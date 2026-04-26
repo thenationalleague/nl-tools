@@ -3,23 +3,38 @@
 <head>
 <!--
   NL Tools — Programme Packs
-  Version: 3.3
-  Date: 25/04/2026
+  Version: 3.5
+  Date: 26/04/2026
 
   CHANGELOG
+  v3.5 (26/04/2026)
+    - Visual polish based on user feedback:
+      * Removed redundant "CLUBS" header from sidebar.
+      * Removed X/8 progress dots and sub-line from each sidebar club item —
+        the right-side total file count badge is the actually-useful number.
+      * Sidebar widened 280→320px so "National League Assets" fits without
+        truncation.
+      * Replaced ↓ arrow on download buttons with proper inline SVG icon
+        (universal "tray with arrow" pattern, currentColor inherits button
+        text colour). Defined once as PP_DOWNLOAD_ICON, used in 7 JS-rendered
+        button templates plus injected into the static preview modal button
+        on init.
+      * Fixed button contrast on coloured panel headers (NL red / own navy):
+        ghost buttons were previously near-invisible (white text on faint
+        white-translucent on red = unreadable). Bumped translucency and
+        used !important to beat brand-css base button rules.
+      * Sub-text on coloured panel headers brightened (rgba 0.85→0.95) for
+        better readability.
+      * Removed uploader name from grid and list views — it's still visible
+        in the preview modal where it actually adds value. Description
+        stays inline if present.
+
+  v3.4 (25/04/2026)
+    - Mobile UX overhaul (sidebar drawer, single-column folder grid,
+      always-visible touch action buttons, modals 92vh, etc).
+
   v3.3 (25/04/2026)
-    - Lazy auto-sync on folder open (admins only):
-      * When an admin opens a club folder or NL Assets folder, the tool fires
-        pp_reconcile_folder in the background if not synced this session
-        within last 15 mins.
-      * Cached view renders immediately — sync is fire-and-forget; live RTDB
-        listener picks up any drift seamlessly.
-      * Per-folder cooldown (in-memory) prevents bouncing in/out from
-        re-firing. Manual "↻ Sync with Drive" button still works for
-        force-now needs.
-      * Audited only when something actually changed; no toast for no-op syncs.
-      * Silent on failure — cached view is fine; manual button is the
-        explicit recovery path.
+    - Lazy auto-sync on folder open (admins only).
 
   v3.2 (25/04/2026)
     - Bulk upload: file picker now allows multi-select.
@@ -130,6 +145,26 @@
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
     {
+      date:    '26 April 2026',
+      version: 'v3.5',
+      items: [
+        'Sidebar tidier: removed the X/8 progress dots — the file count next to each club is the useful number.',
+        'Wider sidebar so "National League Assets" actually fits.',
+        'Better-looking download icon throughout.',
+        'Fixed button readability on the red and navy header bars.',
+        'Removed the uploader name from grid and list views — still shown in the preview.'
+      ]
+    },
+    {
+      date:    '25 April 2026',
+      version: 'v3.4',
+      items: [
+        'Mobile redesigned — clubs are now picked from a tap-friendly drawer instead of a cramped sidebar.',
+        'Folder cards, file rows and action buttons reformatted for phones.',
+        'No more hidden buttons on touch screens — replace and delete are always visible on a phone.'
+      ]
+    },
+    {
       date:    '25 April 2026',
       version: 'v3.3',
       items: [
@@ -217,16 +252,158 @@
    spinner) live in nl-brand.css.
    ──────────────────────────────────────────────────────────────── */
 
-/* Two-column layout: clubs sidebar + content panel */
+/* Two-column layout: clubs sidebar + content panel.
+   On narrow viewports the sidebar is hidden — replaced by a "Choose club"
+   trigger and a fullscreen drawer (see .pp-club-trigger / .pp-drawer below). */
 .pp-layout {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 320px 1fr;
   gap: 24px;
   align-items: flex-start;
 }
+
+/* Mobile club trigger — only shown on narrow.
+   Sits above the panel; tap opens the drawer. */
+.pp-club-trigger {
+  display: none;
+  width: 100%;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  font-family: inherit;
+  font-size: 14px;
+  font-variation-settings: 'wght' 700;
+  color: var(--navy);
+  cursor: pointer;
+  text-align: left;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  box-shadow: var(--shadow);
+}
+.pp-club-trigger:active { background: var(--off-white); }
+.pp-club-trigger__crest {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.pp-club-trigger__crest--nl {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--white);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.pp-club-trigger__crest--nl img {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+}
+.pp-club-trigger__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pp-club-trigger__label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  font-variation-settings: 'wght' 700;
+  margin-bottom: 1px;
+}
+.pp-club-trigger__name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--navy);
+}
+.pp-club-trigger__chevron {
+  color: var(--text-muted);
+  font-size: 16px;
+  font-variation-settings: 'wght' 700;
+  flex-shrink: 0;
+}
+
+/* Fullscreen mobile drawer — same content as sidebar, but takes over the
+   viewport when toggled. Has its own search input at the top. */
+.pp-drawer {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(10,22,40,0.45);
+  align-items: stretch;
+  justify-content: stretch;
+}
+.pp-drawer.is-open {
+  display: flex;
+}
+.pp-drawer__panel {
+  background: var(--white);
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.pp-drawer__head {
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--off-white);
+}
+.pp-drawer__title {
+  flex: 1;
+  font-variation-settings: 'wght' 900;
+  font-size: 16px;
+  color: var(--navy);
+}
+.pp-drawer__close {
+  background: transparent;
+  border: 0;
+  font-size: 24px;
+  color: var(--text-muted);
+  cursor: pointer;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pp-drawer__close:active { background: var(--border); }
+.pp-drawer__search-row {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.pp-drawer__search {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: inherit;
+  font-size: 14px;
+  background: var(--white);
+}
+.pp-drawer__list-wrap {
+  flex: 1;
+  overflow-y: auto;
+}
+
 @media (max-width: 900px) {
-  .pp-layout { grid-template-columns: 1fr; }
-  .pp-sidebar { position: static !important; }
+  .pp-layout { grid-template-columns: 1fr; gap: 0; }
+  .pp-sidebar { display: none; }
+  .pp-club-trigger { display: flex; }
 }
 
 /* Sidebar */
@@ -239,16 +416,6 @@
   top: 24px;
   max-height: calc(100vh - 48px);
   overflow-y: auto;
-}
-.pp-sidebar__heading {
-  padding: 0 18px 10px;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-variation-settings: 'wght' 800;
-  color: var(--text-muted);
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 6px;
 }
 .pp-club-list {
   list-style: none;
@@ -265,14 +432,14 @@
 }
 .pp-club-list__item {
   display: grid;
-  grid-template-columns: 30px 1fr auto;
+  grid-template-columns: 32px 1fr auto;
   align-items: center;
-  gap: 11px;
-  padding: 9px 16px;
+  gap: 12px;
+  padding: 12px 18px;
   cursor: pointer;
   border-left: 3px solid transparent;
   transition: background 0.1s;
-  font-size: 13px;
+  font-size: 14px;
 }
 .pp-club-list__item:hover { background: var(--off-white); }
 .pp-club-list__item.is-active {
@@ -441,14 +608,20 @@
   background: rgba(255,255,255,0.28);
   color: var(--white);
 }
-.pp-panel__head--own .btn--ghost {
-  background: rgba(255,255,255,0.15);
-  border-color: rgba(255,255,255,0.25);
-  color: var(--white);
+.pp-panel__head--own .btn--ghost,
+.pp-panel__head--own .btn--ghost.btn--sm {
+  background: rgba(255,255,255,0.18) !important;
+  border-color: rgba(255,255,255,0.4) !important;
+  color: var(--white) !important;
 }
-.pp-panel__head--own .btn--ghost:hover {
-  background: rgba(255,255,255,0.25);
-  color: var(--white);
+.pp-panel__head--own .btn--ghost:hover,
+.pp-panel__head--own .btn--ghost.btn--sm:hover {
+  background: rgba(255,255,255,0.3) !important;
+  border-color: rgba(255,255,255,0.55) !important;
+  color: var(--white) !important;
+}
+.pp-panel__head--own .pp-panel__sub {
+  color: rgba(255,255,255,0.95) !important;
 }
 /* Red header when viewing NL Assets (matches sidebar pinned red row). */
 .pp-panel__head--nl {
@@ -467,14 +640,22 @@
   background: rgba(255,255,255,0.12);
   color: var(--white);
 }
-.pp-panel__head--nl .btn--ghost {
-  background: rgba(255,255,255,0.15);
-  border-color: rgba(255,255,255,0.25);
-  color: var(--white);
+.pp-panel__head--nl .btn--ghost,
+.pp-panel__head--nl .btn--ghost.btn--sm {
+  background: rgba(255,255,255,0.18) !important;
+  border-color: rgba(255,255,255,0.4) !important;
+  color: var(--white) !important;
 }
-.pp-panel__head--nl .btn--ghost:hover {
-  background: rgba(255,255,255,0.25);
-  color: var(--white);
+.pp-panel__head--nl .btn--ghost:hover,
+.pp-panel__head--nl .btn--ghost.btn--sm:hover {
+  background: rgba(255,255,255,0.3) !important;
+  border-color: rgba(255,255,255,0.55) !important;
+  color: var(--white) !important;
+}
+/* Sub-head text on NL panel needs more contrast too — was washed out at
+   rgba(255,255,255,0.85) on bright red. Brighten. */
+.pp-panel__head--nl .pp-panel__sub {
+  color: rgba(255,255,255,0.95) !important;
 }
 .pp-panel__head__left {
   display: flex;
@@ -941,11 +1122,8 @@
 .pp-file[data-editable="false"] .pp-file__btn--danger {
   display: none;
 }
-@media (max-width: 700px) {
-  .pp-file { grid-template-columns: 38px 1fr auto; }
-  .pp-file__date, .pp-file__size { display: none; }
-  .pp-file__actions { opacity: 1; }
-}
+/* Mobile-specific .pp-file rules are now in the consolidated block at the
+   bottom of the stylesheet (see "MOBILE REFINEMENTS"). */
 
 /* Upload modal — drop zone + form */
 .pp-dropzone {
@@ -1108,6 +1286,22 @@
   font-size: 14px;
 }
 
+/* Inline SVG icons used in buttons (download in particular). currentColor
+   means the icon picks up the button's text colour. Sized to match adjacent
+   text comfortably. */
+.pp-icon {
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+.pp-file__btn .pp-icon {
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+}
+
 /* "Your club" banner — shown above the layout when user is a club rep */
 .pp-myclub-banner {
   display: flex;
@@ -1251,6 +1445,140 @@
   flex-wrap: wrap;
   align-items: center;
 }
+
+/* ============================================================================
+   MOBILE REFINEMENTS — viewport ≤ 700px
+   ============================================================================
+   The desktop layout assumes lots of horizontal room for: a sidebar, big
+   folder cards, hover-only action buttons on file rows, and a packed
+   panel header. None of those work on a phone. Fixes below collapse all
+   of that into a single-column, touch-friendly experience.
+   ============================================================================ */
+@media (max-width: 700px) {
+  /* Container padding tighter — every pixel matters */
+  .main, .page-body, .page, .container {
+    padding: 12px 12px 60px;
+  }
+
+  /* Panel header: stack vertically when crammed; smaller crest, smaller title */
+  .pp-panel__head {
+    padding: 14px 14px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .pp-panel__head__left { width: 100%; }
+  .pp-panel__crest, .pp-panel__crest--text, .pp-panel__crest--nl { width: 40px; height: 40px; }
+  .pp-panel__crest--nl img { width: 30px; height: 30px; }
+  .pp-panel__title { font-size: 17px; line-height: 1.2; }
+  .pp-panel__sub   { font-size: 12px; }
+
+  /* Action buttons fit a phone: smaller, wrap freely */
+  .pp-panel__actions { width: 100%; gap: 6px; }
+  .pp-panel__actions .btn { font-size: 11px; padding: 6px 9px; }
+
+  /* Folder grid: single column, slightly tighter padding inside cards.
+     The desktop minmax(380px) was way too wide on phones. */
+  .pp-folder-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 14px 14px;
+  }
+  .pp-folder-card { padding: 16px 18px; }
+  .pp-folder-card__icon { width: 44px; height: 44px; font-size: 22px; }
+  .pp-folder-card__title { font-size: 16px; }
+  .pp-folder-card__meta  { font-size: 12px; }
+  .pp-folder-card__desc  { font-size: 11px; margin-top: 6px; }
+
+  /* File rows (list view): hide date/size, ALWAYS show actions (no hover).
+     Date+size already hidden by an existing rule at <=700px; this firms it
+     up and makes actions persistent rather than hover-revealed. */
+  .pp-file {
+    grid-template-columns: 38px 1fr auto;
+    padding: 10px 14px;
+  }
+  .pp-file__date, .pp-file__size { display: none; }
+  .pp-file__actions {
+    grid-column: 1 / -1;       /* full width below the row contents */
+    margin-top: 6px;
+    justify-content: flex-end;
+  }
+  /* Reset desktop opacity hide on Replace/Delete — touch has no hover */
+  .pp-file__btn--edit,
+  .pp-file__btn--danger { opacity: 1 !important; }
+  .pp-file__btn { padding: 6px 11px; font-size: 11px; }
+
+  /* File grid view: smaller cards, but still readable */
+  .pp-file-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 10px;
+    padding: 12px;
+  }
+
+  /* Filterbar: stack search above sort */
+  .pp-filterbar {
+    padding: 10px 12px;
+    gap: 8px;
+  }
+  .pp-filterbar__search { width: 100%; min-width: 0; }
+
+  /* NL Assets breadcrumbs: smaller, allow truncation when path runs long */
+  .pp-breadcrumbs {
+    font-size: 14px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+  }
+  .pp-breadcrumb__root, .pp-breadcrumb {
+    font-size: 14px;
+    white-space: nowrap;
+  }
+  .pp-breadcrumb__root.is-active,
+  .pp-breadcrumb.is-active { font-size: 17px; }
+
+  /* NL Assets section labels (Folders / Files) — tighter */
+  .pp-nlf-section-label { padding: 10px 14px 4px; }
+
+  /* Modals: take more of the viewport, prevent inner overflow */
+  .modal {
+    max-height: 92vh;
+    width: calc(100vw - 24px);
+    margin: 12px;
+  }
+  .modal__body {
+    max-height: calc(92vh - 110px);
+    overflow-y: auto;
+  }
+
+  /* Preview canvas height — phone-aware */
+  .pp-preview-canvas { min-height: 240px; max-height: 50vh; }
+  .pp-preview-canvas img,
+  .pp-preview-canvas video { max-height: 50vh; }
+  .pp-preview-canvas iframe { height: 50vh; }
+  .pp-preview-meta {
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 14px;
+  }
+
+  /* Upload list rows tighter on small screens */
+  .pp-upload-list__item {
+    grid-template-columns: 1fr auto auto;
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+  .pp-upload-list__size { display: none; }
+}
+
+/* Even tighter for very small phones */
+@media (max-width: 380px) {
+  .pp-panel__title { font-size: 15px; }
+  .pp-folder-card__icon { width: 38px; height: 38px; font-size: 18px; }
+  .pp-folder-card__title { font-size: 15px; }
+  .pp-club-trigger { padding: 10px 12px; }
+  .pp-club-trigger__name { font-size: 13px; }
+}
 </style>
 </head>
 <body>
@@ -1261,10 +1589,19 @@
 
   <div class="main">
 
+    <!-- Mobile-only "Choose club" trigger above the layout -->
+    <button class="pp-club-trigger" id="ppClubTrigger" onclick="ppOpenDrawer()" type="button">
+      <div id="ppClubTriggerCrest"></div>
+      <div class="pp-club-trigger__text">
+        <div class="pp-club-trigger__label">Showing</div>
+        <div class="pp-club-trigger__name" id="ppClubTriggerName">—</div>
+      </div>
+      <div class="pp-club-trigger__chevron">▾</div>
+    </button>
+
     <div class="pp-layout">
 
       <aside class="pp-sidebar">
-        <div class="pp-sidebar__heading">Clubs</div>
         <ul class="pp-club-list" id="ppClubList">
           <li style="padding:14px 18px; color:var(--text-muted); font-size:13px;">Loading clubs…</li>
         </ul>
@@ -1278,6 +1615,22 @@
 
     </div>
 
+  </div>
+
+  <!-- Mobile club picker drawer -->
+  <div class="pp-drawer" id="ppDrawer" onclick="if(event.target===this)ppCloseDrawer()">
+    <div class="pp-drawer__panel">
+      <div class="pp-drawer__head">
+        <div class="pp-drawer__title">Choose a club</div>
+        <button class="pp-drawer__close" onclick="ppCloseDrawer()" type="button" aria-label="Close">×</button>
+      </div>
+      <div class="pp-drawer__search-row">
+        <input type="search" class="pp-drawer__search" id="ppDrawerSearch" placeholder="Search clubs…" oninput="ppFilterDrawer(this.value)">
+      </div>
+      <div class="pp-drawer__list-wrap">
+        <ul class="pp-club-list" id="ppDrawerList"></ul>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1431,7 +1784,7 @@
     <div class="pp-preview-meta" id="ppPreviewMeta"></div>
     <div class="modal__footer">
       <button class="btn btn--ghost" onclick="ppClosePreview()">Close</button>
-      <button class="btn btn--navy" id="ppPreviewDownload" onclick="ppDownloadFromPreview()">↓ Download</button>
+      <button class="btn btn--navy" id="ppPreviewDownload" onclick="ppDownloadFromPreview()">Download</button>
     </div>
   </div>
 </div>
@@ -1473,6 +1826,15 @@ var FALLBACK_CREST = CREST_BASE + 'National%20League%20rose.png';
 var CLUBS_META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
 var TOOL_DATA_PATH = 'app-data/ops-programme-packs';
 
+/* Inline SVG for the download icon — universal "tray with arrow" pattern.
+   Uses currentColor so it inherits the button's text colour. Sized to sit
+   neatly next to button text. */
+var PP_DOWNLOAD_ICON =
+  '<svg class="pp-icon" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
+  + '<path d="M8 1.5v8m0 0L4.5 6m3.5 3.5L11.5 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'
+  + '<path d="M2 11v2.5A1.5 1.5 0 0 0 3.5 15h9a1.5 1.5 0 0 0 1.5-1.5V11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>'
+  + '</svg>';
+
 /* ============================================================================
    AUTH READY — entry point
    ============================================================================ */
@@ -1485,6 +1847,11 @@ window.nlAuthReady = function(session) {
      ("darlington"), or null. Resolved to canonical slug after clubs load. */
   STATE.myClubRaw = session.club || null;
   STATE.myClub    = null;
+
+  /* Inject the download icon into static buttons. JS-rendered buttons embed
+     PP_DOWNLOAD_ICON inline; this catches the markup-defined preview button. */
+  var pdBtn = document.getElementById('ppPreviewDownload');
+  if (pdBtn) pdBtn.innerHTML = PP_DOWNLOAD_ICON + 'Download';
 
   /* Role-based checks — pattern matches Attendance tool. */
   var role = STATE.role;
@@ -1829,17 +2196,17 @@ function ppRenderMyClubBanner() {
    ============================================================================ */
 
 function ppRenderClubList() {
-  var ul = document.getElementById('ppClubList');
   if (!STATE.clubs.length) {
+    var ul = document.getElementById('ppClubList');
     ul.innerHTML = '<li style="padding:14px 18px; color:var(--text-muted);">No clubs found.</li>';
     return;
   }
 
-  /* Sidebar order:
-     1. National League Assets (always first, red accent)
-     2. Own club (if user has one) — navy accent
-     3. Visual break
-     4. All other clubs, alphabetical
+  /* Build a single ordered HTML string used by both sidebar and drawer:
+       1. National League Assets (always first, red accent)
+       2. Own club (if any) — navy accent
+       3. Divider
+       4. All other clubs, alphabetical
   */
   var ownClub = STATE.myClub ? STATE.clubsByKey[STATE.myClub] : null;
   var nlAssets = STATE.clubsByKey['_nl-central'];
@@ -1851,39 +2218,94 @@ function ppRenderClubList() {
   });
 
   var html = '';
-
-  /* 1. NL Assets pinned top */
-  if (nlAssets) {
-    html += ppRenderClubItem(nlAssets);
-  }
-
-  /* 2. Own club (if any) */
-  if (ownClub) {
-    html += ppRenderClubItem(ownClub);
-  }
-
-  /* 3. Divider before the rest of the league */
-  if (nlAssets || ownClub) {
-    html += '<li class="pp-club-list__divider"></li>';
-  }
-
-  /* 4. Everyone else, alphabetical */
+  if (nlAssets) html += ppRenderClubItem(nlAssets);
+  if (ownClub)  html += ppRenderClubItem(ownClub);
+  if (nlAssets || ownClub) html += '<li class="pp-club-list__divider"></li>';
   html += others.map(ppRenderClubItem).join('');
 
-  ul.innerHTML = html;
+  document.getElementById('ppClubList').innerHTML = html;
+
+  /* Mirror to drawer if it's currently in the DOM (always is on mobile, but
+     present on desktop too — just hidden). Apply current search filter so
+     the drawer shows only matches if user typed something. */
+  var drawerList = document.getElementById('ppDrawerList');
+  if (drawerList) {
+    drawerList.innerHTML = html;
+    ppApplyDrawerFilter();
+  }
+
+  /* Update the mobile trigger to reflect the active club. */
+  ppRenderClubTrigger();
+}
+
+function ppRenderClubTrigger() {
+  var trigger = document.getElementById('ppClubTrigger');
+  if (!trigger) return;
+  var club = STATE.clubsByKey[STATE.activeClub];
+  if (!club) return;
+
+  var crestEl = document.getElementById('ppClubTriggerCrest');
+  if (club.isCentral) {
+    crestEl.outerHTML = '<div id="ppClubTriggerCrest" class="pp-club-trigger__crest--nl"><img src="' + FALLBACK_CREST + '" alt=""></div>';
+  } else {
+    crestEl.outerHTML = '<img id="ppClubTriggerCrest" class="pp-club-trigger__crest" src="' + NL.escHtml(ppCrestUrl(club.name)) + '" '
+      + 'onerror="this.onerror=null;this.src=\'' + FALLBACK_CREST + '\'" alt="">';
+  }
+  document.getElementById('ppClubTriggerName').textContent = club.name;
+}
+
+/* === Mobile drawer === */
+
+function ppOpenDrawer() {
+  var drawer = document.getElementById('ppDrawer');
+  drawer.classList.add('is-open');
+  /* Focus search after a tick so keyboard slides up cleanly */
+  setTimeout(function() {
+    var search = document.getElementById('ppDrawerSearch');
+    if (search) { search.value = ''; search.focus(); ppApplyDrawerFilter(); }
+  }, 50);
+  /* Lock background scroll while drawer is open */
+  document.body.style.overflow = 'hidden';
+}
+
+function ppCloseDrawer() {
+  document.getElementById('ppDrawer').classList.remove('is-open');
+  document.body.style.overflow = '';
+}
+
+function ppFilterDrawer(query) {
+  /* Live-filter the rendered drawer items. Cheap because the list is short
+     (~75 items max). Hides items whose name doesn't match. Also hides the
+     divider if no items above it remain. */
+  ppApplyDrawerFilter(query);
+}
+
+function ppApplyDrawerFilter(query) {
+  var input = document.getElementById('ppDrawerSearch');
+  var q = (typeof query === 'string' ? query : (input ? input.value : '')).trim().toLowerCase();
+  var list = document.getElementById('ppDrawerList');
+  if (!list) return;
+
+  var items = list.children;
+  var anyVisible = false;
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    if (item.classList.contains('pp-club-list__divider')) {
+      /* Hide divider if filtered (it has no name) */
+      item.style.display = q ? 'none' : '';
+      continue;
+    }
+    var name = (item.querySelector('.pp-club-list__name') || {}).textContent || '';
+    var match = !q || name.toLowerCase().indexOf(q) !== -1;
+    item.style.display = match ? '' : 'none';
+    if (match) anyVisible = true;
+  }
+  /* Could insert a "no results" element here, but the rare case isn't worth it */
 }
 
 function ppRenderClubItem(c) {
   var isActive = c.key === STATE.activeClub;
   var isOwn    = ppIsOwnClub(c.key);
-  var dotsHtml = c.isCentral ? '' :
-    STATE.folders.map(function(f) {
-      var filled = ppFolderHasContent(c.key, f.key);
-      return '<div class="pp-club-list__dot ' + (filled ? 'is-green' : '') + '" title="' + NL.escHtml(f.name) + '"></div>';
-    }).join('');
-
-  var filledCount = c.isCentral ? null :
-    STATE.folders.filter(function(f) { return ppFolderHasContent(c.key, f.key); }).length;
 
   var totalFiles = ppFilesIn(c.key).length;
 
@@ -1897,11 +2319,6 @@ function ppRenderClubItem(c) {
     crestHtml = '<img class="pp-club-list__crest" src="' + NL.escHtml(ppCrestUrl(c.name)) + '" '
       + 'onerror="this.onerror=null;this.src=\'' + FALLBACK_CREST + '\'" alt="">';
   }
-
-  /* Sub line: NL Assets shows nothing extra; clubs show their progress */
-  var progressHtml = c.isCentral
-    ? ''
-    : '<div class="pp-club-list__progress"><span>' + filledCount + '/' + STATE.folders.length + '</span><div class="pp-club-list__dots">' + dotsHtml + '</div></div>';
 
   /* Modifier classes:
      - is-nl     → red left bar (NL Assets)
@@ -1917,7 +2334,6 @@ function ppRenderClubItem(c) {
     + crestHtml
     + '<div class="pp-club-list__info">'
       + '<div class="pp-club-list__name">' + NL.escHtml(c.name) + '</div>'
-      + progressHtml
     + '</div>'
     + '<div class="pp-club-list__count">' + totalFiles + '</div>'
     + '</li>';
@@ -1931,6 +2347,14 @@ function ppSelectClub(clubKey) {
   ppRenderMyClubBanner();
   ppRenderClubList();
   ppRenderMainPanel();
+  /* If the mobile drawer was open (user tapped a club inside it), close it. */
+  var drawer = document.getElementById('ppDrawer');
+  if (drawer && drawer.classList.contains('is-open')) ppCloseDrawer();
+  /* Scroll to top of panel — common case is "I picked a different club, show me its content" */
+  if (window.innerWidth <= 900) {
+    var panel = document.getElementById('ppMainPanel');
+    if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 }
 
 /* ============================================================================
@@ -2002,7 +2426,7 @@ function ppRenderFolderGrid() {
   /* Download all in pack — all files across all 8 folders. Show only if any. */
   var packActionsHtml = '';
   if (totalFiles > 0) {
-    packActionsHtml = '<button class="btn btn--ghost btn--sm" onclick="ppDownloadAllInClub(\'' + NL.escJ(club.key) + '\')" title="Download every file in this club\'s pack as a ZIP">↓ Download pack</button>';
+    packActionsHtml = '<button class="btn btn--ghost btn--sm" onclick="ppDownloadAllInClub(\'' + NL.escJ(club.key) + '\')" title="Download every file in this club\'s pack as a ZIP"> ' + PP_DOWNLOAD_ICON + 'Download pack</button>';
   }
 
   panel.innerHTML =
@@ -2074,7 +2498,7 @@ function ppRenderFilesView() {
 
   var actionsHtml = '';
   if (allFiles.length > 0) {
-    actionsHtml += '<button class="btn btn--ghost btn--sm" onclick="ppDownloadAllInFolder(\'' + NL.escJ(club.key) + '\', \'' + NL.escJ(folder.key) + '\')" title="Download every file in this folder as a ZIP">↓ Download all</button>';
+    actionsHtml += '<button class="btn btn--ghost btn--sm" onclick="ppDownloadAllInFolder(\'' + NL.escJ(club.key) + '\', \'' + NL.escJ(folder.key) + '\')" title="Download every file in this folder as a ZIP"> ' + PP_DOWNLOAD_ICON + 'Download all</button>';
   }
   if (STATE.isAdmin) {
     actionsHtml += '<button class="btn btn--ghost btn--sm" onclick="ppDoReconcile(\'' + NL.escJ(club.key) + '\', \'' + NL.escJ(folder.key) + '\')" title="Sync this folder with Drive — imports new files, fixes renames, marks deletions">↻ Sync with Drive</button>';
@@ -2102,7 +2526,7 @@ function ppRenderFilesView() {
   } else {
     filesHtml = files.map(function(f) {
       var ic = ppFileTypeIcon(f.type);
-      var actions = '<button class="pp-file__btn pp-file__btn--primary" onclick="event.stopPropagation();ppDoDownload(\'' + NL.escJ(f.id) + '\')">↓ Download</button>';
+      var actions = '<button class="pp-file__btn pp-file__btn--primary" onclick="event.stopPropagation();ppDoDownload(\'' + NL.escJ(f.id) + '\')"> ' + PP_DOWNLOAD_ICON + 'Download</button>';
       if (canEdit) {
         actions +=
             '<button class="pp-file__btn pp-file__btn--edit" onclick="event.stopPropagation();ppOpenReplace(\'' + NL.escJ(f.id) + '\')">Replace</button>'
@@ -2113,7 +2537,7 @@ function ppRenderFilesView() {
         + '<div class="pp-file__icon pp-file__icon--' + ic.cls + '">' + ic.label + '</div>'
         + '<div class="pp-file__main">'
           + '<div class="pp-file__name">' + NL.escHtml(f.name) + '</div>'
-          + '<div class="pp-file__meta">' + NL.escHtml(ppDisplayUploader(f)) + (f.description ? ' · ' + NL.escHtml(f.description) : '') + '</div>'
+          + (f.description ? '<div class="pp-file__meta">' + NL.escHtml(f.description) + '</div>' : '')
         + '</div>'
         + '<div class="pp-file__date">' + ppFmtDate(f.uploadedAt) + '</div>'
         + '<div class="pp-file__size">' + ppFmtSize(f.size) + '</div>'
@@ -2329,7 +2753,7 @@ function ppRenderFileGrid(files, canEdit) {
         + '</div>';
     }
 
-    var actions = '<button class="pp-file__btn pp-file__btn--primary" onclick="event.stopPropagation();ppDoDownload(\'' + NL.escJ(f.id) + '\')">↓ Download</button>';
+    var actions = '<button class="pp-file__btn pp-file__btn--primary" onclick="event.stopPropagation();ppDoDownload(\'' + NL.escJ(f.id) + '\')"> ' + PP_DOWNLOAD_ICON + 'Download</button>';
     if (canEdit) {
       actions += '<button class="pp-file__btn pp-file__btn--edit" onclick="event.stopPropagation();ppOpenReplace(\'' + NL.escJ(f.id) + '\')">Replace</button>';
       actions += '<button class="pp-file__btn pp-file__btn--danger" onclick="event.stopPropagation();ppOpenDelete(\'' + NL.escJ(f.id) + '\')">Delete</button>';
@@ -2340,7 +2764,6 @@ function ppRenderFileGrid(files, canEdit) {
       + '<div class="pp-file-card__body">'
         + '<div class="pp-file-card__name" title="' + NL.escHtml(f.name) + '">' + NL.escHtml(f.name) + '</div>'
         + '<div class="pp-file-card__meta">' + ppFmtDate(f.uploadedAt) + ' · ' + ppFmtSize(f.size) + '</div>'
-        + '<div class="pp-file-card__by">' + NL.escHtml(ppDisplayUploader(f)) + '</div>'
       + '</div>'
       + '<div class="pp-file-card__actions">' + actions + '</div>'
     + '</div>';
@@ -2505,7 +2928,7 @@ function ppRenderNlAssets() {
 
   /* Download all in current folder — anyone (not admin-only) when inside a folder with files */
   if (currentId && filesHere.length > 0) {
-    headerActions += '<button class="btn btn--ghost btn--sm" onclick="ppDownloadAllInNlfFolder(\'' + NL.escJ(currentId) + '\')" title="Download every file in this folder as a ZIP">↓ Download all</button>';
+    headerActions += '<button class="btn btn--ghost btn--sm" onclick="ppDownloadAllInNlfFolder(\'' + NL.escJ(currentId) + '\')" title="Download every file in this folder as a ZIP"> ' + PP_DOWNLOAD_ICON + 'Download all</button>';
   }
 
   /* Sync with Drive (admin only, inside a folder) */
@@ -2566,7 +2989,7 @@ function ppRenderNlAssets() {
       bodyHtml += '<div class="pp-files">';
       bodyHtml += filesFiltered.map(function(f) {
         var ic = ppFileTypeIcon(f.type);
-        var actions = '<button class="pp-file__btn pp-file__btn--primary" onclick="event.stopPropagation();ppDoDownload(\'' + NL.escJ(f.id) + '\')">↓ Download</button>';
+        var actions = '<button class="pp-file__btn pp-file__btn--primary" onclick="event.stopPropagation();ppDoDownload(\'' + NL.escJ(f.id) + '\')"> ' + PP_DOWNLOAD_ICON + 'Download</button>';
         if (canEdit) {
           actions += '<button class="pp-file__btn pp-file__btn--edit" onclick="event.stopPropagation();ppOpenReplace(\'' + NL.escJ(f.id) + '\')">Replace</button>';
           actions += '<button class="pp-file__btn pp-file__btn--danger" onclick="event.stopPropagation();ppOpenDelete(\'' + NL.escJ(f.id) + '\')">Delete</button>';
@@ -2576,7 +2999,7 @@ function ppRenderNlAssets() {
           + '<div class="pp-file__icon pp-file__icon--' + ic.cls + '">' + ic.label + '</div>'
           + '<div class="pp-file__main">'
             + '<div class="pp-file__name">' + NL.escHtml(f.name) + '</div>'
-            + '<div class="pp-file__meta">' + NL.escHtml(ppDisplayUploader(f)) + (f.description ? ' · ' + NL.escHtml(f.description) : '') + '</div>'
+            + (f.description ? '<div class="pp-file__meta">' + NL.escHtml(f.description) + '</div>' : '')
           + '</div>'
           + '<div class="pp-file__date">' + ppFmtDate(f.uploadedAt) + '</div>'
           + '<div class="pp-file__size">' + ppFmtSize(f.size) + '</div>'
