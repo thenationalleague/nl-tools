@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.73 (26/04/2026)
+  Version: v5.75 (26/04/2026)
   Date: 09/04/2026
   File: /tools/portal/index.html
 
@@ -19,6 +19,18 @@
            * No retrofit to other tool pages yet — installed app scope covers
              all /tools/ URLs via service worker, but tool page browser tabs
              won't show the rose favicon without a later head-tag sweep.
+
+  v5.75 (26/04/2026) — Critical accordion fix:
+           * BUGFIX: buildAccordionItem was calling acc.querySelector() but
+             the variable is named 'item' not 'acc'. This threw a ReferenceError
+             on every user causing the entire accordion to render blank.
+             Fix: append removeBtn directly to footer (which is already built
+             at that point). Users panel now renders correctly.
+
+  v5.74 (26/04/2026) — Filter reset fix:
+           * Filter now resets to 'All users' on each render — was retaining
+             previous selection causing blank user list on reload.
+           * onchange handler now correctly handles all filter values.
 
   v5.73 (26/04/2026) — User filter fix:
            * Users panel was showing only clubs in the filter because the
@@ -287,7 +299,7 @@
   window.NL_CHANGELOG = [
     {
       date: '26 April 2026',
-      version: 'v5.73',
+      version: 'v5.75',
       items: [
         'Tools are now organised into Staff Tools and Club Tools sections.',
         'Star any tool to pin it to the top of its section — your favourites are saved.',
@@ -3736,14 +3748,16 @@ function renderClubFilterPills() {
     select.appendChild(clubGroup);
   }
 
+  /* Reset to All users on each rebuild */
+  select.value = '';
+  _activeClubFilter = null;
+
   select.onchange = function() {
     var val = select.value;
     if (!val) {
       _activeClubFilter = null;
-    } else if (val.startsWith('__org__')) {
-      _activeClubFilter = val; /* stored with prefix, matched in applyUserFilters */
-    } else if (val.startsWith('__club__')) {
-      _activeClubFilter = val;
+    } else {
+      _activeClubFilter = val; /* __staff__, __club__X handled in applyUserFilters */
     }
     applyUserFilters();
   };
@@ -4683,9 +4697,8 @@ function buildAccordionItem(uid, u, depts, deptMap) {
   /* Role picker + Remove User at bottom — below tool sliders */
   body.appendChild(rolePicker);
 
-  /* Remove user button -- alongside Edit in footer */
-  var footerEl = acc.querySelector('.uacc-footer');
-  if (u.role !== 'superadmin' && footerEl) {
+  /* Remove user button — sits alongside Edit in footer, pushed right */
+  if (u.role !== 'superadmin') {
     var removeBtn = document.createElement('button');
     removeBtn.className = 'btn btn--ghost btn--sm';
     removeBtn.style.cssText = 'color:var(--red);border-color:#f5c6c2;font-size:11px;margin-left:auto;';
@@ -4726,8 +4739,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
           showToast('Failed to remove: ' + err.message, 'error');
         });
     });
-    removeWrap.appendChild(removeBtn);
-    footer.appendChild(removeWrap);
+    footer.appendChild(removeBtn);
   }
 
   body.appendChild(footer);
