@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.71 (26/04/2026)
+  Version: v5.72 (26/04/2026)
   Date: 09/04/2026
   File: /tools/portal/index.html
 
@@ -19,6 +19,13 @@
            * No retrofit to other tool pages yet — installed app scope covers
              all /tools/ URLs via service worker, but tool page browser tabs
              won't show the rose favicon without a later head-tag sweep.
+
+  v5.72 (26/04/2026) — User accordion fixes:
+           * Trust/U19 Alliance removed from org picker — staff only.
+           * isTrustU19 logic removed — club users only get staff-locked.
+           * Remove User: no longer full width, sits alongside Edit button.
+           * Role/org picker moved to bottom of accordion (below tool sliders).
+           * Restore defaults button added — resets sliders to role defaults.
 
   v5.71 (26/04/2026) — Section head + favourites style:
            * Section headings match ADMIN PANEL style (grey uppercase, border-bottom).
@@ -272,7 +279,7 @@
   window.NL_CHANGELOG = [
     {
       date: '26 April 2026',
-      version: 'v5.71',
+      version: 'v5.72',
       items: [
         'Tools are now organised into Staff Tools and Club Tools sections.',
         'Star any tool to pin it to the top of its section — your favourites are saved.',
@@ -2016,7 +2023,6 @@ var DEPT_MAP = {
   'ops':        { label: 'Administration & Operations', order: 2 },
   'media':      { label: 'Media & Marketing',           order: 3 },
   'commercial': { label: 'Commercial',                  order: 4 },
-  'alliance':   { label: 'U19 Alliance',                order: 6 }
 };
 
 function getDeptLabel(code) {
@@ -4368,8 +4374,6 @@ function buildAccordionItem(uid, u, depts, deptMap) {
 
     var orgs = [
       { label: 'National League', key: 'nl' },
-      { label: 'NL Trust',        key: 'trust' },
-      { label: 'U19 Alliance',    key: 'u19' },
       { label: 'Club',            key: 'club' }
     ];
 
@@ -4621,8 +4625,8 @@ function buildAccordionItem(uid, u, depts, deptMap) {
     }
     updateRoleSummary();
 
-    /* Insert role picker at top of body -- pushing toggles down */
-    body.insertBefore(rolePicker, body.firstChild);
+    /* Role picker appended after tool sliders + footer */
+    /* (appended at end — see below, after footer is built) */
     /* Role summary not needed in footer -- header pill shows current role */
   }
 
@@ -4639,6 +4643,25 @@ function buildAccordionItem(uid, u, depts, deptMap) {
     saveAccessBtn.style.display = 'none';
     saveAccessBtn.addEventListener('click', function(e) { e.stopPropagation(); saveAccess(); });
 
+    var restoreBtn = document.createElement('button');
+    restoreBtn.className = 'btn btn--ghost btn--sm uacc-restore-btn';
+    restoreBtn.textContent = 'Restore defaults';
+    restoreBtn.style.display = 'none';
+    restoreBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      /* Reset all sliders to tool defaults for this user's role */
+      var ud2 = STATE.allUsers[uid] || {};
+      var groupKey2 = getGroupKey(ud2);
+      body.querySelectorAll('.uacc-tool-row').forEach(function(row) {
+        var slider = row.querySelector('.acc-slider');
+        if (!slider || !slider.dataset.toolkey) return;
+        var tool = STATE.tools[slider.dataset.toolkey];
+        var defaultLevel = (tool && tool.defaults && tool.defaults[groupKey2]) || 'hidden';
+        setSliderLevel(slider, defaultLevel);
+      });
+      showToast('Defaults restored — save to apply', 'info');
+    });
+
     var cancelAccessBtn = document.createElement('button');
     cancelAccessBtn.className = 'btn btn--ghost btn--sm uacc-cancel-edit-btn';
     cancelAccessBtn.textContent = 'Cancel';
@@ -4647,18 +4670,20 @@ function buildAccordionItem(uid, u, depts, deptMap) {
 
     footer.appendChild(editAccessBtn);
     footer.appendChild(saveAccessBtn);
+    footer.appendChild(restoreBtn);
     footer.appendChild(cancelAccessBtn);
-
 
   }
 
-  /* Remove user button -- shown for all non-superadmin users */
-  if (u.role !== 'superadmin') {
-    var removeWrap = document.createElement('div');
-    removeWrap.style.cssText = 'width:100%;margin-top:6px;';
+  /* Role picker + Remove User at bottom — below tool sliders */
+  body.appendChild(rolePicker);
+
+  /* Remove user button -- alongside Edit in footer */
+  var footerEl = acc.querySelector('.uacc-footer');
+  if (u.role !== 'superadmin' && footerEl) {
     var removeBtn = document.createElement('button');
     removeBtn.className = 'btn btn--ghost btn--sm';
-    removeBtn.style.cssText = 'color:var(--red);border-color:#f5c6c2;font-size:10px;width:100%;';
+    removeBtn.style.cssText = 'color:var(--red);border-color:#f5c6c2;font-size:11px;margin-left:auto;';
     removeBtn.textContent = 'Remove user';
     removeBtn.addEventListener('click', function(e) {
       e.stopPropagation();
@@ -4946,12 +4971,10 @@ function setAllInDept(uid, u, deptTools, level, bodyEl, deptLabel) {
   if (!deptTools || !deptTools.length) return;
   var updates = {};
   var isClubUser = u.role === 'club';
-  var isTrustU19 = u.orgKey === 'trust' || u.orgKey === 'u19';
-
-  /* Staff dept is locked for club/trust/u19 -- never allow set-all to change it */
+  /* Staff dept locked for club users only */
   var isStaffDept = deptLabel === 'Staff' ||
     (deptTools[0] && deptTools[0].department === 'staff');
-  if (isStaffDept && (isClubUser || isTrustU19)) {
+  if (isStaffDept && isClubUser) {
     showToast('Staff tools are locked for this user', 'error');
     return;
   }
@@ -4960,7 +4983,7 @@ function setAllInDept(uid, u, deptTools, level, bodyEl, deptLabel) {
   var safeLevel = (isClubUser && level === 'admin') ? 'access' : level;
   deptTools.forEach(function(t) {
     /* Never write staff tools for restricted users even if called directly */
-    if ((t.department === 'staff') && (isClubUser || isTrustU19)) return;
+    if ((t.department === 'staff') && isClubUser) return;
     updates['users/' + uid + '/tools/' + t._key] = safeLevel;
   });
   if (!Object.keys(updates).length) return; /* nothing to write */
