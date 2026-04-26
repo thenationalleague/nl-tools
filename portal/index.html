@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.72 (26/04/2026)
+  Version: v5.73 (26/04/2026)
   Date: 09/04/2026
   File: /tools/portal/index.html
 
@@ -19,6 +19,14 @@
            * No retrofit to other tool pages yet — installed app scope covers
              all /tools/ URLs via service worker, but tool page browser tabs
              won't show the rose favicon without a later head-tag sweep.
+
+  v5.73 (26/04/2026) — User filter fix:
+           * Users panel was showing only clubs in the filter because the
+             org field was removed from all users. Filter now uses role
+             to group users: NL Staff option + individual club options.
+           * orgText display fixed — was blank for staff (org field gone).
+             Now shows 'National League' for staff, club name for clubs.
+           * applyUserFilters: handles new __staff__ filter value.
 
   v5.72 (26/04/2026) — User accordion fixes:
            * Trust/U19 Alliance removed from org picker — staff only.
@@ -279,7 +287,7 @@
   window.NL_CHANGELOG = [
     {
       date: '26 April 2026',
-      version: 'v5.72',
+      version: 'v5.73',
       items: [
         'Tools are now organised into Staff Tools and Club Tools sections.',
         'Star any tool to pin it to the top of its section — your favourites are saved.',
@@ -2091,7 +2099,8 @@ function getAccessLevel(uid, toolKey) {
 function getGroupKey(ud) {
   if (ud.role === 'superadmin') return 'nl-admin';
   if (ud.role === 'admin' || ud.role === 'staff') {
-    var orgKey = ud.orgKey || 'nl';
+    /* org removed — use role directly */
+    var orgKey = 'nl'; /* unused but kept for compat */
     var role   = ud.role === 'admin' ? 'admin' : 'staff';
     return orgKey + '-' + role;
   }
@@ -3662,9 +3671,8 @@ function applyUserFilters() {
       (u.email || '').toLowerCase().indexOf(q) !== -1;
     var matchesFilter = true;
     if (club) {
-      if (club.startsWith('__org__')) {
-        var orgVal = club.replace('__org__', '');
-        matchesFilter = (u.club || '') === orgVal;
+      if (club === '__staff__') {
+        matchesFilter = u.role !== 'club';
       } else if (club.startsWith('__club__')) {
         var clubVal = club.replace('__club__', '');
         matchesFilter = (u.club || '') === clubVal;
@@ -3682,22 +3690,21 @@ function renderClubFilterPills() {
   var select = document.getElementById('clubFilterSelect');
   if (!wrap || !select) return;
 
-  /* Collect NL orgs and clubs separately */
-  var nlOrgs = {};
-  var clubs  = {};
+  /* org field removed — group by role (staff vs club) */
+  var hasStaff = false;
+  var clubs    = {};
   Object.keys(STATE.allUsers).forEach(function(uid) {
     var u = STATE.allUsers[uid];
     if (u.role === 'club' && u.club) {
       clubs[u.club] = true;
-    } else if (u.org) {
-      nlOrgs[u.org] = true;
+    } else if (u.role && u.role !== 'club') {
+      hasStaff = true;
     }
   });
 
-  var nlOrgList  = Object.keys(nlOrgs).sort();
-  var clubList   = Object.keys(clubs).sort();
+  var clubList = Object.keys(clubs).sort();
 
-  if (nlOrgList.length === 0 && clubList.length === 0) {
+  if (!hasStaff && clubList.length === 0) {
     wrap.style.display = 'none';
     return;
   }
@@ -3707,16 +3714,14 @@ function renderClubFilterPills() {
   /* Rebuild options */
   select.innerHTML = '<option value="">All users<\/option>';
 
-  if (nlOrgList.length) {
-    var nlGroup = document.createElement('optgroup');
-    nlGroup.label = 'Organisations';
-    nlOrgList.forEach(function(org) {
-      var opt = document.createElement('option');
-      opt.value = '__org__' + org;
-      opt.textContent = org;
-      nlGroup.appendChild(opt);
-    });
-    select.appendChild(nlGroup);
+  if (hasStaff) {
+    var staffGroup = document.createElement('optgroup');
+    staffGroup.label = 'Staff';
+    var staffOpt = document.createElement('option');
+    staffOpt.value = '__staff__';
+    staffOpt.textContent = 'NL Staff';
+    staffGroup.appendChild(staffOpt);
+    select.appendChild(staffGroup);
   }
 
   if (clubList.length) {
@@ -3856,7 +3861,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
     context.appendChild(clubText);
   } else if (!u.pending) {
     var orgText = document.createElement('span');
-    orgText.textContent = (u.org || 'National League') +
+    orgText.textContent = (u.role === 'club' ? (u.club || 'Club') : 'National League') +
       (u.jobTitle ? '  ·  ' + u.jobTitle : '');
     context.appendChild(orgText);
   }
