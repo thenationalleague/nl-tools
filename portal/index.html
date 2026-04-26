@@ -20,6 +20,15 @@
              all /tools/ URLs via service worker, but tool page browser tabs
              won't show the rose favicon without a later head-tag sweep.
 
+  v5.69 (26/04/2026) — Tool grid redesign:
+           * Tool grid split into Staff Tools / Club Tools sections for
+             staff users. Club users see one flat list (club-facing tools only).
+           * Removed unstyled "My Tools" heading.
+           * Tools sorted alphabetically within each section.
+           * Favourites — star toggle on each tile. Starred tools float to
+             top of their section with amber tint. Persisted per user in
+             RTDB at /users/{uid}/favourites/.
+
   v5.68 (26/04/2026) — Role model simplification:
            * Removed NL Trust and U19 Alliance as separate org distinctions.
            * Users are now simply staff or club — no org matrix.
@@ -444,6 +453,33 @@
   color: var(--text-muted);
   font-size: 13px;
 }
+
+/* -- Favourites ------------------------------------------------------------ */
+.tool-tile--starred {
+  background: #fffbf0;
+  border-top-color: var(--amber) !important;
+}
+.tool-tile__star {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0.3;
+  transition: opacity 0.15s, transform 0.15s;
+  padding: 4px;
+  color: var(--amber);
+  z-index: 2;
+}
+.tool-tile__star:hover { opacity: 0.7; transform: scale(1.15); }
+.tool-tile--starred .tool-tile__star { opacity: 1; }
+.tool-tile { position: relative; } /* needed for absolute star */
+
+/* -- Tool section spacing -------------------------------------------------- */
+#staffToolsSection + #clubToolsSection .section-head { margin-top: 40px; }
 
 /* -- Tool tile grid -------------------------------------------------------- */
 .tool-grid {
@@ -1712,12 +1748,24 @@
       </div>
     </div>
 
-    <!-- My tools -->
-    <div class="section-head">
-      <span class="section-head__title">My Tools</span>
+    <!-- Tool sections — staff see two sections, clubs see one -->
+    <div id="staffToolsSection" style="display:none;">
+      <div class="section-head">
+        <span class="section-head__title">Staff Tools</span>
+      </div>
+      <div class="tool-grid" id="staffToolGrid"><!-- Populated by JS --></div>
     </div>
-    <div class="tool-grid" id="toolGrid">
-      <!-- Populated by JS -->
+
+    <div id="clubToolsSection" style="display:none;">
+      <div class="section-head" style="margin-top:32px;">
+        <span class="section-head__title">Club Tools</span>
+      </div>
+      <div class="tool-grid" id="clubToolGrid"><!-- Populated by JS --></div>
+    </div>
+
+    <!-- Club users: single flat grid -->
+    <div id="clubFlatSection" style="display:none;">
+      <div class="tool-grid" id="clubFlatGrid"><!-- Populated by JS --></div>
     </div>
 
     <!-- Available tools (tools in tier not yet granted) -->
@@ -2308,49 +2356,96 @@ function updateWelcomeNav() {
 }
 
 /* ---- Tool tile grid ------------------------------------------------------ */
-function renderToolGrid() {
-  var grid   = document.getElementById('toolGrid');
-  var ud     = STATE.userData;
-  var tools  = STATE.toolsList;
-  var myKeys = [];
+/* ── Favourites — persisted per user in RTDB at /users/{uid}/favourites ── */
+function getFavourites() {
+  var ud = STATE.userData;
+  return ud && ud.favourites ? ud.favourites : {};
+}
 
-  /* Collect tools to show as tiles.
-     'welcome' is always-on infrastructure, never a tile.
-     Superadmin/admin see everything. Others see access/admin only.
-     off = shown in available section. hidden = not shown at all. */
+function toggleFavourite(toolKey) {
+  var favs = getFavourites();
+  var isStarred = !!favs[toolKey];
+  var ref = firebase.database().ref('users/' + STATE.uid + '/favourites/' + toolKey);
+  if (isStarred) {
+    ref.remove();
+    if (STATE.userData.favourites) delete STATE.userData.favourites[toolKey];
+  } else {
+    ref.set(true);
+    if (!STATE.userData.favourites) STATE.userData.favourites = {};
+    STATE.userData.favourites[toolKey] = true;
+  }
+  renderToolGrid();
+}
+
+function renderToolGrid() {
+  var ud      = STATE.userData;
+  var tools   = STATE.toolsList;
+  var isClub  = ud && ud.role === 'club';
+  var favs    = getFavourites();
+
+  /* Collect visible tools, sorted: starred first then alphabetical */
+  var myTools = [];
   tools.forEach(function(t) {
     if (t._key === 'welcome') return;
     var level = getAccessLevel(STATE.uid, t._key);
     if (level === 'hidden') return;
     if (level === 'off' && !STATE.isAdmin) return;
-    myKeys.push(t._key);
+    myTools.push({ key: t._key, tool: t, level: level });
   });
 
-  grid.innerHTML = '';
+  /* Sort: starred first, then alphabetical by label */
+  myTools.sort(function(a, b) {
+    var aStarred = !!favs[a.key];
+    var bStarred = !!favs[b.key];
+    if (aStarred !== bStarred) return aStarred ? -1 : 1;
+    return (a.tool.label || a.key).localeCompare(b.tool.label || b.key);
+  });
 
-  if (myKeys.length === 0) {
-    var empty = document.createElement('div');
-    empty.className = 'empty-state';
-    empty.style.gridColumn = '1 / -1';
-    var icon = document.createElement('div');
-    icon.className = 'empty-state__icon';
-    icon.textContent = '🔒';
-    var text = document.createElement('div');
-    text.className = 'empty-state__text';
-    text.textContent = 'No tools have been granted yet. Contact an administrator.';
-    empty.appendChild(icon);
-    empty.appendChild(text);
-    grid.appendChild(empty);
-    return;
+  /* Split by type */
+  var staffTools = myTools.filter(function(t) {
+    return t.tool.defaults && t.tool.defaults.club === 'hidden';
+  });
+  var clubTools = myTools.filter(function(t) {
+    return !t.tool.defaults || t.tool.defaults.club !== 'hidden';
+  });
+
+  function populateGrid(gridId, items) {
+    var grid = document.getElementById(gridId);
+    if (!grid) return;
+    grid.innerHTML = '';
+    if (items.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'empty-state';
+      empty.style.gridColumn = '1 / -1';
+      var icon = document.createElement('div');
+      icon.className = 'empty-state__icon';
+      icon.textContent = '🔒';
+      var text = document.createElement('div');
+      text.className = 'empty-state__text';
+      text.textContent = 'No tools available.';
+      empty.appendChild(icon); empty.appendChild(text);
+      grid.appendChild(empty);
+      return;
+    }
+    items.forEach(function(item) {
+      grid.appendChild(buildToolTile(item.key, item.tool, item.level));
+    });
   }
 
-  myKeys.forEach(function(key) {
-    var t = STATE.tools[key];
-    if (!t) return;
-    var level = getAccessLevel(STATE.uid, key);
-    var tile  = buildToolTile(key, t, level);
-    grid.appendChild(tile);
-  });
+  if (isClub) {
+    /* Club users — flat list of club-facing tools only */
+    document.getElementById('staffToolsSection').style.display = 'none';
+    document.getElementById('clubToolsSection').style.display = 'none';
+    document.getElementById('clubFlatSection').style.display = '';
+    populateGrid('clubFlatGrid', clubTools);
+  } else {
+    /* Staff users — two sections */
+    document.getElementById('clubFlatSection').style.display = 'none';
+    document.getElementById('staffToolsSection').style.display = staffTools.length ? '' : 'none';
+    document.getElementById('clubToolsSection').style.display = clubTools.length ? '' : 'none';
+    populateGrid('staffToolGrid', staffTools);
+    populateGrid('clubToolGrid', clubTools);
+  }
 }
 
 function buildToolTile(key, t, level) {
@@ -2424,6 +2519,21 @@ function buildToolTile(key, t, level) {
     deployWrap.appendChild(deployBtn);
     tile.appendChild(deployWrap);
   }
+
+  /* Star / favourite toggle */
+  var starBtn = document.createElement('button');
+  starBtn.className = 'tool-tile__star';
+  starBtn.title = 'Toggle favourite';
+  starBtn.setAttribute('aria-label', 'Toggle favourite');
+  var favs = getFavourites();
+  starBtn.textContent = favs[key] ? '★' : '☆';
+  if (favs[key]) tile.classList.add('tool-tile--starred');
+  starBtn.addEventListener('click', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleFavourite(key);
+  });
+  tile.appendChild(starBtn);
 
   return tile;
 }
