@@ -1,7 +1,7 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /tools/system/nl-utils.js
-   Version: v1.1 (17/04/2026)
+   Version: v1.2 (26/04/2026)
 
    Shared helper functions used by every tool page. Exposed on window.NL
    namespace. All functions are defensive — they handle missing arguments
@@ -14,6 +14,14 @@
      NL.escHtml('<script>');          // → '&lt;script&gt;'
 
    Changelog
+   v1.2 (26/04/2026)
+     - Added NL.icon(name, size) helper — returns SVG element referencing
+       /tools/assets/icons/sprites.svg. Usage: NL.icon('add') or
+       NL.icon('download', 'sm'). Sizes: sm/md/lg.
+
+   v1.1 (17/04/2026)
+     - writeAudit helper added.
+
    v1.0 (17/04/2026)
      - Initial centralised utilities. Extracted from duplicated code
        across all tool pages.
@@ -166,5 +174,29 @@
     updates['admin/audit-by-user/' + window.NL.session.uid + '/' + key] = entry;
     firebase.database().ref().update(updates).catch(function() {});
   };
+
+  /* ── Icon helper ─────────────────────────────────────────────────────── */
+  /* Returns an SVG element referencing the sprite sheet.
+     Usage: NL.icon('add')           → <svg class="icon">...</svg>
+            NL.icon('add', 'md')     → <svg class="icon icon--md">...</svg>
+            NL.icon('delete', 'sm')  → <svg class="icon icon--sm">...</svg>
+     Available sizes: 'sm' (16px), 'md' (20px, default), 'lg' (24px)
+     Available icons: add, close, back, forward, up, down, download, upload,
+       tick, refresh, settings, edit, search, eye, filter, calendar, user,
+       warning, info, link, star, star-filled, send, delete             */
+  window.NL.icon = function(name, size) {
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    var cls = 'icon';
+    if (size && size !== 'md') cls += ' icon--' + size;
+    else if (!size) cls += ' icon--md';
+    else cls += ' icon--md';
+    svg.setAttribute('class', cls);
+    svg.setAttribute('aria-hidden', 'true');
+    var use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+    use.setAttribute('href', '/tools/assets/icons/sprites.svg#icon-' + name);
+    svg.appendChild(use);
+    return svg;
+  };
+
 
 })();
