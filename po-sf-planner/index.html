@@ -3,12 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Playoff SF Planner v17 — National League</title>
+<title>Playoff SF Planner v18 — National League</title>
 <!--
-  National League Playoff Semi-Final Planner v17.0
+  National League Playoff Semi-Final Planner v18.0
   Changelog:
-  v17.0 - 23/04/2026 - Updated TEAM_DATA to final-day standings (45 played).
-    All three divisions refreshed with correct pts and ordering.
+  v18.0 - 26/04/2026 - Final standings locked in. Removed feasibility dropdowns
+    and feasibility calc entirely. Positions 2-7 pre-populated from confirmed
+    final tables. No user selection required.
+  v17.0 - 26/04/2026 - Updated TEAM_DATA to final-day standings (45 played).
   v5.0  - 15/04/2026 - Initial build
   v6.0  - 15/04/2026 - NL branding, stacked selectors, independent state per division
   v7.0  - 15/04/2026 - Per-game KO pickers, swap, soft gap warning
@@ -138,12 +140,12 @@ button:focus-visible { outline: 2px solid #9e0000; outline-offset: 1px; }
 <div class="topbar">
   <img src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose%20white.png"
     alt="National League" onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png'">
-  <div class="topbar__title">Playoff <span>SF Planner v17</span></div>
+  <div class="topbar__title">Playoff <span>SF Planner v18</span></div>
 </div>
 
 <div class="wrap">
   <p class="intro">
-    Assign 2nd–7th per division. Dropdowns only show teams that can mathematically finish in each position. Four scenarios per division based on Eliminator outcomes. Each match has its own KO — swap early/late per scenario. Amber warning if gap &lt; 3h15m.
+    Final standings confirmed. Four scenarios per division based on Eliminator outcomes. Each match has its own KO — swap early/late per scenario. Amber warning if gap &lt; 3h15m.
   </p>
   <div id="app"></div>
   <div class="legend" style="margin-top:8px">
@@ -161,7 +163,6 @@ button:focus-visible { outline: 2px solid #9e0000; outline-offset: 1px; }
     <span style="color:#c0392b">●</span> &lt;30 min / no train ·
     Walk time to ground factored in. Return = KO + 180min + walk to station.
     <span style="background:#1a2a44;width:8px;height:8px;border-radius:50%;display:inline-block"></span> = no viable train, nearest miss shown.
-    <br><strong>Positions:</strong> Filtered by mathematical possibility (46 games, 3pts/W, 1pt/D).
   </div>
 </div>
 
@@ -209,80 +210,12 @@ var CREST_BASE = 'https://raw.githubusercontent.com/thenationalleague/tools/refs
 var FALLBACK = CREST_BASE + 'National%20League%20rose.png';
 function crestUrl(n) { return CREST_BASE + encodeURIComponent(n) + '.png'; }
 
-// ── Team data (update via conversation as results come in) ──
-var TOTAL_GAMES = 46;
-var TEAM_DATA = {
-  National: [
-    {name:"York City", played:45, pts:107},
-    {name:"Rochdale", played:45, pts:105},
-    {name:"Carlisle United", played:45, pts:92},
-    {name:"Boreham Wood", played:45, pts:87},
-    {name:"Scunthorpe United", played:45, pts:82},
-    {name:"Southend United", played:45, pts:79},
-    {name:"Forest Green Rovers", played:45, pts:78}
-  ],
-  North: [
-    {name:"AFC Fylde", played:45, pts:97},
-    {name:"South Shields", played:45, pts:95},
-    {name:"Kidderminster Harriers", played:45, pts:84},
-    {name:"Macclesfield", played:45, pts:77},
-    {name:"Scarborough Athletic", played:45, pts:72},
-    {name:"Chester", played:45, pts:72},
-    {name:"Buxton", played:45, pts:70},
-    {name:"Merthyr Town", played:45, pts:70},
-    {name:"Darlington", played:45, pts:69},
-    {name:"Spennymoor Town", played:45, pts:67},
-    {name:"AFC Telford United", played:45, pts:65}
-  ],
-  South: [
-    {name:"Worthing", played:45, pts:81},
-    {name:"Hornchurch", played:45, pts:80},
-    {name:"Dorking Wanderers", played:45, pts:78},
-    {name:"Hemel Hempstead Town", played:45, pts:78},
-    {name:"Torquay United", played:45, pts:77},
-    {name:"Ebbsfleet United", played:45, pts:77},
-    {name:"Weston-super-Mare", played:45, pts:77},
-    {name:"Maidenhead United", played:45, pts:76},
-    {name:"Maidstone United", played:45, pts:74},
-    {name:"Chelmsford City", played:45, pts:73},
-    {name:"Chesham United", played:45, pts:71}
-  ]
+// ── Final confirmed standings — positions 2-7 per division ──
+var FINAL_STANDINGS = {
+  National: {2:'Rochdale', 3:'Carlisle United', 4:'Boreham Wood', 5:'Scunthorpe United', 6:'Southend United', 7:'Forest Green Rovers'},
+  North:    {2:'South Shields', 3:'Kidderminster Harriers', 4:'Macclesfield', 5:'Buxton', 6:'Scarborough Athletic', 7:'Chester'},
+  South:    {2:'Hornchurch', 3:'Torquay United', 4:'Dorking Wanderers', 5:'Hemel Hempstead Town', 6:'Weston-super-Mare', 7:'Maidenhead United'}
 };
-
-// ── Feasibility calculation ──
-function calcFeasibility() {
-  ['National','North','South'].forEach(function(div) {
-    var teams = TEAM_DATA[div];
-    var n = teams.length;
-    teams.forEach(function(t) {
-      t.remaining = TOTAL_GAMES - t.played;
-      t.maxPts = t.pts + t.remaining * 3;
-      t.minPts = t.pts;
-    });
-    teams.forEach(function(t, i) {
-      t.feasible = [];
-      for (var pos = 1; pos <= n; pos++) {
-        var mustAbove = 0, mustBelow = 0;
-        for (var j = 0; j < n; j++) {
-          if (j === i) continue;
-          if (teams[j].minPts > t.maxPts) mustAbove++;
-          if (teams[j].maxPts < t.minPts) mustBelow++;
-        }
-        if (mustAbove <= pos - 1 && mustBelow <= n - pos) t.feasible.push(pos);
-      }
-      t.playoffPositions = t.feasible.filter(function(p) { return p >= 2 && p <= 7; });
-    });
-  });
-}
-calcFeasibility();
-
-function teamsForPosition(div, pos) {
-  return TEAM_DATA[div].filter(function(t) { return t.playoffPositions.indexOf(pos) !== -1; }).map(function(t) { return t.name; });
-}
-function teamInfo(div, name) {
-  for (var i = 0; i < TEAM_DATA[div].length; i++) { if (TEAM_DATA[div][i].name === name) return TEAM_DATA[div][i]; }
-  return null;
-}
 
 // ── KO times ──
 var earlyTimes = []; for (var m = 720; m <= 780; m += 5) earlyTimes.push(m);
@@ -293,16 +226,12 @@ var MIN_GAP = 195;
 var SF_DATES = { North: 'Sat 02/05/2026', South: 'Sat 02/05/2026', National: 'Sun 03/05/2026' };
 var POS_LABELS = { 2:'2nd — Hosts SF', 3:'3rd — Hosts SF', 4:'4th — Eliminator', 5:'5th — Eliminator', 6:'6th — Eliminator', 7:'7th — Eliminator' };
 
-// ── State ──
+// ── State — pre-populated from final standings ──
 var STATE = {};
 ['National','North','South'].forEach(function(div) {
-  STATE[div] = { teams: {2:'',3:'',4:'',5:'',6:'',7:''}, scenarios: [] };
+  STATE[div] = { teams: FINAL_STANDINGS[div], scenarios: [] };
+  buildScenarios(div);
 });
-
-function getUsed(div) {
-  var t = STATE[div].teams;
-  return [t[2],t[3],t[4],t[5],t[6],t[7]].filter(Boolean);
-}
 
 function buildScenarios(div) {
   var t = STATE[div].teams;
@@ -656,49 +585,24 @@ function getSuffix(n) { return n === 2 ? 'nd' : n === 3 ? 'rd' : 'th'; }
 
 function renderDiv(div) {
   var s = STATE[div];
-  var used = getUsed(div);
   var html = '<div class="division">';
   html += '<div class="div-header"><span class="div-header__name">'+(div==='National'?'National League':'NL '+div)+'</span><span class="div-header__date">'+SF_DATES[div]+'</span></div>';
   html += '<div class="div-body">';
 
   [2,3,4,5,6,7].forEach(function(pos) {
     var isHost = pos <= 3;
-    var eligible = teamsForPosition(div, pos);
-    var avail = eligible.filter(function(t) { return t === s.teams[pos] || used.indexOf(t) === -1; });
-    var info = s.teams[pos] ? teamInfo(div, s.teams[pos]) : null;
-    var infoText = info ? info.pts + 'pts P' + info.played + ' (max ' + info.maxPts + ')' : '';
-
+    var team = s.teams[pos];
     html += '<div class="pos-row '+(isHost?'pos-row--host':'pos-row--elim')+'">';
     html += '<span class="pos-label '+(isHost?'pos-label--host':'pos-label--elim')+'">'+POS_LABELS[pos]+'</span>';
-    if (s.teams[pos]) html += '<img class="pos-crest" src="'+esc(crestUrl(s.teams[pos]))+'" onerror="this.onerror=null;this.src=\''+FALLBACK+'\'">';
-    html += '<select class="pos-select" onchange="setTeam(\''+escJ(div)+'\','+pos+',this.value)">';
-    html += '<option value="">— select —</option>';
-    avail.forEach(function(t) {
-      var ti = teamInfo(div, t);
-      var suffix = ti ? ' (' + ti.pts + 'pts)' : '';
-      html += '<option value="'+esc(t)+'"'+(t===s.teams[pos]?' selected':'')+'>'+esc(t)+suffix+'</option>';
-    });
-    html += '</select>';
-    if (infoText) html += '<span class="pos-info">'+esc(infoText)+'</span>';
+    html += '<img class="pos-crest" src="'+esc(crestUrl(team))+'" onerror="this.onerror=null;this.src=\''+FALLBACK+'\'">';
+    html += '<span style="font-size:13px;font-weight:700;flex:1">'+esc(team)+'</span>';
     html += '</div>';
   });
 
-  var countByPos = {};
-  [2,3,4,5,6,7].forEach(function(pos) { countByPos[pos] = teamsForPosition(div, pos).length; });
-  html += '<div class="feasibility-note"><strong>Feasible teams per position:</strong> ';
-  [2,3,4,5,6,7].forEach(function(pos, i) {
-    if (i > 0) html += ' · ';
-    html += pos + getSuffix(pos) + ': ' + countByPos[pos];
-  });
+  html += '<div class="scenarios">';
+  s.scenarios.forEach(function(sc, i) { html += scenarioHtml(sc, i, div); });
   html += '</div>';
 
-  if (s.scenarios.length === 0) {
-    html += '<div class="placeholder">Assign all six positions to see scenarios</div>';
-  } else {
-    html += '<div class="scenarios">';
-    s.scenarios.forEach(function(sc, i) { html += scenarioHtml(sc, i, div); });
-    html += '</div>';
-  }
   html += '</div></div>';
   return html;
 }
@@ -708,11 +612,6 @@ function render() {
 }
 
 // ── Events ──
-function setTeam(div, pos, val) {
-  STATE[div].teams[pos] = val;
-  buildScenarios(div);
-  render();
-}
 function setKo(div, sIdx, which, val) {
   STATE[div].scenarios[sIdx][which] = val;
   render();
