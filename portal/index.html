@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.79 (26/04/2026)
+  Version: v5.80 (26/04/2026)
   Date: 09/04/2026
   File: /tools/portal/index.html
 
@@ -19,6 +19,13 @@
            * No retrofit to other tool pages yet — installed app scope covers
              all /tools/ URLs via service worker, but tool page browser tabs
              won't show the rose favicon without a later head-tag sweep.
+
+  v5.80 (26/04/2026) — Restore defaults fix:
+           * setSliderLevel() was called but never defined — restore defaults
+             did nothing. Function now implemented: updates slider dots,
+             stores previewLevel, and clears the dept set-all dot.
+           * dept stored on each slider element so setSliderLevel can find
+             and clear the correct set-all header when restoring.
 
   v5.79 (26/04/2026) — Set-all reset fix:
            * resetSetAllSlider was only clearing the mobile band slider, not
@@ -321,7 +328,7 @@
   window.NL_CHANGELOG = [
     {
       date: '26 April 2026',
-      version: 'v5.79',
+      version: 'v5.80',
       items: [
         'Tools are now organised into Staff Tools and Club Tools sections.',
         'Star any tool to pin it to the top of its section — your favourites are saved.',
@@ -4820,11 +4827,35 @@ function buildAccordionItem(uid, u, depts, deptMap) {
 var ACC_LEVELS = ['hidden', 'off', 'access', 'admin'];
 var ACC_LABELS = { hidden: 'Hidden', off: 'Off', access: 'Access', admin: 'Admin' };
 
+/* Set an acc-slider to a given level, updating dot classes.
+   Used by Restore defaults to reset all sliders at once. */
+function setSliderLevel(slider, level) {
+  var idx = ACC_LEVELS.indexOf(level);
+  if (idx === -1) idx = 0;
+
+  slider.querySelectorAll('.acc-slider__stop').forEach(function(stop, si) {
+    stop.classList.remove('acc-slider__stop--active', 'acc-slider__stop--filled', 'acc-slider__stop--padlocked');
+    var node = stop.querySelector('.acc-slider__node');
+    var lbl  = stop.querySelector('.acc-slider__label');
+    if (node) { node.textContent = ''; node.style.cssText = ''; }
+    if (lbl)  { lbl.style.color = ''; }
+    if (si === idx) stop.classList.add('acc-slider__stop--active');
+  });
+
+  slider.dataset.previewLevel = level;
+
+  /* Reset the dept set-all slider */
+  var dept = slider.dataset.dept;
+  var bodyEl = slider.closest('.uacc-body');
+  if (dept && bodyEl) resetSetAllSlider(bodyEl, dept);
+}
+
 function buildAccSlider(uid, toolKey, currentLevel, defaultLevel, locked, clubLocked, dept, bodyEl) {
   var wrap = document.createElement('div');
   wrap.className = 'acc-slider' + (locked ? ' acc-slider--locked' : '');
   wrap.dataset.toolkey = toolKey;
   wrap.dataset.currentLevel = currentLevel;
+  wrap.dataset.dept = dept;
   var currentIdx = ACC_LEVELS.indexOf(currentLevel);
   if (currentIdx === -1) currentIdx = 0;
   var defaultIdx = ACC_LEVELS.indexOf(defaultLevel);
