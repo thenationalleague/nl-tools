@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.78 (26/04/2026)
+  Version: v5.79 (26/04/2026)
   Date: 09/04/2026
   File: /tools/portal/index.html
 
@@ -19,6 +19,11 @@
            * No retrofit to other tool pages yet — installed app scope covers
              all /tools/ URLs via service worker, but tool page browser tabs
              won't show the rose favicon without a later head-tag sweep.
+
+  v5.79 (26/04/2026) — Set-all reset fix:
+           * resetSetAllSlider was only clearing the mobile band slider, not
+             the desktop header slider. On desktop the dot never disappeared
+             after moving an individual tool. Now clears both.
 
   v5.78 (26/04/2026) — Set-all slider fixes:
            * Only active dot shown (no --filled colouring on dots to the left).
@@ -316,7 +321,7 @@
   window.NL_CHANGELOG = [
     {
       date: '26 April 2026',
-      version: 'v5.78',
+      version: 'v5.79',
       items: [
         'Tools are now organised into Staff Tools and Club Tools sections.',
         'Star any tool to pin it to the top of its section — your favourites are saved.',
@@ -4909,22 +4914,40 @@ function buildAccSlider(uid, toolKey, currentLevel, defaultLevel, locked, clubLo
 
 /* Reset a dept's set-all slider to neutral (mixed state) when individual tools change */
 function resetSetAllSlider(bodyEl, dept) {
-  /* Find the band for this dept */
-  var band = bodyEl ? bodyEl.querySelector('.uacc-dept-band[data-dept="' + dept + '"]') : null;
-  if (!band) {
-    /* bodyEl is deptWrap -- go up to body */
-    var wrap = document.querySelector('.uacc-body .uacc-dept-wrap[data-dept="' + dept + '"]');
-    if (wrap) band = wrap.parentElement.querySelector('.uacc-dept-band[data-dept="' + dept + '"]');
+  /* Find both the band (mobile) and the header (desktop) for this dept.
+     Both have set-all sliders — both need clearing. */
+  var body2 = bodyEl;
+  /* If bodyEl is a deptWrap, go up to the accordion body */
+  if (body2 && body2.classList && body2.classList.contains('uacc-dept-wrap')) {
+    body2 = body2.parentElement;
   }
-  if (!band) return;
-  var slider = band.querySelector('.uacc-set-all-slider');
-  if (!slider) return;
-  /* Remove all active/filled states -- leaves all nodes as empty circles (neutral) */
-  slider.querySelectorAll('.uacc-set-all-slider__stop').forEach(function(s) {
-    s.classList.remove('uacc-set-all-slider__stop--active', 'uacc-set-all-slider__stop--filled');
-  });
-  var fill = slider.querySelector('.uacc-set-all-slider__fill');
-  if (fill) /* fill removed */ void '0%';
+  if (!body2) return;
+
+  /* Reset band slider */
+  var band = body2.querySelector('.uacc-dept-band[data-dept="' + dept + '"]');
+  if (band) {
+    band.querySelectorAll('.uacc-set-all-slider__stop').forEach(function(s) {
+      s.classList.remove('uacc-set-all-slider__stop--active', 'uacc-set-all-slider__stop--filled');
+    });
+  }
+
+  /* Reset header slider (desktop) — find deptWrap then get preceding deptHeader */
+  var deptWrap = body2.querySelector('.uacc-dept-wrap[data-dept="' + dept + '"]');
+  if (deptWrap) {
+    /* deptHeader immediately precedes deptWrap after deptBand */
+    var siblings = body2.children;
+    for (var i = 0; i < siblings.length; i++) {
+      if (siblings[i] === deptWrap) {
+        /* Go back to find the deptHeader (band is i-1, header is i-2) */
+        if (i >= 2 && siblings[i-2].classList.contains('uacc-dept-header')) {
+          siblings[i-2].querySelectorAll('.uacc-set-all-slider__stop').forEach(function(s) {
+            s.classList.remove('uacc-set-all-slider__stop--active', 'uacc-set-all-slider__stop--filled');
+          });
+        }
+        break;
+      }
+    }
+  }
 }
 
 function buildSetAllSlider(uid, u, dept, deptMap, deptWrap) {
