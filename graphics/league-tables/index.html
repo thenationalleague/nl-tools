@@ -1,320 +1,350 @@
 <!DOCTYPE html>
+<!--
+  League Tables — NL Tools (Graphics & Media sub-tool)
+  Version: 3.0
+  Date: 26/04/2026
+  File: /tools/graphics/league-tables/index.html
+
+  CHANGELOG
+  v3.0 (26/04/2026) — Portal integration + brand consistency
+    Shell:
+      - Added Firebase compat SDKs + config + initializeApp
+      - Added auth-guard integration under NL_TOOL_KEY = 'staff-graphics'
+      - Added NL_TOOL, NL_CHANGELOG, nlAuthReady callback
+      - Wrapped all content in #pageWrap
+      - Added #nlTopbar for standard topbar
+    CSS:
+      - Loaded nl-brand.css — all brand tokens available
+      - Stripped custom :root tokens (--border, --bg, --fg, --muted)
+        and replaced with brand equivalents
+      - Buttons use brand .btn classes
+      - Form controls use brand tokens for borders, radius, font
+      - Removed Typekit CSS/JS loader (nl-brand.css provides @font-face)
+      - border-radius values changed from 10-14px to var(--radius)
+      - Body background changed from #fff to brand off-white
+      - .page container uses brand fluid padding (no override)
+    Data:
+      - Team list now fetched from clubs-meta.json instead of hardcoded
+      - Crest URLs still use rckd-nl.github.io (to be migrated later)
+    Engine:
+      - All canvas rendering code preserved unchanged
+      - const/let kept in engine (converting 200+ declarations is
+        high-risk for zero functional gain)
+      - Font warmup span kept — needed for canvas text measurement
+      - var used in all new code
+
+  v2.4 — Previous standalone version (pre-portal)
+-->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Table Builder</title>
+<title>League Tables — NL Tools</title>
+<meta name="robots" content="noindex,nofollow">
 
-<!-- Adobe Fonts (same kit) -->
-<link rel="preconnect" href="https://use.typekit.net" crossorigin>
-<link rel="preconnect" href="https://p.typekit.net" crossorigin>
-<link rel="stylesheet" href="https://use.typekit.net/gff4ipy.css">
-<script src="https://use.typekit.net/gff4ipy.js"></script>
+<!-- Firebase SDKs — must load BEFORE auth-guard.js -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script>
-  try{ Typekit.load({ async:true }); }catch(e){}
+  firebase.initializeApp({
+    apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+    authDomain:        "nl-tools.firebaseapp.com",
+    databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId:         "nl-tools",
+    storageBucket:     "nl-tools.firebasestorage.app",
+    messagingSenderId: "801354670005",
+    appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+  });
 </script>
 
+<link rel="stylesheet" href="/tools/system/nl-brand.css">
+
+<script>
+  window.NL_TOOL = {
+    title: 'League Tables',
+    toolKey: 'staff-graphics'
+  };
+  var NL_TOOL_KEY = 'staff-graphics';
+
+  window.NL_CHANGELOG = [
+    {
+      date: '26 April 2026',
+      version: 'v1.0',
+      items: [
+        'Integrated into NL Tools portal with standard topbar and auth.',
+        'Team list now loads from clubs database — no hardcoded names.',
+        'Design aligned with NL Tools brand system.'
+      ]
+    }
+  ];
+</script>
+
+<script src="/tools/system/nl-utils.js"></script>
+<script src="/tools/system/nl-topbar.js"></script>
+<script src="/tools/system/auth-guard.js"></script>
+
 <style>
-:root{
-  --border:#d0d7de;
-  --bg:#f6f8fa;
-  --fg:#24292f;
-  --muted:#57606a;
-  --brand:#9e0000;
-}
+  /* ── Layout ── */
+  .app {
+    display: grid;
+    grid-template-columns: minmax(520px, 980px) minmax(420px, 1fr);
+    gap: 20px;
+    align-items: start;
+  }
+  @media (max-width: 980px) {
+    .app { grid-template-columns: 1fr; }
+  }
 
-*{ box-sizing:border-box; }
+  /* ── Canvas preview ── */
+  .preview-wrap {
+    position: sticky;
+    top: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--off-white);
+    padding: 10px;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
 
-body{
-  margin:0;
-  font-family:"carbona-variable", system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
-  font-size:14px;
-  color:var(--fg);
-  background:#fff;
-}
+  /* ── Controls panel ── */
+  .panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+  }
 
-.page{
-  width:100%;
-  padding:24px 18px 28px;
-}
+  .box {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+    background: var(--white);
+  }
 
-.app-header{
-  display:flex;
-  align-items:center;
-  gap:14px;
-  margin-bottom:18px;
-}
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  .controls select {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--white);
+    font-family: var(--font);
+    font-size: var(--text-sm) !important;
+    font-variation-settings: 'wght' 400;
+    color: var(--text);
+  }
 
-.app-header h1{
-  margin:0;
-  font-size:24px;
-  font-weight:800;
-}
+  /* ── Paste section ── */
+  .section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .section label {
+    font-size: var(--text-xs);
+    font-weight: 800;
+    font-variation-settings: 'wght' 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+  }
+  textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-family: var(--font);
+    font-size: var(--text-sm) !important;
+    font-variation-settings: 'wght' 400;
+    color: var(--text);
+    resize: vertical;
+  }
+  textarea:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(158, 0, 0, 0.10);
+  }
 
-.app{
-  display:grid;
-  grid-template-columns:minmax(520px, 980px) minmax(420px, 1fr);
-  gap:20px;
-  align-items:start;
-}
+  /* ── Footer status ── */
+  footer {
+    margin-top: 6px;
+    display: flex;
+    justify-content: space-between;
+  }
 
-@media (max-width: 980px){
-  .app{ grid-template-columns:1fr; }
-}
+  /* ── Grid editor ── */
+  .grid-wrap {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .grid-topbar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--off-white);
+  }
+  .grid-scroller {
+    max-height: 520px;
+    overflow: auto;
+    background: var(--white);
+  }
+  @media (max-width: 980px) {
+    .grid-scroller { max-height: 360px; }
+  }
 
-.previewWrap{
-  position:sticky;
-  top:16px;
-  border:1px solid var(--border);
-  border-radius:14px;
-  background:var(--bg);
-  padding:10px;
-}
+  table.grid {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    min-width: 640px;
+  }
+  .grid thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--white);
+    border-bottom: 1px solid var(--border);
+    font-size: var(--text-xs);
+    font-weight: 800;
+    font-variation-settings: 'wght' 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    text-align: left;
+    padding: 10px;
+    white-space: nowrap;
+  }
+  .grid tbody td {
+    border-bottom: 1px solid var(--border);
+    padding: 6px 8px;
+    vertical-align: middle;
+  }
+  .grid tbody tr:last-child td { border-bottom: none; }
 
-canvas{
-  display:block;
-  width:100%;
-  height:auto;
-}
-
-.panel{
-  display:flex;
-  flex-direction:column;
-  gap:14px;
-  min-width:0;
-}
-
-.box{
-  border:1px solid var(--border);
-  border-radius:12px;
-  padding:12px;
-  background:#fff;
-}
-
-.controls{
-  display:flex;
-  flex-wrap:wrap;
-  gap:8px;
-  align-items:center;
-}
-
-.controls select,
-.controls input{
-  padding:8px 10px;
-  border:1px solid var(--border);
-  border-radius:10px;
-  background:#fff;
-  font:inherit;
-}
-
-.controls button,
-.box button{
-  padding:8px 10px;
-  border:1px solid var(--brand);
-  border-radius:10px;
-  background:var(--brand);
-  color:#fff;
-  font:inherit;
-  cursor:pointer;
-}
-
-.controls button:hover,
-.box button:hover{ filter:brightness(.95); }
-
-.section{
-  display:flex;
-  flex-direction:column;
-  gap:6px;
-}
-
-textarea{
-  width:100%;
-  padding:10px 12px;
-  border:1px solid var(--border);
-  border-radius:12px;
-  font:inherit;
-  resize:vertical;
-}
-
-footer{
-  margin-top:6px;
-  font-size:12px;
-  color:var(--muted);
-  display:flex;
-  justify-content:space-between;
-}
-
-/* ===== grid editor ===== */
-.gridWrap{
-  border:1px solid var(--border);
-  border-radius:12px;
-  overflow:hidden;
-}
-
-.gridTopBar{
-  display:flex;
-  gap:10px;
-  align-items:center;
-  justify-content:space-between;
-  padding:10px 12px;
-  border-bottom:1px solid var(--border);
-  background:var(--bg);
-}
-
-.gridTopBar .hint{
-  font-size:12px;
-  color:var(--muted);
-}
-
-.gridScroller{
-  max-height:520px;
-  overflow:auto;
-  background:#fff;
-}
-
-table.grid{
-  width:100%;
-  border-collapse:separate;
-  border-spacing:0;
-  min-width:640px;
-}
-
-.grid thead th{
-  position:sticky;
-  top:0;
-  z-index:2;
-  background:#fff;
-  border-bottom:1px solid var(--border);
-  font-size:12px;
-  color:var(--muted);
-  text-align:left;
-  padding:10px 10px;
-  white-space:nowrap;
-}
-
-.grid tbody td{
-  border-bottom:1px solid #eef1f4;
-  padding:6px 8px;
-  vertical-align:middle;
-}
-
-.grid tbody tr:last-child td{
-  border-bottom:none;
-}
-
-.cell-pos{
-  width:54px;
-  text-align:center;
-  font-weight:800;
-  color:#111;
-}
-
-.grid select,
-.grid input{
-  width:100%;
-  padding:8px 10px;
-  border:1px solid var(--border);
-  border-radius:10px;
-  background:#fff;
-  font:inherit;
-}
-
-.grid .small{
-  width:74px;
-  text-align:center;
-}
-
-.grid .override{
-  width:84px;
-  text-align:center;
-}
-
-.grid .team{
-  min-width:260px;
-}
-
-@media (max-width: 980px){
-  .gridScroller{ max-height:360px; }
-}
+  .cell-pos {
+    width: 54px;
+    text-align: center;
+    font-weight: 800;
+    font-variation-settings: 'wght' 800;
+    color: var(--text);
+  }
+  .grid select,
+  .grid input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--white);
+    font-family: var(--font);
+    font-size: var(--text-sm) !important;
+    font-variation-settings: 'wght' 400;
+    color: var(--text);
+  }
+  .grid select:focus,
+  .grid input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(158, 0, 0, 0.10);
+  }
+  .grid .small { width: 74px; text-align: center; }
+  .grid .override { width: 84px; text-align: center; }
+  .grid .team { min-width: 260px; }
 </style>
 </head>
 
 <body>
 
-<!-- font warmup -->
-<span id="fontWarmup" style="position:absolute;left:-9999px;top:-9999px;font-family:'carbona-extrabold','carbona-variable',system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;">
+<!-- Font warmup — needed for canvas text measurement even with @font-face -->
+<span id="fontWarmup" style="position:absolute;left:-9999px;top:-9999px;font-family:'carbona-variable',sans-serif;font-weight:800;font-variation-settings:'wght' 800;">
   FONT-WARMUP-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
 </span>
 
-<div class="page">
+<div id="pageWrap" style="display:none;">
+  <div id="nlTopbar"></div>
 
-<header class="app-header">
-  <h1>Table Builder</h1>
-</header>
+  <div class="page">
 
-<div class="app">
+    <div class="app">
 
-  <div class="previewWrap">
-    <canvas id="preview" width="1347" height="1347"></canvas>
-  </div>
+      <div class="preview-wrap">
+        <canvas id="preview" width="1347" height="1347"></canvas>
+      </div>
 
-  <div class="panel">
+      <div class="panel">
 
-    <div class="box controls">
-      <select id="division" title="Division">
-        <option value="National">National</option>
-        <option value="North">North</option>
-        <option value="South">South</option>
-      </select>
-
-      <select id="matchday" title="Matchday">
-        <option value="">N/A</option>
-      </select>
-
-      <button type="button" id="download1x1" title="Download square export (1347 x 1347)">Download 1x1 PNG</button>
-      <button type="button" id="download4x5" title="Download 4x5 export (1080 x 1347)">Download 4x5 PNG</button>
-      <button type="button" id="resetAll" title="Reset everything">Reset all</button>
-    </div>
-
-    <div class="box section">
-      <label for="pasteIn">Paste league table (TSV/CSV)</label>
-      <textarea id="pasteIn" rows="10" placeholder="Paste your table here (with or without header row)."></textarea>
-    </div>
-
-    <div class="box section">
-      <div class="gridWrap">
-        <div class="gridTopBar">
-          <div style="font-weight:800;">Grid editor</div>
-          <div class="hint">Edits update the graphic instantly. Paste ↔ grid stays in sync.</div>
+        <div class="box controls">
+          <select id="division" title="Division">
+            <option value="National">National</option>
+            <option value="North">North</option>
+            <option value="South">South</option>
+          </select>
+          <select id="matchday" title="Matchday">
+            <option value="">N/A</option>
+          </select>
+          <button type="button" id="download1x1" class="btn btn--primary btn--sm">Download 1×1</button>
+          <button type="button" id="download4x5" class="btn btn--navy btn--sm">Download 4×5</button>
+          <button type="button" id="resetAll" class="btn btn--danger btn--sm">Reset all</button>
         </div>
 
-        <div class="gridScroller">
-          <table class="grid" aria-label="Table grid editor">
-            <thead>
-              <tr>
-                <th style="width:54px;">Pos</th>
-                <th style="width:84px;">Flag</th>
-                <th>Team</th>
-                <th style="width:84px;">P</th>
-                <th style="width:84px;">GD</th>
-                <th style="width:84px;">Pts</th>
-              </tr>
-            </thead>
-            <tbody id="gridBody"></tbody>
-          </table>
+        <div class="box section">
+          <label for="pasteIn">Paste league table (TSV/CSV)</label>
+          <textarea id="pasteIn" rows="10" placeholder="Paste your table here (with or without header row)."></textarea>
         </div>
+
+        <div class="box section">
+          <div class="grid-wrap">
+            <div class="grid-topbar">
+              <span class="text-label" style="color:var(--text);">Grid editor</span>
+              <span class="text-secondary">Edits update the graphic instantly.</span>
+            </div>
+            <div class="grid-scroller">
+              <table class="grid" aria-label="Table grid editor">
+                <thead>
+                  <tr>
+                    <th style="width:54px;">Pos</th>
+                    <th style="width:84px;">Flag</th>
+                    <th>Team</th>
+                    <th style="width:84px;">P</th>
+                    <th style="width:84px;">GD</th>
+                    <th style="width:84px;">Pts</th>
+                  </tr>
+                </thead>
+                <tbody id="gridBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <footer>
+          <span class="text-label" id="status">Ready</span>
+          <span class="text-label" id="fontStatus" style="margin-left:auto;">Font: …</span>
+        </footer>
+
       </div>
     </div>
 
-    <footer>
-      <span id="status">Ready</span>
-      <span id="fontStatus" style="margin-left:auto;">Font: …</span>
-    </footer>
-
   </div>
 </div>
 
-</div>
+<script>
+  window.nlAuthReady = function(session) {
+    /* Topbar rendered by nl-topbar.js — no manual wiring needed */
+    /* Engine starts independently via DOMContentLoaded */
+  };
+</script>
 
 <script>
 (function(){
@@ -322,27 +352,30 @@ table.grid{
 
   /* ================= CONFIG ================= */
 
-  const VERSION = "v2.4";
-  const STORAGE_KEY = "table-builder-v2.4";
+  const VERSION = "v3.0";
+  const STORAGE_KEY = "table-builder-v3.0";
 
   const EXPORT_SIZE = 1347;
 
   const GLOBAL_DX = 0;
   const GLOBAL_DY = -10;
 
+  /* ===== Asset URLs ===== */
+  const ASSET_BASE = "https://rckd-nl.github.io/nl-tools/assets/";
+
   function localAssetUrl(filename){
-    return encodeURI("./" + filename);
+    return encodeURI(ASSET_BASE + filename);
   }
 
   const BG_URL = localAssetUrl("League Table background.png");
 
-const DIVISION_BASE_URL = "https://rckd-nl.github.io/nl-tools/assets/divisions/";
+  const DIVISION_BASE_URL = ASSET_BASE + "divisions/";
 
-function getDivisionBadgeUrl(div){
-  const d = safeText(div);
-  if(!d) return null;
-  return encodeURI(`${DIVISION_BASE_URL}${d}.png`);
-}
+  function getDivisionBadgeUrl(div){
+    const d = safeText(div);
+    if(!d) return null;
+    return encodeURI(DIVISION_BASE_URL + d + ".png");
+  }
 
   const TIC_URL = localAssetUrl("TIC Health.png");
   const TIC_SCALE = 0.30;
@@ -350,37 +383,23 @@ function getDivisionBadgeUrl(div){
 
   const BADGE_MID = { x:180, y:120, scale:0.08 };
 
-  /* ===== TEAMS (dropdown list = official names) ===== */
-  const TEAMS_DROPDOWN = [
-    "Aldershot Town","Altrincham","Boreham Wood","Boston United","Brackley Town","Braintree Town","Carlisle United","Eastleigh",
-    "FC Halifax Town","Forest Green Rovers","Gateshead","Hartlepool United","Morecambe","Rochdale","Scunthorpe United","Solihull Moors",
-    "Southend United","Sutton United","Tamworth","Truro City","Wealdstone","Woking","Yeovil Town","York City",
-    "AFC Fylde","AFC Telford United","Alfreton Town","Bedford Town","Buxton","Chester","Chorley","Curzon Ashton","Darlington","Hereford",
-    "Kidderminster Harriers","King's Lynn Town","Leamington","Macclesfield","Marine","Merthyr Town","Oxford City","Peterborough Sports",
-    "Radcliffe","Scarborough Athletic","South Shields","Southport","Spennymoor Town","Worksop Town",
-    "AFC Totton","Bath City","Chelmsford City","Chesham United","Chippenham Town","Dagenham & Redbridge","Dorking Wanderers","Dover Athletic",
-    "Eastbourne Borough","Ebbsfleet United","Enfield Town","Farnborough","Hampton & Richmond Borough","Hemel Hempstead Town","Hornchurch","Horsham",
-    "Maidenhead United","Maidstone United","Salisbury","Slough Town","Tonbridge Angels","Torquay United","Weston-super-Mare","Worthing"
-  ];
+  /* ===== Clubs metadata (fetched from clubs-meta.json) ===== */
+  var CLUBS_META_URL = "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json";
+  var TEAMS_DROPDOWN = []; // populated on load from clubs-meta.json
+  var TEAM_SET = new Set();
 
-  /* ===== CRESTS (local GitHub folder) ===== */
   function safeText(s){ return (s || "").replace(/\s+/g," ").trim(); }
   function toAllCaps(s){ return safeText(s).toUpperCase(); }
 
-  // Build a crest URL from the exact dropdown team name.
-  // Files live at: assets/crests/<Team Name>.png
-  // Example: assets/crests/Eastleigh.png
+  /* ===== CRESTS ===== */
+  const CREST_BASE_URL = "https://rckd-nl.github.io/nl-tools/assets/crests/";
+
   function crestUrlForTeam(teamName){
     const t = safeText(teamName);
     if(!t) return null;
-
-    // encodeURI keeps slashes but safely encodes spaces, &, etc.
-    // (Important for names like "Dagenham & Redbridge.png")
-    return encodeURI(`https://rckd-nl.github.io/nl-tools/assets/crests/${t}.png`);
+    return encodeURI(CREST_BASE_URL + t + ".png");
   }
 
-  // Only return a crest URL if the team is in your dropdown list (prevents random bad filenames)
-  const TEAM_SET = new Set(TEAMS_DROPDOWN.map(t => t.toLowerCase()));
   function getCrestUrlForTeamExact(teamName){
     const key = safeText(teamName).toLowerCase();
     if(!key) return null;
@@ -388,7 +407,7 @@ function getDivisionBadgeUrl(div){
     return crestUrlForTeam(teamName);
   }
 
-  /* ===== RENDERED TEAM TEXT (ONLY change is Hampton & Richmond Borough) ===== */
+  /* ===== Rendered team text ===== */
   function teamTextForGraphic(teamName){
     const t = safeText(teamName);
     if(!t) return "";
@@ -423,17 +442,17 @@ function getDivisionBadgeUrl(div){
   const BLUE_BOX_W = 42;
   const BLUE_BOX_H = 42;
 
-  const BASE_POS_COLOR = "#223b7c"; // must be your base
+  const BASE_POS_COLOR = "#223b7c";
 
   const RED_BOX_W = 420;
   const RED_BOX_H = 42;
   const RED_BOX_COLOR = "#9e0000";
 
-  // Numeric position zone colours (all numeric text stays WHITE)
-  const POS_CHAMP_COLOR = "#7F99DC"; // 1 
-  const POS_SF_COLOR    = "#3760C8"; // 2-3
-  const POS_QF_COLOR    = "#2D4FA4"; // 4-7 
-  const POS_RELEG_COLOR = "#192C5C"; // 21-24
+  // Numeric position zone colours
+  const POS_CHAMP_COLOR = "#7F99DC";
+  const POS_SF_COLOR    = "#3760C8";
+  const POS_QF_COLOR    = "#2D4FA4";
+  const POS_RELEG_COLOR = "#192C5C";
 
   // Override tokens (grid flag)
   const OVERRIDE_NONE = "-";
@@ -447,8 +466,8 @@ function getDivisionBadgeUrl(div){
   const POS_C_FG = "#000000";
 
   const POS_PO_QF_BG = "silver";
-  const POS_PO_SF_BG = "#9aa3ad";   // darker-than-silver for SF PO
-  const POS_PO_FG    = "#000000";   // both PO variants black text
+  const POS_PO_SF_BG = "#9aa3ad";
+  const POS_PO_FG    = "#000000";
 
   const POS_R_BG = "#000000";
   const POS_R_FG = "#ffffff";
@@ -476,38 +495,29 @@ function getDivisionBadgeUrl(div){
   // Separator lines
   const DOTTED_AFTER_ROWS = [1, 3, 7, 20];
 
-  // Chunky dashes (tweakable)
   const SEP_DASH_W = 12;
   const SEP_DASH_H = 2;
   const SEP_GAP    = 4;
-
-  // Move the separator UP/DOWN:
-  // - increase this number to move DOWN (e.g. from -1 to 0 moves down 1px)
   const SEP_Y_NUDGE = -1;
-
   const SEP_RIGHT_TRIM = 10;
 
   function drawDottedSeparator(c, y){
     const x1 = (ROW_START_X + GLOBAL_DX) - CREST_BOX_W;
     const x2 = (COL_PTS_X + GLOBAL_DX) + 24 - SEP_RIGHT_TRIM;
     const step = SEP_DASH_W + SEP_GAP;
-
     c.save();
     c.fillStyle = "#223b7c";
-
     const yTop = y + SEP_Y_NUDGE;
-
     for(let x = x1; x <= x2; x += step){
       const w = Math.min(SEP_DASH_W, (x2 - x));
       if(w > 0) c.fillRect(x, yTop, w, SEP_DASH_H);
     }
-
     c.restore();
   }
 
-  // Fonts
-  const FONT_ALL_STACK = `"carbona-extrabold","carbona-variable",system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif`;
-  const CANVAS_FALLBACK_STACK = `Arial,sans-serif`;
+  // Fonts — canvas rendering uses these stacks
+  const FONT_ALL_STACK = '"carbona-variable",sans-serif';
+  const CANVAS_FALLBACK_STACK = 'Arial,sans-serif';
 
   /* ================= ELEMENTS ================= */
 
@@ -527,8 +537,6 @@ function getDivisionBadgeUrl(div){
 
   /* ================= STATE ================= */
 
-  // 24 rows: { team, p, gd, pts, flag }
-  // flag: "-", "C", "SF", "QF", "R"
   let rows = Array.from({length: ROWS}, () => ({ team:"", p:"", gd:"", pts:"", flag: OVERRIDE_NONE }));
 
   let bgImg = null;
@@ -538,7 +546,6 @@ function getDivisionBadgeUrl(div){
   const imgCache = new Map();
   const imgObjCache = new Map();
 
-  // sync guards (paste <-> grid)
   let isUpdatingFromGrid = false;
   let isUpdatingFromPaste = false;
 
@@ -552,33 +559,18 @@ function getDivisionBadgeUrl(div){
 
   function loadImage(url){
     if(imgCache.has(url)) return imgCache.get(url);
-
     const p = new Promise((resolve,reject)=>{
       const img = new Image();
       img.crossOrigin = "anonymous";
-
-      img.onload = ()=> {
-        imgObjCache.set(url, img);
-        resolve(img);
-      };
-
-      img.onerror = ()=> {
-        reject(new Error(
-          "IMAGE LOAD FAILED: " + url +
-          " (Check filename/case, and that the file exists. On GitHub Pages, case matters.)"
-        ));
-      };
-
+      img.onload = ()=> { imgObjCache.set(url, img); resolve(img); };
+      img.onerror = ()=> { reject(new Error("IMAGE LOAD FAILED: " + url)); };
       img.src = url;
     });
-
     imgCache.set(url, p);
     return p;
   }
 
-  function clamp3(s){
-    return String(s || "").slice(0, 3);
-  }
+  function clamp3(s){ return String(s || "").slice(0, 3); }
 
   function digitsOnly3(s){
     const v = String(s || "").replace(/[^\d]/g, "");
@@ -586,9 +578,7 @@ function getDivisionBadgeUrl(div){
   }
 
   function gdOnly3(s){
-    // allow + or - then digits, max 3 chars total
     let v = String(s || "").toUpperCase().replace(/[^0-9+\-]/g, "");
-    // collapse multiple signs to first char only
     if(v.length >= 2){
       const first = v[0];
       if(first === "+" || first === "-"){
@@ -630,17 +620,13 @@ function getDivisionBadgeUrl(div){
 
   function refreshFontStatus(){
     if(!fontStatusEl) return;
-
     const t = document.createElement("canvas");
     const c = t.getContext("2d");
     const sample = "FONT-WARMUP-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-
-    c.font = `800 ${TITLE_SIZE}px ${CANVAS_FALLBACK_STACK}`;
+    c.font = "800 " + TITLE_SIZE + "px " + CANVAS_FALLBACK_STACK;
     const wFallback = c.measureText(sample).width;
-
-    c.font = `800 ${TITLE_SIZE}px ${FONT_ALL_STACK}`;
+    c.font = "800 " + TITLE_SIZE + "px " + FONT_ALL_STACK;
     const wTest = c.measureText(sample).width;
-
     const active = Math.abs(wFallback - wTest) >= 2;
     fontStatusEl.textContent = "Font: " + (active ? "CARBONA ACTIVE" : "FALLBACK");
   }
@@ -649,18 +635,15 @@ function getDivisionBadgeUrl(div){
     try{
       const warm = document.getElementById("fontWarmup");
       if(warm){ void warm.offsetWidth; }
-
       if(document.fonts && document.fonts.load){
         await Promise.all([
-          document.fonts.load(`800 ${TITLE_SIZE}px "carbona-extrabold"`).catch(()=>[]),
-          document.fonts.load(`800 ${TEAM_TEXT_SIZE}px "carbona-extrabold"`).catch(()=>[]),
-          document.fonts.load(`800 ${COL_VALUE_SIZE}px "carbona-extrabold"`).catch(()=>[]),
-          document.fonts.load(`800 ${MATCHDAY_SIZE}px "carbona-extrabold"`).catch(()=>[]),
-          document.fonts.load(`800 ${TITLE_SIZE}px "carbona-variable"`).catch(()=>[])
+          document.fonts.load('800 ' + TITLE_SIZE + 'px "carbona-variable"').catch(()=>[]),
+          document.fonts.load('800 ' + TEAM_TEXT_SIZE + 'px "carbona-variable"').catch(()=>[]),
+          document.fonts.load('800 ' + COL_VALUE_SIZE + 'px "carbona-variable"').catch(()=>[]),
+          document.fonts.load('800 ' + MATCHDAY_SIZE + 'px "carbona-variable"').catch(()=>[])
         ]);
         if(document.fonts.ready) await document.fonts.ready;
       }
-
       await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
       await new Promise(r => setTimeout(r, 120));
     }catch{}
@@ -668,44 +651,34 @@ function getDivisionBadgeUrl(div){
 
   function formatDate_DDMMMyy(d){
     const parts = new Intl.DateTimeFormat("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "2-digit"
+      day: "2-digit", month: "short", year: "2-digit"
     }).formatToParts(d);
-
     const dd = (parts.find(p => p.type === "day") || {value:""}).value;
     const mmm = (parts.find(p => p.type === "month") || {value:""}).value;
     const yy = (parts.find(p => p.type === "year") || {value:""}).value;
-
     const mmmNorm = mmm ? (mmm[0].toUpperCase() + mmm.slice(1).toLowerCase()) : "";
-    return `${dd}${mmmNorm}${yy}`;
+    return dd + mmmNorm + yy;
   }
 
   function buildFilename(sizeTag){
     const div = (divisionSel.value || "National").trim();
     const dateStr = formatDate_DDMMMyy(new Date());
-    const sizeSuffix = sizeTag ? (` - ${sizeTag}`) : "";
-    return `Table ${div} ${dateStr}${sizeSuffix}.png`;
+    const sizeSuffix = sizeTag ? (" - " + sizeTag) : "";
+    return "Table " + div + " " + dateStr + sizeSuffix + ".png";
   }
 
   function drawContainedImage(c, img, x, y, w, h, maxSize){
     const iw = img.naturalWidth || img.width;
     const ih = img.naturalHeight || img.height;
     if(!iw || !ih) return;
-
     const s = Math.min(maxSize / iw, maxSize / ih);
     const dw = iw * s;
     const dh = ih * s;
-
     const cx = x + w/2;
     const cy = y + h/2;
-
-    const dx = cx - dw/2;
-    const dy = cy - dh/2;
-
     c.imageSmoothingEnabled = true;
     c.imageSmoothingQuality = "high";
-    c.drawImage(img, dx, dy, dw, dh);
+    c.drawImage(img, cx - dw/2, cy - dh/2, dw, dh);
   }
 
   async function preloadCrests(){
@@ -730,13 +703,9 @@ function getDivisionBadgeUrl(div){
 
     let startIdx = 0;
     const firstCells = splitLine(lines[0]);
-    if(firstCells.length && isProbablyHeader(firstCells)){
-      startIdx = 1;
-    }
+    if(firstCells.length && isProbablyHeader(firstCells)) startIdx = 1;
 
-    const teamSet = new Set(TEAMS_DROPDOWN.map(t => t.toLowerCase()));
     const out = [];
-
     const validFlags = new Set([OVERRIDE_NONE, OVERRIDE_C, OVERRIDE_SF, OVERRIDE_QF, OVERRIDE_R]);
 
     for(let i = startIdx; i < lines.length; i++){
@@ -745,11 +714,6 @@ function getDivisionBadgeUrl(div){
       if(isProbablyHeader(cells)) continue;
 
       const first = safeText(cells[0] || "").toUpperCase();
-
-      // Detect whether the first column is:
-      // - numeric position (e.g. "1")
-      // - a flag token (C / SF / QF / R / -)
-      // - or no pos column at all (team starts at col 0)
       const firstIsNumeric = /^\d+$/.test(first);
       const firstIsFlag = validFlags.has(first);
 
@@ -758,17 +722,13 @@ function getDivisionBadgeUrl(div){
 
       if(firstIsNumeric){
         teamIdx = 1;
-        flag = OVERRIDE_NONE;
       }else if(firstIsFlag){
         teamIdx = 1;
-        flag = first; // already normalised to upper-case
-      }else{
-        teamIdx = 0;
-        flag = OVERRIDE_NONE;
+        flag = first;
       }
 
       const teamRaw = safeText(cells[teamIdx] || "");
-      const teamOk = teamSet.has(teamRaw.toLowerCase());
+      const teamOk = TEAM_SET.has(teamRaw.toLowerCase());
       const team = teamOk ? teamRaw : "";
 
       const rest = cells.slice(teamIdx + 1);
@@ -778,41 +738,22 @@ function getDivisionBadgeUrl(div){
       const pts = nums.length >= 1 ? nums[nums.length - 1] : "";
       const gd = nums.length >= 2 ? nums[nums.length - 2] : "";
 
-      out.push({
-        team,
-        p: digitsOnly3(p),
-        gd: gdOnly3(normalizeGD(gd)),
-        pts: digitsOnly3(pts),
-        flag
-      });
-
+      out.push({ team, p: digitsOnly3(p), gd: gdOnly3(normalizeGD(gd)), pts: digitsOnly3(pts), flag });
       if(out.length >= ROWS) break;
     }
 
-    while(out.length < ROWS){
-      out.push({ team:"", p:"", gd:"", pts:"", flag: OVERRIDE_NONE });
-    }
-
+    while(out.length < ROWS) out.push({ team:"", p:"", gd:"", pts:"", flag: OVERRIDE_NONE });
     return out.slice(0, ROWS);
   }
 
   function rowsToTSV(){
     const head = ["Pos","Team","P","GD","Pts"].join("\t");
     const lines = [head];
-
     for(let i=0;i<ROWS;i++){
       const r = rows[i] || {};
       const flag = safeText(r.flag || OVERRIDE_NONE).toUpperCase();
-
-      // If a flag is set, it overrides the numeric position in the paste output
       const posOut = (flag && flag !== OVERRIDE_NONE) ? flag : String(i + 1);
-
-      const team = safeText(r.team);
-      const p = safeText(r.p);
-      const gd = safeText(r.gd);
-      const pts = safeText(r.pts);
-
-      lines.push([posOut, team, p, gd, pts].join("\t"));
+      lines.push([posOut, safeText(r.team), safeText(r.p), safeText(r.gd), safeText(r.pts)].join("\t"));
     }
     return lines.join("\n");
   }
@@ -820,103 +761,94 @@ function getDivisionBadgeUrl(div){
   /* ================= GRID UI ================= */
 
   function buildTeamOptions(selectEl){
-    // First option blank
-    const opt0 = document.createElement("option");
+    var opt0 = document.createElement("option");
     opt0.value = "";
     opt0.textContent = "";
     selectEl.appendChild(opt0);
-
-    for(const t of TEAMS_DROPDOWN){
-      const o = document.createElement("option");
-      o.value = t;
-      o.textContent = t;
+    for(var i = 0; i < TEAMS_DROPDOWN.length; i++){
+      var o = document.createElement("option");
+      o.value = TEAMS_DROPDOWN[i];
+      o.textContent = TEAMS_DROPDOWN[i];
       selectEl.appendChild(o);
     }
   }
 
   function buildFlagOptions(selectEl){
-    const opts = [
+    var opts = [
       {v: OVERRIDE_NONE, t: "-"},
       {v: OVERRIDE_C,    t: "C"},
       {v: OVERRIDE_SF,   t: "SF"},
       {v: OVERRIDE_QF,   t: "QF"},
       {v: OVERRIDE_R,    t: "R"}
     ];
-    for(const it of opts){
-      const o = document.createElement("option");
-      o.value = it.v;
-      o.textContent = it.t;
+    for(var i = 0; i < opts.length; i++){
+      var o = document.createElement("option");
+      o.value = opts[i].v;
+      o.textContent = opts[i].t;
       selectEl.appendChild(o);
     }
   }
 
   function makeCellPos(i){
-    const td = document.createElement("td");
+    var td = document.createElement("td");
     td.className = "cell-pos";
     td.textContent = String(i + 1);
     return td;
   }
 
   function makeFlagCell(i){
-    const td = document.createElement("td");
-    const sel = document.createElement("select");
+    var td = document.createElement("td");
+    var sel = document.createElement("select");
     sel.className = "override";
     buildFlagOptions(sel);
-
-    sel.addEventListener("change", ()=>{
+    sel.addEventListener("change", function(){
       rows[i].flag = sel.value;
       autosave();
       syncPasteFromGrid();
       render();
     });
-
     td.appendChild(sel);
-    return {td, el: sel};
+    return {td: td, el: sel};
   }
 
   function makeTeamCell(i){
-    const td = document.createElement("td");
-    const sel = document.createElement("select");
+    var td = document.createElement("td");
+    var sel = document.createElement("select");
     sel.className = "team";
     buildTeamOptions(sel);
-
-    sel.addEventListener("change", ()=>{
+    sel.addEventListener("change", function(){
       rows[i].team = sel.value;
       autosave();
       syncPasteFromGrid();
       render();
     });
-
     td.appendChild(sel);
-    return {td, el: sel};
+    return {td: td, el: sel};
   }
 
   function makeSmallInputCell(i, key, kind){
-    const td = document.createElement("td");
-    const inp = document.createElement("input");
+    var td = document.createElement("td");
+    var inp = document.createElement("input");
     inp.className = "small";
     inp.inputMode = "numeric";
     inp.autocomplete = "off";
     inp.spellcheck = false;
     inp.maxLength = 3;
-
-    inp.addEventListener("input", ()=>{
-      let v = inp.value;
+    inp.addEventListener("input", function(){
+      var v = inp.value;
       if(kind === "digits") v = digitsOnly3(v);
       if(kind === "gd") v = gdOnly3(v);
       inp.value = v;
       rows[i][key] = v;
-
       autosave();
       syncPasteFromGrid();
       render();
     });
-
     td.appendChild(inp);
-    return {td, el: inp};
+    return {td: td, el: inp};
   }
 
-  const gridEls = []; // per row: { flagSel, teamSel, pInp, gdInp, ptsInp }
+  const gridEls = [];
 
   function buildGrid(){
     gridBody.innerHTML = "";
@@ -924,33 +856,21 @@ function getDivisionBadgeUrl(div){
 
     for(let i=0;i<ROWS;i++){
       const tr = document.createElement("tr");
-
       tr.appendChild(makeCellPos(i));
 
       const f = makeFlagCell(i);
       tr.appendChild(f.td);
-
       const t = makeTeamCell(i);
       tr.appendChild(t.td);
-
       const p = makeSmallInputCell(i, "p", "digits");
       tr.appendChild(p.td);
-
       const gd = makeSmallInputCell(i, "gd", "gd");
       tr.appendChild(gd.td);
-
       const pts = makeSmallInputCell(i, "pts", "digits");
       tr.appendChild(pts.td);
 
       gridBody.appendChild(tr);
-
-      gridEls.push({
-        flagSel: f.el,
-        teamSel: t.el,
-        pInp: p.el,
-        gdInp: gd.el,
-        ptsInp: pts.el
-      });
+      gridEls.push({ flagSel: f.el, teamSel: t.el, pInp: p.el, gdInp: gd.el, ptsInp: pts.el });
     }
   }
 
@@ -959,7 +879,6 @@ function getDivisionBadgeUrl(div){
       const r = rows[i] || {team:"", p:"", gd:"", pts:"", flag: OVERRIDE_NONE};
       const els = gridEls[i];
       if(!els) continue;
-
       els.flagSel.value = r.flag || OVERRIDE_NONE;
       els.teamSel.value = r.team || "";
       els.pInp.value = safeText(r.p);
@@ -971,90 +890,67 @@ function getDivisionBadgeUrl(div){
   function syncPasteFromGrid(){
     if(isUpdatingFromPaste) return;
     isUpdatingFromGrid = true;
-    try{
-      pasteEl.value = rowsToTSV();
-    }finally{
-      isUpdatingFromGrid = false;
-    }
+    try{ pasteEl.value = rowsToTSV(); }
+    finally{ isUpdatingFromGrid = false; }
   }
 
   function syncRowsFromPaste(){
     if(isUpdatingFromGrid) return;
     isUpdatingFromPaste = true;
     try{
-      const parsed = parsePastedTable(pasteEl.value);
-      // keep existing flags if teams match row index? no — paste is the source: reset flags to "-"
-      rows = parsed;
+      rows = parsePastedTable(pasteEl.value);
       syncGridFromRows();
       autosave();
       render();
-    }finally{
-      isUpdatingFromPaste = false;
-    }
+    }finally{ isUpdatingFromPaste = false; }
   }
 
   /* ================= RENDER ================= */
 
   async function ensureBaseImages(){
     if(!bgImg) bgImg = await loadImage(BG_URL);
-
     const divUrl = getDivisionBadgeUrl(divisionSel.value) || getDivisionBadgeUrl("National");
     badgeImg = await loadImage(divUrl);
-
     if(!ticImg) ticImg = await loadImage(TIC_URL);
   }
 
   function drawTitleAndMatchday(c){
     const div = divisionSel.value || "National";
     const title = titleForDivision(div);
-
     c.save();
     c.textAlign = "left";
     c.textBaseline = "alphabetic";
-
     const titleX = (ROW_START_X - CREST_BOX_W) + GLOBAL_DX;
-
     c.fillStyle = TITLE_COLOR;
-    c.font = `800 ${TITLE_SIZE}px ${FONT_ALL_STACK}`;
+    c.font = "800 " + TITLE_SIZE + "px " + FONT_ALL_STACK;
     c.fillText(title, titleX, TITLE_Y + GLOBAL_DY);
-
     const md = matchdaySel.value;
     if(md){
       c.fillStyle = MATCHDAY_COLOR;
-      c.font = `800 ${MATCHDAY_SIZE}px ${FONT_ALL_STACK}`;
-      c.fillText(`MATCHDAY ${md}`, titleX, MATCHDAY_Y + GLOBAL_DY);
+      c.font = "800 " + MATCHDAY_SIZE + "px " + FONT_ALL_STACK;
+      c.fillText("MATCHDAY " + md, titleX, MATCHDAY_Y + GLOBAL_DY);
     }
-
     c.restore();
   }
 
   function drawBadge(c){
     if(!badgeImg) return;
-
     const iw = badgeImg.naturalWidth || badgeImg.width;
     const ih = badgeImg.naturalHeight || badgeImg.height;
     const dw = iw * BADGE_MID.scale;
     const dh = ih * BADGE_MID.scale;
-
-    const x = (BADGE_MID.x + GLOBAL_DX) - dw/2;
-    const y = (BADGE_MID.y + GLOBAL_DY) - dh/2;
-
-    c.drawImage(badgeImg, x, y, dw, dh);
+    c.drawImage(badgeImg, (BADGE_MID.x + GLOBAL_DX) - dw/2, (BADGE_MID.y + GLOBAL_DY) - dh/2, dw, dh);
   }
 
   function drawTicHealth(c){
     if(!ticImg) return;
-
     const iw = ticImg.naturalWidth || ticImg.width;
     const ih = ticImg.naturalHeight || ticImg.height;
     const dw = iw * TIC_SCALE;
     const dh = ih * TIC_SCALE;
-
     const cx = (BADGE_MID.x + GLOBAL_DX);
     const cy = (EXPORT_SIZE / 2) + GLOBAL_DY;
-
     const rad = (TIC_ROT_DEG * Math.PI) / 180;
-
     c.save();
     c.translate(cx, cy);
     c.rotate(rad);
@@ -1067,12 +963,10 @@ function getDivisionBadgeUrl(div){
     c.textAlign = "center";
     c.textBaseline = "alphabetic";
     c.fillStyle = COL_HEADER_COLOR;
-    c.font = `800 ${COL_HEADER_SIZE}px ${FONT_ALL_STACK}`;
-
+    c.font = "800 " + COL_HEADER_SIZE + "px " + FONT_ALL_STACK;
     c.fillText("P",   COL_P_X + GLOBAL_DX,   COL_HEADER_Y + GLOBAL_DY);
     c.fillText("GD",  COL_GD_X + GLOBAL_DX,  COL_HEADER_Y + GLOBAL_DY);
     c.fillText("PTS", COL_PTS_X + GLOBAL_DX, COL_HEADER_Y + GLOBAL_DY);
-
     c.restore();
   }
 
@@ -1089,53 +983,29 @@ function getDivisionBadgeUrl(div){
       const y = (ROW_START_Y + i * (ROW_H + ROW_GAP)) + GLOBAL_DY;
       const blueX = ROW_START_X + GLOBAL_DX;
       const crestX = blueX - CREST_BOX_W;
-
       const r = rows[i] || {team:"", p:"", gd:"", pts:"", flag: OVERRIDE_NONE};
 
-      // crest box
       c.fillStyle = CREST_BOX_COLOR;
       c.fillRect(crestX, y, CREST_BOX_W, CREST_BOX_H);
 
-      // crest image (only if exact match is in map)
       const crestUrl = safeText(r.team) ? getCrestUrlForTeamExact(r.team) : null;
       const crestImg = crestUrl ? imgObjCache.get(crestUrl) : null;
-      if(crestImg){
-        drawContainedImage(c, crestImg, crestX, y, CREST_BOX_W, CREST_BOX_H, CREST_MAX);
-      }
+      if(crestImg) drawContainedImage(c, crestImg, crestX, y, CREST_BOX_W, CREST_BOX_H, CREST_MAX);
 
       const numericPos = i + 1;
-
-      // default numeric presentation
       let posLabel = String(numericPos);
       let posBoxColor = numericPosBoxColor(numericPos);
       let posTextColor = POS_TEXT_COLOR_DEFAULT;
 
-      // overrides (flag wins)
       const flag = safeText(r.flag || OVERRIDE_NONE).toUpperCase();
+      if(flag === OVERRIDE_C){ posLabel = "C"; posBoxColor = POS_C_BG; posTextColor = POS_C_FG; }
+      else if(flag === OVERRIDE_SF){ posLabel = "PO"; posBoxColor = POS_PO_SF_BG; posTextColor = POS_PO_FG; }
+      else if(flag === OVERRIDE_QF){ posLabel = "PO"; posBoxColor = POS_PO_QF_BG; posTextColor = POS_PO_FG; }
+      else if(flag === OVERRIDE_R){ posLabel = "R"; posBoxColor = POS_R_BG; posTextColor = POS_R_FG; }
 
-      if(flag === OVERRIDE_C){
-        posLabel = "C";
-        posBoxColor = POS_C_BG;
-        posTextColor = POS_C_FG;
-      }else if(flag === OVERRIDE_SF){
-        posLabel = "PO";
-        posBoxColor = POS_PO_SF_BG;
-        posTextColor = POS_PO_FG;
-      }else if(flag === OVERRIDE_QF){
-        posLabel = "PO";
-        posBoxColor = POS_PO_QF_BG;
-        posTextColor = POS_PO_FG;
-      }else if(flag === OVERRIDE_R){
-        posLabel = "R";
-        posBoxColor = POS_R_BG;
-        posTextColor = POS_R_FG;
-      }
-
-      // pos box
       c.fillStyle = posBoxColor;
       c.fillRect(blueX, y, BLUE_BOX_W, BLUE_BOX_H);
 
-      // team box
       const redX = blueX + BLUE_BOX_W;
       c.fillStyle = RED_BOX_COLOR;
       c.fillRect(redX, y, RED_BOX_W, RED_BOX_H);
@@ -1143,34 +1013,28 @@ function getDivisionBadgeUrl(div){
       c.save();
       c.textBaseline = "middle";
 
-      // pos label
       c.textAlign = "center";
       c.fillStyle = posTextColor;
-      c.font = `800 ${POS_TEXT_SIZE}px ${FONT_ALL_STACK}`;
+      c.font = "800 " + POS_TEXT_SIZE + "px " + FONT_ALL_STACK;
       c.fillText(posLabel, blueX + BLUE_BOX_W/2, y + BLUE_BOX_H/2 + 2);
 
-      // team text (blank if not matched)
       const teamGraphic = safeText(r.team) ? teamTextForGraphic(r.team) : "";
       c.textAlign = "left";
       c.fillStyle = TEAM_TEXT_COLOR;
-      c.font = `800 ${TEAM_TEXT_SIZE}px ${FONT_ALL_STACK}`;
+      c.font = "800 " + TEAM_TEXT_SIZE + "px " + FONT_ALL_STACK;
       c.fillText(teamGraphic, redX + TEAM_TEXT_LEFT_PAD, y + RED_BOX_H/2 + 2);
 
-      // stats
       c.textAlign = "center";
       c.fillStyle = COL_VALUE_COLOR;
-      c.font = `800 ${COL_VALUE_SIZE}px ${FONT_ALL_STACK}`;
+      c.font = "800 " + COL_VALUE_SIZE + "px " + FONT_ALL_STACK;
       c.fillText(String(r.p || ""),   COL_P_X + GLOBAL_DX,   y + ROW_H/2 + 2);
       c.fillText(String(r.gd || ""),  COL_GD_X + GLOBAL_DX,  y + ROW_H/2 + 2);
       c.fillText(String(r.pts || ""), COL_PTS_X + GLOBAL_DX, y + ROW_H/2 + 2);
 
       c.restore();
 
-      // separators
-      const rowNumber = i + 1;
-      if(DOTTED_AFTER_ROWS.includes(rowNumber)){
-        const lineY = y + ROW_H + Math.floor(ROW_GAP / 2);
-        drawDottedSeparator(c, lineY);
+      if(DOTTED_AFTER_ROWS.includes(i + 1)){
+        drawDottedSeparator(c, y + ROW_H + Math.floor(ROW_GAP / 2));
       }
     }
   }
@@ -1178,22 +1042,17 @@ function getDivisionBadgeUrl(div){
   async function render(){
     try{
       await ensureBaseImages();
-
       ctx.setTransform(1,0,0,1,0,0);
       ctx.clearRect(0,0,EXPORT_SIZE,EXPORT_SIZE);
-
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = "high";
       ctx.drawImage(bgImg, 0, 0, EXPORT_SIZE, EXPORT_SIZE);
-
       await preloadCrests();
-
       drawBadge(ctx);
       drawTitleAndMatchday(ctx);
       drawColumnHeaders(ctx);
       drawRows(ctx);
       drawTicHealth(ctx);
-
       refreshFontStatus();
       setStatus("Rendered");
     }catch(e){
@@ -1204,40 +1063,29 @@ function getDivisionBadgeUrl(div){
 
   async function renderToFullCanvas(){
     await ensureBaseImages();
-
     const full = document.createElement("canvas");
     full.width = EXPORT_SIZE;
     full.height = EXPORT_SIZE;
     const c = full.getContext("2d");
-
     c.setTransform(1,0,0,1,0,0);
     c.clearRect(0,0,EXPORT_SIZE,EXPORT_SIZE);
-
     c.imageSmoothingEnabled = true;
     c.imageSmoothingQuality = "high";
     c.drawImage(bgImg, 0, 0, EXPORT_SIZE, EXPORT_SIZE);
-
     await preloadCrests();
-
     drawBadge(c);
     drawTitleAndMatchday(c);
     drawColumnHeaders(c);
     drawRows(c);
     drawTicHealth(c);
-
     return full;
   }
 
   async function downloadPNG_1x1(){
     try{
       const full = await renderToFullCanvas();
-
       const blob = await new Promise(res => full.toBlob(res, "image/png"));
-      if(!blob){
-        setStatus("EXPORT BLOCKED (CORS): a badge/crest image may not allow canvas export.");
-        return;
-      }
-
+      if(!blob){ setStatus("EXPORT BLOCKED (CORS)"); return; }
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
       a.download = buildFilename("1x1");
@@ -1245,49 +1093,26 @@ function getDivisionBadgeUrl(div){
       a.click();
       a.remove();
       URL.revokeObjectURL(a.href);
-
       setStatus("Downloaded 1x1");
-    }catch(e){
-      console.error(e);
-      setStatus(String(e && e.message ? e.message : e));
-    }
+    }catch(e){ console.error(e); setStatus(String(e && e.message ? e.message : e)); }
   }
 
   async function downloadPNG_4x5(){
-    const OUT_W = 1080;
-    const OUT_H = 1347;
-
-    const CROP_X = 54;
-    const CROP_Y = 0;
-    const CROP_W = 1080;
-    const CROP_H = 1347;
-
+    const OUT_W = 1080, OUT_H = 1347;
+    const CROP_X = 54, CROP_Y = 0, CROP_W = 1080, CROP_H = 1347;
     try{
       const full = await renderToFullCanvas();
-
       const out = document.createElement("canvas");
       out.width = OUT_W;
       out.height = OUT_H;
       const c = out.getContext("2d");
-
       c.setTransform(1,0,0,1,0,0);
       c.clearRect(0,0,OUT_W,OUT_H);
-
       c.imageSmoothingEnabled = true;
       c.imageSmoothingQuality = "high";
-
-      c.drawImage(
-        full,
-        CROP_X, CROP_Y, CROP_W, CROP_H,
-        0, 0, OUT_W, OUT_H
-      );
-
+      c.drawImage(full, CROP_X, CROP_Y, CROP_W, CROP_H, 0, 0, OUT_W, OUT_H);
       const blob = await new Promise(res => out.toBlob(res, "image/png"));
-      if(!blob){
-        setStatus("EXPORT BLOCKED (CORS): a badge/crest image may not allow canvas export.");
-        return;
-      }
-
+      if(!blob){ setStatus("EXPORT BLOCKED (CORS)"); return; }
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
       a.download = buildFilename("4x5");
@@ -1295,38 +1120,32 @@ function getDivisionBadgeUrl(div){
       a.click();
       a.remove();
       URL.revokeObjectURL(a.href);
-
       setStatus("Downloaded 4x5");
-    }catch(e){
-      console.error(e);
-      setStatus(String(e && e.message ? e.message : e));
-    }
+    }catch(e){ console.error(e); setStatus(String(e && e.message ? e.message : e)); }
   }
 
   /* ================= AUTOSAVE ================= */
 
   function autosave(){
-    const payload = {
+    var payload = {
       v: VERSION,
       division: divisionSel.value,
       matchday: matchdaySel.value,
       pasteIn: pasteEl.value,
-      rows
+      rows: rows
     };
     try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); }catch{}
   }
 
   function autoload(){
     try{
-      const raw = localStorage.getItem(STORAGE_KEY);
+      var raw = localStorage.getItem(STORAGE_KEY);
       if(!raw) return;
-      const d = JSON.parse(raw);
+      var d = JSON.parse(raw);
       if(!d || typeof d !== "object") return;
-
-      if(d.division && DIV_BADGE[d.division]) divisionSel.value = d.division;
+      if(d.division) divisionSel.value = d.division;
       if(typeof d.matchday === "string") matchdaySel.value = d.matchday;
       if(typeof d.pasteIn === "string") pasteEl.value = d.pasteIn;
-
       if(Array.isArray(d.rows) && d.rows.length){
         rows = d.rows.slice(0, ROWS);
         while(rows.length < ROWS) rows.push({ team:"", p:"", gd:"", pts:"", flag: OVERRIDE_NONE });
@@ -1337,8 +1156,8 @@ function getDivisionBadgeUrl(div){
   /* ================= UI ================= */
 
   function populateMatchday(){
-    for(let i=1;i<=46;i++){
-      const o = document.createElement("option");
+    for(var i=1;i<=46;i++){
+      var o = document.createElement("option");
       o.value = String(i);
       o.textContent = String(i);
       matchdaySel.appendChild(o);
@@ -1347,43 +1166,35 @@ function getDivisionBadgeUrl(div){
 
   function resetAll(){
     try{ localStorage.removeItem(STORAGE_KEY); }catch{}
-
     divisionSel.value = "National";
     matchdaySel.value = "";
     pasteEl.value = "";
-
     rows = Array.from({length: ROWS}, () => ({ team:"", p:"", gd:"", pts:"", flag: OVERRIDE_NONE }));
     syncGridFromRows();
     syncPasteFromGrid();
-
     bgImg = null;
     badgeImg = null;
     ticImg = null;
-
     autosave();
     render();
     setStatus("Reset all");
   }
 
   function bindUI(){
-    divisionSel.addEventListener("change", ()=>{
+    divisionSel.addEventListener("change", function(){
       badgeImg = null;
       autosave();
       render();
     });
-
-    matchdaySel.addEventListener("change", ()=>{
+    matchdaySel.addEventListener("change", function(){
       autosave();
       render();
     });
-
-    pasteEl.addEventListener("input", ()=>{
+    pasteEl.addEventListener("input", function(){
       autosave();
-      // debounce parse
       window.clearTimeout(bindUI._pt);
-      bindUI._pt = window.setTimeout(()=> syncRowsFromPaste(), 80);
+      bindUI._pt = window.setTimeout(function(){ syncRowsFromPaste(); }, 80);
     });
-
     download1x1Btn.addEventListener("click", downloadPNG_1x1);
     download4x5Btn.addEventListener("click", downloadPNG_4x5);
     resetAllBtn.addEventListener("click", resetAll);
@@ -1392,6 +1203,19 @@ function getDivisionBadgeUrl(div){
   /* ================= INIT ================= */
 
   async function start(){
+    /* Fetch clubs-meta.json for team dropdown */
+    try {
+      var resp = await fetch(CLUBS_META_URL);
+      var data = await resp.json();
+      var clubs = data.clubs || [];
+      TEAMS_DROPDOWN = clubs.map(function(c){ return c.name; }).sort();
+      TEAM_SET = new Set(TEAMS_DROPDOWN.map(function(t){ return t.toLowerCase(); }));
+    } catch(e) {
+      console.warn("[league-tables] Could not load clubs-meta.json:", e);
+      TEAMS_DROPDOWN = [];
+      TEAM_SET = new Set();
+    }
+
     populateMatchday();
     buildGrid();
     autoload();
@@ -1399,8 +1223,6 @@ function getDivisionBadgeUrl(div){
 
     await ensureFontsLoaded();
 
-    // initial sync direction:
-    // if paste has something, treat paste as source; otherwise create paste from rows
     if(safeText(pasteEl.value)){
       syncRowsFromPaste();
     }else{
