@@ -1,7 +1,7 @@
 /*
  * auth-guard.js — NL Tools v2
  * File: /tools/system/auth-guard.js
- * Version: v4.0 (17/04/2026)
+ * Version: v4.1 (17/04/2026)
  *
  * v4.0: Moved to /tools/system/. Integrates with NL namespace:
  *   - Sets window.NL.session after auth
@@ -82,7 +82,7 @@
           email:    userData.email    || '',
           role:     userData.role     || '',
           org:      userData.org      || '',
-          orgKey:   userData.orgKey   || '',
+          orgKey:   '', /* deprecated — org distinction removed, all staff treated equally */
           club:     userData.club     || '',
           jobTitle: userData.jobTitle || '',
           pending:  userData.pending  || false,
@@ -442,4 +442,4 @@
 
   run();
 
-})(); 
+})();
