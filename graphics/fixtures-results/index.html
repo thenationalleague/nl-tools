@@ -317,14 +317,11 @@
   const RED_BOX    = { w: 52, h: 52,  color: "#9e0000" };
   const CREST_MAX = 45;
 
-  /* ===== Clubs metadata (fetched) ===== */
+  /* ===== Clubs metadata (fetched — name-based) ===== */
   var CLUBS_META_URL = "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json";
-  var TEAM_NAMES = [];
-  var TEAM_CODES = [];
-  var CODE_TO_NAME = new Map();
-  var NAME_TO_CODE = new Map();
-  var CODE_TO_CREST = new Map();
-  var TEAM_CODE_SET = new Set();
+  var TEAM_NAMES = [];       // sorted full names — used as <option> values
+  var TEAM_NAME_SET = new Set();
+  var NAME_TO_SHORT = new Map();  // full name → short name (for mobile display)
 
   /* ===== Canvas font helper ===== */
   const FONT_FAMILY = '"carbona-variable",sans-serif';
@@ -347,19 +344,17 @@
 
   function safeUpper(s){ return (s || "").replace(/\s+/g," ").trim().toUpperCase(); }
 
-  function normalizeTeamCode(v){
-    var t = (v || "").trim();
+  function normalizeName(v){
+    var t = (v || "").replace(/\s+/g," ").trim();
     if(!t) return "";
-    if(TEAM_CODE_SET.has(t)) return t;
-    if(NAME_TO_CODE.has(t)) return NAME_TO_CODE.get(t) || "";
+    if(TEAM_NAME_SET.has(t)) return t;
     return "";
   }
 
-  function displayClubNameFromCode(code){
-    var name = CODE_TO_NAME.get(code) || "";
-    if(!name) return "";
-    if(name === "Hampton & Richmond Borough") return "Hampton & Richmond";
-    return name;
+  function displayName(teamName){
+    if(!teamName) return "";
+    if(teamName === "Hampton & Richmond Borough") return "Hampton & Richmond";
+    return teamName;
   }
 
   /* ================= ELEMENTS ================= */
@@ -438,8 +433,8 @@
     for(var i=0;i<ROWS_COUNT;i++){
       var r = src[i] && typeof src[i] === "object" ? src[i] : {};
       out.push({
-        home:  typeof r.home  === "string" ? normalizeTeamCode(r.home) : "",
-        away:  typeof r.away  === "string" ? normalizeTeamCode(r.away) : "",
+        home:  typeof r.home  === "string" ? normalizeName(r.home) : "",
+        away:  typeof r.away  === "string" ? normalizeName(r.away) : "",
         score: typeof r.score === "string" ? r.score : "",
         issue: typeof r.issue === "string" ? r.issue : ""
       });
@@ -449,8 +444,8 @@
 
   function applyRowsToUI(){
     for(var i=0;i<ROWS_COUNT;i++){
-      if(homeSelectEls[i]) homeSelectEls[i].value = normalizeTeamCode(rowsState[i].home) || "";
-      if(awaySelectEls[i]) awaySelectEls[i].value = normalizeTeamCode(rowsState[i].away) || "";
+      if(homeSelectEls[i]) homeSelectEls[i].value = normalizeName(rowsState[i].home) || "";
+      if(awaySelectEls[i]) awaySelectEls[i].value = normalizeName(rowsState[i].away) || "";
       if(scoreInputEls[i]) scoreInputEls[i].value = rowsState[i].score || "";
       if(issueSelectEls[i]) issueSelectEls[i].value = rowsState[i].issue || "";
     }
@@ -486,9 +481,9 @@
       var opts = sel.options;
       for(var i=0;i<opts.length;i++){
         var opt = opts[i];
-        var code = opt.value || "";
-        if(code === ""){ opt.textContent = "None"; continue; }
-        opt.textContent = MQ_COMPACT.matches ? code : (CODE_TO_NAME.get(code) || code);
+        var name = opt.value || "";
+        if(name === ""){ opt.textContent = "None"; continue; }
+        opt.textContent = MQ_COMPACT.matches ? (NAME_TO_SHORT.get(name) || name) : name;
       }
     }
   }
@@ -534,10 +529,10 @@
     for(var i=0;i<ROWS_COUNT;i++){
       var row = rowsState[i];
       if(isRowHidden(row)) continue;
-      var hCode = normalizeTeamCode(row.home);
-      var aCode = normalizeTeamCode(row.away);
-      if(hCode && CODE_TO_CREST.get(hCode)) urls.add(CODE_TO_CREST.get(hCode));
-      if(aCode && CODE_TO_CREST.get(aCode)) urls.add(CODE_TO_CREST.get(aCode));
+      var h = normalizeName(row.home);
+      var a = normalizeName(row.away);
+      if(h) urls.add(crestUrlForName(h));
+      if(a) urls.add(crestUrlForName(a));
     }
     await Promise.all([...urls].map(function(u){ return loadImage(u).catch(function(){return null;}); }));
   }
@@ -561,12 +556,12 @@
     none.value = "";
     none.textContent = "None";
     s.appendChild(none);
-    for(var i=0;i<TEAM_CODES.length;i++){
-      var code = TEAM_CODES[i];
+    for(var i=0;i<TEAM_NAMES.length;i++){
+      var name = TEAM_NAMES[i];
       var o = document.createElement("option");
-      o.value = code;
-      o.textContent = MQ_COMPACT.matches ? code : (CODE_TO_NAME.get(code) || code);
-      o.title = CODE_TO_NAME.get(code) || code;
+      o.value = name;
+      o.textContent = MQ_COMPACT.matches ? (NAME_TO_SHORT.get(name) || name) : name;
+      o.title = name;
       s.appendChild(o);
     }
     return s;
@@ -615,8 +610,8 @@
       scoreInp.autocomplete = "off";
       scoreInp.maxLength = 5;
 
-      homeSel.value = normalizeTeamCode(rowsState[i].home) || "";
-      awaySel.value = normalizeTeamCode(rowsState[i].away) || "";
+      homeSel.value = normalizeName(rowsState[i].home) || "";
+      awaySel.value = normalizeName(rowsState[i].away) || "";
       scoreInp.value = rowsState[i].score || "";
       issueSel.value = rowsState[i].issue || "";
 
@@ -763,11 +758,11 @@
       drawCenteredRect(c, HOME_ICON_X, cy, RED_BOX.w, RED_BOX.h, RED_BOX.color);
       drawCenteredRect(c, AWAY_ICON_X, cy, RED_BOX.w, RED_BOX.h, RED_BOX.color);
 
-      var homeCode = normalizeTeamCode(row.home);
-      var awayCode = normalizeTeamCode(row.away);
+      var homeName = normalizeName(row.home);
+      var awayName = normalizeName(row.away);
 
-      var homeCrestUrl = homeCode ? (CODE_TO_CREST.get(homeCode) || "") : "";
-      var awayCrestUrl = awayCode ? (CODE_TO_CREST.get(awayCode) || "") : "";
+      var homeCrestUrl = homeName ? crestUrlForName(homeName) : "";
+      var awayCrestUrl = awayName ? crestUrlForName(awayName) : "";
 
       if(homeCrestUrl){
         var hImg = await loadImage(homeCrestUrl).catch(function(){return null;});
@@ -778,8 +773,8 @@
         if(aImg) drawContainedImage(c, aImg, AWAY_ICON_X, cy, CREST_MAX, CREST_MAX);
       }
 
-      var homeText = safeUpper(displayClubNameFromCode(homeCode));
-      var awayText = safeUpper(displayClubNameFromCode(awayCode));
+      var homeText = safeUpper(displayName(homeName));
+      var awayText = safeUpper(displayName(awayName));
 
       if(homeText){
         c.textAlign = HOME_COL.align;
@@ -946,20 +941,12 @@
       var clubs = data.clubs || [];
       clubs.sort(function(a, b){ return a.name.localeCompare(b.name); });
       TEAM_NAMES = clubs.map(function(c){ return c.name; });
-      TEAM_CODES = clubs.map(function(c){ return c.code; });
-      CODE_TO_NAME = new Map();
-      NAME_TO_CODE = new Map();
-      CODE_TO_CREST = new Map();
-      TEAM_CODE_SET = new Set();
+      TEAM_NAME_SET = new Set(TEAM_NAMES);
+      NAME_TO_SHORT = new Map();
       for(var i=0;i<clubs.length;i++){
         var name = clubs[i].name;
-        var code = clubs[i].code;
-        if(code){
-          CODE_TO_NAME.set(code, name);
-          TEAM_CODE_SET.add(code);
-          if(name) CODE_TO_CREST.set(code, crestUrlForName(name));
-        }
-        if(name && code) NAME_TO_CODE.set(name, code);
+        var short = clubs[i].short || clubs[i].code || name;
+        if(name) NAME_TO_SHORT.set(name, short);
       }
     } catch(e) {
       console.warn("[fixtures-results] Could not load clubs-meta.json:", e);
