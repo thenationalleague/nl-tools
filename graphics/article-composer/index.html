@@ -101,7 +101,6 @@
       border: 1px solid var(--border);
       border-radius: var(--radius);
       padding: 10px;
-      box-shadow: var(--shadow);
     }
     .fmt-toolbar button,
     .fmt-toolbar select {
@@ -111,22 +110,23 @@
       border-radius: var(--radius);
       cursor: pointer;
       font-family: var(--font);
-      font-size: var(--text-sm) !important;
-      font-weight: 800;
-      font-variation-settings: 'wght' 800;
+      font-size: 13px;
+      font-weight: 900;
+      font-variation-settings: 'wght' 900;
       text-transform: uppercase;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.08em;
       color: var(--text);
       display: inline-flex;
       align-items: center;
-      gap: 5px;
-      transition: all 0.12s ease;
+      gap: 6px;
+      transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
       line-height: 1;
     }
     .fmt-toolbar button:hover,
     .fmt-toolbar select:hover {
       background: var(--off-white);
-      border-color: var(--navy);
+      border-color: color-mix(in srgb, var(--navy) 60%, transparent);
+      color: var(--navy);
     }
     .fmt-toolbar button:active {
       background: var(--navy);
@@ -162,6 +162,7 @@
     .fmt-toolbar .danger:hover {
       background: var(--red-light);
       border-color: var(--red);
+      color: color-mix(in srgb, var(--red) 80%, black);
     }
 
     /* ── Style dropdown — preview heading sizes ── */
@@ -455,12 +456,40 @@
         }
       } catch(e) {}
 
-      // Style select
+      // Style select — formatBlock with fallback for heading→paragraph
       styleSelect.addEventListener('change', function() {
+        ed.focus();
         var val = styleSelect.value;
-        var tag = val === 'p' ? 'P' : val.toUpperCase();
-        document.execCommand && document.execCommand('formatBlock', false, tag);
-        ed.focus(); scheduleRender();
+
+        if (val === 'p') {
+          // formatBlock('P') is unreliable for heading→paragraph in some browsers.
+          // Try execCommand first, then fall back to manual DOM replacement.
+          var sel = window.getSelection();
+          var node = sel && sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
+          if (node && node.nodeType === 3) node = node.parentNode;
+          // Walk up to find the block element
+          while (node && node !== ed && !/^(H[1-6]|P|DIV|LI)$/.test(node.nodeName)) {
+            node = node.parentNode;
+          }
+          if (node && /^H[1-6]$/.test(node.nodeName)) {
+            // Manual replacement — more reliable than formatBlock
+            var p = document.createElement('p');
+            while (node.firstChild) p.appendChild(node.firstChild);
+            node.parentNode.replaceChild(p, node);
+            // Place cursor inside the new <p>
+            var r = document.createRange();
+            r.selectNodeContents(p);
+            r.collapse(false);
+            sel.removeAllRanges();
+            sel.addRange(r);
+          } else {
+            document.execCommand && document.execCommand('formatBlock', false, 'P');
+          }
+        } else {
+          var tag = val.toUpperCase();
+          document.execCommand && document.execCommand('formatBlock', false, tag);
+        }
+        scheduleRender();
       });
 
       // Primary render triggers
