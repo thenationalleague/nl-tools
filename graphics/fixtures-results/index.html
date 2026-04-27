@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<!--
+  Fixtures & Results — NL Tools (Graphics & Media sub-tool)
+  Version: 2.0
+  Date: 27/04/2026
+  File: /tools/graphics/fixtures-results/index.html
+
+  CHANGELOG
+  v2.0 (27/04/2026) — Portal integration + brand consistency
+    Shell:
+      - Added Firebase compat SDKs + config + initializeApp
+      - Added auth-guard, NL_TOOL, NL_CHANGELOG, nlAuthReady, pageWrap, nlTopbar
+    CSS:
+      - Loaded nl-brand.css — all brand tokens available
+      - Stripped custom :root tokens, replaced with brand equivalents
+      - Buttons use brand .btn classes
+      - Form controls use brand tokens (--border, --radius, --font, --text-sm)
+      - Removed Typekit CSS link
+      - Sticky preview removed
+      - Labels use .text-label utility class
+      - Footer uses .text-label utility class
+      - Disabled input styling uses brand tokens
+    Data:
+      - Team list fetched from clubs-meta.json
+      - All asset URLs point to thenationalleague/tools repo
+    Engine:
+      - All canvas rendering + per-division state preserved
+      - setCanvasFont() helper for variable font weight on canvas
+      - const/let kept in engine code
+
+  v1.9 — Previous standalone version (pre-portal)
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fixtures & Results — NL Tools</title>
+<meta name="robots" content="noindex,nofollow">
+
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script>
+  firebase.initializeApp({
+    apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+    authDomain:        "nl-tools.firebaseapp.com",
+    databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId:         "nl-tools",
+    storageBucket:     "nl-tools.firebasestorage.app",
+    messagingSenderId: "801354670005",
+    appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+  });
+</script>
+
+<link rel="stylesheet" href="/tools/system/nl-brand.css">
+
+<script>
+  window.NL_TOOL = {
+    title: 'Fixtures & Results',
+    toolKey: 'staff-graphics'
+  };
+  var NL_TOOL_KEY = 'staff-graphics';
+
+  window.NL_CHANGELOG = [
+    {
+      date: '27 April 2026',
+      version: 'v1.0',
+      items: [
+        'Integrated into NL Tools portal with standard topbar and auth.',
+        'Team list now loads from clubs database — no hardcoded names.',
+        'Design aligned with NL Tools brand system.'
+      ]
+    }
+  ];
+</script>
+
+<script src="/tools/system/nl-utils.js"></script>
+<script src="/tools/system/nl-topbar.js"></script>
+<script src="/tools/system/auth-guard.js"></script>
+
+<style>
+  /* ── Layout ── */
+  .app {
+    display: grid;
+    grid-template-columns: minmax(520px, 900px) minmax(360px, 1fr);
+    gap: 18px;
+    align-items: start;
+  }
+  @media (max-width: 980px) {
+    .app { grid-template-columns: 1fr; }
+  }
+
+  .preview-wrap {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--off-white);
+    padding: 10px;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    font-variation-settings: 'wght' 800;
+  }
+
+  .panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .box {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+    background: var(--white);
+  }
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  .controls select {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--white);
+    font-family: var(--font);
+    font-size: var(--text-sm) !important;
+    font-variation-settings: 'wght' 400;
+    color: var(--text);
+  }
+
+  .section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  /* ── Rows grid (Home / Score / Away / Status) ── */
+  .rows-grid {
+    display: grid;
+    grid-template-columns: 1fr 140px 1fr 120px;
+    gap: 8px;
+    align-items: center;
+  }
+  .rows-grid > * { min-width: 0; }
+
+  .rows-grid select,
+  .rows-grid input {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--white);
+    font-family: var(--font);
+    font-size: var(--text-sm) !important;
+    font-variation-settings: 'wght' 400;
+    color: var(--text);
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .rows-grid select:focus,
+  .rows-grid input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(158, 0, 0, 0.10);
+  }
+  .rows-grid select {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .rows-grid input {
+    text-align: center;
+    letter-spacing: 0.5px;
+  }
+  .rows-grid input:disabled {
+    background: var(--off-white);
+    color: var(--text-muted);
+    border-color: var(--border);
+    cursor: not-allowed;
+    opacity: 1;
+  }
+
+  footer {
+    margin-top: 4px;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  /* ── Mobile overrides ── */
+  @media (max-width: 640px) {
+    .rows-grid {
+      grid-template-columns: minmax(0, 1fr) 64px minmax(0, 1fr) 48px;
+      gap: 6px;
+    }
+    .rows-grid select,
+    .rows-grid input {
+      min-width: 0;
+      max-width: 100%;
+      width: 100%;
+    }
+  }
+  @media (max-width: 420px) {
+    .rows-grid {
+      grid-template-columns: minmax(0, 1fr) 60px minmax(0, 1fr) 44px;
+      gap: 6px;
+    }
+  }
+</style>
+</head>
+
+<body>
+
+<span id="fontWarmup" style="position:absolute;left:-9999px;top:-9999px;font-family:'carbona-variable',sans-serif;font-weight:800;font-variation-settings:'wght' 800;">
+  FONT-WARMUP-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
+</span>
+
+<div id="pageWrap" style="display:none;">
+  <div id="nlTopbar"></div>
+
+  <div class="page">
+
+    <div class="app">
+
+      <div class="preview-wrap">
+        <canvas id="preview" width="1347" height="1347"></canvas>
+      </div>
+
+      <div class="panel">
+
+        <div class="box controls">
+          <select id="matchday" title="Matchday">
+            <option value="NA">N/A</option>
+          </select>
+          <select id="division" title="Division">
+            <option value="National">National</option>
+            <option value="North">North</option>
+            <option value="South">South</option>
+          </select>
+          <select id="status" title="Status">
+            <option value="Fixtures">Fixtures</option>
+            <option value="Results">Results</option>
+          </select>
+          <button type="button" id="download" class="btn btn--primary btn--sm">Download 1×1</button>
+          <button type="button" id="download45" class="btn btn--navy btn--sm">Download 4×5</button>
+          <button type="button" id="resetAll" class="btn btn--danger btn--sm">Reset all</button>
+        </div>
+
+        <div class="box section">
+          <div class="rows-grid" id="rowsGrid"></div>
+        </div>
+
+        <footer>
+          <span class="text-label" id="statusText">Ready</span>
+        </footer>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  window.nlAuthReady = function(session) {};
+</script>
+
+<script>
+(function(){
+  "use strict";
+
+  const VERSION = "v2.0";
+  const STORAGE_KEY = "fixtures-results-builder-v2.0";
+  const CANVAS_SIZE = 1347;
+
+  /* ===== Asset URLs ===== */
+  const REPO_ASSETS = "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/";
+
+  const BG_URL = REPO_ASSETS + "backgrounds/fixtures-1x1.png";
+
+  const DIV_BADGE = {
+    National: encodeURI(REPO_ASSETS + "divisions/National.png"),
+    North:    encodeURI(REPO_ASSETS + "divisions/North.png"),
+    South:    encodeURI(REPO_ASSETS + "divisions/South.png")
+  };
+  const DIV_BADGE_POS = { x: 750, y: 1258, scale: 0.075 };
+
+  const CREST_BASE_URL = "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/";
+
+  function crestUrlForName(teamName){
+    var t = (teamName || "").replace(/\s+/g," ").trim();
+    if(!t) return "";
+    return encodeURI(CREST_BASE_URL + t + ".png");
+  }
+
+  /* ===== Canvas layout constants ===== */
+  const HEADER_1 = { x: 750, y: 150, size: 84, color: "#9e0000", weight: 800, align: "center" };
+  const HEADER_2 = { x: 750, y: 220, size: 32, color: "#223b7c", weight: 800, align: "center" };
+
+  const ROWS_Y_START = 330;
+  const ROWS_LINE_GAP = 70.2;
+
+  const HOME_COL  = { x: 710, align: "right",  size: 22.6, color: "#ffffff", weight: 800 };
+  const SCORE_COL = { x: 750, align: "center", size: 27.2, color: "#223b7c", weight: 800 };
+  const AWAY_COL  = { x: 790, align: "left",   size: 22.6, color: "#ffffff", weight: 800 };
+  const SCORE_SMALL = { size: 22.6, weight: 800 };
+
+  const HOME_ICON_X = 360;
+  const AWAY_ICON_X = 1140;
+
+  const BLUE_PILL  = { w: (AWAY_ICON_X - HOME_ICON_X), h: 52, color: "#223b7c" };
+  const WHITE_BOX  = { w: 52, h: 56,  color: "#ffffff" };
+  const RED_BOX    = { w: 52, h: 52,  color: "#9e0000" };
+  const CREST_MAX = 45;
+
+  /* ===== Clubs metadata (fetched) ===== */
+  var CLUBS_META_URL = "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json";
+  var TEAM_NAMES = [];
+  var TEAM_CODES = [];
+  var CODE_TO_NAME = new Map();
+  var NAME_TO_CODE = new Map();
+  var CODE_TO_CREST = new Map();
+  var TEAM_CODE_SET = new Set();
+
+  /* ===== Canvas font helper ===== */
+  const FONT_FAMILY = '"carbona-variable",sans-serif';
+
+  function setCanvasFont(c, sizePx, weight){
+    var w = weight || 800;
+    c.font = w + " " + sizePx + "px " + FONT_FAMILY;
+    if('fontVariationSettings' in c){
+      c.fontVariationSettings = "'wght' " + w;
+    } else {
+      try { c.canvas.style.fontVariationSettings = "'wght' " + w; } catch(e){}
+    }
+  }
+
+  function setTextStyle(c, sizePx, colorHex, weight){
+    c.fillStyle = colorHex;
+    setCanvasFont(c, sizePx, weight);
+    c.textBaseline = "middle";
+  }
+
+  function safeUpper(s){ return (s || "").replace(/\s+/g," ").trim().toUpperCase(); }
+
+  function normalizeTeamCode(v){
+    var t = (v || "").trim();
+    if(!t) return "";
+    if(TEAM_CODE_SET.has(t)) return t;
+    if(NAME_TO_CODE.has(t)) return NAME_TO_CODE.get(t) || "";
+    return "";
+  }
+
+  function displayClubNameFromCode(code){
+    var name = CODE_TO_NAME.get(code) || "";
+    if(!name) return "";
+    if(name === "Hampton & Richmond Borough") return "Hampton & Richmond";
+    return name;
+  }
+
+  /* ================= ELEMENTS ================= */
+
+  const canvas = document.getElementById("preview");
+  const ctx = canvas.getContext("2d");
+
+  const matchdaySel = document.getElementById("matchday");
+  const divisionSel = document.getElementById("division");
+  const statusSel = document.getElementById("status");
+  const downloadBtn = document.getElementById("download");
+  const download45Btn = document.getElementById("download45");
+  const resetAllBtn = document.getElementById("resetAll");
+  const rowsGridEl = document.getElementById("rowsGrid");
+  const statusTextEl = document.getElementById("statusText");
+
+  /* ================= STATE ================= */
+
+  const imgCache = new Map();
+  let bgImg = null;
+  let divBadgeImg = null;
+
+  const ROWS_COUNT = 12;
+  const DIVISIONS = ["National","North","South"];
+  const rowsState = Array.from({length: ROWS_COUNT}, ()=> ({ home:"", away:"", score:"", issue:"" }));
+
+  const homeSelectEls = [];
+  const awaySelectEls = [];
+  const scoreInputEls = [];
+  const issueSelectEls = [];
+
+  /* ================= HELPERS ================= */
+
+  function setStatus(msg){
+    statusTextEl.textContent = msg;
+    window.clearTimeout(setStatus._t);
+    setStatus._t = window.setTimeout(()=> statusTextEl.textContent = "Ready", 900);
+  }
+
+  function loadImage(url){
+    if(!url) return Promise.reject(new Error("Empty URL"));
+    if(imgCache.has(url)) return imgCache.get(url);
+    const p = new Promise((resolve,reject)=>{
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = ()=> resolve(img);
+      img.onerror = ()=> reject(new Error("Failed to load: " + url));
+      img.src = url;
+    });
+    imgCache.set(url, p);
+    return p;
+  }
+
+  function drawContainedImage(c, img, centerX, centerY, maxW, maxH){
+    const iw = img.naturalWidth || img.width;
+    const ih = img.naturalHeight || img.height;
+    if(!iw || !ih) return;
+    const s = Math.min(maxW / iw, maxH / ih);
+    const dw = iw * s;
+    const dh = ih * s;
+    c.imageSmoothingEnabled = true;
+    c.imageSmoothingQuality = "high";
+    c.drawImage(img, centerX - dw/2, centerY - dh/2, dw, dh);
+  }
+
+  function drawCenteredRect(c, centerX, centerY, w, h, colorHex){
+    c.fillStyle = colorHex;
+    c.fillRect(centerX - (w/2), centerY - (h/2), w, h);
+  }
+
+  function isRowHidden(row){ return !row.home && !row.away; }
+
+  function cloneRows(src){
+    if(!Array.isArray(src)) return Array.from({length: ROWS_COUNT}, ()=> ({ home:"", away:"", score:"", issue:"" }));
+    var out = [];
+    for(var i=0;i<ROWS_COUNT;i++){
+      var r = src[i] && typeof src[i] === "object" ? src[i] : {};
+      out.push({
+        home:  typeof r.home  === "string" ? normalizeTeamCode(r.home) : "",
+        away:  typeof r.away  === "string" ? normalizeTeamCode(r.away) : "",
+        score: typeof r.score === "string" ? r.score : "",
+        issue: typeof r.issue === "string" ? r.issue : ""
+      });
+    }
+    return out;
+  }
+
+  function applyRowsToUI(){
+    for(var i=0;i<ROWS_COUNT;i++){
+      if(homeSelectEls[i]) homeSelectEls[i].value = normalizeTeamCode(rowsState[i].home) || "";
+      if(awaySelectEls[i]) awaySelectEls[i].value = normalizeTeamCode(rowsState[i].away) || "";
+      if(scoreInputEls[i]) scoreInputEls[i].value = rowsState[i].score || "";
+      if(issueSelectEls[i]) issueSelectEls[i].value = rowsState[i].issue || "";
+    }
+    syncScoreInputsEnabled();
+    updateAllClubSelectLabels();
+  }
+
+  function saveActiveDivisionState(d){
+    var payload = getStoredPayload();
+    payload.byDivision = payload.byDivision && typeof payload.byDivision === "object" ? payload.byDivision : {};
+    payload.byDivision[d] = cloneRows(rowsState);
+    setStoredPayload(payload);
+  }
+
+  function loadDivisionStateOrBlank(d){
+    var payload = getStoredPayload();
+    var by = payload.byDivision && typeof payload.byDivision === "object" ? payload.byDivision : {};
+    var loaded = cloneRows(by[d]);
+    for(var i=0;i<ROWS_COUNT;i++){
+      rowsState[i].home  = loaded[i].home;
+      rowsState[i].away  = loaded[i].away;
+      rowsState[i].score = loaded[i].score;
+      rowsState[i].issue = loaded[i].issue;
+    }
+  }
+
+  const MQ_COMPACT = window.matchMedia("(max-width: 640px)");
+
+  function updateAllClubSelectLabels(){
+    var selects = homeSelectEls.concat(awaySelectEls).filter(Boolean);
+    for(var s=0;s<selects.length;s++){
+      var sel = selects[s];
+      var opts = sel.options;
+      for(var i=0;i<opts.length;i++){
+        var opt = opts[i];
+        var code = opt.value || "";
+        if(code === ""){ opt.textContent = "None"; continue; }
+        opt.textContent = MQ_COMPACT.matches ? code : (CODE_TO_NAME.get(code) || code);
+      }
+    }
+  }
+
+  try{ MQ_COMPACT.addEventListener("change", function(){ updateAllClubSelectLabels(); }); }
+  catch(e){ MQ_COMPACT.addListener(function(){ updateAllClubSelectLabels(); }); }
+
+  function buildMatchdayText(){
+    var v = matchdaySel.value;
+    return v === "NA" ? "MATCHDAY" : "MATCHDAY " + v;
+  }
+
+  function buildDivisionStatusText(){
+    var div = divisionSel.value;
+    var st = statusSel.value;
+    return div === "National" ? ("NATIONAL LEAGUE " + st).toUpperCase() : ("NATIONAL LEAGUE " + div + " " + st).toUpperCase();
+  }
+
+  function dateStamp(d){
+    var day = String(d.getDate());
+    var mon = d.toLocaleString("en-GB", { month: "short" });
+    var yy = String(d.getFullYear()).slice(-2);
+    return day + mon + yy;
+  }
+
+  function buildFilename(kind){
+    var st = statusSel.value;
+    var div = divisionSel.value;
+    var mdVal = matchdaySel.value;
+    var suffix = (kind === "4x5") ? "4x5" : "1x1";
+    if(mdVal && mdVal !== "NA") return (st + " " + div + " MD" + mdVal + " - " + suffix + ".png").replace(/\s+/g," ").trim();
+    return (st + " " + div + " " + dateStamp(new Date()) + " - " + suffix + ".png").replace(/\s+/g," ").trim();
+  }
+
+  async function ensureBaseImages(){
+    if(!bgImg) bgImg = await loadImage(BG_URL);
+    var divUrl = DIV_BADGE[divisionSel.value] || DIV_BADGE.National;
+    divBadgeImg = await loadImage(divUrl);
+  }
+
+  async function preloadRowCrests(){
+    var urls = new Set();
+    for(var i=0;i<ROWS_COUNT;i++){
+      var row = rowsState[i];
+      if(isRowHidden(row)) continue;
+      var hCode = normalizeTeamCode(row.home);
+      var aCode = normalizeTeamCode(row.away);
+      if(hCode && CODE_TO_CREST.get(hCode)) urls.add(CODE_TO_CREST.get(hCode));
+      if(aCode && CODE_TO_CREST.get(aCode)) urls.add(CODE_TO_CREST.get(aCode));
+    }
+    await Promise.all([...urls].map(function(u){ return loadImage(u).catch(function(){return null;}); }));
+  }
+
+  function syncScoreInputsEnabled(){
+    var isResults = (statusSel.value === "Results");
+    for(var i=0;i<ROWS_COUNT;i++){
+      var inp = scoreInputEls[i];
+      if(!inp) continue;
+      var issue = (rowsState[i] && rowsState[i].issue) ? rowsState[i].issue : "";
+      inp.disabled = (!isResults) || !!issue;
+      inp.placeholder = isResults ? "e.g. 2-1" : "";
+    }
+  }
+
+  /* ================= GRID UI ================= */
+
+  function buildClubSelect(){
+    var s = document.createElement("select");
+    var none = document.createElement("option");
+    none.value = "";
+    none.textContent = "None";
+    s.appendChild(none);
+    for(var i=0;i<TEAM_CODES.length;i++){
+      var code = TEAM_CODES[i];
+      var o = document.createElement("option");
+      o.value = code;
+      o.textContent = MQ_COMPACT.matches ? code : (CODE_TO_NAME.get(code) || code);
+      o.title = CODE_TO_NAME.get(code) || code;
+      s.appendChild(o);
+    }
+    return s;
+  }
+
+  function buildIssueSelect(){
+    var s = document.createElement("select");
+    var normal = document.createElement("option");
+    normal.value = "";
+    normal.textContent = "-";
+    s.appendChild(normal);
+    var codes = ["P-P","A-A","L-L"];
+    for(var i=0;i<codes.length;i++){
+      var o = document.createElement("option");
+      o.value = codes[i];
+      o.textContent = codes[i];
+      s.appendChild(o);
+    }
+    return s;
+  }
+
+  function rebuildRowsUI(){
+    rowsGridEl.innerHTML = "";
+
+    var headers = ["Home","Score","Away","Status"];
+    for(var h=0;h<headers.length;h++){
+      var hd = document.createElement("span");
+      hd.className = "text-label";
+      hd.textContent = headers[h];
+      rowsGridEl.appendChild(hd);
+    }
+
+    homeSelectEls.length = 0;
+    awaySelectEls.length = 0;
+    scoreInputEls.length = 0;
+    issueSelectEls.length = 0;
+
+    for(var i=0;i<ROWS_COUNT;i++){
+      var homeSel = buildClubSelect();
+      var awaySel = buildClubSelect();
+      var issueSel = buildIssueSelect();
+
+      var scoreInp = document.createElement("input");
+      scoreInp.type = "text";
+      scoreInp.inputMode = "text";
+      scoreInp.autocomplete = "off";
+      scoreInp.maxLength = 5;
+
+      homeSel.value = normalizeTeamCode(rowsState[i].home) || "";
+      awaySel.value = normalizeTeamCode(rowsState[i].away) || "";
+      scoreInp.value = rowsState[i].score || "";
+      issueSel.value = rowsState[i].issue || "";
+
+      (function(idx){
+        homeSel.addEventListener("change", function(){
+          rowsState[idx].home = homeSel.value || "";
+          autosave(); scheduleRender();
+        });
+        awaySel.addEventListener("change", function(){
+          rowsState[idx].away = awaySel.value || "";
+          autosave(); scheduleRender();
+        });
+        scoreInp.addEventListener("input", function(){
+          rowsState[idx].score = scoreInp.value || "";
+          autosave(); scheduleRender();
+        });
+        issueSel.addEventListener("change", function(){
+          rowsState[idx].issue = issueSel.value || "";
+          syncScoreInputsEnabled();
+          updateAllClubSelectLabels();
+          autosave(); scheduleRender();
+        });
+        scoreInp.addEventListener("keydown", function(e){
+          if(e.key === "Enter"){
+            e.preventDefault();
+            if(idx + 1 < ROWS_COUNT && scoreInputEls[idx + 1]){
+              scoreInputEls[idx + 1].focus();
+              scoreInputEls[idx + 1].select();
+            }
+          }
+        });
+        if(idx === 0){
+          scoreInp.addEventListener("paste", function(e){
+            if(statusSel.value !== "Results") return;
+            var text = (e.clipboardData && e.clipboardData.getData("text")) ? e.clipboardData.getData("text") : "";
+            if(!text) return;
+            if(/\r?\n/.test(text)){
+              e.preventDefault();
+              var lines = text.split(/\r?\n/).map(function(x){ return (x || "").trim(); }).slice(0, ROWS_COUNT);
+              for(var r=0;r<ROWS_COUNT;r++){
+                rowsState[r].score = lines[r] || "";
+                if(scoreInputEls[r]) scoreInputEls[r].value = lines[r] || "";
+              }
+              autosave(); scheduleRender();
+            }
+          });
+        }
+      })(i);
+
+      rowsGridEl.appendChild(homeSel);
+      rowsGridEl.appendChild(scoreInp);
+      rowsGridEl.appendChild(awaySel);
+      rowsGridEl.appendChild(issueSel);
+
+      homeSelectEls.push(homeSel);
+      scoreInputEls.push(scoreInp);
+      awaySelectEls.push(awaySel);
+      issueSelectEls.push(issueSel);
+    }
+
+    syncScoreInputsEnabled();
+  }
+
+  /* ================= AUTOSAVE ================= */
+
+  function getStoredPayload(){
+    try{
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if(!raw) return {};
+      var d = JSON.parse(raw);
+      return (d && typeof d === "object") ? d : {};
+    }catch(e){ return {}; }
+  }
+
+  function setStoredPayload(obj){
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(obj)); }catch(e){}
+  }
+
+  function autosave(){
+    var payload = getStoredPayload();
+    payload.v = VERSION;
+    payload.matchday = matchdaySel.value;
+    payload.division = divisionSel.value;
+    payload.status = statusSel.value;
+    payload.byDivision = payload.byDivision && typeof payload.byDivision === "object" ? payload.byDivision : {};
+    payload.byDivision[divisionSel.value] = cloneRows(rowsState);
+    setStoredPayload(payload);
+  }
+
+  function autoload(){
+    var d = getStoredPayload();
+    if(!d || typeof d !== "object") return;
+    if(typeof d.matchday === "string") matchdaySel.value = d.matchday;
+    if(typeof d.division === "string" && DIVISIONS.indexOf(d.division) !== -1) divisionSel.value = d.division;
+    if(typeof d.status === "string") statusSel.value = d.status;
+    loadDivisionStateOrBlank(divisionSel.value);
+    if((!d.byDivision || typeof d.byDivision !== "object") && Array.isArray(d.rowsState)){
+      var payload = d;
+      payload.byDivision = payload.byDivision && typeof payload.byDivision === "object" ? payload.byDivision : {};
+      payload.byDivision.National = cloneRows(d.rowsState);
+      setStoredPayload(payload);
+    }
+  }
+
+  /* ================= RENDER ================= */
+
+  async function renderToContext(c){
+    await ensureBaseImages();
+    await preloadRowCrests();
+
+    c.setTransform(1,0,0,1,0,0);
+    c.clearRect(0,0,CANVAS_SIZE,CANVAS_SIZE);
+    c.imageSmoothingEnabled = true;
+    c.imageSmoothingQuality = "high";
+    c.drawImage(bgImg, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+    c.textAlign = HEADER_1.align;
+    setTextStyle(c, HEADER_1.size, HEADER_1.color, HEADER_1.weight);
+    c.fillText(buildMatchdayText().toUpperCase(), HEADER_1.x, HEADER_1.y);
+
+    c.textAlign = HEADER_2.align;
+    setTextStyle(c, HEADER_2.size, HEADER_2.color, HEADER_2.weight);
+    c.fillText(buildDivisionStatusText(), HEADER_2.x, HEADER_2.y);
+
+    if(divBadgeImg){
+      var iw = divBadgeImg.naturalWidth || divBadgeImg.width;
+      var ih = divBadgeImg.naturalHeight || divBadgeImg.height;
+      var dw = iw * DIV_BADGE_POS.scale;
+      var dh = ih * DIV_BADGE_POS.scale;
+      c.drawImage(divBadgeImg, DIV_BADGE_POS.x - dw/2, DIV_BADGE_POS.y - dh/2, dw, dh);
+    }
+
+    var isResults = (statusSel.value === "Results");
+
+    for(var i=0;i<ROWS_COUNT;i++){
+      var row = rowsState[i];
+      if(isRowHidden(row)) continue;
+
+      var cy = ROWS_Y_START + (i * ROWS_LINE_GAP);
+      var ty = cy + 2;
+
+      drawCenteredRect(c, SCORE_COL.x, cy, BLUE_PILL.w, BLUE_PILL.h, BLUE_PILL.color);
+      drawCenteredRect(c, SCORE_COL.x, cy, WHITE_BOX.w, WHITE_BOX.h, WHITE_BOX.color);
+      drawCenteredRect(c, HOME_ICON_X, cy, RED_BOX.w, RED_BOX.h, RED_BOX.color);
+      drawCenteredRect(c, AWAY_ICON_X, cy, RED_BOX.w, RED_BOX.h, RED_BOX.color);
+
+      var homeCode = normalizeTeamCode(row.home);
+      var awayCode = normalizeTeamCode(row.away);
+
+      var homeCrestUrl = homeCode ? (CODE_TO_CREST.get(homeCode) || "") : "";
+      var awayCrestUrl = awayCode ? (CODE_TO_CREST.get(awayCode) || "") : "";
+
+      if(homeCrestUrl){
+        var hImg = await loadImage(homeCrestUrl).catch(function(){return null;});
+        if(hImg) drawContainedImage(c, hImg, HOME_ICON_X, cy, CREST_MAX, CREST_MAX);
+      }
+      if(awayCrestUrl){
+        var aImg = await loadImage(awayCrestUrl).catch(function(){return null;});
+        if(aImg) drawContainedImage(c, aImg, AWAY_ICON_X, cy, CREST_MAX, CREST_MAX);
+      }
+
+      var homeText = safeUpper(displayClubNameFromCode(homeCode));
+      var awayText = safeUpper(displayClubNameFromCode(awayCode));
+
+      if(homeText){
+        c.textAlign = HOME_COL.align;
+        setTextStyle(c, HOME_COL.size, HOME_COL.color, HOME_COL.weight);
+        c.fillText(homeText, HOME_COL.x, ty);
+      }
+      if(awayText){
+        c.textAlign = AWAY_COL.align;
+        setTextStyle(c, AWAY_COL.size, AWAY_COL.color, AWAY_COL.weight);
+        c.fillText(awayText, AWAY_COL.x, ty);
+      }
+
+      var scoreText = "";
+      var issue = (row.issue || "").trim();
+      if(issue){
+        scoreText = issue;
+      }else if(!isResults){
+        scoreText = (row.home && row.away) ? "V" : "";
+      }else{
+        scoreText = (row.score || "").trim();
+      }
+      scoreText = safeUpper(scoreText);
+
+      if(scoreText){
+        c.textAlign = SCORE_COL.align;
+        var isV = (!isResults && !issue && scoreText === "V");
+        if(isV){
+          setTextStyle(c, SCORE_SMALL.size, SCORE_COL.color, SCORE_SMALL.weight);
+        }else{
+          setTextStyle(c, SCORE_COL.size, SCORE_COL.color, SCORE_COL.weight);
+        }
+        c.fillText(scoreText, SCORE_COL.x, ty);
+      }
+    }
+  }
+
+  let renderQueued = false;
+  function scheduleRender(){
+    if(renderQueued) return;
+    renderQueued = true;
+    requestAnimationFrame(async function(){
+      renderQueued = false;
+      try{
+        if(document.fonts && document.fonts.ready) await document.fonts.ready;
+        await renderToContext(ctx);
+        autosave();
+      }catch(e){
+        console.error(e);
+        setStatus("Render error");
+      }
+    });
+  }
+
+  async function renderNow(){
+    if(document.fonts && document.fonts.ready) await document.fonts.ready;
+    await renderToContext(ctx);
+    autosave();
+  }
+
+  /* ================= DOWNLOAD ================= */
+
+  async function downloadPNG_1x1(){
+    try{
+      await ensureBaseImages();
+      if(document.fonts && document.fonts.ready) await document.fonts.ready;
+      var out = document.createElement("canvas");
+      out.width = CANVAS_SIZE; out.height = CANVAS_SIZE;
+      await renderToContext(out.getContext("2d"));
+      var blob = await new Promise(function(res){ out.toBlob(res, "image/png"); });
+      if(!blob){ setStatus("Export failed"); return; }
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = buildFilename("1x1");
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(a.href);
+      setStatus("Downloaded");
+    }catch(e){ console.error(e); setStatus("Export error"); }
+  }
+
+  async function downloadPNG_4x5(){
+    try{
+      await ensureBaseImages();
+      if(document.fonts && document.fonts.ready) await document.fonts.ready;
+      var full = document.createElement("canvas");
+      full.width = CANVAS_SIZE; full.height = CANVAS_SIZE;
+      await renderToContext(full.getContext("2d"));
+      var OUT_W = 1080, OUT_H = 1347, SRC_X = 190, SRC_Y = 0;
+      var out = document.createElement("canvas");
+      out.width = OUT_W; out.height = OUT_H;
+      var oc = out.getContext("2d");
+      oc.imageSmoothingEnabled = true; oc.imageSmoothingQuality = "high";
+      oc.drawImage(full, SRC_X, SRC_Y, OUT_W, OUT_H, 0, 0, OUT_W, OUT_H);
+      var blob = await new Promise(function(res){ out.toBlob(res, "image/png"); });
+      if(!blob){ setStatus("Export failed"); return; }
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = buildFilename("4x5");
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(a.href);
+      setStatus("Downloaded");
+    }catch(e){ console.error(e); setStatus("Export error"); }
+  }
+
+  /* ================= RESET ================= */
+
+  function resetAll(){
+    matchdaySel.value = "NA";
+    divisionSel.value = "National";
+    statusSel.value = "Fixtures";
+    for(var i=0;i<ROWS_COUNT;i++){
+      rowsState[i].home = ""; rowsState[i].away = "";
+      rowsState[i].score = ""; rowsState[i].issue = "";
+      if(homeSelectEls[i]) homeSelectEls[i].value = "";
+      if(awaySelectEls[i]) awaySelectEls[i].value = "";
+      if(scoreInputEls[i]) scoreInputEls[i].value = "";
+      if(issueSelectEls[i]) issueSelectEls[i].value = "";
+    }
+    syncScoreInputsEnabled();
+    divBadgeImg = null;
+    autosave(); scheduleRender();
+    setStatus("Reset");
+  }
+
+  /* ================= UI ================= */
+
+  function buildMatchdayOptions(){
+    matchdaySel.innerHTML = "";
+    var na = document.createElement("option");
+    na.value = "NA"; na.textContent = "N/A";
+    matchdaySel.appendChild(na);
+    for(var i=1;i<=46;i++){
+      var o = document.createElement("option");
+      o.value = String(i); o.textContent = String(i);
+      matchdaySel.appendChild(o);
+    }
+  }
+
+  function bindUI(){
+    matchdaySel.addEventListener("change", function(){ autosave(); scheduleRender(); });
+    divisionSel.addEventListener("change", function(){
+      divBadgeImg = null;
+      var prev = divisionSel._prevDivision || "National";
+      saveActiveDivisionState(prev);
+      loadDivisionStateOrBlank(divisionSel.value);
+      applyRowsToUI();
+      divisionSel._prevDivision = divisionSel.value;
+      autosave(); scheduleRender();
+    });
+    statusSel.addEventListener("change", function(){
+      syncScoreInputsEnabled();
+      autosave(); scheduleRender();
+    });
+    downloadBtn.addEventListener("click", downloadPNG_1x1);
+    download45Btn.addEventListener("click", downloadPNG_4x5);
+    resetAllBtn.addEventListener("click", resetAll);
+  }
+
+  /* ================= INIT ================= */
+
+  async function start(){
+    try {
+      var resp = await fetch(CLUBS_META_URL);
+      var data = await resp.json();
+      var clubs = data.clubs || [];
+      clubs.sort(function(a, b){ return a.name.localeCompare(b.name); });
+      TEAM_NAMES = clubs.map(function(c){ return c.name; });
+      TEAM_CODES = clubs.map(function(c){ return c.code; });
+      CODE_TO_NAME = new Map();
+      NAME_TO_CODE = new Map();
+      CODE_TO_CREST = new Map();
+      TEAM_CODE_SET = new Set();
+      for(var i=0;i<clubs.length;i++){
+        var name = clubs[i].name;
+        var code = clubs[i].code;
+        if(code){
+          CODE_TO_NAME.set(code, name);
+          TEAM_CODE_SET.add(code);
+          if(name) CODE_TO_CREST.set(code, crestUrlForName(name));
+        }
+        if(name && code) NAME_TO_CODE.set(name, code);
+      }
+    } catch(e) {
+      console.warn("[fixtures-results] Could not load clubs-meta.json:", e);
+    }
+
+    buildMatchdayOptions();
+    autoload();
+    rebuildRowsUI();
+    divisionSel._prevDivision = divisionSel.value;
+    applyRowsToUI();
+    bindUI();
+    syncScoreInputsEnabled();
+
+    try{
+      var warm = document.getElementById("fontWarmup");
+      if(warm) void warm.offsetWidth;
+      if(document.fonts && document.fonts.ready) await document.fonts.ready;
+      await new Promise(function(r){ setTimeout(r, 300); });
+      await ensureBaseImages();
+      await renderNow();
+      setStatus("Loaded");
+    }catch(e){
+      console.error(e);
+      setStatus("Image load error");
+    }
+  }
+
+  start();
+
+})();
+</script>
+</body>
+</html>
