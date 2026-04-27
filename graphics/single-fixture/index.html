@@ -219,9 +219,9 @@
             <option value="North">North</option>
             <option value="South">South</option>
           </select>
-          <button type="button" id="download" class="btn btn--primary btn--sm">Download 1×1</button>
-          <button type="button" id="download45" class="btn btn--navy btn--sm">Download 4×5</button>
-          <button type="button" id="resetAll" class="btn btn--danger btn--sm">Reset</button>
+          <button type="button" id="download" class="btn btn--primary">Download 1×1</button>
+          <button type="button" id="download45" class="btn btn--navy">Download 4×5</button>
+          <button type="button" id="resetAll" class="btn btn--danger">Reset</button>
         </div>
 
         <div class="box section">
@@ -299,11 +299,8 @@
   /* ===== Clubs metadata (fetched from clubs-meta.json) ===== */
   var CLUBS_META_URL = "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json";
   var TEAM_NAMES = [];
-  var TEAM_CODES = [];
-  var CODE_TO_NAME = new Map();
-  var NAME_TO_CODE = new Map();
-  var CODE_TO_CREST = new Map();
-  var TEAM_CODE_SET = new Set();
+  var TEAM_NAME_SET = new Set();
+  var NAME_TO_SHORT = new Map();
 
   function safeUpper(s){ return (s || "").replace(/\s+/g," ").trim().toUpperCase(); }
 
@@ -313,11 +310,10 @@
     return encodeURI(CREST_BASE_URL + t + ".png");
   }
 
-  function normalizeTeamCode(v){
-    var t = (v || "").trim();
+  function normalizeName(v){
+    var t = (v || "").replace(/\s+/g," ").trim();
     if(!t) return "";
-    if(TEAM_CODE_SET.has(t)) return t;
-    if(NAME_TO_CODE.has(t)) return NAME_TO_CODE.get(t) || "";
+    if(TEAM_NAME_SET.has(t)) return t;
     return "";
   }
 
@@ -415,12 +411,10 @@
 
   async function preloadNeededCrests(){
     const urls = new Set();
-    const hCode = normalizeTeamCode(state.home);
-    const aCode = normalizeTeamCode(state.away);
-    const h = hCode ? (CODE_TO_CREST.get(hCode) || "") : "";
-    const a = aCode ? (CODE_TO_CREST.get(aCode) || "") : "";
-    if(h) urls.add(h);
-    if(a) urls.add(a);
+    const h = normalizeName(state.home);
+    const a = normalizeName(state.away);
+    if(h) urls.add(crestUrlForName(h));
+    if(a) urls.add(crestUrlForName(a));
     await Promise.all([...urls].map(u => loadImage(u).catch(()=>null)));
   }
 
@@ -446,10 +440,8 @@
   function buildFilename(kind){
     const div = divisionSel.value;
     const suffix = (kind === "4x5") ? "4x5" : "1x1";
-    const hCode = normalizeTeamCode(state.home);
-    const aCode = normalizeTeamCode(state.away);
-    const hName = hCode ? (CODE_TO_NAME.get(hCode) || hCode) : "Home";
-    const aName = aCode ? (CODE_TO_NAME.get(aCode) || aCode) : "Away";
+    const hName = normalizeName(state.home) || "Home";
+    const aName = normalizeName(state.away) || "Away";
     const stamp = dateStamp(new Date());
     return ("Fixture " + div + " - " + hName + " v " + aName + " " + stamp + " - " + suffix + ".png").replace(/\s+/g," ").trim();
   }
@@ -462,9 +454,9 @@
     var opts = sel.options;
     for(var i=0;i<opts.length;i++){
       var opt = opts[i];
-      var code = opt.value || "";
-      if(code === ""){ opt.textContent = "None"; continue; }
-      opt.textContent = MQ_COMPACT.matches ? code : (CODE_TO_NAME.get(code) || code);
+      var name = opt.value || "";
+      if(name === ""){ opt.textContent = "None"; continue; }
+      opt.textContent = MQ_COMPACT.matches ? (NAME_TO_SHORT.get(name) || name) : name;
     }
   }
 
@@ -482,12 +474,12 @@
     none.value = "";
     none.textContent = "None";
     sel.appendChild(none);
-    for(var i = 0; i < TEAM_CODES.length; i++){
-      var code = TEAM_CODES[i];
+    for(var i = 0; i < TEAM_NAMES.length; i++){
+      var name = TEAM_NAMES[i];
       var o = document.createElement("option");
-      o.value = code;
-      o.textContent = MQ_COMPACT.matches ? code : (CODE_TO_NAME.get(code) || code);
-      o.title = CODE_TO_NAME.get(code) || code;
+      o.value = name;
+      o.textContent = MQ_COMPACT.matches ? (NAME_TO_SHORT.get(name) || name) : name;
+      o.title = name;
       sel.appendChild(o);
     }
   }
@@ -512,8 +504,8 @@
       var d = JSON.parse(raw);
       if(!d || typeof d !== "object") return;
       if(typeof d.division === "string") divisionSel.value = d.division;
-      if(typeof d.home === "string") state.home = normalizeTeamCode(d.home);
-      if(typeof d.away === "string") state.away = normalizeTeamCode(d.away);
+      if(typeof d.home === "string") state.home = normalizeName(d.home);
+      if(typeof d.away === "string") state.away = normalizeName(d.away);
       if(typeof d.kickoff === "string") state.kickoff = d.kickoff.trim();
     }catch{}
   }
@@ -540,10 +532,10 @@
     }
 
     // Crests
-    const hCode = normalizeTeamCode(state.home);
-    const aCode = normalizeTeamCode(state.away);
-    const hUrl = hCode ? (CODE_TO_CREST.get(hCode) || "") : "";
-    const aUrl = aCode ? (CODE_TO_CREST.get(aCode) || "") : "";
+    const hName = normalizeName(state.home);
+    const aName = normalizeName(state.away);
+    const hUrl = hName ? crestUrlForName(hName) : "";
+    const aUrl = aName ? crestUrlForName(aName) : "";
 
     if(hUrl){
       const img = await loadImage(hUrl).catch(()=>null);
@@ -555,10 +547,8 @@
     }
 
     // Fixture text
-    const homeName = hCode ? (CODE_TO_NAME.get(hCode) || "") : "";
-    const awayName = aCode ? (CODE_TO_NAME.get(aCode) || "") : "";
-    const homeLine = safeUpper(homeName);
-    const awayLine = safeUpper(awayName);
+    const homeLine = safeUpper(hName ? (hName === "Hampton & Richmond Borough" ? "Hampton & Richmond" : hName) : "");
+    const awayLine = safeUpper(aName ? (aName === "Hampton & Richmond Borough" ? "Hampton & Richmond" : aName) : "");
 
     c.textAlign = "center";
     setTextStyle(c, FIXTURE_TEXT.size, FIXTURE_TEXT.blue, FIXTURE_TEXT.weight);
@@ -719,22 +709,12 @@
       var clubs = data.clubs || [];
       clubs.sort(function(a, b){ return a.name.localeCompare(b.name); });
       TEAM_NAMES = clubs.map(function(c){ return c.name; });
-      TEAM_CODES = clubs.map(function(c){ return c.code; });
-
-      CODE_TO_NAME = new Map();
-      NAME_TO_CODE = new Map();
-      CODE_TO_CREST = new Map();
-      TEAM_CODE_SET = new Set();
-
+      TEAM_NAME_SET = new Set(TEAM_NAMES);
+      NAME_TO_SHORT = new Map();
       for(var i = 0; i < clubs.length; i++){
         var name = clubs[i].name;
-        var code = clubs[i].code;
-        if(code){
-          CODE_TO_NAME.set(code, name);
-          TEAM_CODE_SET.add(code);
-          if(name) CODE_TO_CREST.set(code, crestUrlForName(name));
-        }
-        if(name && code) NAME_TO_CODE.set(name, code);
+        var short = clubs[i].short || clubs[i].code || name;
+        if(name) NAME_TO_SHORT.set(name, short);
       }
     } catch(e) {
       console.warn("[single-fixture] Could not load clubs-meta.json:", e);
@@ -745,8 +725,8 @@
 
     autoload();
 
-    homeSel.value = normalizeTeamCode(state.home) || "";
-    awaySel.value = normalizeTeamCode(state.away) || "";
+    homeSel.value = normalizeName(state.home) || "";
+    awaySel.value = normalizeName(state.away) || "";
     kickoffEl.value = state.kickoff || "";
 
     updateAllSelectLabels();
