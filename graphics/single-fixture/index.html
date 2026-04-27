@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<!--
+  Single Fixture — NL Tools (Graphics & Media sub-tool)
+  Version: 2.0
+  Date: 27/04/2026
+  File: /tools/graphics/single-fixture/index.html
+
+  CHANGELOG
+  v2.0 (27/04/2026) — Portal integration + brand consistency
+    Shell:
+      - Added Firebase compat SDKs + config + initializeApp
+      - Added auth-guard integration under NL_TOOL_KEY = 'staff-graphics'
+      - Added NL_TOOL, NL_CHANGELOG, nlAuthReady callback
+      - Wrapped all content in #pageWrap
+      - Added #nlTopbar for standard topbar
+    CSS:
+      - Loaded nl-brand.css — all brand tokens available
+      - Stripped custom :root tokens and replaced with brand equivalents
+      - Buttons use brand .btn classes
+      - Form controls use brand tokens for borders, radius, font
+      - Removed Typekit CSS link (nl-brand.css provides @font-face)
+      - border-radius values changed from 10-14px to var(--radius)
+      - .page container uses brand fluid padding (no override)
+      - Sticky preview removed
+      - Labels use .text-label utility class
+      - Footer uses .text-label utility class
+    Data:
+      - Team list now fetched from clubs-meta.json instead of hardcoded
+      - All asset URLs point to thenationalleague/tools repo
+    Engine:
+      - All canvas rendering code preserved
+      - setCanvasFont() helper added for variable font weight on canvas
+      - const/let kept in engine code
+
+  v1.1 — Previous standalone version (pre-portal)
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Single Fixture — NL Tools</title>
+<meta name="robots" content="noindex,nofollow">
+
+<!-- Firebase SDKs — must load BEFORE auth-guard.js -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script>
+  firebase.initializeApp({
+    apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+    authDomain:        "nl-tools.firebaseapp.com",
+    databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId:         "nl-tools",
+    storageBucket:     "nl-tools.firebasestorage.app",
+    messagingSenderId: "801354670005",
+    appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+  });
+</script>
+
+<link rel="stylesheet" href="/tools/system/nl-brand.css">
+
+<script>
+  window.NL_TOOL = {
+    title: 'Single Fixture',
+    toolKey: 'staff-graphics'
+  };
+  var NL_TOOL_KEY = 'staff-graphics';
+
+  window.NL_CHANGELOG = [
+    {
+      date: '27 April 2026',
+      version: 'v1.0',
+      items: [
+        'Integrated into NL Tools portal with standard topbar and auth.',
+        'Team list now loads from clubs database — no hardcoded names.',
+        'Design aligned with NL Tools brand system.'
+      ]
+    }
+  ];
+</script>
+
+<script src="/tools/system/nl-utils.js"></script>
+<script src="/tools/system/nl-topbar.js"></script>
+<script src="/tools/system/auth-guard.js"></script>
+
+<style>
+  /* ── Layout ── */
+  .app {
+    display: grid;
+    grid-template-columns: minmax(520px, 900px) minmax(360px, 1fr);
+    gap: 18px;
+    align-items: start;
+  }
+  @media (max-width: 980px) {
+    .app { grid-template-columns: 1fr; }
+  }
+
+  /* ── Canvas preview ── */
+  .preview-wrap {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--off-white);
+    padding: 10px;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    font-variation-settings: 'wght' 800;
+  }
+
+  /* ── Controls panel ── */
+  .panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .box {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+    background: var(--white);
+  }
+
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+  .controls select {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--white);
+    font-family: var(--font);
+    font-size: var(--text-sm) !important;
+    font-variation-settings: 'wght' 400;
+    color: var(--text);
+  }
+
+  /* ── Pair grid (home/away selectors) ── */
+  .section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .pair-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    align-items: center;
+  }
+  @media (max-width: 640px) {
+    .pair-grid { grid-template-columns: 1fr; }
+  }
+
+  .pair-grid select,
+  .pair-grid input {
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--white);
+    font-family: var(--font);
+    font-size: var(--text-sm) !important;
+    font-variation-settings: 'wght' 400;
+    color: var(--text);
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .pair-grid select:focus,
+  .pair-grid input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(158, 0, 0, 0.10);
+  }
+  .pair-grid select {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── Footer status ── */
+  footer {
+    margin-top: 4px;
+    display: flex;
+    justify-content: space-between;
+  }
+</style>
+</head>
+
+<body>
+
+<!-- Font warmup — needed for canvas text measurement -->
+<span id="fontWarmup" style="position:absolute;left:-9999px;top:-9999px;font-family:'carbona-variable',sans-serif;font-weight:800;font-variation-settings:'wght' 800;">
+  FONT-WARMUP-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
+</span>
+
+<div id="pageWrap" style="display:none;">
+  <div id="nlTopbar"></div>
+
+  <div class="page">
+
+    <div class="app">
+
+      <div class="preview-wrap">
+        <canvas id="preview" width="1347" height="1347"></canvas>
+      </div>
+
+      <div class="panel">
+
+        <div class="box controls">
+          <select id="division" title="Division">
+            <option value="National">National</option>
+            <option value="North">North</option>
+            <option value="South">South</option>
+          </select>
+          <button type="button" id="download" class="btn btn--primary btn--sm">Download 1×1</button>
+          <button type="button" id="download45" class="btn btn--navy btn--sm">Download 4×5</button>
+          <button type="button" id="resetAll" class="btn btn--danger btn--sm">Reset</button>
+        </div>
+
+        <div class="box section">
+          <div class="pair-grid">
+            <span class="text-label">Home</span>
+            <span class="text-label">Away</span>
+            <select id="homeTeam" title="Home team"></select>
+            <select id="awayTeam" title="Away team"></select>
+          </div>
+        </div>
+
+        <div class="box section">
+          <div class="pair-grid">
+            <span class="text-label">Date / time</span>
+            <div></div>
+            <input id="kickoff" type="datetime-local" title="Kick-off date and time">
+            <div></div>
+          </div>
+        </div>
+
+        <footer>
+          <span class="text-label" id="statusText">Ready</span>
+        </footer>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  window.nlAuthReady = function(session) {
+    /* Topbar rendered by nl-topbar.js — no manual wiring needed */
+  };
+</script>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ================= CONFIG ================= */
+
+  const VERSION = "v2.0";
+  const STORAGE_KEY = "single-fixture-builder-v2.0";
+
+  const CANVAS_SIZE = 1347;
+
+  /* ===== Asset URLs ===== */
+  const REPO_ASSETS = "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/";
+
+  const BG_URL = REPO_ASSETS + "backgrounds/fixtures-1x1.png";
+
+  const DIV_BADGE = {
+    National: encodeURI(REPO_ASSETS + "divisions/National.png"),
+    North:    encodeURI(REPO_ASSETS + "divisions/North.png"),
+    South:    encodeURI(REPO_ASSETS + "divisions/South.png")
+  };
+  const DIV_BADGE_POS = { x: 750, y: 200, scale: 0.075 };
+
+  const CREST_BASE_URL = "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/";
+  const CREST_HOME_POS = { x: 550, y: 600 };
+  const CREST_AWAY_POS = { x: 950, y: 600 };
+  const CREST_MAX_W = 300;
+  const CREST_MAX_H = 300;
+
+  const FIXTURE_TEXT = {
+    x: 750, y: 1000, size: 48, weight: 800, lineGap: 42,
+    blue: "#223b7c", red: "#9e0000"
+  };
+
+  const KICKOFF_TEXT = {
+    x: 750, size: 24, weight: 800, color: "#9e0000", offsetBelowAwayLine: 100
+  };
+
+  /* ===== Clubs metadata (fetched from clubs-meta.json) ===== */
+  var CLUBS_META_URL = "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json";
+  var TEAM_NAMES = [];
+  var TEAM_CODES = [];
+  var CODE_TO_NAME = new Map();
+  var NAME_TO_CODE = new Map();
+  var CODE_TO_CREST = new Map();
+  var TEAM_CODE_SET = new Set();
+
+  function safeUpper(s){ return (s || "").replace(/\s+/g," ").trim().toUpperCase(); }
+
+  function crestUrlForName(teamName){
+    var t = (teamName || "").replace(/\s+/g," ").trim();
+    if(!t) return "";
+    return encodeURI(CREST_BASE_URL + t + ".png");
+  }
+
+  function normalizeTeamCode(v){
+    var t = (v || "").trim();
+    if(!t) return "";
+    if(TEAM_CODE_SET.has(t)) return t;
+    if(NAME_TO_CODE.has(t)) return NAME_TO_CODE.get(t) || "";
+    return "";
+  }
+
+  /* ===== Canvas font helper ===== */
+  const FONT_FAMILY = '"carbona-variable",sans-serif';
+
+  function setCanvasFont(c, sizePx, weight){
+    var w = weight || 800;
+    c.font = w + " " + sizePx + "px " + FONT_FAMILY;
+    if('fontVariationSettings' in c){
+      c.fontVariationSettings = "'wght' " + w;
+    } else {
+      try { c.canvas.style.fontVariationSettings = "'wght' " + w; } catch(e){}
+    }
+  }
+
+  function setTextStyle(c, sizePx, colorHex, weight){
+    c.fillStyle = colorHex;
+    setCanvasFont(c, sizePx, weight);
+    c.textBaseline = "middle";
+  }
+
+  /* ================= ELEMENTS ================= */
+
+  const canvas = document.getElementById("preview");
+  const ctx = canvas.getContext("2d");
+
+  const divisionSel = document.getElementById("division");
+  const homeSel = document.getElementById("homeTeam");
+  const awaySel = document.getElementById("awayTeam");
+  const downloadBtn = document.getElementById("download");
+  const download45Btn = document.getElementById("download45");
+  const resetAllBtn = document.getElementById("resetAll");
+  const kickoffEl = document.getElementById("kickoff");
+  const statusTextEl = document.getElementById("statusText");
+
+  /* ================= STATE ================= */
+
+  const imgCache = new Map();
+  let bgImg = null;
+  let divBadgeImg = null;
+
+  const state = { home:"", away:"", kickoff:"" };
+
+  /* ================= HELPERS ================= */
+
+  function setStatus(msg){
+    statusTextEl.textContent = msg;
+    window.clearTimeout(setStatus._t);
+    setStatus._t = window.setTimeout(()=> statusTextEl.textContent = "Ready", 900);
+  }
+
+  function loadImage(url){
+    if(!url) return Promise.reject(new Error("Empty URL"));
+    if(imgCache.has(url)) return imgCache.get(url);
+    const p = new Promise((resolve,reject)=>{
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = ()=> resolve(img);
+      img.onerror = ()=> reject(new Error("Failed to load: " + url));
+      img.src = url;
+    });
+    imgCache.set(url, p);
+    return p;
+  }
+
+  function drawContainedImage(c, img, centerX, centerY, maxW, maxH){
+    const iw = img.naturalWidth || img.width;
+    const ih = img.naturalHeight || img.height;
+    if(!iw || !ih) return;
+    const s = Math.min(maxW / iw, maxH / ih);
+    const dw = iw * s;
+    const dh = ih * s;
+    c.imageSmoothingEnabled = true;
+    c.imageSmoothingQuality = "high";
+    c.drawImage(img, centerX - dw/2, centerY - dh/2, dw, dh);
+  }
+
+  function drawMixedCenteredLine(c, parts, centerX, y){
+    let totalW = 0;
+    for(const p of parts) totalW += c.measureText(p.text).width;
+    let x = centerX - (totalW / 2);
+    for(const p of parts){
+      c.fillStyle = p.color;
+      c.fillText(p.text, x, y);
+      x += c.measureText(p.text).width;
+    }
+  }
+
+  async function ensureBaseImages(){
+    if(!bgImg) bgImg = await loadImage(BG_URL);
+    const divUrl = DIV_BADGE[divisionSel.value] || DIV_BADGE.National;
+    divBadgeImg = await loadImage(divUrl);
+  }
+
+  async function preloadNeededCrests(){
+    const urls = new Set();
+    const hCode = normalizeTeamCode(state.home);
+    const aCode = normalizeTeamCode(state.away);
+    const h = hCode ? (CODE_TO_CREST.get(hCode) || "") : "";
+    const a = aCode ? (CODE_TO_CREST.get(aCode) || "") : "";
+    if(h) urls.add(h);
+    if(a) urls.add(a);
+    await Promise.all([...urls].map(u => loadImage(u).catch(()=>null)));
+  }
+
+  function dateStamp(d){
+    const day = String(d.getDate());
+    const mon = d.toLocaleString("en-GB", { month: "short" });
+    const yy = String(d.getFullYear()).slice(-2);
+    return day + mon + yy;
+  }
+
+  function formatKickoff(datetimeLocal){
+    if(!datetimeLocal) return "";
+    const d = new Date(datetimeLocal);
+    if(Number.isNaN(d.getTime())) return "";
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      weekday: "short", day: "numeric", month: "short", year: "numeric",
+      hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+    }).formatToParts(d);
+    const get = (type) => (parts.find(p => p.type === type) || {}).value || "";
+    return get("weekday") + " " + get("day") + " " + get("month") + " " + get("year") + ", " + get("hour") + ":" + get("minute");
+  }
+
+  function buildFilename(kind){
+    const div = divisionSel.value;
+    const suffix = (kind === "4x5") ? "4x5" : "1x1";
+    const hCode = normalizeTeamCode(state.home);
+    const aCode = normalizeTeamCode(state.away);
+    const hName = hCode ? (CODE_TO_NAME.get(hCode) || hCode) : "Home";
+    const aName = aCode ? (CODE_TO_NAME.get(aCode) || aCode) : "Away";
+    const stamp = dateStamp(new Date());
+    return ("Fixture " + div + " - " + hName + " v " + aName + " " + stamp + " - " + suffix + ".png").replace(/\s+/g," ").trim();
+  }
+
+  /* ===== Responsive select labels ===== */
+  const MQ_COMPACT = window.matchMedia("(max-width: 640px)");
+
+  function updateSelectOptionLabels(sel){
+    if(!sel) return;
+    var opts = sel.options;
+    for(var i=0;i<opts.length;i++){
+      var opt = opts[i];
+      var code = opt.value || "";
+      if(code === ""){ opt.textContent = "None"; continue; }
+      opt.textContent = MQ_COMPACT.matches ? code : (CODE_TO_NAME.get(code) || code);
+    }
+  }
+
+  function updateAllSelectLabels(){
+    updateSelectOptionLabels(homeSel);
+    updateSelectOptionLabels(awaySel);
+  }
+
+  try{ MQ_COMPACT.addEventListener("change", function(){ updateAllSelectLabels(); }); }
+  catch(e){ MQ_COMPACT.addListener(function(){ updateAllSelectLabels(); }); }
+
+  function buildClubSelectOptions(sel){
+    sel.innerHTML = "";
+    var none = document.createElement("option");
+    none.value = "";
+    none.textContent = "None";
+    sel.appendChild(none);
+    for(var i = 0; i < TEAM_CODES.length; i++){
+      var code = TEAM_CODES[i];
+      var o = document.createElement("option");
+      o.value = code;
+      o.textContent = MQ_COMPACT.matches ? code : (CODE_TO_NAME.get(code) || code);
+      o.title = CODE_TO_NAME.get(code) || code;
+      sel.appendChild(o);
+    }
+  }
+
+  /* ================= AUTOSAVE ================= */
+
+  function autosave(){
+    var payload = {
+      v: VERSION,
+      division: divisionSel.value,
+      home: state.home,
+      away: state.away,
+      kickoff: state.kickoff
+    };
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); }catch{}
+  }
+
+  function autoload(){
+    try{
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if(!raw) return;
+      var d = JSON.parse(raw);
+      if(!d || typeof d !== "object") return;
+      if(typeof d.division === "string") divisionSel.value = d.division;
+      if(typeof d.home === "string") state.home = normalizeTeamCode(d.home);
+      if(typeof d.away === "string") state.away = normalizeTeamCode(d.away);
+      if(typeof d.kickoff === "string") state.kickoff = d.kickoff.trim();
+    }catch{}
+  }
+
+  /* ================= RENDER ================= */
+
+  async function renderToContext(c){
+    await ensureBaseImages();
+    await preloadNeededCrests();
+
+    c.setTransform(1,0,0,1,0,0);
+    c.clearRect(0,0,CANVAS_SIZE,CANVAS_SIZE);
+    c.imageSmoothingEnabled = true;
+    c.imageSmoothingQuality = "high";
+    c.drawImage(bgImg, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+
+    // Division badge
+    if(divBadgeImg){
+      const iw = divBadgeImg.naturalWidth || divBadgeImg.width;
+      const ih = divBadgeImg.naturalHeight || divBadgeImg.height;
+      const dw = iw * DIV_BADGE_POS.scale;
+      const dh = ih * DIV_BADGE_POS.scale;
+      c.drawImage(divBadgeImg, DIV_BADGE_POS.x - dw/2, DIV_BADGE_POS.y - dh/2, dw, dh);
+    }
+
+    // Crests
+    const hCode = normalizeTeamCode(state.home);
+    const aCode = normalizeTeamCode(state.away);
+    const hUrl = hCode ? (CODE_TO_CREST.get(hCode) || "") : "";
+    const aUrl = aCode ? (CODE_TO_CREST.get(aCode) || "") : "";
+
+    if(hUrl){
+      const img = await loadImage(hUrl).catch(()=>null);
+      if(img) drawContainedImage(c, img, CREST_HOME_POS.x, CREST_HOME_POS.y, CREST_MAX_W, CREST_MAX_H);
+    }
+    if(aUrl){
+      const img = await loadImage(aUrl).catch(()=>null);
+      if(img) drawContainedImage(c, img, CREST_AWAY_POS.x, CREST_AWAY_POS.y, CREST_MAX_W, CREST_MAX_H);
+    }
+
+    // Fixture text
+    const homeName = hCode ? (CODE_TO_NAME.get(hCode) || "") : "";
+    const awayName = aCode ? (CODE_TO_NAME.get(aCode) || "") : "";
+    const homeLine = safeUpper(homeName);
+    const awayLine = safeUpper(awayName);
+
+    c.textAlign = "center";
+    setTextStyle(c, FIXTURE_TEXT.size, FIXTURE_TEXT.blue, FIXTURE_TEXT.weight);
+
+    if(homeLine){
+      c.fillStyle = FIXTURE_TEXT.blue;
+      c.fillText(homeLine, FIXTURE_TEXT.x, FIXTURE_TEXT.y);
+    }
+
+    if(awayLine){
+      setTextStyle(c, FIXTURE_TEXT.size, FIXTURE_TEXT.blue, FIXTURE_TEXT.weight);
+      c.textAlign = "left";
+      drawMixedCenteredLine(c,
+        [{ text: "v ", color: FIXTURE_TEXT.red }, { text: awayLine, color: FIXTURE_TEXT.blue }],
+        FIXTURE_TEXT.x, FIXTURE_TEXT.y + FIXTURE_TEXT.lineGap
+      );
+    }
+
+    // Kick-off text
+    const koText = formatKickoff(state.kickoff);
+    if(koText){
+      const koY = (FIXTURE_TEXT.y + FIXTURE_TEXT.lineGap) + KICKOFF_TEXT.offsetBelowAwayLine;
+      c.textAlign = "center";
+      setTextStyle(c, KICKOFF_TEXT.size, KICKOFF_TEXT.color, KICKOFF_TEXT.weight);
+      c.fillText(koText, KICKOFF_TEXT.x, koY);
+    }
+  }
+
+  let renderQueued = false;
+  function scheduleRender(){
+    if(renderQueued) return;
+    renderQueued = true;
+    requestAnimationFrame(async ()=>{
+      renderQueued = false;
+      try{
+        if(document.fonts && document.fonts.ready) await document.fonts.ready;
+        await renderToContext(ctx);
+        autosave();
+      }catch(e){
+        console.error(e);
+        setStatus("Render error");
+      }
+    });
+  }
+
+  async function renderNow(){
+    if(document.fonts && document.fonts.ready) await document.fonts.ready;
+    await renderToContext(ctx);
+    autosave();
+  }
+
+  /* ================= DOWNLOAD ================= */
+
+  async function downloadPNG_1x1(){
+    try{
+      await ensureBaseImages();
+      if(document.fonts && document.fonts.ready) await document.fonts.ready;
+      const out = document.createElement("canvas");
+      out.width = CANVAS_SIZE;
+      out.height = CANVAS_SIZE;
+      await renderToContext(out.getContext("2d"));
+      const blob = await new Promise(res => out.toBlob(res, "image/png"));
+      if(!blob){ setStatus("Export failed"); return; }
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = buildFilename("1x1");
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+      setStatus("Downloaded");
+    }catch(e){ console.error(e); setStatus("Export error"); }
+  }
+
+  async function downloadPNG_4x5(){
+    try{
+      await ensureBaseImages();
+      if(document.fonts && document.fonts.ready) await document.fonts.ready;
+      const full = document.createElement("canvas");
+      full.width = CANVAS_SIZE;
+      full.height = CANVAS_SIZE;
+      await renderToContext(full.getContext("2d"));
+
+      const OUT_W = 1080, OUT_H = 1347;
+      const SRC_X = 190, SRC_Y = 0;
+      const out = document.createElement("canvas");
+      out.width = OUT_W;
+      out.height = OUT_H;
+      const oc = out.getContext("2d");
+      oc.imageSmoothingEnabled = true;
+      oc.imageSmoothingQuality = "high";
+      oc.drawImage(full, SRC_X, SRC_Y, OUT_W, OUT_H, 0, 0, OUT_W, OUT_H);
+
+      const blob = await new Promise(res => out.toBlob(res, "image/png"));
+      if(!blob){ setStatus("Export failed"); return; }
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = buildFilename("4x5");
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+      setStatus("Downloaded");
+    }catch(e){ console.error(e); setStatus("Export error"); }
+  }
+
+  /* ================= RESET ================= */
+
+  function resetAll(){
+    divisionSel.value = "National";
+    state.home = "";
+    state.away = "";
+    state.kickoff = "";
+    homeSel.value = "";
+    awaySel.value = "";
+    kickoffEl.value = "";
+    divBadgeImg = null;
+    autosave();
+    scheduleRender();
+    setStatus("Reset");
+  }
+
+  /* ================= UI ================= */
+
+  function bindUI(){
+    divisionSel.addEventListener("change", function(){
+      divBadgeImg = null;
+      autosave();
+      scheduleRender();
+    });
+    homeSel.addEventListener("change", function(){
+      state.home = homeSel.value || "";
+      autosave();
+      scheduleRender();
+    });
+    awaySel.addEventListener("change", function(){
+      state.away = awaySel.value || "";
+      autosave();
+      scheduleRender();
+    });
+    kickoffEl.addEventListener("change", function(){
+      state.kickoff = (kickoffEl.value || "").trim();
+      autosave();
+      scheduleRender();
+    });
+    downloadBtn.addEventListener("click", downloadPNG_1x1);
+    download45Btn.addEventListener("click", downloadPNG_4x5);
+    resetAllBtn.addEventListener("click", resetAll);
+  }
+
+  /* ================= INIT ================= */
+
+  async function start(){
+    /* Fetch clubs-meta.json for team dropdowns */
+    try {
+      var resp = await fetch(CLUBS_META_URL);
+      var data = await resp.json();
+      var clubs = data.clubs || [];
+      clubs.sort(function(a, b){ return a.name.localeCompare(b.name); });
+      TEAM_NAMES = clubs.map(function(c){ return c.name; });
+      TEAM_CODES = clubs.map(function(c){ return c.code; });
+
+      CODE_TO_NAME = new Map();
+      NAME_TO_CODE = new Map();
+      CODE_TO_CREST = new Map();
+      TEAM_CODE_SET = new Set();
+
+      for(var i = 0; i < clubs.length; i++){
+        var name = clubs[i].name;
+        var code = clubs[i].code;
+        if(code){
+          CODE_TO_NAME.set(code, name);
+          TEAM_CODE_SET.add(code);
+          if(name) CODE_TO_CREST.set(code, crestUrlForName(name));
+        }
+        if(name && code) NAME_TO_CODE.set(name, code);
+      }
+    } catch(e) {
+      console.warn("[single-fixture] Could not load clubs-meta.json:", e);
+    }
+
+    buildClubSelectOptions(homeSel);
+    buildClubSelectOptions(awaySel);
+
+    autoload();
+
+    homeSel.value = normalizeTeamCode(state.home) || "";
+    awaySel.value = normalizeTeamCode(state.away) || "";
+    kickoffEl.value = state.kickoff || "";
+
+    updateAllSelectLabels();
+    bindUI();
+
+    try{
+      /* Ensure fonts loaded before first render */
+      var warm = document.getElementById("fontWarmup");
+      if(warm) void warm.offsetWidth;
+      if(document.fonts && document.fonts.ready) await document.fonts.ready;
+      await new Promise(function(r){ setTimeout(r, 300); });
+
+      await ensureBaseImages();
+      await renderNow();
+      setStatus("Loaded");
+    }catch(e){
+      console.error(e);
+      setStatus("Image load error");
+    }
+  }
+
+  start();
+
+})();
+</script>
+</body>
+</html>
