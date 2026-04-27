@@ -2343,6 +2343,8 @@
     staffView:     'total_att',
     matchMode:     'home',
     cupToggles:    { 'nl':true,'north':true,'south':true,'nl-cup':true,'fa-cup':true,'fa-trophy':true },
+    matchToggles:  { 'nl':true,'north':true,'south':true,'nl-cup':true,'fa-cup':true,'fa-trophy':true },
+    totalsToggles: { 'nl':true,'north':true,'south':true,'nl-cup':true,'fa-cup':true,'fa-trophy':true },
     editingMatchID: null,
     editingFixture: null,
     editingSubmission: null
@@ -3969,6 +3971,7 @@
         S.matchMode = e.currentTarget.getAttribute('data-mode');
         document.querySelectorAll('#homeAwaySwitch button').forEach(function(b) { b.classList.remove('active'); });
         e.currentTarget.classList.add('active');
+        renderCupToggles();
         renderMatchChart();
       });
     });
@@ -4368,7 +4371,7 @@
     var midweek = [];
     var active = {};
     ['nl','north','south','nl-cup','fa-cup','fa-trophy'].forEach(function(k) {
-      if (S.cupToggles[k]) active[k] = true;
+      if (S.matchToggles[k]) active[k] = true;
     });
     for (var i = 0; i < club.homeMatches.length; i++) {
       var hm = club.homeMatches[i];
@@ -4397,7 +4400,7 @@
     if (!club) return null;
     var active = {};
     ['nl','north','south','nl-cup','fa-cup','fa-trophy'].forEach(function(k) {
-      if (S.cupToggles[k]) active[k] = true;
+      if (S.matchToggles[k]) active[k] = true;
     });
     var biggest = null;
     for (var i = 0; i < club.homeMatches.length; i++) {
@@ -4466,7 +4469,7 @@
     if (!club) return null;
     var active = {};
     ['nl','north','south','nl-cup','fa-cup','fa-trophy'].forEach(function(k) {
-      if (S.cupToggles[k]) active[k] = true;
+      if (S.matchToggles[k]) active[k] = true;
     });
     var totals = [];
     for (var i = 0; i < club.homeMatches.length; i++) {
@@ -4507,7 +4510,7 @@
     if (!club) return null;
     var active = {};
     ['nl','north','south','nl-cup','fa-cup','fa-trophy'].forEach(function(k) {
-      if (S.cupToggles[k]) active[k] = true;
+      if (S.matchToggles[k]) active[k] = true;
     });
     var played = [];
     for (var i = 0; i < club.homeMatches.length; i++) {
@@ -4597,63 +4600,51 @@
     var clubName = S.effectiveClub;
     var club = S.perClub[clubName];
 
-    /* Detect which cups this club has data in (home OR away) */
-    var presentCups = {};
-    var allMatches = club.homeMatches.concat(club.awayMatches);
-    for (var i = 0; i < allMatches.length; i++) {
-      var ck = allMatches[i].fix.competitionKey;
-      if (COMP_KEY_CUP[ck] || COMP_KEY_LEAGUE[ck]) {
-        presentCups[ck] = true;
-      }
+    /* Build separate present-maps: match chart uses home OR away depending
+       on current tab; totals card uses home matches only. */
+    var matchPresent = {};
+    var matchSource = (S.matchMode === 'away') ? club.awayMatches : club.homeMatches;
+    for (var i = 0; i < matchSource.length; i++) {
+      var ck = matchSource[i].fix.competitionKey;
+      if (COMP_KEY_CUP[ck] || COMP_KEY_LEAGUE[ck]) matchPresent[ck] = true;
     }
 
-    /* Keep S.cupToggles consistent */
+    var totalsPresent = {};
+    for (var i = 0; i < club.homeMatches.length; i++) {
+      var ck = club.homeMatches[i].fix.competitionKey;
+      if (COMP_KEY_CUP[ck] || COMP_KEY_LEAGUE[ck]) totalsPresent[ck] = true;
+    }
+
+    /* Ensure toggle keys default to true for present comps */
     for (var k in COMP_KEY_TO_LABEL) {
-      if (!(k in presentCups)) {
-        S.cupToggles[k] = true;
-      }
+      if (S.matchToggles[k] === undefined) S.matchToggles[k] = true;
+      if (S.totalsToggles[k] === undefined) S.totalsToggles[k] = true;
     }
 
-    /* Ensure every cup AND league key that is present defaults to true.
-       Previously only cups got initialised, which left league keys at their
-       previous state (could be false if user had toggled off on a prior club). */
-    for (var key in presentCups) {
-      if (S.cupToggles[key] === undefined) S.cupToggles[key] = true;
-    }
-    /* And fill in the inverse \u2014 keys not present on this club stay irrelevant */
-    for (var k in COMP_KEY_TO_LABEL) {
-      if (!(k in presentCups) && S.cupToggles[k] === undefined) {
-        S.cupToggles[k] = true;
-      }
-    }
-
-    /* Match-chart cup toggles \u2014 per-comp toggles including league */
+    /* Match-chart cup toggles */
     var matchBox = document.getElementById('matchCupToggles');
     matchBox.innerHTML = '<span class="filter-pill-row__label">Include:</span>';
-    renderCupToggleButtons(matchBox, presentCups, 'light', function() {
+    renderCupToggleButtons(matchBox, matchPresent, 'light', S.matchToggles, function() {
       renderMatchChart();
     });
 
-    /* Totals card cup toggles \u2014 also per-comp, League included and togglable.
-       The club's own division is always labelled 'League' for simplicity. */
+    /* Totals card cup toggles — only home-match comps */
     var totalsBox = document.getElementById('totalsCupToggles');
     totalsBox.innerHTML = '<span class="filter-pill-row__label" style="color:rgba(255,255,255,0.85);">Include:</span>';
 
-    /* Which league key is "their" league? \u2014 their division's comp key */
     var leagueKey = DIV_TO_COMPKEY[club.division];
-
     var navyPresent = {};
-    if (leagueKey && presentCups[leagueKey]) navyPresent[leagueKey] = true;
-    if (presentCups['nl-cup'])    navyPresent['nl-cup'] = true;
-    if (presentCups['fa-cup'])    navyPresent['fa-cup'] = true;
-    if (presentCups['fa-trophy']) navyPresent['fa-trophy'] = true;
+    if (leagueKey && totalsPresent[leagueKey]) navyPresent[leagueKey] = true;
+    if (totalsPresent['nl-cup'])    navyPresent['nl-cup'] = true;
+    if (totalsPresent['fa-cup'])    navyPresent['fa-cup'] = true;
+    if (totalsPresent['fa-trophy']) navyPresent['fa-trophy'] = true;
 
-    renderCupToggleButtons(totalsBox, navyPresent, 'navy', function() {
+    renderCupToggleButtons(totalsBox, navyPresent, 'navy', S.totalsToggles, function() {
       renderTotals();
     }, leagueKey);
   }
 
-  function renderCupToggleButtons(container, presentMap, style, onChange, leagueKeyToLabel) {
+  function renderCupToggleButtons(container, presentMap, style, toggleState, onChange, leagueKeyToLabel) {
     var order = ['nl', 'north', 'south', 'nl-cup', 'fa-cup', 'fa-trophy'];
     var extraClass = (style === 'navy') ? ' filter-pill--on-dark' : '';
 
@@ -4662,23 +4653,21 @@
       if (!presentMap[key]) continue;
       var btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'filter-pill' + extraClass + (S.cupToggles[key] ? ' active' : '');
+      btn.className = 'filter-pill' + extraClass + (toggleState[key] ? ' active' : '');
       btn.setAttribute('data-comp', key);
-      /* In the totals card, relabel the club's own division comp as 'League' for clarity */
       if (style === 'navy' && leagueKeyToLabel && key === leagueKeyToLabel) {
         btn.textContent = 'League';
       } else {
         btn.textContent = COMP_KEY_TO_LABEL[key];
       }
-      btn.addEventListener('click', function(e) {
-        var k = e.currentTarget.getAttribute('data-comp');
-        S.cupToggles[k] = !S.cupToggles[k];
-        /* Reflect across BOTH toggle groups so the two stay in sync per comp */
-        document.querySelectorAll('[data-comp="' + k + '"]').forEach(function(b) {
-          b.classList.toggle('active', S.cupToggles[k]);
-        });
-        if (onChange) onChange();
-      });
+      btn.addEventListener('click', (function(toggleObj) {
+        return function(e) {
+          var k = e.currentTarget.getAttribute('data-comp');
+          toggleObj[k] = !toggleObj[k];
+          e.currentTarget.classList.toggle('active', toggleObj[k]);
+          if (onChange) onChange();
+        };
+      })(toggleState));
       container.appendChild(btn);
     }
   }
@@ -4700,7 +4689,7 @@
     /* Filter to cups toggled on. Unlike before, we INCLUDE both played and upcoming
        \u2014 upcoming are rendered as non-interactive placeholders at the bottom. */
     var filtered = matches.filter(function(m) {
-      return S.cupToggles[m.fix.competitionKey] !== false;
+      return S.matchToggles[m.fix.competitionKey] !== false;
     });
 
     /* Sort chronologically (earliest first). Upcoming naturally falls after played. */
@@ -5019,7 +5008,7 @@
     /* Active comps = whatever user has toggled on */
     var activeComps = {};
     ['nl','north','south','nl-cup','fa-cup','fa-trophy'].forEach(function(k) {
-      if (S.cupToggles[k]) activeComps[k] = true;
+      if (S.totalsToggles[k]) activeComps[k] = true;
     });
 
     /* Home: all played home matches in active comps. Some may lack a submission
