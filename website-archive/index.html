@@ -664,6 +664,44 @@
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* ============ ARTICLE IMAGES & GALLERIES ============ */
+.article-modal__figure {
+  margin: 24px 0;
+}
+.article-modal__figure img {
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius);
+  display: block;
+}
+.article-modal__figure figcaption {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-top: 8px;
+  font-variation-settings: 'wght' 600;
+}
+.article-modal__gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin: 24px 0;
+}
+.article-modal__gallery-item {
+  margin: 0;
+}
+.article-modal__gallery-item img {
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius);
+  display: block;
+}
+.article-modal__gallery-item figcaption {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-top: 6px;
+  font-variation-settings: 'wght' 600;
+}
+
 /* ============ MODAL ============ */
 .modal-backdrop {
   position: fixed;
@@ -1106,6 +1144,21 @@
 
 var INDEX_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/articles-index.json';
 var BYSLUG_URL = 'https://news.cms.web.gc.nationalleagueservices.co.uk/v1/byslug';
+var S3_IMAGE_BASE = 'https://s3.eu-west-1.amazonaws.com/gc-media-assets-v2.gc.nationalleagueservices.co.uk/';
+var NLS_IMAGE_BASE = 'https://images.gc.nationalleagueservices.co.uk/fit-in/1440x1440/';
+
+/* Resolve an image URL from CMS imageData (or a bare object with location/key/id).
+   Handles: imageData.location (absolute S3 URL), imageData.key (S3 filename),
+   imageData.id (NLS image UUID — used in galleries). */
+function resolveArticleImage(imgData) {
+  if (!imgData) return '';
+  if (typeof imgData === 'string') return imgData;
+  if (imgData.location) return imgData.location;
+  if (imgData.key) return S3_IMAGE_BASE + imgData.key;
+  if (imgData.id) return NLS_IMAGE_BASE + imgData.id + '.jpg';
+  if (imgData.url) return imgData.url;
+  return '';
+}
 var SITE_BASE = 'https://www.thenationalleague.org.uk';
 
 var LS_KEY_VIEW = 'nl-archive-view';
@@ -1736,6 +1789,31 @@ function renderModalBody(a, content) {
       if (data.content) html += data.content;
     } else if (type === 'ThirdPartyV2Widget') {
       if (data.content) html += '<div class="embed-widget">' + data.content + '</div>';
+    } else if (type === 'ImageWidget') {
+      /* Single inline image — data.imageData has location or key */
+      var imgUrl = resolveArticleImage(data.imageData || data);
+      if (imgUrl) {
+        html += '<figure class="article-modal__figure">' +
+          '<img src="' + esc(imgUrl) + '" alt="" loading="lazy" onerror="this.parentNode.style.display=\'none\'">' +
+          (data.caption ? '<figcaption>' + esc(data.caption) + '</figcaption>' : '') +
+          '</figure>';
+      }
+    } else if (type === 'ImageGalleryWidget') {
+      /* Gallery — data.images is an array of image objects */
+      var images = data.images || data.items || [];
+      if (images.length) {
+        html += '<div class="article-modal__gallery">';
+        for (var gi = 0; gi < images.length; gi++) {
+          var gUrl = resolveArticleImage(images[gi].imageData || images[gi]);
+          if (gUrl) {
+            html += '<figure class="article-modal__gallery-item">' +
+              '<img src="' + esc(gUrl) + '" alt="" loading="lazy" onerror="this.parentNode.style.display=\'none\'">' +
+              (images[gi].caption ? '<figcaption>' + esc(images[gi].caption) + '</figcaption>' : '') +
+              '</figure>';
+          }
+        }
+        html += '</div>';
+      }
     }
   });
   html += '</div>';
