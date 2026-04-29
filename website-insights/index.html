@@ -3,10 +3,25 @@
 <head>
 <!--
   NL Tools — Website Insights
-  Version: 1.1
+  Version: 1.2
   Date: 28/04/2026
 
   CHANGELOG
+  v1.2 (28/04/2026)
+    - Removed Authors tab. Wasn't useful for current decisions.
+      Removed: tab button, pane HTML, .auth-* CSS, .ins-filter-row CSS,
+      renderAuthors/renderAuthorsBody/median functions,
+      authPeriod/authMin/authSort state. ~140 lines deleted.
+    - Bug fix: Timing tab's "Single article" view was permanently stuck
+      on "Loading data…" because nlAuthReady seeds that placeholder
+      at startup but renderTimingTab never reset it back to the
+      "Pick an article…" prompt. Now resets correctly.
+    - Bug fix: data-fetch error handler only updated Overview pane,
+      leaving Timing/Gems&Traps stuck on "Loading…". Now updates all
+      panes with the error message.
+    - More transparent ga-hourly.json fetch failures: logs status code
+      / message to console rather than swallowing silently. Helps
+      diagnose "why is timing empty" without server-side investigation.
   v1.1 (28/04/2026)
     - Brand typography sweep: every CSS-block font-size declaration now
       uses one of nl-brand.css's six fluid typography tokens
@@ -78,6 +93,14 @@
   window.NL_CHANGELOG = [
     {
       date: '28 April 2026',
+      version: 'v1.2',
+      items: [
+        'Removed Authors tab.',
+        'Fixed Timing tab\u2019s single-article view being stuck on \u201CLoading\u2026\u201D.'
+      ]
+    },
+    {
+      date: '28 April 2026',
       version: 'v1.1',
       items: [
         'Typography now scales properly with screen size — text was previously too small on wide displays.'
@@ -90,8 +113,7 @@
         'Initial release of Website Insights — companion tool to the Website Archive.',
         'Overview tab summarises the past month\'s biggest performers, hidden gems and time-of-day winners.',
         'Timing tab shows article view curves over the first 72 hours, plus cohort comparisons by publish hour.',
-        'Gems & Traps tab surfaces quality work that didn\'t reach an audience — and articles that got clicks but not engagement.',
-        'Authors tab shows per-author volume, average performance and category specialisation.'
+        'Gems & Traps tab surfaces quality work that didn\'t reach an audience — and articles that got clicks but not engagement.'
       ]
     }
   ];
@@ -440,88 +462,6 @@
     .gt-row > *:nth-child(n+5), .gt-header > *:nth-child(n+5) { display: none; }
   }
 
-  /* ============ AUTHORS ============ */
-  .auth-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 0;
-    background: var(--white);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    overflow: hidden;
-  }
-  .auth-row {
-    display: grid;
-    grid-template-columns: 1fr 70px 80px 80px 80px 80px;
-    gap: 10px;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border);
-    align-items: center;
-    font-size: var(--text-sm);
-  }
-  .auth-row:last-child { border-bottom: none; }
-  .auth-row__name {
-    font-weight: 700; font-variation-settings: 'wght' 700;
-    color: var(--text);
-  }
-  .auth-row__metric {
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
-  .auth-row__metric strong {
-    font-weight: 800; font-variation-settings: 'wght' 800;
-  }
-  .auth-header {
-    display: grid;
-    grid-template-columns: 1fr 70px 80px 80px 80px 80px;
-    gap: 10px;
-    padding: 10px 16px;
-    background: var(--off-white);
-    border-bottom: 1px solid var(--border);
-    font-size: var(--text-xs);
-    font-weight: 800; font-variation-settings: 'wght' 800;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--text-muted);
-    cursor: default;
-  }
-  .auth-header > span:not(:first-child) { text-align: right; cursor: pointer; user-select: none; }
-  .auth-header > span:hover { color: var(--text); }
-  .auth-header > span.active { color: var(--primary); }
-
-  @media (max-width: 720px) {
-    .auth-row, .auth-header { grid-template-columns: 1fr 60px 70px 70px; }
-    .auth-row > *:nth-child(n+5), .auth-header > *:nth-child(n+5) { display: none; }
-  }
-
-  /* Date-range filter */
-  .ins-filter-row {
-    display: flex;
-    gap: 12px;
-    align-items: end;
-    margin-bottom: 16px;
-    flex-wrap: wrap;
-  }
-  .ins-filter-row > div {
-    display: flex; flex-direction: column; gap: 4px;
-  }
-  .ins-filter-row label {
-    font-size: var(--text-xs);
-    font-weight: 800; font-variation-settings: 'wght' 800;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--text-muted);
-  }
-  .ins-filter-row input, .ins-filter-row select {
-    padding: 6px 10px;
-    font-family: var(--font);
-    font-size: var(--text-sm);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--white);
-    color: var(--text);
-  }
-
   /* SVG common */
   .svg-axis-line { stroke: var(--border); stroke-width: 1; }
   .svg-axis-label { fill: var(--text-muted); font-size: 11px; font-family: var(--font); }
@@ -546,7 +486,6 @@
     <button class="ins-tab active" data-tab="overview">Overview</button>
     <button class="ins-tab" data-tab="timing">Timing</button>
     <button class="ins-tab" data-tab="gems">Gems &amp; Traps</button>
-    <button class="ins-tab" data-tab="authors">Authors</button>
   </div>
 
   <!-- OVERVIEW -->
@@ -618,38 +557,6 @@
     </div>
   </div>
 
-  <!-- AUTHORS -->
-  <div class="ins-pane" data-pane="authors">
-    <div class="ins-section-head">
-      <h2>Author performance</h2>
-      <span class="ins-sub">Volume, audience &amp; engagement by writer</span>
-    </div>
-    <div class="ins-filter-row">
-      <div>
-        <label>Period</label>
-        <select id="authPeriod">
-          <option value="all">All time</option>
-          <option value="365">Last 12 months</option>
-          <option value="180">Last 6 months</option>
-          <option value="90" selected>Last 90 days</option>
-          <option value="30">Last 30 days</option>
-        </select>
-      </div>
-      <div>
-        <label>Min articles</label>
-        <select id="authMin">
-          <option value="1">1+</option>
-          <option value="5" selected>5+</option>
-          <option value="10">10+</option>
-          <option value="25">25+</option>
-        </select>
-      </div>
-    </div>
-    <div id="authBody">
-      <div class="ins-loading">Loading authors…</div>
-    </div>
-  </div>
-
 </div><!-- /.main -->
 
 </div><!-- /#pageWrap -->
@@ -667,10 +574,7 @@ var STATE = {
   currentTab: 'overview',
   selectedArticle: null,   // for timing single-curve view
   cohortToggles: {},       // hour bucket -> true/false
-  gtMode: 'gems',
-  authPeriod: 90,
-  authMin: 5,
-  authSort: 'medianViews'
+  gtMode: 'gems'
 };
 
 var DATA_BASE = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/';
@@ -836,7 +740,16 @@ function cumulativeFromPublish(article, hourly, hoursWindow) {
 function loadAllData() {
   return Promise.all([
     fetch(ARTICLES_URL + '?t=' + Date.now()).then(function(r) { return r.json(); }),
-    fetch(HOURLY_URL + '?t=' + Date.now()).then(function(r) { return r.json(); }).catch(function() { return null; })
+    fetch(HOURLY_URL + '?t=' + Date.now()).then(function(r) {
+      if (!r.ok) {
+        console.warn('[Insights] ga-hourly.json fetch failed:', r.status, r.statusText, '— Timing tab will show empty state until file is deployed.');
+        return null;
+      }
+      return r.json();
+    }).catch(function(err) {
+      console.warn('[Insights] ga-hourly.json error:', err.message, '— Timing tab will show empty state until file is deployed.');
+      return null;
+    })
   ]).then(function(results) {
     var idx = results[0];
     var hourly = results[1];
@@ -878,7 +791,6 @@ function activateTab(name) {
   if (name === 'overview' && !STATE._renderedOverview) { renderOverview(); STATE._renderedOverview = true; }
   if (name === 'timing' && !STATE._renderedTiming)     { renderTimingTab(); STATE._renderedTiming = true; }
   if (name === 'gems' && !STATE._renderedGems)         { renderGemsTraps(); STATE._renderedGems = true; }
-  if (name === 'authors' && !STATE._renderedAuthors)   { renderAuthors(); STATE._renderedAuthors = true; }
 }
 
 /* ============ OVERVIEW TAB ============ */
@@ -1091,6 +1003,16 @@ function truncate(s, n) {
 /* ============ TIMING TAB ============ */
 function renderTimingTab() {
   setupArticlePicker();
+
+  // Reset single-article view to its empty-prompt state. Otherwise the
+  // "Loading data…" placeholder injected at startup persists here forever
+  // (this view doesn't auto-load anything — it waits for article selection).
+  var single = $('singleCurveChart');
+  if (single) {
+    single.className = 'chart-empty';
+    single.innerHTML = 'Pick an article to see its first-72-hour curve.';
+  }
+
   renderCohortControls();
   renderCohortChart();
   renderHeatmap();
@@ -1620,107 +1542,6 @@ function renderTrapsList() {
   return html;
 }
 
-/* ============ AUTHORS ============ */
-function renderAuthors() {
-  $('authPeriod').addEventListener('change', function(e) {
-    STATE.authPeriod = e.target.value === 'all' ? 0 : parseInt(e.target.value, 10);
-    renderAuthorsBody();
-  });
-  $('authMin').addEventListener('change', function(e) {
-    STATE.authMin = parseInt(e.target.value, 10);
-    renderAuthorsBody();
-  });
-  renderAuthorsBody();
-}
-
-function renderAuthorsBody() {
-  var body = $('authBody');
-  var cutoff = STATE.authPeriod ? Date.now() - (STATE.authPeriod * 86400 * 1000) : 0;
-
-  var byAuthor = {};
-  STATE.articles.forEach(function(a) {
-    if (cutoff && new Date(a.publishedDateTime).getTime() < cutoff) return;
-    var name = (a.postAuthor || '').trim();
-    if (!name) return;
-    if (!byAuthor[name]) {
-      byAuthor[name] = { name: name, articles: 0, viewsList: [], dwellList: [], rtList: [], totalViews: 0, totalWords: 0 };
-    }
-    byAuthor[name].articles++;
-    if (a.metrics) {
-      var pv = a.metrics.pageViews || 0;
-      byAuthor[name].viewsList.push(pv);
-      byAuthor[name].totalViews += pv;
-      if (a.metrics.avgEngagementTimeSecs) byAuthor[name].dwellList.push(a.metrics.avgEngagementTimeSecs);
-      var wc = wordCount(a);
-      if (wc) {
-        byAuthor[name].totalWords += wc;
-        if (a.metrics.avgEngagementTimeSecs) {
-          var expected = wc * (60 / 225);
-          byAuthor[name].rtList.push(a.metrics.avgEngagementTimeSecs / expected);
-        }
-      }
-    }
-  });
-
-  var rows = Object.values(byAuthor)
-    .filter(function(r) { return r.articles >= STATE.authMin; })
-    .map(function(r) {
-      r.medianViews = median(r.viewsList);
-      r.medianDwell = median(r.dwellList);
-      r.medianRt = median(r.rtList);
-      r.avgWords = r.articles > 0 ? Math.round(r.totalWords / r.articles) : 0;
-      return r;
-    });
-
-  rows.sort(function(a, b) {
-    var key = STATE.authSort;
-    return (b[key] || 0) - (a[key] || 0);
-  });
-
-  if (!rows.length) {
-    body.innerHTML = '<div class="ins-loading">No authors meet the threshold.</div>';
-    return;
-  }
-
-  var html = '<div class="auth-grid">' +
-    '<div class="auth-header">' +
-      '<span>Author</span>' +
-      '<span class="' + (STATE.authSort === 'articles' ? 'active' : '') + '" data-sort="articles">Articles</span>' +
-      '<span class="' + (STATE.authSort === 'totalViews' ? 'active' : '') + '" data-sort="totalViews">Total views</span>' +
-      '<span class="' + (STATE.authSort === 'medianViews' ? 'active' : '') + '" data-sort="medianViews">Median views</span>' +
-      '<span class="' + (STATE.authSort === 'medianDwell' ? 'active' : '') + '" data-sort="medianDwell">Median dwell</span>' +
-      '<span class="' + (STATE.authSort === 'medianRt' ? 'active' : '') + '" data-sort="medianRt">Read-thru</span>' +
-    '</div>';
-
-  rows.forEach(function(r) {
-    html += '<div class="auth-row">' +
-      '<span class="auth-row__name">' + esc(r.name) + '</span>' +
-      '<span class="auth-row__metric"><strong>' + r.articles + '</strong></span>' +
-      '<span class="auth-row__metric">' + formatCount(r.totalViews) + '</span>' +
-      '<span class="auth-row__metric">' + (r.medianViews ? formatCount(r.medianViews) : '—') + '</span>' +
-      '<span class="auth-row__metric">' + (r.medianDwell ? formatDuration(r.medianDwell) : '—') + '</span>' +
-      '<span class="auth-row__metric">' + (r.medianRt ? Math.round(r.medianRt * 100) + '%' : '—') + '</span>' +
-      '</div>';
-  });
-  html += '</div>';
-
-  body.innerHTML = html;
-
-  // Wire sort headers
-  $$('#authBody .auth-header span[data-sort]').forEach(function(s) {
-    s.addEventListener('click', function() {
-      STATE.authSort = s.dataset.sort;
-      renderAuthorsBody();
-    });
-  });
-}
-
-function median(arr) {
-  if (!arr || !arr.length) return 0;
-  var s = arr.slice().sort(function(a, b) { return a - b; });
-  return s[Math.floor(s.length / 2)];
-}
-
 /* ============ ENTRY POINT ============ */
 window.nlAuthReady = function(session) {
   // Wire tab clicks immediately
@@ -1729,7 +1550,7 @@ window.nlAuthReady = function(session) {
   });
 
   // Show "loading data" state across all tabs
-  ['ovBody', 'singleCurveChart', 'cohortChart', 'heatmap', 'gtBody', 'authBody'].forEach(function(id) {
+  ['ovBody', 'singleCurveChart', 'cohortChart', 'heatmap', 'gtBody'].forEach(function(id) {
     var el = $(id);
     if (el) el.innerHTML = '<div class="ins-loading">Loading data…</div>';
   });
@@ -1739,7 +1560,11 @@ window.nlAuthReady = function(session) {
     activateTab(STATE.currentTab);
   }).catch(function(err) {
     console.error('Data load failed:', err);
-    $('ovBody').innerHTML = '<div class="ins-loading">Failed to load data: ' + esc(err.message) + '</div>';
+    var msg = '<div class="ins-loading">Failed to load data: ' + esc(err.message) + '</div>';
+    ['ovBody', 'singleCurveChart', 'cohortChart', 'heatmap', 'gtBody'].forEach(function(id) {
+      var el = $(id);
+      if (el) el.innerHTML = msg;
+    });
   });
 };
 </script>
