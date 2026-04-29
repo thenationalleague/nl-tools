@@ -3,10 +3,28 @@
 <head>
 <!--
   NL Tools — Website Insights
-  Version: 1.2
+  Version: 1.3
   Date: 28/04/2026
 
   CHANGELOG
+  v1.3 (28/04/2026)
+    - Major fix: hourly data join was broken for almost all recent
+      articles. GA truncates pagePath to ~80 chars in its API response,
+      and modern article slugs no longer have the trailing -NUMERIC_ID
+      that the old join relied on. Replaced the regex-based join with
+      a date-directory + slug-prefix matcher that handles truncation,
+      apostrophe encoding differences, and trailing slashes.
+      Result: cohort chart and per-article curves now actually populate.
+      Console logs match counts at startup so we can spot future drift.
+    - Article picker rebuilt:
+        * No longer a collapsing dropdown — inline list, always visible
+        * Shows publish date AND time (was just date)
+        * Shows lifetime views per article on the right
+        * Highlights selected article with brand-red accent border
+        * Filters to only articles where hourly data is actually
+          available (was: any article in window, regardless of join)
+    - Cohort chart legend moved above the plot. Was overlapping the
+      "Hours since publish" X-axis title at the bottom.
   v1.2 (28/04/2026)
     - Removed Authors tab. Wasn't useful for current decisions.
       Removed: tab button, pane HTML, .auth-* CSS, .ins-filter-row CSS,
@@ -91,6 +109,15 @@
   var NL_TOOL_KEY = 'staff-website-insights';
 
   window.NL_CHANGELOG = [
+    {
+      date: '28 April 2026',
+      version: 'v1.3',
+      items: [
+        'Timing tab now actually populates — recent articles are correctly matched to their hourly view data.',
+        'Article picker rebuilt: inline list, shows publish time and lifetime views, no more dropdown collapsing as you click.',
+        'Cohort chart legend moved above the chart so it no longer overlaps the X-axis label.'
+      ]
+    },
     {
       date: '28 April 2026',
       version: 'v1.2',
@@ -253,60 +280,77 @@
   }
 
   /* ============ TIMING TAB ============ */
-  .timing-controls {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 12px;
-    align-items: end;
+  .article-picker {
     margin-bottom: 16px;
   }
-  @media (max-width: 720px) {
-    .timing-controls { grid-template-columns: 1fr; }
-  }
-
-  .article-picker {
-    position: relative;
-  }
-  .article-picker input {
+  .article-picker__search {
     width: 100%;
-    padding: 8px 12px;
+    padding: 10px 14px;
     font-family: var(--font);
     font-size: var(--text-sm);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: var(--white);
+    margin-bottom: 8px;
   }
-  .article-picker__results {
-    position: absolute;
-    top: 100%; left: 0; right: 0;
+  .article-picker__list {
     background: var(--white);
     border: 1px solid var(--border);
-    border-top: none;
-    border-radius: 0 0 var(--radius) var(--radius);
-    max-height: 300px;
+    border-radius: var(--radius);
+    max-height: 240px;
     overflow-y: auto;
-    z-index: 10;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-    display: none;
   }
-  .article-picker__results.open { display: block; }
   .article-picker__option {
-    padding: 8px 12px;
+    padding: 10px 14px;
     cursor: pointer;
     border-bottom: 1px solid var(--border);
-    font-size: var(--text-sm);
-    line-height: 1.3;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    align-items: center;
   }
   .article-picker__option:last-child { border-bottom: none; }
   .article-picker__option:hover { background: var(--off-white); }
+  .article-picker__option.is-selected {
+    background: var(--off-white);
+    border-left: 3px solid var(--primary);
+    padding-left: 11px;
+  }
+  .article-picker__option-main {
+    min-width: 0;
+  }
   .article-picker__option-title {
+    font-size: var(--text-sm);
     font-weight: 700; font-variation-settings: 'wght' 700;
     color: var(--text);
     margin-bottom: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .article-picker__option-meta {
     color: var(--text-muted);
     font-size: var(--text-xs);
+  }
+  .article-picker__option-time {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .article-picker__option-time strong {
+    display: block;
+    font-size: var(--text-sm);
+    color: var(--text);
+    font-weight: 800; font-variation-settings: 'wght' 800;
+  }
+  .article-picker__empty {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+    font-style: italic;
   }
 
   /* SVG chart container */
@@ -510,11 +554,9 @@
       <div class="ins-section-head" style="margin-bottom: 8px;">
         <h2 class="ins-card__title">Single article — first 72 hours</h2>
       </div>
-      <div class="timing-controls">
-        <div class="article-picker">
-          <input type="search" id="articlePicker" placeholder="Type to search articles with timing data…" autocomplete="off">
-          <div class="article-picker__results" id="articlePickerResults"></div>
-        </div>
+      <div class="article-picker">
+        <input type="search" id="articlePickerSearch" class="article-picker__search" placeholder="Search recent articles…" autocomplete="off">
+        <div class="article-picker__list" id="articlePickerList"></div>
       </div>
       <div id="singleCurveChart" class="chart-empty">Pick an article to see its first-72-hour curve.</div>
     </div>
@@ -570,7 +612,6 @@ var STATE = {
   hourly: {},              // path -> [[ts, views], ...]
   hourlyMeta: {},          // generatedAt, startDate, endDate, windowDays
   byId: {},                // postID -> article
-  byPathSuffix: {},        // numeric ID suffix -> article (for hourly join)
   currentTab: 'overview',
   selectedArticle: null,   // for timing single-curve view
   cohortToggles: {},       // hour bucket -> true/false
@@ -669,33 +710,129 @@ function readingTimeMins(article) {
   return Math.max(1, Math.ceil(wc / 225));
 }
 
-/* Get the numeric ID from a slug or path. Used to join hourly data
-   (which is keyed by path) to articles (keyed by postID). */
-var ID_RX = /-(\d+)$/;
-function articleIdFromSlug(slug) {
-  if (!slug) return null;
-  var m = slug.match(ID_RX);
+/* ============ HOURLY DATA JOIN ============
+   GA's pagePath dimension truncates long slugs (typically around 80 chars).
+   Article slugs in articles-index.json end with a trailing slash and are
+   not truncated, so a naive equality match fails for almost every recent
+   article. And the legacy "ends with -NUMERIC_ID" trick only works for
+   pre-2024 articles where slugs included an article ID suffix.
+
+   The robust strategy:
+     1. For each hourly path, extract its date directory (/news/YYYY/month/D/).
+     2. Index articles by date directory.
+     3. For each hourly path, find the article in the same date directory
+        whose normalised slug shares the longest leading prefix with the
+        hourly path's slug-tail.
+     4. Build a map: postID -> [hourly path keys it owns].
+
+   This handles: truncation, slug-encoding differences (apostrophes,
+   double-dashes), trailing slash differences, and multiple articles per
+   day — all in a single deterministic pass.
+*/
+
+var ARTICLE_HOURLY_INDEX = {};   // postID -> array of hourly path keys
+var HOURLY_DIAGNOSTICS = { matched: 0, unmatched: 0, ambiguous: 0 };
+
+function pathDateDir(path) {
+  // Extract /news/YYYY/month/D/ from any path
+  var m = path.match(/^(\/news\/\d{4}\/[a-z]+\/\d{1,2})\//);
   return m ? m[1] : null;
 }
 
-/* Get the hourly time-series for an article. Aggregates across legacy
-   and modern URLs that share the same numeric ID, just like the merge
-   step in rebuild-index.js. Returns sparse [[ts, views], ...] sorted asc. */
-function hourlyForArticle(article) {
-  if (!article) return null;
-  var id = articleIdFromSlug(article.postSlug);
-  if (!id) return null;
+function pathSlugTail(path) {
+  // Everything after /news/YYYY/month/D/, lowercased, no trailing slash
+  var m = path.match(/^\/news\/\d{4}\/[a-z]+\/\d{1,2}\/(.*?)\/?$/);
+  return m ? m[1].toLowerCase() : '';
+}
 
-  var slugStripped = article.postSlug.replace(/\/$/, '');
-  // Find every hourly path that ends in -ID
-  var byTs = {};
-  Object.keys(STATE.hourly).forEach(function(path) {
-    var m = path.match(ID_RX);
-    if (m && m[1] === id) {
-      STATE.hourly[path].forEach(function(pt) {
-        byTs[pt[0]] = (byTs[pt[0]] || 0) + pt[1];
-      });
+function commonPrefixLen(a, b) {
+  var n = Math.min(a.length, b.length);
+  for (var i = 0; i < n; i++) {
+    if (a[i] !== b[i]) return i;
+  }
+  return n;
+}
+
+function buildHourlyIndex() {
+  ARTICLE_HOURLY_INDEX = {};
+  HOURLY_DIAGNOSTICS = { matched: 0, unmatched: 0, ambiguous: 0 };
+
+  if (!STATE.hourly || !Object.keys(STATE.hourly).length) return;
+
+  // 1. Group articles by their date directory
+  var articlesByDate = {};
+  STATE.articles.forEach(function(a) {
+    if (!a.postSlug) return;
+    var dir = pathDateDir(a.postSlug);
+    if (!dir) return;
+    if (!articlesByDate[dir]) articlesByDate[dir] = [];
+    articlesByDate[dir].push(a);
+  });
+
+  // 2. For each hourly path, find best-matching article in same date dir
+  Object.keys(STATE.hourly).forEach(function(hPath) {
+    var dir = pathDateDir(hPath);
+    if (!dir) return;
+    var candidates = articlesByDate[dir];
+    if (!candidates || !candidates.length) {
+      HOURLY_DIAGNOSTICS.unmatched++;
+      return;
     }
+
+    var hTail = pathSlugTail(hPath);
+    if (!hTail) return;
+
+    // Score each candidate by common leading-prefix length on the slug tail
+    var best = null;
+    var bestScore = -1;
+    var ties = 0;
+    candidates.forEach(function(a) {
+      var aTail = pathSlugTail(a.postSlug);
+      if (!aTail) return;
+      var score = commonPrefixLen(aTail, hTail);
+      if (score > bestScore) {
+        best = a;
+        bestScore = score;
+        ties = 0;
+      } else if (score === bestScore && score > 0) {
+        ties++;
+      }
+    });
+
+    // Require at least 8 chars of shared prefix to count as a match.
+    // Below that we're matching on the date directory alone, which would
+    // misroute hourly data for one article to another article that
+    // happens to share the same publish day.
+    if (best && bestScore >= 8) {
+      var pid = best.postID;
+      if (!ARTICLE_HOURLY_INDEX[pid]) ARTICLE_HOURLY_INDEX[pid] = [];
+      ARTICLE_HOURLY_INDEX[pid].push(hPath);
+      HOURLY_DIAGNOSTICS.matched++;
+      if (ties > 0) HOURLY_DIAGNOSTICS.ambiguous++;
+    } else {
+      HOURLY_DIAGNOSTICS.unmatched++;
+    }
+  });
+
+  console.log(
+    '[Insights] Hourly join: ' + HOURLY_DIAGNOSTICS.matched + ' matched, ' +
+    HOURLY_DIAGNOSTICS.unmatched + ' unmatched, ' +
+    HOURLY_DIAGNOSTICS.ambiguous + ' ambiguous (multiple articles same day with similar slugs).'
+  );
+}
+
+/* Get the hourly time-series for an article from the pre-built index.
+   Returns sparse [[ts, views], ...] sorted ascending, or null. */
+function hourlyForArticle(article) {
+  if (!article || !article.postID) return null;
+  var paths = ARTICLE_HOURLY_INDEX[article.postID];
+  if (!paths || !paths.length) return null;
+
+  var byTs = {};
+  paths.forEach(function(p) {
+    (STATE.hourly[p] || []).forEach(function(pt) {
+      byTs[pt[0]] = (byTs[pt[0]] || 0) + pt[1];
+    });
   });
   var keys = Object.keys(byTs).map(Number).sort(function(a, b) { return a - b; });
   if (!keys.length) return null;
@@ -756,11 +893,8 @@ function loadAllData() {
 
     STATE.articles = idx.articles || [];
     STATE.byId = {};
-    STATE.byPathSuffix = {};
     STATE.articles.forEach(function(a) {
       if (a.postID) STATE.byId[a.postID] = a;
-      var id = articleIdFromSlug(a.postSlug);
-      if (id) STATE.byPathSuffix[id] = a;
     });
 
     if (hourly && hourly.hourly) {
@@ -776,6 +910,9 @@ function loadAllData() {
       STATE.hourly = {};
       STATE.hourlyMeta = { windowDays: 0 };
     }
+
+    // Build the article->hourly path index once. Subsequent lookups are O(1).
+    buildHourlyIndex();
 
     return true;
   });
@@ -1026,60 +1163,90 @@ function renderTimingTab() {
 }
 
 function setupArticlePicker() {
-  var input = $('articlePicker');
-  var results = $('articlePickerResults');
-  if (!input) return;
+  var search = $('articlePickerSearch');
+  var list = $('articlePickerList');
+  if (!search || !list) return;
 
-  // Build pool: articles with hourly data available (i.e. published in window)
+  // Build pool: articles with hourly data available (i.e. published in window
+  // AND have a hourly path mapped). Show only articles where the join worked.
   var meta = STATE.hourlyMeta;
   var windowStart = Date.now() - ((meta.windowDays || 30) * 86400 * 1000);
   var pool = STATE.articles.filter(function(a) {
     var t = new Date(a.publishedDateTime).getTime();
-    return t >= windowStart;
+    if (t < windowStart) return false;
+    return ARTICLE_HOURLY_INDEX[a.postID] && ARTICLE_HOURLY_INDEX[a.postID].length;
   }).sort(function(a, b) {
     return new Date(b.publishedDateTime) - new Date(a.publishedDateTime);
   });
 
-  function renderResults(query) {
+  function formatTimeLabel(iso) {
+    var d = new Date(iso);
+    if (isNaN(d)) return '';
+    var hh = d.getUTCHours().toString().padStart(2, '0');
+    var mm = d.getUTCMinutes().toString().padStart(2, '0');
+    return hh + ':' + mm;
+  }
+
+  function renderList(query) {
     var q = (query || '').toLowerCase().trim();
     var matches = q ? pool.filter(function(a) {
       return (a.postTitle || '').toLowerCase().indexOf(q) >= 0 ||
              (a.postAuthor || '').toLowerCase().indexOf(q) >= 0;
-    }).slice(0, 50) : pool.slice(0, 50);
+    }) : pool;
 
     if (!matches.length) {
-      results.innerHTML = '<div class="article-picker__option">No matching articles in last ' + (meta.windowDays || 30) + ' days.</div>';
-    } else {
-      results.innerHTML = matches.map(function(a) {
-        return '<div class="article-picker__option" data-id="' + esc(a.postID) + '">' +
-          '<div class="article-picker__option-title">' + esc(truncate(a.postTitle, 80)) + '</div>' +
-          '<div class="article-picker__option-meta">' + esc(a.postAuthor || '—') + ' · ' + esc(formatDate(a.publishedDateTime)) + '</div>' +
-          '</div>';
-      }).join('');
+      list.innerHTML = '<div class="article-picker__empty">' +
+        (q ? 'No articles match.' : 'No articles with hourly data in the last ' + (meta.windowDays || 30) + ' days.') +
+        '</div>';
+      return;
     }
-    results.classList.add('open');
+
+    var selectedId = STATE.selectedArticle ? STATE.selectedArticle.postID : null;
+    list.innerHTML = matches.slice(0, 100).map(function(a) {
+      var isSel = a.postID === selectedId;
+      var views = (a.metrics && a.metrics.pageViews) ? formatCount(a.metrics.pageViews) : '—';
+      return '<div class="article-picker__option' + (isSel ? ' is-selected' : '') + '" data-id="' + esc(a.postID) + '">' +
+        '<div class="article-picker__option-main">' +
+          '<div class="article-picker__option-title">' + esc(a.postTitle || '(untitled)') + '</div>' +
+          '<div class="article-picker__option-meta">' + esc(a.postAuthor || '—') + ' \u00b7 ' +
+            esc(formatDate(a.publishedDateTime)) + ' \u00b7 ' + esc(formatTimeLabel(a.publishedDateTime)) +
+          '</div>' +
+        '</div>' +
+        '<div class="article-picker__option-time">' +
+          '<strong>' + views + '</strong>' +
+          'lifetime views' +
+        '</div>' +
+      '</div>';
+    }).join('');
   }
 
-  input.addEventListener('focus', function() { renderResults(input.value); });
-  input.addEventListener('input', function() { renderResults(input.value); });
-  input.addEventListener('blur', function() {
-    setTimeout(function() { results.classList.remove('open'); }, 200);
-  });
+  search.addEventListener('input', function() { renderList(search.value); });
 
-  results.addEventListener('click', function(e) {
+  list.addEventListener('click', function(e) {
     var opt = e.target.closest('.article-picker__option');
     if (!opt) return;
     var id = opt.dataset.id;
     if (id && STATE.byId[id]) selectArticle(STATE.byId[id]);
-    results.classList.remove('open');
   });
+
+  // Initial render
+  renderList('');
+
+  // Expose for re-render after selection (to update is-selected highlight)
+  STATE._renderPickerList = renderList;
 }
 
 function selectArticle(article) {
   STATE.selectedArticle = article;
-  var input = $('articlePicker');
-  if (input) input.value = article.postTitle;
   renderSingleCurve(article);
+  // Re-render list so the selected item shows the highlight
+  if (STATE._renderPickerList) {
+    var search = $('articlePickerSearch');
+    STATE._renderPickerList(search ? search.value : '');
+  }
+  // Scroll the chart into view (helpful when there are many articles in the list)
+  var chart = $('singleCurveChart');
+  if (chart) chart.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 function renderSingleCurve(article) {
@@ -1282,7 +1449,7 @@ function computeCohortSeries(hourSet) {
 
 function drawCohortSVG(cohortSeries) {
   var W = 800, H = 360;
-  var ML = 50, MR = 20, MT = 20, MB = 56;
+  var ML = 50, MR = 20, MT = 36, MB = 44;   // raised MT for legend, reduced MB
   var plotW = W - ML - MR, plotH = H - MT - MB;
 
   // Find max across all series
@@ -1299,6 +1466,19 @@ function drawCohortSVG(cohortSeries) {
   var yScale = function(v) { return MT + plotH - (v / maxV) * plotH; };
 
   var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
+
+  // Legend (above plot, reads left to right)
+  var legendY = 14;
+  var legendX = ML;
+  COHORT_DEFS.forEach(function(c) {
+    if (!STATE.cohortToggles[c.key]) return;
+    var s = cohortSeries[c.key];
+    if (!s || s.articleCount === 0) return;
+    var lab = c.label + ' (n=' + s.articleCount + ')';
+    svg += '<rect x="' + legendX + '" y="' + (legendY - 5) + '" width="14" height="3" fill="' + c.colour + '"/>';
+    svg += '<text class="svg-axis-label" x="' + (legendX + 18) + '" y="' + (legendY + 1) + '" style="fill: var(--text); font-weight: 700;">' + esc(lab) + '</text>';
+    legendX += 18 + lab.length * 6.5;
+  });
 
   // Y grid
   for (var i = 0; i <= 4; i++) {
@@ -1326,22 +1506,10 @@ function drawCohortSVG(cohortSeries) {
     svg += '<path class="svg-data-line" d="' + pathD + '" stroke="' + c.colour + '"/>';
   });
 
-  // Legend
-  var legendY = H - 16;
-  var legendX = ML;
-  COHORT_DEFS.forEach(function(c) {
-    if (!STATE.cohortToggles[c.key]) return;
-    var s = cohortSeries[c.key];
-    if (!s || s.articleCount === 0) return;
-    var lab = c.label + ' (n=' + s.articleCount + ')';
-    svg += '<rect x="' + legendX + '" y="' + (legendY - 7) + '" width="14" height="3" fill="' + c.colour + '"/>';
-    svg += '<text class="svg-axis-label" x="' + (legendX + 18) + '" y="' + (legendY - 1) + '" style="fill: var(--text); font-weight: 700;">' + esc(lab) + '</text>';
-    legendX += 18 + lab.length * 6.5;
-  });
-
-  // Y axis title
+  // Y axis title (rotated)
   svg += '<text class="svg-axis-label" x="-' + (MT + plotH / 2) + '" y="14" text-anchor="middle" transform="rotate(-90)" style="font-size: 10px;">Avg cumulative views</text>';
-  svg += '<text class="svg-axis-label" x="' + (ML + plotW / 2) + '" y="' + (MT + plotH + 32) + '" text-anchor="middle">Hours since publish</text>';
+  // X axis title (below ticks, no longer overlaps legend)
+  svg += '<text class="svg-axis-label" x="' + (ML + plotW / 2) + '" y="' + (H - 8) + '" text-anchor="middle">Hours since publish</text>';
 
   svg += '</svg>';
   return svg;
