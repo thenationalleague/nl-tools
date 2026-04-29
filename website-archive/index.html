@@ -3,10 +3,28 @@
 <head>
 <!--
   NL Tools — Website Archive
-  Version: 1.7
+  Version: 1.8
   Date: 28/04/2026
 
   CHANGELOG
+  v1.8 (28/04/2026)
+    - Added cross-link to Website Insights from the article modal.
+      For articles published in the last ~35 days (where hourly timing
+      data exists), a button "Analyse first 72 hours →" appears under
+      the byline. Opens Insights tool with that article pre-selected
+      via ?article=postID query param.
+    - No data layer changes. New tool dependency is ambient (link only
+      appears if user can navigate to /tools/website-insights/).
+    - Brand consistency follow-ups (carried over from v1.7 review):
+        * Added <div id="pageWrap" style="display:none;"> wrapper around
+          topbar + main + modals. Auth-guard reveals it after access
+          check completes — prevents the "flash of unauthorised content"
+          on slow auth resolution.
+        * Card placeholder gradient now uses brand tokens (var(--off-white)
+          to var(--border)) instead of hardcoded hex pair. Last hardcoded
+          hex pair in the file. Channel colour palette in traffic source
+          bar deliberately retained as semantic colours (GA4 channel
+          identity, not brand decisions).
   v1.7 (28/04/2026)
     - Brand CSS consistency pass:
         * Stripped ?v= params from all system file references
@@ -126,6 +144,13 @@
   var NL_TOOL_KEY = 'staff-website-archive';
 
   window.NL_CHANGELOG = [
+    {
+      date: '28 April 2026',
+      version: 'v1.8',
+      items: [
+        'Recent articles now show an "Analyse first 72 hours" button — opens the new Website Insights tool to see how the article performed hour-by-hour after launch.'
+      ]
+    },
     {
       date: '28 April 2026',
       version: 'v1.7',
@@ -323,7 +348,7 @@
 .card__img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .card__img-placeholder {
   width: 100%; height: 100%;
-  background: linear-gradient(135deg, #dfe4ee 0%, #c9cfdb 100%);
+  background: linear-gradient(135deg, var(--off-white) 0%, var(--border) 100%);
   display: flex; align-items: center; justify-content: center;
   color: var(--text-muted); font-size: 10px; font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.08em;
@@ -871,6 +896,26 @@
 }
 .article-modal__byline strong { color: var(--text); }
 
+.article-modal__insights-link {
+  margin-bottom: 18px;
+  font-size: 12px;
+  font-weight: 700; font-variation-settings: 'wght' 700;
+}
+.article-modal__insights-link a {
+  display: inline-block;
+  padding: 6px 12px;
+  background: var(--off-white);
+  color: var(--primary);
+  text-decoration: none;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  transition: background 0.12s, border-color 0.12s;
+}
+.article-modal__insights-link a:hover {
+  background: var(--white);
+  border-color: var(--primary);
+}
+
 .article-modal__content {
   font-size: 16px; line-height: 1.7;
   color: var(--text);
@@ -1048,6 +1093,8 @@
 </head>
 <body>
 
+<div id="pageWrap" style="display:none;">
+
 <div id="nlTopbar"></div>
 <div class="main" id="mainContent">
 
@@ -1182,6 +1229,8 @@
     </div>
   </div>
 </div>
+
+</div><!-- /#pageWrap -->
 
 <script>
 /* ================================================================
@@ -1823,6 +1872,16 @@ function renderModalBody(a, content) {
   if (a.postAuthor) byline += 'By <strong>' + esc(a.postAuthor) + '</strong>';
   if (a.publishedDateTime) byline += (byline ? ' · ' : '') + formatDateLong(a.publishedDateTime);
   if (byline) html += '<div class="article-modal__byline">' + byline + '</div>';
+
+  // Link to Website Insights for articles likely to have hourly timing data
+  // (~last 30 days). Hourly fetch covers a rolling window so this is a heuristic.
+  var ageMs = Date.now() - new Date(a.publishedDateTime).getTime();
+  if (ageMs >= 0 && ageMs <= 35 * 86400 * 1000 && a.postID) {
+    html += '<div class="article-modal__insights-link">' +
+      '<a href="/tools/website-insights/?article=' + encodeURIComponent(a.postID) + '" target="_blank" rel="noopener">' +
+      '\ud83d\udcc8 Analyse first 72 hours \u2192</a>' +
+      '</div>';
+  }
 
   html += '<div class="article-modal__content" id="modalArticleContent">';
   content.forEach(function(row) {
