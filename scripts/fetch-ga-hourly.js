@@ -1,6 +1,6 @@
 /* =======================================================================
    NL Website Insights - GA Hourly Fetch
-   Version: 1.0
+   Version: 1.1
    Date: 28/04/2026
 
    Queries GA4 for hour-level page-view data so we can analyse article
@@ -15,7 +15,9 @@
    QUERY SHAPE
      Dimension:  pagePath, dateHour    (dateHour format YYYYMMDDHH)
      Metric:     screenPageViews
-     Date range: last 30 days (start conservative; extend later if quota allows)
+     Date range: last 90 days (covers full cohort comparison + decay
+                 analysis; 30 days was too tight for stable cohort
+                 medians on lower-volume publish slots)
 
    OUTPUT SHAPE
      {
@@ -53,6 +55,9 @@
      - First run is heavier than subsequent: most paths cold for 30 days
 
    CHANGELOG
+   v1.1 (28/04/2026) - Window extended from 30 to 90 days (richer cohort
+                       analysis; output ~12-15MB vs ~5MB; well within
+                       GA4 quota — single query under 200 tokens)
    v1.0 (28/04/2026) - Initial build for Insights tool
 ======================================================================= */
 
@@ -62,7 +67,7 @@ const { BetaAnalyticsDataClient } = require('@google-analytics/data');
 
 const OUTPUT_PATH = path.join(__dirname, '..', 'assets', 'data', 'ga-hourly.json');
 const GA_PROPERTY_ID = process.env.GA_PROPERTY_ID;
-const WINDOW_DAYS = 30;
+const WINDOW_DAYS = 90;
 const PAGE_SIZE = 100000;
 
 function log(msg) {
