@@ -1,0 +1,1714 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<!--
+  NL Tools — Website Insights
+  Version: 1.0
+  Date: 28/04/2026
+
+  CHANGELOG
+  v1.0 (28/04/2026)
+    - Initial release. Sister tool to Website Archive.
+    - Four tabs: Overview, Timing, Gems & Traps, Authors.
+    - Loads articles-index.json (filters, article picker) and the new
+      ga-hourly.json (timing data for first-72h curves).
+    - All charts hand-rolled SVG/HTML — no external chart library, no
+      external deps. ~50-150 lines of JS per chart.
+    - Modal cross-link from archive tool deep-links here via ?article=ID.
+
+  Tabs:
+    Overview    — auto-generated digest. Top performer, biggest gem,
+                  biggest trap, time-of-day winner. Single-screen brief.
+    Timing      — single-article curve picker, cohort comparison overlay,
+                  24x7 hour-of-day heatmap. Answers: when should we publish?
+    Gems&Traps  — high read-through low views (gems), high views low
+                  engagement (traps). Both sortable, surface hidden value
+                  and clickbait failures.
+    Authors     — per-author stats grid, volume vs quality scatter,
+                  category specialisation. Editorial accountability.
+
+  Pre-requisites:
+    /scripts/fetch-ga-hourly.js v1.0 — produces ga-hourly.json
+    /scripts/fetch-ga-metrics.js v2.1+
+    /scripts/rebuild-index.js v2.5+
+    Workflow rebuild-index.yml extended to call fetch-ga-hourly.js
+
+  Audience: NL editorial staff + senior leadership.
+  All audiences see the same detail — clarity comes from charts, not
+  layered abstractions. No simplified view, no dumbed-down version.
+-->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Website Insights — NL Tools</title>
+
+<link rel="stylesheet" href="/tools/system/nl-brand.css">
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script>
+  firebase.initializeApp({
+    apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+    authDomain:        "nl-tools.firebaseapp.com",
+    databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId:         "nl-tools",
+    storageBucket:     "nl-tools.firebasestorage.app",
+    messagingSenderId: "801354670005",
+    appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+  });
+</script>
+<script>
+  window.NL_TOOL = {
+    title: 'Website Insights',
+    toolKey: 'staff-website-insights'
+  };
+  var NL_TOOL_KEY = 'staff-website-insights';
+
+  window.NL_CHANGELOG = [
+    {
+      date: '28 April 2026',
+      version: 'v1.0',
+      items: [
+        'Initial release of Website Insights — companion tool to the Website Archive.',
+        'Overview tab summarises the past month\'s biggest performers, hidden gems and time-of-day winners.',
+        'Timing tab shows article view curves over the first 72 hours, plus cohort comparisons by publish hour.',
+        'Gems & Traps tab surfaces quality work that didn\'t reach an audience — and articles that got clicks but not engagement.',
+        'Authors tab shows per-author volume, average performance and category specialisation.'
+      ]
+    }
+  ];
+</script>
+<script src="/tools/system/nl-utils.js"></script>
+<script src="/tools/system/nl-topbar.js"></script>
+<script src="/tools/system/auth-guard.js"></script>
+
+<style>
+  /* ============ TAB BAR ============ */
+  .ins-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid var(--border);
+    margin-bottom: 24px;
+    overflow-x: auto;
+  }
+  .ins-tab {
+    background: none;
+    border: none;
+    padding: 12px 20px;
+    font-family: var(--font);
+    font-size: 14px;
+    font-weight: 700; font-variation-settings: 'wght' 700;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .ins-tab:hover { color: var(--text); }
+  .ins-tab.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+  }
+
+  .ins-pane { display: none; }
+  .ins-pane.active { display: block; }
+
+  /* ============ SHARED ============ */
+  .ins-section-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 16px; margin-bottom: 12px; flex-wrap: wrap;
+  }
+  .ins-section-head h2 {
+    font-size: 18px;
+    font-weight: 800; font-variation-settings: 'wght' 800;
+    color: var(--text);
+    margin: 0;
+  }
+  .ins-section-head .ins-sub {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-weight: 600; font-variation-settings: 'wght' 600;
+  }
+
+  .ins-card {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  .ins-loading {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  /* ============ OVERVIEW STAT CARDS ============ */
+  .ov-stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  @media (max-width: 860px) {
+    .ov-stats { grid-template-columns: repeat(2, 1fr); }
+  }
+  .ov-stat {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+  }
+  .ov-stat__label {
+    font-size: 9px;
+    font-weight: 800; font-variation-settings: 'wght' 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+  .ov-stat__value {
+    font-size: 22px;
+    font-weight: 800; font-variation-settings: 'wght' 800;
+    line-height: 1.1;
+    color: var(--text);
+    margin-bottom: 4px;
+  }
+  .ov-stat__detail {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.4;
+  }
+  .ov-stat__detail strong {
+    color: var(--text);
+    font-weight: 700; font-variation-settings: 'wght' 700;
+  }
+
+  .ov-narrative {
+    background: var(--off-white);
+    padding: 16px 18px;
+    border-radius: var(--radius);
+    border-left: 4px solid var(--primary);
+    margin-bottom: 24px;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text);
+  }
+
+  /* ============ TIMING TAB ============ */
+  .timing-controls {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    align-items: end;
+    margin-bottom: 16px;
+  }
+  @media (max-width: 720px) {
+    .timing-controls { grid-template-columns: 1fr; }
+  }
+
+  .article-picker {
+    position: relative;
+  }
+  .article-picker input {
+    width: 100%;
+    padding: 8px 12px;
+    font-family: var(--font);
+    font-size: 13px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--white);
+  }
+  .article-picker__results {
+    position: absolute;
+    top: 100%; left: 0; right: 0;
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 var(--radius) var(--radius);
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 10;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    display: none;
+  }
+  .article-picker__results.open { display: block; }
+  .article-picker__option {
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    line-height: 1.3;
+  }
+  .article-picker__option:last-child { border-bottom: none; }
+  .article-picker__option:hover { background: var(--off-white); }
+  .article-picker__option-title {
+    font-weight: 700; font-variation-settings: 'wght' 700;
+    color: var(--text);
+    margin-bottom: 2px;
+  }
+  .article-picker__option-meta {
+    color: var(--text-muted);
+    font-size: 11px;
+  }
+
+  /* SVG chart container */
+  .chart-wrap {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .chart-wrap svg { display: block; width: 100%; height: auto; }
+  .chart-empty {
+    padding: 60px 20px;
+    text-align: center;
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  /* Cohort selector */
+  .cohort-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+    align-items: center;
+  }
+  .cohort-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--off-white);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    font-size: 12px;
+    font-weight: 700; font-variation-settings: 'wght' 700;
+    cursor: pointer;
+    user-select: none;
+  }
+  .cohort-pill input { margin: 0; cursor: pointer; }
+  .cohort-pill.cohort-on {
+    background: var(--white);
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+
+  /* Heatmap */
+  .heatmap {
+    display: grid;
+    grid-template-columns: 50px repeat(7, 1fr);
+    gap: 2px;
+    font-size: 11px;
+  }
+  .heatmap__corner, .heatmap__col-label, .heatmap__row-label {
+    padding: 4px 6px;
+    color: var(--text-muted);
+    font-weight: 700; font-variation-settings: 'wght' 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 10px;
+  }
+  .heatmap__col-label { text-align: center; }
+  .heatmap__row-label { text-align: right; }
+  .heatmap__cell {
+    aspect-ratio: 1.5;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700; font-variation-settings: 'wght' 700;
+    color: var(--text);
+    cursor: default;
+  }
+  .heatmap__cell--null {
+    background: var(--off-white);
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  /* ============ GEMS & TRAPS ============ */
+  .gt-toggle {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .gt-toggle button {
+    background: none;
+    border: none;
+    padding: 8px 16px;
+    font-family: var(--font);
+    font-size: 12px;
+    font-weight: 700; font-variation-settings: 'wght' 700;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .gt-toggle button.active {
+    background: var(--primary);
+    color: var(--white);
+  }
+
+  .gt-list {
+    display: flex; flex-direction: column;
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .gt-row {
+    display: grid;
+    grid-template-columns: 1fr 80px 80px 80px 80px;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    align-items: center;
+    font-size: 12px;
+  }
+  .gt-row:last-child { border-bottom: none; }
+  .gt-row__title {
+    font-weight: 700; font-variation-settings: 'wght' 700;
+    line-height: 1.3;
+  }
+  .gt-row__sub {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+  .gt-row__metric {
+    text-align: right;
+    font-weight: 700; font-variation-settings: 'wght' 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .gt-row__metric--green { color: var(--green); }
+  .gt-row__metric--amber { color: var(--amber); }
+  .gt-row__metric--red   { color: var(--red); }
+  .gt-header {
+    display: grid;
+    grid-template-columns: 1fr 80px 80px 80px 80px;
+    gap: 10px;
+    padding: 8px 14px;
+    background: var(--off-white);
+    border-bottom: 1px solid var(--border);
+    font-size: 9px;
+    font-weight: 800; font-variation-settings: 'wght' 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+  }
+  .gt-header > span:not(:first-child) { text-align: right; }
+  @media (max-width: 720px) {
+    .gt-row, .gt-header { grid-template-columns: 1fr 70px 70px; }
+    .gt-row > *:nth-child(n+5), .gt-header > *:nth-child(n+5) { display: none; }
+  }
+
+  /* ============ AUTHORS ============ */
+  .auth-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .auth-row {
+    display: grid;
+    grid-template-columns: 1fr 70px 80px 80px 80px 80px;
+    gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    align-items: center;
+    font-size: 12px;
+  }
+  .auth-row:last-child { border-bottom: none; }
+  .auth-row__name {
+    font-weight: 700; font-variation-settings: 'wght' 700;
+    color: var(--text);
+  }
+  .auth-row__metric {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .auth-row__metric strong {
+    font-weight: 800; font-variation-settings: 'wght' 800;
+  }
+  .auth-header {
+    display: grid;
+    grid-template-columns: 1fr 70px 80px 80px 80px 80px;
+    gap: 10px;
+    padding: 10px 16px;
+    background: var(--off-white);
+    border-bottom: 1px solid var(--border);
+    font-size: 9px;
+    font-weight: 800; font-variation-settings: 'wght' 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    cursor: default;
+  }
+  .auth-header > span:not(:first-child) { text-align: right; cursor: pointer; user-select: none; }
+  .auth-header > span:hover { color: var(--text); }
+  .auth-header > span.active { color: var(--primary); }
+
+  @media (max-width: 720px) {
+    .auth-row, .auth-header { grid-template-columns: 1fr 60px 70px 70px; }
+    .auth-row > *:nth-child(n+5), .auth-header > *:nth-child(n+5) { display: none; }
+  }
+
+  /* Date-range filter */
+  .ins-filter-row {
+    display: flex;
+    gap: 12px;
+    align-items: end;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .ins-filter-row > div {
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .ins-filter-row label {
+    font-size: 9px;
+    font-weight: 800; font-variation-settings: 'wght' 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+  }
+  .ins-filter-row input, .ins-filter-row select {
+    padding: 6px 10px;
+    font-family: var(--font);
+    font-size: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--white);
+    color: var(--text);
+  }
+
+  /* SVG common */
+  .svg-axis-line { stroke: var(--border); stroke-width: 1; }
+  .svg-axis-label { fill: var(--text-muted); font-size: 10px; font-family: var(--font); }
+  .svg-axis-tick { stroke: var(--border); stroke-width: 1; }
+  .svg-grid-line { stroke: var(--border); stroke-width: 1; stroke-dasharray: 2,2; opacity: 0.5; }
+  .svg-data-line { fill: none; stroke-width: 2; }
+  .svg-data-point { stroke: var(--white); stroke-width: 1.5; }
+  .svg-publish-marker { stroke: var(--red); stroke-width: 1.5; stroke-dasharray: 4,3; }
+  .svg-tooltip-bg { fill: var(--text); }
+  .svg-tooltip-text { fill: var(--white); font-size: 11px; font-family: var(--font); font-weight: 700; }
+</style>
+</head>
+<body>
+
+<div id="pageWrap" style="display:none;">
+
+<div id="nlTopbar"></div>
+<div class="main">
+
+  <!-- TAB BAR -->
+  <div class="ins-tabs" id="insTabs">
+    <button class="ins-tab active" data-tab="overview">Overview</button>
+    <button class="ins-tab" data-tab="timing">Timing</button>
+    <button class="ins-tab" data-tab="gems">Gems &amp; Traps</button>
+    <button class="ins-tab" data-tab="authors">Authors</button>
+  </div>
+
+  <!-- OVERVIEW -->
+  <div class="ins-pane active" data-pane="overview">
+    <div class="ins-section-head">
+      <h2>Overview</h2>
+      <span class="ins-sub" id="ovSub">Last 30 days</span>
+    </div>
+    <div id="ovBody">
+      <div class="ins-loading">Loading insights…</div>
+    </div>
+  </div>
+
+  <!-- TIMING -->
+  <div class="ins-pane" data-pane="timing">
+    <div class="ins-section-head">
+      <h2>Article timing</h2>
+      <span class="ins-sub">When articles are read &amp; how publish-time affects performance</span>
+    </div>
+
+    <div class="ins-card">
+      <div class="ins-section-head" style="margin-bottom: 8px;">
+        <h2 style="font-size: 14px;">Single article — first 72 hours</h2>
+      </div>
+      <div class="timing-controls">
+        <div class="article-picker">
+          <input type="search" id="articlePicker" placeholder="Type to search articles with timing data…" autocomplete="off">
+          <div class="article-picker__results" id="articlePickerResults"></div>
+        </div>
+      </div>
+      <div id="singleCurveChart" class="chart-empty">Pick an article to see its first-72-hour curve.</div>
+    </div>
+
+    <div class="ins-card">
+      <div class="ins-section-head" style="margin-bottom: 8px;">
+        <h2 style="font-size: 14px;">Cohort comparison — average curve by publish hour</h2>
+      </div>
+      <div class="cohort-controls" id="cohortControls">
+        <span class="ins-sub">Toggle cohorts:</span>
+        <!-- cohort pills injected -->
+      </div>
+      <div id="cohortChart" class="chart-empty">Loading cohort data…</div>
+    </div>
+
+    <div class="ins-card">
+      <div class="ins-section-head" style="margin-bottom: 8px;">
+        <h2 style="font-size: 14px;">When are people reading? — heatmap by day &amp; hour</h2>
+        <span class="ins-sub">Median first-24h views, by publish weekday × hour</span>
+      </div>
+      <div id="heatmap" class="chart-empty">Loading heatmap…</div>
+    </div>
+  </div>
+
+  <!-- GEMS & TRAPS -->
+  <div class="ins-pane" data-pane="gems">
+    <div class="ins-section-head">
+      <h2>Gems &amp; Traps</h2>
+      <div class="gt-toggle" id="gtToggle">
+        <button class="active" data-mode="gems">Hidden Gems</button>
+        <button data-mode="traps">Traffic Traps</button>
+      </div>
+    </div>
+    <div id="gtSubhead" class="ins-sub" style="margin-bottom: 12px;">
+      Articles with strong reader engagement that didn't reach a wide audience. These are
+      candidates for renewed promotion — quality work the algorithm missed.
+    </div>
+    <div id="gtBody">
+      <div class="ins-loading">Loading…</div>
+    </div>
+  </div>
+
+  <!-- AUTHORS -->
+  <div class="ins-pane" data-pane="authors">
+    <div class="ins-section-head">
+      <h2>Author performance</h2>
+      <span class="ins-sub">Volume, audience &amp; engagement by writer</span>
+    </div>
+    <div class="ins-filter-row">
+      <div>
+        <label>Period</label>
+        <select id="authPeriod">
+          <option value="all">All time</option>
+          <option value="365">Last 12 months</option>
+          <option value="180">Last 6 months</option>
+          <option value="90" selected>Last 90 days</option>
+          <option value="30">Last 30 days</option>
+        </select>
+      </div>
+      <div>
+        <label>Min articles</label>
+        <select id="authMin">
+          <option value="1">1+</option>
+          <option value="5" selected>5+</option>
+          <option value="10">10+</option>
+          <option value="25">25+</option>
+        </select>
+      </div>
+    </div>
+    <div id="authBody">
+      <div class="ins-loading">Loading authors…</div>
+    </div>
+  </div>
+
+</div><!-- /.main -->
+
+</div><!-- /#pageWrap -->
+
+<script>
+'use strict';
+
+/* ============ STATE ============ */
+var STATE = {
+  articles: [],            // from articles-index.json
+  hourly: {},              // path -> [[ts, views], ...]
+  hourlyMeta: {},          // generatedAt, startDate, endDate, windowDays
+  byId: {},                // postID -> article
+  byPathSuffix: {},        // numeric ID suffix -> article (for hourly join)
+  currentTab: 'overview',
+  selectedArticle: null,   // for timing single-curve view
+  cohortToggles: {},       // hour bucket -> true/false
+  gtMode: 'gems',
+  authPeriod: 90,
+  authMin: 5,
+  authSort: 'medianViews'
+};
+
+var DATA_BASE = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/';
+var ARTICLES_URL = DATA_BASE + 'articles-index.json';
+var HOURLY_URL   = DATA_BASE + 'ga-hourly.json';
+
+/* ============ HELPERS ============ */
+function $(id) { return document.getElementById(id); }
+function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+  });
+}
+
+function formatCount(n) {
+  if (n == null) return '—';
+  n = Number(n);
+  if (!isFinite(n)) return '—';
+  if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 10000)   return Math.round(n / 1000) + 'k';
+  if (n >= 1000)    return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+  return String(Math.round(n));
+}
+
+function formatDuration(secs) {
+  if (secs == null) return '—';
+  secs = Math.round(Number(secs));
+  if (!isFinite(secs) || secs < 0) return '—';
+  if (secs < 60) return secs + 's';
+  var m = Math.floor(secs / 60);
+  var s = secs % 60;
+  return m + 'm ' + (s < 10 ? '0' : '') + s + 's';
+}
+
+function formatPct(rate) {
+  if (rate == null) return '—';
+  return Math.round(Number(rate) * 100) + '%';
+}
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  var d = new Date(iso);
+  if (isNaN(d)) return '—';
+  return d.getUTCDate().toString().padStart(2, '0') + '/' +
+         (d.getUTCMonth() + 1).toString().padStart(2, '0') + '/' +
+         d.getUTCFullYear();
+}
+
+function formatDateLong(iso) {
+  if (!iso) return '—';
+  var d = new Date(iso);
+  if (isNaN(d)) return '—';
+  var months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  return d.getUTCDate() + ' ' + months[d.getUTCMonth()] + ' ' + d.getUTCFullYear();
+}
+
+function publishHourUTC(iso) {
+  if (!iso) return null;
+  var d = new Date(iso);
+  if (isNaN(d)) return null;
+  return d.getUTCHours();
+}
+
+function publishWeekdayUTC(iso) {
+  if (!iso) return null;
+  var d = new Date(iso);
+  if (isNaN(d)) return null;
+  return d.getUTCDay(); // 0=Sun .. 6=Sat
+}
+
+function publishUnixSec(iso) {
+  if (!iso) return null;
+  var d = new Date(iso);
+  if (isNaN(d)) return null;
+  return Math.floor(d.getTime() / 1000);
+}
+
+function wordCount(article) {
+  if (article._wc != null) return article._wc;
+  if (article.wordCount != null) { article._wc = article.wordCount; return article._wc; }
+  if (!article.bodyText) { article._wc = 0; return 0; }
+  article._wc = article.bodyText.trim().split(/\s+/).filter(Boolean).length;
+  return article._wc;
+}
+
+function readingTimeMins(article) {
+  var wc = wordCount(article);
+  if (!wc) return 0;
+  return Math.max(1, Math.ceil(wc / 225));
+}
+
+/* Get the numeric ID from a slug or path. Used to join hourly data
+   (which is keyed by path) to articles (keyed by postID). */
+var ID_RX = /-(\d+)$/;
+function articleIdFromSlug(slug) {
+  if (!slug) return null;
+  var m = slug.match(ID_RX);
+  return m ? m[1] : null;
+}
+
+/* Get the hourly time-series for an article. Aggregates across legacy
+   and modern URLs that share the same numeric ID, just like the merge
+   step in rebuild-index.js. Returns sparse [[ts, views], ...] sorted asc. */
+function hourlyForArticle(article) {
+  if (!article) return null;
+  var id = articleIdFromSlug(article.postSlug);
+  if (!id) return null;
+
+  var slugStripped = article.postSlug.replace(/\/$/, '');
+  // Find every hourly path that ends in -ID
+  var byTs = {};
+  Object.keys(STATE.hourly).forEach(function(path) {
+    var m = path.match(ID_RX);
+    if (m && m[1] === id) {
+      STATE.hourly[path].forEach(function(pt) {
+        byTs[pt[0]] = (byTs[pt[0]] || 0) + pt[1];
+      });
+    }
+  });
+  var keys = Object.keys(byTs).map(Number).sort(function(a, b) { return a - b; });
+  if (!keys.length) return null;
+  return keys.map(function(k) { return [k, byTs[k]]; });
+}
+
+/* Restrict an hourly series to the first N hours after publish */
+function firstNHoursAfterPublish(article, hourly, hoursWindow) {
+  if (!hourly || !hourly.length) return [];
+  var pubTs = publishUnixSec(article.publishedDateTime);
+  if (!pubTs) return [];
+  var cutoff = pubTs + (hoursWindow * 3600);
+  return hourly.filter(function(pt) {
+    return pt[0] >= pubTs - 3600 && pt[0] <= cutoff;  // include hour before publish to catch any pre-publish noise
+  });
+}
+
+/* Build cumulative series from sparse points relative to publish time.
+   Returns array of {hourSincePublish, cumulativeViews}. */
+function cumulativeFromPublish(article, hourly, hoursWindow) {
+  var pts = firstNHoursAfterPublish(article, hourly, hoursWindow);
+  if (!pts.length) return [];
+  var pubTs = publishUnixSec(article.publishedDateTime);
+  // Build hourly buckets from publish onwards
+  var buckets = {};
+  pts.forEach(function(pt) {
+    var hSince = Math.floor((pt[0] - pubTs) / 3600);
+    if (hSince < 0) return;  // skip pre-publish
+    if (hSince > hoursWindow) return;
+    buckets[hSince] = (buckets[hSince] || 0) + pt[1];
+  });
+  var out = [];
+  var cum = 0;
+  for (var h = 0; h <= hoursWindow; h++) {
+    cum += (buckets[h] || 0);
+    out.push({ hour: h, cumulative: cum, hourly: buckets[h] || 0 });
+  }
+  return out;
+}
+
+/* ============ DATA LOADING ============ */
+function loadAllData() {
+  return Promise.all([
+    fetch(ARTICLES_URL + '?t=' + Date.now()).then(function(r) { return r.json(); }),
+    fetch(HOURLY_URL + '?t=' + Date.now()).then(function(r) { return r.json(); }).catch(function() { return null; })
+  ]).then(function(results) {
+    var idx = results[0];
+    var hourly = results[1];
+
+    STATE.articles = idx.articles || [];
+    STATE.byId = {};
+    STATE.byPathSuffix = {};
+    STATE.articles.forEach(function(a) {
+      if (a.postID) STATE.byId[a.postID] = a;
+      var id = articleIdFromSlug(a.postSlug);
+      if (id) STATE.byPathSuffix[id] = a;
+    });
+
+    if (hourly && hourly.hourly) {
+      STATE.hourly = hourly.hourly;
+      STATE.hourlyMeta = {
+        generatedAt: hourly.generatedAt,
+        startDate:   hourly.startDate,
+        endDate:     hourly.endDate,
+        windowDays:  hourly.windowDays || 30,
+        pathCount:   hourly.pathCount
+      };
+    } else {
+      STATE.hourly = {};
+      STATE.hourlyMeta = { windowDays: 0 };
+    }
+
+    return true;
+  });
+}
+
+/* ============ TAB ROUTING ============ */
+function activateTab(name) {
+  STATE.currentTab = name;
+  $$('.ins-tab').forEach(function(b) { b.classList.toggle('active', b.dataset.tab === name); });
+  $$('.ins-pane').forEach(function(p) { p.classList.toggle('active', p.dataset.pane === name); });
+
+  // Lazy-render heavy tabs the first time they're opened
+  if (name === 'overview' && !STATE._renderedOverview) { renderOverview(); STATE._renderedOverview = true; }
+  if (name === 'timing' && !STATE._renderedTiming)     { renderTimingTab(); STATE._renderedTiming = true; }
+  if (name === 'gems' && !STATE._renderedGems)         { renderGemsTraps(); STATE._renderedGems = true; }
+  if (name === 'authors' && !STATE._renderedAuthors)   { renderAuthors(); STATE._renderedAuthors = true; }
+}
+
+/* ============ OVERVIEW TAB ============ */
+function renderOverview() {
+  var body = $('ovBody');
+  var meta = STATE.hourlyMeta;
+  $('ovSub').textContent = meta.windowDays
+    ? ('Hourly data: last ' + meta.windowDays + ' days · Aggregate metrics: lifetime')
+    : 'No hourly data available';
+
+  // Compute headlines
+  var totalArticles = STATE.articles.length;
+  var withMetrics = STATE.articles.filter(function(a) { return a.metrics && a.metrics.pageViews; });
+
+  // Last 30 days articles
+  var cutoff = Date.now() - (30 * 86400 * 1000);
+  var recent = STATE.articles.filter(function(a) {
+    var t = new Date(a.publishedDateTime).getTime();
+    return t >= cutoff;
+  });
+
+  // Top performer of last 30 days (by views)
+  var topRecent = recent.slice().sort(function(a, b) {
+    return ((b.metrics && b.metrics.pageViews) || 0) - ((a.metrics && a.metrics.pageViews) || 0);
+  })[0];
+
+  // Hidden gem = high read-through, modest views in last 90 days
+  var gemCutoff = Date.now() - (90 * 86400 * 1000);
+  var gemCandidates = STATE.articles.filter(function(a) {
+    if (!a.metrics) return false;
+    var t = new Date(a.publishedDateTime).getTime();
+    if (t < gemCutoff) return false;
+    var wc = wordCount(a);
+    if (!wc || wc < 200) return false;  // need real content to compute read-through
+    if (!a.metrics.avgEngagementTimeSecs) return false;
+    var pv = a.metrics.pageViews || 0;
+    if (pv < 50 || pv > 1500) return false;  // niche but not invisible
+    var expected = wc * (60 / 225);
+    var rt = a.metrics.avgEngagementTimeSecs / expected;
+    a._rt = rt;
+    return rt >= 0.5 && rt <= 1.5;
+  }).sort(function(a, b) { return b._rt - a._rt; });
+  var topGem = gemCandidates[0];
+
+  // Traffic trap = high views, terrible read-through
+  var trapCandidates = STATE.articles.filter(function(a) {
+    if (!a.metrics) return false;
+    var t = new Date(a.publishedDateTime).getTime();
+    if (t < gemCutoff) return false;
+    var wc = wordCount(a);
+    if (!wc || wc < 300) return false;
+    if (!a.metrics.avgEngagementTimeSecs) return false;
+    var pv = a.metrics.pageViews || 0;
+    if (pv < 1000) return false;
+    var expected = wc * (60 / 225);
+    var rt = a.metrics.avgEngagementTimeSecs / expected;
+    a._rt = rt;
+    return rt < 0.3;
+  }).sort(function(a, b) { return (b.metrics.pageViews || 0) - (a.metrics.pageViews || 0); });
+  var topTrap = trapCandidates[0];
+
+  // Time-of-day winner: median first-24h views by publish hour, last 90 days
+  var hourBuckets = {};
+  for (var h = 0; h < 24; h++) hourBuckets[h] = [];
+  STATE.articles.forEach(function(a) {
+    var t = new Date(a.publishedDateTime).getTime();
+    if (t < gemCutoff) return;
+    var hr = publishHourUTC(a.publishedDateTime);
+    if (hr == null) return;
+    var hourly = hourlyForArticle(a);
+    if (!hourly) return;
+    var cum = cumulativeFromPublish(a, hourly, 24);
+    if (!cum.length) return;
+    var first24 = cum[cum.length - 1].cumulative;
+    if (first24 > 0) hourBuckets[hr].push(first24);
+  });
+
+  var hourMedians = {};
+  Object.keys(hourBuckets).forEach(function(hr) {
+    var arr = hourBuckets[hr];
+    if (arr.length < 2) return;  // not enough data
+    arr.sort(function(a, b) { return a - b; });
+    hourMedians[hr] = arr[Math.floor(arr.length / 2)];
+  });
+
+  var bestHour = null, bestMedian = -1;
+  Object.keys(hourMedians).forEach(function(hr) {
+    if (hourMedians[hr] > bestMedian) {
+      bestMedian = hourMedians[hr];
+      bestHour = parseInt(hr, 10);
+    }
+  });
+
+  // Render
+  var html = '';
+
+  // Stat cards
+  html += '<div class="ov-stats">';
+  html += statCard('Articles (last 30d)', String(recent.length),
+    'Across all writers');
+  if (topRecent && topRecent.metrics) {
+    html += statCard('Top performer (30d)', formatCount(topRecent.metrics.pageViews) + ' views',
+      '<strong>' + esc(truncate(topRecent.postTitle, 60)) + '</strong> — ' + esc(topRecent.postAuthor));
+  } else {
+    html += statCard('Top performer (30d)', '—', 'No GA data yet');
+  }
+  if (topGem) {
+    html += statCard('Hidden gem', Math.round(topGem._rt * 100) + '% read-through',
+      '<strong>' + esc(truncate(topGem.postTitle, 60)) + '</strong> — only ' + formatCount(topGem.metrics.pageViews) + ' views');
+  } else {
+    html += statCard('Hidden gem', '—', 'No qualifying articles in last 90 days');
+  }
+  if (bestHour != null) {
+    html += statCard('Best publish hour', bestHour.toString().padStart(2, '0') + ':00 UTC',
+      'Median <strong>' + formatCount(bestMedian) + '</strong> first-24h views');
+  } else {
+    html += statCard('Best publish hour', '—', 'Need more hourly data');
+  }
+  html += '</div>';
+
+  // Narrative
+  var narr = buildOverviewNarrative({
+    recent: recent,
+    topRecent: topRecent,
+    topGem: topGem,
+    topTrap: topTrap,
+    bestHour: bestHour,
+    bestMedian: bestMedian,
+    hourMedians: hourMedians
+  });
+  if (narr) {
+    html += '<div class="ov-narrative">' + narr + '</div>';
+  }
+
+  // Top recent table
+  var topN = recent.slice().sort(function(a, b) {
+    return ((b.metrics && b.metrics.pageViews) || 0) - ((a.metrics && a.metrics.pageViews) || 0);
+  }).slice(0, 10);
+  if (topN.length) {
+    html += '<div class="ins-section-head" style="margin-top: 24px;"><h2 style="font-size: 14px;">Top 10 in last 30 days</h2></div>';
+    html += '<div class="gt-list"><div class="gt-header"><span>Article</span><span>Views</span><span>Time</span><span>Engaged</span><span>Read-thru</span></div>';
+    topN.forEach(function(a) { html += renderListRow(a); });
+    html += '</div>';
+  }
+
+  body.innerHTML = html;
+}
+
+function statCard(label, value, detail) {
+  return '<div class="ov-stat">' +
+    '<div class="ov-stat__label">' + esc(label) + '</div>' +
+    '<div class="ov-stat__value">' + value + '</div>' +
+    '<div class="ov-stat__detail">' + detail + '</div>' +
+    '</div>';
+}
+
+function buildOverviewNarrative(d) {
+  var parts = [];
+  if (d.recent.length) {
+    parts.push('Published <strong>' + d.recent.length + '</strong> articles in the last 30 days.');
+  }
+  if (d.topRecent && d.topRecent.metrics) {
+    parts.push(
+      'The biggest story was <strong>' + esc(d.topRecent.postTitle) + '</strong> by ' +
+      esc(d.topRecent.postAuthor) + ', with ' + formatCount(d.topRecent.metrics.pageViews) + ' views.'
+    );
+  }
+  if (d.bestHour != null && d.hourMedians) {
+    var medians = d.hourMedians;
+    var hours = Object.keys(medians).map(Number).sort(function(a, b) { return medians[b] - medians[a]; });
+    if (hours.length >= 3) {
+      parts.push(
+        'Looking at the last 90 days, articles published at ' + d.bestHour.toString().padStart(2, '0') + ':00 UTC ' +
+        'capture more first-24h views than any other slot — ' +
+        'a typical article gets <strong>' + formatCount(d.bestMedian) + '</strong> views in its first day vs ' +
+        '<strong>' + formatCount(medians[hours[hours.length - 1]]) + '</strong> for the worst slot ' +
+        '(' + hours[hours.length - 1].toString().padStart(2, '0') + ':00).'
+      );
+    }
+  }
+  return parts.join(' ');
+}
+
+function renderListRow(a) {
+  var m = a.metrics || {};
+  var wc = wordCount(a);
+  var rtPct = '—';
+  if (m.avgEngagementTimeSecs != null && wc > 0) {
+    var expected = wc * (60 / 225);
+    rtPct = Math.round(m.avgEngagementTimeSecs / expected * 100) + '%';
+  }
+  return '<div class="gt-row">' +
+    '<div>' +
+      '<div class="gt-row__title">' + esc(a.postTitle || '(untitled)') + '</div>' +
+      '<div class="gt-row__sub">' + esc(a.postAuthor || '—') + ' · ' + esc(formatDate(a.publishedDateTime)) + '</div>' +
+    '</div>' +
+    '<span class="gt-row__metric">' + (m.pageViews != null ? formatCount(m.pageViews) : '—') + '</span>' +
+    '<span class="gt-row__metric">' + (m.avgEngagementTimeSecs != null ? formatDuration(m.avgEngagementTimeSecs) : '—') + '</span>' +
+    '<span class="gt-row__metric">' + (m.engagementRate != null ? formatPct(m.engagementRate) : '—') + '</span>' +
+    '<span class="gt-row__metric">' + rtPct + '</span>' +
+    '</div>';
+}
+
+function truncate(s, n) {
+  if (!s) return '';
+  if (s.length <= n) return s;
+  return s.slice(0, n - 1) + '…';
+}
+
+/* ============ TIMING TAB ============ */
+function renderTimingTab() {
+  setupArticlePicker();
+  renderCohortControls();
+  renderCohortChart();
+  renderHeatmap();
+
+  // If URL has ?article=ID, deep-link
+  var params = new URLSearchParams(window.location.search);
+  var articleId = params.get('article');
+  if (articleId && STATE.byId[articleId]) {
+    selectArticle(STATE.byId[articleId]);
+  }
+}
+
+function setupArticlePicker() {
+  var input = $('articlePicker');
+  var results = $('articlePickerResults');
+  if (!input) return;
+
+  // Build pool: articles with hourly data available (i.e. published in window)
+  var meta = STATE.hourlyMeta;
+  var windowStart = Date.now() - ((meta.windowDays || 30) * 86400 * 1000);
+  var pool = STATE.articles.filter(function(a) {
+    var t = new Date(a.publishedDateTime).getTime();
+    return t >= windowStart;
+  }).sort(function(a, b) {
+    return new Date(b.publishedDateTime) - new Date(a.publishedDateTime);
+  });
+
+  function renderResults(query) {
+    var q = (query || '').toLowerCase().trim();
+    var matches = q ? pool.filter(function(a) {
+      return (a.postTitle || '').toLowerCase().indexOf(q) >= 0 ||
+             (a.postAuthor || '').toLowerCase().indexOf(q) >= 0;
+    }).slice(0, 50) : pool.slice(0, 50);
+
+    if (!matches.length) {
+      results.innerHTML = '<div class="article-picker__option">No matching articles in last ' + (meta.windowDays || 30) + ' days.</div>';
+    } else {
+      results.innerHTML = matches.map(function(a) {
+        return '<div class="article-picker__option" data-id="' + esc(a.postID) + '">' +
+          '<div class="article-picker__option-title">' + esc(truncate(a.postTitle, 80)) + '</div>' +
+          '<div class="article-picker__option-meta">' + esc(a.postAuthor || '—') + ' · ' + esc(formatDate(a.publishedDateTime)) + '</div>' +
+          '</div>';
+      }).join('');
+    }
+    results.classList.add('open');
+  }
+
+  input.addEventListener('focus', function() { renderResults(input.value); });
+  input.addEventListener('input', function() { renderResults(input.value); });
+  input.addEventListener('blur', function() {
+    setTimeout(function() { results.classList.remove('open'); }, 200);
+  });
+
+  results.addEventListener('click', function(e) {
+    var opt = e.target.closest('.article-picker__option');
+    if (!opt) return;
+    var id = opt.dataset.id;
+    if (id && STATE.byId[id]) selectArticle(STATE.byId[id]);
+    results.classList.remove('open');
+  });
+}
+
+function selectArticle(article) {
+  STATE.selectedArticle = article;
+  var input = $('articlePicker');
+  if (input) input.value = article.postTitle;
+  renderSingleCurve(article);
+}
+
+function renderSingleCurve(article) {
+  var container = $('singleCurveChart');
+  var hourly = hourlyForArticle(article);
+  if (!hourly || !hourly.length) {
+    container.className = 'chart-empty';
+    container.innerHTML = 'No hourly data available for this article.';
+    return;
+  }
+  var cum = cumulativeFromPublish(article, hourly, 72);
+  if (!cum.length) {
+    container.className = 'chart-empty';
+    container.innerHTML = 'Article published outside the hourly data window.';
+    return;
+  }
+
+  container.className = '';
+  container.innerHTML = drawSingleCurveSVG(article, cum);
+}
+
+function drawSingleCurveSVG(article, cum) {
+  var W = 800, H = 320;
+  var ML = 50, MR = 20, MT = 30, MB = 36;
+  var plotW = W - ML - MR, plotH = H - MT - MB;
+
+  var maxCum = Math.max.apply(null, cum.map(function(p) { return p.cumulative; }));
+  if (maxCum === 0) maxCum = 1;
+  var maxHourly = Math.max.apply(null, cum.map(function(p) { return p.hourly; }));
+  if (maxHourly === 0) maxHourly = 1;
+
+  var xScale = function(h) { return ML + (h / 72) * plotW; };
+  var yScaleCum = function(v) { return MT + plotH - (v / maxCum) * plotH; };
+  var yScaleHourly = function(v) { return MT + plotH - (v / maxHourly) * plotH * 0.6; };  // half-height for bars
+
+  var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
+
+  // Y axis grid lines
+  for (var i = 0; i <= 4; i++) {
+    var y = MT + (i / 4) * plotH;
+    var v = Math.round(maxCum * (1 - i / 4));
+    svg += '<line class="svg-grid-line" x1="' + ML + '" y1="' + y + '" x2="' + (ML + plotW) + '" y2="' + y + '"/>';
+    svg += '<text class="svg-axis-label" x="' + (ML - 8) + '" y="' + (y + 3) + '" text-anchor="end">' + formatCount(v) + '</text>';
+  }
+
+  // X axis labels: 0, 12, 24, 36, 48, 60, 72
+  var xLabels = [0, 12, 24, 36, 48, 60, 72];
+  xLabels.forEach(function(h) {
+    var x = xScale(h);
+    svg += '<line class="svg-axis-tick" x1="' + x + '" y1="' + (MT + plotH) + '" x2="' + x + '" y2="' + (MT + plotH + 4) + '"/>';
+    svg += '<text class="svg-axis-label" x="' + x + '" y="' + (MT + plotH + 16) + '" text-anchor="middle">' + h + 'h</text>';
+  });
+
+  // Hourly bars (background, soft)
+  var barW = plotW / 72 * 0.7;
+  cum.forEach(function(p) {
+    if (p.hourly === 0) return;
+    var x = xScale(p.hour) - barW / 2;
+    var y = yScaleHourly(p.hourly);
+    var h = (MT + plotH) - y;
+    svg += '<rect x="' + x + '" y="' + y + '" width="' + barW + '" height="' + h + '" fill="var(--info)" opacity="0.18" />';
+  });
+
+  // Cumulative line
+  var pathD = cum.map(function(p, i) {
+    return (i === 0 ? 'M' : 'L') + xScale(p.hour) + ',' + yScaleCum(p.cumulative);
+  }).join(' ');
+  svg += '<path class="svg-data-line" d="' + pathD + '" stroke="var(--primary)"/>';
+
+  // Final point
+  var last = cum[cum.length - 1];
+  svg += '<circle class="svg-data-point" cx="' + xScale(last.hour) + '" cy="' + yScaleCum(last.cumulative) + '" r="4" fill="var(--primary)"/>';
+  svg += '<text class="svg-axis-label" x="' + (xScale(last.hour) - 6) + '" y="' + (yScaleCum(last.cumulative) - 8) + '" text-anchor="end" style="fill: var(--primary); font-weight: 800;">' + formatCount(last.cumulative) + '</text>';
+
+  // Title strip (publish info)
+  var pubLabel = formatDateLong(article.publishedDateTime) + ' at ' +
+    new Date(article.publishedDateTime).getUTCHours().toString().padStart(2, '0') + ':' +
+    new Date(article.publishedDateTime).getUTCMinutes().toString().padStart(2, '0') + ' UTC';
+  svg += '<text class="svg-axis-label" x="' + (W / 2) + '" y="14" text-anchor="middle" style="font-size: 11px; font-weight: 700;">Published ' + esc(pubLabel) + ' · ' + esc(article.postAuthor || '—') + '</text>';
+
+  // Y axis title
+  svg += '<text class="svg-axis-label" x="-' + (MT + plotH / 2) + '" y="14" text-anchor="middle" transform="rotate(-90)" style="font-size: 10px;">Cumulative views</text>';
+
+  // X axis title
+  svg += '<text class="svg-axis-label" x="' + (ML + plotW / 2) + '" y="' + (H - 4) + '" text-anchor="middle">Hours since publish</text>';
+
+  svg += '</svg>';
+  return svg;
+}
+
+/* ============ COHORT CHART ============ */
+var COHORT_DEFS = [
+  { key: 'morning',      label: 'Morning (06–11)',     hours: [6,7,8,9,10,11],   colour: '#1565c0' },
+  { key: 'afternoon',    label: 'Afternoon (12–17)',   hours: [12,13,14,15,16,17], colour: '#1c7a2e' },
+  { key: 'evening',      label: 'Evening (18–22)',     hours: [18,19,20,21,22],   colour: '#c96f15' },
+  { key: 'late',         label: 'Late night (23–05)',  hours: [23,0,1,2,3,4,5],   colour: '#9e0000' }
+];
+
+function renderCohortControls() {
+  var box = $('cohortControls');
+  // Default: all on
+  if (Object.keys(STATE.cohortToggles).length === 0) {
+    COHORT_DEFS.forEach(function(c) { STATE.cohortToggles[c.key] = true; });
+  }
+  // Inject pills (after the leading "Toggle cohorts:" span)
+  var existingSpan = box.querySelector('.ins-sub');
+  box.innerHTML = '';
+  if (existingSpan) box.appendChild(existingSpan);
+  else {
+    var s = document.createElement('span');
+    s.className = 'ins-sub';
+    s.textContent = 'Toggle cohorts:';
+    box.appendChild(s);
+  }
+  COHORT_DEFS.forEach(function(c) {
+    var on = STATE.cohortToggles[c.key];
+    var label = document.createElement('label');
+    label.className = 'cohort-pill' + (on ? ' cohort-on' : '');
+    label.style.borderColor = on ? c.colour : '';
+    label.style.color = on ? c.colour : '';
+    label.innerHTML = '<input type="checkbox" ' + (on ? 'checked' : '') + ' data-cohort="' + c.key + '"> ' + esc(c.label);
+    label.querySelector('input').addEventListener('change', function(e) {
+      STATE.cohortToggles[c.key] = e.target.checked;
+      renderCohortControls();
+      renderCohortChart();
+    });
+    box.appendChild(label);
+  });
+}
+
+function renderCohortChart() {
+  var container = $('cohortChart');
+  var meta = STATE.hourlyMeta;
+  if (!meta.windowDays) {
+    container.className = 'chart-empty';
+    container.innerHTML = 'No hourly data available.';
+    return;
+  }
+
+  // Build cohort series: average cumulative views per hour-since-publish
+  var cohortSeries = {};
+  COHORT_DEFS.forEach(function(c) {
+    if (!STATE.cohortToggles[c.key]) return;
+    cohortSeries[c.key] = computeCohortSeries(c.hours);
+  });
+
+  if (Object.keys(cohortSeries).length === 0) {
+    container.className = 'chart-empty';
+    container.innerHTML = 'Toggle at least one cohort to see comparison.';
+    return;
+  }
+
+  var anyData = false;
+  Object.keys(cohortSeries).forEach(function(k) {
+    if (cohortSeries[k] && cohortSeries[k].articleCount > 0) anyData = true;
+  });
+  if (!anyData) {
+    container.className = 'chart-empty';
+    container.innerHTML = 'Not enough articles in selected cohorts (last ' + meta.windowDays + ' days).';
+    return;
+  }
+
+  container.className = '';
+  container.innerHTML = drawCohortSVG(cohortSeries);
+}
+
+function computeCohortSeries(hourSet) {
+  var meta = STATE.hourlyMeta;
+  var windowStart = Date.now() - (meta.windowDays * 86400 * 1000);
+  var matches = STATE.articles.filter(function(a) {
+    var t = new Date(a.publishedDateTime).getTime();
+    if (t < windowStart) return false;
+    var hr = publishHourUTC(a.publishedDateTime);
+    if (hr == null) return false;
+    return hourSet.indexOf(hr) >= 0;
+  });
+
+  // Average cumulative across articles per hour-since-publish
+  var sums = new Array(73).fill(0);
+  var counts = new Array(73).fill(0);
+  matches.forEach(function(a) {
+    var hourly = hourlyForArticle(a);
+    if (!hourly) return;
+    var cum = cumulativeFromPublish(a, hourly, 72);
+    if (!cum.length) return;
+    cum.forEach(function(p) {
+      if (p.hour <= 72) {
+        sums[p.hour] += p.cumulative;
+        counts[p.hour]++;
+      }
+    });
+  });
+
+  var avg = sums.map(function(s, i) { return counts[i] > 0 ? s / counts[i] : 0; });
+  return {
+    avgCum: avg,
+    articleCount: matches.length
+  };
+}
+
+function drawCohortSVG(cohortSeries) {
+  var W = 800, H = 360;
+  var ML = 50, MR = 20, MT = 20, MB = 56;
+  var plotW = W - ML - MR, plotH = H - MT - MB;
+
+  // Find max across all series
+  var maxV = 0;
+  Object.keys(cohortSeries).forEach(function(k) {
+    var s = cohortSeries[k];
+    if (!s) return;
+    var local = Math.max.apply(null, s.avgCum);
+    if (local > maxV) maxV = local;
+  });
+  if (maxV === 0) maxV = 1;
+
+  var xScale = function(h) { return ML + (h / 72) * plotW; };
+  var yScale = function(v) { return MT + plotH - (v / maxV) * plotH; };
+
+  var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
+
+  // Y grid
+  for (var i = 0; i <= 4; i++) {
+    var y = MT + (i / 4) * plotH;
+    var v = Math.round(maxV * (1 - i / 4));
+    svg += '<line class="svg-grid-line" x1="' + ML + '" y1="' + y + '" x2="' + (ML + plotW) + '" y2="' + y + '"/>';
+    svg += '<text class="svg-axis-label" x="' + (ML - 8) + '" y="' + (y + 3) + '" text-anchor="end">' + formatCount(v) + '</text>';
+  }
+
+  // X axis
+  [0, 12, 24, 36, 48, 60, 72].forEach(function(h) {
+    var x = xScale(h);
+    svg += '<line class="svg-axis-tick" x1="' + x + '" y1="' + (MT + plotH) + '" x2="' + x + '" y2="' + (MT + plotH + 4) + '"/>';
+    svg += '<text class="svg-axis-label" x="' + x + '" y="' + (MT + plotH + 16) + '" text-anchor="middle">' + h + 'h</text>';
+  });
+
+  // Plot each cohort
+  COHORT_DEFS.forEach(function(c) {
+    if (!STATE.cohortToggles[c.key]) return;
+    var s = cohortSeries[c.key];
+    if (!s || s.articleCount === 0) return;
+    var pathD = s.avgCum.map(function(v, i) {
+      return (i === 0 ? 'M' : 'L') + xScale(i) + ',' + yScale(v);
+    }).join(' ');
+    svg += '<path class="svg-data-line" d="' + pathD + '" stroke="' + c.colour + '"/>';
+  });
+
+  // Legend
+  var legendY = H - 16;
+  var legendX = ML;
+  COHORT_DEFS.forEach(function(c) {
+    if (!STATE.cohortToggles[c.key]) return;
+    var s = cohortSeries[c.key];
+    if (!s || s.articleCount === 0) return;
+    var lab = c.label + ' (n=' + s.articleCount + ')';
+    svg += '<rect x="' + legendX + '" y="' + (legendY - 7) + '" width="14" height="3" fill="' + c.colour + '"/>';
+    svg += '<text class="svg-axis-label" x="' + (legendX + 18) + '" y="' + (legendY - 1) + '" style="fill: var(--text); font-weight: 700;">' + esc(lab) + '</text>';
+    legendX += 18 + lab.length * 6.5;
+  });
+
+  // Y axis title
+  svg += '<text class="svg-axis-label" x="-' + (MT + plotH / 2) + '" y="14" text-anchor="middle" transform="rotate(-90)" style="font-size: 10px;">Avg cumulative views</text>';
+  svg += '<text class="svg-axis-label" x="' + (ML + plotW / 2) + '" y="' + (MT + plotH + 32) + '" text-anchor="middle">Hours since publish</text>';
+
+  svg += '</svg>';
+  return svg;
+}
+
+/* ============ HEATMAP ============ */
+function renderHeatmap() {
+  var container = $('heatmap');
+  var meta = STATE.hourlyMeta;
+  if (!meta.windowDays) {
+    container.className = 'chart-empty';
+    container.innerHTML = 'No hourly data available.';
+    return;
+  }
+
+  var windowStart = Date.now() - (meta.windowDays * 86400 * 1000);
+  // Collect first-24h views by [weekday][hour]
+  var grid = {};
+  for (var d = 0; d < 7; d++) {
+    grid[d] = {};
+    for (var h = 0; h < 24; h++) grid[d][h] = [];
+  }
+
+  STATE.articles.forEach(function(a) {
+    var t = new Date(a.publishedDateTime).getTime();
+    if (t < windowStart) return;
+    var hr = publishHourUTC(a.publishedDateTime);
+    var dy = publishWeekdayUTC(a.publishedDateTime);
+    if (hr == null || dy == null) return;
+    var hourly = hourlyForArticle(a);
+    if (!hourly) return;
+    var cum = cumulativeFromPublish(a, hourly, 24);
+    if (!cum.length) return;
+    var v = cum[cum.length - 1].cumulative;
+    if (v > 0) grid[dy][hr].push(v);
+  });
+
+  // Compute median per cell
+  var medians = {};
+  var globalMax = 0;
+  for (var d = 0; d < 7; d++) {
+    medians[d] = {};
+    for (var h = 0; h < 24; h++) {
+      var arr = grid[d][h];
+      if (arr.length >= 1) {
+        arr.sort(function(a, b) { return a - b; });
+        medians[d][h] = arr[Math.floor(arr.length / 2)];
+        if (medians[d][h] > globalMax) globalMax = medians[d][h];
+      } else {
+        medians[d][h] = null;
+      }
+    }
+  }
+
+  if (globalMax === 0) {
+    container.className = 'chart-empty';
+    container.innerHTML = 'Not enough data for heatmap (last ' + meta.windowDays + ' days).';
+    return;
+  }
+
+  // Render as grid: hour rows, day columns
+  container.className = '';
+  var dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  var html = '<div class="heatmap" style="grid-template-columns: 50px repeat(7, 1fr);">';
+
+  // Header row
+  html += '<div class="heatmap__corner"></div>';
+  dayLabels.forEach(function(lab) {
+    html += '<div class="heatmap__col-label">' + lab + '</div>';
+  });
+
+  // Hour rows
+  for (var hr = 0; hr < 24; hr++) {
+    html += '<div class="heatmap__row-label">' + hr.toString().padStart(2, '0') + ':00</div>';
+    for (var dy = 0; dy < 7; dy++) {
+      var v = medians[dy][hr];
+      var n = grid[dy][hr].length;
+      if (v == null) {
+        html += '<div class="heatmap__cell heatmap__cell--null" title="No articles published in this slot">—</div>';
+      } else {
+        var intensity = v / globalMax;
+        // Brand red gradient
+        var alpha = 0.15 + intensity * 0.85;
+        var bg = 'rgba(158, 0, 0, ' + alpha.toFixed(2) + ')';
+        var textColor = intensity > 0.5 ? 'var(--white)' : 'var(--text)';
+        html += '<div class="heatmap__cell" style="background: ' + bg + '; color: ' + textColor + ';" ' +
+          'title="' + dayLabels[dy] + ' ' + hr.toString().padStart(2, '0') + ':00 — median ' + formatCount(v) + ' first-24h views (n=' + n + ')">' +
+          formatCount(v) + '</div>';
+      }
+    }
+  }
+  html += '</div>';
+  html += '<div style="margin-top: 8px; font-size: 11px; color: var(--text-muted);">Times in UTC. Each cell shows the median first-24h views for articles published in that slot, last ' + meta.windowDays + ' days. Brighter red = better-performing slot.</div>';
+
+  container.innerHTML = html;
+}
+
+/* ============ GEMS & TRAPS ============ */
+function renderGemsTraps() {
+  // Toggle handler (set up once)
+  $$('#gtToggle button').forEach(function(b) {
+    b.addEventListener('click', function() {
+      STATE.gtMode = b.dataset.mode;
+      $$('#gtToggle button').forEach(function(b2) { b2.classList.toggle('active', b2 === b); });
+      renderGTBody();
+    });
+  });
+  renderGTBody();
+}
+
+function renderGTBody() {
+  var body = $('gtBody');
+  var sub = $('gtSubhead');
+  if (STATE.gtMode === 'gems') {
+    sub.innerHTML = 'Articles with strong reader engagement that didn\'t reach a wide audience. ' +
+      'These are candidates for renewed promotion — quality work the algorithm missed.';
+    body.innerHTML = renderGemsList();
+  } else {
+    sub.innerHTML = 'Articles that drew large audiences but couldn\'t hold attention. ' +
+      'Headline did its job; the content didn\'t. Worth reviewing whether to keep using these patterns.';
+    body.innerHTML = renderTrapsList();
+  }
+}
+
+function renderGemsList() {
+  // High read-through, low views, body must be substantial
+  var candidates = STATE.articles.filter(function(a) {
+    if (!a.metrics) return false;
+    var wc = wordCount(a);
+    if (!wc || wc < 200) return false;
+    if (!a.metrics.avgEngagementTimeSecs) return false;
+    var pv = a.metrics.pageViews || 0;
+    if (pv < 30 || pv > 1000) return false;
+    var expected = wc * (60 / 225);
+    var rt = a.metrics.avgEngagementTimeSecs / expected;
+    if (rt < 0.5 || rt > 1.5) return false;
+    a._rt = rt;
+    return true;
+  }).sort(function(a, b) { return b._rt - a._rt; });
+
+  if (!candidates.length) {
+    return '<div class="ins-loading">No qualifying gems found.</div>';
+  }
+
+  var html = '<div class="gt-list"><div class="gt-header"><span>Article</span><span>Views</span><span>Read-thru</span><span>Words</span><span>Engaged</span></div>';
+  candidates.slice(0, 30).forEach(function(a) {
+    var rtPct = Math.round(a._rt * 100) + '%';
+    var rtCls = a._rt >= 0.6 && a._rt <= 1.2 ? 'gt-row__metric--green' : 'gt-row__metric--amber';
+    html += '<div class="gt-row">' +
+      '<div>' +
+        '<div class="gt-row__title">' + esc(a.postTitle || '(untitled)') + '</div>' +
+        '<div class="gt-row__sub">' + esc(a.postAuthor || '—') + ' · ' + esc(formatDate(a.publishedDateTime)) + '</div>' +
+      '</div>' +
+      '<span class="gt-row__metric gt-row__metric--red">' + formatCount(a.metrics.pageViews) + '</span>' +
+      '<span class="gt-row__metric ' + rtCls + '">' + rtPct + '</span>' +
+      '<span class="gt-row__metric">' + wordCount(a).toLocaleString() + '</span>' +
+      '<span class="gt-row__metric">' + (a.metrics.engagementRate ? formatPct(a.metrics.engagementRate) : '—') + '</span>' +
+      '</div>';
+  });
+  html += '</div>';
+  return html;
+}
+
+function renderTrapsList() {
+  var candidates = STATE.articles.filter(function(a) {
+    if (!a.metrics) return false;
+    var wc = wordCount(a);
+    if (!wc || wc < 300) return false;
+    if (!a.metrics.avgEngagementTimeSecs) return false;
+    var pv = a.metrics.pageViews || 0;
+    if (pv < 1000) return false;
+    var expected = wc * (60 / 225);
+    var rt = a.metrics.avgEngagementTimeSecs / expected;
+    if (rt >= 0.3) return false;
+    a._rt = rt;
+    return true;
+  }).sort(function(a, b) { return (b.metrics.pageViews || 0) - (a.metrics.pageViews || 0); });
+
+  if (!candidates.length) {
+    return '<div class="ins-loading">No qualifying traps found.</div>';
+  }
+
+  var html = '<div class="gt-list"><div class="gt-header"><span>Article</span><span>Views</span><span>Read-thru</span><span>Words</span><span>Engaged</span></div>';
+  candidates.slice(0, 30).forEach(function(a) {
+    var rtPct = Math.round(a._rt * 100) + '%';
+    html += '<div class="gt-row">' +
+      '<div>' +
+        '<div class="gt-row__title">' + esc(a.postTitle || '(untitled)') + '</div>' +
+        '<div class="gt-row__sub">' + esc(a.postAuthor || '—') + ' · ' + esc(formatDate(a.publishedDateTime)) + '</div>' +
+      '</div>' +
+      '<span class="gt-row__metric gt-row__metric--green">' + formatCount(a.metrics.pageViews) + '</span>' +
+      '<span class="gt-row__metric gt-row__metric--red">' + rtPct + '</span>' +
+      '<span class="gt-row__metric">' + wordCount(a).toLocaleString() + '</span>' +
+      '<span class="gt-row__metric">' + (a.metrics.engagementRate ? formatPct(a.metrics.engagementRate) : '—') + '</span>' +
+      '</div>';
+  });
+  html += '</div>';
+  return html;
+}
+
+/* ============ AUTHORS ============ */
+function renderAuthors() {
+  $('authPeriod').addEventListener('change', function(e) {
+    STATE.authPeriod = e.target.value === 'all' ? 0 : parseInt(e.target.value, 10);
+    renderAuthorsBody();
+  });
+  $('authMin').addEventListener('change', function(e) {
+    STATE.authMin = parseInt(e.target.value, 10);
+    renderAuthorsBody();
+  });
+  renderAuthorsBody();
+}
+
+function renderAuthorsBody() {
+  var body = $('authBody');
+  var cutoff = STATE.authPeriod ? Date.now() - (STATE.authPeriod * 86400 * 1000) : 0;
+
+  var byAuthor = {};
+  STATE.articles.forEach(function(a) {
+    if (cutoff && new Date(a.publishedDateTime).getTime() < cutoff) return;
+    var name = (a.postAuthor || '').trim();
+    if (!name) return;
+    if (!byAuthor[name]) {
+      byAuthor[name] = { name: name, articles: 0, viewsList: [], dwellList: [], rtList: [], totalViews: 0, totalWords: 0 };
+    }
+    byAuthor[name].articles++;
+    if (a.metrics) {
+      var pv = a.metrics.pageViews || 0;
+      byAuthor[name].viewsList.push(pv);
+      byAuthor[name].totalViews += pv;
+      if (a.metrics.avgEngagementTimeSecs) byAuthor[name].dwellList.push(a.metrics.avgEngagementTimeSecs);
+      var wc = wordCount(a);
+      if (wc) {
+        byAuthor[name].totalWords += wc;
+        if (a.metrics.avgEngagementTimeSecs) {
+          var expected = wc * (60 / 225);
+          byAuthor[name].rtList.push(a.metrics.avgEngagementTimeSecs / expected);
+        }
+      }
+    }
+  });
+
+  var rows = Object.values(byAuthor)
+    .filter(function(r) { return r.articles >= STATE.authMin; })
+    .map(function(r) {
+      r.medianViews = median(r.viewsList);
+      r.medianDwell = median(r.dwellList);
+      r.medianRt = median(r.rtList);
+      r.avgWords = r.articles > 0 ? Math.round(r.totalWords / r.articles) : 0;
+      return r;
+    });
+
+  rows.sort(function(a, b) {
+    var key = STATE.authSort;
+    return (b[key] || 0) - (a[key] || 0);
+  });
+
+  if (!rows.length) {
+    body.innerHTML = '<div class="ins-loading">No authors meet the threshold.</div>';
+    return;
+  }
+
+  var html = '<div class="auth-grid">' +
+    '<div class="auth-header">' +
+      '<span>Author</span>' +
+      '<span class="' + (STATE.authSort === 'articles' ? 'active' : '') + '" data-sort="articles">Articles</span>' +
+      '<span class="' + (STATE.authSort === 'totalViews' ? 'active' : '') + '" data-sort="totalViews">Total views</span>' +
+      '<span class="' + (STATE.authSort === 'medianViews' ? 'active' : '') + '" data-sort="medianViews">Median views</span>' +
+      '<span class="' + (STATE.authSort === 'medianDwell' ? 'active' : '') + '" data-sort="medianDwell">Median dwell</span>' +
+      '<span class="' + (STATE.authSort === 'medianRt' ? 'active' : '') + '" data-sort="medianRt">Read-thru</span>' +
+    '</div>';
+
+  rows.forEach(function(r) {
+    html += '<div class="auth-row">' +
+      '<span class="auth-row__name">' + esc(r.name) + '</span>' +
+      '<span class="auth-row__metric"><strong>' + r.articles + '</strong></span>' +
+      '<span class="auth-row__metric">' + formatCount(r.totalViews) + '</span>' +
+      '<span class="auth-row__metric">' + (r.medianViews ? formatCount(r.medianViews) : '—') + '</span>' +
+      '<span class="auth-row__metric">' + (r.medianDwell ? formatDuration(r.medianDwell) : '—') + '</span>' +
+      '<span class="auth-row__metric">' + (r.medianRt ? Math.round(r.medianRt * 100) + '%' : '—') + '</span>' +
+      '</div>';
+  });
+  html += '</div>';
+
+  body.innerHTML = html;
+
+  // Wire sort headers
+  $$('#authBody .auth-header span[data-sort]').forEach(function(s) {
+    s.addEventListener('click', function() {
+      STATE.authSort = s.dataset.sort;
+      renderAuthorsBody();
+    });
+  });
+}
+
+function median(arr) {
+  if (!arr || !arr.length) return 0;
+  var s = arr.slice().sort(function(a, b) { return a - b; });
+  return s[Math.floor(s.length / 2)];
+}
+
+/* ============ ENTRY POINT ============ */
+window.nlAuthReady = function(session) {
+  // Wire tab clicks immediately
+  $$('.ins-tab').forEach(function(b) {
+    b.addEventListener('click', function() { activateTab(b.dataset.tab); });
+  });
+
+  // Show "loading data" state across all tabs
+  ['ovBody', 'singleCurveChart', 'cohortChart', 'heatmap', 'gtBody', 'authBody'].forEach(function(id) {
+    var el = $(id);
+    if (el) el.innerHTML = '<div class="ins-loading">Loading data…</div>';
+  });
+
+  loadAllData().then(function() {
+    // Render whichever tab is active
+    activateTab(STATE.currentTab);
+  }).catch(function(err) {
+    console.error('Data load failed:', err);
+    $('ovBody').innerHTML = '<div class="ins-loading">Failed to load data: ' + esc(err.message) + '</div>';
+  });
+};
+</script>
+</body>
+</html>
