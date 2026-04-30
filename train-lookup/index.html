@@ -3,23 +3,25 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Train Data Collector v1.0 — Playoff Finals</title>
+<title>Train Data Collector v7.1 — Playoff SF</title>
 <!--
-  Train Data Collector v1.0 — Playoff Finals — 30/04/2026
-  
-  Forked from Playoff SF train-lookup v7.1 (Dijkstra journey builder).
-  Configured for North & South division playoff finals, Sat 09/05/2026.
-  
-  8 teams across 2 divisions:
-  North: South Shields (2nd), Kidderminster (3rd), Macclesfield (4th), Buxton (5th)
-  South: Hornchurch (2nd), Torquay (3rd), Dorking (4th), Weston-super-Mare (6th)
-  
-  Special routing considerations:
-  - South Shields: Bede Metro → Newcastle Central (25 min Metro, modelled as walk)
-  - Hornchurch: no mainline station. District Line from central London (~60 min
-    from Barking, modelled as fixed walk from BKG)
-  - Buxton: branch line only (limited Saturday service via Stockport)
-  - Dorking: DKG (Dorking station) or DPD (Deepdene) — using DKG
+  Train Data Collector v7.1 — 16/04/2026
+  v2-v4: Recipe-based route chaining (deprecated)
+  v5.0: Station-centric approach. Complete data-driven journey discovery.
+  v6.0: Clear numbered instructions, removed broken Import box, added
+    Manual Station Scan with custom time range, auto-save raw data after
+    each station completes as crash insurance.
+  v7.0: Rewrote journey builder as graph-based time-respecting BFS.
+    Removes hardcoded viaPairs and londonWalks lists. Supports up to
+    3 train changes automatically.
+  v7.1: v7.0 BFS was exploring combinatorial explosion (browser froze).
+    Rewrote as Dijkstra-style targeted search:
+    - Only explores hub stations (not every intermediate stop)
+    - Runs one search per hour 05:00-23:00 rather than one huge BFS
+    - Hub-departure results are cached per-station
+    - buildJourneys is async with yield between routes so UI stays
+      responsive. Progress logged per route with timing.
+    - Safety: 5000 iteration cap per search, max 16h search forward.
 -->
 <style>
 @font-face{font-family:"carbona-variable";src:url("https://use.typekit.net/af/184cf2/0000000000000000774c3175/31/l?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n4&v=3") format("woff2"),url("https://use.typekit.net/af/184cf2/0000000000000000774c3175/31/d?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n4&v=3") format("woff");font-display:swap;font-style:normal;font-weight:200 900}
@@ -58,7 +60,7 @@ textarea{width:100%;height:200px;font-family:monospace;font-size:11px;padding:8p
 
 <div class="topbar">
   <img src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose%20white.png" alt="NL" onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png'">
-  <div class="topbar__title">Train <span>Data Collector — Finals v1</span></div>
+  <div class="topbar__title">Train <span>Data Collector v7.1</span></div>
 </div>
 
 <div class="wrap">
@@ -185,53 +187,41 @@ textarea{width:100%;height:200px;font-family:monospace;font-size:11px;padding:8p
 // All stations we need to scan. Includes host stations, away team stations,
 // and key interchange stations for building connections.
 var STATIONS = {
-  // ── NORTH DIVISION TEAMS ──
-  NCL: {name:'Newcastle Central',role:'team',team:'South Shields'},
-  KID: {name:'Kidderminster',role:'team',team:'Kidderminster Harriers'},
-  MAC: {name:'Macclesfield',role:'team',team:'Macclesfield'},
-  BUX: {name:'Buxton',role:'team',team:'Buxton'},
-  // ── SOUTH DIVISION TEAMS ──
-  BKG: {name:'Barking',role:'team',team:'Hornchurch'},
-  TQY: {name:'Torre',role:'team',team:'Torquay United'},
-  DKG: {name:'Dorking',role:'team',team:'Dorking Wanderers'},
-  WSM: {name:'Weston-super-Mare',role:'team',team:'Weston-super-Mare'},
-  // ── LONDON TERMINI ──
-  EUS: {name:'London Euston',role:'london'},
-  KGX: {name:'London Kings Cross',role:'london'},
-  STP: {name:'London St Pancras',role:'london'},
-  PAD: {name:'London Paddington',role:'london'},
-  FST: {name:'London Fenchurch Street',role:'london'},
-  WAT: {name:'London Waterloo',role:'london'},
-  VIC: {name:'London Victoria',role:'london'},
-  // ── ECML (Newcastle routing) ──
-  YRK: {name:'York',role:'interchange'},
+  // Host & away stations (National)
+  YRK: {name:'York',team:'York City',role:'host/away',walkToGround:25},
+  RCD: {name:'Rochdale',team:'Rochdale',role:'host/away',walkToGround:10},
+  CAR: {name:'Carlisle',team:'Carlisle United',role:'host/away',walkToGround:15},
+  ELS: {name:'Elstree & Borehamwood',team:'Boreham Wood',role:'host/away',walkToGround:15},
+  SCU: {name:'Scunthorpe',team:'Scunthorpe United',role:'away',walkToGround:15},
+  STD: {name:'Stroud',team:'Forest Green Rovers',role:'away',walkToGround:20},
+  SOC: {name:'Southend Central',team:'Southend United',role:'away',walkToGround:10},
+  // London interchanges
+  EUS: {name:'London Euston',role:'interchange'},
+  KGX: {name:'London Kings Cross',role:'interchange'},
+  STP: {name:'London St Pancras',role:'interchange'},
+  FST: {name:'London Fenchurch Street',role:'interchange'},
+  PAD: {name:'London Paddington',role:'interchange'},
+  // Key northern interchanges
   LDS: {name:'Leeds',role:'interchange'},
   DON: {name:'Doncaster',role:'interchange'},
-  // ── NORTHERN / MIDLANDS ──
   MAN: {name:'Manchester Piccadilly',role:'interchange'},
   MCV: {name:'Manchester Victoria',role:'interchange'},
-  SPT: {name:'Stockport',role:'interchange'},
+  PRE: {name:'Preston',role:'interchange'},
   SHF: {name:'Sheffield',role:'interchange'},
+  // Midlands / West
   BHM: {name:'Birmingham New Street',role:'interchange'},
-  BSH: {name:'Birmingham Snow Hill',role:'interchange'}, // KID services terminate here
-  SOT: {name:'Stoke-on-Trent',role:'interchange'},
-  // ── SOUTH / WEST ──
-  BRI: {name:'Bristol Temple Meads',role:'interchange'},
-  NTA: {name:'Newton Abbot',role:'interchange'},
-  EXD: {name:'Exeter St Davids',role:'interchange'},
-  RDG: {name:'Reading',role:'interchange'},
-  CLJ: {name:'Clapham Junction',role:'interchange'},
+  GLO: {name:'Gloucester',role:'interchange'},
+  SWI: {name:'Swindon',role:'interchange'}, // Forest Green via PAD routing
 };
 
-var DATE = '2026-05-09'; // Saturday — Playoff Finals
+var DATE = '2026-05-03'; // Sunday — National SF
 var TIME_BLOCKS = ['06:00','08:00','10:00','12:00','14:00','16:00','18:00','20:00','22:00','23:30'];
 // Busy stations get hourly blocks to avoid missing services
 var TIME_BLOCKS_DENSE = ['06:00','07:00','08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00','20:00','21:00','22:00','23:00'];
-var DENSE_STATIONS = ['EUS','KGX','STP','PAD','WAT','VIC','MAN','BHM','BRI','FST','YRK','LDS','DON','SHF','CLJ']; // High-frequency stations
+var DENSE_STATIONS = ['EUS','KGX','STP','LDS','MAN','DON','FST','BHM','PAD','SHF']; // High-frequency stations
 
 // Virtual walk connections (minutes)
 var WALKS = {
-  // London inter-terminus walks (mins)
   'STP-KGX':8,'KGX-STP':8,
   'STP-EUS':6,'EUS-STP':6,
   'EUS-KGX':10,'KGX-EUS':10,
@@ -241,30 +231,12 @@ var WALKS = {
   'PAD-EUS':15,'EUS-PAD':15,
   'PAD-KGX':18,'KGX-PAD':18,
   'PAD-STP':18,'STP-PAD':18,
-  'VIC-STP':18,'STP-VIC':18,
-  'VIC-PAD':20,'PAD-VIC':20,
-  'VIC-WAT':15,'WAT-VIC':15,
-  'WAT-PAD':20,'PAD-WAT':20,
-  'WAT-STP':20,'STP-WAT':20,
-  'WAT-EUS':20,'EUS-WAT':20,
-  // Manchester
-  'MAN-MCV':20,'MCV-MAN':20,
-  // Birmingham: Snow Hill ↔ New Street (10 min walk / tram)
-  'BSH-BHM':10,'BHM-BSH':10,
-  // Fenchurch Street connections (for c2c to Barking/Hornchurch)
-  'VIC-FST':25,'FST-VIC':25,
-  'PAD-FST':30,'FST-PAD':30,
-  'WAT-FST':25,'FST-WAT':25,
-  // South Shields ground access: NCL is the rail hub. Metro+walk to 1st Cloud Arena
-  // is modelled as GROUND_WALKS.NCL = 30 (25 Metro + 5 walk), not as a graph edge.
+  'MAN-MCV':10,'MCV-MAN':10,
 };
 
 // Team pairs we need journeys for (away→host)
-// North final: host is higher-finishing SF winner
-// South final: host is higher-finishing SF winner
-var NORTH_TEAMS = ['South Shields','Kidderminster Harriers','Macclesfield','Buxton'];
-var SOUTH_TEAMS = ['Hornchurch','Torquay United','Dorking Wanderers','Weston-super-Mare'];
-// Positions: SS=2nd, Kid=3rd, Macc=4th, Bux=5th / Horn=2nd, Torq=3rd, Dork=4th, WSM=6th
+var NATIONAL_HOSTS = ['York City','Rochdale','Carlisle United','Boreham Wood'];
+var NATIONAL_AWAYS = ['Carlisle United','Boreham Wood','Scunthorpe United','Forest Green Rovers','Southend United'];
 
 function teamToCRS(team) {
   for (var crs in STATIONS) { if (STATIONS[crs].team === team) return crs; }
@@ -874,19 +846,19 @@ function buildDetail(path) {
 // Find the best journey starting at-or-after a given time
 // Returns single journey object or null. Uses Dijkstra (earliest-arrival)
 function findJourneyFromTime(fromCRS, toCRS, earliestDepartMins, maxChanges) {
-  maxChanges = maxChanges || 4;
+  maxChanges = maxChanges || 3;
   var MIN_CONNECTION = 8;
 
   // best[station] = { arriveMins, path, changes }
   var best = {};
   best[fromCRS] = { arriveMins: earliestDepartMins, path: [], changes: -1 };
 
-  // Priority queue (simple array, sorted each iteration — fine for ~30 nodes)
+  // Priority queue (simple array, sorted each iteration — fine for ~20 nodes)
   var queue = [{ station: fromCRS, arriveMins: earliestDepartMins, path: [], changes: -1, visited: {} }];
   queue[0].visited[fromCRS] = true;
 
   var iterations = 0;
-  var MAX_ITER = 10000;
+  var MAX_ITER = 5000;
 
   while (queue.length > 0 && iterations < MAX_ITER) {
     iterations++;
@@ -992,7 +964,7 @@ function findAllJourneys(fromCRS, toCRS) {
   // Try each hour from 05:00 to 23:00 — gives us up to 19 journey options
   for (var hour = 5; hour <= 23; hour++) {
     var startMins = hour * 60;
-    var journey = findJourneyFromTime(fromCRS, toCRS, startMins, 4);
+    var journey = findJourneyFromTime(fromCRS, toCRS, startMins, 3);
     if (!journey) continue;
     var key = journey.depart + '-' + journey.arrive;
     if (seen[key]) continue;
@@ -1005,27 +977,18 @@ function findAllJourneys(fromCRS, toCRS) {
 }
 
 async function buildJourneys() {
-  log('═══ Building journeys — Playoff Finals ═══', 'head');
+  log('═══ Building journeys (v7.1 Dijkstra) ═══', 'head');
   clearDepartureCache();
   var output = {};
 
-  // Finals matchups: host = higher league position
-  // North SF: SS(2) v Bux(5), Kid(3) v Macc(4)
-  // Possible finals: SS v Macc, SS v Kid, Kid v Bux, Macc v Bux
-  // South SF: Horn(2) v WSM(6), Torq(3) v Dork(4)
-  // Possible finals: Horn v Dork, Horn v Torq, Torq v WSM, Dork v WSM
-  var pairs = [
-    // North
-    {host:'South Shields',away:'Macclesfield',div:'North'},
-    {host:'South Shields',away:'Kidderminster Harriers',div:'North'},
-    {host:'Kidderminster Harriers',away:'Buxton',div:'North'},
-    {host:'Macclesfield',away:'Buxton',div:'North'},
-    // South
-    {host:'Hornchurch',away:'Dorking Wanderers',div:'South'},
-    {host:'Hornchurch',away:'Torquay United',div:'South'},
-    {host:'Torquay United',away:'Weston-super-Mare',div:'South'},
-    {host:'Dorking Wanderers',away:'Weston-super-Mare',div:'South'},
-  ];
+  // Build list of all pairs
+  var pairs = [];
+  NATIONAL_HOSTS.forEach(function(host) {
+    NATIONAL_AWAYS.forEach(function(away) {
+      if (host === away) return;
+      pairs.push({ host: host, away: away });
+    });
+  });
 
   log('Total routes to build: ' + pairs.length, 'info');
 
@@ -1059,7 +1022,7 @@ async function buildJourneys() {
         (outbound.length > 0 && returns.length > 0) ? 'ok' : 'warn');
 
     output[routeKey] = {
-      division: pairs[p].div, away: away, host: host, date: DATE,
+      division: 'National', away: away, host: host, date: DATE,
       outbound: outbound, returns: returns
     };
 
