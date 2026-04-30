@@ -3,10 +3,42 @@
 <head>
 <!--
   NL Tools — Website Insights
-  Version: 1.4
+  Version: 1.6
   Date: 28/04/2026
 
   CHANGELOG
+  v1.6 (28/04/2026)
+    - Per-chart period (30d / 90d) and aggregation (Median / Mean)
+      toggles on cohort and heatmap. Each chart has its own controls
+      because the right defaults differ by question:
+        * Cohort: Median, 90d (one viral statement at 11pm shouldn't
+          warp the late-night curve)
+        * Heatmap publishing: Median, 90d (consistency above outliers)
+        * Heatmap reading: Mean, 90d (already an average — median
+          doesn't really apply, so the agg toggle is disabled in
+          reading mode)
+    - Honesty note added at top of Timing tab: "Data window: rolling
+      90 days, refreshed nightly." So the period toggle isn't misread
+      as "we have all data".
+    - All-time isn't an option yet because the underlying file is a
+      rolling 90-day cache. Adding all-time means switching to an
+      accumulating archive (separate piece of work, parked).
+  v1.5 (28/04/2026)
+    - Heatmap was mislabelled. The data showed publish-slot performance
+      (median first-24h views grouped by publish day/hour), but the
+      heading claimed "When are people reading". Fixed by adding two
+      modes with a toggle:
+        * "Publishing slots" (default, current behaviour, properly named)
+          — best slots to publish based on first-24h returns
+        * "Reading times" — actual audience traffic by day-of-week / hour,
+          summing all pageviews regardless of when articles were
+          published. Answers "when is our audience on site?"
+      The two answer genuinely different questions and clicking between
+      them surfaces useful contrast.
+    - Reading-times mode normalises by counting how many times each slot
+      occurred in the window (e.g. ~12-13 Mondays at 14:00 in a 90-day
+      window), so a slot's average isn't inflated just because more
+      time passed.
   v1.4 (28/04/2026)
     - Companion: fetch-ga-hourly.js bumped to v1.1 with WINDOW_DAYS = 90.
       The tool itself reads windowDays from the JSON header, so once the
@@ -131,6 +163,23 @@
   var NL_TOOL_KEY = 'staff-website-insights';
 
   window.NL_CHANGELOG = [
+    {
+      date: '28 April 2026',
+      version: 'v1.6',
+      items: [
+        'Per-chart toggles for period (30 days / 90 days) and average type (Median / Mean) on the cohort chart and heatmap.',
+        'Median is the default to avoid one viral story warping the picture; Mean reveals "rare but high-impact" slots if you flip it.',
+        'Honesty note added: data window is a rolling 90 days. All-time history requires a longer-term archive (planned).'
+      ]
+    },
+    {
+      date: '28 April 2026',
+      version: 'v1.5',
+      items: [
+        'Heatmap now has two modes \u2014 toggle between "Publishing slots" (best time to publish) and "Reading times" (when your audience is actually on site).',
+        'Previous version mislabelled the publishing-slots view as reading times.'
+      ]
+    },
     {
       date: '28 April 2026',
       version: 'v1.4',
@@ -541,6 +590,61 @@
     .gt-row > *:nth-child(n+5), .gt-header > *:nth-child(n+5) { display: none; }
   }
 
+  /* Honesty note about data window */
+  .ins-data-note {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    background: var(--off-white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    margin-bottom: 16px;
+    line-height: 1.4;
+  }
+
+  /* Per-chart toggle controls (period, mean/median) */
+  .ins-chart-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 12px;
+    align-items: center;
+  }
+  .ins-toggle-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .ins-toggle-label {
+    font-size: var(--text-xs);
+    font-weight: 800; font-variation-settings: 'wght' 800;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    margin-right: 2px;
+  }
+  .ins-toggle {
+    background: var(--white);
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    font-family: var(--font);
+    font-size: var(--text-xs);
+    font-weight: 700; font-variation-settings: 'wght' 700;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: var(--radius);
+  }
+  .ins-toggle:hover { color: var(--text); }
+  .ins-toggle.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--white);
+  }
+  .ins-toggle-group--disabled {
+    opacity: 0.45;
+    pointer-events: none;
+  }
+
   /* Collapsible drill-in panel */
   .ins-collapsible {
     background: var(--white);
@@ -648,24 +752,55 @@
       <h2>Article timing</h2>
       <span class="ins-sub">When articles are read &amp; how publish-time affects performance</span>
     </div>
+    <div class="ins-data-note">
+      Data window: rolling 90 days, refreshed nightly. Older data falls off the bottom \u2014 longer-term history requires an accumulating archive (planned).
+    </div>
 
     <div class="ins-card">
       <div class="ins-section-head" style="margin-bottom: 8px;">
-        <h2 class="ins-card__title">Cohort comparison — average curve by publish hour</h2>
+        <h2 class="ins-card__title">Cohort comparison \u2014 curve by publish hour</h2>
+      </div>
+      <div class="ins-chart-controls" id="cohortChartControls">
+        <div class="ins-toggle-group" data-target="cohortPeriod">
+          <span class="ins-toggle-label">Period</span>
+          <button class="ins-toggle" data-value="30">30d</button>
+          <button class="ins-toggle active" data-value="90">90d</button>
+        </div>
+        <div class="ins-toggle-group" data-target="cohortAgg">
+          <span class="ins-toggle-label">Average</span>
+          <button class="ins-toggle active" data-value="median">Median</button>
+          <button class="ins-toggle" data-value="mean">Mean</button>
+        </div>
       </div>
       <div class="cohort-controls" id="cohortControls">
         <span class="ins-sub">Toggle cohorts:</span>
         <!-- cohort pills injected -->
       </div>
-      <div id="cohortChart" class="chart-empty">Loading cohort data…</div>
+      <div id="cohortChart" class="chart-empty">Loading cohort data\u2026</div>
     </div>
 
     <div class="ins-card">
       <div class="ins-section-head" style="margin-bottom: 8px;">
-        <h2 class="ins-card__title">When are people reading? — heatmap by day &amp; hour</h2>
-        <span class="ins-sub">Median first-24h views, by publish weekday × hour</span>
+        <h2 class="ins-card__title" id="heatmapTitle">Publishing slots \u2014 best day &amp; hour to publish</h2>
+        <div class="gt-toggle" id="heatmapToggle">
+          <button class="active" data-mode="publish">Publishing slots</button>
+          <button data-mode="reading">Reading times</button>
+        </div>
       </div>
-      <div id="heatmap" class="chart-empty">Loading heatmap…</div>
+      <div class="ins-chart-controls" id="heatmapChartControls">
+        <div class="ins-toggle-group" data-target="heatmapPeriod">
+          <span class="ins-toggle-label">Period</span>
+          <button class="ins-toggle" data-value="30">30d</button>
+          <button class="ins-toggle active" data-value="90">90d</button>
+        </div>
+        <div class="ins-toggle-group" data-target="heatmapAgg" id="heatmapAggGroup">
+          <span class="ins-toggle-label">Average</span>
+          <button class="ins-toggle active" data-value="median">Median</button>
+          <button class="ins-toggle" data-value="mean">Mean</button>
+        </div>
+      </div>
+      <div class="ins-sub" id="heatmapSub" style="margin-bottom: 10px;">Median first-24h views for articles published in each slot. Brighter red = better-performing publish slot.</div>
+      <div id="heatmap" class="chart-empty">Loading heatmap\u2026</div>
     </div>
 
     <details class="ins-collapsible" id="singleArticlePanel">
@@ -722,7 +857,12 @@ var STATE = {
   currentTab: 'overview',
   selectedArticle: null,   // for timing single-curve view
   cohortToggles: {},       // hour bucket -> true/false
-  gtMode: 'gems'
+  gtMode: 'gems',
+  heatmapMode: 'publish',   // 'publish' | 'reading'
+  cohortPeriod: 90,         // days: 30 | 90
+  cohortAgg: 'median',      // 'median' | 'mean'
+  heatmapPeriod: 90,        // days: 30 | 90
+  heatmapAgg: 'median'      // 'median' | 'mean'
 };
 
 var DATA_BASE = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/';
@@ -1269,8 +1409,44 @@ function renderTimingTab() {
     clearBtn._wired = true;
   }
 
+  // Wire heatmap mode toggle (idempotent)
+  $$('#heatmapToggle button').forEach(function(b) {
+    if (b._wired) return;
+    b.addEventListener('click', function() {
+      STATE.heatmapMode = b.dataset.mode;
+      $$('#heatmapToggle button').forEach(function(b2) {
+        b2.classList.toggle('active', b2 === b);
+      });
+      updateHeatmapHeading();
+      updateAggToggleAvailability();
+      renderHeatmap();
+    });
+    b._wired = true;
+  });
+
+  // Wire chart-controls toggles (period/aggregation, idempotent)
+  wireToggleGroup('#cohortChartControls [data-target="cohortPeriod"]', function(v) {
+    STATE.cohortPeriod = parseInt(v, 10);
+    renderCohortChart();
+  });
+  wireToggleGroup('#cohortChartControls [data-target="cohortAgg"]', function(v) {
+    STATE.cohortAgg = v;
+    renderCohortChart();
+  });
+  wireToggleGroup('#heatmapChartControls [data-target="heatmapPeriod"]', function(v) {
+    STATE.heatmapPeriod = parseInt(v, 10);
+    renderHeatmap();
+  });
+  wireToggleGroup('#heatmapChartControls [data-target="heatmapAgg"]', function(v) {
+    STATE.heatmapAgg = v;
+    updateHeatmapHeading();
+    renderHeatmap();
+  });
+
   renderCohortControls();
   renderCohortChart();
+  updateHeatmapHeading();
+  updateAggToggleAvailability();
   renderHeatmap();
 
   // If URL has ?article=ID, deep-link AND auto-open the collapsible panel
@@ -1280,6 +1456,46 @@ function renderTimingTab() {
     var panel = $('singleArticlePanel');
     if (panel) panel.open = true;
     selectArticle(STATE.byId[articleId]);
+  }
+}
+
+function wireToggleGroup(selector, onChange) {
+  var buttons = $$(selector + ' .ins-toggle');
+  buttons.forEach(function(b) {
+    if (b._wired) return;
+    b.addEventListener('click', function() {
+      buttons.forEach(function(b2) { b2.classList.toggle('active', b2 === b); });
+      onChange(b.dataset.value);
+    });
+    b._wired = true;
+  });
+}
+
+// Reading-times mode is already an average (sum / count of slot occurrences).
+// Median doesn't really apply there — every cell is one number, not a list of
+// numbers to take the middle of. So when in reading mode, we disable the
+// median/mean toggle and force "mean" semantics.
+function updateAggToggleAvailability() {
+  var aggGroup = $('heatmapAggGroup');
+  if (!aggGroup) return;
+  if (STATE.heatmapMode === 'reading') {
+    aggGroup.classList.add('ins-toggle-group--disabled');
+  } else {
+    aggGroup.classList.remove('ins-toggle-group--disabled');
+  }
+}
+
+function updateHeatmapHeading() {
+  var title = $('heatmapTitle');
+  var sub = $('heatmapSub');
+  if (!title || !sub) return;
+  if (STATE.heatmapMode === 'reading') {
+    title.textContent = 'Reading times \u2014 when our audience is on site';
+    sub.textContent = 'Average pageviews per hour, by day-of-week and hour-of-day. Shows traffic patterns regardless of when articles were published.';
+  } else {
+    var aggWord = STATE.heatmapAgg === 'mean' ? 'Mean' : 'Median';
+    title.innerHTML = 'Publishing slots \u2014 best day &amp; hour to publish';
+    sub.textContent = aggWord + ' first-24h views for articles published in each slot. Brighter red = better-performing publish slot.';
   }
 }
 
@@ -1563,7 +1779,7 @@ function renderCohortChart() {
   });
   if (!anyData) {
     container.className = 'chart-empty';
-    container.innerHTML = 'Not enough articles in selected cohorts (last ' + meta.windowDays + ' days).';
+    container.innerHTML = 'Not enough articles in selected cohorts (last ' + (STATE.cohortPeriod || 90) + ' days).';
     return;
   }
 
@@ -1573,7 +1789,8 @@ function renderCohortChart() {
 
 function computeCohortSeries(hourSet) {
   var meta = STATE.hourlyMeta;
-  var windowStart = Date.now() - (meta.windowDays * 86400 * 1000);
+  var periodDays = Math.min(STATE.cohortPeriod || 90, meta.windowDays || 90);
+  var windowStart = Date.now() - (periodDays * 86400 * 1000);
   var matches = STATE.articles.filter(function(a) {
     var t = new Date(a.publishedDateTime).getTime();
     if (t < windowStart) return false;
@@ -1582,9 +1799,11 @@ function computeCohortSeries(hourSet) {
     return hourSet.indexOf(hr) >= 0;
   });
 
-  // Average cumulative across articles per hour-since-publish
-  var sums = new Array(73).fill(0);
-  var counts = new Array(73).fill(0);
+  // Build per-hour-since-publish buckets, then aggregate (mean or median).
+  // Each bucket holds one cumulative-views sample per article.
+  var buckets = [];
+  for (var i = 0; i <= 72; i++) buckets.push([]);
+
   matches.forEach(function(a) {
     var hourly = hourlyForArticle(a);
     if (!hourly) return;
@@ -1592,15 +1811,26 @@ function computeCohortSeries(hourSet) {
     if (!cum.length) return;
     cum.forEach(function(p) {
       if (p.hour <= 72) {
-        sums[p.hour] += p.cumulative;
-        counts[p.hour]++;
+        buckets[p.hour].push(p.cumulative);
       }
     });
   });
 
-  var avg = sums.map(function(s, i) { return counts[i] > 0 ? s / counts[i] : 0; });
+  var aggCum = buckets.map(function(arr) {
+    if (!arr.length) return 0;
+    if (STATE.cohortAgg === 'mean') {
+      var sum = 0;
+      for (var i = 0; i < arr.length; i++) sum += arr[i];
+      return sum / arr.length;
+    }
+    // median
+    var sorted = arr.slice().sort(function(a, b) { return a - b; });
+    var mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  });
+
   return {
-    avgCum: avg,
+    avgCum: aggCum,
     articleCount: matches.length
   };
 }
@@ -1665,7 +1895,8 @@ function drawCohortSVG(cohortSeries) {
   });
 
   // Y axis title (rotated)
-  svg += '<text class="svg-axis-label" x="-' + (MT + plotH / 2) + '" y="14" text-anchor="middle" transform="rotate(-90)" style="font-size: 10px;">Avg cumulative views</text>';
+  var yLabel = (STATE.cohortAgg === 'mean' ? 'Mean' : 'Median') + ' cumulative views';
+  svg += '<text class="svg-axis-label" x="-' + (MT + plotH / 2) + '" y="14" text-anchor="middle" transform="rotate(-90)" style="font-size: 10px;">' + esc(yLabel) + '</text>';
   // X axis title (below ticks, no longer overlaps legend)
   svg += '<text class="svg-axis-label" x="' + (ML + plotW / 2) + '" y="' + (H - 8) + '" text-anchor="middle">Hours since publish</text>';
 
@@ -1674,7 +1905,25 @@ function drawCohortSVG(cohortSeries) {
 }
 
 /* ============ HEATMAP ============ */
+/* ============ HEATMAP ============
+   Two modes:
+     - 'publish'  Median first-24h views for articles published in each slot.
+                  Answers: "what's the best slot to publish?"
+                  Data: per-article first-24h cumulative, median by publish day/hour.
+     - 'reading'  Total pageviews actually received in each day-of-week × hour.
+                  Answers: "when does our audience read?"
+                  Data: every hourly point summed by its absolute weekday/hour,
+                  ignoring article identity.
+*/
 function renderHeatmap() {
+  if (STATE.heatmapMode === 'reading') {
+    renderHeatmapReading();
+  } else {
+    renderHeatmapPublish();
+  }
+}
+
+function renderHeatmapPublish() {
   var container = $('heatmap');
   var meta = STATE.hourlyMeta;
   if (!meta.windowDays) {
@@ -1683,8 +1932,8 @@ function renderHeatmap() {
     return;
   }
 
-  var windowStart = Date.now() - (meta.windowDays * 86400 * 1000);
-  // Collect first-24h views by [weekday][hour]
+  var periodDays = Math.min(STATE.heatmapPeriod || 90, meta.windowDays || 90);
+  var windowStart = Date.now() - (periodDays * 86400 * 1000);
   var grid = {};
   for (var d = 0; d < 7; d++) {
     grid[d] = {};
@@ -1705,66 +1954,150 @@ function renderHeatmap() {
     if (v > 0) grid[dy][hr].push(v);
   });
 
-  // Compute median per cell
-  var medians = {};
+  var aggValues = {};
   var globalMax = 0;
-  for (var d = 0; d < 7; d++) {
-    medians[d] = {};
-    for (var h = 0; h < 24; h++) {
-      var arr = grid[d][h];
+  for (var d2 = 0; d2 < 7; d2++) {
+    aggValues[d2] = {};
+    for (var h2 = 0; h2 < 24; h2++) {
+      var arr = grid[d2][h2];
       if (arr.length >= 1) {
-        arr.sort(function(a, b) { return a - b; });
-        medians[d][h] = arr[Math.floor(arr.length / 2)];
-        if (medians[d][h] > globalMax) globalMax = medians[d][h];
+        var v;
+        if (STATE.heatmapAgg === 'mean') {
+          var sum = 0;
+          for (var i = 0; i < arr.length; i++) sum += arr[i];
+          v = sum / arr.length;
+        } else {
+          // median
+          arr.sort(function(a, b) { return a - b; });
+          v = arr[Math.floor(arr.length / 2)];
+        }
+        aggValues[d2][h2] = v;
+        if (v > globalMax) globalMax = v;
       } else {
-        medians[d][h] = null;
+        aggValues[d2][h2] = null;
       }
     }
   }
 
   if (globalMax === 0) {
     container.className = 'chart-empty';
-    container.innerHTML = 'Not enough data for heatmap (last ' + meta.windowDays + ' days).';
+    container.innerHTML = 'Not enough data for heatmap (last ' + periodDays + ' days).';
     return;
   }
 
-  // Render as grid: hour rows, day columns. Monday-first ordering.
-  // JS getUTCDay() returns 0=Sun..6=Sat; remap so col 0=Mon..col 6=Sun.
+  var aggLabel = STATE.heatmapAgg === 'mean' ? 'mean' : 'median';
+  drawHeatmapGrid(container, aggValues, grid, globalMax,
+    aggLabel + ' first-24h views', periodDays);
+}
+
+function renderHeatmapReading() {
+  var container = $('heatmap');
+  var meta = STATE.hourlyMeta;
+  if (!meta.windowDays || !STATE.hourly) {
+    container.className = 'chart-empty';
+    container.innerHTML = 'No hourly data available.';
+    return;
+  }
+
+  var periodDays = Math.min(STATE.heatmapPeriod || 90, meta.windowDays || 90);
+  var windowStartTs = Math.floor((Date.now() - (periodDays * 86400 * 1000)) / 1000);
+
+  // Sum total views by absolute weekday × hour-of-day across every article.
+  // This shows when the AUDIENCE reads, regardless of when articles publish.
+  // Filter timestamps to the selected period.
+  var totals = {};
+  var counts = {};   // count of distinct hour-buckets contributing
+  for (var d = 0; d < 7; d++) {
+    totals[d] = {};
+    counts[d] = {};
+    for (var h = 0; h < 24; h++) {
+      totals[d][h] = 0;
+      counts[d][h] = 0;
+    }
+  }
+
+  Object.keys(STATE.hourly).forEach(function(path) {
+    var pts = STATE.hourly[path];
+    if (!pts || !pts.length) return;
+    pts.forEach(function(pt) {
+      var ts = pt[0], v = pt[1];
+      if (!v || ts < windowStartTs) return;
+      var date = new Date(ts * 1000);
+      var dy = date.getUTCDay();
+      var hr = date.getUTCHours();
+      totals[dy][hr] += v;
+      counts[dy][hr]++;
+    });
+  });
+
+  // Convert totals to averages-per-hour-bucket so a slot that occurred 13 times
+  // doesn't dominate one that occurred 12 times. This normalises by how often
+  // that slot fell within the window.
+  var aggValues = {};
+  var globalMax = 0;
+  for (var d2 = 0; d2 < 7; d2++) {
+    aggValues[d2] = {};
+    for (var h2 = 0; h2 < 24; h2++) {
+      var avg = counts[d2][h2] > 0 ? Math.round(totals[d2][h2] / counts[d2][h2]) : null;
+      aggValues[d2][h2] = avg;
+      if (avg && avg > globalMax) globalMax = avg;
+    }
+  }
+
+  if (globalMax === 0) {
+    container.className = 'chart-empty';
+    container.innerHTML = 'Not enough data for heatmap (last ' + periodDays + ' days).';
+    return;
+  }
+
+  drawHeatmapGrid(container, aggValues, counts, globalMax,
+    'avg pageviews/hour', periodDays, 'reading');
+}
+
+function drawHeatmapGrid(container, medians, gridForCount, globalMax, valueLabel, windowDays, mode) {
   container.className = '';
   var dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  var jsToCol = [6, 0, 1, 2, 3, 4, 5];   // jsToCol[getUTCDay()] = column index
-  var html = '<div class="heatmap" style="grid-template-columns: 50px repeat(7, 1fr);">';
+  var jsDayForCol = [1, 2, 3, 4, 5, 6, 0];   // col 0=Mon -> JS day 1, etc.
 
-  // Header row
+  var html = '<div class="heatmap" style="grid-template-columns: 50px repeat(7, 1fr);">';
   html += '<div class="heatmap__corner"></div>';
   dayLabels.forEach(function(lab) {
     html += '<div class="heatmap__col-label">' + lab + '</div>';
   });
 
-  // Hour rows
   for (var hr = 0; hr < 24; hr++) {
     html += '<div class="heatmap__row-label">' + hr.toString().padStart(2, '0') + ':00</div>';
-    // Iterate columns Mon..Sun, mapping back to JS day index for the data lookup
-    var jsDayForCol = [1, 2, 3, 4, 5, 6, 0];
     for (var col = 0; col < 7; col++) {
       var dy = jsDayForCol[col];
       var v = medians[dy][hr];
-      var n = grid[dy][hr].length;
+      var n = (typeof gridForCount[dy][hr] === 'number')
+        ? gridForCount[dy][hr]
+        : (gridForCount[dy][hr] && gridForCount[dy][hr].length) || 0;
+
       if (v == null) {
-        html += '<div class="heatmap__cell heatmap__cell--null" title="No articles published in this slot">\u2014</div>';
+        var nullTip = mode === 'reading' ? 'No data this slot' : 'No articles published';
+        html += '<div class="heatmap__cell heatmap__cell--null" title="' + nullTip + '">\u2014</div>';
       } else {
         var intensity = v / globalMax;
         var alpha = 0.15 + intensity * 0.85;
         var bg = 'rgba(158, 0, 0, ' + alpha.toFixed(2) + ')';
         var textColor = intensity > 0.5 ? 'var(--white)' : 'var(--text)';
+        var tipN = mode === 'reading'
+          ? '(across ' + n + ' weeks)'
+          : '(n=' + n + ' articles)';
         html += '<div class="heatmap__cell" style="background: ' + bg + '; color: ' + textColor + ';" ' +
-          'title="' + dayLabels[col] + ' ' + hr.toString().padStart(2, '0') + ':00 \u2014 median ' + formatCount(v) + ' first-24h views (n=' + n + ')">' +
+          'title="' + dayLabels[col] + ' ' + hr.toString().padStart(2, '0') + ':00 \u2014 ' +
+          formatCount(v) + ' ' + valueLabel + ' ' + tipN + '">' +
           formatCount(v) + '</div>';
       }
     }
   }
   html += '</div>';
-  html += '<div class="ins-note">Times in UTC. Each cell shows the median first-24h views for articles published in that slot, last ' + meta.windowDays + ' days. Brighter red = better-performing slot.</div>';
+
+  var note = mode === 'reading'
+    ? 'Times in UTC. Each cell shows average pageviews received during that day-of-week / hour-of-day, last ' + windowDays + ' days. Brighter red = busier reading slot.'
+    : 'Times in UTC. Each cell shows the median first-24h views for articles published in that slot, last ' + windowDays + ' days. Brighter red = better publishing slot.';
+  html += '<div class="ins-note">' + note + '</div>';
 
   container.innerHTML = html;
 }
@@ -1899,4 +2232,4 @@ window.nlAuthReady = function(session) {
 };
 </script>
 </body>
-</html> 
+</html>
