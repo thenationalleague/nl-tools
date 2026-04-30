@@ -1019,6 +1019,39 @@ function findAllJourneys(fromCRS, toCRS) {
 
 async function buildJourneys() {
   log('═══ Building journeys — Playoff Finals ═══', 'head');
+  
+  // ── BACKFILL ALL_DEPS ──
+  // Services found via one station's scan may stop at other hub stations
+  // but weren't discovered when scanning those stations directly.
+  // Scan ALL_SERVICES and add missing departures to ALL_DEPS.
+  var backfilled = 0;
+  var hubSet = {};
+  for (var crs in STATIONS) hubSet[crs] = true;
+  
+  Object.keys(ALL_SERVICES).forEach(function(uid) {
+    var svc = ALL_SERVICES[uid];
+    if (!svc || !svc.stops) return;
+    svc.stops.forEach(function(stop) {
+      var sc = stop.station_code;
+      if (!hubSet[sc]) return; // not a station we care about
+      if (!ALL_DEPS[sc]) ALL_DEPS[sc] = [];
+      // Check if this train_uid is already in ALL_DEPS for this station
+      var already = ALL_DEPS[sc].some(function(d) { return d.train_uid === uid; });
+      if (already) return;
+      var depTime = stop.aimed_departure_time;
+      if (!depTime) return; // terminus — no departure
+      ALL_DEPS[sc].push({
+        departure_time: depTime,
+        train_uid: uid,
+        destination: svc.destination || '',
+        operator: svc.operator || '',
+        mode: 'train'
+      });
+      backfilled++;
+    });
+  });
+  if (backfilled > 0) log('  Backfilled ' + backfilled + ' missing departures from cross-station services', 'info');
+  
   clearDepartureCache();
   var output = {};
 
