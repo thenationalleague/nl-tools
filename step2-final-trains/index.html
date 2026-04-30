@@ -3,1201 +3,435 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Train Data Collector v1.0 — Playoff Finals</title>
+<title>Playoff Finals Planner v3 — National League</title>
 <!--
-  Train Data Collector v1.0 — Playoff Finals — 30/04/2026
-  
-  Forked from Playoff SF train-lookup v7.1 (Dijkstra journey builder).
-  Configured for North & South division playoff finals, Sat 09/05/2026.
-  
-  8 teams across 2 divisions:
-  North: South Shields (2nd), Kidderminster (3rd), Macclesfield (4th), Buxton (5th)
-  South: Hornchurch (2nd), Torquay (3rd), Dorking (4th), Weston-super-Mare (6th)
-  
-  Special routing considerations:
-  - South Shields: Bede Metro → Newcastle Central (25 min Metro, modelled as walk)
-  - Hornchurch: no mainline station. District Line from central London (~60 min
-    from Barking, modelled as fixed walk from BKG)
-  - Buxton: branch line only (limited Saturday service via Stockport)
-  - Dorking: DKG (Dorking station) or DPD (Deepdene) — using DKG
+  National League Playoff Finals Planner v3.0 — 30/04/2026
+  v1.0: Initial build with accordion cards
+  v2.0: Card-switcher layout — tap matchup card to see detail below
+  v3.0: Slot assignment switcher (North early / South late, or flip).
+    KO times in 15-min intervals (12:00-13:30 early, 15:00-16:30 late).
+    Early division renders first. KO auto-clamps when slots swap.
+    Route remapping for Hornchurch (tube from London terminus) and
+    Kidderminster (via BHM with transfer note). All 8 routes populated.
 -->
 <style>
-@font-face{font-family:"carbona-variable";src:url("https://use.typekit.net/af/184cf2/0000000000000000774c3175/31/l?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n4&v=3") format("woff2"),url("https://use.typekit.net/af/184cf2/0000000000000000774c3175/31/d?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n4&v=3") format("woff");font-display:swap;font-style:normal;font-weight:200 900}
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'carbona-variable','carbona',sans-serif;font-size:15px;line-height:1.5;color:#1a2a44;background:#f4f6f9}
-.topbar{background:#9e0000;color:#fff;padding:0 18px;height:56px;display:flex;align-items:center;gap:12px;border-bottom:5px solid #223b7c}
-.topbar img{height:32px}.topbar__title{font-weight:900;font-size:16px;text-transform:uppercase;letter-spacing:0.04em}.topbar__title span{opacity:0.55}
-.wrap{max-width:960px;margin:0 auto;padding:18px 14px 60px}
-.card{background:#fff;border-radius:6px;border:1px solid #dde3ed;box-shadow:0 2px 12px rgba(10,22,40,0.10);margin-bottom:20px;overflow:hidden}
-.card-header{background:#223b7c;color:#fff;padding:11px 20px;font-weight:800;font-size:13px;text-transform:uppercase;letter-spacing:0.08em}
-.card-body{padding:16px 20px}
-label{font-size:12px;font-weight:700;color:#5a6a82;text-transform:uppercase;letter-spacing:0.04em;display:block;margin-bottom:4px}
-input[type="text"]{width:100%;padding:8px 12px;border:1px solid #dde3ed;border-radius:4px;font-size:14px;font-family:inherit;color:#1a2a44;margin-bottom:12px}
-.btn{display:inline-block;padding:10px 24px;border:none;border-radius:4px;font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:0.06em;cursor:pointer;font-family:inherit;margin-right:8px;margin-bottom:6px}
-.btn-primary{background:#9e0000;color:#fff}.btn-primary:hover{background:#7a0000}.btn-primary:disabled{background:#ccc;cursor:not-allowed}
-.btn-navy{background:#223b7c;color:#fff}.btn-navy:hover{background:#1a2f63}
-.btn-sm{padding:6px 14px;font-size:11px}
-.progress-bar{height:8px;background:#dde3ed;border-radius:4px;overflow:hidden;margin:12px 0 6px}
-.progress-fill{height:100%;background:#1e7e34;border-radius:4px;transition:width 0.3s;width:0%}
-.progress-text{font-size:12px;color:#5a6a82}
-.log{background:#1a2a44;border-radius:4px;padding:12px;max-height:500px;overflow-y:auto;font-size:11px;line-height:1.6;color:#8892b0;margin-top:12px;font-family:monospace}
-.log .ok{color:#22c55e}.log .warn{color:#f59e0b}.log .err{color:#ef4444}.log .info{color:#64b5f6}.log .dim{color:#5a6a82}.log .head{color:#fff;font-weight:700}
-.stats{display:flex;gap:12px;margin:12px 0;flex-wrap:wrap}
-.stat{background:#f4f6f9;border-radius:4px;padding:8px 14px;font-size:12px;color:#5a6a82}.stat strong{color:#1a2a44;font-size:18px;display:block}
-.row{display:flex;gap:12px;flex-wrap:wrap}.row>*{flex:1;min-width:150px}
-textarea{width:100%;height:200px;font-family:monospace;font-size:11px;padding:8px;border:1px solid #dde3ed;border-radius:4px;margin-top:8px}
-.stn-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
-.stn-table th{background:#223b7c;color:#fff;padding:6px 10px;text-align:left;font-size:10px;text-transform:uppercase}
-.stn-table td{padding:6px 10px;border-bottom:1px solid #eef1f6;vertical-align:top}
-.stn-table tr:hover td{background:#f4f6f9}
-.pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:800}
-.pill-done{background:#edf7ee;color:#1e7e34}.pill-pending{background:#f4f6f9;color:#5a6a82}.pill-running{background:#fef6ec;color:#e67e22}
+@font-face {
+  font-family: "carbona-variable";
+  src: url("https://use.typekit.net/af/184cf2/0000000000000000774c3175/31/l?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n4&v=3") format("woff2"),
+       url("https://use.typekit.net/af/184cf2/0000000000000000774c3175/31/d?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n4&v=3") format("woff");
+  font-display: swap; font-style: normal; font-weight: 200 900;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --primary: #9e0000;
+  --navy: #223b7c;
+  --text: #1a2a44;
+  --text-muted: #5a6a82;
+  --border: #dde3ed;
+  --off-white: #f4f6f9;
+  --white: #ffffff;
+  --green: #1a7030;
+  --green-light: #edf7ee;
+  --amber: #c96f15;
+  --amber-light: #fef6ec;
+  --red: #d4380d;
+  --radius: 6px;
+  --shadow: 0 2px 12px rgba(10, 22, 40, 0.10);
+  --text-sm: clamp(12px, 0.75vw + 8px, 15px);
+  --text-xs: clamp(10px, 0.6vw + 7px, 13px);
+  --text-base: clamp(16px, 0.9vw + 12px, 21px);
+  --font: 'carbona-variable','carbona',sans-serif;
+}
+body { font-family: var(--font); font-size: var(--text-base); line-height: 1.5; font-variation-settings: 'wght' 400; color: var(--text); background: var(--off-white); -webkit-font-smoothing: antialiased; }
+select:focus { outline: 2px solid var(--primary); outline-offset: -1px; }
+.topbar { background: var(--primary); color: #fff; padding: 0 clamp(16px, 2.5vw, 44px); height: 60px; display: flex; align-items: center; gap: 14px; border-bottom: 5px solid var(--navy); box-shadow: 0 2px 12px rgba(0,0,0,0.3); position: sticky; top: 0; z-index: 100; }
+.topbar img { height: 36px; }
+.topbar__title { font-weight: 900; font-size: clamp(16px, 1vw + 10px, 22px); text-transform: uppercase; letter-spacing: 0.04em; }
+.topbar__title span { opacity: 0.55; }
+.wrap { max-width: 1700px; margin: 0 auto; padding: clamp(24px, 3vw, 56px) clamp(16px, 2.5vw, 44px) 70px; }
+.intro { margin-bottom: 20px; font-size: var(--text-sm); color: var(--text-muted); line-height: 1.6; }
+
+/* Division block */
+.division { background: var(--white); border-radius: var(--radius); border: 1px solid var(--border); box-shadow: var(--shadow); margin-bottom: 28px; overflow: hidden; }
+.div-header { background: var(--navy); color: #fff; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; }
+.div-header__name { font-weight: 800; font-size: var(--text-base); text-transform: uppercase; letter-spacing: 0.08em; }
+.div-header__date { font-size: var(--text-sm); opacity: 0.7; font-weight: 600; }
+
+/* Matchup selector cards — 2x2 grid */
+.cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; padding: 14px 18px; background: var(--off-white); border-bottom: 1px solid var(--border); }
+
+/* Side-by-side columns on desktop */
+.columns { display: grid; grid-template-columns: 1fr; gap: 20px; }
+@media (min-width: 1200px) {
+  .columns { grid-template-columns: 1fr 1fr; }
+}
+.slot-switcher { display: flex; align-items: center; justify-content: center; gap: 14px; margin-bottom: 20px; padding: 14px; background: var(--white); border-radius: var(--radius); border: 1px solid var(--border); box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+.slot-switcher__label { font-size: var(--text-sm); font-weight: 700; }
+.slot-switcher__label--active { color: var(--primary); }
+.slot-switcher__label--muted { color: var(--text-muted); }
+.slot-switcher__btn { background: var(--navy); color: #fff; border: none; border-radius: 4px; padding: 8px 18px; font-size: var(--text-sm); font-weight: 800; cursor: pointer; font-family: var(--font); letter-spacing: 0.04em; }
+.slot-switcher__btn:hover { background: color-mix(in srgb, var(--navy) 80%, black); }
+.card { border: 2px solid var(--border); border-radius: var(--radius); padding: 14px 10px; text-align: center; cursor: pointer; background: var(--white); transition: border-color 0.15s, background 0.15s, box-shadow 0.15s; }
+.card:hover { border-color: var(--primary); box-shadow: 0 2px 8px rgba(158,0,0,0.12); }
+.card.selected { border-color: var(--primary); background: var(--primary); color: #fff; box-shadow: 0 2px 8px rgba(158,0,0,0.25); }
+.card__crests { display: flex; justify-content: center; align-items: center; gap: 8px; margin-bottom: 8px; }
+.card__crest { width: 42px; height: 42px; object-fit: contain; }
+.card__v { font-weight: 800; font-size: var(--text-sm); color: var(--text-muted); }
+.card.selected .card__v { color: rgba(255,255,255,0.7); }
+.card__home, .card__away { font-size: var(--text-sm); font-weight: 700; line-height: 1.3; }
+.card__tag { font-size: var(--text-xs); font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: var(--primary); margin-top: 6px; }
+.card.selected .card__tag { color: rgba(255,255,255,0.8); }
+.card.selected .card__home, .card.selected .card__away { color: #fff; }
+.card__condition { font-size: var(--text-xs); color: var(--text-muted); margin-top: 3px; line-height: 1.3; }
+.card.selected .card__condition { color: rgba(255,255,255,0.7); }
+
+/* Detail panel (below cards) */
+.detail { padding: 20px 24px; }
+.detail__match { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.detail__crest { width: 44px; height: 44px; object-fit: contain; }
+.detail__home { font-weight: 800; font-size: clamp(17px, 1.1vw + 10px, 24px); }
+.detail__v { color: var(--text-muted); font-size: var(--text-base); font-weight: 600; }
+.detail__away { font-weight: 700; font-size: clamp(17px, 1.1vw + 10px, 24px); }
+.detail__meta { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.detail__condition { font-size: var(--text-sm); color: var(--text-muted); font-style: italic; }
+.ko-pick { display: flex; align-items: center; gap: 8px; }
+.ko-pick__label { font-size: var(--text-xs); font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.ko-pick__select { padding: 6px 10px; border-radius: 4px; border: 1px solid var(--border); background: var(--white); font-size: var(--text-base); font-weight: 700; color: var(--navy); cursor: pointer; font-family: var(--font); min-width: 80px; }
+
+/* Train panels */
+.train-panel { margin-top: 12px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.train-panel__header { background: var(--navy); color: #fff; padding: 8px 14px; font-weight: 800; font-size: var(--text-sm); text-transform: uppercase; letter-spacing: 0.06em; display: flex; justify-content: space-between; align-items: center; }
+.train-panel__grade { display: inline-flex; align-items: center; gap: 5px; }
+.train-panel__body { padding: 8px 14px; }
+.train-row { padding: 4px 0; font-size: var(--text-sm); border-bottom: 1px solid var(--off-white); cursor: pointer; }
+.train-row:last-child { border-bottom: none; }
+.train-row--flagged { background: var(--off-white); border-radius: 4px; font-weight: 700; }
+.train-summary { display: flex; align-items: center; gap: 8px; }
+.train-time { font-weight: 700; color: var(--navy); min-width: 110px; }
+.train-dur { color: var(--text); font-weight: 600; min-width: 70px; text-align: right; }
+.train-flag { font-size: var(--text-xs); font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; padding: 2px 7px; border-radius: 3px; }
+.train-flag--first { background: var(--green-light); color: var(--green); }
+.train-flag--last { background: var(--amber-light); color: var(--amber); }
+.train-expand { display: none; padding: 8px 0 6px 20px; border-left: 2px solid var(--border); margin: 5px 0 5px 6px; }
+.train-row.open .train-expand { display: block; }
+.train-row.open .train-chevron { transform: rotate(90deg); }
+.train-chevron { display: inline-block; font-size: var(--text-xs); color: var(--text-muted); transition: transform 0.15s; margin-right: 3px; }
+.leg-line { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: var(--text-sm); }
+.leg-line__op { font-weight: 700; color: var(--navy); min-width: 80px; font-size: var(--text-xs); text-transform: uppercase; }
+.leg-line__detail { color: var(--text); }
+.leg-line--walk { color: var(--amber); font-weight: 600; font-size: var(--text-sm); }
+.grade-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.grade-green { background: var(--green); }
+.grade-amber { background: var(--amber); }
+.grade-red { background: #c0392b; }
+.grade-grey { background: #aab2c0; }
+.grade-black { background: var(--text); }
+.train-walk-note { font-size: var(--text-xs); color: var(--text-muted); font-style: italic; margin-top: 4px; }
+.train-none { color: #c0392b; font-weight: 600; font-size: var(--text-sm); padding: 6px 0; }
+.legend { padding: 16px; background: var(--white); border-radius: var(--radius); border: 1px solid var(--border); font-size: var(--text-sm); color: var(--text-muted); line-height: 1.6; }
+.legend strong { color: var(--text); }
 </style>
 </head>
 <body>
 
 <div class="topbar">
-  <img src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose%20white.png" alt="NL" onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png'">
-  <div class="topbar__title">Train <span>Data Collector — Finals v1</span></div>
+  <img src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose%20white.png"
+    alt="National League" onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png'">
+  <div class="topbar__title">Playoff <span>Finals Planner v3</span></div>
 </div>
 
 <div class="wrap">
-  <div class="card">
-    <div class="card-header">Config</div>
-    <div class="card-body">
-      <div class="row">
-        <div><label>App ID</label><input type="text" id="appId" value="d347c855"></div>
-        <div><label>App Key</label><input type="text" id="appKey" value="daa125de19f0f403e225946f573fab38"></div>
-        <div><label>Delay (ms)</label><input type="text" id="delay" value="200"></div>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">How to use</div>
-    <div class="card-body" style="font-size:13px;line-height:1.7">
-      <strong style="color:#9e0000">If this is a fresh session:</strong>
-      <ol style="margin:6px 0 12px 20px">
-        <li>Paste your previously-saved raw scan data into the <strong>Raw Scan Data</strong> box below and click <strong>Load Raw Data</strong>. This restores the service database from a previous scan.</li>
-        <li>Then click <strong>Scan Missing Only</strong> to fill in any new stations that weren't scanned before.</li>
-        <li>Click <strong>Build Journeys</strong> to generate the journey database.</li>
-        <li>Before closing, click <strong>Save Raw Data</strong>, copy the textarea contents, and save somewhere safe.</li>
-      </ol>
-      <strong style="color:#9e0000">If this is a first-time scan:</strong>
-      <ol style="margin:6px 0 12px 20px">
-        <li>Click <strong>Scan All Stations</strong>. This will cost ~2,000 API hits.</li>
-        <li>After each station completes, raw data auto-saves to the textarea — copy it periodically as insurance.</li>
-        <li>When done, click <strong>Build Journeys</strong>, then <strong>Save Raw Data</strong>.</li>
-      </ol>
-      <strong style="color:#9e0000">To scan a specific station manually:</strong>
-      <ol style="margin:6px 0 0 20px">
-        <li>Use the <strong>Manual Station Scan</strong> section below. Useful for filling gaps without re-running everything.</li>
-      </ol>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">1. Load Previous Scan Data (if available)</div>
-    <div class="card-body">
-      <p style="font-size:12px;color:#5a6a82;margin-bottom:8px">Paste the <strong>raw scan data</strong> saved from a previous session (not the journey JSON). Stations with data will be marked as done, new stations will show as pending.</p>
-      <textarea id="rawDataArea" style="height:80px" placeholder="Paste previously-saved raw scan data here, then click Load Raw Data"></textarea>
-      <div style="margin-top:8px">
-        <button class="btn btn-primary" onclick="loadRawData()">Load Raw Data</button>
-        <button class="btn btn-navy btn-sm" onclick="exportRawData()">Save Raw Data (to textarea above)</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">2. Scan Stations</div>
-    <div class="card-body">
-      <div id="stationList"></div>
-      <div style="margin-top:12px">
-        <button class="btn btn-primary" onclick="runScan()">Scan All Stations (full rescan, ~2k hits)</button>
-        <button class="btn btn-primary" onclick="runScanMissing()">Scan Missing Only</button>
-        <button class="btn btn-navy btn-sm" onclick="stopScan()">Stop</button>
-      </div>
-      <div class="progress-bar"><div class="progress-fill" id="pFill"></div></div>
-      <div class="progress-text" id="pText">Ready</div>
-      <div class="stats">
-        <div class="stat"><strong id="statCalls">0</strong>API calls</div>
-        <div class="stat"><strong id="statServices">0</strong>Service timetables</div>
-        <div class="stat"><strong id="statSkipped">0</strong>Skipped (bus/dup)</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">Manual Station Scan</div>
-    <div class="card-body">
-      <p style="font-size:12px;color:#5a6a82;margin-bottom:8px">Scan a single station between specified times. Results merge into the existing database. Any valid 3-letter CRS code works (use dropdown for known stations or type any code).</p>
-      <div class="row" style="margin-bottom:8px">
-        <div>
-          <label>Station</label>
-          <select id="manualStn" style="width:100%;padding:8px 12px;border:1px solid #dde3ed;border-radius:4px;font-size:14px;font-family:inherit"></select>
-        </div>
-        <div>
-          <label>Or type CRS code</label>
-          <input type="text" id="manualCRS" placeholder="e.g. NCL" maxlength="3" style="text-transform:uppercase">
-        </div>
-        <div>
-          <label>Start time (HH:MM)</label>
-          <input type="text" id="manualStart" value="06:00">
-        </div>
-        <div>
-          <label>End time (HH:MM)</label>
-          <input type="text" id="manualEnd" value="23:30">
-        </div>
-      </div>
-      <button class="btn btn-primary" onclick="runManualScan()">Run Manual Scan</button>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">3. Build Journeys</div>
-    <div class="card-body">
-      <p style="font-size:12px;color:#5a6a82;margin-bottom:8px">Once all needed stations are scanned, generate the complete journey database.</p>
-      <button class="btn btn-primary" onclick="buildJourneys()">Build Journeys</button>
-      <div id="journeyResults" style="margin-top:12px"></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">Log</div>
-    <div class="card-body"><div class="log" id="log"></div></div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">4. Export for Planner</div>
-    <div class="card-body">
-      <p style="font-size:12px;color:#5a6a82;margin-bottom:8px">The final journey JSON for use in the playoff planner. This is NOT the same as raw scan data — keep both saved.</p>
-      <textarea id="exportJSON" readonly></textarea>
-      <button class="btn btn-navy btn-sm" onclick="copyJSON()" style="margin-top:8px">Copy to Clipboard</button>
-    </div>
+  <p class="intro">
+    Playoff finals — Sat 09/05/2026. Two KO slots: 12:30pm &amp; 4:00pm. Tap a matchup card to see train feasibility below.
+    Higher league position hosts. Return assumes fans stay 3h post-KO (ET, pens, trophy). Tap a train row to expand details.
+  </p>
+  <div id="app"></div>
+  <div class="legend" style="margin-top:8px">
+    <strong>Grading:</strong>
+    <span style="color:#1e7e34">●</span> 60min+ before KO
+    <span style="color:#e67e22">●</span> 30–60min
+    <span style="color:#c0392b">●</span> &lt;30min
+    <span style="color:#1a2a44">●</span> no viable option
   </div>
 </div>
 
 <script>
-/* ─────────────────────────────────────────────
-   STATION CONFIG
-   ───────────────────────────────────────────── */
+var CREST_BASE = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
+var FALLBACK = CREST_BASE + 'National%20League%20rose.png';
+function crestUrl(t) { return CREST_BASE + encodeURIComponent(t) + '.png'; }
+function esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function tm(t) { var p = t.split(':'); return parseInt(p[0])*60 + parseInt(p[1]); }
+function tmn(t) { return tm(t); }
+function fmtTime(m) { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0'); }
 
-// All stations we need to scan. Includes host stations, away team stations,
-// and key interchange stations for building connections.
-var STATIONS = {
-  // ── NORTH DIVISION TEAMS ──
-  NCL: {name:'Newcastle Central',role:'team',team:'South Shields'},
-  KID: {name:'Kidderminster',role:'team',team:'Kidderminster Harriers'},
-  MAC: {name:'Macclesfield',role:'team',team:'Macclesfield'},
-  BUX: {name:'Buxton',role:'team',team:'Buxton'},
-  // ── SOUTH DIVISION TEAMS ──
-  BKG: {name:'Barking',role:'team',team:'Hornchurch'},
-  TQY: {name:'Torre',role:'team',team:'Torquay United'},
-  DKG: {name:'Dorking',role:'team',team:'Dorking Wanderers'},
-  WSM: {name:'Weston-super-Mare',role:'team',team:'Weston-super-Mare'},
-  // ── LONDON TERMINI ──
-  EUS: {name:'London Euston',role:'london'},
-  KGX: {name:'London Kings Cross',role:'london'},
-  STP: {name:'London St Pancras',role:'london'},
-  PAD: {name:'London Paddington',role:'london'},
-  FST: {name:'London Fenchurch Street',role:'london'},
-  WAT: {name:'London Waterloo',role:'london'},
-  VIC: {name:'London Victoria',role:'london'},
-  // ── ECML (Newcastle routing) ──
-  YRK: {name:'York',role:'interchange'},
-  LDS: {name:'Leeds',role:'interchange'},
-  DON: {name:'Doncaster',role:'interchange'},
-  // ── NORTHERN / MIDLANDS ──
-  MAN: {name:'Manchester Piccadilly',role:'interchange'},
-  MCV: {name:'Manchester Victoria',role:'interchange'},
-  SPT: {name:'Stockport',role:'interchange'},
-  SHF: {name:'Sheffield',role:'interchange'},
-  BHM: {name:'Birmingham New Street',role:'interchange'},
-  BSW: {name:'Birmingham Snow Hill',role:'interchange'}, // KID services terminate here - CRS is BSW not BSH
-  SOT: {name:'Stoke-on-Trent',role:'interchange'},
-  // ── SOUTH / WEST ──
-  BRI: {name:'Bristol Temple Meads',role:'interchange'},
-  NTA: {name:'Newton Abbot',role:'interchange'},
-  EXD: {name:'Exeter St Davids',role:'interchange'},
-  RDG: {name:'Reading',role:'interchange'},
-  CLJ: {name:'Clapham Junction',role:'interchange'},
+var WALK_TO_GROUND = {
+  'South Shields': 35,          // 30 min Metro from NCL + 5 min walk
+  'Kidderminster Harriers': 20, // 20 min walk from KID
+  'Macclesfield': 25,           // 25 min walk from MAC
+  'Buxton': 15,                 // 15 min walk from BUX
+  'Hornchurch': 30,             // tube-dependent, handled in trainPanelHtml per away team
+  'Torquay United': 30,         // 30 min walk from Torre
+  'Dorking Wanderers': 15,      // 15 min walk from DKG
+  'Weston-super-Mare': 15       // 15 min walk from WSM
 };
 
-var DATE = '2026-05-09'; // Saturday — Playoff Finals
-var TIME_BLOCKS = ['06:00','08:00','10:00','12:00','14:00','16:00','18:00','20:00','22:00','23:30'];
-// Busy stations get hourly blocks to avoid missing services
-var TIME_BLOCKS_DENSE = ['06:00','07:00','08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00','20:00','21:00','22:00','23:00'];
-var DENSE_STATIONS = ['EUS','KGX','STP','PAD','WAT','VIC','MAN','BHM','BRI','FST','YRK','LDS','DON','SHF','CLJ']; // High-frequency stations
-
-// Virtual walk connections (minutes)
-var WALKS = {
-  // London inter-terminus walks (mins)
-  'STP-KGX':8,'KGX-STP':8,
-  'STP-EUS':6,'EUS-STP':6,
-  'EUS-KGX':10,'KGX-EUS':10,
-  'FST-KGX':15,'KGX-FST':15,
-  'FST-EUS':18,'EUS-FST':18,
-  'FST-STP':15,'STP-FST':15,
-  'PAD-EUS':15,'EUS-PAD':15,
-  'PAD-KGX':18,'KGX-PAD':18,
-  'PAD-STP':18,'STP-PAD':18,
-  'VIC-STP':18,'STP-VIC':18,
-  'VIC-PAD':20,'PAD-VIC':20,
-  'VIC-WAT':15,'WAT-VIC':15,
-  'WAT-PAD':20,'PAD-WAT':20,
-  'WAT-STP':20,'STP-WAT':20,
-  'WAT-EUS':20,'EUS-WAT':20,
-  // Manchester
-  'MAN-MCV':20,'MCV-MAN':20,
-  // Birmingham: BSW is aliased to BHM in STATION_ALIAS (no walk needed)
-  // Fenchurch Street connections (for c2c to Barking/Hornchurch)
-  'VIC-FST':25,'FST-VIC':25,
-  'PAD-FST':30,'FST-PAD':30,
-  'WAT-FST':25,'FST-WAT':25,
-  // South Shields ground access: NCL is the rail hub. Metro+walk to 1st Cloud Arena
-  // is modelled as GROUND_WALKS.NCL = 30 (25 Metro + 5 walk), not as a graph edge.
+// Descriptive transfer labels for the walk note line
+var GROUND_TRANSFER_DESC = {
+  'South Shields': '30 min Metro from NCL + 5 min walk',
+  'Kidderminster Harriers': '20 min walk from station',
+  'Macclesfield': '25 min walk from station',
+  'Buxton': '15 min walk from station',
+  'Hornchurch': 'tube + 10 min walk from Upminster Bridge',
+  'Torquay United': '30 min walk from Torre',
+  'Dorking Wanderers': '15 min walk from station',
+  'Weston-super-Mare': '15 min walk from station'
 };
 
-// Team pairs we need journeys for (away→host)
-// North final: host is higher-finishing SF winner
-// South final: host is higher-finishing SF winner
-var NORTH_TEAMS = ['South Shields','Kidderminster Harriers','Macclesfield','Buxton'];
-var SOUTH_TEAMS = ['Hornchurch','Torquay United','Dorking Wanderers','Weston-super-Mare'];
-// Positions: SS=2nd, Kid=3rd, Macc=4th, Bux=5th / Horn=2nd, Torq=3rd, Dork=4th, WSM=6th
+var KO_EARLY = [
+  {label:'12:00',mins:720},{label:'12:15',mins:735},{label:'12:30',mins:750},{label:'12:45',mins:765},
+  {label:'13:00',mins:780},{label:'13:15',mins:795},{label:'13:30',mins:810}
+];
+var KO_LATE = [
+  {label:'15:00',mins:900},{label:'15:15',mins:915},{label:'15:30',mins:930},{label:'15:45',mins:945},
+  {label:'16:00',mins:960},{label:'16:15',mins:975},{label:'16:30',mins:990}
+];
 
-function teamToCRS(team) {
-  for (var crs in STATIONS) { if (STATIONS[crs].team === team) return crs; }
-  return null;
+var SCENARIOS = {
+  North: [
+    {id:'N1',label:'2nd v 4th',home:'South Shields',away:'Macclesfield',cond:'SS beat Buxton & Macc beat Kidderminster'},
+    {id:'N2',label:'2nd v 3rd',home:'South Shields',away:'Kidderminster Harriers',cond:'SS beat Buxton & Kid beat Macclesfield'},
+    {id:'N3',label:'3rd v 5th',home:'Kidderminster Harriers',away:'Buxton',cond:'Kid beat Macclesfield & Buxton beat SS'},
+    {id:'N4',label:'4th v 5th',home:'Macclesfield',away:'Buxton',cond:'Macc beat Kidderminster & Buxton beat SS'}
+  ],
+  South: [
+    {id:'S1',label:'2nd v 4th',home:'Hornchurch',away:'Dorking Wanderers',cond:'Horn beat WSM & Dorking beat Torquay'},
+    {id:'S2',label:'2nd v 3rd',home:'Hornchurch',away:'Torquay United',cond:'Horn beat WSM & Torquay beat Dorking'},
+    {id:'S3',label:'3rd v 6th',home:'Torquay United',away:'Weston-super-Mare',cond:'Torquay beat Dorking & WSM beat Horn'},
+    {id:'S4',label:'4th v 6th',home:'Dorking Wanderers',away:'Weston-super-Mare',cond:'Dorking beat Torquay & WSM beat Horn'}
+  ]
+};
+
+var STATE = {
+  North:{selected:'N1',ko:750},
+  South:{selected:'S1',ko:960},
+  earlyDiv: 'North'  // which division gets 12:00-13:30 slot; the other gets 15:00-16:30
+};
+
+var TRAIN_DATA = {"Macclesfield→South Shields":{"division":"North","away":"Macclesfield","host":"South Shields","date":"2026-05-09","outbound":[{"depart":"06:17","arrive":"10:09","totalMins":232,"changes":2,"legs":"Northern MAC 06:17→MAN 06:49, Walk MAN→MCV, TransPennine Express MCV 07:29→YRK 09:07, LNER YRK 09:19→NCL 10:09"},{"depart":"07:06","arrive":"11:00","totalMins":234,"changes":2,"legs":"CrossCountry MAC 07:06→MAN 07:29, Walk MAN→MCV, TransPennine Express MCV 07:58→YRK 09:37, LNER YRK 10:06→NCL 11:00"},{"depart":"08:06","arrive":"12:00","totalMins":234,"changes":2,"legs":"CrossCountry MAC 08:06→MAN 08:29, Walk MAN→MCV, TransPennine Express MCV 08:58→YRK 10:37, LNER YRK 11:06→NCL 12:00"},{"depart":"09:06","arrive":"13:00","totalMins":234,"changes":2,"legs":"CrossCountry MAC 09:06→MAN 09:29, Walk MAN→MCV, TransPennine Express MCV 09:58→YRK 11:36, LNER YRK 12:06→NCL 13:00"},{"depart":"10:06","arrive":"14:00","totalMins":234,"changes":2,"legs":"CrossCountry MAC 10:06→MAN 10:29, Walk MAN→MCV, TransPennine Express MCV 10:58→YRK 12:37, LNER YRK 13:06→NCL 14:00"},{"depart":"11:06","arrive":"15:00","totalMins":234,"changes":2,"legs":"CrossCountry MAC 11:06→MAN 11:29, Walk MAN→MCV, TransPennine Express MCV 11:58→YRK 13:37, LNER YRK 14:06→NCL 15:00"},{"depart":"12:06","arrive":"16:00","totalMins":234,"changes":2,"legs":"CrossCountry MAC 12:06→MAN 12:29, Walk MAN→MCV, TransPennine Express MCV 12:58→YRK 14:37, LNER YRK 15:05→NCL 16:00"},{"depart":"13:06","arrive":"17:00","totalMins":234,"changes":2,"legs":"CrossCountry MAC 13:06→MAN 13:29, Walk MAN→MCV, TransPennine Express MCV 13:58→YRK 15:37, LNER YRK 16:06→NCL 17:00"},{"depart":"14:06","arrive":"18:00","totalMins":234,"changes":2,"legs":"CrossCountry MAC 14:06→MAN 14:29, Walk MAN→MCV, TransPennine Express MCV 14:58→YRK 16:37, LNER YRK 17:06→NCL 18:00"},{"depart":"15:06","arrive":"19:00","totalMins":234,"changes":2,"legs":"CrossCountry MAC 15:06→MAN 15:29, Walk MAN→MCV, TransPennine Express MCV 15:58→YRK 17:36, LNER YRK 18:06→NCL 19:00"},{"depart":"16:06","arrive":"20:00","totalMins":234,"changes":2,"legs":"CrossCountry MAC 16:06→MAN 16:29, Walk MAN→MCV, TransPennine Express MCV 16:58→YRK 18:37, LNER YRK 19:06→NCL 20:00"},{"depart":"17:06","arrive":"21:00","totalMins":234,"changes":2,"legs":"CrossCountry MAC 17:06→MAN 17:29, Walk MAN→MCV, TransPennine Express MCV 17:58→YRK 19:37, LNER YRK 20:06→NCL 21:00"},{"depart":"18:06","arrive":"22:02","totalMins":236,"changes":2,"legs":"CrossCountry MAC 18:06→MAN 18:29, Walk MAN→MCV, TransPennine Express MCV 18:58→YRK 20:36, LNER YRK 21:04→NCL 22:02"},{"depart":"19:17","arrive":"23:38","totalMins":261,"changes":2,"legs":"Northern MAC 19:17→MAN 19:50, TransPennine Express MAN 19:58→MCV 20:10, TransPennine Express MCV 20:45→NCL 23:38"}],"returns":[{"depart":"06:00","arrive":"09:36","totalMins":216,"changes":1,"legs":"TransPennine Express NCL 06:00→MCV 08:49, Walk MCV→MAN, Avanti West Coast MAN 09:14→MAC 09:36"},{"depart":"07:01","arrive":"10:36","totalMins":215,"changes":2,"legs":"LNER NCL 07:01→YRK 07:53, TransPennine Express YRK 08:04→MCV 09:48, Walk MCV→MAN, Avanti West Coast MAN 10:14→MAC 10:36"},{"depart":"08:02","arrive":"11:36","totalMins":214,"changes":1,"legs":"TransPennine Express NCL 08:02→MCV 10:49, Walk MCV→MAN, Avanti West Coast MAN 11:14→MAC 11:36"},{"depart":"09:03","arrive":"12:36","totalMins":213,"changes":1,"legs":"TransPennine Express NCL 09:03→MCV 11:48, Walk MCV→MAN, Avanti West Coast MAN 12:14→MAC 12:36"},{"depart":"10:03","arrive":"13:36","totalMins":213,"changes":1,"legs":"TransPennine Express NCL 10:03→MCV 12:47, Walk MCV→MAN, Avanti West Coast MAN 13:14→MAC 13:36"},{"depart":"11:03","arrive":"14:36","totalMins":213,"changes":1,"legs":"TransPennine Express NCL 11:03→MCV 13:46, Walk MCV→MAN, Avanti West Coast MAN 14:14→MAC 14:36"},{"depart":"12:02","arrive":"15:36","totalMins":214,"changes":1,"legs":"TransPennine Express NCL 12:02→MCV 14:47, Walk MCV→MAN, Avanti West Coast MAN 15:14→MAC 15:36"},{"depart":"13:01","arrive":"16:36","totalMins":215,"changes":1,"legs":"TransPennine Express NCL 13:01→MCV 15:44, Walk MCV→MAN, Avanti West Coast MAN 16:14→MAC 16:36"},{"depart":"14:02","arrive":"17:36","totalMins":214,"changes":1,"legs":"TransPennine Express NCL 14:02→MCV 16:49, Walk MCV→MAN, Avanti West Coast MAN 17:14→MAC 17:36"},{"depart":"15:04","arrive":"18:36","totalMins":212,"changes":1,"legs":"TransPennine Express NCL 15:04→MCV 17:45, Walk MCV→MAN, Avanti West Coast MAN 18:14→MAC 18:36"},{"depart":"16:02","arrive":"19:36","totalMins":214,"changes":1,"legs":"TransPennine Express NCL 16:02→MCV 18:44, Walk MCV→MAN, Avanti West Coast MAN 19:14→MAC 19:36"},{"depart":"17:02","arrive":"20:46","totalMins":224,"changes":1,"legs":"TransPennine Express NCL 17:02→MCV 19:48, Walk MCV→MAN, Avanti West Coast MAN 20:25→MAC 20:46"},{"depart":"18:03","arrive":"22:17","totalMins":254,"changes":1,"legs":"TransPennine Express NCL 18:03→MCV 20:48, Walk MCV→MAN, Northern MAN 21:46→MAC 22:17"},{"depart":"19:06","arrive":"23:18","totalMins":252,"changes":1,"legs":"TransPennine Express NCL 19:06→MCV 21:47, Walk MCV→MAN, Northern MAN 22:46→MAC 23:18"},{"depart":"20:04","arrive":"23:48","totalMins":224,"changes":2,"legs":"LNER NCL 20:04→DON 21:28, TransPennine Express DON 21:41→SPT 22:52, Northern SPT 23:25→MAC 23:48"}]},
+"Kidderminster Harriers→South Shields":{"division":"North","away":"Kidderminster Harriers","host":"South Shields","date":"2026-05-09","outbound":[{"depart":"06:04","arrive":"10:39","totalMins":275,"changes":1,"legs":"West Midlands Trains KID 06:04→BHM 06:46, CrossCountry BHM 07:03→NCL 10:39"},{"depart":"07:07","arrive":"11:37","totalMins":270,"changes":1,"legs":"West Midlands Trains KID 07:07→BHM 07:46, CrossCountry BHM 08:03→NCL 11:37"},{"depart":"08:22","arrive":"13:37","totalMins":315,"changes":1,"legs":"West Midlands Trains KID 08:22→BHM 09:01, CrossCountry BHM 10:03→NCL 13:37"},{"depart":"09:07","arrive":"13:37","totalMins":270,"changes":1,"legs":"West Midlands Trains KID 09:07→BHM 09:46, CrossCountry BHM 10:03→NCL 13:37"},{"depart":"10:07","arrive":"14:38","totalMins":271,"changes":1,"legs":"West Midlands Trains KID 10:07→BHM 10:46, CrossCountry BHM 11:03→NCL 14:38"},{"depart":"11:07","arrive":"15:37","totalMins":270,"changes":1,"legs":"West Midlands Trains KID 11:07→BHM 11:46, CrossCountry BHM 12:03→NCL 15:37"},{"depart":"12:07","arrive":"16:37","totalMins":270,"changes":1,"legs":"West Midlands Trains KID 12:07→BHM 12:46, CrossCountry BHM 13:03→NCL 16:37"},{"depart":"13:07","arrive":"17:37","totalMins":270,"changes":1,"legs":"West Midlands Trains KID 13:07→BHM 13:46, CrossCountry BHM 14:03→NCL 17:37"},{"depart":"14:07","arrive":"18:37","totalMins":270,"changes":1,"legs":"West Midlands Trains KID 14:07→BHM 14:46, CrossCountry BHM 15:03→NCL 18:37"},{"depart":"15:07","arrive":"19:39","totalMins":272,"changes":1,"legs":"West Midlands Trains KID 15:07→BHM 15:46, CrossCountry BHM 16:03→NCL 19:39"},{"depart":"16:07","arrive":"20:40","totalMins":273,"changes":1,"legs":"West Midlands Trains KID 16:07→BHM 16:46, CrossCountry BHM 17:03→NCL 20:40"},{"depart":"17:07","arrive":"21:29","totalMins":262,"changes":1,"legs":"West Midlands Trains KID 17:07→BHM 17:46, CrossCountry BHM 18:03→NCL 21:29"},{"depart":"18:07","arrive":"23:08","totalMins":301,"changes":3,"legs":"West Midlands Trains KID 18:07→BHM 18:46, CrossCountry BHM 19:03→LDS 21:09, Northern LDS 21:17→YRK 21:53, LNER YRK 22:05→NCL 23:08"}],"returns":[{"depart":"06:40","arrive":"10:55","totalMins":255,"changes":1,"legs":"CrossCountry NCL 06:40→BHM 10:06, West Midlands Trains BHM 10:16→KID 10:55"},{"depart":"07:40","arrive":"11:55","totalMins":255,"changes":1,"legs":"CrossCountry NCL 07:40→BHM 11:06, West Midlands Trains BHM 11:16→KID 11:55"},{"depart":"08:41","arrive":"12:55","totalMins":254,"changes":1,"legs":"CrossCountry NCL 08:41→BHM 12:07, West Midlands Trains BHM 12:16→KID 12:55"},{"depart":"09:40","arrive":"13:55","totalMins":255,"changes":1,"legs":"CrossCountry NCL 09:40→BHM 13:06, West Midlands Trains BHM 13:16→KID 13:55"},{"depart":"10:40","arrive":"14:55","totalMins":255,"changes":1,"legs":"CrossCountry NCL 10:40→BHM 14:04, West Midlands Trains BHM 14:16→KID 14:55"},{"depart":"11:40","arrive":"15:55","totalMins":255,"changes":1,"legs":"CrossCountry NCL 11:40→BHM 15:05, West Midlands Trains BHM 15:16→KID 15:55"},{"depart":"12:40","arrive":"16:55","totalMins":255,"changes":1,"legs":"CrossCountry NCL 12:40→BHM 16:04, West Midlands Trains BHM 16:16→KID 16:55"},{"depart":"13:40","arrive":"17:55","totalMins":255,"changes":1,"legs":"CrossCountry NCL 13:40→BHM 17:06, West Midlands Trains BHM 17:16→KID 17:55"},{"depart":"14:40","arrive":"18:55","totalMins":255,"changes":1,"legs":"CrossCountry NCL 14:40→BHM 18:04, West Midlands Trains BHM 18:16→KID 18:55"},{"depart":"15:40","arrive":"19:55","totalMins":255,"changes":1,"legs":"CrossCountry NCL 15:40→BHM 19:05, West Midlands Trains BHM 19:16→KID 19:55"},{"depart":"16:37","arrive":"21:09","totalMins":272,"changes":1,"legs":"CrossCountry NCL 16:37→BHM 20:07, West Midlands Trains BHM 20:31→KID 21:09"},{"depart":"17:39","arrive":"22:12","totalMins":273,"changes":1,"legs":"CrossCountry NCL 17:39→BHM 21:06, West Midlands Trains BHM 21:31→KID 22:12"},{"depart":"18:40","arrive":"23:42","totalMins":302,"changes":1,"legs":"CrossCountry NCL 18:40→BHM 22:32, West Midlands Trains BHM 23:00→KID 23:42"}]},
+"Buxton→Kidderminster Harriers":{"division":"North","away":"Buxton","host":"Kidderminster Harriers","date":"2026-05-09","outbound":[{"depart":"06:13","arrive":"09:25","totalMins":192,"changes":2,"legs":"Northern BUX 06:13→SPT 07:01, CrossCountry SPT 07:11→BHM 08:33, West Midlands Trains BHM 08:46→KID 09:25"},{"depart":"07:16","arrive":"10:25","totalMins":189,"changes":2,"legs":"Northern BUX 07:16→SPT 08:01, CrossCountry SPT 08:12→BHM 09:33, West Midlands Trains BHM 09:46→KID 10:25"},{"depart":"08:16","arrive":"11:25","totalMins":189,"changes":2,"legs":"Northern BUX 08:16→SPT 09:01, CrossCountry SPT 09:13→BHM 10:33, West Midlands Trains BHM 10:46→KID 11:25"},{"depart":"09:15","arrive":"12:25","totalMins":190,"changes":2,"legs":"Northern BUX 09:15→SPT 10:01, CrossCountry SPT 10:13→BHM 11:33, West Midlands Trains BHM 11:46→KID 12:25"},{"depart":"10:46","arrive":"14:25","totalMins":219,"changes":2,"legs":"Northern BUX 10:46→SPT 11:32, CrossCountry SPT 12:13→BHM 13:33, West Midlands Trains BHM 13:46→KID 14:25"},{"depart":"11:46","arrive":"15:25","totalMins":219,"changes":2,"legs":"Northern BUX 11:46→SPT 12:32, CrossCountry SPT 13:13→BHM 14:33, West Midlands Trains BHM 14:46→KID 15:25"},{"depart":"12:46","arrive":"16:25","totalMins":219,"changes":2,"legs":"Northern BUX 12:46→SPT 13:32, CrossCountry SPT 14:12→BHM 15:33, West Midlands Trains BHM 15:46→KID 16:25"},{"depart":"13:46","arrive":"17:25","totalMins":219,"changes":2,"legs":"Northern BUX 13:46→SPT 14:32, CrossCountry SPT 15:11→BHM 16:33, West Midlands Trains BHM 16:46→KID 17:25"},{"depart":"14:46","arrive":"18:25","totalMins":219,"changes":2,"legs":"Northern BUX 14:46→SPT 15:32, CrossCountry SPT 16:13→BHM 17:33, West Midlands Trains BHM 17:46→KID 18:25"},{"depart":"15:46","arrive":"19:55","totalMins":249,"changes":3,"legs":"Northern BUX 15:46→SPT 16:32, East Midlands Railway SPT 16:54→SHF 17:37, CrossCountry SHF 17:56→BHM 19:05, West Midlands Trains BHM 19:16→KID 19:55"},{"depart":"16:15","arrive":"21:09","totalMins":294,"changes":3,"legs":"Northern BUX 16:15→SPT 17:01, TransPennine Express SPT 17:25→SHF 18:09, CrossCountry SHF 18:56→BHM 20:07, West Midlands Trains BHM 20:31→KID 21:09"},{"depart":"17:16","arrive":"22:12","totalMins":296,"changes":3,"legs":"Northern BUX 17:16→SPT 18:03, TransPennine Express SPT 18:25→SHF 19:09, CrossCountry SHF 19:56→BHM 21:06, West Midlands Trains BHM 21:31→KID 22:12"},{"depart":"18:16","arrive":"23:42","totalMins":326,"changes":3,"legs":"Northern BUX 18:16→SPT 19:01, TransPennine Express SPT 19:24→SHF 20:07, CrossCountry SHF 20:56→BHM 22:32, West Midlands Trains BHM 23:00→KID 23:42"}],"returns":[{"depart":"06:04","arrive":"09:20","totalMins":196,"changes":2,"legs":"West Midlands Trains KID 06:04→BHM 06:46, CrossCountry BHM 07:01→SPT 08:19, Northern SPT 08:33→BUX 09:20"},{"depart":"07:07","arrive":"10:20","totalMins":193,"changes":2,"legs":"West Midlands Trains KID 07:07→BHM 07:46, CrossCountry BHM 08:01→SPT 09:18, Northern SPT 09:33→BUX 10:20"},{"depart":"08:22","arrive":"11:53","totalMins":211,"changes":2,"legs":"West Midlands Trains KID 08:22→BHM 09:01, CrossCountry BHM 09:30→SPT 10:50, Northern SPT 11:04→BUX 11:53"},{"depart":"09:07","arrive":"12:53","totalMins":226,"changes":2,"legs":"West Midlands Trains KID 09:07→BHM 09:46, CrossCountry BHM 10:01→SPT 11:18, Northern SPT 12:04→BUX 12:53"},{"depart":"10:07","arrive":"13:53","totalMins":226,"changes":2,"legs":"West Midlands Trains KID 10:07→BHM 10:46, CrossCountry BHM 11:01→SPT 12:18, Northern SPT 13:04→BUX 13:53"},{"depart":"11:07","arrive":"14:53","totalMins":226,"changes":2,"legs":"West Midlands Trains KID 11:07→BHM 11:46, CrossCountry BHM 12:01→SPT 13:18, Northern SPT 14:04→BUX 14:53"},{"depart":"12:07","arrive":"15:55","totalMins":228,"changes":2,"legs":"West Midlands Trains KID 12:07→BHM 12:46, CrossCountry BHM 13:01→SPT 14:18, Northern SPT 15:04→BUX 15:55"},{"depart":"13:07","arrive":"16:53","totalMins":226,"changes":2,"legs":"West Midlands Trains KID 13:07→BHM 13:46, CrossCountry BHM 14:01→SPT 15:18, Northern SPT 16:04→BUX 16:53"},{"depart":"14:07","arrive":"17:21","totalMins":194,"changes":2,"legs":"West Midlands Trains KID 14:07→BHM 14:46, CrossCountry BHM 15:01→SPT 16:18, Northern SPT 16:33→BUX 17:21"},{"depart":"15:07","arrive":"18:21","totalMins":194,"changes":2,"legs":"West Midlands Trains KID 15:07→BHM 15:46, CrossCountry BHM 16:01→SPT 17:18, Northern SPT 17:34→BUX 18:21"},{"depart":"16:07","arrive":"19:21","totalMins":194,"changes":2,"legs":"West Midlands Trains KID 16:07→BHM 16:46, CrossCountry BHM 17:01→SPT 18:19, Northern SPT 18:33→BUX 19:21"},{"depart":"17:07","arrive":"21:23","totalMins":256,"changes":3,"legs":"West Midlands Trains KID 17:07→BHM 17:46, CrossCountry BHM 18:03→SHF 19:15, East Midlands Railway SHF 19:43→SPT 20:25, Northern SPT 20:33→BUX 21:23"},{"depart":"18:07","arrive":"22:23","totalMins":256,"changes":3,"legs":"West Midlands Trains KID 18:07→BHM 18:46, CrossCountry BHM 19:03→SHF 20:18, East Midlands Railway SHF 20:34→SPT 21:15, Northern SPT 21:33→BUX 22:23"},{"depart":"19:07","arrive":"00:09","totalMins":302,"changes":3,"legs":"West Midlands Trains KID 19:07→BHM 19:46, CrossCountry BHM 20:03→SHF 21:20, TransPennine Express SHF 22:11→SPT 22:52, Northern SPT 23:19→BUX 00:09"}]},
+"Buxton→Macclesfield":{"division":"North","away":"Buxton","host":"Macclesfield","date":"2026-05-09","outbound":[{"depart":"06:13","arrive":"07:23","totalMins":70,"changes":1,"legs":"Northern BUX 06:13→SPT 07:01, CrossCountry SPT 07:11→MAC 07:23"},{"depart":"07:16","arrive":"08:24","totalMins":68,"changes":1,"legs":"Northern BUX 07:16→SPT 08:01, CrossCountry SPT 08:12→MAC 08:24"},{"depart":"08:16","arrive":"09:25","totalMins":69,"changes":1,"legs":"Northern BUX 08:16→SPT 09:01, CrossCountry SPT 09:13→MAC 09:25"},{"depart":"09:15","arrive":"10:25","totalMins":70,"changes":1,"legs":"Northern BUX 09:15→SPT 10:01, CrossCountry SPT 10:13→MAC 10:25"},{"depart":"10:46","arrive":"12:25","totalMins":99,"changes":1,"legs":"Northern BUX 10:46→SPT 11:32, CrossCountry SPT 12:13→MAC 12:25"},{"depart":"11:46","arrive":"13:17","totalMins":91,"changes":1,"legs":"Northern BUX 11:46→SPT 12:32, Northern SPT 12:55→MAC 13:17"},{"depart":"12:46","arrive":"14:24","totalMins":98,"changes":1,"legs":"Northern BUX 12:46→SPT 13:32, CrossCountry SPT 14:12→MAC 14:24"},{"depart":"13:46","arrive":"15:17","totalMins":91,"changes":1,"legs":"Northern BUX 13:46→SPT 14:32, Northern SPT 14:55→MAC 15:17"},{"depart":"14:46","arrive":"16:25","totalMins":99,"changes":1,"legs":"Northern BUX 14:46→SPT 15:32, CrossCountry SPT 16:13→MAC 16:25"},{"depart":"15:46","arrive":"17:17","totalMins":91,"changes":1,"legs":"Northern BUX 15:46→SPT 16:32, Northern SPT 16:55→MAC 17:17"},{"depart":"16:15","arrive":"17:36","totalMins":81,"changes":1,"legs":"Northern BUX 16:15→SPT 17:01, Avanti West Coast SPT 17:24→MAC 17:36"},{"depart":"17:16","arrive":"18:36","totalMins":80,"changes":1,"legs":"Northern BUX 17:16→SPT 18:03, Avanti West Coast SPT 18:24→MAC 18:36"},{"depart":"18:16","arrive":"19:36","totalMins":80,"changes":1,"legs":"Northern BUX 18:16→SPT 19:01, Avanti West Coast SPT 19:24→MAC 19:36"},{"depart":"19:16","arrive":"20:46","totalMins":90,"changes":1,"legs":"Northern BUX 19:16→SPT 20:01, Avanti West Coast SPT 20:35→MAC 20:46"},{"depart":"20:13","arrive":"22:17","totalMins":124,"changes":1,"legs":"Northern BUX 20:13→SPT 21:01, Northern SPT 21:55→MAC 22:17"},{"depart":"21:14","arrive":"23:18","totalMins":124,"changes":1,"legs":"Northern BUX 21:14→SPT 22:01, Northern SPT 22:55→MAC 23:18"},{"depart":"22:13","arrive":"23:48","totalMins":95,"changes":1,"legs":"Northern BUX 22:13→SPT 23:01, Northern SPT 23:25→MAC 23:48"}],"returns":[{"depart":"06:17","arrive":"07:50","totalMins":93,"changes":1,"legs":"Northern MAC 06:17→SPT 06:39, Northern SPT 07:03→BUX 07:50"},{"depart":"07:06","arrive":"08:21","totalMins":75,"changes":1,"legs":"CrossCountry MAC 07:06→SPT 07:18, Northern SPT 07:34→BUX 08:21"},{"depart":"08:06","arrive":"09:20","totalMins":74,"changes":1,"legs":"CrossCountry MAC 08:06→SPT 08:19, Northern SPT 08:33→BUX 09:20"},{"depart":"09:06","arrive":"10:20","totalMins":74,"changes":1,"legs":"CrossCountry MAC 09:06→SPT 09:18, Northern SPT 09:33→BUX 10:20"},{"depart":"10:06","arrive":"11:53","totalMins":107,"changes":1,"legs":"CrossCountry MAC 10:06→SPT 10:18, Northern SPT 11:04→BUX 11:53"},{"depart":"11:06","arrive":"12:53","totalMins":107,"changes":1,"legs":"CrossCountry MAC 11:06→SPT 11:18, Northern SPT 12:04→BUX 12:53"},{"depart":"12:06","arrive":"13:53","totalMins":107,"changes":1,"legs":"CrossCountry MAC 12:06→SPT 12:18, Northern SPT 13:04→BUX 13:53"},{"depart":"13:06","arrive":"14:53","totalMins":107,"changes":1,"legs":"CrossCountry MAC 13:06→SPT 13:18, Northern SPT 14:04→BUX 14:53"},{"depart":"14:06","arrive":"15:55","totalMins":109,"changes":1,"legs":"CrossCountry MAC 14:06→SPT 14:18, Northern SPT 15:04→BUX 15:55"},{"depart":"15:06","arrive":"16:53","totalMins":107,"changes":1,"legs":"CrossCountry MAC 15:06→SPT 15:18, Northern SPT 16:04→BUX 16:53"},{"depart":"16:06","arrive":"17:21","totalMins":75,"changes":1,"legs":"CrossCountry MAC 16:06→SPT 16:18, Northern SPT 16:33→BUX 17:21"},{"depart":"17:06","arrive":"18:21","totalMins":75,"changes":1,"legs":"CrossCountry MAC 17:06→SPT 17:18, Northern SPT 17:34→BUX 18:21"},{"depart":"18:06","arrive":"19:21","totalMins":75,"changes":1,"legs":"CrossCountry MAC 18:06→SPT 18:19, Northern SPT 18:33→BUX 19:21"},{"depart":"19:17","arrive":"21:23","totalMins":126,"changes":1,"legs":"Northern MAC 19:17→SPT 19:39, Northern SPT 20:33→BUX 21:23"},{"depart":"20:17","arrive":"22:23","totalMins":126,"changes":1,"legs":"Northern MAC 20:17→SPT 20:39, Northern SPT 21:33→BUX 22:23"},{"depart":"21:17","arrive":"23:16","totalMins":119,"changes":1,"legs":"Northern MAC 21:17→SPT 21:39, Northern SPT 22:30→BUX 23:16"},{"depart":"22:25","arrive":"00:09","totalMins":104,"changes":1,"legs":"Avanti West Coast MAC 22:25→SPT 22:38, Northern SPT 23:19→BUX 00:09"}]},
+"Dorking Wanderers→Hornchurch":{"division":"South","away":"Dorking Wanderers","host":"Hornchurch","date":"2026-05-09","outbound":[{"depart":"06:44","arrive":"07:45","totalMins":61,"changes":0,"legs":"Southern DKG 06:44→VIC 07:45"},{"depart":"07:17","arrive":"08:15","totalMins":58,"changes":0,"legs":"Southern DKG 07:17→VIC 08:15"},{"depart":"08:17","arrive":"09:15","totalMins":58,"changes":0,"legs":"Southern DKG 08:17→VIC 09:15"},{"depart":"09:17","arrive":"10:15","totalMins":58,"changes":0,"legs":"Southern DKG 09:17→VIC 10:15"},{"depart":"10:17","arrive":"11:15","totalMins":58,"changes":0,"legs":"Southern DKG 10:17→VIC 11:15"},{"depart":"11:17","arrive":"12:15","totalMins":58,"changes":0,"legs":"Southern DKG 11:17→VIC 12:15"},{"depart":"12:17","arrive":"13:15","totalMins":58,"changes":0,"legs":"Southern DKG 12:17→VIC 13:15"},{"depart":"13:17","arrive":"14:15","totalMins":58,"changes":0,"legs":"Southern DKG 13:17→VIC 14:15"},{"depart":"14:17","arrive":"15:15","totalMins":58,"changes":0,"legs":"Southern DKG 14:17→VIC 15:15"},{"depart":"15:17","arrive":"16:15","totalMins":58,"changes":0,"legs":"Southern DKG 15:17→VIC 16:15"},{"depart":"16:17","arrive":"17:15","totalMins":58,"changes":0,"legs":"Southern DKG 16:17→VIC 17:15"},{"depart":"17:17","arrive":"18:15","totalMins":58,"changes":0,"legs":"Southern DKG 17:17→VIC 18:15"},{"depart":"18:17","arrive":"19:15","totalMins":58,"changes":0,"legs":"Southern DKG 18:17→VIC 19:15"},{"depart":"19:16","arrive":"20:15","totalMins":59,"changes":0,"legs":"Southern DKG 19:16→VIC 20:15"},{"depart":"20:16","arrive":"21:15","totalMins":59,"changes":0,"legs":"Southern DKG 20:16→VIC 21:15"},{"depart":"21:16","arrive":"22:15","totalMins":59,"changes":0,"legs":"Southern DKG 21:16→VIC 22:15"},{"depart":"22:16","arrive":"23:15","totalMins":59,"changes":0,"legs":"Southern DKG 22:16→VIC 23:15"},{"depart":"23:32","arrive":"00:26","totalMins":69,"changes":0,"legs":"South Western Railway DKG 23:32→WAT 00:26, Walk WAT→VIC"}],"returns":[{"depart":"06:11","arrive":"07:07","totalMins":56,"changes":0,"legs":"Southern VIC 06:11→DKG 07:07"},{"depart":"07:11","arrive":"08:07","totalMins":56,"changes":0,"legs":"Southern VIC 07:11→DKG 08:07"},{"depart":"08:11","arrive":"09:07","totalMins":56,"changes":0,"legs":"Southern VIC 08:11→DKG 09:07"},{"depart":"09:11","arrive":"10:07","totalMins":56,"changes":0,"legs":"Southern VIC 09:11→DKG 10:07"},{"depart":"10:11","arrive":"11:07","totalMins":56,"changes":0,"legs":"Southern VIC 10:11→DKG 11:07"},{"depart":"11:11","arrive":"12:07","totalMins":56,"changes":0,"legs":"Southern VIC 11:11→DKG 12:07"},{"depart":"12:11","arrive":"13:07","totalMins":56,"changes":0,"legs":"Southern VIC 12:11→DKG 13:07"},{"depart":"13:11","arrive":"14:07","totalMins":56,"changes":0,"legs":"Southern VIC 13:11→DKG 14:07"},{"depart":"14:11","arrive":"15:07","totalMins":56,"changes":0,"legs":"Southern VIC 14:11→DKG 15:07"},{"depart":"15:11","arrive":"16:07","totalMins":56,"changes":0,"legs":"Southern VIC 15:11→DKG 16:07"},{"depart":"16:11","arrive":"17:07","totalMins":56,"changes":0,"legs":"Southern VIC 16:11→DKG 17:07"},{"depart":"17:11","arrive":"18:07","totalMins":56,"changes":0,"legs":"Southern VIC 17:11→DKG 18:07"},{"depart":"18:11","arrive":"19:09","totalMins":58,"changes":0,"legs":"Southern VIC 18:11→DKG 19:09"},{"depart":"19:11","arrive":"20:09","totalMins":58,"changes":0,"legs":"Southern VIC 19:11→DKG 20:09"},{"depart":"20:11","arrive":"21:09","totalMins":58,"changes":0,"legs":"Southern VIC 20:11→DKG 21:09"},{"depart":"21:11","arrive":"22:09","totalMins":58,"changes":0,"legs":"Southern VIC 21:11→DKG 22:09"},{"depart":"22:11","arrive":"23:09","totalMins":58,"changes":0,"legs":"Southern VIC 22:11→DKG 23:09"},{"depart":"23:11","arrive":"00:09","totalMins":58,"changes":0,"legs":"Southern VIC 23:11→DKG 00:09"}]},
+"Torquay United→Hornchurch":{"division":"South","away":"Torquay United","host":"Hornchurch","date":"2026-05-09","outbound":[{"depart":"06:15","arrive":"09:29","totalMins":194,"changes":1,"legs":"Great Western Railway TQY 06:15→NTA 06:25, Great Western Railway NTA 06:35→PAD 09:29"},{"depart":"07:15","arrive":"11:29","totalMins":254,"changes":1,"legs":"Great Western Railway TQY 07:15→NTA 07:25, Great Western Railway NTA 08:54→PAD 11:29"},{"depart":"08:21","arrive":"11:29","totalMins":188,"changes":1,"legs":"Great Western Railway TQY 08:21→NTA 08:31, Great Western Railway NTA 08:54→PAD 11:29"},{"depart":"09:01","arrive":"12:09","totalMins":188,"changes":0,"legs":"Great Western Railway TQY 09:01→PAD 12:09"},{"depart":"10:18","arrive":"13:29","totalMins":191,"changes":1,"legs":"CrossCountry TQY 10:18→NTA 10:26, Great Western Railway NTA 10:54→PAD 13:29"},{"depart":"11:00","arrive":"14:29","totalMins":209,"changes":1,"legs":"Great Western Railway TQY 11:00→NTA 11:11, Great Western Railway NTA 11:55→PAD 14:29"},{"depart":"12:24","arrive":"15:29","totalMins":185,"changes":1,"legs":"Great Western Railway TQY 12:24→NTA 12:35, Great Western Railway NTA 12:54→PAD 15:29"},{"depart":"13:00","arrive":"16:29","totalMins":209,"changes":1,"legs":"Great Western Railway TQY 13:00→NTA 13:11, Great Western Railway NTA 13:54→PAD 16:29"},{"depart":"14:18","arrive":"17:29","totalMins":191,"changes":1,"legs":"CrossCountry TQY 14:18→NTA 14:26, Great Western Railway NTA 14:54→PAD 17:29"},{"depart":"15:02","arrive":"18:11","totalMins":189,"changes":0,"legs":"Great Western Railway TQY 15:02→PAD 18:11"},{"depart":"16:22","arrive":"19:29","totalMins":187,"changes":1,"legs":"Great Western Railway TQY 16:22→NTA 16:34, Great Western Railway NTA 16:55→PAD 19:29"},{"depart":"17:22","arrive":"21:35","totalMins":253,"changes":2,"legs":"Great Western Railway TQY 17:22→NTA 17:34, CrossCountry NTA 18:06→BRI 19:27, Great Western Railway BRI 20:00→PAD 21:35"},{"depart":"18:24","arrive":"21:40","totalMins":196,"changes":1,"legs":"Great Western Railway TQY 18:24→NTA 18:35, Great Western Railway NTA 18:56→PAD 21:40"},{"depart":"19:23","arrive":"23:50","totalMins":267,"changes":1,"legs":"Great Western Railway TQY 19:23→NTA 19:34, Great Western Railway NTA 20:26→PAD 23:50"},{"depart":"20:11","arrive":"00:24","totalMins":253,"changes":2,"legs":"Great Western Railway TQY 20:11→NTA 20:20, CrossCountry NTA 20:47→BRI 22:14, Great Western Railway BRI 22:30→PAD 00:24"}],"returns":[{"depart":"06:00","arrive":"09:45","totalMins":225,"changes":1,"legs":"Great Western Railway PAD 06:00→BRI 07:35, CrossCountry BRI 08:14→TQY 09:45"},{"depart":"07:00","arrive":"10:52","totalMins":232,"changes":2,"legs":"Great Western Railway PAD 07:00→BRI 08:35, CrossCountry BRI 08:45→EXD 09:45, Great Western Railway EXD 10:05→TQY 10:52"},{"depart":"08:03","arrive":"10:52","totalMins":169,"changes":1,"legs":"Great Western Railway PAD 08:03→NTA 10:32, Great Western Railway NTA 10:42→TQY 10:52"},{"depart":"09:03","arrive":"12:16","totalMins":193,"changes":1,"legs":"Great Western Railway PAD 09:03→EXD 11:11, Great Western Railway EXD 11:30→TQY 12:16"},{"depart":"10:02","arrive":"12:59","totalMins":177,"changes":1,"legs":"Great Western Railway PAD 10:02→EXD 12:12, CrossCountry EXD 12:26→TQY 12:59"},{"depart":"11:03","arrive":"13:54","totalMins":171,"changes":1,"legs":"Great Western Railway PAD 11:03→NTA 13:33, Great Western Railway NTA 13:44→TQY 13:54"},{"depart":"12:03","arrive":"14:52","totalMins":169,"changes":1,"legs":"Great Western Railway PAD 12:03→NTA 14:31, Great Western Railway NTA 14:42→TQY 14:52"},{"depart":"13:03","arrive":"16:16","totalMins":193,"changes":1,"legs":"Great Western Railway PAD 13:03→EXD 15:12, Great Western Railway EXD 15:30→TQY 16:16"},{"depart":"14:03","arrive":"16:55","totalMins":172,"changes":1,"legs":"Great Western Railway PAD 14:03→NTA 16:34, Great Western Railway NTA 16:45→TQY 16:55"},{"depart":"15:03","arrive":"18:28","totalMins":205,"changes":1,"legs":"Great Western Railway PAD 15:03→NTA 17:58, Great Western Railway NTA 18:17→TQY 18:28"},{"depart":"16:03","arrive":"18:59","totalMins":176,"changes":1,"legs":"Great Western Railway PAD 16:03→NTA 18:40, Great Western Railway NTA 18:49→TQY 18:59"},{"depart":"17:03","arrive":"19:56","totalMins":173,"changes":1,"legs":"Great Western Railway PAD 17:03→NTA 19:36, Great Western Railway NTA 19:46→TQY 19:56"},{"depart":"18:03","arrive":"20:54","totalMins":171,"changes":1,"legs":"Great Western Railway PAD 18:03→NTA 20:33, Great Western Railway NTA 20:43→TQY 20:54"},{"depart":"19:03","arrive":"22:28","totalMins":205,"changes":1,"legs":"Great Western Railway PAD 19:03→NTA 21:59, Great Western Railway NTA 22:18→TQY 22:28"}]},
+"Weston-super-Mare→Torquay United":{"division":"South","away":"Weston-super-Mare","host":"Torquay United","date":"2026-05-09","outbound":[{"depart":"07:03","arrive":"09:24","totalMins":141,"changes":1,"legs":"Great Western Railway WSM 07:03→EXD 08:04, Great Western Railway EXD 08:37→TQY 09:24"},{"depart":"08:28","arrive":"10:52","totalMins":144,"changes":1,"legs":"Great Western Railway WSM 08:28→EXD 09:31, Great Western Railway EXD 10:05→TQY 10:52"},{"depart":"09:24","arrive":"11:17","totalMins":113,"changes":1,"legs":"Great Western Railway WSM 09:24→EXD 10:22, Great Western Railway EXD 10:31→TQY 11:17"},{"depart":"10:24","arrive":"12:16","totalMins":112,"changes":1,"legs":"Great Western Railway WSM 10:24→EXD 11:22, Great Western Railway EXD 11:30→TQY 12:16"},{"depart":"11:38","arrive":"12:59","totalMins":81,"changes":0,"legs":"CrossCountry WSM 11:38→TQY 12:59"},{"depart":"12:23","arrive":"14:28","totalMins":125,"changes":2,"legs":"Great Western Railway WSM 12:23→EXD 13:31, CrossCountry EXD 13:50→NTA 14:08, Great Western Railway NTA 14:18→TQY 14:28"},{"depart":"13:02","arrive":"15:49","totalMins":167,"changes":2,"legs":"Great Western Railway WSM 13:02→BRI 13:20, CrossCountry BRI 13:45→EXD 14:44, Great Western Railway EXD 15:02→TQY 15:49"},{"depart":"14:25","arrive":"16:55","totalMins":150,"changes":1,"legs":"Great Western Railway WSM 14:25→EXD 15:24, Great Western Railway EXD 16:05→TQY 16:55"},{"depart":"15:24","arrive":"17:54","totalMins":150,"changes":1,"legs":"Great Western Railway WSM 15:24→EXD 16:31, Great Western Railway EXD 17:03→TQY 17:54"},{"depart":"16:26","arrive":"18:28","totalMins":122,"changes":1,"legs":"Great Western Railway WSM 16:26→EXD 17:24, Great Western Railway EXD 17:37→TQY 18:28"},{"depart":"17:02","arrive":"19:26","totalMins":144,"changes":2,"legs":"Great Western Railway WSM 17:02→BRI 17:23, CrossCountry BRI 17:45→NTA 19:07, Great Western Railway NTA 19:15→TQY 19:26"},{"depart":"18:02","arrive":"20:54","totalMins":172,"changes":2,"legs":"Great Western Railway WSM 18:02→BRI 18:20, CrossCountry BRI 18:45→EXD 19:44, Great Western Railway EXD 20:06→TQY 20:54"},{"depart":"19:25","arrive":"21:27","totalMins":122,"changes":1,"legs":"Great Western Railway WSM 19:25→EXD 20:22, Great Western Railway EXD 20:33→TQY 21:27"}],"returns":[{"depart":"06:15","arrive":"08:25","totalMins":130,"changes":2,"legs":"Great Western Railway TQY 06:15→NTA 06:25, Great Western Railway NTA 06:35→EXD 06:54, Great Western Railway EXD 07:33→WSM 08:25"},{"depart":"07:15","arrive":"09:43","totalMins":148,"changes":1,"legs":"Great Western Railway TQY 07:15→EXD 08:12, Great Western Railway EXD 08:48→WSM 09:43"},{"depart":"08:21","arrive":"10:46","totalMins":145,"changes":1,"legs":"Great Western Railway TQY 08:21→EXD 09:10, Great Western Railway EXD 09:52→WSM 10:46"},{"depart":"09:01","arrive":"10:46","totalMins":105,"changes":1,"legs":"Great Western Railway TQY 09:01→EXD 09:43, Great Western Railway EXD 09:52→WSM 10:46"},{"depart":"10:18","arrive":"12:35","totalMins":137,"changes":1,"legs":"CrossCountry TQY 10:18→BRI 11:51, Great Western Railway BRI 12:14→WSM 12:35"},{"depart":"11:00","arrive":"14:24","totalMins":204,"changes":2,"legs":"Great Western Railway TQY 11:00→NTA 11:11, CrossCountry NTA 12:06→BRI 13:24, Great Western Railway BRI 13:54→WSM 14:24"},{"depart":"12:24","arrive":"14:46","totalMins":142,"changes":1,"legs":"Great Western Railway TQY 12:24→EXD 13:08, Great Western Railway EXD 13:50→WSM 14:46"},{"depart":"14:18","arrive":"15:38","totalMins":80,"changes":0,"legs":"CrossCountry TQY 14:18→WSM 15:38"},{"depart":"15:02","arrive":"16:47","totalMins":105,"changes":1,"legs":"Great Western Railway TQY 15:02→EXD 15:40, Great Western Railway EXD 15:55→WSM 16:47"},{"depart":"16:22","arrive":"19:23","totalMins":181,"changes":2,"legs":"Great Western Railway TQY 16:22→NTA 16:34, CrossCountry NTA 17:06→BRI 18:24, Great Western Railway BRI 18:51→WSM 19:23"},{"depart":"17:22","arrive":"20:25","totalMins":183,"changes":2,"legs":"Great Western Railway TQY 17:22→NTA 17:34, CrossCountry NTA 18:06→BRI 19:27, Great Western Railway BRI 19:54→WSM 20:25"},{"depart":"18:24","arrive":"20:50","totalMins":146,"changes":1,"legs":"Great Western Railway TQY 18:24→NTA 18:35, Great Western Railway NTA 19:30→WSM 20:50"},{"depart":"19:34","arrive":"22:14","totalMins":160,"changes":1,"legs":"CrossCountry TQY 19:34→EXD 20:03, Great Western Railway EXD 21:17→WSM 22:14"},{"depart":"20:11","arrive":"22:14","totalMins":123,"changes":2,"legs":"Great Western Railway TQY 20:11→NTA 20:20, CrossCountry NTA 20:47→EXD 21:07, Great Western Railway EXD 21:17→WSM 22:14"}]},
+"Weston-super-Mare→Dorking Wanderers":{"division":"South","away":"Weston-super-Mare","host":"Dorking Wanderers","date":"2026-05-09","outbound":[{"depart":"06:20","arrive":"10:07","totalMins":227,"changes":1,"legs":"Great Western Railway WSM 06:20→PAD 08:35, Walk PAD→VIC, Southern VIC 09:11→DKG 10:07"},{"depart":"07:27","arrive":"11:07","totalMins":220,"changes":1,"legs":"Great Western Railway WSM 07:27→PAD 09:36, Walk PAD→VIC, Southern VIC 10:11→DKG 11:07"},{"depart":"08:27","arrive":"12:07","totalMins":220,"changes":1,"legs":"Great Western Railway WSM 08:27→PAD 10:39, Walk PAD→VIC, Southern VIC 11:11→DKG 12:07"},{"depart":"09:10","arrive":"13:07","totalMins":237,"changes":2,"legs":"Great Western Railway WSM 09:10→BRI 09:44, Great Western Railway BRI 10:00→PAD 11:37, Walk PAD→VIC, Southern VIC 12:11→DKG 13:07"},{"depart":"10:10","arrive":"14:07","totalMins":237,"changes":2,"legs":"Great Western Railway WSM 10:10→BRI 10:44, Great Western Railway BRI 11:00→PAD 12:35, Walk PAD→VIC, Southern VIC 13:11→DKG 14:07"},{"depart":"11:10","arrive":"15:07","totalMins":237,"changes":2,"legs":"Great Western Railway WSM 11:10→BRI 11:44, Great Western Railway BRI 12:00→PAD 13:35, Walk PAD→VIC, Southern VIC 14:11→DKG 15:07"},{"depart":"12:10","arrive":"16:07","totalMins":237,"changes":2,"legs":"Great Western Railway WSM 12:10→BRI 12:44, Great Western Railway BRI 13:00→PAD 14:35, Walk PAD→VIC, Southern VIC 15:11→DKG 16:07"},{"depart":"13:02","arrive":"16:40","totalMins":218,"changes":1,"legs":"Great Western Railway WSM 13:02→PAD 15:05, Walk PAD→VIC, Southern VIC 15:41→DKG 16:40"},{"depart":"14:02","arrive":"17:40","totalMins":218,"changes":1,"legs":"Great Western Railway WSM 14:02→PAD 16:05, Walk PAD→VIC, Southern VIC 16:41→DKG 17:40"},{"depart":"15:02","arrive":"18:40","totalMins":218,"changes":1,"legs":"Great Western Railway WSM 15:02→PAD 17:07, Walk PAD→VIC, Southern VIC 17:41→DKG 18:40"},{"depart":"16:02","arrive":"19:40","totalMins":218,"changes":1,"legs":"Great Western Railway WSM 16:02→PAD 18:05, Walk PAD→VIC, Southern VIC 18:41→DKG 19:40"},{"depart":"17:02","arrive":"20:40","totalMins":218,"changes":1,"legs":"Great Western Railway WSM 17:02→PAD 19:07, Walk PAD→VIC, Southern VIC 19:41→DKG 20:40"},{"depart":"18:02","arrive":"21:40","totalMins":218,"changes":1,"legs":"Great Western Railway WSM 18:02→PAD 20:05, Walk PAD→VIC, Southern VIC 20:41→DKG 21:40"},{"depart":"19:10","arrive":"23:09","totalMins":239,"changes":2,"legs":"Great Western Railway WSM 19:10→BRI 19:43, Great Western Railway BRI 20:00→PAD 21:35, Walk PAD→VIC, Southern VIC 22:11→DKG 23:09"},{"depart":"20:26","arrive":"00:09","totalMins":223,"changes":1,"legs":"Great Western Railway WSM 20:26→PAD 22:37, Walk PAD→VIC, Southern VIC 23:11→DKG 00:09"}],"returns":[{"depart":"06:44","arrive":"10:32","totalMins":228,"changes":1,"legs":"Southern DKG 06:44→VIC 07:45, Walk VIC→PAD, Great Western Railway PAD 08:30→WSM 10:32"},{"depart":"07:17","arrive":"11:22","totalMins":245,"changes":2,"legs":"Southern DKG 07:17→VIC 08:15, Walk VIC→PAD, Great Western Railway PAD 09:00→BRI 10:35, Great Western Railway BRI 10:55→WSM 11:22"},{"depart":"08:17","arrive":"12:21","totalMins":244,"changes":2,"legs":"Southern DKG 08:17→VIC 09:15, Walk VIC→PAD, Great Western Railway PAD 10:00→BRI 11:35, Great Western Railway BRI 11:54→WSM 12:21"},{"depart":"09:17","arrive":"12:35","totalMins":198,"changes":1,"legs":"Southern DKG 09:17→VIC 10:15, Walk VIC→PAD, Great Western Railway PAD 10:45→WSM 12:35"},{"depart":"10:17","arrive":"14:24","totalMins":247,"changes":2,"legs":"Southern DKG 10:17→VIC 11:15, Walk VIC→PAD, Great Western Railway PAD 12:00→BRI 13:35, Great Western Railway BRI 13:54→WSM 14:24"},{"depart":"11:17","arrive":"15:23","totalMins":246,"changes":2,"legs":"Southern DKG 11:17→VIC 12:15, Walk VIC→PAD, Great Western Railway PAD 13:00→BRI 14:35, Great Western Railway BRI 14:56→WSM 15:23"},{"depart":"12:17","arrive":"16:25","totalMins":248,"changes":2,"legs":"Southern DKG 12:17→VIC 13:15, Walk VIC→PAD, Great Western Railway PAD 14:00→BRI 15:35, Great Western Railway BRI 15:58→WSM 16:25"},{"depart":"13:17","arrive":"17:22","totalMins":245,"changes":2,"legs":"Southern DKG 13:17→VIC 14:15, Walk VIC→PAD, Great Western Railway PAD 15:00→BRI 16:35, Great Western Railway BRI 16:55→WSM 17:22"},{"depart":"14:17","arrive":"18:22","totalMins":245,"changes":2,"legs":"Southern DKG 14:17→VIC 15:15, Walk VIC→PAD, Great Western Railway PAD 16:00→BRI 17:35, Great Western Railway BRI 17:55→WSM 18:22"},{"depart":"15:17","arrive":"19:23","totalMins":246,"changes":2,"legs":"Southern DKG 15:17→VIC 16:15, Walk VIC→PAD, Great Western Railway PAD 17:00→BRI 18:38, Great Western Railway BRI 18:51→WSM 19:23"},{"depart":"16:17","arrive":"20:25","totalMins":248,"changes":2,"legs":"Southern DKG 16:17→VIC 17:15, Walk VIC→PAD, Great Western Railway PAD 18:00→BRI 19:36, Great Western Railway BRI 19:54→WSM 20:25"},{"depart":"17:17","arrive":"21:35","totalMins":258,"changes":1,"legs":"Southern DKG 17:17→VIC 18:15, Walk VIC→PAD, Great Western Railway PAD 19:30→WSM 21:35"},{"depart":"18:17","arrive":"22:28","totalMins":251,"changes":2,"legs":"Southern DKG 18:17→VIC 19:15, Walk VIC→PAD, Great Western Railway PAD 20:00→BRI 21:32, Great Western Railway BRI 21:55→WSM 22:28"}]}};
+function gradeOutbound(arriveStr, koMins, walkMins) {
+  var arrAtGround = tmn(arriveStr) + walkMins;
+  var buffer = koMins - arrAtGround;
+  if (buffer >= 60) return {grade:'green',label:'60min+ buffer'};
+  if (buffer >= 30) return {grade:'amber',label:buffer+'min buffer'};
+  if (buffer >= 0) return {grade:'red',label:'only '+buffer+'min'};
+  return {grade:'black',label:'arrives after KO'};
+}
+function gradeReturn(departStr, leaveStationMins) {
+  var wait = tmn(departStr) - leaveStationMins;
+  if (wait >= 30) return {grade:'green',label:'30min+ wait'};
+  if (wait >= 0) return {grade:'amber',label:wait+'min wait'};
+  return {grade:'red',label:'may miss'};
 }
 
-/* ─────────────────────────────────────────────
-   API
-   ───────────────────────────────────────────── */
-var API_BASE = 'https://transportapi.com/v3/uk/train';
-var totalCalls=0, totalServices=0, totalSkipped=0;
-var shouldStop = false;
-
-function creds(){return{id:document.getElementById('appId').value.trim(),key:document.getElementById('appKey').value.trim()}}
-function apiUrl(p){var c=creds();var s=p.indexOf('?')>=0?'&':'?';return API_BASE+p+s+'app_id='+c.id+'&app_key='+c.key}
-function ms(){return parseInt(document.getElementById('delay').value)||200}
-function sleep(n){return new Promise(function(r){setTimeout(r,n)})}
-
-async function apiFetch(p){
-  totalCalls++;updStats();
-  try{var r=await fetch(apiUrl(p));if(!r.ok)return{_error:r.status};return await r.json()}catch(e){return{_error:e.message}}
-}
-
-async function getDeps(crs, date, time) {
-  var d = await apiFetch('/station/'+crs+'/'+date+'/'+time+'/timetable.json?train_status=passenger');
-  if (d._error || !d.departures || !d.departures.all) return [];
-  return d.departures.all;
-}
-
-async function getServiceTimetable(uid, date) {
-  var d = await apiFetch('/service_timetables/'+uid+':'+date+'.json');
-  if (d._error || !d.stops) return null;
-  return d;
-}
-
-/* ─────────────────────────────────────────────
-   DATA STORE
-   All service timetables keyed by train_uid.
-   All departures keyed by station CRS.
-   ───────────────────────────────────────────── */
-var ALL_SERVICES = {};  // train_uid → {stops:[], operator, origin, destination, ...}
-var ALL_DEPS = {};      // CRS → [{departure_time, train_uid, destination, operator, mode}, ...]
-var STATION_STATUS = {}; // CRS → 'pending'|'running'|'done'
-
-function initStationStatus() {
-  for (var crs in STATIONS) {
-    if (!STATION_STATUS[crs]) STATION_STATUS[crs] = 'pending';
-    if (!ALL_DEPS[crs]) ALL_DEPS[crs] = [];
-  }
-}
-
-/* ─────────────────────────────────────────────
-   STATION SCAN
-   For each station, query all time blocks,
-   collect unique train services, fetch each timetable.
-   ───────────────────────────────────────────── */
-async function scanStation(crs) {
-  var stn = STATIONS[crs];
-  STATION_STATUS[crs] = 'running';
-  renderStationList();
-  log('═══ Scanning ' + stn.name + ' (' + crs + ') ═══', 'head');
-
-  var seenUids = {};
-  var trainDeps = [];
-
-  // Use denser time blocks for busy interchange stations
-  var blocks = DENSE_STATIONS.indexOf(crs) >= 0 ? TIME_BLOCKS_DENSE : TIME_BLOCKS;
-  
-  // Query each time block
-  for (var i = 0; i < blocks.length; i++) {
-    if (shouldStop) break;
-    var time = blocks[i];
-    log('  Departures from ' + time, 'dim');
-    var deps = await getDeps(crs, DATE, time);
-    await sleep(ms());
-
-    deps.forEach(function(dep) {
-      if (dep.mode !== 'train') { totalSkipped++; updStats(); return; }
-      if (seenUids[dep.train_uid]) { totalSkipped++; updStats(); return; }
-      seenUids[dep.train_uid] = true;
-      trainDeps.push({
-        departure_time: dep.aimed_departure_time,
-        train_uid: dep.train_uid,
-        destination: dep.destination_name,
-        operator: dep.operator_name,
-        mode: dep.mode
-      });
-    });
-  }
-
-  log('  Found ' + trainDeps.length + ' unique train services', 'info');
-  ALL_DEPS[crs] = trainDeps;
-
-  // Fetch each service timetable
-  for (var j = 0; j < trainDeps.length; j++) {
-    if (shouldStop) break;
-    var dep = trainDeps[j];
-    if (ALL_SERVICES[dep.train_uid]) {
-      log('  ' + dep.train_uid + ' already fetched', 'dim');
-      continue; // Already fetched from another station scan
-    }
-    var svc = await getServiceTimetable(dep.train_uid, DATE);
-    await sleep(ms());
-    if (svc) {
-      ALL_SERVICES[dep.train_uid] = {
-        stops: svc.stops,
-        operator: svc.operator_name || dep.operator,
-        origin: svc.origin_name,
-        destination: svc.destination_name,
-        train_uid: dep.train_uid
-      };
-      totalServices++; updStats();
-      // Compact log — just show destination
-      log('  ✓ ' + dep.departure_time + ' ' + dep.operator + ' → ' + dep.destination, 'ok');
+function legsExpandHtml(legsStr) {
+  var html = '<div class="train-expand">';
+  legsStr.split(', ').forEach(function(p) {
+    if (p.indexOf('Walk ') === 0) {
+      html += '<div class="leg-line leg-line--walk">🚶 ' + esc(p) + '</div>';
     } else {
-      log('  ✗ Failed: ' + dep.train_uid + ' ' + dep.destination, 'err');
+      var m = p.match(/^([A-Za-z ]+?) ([A-Z]{3}) /);
+      if (m) html += '<div class="leg-line"><span class="leg-line__op">'+esc(m[1])+'</span><span class="leg-line__detail">'+esc(p.substring(m[1].length+1))+'</span></div>';
+      else html += '<div class="leg-line"><span class="leg-line__detail">'+esc(p)+'</span></div>';
+    }
+  });
+  return html + '</div>';
+}
+
+function trainRowHtml(j, g, isFlagged, flagLabel, flagClass) {
+  var hrs = Math.floor(j.totalMins/60), mins = j.totalMins%60;
+  var h = '<div class="train-row'+(isFlagged?' train-row--flagged':'')+'" onclick="this.classList.toggle(\'open\')">';
+  h += '<div class="train-summary"><span class="train-chevron">▶</span>';
+  h += '<span class="grade-dot grade-'+g.grade+'"></span>';
+  h += '<span class="train-time">'+esc(j.depart)+' → '+esc(j.arrive)+'</span>';
+  h += '<span class="train-dur">'+hrs+'h'+String(mins).padStart(2,'0')+' '+j.changes+'chg</span>';
+  if (isFlagged) h += '<span class="train-flag '+flagClass+'">'+flagLabel+'</span>';
+  h += '</div>' + legsExpandHtml(j.legs) + '</div>';
+  return h;
+}
+
+function isNextDayArrival(j) { return tmn(j.arrive) < tmn(j.depart); }
+
+function trainPanelHtml(home, away, koMins) {
+  var key = away + '→' + home;
+  var data = TRAIN_DATA[key];
+
+  if (!data || (data.outbound.length === 0 && data.returns.length === 0)) {
+    return '<div class="train-panel"><div class="train-panel__header"><span>Train feasibility</span>'
+      + '<span class="train-panel__grade"><span class="grade-dot grade-grey"></span></span></div>'
+      + '<div class="train-panel__body"><div class="train-none">No train data for this route — check manually.</div></div></div>';
+  }
+
+  var walkMins = WALK_TO_GROUND[home] || 15;
+  var transferDesc = GROUND_TRANSFER_DESC[home] || walkMins+'min walk';
+  var hubNote = '';
+
+  // Hornchurch: train data shows journey to London terminus, not to ground.
+  // Add tube time based on which terminus the away team arrives at.
+  if (home === 'Hornchurch') {
+    if (away === 'Dorking Wanderers') {
+      // DKG→VIC, then tube VIC→Upminster Bridge + walk
+      walkMins = 55; // 45 min tube + 10 min walk
+      transferDesc = '45 min tube from Victoria to Upminster Bridge + 10 min walk';
+      hubNote = 'Train to London Victoria, then tube to Hornchurch ground';
+    } else if (away === 'Torquay United') {
+      // TQY→PAD, then tube PAD→Upminster Bridge + walk
+      walkMins = 70; // 60 min tube + 10 min walk
+      transferDesc = '60 min tube from Paddington to Upminster Bridge + 10 min walk';
+      hubNote = 'Train to London Paddington, then tube to Hornchurch ground';
     }
   }
 
-  STATION_STATUS[crs] = 'done';
-  renderStationList();
-  // Auto-save raw data to textarea as insurance against page crashes
-  try { autoSaveRawData(); } catch(e) {}
-  log('═══ ' + stn.name + ' complete (' + trainDeps.length + ' services) — raw data auto-saved ═══', 'ok');
-}
+  var leaveStationMins = koMins + 180 + walkMins;
+  var outboundCutoff = koMins - walkMins;
+  var html = '<div class="train-panel">';
+  if (hubNote) html += '<div style="padding:8px 14px;font-size:var(--text-sm);color:var(--text-muted);background:var(--amber-light);border-bottom:1px solid var(--border);font-style:italic">⚡ '+esc(hubNote)+'</div>';
 
-function autoSaveRawData() {
-  var raw = { services: ALL_SERVICES, deps: ALL_DEPS, status: STATION_STATUS };
-  var ta = document.getElementById('rawDataArea');
-  if (ta) ta.value = JSON.stringify(raw);
-}
-
-async function runScan() {
-  shouldStop = false;
-  // Full reset — clear everything
-  ALL_SERVICES = {};
-  ALL_DEPS = {};
-  STATION_STATUS = {};
-  totalCalls = 0; totalServices = 0; totalSkipped = 0;
-  for (var crs in STATIONS) { STATION_STATUS[crs] = 'pending'; ALL_DEPS[crs] = []; }
-  renderStationList();
-
-  var stationOrder = Object.keys(STATIONS);
-  var total = stationOrder.length;
-
-  for (var i = 0; i < total; i++) {
-    if (shouldStop) break;
-    updProgress(i, total, 'Scanning ' + STATIONS[stationOrder[i]].name);
-    await scanStation(stationOrder[i]);
-  }
-
-  updProgress(total, total, 'Scan complete — ' + totalCalls + ' API calls, ' + totalServices + ' services');
-  log('All stations scanned. ' + Object.keys(ALL_SERVICES).length + ' unique services in database.', 'head');
-}
-
-async function runScanMissing() {
-  shouldStop = false;
-  // Only scan stations that are still 'pending'
-  var missing = Object.keys(STATIONS).filter(function(crs) {
-    return STATION_STATUS[crs] !== 'done';
-  });
-
-  if (missing.length === 0) {
-    log('All stations already scanned — nothing to do', 'info');
-    return;
-  }
-
-  log('Scanning ' + missing.length + ' missing stations: ' + missing.join(', '), 'head');
-
-  for (var i = 0; i < missing.length; i++) {
-    if (shouldStop) break;
-    updProgress(i, missing.length, 'Scanning ' + STATIONS[missing[i]].name);
-    await scanStation(missing[i]);
-  }
-
-  updProgress(missing.length, missing.length, 'Missing stations complete — ' + totalCalls + ' API calls');
-  log('Missing stations scanned. ' + Object.keys(ALL_SERVICES).length + ' total services in database.', 'head');
-}
-
-function importPreviousData() {
-  // Deprecated — functionality removed. Use Load Raw Data instead.
-}
-
-// Scan a single station between custom times
-async function runManualScan() {
-  var crs = (document.getElementById('manualCRS').value.trim() || document.getElementById('manualStn').value).toUpperCase();
-  if (!crs || crs.length !== 3) { log('Enter a valid 3-letter CRS code', 'err'); return; }
-
-  var startTime = document.getElementById('manualStart').value.trim();
-  var endTime = document.getElementById('manualEnd').value.trim();
-  if (!/^\d{2}:\d{2}$/.test(startTime) || !/^\d{2}:\d{2}$/.test(endTime)) {
-    log('Invalid time format — use HH:MM', 'err'); return;
-  }
-
-  // Register station if not already known
-  if (!STATIONS[crs]) {
-    STATIONS[crs] = {name: crs + ' (manual)', role: 'manual'};
-    log('Registered new station: ' + crs, 'info');
-  }
-  if (!ALL_DEPS[crs]) ALL_DEPS[crs] = [];
-  if (!STATION_STATUS[crs]) STATION_STATUS[crs] = 'pending';
-
-  // Build time blocks for the custom range (hourly)
-  var startMins = tm(startTime), endMins = tm(endTime);
-  if (endMins <= startMins) { log('End time must be after start time', 'err'); return; }
-  var blocks = [];
-  for (var m = startMins; m <= endMins; m += 60) {
-    blocks.push(String(Math.floor(m/60)).padStart(2,'0') + ':' + String(m%60).padStart(2,'0'));
-  }
-
-  log('═══ Manual scan: ' + crs + ' from ' + startTime + ' to ' + endTime + ' (' + blocks.length + ' blocks) ═══', 'head');
-  shouldStop = false;
-  STATION_STATUS[crs] = 'running';
-  renderStationList();
-
-  // Track existing UIDs so we don't re-fetch services already in database
-  var seenUids = {};
-  ALL_DEPS[crs].forEach(function(d) { seenUids[d.train_uid] = true; });
-  var newDeps = [];
-
-  for (var i = 0; i < blocks.length; i++) {
-    if (shouldStop) break;
-    log('  Departures from ' + blocks[i], 'dim');
-    var deps = await getDeps(crs, DATE, blocks[i]);
-    await sleep(ms());
-    deps.forEach(function(dep) {
-      if (dep.mode !== 'train') { totalSkipped++; updStats(); return; }
-      if (seenUids[dep.train_uid]) { totalSkipped++; updStats(); return; }
-      seenUids[dep.train_uid] = true;
-      newDeps.push({
-        departure_time: dep.aimed_departure_time,
-        train_uid: dep.train_uid,
-        destination: dep.destination_name,
-        operator: dep.operator_name,
-        mode: dep.mode
-      });
+  // Outbound
+  var viableOut = data.outbound.filter(function(o) { return !isNextDayArrival(o) && tmn(o.arrive) <= outboundCutoff; });
+  html += '<div class="train-panel__header"><span>Outbound (away fans)</span>';
+  html += '<span class="train-panel__grade"><span class="grade-dot grade-'+(viableOut.length>0?gradeOutbound(viableOut[viableOut.length-1].arrive,koMins,walkMins).grade:'black')+'"></span></span></div>';
+  html += '<div class="train-panel__body">';
+  if (data.outbound.length === 0) {
+    html += '<div class="train-none">No train route found</div>';
+  } else if (viableOut.length === 0) {
+    var n = data.outbound[0], arrG = tmn(n.arrive)+walkMins, miss = arrG - koMins;
+    html += '<div class="train-row" onclick="this.classList.toggle(\'open\')"><div class="train-summary"><span class="train-chevron">▶</span><span class="grade-dot grade-black"></span>';
+    html += '<span class="train-time">'+esc(n.depart)+' → '+esc(n.arrive)+'</span><span class="train-dur" style="color:#c0392b">'+miss+'min late</span></div>'+legsExpandHtml(n.legs)+'</div>';
+    html += '<div class="train-walk-note">Nearest option — arrives '+fmtTime(arrG)+' at ground (KO '+fmtTime(koMins)+')</div>';
+  } else {
+    viableOut.forEach(function(o,i) {
+      html += trainRowHtml(o, gradeOutbound(o.arrive,koMins,walkMins), i===viableOut.length-1, 'Latest', 'train-flag--first');
     });
+    html += '<div class="train-walk-note">+'+walkMins+'min to ground ('+transferDesc+') · Must arrive station by '+fmtTime(outboundCutoff)+'</div>';
   }
+  html += '</div>';
 
-  log('  Found ' + newDeps.length + ' new unique services', 'info');
-
-  // Fetch service timetables for new services
-  for (var j = 0; j < newDeps.length; j++) {
-    if (shouldStop) break;
-    var dep = newDeps[j];
-    if (ALL_SERVICES[dep.train_uid]) continue;
-    var svc = await getServiceTimetable(dep.train_uid, DATE);
-    await sleep(ms());
-    if (svc) {
-      ALL_SERVICES[dep.train_uid] = {
-        stops: svc.stops,
-        operator: svc.operator_name || dep.operator,
-        origin: svc.origin_name,
-        destination: svc.destination_name,
-        train_uid: dep.train_uid
-      };
-      totalServices++; updStats();
-      log('  ✓ ' + dep.departure_time + ' ' + dep.operator + ' → ' + dep.destination, 'ok');
+  // Return
+  var viableRet = data.returns.filter(function(r) { return tmn(r.depart) >= leaveStationMins; });
+  html += '<div class="train-panel__header"><span>Return (away fans home)</span>';
+  html += '<span class="train-panel__grade"><span class="grade-dot grade-'+(viableRet.length>0?gradeReturn(viableRet[viableRet.length-1].depart,leaveStationMins).grade:(data.returns.length>0?'black':'grey'))+'"></span></span></div>';
+  html += '<div class="train-panel__body">';
+  if (data.returns.length === 0) {
+    html += '<div class="train-none">No return data</div>';
+  } else if (viableRet.length === 0) {
+    var nr = null, sg = 9999;
+    data.returns.forEach(function(r) { var g = Math.abs(tmn(r.depart)-leaveStationMins); if (g<sg){sg=g;nr=r;} });
+    if (nr) {
+      var eb = leaveStationMins - tmn(nr.depart);
+      html += '<div class="train-row" onclick="this.classList.toggle(\'open\')"><div class="train-summary"><span class="train-chevron">▶</span><span class="grade-dot grade-black"></span>';
+      html += '<span class="train-time">'+esc(nr.depart)+' → '+esc(nr.arrive)+'</span><span class="train-dur" style="color:#c0392b">'+eb+'min too early</span></div>'+legsExpandHtml(nr.legs)+'</div>';
+      html += '<div class="train-walk-note">Fans reach station '+fmtTime(leaveStationMins)+' (KO+180min+'+walkMins+'min — '+transferDesc+')</div>';
     }
-  }
-
-  // Merge new deps into existing
-  ALL_DEPS[crs] = ALL_DEPS[crs].concat(newDeps);
-  STATION_STATUS[crs] = 'done';
-  renderStationList();
-  autoSaveRawData();
-  log('═══ Manual scan complete: ' + crs + ' — ' + newDeps.length + ' new services merged ═══', 'ok');
-}
-
-function stopScan() { shouldStop = true; log('STOPPED', 'err'); }
-
-/* ─────────────────────────────────────────────
-   JOURNEY BUILDER
-   Uses the service database to find all possible
-   journeys between each away team and each host.
-   ───────────────────────────────────────────── */
-
-function findStopInService(svc, targetCRS) {
-  for (var i = 0; i < svc.stops.length; i++) {
-    if (svc.stops[i].station_code === targetCRS) return svc.stops[i];
-  }
-  return null;
-}
-
-function stopTime(stop, type) {
-  if (type === 'arr') return stop.aimed_arrival_time || stop.aimed_departure_time;
-  return stop.aimed_departure_time || stop.aimed_arrival_time;
-}
-
-function tm(t) { if (!t) return -1; var p = t.split(':'); return parseInt(p[0]) * 60 + parseInt(p[1]); }
-function ft(m) { if (m < 0) return '??:??'; return String(Math.floor(m/60)%24).padStart(2,'0') + ':' + String(m%60).padStart(2,'0'); }
-
-// Find direct services from A to B
-function findDirectServices(fromCRS, toCRS) {
-  var results = [];
-  var deps = ALL_DEPS[fromCRS] || [];
-  deps.forEach(function(dep) {
-    var svc = ALL_SERVICES[dep.train_uid];
-    if (!svc) return;
-    // Check stop order — fromCRS must appear before toCRS in the timetable
-    var fromIdx = -1, toIdx = -1;
-    for (var i = 0; i < svc.stops.length; i++) {
-      if (svc.stops[i].station_code === fromCRS && fromIdx < 0) fromIdx = i;
-      if (svc.stops[i].station_code === toCRS && toIdx < 0) toIdx = i;
-    }
-    if (fromIdx < 0 || toIdx < 0 || toIdx <= fromIdx) return; // Not on this service or wrong direction
-    var depTime = stopTime(svc.stops[fromIdx], 'dep');
-    var arrTime = stopTime(svc.stops[toIdx], 'arr');
-    if (!depTime || !arrTime) return;
-    // Duration handles past-midnight
-    var durMins = tm(arrTime) - tm(depTime);
-    if (durMins < 0) durMins += 1440; // past midnight
-    // Also check arrival date if available — services arriving next day
-    var arrDate = svc.stops[toIdx].aimed_arrival_date || svc.stops[toIdx].aimed_departure_date;
-    var depDate = svc.stops[fromIdx].aimed_departure_date;
-    var crossesMidnight = (arrDate && depDate && arrDate !== depDate);
-    
-    results.push({
-      depart: depTime,
-      arrive: arrTime,
-      operator: svc.operator,
-      train_uid: dep.train_uid,
-      durationMins: durMins,
-      crossesMidnight: crossesMidnight
+  } else {
+    viableRet.forEach(function(r,i) {
+      html += trainRowHtml(r, gradeReturn(r.depart,leaveStationMins), i===viableRet.length-1, 'Last', 'train-flag--last');
     });
-  });
-  results.sort(function(a,b) { return tm(a.depart) - tm(b.depart); });
-  return results;
-}
-
-// Find 1-change journeys: A → intermediate → B
-function find1ChangeJourneys(fromCRS, toCRS, viaCRS, walkMins) {
-  walkMins = walkMins || 0;
-  var minConnection = walkMins > 0 ? walkMins : 8; // 8 min minimum platform change
-  var leg1s = findDirectServices(fromCRS, viaCRS);
-  var leg2s = findDirectServices(viaCRS, toCRS);
-  var results = [];
-
-  leg1s.forEach(function(l1) {
-    var earliest2 = tm(l1.arrive) + minConnection;
-    // Find first leg2 departing after connection time
-    for (var i = 0; i < leg2s.length; i++) {
-      var dep2 = tm(leg2s[i].depart);
-      // Handle past-midnight: if leg1 arrives late and leg2 is after midnight
-      var validConnection = dep2 >= earliest2;
-      if (!validConnection && l1.crossesMidnight) {
-        // leg1 arrival is already past midnight — dep2 should be read as next-day
-        validConnection = (dep2 + 1440) >= earliest2;
-      }
-      if (validConnection) {
-        var totalMins = tm(leg2s[i].arrive) - tm(l1.depart);
-        if (totalMins < 0) totalMins += 1440;
-        // If leg1 crosses midnight, total needs adjustment
-        if (l1.crossesMidnight) {
-          totalMins = (tm(l1.arrive) + 1440 - tm(l1.depart)) + leg2s[i].durationMins;
-        }
-        var waitMins = dep2 - tm(l1.arrive);
-        if (waitMins < 0) waitMins += 1440;
-        waitMins -= walkMins;
-        results.push({
-          depart: l1.depart,
-          arrive: leg2s[i].arrive,
-          totalMins: totalMins,
-          changes: 1,
-          legs: l1.operator + ' ' + fromCRS + ' ' + l1.depart + '→' + viaCRS + ' ' + l1.arrive
-            + (walkMins > 0 ? ', Walk ' + viaCRS + '→' + toCRS.substring(0,3) : '')
-            + ', ' + leg2s[i].operator + ' ' + viaCRS + ' ' + leg2s[i].depart + '→' + toCRS + ' ' + leg2s[i].arrive,
-          detail: {
-            leg1: l1,
-            leg2: leg2s[i],
-            via: viaCRS,
-            walkMins: walkMins,
-            waitMins: waitMins > 0 ? waitMins : 0
-          }
-        });
-        break; // Only take the first valid connection per leg1
-      }
-    }
-  });
-
-  return results;
-}
-
-// Find 1-change journeys with a walk between two different interchange stations
-function find1ChangeWalkJourneys(fromCRS, toCRS, via1CRS, via2CRS) {
-  var walkKey = via1CRS + '-' + via2CRS;
-  var walkMins = WALKS[walkKey];
-  if (!walkMins) return [];
-
-  var leg1s = findDirectServices(fromCRS, via1CRS);
-  var leg2s = findDirectServices(via2CRS, toCRS);
-  var results = [];
-
-  leg1s.forEach(function(l1) {
-    var earliest2 = tm(l1.arrive) + walkMins;
-    for (var i = 0; i < leg2s.length; i++) {
-      if (tm(leg2s[i].depart) >= earliest2) {
-        var totalMins = tm(leg2s[i].arrive) - tm(l1.depart);
-        if (totalMins < 0) totalMins += 1440;
-        results.push({
-          depart: l1.depart,
-          arrive: leg2s[i].arrive,
-          totalMins: totalMins,
-          changes: 1,
-          legs: l1.operator + ' ' + fromCRS + ' ' + l1.depart + '→' + via1CRS + ' ' + l1.arrive
-            + ', Walk ' + via1CRS + '→' + via2CRS
-            + ', ' + leg2s[i].operator + ' ' + via2CRS + ' ' + leg2s[i].depart + '→' + toCRS + ' ' + leg2s[i].arrive,
-          detail: {
-            leg1: l1,
-            leg2: leg2s[i],
-            via1: via1CRS,
-            via2: via2CRS,
-            walkMins: walkMins
-          }
-        });
-        break;
-      }
-    }
-  });
-
-  return results;
-}
-
-// Find 2-change journeys: A → via1 → (walk?) → via2 → B
-function find2ChangeJourneys(fromCRS, toCRS, via1CRS, via2CRS, walkBetween) {
-  var results = [];
-  var leg1s = findDirectServices(fromCRS, via1CRS);
-
-  leg1s.forEach(function(l1) {
-    var afterL1 = tm(l1.arrive) + (walkBetween ? (WALKS[via1CRS+'-'+via2CRS]||10) : 8);
-    var leg2s = findDirectServices(walkBetween ? via2CRS : via1CRS, walkBetween ? toCRS : via2CRS);
-
-    if (walkBetween) {
-      // A→via1, walk via1→via2, via2→B (still 1 actual train change)
-      // This is handled by find1ChangeWalkJourneys — skip here
-      return;
-    }
-
-    // A→via1, via1→via2, via2→B
-    for (var i = 0; i < leg2s.length; i++) {
-      if (tm(leg2s[i].depart) < afterL1) continue;
-      var leg3s = findDirectServices(via2CRS, toCRS);
-      var afterL2 = tm(leg2s[i].arrive) + 8;
-      for (var j = 0; j < leg3s.length; j++) {
-        if (tm(leg3s[j].depart) >= afterL2) {
-          var totalMins = tm(leg3s[j].arrive) - tm(l1.depart);
-          if (totalMins < 0) totalMins += 1440;
-          results.push({
-            depart: l1.depart,
-            arrive: leg3s[j].arrive,
-            totalMins: totalMins,
-            changes: 2,
-            legs: l1.operator+' '+fromCRS+' '+l1.depart+'→'+via1CRS+' '+l1.arrive
-              +', '+leg2s[i].operator+' '+via1CRS+' '+leg2s[i].depart+'→'+via2CRS+' '+leg2s[i].arrive
-              +', '+leg3s[j].operator+' '+via2CRS+' '+leg3s[j].depart+'→'+toCRS+' '+leg3s[j].arrive
-          });
-          break;
-        }
-      }
-      break; // Only first valid per leg1
-    }
-  });
-
-  return results;
-}
-
-/* ─────────────────────────────────────────────
-   GRAPH-BASED JOURNEY FINDER (v7.1)
-   
-   Uses Dijkstra-style shortest-path search with a severely constrained
-   graph:
-   
-   - Nodes: only stations we care about (team stations + interchanges).
-     We DON'T explore every onward stop of every service — only when
-     the service reaches one of our known hub stations.
-   - Edges: (a) train services that START at a hub and STOP at another
-     hub, (b) walk connections between station pairs in WALKS dict.
-   - We find multiple journey options by running the search with
-     different earliest-departure times (stepping through the day).
-   
-   This keeps search space bounded to ~20 nodes rather than the 200+
-   that naive BFS was exploring.
-   ───────────────────────────────────────────── */
-
-// Build a list of hub stations (any station we've scanned)
-function getHubStations() {
-  return Object.keys(STATIONS);
-}
-
-// Station aliases — treat these as the same node in the graph.
-// Services at BSH are reported as BHM (Birmingham Snow Hill ≈ New Street, 10 min apart).
-var STATION_ALIAS = { 'BSW': 'BHM' };
-function resolveAlias(crs) { return STATION_ALIAS[crs] || crs; }
-
-// For a given station, find all trains that go from here to ANY other hub
-// Returns: [{ to_hub, departMins, arriveMins, depart, arrive, operator, train_uid, crossesMidnight }, ...]
-// Only one entry per (train_uid, to_hub) pair — the first reachable hub on that service.
-function findHubDepartures(fromCRS) {
-  // If fromCRS has an alias target, also search departures from the alias source(s)
-  var searchStations = [fromCRS];
-  for (var alias in STATION_ALIAS) {
-    if (STATION_ALIAS[alias] === fromCRS) searchStations.push(alias);
+    html += '<div class="train-walk-note">Fans reach station '+fmtTime(leaveStationMins)+' (KO+180min+'+walkMins+'min — '+transferDesc+')</div>';
   }
-  
-  var cacheKey = searchStations.join('+');
-  if (findHubDepartures._cache && findHubDepartures._cache[cacheKey]) {
-    return findHubDepartures._cache[cacheKey];
-  }
-  if (!findHubDepartures._cache) findHubDepartures._cache = {};
-
-  var hubs = {};
-  getHubStations().forEach(function(h) { hubs[resolveAlias(h)] = true; });
-  var results = [];
-  var seen = {};
-
-  searchStations.forEach(function(searchCRS) {
-    var deps = ALL_DEPS[searchCRS] || [];
-
-    deps.forEach(function(dep) {
-      var svc = ALL_SERVICES[dep.train_uid];
-      if (!svc) return;
-
-      var fromIdx = -1;
-      for (var i = 0; i < svc.stops.length; i++) {
-        if (svc.stops[i].station_code === searchCRS) { fromIdx = i; break; }
-      }
-      if (fromIdx < 0) return;
-
-      var depTime = stopTime(svc.stops[fromIdx], 'dep');
-      if (!depTime) return;
-      var depMins = tm(depTime);
-
-      if (!seen[dep.train_uid]) seen[dep.train_uid] = {};
-      for (var j = fromIdx + 1; j < svc.stops.length; j++) {
-        var rawCRS = svc.stops[j].station_code;
-        var toCRS = resolveAlias(rawCRS);
-        if (!hubs[toCRS]) continue;
-        if (toCRS === fromCRS) continue;
-        if (seen[dep.train_uid][toCRS]) continue;
-        seen[dep.train_uid][toCRS] = true;
-
-        var arrTime = stopTime(svc.stops[j], 'arr');
-        if (!arrTime) continue;
-        var arrMins = tm(arrTime);
-        var crossesMidnight = false;
-        if (arrMins < depMins) { arrMins += 1440; crossesMidnight = true; }
-
-        results.push({
-          train_uid: dep.train_uid,
-          from: fromCRS, to: toCRS,
-          departMins: depMins, arriveMins: arrMins,
-          depart: depTime, arrive: arrTime,
-          operator: svc.operator,
-          crossesMidnight: crossesMidnight
-        });
-      }
-    });
-  });
-
-  results.sort(function(a,b) { return a.departMins - b.departMins; });
-  findHubDepartures._cache[cacheKey] = results;
-  return results;
+  html += '</div></div>';
+  return html;
 }
 
-// Clear the cache before each buildJourneys run
-function clearDepartureCache() { findHubDepartures._cache = {}; }
-
-// Get walk connections from a station
-function getWalksFrom(crs) {
-  var walks = [];
-  for (var key in WALKS) {
-    var parts = key.split('-');
-    if (parts[0] === crs) {
-      walks.push({ to: parts[1], mins: WALKS[key] });
-    }
-  }
-  return walks;
-}
-
-// Format a path as a legs string matching v5 output shape
-function formatPath(path) {
-  var parts = [];
-  for (var i = 0; i < path.length; i++) {
-    var step = path[i];
-    if (step.type === 'train') {
-      parts.push(step.operator + ' ' + step.from + ' ' + step.depart + '→' + step.to + ' ' + step.arrive);
-    } else if (step.type === 'walk') {
-      parts.push('Walk ' + step.from + '→' + step.to);
-    }
-  }
-  return parts.join(', ');
-}
-
-// Build the detail object for the first train leg (for UI expansion)
-function buildDetail(path) {
-  var trains = path.filter(function(s) { return s.type === 'train'; });
-  var walks = path.filter(function(s) { return s.type === 'walk'; });
-
-  if (trains.length === 1) return null;
-  if (trains.length === 2) {
-    var leg1 = trains[0], leg2 = trains[1];
-    var walkBetween = walks.find(function(w) { return w.from === leg1.to && w.to === leg2.from; });
-    if (walkBetween) {
-      return {
-        leg1: { depart: leg1.depart, arrive: leg1.arrive, operator: leg1.operator, train_uid: leg1.train_uid, durationMins: leg1.arriveMins - leg1.departMins, crossesMidnight: leg1.crossesMidnight },
-        leg2: { depart: leg2.depart, arrive: leg2.arrive, operator: leg2.operator, train_uid: leg2.train_uid, durationMins: leg2.arriveMins - leg2.departMins, crossesMidnight: leg2.crossesMidnight },
-        via1: leg1.to, via2: leg2.from, walkMins: walkBetween.mins
-      };
-    } else {
-      var waitMins = leg2.departMins - leg1.arriveMins;
-      return {
-        leg1: { depart: leg1.depart, arrive: leg1.arrive, operator: leg1.operator, train_uid: leg1.train_uid, durationMins: leg1.arriveMins - leg1.departMins, crossesMidnight: leg1.crossesMidnight },
-        leg2: { depart: leg2.depart, arrive: leg2.arrive, operator: leg2.operator, train_uid: leg2.train_uid, durationMins: leg2.arriveMins - leg2.departMins, crossesMidnight: leg2.crossesMidnight },
-        via: leg1.to, walkMins: 0, waitMins: waitMins
-      };
-    }
-  }
-  return null;
-}
-
-// Find the best journey starting at-or-after a given time
-// Returns single journey object or null. Uses Dijkstra (earliest-arrival)
-function findJourneyFromTime(fromCRS, toCRS, earliestDepartMins, maxChanges) {
-  maxChanges = maxChanges || 4;
-  var MIN_CONNECTION = 8;
-
-  // best[station] = { arriveMins, path, changes }
-  var best = {};
-  best[fromCRS] = { arriveMins: earliestDepartMins, path: [], changes: -1 };
-
-  // Priority queue (simple array, sorted each iteration — fine for ~30 nodes)
-  var queue = [{ station: fromCRS, arriveMins: earliestDepartMins, path: [], changes: -1, visited: {} }];
-  queue[0].visited[fromCRS] = true;
-
-  var iterations = 0;
-  var MAX_ITER = 10000;
-
-  while (queue.length > 0 && iterations < MAX_ITER) {
-    iterations++;
-    // Pop lowest arriveMins
-    queue.sort(function(a,b) { return a.arriveMins - b.arriveMins; });
-    var node = queue.shift();
-
-    // Early exit if we already have a better route to destination
-    if (resolveAlias(node.station) === resolveAlias(toCRS) || node.station === toCRS) {
-      var totalMins = node.arriveMins - earliestDepartMins;
-      if (node.path.length === 0) continue; // zero-length
-      var firstTrain = node.path.find(function(s) { return s.type === 'train'; });
-      if (!firstTrain) continue;
-      totalMins = node.arriveMins - firstTrain.departMins;
-      if (totalMins < 0) totalMins += 1440;
-      var journey = {
-        depart: firstTrain.depart,
-        arrive: node.path[node.path.length-1].arrive || node.path[node.path.length-1].arrive,
-        totalMins: totalMins,
-        changes: node.changes,
-        legs: formatPath(node.path)
-      };
-      // Find last train's arrive time properly
-      var lastTrain = null;
-      for (var li = node.path.length - 1; li >= 0; li--) {
-        if (node.path[li].type === 'train') { lastTrain = node.path[li]; break; }
-      }
-      if (lastTrain) journey.arrive = lastTrain.arrive;
-      var detail = buildDetail(node.path);
-      if (detail) journey.detail = detail;
-      return journey;
-    }
-
-    if (node.changes >= maxChanges) continue;
-
-    // Explore train departures
-    var lastWasWalk = node.path.length > 0 && node.path[node.path.length-1].type === 'walk';
-    var minConn = (node.path.length === 0 || lastWasWalk) ? 0 : MIN_CONNECTION;
-    var deps = findHubDepartures(node.station);
-
-    deps.forEach(function(dep) {
-      if (node.visited[dep.to]) return;
-      if (dep.departMins < node.arriveMins + minConn) return;
-      if (dep.departMins > earliestDepartMins + 16 * 60) return; // Don't search > 16h ahead
-
-      var newPath = node.path.slice();
-      newPath.push({
-        type: 'train',
-        from: dep.from, to: dep.to,
-        depart: dep.depart, arrive: dep.arrive,
-        departMins: dep.departMins, arriveMins: dep.arriveMins,
-        operator: dep.operator, train_uid: dep.train_uid,
-        crossesMidnight: dep.crossesMidnight
-      });
-      var newVisited = Object.assign({}, node.visited);
-      newVisited[dep.to] = true;
-      var newNode = {
-        station: dep.to,
-        arriveMins: dep.arriveMins,
-        path: newPath,
-        changes: node.changes + 1,
-        visited: newVisited
-      };
-
-      // Only push if it's better than what we've got for this station
-      if (!best[dep.to] || best[dep.to].arriveMins > dep.arriveMins) {
-        best[dep.to] = { arriveMins: dep.arriveMins };
-        queue.push(newNode);
-      }
-    });
-
-    // Explore walks (don't count as changes)
-    var walks = getWalksFrom(node.station);
-    walks.forEach(function(walk) {
-      if (node.visited[walk.to]) return;
-      if (node.path.length === 0) return; // Can't walk as first action
-      var walkArrive = node.arriveMins + walk.mins;
-      var newPath = node.path.slice();
-      newPath.push({ type: 'walk', from: node.station, to: walk.to, mins: walk.mins });
-      var newVisited = Object.assign({}, node.visited);
-      newVisited[walk.to] = true;
-      if (!best[walk.to] || best[walk.to].arriveMins > walkArrive) {
-        best[walk.to] = { arriveMins: walkArrive };
-        queue.push({
-          station: walk.to,
-          arriveMins: walkArrive,
-          path: newPath,
-          changes: node.changes, // walk doesn't add change
-          visited: newVisited
-        });
-      }
-    });
-  }
-
-  return null;
-}
-
-// Master journey finder: find multiple options by stepping through start times
-function findAllJourneys(fromCRS, toCRS) {
-  var results = [];
-  var seen = {};
-
-  // Try each hour from 05:00 to 23:00 — gives us up to 19 journey options
-  for (var hour = 5; hour <= 23; hour++) {
-    var startMins = hour * 60;
-    var journey = findJourneyFromTime(fromCRS, toCRS, startMins, 4);
-    if (!journey) continue;
-    var key = journey.depart + '-' + journey.arrive;
-    if (seen[key]) continue;
-    seen[key] = true;
-    results.push(journey);
-  }
-
-  results.sort(function(a,b) { return tm(a.depart) - tm(b.depart); });
-  return results;
-}
-
-async function buildJourneys() {
-  log('═══ Building journeys — Playoff Finals ═══', 'head');
-  clearDepartureCache();
-  var output = {};
-
-  // Finals matchups: host = higher league position
-  // North SF: SS(2) v Bux(5), Kid(3) v Macc(4)
-  // Possible finals: SS v Macc, SS v Kid, Kid v Bux, Macc v Bux
-  // South SF: Horn(2) v WSM(6), Torq(3) v Dork(4)
-  // Possible finals: Horn v Dork, Horn v Torq, Torq v WSM, Dork v WSM
-  var pairs = [
-    // North
-    {host:'South Shields',away:'Macclesfield',div:'North'},
-    {host:'South Shields',away:'Kidderminster Harriers',div:'North'},
-    {host:'Kidderminster Harriers',away:'Buxton',div:'North'},
-    {host:'Macclesfield',away:'Buxton',div:'North'},
-    // South — Hornchurch hosting: target London terminus, not BKG
-    // Dorking fans arrive VIC (Southern), Torquay fans arrive PAD (GWR)
-    // Planner adds tube time on top
-    {host:'Hornchurch',away:'Dorking Wanderers',div:'South',toCRS:'VIC'},
-    {host:'Hornchurch',away:'Torquay United',div:'South',toCRS:'PAD'},
-    {host:'Torquay United',away:'Weston-super-Mare',div:'South'},
-    {host:'Dorking Wanderers',away:'Weston-super-Mare',div:'South'},
-  ];
-
-  log('Total routes to build: ' + pairs.length, 'info');
-
-  for (var p = 0; p < pairs.length; p++) {
-    var host = pairs[p].host, away = pairs[p].away;
-    var fromCRS = teamToCRS(away);
-    var toCRS = pairs[p].toCRS || teamToCRS(host);
-    if (!fromCRS || !toCRS) { log('Missing CRS for ' + away + ' or ' + host, 'err'); continue; }
-
-    var routeKey = away + '→' + host;
-    updProgress(p, pairs.length, 'Building ' + routeKey + ' (' + (p+1) + '/' + pairs.length + ')');
-
-    var t0 = Date.now();
-    log('Building: ' + routeKey, 'info');
-
-    var outbound, returns;
-    try {
-      outbound = findAllJourneys(fromCRS, toCRS);
-    } catch (e) {
-      log('  ✗ Outbound error: ' + e.message, 'err');
-      outbound = [];
-    }
-    try {
-      returns = findAllJourneys(toCRS, fromCRS);
-    } catch (e) {
-      log('  ✗ Return error: ' + e.message, 'err');
-      returns = [];
-    }
-    var dt = Date.now() - t0;
-    log('  Outbound: ' + outbound.length + ' options, Return: ' + returns.length + ' options (' + dt + 'ms)',
-        (outbound.length > 0 && returns.length > 0) ? 'ok' : 'warn');
-
-    output[routeKey] = {
-      division: pairs[p].div, away: away, host: host, date: DATE,
-      outbound: outbound, returns: returns
-    };
-
-    // Yield to browser every route so the UI updates and doesn't freeze
-    await new Promise(function(r) { setTimeout(r, 0); });
-  }
-
-  updProgress(pairs.length, pairs.length, 'Complete');
-  log('═══ Journey building complete ═══', 'head');
-
-  document.getElementById('exportJSON').value = JSON.stringify(output, null, 2);
-  renderJourneyResults(output);
-}
-
-/* ─────────────────────────────────────────────
-   UI
-   ───────────────────────────────────────────── */
-function log(msg,cls){var el=document.getElementById('log');var d=document.createElement('div');d.className=cls||'info';d.textContent=msg;el.appendChild(d);el.scrollTop=el.scrollHeight}
-function updProgress(done,total,txt){document.getElementById('pFill').style.width=(total>0?(done/total*100):0)+'%';document.getElementById('pText').textContent=txt||(done+'/'+total)}
-function updStats(){document.getElementById('statCalls').textContent=totalCalls;document.getElementById('statServices').textContent=totalServices;document.getElementById('statSkipped').textContent=totalSkipped}
-
-function renderStationList() {
-  var html = '<table class="stn-table"><thead><tr><th>CRS</th><th>Station</th><th>Role</th><th>Status</th><th>Services</th></tr></thead><tbody>';
-  for (var crs in STATIONS) {
-    var s = STATIONS[crs];
-    var status = STATION_STATUS[crs] || 'pending';
-    var pillCls = status === 'done' ? 'pill-done' : status === 'running' ? 'pill-running' : 'pill-pending';
-    var count = (ALL_DEPS[crs] || []).length;
-    html += '<tr><td><strong>'+crs+'</strong></td><td>'+esc(s.name)+'</td><td>'+esc(s.role||'')+'</td>';
-    html += '<td><span class="pill '+pillCls+'">'+status+'</span></td>';
-    html += '<td>'+count+'</td></tr>';
-  }
-  html += '</tbody></table>';
-  document.getElementById('stationList').innerHTML = html;
-}
-
-function renderJourneyResults(output) {
+function render() {
+  var isNorthEarly = STATE.earlyDiv === 'North';
   var html = '';
-  for (var key in output) {
-    var r = output[key];
-    html += '<div style="margin:8px 0;padding:8px;background:#f4f6f9;border-radius:4px">';
-    html += '<strong style="color:#9e0000">' + esc(key) + '</strong>';
-    html += ' — Out: ' + r.outbound.length + ' options, Ret: ' + r.returns.length + ' options';
-    if (r.outbound.length > 0) {
-      html += '<br><span style="font-size:11px;color:#5a6a82">Earliest: ' + esc(r.outbound[0].depart) + '→' + esc(r.outbound[0].arrive);
-      html += ' | Latest: ' + esc(r.outbound[r.outbound.length-1].depart) + '→' + esc(r.outbound[r.outbound.length-1].arrive) + '</span>';
-    }
+
+  // Slot switcher
+  html += '<div class="slot-switcher">';
+  html += '<span class="slot-switcher__label '+(isNorthEarly?'slot-switcher__label--active':'slot-switcher__label--muted')+'">North '+(isNorthEarly?'12:00–13:30':'15:00–16:30')+'</span>';
+  html += '<button class="slot-switcher__btn" onclick="flipSlots()">↕ SWAP</button>';
+  html += '<span class="slot-switcher__label '+(isNorthEarly?'slot-switcher__label--muted':'slot-switcher__label--active')+'">South '+(isNorthEarly?'15:00–16:30':'12:00–13:30')+'</span>';
+  html += '</div>';
+
+  // Two columns: left = early KO, right = late KO
+  var divOrder = isNorthEarly ? ['North','South'] : ['South','North'];
+  html += '<div class="columns">';
+
+  divOrder.forEach(function(div, colIdx) {
+    var st = STATE[div];
+    var scenarios = SCENARIOS[div];
+    var sel = scenarios.find(function(s){return s.id===st.selected;}) || scenarios[0];
+    var isEarly = (colIdx === 0);
+    var koList = isEarly ? KO_EARLY : KO_LATE;
+    var slotLabel = isEarly ? '12:00–13:30' : '15:00–16:30';
+
+    var koValid = koList.some(function(t){return t.mins===st.ko;});
+    if (!koValid) { st.ko = isEarly ? 750 : 960; }
+
+    html += '<div class="division">';
+    html += '<div class="div-header"><span class="div-header__name">'+div+' Final</span><span class="div-header__date">Sat 09/05 · '+slotLabel+'</span></div>';
+
+    // 2x2 cards
+    html += '<div class="cards">';
+    scenarios.forEach(function(s) {
+      var isSel = s.id === st.selected;
+      html += '<div class="card'+(isSel?' selected':'')+'" onclick="selectScenario(\''+div+'\',\''+s.id+'\')">';
+      html += '<div class="card__crests">';
+      html += '<img class="card__crest" src="'+esc(crestUrl(s.home))+'" onerror="this.onerror=null;this.src=\''+FALLBACK+'\'">';
+      html += '<span class="card__v">v</span>';
+      html += '<img class="card__crest" src="'+esc(crestUrl(s.away))+'" onerror="this.onerror=null;this.src=\''+FALLBACK+'\'">';
+      html += '</div>';
+      html += '<div class="card__home">'+esc(s.home)+'</div>';
+      html += '<div class="card__away">'+esc(s.away)+'</div>';
+      html += '<div class="card__tag">'+esc(s.label)+'</div>';
+      html += '</div>';
+    });
     html += '</div>';
-  }
-  document.getElementById('journeyResults').innerHTML = html;
+
+    // Detail panel
+    html += '<div class="detail">';
+    html += '<div class="detail__match">';
+    html += '<img class="detail__crest" src="'+esc(crestUrl(sel.home))+'" onerror="this.onerror=null;this.src=\''+FALLBACK+'\'">';
+    html += '<span class="detail__home">'+esc(sel.home)+'</span>';
+    html += '<span class="detail__v">v</span>';
+    html += '<img class="detail__crest" src="'+esc(crestUrl(sel.away))+'" onerror="this.onerror=null;this.src=\''+FALLBACK+'\'">';
+    html += '<span class="detail__away">'+esc(sel.away)+'</span>';
+    html += '</div>';
+
+    html += '<div class="detail__meta">';
+    html += '<div class="detail__condition">If: '+esc(sel.cond)+'</div>';
+    html += '<div class="ko-pick"><span class="ko-pick__label">KO</span>';
+    html += '<select class="ko-pick__select" onchange="setKo(\''+div+'\',this.value)">';
+    koList.forEach(function(t) {
+      html += '<option value="'+t.mins+'"'+(st.ko===t.mins?' selected':'')+'>'+t.label+'</option>';
+    });
+    html += '</select></div></div>';
+
+    html += trainPanelHtml(sel.home, sel.away, st.ko);
+    html += '</div>';
+    html += '</div>';
+  });
+
+  html += '</div>'; // columns
+  document.getElementById('app').innerHTML = html;
 }
 
-function copyJSON(){var t=document.getElementById('exportJSON');t.select();document.execCommand('copy')}
-function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
-
-function exportRawData() {
-  var raw = {
-    services: ALL_SERVICES,
-    deps: ALL_DEPS,
-    status: STATION_STATUS
-  };
-  document.getElementById('rawDataArea').value = JSON.stringify(raw);
-  log('Raw data saved — ' + Object.keys(ALL_SERVICES).length + ' services, copy the textarea to preserve', 'ok');
+function flipSlots() {
+  STATE.earlyDiv = STATE.earlyDiv === 'North' ? 'South' : 'North';
+  render();
 }
 
-function loadRawData() {
-  var raw = document.getElementById('rawDataArea').value.trim();
-  if (!raw) { log('Nothing to load', 'warn'); return; }
-  try {
-    var data = JSON.parse(raw);
-    // Merge services
-    var newSvc = 0, newDeps = 0;
-    for (var uid in data.services) {
-      if (!ALL_SERVICES[uid]) { ALL_SERVICES[uid] = data.services[uid]; newSvc++; }
-    }
-    // Merge deps
-    for (var crs in data.deps) {
-      if (!ALL_DEPS[crs]) ALL_DEPS[crs] = [];
-      var existing = {};
-      ALL_DEPS[crs].forEach(function(d) { existing[d.train_uid] = true; });
-      data.deps[crs].forEach(function(d) {
-        if (!existing[d.train_uid]) { ALL_DEPS[crs].push(d); newDeps++; }
-      });
-    }
-    // Merge status
-    for (var crs2 in data.status) {
-      if (data.status[crs2] === 'done' && STATION_STATUS[crs2] !== 'done') {
-        STATION_STATUS[crs2] = 'done';
-      }
-    }
-    // New stations not in loaded data stay 'pending'
-    for (var crs3 in STATIONS) {
-      if (!STATION_STATUS[crs3]) STATION_STATUS[crs3] = 'pending';
-    }
-    totalServices = Object.keys(ALL_SERVICES).length;
-    updStats();
-    renderStationList();
-    log('Loaded ' + newSvc + ' services, ' + newDeps + ' departures. New stations marked pending.', 'ok');
-    // Show which stations are still missing
-    var missing = Object.keys(STATIONS).filter(function(c) { return STATION_STATUS[c] !== 'done'; });
-    if (missing.length > 0) {
-      log('Stations still to scan: ' + missing.join(', '), 'info');
-    } else {
-      log('All stations loaded — ready to Build Journeys', 'ok');
-    }
-  } catch(e) {
-    log('Load failed: ' + e.message, 'err');
-  }
-}
-function populateManualDropdown() {
-  var sel = document.getElementById('manualStn');
-  if (!sel) return;
-  var html = '<option value="">— select known station —</option>';
-  for (var crs in STATIONS) {
-    html += '<option value="'+crs+'">'+crs+' — '+esc(STATIONS[crs].name)+'</option>';
-  }
-  sel.innerHTML = html;
-}
+function selectScenario(div, id) { STATE[div].selected = id; render(); }
+function setKo(div, val) { STATE[div].ko = parseInt(val); render(); }
 
-// Init
-initStationStatus();
-renderStationList();
-populateManualDropdown();
+render();
 </script>
 </body>
 </html>
