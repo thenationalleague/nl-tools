@@ -3,10 +3,28 @@
 <head>
 <!--
   NL Tools — Website Insights
-  Version: 1.7
+  Version: 1.8
   Date: 28/04/2026
 
   CHANGELOG
+  v1.8 (28/04/2026)
+    - Bug fix: Reading-times heatmap was producing nonsense.
+      The aggregation was counting "distinct article-data-points" per
+      cell, not "calendar hours that fell in the slot." So the tooltip
+      showing "(across 500+ weeks)" was actually counting article-hour
+      instances, and the displayed average was meaningless.
+      Rewrote to:
+        1. Sum site-wide views per absolute calendar hour
+        2. Group those hourly totals by (weekday, hour-of-day)
+        3. Average across the actual count of calendar hours in the
+           window (e.g. 13 Mondays at 14:00 in a 90-day window)
+      Now answers correctly: "what's the typical hour-of-traffic at
+      Monday 14:00." Cells include 0-view hours so quiet slots aren't
+      artificially inflated by being omitted.
+    - Tooltip wording fixed: "(over 13 such hours)" instead of
+      "(across 500+ weeks)".
+    - Subtitle clarified: "Average pageviews during a typical hour at
+      each day-of-week + hour-of-day".
   v1.7 (28/04/2026)
     - Added diagnostic logging to wireToggleGroup so we can see in the
       browser console exactly what the toggles are or aren't doing.
@@ -172,6 +190,13 @@
   var NL_TOOL_KEY = 'staff-website-insights';
 
   window.NL_CHANGELOG = [
+    {
+      date: '28 April 2026',
+      version: 'v1.8',
+      items: [
+        'Reading-times heatmap fixed \u2014 was showing nonsense numbers because of how it was averaging data. Now correctly shows typical pageviews for each day-of-week and hour-of-day combination.'
+      ]
+    },
     {
       date: '28 April 2026',
       version: 'v1.6',
@@ -1506,7 +1531,7 @@ function updateHeatmapHeading() {
   if (!title || !sub) return;
   if (STATE.heatmapMode === 'reading') {
     title.textContent = 'Reading times \u2014 when our audience is on site';
-    sub.textContent = 'Average pageviews per hour, by day-of-week and hour-of-day. Shows traffic patterns regardless of when articles were published.';
+    sub.textContent = 'Average pageviews during a typical hour at each day-of-week + hour-of-day. Shows traffic patterns regardless of when articles were published.';
   } else {
     var aggWord = STATE.heatmapAgg === 'mean' ? 'Mean' : 'Median';
     title.innerHTML = 'Publishing slots \u2014 best day &amp; hour to publish';
@@ -2016,44 +2041,73 @@ function renderHeatmapReading() {
 
   var periodDays = Math.min(STATE.heatmapPeriod || 90, meta.windowDays || 90);
   var windowStartTs = Math.floor((Date.now() - (periodDays * 86400 * 1000)) / 1000);
+  var nowTs = Math.floor(Date.now() / 1000);
 
-  // Sum total views by absolute weekday × hour-of-day across every article.
-  // This shows when the AUDIENCE reads, regardless of when articles publish.
-  // Filter timestamps to the selected period.
-  var totals = {};
-  var counts = {};   // count of distinct hour-buckets contributing
-  for (var d = 0; d < 7; d++) {
-    totals[d] = {};
-    counts[d] = {};
-    for (var h = 0; h < 24; h++) {
-      totals[d][h] = 0;
-      counts[d][h] = 0;
-    }
-  }
+  /* CORRECT MODEL FOR "Reading times":
+     Question = "on a typical Monday at 14:00, how many pageviews does
+                 the site see in that hour?"
 
+     Step 1: Sum views into absolute-hour buckets keyed by full timestamp.
+             Every article that received views in (e.g.) the calendar
+             hour starting at 2026-04-13 14:00 contributes to that bucket.
+     Step 2: Group those absolute-hour totals by (weekday, hour-of-day).
+             The Mon-14:00 cell becomes a list of N totals, one per
+             Monday-14:00 in the window (~13 Mondays in a 90-day window).
+     Step 3: Average that list.
+             Result: "typical pageviews on Monday at 14:00."
+
+     The earlier code mistakenly counted distinct article-path-data-points
+     per cell, which produced a meaningless "average pageviews per
+     article-hour-instance" and a tooltip claiming hundreds of weeks.
+  */
+
+  // Step 1: sum views per absolute calendar hour (keyed by start-of-hour ts)
+  var hourBuckets = {};   // tsHourStart -> total views in that hour
   Object.keys(STATE.hourly).forEach(function(path) {
     var pts = STATE.hourly[path];
     if (!pts || !pts.length) return;
     pts.forEach(function(pt) {
       var ts = pt[0], v = pt[1];
       if (!v || ts < windowStartTs) return;
-      var date = new Date(ts * 1000);
-      var dy = date.getUTCDay();
-      var hr = date.getUTCHours();
-      totals[dy][hr] += v;
-      counts[dy][hr]++;
+      // GA dateHour timestamps already align to start-of-hour, but be safe:
+      var bucket = Math.floor(ts / 3600) * 3600;
+      hourBuckets[bucket] = (hourBuckets[bucket] || 0) + v;
     });
   });
 
-  // Convert totals to averages-per-hour-bucket so a slot that occurred 13 times
-  // doesn't dominate one that occurred 12 times. This normalises by how often
-  // that slot fell within the window.
+  // Step 2: group absolute hours by (weekday, hour-of-day)
+  var groupSums = {};      // [day][hour] = sum of all calendar-hour totals
+  var groupCounts = {};    // [day][hour] = number of calendar hours that fell here
+  for (var d = 0; d < 7; d++) {
+    groupSums[d] = {};
+    groupCounts[d] = {};
+    for (var h = 0; h < 24; h++) {
+      groupSums[d][h] = 0;
+      groupCounts[d][h] = 0;
+    }
+  }
+
+  // Walk every full calendar hour in the window, even if it had zero views.
+  // Otherwise quiet hours look better than they should — a 0-view Sunday
+  // 04:00 should pull the Sunday-04:00 average DOWN, not be omitted.
+  var firstHour = Math.floor(windowStartTs / 3600) * 3600;
+  var lastHour  = Math.floor(nowTs / 3600) * 3600;
+  for (var t = firstHour; t <= lastHour; t += 3600) {
+    var date = new Date(t * 1000);
+    var dy = date.getUTCDay();
+    var hr = date.getUTCHours();
+    groupSums[dy][hr] += (hourBuckets[t] || 0);
+    groupCounts[dy][hr]++;
+  }
+
+  // Step 3: average per-cell
   var aggValues = {};
   var globalMax = 0;
   for (var d2 = 0; d2 < 7; d2++) {
     aggValues[d2] = {};
     for (var h2 = 0; h2 < 24; h2++) {
-      var avg = counts[d2][h2] > 0 ? Math.round(totals[d2][h2] / counts[d2][h2]) : null;
+      var n = groupCounts[d2][h2];
+      var avg = n > 0 ? Math.round(groupSums[d2][h2] / n) : null;
       aggValues[d2][h2] = avg;
       if (avg && avg > globalMax) globalMax = avg;
     }
@@ -2065,8 +2119,8 @@ function renderHeatmapReading() {
     return;
   }
 
-  drawHeatmapGrid(container, aggValues, counts, globalMax,
-    'avg pageviews/hour', periodDays, 'reading');
+  drawHeatmapGrid(container, aggValues, groupCounts, globalMax,
+    'avg pageviews', periodDays, 'reading');
 }
 
 function drawHeatmapGrid(container, medians, gridForCount, globalMax, valueLabel, windowDays, mode) {
@@ -2098,8 +2152,8 @@ function drawHeatmapGrid(container, medians, gridForCount, globalMax, valueLabel
         var bg = 'rgba(158, 0, 0, ' + alpha.toFixed(2) + ')';
         var textColor = intensity > 0.5 ? 'var(--white)' : 'var(--text)';
         var tipN = mode === 'reading'
-          ? '(across ' + n + ' weeks)'
-          : '(n=' + n + ' articles)';
+          ? '(over ' + n + ' such hours)'
+          : '(' + n + ' article' + (n === 1 ? '' : 's') + ')';
         html += '<div class="heatmap__cell" style="background: ' + bg + '; color: ' + textColor + ';" ' +
           'title="' + dayLabels[col] + ' ' + hr.toString().padStart(2, '0') + ':00 \u2014 ' +
           formatCount(v) + ' ' + valueLabel + ' ' + tipN + '">' +
@@ -2110,7 +2164,7 @@ function drawHeatmapGrid(container, medians, gridForCount, globalMax, valueLabel
   html += '</div>';
 
   var note = mode === 'reading'
-    ? 'Times in UTC. Each cell shows average pageviews received during that day-of-week / hour-of-day, last ' + windowDays + ' days. Brighter red = busier reading slot.'
+    ? 'Times in UTC. Each cell shows the average pageviews received during a typical hour at that day-of-week + hour, over the last ' + windowDays + ' days. Brighter red = busier reading slot.'
     : 'Times in UTC. Each cell shows the median first-24h views for articles published in that slot, last ' + windowDays + ' days. Brighter red = better publishing slot.';
   html += '<div class="ins-note">' + note + '</div>';
 
