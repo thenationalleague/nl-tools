@@ -5,15 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Travel Planner — NL Tools</title>
 <!--
-  NL Travel Planner v15.0
+  NL Travel Planner v17.0
   Changelog:
-  v15.0| 01/05/2026 | Compact board: short walks shown inline, transit line colours.
-       |            | - Walking legs under 200m collapsed to a single-line connector.
-       |            | - Transit mode badges + timeline dots use line colour from API.
-       |            | - Tighter vertical spacing throughout.
-  v3.2 | 01/05/2026 | Compact rows, transit toggles, origin presets, departure times.
-  v3.1 | 01/05/2026 | Routes REST API, full transit detail, polyline map.
-  v3.0 | 01/05/2026 | Fixture browser, TO/FROM toggle, pre/post-match sliders.
+  v17.0| 01/05/2026 | Redesigned leg rendering:
+       |            | - Pill shows line name (Elizabeth line, Thameslink) not generic "TRAIN".
+       |            | - Main text shows YOUR stops (boarding → alighting).
+       |            | - Secondary line: stop count · towards [headsign] · duration.
+       |            | - Walk legs: pill only, distance + duration inline, no repeated "Walk".
+  v16.0| 01/05/2026 | Route switcher sticky above board, board scrolls in container.
+  v15.0| 01/05/2026 | Compact walks inline, transit line colours from API.
+  v3.2 | 01/05/2026 | Compact rows, transit toggles, origin presets.
 -->
 <link rel="stylesheet" href="/tools/system/nl-brand.css">
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -23,7 +24,7 @@
 <script>
   window.NL_TOOL={title:'Travel Planner',toolKey:'staff-travel'};
   var NL_TOOL_KEY='staff-travel';
-  window.NL_CHANGELOG=[{date:'01/05/2026',version:'v15.0',items:['Compact board — short walks inline, transit line colours.','Walking legs under 200m collapsed to connectors.','Mode badges and dots use actual line colours.']}];
+  window.NL_CHANGELOG=[{date:'01/05/2026',version:'v17.0',items:['Line name in pill (Elizabeth line, not TRAIN).','Your stops as main text, headsign as secondary.','Walk legs compact — no repeated label.']}];
 </script>
 <script src="/tools/system/nl-utils.js"></script>
 <script src="/tools/system/nl-topbar.js"></script>
@@ -97,17 +98,29 @@
   .tp__results{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
   .tp__map-col{min-height:350px;border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
   .tp__map-col #routeMap{width:100%;height:100%;min-height:350px}
-  .tp__board-col{min-width:0}
+  .tp__board-col{min-width:0;display:flex;flex-direction:column;border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
 
   /* Summary */
-  .tp__summary{background:var(--navy);color:var(--white);border-radius:var(--radius) var(--radius) 0 0;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px}
+  .tp__summary{background:var(--navy);color:var(--white);padding:12px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px}
   .tp__summary-route{font-size:14px;font-weight:800;font-variation-settings:'wght' 800}
   .tp__summary-route .arrow{color:rgba(255,255,255,.4);margin:0 6px}
   .tp__summary-duration{font-size:var(--text-xs);font-weight:600;font-variation-settings:'wght' 600;background:rgba(255,255,255,.15);padding:3px 10px;border-radius:99px}
   .tp__summary-depart{font-size:10px;color:rgba(255,255,255,.6);width:100%}
 
+  /* Alts — sticky between summary and board */
+  .tp__alts{padding:8px 14px;background:var(--off-white);border-bottom:1px solid var(--border);display:flex;gap:6px;overflow-x:auto;flex-shrink:0}
+  .tp__alts--sticky{position:sticky;top:0;z-index:10}
+  .tp__alt-chip{flex-shrink:0;padding:4px 10px;border-radius:99px;border:2px solid var(--border);background:var(--white);font-family:var(--font);font-size:10px!important;font-weight:700;color:var(--text);cursor:pointer;transition:all .15s;white-space:nowrap}
+  .tp__alt-chip:hover{border-color:var(--navy);color:var(--navy)}
+  .tp__alt-chip.active{background:var(--navy);color:var(--white);border-color:var(--navy)}
+  .tp__alt-chip .dur{font-weight:400;color:var(--text-muted);margin-left:4px}
+  .tp__alt-chip.active .dur{color:rgba(255,255,255,.6)}
+
+  /* Board scroll container */
+  .tp__board-scroll{flex:1;max-height:55vh;overflow-y:auto;-webkit-overflow-scrolling:touch}
+
   /* Board — COMPACT */
-  .tp__board{background:var(--white);border-radius:0 0 var(--radius) var(--radius);box-shadow:var(--shadow);overflow:hidden}
+  .tp__board{background:var(--white);overflow:hidden}
   .tp__leg{display:flex;border-bottom:1px solid var(--border)}.tp__leg:last-child{border-bottom:none}
   .tp__leg-timeline{width:54px;min-width:54px;display:flex;flex-direction:column;align-items:center;padding:10px 0}
   .tp__leg-time{font-size:12px;font-weight:800;font-variation-settings:'wght' 800;color:var(--text);z-index:1}
@@ -129,18 +142,11 @@
   .tp__leg-route{font-size:13px;font-weight:700;font-variation-settings:'wght' 700;color:var(--text);margin-bottom:1px;line-height:1.3}
   .tp__leg-stops{font-size:10px;color:var(--text-muted);line-height:1.3}
   .tp__leg-duration{font-size:10px;color:var(--text-muted);font-weight:600;font-variation-settings:'wght' 600}
-  /* Compact walk connector — short walks shown as a thin inline row */
+  /* Compact walk connector */
   .tp__walk-connector{display:flex;align-items:center;gap:8px;padding:4px 14px 4px 54px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text-muted);font-weight:600;font-variation-settings:'wght' 600}
   .tp__walk-connector:last-child{border-bottom:none}
   .tp__walk-connector .wc-dot{width:6px;height:6px;border-radius:50%;background:var(--border);flex-shrink:0}
   .tp__walk-connector .wc-line{width:16px;height:1px;background:var(--border);flex-shrink:0}
-
-  /* Alts */
-  .tp__alts{padding:10px 16px;background:var(--off-white);border-top:1px solid var(--border);display:flex;gap:8px;overflow-x:auto}
-  .tp__alt-chip{flex-shrink:0;padding:4px 12px;border-radius:99px;border:2px solid var(--border);background:var(--white);font-family:var(--font);font-size:10px!important;font-weight:700;color:var(--text);cursor:pointer;transition:all .15s;white-space:nowrap}
-  .tp__alt-chip.active{background:var(--navy);color:var(--white);border-color:var(--navy)}
-  .tp__alt-chip .dur{font-weight:400;color:var(--text-muted);margin-left:4px}
-  .tp__alt-chip.active .dur{color:rgba(255,255,255,.6)}
 
   .tp__loading{text-align:center;padding:36px 20px;color:var(--text-muted);font-size:var(--text-sm)}
   .tp__spinner{width:28px;height:28px;border:3px solid var(--border);border-top-color:var(--navy);border-radius:50%;animation:tpSpin .8s linear infinite;margin:0 auto 10px}
@@ -383,29 +389,44 @@ function render(routes,idx,oL,dL){
   var h='<div class="tp__results"><div class="tp__map-col"><div id="routeMap"></div></div><div class="tp__board-col">';
   h+='<div class="tp__summary"><div class="tp__summary-route">'+abbr(oL)+'<span class="arrow">→</span>'+abbr(dL)+'</div><div class="tp__summary-duration">'+dur+(dist?' · '+dist:'')+'</div>';
   if(overallDep)h+='<div class="tp__summary-depart">Departs '+overallDep+'</div>';
-  h+='</div><div class="tp__board">';
+  h+='</div>';
+
+  // Route alternatives — above the board, sticky
+  if(routes.length>1){
+    h+='<div class="tp__alts tp__alts--sticky">';
+    routes.forEach(function(rt,i){
+      var rd=rt.duration?fmtDur(rt.duration):'',chip='Route '+(i+1);
+      if(rt.legs&&rt.legs[0]&&rt.legs[0].steps){for(var j=0;j<rt.legs[0].steps.length;j++){var st=rt.legs[0].steps[j];if(st.transitDetails&&st.transitDetails.stopDetails&&st.transitDetails.stopDetails.departureTime){chip=fI(st.transitDetails.stopDetails.departureTime);break}}}
+      h+='<div class="tp__alt-chip'+(i===idx?' active':'')+'" onclick="sw('+i+',\''+esc(oL)+'\',\''+esc(dL)+'\')">'+chip+(rd?'<span class="dur">'+rd+'</span>':'')+'</div>';
+    });
+    h+='</div>';
+  }
+
+  // Board in scroll container
+  h+='<div class="tp__board-scroll"><div class="tp__board">';
 
   steps.forEach(function(s){
-    var cls=sClass(s),ml=sLabel(s),dep='',arr='',route='',stops='',durT='',distT='';
-    var lineCol='',lineTxt=''; // transit line colours
+    var cls=sClass(s),dep='',arr='',durT='',distT='';
+    var lineCol='',lineTxt='',pillLabel='',mainText='',subText='';
 
     if(s._w){
-      // Consolidated walk — check total distance
+      // Consolidated walk
       var totalDist=0;
       s._w.forEach(function(ws){
         if(ws.localizedValues&&ws.localizedValues.staticDuration&&ws.localizedValues.staticDuration.text)durT=durT||ws.localizedValues.staticDuration.text;
         if(ws.localizedValues&&ws.localizedValues.distance&&ws.localizedValues.distance.text)distT=distT||ws.localizedValues.distance.text;
-        // Sum metres for compact check
         var dm=0;try{dm=parseInt(String(ws.localizedValues.distance.text).replace(/[^0-9]/g,''),10)}catch(e){}
         if(ws.localizedValues&&ws.localizedValues.distance&&ws.localizedValues.distance.text&&ws.localizedValues.distance.text.indexOf('km')!==-1)dm=dm*1000;
         totalDist+=dm;
       });
-      // Short walks (<300m) → compact connector row
+      // Short walks → connector
       if(totalDist<300&&totalDist>0){
         h+='<div class="tp__walk-connector"><span class="wc-dot"></span><span class="wc-line"></span>🚶 '+(distT||'Walk')+(durT?' · '+durT:'')+'</div>';
-        return; // skip full row
+        return;
       }
-      route='Walk';
+      // Longer walks — just pill + distance + duration, no "Walk" text repeated
+      pillLabel='🚶 Walk';
+      mainText=(distT||'')+(durT?' · '+durT:'');
     }else if(s.transitDetails){
       var td=s.transitDetails,sd=td.stopDetails||{};
       if(sd.departureTime)dep=fI(sd.departureTime);
@@ -413,21 +434,31 @@ function render(routes,idx,oL,dL){
       var ds=sd.departureStop||{},as=sd.arrivalStop||{},ln=td.transitLine||{};
       var lnName=ln.nameShort||ln.name||'';
       var hs=td.headsign||'';
-      route=lnName+(hs?' → '+hs:(as.name?' to '+as.name:''));
-      stops=(ds.name||'')+(as.name?' → '+as.name:'');
-      if(td.stopCount)stops+=' · '+td.stopCount+' stops';
-      if(ln.vehicle&&ln.vehicle.type){cls=vC(ln.vehicle.type);ml=vL(ln.vehicle.type)}
-      if(s.localizedValues&&s.localizedValues.staticDuration)durT=s.localizedValues.staticDuration.text;
-      // Line colours
+      if(ln.vehicle&&ln.vehicle.type)cls=vC(ln.vehicle.type);
       if(ln.color)lineCol=ln.color;
       if(ln.textColor)lineTxt=ln.textColor;
+      if(s.localizedValues&&s.localizedValues.staticDuration)durT=s.localizedValues.staticDuration.text;
+
+      // Pill = line name (e.g. "Elizabeth line", "Thameslink")
+      pillLabel=lnName||vL(ln.vehicle?ln.vehicle.type:'RAIL');
+
+      // Main text = boarding → alighting (your stops)
+      mainText=(ds.name||'')+(as.name?' → '+as.name:'');
+
+      // Sub text = stop count + towards headsign + duration
+      var parts=[];
+      if(td.stopCount)parts.push(td.stopCount+' stops');
+      if(hs)parts.push('towards '+hs);
+      if(durT)parts.push(durT);
+      subText=parts.join(' · ');
     }else{
-      if(s.navigationInstruction)route=s.navigationInstruction.instructions||'';
+      if(s.navigationInstruction)mainText=s.navigationInstruction.instructions||'';
       if(s.localizedValues&&s.localizedValues.staticDuration)durT=s.localizedValues.staticDuration.text;
       if(s.localizedValues&&s.localizedValues.distance)distT=s.localizedValues.distance.text;
+      pillLabel='🚶 Walk';
+      mainText=(distT||'')+(durT?' · '+durT:'');
     }
 
-    // Build dot style with line colour
     var dotStyle=lineCol?' style="border-color:'+lineCol+'"':'';
     var modeStyle=lineCol?' style="background:'+lineCol+';color:'+(lineTxt||'#fff')+'"':'';
 
@@ -436,24 +467,15 @@ function render(routes,idx,oL,dL){
     if(dep)h+='<div class="tp__leg-time">'+dep+'</div>';
     h+='<div class="line"'+(lineCol?' style="background:'+lineCol+'"':'')+'></div>';
     if(arr)h+='<div class="tp__leg-time-end">'+arr+'</div>';
-    h+='</div><div class="tp__leg-detail"><div class="tp__leg-mode"'+modeStyle+'>'+ml+'</div>';
-    if(route)h+='<div class="tp__leg-route">'+route+'</div>';
-    if(stops)h+='<div class="tp__leg-stops">'+stops+'</div>';
-    if(distT&&!stops)h+='<div class="tp__leg-stops">'+distT+'</div>';
-    if(durT)h+='<div class="tp__leg-duration">'+durT+'</div>';
+    h+='</div><div class="tp__leg-detail"><div class="tp__leg-mode"'+modeStyle+'>'+pillLabel+'</div>';
+    if(mainText)h+='<div class="tp__leg-route">'+mainText+'</div>';
+    if(subText)h+='<div class="tp__leg-stops">'+subText+'</div>';
     h+='</div></div>';
   });
 
-  if(routes.length>1){
-    h+='<div class="tp__alts">';
-    routes.forEach(function(rt,i){
-      var rd=rt.duration?fmtDur(rt.duration):'',chip='Route '+(i+1);
-      if(rt.legs&&rt.legs[0]&&rt.legs[0].steps){for(var j=0;j<rt.legs[0].steps.length;j++){var st=rt.legs[0].steps[j];if(st.transitDetails&&st.transitDetails.stopDetails&&st.transitDetails.stopDetails.departureTime){chip=fI(st.transitDetails.stopDetails.departureTime);break}}}
-      h+='<div class="tp__alt-chip'+(i===idx?' active':'')+'" onclick="sw('+i+',\''+esc(oL)+'\',\''+esc(dL)+'\')">'+chip+(rd?'<span class="dur">'+rd+'</span>':'')+'</div>';
-    });
-    h+='</div>';
-  }
-  h+='</div></div></div>';ra.innerHTML=h;drawMap(r);
+  h+='</div></div>'; // close board + board-scroll
+  h+='</div></div>'; // close board-col + results
+  ra.innerHTML=h;drawMap(r);
 }
 function sw(i,o,d){aIdx=i;render(allR,i,o,d)}
 
