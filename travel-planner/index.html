@@ -5,15 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Travel Planner — NL Tools</title>
 <!--
-  NL Travel Planner v3.2
+  NL Travel Planner v15.0
   Changelog:
-  v3.2 | 01/05/2026 | UI improvements:
-       |            | - Compact departure board rows (significantly smaller).
-       |            | - Shows departure time on first leg and all transit legs.
-       |            | - Transit mode toggles: Train/Tram/Tube on by default, Bus/Coach/Ferry off.
-       |            | - Toggles live-update the route when changed.
-       |            | - Origin/destination presets: Stadium, Railway Station, Custom address.
-       |            | - Default to Stadium.
+  v15.0| 01/05/2026 | Compact board: short walks shown inline, transit line colours.
+       |            | - Walking legs under 200m collapsed to a single-line connector.
+       |            | - Transit mode badges + timeline dots use line colour from API.
+       |            | - Tighter vertical spacing throughout.
+  v3.2 | 01/05/2026 | Compact rows, transit toggles, origin presets, departure times.
   v3.1 | 01/05/2026 | Routes REST API, full transit detail, polyline map.
   v3.0 | 01/05/2026 | Fixture browser, TO/FROM toggle, pre/post-match sliders.
 -->
@@ -25,7 +23,7 @@
 <script>
   window.NL_TOOL={title:'Travel Planner',toolKey:'staff-travel'};
   var NL_TOOL_KEY='staff-travel';
-  window.NL_CHANGELOG=[{date:'01/05/2026',version:'v3.2',items:['Compact departure board.','Transit mode toggles with live update.','Origin presets: stadium, station, or custom address.','Departure time shown on all legs.']}];
+  window.NL_CHANGELOG=[{date:'01/05/2026',version:'v15.0',items:['Compact board — short walks inline, transit line colours.','Walking legs under 200m collapsed to connectors.','Mode badges and dots use actual line colours.']}];
 </script>
 <script src="/tools/system/nl-utils.js"></script>
 <script src="/tools/system/nl-topbar.js"></script>
@@ -131,6 +129,11 @@
   .tp__leg-route{font-size:13px;font-weight:700;font-variation-settings:'wght' 700;color:var(--text);margin-bottom:1px;line-height:1.3}
   .tp__leg-stops{font-size:10px;color:var(--text-muted);line-height:1.3}
   .tp__leg-duration{font-size:10px;color:var(--text-muted);font-weight:600;font-variation-settings:'wght' 600}
+  /* Compact walk connector — short walks shown as a thin inline row */
+  .tp__walk-connector{display:flex;align-items:center;gap:8px;padding:4px 14px 4px 54px;border-bottom:1px solid var(--border);font-size:10px;color:var(--text-muted);font-weight:600;font-variation-settings:'wght' 600}
+  .tp__walk-connector:last-child{border-bottom:none}
+  .tp__walk-connector .wc-dot{width:6px;height:6px;border-radius:50%;background:var(--border);flex-shrink:0}
+  .tp__walk-connector .wc-line{width:16px;height:1px;background:var(--border);flex-shrink:0}
 
   /* Alts */
   .tp__alts{padding:10px 16px;background:var(--off-white);border-top:1px solid var(--border);display:flex;gap:8px;overflow-x:auto}
@@ -294,7 +297,7 @@ function selMT(c){manTC=c;var i=document.getElementById('manToI'),cr=document.ge
 function upMB(){document.getElementById('manBtn').disabled=!(document.getElementById('manFromI').value.trim().length>=3&&document.getElementById('manToI').value.trim().length>=3)}
 
 // ── REST API ──
-var FM='routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.legs.duration,routes.legs.startLocation,routes.legs.endLocation,routes.legs.steps.travelMode,routes.legs.steps.staticDuration,routes.legs.steps.polyline.encodedPolyline,routes.legs.steps.startLocation,routes.legs.steps.endLocation,routes.legs.steps.navigationInstruction,routes.legs.steps.localizedValues,routes.legs.steps.transitDetails';
+var FM='routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.legs.duration,routes.legs.startLocation,routes.legs.endLocation,routes.legs.steps.travelMode,routes.legs.steps.staticDuration,routes.legs.steps.polyline.encodedPolyline,routes.legs.steps.startLocation,routes.legs.steps.endLocation,routes.legs.steps.navigationInstruction,routes.legs.steps.localizedValues,routes.legs.steps.transitDetails.stopDetails,routes.legs.steps.transitDetails.transitLine,routes.legs.steps.transitDetails.headsign,routes.legs.steps.transitDetails.stopCount,routes.legs.steps.transitDetails.localizedValues';
 
 async function callAPI(origin,dest,tm,opts){
   var body={origin:{address:origin},destination:{address:dest},travelMode:tm,computeAlternativeRoutes:true,languageCode:'en-GB',units:'METRIC'};
@@ -384,14 +387,24 @@ function render(routes,idx,oL,dL){
 
   steps.forEach(function(s){
     var cls=sClass(s),ml=sLabel(s),dep='',arr='',route='',stops='',durT='',distT='';
+    var lineCol='',lineTxt=''; // transit line colours
 
     if(s._w){
-      // Consolidated walk
-      var totalD=0,totalDist=0;
+      // Consolidated walk — check total distance
+      var totalDist=0;
       s._w.forEach(function(ws){
         if(ws.localizedValues&&ws.localizedValues.staticDuration&&ws.localizedValues.staticDuration.text)durT=durT||ws.localizedValues.staticDuration.text;
         if(ws.localizedValues&&ws.localizedValues.distance&&ws.localizedValues.distance.text)distT=distT||ws.localizedValues.distance.text;
+        // Sum metres for compact check
+        var dm=0;try{dm=parseInt(String(ws.localizedValues.distance.text).replace(/[^0-9]/g,''),10)}catch(e){}
+        if(ws.localizedValues&&ws.localizedValues.distance&&ws.localizedValues.distance.text&&ws.localizedValues.distance.text.indexOf('km')!==-1)dm=dm*1000;
+        totalDist+=dm;
       });
+      // Short walks (<300m) → compact connector row
+      if(totalDist<300&&totalDist>0){
+        h+='<div class="tp__walk-connector"><span class="wc-dot"></span><span class="wc-line"></span>🚶 '+(distT||'Walk')+(durT?' · '+durT:'')+'</div>';
+        return; // skip full row
+      }
       route='Walk';
     }else if(s.transitDetails){
       var td=s.transitDetails,sd=td.stopDetails||{};
@@ -405,18 +418,25 @@ function render(routes,idx,oL,dL){
       if(td.stopCount)stops+=' · '+td.stopCount+' stops';
       if(ln.vehicle&&ln.vehicle.type){cls=vC(ln.vehicle.type);ml=vL(ln.vehicle.type)}
       if(s.localizedValues&&s.localizedValues.staticDuration)durT=s.localizedValues.staticDuration.text;
+      // Line colours
+      if(ln.color)lineCol=ln.color;
+      if(ln.textColor)lineTxt=ln.textColor;
     }else{
       if(s.navigationInstruction)route=s.navigationInstruction.instructions||'';
       if(s.localizedValues&&s.localizedValues.staticDuration)durT=s.localizedValues.staticDuration.text;
       if(s.localizedValues&&s.localizedValues.distance)distT=s.localizedValues.distance.text;
     }
 
+    // Build dot style with line colour
+    var dotStyle=lineCol?' style="border-color:'+lineCol+'"':'';
+    var modeStyle=lineCol?' style="background:'+lineCol+';color:'+(lineTxt||'#fff')+'"':'';
+
     h+='<div class="tp__leg tp__leg--'+cls+'">';
-    h+='<div class="tp__leg-timeline"><div class="dot"></div>';
+    h+='<div class="tp__leg-timeline"><div class="dot"'+dotStyle+'></div>';
     if(dep)h+='<div class="tp__leg-time">'+dep+'</div>';
-    h+='<div class="line"></div>';
+    h+='<div class="line"'+(lineCol?' style="background:'+lineCol+'"':'')+'></div>';
     if(arr)h+='<div class="tp__leg-time-end">'+arr+'</div>';
-    h+='</div><div class="tp__leg-detail"><div class="tp__leg-mode">'+ml+'</div>';
+    h+='</div><div class="tp__leg-detail"><div class="tp__leg-mode"'+modeStyle+'>'+ml+'</div>';
     if(route)h+='<div class="tp__leg-route">'+route+'</div>';
     if(stops)h+='<div class="tp__leg-stops">'+stops+'</div>';
     if(distT&&!stops)h+='<div class="tp__leg-stops">'+distT+'</div>';
