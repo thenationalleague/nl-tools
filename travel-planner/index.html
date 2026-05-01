@@ -6,19 +6,17 @@
 <title>Travel Planner — NL Tools</title>
 
 <!--
-  NL Travel Planner v2.0
+  NL Travel Planner v2.1
   ========================
   Changelog:
-  v2.0 | 01/05/2026 | Full rebuild as portal tool.
-       |            | Two modes: Fixture (next match auto-populated) + Manual (club/postcode to club/postcode).
-       |            | Google Directions API for real transit/driving/walking routes.
-       |            | Google Places Autocomplete on postcode/address inputs.
-       |            | NL Services API integration for next fixture lookup.
-       |            | Transport mode switcher (transit/driving/walking).
-       |            | Arrive-before-KO slider (15–120 min, default 60).
-       |            | Club list from clubs-meta.json with crest autocomplete.
-       |            | Portal conventions: topbar, auth-guard, nl-brand.css.
-       |            | Departure-board vertical timeline UI.
+  v2.1 | 01/05/2026 | Rewritten to use modern Google APIs:
+       |            | - Route.computeRoutes() replaces deprecated DirectionsService.
+       |            | - Dynamic importLibrary() loader replaces legacy callback script.
+       |            | - Routes API accepts address strings directly (no Places widget needed).
+       |            | - Transport modes use new enum values (TRANSIT/DRIVE/WALK).
+       |            | - Requires Routes API + Maps JavaScript API enabled in Google Cloud.
+  v2.0 | 01/05/2026 | Full rebuild as portal tool. Two modes, NL Services fixtures,
+       |            | departure board UI, transport mode switcher, arrive-before-KO slider.
   v1.0 | 30/04/2026 | Initial concept — mock data, standalone file.
 -->
 
@@ -43,7 +41,10 @@
   window.NL_TOOL = { title: 'Travel Planner', toolKey: 'staff-travel' };
   var NL_TOOL_KEY = 'staff-travel';
   window.NL_CHANGELOG = [
-    { date: '01/05/2026', version: 'v2.0', items: ['Launch — plan your journey to the match with real-time directions.'] }
+    { date: '01/05/2026', version: 'v2.1', items: [
+      'Upgraded to modern Google Routes & Places APIs.',
+      'Launch — plan your journey to the match with real-time directions.'
+    ]}
   ];
 </script>
 
@@ -52,461 +53,89 @@
 <script src="/tools/system/nl-topbar.js"></script>
 <script src="/tools/system/auth-guard.js"></script>
 
-<!-- Google Maps -->
+<!-- Google Maps dynamic loader -->
 <script>
   var GOOGLE_API_KEY = 'AIzaSyA1qH6K4vtUW8YbMKetK16q2GQaZ2EDXRs';
+  (function(g){var h,a,k,p="The Google Maps JavaScript API",c="google",l="importLibrary",q="__ib__",m=document,b=window;b=b[c]||(b[c]={});var d=b.maps||(b.maps={}),r=new Set,e=new URLSearchParams,u=function(){return h||(h=new Promise(function(f,n){a=m.createElement("script");e.set("libraries",r.size?Array.from(r).join(","):"");for(k in g)e.set(k.replace(/[A-Z]/g,function(t){return"_"+t[0].toLowerCase()}),g[k]);e.set("callback",c+".maps."+q);a.src="https://maps."+c+"apis.com/maps/api/js?"+e;d[q]=f;a.onerror=function(){h=n(Error(p+" could not load."))};a.nonce=(m.querySelector("script[nonce]")||{}).nonce||"";m.head.append(a)}))};d[l]?console.warn(p+" only loads once."):d[l]=function(f){r.add(f);return u().then(function(){return d[l](f)})};
+  })({key:GOOGLE_API_KEY,v:"beta"});
 </script>
-<script async defer id="gmaps-script"></script>
 
 <style>
-  /* ── Tool-specific styles (brand tokens from nl-brand.css) ── */
-
-  .tp__modes {
-    display: flex;
-    gap: 0;
-    margin-bottom: 20px;
-    background: var(--white);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    overflow: hidden;
-  }
-  .tp__mode-btn {
-    flex: 1;
-    padding: 12px 16px;
-    border: none;
-    background: var(--white);
-    font-family: var(--font);
-    font-size: var(--text-sm) !important;
-    font-weight: 800;
-    font-variation-settings: 'wght' 800;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: all 0.2s;
-    border-bottom: 3px solid transparent;
-  }
-  .tp__mode-btn.active {
-    color: var(--navy);
-    border-bottom-color: var(--navy);
-    background: var(--off-white);
-  }
-  .tp__mode-btn:hover:not(.active) {
-    background: var(--off-white);
-  }
-
-  /* ── Search panel ── */
-  .tp__panel {
-    background: var(--white);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    padding: 24px;
-    margin-bottom: 24px;
-  }
-  .tp__panel-title {
-    font-size: var(--text-sm);
-    font-weight: 800;
-    font-variation-settings: 'wght' 800;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--navy);
-    margin-bottom: 18px;
-  }
-
-  .tp__field {
-    margin-bottom: 16px;
-  }
-  .tp__field:last-child { margin-bottom: 0; }
-  .tp__label {
-    display: block;
-    font-size: var(--text-xs);
-    font-weight: 700;
-    font-variation-settings: 'wght' 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-muted);
-    margin-bottom: 6px;
-  }
-  .tp__input,
-  .tp__select {
-    width: 100%;
-    padding: 10px 14px;
-    border: 2px solid var(--border);
-    border-radius: var(--radius);
-    font-family: var(--font);
-    font-size: var(--text-sm) !important;
-    font-variation-settings: 'wght' 400;
-    color: var(--text);
-    background: var(--white);
-    transition: border-color 0.2s;
-    appearance: none;
-  }
-  .tp__input:focus,
-  .tp__select:focus {
-    outline: none;
-    border-color: var(--navy);
-  }
-  .tp__select-wrap {
-    position: relative;
-  }
-  .tp__select-wrap::after {
-    content: "▾";
-    position: absolute;
-    right: 14px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: var(--text-muted);
-    pointer-events: none;
-    font-size: 14px;
-  }
-
-  /* ── Club autocomplete ── */
-  .tp__ac-wrap {
-    position: relative;
-  }
-  .tp__ac-crest {
-    position: absolute;
-    left: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 22px;
-    height: 22px;
-    object-fit: contain;
-    pointer-events: none;
-    display: none;
-  }
-  .tp__ac-wrap.has-crest .tp__input {
-    padding-left: 42px;
-  }
-  .tp__ac-list {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    background: var(--white);
-    border: 2px solid var(--navy);
-    border-top: none;
-    border-radius: 0 0 var(--radius) var(--radius);
-    max-height: 240px;
-    overflow-y: auto;
-    z-index: 100;
-    display: none;
-  }
-  .tp__ac-list.show { display: block; }
-  .tp__ac-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 14px;
-    cursor: pointer;
-    font-size: var(--text-sm);
-    transition: background 0.15s;
-  }
-  .tp__ac-item:hover { background: var(--off-white); }
-  .tp__ac-item img { width: 20px; height: 20px; object-fit: contain; }
-  .tp__ac-item .name { font-weight: 600; font-variation-settings: 'wght' 600; }
-  .tp__ac-item .ground { font-size: var(--text-xs); color: var(--text-muted); margin-left: auto; }
-  .tp__ac-item .div-badge {
-    font-size: 10px; font-weight: 700; font-variation-settings: 'wght' 700;
-    text-transform: uppercase; letter-spacing: 0.04em;
-    padding: 2px 6px; border-radius: 3px;
-    background: var(--off-white); color: var(--text-muted);
-  }
-
-  /* ── Transport mode switcher ── */
-  .tp__transport {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 16px;
-  }
-  .tp__transport-btn {
-    flex: 1;
-    padding: 8px 12px;
-    border: 2px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--white);
-    font-family: var(--font);
-    font-size: var(--text-xs) !important;
-    font-weight: 700;
-    font-variation-settings: 'wght' 700;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: all 0.2s;
-    text-align: center;
-  }
-  .tp__transport-btn.active {
-    border-color: var(--navy);
-    background: var(--navy);
-    color: var(--white);
-  }
-  .tp__transport-btn:hover:not(.active) {
-    border-color: var(--navy);
-    color: var(--navy);
-  }
-
-  /* ── Slider ── */
-  .tp__slider-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-  .tp__slider {
-    flex: 1;
-    accent-color: var(--navy);
-  }
-  .tp__slider-val {
-    font-size: var(--text-sm);
-    font-weight: 700;
-    font-variation-settings: 'wght' 700;
-    color: var(--navy);
-    min-width: 50px;
-    text-align: right;
-  }
-
-  /* ── Fixture card ── */
-  .tp__fixture {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 14px 18px;
-    background: var(--off-white);
-    border-radius: var(--radius);
-    margin-bottom: 16px;
-    border: 2px solid var(--border);
-  }
-  .tp__fixture-crest { width: 32px; height: 32px; object-fit: contain; }
-  .tp__fixture-info { flex: 1; }
-  .tp__fixture-teams {
-    font-size: var(--text-sm);
-    font-weight: 700;
-    font-variation-settings: 'wght' 700;
-    color: var(--text);
-  }
-  .tp__fixture-meta {
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-    margin-top: 2px;
-  }
-  .tp__fixture-badge {
-    font-size: 10px; font-weight: 800; font-variation-settings: 'wght' 800;
-    text-transform: uppercase; letter-spacing: 0.04em;
-    padding: 4px 10px; border-radius: 99px;
-    background: var(--green-light); color: var(--green);
-  }
-
-  /* ── Journey summary ── */
-  .tp__summary {
-    background: var(--navy);
-    color: var(--white);
-    border-radius: var(--radius) var(--radius) 0 0;
-    padding: 18px 22px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-  .tp__summary-route {
-    font-size: 17px;
-    font-weight: 800;
-    font-variation-settings: 'wght' 800;
-  }
-  .tp__summary-route .arrow { color: rgba(255,255,255,0.4); margin: 0 8px; }
-  .tp__summary-duration {
-    font-size: var(--text-sm);
-    font-weight: 600;
-    font-variation-settings: 'wght' 600;
-    background: rgba(255,255,255,0.15);
-    padding: 4px 12px;
-    border-radius: 99px;
-  }
-
-  /* ── Departure board ── */
-  .tp__board {
-    background: var(--white);
-    border-radius: 0 0 var(--radius) var(--radius);
-    box-shadow: var(--shadow);
-    overflow: hidden;
-  }
-
-  .tp__leg {
-    display: flex;
-    gap: 0;
-    border-bottom: 1px solid var(--border);
-  }
-  .tp__leg:last-child { border-bottom: none; }
-
-  .tp__leg-timeline {
-    width: 72px;
-    min-width: 72px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 18px 0;
-    position: relative;
-  }
-  .tp__leg-time {
-    font-size: 15px;
-    font-weight: 800;
-    font-variation-settings: 'wght' 800;
-    color: var(--text);
-    z-index: 1;
-  }
-  .tp__leg-timeline .line {
-    flex: 1;
-    width: 2px;
-    background: var(--border);
-    margin: 6px 0;
-  }
-  .tp__leg-time-end {
-    font-size: var(--text-xs);
-    font-weight: 600;
-    font-variation-settings: 'wght' 600;
-    color: var(--text-muted);
-    z-index: 1;
-  }
-  .tp__leg-timeline .dot {
-    width: 12px; height: 12px; border-radius: 50%;
-    border: 3px solid var(--navy); background: var(--white);
-    z-index: 1; margin-bottom: 4px;
-  }
-  .tp__leg--WALKING .dot { border-color: var(--text-muted); }
-  .tp__leg--BUS .dot { border-color: var(--amber); }
-  .tp__leg--RAIL .dot,
-  .tp__leg--HEAVY_RAIL .dot,
-  .tp__leg--COMMUTER_TRAIN .dot,
-  .tp__leg--HIGH_SPEED_TRAIN .dot,
-  .tp__leg--LONG_DISTANCE_TRAIN .dot,
-  .tp__leg--INTERCITY_BUS .dot { border-color: var(--navy); }
-  .tp__leg--SUBWAY .dot,
-  .tp__leg--METRO_RAIL .dot { border-color: var(--primary); }
-  .tp__leg--TRAM .dot,
-  .tp__leg--LIGHT_RAIL .dot { border-color: var(--green); }
-  .tp__leg--DRIVING .dot { border-color: var(--blue); }
-
-  .tp__leg-detail {
-    flex: 1;
-    padding: 18px 20px 18px 0;
-  }
-  .tp__leg-mode {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px; font-weight: 800; font-variation-settings: 'wght' 800;
-    text-transform: uppercase; letter-spacing: 0.06em;
-    padding: 3px 10px; border-radius: 99px;
-    margin-bottom: 6px;
-  }
-  .tp__leg--WALKING .tp__leg-mode { background: var(--off-white); color: var(--text-muted); }
-  .tp__leg--BUS .tp__leg-mode { background: var(--amber-light); color: var(--amber); }
-  .tp__leg--RAIL .tp__leg-mode,
-  .tp__leg--HEAVY_RAIL .tp__leg-mode,
-  .tp__leg--COMMUTER_TRAIN .tp__leg-mode,
-  .tp__leg--HIGH_SPEED_TRAIN .tp__leg-mode,
-  .tp__leg--LONG_DISTANCE_TRAIN .tp__leg-mode,
-  .tp__leg--INTERCITY_BUS .tp__leg-mode { background: var(--blue-light); color: var(--blue); }
-  .tp__leg--SUBWAY .tp__leg-mode,
-  .tp__leg--METRO_RAIL .tp__leg-mode { background: #fce4ec; color: var(--primary); }
-  .tp__leg--TRAM .tp__leg-mode,
-  .tp__leg--LIGHT_RAIL .tp__leg-mode { background: var(--green-light); color: var(--green); }
-  .tp__leg--DRIVING .tp__leg-mode { background: var(--blue-light); color: var(--blue); }
-
-  .tp__leg-route {
-    font-size: 15px; font-weight: 700; font-variation-settings: 'wght' 700;
-    color: var(--text); margin-bottom: 2px;
-  }
-  .tp__leg-stops {
-    font-size: var(--text-xs); color: var(--text-muted);
-  }
-  .tp__leg-duration {
-    font-size: var(--text-xs); color: var(--text-muted);
-    margin-top: 4px; font-weight: 600; font-variation-settings: 'wght' 600;
-  }
-
-  /* ── Route alternatives ── */
-  .tp__alts {
-    padding: 14px 22px;
-    background: var(--off-white);
-    border-top: 1px solid var(--border);
-    display: flex;
-    gap: 10px;
-    overflow-x: auto;
-  }
-  .tp__alt-chip {
-    flex-shrink: 0;
-    padding: 6px 14px;
-    border-radius: 99px;
-    border: 2px solid var(--border);
-    background: var(--white);
-    font-family: var(--font);
-    font-size: var(--text-xs) !important;
-    font-weight: 700; font-variation-settings: 'wght' 700;
-    color: var(--text); cursor: pointer;
-    transition: all 0.2s; white-space: nowrap;
-  }
-  .tp__alt-chip:hover { border-color: var(--navy); color: var(--navy); }
-  .tp__alt-chip.active { background: var(--navy); color: var(--white); border-color: var(--navy); }
-  .tp__alt-chip .dur { font-weight: 400; font-variation-settings: 'wght' 400; color: var(--text-muted); margin-left: 4px; }
-  .tp__alt-chip.active .dur { color: rgba(255,255,255,0.6); }
-
-  /* ── States ── */
-  .tp__empty {
-    text-align: center;
-    padding: 48px 24px;
-    color: var(--text-muted);
-  }
-  .tp__empty-icon { font-size: 36px; margin-bottom: 12px; }
-  .tp__empty h3 {
-    font-size: 16px; font-weight: 700; font-variation-settings: 'wght' 700;
-    color: var(--text); margin-bottom: 6px;
-  }
-  .tp__empty p { font-size: var(--text-sm); }
-
-  .tp__loading {
-    text-align: center; padding: 48px 24px; color: var(--text-muted); font-size: var(--text-sm);
-  }
-  .tp__spinner {
-    width: 32px; height: 32px;
-    border: 3px solid var(--border); border-top-color: var(--navy);
-    border-radius: 50%; animation: tpSpin 0.8s linear infinite;
-    margin: 0 auto 12px;
-  }
-  @keyframes tpSpin { to { transform: rotate(360deg); } }
-
-  .tp__error {
-    text-align: center; padding: 24px; color: var(--red);
-    font-size: var(--text-sm); font-weight: 600; font-variation-settings: 'wght' 600;
-    background: var(--red-light); border-radius: var(--radius); margin-bottom: 16px;
-  }
-
-  /* ── Row helpers ── */
-  .tp__row { display: flex; gap: 10px; }
-  .tp__row > * { flex: 1; }
-
-  .tp__or-divider {
-    text-align: center;
-    font-size: var(--text-xs);
-    font-weight: 700; font-variation-settings: 'wght' 700;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    padding: 4px 0;
-  }
-
-  /* ── Footer ── */
-  .tp__footer {
-    text-align: center; padding: 20px; font-size: var(--text-xs); color: var(--text-muted);
-  }
-
-  /* ── Responsive ── */
-  @media (max-width: 520px) {
-    .tp__summary { flex-direction: column; align-items: flex-start; padding: 14px 16px; }
-    .tp__leg-timeline { width: 60px; min-width: 60px; }
-    .tp__leg-detail { padding: 14px 14px 14px 0; }
-    .tp__row { flex-direction: column; gap: 0; }
-  }
+  .tp__modes{display:flex;gap:0;margin-bottom:20px;background:var(--white);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+  .tp__mode-btn{flex:1;padding:12px 16px;border:none;background:var(--white);font-family:var(--font);font-size:var(--text-sm)!important;font-weight:800;font-variation-settings:'wght' 800;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);cursor:pointer;transition:all .2s;border-bottom:3px solid transparent}
+  .tp__mode-btn.active{color:var(--navy);border-bottom-color:var(--navy);background:var(--off-white)}
+  .tp__mode-btn:hover:not(.active){background:var(--off-white)}
+  .tp__panel{background:var(--white);border-radius:var(--radius);box-shadow:var(--shadow);padding:24px;margin-bottom:24px}
+  .tp__panel-title{font-size:var(--text-sm);font-weight:800;font-variation-settings:'wght' 800;text-transform:uppercase;letter-spacing:.04em;color:var(--navy);margin-bottom:18px}
+  .tp__field{margin-bottom:16px}.tp__field:last-child{margin-bottom:0}
+  .tp__label{display:block;font-size:var(--text-xs);font-weight:700;font-variation-settings:'wght' 700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:6px}
+  .tp__input,.tp__select{width:100%;padding:10px 14px;border:2px solid var(--border);border-radius:var(--radius);font-family:var(--font);font-size:var(--text-sm)!important;font-variation-settings:'wght' 400;color:var(--text);background:var(--white);transition:border-color .2s;appearance:none}
+  .tp__input:focus,.tp__select:focus{outline:none;border-color:var(--navy)}
+  .tp__select-wrap{position:relative}.tp__select-wrap::after{content:"▾";position:absolute;right:14px;top:50%;transform:translateY(-50%);color:var(--text-muted);pointer-events:none;font-size:14px}
+  .tp__ac-wrap{position:relative}
+  .tp__ac-crest{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:22px;height:22px;object-fit:contain;pointer-events:none;display:none;z-index:2}
+  .tp__ac-wrap.has-crest .tp__input{padding-left:42px}
+  .tp__ac-list{position:absolute;top:100%;left:0;right:0;background:var(--white);border:2px solid var(--navy);border-top:none;border-radius:0 0 var(--radius) var(--radius);max-height:240px;overflow-y:auto;z-index:100;display:none}
+  .tp__ac-list.show{display:block}
+  .tp__ac-item{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;font-size:var(--text-sm);transition:background .15s}
+  .tp__ac-item:hover{background:var(--off-white)}
+  .tp__ac-item img{width:20px;height:20px;object-fit:contain}
+  .tp__ac-item .name{font-weight:600;font-variation-settings:'wght' 600}
+  .tp__ac-item .ground{font-size:var(--text-xs);color:var(--text-muted);margin-left:auto}
+  .tp__ac-item .div-badge{font-size:10px;font-weight:700;font-variation-settings:'wght' 700;text-transform:uppercase;letter-spacing:.04em;padding:2px 6px;border-radius:3px;background:var(--off-white);color:var(--text-muted)}
+  .tp__transport{display:flex;gap:8px;margin-bottom:16px}
+  .tp__transport-btn{flex:1;padding:8px 12px;border:2px solid var(--border);border-radius:var(--radius);background:var(--white);font-family:var(--font);font-size:var(--text-xs)!important;font-weight:700;font-variation-settings:'wght' 700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);cursor:pointer;transition:all .2s;text-align:center}
+  .tp__transport-btn.active{border-color:var(--navy);background:var(--navy);color:var(--white)}
+  .tp__transport-btn:hover:not(.active){border-color:var(--navy);color:var(--navy)}
+  .tp__slider-row{display:flex;align-items:center;gap:12px}
+  .tp__slider{flex:1;accent-color:var(--navy)}
+  .tp__slider-val{font-size:var(--text-sm);font-weight:700;font-variation-settings:'wght' 700;color:var(--navy);min-width:50px;text-align:right}
+  .tp__fixture{display:flex;align-items:center;gap:14px;padding:14px 18px;background:var(--off-white);border-radius:var(--radius);margin-bottom:16px;border:2px solid var(--border)}
+  .tp__fixture-crest{width:32px;height:32px;object-fit:contain}
+  .tp__fixture-info{flex:1}
+  .tp__fixture-teams{font-size:var(--text-sm);font-weight:700;font-variation-settings:'wght' 700;color:var(--text)}
+  .tp__fixture-meta{font-size:var(--text-xs);color:var(--text-muted);margin-top:2px}
+  .tp__fixture-badge{font-size:10px;font-weight:800;font-variation-settings:'wght' 800;text-transform:uppercase;letter-spacing:.04em;padding:4px 10px;border-radius:99px;background:var(--green-light);color:var(--green)}
+  .tp__summary{background:var(--navy);color:var(--white);border-radius:var(--radius) var(--radius) 0 0;padding:18px 22px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+  .tp__summary-route{font-size:17px;font-weight:800;font-variation-settings:'wght' 800}
+  .tp__summary-route .arrow{color:rgba(255,255,255,.4);margin:0 8px}
+  .tp__summary-duration{font-size:var(--text-sm);font-weight:600;font-variation-settings:'wght' 600;background:rgba(255,255,255,.15);padding:4px 12px;border-radius:99px}
+  .tp__board{background:var(--white);border-radius:0 0 var(--radius) var(--radius);box-shadow:var(--shadow);overflow:hidden}
+  .tp__leg{display:flex;gap:0;border-bottom:1px solid var(--border)}.tp__leg:last-child{border-bottom:none}
+  .tp__leg-timeline{width:72px;min-width:72px;display:flex;flex-direction:column;align-items:center;padding:18px 0;position:relative}
+  .tp__leg-time{font-size:15px;font-weight:800;font-variation-settings:'wght' 800;color:var(--text);z-index:1}
+  .tp__leg-timeline .line{flex:1;width:2px;background:var(--border);margin:6px 0}
+  .tp__leg-time-end{font-size:var(--text-xs);font-weight:600;font-variation-settings:'wght' 600;color:var(--text-muted);z-index:1}
+  .tp__leg-timeline .dot{width:12px;height:12px;border-radius:50%;border:3px solid var(--navy);background:var(--white);z-index:1;margin-bottom:4px}
+  .tp__leg--WALKING .dot{border-color:var(--text-muted)}.tp__leg--BUS .dot{border-color:var(--amber)}
+  .tp__leg--RAIL .dot,.tp__leg--HEAVY_RAIL .dot,.tp__leg--COMMUTER_TRAIN .dot,.tp__leg--HIGH_SPEED_TRAIN .dot,.tp__leg--LONG_DISTANCE_TRAIN .dot,.tp__leg--INTERCITY_BUS .dot{border-color:var(--navy)}
+  .tp__leg--SUBWAY .dot,.tp__leg--METRO_RAIL .dot{border-color:var(--primary)}
+  .tp__leg--TRAM .dot,.tp__leg--LIGHT_RAIL .dot{border-color:var(--green)}
+  .tp__leg--DRIVING .dot{border-color:var(--blue)}
+  .tp__leg-detail{flex:1;padding:18px 20px 18px 0}
+  .tp__leg-mode{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:800;font-variation-settings:'wght' 800;text-transform:uppercase;letter-spacing:.06em;padding:3px 10px;border-radius:99px;margin-bottom:6px}
+  .tp__leg--WALKING .tp__leg-mode{background:var(--off-white);color:var(--text-muted)}
+  .tp__leg--BUS .tp__leg-mode{background:var(--amber-light);color:var(--amber)}
+  .tp__leg--RAIL .tp__leg-mode,.tp__leg--HEAVY_RAIL .tp__leg-mode,.tp__leg--COMMUTER_TRAIN .tp__leg-mode,.tp__leg--HIGH_SPEED_TRAIN .tp__leg-mode,.tp__leg--LONG_DISTANCE_TRAIN .tp__leg-mode,.tp__leg--INTERCITY_BUS .tp__leg-mode{background:var(--blue-light);color:var(--blue)}
+  .tp__leg--SUBWAY .tp__leg-mode,.tp__leg--METRO_RAIL .tp__leg-mode{background:#fce4ec;color:var(--primary)}
+  .tp__leg--TRAM .tp__leg-mode,.tp__leg--LIGHT_RAIL .tp__leg-mode{background:var(--green-light);color:var(--green)}
+  .tp__leg--DRIVING .tp__leg-mode{background:var(--blue-light);color:var(--blue)}
+  .tp__leg-route{font-size:15px;font-weight:700;font-variation-settings:'wght' 700;color:var(--text);margin-bottom:2px}
+  .tp__leg-stops{font-size:var(--text-xs);color:var(--text-muted)}
+  .tp__leg-duration{font-size:var(--text-xs);color:var(--text-muted);margin-top:4px;font-weight:600;font-variation-settings:'wght' 600}
+  .tp__alts{padding:14px 22px;background:var(--off-white);border-top:1px solid var(--border);display:flex;gap:10px;overflow-x:auto}
+  .tp__alt-chip{flex-shrink:0;padding:6px 14px;border-radius:99px;border:2px solid var(--border);background:var(--white);font-family:var(--font);font-size:var(--text-xs)!important;font-weight:700;font-variation-settings:'wght' 700;color:var(--text);cursor:pointer;transition:all .2s;white-space:nowrap}
+  .tp__alt-chip:hover{border-color:var(--navy);color:var(--navy)}
+  .tp__alt-chip.active{background:var(--navy);color:var(--white);border-color:var(--navy)}
+  .tp__alt-chip .dur{font-weight:400;font-variation-settings:'wght' 400;color:var(--text-muted);margin-left:4px}
+  .tp__alt-chip.active .dur{color:rgba(255,255,255,.6)}
+  .tp__loading{text-align:center;padding:48px 24px;color:var(--text-muted);font-size:var(--text-sm)}
+  .tp__spinner{width:32px;height:32px;border:3px solid var(--border);border-top-color:var(--navy);border-radius:50%;animation:tpSpin .8s linear infinite;margin:0 auto 12px}
+  @keyframes tpSpin{to{transform:rotate(360deg)}}
+  .tp__error{text-align:center;padding:24px;color:var(--red);font-size:var(--text-sm);font-weight:600;font-variation-settings:'wght' 600;background:var(--red-light);border-radius:var(--radius);margin-bottom:16px}
+  .tp__row{display:flex;gap:10px}.tp__row>*{flex:1}
+  .tp__footer{text-align:center;padding:20px;font-size:var(--text-xs);color:var(--text-muted)}
+  @media(max-width:520px){.tp__summary{flex-direction:column;align-items:flex-start;padding:14px 16px}.tp__leg-timeline{width:60px;min-width:60px}.tp__leg-detail{padding:14px 14px 14px 0}.tp__row{flex-direction:column;gap:0}}
 </style>
 </head>
 <body>
@@ -516,17 +145,15 @@
 <div id="pageWrap" style="display:none;">
 <div class="page" style="max-width:720px;">
 
-  <!-- Mode toggle -->
   <div class="tp__modes">
     <button class="tp__mode-btn active" data-mode="fixture" onclick="setMode('fixture')">Next Fixture</button>
     <button class="tp__mode-btn" data-mode="manual" onclick="setMode('manual')">Manual Journey</button>
   </div>
 
-  <!-- ══════ FIXTURE MODE ══════ -->
+  <!-- FIXTURE MODE -->
   <div id="fixtureMode">
     <div class="tp__panel">
       <div class="tp__panel-title">Your Club</div>
-
       <div class="tp__field">
         <label class="tp__label">Select club</label>
         <div class="tp__ac-wrap" id="fixClubWrap">
@@ -535,26 +162,19 @@
           <div class="tp__ac-list" id="fixClubAC"></div>
         </div>
       </div>
-
-      <!-- Fixture display (populated after club selection) -->
       <div id="fixFixtureArea"></div>
-
       <div class="tp__field">
         <label class="tp__label">Your starting point (postcode or address)</label>
         <input class="tp__input" type="text" id="fixOriginInput" placeholder="e.g. OX11 7HH or Oxford Station" autocomplete="off">
       </div>
-
-      <!-- Transport mode -->
       <div class="tp__field">
         <label class="tp__label">Travel by</label>
         <div class="tp__transport" id="fixTransport">
-          <button class="tp__transport-btn active" data-mode="transit" onclick="setTransport(this,'fix')">🚆 Public transport</button>
-          <button class="tp__transport-btn" data-mode="driving" onclick="setTransport(this,'fix')">🚗 Drive</button>
-          <button class="tp__transport-btn" data-mode="walking" onclick="setTransport(this,'fix')">🚶 Walk</button>
+          <button class="tp__transport-btn active" data-mode="TRANSIT" onclick="setTransport(this,'fix')">🚆 Public transport</button>
+          <button class="tp__transport-btn" data-mode="DRIVE" onclick="setTransport(this,'fix')">🚗 Drive</button>
+          <button class="tp__transport-btn" data-mode="WALK" onclick="setTransport(this,'fix')">🚶 Walk</button>
         </div>
       </div>
-
-      <!-- Arrive before KO slider -->
       <div class="tp__field" id="fixSliderField">
         <label class="tp__label">Arrive before kick-off</label>
         <div class="tp__slider-row">
@@ -563,18 +183,14 @@
           <span class="tp__slider-val" id="fixArriveVal">60 min</span>
         </div>
       </div>
-
-      <button class="btn btn--primary" style="width:100%;margin-top:8px;" id="fixSearchBtn" onclick="doFixtureSearch()" disabled>
-        Find journey
-      </button>
+      <button class="btn btn--primary" style="width:100%;margin-top:8px;" id="fixSearchBtn" onclick="doFixtureSearch()" disabled>Find journey</button>
     </div>
   </div>
 
-  <!-- ══════ MANUAL MODE ══════ -->
+  <!-- MANUAL MODE -->
   <div id="manualMode" style="display:none;">
     <div class="tp__panel">
       <div class="tp__panel-title">Plan a Journey</div>
-
       <div class="tp__field">
         <label class="tp__label">From</label>
         <div class="tp__ac-wrap" id="manFromClubWrap">
@@ -583,7 +199,6 @@
           <div class="tp__ac-list" id="manFromAC"></div>
         </div>
       </div>
-
       <div class="tp__field">
         <label class="tp__label">To</label>
         <div class="tp__ac-wrap" id="manToClubWrap">
@@ -592,18 +207,14 @@
           <div class="tp__ac-list" id="manToAC"></div>
         </div>
       </div>
-
-      <!-- Transport mode -->
       <div class="tp__field">
         <label class="tp__label">Travel by</label>
         <div class="tp__transport" id="manTransport">
-          <button class="tp__transport-btn active" data-mode="transit" onclick="setTransport(this,'man')">🚆 Public transport</button>
-          <button class="tp__transport-btn" data-mode="driving" onclick="setTransport(this,'man')">🚗 Drive</button>
-          <button class="tp__transport-btn" data-mode="walking" onclick="setTransport(this,'man')">🚶 Walk</button>
+          <button class="tp__transport-btn active" data-mode="TRANSIT" onclick="setTransport(this,'man')">🚆 Public transport</button>
+          <button class="tp__transport-btn" data-mode="DRIVE" onclick="setTransport(this,'man')">🚗 Drive</button>
+          <button class="tp__transport-btn" data-mode="WALK" onclick="setTransport(this,'man')">🚶 Walk</button>
         </div>
       </div>
-
-      <!-- When -->
       <div class="tp__field">
         <label class="tp__label">When</label>
         <div class="tp__row">
@@ -616,619 +227,358 @@
           <input class="tp__input" type="datetime-local" id="manTimeInput" style="display:none;">
         </div>
       </div>
-
-      <button class="btn btn--primary" style="width:100%;margin-top:8px;" id="manSearchBtn" onclick="doManualSearch()" disabled>
-        Find journey
-      </button>
+      <button class="btn btn--primary" style="width:100%;margin-top:8px;" id="manSearchBtn" onclick="doManualSearch()" disabled>Find journey</button>
     </div>
   </div>
 
-  <!-- ══════ RESULTS ══════ -->
   <div id="resultsArea"></div>
-
-  <div class="tp__footer">
-    Powered by Google Maps Platform & National League Services
-  </div>
-
+  <div class="tp__footer">Powered by Google Maps Platform & National League Services</div>
 </div>
 </div>
 
 <script>
-/*
- * NL Travel Planner v2.0
- * ========================
- * Core logic: club data, fixture lookup, Google Directions integration, departure board rendering.
- */
+var CLUBS_META_URL='https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
+var CREST_BASE='https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
+var FALLBACK_CREST=CREST_BASE+'National%20League%20rose.png';
+var NLS_BASE='https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
+var SEASON_ID=2025;
+var COMP_IDS=[89,373,372];
 
-// ── Constants ──
-var CLUBS_META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
-var CREST_BASE = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
-var FALLBACK_CREST = CREST_BASE + 'National%20League%20rose.png';
-var NLS_BASE = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
-var SEASON_ID = 2025;
-var COMP_IDS = [89, 373, 372]; // Premier, North, South
+var clubs=[];
+var currentMode='fixture';
+var fixSelectedClub=null;
+var fixNextMatch=null;
+var manFromClub=null;
+var manToClub=null;
+var RouteClass=null;
+var allRoutes=[];
+var activeRouteIdx=0;
+var gmapsReady=false;
 
-// ── State ──
-var clubs = [];
-var currentMode = 'fixture';
-var fixSelectedClub = null;
-var fixNextMatch = null;
-var manFromClub = null;
-var manToClub = null;
-var directionsService = null;
-var placesAutocompletes = {};
-var allRoutes = [];
-var activeRouteIdx = 0;
-
-// ── Google Maps callback ──
-function initGoogleMaps() {
-  directionsService = new google.maps.DirectionsService();
-
-  // Set up Places Autocomplete on free-text inputs
-  setupPlacesAutocomplete('fixOriginInput');
-  setupPlacesAutocomplete('manFromInput');
-  setupPlacesAutocomplete('manToInput');
-
-  updateButtons();
-}
-
-function setupPlacesAutocomplete(inputId) {
-  var input = document.getElementById(inputId);
-  if (!input) return;
-  var ac = new google.maps.places.Autocomplete(input, {
-    componentRestrictions: { country: 'gb' },
-    fields: ['formatted_address', 'geometry', 'name']
-  });
-  ac.addListener('place_changed', function() {
+// ── Google Maps init ──
+async function initGoogleMaps(){
+  try{
+    var routesLib=await google.maps.importLibrary('routes');
+    RouteClass=routesLib.Route;
+    gmapsReady=true;
     updateButtons();
-  });
-  placesAutocompletes[inputId] = ac;
+  }catch(err){
+    console.error('Failed to load Routes library:',err);
+    document.getElementById('resultsArea').innerHTML='<div class="tp__error">Failed to load Google Maps. Ensure Routes API is enabled in your Google Cloud project.</div>';
+  }
 }
 
-// Load Google Maps script
-function loadGoogleMaps() {
-  var s = document.getElementById('gmaps-script');
-  s.src = 'https://maps.googleapis.com/maps/api/js?key=' + GOOGLE_API_KEY + '&libraries=places&callback=initGoogleMaps';
+// ── Clubs ──
+function loadClubs(){
+  fetch(CLUBS_META_URL).then(function(r){return r.json()}).then(function(data){
+    clubs=(data.clubs||[]).map(function(c){
+      return{name:c.name||'',code:c.code||'',short:c.short||'',stadium:c.stadium||'',division:c.division||'',optaID:c.optaID||'',postcode:c.postcode||'',colors:c.colors||{}};
+    }).sort(function(a,b){return a.name.localeCompare(b.name)});
+  }).catch(function(){clubs=[]});
 }
 
-// ── Club data ──
-function loadClubs() {
-  fetch(CLUBS_META_URL)
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      var raw = data.clubs || [];
-      clubs = raw.map(function(c) {
-        return {
-          name: c.name || '',
-          code: c.code || '',
-          short: c.short || '',
-          stadium: c.stadium || '',
-          division: c.division || '',
-          optaID: c.optaID || '',
-          postcode: c.postcode || '',
-          colors: c.colors || {}
-        };
-      }).sort(function(a, b) { return a.name.localeCompare(b.name); });
-    })
-    .catch(function() {
-      console.warn('Failed to load clubs-meta.json');
-      clubs = [];
-    });
+function getCrestUrl(n){return CREST_BASE+encodeURIComponent(n)+'.png'}
+
+// ── Club autocomplete ──
+function setupClubAC(inputId,listId,wrapId,crestId,onSelect){
+  var input=document.getElementById(inputId);
+  var list=document.getElementById(listId);
+  input.addEventListener('input',function(){filterClubList(this.value,listId,onSelect);onSelect(null)});
+  input.addEventListener('focus',function(){if(this.value.length===0)filterClubList('',listId,onSelect)});
+  document.addEventListener('click',function(e){if(!e.target.closest('#'+wrapId))list.classList.remove('show')});
 }
 
-function getCrestUrl(name) {
-  return CREST_BASE + encodeURIComponent(name) + '.png';
-}
-
-// ── Autocomplete for club inputs ──
-function setupClubAC(inputId, listId, wrapId, crestId, onSelect) {
-  var input = document.getElementById(inputId);
-  var list = document.getElementById(listId);
-
-  input.addEventListener('input', function() {
-    filterClubList(this.value, listId, onSelect);
-    // Clear selection if user is typing
-    onSelect(null);
-  });
-  input.addEventListener('focus', function() {
-    if (this.value.length === 0) filterClubList('', listId, onSelect);
-  });
-  document.addEventListener('click', function(e) {
-    if (!e.target.closest('#' + wrapId)) list.classList.remove('show');
-  });
-}
-
-function filterClubList(query, listId, onSelect) {
-  var list = document.getElementById(listId);
-  var q = query.toLowerCase().trim();
-  var filtered = clubs;
-  if (q.length > 0) {
-    filtered = clubs.filter(function(c) {
-      return c.name.toLowerCase().indexOf(q) !== -1 ||
-             (c.short && c.short.toLowerCase().indexOf(q) !== -1) ||
-             (c.stadium && c.stadium.toLowerCase().indexOf(q) !== -1) ||
-             (c.code && c.code.toLowerCase() === q);
+function filterClubList(query,listId,onSelect){
+  var list=document.getElementById(listId);
+  var q=query.toLowerCase().trim();
+  var filtered=clubs;
+  if(q.length>0){
+    filtered=clubs.filter(function(c){
+      return c.name.toLowerCase().indexOf(q)!==-1||(c.short&&c.short.toLowerCase().indexOf(q)!==-1)||(c.stadium&&c.stadium.toLowerCase().indexOf(q)!==-1)||(c.code&&c.code.toLowerCase()===q);
     });
   }
-
-  if (filtered.length === 0) {
-    list.innerHTML = '<div class="tp__ac-item" style="color:var(--text-muted);justify-content:center;">No clubs found</div>';
-    list.classList.add('show');
-    return;
+  if(filtered.length===0){
+    list.innerHTML='<div class="tp__ac-item" style="color:var(--text-muted);justify-content:center;">No clubs found</div>';
+    list.classList.add('show');return;
   }
-
-  list.innerHTML = filtered.slice(0, 15).map(function(c) {
-    return '<div class="tp__ac-item" data-club="' + c.name.replace(/"/g, '&quot;') + '">' +
-      '<img src="' + getCrestUrl(c.name) + '" alt="" onerror="this.onerror=null;this.src=\'' + FALLBACK_CREST + '\'">' +
-      '<span class="name">' + c.name + '</span>' +
-      '<span class="ground">' + c.stadium + '</span>' +
-      '<span class="div-badge">' + c.division + '</span>' +
-    '</div>';
+  list.innerHTML=filtered.slice(0,15).map(function(c){
+    return'<div class="tp__ac-item" data-club="'+c.name.replace(/"/g,'&quot;')+'"><img src="'+getCrestUrl(c.name)+'" alt="" onerror="this.onerror=null;this.src=\''+FALLBACK_CREST+'\'"><span class="name">'+c.name+'</span><span class="ground">'+c.stadium+'</span><span class="div-badge">'+c.division+'</span></div>';
   }).join('');
-
   list.classList.add('show');
-
-  list.querySelectorAll('.tp__ac-item[data-club]').forEach(function(item) {
-    item.addEventListener('click', function() {
-      var clubName = this.getAttribute('data-club');
-      var club = clubs.find(function(c) { return c.name === clubName; });
-      onSelect(club);
-      list.classList.remove('show');
+  list.querySelectorAll('.tp__ac-item[data-club]').forEach(function(item){
+    item.addEventListener('click',function(){
+      var club=clubs.find(function(c){return c.name===item.getAttribute('data-club')});
+      onSelect(club);list.classList.remove('show');
     });
   });
 }
 
-// ── Selection handlers ──
-function selectFixClub(club) {
-  fixSelectedClub = club;
-  var input = document.getElementById('fixClubInput');
-  var crest = document.getElementById('fixClubCrest');
-  var wrap = document.getElementById('fixClubWrap');
-
-  if (club) {
-    input.value = club.name;
-    crest.src = getCrestUrl(club.name);
-    crest.style.display = 'block';
-    wrap.classList.add('has-crest');
-    fetchNextFixture(club);
-  } else {
-    crest.style.display = 'none';
-    wrap.classList.remove('has-crest');
-    fixNextMatch = null;
-    document.getElementById('fixFixtureArea').innerHTML = '';
-  }
+// ── Selections ──
+function selectFixClub(club){
+  fixSelectedClub=club;
+  var input=document.getElementById('fixClubInput'),crest=document.getElementById('fixClubCrest'),wrap=document.getElementById('fixClubWrap');
+  if(club){input.value=club.name;crest.src=getCrestUrl(club.name);crest.style.display='block';wrap.classList.add('has-crest');fetchNextFixture(club)}
+  else{crest.style.display='none';wrap.classList.remove('has-crest');fixNextMatch=null;document.getElementById('fixFixtureArea').innerHTML=''}
   updateButtons();
 }
-
-function selectManFrom(club) {
-  manFromClub = club;
-  var input = document.getElementById('manFromInput');
-  var crest = document.getElementById('manFromCrest');
-  var wrap = document.getElementById('manFromClubWrap');
-
-  if (club) {
-    input.value = club.name + ' (' + club.stadium + ')';
-    crest.src = getCrestUrl(club.name);
-    crest.style.display = 'block';
-    wrap.classList.add('has-crest');
-  } else {
-    crest.style.display = 'none';
-    wrap.classList.remove('has-crest');
-  }
+function selectManFrom(club){
+  manFromClub=club;
+  var input=document.getElementById('manFromInput'),crest=document.getElementById('manFromCrest'),wrap=document.getElementById('manFromClubWrap');
+  if(club){input.value=club.name+' ('+club.stadium+')';crest.src=getCrestUrl(club.name);crest.style.display='block';wrap.classList.add('has-crest')}
+  else{crest.style.display='none';wrap.classList.remove('has-crest')}
   updateButtons();
 }
-
-function selectManTo(club) {
-  manToClub = club;
-  var input = document.getElementById('manToInput');
-  var crest = document.getElementById('manToCrest');
-  var wrap = document.getElementById('manToClubWrap');
-
-  if (club) {
-    input.value = club.name + ' (' + club.stadium + ')';
-    crest.src = getCrestUrl(club.name);
-    crest.style.display = 'block';
-    wrap.classList.add('has-crest');
-  } else {
-    crest.style.display = 'none';
-    wrap.classList.remove('has-crest');
-  }
+function selectManTo(club){
+  manToClub=club;
+  var input=document.getElementById('manToInput'),crest=document.getElementById('manToCrest'),wrap=document.getElementById('manToClubWrap');
+  if(club){input.value=club.name+' ('+club.stadium+')';crest.src=getCrestUrl(club.name);crest.style.display='block';wrap.classList.add('has-crest')}
+  else{crest.style.display='none';wrap.classList.remove('has-crest')}
   updateButtons();
 }
 
 // ── Fixture lookup ──
-function fetchNextFixture(club) {
-  var area = document.getElementById('fixFixtureArea');
-  area.innerHTML = '<div class="tp__loading"><div class="tp__spinner"></div>Finding next fixture…</div>';
-
-  if (!club.optaID) {
-    area.innerHTML = '<div class="tp__error">No Opta ID for this club — try manual mode.</div>';
-    return;
-  }
-
-  // Fetch matches from all three competitions to find the next fixture
-  var now = new Date();
-  var promises = COMP_IDS.map(function(compID) {
-    var url = NLS_BASE + '/matches/?seasonID=' + SEASON_ID + '&competitionID=' + compID + '&sort=kickOffDateUTC&page.size=100&page.number=1';
-    return fetch(url).then(function(r) { return r.json(); }).catch(function() { return { data: [] }; });
+function fetchNextFixture(club){
+  var area=document.getElementById('fixFixtureArea');
+  area.innerHTML='<div class="tp__loading"><div class="tp__spinner"></div>Finding next fixture…</div>';
+  if(!club.optaID){area.innerHTML='<div class="tp__error">No Opta ID for this club — try manual mode.</div>';return}
+  var promises=COMP_IDS.map(function(compID){
+    return fetch(NLS_BASE+'/matches/?seasonID='+SEASON_ID+'&competitionID='+compID+'&sort=kickOffDateUTC&page.size=100&page.number=1').then(function(r){return r.json()}).catch(function(){return{data:[]}});
   });
-
-  Promise.all(promises).then(function(results) {
-    var allMatches = [];
-    results.forEach(function(r) {
-      if (r.data) allMatches = allMatches.concat(r.data);
-    });
-
-    // Find next upcoming match for this club
-    var teamID = club.optaID;
-    var upcoming = allMatches.filter(function(m) {
-      var a = m.attributes;
-      var period = (a.matchPeriod || '').toLowerCase();
-      var isUpcoming = period === 'prematch' || period === '' || period === 'fixture';
-      var involvesClub = (a.homeTeam && a.homeTeam.teamID === teamID) ||
-                         (a.awayTeam && a.awayTeam.teamID === teamID);
-      return isUpcoming && involvesClub;
-    }).sort(function(a, b) {
-      var da = normaliseDate(a.attributes.kickOffDateUTC);
-      var db = normaliseDate(b.attributes.kickOffDateUTC);
-      return new Date(da) - new Date(db);
-    });
-
-    if (upcoming.length === 0) {
-      area.innerHTML = '<div class="tp__error">No upcoming fixtures found for ' + club.name + '.</div>';
-      fixNextMatch = null;
-      updateButtons();
-      return;
-    }
-
-    var match = upcoming[0];
-    fixNextMatch = match;
-    var a = match.attributes;
-    var isHome = a.homeTeam && a.homeTeam.teamID === teamID;
-    var opponent = isHome ? a.awayTeam : a.homeTeam;
-    var venue = isHome ? 'Home' : 'Away';
-    var ko = new Date(normaliseDate(a.kickOffDateUTC));
-    var koStr = formatDate(ko) + ' — ' + formatTime(ko);
-
-    // Find opponent club for stadium info
-    var oppClub = clubs.find(function(c) { return c.optaID === opponent.teamID; });
-
-    area.innerHTML = '<div class="tp__fixture">' +
-      '<img class="tp__fixture-crest" src="' + getCrestUrl(opponent.name || (oppClub ? oppClub.name : '')) + '" alt="" onerror="this.onerror=null;this.src=\'' + FALLBACK_CREST + '\'">' +
-      '<div class="tp__fixture-info">' +
-        '<div class="tp__fixture-teams">' + (isHome ? club.name + ' vs ' + (opponent.name || 'TBC') : (opponent.name || 'TBC') + ' vs ' + club.name) + '</div>' +
-        '<div class="tp__fixture-meta">' + koStr + (oppClub ? ' · ' + oppClub.stadium : '') + '</div>' +
-      '</div>' +
-      '<span class="tp__fixture-badge">' + venue + '</span>' +
-    '</div>';
-
+  Promise.all(promises).then(function(results){
+    var allMatches=[];
+    results.forEach(function(r){if(r.data)allMatches=allMatches.concat(r.data)});
+    var teamID=club.optaID;
+    var upcoming=allMatches.filter(function(m){
+      var a=m.attributes;var period=(a.matchPeriod||'').toLowerCase();
+      var isUp=period==='prematch'||period===''||period==='fixture';
+      var involves=(a.homeTeam&&a.homeTeam.teamID===teamID)||(a.awayTeam&&a.awayTeam.teamID===teamID);
+      return isUp&&involves;
+    }).sort(function(a,b){return new Date(normaliseDate(a.attributes.kickOffDateUTC))-new Date(normaliseDate(b.attributes.kickOffDateUTC))});
+    if(upcoming.length===0){area.innerHTML='<div class="tp__error">No upcoming fixtures found for '+club.name+'.</div>';fixNextMatch=null;updateButtons();return}
+    var match=upcoming[0];fixNextMatch=match;
+    var a=match.attributes;var isHome=a.homeTeam&&a.homeTeam.teamID===teamID;
+    var opponent=isHome?a.awayTeam:a.homeTeam;var venue=isHome?'Home':'Away';
+    var ko=new Date(normaliseDate(a.kickOffDateUTC));var koStr=formatDate(ko)+' — '+formatTime(ko);
+    var oppClub=clubs.find(function(c){return c.optaID===opponent.teamID});
+    area.innerHTML='<div class="tp__fixture"><img class="tp__fixture-crest" src="'+getCrestUrl(opponent.name||(oppClub?oppClub.name:''))+'" alt="" onerror="this.onerror=null;this.src=\''+FALLBACK_CREST+'\'"><div class="tp__fixture-info"><div class="tp__fixture-teams">'+(isHome?club.name+' vs '+(opponent.name||'TBC'):(opponent.name||'TBC')+' vs '+club.name)+'</div><div class="tp__fixture-meta">'+koStr+(oppClub?' · '+oppClub.stadium:'')+'</div></div><span class="tp__fixture-badge">'+venue+'</span></div>';
     updateButtons();
-  }).catch(function(err) {
-    area.innerHTML = '<div class="tp__error">Failed to load fixtures. Try again.</div>';
-    console.error(err);
-  });
-}
-
-// ── Date helpers ──
-function normaliseDate(str) {
-  if (!str) return '';
-  return str.includes('T') ? str : str.replace(' ', 'T') + 'Z';
-}
-
-function formatDate(d) {
-  var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  return days[d.getDay()] + ' ' + d.getDate() + ' ' + months[d.getMonth()];
-}
-
-function formatTime(d) {
-  return pad(d.getHours()) + ':' + pad(d.getMinutes());
-}
-
-function pad(n) { return n < 10 ? '0' + n : '' + n; }
-
-// ── Mode toggle ──
-function setMode(mode) {
-  currentMode = mode;
-  document.querySelectorAll('.tp__mode-btn').forEach(function(btn) {
-    btn.classList.toggle('active', btn.getAttribute('data-mode') === mode);
-  });
-  document.getElementById('fixtureMode').style.display = mode === 'fixture' ? 'block' : 'none';
-  document.getElementById('manualMode').style.display = mode === 'manual' ? 'block' : 'none';
-  document.getElementById('resultsArea').innerHTML = '';
-}
-
-// ── Transport mode ──
-function setTransport(btn, prefix) {
-  var container = document.getElementById(prefix + 'Transport');
-  container.querySelectorAll('.tp__transport-btn').forEach(function(b) { b.classList.remove('active'); });
-  btn.classList.add('active');
-
-  // Show/hide slider (only relevant for transit in fixture mode)
-  if (prefix === 'fix') {
-    var slider = document.getElementById('fixSliderField');
-    // Slider is useful for all modes in fixture mode
-  }
-}
-
-function getTransportMode(prefix) {
-  var container = document.getElementById(prefix + 'Transport');
-  var active = container.querySelector('.tp__transport-btn.active');
-  return active ? active.getAttribute('data-mode') : 'transit';
-}
-
-// ── Button state ──
-function updateButtons() {
-  var fixBtn = document.getElementById('fixSearchBtn');
-  var manBtn = document.getElementById('manSearchBtn');
-
-  var fixOrigin = document.getElementById('fixOriginInput').value.trim();
-  fixBtn.disabled = !(fixOrigin.length >= 3 && fixSelectedClub && fixNextMatch && directionsService);
-
-  var manFrom = document.getElementById('manFromInput').value.trim();
-  var manTo = document.getElementById('manToInput').value.trim();
-  manBtn.disabled = !(manFrom.length >= 3 && manTo.length >= 3 && directionsService);
-}
-
-// ── Directions API calls ──
-function doFixtureSearch() {
-  if (!fixNextMatch || !fixSelectedClub) return;
-
-  var origin = document.getElementById('fixOriginInput').value.trim();
-  var a = fixNextMatch.attributes;
-  var teamID = fixSelectedClub.optaID;
-  var isHome = a.homeTeam && a.homeTeam.teamID === teamID;
-
-  // Destination: the ground we're travelling TO
-  var destClub;
-  if (isHome) {
-    destClub = fixSelectedClub;
-  } else {
-    var oppID = isHome ? a.awayTeam.teamID : a.homeTeam.teamID;
-    destClub = clubs.find(function(c) { return c.optaID === oppID; });
-  }
-
-  var destination = destClub ? destClub.stadium + ', ' + destClub.name : (a.homeTeam.name || 'stadium');
-  var travelMode = getTransportMode('fix');
-  var arriveMinsBefore = parseInt(document.getElementById('fixArriveSlider').value, 10);
-
-  // Calculate departure_time: kick-off minus arrive-before minus estimated journey (2h buffer)
-  var ko = new Date(normaliseDate(a.kickOffDateUTC));
-  var arriveBy = new Date(ko.getTime() - arriveMinsBefore * 60000);
-
-  requestDirections(origin, destination, travelMode, arriveBy, destClub ? destClub.name : null);
-}
-
-function doManualSearch() {
-  var fromInput = document.getElementById('manFromInput').value.trim();
-  var toInput = document.getElementById('manToInput').value.trim();
-  var travelMode = getTransportMode('man');
-
-  var origin = manFromClub ? manFromClub.stadium + ', ' + manFromClub.name : fromInput;
-  var destination = manToClub ? manToClub.stadium + ', ' + manToClub.name : toInput;
-  var destName = manToClub ? manToClub.name : null;
-
-  var departureTime = null;
-  var whenVal = document.getElementById('manWhenSelect').value;
-  if (whenVal === 'choose') {
-    var dt = document.getElementById('manTimeInput').value;
-    if (dt) departureTime = new Date(dt);
-  }
-
-  requestDirections(origin, destination, travelMode, departureTime, destName);
-}
-
-function requestDirections(origin, destination, travelMode, targetTime, destClubName) {
-  var results = document.getElementById('resultsArea');
-  results.innerHTML = '<div class="tp__loading"><div class="tp__spinner"></div>Finding the best route…</div>';
-
-  var gmMode = {
-    transit: google.maps.TravelMode.TRANSIT,
-    driving: google.maps.TravelMode.DRIVING,
-    walking: google.maps.TravelMode.WALKING
-  }[travelMode] || google.maps.TravelMode.TRANSIT;
-
-  var request = {
-    origin: origin,
-    destination: destination,
-    travelMode: gmMode,
-    provideRouteAlternatives: true,
-    region: 'gb',
-    unitSystem: google.maps.UnitSystem.METRIC
-  };
-
-  // For transit, use arrival_time when we have a target time
-  if (travelMode === 'transit' && targetTime) {
-    request.transitOptions = {
-      arrivalTime: targetTime
-    };
-  } else if (targetTime && travelMode !== 'transit') {
-    request.drivingOptions = {
-      departureTime: targetTime
-    };
-  }
-
-  directionsService.route(request, function(response, status) {
-    if (status === 'OK') {
-      allRoutes = response.routes;
-      activeRouteIdx = 0;
-      renderJourney(allRoutes, 0, origin, destClubName || destination);
-    } else {
-      var msg = 'Could not find a route.';
-      if (status === 'ZERO_RESULTS') msg = 'No routes found between these locations. Try adjusting your search.';
-      if (status === 'NOT_FOUND') msg = 'One of the locations could not be found. Try a postcode instead.';
-      results.innerHTML = '<div class="tp__error">' + msg + '</div>';
-    }
-  });
-}
-
-// ── Render journey ──
-function renderJourney(routes, idx, originLabel, destLabel) {
-  var results = document.getElementById('resultsArea');
-  var route = routes[idx];
-  var leg = route.legs[0]; // Single origin→destination
-
-  var html = '';
-
-  // Summary bar
-  html += '<div class="tp__summary">';
-  html += '<div class="tp__summary-route">' + abbreviate(originLabel) + '<span class="arrow">→</span>' + abbreviate(destLabel) + '</div>';
-  html += '<div class="tp__summary-duration">' + leg.duration.text + '</div>';
-  html += '</div>';
-
-  // Board
-  html += '<div class="tp__board">';
-
-  if (leg.steps) {
-    leg.steps.forEach(function(step) {
-      var mode = classifyStep(step);
-      var modeLabel = getModeLabel(step, mode);
-      var depTime = step.transit ? formatTime(new Date(step.transit.departure_time.value)) : '';
-      var arrTime = step.transit ? formatTime(new Date(step.transit.arrival_time.value)) : '';
-
-      html += '<div class="tp__leg tp__leg--' + mode + '">';
-
-      // Timeline
-      html += '<div class="tp__leg-timeline">';
-      html += '<div class="dot"></div>';
-      if (depTime) html += '<div class="tp__leg-time">' + depTime + '</div>';
-      html += '<div class="line"></div>';
-      if (arrTime) html += '<div class="tp__leg-time-end">' + arrTime + '</div>';
-      html += '</div>';
-
-      // Detail
-      html += '<div class="tp__leg-detail">';
-      html += '<div class="tp__leg-mode">' + modeLabel + '</div>';
-
-      if (step.transit) {
-        var t = step.transit;
-        html += '<div class="tp__leg-route">' + (t.line.short_name || t.line.name || '') + ' to ' + t.arrival_stop.name + '</div>';
-        html += '<div class="tp__leg-stops">' + t.departure_stop.name + ' → ' + t.arrival_stop.name;
-        if (t.num_stops) html += ' · ' + t.num_stops + ' stops';
-        html += '</div>';
-      } else {
-        // Walking / driving
-        html += '<div class="tp__leg-route">' + stripHtml(step.instructions) + '</div>';
-        html += '<div class="tp__leg-stops">' + step.distance.text + '</div>';
-      }
-
-      html += '<div class="tp__leg-duration">' + step.duration.text + '</div>';
-      html += '</div>'; // detail
-
-      html += '</div>'; // leg
-    });
-  }
-
-  // Alternatives
-  if (routes.length > 1) {
-    html += '<div class="tp__alts">';
-    routes.forEach(function(r, i) {
-      var rLeg = r.legs[0];
-      var depText = rLeg.departure_time ? formatTime(new Date(rLeg.departure_time.value)) : ('Option ' + (i + 1));
-      html += '<div class="tp__alt-chip' + (i === idx ? ' active' : '') + '" onclick="switchRoute(' + i + ',\'' + escHtml(originLabel) + '\',\'' + escHtml(destLabel) + '\')">';
-      html += depText;
-      html += '<span class="dur">' + rLeg.duration.text + '</span>';
-      html += '</div>';
-    });
-    html += '</div>';
-  }
-
-  // Depart/arrive summary
-  var departTime = leg.departure_time ? formatTime(new Date(leg.departure_time.value)) : '';
-  var arriveTime = leg.arrival_time ? formatTime(new Date(leg.arrival_time.value)) : '';
-  if (departTime && arriveTime) {
-    html += '<div style="padding:12px 22px;font-size:var(--text-xs);color:var(--text-muted);background:var(--off-white);border-top:1px solid var(--border);">';
-    html += 'Depart <strong>' + departTime + '</strong> · Arrive <strong>' + arriveTime + '</strong> · ' + leg.distance.text;
-    html += '</div>';
-  }
-
-  html += '</div>'; // board
-
-  results.innerHTML = html;
-}
-
-function switchRoute(idx, origin, dest) {
-  activeRouteIdx = idx;
-  renderJourney(allRoutes, idx, origin, dest);
+  }).catch(function(err){area.innerHTML='<div class="tp__error">Failed to load fixtures.</div>';console.error(err)});
 }
 
 // ── Helpers ──
-function classifyStep(step) {
-  if (step.travel_mode === 'WALKING') return 'WALKING';
-  if (step.travel_mode === 'DRIVING') return 'DRIVING';
-  if (step.transit) {
-    var vType = step.transit.line.vehicle.type;
-    return vType || 'RAIL';
-  }
-  return 'WALKING';
+function normaliseDate(s){if(!s)return'';return s.includes('T')?s:s.replace(' ','T')+'Z'}
+function formatDate(d){var days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];var months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return days[d.getDay()]+' '+d.getDate()+' '+months[d.getMonth()]}
+function formatTime(d){return pad(d.getHours())+':'+pad(d.getMinutes())}
+function pad(n){return n<10?'0'+n:''+n}
+function formatDuration(s){var sec=parseInt(s,10);if(isNaN(sec))return s;var h=Math.floor(sec/3600);var m=Math.floor((sec%3600)/60);return h>0?h+'h '+m+'min':m+' min'}
+function formatDistance(m){return m>=1000?(m/1000).toFixed(1)+' km':m+' m'}
+
+// ── Mode/transport ──
+function setMode(mode){
+  currentMode=mode;
+  document.querySelectorAll('.tp__mode-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-mode')===mode)});
+  document.getElementById('fixtureMode').style.display=mode==='fixture'?'block':'none';
+  document.getElementById('manualMode').style.display=mode==='manual'?'block':'none';
+  document.getElementById('resultsArea').innerHTML='';
+}
+function setTransport(btn,prefix){
+  document.getElementById(prefix+'Transport').querySelectorAll('.tp__transport-btn').forEach(function(b){b.classList.remove('active')});
+  btn.classList.add('active');
+}
+function getTransportMode(prefix){
+  var active=document.getElementById(prefix+'Transport').querySelector('.tp__transport-btn.active');
+  return active?active.getAttribute('data-mode'):'TRANSIT';
+}
+function updateButtons(){
+  document.getElementById('fixSearchBtn').disabled=!(document.getElementById('fixOriginInput').value.trim().length>=3&&fixSelectedClub&&fixNextMatch&&gmapsReady);
+  document.getElementById('manSearchBtn').disabled=!(document.getElementById('manFromInput').value.trim().length>=3&&document.getElementById('manToInput').value.trim().length>=3&&gmapsReady);
 }
 
-function getModeLabel(step, mode) {
-  var labels = {
-    WALKING: '🚶 Walk',
-    DRIVING: '🚗 Drive',
-    BUS: '🚌 Bus',
-    INTERCITY_BUS: '🚌 Coach',
-    RAIL: '🚆 Train',
-    HEAVY_RAIL: '🚆 Train',
-    COMMUTER_TRAIN: '🚆 Train',
-    HIGH_SPEED_TRAIN: '🚄 Train',
-    LONG_DISTANCE_TRAIN: '🚆 Train',
-    SUBWAY: '🚇 Underground',
-    METRO_RAIL: '🚇 Metro',
-    TRAM: '🚊 Tram',
-    LIGHT_RAIL: '🚊 Light rail',
-    FERRY: '⛴ Ferry'
+// ── Route requests ──
+function doFixtureSearch(){
+  if(!fixNextMatch||!fixSelectedClub)return;
+  var origin=document.getElementById('fixOriginInput').value.trim();
+  var a=fixNextMatch.attributes;var teamID=fixSelectedClub.optaID;
+  var isHome=a.homeTeam&&a.homeTeam.teamID===teamID;
+  var destClub=isHome?fixSelectedClub:clubs.find(function(c){return c.optaID===(isHome?a.awayTeam.teamID:a.homeTeam.teamID)});
+  var destination=destClub?(destClub.postcode?destClub.stadium+', '+destClub.postcode:destClub.stadium+', '+destClub.name):(a.homeTeam.name||'stadium');
+  var travelMode=getTransportMode('fix');
+  var arriveMinsBefore=parseInt(document.getElementById('fixArriveSlider').value,10);
+  var ko=new Date(normaliseDate(a.kickOffDateUTC));
+  var arriveBy=new Date(ko.getTime()-arriveMinsBefore*60000);
+  requestRoute(origin,destination,travelMode,arriveBy,destClub?destClub.name:null);
+}
+
+function doManualSearch(){
+  var fromInput=document.getElementById('manFromInput').value.trim();
+  var toInput=document.getElementById('manToInput').value.trim();
+  var travelMode=getTransportMode('man');
+  var origin=manFromClub?(manFromClub.postcode?manFromClub.stadium+', '+manFromClub.postcode:manFromClub.stadium+', '+manFromClub.name):fromInput;
+  var destination=manToClub?(manToClub.postcode?manToClub.stadium+', '+manToClub.postcode:manToClub.stadium+', '+manToClub.name):toInput;
+  var departureTime=null;
+  if(document.getElementById('manWhenSelect').value==='choose'){var dt=document.getElementById('manTimeInput').value;if(dt)departureTime=new Date(dt)}
+  else departureTime=new Date();
+  requestRoute(origin,destination,travelMode,departureTime,manToClub?manToClub.name:null);
+}
+
+async function requestRoute(origin,destination,travelMode,targetTime,destClubName){
+  var results=document.getElementById('resultsArea');
+  results.innerHTML='<div class="tp__loading"><div class="tp__spinner"></div>Finding the best route…</div>';
+  if(!RouteClass){results.innerHTML='<div class="tp__error">Google Routes library not loaded. Ensure Routes API is enabled.</div>';return}
+
+  var request={
+    origin:origin,
+    destination:destination,
+    travelMode:travelMode,
+    computeAlternativeRoutes:true,
+    languageCode:'en-GB',
+    units:google.maps.UnitSystem.METRIC,
+    fields:['legs','localizedValues','travelAdvisory']
   };
-  return labels[mode] || mode;
+
+  if(travelMode==='TRANSIT'){
+    request.departureTime=targetTime||new Date();
+    request.transitPreference={routingPreference:'FEWER_TRANSFERS'};
+  }else if(targetTime){
+    request.departureTime=targetTime;
+  }
+
+  try{
+    var response=await RouteClass.computeRoutes(request);
+    var routes=response.routes||[];
+    if(!routes||routes.length===0){results.innerHTML='<div class="tp__error">No routes found. Try a different origin or destination.</div>';return}
+    allRoutes=routes;activeRouteIdx=0;
+    renderJourney(routes,0,origin,destClubName||destination);
+  }catch(err){
+    console.error('Route failed:',err);
+    results.innerHTML='<div class="tp__error">Could not find a route. '+(err.message||'')+'</div>';
+  }
 }
 
-function stripHtml(html) {
-  var tmp = document.createElement('div');
-  tmp.innerHTML = html || '';
-  return tmp.textContent || tmp.innerText || '';
+// ── Render ──
+function renderJourney(routes,idx,originLabel,destLabel){
+  var results=document.getElementById('resultsArea');
+  var route=routes[idx];var leg=route.legs[0];
+  var durText='';
+  if(route.localizedValues&&route.localizedValues.duration)durText=route.localizedValues.duration.text||'';
+  else if(leg.localizedValues&&leg.localizedValues.duration)durText=leg.localizedValues.duration.text||'';
+  else if(route.duration)durText=formatDuration(String(route.duration).replace('s',''));
+
+  var html='<div class="tp__summary"><div class="tp__summary-route">'+abbreviate(originLabel)+'<span class="arrow">→</span>'+abbreviate(destLabel)+'</div><div class="tp__summary-duration">'+durText+'</div></div>';
+  html+='<div class="tp__board">';
+
+  if(leg.steps&&leg.steps.length>0){
+    leg.steps.forEach(function(step){
+      var mode=classifyStep(step);var modeLabel=getModeLabel(mode);
+      var depTime='',arrTime='',routeDesc='',stopsDesc='',durT='',distT='';
+
+      if(step.transitDetails){
+        var td=step.transitDetails;var sd=td.stopDetails||{};
+        if(sd.departureTime)depTime=fmtISO(sd.departureTime);
+        if(sd.arrivalTime)arrTime=fmtISO(sd.arrivalTime);
+        var line=td.transitLine||{};
+        var lName=line.nameShort||line.name||'';
+        var depStop=sd.departureStop?sd.departureStop.name:'';
+        var arrStop=sd.arrivalStop?sd.arrivalStop.name:'';
+        routeDesc=lName+(arrStop?' to '+arrStop:'');
+        stopsDesc=depStop+' → '+arrStop;
+        if(td.stopCount)stopsDesc+=' · '+td.stopCount+' stops';
+        if(line.vehicle&&line.vehicle.type){mode=line.vehicle.type;modeLabel=getModeLabel(mode)}
+      }else{
+        routeDesc=step.navigationInstruction?stripHtml(step.navigationInstruction.instructions):'';
+      }
+
+      if(step.localizedValues){
+        if(step.localizedValues.staticDuration)durT=step.localizedValues.staticDuration.text||'';
+        if(!durT&&step.localizedValues.duration)durT=step.localizedValues.duration.text||'';
+      }
+      if(step.localizedValues&&step.localizedValues.distance)distT=step.localizedValues.distance.text||'';
+      else if(step.distanceMeters)distT=formatDistance(step.distanceMeters);
+
+      html+='<div class="tp__leg tp__leg--'+mode+'">';
+      html+='<div class="tp__leg-timeline"><div class="dot"></div>';
+      if(depTime)html+='<div class="tp__leg-time">'+depTime+'</div>';
+      html+='<div class="line"></div>';
+      if(arrTime)html+='<div class="tp__leg-time-end">'+arrTime+'</div>';
+      html+='</div>';
+      html+='<div class="tp__leg-detail"><div class="tp__leg-mode">'+modeLabel+'</div>';
+      if(routeDesc)html+='<div class="tp__leg-route">'+routeDesc+'</div>';
+      if(stopsDesc)html+='<div class="tp__leg-stops">'+stopsDesc+'</div>';
+      if(distT&&!stopsDesc)html+='<div class="tp__leg-stops">'+distT+'</div>';
+      if(durT)html+='<div class="tp__leg-duration">'+durT+'</div>';
+      html+='</div></div>';
+    });
+  }
+
+  if(routes.length>1){
+    html+='<div class="tp__alts">';
+    routes.forEach(function(r,i){
+      var rDur='';if(r.localizedValues&&r.localizedValues.duration)rDur=r.localizedValues.duration.text||'';
+      var chipLabel='Route '+(i+1);
+      if(r.legs&&r.legs[0]&&r.legs[0].steps){
+        for(var s=0;s<r.legs[0].steps.length;s++){
+          var st=r.legs[0].steps[s];
+          if(st.transitDetails&&st.transitDetails.stopDetails&&st.transitDetails.stopDetails.departureTime){
+            chipLabel=fmtISO(st.transitDetails.stopDetails.departureTime);break;
+          }
+        }
+      }
+      html+='<div class="tp__alt-chip'+(i===idx?' active':'')+'" onclick="switchRoute('+i+',\''+escHtml(originLabel)+'\',\''+escHtml(destLabel)+'\')">'+chipLabel;
+      if(rDur)html+='<span class="dur">'+rDur+'</span>';
+      html+='</div>';
+    });
+    html+='</div>';
+  }
+  html+='</div>';
+  results.innerHTML=html;
 }
 
-function abbreviate(str) {
-  if (!str) return '';
-  // Shorten long addresses for the summary bar
-  if (str.length > 30) return str.substring(0, 28) + '…';
-  return str;
-}
+function switchRoute(idx,o,d){activeRouteIdx=idx;renderJourney(allRoutes,idx,o,d)}
 
-function escHtml(str) {
-  return (str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+// ── Step helpers ──
+function fmtISO(v){
+  if(!v)return'';
+  if(typeof v==='string'){var d=new Date(v);return isNaN(d)?v:formatTime(d)}
+  if(v.text)return v.text;
+  if(v instanceof Date)return formatTime(v);
+  return'';
 }
+function classifyStep(s){
+  if(s.travelMode==='WALK'||s.travelMode==='WALKING')return'WALKING';
+  if(s.travelMode==='DRIVE'||s.travelMode==='DRIVING')return'DRIVING';
+  if(s.transitDetails){var l=s.transitDetails.transitLine||{};if(l.vehicle&&l.vehicle.type)return l.vehicle.type;return'RAIL'}
+  return'WALKING';
+}
+function getModeLabel(m){
+  var L={WALKING:'🚶 Walk',WALK:'🚶 Walk',DRIVING:'🚗 Drive',DRIVE:'🚗 Drive',BUS:'🚌 Bus',INTERCITY_BUS:'🚌 Coach',RAIL:'🚆 Train',HEAVY_RAIL:'🚆 Train',COMMUTER_TRAIN:'🚆 Train',HIGH_SPEED_TRAIN:'🚄 Train',LONG_DISTANCE_TRAIN:'🚆 Train',SUBWAY:'🚇 Underground',METRO_RAIL:'🚇 Metro',TRAM:'🚊 Tram',LIGHT_RAIL:'🚊 Light rail',FERRY:'⛴ Ferry'};
+  return L[m]||m;
+}
+function stripHtml(h){if(!h)return'';var t=document.createElement('div');t.innerHTML=h;return t.textContent||t.innerText||''}
+function abbreviate(s){if(!s)return'';return s.length>30?s.substring(0,28)+'…':s}
+function escHtml(s){return(s||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}
 
-// ── Input listeners ──
-function wireInputListeners() {
-  document.getElementById('fixOriginInput').addEventListener('input', updateButtons);
-  document.getElementById('manFromInput').addEventListener('input', function() {
-    if (manFromClub) { manFromClub = null; document.getElementById('manFromCrest').style.display = 'none'; document.getElementById('manFromClubWrap').classList.remove('has-crest'); }
+// ── Wiring ──
+function wireInputListeners(){
+  document.getElementById('fixOriginInput').addEventListener('input',updateButtons);
+  document.getElementById('manFromInput').addEventListener('input',function(){
+    if(manFromClub){manFromClub=null;document.getElementById('manFromCrest').style.display='none';document.getElementById('manFromClubWrap').classList.remove('has-crest')}
     updateButtons();
   });
-  document.getElementById('manToInput').addEventListener('input', function() {
-    if (manToClub) { manToClub = null; document.getElementById('manToCrest').style.display = 'none'; document.getElementById('manToClubWrap').classList.remove('has-crest'); }
+  document.getElementById('manToInput').addEventListener('input',function(){
+    if(manToClub){manToClub=null;document.getElementById('manToCrest').style.display='none';document.getElementById('manToClubWrap').classList.remove('has-crest')}
     updateButtons();
   });
 }
 
-// ── Auth callback ──
-window.nlAuthReady = function(session) {
-  document.getElementById('pageWrap').style.display = 'block';
-
-  loadClubs();
-  loadGoogleMaps();
-  wireInputListeners();
-
-  // Setup club autocompletes after a short delay (clubs need to load)
-  setTimeout(function() {
-    setupClubAC('fixClubInput', 'fixClubAC', 'fixClubWrap', 'fixClubCrest', selectFixClub);
-    setupClubAC('manFromInput', 'manFromAC', 'manFromClubWrap', 'manFromCrest', selectManFrom);
-    setupClubAC('manToInput', 'manToAC', 'manToClubWrap', 'manToCrest', selectManTo);
-  }, 1500);
+window.nlAuthReady=function(session){
+  document.getElementById('pageWrap').style.display='block';
+  loadClubs();initGoogleMaps();wireInputListeners();
+  setTimeout(function(){
+    setupClubAC('fixClubInput','fixClubAC','fixClubWrap','fixClubCrest',selectFixClub);
+    setupClubAC('manFromInput','manFromAC','manFromClubWrap','manFromCrest',selectManFrom);
+    setupClubAC('manToInput','manToAC','manToClubWrap','manToCrest',selectManTo);
+  },1500);
 };
 </script>
-
 </body>
 </html>
