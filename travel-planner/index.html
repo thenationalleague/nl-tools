@@ -5,16 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Travel Planner — NL Tools</title>
 <!--
-  NL Travel Planner v24.0
+  NL Travel Planner v25.0
   Changelog:
-  v24.0| 01/05/2026 | Usability improvements:
-       |            | - Fare info shown in summary when available from API.
-       |            | - Walk descriptions contextual: "Walk to Rochdale Station".
-       |            | - Map markers at all boarding/alighting stops + origin/destination.
-       |            | - Transit stop markers coloured to match their line.
-  v23.0| 01/05/2026 | Depart/Arrive labels with emoji, departure+arrival times.
-  v22.0| 01/05/2026 | TO: latest first, FROM: earliest first.
-  v21.0| 01/05/2026 | Custom fixture builder, overnight detection.
+  v25.0| 01/05/2026 | UX improvements:
+       |            | - Emoji back in transit pills (🚆 Northern, 🚇 Metro).
+       |            | - SUBWAY mapped to "Metro" (more universal than "Tube").
+       |            | - Dedup keeps routes with different transport modes at same time.
+       |            | - Route chips show mode emojis (09:15 🚆🚇).
+       |            | - Transport mode toggles removed (weren't working).
+  v24.0| 01/05/2026 | Fare info, contextual walks, map markers.
+  v23.0| 01/05/2026 | Depart/Arrive labels, departure+arrival times.
+  v22.0| 01/05/2026 | Sort order: TO latest first, FROM earliest first.
 -->
 <link rel="stylesheet" href="/tools/system/nl-brand.css">
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -24,7 +25,7 @@
 <script>
   window.NL_TOOL={title:'Travel Planner',toolKey:'staff-travel'};
   var NL_TOOL_KEY='staff-travel';
-  window.NL_CHANGELOG=[{date:'01/05/2026',version:'v24.0',items:['Fare info in summary when available.','Contextual walk descriptions.','Map markers at transit stops.']}];
+  window.NL_CHANGELOG=[{date:'01/05/2026',version:'v25.0',items:['Emoji in transit pills.','Metro instead of Tube for SUBWAY.','Dedup keeps different mode combos.','Mode emojis in route chips.','Transport toggles removed.']}];
 </script>
 <script src="/tools/system/nl-utils.js"></script>
 <script src="/tools/system/nl-topbar.js"></script>
@@ -219,17 +220,6 @@
           <div class="tp__slider-note" id="postNote"></div>
         </div>
 
-        <div class="tp__field">
-          <label class="tp__label">Transit modes</label>
-          <div class="tp__transit-toggles" id="transitToggles">
-            <button class="tp__tt on" data-t="TRAIN" onclick="togTT(this)">🚆 Train</button>
-            <button class="tp__tt on" data-t="LIGHT_RAIL" onclick="togTT(this)">🚊 Tram</button>
-            <button class="tp__tt on" data-t="SUBWAY" onclick="togTT(this)">🚇 Tube</button>
-            <button class="tp__tt" data-t="BUS" onclick="togTT(this)">🚌 Bus</button>
-            <button class="tp__tt" data-t="RAIL" onclick="togTT(this)">🚌 Coach</button>
-          </div>
-        </div>
-
         <button class="btn btn--primary" style="width:100%;" id="fixBtn" onclick="doFixSearch()">Find journey</button>
       </div>
     </div>
@@ -279,16 +269,6 @@
         </div>
         <div class="tp__slider-note" id="manPostNote"></div>
       </div>
-      <div class="tp__field">
-        <label class="tp__label">Transit modes</label>
-        <div class="tp__transit-toggles" id="manTransitToggles">
-          <button class="tp__tt on" data-t="TRAIN" onclick="togManTT(this)">🚆 Train</button>
-          <button class="tp__tt on" data-t="LIGHT_RAIL" onclick="togManTT(this)">🚊 Tram</button>
-          <button class="tp__tt on" data-t="SUBWAY" onclick="togManTT(this)">🚇 Tube</button>
-          <button class="tp__tt" data-t="BUS" onclick="togManTT(this)">🚌 Bus</button>
-          <button class="tp__tt" data-t="RAIL" onclick="togManTT(this)">🚌 Coach</button>
-        </div>
-      </div>
       <button class="btn btn--primary" style="width:100%;margin-top:6px;" id="manBtn" onclick="doManSearch()">Find journey</button>
     </div>
   </div>
@@ -316,8 +296,9 @@ async function initMap(){try{await google.maps.importLibrary('maps');await googl
 function loadClubs(){fetch(CMU).then(function(r){return r.json()}).then(function(d){clubs=(d.clubs||[]).map(function(c){return{name:c.name||'',code:c.code||'',short:c.short||'',stadium:c.stadium||'',division:c.division||'',optaID:c.optaID||'',postcode:c.postcode||'',colors:c.colors||{}}}).sort(function(a,b){return a.name.localeCompare(b.name)})}).catch(function(){})}
 function cU(n){return CB+encodeURIComponent(n)+'.png'}
 function addr(c){
-  // All clubs have postcodes — use postcode for reliable geocoding
-  return c.postcode||c.stadium+', '+(c.short||c.name)+', UK';
+  // Stadium name + postcode gives Google the best chance of hitting the ground
+  if(c.postcode)return c.stadium+', '+c.postcode+', UK';
+  return c.stadium+', '+(c.short||c.name)+', UK';
 }
 function stationAddr(c){
   // Use "[town] railway station" — Google geocodes this well for UK stations
@@ -346,7 +327,7 @@ function setPreset(p){
   // Re-query if we have a search already
   if(fixMatch&&fixClub)doFixSearch();
 }
-function togTT(btn){btn.classList.toggle('on');if(fixMatch&&fixClub)doFixSearch()}
+function getEnabledModes(){return[]}  // No filter — let Google decide
 function updatePresetLabels(){
   if(!fixClub)return;
   var btns=document.querySelectorAll('#fixPresets .tp__preset');
@@ -408,8 +389,7 @@ function updateManPresetLabels(){
     else if(p==='station')b.textContent='🚉 '+(club.short||club.name)+' Station';
   });
 }
-function togManTT(btn){btn.classList.toggle('on')}
-function getManModes(){var m=[];document.querySelectorAll('#manTransitToggles .tp__tt.on').forEach(function(b){m.push(b.getAttribute('data-t'))});return m}
+function getManModes(){return[]}  // No filter
 
 // ── REST API ──
 var FM='routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.legs.duration,routes.legs.startLocation,routes.legs.endLocation,routes.legs.localizedValues,routes.legs.steps.travelMode,routes.legs.steps.staticDuration,routes.legs.steps.polyline.encodedPolyline,routes.legs.steps.startLocation,routes.legs.steps.endLocation,routes.legs.steps.navigationInstruction,routes.legs.steps.localizedValues,routes.legs.steps.transitDetails.stopDetails,routes.legs.steps.transitDetails.transitLine,routes.legs.steps.transitDetails.headsign,routes.legs.steps.transitDetails.stopCount,routes.legs.steps.transitDetails.localizedValues';
@@ -554,23 +534,46 @@ function dedupeRoutes(routes,isToMode){
     if(!r.duration)return 99999;
     return parseInt(String(r.duration).replace('s',''),10)||99999;
   }
+  // Build a mode signature: sorted list of vehicle types used in transit legs
+  function modeSig(r){
+    if(!r.legs||!r.legs[0]||!r.legs[0].steps)return'';
+    var modes=[];
+    r.legs[0].steps.forEach(function(s){
+      if(s.transitDetails&&s.transitDetails.transitLine&&s.transitDetails.transitLine.vehicle){
+        var t=s.transitDetails.transitLine.vehicle.type;
+        if(modes.indexOf(t)===-1)modes.push(t);
+      }
+    });
+    return modes.sort().join('+');
+  }
   var groups={};
   routes.forEach(function(r){
     var dep=firstDepTime(r);
-    var key=dep?dep.substring(0,16):'no-transit';
+    var key=(dep?dep.substring(0,16):'no-transit')+'|'+modeSig(r);
     if(!groups[key]||durSec(r)<durSec(groups[key])){
       groups[key]=r;
     }
   });
   var unique=Object.keys(groups).map(function(k){return groups[k]});
   if(isToMode){
-    // TO mode: latest departure first (leave as late as possible)
     unique.sort(function(a,b){return(firstDepTime(b)||'').localeCompare(firstDepTime(a)||'')});
   }else{
-    // FROM mode: earliest departure first (leave as soon as possible)
     unique.sort(function(a,b){return(firstDepTime(a)||'').localeCompare(firstDepTime(b)||'')});
   }
   return unique.slice(0,4);
+}
+
+// Get transit mode emojis for a route (for chips)
+function routeModeEmojis(r){
+  if(!r.legs||!r.legs[0]||!r.legs[0].steps)return'';
+  var seen={},emojis=[];
+  r.legs[0].steps.forEach(function(s){
+    if(s.transitDetails&&s.transitDetails.transitLine&&s.transitDetails.transitLine.vehicle){
+      var t=s.transitDetails.transitLine.vehicle.type;
+      if(!seen[t]){seen[t]=true;emojis.push(vEmoji(t))}
+    }
+  });
+  return emojis.join('');
 }
 
 // ── Consolidate walks ──
@@ -650,7 +653,8 @@ function render(routes,idx,oL,dL){
     routes.forEach(function(rt,i){
       var rd=rt.duration?fmtDur(rt.duration):'',chip='Route '+(i+1);
       if(rt.legs&&rt.legs[0]&&rt.legs[0].steps){for(var j=0;j<rt.legs[0].steps.length;j++){var st=rt.legs[0].steps[j];if(st.transitDetails&&st.transitDetails.stopDetails&&st.transitDetails.stopDetails.departureTime){chip=fI(st.transitDetails.stopDetails.departureTime);break}}}
-      h+='<div class="tp__alt-chip'+(i===idx?' active':'')+'" onclick="sw('+i+',\''+esc(oL)+'\',\''+esc(dL)+'\')">'+chip+(rd?'<span class="dur">'+rd+'</span>':'')+'</div>';
+      var mEmoji=routeModeEmojis(rt);
+      h+='<div class="tp__alt-chip'+(i===idx?' active':'')+'" onclick="sw('+i+',\''+esc(oL)+'\',\''+esc(dL)+'\')">'+chip+(mEmoji?' '+mEmoji:'')+(rd?'<span class="dur">'+rd+'</span>':'')+'</div>';
     });
     h+='</div>';
   }
@@ -707,8 +711,10 @@ function render(routes,idx,oL,dL){
       if(ln.textColor)lineTxt=ln.textColor;
       if(s.localizedValues&&s.localizedValues.staticDuration)durT=s.localizedValues.staticDuration.text;
 
-      // Pill = line name (e.g. "Elizabeth line", "Thameslink")
-      pillLabel=lnName||vL(ln.vehicle?ln.vehicle.type:'RAIL');
+      // Pill = emoji + line name (e.g. "🚆 Northern", "🚇 Metro")
+      var vtype=ln.vehicle?ln.vehicle.type:'RAIL';
+      var emoji=vEmoji(vtype);
+      pillLabel=lnName?(emoji+' '+lnName):vL(vtype);
 
       // Main text = boarding → alighting (your stops)
       mainText=(ds.name||'')+(as.name?' → '+as.name:'');
@@ -825,7 +831,8 @@ function fI(v){if(!v)return'';var d=new Date(v);return isNaN(d)?String(v):ft(d)}
 function sClass(s){if(s._w||s.travelMode==='WALK')return'walk';if(s.travelMode==='DRIVE')return'drive';if(s.transitDetails){var l=s.transitDetails.transitLine||{};if(l.vehicle)return vC(l.vehicle.type);return'train'}return'walk'}
 function sLabel(s){if(s._w||s.travelMode==='WALK')return'🚶 Walk';if(s.travelMode==='DRIVE')return'🚗 Drive';if(s.transitDetails){var l=s.transitDetails.transitLine||{};if(l.vehicle)return vL(l.vehicle.type);return'🚆 Transit'}return'🚶 Walk'}
 function vC(t){return{BUS:'bus',INTERCITY_BUS:'bus',RAIL:'train',HEAVY_RAIL:'train',COMMUTER_TRAIN:'train',HIGH_SPEED_TRAIN:'train',LONG_DISTANCE_TRAIN:'train',SUBWAY:'subway',METRO_RAIL:'subway',TRAM:'tram',LIGHT_RAIL:'tram',FERRY:'train'}[t]||'train'}
-function vL(t){return{BUS:'🚌 Bus',INTERCITY_BUS:'🚌 Coach',RAIL:'🚆 Train',HEAVY_RAIL:'🚆 Train',COMMUTER_TRAIN:'🚆 Train',HIGH_SPEED_TRAIN:'🚄 Train',LONG_DISTANCE_TRAIN:'🚆 Train',SUBWAY:'🚇 Tube',METRO_RAIL:'🚇 Metro',TRAM:'🚊 Tram',LIGHT_RAIL:'🚊 Tram',FERRY:'⛴ Ferry'}[t]||'🚆 Transit'}
+function vL(t){return{BUS:'🚌 Bus',INTERCITY_BUS:'🚌 Coach',RAIL:'🚆 Train',HEAVY_RAIL:'🚆 Train',COMMUTER_TRAIN:'🚆 Train',HIGH_SPEED_TRAIN:'🚄 Train',LONG_DISTANCE_TRAIN:'🚆 Train',SUBWAY:'🚇 Metro',METRO_RAIL:'🚇 Metro',TRAM:'🚊 Tram',LIGHT_RAIL:'🚊 Tram',FERRY:'⛴ Ferry'}[t]||'🚆 Transit'}
+function vEmoji(t){return{BUS:'🚌',INTERCITY_BUS:'🚌',RAIL:'🚆',HEAVY_RAIL:'🚆',COMMUTER_TRAIN:'🚆',HIGH_SPEED_TRAIN:'🚄',LONG_DISTANCE_TRAIN:'🚆',SUBWAY:'🚇',METRO_RAIL:'🚇',TRAM:'🚊',LIGHT_RAIL:'🚊',FERRY:'⛴'}[t]||'🚆'}
 function abbr(s){return s&&s.length>28?s.substring(0,26)+'…':s||''}
 function esc(s){return(s||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}
 
