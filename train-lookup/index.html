@@ -891,11 +891,14 @@ function findJourneyFromTime(fromCRS, toCRS, earliestDepartMins, maxChanges) {
   maxChanges = maxChanges || 4;
   var MIN_CONNECTION = 8;
 
-  // best[station] = { arriveMins, path, changes }
+  // best[station] = { arriveMins } — for INTERMEDIATE stations only
   var best = {};
-  best[fromCRS] = { arriveMins: earliestDepartMins, path: [], changes: -1 };
+  best[fromCRS] = { arriveMins: earliestDepartMins };
 
-  // Priority queue (simple array, sorted each iteration — fine for ~30 nodes)
+  // Collect multiple destination arrivals
+  var foundJourneys = [];
+  var foundKeys = {};
+
   var queue = [{ station: fromCRS, arriveMins: earliestDepartMins, path: [], changes: -1, visited: {} }];
   queue[0].visited[fromCRS] = true;
 
@@ -904,26 +907,23 @@ function findJourneyFromTime(fromCRS, toCRS, earliestDepartMins, maxChanges) {
 
   while (queue.length > 0 && iterations < MAX_ITER) {
     iterations++;
-    // Pop lowest arriveMins
     queue.sort(function(a,b) { return a.arriveMins - b.arriveMins; });
     var node = queue.shift();
 
-    // Early exit if we already have a better route to destination
+    // Check if we reached the destination
     if (resolveAlias(node.station) === resolveAlias(toCRS) || node.station === toCRS) {
-      var totalMins = node.arriveMins - earliestDepartMins;
-      if (node.path.length === 0) continue; // zero-length
+      if (node.path.length === 0) continue;
       var firstTrain = node.path.find(function(s) { return s.type === 'train'; });
       if (!firstTrain) continue;
-      totalMins = node.arriveMins - firstTrain.departMins;
+      var totalMins = node.arriveMins - firstTrain.departMins;
       if (totalMins < 0) totalMins += 1440;
       var journey = {
         depart: firstTrain.depart,
-        arrive: node.path[node.path.length-1].arrive || node.path[node.path.length-1].arrive,
+        arrive: node.path[node.path.length-1].arrive || '',
         totalMins: totalMins,
         changes: node.changes,
         legs: formatPath(node.path)
       };
-      // Find last train's arrive time properly
       var lastTrain = null;
       for (var li = node.path.length - 1; li >= 0; li--) {
         if (node.path[li].type === 'train') { lastTrain = node.path[li]; break; }
@@ -931,7 +931,16 @@ function findJourneyFromTime(fromCRS, toCRS, earliestDepartMins, maxChanges) {
       if (lastTrain) journey.arrive = lastTrain.arrive;
       var detail = buildDetail(node.path);
       if (detail) journey.detail = detail;
-      return journey;
+
+      var key = journey.depart + '-' + journey.arrive;
+      if (!foundKeys[key]) {
+        foundKeys[key] = true;
+        foundJourneys.push(journey);
+      }
+      // DON'T return — keep exploring for alternative routes
+      // But cap at 5 results per time slot to avoid infinite exploration
+      if (foundJourneys.length >= 5) break;
+      continue;
     }
 
     if (node.changes >= maxChanges) continue;
@@ -944,7 +953,7 @@ function findJourneyFromTime(fromCRS, toCRS, earliestDepartMins, maxChanges) {
     deps.forEach(function(dep) {
       if (node.visited[dep.to]) return;
       if (dep.departMins < node.arriveMins + minConn) return;
-      if (dep.departMins > earliestDepartMins + 16 * 60) return; // Don't search > 16h ahead
+      if (dep.departMins > earliestDepartMins + 16 * 60) return;
 
       var newPath = node.path.slice();
       newPath.push({
@@ -965,37 +974,40 @@ function findJourneyFromTime(fromCRS, toCRS, earliestDepartMins, maxChanges) {
         visited: newVisited
       };
 
-      // Only push if it's better than what we've got for this station
-      if (!best[dep.to] || best[dep.to].arriveMins > dep.arriveMins) {
-        best[dep.to] = { arriveMins: dep.arriveMins };
+      // For destination: always allow exploration (don't prune)
+      // For intermediate stations: only if better than previous
+      var isDestination = (resolveAlias(dep.to) === resolveAlias(toCRS) || dep.to === toCRS);
+      if (isDestination || !best[dep.to] || best[dep.to].arriveMins > dep.arriveMins) {
+        if (!isDestination) best[dep.to] = { arriveMins: dep.arriveMins };
         queue.push(newNode);
       }
     });
 
-    // Explore walks (don't count as changes)
+    // Explore walks
     var walks = getWalksFrom(node.station);
     walks.forEach(function(walk) {
       if (node.visited[walk.to]) return;
-      if (node.path.length === 0) return; // Can't walk as first action
+      if (node.path.length === 0) return;
       var walkArrive = node.arriveMins + walk.mins;
       var newPath = node.path.slice();
       newPath.push({ type: 'walk', from: node.station, to: walk.to, mins: walk.mins });
       var newVisited = Object.assign({}, node.visited);
       newVisited[walk.to] = true;
-      if (!best[walk.to] || best[walk.to].arriveMins > walkArrive) {
-        best[walk.to] = { arriveMins: walkArrive };
+      var isDestination = (resolveAlias(walk.to) === resolveAlias(toCRS) || walk.to === toCRS);
+      if (isDestination || !best[walk.to] || best[walk.to].arriveMins > walkArrive) {
+        if (!isDestination) best[walk.to] = { arriveMins: walkArrive };
         queue.push({
           station: walk.to,
           arriveMins: walkArrive,
           path: newPath,
-          changes: node.changes, // walk doesn't add change
+          changes: node.changes,
           visited: newVisited
         });
       }
     });
   }
 
-  return null;
+  return foundJourneys; // returns array now
 }
 
 // Master journey finder: find multiple options by stepping through start times
@@ -1003,15 +1015,16 @@ function findAllJourneys(fromCRS, toCRS) {
   var results = [];
   var seen = {};
 
-  // Try each hour from 05:00 to 23:00 — gives us up to 19 journey options
-  for (var hour = 5; hour <= 23; hour++) {
-    var startMins = hour * 60;
-    var journey = findJourneyFromTime(fromCRS, toCRS, startMins, 4);
-    if (!journey) continue;
-    var key = journey.depart + '-' + journey.arrive;
-    if (seen[key]) continue;
-    seen[key] = true;
-    results.push(journey);
+  // Try every 15 minutes from 05:00 to 23:45 for finer coverage
+  for (var slot = 5 * 60; slot <= 23 * 60 + 45; slot += 15) {
+    var journeys = findJourneyFromTime(fromCRS, toCRS, slot, 4);
+    if (!journeys || journeys.length === 0) continue;
+    journeys.forEach(function(journey) {
+      var key = journey.depart + '-' + journey.arrive;
+      if (seen[key]) return;
+      seen[key] = true;
+      results.push(journey);
+    });
   }
 
   results.sort(function(a,b) { return tm(a.depart) - tm(b.depart); });
