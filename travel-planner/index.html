@@ -5,12 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Travel Planner — NL Tools</title>
 <!--
-  NL Travel Planner v26.0
+  NL Travel Planner v28.0
   Changelog:
-  v26.0| 01/05/2026 | Sub-line now shows vehicle type: "Tram • 3 stops · towards X".
-  v25.0| 01/05/2026 | Emoji in pills, Metro for SUBWAY, mode-aware dedup, toggles removed.
-  v24.0| 01/05/2026 | Fare info, contextual walks, map markers.
-  v23.0| 01/05/2026 | Depart/Arrive labels, departure+arrival times.
+  v28.0| 01/05/2026 | Routing fix + interchange detection:
+       |            | - Removed FEWER_TRANSFERS preference — unlocks station interchanges
+       |            |   (Bham New St→Snow Hill, Manchester Vic→Picc, London termini).
+       |            | - Short walks between transit legs shown as "🔄 Change at Snow Hill".
+  v27.0| 01/05/2026 | Route chips: two-line, type names not emojis.
+  v26.0| 01/05/2026 | Sub-line shows vehicle type: "Tram • 3 stops".
+  v25.0| 01/05/2026 | Emoji in pills, Metro for SUBWAY, mode-aware dedup.
 -->
 <link rel="stylesheet" href="/tools/system/nl-brand.css">
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -20,7 +23,7 @@
 <script>
   window.NL_TOOL={title:'Travel Planner',toolKey:'staff-travel'};
   var NL_TOOL_KEY='staff-travel';
-  window.NL_CHANGELOG=[{date:'01/05/2026',version:'v26.0',items:['Sub-line shows vehicle type: Tram • 3 stops.','Clearer transport identification on every leg.']}];
+  window.NL_CHANGELOG=[{date:'01/05/2026',version:'v28.0',items:['Removed FEWER_TRANSFERS — unlocks station interchanges.','Short walks between trains shown as Change at [station].','Better routes via Bham, Manchester, London connections.']}];
 </script>
 <script src="/tools/system/nl-utils.js"></script>
 <script src="/tools/system/nl-topbar.js"></script>
@@ -106,11 +109,15 @@
   /* Alts — sticky between summary and board */
   .tp__alts{padding:8px 14px;background:var(--off-white);border-bottom:1px solid var(--border);display:flex;gap:6px;overflow-x:auto;flex-shrink:0}
   .tp__alts--sticky{position:sticky;top:0;z-index:10}
-  .tp__alt-chip{flex-shrink:0;padding:4px 10px;border-radius:99px;border:2px solid var(--border);background:var(--white);font-family:var(--font);font-size:10px!important;font-weight:700;color:var(--text);cursor:pointer;transition:all .15s;white-space:nowrap}
+  .tp__alt-chip{flex-shrink:0;padding:6px 12px;border-radius:10px;border:2px solid var(--border);background:var(--white);font-family:var(--font);cursor:pointer;transition:all .15s;white-space:nowrap;text-align:center}
   .tp__alt-chip:hover{border-color:var(--navy);color:var(--navy)}
   .tp__alt-chip.active{background:var(--navy);color:var(--white);border-color:var(--navy)}
-  .tp__alt-chip .dur{font-weight:400;color:var(--text-muted);margin-left:4px}
-  .tp__alt-chip.active .dur{color:rgba(255,255,255,.6)}
+  .chip-time{font-size:11px;font-weight:800;font-variation-settings:'wght' 800;color:var(--text);line-height:1.3}
+  .chip-time .dur{font-weight:400;color:var(--text-muted);margin-left:3px;font-size:9px}
+  .chip-modes{font-size:8px;font-weight:600;font-variation-settings:'wght' 600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.03em;line-height:1.2}
+  .tp__alt-chip.active .chip-time{color:var(--white)}
+  .tp__alt-chip.active .chip-time .dur{color:rgba(255,255,255,.6)}
+  .tp__alt-chip.active .chip-modes{color:rgba(255,255,255,.6)}
 
   /* Board scroll container */
   .tp__board-scroll{flex:1;max-height:55vh;overflow-y:auto;-webkit-overflow-scrolling:touch}
@@ -394,7 +401,7 @@ async function callAPI(origin,dest,tm,opts,modes){
   if(tm==='TRANSIT'){
     if(opts.arrivalTime)body.arrivalTime=opts.arrivalTime;
     else if(opts.departureTime)body.departureTime=opts.departureTime;
-    var prefs={routingPreference:'FEWER_TRANSFERS'};
+    var prefs={};
     if(modes&&modes.length>0&&modes.length<5)prefs.allowedTravelModes=modes;
     body.transitPreferences=prefs;
   }else{
@@ -558,17 +565,18 @@ function dedupeRoutes(routes,isToMode){
   return unique.slice(0,4);
 }
 
-// Get transit mode emojis for a route (for chips)
-function routeModeEmojis(r){
+// Get transit mode names for a route (for chips)
+function routeModeNames(r){
   if(!r.legs||!r.legs[0]||!r.legs[0].steps)return'';
-  var seen={},emojis=[];
+  var seen={},names=[];
   r.legs[0].steps.forEach(function(s){
     if(s.transitDetails&&s.transitDetails.transitLine&&s.transitDetails.transitLine.vehicle){
       var t=s.transitDetails.transitLine.vehicle.type;
-      if(!seen[t]){seen[t]=true;emojis.push(vEmoji(t))}
+      var n=vShort(t);
+      if(!seen[n]){seen[n]=true;names.push(n)}
     }
   });
-  return emojis.join('');
+  return names.join(', ');
 }
 
 // ── Consolidate walks ──
@@ -648,8 +656,8 @@ function render(routes,idx,oL,dL){
     routes.forEach(function(rt,i){
       var rd=rt.duration?fmtDur(rt.duration):'',chip='Route '+(i+1);
       if(rt.legs&&rt.legs[0]&&rt.legs[0].steps){for(var j=0;j<rt.legs[0].steps.length;j++){var st=rt.legs[0].steps[j];if(st.transitDetails&&st.transitDetails.stopDetails&&st.transitDetails.stopDetails.departureTime){chip=fI(st.transitDetails.stopDetails.departureTime);break}}}
-      var mEmoji=routeModeEmojis(rt);
-      h+='<div class="tp__alt-chip'+(i===idx?' active':'')+'" onclick="sw('+i+',\''+esc(oL)+'\',\''+esc(dL)+'\')">'+chip+(mEmoji?' '+mEmoji:'')+(rd?'<span class="dur">'+rd+'</span>':'')+'</div>';
+      var mNames=routeModeNames(rt);
+      h+='<div class="tp__alt-chip'+(i===idx?' active':'')+'" onclick="sw('+i+',\''+esc(oL)+'\',\''+esc(dL)+'\')"><div class="chip-time">'+chip+(rd?' <span class="dur">'+rd+'</span>':'')+'</div>'+(mNames?'<div class="chip-modes">'+mNames+'</div>':'')+'</div>';
     });
     h+='</div>';
   }
@@ -684,6 +692,17 @@ function render(routes,idx,oL,dL){
         walkDesc='Walk to destination';
       }else if(prevStep&&prevStep.transitDetails&&prevStep.transitDetails.stopDetails&&prevStep.transitDetails.stopDetails.arrivalStop){
         walkDesc='Walk from '+prevStep.transitDetails.stopDetails.arrivalStop.name;
+      }
+
+      // Detect interchange: short walk between two transit legs
+      var isInterchange=totalDist<500&&prevStep&&nextStep&&
+        prevStep.transitDetails&&nextStep.transitDetails;
+      if(isInterchange){
+        var changeAt=nextStep.transitDetails.stopDetails&&nextStep.transitDetails.stopDetails.departureStop?
+          nextStep.transitDetails.stopDetails.departureStop.name:'';
+        var changeLabel=changeAt?'Change at '+changeAt:'Change';
+        h+='<div class="tp__walk-connector"><span class="wc-dot"></span><span class="wc-line"></span>🔄 '+changeLabel+(distT?' · '+distT:'')+(durT?' · '+durT:'')+'</div>';
+        continue;
       }
 
       // Short walks → connector with context
