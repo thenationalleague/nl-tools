@@ -5,16 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Travel Planner — NL Tools</title>
 <!--
-  NL Travel Planner v17.0
+  NL Travel Planner v20.0
   Changelog:
-  v17.0| 01/05/2026 | Redesigned leg rendering:
-       |            | - Pill shows line name (Elizabeth line, Thameslink) not generic "TRAIN".
-       |            | - Main text shows YOUR stops (boarding → alighting).
-       |            | - Secondary line: stop count · towards [headsign] · duration.
-       |            | - Walk legs: pill only, distance + duration inline, no repeated "Walk".
-  v16.0| 01/05/2026 | Route switcher sticky above board, board scrolls in container.
-  v15.0| 01/05/2026 | Compact walks inline, transit line colours from API.
-  v3.2 | 01/05/2026 | Compact rows, transit toggles, origin presets.
+  v20.0| 01/05/2026 | Up to 6 unique departure alternatives:
+       |            | - Multi-call: makes 2-3 staggered API requests to gather options.
+       |            | - TO mode: progressively earlier arrivals to find earlier departures.
+       |            | - FROM mode: progressively later departures for later options.
+       |            | - Deduplicated by departure time, fastest per slot, max 6.
+  v19.0| 01/05/2026 | Route deduplication (same departure → keep fastest).
+  v18.0| 01/05/2026 | Live re-query, preset labels, postcode routing.
+  v17.0| 01/05/2026 | Line name in pill, stops as main text.
 -->
 <link rel="stylesheet" href="/tools/system/nl-brand.css">
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -24,7 +24,7 @@
 <script>
   window.NL_TOOL={title:'Travel Planner',toolKey:'staff-travel'};
   var NL_TOOL_KEY='staff-travel';
-  window.NL_CHANGELOG=[{date:'01/05/2026',version:'v17.0',items:['Line name in pill (Elizabeth line, not TRAIN).','Your stops as main text, headsign as secondary.','Walk legs compact — no repeated label.']}];
+  window.NL_CHANGELOG=[{date:'01/05/2026',version:'v20.0',items:['Up to 6 unique departure alternatives.','Multi-call API for broader time range.','Deduplicated by departure, fastest per slot.']}];
 </script>
 <script src="/tools/system/nl-utils.js"></script>
 <script src="/tools/system/nl-topbar.js"></script>
@@ -275,15 +275,22 @@ async function initMap(){try{await google.maps.importLibrary('maps');await googl
 
 function loadClubs(){fetch(CMU).then(function(r){return r.json()}).then(function(d){clubs=(d.clubs||[]).map(function(c){return{name:c.name||'',code:c.code||'',short:c.short||'',stadium:c.stadium||'',division:c.division||'',optaID:c.optaID||'',postcode:c.postcode||'',colors:c.colors||{}}}).sort(function(a,b){return a.name.localeCompare(b.name)})}).catch(function(){})}
 function cU(n){return CB+encodeURIComponent(n)+'.png'}
-function addr(c){return c.postcode?c.stadium+', '+c.postcode:c.stadium+', '+(c.short||c.name)+', UK'}
-function stationAddr(c){return(c.short||c.name)+' Railway Station, UK'}
+function addr(c){
+  // Always include postcode if available — most reliable for geocoding to the actual ground
+  if(c.postcode)return c.stadium+', '+c.postcode+', UK';
+  return c.stadium+', '+(c.short||c.name)+', UK';
+}
+function stationAddr(c){
+  // Use "[town] railway station" — Google geocodes this well for UK stations
+  return(c.short||c.name)+' Railway Station, UK';
+}
 
 // ── AC ──
 function setupAC(iid,lid,wid,cb){var inp=document.getElementById(iid),l=document.getElementById(lid);inp.addEventListener('input',function(){fAC(this.value,lid,cb);cb(null)});inp.addEventListener('focus',function(){if(!this.value.trim())fAC('',lid,cb)});document.addEventListener('click',function(e){if(!e.target.closest('#'+wid))l.classList.remove('show')})}
 function fAC(q,lid,cb){var l=document.getElementById(lid);q=(q||'').toLowerCase().trim();var f=q?clubs.filter(function(c){return c.name.toLowerCase().indexOf(q)!==-1||(c.short&&c.short.toLowerCase().indexOf(q)!==-1)||(c.code&&c.code.toLowerCase()===q)}):clubs;if(!f.length){l.innerHTML='<div class="tp__ac-item" style="color:var(--text-muted);justify-content:center">No clubs found</div>';l.classList.add('show');return}l.innerHTML=f.slice(0,12).map(function(c){return'<div class="tp__ac-item" data-c="'+c.name.replace(/"/g,'&quot;')+'"><img src="'+cU(c.name)+'" alt="" onerror="this.onerror=null;this.src=\''+FC+'\'"><span class="name">'+c.name+'</span><span class="ground">'+c.stadium+'</span></div>'}).join('');l.classList.add('show');l.querySelectorAll('[data-c]').forEach(function(el){el.addEventListener('click',function(){cb(clubs.find(function(c){return c.name===el.getAttribute('data-c')}));l.classList.remove('show')})})}
 
 // ── Fix club → fixtures ──
-function selFC(c){fixClub=c;fixMatch=null;document.getElementById('fixConfig').style.display='none';var i=document.getElementById('fixClubInput'),cr=document.getElementById('fixClubCrest'),w=document.getElementById('fixClubWrap');if(c){i.value=c.name;cr.src=cU(c.name);cr.style.display='block';w.classList.add('has-crest');loadFix(c)}else{cr.style.display='none';w.classList.remove('has-crest');document.getElementById('fixFixtureArea').innerHTML=''}}
+function selFC(c){fixClub=c;fixMatch=null;document.getElementById('fixConfig').style.display='none';var i=document.getElementById('fixClubInput'),cr=document.getElementById('fixClubCrest'),w=document.getElementById('fixClubWrap');if(c){i.value=c.name;cr.src=cU(c.name);cr.style.display='block';w.classList.add('has-crest');updatePresetLabels();loadFix(c)}else{cr.style.display='none';w.classList.remove('has-crest');document.getElementById('fixFixtureArea').innerHTML=''}}
 function loadFix(club){var a=document.getElementById('fixFixtureArea');a.innerHTML='<div class="tp__loading"><div class="tp__spinner"></div>Loading fixtures…</div>';if(!club.optaID){a.innerHTML='<div class="tp__error">No Opta ID.</div>';return}Promise.all(CIDS.map(function(cid){return fetch(NLS+'/matches/?seasonID='+SID+'&competitionID='+cid+'&sort=kickOffDateUTC&page.size=100&page.number=1').then(function(r){return r.json()}).catch(function(){return{data:[]}})})).then(function(res){var all=[];res.forEach(function(r){if(r.data)all=all.concat(r.data)});var tid=club.optaID;var up=all.filter(function(m){var x=m.attributes,p=(x.matchPeriod||'').toLowerCase();return(p==='prematch'||!p||p==='fixture')&&((x.homeTeam&&x.homeTeam.teamID===tid)||(x.awayTeam&&x.awayTeam.teamID===tid))}).sort(function(a,b){return new Date(nd(a.attributes.kickOffDateUTC))-new Date(nd(b.attributes.kickOffDateUTC))});if(!up.length){a.innerHTML='<div class="tp__error">No upcoming fixtures.</div>';return}var h='<div class="tp__panel"><div class="tp__panel-title">Upcoming Fixtures</div><div class="tp__fix-list">';up.slice(0,10).forEach(function(m,i){var x=m.attributes,isH=x.homeTeam&&x.homeTeam.teamID===tid,opp=isH?x.awayTeam:x.homeTeam,oc=clubs.find(function(c){return c.optaID===(opp?opp.teamID:'')}),ko=new Date(nd(x.kickOffDateUTC));h+='<div class="tp__fix-item" onclick="selFix('+i+')"><img src="'+cU(opp?opp.name:(oc?oc.name:''))+'" alt="" onerror="this.onerror=null;this.src=\''+FC+'\'"><div class="info"><div class="teams">'+(isH?club.name+' v '+(opp?opp.name:'TBC'):(opp?opp.name:'TBC')+' v '+club.name)+'</div><div class="meta">'+fd(ko)+' '+ft(ko)+(oc?' · '+oc.stadium:'')+'</div></div><span class="badge badge--'+(isH?'home':'away')+'">'+(isH?'H':'A')+'</span></div>'});h+='</div></div>';a.innerHTML=h;a._m=up.slice(0,10)}).catch(function(){a.innerHTML='<div class="tp__error">Failed to load fixtures.</div>'})}
 function selFix(i){var a=document.getElementById('fixFixtureArea');if(!a._m||!a._m[i])return;fixMatch=a._m[i];a.querySelectorAll('.tp__fix-item').forEach(function(el,j){el.classList.toggle('selected',j===i)});document.getElementById('fixConfig').style.display='block';upPostNote();document.getElementById('fixConfig').scrollIntoView({behavior:'smooth'})}
 
@@ -291,8 +298,25 @@ function selFix(i){var a=document.getElementById('fixFixtureArea');if(!a._m||!a.
 function setDir(d){fixDir=d;document.querySelectorAll('.tp__dir-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-dir')===d)});document.getElementById('preSlider').style.display=d==='to'?'block':'none';document.getElementById('postSlider').style.display=d==='from'?'block':'none';if(d==='from')upPostNote()}
 function upPostLbl(){var v=+document.getElementById('extraAfter').value;document.getElementById('extraAfterV').textContent=v===0?'Depart at FT':'~'+v+'m after FT'}
 function upPostNote(){if(!fixMatch)return;var ko=new Date(nd(fixMatch.attributes.kickOffDateUTC));document.getElementById('postNote').textContent='Assumes 2h match. Estimated FT: '+ft(new Date(ko.getTime()+72e5))}
-function setPreset(p){fixPreset=p;document.querySelectorAll('#fixPresets .tp__preset').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-p')===p)});document.getElementById('fixCustomAddr').style.display=p==='custom'?'block':'none'}
-function togTT(btn){btn.classList.toggle('on');if(lastSearch)doFixSearch()} // Live re-query
+function setPreset(p){
+  fixPreset=p;
+  document.querySelectorAll('#fixPresets .tp__preset').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-p')===p)});
+  document.getElementById('fixCustomAddr').style.display=p==='custom'?'block':'none';
+  // Update preset label to show resolved address
+  updatePresetLabels();
+  // Re-query if we have a search already
+  if(fixMatch&&fixClub)doFixSearch();
+}
+function togTT(btn){btn.classList.toggle('on');if(fixMatch&&fixClub)doFixSearch()}
+function updatePresetLabels(){
+  if(!fixClub)return;
+  var btns=document.querySelectorAll('#fixPresets .tp__preset');
+  btns.forEach(function(b){
+    var p=b.getAttribute('data-p');
+    if(p==='stadium')b.textContent='🏟 '+(fixClub.stadium||fixClub.short||fixClub.name);
+    else if(p==='station')b.textContent='🚉 '+(fixClub.short||fixClub.name)+' Station';
+  });
+}
 function getEnabledModes(){var modes=[];document.querySelectorAll('#transitToggles .tp__tt.on').forEach(function(b){modes.push(b.getAttribute('data-t'))});return modes}
 function setMode(m){document.querySelectorAll('.tp__mode-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-mode')===m)});document.getElementById('fixtureMode').style.display=m==='fixture'?'block':'none';document.getElementById('manualMode').style.display=m==='manual'?'block':'none';document.getElementById('resultsArea').innerHTML=''}
 function setTransport(b,p){document.getElementById(p+'Transport').querySelectorAll('.tp__transport-btn').forEach(function(x){x.classList.remove('active')});b.classList.add('active')}
@@ -363,8 +387,84 @@ function doManSearch(){
 async function doRoute(o,d,tm,opts,oL,dL){
   var ra=document.getElementById('resultsArea');
   ra.innerHTML='<div class="tp__loading"><div class="tp__spinner"></div>Finding routes…</div>';
-  try{var data=await callAPI(o,d,tm,opts);if(!data.routes||!data.routes.length){ra.innerHTML='<div class="tp__error">No routes found.</div>';return}allR=data.routes;aIdx=0;render(data.routes,0,oL,dL)}
-  catch(e){ra.innerHTML='<div class="tp__error">'+e.message+'</div>'}
+  try{
+    // First call — gets the optimal route + a couple of alternatives
+    var data=await callAPI(o,d,tm,opts);
+    if(!data.routes||!data.routes.length){ra.innerHTML='<div class="tp__error">No routes found.</div>';return}
+    var collected=data.routes.slice();
+
+    // Make up to 2 additional calls to get more departure options
+    // For TO (arrivalTime): shift arrival earlier to get earlier departures
+    // For FROM (departureTime): shift departure later to get later departures
+    for(var pass=0;pass<2;pass++){
+      var deduped=dedupeRoutes(collected);
+      if(deduped.length>=6)break;
+
+      // Find the earliest (TO) or latest (FROM) departure we have so far
+      var edgeDep=findEdgeDeparture(deduped,opts.arrivalTime?'earliest':'latest');
+      if(!edgeDep)break;
+
+      var newOpts={};
+      if(opts.arrivalTime){
+        // TO mode: request arriving earlier than our earliest departure
+        // Shift arrival time back by 30 min from the earliest departure we found
+        var earlier=new Date(new Date(edgeDep).getTime()-30*6e4);
+        newOpts.arrivalTime=earlier.toISOString();
+      }else{
+        // FROM mode: request departing after our latest departure
+        var later=new Date(new Date(edgeDep).getTime()+5*6e4);
+        newOpts.departureTime=later.toISOString();
+      }
+
+      try{
+        var moreData=await callAPI(o,d,tm,newOpts);
+        if(moreData.routes)collected=collected.concat(moreData.routes);
+      }catch(e){break}
+    }
+
+    var final=dedupeRoutes(collected);
+    allR=final;aIdx=0;render(final,0,oL,dL);
+  }catch(e){ra.innerHTML='<div class="tp__error">'+e.message+'</div>'}
+}
+
+function findEdgeDeparture(routes,which){
+  // Find earliest or latest first-transit-departure across all routes
+  var deps=[];
+  routes.forEach(function(r){
+    var d=firstDepTime(r);
+    if(d)deps.push(d);
+  });
+  if(!deps.length)return null;
+  deps.sort();
+  return which==='earliest'?deps[0]:deps[deps.length-1];
+}
+
+function firstDepTime(r){
+  if(!r.legs||!r.legs[0]||!r.legs[0].steps)return'';
+  for(var i=0;i<r.legs[0].steps.length;i++){
+    var s=r.legs[0].steps[i];
+    if(s.transitDetails&&s.transitDetails.stopDetails&&s.transitDetails.stopDetails.departureTime)
+      return s.transitDetails.stopDetails.departureTime;
+  }
+  return'';
+}
+
+function dedupeRoutes(routes){
+  function durSec(r){
+    if(!r.duration)return 99999;
+    return parseInt(String(r.duration).replace('s',''),10)||99999;
+  }
+  var groups={};
+  routes.forEach(function(r){
+    var dep=firstDepTime(r);
+    var key=dep?dep.substring(0,16):'no-transit';
+    if(!groups[key]||durSec(r)<durSec(groups[key])){
+      groups[key]=r;
+    }
+  });
+  var unique=Object.keys(groups).map(function(k){return groups[k]});
+  unique.sort(function(a,b){return(firstDepTime(a)||'').localeCompare(firstDepTime(b)||'')});
+  return unique.slice(0,6);
 }
 
 // ── Consolidate walks ──
