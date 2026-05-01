@@ -5,16 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Travel Planner — NL Tools</title>
 <!--
-  NL Travel Planner v20.0
+  NL Travel Planner v24.0
   Changelog:
-  v20.0| 01/05/2026 | Up to 6 unique departure alternatives:
-       |            | - Multi-call: makes 2-3 staggered API requests to gather options.
-       |            | - TO mode: progressively earlier arrivals to find earlier departures.
-       |            | - FROM mode: progressively later departures for later options.
-       |            | - Deduplicated by departure time, fastest per slot, max 6.
-  v19.0| 01/05/2026 | Route deduplication (same departure → keep fastest).
-  v18.0| 01/05/2026 | Live re-query, preset labels, postcode routing.
-  v17.0| 01/05/2026 | Line name in pill, stops as main text.
+  v24.0| 01/05/2026 | Usability improvements:
+       |            | - Fare info shown in summary when available from API.
+       |            | - Walk descriptions contextual: "Walk to Rochdale Station".
+       |            | - Map markers at all boarding/alighting stops + origin/destination.
+       |            | - Transit stop markers coloured to match their line.
+  v23.0| 01/05/2026 | Depart/Arrive labels with emoji, departure+arrival times.
+  v22.0| 01/05/2026 | TO: latest first, FROM: earliest first.
+  v21.0| 01/05/2026 | Custom fixture builder, overnight detection.
 -->
 <link rel="stylesheet" href="/tools/system/nl-brand.css">
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -24,7 +24,7 @@
 <script>
   window.NL_TOOL={title:'Travel Planner',toolKey:'staff-travel'};
   var NL_TOOL_KEY='staff-travel';
-  window.NL_CHANGELOG=[{date:'01/05/2026',version:'v20.0',items:['Up to 6 unique departure alternatives.','Multi-call API for broader time range.','Deduplicated by departure, fastest per slot.']}];
+  window.NL_CHANGELOG=[{date:'01/05/2026',version:'v24.0',items:['Fare info in summary when available.','Contextual walk descriptions.','Map markers at transit stops.']}];
 </script>
 <script src="/tools/system/nl-utils.js"></script>
 <script src="/tools/system/nl-topbar.js"></script>
@@ -235,20 +235,61 @@
     </div>
   </div>
 
-  <!-- MANUAL -->
+  <!-- MANUAL — Custom Fixture Builder -->
   <div id="manualMode" style="display:none;">
     <div class="tp__panel">
-      <div class="tp__panel-title">Plan a Journey</div>
-      <div class="tp__field"><label class="tp__label">From</label>
-        <div class="tp__ac-wrap" id="manFromW"><img class="tp__ac-crest" id="manFromCr" src="" alt="" onerror="this.onerror=null;this.style.display='none';"><input class="tp__input" type="text" id="manFromI" placeholder="Club, postcode or address" autocomplete="off"><div class="tp__ac-list" id="manFromAC"></div></div>
+      <div class="tp__panel-title">Custom Fixture</div>
+      <div class="tp__field"><label class="tp__label">Home club</label>
+        <div class="tp__ac-wrap" id="manHomeW"><img class="tp__ac-crest" id="manHomeCr" src="" alt="" onerror="this.onerror=null;this.style.display='none';"><input class="tp__input" type="text" id="manHomeI" placeholder="Home club…" autocomplete="off"><div class="tp__ac-list" id="manHomeAC"></div></div>
       </div>
-      <div class="tp__field"><label class="tp__label">To</label>
-        <div class="tp__ac-wrap" id="manToW"><img class="tp__ac-crest" id="manToCr" src="" alt="" onerror="this.onerror=null;this.style.display='none';"><input class="tp__input" type="text" id="manToI" placeholder="Club, postcode or address" autocomplete="off"><div class="tp__ac-list" id="manToAC"></div></div>
+      <div class="tp__field"><label class="tp__label">Away club</label>
+        <div class="tp__ac-wrap" id="manAwayW"><img class="tp__ac-crest" id="manAwayCr" src="" alt="" onerror="this.onerror=null;this.style.display='none';"><input class="tp__input" type="text" id="manAwayI" placeholder="Away club…" autocomplete="off"><div class="tp__ac-list" id="manAwayAC"></div></div>
       </div>
-      <div class="tp__field"><label class="tp__label">When</label>
-        <div class="tp__row"><div class="tp__select-wrap"><select class="tp__select" id="manWhen" onchange="document.getElementById('manTime').style.display=this.value==='choose'?'block':'none'"><option value="now">Leave now</option><option value="choose">Choose time</option></select></div><input class="tp__input" type="datetime-local" id="manTime" style="display:none;"></div>
+      <div class="tp__field"><label class="tp__label">Kick-off</label>
+        <input class="tp__input" type="datetime-local" id="manKO">
       </div>
-      <button class="btn btn--primary" style="width:100%;margin-top:6px;" id="manBtn" onclick="doManSearch()" disabled>Find journey</button>
+      <div class="tp__field">
+        <label class="tp__label">Direction</label>
+        <div class="tp__dir-toggle">
+          <button class="tp__dir-btn active" data-dir="to" onclick="setManDir('to')">🚆 Travel TO</button>
+          <button class="tp__dir-btn" data-dir="from" onclick="setManDir('from')">🏠 Travel FROM</button>
+        </div>
+      </div>
+      <div class="tp__field">
+        <label class="tp__label">Start / end point</label>
+        <div class="tp__presets" id="manPresets">
+          <button class="tp__preset active" data-p="stadium" onclick="setManPreset('stadium')">🏟 Stadium</button>
+          <button class="tp__preset" data-p="station" onclick="setManPreset('station')">🚉 Station</button>
+          <button class="tp__preset" data-p="custom" onclick="setManPreset('custom')">📍 Custom</button>
+        </div>
+        <input class="tp__input" type="text" id="manCustomAddr" placeholder="Enter postcode or address…" style="display:none;" autocomplete="off">
+      </div>
+      <div class="tp__field" id="manPreSlider">
+        <label class="tp__label">Arrive before kick-off</label>
+        <div class="tp__slider-row">
+          <input class="tp__slider" type="range" id="manArrBefore" min="15" max="120" step="5" value="60" oninput="document.getElementById('manArrBeforeV').textContent=this.value+' min'">
+          <span class="tp__slider-val" id="manArrBeforeV">60 min</span>
+        </div>
+      </div>
+      <div class="tp__field" id="manPostSlider" style="display:none;">
+        <label class="tp__label">Extra time after full-time</label>
+        <div class="tp__slider-row">
+          <input class="tp__slider" type="range" id="manExtraAfter" min="0" max="120" step="5" value="0" oninput="upManPostLbl()">
+          <span class="tp__slider-val" id="manExtraAfterV">Depart at FT</span>
+        </div>
+        <div class="tp__slider-note" id="manPostNote"></div>
+      </div>
+      <div class="tp__field">
+        <label class="tp__label">Transit modes</label>
+        <div class="tp__transit-toggles" id="manTransitToggles">
+          <button class="tp__tt on" data-t="TRAIN" onclick="togManTT(this)">🚆 Train</button>
+          <button class="tp__tt on" data-t="LIGHT_RAIL" onclick="togManTT(this)">🚊 Tram</button>
+          <button class="tp__tt on" data-t="SUBWAY" onclick="togManTT(this)">🚇 Tube</button>
+          <button class="tp__tt" data-t="BUS" onclick="togManTT(this)">🚌 Bus</button>
+          <button class="tp__tt" data-t="RAIL" onclick="togManTT(this)">🚌 Coach</button>
+        </div>
+      </div>
+      <button class="btn btn--primary" style="width:100%;margin-top:6px;" id="manBtn" onclick="doManSearch()">Find journey</button>
     </div>
   </div>
 
@@ -267,8 +308,7 @@ var NLS='https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk
 var SID=2025,CIDS=[89,373,372];
 
 var clubs=[],fixClub=null,fixMatch=null,fixDir='to',fixPreset='stadium';
-var manFC=null,manTC=null,gMap=null,gPoly=null,allR=[],aIdx=0,mapOK=false;
-// Last search params for live re-query
+var gMap=null,gPoly=null,allR=[],aIdx=0,mapOK=false;
 var lastSearch=null;
 
 async function initMap(){try{await google.maps.importLibrary('maps');await google.maps.importLibrary('geometry');mapOK=true}catch(e){}}
@@ -276,9 +316,8 @@ async function initMap(){try{await google.maps.importLibrary('maps');await googl
 function loadClubs(){fetch(CMU).then(function(r){return r.json()}).then(function(d){clubs=(d.clubs||[]).map(function(c){return{name:c.name||'',code:c.code||'',short:c.short||'',stadium:c.stadium||'',division:c.division||'',optaID:c.optaID||'',postcode:c.postcode||'',colors:c.colors||{}}}).sort(function(a,b){return a.name.localeCompare(b.name)})}).catch(function(){})}
 function cU(n){return CB+encodeURIComponent(n)+'.png'}
 function addr(c){
-  // Always include postcode if available — most reliable for geocoding to the actual ground
-  if(c.postcode)return c.stadium+', '+c.postcode+', UK';
-  return c.stadium+', '+(c.short||c.name)+', UK';
+  // All clubs have postcodes — use postcode for reliable geocoding
+  return c.postcode||c.stadium+', '+(c.short||c.name)+', UK';
 }
 function stationAddr(c){
   // Use "[town] railway station" — Google geocodes this well for UK stations
@@ -321,23 +360,67 @@ function getEnabledModes(){var modes=[];document.querySelectorAll('#transitToggl
 function setMode(m){document.querySelectorAll('.tp__mode-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-mode')===m)});document.getElementById('fixtureMode').style.display=m==='fixture'?'block':'none';document.getElementById('manualMode').style.display=m==='manual'?'block':'none';document.getElementById('resultsArea').innerHTML=''}
 function setTransport(b,p){document.getElementById(p+'Transport').querySelectorAll('.tp__transport-btn').forEach(function(x){x.classList.remove('active')});b.classList.add('active')}
 
-// ── Manual ──
-function selMF(c){manFC=c;var i=document.getElementById('manFromI'),cr=document.getElementById('manFromCr'),w=document.getElementById('manFromW');if(c){i.value=c.name+' ('+c.stadium+')';cr.src=cU(c.name);cr.style.display='block';w.classList.add('has-crest')}else{cr.style.display='none';w.classList.remove('has-crest')}upMB()}
-function selMT(c){manTC=c;var i=document.getElementById('manToI'),cr=document.getElementById('manToCr'),w=document.getElementById('manToW');if(c){i.value=c.name+' ('+c.stadium+')';cr.src=cU(c.name);cr.style.display='block';w.classList.add('has-crest')}else{cr.style.display='none';w.classList.remove('has-crest')}upMB()}
-function upMB(){document.getElementById('manBtn').disabled=!(document.getElementById('manFromI').value.trim().length>=3&&document.getElementById('manToI').value.trim().length>=3)}
+// ── Manual — custom fixture builder ──
+var manHomeClub=null,manAwayClub=null,manDir='to',manPreset='stadium';
+
+function selManHome(c){
+  manHomeClub=c;
+  var i=document.getElementById('manHomeI'),cr=document.getElementById('manHomeCr'),w=document.getElementById('manHomeW');
+  if(c){i.value=c.name;cr.src=cU(c.name);cr.style.display='block';w.classList.add('has-crest');updateManPresetLabels()}
+  else{cr.style.display='none';w.classList.remove('has-crest')}
+}
+function selManAway(c){
+  manAwayClub=c;
+  var i=document.getElementById('manAwayI'),cr=document.getElementById('manAwayCr'),w=document.getElementById('manAwayW');
+  if(c){i.value=c.name;cr.src=cU(c.name);cr.style.display='block';w.classList.add('has-crest');updateManPresetLabels()}
+  else{cr.style.display='none';w.classList.remove('has-crest')}
+}
+function setManDir(d){
+  manDir=d;
+  document.querySelectorAll('#manualMode .tp__dir-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-dir')===d)});
+  document.getElementById('manPreSlider').style.display=d==='to'?'block':'none';
+  document.getElementById('manPostSlider').style.display=d==='from'?'block':'none';
+  if(d==='from')upManPostNote();
+}
+function setManPreset(p){
+  manPreset=p;
+  document.querySelectorAll('#manPresets .tp__preset').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-p')===p)});
+  document.getElementById('manCustomAddr').style.display=p==='custom'?'block':'none';
+}
+function upManPostLbl(){
+  var v=+document.getElementById('manExtraAfter').value;
+  document.getElementById('manExtraAfterV').textContent=v===0?'Depart at FT':'~'+v+'m after FT';
+}
+function upManPostNote(){
+  var koVal=document.getElementById('manKO').value;
+  if(!koVal)return;
+  var ko=new Date(koVal);
+  document.getElementById('manPostNote').textContent='Assumes 2h match. Estimated FT: '+ft(new Date(ko.getTime()+72e5));
+}
+function updateManPresetLabels(){
+  // The away club is the traveller's club (they travel TO the home ground)
+  var club=manAwayClub;
+  if(!club)return;
+  var btns=document.querySelectorAll('#manPresets .tp__preset');
+  btns.forEach(function(b){
+    var p=b.getAttribute('data-p');
+    if(p==='stadium')b.textContent='🏟 '+(club.stadium||club.short||club.name);
+    else if(p==='station')b.textContent='🚉 '+(club.short||club.name)+' Station';
+  });
+}
+function togManTT(btn){btn.classList.toggle('on')}
+function getManModes(){var m=[];document.querySelectorAll('#manTransitToggles .tp__tt.on').forEach(function(b){m.push(b.getAttribute('data-t'))});return m}
 
 // ── REST API ──
-var FM='routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.legs.duration,routes.legs.startLocation,routes.legs.endLocation,routes.legs.steps.travelMode,routes.legs.steps.staticDuration,routes.legs.steps.polyline.encodedPolyline,routes.legs.steps.startLocation,routes.legs.steps.endLocation,routes.legs.steps.navigationInstruction,routes.legs.steps.localizedValues,routes.legs.steps.transitDetails.stopDetails,routes.legs.steps.transitDetails.transitLine,routes.legs.steps.transitDetails.headsign,routes.legs.steps.transitDetails.stopCount,routes.legs.steps.transitDetails.localizedValues';
+var FM='routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.legs.duration,routes.legs.startLocation,routes.legs.endLocation,routes.legs.localizedValues,routes.legs.steps.travelMode,routes.legs.steps.staticDuration,routes.legs.steps.polyline.encodedPolyline,routes.legs.steps.startLocation,routes.legs.steps.endLocation,routes.legs.steps.navigationInstruction,routes.legs.steps.localizedValues,routes.legs.steps.transitDetails.stopDetails,routes.legs.steps.transitDetails.transitLine,routes.legs.steps.transitDetails.headsign,routes.legs.steps.transitDetails.stopCount,routes.legs.steps.transitDetails.localizedValues';
 
-async function callAPI(origin,dest,tm,opts){
+async function callAPI(origin,dest,tm,opts,modes){
   var body={origin:{address:origin},destination:{address:dest},travelMode:tm,computeAlternativeRoutes:true,languageCode:'en-GB',units:'METRIC'};
   if(tm==='TRANSIT'){
     if(opts.arrivalTime)body.arrivalTime=opts.arrivalTime;
     else if(opts.departureTime)body.departureTime=opts.departureTime;
-    var modes=getEnabledModes();
     var prefs={routingPreference:'FEWER_TRANSFERS'};
-    // Only filter modes if some are selected (not all 5)
-    if(modes.length>0&&modes.length<5)prefs.allowedTravelModes=modes;
+    if(modes&&modes.length>0&&modes.length<5)prefs.allowedTravelModes=modes;
     body.transitPreferences=prefs;
   }else{
     if(opts.departureTime)body.departureTime=opts.departureTime;
@@ -359,9 +442,21 @@ function doFixSearch(){
   var myA=fixPreset==='station'?stationAddr(fixClub):fixPreset==='custom'?document.getElementById('fixCustomAddr').value.trim():addr(fixClub);
   var oppA=opp?addr(opp):(isH?a.awayTeam.name:a.homeTeam.name);
 
+  // Build labels with context
+  var myIcon=fixPreset==='station'?'🚉 ':fixPreset==='custom'?'📍 ':'🏟 ';
+  var myLabel=fixClub.short||fixClub.name;
+  var oppLabel=opp?opp.short||opp.name:'Away';
+
   var origin,dest,oL,dL;
-  if(fixDir==='to'){origin=myA;dest=oppA;oL=fixClub.short||fixClub.name;dL=opp?opp.short||opp.name:dest}
-  else{origin=oppA;dest=myA;oL=opp?opp.short||opp.name:origin;dL=fixClub.short||fixClub.name}
+  if(fixDir==='to'){
+    origin=myA;dest=oppA;
+    oL=myIcon+myLabel;
+    dL='🏟 '+oppLabel;
+  }else{
+    origin=oppA;dest=myA;
+    oL='🏟 '+oppLabel;
+    dL=myIcon+myLabel;
+  }
 
   var ko=new Date(nd(a.kickOffDateUTC)),opts={};
   if(fixDir==='to'){
@@ -372,58 +467,63 @@ function doFixSearch(){
     opts.departureTime=new Date(ko.getTime()+72e5+ea*6e4).toISOString();
   }
   lastSearch={o:origin,d:dest,oL:oL,dL:dL,opts:opts};
-  doRoute(origin,dest,'TRANSIT',opts,oL,dL);
+  doRoute(origin,dest,'TRANSIT',opts,oL,dL,getEnabledModes());
 }
 
 function doManSearch(){
-  var fi=document.getElementById('manFromI').value.trim(),ti=document.getElementById('manToI').value.trim();
-  var o=manFC?addr(manFC):fi,d=manTC?addr(manTC):ti;
+  if(!manHomeClub||!manAwayClub)return;
+  var koVal=document.getElementById('manKO').value;
+  if(!koVal){document.getElementById('resultsArea').innerHTML='<div class="tp__error">Please set a kick-off time.</div>';return}
+  var ko=new Date(koVal);
+
+  // Away club is the traveller — they start from their ground/station
+  var awayA=manPreset==='station'?stationAddr(manAwayClub):manPreset==='custom'?document.getElementById('manCustomAddr').value.trim():addr(manAwayClub);
+  var homeA=addr(manHomeClub); // Destination is always the home ground
+
+  var manIcon=manPreset==='station'?'🚉 ':manPreset==='custom'?'📍 ':'🏟 ';
+  var awayLabel=manAwayClub.short||manAwayClub.name;
+  var homeLabel=manHomeClub.short||manHomeClub.name;
+
+  var origin,dest,oL,dL;
+  if(manDir==='to'){
+    origin=awayA;dest=homeA;
+    oL=manIcon+awayLabel;
+    dL='🏟 '+homeLabel;
+  }else{
+    origin=homeA;dest=awayA;
+    oL='🏟 '+homeLabel;
+    dL=manIcon+awayLabel;
+  }
+
   var opts={};
-  if(document.getElementById('manWhen').value==='choose'){var dt=document.getElementById('manTime').value;if(dt)opts.departureTime=new Date(dt).toISOString()}
-  else opts.departureTime=new Date().toISOString();
-  doRoute(o,d,'TRANSIT',opts,manFC?manFC.short:fi,manTC?manTC.short:ti);
+  if(manDir==='to'){
+    var mb=+document.getElementById('manArrBefore').value;
+    opts.arrivalTime=new Date(ko.getTime()-mb*6e4).toISOString();
+  }else{
+    var ea=+document.getElementById('manExtraAfter').value;
+    opts.departureTime=new Date(ko.getTime()+72e5+ea*6e4).toISOString();
+  }
+
+  doRoute(origin,dest,'TRANSIT',opts,oL,dL,getManModes());
 }
 
-async function doRoute(o,d,tm,opts,oL,dL){
+async function doRoute(o,d,tm,opts,oL,dL,modes){
   var ra=document.getElementById('resultsArea');
   ra.innerHTML='<div class="tp__loading"><div class="tp__spinner"></div>Finding routes…</div>';
+  var isToMode=!!opts.arrivalTime; // TO = arrivalTime, FROM = departureTime
   try{
-    // First call — gets the optimal route + a couple of alternatives
-    var data=await callAPI(o,d,tm,opts);
+    var data=await callAPI(o,d,tm,opts,modes);
     if(!data.routes||!data.routes.length){ra.innerHTML='<div class="tp__error">No routes found.</div>';return}
     var collected=data.routes.slice();
-
-    // Make up to 2 additional calls to get more departure options
-    // For TO (arrivalTime): shift arrival earlier to get earlier departures
-    // For FROM (departureTime): shift departure later to get later departures
     for(var pass=0;pass<2;pass++){
-      var deduped=dedupeRoutes(collected);
-      if(deduped.length>=6)break;
-
-      // Find the earliest (TO) or latest (FROM) departure we have so far
-      var edgeDep=findEdgeDeparture(deduped,opts.arrivalTime?'earliest':'latest');
-      if(!edgeDep)break;
-
-      var newOpts={};
-      if(opts.arrivalTime){
-        // TO mode: request arriving earlier than our earliest departure
-        // Shift arrival time back by 30 min from the earliest departure we found
-        var earlier=new Date(new Date(edgeDep).getTime()-30*6e4);
-        newOpts.arrivalTime=earlier.toISOString();
-      }else{
-        // FROM mode: request departing after our latest departure
-        var later=new Date(new Date(edgeDep).getTime()+5*6e4);
-        newOpts.departureTime=later.toISOString();
-      }
-
-      try{
-        var moreData=await callAPI(o,d,tm,newOpts);
-        if(moreData.routes)collected=collected.concat(moreData.routes);
-      }catch(e){break}
+      var dd=dedupeRoutes(collected,isToMode);if(dd.length>=4)break;
+      var edge=findEdgeDeparture(dd,isToMode?'earliest':'latest');if(!edge)break;
+      var no={};
+      if(isToMode)no.arrivalTime=new Date(new Date(edge).getTime()-18e5).toISOString();
+      else no.departureTime=new Date(new Date(edge).getTime()+3e5).toISOString();
+      try{var mr=await callAPI(o,d,tm,no,modes);if(mr.routes)collected=collected.concat(mr.routes)}catch(e){break}
     }
-
-    var final=dedupeRoutes(collected);
-    allR=final;aIdx=0;render(final,0,oL,dL);
+    allR=dedupeRoutes(collected,isToMode);aIdx=0;render(allR,0,oL,dL);
   }catch(e){ra.innerHTML='<div class="tp__error">'+e.message+'</div>'}
 }
 
@@ -449,7 +549,7 @@ function firstDepTime(r){
   return'';
 }
 
-function dedupeRoutes(routes){
+function dedupeRoutes(routes,isToMode){
   function durSec(r){
     if(!r.duration)return 99999;
     return parseInt(String(r.duration).replace('s',''),10)||99999;
@@ -463,8 +563,14 @@ function dedupeRoutes(routes){
     }
   });
   var unique=Object.keys(groups).map(function(k){return groups[k]});
-  unique.sort(function(a,b){return(firstDepTime(a)||'').localeCompare(firstDepTime(b)||'')});
-  return unique.slice(0,6);
+  if(isToMode){
+    // TO mode: latest departure first (leave as late as possible)
+    unique.sort(function(a,b){return(firstDepTime(b)||'').localeCompare(firstDepTime(a)||'')});
+  }else{
+    // FROM mode: earliest departure first (leave as soon as possible)
+    unique.sort(function(a,b){return(firstDepTime(a)||'').localeCompare(firstDepTime(b)||'')});
+  }
+  return unique.slice(0,4);
 }
 
 // ── Consolidate walks ──
@@ -486,9 +592,56 @@ function render(routes,idx,oL,dL){
     }
   }
 
+  // Check for overnight journey — look for 4h+ gap between consecutive transit legs
+  var overnight=false;
+  var transitTimes=[];
+  (leg.steps||[]).forEach(function(s){
+    if(s.transitDetails&&s.transitDetails.stopDetails){
+      var sd=s.transitDetails.stopDetails;
+      if(sd.departureTime)transitTimes.push({type:'dep',t:new Date(sd.departureTime)});
+      if(sd.arrivalTime)transitTimes.push({type:'arr',t:new Date(sd.arrivalTime)});
+    }
+  });
+  // Check gaps between arrival of one leg and departure of next
+  var lastArr=null;
+  (leg.steps||[]).forEach(function(s){
+    if(s.transitDetails&&s.transitDetails.stopDetails){
+      var sd=s.transitDetails.stopDetails;
+      if(lastArr&&sd.departureTime){
+        var gap=new Date(sd.departureTime).getTime()-lastArr.getTime();
+        if(gap>4*36e5)overnight=true; // 4+ hour gap
+      }
+      if(sd.arrivalTime)lastArr=new Date(sd.arrivalTime);
+    }
+  });
+
+  // Also find the last transit arrival time
+  var overallArr='';
+  for(var ai=(leg.steps||[]).length-1;ai>=0;ai--){
+    var as=leg.steps[ai];
+    if(as.transitDetails&&as.transitDetails.stopDetails&&as.transitDetails.stopDetails.arrivalTime){
+      overallArr=fI(as.transitDetails.stopDetails.arrivalTime);break;
+    }
+  }
+
+  // Extract fare info from leg localizedValues
+  var fareText='';
+  if(leg.localizedValues&&leg.localizedValues.transitFare&&leg.localizedValues.transitFare.text){
+    fareText=leg.localizedValues.transitFare.text;
+  }
+
   var h='<div class="tp__results"><div class="tp__map-col"><div id="routeMap"></div></div><div class="tp__board-col">';
-  h+='<div class="tp__summary"><div class="tp__summary-route">'+abbr(oL)+'<span class="arrow">→</span>'+abbr(dL)+'</div><div class="tp__summary-duration">'+dur+(dist?' · '+dist:'')+'</div>';
-  if(overallDep)h+='<div class="tp__summary-depart">Departs '+overallDep+'</div>';
+  h+='<div class="tp__summary">';
+  h+='<div class="tp__summary-route">Depart '+abbr(oL)+'<span class="arrow">→</span>Arrive '+abbr(dL)+'</div>';
+  h+='<div class="tp__summary-duration">'+dur+(dist?' · '+dist:'')+(fareText?' · '+fareText:'')+'</div>';
+  if(overallDep||overallArr){
+    var timeStr='';
+    if(overallDep)timeStr+='Departs '+overallDep;
+    if(overallDep&&overallArr)timeStr+=' · ';
+    if(overallArr)timeStr+='Arrives '+overallArr;
+    h+='<div class="tp__summary-depart">'+timeStr+'</div>';
+  }
+  if(overnight)h+='<div class="tp__summary-depart" style="color:#ffab91;">⚠️ Requires overnight stay — no same-day route available</div>';
   h+='</div>';
 
   // Route alternatives — above the board, sticky
@@ -505,7 +658,8 @@ function render(routes,idx,oL,dL){
   // Board in scroll container
   h+='<div class="tp__board-scroll"><div class="tp__board">';
 
-  steps.forEach(function(s){
+  for(var si2=0;si2<steps.length;si2++){
+    var s=steps[si2];
     var cls=sClass(s),dep='',arr='',durT='',distT='';
     var lineCol='',lineTxt='',pillLabel='',mainText='',subText='';
 
@@ -519,14 +673,28 @@ function render(routes,idx,oL,dL){
         if(ws.localizedValues&&ws.localizedValues.distance&&ws.localizedValues.distance.text&&ws.localizedValues.distance.text.indexOf('km')!==-1)dm=dm*1000;
         totalDist+=dm;
       });
-      // Short walks → connector
-      if(totalDist<300&&totalDist>0){
-        h+='<div class="tp__walk-connector"><span class="wc-dot"></span><span class="wc-line"></span>🚶 '+(distT||'Walk')+(durT?' · '+durT:'')+'</div>';
-        return;
+
+      // Build contextual walk description
+      var walkDesc='Walk';
+      var nextStep=steps[si2+1];
+      var prevStep=si2>0?steps[si2-1]:null;
+      if(nextStep&&nextStep.transitDetails&&nextStep.transitDetails.stopDetails&&nextStep.transitDetails.stopDetails.departureStop){
+        walkDesc='Walk to '+nextStep.transitDetails.stopDetails.departureStop.name;
+      }else if(!nextStep){
+        // Last step — walking to destination
+        walkDesc='Walk to destination';
+      }else if(prevStep&&prevStep.transitDetails&&prevStep.transitDetails.stopDetails&&prevStep.transitDetails.stopDetails.arrivalStop){
+        walkDesc='Walk from '+prevStep.transitDetails.stopDetails.arrivalStop.name;
       }
-      // Longer walks — just pill + distance + duration, no "Walk" text repeated
+
+      // Short walks → connector with context
+      if(totalDist<300&&totalDist>0){
+        h+='<div class="tp__walk-connector"><span class="wc-dot"></span><span class="wc-line"></span>🚶 '+walkDesc+(distT?' · '+distT:'')+(durT?' · '+durT:'')+'</div>';
+        continue;
+      }
       pillLabel='🚶 Walk';
-      mainText=(distT||'')+(durT?' · '+durT:'');
+      mainText=walkDesc;
+      subText=(distT||'')+(durT?' · '+durT:'');
     }else if(s.transitDetails){
       var td=s.transitDetails,sd=td.stopDetails||{};
       if(sd.departureTime)dep=fI(sd.departureTime);
@@ -571,7 +739,7 @@ function render(routes,idx,oL,dL){
     if(mainText)h+='<div class="tp__leg-route">'+mainText+'</div>';
     if(subText)h+='<div class="tp__leg-stops">'+subText+'</div>';
     h+='</div></div>';
-  });
+  }
 
   h+='</div></div>'; // close board + board-scroll
   h+='</div></div>'; // close board-col + results
@@ -603,6 +771,47 @@ function drawMap(r){
     try{var p=google.maps.geometry.encoding.decodePath(r.polyline.encodedPolyline);new google.maps.Polyline({path:p,strokeColor:'#223b7c',strokeWeight:4,map:gMap});p.forEach(function(pt){bounds.extend(pt)})}catch(e){}
   }
   if(!bounds.isEmpty())gMap.fitBounds(bounds,40);
+
+  // Add markers at boarding/alighting stops
+  if(r.legs&&r.legs[0]&&r.legs[0].steps){
+    r.legs[0].steps.forEach(function(s){
+      if(s.transitDetails&&s.transitDetails.stopDetails){
+        var sd=s.transitDetails.stopDetails;
+        var ln=s.transitDetails.transitLine||{};
+        var col=ln.color||'#223b7c';
+        // Departure stop marker
+        if(sd.departureStop&&sd.departureStop.location&&sd.departureStop.location.latLng){
+          var dLoc=sd.departureStop.location.latLng;
+          new google.maps.Marker({
+            position:{lat:dLoc.latitude,lng:dLoc.longitude},
+            map:gMap,
+            title:sd.departureStop.name,
+            icon:{path:google.maps.SymbolPath.CIRCLE,scale:5,fillColor:col,fillOpacity:1,strokeColor:'#fff',strokeWeight:2}
+          });
+        }
+        // Arrival stop marker
+        if(sd.arrivalStop&&sd.arrivalStop.location&&sd.arrivalStop.location.latLng){
+          var aLoc=sd.arrivalStop.location.latLng;
+          new google.maps.Marker({
+            position:{lat:aLoc.latitude,lng:aLoc.longitude},
+            map:gMap,
+            title:sd.arrivalStop.name,
+            icon:{path:google.maps.SymbolPath.CIRCLE,scale:5,fillColor:col,fillOpacity:1,strokeColor:'#fff',strokeWeight:2}
+          });
+        }
+      }
+    });
+  }
+  // Origin/destination markers
+  if(r.legs&&r.legs[0]){
+    var lg=r.legs[0];
+    if(lg.startLocation&&lg.startLocation.latLng){
+      new google.maps.Marker({position:{lat:lg.startLocation.latLng.latitude,lng:lg.startLocation.latLng.longitude},map:gMap,title:'Start'});
+    }
+    if(lg.endLocation&&lg.endLocation.latLng){
+      new google.maps.Marker({position:{lat:lg.endLocation.latLng.latitude,lng:lg.endLocation.latLng.longitude},map:gMap,title:'Destination'});
+    }
+  }
 }
 
 // ── Helpers ──
@@ -617,16 +826,18 @@ function sClass(s){if(s._w||s.travelMode==='WALK')return'walk';if(s.travelMode==
 function sLabel(s){if(s._w||s.travelMode==='WALK')return'🚶 Walk';if(s.travelMode==='DRIVE')return'🚗 Drive';if(s.transitDetails){var l=s.transitDetails.transitLine||{};if(l.vehicle)return vL(l.vehicle.type);return'🚆 Transit'}return'🚶 Walk'}
 function vC(t){return{BUS:'bus',INTERCITY_BUS:'bus',RAIL:'train',HEAVY_RAIL:'train',COMMUTER_TRAIN:'train',HIGH_SPEED_TRAIN:'train',LONG_DISTANCE_TRAIN:'train',SUBWAY:'subway',METRO_RAIL:'subway',TRAM:'tram',LIGHT_RAIL:'tram',FERRY:'train'}[t]||'train'}
 function vL(t){return{BUS:'🚌 Bus',INTERCITY_BUS:'🚌 Coach',RAIL:'🚆 Train',HEAVY_RAIL:'🚆 Train',COMMUTER_TRAIN:'🚆 Train',HIGH_SPEED_TRAIN:'🚄 Train',LONG_DISTANCE_TRAIN:'🚆 Train',SUBWAY:'🚇 Tube',METRO_RAIL:'🚇 Metro',TRAM:'🚊 Tram',LIGHT_RAIL:'🚊 Tram',FERRY:'⛴ Ferry'}[t]||'🚆 Transit'}
-function abbr(s){return s&&s.length>22?s.substring(0,20)+'…':s||''}
+function abbr(s){return s&&s.length>28?s.substring(0,26)+'…':s||''}
 function esc(s){return(s||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}
 
 // ── Init ──
 window.nlAuthReady=function(){
   document.getElementById('pageWrap').style.display='block';
   loadClubs();initMap();
-  document.getElementById('manFromI').addEventListener('input',function(){if(manFC){manFC=null;document.getElementById('manFromCr').style.display='none';document.getElementById('manFromW').classList.remove('has-crest')}upMB()});
-  document.getElementById('manToI').addEventListener('input',function(){if(manTC){manTC=null;document.getElementById('manToCr').style.display='none';document.getElementById('manToW').classList.remove('has-crest')}upMB()});
-  setTimeout(function(){setupAC('fixClubInput','fixClubAC','fixClubWrap',selFC);setupAC('manFromI','manFromAC','manFromW',selMF);setupAC('manToI','manToAC','manToW',selMT)},1500);
+  setTimeout(function(){
+    setupAC('fixClubInput','fixClubAC','fixClubWrap',selFC);
+    setupAC('manHomeI','manHomeAC','manHomeW',selManHome);
+    setupAC('manAwayI','manAwayAC','manAwayW',selManAway);
+  },1500);
 };
 </script>
 </body>
