@@ -5,15 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Travel Planner — NL Tools</title>
 <!--
-  NL Travel Planner v28.0
+  NL Travel Planner v31.0
   Changelog:
-  v28.0| 01/05/2026 | Routing fix + interchange detection:
-       |            | - Removed FEWER_TRANSFERS preference — unlocks station interchanges
-       |            |   (Bham New St→Snow Hill, Manchester Vic→Picc, London termini).
-       |            | - Short walks between transit legs shown as "🔄 Change at Snow Hill".
-  v27.0| 01/05/2026 | Route chips: two-line, type names not emojis.
-  v26.0| 01/05/2026 | Sub-line shows vehicle type: "Tram • 3 stops".
-  v25.0| 01/05/2026 | Emoji in pills, Metro for SUBWAY, mode-aware dedup.
+  v31.0| 02/05/2026 | CRS station codes:
+       |            | - Loads UK station CRS codes from stations.json.
+       |            | - Appends 3-letter code to stop names: "Rochdale (RCD)".
+       |            | - Fuzzy matching handles London prefix, International suffix.
+       |            | - Applied to boarding/alighting stops, walk descriptions, interchanges.
+  v30.0| 02/05/2026 | Routing fix: always away fans' route, destination = home ground.
+  v29.0| 02/05/2026 | Stadium names in labels, default KO time.
+  v28.0| 01/05/2026 | Interchange detection.
 -->
 <link rel="stylesheet" href="/tools/system/nl-brand.css">
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -23,7 +24,7 @@
 <script>
   window.NL_TOOL={title:'Travel Planner',toolKey:'staff-travel'};
   var NL_TOOL_KEY='staff-travel';
-  window.NL_CHANGELOG=[{date:'01/05/2026',version:'v28.0',items:['Removed FEWER_TRANSFERS — unlocks station interchanges.','Short walks between trains shown as Change at [station].','Better routes via Bham, Manchester, London connections.']}];
+  window.NL_CHANGELOG=[{date:'02/05/2026',version:'v31.0',items:['CRS station codes appended to stop names.','Fuzzy matching for London prefix and suffixes.','Applied to all stop references in route display.']}];
 </script>
 <script src="/tools/system/nl-utils.js"></script>
 <script src="/tools/system/nl-topbar.js"></script>
@@ -284,6 +285,7 @@
 var GK='AIzaSyA1qH6K4vtUW8YbMKetK16q2GQaZ2EDXRs';
 var RU='https://routes.googleapis.com/directions/v2:computeRoutes';
 var CMU='https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
+var STN_URL='https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/stations.json';
 var CB='https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
 var FC=CB+'National%20League%20rose.png';
 var NLS='https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
@@ -291,11 +293,15 @@ var SID=2025,CIDS=[89,373,372];
 
 var clubs=[],fixClub=null,fixMatch=null,fixDir='to',fixPreset='stadium';
 var gMap=null,gPoly=null,allR=[],aIdx=0,mapOK=false;
+var crsLookup={}; // station name → CRS code
 var lastSearch=null;
 
 async function initMap(){try{await google.maps.importLibrary('maps');await google.maps.importLibrary('geometry');mapOK=true}catch(e){}}
 
 function loadClubs(){fetch(CMU).then(function(r){return r.json()}).then(function(d){clubs=(d.clubs||[]).map(function(c){return{name:c.name||'',code:c.code||'',short:c.short||'',stadium:c.stadium||'',division:c.division||'',optaID:c.optaID||'',postcode:c.postcode||'',colors:c.colors||{}}}).sort(function(a,b){return a.name.localeCompare(b.name)})}).catch(function(){})}
+function loadCRS(){fetch(STN_URL).then(function(r){return r.json()}).then(function(data){data.forEach(function(s){var name=s.stationName,code=s.crsCode;if(!name||!code)return;crsLookup[name.toLowerCase()]=code;if(name.toLowerCase().indexOf('london ')===0)crsLookup[name.substring(7).toLowerCase()]=code;if(name.toLowerCase().indexOf(' international')!==-1){crsLookup[name.replace(/ International/i,'').toLowerCase()]=code;if(name.toLowerCase().indexOf('london ')===0)crsLookup[name.substring(7).replace(/ International/i,'').toLowerCase()]=code}})}).catch(function(){})}
+function getCRS(n){if(!n)return'';var k=n.toLowerCase().replace(/ railway station$/,'').replace(/ station$/,'').replace(/ rail$/,'').trim();return crsLookup[k]||crsLookup[n.toLowerCase()]||''}
+function addCRS(n){var c=getCRS(n);return c?n+' ('+c+')':n}
 function cU(n){return CB+encodeURIComponent(n)+'.png'}
 function addr(c){
   // Stadium name + postcode gives Google the best chance of hitting the ground
@@ -314,7 +320,7 @@ function fAC(q,lid,cb){var l=document.getElementById(lid);q=(q||'').toLowerCase(
 // ── Fix club → fixtures ──
 function selFC(c){fixClub=c;fixMatch=null;document.getElementById('fixConfig').style.display='none';var i=document.getElementById('fixClubInput'),cr=document.getElementById('fixClubCrest'),w=document.getElementById('fixClubWrap');if(c){i.value=c.name;cr.src=cU(c.name);cr.style.display='block';w.classList.add('has-crest');updatePresetLabels();loadFix(c)}else{cr.style.display='none';w.classList.remove('has-crest');document.getElementById('fixFixtureArea').innerHTML=''}}
 function loadFix(club){var a=document.getElementById('fixFixtureArea');a.innerHTML='<div class="tp__loading"><div class="tp__spinner"></div>Loading fixtures…</div>';if(!club.optaID){a.innerHTML='<div class="tp__error">No Opta ID.</div>';return}Promise.all(CIDS.map(function(cid){return fetch(NLS+'/matches/?seasonID='+SID+'&competitionID='+cid+'&sort=kickOffDateUTC&page.size=100&page.number=1').then(function(r){return r.json()}).catch(function(){return{data:[]}})})).then(function(res){var all=[];res.forEach(function(r){if(r.data)all=all.concat(r.data)});var tid=club.optaID;var up=all.filter(function(m){var x=m.attributes,p=(x.matchPeriod||'').toLowerCase();return(p==='prematch'||!p||p==='fixture')&&((x.homeTeam&&x.homeTeam.teamID===tid)||(x.awayTeam&&x.awayTeam.teamID===tid))}).sort(function(a,b){return new Date(nd(a.attributes.kickOffDateUTC))-new Date(nd(b.attributes.kickOffDateUTC))});if(!up.length){a.innerHTML='<div class="tp__error">No upcoming fixtures.</div>';return}var h='<div class="tp__panel"><div class="tp__panel-title">Upcoming Fixtures</div><div class="tp__fix-list">';up.slice(0,10).forEach(function(m,i){var x=m.attributes,isH=x.homeTeam&&x.homeTeam.teamID===tid,opp=isH?x.awayTeam:x.homeTeam,oc=clubs.find(function(c){return c.optaID===(opp?opp.teamID:'')}),ko=new Date(nd(x.kickOffDateUTC));h+='<div class="tp__fix-item" onclick="selFix('+i+')"><img src="'+cU(opp?opp.name:(oc?oc.name:''))+'" alt="" onerror="this.onerror=null;this.src=\''+FC+'\'"><div class="info"><div class="teams">'+(isH?club.name+' v '+(opp?opp.name:'TBC'):(opp?opp.name:'TBC')+' v '+club.name)+'</div><div class="meta">'+fd(ko)+' '+ft(ko)+(oc?' · '+oc.stadium:'')+'</div></div><span class="badge badge--'+(isH?'home':'away')+'">'+(isH?'H':'A')+'</span></div>'});h+='</div></div>';a.innerHTML=h;a._m=up.slice(0,10)}).catch(function(){a.innerHTML='<div class="tp__error">Failed to load fixtures.</div>'})}
-function selFix(i){var a=document.getElementById('fixFixtureArea');if(!a._m||!a._m[i])return;fixMatch=a._m[i];a.querySelectorAll('.tp__fix-item').forEach(function(el,j){el.classList.toggle('selected',j===i)});document.getElementById('fixConfig').style.display='block';upPostNote();document.getElementById('fixConfig').scrollIntoView({behavior:'smooth'})}
+function selFix(i){var a=document.getElementById('fixFixtureArea');if(!a._m||!a._m[i])return;fixMatch=a._m[i];a.querySelectorAll('.tp__fix-item').forEach(function(el,j){el.classList.toggle('selected',j===i)});document.getElementById('fixConfig').style.display='block';updatePresetLabels();upPostNote();document.getElementById('fixConfig').scrollIntoView({behavior:'smooth'})}
 
 // ── Controls ──
 function setDir(d){fixDir=d;document.querySelectorAll('.tp__dir-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-dir')===d)});document.getElementById('preSlider').style.display=d==='to'?'block':'none';document.getElementById('postSlider').style.display=d==='from'?'block':'none';if(d==='from')upPostNote()}
@@ -331,12 +337,23 @@ function setPreset(p){
 }
 function getEnabledModes(){return[]}  // No filter — let Google decide
 function updatePresetLabels(){
+  // Preset labels should reflect the away club (the traveller)
+  // We need the fixture to know who's home/away
   if(!fixClub)return;
+  var awayC=fixClub; // default to selected club before fixture is picked
+  if(fixMatch){
+    var a=fixMatch.attributes,tid=fixClub.optaID;
+    var isH=a.homeTeam&&a.homeTeam.teamID===tid;
+    var oppID=isH?a.awayTeam.teamID:a.homeTeam.teamID;
+    var opp=clubs.find(function(c){return c.optaID===oppID});
+    awayC=isH?opp:fixClub;
+    if(!awayC)awayC=fixClub;
+  }
   var btns=document.querySelectorAll('#fixPresets .tp__preset');
   btns.forEach(function(b){
     var p=b.getAttribute('data-p');
-    if(p==='stadium')b.textContent='🏟 '+(fixClub.stadium||fixClub.short||fixClub.name);
-    else if(p==='station')b.textContent='🚉 '+(fixClub.short||fixClub.name)+' Station';
+    if(p==='stadium')b.textContent='🏟 '+(awayC.stadium||awayC.short||awayC.name);
+    else if(p==='station')b.textContent='🚉 '+(awayC.short||awayC.name)+' Station';
   });
 }
 function getEnabledModes(){var modes=[];document.querySelectorAll('#transitToggles .tp__tt.on').forEach(function(b){modes.push(b.getAttribute('data-t'))});return modes}
@@ -420,24 +437,35 @@ function doFixSearch(){
   var oppID=isH?a.awayTeam.teamID:a.homeTeam.teamID;
   var opp=clubs.find(function(c){return c.optaID===oppID});
 
-  // Build addresses based on preset
-  var myA=fixPreset==='station'?stationAddr(fixClub):fixPreset==='custom'?document.getElementById('fixCustomAddr').value.trim():addr(fixClub);
-  var oppA=opp?addr(opp):(isH?a.awayTeam.name:a.homeTeam.name);
+  // Identify home and away clubs for this fixture
+  var homeClub=isH?fixClub:opp;
+  var awayClub=isH?opp:fixClub;
 
-  // Build labels with context
-  var myIcon=fixPreset==='station'?'🚉 ':fixPreset==='custom'?'📍 ':'🏟 ';
-  var myLabel=fixClub.short||fixClub.name;
-  var oppLabel=opp?opp.short||opp.name:'Away';
+  // Home ground is always the match venue (fixed end)
+  var homeGroundAddr=homeClub?addr(homeClub):(a.homeTeam.name+', UK');
+  var homeStadiumLabel=homeClub?(homeClub.stadium||homeClub.short||homeClub.name):'Home';
 
+  // Away club start point depends on preset
+  var awayAddr=awayClub?(fixPreset==='station'?stationAddr(awayClub):fixPreset==='custom'?document.getElementById('fixCustomAddr').value.trim():addr(awayClub)):'';
+  var awayStadiumLabel=awayClub?(awayClub.stadium||awayClub.short||awayClub.name):'Away';
+  var awayStationLabel=awayClub?((awayClub.short||awayClub.name)+' Station'):'Away Station';
+  var customAddrVal=document.getElementById('fixCustomAddr')?document.getElementById('fixCustomAddr').value.trim():'';
+
+  var awayIcon,awayDescLabel;
+  if(fixPreset==='station'){awayDescLabel=awayStationLabel;awayIcon='🚉 '}
+  else if(fixPreset==='custom'){awayDescLabel=customAddrVal||'Custom';awayIcon='📍 '}
+  else{awayDescLabel=awayStadiumLabel;awayIcon='🏟 '}
+
+  // TO = away fans going to the match. FROM = away fans going home.
   var origin,dest,oL,dL;
   if(fixDir==='to'){
-    origin=myA;dest=oppA;
-    oL=myIcon+myLabel;
-    dL='🏟 '+oppLabel;
+    origin=awayAddr;dest=homeGroundAddr;
+    oL=awayIcon+awayDescLabel;
+    dL='🏟 '+homeStadiumLabel;
   }else{
-    origin=oppA;dest=myA;
-    oL='🏟 '+oppLabel;
-    dL=myIcon+myLabel;
+    origin=homeGroundAddr;dest=awayAddr;
+    oL='🏟 '+homeStadiumLabel;
+    dL=awayIcon+awayDescLabel;
   }
 
   var ko=new Date(nd(a.kickOffDateUTC)),opts={};
@@ -462,19 +490,25 @@ function doManSearch(){
   var awayA=manPreset==='station'?stationAddr(manAwayClub):manPreset==='custom'?document.getElementById('manCustomAddr').value.trim():addr(manAwayClub);
   var homeA=addr(manHomeClub); // Destination is always the home ground
 
-  var manIcon=manPreset==='station'?'🚉 ':manPreset==='custom'?'📍 ':'🏟 ';
-  var awayLabel=manAwayClub.short||manAwayClub.name;
-  var homeLabel=manHomeClub.short||manHomeClub.name;
+  var awayStadium=manAwayClub.stadium||manAwayClub.short||manAwayClub.name;
+  var homeStadium=manHomeClub.stadium||manHomeClub.short||manHomeClub.name;
+  var awayStationName=(manAwayClub.short||manAwayClub.name)+' Station';
+  var manCustomVal=document.getElementById('manCustomAddr')?document.getElementById('manCustomAddr').value.trim():'';
+
+  var manIcon,awayDescLabel;
+  if(manPreset==='station'){awayDescLabel=awayStationName;manIcon='🚉 '}
+  else if(manPreset==='custom'){awayDescLabel=manCustomVal||'Custom';manIcon='📍 '}
+  else{awayDescLabel=awayStadium;manIcon='🏟 '}
 
   var origin,dest,oL,dL;
   if(manDir==='to'){
     origin=awayA;dest=homeA;
-    oL=manIcon+awayLabel;
-    dL='🏟 '+homeLabel;
+    oL=manIcon+awayDescLabel;
+    dL='🏟 '+homeStadium;
   }else{
     origin=homeA;dest=awayA;
-    oL='🏟 '+homeLabel;
-    dL=manIcon+awayLabel;
+    oL='🏟 '+homeStadium;
+    dL=manIcon+awayDescLabel;
   }
 
   var opts={};
@@ -686,12 +720,12 @@ function render(routes,idx,oL,dL){
       var nextStep=steps[si2+1];
       var prevStep=si2>0?steps[si2-1]:null;
       if(nextStep&&nextStep.transitDetails&&nextStep.transitDetails.stopDetails&&nextStep.transitDetails.stopDetails.departureStop){
-        walkDesc='Walk to '+nextStep.transitDetails.stopDetails.departureStop.name;
+        walkDesc='Walk to '+addCRS(nextStep.transitDetails.stopDetails.departureStop.name);
       }else if(!nextStep){
         // Last step — walking to destination
         walkDesc='Walk to destination';
       }else if(prevStep&&prevStep.transitDetails&&prevStep.transitDetails.stopDetails&&prevStep.transitDetails.stopDetails.arrivalStop){
-        walkDesc='Walk from '+prevStep.transitDetails.stopDetails.arrivalStop.name;
+        walkDesc='Walk from '+addCRS(prevStep.transitDetails.stopDetails.arrivalStop.name);
       }
 
       // Detect interchange: short walk between two transit legs
@@ -699,7 +733,7 @@ function render(routes,idx,oL,dL){
         prevStep.transitDetails&&nextStep.transitDetails;
       if(isInterchange){
         var changeAt=nextStep.transitDetails.stopDetails&&nextStep.transitDetails.stopDetails.departureStop?
-          nextStep.transitDetails.stopDetails.departureStop.name:'';
+          addCRS(nextStep.transitDetails.stopDetails.departureStop.name):'';
         var changeLabel=changeAt?'Change at '+changeAt:'Change';
         h+='<div class="tp__walk-connector"><span class="wc-dot"></span><span class="wc-line"></span>🔄 '+changeLabel+(distT?' · '+distT:'')+(durT?' · '+durT:'')+'</div>';
         continue;
@@ -730,8 +764,8 @@ function render(routes,idx,oL,dL){
       var emoji=vEmoji(vtype);
       pillLabel=lnName?(emoji+' '+lnName):vL(vtype);
 
-      // Main text = boarding → alighting (your stops)
-      mainText=(ds.name||'')+(as.name?' → '+as.name:'');
+      // Main text = boarding → alighting (your stops) with CRS codes
+      mainText=addCRS(ds.name||'')+(as.name?' → '+addCRS(as.name):'');
 
       // Sub text = vehicle type ∙ stop count ∙ towards headsign ∙ duration
       var parts=[];
@@ -850,13 +884,23 @@ function vC(t){return{BUS:'bus',INTERCITY_BUS:'bus',RAIL:'train',HEAVY_RAIL:'tra
 function vL(t){return{BUS:'🚌 Bus',INTERCITY_BUS:'🚌 Coach',RAIL:'🚆 Train',HEAVY_RAIL:'🚆 Train',COMMUTER_TRAIN:'🚆 Train',HIGH_SPEED_TRAIN:'🚄 Train',LONG_DISTANCE_TRAIN:'🚆 Train',SUBWAY:'🚇 Metro',METRO_RAIL:'🚇 Metro',TRAM:'🚊 Tram',LIGHT_RAIL:'🚊 Tram',FERRY:'⛴ Ferry'}[t]||'🚆 Transit'}
 function vEmoji(t){return{BUS:'🚌',INTERCITY_BUS:'🚌',RAIL:'🚆',HEAVY_RAIL:'🚆',COMMUTER_TRAIN:'🚆',HIGH_SPEED_TRAIN:'🚄',LONG_DISTANCE_TRAIN:'🚆',SUBWAY:'🚇',METRO_RAIL:'🚇',TRAM:'🚊',LIGHT_RAIL:'🚊',FERRY:'⛴'}[t]||'🚆'}
 function vShort(t){return{BUS:'Bus',INTERCITY_BUS:'Coach',RAIL:'Train',HEAVY_RAIL:'Train',COMMUTER_TRAIN:'Train',HIGH_SPEED_TRAIN:'Train',LONG_DISTANCE_TRAIN:'Train',SUBWAY:'Metro',METRO_RAIL:'Metro',TRAM:'Tram',LIGHT_RAIL:'Tram',FERRY:'Ferry'}[t]||'Transit'}
-function abbr(s){return s&&s.length>28?s.substring(0,26)+'…':s||''}
+function abbr(s){return s&&s.length>35?s.substring(0,33)+'…':s||''}
 function esc(s){return(s||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}
 
 // ── Init ──
 window.nlAuthReady=function(){
   document.getElementById('pageWrap').style.display='block';
-  loadClubs();initMap();
+  loadClubs();loadCRS();initMap();
+  // Set default KO: today, 15:00 weekend or 19:45 weekday
+  var now=new Date();
+  var day=now.getDay(); // 0=Sun, 6=Sat
+  var isWeekend=(day===0||day===6);
+  var hh=isWeekend?'15':'19';
+  var mm=isWeekend?'00':'45';
+  var yyyy=now.getFullYear();
+  var mo=String(now.getMonth()+1).padStart(2,'0');
+  var dd=String(now.getDate()).padStart(2,'0');
+  document.getElementById('manKO').value=yyyy+'-'+mo+'-'+dd+'T'+hh+':'+mm;
   setTimeout(function(){
     setupAC('fixClubInput','fixClubAC','fixClubWrap',selFC);
     setupAC('manHomeI','manHomeAC','manHomeW',selManHome);
