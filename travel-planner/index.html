@@ -5,16 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Travel Planner — NL Tools</title>
 <!--
-  NL Travel Planner v31.0
+  NL Travel Planner v32.0
   Changelog:
-  v31.0| 02/05/2026 | CRS station codes:
-       |            | - Loads UK station CRS codes from stations.json.
-       |            | - Appends 3-letter code to stop names: "Rochdale (RCD)".
-       |            | - Fuzzy matching handles London prefix, International suffix.
-       |            | - Applied to boarding/alighting stops, walk descriptions, interchanges.
-  v30.0| 02/05/2026 | Routing fix: always away fans' route, destination = home ground.
+  v32.0| 02/05/2026 | Walk label fixes + CRS improvements:
+       |            | - First walk: "Walk from The Silverlands" (uses origin label).
+       |            | - Last walk: "Walk to 1st Cloud Arena" (uses destination label).
+       |            | - CRS fuzzy matching: partial suffix match for short stop names.
+       |            | - Only matches unambiguous single results (5+ char names).
+  v31.0| 02/05/2026 | CRS station codes on all stop names.
+  v30.0| 02/05/2026 | Routing fix: always away fans' route.
   v29.0| 02/05/2026 | Stadium names in labels, default KO time.
-  v28.0| 01/05/2026 | Interchange detection.
 -->
 <link rel="stylesheet" href="/tools/system/nl-brand.css">
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -24,7 +24,7 @@
 <script>
   window.NL_TOOL={title:'Travel Planner',toolKey:'staff-travel'};
   var NL_TOOL_KEY='staff-travel';
-  window.NL_CHANGELOG=[{date:'02/05/2026',version:'v31.0',items:['CRS station codes appended to stop names.','Fuzzy matching for London prefix and suffixes.','Applied to all stop references in route display.']}];
+  window.NL_CHANGELOG=[{date:'02/05/2026',version:'v32.0',items:['First walk: Walk from [origin stadium].','Last walk: Walk to [destination stadium].','CRS partial matching for short stop names.']}];
 </script>
 <script src="/tools/system/nl-utils.js"></script>
 <script src="/tools/system/nl-topbar.js"></script>
@@ -300,7 +300,10 @@ async function initMap(){try{await google.maps.importLibrary('maps');await googl
 
 function loadClubs(){fetch(CMU).then(function(r){return r.json()}).then(function(d){clubs=(d.clubs||[]).map(function(c){return{name:c.name||'',code:c.code||'',short:c.short||'',stadium:c.stadium||'',division:c.division||'',optaID:c.optaID||'',postcode:c.postcode||'',colors:c.colors||{}}}).sort(function(a,b){return a.name.localeCompare(b.name)})}).catch(function(){})}
 function loadCRS(){fetch(STN_URL).then(function(r){return r.json()}).then(function(data){data.forEach(function(s){var name=s.stationName,code=s.crsCode;if(!name||!code)return;crsLookup[name.toLowerCase()]=code;if(name.toLowerCase().indexOf('london ')===0)crsLookup[name.substring(7).toLowerCase()]=code;if(name.toLowerCase().indexOf(' international')!==-1){crsLookup[name.replace(/ International/i,'').toLowerCase()]=code;if(name.toLowerCase().indexOf('london ')===0)crsLookup[name.substring(7).replace(/ International/i,'').toLowerCase()]=code}})}).catch(function(){})}
-function getCRS(n){if(!n)return'';var k=n.toLowerCase().replace(/ railway station$/,'').replace(/ station$/,'').replace(/ rail$/,'').trim();return crsLookup[k]||crsLookup[n.toLowerCase()]||''}
+function getCRS(n){if(!n)return'';var k=n.toLowerCase().replace(/ railway station$/,'').replace(/ station$/,'').replace(/ rail$/,'').trim();var c=crsLookup[k]||crsLookup[n.toLowerCase()]||'';if(c)return c;
+// Fallback: try matching as a suffix — only if exactly one match (unambiguous)
+if(k.length>=5){var keys=Object.keys(crsLookup),matches=[];for(var i=0;i<keys.length;i++){if(keys[i].length>k.length&&keys[i].indexOf(' '+k)===keys[i].length-k.length-1)matches.push(crsLookup[keys[i]])}if(matches.length===1)return matches[0]}
+return''}
 function addCRS(n){var c=getCRS(n);return c?n+' ('+c+')':n}
 function cU(n){return CB+encodeURIComponent(n)+'.png'}
 function addr(c){
@@ -719,11 +722,17 @@ function render(routes,idx,oL,dL){
       var walkDesc='Walk';
       var nextStep=steps[si2+1];
       var prevStep=si2>0?steps[si2-1]:null;
-      if(nextStep&&nextStep.transitDetails&&nextStep.transitDetails.stopDetails&&nextStep.transitDetails.stopDetails.departureStop){
-        walkDesc='Walk to '+addCRS(nextStep.transitDetails.stopDetails.departureStop.name);
-      }else if(!nextStep){
+      var isFirst=!prevStep||(!prevStep.transitDetails&&!prevStep._w);
+      var isLast=!nextStep;
+
+      if(isFirst&&si2===0){
+        // First step — walking from origin
+        walkDesc='Walk from '+oL.replace(/^🏟 |^🚉 |^📍 /,'');
+      }else if(isLast){
         // Last step — walking to destination
-        walkDesc='Walk to destination';
+        walkDesc='Walk to '+dL.replace(/^🏟 |^🚉 |^📍 /,'');
+      }else if(nextStep&&nextStep.transitDetails&&nextStep.transitDetails.stopDetails&&nextStep.transitDetails.stopDetails.departureStop){
+        walkDesc='Walk to '+addCRS(nextStep.transitDetails.stopDetails.departureStop.name);
       }else if(prevStep&&prevStep.transitDetails&&prevStep.transitDetails.stopDetails&&prevStep.transitDetails.stopDetails.arrivalStop){
         walkDesc='Walk from '+addCRS(prevStep.transitDetails.stopDetails.arrivalStop.name);
       }
