@@ -5,16 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Travel Planner — NL Tools</title>
 <!--
-  NL Travel Planner v32.0
+  NL Travel Planner v33.0
   Changelog:
-  v32.0| 02/05/2026 | Walk label fixes + CRS improvements:
-       |            | - First walk: "Walk from The Silverlands" (uses origin label).
-       |            | - Last walk: "Walk to 1st Cloud Arena" (uses destination label).
-       |            | - CRS fuzzy matching: partial suffix match for short stop names.
-       |            | - Only matches unambiguous single results (5+ char names).
-  v31.0| 02/05/2026 | CRS station codes on all stop names.
+  v33.0| 02/05/2026 | Board bookends + smart stop labels:
+       |            | - Depart/Arrive bookend rows at top and bottom of board.
+       |            | - CRS codes only on rail stops. Tram/Metro/Bus get type label instead.
+       |            | - "Piccadilly (Tram)" not "Piccadilly (MAN)".
+       |            | - Walk to/from uses destination/origin names.
+       |            | - Interchange labels also use smart stop format.
+  v32.0| 02/05/2026 | Walk labels use origin/destination names. CRS partial matching.
+  v31.0| 02/05/2026 | CRS station codes loaded from stations.json.
   v30.0| 02/05/2026 | Routing fix: always away fans' route.
-  v29.0| 02/05/2026 | Stadium names in labels, default KO time.
 -->
 <link rel="stylesheet" href="/tools/system/nl-brand.css">
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -24,7 +25,7 @@
 <script>
   window.NL_TOOL={title:'Travel Planner',toolKey:'staff-travel'};
   var NL_TOOL_KEY='staff-travel';
-  window.NL_CHANGELOG=[{date:'02/05/2026',version:'v32.0',items:['First walk: Walk from [origin stadium].','Last walk: Walk to [destination stadium].','CRS partial matching for short stop names.']}];
+  window.NL_CHANGELOG=[{date:'02/05/2026',version:'v33.0',items:['Depart/Arrive bookend rows on board.','CRS only on rail; Tram/Metro/Bus get type labels.','Walks use origin and destination names.']}];
 </script>
 <script src="/tools/system/nl-utils.js"></script>
 <script src="/tools/system/nl-topbar.js"></script>
@@ -702,13 +703,32 @@ function render(routes,idx,oL,dL){
   // Board in scroll container
   h+='<div class="tp__board-scroll"><div class="tp__board">';
 
+  // Helper: get vehicle type from a transit step
+  function stepVT(st){if(!st||!st.transitDetails||!st.transitDetails.transitLine||!st.transitDetails.transitLine.vehicle)return'';return st.transitDetails.transitLine.vehicle.type}
+  function isRail(vt){return vt==='RAIL'||vt==='HEAVY_RAIL'||vt==='COMMUTER_TRAIN'||vt==='HIGH_SPEED_TRAIN'||vt==='LONG_DISTANCE_TRAIN'}
+  // Format stop: rail gets CRS code, others get (Tram)/(Metro)/(Bus)
+  function fmtStop(name,vt){
+    if(!name)return'';
+    if(isRail(vt))return addCRS(name);
+    if(vt==='TRAM'||vt==='LIGHT_RAIL')return name+' (Tram)';
+    if(vt==='SUBWAY'||vt==='METRO_RAIL')return name+' (Metro)';
+    if(vt==='BUS'||vt==='INTERCITY_BUS')return name+' (Bus)';
+    return name;
+  }
+
+  // Depart bookend
+  var originName=oL.replace(/^🏟 |^🚉 |^📍 /,'');
+  var destName=dL.replace(/^🏟 |^🚉 |^📍 /,'');
+  var oIcon=oL.match(/^(🏟|🚉|📍)/);oIcon=oIcon?oIcon[0]+' ':'';
+  var dIcon=dL.match(/^(🏟|🚉|📍)/);dIcon=dIcon?dIcon[0]+' ':'';
+  h+='<div class="tp__walk-connector" style="font-weight:800;color:var(--navy);font-size:11px"><span class="wc-dot" style="background:var(--navy)"></span><span class="wc-line" style="background:var(--navy)"></span>'+oIcon+'Depart '+originName+'</div>';
+
   for(var si2=0;si2<steps.length;si2++){
     var s=steps[si2];
     var cls=sClass(s),dep='',arr='',durT='',distT='';
     var lineCol='',lineTxt='',pillLabel='',mainText='',subText='';
 
     if(s._w){
-      // Consolidated walk
       var totalDist=0;
       s._w.forEach(function(ws){
         if(ws.localizedValues&&ws.localizedValues.staticDuration&&ws.localizedValues.staticDuration.text)durT=durT||ws.localizedValues.staticDuration.text;
@@ -718,37 +738,28 @@ function render(routes,idx,oL,dL){
         totalDist+=dm;
       });
 
-      // Build contextual walk description
       var walkDesc='Walk';
       var nextStep=steps[si2+1];
       var prevStep=si2>0?steps[si2-1]:null;
-      var isFirst=!prevStep||(!prevStep.transitDetails&&!prevStep._w);
       var isLast=!nextStep;
 
-      if(isFirst&&si2===0){
-        // First step — walking from origin
-        walkDesc='Walk from '+oL.replace(/^🏟 |^🚉 |^📍 /,'');
-      }else if(isLast){
-        // Last step — walking to destination
-        walkDesc='Walk to '+dL.replace(/^🏟 |^🚉 |^📍 /,'');
+      if(isLast){
+        walkDesc='Walk to '+destName;
       }else if(nextStep&&nextStep.transitDetails&&nextStep.transitDetails.stopDetails&&nextStep.transitDetails.stopDetails.departureStop){
-        walkDesc='Walk to '+addCRS(nextStep.transitDetails.stopDetails.departureStop.name);
+        walkDesc='Walk to '+fmtStop(nextStep.transitDetails.stopDetails.departureStop.name,stepVT(nextStep));
       }else if(prevStep&&prevStep.transitDetails&&prevStep.transitDetails.stopDetails&&prevStep.transitDetails.stopDetails.arrivalStop){
-        walkDesc='Walk from '+addCRS(prevStep.transitDetails.stopDetails.arrivalStop.name);
+        walkDesc='Walk from '+fmtStop(prevStep.transitDetails.stopDetails.arrivalStop.name,stepVT(prevStep));
       }
 
-      // Detect interchange: short walk between two transit legs
-      var isInterchange=totalDist<500&&prevStep&&nextStep&&
-        prevStep.transitDetails&&nextStep.transitDetails;
+      // Detect interchange
+      var isInterchange=totalDist<500&&prevStep&&nextStep&&prevStep.transitDetails&&nextStep.transitDetails;
       if(isInterchange){
-        var changeAt=nextStep.transitDetails.stopDetails&&nextStep.transitDetails.stopDetails.departureStop?
-          addCRS(nextStep.transitDetails.stopDetails.departureStop.name):'';
-        var changeLabel=changeAt?'Change at '+changeAt:'Change';
-        h+='<div class="tp__walk-connector"><span class="wc-dot"></span><span class="wc-line"></span>🔄 '+changeLabel+(distT?' · '+distT:'')+(durT?' · '+durT:'')+'</div>';
+        var chName=nextStep.transitDetails.stopDetails&&nextStep.transitDetails.stopDetails.departureStop?
+          fmtStop(nextStep.transitDetails.stopDetails.departureStop.name,stepVT(nextStep)):'';
+        h+='<div class="tp__walk-connector"><span class="wc-dot"></span><span class="wc-line"></span>🔄 '+(chName?'Change at '+chName:'Change')+(distT?' · '+distT:'')+(durT?' · '+durT:'')+'</div>';
         continue;
       }
 
-      // Short walks → connector with context
       if(totalDist<300&&totalDist>0){
         h+='<div class="tp__walk-connector"><span class="wc-dot"></span><span class="wc-line"></span>🚶 '+walkDesc+(distT?' · '+distT:'')+(durT?' · '+durT:'')+'</div>';
         continue;
@@ -773,8 +784,8 @@ function render(routes,idx,oL,dL){
       var emoji=vEmoji(vtype);
       pillLabel=lnName?(emoji+' '+lnName):vL(vtype);
 
-      // Main text = boarding → alighting (your stops) with CRS codes
-      mainText=addCRS(ds.name||'')+(as.name?' → '+addCRS(as.name):'');
+      // Main text = boarding → alighting with CRS (rail) or type label (tram/metro/bus)
+      mainText=fmtStop(ds.name||'',vtype)+(as.name?' → '+fmtStop(as.name,vtype):'');
 
       // Sub text = vehicle type ∙ stop count ∙ towards headsign ∙ duration
       var parts=[];
@@ -805,6 +816,9 @@ function render(routes,idx,oL,dL){
     if(subText)h+='<div class="tp__leg-stops">'+subText+'</div>';
     h+='</div></div>';
   }
+
+  // Arrive bookend
+  h+='<div class="tp__walk-connector" style="font-weight:800;color:var(--navy);font-size:11px"><span class="wc-dot" style="background:var(--navy)"></span><span class="wc-line" style="background:var(--navy)"></span>'+dIcon+'Arrive '+destName+'</div>';
 
   h+='</div></div>'; // close board + board-scroll
   h+='</div></div>'; // close board-col + results
