@@ -5,17 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Travel Planner — NL Tools</title>
 <!--
-  NL Travel Planner v33.0
+  NL Travel Planner v34.0
   Changelog:
-  v33.0| 02/05/2026 | Board bookends + smart stop labels:
-       |            | - Depart/Arrive bookend rows at top and bottom of board.
-       |            | - CRS codes only on rail stops. Tram/Metro/Bus get type label instead.
-       |            | - "Piccadilly (Tram)" not "Piccadilly (MAN)".
-       |            | - Walk to/from uses destination/origin names.
-       |            | - Interchange labels also use smart stop format.
-  v32.0| 02/05/2026 | Walk labels use origin/destination names. CRS partial matching.
-  v31.0| 02/05/2026 | CRS station codes loaded from stations.json.
-  v30.0| 02/05/2026 | Routing fix: always away fans' route.
+  v34.0| 02/05/2026 | Smart walk skip for station preset:
+       |            | - Station preset: first walk stripped on TO, last walk stripped on FROM.
+       |            | - Stadium/Custom: all walks shown (you need to get to the station).
+       |            | - Depart/Arrive bookends show departure and arrival times.
+  v33.0| 02/05/2026 | Depart/Arrive bookends, CRS rail only, type labels for tram/metro/bus.
+  v32.0| 02/05/2026 | Walk labels, CRS partial matching.
+  v31.0| 02/05/2026 | CRS station codes from stations.json.
 -->
 <link rel="stylesheet" href="/tools/system/nl-brand.css">
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -25,7 +23,7 @@
 <script>
   window.NL_TOOL={title:'Travel Planner',toolKey:'staff-travel'};
   var NL_TOOL_KEY='staff-travel';
-  window.NL_CHANGELOG=[{date:'02/05/2026',version:'v33.0',items:['Depart/Arrive bookend rows on board.','CRS only on rail; Tram/Metro/Bus get type labels.','Walks use origin and destination names.']}];
+  window.NL_CHANGELOG=[{date:'02/05/2026',version:'v34.0',items:['Station preset skips first/last walk as appropriate.','Stadium/Custom presets show all walks.','Depart/Arrive bookends with times.']}];
 </script>
 <script src="/tools/system/nl-utils.js"></script>
 <script src="/tools/system/nl-topbar.js"></script>
@@ -295,6 +293,7 @@ var SID=2025,CIDS=[89,373,372];
 var clubs=[],fixClub=null,fixMatch=null,fixDir='to',fixPreset='stadium';
 var gMap=null,gPoly=null,allR=[],aIdx=0,mapOK=false;
 var crsLookup={}; // station name → CRS code
+var lastSkipWalk=null; // 'first','last', or null
 var lastSearch=null;
 
 async function initMap(){try{await google.maps.importLibrary('maps');await google.maps.importLibrary('geometry');mapOK=true}catch(e){}}
@@ -481,7 +480,12 @@ function doFixSearch(){
     opts.departureTime=new Date(ko.getTime()+72e5+ea*6e4).toISOString();
   }
   lastSearch={o:origin,d:dest,oL:oL,dL:dL,opts:opts};
-  doRoute(origin,dest,'TRANSIT',opts,oL,dL,getEnabledModes());
+  // Station preset: skip the walk at the away club's end
+  var sw=null;
+  if(fixPreset==='station'){
+    sw=fixDir==='to'?'first':'last'; // TO: away end is origin (first walk). FROM: away end is destination (last walk)
+  }
+  doRoute(origin,dest,'TRANSIT',opts,oL,dL,getEnabledModes(),sw);
 }
 
 function doManSearch(){
@@ -524,10 +528,14 @@ function doManSearch(){
     opts.departureTime=new Date(ko.getTime()+72e5+ea*6e4).toISOString();
   }
 
-  doRoute(origin,dest,'TRANSIT',opts,oL,dL,getManModes());
+  var msw=null;
+  if(manPreset==='station'){
+    msw=manDir==='to'?'first':'last';
+  }
+  doRoute(origin,dest,'TRANSIT',opts,oL,dL,getManModes(),msw);
 }
 
-async function doRoute(o,d,tm,opts,oL,dL,modes){
+async function doRoute(o,d,tm,opts,oL,dL,modes,skipWalk){
   var ra=document.getElementById('resultsArea');
   ra.innerHTML='<div class="tp__loading"><div class="tp__spinner"></div>Finding routes…</div>';
   var isToMode=!!opts.arrivalTime; // TO = arrivalTime, FROM = departureTime
@@ -543,7 +551,7 @@ async function doRoute(o,d,tm,opts,oL,dL,modes){
       else no.departureTime=new Date(new Date(edge).getTime()+3e5).toISOString();
       try{var mr=await callAPI(o,d,tm,no,modes);if(mr.routes)collected=collected.concat(mr.routes)}catch(e){break}
     }
-    allR=dedupeRoutes(collected,isToMode);aIdx=0;render(allR,0,oL,dL);
+    allR=dedupeRoutes(collected,isToMode);aIdx=0;lastSkipWalk=skipWalk||null;render(allR,0,oL,dL);
   }catch(e){ra.innerHTML='<div class="tp__error">'+e.message+'</div>'}
 }
 
@@ -721,7 +729,7 @@ function render(routes,idx,oL,dL){
   var destName=dL.replace(/^🏟 |^🚉 |^📍 /,'');
   var oIcon=oL.match(/^(🏟|🚉|📍)/);oIcon=oIcon?oIcon[0]+' ':'';
   var dIcon=dL.match(/^(🏟|🚉|📍)/);dIcon=dIcon?dIcon[0]+' ':'';
-  h+='<div class="tp__walk-connector" style="font-weight:800;color:var(--navy);font-size:11px"><span class="wc-dot" style="background:var(--navy)"></span><span class="wc-line" style="background:var(--navy)"></span>'+oIcon+'Depart '+originName+'</div>';
+  h+='<div class="tp__walk-connector" style="font-weight:800;color:var(--navy);font-size:11px"><span class="wc-dot" style="background:var(--navy)"></span><span class="wc-line" style="background:var(--navy)"></span>'+oIcon+'Depart '+originName+(overallDep?' · '+overallDep:'')+'</div>';
 
   for(var si2=0;si2<steps.length;si2++){
     var s=steps[si2];
@@ -742,6 +750,12 @@ function render(routes,idx,oL,dL){
       var nextStep=steps[si2+1];
       var prevStep=si2>0?steps[si2-1]:null;
       var isLast=!nextStep;
+      var isFirstWalk=(si2===0);
+
+      // Skip first walk if departing from station (already there)
+      if(isFirstWalk&&lastSkipWalk==='first')continue;
+      // Skip last walk if arriving at station
+      if(isLast&&lastSkipWalk==='last')continue;
 
       if(isLast){
         walkDesc='Walk to '+destName;
@@ -818,7 +832,7 @@ function render(routes,idx,oL,dL){
   }
 
   // Arrive bookend
-  h+='<div class="tp__walk-connector" style="font-weight:800;color:var(--navy);font-size:11px"><span class="wc-dot" style="background:var(--navy)"></span><span class="wc-line" style="background:var(--navy)"></span>'+dIcon+'Arrive '+destName+'</div>';
+  h+='<div class="tp__walk-connector" style="font-weight:800;color:var(--navy);font-size:11px"><span class="wc-dot" style="background:var(--navy)"></span><span class="wc-line" style="background:var(--navy)"></span>'+dIcon+'Arrive '+destName+(overallArr?' · '+overallArr:'')+'</div>';
 
   h+='</div></div>'; // close board + board-scroll
   h+='</div></div>'; // close board-col + results
