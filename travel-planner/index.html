@@ -5,15 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Travel Planner — NL Tools</title>
 <!--
-  NL Travel Planner v34.0
+  NL Travel Planner v36.0
   Changelog:
-  v34.0| 02/05/2026 | Smart walk skip for station preset:
-       |            | - Station preset: first walk stripped on TO, last walk stripped on FROM.
-       |            | - Stadium/Custom: all walks shown (you need to get to the station).
-       |            | - Depart/Arrive bookends show departure and arrival times.
-  v33.0| 02/05/2026 | Depart/Arrive bookends, CRS rail only, type labels for tram/metro/bus.
-  v32.0| 02/05/2026 | Walk labels, CRS partial matching.
-  v31.0| 02/05/2026 | CRS station codes from stations.json.
+  v36.0| 02/05/2026 | Station data from clubs-meta.json:
+       |            | - loadClubs() captures station[] array per club.
+       |            | - stationAddr() reads from station field, not guessed name.
+       |            | - Preset labels show actual station name(s).
+       |            | - Multi-station clubs (Southend, Maidstone, Brackley):
+       |            |   parallel API calls, merged + deduped results.
+       |            | - stationLabel() helper for display names.
+  v35.0| 02/05/2026 | Walk logic overhaul.
+  v34.0| 02/05/2026 | Station preset skips first/last walk. Bookend times.
+  v33.0| 02/05/2026 | Depart/Arrive bookends. CRS rail only, type labels for others.
+  v32.0| 02/05/2026 | Walk labels, CRS matching.
 -->
 <link rel="stylesheet" href="/tools/system/nl-brand.css">
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -23,7 +27,7 @@
 <script>
   window.NL_TOOL={title:'Travel Planner',toolKey:'staff-travel'};
   var NL_TOOL_KEY='staff-travel';
-  window.NL_CHANGELOG=[{date:'02/05/2026',version:'v34.0',items:['Station preset skips first/last walk as appropriate.','Stadium/Custom presets show all walks.','Depart/Arrive bookends with times.']}];
+  window.NL_CHANGELOG=[{date:'02/05/2026',version:'v36.0',items:['Station data from clubs-meta.json.','Multi-station parallel search (Southend, Maidstone, Brackley).','Preset labels show actual station names.']}];
 </script>
 <script src="/tools/system/nl-utils.js"></script>
 <script src="/tools/system/nl-topbar.js"></script>
@@ -298,7 +302,7 @@ var lastSearch=null;
 
 async function initMap(){try{await google.maps.importLibrary('maps');await google.maps.importLibrary('geometry');mapOK=true}catch(e){}}
 
-function loadClubs(){fetch(CMU).then(function(r){return r.json()}).then(function(d){clubs=(d.clubs||[]).map(function(c){return{name:c.name||'',code:c.code||'',short:c.short||'',stadium:c.stadium||'',division:c.division||'',optaID:c.optaID||'',postcode:c.postcode||'',colors:c.colors||{}}}).sort(function(a,b){return a.name.localeCompare(b.name)})}).catch(function(){})}
+function loadClubs(){fetch(CMU).then(function(r){return r.json()}).then(function(d){clubs=(d.clubs||[]).map(function(c){return{name:c.name||'',code:c.code||'',short:c.short||'',stadium:c.stadium||'',division:c.division||'',optaID:c.optaID||'',postcode:c.postcode||'',colors:c.colors||{},station:c.station||[]}}).sort(function(a,b){return a.name.localeCompare(b.name)})}).catch(function(){})}
 function loadCRS(){fetch(STN_URL).then(function(r){return r.json()}).then(function(data){data.forEach(function(s){var name=s.stationName,code=s.crsCode;if(!name||!code)return;crsLookup[name.toLowerCase()]=code;if(name.toLowerCase().indexOf('london ')===0)crsLookup[name.substring(7).toLowerCase()]=code;if(name.toLowerCase().indexOf(' international')!==-1){crsLookup[name.replace(/ International/i,'').toLowerCase()]=code;if(name.toLowerCase().indexOf('london ')===0)crsLookup[name.substring(7).replace(/ International/i,'').toLowerCase()]=code}})}).catch(function(){})}
 function getCRS(n){if(!n)return'';var k=n.toLowerCase().replace(/ railway station$/,'').replace(/ station$/,'').replace(/ rail$/,'').trim();var c=crsLookup[k]||crsLookup[n.toLowerCase()]||'';if(c)return c;
 // Fallback: try matching as a suffix — only if exactly one match (unambiguous)
@@ -311,9 +315,22 @@ function addr(c){
   if(c.postcode)return c.stadium+', '+c.postcode+', UK';
   return c.stadium+', '+(c.short||c.name)+', UK';
 }
-function stationAddr(c){
-  // Use "[town] railway station" — Google geocodes this well for UK stations
+function stationAddr(c,idx){
+  // Return Google-geocodable address for a club's station
+  // idx selects which station (0-based) for multi-station clubs; defaults to 0
+  if(c.station&&c.station.length){
+    var sn=c.station[idx||0]||c.station[0];
+    return sn+' Station, UK';
+  }
+  // Fallback if no station data
   return(c.short||c.name)+' Railway Station, UK';
+}
+function stationLabel(c){
+  // Human-readable label for preset button: "Southend Central / Victoria"
+  if(!c.station||!c.station.length)return(c.short||c.name)+' Station';
+  if(c.station.length===1)return c.station[0];
+  // Multi: abbreviate — show both separated by /
+  return c.station.join(' / ');
 }
 
 // ── AC ──
@@ -356,7 +373,7 @@ function updatePresetLabels(){
   btns.forEach(function(b){
     var p=b.getAttribute('data-p');
     if(p==='stadium')b.textContent='🏟 '+(awayC.stadium||awayC.short||awayC.name);
-    else if(p==='station')b.textContent='🚉 '+(awayC.short||awayC.name)+' Station';
+    else if(p==='station')b.textContent='🚉 '+stationLabel(awayC);
   });
 }
 function getEnabledModes(){var modes=[];document.querySelectorAll('#transitToggles .tp__tt.on').forEach(function(b){modes.push(b.getAttribute('data-t'))});return modes}
@@ -408,7 +425,7 @@ function updateManPresetLabels(){
   btns.forEach(function(b){
     var p=b.getAttribute('data-p');
     if(p==='stadium')b.textContent='🏟 '+(club.stadium||club.short||club.name);
-    else if(p==='station')b.textContent='🚉 '+(club.short||club.name)+' Station';
+    else if(p==='station')b.textContent='🚉 '+stationLabel(club);
   });
 }
 function getManModes(){return[]}  // No filter
@@ -449,27 +466,24 @@ function doFixSearch(){
   var homeStadiumLabel=homeClub?(homeClub.stadium||homeClub.short||homeClub.name):'Home';
 
   // Away club start point depends on preset
-  var awayAddr=awayClub?(fixPreset==='station'?stationAddr(awayClub):fixPreset==='custom'?document.getElementById('fixCustomAddr').value.trim():addr(awayClub)):'';
-  var awayStadiumLabel=awayClub?(awayClub.stadium||awayClub.short||awayClub.name):'Away';
-  var awayStationLabel=awayClub?((awayClub.short||awayClub.name)+' Station'):'Away Station';
   var customAddrVal=document.getElementById('fixCustomAddr')?document.getElementById('fixCustomAddr').value.trim():'';
 
+  // Build list of away addresses to query (multi-station support)
+  var awayAddrs=[];
+  if(fixPreset==='station'&&awayClub&&awayClub.station&&awayClub.station.length>1){
+    awayClub.station.forEach(function(sn,i){awayAddrs.push(stationAddr(awayClub,i))});
+  }else{
+    var singleAddr=awayClub?(fixPreset==='station'?stationAddr(awayClub):fixPreset==='custom'?customAddrVal:addr(awayClub)):'';
+    awayAddrs.push(singleAddr);
+  }
+
+  var awayStadiumLabel=awayClub?(awayClub.stadium||awayClub.short||awayClub.name):'Away';
+  var awayStLabel=awayClub?stationLabel(awayClub):'Away Station';
+
   var awayIcon,awayDescLabel;
-  if(fixPreset==='station'){awayDescLabel=awayStationLabel;awayIcon='🚉 '}
+  if(fixPreset==='station'){awayDescLabel=awayStLabel;awayIcon='🚉 '}
   else if(fixPreset==='custom'){awayDescLabel=customAddrVal||'Custom';awayIcon='📍 '}
   else{awayDescLabel=awayStadiumLabel;awayIcon='🏟 '}
-
-  // TO = away fans going to the match. FROM = away fans going home.
-  var origin,dest,oL,dL;
-  if(fixDir==='to'){
-    origin=awayAddr;dest=homeGroundAddr;
-    oL=awayIcon+awayDescLabel;
-    dL='🏟 '+homeStadiumLabel;
-  }else{
-    origin=homeGroundAddr;dest=awayAddr;
-    oL='🏟 '+homeStadiumLabel;
-    dL=awayIcon+awayDescLabel;
-  }
 
   var ko=new Date(nd(a.kickOffDateUTC)),opts={};
   if(fixDir==='to'){
@@ -479,13 +493,24 @@ function doFixSearch(){
     var ea=+document.getElementById('extraAfter').value;
     opts.departureTime=new Date(ko.getTime()+72e5+ea*6e4).toISOString();
   }
-  lastSearch={o:origin,d:dest,oL:oL,dL:dL,opts:opts};
+
   // Station preset: skip the walk at the away club's end
   var sw=null;
   if(fixPreset==='station'){
-    sw=fixDir==='to'?'first':'last'; // TO: away end is origin (first walk). FROM: away end is destination (last walk)
+    sw=fixDir==='to'?'first':'last';
   }
-  doRoute(origin,dest,'TRANSIT',opts,oL,dL,getEnabledModes(),sw);
+
+  // Build origin/dest pairs for each away address
+  var pairs=awayAddrs.map(function(aa){
+    if(fixDir==='to') return{o:aa,d:homeGroundAddr};
+    else return{o:homeGroundAddr,d:aa};
+  });
+
+  var oL=(fixDir==='to'?awayIcon+awayDescLabel:'🏟 '+homeStadiumLabel);
+  var dL=(fixDir==='to'?'🏟 '+homeStadiumLabel:awayIcon+awayDescLabel);
+  lastSearch={o:pairs[0].o,d:pairs[0].d,oL:oL,dL:dL,opts:opts};
+
+  doMultiRoute(pairs,'TRANSIT',opts,oL,dL,getEnabledModes(),sw);
 }
 
 function doManSearch(){
@@ -494,30 +519,33 @@ function doManSearch(){
   if(!koVal){document.getElementById('resultsArea').innerHTML='<div class="tp__error">Please set a kick-off time.</div>';return}
   var ko=new Date(koVal);
 
-  // Away club is the traveller — they start from their ground/station
-  var awayA=manPreset==='station'?stationAddr(manAwayClub):manPreset==='custom'?document.getElementById('manCustomAddr').value.trim():addr(manAwayClub);
-  var homeA=addr(manHomeClub); // Destination is always the home ground
-
+  var homeA=addr(manHomeClub);
   var awayStadium=manAwayClub.stadium||manAwayClub.short||manAwayClub.name;
   var homeStadium=manHomeClub.stadium||manHomeClub.short||manHomeClub.name;
-  var awayStationName=(manAwayClub.short||manAwayClub.name)+' Station';
+  var awayStLabel=stationLabel(manAwayClub);
   var manCustomVal=document.getElementById('manCustomAddr')?document.getElementById('manCustomAddr').value.trim():'';
 
+  // Build list of away addresses (multi-station support)
+  var awayAddrs=[];
+  if(manPreset==='station'&&manAwayClub.station&&manAwayClub.station.length>1){
+    manAwayClub.station.forEach(function(sn,i){awayAddrs.push(stationAddr(manAwayClub,i))});
+  }else{
+    var singleAddr=manPreset==='station'?stationAddr(manAwayClub):manPreset==='custom'?manCustomVal:addr(manAwayClub);
+    awayAddrs.push(singleAddr);
+  }
+
   var manIcon,awayDescLabel;
-  if(manPreset==='station'){awayDescLabel=awayStationName;manIcon='🚉 '}
+  if(manPreset==='station'){awayDescLabel=awayStLabel;manIcon='🚉 '}
   else if(manPreset==='custom'){awayDescLabel=manCustomVal||'Custom';manIcon='📍 '}
   else{awayDescLabel=awayStadium;manIcon='🏟 '}
 
-  var origin,dest,oL,dL;
-  if(manDir==='to'){
-    origin=awayA;dest=homeA;
-    oL=manIcon+awayDescLabel;
-    dL='🏟 '+homeStadium;
-  }else{
-    origin=homeA;dest=awayA;
-    oL='🏟 '+homeStadium;
-    dL=manIcon+awayDescLabel;
-  }
+  var pairs=awayAddrs.map(function(aa){
+    if(manDir==='to') return{o:aa,d:homeA};
+    else return{o:homeA,d:aa};
+  });
+
+  var oL=(manDir==='to'?manIcon+awayDescLabel:'🏟 '+homeStadium);
+  var dL=(manDir==='to'?'🏟 '+homeStadium:manIcon+awayDescLabel);
 
   var opts={};
   if(manDir==='to'){
@@ -532,7 +560,50 @@ function doManSearch(){
   if(manPreset==='station'){
     msw=manDir==='to'?'first':'last';
   }
-  doRoute(origin,dest,'TRANSIT',opts,oL,dL,getManModes(),msw);
+  doMultiRoute(pairs,'TRANSIT',opts,oL,dL,getManModes(),msw);
+}
+
+// ── Multi-station route: parallel API calls, merged results ──
+async function doMultiRoute(pairs,tm,opts,oL,dL,modes,skipWalk){
+  // pairs = [{o,d}, ...] — one per station address
+  // For single-station clubs this is just [{o,d}] — same as before
+  if(pairs.length===1){
+    doRoute(pairs[0].o,pairs[0].d,tm,opts,oL,dL,modes,skipWalk);
+    return;
+  }
+  var ra=document.getElementById('resultsArea');
+  ra.innerHTML='<div class="tp__loading"><div class="tp__spinner"></div>Searching '+pairs.length+' stations…</div>';
+  var isToMode=!!opts.arrivalTime;
+  try{
+    // Fire all station queries in parallel
+    var results=await Promise.all(pairs.map(function(p){
+      return callAPI(p.o,p.d,tm,opts,modes).catch(function(){return{routes:[]}});
+    }));
+    // Merge all routes into one pool
+    var collected=[];
+    results.forEach(function(data){
+      if(data.routes)collected=collected.concat(data.routes);
+    });
+    if(!collected.length){ra.innerHTML='<div class="tp__error">No routes found across any station.</div>';return}
+
+    // Expand search: try earlier/later departures from each station
+    for(var pass=0;pass<2;pass++){
+      var dd=dedupeRoutes(collected,isToMode);if(dd.length>=4)break;
+      var edge=findEdgeDeparture(dd,isToMode?'earliest':'latest');if(!edge)break;
+      var no={};
+      if(isToMode)no.arrivalTime=new Date(new Date(edge).getTime()-18e5).toISOString();
+      else no.departureTime=new Date(new Date(edge).getTime()+3e5).toISOString();
+      try{
+        var moreResults=await Promise.all(pairs.map(function(p){
+          return callAPI(p.o,p.d,tm,no,modes).catch(function(){return{routes:[]}});
+        }));
+        moreResults.forEach(function(data){
+          if(data.routes)collected=collected.concat(data.routes);
+        });
+      }catch(e){break}
+    }
+    allR=dedupeRoutes(collected,isToMode);aIdx=0;lastSkipWalk=skipWalk||null;render(allR,0,oL,dL);
+  }catch(e){ra.innerHTML='<div class="tp__error">'+e.message+'</div>'}
 }
 
 async function doRoute(o,d,tm,opts,oL,dL,modes,skipWalk){
@@ -729,7 +800,61 @@ function render(routes,idx,oL,dL){
   var destName=dL.replace(/^🏟 |^🚉 |^📍 /,'');
   var oIcon=oL.match(/^(🏟|🚉|📍)/);oIcon=oIcon?oIcon[0]+' ':'';
   var dIcon=dL.match(/^(🏟|🚉|📍)/);dIcon=dIcon?dIcon[0]+' ':'';
-  h+='<div class="tp__walk-connector" style="font-weight:800;color:var(--navy);font-size:11px"><span class="wc-dot" style="background:var(--navy)"></span><span class="wc-line" style="background:var(--navy)"></span>'+oIcon+'Depart '+originName+(overallDep?' · '+overallDep:'')+'</div>';
+
+  // Calculate adjusted depart time (subtract first walk duration from first transit departure)
+  var departBookendTime='';
+  if(lastSkipWalk!=='first'&&overallDep){
+    // Find first walk duration in minutes
+    var firstWalkMins=0;
+    if(steps.length>0&&steps[0]._w){
+      steps[0]._w.forEach(function(ws){
+        if(ws.staticDuration){var sec=parseInt(String(ws.staticDuration).replace('s',''),10)||0;firstWalkMins+=Math.ceil(sec/60)}
+        else if(ws.localizedValues&&ws.localizedValues.staticDuration&&ws.localizedValues.staticDuration.text){
+          var m=ws.localizedValues.staticDuration.text.match(/(\d+)/);if(m)firstWalkMins+=parseInt(m[1],10);
+        }
+      });
+    }
+    if(firstWalkMins>0&&leg.steps&&leg.steps[0]){
+      // Find first transit departure as Date, subtract walk
+      for(var di=0;di<(leg.steps||[]).length;di++){
+        var ds2=leg.steps[di];
+        if(ds2.transitDetails&&ds2.transitDetails.stopDetails&&ds2.transitDetails.stopDetails.departureTime){
+          var depDate=new Date(ds2.transitDetails.stopDetails.departureTime);
+          depDate.setMinutes(depDate.getMinutes()-firstWalkMins);
+          departBookendTime=ft(depDate);break;
+        }
+      }
+    }
+    if(!departBookendTime)departBookendTime=overallDep;
+  }
+
+  // Calculate adjusted arrive time (add last walk duration to last transit arrival)
+  var arriveBookendTime='';
+  if(lastSkipWalk!=='last'&&overallArr){
+    var lastWalkMins=0;
+    if(steps.length>0&&steps[steps.length-1]._w){
+      steps[steps.length-1]._w.forEach(function(ws){
+        if(ws.staticDuration){var sec=parseInt(String(ws.staticDuration).replace('s',''),10)||0;lastWalkMins+=Math.ceil(sec/60)}
+        else if(ws.localizedValues&&ws.localizedValues.staticDuration&&ws.localizedValues.staticDuration.text){
+          var m=ws.localizedValues.staticDuration.text.match(/(\d+)/);if(m)lastWalkMins+=parseInt(m[1],10);
+        }
+      });
+    }
+    if(lastWalkMins>0){
+      // Find last transit arrival as Date, add walk
+      for(var ai2=(leg.steps||[]).length-1;ai2>=0;ai2--){
+        var as2=leg.steps[ai2];
+        if(as2.transitDetails&&as2.transitDetails.stopDetails&&as2.transitDetails.stopDetails.arrivalTime){
+          var arrDate=new Date(as2.transitDetails.stopDetails.arrivalTime);
+          arrDate.setMinutes(arrDate.getMinutes()+lastWalkMins);
+          arriveBookendTime=ft(arrDate);break;
+        }
+      }
+    }
+    if(!arriveBookendTime)arriveBookendTime=overallArr;
+  }
+
+  h+='<div class="tp__walk-connector" style="font-weight:800;color:var(--navy);font-size:11px"><span class="wc-dot" style="background:var(--navy)"></span><span class="wc-line" style="background:var(--navy)"></span>'+oIcon+'Depart '+originName+(departBookendTime?' · '+departBookendTime:'')+'</div>';
 
   for(var si2=0;si2<steps.length;si2++){
     var s=steps[si2];
@@ -752,10 +877,33 @@ function render(routes,idx,oL,dL){
       var isLast=!nextStep;
       var isFirstWalk=(si2===0);
 
-      // Skip first walk if departing from station (already there)
-      if(isFirstWalk&&lastSkipWalk==='first')continue;
-      // Skip last walk if arriving at station
-      if(isLast&&lastSkipWalk==='last')continue;
+      // Skip first walk if departing from station AND first transit leg is rail-type
+      if(isFirstWalk&&lastSkipWalk==='first'){
+        var firstVT=stepVT(nextStep);
+        if(isRail(firstVT)||firstVT==='SUBWAY'||firstVT==='METRO_RAIL')continue;
+        // Not rail — show the walk (station preset but bus route, user needs to see it)
+      }
+      // Skip last walk if arriving at station AND last transit leg is rail-type
+      if(isLast&&lastSkipWalk==='last'){
+        var lastVT=stepVT(prevStep);
+        if(isRail(lastVT)||lastVT==='SUBWAY'||lastVT==='METRO_RAIL')continue;
+      }
+
+      // Check if this is a same-station transfer (arrive and depart same place)
+      var prevArrName='',nextDepName='';
+      if(prevStep&&prevStep.transitDetails&&prevStep.transitDetails.stopDetails&&prevStep.transitDetails.stopDetails.arrivalStop)
+        prevArrName=prevStep.transitDetails.stopDetails.arrivalStop.name||'';
+      if(nextStep&&nextStep.transitDetails&&nextStep.transitDetails.stopDetails&&nextStep.transitDetails.stopDetails.departureStop)
+        nextDepName=nextStep.transitDetails.stopDetails.departureStop.name||'';
+
+      // Same station → just show transfer time, very thin
+      if(prevArrName&&nextDepName&&prevArrName.toLowerCase()===nextDepName.toLowerCase()){
+        h+='<div class="tp__walk-connector" style="font-size:9px;color:var(--text-muted)"><span class="wc-dot"></span><span class="wc-line"></span>🔄 '+(durT||'Transfer')+'</div>';
+        continue;
+      }
+
+      // Different stations between two transit legs = interchange walk
+      var isInterchange=prevStep&&nextStep&&prevStep.transitDetails&&nextStep.transitDetails;
 
       if(isLast){
         walkDesc='Walk to '+destName;
@@ -765,12 +913,9 @@ function render(routes,idx,oL,dL){
         walkDesc='Walk from '+fmtStop(prevStep.transitDetails.stopDetails.arrivalStop.name,stepVT(prevStep));
       }
 
-      // Detect interchange
-      var isInterchange=totalDist<500&&prevStep&&nextStep&&prevStep.transitDetails&&nextStep.transitDetails;
-      if(isInterchange){
-        var chName=nextStep.transitDetails.stopDetails&&nextStep.transitDetails.stopDetails.departureStop?
-          fmtStop(nextStep.transitDetails.stopDetails.departureStop.name,stepVT(nextStep)):'';
-        h+='<div class="tp__walk-connector"><span class="wc-dot"></span><span class="wc-line"></span>🔄 '+(chName?'Change at '+chName:'Change')+(distT?' · '+distT:'')+(durT?' · '+durT:'')+'</div>';
+      // Short interchange walk between different stops
+      if(isInterchange&&totalDist<500){
+        h+='<div class="tp__walk-connector"><span class="wc-dot"></span><span class="wc-line"></span>🔄 '+walkDesc+(distT?' · '+distT:'')+(durT?' · '+durT:'')+'</div>';
         continue;
       }
 
@@ -832,7 +977,7 @@ function render(routes,idx,oL,dL){
   }
 
   // Arrive bookend
-  h+='<div class="tp__walk-connector" style="font-weight:800;color:var(--navy);font-size:11px"><span class="wc-dot" style="background:var(--navy)"></span><span class="wc-line" style="background:var(--navy)"></span>'+dIcon+'Arrive '+destName+(overallArr?' · '+overallArr:'')+'</div>';
+  h+='<div class="tp__walk-connector" style="font-weight:800;color:var(--navy);font-size:11px"><span class="wc-dot" style="background:var(--navy)"></span><span class="wc-line" style="background:var(--navy)"></span>'+dIcon+'Arrive '+destName+(arriveBookendTime?' · '+arriveBookendTime:'')+'</div>';
 
   h+='</div></div>'; // close board + board-scroll
   h+='</div></div>'; // close board-col + results
