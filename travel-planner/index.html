@@ -5,15 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Travel Planner — NL Tools</title>
 <!--
-  NL Travel Planner v36.0
+  NL Travel Planner v37.0
   Changelog:
-  v36.0| 02/05/2026 | Station data from clubs-meta.json:
-       |            | - loadClubs() captures station[] array per club.
-       |            | - stationAddr() reads from station field, not guessed name.
-       |            | - Preset labels show actual station name(s).
-       |            | - Multi-station clubs (Southend, Maidstone, Brackley):
-       |            |   parallel API calls, merged + deduped results.
-       |            | - stationLabel() helper for display names.
+  v37.0| 02/05/2026 | Shareable URL state:
+       |            | - All field state synced to URL query params via replaceState.
+       |            | - URL auto-updates on every field change (always shareable).
+       |            | - readURL() restores full state on page load (both tabs).
+       |            | - Fixture tab: club code + match ID (stable across reloads).
+       |            | - Manual tab: home/away codes, KO datetime, dir, preset, sliders.
+  v36.0| 02/05/2026 | Station data from clubs-meta.json. Multi-station parallel search.
   v35.0| 02/05/2026 | Walk logic overhaul.
   v34.0| 02/05/2026 | Station preset skips first/last walk. Bookend times.
   v33.0| 02/05/2026 | Depart/Arrive bookends. CRS rail only, type labels for others.
@@ -27,7 +27,7 @@
 <script>
   window.NL_TOOL={title:'Travel Planner',toolKey:'staff-travel'};
   var NL_TOOL_KEY='staff-travel';
-  window.NL_CHANGELOG=[{date:'02/05/2026',version:'v36.0',items:['Station data from clubs-meta.json.','Multi-station parallel search (Southend, Maidstone, Brackley).','Preset labels show actual station names.']}];
+  window.NL_CHANGELOG=[{date:'02/05/2026',version:'v37.0',items:['Shareable URL: all fields sync to query params.','URL auto-updates on every change.','Fixture tab restores club + match from URL.','Manual tab restores clubs, KO, direction, preset, sliders.']}];
 </script>
 <script src="/tools/system/nl-utils.js"></script>
 <script src="/tools/system/nl-topbar.js"></script>
@@ -338,21 +338,20 @@ function setupAC(iid,lid,wid,cb){var inp=document.getElementById(iid),l=document
 function fAC(q,lid,cb){var l=document.getElementById(lid);q=(q||'').toLowerCase().trim();var f=q?clubs.filter(function(c){return c.name.toLowerCase().indexOf(q)!==-1||(c.short&&c.short.toLowerCase().indexOf(q)!==-1)||(c.code&&c.code.toLowerCase()===q)}):clubs;if(!f.length){l.innerHTML='<div class="tp__ac-item" style="color:var(--text-muted);justify-content:center">No clubs found</div>';l.classList.add('show');return}l.innerHTML=f.slice(0,12).map(function(c){return'<div class="tp__ac-item" data-c="'+c.name.replace(/"/g,'&quot;')+'"><img src="'+cU(c.name)+'" alt="" onerror="this.onerror=null;this.src=\''+FC+'\'"><span class="name">'+c.name+'</span><span class="ground">'+c.stadium+'</span></div>'}).join('');l.classList.add('show');l.querySelectorAll('[data-c]').forEach(function(el){el.addEventListener('click',function(){cb(clubs.find(function(c){return c.name===el.getAttribute('data-c')}));l.classList.remove('show')})})}
 
 // ── Fix club → fixtures ──
-function selFC(c){fixClub=c;fixMatch=null;document.getElementById('fixConfig').style.display='none';var i=document.getElementById('fixClubInput'),cr=document.getElementById('fixClubCrest'),w=document.getElementById('fixClubWrap');if(c){i.value=c.name;cr.src=cU(c.name);cr.style.display='block';w.classList.add('has-crest');updatePresetLabels();loadFix(c)}else{cr.style.display='none';w.classList.remove('has-crest');document.getElementById('fixFixtureArea').innerHTML=''}}
-function loadFix(club){var a=document.getElementById('fixFixtureArea');a.innerHTML='<div class="tp__loading"><div class="tp__spinner"></div>Loading fixtures…</div>';if(!club.optaID){a.innerHTML='<div class="tp__error">No Opta ID.</div>';return}Promise.all(CIDS.map(function(cid){return fetch(NLS+'/matches/?seasonID='+SID+'&competitionID='+cid+'&sort=kickOffDateUTC&page.size=100&page.number=1').then(function(r){return r.json()}).catch(function(){return{data:[]}})})).then(function(res){var all=[];res.forEach(function(r){if(r.data)all=all.concat(r.data)});var tid=club.optaID;var up=all.filter(function(m){var x=m.attributes,p=(x.matchPeriod||'').toLowerCase();return(p==='prematch'||!p||p==='fixture')&&((x.homeTeam&&x.homeTeam.teamID===tid)||(x.awayTeam&&x.awayTeam.teamID===tid))}).sort(function(a,b){return new Date(nd(a.attributes.kickOffDateUTC))-new Date(nd(b.attributes.kickOffDateUTC))});if(!up.length){a.innerHTML='<div class="tp__error">No upcoming fixtures.</div>';return}var h='<div class="tp__panel"><div class="tp__panel-title">Upcoming Fixtures</div><div class="tp__fix-list">';up.slice(0,10).forEach(function(m,i){var x=m.attributes,isH=x.homeTeam&&x.homeTeam.teamID===tid,opp=isH?x.awayTeam:x.homeTeam,oc=clubs.find(function(c){return c.optaID===(opp?opp.teamID:'')}),ko=new Date(nd(x.kickOffDateUTC));h+='<div class="tp__fix-item" onclick="selFix('+i+')"><img src="'+cU(opp?opp.name:(oc?oc.name:''))+'" alt="" onerror="this.onerror=null;this.src=\''+FC+'\'"><div class="info"><div class="teams">'+(isH?club.name+' v '+(opp?opp.name:'TBC'):(opp?opp.name:'TBC')+' v '+club.name)+'</div><div class="meta">'+fd(ko)+' '+ft(ko)+(oc?' · '+oc.stadium:'')+'</div></div><span class="badge badge--'+(isH?'home':'away')+'">'+(isH?'H':'A')+'</span></div>'});h+='</div></div>';a.innerHTML=h;a._m=up.slice(0,10)}).catch(function(){a.innerHTML='<div class="tp__error">Failed to load fixtures.</div>'})}
-function selFix(i){var a=document.getElementById('fixFixtureArea');if(!a._m||!a._m[i])return;fixMatch=a._m[i];a.querySelectorAll('.tp__fix-item').forEach(function(el,j){el.classList.toggle('selected',j===i)});document.getElementById('fixConfig').style.display='block';updatePresetLabels();upPostNote();document.getElementById('fixConfig').scrollIntoView({behavior:'smooth'})}
+function selFC(c){fixClub=c;fixMatch=null;document.getElementById('fixConfig').style.display='none';var i=document.getElementById('fixClubInput'),cr=document.getElementById('fixClubCrest'),w=document.getElementById('fixClubWrap');if(c){i.value=c.name;cr.src=cU(c.name);cr.style.display='block';w.classList.add('has-crest');updatePresetLabels();loadFix(c)}else{cr.style.display='none';w.classList.remove('has-crest');document.getElementById('fixFixtureArea').innerHTML=''}syncURL()}
+function loadFix(club){var a=document.getElementById('fixFixtureArea');a.innerHTML='<div class="tp__loading"><div class="tp__spinner"></div>Loading fixtures…</div>';if(!club.optaID){a.innerHTML='<div class="tp__error">No Opta ID.</div>';return}Promise.all(CIDS.map(function(cid){return fetch(NLS+'/matches/?seasonID='+SID+'&competitionID='+cid+'&sort=kickOffDateUTC&page.size=100&page.number=1').then(function(r){return r.json()}).catch(function(){return{data:[]}})})).then(function(res){var all=[];res.forEach(function(r){if(r.data)all=all.concat(r.data)});var tid=club.optaID;var up=all.filter(function(m){var x=m.attributes,p=(x.matchPeriod||'').toLowerCase();return(p==='prematch'||!p||p==='fixture')&&((x.homeTeam&&x.homeTeam.teamID===tid)||(x.awayTeam&&x.awayTeam.teamID===tid))}).sort(function(a,b){return new Date(nd(a.attributes.kickOffDateUTC))-new Date(nd(b.attributes.kickOffDateUTC))});if(!up.length){a.innerHTML='<div class="tp__error">No upcoming fixtures.</div>';return}var h='<div class="tp__panel"><div class="tp__panel-title">Upcoming Fixtures</div><div class="tp__fix-list">';up.slice(0,10).forEach(function(m,i){var x=m.attributes,isH=x.homeTeam&&x.homeTeam.teamID===tid,opp=isH?x.awayTeam:x.homeTeam,oc=clubs.find(function(c){return c.optaID===(opp?opp.teamID:'')}),ko=new Date(nd(x.kickOffDateUTC));h+='<div class="tp__fix-item" onclick="selFix('+i+')"><img src="'+cU(opp?opp.name:(oc?oc.name:''))+'" alt="" onerror="this.onerror=null;this.src=\''+FC+'\'"><div class="info"><div class="teams">'+(isH?club.name+' v '+(opp?opp.name:'TBC'):(opp?opp.name:'TBC')+' v '+club.name)+'</div><div class="meta">'+fd(ko)+' '+ft(ko)+(oc?' · '+oc.stadium:'')+'</div></div><span class="badge badge--'+(isH?'home':'away')+'">'+(isH?'H':'A')+'</span></div>'});h+='</div></div>';a.innerHTML=h;a._m=up.slice(0,10);if(_pendingMatchID){var pi=a._m.findIndex(function(m){return m.id===_pendingMatchID});if(pi!==-1)selFix(pi);_pendingMatchID=null}}).catch(function(){a.innerHTML='<div class="tp__error">Failed to load fixtures.</div>'})}
+function selFix(i){var a=document.getElementById('fixFixtureArea');if(!a._m||!a._m[i])return;fixMatch=a._m[i];a.querySelectorAll('.tp__fix-item').forEach(function(el,j){el.classList.toggle('selected',j===i)});document.getElementById('fixConfig').style.display='block';updatePresetLabels();upPostNote();syncURL();document.getElementById('fixConfig').scrollIntoView({behavior:'smooth'})}
 
 // ── Controls ──
-function setDir(d){fixDir=d;document.querySelectorAll('.tp__dir-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-dir')===d)});document.getElementById('preSlider').style.display=d==='to'?'block':'none';document.getElementById('postSlider').style.display=d==='from'?'block':'none';if(d==='from')upPostNote()}
+function setDir(d){fixDir=d;document.querySelectorAll('.tp__dir-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-dir')===d)});document.getElementById('preSlider').style.display=d==='to'?'block':'none';document.getElementById('postSlider').style.display=d==='from'?'block':'none';if(d==='from')upPostNote();syncURL()}
 function upPostLbl(){var v=+document.getElementById('extraAfter').value;document.getElementById('extraAfterV').textContent=v===0?'Depart at FT':'~'+v+'m after FT'}
 function upPostNote(){if(!fixMatch)return;var ko=new Date(nd(fixMatch.attributes.kickOffDateUTC));document.getElementById('postNote').textContent='Assumes 2h match. Estimated FT: '+ft(new Date(ko.getTime()+72e5))}
 function setPreset(p){
   fixPreset=p;
   document.querySelectorAll('#fixPresets .tp__preset').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-p')===p)});
   document.getElementById('fixCustomAddr').style.display=p==='custom'?'block':'none';
-  // Update preset label to show resolved address
   updatePresetLabels();
-  // Re-query if we have a search already
+  syncURL();
   if(fixMatch&&fixClub)doFixSearch();
 }
 function getEnabledModes(){return[]}  // No filter — let Google decide
@@ -377,7 +376,7 @@ function updatePresetLabels(){
   });
 }
 function getEnabledModes(){var modes=[];document.querySelectorAll('#transitToggles .tp__tt.on').forEach(function(b){modes.push(b.getAttribute('data-t'))});return modes}
-function setMode(m){document.querySelectorAll('.tp__mode-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-mode')===m)});document.getElementById('fixtureMode').style.display=m==='fixture'?'block':'none';document.getElementById('manualMode').style.display=m==='manual'?'block':'none';document.getElementById('resultsArea').innerHTML=''}
+function setMode(m){document.querySelectorAll('.tp__mode-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-mode')===m)});document.getElementById('fixtureMode').style.display=m==='fixture'?'block':'none';document.getElementById('manualMode').style.display=m==='manual'?'block':'none';document.getElementById('resultsArea').innerHTML='';syncURL()}
 function setTransport(b,p){document.getElementById(p+'Transport').querySelectorAll('.tp__transport-btn').forEach(function(x){x.classList.remove('active')});b.classList.add('active')}
 
 // ── Manual — custom fixture builder ──
@@ -388,12 +387,14 @@ function selManHome(c){
   var i=document.getElementById('manHomeI'),cr=document.getElementById('manHomeCr'),w=document.getElementById('manHomeW');
   if(c){i.value=c.name;cr.src=cU(c.name);cr.style.display='block';w.classList.add('has-crest');updateManPresetLabels()}
   else{cr.style.display='none';w.classList.remove('has-crest')}
+  syncURL();
 }
 function selManAway(c){
   manAwayClub=c;
   var i=document.getElementById('manAwayI'),cr=document.getElementById('manAwayCr'),w=document.getElementById('manAwayW');
   if(c){i.value=c.name;cr.src=cU(c.name);cr.style.display='block';w.classList.add('has-crest');updateManPresetLabels()}
   else{cr.style.display='none';w.classList.remove('has-crest')}
+  syncURL();
 }
 function setManDir(d){
   manDir=d;
@@ -401,11 +402,13 @@ function setManDir(d){
   document.getElementById('manPreSlider').style.display=d==='to'?'block':'none';
   document.getElementById('manPostSlider').style.display=d==='from'?'block':'none';
   if(d==='from')upManPostNote();
+  syncURL();
 }
 function setManPreset(p){
   manPreset=p;
   document.querySelectorAll('#manPresets .tp__preset').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-p')===p)});
   document.getElementById('manCustomAddr').style.display=p==='custom'?'block':'none';
+  syncURL();
 }
 function upManPostLbl(){
   var v=+document.getElementById('manExtraAfter').value;
@@ -1069,6 +1072,108 @@ function vShort(t){return{BUS:'Bus',INTERCITY_BUS:'Coach',RAIL:'Train',HEAVY_RAI
 function abbr(s){return s&&s.length>35?s.substring(0,33)+'…':s||''}
 function esc(s){return(s||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}
 
+// ── URL state sync ──
+var _urlSuppressed=false; // suppress syncURL during readURL restoration
+function syncURL(){
+  if(_urlSuppressed)return;
+  var p=new URLSearchParams();
+  // Which mode?
+  var mode=document.getElementById('manualMode').style.display==='none'?'fixture':'manual';
+  p.set('mode',mode);
+
+  if(mode==='fixture'){
+    if(fixClub)p.set('club',fixClub.code);
+    if(fixMatch&&fixMatch.id)p.set('fix',fixMatch.id);
+    p.set('dir',fixDir);
+    p.set('preset',fixPreset);
+    if(fixPreset==='custom'){var cv=document.getElementById('fixCustomAddr').value.trim();if(cv)p.set('addr',cv)}
+    if(fixDir==='to'){p.set('arr',document.getElementById('arrBefore').value)}
+    else{p.set('post',document.getElementById('extraAfter').value)}
+  }else{
+    if(manHomeClub)p.set('home',manHomeClub.code);
+    if(manAwayClub)p.set('away',manAwayClub.code);
+    var koVal=document.getElementById('manKO').value;
+    if(koVal)p.set('ko',koVal);
+    p.set('dir',manDir);
+    p.set('preset',manPreset);
+    if(manPreset==='custom'){var mv=document.getElementById('manCustomAddr').value.trim();if(mv)p.set('addr',mv)}
+    if(manDir==='to'){p.set('arr',document.getElementById('manArrBefore').value)}
+    else{p.set('post',document.getElementById('manExtraAfter').value)}
+  }
+  var qs=p.toString();
+  var newURL=window.location.pathname+(qs?'?'+qs:'');
+  history.replaceState(null,'',newURL);
+}
+
+function readURL(){
+  var p=new URLSearchParams(window.location.search);
+  if(!p.has('mode'))return; // no URL state to restore
+  _urlSuppressed=true;
+
+  var mode=p.get('mode')||'fixture';
+  // Switch tab (without triggering syncURL)
+  document.querySelectorAll('.tp__mode-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-mode')===mode)});
+  document.getElementById('fixtureMode').style.display=mode==='fixture'?'block':'none';
+  document.getElementById('manualMode').style.display=mode==='manual'?'block':'none';
+
+  if(mode==='fixture'){
+    // Direction
+    var dir=p.get('dir')||'to';
+    fixDir=dir;
+    document.querySelectorAll('#fixtureMode .tp__dir-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-dir')===dir)});
+    document.getElementById('preSlider').style.display=dir==='to'?'block':'none';
+    document.getElementById('postSlider').style.display=dir==='from'?'block':'none';
+
+    // Preset
+    var preset=p.get('preset')||'stadium';
+    fixPreset=preset;
+    document.querySelectorAll('#fixPresets .tp__preset').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-p')===preset)});
+    document.getElementById('fixCustomAddr').style.display=preset==='custom'?'block':'none';
+    if(preset==='custom'&&p.has('addr'))document.getElementById('fixCustomAddr').value=p.get('addr');
+
+    // Sliders
+    if(p.has('arr')){document.getElementById('arrBefore').value=p.get('arr');document.getElementById('arrBeforeV').textContent=p.get('arr')+' min'}
+    if(p.has('post')){document.getElementById('extraAfter').value=p.get('post');upPostLbl()}
+
+    // Club — triggers loadFix, which is async. Match selection happens in callback.
+    var clubCode=p.get('club');
+    var matchID=p.get('fix');
+    if(clubCode){
+      var c=clubs.find(function(cl){return cl.code===clubCode});
+      if(c){
+        _pendingMatchID=matchID||null;
+        selFC(c);
+      }
+    }
+  }else{
+    // Manual mode
+    var dir=p.get('dir')||'to';
+    manDir=dir;
+    document.querySelectorAll('#manualMode .tp__dir-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-dir')===dir)});
+    document.getElementById('manPreSlider').style.display=dir==='to'?'block':'none';
+    document.getElementById('manPostSlider').style.display=dir==='from'?'block':'none';
+
+    var preset=p.get('preset')||'stadium';
+    manPreset=preset;
+    document.querySelectorAll('#manPresets .tp__preset').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-p')===preset)});
+    document.getElementById('manCustomAddr').style.display=preset==='custom'?'block':'none';
+    if(preset==='custom'&&p.has('addr'))document.getElementById('manCustomAddr').value=p.get('addr');
+
+    if(p.has('ko'))document.getElementById('manKO').value=p.get('ko');
+
+    if(p.has('arr')){document.getElementById('manArrBefore').value=p.get('arr');document.getElementById('manArrBeforeV').textContent=p.get('arr')+' min'}
+    if(p.has('post')){document.getElementById('manExtraAfter').value=p.get('post');upManPostLbl()}
+
+    var homeCode=p.get('home'),awayCode=p.get('away');
+    if(homeCode){var hc=clubs.find(function(cl){return cl.code===homeCode});if(hc)selManHome(hc)}
+    if(awayCode){var ac=clubs.find(function(cl){return cl.code===awayCode});if(ac)selManAway(ac)}
+  }
+  _urlSuppressed=false;
+}
+
+// Pending match ID for fixture restore — set by readURL, consumed by loadFix
+var _pendingMatchID=null;
+
 // ── Init ──
 window.nlAuthReady=function(){
   document.getElementById('pageWrap').style.display='block';
@@ -1087,6 +1192,19 @@ window.nlAuthReady=function(){
     setupAC('fixClubInput','fixClubAC','fixClubWrap',selFC);
     setupAC('manHomeI','manHomeAC','manHomeW',selManHome);
     setupAC('manAwayI','manAwayAC','manAwayW',selManAway);
+    // Hook sliders and inputs for URL sync
+    ['arrBefore','extraAfter','manArrBefore','manExtraAfter'].forEach(function(id){
+      var el=document.getElementById(id);
+      if(el)el.addEventListener('change',syncURL);
+    });
+    ['fixCustomAddr','manCustomAddr','manKO'].forEach(function(id){
+      var el=document.getElementById(id);
+      if(el)el.addEventListener('change',syncURL);
+    });
+    // Read URL params after clubs have loaded (loadClubs is async)
+    var waitForClubs=setInterval(function(){
+      if(clubs.length>0){clearInterval(waitForClubs);readURL()}
+    },100);
   },1500);
 };
 </script>
