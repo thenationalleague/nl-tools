@@ -747,3 +747,64 @@ Source: inline `window.CLUBS` (in `index.html`) compared against the 2025/26 PDF
   - directory: `Name as Press Officer`
   - note: name is a role label, not a person: 'Name as Press Officer'
 
+
+## clubs-meta vs PDF disagreements
+
+Captured during the meta enrichment pass. Postcodes/stations may need reconciling between clubs-meta (was previously the league-side source of truth) and the PDF directory address line. Capacity differences are usually small and the meta value (an official published figure) was kept; PDF totals not stored.
+
+```
+Updated clubs-meta.json. 65 disagreements flagged.
+Aldershot Town |CAPACITY_DISAGREES |meta capacity=7200 |PDF total=7055
+Altrincham |CAPACITY_DISAGREES |meta capacity=7700 |PDF total=5450
+Boreham Wood |CAPACITY_DISAGREES |meta capacity=4502 |PDF total=4067
+Boston United |CAPACITY_DISAGREES |meta capacity=5061 |PDF total=4452
+Brackley Town |CAPACITY_DISAGREES |meta capacity=3500 |PDF total=4046
+Carlisle United |CAPACITY_DISAGREES |meta capacity=17949 |PDF total=17000
+Eastleigh |CAPACITY_DISAGREES |meta capacity=5250 |PDF total=5000
+Eastleigh |STATION_DISAGREES |meta stations=['Southampton Airport Parkway'] |PDF nearest='Southampton Parkway'
+Forest Green Rovers |CAPACITY_DISAGREES |meta capacity=5147 |PDF total=5006
+Gateshead |POSTCODE_DISAGREES |meta postcode=NE10 0EF |PDF address postcode=NE10 8EF ('The International Stadium, Gateshead, Tyne and Wear, NE10 8EF')
+Gateshead |CAPACITY_DISAGREES |meta capacity=11800 |PDF total=9800
+Gateshead |STATION_DISAGREES |meta stations=['Gateshead'] |PDF nearest='Newcastle Central Station'
+Morecambe |CAPACITY_DISAGREES |meta capacity=6476 |PDF total=6241
+Solihull Moors |CAPACITY_DISAGREES |meta capacity=5500 |PDF total=4107
+Solihull Moors |STATION_DISAGREES |meta stations=['Solihull'] |PDF nearest='Birmingham International'
+Southend United |STATION_DISAGREES |meta stations=['Southend Central', 'Southend Victoria'] |PDF nearest='Prittlewell'
+Sutton United |CAPACITY_DISAGREES |meta capacity=5013 |PDF total=5001
+Tamworth |CAPACITY_DISAGREES |meta capacity=4565 |PDF total=4038
+Truro City |CAPACITY_DISAGREES |meta capacity=3000 |PDF total=4000
+Wealdstone |STATION_DISAGREES |meta stations=['Ruislip Gardens'] |PDF nearest='Ruislip - Met Line'
+York City |CAPACITY_DISAGREES |meta capacity=8500 |PDF total=8510
+AFC Telford United |CAPACITY_DISAGREES |meta capacity=6300 |PDF total=6380
+AFC Telford United |STATION_DISAGREES |meta stations=['Telford Central'] |PDF nearest='Wellington'
+Alfreton Town |POSTCODE_DISAGREES |meta postcode=DE75 7XB |PDF address postcode=DE55 7FZ ('North Street, Alfreton, DE55 7FZ')
+Alfreton Town |CAPACITY_DISAGREES |meta capacity=3600 |PDF total=3972
+Hereford |CAPACITY_DISAGREES |meta capacity=5250 |PDF total=4938
+Kidderminster Harriers |CAPACITY_DISAGREES |meta capacity=6238 |PDF total=6444
+King's Lynn Town |POSTCODE_DISAGREES |meta postcode=PE30 3PX |PDF address postcode=PE30 5PB ('Docherty Walks Stadium, Tennyson Road, Kings Lynn, Norfolk PE30 5PB')
+King's Lynn Town |CAPACITY_DISAGREES |meta capacity=8200 |PDF total=4399
+Leamington |POSTCODE_DISAGREES |meta postcode=CV33 9SA |PDF address postcode=CV33 9QB ('Your Co-op Community Stadium Harbury Lane, Bishops Tachbrook, Leamington Spa CV33 9QB')
+Macclesfield |CAPACITY_DISAGREES |meta capacity=5300 |PDF total=5369
+Peterborough Sports |CAPACITY_DISAGREES |meta capacity=2300 |PDF total=3004
+Scarborough Athletic |POSTCODE_DISAGREES |meta postcode=YO11 2JW |PDF address postcode=YO16 7LN ('Yorkshire YO16 7LN')
+Scarborough Athletic |CAPACITY_DISAGREES |meta capacity=2833 |PDF total=3252
+Scarborough Athletic |STATION_DISAGREES |meta stations=['Scarborough'] |PDF nearest='Bridlington'
+South Shields |STATION_DISAGREES |meta stations=['Bede'] |PDF nearest='Newcastle'
+Southport |CAPACITY_DISAGREES |meta capacity=6008 |PDF total=5750
+Southport |STATION_DISAGREES |meta stations=['Southport'] |PDF nearest='Meols Cop Railway Station'
+Spennymoor Town |CAPACITY_DISAGREES |meta capacity=4300 |PDF total=3300
+Worksop Town |CAPACITY_DISAGREES |meta capacity=2500 |PDF total=2170
+AFC Totton |CAPACITY_DISAGREES |meta capacity=3000 |PDF total=2089
+AFC Totton |STATION_DISAGREES |meta stations=['Totton & Eling'] |PDF nearest='Totton'
+Bath City |POSTCODE_DISAGREES |meta postcode=BA2 3RT |PDF address postcode=BA2 1DB ('Twerton Park, Bath BA2 1DB')
+Bath City |STATION_DISAGREES |meta stations=['Bath Spa'] |PDF nearest='Oldfield Park'
+Chelmsford City |POSTCODE_DISAGREES |meta postcode=CM2 8XJ |PDF address postcode=CM1 2EH ('Dunmow Group Community Stadium’ Salerno Way, Chelmsford, CM1 2EH')
+Chesham United |CAPACITY_DISAGREES |meta capacity=5000 |PDF total=4620
+Chippenham Town |CAPACITY_DISAGREES |meta capacity=3000 |PDF total=3191
+Dover Athletic |CAPACITY_DISAGREES |meta capacity=6500 |PDF total=5491
+Eastbourne Borough |POSTCODE_DISAGREES |meta postcode=BN23 7AQ |PDF address postcode=BN23 7QH ('Eastbourne, East Sussex, BN23 7QH')
+Eastbourne Borough |CAPACITY_DISAGREES |meta capacity=4151 |PDF total=3622
+Eastbourne Borough |STATION_DISAGREES |meta stations=['Eastbourne'] |PDF nearest='Pevensey & Westham'
+Ebbsfleet United |STATION_DISAGREES |meta stations=['Ebbsfleet International'] |PDF nearest='Northfleet'
+Enfield Town |CAPACITY_DISAGREES |meta capacity=2500 |PDF total=3000
+```
