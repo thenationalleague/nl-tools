@@ -1,7 +1,15 @@
 /*
  * auth-guard.js — NL Tools v2
  * File: /tools/system/auth-guard.js
- * Version: v4.1 (17/04/2026)
+ * Version: v5.0 (03/05/2026)
+ *
+ * v5.0: Defaults lookup now uses bare role keys (`staff` / `admin` /
+ *        `superadmin` / `club`) matching the portal admin UI's v5.81
+ *        change and the canonical tool-registry shape. Compound keys
+ *        (`nl-staff` / `nl-admin` / `nl-superadmin`) still accepted as
+ *        fallback for any tool registry entries that haven't migrated.
+ *        Fixes silent-redirect-to-portal for newly-deployed tools whose
+ *        users don't yet have explicit per-user grants.
  *
  * v4.0: Moved to /tools/system/. Integrates with NL namespace:
  *   - Sets window.NL.session after auth
@@ -247,12 +255,19 @@
       level = 'hidden';
     }
 
-    /* Fallback to tool defaults if no explicit entry */
+    /* Fallback to tool defaults if no explicit entry.
+       v5.0: prefer bare role key (`staff`, `admin`, `superadmin`, `club`)
+       to match the canonical tool-registry shape and the portal's v5.81
+       admin-UI lookup. Compound key (`nl-${role}`) accepted as fallback
+       for any older registry entries that haven't migrated. */
     if (!session.tools || !session.tools.hasOwnProperty(NL_TOOL_KEY)) {
       if (toolData && toolData.defaults) {
-        var groupKey = session.role === 'club' ? 'club'
-                     : ((session.orgKey || 'nl') + '-' + session.role);
-        level = toolData.defaults[groupKey] || 'hidden';
+        var role = session.role;
+        var bareKey     = role === 'club' ? 'club' : role;
+        var compoundKey = role === 'club' ? null  : ((session.orgKey || 'nl') + '-' + role);
+        level = toolData.defaults[bareKey]
+             || (compoundKey && toolData.defaults[compoundKey])
+             || 'hidden';
       }
     }
 
