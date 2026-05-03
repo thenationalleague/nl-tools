@@ -5,12 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Travel Planner — NL Tools</title>
 <!--
-  NL Travel Planner v37.1
+  NL Travel Planner v38.0
   Changelog:
-  v37.1| 02/05/2026 | addr() uses postcode only (drops stadium name) to fix
-       |            | Google geocoding routing to wrong stations (e.g. Seaburn
-       |            | instead of Bede for South Shields).
-  v37.0| 02/05/2026 | Shareable URL state. Auto-sync query params on every change.
+  v38.0| 03/05/2026 | Tool key → staff-travel-planner (matches RTDB).
+       |            | Removed stadium preset — station is default, custom uses
+       |            |   Google Places Autocomplete dropdown.
+       |            | Depart bookend time moved to timeline column (left-aligned).
+       |            | Migrated google.maps.Marker → AdvancedMarkerElement.
+       |            | Import 'places' + 'marker' libraries on init.
+  v37.1| 02/05/2026 | addr() uses postcode only for geocoding.
+  v37.0| 02/05/2026 | Shareable URL state.
   v36.0| 02/05/2026 | Station data from clubs-meta.json. Multi-station parallel search.
   v35.0| 02/05/2026 | Walk logic overhaul.
 -->
@@ -20,10 +24,10 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script>firebase.initializeApp({apiKey:"AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",authDomain:"nl-tools.firebaseapp.com",databaseURL:"https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",projectId:"nl-tools",storageBucket:"nl-tools.firebasestorage.app",messagingSenderId:"801354670005",appId:"1:801354670005:web:05d8ebad3e7e63610d03fc"});</script>
 <script>
-  window.NL_TOOL={title:'Travel Planner',toolKey:'staff-travel'};
-  var NL_TOOL_KEY='staff-travel';
+  window.NL_TOOL={title:'Travel Planner',toolKey:'staff-travel-planner'};
+  var NL_TOOL_KEY='staff-travel-planner';
   window.NL_CHANGELOG=[
-    {date:'2 May 2026',version:'v1.0',items:['Integrated into NL Tools portal with standard topbar and auth.','Visual alignment with NL Tools brand system.']}
+    {date:'3 May 2026',version:'v2.0',items:['Station is now the default start point — stadium option removed.','Custom address field now offers Google Places suggestions as you type.','Depart time aligned in the timeline column.','Updated map markers to latest Google Maps API.']}
   ];
 </script>
 <script src="/tools/system/nl-utils.js"></script>
@@ -49,6 +53,7 @@
 
   /* AC — uses brand .club-picker classes. Only tool-specific addition is
      the crest-in-input overlay when a club is selected. */
+  .club-picker__wrap{position:relative}
   .tp__cp-crest{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:28px;height:28px;object-fit:contain;pointer-events:none;display:none;z-index:2}
   .club-picker.has-crest .club-picker__input{padding-left:46px}
 
@@ -154,6 +159,8 @@
   .tp__row{display:flex;gap:8px}.tp__row>*{flex:1}
   @media(max-width:768px){.tp__results{grid-template-columns:1fr}.tp__map-col{min-height:220px}}
   @media(max-width:520px){.tp__summary{flex-direction:column;align-items:flex-start}.tp__leg-timeline{width:48px;min-width:48px}.tp__row{flex-direction:column;gap:0}}
+  /* Google Places Autocomplete dropdown */
+  .pac-container{z-index:9999!important;font-family:var(--font)!important;font-size:var(--text-sm)!important;border-radius:var(--radius)!important;box-shadow:var(--shadow)!important}
 </style>
 </head>
 <body>
@@ -196,11 +203,10 @@
         <div class="tp__field">
           <label class="tp__label">Start / end point</label>
           <div class="tp__presets" id="fixPresets">
-            <button class="tp__preset active" data-p="stadium" onclick="setPreset('stadium')">🏟 Stadium</button>
-            <button class="tp__preset" data-p="station" onclick="setPreset('station')">🚉 Railway Station</button>
+            <button class="tp__preset active" data-p="station" onclick="setPreset('station')">🚉 Railway Station</button>
             <button class="tp__preset" data-p="custom" onclick="setPreset('custom')">📍 Custom</button>
           </div>
-          <input class="tp__input" type="text" id="fixCustomAddr" placeholder="Enter postcode or address…" style="display:none;" autocomplete="off">
+          <input class="tp__input" type="text" id="fixCustomAddr" placeholder="Start typing an address…" style="display:none;" autocomplete="off">
         </div>
 
         <div class="tp__field" id="preSlider">
@@ -247,11 +253,10 @@
       <div class="tp__field">
         <label class="tp__label">Start / end point</label>
         <div class="tp__presets" id="manPresets">
-          <button class="tp__preset active" data-p="stadium" onclick="setManPreset('stadium')">🏟 Stadium</button>
-          <button class="tp__preset" data-p="station" onclick="setManPreset('station')">🚉 Station</button>
+          <button class="tp__preset active" data-p="station" onclick="setManPreset('station')">🚉 Station</button>
           <button class="tp__preset" data-p="custom" onclick="setManPreset('custom')">📍 Custom</button>
         </div>
-        <input class="tp__input" type="text" id="manCustomAddr" placeholder="Enter postcode or address…" style="display:none;" autocomplete="off">
+        <input class="tp__input" type="text" id="manCustomAddr" placeholder="Start typing an address…" style="display:none;" autocomplete="off">
       </div>
       <div class="tp__field" id="manPreSlider">
         <label class="tp__label">Arrive before kick-off</label>
@@ -287,13 +292,34 @@ var FC=CB+'National%20League%20rose.png';
 var NLS='https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
 var SID=2025,CIDS=[89,373,372];
 
-var clubs=[],fixClub=null,fixMatch=null,fixDir='to',fixPreset='stadium';
+var clubs=[],fixClub=null,fixMatch=null,fixDir='to',fixPreset='station';
 var gMap=null,gPoly=null,allR=[],aIdx=0,mapOK=false;
 var crsLookup={}; // station name → CRS code
 var lastSkipWalk=null; // 'first','last', or null
 var lastSearch=null;
 
-async function initMap(){try{await google.maps.importLibrary('maps');await google.maps.importLibrary('geometry');mapOK=true}catch(e){}}
+async function initMap(){try{await google.maps.importLibrary('maps');await google.maps.importLibrary('geometry');await google.maps.importLibrary('marker');await google.maps.importLibrary('places');mapOK=true;initPlacesAC()}catch(e){}}
+
+function initPlacesAC(){
+  // Attach Google Places Autocomplete to custom address inputs
+  var ids=['fixCustomAddr','manCustomAddr'];
+  ids.forEach(function(id){
+    var el=document.getElementById(id);
+    if(!el)return;
+    var ac=new google.maps.places.Autocomplete(el,{
+      componentRestrictions:{country:'gb'},
+      fields:['formatted_address','geometry','name'],
+      types:['geocode','establishment']
+    });
+    ac.addListener('place_changed',function(){
+      var place=ac.getPlace();
+      if(place&&place.formatted_address){
+        el.value=place.formatted_address;
+      }
+      syncURL();
+    });
+  });
+}
 
 function loadClubs(){fetch(CMU).then(function(r){return r.json()}).then(function(d){clubs=(d.clubs||[]).map(function(c){return{name:c.name||'',code:c.code||'',short:c.short||'',stadium:c.stadium||'',division:c.division||'',optaID:c.optaID||'',postcode:c.postcode||'',colors:c.colors||{},station:c.station||[]}}).sort(function(a,b){return a.name.localeCompare(b.name)})}).catch(function(){})}
 function loadCRS(){fetch(STN_URL).then(function(r){return r.json()}).then(function(data){data.forEach(function(s){var name=s.stationName,code=s.crsCode;if(!name||!code)return;crsLookup[name.toLowerCase()]=code;if(name.toLowerCase().indexOf('london ')===0)crsLookup[name.substring(7).toLowerCase()]=code;if(name.toLowerCase().indexOf(' international')!==-1){crsLookup[name.replace(/ International/i,'').toLowerCase()]=code;if(name.toLowerCase().indexOf('london ')===0)crsLookup[name.substring(7).replace(/ International/i,'').toLowerCase()]=code}})}).catch(function(){})}
@@ -349,10 +375,8 @@ function setPreset(p){
 }
 function getEnabledModes(){return[]}  // No filter — let Google decide
 function updatePresetLabels(){
-  // Preset labels should reflect the away club (the traveller)
-  // We need the fixture to know who's home/away
   if(!fixClub)return;
-  var awayC=fixClub; // default to selected club before fixture is picked
+  var awayC=fixClub;
   if(fixMatch){
     var a=fixMatch.attributes,tid=fixClub.optaID;
     var isH=a.homeTeam&&a.homeTeam.teamID===tid;
@@ -364,8 +388,7 @@ function updatePresetLabels(){
   var btns=document.querySelectorAll('#fixPresets .tp__preset');
   btns.forEach(function(b){
     var p=b.getAttribute('data-p');
-    if(p==='stadium')b.textContent='🏟 '+(awayC.stadium||awayC.short||awayC.name);
-    else if(p==='station')b.textContent='🚉 '+stationLabel(awayC);
+    if(p==='station')b.textContent='🚉 '+stationLabel(awayC);
   });
 }
 function getEnabledModes(){var modes=[];document.querySelectorAll('#transitToggles .tp__tt.on').forEach(function(b){modes.push(b.getAttribute('data-t'))});return modes}
@@ -373,7 +396,7 @@ function setMode(m){document.querySelectorAll('.tp__mode-btn').forEach(function(
 function setTransport(b,p){document.getElementById(p+'Transport').querySelectorAll('.tp__transport-btn').forEach(function(x){x.classList.remove('active')});b.classList.add('active')}
 
 // ── Manual — custom fixture builder ──
-var manHomeClub=null,manAwayClub=null,manDir='to',manPreset='stadium';
+var manHomeClub=null,manAwayClub=null,manDir='to',manPreset='station';
 
 function selManHome(c){
   manHomeClub=c;
@@ -414,14 +437,12 @@ function upManPostNote(){
   document.getElementById('manPostNote').textContent='Assumes 2h match. Estimated FT: '+ft(new Date(ko.getTime()+72e5));
 }
 function updateManPresetLabels(){
-  // The away club is the traveller's club (they travel TO the home ground)
   var club=manAwayClub;
   if(!club)return;
   var btns=document.querySelectorAll('#manPresets .tp__preset');
   btns.forEach(function(b){
     var p=b.getAttribute('data-p');
-    if(p==='stadium')b.textContent='🏟 '+(club.stadium||club.short||club.name);
-    else if(p==='station')b.textContent='🚉 '+stationLabel(club);
+    if(p==='station')b.textContent='🚉 '+stationLabel(club);
   });
 }
 function getManModes(){return[]}  // No filter
@@ -466,20 +487,20 @@ function doFixSearch(){
 
   // Build list of away addresses to query (multi-station support)
   var awayAddrs=[];
-  if(fixPreset==='station'&&awayClub&&awayClub.station&&awayClub.station.length>1){
+  if(fixPreset==='custom'){
+    awayAddrs.push(customAddrVal);
+  }else if(awayClub&&awayClub.station&&awayClub.station.length>1){
     awayClub.station.forEach(function(sn,i){awayAddrs.push(stationAddr(awayClub,i))});
   }else{
-    var singleAddr=awayClub?(fixPreset==='station'?stationAddr(awayClub):fixPreset==='custom'?customAddrVal:addr(awayClub)):'';
-    awayAddrs.push(singleAddr);
+    awayAddrs.push(awayClub?stationAddr(awayClub):'');
   }
 
   var awayStadiumLabel=awayClub?(awayClub.stadium||awayClub.short||awayClub.name):'Away';
   var awayStLabel=awayClub?stationLabel(awayClub):'Away Station';
 
   var awayIcon,awayDescLabel;
-  if(fixPreset==='station'){awayDescLabel=awayStLabel;awayIcon='🚉 '}
-  else if(fixPreset==='custom'){awayDescLabel=customAddrVal||'Custom';awayIcon='📍 '}
-  else{awayDescLabel=awayStadiumLabel;awayIcon='🏟 '}
+  if(fixPreset==='custom'){awayDescLabel=customAddrVal||'Custom';awayIcon='📍 '}
+  else{awayDescLabel=awayStLabel;awayIcon='🚉 '}
 
   var ko=new Date(nd(a.kickOffDateUTC)),opts={};
   if(fixDir==='to'){
@@ -492,7 +513,7 @@ function doFixSearch(){
 
   // Station preset: skip the walk at the away club's end
   var sw=null;
-  if(fixPreset==='station'){
+  if(fixPreset!=='custom'){
     sw=fixDir==='to'?'first':'last';
   }
 
@@ -523,17 +544,17 @@ function doManSearch(){
 
   // Build list of away addresses (multi-station support)
   var awayAddrs=[];
-  if(manPreset==='station'&&manAwayClub.station&&manAwayClub.station.length>1){
+  if(manPreset==='custom'){
+    awayAddrs.push(manCustomVal);
+  }else if(manAwayClub.station&&manAwayClub.station.length>1){
     manAwayClub.station.forEach(function(sn,i){awayAddrs.push(stationAddr(manAwayClub,i))});
   }else{
-    var singleAddr=manPreset==='station'?stationAddr(manAwayClub):manPreset==='custom'?manCustomVal:addr(manAwayClub);
-    awayAddrs.push(singleAddr);
+    awayAddrs.push(stationAddr(manAwayClub));
   }
 
   var manIcon,awayDescLabel;
-  if(manPreset==='station'){awayDescLabel=awayStLabel;manIcon='🚉 '}
-  else if(manPreset==='custom'){awayDescLabel=manCustomVal||'Custom';manIcon='📍 '}
-  else{awayDescLabel=awayStadium;manIcon='🏟 '}
+  if(manPreset==='custom'){awayDescLabel=manCustomVal||'Custom';manIcon='📍 '}
+  else{awayDescLabel=awayStLabel;manIcon='🚉 '}
 
   var pairs=awayAddrs.map(function(aa){
     if(manDir==='to') return{o:aa,d:homeA};
@@ -553,7 +574,7 @@ function doManSearch(){
   }
 
   var msw=null;
-  if(manPreset==='station'){
+  if(manPreset!=='custom'){
     msw=manDir==='to'?'first':'last';
   }
   doMultiRoute(pairs,'TRANSIT',opts,oL,dL,getManModes(),msw);
@@ -850,7 +871,7 @@ function render(routes,idx,oL,dL){
     if(!arriveBookendTime)arriveBookendTime=overallArr;
   }
 
-  h+='<div class="tp__walk-connector" style="font-weight:800;color:var(--navy);font-size:11px"><span class="wc-dot" style="background:var(--navy)"></span><span class="wc-line" style="background:var(--navy)"></span>'+oIcon+'Depart '+originName+(departBookendTime?' · '+departBookendTime:'')+'</div>';
+  h+='<div class="tp__leg" style="border-bottom:1px solid var(--border)"><div class="tp__leg-timeline">'+(departBookendTime?'<div class="tp__leg-time">'+departBookendTime+'</div>':'')+'</div><div class="tp__leg-detail" style="padding:8px 14px 8px 0;font-weight:800;font-size:var(--text-xs);color:var(--navy)">'+oIcon+'Depart '+originName+'</div></div>';
 
   for(var si2=0;si2<steps.length;si2++){
     var s=steps[si2];
@@ -973,7 +994,7 @@ function render(routes,idx,oL,dL){
   }
 
   // Arrive bookend
-  h+='<div class="tp__walk-connector" style="font-weight:800;color:var(--navy);font-size:11px"><span class="wc-dot" style="background:var(--navy)"></span><span class="wc-line" style="background:var(--navy)"></span>'+dIcon+'Arrive '+destName+(arriveBookendTime?' · '+arriveBookendTime:'')+'</div>';
+  h+='<div class="tp__leg"><div class="tp__leg-timeline">'+(arriveBookendTime?'<div class="tp__leg-time">'+arriveBookendTime+'</div>':'')+'</div><div class="tp__leg-detail" style="padding:8px 14px 8px 0;font-weight:800;font-size:var(--text-xs);color:var(--navy)">'+dIcon+'Arrive '+destName+'</div></div>';
 
   h+='</div></div>'; // close board + board-scroll
   h+='</div></div>'; // close board-col + results
@@ -984,7 +1005,7 @@ function sw(i,o,d){aIdx=i;render(allR,i,o,d)}
 // ── Map ──
 function drawMap(r){
   var el=document.getElementById('routeMap');if(!el||!mapOK)return;
-  gMap=new google.maps.Map(el,{zoom:6,center:{lat:52.5,lng:-1.5},disableDefaultUI:true,zoomControl:true});
+  gMap=new google.maps.Map(el,{zoom:6,center:{lat:52.5,lng:-1.5},disableDefaultUI:true,zoomControl:true,mapId:'nl-travel-planner'});
   var bounds=new google.maps.LatLngBounds();
   // Step polylines with colours
   if(r.legs&&r.legs[0]&&r.legs[0].steps){
@@ -1006,6 +1027,13 @@ function drawMap(r){
   }
   if(!bounds.isEmpty())gMap.fitBounds(bounds,40);
 
+  // Helper: create a coloured circle pin element
+  function circlePin(col,size){
+    var d=document.createElement('div');
+    d.style.cssText='width:'+size+'px;height:'+size+'px;border-radius:50%;background:'+col+';border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3)';
+    return d;
+  }
+
   // Add markers at boarding/alighting stops
   if(r.legs&&r.legs[0]&&r.legs[0].steps){
     r.legs[0].steps.forEach(function(s){
@@ -1013,37 +1041,33 @@ function drawMap(r){
         var sd=s.transitDetails.stopDetails;
         var ln=s.transitDetails.transitLine||{};
         var col=ln.color||'#223b7c';
-        // Departure stop marker
         if(sd.departureStop&&sd.departureStop.location&&sd.departureStop.location.latLng){
           var dLoc=sd.departureStop.location.latLng;
-          new google.maps.Marker({
+          new google.maps.marker.AdvancedMarkerElement({
             position:{lat:dLoc.latitude,lng:dLoc.longitude},
-            map:gMap,
-            title:sd.departureStop.name,
-            icon:{path:google.maps.SymbolPath.CIRCLE,scale:5,fillColor:col,fillOpacity:1,strokeColor:'#fff',strokeWeight:2}
+            map:gMap,title:sd.departureStop.name,
+            content:circlePin(col,10)
           });
         }
-        // Arrival stop marker
         if(sd.arrivalStop&&sd.arrivalStop.location&&sd.arrivalStop.location.latLng){
           var aLoc=sd.arrivalStop.location.latLng;
-          new google.maps.Marker({
+          new google.maps.marker.AdvancedMarkerElement({
             position:{lat:aLoc.latitude,lng:aLoc.longitude},
-            map:gMap,
-            title:sd.arrivalStop.name,
-            icon:{path:google.maps.SymbolPath.CIRCLE,scale:5,fillColor:col,fillOpacity:1,strokeColor:'#fff',strokeWeight:2}
+            map:gMap,title:sd.arrivalStop.name,
+            content:circlePin(col,10)
           });
         }
       }
     });
   }
-  // Origin/destination markers
+  // Origin/destination markers (default pins)
   if(r.legs&&r.legs[0]){
     var lg=r.legs[0];
     if(lg.startLocation&&lg.startLocation.latLng){
-      new google.maps.Marker({position:{lat:lg.startLocation.latLng.latitude,lng:lg.startLocation.latLng.longitude},map:gMap,title:'Start'});
+      new google.maps.marker.AdvancedMarkerElement({position:{lat:lg.startLocation.latLng.latitude,lng:lg.startLocation.latLng.longitude},map:gMap,title:'Start'});
     }
     if(lg.endLocation&&lg.endLocation.latLng){
-      new google.maps.Marker({position:{lat:lg.endLocation.latLng.latitude,lng:lg.endLocation.latLng.longitude},map:gMap,title:'Destination'});
+      new google.maps.marker.AdvancedMarkerElement({position:{lat:lg.endLocation.latLng.latitude,lng:lg.endLocation.latLng.longitude},map:gMap,title:'Destination'});
     }
   }
 }
@@ -1118,7 +1142,7 @@ function readURL(){
     document.getElementById('postSlider').style.display=dir==='from'?'block':'none';
 
     // Preset
-    var preset=p.get('preset')||'stadium';
+    var preset=p.get('preset')||'station';
     fixPreset=preset;
     document.querySelectorAll('#fixPresets .tp__preset').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-p')===preset)});
     document.getElementById('fixCustomAddr').style.display=preset==='custom'?'block':'none';
@@ -1146,7 +1170,7 @@ function readURL(){
     document.getElementById('manPreSlider').style.display=dir==='to'?'block':'none';
     document.getElementById('manPostSlider').style.display=dir==='from'?'block':'none';
 
-    var preset=p.get('preset')||'stadium';
+    var preset=p.get('preset')||'station';
     manPreset=preset;
     document.querySelectorAll('#manPresets .tp__preset').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-p')===preset)});
     document.getElementById('manCustomAddr').style.display=preset==='custom'?'block':'none';
