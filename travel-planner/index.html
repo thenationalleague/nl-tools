@@ -1107,20 +1107,35 @@ function render(routes,idx,oL,dL){
     var lineCol='',lineTxt='',pillLabel='',mainText='',subText='';
 
     if(s._w){
-      var totalDist=0;
+      var totalDist=0,totalDurSec=0;
       s._w.forEach(function(ws){
-        if(ws.localizedValues&&ws.localizedValues.staticDuration&&ws.localizedValues.staticDuration.text)durT=durT||ws.localizedValues.staticDuration.text;
-        if(ws.localizedValues&&ws.localizedValues.distance&&ws.localizedValues.distance.text)distT=distT||ws.localizedValues.distance.text;
-        var dm=0;try{dm=parseInt(String(ws.localizedValues.distance.text).replace(/[^0-9]/g,''),10)}catch(e){}
-        if(ws.localizedValues&&ws.localizedValues.distance&&ws.localizedValues.distance.text&&ws.localizedValues.distance.text.indexOf('km')!==-1)dm=dm*1000;
+        // Sum durations in seconds for accurate total
+        if(ws.staticDuration){var sec=parseInt(String(ws.staticDuration).replace('s',''),10)||0;totalDurSec+=sec}
+        if(ws.localizedValues&&ws.localizedValues.distance&&ws.localizedValues.distance.text)distT=ws.localizedValues.distance.text;
+        // Parse distance correctly — "0.2 km" → 200m, "85 m" → 85m
+        var dm=0;
+        try{
+          var dtxt=String(ws.localizedValues.distance.text);
+          if(dtxt.indexOf('km')!==-1){
+            dm=Math.round(parseFloat(dtxt)*1000);
+          }else{
+            dm=parseInt(dtxt.replace(/[^0-9]/g,''),10)||0;
+          }
+        }catch(e){}
         totalDist+=dm;
       });
+      // Build total distance and duration text from summed values
+      distT=totalDist>=1000?(totalDist/1000).toFixed(1)+' km':totalDist+' m';
+      durT=totalDurSec>=60?Math.round(totalDurSec/60)+' mins':'1 min';
 
       var walkDesc='Walk';
       var nextStep=steps[si2+1];
       var prevStep=si2>0?steps[si2-1]:null;
       var isLast=!nextStep;
       var isFirstWalk=(si2===0);
+
+      // Hide very short terminal walks (<150m) — essentially "you've arrived"
+      if((isFirstWalk||isLast)&&totalDist<150&&totalDist>0)continue;
 
       // Skip first walk if departing from station AND first transit leg is rail-type
       if(isFirstWalk&&lastSkipWalk==='first'){
