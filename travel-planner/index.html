@@ -148,7 +148,7 @@
 
   /* Summary */
   .tp__summary{background:var(--navy);color:var(--white);padding:12px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px}
-  .tp__summary-route{font-size:var(--text-sm);font-weight:800;font-variation-settings:'wght' 800}
+  .tp__summary-route{font-size:var(--text-sm);font-weight:800;font-variation-settings:'wght' 800;display:flex;flex-direction:column;gap:2px;line-height:1.3}
   .tp__summary-route .arrow{color:rgba(255,255,255,.4);margin:0 6px}
   .tp__summary-duration{font-size:var(--text-xs);font-weight:600;font-variation-settings:'wght' 600;background:rgba(255,255,255,.15);padding:3px 10px;border-radius:99px}
   .tp__summary-depart{font-size:var(--text-xs);color:rgba(255,255,255,.6);width:100%}
@@ -1074,7 +1074,9 @@ function render(routes,idx,oL,dL){
 
   var h='<div class="tp__results"><div class="tp__map-col"><div id="routeMap"></div></div><div class="tp__board-col">';
   h+='<div class="tp__summary">';
-  h+='<div class="tp__summary-route">Depart '+abbr(oL)+'<span class="arrow">→</span>Arrive '+abbr(dL)+'</div>';
+  var oClean=abbr(oL.replace(/^(?:🚗|🏟|🚉|📍)\s*/u,''));
+  var dClean=abbr(dL.replace(/^(?:🚗|🏟|🚉|📍)\s*/u,''));
+  h+='<div class="tp__summary-route"><div>Depart '+oClean+'</div><div>Arrive '+dClean+'</div></div>';
   h+='<div class="tp__summary-duration">'+dur+(dist?' · '+dist:'')+(fareText?' · '+fareText:'')+'</div>';
   if(overallDep||overallArr){
     var timeStr='';
@@ -1105,14 +1107,21 @@ function render(routes,idx,oL,dL){
   function stepVT(st){if(!st||!st.transitDetails||!st.transitDetails.transitLine||!st.transitDetails.transitLine.vehicle)return'';return st.transitDetails.transitLine.vehicle.type}
   function isRail(vt){return vt==='RAIL'||vt==='HEAVY_RAIL'||vt==='COMMUTER_TRAIN'||vt==='HIGH_SPEED_TRAIN'||vt==='LONG_DISTANCE_TRAIN'}
   // Format stop: rail gets CRS code, others get (Tram)/(Metro)/(Bus)
-  function fmtStop(name,vt){
+  function fmtStop(name,vt,agency){
     if(!name)return'';
     if(isRail(vt))return addCRS(name);
+    if(vt==='SUBWAY'||vt==='METRO_RAIL'){
+      if(agency&&/london|underground|tfl/i.test(agency))return name+' (Underground)';
+      if(agency&&/glasgow/i.test(agency))return name+' (Subway)';
+      if(agency&&/docklands|dlr/i.test(agency))return name+' (DLR)';
+      if(agency&&/nexus|tyne|wear/i.test(agency))return name+' (Metro)';
+      return name;
+    }
     if(vt==='TRAM'||vt==='LIGHT_RAIL')return name+' (Tram)';
-    if(vt==='SUBWAY'||vt==='METRO_RAIL')return name+' (Metro)';
     if(vt==='BUS'||vt==='INTERCITY_BUS')return name+' (Bus)';
     return name;
   }
+  function stepAgency(st){try{return(st.transitDetails.transitLine.agencies||[]).map(function(a){return a.name||''}).join(' ')}catch(e){return''}}
 
   var destName=dL.replace(/^🏟 |^🚉 |^📍 /,'');
   var dIcon=dL.match(/^(🏟|🚉|📍)/);dIcon=dIcon?dIcon[0]+' ':'';
@@ -1176,6 +1185,27 @@ function render(routes,idx,oL,dL){
       var isLast=!nextStep;
       var isFirstWalk=(si2===0);
 
+      // Times for walk legs: first walk = backward from next transit dep; last walk = forward from prev transit arr
+      if(isFirstWalk){
+        for(var ni=si2+1;ni<steps.length;ni++){
+          var nT=steps[ni];
+          if(nT.transitDetails&&nT.transitDetails.stopDetails&&nT.transitDetails.stopDetails.departureTime){
+            var nDep=new Date(nT.transitDetails.stopDetails.departureTime);
+            arr=fI(nDep);dep=fI(new Date(nDep.getTime()-totalDurSec*1000));
+            break;
+          }
+        }
+      }else if(isLast){
+        for(var pi=si2-1;pi>=0;pi--){
+          var pT=steps[pi];
+          if(pT.transitDetails&&pT.transitDetails.stopDetails&&pT.transitDetails.stopDetails.arrivalTime){
+            var pArr=new Date(pT.transitDetails.stopDetails.arrivalTime);
+            dep=fI(pArr);arr=fI(new Date(pArr.getTime()+totalDurSec*1000));
+            break;
+          }
+        }
+      }
+
       // Hide very short terminal walks (<150m) — essentially "you've arrived"
       if((isFirstWalk||isLast)&&totalDist<150&&totalDist>0)continue;
 
@@ -1219,9 +1249,9 @@ function render(routes,idx,oL,dL){
       if(isLast){
         walkDesc='Walk to '+destName;
       }else if(nextStep&&nextStep.transitDetails&&nextStep.transitDetails.stopDetails&&nextStep.transitDetails.stopDetails.departureStop){
-        walkDesc='Walk to '+fmtStop(nextStep.transitDetails.stopDetails.departureStop.name,stepVT(nextStep));
+        walkDesc='Walk to '+fmtStop(nextStep.transitDetails.stopDetails.departureStop.name,stepVT(nextStep),stepAgency(nextStep));
       }else if(prevStep&&prevStep.transitDetails&&prevStep.transitDetails.stopDetails&&prevStep.transitDetails.stopDetails.arrivalStop){
-        walkDesc='Walk from '+fmtStop(prevStep.transitDetails.stopDetails.arrivalStop.name,stepVT(prevStep));
+        walkDesc='Walk from '+fmtStop(prevStep.transitDetails.stopDetails.arrivalStop.name,stepVT(prevStep),stepAgency(prevStep));
       }
 
       // Short interchange walk between different stops — show connection time + walk
@@ -1259,7 +1289,8 @@ function render(routes,idx,oL,dL){
       pillLabel=lnName?(emoji+' '+lnName):vL(vtype);
 
       // Main text = boarding → alighting with CRS (rail) or type label (tram/metro/bus)
-      mainText=fmtStop(ds.name||'',vtype)+(as.name?' → '+fmtStop(as.name,vtype):'');
+      var agName=(ln.agencies||[]).map(function(a){return a.name||''}).join(' ');
+      mainText=fmtStop(ds.name||'',vtype,agName)+(as.name?' → '+fmtStop(as.name,vtype,agName):'');
 
       // Sub text = vehicle type ∙ stop count ∙ towards headsign ∙ duration
       var parts=[];
