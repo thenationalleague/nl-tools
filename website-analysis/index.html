@@ -491,6 +491,46 @@
     }
     .card__wordcount--null { opacity: 0.5; }
 
+    /* Sparkline (60×16 SVG) — last ~24h hourly views per article.
+       Rendered on cards when hourly data is loaded; absent otherwise. */
+    .card__sparkline {
+      display: block;
+      width: 60px;
+      height: 16px;
+      margin-top: 4px;
+      flex-shrink: 0;
+    }
+    /* List-view inline variant — sits in a metric column slot */
+    .row__sparkline {
+      display: block;
+      width: 60px;
+      height: 16px;
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+
+    /* Performance chip — at most one per card; computed against cohort
+       median + period percentiles in PERF_CACHE. */
+    .card__perf-chip {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: var(--radius-pill, 999px);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-left: 6px;
+      line-height: 1.4;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+    .card__perf-chip--over       { background: var(--green-light); color: var(--green); }
+    .card__perf-chip--under      { background: var(--red-light);   color: var(--red); }
+    .card__perf-chip--slow-burn  { background: var(--info-light);  color: var(--navy); }
+    .card__perf-chip--early-peak { background: var(--amber-light); color: var(--amber); }
+    .card__perf-chip--gem        { background: var(--purple-light); color: var(--purple); }
+    .card__perf-chip--trap       { background: var(--off-white);   color: var(--text-muted); border: 1px solid var(--border); }
+
     /* ============ LIST VIEW METRIC COLUMNS ============ */
     .row__metric {
       text-align: right;
@@ -1636,8 +1676,12 @@
       $('viewGrid').addEventListener('click', function() { setView('grid'); });
       $('viewList').addEventListener('click', function() { setView('list'); });
 
-      // Re-render Browse when the page-level period changes.
+      // Re-render Browse when the page-level period changes. The
+      // perf-chip thresholds depend on the active period (cohort
+      // medians + per-period view percentiles), so the cache must be
+      // invalidated before the re-render walks the cards.
       window.addEventListener('nl:period-changed', function() {
+        _invalidatePerfCache();
         if (STATE.articles.length) applyFilters();
       });
 
@@ -1711,6 +1755,19 @@
           // If Performance was already activated (e.g. via deep link) before
           // the index finished loading, render it now.
           if (STATE.tab === 'performance') ensurePerfDataAndRender();
+          // Phase 1 step 4: kick off the rolling hourly snapshot in the
+          // background so Browse cards can render sparklines + perf chips
+          // without waiting for the user to visit Performance. When it
+          // resolves, re-render Browse so cards get their affordances.
+          if (!_perfDataPromise) {
+            _perfDataPromise = loadRollingHourly();
+          }
+          _perfDataPromise.then(function() {
+            _invalidatePerfCache();
+            if (STATE.tab === 'browse' && STATE.articles.length) {
+              renderResults();
+            }
+          });
         })
         .catch(function(err) {
           showEmpty("Couldn't load archive",
@@ -1882,6 +1939,11 @@
         ? '<span class="card__wordcount">' + esc(wc.toLocaleString() + ' words') + '</span>'
         : '<span class="card__wordcount card__wordcount--null">&mdash;</span>';
 
+      // Phase 1 step 4: sparkline + perf chip. Both helpers return '' when
+      // hourly data isn't loaded yet, so cards still render cleanly.
+      var sparkMarkup = articleSparkline(a);
+      var chipMarkup = articlePerfChip(a);
+
       // BROWSE-PORT: archive's "Analyse first 72 hours →" cross-link
       // is intentionally not rendered here. The side-drawer (Phase 1
       // step 5) surfaces analytics inline, so the per-card jump is
@@ -1896,9 +1958,11 @@
           '<div class="card__meta">' +
             '<span class="card__pill">' + esc(a.newsCategory || '—') + '</span>' +
             '<span class="card__date">' + esc(formatDate(a.publishedDateTime)) + '</span>' +
+            chipMarkup +
           '</div>' +
           '<div class="card__title">' + esc(a.postTitle || '(untitled)') + '</div>' +
           (a.description ? '<div class="card__sub">' + esc(a.description) + '</div>' : '') +
+          sparkMarkup +
           '<div class="card__footer">' +
             '<span>' + esc((a.postAuthor || '').trim() || '—') + '</span>' +
             wcMarkup +
@@ -1941,12 +2005,26 @@
         engTierClass = 'row__metric--null';
       }
 
+      // Phase 1 step 4: list-view rows also get the sparkline + chip,
+      // surfaced inline in the title cell (chip after title, sparkline
+      // beside metrics). Both helpers return '' before hourly lands.
+      var sparkMarkup = articleSparkline(a);
+      var chipMarkup = articlePerfChip(a);
+
+      // Title cell wraps title + chip on one row (chip pushed beside the
+      // ellipsised title) and the sparkline below the description.
+      var titleInner = '<div class="row__title">' + esc(a.postTitle || '(untitled)') + '</div>';
+      var titleRow = chipMarkup
+        ? '<div style="display:flex;align-items:center;gap:6px;min-width:0;">' + titleInner + chipMarkup + '</div>'
+        : titleInner;
+
       return '<div class="row" data-idx="' + i + '">' +
         '<div class="row__img">' + imgMarkup + '</div>' +
         '<div class="row__date">' + esc(formatDate(a.publishedDateTime)) + '</div>' +
         '<div>' +
-          '<div class="row__title">' + esc(a.postTitle || '(untitled)') + '</div>' +
+          titleRow +
           (a.description ? '<div class="row__sub">' + esc(a.description) + '</div>' : '') +
+          (sparkMarkup ? sparkMarkup.replace('card__sparkline', 'card__sparkline row__sparkline') : '') +
         '</div>' +
         '<div class="row__author">' + esc((a.postAuthor || '').trim() || '—') + '</div>' +
         '<span class="row__metric ' + viewsTierClass + '">' + esc(viewsVal) + '</span>' +
@@ -2352,6 +2430,199 @@
         out.push({ hour: h, cumulative: cum, hourly: buckets[h] || 0 });
       }
       return out;
+    }
+
+    /* ── Browse-card affordances: sparklines + performance chips ──────────
+       These read STATE.hourly (populated lazily when Performance is first
+       opened, or after `loadRollingHourly` resolves). Both helpers MUST
+       degrade to empty strings when the underlying data isn't available
+       — Browse should render fine on first paint before hourly arrives.
+       PERF_CACHE memoises cohort medians and period-wide percentile
+       thresholds. It is invalidated on `nl:period-changed`.            */
+    var PERF_CACHE = {
+      cohortMedians: null,   // { cohortKey -> median first-24h cumulative }
+      periodViewMedian: null, // median of metrics.pageViews across STATE.articles in period
+      periodViewP75: null,    // 75th percentile of metrics.pageViews in period
+      periodViewP25: null,    // 25th percentile of metrics.pageViews in period
+      built: false
+    };
+
+    function _invalidatePerfCache() {
+      PERF_CACHE = { cohortMedians: null, periodViewMedian: null,
+                     periodViewP75: null, periodViewP25: null, built: false };
+    }
+
+    function _cohortKeyForHour(hr) {
+      if (hr == null) return null;
+      for (var i = 0; i < COHORT_DEFS.length; i++) {
+        if (COHORT_DEFS[i].hours.indexOf(hr) >= 0) return COHORT_DEFS[i].key;
+      }
+      return null;
+    }
+
+    function _percentile(sorted, p) {
+      if (!sorted.length) return null;
+      var idx = Math.floor((sorted.length - 1) * p);
+      return sorted[idx];
+    }
+
+    /* Build cohort medians (first-24h cumulative) and period view
+       percentiles. Filters to the current STATE.period window for
+       percentiles. Cohort medians use whatever hourly data is present. */
+    function _buildPerfCache() {
+      if (PERF_CACHE.built) return;
+
+      // Cohort medians: bucket articles by publish-hour cohort, take
+      // first-24h cumulative for each, then median per cohort.
+      var byCohort = {};
+      COHORT_DEFS.forEach(function(c) { byCohort[c.key] = []; });
+      STATE.articles.forEach(function(a) {
+        var hr = publishHourUTC(a.publishedDateTime);
+        var key = _cohortKeyForHour(hr);
+        if (!key) return;
+        var hourly = hourlyForArticle(a);
+        if (!hourly) return;
+        var cum = cumulativeFromPublish(a, hourly, 24);
+        if (!cum.length) return;
+        var v = cum[cum.length - 1].cumulative;
+        if (v > 0) byCohort[key].push(v);
+      });
+      var medians = {};
+      Object.keys(byCohort).forEach(function(k) {
+        var arr = byCohort[k];
+        if (arr.length < 2) { medians[k] = null; return; }
+        arr.sort(function(a, b) { return a - b; });
+        medians[k] = arr[Math.floor(arr.length / 2)];
+      });
+      PERF_CACHE.cohortMedians = medians;
+
+      // Period view percentiles: pageViews across articles in current period.
+      var floor = periodFloorISO();
+      var views = [];
+      STATE.articles.forEach(function(a) {
+        if (floor) {
+          var date = (a.publishedDateTime || '').slice(0, 10);
+          if (date < floor) return;
+        }
+        if (a.metrics && a.metrics.pageViews != null) {
+          views.push(a.metrics.pageViews);
+        }
+      });
+      if (views.length >= 4) {
+        views.sort(function(a, b) { return a - b; });
+        PERF_CACHE.periodViewMedian = _percentile(views, 0.5);
+        PERF_CACHE.periodViewP25 = _percentile(views, 0.25);
+        PERF_CACHE.periodViewP75 = _percentile(views, 0.75);
+      }
+
+      PERF_CACHE.built = true;
+    }
+
+    /* Inline-SVG sparkline of the article's last ~24 hourly data points.
+       Returns empty string if insufficient hourly data. */
+    function articleSparkline(article) {
+      var hourly = hourlyForArticle(article);
+      if (!hourly || !hourly.length) return '';
+      var slice = hourly.slice(-24);
+      if (!slice.length) return '';
+      var max = 0;
+      slice.forEach(function(pt) { if (pt[1] > max) max = pt[1]; });
+      // Plot range — use 1px padding inset on a 60×16 viewBox.
+      var W = 60, H = 16, pad = 1;
+      var innerW = W - pad * 2;
+      var innerH = H - pad * 2;
+      var n = slice.length;
+      // Always start the line at the leftmost point (per spec) — if only
+      // one point, render a flat segment to make it visible.
+      var pts = slice.map(function(pt, i) {
+        var x = pad + (n === 1 ? 0 : (i / (n - 1)) * innerW);
+        var y = pad + (max > 0 ? innerH - (pt[1] / max) * innerH : innerH);
+        return x.toFixed(2) + ',' + y.toFixed(2);
+      });
+      if (n === 1) {
+        // Stretch single point to a flat segment at its own y.
+        var only = pts[0].split(',');
+        pts = [pad.toFixed(2) + ',' + only[1], (pad + innerW).toFixed(2) + ',' + only[1]];
+      }
+      return '<svg class="card__sparkline" viewBox="0 0 ' + W + ' ' + H +
+        '" preserveAspectRatio="none" aria-hidden="true">' +
+        '<polyline points="' + pts.join(' ') + '" fill="none" ' +
+        'stroke="var(--primary)" stroke-opacity="0.6" stroke-width="1.5" ' +
+        'stroke-linecap="round" stroke-linejoin="round" /></svg>';
+    }
+
+    /* Performance chip — at most one chip per card. Order of preference:
+       gem > trap > over > under > slow-burn > early-peak.
+       Returns '' when no rule fires or insufficient data.
+       TODO(phase-1-review): cohort medians use whatever hourly data is
+       loaded (rolling 90d by default); for period === 'all' we'd ideally
+       use the all-time archive medians. Acceptable for Phase 1 — chips
+       remain directionally correct. */
+    function articlePerfChip(article) {
+      if (!article || !article.metrics) return '';
+      _buildPerfCache();
+
+      var m = article.metrics;
+      var wc = wordCount(article);
+      var rt = null;
+      if (m.avgEngagementTimeSecs != null && wc > 0) {
+        var expected = wc * (60 / 225);  // seconds at 225 wpm
+        rt = m.avgEngagementTimeSecs / expected;
+      }
+      var pv = m.pageViews;
+
+      // Gem: low views + high read-through (read-through > 0.7).
+      if (pv != null && rt != null &&
+          PERF_CACHE.periodViewMedian != null &&
+          pv < PERF_CACHE.periodViewMedian * 0.25 && rt > 0.7) {
+        return '<span class="card__perf-chip card__perf-chip--gem">Gem</span>';
+      }
+
+      // Trap: high views + low read-through.
+      if (pv != null && rt != null &&
+          PERF_CACHE.periodViewP75 != null &&
+          pv > PERF_CACHE.periodViewP75 && rt < 0.3) {
+        return '<span class="card__perf-chip card__perf-chip--trap">Trap</span>';
+      }
+
+      // Over / Under vs cohort median (needs hourly data).
+      var hourly = hourlyForArticle(article);
+      if (hourly && hourly.length) {
+        var hr = publishHourUTC(article.publishedDateTime);
+        var cohortKey = _cohortKeyForHour(hr);
+        var cohortMedian = cohortKey && PERF_CACHE.cohortMedians
+          ? PERF_CACHE.cohortMedians[cohortKey] : null;
+        var cum24 = cumulativeFromPublish(article, hourly, 24);
+        var v24 = cum24.length ? cum24[cum24.length - 1].cumulative : null;
+
+        if (v24 != null && cohortMedian) {
+          if (v24 > cohortMedian * 1.5) {
+            return '<span class="card__perf-chip card__perf-chip--over">Over-performer</span>';
+          }
+          if (v24 < cohortMedian * 0.5) {
+            return '<span class="card__perf-chip card__perf-chip--under">Under-performer</span>';
+          }
+        }
+
+        // Slow burn / Early peak — need full 72h window.
+        var pubTs = publishUnixSec(article.publishedDateTime);
+        var nowSec = Math.floor(Date.now() / 1000);
+        if (pubTs && (nowSec - pubTs) >= 72 * 3600 && v24 != null) {
+          var cum72 = cumulativeFromPublish(article, hourly, 72);
+          var v72 = cum72.length ? cum72[cum72.length - 1].cumulative : null;
+          if (v72 && v72 > 0) {
+            var ratio = v24 / v72;
+            if (ratio < 0.5) {
+              return '<span class="card__perf-chip card__perf-chip--slow-burn">Slow burn</span>';
+            }
+            if (ratio > 0.85) {
+              return '<span class="card__perf-chip card__perf-chip--early-peak">Early peak</span>';
+            }
+          }
+        }
+      }
+
+      return '';
     }
 
     /* ── Hourly data loaders (rolling + lazy archive) ─────────────────── */
