@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<!--
+  Website Analysis — NL Tools
+  Version: v0.1 (skeleton)
+  Date: 03/05/2026
+  Description: Phase 1 skeleton. Sets up the agreed IA (Browse + Performance
+  with Trends/Timing/Outliers sub-tabs), a page-level period selector, and a
+  side-drawer for article detail. No business logic ported yet — subsequent
+  commits port Browse from website-archive and Performance views from
+  website-insights.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Website Analysis — NL Tools</title>
+
+  <!-- Brand stylesheet -->
+  <link rel="stylesheet" href="/tools/system/nl-brand.css?v=14">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init (standard NL config) -->
+  <script>
+    var firebaseConfig = {
+      apiKey: "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain: "nl-tools.firebaseapp.com",
+      databaseURL: "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId: "nl-tools",
+      storageBucket: "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId: "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    };
+    firebase.initializeApp(firebaseConfig);
+  </script>
+
+  <!-- Tool identity + changelog -->
+  <script>window.NL_TOOL = { title: 'Website Analysis', toolKey: 'staff-website-analysis' }; var NL_TOOL_KEY = 'staff-website-analysis'; window.NL_CHANGELOG = [{ date: '3 May 2026', version: 'v0.1', items: ['Initial skeleton — Phase 1 build in progress.'] }];</script>
+
+  <!-- NL system scripts -->
+  <script src="/tools/system/nl-utils.js?v=5"></script>
+  <script src="/tools/system/nl-topbar.js?v=7"></script>
+  <script src="/tools/system/auth-guard.js?v=4"></script>
+
+  <style>
+    /* ── Page header ─────────────────────────────────────────────────────
+       Title block on the left, period selector on the right. Stacks on
+       narrow viewports. */
+    .wa-pageheader {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: var(--space-4, 16px);
+      flex-wrap: wrap;
+      padding: var(--space-5, 24px) 0 var(--space-4, 16px);
+      border-bottom: 1px solid var(--border, var(--line));
+      margin-bottom: var(--space-5, 24px);
+    }
+    .wa-pageheader__titles { min-width: 0; flex: 1 1 320px; }
+    .wa-pageheader__title {
+      margin: 0 0 var(--space-1, 4px);
+      font-size: var(--fs-h1, 28px);
+      font-weight: var(--fw-bold, 700);
+      color: var(--text, var(--ink));
+      letter-spacing: -0.01em;
+    }
+    .wa-pageheader__sub {
+      margin: 0;
+      font-size: var(--fs-body, 14px);
+      color: var(--text-muted, var(--muted));
+    }
+
+    /* ── Period selector (pill group) ────────────────────────────────────
+       Segmented buttons; active state uses brand accent. */
+    .period-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0;
+      padding: 4px;
+      background: var(--surface-2, var(--bg-soft));
+      border: 1px solid var(--border, var(--line));
+      border-radius: var(--radius-pill, 999px);
+      flex: 0 0 auto;
+    }
+    .period-btn {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--text-muted, var(--muted));
+      padding: 6px 14px;
+      font: inherit;
+      font-size: var(--fs-small, 13px);
+      font-weight: var(--fw-medium, 500);
+      border-radius: var(--radius-pill, 999px);
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .period-btn:hover { color: var(--text, var(--ink)); }
+    .period-btn.is-active {
+      background: var(--surface, var(--white));
+      color: var(--text, var(--ink));
+      box-shadow: var(--shadow-sm, 0 1px 2px rgba(10, 22, 40, 0.08));
+    }
+
+    /* ── Top-level tabs (Browse / Performance) ───────────────────────────
+       Mirrors the nl-brand .tabs / .tab pattern used by Insights' .ins-tabs:
+       a row of underline-style buttons with an active accent underline. */
+    .wa-tabs {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2, 8px);
+      border-bottom: 1px solid var(--border, var(--line));
+      margin-bottom: var(--space-4, 16px);
+    }
+    .wa-tab {
+      appearance: none;
+      background: transparent;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      padding: var(--space-3, 12px) var(--space-4, 16px);
+      font: inherit;
+      font-size: var(--fs-body, 14px);
+      font-weight: var(--fw-medium, 500);
+      color: var(--text-muted, var(--muted));
+      cursor: pointer;
+      margin-bottom: -1px;
+      transition: color 0.15s ease, border-color 0.15s ease;
+    }
+    .wa-tab:hover { color: var(--text, var(--ink)); }
+    .wa-tab.is-active {
+      color: var(--accent, var(--brand));
+      border-bottom-color: var(--accent, var(--brand));
+      font-weight: var(--fw-semibold, 600);
+    }
+
+    /* ── Tab panes ───────────────────────────────────────────────────────*/
+    .wa-pane { display: none; }
+    .wa-pane.is-active { display: block; }
+
+    /* ── Performance sub-tabs (Trends / Timing / Outliers) ───────────────
+       Slightly lighter weight than top-level tabs; same underline pattern. */
+    .wa-subtabs {
+      display: flex;
+      align-items: center;
+      gap: var(--space-1, 4px);
+      border-bottom: 1px solid var(--border, var(--line));
+      margin-bottom: var(--space-4, 16px);
+    }
+    .wa-subtab {
+      appearance: none;
+      background: transparent;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      padding: var(--space-2, 8px) var(--space-3, 12px);
+      font: inherit;
+      font-size: var(--fs-small, 13px);
+      font-weight: var(--fw-medium, 500);
+      color: var(--text-muted, var(--muted));
+      cursor: pointer;
+      margin-bottom: -1px;
+      transition: color 0.15s ease, border-color 0.15s ease;
+    }
+    .wa-subtab:hover { color: var(--text, var(--ink)); }
+    .wa-subtab.is-active {
+      color: var(--accent, var(--brand));
+      border-bottom-color: var(--accent, var(--brand));
+    }
+
+    .wa-subpane { display: none; }
+    .wa-subpane.is-active { display: block; }
+
+    /* ── Side-drawer (slides in from right) ──────────────────────────────
+       480px wide on desktop, full-width on mobile. Backdrop dims the page. */
+    .drawer {
+      position: fixed;
+      top: 0;
+      right: 0;
+      height: 100vh;
+      width: 480px;
+      max-width: 100vw;
+      transform: translateX(100%);
+      transition: transform 0.25s ease;
+      z-index: 200;
+      background: var(--white);
+      box-shadow: -8px 0 32px rgba(10, 22, 40, 0.18);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+    .drawer.is-open { transform: translateX(0); }
+    .drawer-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 22, 40, 0.35);
+      z-index: 199;
+    }
+    @media (max-width: 600px) {
+      .drawer { width: 100vw; }
+    }
+
+    .drawer__head {
+      display: flex;
+      align-items: flex-start;
+      gap: var(--space-3, 12px);
+      padding: var(--space-4, 16px) var(--space-5, 24px);
+      border-bottom: 1px solid var(--border, var(--line));
+      position: sticky;
+      top: 0;
+      background: var(--white);
+      z-index: 1;
+    }
+    .drawer__close {
+      appearance: none;
+      background: transparent;
+      border: 0;
+      font-size: 24px;
+      line-height: 1;
+      color: var(--text-muted, var(--muted));
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: var(--radius-sm, 6px);
+      flex: 0 0 auto;
+    }
+    .drawer__close:hover {
+      color: var(--text, var(--ink));
+      background: var(--surface-2, var(--bg-soft));
+    }
+    .drawer__title-wrap { min-width: 0; flex: 1 1 auto; }
+    .drawer__title {
+      margin: 0 0 var(--space-1, 4px);
+      font-size: var(--fs-h3, 18px);
+      font-weight: var(--fw-semibold, 600);
+      color: var(--text, var(--ink));
+      word-break: break-word;
+    }
+    .drawer__meta {
+      font-size: var(--fs-small, 13px);
+      color: var(--text-muted, var(--muted));
+    }
+    .drawer__body {
+      padding: var(--space-4, 16px) var(--space-5, 24px);
+      flex: 1 1 auto;
+    }
+  </style>
+</head>
+<body>
+  <div id="pageWrap" style="display:none;">
+    <div id="nlTopbar"></div>
+    <div class="main">
+      <div class="wa-pageheader">
+        <div class="wa-pageheader__titles">
+          <h1 class="wa-pageheader__title">Website Analysis</h1>
+          <p class="wa-pageheader__sub">Browse articles and analyse performance.</p>
+        </div>
+        <div class="period-toggle" id="periodToggle" role="group" aria-label="Period">
+          <button class="period-btn" data-value="30">30d</button>
+          <button class="period-btn is-active" data-value="90">90d</button>
+          <button class="period-btn" data-value="all">All time</button>
+        </div>
+      </div>
+
+      <div class="wa-tabs" id="waTabs">
+        <button class="wa-tab is-active" data-tab="browse">Browse</button>
+        <button class="wa-tab" data-tab="performance">Performance</button>
+      </div>
+
+      <div class="wa-pane is-active" data-pane="browse">
+        <p style="padding:60px 20px; text-align:center; color:var(--text-muted);">Browse view — port pending.</p>
+      </div>
+
+      <div class="wa-pane" data-pane="performance">
+        <div class="wa-subtabs" id="waSubtabs">
+          <button class="wa-subtab is-active" data-subtab="trends">Trends</button>
+          <button class="wa-subtab" data-subtab="timing">Timing</button>
+          <button class="wa-subtab" data-subtab="outliers">Outliers</button>
+        </div>
+        <div class="wa-subpane is-active" data-subpane="trends">
+          <p style="padding:60px 20px; text-align:center; color:var(--text-muted);">Trends — port pending.</p>
+        </div>
+        <div class="wa-subpane" data-subpane="timing">
+          <p style="padding:60px 20px; text-align:center; color:var(--text-muted);">Timing — port pending.</p>
+        </div>
+        <div class="wa-subpane" data-subpane="outliers">
+          <p style="padding:60px 20px; text-align:center; color:var(--text-muted);">Outliers — port pending.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Side-drawer (slides in from right) -->
+  <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
+  <aside class="drawer" id="articleDrawer" aria-hidden="true">
+    <header class="drawer__head">
+      <button class="drawer__close" id="drawerClose" aria-label="Close">×</button>
+      <div class="drawer__title-wrap">
+        <h2 class="drawer__title" id="drawerTitle">—</h2>
+        <div class="drawer__meta" id="drawerMeta"></div>
+      </div>
+    </header>
+    <div class="drawer__body" id="drawerBody">
+      <p style="padding:60px 20px; text-align:center; color:var(--text-muted);">Article detail — port pending.</p>
+    </div>
+  </aside>
+
+  <script>
+    // ── State ────────────────────────────────────────────────────────────
+    var STATE = {
+      tab: 'browse',           // 'browse' | 'performance'
+      perfTab: 'trends',       // 'trends' | 'timing' | 'outliers'
+      period: 90,              // 30 | 90 | 'all'
+      openArticle: null,       // postID or null
+      query: ''
+    };
+
+    // ── URL state ────────────────────────────────────────────────────────
+    function readStateFromUrl() {
+      var p = new URLSearchParams(window.location.search);
+      STATE.tab = p.get('tab') === 'performance' ? 'performance' : 'browse';
+      STATE.perfTab = ['trends', 'timing', 'outliers'].indexOf(p.get('perfTab')) >= 0 ? p.get('perfTab') : 'trends';
+      var per = p.get('period');
+      STATE.period = per === 'all' ? 'all' : (per === '30' ? 30 : 90);
+      STATE.openArticle = p.get('article') || null;
+      STATE.query = p.get('q') || '';
+    }
+    function writeStateToUrl() {
+      var p = new URLSearchParams();
+      if (STATE.tab !== 'browse') p.set('tab', STATE.tab);
+      if (STATE.perfTab !== 'trends' && STATE.tab === 'performance') p.set('perfTab', STATE.perfTab);
+      if (STATE.period !== 90) p.set('period', String(STATE.period));
+      if (STATE.openArticle) p.set('article', STATE.openArticle);
+      if (STATE.query) p.set('q', STATE.query);
+      var qs = p.toString();
+      var url = window.location.pathname + (qs ? '?' + qs : '');
+      history.replaceState(null, '', url);
+    }
+
+    // ── Tab switching ────────────────────────────────────────────────────
+    function activateTab(name) {
+      STATE.tab = name;
+      Array.prototype.forEach.call(document.querySelectorAll('.wa-tab'), function(b) {
+        b.classList.toggle('is-active', b.dataset.tab === name);
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('.wa-pane'), function(p) {
+        p.classList.toggle('is-active', p.dataset.pane === name);
+      });
+      writeStateToUrl();
+    }
+    function activateSubTab(name) {
+      STATE.perfTab = name;
+      Array.prototype.forEach.call(document.querySelectorAll('.wa-subtab'), function(b) {
+        b.classList.toggle('is-active', b.dataset.subtab === name);
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('.wa-subpane'), function(p) {
+        p.classList.toggle('is-active', p.dataset.subpane === name);
+      });
+      writeStateToUrl();
+    }
+
+    // ── Period toggle ────────────────────────────────────────────────────
+    function activatePeriod(v) {
+      STATE.period = v === 'all' ? 'all' : parseInt(v, 10);
+      Array.prototype.forEach.call(document.querySelectorAll('.period-btn'), function(b) {
+        b.classList.toggle('is-active', b.dataset.value === String(v));
+      });
+      writeStateToUrl();
+      window.dispatchEvent(new CustomEvent('nl:period-changed', { detail: { period: STATE.period } }));
+    }
+
+    // ── Drawer ───────────────────────────────────────────────────────────
+    function openDrawer(postID) {
+      STATE.openArticle = postID;
+      document.getElementById('drawerBackdrop').hidden = false;
+      var drawer = document.getElementById('articleDrawer');
+      drawer.classList.add('is-open');
+      drawer.setAttribute('aria-hidden', 'false');
+      writeStateToUrl();
+      // TODO(phase-1-review): populate drawer body with article detail
+    }
+    function closeDrawer() {
+      STATE.openArticle = null;
+      document.getElementById('drawerBackdrop').hidden = true;
+      var drawer = document.getElementById('articleDrawer');
+      drawer.classList.remove('is-open');
+      drawer.setAttribute('aria-hidden', 'true');
+      writeStateToUrl();
+    }
+
+    // ── Wiring ───────────────────────────────────────────────────────────
+    function init() {
+      readStateFromUrl();
+
+      Array.prototype.forEach.call(document.querySelectorAll('.wa-tab'), function(b) {
+        b.addEventListener('click', function() { activateTab(b.dataset.tab); });
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('.wa-subtab'), function(b) {
+        b.addEventListener('click', function() { activateSubTab(b.dataset.subtab); });
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('.period-btn'), function(b) {
+        b.addEventListener('click', function() { activatePeriod(b.dataset.value); });
+      });
+      document.getElementById('drawerClose').addEventListener('click', closeDrawer);
+      document.getElementById('drawerBackdrop').addEventListener('click', closeDrawer);
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && document.getElementById('articleDrawer').classList.contains('is-open')) {
+          closeDrawer();
+        }
+      });
+
+      // Restore initial state from URL
+      activateTab(STATE.tab);
+      activateSubTab(STATE.perfTab);
+      activatePeriod(STATE.period);
+      if (STATE.openArticle) openDrawer(STATE.openArticle);
+
+      // Reveal page (auth-guard hides #pageWrap until auth resolves)
+      document.getElementById('pageWrap').style.display = '';
+    }
+
+    if (window.nlAuthReady) {
+      window.nlAuthReady.then(init);
+    } else {
+      document.addEventListener('DOMContentLoaded', init);
+    }
+  </script>
+</body>
+</html>
