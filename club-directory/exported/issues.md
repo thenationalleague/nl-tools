@@ -2,8 +2,8 @@
 
 Source: inline `window.CLUBS` (in `index.html`) compared against the 2025/26 PDF and `clubs-meta.json`.
 
-- Auto-corrected (already applied to `clubs.csv` / `clubs.json`): **18**
-- Flagged for manual review: **11**
+- Auto-corrected (already applied to `clubs.csv` / `clubs.json`): **213**
+- Flagged for manual review: **22**
 
 ## Auto-corrections applied
 
@@ -76,6 +76,603 @@ Source: inline `window.CLUBS` (in `index.html`) compared against the 2025/26 PDF
   - was: `Www.braintreetownfc.org.uk`
   - now: `www.braintreetownfc.org.uk`
 
+### PERSON_NAME_SPLIT (13)
+
+- **Boreham Wood**
+  - was: `Mandee Morris / Billy Hunter`
+  - now: `Mandee Morris | Billy Hunter`
+- **FC Halifax Town**
+  - was: `Tony Allan (Secretary) & Robert Ham (Director)`
+  - now: `Tony Allan | Robert Ham`
+- **Rochdale**
+  - was: `Cameron Ogden and Simon Gauge`
+  - now: `Cameron Ogden | Simon Gauge`
+- **Wealdstone**
+  - was: `Richard Hopwood & Amar Zaman`
+  - now: `Richard Hopwood | Amar Zaman`
+- **York City**
+  - was: `Mathew Uggla and Julie Anne Uggla`
+  - now: `Mathew Uggla | Julie Anne Uggla`
+- **Hereford**
+  - was: `Ritesh Dua & Wasim Mahmalji`
+  - now: `Ritesh Dua | Wasim Mahmalji`
+- **Hereford**
+  - was: `Nik Marsh & Jamie Griffiths`
+  - now: `Nik Marsh | Jamie Griffiths`
+- **Kidderminster Harriers**
+  - was: `Dave Preece & Tim Oldman`
+  - now: `Dave Preece | Tim Oldman`
+- **Kidderminster Harriers**
+  - was: `Dave Preece & Tim Oldman`
+  - now: `Dave Preece | Tim Oldman`
+- **Leamington**
+  - was: `Max Passantino and Harry Cross`
+  - now: `Max Passantino | Harry Cross`
+- **Merthyr Town**
+  - was: `Jack Burgess / Kevin Brain /`
+  - now: `Jack Burgess | Kevin Brain`
+- **Chelmsford City**
+  - was: `Spencer Gore / Daniel Watkins`
+  - now: `Spencer Gore | Daniel Watkins`
+- **Horsham**
+  - was: `Kevin Borrett/Sam Borrett/Peter Tanner/Matthew Sean Bravery`
+  - now: `Kevin Borrett | Sam Borrett | Peter Tanner | Matthew Sean Bravery`
+
+### PERSON_NOTE (49)
+
+- **Aldershot Town**
+  - was: `Sports Therapist Degree`
+  - now: `(dropped)`
+- **Altrincham**
+  - was: `ATMMiF`
+  - now: `(dropped)`
+- **Altrincham**
+  - was: `ATMMiF`
+  - now: `(dropped)`
+- **Boreham Wood**
+  - was: `Sports Therapist / ATTMIF`
+  - now: `(dropped)`
+- **Boston United**
+  - was: `ATMMiF`
+  - now: `(dropped)`
+- **Brackley Town**
+  - was: `BSc in Sports Therapy`
+  - now: `(dropped)`
+- **Carlisle United**
+  - was: `ATMMiF`
+  - now: `(dropped)`
+- **Eastleigh**
+  - was: `ATMMiF`
+  - now: `(dropped)`
+- **Eastleigh**
+  - was: `ATMMiF`
+  - now: `(dropped)`
+- **FC Halifax Town**
+  - was: `Bsc (Hons) Sports and Exercise Therapist & IMMOFP`
+  - now: `(dropped)`
+- **FC Halifax Town**
+  - was: `Bsc, Dip SEM (Sports and Exercise Medicine) & IMMOFP`
+  - now: `(dropped)`
+- **Hartlepool United**
+  - was: `Correspondence: Club Executive Director Tony Webster Commercial and Operations Director Rose Stoker, , Head of Football Operations Joe Monks`
+  - now: `Correspondence: Club`
+- **Hartlepool United**
+  - was: `ATMMiF`
+  - now: `(dropped)`
+- **Rochdale**
+  - was: `Hons), MB BChir (Cantab) MRCGP`
+  - now: `(dropped)`
+- **Rochdale**
+  - was: `BSc Sports Rehabilitation, MSc Physiotherapy, ATMMiF Commercial Sales Manager Jamie Stoddart`
+  - now: `(dropped)`
+- **Scunthorpe United**
+  - was: `BSc(hons) Sports Rehabilitation, MSc Psychology, MSc Sport and Exercise Psychology, ATTMiF`
+  - now: `(dropped)`
+- **Solihull Moors**
+  - was: `BSc(hons), MB ChB, FRCEM PGDip(SEM), DMFSEM(UK)`
+  - now: `(dropped)`
+- **Solihull Moors**
+  - was: `ATMMiF. E:`
+  - now: `(dropped)`
+- **Sutton United**
+  - was: `Correspondence: Club Fixtures Secretary Graham Starns`
+  - now: `Correspondence: Club`
+- **Sutton United**
+  - was: `ATMMiF Chief Revenue Officer Jack Daly`
+  - now: `(dropped)`
+- **Tamworth**
+  - was: `Bsc Sports Rehab and Exercise Science`
+  - now: `(dropped)`
+- **Woking**
+  - was: `ATMMiF, MD`
+  - now: `(dropped)`
+- **Yeovil Town**
+  - was: `ATMMiF`
+  - now: `(dropped)`
+- **York City**
+  - was: `BSc (Hons) Sports Therapy -PGDip Physiotherapy - Merit`
+  - now: `(dropped)`
+- **AFC Fylde**
+  - was: `ATMMiF`
+  - now: `(dropped)`
+- **AFC Telford United**
+  - was: `BSc Hons Sports Therapy Emergency Medical First Aid, ITMMIF`
+  - now: `(dropped)`
+- **Chester**
+  - was: `Level 4 Intermediate Trauma Medical Management in Football (ITMMiF)`
+  - now: `(dropped)`
+- **Chorley**
+  - was: `ATMMiF`
+  - now: `(dropped)`
+- **Curzon Ashton**
+  - was: `Hons) Physiotherapy, Emergency First Aid in Football Level 2, Complex Injury Assessment and Rehabilitation of Sporting Injury, Sports Massage Therapy Diploma, First Aid at Work OPR`
+  - now: `(dropped)`
+- **Darlington**
+  - was: `Chartered physiotherapist`
+  - now: `(dropped)`
+- **Hereford**
+  - was: `BSc Sports and Exercise Science, ITMMiF`
+  - now: `(dropped)`
+- **Kidderminster Harriers**
+  - was: `BSc Sports Therapy ITMMiF`
+  - now: `(dropped)`
+- **King’s Lynn Town**
+  - was: `BSc Sport Therapy, ITMMiF`
+  - now: `(dropped)`
+- **Marine**
+  - was: `Level 4 Intermediate Trauma Medical Management in Football, Concussion Guidelines`
+  - now: `(dropped)`
+- **Radcliffe**
+  - was: `BSc Hons Sport Rehabilitation, ITMMiF, PHICIS 2`
+  - now: `(dropped)`
+- **Radcliffe**
+  - was: `BSc Physiotherapy, MSc Strength and Conditioning`
+  - now: `(dropped)`
+- **Radcliffe**
+  - was: `Bsc Hons`
+  - now: `(dropped)`
+- **Southport**
+  - was: `Level 4 ITMMiF`
+  - now: `(dropped)`
+- **Worksop Town**
+  - was: `Level 3 Emergency First Aid`
+  - now: `(dropped)`
+- **Bath City**
+  - was: `BSc Sports Therapy`
+  - now: `(dropped)`
+- **Chesham United**
+  - was: `Degree Master of Science Professional Practice Placement 5`
+  - now: `(dropped)`
+- **Chippenham Town**
+  - was: `BSc Sports Therapy. ITMMiF`
+  - now: `(dropped)`
+- **Dorking Wanderers**
+  - was: `Level 5`
+  - now: `(dropped)`
+- **Hornchurch**
+  - was: `Bsc Hons Sports Therapy Msst`
+  - now: `(dropped)`
+- **Horsham**
+  - was: `ATMMiF Ide/`
+  - now: `(dropped)`
+- **Maidenhead United**
+  - was: `BSc Physiotherapy FA Diploma`
+  - now: `(dropped)`
+- **Tonbridge Angels**
+  - was: `Level 4 Intermediate Trauma Medical Management in Football`
+  - now: `(dropped)`
+- **Torquay United**
+  - was: `Level 5 ATMMiF`
+  - now: `(dropped)`
+- **Weston-Super-Mare**
+  - was: `BSc (Hons) Sports Therapy, FA Level 4 ITMMiF`
+  - now: `(dropped)`
+
+### PERSON_EMAIL_CASE (38)
+
+- **Aldershot Town**
+  - was: `Commercial@theshots.co.uk`
+  - now: `commercial@theshots.co.uk`
+- **Braintree Town**
+  - was: `Chairman@braintreetownfc.org.uk`
+  - now: `chairman@braintreetownfc.org.uk`
+- **Braintree Town**
+  - was: `Info@braintreetownfc.org.uk`
+  - now: `info@braintreetownfc.org.uk`
+- **FC Halifax Town**
+  - was: `Dyoung@doctors.org.uk`
+  - now: `dyoung@doctors.org.uk`
+- **Gateshead**
+  - was: `David.Renwick@gateshead-fc.com`
+  - now: `david.renwick@gateshead-fc.com`
+- **Gateshead**
+  - was: `Simon@gateshead-fc.co`
+  - now: `simon@gateshead-fc.co`
+- **Hartlepool United**
+  - was: `Dom.Aberdeen@hartlepoolunited.co.uk`
+  - now: `dom.aberdeen@hartlepoolunited.co.uk`
+- **Morecambe**
+  - was: `Ropindersingh@morecambefc.com`
+  - now: `ropindersingh@morecambefc.com`
+- **Rochdale**
+  - was: `rebecca.o'loughlin@rochdaleafc.co.uk`
+  - now: `rebecca.oloughlin@rochdaleafc.co.uk`
+- **Woking**
+  - was: `Benjamin.parker@wokingfc.co.uk`
+  - now: `benjamin.parker@wokingfc.co.uk`
+- **York City**
+  - was: `Paul.Fenton@yorkcityfootballclub.co.uk`
+  - now: `paul.fenton@yorkcityfootballclub.co.uk`
+- **York City**
+  - was: `Media@yorkcityfootballclub.co.uk`
+  - now: `media@yorkcityfootballclub.co.uk`
+- **York City**
+  - was: `Paula@yorkcityfcfoundation.co.uk`
+  - now: `paula@yorkcityfcfoundation.co.uk`
+- **York City**
+  - was: `Steve.Dorey@yorkcityfootballclub.co.uk`
+  - now: `steve.dorey@yorkcityfootballclub.co.uk`
+- **AFC Fylde**
+  - was: `Adam.hartley@afcfylde.co.uk`
+  - now: `adam.hartley@afcfylde.co.uk`
+- **AFC Fylde**
+  - was: `Chris.Brannigan@afcfylde.co.uk`
+  - now: `chris.brannigan@afcfylde.co.uk`
+- **AFC Telford United**
+  - was: `Thomasryan18@live.co.uk`
+  - now: `thomasryan18@live.co.uk`
+- **Buxton**
+  - was: `Melanie.Flude@buxtonfc.com`
+  - now: `melanie.flude@buxtonfc.com`
+- **Chorley**
+  - was: `Jamie.vermiglio@chorleyfc.com`
+  - now: `jamie.vermiglio@chorleyfc.com`
+- **Kidderminster Harriers**
+  - was: `Kevin.Bunn@harriers.co.uk`
+  - now: `kevin.bunn@harriers.co.uk`
+- **Kidderminster Harriers**
+  - was: `Ellie.Billingham@harriers.co.uk`
+  - now: `ellie.billingham@harriers.co.uk`
+- **King’s Lynn Town**
+  - was: `Lauren@kltown.co.uk`
+  - now: `lauren@kltown.co.uk`
+- **Leamington**
+  - was: `Jim.Scott@leamingtonfc.co.uk`
+  - now: `jim.scott@leamingtonfc.co.uk`
+- **Peterborough Sports**
+  - was: `Tim@psfc.co.uk`
+  - now: `tim@psfc.co.uk`
+- **Peterborough Sports**
+  - was: `David@psfc.co.uk`
+  - now: `david@psfc.co.uk`
+- **AFC Totton**
+  - was: `Chairman@afctotton.com`
+  - now: `chairman@afctotton.com`
+- **AFC Totton**
+  - was: `Medical@afctotton.com`
+  - now: `medical@afctotton.com`
+- **AFC Totton**
+  - was: `Salesandmarketing@afctotton.com`
+  - now: `salesandmarketing@afctotton.com`
+- **AFC Totton**
+  - was: `Bethrowley@hotmail.co.uk`
+  - now: `bethrowley@hotmail.co.uk`
+- **AFC Totton**
+  - was: `Harrybrookwell@yahoo.com`
+  - now: `harrybrookwell@yahoo.com`
+- **AFC Totton**
+  - was: `Communities@afctotton.com`
+  - now: `communities@afctotton.com`
+- **AFC Totton**
+  - was: `Welfare@afctotton.club`
+  - now: `welfare@afctotton.club`
+- **Ebbsfleet United FC**
+  - was: `Katie.humphris@eufc.co.uk`
+  - now: `katie.humphris@eufc.co.uk`
+- **Farnborough**
+  - was: `Connor.field@farnboroughfc.co.uk`
+  - now: `connor.field@farnboroughfc.co.uk`
+- **Hornchurch**
+  - was: `Terry.fisher@hotmail.co.uk`
+  - now: `terry.fisher@hotmail.co.uk`
+- **Horsham**
+  - was: `Accounts@horshamfc.co.uk`
+  - now: `accounts@horshamfc.co.uk`
+- **Slough Town**
+  - was: `Steve.Doyle@sloughtownfc.net`
+  - now: `steve.doyle@sloughtownfc.net`
+- **Torquay United**
+  - was: `SLO@torquayunited.com`
+  - now: `slo@torquayunited.com`
+
+### PERSON_NAME (95)
+
+- **Boston United**
+  - was: `Matt Elworthy , matt`
+  - now: `Matt Elworthy matt`
+- **Eastleigh**
+  - was: `Tom Coffey Head of Football Operations Jamie White`
+  - now: `Tom Coffey`
+- **FC Halifax Town**
+  - was: `Donald Young MbChB`
+  - now: `Donald Young`
+- **Forest Green Rovers**
+  - was: `Dane Vince Head of Content Chris Hutchings`
+  - now: `Dane Vince`
+- **Forest Green Rovers**
+  - was: `Jake Roe ATMiFF`
+  - now: `Jake Roe`
+- **Gateshead**
+  - was: `Tim Robson Club disabled Officer Ben Clark`
+  - now: `Tim Robson`
+- **Hartlepool United**
+  - was: `Rose Stoker Retail/Ticketing Sarah Rowntree`
+  - now: `Rose Stoker`
+- **Morecambe**
+  - was: `Vacant`
+  - now: ``
+- **Morecambe**
+  - was: `Chris Coldwell ATTMiF`
+  - now: `Chris Coldwell`
+- **Morecambe**
+  - was: `Vacant`
+  - now: ``
+- **Morecambe**
+  - was: `Paul Elliot Club Disabled Officer Vacant`
+  - now: `Paul Elliot`
+- **Rochdale**
+  - was: `Dr Wes Tensel MA (`
+  - now: `Dr Wes Tensel`
+- **Scunthorpe United**
+  - was: `Madora Health Lead Sports Rehabilitator Rosie Margetson`
+  - now: `Madora Health`
+- **Scunthorpe United**
+  - was: `Paul Hurrell Club disabled Officer James Moody`
+  - now: `Paul Hurrell`
+- **Solihull Moors**
+  - was: `Ethan Cooper MSc Physiotherapy`
+  - now: `Ethan Cooper`
+- **Truro City**
+  - was: `Joe Whittaker ATMIFF`
+  - now: `Joe Whittaker`
+- **Truro City**
+  - was: `James`
+  - now: ``
+- **Truro City**
+  - was: `Gareth Davies - as per Press officer`
+  - now: `Gareth Davies`
+- **Wealdstone**
+  - was: `Richard Hopwood - COO`
+  - now: `Richard Hopwood`
+- **Wealdstone**
+  - was: `Shyam Gadhvi ATTMIF`
+  - now: `Shyam Gadhvi`
+- **Wealdstone**
+  - was: `Georgie Turner ITMMIF`
+  - now: `Georgie Turner`
+- **Wealdstone**
+  - was: `Will Beaman Sales & Ticketing Administrator Natasha Fitzgerald M: , E:`
+  - now: `Will Beaman`
+- **Wealdstone**
+  - was: `Police Liaison Officer`
+  - now: ``
+- **Woking**
+  - was: `Dan Rowe ITMMiF`
+  - now: `Dan Rowe`
+- **Woking**
+  - was: `Sam Newman 447903944556`
+  - now: `Sam Newman`
+- **Woking**
+  - was: `John Monday Sales and Ticketing Administrator Natash Fitzgerald`
+  - now: `John Monday`
+- **Yeovil Town**
+  - was: `Dr Chris Minton MBChB, MRCGP, PGdipSEM`
+  - now: `Dr Chris Minton`
+- **York City**
+  - was: `Sam Mannings HCPC, CSP and ACPSEM`
+  - now: `Sam Mannings`
+- **AFC Fylde**
+  - was: `JackTomlinson`
+  - now: `Jack Tomlinson`
+- **AFC Fylde**
+  - was: `Paige Morris Head of Scouting Danny Rowe`
+  - now: `Paige Morris`
+- **AFC Telford United**
+  - was: `/ Player Secretary same as club`
+  - now: ``
+- **Alfreton Town**
+  - was: `Oliver Rowley ATMMIF`
+  - now: `Oliver Rowley`
+- **Bedford Town**
+  - was: `James Smiles Player Secretary`
+  - now: `James Smiles`
+- **Bedford Town**
+  - was: `Jasmin Dolby EMMIAF`
+  - now: `Jasmin Dolby`
+- **Buxton**
+  - was: `Mike Barton Player Secretary Danny Hopkins`
+  - now: `Mike Barton`
+- **Buxton**
+  - was: `Eloise Mcgrath EMITF`
+  - now: `Eloise Mcgrath`
+- **Chester**
+  - was: `Jim Green. info as Club Secretary`
+  - now: `Jim Green`
+- **Chester**
+  - was: `Name`
+  - now: ``
+- **Chester**
+  - was: `Dr Marion Needham Total Stadium 5126`
+  - now: `Dr Marion Needham`
+- **Chorley**
+  - was: `Robbie Harrison L1 Introduction to First Aid`
+  - now: `Robbie Harrison`
+- **Chorley**
+  - was: `Dr Adams DiPHE`
+  - now: `Dr Adams`
+- **Curzon Ashton**
+  - was: `Lucia Cicchirillo BHSc (`
+  - now: `Lucia Cicchirillo`
+- **Darlington**
+  - was: `Darlington FC Supporters Group`
+  - now: ``
+- **Hereford**
+  - was: `Dan Brayson MSc Sports Therapy`
+  - now: `Dan Brayson`
+- **Leamington**
+  - was: `Tom Gallagher, ATMMIF`
+  - now: `Tom Gallagher`
+- **Macclesfield**
+  - was: `Finance Manager`
+  - now: ``
+- **Macclesfield**
+  - was: `Mediskills Consultant, Paramedics, Sister NHS Ambulance info@mediskills-uk`
+  - now: ``
+- **Macclesfield**
+  - was: `Merrissa Heraldson UK/USA Physiotherapist Qualified`
+  - now: `Merrissa Heraldson`
+- **Merthyr Town**
+  - was: `100% Fan Owned`
+  - now: ``
+- **Oxford City**
+  - was: `Jazmine Simpkin ITMMiF`
+  - now: `Jazmine Simpkin`
+- **Peterborough Sports**
+  - was: `Joshua Aves ITTMIF`
+  - now: `Joshua Aves`
+- **Radcliffe**
+  - was: `Viv Ware Correspondence Club`
+  - now: `Viv Ware`
+- **Radcliffe**
+  - was: `& Performance Stephen O'Halloran`
+  - now: `Performance Stephen O'Halloran`
+- **Radcliffe**
+  - was: `O'Halloran`
+  - now: ``
+- **Scarborough Athletic**
+  - was: `Becky Cox ITMIFF`
+  - now: `Becky Cox`
+- **South Shields**
+  - was: `Gary Crutwell Sporting Director Lee Picton`
+  - now: `Gary Crutwell`
+- **Southport**
+  - was: `(COO) Andy Burgess`
+  - now: `Andy Burgess`
+- **Spennymoor Town**
+  - was: `Name as Press Officer`
+  - now: ``
+- **Worksop Town**
+  - was: `Bryan(max)Ross`
+  - now: `Bryan Ross`
+- **Worksop Town**
+  - was: `Bryan(Max)Ross`
+  - now: `Bryan Ross`
+- **AFC Totton**
+  - was: `nterim Chairman, Kevin Hebenton`
+  - now: `Kevin Hebenton`
+- **AFC Totton**
+  - was: `Steve Brookwell (Option 6)`
+  - now: `Steve Brookwell`
+- **AFC Totton**
+  - was: `Tony Croft (Option 5)`
+  - now: `Tony Croft`
+- **AFC Totton**
+  - was: `Riley Langdown ITMMIF`
+  - now: `Riley Langdown`
+- **AFC Totton**
+  - was: `Keely Ball (Option 3)`
+  - now: `Keely Ball`
+- **AFC Totton**
+  - was: `Tara Doel (Option 7)`
+  - now: `Tara Doel`
+- **Chelmsford City**
+  - was: `Finance Team Club Therapis Arron Benstead MSc Sports Rehabilitation`
+  - now: `Club Therapis Arron Benstead`
+- **Chippenham Town**
+  - was: `Martin Searle MA MB BChir MRCGP`
+  - now: `Martin Searle BChir`
+- **Dagenham & Redbridge**
+  - was: `Stephen Thompson MBE (Managing Director)`
+  - now: `Stephen Thompson`
+- **Dagenham & Redbridge**
+  - was: `Alan Jeyes (Members Director)`
+  - now: `Alan Jeyes`
+- **Dagenham & Redbridge**
+  - was: `Stephen Thompson MBE`
+  - now: `Stephen Thompson`
+- **Dagenham & Redbridge**
+  - was: `Alex Gibbs ATMIFF`
+  - now: `Alex Gibbs`
+- **Dagenham & Redbridge**
+  - was: `Bryony Woolley ATMIFF`
+  - now: `Bryony Woolley`
+- **Dagenham & Redbridge**
+  - was: `Stephen Thompson MBE`
+  - now: `Stephen Thompson`
+- **Dorking Wanderers**
+  - was: `Kat Brown ATMMIF`
+  - now: `Kat Brown`
+- **Dover Athletic**
+  - was: `Deborah Harrison Player Secretary as Club Secretary`
+  - now: `Deborah Harrison`
+- **Eastbourne Borough**
+  - was: `LEE MALYON`
+  - now: `Lee Malyon`
+- **Enfield Town**
+  - was: `George Sherman-Dejonghe ITMMiF`
+  - now: `George Sherman-Dejonghe`
+- **Enfield Town**
+  - was: `Laura Pollington ITMMiF (August 2024)`
+  - now: `Laura Pollington`
+- **Farnborough**
+  - was: `Holly Vickers ITMIFF qualified`
+  - now: `Holly Vickers`
+- **Hampton & Richmond Borough**
+  - was: `Megan Partington ITMMIF`
+  - now: `Megan Partington`
+- **Hemel Hempstead Town**
+  - was: `Paul Shadbolt ITMMIF`
+  - now: `Paul Shadbolt`
+- **Hornchurch**
+  - was: `Jack Morris /`
+  - now: `Jack Morris`
+- **Horsham**
+  - was: `Leighton Mitchell. Correspondence Club. Fusion Aviation Community Stadium Worthing Road Horsham RH130AD`
+  - now: `Leighton Mitchell`
+- **Horsham**
+  - was: `Juliette Swietlik (DS925)`
+  - now: `Juliette Swietlik`
+- **Horsham**
+  - was: `Ian Burlinson Primary Club Welfare/Safeguarding Officer Annie Raby`
+  - now: `Ian Burlinson`
+- **Maidenhead United**
+  - was: `Sian Lancaster Marketing and Media Manager Shay Bottomley`
+  - now: `Sian Lancaster`
+- **Maidstone United**
+  - was: `Dr Arjun Sohanpal MB BS MRCGP`
+  - now: `Dr Arjun Sohanpal`
+- **Salisbury**
+  - was: `Ali Al-Hamad 96599 999578`
+  - now: `Ali Al-Hamad`
+- **Salisbury**
+  - was: `Ian Hammond Associate Directors David Trowbridge, Alan Green`
+  - now: `Ian Hammond`
+- **Salisbury**
+  - was: `Colin Cooper or`
+  - now: `Colin Cooper`
+- **Salisbury**
+  - was: `Harry Vickery BSC Sports Therapy Intermediate Trauma Medical Management in football`
+  - now: `Harry Vickery`
+- **Slough Town**
+  - was: `Chiko Mvula ITMIFF, MSc Physiotherapy`
+  - now: `Chiko Mvula`
+- **Worthing**
+  - was: `Chris Salt Fixtures Secretary Gary Cooper Head of Performance & Medical`
+  - now: `Chris Salt`
+- **Worthing**
+  - was: `Steve Tomlin Kit Enquiries as secretary`
+  - now: `Steve Tomlin`
+
 ## Flagged for manual review
 
 ### POSTCODE_VS_META (10)
@@ -111,9 +708,42 @@ Source: inline `window.CLUBS` (in `index.html`) compared against the 2025/26 PDF
   - directory: `directory=SL2 5AY`
   - note: meta stadium=SL1 5QF
 
-### PERSON_EMAIL_MISMATCH (1)
+### PERSON_NAME_REVIEW (12)
 
-- **Rochdale / Rebecca O'Loughlin**
-  - directory: `rebecca.o'loughlin@rochdaleafc.co.uk`
-  - note: PDF same-domain emails: ['andy.duff@rochdaleafc.co.uk', 'chris.garland@rochdaleafc.co.uk', 'george.delves@rochdaleafc.co.uk', 'greg.jones@rochdaleafc.co.uk', 'jamie.stoddart@rochdaleafc.co.uk']
+- **Morecambe / Vacant**
+  - directory: `Vacant`
+  - note: name is a role label, not a person: 'Vacant'
+- **Morecambe / Vacant**
+  - directory: `Vacant`
+  - note: name is a role label, not a person: 'Vacant'
+- **Truro City / James**
+  - directory: `James`
+  - note: name not recoverable: 'James' -> 'James'
+- **Wealdstone / Police Liaison Officer**
+  - directory: `Police Liaison Officer`
+  - note: name is a role label, not a person: 'Police Liaison Officer'
+- **AFC Telford United / / Player Secretary same as club**
+  - directory: `/ Player Secretary same as club`
+  - note: name was empty after normalisation
+- **Chester / Name**
+  - directory: `Name`
+  - note: name is a role label, not a person: 'Name'
+- **Darlington / Darlington FC Supporters Group**
+  - directory: `Darlington FC Supporters Group`
+  - note: name is a role label, not a person: 'Darlington FC Supporters Group'
+- **Macclesfield / Finance Manager**
+  - directory: `Finance Manager`
+  - note: name is a role label, not a person: 'Finance Manager'
+- **Macclesfield / Mediskills Consultant, Paramedics, Sister NHS Ambulance info@mediskills-uk**
+  - directory: `Mediskills Consultant, Paramedics, Sister NHS Ambulance info@mediskills-uk`
+  - note: name is a role label, not a person: 'Mediskills Consultant, Paramedics, Sister NHS Ambulance info@mediskills-uk'
+- **Merthyr Town / 100% Fan Owned**
+  - directory: `100% Fan Owned`
+  - note: name is a role label, not a person: '100% Fan Owned'
+- **Radcliffe / O'Halloran**
+  - directory: `O'Halloran`
+  - note: name not recoverable: "O'Halloran" -> "O'Halloran"
+- **Spennymoor Town / Name as Press Officer**
+  - directory: `Name as Press Officer`
+  - note: name is a role label, not a person: 'Name as Press Officer'
 

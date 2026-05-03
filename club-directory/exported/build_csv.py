@@ -33,7 +33,7 @@ def get_pdf(name):
 def get_meta(name):
     return meta.get(NAME_MAP.get(name, name))
 
-EMAIL_RE = re.compile(r'[\w.+\-]+@[\w.\-]+\.[A-Za-z]{2,}')
+EMAIL_RE = re.compile(r"[\w.+'’\-]+@[\w.\-]+\.[A-Za-z]{2,}")
 def extract_phones(text):
     found = set()
     pats = [
@@ -83,6 +83,317 @@ def add_issue(club, category, current, suggested, applied=False, person=''):
         'club': club, 'category': category, 'person': person,
         'current': current, 'suggested': suggested, 'applied': applied,
     })
+
+# ---------------- Person field normalisation ----------------
+# Tokens treated as academic / professional qualifications — stripped from names
+# and used to detect notes that are purely qualification noise.
+QUAL_TOKENS = [
+    'BSc', 'BSc(Hons)', 'BSc(hons)', 'B.Sc', 'BS',
+    'MSc', 'M.Sc', 'MA', 'MBA', 'MEng',
+    'MB', 'MBChB', 'MbChB', 'MBBS', 'BHSc', 'BHsc', 'B.HSc',
+    'MRCGP', 'FRCGP', 'FRCEM', 'PGDip', 'PGdip', 'DipSEM', 'DipSem',
+    'Dip', 'DipHE', 'DiPHE', 'DMFSEM', 'PHICIS', 'HCPC', 'CSP', 'ACPSEM',
+    'ATMMiF', 'ATMMIF', 'ATTMiF', 'ATTMIF', 'ATMiFF', 'ATMIFF', 'ATMiF',
+    'ITMMiF', 'ITMMIF', 'ITMIFF', 'ITTMIF',
+    'EMMIAF', 'EMITF',
+    'MBE', 'OBE', 'CBE',
+    'IMMOFP', 'OPR', 'NHS',
+    'MRCS',
+    'qualified',  # trailing word in "Holly Vickers ITMIFF qualified"
+]
+QUAL_RE = re.compile(r'\b(' + '|'.join(re.escape(q) for q in QUAL_TOKENS) + r')\b\.?',
+                     re.IGNORECASE)
+
+# Phrases that indicate the field has bled into adjacent content. When found
+# inside a "name", we truncate the name at the first occurrence and keep only
+# what came before — provided it still looks like a real name.
+ROLE_BLEED_PATTERNS = [
+    r'Head of ', r'Sporting Director', r'Managing Director', r'Operations Director',
+    r'Executive Director', r'Associate Directors?',
+    r'Player Secretary', r'Fixture Secretary', r'Fixtures Secretary',
+    r'Club disabled', r'Club Disabled',
+    r'Welfare\s*/\s*Safeguarding', r'Primary Club', r'Welfare Officer',
+    r'Marketing and Media', r'Sales (and|&) Ticketing', r'Sales (and|&) Marketing',
+    r'Lead Sports Rehabilitator', r'Sales Manager', r'Programme Editor',
+    r'Retail\s*/\s*Ticketing', r'Press Officer', r'Press officer',
+    r'Kit Enquiries', r'Total Stadium', r'Finance Team',
+    r'Player Liaison', r'Disabled Officer',
+    r'as per ', r' as Press', r' as Club', r' as secretary',
+    r'Correspondence ', r'Correspondence:',
+    r'info as ',
+    # qualification phrases that bleed into the name field
+    r'Sports Therapy', r'Sports Rehabilitation', r'Sport Rehabilitation',
+    r'Trauma Medical', r'Physiotherapist', r'Physiotherapy', r'Consultant',
+    r'Paramedics?', r'\s+UK/USA',
+]
+ROLE_BLEED_RE = re.compile('(' + '|'.join(ROLE_BLEED_PATTERNS) + ')', re.IGNORECASE)
+
+# Whole names that are pure role labels (PDF "ditto" / column-header bleed).
+ROLE_LABEL_NAMES = {
+    'finance manager', 'finance team', 'police liaison officer',
+    'general manager', 'fixture secretary', 'fixtures secretary',
+    'commercial manager', 'safety officer', 'welfare officer',
+    'club doctor', 'club therapist', 'kit manager', 'community manager',
+    'name as press officer', 'as press officer', 'name', 'name as',
+    'mediskills', '100% fan owned', 'fan owned',
+    'vacant', 'tbc', 'tba', 'darlington fc supporters group',
+    'fc supporters group', 'supporters group',
+}
+
+# Camel-case split: "JackTomlinson" -> "Jack Tomlinson"; protected prefixes like
+# Mc/Mac/De/Di/O' stay glued.
+CAMEL_PROTECTED = {'Mc', 'Mac', 'De', 'Di', 'Da', 'La', 'Le', 'Van', 'Von',
+                   'Du', 'Al', 'El', 'St', "O'", "D'"}
+def split_camel(name):
+    out = []
+    for word in name.split(' '):
+        # find lowercase->uppercase boundaries; split unless the lead is a
+        # protected prefix
+        parts = re.split(r'(?<=[a-z])(?=[A-Z])', word)
+        if len(parts) > 1:
+            merged = [parts[0]]
+            for nxt in parts[1:]:
+                if merged[-1] in CAMEL_PROTECTED:
+                    merged[-1] = merged[-1] + nxt
+                else:
+                    merged.append(nxt)
+            out.append(' '.join(merged))
+        else:
+            out.append(word)
+    return ' '.join(out)
+
+# All-caps tokens that ARE legitimate within a person name (titles, suffixes)
+NAME_ALLCAPS_OK = {'DR', 'PC', 'PCSO', 'PR', 'II', 'III', 'IV', 'JR', 'SR', 'OBE', 'MBE', 'CBE'}
+
+def looks_like_person_name(s, strict=False):
+    """Heuristic: ≥2 capitalised words, reasonable length. In non-strict mode
+    one stray all-caps middle token is allowed (Saudi-style abbreviations).
+    Strict mode rejects any non-whitelisted all-caps token — used when deciding
+    whether to split on '/' or '&'."""
+    s = s.strip()
+    if not s: return False
+    if not re.match(r'^[A-Z]', s): return False
+    if len(s) > 50: return False
+    words = [w for w in re.split(r'[\s.\-]+', s) if w]
+    if not words: return False
+    cap_words = [w for w in words if re.match(r"^[A-Z][a-zA-Z'’\-]+", w)]
+    if len(cap_words) < 2: return False
+    bad_caps = [w for w in words
+                if w.isupper() and len(w) >= 2 and w not in NAME_ALLCAPS_OK]
+    limit = 1 if strict else 2
+    if len(bad_caps) >= limit: return False
+    return True
+
+def title_case_if_all_upper(s):
+    """LEE MALYON -> Lee Malyon, but leave 'Tom McCabe' alone."""
+    words = s.split()
+    if not words: return s
+    if all(w.isupper() for w in words if len(w) >= 2):
+        return ' '.join(w[0] + w[1:].lower() if len(w) > 1 else w for w in words)
+    return s
+
+def normalise_name(raw, club, person_id):
+    """Return (clean_name, review_flag_or_empty). Empty clean_name + flag means
+    'this row should probably be deleted'."""
+    if not raw: return '', ''
+    original = raw
+    n = raw
+
+    # 1. Strip parenthetical asides and trailing role-suffix dashes
+    n = re.sub(r'\s*\([^)]*\)\s*', ' ', n)
+    # "Richard Hopwood - COO" → "Richard Hopwood"
+    n = re.sub(r'\s*[\-–—]\s*[A-Z]{2,}\s*$', '', n)
+
+    # 2. Strip standalone digit runs (phone numbers leaked into name)
+    n = re.sub(r'\s+\d[\d\s]{4,}', '', n)
+
+    # 3. Strip qualification tokens (and concatenated forms like PGdipSEM)
+    n = QUAL_RE.sub('', n)
+    # Catch concatenated qualification suffixes (no boundary between tokens)
+    n = re.sub(r'\b(PGdip|PGDip|MBChB|MbChB|MBA|BSc|MSc)[A-Z]+\b', '', n,
+               flags=re.IGNORECASE)
+    # Strip "Level N <text>" / "L1 Introduction to First Aid" qualification phrases
+    n = re.sub(r'\s+L\d\b.*$', '', n)
+    n = re.sub(r'\s+Level\s+\d.*$', '', n, flags=re.IGNORECASE)
+    n = re.sub(r'\s+First Aid.*$', '', n, flags=re.IGNORECASE)
+
+    # 4. Truncate at role-bleed phrase. If the head segment doesn't look like a
+    # person but the tail does, prefer the tail (handles e.g.
+    # "Madora Health Lead Sports Rehabilitator Rosie Margetson" → "Rosie Margetson").
+    m = ROLE_BLEED_RE.search(n)
+    if m:
+        head = n[:m.start()].rstrip(' ,./&-')
+        # Find the next role-bleed phrase after this one (if any), to bound the tail
+        rest = n[m.end():]
+        m2 = ROLE_BLEED_RE.search(rest)
+        tail = (rest if not m2 else rest[:m2.start()]).strip(' ,./&-')
+        if not looks_like_person_name(head) and looks_like_person_name(tail):
+            n = tail
+        else:
+            n = head
+
+    # 5. "<role-or-junk>, <Real Name>" — keep the part after the comma if it
+    # looks like a name. e.g. "nterim Chairman, Kevin Hebenton",
+    # "General Manager, Tim Herbert".
+    if ',' in n:
+        before, after = [s.strip(' ,./&-') for s in n.split(',', 1)]
+        if looks_like_person_name(after) and not looks_like_person_name(before):
+            n = after
+
+    # 6. Tidy whitespace + leading junk + leftover punctuation islands
+    # (e.g. "Sam Mannings , and" after stripping qualifications)
+    n = re.sub(r'\s+,\s+', ' ', n)
+    n = re.sub(r'\b(and|&|or)\b\s*$', '', n, flags=re.IGNORECASE)
+    n = re.sub(r'\s*\([^)]*$', '', n)            # unclosed trailing paren
+    n = re.sub(r'^[\s,./&\\-]+', '', n)
+    n = re.sub(r'[\s,./&\\-]+$', '', n)
+    n = re.sub(r'\s+', ' ', n).strip()
+
+    # 7. Camel-case split, then title-case all-caps names
+    n = split_camel(n)
+    n = title_case_if_all_upper(n)
+
+    # 8. Final checks
+    if not n:
+        return '', 'name was empty after normalisation'
+    if n.lower() in ROLE_LABEL_NAMES:
+        return '', f'name is a role label, not a person: {original!r}'
+    # Also catch "starts-with-lowercase" leftovers like "nterim Chairman" — these
+    # are PDF text-flow artefacts and we can't reliably reconstruct them.
+    if not re.match(r'^[A-Z]', n):
+        return '', f'name starts with non-capital, likely PDF artefact: {original!r}'
+    if not looks_like_person_name(n):
+        return '', f'name not recoverable: {original!r} -> {n!r}'
+    return n, ''
+
+def normalise_email(e):
+    if not e: return e, ''
+    e = e.strip()
+    flags = []
+    # Strip apostrophes (smart and straight) — emails don't carry them in
+    # practice; this catches PDF rendering artefacts e.g. rebecca.o'loughlin
+    if "'" in e or "’" in e:
+        e_new = e.replace("'", '').replace("’", '')
+        flags.append(f"stripped apostrophe (was {e!r})")
+        e = e_new
+    if '@' in e:
+        local, dom = e.split('@', 1)
+        if local != local.lower():
+            flags.append('lowercased local part')
+            e = local.lower() + '@' + dom
+    return e, '; '.join(flags)
+
+def normalise_phone(p):
+    if not p: return p, ''
+    p = re.sub(r'\s+', ' ', p).strip()
+    return p, ''
+
+def normalise_note(note):
+    """Drop notes that are purely qualifications. Keep correspondence info."""
+    if not note: return note
+    s = note.strip()
+    # If it starts with Correspondence, keep (but trim trailing role-bleed)
+    if s.lower().startswith('correspondence'):
+        # Cut at common bleed-trailers
+        s = re.split(r'\s+(Fixtures? Secretary|Player Secretary|Executive Director|'
+                     r'Commercial and Operations|Head of Football|Commercial Sales Manager|'
+                     r'Programme Editor)\b', s)[0]
+        return s.strip(' ,.;')
+    # Pure qualification text? Drop. Anything that starts with a known
+    # qualification token is treated as qualification noise.
+    if QUAL_RE.match(s):
+        return ''
+    qual_indicators = re.compile(
+        r'^(BSc|Bsc|MSc|MA|MB |MBChB|MbChB|BHSc|MBBS|Level\s+\d|PGDip|PGdip|'
+        r'Bachelor|Master|Hons|HCPC|Dip|Diploma|Sports Therapy|First Aid|'
+        r'L\d Introduction|MRCS|FRCEM|Sport Rehabilitation|Sports Rehabilitation|'
+        r'Degree\b|Chartered\b|Sports Therapist|Physiotherapist)',
+        re.IGNORECASE,
+    )
+    if qual_indicators.match(s):
+        return ''
+    # If contains a comma-separated list of qualification tokens and not much
+    # else, drop.
+    bare = re.sub(QUAL_RE, '', s)
+    bare = re.sub(r'[,\s\-/.]', '', bare)
+    if len(bare) < max(8, len(s) * 0.3):
+        return ''
+    return s
+
+# Pre-pass: slash- or ampersand-joined director names → split into separate
+# person entries
+SPLIT_RE = re.compile(r'\s*(?:/|\s&\s|\s+and\s+)\s*')
+def _looks_listy(name, sep_pattern):
+    # Refuse splits when the original contains a role-bleed phrase — usually
+    # means the "and"/"/" is part of a junk substring like "Retail/Ticketing"
+    # or "Sales and Ticketing", not a real separator between two people.
+    if ROLE_BLEED_RE.search(name): return None
+    if not sep_pattern.search(name): return None
+    parts = [s.strip() for s in sep_pattern.split(name) if s.strip()]
+    if len(parts) < 2: return None
+    if all(looks_like_person_name(p, strict=True) for p in parts):
+        return parts
+    return None
+
+for c in clubs:
+    expanded = []
+    for p in c.get('people', []):
+        nm = p.get('name', '') or ''
+        if 'http' in nm.lower():
+            expanded.append(p); continue
+        # Strip parenthetical role hints first so "Tony Allan (Secretary) & Robert Ham (Director)"
+        # becomes "Tony Allan & Robert Ham" before split
+        nm_stripped = re.sub(r'\s*\([^)]*\)\s*', ' ', nm).strip()
+        parts = _looks_listy(nm_stripped, SPLIT_RE)
+        if parts and len(nm) > 20:
+            add_issue(c['name'], 'PERSON_NAME_SPLIT', nm,
+                      ' | '.join(parts), applied=True, person=nm)
+            for s in parts:
+                expanded.append({**p, 'name': s})
+            continue
+        expanded.append(p)
+    c['people'] = expanded
+
+# Apply to every person
+for c in clubs:
+    new_people = []
+    for p in c.get('people', []):
+        person_key = p.get('name', '')
+        clean_name, name_flag = normalise_name(p.get('name', ''), c['name'], person_key)
+        clean_email, email_flag = normalise_email(p.get('email'))
+        clean_phone, phone_flag = normalise_phone(p.get('phone'))
+        clean_note = normalise_note(p.get('note') or '')
+
+        review = []
+        if name_flag: review.append(name_flag)
+
+        # Log changes
+        if clean_name != (p.get('name') or ''):
+            add_issue(c['name'], 'PERSON_NAME', p.get('name',''), clean_name,
+                      applied=True, person=p.get('name',''))
+        if email_flag:
+            add_issue(c['name'], 'PERSON_EMAIL_CASE', p.get('email',''), clean_email,
+                      applied=True, person=clean_name or p.get('name',''))
+        if (p.get('note') or '') and clean_note != p.get('note'):
+            add_issue(c['name'], 'PERSON_NOTE', p.get('note',''), clean_note or '(dropped)',
+                      applied=True, person=clean_name or p.get('name',''))
+        if review:
+            add_issue(c['name'], 'PERSON_NAME_REVIEW', p.get('name',''),
+                      '; '.join(review), applied=False,
+                      person=clean_name or p.get('name',''))
+
+        p['name'] = clean_name
+        p['email'] = clean_email
+        p['phone'] = clean_phone
+        p['note'] = clean_note or None
+        p['_review'] = '; '.join(review) if review else ''
+        new_people.append(p)
+
+    c['people'] = new_people
+
+# ---------- end normalisation ----------
+
+
 
 # Normalise club names with smart quotes
 for c in clubs:
@@ -196,7 +507,8 @@ for c in clubs:
     if not pdf_text:
         add_issue(c['name'], 'NO_PDF_PAGE', '', 'PDF page not found', applied=False)
         continue
-    pdf_emails = set(e.lower() for e in EMAIL_RE.findall(pdf_text))
+    pdf_emails = set(e.lower().replace("'", '').replace('’', '')
+                     for e in EMAIL_RE.findall(pdf_text))
     pdf_phones = extract_phones(pdf_text)
 
     cemail = (c.get('email') or '').lower()
@@ -241,7 +553,7 @@ with open(f'{out_dir}/clubs.csv', 'w', newline='') as f:
 # people.csv (one row per role per person — denormalised so multi-role people get multiple rows)
 with open(f'{out_dir}/people.csv', 'w', newline='') as f:
     w = csv.writer(f, quoting=csv.QUOTE_ALL)
-    w.writerow(['club','person_name','role_title','section','main','dept_head','email','phone','note'])
+    w.writerow(['club','person_name','role_title','section','main','dept_head','email','phone','note','review'])
     for c in clubs:
         for p in c.get('people', []):
             for r in p.get('roles', []):
@@ -253,6 +565,7 @@ with open(f'{out_dir}/people.csv', 'w', newline='') as f:
                     p.get('email','') or '',
                     p.get('phone','') or '',
                     p.get('note','') or '',
+                    p.get('_review','') or '',
                 ])
 
 # clubs.json — corrected, ready for RTDB
