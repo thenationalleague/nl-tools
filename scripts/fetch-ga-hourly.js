@@ -1,13 +1,22 @@
 /* =======================================================================
    NL Website Insights - GA Hourly Fetch
-   Version: 1.1
-   Date: 28/04/2026
+   Version: 2.0
+   Date: 03/05/2026
 
    Queries GA4 for hour-level page-view data so we can analyse article
    performance trajectories - "first 72 hours" curves, time-of-day
    publishing patterns, decay rates.
 
-   Output: assets/data/ga-hourly.json
+   Outputs:
+     assets/data/ga-hourly.json           Rolling 90-day window (live view)
+     assets/data/ga-hourly-archive.json   Accumulating all-time archive
+
+   The rolling file is what the Insights tool reads for 30d/90d views.
+   The archive is read on demand when the user picks "All time" — it
+   accumulates forward from the first run that has v2.0 of this script.
+
+   For historical data prior to the first v2.0 run, run
+   scripts/backfill-ga-hourly-archive.js with a start date.
 
    AUTH
      Same WIF setup as fetch-ga-metrics.js. No JSON keys needed.
@@ -19,26 +28,35 @@
                  analysis; 30 days was too tight for stable cohort
                  medians on lower-volume publish slots)
 
-   OUTPUT SHAPE
+   ROLLING-FILE OUTPUT SHAPE
      {
        generatedAt:  "...",
-       startDate:    "2026-03-29",
-       endDate:      "2026-04-28",
-       windowDays:   30,
+       startDate:    "2026-02-02",
+       endDate:      "2026-05-03",
+       windowDays:   90,
        pathCount:    NNNN,
+       schemaVersion: 1,
        hourly: {
          "/news/2026/april/19/...": [
-           [unixTimestamp, views],
            [unixTimestamp, views],
            ...
          ],
          ...
        }
      }
-
      Each path's array is sorted ascending by timestamp. Empty hours are
-     omitted (sparse), so consumers should iterate through the array
-     rather than expecting a value for every hour.
+     omitted (sparse).
+
+   ARCHIVE-FILE OUTPUT SHAPE
+     Same hourly shape, unbounded date range. Plus:
+       firstSeenDate:  the earliest date covered (set on first write,
+                       updated only by backfill)
+       lastUpdatedAt:  ISO timestamp of last successful merge
+
+     Merge rule: for any (path, timestamp) pair, the new fetch's value
+     wins on overlap (corrects for late-arriving GA data within the 90d
+     window). Anything older than the new fetch's startDate is left
+     untouched.
 
    PATH NORMALISATION
      Same as fetch-ga-metrics.js: strip query string, fragment, trailing
@@ -47,25 +65,31 @@
      use in the archive's rebuild-index.js merge.
 
    COST CONSIDERATIONS
-     - 30 days x 24 hours = 720 hour-buckets per path
-     - ~1000-2000 paths receive views in any 30-day window
-     - Sparse output - we expect ~30,000-100,000 rows back from GA
-     - Typical response under 5MB compressed
-     - GA4 Data API quota: ~5-50 tokens per query, well within standard tier
-     - First run is heavier than subsequent: most paths cold for 30 days
+     - 90 days x 24 hours = 2160 hour-buckets per path
+     - ~1000-2000 paths receive views in any 90-day window
+     - Sparse output - we expect ~100,000 rows back from GA
+     - Typical response under 12-15 MB compressed
+     - GA4 Data API quota: ~5-200 tokens per query, well within standard tier
+     - Archive grows ~12-15 MB / 90 days → ~80 MB at 18 months. Crosses
+       GitHub's recommended 50 MB single-file threshold around 9 months
+       in. Add quarterly partitioning before that.
 
    CHANGELOG
-   v1.1 (28/04/2026) - Window extended from 30 to 90 days (richer cohort
-                       analysis; output ~12-15MB vs ~5MB; well within
-                       GA4 quota — single query under 200 tokens)
-   v1.0 (28/04/2026) - Initial build for Insights tool
+   v2.0 (03/05/2026) - Adds accumulating archive (ga-hourly-archive.json)
+                       so "All time" views in the Insights tool have data
+                       to read. Each nightly run merges the rolling-90d
+                       slice into the archive. Existing rolling-file
+                       behaviour unchanged.
+   v1.1 (28/04/2026) - Window extended from 30 to 90 days.
+   v1.0 (28/04/2026) - Initial build for Insights tool.
 ======================================================================= */
 
 const fs = require('fs');
 const path = require('path');
 const { BetaAnalyticsDataClient } = require('@google-analytics/data');
 
-const OUTPUT_PATH = path.join(__dirname, '..', 'assets', 'data', 'ga-hourly.json');
+const OUTPUT_PATH  = path.join(__dirname, '..', 'assets', 'data', 'ga-hourly.json');
+const ARCHIVE_PATH = path.join(__dirname, '..', 'assets', 'data', 'ga-hourly-archive.json');
 const GA_PROPERTY_ID = process.env.GA_PROPERTY_ID;
 const WINDOW_DAYS = 90;
 const PAGE_SIZE = 100000;
@@ -219,6 +243,102 @@ async function main() {
   const sizeMB = (fs.statSync(OUTPUT_PATH).size / 1024 / 1024).toFixed(2);
   log('');
   log('Wrote ' + OUTPUT_PATH + ' (' + sizeMB + 'MB)');
+
+  // Merge into the accumulating archive. Defensive: if the archive
+  // already exists, read it, merge new data in, write back. Failure
+  // here must not corrupt the archive or break the rolling-file write
+  // we already completed above.
+  try {
+    log('');
+    log('ARCHIVE MERGE');
+    mergeIntoArchive(byPath, startDate, endDate);
+  } catch (err) {
+    console.error('Archive merge failed:', err.message);
+    if (err.stack) console.error(err.stack);
+    // Don't propagate — the rolling file is already written successfully.
+    // The archive can be repaired by a subsequent run or the backfill script.
+  }
+}
+
+/**
+ * Merge new data into the all-time archive at ARCHIVE_PATH. New data wins
+ * on overlap (corrects late-arriving GA values within the 90d window).
+ * Anything older than the new fetch is left untouched.
+ *
+ * Atomic write: stage to a .tmp file, then rename. So a partial write
+ * from a crashed process can never leave the archive in a broken state.
+ */
+function mergeIntoArchive(newByPath, newStartDate, newEndDate) {
+  let archive = null;
+  if (fs.existsSync(ARCHIVE_PATH)) {
+    try {
+      archive = JSON.parse(fs.readFileSync(ARCHIVE_PATH, 'utf8'));
+    } catch (err) {
+      log('  WARN: existing archive could not be parsed (' + err.message + ') — will rebuild from this run');
+      archive = null;
+    }
+  }
+
+  const existing = (archive && archive.hourly) ? archive.hourly : {};
+  const merged   = {};
+  const newStartTs = Math.floor(new Date(newStartDate + 'T00:00:00Z').getTime() / 1000);
+
+  // 1. Carry forward all existing data older than the new fetch window.
+  Object.keys(existing).forEach(p => {
+    const arr = existing[p].filter(([ts]) => ts < newStartTs);
+    if (arr.length) merged[p] = arr;
+  });
+
+  // 2. Layer the new fetch on top — new wins on any overlap.
+  Object.keys(newByPath).forEach(p => {
+    if (!merged[p]) merged[p] = [];
+    const seen = {};
+    newByPath[p].forEach(([ts, v]) => { seen[ts] = v; });
+    // Drop any existing entries that overlap the new window for this path
+    merged[p] = merged[p].filter(([ts]) => ts < newStartTs);
+    Object.keys(seen).forEach(ts => merged[p].push([Number(ts), seen[ts]]));
+    merged[p].sort((a, b) => a[0] - b[0]);
+  });
+
+  // 3. Compute archive-wide metadata
+  let earliestTs = Infinity, latestTs = 0, totalPoints = 0;
+  Object.keys(merged).forEach(p => {
+    merged[p].forEach(([ts]) => {
+      if (ts < earliestTs) earliestTs = ts;
+      if (ts > latestTs) latestTs = ts;
+      totalPoints++;
+    });
+  });
+
+  const firstSeenDate = (archive && archive.firstSeenDate)
+    ? archive.firstSeenDate
+    : (earliestTs === Infinity ? newStartDate : new Date(earliestTs * 1000).toISOString().slice(0, 10));
+
+  const payload = {
+    generatedAt:    new Date().toISOString(),
+    propertyId:     GA_PROPERTY_ID,
+    firstSeenDate:  firstSeenDate,
+    endDate:        newEndDate,
+    lastUpdatedAt:  new Date().toISOString(),
+    pathCount:      Object.keys(merged).length,
+    pointCount:     totalPoints,
+    schemaVersion:  1,
+    hourly:         merged
+  };
+
+  // Atomic write
+  const tmp = ARCHIVE_PATH + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(payload));
+  fs.renameSync(tmp, ARCHIVE_PATH);
+
+  const sizeMB = (fs.statSync(ARCHIVE_PATH).size / 1024 / 1024).toFixed(2);
+  log('  paths in archive:   ' + Object.keys(merged).length);
+  log('  points in archive:  ' + totalPoints.toLocaleString());
+  log('  earliest data:      ' + firstSeenDate);
+  log('  archive file size:  ' + sizeMB + 'MB');
+  if (parseFloat(sizeMB) > 50) {
+    log('  WARN: archive is over 50 MB — consider migrating to quarterly partitioning');
+  }
 }
 
 main().catch(err => {

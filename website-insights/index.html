@@ -3,10 +3,33 @@
 <head>
 <!--
   NL Tools — Website Insights
-  Version: 1.10
+  Version: 1.11
   Date: 03/05/2026
 
   CHANGELOG
+  v1.11 (03/05/2026) — All-time data + day-boundary reference lines
+    - Added "All time" option to both period toggles (cohort + heatmap)
+      alongside 30d / 90d. Reads from a new accumulating archive
+      (assets/data/ga-hourly-archive.json) which is built nightly by
+      fetch-ga-hourly.js v2.0. The archive is lazy-loaded only when
+      the user picks "All time" — the 30d/90d views stay snappy.
+    - Until the backfill workflow runs, the archive only contains
+      whatever's been fetched since v2.0 of the script went live.
+      Backfill from the site launch (2024-11-08) by triggering the
+      backfill-ga-archive.yml workflow with start_date=2024-11-08.
+    - Added vertical day-boundary reference lines at +24h, +48h, +72h
+      on the cohort chart. Faint dashed lines + small "Day 1 / Day 2
+      / Day 3" labels at the top of the plot. Gives the reader a
+      "where am I in the news cycle" anchor without trying to map to
+      specific clock times (which cohorts can't represent — each one
+      spans a range of publish hours).
+    - Architectural plumbing: STATE.rolling and STATE.allTime hold
+      separate hourly snapshots and article indices. useDataset(period)
+      swaps which one is "active" before each render. Cohort and
+      heatmap each pick their own period independently. loadAllTime-
+      Hourly() lazy-loads with a single in-flight promise (so two
+      simultaneous toggles don't double-fetch).
+
   v1.10 (03/05/2026)
     - Brand sweep: cohort chart palette no longer hardcoded. The four
       cohort colours (morning/afternoon/evening/late) now resolve from
@@ -219,6 +242,14 @@
   var NL_TOOL_KEY = 'staff-website-insights';
 
   window.NL_CHANGELOG = [
+    {
+      date: '3 May 2026',
+      version: 'v1.11',
+      items: [
+        'New "All time" option on the period toggle (cohort and heatmap) alongside 30d / 90d. Looks at every article since the data archive started — currently from the date this feature went live, eventually from site launch once a backfill is run.',
+        'Day-boundary reference lines on the cohort chart. Faint vertical lines at +24h, +48h, +72h with "Day 1 / Day 2 / Day 3" labels — easier to spot how an article is doing within the news cycle.'
+      ]
+    },
     {
       date: '3 May 2026',
       version: 'v1.10',
@@ -839,8 +870,8 @@
       <h2>Article timing</h2>
       <span class="ins-sub">When articles are read &amp; how publish-time affects performance</span>
     </div>
-    <div class="ins-data-note">
-      Data window: rolling 90 days, refreshed nightly. Older data falls off the bottom — longer-term history requires an accumulating archive (planned).
+    <div class="ins-data-note" id="dataWindowNote">
+      Data window: rolling 90 days, refreshed nightly. All-time uses an accumulating archive that grows from the date the archive was first populated.
     </div>
 
     <div class="ins-card">
@@ -852,6 +883,7 @@
           <span class="ins-toggle-label">Period</span>
           <button class="ins-toggle" data-value="30">30d</button>
           <button class="ins-toggle active" data-value="90">90d</button>
+          <button class="ins-toggle" data-value="all">All time</button>
         </div>
         <div class="ins-toggle-group" data-target="cohortAgg">
           <span class="ins-toggle-label">Average</span>
@@ -879,6 +911,7 @@
           <span class="ins-toggle-label">Period</span>
           <button class="ins-toggle" data-value="30">30d</button>
           <button class="ins-toggle active" data-value="90">90d</button>
+          <button class="ins-toggle" data-value="all">All time</button>
         </div>
         <div class="ins-toggle-group" data-target="heatmapAgg" id="heatmapAggGroup">
           <span class="ins-toggle-label">Average</span>
@@ -946,15 +979,18 @@ var STATE = {
   cohortToggles: {},       // hour bucket -> true/false
   gtMode: 'gems',
   heatmapMode: 'publish',   // 'publish' | 'reading'
-  cohortPeriod: 90,         // days: 30 | 90
+  cohortPeriod: 90,         // days: 30 | 90 | 'all'
   cohortAgg: 'median',      // 'median' | 'mean'
-  heatmapPeriod: 90,        // days: 30 | 90
-  heatmapAgg: 'median'      // 'median' | 'mean'
+  heatmapPeriod: 90,        // days: 30 | 90 | 'all'
+  heatmapAgg: 'median',     // 'median' | 'mean'
+  hourlyAllTime: null,      // lazy-loaded archive (loadAllTimeHourly)
+  hourlyAllTimeLoading: false
 };
 
-var DATA_BASE = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/';
-var ARTICLES_URL = DATA_BASE + 'articles-index.json';
-var HOURLY_URL   = DATA_BASE + 'ga-hourly.json';
+var DATA_BASE     = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/';
+var ARTICLES_URL  = DATA_BASE + 'articles-index.json';
+var HOURLY_URL    = DATA_BASE + 'ga-hourly.json';
+var HOURLY_ARCHIVE_URL = DATA_BASE + 'ga-hourly-archive.json';
 
 /* ============ HELPERS ============ */
 function $(id) { return document.getElementById(id); }
@@ -1252,8 +1288,102 @@ function loadAllData() {
     // Build the article->hourly path index once. Subsequent lookups are O(1).
     buildHourlyIndex();
 
+    // Snapshot the rolling dataset so we can swap back to it later when
+    // the user toggles between 'all time' and a windowed period.
+    STATE.rolling = {
+      hourly:       STATE.hourly,
+      meta:         STATE.hourlyMeta,
+      articleIndex: ARTICLE_HOURLY_INDEX
+    };
+
     return true;
   });
+}
+
+/* Load the all-time archive on demand. Returns a promise that resolves
+   when STATE.allTime is populated and a separate ARTICLE_HOURLY_INDEX
+   has been built against the archive's path set. The fetch is cached:
+   second + subsequent calls return the cached result without a network
+   round-trip. */
+function loadAllTimeHourly() {
+  if (STATE.allTime) return Promise.resolve(STATE.allTime);
+  if (STATE.hourlyAllTimeLoading) return STATE.hourlyAllTimeLoading;
+
+  STATE.hourlyAllTimeLoading = fetch(HOURLY_ARCHIVE_URL + '?t=' + Date.now())
+    .then(function(r) {
+      if (!r.ok) throw new Error('archive fetch failed: ' + r.status);
+      return r.json();
+    })
+    .then(function(arch) {
+      // Build a parallel article index against the archive's hourly map.
+      // Reuses buildHourlyIndex's logic by temporarily swapping STATE.hourly,
+      // building, and restoring.
+      var prevHourly = STATE.hourly;
+      var prevIndex  = ARTICLE_HOURLY_INDEX;
+      STATE.hourly = arch.hourly || {};
+      buildHourlyIndex();
+      var archIndex = ARTICLE_HOURLY_INDEX;
+      // Restore the rolling dataset as the active one
+      STATE.hourly = prevHourly;
+      ARTICLE_HOURLY_INDEX = prevIndex;
+
+      STATE.allTime = {
+        hourly:       arch.hourly || {},
+        meta: {
+          generatedAt:    arch.generatedAt,
+          startDate:      arch.firstSeenDate,
+          endDate:        arch.endDate,
+          windowDays:     null,        // 'all time' has no fixed window
+          pathCount:      arch.pathCount,
+          firstSeenDate:  arch.firstSeenDate,
+          isAllTime:      true
+        },
+        articleIndex: archIndex
+      };
+      STATE.hourlyAllTimeLoading = false;
+      return STATE.allTime;
+    })
+    .catch(function(err) {
+      console.warn('[Insights] all-time archive fetch failed:', err.message);
+      STATE.hourlyAllTimeLoading = false;
+      throw err;
+    });
+
+  return STATE.hourlyAllTimeLoading;
+}
+
+/* Swap the active dataset (STATE.hourly + ARTICLE_HOURLY_INDEX +
+   STATE.hourlyMeta) to the right slot for the requested period.
+   period === 'all' uses the archive; anything else uses the rolling
+   90-day snapshot. Pure pointer reassignment — fast, no recompute. */
+function useDataset(period) {
+  var ds = (period === 'all' && STATE.allTime) ? STATE.allTime : STATE.rolling;
+  if (!ds) return;
+  STATE.hourly = ds.hourly;
+  STATE.hourlyMeta = ds.meta;
+  ARTICLE_HOURLY_INDEX = ds.articleIndex;
+}
+
+/* Called on every period-toggle click. If the new period is 'all' and
+   the archive isn't loaded yet, lazy-load it and re-render once ready.
+   Otherwise just renders synchronously. */
+function onPeriodChange(renderFn) {
+  var period = STATE.cohortPeriod === 'all' || STATE.heatmapPeriod === 'all' ? 'all' : 90;
+  if (period === 'all' && !STATE.allTime) {
+    // Show a loading hint on whichever chart triggered this
+    var target = renderFn === renderCohortChart ? $('cohortChart') : $('heatmap');
+    if (target) {
+      target.className = 'chart-empty';
+      target.innerHTML = 'Loading all-time data…';
+    }
+    loadAllTimeHourly()
+      .then(function() { renderFn(); })
+      .catch(function() {
+        if (target) target.innerHTML = 'All-time data is not yet available. The archive is built nightly — check back tomorrow, or run the backfill workflow to seed it.';
+      });
+    return;
+  }
+  renderFn();
 }
 
 /* ============ TAB ROUTING ============ */
@@ -1515,18 +1645,22 @@ function renderTimingTab() {
     b._wired = true;
   });
 
+  // Period values: 'all' is a string sentinel (lazy-loads the archive),
+  // anything else is a day-count integer. coercePeriod() normalises.
+  function coercePeriod(v) { return v === 'all' ? 'all' : parseInt(v, 10); }
+
   // Wire chart-controls toggles (period/aggregation, idempotent)
   wireToggleGroup('#cohortChartControls [data-target="cohortPeriod"]', function(v) {
-    STATE.cohortPeriod = parseInt(v, 10);
-    renderCohortChart();
+    STATE.cohortPeriod = coercePeriod(v);
+    onPeriodChange(renderCohortChart);
   });
   wireToggleGroup('#cohortChartControls [data-target="cohortAgg"]', function(v) {
     STATE.cohortAgg = v;
     renderCohortChart();
   });
   wireToggleGroup('#heatmapChartControls [data-target="heatmapPeriod"]', function(v) {
-    STATE.heatmapPeriod = parseInt(v, 10);
-    renderHeatmap();
+    STATE.heatmapPeriod = coercePeriod(v);
+    onPeriodChange(renderHeatmap);
   });
   wireToggleGroup('#heatmapChartControls [data-target="heatmapAgg"]', function(v) {
     STATE.heatmapAgg = v;
@@ -1851,9 +1985,13 @@ function renderCohortControls() {
 }
 
 function renderCohortChart() {
+  // Swap to the right dataset for this chart's selected period.
+  useDataset(STATE.cohortPeriod);
+
   var container = $('cohortChart');
   var meta = STATE.hourlyMeta;
-  if (!meta.windowDays) {
+  // 'all time' has no windowDays — accept either windowDays > 0 or isAllTime
+  if (!meta.windowDays && !meta.isAllTime) {
     container.className = 'chart-empty';
     container.innerHTML = 'No hourly data available.';
     return;
@@ -1888,8 +2026,15 @@ function renderCohortChart() {
 
 function computeCohortSeries(hourSet) {
   var meta = STATE.hourlyMeta;
-  var periodDays = Math.min(STATE.cohortPeriod || 90, meta.windowDays || 90);
-  var windowStart = Date.now() - (periodDays * 86400 * 1000);
+  // For 'all time', no windowStart filter — include every article ever.
+  // For windowed periods, cap the window at whatever the dataset actually
+  // covers (so 30d on a 90d dataset works, 'all' uses the archive's full span).
+  var isAllTime = STATE.cohortPeriod === 'all';
+  var windowStart = -Infinity;
+  if (!isAllTime) {
+    var periodDays = Math.min(STATE.cohortPeriod || 90, meta.windowDays || 90);
+    windowStart = Date.now() - (periodDays * 86400 * 1000);
+  }
   var matches = STATE.articles.filter(function(a) {
     var t = new Date(a.publishedDateTime).getTime();
     if (t < windowStart) return false;
@@ -1994,6 +2139,23 @@ function drawCohortSVG(cohortSeries) {
     svg += '<text class="svg-axis-label" x="' + (ML - 8) + '" y="' + (y + 3) + '" text-anchor="end">' + formatCount(v) + '</text>';
   }
 
+  // Day-boundary reference lines at +24h and +48h. Sit underneath the
+  // data so they're visible without distracting; "Day 1 / Day 2 / Day 3"
+  // labels at the top give the reader a "where am I in the news cycle"
+  // anchor without trying to map to specific clock times (which cohorts
+  // can't, since each cohort spans a range of publish hours).
+  [
+    { x: 24, label: 'Day 1' },
+    { x: 48, label: 'Day 2' },
+    { x: 72, label: 'Day 3' }
+  ].forEach(function(b) {
+    var x = xScale(b.x);
+    if (b.x < 72) {
+      svg += '<line x1="' + x + '" y1="' + MT + '" x2="' + x + '" y2="' + (MT + plotH) + '" stroke="var(--border)" stroke-width="1" stroke-dasharray="2,4"/>';
+    }
+    svg += '<text class="svg-axis-label" x="' + (x - 4) + '" y="' + (MT + 12) + '" text-anchor="end" style="font-size: 9px; fill: var(--text-muted); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;">' + b.label + '</text>';
+  });
+
   // X axis
   [0, 12, 24, 36, 48, 60, 72].forEach(function(h) {
     var x = xScale(h);
@@ -2042,6 +2204,8 @@ function drawCohortSVG(cohortSeries) {
                   ignoring article identity.
 */
 function renderHeatmap() {
+  // Swap to the right dataset for this chart's selected period.
+  useDataset(STATE.heatmapPeriod);
   if (STATE.heatmapMode === 'reading') {
     renderHeatmapReading();
   } else {
@@ -2052,14 +2216,18 @@ function renderHeatmap() {
 function renderHeatmapPublish() {
   var container = $('heatmap');
   var meta = STATE.hourlyMeta;
-  if (!meta.windowDays) {
+  if (!meta.windowDays && !meta.isAllTime) {
     container.className = 'chart-empty';
     container.innerHTML = 'No hourly data available.';
     return;
   }
 
-  var periodDays = Math.min(STATE.heatmapPeriod || 90, meta.windowDays || 90);
-  var windowStart = Date.now() - (periodDays * 86400 * 1000);
+  var isAllTime = STATE.heatmapPeriod === 'all';
+  var windowStart = -Infinity;
+  if (!isAllTime) {
+    var periodDays = Math.min(STATE.heatmapPeriod || 90, meta.windowDays || 90);
+    windowStart = Date.now() - (periodDays * 86400 * 1000);
+  }
   var grid = {};
   for (var d = 0; d < 7; d++) {
     grid[d] = {};
@@ -2119,14 +2287,18 @@ function renderHeatmapPublish() {
 function renderHeatmapReading() {
   var container = $('heatmap');
   var meta = STATE.hourlyMeta;
-  if (!meta.windowDays || !STATE.hourly) {
+  if ((!meta.windowDays && !meta.isAllTime) || !STATE.hourly) {
     container.className = 'chart-empty';
     container.innerHTML = 'No hourly data available.';
     return;
   }
 
-  var periodDays = Math.min(STATE.heatmapPeriod || 90, meta.windowDays || 90);
-  var windowStartTs = Math.floor((Date.now() - (periodDays * 86400 * 1000)) / 1000);
+  var isAllTime = STATE.heatmapPeriod === 'all';
+  var windowStartTs = 0;
+  if (!isAllTime) {
+    var periodDays = Math.min(STATE.heatmapPeriod || 90, meta.windowDays || 90);
+    windowStartTs = Math.floor((Date.now() - (periodDays * 86400 * 1000)) / 1000);
+  }
   var nowTs = Math.floor(Date.now() / 1000);
 
   /* CORRECT MODEL FOR "Reading times":
