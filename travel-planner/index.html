@@ -689,7 +689,7 @@ function doManSearch(){
 }
 
 // ── Driving search ──
-var DFM='routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.routeLabels,routes.travelAdvisory,routes.legs.startLocation,routes.legs.endLocation,routes.description';
+var DFM='routes.duration,routes.distanceMeters,routes.staticDuration,routes.polyline.encodedPolyline,routes.routeLabels,routes.travelAdvisory,routes.legs.startLocation,routes.legs.endLocation,routes.legs.duration,routes.legs.staticDuration,routes.legs.steps.navigationInstruction,routes.legs.steps.localizedValues,routes.legs.steps.polyline.encodedPolyline,routes.description';
 
 async function doDriveSearch(origin,dest,opts,oL,dL){
   var ra=document.getElementById('resultsArea');
@@ -715,8 +715,6 @@ function renderDrive(routes,idx,oL,dL){
   var ra=document.getElementById('resultsArea'),r=routes[idx];
   var dur=r.duration?fmtDur(r.duration):'';
   var dist=r.distanceMeters?fmtDist(r.distanceMeters):'';
-  var hasToll=r.travelAdvisory&&r.travelAdvisory.tollInfo;
-  var desc=r.description||'';
 
   var h='<div class="tp__results"><div class="tp__map-col"><div id="routeMap"></div></div><div class="tp__board-col">';
   h+='<div class="tp__summary">';
@@ -730,20 +728,84 @@ function renderDrive(routes,idx,oL,dL){
     var rdist=rt.distanceMeters?fmtDist(rt.distanceMeters):'';
     var rtoll=rt.travelAdvisory&&rt.travelAdvisory.tollInfo;
     var rdesc=rt.description||'';
-    var labels=(rt.routeLabels||[]).join(', ');
+
+    // Extract major road names from steps
+    var roads=extractRoads(rt);
 
     h+='<div class="tp__drive-card'+(i===idx?' active':'')+'" onclick="swDrive('+i+',\''+esc(oL)+'\',\''+esc(dL)+'\')">';
-    h+='<div class="tp__drive-head"><span class="tp__drive-dur">'+(i===0?'Fastest':'Route '+(i+1))+' · '+rd+'</span><span class="tp__drive-dist">'+rdist+'</span></div>';
+    h+='<div class="tp__drive-head"><span class="tp__drive-dur">'+(i===0?'🟢 Fastest':'Route '+(i+1))+' · '+rd+'</span><span class="tp__drive-dist">'+rdist+'</span></div>';
     if(rdesc)h+='<div class="tp__drive-via">via '+rdesc+'</div>';
+    if(roads&&!rdesc)h+='<div class="tp__drive-via">via '+roads+'</div>';
     if(rtoll)h+='<div class="tp__drive-toll">💰 Tolls on this route</div>';
     h+='</div>';
   });
   h+='</div>';
 
   h+='</div></div>';
-  ra.innerHTML=h;drawMap(r);
+  ra.innerHTML=h;drawDriveMap(routes,idx);
   ra.scrollIntoView({behavior:'smooth',block:'start'});
 }
+
+// Extract major road names (M-roads and A-roads) from driving steps
+function extractRoads(route){
+  if(!route.legs||!route.legs[0]||!route.legs[0].steps)return'';
+  var seen={},roads=[];
+  route.legs[0].steps.forEach(function(s){
+    if(s.navigationInstruction&&s.navigationInstruction.instructions){
+      var txt=s.navigationInstruction.instructions;
+      // Match M and A road numbers
+      var matches=txt.match(/\b(M\d+|A\d+(?:\(M\))?)\b/g);
+      if(matches){matches.forEach(function(rd){if(!seen[rd]){seen[rd]=true;roads.push(rd)}})}
+    }
+  });
+  return roads.join(', ');
+}
+
+// Draw map for driving — all routes shown, active one bold
+function drawDriveMap(routes,activeIdx){
+  var el=document.getElementById('routeMap');if(!el||!mapOK)return;
+  gMap=new google.maps.Map(el,{zoom:6,center:{lat:52.5,lng:-1.5},disableDefaultUI:true,zoomControl:true,mapId:'a47d3923fb8143cb8894dc48'});
+  var bounds=new google.maps.LatLngBounds();
+  var driveColours=['#223b7c','#6b7186','#b0b5c4']; // navy, mid-grey, light-grey
+
+  // Draw inactive routes first (underneath)
+  routes.forEach(function(rt,i){
+    if(i===activeIdx)return;
+    if(rt.polyline&&rt.polyline.encodedPolyline){
+      try{
+        var p=google.maps.geometry.encoding.decodePath(rt.polyline.encodedPolyline);
+        var poly=new google.maps.Polyline({path:p,strokeColor:driveColours[i]||'#b0b5c4',strokeWeight:4,strokeOpacity:.4,map:gMap,zIndex:1});
+        p.forEach(function(pt){bounds.extend(pt)});
+        // Clickable — switch to this route
+        (function(idx){poly.addListener('click',function(){swDrive(idx,lastOL,lastDL)})})(i);
+      }catch(e){}
+    }
+  });
+
+  // Draw active route on top
+  var ar=routes[activeIdx];
+  if(ar&&ar.polyline&&ar.polyline.encodedPolyline){
+    try{
+      var p=google.maps.geometry.encoding.decodePath(ar.polyline.encodedPolyline);
+      new google.maps.Polyline({path:p,strokeColor:driveColours[0],strokeWeight:5,strokeOpacity:.9,map:gMap,zIndex:10});
+      p.forEach(function(pt){bounds.extend(pt)});
+    }catch(e){}
+  }
+
+  if(!bounds.isEmpty())gMap.fitBounds(bounds,{top:50,right:50,bottom:50,left:50});
+
+  // Origin/destination markers
+  if(ar&&ar.legs&&ar.legs[0]){
+    var lg=ar.legs[0];
+    if(lg.startLocation&&lg.startLocation.latLng){
+      new google.maps.marker.AdvancedMarkerElement({position:{lat:lg.startLocation.latLng.latitude,lng:lg.startLocation.latLng.longitude},map:gMap,title:'Start'});
+    }
+    if(lg.endLocation&&lg.endLocation.latLng){
+      new google.maps.marker.AdvancedMarkerElement({position:{lat:lg.endLocation.latLng.latitude,lng:lg.endLocation.latLng.longitude},map:gMap,title:'Destination'});
+    }
+  }
+}
+
 function swDrive(i,o,d){aIdx=i;renderDrive(allR,i,o,d)}
 
 // ── Multi-station route: parallel API calls, merged results ──
