@@ -3,10 +3,41 @@
 <head>
 <!--
   NL Tools — Website Insights
-  Version: 1.10
+  Version: 1.11
   Date: 03/05/2026
 
   CHANGELOG
+  v1.11 (03/05/2026)
+    - Cohort chart UX overhaul, addressing four concrete issues:
+      * X-axis title "Hours since publish" was rendering at y=H-22 with
+        tick labels at y=MT+plotH+16 — only 6px gap, so they overlapped.
+        Bumped chart height 380→400, bottom margin 44→60, and moved the
+        title to y=H-26. Labels are now properly separated.
+      * Y-axis title was 10px ("Median cumulative views") — illegible.
+        Now 12px bold, simplified to "Median views".
+      * In-SVG legend with hardcoded label-width estimation (6.5px/char)
+        was overflowing on narrow viewports and bleeding into the plot.
+        Replaced with HTML-based clickable legend chips above the chart
+        — each chip shows colour swatch, label and sample count, doubles
+        as the cohort on/off toggle. Browser handles wrapping, so no
+        more bleed.
+      * "Cohort comparison — curve by publish hour" was tool-jargon.
+        Renamed to plain English "When should we publish?" with a
+        sub-line explaining what's plotted.
+    - Added auto-generated insight callout above the chart: shows the
+      leader vs laggard cohort with their endpoint values and the
+      percentage gap. Hidden when fewer than 2 cohorts have ≥10 articles.
+    - Added hover scrubber on the chart: vertical line follows the
+      cursor, per-cohort dots mark each line's value at that hour, a
+      pinned tooltip shows the leader-board sorted high-to-low. Tooltip
+      flips to the left of the cursor near the right edge of the plot.
+    - Demoted the Median/Mean toggle visually (opacity 0.7, "Avg" label
+      instead of "Average"). Most users want median; the option is still
+      there but doesn't compete for attention with Period.
+    - Removed font-style: italic from .ins-loading and
+      .article-picker__empty placeholders — was inconsistent with brand,
+      no other tool uses italic for empty states.
+
   v1.10 (03/05/2026)
     - Brand sweep: cohort chart palette no longer hardcoded. The four
       cohort colours (morning/afternoon/evening/late) now resolve from
@@ -221,6 +252,17 @@
   window.NL_CHANGELOG = [
     {
       date: '3 May 2026',
+      version: 'v1.11',
+      items: [
+        'Cohort chart redesigned: plain-English title and subhead so it\'s clear what you\'re looking at, automatic insight callout summarising the headline takeaway in one sentence.',
+        'Hover the chart to see exact values for each cohort at that hour — vertical scrubber line and a pinned tooltip ranks the cohorts high-to-low.',
+        'Cohort toggles and chart legend merged into a single set of chips above the chart, with sample counts so you can see at a glance how much data is behind each line.',
+        'Fixed the "Hours since publish" label overlapping the tick labels. Bigger, more readable axis titles.',
+        'Median/Mean toggle made less prominent — Median is the right default for almost everyone.'
+      ]
+    },
+    {
+      date: '3 May 2026',
       version: 'v1.10',
       items: [
         'Cohort chart palette now reads directly from the NL brand colours (single source of truth — colour changes in the brand file flow through automatically).'
@@ -392,7 +434,6 @@
     text-align: center;
     padding: 60px 20px;
     color: var(--text-muted);
-    font-style: italic;
   }
 
   /* ============ OVERVIEW STAT CARDS ============ */
@@ -518,7 +559,6 @@
     text-align: center;
     color: var(--text-muted);
     font-size: var(--text-sm);
-    font-style: italic;
   }
 
   /* SVG chart container */
@@ -539,33 +579,83 @@
     font-weight: 600; font-variation-settings: 'wght' 600;
   }
 
-  /* Cohort selector */
-  .cohort-controls {
+  /* Cohort legend — clickable chips that double as the toggle UI.
+     One chip per cohort: colour swatch + label + sample count. Click
+     toggles the cohort on/off; low-sample chips are dashed. */
+  .cohort-legend {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 6px;
     margin-bottom: 12px;
-    align-items: center;
   }
-  .cohort-pill {
+  .cohort-chip {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    background: var(--off-white);
+    gap: 8px;
+    padding: 5px 11px 5px 9px;
+    background: var(--white);
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: var(--radius-pill);
     font-size: var(--text-sm);
     font-weight: 700; font-variation-settings: 'wght' 700;
+    color: var(--text);
     cursor: pointer;
     user-select: none;
+    transition: opacity 0.12s, border-color 0.12s, background 0.12s;
   }
-  .cohort-pill input { margin: 0; cursor: pointer; }
-  .cohort-pill.cohort-on {
-    background: var(--white);
-    border-color: var(--primary);
-    color: var(--primary);
+  .cohort-chip:hover { background: var(--off-white); }
+  .cohort-chip[aria-pressed="false"] {
+    opacity: 0.45;
+    background: var(--off-white);
   }
+  .cohort-chip__swatch {
+    display: inline-block;
+    width: 14px;
+    height: 4px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  .cohort-chip--dashed .cohort-chip__swatch {
+    background-image: linear-gradient(to right, currentColor 40%, transparent 40%);
+    background-size: 4px 4px;
+    background-color: transparent !important;
+  }
+  .cohort-chip__count {
+    color: var(--text-muted);
+    font-weight: 600; font-variation-settings: 'wght' 600;
+    font-size: var(--text-xs);
+  }
+
+  /* Auto-generated insight callout sitting above each chart, summarising
+     the headline takeaway in plain English. */
+  .ins-callout {
+    margin-bottom: 10px;
+    padding: 10px 14px;
+    background: var(--info-light);
+    border-left: 3px solid var(--navy);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+    color: var(--text);
+    line-height: 1.45;
+  }
+  .ins-callout strong {
+    color: var(--navy);
+    font-weight: 800; font-variation-settings: 'wght' 800;
+  }
+
+  /* Plain-English subhead that explains what a chart is plotting. */
+  .ins-card__sub {
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+    line-height: 1.45;
+    margin: 0 0 12px;
+  }
+
+  /* Secondary (less prominent) toggle group — for niche controls like
+     mean/median that most users don't need to touch. */
+  .ins-toggle-group--secondary { opacity: 0.7; }
+  .ins-toggle-group--secondary:hover,
+  .ins-toggle-group--secondary:focus-within { opacity: 1; }
 
   /* Heatmap */
   .heatmap {
@@ -844,25 +934,24 @@
     </div>
 
     <div class="ins-card">
-      <div class="ins-section-head" style="margin-bottom: 8px;">
-        <h2 class="ins-card__title">Cohort comparison — curve by publish hour</h2>
+      <div class="ins-section-head" style="margin-bottom: 4px;">
+        <h2 class="ins-card__title">When should we publish?</h2>
       </div>
+      <p class="ins-card__sub">Cumulative views over the first 72 hours, grouped by publish hour-of-day. Higher endpoint = more total views by 72 h; steeper line = built an audience faster.</p>
       <div class="ins-chart-controls" id="cohortChartControls">
         <div class="ins-toggle-group" data-target="cohortPeriod">
           <span class="ins-toggle-label">Period</span>
           <button class="ins-toggle" data-value="30">30d</button>
           <button class="ins-toggle active" data-value="90">90d</button>
         </div>
-        <div class="ins-toggle-group" data-target="cohortAgg">
-          <span class="ins-toggle-label">Average</span>
+        <div class="ins-toggle-group ins-toggle-group--secondary" data-target="cohortAgg">
+          <span class="ins-toggle-label">Avg</span>
           <button class="ins-toggle active" data-value="median">Median</button>
           <button class="ins-toggle" data-value="mean">Mean</button>
         </div>
       </div>
-      <div class="cohort-controls" id="cohortControls">
-        <span class="ins-sub">Toggle cohorts:</span>
-        <!-- cohort pills injected -->
-      </div>
+      <div class="cohort-legend" id="cohortLegend"><!-- legend chips injected --></div>
+      <div id="cohortCallout" class="ins-callout" hidden></div>
       <div id="cohortChart" class="chart-empty">Loading cohort data\u2026</div>
     </div>
 
@@ -1534,7 +1623,7 @@ function renderTimingTab() {
     renderHeatmap();
   });
 
-  renderCohortControls();
+  renderCohortLegend(null);   // first pass with no data — chart fills it on render
   renderCohortChart();
   updateHeatmapHeading();
   updateAggToggleAvailability();
@@ -1817,37 +1906,77 @@ var COHORT_DEFS = [
 ];
 function cohortColour(c) { return cssVar(c.colourVar); }
 
-function renderCohortControls() {
-  var box = $('cohortControls');
+/* Render the cohort legend as clickable chips. Each chip shows colour
+   swatch + label + sample count, doubles as the on/off toggle. Reads
+   sample counts from the cohort series so chips reflect "how much data
+   am I looking at?" — replaces the old separate pills + in-SVG legend. */
+function renderCohortLegend(seriesByCohort) {
+  var box = $('cohortLegend');
+  if (!box) return;
   // Default: all on
   if (Object.keys(STATE.cohortToggles).length === 0) {
     COHORT_DEFS.forEach(function(c) { STATE.cohortToggles[c.key] = true; });
   }
-  // Inject pills (after the leading "Toggle cohorts:" span)
-  var existingSpan = box.querySelector('.ins-sub');
   box.innerHTML = '';
-  if (existingSpan) box.appendChild(existingSpan);
-  else {
-    var s = document.createElement('span');
-    s.className = 'ins-sub';
-    s.textContent = 'Toggle cohorts:';
-    box.appendChild(s);
-  }
   COHORT_DEFS.forEach(function(c) {
-    var on = STATE.cohortToggles[c.key];
-    var label = document.createElement('label');
-    label.className = 'cohort-pill' + (on ? ' cohort-on' : '');
+    var on = !!STATE.cohortToggles[c.key];
+    var s  = seriesByCohort && seriesByCohort[c.key];
+    var n  = s ? s.articleCount : 0;
+    var isLow = n > 0 && n < 10;
     var col = cohortColour(c);
-    label.style.borderColor = on ? col : '';
-    label.style.color = on ? col : '';
-    label.innerHTML = '<input type="checkbox" ' + (on ? 'checked' : '') + ' data-cohort="' + c.key + '"> ' + esc(c.label);
-    label.querySelector('input').addEventListener('change', function(e) {
-      STATE.cohortToggles[c.key] = e.target.checked;
-      renderCohortControls();
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'cohort-chip' + (isLow ? ' cohort-chip--dashed' : '');
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.style.color = col;
+    btn.title = isLow ? 'Low sample (' + n + ' articles) — treat as indicative' : '';
+    btn.innerHTML =
+      '<span class="cohort-chip__swatch" style="background:' + col + ';"></span>' +
+      '<span>' + esc(c.label) + '</span>' +
+      '<span class="cohort-chip__count">' + (n ? 'n=' + n : 'no data') + (isLow ? ' · low' : '') + '</span>';
+    btn.addEventListener('click', function() {
+      STATE.cohortToggles[c.key] = !STATE.cohortToggles[c.key];
       renderCohortChart();
     });
-    box.appendChild(label);
+    box.appendChild(btn);
   });
+}
+
+/* Auto-generated headline takeaway. Looks at the active cohorts and
+   compares their 72h endpoints; surfaces the leader vs the laggard in
+   plain English. Falls back to a neutral summary when one of:
+   single-cohort selection, all-low-sample, no data. */
+function renderCohortCallout(seriesByCohort) {
+  var box = $('cohortCallout');
+  if (!box) return;
+  var rows = COHORT_DEFS
+    .filter(function(c) { return STATE.cohortToggles[c.key]; })
+    .map(function(c) {
+      var s = seriesByCohort && seriesByCohort[c.key];
+      if (!s || s.articleCount < 10) return null;
+      var endpoint = s.avgCum[s.avgCum.length - 1] || 0;
+      return { key: c.key, label: c.label, endpoint: endpoint, n: s.articleCount };
+    })
+    .filter(Boolean);
+  if (rows.length < 2) {
+    box.hidden = true;
+    box.textContent = '';
+    return;
+  }
+  rows.sort(function(a, b) { return b.endpoint - a.endpoint; });
+  var lead = rows[0], tail = rows[rows.length - 1];
+  if (lead.endpoint <= 0 || tail.endpoint <= 0) {
+    box.hidden = true; box.textContent = ''; return;
+  }
+  var pct = Math.round(((lead.endpoint - tail.endpoint) / tail.endpoint) * 100);
+  var aggLabel = (STATE.cohortAgg === 'mean' ? 'mean' : 'median');
+  box.hidden = false;
+  box.innerHTML =
+    '<strong>' + esc(lead.label) + '</strong> publishes lead — ' +
+    formatCount(lead.endpoint) + ' ' + aggLabel + ' views by 72 h, vs ' +
+    formatCount(tail.endpoint) + ' for ' + esc(tail.label) +
+    ' (a ' + pct + '% gap). ' +
+    'Period: last ' + (STATE.cohortPeriod || 90) + ' days.';
 }
 
 function renderCohortChart() {
@@ -1859,22 +1988,32 @@ function renderCohortChart() {
     return;
   }
 
-  // Build cohort series: average cumulative views per hour-since-publish
+  // Compute series for ALL cohorts (even hidden ones) so the legend can
+  // show sample counts for everything — the toggle only affects the SVG.
   var cohortSeries = {};
   COHORT_DEFS.forEach(function(c) {
-    if (!STATE.cohortToggles[c.key]) return;
     cohortSeries[c.key] = computeCohortSeries(c.hours);
   });
 
-  if (Object.keys(cohortSeries).length === 0) {
+  // Refresh the legend chips with current sample counts and toggle state
+  renderCohortLegend(cohortSeries);
+  renderCohortCallout(cohortSeries);
+
+  // Filter to active cohorts for actual plotting
+  var activeSeries = {};
+  Object.keys(cohortSeries).forEach(function(k) {
+    if (STATE.cohortToggles[k]) activeSeries[k] = cohortSeries[k];
+  });
+
+  if (Object.keys(activeSeries).length === 0) {
     container.className = 'chart-empty';
-    container.innerHTML = 'Toggle at least one cohort to see comparison.';
+    container.innerHTML = 'Toggle at least one cohort above to see the comparison.';
     return;
   }
 
   var anyData = false;
-  Object.keys(cohortSeries).forEach(function(k) {
-    if (cohortSeries[k] && cohortSeries[k].articleCount > 0) anyData = true;
+  Object.keys(activeSeries).forEach(function(k) {
+    if (activeSeries[k] && activeSeries[k].articleCount > 0) anyData = true;
   });
   if (!anyData) {
     container.className = 'chart-empty';
@@ -1883,7 +2022,8 @@ function renderCohortChart() {
   }
 
   container.className = '';
-  container.innerHTML = drawCohortSVG(cohortSeries);
+  container.innerHTML = drawCohortSVG(activeSeries);
+  wireCohortScrubber(activeSeries);
 }
 
 function computeCohortSeries(hourSet) {
@@ -1935,10 +2075,13 @@ function computeCohortSeries(hourSet) {
 }
 
 function drawCohortSVG(cohortSeries) {
-  var W = 800, H = 380;
-  var ML = 50, MR = 20, MT = 36, MB = 44;
+  // Layout: a touch taller than before (380 -> 400) so the x-axis title can
+  // sit safely below the tick labels rather than overlapping them. Top
+  // margin is tighter now that the legend lives in HTML, not SVG.
+  var W = 800, H = 400;
+  var ML = 56, MR = 18, MT = 16, MB = 60;
   var plotW = W - ML - MR, plotH = H - MT - MB;
-  var LOW_SAMPLE_THRESHOLD = 10;   // n < this means we dash the line and warn
+  var LOW_SAMPLE_THRESHOLD = 10;   // n < this means we dash the line and footnote
 
   // Find max across all series — but exclude low-sample cohorts from the max
   // calculation so one outlier-driven cohort doesn't squash everyone else.
@@ -1967,24 +2110,15 @@ function drawCohortSVG(cohortSeries) {
     return MT + plotH - (clipped / maxV) * plotH;
   };
 
-  var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
-
-  // Legend (above plot, reads left to right). Mark low-sample cohorts.
-  var legendY = 14;
-  var legendX = ML;
+  // Legend now lives in HTML (#cohortLegend) — see renderCohortLegend().
+  // Just track the low-sample state here for the footnote below.
   var anyLowSample = false;
-  COHORT_DEFS.forEach(function(c) {
-    if (!STATE.cohortToggles[c.key]) return;
-    var s = cohortSeries[c.key];
-    if (!s || s.articleCount === 0) return;
-    var isLow = s.articleCount < LOW_SAMPLE_THRESHOLD;
-    if (isLow) anyLowSample = true;
-    var lab = c.label + ' (n=' + s.articleCount + (isLow ? ', low sample' : '') + ')';
-    var dashAttr = isLow ? ' stroke-dasharray="3,3"' : '';
-    svg += '<line x1="' + legendX + '" y1="' + (legendY - 4) + '" x2="' + (legendX + 14) + '" y2="' + (legendY - 4) + '" stroke="' + cohortColour(c) + '" stroke-width="3"' + dashAttr + '/>';
-    svg += '<text class="svg-axis-label" x="' + (legendX + 18) + '" y="' + (legendY + 1) + '" style="fill: var(--text); font-weight: 700;">' + esc(lab) + '</text>';
-    legendX += 18 + lab.length * 6.5;
+  Object.keys(cohortSeries).forEach(function(k) {
+    var s = cohortSeries[k];
+    if (s && s.articleCount > 0 && s.articleCount < LOW_SAMPLE_THRESHOLD) anyLowSample = true;
   });
+
+  var svg = '<svg id="cohortChartSvg" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
 
   // Y grid
   for (var i = 0; i <= 4; i++) {
@@ -1994,11 +2128,12 @@ function drawCohortSVG(cohortSeries) {
     svg += '<text class="svg-axis-label" x="' + (ML - 8) + '" y="' + (y + 3) + '" text-anchor="end">' + formatCount(v) + '</text>';
   }
 
-  // X axis
+  // X axis ticks + labels (label baseline ~18px below tick — title sits
+  // another 18px below that, see below).
   [0, 12, 24, 36, 48, 60, 72].forEach(function(h) {
     var x = xScale(h);
     svg += '<line class="svg-axis-tick" x1="' + x + '" y1="' + (MT + plotH) + '" x2="' + x + '" y2="' + (MT + plotH + 4) + '"/>';
-    svg += '<text class="svg-axis-label" x="' + x + '" y="' + (MT + plotH + 16) + '" text-anchor="middle">' + h + 'h</text>';
+    svg += '<text class="svg-axis-label" x="' + x + '" y="' + (MT + plotH + 18) + '" text-anchor="middle">' + h + 'h</text>';
   });
 
   // Plot each cohort. Dash low-sample lines and reduce opacity so they
@@ -2016,19 +2151,100 @@ function drawCohortSVG(cohortSeries) {
     svg += '<path class="svg-data-line" d="' + pathD + '" stroke="' + cohortColour(c) + '"' + dashAttr + opacityAttr + '/>';
   });
 
-  // Y axis title (rotated)
-  var yLabel = (STATE.cohortAgg === 'mean' ? 'Mean' : 'Median') + ' cumulative views';
-  svg += '<text class="svg-axis-label" x="-' + (MT + plotH / 2) + '" y="14" text-anchor="middle" transform="rotate(-90)" style="font-size: 10px;">' + esc(yLabel) + '</text>';
-  // X axis title
-  svg += '<text class="svg-axis-label" x="' + (ML + plotW / 2) + '" y="' + (H - 22) + '" text-anchor="middle">Hours since publish</text>';
+  // Y axis title (rotated) \u2014 bumped from 10px to 12px so it's actually legible.
+  var yLabel = (STATE.cohortAgg === 'mean' ? 'Mean' : 'Median') + ' views';
+  svg += '<text class="svg-axis-label" x="-' + (MT + plotH / 2) + '" y="16" text-anchor="middle" transform="rotate(-90)" style="font-size: 12px; font-weight: 700; fill: var(--text);">' + esc(yLabel) + '</text>';
+  // X axis title \u2014 sits in the bottom margin, well clear of tick labels (was
+  // overlapping at H-22 with old layout). Now H-26 with bigger MB.
+  svg += '<text class="svg-axis-label" x="' + (ML + plotW / 2) + '" y="' + (H - 26) + '" text-anchor="middle" style="font-size: 12px; font-weight: 700; fill: var(--text);">Hours since publish</text>';
 
   // Low-sample warning footnote (only if any cohort has too few articles)
   if (anyLowSample) {
-    svg += '<text class="svg-axis-label" x="' + (ML + plotW / 2) + '" y="' + (H - 4) + '" text-anchor="middle" style="font-size: 10px; fill: var(--text-muted);">Dashed lines have fewer than ' + LOW_SAMPLE_THRESHOLD + ' articles \u2014 treat as indicative only.</text>';
+    svg += '<text class="svg-axis-label" x="' + (ML + plotW / 2) + '" y="' + (H - 8) + '" text-anchor="middle" style="font-size: 10px; fill: var(--text-muted);">Dashed lines have fewer than ' + LOW_SAMPLE_THRESHOLD + ' articles \u2014 treat as indicative only.</text>';
   }
 
+  // Scrubber overlay (hidden until mouseover). Vertical line + per-cohort
+  // value markers + a tooltip box pinned to the right of the cursor.
+  svg += '<g id="cohortScrubber" style="display:none;pointer-events:none;">' +
+           '<line id="cohortScrubberLine" class="svg-axis-tick" y1="' + MT + '" y2="' + (MT + plotH) + '" stroke-width="1"/>' +
+           '<g id="cohortScrubberDots"></g>' +
+           '<g id="cohortScrubberTip"></g>' +
+         '</g>';
+  // Transparent rect captures mouse events across the whole plot
+  svg += '<rect id="cohortHitArea" x="' + ML + '" y="' + MT + '" width="' + plotW + '" height="' + plotH + '" fill="transparent" style="cursor:crosshair"/>';
+
   svg += '</svg>';
+
+  // Stash layout for the scrubber wiring outside this function
+  drawCohortSVG._layout = { W: W, H: H, ML: ML, MR: MR, MT: MT, MB: MB, plotW: plotW, plotH: plotH, maxV: maxV };
   return svg;
+}
+
+/* Hover scrubber \u2014 vertical line that follows the cursor and shows each
+   active cohort's value at that hour. Wires up to elements rendered by
+   drawCohortSVG. Cleared automatically on mouseleave. */
+function wireCohortScrubber(activeSeries) {
+  var svg  = document.getElementById('cohortChartSvg');
+  var hit  = document.getElementById('cohortHitArea');
+  var grp  = document.getElementById('cohortScrubber');
+  if (!svg || !hit || !grp || !drawCohortSVG._layout) return;
+  var L    = drawCohortSVG._layout;
+  var line = document.getElementById('cohortScrubberLine');
+  var dots = document.getElementById('cohortScrubberDots');
+  var tip  = document.getElementById('cohortScrubberTip');
+
+  function svgPoint(evt) {
+    var pt = svg.createSVGPoint();
+    pt.x = evt.clientX; pt.y = evt.clientY;
+    var ctm = svg.getScreenCTM();
+    return ctm ? pt.matrixTransform(ctm.inverse()) : null;
+  }
+  function yScale(v) {
+    var clipped = Math.min(v, L.maxV * 1.05);
+    return L.MT + L.plotH - (clipped / L.maxV) * L.plotH;
+  }
+
+  hit.addEventListener('mouseleave', function() { grp.style.display = 'none'; });
+  hit.addEventListener('mousemove', function(evt) {
+    var p = svgPoint(evt);
+    if (!p) return;
+    var hr = Math.round(((p.x - L.ML) / L.plotW) * 72);
+    if (hr < 0) hr = 0; if (hr > 72) hr = 72;
+    var x  = L.ML + (hr / 72) * L.plotW;
+
+    grp.style.display = '';
+    line.setAttribute('x1', x);
+    line.setAttribute('x2', x);
+
+    // Per-cohort dots + tooltip rows, sorted high-to-low so the leader is on top
+    var rows = [];
+    COHORT_DEFS.forEach(function(c) {
+      if (!STATE.cohortToggles[c.key]) return;
+      var s = activeSeries[c.key];
+      if (!s || s.articleCount === 0) return;
+      var v = s.avgCum[hr] || 0;
+      rows.push({ key: c.key, label: c.label, value: v, colour: cohortColour(c) });
+    });
+    rows.sort(function(a, b) { return b.value - a.value; });
+
+    dots.innerHTML = rows.map(function(r) {
+      return '<circle cx="' + x + '" cy="' + yScale(r.value) + '" r="4" fill="' + r.colour + '" stroke="var(--white)" stroke-width="1.5"/>';
+    }).join('');
+
+    // Tooltip box \u2014 anchored right of the cursor, flips left near the right edge
+    var tipW = 170, tipH = 18 + rows.length * 14, pad = 10;
+    var tipX = (x + tipW + pad < L.ML + L.plotW) ? (x + pad) : (x - tipW - pad);
+    var tipY = L.MT + 8;
+    var tipHTML = '<rect x="' + tipX + '" y="' + tipY + '" width="' + tipW + '" height="' + tipH + '" rx="4" fill="var(--text)" opacity="0.92"/>' +
+                  '<text x="' + (tipX + 8) + '" y="' + (tipY + 14) + '" style="font-size:10px;fill:var(--white);font-weight:700;font-family:var(--font);">' + hr + ' h since publish</text>';
+    rows.forEach(function(r, i) {
+      var ry = tipY + 14 + 14 * (i + 1);
+      tipHTML += '<circle cx="' + (tipX + 12) + '" cy="' + (ry - 3) + '" r="3" fill="' + r.colour + '"/>';
+      tipHTML += '<text x="' + (tipX + 22) + '" y="' + ry + '" style="font-size:10px;fill:var(--white);font-family:var(--font);">' + esc(r.label.split(' ')[0]) + '</text>';
+      tipHTML += '<text x="' + (tipX + tipW - 8) + '" y="' + ry + '" text-anchor="end" style="font-size:10px;fill:var(--white);font-weight:700;font-family:var(--font);">' + formatCount(r.value) + '</text>';
+    });
+    tip.innerHTML = tipHTML;
+  });
 }
 
 /* ============ HEATMAP ============
