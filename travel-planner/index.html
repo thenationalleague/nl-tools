@@ -265,7 +265,7 @@
             <button class="tp__preset active" data-p="station" onclick="setPreset('station')">🚉 Railway Station</button>
             <button class="tp__preset" data-p="custom" onclick="setPreset('custom')">📍 Custom</button>
           </div>
-          <input class="tp__input" type="text" id="fixCustomAddr" placeholder="Start typing an address…" style="display:none;" autocomplete="off">
+          <div id="fixCustomAddrWrap" style="display:none"><input type="hidden" id="fixCustomAddr"></div>
         </div>
 
         <div class="tp__field" id="preSlider">
@@ -328,7 +328,7 @@
           <button class="tp__preset active" data-p="station" onclick="setManPreset('station')">🚉 Station</button>
           <button class="tp__preset" data-p="custom" onclick="setManPreset('custom')">📍 Custom</button>
         </div>
-        <input class="tp__input" type="text" id="manCustomAddr" placeholder="Start typing an address…" style="display:none;" autocomplete="off">
+        <div id="manCustomAddrWrap" style="display:none"><input type="hidden" id="manCustomAddr"></div>
       </div>
       <div class="tp__field" id="manPreSlider">
         <label class="tp__label">Arrive before kick-off</label>
@@ -374,22 +374,26 @@ var lastOL='',lastDL=''; // for route switcher map redraw
 async function initMap(){try{await google.maps.importLibrary('maps');await google.maps.importLibrary('geometry');await google.maps.importLibrary('marker');await google.maps.importLibrary('places');mapOK=true;initPlacesAC()}catch(e){}}
 
 function initPlacesAC(){
-  // Attach Google Places Autocomplete to custom address inputs
-  var ids=['fixCustomAddr','manCustomAddr'];
-  ids.forEach(function(id){
-    var el=document.getElementById(id);
-    if(!el)return;
-    var ac=new google.maps.places.Autocomplete(el,{
-      componentRestrictions:{country:'gb'},
-      fields:['formatted_address','geometry','name'],
-      types:['geocode','establishment']
+  // Attach Google Places Autocomplete (new API) to custom address wrappers
+  if(!google.maps.places||!google.maps.places.PlaceAutocompleteElement)return;
+  [['fixCustomAddr','fixCustomAddrWrap'],['manCustomAddr','manCustomAddrWrap']].forEach(function(pair){
+    var input=document.getElementById(pair[0]);
+    var wrap=document.getElementById(pair[1]);
+    if(!input||!wrap||wrap.querySelector('gmp-place-autocomplete'))return;
+    var ac=new google.maps.places.PlaceAutocompleteElement({
+      includedRegionCodes:['gb']
     });
-    ac.addListener('place_changed',function(){
-      var place=ac.getPlace();
-      if(place&&place.formatted_address){
-        el.value=place.formatted_address;
-      }
-      syncURL();
+    ac.style.width='100%';
+    wrap.appendChild(ac);
+    ac.addEventListener('gmp-select',async function(ev){
+      try{
+        var place=ev.placePrediction.toPlace();
+        await place.fetchFields({fields:['formattedAddress','displayName','location']});
+        var addr=place.formattedAddress||place.displayName||'';
+        input.value=addr;
+        input.dispatchEvent(new Event('change'));
+        syncURL();
+      }catch(e){}
     });
   });
 }
@@ -441,7 +445,7 @@ function upPostNote(){if(!fixMatch)return;var ko=new Date(nd(fixMatch.attributes
 function setPreset(p){
   fixPreset=p;
   document.querySelectorAll('#fixPresets .tp__preset').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-p')===p)});
-  document.getElementById('fixCustomAddr').style.display=p==='custom'?'block':'none';
+  document.getElementById('fixCustomAddrWrap').style.display=p==='custom'?'block':'none';
   updatePresetLabels();
   syncURL();
   if(fixMatch&&fixClub)doFixSearch();
@@ -524,7 +528,7 @@ function setManDir(d){
 function setManPreset(p){
   manPreset=p;
   document.querySelectorAll('#manPresets .tp__preset').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-p')===p)});
-  document.getElementById('manCustomAddr').style.display=p==='custom'?'block':'none';
+  document.getElementById('manCustomAddrWrap').style.display=p==='custom'?'block':'none';
   syncURL();
 }
 function upManPostLbl(){
@@ -1474,7 +1478,7 @@ function readURL(){
     var preset=p.get('preset')||'station';
     fixPreset=preset;
     document.querySelectorAll('#fixPresets .tp__preset').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-p')===preset)});
-    document.getElementById('fixCustomAddr').style.display=preset==='custom'?'block':'none';
+    document.getElementById('fixCustomAddrWrap').style.display=preset==='custom'?'block':'none';
     if(preset==='custom'&&p.has('addr'))document.getElementById('fixCustomAddr').value=p.get('addr');
 
     // Transport mode
@@ -1508,7 +1512,7 @@ function readURL(){
     var preset=p.get('preset')||'station';
     manPreset=preset;
     document.querySelectorAll('#manPresets .tp__preset').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-p')===preset)});
-    document.getElementById('manCustomAddr').style.display=preset==='custom'?'block':'none';
+    document.getElementById('manCustomAddrWrap').style.display=preset==='custom'?'block':'none';
     if(preset==='custom'&&p.has('addr'))document.getElementById('manCustomAddr').value=p.get('addr');
 
     // Transport mode
