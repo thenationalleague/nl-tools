@@ -3,10 +3,18 @@
 <head>
 <!--
   NL Tools — Website Insights
-  Version: 1.9
-  Date: 28/04/2026
+  Version: 1.10
+  Date: 03/05/2026
 
   CHANGELOG
+  v1.10 (03/05/2026)
+    - Brand sweep: cohort chart palette no longer hardcoded. The four
+      cohort colours (morning/afternoon/evening/late) now resolve from
+      nl-brand.css tokens (--blue, --green, --amber, --primary) via a
+      cssVar() helper. Single source of truth — palette changes in the
+      brand file now flow through to chart legends, lines, and pills.
+      Also corrects a slightly off "afternoon" green that didn't match
+      --green (#1c7a2e → #1a7030).
   v1.9 (28/04/2026)
     - Bug: \u2014 was rendering literally as the escape sequence in
       several HTML markup contexts (data window note, cohort heading,
@@ -211,6 +219,13 @@
   var NL_TOOL_KEY = 'staff-website-insights';
 
   window.NL_CHANGELOG = [
+    {
+      date: '3 May 2026',
+      version: 'v1.10',
+      items: [
+        'Cohort chart palette now reads directly from the NL brand colours (single source of truth — colour changes in the brand file flow through automatically).'
+      ]
+    },
     {
       date: '28 April 2026',
       version: 'v1.9',
@@ -944,6 +959,10 @@ var HOURLY_URL   = DATA_BASE + 'ga-hourly.json';
 /* ============ HELPERS ============ */
 function $(id) { return document.getElementById(id); }
 function $$(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
 
 function esc(s) {
   if (s == null) return '';
@@ -1791,11 +1810,12 @@ function drawSingleCurveSVG(article, cum) {
 
 /* ============ COHORT CHART ============ */
 var COHORT_DEFS = [
-  { key: 'morning',      label: 'Morning (06–11)',     hours: [6,7,8,9,10,11],   colour: '#1565c0' },
-  { key: 'afternoon',    label: 'Afternoon (12–17)',   hours: [12,13,14,15,16,17], colour: '#1c7a2e' },
-  { key: 'evening',      label: 'Evening (18–22)',     hours: [18,19,20,21,22],   colour: '#c96f15' },
-  { key: 'late',         label: 'Late night (23–05)',  hours: [23,0,1,2,3,4,5],   colour: '#9e0000' }
+  { key: 'morning',      label: 'Morning (06–11)',     hours: [6,7,8,9,10,11],     colourVar: '--blue' },
+  { key: 'afternoon',    label: 'Afternoon (12–17)',   hours: [12,13,14,15,16,17], colourVar: '--green' },
+  { key: 'evening',      label: 'Evening (18–22)',     hours: [18,19,20,21,22],    colourVar: '--amber' },
+  { key: 'late',         label: 'Late night (23–05)',  hours: [23,0,1,2,3,4,5],    colourVar: '--primary' }
 ];
+function cohortColour(c) { return cssVar(c.colourVar); }
 
 function renderCohortControls() {
   var box = $('cohortControls');
@@ -1817,8 +1837,9 @@ function renderCohortControls() {
     var on = STATE.cohortToggles[c.key];
     var label = document.createElement('label');
     label.className = 'cohort-pill' + (on ? ' cohort-on' : '');
-    label.style.borderColor = on ? c.colour : '';
-    label.style.color = on ? c.colour : '';
+    var col = cohortColour(c);
+    label.style.borderColor = on ? col : '';
+    label.style.color = on ? col : '';
     label.innerHTML = '<input type="checkbox" ' + (on ? 'checked' : '') + ' data-cohort="' + c.key + '"> ' + esc(c.label);
     label.querySelector('input').addEventListener('change', function(e) {
       STATE.cohortToggles[c.key] = e.target.checked;
@@ -1960,7 +1981,7 @@ function drawCohortSVG(cohortSeries) {
     if (isLow) anyLowSample = true;
     var lab = c.label + ' (n=' + s.articleCount + (isLow ? ', low sample' : '') + ')';
     var dashAttr = isLow ? ' stroke-dasharray="3,3"' : '';
-    svg += '<line x1="' + legendX + '" y1="' + (legendY - 4) + '" x2="' + (legendX + 14) + '" y2="' + (legendY - 4) + '" stroke="' + c.colour + '" stroke-width="3"' + dashAttr + '/>';
+    svg += '<line x1="' + legendX + '" y1="' + (legendY - 4) + '" x2="' + (legendX + 14) + '" y2="' + (legendY - 4) + '" stroke="' + cohortColour(c) + '" stroke-width="3"' + dashAttr + '/>';
     svg += '<text class="svg-axis-label" x="' + (legendX + 18) + '" y="' + (legendY + 1) + '" style="fill: var(--text); font-weight: 700;">' + esc(lab) + '</text>';
     legendX += 18 + lab.length * 6.5;
   });
@@ -1992,7 +2013,7 @@ function drawCohortSVG(cohortSeries) {
     }).join(' ');
     var dashAttr = isLow ? ' stroke-dasharray="3,3"' : '';
     var opacityAttr = isLow ? ' opacity="0.55"' : '';
-    svg += '<path class="svg-data-line" d="' + pathD + '" stroke="' + c.colour + '"' + dashAttr + opacityAttr + '/>';
+    svg += '<path class="svg-data-line" d="' + pathD + '" stroke="' + cohortColour(c) + '"' + dashAttr + opacityAttr + '/>';
   });
 
   // Y axis title (rotated)
