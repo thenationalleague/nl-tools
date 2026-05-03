@@ -465,7 +465,10 @@ function updatePresetLabels(){
   var btns=document.querySelectorAll('#fixPresets .tp__preset');
   btns.forEach(function(b){
     var p=b.getAttribute('data-p');
-    if(p==='station')b.textContent='🚉 '+stationLabel(awayC);
+    if(p==='station'){
+      if(fixTM==='drive')b.textContent='🏟 '+(awayC.stadium||awayC.short||awayC.name);
+      else b.textContent='🚉 '+stationLabel(awayC);
+    }
   });
 }
 function getEnabledModes(){var modes=[];document.querySelectorAll('#transitToggles .tp__tt.on').forEach(function(b){modes.push(b.getAttribute('data-t'))});return modes}
@@ -479,14 +482,13 @@ var manHomeClub=null,manAwayClub=null,manDir='to',manPreset='station',manTM='tra
 function setFixTM(tm){
   fixTM=tm;
   document.querySelectorAll('#fixModeToggle .tp__mode-pill').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-tm')===tm)});
-  // Hide preset field for driving (always stadium-to-stadium)
-  document.getElementById('fixPresetField').style.display=tm==='drive'?'none':'block';
+  updatePresetLabels();
   syncURL();
 }
 function setManTM(tm){
   manTM=tm;
   document.querySelectorAll('#manModeToggle .tp__mode-pill').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-tm')===tm)});
-  document.getElementById('manPresetField').style.display=tm==='drive'?'none':'block';
+  updateManPresetLabels();
   syncURL();
 }
 
@@ -543,11 +545,16 @@ function upManPostNote(){
 }
 function updateManPresetLabels(){
   var club=manAwayClub;
-  if(!club)return;
   var btns=document.querySelectorAll('#manPresets .tp__preset');
   btns.forEach(function(b){
     var p=b.getAttribute('data-p');
-    if(p==='station')b.textContent='🚉 '+stationLabel(club);
+    if(p!=='station')return;
+    if(club){
+      if(manTM==='drive')b.textContent='🏟 '+(club.stadium||club.short||club.name);
+      else b.textContent='🚉 '+stationLabel(club);
+    }else{
+      b.textContent=manTM==='drive'?'🏟 Stadium':'🚉 Station';
+    }
   });
 }
 function getManModes(){return[]}  // No filter
@@ -602,11 +609,16 @@ function doFixSearch(){
 
   // DRIVING mode
   if(fixTM==='drive'){
-    var dOrigin=awayClub?addr(awayClub):homeGroundAddr;
+    var fixCustomVal=document.getElementById('fixCustomAddr')?document.getElementById('fixCustomAddr').value.trim():'';
+    var useCustom=fixPreset==='custom'&&fixCustomVal;
+    var awayPoint=useCustom?fixCustomVal:(awayClub?addr(awayClub):homeGroundAddr);
+    var awayLabelTxt=useCustom?fixCustomVal:(awayClub?(awayClub.stadium||awayClub.short):'Away');
+    var awayIconCh=useCustom?'📍':'🚗';
+    var dOrigin=awayPoint;
     var dDest=homeGroundAddr;
-    var dOL='🚗 '+(awayClub?(awayClub.stadium||awayClub.short):'Away');
+    var dOL=awayIconCh+' '+awayLabelTxt;
     var dDL='🏟 '+homeStadiumLabel;
-    if(fixDir==='from'){dOrigin=homeGroundAddr;dDest=awayClub?addr(awayClub):'';dOL='🏟 '+homeStadiumLabel;dDL='🚗 '+(awayClub?(awayClub.stadium||awayClub.short):'Away')}
+    if(fixDir==='from'){dOrigin=homeGroundAddr;dDest=awayPoint;dOL='🏟 '+homeStadiumLabel;dDL=awayIconCh+' '+awayLabelTxt}
     lastOL=dOL;lastDL=dDL;
     doDriveSearch(dOrigin,dDest,opts,dOL,dDL).finally(function(){btn.classList.remove('btn--loading');btn.textContent='Find journey'});
     return;
@@ -667,11 +679,16 @@ function doManSearch(){
 
   // DRIVING mode
   if(manTM==='drive'){
-    var dOrigin=addr(manAwayClub);
+    var manCustomValD=document.getElementById('manCustomAddr')?document.getElementById('manCustomAddr').value.trim():'';
+    var useManCustom=manPreset==='custom'&&manCustomValD;
+    var awayPoint=useManCustom?manCustomValD:addr(manAwayClub);
+    var awayLabelTxt=useManCustom?manCustomValD:(manAwayClub.stadium||manAwayClub.short);
+    var awayIconCh=useManCustom?'📍':'🚗';
+    var dOrigin=awayPoint;
     var dDest=homeA;
-    var dOL='🚗 '+(manAwayClub.stadium||manAwayClub.short);
+    var dOL=awayIconCh+' '+awayLabelTxt;
     var dDL='🏟 '+homeStadium;
-    if(manDir==='from'){dOrigin=homeA;dDest=addr(manAwayClub);dOL='🏟 '+homeStadium;dDL='🚗 '+(manAwayClub.stadium||manAwayClub.short)}
+    if(manDir==='from'){dOrigin=homeA;dDest=awayPoint;dOL='🏟 '+homeStadium;dDL=awayIconCh+' '+awayLabelTxt}
     lastOL=dOL;lastDL=dDL;
     doDriveSearch(dOrigin,dDest,opts,dOL,dDL).finally(function(){btn.classList.remove('btn--loading');btn.textContent='Find journey'});
     return;
@@ -1485,7 +1502,6 @@ function readURL(){
     var tm=p.get('tm')||'transit';
     fixTM=tm;
     document.querySelectorAll('#fixModeToggle .tp__mode-pill').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-tm')===tm)});
-    document.getElementById('fixPresetField').style.display=tm==='drive'?'none':'block';
 
     // Sliders
     if(p.has('arr')){document.getElementById('arrBefore').value=p.get('arr');document.getElementById('arrBeforeV').textContent=p.get('arr')+' min'}
@@ -1519,7 +1535,7 @@ function readURL(){
     var manTmVal=p.get('tm')||'transit';
     manTM=manTmVal;
     document.querySelectorAll('#manModeToggle .tp__mode-pill').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-tm')===manTmVal)});
-    document.getElementById('manPresetField').style.display=manTmVal==='drive'?'none':'block';
+    updateManPresetLabels();
 
     if(p.has('ko'))document.getElementById('manKO').value=p.get('ko');
 
