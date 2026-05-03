@@ -104,6 +104,11 @@
   .tp__drive-meta{font-size:var(--text-xs);color:var(--text-muted)}
   .tp__drive-toll{display:inline-flex;align-items:center;gap:3px;font-size:var(--text-xs);font-weight:700;color:var(--amber);background:var(--amber-light);padding:2px 8px;border-radius:99px;margin-top:4px}
   .tp__drive-via{font-size:var(--text-xs);color:var(--text-muted);margin-top:2px}
+  .tp__drive-roads{display:flex;flex-wrap:wrap;gap:3px;margin-top:5px}
+  .tp__road-badge{display:inline-block;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:800;font-variation-settings:'wght' 800;letter-spacing:.02em;line-height:1.4}
+  .tp__road-badge--m{background:#2563ac;color:#fff}
+  .tp__road-badge--a{background:#2a7c3b;color:#fff}
+  .tp__road-badge--b{background:#fff;color:#1a2a44;border:1px solid #ccc}
 
   /* Origin preset */
   .tp__presets{display:flex;gap:6px;margin-bottom:8px}
@@ -736,7 +741,7 @@ function renderDrive(routes,idx,oL,dL){
     h+='<div class="tp__drive-card'+(i===idx?' active':'')+'" onclick="swDrive('+i+',\''+esc(oL)+'\',\''+esc(dL)+'\')">';
     h+='<div class="tp__drive-head"><span class="tp__drive-dur">'+(i===0?'🟢 Fastest':'Route '+(i+1))+' · '+rd+'</span><span class="tp__drive-dist">'+rdist+'</span></div>';
     if(rdesc)h+='<div class="tp__drive-via">via '+rdesc+'</div>';
-    if(roads&&!rdesc)h+='<div class="tp__drive-via">via '+roads+'</div>';
+    h+=roadBadgesHTML(roads);
     if(rtoll)h+='<div class="tp__drive-toll">💰 Tolls on this route</div>';
     h+='</div>';
   });
@@ -747,25 +752,67 @@ function renderDrive(routes,idx,oL,dL){
   ra.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
-// Extract major road names (M-roads and A-roads) from driving steps
+// Extract major road names in route order with type classification
 function extractRoads(route){
-  if(!route.legs||!route.legs[0]||!route.legs[0].steps)return'';
+  if(!route.legs||!route.legs[0]||!route.legs[0].steps)return[];
   var seen={},roads=[];
   route.legs[0].steps.forEach(function(s){
     if(s.navigationInstruction&&s.navigationInstruction.instructions){
       var txt=s.navigationInstruction.instructions;
-      // Match M and A road numbers
-      var matches=txt.match(/\b(M\d+|A\d+(?:\(M\))?)\b/g);
-      if(matches){matches.forEach(function(rd){if(!seen[rd]){seen[rd]=true;roads.push(rd)}})}
+      // Match M-roads (including A1(M) pattern), A-roads, B-roads
+      var matches=txt.match(/\b([MAB]\d+(?:\([M]\))?)\b/g);
+      if(matches){matches.forEach(function(rd){
+        if(!seen[rd]){
+          seen[rd]=true;
+          var type='b';
+          if(/^M\d/.test(rd)||/\(M\)$/.test(rd))type='m';
+          else if(/^A\d/.test(rd))type='a';
+          roads.push({name:rd,type:type});
+        }
+      })}
     }
   });
-  return roads.join(', ');
+  return roads;
 }
 
-// Draw map for driving — all routes shown, active one bold
+function roadBadgesHTML(roads){
+  if(!roads||!roads.length)return'';
+  return'<div class="tp__drive-roads">'+roads.map(function(r){
+    return'<span class="tp__road-badge tp__road-badge--'+r.type+'">'+r.name+'</span>';
+  }).join('')+'</div>';
+}
+
+// Driving map style — roads prominent, motorway labels visible, transit hidden
+var DRIVE_MAP_STYLE=[
+  {featureType:"landscape",elementType:"geometry.fill",stylers:[{color:"#f0f1f5"}]},
+  {featureType:"landscape.man_made",elementType:"geometry.fill",stylers:[{color:"#eceef3"}]},
+  {featureType:"poi",elementType:"all",stylers:[{visibility:"off"}]},
+  {featureType:"poi.park",elementType:"geometry.fill",stylers:[{visibility:"on"},{color:"#e4e7ee"}]},
+  {featureType:"poi.park",elementType:"labels",stylers:[{visibility:"off"}]},
+  {featureType:"road.highway",elementType:"geometry.fill",stylers:[{color:"#4a7abf"}]},
+  {featureType:"road.highway",elementType:"geometry.stroke",stylers:[{color:"#3a6299"},{weight:1}]},
+  {featureType:"road.highway",elementType:"labels",stylers:[{visibility:"on"}]},
+  {featureType:"road.highway",elementType:"labels.text.fill",stylers:[{color:"#1a2a44"}]},
+  {featureType:"road.highway",elementType:"labels.text.stroke",stylers:[{color:"#ffffff"},{weight:3}]},
+  {featureType:"road.arterial",elementType:"geometry.fill",stylers:[{color:"#d0d6e0"}]},
+  {featureType:"road.arterial",elementType:"labels",stylers:[{visibility:"on"}]},
+  {featureType:"road.arterial",elementType:"labels.text.fill",stylers:[{color:"#5a6a82"}]},
+  {featureType:"road.local",elementType:"geometry.fill",stylers:[{color:"#e8eaf0"}]},
+  {featureType:"road.local",elementType:"labels",stylers:[{visibility:"off"}]},
+  {featureType:"transit",elementType:"all",stylers:[{visibility:"off"}]},
+  {featureType:"water",elementType:"geometry.fill",stylers:[{color:"#cdd5e2"}]},
+  {featureType:"water",elementType:"labels.text.fill",stylers:[{color:"#9aa3b8"}]},
+  {featureType:"administrative",elementType:"labels.text.fill",stylers:[{color:"#8a90a0"}]},
+  {featureType:"administrative.locality",elementType:"labels.text.fill",stylers:[{color:"#6b7186"}]}
+];
+
+// Draw map for driving — all routes shown, active one bold, road-focused style
 function drawDriveMap(routes,activeIdx){
   var el=document.getElementById('routeMap');if(!el||!mapOK)return;
-  gMap=new google.maps.Map(el,{zoom:6,center:{lat:52.5,lng:-1.5},disableDefaultUI:true,zoomControl:true,mapId:'a47d3923fb8143cb8894dc48'});
+  gMap=new google.maps.Map(el,{zoom:6,center:{lat:52.5,lng:-1.5},disableDefaultUI:true,zoomControl:true});
+  var driveStyled=new google.maps.StyledMapType(DRIVE_MAP_STYLE,{name:'Drive'});
+  gMap.mapTypes.set('drive',driveStyled);
+  gMap.setMapTypeId('drive');
   var bounds=new google.maps.LatLngBounds();
   var driveColours=['#223b7c','#6b7186','#b0b5c4']; // navy, mid-grey, light-grey
 
@@ -795,14 +842,14 @@ function drawDriveMap(routes,activeIdx){
 
   if(!bounds.isEmpty())gMap.fitBounds(bounds,{top:50,right:50,bottom:50,left:50});
 
-  // Origin/destination markers
+  // Origin/destination markers (legacy Marker — no mapId on driving map)
   if(ar&&ar.legs&&ar.legs[0]){
     var lg=ar.legs[0];
     if(lg.startLocation&&lg.startLocation.latLng){
-      new google.maps.marker.AdvancedMarkerElement({position:{lat:lg.startLocation.latLng.latitude,lng:lg.startLocation.latLng.longitude},map:gMap,title:'Start'});
+      new google.maps.Marker({position:{lat:lg.startLocation.latLng.latitude,lng:lg.startLocation.latLng.longitude},map:gMap,title:'Start'});
     }
     if(lg.endLocation&&lg.endLocation.latLng){
-      new google.maps.marker.AdvancedMarkerElement({position:{lat:lg.endLocation.latLng.latitude,lng:lg.endLocation.latLng.longitude},map:gMap,title:'Destination'});
+      new google.maps.Marker({position:{lat:lg.endLocation.latLng.latitude,lng:lg.endLocation.latLng.longitude},map:gMap,title:'Destination'});
     }
   }
 }
@@ -1271,7 +1318,6 @@ function zoomToStep(stepIdx){
   var bounds=new google.maps.LatLngBounds();
   var paths=[];
 
-  // Collect polylines from this step (consolidated walks have _w array)
   if(s._w){
     s._w.forEach(function(ws){
       if(ws.polyline&&ws.polyline.encodedPolyline){
@@ -1282,7 +1328,6 @@ function zoomToStep(stepIdx){
     try{var p=google.maps.geometry.encoding.decodePath(s.polyline.encodedPolyline);p.forEach(function(pt){bounds.extend(pt)});paths=paths.concat(p)}catch(e){}
   }
 
-  // Also try start/end locations if no polyline
   if(bounds.isEmpty()){
     if(s.startLocation&&s.startLocation.latLng)bounds.extend({lat:s.startLocation.latLng.latitude,lng:s.startLocation.latLng.longitude});
     if(s.endLocation&&s.endLocation.latLng)bounds.extend({lat:s.endLocation.latLng.latitude,lng:s.endLocation.latLng.longitude});
@@ -1290,12 +1335,14 @@ function zoomToStep(stepIdx){
 
   if(!bounds.isEmpty()){
     gMap.fitBounds(bounds,{top:60,right:60,bottom:60,left:60});
-    // Highlight this leg's polyline
-    if(_highlightPoly){_highlightPoly.setMap(null);_highlightPoly=null}
+    // Clear previous glow
+    if(_highlightPoly){_highlightPoly.forEach(function(p){p.setMap(null)});_highlightPoly=null}
+    // Draw glow — two layers: outer soft glow + inner bright glow
     if(paths.length){
-      _highlightPoly=new google.maps.Polyline({path:paths,strokeColor:'#9e0000',strokeWeight:6,strokeOpacity:.8,map:gMap,zIndex:100});
-      // Auto-clear highlight after 4 seconds
-      setTimeout(function(){if(_highlightPoly){_highlightPoly.setMap(null);_highlightPoly=null}},4000);
+      _highlightPoly=[
+        new google.maps.Polyline({path:paths,strokeColor:'#223b7c',strokeWeight:16,strokeOpacity:.15,map:gMap,zIndex:90}),
+        new google.maps.Polyline({path:paths,strokeColor:'#223b7c',strokeWeight:10,strokeOpacity:.25,map:gMap,zIndex:91})
+      ];
     }
   }
 }
