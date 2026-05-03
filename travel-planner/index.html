@@ -5,8 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Travel Planner — NL Tools</title>
 <!--
-  NL Travel Planner v39.0
+  NL Travel Planner v39.1
   Changelog:
+  v39.1| 03/05/2026 | Brand sweep:
+       |            | - CSS swaps: #fff → var(--white) on btn-loading
+       |            |   spinner; #1a2a44, #ccc on B-road badge → var(--text),
+       |            |   var(--border).
+       |            | - Added tpCssVar() helper to resolve brand tokens at
+       |            |   runtime for the Google Maps API (which only accepts
+       |            |   literal hex strings, not var()). Used to swap five
+       |            |   hardcoded hex strokeColors on Polylines and one
+       |            |   marker-border colour: #999 → --text-muted, #9e0000 →
+       |            |   --primary, #223b7c (×3) → --navy, #fff → --white.
+       |            | - Documented in-place exceptions:
+       |            |   * UK road-sign identity colours (motorway blue,
+       |            |     A-road green/yellow) on .tp__road-badge--m/--a.
+       |            |   * Google Maps style array (DRIVE_MAP_STYLE) — Google
+       |            |     consumes literal hex; theme palette retained as a
+       |            |     cohesive map identity.
   v39.0| 03/05/2026 | Major UX pass:
        |            | - Driving mode: Train/Drive toggle, summary cards with tolls
        |            |   and up to 2 alternatives. Route polyline on map.
@@ -33,6 +49,7 @@
   window.NL_TOOL={title:'Travel Planner',toolKey:'staff-travel-planner'};
   var NL_TOOL_KEY='staff-travel-planner';
   window.NL_CHANGELOG=[
+    {date:'3 May 2026',version:'v3.1',items:['Tidied a few stray colours so the tool now pulls everything from the central NL palette — future tweaks flow through automatically.']},
     {date:'3 May 2026',version:'v3.0',items:['Driving mode — toggle between train and car routes.','Driving shows fastest route + 2 alternatives with toll warnings.','Auto-scrolls to results after searching.','Remembers your club between visits.','Quick kick-off presets for common match times.','Clear button on club selectors.','Clickable map markers show station names.']},
     {date:'3 May 2026',version:'v2.0',items:['Station is now the default start point.','Custom address uses Google Places suggestions.','Custom map styling.']}
   ];
@@ -85,7 +102,7 @@
 
   /* Button loading state */
   .btn--loading{pointer-events:none;opacity:.7}
-  .btn--loading::after{content:'';display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:tpSpin .6s linear infinite;margin-left:8px;vertical-align:middle}
+  .btn--loading::after{content:'';display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:var(--white);border-radius:50%;animation:tpSpin .6s linear infinite;margin-left:8px;vertical-align:middle}
 
   /* KO quick presets */
   .tp__ko-presets{display:flex;gap:4px;margin-top:4px;flex-wrap:wrap}
@@ -106,9 +123,12 @@
   .tp__drive-via{font-size:var(--text-xs);color:var(--text-muted);margin-top:2px}
   .tp__drive-roads{display:flex;flex-wrap:wrap;gap:3px;margin-top:5px}
   .tp__road-badge{display:inline-block;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:800;font-variation-settings:'wght' 800;letter-spacing:.02em;line-height:1.4}
-  .tp__road-badge--m{background:#2563ac;color:#fff}
+  /* UK road sign identity colours — motorway blue, A-road green/yellow are
+     real-world signage palette, kept as hex literals (single-use, widget-
+     internal). White / text / border on B-roads use brand tokens. */
+  .tp__road-badge--m{background:#2563ac;color:var(--white)}
   .tp__road-badge--a{background:#007a33;color:#ffd900}
-  .tp__road-badge--b{background:#fff;color:#1a2a44;border:1px solid #ccc}
+  .tp__road-badge--b{background:var(--white);color:var(--text);border:1px solid var(--border)}
 
   /* Origin preset */
   .tp__presets{display:flex;gap:6px;margin-bottom:8px}
@@ -809,7 +829,17 @@ function roadBadgesHTML(roads){
   }).join('')+'</div>';
 }
 
-// Driving map style — roads prominent, motorway labels visible, transit hidden
+// Resolve a CSS variable to its computed hex/rgb value. Used wherever the
+// Google Maps API needs literal colour strings (it doesn't accept var()).
+function tpCssVar(name){return getComputedStyle(document.documentElement).getPropertyValue(name).trim();}
+
+// Driving map style — roads prominent, motorway labels visible, transit hidden.
+// This is a self-contained Google Maps theme palette consumed by the Google
+// Maps API, which only accepts literal hex strings (not var()). Several values
+// happen to match brand tokens (#1a2a44 = --text, #ffffff = --white, #5a6a82
+// = --text-muted) but are kept inline here so the theme reads as a single
+// cohesive palette rather than a cssVar() lookup table. Treat as a deliberate
+// widget-internal palette under the brand-CSS exception.
 var DRIVE_MAP_STYLE=[
   {featureType:"landscape",elementType:"geometry.fill",stylers:[{color:"#f0f1f5"}]},
   {featureType:"landscape.man_made",elementType:"geometry.fill",stylers:[{color:"#eceef3"}]},
@@ -848,7 +878,7 @@ function drawDriveMap(routes,activeIdx){
     if(rt.polyline&&rt.polyline.encodedPolyline){
       try{
         var p=google.maps.geometry.encoding.decodePath(rt.polyline.encodedPolyline);
-        var poly=new google.maps.Polyline({path:p,strokeColor:'#999',strokeWeight:4,strokeOpacity:.35,map:gMap,zIndex:1});
+        var poly=new google.maps.Polyline({path:p,strokeColor:tpCssVar('--text-muted'),strokeWeight:4,strokeOpacity:.35,map:gMap,zIndex:1});
         p.forEach(function(pt){bounds.extend(pt)});
         (function(idx){poly.addListener('click',function(){swDrive(idx,lastOL,lastDL)})})(i);
       }catch(e){}
@@ -860,7 +890,7 @@ function drawDriveMap(routes,activeIdx){
   if(ar&&ar.polyline&&ar.polyline.encodedPolyline){
     try{
       var p=google.maps.geometry.encoding.decodePath(ar.polyline.encodedPolyline);
-      new google.maps.Polyline({path:p,strokeColor:'#9e0000',strokeWeight:5,strokeOpacity:.9,map:gMap,zIndex:10});
+      new google.maps.Polyline({path:p,strokeColor:tpCssVar('--primary'),strokeWeight:5,strokeOpacity:.9,map:gMap,zIndex:10});
       p.forEach(function(pt){bounds.extend(pt)});
     }catch(e){}
   }
@@ -1311,7 +1341,7 @@ function render(routes,idx,oL,dL){
     }
 
     var dotStyle=lineCol?' style="border-color:'+lineCol+'"':'';
-    var modeStyle=lineCol?' style="background:'+lineCol+';color:'+(lineTxt||'#fff')+'"':'';
+    var modeStyle=lineCol?' style="background:'+lineCol+';color:'+(lineTxt||'var(--white)')+'"':'';
 
     h+='<div class="tp__leg tp__leg--'+cls+'" onclick="zoomToStep('+si2+')" style="cursor:pointer">';
     h+='<div class="tp__leg-times">';
@@ -1368,7 +1398,7 @@ function zoomToStep(stepIdx){
     if(_highlightPoly){_highlightPoly.forEach(function(p){p.setMap(null)});_highlightPoly=null}
     // Draw glow using the leg's own colour
     if(paths.length){
-      var glowCol='#223b7c'; // default navy
+      var glowCol=tpCssVar('--navy'); // default navy
       if(s.transitDetails&&s.transitDetails.transitLine&&s.transitDetails.transitLine.color)glowCol=s.transitDetails.transitLine.color;
       _highlightPoly=[
         new google.maps.Polyline({path:paths,strokeColor:glowCol,strokeWeight:18,strokeOpacity:.12,map:gMap,zIndex:90}),
@@ -1389,8 +1419,8 @@ function drawMap(r){
     r.legs[0].steps.forEach(function(s){
       if(s.polyline&&s.polyline.encodedPolyline){
         try{
-          var col='#999',w=2;
-          if(s.travelMode==='TRANSIT'){col='#223b7c';w=4;if(s.transitDetails&&s.transitDetails.transitLine&&s.transitDetails.transitLine.color)col=s.transitDetails.transitLine.color}
+          var col=tpCssVar('--text-muted'),w=2;
+          if(s.travelMode==='TRANSIT'){col=tpCssVar('--navy');w=4;if(s.transitDetails&&s.transitDetails.transitLine&&s.transitDetails.transitLine.color)col=s.transitDetails.transitLine.color}
           var p=google.maps.geometry.encoding.decodePath(s.polyline.encodedPolyline);
           new google.maps.Polyline({path:p,strokeColor:col,strokeWeight:w,strokeOpacity:.9,map:gMap});
           p.forEach(function(pt){bounds.extend(pt)});
@@ -1400,7 +1430,7 @@ function drawMap(r){
   }
   // Fallback to route polyline
   if(bounds.isEmpty()&&r.polyline&&r.polyline.encodedPolyline){
-    try{var p=google.maps.geometry.encoding.decodePath(r.polyline.encodedPolyline);new google.maps.Polyline({path:p,strokeColor:'#223b7c',strokeWeight:4,map:gMap});p.forEach(function(pt){bounds.extend(pt)})}catch(e){}
+    try{var p=google.maps.geometry.encoding.decodePath(r.polyline.encodedPolyline);new google.maps.Polyline({path:p,strokeColor:tpCssVar('--navy'),strokeWeight:4,map:gMap});p.forEach(function(pt){bounds.extend(pt)})}catch(e){}
   }
   if(!bounds.isEmpty())gMap.fitBounds(bounds,{top:50,right:50,bottom:50,left:50});
 
@@ -1408,7 +1438,7 @@ function drawMap(r){
   // Helper: coloured circle marker content
   function circlePin(col,size){
     var d=document.createElement('div');
-    d.style.cssText='width:'+size+'px;height:'+size+'px;border-radius:50%;background:'+col+';border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3)';
+    d.style.cssText='width:'+size+'px;height:'+size+'px;border-radius:50%;background:'+col+';border:2px solid var(--white);box-shadow:0 1px 3px rgba(0,0,0,.3)';
     return d;
   }
 
@@ -1418,7 +1448,7 @@ function drawMap(r){
       if(s.transitDetails&&s.transitDetails.stopDetails){
         var sd=s.transitDetails.stopDetails;
         var ln=s.transitDetails.transitLine||{};
-        var col=ln.color||'#223b7c';
+        var col=ln.color||tpCssVar('--navy');
         var lnName=ln.nameShort||ln.name||'';
         if(sd.departureStop&&sd.departureStop.location&&sd.departureStop.location.latLng){
           var dLoc=sd.departureStop.location.latLng;
