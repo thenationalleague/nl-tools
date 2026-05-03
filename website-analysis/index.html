@@ -1,0 +1,4313 @@
+<!DOCTYPE html>
+<!--
+  Website Analysis — NL Tools
+  Version: v0.1 (skeleton)
+  Date: 03/05/2026
+  Description: Phase 1 skeleton. Sets up the agreed IA (Browse + Performance
+  with Trends/Timing/Outliers sub-tabs), a page-level period selector, and a
+  side-drawer for article detail. No business logic ported yet — subsequent
+  commits port Browse from website-archive and Performance views from
+  website-insights.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Website Analysis — NL Tools</title>
+
+  <!-- Brand stylesheet -->
+  <link rel="stylesheet" href="/tools/system/nl-brand.css?v=14">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init (standard NL config) -->
+  <script>
+    var firebaseConfig = {
+      apiKey: "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain: "nl-tools.firebaseapp.com",
+      databaseURL: "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId: "nl-tools",
+      storageBucket: "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId: "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    };
+    firebase.initializeApp(firebaseConfig);
+  </script>
+
+  <!-- Tool identity + changelog -->
+  <script>window.NL_TOOL = { title: 'Website Analysis', toolKey: 'staff-website-analysis' }; var NL_TOOL_KEY = 'staff-website-analysis'; window.NL_CHANGELOG = [{ date: '3 May 2026', version: 'v0.1', items: ['Initial skeleton — Phase 1 build in progress.'] }];</script>
+
+  <!-- NL system scripts -->
+  <script src="/tools/system/nl-utils.js?v=5"></script>
+  <script src="/tools/system/nl-topbar.js?v=7"></script>
+  <script src="/tools/system/auth-guard.js?v=4"></script>
+
+  <style>
+    /* ── Page header ─────────────────────────────────────────────────────
+       Title block on the left, period selector on the right. Stacks on
+       narrow viewports. */
+    .wa-pageheader {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      padding: 24px 0 16px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 24px;
+    }
+    .wa-pageheader__titles { min-width: 0; flex: 1 1 320px; }
+    .wa-pageheader__title {
+      margin: 0 0 4px;
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text);
+      letter-spacing: -0.01em;
+    }
+    .wa-pageheader__sub {
+      margin: 0;
+      font-size: var(--text-sm);
+      color: var(--text-muted);
+    }
+
+    /* ── Period selector (pill group) ────────────────────────────────────
+       Segmented buttons; active state uses brand accent. */
+    .period-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0;
+      padding: 4px;
+      background: var(--off-white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-pill);
+      flex: 0 0 auto;
+    }
+    .period-btn {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: var(--text-muted);
+      padding: 6px 14px;
+      font: inherit;
+      font-size: var(--text-sm);
+      font-weight: 500;
+      border-radius: var(--radius-pill);
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .period-btn:hover { color: var(--text); }
+    .period-btn.is-active {
+      background: var(--white);
+      color: var(--text);
+      box-shadow: var(--shadow);
+    }
+
+    /* ── Top-level tabs (Browse / Performance) ───────────────────────────
+       Mirrors the nl-brand .tabs / .tab pattern used by Insights' .ins-tabs:
+       a row of underline-style buttons with an active accent underline. */
+    .wa-tabs {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+    .wa-tab {
+      appearance: none;
+      background: transparent;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      padding: 12px 16px;
+      font: inherit;
+      font-size: var(--text-sm);
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      margin-bottom: -1px;
+      transition: color 0.15s ease, border-color 0.15s ease;
+    }
+    .wa-tab:hover { color: var(--text); }
+    .wa-tab.is-active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+      font-weight: 600;
+    }
+
+    /* ── Tab panes ───────────────────────────────────────────────────────*/
+    .wa-pane { display: none; }
+    .wa-pane.is-active { display: block; }
+
+    /* ── Performance sub-tabs (Trends / Timing / Outliers) ───────────────
+       Slightly lighter weight than top-level tabs; same underline pattern. */
+    .wa-subtabs {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+    .wa-subtab {
+      appearance: none;
+      background: transparent;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      padding: 8px 12px;
+      font: inherit;
+      font-size: var(--text-sm);
+      font-weight: 500;
+      color: var(--text-muted);
+      cursor: pointer;
+      margin-bottom: -1px;
+      transition: color 0.15s ease, border-color 0.15s ease;
+    }
+    .wa-subtab:hover { color: var(--text); }
+    .wa-subtab.is-active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+    }
+
+    .wa-subpane { display: none; }
+    .wa-subpane.is-active { display: block; }
+
+    /* ── Side-drawer (slides in from right) ──────────────────────────────
+       480px wide on desktop, full-width on mobile. Backdrop dims the page. */
+    .drawer {
+      position: fixed;
+      top: 0;
+      right: 0;
+      height: 100vh;
+      width: 480px;
+      max-width: 100vw;
+      transform: translateX(100%);
+      transition: transform 0.25s ease;
+      z-index: 200;
+      background: var(--white);
+      box-shadow: -8px 0 32px rgba(10, 22, 40, 0.18);
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+    }
+    .drawer.is-open { transform: translateX(0); }
+    .drawer-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 22, 40, 0.35);
+      z-index: 199;
+    }
+    @media (max-width: 600px) {
+      .drawer { width: 100vw; }
+    }
+
+    .drawer__head {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      background: var(--white);
+      z-index: 1;
+    }
+    .drawer__close {
+      appearance: none;
+      background: transparent;
+      border: 0;
+      font-size: 24px;
+      line-height: 1;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: var(--radius-sm, 6px);
+      flex: 0 0 auto;
+    }
+    .drawer__close:hover {
+      color: var(--text);
+      background: var(--off-white);
+    }
+    .drawer__title-wrap { min-width: 0; flex: 1 1 auto; }
+    .drawer__title {
+      margin: 0 0 4px;
+      font-size: var(--text-md);
+      font-weight: 600;
+      color: var(--text);
+      word-break: break-word;
+    }
+    .drawer__meta {
+      font-size: var(--text-sm);
+      color: var(--text-muted);
+    }
+    .drawer__body {
+      padding: 16px 24px;
+      flex: 1 1 auto;
+    }
+
+    /* ── Drawer body sections (populated by openDrawer) ──────────────────
+       Each of the five section helpers wraps its content in
+       `.drawer-section`. Section heads share `.drawer-section__head`. */
+    .drawer-section {
+      margin-bottom: 22px;
+    }
+    .drawer-section:last-child { margin-bottom: 0; }
+    .drawer-section__head {
+      font-size: var(--text-xs);
+      font-weight: 800; font-variation-settings: 'wght' 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    /* 5-stat panel — drawer flavour of the brand `.stats` widget so the
+       five cells lay out evenly on desktop and re-flow on narrow screens.
+       (Brand `.stats` here is bespoke to keep the drawer self-contained.) */
+    .drawer-stats {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 10px;
+      background: var(--off-white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+    }
+    @media (max-width: 720px) {
+      .drawer-stats { grid-template-columns: repeat(3, 1fr); row-gap: 14px; }
+    }
+    @media (max-width: 460px) {
+      .drawer-stats { grid-template-columns: repeat(2, 1fr); }
+    }
+    .drawer-stat { text-align: center; min-width: 0; }
+    .drawer-stat__num {
+      font-size: var(--text-lg, 18px);
+      font-weight: 900; font-variation-settings: 'wght' 900;
+      color: var(--text);
+      line-height: 1.1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .drawer-stat__num--null { color: var(--text-muted); font-weight: 600; font-variation-settings: 'wght' 600; }
+    .drawer-stat__num--green { color: var(--green); }
+    .drawer-stat__num--amber { color: var(--amber); }
+    .drawer-stat__num--red   { color: var(--red); }
+    .drawer-stat__label {
+      font-size: 10px;
+      font-weight: 700; font-variation-settings: 'wght' 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* Curve section: SVG sits in a clean white card; legend immediately
+       below; comparison sentence below that. */
+    .drawer-curve {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px;
+    }
+    .drawer-curve__svg-wrap {
+      width: 100%;
+      overflow: hidden;
+    }
+    .drawer-curve__svg-wrap svg {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    .drawer-curve__legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 14px;
+      margin-top: 8px;
+      font-size: var(--text-xs);
+      color: var(--text-muted);
+    }
+    .drawer-curve__legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .drawer-curve__legend-swatch {
+      display: inline-block;
+      width: 14px;
+      height: 2px;
+      background: var(--primary);
+    }
+    .drawer-curve__legend-swatch--dashed {
+      background: repeating-linear-gradient(to right, var(--text-muted) 0 4px, transparent 4px 7px);
+    }
+    .drawer-comparison {
+      margin-top: 10px;
+      background: var(--off-white);
+      border-left: 3px solid var(--primary);
+      border-radius: var(--radius-sm, 6px);
+      padding: 8px 12px;
+      font-size: var(--text-sm);
+      color: var(--text);
+      line-height: 1.4;
+    }
+    .drawer-comparison strong { font-weight: 800; font-variation-settings: 'wght' 800; }
+
+    /* Traffic source bar — verbatim port of Archive's modal-sources bar
+       under a section head. */
+    .drawer-sources__bar {
+      display: flex;
+      height: 8px;
+      border-radius: 4px;
+      overflow: hidden;
+      background: var(--border);
+      margin-bottom: 8px;
+    }
+    .drawer-sources__seg { height: 100%; min-width: 2px; }
+    .drawer-sources__legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 14px;
+      font-size: var(--text-xs);
+    }
+    .drawer-sources__legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--text);
+      font-weight: 600; font-variation-settings: 'wght' 600;
+    }
+    .drawer-sources__legend-dot {
+      width: 8px; height: 8px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+    .drawer-sources__legend-label { color: var(--text-muted); }
+    .drawer-sources__legend-val {
+      font-weight: 800; font-variation-settings: 'wght' 800;
+      color: var(--text);
+      margin-left: 1px;
+    }
+
+    /* Article body container. Preserves Archive's prose/embed styles
+       (best-effort) — relies on the article HTML carrying its own layout
+       attributes for tables, lists, embeds. */
+    .drawer-article-body {
+      font-size: var(--text-md, 15px);
+      line-height: 1.6;
+      color: var(--text);
+    }
+    .drawer-article-body img { max-width: 100%; height: auto; border-radius: var(--radius-sm, 6px); }
+    .drawer-article-body p { margin: 0 0 14px; }
+    .drawer-article-body h2, .drawer-article-body h3 { margin: 22px 0 8px; }
+    .drawer-article-body figure { margin: 18px 0; }
+    .drawer-article-body figcaption { font-size: var(--text-sm); color: var(--text-muted); margin-top: 4px; }
+    .drawer-article-body blockquote {
+      margin: 18px 0;
+      padding: 10px 14px;
+      border-left: 3px solid var(--primary);
+      background: var(--off-white);
+      font-style: italic;
+    }
+    .drawer-article-body iframe { max-width: 100%; }
+
+    /* ── Browse view (ported from website-archive) ───────────────────────
+       Search + filters + cards grid. Section headers below mirror the
+       Archive structure for easy diffing during the Phase 1 review. */
+
+    /* ============ FILTERS PANEL ============ */
+    .filters {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px;
+      margin-bottom: 18px;
+      box-shadow: var(--shadow);
+    }
+    .filters__row {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
+      gap: 12px;
+      align-items: end;
+    }
+    .filters__row + .filters__row { margin-top: 12px; }
+    @media (max-width: 980px) { .filters__row { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 560px) { .filters__row { grid-template-columns: 1fr; } }
+
+    .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .field__label {
+      font-size: var(--text-xs); font-weight: 800; font-variation-settings: 'wght' 800;
+      text-transform: uppercase; letter-spacing: 0.1em;
+      color: var(--text-muted);
+    }
+    .field input[type=text],
+    .field input[type=date],
+    .field input[type=search],
+    .field select {
+      font-family: var(--font);
+      font-size: var(--text-sm);
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--white);
+      color: var(--text);
+      width: 100%;
+      min-width: 0;
+    }
+    .field input:focus, .field select:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: var(--focus-ring);
+    }
+
+    .scope {
+      display: flex; align-items: center; gap: 12px;
+      font-size: var(--text-sm); color: var(--text-muted);
+      font-weight: 600; font-variation-settings: 'wght' 600;
+    }
+    .scope label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+    .scope input[type=checkbox] { accent-color: var(--primary); }
+
+    /* TODO(phase-1-review): Archive's per-pane custom date filter is preserved
+       here as a narrower override of the page-level period selector. If the
+       page-period covers what users need, we may drop these date inputs in a
+       later pass to declutter the filters row. */
+
+    /* ============ CONTROL BAR ============ */
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+    .controls__count {
+      font-size: var(--text-sm);
+      color: var(--text-muted);
+      font-weight: 600; font-variation-settings: 'wght' 600;
+    }
+    .controls__count strong {
+      color: var(--text);
+      font-weight: 900; font-variation-settings: 'wght' 900;
+    }
+    .controls__spacer { flex: 1; }
+
+    .sort-select {
+      font-family: var(--font);
+      font-size: var(--text-sm);
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--white);
+      color: var(--text);
+    }
+
+    .view-toggle {
+      display: inline-flex;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: var(--white);
+    }
+    .view-toggle button {
+      background: none;
+      border: none;
+      padding: 7px 11px;
+      font-family: var(--font);
+      font-size: var(--text-xs); font-weight: 800; font-variation-settings: 'wght' 800;
+      text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .view-toggle button.active {
+      background: var(--navy);
+      color: var(--white);
+    }
+
+    /* ============ RESULTS — GRID MODE ============ */
+    .results-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 14px;
+    }
+    .card {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      cursor: pointer;
+      display: flex; flex-direction: column;
+      transition: transform 0.12s, box-shadow 0.12s;
+    }
+    .card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+    .card__img-wrap {
+      aspect-ratio: 16 / 9;
+      background: var(--off-white);
+      overflow: hidden;
+      position: relative;
+    }
+    .card__img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .card__img-placeholder {
+      width: 100%; height: 100%;
+      background: linear-gradient(135deg, var(--off-white) 0%, var(--border) 100%);
+      display: flex; align-items: center; justify-content: center;
+      color: var(--text-muted); font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.08em;
+    }
+    .card__body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+    .card__meta { display: flex; align-items: center; gap: 8px; font-size: 10px; }
+    .card__pill {
+      background: var(--navy);
+      color: var(--white);
+      padding: 2px 7px;
+      border-radius: 10px;
+      font-size: var(--text-xs); font-weight: 800; font-variation-settings: 'wght' 800;
+      text-transform: uppercase; letter-spacing: 0.06em;
+      white-space: nowrap;
+    }
+    .card__date {
+      color: var(--text-muted);
+      font-weight: 600; font-variation-settings: 'wght' 600;
+    }
+    .card__title {
+      font-size: var(--text-md);
+      font-weight: 700; font-variation-settings: 'wght' 700;
+      color: var(--text);
+      line-height: 1.3;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .card__sub {
+      font-size: var(--text-sm);
+      color: var(--text-muted);
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .card__footer {
+      margin-top: auto;
+      padding-top: 6px;
+      font-size: var(--text-xs);
+      color: var(--text-muted);
+      font-weight: 600; font-variation-settings: 'wght' 600;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    /* ============ METRICS — SHARED ============ */
+    /* Traffic light dot. Still used in list view (and later: drawer). */
+    .tl-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      flex-shrink: 0;
+      vertical-align: middle;
+    }
+    .tl-dot--green  { background: var(--green); }
+    .tl-dot--amber  { background: var(--amber); }
+    .tl-dot--red    { background: var(--red); }
+    .tl-dot--null   { background: transparent; border: 1px dashed var(--text-muted); }
+
+    /* Card views badge — two-line stack (views on top, dwell underneath) */
+    .card__views-badge {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: rgba(26, 42, 68, 0.90);
+      color: var(--white);
+      padding: 5px 9px;
+      border-radius: 8px;
+      line-height: 1.25;
+      text-align: right;
+      backdrop-filter: blur(4px);
+    }
+    .card__views-badge-line1 {
+      font-size: var(--text-xs);
+      font-weight: 800; font-variation-settings: 'wght' 800;
+      letter-spacing: 0.02em;
+    }
+    .card__views-badge-line2 {
+      font-size: var(--text-xs);
+      font-weight: 600; font-variation-settings: 'wght' 600;
+      opacity: 0.80;
+      margin-top: 1px;
+    }
+    .card__views-badge--null {
+      background: rgba(100, 100, 100, 0.75);
+      font-style: italic;
+    }
+    .card__views-badge--null .card__views-badge-line1 {
+      font-weight: 500; font-variation-settings: 'wght' 500;
+    }
+
+    /* Card footer — word count */
+    .card__wordcount {
+      font-size: var(--text-xs);
+      color: var(--text-muted);
+      font-weight: 600; font-variation-settings: 'wght' 600;
+    }
+    .card__wordcount--null { opacity: 0.5; }
+
+    /* Sparkline (60×16 SVG) — last ~24h hourly views per article.
+       Rendered on cards when hourly data is loaded; absent otherwise. */
+    .card__sparkline {
+      display: block;
+      width: 60px;
+      height: 16px;
+      margin-top: 4px;
+      flex-shrink: 0;
+    }
+    /* List-view inline variant — sits in a metric column slot */
+    .row__sparkline {
+      display: block;
+      width: 60px;
+      height: 16px;
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+
+    /* Performance chip — at most one per card; computed against cohort
+       median + period percentiles in PERF_CACHE. */
+    .card__perf-chip {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: var(--radius-pill);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-left: 6px;
+      line-height: 1.4;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+    .card__perf-chip--over       { background: var(--green-light); color: var(--green); }
+    .card__perf-chip--under      { background: var(--red-light);   color: var(--red); }
+    .card__perf-chip--slow-burn  { background: var(--info-light);  color: var(--navy); }
+    .card__perf-chip--early-peak { background: var(--amber-light); color: var(--amber); }
+    .card__perf-chip--gem        { background: var(--purple-light); color: var(--purple); }
+    .card__perf-chip--trap       { background: var(--off-white);   color: var(--text-muted); border: 1px solid var(--border); }
+
+    /* ============ LIST VIEW METRIC COLUMNS ============ */
+    .row__metric {
+      text-align: right;
+      font-size: var(--text-sm);
+      font-weight: 700; font-variation-settings: 'wght' 700;
+    }
+    .row__metric--green { color: var(--green); }
+    .row__metric--amber { color: var(--amber); }
+    .row__metric--red   { color: var(--red); }
+    .row__metric--null  { color: var(--text-muted); font-weight: 500; font-variation-settings: 'wght' 500; }
+
+    .row__header {
+      display: grid;
+      grid-template-columns: 70px 90px 1fr 130px 55px 55px 55px;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 16px;
+      background: var(--off-white);
+      border-bottom: 1px solid var(--border);
+      font-size: var(--text-xs);
+      font-weight: 800; font-variation-settings: 'wght' 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      cursor: default;
+    }
+    .row__header > span { min-width: 0; }
+    .row__header-metric { text-align: right; }
+    .row__header-sortable { cursor: pointer; user-select: none; }
+    .row__header-sortable:hover { color: var(--text); }
+    .row__header-sortable.active { color: var(--primary); }
+
+    /* ============ RESULTS — LIST MODE ============ */
+    .results-list {
+      display: flex; flex-direction: column;
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 70px 90px 1fr 130px 55px 55px 55px;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: background 0.12s;
+    }
+    .row:last-child { border-bottom: none; }
+    .row:hover { background: var(--off-white); }
+    .row > div, .row > span { min-width: 0; }
+    .row__img {
+      width: 70px; height: 40px;
+      background: var(--off-white);
+      border-radius: 4px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .row__img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .row__date {
+      font-size: var(--text-xs); color: var(--text-muted);
+      font-weight: 600; font-variation-settings: 'wght' 600;
+    }
+    .row__title {
+      font-size: var(--text-sm);
+      font-weight: 700; font-variation-settings: 'wght' 700;
+      color: var(--text);
+      line-height: 1.3;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .row__sub {
+      font-size: var(--text-xs); color: var(--text-muted); line-height: 1.3;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      margin-top: 2px;
+    }
+    .row__author {
+      font-size: var(--text-sm); color: var(--text-muted);
+      font-weight: 600; font-variation-settings: 'wght' 600;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    @media (max-width: 860px) {
+      .row { grid-template-columns: 60px 1fr 55px; gap: 10px; }
+      .row__header { grid-template-columns: 60px 1fr 55px; }
+      .row__date, .row__author,
+      .row__metric--time, .row__metric--eng,
+      .row__header-metric-time, .row__header-metric-eng { display: none; }
+      .row__img { width: 60px; height: 36px; }
+    }
+
+    /* ============ EMPTY STATES ============ */
+    .empty {
+      padding: 60px 20px;
+      text-align: center;
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .empty__title {
+      font-size: var(--text-md); font-weight: 900; font-variation-settings: 'wght' 900;
+      color: var(--text); margin-bottom: 8px;
+    }
+    .empty__msg {
+      font-size: var(--text-sm); color: var(--text-muted); line-height: 1.5;
+      max-width: 440px; margin: 0 auto;
+    }
+
+    .loading {
+      display: flex; align-items: center; justify-content: center;
+      gap: 10px;
+      padding: 40px 20px;
+      color: var(--text-muted);
+      font-size: var(--text-sm);
+      font-weight: 600; font-variation-settings: 'wght' 600;
+    }
+    .spinner-inline {
+      width: 20px; height: 20px;
+      border: 2px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ============ EXPORT DROPDOWN (admin only) ============ */
+    .export-wrap {
+      position: relative;
+    }
+    .export-btn {
+      font-size: var(--text-xs);
+    }
+    .export-menu {
+      display: none;
+      position: absolute;
+      top: calc(100% + 4px);
+      right: 0;
+      min-width: 280px;
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+      z-index: 50;
+      overflow: hidden;
+    }
+    .export-menu.open { display: block; }
+    .export-menu__item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 12px 14px;
+      border: none;
+      background: none;
+      cursor: pointer;
+      font-family: var(--font);
+      border-bottom: 1px solid var(--border);
+      transition: background 0.12s;
+    }
+    .export-menu__item:last-child { border-bottom: none; }
+    .export-menu__item:hover { background: var(--off-white); }
+    .export-menu__item strong {
+      display: block;
+      font-size: var(--text-sm);
+      font-weight: 800; font-variation-settings: 'wght' 800;
+      color: var(--text);
+      margin-bottom: 2px;
+    }
+    .export-menu__item span {
+      display: block;
+      font-size: var(--text-xs);
+      color: var(--text-muted);
+    }
+
+    /* ============ EXPORT PROGRESS MODAL ============ */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(26, 42, 68, 0.72);
+      z-index: 500;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+      overscroll-behavior: contain;
+    }
+    .modal-backdrop.open { display: flex; }
+    .export-modal {
+      background: var(--white);
+      border-radius: 10px;
+      max-width: 520px;
+      width: 100%;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      overflow: hidden;
+      animation: modalIn 0.18s ease-out;
+    }
+    @keyframes modalIn {
+      from { transform: scale(0.96); opacity: 0; }
+      to   { transform: scale(1); opacity: 1; }
+    }
+    .export-modal__head {
+      background: var(--navy);
+      color: var(--white);
+      padding: 14px 20px;
+      font-size: var(--text-sm);
+      font-weight: 800; font-variation-settings: 'wght' 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .export-modal__body {
+      padding: 20px;
+    }
+    .export-progress {
+      width: 100%;
+      height: 8px;
+      background: var(--off-white);
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 14px 0;
+    }
+    .export-progress__fill {
+      height: 100%;
+      background: var(--primary);
+      transition: width 0.2s;
+    }
+    .export-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+      margin-top: 14px;
+      font-size: var(--text-sm);
+    }
+    .export-stats__item {
+      text-align: center;
+      padding: 10px;
+      background: var(--off-white);
+      border-radius: var(--radius);
+    }
+    .export-stats__num {
+      display: block;
+      font-size: var(--text-md);
+      font-weight: 900; font-variation-settings: 'wght' 900;
+      color: var(--navy);
+    }
+    .export-stats__label {
+      display: block;
+      font-size: var(--text-xs);
+      font-weight: 800; font-variation-settings: 'wght' 800;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+    .export-modal__foot {
+      padding: 14px 20px;
+      background: var(--off-white);
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+
+    /* ================================================================
+       PERFORMANCE — ported verbatim from website-insights v1.11.
+       Class prefixes (.ins-*, .ov-*, .gt-*, .cohort-*, .heatmap*,
+       .svg-*) are intentionally preserved: the ported render JS uses
+       these names internally, and renaming would multiply diff noise
+       without behavioural benefit.
+       ================================================================ */
+
+    /* ============ SHARED ============ */
+    .ins-section-head {
+      display: flex; align-items: baseline; justify-content: space-between;
+      gap: 16px; margin-bottom: 12px; flex-wrap: wrap;
+    }
+    .ins-section-head h2 {
+      font-size: var(--text-md);
+      font-weight: 800; font-variation-settings: 'wght' 800;
+      color: var(--text);
+      margin: 0;
+    }
+    .ins-section-head .ins-sub {
+      font-size: var(--text-sm);
+      color: var(--text-muted);
+      font-weight: 600; font-variation-settings: 'wght' 600;
+    }
+
+    .ins-card {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .ins-card__title {
+      font-size: var(--text-md);
+      font-weight: 800; font-variation-settings: 'wght' 800;
+      color: var(--text);
+      margin: 0;
+    }
+    .ins-note {
+      margin-top: 8px;
+      font-size: var(--text-xs);
+      color: var(--text-muted);
+    }
+    .ins-section-spacer {
+      margin-top: 24px;
+    }
+
+    .ins-loading {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+    /* ============ OVERVIEW STAT CARDS (Trends sub-tab) ============ */
+    .ov-stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    @media (max-width: 860px) {
+      .ov-stats { grid-template-columns: repeat(2, 1fr); }
+    }
+    .ov-stat {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+    }
+    .ov-stat__label {
+      font-size: var(--text-xs);
+      font-weight: 800; font-variation-settings: 'wght' 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .ov-stat__value {
+      font-size: var(--text-lg);
+      font-weight: 800; font-variation-settings: 'wght' 800;
+      line-height: 1.1;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+    .ov-stat__detail {
+      font-size: var(--text-xs);
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+    .ov-stat__detail strong {
+      color: var(--text);
+      font-weight: 700; font-variation-settings: 'wght' 700;
+    }
+
+    .ov-narrative {
+      background: var(--off-white);
+      padding: 16px 18px;
+      border-radius: var(--radius);
+      border-left: 4px solid var(--primary);
+      margin-bottom: 24px;
+      font-size: var(--text-base);
+      line-height: 1.55;
+      color: var(--text);
+    }
+
+    /* ============ TIMING SUB-TAB ============ */
+    /* SVG chart container */
+    .chart-wrap {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .chart-wrap svg { display: block; width: 100%; height: auto; }
+    .chart-empty {
+      padding: 60px 20px;
+      text-align: center;
+      color: var(--text-muted);
+      font-family: var(--font);
+      font-size: var(--text-sm);
+      font-weight: 600; font-variation-settings: 'wght' 600;
+    }
+
+    /* Cohort selector */
+    .cohort-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+      align-items: center;
+    }
+    .cohort-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: var(--off-white);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      font-size: var(--text-sm);
+      font-weight: 700; font-variation-settings: 'wght' 700;
+      cursor: pointer;
+      user-select: none;
+    }
+    .cohort-pill input { margin: 0; cursor: pointer; }
+    .cohort-pill.cohort-on {
+      background: var(--white);
+      border-color: var(--primary);
+      color: var(--primary);
+    }
+
+    /* Heatmap */
+    .heatmap {
+      display: grid;
+      grid-template-columns: 50px repeat(7, 1fr);
+      gap: 2px;
+      font-size: var(--text-xs);
+    }
+    .heatmap__corner, .heatmap__col-label, .heatmap__row-label {
+      padding: 4px 6px;
+      color: var(--text-muted);
+      font-weight: 700; font-variation-settings: 'wght' 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-size: var(--text-xs);
+    }
+    .heatmap__col-label { text-align: center; }
+    .heatmap__row-label { text-align: right; }
+    .heatmap__cell {
+      height: 22px;
+      border-radius: 3px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: var(--text-xs);
+      font-weight: 700; font-variation-settings: 'wght' 700;
+      color: var(--text);
+      cursor: default;
+    }
+    .heatmap__cell--null {
+      background: var(--off-white);
+      color: var(--text-muted);
+      font-family: var(--font);
+      font-weight: 600; font-variation-settings: 'wght' 600;
+    }
+
+    /* ============ GEMS & TRAPS / OUTLIERS ============ */
+    .gt-toggle {
+      display: inline-flex;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .gt-toggle button {
+      background: none;
+      border: none;
+      padding: 8px 16px;
+      font-family: var(--font);
+      font-size: var(--text-sm);
+      font-weight: 700; font-variation-settings: 'wght' 700;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+    .gt-toggle button.active {
+      background: var(--primary);
+      color: var(--white);
+    }
+
+    .gt-list {
+      display: flex; flex-direction: column;
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .gt-row {
+      display: grid;
+      grid-template-columns: 1fr 80px 80px 80px 80px;
+      gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      align-items: center;
+      font-size: var(--text-sm);
+      cursor: pointer;
+      transition: background 0.12s;
+    }
+    .gt-row:last-child { border-bottom: none; }
+    .gt-row:hover { background: var(--off-white); }
+    .gt-row__title {
+      font-weight: 700; font-variation-settings: 'wght' 700;
+      line-height: 1.3;
+    }
+    .gt-row__sub {
+      font-size: var(--text-xs);
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .gt-row__metric {
+      text-align: right;
+      font-weight: 700; font-variation-settings: 'wght' 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .gt-row__metric--green { color: var(--green); }
+    .gt-row__metric--amber { color: var(--amber); }
+    .gt-row__metric--red   { color: var(--red); }
+    .gt-header {
+      display: grid;
+      grid-template-columns: 1fr 80px 80px 80px 80px;
+      gap: 10px;
+      padding: 8px 14px;
+      background: var(--off-white);
+      border-bottom: 1px solid var(--border);
+      font-size: var(--text-xs);
+      font-weight: 800; font-variation-settings: 'wght' 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+    }
+    .gt-header > span:not(:first-child) { text-align: right; }
+    @media (max-width: 720px) {
+      .gt-row, .gt-header { grid-template-columns: 1fr 70px 70px; }
+      .gt-row > *:nth-child(n+5), .gt-header > *:nth-child(n+5) { display: none; }
+    }
+
+    /* Honesty note about data window */
+    .ins-data-note {
+      font-size: var(--text-xs);
+      color: var(--text-muted);
+      background: var(--off-white);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 8px 12px;
+      margin-bottom: 16px;
+      line-height: 1.4;
+    }
+
+    /* Per-chart toggle controls (mean/median).
+       NOTE: Period toggles inside .ins-chart-controls are deliberately
+       NOT rendered here — the page-level period selector (.period-toggle)
+       drives both cohort and heatmap. Median/Mean is orthogonal so it
+       stays. */
+    .ins-chart-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-bottom: 12px;
+      align-items: center;
+    }
+    .ins-toggle-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .ins-toggle-label {
+      font-size: var(--text-xs);
+      font-weight: 800; font-variation-settings: 'wght' 800;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      margin-right: 2px;
+    }
+    .ins-toggle {
+      background: var(--white);
+      border: 1px solid var(--border);
+      padding: 4px 10px;
+      font-family: var(--font);
+      font-size: var(--text-xs);
+      font-weight: 700; font-variation-settings: 'wght' 700;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-radius: var(--radius);
+    }
+    .ins-toggle:hover { color: var(--text); }
+    .ins-toggle.active {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: var(--white);
+    }
+    .ins-toggle-group--disabled {
+      opacity: 0.45;
+      pointer-events: none;
+    }
+
+    /* SVG common */
+    .svg-axis-line { stroke: var(--border); stroke-width: 1; }
+    .svg-axis-label { fill: var(--text-muted); font-size: 11px; font-family: var(--font); }
+    .svg-axis-tick { stroke: var(--border); stroke-width: 1; }
+    .svg-grid-line { stroke: var(--border); stroke-width: 1; stroke-dasharray: 2,2; opacity: 0.5; }
+    .svg-data-line { fill: none; stroke-width: 2; }
+    .svg-data-point { stroke: var(--white); stroke-width: 1.5; }
+  </style>
+</head>
+<body>
+  <div id="pageWrap" style="display:none;">
+    <div id="nlTopbar"></div>
+    <div class="main">
+      <div class="wa-pageheader">
+        <div class="wa-pageheader__titles">
+          <h1 class="wa-pageheader__title">Website Analysis</h1>
+          <p class="wa-pageheader__sub">Browse articles and analyse performance.</p>
+        </div>
+        <div class="period-toggle" id="periodToggle" role="group" aria-label="Period">
+          <button class="period-btn" data-value="30">30d</button>
+          <button class="period-btn is-active" data-value="90">90d</button>
+          <button class="period-btn" data-value="all">All time</button>
+        </div>
+      </div>
+
+      <div class="wa-tabs" id="waTabs">
+        <button class="wa-tab is-active" data-tab="browse">Browse</button>
+        <button class="wa-tab" data-tab="performance">Performance</button>
+      </div>
+
+      <div class="wa-pane is-active" data-pane="browse">
+        <!-- FILTERS -->
+        <div class="filters">
+          <div class="filters__row">
+            <div class="field">
+              <label class="field__label" for="qInput">Search</label>
+              <input type="search" id="qInput" placeholder="Type to search titles and sub-headers…" autocomplete="off">
+            </div>
+            <div class="field">
+              <label class="field__label" for="fromInput">From</label>
+              <input type="date" id="fromInput">
+            </div>
+            <div class="field">
+              <label class="field__label" for="toInput">To</label>
+              <input type="date" id="toInput">
+            </div>
+            <div class="field">
+              <label class="field__label" for="authorInput">Author</label>
+              <select id="authorInput">
+                <option value="">Any author</option>
+              </select>
+            </div>
+            <div class="field">
+              <label class="field__label" for="catInput">Category</label>
+              <select id="catInput">
+                <option value="">Any category</option>
+              </select>
+            </div>
+          </div>
+          <div class="filters__row" style="grid-template-columns: 1fr auto; align-items: center;">
+            <div class="scope">
+              <label>
+                <input type="checkbox" id="scopeBody">
+                Include article body in search
+              </label>
+            </div>
+            <button class="btn btn--ghost" id="resetBtn">Reset filters</button>
+          </div>
+        </div>
+
+        <!-- CONTROLS -->
+        <div class="controls">
+          <div class="controls__count" id="countDisplay">Loading archive…</div>
+          <div class="controls__spacer"></div>
+          <div class="export-wrap" id="exportWrap" style="display:none;">
+            <button class="btn btn--navy export-btn" id="exportBtn" type="button">
+              Export <span id="exportCount">0</span> ▾
+            </button>
+            <div class="export-menu" id="exportMenu">
+              <button class="export-menu__item" data-format="meta">
+                <strong>Metadata only</strong>
+                <span>Title, date, author, category, URL — instant</span>
+              </button>
+              <button class="export-menu__item" data-format="plaintext">
+                <strong>With plaintext body</strong>
+                <span>Full text, stripped of HTML — instant</span>
+              </button>
+              <button class="export-menu__item" data-format="html">
+                <strong>With full HTML body</strong>
+                <span>Full fidelity — fetches each article, rate-limited</span>
+              </button>
+            </div>
+          </div>
+          <select class="sort-select" id="sortSelect">
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="views">Most viewed</option>
+            <option value="engagement">Longest engagement</option>
+            <option value="length">Longest read</option>
+          </select>
+          <div class="view-toggle">
+            <button id="viewGrid" class="active" data-view="grid">Grid</button>
+            <button id="viewList" data-view="list">List</button>
+          </div>
+        </div>
+
+        <!-- RESULTS -->
+        <div id="resultsRoot">
+          <div class="loading">
+            <div class="spinner-inline"></div>
+            <div>Loading archive index…</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="wa-pane" data-pane="performance">
+        <div class="wa-subtabs" id="waSubtabs">
+          <button class="wa-subtab is-active" data-subtab="trends">Trends</button>
+          <button class="wa-subtab" data-subtab="timing">Timing</button>
+          <button class="wa-subtab" data-subtab="outliers">Outliers</button>
+        </div>
+        <!-- TRENDS — overview digest ported from Insights v1.11 -->
+        <div class="wa-subpane is-active" data-subpane="trends">
+          <div class="ins-section-head">
+            <h2>Overview</h2>
+            <span class="ins-sub" id="ovSub">Last 30 days</span>
+          </div>
+          <div id="ovBody">
+            <div class="ins-loading">Loading insights…</div>
+          </div>
+        </div>
+
+        <!-- TIMING — cohort comparison + heatmap ported from Insights v1.11.
+             Per-chart period sub-toggles removed: the page-level period
+             selector drives both. Median/Mean toggles kept (orthogonal).
+             Drill-into-article details panel removed: the side-drawer
+             surfaces single-article analytics in Phase 1 step 5. -->
+        <div class="wa-subpane" data-subpane="timing">
+          <div class="ins-section-head">
+            <h2>Article timing</h2>
+            <span class="ins-sub">When articles are read &amp; how publish-time affects performance</span>
+          </div>
+          <div class="ins-data-note" id="dataWindowNote">
+            Data window: rolling 90 days, refreshed nightly. All-time uses an accumulating archive that grows from the date the archive was first populated.
+          </div>
+
+          <div class="ins-card">
+            <div class="ins-section-head" style="margin-bottom: 8px;">
+              <h2 class="ins-card__title">Cohort comparison — curve by publish hour</h2>
+            </div>
+            <div class="ins-chart-controls" id="cohortChartControls">
+              <div class="ins-toggle-group" data-target="cohortAgg">
+                <span class="ins-toggle-label">Average</span>
+                <button class="ins-toggle active" data-value="median">Median</button>
+                <button class="ins-toggle" data-value="mean">Mean</button>
+              </div>
+            </div>
+            <div class="cohort-controls" id="cohortControls">
+              <span class="ins-sub">Toggle cohorts:</span>
+              <!-- cohort pills injected -->
+            </div>
+            <div id="cohortChart" class="chart-empty">Loading cohort data&hellip;</div>
+          </div>
+
+          <div class="ins-card">
+            <div class="ins-section-head" style="margin-bottom: 8px;">
+              <h2 class="ins-card__title" id="heatmapTitle">Publishing slots — best day &amp; hour to publish</h2>
+              <div class="gt-toggle" id="heatmapToggle">
+                <button class="active" data-mode="publish">Publishing slots</button>
+                <button data-mode="reading">Reading times</button>
+              </div>
+            </div>
+            <div class="ins-chart-controls" id="heatmapChartControls">
+              <div class="ins-toggle-group" data-target="heatmapAgg" id="heatmapAggGroup">
+                <span class="ins-toggle-label">Average</span>
+                <button class="ins-toggle active" data-value="median">Median</button>
+                <button class="ins-toggle" data-value="mean">Mean</button>
+              </div>
+            </div>
+            <div class="ins-sub" id="heatmapSub" style="margin-bottom: 10px;">Median first-24h views for articles published in each slot. Brighter red = better-performing publish slot.</div>
+            <div id="heatmap" class="chart-empty">Loading heatmap&hellip;</div>
+          </div>
+        </div>
+
+        <!-- OUTLIERS — gems & traps list, renamed from "Gems & Traps".
+             Each row click opens the side-drawer. -->
+        <div class="wa-subpane" data-subpane="outliers">
+          <div class="ins-section-head">
+            <h2>Outliers</h2>
+            <div class="gt-toggle" id="gtToggle">
+              <button class="active" data-mode="gems">Hidden Gems</button>
+              <button data-mode="traps">Traffic Traps</button>
+            </div>
+          </div>
+          <div id="gtSubhead" class="ins-sub" style="margin-bottom: 12px;">
+            Articles with strong reader engagement that didn't reach a wide audience. These are
+            candidates for renewed promotion — quality work the algorithm missed.
+          </div>
+          <div id="gtBody">
+            <div class="ins-loading">Loading…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- EXPORT PROGRESS MODAL (admin-only, ported from website-archive) -->
+  <div class="modal-backdrop" id="exportModalBackdrop" role="dialog" aria-modal="true" aria-labelledby="exportModalTitle" style="display:none;">
+    <div class="export-modal">
+      <div class="export-modal__head" id="exportModalTitle">Exporting articles</div>
+      <div class="export-modal__body">
+        <div id="exportStatus" style="font-size: var(--text-sm); color: var(--text-muted);">Preparing…</div>
+        <div class="export-progress"><div class="export-progress__fill" id="exportProgressFill" style="width:0%"></div></div>
+        <div class="export-stats">
+          <div class="export-stats__item">
+            <span class="export-stats__num" id="exportDone">0</span>
+            <span class="export-stats__label">Done</span>
+          </div>
+          <div class="export-stats__item">
+            <span class="export-stats__num" id="exportTotal">0</span>
+            <span class="export-stats__label">Total</span>
+          </div>
+          <div class="export-stats__item">
+            <span class="export-stats__num" id="exportFailed">0</span>
+            <span class="export-stats__label">Failed</span>
+          </div>
+        </div>
+      </div>
+      <div class="export-modal__foot">
+        <button class="btn btn--ghost" id="exportCancelBtn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Side-drawer (slides in from right) -->
+  <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
+  <aside class="drawer" id="articleDrawer" aria-hidden="true">
+    <header class="drawer__head">
+      <button class="drawer__close" id="drawerClose" aria-label="Close">×</button>
+      <div class="drawer__title-wrap">
+        <h2 class="drawer__title" id="drawerTitle">—</h2>
+        <div class="drawer__meta" id="drawerMeta"></div>
+      </div>
+    </header>
+    <div class="drawer__body" id="drawerBody"></div>
+  </aside>
+
+  <script>
+    /* ================================================================
+       Website Analysis — main script
+       Phase 1 step 2: Browse view ported from website-archive (v2.0).
+       The Browse logic (data load, filter, render, export) is a near-
+       verbatim port; the only behavioural divergences are noted in
+       comments tagged TODO(phase-1-review) or BROWSE-PORT below.
+       ================================================================ */
+
+    /* ── Constants (Browse data sources, mirrors website-archive) ───── */
+    var INDEX_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/articles-index.json';
+    var BYSLUG_URL = 'https://news.cms.web.gc.nationalleagueservices.co.uk/v1/byslug';
+    var SITE_BASE = 'https://www.thenationalleague.org.uk';
+    var LS_KEY_VIEW = 'nl-wa-view';
+
+    /* ── Constants (Performance hourly data, ported from Insights v1.11) */
+    var HOURLY_URL         = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/ga-hourly.json';
+    var HOURLY_ARCHIVE_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/ga-hourly-archive.json';
+
+    // ── State ────────────────────────────────────────────────────────────
+    // Skeleton-level keys (tab, perfTab, period, openArticle, query) plus
+    // the Browse keys ported from website-archive (articles, filtered,
+    // view, isAdmin, export*). One STATE object — no parallel state.
+    var STATE = {
+      // Skeleton (page-level)
+      tab: 'browse',           // 'browse' | 'performance'
+      perfTab: 'trends',       // 'trends' | 'timing' | 'outliers'
+      period: 90,              // 30 | 90 | 'all' — drives Browse date range AND Performance charts
+      openArticle: null,       // postID or null
+      query: '',
+      // Browse (ported from archive)
+      articles: [],
+      filtered: [],
+      view: 'grid',
+      searchTimer: null,
+      isAdmin: false,
+      exportRunning: false,
+      exportCancelled: false,
+      // Performance (ported from Insights v1.11)
+      // NOTE: cohortPeriod / heatmapPeriod from Insights are *gone*. The
+      // page-level STATE.period is the single source of truth for both
+      // cohort and heatmap rendering.
+      byId: {},                // postID -> article (built in loadIndex)
+      hourly: {},              // path -> [[ts, views], ...] (active dataset)
+      hourlyMeta: {},          // generatedAt, startDate, endDate, windowDays
+      rolling: null,           // { hourly, meta, articleIndex } — 90d snapshot
+      allTime: null,           // { hourly, meta, articleIndex } — lazy archive
+      hourlyAllTimeLoading: false,
+      cohortToggles: {},       // hour-bucket key -> bool
+      cohortAgg: 'median',     // 'median' | 'mean' (orthogonal to period)
+      heatmapMode: 'publish',  // 'publish' | 'reading'
+      heatmapAgg: 'median',    // 'median' | 'mean'
+      gtMode: 'gems',          // 'gems' | 'traps'
+      // Lazy-render flags so switching tabs doesn't re-do heavy work.
+      _renderedTrends: false,
+      _renderedTiming: false,
+      _renderedOutliers: false,
+      // Drawer body cache: postSlug -> { content, ts }. In-memory only —
+      // we don't persist across reloads (Archive does, but Phase 1 keeps
+      // it simple; reloading the tool refetches on first open).
+      bodyCache: {}
+    };
+
+    // ── URL state ────────────────────────────────────────────────────────
+    function readStateFromUrl() {
+      var p = new URLSearchParams(window.location.search);
+      STATE.tab = p.get('tab') === 'performance' ? 'performance' : 'browse';
+      STATE.perfTab = ['trends', 'timing', 'outliers'].indexOf(p.get('perfTab')) >= 0 ? p.get('perfTab') : 'trends';
+      var per = p.get('period');
+      STATE.period = per === 'all' ? 'all' : (per === '30' ? 30 : 90);
+      STATE.openArticle = p.get('article') || null;
+      STATE.query = p.get('q') || '';
+    }
+    function writeStateToUrl() {
+      var p = new URLSearchParams();
+      if (STATE.tab !== 'browse') p.set('tab', STATE.tab);
+      if (STATE.perfTab !== 'trends' && STATE.tab === 'performance') p.set('perfTab', STATE.perfTab);
+      if (STATE.period !== 90) p.set('period', String(STATE.period));
+      if (STATE.openArticle) p.set('article', STATE.openArticle);
+      if (STATE.query) p.set('q', STATE.query);
+      var qs = p.toString();
+      var url = window.location.pathname + (qs ? '?' + qs : '');
+      history.replaceState(null, '', url);
+    }
+
+    // ── Tab switching ────────────────────────────────────────────────────
+    function activateTab(name) {
+      STATE.tab = name;
+      Array.prototype.forEach.call(document.querySelectorAll('.wa-tab'), function(b) {
+        b.classList.toggle('is-active', b.dataset.tab === name);
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('.wa-pane'), function(p) {
+        p.classList.toggle('is-active', p.dataset.pane === name);
+      });
+      writeStateToUrl();
+      // Lazy-load Performance data + render the active sub-tab the first
+      // time the user enters Performance. Browse stays unaffected on
+      // first load (saves the hourly fetch entirely if user never opens
+      // Performance).
+      if (name === 'performance') ensurePerfDataAndRender();
+    }
+    function activateSubTab(name) {
+      STATE.perfTab = name;
+      Array.prototype.forEach.call(document.querySelectorAll('.wa-subtab'), function(b) {
+        b.classList.toggle('is-active', b.dataset.subtab === name);
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('.wa-subpane'), function(p) {
+        p.classList.toggle('is-active', p.dataset.subpane === name);
+      });
+      writeStateToUrl();
+      // Render the newly-active sub-tab if its data is in place.
+      if (STATE.tab === 'performance') renderActivePerfSubTab();
+    }
+
+    // ── Period toggle ────────────────────────────────────────────────────
+    function activatePeriod(v) {
+      STATE.period = v === 'all' ? 'all' : parseInt(v, 10);
+      Array.prototype.forEach.call(document.querySelectorAll('.period-btn'), function(b) {
+        b.classList.toggle('is-active', b.dataset.value === String(v));
+      });
+      writeStateToUrl();
+      window.dispatchEvent(new CustomEvent('nl:period-changed', { detail: { period: STATE.period } }));
+    }
+
+    // ── Drawer ───────────────────────────────────────────────────────────
+    /* openDrawer wires up all five sections of the drawer body. Each
+       section is built by a small, single-purpose helper (drawerStatsHTML,
+       drawerCurveHTML, drawerSourcesHTML, drawerBodySkeletonHTML) that
+       returns a string. The article body fetch is async — the skeleton
+       container is filled in as soon as the BYSLUG_URL response lands. */
+    function openDrawer(postID) {
+      STATE.openArticle = postID;
+      document.getElementById('drawerBackdrop').hidden = false;
+      var drawer = document.getElementById('articleDrawer');
+      drawer.classList.add('is-open');
+      drawer.setAttribute('aria-hidden', 'false');
+
+      // Look up article: prefer STATE.byId (built in loadIndex) for O(1);
+      // fall back to a linear search over STATE.articles for non-postID
+      // identifiers (e.g. postSlug-keyed callers).
+      var article = STATE.byId ? STATE.byId[postID] : null;
+      if (!article) {
+        for (var i = 0; i < STATE.articles.length; i++) {
+          if (STATE.articles[i].postID === postID || STATE.articles[i].postSlug === postID) {
+            article = STATE.articles[i];
+            break;
+          }
+        }
+      }
+
+      // Drawer head — title + meta strip.
+      if (article) {
+        document.getElementById('drawerTitle').textContent = article.postTitle || '(untitled)';
+        document.getElementById('drawerMeta').textContent =
+          (article.newsCategory || '—') + ' · ' +
+          formatDateLong(article.publishedDateTime) + ' · ' +
+          ((article.postAuthor || '').trim() || '—');
+      } else {
+        document.getElementById('drawerTitle').textContent = '(article not found)';
+        document.getElementById('drawerMeta').textContent = '';
+      }
+      writeStateToUrl();
+
+      // Drawer body — five sections concatenated. Skeleton section 5 gets
+      // its content swapped in once the BYSLUG fetch resolves.
+      var body = document.getElementById('drawerBody');
+      if (!article) {
+        body.innerHTML = '<div class="empty">' +
+          '<div class="empty__title">Article not found</div>' +
+          '<div class="empty__msg">No article matches this identifier.</div>' +
+        '</div>';
+        return;
+      }
+      body.innerHTML =
+        drawerStatsHTML(article) +
+        drawerCurveHTML(article) +
+        drawerSourcesHTML(article) +
+        drawerBodySkeletonHTML();
+      body.scrollTop = 0;
+
+      // Async body fetch (uses STATE.bodyCache; renders straight from the
+      // cache when warm). Track the in-flight slug so a fast user clicking
+      // a different article doesn't end up with the wrong content swapped
+      // in once the older fetch resolves.
+      _populateDrawerArticleBody(article);
+    }
+
+    /* Close clears STATE + body so a stale article's content can't flash
+       on the next open before the new fetch lands. */
+    function closeDrawer() {
+      STATE.openArticle = null;
+      document.getElementById('drawerBackdrop').hidden = true;
+      var drawer = document.getElementById('articleDrawer');
+      drawer.classList.remove('is-open');
+      drawer.setAttribute('aria-hidden', 'true');
+      var body = document.getElementById('drawerBody');
+      if (body) body.innerHTML = '';
+      document.getElementById('drawerTitle').textContent = '—';
+      document.getElementById('drawerMeta').textContent = '';
+      writeStateToUrl();
+    }
+
+    /* ── Drawer body helpers (Phase 1 step 5) ────────────────────────────
+       Each returns an HTML string for one section. Pure-string helpers so
+       openDrawer can concatenate them in any order; per-section state
+       (cache hits, async fetches) lives in dedicated functions below. */
+
+    /* Section 1: 5-stat panel (views / engagement time / engagement rate
+       / scroll depth / read-through). Ported from Archive's modal metrics
+       panel, pared to the five headline numbers.
+       Tier classes (green/amber/red) mirror Archive's thresholds so a card
+       and the drawer agree about what counts as a strong number. */
+    function drawerStatsHTML(a) {
+      var m = a.metrics || {};
+      var wc = wordCount(a);
+
+      function statCell(num, numCls, label) {
+        var cls = 'drawer-stat__num' + (numCls ? ' ' + numCls : '');
+        return '<div class="drawer-stat">' +
+          '<div class="' + cls + '">' + num + '</div>' +
+          '<div class="drawer-stat__label">' + esc(label) + '</div>' +
+        '</div>';
+      }
+
+      // Views — green/amber/red by viewsTier (already used on cards).
+      var viewsNum, viewsCls;
+      if (m.pageViews != null) {
+        viewsNum = formatCount(m.pageViews);
+        viewsCls = 'drawer-stat__num--' + (m.pageViews >= 5000 ? 'green' : (m.pageViews >= 1000 ? 'amber' : 'red'));
+      } else { viewsNum = '—'; viewsCls = 'drawer-stat__num--null'; }
+
+      // Engagement time — same dwell tiers as the list view.
+      var timeNum, timeCls;
+      if (m.avgEngagementTimeSecs != null) {
+        timeNum = formatDuration(m.avgEngagementTimeSecs);
+        var s = m.avgEngagementTimeSecs;
+        timeCls = 'drawer-stat__num--' + (s >= 60 ? 'green' : (s >= 30 ? 'amber' : 'red'));
+      } else { timeNum = '—'; timeCls = 'drawer-stat__num--null'; }
+
+      // Engagement rate
+      var engNum, engCls;
+      if (m.engagementRate != null) {
+        engNum = formatPct(m.engagementRate);
+        var er = m.engagementRate;
+        engCls = 'drawer-stat__num--' + (er >= 0.5 ? 'green' : (er >= 0.3 ? 'amber' : 'red'));
+      } else { engNum = '—'; engCls = 'drawer-stat__num--null'; }
+
+      // Scroll depth — GA's scrollRate (90% reached / users)
+      var scrNum, scrCls;
+      if (m.scrollRate != null) {
+        scrNum = Math.round(m.scrollRate * 100) + '%';
+        scrCls = 'drawer-stat__num--' + (m.scrollRate >= 0.5 ? 'green' : (m.scrollRate >= 0.25 ? 'amber' : 'red'));
+      } else { scrNum = '—'; scrCls = 'drawer-stat__num--null'; }
+
+      // Read-through — avgEngagementTime / expected reading time @ 225 wpm.
+      var rtNum, rtCls;
+      if (m.avgEngagementTimeSecs != null && wc > 0) {
+        var expected = wc * (60 / 225);
+        var rate = m.avgEngagementTimeSecs / expected;
+        var pct = Math.round(rate * 100);
+        rtNum = Math.min(pct, 999) + '%';
+        if (pct >= 60 && pct <= 150) rtCls = 'drawer-stat__num--green';
+        else if (pct >= 30 || pct > 150) rtCls = 'drawer-stat__num--amber';
+        else rtCls = 'drawer-stat__num--red';
+      } else { rtNum = '—'; rtCls = 'drawer-stat__num--null'; }
+
+      return '<div class="drawer-section">' +
+        '<div class="drawer-section__head">Headline numbers</div>' +
+        '<div class="drawer-stats">' +
+          statCell(viewsNum, viewsCls, 'Views') +
+          statCell(timeNum,  timeCls,  'Avg time') +
+          statCell(engNum,   engCls,   'Engaged') +
+          statCell(scrNum,   scrCls,   'Scroll 90%') +
+          statCell(rtNum,    rtCls,    'Read-thru') +
+        '</div>' +
+      '</div>';
+    }
+
+    /* Section 2 + 3: 72h cumulative curve + cohort comparison sentence.
+       The two ride together: the curve overlays the article line on the
+       cohort median for its publish slot, and the sentence below
+       quantifies the delta at 24h. If hourly data is missing we render
+       an empty-state and skip both. */
+    function drawerCurveHTML(a) {
+      var hourly = hourlyForArticle(a);
+      if (!hourly || !hourly.length) {
+        return '<div class="drawer-section">' +
+          '<div class="drawer-section__head">First 72 hours</div>' +
+          '<div class="empty">' +
+            '<div class="empty__title">No hourly data</div>' +
+            '<div class="empty__msg">This article wasn\'t in the hourly tracking window.</div>' +
+          '</div>' +
+        '</div>';
+      }
+      var cum72 = cumulativeFromPublish(a, hourly, 72);
+      if (!cum72.length) {
+        return '<div class="drawer-section">' +
+          '<div class="drawer-section__head">First 72 hours</div>' +
+          '<div class="empty">' +
+            '<div class="empty__title">Out of window</div>' +
+            '<div class="empty__msg">Article published outside the hourly data window.</div>' +
+          '</div>' +
+        '</div>';
+      }
+
+      // Cohort median curve (best-effort) — pull from PERF_CACHE for the
+      // 24h figure, but build the per-hour median curve here. We don't
+      // memoise the per-hour cohort curve in PERF_CACHE because the
+      // 5-stat sentence only needs the 24h value.
+      _buildPerfCache();
+      var hr = publishHourUTC(a.publishedDateTime);
+      var cohortKey = _cohortKeyForHour(hr);
+      var cohortDef = cohortKey ? cohortDefByKey(cohortKey) : null;
+      var cohortMedianCurve = cohortKey ? _cohortMedianCurve(cohortKey, 72) : null;
+
+      var svg = drawDrawerCurveSVG(a, cum72, cohortDef, cohortMedianCurve);
+
+      // Legend
+      var legend = '<div class="drawer-curve__legend">' +
+        '<span class="drawer-curve__legend-item">' +
+          '<span class="drawer-curve__legend-swatch"></span>This article' +
+        '</span>';
+      if (cohortDef && cohortMedianCurve) {
+        legend += '<span class="drawer-curve__legend-item">' +
+          '<span class="drawer-curve__legend-swatch drawer-curve__legend-swatch--dashed"></span>Cohort median (' + esc(cohortDef.label) + ')' +
+        '</span>';
+      }
+      legend += '</div>';
+
+      // Cohort comparison sentence (24h ratio)
+      var comparison = '';
+      var v24 = cumulativeFromPublish(a, hourly, 24);
+      var article24 = v24.length ? v24[v24.length - 1].cumulative : 0;
+      var cohortMedian24 = (cohortKey && PERF_CACHE.cohortMedians)
+        ? PERF_CACHE.cohortMedians[cohortKey] : null;
+      if (cohortDef && cohortMedian24 && article24 > 0) {
+        var ratio = article24 / cohortMedian24;
+        comparison = '<div class="drawer-comparison">This article ' + formatRatio(ratio) +
+          ' for 24h views (' + esc(cohortDef.label) + ').</div>';
+      }
+
+      return '<div class="drawer-section">' +
+        '<div class="drawer-section__head">First 72 hours</div>' +
+        '<div class="drawer-curve">' +
+          '<div class="drawer-curve__svg-wrap">' + svg + '</div>' +
+          legend +
+        '</div>' +
+        comparison +
+      '</div>';
+    }
+
+    /* SVG generator for the drawer curve. 380×180 — single line for the
+       article in `--primary`, single dashed line for the cohort median in
+       `--text-muted`. Day boundary tick lines at +24h and +48h. */
+    function drawDrawerCurveSVG(article, articleCum, cohortDef, cohortMedianCurve) {
+      var W = 380, H = 180;
+      var ML = 38, MR = 12, MT = 10, MB = 26;
+      var plotW = W - ML - MR, plotH = H - MT - MB;
+
+      // Y-max spans both lines so they share a scale.
+      var maxV = Math.max.apply(null, articleCum.map(function(p) { return p.cumulative; }));
+      if (cohortMedianCurve) {
+        var cohortMax = Math.max.apply(null, cohortMedianCurve);
+        if (cohortMax > maxV) maxV = cohortMax;
+      }
+      if (maxV === 0) maxV = 1;
+
+      var xScale = function(h) { return ML + (h / 72) * plotW; };
+      var yScale = function(v) { return MT + plotH - Math.min(v, maxV) / maxV * plotH; };
+
+      var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
+
+      // Y grid (4 lines, labels)
+      for (var i = 0; i <= 4; i++) {
+        var y = MT + (i / 4) * plotH;
+        var v = Math.round(maxV * (1 - i / 4));
+        svg += '<line x1="' + ML + '" y1="' + y + '" x2="' + (ML + plotW) + '" y2="' + y + '" stroke="var(--border)" stroke-width="1"/>';
+        svg += '<text x="' + (ML - 6) + '" y="' + (y + 3) + '" text-anchor="end" style="font-size: 9px; fill: var(--text-muted);">' + formatCount(v) + '</text>';
+      }
+
+      // Day-boundary refs at +24h, +48h.
+      [24, 48].forEach(function(hh) {
+        var x = xScale(hh);
+        svg += '<line x1="' + x + '" y1="' + MT + '" x2="' + x + '" y2="' + (MT + plotH) + '" stroke="var(--border)" stroke-width="1" stroke-dasharray="2,4"/>';
+      });
+
+      // X axis labels (0/24/48/72)
+      [0, 24, 48, 72].forEach(function(hh) {
+        var x = xScale(hh);
+        svg += '<text x="' + x + '" y="' + (MT + plotH + 14) + '" text-anchor="middle" style="font-size: 9px; fill: var(--text-muted);">' + hh + 'h</text>';
+      });
+
+      // Cohort median (dashed, behind article line)
+      if (cohortMedianCurve) {
+        var cd = cohortMedianCurve.map(function(v, i) {
+          return (i === 0 ? 'M' : 'L') + xScale(i) + ',' + yScale(v);
+        }).join(' ');
+        svg += '<path d="' + cd + '" fill="none" stroke="var(--text-muted)" stroke-width="1.5" stroke-dasharray="3,3"/>';
+      }
+
+      // Article line
+      var pathD = articleCum.map(function(p, i) {
+        return (i === 0 ? 'M' : 'L') + xScale(p.hour) + ',' + yScale(p.cumulative);
+      }).join(' ');
+      svg += '<path d="' + pathD + '" fill="none" stroke="var(--primary)" stroke-width="2" stroke-linejoin="round"/>';
+
+      // Final-point dot + value
+      var last = articleCum[articleCum.length - 1];
+      svg += '<circle cx="' + xScale(last.hour) + '" cy="' + yScale(last.cumulative) + '" r="3" fill="var(--primary)"/>';
+
+      svg += '</svg>';
+      return svg;
+    }
+
+    /* Build per-hour-since-publish median curve for a single cohort.
+       (PERF_CACHE only stores the 24h median, not the full curve.)
+       TODO(phase-1-review): if this gets called per-article repeatedly
+       (e.g. drawer rapid-toggle), memoise into PERF_CACHE.cohortCurves. */
+    function _cohortMedianCurve(cohortKey, hoursWindow) {
+      var def = cohortDefByKey(cohortKey);
+      if (!def) return null;
+      var buckets = [];
+      for (var i = 0; i <= hoursWindow; i++) buckets.push([]);
+      STATE.articles.forEach(function(a) {
+        var hr = publishHourUTC(a.publishedDateTime);
+        if (hr == null || def.hours.indexOf(hr) < 0) return;
+        var hourly = hourlyForArticle(a);
+        if (!hourly) return;
+        var cum = cumulativeFromPublish(a, hourly, hoursWindow);
+        if (!cum.length) return;
+        cum.forEach(function(p) {
+          if (p.hour <= hoursWindow) buckets[p.hour].push(p.cumulative);
+        });
+      });
+      // Need at least a couple of articles in the cohort to call it a median.
+      var hasData = buckets.some(function(b) { return b.length >= 2; });
+      if (!hasData) return null;
+      return buckets.map(function(b) {
+        if (!b.length) return 0;
+        b.sort(function(a, b) { return a - b; });
+        return b[Math.floor(b.length / 2)];
+      });
+    }
+
+    function cohortDefByKey(key) {
+      for (var i = 0; i < COHORT_DEFS.length; i++) {
+        if (COHORT_DEFS[i].key === key) return COHORT_DEFS[i];
+      }
+      return null;
+    }
+
+    /* Format an article-vs-cohort ratio as a human sentence fragment.
+       0.95–1.05 collapses to "matched the cohort median". */
+    function formatRatio(ratio) {
+      if (ratio == null || !isFinite(ratio)) return 'had no comparable cohort data';
+      if (ratio >= 0.95 && ratio <= 1.05) return 'matched the cohort median';
+      var mult = ratio.toFixed(ratio >= 10 ? 0 : 1).replace(/\.0$/, '');
+      return 'did <strong>' + mult + '×</strong> the cohort median';
+    }
+
+    /* Section 4: traffic source breakdown bar — verbatim port of Archive
+       (only the class names are namespaced to drawer-sources). Skips
+       altogether when no source data is present. */
+    function drawerSourcesHTML(a) {
+      var m = a.metrics;
+      if (!m || !m.sources || !Object.keys(m.sources).length) return '';
+      var totalViews = m.pageViews || 0;
+      if (!totalViews) return '';
+
+      var entries = Object.keys(m.sources).map(function(k) { return [k, m.sources[k]]; })
+        .filter(function(e) { return e[1] > 0; })
+        .sort(function(a, b) { return b[1] - a[1]; });
+      if (!entries.length) return '';
+
+      // Channel colour mapping copied from Archive — keeps drawer palette
+      // identical to the modal so cross-tool links feel continuous.
+      var channelColours = {
+        'Direct':         '#555',
+        'Organic Search': '#2e7d32',
+        'Paid Search':    '#558b2f',
+        'Organic Social': '#1976d2',
+        'Paid Social':    '#0d47a1',
+        'Referral':       '#7b1fa2',
+        'Email':          '#f57c00',
+        'Display':        '#c2185b',
+        'Organic Video':  '#d81b60',
+        'Paid Video':     '#880e4f',
+        'Cross-network':  '#6a1b9a',
+        'Affiliates':     '#ad1457',
+        'Audio':          '#00838f',
+        'SMS':            '#00695c',
+        'Mobile Push':    '#4527a0',
+        'Unassigned':     '#888',
+        'Unknown':        '#aaa'
+      };
+
+      var segs = '';
+      var legend = '';
+      entries.forEach(function(e) {
+        var channel = e[0], views = e[1];
+        var pct = (views / totalViews) * 100;
+        if (pct < 0.5) return;  // skip slivers
+        var col = channelColours[channel] || '#999';
+        segs += '<div class="drawer-sources__seg" style="width:' + pct.toFixed(2) + '%;background:' + col + ';" ' +
+          'title="' + esc(channel) + ' — ' + views.toLocaleString() + ' views (' + pct.toFixed(1) + '%)"></div>';
+        legend += '<div class="drawer-sources__legend-item">' +
+          '<span class="drawer-sources__legend-dot" style="background:' + col + ';"></span>' +
+          '<span class="drawer-sources__legend-label">' + esc(channel) + '</span>' +
+          '<span class="drawer-sources__legend-val">' + pct.toFixed(0) + '%</span>' +
+        '</div>';
+      });
+      if (!segs) return '';
+
+      return '<div class="drawer-section">' +
+        '<div class="drawer-section__head">Traffic sources</div>' +
+        '<div class="drawer-sources__bar">' + segs + '</div>' +
+        '<div class="drawer-sources__legend">' + legend + '</div>' +
+      '</div>';
+    }
+
+    /* Section 5: skeleton container for the article body. Initial state
+       is a centred spinner; _populateDrawerArticleBody swaps in real
+       prose (or an error empty-state) once the BYSLUG fetch resolves. */
+    function drawerBodySkeletonHTML() {
+      return '<div class="drawer-section">' +
+        '<div class="drawer-section__head">Article</div>' +
+        '<div id="drawerArticleBodyHost">' +
+          '<div class="loading"><div class="spinner-inline"></div><div>Loading article…</div></div>' +
+        '</div>' +
+      '</div>';
+    }
+
+    /* BYSLUG fetch + cache + DOM swap. Stamped with the slug we expect so
+       a faster second open of a different article doesn't get its body
+       overwritten by an in-flight earlier fetch. */
+    function _populateDrawerArticleBody(article) {
+      var host = document.getElementById('drawerArticleBodyHost');
+      if (!host) return;
+      var slug = article.postSlug;
+      if (!slug) {
+        host.innerHTML = '<div class="empty">' +
+          '<div class="empty__title">No article body</div>' +
+          '<div class="empty__msg">This article has no postSlug — body fetch unavailable.</div>' +
+        '</div>';
+        return;
+      }
+      host.dataset.slug = slug;
+
+      var cached = STATE.bodyCache[slug];
+      if (cached && cached.content) {
+        _renderDrawerArticleBody(host, slug, article, cached.content);
+        return;
+      }
+
+      _fetchDrawerArticleBody(slug).then(function(content) {
+        STATE.bodyCache[slug] = { content: content, ts: Date.now() };
+        // Bail if user already navigated to a different article.
+        if (host.dataset.slug !== slug) return;
+        _renderDrawerArticleBody(host, slug, article, content);
+      }).catch(function(err) {
+        if (host.dataset.slug !== slug) return;
+        host.innerHTML = '<div class="empty">' +
+          '<div class="empty__title">Could not load article body</div>' +
+          '<div class="empty__msg">' + esc((err && err.message) ? err.message : 'Unknown error') + '.</div>' +
+        '</div>';
+      });
+    }
+
+    function _fetchDrawerArticleBody(slug) {
+      if (!slug) return Promise.reject(new Error('No slug'));
+      return fetch(BYSLUG_URL + '?postSlug=' + encodeURI(slug), { method: 'GET', headers: { 'Accept': '*/*' } })
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function(json) {
+          if (!json.success || !json.body || !json.body[0]) throw new Error('Unexpected response shape');
+          return json.body[0].content || [];
+        });
+    }
+
+    /* Render the parsed body widgets into HTML. Copies just the widget
+       types Archive recognises (text + third-party embeds) — figure /
+       gallery / quote / hr support is deferred to a later phase since
+       Phase 1's drawer is for at-a-glance review, not full reading. */
+    function _renderDrawerArticleBody(host, slug, article, content) {
+      var html = '';
+      content.forEach(function(row) {
+        if (!row || !row.rowData) return;
+        var widget = row.rowData;
+        var type = widget.widgetType;
+        var data = widget.widgetData;
+        if (!data) return;
+        if (type === 'TextBlockWidget') {
+          if (data.content) html += data.content;
+        } else if (type === 'ThirdPartyV2Widget') {
+          if (data.content) html += '<div class="embed-widget">' + data.content + '</div>';
+        } else if (type === 'HorizontalLineWidget') {
+          html += '<hr>';
+        }
+        // TODO(phase-1-review): port ImageWidget / ImageGalleryWidget /
+        // QuoteWidget renderers from Archive once we settle the drawer's
+        // role re. full article reading.
+      });
+      if (!html) {
+        host.innerHTML = '<div class="empty">' +
+          '<div class="empty__title">Empty body</div>' +
+          '<div class="empty__msg">The article has no renderable content.</div>' +
+        '</div>';
+        return;
+      }
+      host.innerHTML = '<div class="drawer-article-body" id="drawerArticleBody">' + html + '</div>';
+      executeInlineScripts(document.getElementById('drawerArticleBody'));
+      // Twitter embeds — re-mount widgets if the script is loaded.
+      setTimeout(function() {
+        if (window.twttr && window.twttr.widgets && window.twttr.widgets.load) {
+          try { window.twttr.widgets.load(document.getElementById('drawerArticleBody')); } catch (_) {}
+        }
+      }, 100);
+    }
+
+    /* Inline-script reattach helper — innerHTML doesn't execute <script>
+       tags, so we clone+replace each one to force evaluation. Verbatim
+       from Archive. */
+    function executeInlineScripts(container) {
+      if (!container) return;
+      var scripts = container.querySelectorAll('script');
+      Array.prototype.forEach.call(scripts, function(oldScript) {
+        var newScript = document.createElement('script');
+        Array.prototype.forEach.call(oldScript.attributes, function(attr) {
+          newScript.setAttribute(attr.name, attr.value);
+        });
+        if (oldScript.textContent) newScript.textContent = oldScript.textContent;
+        oldScript.parentNode.replaceChild(newScript, oldScript);
+      });
+    }
+
+    /* ================================================================
+       BROWSE PORT — everything below is from website-archive v2.0.
+       Differences from the original:
+         * Card click handler calls openDrawer(postID), NOT openModal(idx).
+         * Per-article "Analyse first 72 hours" cross-link is removed
+           (drawer surfaces analytics inline in Phase 1 step 5).
+         * Page-level period selector is layered ON TOP of Archive's
+           per-pane From/To inputs. STATE.period sets a floor on the
+           date range; user-supplied From narrower than the period
+           still takes effect.
+         * Article modal port is intentionally skipped.
+       ================================================================ */
+
+    function $(id) { return document.getElementById(id); }
+
+    function esc(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function formatDate(iso) {
+      if (!iso) return '';
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return '';
+      var day = String(d.getDate()).padStart(2, '0');
+      var mm = String(d.getMonth() + 1).padStart(2, '0');
+      var yyyy = d.getFullYear();
+      return day + '/' + mm + '/' + yyyy;
+    }
+
+    function formatDateLong(iso) {
+      if (!iso) return '';
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return '';
+      var months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+      return d.getDate() + ' ' + months[d.getMonth()] + ' ' + d.getFullYear();
+    }
+
+    function debounce(fn, ms) {
+      return function() {
+        var args = arguments;
+        clearTimeout(STATE.searchTimer);
+        STATE.searchTimer = setTimeout(function() { fn.apply(null, args); }, ms);
+      };
+    }
+
+    /* ── Metric helpers (data-driven thresholds, see archive v1.4) ──── */
+    var VIEWS_GREEN = 1000;
+    var VIEWS_AMBER = 300;
+    var DWELL_GREEN = 30;
+    var DWELL_AMBER = 15;
+
+    function formatCount(n) {
+      if (n == null) return '—';
+      n = Number(n);
+      if (!isFinite(n)) return '—';
+      if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+      if (n >= 10000)   return Math.round(n / 1000) + 'k';
+      if (n >= 1000)    return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+      return String(Math.round(n));
+    }
+
+    function formatDuration(secs) {
+      if (secs == null) return '—';
+      secs = Math.round(Number(secs));
+      if (!isFinite(secs) || secs < 0) return '—';
+      if (secs < 60) return secs + 's';
+      var m = Math.floor(secs / 60);
+      var s = secs % 60;
+      return m + 'm ' + (s < 10 ? '0' : '') + s + 's';
+    }
+
+    function formatPct(rate) {
+      if (rate == null) return '—';
+      var n = Number(rate);
+      if (!isFinite(n)) return '—';
+      return Math.round(n * 100) + '%';
+    }
+
+    function viewsTier(v) {
+      if (v == null) return 'null';
+      if (v >= VIEWS_GREEN) return 'green';
+      if (v >= VIEWS_AMBER) return 'amber';
+      return 'red';
+    }
+
+    function dwellTier(d) {
+      if (d == null) return 'null';
+      if (d >= DWELL_GREEN) return 'green';
+      if (d >= DWELL_AMBER) return 'amber';
+      return 'red';
+    }
+
+    function wordCount(article) {
+      if (article._wc != null) return article._wc;
+      if (article.wordCount != null) { article._wc = article.wordCount; return article._wc; }
+      if (!article.bodyText) { article._wc = 0; return 0; }
+      var wc = article.bodyText.trim().split(/\s+/).filter(Boolean).length;
+      article._wc = wc;
+      return wc;
+    }
+
+    function readingTimeMins(article) {
+      var wc = wordCount(article);
+      if (!wc) return 0;
+      return Math.max(1, Math.ceil(wc / 225));
+    }
+
+    /* ── Period → date floor ──────────────────────────────────────────
+       Translate STATE.period into an ISO date string used as a lower
+       bound on publishedDateTime. Returns '' for 'all'. */
+    function periodFloorISO() {
+      if (STATE.period === 'all') return '';
+      var days = parseInt(STATE.period, 10);
+      if (!isFinite(days)) return '';
+      var d = new Date();
+      d.setDate(d.getDate() - days);
+      return d.toISOString().slice(0, 10);
+    }
+
+    /* ── Browse wiring ───────────────────────────────────────────────── */
+    function wireBrowseControls() {
+      var doFilter = debounce(applyFilters, 150);
+
+      $('qInput').addEventListener('input', function() {
+        STATE.query = $('qInput').value;
+        writeStateToUrl();
+        doFilter();
+      });
+      $('fromInput').addEventListener('change', applyFilters);
+      $('toInput').addEventListener('change', applyFilters);
+      $('authorInput').addEventListener('change', applyFilters);
+      $('catInput').addEventListener('change', applyFilters);
+      $('scopeBody').addEventListener('change', applyFilters);
+      $('sortSelect').addEventListener('change', applyFilters);
+
+      $('resetBtn').addEventListener('click', function() {
+        $('qInput').value = '';
+        $('fromInput').value = '';
+        $('toInput').value = '';
+        $('authorInput').value = '';
+        $('catInput').value = '';
+        $('scopeBody').checked = false;
+        $('sortSelect').value = 'newest';
+        STATE.query = '';
+        writeStateToUrl();
+        applyFilters();
+      });
+
+      $('viewGrid').addEventListener('click', function() { setView('grid'); });
+      $('viewList').addEventListener('click', function() { setView('list'); });
+
+      // Re-render Browse when the page-level period changes. The
+      // perf-chip thresholds depend on the active period (cohort
+      // medians + per-period view percentiles), so the cache must be
+      // invalidated before the re-render walks the cards.
+      window.addEventListener('nl:period-changed', function() {
+        _invalidatePerfCache();
+        if (STATE.articles.length) applyFilters();
+      });
+
+      // Export dropdown (admin only)
+      if (STATE.isAdmin) {
+        $('exportWrap').style.display = 'inline-block';
+        $('exportBtn').addEventListener('click', function(e) {
+          e.stopPropagation();
+          $('exportMenu').classList.toggle('open');
+        });
+        document.addEventListener('click', function(e) {
+          if (!$('exportWrap').contains(e.target)) {
+            $('exportMenu').classList.remove('open');
+          }
+        });
+        var menuItems = document.querySelectorAll('.export-menu__item');
+        menuItems.forEach(function(item) {
+          item.addEventListener('click', function() {
+            $('exportMenu').classList.remove('open');
+            startExport(item.getAttribute('data-format'));
+          });
+        });
+        $('exportCancelBtn').addEventListener('click', function() {
+          if (STATE.exportRunning) {
+            STATE.exportCancelled = true;
+          } else {
+            closeExportModal();
+          }
+        });
+      }
+
+      // Restore search query from URL
+      if (STATE.query) $('qInput').value = STATE.query;
+
+      // "/" focuses search (when not already in an input)
+      document.addEventListener('keydown', function(e) {
+        if (e.key === '/' && document.activeElement &&
+            document.activeElement.tagName !== 'INPUT' &&
+            document.activeElement.tagName !== 'SELECT' &&
+            document.activeElement.tagName !== 'TEXTAREA') {
+          e.preventDefault();
+          $('qInput').focus();
+        }
+      });
+    }
+
+    /* ── Data load ──────────────────────────────────────────────────── */
+    function loadIndex() {
+      fetch(INDEX_URL, { cache: 'no-cache' })
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function(data) {
+          STATE.articles = Array.isArray(data) ? data : (data.articles || []);
+          if (!STATE.articles.length) {
+            showEmpty('No articles in index', 'The archive index file exists but contains no articles. Trigger a rebuild to populate it.');
+            return;
+          }
+          STATE.articles.sort(function(a, b) {
+            return (b.publishedDateTime || '').localeCompare(a.publishedDateTime || '');
+          });
+          // Build postID → article lookup once. Used by Performance to
+          // resolve article references in cohort / outliers data.
+          STATE.byId = {};
+          STATE.articles.forEach(function(a) {
+            if (a.postID) STATE.byId[a.postID] = a;
+          });
+          populateFilterDropdowns();
+          applyFilters();
+          // If Performance was already activated (e.g. via deep link) before
+          // the index finished loading, render it now.
+          if (STATE.tab === 'performance') ensurePerfDataAndRender();
+          // Phase 1 step 4: kick off the rolling hourly snapshot in the
+          // background so Browse cards can render sparklines + perf chips
+          // without waiting for the user to visit Performance. When it
+          // resolves, re-render Browse so cards get their affordances.
+          if (!_perfDataPromise) {
+            _perfDataPromise = loadRollingHourly();
+          }
+          _perfDataPromise.then(function() {
+            _invalidatePerfCache();
+            if (STATE.tab === 'browse' && STATE.articles.length) {
+              renderResults();
+            }
+          });
+        })
+        .catch(function(err) {
+          showEmpty("Couldn't load archive",
+            'The archive index could not be fetched. ' + (err && err.message ? err.message : '') +
+            '. Check that articles-index.json exists in the tools repo.');
+        });
+    }
+
+    function populateFilterDropdowns() {
+      var authors = {};
+      var cats = {};
+      STATE.articles.forEach(function(a) {
+        var au = (a.postAuthor || '').trim();
+        var c = a.newsCategory || '';
+        if (au) authors[au] = (authors[au] || 0) + 1;
+        if (c) cats[c] = (cats[c] || 0) + 1;
+      });
+
+      var authorSel = $('authorInput');
+      authorSel.innerHTML = '<option value="">Any author</option>';
+      Object.keys(authors).sort(function(a, b) { return authors[b] - authors[a]; }).forEach(function(au) {
+        var opt = document.createElement('option');
+        opt.value = au; opt.textContent = au + ' (' + authors[au] + ')';
+        authorSel.appendChild(opt);
+      });
+
+      var catSel = $('catInput');
+      catSel.innerHTML = '<option value="">Any category</option>';
+      Object.keys(cats).sort(function(a, b) { return cats[b] - cats[a]; }).forEach(function(c) {
+        var opt = document.createElement('option');
+        opt.value = c; opt.textContent = c + ' (' + cats[c] + ')';
+        catSel.appendChild(opt);
+      });
+    }
+
+    /* ── Filtering ──────────────────────────────────────────────────── */
+    function applyFilters() {
+      var q = $('qInput').value.trim().toLowerCase();
+      var fromUser = $('fromInput').value || '';
+      var to = $('toInput').value || '';
+      var author = $('authorInput').value || '';
+      var cat = $('catInput').value || '';
+      var scopeBody = $('scopeBody').checked;
+      var sort = $('sortSelect').value;
+
+      // BROWSE-PORT: page-level period sets a floor on the From date.
+      // User's per-pane From input can narrow further but cannot widen
+      // beyond the page-level period.
+      var floor = periodFloorISO();
+      var from = fromUser;
+      if (floor && (!from || from < floor)) from = floor;
+
+      var out = STATE.articles.filter(function(a) {
+        var date = (a.publishedDateTime || '').slice(0, 10);
+        if (from && date < from) return false;
+        if (to && date > to) return false;
+        if (author && (a.postAuthor || '').trim() !== author) return false;
+        if (cat && a.newsCategory !== cat) return false;
+
+        if (q) {
+          var hay = ((a.postTitle || '') + ' ' + (a.description || '')).toLowerCase();
+          if (scopeBody && a.bodyText) hay += ' ' + a.bodyText.toLowerCase();
+          if (hay.indexOf(q) === -1) return false;
+        }
+        return true;
+      });
+
+      if (sort === 'oldest') {
+        out.sort(function(a, b) { return (a.publishedDateTime || '').localeCompare(b.publishedDateTime || ''); });
+      } else if (sort === 'views') {
+        out.sort(function(a, b) {
+          var av = (a.metrics && a.metrics.pageViews != null) ? a.metrics.pageViews : -1;
+          var bv = (b.metrics && b.metrics.pageViews != null) ? b.metrics.pageViews : -1;
+          return bv - av;
+        });
+      } else if (sort === 'engagement') {
+        out.sort(function(a, b) {
+          var av = (a.metrics && a.metrics.avgEngagementTimeSecs != null) ? a.metrics.avgEngagementTimeSecs : -1;
+          var bv = (b.metrics && b.metrics.avgEngagementTimeSecs != null) ? b.metrics.avgEngagementTimeSecs : -1;
+          return bv - av;
+        });
+      } else if (sort === 'length') {
+        out.sort(function(a, b) { return wordCount(b) - wordCount(a); });
+      } else {
+        out.sort(function(a, b) { return (b.publishedDateTime || '').localeCompare(a.publishedDateTime || ''); });
+      }
+
+      STATE.filtered = out;
+      renderResults();
+      updateExportCount();
+    }
+
+    /* ── Render results ─────────────────────────────────────────────── */
+    function renderResults() {
+      var root = $('resultsRoot');
+      var n = STATE.filtered.length;
+      var total = STATE.articles.length;
+
+      $('countDisplay').innerHTML = '<strong>' + n.toLocaleString() + '</strong> of ' + total.toLocaleString() + ' articles';
+
+      if (!n) {
+        root.innerHTML = '<div class="empty"><div class="empty__title">No matches</div><div class="empty__msg">No articles match these filters. Try broadening the date range, clearing search terms, or picking "Any author/category".</div></div>';
+        return;
+      }
+
+      var cap = 300;
+      var toRender = STATE.filtered.slice(0, cap);
+
+      if (STATE.view === 'grid') {
+        root.innerHTML = '<div class="results-grid">' + toRender.map(cardHTML).join('') + '</div>';
+      } else {
+        root.innerHTML = '<div class="results-list">' + listHeaderHTML() + toRender.map(rowHTML).join('') + '</div>';
+      }
+
+      if (n > cap) {
+        root.innerHTML += '<div class="empty" style="margin-top: 14px; padding: 20px;"><div class="empty__msg">Showing first ' + cap.toLocaleString() + ' of ' + n.toLocaleString() + ' matches. Narrow filters to see the rest.</div></div>';
+      }
+
+      // BROWSE-PORT: card / row click opens the side-drawer (NOT the
+      // archive's article modal). Drawer body is a placeholder until
+      // Phase 1 step 5.
+      var clickable = root.querySelectorAll('[data-idx]');
+      clickable.forEach(function(el) {
+        el.addEventListener('click', function() {
+          var idx = parseInt(el.getAttribute('data-idx'), 10);
+          var article = STATE.filtered[idx];
+          if (!article) return;
+          openDrawer(article.postID || article.postSlug || String(idx));
+        });
+      });
+
+      var sortableHeaders = root.querySelectorAll('.row__header-sortable');
+      sortableHeaders.forEach(function(el) {
+        el.addEventListener('click', function() {
+          var sortKey = el.getAttribute('data-sort');
+          if (!sortKey) return;
+          $('sortSelect').value = sortKey;
+          applyFilters();
+        });
+      });
+    }
+
+    function cardHTML(a, i) {
+      var img = a.imageUrl || '';
+      var imgMarkup = img
+        ? '<img class="card__img" src="' + esc(img) + '" alt="" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling&&(this.nextElementSibling.style.display=\'flex\')">'
+        : '';
+      var placeholderStyle = img ? 'display:none;' : '';
+
+      var m = a.metrics;
+      var viewsBadge;
+      if (m && m.pageViews != null) {
+        var line1 = formatCount(m.pageViews) + ' views';
+        var line2Text = (m.avgEngagementTimeSecs != null) ? (formatDuration(m.avgEngagementTimeSecs) + ' avg') : '';
+        viewsBadge =
+          '<div class="card__views-badge" title="Page views and average engagement time since Nov 2024">' +
+            '<div class="card__views-badge-line1">' + esc(line1) + '</div>' +
+            (line2Text ? '<div class="card__views-badge-line2">' + esc(line2Text) + '</div>' : '') +
+          '</div>';
+      } else {
+        viewsBadge =
+          '<div class="card__views-badge card__views-badge--null" title="No analytics data for this article">' +
+            '<div class="card__views-badge-line1">no data</div>' +
+          '</div>';
+      }
+
+      var wc = wordCount(a);
+      var wcMarkup = (wc > 0)
+        ? '<span class="card__wordcount">' + esc(wc.toLocaleString() + ' words') + '</span>'
+        : '<span class="card__wordcount card__wordcount--null">&mdash;</span>';
+
+      // Phase 1 step 4: sparkline + perf chip. Both helpers return '' when
+      // hourly data isn't loaded yet, so cards still render cleanly.
+      var sparkMarkup = articleSparkline(a);
+      var chipMarkup = articlePerfChip(a);
+
+      // BROWSE-PORT: archive's "Analyse first 72 hours →" cross-link
+      // is intentionally not rendered here. The side-drawer (Phase 1
+      // step 5) surfaces analytics inline, so the per-card jump is
+      // redundant.
+      return '<div class="card" data-idx="' + i + '">' +
+        '<div class="card__img-wrap">' +
+          imgMarkup +
+          '<div class="card__img-placeholder" style="' + placeholderStyle + '">National League</div>' +
+          viewsBadge +
+        '</div>' +
+        '<div class="card__body">' +
+          '<div class="card__meta">' +
+            '<span class="card__pill">' + esc(a.newsCategory || '—') + '</span>' +
+            '<span class="card__date">' + esc(formatDate(a.publishedDateTime)) + '</span>' +
+            chipMarkup +
+          '</div>' +
+          '<div class="card__title">' + esc(a.postTitle || '(untitled)') + '</div>' +
+          (a.description ? '<div class="card__sub">' + esc(a.description) + '</div>' : '') +
+          sparkMarkup +
+          '<div class="card__footer">' +
+            '<span>' + esc((a.postAuthor || '').trim() || '—') + '</span>' +
+            wcMarkup +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }
+
+    function rowHTML(a, i) {
+      var img = a.imageUrl || '';
+      var imgMarkup = img
+        ? '<img src="' + esc(img) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
+        : '';
+
+      var m = a.metrics;
+      var viewsVal, viewsTierClass, timeVal, timeTierClass, engVal, engTierClass;
+
+      if (m && m.pageViews != null) {
+        viewsVal = formatCount(m.pageViews);
+        viewsTierClass = 'row__metric--' + viewsTier(m.pageViews);
+      } else {
+        viewsVal = '—';
+        viewsTierClass = 'row__metric--null';
+      }
+
+      if (m && m.avgEngagementTimeSecs != null) {
+        timeVal = formatDuration(m.avgEngagementTimeSecs);
+        timeTierClass = 'row__metric--' + dwellTier(m.avgEngagementTimeSecs);
+      } else {
+        timeVal = '—';
+        timeTierClass = 'row__metric--null';
+      }
+
+      if (m && m.engagementRate != null) {
+        engVal = formatPct(m.engagementRate);
+        var er = m.engagementRate;
+        engTierClass = er >= 0.5 ? 'row__metric--green' : (er >= 0.3 ? 'row__metric--amber' : 'row__metric--red');
+      } else {
+        engVal = '—';
+        engTierClass = 'row__metric--null';
+      }
+
+      // Phase 1 step 4: list-view rows also get the sparkline + chip,
+      // surfaced inline in the title cell (chip after title, sparkline
+      // beside metrics). Both helpers return '' before hourly lands.
+      var sparkMarkup = articleSparkline(a);
+      var chipMarkup = articlePerfChip(a);
+
+      // Title cell wraps title + chip on one row (chip pushed beside the
+      // ellipsised title) and the sparkline below the description.
+      var titleInner = '<div class="row__title">' + esc(a.postTitle || '(untitled)') + '</div>';
+      var titleRow = chipMarkup
+        ? '<div style="display:flex;align-items:center;gap:6px;min-width:0;">' + titleInner + chipMarkup + '</div>'
+        : titleInner;
+
+      return '<div class="row" data-idx="' + i + '">' +
+        '<div class="row__img">' + imgMarkup + '</div>' +
+        '<div class="row__date">' + esc(formatDate(a.publishedDateTime)) + '</div>' +
+        '<div>' +
+          titleRow +
+          (a.description ? '<div class="row__sub">' + esc(a.description) + '</div>' : '') +
+          (sparkMarkup ? sparkMarkup.replace('card__sparkline', 'card__sparkline row__sparkline') : '') +
+        '</div>' +
+        '<div class="row__author">' + esc((a.postAuthor || '').trim() || '—') + '</div>' +
+        '<span class="row__metric ' + viewsTierClass + '">' + esc(viewsVal) + '</span>' +
+        '<span class="row__metric row__metric--time ' + timeTierClass + '">' + esc(timeVal) + '</span>' +
+        '<span class="row__metric row__metric--eng ' + engTierClass + '">' + esc(engVal) + '</span>' +
+      '</div>';
+    }
+
+    function listHeaderHTML() {
+      var sortMap = { newest: '', oldest: '', views: 'views', engagement: 'engagement', length: 'length' };
+      var currentSort = $('sortSelect').value;
+      var active = sortMap[currentSort] || '';
+      return '<div class="row__header">' +
+        '<span></span>' +
+        '<span>Date</span>' +
+        '<span>Title</span>' +
+        '<span>Author</span>' +
+        '<span class="row__header-metric row__header-sortable' + (active === 'views' ? ' active' : '') + '" data-sort="views">Views</span>' +
+        '<span class="row__header-metric row__header-sortable row__header-metric-time' + (active === 'engagement' ? ' active' : '') + '" data-sort="engagement">Time</span>' +
+        '<span class="row__header-metric row__header-metric-eng">Eng.</span>' +
+      '</div>';
+    }
+
+    function showEmpty(title, msg) {
+      $('resultsRoot').innerHTML =
+        '<div class="empty">' +
+          '<div class="empty__title">' + esc(title) + '</div>' +
+          '<div class="empty__msg">' + esc(msg) + '</div>' +
+        '</div>';
+      $('countDisplay').textContent = '';
+    }
+
+    /* ── View toggle ────────────────────────────────────────────────── */
+    function setView(v) {
+      STATE.view = v;
+      try { localStorage.setItem(LS_KEY_VIEW, v); } catch (e) {}
+      applyViewToggleUI();
+      renderResults();
+    }
+
+    function applyViewToggleUI() {
+      $('viewGrid').classList.toggle('active', STATE.view === 'grid');
+      $('viewList').classList.toggle('active', STATE.view === 'list');
+    }
+
+    /* ── byslug fetch (used by HTML export only) ──────────────────── */
+    function fetchArticleBody(slug) {
+      if (!slug) return Promise.reject(new Error('no slug'));
+      var url = BYSLUG_URL + '?slug=' + encodeURIComponent(slug);
+      return fetch(url, { cache: 'no-cache' })
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function(data) {
+          if (!data || !data.content) throw new Error('no content');
+          return data.content;
+        });
+    }
+
+    /* ── Export ─────────────────────────────────────────────────────── */
+    function updateExportCount() {
+      var el = $('exportCount');
+      if (el) el.textContent = STATE.filtered.length.toLocaleString();
+    }
+
+    async function startExport(format) {
+      if (!STATE.filtered.length) {
+        alert('No articles to export. Adjust your filters first.');
+        return;
+      }
+
+      var articles = STATE.filtered.slice();
+      var needsFetch = format === 'html';
+
+      if (needsFetch && articles.length > 50) {
+        var mins = Math.ceil((articles.length * 500) / 60000);
+        var go = confirm('Export ' + articles.length + ' articles with full HTML bodies?\n\n' +
+                         'This will fetch each article individually (~' + mins + ' minutes).\n\n' +
+                         'You can cancel mid-export to keep what\'s been fetched so far.');
+        if (!go) return;
+      }
+
+      STATE.exportRunning = true;
+      STATE.exportCancelled = false;
+      openExportModal();
+
+      $('exportTotal').textContent = articles.length;
+      $('exportDone').textContent = '0';
+      $('exportFailed').textContent = '0';
+      $('exportProgressFill').style.width = '0%';
+      $('exportStatus').textContent = needsFetch ? 'Fetching bodies…' : 'Building export…';
+
+      var rows = [];
+      var failed = 0;
+
+      for (var i = 0; i < articles.length; i++) {
+        if (STATE.exportCancelled) break;
+        var a = articles[i];
+        var m = a.metrics;
+        var row = {
+          headline:      a.postTitle || '',
+          subheader:     a.description || '',
+          timestamp:     a.publishedDateTime || '',
+          author:        a.postAuthor || '',
+          news_category: a.newsCategory || '',
+          url:           SITE_BASE + (a.postSlug || ''),
+          image_url:     a.imageUrl || '',
+          body_text:     '',
+          body_html:     '',
+          word_count:    wordCount(a) || '',
+          reading_time_mins: readingTimeMins(a) || '',
+          page_views:    (m && m.pageViews != null) ? m.pageViews : '',
+          users:         (m && m.users != null) ? m.users : '',
+          avg_engagement_time_secs: (m && m.avgEngagementTimeSecs != null) ? m.avgEngagementTimeSecs : '',
+          engagement_rate: (m && m.engagementRate != null) ? m.engagementRate : ''
+        };
+
+        if (format === 'plaintext') {
+          row.body_text = a.bodyText || '';
+        } else if (format === 'html') {
+          try {
+            var content = await fetchArticleBody(a.postSlug);
+            var html = '';
+            content.forEach(function(widgetRow) {
+              if (!widgetRow || !widgetRow.rowData) return;
+              var w = widgetRow.rowData;
+              if (!w.widgetData) return;
+              if (w.widgetType === 'TextBlockWidget' && w.widgetData.content) {
+                html += w.widgetData.content;
+              } else if (w.widgetType === 'ThirdPartyV2Widget' && w.widgetData.content) {
+                html += '<div class="embed">' + w.widgetData.content + '</div>';
+              }
+            });
+            row.body_html = html;
+            row.body_text = a.bodyText || '';
+          } catch (err) {
+            failed++;
+            row.body_html = '[FETCH FAILED: ' + (err && err.message || 'unknown') + ']';
+          }
+        }
+
+        rows.push(row);
+
+        var done = i + 1;
+        $('exportDone').textContent = done;
+        $('exportFailed').textContent = failed;
+        $('exportProgressFill').style.width = (done / articles.length * 100) + '%';
+
+        if (needsFetch && i < articles.length - 1 && !STATE.exportCancelled) {
+          await sleep(500);
+        }
+      }
+
+      $('exportStatus').textContent = 'Building CSV…';
+      var csv = buildCSV(rows, format);
+      downloadCSV(csv, format);
+
+      var cancelled = STATE.exportCancelled;
+      STATE.exportRunning = false;
+      STATE.exportCancelled = false;
+      $('exportStatus').textContent = cancelled
+        ? 'Cancelled — downloaded ' + rows.length + ' of ' + articles.length + ' articles'
+        : 'Complete — downloaded ' + rows.length + ' article' + (rows.length === 1 ? '' : 's');
+      $('exportCancelBtn').textContent = 'Close';
+    }
+
+    function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
+
+    function openExportModal() {
+      $('exportModalBackdrop').classList.add('open');
+      $('exportModalBackdrop').style.display = 'flex';
+      $('exportCancelBtn').textContent = 'Cancel';
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeExportModal() {
+      $('exportModalBackdrop').classList.remove('open');
+      $('exportModalBackdrop').style.display = 'none';
+      document.body.style.overflow = '';
+    }
+
+    function csvEscape(s) {
+      if (s == null) return '';
+      var str = String(s);
+      if (/[",\r\n]/.test(str)) return '"' + str.replace(/"/g, '""') + '"';
+      return str;
+    }
+
+    function buildCSV(rows, format) {
+      var metricCols = ['word_count', 'reading_time_mins', 'page_views', 'users', 'avg_engagement_time_secs', 'engagement_rate'];
+      var headers;
+      if (format === 'meta') {
+        headers = ['headline', 'sub-header', 'timestamp', 'author', 'news_category']
+          .concat(metricCols).concat(['image_url', 'url']);
+      } else if (format === 'plaintext') {
+        headers = ['headline', 'sub-header', 'timestamp', 'author', 'news_category']
+          .concat(metricCols).concat(['body_text', 'image_url', 'url']);
+      } else {
+        headers = ['headline', 'sub-header', 'timestamp', 'author', 'news_category']
+          .concat(metricCols).concat(['body_text', 'body_html', 'image_url', 'url']);
+      }
+      var lines = [headers.join(',')];
+      rows.forEach(function(r) {
+        var vals = headers.map(function(h) {
+          var key = h === 'sub-header' ? 'subheader' : h;
+          return csvEscape(r[key]);
+        });
+        lines.push(vals.join(','));
+      });
+      return '﻿' + lines.join('\r\n');
+    }
+
+    function downloadCSV(csv, format) {
+      var now = new Date();
+      var stamp = now.getFullYear() + '-' +
+                  String(now.getMonth() + 1).padStart(2, '0') + '-' +
+                  String(now.getDate()).padStart(2, '0') + '_' +
+                  String(now.getHours()).padStart(2, '0') +
+                  String(now.getMinutes()).padStart(2, '0');
+      var filename = 'nl-archive_' + format + '_' + stamp + '.csv';
+      var blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+    }
+
+    /* ================================================================
+       PERFORMANCE PORT — ported verbatim from website-insights v1.11.
+
+       Differences from the Insights original:
+         * STATE.cohortPeriod / STATE.heatmapPeriod removed. The page-
+           level STATE.period is the single source for both cohort and
+           heatmap. Per-chart period sub-toggles are gone from the HTML
+           too — only median/mean and heatmap-mode toggles remain.
+         * The `details`-collapsed "Drill into a specific article" panel
+           is removed; the side-drawer (openDrawer) replaces it.
+         * Outliers list rows call openDrawer(postID) on click.
+         * Helpers that already exist in the Browse port (wordCount,
+           readingTimeMins, formatCount, formatDuration, formatPct,
+           formatDate, formatDateLong, esc, $) are NOT re-defined.
+         * Lazy data-fetch: hourly data is only loaded the first time the
+           user enters Performance, NOT on first page load.
+
+       Tagged TODO(phase-1-review) where Phase 1 step 5 will replace
+       drawer-body content with full article analytics.
+       ================================================================ */
+
+    /* ── Performance data plumbing ──────────────────────────────────── */
+    function cssVar(name) {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    }
+
+    function publishHourUTC(iso) {
+      if (!iso) return null;
+      var d = new Date(iso);
+      if (isNaN(d)) return null;
+      return d.getUTCHours();
+    }
+
+    function publishWeekdayUTC(iso) {
+      if (!iso) return null;
+      var d = new Date(iso);
+      if (isNaN(d)) return null;
+      return d.getUTCDay(); // 0=Sun .. 6=Sat
+    }
+
+    function publishUnixSec(iso) {
+      if (!iso) return null;
+      var d = new Date(iso);
+      if (isNaN(d)) return null;
+      return Math.floor(d.getTime() / 1000);
+    }
+
+    function truncate(s, n) {
+      if (!s) return '';
+      if (s.length <= n) return s;
+      return s.slice(0, n - 1) + '…';
+    }
+
+    /* ── Hourly data join (path → article mapping) ─────────────────────
+       GA's pagePath truncates long slugs (~80 chars). We index articles
+       by date directory, then for each hourly path find the best-matching
+       article in the same date directory by longest leading-prefix on
+       slug-tail. Requires ≥8 char shared prefix to avoid cross-routing.
+    */
+    var ARTICLE_HOURLY_INDEX = {};   // postID -> array of hourly path keys
+    var HOURLY_DIAGNOSTICS = { matched: 0, unmatched: 0, ambiguous: 0 };
+
+    function pathDateDir(path) {
+      var m = path.match(/^(\/news\/\d{4}\/[a-z]+\/\d{1,2})\//);
+      return m ? m[1] : null;
+    }
+
+    function pathSlugTail(path) {
+      var m = path.match(/^\/news\/\d{4}\/[a-z]+\/\d{1,2}\/(.*?)\/?$/);
+      return m ? m[1].toLowerCase() : '';
+    }
+
+    function commonPrefixLen(a, b) {
+      var n = Math.min(a.length, b.length);
+      for (var i = 0; i < n; i++) {
+        if (a[i] !== b[i]) return i;
+      }
+      return n;
+    }
+
+    function buildHourlyIndex() {
+      ARTICLE_HOURLY_INDEX = {};
+      HOURLY_DIAGNOSTICS = { matched: 0, unmatched: 0, ambiguous: 0 };
+      if (!STATE.hourly || !Object.keys(STATE.hourly).length) return;
+
+      var articlesByDate = {};
+      STATE.articles.forEach(function(a) {
+        if (!a.postSlug) return;
+        var dir = pathDateDir(a.postSlug);
+        if (!dir) return;
+        if (!articlesByDate[dir]) articlesByDate[dir] = [];
+        articlesByDate[dir].push(a);
+      });
+
+      Object.keys(STATE.hourly).forEach(function(hPath) {
+        var dir = pathDateDir(hPath);
+        if (!dir) return;
+        var candidates = articlesByDate[dir];
+        if (!candidates || !candidates.length) {
+          HOURLY_DIAGNOSTICS.unmatched++;
+          return;
+        }
+        var hTail = pathSlugTail(hPath);
+        if (!hTail) return;
+
+        var best = null, bestScore = -1, ties = 0;
+        candidates.forEach(function(a) {
+          var aTail = pathSlugTail(a.postSlug);
+          if (!aTail) return;
+          var score = commonPrefixLen(aTail, hTail);
+          if (score > bestScore) { best = a; bestScore = score; ties = 0; }
+          else if (score === bestScore && score > 0) ties++;
+        });
+
+        if (best && bestScore >= 8) {
+          var pid = best.postID;
+          if (!ARTICLE_HOURLY_INDEX[pid]) ARTICLE_HOURLY_INDEX[pid] = [];
+          ARTICLE_HOURLY_INDEX[pid].push(hPath);
+          HOURLY_DIAGNOSTICS.matched++;
+          if (ties > 0) HOURLY_DIAGNOSTICS.ambiguous++;
+        } else {
+          HOURLY_DIAGNOSTICS.unmatched++;
+        }
+      });
+
+      console.log('[Analysis] Hourly join: ' + HOURLY_DIAGNOSTICS.matched +
+        ' matched, ' + HOURLY_DIAGNOSTICS.unmatched + ' unmatched, ' +
+        HOURLY_DIAGNOSTICS.ambiguous + ' ambiguous.');
+    }
+
+    function hourlyForArticle(article) {
+      if (!article || !article.postID) return null;
+      var paths = ARTICLE_HOURLY_INDEX[article.postID];
+      if (!paths || !paths.length) return null;
+      var byTs = {};
+      paths.forEach(function(p) {
+        (STATE.hourly[p] || []).forEach(function(pt) {
+          byTs[pt[0]] = (byTs[pt[0]] || 0) + pt[1];
+        });
+      });
+      var keys = Object.keys(byTs).map(Number).sort(function(a, b) { return a - b; });
+      if (!keys.length) return null;
+      return keys.map(function(k) { return [k, byTs[k]]; });
+    }
+
+    function firstNHoursAfterPublish(article, hourly, hoursWindow) {
+      if (!hourly || !hourly.length) return [];
+      var pubTs = publishUnixSec(article.publishedDateTime);
+      if (!pubTs) return [];
+      var cutoff = pubTs + (hoursWindow * 3600);
+      return hourly.filter(function(pt) {
+        return pt[0] >= pubTs - 3600 && pt[0] <= cutoff;
+      });
+    }
+
+    function cumulativeFromPublish(article, hourly, hoursWindow) {
+      var pts = firstNHoursAfterPublish(article, hourly, hoursWindow);
+      if (!pts.length) return [];
+      var pubTs = publishUnixSec(article.publishedDateTime);
+      var buckets = {};
+      pts.forEach(function(pt) {
+        var hSince = Math.floor((pt[0] - pubTs) / 3600);
+        if (hSince < 0) return;
+        if (hSince > hoursWindow) return;
+        buckets[hSince] = (buckets[hSince] || 0) + pt[1];
+      });
+      var out = [];
+      var cum = 0;
+      for (var h = 0; h <= hoursWindow; h++) {
+        cum += (buckets[h] || 0);
+        out.push({ hour: h, cumulative: cum, hourly: buckets[h] || 0 });
+      }
+      return out;
+    }
+
+    /* ── Browse-card affordances: sparklines + performance chips ──────────
+       These read STATE.hourly (populated lazily when Performance is first
+       opened, or after `loadRollingHourly` resolves). Both helpers MUST
+       degrade to empty strings when the underlying data isn't available
+       — Browse should render fine on first paint before hourly arrives.
+       PERF_CACHE memoises cohort medians and period-wide percentile
+       thresholds. It is invalidated on `nl:period-changed`.            */
+    var PERF_CACHE = {
+      cohortMedians: null,   // { cohortKey -> median first-24h cumulative }
+      periodViewMedian: null, // median of metrics.pageViews across STATE.articles in period
+      periodViewP75: null,    // 75th percentile of metrics.pageViews in period
+      periodViewP25: null,    // 25th percentile of metrics.pageViews in period
+      built: false
+    };
+
+    function _invalidatePerfCache() {
+      PERF_CACHE = { cohortMedians: null, periodViewMedian: null,
+                     periodViewP75: null, periodViewP25: null, built: false };
+    }
+
+    function _cohortKeyForHour(hr) {
+      if (hr == null) return null;
+      for (var i = 0; i < COHORT_DEFS.length; i++) {
+        if (COHORT_DEFS[i].hours.indexOf(hr) >= 0) return COHORT_DEFS[i].key;
+      }
+      return null;
+    }
+
+    function _percentile(sorted, p) {
+      if (!sorted.length) return null;
+      var idx = Math.floor((sorted.length - 1) * p);
+      return sorted[idx];
+    }
+
+    /* Build cohort medians (first-24h cumulative) and period view
+       percentiles. Filters to the current STATE.period window for
+       percentiles. Cohort medians use whatever hourly data is present. */
+    function _buildPerfCache() {
+      if (PERF_CACHE.built) return;
+
+      // Cohort medians: bucket articles by publish-hour cohort, take
+      // first-24h cumulative for each, then median per cohort.
+      var byCohort = {};
+      COHORT_DEFS.forEach(function(c) { byCohort[c.key] = []; });
+      STATE.articles.forEach(function(a) {
+        var hr = publishHourUTC(a.publishedDateTime);
+        var key = _cohortKeyForHour(hr);
+        if (!key) return;
+        var hourly = hourlyForArticle(a);
+        if (!hourly) return;
+        var cum = cumulativeFromPublish(a, hourly, 24);
+        if (!cum.length) return;
+        var v = cum[cum.length - 1].cumulative;
+        if (v > 0) byCohort[key].push(v);
+      });
+      var medians = {};
+      Object.keys(byCohort).forEach(function(k) {
+        var arr = byCohort[k];
+        if (arr.length < 2) { medians[k] = null; return; }
+        arr.sort(function(a, b) { return a - b; });
+        medians[k] = arr[Math.floor(arr.length / 2)];
+      });
+      PERF_CACHE.cohortMedians = medians;
+
+      // Period view percentiles: pageViews across articles in current period.
+      var floor = periodFloorISO();
+      var views = [];
+      STATE.articles.forEach(function(a) {
+        if (floor) {
+          var date = (a.publishedDateTime || '').slice(0, 10);
+          if (date < floor) return;
+        }
+        if (a.metrics && a.metrics.pageViews != null) {
+          views.push(a.metrics.pageViews);
+        }
+      });
+      if (views.length >= 4) {
+        views.sort(function(a, b) { return a - b; });
+        PERF_CACHE.periodViewMedian = _percentile(views, 0.5);
+        PERF_CACHE.periodViewP25 = _percentile(views, 0.25);
+        PERF_CACHE.periodViewP75 = _percentile(views, 0.75);
+      }
+
+      PERF_CACHE.built = true;
+    }
+
+    /* Inline-SVG sparkline of the article's last ~24 hourly data points.
+       Returns empty string if insufficient hourly data. */
+    function articleSparkline(article) {
+      var hourly = hourlyForArticle(article);
+      if (!hourly || !hourly.length) return '';
+      var slice = hourly.slice(-24);
+      if (!slice.length) return '';
+      var max = 0;
+      slice.forEach(function(pt) { if (pt[1] > max) max = pt[1]; });
+      // Plot range — use 1px padding inset on a 60×16 viewBox.
+      var W = 60, H = 16, pad = 1;
+      var innerW = W - pad * 2;
+      var innerH = H - pad * 2;
+      var n = slice.length;
+      // Always start the line at the leftmost point (per spec) — if only
+      // one point, render a flat segment to make it visible.
+      var pts = slice.map(function(pt, i) {
+        var x = pad + (n === 1 ? 0 : (i / (n - 1)) * innerW);
+        var y = pad + (max > 0 ? innerH - (pt[1] / max) * innerH : innerH);
+        return x.toFixed(2) + ',' + y.toFixed(2);
+      });
+      if (n === 1) {
+        // Stretch single point to a flat segment at its own y.
+        var only = pts[0].split(',');
+        pts = [pad.toFixed(2) + ',' + only[1], (pad + innerW).toFixed(2) + ',' + only[1]];
+      }
+      return '<svg class="card__sparkline" viewBox="0 0 ' + W + ' ' + H +
+        '" preserveAspectRatio="none" aria-hidden="true">' +
+        '<polyline points="' + pts.join(' ') + '" fill="none" ' +
+        'stroke="var(--primary)" stroke-opacity="0.6" stroke-width="1.5" ' +
+        'stroke-linecap="round" stroke-linejoin="round" /></svg>';
+    }
+
+    /* Performance chip — at most one chip per card. Order of preference:
+       gem > trap > over > under > slow-burn > early-peak.
+       Returns '' when no rule fires or insufficient data.
+       TODO(phase-1-review): cohort medians use whatever hourly data is
+       loaded (rolling 90d by default); for period === 'all' we'd ideally
+       use the all-time archive medians. Acceptable for Phase 1 — chips
+       remain directionally correct. */
+    function articlePerfChip(article) {
+      if (!article || !article.metrics) return '';
+      _buildPerfCache();
+
+      var m = article.metrics;
+      var wc = wordCount(article);
+      var rt = null;
+      if (m.avgEngagementTimeSecs != null && wc > 0) {
+        var expected = wc * (60 / 225);  // seconds at 225 wpm
+        rt = m.avgEngagementTimeSecs / expected;
+      }
+      var pv = m.pageViews;
+
+      // Gem: low views + high read-through (read-through > 0.7).
+      if (pv != null && rt != null &&
+          PERF_CACHE.periodViewMedian != null &&
+          pv < PERF_CACHE.periodViewMedian * 0.25 && rt > 0.7) {
+        return '<span class="card__perf-chip card__perf-chip--gem">Gem</span>';
+      }
+
+      // Trap: high views + low read-through.
+      if (pv != null && rt != null &&
+          PERF_CACHE.periodViewP75 != null &&
+          pv > PERF_CACHE.periodViewP75 && rt < 0.3) {
+        return '<span class="card__perf-chip card__perf-chip--trap">Trap</span>';
+      }
+
+      // Over / Under vs cohort median (needs hourly data).
+      var hourly = hourlyForArticle(article);
+      if (hourly && hourly.length) {
+        var hr = publishHourUTC(article.publishedDateTime);
+        var cohortKey = _cohortKeyForHour(hr);
+        var cohortMedian = cohortKey && PERF_CACHE.cohortMedians
+          ? PERF_CACHE.cohortMedians[cohortKey] : null;
+        var cum24 = cumulativeFromPublish(article, hourly, 24);
+        var v24 = cum24.length ? cum24[cum24.length - 1].cumulative : null;
+
+        if (v24 != null && cohortMedian) {
+          if (v24 > cohortMedian * 1.5) {
+            return '<span class="card__perf-chip card__perf-chip--over">Over-performer</span>';
+          }
+          if (v24 < cohortMedian * 0.5) {
+            return '<span class="card__perf-chip card__perf-chip--under">Under-performer</span>';
+          }
+        }
+
+        // Slow burn / Early peak — need full 72h window.
+        var pubTs = publishUnixSec(article.publishedDateTime);
+        var nowSec = Math.floor(Date.now() / 1000);
+        if (pubTs && (nowSec - pubTs) >= 72 * 3600 && v24 != null) {
+          var cum72 = cumulativeFromPublish(article, hourly, 72);
+          var v72 = cum72.length ? cum72[cum72.length - 1].cumulative : null;
+          if (v72 && v72 > 0) {
+            var ratio = v24 / v72;
+            if (ratio < 0.5) {
+              return '<span class="card__perf-chip card__perf-chip--slow-burn">Slow burn</span>';
+            }
+            if (ratio > 0.85) {
+              return '<span class="card__perf-chip card__perf-chip--early-peak">Early peak</span>';
+            }
+          }
+        }
+      }
+
+      return '';
+    }
+
+    /* ── Hourly data loaders (rolling + lazy archive) ─────────────────── */
+    function loadRollingHourly() {
+      return fetch(HOURLY_URL + '?t=' + Date.now())
+        .then(function(r) {
+          if (!r.ok) {
+            console.warn('[Analysis] ga-hourly.json fetch failed:', r.status);
+            return null;
+          }
+          return r.json();
+        })
+        .catch(function(err) {
+          console.warn('[Analysis] ga-hourly.json error:', err && err.message);
+          return null;
+        })
+        .then(function(hourly) {
+          if (hourly && hourly.hourly) {
+            STATE.hourly = hourly.hourly;
+            STATE.hourlyMeta = {
+              generatedAt: hourly.generatedAt,
+              startDate:   hourly.startDate,
+              endDate:     hourly.endDate,
+              windowDays:  hourly.windowDays || 30,
+              pathCount:   hourly.pathCount
+            };
+          } else {
+            STATE.hourly = {};
+            STATE.hourlyMeta = { windowDays: 0 };
+          }
+          buildHourlyIndex();
+          STATE.rolling = {
+            hourly:       STATE.hourly,
+            meta:         STATE.hourlyMeta,
+            articleIndex: ARTICLE_HOURLY_INDEX
+          };
+          return true;
+        });
+    }
+
+    function loadAllTimeHourly() {
+      if (STATE.allTime) return Promise.resolve(STATE.allTime);
+      if (STATE.hourlyAllTimeLoading) return STATE.hourlyAllTimeLoading;
+
+      STATE.hourlyAllTimeLoading = fetch(HOURLY_ARCHIVE_URL + '?t=' + Date.now())
+        .then(function(r) {
+          if (!r.ok) throw new Error('archive fetch failed: ' + r.status);
+          return r.json();
+        })
+        .then(function(arch) {
+          var prevHourly = STATE.hourly;
+          var prevIndex  = ARTICLE_HOURLY_INDEX;
+          STATE.hourly = arch.hourly || {};
+          buildHourlyIndex();
+          var archIndex = ARTICLE_HOURLY_INDEX;
+          STATE.hourly = prevHourly;
+          ARTICLE_HOURLY_INDEX = prevIndex;
+
+          STATE.allTime = {
+            hourly: arch.hourly || {},
+            meta: {
+              generatedAt:   arch.generatedAt,
+              startDate:     arch.firstSeenDate,
+              endDate:       arch.endDate,
+              windowDays:    null,
+              pathCount:     arch.pathCount,
+              firstSeenDate: arch.firstSeenDate,
+              isAllTime:     true
+            },
+            articleIndex: archIndex
+          };
+          STATE.hourlyAllTimeLoading = false;
+          return STATE.allTime;
+        })
+        .catch(function(err) {
+          console.warn('[Analysis] all-time archive fetch failed:', err && err.message);
+          STATE.hourlyAllTimeLoading = false;
+          throw err;
+        });
+      return STATE.hourlyAllTimeLoading;
+    }
+
+    /* Swap STATE.hourly + ARTICLE_HOURLY_INDEX + STATE.hourlyMeta to the
+       right slot for the requested period. Pure pointer reassignment —
+       fast, no recompute. period === 'all' uses the lazy archive; any
+       numeric period uses the rolling 90-day snapshot. */
+    function useDataset(period) {
+      var ds = (period === 'all' && STATE.allTime) ? STATE.allTime : STATE.rolling;
+      if (!ds) return;
+      STATE.hourly = ds.hourly;
+      STATE.hourlyMeta = ds.meta;
+      ARTICLE_HOURLY_INDEX = ds.articleIndex;
+    }
+
+    /* Performance lazy-load coordinator. Called by activateTab when the
+       user enters Performance. Fetches the rolling hourly snapshot the
+       first time, then renders the active sub-tab. If period === 'all'
+       it also kicks off the archive fetch. */
+    var _perfDataPromise = null;
+    function ensurePerfDataAndRender() {
+      // Need the article index first — Browse load owns that fetch.
+      if (!STATE.articles.length) return;
+
+      if (!_perfDataPromise) {
+        _perfDataPromise = loadRollingHourly();
+      }
+      _perfDataPromise.then(function() {
+        if (STATE.period === 'all' && !STATE.allTime) {
+          // Show loading indicator on whichever sub-pane is active
+          var loaders = ['ovBody', 'cohortChart', 'heatmap', 'gtBody'];
+          loaders.forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el && el.querySelector('.ins-loading')) {
+              el.innerHTML = '<div class="ins-loading">Loading all-time data…</div>';
+            }
+          });
+          loadAllTimeHourly()
+            .then(function() { renderActivePerfSubTab(); })
+            .catch(function() {
+              // Fall back to rolling dataset; the sub-pane render will
+              // surface its own empty state if needed.
+              renderActivePerfSubTab();
+            });
+        } else {
+          renderActivePerfSubTab();
+        }
+      });
+    }
+
+    function renderActivePerfSubTab() {
+      // Make sure the right dataset is active before any render.
+      useDataset(STATE.period);
+      if (STATE.perfTab === 'trends') {
+        renderOverview();
+        STATE._renderedTrends = true;
+      } else if (STATE.perfTab === 'timing') {
+        renderTimingPane();
+        STATE._renderedTiming = true;
+      } else if (STATE.perfTab === 'outliers') {
+        renderGemsTrapsPane();
+        STATE._renderedOutliers = true;
+      }
+    }
+
+    /* Re-render Performance when the page-level period changes.
+       For 'all', lazy-load the archive first. */
+    window.addEventListener('nl:period-changed', function() {
+      if (STATE.tab !== 'performance') return;       // Browse handles itself
+      if (!STATE.rolling) return;                    // Performance not loaded yet — initial enter will pick up the new period
+
+      if (STATE.period === 'all' && !STATE.allTime) {
+        // Show loading on whichever charts are visible
+        ['cohortChart', 'heatmap'].forEach(function(id) {
+          var el = document.getElementById(id);
+          if (el) { el.className = 'chart-empty'; el.innerHTML = 'Loading all-time data…'; }
+        });
+        loadAllTimeHourly()
+          .then(function() { rerenderPerfChartsForPeriod(); })
+          .catch(function() {
+            ['cohortChart', 'heatmap'].forEach(function(id) {
+              var el = document.getElementById(id);
+              if (el) el.innerHTML = 'All-time data is not yet available. The archive is built nightly — check back tomorrow, or run the backfill workflow to seed it.';
+            });
+          });
+        return;
+      }
+      rerenderPerfChartsForPeriod();
+    });
+
+    function rerenderPerfChartsForPeriod() {
+      useDataset(STATE.period);
+      // Re-render whichever sub-tab is active. Period also affects Trends
+      // copy and Outliers candidate window, so re-render those when active.
+      if (STATE.tab !== 'performance') return;
+      if (STATE.perfTab === 'trends') renderOverview();
+      else if (STATE.perfTab === 'timing') {
+        renderCohortChart();
+        renderHeatmap();
+      }
+      else if (STATE.perfTab === 'outliers') renderGemsTrapsPane();
+    }
+
+    /* ============ TRENDS — overview digest ============ */
+    function renderOverview() {
+      var body = document.getElementById('ovBody');
+      var sub = document.getElementById('ovSub');
+      var meta = STATE.hourlyMeta || {};
+      if (sub) {
+        sub.textContent = meta.windowDays
+          ? ('Hourly data: last ' + meta.windowDays + ' days · Aggregate metrics: lifetime')
+          : (meta.isAllTime ? 'Hourly data: all-time · Aggregate metrics: lifetime' : 'No hourly data available');
+      }
+
+      var cutoff = Date.now() - (30 * 86400 * 1000);
+      var recent = STATE.articles.filter(function(a) {
+        var t = new Date(a.publishedDateTime).getTime();
+        return t >= cutoff;
+      });
+
+      var topRecent = recent.slice().sort(function(a, b) {
+        return ((b.metrics && b.metrics.pageViews) || 0) - ((a.metrics && a.metrics.pageViews) || 0);
+      })[0];
+
+      // Hidden gem (90-day window)
+      var gemCutoff = Date.now() - (90 * 86400 * 1000);
+      var gemCandidates = STATE.articles.filter(function(a) {
+        if (!a.metrics) return false;
+        var t = new Date(a.publishedDateTime).getTime();
+        if (t < gemCutoff) return false;
+        var wc = wordCount(a);
+        if (!wc || wc < 200) return false;
+        if (!a.metrics.avgEngagementTimeSecs) return false;
+        var pv = a.metrics.pageViews || 0;
+        if (pv < 50 || pv > 1500) return false;
+        var expected = wc * (60 / 225);
+        var rt = a.metrics.avgEngagementTimeSecs / expected;
+        a._rt = rt;
+        return rt >= 0.5 && rt <= 1.5;
+      }).sort(function(a, b) { return b._rt - a._rt; });
+      var topGem = gemCandidates[0];
+
+      // Trap (90-day window)
+      var trapCandidates = STATE.articles.filter(function(a) {
+        if (!a.metrics) return false;
+        var t = new Date(a.publishedDateTime).getTime();
+        if (t < gemCutoff) return false;
+        var wc = wordCount(a);
+        if (!wc || wc < 300) return false;
+        if (!a.metrics.avgEngagementTimeSecs) return false;
+        var pv = a.metrics.pageViews || 0;
+        if (pv < 1000) return false;
+        var expected = wc * (60 / 225);
+        var rt = a.metrics.avgEngagementTimeSecs / expected;
+        a._rt = rt;
+        return rt < 0.3;
+      }).sort(function(a, b) { return (b.metrics.pageViews || 0) - (a.metrics.pageViews || 0); });
+      var topTrap = trapCandidates[0];
+
+      // Best publish hour by median first-24h views, last 90 days
+      var hourBuckets = {};
+      for (var h = 0; h < 24; h++) hourBuckets[h] = [];
+      STATE.articles.forEach(function(a) {
+        var t = new Date(a.publishedDateTime).getTime();
+        if (t < gemCutoff) return;
+        var hr = publishHourUTC(a.publishedDateTime);
+        if (hr == null) return;
+        var hourly = hourlyForArticle(a);
+        if (!hourly) return;
+        var cum = cumulativeFromPublish(a, hourly, 24);
+        if (!cum.length) return;
+        var first24 = cum[cum.length - 1].cumulative;
+        if (first24 > 0) hourBuckets[hr].push(first24);
+      });
+
+      var hourMedians = {};
+      Object.keys(hourBuckets).forEach(function(hr) {
+        var arr = hourBuckets[hr];
+        if (arr.length < 2) return;
+        arr.sort(function(a, b) { return a - b; });
+        hourMedians[hr] = arr[Math.floor(arr.length / 2)];
+      });
+
+      var bestHour = null, bestMedian = -1;
+      Object.keys(hourMedians).forEach(function(hr) {
+        if (hourMedians[hr] > bestMedian) {
+          bestMedian = hourMedians[hr];
+          bestHour = parseInt(hr, 10);
+        }
+      });
+
+      var html = '';
+      html += '<div class="ov-stats">';
+      html += ovStatCard('Articles (last 30d)', String(recent.length), 'Across all writers');
+      if (topRecent && topRecent.metrics) {
+        html += ovStatCard('Top performer (30d)', formatCount(topRecent.metrics.pageViews) + ' views',
+          '<strong>' + esc(truncate(topRecent.postTitle, 60)) + '</strong> — ' + esc(topRecent.postAuthor || '—'));
+      } else {
+        html += ovStatCard('Top performer (30d)', '—', 'No GA data yet');
+      }
+      if (topGem) {
+        html += ovStatCard('Hidden gem', Math.round(topGem._rt * 100) + '% read-through',
+          '<strong>' + esc(truncate(topGem.postTitle, 60)) + '</strong> — only ' + formatCount(topGem.metrics.pageViews) + ' views');
+      } else {
+        html += ovStatCard('Hidden gem', '—', 'No qualifying articles in last 90 days');
+      }
+      if (bestHour != null) {
+        html += ovStatCard('Best publish hour', String(bestHour).padStart(2, '0') + ':00 UTC',
+          'Median <strong>' + formatCount(bestMedian) + '</strong> first-24h views');
+      } else {
+        html += ovStatCard('Best publish hour', '—', 'Need more hourly data');
+      }
+      html += '</div>';
+
+      var narr = buildOverviewNarrative({
+        recent: recent, topRecent: topRecent, topGem: topGem, topTrap: topTrap,
+        bestHour: bestHour, bestMedian: bestMedian, hourMedians: hourMedians
+      });
+      if (narr) html += '<div class="ov-narrative">' + narr + '</div>';
+
+      var topN = recent.slice().sort(function(a, b) {
+        return ((b.metrics && b.metrics.pageViews) || 0) - ((a.metrics && a.metrics.pageViews) || 0);
+      }).slice(0, 10);
+      if (topN.length) {
+        html += '<div class="ins-section-head ins-section-spacer"><h2 class="ins-card__title">Top 10 in last 30 days</h2></div>';
+        html += '<div class="gt-list"><div class="gt-header"><span>Article</span><span>Views</span><span>Time</span><span>Engaged</span><span>Read-thru</span></div>';
+        topN.forEach(function(a) { html += renderOvListRow(a); });
+        html += '</div>';
+      }
+
+      body.innerHTML = html;
+      // Wire row clicks (Top 10 list) → drawer
+      Array.prototype.forEach.call(body.querySelectorAll('.gt-row[data-postid]'), function(row) {
+        row.addEventListener('click', function() { openDrawer(row.dataset.postid); });
+      });
+    }
+
+    function ovStatCard(label, value, detail) {
+      return '<div class="ov-stat">' +
+        '<div class="ov-stat__label">' + esc(label) + '</div>' +
+        '<div class="ov-stat__value">' + value + '</div>' +
+        '<div class="ov-stat__detail">' + detail + '</div>' +
+        '</div>';
+    }
+
+    function buildOverviewNarrative(d) {
+      var parts = [];
+      if (d.recent.length) {
+        parts.push('Published <strong>' + d.recent.length + '</strong> articles in the last 30 days.');
+      }
+      if (d.topRecent && d.topRecent.metrics) {
+        parts.push(
+          'The biggest story was <strong>' + esc(d.topRecent.postTitle) + '</strong> by ' +
+          esc(d.topRecent.postAuthor || '—') + ', with ' + formatCount(d.topRecent.metrics.pageViews) + ' views.'
+        );
+      }
+      if (d.bestHour != null && d.hourMedians) {
+        var medians = d.hourMedians;
+        var hours = Object.keys(medians).map(Number).sort(function(a, b) { return medians[b] - medians[a]; });
+        if (hours.length >= 3) {
+          parts.push(
+            'Looking at the last 90 days, articles published at ' + String(d.bestHour).padStart(2, '0') + ':00 UTC ' +
+            'capture more first-24h views than any other slot — ' +
+            'a typical article gets <strong>' + formatCount(d.bestMedian) + '</strong> views in its first day vs ' +
+            '<strong>' + formatCount(medians[hours[hours.length - 1]]) + '</strong> for the worst slot ' +
+            '(' + String(hours[hours.length - 1]).padStart(2, '0') + ':00).'
+          );
+        }
+      }
+      return parts.join(' ');
+    }
+
+    function renderOvListRow(a) {
+      var m = a.metrics || {};
+      var wc = wordCount(a);
+      var rtPct = '—';
+      if (m.avgEngagementTimeSecs != null && wc > 0) {
+        var expected = wc * (60 / 225);
+        rtPct = Math.round(m.avgEngagementTimeSecs / expected * 100) + '%';
+      }
+      var pid = a.postID || '';
+      return '<div class="gt-row" data-postid="' + esc(pid) + '">' +
+        '<div>' +
+          '<div class="gt-row__title">' + esc(a.postTitle || '(untitled)') + '</div>' +
+          '<div class="gt-row__sub">' + esc(a.postAuthor || '—') + ' · ' + esc(formatDate(a.publishedDateTime)) + '</div>' +
+        '</div>' +
+        '<span class="gt-row__metric">' + (m.pageViews != null ? formatCount(m.pageViews) : '—') + '</span>' +
+        '<span class="gt-row__metric">' + (m.avgEngagementTimeSecs != null ? formatDuration(m.avgEngagementTimeSecs) : '—') + '</span>' +
+        '<span class="gt-row__metric">' + (m.engagementRate != null ? formatPct(m.engagementRate) : '—') + '</span>' +
+        '<span class="gt-row__metric">' + rtPct + '</span>' +
+        '</div>';
+    }
+
+    /* ============ TIMING — cohort chart + heatmap ============ */
+    var COHORT_DEFS = [
+      { key: 'morning',   label: 'Morning (06–11)',    hours: [6,7,8,9,10,11],     colourVar: '--blue' },
+      { key: 'afternoon', label: 'Afternoon (12–17)',  hours: [12,13,14,15,16,17], colourVar: '--green' },
+      { key: 'evening',   label: 'Evening (18–22)',    hours: [18,19,20,21,22],    colourVar: '--amber' },
+      { key: 'late',      label: 'Late night (23–05)', hours: [23,0,1,2,3,4,5],    colourVar: '--primary' }
+    ];
+    function cohortColour(c) { return cssVar(c.colourVar); }
+
+    function renderTimingPane() {
+      // Wire heatmap-mode toggle once
+      Array.prototype.forEach.call(document.querySelectorAll('#heatmapToggle button'), function(b) {
+        if (b._wired) return;
+        b.addEventListener('click', function() {
+          STATE.heatmapMode = b.dataset.mode;
+          Array.prototype.forEach.call(document.querySelectorAll('#heatmapToggle button'), function(b2) {
+            b2.classList.toggle('active', b2 === b);
+          });
+          updateHeatmapHeading();
+          updateAggToggleAvailability();
+          renderHeatmap();
+        });
+        b._wired = true;
+      });
+      // Wire cohort agg toggle (median/mean) once
+      wireToggleGroup('#cohortChartControls [data-target="cohortAgg"]', function(v) {
+        STATE.cohortAgg = v;
+        renderCohortChart();
+      });
+      // Wire heatmap agg toggle once
+      wireToggleGroup('#heatmapChartControls [data-target="heatmapAgg"]', function(v) {
+        STATE.heatmapAgg = v;
+        updateHeatmapHeading();
+        renderHeatmap();
+      });
+
+      renderCohortControls();
+      renderCohortChart();
+      updateHeatmapHeading();
+      updateAggToggleAvailability();
+      renderHeatmap();
+    }
+
+    function wireToggleGroup(selector, onChange) {
+      var buttons = Array.prototype.slice.call(document.querySelectorAll(selector + ' .ins-toggle'));
+      if (!buttons.length) return;
+      buttons.forEach(function(b) {
+        if (b._wired) return;
+        b.addEventListener('click', function() {
+          buttons.forEach(function(b2) { b2.classList.toggle('active', b2 === b); });
+          onChange(b.dataset.value);
+        });
+        b._wired = true;
+      });
+    }
+
+    function updateAggToggleAvailability() {
+      var aggGroup = document.getElementById('heatmapAggGroup');
+      if (!aggGroup) return;
+      if (STATE.heatmapMode === 'reading') {
+        aggGroup.classList.add('ins-toggle-group--disabled');
+      } else {
+        aggGroup.classList.remove('ins-toggle-group--disabled');
+      }
+    }
+
+    function updateHeatmapHeading() {
+      var title = document.getElementById('heatmapTitle');
+      var sub = document.getElementById('heatmapSub');
+      if (!title || !sub) return;
+      if (STATE.heatmapMode === 'reading') {
+        title.textContent = 'Reading times — when our audience is on site';
+        sub.textContent = 'Average pageviews during a typical hour at each day-of-week + hour-of-day. Shows traffic patterns regardless of when articles were published.';
+      } else {
+        var aggWord = STATE.heatmapAgg === 'mean' ? 'Mean' : 'Median';
+        title.innerHTML = 'Publishing slots — best day &amp; hour to publish';
+        sub.textContent = aggWord + ' first-24h views for articles published in each slot. Brighter red = better-performing publish slot.';
+      }
+    }
+
+    function renderCohortControls() {
+      var box = document.getElementById('cohortControls');
+      if (!box) return;
+      if (Object.keys(STATE.cohortToggles).length === 0) {
+        COHORT_DEFS.forEach(function(c) { STATE.cohortToggles[c.key] = true; });
+      }
+      var existingSpan = box.querySelector('.ins-sub');
+      box.innerHTML = '';
+      if (existingSpan) box.appendChild(existingSpan);
+      else {
+        var s = document.createElement('span');
+        s.className = 'ins-sub';
+        s.textContent = 'Toggle cohorts:';
+        box.appendChild(s);
+      }
+      COHORT_DEFS.forEach(function(c) {
+        var on = STATE.cohortToggles[c.key];
+        var label = document.createElement('label');
+        label.className = 'cohort-pill' + (on ? ' cohort-on' : '');
+        var col = cohortColour(c);
+        label.style.borderColor = on ? col : '';
+        label.style.color = on ? col : '';
+        label.innerHTML = '<input type="checkbox" ' + (on ? 'checked' : '') + ' data-cohort="' + c.key + '"> ' + esc(c.label);
+        label.querySelector('input').addEventListener('change', function(e) {
+          STATE.cohortToggles[c.key] = e.target.checked;
+          renderCohortControls();
+          renderCohortChart();
+        });
+        box.appendChild(label);
+      });
+    }
+
+    function renderCohortChart() {
+      // Page-level period drives cohort dataset selection.
+      useDataset(STATE.period);
+
+      var container = document.getElementById('cohortChart');
+      if (!container) return;
+      var meta = STATE.hourlyMeta || {};
+      if (!meta.windowDays && !meta.isAllTime) {
+        container.className = 'chart-empty';
+        container.innerHTML = 'No hourly data available.';
+        return;
+      }
+
+      var cohortSeries = {};
+      COHORT_DEFS.forEach(function(c) {
+        if (!STATE.cohortToggles[c.key]) return;
+        cohortSeries[c.key] = computeCohortSeries(c.hours);
+      });
+
+      if (Object.keys(cohortSeries).length === 0) {
+        container.className = 'chart-empty';
+        container.innerHTML = 'Toggle at least one cohort to see comparison.';
+        return;
+      }
+
+      var anyData = false;
+      Object.keys(cohortSeries).forEach(function(k) {
+        if (cohortSeries[k] && cohortSeries[k].articleCount > 0) anyData = true;
+      });
+      if (!anyData) {
+        container.className = 'chart-empty';
+        container.innerHTML = 'Not enough articles in selected cohorts (last ' + (STATE.period || 90) + ' days).';
+        return;
+      }
+
+      container.className = '';
+      container.innerHTML = drawCohortSVG(cohortSeries);
+    }
+
+    function computeCohortSeries(hourSet) {
+      var meta = STATE.hourlyMeta || {};
+      var isAllTime = STATE.period === 'all';
+      var windowStart = -Infinity;
+      if (!isAllTime) {
+        var periodDays = Math.min(STATE.period || 90, meta.windowDays || 90);
+        windowStart = Date.now() - (periodDays * 86400 * 1000);
+      }
+      var matches = STATE.articles.filter(function(a) {
+        var t = new Date(a.publishedDateTime).getTime();
+        if (t < windowStart) return false;
+        var hr = publishHourUTC(a.publishedDateTime);
+        if (hr == null) return false;
+        return hourSet.indexOf(hr) >= 0;
+      });
+
+      var buckets = [];
+      for (var i = 0; i <= 72; i++) buckets.push([]);
+
+      matches.forEach(function(a) {
+        var hourly = hourlyForArticle(a);
+        if (!hourly) return;
+        var cum = cumulativeFromPublish(a, hourly, 72);
+        if (!cum.length) return;
+        cum.forEach(function(p) {
+          if (p.hour <= 72) buckets[p.hour].push(p.cumulative);
+        });
+      });
+
+      var aggCum = buckets.map(function(arr) {
+        if (!arr.length) return 0;
+        if (STATE.cohortAgg === 'mean') {
+          var sum = 0;
+          for (var i = 0; i < arr.length; i++) sum += arr[i];
+          return sum / arr.length;
+        }
+        var sorted = arr.slice().sort(function(a, b) { return a - b; });
+        var mid = Math.floor(sorted.length / 2);
+        return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+      });
+
+      return { avgCum: aggCum, articleCount: matches.length };
+    }
+
+    function drawCohortSVG(cohortSeries) {
+      var W = 800, H = 380;
+      var ML = 50, MR = 20, MT = 36, MB = 44;
+      var plotW = W - ML - MR, plotH = H - MT - MB;
+      var LOW_SAMPLE_THRESHOLD = 10;
+
+      var maxV = 0;
+      Object.keys(cohortSeries).forEach(function(k) {
+        var s = cohortSeries[k];
+        if (!s || s.articleCount < LOW_SAMPLE_THRESHOLD) return;
+        var local = Math.max.apply(null, s.avgCum);
+        if (local > maxV) maxV = local;
+      });
+      if (maxV === 0) {
+        Object.keys(cohortSeries).forEach(function(k) {
+          var s = cohortSeries[k];
+          if (!s) return;
+          var local = Math.max.apply(null, s.avgCum);
+          if (local > maxV) maxV = local;
+        });
+      }
+      if (maxV === 0) maxV = 1;
+
+      var xScale = function(h) { return ML + (h / 72) * plotW; };
+      var yScale = function(v) {
+        var clipped = Math.min(v, maxV * 1.05);
+        return MT + plotH - (clipped / maxV) * plotH;
+      };
+
+      var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
+
+      // Legend
+      var legendY = 14;
+      var legendX = ML;
+      var anyLowSample = false;
+      COHORT_DEFS.forEach(function(c) {
+        if (!STATE.cohortToggles[c.key]) return;
+        var s = cohortSeries[c.key];
+        if (!s || s.articleCount === 0) return;
+        var isLow = s.articleCount < LOW_SAMPLE_THRESHOLD;
+        if (isLow) anyLowSample = true;
+        var lab = c.label + ' (n=' + s.articleCount + (isLow ? ', low sample' : '') + ')';
+        var dashAttr = isLow ? ' stroke-dasharray="3,3"' : '';
+        svg += '<line x1="' + legendX + '" y1="' + (legendY - 4) + '" x2="' + (legendX + 14) + '" y2="' + (legendY - 4) + '" stroke="' + cohortColour(c) + '" stroke-width="3"' + dashAttr + '/>';
+        svg += '<text class="svg-axis-label" x="' + (legendX + 18) + '" y="' + (legendY + 1) + '" style="fill: var(--text); font-weight: 700;">' + esc(lab) + '</text>';
+        legendX += 18 + lab.length * 6.5;
+      });
+
+      // Y grid
+      for (var i = 0; i <= 4; i++) {
+        var y = MT + (i / 4) * plotH;
+        var v = Math.round(maxV * (1 - i / 4));
+        svg += '<line class="svg-grid-line" x1="' + ML + '" y1="' + y + '" x2="' + (ML + plotW) + '" y2="' + y + '"/>';
+        svg += '<text class="svg-axis-label" x="' + (ML - 8) + '" y="' + (y + 3) + '" text-anchor="end">' + formatCount(v) + '</text>';
+      }
+
+      // Day-boundary references
+      [
+        { x: 24, label: 'Day 1' },
+        { x: 48, label: 'Day 2' },
+        { x: 72, label: 'Day 3' }
+      ].forEach(function(b) {
+        var x = xScale(b.x);
+        if (b.x < 72) {
+          svg += '<line x1="' + x + '" y1="' + MT + '" x2="' + x + '" y2="' + (MT + plotH) + '" stroke="var(--border)" stroke-width="1" stroke-dasharray="2,4"/>';
+        }
+        svg += '<text class="svg-axis-label" x="' + (x - 4) + '" y="' + (MT + 12) + '" text-anchor="end" style="font-size: 9px; fill: var(--text-muted); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;">' + b.label + '</text>';
+      });
+
+      // X axis
+      [0, 12, 24, 36, 48, 60, 72].forEach(function(h) {
+        var x = xScale(h);
+        svg += '<line class="svg-axis-tick" x1="' + x + '" y1="' + (MT + plotH) + '" x2="' + x + '" y2="' + (MT + plotH + 4) + '"/>';
+        svg += '<text class="svg-axis-label" x="' + x + '" y="' + (MT + plotH + 16) + '" text-anchor="middle">' + h + 'h</text>';
+      });
+
+      // Plot each cohort
+      COHORT_DEFS.forEach(function(c) {
+        if (!STATE.cohortToggles[c.key]) return;
+        var s = cohortSeries[c.key];
+        if (!s || s.articleCount === 0) return;
+        var isLow = s.articleCount < LOW_SAMPLE_THRESHOLD;
+        var pathD = s.avgCum.map(function(v, i) {
+          return (i === 0 ? 'M' : 'L') + xScale(i) + ',' + yScale(v);
+        }).join(' ');
+        var dashAttr = isLow ? ' stroke-dasharray="3,3"' : '';
+        var opacityAttr = isLow ? ' opacity="0.55"' : '';
+        svg += '<path class="svg-data-line" d="' + pathD + '" stroke="' + cohortColour(c) + '"' + dashAttr + opacityAttr + '/>';
+      });
+
+      var yLabel = (STATE.cohortAgg === 'mean' ? 'Mean' : 'Median') + ' cumulative views';
+      svg += '<text class="svg-axis-label" x="-' + (MT + plotH / 2) + '" y="14" text-anchor="middle" transform="rotate(-90)" style="font-size: 10px;">' + esc(yLabel) + '</text>';
+      svg += '<text class="svg-axis-label" x="' + (ML + plotW / 2) + '" y="' + (H - 22) + '" text-anchor="middle">Hours since publish</text>';
+
+      if (anyLowSample) {
+        svg += '<text class="svg-axis-label" x="' + (ML + plotW / 2) + '" y="' + (H - 4) + '" text-anchor="middle" style="font-size: 10px; fill: var(--text-muted);">Dashed lines have fewer than ' + LOW_SAMPLE_THRESHOLD + ' articles — treat as indicative only.</text>';
+      }
+
+      svg += '</svg>';
+      return svg;
+    }
+
+    /* Heatmap (publish + reading modes) */
+    function renderHeatmap() {
+      useDataset(STATE.period);
+      if (STATE.heatmapMode === 'reading') {
+        renderHeatmapReading();
+      } else {
+        renderHeatmapPublish();
+      }
+    }
+
+    function renderHeatmapPublish() {
+      var container = document.getElementById('heatmap');
+      if (!container) return;
+      var meta = STATE.hourlyMeta || {};
+      if (!meta.windowDays && !meta.isAllTime) {
+        container.className = 'chart-empty';
+        container.innerHTML = 'No hourly data available.';
+        return;
+      }
+
+      var isAllTime = STATE.period === 'all';
+      var windowStart = -Infinity;
+      var periodDays = STATE.period || 90;
+      if (!isAllTime) {
+        periodDays = Math.min(STATE.period || 90, meta.windowDays || 90);
+        windowStart = Date.now() - (periodDays * 86400 * 1000);
+      }
+      var grid = {};
+      for (var d = 0; d < 7; d++) {
+        grid[d] = {};
+        for (var h = 0; h < 24; h++) grid[d][h] = [];
+      }
+
+      STATE.articles.forEach(function(a) {
+        var t = new Date(a.publishedDateTime).getTime();
+        if (t < windowStart) return;
+        var hr = publishHourUTC(a.publishedDateTime);
+        var dy = publishWeekdayUTC(a.publishedDateTime);
+        if (hr == null || dy == null) return;
+        var hourly = hourlyForArticle(a);
+        if (!hourly) return;
+        var cum = cumulativeFromPublish(a, hourly, 24);
+        if (!cum.length) return;
+        var v = cum[cum.length - 1].cumulative;
+        if (v > 0) grid[dy][hr].push(v);
+      });
+
+      var aggValues = {};
+      var globalMax = 0;
+      for (var d2 = 0; d2 < 7; d2++) {
+        aggValues[d2] = {};
+        for (var h2 = 0; h2 < 24; h2++) {
+          var arr = grid[d2][h2];
+          if (arr.length >= 1) {
+            var v;
+            if (STATE.heatmapAgg === 'mean') {
+              var sum = 0;
+              for (var i = 0; i < arr.length; i++) sum += arr[i];
+              v = sum / arr.length;
+            } else {
+              arr.sort(function(a, b) { return a - b; });
+              v = arr[Math.floor(arr.length / 2)];
+            }
+            aggValues[d2][h2] = v;
+            if (v > globalMax) globalMax = v;
+          } else {
+            aggValues[d2][h2] = null;
+          }
+        }
+      }
+
+      if (globalMax === 0) {
+        container.className = 'chart-empty';
+        container.innerHTML = 'Not enough data for heatmap (last ' + periodDays + ' days).';
+        return;
+      }
+
+      var aggLabel = STATE.heatmapAgg === 'mean' ? 'mean' : 'median';
+      drawHeatmapGrid(container, aggValues, grid, globalMax,
+        aggLabel + ' first-24h views', isAllTime ? 'all-time' : periodDays);
+    }
+
+    function renderHeatmapReading() {
+      var container = document.getElementById('heatmap');
+      if (!container) return;
+      var meta = STATE.hourlyMeta || {};
+      if ((!meta.windowDays && !meta.isAllTime) || !STATE.hourly) {
+        container.className = 'chart-empty';
+        container.innerHTML = 'No hourly data available.';
+        return;
+      }
+
+      var isAllTime = STATE.period === 'all';
+      var windowStartTs = 0;
+      var periodDays = STATE.period || 90;
+      if (!isAllTime) {
+        periodDays = Math.min(STATE.period || 90, meta.windowDays || 90);
+        windowStartTs = Math.floor((Date.now() - (periodDays * 86400 * 1000)) / 1000);
+      }
+      var nowTs = Math.floor(Date.now() / 1000);
+
+      var hourBucketsAbs = {};
+      Object.keys(STATE.hourly).forEach(function(path) {
+        var pts = STATE.hourly[path];
+        if (!pts || !pts.length) return;
+        pts.forEach(function(pt) {
+          var ts = pt[0], v = pt[1];
+          if (!v || ts < windowStartTs) return;
+          var bucket = Math.floor(ts / 3600) * 3600;
+          hourBucketsAbs[bucket] = (hourBucketsAbs[bucket] || 0) + v;
+        });
+      });
+
+      var groupSums = {};
+      var groupCounts = {};
+      for (var d = 0; d < 7; d++) {
+        groupSums[d] = {};
+        groupCounts[d] = {};
+        for (var h = 0; h < 24; h++) {
+          groupSums[d][h] = 0;
+          groupCounts[d][h] = 0;
+        }
+      }
+
+      var firstHour = Math.floor(windowStartTs / 3600) * 3600;
+      var lastHour  = Math.floor(nowTs / 3600) * 3600;
+      for (var t = firstHour; t <= lastHour; t += 3600) {
+        var date = new Date(t * 1000);
+        var dy = date.getUTCDay();
+        var hr = date.getUTCHours();
+        groupSums[dy][hr] += (hourBucketsAbs[t] || 0);
+        groupCounts[dy][hr]++;
+      }
+
+      var aggValues = {};
+      var globalMax = 0;
+      for (var d2 = 0; d2 < 7; d2++) {
+        aggValues[d2] = {};
+        for (var h2 = 0; h2 < 24; h2++) {
+          var n = groupCounts[d2][h2];
+          var avg = n > 0 ? Math.round(groupSums[d2][h2] / n) : null;
+          aggValues[d2][h2] = avg;
+          if (avg && avg > globalMax) globalMax = avg;
+        }
+      }
+
+      if (globalMax === 0) {
+        container.className = 'chart-empty';
+        container.innerHTML = 'Not enough data for heatmap (last ' + periodDays + ' days).';
+        return;
+      }
+
+      drawHeatmapGrid(container, aggValues, groupCounts, globalMax,
+        'avg pageviews', isAllTime ? 'all-time' : periodDays, 'reading');
+    }
+
+    function drawHeatmapGrid(container, medians, gridForCount, globalMax, valueLabel, windowDays, mode) {
+      container.className = '';
+      var dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      var jsDayForCol = [1, 2, 3, 4, 5, 6, 0];
+
+      var html = '<div class="heatmap" style="grid-template-columns: 50px repeat(7, 1fr);">';
+      html += '<div class="heatmap__corner"></div>';
+      dayLabels.forEach(function(lab) {
+        html += '<div class="heatmap__col-label">' + lab + '</div>';
+      });
+
+      for (var hr = 0; hr < 24; hr++) {
+        html += '<div class="heatmap__row-label">' + String(hr).padStart(2, '0') + ':00</div>';
+        for (var col = 0; col < 7; col++) {
+          var dy = jsDayForCol[col];
+          var v = medians[dy][hr];
+          var n = (typeof gridForCount[dy][hr] === 'number')
+            ? gridForCount[dy][hr]
+            : (gridForCount[dy][hr] && gridForCount[dy][hr].length) || 0;
+
+          if (v == null) {
+            var nullTip = mode === 'reading' ? 'No data this slot' : 'No articles published';
+            html += '<div class="heatmap__cell heatmap__cell--null" title="' + nullTip + '">—</div>';
+          } else {
+            var intensity = v / globalMax;
+            var alpha = 0.15 + intensity * 0.85;
+            // SVG/inline rgba for the heatmap intensity ramp. The Insights
+            // CSS audit treats this string as the canonical ported form.
+            var bg = 'rgba(158, 0, 0, ' + alpha.toFixed(2) + ')';
+            var textColor = intensity > 0.5 ? 'var(--white)' : 'var(--text)';
+            var tipN = mode === 'reading'
+              ? '(over ' + n + ' such hours)'
+              : '(' + n + ' article' + (n === 1 ? '' : 's') + ')';
+            html += '<div class="heatmap__cell" style="background: ' + bg + '; color: ' + textColor + ';" ' +
+              'title="' + dayLabels[col] + ' ' + String(hr).padStart(2, '0') + ':00 — ' +
+              formatCount(v) + ' ' + valueLabel + ' ' + tipN + '">' +
+              formatCount(v) + '</div>';
+          }
+        }
+      }
+      html += '</div>';
+
+      var note = mode === 'reading'
+        ? 'Times in UTC. Each cell shows the average pageviews received during a typical hour at that day-of-week + hour, over the last ' + windowDays + ' days. Brighter red = busier reading slot.'
+        : 'Times in UTC. Each cell shows the median first-24h views for articles published in that slot, last ' + windowDays + ' days. Brighter red = better publishing slot.';
+      html += '<div class="ins-note">' + note + '</div>';
+
+      container.innerHTML = html;
+    }
+
+    /* ============ OUTLIERS — gems & traps ============ */
+    function renderGemsTrapsPane() {
+      // Wire mode toggle once
+      Array.prototype.forEach.call(document.querySelectorAll('#gtToggle button'), function(b) {
+        if (b._wired) return;
+        b.addEventListener('click', function() {
+          STATE.gtMode = b.dataset.mode;
+          Array.prototype.forEach.call(document.querySelectorAll('#gtToggle button'), function(b2) {
+            b2.classList.toggle('active', b2 === b);
+          });
+          renderGTBody();
+        });
+        b._wired = true;
+      });
+      renderGTBody();
+    }
+
+    function renderGTBody() {
+      var body = document.getElementById('gtBody');
+      var sub = document.getElementById('gtSubhead');
+      if (!body) return;
+      if (STATE.gtMode === 'gems') {
+        if (sub) sub.innerHTML = 'Articles with strong reader engagement that didn\'t reach a wide audience. ' +
+          'These are candidates for renewed promotion — quality work the algorithm missed.';
+        body.innerHTML = renderGemsList();
+      } else {
+        if (sub) sub.innerHTML = 'Articles that drew large audiences but couldn\'t hold attention. ' +
+          'Headline did its job; the content didn\'t. Worth reviewing whether to keep using these patterns.';
+        body.innerHTML = renderTrapsList();
+      }
+      // Wire row clicks → drawer
+      Array.prototype.forEach.call(body.querySelectorAll('.gt-row[data-postid]'), function(row) {
+        row.addEventListener('click', function() { openDrawer(row.dataset.postid); });
+      });
+    }
+
+    function renderGemsList() {
+      var candidates = STATE.articles.filter(function(a) {
+        if (!a.metrics) return false;
+        var wc = wordCount(a);
+        if (!wc || wc < 200) return false;
+        if (!a.metrics.avgEngagementTimeSecs) return false;
+        var pv = a.metrics.pageViews || 0;
+        if (pv < 30 || pv > 1000) return false;
+        var expected = wc * (60 / 225);
+        var rt = a.metrics.avgEngagementTimeSecs / expected;
+        if (rt < 0.5 || rt > 1.5) return false;
+        a._rt = rt;
+        return true;
+      }).sort(function(a, b) { return b._rt - a._rt; });
+
+      if (!candidates.length) {
+        return '<div class="ins-loading">No qualifying gems found.</div>';
+      }
+
+      var html = '<div class="gt-list"><div class="gt-header"><span>Article</span><span>Views</span><span>Read-thru</span><span>Words</span><span>Engaged</span></div>';
+      candidates.slice(0, 30).forEach(function(a) {
+        var rtPct = Math.round(a._rt * 100) + '%';
+        var rtCls = a._rt >= 0.6 && a._rt <= 1.2 ? 'gt-row__metric--green' : 'gt-row__metric--amber';
+        var pid = a.postID || '';
+        html += '<div class="gt-row" data-postid="' + esc(pid) + '">' +
+          '<div>' +
+            '<div class="gt-row__title">' + esc(a.postTitle || '(untitled)') + '</div>' +
+            '<div class="gt-row__sub">' + esc(a.postAuthor || '—') + ' · ' + esc(formatDate(a.publishedDateTime)) + '</div>' +
+          '</div>' +
+          '<span class="gt-row__metric gt-row__metric--red">' + formatCount(a.metrics.pageViews) + '</span>' +
+          '<span class="gt-row__metric ' + rtCls + '">' + rtPct + '</span>' +
+          '<span class="gt-row__metric">' + wordCount(a).toLocaleString() + '</span>' +
+          '<span class="gt-row__metric">' + (a.metrics.engagementRate ? formatPct(a.metrics.engagementRate) : '—') + '</span>' +
+          '</div>';
+      });
+      html += '</div>';
+      return html;
+    }
+
+    function renderTrapsList() {
+      var candidates = STATE.articles.filter(function(a) {
+        if (!a.metrics) return false;
+        var wc = wordCount(a);
+        if (!wc || wc < 300) return false;
+        if (!a.metrics.avgEngagementTimeSecs) return false;
+        var pv = a.metrics.pageViews || 0;
+        if (pv < 1000) return false;
+        var expected = wc * (60 / 225);
+        var rt = a.metrics.avgEngagementTimeSecs / expected;
+        if (rt >= 0.3) return false;
+        a._rt = rt;
+        return true;
+      }).sort(function(a, b) { return (b.metrics.pageViews || 0) - (a.metrics.pageViews || 0); });
+
+      if (!candidates.length) {
+        return '<div class="ins-loading">No qualifying traps found.</div>';
+      }
+
+      var html = '<div class="gt-list"><div class="gt-header"><span>Article</span><span>Views</span><span>Read-thru</span><span>Words</span><span>Engaged</span></div>';
+      candidates.slice(0, 30).forEach(function(a) {
+        var rtPct = Math.round(a._rt * 100) + '%';
+        var pid = a.postID || '';
+        html += '<div class="gt-row" data-postid="' + esc(pid) + '">' +
+          '<div>' +
+            '<div class="gt-row__title">' + esc(a.postTitle || '(untitled)') + '</div>' +
+            '<div class="gt-row__sub">' + esc(a.postAuthor || '—') + ' · ' + esc(formatDate(a.publishedDateTime)) + '</div>' +
+          '</div>' +
+          '<span class="gt-row__metric gt-row__metric--green">' + formatCount(a.metrics.pageViews) + '</span>' +
+          '<span class="gt-row__metric gt-row__metric--red">' + rtPct + '</span>' +
+          '<span class="gt-row__metric">' + wordCount(a).toLocaleString() + '</span>' +
+          '<span class="gt-row__metric">' + (a.metrics.engagementRate ? formatPct(a.metrics.engagementRate) : '—') + '</span>' +
+          '</div>';
+      });
+      html += '</div>';
+      return html;
+    }
+
+    /* ================================================================
+       INIT — auth-guard entry point
+       ================================================================ */
+    window.nlAuthReady = function(session) {
+      // Determine admin status (drives export button visibility)
+      var toolPerms = (session && session.tools && session.tools[NL_TOOL_KEY]) || {};
+      STATE.isAdmin = !!(toolPerms.admin || (session && session.role === 'nl-admin'));
+
+      // Restore view preference
+      try {
+        var savedView = localStorage.getItem(LS_KEY_VIEW);
+        if (savedView === 'list' || savedView === 'grid') STATE.view = savedView;
+      } catch (e) {}
+
+      init();
+    };
+
+    function init() {
+      readStateFromUrl();
+
+      // Skeleton tab / sub-tab / period / drawer wiring
+      Array.prototype.forEach.call(document.querySelectorAll('.wa-tab'), function(b) {
+        b.addEventListener('click', function() { activateTab(b.dataset.tab); });
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('.wa-subtab'), function(b) {
+        b.addEventListener('click', function() { activateSubTab(b.dataset.subtab); });
+      });
+      Array.prototype.forEach.call(document.querySelectorAll('.period-btn'), function(b) {
+        b.addEventListener('click', function() { activatePeriod(b.dataset.value); });
+      });
+      document.getElementById('drawerClose').addEventListener('click', closeDrawer);
+      document.getElementById('drawerBackdrop').addEventListener('click', closeDrawer);
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && document.getElementById('articleDrawer').classList.contains('is-open')) {
+          closeDrawer();
+        }
+      });
+
+      // Browse pane wiring + data load
+      applyViewToggleUI();
+      wireBrowseControls();
+      loadIndex();
+
+      // Restore initial state from URL
+      activateTab(STATE.tab);
+      activateSubTab(STATE.perfTab);
+      activatePeriod(STATE.period);
+      if (STATE.openArticle) openDrawer(STATE.openArticle);
+
+      // Reveal page (auth-guard hides #pageWrap until auth resolves)
+      document.getElementById('pageWrap').style.display = '';
+    }
+  </script>
+</body>
+</html>
