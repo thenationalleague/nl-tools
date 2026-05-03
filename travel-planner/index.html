@@ -10,9 +10,10 @@
   v38.0| 03/05/2026 | Tool key → staff-travel-planner (matches RTDB).
        |            | Removed stadium preset — station is default, custom uses
        |            |   Google Places Autocomplete dropdown.
-       |            | Depart bookend time moved to timeline column (left-aligned).
-       |            | Migrated google.maps.Marker → AdvancedMarkerElement.
-       |            | Import 'places' + 'marker' libraries on init.
+       |            | Depart/arrive bookend times in timeline column (left-aligned).
+       |            | Custom NL map style (muted base, transport emphasis).
+       |            | Legacy markers retained (AdvancedMarkerElement needs Cloud
+       |            |   Map ID registration which isn't available).
   v37.1| 02/05/2026 | addr() uses postcode only for geocoding.
   v37.0| 02/05/2026 | Shareable URL state.
   v36.0| 02/05/2026 | Station data from clubs-meta.json. Multi-station parallel search.
@@ -51,11 +52,10 @@
   .tp__input:focus,.tp__select:focus{outline:none;border-color:var(--navy)}
   .tp__select-wrap{position:relative}.tp__select-wrap::after{content:"▾";position:absolute;right:12px;top:50%;transform:translateY(-50%);color:var(--text-muted);pointer-events:none}
 
-  /* AC — uses brand .club-picker classes. Only tool-specific addition is
-     the crest-in-input overlay when a club is selected. */
-  .club-picker__wrap{position:relative}
-  .tp__cp-crest{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:28px;height:28px;object-fit:contain;pointer-events:none;display:none;z-index:2}
-  .club-picker.has-crest .club-picker__input{padding-left:46px}
+  /* AC — club-picker uses brand flex layout (crest + input as siblings).
+     Only override: hide crest by default, show when club is selected. */
+  .club-picker__crest{display:none}
+  .club-picker.has-crest .club-picker__crest{display:block}
 
   /* Direction toggle */
   .tp__dir-toggle{display:flex;border-radius:var(--radius);overflow:hidden;border:2px solid var(--border);margin-bottom:12px}
@@ -180,7 +180,7 @@
       <div class="tp__field">
         <div class="club-picker" id="fixClubWrap">
           <div class="club-picker__wrap">
-            <img class="tp__cp-crest" id="fixClubCrest" src="" alt="" onerror="this.onerror=null;this.style.display='none';">
+            <img class="club-picker__crest" id="fixClubCrest" src="" alt="" onerror="this.onerror=null;this.style.display='none';">
             <input class="club-picker__input" type="text" id="fixClubInput" placeholder="Start typing a club name…" autocomplete="off">
           </div>
           <div class="club-picker__dropdown" id="fixClubAC"></div>
@@ -235,10 +235,10 @@
     <div class="tp__panel">
       <div class="tp__panel-title">Custom Fixture</div>
       <div class="tp__field"><label class="tp__label">Home club</label>
-        <div class="club-picker" id="manHomeW"><div class="club-picker__wrap"><img class="tp__cp-crest" id="manHomeCr" src="" alt="" onerror="this.onerror=null;this.style.display='none';"><input class="club-picker__input" type="text" id="manHomeI" placeholder="Home club…" autocomplete="off"></div><div class="club-picker__dropdown" id="manHomeAC"></div></div>
+        <div class="club-picker" id="manHomeW"><div class="club-picker__wrap"><img class="club-picker__crest" id="manHomeCr" src="" alt="" onerror="this.onerror=null;this.style.display='none';"><input class="club-picker__input" type="text" id="manHomeI" placeholder="Home club…" autocomplete="off"></div><div class="club-picker__dropdown" id="manHomeAC"></div></div>
       </div>
       <div class="tp__field"><label class="tp__label">Away club</label>
-        <div class="club-picker" id="manAwayW"><div class="club-picker__wrap"><img class="tp__cp-crest" id="manAwayCr" src="" alt="" onerror="this.onerror=null;this.style.display='none';"><input class="club-picker__input" type="text" id="manAwayI" placeholder="Away club…" autocomplete="off"></div><div class="club-picker__dropdown" id="manAwayAC"></div></div>
+        <div class="club-picker" id="manAwayW"><div class="club-picker__wrap"><img class="club-picker__crest" id="manAwayCr" src="" alt="" onerror="this.onerror=null;this.style.display='none';"><input class="club-picker__input" type="text" id="manAwayI" placeholder="Away club…" autocomplete="off"></div><div class="club-picker__dropdown" id="manAwayAC"></div></div>
       </div>
       <div class="tp__field"><label class="tp__label">Kick-off</label>
         <input class="tp__input" type="datetime-local" id="manKO">
@@ -298,7 +298,7 @@ var crsLookup={}; // station name → CRS code
 var lastSkipWalk=null; // 'first','last', or null
 var lastSearch=null;
 
-async function initMap(){try{await google.maps.importLibrary('maps');await google.maps.importLibrary('geometry');await google.maps.importLibrary('marker');await google.maps.importLibrary('places');mapOK=true;initPlacesAC()}catch(e){}}
+async function initMap(){try{await google.maps.importLibrary('maps');await google.maps.importLibrary('geometry');await google.maps.importLibrary('places');mapOK=true;initPlacesAC()}catch(e){}}
 
 function initPlacesAC(){
   // Attach Google Places Autocomplete to custom address inputs
@@ -357,7 +357,7 @@ function setupAC(iid,lid,wid,cb){var inp=document.getElementById(iid),l=document
 function fAC(q,lid,cb){var l=document.getElementById(lid);q=(q||'').toLowerCase().trim();var f=q?clubs.filter(function(c){return c.name.toLowerCase().indexOf(q)!==-1||(c.short&&c.short.toLowerCase().indexOf(q)!==-1)||(c.code&&c.code.toLowerCase()===q)}):clubs;if(!f.length){l.innerHTML='<div class="club-picker__option" style="color:var(--text-muted);justify-content:center;cursor:default">No clubs found</div>';l.classList.add('open');return}l.innerHTML=f.slice(0,12).map(function(c){return'<div class="club-picker__option" data-c="'+c.name.replace(/"/g,'&quot;')+'"><img src="'+cU(c.name)+'" alt="" onerror="this.onerror=null;this.src=\''+FC+'\'"><span class="club-picker__option-name">'+c.name+'</span><span class="club-picker__option-div">'+c.stadium+'</span></div>'}).join('');l.classList.add('open');l.querySelectorAll('[data-c]').forEach(function(el){el.addEventListener('mousedown',function(){cb(clubs.find(function(c){return c.name===el.getAttribute('data-c')}));l.classList.remove('open')})})}
 
 // ── Fix club → fixtures ──
-function selFC(c){fixClub=c;fixMatch=null;document.getElementById('fixConfig').style.display='none';var i=document.getElementById('fixClubInput'),cr=document.getElementById('fixClubCrest'),w=document.getElementById('fixClubWrap');if(c){i.value=c.name;cr.src=cU(c.name);cr.style.display='block';w.classList.add('has-crest');updatePresetLabels();loadFix(c)}else{cr.style.display='none';w.classList.remove('has-crest');document.getElementById('fixFixtureArea').innerHTML=''}syncURL()}
+function selFC(c){fixClub=c;fixMatch=null;document.getElementById('fixConfig').style.display='none';var i=document.getElementById('fixClubInput'),cr=document.getElementById('fixClubCrest'),w=document.getElementById('fixClubWrap');if(c){i.value=c.name;cr.src=cU(c.name);w.classList.add('has-crest');updatePresetLabels();loadFix(c)}else{w.classList.remove('has-crest');document.getElementById('fixFixtureArea').innerHTML=''}syncURL()}
 function loadFix(club){var a=document.getElementById('fixFixtureArea');a.innerHTML='<div class="tp__loading"><div class="tp__spinner"></div>Loading fixtures…</div>';if(!club.optaID){a.innerHTML='<div class="tp__error">No Opta ID.</div>';return}Promise.all(CIDS.map(function(cid){return fetch(NLS+'/matches/?seasonID='+SID+'&competitionID='+cid+'&sort=kickOffDateUTC&page.size=100&page.number=1').then(function(r){return r.json()}).catch(function(){return{data:[]}})})).then(function(res){var all=[];res.forEach(function(r){if(r.data)all=all.concat(r.data)});var tid=club.optaID;var up=all.filter(function(m){var x=m.attributes,p=(x.matchPeriod||'').toLowerCase();return(p==='prematch'||!p||p==='fixture')&&((x.homeTeam&&x.homeTeam.teamID===tid)||(x.awayTeam&&x.awayTeam.teamID===tid))}).sort(function(a,b){return new Date(nd(a.attributes.kickOffDateUTC))-new Date(nd(b.attributes.kickOffDateUTC))});if(!up.length){a.innerHTML='<div class="tp__error">No upcoming fixtures.</div>';return}var h='<div class="tp__panel"><div class="tp__panel-title">Upcoming Fixtures</div><div class="tp__fix-list">';up.slice(0,10).forEach(function(m,i){var x=m.attributes,isH=x.homeTeam&&x.homeTeam.teamID===tid,opp=isH?x.awayTeam:x.homeTeam,oc=clubs.find(function(c){return c.optaID===(opp?opp.teamID:'')}),ko=new Date(nd(x.kickOffDateUTC));h+='<div class="tp__fix-item" onclick="selFix('+i+')"><img src="'+cU(opp?opp.name:(oc?oc.name:''))+'" alt="" onerror="this.onerror=null;this.src=\''+FC+'\'"><div class="info"><div class="teams">'+(isH?club.name+' v '+(opp?opp.name:'TBC'):(opp?opp.name:'TBC')+' v '+club.name)+'</div><div class="meta">'+fd(ko)+' '+ft(ko)+(oc?' · '+oc.stadium:'')+'</div></div><span class="badge badge--'+(isH?'home':'away')+'">'+(isH?'H':'A')+'</span></div>'});h+='</div></div>';a.innerHTML=h;a._m=up.slice(0,10);if(_pendingMatchID){var pi=a._m.findIndex(function(m){return m.id===_pendingMatchID});if(pi!==-1)selFix(pi);_pendingMatchID=null}}).catch(function(){a.innerHTML='<div class="tp__error">Failed to load fixtures.</div>'})}
 function selFix(i){var a=document.getElementById('fixFixtureArea');if(!a._m||!a._m[i])return;fixMatch=a._m[i];a.querySelectorAll('.tp__fix-item').forEach(function(el,j){el.classList.toggle('selected',j===i)});document.getElementById('fixConfig').style.display='block';updatePresetLabels();upPostNote();syncURL();document.getElementById('fixConfig').scrollIntoView({behavior:'smooth'})}
 
@@ -401,15 +401,15 @@ var manHomeClub=null,manAwayClub=null,manDir='to',manPreset='station';
 function selManHome(c){
   manHomeClub=c;
   var i=document.getElementById('manHomeI'),cr=document.getElementById('manHomeCr'),w=document.getElementById('manHomeW');
-  if(c){i.value=c.name;cr.src=cU(c.name);cr.style.display='block';w.classList.add('has-crest');updateManPresetLabels()}
-  else{cr.style.display='none';w.classList.remove('has-crest')}
+  if(c){i.value=c.name;cr.src=cU(c.name);w.classList.add('has-crest');updateManPresetLabels()}
+  else{w.classList.remove('has-crest')}
   syncURL();
 }
 function selManAway(c){
   manAwayClub=c;
   var i=document.getElementById('manAwayI'),cr=document.getElementById('manAwayCr'),w=document.getElementById('manAwayW');
-  if(c){i.value=c.name;cr.src=cU(c.name);cr.style.display='block';w.classList.add('has-crest');updateManPresetLabels()}
-  else{cr.style.display='none';w.classList.remove('has-crest')}
+  if(c){i.value=c.name;cr.src=cU(c.name);w.classList.add('has-crest');updateManPresetLabels()}
+  else{w.classList.remove('has-crest')}
   syncURL();
 }
 function setManDir(d){
@@ -1007,7 +1007,10 @@ var NL_MAP_STYLE=[{featureType:"all",elementType:"labels.text.fill",stylers:[{co
 
 function drawMap(r){
   var el=document.getElementById('routeMap');if(!el||!mapOK)return;
-  gMap=new google.maps.Map(el,{zoom:6,center:{lat:52.5,lng:-1.5},disableDefaultUI:true,zoomControl:true,mapId:'nl-travel-planner',styles:NL_MAP_STYLE});
+  gMap=new google.maps.Map(el,{zoom:6,center:{lat:52.5,lng:-1.5},disableDefaultUI:true,zoomControl:true});
+  var styledMap=new google.maps.StyledMapType(NL_MAP_STYLE,{name:'NL'});
+  gMap.mapTypes.set('nl',styledMap);
+  gMap.setMapTypeId('nl');
   var bounds=new google.maps.LatLngBounds();
   // Step polylines with colours
   if(r.legs&&r.legs[0]&&r.legs[0].steps){
@@ -1029,13 +1032,6 @@ function drawMap(r){
   }
   if(!bounds.isEmpty())gMap.fitBounds(bounds,40);
 
-  // Helper: create a coloured circle pin element
-  function circlePin(col,size){
-    var d=document.createElement('div');
-    d.style.cssText='width:'+size+'px;height:'+size+'px;border-radius:50%;background:'+col+';border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.3)';
-    return d;
-  }
-
   // Add markers at boarding/alighting stops
   if(r.legs&&r.legs[0]&&r.legs[0].steps){
     r.legs[0].steps.forEach(function(s){
@@ -1045,31 +1041,31 @@ function drawMap(r){
         var col=ln.color||'#223b7c';
         if(sd.departureStop&&sd.departureStop.location&&sd.departureStop.location.latLng){
           var dLoc=sd.departureStop.location.latLng;
-          new google.maps.marker.AdvancedMarkerElement({
+          new google.maps.Marker({
             position:{lat:dLoc.latitude,lng:dLoc.longitude},
             map:gMap,title:sd.departureStop.name,
-            content:circlePin(col,10)
+            icon:{path:google.maps.SymbolPath.CIRCLE,scale:5,fillColor:col,fillOpacity:1,strokeColor:'#fff',strokeWeight:2}
           });
         }
         if(sd.arrivalStop&&sd.arrivalStop.location&&sd.arrivalStop.location.latLng){
           var aLoc=sd.arrivalStop.location.latLng;
-          new google.maps.marker.AdvancedMarkerElement({
+          new google.maps.Marker({
             position:{lat:aLoc.latitude,lng:aLoc.longitude},
             map:gMap,title:sd.arrivalStop.name,
-            content:circlePin(col,10)
+            icon:{path:google.maps.SymbolPath.CIRCLE,scale:5,fillColor:col,fillOpacity:1,strokeColor:'#fff',strokeWeight:2}
           });
         }
       }
     });
   }
-  // Origin/destination markers (default pins)
+  // Origin/destination markers
   if(r.legs&&r.legs[0]){
     var lg=r.legs[0];
     if(lg.startLocation&&lg.startLocation.latLng){
-      new google.maps.marker.AdvancedMarkerElement({position:{lat:lg.startLocation.latLng.latitude,lng:lg.startLocation.latLng.longitude},map:gMap,title:'Start'});
+      new google.maps.Marker({position:{lat:lg.startLocation.latLng.latitude,lng:lg.startLocation.latLng.longitude},map:gMap,title:'Start'});
     }
     if(lg.endLocation&&lg.endLocation.latLng){
-      new google.maps.marker.AdvancedMarkerElement({position:{lat:lg.endLocation.latLng.latitude,lng:lg.endLocation.latLng.longitude},map:gMap,title:'Destination'});
+      new google.maps.Marker({position:{lat:lg.endLocation.latLng.latitude,lng:lg.endLocation.latLng.longitude},map:gMap,title:'Destination'});
     }
   }
 }
