@@ -166,7 +166,8 @@
 
   /* Board — COMPACT */
   .tp__board{background:var(--white);overflow:hidden}
-  .tp__leg{display:flex;border-bottom:1px solid var(--border)}.tp__leg:last-child{border-bottom:none}
+  .tp__leg{display:flex;border-bottom:1px solid var(--border);transition:background .1s}.tp__leg:last-child{border-bottom:none}
+  .tp__leg:hover{background:var(--off-white)}
   .tp__leg-timeline{width:54px;min-width:54px;display:flex;flex-direction:column;align-items:center;padding:10px 0}
   .tp__leg-time{font-size:var(--text-xs);font-weight:800;font-variation-settings:'wght' 800;color:var(--text);z-index:1}
   .tp__leg-timeline .line{flex:1;width:2px;background:var(--border);margin:3px 0}
@@ -953,6 +954,7 @@ function render(routes,idx,oL,dL){
   // Find overall departure time from first transit step
   var overallDep='';
   var steps=consol(leg.steps);
+  _currentSteps=steps; // store for leg zoom
   for(var si=0;si<(leg.steps||[]).length;si++){
     var ts=leg.steps[si];
     if(ts.transitDetails&&ts.transitDetails.stopDetails&&ts.transitDetails.stopDetails.departureTime){
@@ -1238,7 +1240,7 @@ function render(routes,idx,oL,dL){
     var dotStyle=lineCol?' style="border-color:'+lineCol+'"':'';
     var modeStyle=lineCol?' style="background:'+lineCol+';color:'+(lineTxt||'#fff')+'"':'';
 
-    h+='<div class="tp__leg tp__leg--'+cls+'">';
+    h+='<div class="tp__leg tp__leg--'+cls+'" onclick="zoomToStep('+si2+')" style="cursor:pointer">';
     h+='<div class="tp__leg-timeline"><div class="dot"'+dotStyle+'></div>';
     if(dep)h+='<div class="tp__leg-time">'+dep+'</div>';
     h+='<div class="line"'+(lineCol?' style="background:'+lineCol+'"':'')+'></div>';
@@ -1258,6 +1260,45 @@ function render(routes,idx,oL,dL){
   ra.scrollIntoView({behavior:'smooth',block:'start'});
 }
 function sw(i,o,d){aIdx=i;render(allR,i,o,d)}
+
+// Store current consolidated steps for leg zoom
+var _currentSteps=[];
+var _highlightPoly=null;
+
+function zoomToStep(stepIdx){
+  if(!gMap||!_currentSteps[stepIdx])return;
+  var s=_currentSteps[stepIdx];
+  var bounds=new google.maps.LatLngBounds();
+  var paths=[];
+
+  // Collect polylines from this step (consolidated walks have _w array)
+  if(s._w){
+    s._w.forEach(function(ws){
+      if(ws.polyline&&ws.polyline.encodedPolyline){
+        try{var p=google.maps.geometry.encoding.decodePath(ws.polyline.encodedPolyline);p.forEach(function(pt){bounds.extend(pt)});paths=paths.concat(p)}catch(e){}
+      }
+    });
+  }else if(s.polyline&&s.polyline.encodedPolyline){
+    try{var p=google.maps.geometry.encoding.decodePath(s.polyline.encodedPolyline);p.forEach(function(pt){bounds.extend(pt)});paths=paths.concat(p)}catch(e){}
+  }
+
+  // Also try start/end locations if no polyline
+  if(bounds.isEmpty()){
+    if(s.startLocation&&s.startLocation.latLng)bounds.extend({lat:s.startLocation.latLng.latitude,lng:s.startLocation.latLng.longitude});
+    if(s.endLocation&&s.endLocation.latLng)bounds.extend({lat:s.endLocation.latLng.latitude,lng:s.endLocation.latLng.longitude});
+  }
+
+  if(!bounds.isEmpty()){
+    gMap.fitBounds(bounds,{top:60,right:60,bottom:60,left:60});
+    // Highlight this leg's polyline
+    if(_highlightPoly){_highlightPoly.setMap(null);_highlightPoly=null}
+    if(paths.length){
+      _highlightPoly=new google.maps.Polyline({path:paths,strokeColor:'#9e0000',strokeWeight:6,strokeOpacity:.8,map:gMap,zIndex:100});
+      // Auto-clear highlight after 4 seconds
+      setTimeout(function(){if(_highlightPoly){_highlightPoly.setMap(null);_highlightPoly=null}},4000);
+    }
+  }
+}
 
 // ── Map (styled via Cloud Map ID: a47d3923fb8143cb8894dc48) ──
 
