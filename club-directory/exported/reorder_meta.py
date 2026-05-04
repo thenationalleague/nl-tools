@@ -87,20 +87,49 @@ STADIUM = {
 
 POSTCODE_RE = re.compile(r'\s*[,.]?\s*\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b\s*[/.]?\s*$')
 
-def clean_address(addr, club_name, postcode):
+VENUE_SUFFIXES = re.compile(r'\b(Stadium|Arena|Hall|Ground|Field|Lawn|Pavilion|Hub)\b\s*$', re.IGNORECASE)
+ROAD_SUFFIXES = re.compile(r'\b(Road|Lane|Street|Way|Avenue|Drive|Close|Walk|Place|Parkway|Crescent|Gardens|Mews|Terrace|Park)\b', re.IGNORECASE)
+
+def _norm(s):
+    return re.sub(r'\s+', ' ', s.replace('.', '').replace(',', '')).strip().lower()
+
+def _stadium_variants(stadium_name, sponsor_name):
+    pool = set()
+    for s in (stadium_name, sponsor_name):
+        if not s: continue
+        for v in (s, 'The ' + s, s + ' Stadium', 'The ' + s + ' Stadium'):
+            pool.add(_norm(v))
+        if s.lower().startswith('the '):
+            bare = s[4:]
+            pool.add(_norm(bare))
+            pool.add(_norm(bare + ' Stadium'))
+    return pool
+
+def _strip_stadium_prefix(addr, stadium_name, sponsor_name):
+    if not addr: return addr
+    pool = _stadium_variants(stadium_name, sponsor_name)
+    while ',' in addr:
+        first, rest = addr.split(',', 1)
+        first_clean = first.strip()
+        rest_clean = rest.lstrip(' ,').strip()
+        next_tok = rest_clean.split(',', 1)[0].strip()
+
+        has_venue_suffix = bool(VENUE_SUFFIXES.search(first_clean))
+        matches_name = _norm(first_clean) in pool
+        next_is_road = bool(ROAD_SUFFIXES.search(next_tok))
+
+        if has_venue_suffix or (matches_name and next_is_road):
+            addr = rest_clean
+            continue
+        break
+    return addr
+
+def clean_address(addr, club_name, postcode, stadium_name, sponsor_name):
     if not addr: return addr
     s = addr
-    # Strip trailing postcode (and any junk after it like "/")
+    # 1. Strip trailing postcode
     s = POSTCODE_RE.sub('', s).rstrip(' ,.;:')
-    # Punctuation tidy: smart-quote -> comma; missing space after comma;
-    # collapse internal whitespace; replace ". " with ", " mid-sentence
-    s = s.replace('’', ',')          # rare PDF artefact
-    s = re.sub(r',(?=\S)', ', ', s)  # add space after commas
-    s = re.sub(r'\s+,', ',', s)      # remove space before commas
-    s = re.sub(r'\.\s+(?=[A-Z])', ', ', s)  # ". Hertfordshire" -> ", Hertfordshire"
-    s = re.sub(r'\s+', ' ', s).strip(' ,.;:')
-    # Strip leading "ClubName Football Club, " / "ClubName FC, " / "ClubName, "
-    # — longest variant first, otherwise the short one matches and leaves "FC, "
+    # 2. Strip leading "ClubName, " / "ClubName FC, " / "ClubName Football Club, "
     name_variants = [
         club_name + ' Football Club',
         club_name.replace("'", '’') + ' Football Club',
@@ -112,9 +141,17 @@ def clean_address(addr, club_name, postcode):
         new = pat.sub('', s)
         if new != s:
             s = new
-            break  # only strip one prefix
-    # Tidy stray whitespace and trailing punctuation again
-    s = re.sub(r'\s+', ' ', s).strip(' ,.;')
+            break
+    # 3. Tidy punctuation
+    s = s.replace('’', ',')
+    s = re.sub(r',(?=\S)', ', ', s)
+    s = re.sub(r'\s+,', ',', s)
+    s = re.sub(r'\.\s+(?=[A-Z])', ', ', s)
+    s = re.sub(r'\s+', ' ', s).strip(' ,.;:')
+    # 4. Strip stadium prefix(es)
+    s = _strip_stadium_prefix(s, stadium_name, sponsor_name)
+    # 5. Final tidy
+    s = re.sub(r'\s+', ' ', s).strip(' ,.;:')
     return s
 
 # Logical key order for every club record
@@ -127,7 +164,7 @@ KEY_ORDER = [
     'capacity', 'capacity_seated',
     'pitch',
     'address', 'postcode',
-    'station', 'distance_to_station',
+    'station',
     'fa_membership',
     'kit',
     'sponsors',
@@ -139,8 +176,26 @@ for c in meta['clubs']:
     name = c['name']
     proper, sponsor = STADIUM.get(name, (c.get('stadium'), None))
 
-    # Clean address: strip postcode and club name prefix
-    cleaned_addr = clean_address(c.get('address',''), name, c.get('postcode',''))
+    # Manual address overrides for cases the parser can't recover automatically
+    # (PDF text-flow issues, ground-share routing notes, etc.)
+    MANUAL_ADDRESS = {
+        # PDF text-flow issues / addresses with no commas in the PDF
+        'Altrincham': 'Moss Lane, Altrincham, Cheshire',
+        'Horsham': 'Worthing Road, Horsham',
+        'Leamington': 'Harbury Lane, Bishops Tachbrook, Leamington Spa',
+        # Ground-share with Bridlington — keep the c/o note
+        'Scarborough Athletic': 'c/o Bridlington Town AFC, Queensgate, Bridlington, East Yorkshire',
+        # PDF only lists venue + town (no street given) — fill in the actual street
+        'Braintree Town': 'Cressing Road, Braintree, Essex',
+        'Spennymoor Town': 'Brewery Field, Wood Vue, Spennymoor',
+        'Hereford': 'Edgar Street, Hereford',
+        'Buxton': 'Silverlands, Buxton',
+    }
+    if name in MANUAL_ADDRESS:
+        cleaned_addr = MANUAL_ADDRESS[name]
+    else:
+        cleaned_addr = clean_address(c.get('address',''), name, c.get('postcode',''),
+                                     proper, sponsor)
 
     # Build re-ordered record
     rec = {}
@@ -160,8 +215,6 @@ for c in meta['clubs']:
     rec['address'] = cleaned_addr
     rec['postcode'] = c.get('postcode')
     rec['station'] = c.get('station')
-    if c.get('distance_to_station') is not None:
-        rec['distance_to_station'] = c['distance_to_station']
     if c.get('fa_membership') is not None:
         rec['fa_membership'] = c['fa_membership']
     if c.get('kit') is not None:
