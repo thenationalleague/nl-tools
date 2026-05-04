@@ -33,14 +33,15 @@ def parse_club(text, club_name):
                 'MANAGER','DIRECTORS','FA MEMBERSHIP','PITCH DIMENSIONS','PITCH TYPE',
                 'ENTERPRISE NATIONAL LEAGUE','ENTERPRISE NATIONAL LEAGUE NORTH',
                 'ENTERPRISE NATIONAL LEAGUE SOUTH'}
-        for j in range(contact_idx - 1, max(contact_idx - 5, -1), -1):
+        for j in range(contact_idx - 1, max(contact_idx - 6, -1), -1):
             s = lines[j].strip()
             if not s: continue
             if s in STOP or s.upper() in STOP: break
             if s.isupper() and len(s) > 4: break  # club-name heading
+            # Stop at any line that's somebody else's contact info bleeding in
+            if re.search(r'\b[TMB]\s+0\d', s) or '@' in s: break
             addr_lines.insert(0, s)
-            # One line is usually enough; bail once we have a postcode
-            if re.search(r'\b[A-Z]{1,2}\d[A-Z\d]?\s*\d\s*[A-Z]{2}\b', s): break
+            # Address may span 2 lines — keep walking until we hit a heading.
         if addr_lines:
             addr = ' '.join(addr_lines).strip()
             for old, new in [('S050 9HT','SO50 9HT'),
