@@ -157,6 +157,20 @@
     padding: 24px 20px;
   }
 
+  /* ── Diagnostic status banner (staff view) ──────────────────────────── */
+  .vip-diag {
+    font-size: 12px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin-bottom: 14px;
+    font-family: monospace;
+    line-height: 1.4;
+    word-break: break-word;
+  }
+  .vip-diag--info  { background: #e8f1ff; color: #1a3a6b; border: 1px solid #b8d0f5; }
+  .vip-diag--ok    { background: #e8f5ec; color: #1a5a2a; border: 1px solid #b8d8c0; }
+  .vip-diag--err   { background: #fdecec; color: #7a1a1a; border: 1px solid #e8b8b8; }
+
   /* ── Action buttons ─────────────────────────────────────────────────── */
   .vip-row-btn {
     background: transparent;
@@ -525,6 +539,8 @@
           <div class="page-header__sub">Review club requests and forward changes to DAZN.</div>
         </div>
       </div>
+
+      <div id="vipDiag" class="vip-diag" style="display:none"></div>
 
       <nav class="vip-tabs">
         <button class="vip-tab is-active" data-tab="requests">Requests <span class="vip-tab__count" id="tabRequestsCount" style="display:none">0</span></button>
@@ -1649,29 +1665,74 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     }
   }
 
+  function setDiag(kind, msg) {
+    var el = document.getElementById('vipDiag');
+    if (!el) return;
+    el.style.display = '';
+    el.className = 'vip-diag vip-diag--' + kind;
+    el.textContent = msg;
+  }
+  var _diagState = { orgs: '…', requests: '…', orgsCount: 0, reqsCount: 0 };
+  function refreshDiag() {
+    var bad = (_diagState.orgs === 'err' || _diagState.requests === 'err');
+    var loading = (_diagState.orgs === '…' || _diagState.requests === '…');
+    if (bad) {
+      setDiag('err',
+        'RTDB read failed.\n' +
+        'orgs: ' + _diagState.orgs + '   requests: ' + _diagState.requests + '\n' +
+        'Open Firebase Console → Realtime Database → Rules and Publish the contents of dazn-vip.rules.json. ' +
+        'Then refresh this page.');
+    } else if (loading) {
+      setDiag('info', 'Connecting to RTDB… (orgs: ' + _diagState.orgs + ', requests: ' + _diagState.requests + ')');
+    } else {
+      setDiag('ok', 'Connected. ' + _diagState.orgsCount + ' org' + (_diagState.orgsCount === 1 ? '' : 's')
+        + ', ' + _diagState.reqsCount + ' request' + (_diagState.reqsCount === 1 ? '' : 's') + '.');
+    }
+  }
+
+  function safePaint(fn, name) {
+    try { fn(); }
+    catch (e) {
+      console.error('[dazn-vip] paint error in', name, e);
+      setDiag('err', 'JS error in ' + name + ': ' + (e && e.message ? e.message : String(e)));
+    }
+  }
+
   function attachStaffListeners() {
     /* Paint empty states immediately so the user sees structure even before
        RTDB connects (or if rules deny the read). */
-    paintRequests();
-    paintBrowse();
-    paintNonClubs();
+    safePaint(paintRequests, 'paintRequests');
+    safePaint(paintBrowse,   'paintBrowse');
+    safePaint(paintNonClubs, 'paintNonClubs');
+    refreshDiag();
 
     db.ref('app-data/media-dazn-vip/orgs').on('value', function (snap) {
-      S.orgs = snap.val() || {};
-      paintRequests();
-      paintBrowse();
-      paintNonClubs();
+      var v = snap.val();
+      S.orgs = v || {};
+      _diagState.orgs = 'ok';
+      _diagState.orgsCount = v ? Object.keys(v).length : 0;
+      safePaint(paintRequests, 'paintRequests');
+      safePaint(paintBrowse,   'paintBrowse');
+      safePaint(paintNonClubs, 'paintNonClubs');
       maybeShowSeedPrompt();
+      refreshDiag();
     }, function (err) {
       console.error('[dazn-vip] orgs listener error:', err);
-      toast('Could not read VIP data — check Firebase rules at app-data/media-dazn-vip.', 'error');
+      _diagState.orgs = 'err: ' + (err && err.code ? err.code : (err && err.message ? err.message : 'unknown'));
+      refreshDiag();
     });
 
     db.ref('app-data/media-dazn-vip/requests').on('value', function (snap) {
-      S.requests = snap.val() || {};
-      paintRequests();
+      var v = snap.val();
+      S.requests = v || {};
+      _diagState.requests = 'ok';
+      _diagState.reqsCount = v ? Object.keys(v).length : 0;
+      safePaint(paintRequests, 'paintRequests');
+      refreshDiag();
     }, function (err) {
       console.error('[dazn-vip] requests listener error:', err);
+      _diagState.requests = 'err: ' + (err && err.code ? err.code : (err && err.message ? err.message : 'unknown'));
+      refreshDiag();
     });
   }
 
