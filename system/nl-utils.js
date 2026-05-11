@@ -322,6 +322,30 @@
     window.NL._auditHookInstalled = true;
   };
 
+  /* ── data-audit click delegation ──────────────────────────────────────── */
+  /* Any element (or ancestor) carrying data-audit="action_name" triggers an
+     audit entry when clicked. Optional data-audit-detail supplies a detail
+     string; if omitted, the element's trimmed textContent is used (capped
+     to 80 chars). Handlers can mutate data-audit-detail just before the
+     click to inject runtime context. */
+  function _onAuditClick(e) {
+    var t = e.target && e.target.closest && e.target.closest('[data-audit]');
+    if (!t) return;
+    if (!window.NL.writeAudit) return;
+    var action = t.getAttribute('data-audit');
+    if (!action) return;
+    var detail = t.getAttribute('data-audit-detail');
+    if (detail == null) {
+      detail = (t.textContent || '').replace(/\s+/g, ' ').trim();
+      if (detail.length > 80) detail = detail.slice(0, 80) + '…';
+    }
+    try { window.NL.writeAudit(action, detail); } catch(err) {}
+  }
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('click', _onAuditClick, true);
+  }
+
   /* Auto-install if firebase is already loaded; otherwise wait. */
   if (window.firebase && window.firebase.database) {
     try { window.NL.installAuditHook(); } catch(e) {}
