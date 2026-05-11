@@ -270,11 +270,18 @@
           var toolTitle = (window.NL_TOOL && window.NL_TOOL.title) || '';
           var toolKey   = (typeof NL_TOOL_KEY !== 'undefined' && NL_TOOL_KEY) ||
                           (window.NL_TOOL && window.NL_TOOL.toolKey) || '';
-          var parts = [];
-          if (toolTitle) parts.push(toolTitle);
-          if (toolKey && toolKey !== toolTitle) parts.push('[' + toolKey + ']');
-          parts.push(location.pathname);
-          window.NL.writeAudit('page_opened', parts.join(' '));
+          var throttleKey = 'nl_audit_open_' + (toolKey || location.pathname);
+          var last = parseInt(sessionStorage.getItem(throttleKey) || '0', 10);
+          if (Date.now() - last < 5 * 60 * 1000) {
+            /* recently logged — skip */
+          } else {
+            sessionStorage.setItem(throttleKey, String(Date.now()));
+            var parts = [];
+            if (toolTitle) parts.push(toolTitle);
+            if (toolKey && toolKey !== toolTitle) parts.push('[' + toolKey + ']');
+            parts.push(location.pathname);
+            window.NL.writeAudit('page_opened', parts.join(' '));
+          }
         } catch(e) {}
       }
       if (typeof window.nlAuthReady === 'function') {
