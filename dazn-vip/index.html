@@ -2674,28 +2674,36 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       return;
     }
     if (t.dataset.act === 'save-club') {
-      openReviewModal(clubName);
+      openReviewModalForClub(clubName);
       return;
     }
   }
 
   /* ── Review & send modal (Clubs batch edit → email DAZN) ──────────── */
   /* Workflow:
-       1. Admin makes any combo of adds / edits / removes on a club card.
-       2. Hits "Save & email DAZN" → openReviewModal builds the change
-          summary + pre-fills an editable email draft.
+       1. Admin makes any change on any org (any combo of adds / edits /
+          removes — clubs use a per-card batch UI; non-clubs do one
+          change at a time).
+       2. The change is handed to openReviewModalFor which shows a
+          summary + pre-fills an editable email draft to DAZN.
        3. "Open in Outlook" fires a mailto: with the (possibly edited)
           subject + body. The admin sends it from their mail client.
        4. "Mark as sent" writes a request with status:'sent' to RTDB.
           Later, in the Requests tab, an admin marks it complete once
-          DAZN has confirmed — which is what actually applies the
-          changes to the canonical VIP list. */
+          DAZN has confirmed — that's when the canonical VIP list
+          actually updates. DAZN routes everything; we just allocate. */
   var reviewModalEl = document.getElementById('reviewModal');
-  var reviewCtx = null; /* { clubName, changes } */
+  var reviewCtx = null; /* { orgName, orgCategory, changes } */
 
-  function openReviewModal(clubName) {
+  /* Convenience wrapper for the Clubs tab — builds the pending changes
+     for a club and routes them through the shared review flow. */
+  function openReviewModalForClub(clubName) {
     var changes = buildChangesForClub(clubName);
-    if (!changes.length) {
+    openReviewModalFor(clubName, 'club', changes);
+  }
+
+  function openReviewModalFor(orgName, orgCategory, changes) {
+    if (!changes || !changes.length) {
       toast('No changes to send.', 'error');
       return;
     }
@@ -2709,7 +2717,7 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
         toast('Invalid email on edit: ' + c.after.email, 'error'); return;
       }
     }
-    reviewCtx = { clubName: clubName, changes: changes };
+    reviewCtx = { orgName: orgName, orgCategory: orgCategory || 'club', changes: changes };
 
     /* Build the summary list. */
     var summaryHtml = changes.map(function (c) {
@@ -2734,12 +2742,13 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
        uses. Pass a synthetic request shape so buildEmail behaves the
        same as if the request already existed. */
     var fauxReq = {
-      orgName: clubName,
+      orgName: orgName,
+      orgCategory: reviewCtx.orgCategory,
       changes: changes,
       requestedBy: { name: S.session && S.session.name || '' }
     };
     var built = buildEmail(fauxReq);
-    document.getElementById('reviewModalTitle').textContent = 'Review & send — ' + clubName;
+    document.getElementById('reviewModalTitle').textContent = 'Review & send — ' + orgName;
     document.getElementById('reviewEmailTo').textContent = DAZN_EMAIL;
     document.getElementById('reviewEmailSubject').value = built.subject;
     document.getElementById('reviewEmailBody').value    = built.body;
@@ -2768,9 +2777,11 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     var err = document.getElementById('reviewModalError');
     err.textContent = '';
 
-    var org = S.orgs[reviewCtx.clubName] || {};
+    var orgName = reviewCtx.orgName;
+    var orgCategory = reviewCtx.orgCategory;
+    var org = S.orgs[orgName] || {};
     if (org.openRequestId) {
-      err.textContent = 'There is already an open request for this club. Resolve it from the Requests tab first.';
+      err.textContent = 'There is already an open request for ' + orgName + '. Resolve it from the Requests tab first.';
       return;
     }
 
@@ -2780,8 +2791,8 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     var reqId = uid();
     var now = Date.now();
     var req = {
-      orgName: reviewCtx.clubName,
-      orgCategory: 'club',
+      orgName: orgName,
+      orgCategory: orgCategory,
       requestedBy: {
         uid:   S.session.uid || (firebase.auth().currentUser && firebase.auth().currentUser.uid) || '',
         name:  S.session.name || '',
@@ -2797,17 +2808,18 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
 
     var updates = {};
     updates['app-data/media-dazn-vip/requests/' + reqId] = req;
-    updates['app-data/media-dazn-vip/orgs/' + reviewCtx.clubName + '/openRequestId'] = reqId;
-    updates['app-data/media-dazn-vip/orgs/' + reviewCtx.clubName + '/name'] = reviewCtx.clubName;
-    updates['app-data/media-dazn-vip/orgs/' + reviewCtx.clubName + '/category'] = 'club';
+    updates['app-data/media-dazn-vip/orgs/' + orgName + '/openRequestId'] = reqId;
+    updates['app-data/media-dazn-vip/orgs/' + orgName + '/name']     = orgName;
+    updates['app-data/media-dazn-vip/orgs/' + orgName + '/category'] = orgCategory;
 
-    var clubName = reviewCtx.clubName;
     db.ref().update(updates).then(function () {
-      try { NL.writeAudit('dazn_vip_sent', clubName + ': ' + reviewCtx.changes.length + ' change(s)'); } catch (e) {}
-      clearPending(clubName);
+      try { NL.writeAudit('dazn_vip_sent', orgName + ' (' + orgCategory + '): ' + reviewCtx.changes.length + ' change(s)'); } catch (e) {}
+      if (orgCategory === 'club') {
+        clearPending(orgName);
+        paintClubs();
+      }
       toast('Logged as sent. Mark complete once DAZN confirms.', 'success');
       closeReviewModal();
-      paintClubs();
     }).catch(function (e) {
       err.textContent = 'Couldn’t write request: ' + (e.message || 'error');
     });
@@ -2936,56 +2948,33 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       return;
     }
     if (act === 'nc-remove') {
+      var orgCategory = ((S.orgs || {})[orgKey] || {}).category || 'partner';
       confirmDialog(
-        'Remove VIP?',
-        'This will remove <strong>' + esc(vip.name || '(no name)') + '</strong> (' + esc(vip.email) + ') from <strong>' + esc(orgKey) + '</strong>. Non-clubs aren’t routed through DAZN — this writes directly.',
-        'Remove',
+        'Remove VIP from ' + orgKey + '?',
+        'You’ll get a draft email to DAZN — they need to disable the account on their side. Nothing is removed locally until DAZN confirms.',
+        'Continue',
         function () {
-          db.ref('app-data/media-dazn-vip/orgs/' + orgKey + '/vips/' + vipId).set(null)
-            .then(function () { try { NL.writeAudit('dazn_vip_nc_remove', orgKey + ': ' + (vip.email || '')); } catch (e) {} toast('Removed.', 'success'); })
-            .catch(function (e) { toast('Couldn’t remove: ' + (e.message || 'error'), 'error'); });
+          openReviewModalFor(orgKey, orgCategory, [{
+            action: 'remove', vipId: vipId, name: vip.name || '', email: vip.email || ''
+          }]);
         }
       );
     }
   }
 
-  /* Old card-based paintNonClubs + onNonClubAction removed — replaced by
-     the flat-table paintNonClubs above. openSimpleAdd / openSimpleEdit
-     below are still used by the Clubs tab\'s empty-slot click. */
+  /* openSimpleAdd / openSimpleEdit are the one-row entry points for the
+     Non-clubs tab. Every change goes through openReviewModalFor — DAZN
+     routes everything; we just allocate. The local RTDB only updates
+     when the request is marked complete in the Requests tab. */
 
   function openSimpleAdd(orgKey) {
-    /* Re-use the vipModal in a simple direct-write mode */
-    document.getElementById('vipModalTitle').textContent = 'Add to ' + orgKey;
+    var orgCategory = ((S.orgs || {})[orgKey] || {}).category || 'partner';
+    var modalTitle = document.getElementById('vipModalTitle');
+    modalTitle.textContent = 'Add VIP to ' + orgKey;
     document.getElementById('vipModalName').value = '';
     document.getElementById('vipModalEmail').value = '';
     document.getElementById('vipModalEditReason').style.display = 'none';
-    document.getElementById('vipModalHint').textContent = 'Writes directly — no request workflow.';
-    document.getElementById('vipModalError').textContent = '';
-    openModal(vipModal);
-    var saveBtn = document.getElementById('vipModalSave');
-    var newHandler = function () {
-      var name = trim(document.getElementById('vipModalName').value);
-      var email = trim(document.getElementById('vipModalEmail').value);
-      if (!emailValid(email)) { document.getElementById('vipModalError').textContent = 'Invalid email.'; return; }
-      var id = uid();
-      db.ref('app-data/media-dazn-vip/orgs/' + orgKey + '/vips/' + id).set({
-        name: name, email: email, addedAt: Date.now(), addedBy: S.session.name || 'NL'
-      });
-      try { NL.writeAudit('dazn_vip_nc_add', orgKey + ': ' + email); } catch (e) {}
-      saveBtn.removeEventListener('click', newHandler);
-      closeModal(vipModal);
-    };
-    /* Clear any previous handlers by cloning */
-    var fresh = saveBtn.cloneNode(true); saveBtn.parentNode.replaceChild(fresh, saveBtn);
-    fresh.addEventListener('click', newHandler);
-  }
-
-  function openSimpleEdit(orgKey, vipId, vip) {
-    document.getElementById('vipModalTitle').textContent = 'Edit ' + (vip.name || vip.email);
-    document.getElementById('vipModalName').value = vip.name || '';
-    document.getElementById('vipModalEmail').value = vip.email || '';
-    document.getElementById('vipModalEditReason').style.display = 'none';
-    document.getElementById('vipModalHint').textContent = 'Writes directly — no request workflow.';
+    document.getElementById('vipModalHint').textContent = 'On Save you’ll get a draft email to DAZN — they manage the actual account.';
     document.getElementById('vipModalError').textContent = '';
     openModal(vipModal);
     var saveBtn = document.getElementById('vipModalSave');
@@ -2993,10 +2982,39 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       var name  = trim(document.getElementById('vipModalName').value);
       var email = trim(document.getElementById('vipModalEmail').value);
       if (!emailValid(email)) { document.getElementById('vipModalError').textContent = 'Invalid email.'; return; }
-      db.ref('app-data/media-dazn-vip/orgs/' + orgKey + '/vips/' + vipId).update({ name: name, email: email });
-      try { NL.writeAudit('dazn_vip_nc_edit', orgKey + ': ' + email); } catch (e) {}
       saveBtn.removeEventListener('click', newHandler);
       closeModal(vipModal);
+      openReviewModalFor(orgKey, orgCategory, [{ action: 'add', name: name, email: email }]);
+    };
+    var fresh = saveBtn.cloneNode(true); saveBtn.parentNode.replaceChild(fresh, saveBtn);
+    fresh.addEventListener('click', newHandler);
+  }
+
+  function openSimpleEdit(orgKey, vipId, vip) {
+    var orgCategory = ((S.orgs || {})[orgKey] || {}).category || 'partner';
+    var before = { name: vip.name || '', email: vip.email || '' };
+    document.getElementById('vipModalTitle').textContent = 'Edit ' + (vip.name || vip.email);
+    document.getElementById('vipModalName').value  = before.name;
+    document.getElementById('vipModalEmail').value = before.email;
+    document.getElementById('vipModalEditReason').style.display = 'none';
+    document.getElementById('vipModalHint').textContent = 'On Save you’ll get a draft email to DAZN — they manage the actual account.';
+    document.getElementById('vipModalError').textContent = '';
+    openModal(vipModal);
+    var saveBtn = document.getElementById('vipModalSave');
+    var newHandler = function () {
+      var name  = trim(document.getElementById('vipModalName').value);
+      var email = trim(document.getElementById('vipModalEmail').value);
+      var err = document.getElementById('vipModalError');
+      if (!emailValid(email)) { err.textContent = 'Invalid email.'; return; }
+      if (name === before.name && email === before.email) { err.textContent = 'No changes made.'; return; }
+      saveBtn.removeEventListener('click', newHandler);
+      closeModal(vipModal);
+      var nameChanged  = name  !== before.name;
+      var emailChanged = email !== before.email;
+      var reason = (emailChanged && !nameChanged) ? 'typo' : 'newperson';
+      openReviewModalFor(orgKey, orgCategory, [{
+        action: 'edit', vipId: vipId, before: before, after: { name: name, email: email }, editReason: reason
+      }]);
     };
     var fresh = saveBtn.cloneNode(true); saveBtn.parentNode.replaceChild(fresh, saveBtn);
     fresh.addEventListener('click', newHandler);
