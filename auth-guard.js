@@ -260,6 +260,19 @@
       removeOverlay();
       var wrap = document.getElementById('pageWrap');
       if (wrap) wrap.style.display = 'block';
+      window.NL = window.NL || {};
+      window.NL.session = session;
+      if (window.NL.installAuditHook) {
+        try { window.NL.installAuditHook(); } catch(e) {}
+      }
+      if (window.NL.writeAudit) {
+        try {
+          window.NL.writeAudit('page_opened',
+            (typeof NL_TOOL_KEY !== 'undefined' && NL_TOOL_KEY) ||
+            (window.NL_TOOL && window.NL_TOOL.toolKey) ||
+            location.pathname);
+        } catch(e) {}
+      }
       if (typeof window.nlAuthReady === 'function') {
         window.nlAuthReady(session);
       }
