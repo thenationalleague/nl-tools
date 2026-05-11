@@ -1275,10 +1275,15 @@
   gap: 8px;
   margin-bottom: 12px;
   flex-wrap: wrap;
+  align-items: stretch;
 }
-.audit-controls input {
+.audit-search-wrap {
   flex: 1;
   min-width: 200px;
+  position: relative;
+}
+.audit-controls input {
+  width: 100%;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 8px 12px;
@@ -1288,6 +1293,58 @@
   transition: border-color 0.15s;
 }
 .audit-controls input:focus { border-color: var(--primary); }
+.audit-suggest {
+  position: absolute;
+  left: 0; right: 0; top: 100%;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-top: 4px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+  max-height: 320px;
+  overflow-y: auto;
+  z-index: 20;
+  display: none;
+}
+.audit-suggest.open { display: block; }
+.audit-suggest__group {
+  font-size: 10px;
+  font-weight: 800;
+  font-variation-settings: 'wght' 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: 10px 12px 4px;
+}
+.audit-suggest__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+}
+.audit-suggest__item:hover,
+.audit-suggest__item.active { background: var(--off-white); }
+.audit-suggest__icon {
+  width: 22px;
+  text-align: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.audit-suggest__main {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.audit-suggest__sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
 
 .audit-notice {
   font-size: 12px;
@@ -2060,7 +2117,10 @@
       <!-- Audit log pane -->
       <div class="admin-pane" id="pane-audit">
         <div class="audit-controls">
-          <input type="text" id="auditSearch" placeholder="Search by name, email or action...">
+          <div class="audit-search-wrap">
+            <input type="text" id="auditSearch" placeholder="Search by name, email or action..." autocomplete="off">
+            <div id="auditSuggest" class="audit-suggest"></div>
+          </div>
           <button class="btn btn--primary btn--sm" id="auditSearchBtn">Search</button>
           <button class="btn btn--ghost btn--sm" id="auditClearBtn">Clear</button>
         </div>
@@ -2920,6 +2980,18 @@ function initAuditPane() {
   window._auditPaneInit = true;
 
   document.addEventListener('click', function(ev) {
+    /* Suggestion item click → apply filter */
+    var sugg = ev.target && ev.target.closest && ev.target.closest('.audit-suggest__item');
+    if (sugg) {
+      applyAuditSuggestion(sugg);
+      return;
+    }
+    /* Close suggestion box on outside click */
+    var box = document.getElementById('auditSuggest');
+    if (box && !ev.target.closest('#auditSuggest, #auditSearch')) {
+      box.classList.remove('open');
+    }
+    /* Button clicks */
     var t = ev.target && ev.target.closest && ev.target.closest('button');
     if (!t) return;
     if (t.id === 'auditSearchBtn') {
@@ -2929,6 +3001,8 @@ function initAuditPane() {
       if (s) s.value = '';
       var n = document.getElementById('auditSearchNotice');
       if (n) n.style.display = 'none';
+      var sb = document.getElementById('auditSuggest');
+      if (sb) sb.classList.remove('open');
       AUDIT_STATE.mode         = 'feed';
       AUDIT_STATE.cursor       = null;
       AUDIT_STATE.searchUid    = null;
@@ -2940,17 +3014,157 @@ function initAuditPane() {
     } else if (t.id === 'auditLoadMoreBtn') {
       if (AUDIT_STATE.mode === 'search') {
         loadAuditForUser(AUDIT_STATE.searchUid, false);
+      } else if (AUDIT_STATE.mode === 'action-search') {
+        /* action-search currently loads last 500 entries — no pagination yet */
       } else {
         loadAuditFeed(false);
       }
     }
   });
 
+  document.addEventListener('input', function(ev) {
+    if (ev.target && ev.target.id === 'auditSearch') {
+      renderAuditSuggestions(ev.target.value);
+    }
+  });
+
   document.addEventListener('keydown', function(ev) {
     if (ev.target && ev.target.id === 'auditSearch' && ev.key === 'Enter') {
+      document.getElementById('auditSuggest').classList.remove('open');
       runAuditSearch();
     }
   });
+
+  document.addEventListener('focusin', function(ev) {
+    if (ev.target && ev.target.id === 'auditSearch') {
+      renderAuditSuggestions(ev.target.value);
+    }
+  });
+}
+
+/* Build suggestion lists: matching people + matching action types */
+function buildAuditSuggestions(q) {
+  q = (q || '').trim().toLowerCase();
+  var result = { people: [], actions: [] };
+  if (!q) return result;
+
+  if (STATE.allUsers) {
+    Object.keys(STATE.allUsers).forEach(function(uid) {
+      var u = STATE.allUsers[uid];
+      if ((u.name  || '').toLowerCase().indexOf(q) !== -1 ||
+          (u.email || '').toLowerCase().indexOf(q) !== -1) {
+        result.people.push({
+          uid: uid,
+          name: u.name || u.email || uid,
+          email: u.email || '',
+          role: u.role || '',
+          club: u.club || ''
+        });
+      }
+    });
+  }
+  if (STATE.userData) {
+    var selfMatch =
+      (STATE.userData.name  || '').toLowerCase().indexOf(q) !== -1 ||
+      (STATE.userData.email || '').toLowerCase().indexOf(q) !== -1;
+    var already = result.people.some(function(p) { return p.uid === STATE.uid; });
+    if (selfMatch && !already) {
+      result.people.push({
+        uid: STATE.uid,
+        name: STATE.userData.name || STATE.userData.email || STATE.uid,
+        email: STATE.userData.email || '',
+        role: STATE.userData.role || '',
+        club: STATE.userData.club || ''
+      });
+    }
+  }
+
+  Object.keys(AUDIT_ACTION_LABELS).forEach(function(a) {
+    var label = AUDIT_ACTION_LABELS[a];
+    if (a.toLowerCase().indexOf(q) !== -1 || label.toLowerCase().indexOf(q) !== -1) {
+      result.actions.push({ action: a, label: label });
+    }
+  });
+
+  result.people  = result.people.slice(0, 6);
+  result.actions = result.actions.slice(0, 6);
+  return result;
+}
+
+function renderAuditSuggestions(q) {
+  var box = document.getElementById('auditSuggest');
+  if (!box) return;
+  var s = buildAuditSuggestions(q);
+  if (s.people.length === 0 && s.actions.length === 0) {
+    box.classList.remove('open');
+    box.innerHTML = '';
+    return;
+  }
+  var html = '';
+  if (s.people.length) {
+    html += '<div class="audit-suggest__group">People</div>';
+    s.people.forEach(function(p) {
+      var sub = [];
+      if (p.email) sub.push(esc(p.email));
+      if (p.role)  sub.push(esc(p.role));
+      if (p.club)  sub.push(esc(p.club));
+      html += '<div class="audit-suggest__item" data-kind="person" data-uid="' + esc(p.uid) + '" data-label="' + esc(p.name) + '">' +
+              '<div class="audit-suggest__icon">👤</div>' +
+              '<div class="audit-suggest__main">' + esc(p.name) +
+                '<div class="audit-suggest__sub">' + sub.join(' · ') + '</div>' +
+              '</div></div>';
+    });
+  }
+  if (s.actions.length) {
+    html += '<div class="audit-suggest__group">Actions</div>';
+    s.actions.forEach(function(a) {
+      html += '<div class="audit-suggest__item" data-kind="action" data-action="' + esc(a.action) + '" data-label="' + esc(a.label) + '">' +
+              '<div class="audit-suggest__icon">' + (AUDIT_ACTION_ICONS[a.action] || '📋') + '</div>' +
+              '<div class="audit-suggest__main">' + esc(a.label) +
+                '<div class="audit-suggest__sub">' + esc(a.action) + '</div>' +
+              '</div></div>';
+    });
+  }
+  box.innerHTML = html;
+  box.classList.add('open');
+}
+
+function applyAuditSuggestion(el) {
+  var kind = el.getAttribute('data-kind');
+  var input = document.getElementById('auditSearch');
+  var box   = document.getElementById('auditSuggest');
+  var label = el.getAttribute('data-label') || '';
+  if (input) input.value = label;
+  if (box)   box.classList.remove('open');
+
+  if (kind === 'person') {
+    var uid = el.getAttribute('data-uid');
+    var userData = STATE.allUsers[uid] || STATE.userData;
+    var notice = document.getElementById('auditSearchNotice');
+    notice.textContent = 'Showing full history for ' +
+      (userData.name || userData.email || uid) + '.';
+    notice.style.display = 'block';
+    AUDIT_STATE.mode         = 'search';
+    AUDIT_STATE.searchUid    = uid;
+    AUDIT_STATE.searchCursor = null;
+    AUDIT_STATE.exhausted    = false;
+    document.getElementById('auditList').innerHTML =
+      '<div class="audit-loading">Loading history...<\/div>';
+    loadAuditForUser(uid, true);
+  } else if (kind === 'action') {
+    var action = el.getAttribute('data-action');
+    var label2 = AUDIT_ACTION_LABELS[action] || action;
+    var notice2 = document.getElementById('auditSearchNotice');
+    notice2.textContent = 'Showing all entries with action "' + label2 +
+      '" (last 500 events).';
+    notice2.style.display = 'block';
+    AUDIT_STATE.mode      = 'action-search';
+    AUDIT_STATE.cursor    = null;
+    AUDIT_STATE.exhausted = false;
+    document.getElementById('auditList').innerHTML =
+      '<div class="audit-loading">Searching...<\/div>';
+    loadAuditActionSearch(action.toLowerCase(), true);
+  }
 }
 
 function loadAuditFeed(fresh) {
@@ -3182,60 +3396,61 @@ function appendAuditEntries(entries) {
   });
 }
 
+var AUDIT_ACTION_LABELS = {
+  /* portal */
+  'signed_in':                     'Signed in',
+  'signed_out':                    'Signed out',
+  'invite_sent':                   'Invite sent',
+  'invite_cancelled':              'Invite cancelled',
+  'request_approved':              'Request approved',
+  'request_declined':              'Request declined',
+  'access_changed':                'Access changed',
+  'role_changed':                  'Role changed',
+  'message_created':               'Message created',
+  'message_edited':                'Message edited',
+  'message_deleted':               'Message deleted',
+  'user_removed':                  'User removed',
+  'tool_deployed':                 'Tool deployed',
+  'tool_seeded':                   'Tool seeded',
+  'page_opened':                   'Page opened',
+  /* attendance */
+  'attendance_submit':             'Attendance submitted',
+  'attendance_edit':               'Attendance edited',
+  'add_cup_fixture':               'Cup fixture added',
+  'edit_cup_fixture':              'Cup fixture edited',
+  'delete_cup_fixture':            'Cup fixture deleted',
+  'sync_fixture_run':              'Fixture sync run',
+  /* judgements */
+  'judgement_added':               'Judgement added',
+  'judgement_updated':             'Judgement updated',
+  'judgement_deleted':             'Judgement deleted',
+  /* meeting-notes */
+  'meeting_created':               'Meeting created',
+  'meeting_edited':                'Meeting edited',
+  'meeting_started':               'Meeting started',
+  'meeting_note_saved':            'Meeting note saved',
+  'contact_added':                 'Contact added',
+  'minutes_generated':             'Minutes generated',
+  'minutes_published':             'Minutes published',
+  /* programme packs */
+  'programme_packs_uploaded':      'Programme pack uploaded',
+  'programme_packs_deleted':       'Programme pack deleted',
+  'programme_packs_reconciled':    'Programme packs reconciled',
+  'programme_packs_zip_downloaded':'Programme packs zip downloaded',
+  /* graphics */
+  'totw_download':                 'Team of the Week downloaded',
+  'totw_copy_roundup':             'TOTW roundup copied',
+  'totw_copy_excel':               'TOTW Excel copied',
+  'single-fixture_download':       'Single fixture downloaded',
+  'league-tables_download':        'League tables downloaded',
+  'fixtures-results_download':     'Fixtures / results downloaded',
+  'top-scorers_download':          'Top scorers downloaded',
+  'article-composer_copy_text':    'Article text copied',
+  'article-composer_copy_html':    'Article HTML copied'
+};
+
 function formatAuditAction(e) {
-  var labels = {
-    /* portal */
-    'signed_in':                     'Signed in',
-    'signed_out':                    'Signed out',
-    'invite_sent':                   'Invite sent',
-    'invite_cancelled':              'Invite cancelled',
-    'request_approved':              'Request approved',
-    'request_declined':              'Request declined',
-    'access_changed':                'Access changed',
-    'role_changed':                  'Role changed',
-    'message_created':               'Message created',
-    'message_edited':                'Message edited',
-    'message_deleted':               'Message deleted',
-    'user_removed':                  'User removed',
-    'tool_deployed':                 'Tool deployed',
-    'tool_seeded':                   'Tool seeded',
-    'page_opened':                   'Page opened',
-    /* attendance */
-    'attendance_submit':             'Attendance submitted',
-    'attendance_edit':               'Attendance edited',
-    'add_cup_fixture':               'Cup fixture added',
-    'edit_cup_fixture':              'Cup fixture edited',
-    'delete_cup_fixture':            'Cup fixture deleted',
-    'sync_fixture_run':              'Fixture sync run',
-    /* judgements */
-    'judgement_added':               'Judgement added',
-    'judgement_updated':             'Judgement updated',
-    'judgement_deleted':             'Judgement deleted',
-    /* meeting-notes */
-    'meeting_created':               'Meeting created',
-    'meeting_edited':                'Meeting edited',
-    'meeting_started':               'Meeting started',
-    'meeting_note_saved':            'Meeting note saved',
-    'contact_added':                 'Contact added',
-    'minutes_generated':             'Minutes generated',
-    'minutes_published':             'Minutes published',
-    /* programme packs */
-    'programme_packs_uploaded':      'Programme pack uploaded',
-    'programme_packs_deleted':       'Programme pack deleted',
-    'programme_packs_reconciled':    'Programme packs reconciled',
-    'programme_packs_zip_downloaded':'Programme packs zip downloaded',
-    /* graphics */
-    'totw_download':                 'Team of the Week downloaded',
-    'totw_copy_roundup':             'TOTW roundup copied',
-    'totw_copy_excel':               'TOTW Excel copied',
-    'single-fixture_download':       'Single fixture downloaded',
-    'league-tables_download':        'League tables downloaded',
-    'fixtures-results_download':     'Fixtures / results downloaded',
-    'top-scorers_download':          'Top scorers downloaded',
-    'article-composer_copy_text':    'Article text copied',
-    'article-composer_copy_html':    'Article HTML copied'
-  };
-  if (labels[e.action]) return labels[e.action];
+  if (AUDIT_ACTION_LABELS[e.action]) return AUDIT_ACTION_LABELS[e.action];
   /* Auto-audit shape: "<tool>_changed" → "Tool data changed" */
   var m = e.action && e.action.match(/^(.+)_changed$/);
   if (m) {

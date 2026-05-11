@@ -300,10 +300,24 @@
       }
       if (window.NL.writeAudit) {
         try {
-          window.NL.writeAudit('page_opened',
-            (typeof NL_TOOL_KEY !== 'undefined' && NL_TOOL_KEY) ||
-            (window.NL_TOOL && window.NL_TOOL.toolKey) ||
-            location.pathname);
+          var toolTitle = (window.NL_TOOL && window.NL_TOOL.title) || '';
+          var toolKey   = (typeof NL_TOOL_KEY !== 'undefined' && NL_TOOL_KEY) ||
+                          (window.NL_TOOL && window.NL_TOOL.toolKey) || '';
+          /* Throttle: suppress duplicate page_opened for the same tool
+             within the same session/tab if logged in the last 5 minutes.
+             Stops refreshes and back/forward nav from flooding the feed. */
+          var throttleKey = 'nl_audit_open_' + (toolKey || location.pathname);
+          var last = parseInt(sessionStorage.getItem(throttleKey) || '0', 10);
+          if (Date.now() - last < 5 * 60 * 1000) {
+            /* recently logged — skip */
+          } else {
+            sessionStorage.setItem(throttleKey, String(Date.now()));
+            var parts = [];
+            if (toolTitle) parts.push(toolTitle);
+            if (toolKey && toolKey !== toolTitle) parts.push('[' + toolKey + ']');
+            parts.push(location.pathname);
+            window.NL.writeAudit('page_opened', parts.join(' '));
+          }
         } catch(e) {}
       }
       window.nlAuthReady(session);
