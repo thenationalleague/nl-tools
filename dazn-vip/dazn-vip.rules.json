@@ -1,0 +1,92 @@
+{
+  "_README": [
+    "RTDB security rules snippet for the DAZN VIP tool.",
+    "Merge these into your existing root rules file at the matching paths.",
+    "If you paste directly into the Firebase console, strip this _README field first.",
+    "Role mapping assumed (matches /tools/system/auth-guard.js):",
+    "  users/{uid}/role  ∈ {'superadmin','admin','staff','club'}",
+    "  users/{uid}/club  = club name string (only set when role='club')",
+    "RTDB keys are the raw club / org names (e.g. 'Slough Town', 'AFC Fylde').",
+    "None of the seeded org names contain RTDB-reserved chars (. # $ [ ] /)."
+  ],
+  "rules": {
+    "dazn-vip": {
+      "orgs": {
+        ".indexOn": ["category"],
+        "$orgName": {
+          ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'superadmin' || root.child('users').child(auth.uid).child('role').val() === 'staff' || (root.child('users').child(auth.uid).child('role').val() === 'club' && root.child('users').child(auth.uid).child('club').val() === $orgName))",
+
+          "name": {
+            ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'superadmin' || (!data.exists() && root.child('users').child(auth.uid).child('role').val() === 'club' && root.child('users').child(auth.uid).child('club').val() === $orgName && newData.val() === $orgName))",
+            ".validate": "newData.isString()"
+          },
+          "category": {
+            ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'superadmin' || (!data.exists() && root.child('users').child(auth.uid).child('role').val() === 'club' && root.child('users').child(auth.uid).child('club').val() === $orgName && newData.val() === 'club'))",
+            ".validate": "newData.isString()"
+          },
+          "maxVips": {
+            ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'superadmin' || (!data.exists() && root.child('users').child(auth.uid).child('role').val() === 'club' && root.child('users').child(auth.uid).child('club').val() === $orgName && newData.val() === 5))",
+            ".validate": "newData.isNumber()"
+          },
+
+          "openRequestId": {
+            ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'superadmin' || (root.child('users').child(auth.uid).child('role').val() === 'club' && root.child('users').child(auth.uid).child('club').val() === $orgName))"
+          },
+
+          "vips": {
+            ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'superadmin')",
+            "$vipId": {
+              ".validate": "newData.hasChild('email')",
+              "name":    { ".validate": "newData.isString()" },
+              "email":   { ".validate": "newData.isString() && newData.val().contains('@')" },
+              "addedAt": { ".validate": "newData.isNumber()" },
+              "addedBy": { ".validate": "newData.isString()" },
+              "$other":  { ".validate": false }
+            }
+          }
+        }
+      },
+
+      "requests": {
+        ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'superadmin' || root.child('users').child(auth.uid).child('role').val() === 'staff')",
+        ".indexOn": ["status", "orgName", "requestedAt"],
+        "$reqId": {
+          ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'superadmin' || root.child('users').child(auth.uid).child('role').val() === 'staff' || data.child('orgName').val() === root.child('users').child(auth.uid).child('club').val())",
+          ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'superadmin' || (root.child('users').child(auth.uid).child('role').val() === 'club' && newData.child('orgName').val() === root.child('users').child(auth.uid).child('club').val() && ((!data.exists() && newData.child('status').val() === 'pending') || (data.exists() && data.child('status').val() === 'pending' && newData.child('status').val() === 'cancelled' && data.child('orgName').val() === root.child('users').child(auth.uid).child('club').val()))))",
+          ".validate": "newData.hasChildren(['orgName', 'status', 'requestedAt'])",
+          "status":      { ".validate": "newData.isString() && (newData.val() === 'pending' || newData.val() === 'sent' || newData.val() === 'complete' || newData.val() === 'cancelled')" },
+          "orgName":     { ".validate": "newData.isString()" },
+          "orgCategory": { ".validate": "newData.isString()" },
+          "requestedAt": { ".validate": "newData.isNumber()" },
+          "requestedBy": { ".validate": "newData.hasChild('uid')" },
+          "changes":     { ".validate": "newData.hasChildren()" },
+          "sentAt":      { ".validate": "newData.isNumber()" },
+          "sentBy":      { ".validate": "newData.hasChild('uid')" },
+          "completedAt": { ".validate": "newData.isNumber()" },
+          "completedBy": { ".validate": "newData.hasChild('uid')" },
+          "cancelledAt": { ".validate": "newData.isNumber()" },
+          "cancelledBy": { ".validate": "newData.hasChild('uid')" },
+          "cancelReason":{ ".validate": "newData.isString()" },
+          "emailDraft":  { ".validate": "newData.hasChildren(['subject','body','to'])" }
+        }
+      },
+
+      "audit": {
+        "$orgName": {
+          ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'superadmin' || root.child('users').child(auth.uid).child('role').val() === 'staff' || root.child('users').child(auth.uid).child('club').val() === $orgName)",
+          ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'superadmin')",
+          "$ts": {
+            ".validate": "newData.hasChild('summary')"
+          }
+        }
+      }
+    },
+
+    "tools": {
+      "dazn-vip": {
+        ".read": "auth != null",
+        ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() === 'superadmin'"
+      }
+    }
+  }
+}

@@ -1,0 +1,2261 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — DAZN VIP
+  Version: v1.0 (11/05/2026)
+  File: /tools/dazn-vip/index.html
+
+  Tool for logging VIP access changes for the DAZN feed.
+  This tool does NOT manage DAZN access directly — it is a request log and
+  email-handoff helper. Clubs request changes; NL admins forward them to DAZN
+  by email and update the local mirror once DAZN confirms.
+
+  Lifecycle: pending → sent → complete
+    pending   — club submitted, awaiting NL admin
+    sent      — NL admin sent the email to DAZN (mirror still shows old state)
+    complete  — DAZN confirmed; local mirror updates to new state
+
+  Storage (RTDB):
+    dazn-vip/orgs/{name}/                org keyed by club/org name
+      name, category, maxVips
+      vips/{vipId} { name, email, addedAt, addedBy }
+      openRequestId                       denormalised pointer
+    dazn-vip/requests/{requestId}         queue
+    dazn-vip/audit/{name}/{ts}            per-org history
+    tools/dazn-vip                        tool registration (label, defaults)
+
+  Access:
+    role=club + access=access   → own list, can request changes
+    role=staff + access=access  → browse all, view only
+    role=admin/superadmin + admin → action requests, manage non-club orgs
+
+  v1.0 — Initial build.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DAZN VIP — NL Tools</title>
+  <link rel="stylesheet" href="/tools/system/nl-brand.css?v=14">
+
+<style>
+  #pageWrap { display: none; }
+
+  .vip-page { padding: 20px 0 60px; }
+
+  /* ── Section header (club view) ─────────────────────────────────────── */
+  .vip-header {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    margin-bottom: 22px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .vip-header__crest {
+    width: 64px;
+    height: 64px;
+    object-fit: contain;
+    flex-shrink: 0;
+  }
+  .vip-header__text { flex: 1; min-width: 0; }
+  .vip-header__title {
+    font-size: 22px;
+    font-weight: 900;
+    color: var(--ink);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    margin: 0 0 4px;
+  }
+  .vip-header__sub {
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .vip-header__sub strong { color: var(--ink); font-weight: 700; }
+
+  /* ── Open-request banner ────────────────────────────────────────────── */
+  .vip-banner {
+    background: #fff8e1;
+    border: 1px solid #f0d27a;
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin-bottom: 18px;
+    font-size: 13px;
+    color: #6b4a00;
+    line-height: 1.55;
+  }
+  .vip-banner.is-sent {
+    background: #e8f1ff;
+    border-color: #b8d0f5;
+    color: #1a3a6b;
+  }
+  .vip-banner.is-success {
+    background: #e8f5ec;
+    border-color: #b8d8c0;
+    color: #1a5a2a;
+  }
+  .vip-banner__title {
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .vip-banner__badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 99px;
+    background: rgba(0,0,0,0.06);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .vip-banner__changes { margin: 6px 0 0 0; padding-left: 18px; }
+  .vip-banner__changes li { margin: 2px 0; }
+  .vip-banner__meta { margin-top: 8px; font-size: 12px; opacity: 0.8; }
+  .vip-banner__actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+
+  /* ── VIP table ──────────────────────────────────────────────────────── */
+  .vip-table-wrap { background: #fff; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .vip-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .vip-table th {
+    background: var(--off-white);
+    padding: 12px 14px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border-bottom: 1px solid var(--border);
+  }
+  .vip-table td {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  .vip-table tr:last-child td { border-bottom: none; }
+  .vip-table .col-actions { width: 1%; white-space: nowrap; text-align: right; }
+  .vip-table .col-name { width: 32%; font-weight: 600; }
+  .vip-table .vip-name-blank { color: var(--muted); font-style: italic; font-weight: 400; }
+  .vip-table .vip-email { color: var(--muted); font-family: monospace; font-size: 13px; }
+
+  .vip-empty {
+    text-align: center;
+    padding: 48px 20px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  /* ── Action buttons ─────────────────────────────────────────────────── */
+  .vip-row-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink);
+    cursor: pointer;
+    font-family: inherit;
+    margin-left: 4px;
+  }
+  .vip-row-btn:hover { background: var(--off-white); }
+  .vip-row-btn.is-danger { color: var(--primary); border-color: #e8b8b8; }
+  .vip-row-btn.is-danger:hover { background: #fdf0f0; }
+  .vip-row-btn[disabled] { opacity: 0.4; cursor: not-allowed; }
+
+  /* ── Action bar / add button ────────────────────────────────────────── */
+  .vip-action-bar {
+    margin-top: 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .vip-cap-note { font-size: 12px; color: var(--muted); }
+
+  /* ── Basket (pending unsubmitted) ───────────────────────────────────── */
+  .vip-basket {
+    background: #fffdf4;
+    border: 1px dashed #d9c478;
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin: 18px 0;
+  }
+  .vip-basket__title { font-size: 13px; font-weight: 700; color: var(--ink); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; }
+  .vip-basket__list { list-style: none; padding: 0; margin: 0 0 12px; }
+  .vip-basket__list li {
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(217,196,120,0.3);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .vip-basket__list li:last-child { border-bottom: none; }
+  .vip-basket__chip {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 99px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #fff;
+    flex-shrink: 0;
+  }
+  .vip-basket__chip.add { background: #2e7d32; }
+  .vip-basket__chip.remove { background: var(--primary); }
+  .vip-basket__chip.edit { background: #1565c0; }
+  .vip-basket__actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .vip-basket__undo {
+    margin-left: auto;
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    text-decoration: underline;
+  }
+
+  /* ── Recent changes log ─────────────────────────────────────────────── */
+  .vip-log { margin-top: 36px; }
+  .vip-log__title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 10px;
+  }
+  .vip-log__list { list-style: none; padding: 0; margin: 0; }
+  .vip-log__list li {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .vip-log__list li:last-child { border-bottom: none; }
+  .vip-log__date { font-weight: 600; color: var(--ink); margin-right: 6px; }
+
+  /* ── Staff tabs ─────────────────────────────────────────────────────── */
+  .vip-tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 22px;
+    flex-wrap: wrap;
+  }
+  .vip-tab {
+    padding: 10px 18px;
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--muted);
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    transform: translateY(1px);
+  }
+  .vip-tab:hover { color: var(--ink); }
+  .vip-tab.is-active { color: var(--primary); border-bottom-color: var(--primary); }
+  .vip-tab .vip-tab__count {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 8px;
+    background: var(--primary);
+    color: #fff;
+    border-radius: 99px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .vip-tab.is-active .vip-tab__count { background: var(--primary); }
+  .vip-tab:not(.is-active) .vip-tab__count { background: var(--muted); }
+
+  /* ── Request card (staff queue) ─────────────────────────────────────── */
+  .req-card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin-bottom: 14px;
+  }
+  .req-card__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+  .req-card__org {
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--ink);
+  }
+  .req-card__meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .req-status {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 99px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .req-status.pending { background: #fff3cd; color: #6b4a00; }
+  .req-status.sent { background: #cfe2ff; color: #1a3a6b; }
+  .req-status.complete { background: #d1e7dd; color: #1a5a2a; }
+  .req-status.cancelled { background: #e9ecef; color: #555; }
+
+  .req-changes {
+    background: var(--off-white);
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 13px;
+    margin-bottom: 14px;
+  }
+  .req-changes ul { margin: 0; padding-left: 18px; }
+  .req-changes li { margin: 2px 0; }
+
+  .req-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .req-actions__spacer { flex: 1; }
+
+  .req-history {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .req-history div { margin: 2px 0; }
+
+  /* ── Browse all orgs (staff) ────────────────────────────────────────── */
+  .vip-org-card {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+  .vip-org-card__head {
+    padding: 14px 18px;
+    background: var(--off-white);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    gap: 12px;
+  }
+  .vip-org-card__title { font-size: 14px; font-weight: 800; color: var(--ink); }
+  .vip-org-card__title-cat { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-left: 8px; }
+  .vip-org-card__count { font-size: 12px; color: var(--muted); }
+  .vip-org-card__body { display: none; padding: 4px 0; }
+  .vip-org-card.is-open .vip-org-card__body { display: block; }
+  .vip-org-card__body .vip-table th { background: #fff; }
+
+  .vip-search {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+    margin-bottom: 14px;
+    background: #fff;
+  }
+
+  /* ── Modal ──────────────────────────────────────────────────────────── */
+  .modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 20px;
+  }
+  .modal.is-open { display: flex; }
+  .modal__inner {
+    background: #fff;
+    border-radius: 12px;
+    max-width: 460px;
+    width: 100%;
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+    box-shadow: 0 12px 48px rgba(0,0,0,0.3);
+  }
+  .modal__head {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--ink);
+  }
+  .modal__body { padding: 20px 24px; }
+  .modal__foot {
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .modal label { display: block; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 12px 0 6px; }
+  .modal input[type="text"], .modal input[type="email"], .modal textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: inherit;
+    background: #fff;
+  }
+  .modal__radios { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+  .modal__radios label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; text-transform: none; letter-spacing: normal; font-weight: 500; color: var(--ink); font-size: 13px; margin: 0; line-height: 1.4; }
+  .modal__radios input { margin-top: 2px; }
+  .modal__radios .hint { color: var(--muted); font-size: 12px; }
+  .modal__hint { font-size: 12px; color: var(--muted); margin-top: 6px; line-height: 1.5; }
+  .modal__error { color: var(--primary); font-size: 13px; margin-top: 10px; min-height: 18px; }
+
+  /* ── Seed UI ────────────────────────────────────────────────────────── */
+  .seed-preview {
+    max-height: 360px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+    margin-bottom: 14px;
+  }
+  .seed-preview table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .seed-preview th, .seed-preview td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+  .seed-preview th { position: sticky; top: 0; background: var(--off-white); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .seed-flag { display: inline-block; background: #fff3cd; color: #6b4a00; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-left: 6px; }
+  .seed-summary { display: flex; gap: 18px; font-size: 13px; margin-bottom: 14px; flex-wrap: wrap; }
+  .seed-summary div strong { color: var(--ink); font-weight: 800; display: block; font-size: 18px; }
+
+  /* ── Locked state (when open request exists) ────────────────────────── */
+  .vip-locked .vip-row-btn,
+  .vip-locked #addVipBtn { opacity: 0.4; pointer-events: none; }
+
+  /* ── Misc ───────────────────────────────────────────────────────────── */
+  .vip-flash { padding: 24px; text-align: center; color: var(--muted); }
+  .nl-btn { font-family: inherit; }
+</style>
+</head>
+<body>
+
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <main class="page vip-page">
+
+    <!-- Loading flash while we figure out which view to render -->
+    <div id="vipBoot" class="vip-flash">Loading…</div>
+
+    <!-- ── CLUB VIEW (role=club) ─────────────────────────────────────── -->
+    <section id="clubView" style="display:none">
+      <div class="vip-header">
+        <img id="clubCrest" class="vip-header__crest" alt="" src="">
+        <div class="vip-header__text">
+          <h1 class="vip-header__title" id="clubTitle">VIP access</h1>
+          <div class="vip-header__sub" id="clubSubtitle">—</div>
+        </div>
+      </div>
+
+      <div id="openRequestBanner" style="display:none"></div>
+
+      <div class="vip-table-wrap">
+        <table class="vip-table" id="clubVipTable">
+          <thead>
+            <tr><th class="col-name">Name</th><th>Email</th><th class="col-actions"></th></tr>
+          </thead>
+          <tbody id="clubVipBody"></tbody>
+        </table>
+      </div>
+
+      <div class="vip-action-bar">
+        <div class="vip-cap-note" id="clubCapNote"></div>
+        <div>
+          <button class="nl-btn nl-btn--secondary" id="addVipBtn">+ Add VIP</button>
+        </div>
+      </div>
+
+      <div class="vip-basket" id="clubBasket" style="display:none">
+        <div class="vip-basket__title">Pending changes — not yet submitted</div>
+        <ul class="vip-basket__list" id="clubBasketList"></ul>
+        <div class="vip-basket__actions">
+          <button class="nl-btn nl-btn--ghost" id="basketDiscard">Discard changes</button>
+          <button class="nl-btn nl-btn--primary" id="basketSubmit">Submit request</button>
+        </div>
+      </div>
+
+      <div class="vip-log" id="clubRecentLog" style="display:none">
+        <div class="vip-log__title">Recent changes</div>
+        <ul class="vip-log__list" id="clubRecentList"></ul>
+      </div>
+    </section>
+
+    <!-- ── STAFF VIEW (role=staff/admin/superadmin) ──────────────────── -->
+    <section id="staffView" style="display:none">
+      <h1 style="font-size:22px;font-weight:900;text-transform:uppercase;letter-spacing:.02em;color:var(--ink);margin:0 0 18px">DAZN VIP</h1>
+
+      <nav class="vip-tabs">
+        <button class="vip-tab is-active" data-tab="requests">Requests <span class="vip-tab__count" id="tabRequestsCount" style="display:none">0</span></button>
+        <button class="vip-tab" data-tab="browse">Browse all</button>
+        <button class="vip-tab" data-tab="nonclubs" id="tabNonClubsBtn" style="display:none">Non-club orgs</button>
+        <button class="vip-tab" data-tab="seed" id="tabSeedBtn" style="display:none">Seed</button>
+      </nav>
+
+      <div id="tabRequests" class="vip-tab-panel">
+        <div id="reqList"></div>
+      </div>
+
+      <div id="tabBrowse" class="vip-tab-panel" style="display:none">
+        <input type="search" id="browseSearch" class="vip-search" placeholder="Search clubs, names, emails…">
+        <div id="browseList"></div>
+      </div>
+
+      <div id="tabNonClubs" class="vip-tab-panel" style="display:none">
+        <p style="font-size:13px;color:var(--muted);margin-bottom:14px;">
+          Media, partner, governing body and agency contacts. NL maintained — no per-org cap, no request workflow.
+        </p>
+        <div id="nonClubsList"></div>
+      </div>
+
+      <div id="tabSeed" class="vip-tab-panel" style="display:none">
+        <div id="seedRoot"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ── Modal: add / edit VIP ─────────────────────────────────────────── -->
+<div class="modal" id="vipModal">
+  <div class="modal__inner">
+    <div class="modal__head" id="vipModalTitle">Add VIP</div>
+    <div class="modal__body">
+      <label>Name</label>
+      <input type="text" id="vipModalName" autocomplete="off" placeholder="e.g. Alan Julian">
+      <label>Email</label>
+      <input type="email" id="vipModalEmail" autocomplete="off" placeholder="e.g. alan.julian@example.com">
+
+      <div id="vipModalEditReason" style="display:none">
+        <label>Reason for this edit</label>
+        <div class="modal__radios">
+          <label><input type="radio" name="editReason" value="typo">
+            <span><strong>Typo correction</strong> <span class="hint">— same person, fixing a typo</span></span>
+          </label>
+          <label><input type="radio" name="editReason" value="newperson">
+            <span><strong>Different person taking over</strong> <span class="hint">— same email address, new contact</span></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="modal__hint" id="vipModalHint"></div>
+      <div class="modal__error" id="vipModalError"></div>
+    </div>
+    <div class="modal__foot">
+      <button class="nl-btn nl-btn--ghost" id="vipModalCancel">Cancel</button>
+      <button class="nl-btn nl-btn--primary" id="vipModalSave">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: confirm ────────────────────────────────────────────────── -->
+<div class="modal" id="confirmModal">
+  <div class="modal__inner">
+    <div class="modal__head" id="confirmTitle">Confirm</div>
+    <div class="modal__body" id="confirmBody"></div>
+    <div class="modal__foot">
+      <button class="nl-btn nl-btn--ghost" id="confirmCancel">Cancel</button>
+      <button class="nl-btn nl-btn--primary" id="confirmOk">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- ── Seed payload (TSV embedded as a script tag) ───────────────────── -->
+<script id="seedData" type="text/tab-separated-values">
+Chris Markham	chris.markham@247.tv	Partner	247.tv
+David Haythornthwaite	david@vetplus.co.uk	Club	AFC Fylde
+Jack Tomlinson	Jack.Tomlinson@afcfylde.co.uk	Club	AFC Fylde
+Philip Heald	Philip.Heald@afcfylde.co.uk	Club	AFC Fylde
+Josh Knowles	josh.knowles@afcfylde.co.uk	Club	AFC Fylde
+Anthony McCluskey	Anthony.McCluskey@afcfylde.co.uk	Club	AFC Fylde
+Ian Dosser	ian.dosser@btinternet.com	Club	AFC Telford United
+Aimee Lauder	aimee.l83@hotmail.com	Club	AFC Telford United
+Kevin Wilkin	kevinwilkin@me.com	Club	AFC Telford United
+Mark Noon	mrnoon@aol.com	Club	AFC Telford United
+Rhys Morris	rhys.morris@outlook.com	Club	AFC Telford United
+Michael Lipscombe	media@theshots.co.uk	Club	Aldershot Town
+Bob Green	secretary@theshots.co.uk	Club	Aldershot Town
+Johnny Leppard	johnnyleppard@gmail.com	Club	Aldershot Town
+Shahid Azeem	shahid.azeem@theshots.co.uk	Club	Aldershot Town
+John Coleman	j.coley@theshots.co.uk	Club	Aldershot Town
+Wayne Bradley	wbradleyimpact@gmail.com	Club	Alfreton Town
+	s-maltby@sky.com	Club	Alfreton Town
+Mark Lockyear	secretary@altrinchamfootballclub.co.uk	Club	Altrincham
+Mark Luby	mark@altyfc.com	Club	Altrincham
+Wayne Ashall	wayne@altyfc.com	Club	Altrincham
+Alex Birch	alex@altyfc.com	Club	Altrincham
+Paul Williams	paul.williams@bathcityfootballclub.co.uk	Club	Bath City
+Matthew Francis	socialmedia@bathcityfootballclub.co.uk	Club	Bath City
+Andrew Pierce	andrew@techni-cal.co.uk	Club	Bath City
+Darren Way	darren.way@bathcityfootballclub.co.uk	Club	Bath City
+Martin Horsell	mhorsell@hotmail.co.uk	Club	Bath City
+Rob Worrall	robaworrall@gmail.com	Media	BBC Radio Surrey
+David Ward	davidtward1978@yahoo.co.uk	Media	BBC Radio York
+James Smiles	bedfordtownsecretary@outlook.com	Club	Bedford Town
+Jon Taylor	jrt@taylorlandlimited.co.uk	Club	Bedford Town
+Lee Bircham	birchy1976@gmail.com	Club	Bedford Town
+Ben Banks	ben4m@icloud.com	Club	Bedford Town
+David Noble	nobes1982@hotmail.co.uk	Club	Bedford Town
+Charlie Hunter	charliehunter1993@gmail.com	Club	Boreham Wood
+Grant Morris	grant.bwfc@outlook.com	Club	Boreham Wood
+Daniel Hunter	dhunterbwfc@yahoo.co.uk	Club	Boreham Wood
+Peter Smith	peter.s.smith26@outlook.com	Club	Boreham Wood
+Billy Hunter	bhunter@borehamwoodfootballclub.co.uk	Club	Boreham Wood
+Craig Singleton	craig.singleton@bufc.co.uk	Club	Boston United
+Neil Kempster	n.kempster@btinternet.com	Club	Boston United
+Adrian Padley	sales@adrianpadley.co.uk	Club	Boston United
+Paul Hurst	paul.hurst@bufc.co.uk	Club	Boston United
+David Newton	david.newton@chestnuthomes.co.uk	Club	Boston United
+Chris Tymon	christymon@brackleytownfc.co.uk	Club	Brackley Town
+Gavin Cowan	gavincowan@brackleytownfc.co.uk	Club	Brackley Town
+Steve Goodman	stevegoodman@brackleytownfc.co.uk	Club	Brackley Town
+Jamie Haynes	jamie@thecrossbargroup.co.uk	Club	Brackley Town
+Tim Carroll	timcarroll@brackleytownfc.co.uk	Club	Brackley Town
+Lee Harding	BraintreeTFC@aol.com	Club	Braintree Town
+Adrian Marston	secretary@braintreetownfc.org.uk	Club	Braintree Town
+Steve Pitt	steve.pitt2@hotmail.co.uk	Club	Braintree Town
+George Blackwell	georgeblackwellmobile@gmail.com	Club	Braintree Town
+Matt Amos	amos452@gmail.com	Club	Braintree Town
+Carl Taylor	carl.taylor@buxtonfc.com	Club	Buxton
+Chris Hill	chris@buxtonfc.com	Club	Buxton
+Danny Hopkins	danny@jhmp.co.uk	Club	Buxton
+Jake Loftus	jake.loftus@buxtonfc.com	Club	Buxton
+Tom Piatak	tpiatak@magellanlogistics.com	Club	Carlisle United
+Martin Foyle	martin.foyle@carlisleunited.co.uk	Club	Carlisle United
+Marc Tierney	marc.tierney@carlisleunited.co.uk	Club	Carlisle United
+Suzanne Kidd	Suzanne.kidd@carlisleunited.co.uk	Club	Carlisle United
+Sarah McKnight	sarah.mcknight@carlisleunited.co.uk	Club	Carlisle United
+Spencer Gore	spencer@emjreviews.com	Club	Chelmsford City
+Keith Moule	keith.moule@chelmsfordcityfc.com	Club	Chelmsford City
+Dan Watkins	watkins.dan10@gmail.com	Club	Chelmsford City
+Angelo Harrop	Angelo.Harrop@Chelmsfordcityfc.com	Club	Chelmsford City
+Rhiannon Harrison	rhiannon.harrison@Chelmsfordcityfc.com	Club	Chelmsford City
+Peter Brown	peter@ramscote.co.uk	Club	Chesham United
+Michael Murray	mmurray1988@icloud.com	Club	Chesham United
+James Duncan	jamesaduncan64@icloud.com	Club	Chesham United
+Ryan Woolnough	press@cheshamunited.co.uk	Club	Chesham United
+Gavin Jones	gavj@sky.com	Club	Chesham United
+Albert Davies	albert.davies@chesterfc.com	Club	Chester
+Calum McIntyre	calum.mcintyre@chesterfc.com	Club	Chester
+Mike Allcock	mike.allcock@chesterfc.com	Club	Chester
+Kieron Shiel	kieron.shiel@chesterfc.com	Club	Chester
+Jim Green	jim.green@chesterfc.com	Club	Chester
+Matthew Chappell	media@chippenhamtown.com	Club	Chippenham Town
+Richard Chappell	rchapp@btinternet.com	Club	Chippenham Town
+Jamie Oieszynski	jamieoleszynski2@gmail.com	Club	Chippenham Town
+Pete Tscherewik	pete@chorleyfc.com	Club	Chorley
+Media	media@chorleyfc.com	Club	Chorley
+Secretary	clubsecretary@chorleyfc.com	Club	Chorley
+Jamie Vermiglio	Jamie.vermiglio@chorleyfc.com	Club	Chorley
+James Waldie	james@chorleyfc.com	Club	Chorley
+Charlie Fraser	secretary@daggers.co.uk	Club	Dagenham & Redbridge
+Chris Pollard	functions@daggers.co.uk	Club	Dagenham & Redbridge
+Dave Bennett	daveabennett@hotmail.co.uk	Club	Dagenham & Redbridge
+Daniel Hall	dhall@northsixthgroup.com	Club	Dagenham & Redbridge
+Matt Rizzetta	mrizzetta@northsixthgroup.com	Club	Dagenham & Redbridge
+Terry Mitchell	Terry.mitchell171961@gmail.com	Club	Darlington
+	wattoon@hotmail.co.uk	Club	Darlington
+Chris Stockdale	chris.stockdale@darlingtonfc.org	Club	Darlington
+David Johnston	david.johnston@darlingtonfc.org	Club	Darlington
+John Vickerman	jvickerman@hotmail.com	Club	Darlington
+Rob Jones	Rob.Jones@dazn.com	Media	DAZN
+David Wade	David.Wade@dazn.com	Media	DAZN
+Jamie Rice	Jamie.Rice@dazn.com	Media	DAZN
+Joseph Pickering	Joseph.Pickering@dazn.com	Media	DAZN
+Maria Dot Grau	maria.dotgrau@dazn.com	Media	DAZN
+Kate Ward	Kate.Ward@dazn.com	Media	DAZN
+Rhys Griffiths	rhys.griffiths1@ext.dazn.com	Media	DAZN
+Marc Fernandez	marc.fernandez@dazn.com	Media	DAZN
+Samuel Phelan	samuel.phelan@dazn.com	Media	DAZN
+Nick McCabe	Nicholas.McCabe@ext.dazn.com	Media	DAZN
+Aaron McLean	mcleanaaron83@gmail.com	Media	DAZN
+Nick Gee	Nick.Gee@dazn.com	Media	DAZN
+Heather Johnston	Heather.Johnston@dazn.com	Media	DAZN
+Marc White	marcwhitedw@outlook.com	Club	Dorking Wanderers
+Kris Lea	kris@dorkingwanderers.com	Club	Dorking Wanderers
+Jon Bines	jonathan@dorkingwanderers.com	Club	Dorking Wanderers
+Alan Gout	alangout@dorkingwanderers.com	Club	Dorking Wanderers
+Ollie Gout	ollie@dorkingwanderers.com	Club	Dorking Wanderers
+Jim Parmenter	jim.parmenter@doverathletic.com	Club	Dover Athletic
+Steve Parmenter	Steve.parmenter@doverathletic.com	Club	Dover Athletic
+Simon Brooker	Simon.brooker@doverathletic.com	Club	Dover Athletic
+Frank Clarke	Frank.clarke@doverathletic.com	Club	Dover Athletic
+Media Team	Media.team@doverathletic.com	Club	Dover Athletic
+Alan Williams	ceo@ebfc.co.uk	Club	Eastbourne Borough
+John Bonar	gm@ebfc.co.uk	Club	Eastbourne Borough
+Tom McCleave	media@ebfc.co.uk	Club	Eastbourne Borough
+Simon Leslie	simon@luckyleslie.com	Club	Eastbourne Borough
+Benjy Leslie	benjy@connectmgt.com	Club	Eastbourne Borough
+Tom Coffey	tomc@eastleighfc.com	Club	Eastleigh
+Ray Murphy	secretary@eastleighfc.com	Club	Eastleigh
+Tom Coffey	admin@eastleighfc.com	Club	Eastleigh
+Damian Irvine	Damian.irvine@eufc.co.uk	Club	Ebbsfleet United
+Katie Humphris	Katie.humphris@eufc.co.uk	Club	Ebbsfleet United
+Meghan Love	info@eufc.co.uk	Club	Ebbsfleet United
+Josh Wright	josh.wright@eufc.co.uk	Club	Ebbsfleet United
+Sam Collyer	samuel.collyer@eufc.co.uk	Club	Ebbsfleet United
+Gabriel Meytanis	socialmedia@etfc.london	Club	Enfield Town
+John Dolan	fixturesecretary@etfc.london	Club	Enfield Town
+Paul Reed	chairman@etfc.london	Club	Enfield Town
+ETFC Management	firstteam@etfc.london	Club	Enfield Town
+ETFC Recruitment	recruitment@etfc.london	Club	Enfield Town
+Ed Thorne	ed.thorne@em.com	Partner	Enterprise
+Christine Taylor	christine.b.taylor@ehi.com	Partner	Enterprise
+Kyle Sanborn	kyle.sanborn@ehi.com	Partner	Enterprise
+Spencer Day	spencerday@handafinance.co.uk	Club	Farnborough
+Jim Hardy	clubsecretary@farnboroughfc.co.uk	Club	Farnborough
+Information Farnborough	info@farnboroughfc.co.uk	Club	Farnborough
+Dom Lloyd	dom.lloyd@farnboroughfc.co.uk	Club	Farnborough
+Rob Prince	rob.prince@farnboroughfc.co.uk	Club	Farnborough
+Kelly Gilchrist	kellygilchrist@fchalifaxtown.com	Club	FC Halifax Town
+Louisa Green	louisa.inspire.engage@gmail.com	Club	FC Halifax Town
+David Bosomworth	dbosomworth@tiscali.co.uk	Club	FC Halifax Town
+Luke Davis	lukejrdavis@hotmail.com	Club	FC Halifax Town
+Media Team	mediateam@fchalifaxtown.com	Club	FC Halifax Town
+Dale Vince	dale.vince@mac.com	Club	Forest Green Rovers
+Paula Brown	partnerships@fgr.co.uk	Club	Forest Green Rovers
+Mark Bowen	Mark.Bowen@fgr.co.uk	Club	Forest Green Rovers
+Heather Cook	middleyard.lady@gmail.com	Club	Forest Green Rovers
+Asif Rehmanwala	Asif.Rehmanwala@ecotricity.co.uk	Club	Forest Green Rovers
+Simon Johnson	Simon@gateshead-fc.com	Club	Gateshead
+Bernard McWilliams	Bernard.McWilliams@Gateshead-fc.com	Club	Gateshead
+Scott Ryan	scott@gatesheadcentraltaxis.com	Club	Gateshead
+Mike Coulson	info@gateshead-fc.com	Club	Gateshead
+Craig Whitehouse	craig.whitehouse@purepgltd.co.uk	Club	Gateshead
+Stefano Petruzzo	stefano@ramayana.ventures	Club	Hampton & Richmond Borough
+Alan Julian	alan.julian@hamrichfc.com	Club	Hampton & Richmond Borough
+Ben Hudson	ben.hudson@hamrichfc.com	Club	Hampton & Richmond Borough
+Dom Aberdeen	dom.aberdeen@hartlepoolunited.co.uk	Club	Hartlepool United
+Rose Stoker	Rose.stoker@hartlepoolunited.co.uk	Club	Hartlepool United
+Joe Monks	Joe.Monks@hartlepoolunited.co.uk	Club	Hartlepool United
+Raj Singh	Raj.Singh@prestigegroup.uk.com	Club	Hartlepool United
+Tom Crawford	tom.crawford@hartlepoolunited.co.uk	Club	Hartlepool United
+Dave Boggins	daveboggins@aol.com	Club	Hemel Hempstead Town
+Dean Chance	dean.chance@ntlworld.com	Club	Hemel Hempstead Town
+Lee Bircham	birchy1976@gmail.com	Club	Hemel Hempstead Town
+Mike Percival	mjpercival89@gmail.com	Club	Hemel Hempstead Town
+Reece Sullivan	media@hemelfc.com	Club	Hemel Hempstead Town
+Nik Marsh	nmarsh@herefordfc.co.uk	Club	Hereford
+Chris Ammonds	cammonds@herefordfc.co.uk	Club	Hereford
+Adam Delahaye	adelahaye@herefordfc.co.uk	Club	Hereford
+Jamie Griffiths	jgriffiths@herefordfc.co.uk	Club	Hereford
+Darren Ball	Balldarren00@gmail.com	Club	Hereford
+Andrew Dickinson	media@hornchurchfc.com	Club	Hornchurch
+Daryl McMahon	darylpmcmahon@yahoo.co.uk	Club	Hornchurch
+NL TV	NLTV@hornchurchfc.com	Club	Hornchurch
+Norman Posner	secretary@hornchurchfc.com	Club	Hornchurch
+Colin McBride	club@hornchurchfc.com	Club	Hornchurch
+Dominic Di Paola	dominicdipaola@gmail.com	Club	Horsham
+Leighton Mitchell	Leighton@horshamfc.co.uk	Club	Horsham
+Jimmy Punter	jimmypunts@hotmail.co.uk	Club	Horsham
+Kevin Borrett	chairman@horshamfc.co.uk	Club	Horsham
+Sami El Abd	sami.elabd88@gmail.com	Club	Horsham
+Matt Paddock	Matt.Paddock@harriers.co.uk	Club	Kidderminster Harriers
+Richard Lane	Richard.Lane@harriers.co.uk	Club	Kidderminster Harriers
+Kevin Bunn	Kevin.bunn@harriers.co.uk	Club	Kidderminster Harriers
+Charlie Tonks	Charlie.Tonks@harriers.co.uk	Club	Kidderminster Harriers
+Phil Brown	p30brown@yahoo.co.uk	Club	Kidderminster Harriers
+Bal Srai	bal@turncapital.io	Club	King's Lynn Town
+Julie Briggs	julie@kltown.co.uk	Club	King's Lynn Town
+Paul Caddis	bcfcpc31@gmail.com	Club	King's Lynn Town
+Joe Simpson	joe@kltown.co.uk	Club	King's Lynn Town
+Performance	performance@kltown.co.uk	Club	King's Lynn Town
+Josh Field	josh.field@leamingtonfc.co.uk	Club	Leamington
+Chris Knott	chris.knott@leamingtonfc.co.uk	Club	Leamington
+Jim Scott	jim.scott@leamingtonfc.co.uk	Club	Leamington
+Max Passantino	max.passantino@leamingtonfc.co.uk	Club	Leamington
+Leamington FC	leamingtonfc1@hotmail.com	Club	Leamington
+Bob Trafford	bob@macclesfieldfc.com	Club	Macclesfield
+Anthony Curran	anthony@macclesfieldfc.com	Club	Macclesfield
+Rob Smethurst	rob@macclesfieldfc.com	Club	Macclesfield
+Jonathan Bull	Bulljonathan007@aol.com	Club	Macclesfield
+Brigg Simpson	briggsimpson@hotmail.com	Club	Macclesfield
+Neil Maskell	social@maidenheadunitedfc.org	Club	Maidenhead United
+Peter Griffin	peter.griffin10@outlook.com	Club	Maidenhead United
+Jonathan Adams	jon@maidenheadunitedfc.org	Club	Maidenhead United
+Lee Devonshire	Lee.Devonshire@maidenheadunitedfc.org	Club	Maidenhead United
+Aaron O'Brien	adlob17@gmail.com	Club	Maidenhead United
+John Gooch	John.gooch@maidstoneunited.co.uk	Club	Maidstone United
+Bob Gouldson	Bob.Gouldson@maidstoneunited.co.uk	Club	Maidstone United
+Ian Tucker	Ian.Tucker@maidstoneunited.co.uk	Club	Maidstone United
+Zach Foster-Crouch	zach.fostercrouch@maidstoneunited.co.uk	Club	Maidstone United
+Oliver Ash	oash@richmond-dev.com	Club	Maidstone United
+Neil Young	DOF@marinefc.com	Club	Marine
+Rob Armes	commercial@marinefc.com	Club	Marine
+Sean Doherty	seandoherty207@gmail.com	Club	Marine
+Liam Roberts	liamroberts@morecambefc.com	Club	Morecambe
+Liam Roberts	media@morecambefc.com	Club	Morecambe
+Ropinder Singh	ropindersingh@morecambefc.com	Club	Morecambe
+Rod Taylor	bod@morecambefc.com	Club	Morecambe
+Adele Laffan	alaffan@morecambefc.com	Club	Morecambe
+Steve Thompson	steve@daggers.co.uk	Governing body	National League
+Graham Hill	Graham@thenationalleague.org.uk	Governing body	National League
+Michaela Garrard	michaela@thenationalleague.org.uk	Governing body	National League
+Richard Dorman	richard@thenationalleague.org.uk	Governing body	National League
+Nabila Zulfiqar	nabilazulfiqar@yahoo.co.uk	Governing body	National League
+Gary Owers	gary@thenationalleague.org.uk	Governing body	National League
+Mark Ives	mark@thenationalleague.org.uk	Governing body	National League
+Martin Howard	martinjameshoward@gmail.com	Governing body	National League
+Melissa Whitmore	melissa@thenationalleague.org.uk	Governing body	National League
+Simon Baker	simon@thenationalleague.org.uk	Governing body	National League
+Martyn Cannon	martyn@thenationalleague.org.uk	Governing body	National League
+Nick Elliott	nick@thenationalleague.org.uk	Governing body	National League
+Tim Murphy	tim@manda-ltd.com	Governing body	National League
+Colin Peake	Colin@thenationalleague.org.uk	Governing body	National League
+Jon Warburton	Jon@thenationalleague.org.uk	Governing body	National League
+Tony Butler	Tony@thenationalleague.org.uk	Governing body	National League
+Susan O'Brien	Sobrien@nationalleaguetrust.org.uk	Governing body	National League
+Martin Copus	martin.copus@suttonunited.net	Club	National League
+Tom Scott	tom@thenationalleague.org.uk	Governing body	National League
+Simon Gauge	Simon.Gauge@rochdaleafc.co.uk	Governing body	National League
+Phil Alexander	philalexander62@gmail.com	Governing body	National League
+Claire Morris	cmorris@nationalleaguetrust.org.uk	Governing body	National League
+Louisa Hemming	Louisa.Hemming@thenationalleague.org.uk	Governing body	National League
+Shaun Fisher	1882bar@oxcityfc.co.uk	Club	Oxford City
+Andrew Gate	andrew.gate@oxcityfc.co.uk	Club	Oxford City
+Ross Jenkins	ross.jenkins@oxcityfc.co.uk	Club	Oxford City
+Lee Pankau	secretary@oxcityfc.co.uk	Club	Oxford City
+Justin Merritt	j.merritt@oxcityfc.co.uk	Club	Oxford City
+Sam Jennings	sam@psfc.co.uk	Club	Peterborough Sports
+Laura Anderson	admin-accounts@psfc.co.uk	Club	Peterborough Sports
+Lauren Shiels	laurenshiels99@icloud.com	Club	Peterborough Sports
+Jonathan Robinson	secretary@psfc.co.uk	Club	Peterborough Sports
+Steve Bratt	steve.bratt@pgmol.com	Governing body	PGMOL
+Michael Jones	mjones@pgmol.com	Governing body	PGMOL
+Paul Taylor	PTaylor@pgmol.com	Governing body	PGMOL
+Steve Dunn	sdunn@pgmol.com	Governing body	PGMOL
+Michael Murphy	mmurphy@pgmol.com	Governing body	PGMOL
+Andy D'Urso	adurso@pgmol.com	Governing body	PGMOL
+Clive Oliver	clive.oliver@pgmol.com	Governing body	PGMOL
+David Allison	DAllison@pgmol.com	Governing body	PGMOL
+Neale Barry	nbarry@pgmol.com	Governing body	PGMOL
+Rob Lewis	rob.lewis@pgmol.com	Governing body	PGMOL
+Paul Canadine	PCanadine@pgmol.com	Governing body	PGMOL
+Michael D'Aguilar	Michael.DAguilar@pgmol.com	Governing body	PGMOL
+Mike George	mike.george@pgmol.com	Governing body	PGMOL
+Trevor Massey	tmassey@pgmol.com	Governing body	PGMOL
+Ian Smedley	Ian.Smedley@pgmol.com	Governing body	PGMOL
+Ralph Bone	RBone@pgmol.com	Governing body	PGMOL
+Chris Kiwomya	Chris.Kiwomya@pgmol.com	Governing body	PGMOL
+Kayleigh Dougan	Kayleigh.Dougan@pgmol.com	Governing body	PGMOL
+Daniel Meeson	Daniel.Meeson@pgmol.com	Governing body	PGMOL
+Alan Wiley	AWiley@pgmol.com	Governing body	PGMOL
+Phil Dowd	pdowd@pgmol.com	Governing body	PGMOL
+Adam Kenton	Adam.Kenton@pgmol.com	Governing body	PGMOL
+Graham Laws	GLaws@pgmol.com	Governing body	PGMOL
+Lee Mason	Lee.Mason@pgmol.com	Governing body	PGMOL
+Michael Tingey	Michael.Tingey@pgmol.com	Governing body	PGMOL
+Irfan Kawri	Irfan.Kawri@pgmol.com	Governing body	PGMOL
+Susan Jones	susan.jones@pgmol.com	Governing body	PGMOL
+Brett Huxtable	Brett.Huxtable@pgmol.com	Governing body	PGMOL
+Sports Data	SportsData.Desk@pamediagroup.com	Media	Press Association
+Marcus McCabe	marcus@taurus-group.co.uk	Club	Radcliffe
+Billy Quarmby	billy.quarmby@radcliffefc.com	Club	Radcliffe
+Viv Ware	viv.ware@radcliffe.com	Club	Radcliffe
+Robert Duckworth	duckworth992@yahoo.co.uk	Club	Radcliffe
+George Delves	george.delves@rochdaleafc.co.uk	Club	Rochdale
+Greg Jones	media@rochdaleafc.co.uk	Club	Rochdale
+Cameron Ogden	cameron@puffinpoint.com	Club	Rochdale
+RAFC Staff	office@rochdaleafc.co.uk	Club	Rochdale
+Commercial Staff RAFC	commercial@rochdaleafc.co.uk	Club	Rochdale
+Brian Dutton	dutts2823@icloud.com	Club	Salisbury
+Callum Hart	callumhart3@icloud.com	Club	Salisbury
+Theo Lewis	theolewis1991@hotmail.com	Club	Salisbury
+Andrew Munns	andy@salisburyfc.co.uk	Club	Salisbury
+Jack Fewster	info@scarboroughathletic.com	Club	Scarborough Athletic
+Fred Firman	info@seadogtrust.com	Club	Scarborough Athletic
+Trevor Bull	club.secretary@scarboroughathletic.com	Club	Scarborough Athletic
+Paul Exley	club.secretary@seadogtrust.com	Club	Scarborough Athletic
+Jonathan Greening	seasontickets@seadogtrust.com	Club	Scarborough Athletic
+James Moody	James.moody@scunthorpe-united.co.uk	Club	Scunthorpe United
+Ian Sharp	Ian.sharp@scunthorpe-united.co.uk	Club	Scunthorpe United
+Roj Rahman	Roj.rahman@scunthorpe-united.co.uk	Club	Scunthorpe United
+George Aitkenhead	George.aitkenhead@scunthorpe-united.co.uk	Club	Scunthorpe United
+Michelle Harness	michellebharness@gmail.com	Club	Scunthorpe United
+Ashley Smith	ashley.smith@sloughtownfc.net	Club	Slough Town
+Alan Julian	alan.julian@sloughtownfc.com	Club	Slough Town
+Tom Gathern	media@sloughtownfc.net	Club	Slough Town
+Tom Gathern	tom.gathern@sloughtownfc.net	Club	Slough Town
+Steve Doyle	commercial@sloughtownfc.net	Club	Slough Town
+Darryl Eales	darryl.eales@solihullmoorsfc.co.uk	Club	Solihull Moors
+Cheryl Cooper	cheryl.cooper@solihullmoorsfc.co.uk	Club	Solihull Moors
+Bradley Rice	bradley.rice@solihullmoorsfc.co.uk	Club	Solihull Moors
+Kate Willetts	kate.willetts@solihullmoorsfc.co.uk	Club	Solihull Moors
+Andrew Cooper	andy.cooper@solihullmoorsfc.co.uk	Club	Solihull Moors
+Geoff Thompson	geoff.thompson@southshieldsfc.co.uk	Club	South Shields
+Lee Picton	lee.picton@southshieldsfc.co.uk	Club	South Shields
+Elliott Dickman	elliott.dickman@southshieldsfc.co.uk	Club	South Shields
+Andy Inness	andy.inness@southshieldsfc.co.uk	Club	South Shields
+Philip Reay	southshieldsfcsec@gmail.com	Club	South Shields
+George Taylor	georgealexandertaylor@gmail.com	Club	Southend United
+Jason Brown	jason.brown@southend-united.co.uk	Club	Southend United
+Justin Rees	justin.rees@southend-united.co.uk	Club	Southend United
+Tom Lawrence	tom.lawrence@southend-united.co.uk	Club	Southend United
+Rylee Doe	commercial@southend-united.co.uk	Club	Southend United
+Andy Burgess	andy.burgess@southportfc.net	Club	Southport
+Joe Goulding	joe.goulding@bighelpgroup.com	Club	Southport
+Rob Urwin	programme@southportfc.net	Club	Southport
+Shaun Slater	shaun.slater@southportfc.net	Club	Southport
+Julie Ankers	secretary@southportfc.net	Club	Southport
+David Atkinson	david.atkinson@agencyspace.co.uk	Agency	Space
+Bobby Taylor	r-taylor3@sky.com	Club	Spennymoor Town
+Debra Swinburn	debra.swinburn@evansco.co.uk	Club	Spennymoor Town
+Brad Groves	brad.groves@procuresmart.com	Club	Spennymoor Town
+Jason Ainsley	Jason.ainsley07@gmail.com	Club	Spennymoor Town
+Mark Simpson	info@spennymoortownfc.org	Club	Spennymoor Town
+Andrew Vaughan	andrew.vaughan@statsperform.com	Media	StatsPerform/Opta
+Limerick Video	Limerickvideo@statsperform.com	Media	StatsPerform/Opta
+Vid Opschi	vidopschi@gmail.com	Media	StatsPerform/Opta
+Jack Daly	jack.daly@suttonunited.net	Club	Sutton United
+Ben Hautt	ben.hautt@suttonunited.net	Club	Sutton United
+Gary Otto	gary.otto@suttonunited.net	Club	Sutton United
+Tim Allison	tim.allison@suttonunited.net	Club	Sutton United
+Bruce Elliott	bruce.elliott2@btopenworld.com	Club	Sutton United
+Archie Baynham	archiebaynham@thelambs.co.uk	Club	Tamworth
+Bob Andrews	chairman@thelambs.co.uk	Club	Tamworth
+Steve Lathbury	steve.lathbury@gmail.com	Club	Tamworth
+Scott Rickards	scottrickards@thelambs.co.uk	Club	Tamworth
+Archie Baynham	office@thelambs.co.uk	Club	Tamworth
+Paul Fairclough	paul.fairclough@thefa.com	Governing body	The FA
+Sophie Purves	Sophie.Purves@tonbridgeangels.co.uk	Club	Tonbridge Angels
+Craig Nelson	craig.nelson@tonbridgeangels.co.uk	Club	Tonbridge Angels
+Geoff Curtis	geoff.curtis@tonbridgeangels.co.uk	Club	Tonbridge Angels
+James Ford	james.ford@tonbridgeangels.co.uk	Club	Tonbridge Angels
+Wink Tomkinson	wink.tomkinson@tonbridgeangels.co.uk	Club	Tonbridge Angels
+Joe Lovell	JoeL@TorquayUnited.com	Club	Torquay United
+Dominic Garrett-Mee	DominicM@TorquayUnited.com	Club	Torquay United
+Jimmy Ball	JimmyB@TorquayUnited.com	Club	Torquay United
+Patrick Tinkler	PatrickT@TorquayUnited.com	Club	Torquay United
+Debbie Reynolds	debbier@torquayunited.com	Club	Torquay United
+Eric Perez	Eperez@trurocity.co.uk	Club	Truro City
+Abdullah Ashraf	abdullah@sparkpropertiesgroup.com	Club	Truro City
+Rob Butland	rbutland@trurocity.co.uk	Club	Truro City
+John Askey	johnaskey07@gmail.com	Club	Truro City
+Alex Black	ablack@trurocity.co.uk	Club	Truro City
+Dan Simmonite	work@dansimmonite.com	Partner	Vanarama
+Tom Bodell	Tom.Bodell@autotrader.co.uk	Partner	Vanarama
+Rory Fitzgerald	rory.fitzgerald@gpflewis.co.uk	Club	Wealdstone
+Dominic Whyley	dominic.whyley@yahoo.co.uk	Club	Wealdstone
+Gary Waddock	Gwaddock@aol.com	Club	Wealdstone
+Sarah Gowdy	sarahgowdy@wealdstonefc.com	Club	Wealdstone
+Richard Hopwood	richardhopwood@wealdstonefc.com	Club	Wealdstone
+Oli Bliss	Oli.bliss@optimacp.co.uk	Club	Weston-super-Mare
+Scott Rogers	scottsouthwesttiling@gmail.com	Club	Weston-super-Mare
+Rich Joyce	rich.joyce@live.co.uk	Club	Weston-super-Mare
+Steve Laker	steve.laker@wsmafc.co.uk	Club	Weston-super-Mare
+John Mathewson	secretary@wsmafc.co.uk	Club	Weston-super-Mare
+Ben Stone	ben.stone@wokingfc.co.uk	Club	Woking
+Robin Byrne	robin.byrne@wokingfc.co.uk	Club	Woking
+Jody Brown	jodybrown22@hotmail.com	Club	Woking
+Jonnie Green	Jonnie.green@wokingfc.co.uk	Club	Woking
+Todd Johnson	media@wokingfc.co.uk	Club	Woking
+Ben Tomlinson	buddytomo@gmail.com	Club	Worksop Town
+Worksop Town	tigers.den.wtfc@gmail.com	Club	Worksop Town
+Worksop Town	Ojc196@gmail.com	Club	Worksop Town
+Nathan Bowen	nathan.bowen@worthingfc.com	Club	Worthing
+George Dowell MBE	george@worthingfc.com	Club	Worthing
+Keith Mitchell	keith.mitchell@worthingfc.com	Club	Worthing
+Jude Deedigan	jude.deedigan@worthingfc.com	Club	Worthing
+Ralph Gilbert	ralph.gilbert@worthingfc.com	Club	Worthing
+Kirstie Baker	kbaker@ytfc.net	Club	Yeovil Town
+Prabhu Srinivasan	prabhu@ytfc.net	Club	Yeovil Town
+Sahil Prabhu	sahil@ytfc.net	Club	Yeovil Town
+Stuart Robins	srobins@ytfc.net	Club	Yeovil Town
+Daniel Howell	dhowell@ytfc.net	Club	Yeovil Town
+Matt Uggla	Matthew@yorkcityfootballclub.co.uk	Club	York City
+Julie Anne Uggla	Jauggla@yorkcityfootballclub.co.uk	Club	York City
+Lisa Charlton	Lisa.charlton@yorkcityfootballclub.co.uk	Club	York City
+YCFC Media	Media@yorkcityfootballclub.co.uk	Club	York City
+Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
+</script>
+
+<!-- ── Firebase + tool boot ──────────────────────────────────────────── -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+<script>
+  firebase.initializeApp({
+    apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+    authDomain:        "nl-tools.firebaseapp.com",
+    databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId:         "nl-tools",
+    storageBucket:     "nl-tools.firebasestorage.app",
+    messagingSenderId: "801354670005",
+    appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+  });
+  var db = firebase.database();
+
+  window.NL_TOOL = {
+    title: 'DAZN VIP',
+    toolKey: 'dazn-vip'
+  };
+  var NL_TOOL_KEY = 'dazn-vip';
+
+  window.NL_CHANGELOG = [
+    {
+      date: '11 May 2026',
+      version: 'v1.0',
+      items: [
+        'New tool: request DAZN VIP access changes for your club.',
+        'Clubs see their own VIP list (max 5) and can request adds, removes and edits.',
+        'NL admins receive the request, forward it to DAZN by email, and mark complete once DAZN confirms.'
+      ]
+    }
+  ];
+
+  /* Held until auth-guard resolves; main app boot below. */
+  window.nlAuthReady = function(userData) {
+    window.NL = window.NL || {};
+    window.NL.session = userData;
+    if (window.DAZNVIP && window.DAZNVIP.boot) {
+      window.DAZNVIP.boot(userData);
+    } else {
+      /* Main script not loaded yet — defer */
+      window._daznVipDeferredSession = userData;
+    }
+  };
+</script>
+
+<script src="/tools/system/nl-utils.js?v=6"></script>
+<script src="/tools/system/nl-topbar.js?v=7"></script>
+<script src="/tools/system/auth-guard.js?v=6"></script>
+
+<!-- ── Main application ──────────────────────────────────────────────── -->
+<script>
+(function () {
+  'use strict';
+
+  /* ── Constants ─────────────────────────────────────────────────────── */
+  var CREST_BASE     = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
+  var FALLBACK_CREST = CREST_BASE + 'National%20League%20rose.png';
+  var DAZN_EMAIL     = 'nltvaccess@dazn.com';
+  var CLUB_VIP_CAP   = 5;
+
+  var ESC_CHARS = ['.', '#', '$', '[', ']', '/'];
+
+  /* ── State ─────────────────────────────────────────────────────────── */
+  var S = {
+    session: null,
+    role: '',
+    isClub: false,
+    isStaff: false,           /* view-only */
+    isAdmin: false,           /* admin or superadmin */
+    isSuperadmin: false,
+    clubName: '',             /* set for club users */
+    orgs: {},                 /* clubName → { name, category, maxVips, vips: { id → row }, openRequestId } */
+    requests: {},             /* requestId → request */
+    audit: {},                /* clubName → { ts → entry } */
+    basket: [],               /* { action, name, email, vipId?, editReason?, oldName?, oldEmail? } */
+    _initDone: false
+  };
+
+  /* ── Helpers ───────────────────────────────────────────────────────── */
+  function esc(s) { return (window.NL && NL.escHtml) ? NL.escHtml(s) : String(s == null ? '' : s); }
+  function toast(msg, type) { if (window.NL && NL.toast) NL.toast(msg, type); }
+
+  function trim(s) { return (s == null ? '' : String(s)).replace(/^\s+|\s+$/g, ''); }
+
+  /* RTDB key safety — keep raw club name but reject reserved chars in seed. */
+  function isSafeKey(k) {
+    if (!k) return false;
+    for (var i = 0; i < ESC_CHARS.length; i++) if (k.indexOf(ESC_CHARS[i]) !== -1) return false;
+    return true;
+  }
+
+  function fmtTs(ts) {
+    if (!ts) return '—';
+    var d = new Date(ts);
+    return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+
+  function fmtDate(ts) {
+    if (!ts) return '—';
+    var d = new Date(ts);
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+
+  function forenameOf(name) {
+    var n = trim(name);
+    if (!n) return 'NL Staff';
+    return n.split(/\s+/)[0];
+  }
+
+  function emailValid(s) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trim(s));
+  }
+
+  function uid() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  function listValues(obj) {
+    if (!obj) return [];
+    var out = [];
+    for (var k in obj) if (Object.prototype.hasOwnProperty.call(obj, k)) {
+      var v = obj[k]; v._key = k; out.push(v);
+    }
+    return out;
+  }
+
+  /* ── Modal plumbing ────────────────────────────────────────────────── */
+  var vipModal      = document.getElementById('vipModal');
+  var confirmModal  = document.getElementById('confirmModal');
+
+  function openModal(el) { el.classList.add('is-open'); }
+  function closeModal(el) { el.classList.remove('is-open'); }
+
+  function confirmDialog(title, body, okLabel, onOk) {
+    document.getElementById('confirmTitle').textContent = title;
+    document.getElementById('confirmBody').innerHTML = body;
+    var okBtn = document.getElementById('confirmOk');
+    okBtn.textContent = okLabel || 'Confirm';
+    var cancelBtn = document.getElementById('confirmCancel');
+    function cleanup() {
+      okBtn.removeEventListener('click', okHandler);
+      cancelBtn.removeEventListener('click', cancelHandler);
+      closeModal(confirmModal);
+    }
+    function okHandler() { cleanup(); onOk(); }
+    function cancelHandler() { cleanup(); }
+    okBtn.addEventListener('click', okHandler);
+    cancelBtn.addEventListener('click', cancelHandler);
+    openModal(confirmModal);
+  }
+
+  /* ── Boot ──────────────────────────────────────────────────────────── */
+  function boot(userData) {
+    if (S._initDone) return;
+    S._initDone = true;
+    S.session = userData;
+    S.role = userData.role || '';
+    S.isSuperadmin = S.role === 'superadmin';
+    S.isAdmin = S.isSuperadmin || S.role === 'admin';
+    S.isStaff = !S.isAdmin && (S.role === 'staff' || S.role === 'admin');
+    S.isClub  = S.role === 'club';
+    S.clubName = userData.club || '';
+
+    document.getElementById('pageWrap').style.display = 'block';
+    document.getElementById('vipBoot').style.display = 'none';
+
+    if (S.isClub) {
+      if (!S.clubName) {
+        document.getElementById('vipBoot').style.display = '';
+        document.getElementById('vipBoot').textContent = 'No club assigned to your account — contact NL admin.';
+        return;
+      }
+      renderClubView();
+      attachClubListeners();
+      wireClubEvents();
+    } else {
+      /* Staff or admin */
+      renderStaffView();
+      attachStaffListeners();
+      wireStaffEvents();
+    }
+  }
+  window.DAZNVIP = { boot: boot };
+
+  if (window._daznVipDeferredSession) {
+    boot(window._daznVipDeferredSession);
+    window._daznVipDeferredSession = null;
+  }
+
+  /* ════════════════════════════════════════════════════════════════════
+     CLUB VIEW
+     ════════════════════════════════════════════════════════════════════ */
+
+  function renderClubView() {
+    document.getElementById('clubView').style.display = '';
+
+    var crestEl = document.getElementById('clubCrest');
+    crestEl.src = CREST_BASE + encodeURIComponent(S.clubName) + '.png';
+    crestEl.onerror = function () { this.onerror = null; this.src = FALLBACK_CREST; };
+
+    document.getElementById('clubTitle').textContent = S.clubName + ' — VIP access';
+  }
+
+  function attachClubListeners() {
+    db.ref('dazn-vip/orgs/' + S.clubName).on('value', function (snap) {
+      var org = snap.val() || { name: S.clubName, category: 'club', maxVips: CLUB_VIP_CAP, vips: {} };
+      S.orgs[S.clubName] = org;
+      paintClubView();
+    });
+
+    db.ref('dazn-vip/audit/' + S.clubName).limitToLast(20).on('value', function (snap) {
+      S.audit[S.clubName] = snap.val() || {};
+      paintClubLog();
+    });
+  }
+
+  var _openReqUnsub = null;
+  function paintClubView() {
+    var org = S.orgs[S.clubName] || { vips: {} };
+    var vips = listValues(org.vips);
+    vips.sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); });
+
+    /* Detach any prior open-request listener */
+    if (_openReqUnsub) { try { _openReqUnsub.off(); } catch (e) {} _openReqUnsub = null; }
+
+    var openId = org.openRequestId;
+    if (openId) {
+      var ref = db.ref('dazn-vip/requests/' + openId);
+      _openReqUnsub = ref;
+      ref.on('value', function (snap) {
+        var openReq = snap.val();
+        if (openReq) openReq._key = openId;
+        paintOpenRequestBanner(openReq, openId);
+        paintClubBody(vips, !!openReq && (openReq.status === 'pending' || openReq.status === 'sent'));
+      });
+    } else {
+      paintOpenRequestBanner(null, null);
+      paintClubBody(vips, false);
+    }
+  }
+
+  function paintClubBody(vips, locked) {
+    var tbody = document.getElementById('clubVipBody');
+    var section = document.getElementById('clubView');
+    if (locked) section.classList.add('vip-locked'); else section.classList.remove('vip-locked');
+
+    document.getElementById('clubSubtitle').innerHTML =
+      '<strong>' + vips.length + '</strong> of ' + CLUB_VIP_CAP + ' slots used';
+
+    if (!vips.length) {
+      tbody.innerHTML = '<tr><td colspan="3" class="vip-empty">No VIPs on the list yet. Use “Add VIP” to start.</td></tr>';
+    } else {
+      var rows = vips.map(function (v) {
+        var nameHtml = v.name ? esc(v.name) : '<span class="vip-name-blank">(no name)</span>';
+        return '<tr>'
+          + '<td class="col-name">' + nameHtml + '</td>'
+          + '<td class="vip-email">' + esc(v.email) + '</td>'
+          + '<td class="col-actions">'
+          +   '<button class="vip-row-btn" data-act="edit"   data-vip="' + esc(v._key) + '">Edit</button>'
+          +   '<button class="vip-row-btn is-danger" data-act="remove" data-vip="' + esc(v._key) + '">Remove</button>'
+          + '</td>'
+          + '</tr>';
+      });
+      tbody.innerHTML = rows.join('');
+    }
+
+    var addBtn = document.getElementById('addVipBtn');
+    var capNote = document.getElementById('clubCapNote');
+    var slotsLeft = CLUB_VIP_CAP - vips.length;
+    if (slotsLeft <= 0) {
+      addBtn.disabled = true;
+      capNote.textContent = 'At cap. Remove an existing VIP first to add another.';
+    } else {
+      addBtn.disabled = false;
+      capNote.textContent = slotsLeft + ' slot' + (slotsLeft === 1 ? '' : 's') + ' available.';
+    }
+    if (locked) {
+      addBtn.disabled = true;
+      capNote.textContent = 'Changes locked while a request is being processed.';
+    }
+
+    paintBasket();
+  }
+
+  function paintOpenRequestBanner(req, reqId) {
+    var banner = document.getElementById('openRequestBanner');
+    if (!req) { banner.style.display = 'none'; return; }
+
+    var statusLabel = '';
+    var bannerClass = '';
+    var bodyText = '';
+    if (req.status === 'pending') {
+      statusLabel = 'Pending review';
+      bannerClass = '';
+      bodyText = 'The National League will review your request and forward it to DAZN. Your VIP list will update once DAZN confirms the change.';
+    } else if (req.status === 'sent') {
+      statusLabel = 'Sent to DAZN';
+      bannerClass = 'is-sent';
+      bodyText = 'The National League has forwarded your request to DAZN. Your VIP list will update once DAZN confirms.';
+    } else {
+      banner.style.display = 'none';
+      return;
+    }
+
+    var changesList = (req.changes || []).map(function (c) {
+      return '<li>' + summariseChange(c) + '</li>';
+    }).join('');
+
+    var meta = 'Submitted ' + fmtTs(req.requestedAt);
+    if (req.sentAt) meta += ' · Sent ' + fmtTs(req.sentAt);
+
+    banner.className = 'vip-banner ' + bannerClass;
+    banner.style.display = 'block';
+    banner.innerHTML =
+        '<div class="vip-banner__title">'
+      +   '<span class="vip-banner__badge">' + esc(statusLabel) + '</span>'
+      +   '<span>Request being processed</span>'
+      + '</div>'
+      + '<div>' + esc(bodyText) + '</div>'
+      + '<div style="margin-top:8px;font-weight:700;font-size:12px">You requested:</div>'
+      + '<ul class="vip-banner__changes">' + changesList + '</ul>'
+      + '<div class="vip-banner__meta">' + meta + '</div>'
+      + (req.status === 'pending'
+          ? '<div class="vip-banner__actions"><button class="nl-btn nl-btn--ghost" id="cancelOwnRequest">Cancel this request</button></div>'
+          : '');
+
+    var cancelBtn = document.getElementById('cancelOwnRequest');
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', function () {
+        confirmDialog('Cancel request?', 'This will withdraw your pending request to the National League. You can submit a new one afterwards.', 'Cancel request', function () {
+          cancelRequest(reqId, 'Cancelled by club');
+        });
+      });
+    }
+  }
+
+  function paintClubLog() {
+    var entries = listValues(S.audit[S.clubName] || {});
+    entries.sort(function (a, b) { return (b._key * 1) - (a._key * 1); });
+    var log = document.getElementById('clubRecentLog');
+    var list = document.getElementById('clubRecentList');
+    if (!entries.length) { log.style.display = 'none'; return; }
+    log.style.display = '';
+    list.innerHTML = entries.slice(0, 8).map(function (e) {
+      return '<li><span class="vip-log__date">' + esc(fmtDate(e._key * 1)) + '</span> '
+        + esc(e.summary || '—')
+        + (e.by ? ' <span style="font-size:11px;opacity:.7;">(by ' + esc(e.by) + ')</span>' : '')
+        + '</li>';
+    }).join('');
+  }
+
+  function summariseChange(c) {
+    var who = (c.name || '(no name)') + ' — ' + (c.email || '');
+    if (c.action === 'add')    return 'Add: ' + esc(who);
+    if (c.action === 'remove') return 'Remove: ' + esc(who);
+    if (c.action === 'edit') {
+      var before = (c.before && (c.before.name || '(no name)')) + ' / ' + (c.before && c.before.email);
+      var after  = (c.after  && (c.after.name  || '(no name)'))  + ' / ' + (c.after  && c.after.email);
+      var reasonNote = '';
+      if (c.editReason === 'typo')     reasonNote = ' <span style="font-size:11px;opacity:.7">(typo correction)</span>';
+      if (c.editReason === 'newperson') reasonNote = ' <span style="font-size:11px;opacity:.7">(new person, same email)</span>';
+      return 'Edit: ' + esc(before) + ' → ' + esc(after) + reasonNote;
+    }
+    return esc(c.action || '?');
+  }
+
+  /* ── Basket (unsubmitted edits) ────────────────────────────────────── */
+  function paintBasket() {
+    var basket = document.getElementById('clubBasket');
+    if (!S.basket.length) { basket.style.display = 'none'; return; }
+    basket.style.display = '';
+
+    var list = document.getElementById('clubBasketList');
+    list.innerHTML = S.basket.map(function (c, idx) {
+      var chip, label;
+      if (c.action === 'add')    { chip = 'add';    label = 'Add — '    + (c.name || '(no name)') + ' / ' + c.email; }
+      else if (c.action === 'remove') { chip = 'remove'; label = 'Remove — ' + (c.name || '(no name)') + ' / ' + c.email; }
+      else if (c.action === 'edit')   { chip = 'edit';   label = 'Edit — '   + (c.before.name || '(no name)') + ' → ' + (c.after.name || '(no name)') + ' / ' + c.after.email; }
+      return '<li>'
+        + '<span class="vip-basket__chip ' + chip + '">' + chip + '</span>'
+        + '<span>' + esc(label) + '</span>'
+        + '<button class="vip-basket__undo" data-idx="' + idx + '">remove</button>'
+        + '</li>';
+    }).join('');
+  }
+
+  function addToBasket(change) {
+    S.basket.push(change);
+    paintBasket();
+  }
+
+  function removeFromBasket(idx) {
+    S.basket.splice(idx, 1);
+    paintBasket();
+  }
+
+  function discardBasket() {
+    S.basket = [];
+    paintBasket();
+  }
+
+  function wireClubEvents() {
+    /* Add */
+    document.getElementById('addVipBtn').addEventListener('click', function () {
+      openVipModal({ mode: 'add' });
+    });
+
+    /* Edit / Remove on rows */
+    document.getElementById('clubVipBody').addEventListener('click', function (e) {
+      var t = e.target;
+      if (!t || !t.dataset || !t.dataset.act) return;
+      var vipId = t.dataset.vip;
+      var vip = (S.orgs[S.clubName] && S.orgs[S.clubName].vips && S.orgs[S.clubName].vips[vipId]);
+      if (!vip) return;
+      if (t.dataset.act === 'edit') {
+        openVipModal({ mode: 'edit', vipId: vipId, vip: vip });
+      } else if (t.dataset.act === 'remove') {
+        confirmDialog(
+          'Remove VIP?',
+          'This will queue removal of <strong>' + esc(vip.name || '(no name)') + '</strong> (' + esc(vip.email) + ') from the request.',
+          'Add to changes',
+          function () {
+            addToBasket({ action: 'remove', vipId: vipId, name: vip.name || '', email: vip.email || '' });
+          }
+        );
+      }
+    });
+
+    /* Basket controls */
+    document.getElementById('clubBasketList').addEventListener('click', function (e) {
+      var t = e.target;
+      if (t && t.classList.contains('vip-basket__undo')) {
+        removeFromBasket(parseInt(t.dataset.idx, 10));
+      }
+    });
+    document.getElementById('basketDiscard').addEventListener('click', function () {
+      confirmDialog('Discard all pending changes?', 'These edits will be cleared. Nothing has been submitted yet.', 'Discard', discardBasket);
+    });
+    document.getElementById('basketSubmit').addEventListener('click', submitClubRequest);
+
+    /* Modal controls */
+    document.getElementById('vipModalCancel').addEventListener('click', function () { closeModal(vipModal); });
+    document.getElementById('vipModalSave').addEventListener('click', onVipModalSave);
+  }
+
+  /* ── VIP modal (add / edit) ────────────────────────────────────────── */
+  var modalContext = null;
+  function openVipModal(ctx) {
+    modalContext = ctx;
+    var titleEl = document.getElementById('vipModalTitle');
+    var nameEl  = document.getElementById('vipModalName');
+    var emailEl = document.getElementById('vipModalEmail');
+    var reasonWrap = document.getElementById('vipModalEditReason');
+    var hint = document.getElementById('vipModalHint');
+    var err  = document.getElementById('vipModalError');
+    err.textContent = '';
+    reasonWrap.style.display = 'none';
+    var radios = reasonWrap.querySelectorAll('input[name="editReason"]');
+    for (var i = 0; i < radios.length; i++) radios[i].checked = false;
+
+    if (ctx.mode === 'add') {
+      titleEl.textContent = 'Add VIP';
+      nameEl.value = '';
+      emailEl.value = '';
+      hint.textContent = 'Adds this person to your VIP list. Leave name blank if it’s a shared inbox.';
+    } else {
+      titleEl.textContent = 'Edit VIP';
+      nameEl.value = ctx.vip.name || '';
+      emailEl.value = ctx.vip.email || '';
+      hint.textContent = '';
+    }
+    openModal(vipModal);
+    setTimeout(function () { nameEl.focus(); }, 30);
+  }
+
+  function onVipModalSave() {
+    var nameEl  = document.getElementById('vipModalName');
+    var emailEl = document.getElementById('vipModalEmail');
+    var err     = document.getElementById('vipModalError');
+    var name    = trim(nameEl.value);
+    var email   = trim(emailEl.value);
+
+    err.textContent = '';
+    if (!email) { err.textContent = 'Email is required.'; return; }
+    if (!emailValid(email)) { err.textContent = 'That doesn’t look like a valid email.'; return; }
+
+    if (modalContext.mode === 'add') {
+      /* Capacity check including basket adds */
+      var currentCount = listValues((S.orgs[S.clubName] || {}).vips || {}).length;
+      var pendingAdds = S.basket.filter(function (c) { return c.action === 'add'; }).length;
+      var pendingRemoves = S.basket.filter(function (c) { return c.action === 'remove'; }).length;
+      var projected = currentCount + pendingAdds - pendingRemoves;
+      if (projected >= CLUB_VIP_CAP) {
+        err.textContent = 'Would exceed the ' + CLUB_VIP_CAP + '-VIP cap. Queue a removal first.';
+        return;
+      }
+      addToBasket({ action: 'add', name: name, email: email });
+      closeModal(vipModal);
+      return;
+    }
+
+    /* Edit mode */
+    var before = { name: modalContext.vip.name || '', email: modalContext.vip.email || '' };
+    var after  = { name: name, email: email };
+    if (before.name === after.name && before.email === after.email) {
+      err.textContent = 'No changes made.';
+      return;
+    }
+
+    var nameChanged  = before.name !== after.name;
+    var emailChanged = before.email !== after.email;
+
+    if (nameChanged && !emailChanged) {
+      /* Name only changed — need reason */
+      var reasonWrap = document.getElementById('vipModalEditReason');
+      reasonWrap.style.display = '';
+      var picked = reasonWrap.querySelector('input[name="editReason"]:checked');
+      if (!picked) { err.textContent = 'Pick a reason — typo vs new person.'; return; }
+      addToBasket({
+        action: 'edit',
+        vipId: modalContext.vipId,
+        before: before,
+        after: after,
+        editReason: picked.value
+      });
+      closeModal(vipModal);
+      return;
+    }
+
+    if (emailChanged && !nameChanged) {
+      addToBasket({
+        action: 'edit',
+        vipId: modalContext.vipId,
+        before: before,
+        after: after,
+        editReason: 'typo'
+      });
+      closeModal(vipModal);
+      return;
+    }
+
+    /* Both changed — split into remove + add */
+    addToBasket({ action: 'remove', vipId: modalContext.vipId, name: before.name, email: before.email });
+    addToBasket({ action: 'add', name: after.name, email: after.email });
+    closeModal(vipModal);
+  }
+
+  /* ── Submit club request ───────────────────────────────────────────── */
+  function submitClubRequest() {
+    if (!S.basket.length) return;
+    var org = S.orgs[S.clubName];
+    if (org && org.openRequestId) {
+      toast('You already have an open request.', 'error');
+      return;
+    }
+
+    confirmDialog(
+      'Submit request to National League?',
+      'Your ' + S.basket.length + ' change' + (S.basket.length === 1 ? '' : 's')
+        + ' will be sent to NL admin for review.',
+      'Submit',
+      function () { doSubmitClubRequest(); }
+    );
+  }
+
+  function doSubmitClubRequest() {
+    var reqId = uid();
+    var now = Date.now();
+    var req = {
+      orgName: S.clubName,
+      orgCategory: 'club',
+      requestedBy: {
+        uid:   S.session.uid || (firebase.auth().currentUser && firebase.auth().currentUser.uid) || '',
+        name:  S.session.name || '',
+        email: S.session.email || ''
+      },
+      requestedAt: now,
+      changes: S.basket.slice(),
+      status: 'pending'
+    };
+
+    var updates = {};
+    updates['dazn-vip/requests/' + reqId] = req;
+    updates['dazn-vip/orgs/' + S.clubName + '/openRequestId'] = reqId;
+    updates['dazn-vip/orgs/' + S.clubName + '/name'] = S.clubName;
+    updates['dazn-vip/orgs/' + S.clubName + '/category'] = 'club';
+    updates['dazn-vip/orgs/' + S.clubName + '/maxVips'] = CLUB_VIP_CAP;
+
+    db.ref().update(updates).then(function () {
+      try { NL.writeAudit('dazn_vip_request_submitted', S.clubName + ': ' + req.changes.length + ' change(s)'); } catch (e) {}
+      S.basket = [];
+      paintBasket();
+      toast('Request submitted.', 'success');
+    }).catch(function (e) {
+      toast('Couldn’t submit: ' + (e.message || 'error'), 'error');
+    });
+  }
+
+  function cancelRequest(reqId, reason) {
+    if (!reqId) return;
+    var now = Date.now();
+    var orgName = '';
+    db.ref('dazn-vip/requests/' + reqId).once('value').then(function (snap) {
+      var r = snap.val();
+      if (!r) return;
+      orgName = r.orgName;
+      var updates = {};
+      updates['dazn-vip/requests/' + reqId + '/status'] = 'cancelled';
+      updates['dazn-vip/requests/' + reqId + '/cancelledAt'] = now;
+      updates['dazn-vip/requests/' + reqId + '/cancelledBy'] = { uid: S.session.uid || '', name: S.session.name || '' };
+      updates['dazn-vip/requests/' + reqId + '/cancelReason'] = reason || '';
+      updates['dazn-vip/orgs/' + orgName + '/openRequestId'] = null;
+      return db.ref().update(updates);
+    }).then(function () {
+      toast('Request cancelled.', 'success');
+    }).catch(function (e) { toast('Couldn’t cancel: ' + (e.message || 'error'), 'error'); });
+  }
+
+  /* ════════════════════════════════════════════════════════════════════
+     STAFF VIEW
+     ════════════════════════════════════════════════════════════════════ */
+
+  function renderStaffView() {
+    document.getElementById('staffView').style.display = '';
+    if (S.isAdmin) {
+      document.getElementById('tabNonClubsBtn').style.display = '';
+    }
+    if (S.isSuperadmin) {
+      document.getElementById('tabSeedBtn').style.display = '';
+    }
+  }
+
+  function attachStaffListeners() {
+    db.ref('dazn-vip/orgs').on('value', function (snap) {
+      S.orgs = snap.val() || {};
+      paintRequests();
+      paintBrowse();
+      paintNonClubs();
+      maybeShowSeedPrompt();
+    });
+    db.ref('dazn-vip/requests').on('value', function (snap) {
+      S.requests = snap.val() || {};
+      paintRequests();
+    });
+  }
+
+  function wireStaffEvents() {
+    var tabs = document.querySelectorAll('.vip-tab');
+    Array.prototype.forEach.call(tabs, function (t) {
+      t.addEventListener('click', function () {
+        Array.prototype.forEach.call(tabs, function (x) { x.classList.remove('is-active'); });
+        t.classList.add('is-active');
+        document.getElementById('tabRequests').style.display = 'none';
+        document.getElementById('tabBrowse').style.display = 'none';
+        document.getElementById('tabNonClubs').style.display = 'none';
+        document.getElementById('tabSeed').style.display = 'none';
+        document.getElementById('tab' + t.dataset.tab.charAt(0).toUpperCase() + t.dataset.tab.slice(1)).style.display = '';
+      });
+    });
+
+    document.getElementById('browseSearch').addEventListener('input', paintBrowse);
+
+    /* Request actions delegated */
+    document.getElementById('reqList').addEventListener('click', onRequestAction);
+
+    /* Non-club actions delegated (bound once) */
+    if (S.isAdmin) {
+      document.getElementById('nonClubsList').addEventListener('click', onNonClubAction);
+    }
+
+    /* Modal cancel for staff edits */
+    document.getElementById('vipModalCancel').addEventListener('click', function () { closeModal(vipModal); });
+  }
+
+  /* ── Requests tab ──────────────────────────────────────────────────── */
+  function paintRequests() {
+    var rows = listValues(S.requests || {});
+    var open = rows.filter(function (r) { return r.status === 'pending' || r.status === 'sent'; });
+    var done = rows.filter(function (r) { return r.status === 'complete' || r.status === 'cancelled'; });
+    open.sort(function (a, b) { return (a.requestedAt || 0) - (b.requestedAt || 0); });
+    done.sort(function (a, b) { return (b.requestedAt || 0) - (a.requestedAt || 0); });
+
+    var openCount = open.length;
+    var countEl = document.getElementById('tabRequestsCount');
+    if (openCount > 0) { countEl.style.display = ''; countEl.textContent = openCount; }
+    else { countEl.style.display = 'none'; }
+
+    var html = '';
+    if (!open.length) {
+      html += '<div class="vip-empty" style="background:#fff;border:1px solid var(--border);border-radius:10px">No open requests.</div>';
+    } else {
+      html += open.map(renderReqCard).join('');
+    }
+    if (done.length) {
+      html += '<div style="margin:24px 0 10px;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Recently closed</div>';
+      html += done.slice(0, 20).map(renderReqCard).join('');
+    }
+    document.getElementById('reqList').innerHTML = html;
+  }
+
+  function renderReqCard(r) {
+    var canAction = S.isAdmin;
+    var actionBtns = '';
+    if (canAction) {
+      if (r.status === 'pending') {
+        actionBtns =
+            '<button class="nl-btn nl-btn--primary" data-act="open-email" data-req="' + esc(r._key) + '">Open in Outlook</button>'
+          + '<button class="nl-btn nl-btn--secondary" data-act="mark-sent" data-req="' + esc(r._key) + '">Mark as sent</button>'
+          + '<div class="req-actions__spacer"></div>'
+          + '<button class="nl-btn nl-btn--ghost" data-act="cancel-req" data-req="' + esc(r._key) + '">Reject / cancel</button>';
+      } else if (r.status === 'sent') {
+        actionBtns =
+            '<button class="nl-btn nl-btn--primary" data-act="mark-complete" data-req="' + esc(r._key) + '">Mark complete (DAZN confirmed)</button>'
+          + '<button class="nl-btn nl-btn--secondary" data-act="open-email" data-req="' + esc(r._key) + '">Re-open email</button>'
+          + '<div class="req-actions__spacer"></div>'
+          + '<button class="nl-btn nl-btn--ghost" data-act="cancel-req" data-req="' + esc(r._key) + '">Cancel</button>';
+      }
+    }
+
+    var history = '';
+    if (r.sentAt || r.completedAt || r.cancelledAt) {
+      history = '<div class="req-history">';
+      if (r.sentAt) history += '<div>Sent ' + fmtTs(r.sentAt) + (r.sentBy ? ' by ' + esc(r.sentBy.name || '') : '') + '</div>';
+      if (r.completedAt) history += '<div>Completed ' + fmtTs(r.completedAt) + (r.completedBy ? ' by ' + esc(r.completedBy.name || '') : '') + '</div>';
+      if (r.cancelledAt) history += '<div>Cancelled ' + fmtTs(r.cancelledAt) + (r.cancelledBy ? ' by ' + esc(r.cancelledBy.name || '') : '') + (r.cancelReason ? ' — ' + esc(r.cancelReason) : '') + '</div>';
+      history += '</div>';
+    }
+
+    return ''
+      + '<div class="req-card">'
+      +   '<div class="req-card__head">'
+      +     '<div>'
+      +       '<div class="req-card__org">' + esc(r.orgName) + '</div>'
+      +       '<div class="req-card__meta">Requested ' + fmtTs(r.requestedAt) + (r.requestedBy ? ' by ' + esc(r.requestedBy.name || '—') : '') + '</div>'
+      +     '</div>'
+      +     '<span class="req-status ' + r.status + '">' + esc(r.status) + '</span>'
+      +   '</div>'
+      +   '<div class="req-changes"><ul>'
+      +     (r.changes || []).map(function (c) { return '<li>' + summariseChange(c) + '</li>'; }).join('')
+      +   '</ul></div>'
+      +   '<div class="req-actions">' + actionBtns + '</div>'
+      +   history
+      + '</div>';
+  }
+
+  function onRequestAction(e) {
+    var t = e.target;
+    if (!t || !t.dataset || !t.dataset.act) return;
+    var reqId = t.dataset.req;
+    var req = S.requests[reqId];
+    if (!req) return;
+    req._key = reqId;
+
+    if (t.dataset.act === 'open-email') {
+      openMailto(req);
+      return;
+    }
+    if (t.dataset.act === 'mark-sent') {
+      confirmDialog('Mark as sent?', 'Confirm you’ve emailed DAZN. The club will see status change to “Sent to DAZN”.', 'Mark sent', function () { markSent(reqId, req); });
+      return;
+    }
+    if (t.dataset.act === 'mark-complete') {
+      confirmDialog('Mark complete?', 'This will apply the changes to <strong>' + esc(req.orgName) + '</strong>’s VIP list. Only do this once DAZN has confirmed.', 'Apply changes', function () { markComplete(reqId, req); });
+      return;
+    }
+    if (t.dataset.act === 'cancel-req') {
+      var reason = prompt('Reason (optional)?') || '';
+      cancelRequest(reqId, reason);
+      return;
+    }
+  }
+
+  function openMailto(req) {
+    var built = buildEmail(req);
+    /* mailto: + window.open. Outlook desktop picks it up via protocol handler. */
+    var href = 'mailto:' + encodeURIComponent(DAZN_EMAIL)
+      + '?subject=' + encodeURIComponent(built.subject)
+      + '&body='    + encodeURIComponent(built.body);
+    /* Note: very long bodies may be truncated by some mail clients. Most clubs
+       have <= 5 VIPs which stays well under 2000 chars. */
+    window.location.href = href;
+
+    /* Persist the draft so the club view can show parity if ever needed. */
+    db.ref('dazn-vip/requests/' + (req._key || req.id)).update({
+      emailDraft: { to: DAZN_EMAIL, subject: built.subject, body: built.body, generatedAt: Date.now() }
+    });
+  }
+
+  function buildEmail(req) {
+    var org = S.orgs[req.orgName] || {};
+    var currentVips = listValues(org.vips || {});
+    var projected = applyChangesToList(currentVips, req.changes || []);
+    projected.sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); });
+
+    var subject = 'Change to ' + req.orgName + ' VIP';
+    var lines = [];
+    lines.push('Hi, please can ' + req.orgName + ' VIP access be changed as follows:');
+    lines.push('');
+
+    var removes = (req.changes || []).filter(function (c) { return c.action === 'remove'; });
+    var adds    = (req.changes || []).filter(function (c) { return c.action === 'add'; });
+    var edits   = (req.changes || []).filter(function (c) { return c.action === 'edit'; });
+
+    if (removes.length) {
+      lines.push('Remove:');
+      removes.forEach(function (c) {
+        lines.push((c.name || '(no name)') + '\t' + (c.email || ''));
+      });
+      lines.push('');
+    }
+    if (adds.length) {
+      lines.push('Add:');
+      adds.forEach(function (c) {
+        lines.push((c.name || '(no name)') + '\t' + (c.email || ''));
+      });
+      lines.push('');
+    }
+    if (edits.length) {
+      lines.push('Edit:');
+      edits.forEach(function (c) {
+        var note = c.editReason === 'newperson' ? '(new person on same email)' :
+                   c.editReason === 'typo'      ? '(typo correction — same person)' : '';
+        lines.push((c.before.name || '(no name)') + ' / ' + c.before.email + '  →  ' + (c.after.name || '(no name)') + ' / ' + c.after.email + (note ? '   ' + note : ''));
+      });
+      lines.push('');
+    }
+
+    lines.push('In total this is:');
+    projected.forEach(function (v) {
+      lines.push((v.name || '(no name)') + '\t' + (v.email || '') + '\tClub\t' + req.orgName);
+    });
+    lines.push('');
+    lines.push('Kind regards,');
+    lines.push(forenameOf(S.session.name));
+
+    return { subject: subject, body: lines.join('\n') };
+  }
+
+  function applyChangesToList(vips, changes) {
+    /* Apply removes (by vipId or by email fallback), edits, adds in that order. */
+    var byId = {};
+    var byEmail = {};
+    var working = vips.map(function (v) { var c = { _key: v._key, name: v.name, email: v.email }; byId[v._key] = c; byEmail[(v.email || '').toLowerCase()] = c; return c; });
+
+    (changes || []).forEach(function (c) {
+      if (c.action === 'remove') {
+        var target = (c.vipId && byId[c.vipId]) || byEmail[(c.email || '').toLowerCase()];
+        if (target) target._removed = true;
+      } else if (c.action === 'edit') {
+        var t = (c.vipId && byId[c.vipId]) || byEmail[(c.before && c.before.email || '').toLowerCase()];
+        if (t) { t.name = c.after.name; t.email = c.after.email; }
+      }
+    });
+
+    var alive = working.filter(function (v) { return !v._removed; });
+    (changes || []).forEach(function (c) {
+      if (c.action === 'add') alive.push({ name: c.name, email: c.email });
+    });
+    return alive;
+  }
+
+  function markSent(reqId, req) {
+    var now = Date.now();
+    db.ref('dazn-vip/requests/' + reqId).update({
+      status: 'sent',
+      sentAt: now,
+      sentBy: { uid: S.session.uid || '', name: S.session.name || '' }
+    }).then(function () {
+      try { NL.writeAudit('dazn_vip_marked_sent', req.orgName); } catch (e) {}
+      toast('Marked as sent.', 'success');
+    }).catch(function (e) { toast('Couldn’t update: ' + (e.message || 'error'), 'error'); });
+  }
+
+  function markComplete(reqId, req) {
+    var now = Date.now();
+    var orgName = req.orgName;
+    var org = S.orgs[orgName] || { vips: {} };
+    var currentVips = listValues(org.vips || {});
+
+    /* Build updates: apply each change to the canonical list. */
+    var updates = {};
+
+    (req.changes || []).forEach(function (c) {
+      if (c.action === 'remove') {
+        var key = c.vipId;
+        if (!key) {
+          /* Find by email fallback */
+          var match = currentVips.filter(function (v) { return (v.email || '').toLowerCase() === (c.email || '').toLowerCase(); })[0];
+          key = match && match._key;
+        }
+        if (key) updates['dazn-vip/orgs/' + orgName + '/vips/' + key] = null;
+      } else if (c.action === 'add') {
+        var newId = uid();
+        updates['dazn-vip/orgs/' + orgName + '/vips/' + newId] = {
+          name: c.name || '',
+          email: c.email || '',
+          addedAt: now,
+          addedBy: S.session.name || S.session.email || 'NL'
+        };
+      } else if (c.action === 'edit') {
+        var key2 = c.vipId;
+        if (!key2) {
+          var match2 = currentVips.filter(function (v) { return (v.email || '').toLowerCase() === ((c.before && c.before.email) || '').toLowerCase(); })[0];
+          key2 = match2 && match2._key;
+        }
+        if (key2) {
+          updates['dazn-vip/orgs/' + orgName + '/vips/' + key2 + '/name']  = c.after.name;
+          updates['dazn-vip/orgs/' + orgName + '/vips/' + key2 + '/email'] = c.after.email;
+        }
+      }
+    });
+
+    /* Mark request complete and clear pointer */
+    updates['dazn-vip/requests/' + reqId + '/status'] = 'complete';
+    updates['dazn-vip/requests/' + reqId + '/completedAt'] = now;
+    updates['dazn-vip/requests/' + reqId + '/completedBy'] = { uid: S.session.uid || '', name: S.session.name || '' };
+    updates['dazn-vip/orgs/' + orgName + '/openRequestId'] = null;
+
+    /* Audit entry */
+    var summary = (req.changes || []).map(function (c) {
+      if (c.action === 'add')    return 'Added ' + (c.name || c.email);
+      if (c.action === 'remove') return 'Removed ' + (c.name || c.email);
+      if (c.action === 'edit')   return 'Edited ' + (c.before.email || '') + ' → ' + (c.after.email || '');
+      return '?';
+    }).join('; ');
+    updates['dazn-vip/audit/' + orgName + '/' + now] = {
+      requestId: reqId,
+      summary: summary,
+      by: S.session.name || S.session.email || 'NL'
+    };
+
+    db.ref().update(updates).then(function () {
+      try { NL.writeAudit('dazn_vip_marked_complete', orgName + ': ' + summary); } catch (e) {}
+      toast('Changes applied — ' + orgName + ' VIP list updated.', 'success');
+    }).catch(function (e) { toast('Couldn’t apply: ' + (e.message || 'error'), 'error'); });
+  }
+
+  /* ── Browse all (staff) ────────────────────────────────────────────── */
+  function paintBrowse() {
+    var q = trim((document.getElementById('browseSearch') || {}).value || '').toLowerCase();
+    var orgs = listValues(S.orgs || {});
+    /* Show clubs first, then non-clubs */
+    orgs.sort(function (a, b) {
+      var aClub = (a.category === 'club') ? 0 : 1;
+      var bClub = (b.category === 'club') ? 0 : 1;
+      if (aClub !== bClub) return aClub - bClub;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+
+    var visible = orgs;
+    if (q) {
+      visible = orgs.filter(function (o) {
+        if ((o.name || '').toLowerCase().indexOf(q) !== -1) return true;
+        var vips = listValues(o.vips || {});
+        for (var i = 0; i < vips.length; i++) {
+          var v = vips[i];
+          if ((v.name || '').toLowerCase().indexOf(q) !== -1) return true;
+          if ((v.email || '').toLowerCase().indexOf(q) !== -1) return true;
+        }
+        return false;
+      });
+    }
+
+    var html = visible.map(function (o) {
+      var vips = listValues(o.vips || {});
+      vips.sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); });
+      var rows = vips.map(function (v) {
+        return '<tr><td class="col-name">' + (v.name ? esc(v.name) : '<span class="vip-name-blank">(no name)</span>') + '</td><td class="vip-email">' + esc(v.email) + '</td></tr>';
+      }).join('');
+      if (!rows) rows = '<tr><td colspan="2" class="vip-empty" style="padding:14px">No entries</td></tr>';
+      return ''
+        + '<div class="vip-org-card">'
+        +   '<div class="vip-org-card__head" data-org="' + esc(o._key) + '">'
+        +     '<div><span class="vip-org-card__title">' + esc(o.name || o._key) + '</span>'
+        +       '<span class="vip-org-card__title-cat">' + esc(o.category || '') + '</span></div>'
+        +     '<div class="vip-org-card__count">' + vips.length + (o.category === 'club' ? ' / ' + CLUB_VIP_CAP : '') + '</div>'
+        +   '</div>'
+        +   '<div class="vip-org-card__body">'
+        +     '<table class="vip-table"><tbody>' + rows + '</tbody></table>'
+        +   '</div>'
+        + '</div>';
+    }).join('');
+
+    if (!html) html = '<div class="vip-empty" style="background:#fff;border:1px solid var(--border);border-radius:10px">No matches.</div>';
+    document.getElementById('browseList').innerHTML = html;
+
+    /* Toggle on header click */
+    var heads = document.querySelectorAll('#browseList .vip-org-card__head');
+    Array.prototype.forEach.call(heads, function (h) {
+      h.addEventListener('click', function () { h.parentNode.classList.toggle('is-open'); });
+    });
+  }
+
+  /* ── Non-club orgs (admin) ─────────────────────────────────────────── */
+  function paintNonClubs() {
+    if (!S.isAdmin) return;
+    var orgs = listValues(S.orgs || {}).filter(function (o) { return o.category && o.category !== 'club'; });
+    orgs.sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); });
+
+    var html = orgs.map(function (o) {
+      var vips = listValues(o.vips || {});
+      vips.sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); });
+      var rows = vips.map(function (v) {
+        return '<tr>'
+          + '<td class="col-name">' + (v.name ? esc(v.name) : '<span class="vip-name-blank">(no name)</span>') + '</td>'
+          + '<td class="vip-email">' + esc(v.email) + '</td>'
+          + '<td class="col-actions">'
+          +   '<button class="vip-row-btn" data-nc-act="edit"   data-org="' + esc(o._key) + '" data-vip="' + esc(v._key) + '">Edit</button>'
+          +   '<button class="vip-row-btn is-danger" data-nc-act="remove" data-org="' + esc(o._key) + '" data-vip="' + esc(v._key) + '">Remove</button>'
+          + '</td></tr>';
+      }).join('');
+      return ''
+        + '<div class="vip-org-card is-open">'
+        +   '<div class="vip-org-card__head">'
+        +     '<div><span class="vip-org-card__title">' + esc(o.name || o._key) + '</span>'
+        +       '<span class="vip-org-card__title-cat">' + esc(o.category || '') + '</span></div>'
+        +     '<div>'
+        +       '<button class="vip-row-btn" data-nc-act="add" data-org="' + esc(o._key) + '">+ Add</button>'
+        +     '</div>'
+        +   '</div>'
+        +   '<div class="vip-org-card__body">'
+        +     '<table class="vip-table"><tbody>' + (rows || '<tr><td colspan="3" class="vip-empty" style="padding:14px">No entries</td></tr>') + '</tbody></table>'
+        +   '</div>'
+        + '</div>';
+    }).join('');
+
+    document.getElementById('nonClubsList').innerHTML = html || '<div class="vip-empty">No non-club orgs yet — seed first.</div>';
+  }
+
+  function onNonClubAction(e) {
+    var t = e.target;
+    if (!t || !t.dataset || !t.dataset.ncAct) return;
+    var orgKey = t.dataset.org;
+    var org = S.orgs[orgKey];
+    if (!org) return;
+
+    if (t.dataset.ncAct === 'add') {
+      openSimpleAdd(orgKey);
+      return;
+    }
+    var vipId = t.dataset.vip;
+    var vip = (org.vips || {})[vipId];
+    if (!vip) return;
+    if (t.dataset.ncAct === 'remove') {
+      confirmDialog('Remove ' + esc(vip.name || vip.email) + '?', 'This removes the entry immediately (non-club orgs have no request workflow).', 'Remove', function () {
+        db.ref('dazn-vip/orgs/' + orgKey + '/vips/' + vipId).remove();
+        try { NL.writeAudit('dazn_vip_nc_remove', orgKey + ': ' + (vip.email || '')); } catch (e2) {}
+      });
+    } else if (t.dataset.ncAct === 'edit') {
+      openSimpleEdit(orgKey, vipId, vip);
+    }
+  }
+
+  function openSimpleAdd(orgKey) {
+    /* Re-use the vipModal in a simple direct-write mode */
+    document.getElementById('vipModalTitle').textContent = 'Add to ' + orgKey;
+    document.getElementById('vipModalName').value = '';
+    document.getElementById('vipModalEmail').value = '';
+    document.getElementById('vipModalEditReason').style.display = 'none';
+    document.getElementById('vipModalHint').textContent = 'Writes directly — no request workflow.';
+    document.getElementById('vipModalError').textContent = '';
+    openModal(vipModal);
+    var saveBtn = document.getElementById('vipModalSave');
+    var newHandler = function () {
+      var name = trim(document.getElementById('vipModalName').value);
+      var email = trim(document.getElementById('vipModalEmail').value);
+      if (!emailValid(email)) { document.getElementById('vipModalError').textContent = 'Invalid email.'; return; }
+      var id = uid();
+      db.ref('dazn-vip/orgs/' + orgKey + '/vips/' + id).set({
+        name: name, email: email, addedAt: Date.now(), addedBy: S.session.name || 'NL'
+      });
+      try { NL.writeAudit('dazn_vip_nc_add', orgKey + ': ' + email); } catch (e) {}
+      saveBtn.removeEventListener('click', newHandler);
+      closeModal(vipModal);
+    };
+    /* Clear any previous handlers by cloning */
+    var fresh = saveBtn.cloneNode(true); saveBtn.parentNode.replaceChild(fresh, saveBtn);
+    fresh.addEventListener('click', newHandler);
+  }
+
+  function openSimpleEdit(orgKey, vipId, vip) {
+    document.getElementById('vipModalTitle').textContent = 'Edit ' + (vip.name || vip.email);
+    document.getElementById('vipModalName').value = vip.name || '';
+    document.getElementById('vipModalEmail').value = vip.email || '';
+    document.getElementById('vipModalEditReason').style.display = 'none';
+    document.getElementById('vipModalHint').textContent = 'Writes directly — no request workflow.';
+    document.getElementById('vipModalError').textContent = '';
+    openModal(vipModal);
+    var saveBtn = document.getElementById('vipModalSave');
+    var newHandler = function () {
+      var name  = trim(document.getElementById('vipModalName').value);
+      var email = trim(document.getElementById('vipModalEmail').value);
+      if (!emailValid(email)) { document.getElementById('vipModalError').textContent = 'Invalid email.'; return; }
+      db.ref('dazn-vip/orgs/' + orgKey + '/vips/' + vipId).update({ name: name, email: email });
+      try { NL.writeAudit('dazn_vip_nc_edit', orgKey + ': ' + email); } catch (e) {}
+      saveBtn.removeEventListener('click', newHandler);
+      closeModal(vipModal);
+    };
+    var fresh = saveBtn.cloneNode(true); saveBtn.parentNode.replaceChild(fresh, saveBtn);
+    fresh.addEventListener('click', newHandler);
+  }
+
+  /* ════════════════════════════════════════════════════════════════════
+     SEED (superadmin only, hides after first run)
+     ════════════════════════════════════════════════════════════════════ */
+  function maybeShowSeedPrompt() {
+    if (!S.isSuperadmin) return;
+    var hasData = false;
+    for (var k in S.orgs) { if (Object.prototype.hasOwnProperty.call(S.orgs, k)) { hasData = true; break; } }
+    var btn = document.getElementById('tabSeedBtn');
+    if (hasData) {
+      btn.style.display = 'none';
+    } else {
+      btn.style.display = '';
+      renderSeedUI();
+    }
+  }
+
+  function parseSeedTSV() {
+    var raw = document.getElementById('seedData').textContent || '';
+    var lines = raw.split('\n');
+    var rows = [];
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (!line || !line.trim()) continue;
+      var parts = line.split('\t');
+      if (parts.length < 4) continue;
+      var name = trim(parts[0]);
+      var email = trim(parts[1]);
+      var type = trim(parts[2]);
+      var org = trim(parts[3]);
+      if (type === 'Parner') type = 'Partner'; /* fix typo */
+      rows.push({ name: name, email: email, type: type, org: org });
+    }
+    return rows;
+  }
+
+  function groupSeed(rows) {
+    var byOrg = {};
+    rows.forEach(function (r) {
+      if (!byOrg[r.org]) byOrg[r.org] = { name: r.org, types: {}, rows: [] };
+      byOrg[r.org].types[r.type] = (byOrg[r.org].types[r.type] || 0) + 1;
+      byOrg[r.org].rows.push(r);
+    });
+    /* Determine category per org */
+    Object.keys(byOrg).forEach(function (orgName) {
+      var t = byOrg[orgName].types;
+      var best = ''; var bestN = -1;
+      Object.keys(t).forEach(function (k) { if (t[k] > bestN) { best = k; bestN = t[k]; } });
+      var category = ({
+        'Club': 'club', 'Media': 'media', 'Partner': 'partner',
+        'Governing body': 'governing', 'Agency': 'agency'
+      })[best] || best.toLowerCase();
+      byOrg[orgName].category = category;
+    });
+    return byOrg;
+  }
+
+  function renderSeedUI() {
+    var rows = parseSeedTSV();
+    var byOrg = groupSeed(rows);
+    var orgNames = Object.keys(byOrg).sort();
+
+    var anomalies = [];
+    var unsafeKeys = orgNames.filter(function (n) { return !isSafeKey(n); });
+    if (unsafeKeys.length) anomalies.push('Unsafe RTDB keys (contain reserved chars): ' + unsafeKeys.join(', '));
+
+    var clubOverCap = orgNames.filter(function (n) {
+      return byOrg[n].category === 'club' && byOrg[n].rows.length > CLUB_VIP_CAP;
+    });
+    if (clubOverCap.length) anomalies.push('Clubs over 5-VIP cap (will seed anyway): ' + clubOverCap.join(', '));
+
+    var blankNames = rows.filter(function (r) { return !r.name; }).length;
+    var totalClubs = orgNames.filter(function (n) { return byOrg[n].category === 'club'; }).length;
+    var totalNonClubs = orgNames.length - totalClubs;
+
+    var previewRows = [];
+    orgNames.forEach(function (org) {
+      var entry = byOrg[org];
+      entry.rows.forEach(function (r, idx) {
+        var flag = '';
+        if (!r.name) flag = '<span class="seed-flag">no name</span>';
+        previewRows.push('<tr>'
+          + '<td>' + (idx === 0 ? esc(org) + ' <span style="color:var(--muted);font-size:10px">(' + entry.category + ')</span>' : '') + '</td>'
+          + '<td>' + esc(r.name || '') + flag + '</td>'
+          + '<td>' + esc(r.email) + '</td>'
+          + '</tr>');
+      });
+    });
+
+    document.getElementById('seedRoot').innerHTML =
+        '<p style="font-size:14px;color:var(--ink);margin-bottom:14px">'
+      +   'No data yet in <code>dazn-vip/</code>. Seed the initial state from the imported sheet.'
+      + '</p>'
+      + '<div class="seed-summary">'
+      +   '<div><strong>' + orgNames.length + '</strong> orgs total</div>'
+      +   '<div><strong>' + totalClubs + '</strong> clubs</div>'
+      +   '<div><strong>' + totalNonClubs + '</strong> non-club orgs</div>'
+      +   '<div><strong>' + rows.length + '</strong> VIP rows</div>'
+      +   '<div><strong>' + blankNames + '</strong> blank names (kept)</div>'
+      + '</div>'
+      + (anomalies.length ? '<div class="vip-banner" style="margin-bottom:14px">' + anomalies.map(esc).join('<br>') + '</div>' : '')
+      + '<div class="seed-preview">'
+      +   '<table>'
+      +     '<thead><tr><th>Org</th><th>Name</th><th>Email</th></tr></thead>'
+      +     '<tbody>' + previewRows.join('') + '</tbody>'
+      +   '</table>'
+      + '</div>'
+      + '<div style="display:flex;gap:8px;justify-content:flex-end">'
+      +   '<button class="nl-btn nl-btn--primary" id="seedRunBtn">Seed now</button>'
+      + '</div>';
+
+    document.getElementById('seedRunBtn').addEventListener('click', function () {
+      confirmDialog('Seed initial data?', 'Writes ' + orgNames.length + ' orgs and ' + rows.length + ' VIPs to <code>dazn-vip/</code>. Safe to run once. If data already exists this will overwrite it.', 'Seed', function () {
+        runSeed(byOrg);
+      });
+    });
+  }
+
+  function runSeed(byOrg) {
+    var updates = {};
+    var now = Date.now();
+    Object.keys(byOrg).forEach(function (orgName) {
+      var entry = byOrg[orgName];
+      var orgPath = 'dazn-vip/orgs/' + orgName;
+      updates[orgPath + '/name'] = orgName;
+      updates[orgPath + '/category'] = entry.category;
+      updates[orgPath + '/maxVips'] = entry.category === 'club' ? CLUB_VIP_CAP : null;
+      entry.rows.forEach(function (r, idx) {
+        var vid = now.toString(36) + '-' + idx + '-' + Math.random().toString(36).slice(2, 6);
+        updates[orgPath + '/vips/' + vid] = {
+          name: r.name, email: r.email, addedAt: now, addedBy: 'seed'
+        };
+      });
+    });
+    /* Tool registration */
+    updates['tools/dazn-vip/label'] = 'DAZN VIP';
+    updates['tools/dazn-vip/description'] = 'Request changes to DAZN VIP access for your club.';
+    updates['tools/dazn-vip/defaults'] = {
+      'club': 'access',
+      'nl-staff': 'access',
+      'nl-admin': 'admin',
+      'nl-superadmin': 'admin'
+    };
+
+    db.ref().update(updates).then(function () {
+      try { NL.writeAudit('dazn_vip_seeded', Object.keys(byOrg).length + ' orgs'); } catch (e) {}
+      toast('Seed complete.', 'success');
+      document.getElementById('tabSeedBtn').style.display = 'none';
+    }).catch(function (e) {
+      toast('Seed failed: ' + (e.message || 'error'), 'error');
+    });
+  }
+
+})();
+</script>
+
+</body>
+</html>
