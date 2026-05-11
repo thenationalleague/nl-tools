@@ -28,6 +28,22 @@
     role=staff + access=access  → browse all, view only
     role=admin/superadmin + admin → action requests, manage non-club orgs
 
+  v1.1 — Wiring fix to match the canonical NL Tools page structure:
+         - Moved Firebase SDKs + NL_TOOL_KEY + nl-utils + nl-topbar + auth-guard
+           from bottom-of-body to <head>. Page now bootstraps in the same
+           order as every other tool, eliminating the timing race that
+           caused PERMISSION_DENIED on RTDB reads.
+         - Bumped cache-bust on system scripts from ?v=6 to ?v=7 (aligns
+           with every other tool — dazn-vip was loading a stale copy).
+         - Replaced private whenFirebaseAuthed() with NL.ensureAuth() from
+           nl-utils.js — the existing helper for this scenario, used by
+           chase-hq for the same reason.
+         - Brand hex sweep: amber/blue/green/red banner and pill colours,
+           basket chips, danger states all converted to brand tokens or
+           color-mix() derivations. Removes ~30 hardcoded hex literals.
+         - Removed redundant local #pageWrap{display:none} CSS rule — the
+           brand stylesheet already provides it. Documented the trap-line
+           in a comment so future devs don't reveal with style.display=''.
   v1.0 — Initial build.
 -->
 <html lang="en">
@@ -35,10 +51,79 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DAZN VIP — NL Tools</title>
+
+  <!-- Brand stylesheet -->
   <link rel="stylesheet" href="/tools/system/nl-brand.css?v=14">
 
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog -->
+  <script>
+    window.NL_TOOL = {
+      title: 'DAZN VIP',
+      toolKey: 'media-dazn-vip'
+    };
+    var NL_TOOL_KEY = 'media-dazn-vip';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '11 May 2026',
+        version: 'v1.1',
+        items: [
+          'Fixed the page sometimes failing to load with a permission error — page now bootstraps in the same order as every other tool.',
+          'Brand colours unified across banners, status pills and basket chips so the tool matches the rest of the suite.'
+        ]
+      },
+      {
+        date: '11 May 2026',
+        version: 'v1.0',
+        items: [
+          'New tool: request DAZN VIP access changes for your club.',
+          'Clubs see their own VIP list (max 5) and can request adds, removes and edits.',
+          'NL admins receive the request, forward it to DAZN by email, and mark complete once DAZN confirms.'
+        ]
+      }
+    ];
+
+    /* Held until auth-guard resolves; main app boot below. */
+    window.nlAuthReady = function(userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.DAZNVIP && window.DAZNVIP.boot) {
+        window.DAZNVIP.boot(userData);
+      } else {
+        /* Main script not loaded yet — defer */
+        window._daznVipDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts -->
+  <script src="/tools/system/nl-utils.js?v=7"></script>
+  <script src="/tools/system/nl-topbar.js?v=7"></script>
+  <script src="/tools/system/auth-guard.js?v=7"></script>
+
 <style>
-  #pageWrap { display: none; }
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
   /* .page padding inherited from nl-brand.css — do not override horizontal */
 
   /* ── Section header (club view) ─────────────────────────────────────── */
@@ -74,24 +159,24 @@
 
   /* ── Open-request banner ────────────────────────────────────────────── */
   .vip-banner {
-    background: #fff8e1;
-    border: 1px solid #f0d27a;
+    background: var(--amber-light);
+    border: 1px solid color-mix(in srgb, var(--amber) 35%, white);
     border-radius: 8px;
     padding: 14px 16px;
     margin-bottom: 18px;
     font-size: 13px;
-    color: #6b4a00;
+    color: color-mix(in srgb, var(--amber) 70%, black);
     line-height: 1.55;
   }
   .vip-banner.is-sent {
-    background: #e8f1ff;
-    border-color: #b8d0f5;
-    color: #1a3a6b;
+    background: var(--info-light);
+    border-color: color-mix(in srgb, var(--info) 25%, white);
+    color: var(--navy);
   }
   .vip-banner.is-success {
-    background: #e8f5ec;
-    border-color: #b8d8c0;
-    color: #1a5a2a;
+    background: var(--green-light);
+    border-color: color-mix(in srgb, var(--green) 30%, white);
+    color: var(--green);
   }
   .vip-banner__title {
     font-weight: 700;
@@ -117,7 +202,7 @@
   .vip-banner__actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
 
   /* ── VIP table ──────────────────────────────────────────────────────── */
-  .vip-table-wrap { background: #fff; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .vip-table-wrap { background: var(--white); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
   .vip-table { width: 100%; border-collapse: collapse; font-size: 14px; }
   .vip-table th {
     background: var(--off-white);
@@ -146,7 +231,7 @@
     padding: 48px 20px;
     color: var(--text-muted);
     font-size: 14px;
-    background: #fff;
+    background: var(--white);
     border: 1px solid var(--border);
     border-radius: 10px;
   }
@@ -167,9 +252,9 @@
     word-break: break-word;
     white-space: pre-wrap;
   }
-  .vip-diag--info  { background: #e8f1ff; color: #1a3a6b; border: 1px solid #b8d0f5; }
-  .vip-diag--ok    { background: #e8f5ec; color: #1a5a2a; border: 1px solid #b8d8c0; }
-  .vip-diag--err   { background: #fdecec; color: #7a1a1a; border: 1px solid #e8b8b8; }
+  .vip-diag--info  { background: var(--info-light); color: var(--navy); border: 1px solid color-mix(in srgb, var(--info) 25%, white); }
+  .vip-diag--ok    { background: var(--green-light); color: var(--green); border: 1px solid color-mix(in srgb, var(--green) 30%, white); }
+  .vip-diag--err   { background: var(--red-light); color: var(--red); border: 1px solid color-mix(in srgb, var(--red) 30%, white); }
 
   /* ── Action buttons ─────────────────────────────────────────────────── */
   .vip-row-btn {
@@ -185,8 +270,8 @@
     margin-left: 4px;
   }
   .vip-row-btn:hover { background: var(--off-white); }
-  .vip-row-btn.is-danger { color: var(--primary); border-color: #e8b8b8; }
-  .vip-row-btn.is-danger:hover { background: #fdf0f0; }
+  .vip-row-btn.is-danger { color: var(--primary); border-color: color-mix(in srgb, var(--red) 30%, white); }
+  .vip-row-btn.is-danger:hover { background: var(--red-light); }
   .vip-row-btn[disabled] { opacity: 0.4; cursor: not-allowed; }
 
   /* ── Action bar / add button ────────────────────────────────────────── */
@@ -202,8 +287,8 @@
 
   /* ── Basket (pending unsubmitted) ───────────────────────────────────── */
   .vip-basket {
-    background: #fffdf4;
-    border: 1px dashed #d9c478;
+    background: var(--amber-light);
+    border: 1px dashed color-mix(in srgb, var(--amber) 50%, white);
     border-radius: 10px;
     padding: 16px 18px;
     margin: 18px 0;
@@ -227,12 +312,12 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: #fff;
+    color: var(--white);
     flex-shrink: 0;
   }
-  .vip-basket__chip.add { background: #2e7d32; }
+  .vip-basket__chip.add { background: var(--green); }
   .vip-basket__chip.remove { background: var(--primary); }
-  .vip-basket__chip.edit { background: #1565c0; }
+  .vip-basket__chip.edit { background: var(--blue); }
   .vip-basket__actions { display: flex; gap: 8px; justify-content: flex-end; }
   .vip-basket__undo {
     margin-left: auto;
@@ -294,7 +379,7 @@
     margin-left: 6px;
     padding: 1px 8px;
     background: var(--primary);
-    color: #fff;
+    color: var(--white);
     border-radius: 99px;
     font-size: 11px;
     font-weight: 700;
@@ -304,7 +389,7 @@
 
   /* ── Request card (staff queue) ─────────────────────────────────────── */
   .req-card {
-    background: #fff;
+    background: var(--white);
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 18px 20px;
@@ -333,10 +418,10 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
-  .req-status.pending { background: #fff3cd; color: #6b4a00; }
-  .req-status.sent { background: #cfe2ff; color: #1a3a6b; }
-  .req-status.complete { background: #d1e7dd; color: #1a5a2a; }
-  .req-status.cancelled { background: #e9ecef; color: #555; }
+  .req-status.pending { background: var(--amber-light); color: color-mix(in srgb, var(--amber) 70%, black); }
+  .req-status.sent { background: var(--info-light); color: var(--navy); }
+  .req-status.complete { background: var(--green-light); color: var(--green); }
+  .req-status.cancelled { background: var(--off-white); color: var(--text-muted); }
 
   .req-changes {
     background: var(--off-white);
@@ -367,7 +452,7 @@
 
   /* ── Browse all orgs (staff) ────────────────────────────────────────── */
   .vip-org-card {
-    background: #fff;
+    background: var(--white);
     border: 1px solid var(--border);
     border-radius: 10px;
     margin-bottom: 12px;
@@ -387,7 +472,7 @@
   .vip-org-card__count { font-size: 12px; color: var(--text-muted); }
   .vip-org-card__body { display: none; padding: 4px 0; }
   .vip-org-card.is-open .vip-org-card__body { display: block; }
-  .vip-org-card__body .vip-table th { background: #fff; }
+  .vip-org-card__body .vip-table th { background: var(--white); }
 
   .vip-search {
     width: 100%;
@@ -397,7 +482,7 @@
     font-size: 14px;
     font-family: inherit;
     margin-bottom: 14px;
-    background: #fff;
+    background: var(--white);
   }
 
   /* ── Modal ──────────────────────────────────────────────────────────── */
@@ -413,7 +498,7 @@
   }
   .modal.is-open { display: flex; }
   .modal__inner {
-    background: #fff;
+    background: var(--white);
     border-radius: 12px;
     max-width: 460px;
     width: 100%;
@@ -444,7 +529,7 @@
     border-radius: 6px;
     font-size: 14px;
     font-family: inherit;
-    background: #fff;
+    background: var(--white);
   }
   .modal__radios { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
   .modal__radios label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; text-transform: none; letter-spacing: normal; font-weight: 500; color: var(--text); font-size: 13px; margin: 0; line-height: 1.4; }
@@ -459,13 +544,13 @@
     overflow-y: auto;
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: #fff;
+    background: var(--white);
     margin-bottom: 14px;
   }
   .seed-preview table { width: 100%; border-collapse: collapse; font-size: 12px; }
   .seed-preview th, .seed-preview td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border); }
   .seed-preview th { position: sticky; top: 0; background: var(--off-white); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
-  .seed-flag { display: inline-block; background: #fff3cd; color: #6b4a00; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-left: 6px; }
+  .seed-flag { display: inline-block; background: var(--amber-light); color: color-mix(in srgb, var(--amber) 70%, black); padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; margin-left: 6px; }
   .seed-summary { display: flex; gap: 18px; font-size: 13px; margin-bottom: 14px; flex-wrap: wrap; }
   .seed-summary div strong { color: var(--text); font-weight: 800; display: block; font-size: 18px; }
 
@@ -1027,57 +1112,8 @@ YCFC Media	Media@yorkcityfootballclub.co.uk	Club	York City
 Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
 </script>
 
-<!-- ── Firebase + tool boot ──────────────────────────────────────────── -->
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
-
-<script>
-  firebase.initializeApp({
-    apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
-    authDomain:        "nl-tools.firebaseapp.com",
-    databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
-    projectId:         "nl-tools",
-    storageBucket:     "nl-tools.firebasestorage.app",
-    messagingSenderId: "801354670005",
-    appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
-  });
-  var db = firebase.database();
-
-  window.NL_TOOL = {
-    title: 'DAZN VIP',
-    toolKey: 'media-dazn-vip'
-  };
-  var NL_TOOL_KEY = 'media-dazn-vip';
-
-  window.NL_CHANGELOG = [
-    {
-      date: '11 May 2026',
-      version: 'v1.0',
-      items: [
-        'New tool: request DAZN VIP access changes for your club.',
-        'Clubs see their own VIP list (max 5) and can request adds, removes and edits.',
-        'NL admins receive the request, forward it to DAZN by email, and mark complete once DAZN confirms.'
-      ]
-    }
-  ];
-
-  /* Held until auth-guard resolves; main app boot below. */
-  window.nlAuthReady = function(userData) {
-    window.NL = window.NL || {};
-    window.NL.session = userData;
-    if (window.DAZNVIP && window.DAZNVIP.boot) {
-      window.DAZNVIP.boot(userData);
-    } else {
-      /* Main script not loaded yet — defer */
-      window._daznVipDeferredSession = userData;
-    }
-  };
-</script>
-
-<script src="/tools/system/nl-utils.js?v=6"></script>
-<script src="/tools/system/nl-topbar.js?v=7"></script>
-<script src="/tools/system/auth-guard.js?v=6"></script>
+<!-- Firebase + tool boot moved to <head> in line with the canonical NL Tools
+     page structure. Main application below. -->
 
 <!-- ── Main application ──────────────────────────────────────────────── -->
 <script>
@@ -1188,15 +1224,20 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
 
   /* auth-guard fast-path fires nlAuthReady from sessionStorage before Firebase
      Auth has restored its JWT. RTDB rules evaluate auth server-side using the
-     JWT, so we must wait until Firebase Auth confirms a signed-in user before
-     starting any RTDB listeners. */
-  function whenFirebaseAuthed(cb) {
-    var user = firebase.auth().currentUser;
-    if (user) { cb(user); return; }
-    var unsub = firebase.auth().onAuthStateChanged(function (u) {
-      unsub();
-      cb(u);
-    });
+     JWT, so any RTDB listener must wait until Firebase Auth confirms a
+     signed-in user. NL.ensureAuth (in nl-utils.js) handles exactly this. */
+  function whenAuthed(cb) {
+    if (window.NL && NL.ensureAuth) {
+      NL.ensureAuth().then(cb).catch(function () { cb(null); });
+    } else {
+      /* Fallback if nl-utils missed loading — shouldn't happen in normal use */
+      var user = firebase.auth().currentUser;
+      if (user) { cb(user); return; }
+      var unsub = firebase.auth().onAuthStateChanged(function (u) {
+        unsub();
+        cb(u);
+      });
+    }
   }
 
   function boot(userData) {
@@ -1221,7 +1262,7 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       }
       renderClubView();
       wireClubEvents();
-      whenFirebaseAuthed(function (u) {
+      whenAuthed(function (u) {
         if (!u) { setDiag('err', 'Firebase Auth session not found — try signing out and back in.'); return; }
         attachClubListeners();
       });
@@ -1229,7 +1270,7 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       /* Staff or admin */
       renderStaffView();
       wireStaffEvents();
-      whenFirebaseAuthed(function (u) {
+      whenAuthed(function (u) {
         if (!u) { setDiag('err', 'Firebase Auth session not found — try signing out and back in.'); return; }
         attachStaffListeners();
       });
