@@ -203,13 +203,26 @@
       ts: now,
       at: new Date(now).toISOString()
     };
-    var key = String(Date.now()) + '_' + Math.random().toString(36).slice(2, 8);
+    var key = String(now) + '_' + Math.random().toString(36).slice(2, 8);
     var updates = {};
     updates['admin/audit/' + key] = entry;
     updates['admin/audit-by-user/' + window.NL.session.uid + '/' + key] = entry;
-    firebase.database().ref().update(updates).catch(function(e) {
-      console.warn('NL.writeAudit failed:', e && e.code, e && e.message);
-    });
+    /* Wait for Firebase Auth to be restored before writing — RTDB rules check
+       the live auth token, not NL.session. Tools that don't otherwise touch
+       RTDB (graphics, etc.) may have a populated session but no resolved
+       firebase.auth().currentUser yet, which would fail PERMISSION_DENIED. */
+    var doWrite = function() {
+      return firebase.database().ref().update(updates).catch(function(e) {
+        console.warn('NL.writeAudit failed:', e && e.code, e && e.message);
+      });
+    };
+    if (window.NL.ensureAuth) {
+      window.NL.ensureAuth().then(doWrite).catch(function(e) {
+        console.warn('NL.writeAudit (auth) failed:', e && e.message);
+      });
+    } else {
+      doWrite();
+    }
   };
 
   /* ── Auto-audit RTDB writes ──────────────────────────────────────────── */
