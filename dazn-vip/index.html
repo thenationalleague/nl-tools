@@ -15,13 +15,13 @@
     complete  — DAZN confirmed; local mirror updates to new state
 
   Storage (RTDB):
-    dazn-vip/orgs/{name}/                org keyed by club/org name
+    app-data/dazn-vip/orgs/{name}/                org keyed by club/org name
       name, category, maxVips
       vips/{vipId} { name, email, addedAt, addedBy }
-      openRequestId                       denormalised pointer
-    dazn-vip/requests/{requestId}         queue
-    dazn-vip/audit/{name}/{ts}            per-org history
-    tools/dazn-vip                        tool registration (label, defaults)
+      openRequestId                                denormalised pointer
+    app-data/dazn-vip/requests/{requestId}         queue
+    app-data/dazn-vip/audit/{name}/{ts}            per-org history
+    tools/dazn-vip                                 tool registration (label, defaults)
 
   Access:
     role=club + access=access   → own list, can request changes
@@ -1204,13 +1204,13 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
   }
 
   function attachClubListeners() {
-    db.ref('dazn-vip/orgs/' + S.clubName).on('value', function (snap) {
+    db.ref('app-data/dazn-vip/orgs/' + S.clubName).on('value', function (snap) {
       var org = snap.val() || { name: S.clubName, category: 'club', maxVips: CLUB_VIP_CAP, vips: {} };
       S.orgs[S.clubName] = org;
       paintClubView();
     });
 
-    db.ref('dazn-vip/audit/' + S.clubName).limitToLast(20).on('value', function (snap) {
+    db.ref('app-data/dazn-vip/audit/' + S.clubName).limitToLast(20).on('value', function (snap) {
       S.audit[S.clubName] = snap.val() || {};
       paintClubLog();
     });
@@ -1227,7 +1227,7 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
 
     var openId = org.openRequestId;
     if (openId) {
-      var ref = db.ref('dazn-vip/requests/' + openId);
+      var ref = db.ref('app-data/dazn-vip/requests/' + openId);
       _openReqUnsub = ref;
       ref.on('value', function (snap) {
         var openReq = snap.val();
@@ -1582,11 +1582,11 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     };
 
     var updates = {};
-    updates['dazn-vip/requests/' + reqId] = req;
-    updates['dazn-vip/orgs/' + S.clubName + '/openRequestId'] = reqId;
-    updates['dazn-vip/orgs/' + S.clubName + '/name'] = S.clubName;
-    updates['dazn-vip/orgs/' + S.clubName + '/category'] = 'club';
-    updates['dazn-vip/orgs/' + S.clubName + '/maxVips'] = CLUB_VIP_CAP;
+    updates['app-data/dazn-vip/requests/' + reqId] = req;
+    updates['app-data/dazn-vip/orgs/' + S.clubName + '/openRequestId'] = reqId;
+    updates['app-data/dazn-vip/orgs/' + S.clubName + '/name'] = S.clubName;
+    updates['app-data/dazn-vip/orgs/' + S.clubName + '/category'] = 'club';
+    updates['app-data/dazn-vip/orgs/' + S.clubName + '/maxVips'] = CLUB_VIP_CAP;
 
     db.ref().update(updates).then(function () {
       try { NL.writeAudit('dazn_vip_request_submitted', S.clubName + ': ' + req.changes.length + ' change(s)'); } catch (e) {}
@@ -1602,16 +1602,16 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     if (!reqId) return;
     var now = Date.now();
     var orgName = '';
-    db.ref('dazn-vip/requests/' + reqId).once('value').then(function (snap) {
+    db.ref('app-data/dazn-vip/requests/' + reqId).once('value').then(function (snap) {
       var r = snap.val();
       if (!r) return;
       orgName = r.orgName;
       var updates = {};
-      updates['dazn-vip/requests/' + reqId + '/status'] = 'cancelled';
-      updates['dazn-vip/requests/' + reqId + '/cancelledAt'] = now;
-      updates['dazn-vip/requests/' + reqId + '/cancelledBy'] = { uid: S.session.uid || '', name: S.session.name || '' };
-      updates['dazn-vip/requests/' + reqId + '/cancelReason'] = reason || '';
-      updates['dazn-vip/orgs/' + orgName + '/openRequestId'] = null;
+      updates['app-data/dazn-vip/requests/' + reqId + '/status'] = 'cancelled';
+      updates['app-data/dazn-vip/requests/' + reqId + '/cancelledAt'] = now;
+      updates['app-data/dazn-vip/requests/' + reqId + '/cancelledBy'] = { uid: S.session.uid || '', name: S.session.name || '' };
+      updates['app-data/dazn-vip/requests/' + reqId + '/cancelReason'] = reason || '';
+      updates['app-data/dazn-vip/orgs/' + orgName + '/openRequestId'] = null;
       return db.ref().update(updates);
     }).then(function () {
       toast('Request cancelled.', 'success');
@@ -1633,14 +1633,14 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
   }
 
   function attachStaffListeners() {
-    db.ref('dazn-vip/orgs').on('value', function (snap) {
+    db.ref('app-data/dazn-vip/orgs').on('value', function (snap) {
       S.orgs = snap.val() || {};
       paintRequests();
       paintBrowse();
       paintNonClubs();
       maybeShowSeedPrompt();
     });
-    db.ref('dazn-vip/requests').on('value', function (snap) {
+    db.ref('app-data/dazn-vip/requests').on('value', function (snap) {
       S.requests = snap.val() || {};
       paintRequests();
     });
@@ -1783,7 +1783,7 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     window.location.href = href;
 
     /* Persist the draft so the club view can show parity if ever needed. */
-    db.ref('dazn-vip/requests/' + (req._key || req.id)).update({
+    db.ref('app-data/dazn-vip/requests/' + (req._key || req.id)).update({
       emailDraft: { to: DAZN_EMAIL, subject: built.subject, body: built.body, generatedAt: Date.now() }
     });
   }
@@ -1863,7 +1863,7 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
 
   function markSent(reqId, req) {
     var now = Date.now();
-    db.ref('dazn-vip/requests/' + reqId).update({
+    db.ref('app-data/dazn-vip/requests/' + reqId).update({
       status: 'sent',
       sentAt: now,
       sentBy: { uid: S.session.uid || '', name: S.session.name || '' }
@@ -1890,10 +1890,10 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
           var match = currentVips.filter(function (v) { return (v.email || '').toLowerCase() === (c.email || '').toLowerCase(); })[0];
           key = match && match._key;
         }
-        if (key) updates['dazn-vip/orgs/' + orgName + '/vips/' + key] = null;
+        if (key) updates['app-data/dazn-vip/orgs/' + orgName + '/vips/' + key] = null;
       } else if (c.action === 'add') {
         var newId = uid();
-        updates['dazn-vip/orgs/' + orgName + '/vips/' + newId] = {
+        updates['app-data/dazn-vip/orgs/' + orgName + '/vips/' + newId] = {
           name: c.name || '',
           email: c.email || '',
           addedAt: now,
@@ -1906,17 +1906,17 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
           key2 = match2 && match2._key;
         }
         if (key2) {
-          updates['dazn-vip/orgs/' + orgName + '/vips/' + key2 + '/name']  = c.after.name;
-          updates['dazn-vip/orgs/' + orgName + '/vips/' + key2 + '/email'] = c.after.email;
+          updates['app-data/dazn-vip/orgs/' + orgName + '/vips/' + key2 + '/name']  = c.after.name;
+          updates['app-data/dazn-vip/orgs/' + orgName + '/vips/' + key2 + '/email'] = c.after.email;
         }
       }
     });
 
     /* Mark request complete and clear pointer */
-    updates['dazn-vip/requests/' + reqId + '/status'] = 'complete';
-    updates['dazn-vip/requests/' + reqId + '/completedAt'] = now;
-    updates['dazn-vip/requests/' + reqId + '/completedBy'] = { uid: S.session.uid || '', name: S.session.name || '' };
-    updates['dazn-vip/orgs/' + orgName + '/openRequestId'] = null;
+    updates['app-data/dazn-vip/requests/' + reqId + '/status'] = 'complete';
+    updates['app-data/dazn-vip/requests/' + reqId + '/completedAt'] = now;
+    updates['app-data/dazn-vip/requests/' + reqId + '/completedBy'] = { uid: S.session.uid || '', name: S.session.name || '' };
+    updates['app-data/dazn-vip/orgs/' + orgName + '/openRequestId'] = null;
 
     /* Audit entry */
     var summary = (req.changes || []).map(function (c) {
@@ -1925,7 +1925,7 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       if (c.action === 'edit')   return 'Edited ' + (c.before.email || '') + ' → ' + (c.after.email || '');
       return '?';
     }).join('; ');
-    updates['dazn-vip/audit/' + orgName + '/' + now] = {
+    updates['app-data/dazn-vip/audit/' + orgName + '/' + now] = {
       requestId: reqId,
       summary: summary,
       by: S.session.name || S.session.email || 'NL'
@@ -2045,7 +2045,7 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     if (!vip) return;
     if (t.dataset.ncAct === 'remove') {
       confirmDialog('Remove ' + esc(vip.name || vip.email) + '?', 'This removes the entry immediately (non-club orgs have no request workflow).', 'Remove', function () {
-        db.ref('dazn-vip/orgs/' + orgKey + '/vips/' + vipId).remove();
+        db.ref('app-data/dazn-vip/orgs/' + orgKey + '/vips/' + vipId).remove();
         try { NL.writeAudit('dazn_vip_nc_remove', orgKey + ': ' + (vip.email || '')); } catch (e2) {}
       });
     } else if (t.dataset.ncAct === 'edit') {
@@ -2068,7 +2068,7 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       var email = trim(document.getElementById('vipModalEmail').value);
       if (!emailValid(email)) { document.getElementById('vipModalError').textContent = 'Invalid email.'; return; }
       var id = uid();
-      db.ref('dazn-vip/orgs/' + orgKey + '/vips/' + id).set({
+      db.ref('app-data/dazn-vip/orgs/' + orgKey + '/vips/' + id).set({
         name: name, email: email, addedAt: Date.now(), addedBy: S.session.name || 'NL'
       });
       try { NL.writeAudit('dazn_vip_nc_add', orgKey + ': ' + email); } catch (e) {}
@@ -2093,7 +2093,7 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       var name  = trim(document.getElementById('vipModalName').value);
       var email = trim(document.getElementById('vipModalEmail').value);
       if (!emailValid(email)) { document.getElementById('vipModalError').textContent = 'Invalid email.'; return; }
-      db.ref('dazn-vip/orgs/' + orgKey + '/vips/' + vipId).update({ name: name, email: email });
+      db.ref('app-data/dazn-vip/orgs/' + orgKey + '/vips/' + vipId).update({ name: name, email: email });
       try { NL.writeAudit('dazn_vip_nc_edit', orgKey + ': ' + email); } catch (e) {}
       saveBtn.removeEventListener('click', newHandler);
       closeModal(vipModal);
@@ -2192,7 +2192,7 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
 
     document.getElementById('seedRoot').innerHTML =
         '<p style="font-size:14px;color:var(--ink);margin-bottom:14px">'
-      +   'No data yet in <code>dazn-vip/</code>. Seed the initial state from the imported sheet.'
+      +   'No data yet in <code>app-data/dazn-vip/</code>. Seed the initial state from the imported sheet.'
       + '</p>'
       + '<div class="seed-summary">'
       +   '<div><strong>' + orgNames.length + '</strong> orgs total</div>'
@@ -2213,7 +2213,7 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       + '</div>';
 
     document.getElementById('seedRunBtn').addEventListener('click', function () {
-      confirmDialog('Seed initial data?', 'Writes ' + orgNames.length + ' orgs and ' + rows.length + ' VIPs to <code>dazn-vip/</code>. Safe to run once. If data already exists this will overwrite it.', 'Seed', function () {
+      confirmDialog('Seed initial data?', 'Writes ' + orgNames.length + ' orgs and ' + rows.length + ' VIPs to <code>app-data/dazn-vip/</code>. Safe to run once. If data already exists this will overwrite it.', 'Seed', function () {
         runSeed(byOrg);
       });
     });
@@ -2224,7 +2224,7 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     var now = Date.now();
     Object.keys(byOrg).forEach(function (orgName) {
       var entry = byOrg[orgName];
-      var orgPath = 'dazn-vip/orgs/' + orgName;
+      var orgPath = 'app-data/dazn-vip/orgs/' + orgName;
       updates[orgPath + '/name'] = orgName;
       updates[orgPath + '/category'] = entry.category;
       updates[orgPath + '/maxVips'] = entry.category === 'club' ? CLUB_VIP_CAP : null;
