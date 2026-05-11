@@ -2295,7 +2295,14 @@ auth.onAuthStateChanged(function(user) {
 
       loadTools().then(function() {
         initPortal();
-        writeAudit('signed_in', 'Portal loaded');
+        /* Only audit an actual fresh sign-in, not page reloads. Firebase
+           Auth records the last real sign-in timestamp in user metadata;
+           within 60s of that we treat this as a genuine sign-in event. */
+        var lastSignInMs = user.metadata && user.metadata.lastSignInTime
+          ? new Date(user.metadata.lastSignInTime).getTime() : 0;
+        if (lastSignInMs && Date.now() - lastSignInMs < 60000) {
+          writeAudit('signed_in', 'Portal loaded');
+        }
       });
     })
     .catch(function() {
@@ -3547,8 +3554,10 @@ function loadPendingInvites() {
     });
     if (staleKeys.length) {
       var cleanUpdates = {};
-      staleKeys.forEach(function(k) { cleanUpdates['invites-pending/' + k] = null; });
-      db.ref().update(cleanUpdates).catch(function() {});
+      staleKeys.forEach(function(k) { cleanUpdates['admin/invites-pending/' + k] = null; });
+      db.ref().update(cleanUpdates).catch(function(e) {
+        console.warn('stale invite cleanup failed:', e && e.code, e && e.message);
+      });
     }
 
     /* Sort newest first */
