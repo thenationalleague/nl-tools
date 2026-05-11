@@ -3156,8 +3156,8 @@ function appendAuditEntries(entries) {
 
     var time = document.createElement('div');
     time.className = 'audit-entry__time';
-    time.textContent = formatAuditTime(e.at || e._ts);
-    time.title = e.at || '';
+    time.textContent = formatAuditTime(e.at || e.ts || e._ts);
+    time.title = e.at || (e.ts ? new Date(e.ts).toISOString() : '');
 
     row.appendChild(icon);
     row.appendChild(body);
@@ -3237,8 +3237,22 @@ function formatAuditAction(e) {
 
 function formatAuditTime(val) {
   if (!val) return '';
-  var d = isNaN(val) ? new Date(val) : new Date(parseInt(val));
-  if (isNaN(d.getTime())) return val;
+  var d;
+  if (typeof val === 'number') {
+    d = new Date(val);
+  } else if (typeof val === 'string') {
+    /* ISO string, pure numeric string, or "<ts>_<rand>" key — try in order */
+    if (!isNaN(val)) {
+      d = new Date(parseInt(val, 10));
+    } else {
+      d = new Date(val);
+      if (isNaN(d.getTime())) {
+        var m = val.match(/^(\d{10,})/);
+        if (m) d = new Date(parseInt(m[1], 10));
+      }
+    }
+  }
+  if (!d || isNaN(d.getTime())) return '';
   var now  = new Date();
   var diff = now - d;
   if (diff < 60000)    return 'Just now';
@@ -3258,6 +3272,7 @@ function initAdminTabs() {
       document.getElementById('pane-' + tab.dataset.pane).classList.add('active');
       if (tab.dataset.pane === 'audit' && !tab.dataset.loaded) {
         tab.dataset.loaded = '1';
+        initAuditPane();
         loadAuditFeed(true);
       }
       if (tab.dataset.pane === 'pending-invites') {

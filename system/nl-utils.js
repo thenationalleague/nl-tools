@@ -193,13 +193,15 @@
     if (!window.firebase || !firebase.database) return;
     if (!window.NL.session) return;
     window.NL._auditLastManualAt = Date.now();
+    var now = Date.now();
     var entry = {
       action: String(action || ''),
       detail: _auditDetailString(detail),
       uid: window.NL.session.uid,
       name: window.NL.session.name || '',
       email: window.NL.session.email || '',
-      ts: Date.now()
+      ts: now,
+      at: new Date(now).toISOString()
     };
     var key = String(Date.now()) + '_' + Math.random().toString(36).slice(2, 8);
     var updates = {};
