@@ -14,6 +14,14 @@
      NL.escHtml('<script>');          // → '&lt;script&gt;'
 
    Changelog
+   v1.4 (11/05/2026)
+     - Manual NL.writeAudit calls suppress the auto-hook for the next
+       500ms, so apps that call writeAudit immediately before an RTDB
+       write get a single rich audit entry instead of manual + auto.
+     - NL.writeAudit no longer silently swallows write failures —
+       errors are surfaced via console.warn so future "audit looks
+       empty" issues are visible at first glance.
+
    v1.3 (11/05/2026)
      - Added NL.installAuditHook(): proxies the firebase.database Reference
        prototype so every set/update/push/remove/transaction call writes
@@ -166,9 +174,17 @@
   window.NL.session = null;
 
   /* ── Audit log helpers ───────────────────────────────────────────────── */
+  /* When a manual NL.writeAudit fires, the auto-hook below suppresses
+     itself for AUDIT_MANUAL_SUPPRESS_MS so a single user action that
+     produces "manual write + RTDB write" doesn't generate two entries.
+     Call NL.writeAudit BEFORE the RTDB write to benefit from this. */
+  var AUDIT_MANUAL_SUPPRESS_MS = 500;
+  window.NL._auditLastManualAt = 0;
+
   window.NL.writeAudit = function(action, detail) {
     if (!window.firebase || !firebase.database) return;
     if (!window.NL.session) return;
+    window.NL._auditLastManualAt = Date.now();
     var entry = {
       action: action || '',
       detail: detail || '',
@@ -181,7 +197,9 @@
     var updates = {};
     updates['admin/audit/' + key] = entry;
     updates['admin/audit-by-user/' + window.NL.session.uid + '/' + key] = entry;
-    firebase.database().ref().update(updates).catch(function() {});
+    firebase.database().ref().update(updates).catch(function(e) {
+      console.warn('NL.writeAudit failed:', e && e.code, e && e.message);
+    });
   };
 
   /* ── Auto-audit RTDB writes ──────────────────────────────────────────── */
@@ -244,6 +262,9 @@
     if (!window.NL.session) return;
     if (window.NL._auditWriting) return;
     if (_auditSkip(path)) return;
+    /* If a manual NL.writeAudit just fired, the calling code is logging
+       this action itself — skip the auto entry to avoid duplicates. */
+    if (Date.now() - window.NL._auditLastManualAt < AUDIT_MANUAL_SUPPRESS_MS) return;
     var tool = _toolFromPath(path);
     var detail = op + ' ' + path + _valueSummary(value);
     window.NL._auditWriting = true;
