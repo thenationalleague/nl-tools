@@ -1,7 +1,11 @@
 /*
  * auth-guard.js — NL Tools v2
  * File: /tools/system/auth-guard.js
- * Version: v5.0 (03/05/2026)
+ * Version: v5.1 (11/05/2026)
+ *
+ * v5.1: Writes a `page_opened` audit entry after access is granted, so
+ *        every tool page visit shows up in the superadmin audit log even
+ *        for read-only tools that never write to RTDB.
  *
  * v5.0: Defaults lookup now uses bare role keys (`staff` / `admin` /
  *        `superadmin` / `club`) matching the portal admin UI's v5.81
@@ -291,6 +295,17 @@
         window.NL = window.NL || {};
       window.NL.session = session;
       if (window.NL.renderTopbar) window.NL.renderTopbar(session);
+      if (window.NL.installAuditHook) {
+        try { window.NL.installAuditHook(); } catch(e) {}
+      }
+      if (window.NL.writeAudit) {
+        try {
+          window.NL.writeAudit('page_opened',
+            (typeof NL_TOOL_KEY !== 'undefined' && NL_TOOL_KEY) ||
+            (window.NL_TOOL && window.NL_TOOL.toolKey) ||
+            location.pathname);
+        } catch(e) {}
+      }
       window.nlAuthReady(session);
       }
     }
