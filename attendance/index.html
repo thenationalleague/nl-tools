@@ -5730,18 +5730,32 @@
 
     NL.ensureAuth()
       .then(function() {
+        /* Audit FIRST so the auto-hook below suppresses its duplicate.
+           A failed write below will surface via the catch handler and
+           is rare enough not to justify a post-write audit. */
+        if (NL.writeAudit) {
+          var kickoffStr = fix.kickoffUTC
+            ? new Date(fix.kickoffUTC).toLocaleString('en-GB', {
+                day: '2-digit', month: 'short', year: 'numeric',
+                hour: '2-digit', minute: '2-digit'
+              })
+            : '';
+          var roleLabel = onBehalf
+            ? 'on behalf of ' + fix.homeTeamName
+            : (record.submittedByRole === 'club' ? 'as club user' : 'as ' + record.submittedByRole);
+          var detail = (existing ? 'Edited' : 'Submitted') +
+            ' attendance ' + roleLabel +
+            ' \u2014 ' + fix.homeTeamName + ' v ' + fix.awayTeamName +
+            (kickoffStr ? ' (' + kickoffStr + ')' : '') +
+            ' \u2014 total ' + total +
+            (away != null ? ', away ' + away : ', away not recorded');
+          NL.writeAudit(existing ? 'attendance_edit' : 'attendance_submit', detail);
+        }
         return firebase.database()
           .ref('app-data/ops-attendance/submissions/' + matchID)
           .set(toWrite);
       })
       .then(function() {
-        if (NL.writeAudit) {
-          NL.writeAudit(
-            existing ? 'attendance_edit' : 'attendance_submit',
-            (existing ? 'Edited' : 'Submitted') + ' attendance for ' + fix.homeTeamName + ' v ' + fix.awayTeamName +
-            ' \u2014 total ' + total + (away != null ? ', away ' + away : ' (away not recorded)')
-          );
-        }
         /* Update local state + re-render */
         S.submissions[matchID] = toWrite;
         /* Update the per-club cache */
