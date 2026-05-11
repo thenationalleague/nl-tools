@@ -2338,6 +2338,7 @@ function initPortal() {
   if (STATE.isAdmin) {
     document.getElementById('adminPanel').style.display = 'block';
     initAdminTabs();
+    initAuditPane();
     loadRequests();
     loadUsers();
     loadPendingInvites();
@@ -2910,29 +2911,44 @@ function writeAuditFor(targetUid, targetName, targetEmail, action, detail) {
 
 /* ---- Audit display ------------------------------------------------------- */
 
+/* Audit pane controls use document-level event delegation so they work
+   regardless of when the pane HTML is in the DOM or whether the audit tab
+   has been opened yet. Idempotent — safe to call multiple times because the
+   guard flag prevents double-binding. */
 function initAuditPane() {
-  document.getElementById('auditSearchBtn').addEventListener('click', function() {
-    runAuditSearch();
+  if (window._auditPaneInit) return;
+  window._auditPaneInit = true;
+
+  document.addEventListener('click', function(ev) {
+    var t = ev.target && ev.target.closest && ev.target.closest('button');
+    if (!t) return;
+    if (t.id === 'auditSearchBtn') {
+      runAuditSearch();
+    } else if (t.id === 'auditClearBtn') {
+      var s = document.getElementById('auditSearch');
+      if (s) s.value = '';
+      var n = document.getElementById('auditSearchNotice');
+      if (n) n.style.display = 'none';
+      AUDIT_STATE.mode         = 'feed';
+      AUDIT_STATE.cursor       = null;
+      AUDIT_STATE.searchUid    = null;
+      AUDIT_STATE.searchCursor = null;
+      AUDIT_STATE.exhausted    = false;
+      var l = document.getElementById('auditList');
+      if (l) l.innerHTML = '';
+      loadAuditFeed(true);
+    } else if (t.id === 'auditLoadMoreBtn') {
+      if (AUDIT_STATE.mode === 'search') {
+        loadAuditForUser(AUDIT_STATE.searchUid, false);
+      } else {
+        loadAuditFeed(false);
+      }
+    }
   });
-  document.getElementById('auditSearch').addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') runAuditSearch();
-  });
-  document.getElementById('auditClearBtn').addEventListener('click', function() {
-    document.getElementById('auditSearch').value = '';
-    document.getElementById('auditSearchNotice').style.display = 'none';
-    AUDIT_STATE.mode        = 'feed';
-    AUDIT_STATE.cursor      = null;
-    AUDIT_STATE.searchUid   = null;
-    AUDIT_STATE.searchCursor = null;
-    AUDIT_STATE.exhausted   = false;
-    document.getElementById('auditList').innerHTML = '';
-    loadAuditFeed(true);
-  });
-  document.getElementById('auditLoadMoreBtn').addEventListener('click', function() {
-    if (AUDIT_STATE.mode === 'search') {
-      loadAuditForUser(AUDIT_STATE.searchUid, false);
-    } else {
-      loadAuditFeed(false);
+
+  document.addEventListener('keydown', function(ev) {
+    if (ev.target && ev.target.id === 'auditSearch' && ev.key === 'Enter') {
+      runAuditSearch();
     }
   });
 }
