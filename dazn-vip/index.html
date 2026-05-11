@@ -1185,6 +1185,20 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
   }
 
   /* ── Boot ──────────────────────────────────────────────────────────── */
+
+  /* auth-guard fast-path fires nlAuthReady from sessionStorage before Firebase
+     Auth has restored its JWT. RTDB rules evaluate auth server-side using the
+     JWT, so we must wait until Firebase Auth confirms a signed-in user before
+     starting any RTDB listeners. */
+  function whenFirebaseAuthed(cb) {
+    var user = firebase.auth().currentUser;
+    if (user) { cb(user); return; }
+    var unsub = firebase.auth().onAuthStateChanged(function (u) {
+      unsub();
+      cb(u);
+    });
+  }
+
   function boot(userData) {
     if (S._initDone) return;
     S._initDone = true;
@@ -1206,13 +1220,19 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
         return;
       }
       renderClubView();
-      attachClubListeners();
       wireClubEvents();
+      whenFirebaseAuthed(function (u) {
+        if (!u) { setDiag('err', 'Firebase Auth session not found — try signing out and back in.'); return; }
+        attachClubListeners();
+      });
     } else {
       /* Staff or admin */
       renderStaffView();
-      attachStaffListeners();
       wireStaffEvents();
+      whenFirebaseAuthed(function (u) {
+        if (!u) { setDiag('err', 'Firebase Auth session not found — try signing out and back in.'); return; }
+        attachStaffListeners();
+      });
     }
   }
   window.DAZNVIP = { boot: boot };
