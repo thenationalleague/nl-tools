@@ -181,13 +181,21 @@
   var AUDIT_MANUAL_SUPPRESS_MS = 500;
   window.NL._auditLastManualAt = 0;
 
+  function _auditDetailString(d) {
+    if (d == null) return '';
+    if (typeof d === 'string') return d;
+    if (typeof d === 'number' || typeof d === 'boolean') return String(d);
+    try { return JSON.stringify(d); }
+    catch(e) { return String(d); }
+  }
+
   window.NL.writeAudit = function(action, detail) {
     if (!window.firebase || !firebase.database) return;
     if (!window.NL.session) return;
     window.NL._auditLastManualAt = Date.now();
     var entry = {
-      action: action || '',
-      detail: detail || '',
+      action: String(action || ''),
+      detail: _auditDetailString(detail),
       uid: window.NL.session.uid,
       name: window.NL.session.name || '',
       email: window.NL.session.email || '',
