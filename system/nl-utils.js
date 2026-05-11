@@ -14,6 +14,15 @@
      NL.escHtml('<script>');          // → '&lt;script&gt;'
 
    Changelog
+   v1.3 (11/05/2026)
+     - Added NL.installAuditHook(): proxies the firebase.database Reference
+       prototype so every set/update/push/remove/transaction call writes
+       an entry to admin/audit/{key} automatically. Paths under
+       admin/audit*, presence/ and .info/ are skipped to avoid loops/noise.
+       Auto-installs at script load if firebase is already initialised.
+     - writeAudit() now sets action prefix based on path so the feed
+       groups by tool (e.g. tasks_changed, holiday-lieu_changed).
+
    v1.2 (26/04/2026)
      - Added NL.icon(name, size) helper — returns SVG element referencing
        /tools/assets/icons/sprites.svg. Usage: NL.icon('add') or
@@ -174,6 +183,179 @@
     updates['admin/audit-by-user/' + window.NL.session.uid + '/' + key] = entry;
     firebase.database().ref().update(updates).catch(function() {});
   };
+
+  /* ── Auto-audit RTDB writes ──────────────────────────────────────────── */
+  /* Paths matching any of these are NOT auto-audited (avoids loops/noise).
+     Editable at runtime via NL.AUDIT_AUTO.skipPatterns. */
+  window.NL.AUDIT_AUTO = {
+    enabled: true,
+    skipPatterns: [
+      /* Portal manages /admin/* itself and writes its own audit entries
+         (request_approved, invite_sent, access_changed, etc.) — skip the
+         whole namespace to avoid double-logging. */
+      /^\/?admin(\/|$)/,
+      /^\/?presence(\/|$)/,
+      /^\/?\.info(\/|$)/
+    ]
+  };
+
+  function _auditSkip(path) {
+    var p = String(path || '');
+    var pats = window.NL.AUDIT_AUTO.skipPatterns;
+    for (var i = 0; i < pats.length; i++) {
+      if (pats[i].test(p)) return true;
+    }
+    return false;
+  }
+
+  function _refPath(ref) {
+    try {
+      var s = ref.toString();
+      return s.replace(/^https?:\/\/[^/]+/, '') || '/';
+    } catch(e) { return ''; }
+  }
+
+  /* Tool name from a path: skips generic container segments like
+     "app-data" / "data" so paths like /app-data/staff-tasks/items/...
+     are grouped as "staff-tasks_changed" not "app-data_changed". */
+  function _toolFromPath(path) {
+    var parts = String(path || '').split('/').filter(Boolean);
+    if (!parts.length) return 'root';
+    var skip = { 'app-data': 1, 'data': 1, 'tools': 1 };
+    var seg = parts[0];
+    if (skip[seg] && parts.length > 1) seg = parts[1];
+    return seg.replace(/[^a-z0-9_-]/gi, '').toLowerCase() || 'root';
+  }
+
+  function _valueSummary(value) {
+    if (value == null) return '';
+    if (typeof value === 'object') {
+      var keys = Object.keys(value);
+      if (!keys.length) return '';
+      var preview = keys.slice(0, 3).join(', ');
+      return ' { ' + preview + (keys.length > 3 ? ', …' : '') + ' }';
+    }
+    var s = String(value);
+    return ' = ' + (s.length > 40 ? s.slice(0, 40) + '…' : s);
+  }
+
+  function _autoAudit(op, path, value) {
+    if (!window.NL.AUDIT_AUTO.enabled) return;
+    if (!window.NL.session) return;
+    if (window.NL._auditWriting) return;
+    if (_auditSkip(path)) return;
+    var tool = _toolFromPath(path);
+    var detail = op + ' ' + path + _valueSummary(value);
+    window.NL._auditWriting = true;
+    try { window.NL.writeAudit(tool + '_changed', detail); }
+    finally { window.NL._auditWriting = false; }
+  }
+
+  window.NL.installAuditHook = function() {
+    if (window.NL._auditHookInstalled) return;
+    if (!window.firebase || !firebase.database || !firebase.database.Reference) return;
+    var R = firebase.database.Reference.prototype;
+    if (!R) return;
+
+    var origSet = R.set;
+    R.set = function(value) {
+      _autoAudit('set', _refPath(this), value);
+      return origSet.apply(this, arguments);
+    };
+
+    var origUpdate = R.update;
+    R.update = function(values) {
+      var base = _refPath(this);
+      if (values && typeof values === 'object') {
+        /* update() may carry many absolute paths in its keys */
+        var keys = Object.keys(values);
+        var nonSkipped = [];
+        for (var i = 0; i < keys.length; i++) {
+          var k = keys[i];
+          var full = (k.indexOf('/') === 0)
+            ? k
+            : (base.replace(/\/$/, '') + '/' + k);
+          if (!_auditSkip(full)) nonSkipped.push(k);
+        }
+        if (nonSkipped.length) {
+          /* Summarise by the first non-skipped path so the tool prefix is right */
+          var sample = nonSkipped[0];
+          var samplePath = (sample.indexOf('/') === 0)
+            ? sample
+            : (base.replace(/\/$/, '') + '/' + sample);
+          _autoAudit('update', samplePath, values);
+        }
+      } else {
+        _autoAudit('update', base, values);
+      }
+      return origUpdate.apply(this, arguments);
+    };
+
+    var origRemove = R.remove;
+    R.remove = function() {
+      _autoAudit('remove', _refPath(this));
+      return origRemove.apply(this, arguments);
+    };
+
+    var origPush = R.push;
+    R.push = function(value) {
+      if (value !== undefined) _autoAudit('push', _refPath(this), value);
+      return origPush.apply(this, arguments);
+    };
+
+    if (R.setWithPriority) {
+      var origSWP = R.setWithPriority;
+      R.setWithPriority = function(value) {
+        _autoAudit('set', _refPath(this), value);
+        return origSWP.apply(this, arguments);
+      };
+    }
+
+    if (R.transaction) {
+      var origTx = R.transaction;
+      R.transaction = function() {
+        _autoAudit('transaction', _refPath(this));
+        return origTx.apply(this, arguments);
+      };
+    }
+
+    window.NL._auditHookInstalled = true;
+  };
+
+  /* ── data-audit click delegation ──────────────────────────────────────── */
+  /* Any element (or ancestor) carrying data-audit="action_name" triggers an
+     audit entry when clicked. Optional data-audit-detail supplies a detail
+     string; if omitted, the element's trimmed textContent is used (capped
+     to 80 chars). Handlers can mutate data-audit-detail just before the
+     click to inject runtime context. */
+  function _onAuditClick(e) {
+    var t = e.target && e.target.closest && e.target.closest('[data-audit]');
+    if (!t) return;
+    if (!window.NL.writeAudit) return;
+    var action = t.getAttribute('data-audit');
+    if (!action) return;
+    var detail = t.getAttribute('data-audit-detail');
+    if (detail == null) {
+      detail = (t.textContent || '').replace(/\s+/g, ' ').trim();
+      if (detail.length > 80) detail = detail.slice(0, 80) + '…';
+    }
+    try { window.NL.writeAudit(action, detail); } catch(err) {}
+  }
+
+  if (typeof document !== 'undefined') {
+    document.addEventListener('click', _onAuditClick, true);
+  }
+
+  /* Auto-install if firebase is already loaded; otherwise wait. */
+  if (window.firebase && window.firebase.database) {
+    try { window.NL.installAuditHook(); } catch(e) {}
+  } else {
+    document.addEventListener('DOMContentLoaded', function() {
+      if (window.firebase && window.firebase.database) {
+        try { window.NL.installAuditHook(); } catch(e) {}
+      }
+    });
+  }
 
   /* ── Icon helper ─────────────────────────────────────────────────────── */
   /* Returns an SVG element referencing the sprite sheet.
