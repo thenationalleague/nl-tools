@@ -450,7 +450,10 @@
   }
   .req-history div { margin: 2px 0; }
 
-  /* ── Browse all orgs (staff) ────────────────────────────────────────── */
+  /* Browse all uses brand .toolbar + .table widgets — no local rules needed.
+     The .vip-org-card* classes below are still used by the Non-clubs tab
+     (paintNonClubs) — kept until that view is also converted to a flat
+     brand-widget table in a follow-up. */
   .vip-org-card {
     background: var(--white);
     border: 1px solid var(--border);
@@ -464,14 +467,12 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    cursor: pointer;
     gap: 12px;
   }
   .vip-org-card__title { font-size: 14px; font-weight: 800; color: var(--text); }
   .vip-org-card__title-cat { font-size: 11px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; margin-left: 8px; }
   .vip-org-card__count { font-size: 12px; color: var(--text-muted); }
-  .vip-org-card__body { display: none; padding: 4px 0; }
-  .vip-org-card.is-open .vip-org-card__body { display: block; }
+  .vip-org-card__body { padding: 4px 0; }
   .vip-org-card__body .vip-table th { background: var(--white); }
 
   .vip-search {
@@ -639,8 +640,35 @@
       </div>
 
       <div id="tabBrowse" class="vip-tab-panel" style="display:none">
-        <input type="search" id="browseSearch" class="vip-search" placeholder="Search clubs, names, emails…">
-        <div id="browseList"></div>
+        <!-- Brand .toolbar widget — search + category filter + result count -->
+        <div class="toolbar">
+          <div class="toolbar__left">
+            <input type="search" id="browseSearch" class="toolbar__search" placeholder="Search org, name or email…">
+            <select id="browseCategoryFilter" class="toolbar__filter">
+              <option value="">All categories</option>
+              <option value="club">Clubs</option>
+              <option value="__nonclub">Non-clubs (all)</option>
+            </select>
+          </div>
+          <div class="toolbar__right">
+            <span id="browseCount" class="text-secondary"></span>
+          </div>
+        </div>
+        <!-- Brand .table widget — one row per VIP, flat -->
+        <div class="table-wrap">
+          <table class="table" id="browseTable">
+            <thead>
+              <tr>
+                <th data-sort="org" style="cursor:pointer">Org</th>
+                <th data-sort="cat" style="cursor:pointer">Category</th>
+                <th data-sort="name" style="cursor:pointer">Name</th>
+                <th data-sort="email" style="cursor:pointer">Email</th>
+                <th data-sort="added" style="cursor:pointer; white-space:nowrap;">Added</th>
+              </tr>
+            </thead>
+            <tbody id="browseTbody"></tbody>
+          </table>
+        </div>
       </div>
 
       <div id="tabNonClubs" class="vip-tab-panel" style="display:none">
@@ -1821,6 +1849,9 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     });
 
     document.getElementById('browseSearch').addEventListener('input', paintBrowse);
+    var browseCatEl = document.getElementById('browseCategoryFilter');
+    if (browseCatEl) browseCatEl.addEventListener('change', paintBrowse);
+    wireBrowseSortHeaders();
 
     /* Request actions delegated */
     document.getElementById('reqList').addEventListener('click', onRequestAction);
@@ -2098,58 +2129,105 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
   }
 
   /* ── Browse all (staff) ────────────────────────────────────────────── */
+  /* Flat-table view: one row per VIP entry across every org. Filterable by
+     free-text search + category dropdown, sortable by any column. Replaces
+     the old card-per-org accordion which made it hard to scan across orgs
+     or compare. CSV-style by design — copy/paste into a spreadsheet works. */
+  var _browseSort = { col: 'org', dir: 1 };   /* dir: 1 asc, -1 desc */
+
   function paintBrowse() {
+    var tbody = document.getElementById('browseTbody');
+    var countEl = document.getElementById('browseCount');
+    if (!tbody) return;
     var q = trim((document.getElementById('browseSearch') || {}).value || '').toLowerCase();
-    var orgs = listValues(S.orgs || {});
-    /* Show clubs first, then non-clubs */
-    orgs.sort(function (a, b) {
-      var aClub = (a.category === 'club') ? 0 : 1;
-      var bClub = (b.category === 'club') ? 0 : 1;
-      if (aClub !== bClub) return aClub - bClub;
-      return (a.name || '').localeCompare(b.name || '');
+    var cat = (document.getElementById('browseCategoryFilter') || {}).value || '';
+
+    /* Flatten: one entry per VIP. Also synthesise an empty placeholder row
+       for orgs with no VIPs so they don't vanish from the view. */
+    var rows = [];
+    listValues(S.orgs || {}).forEach(function (o) {
+      var orgCat = o.category || 'club';
+      var vips = listValues(o.vips || {});
+      if (!vips.length) {
+        rows.push({ org: o.name || o._key, cat: orgCat, name: '', email: '', added: 0, isEmpty: true });
+        return;
+      }
+      vips.forEach(function (v) {
+        rows.push({
+          org:   o.name || o._key,
+          cat:   orgCat,
+          name:  v.name || '',
+          email: v.email || '',
+          added: v.addedAt || 0,
+          isEmpty: false
+        });
+      });
     });
 
-    var visible = orgs;
-    if (q) {
-      visible = orgs.filter(function (o) {
-        if ((o.name || '').toLowerCase().indexOf(q) !== -1) return true;
-        var vips = listValues(o.vips || {});
-        for (var i = 0; i < vips.length; i++) {
-          var v = vips[i];
-          if ((v.name || '').toLowerCase().indexOf(q) !== -1) return true;
-          if ((v.email || '').toLowerCase().indexOf(q) !== -1) return true;
-        }
-        return false;
-      });
+    /* Filter — category dropdown first, then free-text. */
+    var filtered = rows.filter(function (r) {
+      if (cat === 'club' && r.cat !== 'club') return false;
+      if (cat === '__nonclub' && r.cat === 'club') return false;
+      if (!q) return true;
+      return (r.org.toLowerCase().indexOf(q) !== -1)
+          || (r.name.toLowerCase().indexOf(q) !== -1)
+          || (r.email.toLowerCase().indexOf(q) !== -1);
+    });
+
+    /* Sort. String columns localeCompare; numeric (added) plain subtract. */
+    var col = _browseSort.col, dir = _browseSort.dir;
+    filtered.sort(function (a, b) {
+      var av = a[col], bv = b[col];
+      var cmp = (col === 'added') ? (av - bv) : String(av).localeCompare(String(bv));
+      if (cmp === 0 && col !== 'org') {
+        /* Secondary sort by org to keep grouping consistent. */
+        cmp = String(a.org).localeCompare(String(b.org));
+      }
+      return cmp * dir;
+    });
+
+    if (countEl) {
+      countEl.textContent = filtered.length + ' row' + (filtered.length === 1 ? '' : 's');
     }
 
-    var html = visible.map(function (o) {
-      var vips = listValues(o.vips || {});
-      vips.sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); });
-      var rows = vips.map(function (v) {
-        return '<tr><td class="col-name">' + (v.name ? esc(v.name) : '<span class="vip-name-blank">(no name)</span>') + '</td><td class="vip-email">' + esc(v.email) + '</td></tr>';
-      }).join('');
-      if (!rows) rows = '<tr><td colspan="2" class="vip-empty" style="padding:14px">No entries</td></tr>';
-      return ''
-        + '<div class="vip-org-card">'
-        +   '<div class="vip-org-card__head" data-org="' + esc(o._key) + '">'
-        +     '<div><span class="vip-org-card__title">' + esc(o.name || o._key) + '</span>'
-        +       '<span class="vip-org-card__title-cat">' + esc(o.category || '') + '</span></div>'
-        +     '<div class="vip-org-card__count">' + vips.length + (o.category === 'club' ? ' / ' + CLUB_VIP_CAP : '') + '</div>'
-        +   '</div>'
-        +   '<div class="vip-org-card__body">'
-        +     '<table class="vip-table"><tbody>' + rows + '</tbody></table>'
-        +   '</div>'
-        + '</div>';
+    if (!filtered.length) {
+      tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state" style="padding:32px 16px;">' +
+        '<div class="empty-state__text">No matches.</div></div></td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(function (r) {
+      var pillClass = r.cat === 'club' ? 'pill pill--info' : 'pill';
+      var nameCell = r.isEmpty
+        ? '<td colspan="3" style="color:var(--text-muted);font-style:italic;">No VIPs added yet</td>'
+        : '<td>' + (r.name ? esc(r.name) : '<span style="color:var(--text-muted);font-style:italic;">(no name)</span>') + '</td>'
+        + '<td style="font-family:monospace;font-size:13px;color:var(--text-muted);">' + esc(r.email) + '</td>'
+        + '<td style="white-space:nowrap;color:var(--text-muted);font-size:13px;">' + (r.added ? fmtDate(r.added) : '—') + '</td>';
+      return '<tr>'
+        + '<td style="font-weight:700;">' + esc(r.org) + '</td>'
+        + '<td><span class="' + pillClass + '">' + esc(r.cat || 'other') + '</span></td>'
+        + nameCell
+        + '</tr>';
     }).join('');
+  }
 
-    if (!html) html = '<div class="vip-empty">No matches.</div>';
-    document.getElementById('browseList').innerHTML = html;
-
-    /* Toggle on header click */
-    var heads = document.querySelectorAll('#browseList .vip-org-card__head');
-    Array.prototype.forEach.call(heads, function (h) {
-      h.addEventListener('click', function () { h.parentNode.classList.toggle('is-open'); });
+  /* Wire column-header sort once — clicking a header toggles direction on
+     the same column or switches to a new column ascending. */
+  function wireBrowseSortHeaders() {
+    var table = document.getElementById('browseTable');
+    if (!table || table._sortWired) return;
+    table._sortWired = true;
+    Array.prototype.forEach.call(table.querySelectorAll('thead th[data-sort]'), function (th) {
+      th.addEventListener('click', function () {
+        var col = th.dataset.sort;
+        if (_browseSort.col === col) {
+          _browseSort.dir = -_browseSort.dir;
+        } else {
+          _browseSort.col = col;
+          _browseSort.dir = 1;
+        }
+        paintBrowse();
+      });
     });
   }
 
