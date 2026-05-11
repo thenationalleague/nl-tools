@@ -215,11 +215,16 @@
     } catch(e) { return ''; }
   }
 
-  /* First non-empty path segment, sanitised for use as an action key. */
+  /* Tool name from a path: skips generic container segments like
+     "app-data" / "data" so paths like /app-data/staff-tasks/items/...
+     are grouped as "staff-tasks_changed" not "app-data_changed". */
   function _toolFromPath(path) {
     var parts = String(path || '').split('/').filter(Boolean);
     if (!parts.length) return 'root';
-    return parts[0].replace(/[^a-z0-9_-]/gi, '').toLowerCase() || 'root';
+    var skip = { 'app-data': 1, 'data': 1, 'tools': 1 };
+    var seg = parts[0];
+    if (skip[seg] && parts.length > 1) seg = parts[1];
+    return seg.replace(/[^a-z0-9_-]/gi, '').toLowerCase() || 'root';
   }
 
   function _valueSummary(value) {
