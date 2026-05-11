@@ -2851,14 +2851,20 @@ var AUDIT_STATE = {
 /*
  * writeAudit(action, detail)
  * Writes to both audit/{ts} and audit-by-user/{actorUid}/{ts}.
- * Never throws -- audit failures are silent.
+ * Never throws -- audit failures surface via console.warn.
  */
+function _auditDetailToString(d) {
+  if (d == null) return '';
+  if (typeof d === 'string') return d;
+  if (typeof d === 'number' || typeof d === 'boolean') return String(d);
+  try { return JSON.stringify(d); } catch(e) { return String(d); }
+}
 function writeAudit(action, detail) {
   if (!STATE.uid) return;
   var ts      = Date.now();
   var entry   = {
-    action:    action,
-    detail:    detail  || '',
+    action:    String(action || ''),
+    detail:    _auditDetailToString(detail),
     uid:       STATE.uid,
     name:      (STATE.userData && STATE.userData.name)  || '',
     email:     (STATE.userData && STATE.userData.email) || '',
@@ -2881,8 +2887,8 @@ function writeAuditFor(targetUid, targetName, targetEmail, action, detail) {
   if (!STATE.uid) return;
   var ts    = Date.now();
   var entry = {
-    action:      action,
-    detail:      detail || '',
+    action:      String(action || ''),
+    detail:      _auditDetailToString(detail),
     uid:         STATE.uid,
     name:        (STATE.userData && STATE.userData.name)  || '',
     email:       (STATE.userData && STATE.userData.email) || '',
@@ -3162,18 +3168,56 @@ function appendAuditEntries(entries) {
 
 function formatAuditAction(e) {
   var labels = {
-    'signed_in':        'Signed in',
-    'signed_out':       'Signed out',
-    'invite_sent':      'Invite sent',
-    'request_approved': 'Request approved',
-    'request_declined': 'Request declined',
-    'access_changed':   'Access changed',
-    'role_changed':     'Role changed',
-    'message_created':  'Message created',
-    'message_edited':   'Message edited',
-    'message_deleted':  'Message deleted',
-    'user_removed':     'User removed',
-    'page_opened':      'Page opened'
+    /* portal */
+    'signed_in':                     'Signed in',
+    'signed_out':                    'Signed out',
+    'invite_sent':                   'Invite sent',
+    'invite_cancelled':              'Invite cancelled',
+    'request_approved':              'Request approved',
+    'request_declined':              'Request declined',
+    'access_changed':                'Access changed',
+    'role_changed':                  'Role changed',
+    'message_created':               'Message created',
+    'message_edited':                'Message edited',
+    'message_deleted':               'Message deleted',
+    'user_removed':                  'User removed',
+    'tool_deployed':                 'Tool deployed',
+    'tool_seeded':                   'Tool seeded',
+    'page_opened':                   'Page opened',
+    /* attendance */
+    'attendance_submit':             'Attendance submitted',
+    'attendance_edit':               'Attendance edited',
+    'add_cup_fixture':               'Cup fixture added',
+    'edit_cup_fixture':              'Cup fixture edited',
+    'delete_cup_fixture':            'Cup fixture deleted',
+    'sync_fixture_run':              'Fixture sync run',
+    /* judgements */
+    'judgement_added':               'Judgement added',
+    'judgement_updated':             'Judgement updated',
+    'judgement_deleted':             'Judgement deleted',
+    /* meeting-notes */
+    'meeting_created':               'Meeting created',
+    'meeting_edited':                'Meeting edited',
+    'meeting_started':               'Meeting started',
+    'meeting_note_saved':            'Meeting note saved',
+    'contact_added':                 'Contact added',
+    'minutes_generated':             'Minutes generated',
+    'minutes_published':             'Minutes published',
+    /* programme packs */
+    'programme_packs_uploaded':      'Programme pack uploaded',
+    'programme_packs_deleted':       'Programme pack deleted',
+    'programme_packs_reconciled':    'Programme packs reconciled',
+    'programme_packs_zip_downloaded':'Programme packs zip downloaded',
+    /* graphics */
+    'totw_download':                 'Team of the Week downloaded',
+    'totw_copy_roundup':             'TOTW roundup copied',
+    'totw_copy_excel':               'TOTW Excel copied',
+    'single-fixture_download':       'Single fixture downloaded',
+    'league-tables_download':        'League tables downloaded',
+    'fixtures-results_download':     'Fixtures / results downloaded',
+    'top-scorers_download':          'Top scorers downloaded',
+    'article-composer_copy_text':    'Article text copied',
+    'article-composer_copy_html':    'Article HTML copied'
   };
   if (labels[e.action]) return labels[e.action];
   /* Auto-audit shape: "<tool>_changed" → "Tool data changed" */
@@ -3182,7 +3226,13 @@ function formatAuditAction(e) {
     var tool = m[1].replace(/[-_]/g, ' ');
     return tool.charAt(0).toUpperCase() + tool.slice(1) + ' data changed';
   }
-  return e.action || 'Unknown action';
+  /* Generic fallback: action_name → "Action name" */
+  if (e.action) {
+    return e.action
+      .replace(/[-_]+/g, ' ')
+      .replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+  }
+  return 'Unknown action';
 }
 
 function formatAuditTime(val) {
