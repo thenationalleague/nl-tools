@@ -500,6 +500,83 @@
     box-shadow: var(--focus-ring);
   }
 
+  /* ── Non-clubs add panel ────────────────────────────────────────────── */
+  .nc-add-panel {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+  .nc-add-panel__head {
+    padding: 12px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  .nc-add-panel__head h3 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text);
+  }
+  .nc-add-panel__hint {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .nc-add-panel__rows {
+    padding: 10px 12px 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .nc-add-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr auto;
+    gap: 8px;
+    align-items: center;
+  }
+  .nc-add-row__input {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+    background: var(--white);
+    color: var(--text);
+    min-width: 0;
+  }
+  .nc-add-row__input--email { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .nc-add-row__input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
+  }
+  .nc-add-row__remove {
+    width: 28px; height: 28px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--white);
+    color: var(--text-muted);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+  }
+  .nc-add-row__remove:hover { color: var(--primary); border-color: var(--primary); }
+  .nc-add-panel__foot {
+    padding: 10px 12px 12px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  @media (max-width: 720px) {
+    .nc-add-row { grid-template-columns: 1fr; }
+  }
+
   /* ── Seed UI ────────────────────────────────────────────────────────── */
   .seed-preview {
     max-height: 360px;
@@ -673,6 +750,17 @@
   .review-changes__item--add::before    { content: "＋"; color: var(--success, #16a34a); font-weight: 700; margin-right: 6px; }
   .review-changes__item--remove::before { content: "－"; color: var(--primary);          font-weight: 700; margin-right: 6px; }
   .review-changes__item--edit::before   { content: "✎";  color: var(--navy);             font-weight: 700; margin-right: 6px; }
+  .review-changes__group { margin-bottom: 12px; }
+  .review-changes__group-head {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 4px;
+    margin-bottom: 4px;
+  }
   .review-email-meta {
     font-size: 12px;
     color: var(--text-muted);
@@ -794,9 +882,25 @@
         <div id="clubsGrid" class="clubs-grid"></div>
       </div>
 
-      <!-- Non-clubs tab — media, partner, governing, agency.
-           Flat one-row-per-VIP table with category filter. -->
+      <!-- Non-clubs tab — media, partner, governing, agency, ex-clubs.
+           Top panel for adding VIPs (single email to DAZN covers as many
+           rows as you queue up). Flat one-row-per-VIP table below. -->
       <div id="tabNonClubs" class="vip-tab-panel" style="display:none">
+
+        <section class="nc-add-panel">
+          <header class="nc-add-panel__head">
+            <h3>Add VIP(s)</h3>
+            <span class="nc-add-panel__hint">All rows below get bundled into one email to DAZN.</span>
+          </header>
+          <div class="nc-add-panel__rows" id="ncAddRows"></div>
+          <footer class="nc-add-panel__foot">
+            <button type="button" class="btn btn--ghost" id="ncAddAnotherBtn">+ Add another row</button>
+            <div style="flex:1;"></div>
+            <button type="button" class="btn btn--ghost" id="ncAddDiscardBtn">Clear</button>
+            <button type="button" class="btn btn--primary" id="ncAddSaveBtn">Save &amp; email DAZN</button>
+          </footer>
+        </section>
+
         <div class="toolbar">
           <div class="toolbar__left">
             <input type="search" id="nonClubsSearch" class="toolbar__search" placeholder="Search org, name or email…">
@@ -1985,6 +2089,7 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       fetch(CLUBS_META_URL).then(function (r) { return r.json(); }).then(function (data) {
         S.clubsMeta = (data && data.clubs) || [];
         safePaint(paintClubs, 'paintClubs');
+        safePaint(paintNonClubs, 'paintNonClubs'); /* clubs-meta gates ex-club detection */
       }).catch(function (e) {
         console.error('[dazn-vip] clubs-meta fetch failed:', e);
       });
@@ -2061,6 +2166,17 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     wireSortHeaders('nonClubsTable', _nonClubsSort, paintNonClubs);
     var ncTbody = document.getElementById('nonClubsTbody');
     if (ncTbody) ncTbody.addEventListener('click', onNonClubAction);
+
+    /* Non-clubs Add panel wiring + seed one empty row. */
+    ncAddPanelEnsureRow();
+    var ncAddRowsEl     = document.getElementById('ncAddRows');
+    var ncAddAnotherBtn = document.getElementById('ncAddAnotherBtn');
+    var ncAddDiscardBtn = document.getElementById('ncAddDiscardBtn');
+    var ncAddSaveBtn    = document.getElementById('ncAddSaveBtn');
+    if (ncAddRowsEl)     ncAddRowsEl.addEventListener('click', onNcAddRowsClick);
+    if (ncAddAnotherBtn) ncAddAnotherBtn.addEventListener('click', ncAddPanelAddRow);
+    if (ncAddDiscardBtn) ncAddDiscardBtn.addEventListener('click', ncAddPanelClear);
+    if (ncAddSaveBtn)    ncAddSaveBtn.addEventListener('click', onNcAddSave);
 
     /* Request actions delegated */
     document.getElementById('reqList').addEventListener('click', onRequestAction);
@@ -2680,79 +2796,126 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     }
   }
 
-  /* ── Review & send modal (Clubs batch edit → email DAZN) ──────────── */
+  /* ── Review & send modal (any combination of changes → email DAZN) ── */
   /* Workflow:
-       1. Admin makes any change on any org (any combo of adds / edits /
-          removes — clubs use a per-card batch UI; non-clubs do one
-          change at a time).
-       2. The change is handed to openReviewModalFor which shows a
-          summary + pre-fills an editable email draft to DAZN.
+       1. Admin batches changes (per-club card editor, per-VIP edit/remove
+          buttons on Non-clubs, or the top "Add VIP(s)" panel).
+       2. Changes are handed to openReviewModalForGroups as one or more
+          {orgName, orgCategory, changes} groups. The modal shows a
+          per-group summary + pre-fills an editable email draft.
        3. "Open in Outlook" fires a mailto: with the (possibly edited)
           subject + body. The admin sends it from their mail client.
-       4. "Mark as sent" writes a request with status:'sent' to RTDB.
-          Later, in the Requests tab, an admin marks it complete once
-          DAZN has confirmed — that's when the canonical VIP list
-          actually updates. DAZN routes everything; we just allocate. */
+       4. "Mark as sent" writes one request per group with status:'sent'
+          to RTDB, all sharing the same emailDraft snapshot. Each
+          request is independently marked complete in the Requests tab
+          once DAZN confirms — that's when each org's canonical VIP
+          list actually updates. DAZN routes everything; we just
+          allocate. */
   var reviewModalEl = document.getElementById('reviewModal');
-  var reviewCtx = null; /* { orgName, orgCategory, changes } */
+  var reviewCtx = null; /* { groups: [{orgName, orgCategory, changes}] } */
 
-  /* Convenience wrapper for the Clubs tab — builds the pending changes
-     for a club and routes them through the shared review flow. */
+  /* Convenience wrappers. Single-group flows are the common case. */
   function openReviewModalForClub(clubName) {
     var changes = buildChangesForClub(clubName);
-    openReviewModalFor(clubName, 'club', changes);
+    openReviewModalForGroups([{ orgName: clubName, orgCategory: 'club', changes: changes }]);
+  }
+  function openReviewModalFor(orgName, orgCategory, changes) {
+    openReviewModalForGroups([{ orgName: orgName, orgCategory: orgCategory || 'partner', changes: changes }]);
   }
 
-  function openReviewModalFor(orgName, orgCategory, changes) {
-    if (!changes || !changes.length) {
+  function openReviewModalForGroups(groups) {
+    groups = (groups || []).filter(function (g) { return g.changes && g.changes.length; });
+    if (!groups.length) {
       toast('No changes to send.', 'error');
       return;
     }
-    /* Validate emails on adds / edits before we let the modal open. */
-    for (var i = 0; i < changes.length; i++) {
-      var c = changes[i];
-      if (c.action === 'add' && c.email && !emailValid(c.email)) {
-        toast('Invalid email on add: ' + c.email, 'error'); return;
-      }
-      if (c.action === 'edit' && !emailValid(c.after.email)) {
-        toast('Invalid email on edit: ' + c.after.email, 'error'); return;
+    /* Validate every email upfront. */
+    for (var gi = 0; gi < groups.length; gi++) {
+      var g = groups[gi];
+      for (var i = 0; i < g.changes.length; i++) {
+        var c = g.changes[i];
+        if (c.action === 'add' && c.email && !emailValid(c.email)) {
+          toast('Invalid email: ' + c.email, 'error'); return;
+        }
+        if (c.action === 'edit' && !emailValid(c.after.email)) {
+          toast('Invalid email: ' + c.after.email, 'error'); return;
+        }
       }
     }
-    reviewCtx = { orgName: orgName, orgCategory: orgCategory || 'club', changes: changes };
+    reviewCtx = { groups: groups };
 
-    /* Build the summary list. */
-    var summaryHtml = changes.map(function (c) {
-      if (c.action === 'add') {
-        return '<div class="review-changes__item review-changes__item--add">' + esc(c.name || '(no name)') + ' &lt;' + esc(c.email) + '&gt;</div>';
-      }
-      if (c.action === 'remove') {
-        return '<div class="review-changes__item review-changes__item--remove">' + esc(c.name || '(no name)') + ' &lt;' + esc(c.email) + '&gt;</div>';
-      }
-      if (c.action === 'edit') {
-        return '<div class="review-changes__item review-changes__item--edit">'
-          + esc(c.before.name || '(no name)') + ' &lt;' + esc(c.before.email) + '&gt;'
-          + ' → '
-          + esc(c.after.name || '(no name)') + ' &lt;' + esc(c.after.email) + '&gt;'
-          + '</div>';
-      }
-      return '';
+    /* Build the summary list — section per org when there's more than one. */
+    var summaryHtml = groups.map(function (g) {
+      var rows = g.changes.map(function (c) {
+        if (c.action === 'add') {
+          return '<div class="review-changes__item review-changes__item--add">' + esc(c.name || '(no name)') + ' &lt;' + esc(c.email) + '&gt;</div>';
+        }
+        if (c.action === 'remove') {
+          return '<div class="review-changes__item review-changes__item--remove">' + esc(c.name || '(no name)') + ' &lt;' + esc(c.email) + '&gt;</div>';
+        }
+        if (c.action === 'edit') {
+          return '<div class="review-changes__item review-changes__item--edit">'
+            + esc(c.before.name || '(no name)') + ' &lt;' + esc(c.before.email) + '&gt;'
+            + ' → '
+            + esc(c.after.name || '(no name)') + ' &lt;' + esc(c.after.email) + '&gt;'
+            + '</div>';
+        }
+        return '';
+      }).join('');
+      if (groups.length === 1) return rows;
+      return '<div class="review-changes__group"><div class="review-changes__group-head">' + esc(g.orgName) + '</div>' + rows + '</div>';
     }).join('');
     document.getElementById('reviewChangesList').innerHTML = summaryHtml;
 
-    /* Pre-fill the email draft using the same builder the Requests tab
-       uses. Pass a synthetic request shape so buildEmail behaves the
-       same as if the request already existed. */
-    var fauxReq = {
-      orgName: orgName,
-      orgCategory: reviewCtx.orgCategory,
-      changes: changes,
-      requestedBy: { name: S.session && S.session.name || '' }
-    };
-    var built = buildEmail(fauxReq);
-    document.getElementById('reviewModalTitle').textContent = 'Review & send — ' + orgName;
+    /* Build the email subject + body. Single group → reuse buildEmail
+       for parity with the Requests tab. Multi-group → concatenate. */
+    var subject, body;
+    if (groups.length === 1) {
+      var g0 = groups[0];
+      var built = buildEmail({
+        orgName: g0.orgName,
+        orgCategory: g0.orgCategory,
+        changes: g0.changes,
+        requestedBy: { name: S.session && S.session.name || '' }
+      });
+      subject = built.subject;
+      body = built.body;
+    } else {
+      subject = 'VIP changes across ' + groups.length + ' orgs';
+      var bodyParts = ['Hi, please can the following VIP changes be made:', ''];
+      groups.forEach(function (g) {
+        bodyParts.push('— ' + g.orgName + ' —');
+        var built = buildEmail({
+          orgName: g.orgName,
+          orgCategory: g.orgCategory,
+          changes: g.changes,
+          requestedBy: { name: S.session && S.session.name || '' }
+        });
+        /* Strip the "Hi, please can…" preamble and the "Kind regards" sign-off
+           from the per-org body so the combined email reads cleanly. */
+        var lines = built.body.split('\n');
+        var startIdx = 0, endIdx = lines.length;
+        for (var li = 0; li < lines.length; li++) {
+          if (/^Hi,?\s/i.test(lines[li]) || lines[li].indexOf('please can') !== -1) { startIdx = li + 1; break; }
+        }
+        for (var lj = lines.length - 1; lj >= 0; lj--) {
+          if (/^Kind regards/i.test(lines[lj])) { endIdx = lj; break; }
+        }
+        bodyParts.push(lines.slice(startIdx, endIdx).join('\n').replace(/^\n+/, ''));
+        bodyParts.push('');
+      });
+      bodyParts.push('Kind regards,');
+      bodyParts.push(forenameOf(S.session && S.session.name));
+      body = bodyParts.join('\n');
+    }
+
+    var title = (groups.length === 1)
+      ? 'Review & send — ' + groups[0].orgName
+      : 'Review & send — ' + groups.length + ' orgs';
+    document.getElementById('reviewModalTitle').textContent = title;
     document.getElementById('reviewEmailTo').textContent = DAZN_EMAIL;
-    document.getElementById('reviewEmailSubject').value = built.subject;
-    document.getElementById('reviewEmailBody').value    = built.body;
+    document.getElementById('reviewEmailSubject').value = subject;
+    document.getElementById('reviewEmailBody').value    = body;
     document.getElementById('reviewModalError').textContent = '';
 
     openModal(reviewModalEl);
@@ -2778,47 +2941,66 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     var err = document.getElementById('reviewModalError');
     err.textContent = '';
 
-    var orgName = reviewCtx.orgName;
-    var orgCategory = reviewCtx.orgCategory;
-    var org = S.orgs[orgName] || {};
-    if (org.openRequestId) {
-      err.textContent = 'There is already an open request for ' + orgName + '. Resolve it from the Requests tab first.';
-      return;
+    var groups = reviewCtx.groups;
+
+    /* Block if any org already has an open request — user resolves it
+       from the Requests tab first. */
+    for (var gi = 0; gi < groups.length; gi++) {
+      var checkOrg = S.orgs[groups[gi].orgName] || {};
+      if (checkOrg.openRequestId) {
+        err.textContent = 'There is already an open request for ' + groups[gi].orgName + '. Resolve it from the Requests tab first.';
+        return;
+      }
     }
 
     var subject = document.getElementById('reviewEmailSubject').value || '';
     var body    = document.getElementById('reviewEmailBody').value    || '';
 
-    var reqId = uid();
     var now = Date.now();
-    var req = {
-      orgName: orgName,
-      orgCategory: orgCategory,
-      requestedBy: {
-        uid:   S.session.uid || (firebase.auth().currentUser && firebase.auth().currentUser.uid) || '',
-        name:  S.session.name || '',
-        email: S.session.email || ''
-      },
-      requestedAt: now,
-      changes: reviewCtx.changes,
-      status: 'sent',
-      sentAt: now,
-      sentBy: { uid: S.session.uid || '', name: S.session.name || '' },
-      emailDraft: { to: DAZN_EMAIL, subject: subject, body: body, generatedAt: now }
+    var who = {
+      uid:   S.session.uid || (firebase.auth().currentUser && firebase.auth().currentUser.uid) || '',
+      name:  S.session.name || '',
+      email: S.session.email || ''
     };
+    var sentBy = { uid: who.uid, name: who.name };
+    var emailDraft = { to: DAZN_EMAIL, subject: subject, body: body, generatedAt: now };
 
+    /* One request per group. All share the same emailDraft so we can
+       point them back to the same outgoing email if needed. */
     var updates = {};
-    updates['app-data/media-dazn-vip/requests/' + reqId] = req;
-    updates['app-data/media-dazn-vip/orgs/' + orgName + '/openRequestId'] = reqId;
-    updates['app-data/media-dazn-vip/orgs/' + orgName + '/name']     = orgName;
-    updates['app-data/media-dazn-vip/orgs/' + orgName + '/category'] = orgCategory;
+    var summary = [];
+    groups.forEach(function (g) {
+      var reqId = uid();
+      /* Persist category as the stored RTDB value — for ex-clubs we
+         keep the original 'club' on RTDB and let the read-time helper
+         re-derive 'ex-club' for display. */
+      var storedCat = ((S.orgs[g.orgName] || {}).category) || (g.orgCategory === 'ex-club' ? 'club' : g.orgCategory);
+      updates['app-data/media-dazn-vip/requests/' + reqId] = {
+        orgName: g.orgName,
+        orgCategory: g.orgCategory,
+        requestedBy: who,
+        requestedAt: now,
+        changes: g.changes,
+        status: 'sent',
+        sentAt: now,
+        sentBy: sentBy,
+        emailDraft: emailDraft
+      };
+      updates['app-data/media-dazn-vip/orgs/' + g.orgName + '/openRequestId'] = reqId;
+      updates['app-data/media-dazn-vip/orgs/' + g.orgName + '/name']     = g.orgName;
+      updates['app-data/media-dazn-vip/orgs/' + g.orgName + '/category'] = storedCat;
+      summary.push(g.orgName + ' (' + g.orgCategory + '): ' + g.changes.length);
+    });
 
     db.ref().update(updates).then(function () {
-      try { NL.writeAudit('dazn_vip_sent', orgName + ' (' + orgCategory + '): ' + reviewCtx.changes.length + ' change(s)'); } catch (e) {}
-      if (orgCategory === 'club') {
-        clearPending(orgName);
-        paintClubs();
-      }
+      try { NL.writeAudit('dazn_vip_sent', summary.join('; ')); } catch (e) {}
+      /* Clear per-club pending state for any clubs we just sent. */
+      groups.forEach(function (g) {
+        if (g.orgCategory === 'club') clearPending(g.orgName);
+      });
+      paintClubs();
+      /* Clear the non-clubs Add panel (it's the only multi-group source). */
+      ncAddPanelClear();
       toast('Logged as sent. Mark complete once DAZN confirms.', 'success');
       closeReviewModal();
     }).catch(function (e) {
@@ -2866,7 +3048,12 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     var cat = (document.getElementById('nonClubsCategoryFilter') || {}).value || '';
 
     /* Build a set of clubs that are currently in clubs-meta — anything
-       with category='club' that ISN'T in this set is treated as ex-club. */
+       with category='club' that ISN'T in this set is treated as ex-club.
+       If clubsMeta hasn't loaded yet, treat ALL category='club' orgs as
+       current (skip them) — better than briefly mis-categorising every
+       NL club as "Non-NL Club" on first paint. paintNonClubs is called
+       again once the meta arrives. */
+    var clubsMetaReady = S.clubsMeta.length > 0;
     var clubsInMeta = {};
     S.clubsMeta.forEach(function (cm) { clubsInMeta[cm.name] = true; });
 
@@ -2877,6 +3064,7 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       var storedCat = o.category || '';
       var displayCat;
       if (storedCat === 'club') {
+        if (!clubsMetaReady)               return; /* meta not loaded → defer */
         if (clubsInMeta[o.name || o._key]) return; /* Current NL club → Clubs tab */
         displayCat = 'ex-club';
       } else if (!storedCat) {
@@ -2911,33 +3099,16 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
           || (r.email.toLowerCase().indexOf(q) !== -1);
     });
 
-    /* Sort: always group by org first, then by the user-picked column
-       within each org. Keeps the per-org "+ Add VIP" row attached to
-       its org regardless of secondary sort. */
+    /* Sort by user-picked column. Adds are entered via the top-of-tab
+       panel, so we no longer have synthetic per-org rows to keep
+       grouped — back to a simple flat sort. */
     var col = _nonClubsSort.col, dir = _nonClubsSort.dir;
     filtered.sort(function (a, b) {
-      var orgCmp = String(a.org).localeCompare(String(b.org));
-      if (orgCmp !== 0) return orgCmp;
-      if (col === 'org') return 0;
       var av = a[col], bv = b[col];
       var cmp = (col === 'added') ? (av - bv) : String(av).localeCompare(String(bv));
+      if (cmp === 0 && col !== 'org') cmp = String(a.org).localeCompare(String(b.org));
       return cmp * dir;
     });
-
-    /* Walk the sorted rows and append a synthetic "add another" row
-       after the last VIP of each org. Skip for orgs that only have the
-       isEmpty placeholder (they already carry an Add button). */
-    var displayed = [];
-    for (var i = 0; i < filtered.length; i++) {
-      var r = filtered[i];
-      displayed.push(r);
-      if (r.isEmpty) continue;
-      var next = filtered[i + 1];
-      var lastOfOrg = !next || next.orgKey !== r.orgKey;
-      if (lastOfOrg) {
-        displayed.push({ org: r.org, orgKey: r.orgKey, cat: r.cat, isAddRow: true });
-      }
-    }
 
     if (countEl) {
       var vipCount = filtered.filter(function (r) { return !r.isEmpty; }).length;
@@ -2962,26 +3133,12 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       }
     }
 
-    tbody.innerHTML = displayed.map(function (r) {
+    tbody.innerHTML = filtered.map(function (r) {
       var orgAttr = ' data-org="' + esc(r.orgKey) + '"';
-
-      if (r.isAddRow) {
-        return '<tr style="background:var(--surface);">'
-          + '<td></td>'
-          + '<td></td>'
-          + '<td colspan="3" style="color:var(--text-muted);font-style:italic;font-size:12px;">Add another VIP to ' + esc(r.org) + '</td>'
-          + '<td style="white-space:nowrap;text-align:right;">'
-          + '<button class="btn btn--ghost" data-act="nc-add"' + orgAttr + ' style="padding:6px 12px;font-size:11px;">+ Add VIP</button>'
-          + '</td>'
-          + '</tr>';
-      }
-
       var nameCell, actionsCell;
       if (r.isEmpty) {
-        nameCell = '<td colspan="3" style="color:var(--text-muted);font-style:italic;font-size:13px;">No VIPs added yet</td>';
-        actionsCell = '<td style="white-space:nowrap;text-align:right;">'
-          + '<button class="btn btn--ghost" data-act="nc-add"' + orgAttr + ' style="padding:6px 12px;font-size:11px;">+ Add VIP</button>'
-          + '</td>';
+        nameCell = '<td colspan="3" style="color:var(--text-muted);font-style:italic;font-size:13px;">No VIPs added yet — use the panel above to add.</td>';
+        actionsCell = '<td></td>';
       } else {
         nameCell = '<td>' + (r.name ? esc(r.name) : '<span style="color:var(--text-muted);font-style:italic;">(no name)</span>') + '</td>'
           + '<td style="font-family:monospace;font-size:13px;color:var(--text-muted);">' + esc(r.email) + '</td>'
@@ -3001,8 +3158,92 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     }).join('');
   }
 
-  /* Non-clubs row actions — admin only. Direct writes (no request workflow),
-     same as Clubs tab empty-slot fills already do via openSimpleAdd. */
+  /* ── Non-clubs Add panel ─────────────────────────────────────────────
+     Sits at the top of the Non-clubs tab. Three free-text fields per
+     row (Name, Org, Email). "+ Add another row" grows the list. Save
+     groups by org and routes through openReviewModalForGroups — one
+     email to DAZN covers as many rows as you queue up. */
+
+  function ncAddRowHtml(name, org, email) {
+    return '<div class="nc-add-row">'
+      + '<input class="nc-add-row__input" type="text"  data-field="name"  placeholder="Name"  value="' + esc(name  || '') + '">'
+      + '<input class="nc-add-row__input" type="text"  data-field="org"   placeholder="Org"   value="' + esc(org   || '') + '">'
+      + '<input class="nc-add-row__input nc-add-row__input--email" type="email" data-field="email" placeholder="email@example.com" value="' + esc(email || '') + '">'
+      + '<button type="button" class="nc-add-row__remove" data-act="nc-add-remove-row" title="Remove row">×</button>'
+      + '</div>';
+  }
+  function ncAddPanelEnsureRow() {
+    var rowsEl = document.getElementById('ncAddRows');
+    if (rowsEl && !rowsEl.children.length) rowsEl.insertAdjacentHTML('beforeend', ncAddRowHtml());
+  }
+  function ncAddPanelAddRow() {
+    var rowsEl = document.getElementById('ncAddRows');
+    if (!rowsEl) return;
+    rowsEl.insertAdjacentHTML('beforeend', ncAddRowHtml());
+    /* Focus the new row's name input for fast entry. */
+    var rows = rowsEl.querySelectorAll('.nc-add-row');
+    var last = rows[rows.length - 1];
+    if (last) {
+      var firstInput = last.querySelector('input[data-field="name"]');
+      if (firstInput) firstInput.focus();
+    }
+  }
+  function ncAddPanelClear() {
+    var rowsEl = document.getElementById('ncAddRows');
+    if (!rowsEl) return;
+    rowsEl.innerHTML = '';
+    ncAddPanelEnsureRow();
+  }
+  function ncAddPanelReadRows() {
+    var rowsEl = document.getElementById('ncAddRows');
+    if (!rowsEl) return [];
+    var out = [];
+    Array.prototype.forEach.call(rowsEl.querySelectorAll('.nc-add-row'), function (row) {
+      var name  = trim((row.querySelector('input[data-field="name"]')  || {}).value || '');
+      var org   = trim((row.querySelector('input[data-field="org"]')   || {}).value || '');
+      var email = trim((row.querySelector('input[data-field="email"]') || {}).value || '');
+      if (!name && !org && !email) return; /* skip empty rows */
+      out.push({ name: name, org: org, email: email });
+    });
+    return out;
+  }
+  function onNcAddSave() {
+    var entries = ncAddPanelReadRows();
+    if (!entries.length) { toast('Add at least one row first.', 'error'); return; }
+
+    /* Validate. Org + email required; name is optional (shared inbox). */
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      if (!e.org)   { toast('Row ' + (i + 1) + ': org required.',   'error'); return; }
+      if (!e.email) { toast('Row ' + (i + 1) + ': email required.', 'error'); return; }
+      if (!emailValid(e.email)) { toast('Row ' + (i + 1) + ': invalid email.', 'error'); return; }
+    }
+
+    /* Group by org name. For known orgs, use effectiveCategory; for
+       brand new orgs, default to 'partner' (DAZN treats them the same
+       way regardless of our internal taxonomy). */
+    var byOrg = {};
+    entries.forEach(function (e) {
+      if (!byOrg[e.org]) {
+        var cat = ((S.orgs || {})[e.org]) ? effectiveCategory(e.org) : 'partner';
+        byOrg[e.org] = { orgName: e.org, orgCategory: cat, changes: [] };
+      }
+      byOrg[e.org].changes.push({ action: 'add', name: e.name, email: e.email });
+    });
+
+    var groups = [];
+    Object.keys(byOrg).forEach(function (k) { groups.push(byOrg[k]); });
+    openReviewModalForGroups(groups);
+  }
+  function onNcAddRowsClick(e) {
+    var t = e.target;
+    if (t && t.dataset && t.dataset.act === 'nc-add-remove-row') {
+      var row = t.closest('.nc-add-row');
+      if (row) row.remove();
+      ncAddPanelEnsureRow();
+    }
+  }
+
   function onNonClubAction(e) {
     var t = e.target;
     if (!t || !t.dataset || !t.dataset.act) return;
