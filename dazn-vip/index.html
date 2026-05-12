@@ -577,6 +577,41 @@
     .nc-add-row { grid-template-columns: 1fr; }
   }
 
+  /* ── Non-clubs selection action bar ─────────────────────────────────── */
+  .nc-action-bar {
+    position: sticky;
+    bottom: 16px;
+    margin-top: 16px;
+    background: var(--navy);
+    color: var(--white);
+    border-radius: 999px;
+    padding: 10px 14px 10px 18px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    z-index: 50;
+    width: fit-content;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .nc-action-bar[hidden] { display: none; }
+  .nc-action-bar__count {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--white);
+    margin-right: 4px;
+  }
+
+  /* Per-row select checkbox — sized for touch + aligned with text rows. */
+  #nonClubsTable td input[type="checkbox"],
+  #nonClubsTable th input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: var(--primary);
+  }
+
   /* ── Seed UI ────────────────────────────────────────────────────────── */
   .seed-preview {
     max-height: 360px;
@@ -921,6 +956,7 @@
           <table class="table" id="nonClubsTable">
             <thead>
               <tr>
+                <th style="width:1%;"><input type="checkbox" id="ncSelectAll" title="Select all visible"></th>
                 <th data-sort="org" style="cursor:pointer">Org</th>
                 <th data-sort="cat" style="cursor:pointer">Category</th>
                 <th data-sort="name" style="cursor:pointer">Name</th>
@@ -931,6 +967,13 @@
             </thead>
             <tbody id="nonClubsTbody"></tbody>
           </table>
+        </div>
+
+        <!-- Floating action bar — shows when 1+ rows ticked. -->
+        <div class="nc-action-bar" id="ncActionBar" hidden>
+          <span class="nc-action-bar__count" id="ncActionBarCount">0 selected</span>
+          <button type="button" class="btn btn--ghost" id="ncActionBarClear">Clear</button>
+          <button type="button" class="btn btn--primary" id="ncActionBarRemove">Remove selected</button>
         </div>
       </div>
 
@@ -2165,7 +2208,16 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     if (ncCatEl) ncCatEl.addEventListener('change', paintNonClubs);
     wireSortHeaders('nonClubsTable', _nonClubsSort, paintNonClubs);
     var ncTbody = document.getElementById('nonClubsTbody');
-    if (ncTbody) ncTbody.addEventListener('click', onNonClubAction);
+    if (ncTbody) {
+      ncTbody.addEventListener('click',  onNonClubAction);
+      ncTbody.addEventListener('change', onNcRowSelectChange);
+    }
+    var ncSelectAll  = document.getElementById('ncSelectAll');
+    var ncActionClr  = document.getElementById('ncActionBarClear');
+    var ncActionRem  = document.getElementById('ncActionBarRemove');
+    if (ncSelectAll) ncSelectAll.addEventListener('change', onNcSelectAllToggle);
+    if (ncActionClr) ncActionClr.addEventListener('click',  ncSelectionClear);
+    if (ncActionRem) ncActionRem.addEventListener('click',  onNcBulkRemove);
 
     /* Non-clubs Add panel wiring + seed one empty row. */
     ncAddPanelEnsureRow();
@@ -2351,9 +2403,25 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       lines.push('');
     }
 
+    /* Type label per the category — matches the seed TSV format DAZN
+       are used to (Club / Media / Partner / Governing / Agency).
+       Non-NL clubs surface as their own label so DAZN doesn't confuse
+       them with current members. */
+    var typeLabel = (function (c) {
+      switch (c) {
+        case 'club':      return 'Club';
+        case 'media':     return 'Media';
+        case 'partner':   return 'Partner';
+        case 'governing': return 'Governing';
+        case 'agency':    return 'Agency';
+        case 'ex-club':   return 'Non-NL Club';
+        default:          return 'Other';
+      }
+    })(req.orgCategory || 'club');
+
     lines.push('In total this is:');
     projected.forEach(function (v) {
-      lines.push((v.name || '(no name)') + '\t' + (v.email || '') + '\tClub\t' + req.orgName);
+      lines.push((v.name || '(no name)') + '\t' + (v.email || '') + '\t' + typeLabel + '\t' + req.orgName);
     });
     lines.push('');
     lines.push('Kind regards,');
@@ -2999,8 +3067,9 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
         if (g.orgCategory === 'club') clearPending(g.orgName);
       });
       paintClubs();
-      /* Clear the non-clubs Add panel (it's the only multi-group source). */
+      /* Clear the non-clubs Add panel + bulk selection (the multi-group sources). */
       ncAddPanelClear();
+      ncSelectionClear();
       toast('Logged as sent. Mark complete once DAZN confirms.', 'success');
       closeReviewModal();
     }).catch(function (e) {
@@ -3116,8 +3185,9 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     }
 
     if (!filtered.length) {
-      tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state" style="padding:32px 16px;">' +
+      tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state" style="padding:32px 16px;">' +
         '<div class="empty-state__text">No matches.</div></div></td></tr>';
+      ncSelectionSync();
       return;
     }
 
@@ -3135,27 +3205,34 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
 
     tbody.innerHTML = filtered.map(function (r) {
       var orgAttr = ' data-org="' + esc(r.orgKey) + '"';
-      var nameCell, actionsCell;
+      var nameCell, actionsCell, selCell;
       if (r.isEmpty) {
+        selCell = '<td></td>';
         nameCell = '<td colspan="3" style="color:var(--text-muted);font-style:italic;font-size:13px;">No VIPs added yet — use the panel above to add.</td>';
         actionsCell = '<td></td>';
       } else {
+        var vipAttr = ' data-vip="' + esc(r.vipId) + '"';
+        var selKey = r.orgKey + '|' + r.vipId;
+        var checked = ncSelected[selKey] ? ' checked' : '';
+        selCell = '<td><input type="checkbox" class="nc-row-select" data-sel-key="' + esc(selKey) + '"' + orgAttr + vipAttr + checked + '></td>';
         nameCell = '<td>' + (r.name ? esc(r.name) : '<span style="color:var(--text-muted);font-style:italic;">(no name)</span>') + '</td>'
           + '<td style="font-family:monospace;font-size:13px;color:var(--text-muted);">' + esc(r.email) + '</td>'
           + '<td style="white-space:nowrap;color:var(--text-muted);font-size:13px;">' + (r.added ? fmtDate(r.added) : '—') + '</td>';
-        var vipAttr = ' data-vip="' + esc(r.vipId) + '"';
         actionsCell = '<td style="white-space:nowrap;text-align:right;">'
           + '<button class="btn btn--ghost" data-act="nc-edit"' + orgAttr + vipAttr + ' style="padding:6px 10px;font-size:11px;margin-right:4px;">Edit</button>'
           + '<button class="btn btn--ghost" data-act="nc-remove"' + orgAttr + vipAttr + ' style="padding:6px 10px;font-size:11px;color:var(--primary);">Remove</button>'
           + '</td>';
       }
       return '<tr>'
+        + selCell
         + '<td style="font-weight:700;">' + esc(r.org) + '</td>'
         + '<td><span class="' + pillFor(r.cat) + '">' + esc(nonClubCatLabel(r.cat)) + '</span></td>'
         + nameCell
         + actionsCell
         + '</tr>';
     }).join('');
+
+    ncSelectionSync();
   }
 
   /* ── Non-clubs Add panel ─────────────────────────────────────────────
@@ -3242,6 +3319,115 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       if (row) row.remove();
       ncAddPanelEnsureRow();
     }
+  }
+
+  /* ── Non-clubs multi-select (bulk remove) ───────────────────────────
+     Selection state is a map of "orgKey|vipId" → true. Survives repaint
+     (paintNonClubs walks it to pre-tick rendered checkboxes).
+     "Remove selected" groups by org and routes through the same
+     openReviewModalForGroups flow as the Add panel, so one email
+     covers all selected rows across any number of orgs. */
+  var ncSelected = Object.create(null);
+
+  function ncSelectionCount() { return Object.keys(ncSelected).length; }
+
+  function ncSelectionSync() {
+    var bar = document.getElementById('ncActionBar');
+    var countEl = document.getElementById('ncActionBarCount');
+    var selectAllEl = document.getElementById('ncSelectAll');
+    if (!bar) return;
+    var n = ncSelectionCount();
+    bar.hidden = (n === 0);
+    if (countEl) countEl.textContent = n + ' selected';
+
+    /* Update header checkbox: checked when every visible row is ticked,
+       indeterminate when some are. */
+    if (selectAllEl) {
+      var visible = document.querySelectorAll('#nonClubsTbody .nc-row-select');
+      var visibleN = visible.length;
+      var checkedN = 0;
+      Array.prototype.forEach.call(visible, function (cb) { if (cb.checked) checkedN++; });
+      selectAllEl.checked       = (visibleN > 0 && checkedN === visibleN);
+      selectAllEl.indeterminate = (checkedN > 0 && checkedN < visibleN);
+    }
+  }
+
+  function onNcRowSelectChange(e) {
+    var t = e.target;
+    if (!t || !t.classList || !t.classList.contains('nc-row-select')) return;
+    var key = t.dataset.selKey;
+    if (!key) return;
+    if (t.checked) ncSelected[key] = { orgKey: t.dataset.org, vipId: t.dataset.vip };
+    else delete ncSelected[key];
+    ncSelectionSync();
+  }
+
+  function onNcSelectAllToggle() {
+    var selectAllEl = document.getElementById('ncSelectAll');
+    if (!selectAllEl) return;
+    var on = selectAllEl.checked;
+    var visible = document.querySelectorAll('#nonClubsTbody .nc-row-select');
+    Array.prototype.forEach.call(visible, function (cb) {
+      cb.checked = on;
+      var key = cb.dataset.selKey;
+      if (!key) return;
+      if (on) ncSelected[key] = { orgKey: cb.dataset.org, vipId: cb.dataset.vip };
+      else delete ncSelected[key];
+    });
+    ncSelectionSync();
+  }
+
+  function ncSelectionClear() {
+    ncSelected = Object.create(null);
+    var visible = document.querySelectorAll('#nonClubsTbody .nc-row-select');
+    Array.prototype.forEach.call(visible, function (cb) { cb.checked = false; });
+    ncSelectionSync();
+  }
+
+  function onNcBulkRemove() {
+    var keys = Object.keys(ncSelected);
+    if (!keys.length) return;
+
+    /* Group selected VIPs by org. Build remove-change per VIP. */
+    var byOrg = {};
+    var skipped = [];
+    keys.forEach(function (k) {
+      var info = ncSelected[k];
+      var org = (S.orgs || {})[info.orgKey];
+      var vip = org && org.vips && org.vips[info.vipId];
+      if (!vip) { skipped.push(k); return; }
+      if (!byOrg[info.orgKey]) {
+        byOrg[info.orgKey] = {
+          orgName: info.orgKey,
+          orgCategory: effectiveCategory(info.orgKey),
+          changes: []
+        };
+      }
+      byOrg[info.orgKey].changes.push({
+        action: 'remove',
+        vipId: info.vipId,
+        name: vip.name || '',
+        email: vip.email || ''
+      });
+    });
+
+    var groups = [];
+    Object.keys(byOrg).forEach(function (k) { groups.push(byOrg[k]); });
+    if (!groups.length) {
+      toast('No VIPs found for the current selection.', 'error');
+      ncSelectionClear();
+      return;
+    }
+    var totalN = 0; groups.forEach(function (g) { totalN += g.changes.length; });
+
+    confirmDialog(
+      'Remove ' + totalN + ' VIP' + (totalN === 1 ? '' : 's') + ' across ' + groups.length + ' org' + (groups.length === 1 ? '' : 's') + '?',
+      'You’ll get one combined draft email to DAZN. Nothing is removed locally until DAZN confirms each org.',
+      'Continue',
+      function () {
+        openReviewModalForGroups(groups);
+      }
+    );
   }
 
   function onNonClubAction(e) {
