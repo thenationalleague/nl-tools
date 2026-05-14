@@ -55,35 +55,46 @@
   section('Cookies visible to JS (' + cookieNames.length + ')', cookieNames.join('\n') || '(none)');
 
   // ---------- 3. SSO cookies of interest ----------
-  var interesting = ['_sa_sso_upid', '_gc_sa_sso_access', '_gc_sa_sso_refresh'];
+  var interesting = ['_sa_sso_upid', '_gc_sa_sso_access', '_gc_sa_sso_refresh', '_gc_sa_sso_id', '_sa_sso_id', '_sa_sso_access'];
   var ssoLines = interesting.map(function (n) {
     var v = cookies[n];
     if (!v) return n + ': (not visible — either absent or HttpOnly)';
     var preview = v.length > 40 ? v.slice(0, 20) + '…' + v.slice(-10) : v;
     return n + ': ' + preview + '  (length ' + v.length + ')';
   });
+  // Also flag any other cookie that smells like SSO/auth
+  var sniff = cookieNames.filter(function (n) {
+    return /sso|token|auth|cognito|id_?token|access/i.test(n) && interesting.indexOf(n) === -1;
+  });
+  if (sniff.length) ssoLines.push('', 'Other auth-shaped cookies seen: ' + sniff.join(', '));
   section('SSO cookies', ssoLines.join('\n'));
 
-  // ---------- 4. Decode access token JWT (no signature verification — debug only) ----------
+  // ---------- 4. Decode any visible JWT (no signature verification — debug only) ----------
   function b64urlDecode(s) {
     s = s.replace(/-/g, '+').replace(/_/g, '/');
     while (s.length % 4) s += '=';
     try { return decodeURIComponent(escape(atob(s))); } catch (e) { return null; }
   }
-  var access = cookies['_gc_sa_sso_access'];
-  if (access && access.split('.').length === 3) {
-    var parts = access.split('.');
+  function tryDecodeJwt(label, val) {
+    if (!val) {
+      section(label, '(not visible to JS)');
+      return;
+    }
+    var parts = val.split('.');
+    if (parts.length !== 3) {
+      section(label, '(present but not a JWT shape)');
+      return;
+    }
     var header = b64urlDecode(parts[0]);
     var payload = b64urlDecode(parts[1]);
-    var prettyHeader = header;
-    var prettyPayload = payload;
-    try { prettyHeader = JSON.stringify(JSON.parse(header), null, 2); } catch (e) {}
-    try { prettyPayload = JSON.stringify(JSON.parse(payload), null, 2); } catch (e) {}
-    section('Access token — header (decoded, unverified)', prettyHeader || '(decode failed)');
-    section('Access token — payload (decoded, unverified)', prettyPayload || '(decode failed)');
-  } else {
-    section('Access token JWT', '(not a JWT or not visible to JS)');
+    try { header = JSON.stringify(JSON.parse(header), null, 2); } catch (e) {}
+    try { payload = JSON.stringify(JSON.parse(payload), null, 2); } catch (e) {}
+    section(label + ' — header', header || '(decode failed)');
+    section(label + ' — payload', payload || '(decode failed)');
   }
+  tryDecodeJwt('Access token (_gc_sa_sso_access)', cookies['_gc_sa_sso_access']);
+  tryDecodeJwt('ID token (_gc_sa_sso_id)',         cookies['_gc_sa_sso_id']);
+  tryDecodeJwt('ID token (_sa_sso_id)',            cookies['_sa_sso_id']);
 
   // ---------- 5. Common JS globals that sometimes hold user info ----------
   var globals = ['user', 'currentUser', 'USER', 'profile', '__INITIAL_STATE__', '__NEXT_DATA__', '__NUXT__', 'dataLayer'];
