@@ -1,48 +1,271 @@
 <!-- ============================================================
-     SCORE PREDICTOR — v1
-     - Pulls real fixtures from NLS public API
-     - Decodes JWT from _gc_sa_sso_access for user identity
-     - Sim-time toggle: 12:00 / 16:00 / 18:00 BST on 2025-08-09
-     - Predictions stored in localStorage keyed by JWT `id`
-     - (v2 will swap localStorage for RTDB on nl-tools)
+     SCORE PREDICTOR — v2 (RTDB-backed, branded)
+     - JWT identity from _gc_sa_sso_access
+     - One-time team registration (locked for season)
+     - RTDB: predictor/users/{jwtId} + predictor/predictions/{jwtId}/{matchday}/{matchId}
+     - Submit-all (12/12 + joker), per-row KO lock, edit-before-KO
+     - Auto-double on own team; one joker per matchday (×2)
+     - Demo mode: starts at 2:59:50 BST and ticks (watch matches lock)
+     - League table: forename + surname initial + crest + total
+     - Scoped under #nl-predictor; system fonts; no external <script src>
      ============================================================ -->
 
-<div id="sp-root" style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:920px;margin:24px auto;color:#1f2328;">
-  <div id="sp-banner" style="background:#fff3cd;border:1px solid #ffe69c;color:#7a5d00;padding:10px 14px;border-radius:8px;margin-bottom:16px;font-size:13px;">
-    Loading predictor…
+<div id="nl-predictor">
+  <div class="np-banner" id="np-banner">Loading predictor…</div>
+  <div class="np-screen" id="np-register" hidden></div>
+  <div class="np-screen" id="np-main" hidden>
+    <div id="np-greet"></div>
+    <div id="np-sim"></div>
+    <div id="np-fixtures"></div>
+    <div id="np-submitbar"></div>
+    <div id="np-table"></div>
   </div>
-  <div id="sp-greet" style="display:none;margin-bottom:12px;"></div>
-  <div id="sp-simbar" style="display:none;margin-bottom:16px;"></div>
-  <div id="sp-fixtures"></div>
 </div>
+
+<style>
+  #nl-predictor {
+    --nl-red:#9e0000; --nl-red-hover:#7e0000; --nl-red-active:#6e0000;
+    --bg-page:#f5f5f5; --bg-card:#ffffff; --bg-dark:#1a1a2e;
+    --text-primary:#1a1a1a; --text-secondary:#666666; --text-on-dark:#ffffff; --text-on-dark-muted:#b0b0b0;
+    --border:#e0e0e0; --border-light:#f0f0f0;
+    --win:#2e7d32; --draw:#f9a825; --loss:#c62828; --live:#e53935;
+    --btn-disabled-bg:#cccccc; --btn-disabled-text:#888888;
+    --focus-ring:rgba(158,0,0,.35);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    color:var(--text-primary);
+    font-size:15px; line-height:1.5;
+    max-width:680px; margin:24px auto; padding:0 12px;
+    box-sizing:border-box;
+  }
+  #nl-predictor *, #nl-predictor *::before, #nl-predictor *::after { box-sizing:border-box; }
+
+  #nl-predictor .np-banner {
+    background:#fff8e6; border:1px solid #f0c674; color:#5b4900;
+    padding:10px 14px; border-radius:6px; font-size:13px; margin-bottom:16px;
+  }
+  #nl-predictor .np-banner.err   { background:#fde8e8; border-color:#f5a3a3; color:#8a1f1f; }
+  #nl-predictor .np-banner.ok    { background:#e6f4ea; border-color:#a4cfae; color:#1d5b2a; }
+  #nl-predictor .np-banner.hide  { display:none; }
+
+  #nl-predictor h2 { font-size:22px; font-weight:700; margin:0 0 4px; line-height:1.3; }
+  #nl-predictor h3 { font-size:18px; font-weight:600; margin:0 0 8px; line-height:1.3; }
+  #nl-predictor .np-kicker {
+    font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:1.5px;
+    color:var(--text-secondary);
+  }
+  #nl-predictor .np-muted { color:var(--text-secondary); font-size:13px; }
+
+  /* Greeting */
+  #nl-predictor .np-greet {
+    background:var(--bg-card); border:1px solid var(--border); border-radius:8px;
+    padding:14px 16px; margin-bottom:12px; display:flex; align-items:center; gap:12px;
+    box-shadow:0 1px 4px rgba(0,0,0,.06);
+  }
+  #nl-predictor .np-greet img { width:40px; height:40px; flex:none; border-radius:4px; object-fit:contain; }
+  #nl-predictor .np-greet .np-name { font-weight:700; font-size:16px; }
+
+  /* Sim bar */
+  #nl-predictor .np-sim {
+    display:flex; gap:6px; flex-wrap:wrap; align-items:center;
+    margin-bottom:14px;
+  }
+  #nl-predictor .np-sim-label { font-size:12px; color:var(--text-secondary); margin-right:4px; }
+  #nl-predictor .np-sim button {
+    font-family:inherit; font-size:12px; font-weight:600;
+    padding:6px 10px; border-radius:999px; cursor:pointer;
+    background:#fff; color:var(--text-primary); border:1px solid var(--border);
+    transition:all .15s ease;
+  }
+  #nl-predictor .np-sim button:hover { border-color:var(--nl-red); color:var(--nl-red); }
+  #nl-predictor .np-sim button.active {
+    background:var(--nl-red); color:#fff; border-color:var(--nl-red);
+  }
+  #nl-predictor .np-sim button.demo {
+    background:#1a1a2e; color:#fff; border-color:#1a1a2e;
+  }
+  #nl-predictor .np-sim button.demo.active { background:var(--nl-red); border-color:var(--nl-red); }
+  #nl-predictor .np-sim .np-clock {
+    font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px;
+    color:var(--text-secondary); margin-left:auto;
+  }
+
+  /* Match-day header */
+  #nl-predictor .np-matchday {
+    margin:6px 0 10px;
+  }
+  #nl-predictor .np-matchday h2 { margin-top:2px; }
+
+  /* Fixture row */
+  #nl-predictor .np-row {
+    background:var(--bg-dark); color:#fff; border-radius:8px;
+    padding:10px 12px; margin-bottom:8px;
+    display:grid; grid-template-rows:auto auto;
+    row-gap:6px;
+  }
+  #nl-predictor .np-row .np-status {
+    display:flex; align-items:center; gap:8px; font-size:11px; font-weight:600;
+    text-transform:uppercase; letter-spacing:1px; color:var(--text-on-dark-muted);
+  }
+  #nl-predictor .np-row .np-status .np-pill {
+    display:inline-block; padding:1px 8px; border-radius:999px; font-size:10px;
+  }
+  #nl-predictor .np-row .np-status .np-pill.pre  { background:#0969da; color:#fff; }
+  #nl-predictor .np-row .np-status .np-pill.live { background:var(--live); color:#fff; }
+  #nl-predictor .np-row .np-status .np-pill.post { background:var(--win); color:#fff; }
+  #nl-predictor .np-row .np-status .np-pill.own  { background:#f1c40f; color:#1a1a1a; }
+  #nl-predictor .np-row .np-status .np-pill.joke { background:#9b59b6; color:#fff; }
+  #nl-predictor .np-row .np-status .np-points {
+    margin-left:auto; font-size:12px; font-weight:700; color:#fff;
+  }
+
+  #nl-predictor .np-teams {
+    display:grid; grid-template-columns:1fr auto 1fr; gap:8px; align-items:center;
+  }
+  #nl-predictor .np-team {
+    display:flex; align-items:center; gap:8px; font-size:14px; font-weight:600;
+  }
+  #nl-predictor .np-team.away { flex-direction:row-reverse; text-align:right; }
+  #nl-predictor .np-team img { width:28px; height:28px; flex:none; border-radius:4px; background:#fff; padding:1px; object-fit:contain; }
+  #nl-predictor .np-team .np-tname { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #nl-predictor .np-score-cell {
+    display:flex; align-items:center; gap:6px; font-size:20px; font-weight:700;
+    min-width:72px; justify-content:center;
+  }
+  #nl-predictor .np-score-cell input {
+    width:42px; height:34px; border-radius:5px; border:1px solid #d0d0d0;
+    text-align:center; font-size:18px; font-weight:700; font-family:inherit;
+    background:#fff; color:var(--text-primary);
+  }
+  #nl-predictor .np-score-cell input:focus { outline:none; border-color:var(--nl-red); box-shadow:0 0 0 3px var(--focus-ring); }
+  #nl-predictor .np-score-cell input:disabled { background:#f0f0f0; color:#888; }
+  #nl-predictor .np-score-cell .np-fs { display:inline-block; min-width:18px; text-align:center; }
+
+  #nl-predictor .np-rowfoot {
+    display:flex; align-items:center; gap:8px;
+    font-size:12px; color:var(--text-on-dark-muted);
+  }
+  #nl-predictor .np-rowfoot button.np-joker, #nl-predictor .np-rowfoot button.np-edit {
+    font-family:inherit; font-size:11px; font-weight:600;
+    padding:4px 10px; border-radius:999px; cursor:pointer; border:1px solid #4a4a6a;
+    background:transparent; color:#fff;
+    transition:all .15s ease;
+  }
+  #nl-predictor .np-rowfoot button.np-joker:hover { border-color:#9b59b6; color:#d6a6e6; }
+  #nl-predictor .np-rowfoot button.np-joker.on { background:#9b59b6; border-color:#9b59b6; color:#fff; }
+  #nl-predictor .np-rowfoot button.np-joker:disabled { opacity:.4; cursor:not-allowed; }
+  #nl-predictor .np-rowfoot button.np-edit:hover { background:#fff; color:#1a1a1a; }
+  #nl-predictor .np-rowfoot .np-yourpred { margin-left:auto; }
+
+  /* Submit bar */
+  #nl-predictor .np-submitbar {
+    display:flex; align-items:center; gap:12px; padding:12px 14px; margin:12px 0 18px;
+    background:var(--bg-card); border:1px solid var(--border); border-radius:8px;
+    box-shadow:0 1px 4px rgba(0,0,0,.06);
+  }
+  #nl-predictor .np-submitbar .np-count { font-size:13px; color:var(--text-secondary); }
+  #nl-predictor .np-btn {
+    font-family:inherit; font-size:15px; font-weight:600;
+    padding:10px 24px; border:none; border-radius:6px; cursor:pointer;
+    background:var(--nl-red); color:#fff; transition:background .15s ease;
+  }
+  #nl-predictor .np-btn:hover  { background:var(--nl-red-hover); }
+  #nl-predictor .np-btn:active { background:var(--nl-red-active); }
+  #nl-predictor .np-btn:focus-visible { outline:3px solid var(--focus-ring); outline-offset:2px; }
+  #nl-predictor .np-btn:disabled { background:var(--btn-disabled-bg); color:var(--btn-disabled-text); cursor:not-allowed; }
+  #nl-predictor .np-btn.outline {
+    background:transparent; color:var(--nl-red); border:2px solid var(--nl-red); padding:8px 22px;
+  }
+  #nl-predictor .np-btn.outline:hover { background:var(--nl-red); color:#fff; }
+
+  /* Registration screen */
+  #nl-predictor .np-register-card {
+    background:var(--bg-card); border:1px solid var(--border); border-radius:8px;
+    padding:20px 22px; box-shadow:0 1px 4px rgba(0,0,0,.06);
+  }
+  #nl-predictor .np-register-card h2 { margin-bottom:8px; }
+  #nl-predictor .np-register-card label { display:block; font-size:13px; font-weight:600; margin:14px 0 6px; }
+  #nl-predictor .np-register-card select {
+    width:100%; padding:10px 12px; font-size:15px; font-family:inherit;
+    border:1px solid #d0d0d0; border-radius:6px; background:#fff;
+  }
+  #nl-predictor .np-register-card select:focus { outline:none; border-color:var(--nl-red); box-shadow:0 0 0 3px var(--focus-ring); }
+  #nl-predictor .np-register-card .np-lockwarn {
+    margin:14px 0; padding:10px 12px; background:#fff8e6; border:1px solid #f0c674;
+    color:#5b4900; font-size:13px; border-radius:6px;
+  }
+
+  /* League table */
+  #nl-predictor .np-table {
+    background:var(--bg-card); border:1px solid var(--border); border-radius:8px;
+    padding:14px 0; margin-bottom:24px; box-shadow:0 1px 4px rgba(0,0,0,.06);
+  }
+  #nl-predictor .np-table .np-tablehead {
+    padding:0 16px 10px; border-bottom:1px solid var(--border-light);
+  }
+  #nl-predictor .np-table .np-trow {
+    display:grid; grid-template-columns:32px 32px 1fr auto;
+    align-items:center; gap:10px; padding:8px 16px;
+    border-bottom:1px solid var(--border-light); font-size:14px;
+  }
+  #nl-predictor .np-table .np-trow:last-child { border-bottom:none; }
+  #nl-predictor .np-table .np-trow.you { background:#fff8e6; }
+  #nl-predictor .np-table .np-trow .np-rank { font-weight:700; color:var(--text-secondary); }
+  #nl-predictor .np-table .np-trow img { width:24px; height:24px; border-radius:3px; background:#fff; object-fit:contain; }
+  #nl-predictor .np-table .np-trow .np-pts { font-weight:700; font-size:15px; }
+
+  @media (max-width:520px) {
+    #nl-predictor .np-team img { width:24px; height:24px; }
+    #nl-predictor .np-team { font-size:13px; }
+    #nl-predictor .np-score-cell input { width:38px; }
+  }
+</style>
 
 <script>
 (function () {
   // ---------- config ----------
-  var COMP_ID   = 89;            // National Division
-  var SEASON_ID = 2025;          // 2025/26
-  var MATCH_DAY = '2025-08-09';  // opening day
-  var API_BASE  = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
-  var MATCH_DURATION_MIN = 105;  // 90 + ~15 (HT + stoppage), used for in-play window
+  var FIREBASE_CONFIG = {
+    apiKey:            'AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU',
+    authDomain:        'nl-tools.firebaseapp.com',
+    databaseURL:       'https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app',
+    projectId:         'nl-tools',
+    storageBucket:     'nl-tools.firebasestorage.app',
+    messagingSenderId: '801354670005',
+    appId:             '1:801354670005:web:05d8ebad3e7e63610d03fc'
+  };
+  var FB_SDK_URL = 'https://www.gstatic.com/firebasejs/10.7.1/';
+  var FB_SDK = ['firebase-app-compat.js','firebase-auth-compat.js','firebase-database-compat.js'];
+
+  var COMP_ID    = 89;
+  var SEASON_ID  = 2025;
+  var MATCH_DAY  = '2025-08-09';
+  var MATCHDAY_KEY = '2025-08-09';
+  var API_BASE   = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
+  var MAX_PAGES  = 10;
+  var IN_PLAY_MIN = 105;
   var SIM_OPTIONS = [
-    { label: '12:00 BST — pre-KO',  utc: '2025-08-09T11:00:00Z' },
-    { label: '16:00 BST — in-play', utc: '2025-08-09T15:00:00Z' },
-    { label: '18:00 BST — post-FT', utc: '2025-08-09T17:00:00Z' }
+    { id:'pre',  label:'12:00 BST',    utc:'2025-08-09T11:00:00Z' },
+    { id:'live', label:'16:00 BST',    utc:'2025-08-09T15:00:00Z' },
+    { id:'post', label:'18:00 BST',    utc:'2025-08-09T17:00:00Z' },
+    { id:'demo', label:'🎬 2:59:50',   utc:'2025-08-09T13:59:50Z' }
   ];
 
-  // ---------- dom refs ----------
-  var banner   = document.getElementById('sp-banner');
-  var greet    = document.getElementById('sp-greet');
-  var simbar   = document.getElementById('sp-simbar');
-  var fixtures = document.getElementById('sp-fixtures');
+  // ---------- DOM refs ----------
+  var banner   = document.getElementById('np-banner');
+  var register = document.getElementById('np-register');
+  var main     = document.getElementById('np-main');
+  var greet    = document.getElementById('np-greet');
+  var simbar   = document.getElementById('np-sim');
+  var fixtures = document.getElementById('np-fixtures');
+  var submitb  = document.getElementById('np-submitbar');
+  var tableEl  = document.getElementById('np-table');
 
-  // ---------- 1. identity ----------
+  // ---------- helpers ----------
+  function $h(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+  });}
   function readCookie(name) {
-    var pairs = (document.cookie || '').split('; ');
-    for (var i = 0; i < pairs.length; i++) {
-      var kv = pairs[i];
-      if (kv.indexOf(name + '=') === 0) return kv.slice(name.length + 1);
-    }
+    var p = (document.cookie || '').split('; ');
+    for (var i = 0; i < p.length; i++) if (p[i].indexOf(name + '=') === 0) return p[i].slice(name.length + 1);
     return null;
   }
   function decodeJwtPayload(jwt) {
@@ -55,317 +278,605 @@
       return JSON.parse(decodeURIComponent(escape(atob(s))));
     } catch (e) { return null; }
   }
-
-  var jwt = readCookie('_gc_sa_sso_access');
-  var claims = decodeJwtPayload(jwt);
-  if (!claims || !claims.id) {
-    banner.style.background = '#fde8e8';
-    banner.style.borderColor = '#f5a3a3';
-    banner.style.color = '#8a1f1f';
-    banner.textContent = 'You need to be signed in to use the Score Predictor. (Could not read your SSO token.)';
-    return;
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = src; s.async = false;
+      s.onload = function () { resolve(); };
+      s.onerror = function () { reject(new Error('Failed to load ' + src)); };
+      document.head.appendChild(s);
+    });
   }
-  var USER = {
-    id:        claims.id,
-    forename:  claims.forename || 'there',
-    surname:   claims.surname || '',
-    email:     claims.email,
-    favTeam:   claims.favourite_team || null
-  };
-
-  // ---------- 2. simulated clock ----------
-  var simIndex = 0;
-  function simNow() { return new Date(SIM_OPTIONS[simIndex].utc); }
-
-  // ---------- 3. predictions store (localStorage for v1) ----------
-  var STORAGE_KEY = 'sp.predictions.' + USER.id;
-  function loadPreds() {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }
-    catch (e) { return {}; }
+  function loadFirebase() {
+    return FB_SDK.reduce(function (p, name) {
+      return p.then(function () { return loadScript(FB_SDK_URL + name); });
+    }, Promise.resolve());
   }
-  function savePred(matchId, home, away) {
-    var p = loadPreds();
-    p[matchId] = { home: home, away: away, savedAt: Date.now() };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
-  }
-
-  // ---------- 4. helpers ----------
-  function normaliseUtc(str) {
-    if (!str) return null;
-    var iso = str.indexOf('T') >= 0 ? str : str.replace(' ', 'T') + 'Z';
+  function normaliseUtc(s) {
+    if (!s) return null;
+    var iso = s.indexOf('T') >= 0 ? s : s.replace(' ', 'T') + 'Z';
     return new Date(iso);
   }
-  function fmtKO(d) {
+  function fmtBST(d) {
     if (!d) return '';
-    return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' }) + ' BST';
+    return d.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', timeZone:'Europe/London' }) + ' BST';
   }
-  function stateFor(match, now) {
-    var ko = normaliseUtc(match.attributes.kickOffDateUTC);
-    if (!ko) return 'unknown';
-    var diff = (now - ko) / 60000;
-    if (diff < 0) return 'pre';
-    if (diff < MATCH_DURATION_MIN) return 'live';
-    return 'post';
+  function showBanner(msg, cls) {
+    banner.className = 'np-banner' + (cls ? ' ' + cls : '');
+    banner.textContent = msg;
+    banner.hidden = false;
   }
-  function scoreOutcome(h, a) {
-    if (h > a) return 'H';
-    if (h < a) return 'A';
-    return 'D';
-  }
-  function pointsFor(predH, predA, realH, realA) {
-    if (predH == null || predA == null) return null;
-    if (predH === realH && predA === realA) return 3;
-    if (scoreOutcome(predH, predA) === scoreOutcome(realH, realA)) return 1;
-    return 0;
-  }
-  function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
-    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
-  }); }
+  function hideBanner() { banner.hidden = true; }
+  function setBannerOK(msg) { showBanner(msg, 'ok'); setTimeout(function(){ if (banner.textContent === msg) hideBanner(); }, 3000); }
 
-  // ---------- 5. render greeting + sim bar ----------
-  function renderGreet() {
-    greet.style.display = 'block';
-    greet.innerHTML =
-      '<h2 style="margin:0 0 4px;font-size:22px;">Welcome back, ' + escapeHtml(USER.forename) + ' 👋</h2>' +
-      (USER.favTeam
-        ? '<div style="color:#57606a;font-size:14px;">Predicting opening day — your team: <b>' + escapeHtml(USER.favTeam) + '</b></div>'
-        : '<div style="color:#57606a;font-size:14px;">Predicting opening day fixtures</div>');
-  }
-  function renderSimBar() {
-    simbar.style.display = 'flex';
-    simbar.style.flexWrap = 'wrap';
-    simbar.style.gap = '8px';
-    simbar.style.alignItems = 'center';
-    simbar.innerHTML =
-      '<span style="font-size:13px;color:#57606a;margin-right:4px;">Simulated time:</span>' +
-      SIM_OPTIONS.map(function (o, i) {
-        var active = i === simIndex;
-        return '<button data-sim="' + i + '" style="' +
-          'padding:6px 12px;border-radius:999px;font-size:13px;cursor:pointer;border:1px solid ' +
-          (active ? '#9e2a2b' : '#d0d7de') + ';background:' + (active ? '#9e2a2b' : '#fff') + ';color:' +
-          (active ? '#fff' : '#1f2328') + ';">' + escapeHtml(o.label) + '</button>';
-      }).join('');
-    Array.prototype.forEach.call(simbar.querySelectorAll('button'), function (b) {
-      b.addEventListener('click', function () {
-        simIndex = Number(b.getAttribute('data-sim'));
-        renderSimBar();
-        renderFixtures();
-      });
-    });
-  }
+  // ---------- state ----------
+  var state = {
+    user: null,           // { id, forename, surname, surnameInitial, email, favTeamName }
+    fbAuthed: false,
+    matches: [],          // raw match objects
+    registration: null,   // { teamId, teamName, crestUrl, forename, surnameInitial, ... } | null
+    predictions: {},      // { matchId: { home, away, joker, submittedAt } } — current user, this matchday
+    draft: {},            // { matchId: { home, away } } — local pre-submit
+    draftJoker: null,     // matchId | null
+    allUsers: {},         // { jwtId: registration }
+    allPreds: {},         // { jwtId: { matchId: prediction } } — for this matchday only
+    sim: { index: 0, demoTick: null, demoStartReal: 0, demoStartUtc: 0, now: null }
+  };
 
-  // ---------- 6. fixture rendering ----------
-  var MATCHES = [];
-
-  function teamRow(team, score, side) {
-    var crest = team.crest || team.crestURL || '';
-    return '' +
-      '<div style="display:flex;align-items:center;gap:10px;' + (side === 'away' ? 'flex-direction:row-reverse;text-align:right;' : '') + '">' +
-        (crest ? '<img src="' + escapeHtml(crest) + '" alt="" style="width:32px;height:32px;object-fit:contain;flex:none;">' : '<div style="width:32px;height:32px;flex:none;"></div>') +
-        '<div style="font-weight:600;font-size:15px;flex:1;">' + escapeHtml(team.name) + '</div>' +
-        (score != null ? '<div style="font-size:22px;font-weight:700;min-width:24px;text-align:center;">' + score + '</div>' : '') +
-      '</div>';
-  }
-
-  function predictionInput(matchId, side, value) {
-    return '<input type="number" min="0" max="20" inputmode="numeric" data-match="' + matchId + '" data-side="' + side + '" ' +
-      'value="' + (value != null ? value : '') + '" ' +
-      'style="width:48px;height:40px;font-size:18px;text-align:center;border:1px solid #d0d7de;border-radius:6px;">';
-  }
-
-  function renderMatch(m) {
-    var attrs = m.attributes;
-    var ko = normaliseUtc(attrs.kickOffDateUTC);
-    var now = simNow();
-    var state = stateFor(m, now);
-    var preds = loadPreds();
-    var p = preds[m.id] || {};
-
-    var stateLabel, stateColor;
-    if (state === 'pre')   { stateLabel = 'Kicks off ' + fmtKO(ko); stateColor = '#0969da'; }
-    if (state === 'live')  { stateLabel = 'IN PLAY';                stateColor = '#bf3989'; }
-    if (state === 'post')  { stateLabel = 'FULL TIME';              stateColor = '#1a7f37'; }
-
-    var realH = attrs.homeTeam.score, realA = attrs.awayTeam.score;
-    var showHome = (state === 'pre') ? null : realH;
-    var showAway = (state === 'pre') ? null : realA;
-
-    var body = '';
-    if (state === 'pre') {
-      body =
-        '<div style="display:flex;gap:8px;align-items:center;justify-content:center;margin-top:12px;">' +
-          predictionInput(m.id, 'home', p.home) +
-          '<span style="color:#57606a;">vs</span>' +
-          predictionInput(m.id, 'away', p.away) +
-        '</div>' +
-        '<div style="text-align:center;margin-top:8px;font-size:12px;color:#57606a;">Your prediction (auto-saves)</div>';
-    } else if (state === 'live') {
-      body = '<div style="text-align:center;margin-top:12px;font-size:13px;color:#57606a;">' +
-        'Predictions locked. ' +
-        (p.home != null ? 'You predicted <b>' + p.home + '–' + p.away + '</b>.' : 'You didn\'t predict this one.') +
-        '</div>';
-    } else if (state === 'post') {
-      var pts = pointsFor(p.home, p.away, realH, realA);
-      var ptsLabel;
-      if (pts === null) ptsLabel = 'No prediction made';
-      else if (pts === 3) ptsLabel = '🎯 Exact score! <b>+3 pts</b>';
-      else if (pts === 1) ptsLabel = '✔ Right result. <b>+1 pt</b>';
-      else                ptsLabel = '✗ Wrong result. <b>0 pts</b>';
-      body = '<div style="text-align:center;margin-top:12px;font-size:13px;color:#57606a;">' +
-        (p.home != null ? 'You predicted <b>' + p.home + '–' + p.away + '</b> · ' : '') + ptsLabel +
-        '</div>';
+  // ---------- sim clock ----------
+  function simNow() {
+    var s = state.sim;
+    if (s.demoTick) {
+      var elapsedMs = Date.now() - s.demoStartReal;
+      return new Date(s.demoStartUtc + elapsedMs);
     }
-
-    return '' +
-      '<div style="background:#fff;border:1px solid #d0d7de;border-radius:10px;padding:14px 16px;margin-bottom:12px;">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
-          '<span style="font-size:12px;font-weight:600;color:' + stateColor + ';text-transform:uppercase;letter-spacing:.5px;">' + stateLabel + '</span>' +
-          '<span style="font-size:12px;color:#57606a;">' + escapeHtml(attrs.kickOffDateUTC || '') + ' UTC</span>' +
-        '</div>' +
-        '<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:14px;align-items:center;">' +
-          teamRow(attrs.homeTeam, showHome, 'home') +
-          '<div style="color:#57606a;font-size:13px;">' + (state === 'pre' ? 'v' : '–') + '</div>' +
-          teamRow(attrs.awayTeam, showAway, 'away') +
-        '</div>' +
-        body +
-      '</div>';
+    return new Date(SIM_OPTIONS[s.index].utc);
+  }
+  function stopDemo() {
+    if (state.sim.demoTick) { clearInterval(state.sim.demoTick); state.sim.demoTick = null; }
+  }
+  function startDemo() {
+    stopDemo();
+    state.sim.demoStartReal = Date.now();
+    state.sim.demoStartUtc  = new Date(SIM_OPTIONS[3].utc).getTime();
+    state.sim.demoTick = setInterval(function () {
+      renderClock();
+      renderFixtures();
+      renderSubmitbar();
+      renderTable();
+    }, 1000);
+  }
+  function setSim(i) {
+    stopDemo();
+    state.sim.index = i;
+    if (SIM_OPTIONS[i].id === 'demo') startDemo();
+    renderSimBar();
+    renderFixtures();
+    renderSubmitbar();
+    renderTable();
   }
 
-  function renderFixtures() {
-    if (!MATCHES.length) {
-      var diag = window.__SP_DIAG__ || {};
-      var dateCounts = diag.dateCounts || {};
-      var topDates = Object.keys(dateCounts).sort(function (a, b) { return dateCounts[b] - dateCounts[a]; }).slice(0, 12);
-      var sample = diag.sample || {};
-      fixtures.innerHTML =
-        '<div style="padding:18px;background:#fff8e6;border:1px solid #f0c674;border-radius:8px;font-size:13px;color:#5b4900;">' +
-          '<div style="font-weight:600;margin-bottom:8px;">No matches found for ' + MATCH_DAY + '. Diagnostics:</div>' +
-          '<pre style="margin:0;white-space:pre-wrap;word-break:break-all;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;">' +
-          'Request URL:   ' + escapeHtml(diag.url || '(none)') + '\n' +
-          'HTTP status:   ' + escapeHtml(String(diag.status || '?')) + '\n' +
-          'Top-level keys: ' + escapeHtml((diag.topKeys || []).join(', ')) + '\n' +
-          'data[] length: ' + escapeHtml(String(diag.dataLen == null ? '?' : diag.dataLen)) + '\n' +
-          'meta / links:  ' + escapeHtml(JSON.stringify(diag.meta || {})) + '\n\n' +
-          'Distinct dates seen (top 12, with counts):\n  ' +
-          (topDates.length
-            ? topDates.map(function (d) { return d + ' × ' + dateCounts[d]; }).join('\n  ')
-            : '(none — data array empty or no kickOffDateUTC field)') + '\n\n' +
-          'Sample of first match.attributes (keys + key values):\n' + escapeHtml(JSON.stringify(sample, null, 2)) +
-          '</pre>' +
-        '</div>';
-      return;
-    }
-    var totalPts = 0, totalPredicted = 0, totalDone = 0;
-    var preds = loadPreds();
-    MATCHES.forEach(function (m) {
-      var state = stateFor(m, simNow());
-      var p = preds[m.id];
-      if (state === 'post' && p && p.home != null) {
-        var pts = pointsFor(p.home, p.away, m.attributes.homeTeam.score, m.attributes.awayTeam.score);
-        if (pts != null) { totalPts += pts; totalDone += 1; }
-      }
-      if (p && p.home != null) totalPredicted += 1;
-    });
-
-    var summary = '<div style="background:#f6f8fa;border:1px solid #d0d7de;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#1f2328;display:flex;gap:18px;flex-wrap:wrap;">' +
-      '<span>Matches: <b>' + MATCHES.length + '</b></span>' +
-      '<span>Predicted: <b>' + totalPredicted + '</b></span>' +
-      (totalDone > 0 ? '<span>Settled: <b>' + totalDone + '</b></span><span>Points: <b>' + totalPts + '</b></span>' : '') +
-    '</div>';
-
-    fixtures.innerHTML = summary + MATCHES.map(renderMatch).join('');
-
-    // wire prediction inputs
-    Array.prototype.forEach.call(fixtures.querySelectorAll('input[data-match]'), function (inp) {
-      inp.addEventListener('input', function () {
-        var matchId = inp.getAttribute('data-match');
-        var side = inp.getAttribute('data-side');
-        var p = loadPreds()[matchId] || {};
-        var val = inp.value === '' ? null : Math.max(0, Math.min(20, parseInt(inp.value, 10)));
-        if (side === 'home') savePred(matchId, val, p.away == null ? null : p.away);
-        else                 savePred(matchId, p.home == null ? null : p.home, val);
-        // re-render summary line only
-        var preds = loadPreds();
-        var count = MATCHES.reduce(function (n, m) { return n + (preds[m.id] && preds[m.id].home != null ? 1 : 0); }, 0);
-        var summaryEl = fixtures.querySelector('div');
-        if (summaryEl) summaryEl.innerHTML = summaryEl.innerHTML.replace(/Predicted: <b>\d+<\/b>/, 'Predicted: <b>' + count + '</b>');
-      });
-    });
-  }
-
-  // ---------- 7. fetch fixtures ----------
-  var MAX_PAGES = 10; // safety cap; season is ~557 matches = 6 pages of 100
+  // ---------- match state ----------
   function dateOf(m) {
     var a = (m && m.attributes) || {};
     return String(a.kickOffDateUTC || a.kickoffDateUTC || a.kickOffDate || a.kickoffDate || a.date || '');
   }
+  function koOf(m) { return normaliseUtc(dateOf(m)); }
+  function stateOf(m, now) {
+    var ko = koOf(m); if (!ko) return 'unknown';
+    var diff = (now - ko) / 60000;
+    if (diff < 0) return 'pre';
+    if (diff < IN_PLAY_MIN) return 'live';
+    return 'post';
+  }
+  function outcome(h, a) { return h > a ? 'H' : (h < a ? 'A' : 'D'); }
+  function basePoints(predH, predA, realH, realA) {
+    if (predH == null || predA == null || realH == null || realA == null) return null;
+    if (predH === realH && predA === realA) return 3;
+    if (outcome(predH, predA) === outcome(realH, realA)) return 1;
+    return 0;
+  }
+  function multiplierFor(m, pred) {
+    var mult = 1;
+    if (state.registration && (m.attributes.homeTeam.teamID === state.registration.teamId ||
+                               m.attributes.awayTeam.teamID === state.registration.teamId)) {
+      mult *= 2;
+    }
+    if (pred && pred.joker) mult *= 2;
+    return mult;
+  }
+  function pointsForMatch(m, pred, now) {
+    if (stateOf(m, now) !== 'post') return null;
+    var base = basePoints(pred && pred.home, pred && pred.away,
+                          m.attributes.homeTeam.score, m.attributes.awayTeam.score);
+    if (base == null) return null;
+    return base * multiplierFor(m, pred);
+  }
+  function totalForUser(jwtId, now) {
+    var preds = (jwtId === state.user.id) ? state.predictions : (state.allPreds[jwtId] || {});
+    var reg = (jwtId === state.user.id) ? state.registration : state.allUsers[jwtId];
+    var total = 0, settled = 0, total_unmult = 0;
+    for (var i = 0; i < state.matches.length; i++) {
+      var m = state.matches[i];
+      if (stateOf(m, now) !== 'post') continue;
+      var p = preds[m.id];
+      if (!p) continue;
+      var base = basePoints(p.home, p.away, m.attributes.homeTeam.score, m.attributes.awayTeam.score);
+      if (base == null) continue;
+      var mult = 1;
+      if (reg && (m.attributes.homeTeam.teamID === reg.teamId || m.attributes.awayTeam.teamID === reg.teamId)) mult *= 2;
+      if (p.joker) mult *= 2;
+      total += base * mult;
+      total_unmult += base;
+      settled += 1;
+    }
+    return { total: total, settled: settled, base: total_unmult };
+  }
 
+  // ---------- fetch fixtures ----------
   function fetchFixtures() {
-    window.__SP_DIAG__ = { pages: [] };
     var all = [];
-
-    function getPage(n) {
+    function page(n) {
       var url = API_BASE + '/matches/?competitionID=' + COMP_ID + '&seasonID=' + SEASON_ID +
                 '&sort=kickOffDateUTC&page.number=' + n + '&page.size=100';
-      banner.style.display = 'block';
-      banner.textContent = 'Fetching fixtures… (page ' + n + ')';
-      return fetch(url, { credentials: 'omit' })
-        .then(function (r) {
-          if (!r.ok) throw new Error('HTTP ' + r.status + ' on page ' + n);
-          return r.json();
-        })
+      showBanner('Loading fixtures… (page ' + n + ')');
+      return fetch(url, { credentials:'omit' })
+        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
         .then(function (json) {
-          var data = (json && json.data) || [];
+          var d = (json && json.data) || [];
+          all = all.concat(d);
           var total = json && json.meta && json.meta.totalCount;
-          window.__SP_DIAG__.pages.push({ n: n, returned: data.length, total: total });
-          all = all.concat(data);
-
-          var moreLeft = (data.length === 100) && (total == null || all.length < total);
-          if (moreLeft && n < MAX_PAGES) return getPage(n + 1);
-          return null;
+          if (d.length === 100 && (total == null || all.length < total) && n < MAX_PAGES) return page(n + 1);
         });
     }
-
-    return getPage(1).then(function () {
-      window.__SP_DIAG__.totalFetched = all.length;
-
-      var counts = {};
-      var firstSample = null;
-      for (var i = 0; i < all.length; i++) {
-        var d = dateOf(all[i]).slice(0, 10);
-        if (d) counts[d] = (counts[d] || 0) + 1;
-        if (!firstSample && all[i] && all[i].attributes) {
-          var s = all[i].attributes;
-          firstSample = {
-            keys: Object.keys(s),
-            kickOffDateUTC: s.kickOffDateUTC,
-            competitionID: s.competitionID,
-            matchPeriod: s.matchPeriod,
-            homeTeam: s.homeTeam && s.homeTeam.name,
-            awayTeam: s.awayTeam && s.awayTeam.name
-          };
-        }
-      }
-      window.__SP_DIAG__.dateCounts = counts;
-      window.__SP_DIAG__.sample = firstSample;
-
-      return all.filter(function (m) { return dateOf(m).indexOf(MATCH_DAY) === 0; });
+    return page(1).then(function () {
+      return all.filter(function (m) { return dateOf(m).indexOf(MATCH_DAY) === 0; })
+                .sort(function (a, b) { return dateOf(a).localeCompare(dateOf(b)); });
     });
   }
 
-  // ---------- 8. boot ----------
-  renderGreet();
-  banner.textContent = 'Fetching fixtures for ' + MATCH_DAY + '…';
-  fetchFixtures().then(function (matches) {
-    MATCHES = matches;
-    banner.style.display = 'none';
-    renderSimBar();
-    renderFixtures();
-  }).catch(function (err) {
-    banner.style.background = '#fde8e8';
-    banner.style.borderColor = '#f5a3a3';
-    banner.style.color = '#8a1f1f';
-    banner.textContent = 'Could not load fixtures: ' + err.message + '. Open DevTools → Network for details.';
-  });
+  // ---------- registration ----------
+  function teamOptionsFromMatches() {
+    var seen = {}, opts = [];
+    state.matches.forEach(function (m) {
+      [m.attributes.homeTeam, m.attributes.awayTeam].forEach(function (t) {
+        if (!seen[t.teamID]) {
+          seen[t.teamID] = true;
+          opts.push({ id: t.teamID, name: t.name, crest: t.crest });
+        }
+      });
+    });
+    opts.sort(function (a, b) { return a.name.localeCompare(b.name); });
+    return opts;
+  }
+  function renderRegistration() {
+    main.hidden = true;
+    register.hidden = false;
+    var opts = teamOptionsFromMatches();
+    // Prefer match for user's JWT favourite_team if listed
+    var defaultId = '';
+    if (state.user.favTeamName) {
+      var hit = opts.filter(function (o) { return o.name.toLowerCase() === state.user.favTeamName.toLowerCase(); })[0];
+      if (hit) defaultId = hit.id;
+    }
+    register.innerHTML =
+      '<div class="np-register-card">' +
+        '<div class="np-kicker">National League Predictor</div>' +
+        '<h2>Welcome, ' + $h(state.user.forename) + '</h2>' +
+        '<p class="np-muted">Pick your team for the season. Your team\'s match each week will <b>auto-double</b> your points.</p>' +
+        '<label for="np-team-select">Your team</label>' +
+        '<select id="np-team-select">' +
+          '<option value="">— choose a team —</option>' +
+          opts.map(function (o) {
+            return '<option value="' + $h(o.id) + '"' + (o.id === defaultId ? ' selected' : '') + '>' + $h(o.name) + '</option>';
+          }).join('') +
+        '</select>' +
+        '<div class="np-lockwarn">⚠️ This locks for the season — pick carefully. You won\'t be able to change your team later.</div>' +
+        '<button class="np-btn" id="np-register-btn"' + (defaultId ? '' : ' disabled') + '>Confirm & lock my team</button>' +
+      '</div>';
+
+    var sel = document.getElementById('np-team-select');
+    var btn = document.getElementById('np-register-btn');
+    sel.addEventListener('change', function () { btn.disabled = !sel.value; });
+    btn.addEventListener('click', function () {
+      var teamId = sel.value;
+      if (!teamId) return;
+      var team = opts.filter(function (o) { return o.id === teamId; })[0];
+      btn.disabled = true; btn.textContent = 'Saving…';
+      var payload = {
+        teamId: team.id,
+        teamName: team.name,
+        crestUrl: team.crest || '',
+        forename: state.user.forename,
+        surnameInitial: state.user.surnameInitial,
+        email: state.user.email || '',
+        registeredAt: firebase.database.ServerValue.TIMESTAMP
+      };
+      firebase.database().ref('predictor/users/' + state.user.id).set(payload).then(function () {
+        // wait for the listener to refresh state.registration; on next tick render main
+        setBannerOK('Locked in — let\'s predict!');
+      }).catch(function (err) {
+        btn.disabled = false; btn.textContent = 'Confirm & lock my team';
+        showBanner('Could not save registration: ' + err.message, 'err');
+      });
+    });
+  }
+
+  // ---------- main UI ----------
+  function renderGreet() {
+    var r = state.registration;
+    greet.className = 'np-greet';
+    greet.innerHTML =
+      (r && r.crestUrl ? '<img src="' + $h(r.crestUrl) + '" alt="">' : '<div style="width:40px;height:40px;flex:none;"></div>') +
+      '<div>' +
+        '<div class="np-name">Welcome back, ' + $h(state.user.forename) + ' 👋</div>' +
+        '<div class="np-muted">' +
+          (r ? 'Your team: <b>' + $h(r.teamName) + '</b> — every match auto-doubles your points.' : '') +
+        '</div>' +
+      '</div>';
+  }
+  function renderClock() {
+    var el = simbar.querySelector('.np-clock');
+    if (!el) return;
+    var n = simNow();
+    el.textContent = n.toLocaleTimeString('en-GB', { hour:'2-digit',minute:'2-digit',second:'2-digit', timeZone:'Europe/London' }) + ' BST';
+  }
+  function renderSimBar() {
+    simbar.className = 'np-sim';
+    simbar.innerHTML =
+      '<span class="np-sim-label">Sim time:</span>' +
+      SIM_OPTIONS.map(function (o, i) {
+        var cls = '';
+        if (i === state.sim.index) cls += ' active';
+        if (o.id === 'demo') cls += ' demo';
+        return '<button data-i="' + i + '" class="' + cls.trim() + '">' + $h(o.label) + '</button>';
+      }).join('') +
+      '<span class="np-clock"></span>';
+    Array.prototype.forEach.call(simbar.querySelectorAll('button'), function (b) {
+      b.addEventListener('click', function () { setSim(Number(b.getAttribute('data-i'))); });
+    });
+    renderClock();
+  }
+
+  function renderFixtures() {
+    if (!state.matches.length) {
+      fixtures.innerHTML = '<div class="np-muted" style="padding:20px;text-align:center;">No matches found for ' + MATCH_DAY + '.</div>';
+      return;
+    }
+    var now = simNow();
+    var firstKO = koOf(state.matches[0]);
+    var dateLabel = firstKO ? firstKO.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long' }) : MATCH_DAY;
+    var head = '<div class="np-matchday">' +
+                 '<div class="np-kicker">National League</div>' +
+                 '<h2>' + $h(dateLabel) + '</h2>' +
+               '</div>';
+
+    var rows = state.matches.map(function (m) {
+      var a = m.attributes;
+      var s = stateOf(m, now);
+      var ko = koOf(m);
+      var reg = state.registration;
+      var isOwn = reg && (a.homeTeam.teamID === reg.teamId || a.awayTeam.teamID === reg.teamId);
+      var submittedPred = state.predictions[m.id];
+      var draft = state.draft[m.id] || {};
+      var isLocked = (s !== 'pre');
+      var isJoker = submittedPred ? !!submittedPred.joker : (state.draftJoker === m.id);
+
+      // status pills
+      var pill, pillCls;
+      if (s === 'pre')  { pillCls = 'pre';  pill = 'KO ' + fmtBST(ko); }
+      if (s === 'live') { pillCls = 'live'; pill = 'IN PLAY'; }
+      if (s === 'post') { pillCls = 'post'; pill = 'FULL TIME'; }
+      var ownPill   = isOwn   ? '<span class="np-pill own">×2 OWN TEAM</span>' : '';
+      var jokerPill = (isJoker && !isOwn) ? '<span class="np-pill joke">×2 JOKER</span>' : '';
+
+      var pts = pointsForMatch(m, submittedPred, now);
+      var ptsHTML = (pts != null) ? '<span class="np-points">+' + pts + ' pts</span>' : '';
+
+      // score cell content
+      var scoreInputs;
+      if (s === 'pre' && !submittedPred) {
+        // taking input
+        var hv = draft.home != null ? draft.home : '';
+        var av = draft.away != null ? draft.away : '';
+        scoreInputs =
+          '<input type="number" min="0" max="20" inputmode="numeric" data-side="home" data-m="' + $h(m.id) + '" value="' + $h(hv) + '">' +
+          '<span class="np-fs">v</span>' +
+          '<input type="number" min="0" max="20" inputmode="numeric" data-side="away" data-m="' + $h(m.id) + '" value="' + $h(av) + '">';
+      } else if (s === 'pre' && submittedPred) {
+        // submitted, locked rendering but can re-enter via edit
+        scoreInputs =
+          '<input type="number" min="0" max="20" inputmode="numeric" data-side="home" data-m="' + $h(m.id) + '" value="' + $h(submittedPred.home) + '" disabled>' +
+          '<span class="np-fs">v</span>' +
+          '<input type="number" min="0" max="20" inputmode="numeric" data-side="away" data-m="' + $h(m.id) + '" value="' + $h(submittedPred.away) + '" disabled>';
+      } else if (s === 'live') {
+        scoreInputs = '<span class="np-fs">·</span><span class="np-fs">vs</span><span class="np-fs">·</span>';
+      } else {
+        scoreInputs = '<span class="np-fs">' + (a.homeTeam.score != null ? a.homeTeam.score : '?') + '</span>' +
+                      '<span class="np-fs">—</span>' +
+                      '<span class="np-fs">' + (a.awayTeam.score != null ? a.awayTeam.score : '?') + '</span>';
+      }
+
+      // footer
+      var foot = '';
+      if (s === 'pre') {
+        if (!submittedPred) {
+          // can toggle joker if not own team
+          var jokerBtn = isOwn
+            ? '<button class="np-joker" disabled title="Own team already auto-doubles">🃏 (own team)</button>'
+            : '<button class="np-joker' + (isJoker ? ' on' : '') + '" data-joker="' + $h(m.id) + '">🃏 ' + (isJoker ? 'Joker set' : 'Set as joker') + '</button>';
+          foot = '<div class="np-rowfoot">' + jokerBtn + '</div>';
+        } else {
+          // submitted, allow edit
+          foot = '<div class="np-rowfoot">' +
+            '<button class="np-edit" data-edit="' + $h(m.id) + '">Edit until KO</button>' +
+            '<span class="np-yourpred">You: ' + submittedPred.home + '–' + submittedPred.away + (submittedPred.joker ? ' 🃏' : '') + '</span>' +
+          '</div>';
+        }
+      } else if (s === 'live') {
+        foot = '<div class="np-rowfoot">' +
+          (submittedPred ? '<span class="np-yourpred">You: ' + submittedPred.home + '–' + submittedPred.away + (submittedPred.joker ? ' 🃏' : '') + '</span>'
+                         : '<span class="np-yourpred">No prediction</span>') +
+        '</div>';
+      } else if (s === 'post') {
+        var basis = '';
+        if (submittedPred) {
+          var b = basePoints(submittedPred.home, submittedPred.away, a.homeTeam.score, a.awayTeam.score);
+          var mult = multiplierFor(m, submittedPred);
+          basis = 'You: ' + submittedPred.home + '–' + submittedPred.away + (submittedPred.joker ? ' 🃏' : '') +
+                  ' · ' + (b === 3 ? 'exact' : b === 1 ? 'right result' : 'wrong') +
+                  (mult > 1 ? ' (×' + mult + ')' : '');
+        } else {
+          basis = 'No prediction';
+        }
+        foot = '<div class="np-rowfoot"><span class="np-yourpred">' + basis + '</span></div>';
+      }
+
+      return '<div class="np-row">' +
+        '<div class="np-status">' +
+          '<span class="np-pill ' + pillCls + '">' + $h(pill) + '</span>' +
+          ownPill + jokerPill + ptsHTML +
+        '</div>' +
+        '<div class="np-teams">' +
+          '<div class="np-team home">' +
+            (a.homeTeam.crest ? '<img src="' + $h(a.homeTeam.crest) + '" alt="">' : '') +
+            '<span class="np-tname">' + $h(a.homeTeam.name) + '</span>' +
+          '</div>' +
+          '<div class="np-score-cell">' + scoreInputs + '</div>' +
+          '<div class="np-team away">' +
+            (a.awayTeam.crest ? '<img src="' + $h(a.awayTeam.crest) + '" alt="">' : '') +
+            '<span class="np-tname">' + $h(a.awayTeam.name) + '</span>' +
+          '</div>' +
+        '</div>' +
+        foot +
+      '</div>';
+    }).join('');
+
+    fixtures.innerHTML = head + rows;
+
+    // wire score inputs (draft only — pre-state, not yet submitted)
+    Array.prototype.forEach.call(fixtures.querySelectorAll('input[data-m]'), function (inp) {
+      inp.addEventListener('input', function () {
+        var mid = inp.getAttribute('data-m');
+        var side = inp.getAttribute('data-side');
+        var val = inp.value === '' ? null : Math.max(0, Math.min(20, parseInt(inp.value, 10) || 0));
+        state.draft[mid] = state.draft[mid] || {};
+        state.draft[mid][side] = val;
+        renderSubmitbar();
+      });
+    });
+
+    // wire joker
+    Array.prototype.forEach.call(fixtures.querySelectorAll('button.np-joker[data-joker]'), function (b) {
+      b.addEventListener('click', function () {
+        var mid = b.getAttribute('data-joker');
+        state.draftJoker = (state.draftJoker === mid) ? null : mid;
+        renderFixtures();
+        renderSubmitbar();
+      });
+    });
+
+    // wire edit
+    Array.prototype.forEach.call(fixtures.querySelectorAll('button[data-edit]'), function (b) {
+      b.addEventListener('click', function () {
+        var mid = b.getAttribute('data-edit');
+        var p = state.predictions[mid];
+        if (!p) return;
+        // bring submitted values into draft and remove from predictions locally;
+        // server still has them, but UI lets user re-enter and re-submit just this match
+        state.draft[mid] = { home: p.home, away: p.away };
+        if (p.joker) state.draftJoker = mid;
+        delete state.predictions[mid];
+        renderFixtures();
+        renderSubmitbar();
+      });
+    });
+  }
+
+  function preCount() {
+    // count fixtures in pre-state that we have a complete draft or submitted prediction for
+    var now = simNow();
+    var preMatches = state.matches.filter(function (m) { return stateOf(m, now) === 'pre'; });
+    var ready = 0;
+    preMatches.forEach(function (m) {
+      var p = state.predictions[m.id];
+      var d = state.draft[m.id];
+      if (p && p.home != null && p.away != null) ready++;
+      else if (d && d.home != null && d.away != null) ready++;
+    });
+    var jokerOK = !!(state.draftJoker || Object.keys(state.predictions).some(function (mid) {
+      return state.predictions[mid].joker;
+    }));
+    // joker can be the own-team match implicitly? No — joker is a separate pick. Need an explicit joker pick.
+    // If user's own team is in the matchday list, we still require a joker on a different match.
+    return { total: preMatches.length, ready: ready, jokerOK: jokerOK };
+  }
+
+  function renderSubmitbar() {
+    var now = simNow();
+    // hide if nothing to do
+    var hasPre = state.matches.some(function (m) { return stateOf(m, now) === 'pre'; });
+    if (!hasPre) { submitb.innerHTML = ''; return; }
+    var c = preCount();
+    var draftsPending = Object.keys(state.draft).length > 0 || state.draftJoker;
+    var canSubmit = (c.ready === c.total) && c.jokerOK && draftsPending;
+    submitb.innerHTML =
+      '<div class="np-submitbar">' +
+        '<div class="np-count">' + c.ready + '/' + c.total + ' predicted · ' + (c.jokerOK ? 'joker ✓' : 'joker needed') + '</div>' +
+        '<button class="np-btn" id="np-submit"' + (canSubmit ? '' : ' disabled') + '>' +
+          (Object.keys(state.predictions).length ? 'Save changes' : 'Submit all predictions') +
+        '</button>' +
+      '</div>';
+    var btn = document.getElementById('np-submit');
+    if (btn) btn.addEventListener('click', submitDrafts);
+  }
+
+  function submitDrafts() {
+    var ref = firebase.database().ref('predictor/predictions/' + state.user.id + '/' + MATCHDAY_KEY);
+    var updates = {};
+    var now = simNow();
+    state.matches.forEach(function (m) {
+      if (stateOf(m, now) !== 'pre') return;
+      var d = state.draft[m.id];
+      if (!d || d.home == null || d.away == null) {
+        // fallback to existing prediction if any
+        var existing = state.predictions[m.id];
+        if (existing) return; // nothing to write for this one
+        return;
+      }
+      var jokerFlag = (state.draftJoker === m.id);
+      updates[m.id] = {
+        home: d.home,
+        away: d.away,
+        joker: jokerFlag,
+        submittedAt: firebase.database.ServerValue.TIMESTAMP
+      };
+    });
+    // also handle joker change without score change: ensure joker flag flips on previously-submitted preds that are now pre-KO
+    // (kept simple: joker only flips when match is in current draft)
+
+    if (Object.keys(updates).length === 0) { setBannerOK('No changes to save.'); return; }
+
+    showBanner('Saving predictions…');
+    ref.update(updates).then(function () {
+      // clear drafts that were written; keep joker as-is if it landed
+      Object.keys(updates).forEach(function (mid) {
+        delete state.draft[mid];
+      });
+      state.draftJoker = null;
+      setBannerOK('Predictions saved.');
+      // listener will refresh state.predictions
+    }).catch(function (err) {
+      showBanner('Save failed: ' + err.message, 'err');
+    });
+  }
+
+  // ---------- league table ----------
+  function renderTable() {
+    if (!state.matches.length) { tableEl.innerHTML = ''; return; }
+    var now = simNow();
+
+    // Always include the current user even if no row in allUsers yet
+    var userIds = Object.keys(state.allUsers);
+    if (state.user && userIds.indexOf(state.user.id) === -1 && state.registration) userIds.push(state.user.id);
+
+    var rows = userIds.map(function (uid) {
+      var reg = (uid === state.user.id) ? state.registration : state.allUsers[uid];
+      var t = totalForUser(uid, now);
+      return { uid: uid, reg: reg, total: t.total, settled: t.settled };
+    }).filter(function (r) { return r.reg; })
+      .sort(function (a, b) { return b.total - a.total; });
+
+    if (!rows.length) { tableEl.innerHTML = ''; return; }
+
+    var inner =
+      '<div class="np-tablehead">' +
+        '<div class="np-kicker">Leaderboard</div>' +
+        '<div class="np-muted" style="margin-top:2px;">' +
+          (rows[0].settled ? rows[0].settled + ' settled · ' : '') +
+          rows.length + ' player' + (rows.length === 1 ? '' : 's') +
+        '</div>' +
+      '</div>' +
+      rows.map(function (r, i) {
+        var name = $h(r.reg.forename) + ' ' + $h(r.reg.surnameInitial || '');
+        var crest = r.reg.crestUrl ? '<img src="' + $h(r.reg.crestUrl) + '" alt="">' : '<span></span>';
+        var youCls = (r.uid === state.user.id) ? ' you' : '';
+        return '<div class="np-trow' + youCls + '">' +
+          '<span class="np-rank">' + (i + 1) + '</span>' +
+          crest +
+          '<span>' + name + (r.uid === state.user.id ? ' <span class="np-muted">(you)</span>' : '') + '</span>' +
+          '<span class="np-pts">' + r.total + '</span>' +
+        '</div>';
+      }).join('');
+
+    tableEl.className = 'np-table';
+    tableEl.innerHTML = inner;
+  }
+
+  // ---------- RTDB listeners ----------
+  function listenAll() {
+    var db = firebase.database();
+    db.ref('predictor/users').on('value', function (snap) {
+      state.allUsers = snap.val() || {};
+      state.registration = state.allUsers[state.user.id] || null;
+      if (!state.registration) {
+        renderRegistration();
+      } else {
+        register.hidden = true;
+        main.hidden = false;
+        renderGreet();
+        renderSimBar();
+        renderFixtures();
+        renderSubmitbar();
+        renderTable();
+      }
+    });
+    db.ref('predictor/predictions').on('value', function (snap) {
+      var v = snap.val() || {};
+      state.allPreds = {};
+      Object.keys(v).forEach(function (jwtId) {
+        state.allPreds[jwtId] = (v[jwtId] && v[jwtId][MATCHDAY_KEY]) || {};
+      });
+      state.predictions = state.allPreds[state.user.id] || {};
+      if (!main.hidden) {
+        renderFixtures();
+        renderSubmitbar();
+        renderTable();
+      }
+    });
+  }
+
+  // ---------- boot ----------
+  (function boot() {
+    // 1. JWT
+    var jwt = readCookie('_gc_sa_sso_access');
+    var claims = decodeJwtPayload(jwt);
+    if (!claims || !claims.id) {
+      showBanner('Please sign in to the National League site to use the Predictor.', 'err');
+      return;
+    }
+    state.user = {
+      id: claims.id,
+      forename: claims.forename || 'there',
+      surname:  claims.surname  || '',
+      surnameInitial: (claims.surname || '').charAt(0).toUpperCase(),
+      email:    claims.email    || '',
+      favTeamName: claims.favourite_team || null
+    };
+
+    // 2. Firebase SDK + auth + fixtures in parallel
+    Promise.all([
+      loadFirebase().then(function () {
+        if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+        return firebase.auth().signInAnonymously();
+      }).then(function () { state.fbAuthed = true; }),
+      fetchFixtures().then(function (ms) { state.matches = ms; })
+    ]).then(function () {
+      hideBanner();
+      listenAll();
+    }).catch(function (err) {
+      showBanner('Could not start the predictor: ' + (err && err.message ? err.message : err), 'err');
+    });
+  })();
 })();
 </script>
