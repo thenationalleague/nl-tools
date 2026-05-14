@@ -1,0 +1,970 @@
+<!-- ============================================================
+     SCORE PREDICTOR — embeddable widget for thenationalleague.org.uk
+     Source of truth. Copy/paste this whole file into the CMS custom
+     HTML block when deploying.
+
+     - JWT identity from _gc_sa_sso_access (sso.sportsalliance.com)
+     - One-time team registration (immutable team lock)
+     - RTDB (dedicated nl-score-predictor project, named Firebase app):
+         users/{jwtId}
+         predictions/{jwtId}/{matchday}/{matchId}
+     - Submit-all (12/12 + joker), per-row KO lock, edit-before-KO
+     - Auto-double on own team; one joker per matchday (×2)
+     - Demo: starts at 2:59:50 BST and ticks (watch matches lock)
+     - League table: forename + surname initial + crest + total
+     - Scoped under #nlPredictor; BEM .nlsp__ prefix; Carbona inline;
+       no external <script src> tags (CMS strips them).
+     ============================================================ -->
+
+<div id="nlPredictor">
+  <div class="nlsp__banner" id="nlsp-banner">Loading predictor…</div>
+  <div class="nlsp__screen" id="nlsp-register" hidden></div>
+  <div class="nlsp__screen" id="nlsp-main" hidden>
+    <div id="nlsp-greet"></div>
+    <div id="nlsp-sim"></div>
+    <div id="nlsp-fixtures"></div>
+    <div id="nlsp-submitbar"></div>
+    <div id="nlsp-table"></div>
+  </div>
+</div>
+
+<style>
+  /* Carbona Variable — self-hosted @font-face per embed brand guide */
+  @font-face {
+    font-family: "carbona-variable";
+    src: url("https://use.typekit.net/af/184cf2/0000000000000000774c3175/31/l?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n4&v=3") format("woff2"),
+         url("https://use.typekit.net/af/184cf2/0000000000000000774c3175/31/d?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n4&v=3") format("woff");
+    font-display: swap;
+    font-style: normal;
+    font-weight: 200 900;
+    font-stretch: normal;
+  }
+
+  /* Root + scoped reset */
+  #nlPredictor {
+    --primary:#9e0000;
+    --navy:#223b7c;
+    --red:#d4380d; --red-light:#fff1ec;
+    --green:#1a7030; --green-light:#edf7ee;
+    --amber:#c96f15; --amber-light:#fef6ec;
+    --info:#3b82f6; --info-light:#eef2ff;
+    --white:#ffffff; --off-white:#f4f6f9;
+    --text:#1a2a44; --text-muted:#5a6a82;
+    --border:#dde3ed;
+    --radius:6px;
+    --shadow:0 2px 12px rgba(10,22,40,.10);
+    --joker:#9b59b6;
+
+    font-family:'carbona-variable','carbona',sans-serif;
+    font-size:15px; line-height:1.5;
+    font-variation-settings:'wght' 400;
+    color:var(--text);
+    -webkit-font-smoothing:antialiased;
+    max-width:680px; margin:24px auto; padding:0 12px;
+  }
+  #nlPredictor, #nlPredictor *, #nlPredictor *::before, #nlPredictor *::after {
+    box-sizing:border-box;
+  }
+
+  /* Banner */
+  #nlPredictor .nlsp__banner {
+    background:var(--amber-light); border:1px solid var(--amber); color:var(--amber);
+    padding:10px 14px; border-radius:var(--radius); font-size:13px; margin-bottom:16px;
+    font-variation-settings:'wght' 600;
+  }
+  #nlPredictor .nlsp__banner.is-err {
+    background:var(--red-light); border-color:var(--red); color:var(--red);
+  }
+  #nlPredictor .nlsp__banner.is-ok {
+    background:var(--green-light); border-color:var(--green); color:var(--green);
+  }
+
+  /* Headings + helpers */
+  #nlPredictor h2 {
+    font-size:24px; line-height:1.2; margin:0 0 4px;
+    font-weight:900; font-variation-settings:'wght' 900;
+  }
+  #nlPredictor h3 {
+    font-size:18px; line-height:1.3; margin:0 0 8px;
+    font-weight:800; font-variation-settings:'wght' 800;
+  }
+  #nlPredictor .nlsp__kicker {
+    font-size:11px; text-transform:uppercase; letter-spacing:1.5px;
+    color:var(--text-muted);
+    font-weight:700; font-variation-settings:'wght' 700;
+  }
+  #nlPredictor .nlsp__muted {
+    color:var(--text-muted); font-size:13px;
+  }
+
+  /* Greeting */
+  #nlPredictor .nlsp__greet {
+    background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
+    padding:14px 16px; margin-bottom:12px;
+    display:flex; align-items:center; gap:12px;
+    box-shadow:var(--shadow);
+  }
+  #nlPredictor .nlsp__greet img {
+    width:40px; height:40px; flex:none; border-radius:4px; object-fit:contain; background:var(--white);
+  }
+  #nlPredictor .nlsp__greet .nlsp__name {
+    font-size:16px; font-weight:800; font-variation-settings:'wght' 800;
+  }
+
+  /* Sim bar */
+  #nlPredictor .nlsp__sim {
+    display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:14px;
+  }
+  #nlPredictor .nlsp__sim-label {
+    font-size:12px; color:var(--text-muted); margin-right:4px;
+    font-weight:700; font-variation-settings:'wght' 700;
+  }
+  #nlPredictor .nlsp__sim button {
+    font-family:inherit; font-size:12px;
+    font-weight:800; font-variation-settings:'wght' 800;
+    padding:6px 10px; border-radius:999px; cursor:pointer;
+    background:var(--white); color:var(--text); border:1px solid var(--border);
+    transition:all .15s ease;
+  }
+  #nlPredictor .nlsp__sim button:hover {
+    border-color:var(--primary); color:var(--primary);
+  }
+  #nlPredictor .nlsp__sim button.is-active {
+    background:var(--primary); color:var(--white); border-color:var(--primary);
+  }
+  #nlPredictor .nlsp__sim button.is-demo {
+    background:var(--navy); color:var(--white); border-color:var(--navy);
+  }
+  #nlPredictor .nlsp__sim button.is-demo.is-active {
+    background:var(--primary); border-color:var(--primary);
+  }
+  #nlPredictor .nlsp__sim .nlsp__clock {
+    font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px;
+    color:var(--text-muted); margin-left:auto;
+  }
+
+  /* Match-day header */
+  #nlPredictor .nlsp__matchday { margin:6px 0 10px; }
+  #nlPredictor .nlsp__matchday h2 { margin-top:2px; }
+
+  /* Fixture row — navy strip per brand guide */
+  #nlPredictor .nlsp__row {
+    background:var(--navy); color:var(--white);
+    border-radius:var(--radius); padding:10px 12px; margin-bottom:8px;
+    display:grid; grid-template-rows:auto auto; row-gap:6px;
+    box-shadow:var(--shadow);
+  }
+  #nlPredictor .nlsp__status {
+    display:flex; align-items:center; gap:8px; font-size:11px;
+    text-transform:uppercase; letter-spacing:1px; color:rgba(255,255,255,.7);
+    font-weight:700; font-variation-settings:'wght' 700;
+  }
+  #nlPredictor .nlsp__pill {
+    display:inline-block; padding:1px 8px; border-radius:999px; font-size:10px;
+    font-weight:800; font-variation-settings:'wght' 800;
+  }
+  #nlPredictor .nlsp__pill.is-pre  { background:var(--info);   color:var(--white); }
+  #nlPredictor .nlsp__pill.is-live { background:var(--red);    color:var(--white); }
+  #nlPredictor .nlsp__pill.is-post { background:var(--green);  color:var(--white); }
+  #nlPredictor .nlsp__pill.is-own  { background:#f1c40f;       color:#1a1a1a; }
+  #nlPredictor .nlsp__pill.is-joke { background:var(--joker);  color:var(--white); }
+  #nlPredictor .nlsp__points {
+    margin-left:auto; font-size:13px; color:var(--white);
+    font-weight:900; font-variation-settings:'wght' 900;
+  }
+
+  #nlPredictor .nlsp__teams {
+    display:grid; grid-template-columns:1fr auto 1fr; gap:8px; align-items:center;
+  }
+  #nlPredictor .nlsp__team {
+    display:flex; align-items:center; gap:8px; font-size:14px;
+    font-weight:800; font-variation-settings:'wght' 800;
+  }
+  #nlPredictor .nlsp__team.is-away { flex-direction:row-reverse; text-align:right; }
+  #nlPredictor .nlsp__team img {
+    width:28px; height:28px; flex:none; border-radius:4px;
+    background:var(--white); padding:1px; object-fit:contain;
+  }
+  #nlPredictor .nlsp__tname {
+    flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  #nlPredictor .nlsp__score-cell {
+    display:flex; align-items:center; gap:6px;
+    font-size:20px; min-width:72px; justify-content:center;
+    font-weight:900; font-variation-settings:'wght' 900;
+  }
+  #nlPredictor .nlsp__score-cell input {
+    width:42px; height:34px; border-radius:5px; border:1px solid #d0d0d0;
+    text-align:center; font-size:18px; font-family:inherit;
+    background:var(--white); color:var(--text);
+    font-weight:900; font-variation-settings:'wght' 900;
+  }
+  #nlPredictor .nlsp__score-cell input:focus {
+    outline:none; border-color:var(--primary);
+    box-shadow:0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent);
+  }
+  #nlPredictor .nlsp__score-cell input:disabled {
+    background:rgba(255,255,255,.4); color:rgba(255,255,255,.6); border-color:rgba(255,255,255,.3);
+  }
+  #nlPredictor .nlsp__fs {
+    display:inline-block; min-width:18px; text-align:center;
+  }
+
+  /* Row foot — joker / edit buttons */
+  #nlPredictor .nlsp__rowfoot {
+    display:flex; align-items:center; gap:8px;
+    font-size:12px; color:rgba(255,255,255,.8);
+  }
+  #nlPredictor .nlsp__joker, #nlPredictor .nlsp__edit {
+    font-family:inherit; font-size:11px;
+    font-weight:800; font-variation-settings:'wght' 800;
+    padding:4px 10px; border-radius:999px; cursor:pointer;
+    border:1px solid rgba(255,255,255,.3);
+    background:transparent; color:var(--white);
+    transition:all .15s ease;
+  }
+  #nlPredictor .nlsp__joker:hover {
+    border-color:var(--joker); color:#d6a6e6;
+  }
+  #nlPredictor .nlsp__joker.is-on {
+    background:var(--joker); border-color:var(--joker); color:var(--white);
+  }
+  #nlPredictor .nlsp__joker:disabled { opacity:.4; cursor:not-allowed; }
+  #nlPredictor .nlsp__edit:hover {
+    background:var(--white); color:var(--navy);
+  }
+  #nlPredictor .nlsp__yourpred { margin-left:auto; }
+
+  /* Submit bar */
+  #nlPredictor .nlsp__submitbar {
+    display:flex; align-items:center; gap:12px; padding:12px 14px; margin:12px 0 18px;
+    background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
+    box-shadow:var(--shadow);
+  }
+  #nlPredictor .nlsp__count {
+    font-size:13px; color:var(--text-muted);
+    font-weight:700; font-variation-settings:'wght' 700;
+  }
+
+  /* Buttons */
+  #nlPredictor .nlsp__btn {
+    font-family:inherit; font-size:15px;
+    font-weight:900; font-variation-settings:'wght' 900;
+    padding:10px 24px; border:none; border-radius:var(--radius);
+    cursor:pointer; background:var(--primary); color:var(--white);
+    transition:background .15s ease;
+  }
+  #nlPredictor .nlsp__btn:hover  {
+    background:color-mix(in srgb, var(--primary) 80%, black);
+  }
+  #nlPredictor .nlsp__btn:active {
+    background:color-mix(in srgb, var(--primary) 70%, black);
+  }
+  #nlPredictor .nlsp__btn:focus-visible {
+    outline:3px solid color-mix(in srgb, var(--primary) 35%, transparent);
+    outline-offset:2px;
+  }
+  #nlPredictor .nlsp__btn:disabled {
+    background:#cccccc; color:#888888; cursor:not-allowed;
+  }
+  #nlPredictor .nlsp__btn.is-outline {
+    background:transparent; color:var(--primary);
+    border:2px solid var(--primary); padding:8px 22px;
+  }
+  #nlPredictor .nlsp__btn.is-outline:hover {
+    background:var(--primary); color:var(--white);
+  }
+
+  /* Registration */
+  #nlPredictor .nlsp__register-card {
+    background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
+    padding:20px 22px; box-shadow:var(--shadow);
+  }
+  #nlPredictor .nlsp__register-card label {
+    display:block; font-size:13px; margin:14px 0 6px;
+    font-weight:800; font-variation-settings:'wght' 800;
+  }
+  #nlPredictor .nlsp__register-card select {
+    width:100%; padding:10px 12px; font-size:15px; font-family:inherit;
+    border:1px solid #d0d0d0; border-radius:var(--radius); background:var(--white);
+    color:var(--text);
+    font-weight:600; font-variation-settings:'wght' 600;
+  }
+  #nlPredictor .nlsp__register-card select:focus {
+    outline:none; border-color:var(--primary);
+    box-shadow:0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent);
+  }
+  #nlPredictor .nlsp__lockwarn {
+    margin:14px 0; padding:10px 12px;
+    background:var(--amber-light); border:1px solid var(--amber); color:var(--amber);
+    font-size:13px; border-radius:var(--radius);
+    font-weight:700; font-variation-settings:'wght' 700;
+  }
+
+  /* League table */
+  #nlPredictor .nlsp__table {
+    background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
+    padding:14px 0; margin-bottom:24px; box-shadow:var(--shadow);
+  }
+  #nlPredictor .nlsp__tablehead {
+    padding:0 16px 10px; border-bottom:1px solid var(--border);
+  }
+  #nlPredictor .nlsp__trow {
+    display:grid; grid-template-columns:32px 32px 1fr auto;
+    align-items:center; gap:10px; padding:8px 16px;
+    border-bottom:1px solid var(--border); font-size:14px;
+    font-weight:700; font-variation-settings:'wght' 700;
+  }
+  #nlPredictor .nlsp__trow:last-child { border-bottom:none; }
+  #nlPredictor .nlsp__trow.is-you {
+    background:var(--amber-light);
+  }
+  #nlPredictor .nlsp__trow .nlsp__rank {
+    color:var(--text-muted);
+    font-weight:900; font-variation-settings:'wght' 900;
+  }
+  #nlPredictor .nlsp__trow img {
+    width:24px; height:24px; border-radius:3px; background:var(--white); object-fit:contain;
+  }
+  #nlPredictor .nlsp__trow .nlsp__pts {
+    font-size:15px;
+    font-weight:900; font-variation-settings:'wght' 900;
+  }
+
+  @media (max-width:520px) {
+    #nlPredictor .nlsp__team img { width:24px; height:24px; }
+    #nlPredictor .nlsp__team { font-size:13px; }
+    #nlPredictor .nlsp__score-cell input { width:38px; }
+  }
+</style>
+
+<script>
+(function () {
+  // ---------- config ----------
+  var FIREBASE_CONFIG = {
+    apiKey:            'AIzaSyB3-woStjYeeEJxfGPXkoIaO48zCzQ3mA0',
+    authDomain:        'nl-score-predictor.firebaseapp.com',
+    databaseURL:       'https://nl-score-predictor-default-rtdb.europe-west1.firebasedatabase.app',
+    projectId:         'nl-score-predictor',
+    storageBucket:     'nl-score-predictor.firebasestorage.app',
+    messagingSenderId: '164767666899',
+    appId:             '1:164767666899:web:6a2320d96fa2dd2009fa26'
+  };
+  var APP_NAME   = 'nlPredictor'; // named Firebase app to avoid clashes with other NL widgets on the same page
+  var FB_SDK_URL = 'https://www.gstatic.com/firebasejs/10.12.0/';
+  var FB_SDK     = ['firebase-app-compat.js','firebase-auth-compat.js','firebase-database-compat.js'];
+
+  var COMP_ID    = 89;
+  var SEASON_ID  = 2025;
+  var MATCH_DAY  = '2025-08-09';
+  var MATCHDAY_KEY = '2025-08-09';
+  var API_BASE   = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
+  var MAX_PAGES  = 10;
+  var IN_PLAY_MIN = 105;
+  var SIM_OPTIONS = [
+    { id:'pre',  label:'12:00 BST',    utc:'2025-08-09T11:00:00Z' },
+    { id:'live', label:'16:00 BST',    utc:'2025-08-09T15:00:00Z' },
+    { id:'post', label:'18:00 BST',    utc:'2025-08-09T17:00:00Z' },
+    { id:'demo', label:'🎬 2:59:50',   utc:'2025-08-09T13:59:50Z' }
+  ];
+
+  // ---------- DOM refs ----------
+  var banner   = document.getElementById('nlsp-banner');
+  var register = document.getElementById('nlsp-register');
+  var main     = document.getElementById('nlsp-main');
+  var greet    = document.getElementById('nlsp-greet');
+  var simbar   = document.getElementById('nlsp-sim');
+  var fixtures = document.getElementById('nlsp-fixtures');
+  var submitb  = document.getElementById('nlsp-submitbar');
+  var tableEl  = document.getElementById('nlsp-table');
+
+  // ---------- helpers ----------
+  function $h(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+  });}
+  function readCookie(name) {
+    var p = (document.cookie || '').split('; ');
+    for (var i = 0; i < p.length; i++) if (p[i].indexOf(name + '=') === 0) return p[i].slice(name.length + 1);
+    return null;
+  }
+  function decodeJwtPayload(jwt) {
+    if (!jwt) return null;
+    var parts = jwt.split('.');
+    if (parts.length !== 3) return null;
+    try {
+      var s = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      while (s.length % 4) s += '=';
+      return JSON.parse(decodeURIComponent(escape(atob(s))));
+    } catch (e) { return null; }
+  }
+  function loadScript(src) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = src; s.async = false;
+      s.onload  = function () { resolve(); };
+      s.onerror = function () { reject(new Error('Failed to load ' + src)); };
+      document.head.appendChild(s);
+    });
+  }
+  function loadFirebase() {
+    return FB_SDK.reduce(function (p, name) {
+      return p.then(function () { return loadScript(FB_SDK_URL + name); });
+    }, Promise.resolve());
+  }
+  function normaliseUtc(s) {
+    if (!s) return null;
+    var iso = s.indexOf('T') >= 0 ? s : s.replace(' ', 'T') + 'Z';
+    return new Date(iso);
+  }
+  function fmtBST(d) {
+    if (!d) return '';
+    return d.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', timeZone:'Europe/London' }) + ' BST';
+  }
+  function showBanner(msg, kind) {
+    banner.className = 'nlsp__banner' + (kind === 'err' ? ' is-err' : kind === 'ok' ? ' is-ok' : '');
+    banner.textContent = msg;
+    banner.hidden = false;
+  }
+  function hideBanner() { banner.hidden = true; }
+  function setBannerOK(msg) {
+    showBanner(msg, 'ok');
+    setTimeout(function () { if (banner.textContent === msg) hideBanner(); }, 3000);
+  }
+  function crestImg(url, alt) {
+    if (!url) return '<span></span>';
+    return '<img src="' + $h(url) + '" alt="' + $h(alt || '') + '" ' +
+           'onerror="this.onerror=null;this.style.visibility=\'hidden\';">';
+  }
+
+  // ---------- state ----------
+  var fbApp = null, fbDb = null, fbAuth = null;
+  var state = {
+    user: null,
+    fbAuthed: false,
+    matches: [],
+    registration: null,
+    predictions: {},
+    draft: {},
+    draftJoker: null,
+    allUsers: {},
+    allPreds: {},
+    sim: { index: 0, demoTick: null, demoStartReal: 0, demoStartUtc: 0 }
+  };
+
+  // ---------- sim clock ----------
+  function simNow() {
+    var s = state.sim;
+    if (s.demoTick) {
+      var elapsedMs = Date.now() - s.demoStartReal;
+      return new Date(s.demoStartUtc + elapsedMs);
+    }
+    return new Date(SIM_OPTIONS[s.index].utc);
+  }
+  function stopDemo() {
+    if (state.sim.demoTick) { clearInterval(state.sim.demoTick); state.sim.demoTick = null; }
+  }
+  function startDemo() {
+    stopDemo();
+    state.sim.demoStartReal = Date.now();
+    state.sim.demoStartUtc  = new Date(SIM_OPTIONS[3].utc).getTime();
+    state.sim.demoTick = setInterval(function () {
+      renderClock();
+      renderFixtures();
+      renderSubmitbar();
+      renderTable();
+    }, 1000);
+  }
+  function setSim(i) {
+    stopDemo();
+    state.sim.index = i;
+    if (SIM_OPTIONS[i].id === 'demo') startDemo();
+    renderSimBar();
+    renderFixtures();
+    renderSubmitbar();
+    renderTable();
+  }
+
+  // ---------- match state ----------
+  function dateOf(m) {
+    var a = (m && m.attributes) || {};
+    return String(a.kickOffDateUTC || a.kickoffDateUTC || a.kickOffDate || a.kickoffDate || a.date || '');
+  }
+  function koOf(m) { return normaliseUtc(dateOf(m)); }
+  function stateOf(m, now) {
+    var ko = koOf(m); if (!ko) return 'unknown';
+    var diff = (now - ko) / 60000;
+    if (diff < 0) return 'pre';
+    if (diff < IN_PLAY_MIN) return 'live';
+    return 'post';
+  }
+  function outcome(h, a) { return h > a ? 'H' : (h < a ? 'A' : 'D'); }
+  function basePoints(predH, predA, realH, realA) {
+    if (predH == null || predA == null || realH == null || realA == null) return null;
+    if (predH === realH && predA === realA) return 3;
+    if (outcome(predH, predA) === outcome(realH, realA)) return 1;
+    return 0;
+  }
+  function multiplierFor(m, pred) {
+    var mult = 1;
+    if (state.registration && (m.attributes.homeTeam.teamID === state.registration.teamId ||
+                               m.attributes.awayTeam.teamID === state.registration.teamId)) mult *= 2;
+    if (pred && pred.joker) mult *= 2;
+    return mult;
+  }
+  function pointsForMatch(m, pred, now) {
+    if (stateOf(m, now) !== 'post') return null;
+    var base = basePoints(pred && pred.home, pred && pred.away,
+                          m.attributes.homeTeam.score, m.attributes.awayTeam.score);
+    if (base == null) return null;
+    return base * multiplierFor(m, pred);
+  }
+  function totalForUser(jwtId, now) {
+    var preds = (jwtId === state.user.id) ? state.predictions : (state.allPreds[jwtId] || {});
+    var reg   = (jwtId === state.user.id) ? state.registration : state.allUsers[jwtId];
+    var total = 0, settled = 0;
+    for (var i = 0; i < state.matches.length; i++) {
+      var m = state.matches[i];
+      if (stateOf(m, now) !== 'post') continue;
+      var p = preds[m.id]; if (!p) continue;
+      var base = basePoints(p.home, p.away, m.attributes.homeTeam.score, m.attributes.awayTeam.score);
+      if (base == null) continue;
+      var mult = 1;
+      if (reg && (m.attributes.homeTeam.teamID === reg.teamId || m.attributes.awayTeam.teamID === reg.teamId)) mult *= 2;
+      if (p.joker) mult *= 2;
+      total += base * mult;
+      settled += 1;
+    }
+    return { total: total, settled: settled };
+  }
+
+  // ---------- fetch fixtures ----------
+  function fetchFixtures() {
+    var all = [];
+    function page(n) {
+      var url = API_BASE + '/matches/?competitionID=' + COMP_ID + '&seasonID=' + SEASON_ID +
+                '&sort=kickOffDateUTC&page.number=' + n + '&page.size=100';
+      showBanner('Loading fixtures… (page ' + n + ')');
+      return fetch(url, { credentials:'omit' })
+        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(function (json) {
+          var d = (json && json.data) || [];
+          all = all.concat(d);
+          var total = json && json.meta && json.meta.totalCount;
+          if (d.length === 100 && (total == null || all.length < total) && n < MAX_PAGES) return page(n + 1);
+        });
+    }
+    return page(1).then(function () {
+      return all.filter(function (m) { return dateOf(m).indexOf(MATCH_DAY) === 0; })
+                .sort(function (a, b) { return dateOf(a).localeCompare(dateOf(b)); });
+    });
+  }
+
+  // ---------- registration ----------
+  function teamOptionsFromMatches() {
+    var seen = {}, opts = [];
+    state.matches.forEach(function (m) {
+      [m.attributes.homeTeam, m.attributes.awayTeam].forEach(function (t) {
+        if (!seen[t.teamID]) {
+          seen[t.teamID] = true;
+          opts.push({ id: t.teamID, name: t.name, crest: t.crest });
+        }
+      });
+    });
+    opts.sort(function (a, b) { return a.name.localeCompare(b.name); });
+    return opts;
+  }
+  function renderRegistration() {
+    main.hidden = true;
+    register.hidden = false;
+    var opts = teamOptionsFromMatches();
+    var defaultId = '';
+    if (state.user.favTeamName) {
+      var hit = opts.filter(function (o) { return o.name.toLowerCase() === state.user.favTeamName.toLowerCase(); })[0];
+      if (hit) defaultId = hit.id;
+    }
+    register.innerHTML =
+      '<div class="nlsp__register-card">' +
+        '<div class="nlsp__kicker">National League Predictor</div>' +
+        '<h2>Welcome, ' + $h(state.user.forename) + '</h2>' +
+        '<p class="nlsp__muted">Pick your team for the season. Your team\'s match each week will <b>auto-double</b> your points.</p>' +
+        '<label for="nlsp-team-select">Your team</label>' +
+        '<select id="nlsp-team-select">' +
+          '<option value="">— choose a team —</option>' +
+          opts.map(function (o) {
+            return '<option value="' + $h(o.id) + '"' + (o.id === defaultId ? ' selected' : '') + '>' + $h(o.name) + '</option>';
+          }).join('') +
+        '</select>' +
+        '<div class="nlsp__lockwarn">⚠️ This locks for the season — pick carefully. You won\'t be able to change your team later.</div>' +
+        '<button class="nlsp__btn" id="nlsp-register-btn"' + (defaultId ? '' : ' disabled') + '>Confirm &amp; lock my team</button>' +
+      '</div>';
+
+    var sel = document.getElementById('nlsp-team-select');
+    var btn = document.getElementById('nlsp-register-btn');
+    sel.addEventListener('change', function () { btn.disabled = !sel.value; });
+    btn.addEventListener('click', function () {
+      var teamId = sel.value;
+      if (!teamId) return;
+      var team = opts.filter(function (o) { return o.id === teamId; })[0];
+      btn.disabled = true; btn.textContent = 'Saving…';
+      var payload = {
+        teamId:         team.id,
+        teamName:       team.name,
+        crestUrl:       team.crest || '',
+        forename:       state.user.forename,
+        surnameInitial: state.user.surnameInitial,
+        email:          state.user.email || '',
+        registeredAt:   firebase.database.ServerValue.TIMESTAMP
+      };
+      fbDb.ref('users/' + state.user.id).set(payload).then(function () {
+        setBannerOK('Locked in — let\'s predict!');
+      }).catch(function (err) {
+        btn.disabled = false; btn.textContent = 'Confirm & lock my team';
+        showBanner('Could not save registration: ' + err.message, 'err');
+      });
+    });
+  }
+
+  // ---------- main UI ----------
+  function renderGreet() {
+    var r = state.registration;
+    greet.className = 'nlsp__greet';
+    greet.innerHTML =
+      (r && r.crestUrl ? crestImg(r.crestUrl, r.teamName) : '<span style="width:40px;height:40px;flex:none;"></span>') +
+      '<div>' +
+        '<div class="nlsp__name">Welcome back, ' + $h(state.user.forename) + ' 👋</div>' +
+        '<div class="nlsp__muted">' +
+          (r ? 'Your team: <b>' + $h(r.teamName) + '</b> — every match auto-doubles your points.' : '') +
+        '</div>' +
+      '</div>';
+  }
+  function renderClock() {
+    var el = simbar.querySelector('.nlsp__clock');
+    if (!el) return;
+    var n = simNow();
+    el.textContent = n.toLocaleTimeString('en-GB', { hour:'2-digit',minute:'2-digit',second:'2-digit', timeZone:'Europe/London' }) + ' BST';
+  }
+  function renderSimBar() {
+    simbar.className = 'nlsp__sim';
+    simbar.innerHTML =
+      '<span class="nlsp__sim-label">Sim time:</span>' +
+      SIM_OPTIONS.map(function (o, i) {
+        var cls = '';
+        if (i === state.sim.index) cls += ' is-active';
+        if (o.id === 'demo') cls += ' is-demo';
+        return '<button data-i="' + i + '" class="' + cls.trim() + '">' + $h(o.label) + '</button>';
+      }).join('') +
+      '<span class="nlsp__clock"></span>';
+    Array.prototype.forEach.call(simbar.querySelectorAll('button'), function (b) {
+      b.addEventListener('click', function () { setSim(Number(b.getAttribute('data-i'))); });
+    });
+    renderClock();
+  }
+
+  function renderFixtures() {
+    if (!state.matches.length) {
+      fixtures.innerHTML = '<div class="nlsp__muted" style="padding:20px;text-align:center;">No matches found for ' + MATCH_DAY + '.</div>';
+      return;
+    }
+    var now = simNow();
+    var firstKO = koOf(state.matches[0]);
+    var dateLabel = firstKO ? firstKO.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long' }) : MATCH_DAY;
+    var head =
+      '<div class="nlsp__matchday">' +
+        '<div class="nlsp__kicker">National League</div>' +
+        '<h2>' + $h(dateLabel) + '</h2>' +
+      '</div>';
+
+    var rows = state.matches.map(function (m) {
+      var a = m.attributes;
+      var s = stateOf(m, now);
+      var ko = koOf(m);
+      var reg = state.registration;
+      var isOwn = reg && (a.homeTeam.teamID === reg.teamId || a.awayTeam.teamID === reg.teamId);
+      var submittedPred = state.predictions[m.id];
+      var draft = state.draft[m.id] || {};
+      var isJoker = submittedPred ? !!submittedPred.joker : (state.draftJoker === m.id);
+
+      var pillCls, pillText;
+      if (s === 'pre')  { pillCls = 'is-pre';  pillText = 'KO ' + fmtBST(ko); }
+      if (s === 'live') { pillCls = 'is-live'; pillText = 'IN PLAY'; }
+      if (s === 'post') { pillCls = 'is-post'; pillText = 'FULL TIME'; }
+      var ownPill   = isOwn   ? '<span class="nlsp__pill is-own">×2 OWN TEAM</span>' : '';
+      var jokerPill = (isJoker && !isOwn) ? '<span class="nlsp__pill is-joke">×2 JOKER</span>' : '';
+
+      var pts = pointsForMatch(m, submittedPred, now);
+      var ptsHTML = (pts != null) ? '<span class="nlsp__points">+' + pts + ' pts</span>' : '';
+
+      var scoreInputs;
+      if (s === 'pre' && !submittedPred) {
+        var hv = draft.home != null ? draft.home : '';
+        var av = draft.away != null ? draft.away : '';
+        scoreInputs =
+          '<input type="number" min="0" max="20" inputmode="numeric" data-side="home" data-m="' + $h(m.id) + '" value="' + $h(hv) + '">' +
+          '<span class="nlsp__fs">v</span>' +
+          '<input type="number" min="0" max="20" inputmode="numeric" data-side="away" data-m="' + $h(m.id) + '" value="' + $h(av) + '">';
+      } else if (s === 'pre' && submittedPred) {
+        scoreInputs =
+          '<input type="number" min="0" max="20" inputmode="numeric" data-side="home" data-m="' + $h(m.id) + '" value="' + $h(submittedPred.home) + '" disabled>' +
+          '<span class="nlsp__fs">v</span>' +
+          '<input type="number" min="0" max="20" inputmode="numeric" data-side="away" data-m="' + $h(m.id) + '" value="' + $h(submittedPred.away) + '" disabled>';
+      } else if (s === 'live') {
+        scoreInputs = '<span class="nlsp__fs">·</span><span class="nlsp__fs">vs</span><span class="nlsp__fs">·</span>';
+      } else {
+        scoreInputs =
+          '<span class="nlsp__fs">' + (a.homeTeam.score != null ? a.homeTeam.score : '?') + '</span>' +
+          '<span class="nlsp__fs">—</span>' +
+          '<span class="nlsp__fs">' + (a.awayTeam.score != null ? a.awayTeam.score : '?') + '</span>';
+      }
+
+      var foot = '';
+      if (s === 'pre') {
+        if (!submittedPred) {
+          var jokerBtn = isOwn
+            ? '<button class="nlsp__joker" disabled title="Own team already auto-doubles">🃏 (own team)</button>'
+            : '<button class="nlsp__joker' + (isJoker ? ' is-on' : '') + '" data-joker="' + $h(m.id) + '">🃏 ' + (isJoker ? 'Joker set' : 'Set as joker') + '</button>';
+          foot = '<div class="nlsp__rowfoot">' + jokerBtn + '</div>';
+        } else {
+          foot = '<div class="nlsp__rowfoot">' +
+            '<button class="nlsp__edit" data-edit="' + $h(m.id) + '">Edit until KO</button>' +
+            '<span class="nlsp__yourpred">You: ' + submittedPred.home + '–' + submittedPred.away + (submittedPred.joker ? ' 🃏' : '') + '</span>' +
+          '</div>';
+        }
+      } else if (s === 'live') {
+        foot = '<div class="nlsp__rowfoot">' +
+          (submittedPred ? '<span class="nlsp__yourpred">You: ' + submittedPred.home + '–' + submittedPred.away + (submittedPred.joker ? ' 🃏' : '') + '</span>'
+                         : '<span class="nlsp__yourpred">No prediction</span>') +
+        '</div>';
+      } else if (s === 'post') {
+        var basis;
+        if (submittedPred) {
+          var b = basePoints(submittedPred.home, submittedPred.away, a.homeTeam.score, a.awayTeam.score);
+          var mult = multiplierFor(m, submittedPred);
+          basis = 'You: ' + submittedPred.home + '–' + submittedPred.away + (submittedPred.joker ? ' 🃏' : '') +
+                  ' · ' + (b === 3 ? 'exact' : b === 1 ? 'right result' : 'wrong') +
+                  (mult > 1 ? ' (×' + mult + ')' : '');
+        } else {
+          basis = 'No prediction';
+        }
+        foot = '<div class="nlsp__rowfoot"><span class="nlsp__yourpred">' + basis + '</span></div>';
+      }
+
+      return '<div class="nlsp__row">' +
+        '<div class="nlsp__status">' +
+          '<span class="nlsp__pill ' + pillCls + '">' + $h(pillText) + '</span>' +
+          ownPill + jokerPill + ptsHTML +
+        '</div>' +
+        '<div class="nlsp__teams">' +
+          '<div class="nlsp__team is-home">' +
+            crestImg(a.homeTeam.crest, a.homeTeam.name) +
+            '<span class="nlsp__tname">' + $h(a.homeTeam.name) + '</span>' +
+          '</div>' +
+          '<div class="nlsp__score-cell">' + scoreInputs + '</div>' +
+          '<div class="nlsp__team is-away">' +
+            crestImg(a.awayTeam.crest, a.awayTeam.name) +
+            '<span class="nlsp__tname">' + $h(a.awayTeam.name) + '</span>' +
+          '</div>' +
+        '</div>' +
+        foot +
+      '</div>';
+    }).join('');
+
+    fixtures.innerHTML = head + rows;
+
+    Array.prototype.forEach.call(fixtures.querySelectorAll('input[data-m]'), function (inp) {
+      inp.addEventListener('input', function () {
+        var mid = inp.getAttribute('data-m');
+        var side = inp.getAttribute('data-side');
+        var val = inp.value === '' ? null : Math.max(0, Math.min(20, parseInt(inp.value, 10) || 0));
+        state.draft[mid] = state.draft[mid] || {};
+        state.draft[mid][side] = val;
+        renderSubmitbar();
+      });
+    });
+    Array.prototype.forEach.call(fixtures.querySelectorAll('button.nlsp__joker[data-joker]'), function (b) {
+      b.addEventListener('click', function () {
+        var mid = b.getAttribute('data-joker');
+        state.draftJoker = (state.draftJoker === mid) ? null : mid;
+        renderFixtures();
+        renderSubmitbar();
+      });
+    });
+    Array.prototype.forEach.call(fixtures.querySelectorAll('button[data-edit]'), function (b) {
+      b.addEventListener('click', function () {
+        var mid = b.getAttribute('data-edit');
+        var p = state.predictions[mid]; if (!p) return;
+        state.draft[mid] = { home: p.home, away: p.away };
+        if (p.joker) state.draftJoker = mid;
+        delete state.predictions[mid];
+        renderFixtures();
+        renderSubmitbar();
+      });
+    });
+  }
+
+  function preCount() {
+    var now = simNow();
+    var preMatches = state.matches.filter(function (m) { return stateOf(m, now) === 'pre'; });
+    var ready = 0;
+    preMatches.forEach(function (m) {
+      var p = state.predictions[m.id];
+      var d = state.draft[m.id];
+      if (p && p.home != null && p.away != null) ready++;
+      else if (d && d.home != null && d.away != null) ready++;
+    });
+    var jokerOK = !!(state.draftJoker || Object.keys(state.predictions).some(function (mid) {
+      return state.predictions[mid].joker;
+    }));
+    return { total: preMatches.length, ready: ready, jokerOK: jokerOK };
+  }
+  function renderSubmitbar() {
+    var now = simNow();
+    var hasPre = state.matches.some(function (m) { return stateOf(m, now) === 'pre'; });
+    if (!hasPre) { submitb.innerHTML = ''; return; }
+    var c = preCount();
+    var draftsPending = Object.keys(state.draft).length > 0 || state.draftJoker;
+    var canSubmit = (c.ready === c.total) && c.jokerOK && draftsPending;
+    submitb.innerHTML =
+      '<div class="nlsp__submitbar">' +
+        '<div class="nlsp__count">' + c.ready + '/' + c.total + ' predicted · ' + (c.jokerOK ? 'joker ✓' : 'joker needed') + '</div>' +
+        '<button class="nlsp__btn" id="nlsp-submit"' + (canSubmit ? '' : ' disabled') + '>' +
+          (Object.keys(state.predictions).length ? 'Save changes' : 'Submit all predictions') +
+        '</button>' +
+      '</div>';
+    var btn = document.getElementById('nlsp-submit');
+    if (btn) btn.addEventListener('click', submitDrafts);
+  }
+
+  function submitDrafts() {
+    var ref = fbDb.ref('predictions/' + state.user.id + '/' + MATCHDAY_KEY);
+    var updates = {};
+    var now = simNow();
+    state.matches.forEach(function (m) {
+      if (stateOf(m, now) !== 'pre') return;
+      var d = state.draft[m.id];
+      if (!d || d.home == null || d.away == null) return;
+      updates[m.id] = {
+        home: d.home,
+        away: d.away,
+        joker: (state.draftJoker === m.id),
+        submittedAt: firebase.database.ServerValue.TIMESTAMP
+      };
+    });
+    if (Object.keys(updates).length === 0) { setBannerOK('No changes to save.'); return; }
+
+    showBanner('Saving predictions…');
+    ref.update(updates).then(function () {
+      Object.keys(updates).forEach(function (mid) { delete state.draft[mid]; });
+      state.draftJoker = null;
+      setBannerOK('Predictions saved.');
+    }).catch(function (err) {
+      showBanner('Save failed: ' + err.message, 'err');
+    });
+  }
+
+  // ---------- league table ----------
+  function renderTable() {
+    if (!state.matches.length) { tableEl.innerHTML = ''; return; }
+    var now = simNow();
+    var userIds = Object.keys(state.allUsers);
+    if (state.user && userIds.indexOf(state.user.id) === -1 && state.registration) userIds.push(state.user.id);
+
+    var rows = userIds.map(function (uid) {
+      var reg = (uid === state.user.id) ? state.registration : state.allUsers[uid];
+      var t = totalForUser(uid, now);
+      return { uid: uid, reg: reg, total: t.total, settled: t.settled };
+    }).filter(function (r) { return r.reg; })
+      .sort(function (a, b) { return b.total - a.total; });
+
+    if (!rows.length) { tableEl.innerHTML = ''; return; }
+
+    var inner =
+      '<div class="nlsp__tablehead">' +
+        '<div class="nlsp__kicker">Leaderboard</div>' +
+        '<div class="nlsp__muted" style="margin-top:2px;">' +
+          (rows[0].settled ? rows[0].settled + ' settled · ' : '') +
+          rows.length + ' player' + (rows.length === 1 ? '' : 's') +
+        '</div>' +
+      '</div>' +
+      rows.map(function (r, i) {
+        var name = $h(r.reg.forename) + ' ' + $h(r.reg.surnameInitial || '');
+        var crest = crestImg(r.reg.crestUrl, r.reg.teamName);
+        var youCls = (r.uid === state.user.id) ? ' is-you' : '';
+        return '<div class="nlsp__trow' + youCls + '">' +
+          '<span class="nlsp__rank">' + (i + 1) + '</span>' +
+          crest +
+          '<span>' + name + (r.uid === state.user.id ? ' <span class="nlsp__muted">(you)</span>' : '') + '</span>' +
+          '<span class="nlsp__pts">' + r.total + '</span>' +
+        '</div>';
+      }).join('');
+
+    tableEl.className = 'nlsp__table';
+    tableEl.innerHTML = inner;
+  }
+
+  // ---------- RTDB listeners ----------
+  function listenAll() {
+    fbDb.ref('users').on('value', function (snap) {
+      state.allUsers = snap.val() || {};
+      state.registration = state.allUsers[state.user.id] || null;
+      if (!state.registration) {
+        renderRegistration();
+      } else {
+        register.hidden = true;
+        main.hidden = false;
+        renderGreet();
+        renderSimBar();
+        renderFixtures();
+        renderSubmitbar();
+        renderTable();
+      }
+    });
+    fbDb.ref('predictions').on('value', function (snap) {
+      var v = snap.val() || {};
+      state.allPreds = {};
+      Object.keys(v).forEach(function (jwtId) {
+        state.allPreds[jwtId] = (v[jwtId] && v[jwtId][MATCHDAY_KEY]) || {};
+      });
+      state.predictions = state.allPreds[state.user.id] || {};
+      if (!main.hidden) {
+        renderFixtures();
+        renderSubmitbar();
+        renderTable();
+      }
+    });
+  }
+
+  // ---------- boot ----------
+  (function boot() {
+    var jwt = readCookie('_gc_sa_sso_access');
+    var claims = decodeJwtPayload(jwt);
+    if (!claims || !claims.id) {
+      showBanner('Please sign in to the National League site to use the Predictor.', 'err');
+      return;
+    }
+    state.user = {
+      id:             claims.id,
+      forename:       claims.forename || 'there',
+      surname:        claims.surname  || '',
+      surnameInitial: (claims.surname || '').charAt(0).toUpperCase(),
+      email:          claims.email    || '',
+      favTeamName:    claims.favourite_team || null
+    };
+
+    Promise.all([
+      loadFirebase().then(function () {
+        var exists = firebase.apps && firebase.apps.some(function (a) { return a.name === APP_NAME; });
+        fbApp  = exists ? firebase.app(APP_NAME) : firebase.initializeApp(FIREBASE_CONFIG, APP_NAME);
+        fbAuth = firebase.auth(fbApp);
+        fbDb   = firebase.database(fbApp);
+        return fbAuth.signInAnonymously();
+      }).then(function () { state.fbAuthed = true; }),
+      fetchFixtures().then(function (ms) { state.matches = ms; })
+    ]).then(function () {
+      hideBanner();
+      listenAll();
+    }).catch(function (err) {
+      showBanner('Could not start the predictor: ' + (err && err.message ? err.message : err), 'err');
+    });
+  })();
+})();
+</script>
