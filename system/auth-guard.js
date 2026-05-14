@@ -1,7 +1,22 @@
 /*
  * auth-guard.js — NL Tools v2
  * File: /tools/system/auth-guard.js
- * Version: v5.1 (11/05/2026)
+ * Version: v6.0 (14/05/2026)
+ *
+ * v6.0: BREAKING (correctness) — sessionStorage is now cache only. Every page
+ *        load waits for firebase.auth() to confirm a signed-in user, then
+ *        re-reads users/<uid> and tools/<key> before granting access.
+ *        Fixes three classes of bug:
+ *          (a) Race where nlAuthReady fired before Firebase Auth restored its
+ *              JWT, causing tools to hit PERMISSION_DENIED on RTDB reads
+ *              despite the user appearing signed in (DAZN VIP symptom).
+ *          (b) Stale role/access flags lingering up to 4h after a server-side
+ *              change.
+ *          (c) Disabled users appearing signed in for up to 4h until cache
+ *              expires.
+ *        The nlAuthReady(session) contract is preserved, but firebase.auth()
+ *        .currentUser is now guaranteed to be populated by the time
+ *        nlAuthReady fires. No tool code changes required.
  *
  * v5.1: Writes a `page_opened` audit entry after access is granted, so
  *        every tool page visit shows up in the superadmin audit log even
@@ -420,68 +435,77 @@
     overlay.appendChild(card);
   }
 
+  /* ── Wait for Firebase Auth to resolve ─────────────────────────────────── */
+  /* Resolves with the current user (or null after timeout). The first of:
+     immediate currentUser, onAuthStateChanged firing, or AUTH_TIMEOUT_MS
+     elapsed. */
+  var AUTH_TIMEOUT_MS = 8000;
+  function waitForFirebaseUser() {
+    return new Promise(function (resolve) {
+      var resolved = false;
+      function done(u) {
+        if (resolved) return;
+        resolved = true;
+        resolve(u || null);
+      }
+
+      /* Immediate check -- might already be restored from IndexedDB */
+      var current = firebase.auth().currentUser;
+      if (current) { done(current); return; }
+
+      var unsub = firebase.auth().onAuthStateChanged(function (u) {
+        if (unsub) { try { unsub(); } catch (e) {} unsub = null; }
+        done(u);
+      });
+
+      setTimeout(function () { done(firebase.auth().currentUser); }, AUTH_TIMEOUT_MS);
+    });
+  }
+
   /* ── Main flow ─────────────────────────────────────────────────────────── */
+  /* v6.0: single path. sessionStorage is cache only.
+     1. Wait for Firebase Auth to confirm a signed-in user.
+     2. If no user → clear cache, redirect to login.
+     3. Re-read users/<uid> + tools/<key> in parallel (source of truth).
+     4. Refresh sessionStorage cache.
+     5. checkAccess against fresh data. */
   function run() {
-    /* 1. Try sessionStorage first -- instant, no network call */
-    var session = nlSession.read();
+    /* Show "Verifying" if we have a cached session, otherwise "Signing in". */
+    setStatus(nlSession.read() ? 'Verifying session…' : 'Signing you in…');
 
-    if (session) {
-      /* Session found -- get tool data from RTDB (lightweight, just one node) */
-      /* then check access. Tool data needed for denied card label/description */
-      firebase.database().ref('tools/' + NL_TOOL_KEY).once('value')
-        .then(function(snap) {
-          var toolData = snap.exists() ? snap.val() : null;
-          checkAccess(session, toolData);
-        })
-        .catch(function() {
-          /* RTDB failed -- check access without tool data */
-          checkAccess(session, null);
-        });
-      return;
-    }
+    waitForFirebaseUser().then(function (user) {
+      if (!user) {
+        /* No Firebase Auth user. Either truly signed out, or session has
+           expired / been revoked since the cache was written. */
+        nlSession.clear();
+        window.location.replace(LOGIN_URL);
+        return;
+      }
 
-    /* 2. No session -- use Firebase Auth (direct access / bookmark) */
-    var auth = firebase.auth();
-    var db   = firebase.database();
-
-    setStatus('Signing you in…');
-
-    /* Fallback: check currentUser immediately in case onAuthStateChanged
-       doesn't fire (GitHub Pages cached auth state issue) */
-    var _authHandled = false;
-    function handleAuthUser(user) {
-      if (_authHandled) return;
-      _authHandled = true;
-      if (!user) { window.location.replace(LOGIN_URL); return; }
       setStatus('Loading your profile…');
+      var db = firebase.database();
+
       Promise.all([
         db.ref('users/' + user.uid).once('value'),
         db.ref('tools/' + NL_TOOL_KEY).once('value')
-      ]).then(function(snaps) {
-        if (!snaps[0].exists()) { window.location.replace(PORTAL_URL + '?guard=error'); return; }
+      ]).then(function (snaps) {
+        if (!snaps[0].exists()) {
+          /* User record missing -- account deleted or never set up. */
+          nlSession.clear();
+          window.location.replace(PORTAL_URL + '?guard=error');
+          return;
+        }
         var userData = snaps[0].val();
         var toolData = snaps[1].exists() ? snaps[1].val() : null;
+
+        /* Refresh cache so portal / other tools see the latest values. */
         nlSession.write(user.uid, userData);
         checkAccess(nlSession.read(), toolData);
-      }).catch(function() { window.location.replace(PORTAL_URL + '?guard=error'); });
-    }
-
-    /* Check currentUser immediately (works if auth state already resolved) */
-    var currentUser = auth.currentUser;
-    if (currentUser) {
-      handleAuthUser(currentUser);
-    } else {
-      /* Register listener as backup */
-      auth.onAuthStateChanged(function(user) { handleAuthUser(user); });
-    }
-
-    /* Belt-and-braces: if neither fires in 5s, check currentUser once more */
-    setTimeout(function() {
-      if (_authHandled) return;
-      var u = auth.currentUser;
-      if (u) { handleAuthUser(u); }
-      else { window.location.replace(LOGIN_URL); }
-    }, 5000);
+      }).catch(function (err) {
+        console.error('[auth-guard] RTDB read failed:', err);
+        window.location.replace(PORTAL_URL + '?guard=error');
+      });
+    });
   }
 
   run();
