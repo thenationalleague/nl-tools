@@ -1,0 +1,116 @@
+<!-- ============================================================
+     SCORE PREDICTOR — DEBUG PROBE v1
+     Drop this whole block into the page's custom HTML field.
+     It will render a panel showing what the SSO exposes to JS.
+     Nothing is sent anywhere — read-only, all in-browser.
+     ============================================================ -->
+
+<div id="sp-debug" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.45;background:#0b0f17;color:#e6edf3;padding:16px;border-radius:8px;margin:16px 0;border:1px solid #30363d;max-width:900px;overflow:auto;">
+  <div style="font-size:14px;font-weight:600;margin-bottom:8px;color:#7ee787;">Score Predictor — Debug Probe</div>
+  <div id="sp-debug-status" style="color:#f0883e;margin-bottom:8px;">
+    If you only see this line, the &lt;script&gt; tag was stripped by the CMS.
+  </div>
+  <div id="sp-debug-out"></div>
+</div>
+
+<script>
+(function () {
+  var statusEl = document.getElementById('sp-debug-status');
+  var outEl = document.getElementById('sp-debug-out');
+  if (!statusEl || !outEl) return;
+  statusEl.style.color = '#7ee787';
+  statusEl.textContent = 'Script executed OK. Results below.';
+
+  function section(title, body) {
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'margin:10px 0;padding:8px;background:#161b22;border:1px solid #30363d;border-radius:6px;';
+    var h = document.createElement('div');
+    h.style.cssText = 'color:#79c0ff;font-weight:600;margin-bottom:4px;';
+    h.textContent = title;
+    var pre = document.createElement('pre');
+    pre.style.cssText = 'margin:0;white-space:pre-wrap;word-break:break-all;color:#e6edf3;';
+    pre.textContent = body;
+    wrap.appendChild(h);
+    wrap.appendChild(pre);
+    outEl.appendChild(wrap);
+  }
+
+  // ---------- 1. Page context ----------
+  section('Page context', [
+    'href:     ' + location.href,
+    'origin:   ' + location.origin,
+    'referrer: ' + (document.referrer || '(none)'),
+    'UA:       ' + navigator.userAgent
+  ].join('\n'));
+
+  // ---------- 2. Cookies visible to JS ----------
+  var raw = document.cookie || '';
+  var cookies = {};
+  raw.split('; ').filter(Boolean).forEach(function (kv) {
+    var i = kv.indexOf('=');
+    if (i < 0) return;
+    cookies[kv.slice(0, i)] = kv.slice(i + 1);
+  });
+  var cookieNames = Object.keys(cookies);
+  section('Cookies visible to JS (' + cookieNames.length + ')', cookieNames.join('\n') || '(none)');
+
+  // ---------- 3. SSO cookies of interest ----------
+  var interesting = ['_sa_sso_upid', '_gc_sa_sso_access', '_gc_sa_sso_refresh'];
+  var ssoLines = interesting.map(function (n) {
+    var v = cookies[n];
+    if (!v) return n + ': (not visible — either absent or HttpOnly)';
+    var preview = v.length > 40 ? v.slice(0, 20) + '…' + v.slice(-10) : v;
+    return n + ': ' + preview + '  (length ' + v.length + ')';
+  });
+  section('SSO cookies', ssoLines.join('\n'));
+
+  // ---------- 4. Decode access token JWT (no signature verification — debug only) ----------
+  function b64urlDecode(s) {
+    s = s.replace(/-/g, '+').replace(/_/g, '/');
+    while (s.length % 4) s += '=';
+    try { return decodeURIComponent(escape(atob(s))); } catch (e) { return null; }
+  }
+  var access = cookies['_gc_sa_sso_access'];
+  if (access && access.split('.').length === 3) {
+    var parts = access.split('.');
+    var header = b64urlDecode(parts[0]);
+    var payload = b64urlDecode(parts[1]);
+    var prettyHeader = header;
+    var prettyPayload = payload;
+    try { prettyHeader = JSON.stringify(JSON.parse(header), null, 2); } catch (e) {}
+    try { prettyPayload = JSON.stringify(JSON.parse(payload), null, 2); } catch (e) {}
+    section('Access token — header (decoded, unverified)', prettyHeader || '(decode failed)');
+    section('Access token — payload (decoded, unverified)', prettyPayload || '(decode failed)');
+  } else {
+    section('Access token JWT', '(not a JWT or not visible to JS)');
+  }
+
+  // ---------- 5. Common JS globals that sometimes hold user info ----------
+  var globals = ['user', 'currentUser', 'USER', 'profile', '__INITIAL_STATE__', '__NEXT_DATA__', '__NUXT__', 'dataLayer'];
+  var globalLines = globals.map(function (k) {
+    var v = window[k];
+    if (typeof v === 'undefined') return k + ': undefined';
+    if (v === null) return k + ': null';
+    try {
+      var s = JSON.stringify(v);
+      return k + ': ' + (s.length > 200 ? s.slice(0, 200) + '…' : s);
+    } catch (e) {
+      return k + ': [unstringifiable ' + (typeof v) + ']';
+    }
+  });
+  section('Window globals', globalLines.join('\n'));
+
+  // ---------- 6. localStorage / sessionStorage keys ----------
+  function storageKeys(store, label) {
+    try {
+      var keys = [];
+      for (var i = 0; i < store.length; i++) keys.push(store.key(i));
+      section(label + ' keys (' + keys.length + ')', keys.join('\n') || '(none)');
+    } catch (e) {
+      section(label, '(blocked: ' + e.message + ')');
+    }
+  }
+  storageKeys(localStorage, 'localStorage');
+  storageKeys(sessionStorage, 'sessionStorage');
+})();
+</script>
