@@ -2355,12 +2355,16 @@ auth.onAuthStateChanged(function(user) {
 
       loadTools().then(function() {
         initPortal();
-        /* Only audit an actual fresh sign-in, not page reloads. Firebase
-           Auth records the last real sign-in timestamp in user metadata;
-           within 60s of that we treat this as a genuine sign-in event. */
-        var lastSignInMs = user.metadata && user.metadata.lastSignInTime
-          ? new Date(user.metadata.lastSignInTime).getTime() : 0;
-        if (lastSignInMs && Date.now() - lastSignInMs < 60000) {
+        /* Only audit when the user actually pressed Sign In on /tools/.
+           The login page sets nl_fresh_signin in sessionStorage just before
+           calling signInWithEmailAndPassword; we consume + clear it here so
+           subsequent portal loads (navigation, refresh) don't re-log. */
+        var freshSignin = false;
+        try {
+          freshSignin = sessionStorage.getItem('nl_fresh_signin') === '1';
+          if (freshSignin) sessionStorage.removeItem('nl_fresh_signin');
+        } catch (e) {}
+        if (freshSignin) {
           writeAudit('signed_in', 'Portal loaded');
         }
       });
