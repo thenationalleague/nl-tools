@@ -233,7 +233,26 @@
 
   function renderFixtures() {
     if (!MATCHES.length) {
-      fixtures.innerHTML = '<div style="padding:24px;text-align:center;color:#57606a;">No matches found for ' + MATCH_DAY + '.</div>';
+      var diag = window.__SP_DIAG__ || {};
+      var dateCounts = diag.dateCounts || {};
+      var topDates = Object.keys(dateCounts).sort(function (a, b) { return dateCounts[b] - dateCounts[a]; }).slice(0, 12);
+      var sample = diag.sample || {};
+      fixtures.innerHTML =
+        '<div style="padding:18px;background:#fff8e6;border:1px solid #f0c674;border-radius:8px;font-size:13px;color:#5b4900;">' +
+          '<div style="font-weight:600;margin-bottom:8px;">No matches found for ' + MATCH_DAY + '. Diagnostics:</div>' +
+          '<pre style="margin:0;white-space:pre-wrap;word-break:break-all;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;">' +
+          'Request URL:   ' + escapeHtml(diag.url || '(none)') + '\n' +
+          'HTTP status:   ' + escapeHtml(String(diag.status || '?')) + '\n' +
+          'Top-level keys: ' + escapeHtml((diag.topKeys || []).join(', ')) + '\n' +
+          'data[] length: ' + escapeHtml(String(diag.dataLen == null ? '?' : diag.dataLen)) + '\n' +
+          'meta / links:  ' + escapeHtml(JSON.stringify(diag.meta || {})) + '\n\n' +
+          'Distinct dates seen (top 12, with counts):\n  ' +
+          (topDates.length
+            ? topDates.map(function (d) { return d + ' × ' + dateCounts[d]; }).join('\n  ')
+            : '(none — data array empty or no kickOffDateUTC field)') + '\n\n' +
+          'Sample of first match.attributes (keys + key values):\n' + escapeHtml(JSON.stringify(sample, null, 2)) +
+          '</pre>' +
+        '</div>';
       return;
     }
     var totalPts = 0, totalPredicted = 0, totalDone = 0;
@@ -278,16 +297,47 @@
   function fetchFixtures() {
     var url = API_BASE + '/matches/?competitionID=' + COMP_ID + '&seasonID=' + SEASON_ID +
               '&sort=kickOffDateUTC&page.number=1&page.size=100';
+    window.__SP_DIAG__ = { url: url };
     return fetch(url, { credentials: 'omit' })
       .then(function (r) {
+        window.__SP_DIAG__.status = r.status;
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       })
       .then(function (json) {
+        window.__SP_DIAG__.topKeys = json ? Object.keys(json) : [];
+        window.__SP_DIAG__.meta    = (json && (json.meta || json.links)) || {};
         var all = (json && json.data) || [];
+        window.__SP_DIAG__.dataLen = all.length;
+
+        // Tally every distinct date-prefix we can find on a match (try multiple field names)
+        var counts = {};
+        for (var i = 0; i < all.length; i++) {
+          var a = all[i].attributes || {};
+          var ko = a.kickOffDateUTC || a.kickoffDateUTC || a.kickOffDate || a.kickoffDate || a.date || '';
+          var key = String(ko).slice(0, 10);
+          if (key) counts[key] = (counts[key] || 0) + 1;
+        }
+        window.__SP_DIAG__.dateCounts = counts;
+
+        // Sample of the first match to expose actual field names
+        if (all[0]) {
+          var s = all[0].attributes || {};
+          window.__SP_DIAG__.sample = {
+            keys: Object.keys(s),
+            kickOffDateUTC: s.kickOffDateUTC,
+            competitionID: s.competitionID,
+            seasonID: s.seasonID,
+            matchPeriod: s.matchPeriod,
+            homeTeam: s.homeTeam && s.homeTeam.name,
+            awayTeam: s.awayTeam && s.awayTeam.name
+          };
+        }
+
         return all.filter(function (m) {
-          var ko = (m.attributes && m.attributes.kickOffDateUTC) || '';
-          return ko.indexOf(MATCH_DAY) === 0;
+          var a = m.attributes || {};
+          var ko = a.kickOffDateUTC || a.kickoffDateUTC || a.kickOffDate || a.kickoffDate || a.date || '';
+          return String(ko).indexOf(MATCH_DAY) === 0;
         });
       });
   }
