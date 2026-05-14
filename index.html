@@ -606,11 +606,17 @@ function showMsg(id, text, type) {
 function clearAllMsgs() {
   document.querySelectorAll('.msg').forEach(function(m) { m.className = 'msg'; m.textContent = ''; });
 }
-function setBtnLoading(id, loading, label) {
+function setBtnLoading(id, loading, label, loadingLabel) {
   var btn = document.getElementById(id);
   if (!btn) return;
   btn.disabled = loading;
-  btn.innerHTML = loading ? '<span class="btn-spinner"></span>' : (label || btn.dataset.label || btn.textContent);
+  if (loading) {
+    /* Preserve button width so the layout doesn't collapse */
+    btn.innerHTML = '<span class="spinner"></span><span style="opacity:0.85">'
+                  + (loadingLabel || 'Loading…') + '</span>';
+  } else {
+    btn.innerHTML = label || btn.dataset.label || btn.textContent;
+  }
   if (label) btn.dataset.label = label;
 }
 
@@ -737,11 +743,17 @@ function doSignIn() {
   var email = document.getElementById('signinEmail').value.trim();
   var pass  = document.getElementById('signinPassword').value;
   if (!email || !pass) { showMsg('signinMsg', 'Please enter your email and password.', 'error'); return; }
-  setBtnLoading('signinBtn', true);
+  setBtnLoading('signinBtn', true, null, 'Signing in…');
+  /* Flag a genuine sign-in so the portal can audit it on its next load.
+     This replaces the previous lastSignInTime-window heuristic. */
+  try { sessionStorage.setItem('nl_fresh_signin', '1'); } catch (e) {}
   auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
     .then(function() { return auth.signInWithEmailAndPassword(email, pass); })
     .catch(function(err) {
       setBtnLoading('signinBtn', false, 'Sign in');
+      /* Sign-in failed -- clear the fresh-signin flag so a later success
+         elsewhere doesn't get falsely attributed. */
+      try { sessionStorage.removeItem('nl_fresh_signin'); } catch (e) {}
       var msg = 'Sign-in failed. Please check your details.';
       if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') msg = 'Incorrect email or password.';
       else if (err.code === 'auth/too-many-requests') msg = 'Too many attempts. Please try again later or reset your password.';
