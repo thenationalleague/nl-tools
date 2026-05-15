@@ -29,6 +29,7 @@
   <div class="nlsp__banner" id="nlsp-banner" hidden>Loading predictor…</div>
   <div class="nlsp__screen" id="nlsp-register" hidden></div>
   <div class="nlsp__screen" id="nlsp-main" hidden>
+    <div id="nlsp-datebar"></div>
     <div id="nlsp-hero"></div>
     <div id="nlsp-statusbar"></div>
     <div id="nlsp-fixtures"></div>
@@ -146,6 +147,36 @@
   }
   #nlPredictor .nlsp__footer img {
     height:22px; width:auto; display:block; opacity:.65;
+  }
+
+  /* Date selector — horizontally scrollable strip of matchday pills */
+  #nlPredictor .nlsp__datebar {
+    display:flex; gap:6px;
+    padding:14px 2px 8px;
+    overflow-x:auto; overflow-y:hidden;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+  }
+  #nlPredictor .nlsp__datebar::-webkit-scrollbar { display:none; }
+  #nlPredictor .nlsp__datebar button {
+    flex:none;
+    font-family:inherit; font-size:11px;
+    text-transform:uppercase; letter-spacing:1px;
+    padding:7px 12px; border-radius:999px; cursor:pointer;
+    background:var(--white); color:var(--text-muted);
+    border:1px solid var(--border);
+    font-weight:800; font-variation-settings:'wght' 800;
+    white-space:nowrap;
+    transition:all .15s ease;
+  }
+  #nlPredictor .nlsp__datebar button:hover {
+    color:var(--primary); border-color:var(--primary);
+  }
+  #nlPredictor .nlsp__datebar button.is-active {
+    background:var(--text); color:var(--white); border-color:var(--text);
+  }
+  #nlPredictor .nlsp__datebar button.is-today {
+    border-color:var(--primary);
   }
 
   /* Hero — compressed: greeting ribbon + date */
@@ -472,13 +503,15 @@
     text-transform:uppercase; letter-spacing:1.2px;
     font-weight:800; font-variation-settings:'wght' 800;
   }
-  #nlPredictor .nlsp__simbar input[type="datetime-local"] {
+  #nlPredictor .nlsp__simbar input[type="date"],
+  #nlPredictor .nlsp__simbar input[type="time"] {
     font-family:inherit; font-size:12px;
     padding:4px 8px; border-radius:var(--radius);
     border:1px solid var(--border); background:var(--white); color:var(--text);
     font-weight:600; font-variation-settings:'wght' 600;
   }
-  #nlPredictor .nlsp__simbar input[type="datetime-local"]:focus {
+  #nlPredictor .nlsp__simbar input[type="date"]:focus,
+  #nlPredictor .nlsp__simbar input[type="time"]:focus {
     outline:none; border-color:var(--primary);
     box-shadow:0 0 0 2px color-mix(in srgb, var(--primary) 25%, transparent);
   }
@@ -551,6 +584,7 @@
   var simEl     = document.getElementById('nlsp-sim');
   var sponsorEl = document.getElementById('nlsp-sponsor');
   var footerEl  = document.getElementById('nlsp-footer');
+  var datebarEl = document.getElementById('nlsp-datebar');
 
   // ---------- sponsor + footer (always visible) ----------
   var ENTERPRISE_LOGO_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/partners/Enterprise.png';
@@ -644,7 +678,7 @@
   var state = {
     user: null, fbAuthed: false,
     allMatches: [],     // every fixture for the season (paginated full fetch)
-    matches: [],        // filtered subset for the currently-selected matchday
+    matches: [],        // filtered subset for the currently-active matchday
     registration: null,
     allPredsRaw: {},    // full RTDB predictions tree { jwtId: { matchday: { matchId: ... } } }
     predictions: {},    // current user, current matchday
@@ -652,7 +686,8 @@
     drafts: {},
     editing: {},
     allUsers: {},
-    sim: { fixed: null } // a JS Date overriding "now", or null for the real clock
+    selectedMatchday: null, // explicit override from the date selector; null = derive
+    sim: { fixed: null }     // explicit sim 'now' time; null = real clock
   };
 
   // ---------- sim clock ----------
@@ -662,13 +697,13 @@
   function setSimFixed(d) {
     state.sim.fixed = d;
     recomputeMatchday();
-    renderSimBar();
-    renderHero();
-    renderFixtures();
-    renderReset();
-    renderTable();
+    renderAll();
   }
   function clearSimFixed() { setSimFixed(null); }
+  function renderAll() {
+    renderDatebar(); renderSimBar(); renderHero();
+    renderFixtures(); renderSubmitbar(); renderReset(); renderTable();
+  }
 
   // ---------- matchday derivation ----------
   // BST/GMT calendar date — keeps a 23:00 BST kickoff on the right matchday
@@ -677,8 +712,34 @@
     if (!d) return '';
     return d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
   }
-  function currentMatchdayKey() { return bstDateOf(simNow()); }
   function matchMatchdayKey(m) { return bstDateOf(koOf(m)); }
+  function uniqueMatchdayKeys() {
+    var seen = {};
+    (state.allMatches || []).forEach(function (m) {
+      var k = matchMatchdayKey(m); if (k) seen[k] = true;
+    });
+    return Object.keys(seen).sort();
+  }
+  // Default: today (in BST) if any matches today, else next upcoming matchday.
+  // Always computed from REAL today — sim time doesn't auto-shift the default.
+  function defaultMatchdayKey() {
+    var today = bstDateOf(new Date());
+    var keys = uniqueMatchdayKeys();
+    if (keys.indexOf(today) !== -1) return today;
+    for (var i = 0; i < keys.length; i++) {
+      if (keys[i] > today) return keys[i];
+    }
+    return keys[keys.length - 1] || today;
+  }
+  // The matchday actually being shown
+  function currentMatchdayKey() {
+    return state.selectedMatchday || defaultMatchdayKey();
+  }
+  function setSelectedMatchday(key) {
+    state.selectedMatchday = key;
+    recomputeMatchday();
+    renderAll();
+  }
   function recomputeMatchday() {
     var key = currentMatchdayKey();
     state.matches = (state.allMatches || []).filter(function (m) { return matchMatchdayKey(m) === key; })
@@ -827,18 +888,45 @@
     });
   }
 
+  // ---------- date selector (matchday navigator) ----------
+  // Horizontally scrollable strip of every matchday in the season. Default
+  // selection is today (in BST) if any matches today, otherwise the next
+  // upcoming matchday. Click a pill to navigate; the active pill scrolls
+  // into view automatically.
+  function renderDatebar() {
+    var keys = uniqueMatchdayKeys();
+    if (!keys.length) { datebarEl.innerHTML = ''; return; }
+    var active = currentMatchdayKey();
+    var today  = bstDateOf(new Date());
+    datebarEl.className = 'nlsp__datebar';
+    datebarEl.innerHTML = keys.map(function (k) {
+      var d = new Date(k + 'T12:00:00Z');
+      var label = d.toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short', timeZone:'Europe/London' });
+      var cls = '';
+      if (k === active) cls += ' is-active';
+      if (k === today)  cls += ' is-today';
+      return '<button data-md="' + $h(k) + '" class="' + cls.trim() + '">' + $h(label) + '</button>';
+    }).join('');
+    Array.prototype.forEach.call(datebarEl.querySelectorAll('button'), function (b) {
+      b.addEventListener('click', function () {
+        setSelectedMatchday(b.getAttribute('data-md'));
+      });
+    });
+    // Centre the active pill in view
+    var activeBtn = datebarEl.querySelector('button.is-active');
+    if (activeBtn && activeBtn.scrollIntoView) {
+      try { activeBtn.scrollIntoView({ behavior:'auto', inline:'center', block:'nearest' }); } catch (e) {}
+    }
+  }
+
   // ---------- hero ----------
   // Greeting ribbon (small caps) + matchday date. The ×3 boost is no longer
   // surfaced here — it's surfaced via the gold left-edge on the own-team
   // fixture row plus a tooltip on that row.
   function renderHero() {
-    var firstKO = state.matches.length ? koOf(state.matches[0]) : null;
-    var dateLabel = firstKO
-      ? firstKO.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', timeZone:'Europe/London' })
-      : (function () {
-          var d = simNow();
-          return d.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', timeZone:'Europe/London' });
-        })();
+    var key = currentMatchdayKey();
+    var midday = new Date(key + 'T12:00:00Z');
+    var dateLabel = midday.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', timeZone:'Europe/London' });
     var r = state.registration;
     var parts = [ $h((state.user.forename || '').toUpperCase()) ];
     if (r && r.teamName) parts.push($h(r.teamName.toUpperCase()));
@@ -1264,10 +1352,13 @@
   // post-FT or even mid-season states. The datetime-local value is treated
   // as the user's local time; new Date(<value>) handles the conversion.
   function pad2(n) { n = String(n); return n.length < 2 ? '0' + n : n; }
-  function toLocalInputValue(d) {
+  function dateInputValue(d) {
     if (!d) return '';
-    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) +
-           'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+  }
+  function timeInputValue(d) {
+    if (!d) return '';
+    return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
   }
   function renderSimBar() {
     var d = simNow();
@@ -1275,18 +1366,27 @@
       ? 'Sim · ' + d.toLocaleString('en-GB', { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit', timeZone:'Europe/London' }) + ' BST'
       : 'Live clock';
     simEl.className = 'nlsp__simbar';
+    // Separate date + time inputs — datetime-local has a quirk where typing
+    // a single digit into the minutes field auto-completes (e.g. "4" -> "04")
+    // and prevents you typing "45". Splitting it gives you natural typing.
     simEl.innerHTML =
       '<span class="nlsp__simlbl">Sim now</span>' +
-      '<input type="datetime-local" id="nlsp-sim-input" value="' + $h(toLocalInputValue(d)) + '">' +
+      '<input type="date" id="nlsp-sim-date" value="' + $h(dateInputValue(d)) + '">' +
+      '<input type="time" id="nlsp-sim-time" value="' + $h(timeInputValue(d)) + '" step="60">' +
       '<button id="nlsp-sim-now" class="nlsp__sim-now-btn">Now</button>' +
       '<span class="nlsp__clock">' + $h(live) + '</span>';
-    var input = document.getElementById('nlsp-sim-input');
-    input.addEventListener('change', function () {
-      var v = input.value; if (!v) return;
-      var picked = new Date(v); // local-time interpretation
+    var dateInput = document.getElementById('nlsp-sim-date');
+    var timeInput = document.getElementById('nlsp-sim-time');
+    function commit() {
+      var dv = dateInput.value || dateInputValue(d);
+      var tv = timeInput.value || timeInputValue(d);
+      if (!dv) return;
+      var picked = new Date(dv + 'T' + (tv || '12:00'));
       if (isNaN(picked.getTime())) return;
       setSimFixed(picked);
-    });
+    }
+    dateInput.addEventListener('change', commit);
+    timeInput.addEventListener('change', commit);
     document.getElementById('nlsp-sim-now').addEventListener('click', clearSimFixed);
   }
 
@@ -1301,7 +1401,7 @@
       } else {
         hideGate();
         register.hidden = true; main.hidden = false;
-        renderHero(); renderFixtures(); renderSubmitbar(); renderReset(); renderTable(); renderSimBar();
+        renderDatebar(); renderHero(); renderFixtures(); renderSubmitbar(); renderReset(); renderTable(); renderSimBar();
       }
     });
     fbDb.ref('predictions').on('value', function (snap) {
