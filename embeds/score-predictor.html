@@ -122,21 +122,42 @@
   }
   @keyframes nlsp-spin { to { transform:rotate(360deg); } }
 
-  /* Sponsor header — Enterprise + "Score Predictor" */
+  /* Sponsor header — Enterprise + division logo on left, title + team crest on right */
   #nlPredictor .nlsp__sponsor {
     display:flex; align-items:center; justify-content:space-between;
     background:#000; color:#fff;
-    padding:14px 16px; border-radius:var(--radius) var(--radius) 0 0;
+    padding:12px 16px; border-radius:var(--radius) var(--radius) 0 0;
     border-bottom:2px solid #34ab56;
-    gap:12px;
+    gap:12px; min-height:54px;
   }
-  #nlPredictor .nlsp__sponsor img {
+  #nlPredictor .nlsp__sponsor-left,
+  #nlPredictor .nlsp__sponsor-right {
+    display:flex; align-items:center; gap:10px;
+  }
+  #nlPredictor .nlsp__sponsor img.nlsp__sponsor-logo {
+    height:26px; width:auto; display:block; object-fit:contain;
+  }
+  #nlPredictor .nlsp__sponsor img.nlsp__sponsor-comp {
     height:28px; width:auto; display:block; object-fit:contain;
+    padding-left:10px;
+    border-left:1px solid rgba(255,255,255,.18);
+  }
+  #nlPredictor .nlsp__sponsor img.nlsp__sponsor-team {
+    height:28px; width:28px; display:block; object-fit:contain;
+    background:#fff; border-radius:4px; padding:1px;
   }
   #nlPredictor .nlsp__sponsor .nlsp__sponsor-title {
     font-size:15px; color:#fff;
     text-transform:uppercase; letter-spacing:1.5px;
     font-weight:900; font-variation-settings:'wght' 900;
+    line-height:1;
+  }
+  @media (max-width:520px) {
+    #nlPredictor .nlsp__sponsor { padding:10px 12px; min-height:48px; }
+    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-logo,
+    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-comp { height:22px; }
+    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-team { height:24px; width:24px; }
+    #nlPredictor .nlsp__sponsor .nlsp__sponsor-title { font-size:13px; letter-spacing:1.2px; }
   }
 
   /* Footer — small Enterprise logo only */
@@ -149,14 +170,19 @@
     height:22px; width:auto; display:block; opacity:.65;
   }
 
-  /* Date selector — horizontally scrollable strip of matchday pills */
+  /* Date selector — horizontally scrollable strip of matchday pills.
+     Click-drag enabled on desktop via JS (enableDragScroll). */
   #nlPredictor .nlsp__datebar {
     display:flex; gap:6px;
     padding:14px 2px 8px;
     overflow-x:auto; overflow-y:hidden;
     -webkit-overflow-scrolling:touch;
     scrollbar-width:none;
+    cursor:grab;
+    user-select:none;
   }
+  #nlPredictor .nlsp__datebar.is-dragging { cursor:grabbing; }
+  #nlPredictor .nlsp__datebar.is-dragging button { pointer-events:none; }
   #nlPredictor .nlsp__datebar::-webkit-scrollbar { display:none; }
   #nlPredictor .nlsp__datebar button {
     flex:none;
@@ -563,7 +589,14 @@
   // SA SSO tenant for thenationalleague — matches the tenant_id claim in JWTs
   var SSO_TENANT_ID = 'EBLzD6derkq3NH7m9Rp2mQ';
 
-  var COMP_ID    = 89;
+  // Three NL divisions wired in. Add/change here to extend coverage.
+  var COMPS = {
+    89:  { id: 89,  name: 'National Division',     shortName: 'National', logoFile: 'National.png' },
+    373: { id: 373, name: 'National League North', shortName: 'North',    logoFile: 'North.png'    },
+    372: { id: 372, name: 'National League South', shortName: 'South',    logoFile: 'South.png'    }
+  };
+  var COMP_IDS = Object.keys(COMPS).map(Number); // [89, 373, 372]
+  var DEFAULT_COMP_ID = 89; // National — fallback when team→comp lookup fails
   var SEASON_ID  = 2025;
   var API_BASE   = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
   var MAX_PAGES  = 10;
@@ -589,10 +622,25 @@
   // ---------- sponsor + footer (always visible) ----------
   var ENTERPRISE_LOGO_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/partners/Enterprise.png';
   function renderSponsor() {
+    var r = state.registration;
+    var compId = userCompId() || DEFAULT_COMP_ID;
+    var teamCrestHTML = (r && r.crestUrl)
+      ? '<img class="nlsp__sponsor-team" src="' + $h(r.crestUrl) + '" alt="' + $h(r.teamName || 'My team') + '" ' +
+          'title="' + $h(r.teamName || '') + ' · ' + $h(compName(compId)) + '" ' +
+          'onerror="this.onerror=null;this.style.display=\'none\';">'
+      : '';
     sponsorEl.innerHTML =
-      '<img src="' + ENTERPRISE_LOGO_URL + '" alt="Enterprise" ' +
-        'onerror="this.onerror=null;this.style.display=\'none\';">' +
-      '<span class="nlsp__sponsor-title">Score Predictor</span>';
+      '<div class="nlsp__sponsor-left">' +
+        '<img class="nlsp__sponsor-logo" src="' + ENTERPRISE_LOGO_URL + '" alt="Enterprise" ' +
+          'onerror="this.onerror=null;this.style.display=\'none\';">' +
+        '<img class="nlsp__sponsor-comp" src="' + compLogoUrl(compId) + '" alt="' + $h(compName(compId)) + '" ' +
+          'title="' + $h(compName(compId)) + '" ' +
+          'onerror="this.onerror=null;this.style.display=\'none\';">' +
+      '</div>' +
+      '<div class="nlsp__sponsor-right">' +
+        '<span class="nlsp__sponsor-title">Score Predictor</span>' +
+        teamCrestHTML +
+      '</div>';
   }
   function renderFooter() {
     footerEl.innerHTML =
@@ -722,8 +770,10 @@
   }
   function matchMatchdayKey(m) { return bstDateOf(koOf(m)); }
   function uniqueMatchdayKeys() {
+    var compId = userCompId();
     var seen = {};
     (state.allMatches || []).forEach(function (m) {
+      if (compId && m.attributes.competitionID !== compId) return;
       var k = matchMatchdayKey(m); if (k) seen[k] = true;
     });
     return Object.keys(seen).sort();
@@ -750,8 +800,11 @@
   }
   function recomputeMatchday() {
     var key = currentMatchdayKey();
-    state.matches = (state.allMatches || []).filter(function (m) { return matchMatchdayKey(m) === key; })
-      .sort(function (a, b) { return dateOf(a).localeCompare(dateOf(b)); });
+    var compId = userCompId();
+    state.matches = (state.allMatches || []).filter(function (m) {
+      if (compId && m.attributes.competitionID !== compId) return false;
+      return matchMatchdayKey(m) === key;
+    }).sort(function (a, b) { return dateOf(a).localeCompare(dateOf(b)); });
     recomputePredictionsFromRaw();
   }
   function recomputePredictionsFromRaw() {
@@ -812,14 +865,50 @@
   }
 
   // ---------- fetch fixtures ----------
+  // ---------- multi-competition lookup ----------
+  // Build a teamId -> competitionID map by walking allMatches.
+  var teamCompCache = null;
+  function buildTeamCompMap() {
+    teamCompCache = {};
+    (state.allMatches || []).forEach(function (m) {
+      var c = m.attributes.competitionID;
+      if (m.attributes.homeTeam && m.attributes.homeTeam.teamID) teamCompCache[m.attributes.homeTeam.teamID] = c;
+      if (m.attributes.awayTeam && m.attributes.awayTeam.teamID) teamCompCache[m.attributes.awayTeam.teamID] = c;
+    });
+  }
+  function teamCompId(teamId) {
+    if (!teamCompCache) buildTeamCompMap();
+    return teamCompCache[teamId] || null;
+  }
+  function userCompId() {
+    if (!state.registration) return null;
+    return teamCompId(state.registration.teamId) || DEFAULT_COMP_ID;
+  }
+  function compLogoUrl(compId) {
+    var c = COMPS[compId] || COMPS[DEFAULT_COMP_ID];
+    return 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/divisions/' + c.logoFile;
+  }
+  function compName(compId) {
+    var c = COMPS[compId] || COMPS[DEFAULT_COMP_ID];
+    return c.name;
+  }
+
+  // ---------- fetch fixtures (all 3 competitions in parallel) ----------
   function fetchFixtures() {
+    return Promise.all(COMP_IDS.map(fetchCompetition))
+      .then(function (results) {
+        var all = [].concat.apply([], results);
+        // Sort by KO; matchday/comp filtering happens in recomputeMatchday()
+        return all.sort(function (a, b) { return dateOf(a).localeCompare(dateOf(b)); });
+      });
+  }
+  function fetchCompetition(compId) {
     var all = [];
     function page(n) {
-      var url = API_BASE + '/matches/?competitionID=' + COMP_ID + '&seasonID=' + SEASON_ID +
+      var url = API_BASE + '/matches/?competitionID=' + compId + '&seasonID=' + SEASON_ID +
                 '&sort=kickOffDateUTC&page.number=' + n + '&page.size=100';
-      // No banner — the gate card's spinner + "Loading…" covers this phase.
       return fetch(url, { credentials:'omit' })
-        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status + ' (comp ' + compId + ')'); return r.json(); })
         .then(function (json) {
           var d = (json && json.data) || [];
           all = all.concat(d);
@@ -827,35 +916,56 @@
           if (d.length === 100 && (total == null || all.length < total) && n < MAX_PAGES) return page(n + 1);
         });
     }
-    return page(1).then(function () {
-      // Keep the full season; matchday filtering happens in recomputeMatchday()
-      // based on simNow().
-      return all.sort(function (a, b) { return dateOf(a).localeCompare(dateOf(b)); });
-    });
+    return page(1).then(function () { return all; });
   }
 
   // ---------- registration ----------
-  function teamOptionsFromMatches() {
-    var seen = {}, opts = [];
-    state.matches.forEach(function (m) {
+  // Returns the full team list across all 3 NL divisions, grouped by competition.
+  function teamOptionsByComp() {
+    var byComp = {}; // compId -> { teamId -> teamObj }
+    (state.allMatches || []).forEach(function (m) {
+      var c = m.attributes.competitionID;
+      if (!byComp[c]) byComp[c] = {};
       [m.attributes.homeTeam, m.attributes.awayTeam].forEach(function (t) {
-        if (!seen[t.teamID]) {
-          seen[t.teamID] = true;
-          opts.push({ id: t.teamID, name: t.name, shortName: t.shortName, crest: t.crest });
+        if (!byComp[c][t.teamID]) {
+          byComp[c][t.teamID] = { id: t.teamID, name: t.name, shortName: t.shortName, crest: t.crest, compId: c };
         }
       });
     });
-    opts.sort(function (a, b) { return a.name.localeCompare(b.name); });
-    return opts;
+    // Convert to ordered arrays per comp, comps in fixed order
+    var grouped = [];
+    COMP_IDS.forEach(function (c) {
+      if (!byComp[c]) return;
+      var arr = Object.keys(byComp[c]).map(function (id) { return byComp[c][id]; });
+      arr.sort(function (a, b) { return a.name.localeCompare(b.name); });
+      grouped.push({ compId: c, name: COMPS[c].name, teams: arr });
+    });
+    return grouped;
+  }
+  // Flat list of every team (used to find a team by id at submit time).
+  function allTeamsFlat() {
+    var grouped = teamOptionsByComp();
+    var flat = [];
+    grouped.forEach(function (g) { flat = flat.concat(g.teams); });
+    return flat;
   }
   function renderRegistration() {
     main.hidden = true; register.hidden = false;
-    var opts = teamOptionsFromMatches();
+    var grouped = teamOptionsByComp();
+    var flat    = allTeamsFlat();
+    // Try to default-select the user's TC favourite team if it exists across any division
     var defaultId = '';
     if (state.user.favTeamName) {
-      var hit = opts.filter(function (o) { return o.name.toLowerCase() === state.user.favTeamName.toLowerCase(); })[0];
+      var hit = flat.filter(function (o) { return o.name.toLowerCase() === state.user.favTeamName.toLowerCase(); })[0];
       if (hit) defaultId = hit.id;
     }
+    var optgroupHTML = grouped.map(function (g) {
+      return '<optgroup label="' + $h(g.name) + '">' +
+        g.teams.map(function (o) {
+          return '<option value="' + $h(o.id) + '"' + (o.id === defaultId ? ' selected' : '') + '>' + $h(o.name) + '</option>';
+        }).join('') +
+      '</optgroup>';
+    }).join('');
     register.innerHTML =
       '<div class="nlsp__register-card">' +
         '<div class="nlsp__hero" style="padding:0;">' +
@@ -863,14 +973,12 @@
           '<h1>Welcome, ' + $h(state.user.forename) + '</h1>' +
         '</div>' +
         '<p style="color:var(--text-muted);font-size:14px;margin:6px 0 0;">' +
-          'Pick your team for the season. Your team\'s match each week scores <b style="color:var(--gold);">×3</b>.' +
+          'Pick your team from the National, North or South division. Your team\'s match each week scores <b style="color:var(--gold);">×3</b>.' +
         '</p>' +
         '<label for="nlsp-team-select">Your team</label>' +
         '<select id="nlsp-team-select">' +
           '<option value="">— choose a team —</option>' +
-          opts.map(function (o) {
-            return '<option value="' + $h(o.id) + '"' + (o.id === defaultId ? ' selected' : '') + '>' + $h(o.name) + '</option>';
-          }).join('') +
+          optgroupHTML +
         '</select>' +
         '<div class="nlsp__lockwarn">This locks for the season. Pick carefully — you can\'t change your team later.</div>' +
         '<button class="nlsp__btn" id="nlsp-register-btn"' + (defaultId ? '' : ' disabled') + '>Confirm and lock my team</button>' +
@@ -881,7 +989,8 @@
     sel.addEventListener('change', function () { btn.disabled = !sel.value; });
     btn.addEventListener('click', function () {
       var teamId = sel.value; if (!teamId) return;
-      var team = opts.filter(function (o) { return o.id === teamId; })[0];
+      var team = flat.filter(function (o) { return o.id === teamId; })[0];
+      if (!team) return;
       btn.disabled = true; btn.textContent = 'Saving…';
       var payload = {
         teamId: team.id, teamName: team.name, crestUrl: team.crest || '',
@@ -920,11 +1029,46 @@
         setSelectedMatchday(b.getAttribute('data-md'));
       });
     });
+    enableDragScroll(datebarEl);
     // Centre the active pill in view
     var activeBtn = datebarEl.querySelector('button.is-active');
     if (activeBtn && activeBtn.scrollIntoView) {
       try { activeBtn.scrollIntoView({ behavior:'auto', inline:'center', block:'nearest' }); } catch (e) {}
     }
+  }
+
+  // Hold-and-drag horizontal scroll for any container. Doesn't interfere
+  // with native click on child buttons unless the user actually drags
+  // (>5px movement) — in which case the subsequent click is suppressed.
+  function enableDragScroll(el) {
+    if (el.__nlspDragWired) return;
+    el.__nlspDragWired = true;
+    var down = false, dragged = false, startX = 0, startScroll = 0;
+    el.addEventListener('mousedown', function (e) {
+      if (e.button !== 0) return;
+      down = true; dragged = false;
+      startX = e.pageX;
+      startScroll = el.scrollLeft;
+      el.classList.add('is-dragging');
+    });
+    document.addEventListener('mousemove', function (e) {
+      if (!down) return;
+      var dx = e.pageX - startX;
+      if (!dragged && Math.abs(dx) > 5) dragged = true;
+      if (dragged) {
+        e.preventDefault();
+        el.scrollLeft = startScroll - dx;
+      }
+    });
+    document.addEventListener('mouseup', function () {
+      if (!down) return;
+      down = false;
+      el.classList.remove('is-dragging');
+      setTimeout(function () { dragged = false; }, 50);
+    });
+    el.addEventListener('click', function (e) {
+      if (dragged) { e.stopPropagation(); e.preventDefault(); }
+    }, true);
   }
 
   // ---------- hero ----------
@@ -1319,6 +1463,7 @@
   function renderTable() {
     if (!state.matches.length) { tableEl.innerHTML = ''; return; }
     var now = simNow();
+    var myComp = userCompId();
     var userIds = Object.keys(state.allUsers);
     if (state.user && userIds.indexOf(state.user.id) === -1 && state.registration) userIds.push(state.user.id);
 
@@ -1326,8 +1471,13 @@
       var reg = (uid === state.user.id) ? state.registration : state.allUsers[uid];
       var t = totalForUser(uid, now);
       return { uid: uid, reg: reg, total: t.total, settled: t.settled };
-    }).filter(function (r) { return r.reg; })
-      .sort(function (a, b) { return b.total - a.total; });
+    }).filter(function (r) {
+      if (!r.reg) return false;
+      // Per-division leaderboard — only fans whose team is in your competition
+      if (!myComp) return true;
+      var theirComp = teamCompId(r.reg.teamId);
+      return !theirComp || theirComp === myComp;
+    }).sort(function (a, b) { return b.total - a.total; });
 
     if (!rows.length) { tableEl.innerHTML = ''; return; }
 
@@ -1409,6 +1559,11 @@
       } else {
         hideGate();
         register.hidden = true; main.hidden = false;
+        // Registration may have just landed — sponsor + matchday filtering
+        // both depend on user comp, so refresh sponsor and recompute the
+        // matchday view before rendering.
+        renderSponsor();
+        recomputeMatchday();
         renderDatebar(); renderHero(); renderFixtures(); renderSubmitbar(); renderReset(); renderTable(); renderSimBar();
       }
     });
@@ -1529,7 +1684,10 @@
         fbDb   = firebase.database(fbApp);
         return fbAuth.signInAnonymously();
       }).then(function () { state.fbAuthed = true; }),
-      fetchFixtures().then(function (ms) { state.allMatches = ms; })
+      fetchFixtures().then(function (ms) {
+        state.allMatches = ms;
+        teamCompCache = null; // invalidate so it rebuilds from fresh data
+      })
     ]).then(function () {
       hideBanner();
       // If a sim datetime came from the URL, apply it before first render
