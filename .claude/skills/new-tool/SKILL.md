@@ -1,6 +1,6 @@
 ---
 name: new-tool
-description: Scaffold a new NL Tool from the canonical template at system/_template/. Use when the user types /new-tool <slug>, asks to "create a new tool", "scaffold a tool", or "start a tool called X". Copies the template, does the find-replaces, and reminds the user about portal + auth-guard registry + RTDB rules wiring.
+description: Scaffold a new NL Tool from the canonical template at system/_template/. Use when the user types /new-tool <slug>, asks to "create a new tool", "scaffold a tool", or "start a tool called X". Copies the template, does the find-replaces, and reminds the user about portal + RTDB tool entry + rules wiring.
 allowed-tools: Bash, Read, Edit, Write
 ---
 
@@ -8,6 +8,21 @@ allowed-tools: Bash, Read, Edit, Write
 
 You are bootstrapping a new tool in the NL Tools monorepo using the
 canonical template at `system/_template/index.html`.
+
+## Before you write any code
+
+**Read `system/_template/BRAND_GUIDE.md`** — the brand canon. It tells
+you which utility classes (`.btn`, `.pill`, `.table`, `.modal`, `.stats`,
+`.tabs`, `.form-panel`, `.empty-state`, `.text-display` / `.text-heading`
+etc.) and which CSS tokens (`--text-sm`, `--primary`, `--tracking-wide`
+etc.) to use instead of writing your own. `nl-brand.css` is the source
+of truth for all tool styling. Live preview of every component is at
+`/tools/style-guide/index.html`.
+
+This is non-negotiable: if you scaffold a tool and then freestyle CSS
+with hardcoded font sizes, hex colours, or custom button shapes, the
+tool will drift from the family and the user will reject it. Use the
+classes. Use the tokens.
 
 ## Steps
 
@@ -47,14 +62,17 @@ canonical template at `system/_template/index.html`.
 6. **Tell the user what's NOT done.** Don't try to do these yourself
    unless the user explicitly asks — they need product decisions:
 
-   - **portal registration** — they'll need to add a card to
-     `portal/index.html` so the tool is discoverable.
-   - **auth-guard registry** — they'll need to add `<category>-<slug>`
-     to the access registry in `system/auth-guard.js` so the role(s)
-     who should access it are allowed in. Without this, the page
-     denies for everyone.
+   - **RTDB tool entry** — they'll need to write `tools/<category>-<slug>`
+     in the nl-tools RTDB (label, icon, department, url, defaults).
+     Auth-guard reads defaults from there; there is **no hardcoded
+     registry** in `auth-guard.js`. Without this entry the page denies
+     for everyone except superadmins. Show them the JSON shape from
+     `system/_template/README.md` step 4.
    - **RTDB rules** — if the tool reads/writes RTDB, they need to
      extend the rules to cover `app-data/<category>-<slug>/...`.
+   - **Portal admin "Deploy"** — once the tool entry is saved, the
+     superadmin hits Deploy in the portal admin UI to seed defaults
+     onto every existing user.
 
 7. **Don't commit unless asked.** Stop after the scaffold lands locally.
 

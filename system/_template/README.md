@@ -5,6 +5,16 @@ Firebase init, `window.NL_TOOL` / `NL_TOOL_KEY`, brand CSS, auth-guard
 reveal, topbar, and a minimal app skeleton. Copy this directory to start
 a new tool — don't piece one together from scratch.
 
+## Before you start: read the brand canon
+
+`/tools/system/nl-brand.css` is the source of truth for all tool styling.
+The rules are short and live in **[`BRAND_GUIDE.md`](./BRAND_GUIDE.md)**
+(this directory). The live preview of every component is at
+**`/tools/style-guide/index.html`**.
+
+Skim both before writing any CSS in your tool. If a component exists in
+the brand stylesheet, use it. Don't roll your own.
+
 ## Roll out a new tool
 
 The fast path is to ask Claude:
@@ -41,16 +51,30 @@ by hand:
    system files later, bump them everywhere — `system/lint-tools.sh`
    will catch drift.
 
-4. Register the tool. Three places, depending on what it does:
+4. Register the tool. Two places, depending on what it does:
 
-   - **`portal/index.html`** — add a card for the tool so people can
-     find it.
-   - **`system/auth-guard.js`** — register the tool key in the access
-     registry so auth-guard knows who can open it. Look for the
-     `TOOL_DEFAULTS` / `TOOL_ACCESS_REGISTRY` block.
+   - **RTDB `tools/{{TOOL_KEY}}`** — write the registry entry
+     (label, icon, department, url, defaults). The portal admin UI's
+     Deploy button seeds the defaults to every user from there.
+     `auth-guard.js` reads this entry at boot — there is **no
+     hardcoded registry** in the code. Shape:
+     ```json
+     {
+       "defaults":     { "admin": "admin", "club": "hidden",
+                         "staff": "access", "superadmin": "admin" },
+       "department":   "staff",
+       "description":  "One-line summary.",
+       "icon":         "⭐",
+       "label":        "My Tool",
+       "placeholder":  false,
+       "type":         "staff-only",
+       "url":          "/tools/{{TOOL_SLUG}}/",
+       "visibleToAll": false
+     }
+     ```
    - **RTDB rules** — if the tool reads/writes RTDB, add a rules block
-     for `app-data/{{TOOL_KEY}}/...`. Update `<slug>.rules.json` (if
-     you split per tool) or the central rules file.
+     for `app-data/{{TOOL_KEY}}/...`. Update the central rules file
+     and deploy.
 
 5. (Optional but recommended) add a `manifest.json` entry so the tool
    shows in the PWA install list.
@@ -62,9 +86,10 @@ by hand:
 - **Doesn't seed data.** If your tool needs default data (e.g. a list
   of clubs), import it manually via the Firebase Console or write a
   seed script under `scripts/`.
-- **Doesn't register the tool in auth-guard.** Whichever role(s) can
-  open the tool, you must add the toolKey to the registry yourself —
-  otherwise the page will be denied for everyone.
+- **Doesn't write the RTDB tool entry.** Until you put
+  `tools/{{TOOL_KEY}}` in the nl-tools RTDB (see step 4 above),
+  auth-guard has no defaults to read and the page will deny for
+  everyone except superadmins.
 
 ## Drift detection
 
