@@ -122,28 +122,24 @@
   }
   @keyframes nlsp-spin { to { transform:rotate(360deg); } }
 
-  /* Sponsor header — Enterprise + division logo on left, title + team crest on right */
+  /* Sponsor header — Enterprise (left), title (centred), comp + team crests (right) */
   #nlPredictor .nlsp__sponsor {
-    display:flex; align-items:center; justify-content:space-between;
+    display:grid; grid-template-columns:1fr auto 1fr; align-items:center;
     background:#000; color:#fff;
     padding:12px 16px; border-radius:var(--radius) var(--radius) 0 0;
     border-bottom:2px solid #34ab56;
     gap:12px; min-height:54px;
   }
-  #nlPredictor .nlsp__sponsor-left,
-  #nlPredictor .nlsp__sponsor-right {
-    display:flex; align-items:center; gap:10px;
-  }
+  #nlPredictor .nlsp__sponsor-left  { display:flex; align-items:center; gap:10px; justify-self:start; }
+  #nlPredictor .nlsp__sponsor-right { display:flex; align-items:center; gap:8px;  justify-self:end; }
   #nlPredictor .nlsp__sponsor img.nlsp__sponsor-logo {
     height:26px; width:auto; display:block; object-fit:contain;
   }
   #nlPredictor .nlsp__sponsor img.nlsp__sponsor-comp {
-    height:28px; width:auto; display:block; object-fit:contain;
-    padding-left:10px;
-    border-left:1px solid rgba(255,255,255,.18);
+    height:30px; width:auto; display:block; object-fit:contain;
   }
   #nlPredictor .nlsp__sponsor img.nlsp__sponsor-team {
-    height:28px; width:28px; display:block; object-fit:contain;
+    height:30px; width:30px; display:block; object-fit:contain;
     background:#fff; border-radius:4px; padding:1px;
   }
   #nlPredictor .nlsp__sponsor .nlsp__sponsor-title {
@@ -151,13 +147,20 @@
     text-transform:uppercase; letter-spacing:1.5px;
     font-weight:900; font-variation-settings:'wght' 900;
     line-height:1;
+    text-align:center;
+    justify-self:center;
   }
   @media (max-width:520px) {
-    #nlPredictor .nlsp__sponsor { padding:10px 12px; min-height:48px; }
-    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-logo,
-    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-comp { height:22px; }
-    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-team { height:24px; width:24px; }
-    #nlPredictor .nlsp__sponsor .nlsp__sponsor-title { font-size:13px; letter-spacing:1.2px; }
+    #nlPredictor .nlsp__sponsor {
+      padding:10px 12px; min-height:48px;
+      grid-template-columns:1fr auto 1fr;
+      gap:8px;
+    }
+    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-logo { height:20px; }
+    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-comp,
+    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-team { height:24px; }
+    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-team { width:24px; }
+    #nlPredictor .nlsp__sponsor .nlsp__sponsor-title { font-size:11px; letter-spacing:1px; }
   }
 
   /* Footer — small Enterprise logo only */
@@ -624,22 +627,25 @@
   function renderSponsor() {
     var r = state.registration;
     var compId = userCompId() || DEFAULT_COMP_ID;
-    var teamCrestHTML = (r && r.crestUrl)
-      ? '<img class="nlsp__sponsor-team" src="' + $h(r.crestUrl) + '" alt="' + $h(r.teamName || 'My team') + '" ' +
-          'title="' + $h(r.teamName || '') + ' · ' + $h(compName(compId)) + '" ' +
+    var compName_ = compName(compId);
+    var teamName  = (r && r.teamName) || '';
+    var compCrest = '<img class="nlsp__sponsor-comp" src="' + compLogoUrl(compId) + '" alt="' + $h(compName_) + '" ' +
+                      'title="' + $h(compName_) + '" ' +
+                      'onerror="this.onerror=null;this.style.display=\'none\';">';
+    var teamCrest = (r && r.crestUrl)
+      ? '<img class="nlsp__sponsor-team" src="' + $h(r.crestUrl) + '" alt="' + $h(teamName || 'My team') + '" ' +
+          'title="' + $h(teamName) + ' · ' + $h(compName_) + '" ' +
           'onerror="this.onerror=null;this.style.display=\'none\';">'
       : '';
     sponsorEl.innerHTML =
       '<div class="nlsp__sponsor-left">' +
         '<img class="nlsp__sponsor-logo" src="' + ENTERPRISE_LOGO_URL + '" alt="Enterprise" ' +
           'onerror="this.onerror=null;this.style.display=\'none\';">' +
-        '<img class="nlsp__sponsor-comp" src="' + compLogoUrl(compId) + '" alt="' + $h(compName(compId)) + '" ' +
-          'title="' + $h(compName(compId)) + '" ' +
-          'onerror="this.onerror=null;this.style.display=\'none\';">' +
       '</div>' +
+      '<span class="nlsp__sponsor-title">Score Predictor</span>' +
       '<div class="nlsp__sponsor-right">' +
-        '<span class="nlsp__sponsor-title">Score Predictor</span>' +
-        teamCrestHTML +
+        compCrest +
+        teamCrest +
       '</div>';
   }
   function renderFooter() {
@@ -1046,10 +1052,10 @@
   function enableDragScroll(el) {
     if (el.__nlspDragWired) return;
     el.__nlspDragWired = true;
-    var down = false, dragged = false, startX = 0, startScroll = 0;
+    var down = false, startX = 0, startScroll = 0, scrolledBy = 0;
     el.addEventListener('mousedown', function (e) {
       if (e.button !== 0) return;
-      down = true; dragged = false;
+      down = true; scrolledBy = 0;
       startX = e.pageX;
       startScroll = el.scrollLeft;
       el.classList.add('is-dragging');
@@ -1057,20 +1063,28 @@
     document.addEventListener('mousemove', function (e) {
       if (!down) return;
       var dx = e.pageX - startX;
-      if (!dragged && Math.abs(dx) > 5) dragged = true;
-      if (dragged) {
+      // Only move once past a 12px deadzone — and only suppress the click
+      // if we've actually moved the scroll position.
+      if (Math.abs(dx) > 12) {
         e.preventDefault();
-        el.scrollLeft = startScroll - dx;
+        var newScroll = startScroll - dx;
+        if (newScroll !== el.scrollLeft) {
+          el.scrollLeft = newScroll;
+          scrolledBy = Math.abs(el.scrollLeft - startScroll);
+        }
       }
     });
     document.addEventListener('mouseup', function () {
       if (!down) return;
       down = false;
       el.classList.remove('is-dragging');
-      setTimeout(function () { dragged = false; }, 50);
     });
+    // Suppress the synthetic click only when the drag actually scrolled
+    // the container by more than a couple of pixels. A normal click — even
+    // with tiny incidental cursor jitter — passes straight through.
     el.addEventListener('click', function (e) {
-      if (dragged) { e.stopPropagation(); e.preventDefault(); }
+      if (scrolledBy > 4) { e.stopPropagation(); e.preventDefault(); }
+      scrolledBy = 0;
     }, true);
   }
 
@@ -1082,9 +1096,8 @@
     var key = currentMatchdayKey();
     var midday = new Date(key + 'T12:00:00Z');
     var dateLabel = midday.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', timeZone:'Europe/London' });
-    var r = state.registration;
+    // Greeting drops the team name now that the team crest lives in the header.
     var parts = [ $h((state.user.forename || '').toUpperCase()) ];
-    if (r && r.teamName) parts.push($h(r.teamName.toUpperCase()));
     hero.className = 'nlsp__hero';
     hero.innerHTML =
       '<div class="nlsp__greetline">' + parts.join(' · ') + '</div>' +
