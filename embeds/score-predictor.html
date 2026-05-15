@@ -122,21 +122,43 @@
   }
   @keyframes nlsp-spin { to { transform:rotate(360deg); } }
 
-  /* Sponsor header — Enterprise + "Score Predictor" */
+  /* Sponsor header — Enterprise + comp logo on left, title + team crest on right */
   #nlPredictor .nlsp__sponsor {
     display:flex; align-items:center; justify-content:space-between;
     background:#000; color:#fff;
-    padding:14px 16px; border-radius:var(--radius) var(--radius) 0 0;
+    padding:12px 16px; border-radius:var(--radius) var(--radius) 0 0;
     border-bottom:2px solid #34ab56;
-    gap:12px;
+    gap:12px; min-height:54px;
   }
-  #nlPredictor .nlsp__sponsor img {
+  #nlPredictor .nlsp__sponsor-left,
+  #nlPredictor .nlsp__sponsor-right {
+    display:flex; align-items:center; gap:10px;
+  }
+  #nlPredictor .nlsp__sponsor img.nlsp__sponsor-logo {
+    height:26px; width:auto; display:block; object-fit:contain;
+  }
+  #nlPredictor .nlsp__sponsor img.nlsp__sponsor-comp {
     height:28px; width:auto; display:block; object-fit:contain;
+    /* Subtle separator from the Enterprise logo on the left */
+    padding-left:10px;
+    border-left:1px solid rgba(255,255,255,.18);
+  }
+  #nlPredictor .nlsp__sponsor img.nlsp__sponsor-team {
+    height:28px; width:28px; display:block; object-fit:contain;
+    background:#fff; border-radius:4px; padding:1px;
   }
   #nlPredictor .nlsp__sponsor .nlsp__sponsor-title {
     font-size:15px; color:#fff;
     text-transform:uppercase; letter-spacing:1.5px;
     font-weight:900; font-variation-settings:'wght' 900;
+    line-height:1;
+  }
+  @media (max-width:520px) {
+    #nlPredictor .nlsp__sponsor { padding:10px 12px; min-height:48px; }
+    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-logo,
+    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-comp { height:22px; }
+    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-team { height:24px; width:24px; }
+    #nlPredictor .nlsp__sponsor .nlsp__sponsor-title { font-size:13px; letter-spacing:1.2px; }
   }
 
   /* Footer — small Enterprise logo only */
@@ -149,14 +171,19 @@
     height:22px; width:auto; display:block; opacity:.65;
   }
 
-  /* Date selector — horizontally scrollable strip of matchday pills */
+  /* Date selector — horizontally scrollable strip of matchday pills.
+     Click-drag enabled on desktop via JS (enableDragScroll). */
   #nlPredictor .nlsp__datebar {
     display:flex; gap:6px;
     padding:14px 2px 8px;
     overflow-x:auto; overflow-y:hidden;
     -webkit-overflow-scrolling:touch;
     scrollbar-width:none;
+    cursor:grab;
+    user-select:none;
   }
+  #nlPredictor .nlsp__datebar.is-dragging { cursor:grabbing; }
+  #nlPredictor .nlsp__datebar.is-dragging button { pointer-events:none; }
   #nlPredictor .nlsp__datebar::-webkit-scrollbar { display:none; }
   #nlPredictor .nlsp__datebar button {
     flex:none;
@@ -588,11 +615,26 @@
 
   // ---------- sponsor + footer (always visible) ----------
   var ENTERPRISE_LOGO_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/partners/Enterprise.png';
+  // Competition logo. compID 89 = National Division.
+  var COMP_LOGO_URL       = 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/divisions/National.png';
   function renderSponsor() {
+    var r = state.registration;
+    var teamCrestHTML = (r && r.crestUrl)
+      ? '<img class="nlsp__sponsor-team" src="' + $h(r.crestUrl) + '" alt="' + $h(r.teamName || 'My team') + '" ' +
+          'title="' + $h(r.teamName || '') + '" ' +
+          'onerror="this.onerror=null;this.style.display=\'none\';">'
+      : '';
     sponsorEl.innerHTML =
-      '<img src="' + ENTERPRISE_LOGO_URL + '" alt="Enterprise" ' +
-        'onerror="this.onerror=null;this.style.display=\'none\';">' +
-      '<span class="nlsp__sponsor-title">Score Predictor</span>';
+      '<div class="nlsp__sponsor-left">' +
+        '<img class="nlsp__sponsor-logo" src="' + ENTERPRISE_LOGO_URL + '" alt="Enterprise" ' +
+          'onerror="this.onerror=null;this.style.display=\'none\';">' +
+        '<img class="nlsp__sponsor-comp" src="' + COMP_LOGO_URL + '" alt="National Division" ' +
+          'onerror="this.onerror=null;this.style.display=\'none\';">' +
+      '</div>' +
+      '<div class="nlsp__sponsor-right">' +
+        '<span class="nlsp__sponsor-title">Score Predictor</span>' +
+        teamCrestHTML +
+      '</div>';
   }
   function renderFooter() {
     footerEl.innerHTML =
@@ -912,11 +954,53 @@
         setSelectedMatchday(b.getAttribute('data-md'));
       });
     });
+    // Click-drag horizontal scrolling for desktop mouse users
+    enableDragScroll(datebarEl);
     // Centre the active pill in view
     var activeBtn = datebarEl.querySelector('button.is-active');
     if (activeBtn && activeBtn.scrollIntoView) {
       try { activeBtn.scrollIntoView({ behavior:'auto', inline:'center', block:'nearest' }); } catch (e) {}
     }
+  }
+
+  // Hold-and-drag horizontal scroll for any container. Doesn't interfere
+  // with native click on child buttons unless the user actually drags
+  // (>5px movement) — in which case the subsequent click is suppressed.
+  function enableDragScroll(el) {
+    if (el.__nlspDragWired) return;
+    el.__nlspDragWired = true;
+    var down = false, dragged = false, startX = 0, startScroll = 0;
+    el.addEventListener('mousedown', function (e) {
+      // Ignore non-primary clicks
+      if (e.button !== 0) return;
+      down = true; dragged = false;
+      startX = e.pageX;
+      startScroll = el.scrollLeft;
+      el.classList.add('is-dragging');
+    });
+    document.addEventListener('mousemove', function (e) {
+      if (!down) return;
+      var dx = e.pageX - startX;
+      if (!dragged && Math.abs(dx) > 5) dragged = true;
+      if (dragged) {
+        e.preventDefault();
+        el.scrollLeft = startScroll - dx;
+      }
+    });
+    document.addEventListener('mouseup', function () {
+      if (!down) return;
+      down = false;
+      el.classList.remove('is-dragging');
+      // Keep the dragged flag set briefly so the click handler can suppress
+      setTimeout(function () { dragged = false; }, 50);
+    });
+    // Suppress click on child buttons if the user just dragged
+    el.addEventListener('click', function (e) {
+      if (dragged) {
+        e.stopPropagation();
+        e.preventDefault();
+      }
+    }, true); // capture phase so we beat the button's own click
   }
 
   // ---------- hero ----------
@@ -1401,6 +1485,7 @@
       } else {
         hideGate();
         register.hidden = true; main.hidden = false;
+        renderSponsor(); // refresh so the registered team crest shows in the header
         renderDatebar(); renderHero(); renderFixtures(); renderSubmitbar(); renderReset(); renderTable(); renderSimBar();
       }
     });
