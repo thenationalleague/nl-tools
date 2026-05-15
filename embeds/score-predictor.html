@@ -1122,20 +1122,46 @@
       '</div>';
   }
   function signInHref() {
-    // Send the fan back here after auth. The NL site exposes /login (with redirect param) per existing auth-guard.
-    try { return '/login?redirect=' + encodeURIComponent(window.location.pathname + window.location.search); }
-    catch (e) { return '/login'; }
+    // SSO entry point. Cookie set by signin.thenationalleague.org.uk is scoped
+    // to .thenationalleague.org.uk so it'll be visible to JS on www / beta when
+    // the user lands back here.
+    return 'https://signin.thenationalleague.org.uk/';
   }
 
   // ---------- boot ----------
-  (function boot() {
+  // The SSO cookie is sometimes not yet on document.cookie at initial script
+  // execution (Nuxt hydration / SSO middleware writes it asynchronously). We
+  // poll for up to ~2.5s before deciding the user is signed out. During that
+  // window the existing "Loading predictor…" banner stays up.
+  function tryDecodeClaims() {
     var jwt = readCookie('_gc_sa_sso_access');
-    var claims = decodeJwtPayload(jwt);
-    if (!claims || !claims.id) {
-      hideBanner();
-      renderSignInModal();
-      return;
-    }
+    return decodeJwtPayload(jwt);
+  }
+  function waitForJwt(maxMs) {
+    return new Promise(function (resolve) {
+      var c = tryDecodeClaims();
+      if (c && c.id) return resolve(c);
+      var start = Date.now();
+      var iv = setInterval(function () {
+        var got = tryDecodeClaims();
+        if (got && got.id) { clearInterval(iv); resolve(got); return; }
+        if (Date.now() - start >= maxMs) { clearInterval(iv); resolve(null); }
+      }, 200);
+    });
+  }
+
+  (function boot() {
+    waitForJwt(2500).then(function (claims) {
+      if (!claims || !claims.id) {
+        hideBanner();
+        renderSignInModal();
+        return;
+      }
+      startSignedIn(claims);
+    });
+  })();
+
+  function startSignedIn(claims) {
     state.user = {
       id: claims.id,
       forename: claims.forename || 'there',
@@ -1166,6 +1192,6 @@
     }).catch(function (err) {
       showBanner('Could not start the predictor: ' + (err && err.message ? err.message : err), 'err');
     });
-  })();
+  }
 })();
 </script>
