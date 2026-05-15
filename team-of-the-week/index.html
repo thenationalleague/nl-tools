@@ -58,6 +58,16 @@
     window.NL_CHANGELOG = [
       {
         date: '15/05/2026',
+        version: 'v0.8',
+        items: [
+          'Fix: division switcher could hang/crash on mobile because state.selectedComp was occasionally a stringified number (from a stale prefs payload). This made === comparisons fail across matchInComp, the active-tab check, and a couple of other places — the visible symptoms being "no division highlighted" and an empty matchday list. Now normalised to a number on prefs load, and the active-class check compares via String() on both sides as belt-and-braces.',
+          'Perf: List view click-to-render was running an O(rows × allMatches) palette lookup per row — about 15k iterations on a busy matchday. Replaced with an O(matches) pre-computed teamId → palette map; O(1) per row.',
+          'Perf: Matchday strip under the All filter was running matchdayDivisions() per pill — another O(matches) scan per pill, ~20k iterations on a full season. Replaced with a single O(matches) pre-computed date → divisions map.',
+          'Perf: List view was firing a full re-render for every lineup fetch that resolved (N renders for N matches). Removed the auto-rerender from ensurePlayers; renderListView now schedules a single deferred re-render after 1.5s once any fetches are pending.'
+        ]
+      },
+      {
+        date: '15/05/2026',
         version: 'v0.7',
         items: [
           'Fix: page no longer crashes when the All division filter is selected (three unguarded COMPS lookups, including the boot-time audit call).',
@@ -857,8 +867,10 @@
           });
         });
         state.players[matchId] = { list: list };
-        /* Re-render the list view so positions populate. */
-        if (state.activeTab === 'matchday' && state.viewMode === 'list') renderMatches();
+        /* Caller (renderListView) handles the single deferred re-render
+           once all pending lineup fetches have settled. We don't
+           re-render here because firing one render per resolved fetch
+           was thrashing the page on busy matchdays. */
       })
       .catch(function (err) {
         state.players[matchId] = { error: err && err.message ? err.message : String(err) };
@@ -924,7 +936,11 @@
       );
       divs = '<div class="tabs totw-divtabs">' +
         divItems.map(function (item) {
-          var active = (state.selectedComp === item.id) ? ' is-active' : '';
+          /* Use String() on both sides so an accidentally-stringified
+             selectedComp (e.g. from a stale prefs payload) still
+             matches the numeric COMP_IDS — defence in depth on top of
+             the boot-time normalisation. */
+          var active = (String(state.selectedComp) === String(item.id)) ? ' is-active' : '';
           return '<button type="button" class="tab' + active + '" data-comp="' + h(String(item.id)) + '">' + h(item.label) + '</button>';
         }).join('') +
       '</div>';
@@ -989,19 +1005,34 @@
       $mdrow.innerHTML = '<div class="totw-mdrow"><span class="text-secondary" style="padding:6px 0;">No fixtures in this division yet.</span></div>';
       return;
     }
+    /* When the All filter is on we tag each pill with a division code.
+       Pre-compute the date → divisions map ONCE per render — was being
+       computed per pill via matchdayDivisions(), which is O(matches)
+       per call. With ~40 matchdays × 500 matches that's a 20k-iteration
+       hang on click. Single O(matches) pass now, then O(1) per pill. */
+    var divsByDay = null;
+    if (state.selectedComp === 'all') {
+      divsByDay = {};
+      state.allMatches.forEach(function (m) {
+        var k = bstDateOf(koOf(m));
+        if (!k) return;
+        var short = COMPS[m.attributes.competitionID] ? COMPS[m.attributes.competitionID].shortName : '';
+        if (!short) return;
+        if (!divsByDay[k]) divsByDay[k] = {};
+        divsByDay[k][short] = true;
+      });
+    }
     $mdrow.innerHTML =
       '<div class="totw-mdrow">' +
         keys.map(function (k) {
           var active = (k === state.selectedMatchday) ? ' is-active' : '';
           var today  = (k === todayKey) ? ' is-today' : '';
           var d = new Date(k + 'T12:00:00Z');
-          /* When the All filter is on, prefix with division code so
-             the user knows which division a matchday belongs to. */
           var divPrefix = '';
-          if (state.selectedComp === 'all') {
-            var divs = matchdayDivisions(k);
-            if (divs.length === 1) divPrefix = '<span class="totw-mdpill__div">' + h(divs[0]) + '</span>';
-            /* If multiple divisions share the day, no prefix (it's a true cross-league date). */
+          if (divsByDay) {
+            var dks = Object.keys(divsByDay[k] || {});
+            if (dks.length === 1) divPrefix = '<span class="totw-mdpill__div">' + h(dks[0]) + '</span>';
+            /* Multi-division days get no prefix — it's a true cross-league date. */
           }
           return '<button type="button" class="totw-mdpill' + active + today + '" data-md="' + h(k) + '">' +
             divPrefix + h(bstDayLabel(d)) +
@@ -1101,9 +1132,33 @@
      RENDER: List view — flat per-player rows for the matchday
      ============================================================ */
   function renderListView(matches) {
-    /* Trigger lazy lineup fetch for every match so positions can fill
-       in. Cache means each is at most one network hit per session. */
-    matches.forEach(function (m) { ensurePlayers(m.id); });
+    /* Trigger lazy lineup fetches for missing matches. Each ensurePlayers
+       no longer triggers an immediate re-render (would cause N renders
+       for N matches). Instead we schedule ONE deferred re-render once
+       any are missing, then quiesce. */
+    var needsFetch = matches.filter(function (m) { return !state.players[m.id]; });
+    needsFetch.forEach(function (m) { ensurePlayers(m.id); });
+    if (needsFetch.length && !state._lineupRerenderTimer) {
+      state._lineupRerenderTimer = setTimeout(function () {
+        state._lineupRerenderTimer = null;
+        if (state.activeTab === 'matchday' && state.viewMode === 'list') renderMatches();
+      }, 1500);
+    }
+
+    /* Pre-compute a teamId → palette map for the matches in view.
+       Replaces the O(rows × allMatches) linear scan that was hanging
+       the click handler on the matchday switcher (mobile especially).
+       O(matches) once, then O(1) per row. */
+    var palByTeamId = {};
+    matches.forEach(function (m) {
+      var a = m.attributes;
+      if (a.homeTeam && a.homeTeam.teamID && !palByTeamId[a.homeTeam.teamID]) {
+        palByTeamId[a.homeTeam.teamID] = paletteForTeam(a.homeTeam.teamID);
+      }
+      if (a.awayTeam && a.awayTeam.teamID && !palByTeamId[a.awayTeam.teamID]) {
+        palByTeamId[a.awayTeam.teamID] = paletteForTeam(a.awayTeam.teamID);
+      }
+    });
 
     /* Flatten: every player who got at least one vote, with match
        context attached. Sorted by votes desc. */
@@ -1130,6 +1185,7 @@
         rows.push({
           playerId: p.playerId,
           name: p.name,
+          teamId: p.teamId,
           teamName: teamNameFor(p.teamId),
           ownTeamShort: ownTeam.shortName || ownTeam.name || '',
           oppShort: oppTeam.shortName || oppTeam.name || '',
@@ -1170,16 +1226,7 @@
         '<div style="text-align:right;">📝</div>' +
       '</div>';
     var body = rows.map(function (r, i) {
-      var pal = paletteForTeam(r.playerId && state.allMatches.length ? null : null) || { primary: 'var(--navy)' };
-      /* Bar colour = the player's team primary. */
-      var teamPal = (function () {
-        for (var x = 0; x < state.allMatches.length; x++) {
-          var a = state.allMatches[x].attributes;
-          if (a.homeTeam.shortName === r.ownTeamShort || a.homeTeam.name === r.ownTeamShort) return paletteForTeam(a.homeTeam.teamID);
-          if (a.awayTeam.shortName === r.ownTeamShort || a.awayTeam.name === r.ownTeamShort) return paletteForTeam(a.awayTeam.teamID);
-        }
-        return { primary: 'var(--navy)' };
-      })();
+      var teamPal = palByTeamId[r.teamId] || { primary: 'var(--navy)' };
       var barPct = Math.round(r.votes / maxVotes * 100);
       var pos = r.position ? '<span class="totw-pos">' + h(r.position) + '</span>' : '';
       var shirt = (r.shirtNumber != null) ? '<span class="totw-shirt">#' + h(r.shirtNumber) + '</span>' : '';
@@ -2054,8 +2101,18 @@
               state.activeTab = prefs.activeTab;
             }
             if (prefs.viewMode === 'list' || prefs.viewMode === 'cards') state.viewMode = prefs.viewMode;
-            if (prefs.compId === 'all') state.selectedComp = 'all';
-            else if (prefs.compId && COMPS[prefs.compId]) state.selectedComp = prefs.compId;
+            /* Normalise compId to either 'all' or a NUMBER. Anything that
+               came back from Firebase as a stringified number would
+               otherwise break === comparisons against COMP_IDS (which
+               are numbers) and against m.attributes.competitionID
+               (also a number). Manifests as "no division active" and
+               an empty matchday list. */
+            if (prefs.compId === 'all') {
+              state.selectedComp = 'all';
+            } else if (prefs.compId != null) {
+              var n = Number(prefs.compId);
+              if (!isNaN(n) && COMPS[n]) state.selectedComp = n;
+            }
             if (prefs.selectedClub) state.selectedClub = prefs.selectedClub;
             if (typeof prefs.notesOnly === 'boolean') state.notesOnly = prefs.notesOnly;
           }
