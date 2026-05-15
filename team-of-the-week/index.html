@@ -58,6 +58,14 @@
     window.NL_CHANGELOG = [
       {
         date: '15/05/2026',
+        version: 'v0.3',
+        items: [
+          'Fix: superadmin always resolves to admin tier (was sometimes pinned to access by a stale per-user grant).',
+          'UX: workflow intro paragraph, numbered section labels, "currently viewing" status line, friendlier summary tile labels, clearer empty states, tip about clicking player rows.'
+        ]
+      },
+      {
+        date: '15/05/2026',
         version: 'v0.2',
         items: [
           'First features build: division + matchday filters, summary tiles, per-match cards with ranked vote bars / donut, voter-club drill, admin-only notes panel, copy/export.'
@@ -90,12 +98,41 @@
 
 <style>
   /* ----- Page header ----- */
-  #pageWrap .totw-h1 { color: var(--navy); margin: 0 0 4px; font-size: var(--text-lg); }
-  #pageWrap .totw-sub { color: var(--text-muted); margin: 0 0 4px; font-size: var(--text-sm); }
-  #pageWrap .totw-rolebar { display: flex; gap: 8px; align-items: center; margin: 8px 0 22px; font-size: 12px; color: var(--text-muted); }
+  #pageWrap .totw-h1 { color: var(--navy); margin: 0 0 6px; font-size: var(--text-xl); letter-spacing: -0.01em; }
+  #pageWrap .totw-intro { color: var(--text); margin: 0 0 6px; font-size: var(--text-base); line-height: 1.5; max-width: 720px; }
+  #pageWrap .totw-intro b { color: var(--navy); }
+  #pageWrap .totw-rolebar { display: flex; gap: 8px; align-items: center; margin: 12px 0 24px; font-size: 12px; color: var(--text-muted); }
   #pageWrap .totw-rolebar .pill { font-size: 10px; padding: 3px 9px; letter-spacing: var(--tracking-wide); }
   #pageWrap .totw-rolebar .pill--admin { background: var(--red-light); color: var(--primary); font-weight: 800; }
   #pageWrap .totw-rolebar .pill--access { background: var(--info-light); color: var(--navy); font-weight: 800; }
+
+  /* ----- Section labels ----- */
+  #pageWrap .totw-section {
+    margin: 26px 0 10px;
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--border); padding-bottom: 6px;
+  }
+  #pageWrap .totw-section:first-of-type { margin-top: 4px; }
+  #pageWrap .totw-section h2 {
+    margin: 0; font-size: 12px; font-weight: 900; font-variation-settings: 'wght' 900;
+    color: var(--navy); text-transform: uppercase; letter-spacing: var(--tracking-wider);
+  }
+  #pageWrap .totw-section .totw-section__hint {
+    font-size: 11px; color: var(--text-muted); font-weight: 600;
+  }
+
+  /* ----- Currently viewing context line ----- */
+  #pageWrap .totw-viewing {
+    background: color-mix(in srgb, var(--navy) 4%, var(--white));
+    border: 1px solid var(--border); border-left: 3px solid var(--navy);
+    border-radius: var(--radius);
+    padding: 10px 14px; margin: 10px 0 14px;
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    font-size: 13px;
+  }
+  #pageWrap .totw-viewing__label { font-size: 10px; text-transform: uppercase; letter-spacing: var(--tracking-wider); color: var(--text-muted); font-weight: 800; }
+  #pageWrap .totw-viewing__value { font-weight: 900; font-variation-settings: 'wght' 900; color: var(--navy); }
+  #pageWrap .totw-viewing__sep   { color: var(--border); }
 
   /* ----- Banner / loading ----- */
   #pageWrap .totw-banner {
@@ -308,15 +345,39 @@
 
     <header>
       <h1 class="totw-h1">Team of the Week</h1>
-      <p class="totw-sub">Browse fan MOTM votes and notes — pick your Team of the Week.</p>
+      <p class="totw-intro">
+        Each match, fans across the National League pick their <b>Man of the Match</b> and
+        can leave a short note explaining their choice. This tool collects every fan vote so
+        you can scan the standouts from a matchday, see how decisive each pick was, drill into
+        who voted from which club, and read the notes — to shortlist your weekly Team of the Week.
+      </p>
       <div class="totw-rolebar" id="totw-rolebar"></div>
     </header>
 
     <div id="totw-banner" class="totw-banner" hidden></div>
 
+    <div class="totw-section">
+      <h2>1 · Pick a division and matchday</h2>
+      <span class="totw-section__hint">Today's date pill is rimmed in red.</span>
+    </div>
     <div id="totw-controls"></div>
+    <div id="totw-viewing"></div>
+
+    <div class="totw-section">
+      <h2>2 · Matchday snapshot</h2>
+    </div>
     <div id="totw-summary" class="totw-summary"></div>
+
+    <div class="totw-section">
+      <h2>3 · Match results</h2>
+      <span class="totw-section__hint">Click a player row to see their voter-club breakdown and notes.</span>
+    </div>
     <div id="totw-matches" class="totw-matches"></div>
+
+    <div class="totw-section">
+      <h2>4 · Export</h2>
+      <span class="totw-section__hint">Roundup formats ready to paste straight into an article draft.</span>
+    </div>
     <div id="totw-actions" class="totw-actions"></div>
 
   </div>
@@ -380,6 +441,7 @@
   var $banner   = document.getElementById('totw-banner');
   var $rolebar  = document.getElementById('totw-rolebar');
   var $ctrls    = document.getElementById('totw-controls');
+  var $viewing  = document.getElementById('totw-viewing');
   var $summary  = document.getElementById('totw-summary');
   var $matches  = document.getElementById('totw-matches');
   var $actions  = document.getElementById('totw-actions');
@@ -464,6 +526,10 @@
      LEVEL RESOLUTION
      ============================================================ */
   function resolveLevel(session) {
+    /* Superadmin always sees the top tier regardless of any per-tool
+       grant — matches the portal's own convention. */
+    if (session && session.role === 'superadmin') return 'admin';
+
     var raw = session && session.tools && session.tools[NL_TOOL_KEY];
     if (typeof raw === 'string') return raw;
     if (raw && typeof raw === 'object') {
@@ -472,7 +538,7 @@
       return 'off';
     }
     var role = session && session.role;
-    if (role === 'superadmin' || role === 'admin') return 'admin';
+    if (role === 'admin') return 'admin';
     if (role === 'staff') return 'access';
     return 'hidden';
   }
@@ -649,8 +715,8 @@
     var pillCls = state.canSeeNotes ? 'pill--admin' : 'pill--access';
     var pillLbl = state.canSeeNotes ? 'Admin tier' : 'Access tier';
     var detail  = state.canSeeNotes
-      ? 'You can read voter notes.'
-      : 'You see counts and charts; note text is hidden.';
+      ? 'Counts, charts, drills, and voter notes are visible to you.'
+      : 'You see counts, charts, and voter-club drills. Note text is admin-only.';
     $rolebar.innerHTML =
       '<span class="pill ' + pillCls + '">' + h(pillLbl) + '</span>' +
       '<span>' + h(detail) + '</span>';
@@ -714,6 +780,25 @@
   /* ============================================================
      RENDER: summary tiles
      ============================================================ */
+  function renderViewing() {
+    var matches = matchesForSelected();
+    var dateLabel = '';
+    if (state.selectedMatchday) {
+      var d = new Date(state.selectedMatchday + 'T12:00:00Z');
+      dateLabel = d.toLocaleDateString('en-GB', { timeZone: 'Europe/London', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    } else {
+      dateLabel = '— no matchday selected —';
+    }
+    var compLabel = COMPS[state.selectedComp] ? COMPS[state.selectedComp].name : '';
+    $viewing.innerHTML =
+      '<span class="totw-viewing__label">Viewing</span>' +
+      '<span class="totw-viewing__value">' + h(compLabel) + '</span>' +
+      '<span class="totw-viewing__sep">·</span>' +
+      '<span class="totw-viewing__value">' + h(dateLabel) + '</span>' +
+      '<span class="totw-viewing__sep">·</span>' +
+      '<span style="color:var(--text-muted);">' + matches.length + ' fixture' + (matches.length === 1 ? '' : 's') + '</span>';
+  }
+
   function renderSummary() {
     var matches = matchesForSelected();
     if (!matches.length) { $summary.innerHTML = ''; return; }
@@ -731,14 +816,14 @@
       }
     });
     var top = topPlayer
-      ? h(topPlayer.name) + ' <span class="totw-tile__sub">' + h(teamNameFor(topPlayer.teamId)) + ' · ' + topPlayer.votes + ' votes</span>'
+      ? h(topPlayer.name) + ' <span class="totw-tile__sub">' + h(teamNameFor(topPlayer.teamId)) + ' · ' + topPlayer.votes + ' vote' + (topPlayer.votes === 1 ? '' : 's') + '</span>'
       : '<span style="color:var(--text-muted);font-size:14px;font-weight:700;">No votes yet</span>';
     $summary.innerHTML =
-      tile('Matches', matches.length, '') +
-      tile('Total votes', totalVotes, '') +
-      tile('Distinct voters', Object.keys(voters).length, '') +
-      tile('Notes left', totalNotes, totalNotes ? Math.round(totalNotes / Math.max(totalVotes, 1) * 100) + '% of votes' : '') +
-      '<div class="totw-tile"><div class="totw-tile__label">Top pick</div><div class="totw-tile__value" style="font-size:16px;line-height:1.3;">' + top + '</div></div>';
+      tile('Fixtures', matches.length, matches.length === 1 ? 'match in this round' : 'matches in this round') +
+      tile('Votes cast', totalVotes, totalVotes ? 'across all fixtures' : '') +
+      tile('Fans who voted', Object.keys(voters).length, totalVotes && Object.keys(voters).length ? 'avg ' + (totalVotes / Object.keys(voters).length).toFixed(1) + ' votes / fan' : '') +
+      tile('Notes left', totalNotes, totalNotes ? Math.round(totalNotes / Math.max(totalVotes, 1) * 100) + '% of votes had a note' : 'no fan left a note') +
+      '<div class="totw-tile"><div class="totw-tile__label">Matchday top pick</div><div class="totw-tile__value" style="font-size:16px;line-height:1.3;">' + top + '</div></div>';
 
     function tile(label, value, sub) {
       return '<div class="totw-tile">' +
@@ -755,8 +840,10 @@
   function renderMatches() {
     var matches = matchesForSelected();
     if (!matches.length) {
-      $matches.innerHTML = '<div class="totw-empty">No fixtures on this matchday in ' +
-        h(COMPS[state.selectedComp].shortName) + '.</div>';
+      $matches.innerHTML =
+        '<div class="totw-empty"><b>No ' + h(COMPS[state.selectedComp].shortName) +
+        ' fixtures on this matchday.</b><br>' +
+        'Pick a different date above, or switch division.</div>';
       return;
     }
     $matches.innerHTML = matches.map(renderCard).join('');
@@ -1248,6 +1335,7 @@
      ============================================================ */
   function render() {
     renderControls();
+    renderViewing();
     renderSummary();
     renderMatches();
     renderActions();
