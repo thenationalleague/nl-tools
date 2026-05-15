@@ -138,7 +138,7 @@ done
 echo "=== Tool wiring lint ==="
 echo "Canonical: nl-brand.css?v=$CANON_BRAND  nl-utils.js?v=$CANON_UTILS  nl-topbar.js?v=$CANON_TOPBAR  auth-guard.js?v=$CANON_GUARD"
 echo
-if [[ ${#warnings[@]} -gt 0 ]]; then
+if [[ "${warnings+x}" == "x" && ${#warnings[@]} -gt 0 ]]; then
   echo "Drift detected in $warn_count tool$( [[ $warn_count -ne 1 ]] && echo s ):"
   for w in "${warnings[@]}"; do
     echo "$w"
