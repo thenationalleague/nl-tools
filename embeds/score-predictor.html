@@ -7,18 +7,18 @@
      - RTDB (dedicated nl-score-predictor project, named Firebase app):
          users/{jwtId}
          predictions/{jwtId}/{matchday}/{matchId}
-     - Submit-all (12/12 + joker), per-row KO lock, edit-before-KO
-     - Auto-double on own team; one joker per matchday (×2)
+     - Auto-save on blur; per-row KO lock harden inputs into numbers
+     - Own-team match scores ×3 (no joker)
      - League table: forename + surname initial + crest + total
 
-     Sim controls (dev / demo — visible by default during development):
-       (no param) → show the sim bar with 4 time snapshots (default)
-       ?sim=1     → show the sim bar (same as default — explicit form)
+     Sim controls (visible by default during dev):
+       (no param) → show the sim bar with 4 time snapshots
+       ?sim=1     → show the sim bar (explicit form, same as default)
        ?sim=pre   → freeze sim at 12:00 BST (pre-KO), bar hidden
        ?sim=live  → freeze sim at 16:00 BST (in-play), bar hidden
        ?sim=post  → freeze sim at 18:00 BST (post-FT), bar hidden
        ?sim=demo  → tick from 14:59:50 BST in real time, bar hidden
-       ?sim=off   → use the real clock, bar hidden (production)
+       ?sim=off   → real clock, bar hidden (production)
 
      Scoped under #nlPredictor; BEM .nlsp__ prefix; Carbona inline;
      no external <script src> tags (CMS strips them).
@@ -29,16 +29,15 @@
   <div class="nlsp__screen" id="nlsp-register" hidden></div>
   <div class="nlsp__screen" id="nlsp-main" hidden>
     <div id="nlsp-hero"></div>
-    <div id="nlsp-joker"></div>
+    <div id="nlsp-statusbar"></div>
     <div id="nlsp-fixtures"></div>
-    <div id="nlsp-submitbar"></div>
     <div id="nlsp-table"></div>
     <div id="nlsp-sim"></div>
   </div>
 </div>
 
 <style>
-  /* Carbona Variable — self-hosted */
+  /* Carbona Variable */
   @font-face {
     font-family: "carbona-variable";
     src: url("https://use.typekit.net/af/184cf2/0000000000000000774c3175/31/l?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n4&v=3") format("woff2"),
@@ -60,14 +59,14 @@
     --shadow:0 2px 12px rgba(10,22,40,.10);
 
     font-family:'carbona-variable','carbona',sans-serif;
-    font-size:15px; line-height:1.5;
+    font-size:15px; line-height:1.45;
     font-variation-settings:'wght' 400;
     color:var(--text); -webkit-font-smoothing:antialiased;
     max-width:680px; margin:24px auto; padding:0 12px;
   }
   #nlPredictor, #nlPredictor *, #nlPredictor *::before, #nlPredictor *::after { box-sizing:border-box; }
 
-  /* Hide native number-input spinners EVERYWHERE — even though we use type=text/inputmode=numeric, belt-and-braces */
+  /* Hide native number-input spinners just in case */
   #nlPredictor input[type="number"]::-webkit-outer-spin-button,
   #nlPredictor input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
   #nlPredictor input[type="number"] { -moz-appearance:textfield; appearance:textfield; }
@@ -75,26 +74,25 @@
   /* Banner */
   #nlPredictor .nlsp__banner {
     background:var(--amber-light); border:1px solid var(--amber); color:var(--amber);
-    padding:10px 14px; border-radius:var(--radius); font-size:13px; margin-bottom:16px;
+    padding:8px 12px; border-radius:var(--radius); font-size:13px; margin-bottom:14px;
     font-variation-settings:'wght' 600;
   }
   #nlPredictor .nlsp__banner.is-err { background:var(--red-light);   border-color:var(--red);   color:var(--red); }
   #nlPredictor .nlsp__banner.is-ok  { background:var(--green-light); border-color:var(--green); color:var(--green); }
 
-  /* Page header (was the greeting card) */
-  #nlPredictor .nlsp__hero { padding:6px 2px 18px; }
+  /* Hero — compressed */
+  #nlPredictor .nlsp__hero { padding:2px 0 12px; }
   #nlPredictor .nlsp__hero .nlsp__kicker {
     font-size:11px; text-transform:uppercase; letter-spacing:1.5px;
     color:var(--text-muted);
     font-weight:700; font-variation-settings:'wght' 700;
   }
   #nlPredictor .nlsp__hero h1 {
-    font-size:28px; line-height:1.15; margin:2px 0 6px;
+    font-size:24px; line-height:1.15; margin:2px 0 4px;
     font-weight:900; font-variation-settings:'wght' 900;
-    color:var(--text);
   }
   #nlPredictor .nlsp__hero .nlsp__welcome {
-    color:var(--text-muted); font-size:14px;
+    color:var(--text-muted); font-size:13px;
     font-weight:600; font-variation-settings:'wght' 600;
   }
   #nlPredictor .nlsp__hero .nlsp__welcome b {
@@ -107,167 +105,151 @@
     border-radius:999px; vertical-align:middle;
   }
   #nlPredictor .nlsp__hero .nlsp__myteam img {
-    width:18px; height:18px; border-radius:3px; object-fit:contain; background:var(--white);
+    width:16px; height:16px; border-radius:3px; object-fit:contain; background:var(--white);
+  }
+  #nlPredictor .nlsp__hero .nlsp__mult {
+    color:var(--gold); font-weight:900; font-variation-settings:'wght' 900;
+    margin-left:4px;
   }
 
-  /* Joker picker */
-  #nlPredictor .nlsp__jokerbar {
-    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
-    padding:10px 14px; margin-bottom:14px;
-    background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
-    box-shadow:var(--shadow);
+  /* Status bar — single thin line above fixtures */
+  #nlPredictor .nlsp__status {
+    display:flex; justify-content:space-between; align-items:baseline;
+    padding:6px 2px; margin-bottom:8px;
+    font-size:12px; color:var(--text-muted);
+    font-weight:700; font-variation-settings:'wght' 700;
+    text-transform:uppercase; letter-spacing:1px;
+    border-bottom:1px solid var(--border);
   }
-  #nlPredictor .nlsp__jokerbar .nlsp__jokerlbl {
-    font-size:12px; text-transform:uppercase; letter-spacing:1.2px;
-    color:var(--text-muted);
+  #nlPredictor .nlsp__status .nlsp__count b { color:var(--text); font-weight:900; font-variation-settings:'wght' 900; }
+  #nlPredictor .nlsp__status .nlsp__savetick {
+    color:var(--green); opacity:0; transition:opacity .25s ease;
     font-weight:800; font-variation-settings:'wght' 800;
   }
-  #nlPredictor .nlsp__jokerbar select {
-    flex:1; min-width:200px; padding:8px 10px; font-size:14px;
-    font-family:inherit; color:var(--text);
-    background:var(--off-white); border:1px solid var(--border); border-radius:var(--radius);
-    font-weight:600; font-variation-settings:'wght' 600;
-  }
-  #nlPredictor .nlsp__jokerbar select:focus {
-    outline:none; border-color:var(--primary);
-    box-shadow:0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent);
-  }
-  #nlPredictor .nlsp__jokerbar .nlsp__jokerhint {
-    font-size:12px; color:var(--text-muted);
-    flex-basis:100%;
-  }
-  #nlPredictor .nlsp__jokerbar .nlsp__jokerhint b {
-    color:var(--gold); font-weight:800; font-variation-settings:'wght' 800;
-  }
+  #nlPredictor .nlsp__status .nlsp__savetick.is-on { opacity:1; }
 
-  /* Fixture rows — light cards with optional gold accent */
+  /* Fixture rows — compact, one fixture per row */
   #nlPredictor .nlsp__row {
-    background:var(--white); border:1px solid var(--border); border-left:4px solid transparent;
-    border-radius:var(--radius); margin-bottom:8px;
-    padding:10px 14px;
-    display:grid; grid-template-rows:auto auto auto; row-gap:4px;
-    transition:border-color .15s ease;
+    display:grid; grid-template-columns:48px 1fr auto 1fr;
+    column-gap:10px; align-items:center;
+    padding:8px 10px; min-height:54px;
+    border-bottom:1px solid var(--border);
+    background:var(--white);
+    border-left:3px solid transparent;
   }
-  #nlPredictor .nlsp__row.is-mult {
-    border-left-color:var(--gold);
-    background:linear-gradient(90deg, color-mix(in srgb, var(--gold) 8%, transparent), var(--white) 60px);
-  }
-  #nlPredictor .nlsp__row.is-live { border-color:var(--red); }
-  #nlPredictor .nlsp__row.is-post { /* no extra change */ }
+  #nlPredictor .nlsp__row:first-child { border-top:1px solid var(--border); }
+  #nlPredictor .nlsp__row.is-mult { border-left-color:var(--gold); }
+  #nlPredictor .nlsp__row.is-live { background:color-mix(in srgb, var(--red) 4%, var(--white)); }
+  #nlPredictor .nlsp__row.is-exact { background:color-mix(in srgb, var(--gold) 10%, var(--white)); }
+  #nlPredictor .nlsp__row.is-right { background:color-mix(in srgb, var(--green) 6%, var(--white)); }
+  #nlPredictor .nlsp__row.is-wrong { background:color-mix(in srgb, var(--text-muted) 4%, var(--white)); }
 
-  #nlPredictor .nlsp__row-meta {
-    display:flex; align-items:center; gap:8px;
-    font-size:11px; text-transform:uppercase; letter-spacing:1px;
-    color:var(--text-muted);
-    font-weight:700; font-variation-settings:'wght' 700;
+  /* KO column — left edge */
+  #nlPredictor .nlsp__ko {
+    font-family:ui-monospace,Menlo,Consolas,monospace;
+    font-size:13px; color:var(--text-muted);
+    font-weight:800; font-variation-settings:'wght' 800;
+    text-align:center;
   }
-  #nlPredictor .nlsp__row-meta .nlsp__livedot {
-    width:8px; height:8px; border-radius:50%; background:var(--red);
-    box-shadow:0 0 0 0 color-mix(in srgb, var(--red) 50%, transparent);
+  #nlPredictor .nlsp__ko .nlsp__live {
+    display:flex; align-items:center; justify-content:center; gap:4px;
+    color:var(--red);
+    font-family:'carbona-variable','carbona',sans-serif; font-size:11px;
+    text-transform:uppercase; letter-spacing:1px;
+    font-weight:900; font-variation-settings:'wght' 900;
+  }
+  #nlPredictor .nlsp__ko .nlsp__livedot {
+    width:7px; height:7px; border-radius:50%; background:var(--red);
     animation:nlsp-pulse 1.4s infinite;
+  }
+  #nlPredictor .nlsp__ko .nlsp__ftlabel {
+    color:var(--green);
+    font-family:'carbona-variable','carbona',sans-serif; font-size:11px;
+    text-transform:uppercase; letter-spacing:1px;
+    font-weight:900; font-variation-settings:'wght' 900;
+  }
+  #nlPredictor .nlsp__ko .nlsp__locklabel {
+    display:inline-flex; align-items:center; gap:3px;
+    color:var(--text-muted); font-size:11px;
   }
   @keyframes nlsp-pulse {
     0%   { box-shadow:0 0 0 0 color-mix(in srgb, var(--red) 50%, transparent); }
-    70%  { box-shadow:0 0 0 6px color-mix(in srgb, var(--red) 0%,  transparent); }
-    100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--red) 0%,  transparent); }
-  }
-  #nlPredictor .nlsp__multbadge {
-    margin-left:auto; padding:2px 8px; border-radius:4px;
-    background:var(--gold-light); color:var(--gold);
-    font-size:10px; letter-spacing:1.2px;
-    font-weight:900; font-variation-settings:'wght' 900;
+    70%  { box-shadow:0 0 0 6px color-mix(in srgb, var(--red) 0%, transparent); }
+    100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--red) 0%, transparent); }
   }
 
-  /* Main row — crest + name on each side, big scoreboard in the middle */
-  #nlPredictor .nlsp__teams {
-    display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:10px;
-    padding:4px 0;
-  }
+  /* Team cells */
   #nlPredictor .nlsp__team {
-    display:flex; align-items:center; gap:10px;
-    min-width:0; /* allow ellipsis */
+    display:flex; align-items:center; gap:8px;
+    min-width:0;
+    font-size:14px;
+    font-weight:800; font-variation-settings:'wght' 800;
+    color:var(--text);
   }
   #nlPredictor .nlsp__team.is-away { flex-direction:row-reverse; text-align:right; }
   #nlPredictor .nlsp__team img {
-    width:36px; height:36px; flex:none; border-radius:4px;
+    width:26px; height:26px; flex:none; border-radius:3px;
     background:var(--white); object-fit:contain;
   }
   #nlPredictor .nlsp__tname {
     flex:1; min-width:0;
-    font-size:15px; color:var(--text);
-    font-weight:800; font-variation-settings:'wght' 800;
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
-  #nlPredictor .nlsp__scoreboard {
-    display:flex; align-items:center; gap:6px;
-    font-size:24px; color:var(--text);
+
+  /* Score (centre) */
+  #nlPredictor .nlsp__score {
+    display:flex; align-items:center; gap:5px;
+    color:var(--text);
     font-weight:900; font-variation-settings:'wght' 900;
   }
-  #nlPredictor .nlsp__scoreboard .nlsp__dash { color:var(--text-muted); font-size:18px; }
-  #nlPredictor .nlsp__scoreboard input {
-    width:48px; height:42px;
+  #nlPredictor .nlsp__score .nlsp__num {
+    display:inline-block; min-width:24px; text-align:center;
+    font-size:20px;
+  }
+  #nlPredictor .nlsp__score .nlsp__num.is-locked {
+    background:var(--off-white); border-radius:5px; padding:4px 6px;
+  }
+  #nlPredictor .nlsp__score .nlsp__dash {
+    color:var(--text-muted); font-size:16px;
+  }
+  #nlPredictor .nlsp__score input {
+    width:42px; height:36px;
     text-align:center; font-family:inherit;
-    font-size:22px; font-weight:900; font-variation-settings:'wght' 900;
+    font-size:18px; font-weight:900; font-variation-settings:'wght' 900;
     color:var(--text); background:var(--off-white);
     border:1px solid var(--border); border-radius:var(--radius);
   }
-  #nlPredictor .nlsp__scoreboard input:focus {
+  #nlPredictor .nlsp__score input:focus {
     outline:none; background:var(--white); border-color:var(--primary);
     box-shadow:0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent);
   }
-  #nlPredictor .nlsp__scoreboard .nlsp__num {
-    display:inline-block; min-width:32px; text-align:center;
-  }
+  #nlPredictor .nlsp__score input::placeholder { color:var(--text-muted); opacity:.4; }
 
-  /* Foot — context strip under the scoreboard */
-  #nlPredictor .nlsp__foot {
-    display:flex; align-items:center; gap:10px;
-    font-size:12px; color:var(--text-muted);
-    min-height:18px;
+  /* Verdict strip — only shown when in-play or post */
+  #nlPredictor .nlsp__verdict {
+    grid-column:2 / span 3;
+    margin-top:4px; font-size:12px; color:var(--text-muted);
+    display:flex; gap:10px; align-items:center;
   }
-  #nlPredictor .nlsp__foot .nlsp__yours { color:var(--text-muted); }
-  #nlPredictor .nlsp__foot .nlsp__yours b { color:var(--text); font-weight:800; font-variation-settings:'wght' 800; }
-  #nlPredictor .nlsp__foot .nlsp__pts {
-    margin-left:auto;
-    color:var(--green); font-weight:900; font-variation-settings:'wght' 900;
+  #nlPredictor .nlsp__verdict .nlsp__pickline {
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
-  #nlPredictor .nlsp__foot .nlsp__pts.is-zero { color:var(--text-muted); }
-  #nlPredictor .nlsp__foot .nlsp__edit {
-    font:inherit; font-size:12px; padding:0; border:none; background:transparent;
-    color:var(--primary); cursor:pointer;
-    font-weight:800; font-variation-settings:'wght' 800;
-    text-decoration:underline; text-underline-offset:2px;
-  }
-
-  /* Submit bar */
-  #nlPredictor .nlsp__submitbar {
-    display:flex; align-items:center; gap:12px;
-    padding:12px 14px; margin:14px 0 20px;
-    background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
-    box-shadow:var(--shadow);
-  }
-  #nlPredictor .nlsp__count {
-    font-size:13px; color:var(--text-muted);
-    font-weight:700; font-variation-settings:'wght' 700;
-  }
-  #nlPredictor .nlsp__count b { color:var(--text); font-weight:900; font-variation-settings:'wght' 900; }
-
-  /* Buttons */
-  #nlPredictor .nlsp__btn {
-    font-family:inherit; font-size:15px;
+  #nlPredictor .nlsp__verdict b { color:var(--text); font-weight:800; font-variation-settings:'wght' 800; }
+  #nlPredictor .nlsp__verdict .nlsp__multbadge {
+    background:var(--gold-light); color:var(--gold);
+    padding:1px 6px; border-radius:4px; font-size:10px; letter-spacing:1px;
     font-weight:900; font-variation-settings:'wght' 900;
-    padding:10px 22px; border:none; border-radius:var(--radius);
-    cursor:pointer; background:var(--primary); color:var(--white);
-    transition:background .15s ease;
   }
-  #nlPredictor .nlsp__btn:hover  { background:color-mix(in srgb, var(--primary) 80%, black); }
-  #nlPredictor .nlsp__btn:active { background:color-mix(in srgb, var(--primary) 70%, black); }
-  #nlPredictor .nlsp__btn:focus-visible {
-    outline:3px solid color-mix(in srgb, var(--primary) 35%, transparent); outline-offset:2px;
+  #nlPredictor .nlsp__pts {
+    margin-left:auto; padding:2px 10px; border-radius:999px;
+    font-size:14px;
+    font-weight:900; font-variation-settings:'wght' 900;
   }
-  #nlPredictor .nlsp__btn:disabled { background:#cccccc; color:#888888; cursor:not-allowed; }
+  #nlPredictor .nlsp__pts.is-exact { background:var(--gold-light); color:var(--gold); }
+  #nlPredictor .nlsp__pts.is-right { background:var(--green-light); color:var(--green); }
+  #nlPredictor .nlsp__pts.is-wrong { background:var(--off-white); color:var(--text-muted); }
 
-  /* Registration card */
+  /* Registration */
   #nlPredictor .nlsp__register-card {
     background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
     padding:24px; box-shadow:var(--shadow);
@@ -292,13 +274,26 @@
     font-size:13px; border-radius:var(--radius);
     font-weight:700; font-variation-settings:'wght' 700;
   }
+  #nlPredictor .nlsp__btn {
+    font-family:inherit; font-size:15px;
+    font-weight:900; font-variation-settings:'wght' 900;
+    padding:10px 22px; border:none; border-radius:var(--radius);
+    cursor:pointer; background:var(--primary); color:var(--white);
+    transition:background .15s ease;
+  }
+  #nlPredictor .nlsp__btn:hover  { background:color-mix(in srgb, var(--primary) 80%, black); }
+  #nlPredictor .nlsp__btn:active { background:color-mix(in srgb, var(--primary) 70%, black); }
+  #nlPredictor .nlsp__btn:focus-visible {
+    outline:3px solid color-mix(in srgb, var(--primary) 35%, transparent); outline-offset:2px;
+  }
+  #nlPredictor .nlsp__btn:disabled { background:#cccccc; color:#888888; cursor:not-allowed; }
 
   /* Leaderboard */
   #nlPredictor .nlsp__table {
     background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
-    padding:14px 0; margin-bottom:24px; box-shadow:var(--shadow);
+    padding:12px 0; margin:18px 0; box-shadow:var(--shadow);
   }
-  #nlPredictor .nlsp__tablehead { padding:0 16px 10px; border-bottom:1px solid var(--border); }
+  #nlPredictor .nlsp__tablehead { padding:0 14px 8px; border-bottom:1px solid var(--border); }
   #nlPredictor .nlsp__tablehead .nlsp__kicker {
     font-size:11px; text-transform:uppercase; letter-spacing:1.5px;
     color:var(--text-muted);
@@ -306,29 +301,26 @@
   }
   #nlPredictor .nlsp__tablehead .nlsp__tsub { font-size:12px; color:var(--text-muted); margin-top:2px; }
   #nlPredictor .nlsp__trow {
-    display:grid; grid-template-columns:28px 28px 1fr auto;
-    align-items:center; gap:10px; padding:10px 16px;
-    border-bottom:1px solid var(--border); font-size:14px;
+    display:grid; grid-template-columns:24px 24px 1fr auto;
+    align-items:center; gap:10px; padding:6px 14px;
+    font-size:14px;
     font-weight:700; font-variation-settings:'wght' 700;
   }
-  #nlPredictor .nlsp__trow:last-child { border-bottom:none; }
   #nlPredictor .nlsp__trow.is-you { background:color-mix(in srgb, var(--primary) 4%, var(--white)); }
-  #nlPredictor .nlsp__trow.is-top1 { border-left:3px solid var(--gold); padding-left:13px; }
   #nlPredictor .nlsp__trow .nlsp__rank { color:var(--text-muted); font-weight:900; font-variation-settings:'wght' 900; }
-  #nlPredictor .nlsp__trow img { width:24px; height:24px; border-radius:3px; background:var(--white); object-fit:contain; }
-  #nlPredictor .nlsp__trow .nlsp__pts { font-size:15px; font-weight:900; font-variation-settings:'wght' 900; color:var(--text); }
+  #nlPredictor .nlsp__trow img { width:22px; height:22px; border-radius:3px; background:var(--white); object-fit:contain; }
+  #nlPredictor .nlsp__trow .nlsp__pts { font-size:14px; font-weight:900; font-variation-settings:'wght' 900; color:var(--text); padding:0; background:none; }
   #nlPredictor .nlsp__trow .nlsp__youlbl { color:var(--text-muted); font-weight:600; font-variation-settings:'wght' 600; }
 
-  /* Sim bar (dev-only, foot of widget) */
+  /* Sim bar (foot) */
   #nlPredictor .nlsp__simbar {
-    margin-top:20px; padding-top:12px; border-top:1px dashed var(--border);
+    margin-top:18px; padding-top:10px; border-top:1px dashed var(--border);
     display:flex; flex-wrap:wrap; gap:6px; align-items:center;
     font-size:11px; color:var(--text-muted);
   }
   #nlPredictor .nlsp__simbar .nlsp__simlbl {
     text-transform:uppercase; letter-spacing:1.2px;
-    font-weight:800; font-variation-settings:'wght' 800;
-    margin-right:4px;
+    font-weight:800; font-variation-settings:'wght' 800; margin-right:4px;
   }
   #nlPredictor .nlsp__simbar button {
     font-family:inherit; font-size:11px;
@@ -346,11 +338,12 @@
   }
 
   @media (max-width:520px) {
-    #nlPredictor .nlsp__team img { width:30px; height:30px; }
-    #nlPredictor .nlsp__tname { font-size:14px; }
-    #nlPredictor .nlsp__scoreboard input { width:42px; height:40px; font-size:20px; }
-    #nlPredictor .nlsp__scoreboard .nlsp__num { min-width:26px; }
-    #nlPredictor .nlsp__hero h1 { font-size:24px; }
+    #nlPredictor .nlsp__row { grid-template-columns:42px 1fr auto 1fr; column-gap:6px; padding:8px; }
+    #nlPredictor .nlsp__team img { width:22px; height:22px; }
+    #nlPredictor .nlsp__team { font-size:13px; }
+    #nlPredictor .nlsp__score input { width:38px; height:34px; font-size:17px; }
+    #nlPredictor .nlsp__score .nlsp__num { font-size:18px; min-width:22px; }
+    #nlPredictor .nlsp__hero h1 { font-size:22px; }
   }
 </style>
 
@@ -377,6 +370,7 @@
   var API_BASE   = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
   var MAX_PAGES  = 10;
   var IN_PLAY_MIN = 105;
+  var OWN_TEAM_MULT = 3;
   var SIM_OPTIONS = [
     { id:'pre',  label:'12:00',  utc:'2025-08-09T11:00:00Z' },
     { id:'live', label:'16:00',  utc:'2025-08-09T15:00:00Z' },
@@ -385,15 +379,14 @@
   ];
 
   // ---------- DOM refs ----------
-  var banner   = document.getElementById('nlsp-banner');
-  var register = document.getElementById('nlsp-register');
-  var main     = document.getElementById('nlsp-main');
-  var hero     = document.getElementById('nlsp-hero');
-  var jokerEl  = document.getElementById('nlsp-joker');
-  var fixtures = document.getElementById('nlsp-fixtures');
-  var submitb  = document.getElementById('nlsp-submitbar');
-  var tableEl  = document.getElementById('nlsp-table');
-  var simEl    = document.getElementById('nlsp-sim');
+  var banner    = document.getElementById('nlsp-banner');
+  var register  = document.getElementById('nlsp-register');
+  var main      = document.getElementById('nlsp-main');
+  var hero      = document.getElementById('nlsp-hero');
+  var statusbar = document.getElementById('nlsp-statusbar');
+  var fixtures  = document.getElementById('nlsp-fixtures');
+  var tableEl   = document.getElementById('nlsp-table');
+  var simEl     = document.getElementById('nlsp-sim');
 
   // ---------- helpers ----------
   function $h(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -436,40 +429,37 @@
     if (!d) return '';
     return d.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', timeZone:'Europe/London' });
   }
+  function teamLabel(t) { return t.shortName || t.name || ''; }
   function showBanner(msg, kind) {
     banner.className = 'nlsp__banner' + (kind === 'err' ? ' is-err' : kind === 'ok' ? ' is-ok' : '');
     banner.textContent = msg; banner.hidden = false;
   }
   function hideBanner() { banner.hidden = true; }
-  function setBannerOK(msg) {
-    showBanner(msg, 'ok');
-    setTimeout(function () { if (banner.textContent === msg) hideBanner(); }, 3000);
+  function flashSaveTick() {
+    var tick = statusbar.querySelector('.nlsp__savetick');
+    if (!tick) return;
+    tick.classList.add('is-on');
+    setTimeout(function () { if (tick) tick.classList.remove('is-on'); }, 1400);
   }
   function crestImg(url, alt, size) {
-    if (!url) return '<span style="width:' + (size || 36) + 'px;height:' + (size || 36) + 'px;flex:none;display:inline-block;"></span>';
+    var s = size || 26;
+    if (!url) return '<span style="display:inline-block;width:' + s + 'px;height:' + s + 'px;flex:none;"></span>';
     return '<img src="' + $h(url) + '" alt="' + $h(alt || '') + '" ' +
            'onerror="this.onerror=null;this.style.visibility=\'hidden\';">';
   }
-  function clampScore(raw) {
-    if (raw == null || raw === '') return null;
-    var n = parseInt(String(raw).replace(/[^0-9]/g, ''), 10);
-    if (isNaN(n)) return null;
-    return Math.max(0, Math.min(20, n));
-  }
 
   // ---------- sim mode (URL-driven) ----------
-  // Default during dev: bar visible, index 0 (pre-KO snapshot). Switch off with ?sim=off.
   function parseSimMode() {
     var p = new URLSearchParams(window.location.search).get('sim');
-    if (p == null) return { showBar: true, index: 0 }; // default — sim bar shown
+    if (p == null) return { showBar: true, index: 0 };
     p = p.toLowerCase();
-    if (p === 'off' || p === 'none' || p === '0' || p === 'false') return null; // real clock, no bar
+    if (p === 'off' || p === 'none' || p === '0' || p === 'false') return null;
     if (p === '1' || p === 'on' || p === 'true') return { showBar: true, index: 0 };
     if (p === 'pre')  return { showBar: false, index: 0 };
     if (p === 'live') return { showBar: false, index: 1 };
     if (p === 'post') return { showBar: false, index: 2 };
     if (p === 'demo') return { showBar: false, index: 3, autoDemo: true };
-    return { showBar: true, index: 0 }; // unknown value → fall back to bar visible
+    return { showBar: true, index: 0 };
   }
 
   // ---------- state ----------
@@ -478,18 +468,18 @@
     user: null, fbAuthed: false,
     matches: [],
     registration: null,
-    predictions: {}, draft: {}, draftJoker: null,
-    allUsers: {}, allPreds: {},
+    predictions: {},   // committed (server)
+    drafts: {},        // local-only between blur saves (matches predictions on blur)
+    allUsers: {},
+    allPreds: {},
     sim: { mode: null, index: 0, demoTick: null, demoStartReal: 0, demoStartUtc: 0 }
   };
 
   // ---------- sim clock ----------
   function simNow() {
     var s = state.sim;
-    if (!s.mode) return new Date(); // real time
-    if (s.demoTick) {
-      return new Date(s.demoStartUtc + (Date.now() - s.demoStartReal));
-    }
+    if (!s.mode) return new Date();
+    if (s.demoTick) return new Date(s.demoStartUtc + (Date.now() - s.demoStartReal));
     return new Date(SIM_OPTIONS[s.index].utc);
   }
   function stopDemo() {
@@ -500,14 +490,14 @@
     state.sim.demoStartReal = Date.now();
     state.sim.demoStartUtc  = new Date(SIM_OPTIONS[3].utc).getTime();
     state.sim.demoTick = setInterval(function () {
-      renderClock(); renderFixtures(); renderSubmitbar(); renderTable();
+      renderClock(); renderFixtures(); renderStatus(); renderTable();
     }, 1000);
   }
   function setSim(i) {
     stopDemo();
     state.sim.index = i;
     if (SIM_OPTIONS[i].id === 'demo') startDemo();
-    renderSimBar(); renderFixtures(); renderSubmitbar(); renderTable();
+    renderSimBar(); renderFixtures(); renderStatus(); renderTable();
   }
 
   // ---------- match state ----------
@@ -533,19 +523,7 @@
   function isOwnTeamMatch(m, reg) {
     return reg && (m.attributes.homeTeam.teamID === reg.teamId || m.attributes.awayTeam.teamID === reg.teamId);
   }
-  function multiplierFor(m, pred) {
-    var mult = 1;
-    if (isOwnTeamMatch(m, state.registration)) mult *= 2;
-    if (pred && pred.joker) mult *= 2;
-    return mult;
-  }
-  function pointsForMatch(m, pred, now) {
-    if (stateOf(m, now) !== 'post') return null;
-    var base = basePoints(pred && pred.home, pred && pred.away,
-                          m.attributes.homeTeam.score, m.attributes.awayTeam.score);
-    if (base == null) return null;
-    return base * multiplierFor(m, pred);
-  }
+  function multiplierFor(m, reg) { return isOwnTeamMatch(m, reg) ? OWN_TEAM_MULT : 1; }
   function totalForUser(jwtId, now) {
     var preds = (jwtId === state.user.id) ? state.predictions : (state.allPreds[jwtId] || {});
     var reg   = (jwtId === state.user.id) ? state.registration : state.allUsers[jwtId];
@@ -556,10 +534,8 @@
       var p = preds[m.id]; if (!p) continue;
       var base = basePoints(p.home, p.away, m.attributes.homeTeam.score, m.attributes.awayTeam.score);
       if (base == null) continue;
-      var mult = 1;
-      if (reg && (m.attributes.homeTeam.teamID === reg.teamId || m.attributes.awayTeam.teamID === reg.teamId)) mult *= 2;
-      if (p.joker) mult *= 2;
-      total += base * mult; settled += 1;
+      total += base * multiplierFor(m, reg);
+      settled += 1;
     }
     return { total: total, settled: settled };
   }
@@ -593,7 +569,7 @@
       [m.attributes.homeTeam, m.attributes.awayTeam].forEach(function (t) {
         if (!seen[t.teamID]) {
           seen[t.teamID] = true;
-          opts.push({ id: t.teamID, name: t.name, crest: t.crest });
+          opts.push({ id: t.teamID, name: t.name, shortName: t.shortName, crest: t.crest });
         }
       });
     });
@@ -601,8 +577,7 @@
     return opts;
   }
   function renderRegistration() {
-    main.hidden = true;
-    register.hidden = false;
+    main.hidden = true; register.hidden = false;
     var opts = teamOptionsFromMatches();
     var defaultId = '';
     if (state.user.favTeamName) {
@@ -611,12 +586,12 @@
     }
     register.innerHTML =
       '<div class="nlsp__register-card">' +
-        '<div class="nlsp__hero" style="padding:0 0 6px;">' +
+        '<div class="nlsp__hero" style="padding:0;">' +
           '<div class="nlsp__kicker">National League Predictor</div>' +
           '<h1>Welcome, ' + $h(state.user.forename) + '</h1>' +
         '</div>' +
         '<p style="color:var(--text-muted);font-size:14px;margin:6px 0 0;">' +
-          'Pick your team for the season. Your team\'s match each week will <b style="color:var(--gold);">auto-double</b> your points.' +
+          'Pick your team for the season. Your team\'s match each week scores <b style="color:var(--gold);">×3</b>.' +
         '</p>' +
         '<label for="nlsp-team-select">Your team</label>' +
         '<select id="nlsp-team-select">' +
@@ -642,9 +617,7 @@
         email: state.user.email || '',
         registeredAt: firebase.database.ServerValue.TIMESTAMP
       };
-      fbDb.ref('users/' + state.user.id).set(payload).then(function () {
-        setBannerOK('Locked in — let\'s predict.');
-      }).catch(function (err) {
+      fbDb.ref('users/' + state.user.id).set(payload).catch(function (err) {
         btn.disabled = false; btn.textContent = 'Confirm and lock my team';
         showBanner('Could not save registration: ' + err.message, 'err');
       });
@@ -662,249 +635,178 @@
       '<h1>' + $h(dateLabel) + '</h1>' +
       '<div class="nlsp__welcome">' +
         'Welcome back, <b>' + $h(state.user.forename) + '</b>' +
-        (r ? '<span class="nlsp__myteam">' + crestImg(r.crestUrl, r.teamName, 18) + $h(r.teamName) + '</span>' : '') +
+        (r ? '<span class="nlsp__myteam">' + crestImg(r.crestUrl, r.teamName, 16) + $h(r.teamName) + '<span class="nlsp__mult">×3</span></span>' : '') +
       '</div>';
   }
 
-  // ---------- joker picker ----------
-  function eligibleJokerMatches() {
-    return state.matches.filter(function (m) { return !isOwnTeamMatch(m, state.registration); });
-  }
-  function currentJokerMatchId() {
-    // submitted joker (if any) wins; otherwise draft joker
-    var fromSubmitted = Object.keys(state.predictions).filter(function (mid) {
-      return state.predictions[mid] && state.predictions[mid].joker;
-    })[0];
-    return state.draftJoker || fromSubmitted || '';
-  }
-  function renderJoker() {
+  // ---------- status bar ----------
+  function renderStatus() {
     var now = simNow();
-    var anyPre = state.matches.some(function (m) { return stateOf(m, now) === 'pre'; });
-    if (!anyPre) { jokerEl.innerHTML = ''; return; }
-
-    var eligible = eligibleJokerMatches();
-    var current = currentJokerMatchId();
-    jokerEl.className = '';
-    jokerEl.innerHTML =
-      '<div class="nlsp__jokerbar">' +
-        '<span class="nlsp__jokerlbl">Joker</span>' +
-        '<select id="nlsp-joker-select">' +
-          '<option value="">— pick one match to ×2 —</option>' +
-          eligible.map(function (m) {
-            var ko = koOf(m);
-            var label = m.attributes.homeTeam.name + ' v ' + m.attributes.awayTeam.name + ' · ' + fmtBST(ko);
-            return '<option value="' + $h(m.id) + '"' + (m.id === current ? ' selected' : '') + '>' + $h(label) + '</option>';
-          }).join('') +
-        '</select>' +
-        '<div class="nlsp__jokerhint">' +
-          (current
-            ? 'Your joker match counts <b>×2</b>. Change it any time before its kick-off.'
-            : 'Pick one match (other than your own team\'s) to double its points.') +
-        '</div>' +
-      '</div>';
-
-    document.getElementById('nlsp-joker-select').addEventListener('change', function (e) {
-      var mid = e.target.value || null;
-      state.draftJoker = mid;
-      // if the user already submitted other matches, the joker flag will get rewritten on next Save
-      renderJoker(); renderFixtures(); renderSubmitbar();
+    var preCount = 0, savedCount = 0;
+    state.matches.forEach(function (m) {
+      var s = stateOf(m, now);
+      if (s === 'pre') preCount++;
+      var p = state.predictions[m.id];
+      if (p && p.home != null && p.away != null) savedCount++;
     });
+    statusbar.className = 'nlsp__status';
+    statusbar.innerHTML =
+      '<span class="nlsp__count"><b>' + savedCount + '/' + state.matches.length + '</b> predicted' +
+        (preCount > 0 ? ' · ' + preCount + ' open' : '') + '</span>' +
+      '<span class="nlsp__savetick">Saved</span>';
   }
 
-  // ---------- fixtures ----------
+  // ---------- fixture rendering ----------
   function renderFixtures() {
     if (!state.matches.length) {
       fixtures.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">No matches found for ' + MATCH_DAY + '.</div>';
       return;
     }
     var now = simNow();
-    var jokerMid = currentJokerMatchId();
+    fixtures.innerHTML = state.matches.map(function (m) { return rowHTML(m, now); }).join('');
+    wireRow();
+  }
 
-    fixtures.innerHTML = state.matches.map(function (m) {
-      var a = m.attributes;
-      var s = stateOf(m, now);
-      var ko = koOf(m);
-      var reg = state.registration;
-      var isOwn = isOwnTeamMatch(m, reg);
-      var submittedPred = state.predictions[m.id];
-      var draft = state.draft[m.id] || {};
-      var isJoker = (jokerMid === m.id);
-      var hasMult = (isOwn || isJoker);
+  function rowHTML(m, now) {
+    var a = m.attributes;
+    var s = stateOf(m, now);
+    var ko = koOf(m);
+    var reg = state.registration;
+    var isOwn = isOwnTeamMatch(m, reg);
+    var p = state.predictions[m.id];
+    var d = state.drafts[m.id];
 
-      // Meta strip
-      var meta = '';
-      if (s === 'pre')  meta = 'Kicks off ' + fmtBST(ko);
-      if (s === 'live') meta = '<span class="nlsp__livedot"></span>Live · ' + fmtBST(ko);
-      if (s === 'post') meta = 'Full time · ' + fmtBST(ko);
-      var multCaption = '';
-      if (hasMult) multCaption = '<span class="nlsp__multbadge">×2 ' + (isOwn ? 'OWN TEAM' : 'JOKER') + '</span>';
+    // KO column content
+    var koCell;
+    if (s === 'pre')  koCell = '<span>' + fmtBST(ko) + '</span>';
+    else if (s === 'live') koCell = '<span class="nlsp__live"><span class="nlsp__livedot"></span>Live</span>';
+    else koCell = '<span class="nlsp__ftlabel">FT</span>';
 
-      // Scoreboard
-      var scoreboard;
-      if (s === 'pre' && !submittedPred) {
-        var hv = draft.home != null ? draft.home : '';
-        var av = draft.away != null ? draft.away : '';
-        scoreboard =
-          '<input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="off" data-side="home" data-m="' + $h(m.id) + '" value="' + $h(hv) + '" aria-label="' + $h(a.homeTeam.name + ' score') + '">' +
-          '<span class="nlsp__dash">–</span>' +
-          '<input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="off" data-side="away" data-m="' + $h(m.id) + '" value="' + $h(av) + '" aria-label="' + $h(a.awayTeam.name + ' score') + '">';
-      } else if (s === 'pre' && submittedPred) {
-        scoreboard =
-          '<span class="nlsp__num">' + submittedPred.home + '</span>' +
-          '<span class="nlsp__dash">–</span>' +
-          '<span class="nlsp__num">' + submittedPred.away + '</span>';
-      } else if (s === 'live') {
-        scoreboard =
-          '<span class="nlsp__num" style="color:var(--text-muted);">·</span>' +
-          '<span class="nlsp__dash">–</span>' +
-          '<span class="nlsp__num" style="color:var(--text-muted);">·</span>';
+    // Score cell content
+    var scoreCell;
+    if (s === 'pre') {
+      // editable inputs (drafts override committed)
+      var hv = (d && d.home != null) ? d.home : (p && p.home != null ? p.home : '');
+      var av = (d && d.away != null) ? d.away : (p && p.away != null ? p.away : '');
+      scoreCell =
+        '<input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="off" placeholder="–" data-side="home" data-m="' + $h(m.id) + '" value="' + $h(hv) + '" aria-label="' + $h(teamLabel(a.homeTeam) + ' score') + '">' +
+        '<span class="nlsp__dash">–</span>' +
+        '<input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="off" placeholder="–" data-side="away" data-m="' + $h(m.id) + '" value="' + $h(av) + '" aria-label="' + $h(teamLabel(a.awayTeam) + ' score') + '">';
+    } else {
+      // locked — show actual scores if known, otherwise "?"
+      var hs = a.homeTeam.score != null ? a.homeTeam.score : '?';
+      var as = a.awayTeam.score != null ? a.awayTeam.score : '?';
+      scoreCell =
+        '<span class="nlsp__num is-locked">' + $h(hs) + '</span>' +
+        '<span class="nlsp__dash">–</span>' +
+        '<span class="nlsp__num is-locked">' + $h(as) + '</span>';
+    }
+
+    // Verdict line (only meaningful when row not pre)
+    var verdict = '';
+    var rowMod = '';
+    if (s === 'live') {
+      var pickHTML = p
+        ? 'Your pick <b>' + p.home + '–' + p.away + '</b>'
+        : '<span class="nlsp__pickline">No prediction</span>';
+      verdict = '<div class="nlsp__verdict"><span class="nlsp__pickline">' + pickHTML + '</span>' +
+                  (isOwn ? '<span class="nlsp__multbadge">×3 OWN TEAM</span>' : '') +
+                '</div>';
+    } else if (s === 'post') {
+      var realH = a.homeTeam.score, realA = a.awayTeam.score;
+      if (p && p.home != null) {
+        var b = basePoints(p.home, p.away, realH, realA);
+        var mult = multiplierFor(m, reg);
+        var pts = (b == null) ? null : b * mult;
+        var verdictWord = b === 3 ? 'Exact score' : b === 1 ? 'Right result' : 'Wrong';
+        var ptsCls, rowCls;
+        if (b === 3) { ptsCls = 'is-exact'; rowCls = 'is-exact'; }
+        else if (b === 1) { ptsCls = 'is-right'; rowCls = 'is-right'; }
+        else { ptsCls = 'is-wrong'; rowCls = 'is-wrong'; }
+        rowMod = ' ' + rowCls;
+        verdict = '<div class="nlsp__verdict">' +
+                    '<span class="nlsp__pickline">Your pick <b>' + p.home + '–' + p.away + '</b> · ' + verdictWord + '</span>' +
+                    (isOwn ? '<span class="nlsp__multbadge">×3</span>' : '') +
+                    '<span class="nlsp__pts ' + ptsCls + '">+' + (pts != null ? pts : 0) + '</span>' +
+                  '</div>';
       } else {
-        scoreboard =
-          '<span class="nlsp__num">' + (a.homeTeam.score != null ? a.homeTeam.score : '?') + '</span>' +
-          '<span class="nlsp__dash">–</span>' +
-          '<span class="nlsp__num">' + (a.awayTeam.score != null ? a.awayTeam.score : '?') + '</span>';
+        verdict = '<div class="nlsp__verdict"><span class="nlsp__pickline" style="opacity:.7;">No prediction</span></div>';
       }
+    } else if (isOwn) {
+      // pre + own team — surface ×3 hint inline
+      verdict = '<div class="nlsp__verdict"><span class="nlsp__multbadge">×3 OWN TEAM</span></div>';
+    }
 
-      // Foot
-      var foot = '';
-      if (s === 'pre' && submittedPred) {
-        foot = '<div class="nlsp__foot">' +
-                 '<span class="nlsp__yours">Your pick: <b>' + submittedPred.home + '–' + submittedPred.away + '</b></span>' +
-                 '<button class="nlsp__edit" data-edit="' + $h(m.id) + '">Edit</button>' +
-               '</div>';
-      } else if (s === 'live') {
-        foot = '<div class="nlsp__foot">' +
-                 (submittedPred
-                   ? '<span class="nlsp__yours">Your pick: <b>' + submittedPred.home + '–' + submittedPred.away + '</b></span>'
-                   : '<span class="nlsp__yours">No prediction</span>') +
-               '</div>';
-      } else if (s === 'post') {
-        if (submittedPred) {
-          var b = basePoints(submittedPred.home, submittedPred.away, a.homeTeam.score, a.awayTeam.score);
-          var mult = multiplierFor(m, submittedPred);
-          var pts = (b == null) ? null : b * mult;
-          var verdict = b === 3 ? 'Exact score' : b === 1 ? 'Right result' : 'Wrong';
-          foot = '<div class="nlsp__foot">' +
-                   '<span class="nlsp__yours">Your pick: <b>' + submittedPred.home + '–' + submittedPred.away + '</b> · ' + verdict + (mult > 1 ? ' (×' + mult + ')' : '') + '</span>' +
-                   (pts != null ? '<span class="nlsp__pts' + (pts === 0 ? ' is-zero' : '') + '">+' + pts + ' pts</span>' : '') +
-                 '</div>';
-        } else {
-          foot = '<div class="nlsp__foot"><span class="nlsp__yours">No prediction</span></div>';
-        }
-      }
+    var rowCls = 'nlsp__row';
+    if (isOwn) rowCls += ' is-mult';
+    if (s === 'live') rowCls += ' is-live';
+    rowCls += rowMod;
 
-      var cls = 'nlsp__row';
-      if (hasMult) cls += ' is-mult';
-      if (s === 'live') cls += ' is-live';
-      if (s === 'post') cls += ' is-post';
+    return '<div class="' + rowCls + '">' +
+      '<div class="nlsp__ko">' + koCell + '</div>' +
+      '<div class="nlsp__team is-home">' +
+        crestImg(a.homeTeam.crest, teamLabel(a.homeTeam)) +
+        '<span class="nlsp__tname">' + $h(teamLabel(a.homeTeam)) + '</span>' +
+      '</div>' +
+      '<div class="nlsp__score">' + scoreCell + '</div>' +
+      '<div class="nlsp__team is-away">' +
+        crestImg(a.awayTeam.crest, teamLabel(a.awayTeam)) +
+        '<span class="nlsp__tname">' + $h(teamLabel(a.awayTeam)) + '</span>' +
+      '</div>' +
+      verdict +
+    '</div>';
+  }
 
-      return '<div class="' + cls + '">' +
-        '<div class="nlsp__row-meta">' + meta + multCaption + '</div>' +
-        '<div class="nlsp__teams">' +
-          '<div class="nlsp__team is-home">' +
-            crestImg(a.homeTeam.crest, a.homeTeam.name, 36) +
-            '<span class="nlsp__tname">' + $h(a.homeTeam.name) + '</span>' +
-          '</div>' +
-          '<div class="nlsp__scoreboard">' + scoreboard + '</div>' +
-          '<div class="nlsp__team is-away">' +
-            crestImg(a.awayTeam.crest, a.awayTeam.name, 36) +
-            '<span class="nlsp__tname">' + $h(a.awayTeam.name) + '</span>' +
-          '</div>' +
-        '</div>' +
-        foot +
-      '</div>';
-    }).join('');
-
-    // Wire score inputs
+  function wireRow() {
     Array.prototype.forEach.call(fixtures.querySelectorAll('input[data-m]'), function (inp) {
       inp.addEventListener('input', function () {
-        var mid = inp.getAttribute('data-m');
-        var side = inp.getAttribute('data-side');
-        // strip non-digits in place (keeps caret behaviour reasonable)
         var cleaned = inp.value.replace(/[^0-9]/g, '').slice(0, 2);
         if (cleaned !== inp.value) inp.value = cleaned;
-        var val = clampScore(cleaned);
-        state.draft[mid] = state.draft[mid] || {};
-        state.draft[mid][side] = val;
-        renderSubmitbar();
+        var mid = inp.getAttribute('data-m');
+        var side = inp.getAttribute('data-side');
+        state.drafts[mid] = state.drafts[mid] || {};
+        state.drafts[mid][side] = (cleaned === '' ? null : Math.max(0, Math.min(20, parseInt(cleaned, 10))));
       });
-    });
-    // Edit
-    Array.prototype.forEach.call(fixtures.querySelectorAll('button[data-edit]'), function (b) {
-      b.addEventListener('click', function () {
-        var mid = b.getAttribute('data-edit');
-        var p = state.predictions[mid]; if (!p) return;
-        state.draft[mid] = { home: p.home, away: p.away };
-        if (p.joker) state.draftJoker = mid;
-        delete state.predictions[mid];
-        renderFixtures(); renderSubmitbar();
+      inp.addEventListener('blur', function () {
+        var mid = inp.getAttribute('data-m');
+        commitDraft(mid);
+      });
+      inp.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') inp.blur();
       });
     });
   }
 
-  // ---------- submit bar ----------
-  function preCount() {
-    var now = simNow();
-    var preMatches = state.matches.filter(function (m) { return stateOf(m, now) === 'pre'; });
-    var ready = 0;
-    preMatches.forEach(function (m) {
-      var p = state.predictions[m.id];
-      var d = state.draft[m.id];
-      if (p && p.home != null && p.away != null) ready++;
-      else if (d && d.home != null && d.away != null) ready++;
-    });
-    var jokerOK = !!currentJokerMatchId();
-    return { total: preMatches.length, ready: ready, jokerOK: jokerOK };
-  }
-  function renderSubmitbar() {
-    var now = simNow();
-    var hasPre = state.matches.some(function (m) { return stateOf(m, now) === 'pre'; });
-    if (!hasPre) { submitb.innerHTML = ''; return; }
-    var c = preCount();
-    var draftsPending = Object.keys(state.draft).length > 0 || (state.draftJoker !== null && state.draftJoker !== undefined);
-    var canSubmit = (c.ready === c.total) && c.jokerOK && draftsPending;
-    submitb.innerHTML =
-      '<div class="nlsp__submitbar">' +
-        '<div class="nlsp__count">' +
-          '<b>' + c.ready + '/' + c.total + '</b> predicted · ' + (c.jokerOK ? 'joker set' : 'no joker yet') +
-        '</div>' +
-        '<button class="nlsp__btn" id="nlsp-submit"' + (canSubmit ? '' : ' disabled') +
-          ' style="margin-left:auto;">' +
-          (Object.keys(state.predictions).length ? 'Save changes' : 'Submit predictions') +
-        '</button>' +
-      '</div>';
-    var btn = document.getElementById('nlsp-submit');
-    if (btn) btn.addEventListener('click', submitDrafts);
-  }
-  function submitDrafts() {
-    var ref = fbDb.ref('predictions/' + state.user.id + '/' + MATCHDAY_KEY);
-    var updates = {};
-    var now = simNow();
-    var jokerMid = currentJokerMatchId();
-    state.matches.forEach(function (m) {
-      if (stateOf(m, now) !== 'pre') return;
-      var d = state.draft[m.id];
-      // include rows that are in draft OR previously-submitted rows where joker flag has changed
-      var submitted = state.predictions[m.id];
-      var newJoker = (jokerMid === m.id);
-      if (d && d.home != null && d.away != null) {
-        updates[m.id] = { home: d.home, away: d.away, joker: newJoker,
-                          submittedAt: firebase.database.ServerValue.TIMESTAMP };
-      } else if (submitted && !!submitted.joker !== newJoker) {
-        updates[m.id] = { home: submitted.home, away: submitted.away, joker: newJoker,
-                          submittedAt: firebase.database.ServerValue.TIMESTAMP };
-      }
-    });
-    if (Object.keys(updates).length === 0) { setBannerOK('No changes to save.'); return; }
+  function commitDraft(mid) {
+    var d = state.drafts[mid];
+    if (!d) return;
+    if (d.home == null || d.away == null) return; // wait until both filled
 
-    showBanner('Saving predictions…');
-    ref.update(updates).then(function () {
-      Object.keys(updates).forEach(function (mid) { delete state.draft[mid]; });
-      state.draftJoker = null;
-      setBannerOK('Predictions saved.');
-    }).catch(function (err) {
-      showBanner('Save failed: ' + err.message, 'err');
-    });
+    // Don't commit if match has crossed KO since draft start
+    var m = state.matches.filter(function (x) { return x.id === mid; })[0];
+    if (!m || stateOf(m, simNow()) !== 'pre') return;
+
+    // Skip write if unchanged from server state
+    var existing = state.predictions[mid];
+    if (existing && existing.home === d.home && existing.away === d.away) {
+      delete state.drafts[mid];
+      return;
+    }
+
+    var payload = {
+      home: d.home,
+      away: d.away,
+      joker: false, // legacy field — keep for rules compatibility
+      submittedAt: firebase.database.ServerValue.TIMESTAMP
+    };
+    fbDb.ref('predictions/' + state.user.id + '/' + MATCHDAY_KEY + '/' + mid).update(payload)
+      .then(function () {
+        delete state.drafts[mid];
+        flashSaveTick();
+      })
+      .catch(function (err) {
+        showBanner('Save failed for one match: ' + err.message, 'err');
+      });
   }
 
   // ---------- league table ----------
@@ -933,12 +835,10 @@
       '</div>' +
       rows.map(function (r, i) {
         var name = $h(r.reg.forename) + ' ' + $h(r.reg.surnameInitial || '');
-        var cls = 'nlsp__trow';
-        if (r.uid === state.user.id) cls += ' is-you';
-        if (i === 0) cls += ' is-top1';
+        var cls = 'nlsp__trow' + (r.uid === state.user.id ? ' is-you' : '');
         return '<div class="' + cls + '">' +
           '<span class="nlsp__rank">' + (i + 1) + '</span>' +
-          crestImg(r.reg.crestUrl, r.reg.teamName, 24) +
+          crestImg(r.reg.crestUrl, r.reg.teamName, 22) +
           '<span>' + name + (r.uid === state.user.id ? ' <span class="nlsp__youlbl">(you)</span>' : '') + '</span>' +
           '<span class="nlsp__pts">' + r.total + '</span>' +
         '</div>';
@@ -948,7 +848,7 @@
     tableEl.innerHTML = inner;
   }
 
-  // ---------- sim bar (dev only) ----------
+  // ---------- sim bar (dev) ----------
   function renderClock() {
     var el = simEl.querySelector('.nlsp__clock'); if (!el) return;
     el.textContent = simNow().toLocaleTimeString('en-GB', { hour:'2-digit',minute:'2-digit',second:'2-digit', timeZone:'Europe/London' });
@@ -977,12 +877,7 @@
         renderRegistration();
       } else {
         register.hidden = true; main.hidden = false;
-        renderHero();
-        renderJoker();
-        renderFixtures();
-        renderSubmitbar();
-        renderTable();
-        renderSimBar();
+        renderHero(); renderStatus(); renderFixtures(); renderTable(); renderSimBar();
       }
     });
     fbDb.ref('predictions').on('value', function (snap) {
@@ -993,7 +888,7 @@
       });
       state.predictions = state.allPreds[state.user.id] || {};
       if (!main.hidden) {
-        renderJoker(); renderFixtures(); renderSubmitbar(); renderTable();
+        renderStatus(); renderFixtures(); renderTable();
       }
     });
   }
@@ -1015,7 +910,6 @@
       favTeamName: claims.favourite_team || null
     };
 
-    // Init sim mode from URL
     state.sim.mode = parseSimMode();
     if (state.sim.mode) {
       state.sim.index = state.sim.mode.index;
