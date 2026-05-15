@@ -237,6 +237,26 @@
   }
   #nlPredictor .nlsp__status .nlsp__savetick.is-on { opacity:1; }
 
+  /* Empty state (no matches on selected date / pre-season / post-season) */
+  #nlPredictor .nlsp__empty {
+    padding:32px 24px;
+    text-align:center;
+    background:var(--white);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow);
+    margin:8px 0 12px;
+  }
+  #nlPredictor .nlsp__empty-title {
+    font-size:16px; color:var(--text);
+    font-weight:900; font-variation-settings:'wght' 900;
+    margin-bottom:6px;
+  }
+  #nlPredictor .nlsp__empty-body {
+    font-size:13px; color:var(--text-muted);
+    font-weight:500; font-variation-settings:'wght' 500;
+  }
+
   /* Fixture rows — stacked layout: meta strip, then home team line, away team line */
   #nlPredictor .nlsp__row {
     position:relative;
@@ -787,16 +807,30 @@
     });
     return Object.keys(seen).sort();
   }
-  // Default: today (in BST) if any matches today, else next upcoming matchday.
-  // Always computed from REAL today — sim time doesn't auto-shift the default.
+  // Default: probe-date (sim time's BST date, or real today) if any matches
+  // that day, else next upcoming matchday from that probe, else the last
+  // matchday of the season. Driving from sim time means setting the sim to
+  // a March date will auto-navigate the matchday view to the next NL match
+  // after March, which matches the user's expectation.
   function defaultMatchdayKey() {
-    var today = bstDateOf(new Date());
+    var probe = bstDateOf(simNow());
     var keys = uniqueMatchdayKeys();
-    if (keys.indexOf(today) !== -1) return today;
+    if (keys.indexOf(probe) !== -1) return probe;
     for (var i = 0; i < keys.length; i++) {
-      if (keys[i] > today) return keys[i];
+      if (keys[i] > probe) return keys[i];
     }
-    return keys[keys.length - 1] || today;
+    return keys[keys.length - 1] || probe;
+  }
+  // Returns 'before' if sim is before the first matchday of the user's season,
+  // 'after' if it's past the last, or null otherwise. Drives the empty-state
+  // banner when the predictor isn't relevant yet (or any more).
+  function seasonBoundary() {
+    var keys = uniqueMatchdayKeys();
+    if (!keys.length) return null;
+    var probe = bstDateOf(simNow());
+    if (probe < keys[0]) return 'before';
+    if (probe > keys[keys.length - 1]) return 'after';
+    return null;
   }
   // The matchday actually being shown
   function currentMatchdayKey() {
@@ -1052,39 +1086,41 @@
   function enableDragScroll(el) {
     if (el.__nlspDragWired) return;
     el.__nlspDragWired = true;
-    var down = false, startX = 0, startScroll = 0, scrolledBy = 0;
+    var down = false, startX = 0, startScroll = 0, didScroll = false;
+
     el.addEventListener('mousedown', function (e) {
       if (e.button !== 0) return;
-      down = true; scrolledBy = 0;
+      down = true; didScroll = false;
       startX = e.pageX;
       startScroll = el.scrollLeft;
-      el.classList.add('is-dragging');
+      // NB: don't add is-dragging here — would set pointer-events:none on
+      // child buttons immediately and on some browsers swallows the click
+      // that arrives a few ms later. Only add it once we actually scroll.
     });
+
     document.addEventListener('mousemove', function (e) {
       if (!down) return;
       var dx = e.pageX - startX;
-      // Only move once past a 12px deadzone — and only suppress the click
-      // if we've actually moved the scroll position.
-      if (Math.abs(dx) > 12) {
-        e.preventDefault();
-        var newScroll = startScroll - dx;
-        if (newScroll !== el.scrollLeft) {
-          el.scrollLeft = newScroll;
-          scrolledBy = Math.abs(el.scrollLeft - startScroll);
-        }
+      if (Math.abs(dx) < 15) return; // generous deadzone
+      e.preventDefault();
+      el.scrollLeft = startScroll - dx;
+      if (!didScroll) {
+        didScroll = true;
+        el.classList.add('is-dragging');
       }
     });
+
     document.addEventListener('mouseup', function () {
       if (!down) return;
       down = false;
       el.classList.remove('is-dragging');
     });
-    // Suppress the synthetic click only when the drag actually scrolled
-    // the container by more than a couple of pixels. A normal click — even
-    // with tiny incidental cursor jitter — passes straight through.
+
+    // Capture-phase suppression — fires only when we actually scrolled,
+    // so a clean click on a pill is never blocked.
     el.addEventListener('click', function (e) {
-      if (scrolledBy > 4) { e.stopPropagation(); e.preventDefault(); }
-      scrolledBy = 0;
+      if (didScroll) { e.stopPropagation(); e.preventDefault(); }
+      didScroll = false;
     }, true);
   }
 
@@ -1110,9 +1146,37 @@
   function renderStatus() { statusbar.innerHTML = ''; }
 
   // ---------- fixture rendering ----------
+  function emptyStateHTML(title, body) {
+    return '<div class="nlsp__empty">' +
+      '<div class="nlsp__empty-title">' + $h(title) + '</div>' +
+      (body ? '<div class="nlsp__empty-body">' + $h(body) + '</div>' : '') +
+    '</div>';
+  }
   function renderFixtures() {
     if (!state.matches.length) {
-      fixtures.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">No National Division fixtures on ' + $h(currentMatchdayKey()) + '.</div>';
+      var boundary = seasonBoundary();
+      var keys = uniqueMatchdayKeys();
+      var compNm = compName(userCompId() || DEFAULT_COMP_ID);
+      var firstD = keys[0] ? new Date(keys[0] + 'T12:00:00Z')
+                              .toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', timeZone:'Europe/London' }) : '';
+      var lastD  = keys[keys.length - 1] ? new Date(keys[keys.length - 1] + 'T12:00:00Z')
+                              .toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', timeZone:'Europe/London' }) : '';
+      if (boundary === 'before') {
+        fixtures.innerHTML = emptyStateHTML(
+          'Predictor not available yet',
+          compNm + ' kicks off on ' + firstD + '. Predictions open seven days before each match.'
+        );
+      } else if (boundary === 'after') {
+        fixtures.innerHTML = emptyStateHTML(
+          'Season ended',
+          compNm + ' wrapped up on ' + lastD + '. See you next season.'
+        );
+      } else {
+        fixtures.innerHTML = emptyStateHTML(
+          'No matches on this date',
+          'Pick another date above — ' + compNm + ' isn\'t playing on ' + $h(currentMatchdayKey()) + '.'
+        );
+      }
       return;
     }
     var now = simNow();
