@@ -210,6 +210,9 @@
   }
   #nlPredictor .nlsp__meta .nlsp__livelbl { color:var(--red); }
   #nlPredictor .nlsp__meta .nlsp__ftlabel { color:var(--green); }
+  #nlPredictor .nlsp__meta .nlsp__voidlbl { color:var(--text-muted); }
+  #nlPredictor .nlsp__meta .nlsp__lock    { color:var(--text-muted); }
+  #nlPredictor .nlsp__row.is-void { opacity:.7; }
   #nlPredictor .nlsp__meta .nlsp__pickline { color:var(--text-muted); }
   #nlPredictor .nlsp__meta .nlsp__pickline b { color:var(--text); font-weight:900; font-variation-settings:'wght' 900; }
   @keyframes nlsp-pulse {
@@ -234,7 +237,7 @@
     box-shadow:0 1px 4px color-mix(in srgb, var(--gold) 35%, transparent);
   }
   #nlPredictor .nlsp__pts.is-exact::before { content:'\2605'; font-size:13px; line-height:1; }
-  #nlPredictor .nlsp__pts.is-right { background:var(--green); color:var(--white); }
+  #nlPredictor .nlsp__pts.is-right { background:#0f5022; color:var(--white); }
   #nlPredictor .nlsp__pts.is-wrong {
     background:var(--white); color:var(--text-muted);
     border:1px solid var(--border);
@@ -462,22 +465,32 @@
   /* Sim bar (foot) */
   #nlPredictor .nlsp__simbar {
     margin-top:18px; padding-top:10px; border-top:1px dashed var(--border);
-    display:flex; flex-wrap:wrap; gap:6px; align-items:center;
+    display:flex; flex-wrap:wrap; gap:8px; align-items:center;
     font-size:11px; color:var(--text-muted);
   }
   #nlPredictor .nlsp__simbar .nlsp__simlbl {
     text-transform:uppercase; letter-spacing:1.2px;
-    font-weight:800; font-variation-settings:'wght' 800; margin-right:4px;
+    font-weight:800; font-variation-settings:'wght' 800;
   }
-  #nlPredictor .nlsp__simbar button {
+  #nlPredictor .nlsp__simbar input[type="datetime-local"] {
+    font-family:inherit; font-size:12px;
+    padding:4px 8px; border-radius:var(--radius);
+    border:1px solid var(--border); background:var(--white); color:var(--text);
+    font-weight:600; font-variation-settings:'wght' 600;
+  }
+  #nlPredictor .nlsp__simbar input[type="datetime-local"]:focus {
+    outline:none; border-color:var(--primary);
+    box-shadow:0 0 0 2px color-mix(in srgb, var(--primary) 25%, transparent);
+  }
+  #nlPredictor .nlsp__simbar .nlsp__sim-now-btn {
     font-family:inherit; font-size:11px;
     font-weight:700; font-variation-settings:'wght' 700;
+    text-transform:uppercase; letter-spacing:1px;
     padding:4px 10px; border-radius:999px; cursor:pointer;
     background:var(--white); color:var(--text-muted); border:1px solid var(--border);
   }
-  #nlPredictor .nlsp__simbar button:hover { color:var(--primary); border-color:var(--primary); }
-  #nlPredictor .nlsp__simbar button.is-active {
-    background:var(--text); color:var(--white); border-color:var(--text);
+  #nlPredictor .nlsp__simbar .nlsp__sim-now-btn:hover {
+    color:var(--primary); border-color:var(--primary);
   }
   #nlPredictor .nlsp__simbar .nlsp__clock {
     font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px;
@@ -519,18 +532,11 @@
 
   var COMP_ID    = 89;
   var SEASON_ID  = 2025;
-  var MATCH_DAY  = '2025-08-09';
-  var MATCHDAY_KEY = '2025-08-09';
   var API_BASE   = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
   var MAX_PAGES  = 10;
   var IN_PLAY_MIN = 105;
+  var EDIT_WINDOW_HOURS = 168; // predictions open 7 days before KO
   var OWN_TEAM_MULT = 3;
-  var SIM_OPTIONS = [
-    { id:'pre',  label:'12:00',  utc:'2025-08-09T11:00:00Z' },
-    { id:'live', label:'16:00',  utc:'2025-08-09T15:00:00Z' },
-    { id:'post', label:'18:00',  utc:'2025-08-09T17:00:00Z' },
-    { id:'demo', label:'Demo',   utc:'2025-08-09T13:59:50Z' }
-  ];
 
   // ---------- DOM refs ----------
   var banner    = document.getElementById('nlsp-banner');
@@ -609,12 +615,9 @@
     banner.textContent = msg; banner.hidden = false;
   }
   function hideBanner() { banner.hidden = true; }
-  function flashSaveTick() {
-    var tick = statusbar.querySelector('.nlsp__savetick');
-    if (!tick) return;
-    tick.classList.add('is-on');
-    setTimeout(function () { if (tick) tick.classList.remove('is-on'); }, 1400);
-  }
+  // Brief "Saved" toast at the top of the widget (replaces the old savetick
+  // pinned to the now-removed status bar).
+  function flashSaveTick() { setBannerOK('Saved'); }
   function crestImg(url, alt, size) {
     var s = size || 26;
     if (!url) return '<span style="display:inline-block;width:' + s + 'px;height:' + s + 'px;flex:none;"></span>';
@@ -623,56 +626,73 @@
   }
 
   // ---------- sim mode (URL-driven) ----------
+  // Returns a Date to use as the simulated 'now', or null for the real clock.
+  // ?sim=2025-08-09T14:00:00Z (or any value parseable by new Date()) freezes
+  // the sim at that moment. ?sim=off explicitly disables. No param => null.
   function parseSimMode() {
     var p = new URLSearchParams(window.location.search).get('sim');
-    if (p == null) return { showBar: true, index: 0 };
-    p = p.toLowerCase();
-    if (p === 'off' || p === 'none' || p === '0' || p === 'false') return null;
-    if (p === '1' || p === 'on' || p === 'true') return { showBar: true, index: 0 };
-    if (p === 'pre')  return { showBar: false, index: 0 };
-    if (p === 'live') return { showBar: false, index: 1 };
-    if (p === 'post') return { showBar: false, index: 2 };
-    if (p === 'demo') return { showBar: false, index: 3, autoDemo: true };
-    return { showBar: true, index: 0 };
+    if (p == null) return null;
+    var l = p.toLowerCase();
+    if (l === 'off' || l === 'none' || l === '0' || l === 'false') return null;
+    var d = new Date(p);
+    if (!isNaN(d.getTime())) return d;
+    return null;
   }
 
   // ---------- state ----------
   var fbApp = null, fbDb = null, fbAuth = null;
   var state = {
     user: null, fbAuthed: false,
-    matches: [],
+    allMatches: [],     // every fixture for the season (paginated full fetch)
+    matches: [],        // filtered subset for the currently-selected matchday
     registration: null,
-    predictions: {},   // committed (server)
-    drafts: {},        // local-only between blur saves (matches predictions on blur)
-    editing: {},       // matchId -> true while the user has re-opened a submitted row
+    allPredsRaw: {},    // full RTDB predictions tree { jwtId: { matchday: { matchId: ... } } }
+    predictions: {},    // current user, current matchday
+    allPreds: {},       // every user, current matchday only (used by leaderboard)
+    drafts: {},
+    editing: {},
     allUsers: {},
-    allPreds: {},
-    sim: { mode: null, index: 0, demoTick: null, demoStartReal: 0, demoStartUtc: 0 }
+    sim: { fixed: null } // a JS Date overriding "now", or null for the real clock
   };
 
   // ---------- sim clock ----------
   function simNow() {
-    var s = state.sim;
-    if (!s.mode) return new Date();
-    if (s.demoTick) return new Date(s.demoStartUtc + (Date.now() - s.demoStartReal));
-    return new Date(SIM_OPTIONS[s.index].utc);
+    return state.sim.fixed ? new Date(state.sim.fixed.getTime()) : new Date();
   }
-  function stopDemo() {
-    if (state.sim.demoTick) { clearInterval(state.sim.demoTick); state.sim.demoTick = null; }
+  function setSimFixed(d) {
+    state.sim.fixed = d;
+    recomputeMatchday();
+    renderSimBar();
+    renderHero();
+    renderFixtures();
+    renderReset();
+    renderTable();
   }
-  function startDemo() {
-    stopDemo();
-    state.sim.demoStartReal = Date.now();
-    state.sim.demoStartUtc  = new Date(SIM_OPTIONS[3].utc).getTime();
-    state.sim.demoTick = setInterval(function () {
-      renderClock(); renderFixtures(); renderStatus(); renderTable();
-    }, 1000);
+  function clearSimFixed() { setSimFixed(null); }
+
+  // ---------- matchday derivation ----------
+  // BST/GMT calendar date — keeps a 23:00 BST kickoff on the right matchday
+  // even though the API timestamps are UTC.
+  function bstDateOf(d) {
+    if (!d) return '';
+    return d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
   }
-  function setSim(i) {
-    stopDemo();
-    state.sim.index = i;
-    if (SIM_OPTIONS[i].id === 'demo') startDemo();
-    renderSimBar(); renderFixtures(); renderStatus(); renderTable();
+  function currentMatchdayKey() { return bstDateOf(simNow()); }
+  function matchMatchdayKey(m) { return bstDateOf(koOf(m)); }
+  function recomputeMatchday() {
+    var key = currentMatchdayKey();
+    state.matches = (state.allMatches || []).filter(function (m) { return matchMatchdayKey(m) === key; })
+      .sort(function (a, b) { return dateOf(a).localeCompare(dateOf(b)); });
+    recomputePredictionsFromRaw();
+  }
+  function recomputePredictionsFromRaw() {
+    if (!state.user) return;
+    var key = currentMatchdayKey();
+    state.predictions = (state.allPredsRaw[state.user.id] && state.allPredsRaw[state.user.id][key]) || {};
+    state.allPreds = {};
+    Object.keys(state.allPredsRaw).forEach(function (jwtId) {
+      state.allPreds[jwtId] = (state.allPredsRaw[jwtId] && state.allPredsRaw[jwtId][key]) || {};
+    });
   }
 
   // ---------- match state ----------
@@ -681,11 +701,18 @@
     return String(a.kickOffDateUTC || a.kickoffDateUTC || a.kickOffDate || a.kickoffDate || a.date || '');
   }
   function koOf(m) { return normaliseUtc(dateOf(m)); }
+  function periodOf(m) { return ((m && m.attributes && m.attributes.matchPeriod) || '').toLowerCase(); }
   function stateOf(m, now) {
+    // matchPeriod from the API takes priority for postponed / abandoned
+    var p = periodOf(m);
+    if (p === 'postponed') return 'postponed';
+    if (p === 'abandoned') return 'abandoned';
     var ko = koOf(m); if (!ko) return 'unknown';
-    var diff = (now - ko) / 60000;
-    if (diff < 0) return 'pre';
-    if (diff < IN_PLAY_MIN) return 'live';
+    var diffMin = (now - ko) / 60000;
+    var hoursUntil = -diffMin / 60;
+    if (diffMin < 0 && hoursUntil > EDIT_WINDOW_HOURS) return 'future'; // > 7 days away
+    if (diffMin < 0) return 'pre';                                       // editable window
+    if (diffMin < IN_PLAY_MIN) return 'live';
     return 'post';
   }
   function outcome(h, a) { return h > a ? 'H' : (h < a ? 'A' : 'D'); }
@@ -732,8 +759,9 @@
         });
     }
     return page(1).then(function () {
-      return all.filter(function (m) { return dateOf(m).indexOf(MATCH_DAY) === 0; })
-                .sort(function (a, b) { return dateOf(a).localeCompare(dateOf(b)); });
+      // Keep the full season; matchday filtering happens in recomputeMatchday()
+      // based on simNow().
+      return all.sort(function (a, b) { return dateOf(a).localeCompare(dateOf(b)); });
     });
   }
 
@@ -805,7 +833,12 @@
   // fixture row plus a tooltip on that row.
   function renderHero() {
     var firstKO = state.matches.length ? koOf(state.matches[0]) : null;
-    var dateLabel = firstKO ? firstKO.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long' }) : MATCH_DAY;
+    var dateLabel = firstKO
+      ? firstKO.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', timeZone:'Europe/London' })
+      : (function () {
+          var d = simNow();
+          return d.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', timeZone:'Europe/London' });
+        })();
     var r = state.registration;
     var parts = [ $h((state.user.forename || '').toUpperCase()) ];
     if (r && r.teamName) parts.push($h(r.teamName.toUpperCase()));
@@ -816,26 +849,14 @@
   }
 
   // ---------- status bar ----------
-  function renderStatus() {
-    var now = simNow();
-    var preCount = 0, savedCount = 0;
-    state.matches.forEach(function (m) {
-      var s = stateOf(m, now);
-      if (s === 'pre') preCount++;
-      var p = state.predictions[m.id];
-      if (p && p.home != null && p.away != null) savedCount++;
-    });
-    statusbar.className = 'nlsp__status';
-    statusbar.innerHTML =
-      '<span class="nlsp__count"><b>' + savedCount + '/' + state.matches.length + '</b> predicted' +
-        (preCount > 0 ? ' · ' + preCount + ' open' : '') + '</span>' +
-      '<span class="nlsp__savetick">Saved</span>';
-  }
+  // The X/12 PREDICTED status bar is removed. The submit-bar count + the
+  // per-row state already convey the same info more naturally.
+  function renderStatus() { statusbar.innerHTML = ''; }
 
   // ---------- fixture rendering ----------
   function renderFixtures() {
     if (!state.matches.length) {
-      fixtures.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">No matches found for ' + MATCH_DAY + '.</div>';
+      fixtures.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">No National Division fixtures on ' + $h(currentMatchdayKey()) + '.</div>';
       return;
     }
     var now = simNow();
@@ -863,13 +884,17 @@
     // -------- Meta strip (top of row) --------
     var meta = '';
     var rowMod = '';
-    if (s === 'pre') {
+    if (s === 'future') {
+      // > 7 days from KO — predictions not yet open
+      var dayLabel = ko.toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short' });
+      meta = '<span class="nlsp__lock">Opens ' + $h(dayLabel) + '</span>';
+    } else if (s === 'pre') {
       meta = '<span>' + $h(fmtBST(ko)) + '</span>';
     } else if (s === 'live') {
-      // Pulse dot + LIVE label (now we have horizontal room in the meta strip)
-      meta = '<span class="nlsp__livedot" aria-hidden="true"></span><span class="nlsp__livelbl">Live</span>';
+      // Pulse dot + LIVE label + your prediction inline
+      var pickLive = (p && p.home != null) ? '<span class="nlsp__pickline">Prediction <b>' + p.home + '–' + p.away + '</b></span>' : '';
+      meta = '<span class="nlsp__livedot" aria-hidden="true"></span><span class="nlsp__livelbl">Live</span>' + pickLive;
     } else if (s === 'post') {
-      // Full FT verdict + points pill
       var realH = a.homeTeam.score, realA = a.awayTeam.score;
       if (p && p.home != null) {
         var b = basePoints(p.home, p.away, realH, realA);
@@ -888,13 +913,18 @@
       } else {
         meta = '<span class="nlsp__ftlabel">FT</span><span class="nlsp__pickline" style="opacity:.7;">No prediction</span>';
       }
+    } else if (s === 'postponed') {
+      meta = '<span class="nlsp__voidlbl">Postponed</span><span class="nlsp__pickline" style="opacity:.7;">Prediction voided</span>';
+      rowMod = ' is-void';
+    } else if (s === 'abandoned') {
+      meta = '<span class="nlsp__voidlbl">Abandoned</span><span class="nlsp__pickline" style="opacity:.7;">Prediction voided</span>';
+      rowMod = ' is-void';
     }
 
     // -------- Score cell renderer (per side) --------
     function scoreCell(side) {
-      var val, real, cls = 'nlsp__teamscore';
+      var real, cls = 'nlsp__teamscore';
       if (s === 'pre' && (preState === 'empty' || preState === 'editing')) {
-        // editable input
         var fromDraft = (d && d[side] != null) ? d[side] : (p && p[side] != null ? p[side] : '');
         return '<div class="' + cls + '">' +
           '<input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="off" placeholder="–" data-side="' + side + '" data-m="' + $h(m.id) + '" value="' + $h(fromDraft) + '" aria-label="' + $h((side === 'home' ? a.homeTeam : a.awayTeam).name + ' score') + '">' +
@@ -906,6 +936,9 @@
       // live: show user's prediction (muted) since we don't have live scores
       if (s === 'live') {
         return '<div class="' + cls + ' is-pred">' + (p && p[side] != null ? p[side] : '–') + '</div>';
+      }
+      if (s === 'future' || s === 'postponed' || s === 'abandoned') {
+        return '<div class="' + cls + ' is-pred">–</div>';
       }
       // post: show the real final score
       real = (side === 'home' ? a.homeTeam : a.awayTeam).score;
@@ -1032,7 +1065,7 @@
       home: d.home, away: d.away, joker: false,
       submittedAt: firebase.database.ServerValue.TIMESTAMP
     };
-    fbDb.ref('predictions/' + state.user.id + '/' + MATCHDAY_KEY + '/' + mid).update(payload)
+    fbDb.ref('predictions/' + state.user.id + '/' + currentMatchdayKey() + '/' + mid).update(payload)
       .then(function () {
         delete state.drafts[mid];
         flashSaveTick();
@@ -1095,7 +1128,7 @@
     if (Object.keys(updates).length === 0) return;
     var btn = document.getElementById('nlsp-submit');
     if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
-    fbDb.ref('predictions/' + state.user.id + '/' + MATCHDAY_KEY).update(updates)
+    fbDb.ref('predictions/' + state.user.id + '/' + currentMatchdayKey()).update(updates)
       .then(function () {
         Object.keys(updates).forEach(function (mid) { delete state.drafts[mid]; });
         flashSaveTick();
@@ -1140,7 +1173,10 @@
   function allMatchesPreKO() {
     var now = simNow();
     for (var i = 0; i < state.matches.length; i++) {
-      if (stateOf(state.matches[i], now) !== 'pre') return false;
+      var s = stateOf(state.matches[i], now);
+      // future / pre = not yet kicked off, so still resettable.
+      // live / post / postponed / abandoned all freeze the matchday.
+      if (s !== 'pre' && s !== 'future') return false;
     }
     return state.matches.length > 0;
   }
@@ -1170,7 +1206,7 @@
           setBannerOK('Nothing to reset.');
           return;
         }
-        fbDb.ref('predictions/' + state.user.id + '/' + MATCHDAY_KEY).update(nulls)
+        fbDb.ref('predictions/' + state.user.id + '/' + currentMatchdayKey()).update(nulls)
           .then(function () {
             state.drafts = {}; state.editing = {};
             setBannerOK('All predictions reset.');
@@ -1223,23 +1259,35 @@
   }
 
   // ---------- sim bar (dev) ----------
-  function renderClock() {
-    var el = simEl.querySelector('.nlsp__clock'); if (!el) return;
-    el.textContent = simNow().toLocaleTimeString('en-GB', { hour:'2-digit',minute:'2-digit',second:'2-digit', timeZone:'Europe/London' });
+  // ---------- sim bar (datetime picker) ----------
+  // Lets you pick any moment as 'now' so you can preview pre-KO, in-play,
+  // post-FT or even mid-season states. The datetime-local value is treated
+  // as the user's local time; new Date(<value>) handles the conversion.
+  function pad2(n) { n = String(n); return n.length < 2 ? '0' + n : n; }
+  function toLocalInputValue(d) {
+    if (!d) return '';
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) +
+           'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
   }
   function renderSimBar() {
-    if (!state.sim.mode || !state.sim.mode.showBar) { simEl.innerHTML = ''; return; }
+    var d = simNow();
+    var live = state.sim.fixed
+      ? 'Sim · ' + d.toLocaleString('en-GB', { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit', timeZone:'Europe/London' }) + ' BST'
+      : 'Live clock';
     simEl.className = 'nlsp__simbar';
     simEl.innerHTML =
-      '<span class="nlsp__simlbl">Sim</span>' +
-      SIM_OPTIONS.map(function (o, i) {
-        return '<button data-i="' + i + '" class="' + (i === state.sim.index ? 'is-active' : '') + '">' + $h(o.label) + '</button>';
-      }).join('') +
-      '<span class="nlsp__clock"></span>';
-    Array.prototype.forEach.call(simEl.querySelectorAll('button'), function (b) {
-      b.addEventListener('click', function () { setSim(Number(b.getAttribute('data-i'))); });
+      '<span class="nlsp__simlbl">Sim now</span>' +
+      '<input type="datetime-local" id="nlsp-sim-input" value="' + $h(toLocalInputValue(d)) + '">' +
+      '<button id="nlsp-sim-now" class="nlsp__sim-now-btn">Now</button>' +
+      '<span class="nlsp__clock">' + $h(live) + '</span>';
+    var input = document.getElementById('nlsp-sim-input');
+    input.addEventListener('change', function () {
+      var v = input.value; if (!v) return;
+      var picked = new Date(v); // local-time interpretation
+      if (isNaN(picked.getTime())) return;
+      setSimFixed(picked);
     });
-    renderClock();
+    document.getElementById('nlsp-sim-now').addEventListener('click', clearSimFixed);
   }
 
   // ---------- RTDB listeners ----------
@@ -1253,18 +1301,14 @@
       } else {
         hideGate();
         register.hidden = true; main.hidden = false;
-        renderHero(); renderStatus(); renderFixtures(); renderSubmitbar(); renderReset(); renderTable(); renderSimBar();
+        renderHero(); renderFixtures(); renderSubmitbar(); renderReset(); renderTable(); renderSimBar();
       }
     });
     fbDb.ref('predictions').on('value', function (snap) {
-      var v = snap.val() || {};
-      state.allPreds = {};
-      Object.keys(v).forEach(function (jwtId) {
-        state.allPreds[jwtId] = (v[jwtId] && v[jwtId][MATCHDAY_KEY]) || {};
-      });
-      state.predictions = state.allPreds[state.user.id] || {};
+      state.allPredsRaw = snap.val() || {};
+      recomputePredictionsFromRaw();
       if (!main.hidden) {
-        renderStatus(); renderFixtures(); renderSubmitbar(); renderReset(); renderTable();
+        renderFixtures(); renderSubmitbar(); renderReset(); renderTable();
       }
     });
   }
@@ -1377,9 +1421,13 @@
         fbDb   = firebase.database(fbApp);
         return fbAuth.signInAnonymously();
       }).then(function () { state.fbAuthed = true; }),
-      fetchFixtures().then(function (ms) { state.matches = ms; })
+      fetchFixtures().then(function (ms) { state.allMatches = ms; })
     ]).then(function () {
       hideBanner();
+      // If a sim datetime came from the URL, apply it before first render
+      var simParam = parseSimMode();
+      if (simParam) state.sim.fixed = simParam;
+      recomputeMatchday();
       listenAll();
     }).catch(function (err) {
       showBanner('Could not start the predictor: ' + (err && err.message ? err.message : err), 'err');
