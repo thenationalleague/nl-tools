@@ -1141,7 +1141,18 @@
       }).then(function (ok) {
         if (!ok) return;
         btn.disabled = true; btn.textContent = 'Resetting…';
-        fbDb.ref('predictions/' + state.user.id + '/' + MATCHDAY_KEY).remove()
+        // The RTDB rules only grant .write at $matchId, not at the parent
+        // $matchday. So deleting the whole subtree at once 403s. We instead
+        // do a multi-path update of nulls — each individual delete is
+        // allowed by the per-$matchId .write rule.
+        var nulls = {};
+        Object.keys(state.predictions).forEach(function (mid) { nulls[mid] = null; });
+        if (Object.keys(nulls).length === 0) {
+          state.drafts = {}; state.editing = {};
+          setBannerOK('Nothing to reset.');
+          return;
+        }
+        fbDb.ref('predictions/' + state.user.id + '/' + MATCHDAY_KEY).update(nulls)
           .then(function () {
             state.drafts = {}; state.editing = {};
             setBannerOK('All predictions reset.');
