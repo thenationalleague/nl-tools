@@ -1,7 +1,6 @@
 <!-- ============================================================
      SCORE PREDICTOR — embeddable widget for thenationalleague.org.uk
-     Source of truth. Copy/paste this whole file into the CMS custom
-     HTML block when deploying.
+     Source of truth. Copy/paste into the CMS custom HTML block.
 
      - JWT identity from _gc_sa_sso_access (sso.sportsalliance.com)
      - One-time team registration (immutable team lock)
@@ -10,61 +9,67 @@
          predictions/{jwtId}/{matchday}/{matchId}
      - Submit-all (12/12 + joker), per-row KO lock, edit-before-KO
      - Auto-double on own team; one joker per matchday (×2)
-     - Demo: starts at 2:59:50 BST and ticks (watch matches lock)
      - League table: forename + surname initial + crest + total
-     - Scoped under #nlPredictor; BEM .nlsp__ prefix; Carbona inline;
-       no external <script src> tags (CMS strips them).
+
+     Sim controls (dev / demo only — fans never see them):
+       ?sim=1     → show the sim bar with 4 time snapshots
+       ?sim=pre   → freeze sim at 12:00 BST (pre-KO)
+       ?sim=live  → freeze sim at 16:00 BST (in-play)
+       ?sim=post  → freeze sim at 18:00 BST (post-FT)
+       ?sim=demo  → tick from 14:59:50 BST in real time
+       (no param) → use the real clock
+
+     Scoped under #nlPredictor; BEM .nlsp__ prefix; Carbona inline;
+     no external <script src> tags (CMS strips them).
      ============================================================ -->
 
 <div id="nlPredictor">
   <div class="nlsp__banner" id="nlsp-banner">Loading predictor…</div>
   <div class="nlsp__screen" id="nlsp-register" hidden></div>
   <div class="nlsp__screen" id="nlsp-main" hidden>
-    <div id="nlsp-greet"></div>
-    <div id="nlsp-sim"></div>
+    <div id="nlsp-hero"></div>
+    <div id="nlsp-joker"></div>
     <div id="nlsp-fixtures"></div>
     <div id="nlsp-submitbar"></div>
     <div id="nlsp-table"></div>
+    <div id="nlsp-sim"></div>
   </div>
 </div>
 
 <style>
-  /* Carbona Variable — self-hosted @font-face per embed brand guide */
+  /* Carbona Variable — self-hosted */
   @font-face {
     font-family: "carbona-variable";
     src: url("https://use.typekit.net/af/184cf2/0000000000000000774c3175/31/l?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n4&v=3") format("woff2"),
          url("https://use.typekit.net/af/184cf2/0000000000000000774c3175/31/d?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n4&v=3") format("woff");
-    font-display: swap;
-    font-style: normal;
-    font-weight: 200 900;
-    font-stretch: normal;
+    font-display: swap; font-style: normal; font-weight: 200 900; font-stretch: normal;
   }
 
-  /* Root + scoped reset */
   #nlPredictor {
-    --primary:#9e0000;
-    --navy:#223b7c;
+    --primary:#9e0000; --navy:#223b7c;
     --red:#d4380d; --red-light:#fff1ec;
     --green:#1a7030; --green-light:#edf7ee;
     --amber:#c96f15; --amber-light:#fef6ec;
     --info:#3b82f6; --info-light:#eef2ff;
+    --gold:#b8860b; --gold-light:#fff5d4;
     --white:#ffffff; --off-white:#f4f6f9;
     --text:#1a2a44; --text-muted:#5a6a82;
     --border:#dde3ed;
     --radius:6px;
     --shadow:0 2px 12px rgba(10,22,40,.10);
-    --joker:#9b59b6;
 
     font-family:'carbona-variable','carbona',sans-serif;
     font-size:15px; line-height:1.5;
     font-variation-settings:'wght' 400;
-    color:var(--text);
-    -webkit-font-smoothing:antialiased;
+    color:var(--text); -webkit-font-smoothing:antialiased;
     max-width:680px; margin:24px auto; padding:0 12px;
   }
-  #nlPredictor, #nlPredictor *, #nlPredictor *::before, #nlPredictor *::after {
-    box-sizing:border-box;
-  }
+  #nlPredictor, #nlPredictor *, #nlPredictor *::before, #nlPredictor *::after { box-sizing:border-box; }
+
+  /* Hide native number-input spinners EVERYWHERE — even though we use type=text/inputmode=numeric, belt-and-braces */
+  #nlPredictor input[type="number"]::-webkit-outer-spin-button,
+  #nlPredictor input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
+  #nlPredictor input[type="number"] { -moz-appearance:textfield; appearance:textfield; }
 
   /* Banner */
   #nlPredictor .nlsp__banner {
@@ -72,172 +77,171 @@
     padding:10px 14px; border-radius:var(--radius); font-size:13px; margin-bottom:16px;
     font-variation-settings:'wght' 600;
   }
-  #nlPredictor .nlsp__banner.is-err {
-    background:var(--red-light); border-color:var(--red); color:var(--red);
-  }
-  #nlPredictor .nlsp__banner.is-ok {
-    background:var(--green-light); border-color:var(--green); color:var(--green);
-  }
+  #nlPredictor .nlsp__banner.is-err { background:var(--red-light);   border-color:var(--red);   color:var(--red); }
+  #nlPredictor .nlsp__banner.is-ok  { background:var(--green-light); border-color:var(--green); color:var(--green); }
 
-  /* Headings + helpers */
-  #nlPredictor h2 {
-    font-size:24px; line-height:1.2; margin:0 0 4px;
-    font-weight:900; font-variation-settings:'wght' 900;
-  }
-  #nlPredictor h3 {
-    font-size:18px; line-height:1.3; margin:0 0 8px;
-    font-weight:800; font-variation-settings:'wght' 800;
-  }
-  #nlPredictor .nlsp__kicker {
+  /* Page header (was the greeting card) */
+  #nlPredictor .nlsp__hero { padding:6px 2px 18px; }
+  #nlPredictor .nlsp__hero .nlsp__kicker {
     font-size:11px; text-transform:uppercase; letter-spacing:1.5px;
     color:var(--text-muted);
     font-weight:700; font-variation-settings:'wght' 700;
   }
-  #nlPredictor .nlsp__muted {
-    color:var(--text-muted); font-size:13px;
+  #nlPredictor .nlsp__hero h1 {
+    font-size:28px; line-height:1.15; margin:2px 0 6px;
+    font-weight:900; font-variation-settings:'wght' 900;
+    color:var(--text);
+  }
+  #nlPredictor .nlsp__hero .nlsp__welcome {
+    color:var(--text-muted); font-size:14px;
+    font-weight:600; font-variation-settings:'wght' 600;
+  }
+  #nlPredictor .nlsp__hero .nlsp__welcome b {
+    color:var(--text); font-weight:800; font-variation-settings:'wght' 800;
+  }
+  #nlPredictor .nlsp__hero .nlsp__myteam {
+    display:inline-flex; align-items:center; gap:6px;
+    margin-left:6px; padding:2px 8px 2px 4px;
+    background:var(--off-white); border:1px solid var(--border);
+    border-radius:999px; vertical-align:middle;
+  }
+  #nlPredictor .nlsp__hero .nlsp__myteam img {
+    width:18px; height:18px; border-radius:3px; object-fit:contain; background:var(--white);
   }
 
-  /* Greeting */
-  #nlPredictor .nlsp__greet {
+  /* Joker picker */
+  #nlPredictor .nlsp__jokerbar {
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    padding:10px 14px; margin-bottom:14px;
     background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
-    padding:14px 16px; margin-bottom:12px;
-    display:flex; align-items:center; gap:12px;
     box-shadow:var(--shadow);
   }
-  #nlPredictor .nlsp__greet img {
-    width:40px; height:40px; flex:none; border-radius:4px; object-fit:contain; background:var(--white);
-  }
-  #nlPredictor .nlsp__greet .nlsp__name {
-    font-size:16px; font-weight:800; font-variation-settings:'wght' 800;
-  }
-
-  /* Sim bar */
-  #nlPredictor .nlsp__sim {
-    display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:14px;
-  }
-  #nlPredictor .nlsp__sim-label {
-    font-size:12px; color:var(--text-muted); margin-right:4px;
-    font-weight:700; font-variation-settings:'wght' 700;
-  }
-  #nlPredictor .nlsp__sim button {
-    font-family:inherit; font-size:12px;
-    font-weight:800; font-variation-settings:'wght' 800;
-    padding:6px 10px; border-radius:999px; cursor:pointer;
-    background:var(--white); color:var(--text); border:1px solid var(--border);
-    transition:all .15s ease;
-  }
-  #nlPredictor .nlsp__sim button:hover {
-    border-color:var(--primary); color:var(--primary);
-  }
-  #nlPredictor .nlsp__sim button.is-active {
-    background:var(--primary); color:var(--white); border-color:var(--primary);
-  }
-  #nlPredictor .nlsp__sim button.is-demo {
-    background:var(--navy); color:var(--white); border-color:var(--navy);
-  }
-  #nlPredictor .nlsp__sim button.is-demo.is-active {
-    background:var(--primary); border-color:var(--primary);
-  }
-  #nlPredictor .nlsp__sim .nlsp__clock {
-    font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px;
-    color:var(--text-muted); margin-left:auto;
-  }
-
-  /* Match-day header */
-  #nlPredictor .nlsp__matchday { margin:6px 0 10px; }
-  #nlPredictor .nlsp__matchday h2 { margin-top:2px; }
-
-  /* Fixture row — navy strip per brand guide */
-  #nlPredictor .nlsp__row {
-    background:var(--navy); color:var(--white);
-    border-radius:var(--radius); padding:10px 12px; margin-bottom:8px;
-    display:grid; grid-template-rows:auto auto; row-gap:6px;
-    box-shadow:var(--shadow);
-  }
-  #nlPredictor .nlsp__status {
-    display:flex; align-items:center; gap:8px; font-size:11px;
-    text-transform:uppercase; letter-spacing:1px; color:rgba(255,255,255,.7);
-    font-weight:700; font-variation-settings:'wght' 700;
-  }
-  #nlPredictor .nlsp__pill {
-    display:inline-block; padding:1px 8px; border-radius:999px; font-size:10px;
+  #nlPredictor .nlsp__jokerbar .nlsp__jokerlbl {
+    font-size:12px; text-transform:uppercase; letter-spacing:1.2px;
+    color:var(--text-muted);
     font-weight:800; font-variation-settings:'wght' 800;
   }
-  #nlPredictor .nlsp__pill.is-pre  { background:var(--info);   color:var(--white); }
-  #nlPredictor .nlsp__pill.is-live { background:var(--red);    color:var(--white); }
-  #nlPredictor .nlsp__pill.is-post { background:var(--green);  color:var(--white); }
-  #nlPredictor .nlsp__pill.is-own  { background:#f1c40f;       color:#1a1a1a; }
-  #nlPredictor .nlsp__pill.is-joke { background:var(--joker);  color:var(--white); }
-  #nlPredictor .nlsp__points {
-    margin-left:auto; font-size:13px; color:var(--white);
-    font-weight:900; font-variation-settings:'wght' 900;
+  #nlPredictor .nlsp__jokerbar select {
+    flex:1; min-width:200px; padding:8px 10px; font-size:14px;
+    font-family:inherit; color:var(--text);
+    background:var(--off-white); border:1px solid var(--border); border-radius:var(--radius);
+    font-weight:600; font-variation-settings:'wght' 600;
   }
-
-  #nlPredictor .nlsp__teams {
-    display:grid; grid-template-columns:1fr auto 1fr; gap:8px; align-items:center;
-  }
-  #nlPredictor .nlsp__team {
-    display:flex; align-items:center; gap:8px; font-size:14px;
-    font-weight:800; font-variation-settings:'wght' 800;
-  }
-  #nlPredictor .nlsp__team.is-away { flex-direction:row-reverse; text-align:right; }
-  #nlPredictor .nlsp__team img {
-    width:28px; height:28px; flex:none; border-radius:4px;
-    background:var(--white); padding:1px; object-fit:contain;
-  }
-  #nlPredictor .nlsp__tname {
-    flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  }
-  #nlPredictor .nlsp__score-cell {
-    display:flex; align-items:center; gap:6px;
-    font-size:20px; min-width:72px; justify-content:center;
-    font-weight:900; font-variation-settings:'wght' 900;
-  }
-  #nlPredictor .nlsp__score-cell input {
-    width:42px; height:34px; border-radius:5px; border:1px solid #d0d0d0;
-    text-align:center; font-size:18px; font-family:inherit;
-    background:var(--white); color:var(--text);
-    font-weight:900; font-variation-settings:'wght' 900;
-  }
-  #nlPredictor .nlsp__score-cell input:focus {
+  #nlPredictor .nlsp__jokerbar select:focus {
     outline:none; border-color:var(--primary);
     box-shadow:0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent);
   }
-  #nlPredictor .nlsp__score-cell input:disabled {
-    background:rgba(255,255,255,.4); color:rgba(255,255,255,.6); border-color:rgba(255,255,255,.3);
+  #nlPredictor .nlsp__jokerbar .nlsp__jokerhint {
+    font-size:12px; color:var(--text-muted);
+    flex-basis:100%;
   }
-  #nlPredictor .nlsp__fs {
-    display:inline-block; min-width:18px; text-align:center;
+  #nlPredictor .nlsp__jokerbar .nlsp__jokerhint b {
+    color:var(--gold); font-weight:800; font-variation-settings:'wght' 800;
   }
 
-  /* Row foot — joker / edit buttons */
-  #nlPredictor .nlsp__rowfoot {
+  /* Fixture rows — light cards with optional gold accent */
+  #nlPredictor .nlsp__row {
+    background:var(--white); border:1px solid var(--border); border-left:4px solid transparent;
+    border-radius:var(--radius); margin-bottom:8px;
+    padding:10px 14px;
+    display:grid; grid-template-rows:auto auto auto; row-gap:4px;
+    transition:border-color .15s ease;
+  }
+  #nlPredictor .nlsp__row.is-mult {
+    border-left-color:var(--gold);
+    background:linear-gradient(90deg, color-mix(in srgb, var(--gold) 8%, transparent), var(--white) 60px);
+  }
+  #nlPredictor .nlsp__row.is-live { border-color:var(--red); }
+  #nlPredictor .nlsp__row.is-post { /* no extra change */ }
+
+  #nlPredictor .nlsp__row-meta {
     display:flex; align-items:center; gap:8px;
-    font-size:12px; color:rgba(255,255,255,.8);
+    font-size:11px; text-transform:uppercase; letter-spacing:1px;
+    color:var(--text-muted);
+    font-weight:700; font-variation-settings:'wght' 700;
   }
-  #nlPredictor .nlsp__joker, #nlPredictor .nlsp__edit {
-    font-family:inherit; font-size:11px;
+  #nlPredictor .nlsp__row-meta .nlsp__livedot {
+    width:8px; height:8px; border-radius:50%; background:var(--red);
+    box-shadow:0 0 0 0 color-mix(in srgb, var(--red) 50%, transparent);
+    animation:nlsp-pulse 1.4s infinite;
+  }
+  @keyframes nlsp-pulse {
+    0%   { box-shadow:0 0 0 0 color-mix(in srgb, var(--red) 50%, transparent); }
+    70%  { box-shadow:0 0 0 6px color-mix(in srgb, var(--red) 0%,  transparent); }
+    100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--red) 0%,  transparent); }
+  }
+  #nlPredictor .nlsp__multbadge {
+    margin-left:auto; padding:2px 8px; border-radius:4px;
+    background:var(--gold-light); color:var(--gold);
+    font-size:10px; letter-spacing:1.2px;
+    font-weight:900; font-variation-settings:'wght' 900;
+  }
+
+  /* Main row — crest + name on each side, big scoreboard in the middle */
+  #nlPredictor .nlsp__teams {
+    display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:10px;
+    padding:4px 0;
+  }
+  #nlPredictor .nlsp__team {
+    display:flex; align-items:center; gap:10px;
+    min-width:0; /* allow ellipsis */
+  }
+  #nlPredictor .nlsp__team.is-away { flex-direction:row-reverse; text-align:right; }
+  #nlPredictor .nlsp__team img {
+    width:36px; height:36px; flex:none; border-radius:4px;
+    background:var(--white); object-fit:contain;
+  }
+  #nlPredictor .nlsp__tname {
+    flex:1; min-width:0;
+    font-size:15px; color:var(--text);
     font-weight:800; font-variation-settings:'wght' 800;
-    padding:4px 10px; border-radius:999px; cursor:pointer;
-    border:1px solid rgba(255,255,255,.3);
-    background:transparent; color:var(--white);
-    transition:all .15s ease;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
-  #nlPredictor .nlsp__joker:hover {
-    border-color:var(--joker); color:#d6a6e6;
+  #nlPredictor .nlsp__scoreboard {
+    display:flex; align-items:center; gap:6px;
+    font-size:24px; color:var(--text);
+    font-weight:900; font-variation-settings:'wght' 900;
   }
-  #nlPredictor .nlsp__joker.is-on {
-    background:var(--joker); border-color:var(--joker); color:var(--white);
+  #nlPredictor .nlsp__scoreboard .nlsp__dash { color:var(--text-muted); font-size:18px; }
+  #nlPredictor .nlsp__scoreboard input {
+    width:48px; height:42px;
+    text-align:center; font-family:inherit;
+    font-size:22px; font-weight:900; font-variation-settings:'wght' 900;
+    color:var(--text); background:var(--off-white);
+    border:1px solid var(--border); border-radius:var(--radius);
   }
-  #nlPredictor .nlsp__joker:disabled { opacity:.4; cursor:not-allowed; }
-  #nlPredictor .nlsp__edit:hover {
-    background:var(--white); color:var(--navy);
+  #nlPredictor .nlsp__scoreboard input:focus {
+    outline:none; background:var(--white); border-color:var(--primary);
+    box-shadow:0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent);
   }
-  #nlPredictor .nlsp__yourpred { margin-left:auto; }
+  #nlPredictor .nlsp__scoreboard .nlsp__num {
+    display:inline-block; min-width:32px; text-align:center;
+  }
+
+  /* Foot — context strip under the scoreboard */
+  #nlPredictor .nlsp__foot {
+    display:flex; align-items:center; gap:10px;
+    font-size:12px; color:var(--text-muted);
+    min-height:18px;
+  }
+  #nlPredictor .nlsp__foot .nlsp__yours { color:var(--text-muted); }
+  #nlPredictor .nlsp__foot .nlsp__yours b { color:var(--text); font-weight:800; font-variation-settings:'wght' 800; }
+  #nlPredictor .nlsp__foot .nlsp__pts {
+    margin-left:auto;
+    color:var(--green); font-weight:900; font-variation-settings:'wght' 900;
+  }
+  #nlPredictor .nlsp__foot .nlsp__pts.is-zero { color:var(--text-muted); }
+  #nlPredictor .nlsp__foot .nlsp__edit {
+    font:inherit; font-size:12px; padding:0; border:none; background:transparent;
+    color:var(--primary); cursor:pointer;
+    font-weight:800; font-variation-settings:'wght' 800;
+    text-decoration:underline; text-underline-offset:2px;
+  }
 
   /* Submit bar */
   #nlPredictor .nlsp__submitbar {
-    display:flex; align-items:center; gap:12px; padding:12px 14px; margin:12px 0 18px;
+    display:flex; align-items:center; gap:12px;
+    padding:12px 14px; margin:14px 0 20px;
     background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
     box-shadow:var(--shadow);
   }
@@ -245,49 +249,36 @@
     font-size:13px; color:var(--text-muted);
     font-weight:700; font-variation-settings:'wght' 700;
   }
+  #nlPredictor .nlsp__count b { color:var(--text); font-weight:900; font-variation-settings:'wght' 900; }
 
   /* Buttons */
   #nlPredictor .nlsp__btn {
     font-family:inherit; font-size:15px;
     font-weight:900; font-variation-settings:'wght' 900;
-    padding:10px 24px; border:none; border-radius:var(--radius);
+    padding:10px 22px; border:none; border-radius:var(--radius);
     cursor:pointer; background:var(--primary); color:var(--white);
     transition:background .15s ease;
   }
-  #nlPredictor .nlsp__btn:hover  {
-    background:color-mix(in srgb, var(--primary) 80%, black);
-  }
-  #nlPredictor .nlsp__btn:active {
-    background:color-mix(in srgb, var(--primary) 70%, black);
-  }
+  #nlPredictor .nlsp__btn:hover  { background:color-mix(in srgb, var(--primary) 80%, black); }
+  #nlPredictor .nlsp__btn:active { background:color-mix(in srgb, var(--primary) 70%, black); }
   #nlPredictor .nlsp__btn:focus-visible {
-    outline:3px solid color-mix(in srgb, var(--primary) 35%, transparent);
-    outline-offset:2px;
+    outline:3px solid color-mix(in srgb, var(--primary) 35%, transparent); outline-offset:2px;
   }
-  #nlPredictor .nlsp__btn:disabled {
-    background:#cccccc; color:#888888; cursor:not-allowed;
-  }
-  #nlPredictor .nlsp__btn.is-outline {
-    background:transparent; color:var(--primary);
-    border:2px solid var(--primary); padding:8px 22px;
-  }
-  #nlPredictor .nlsp__btn.is-outline:hover {
-    background:var(--primary); color:var(--white);
-  }
+  #nlPredictor .nlsp__btn:disabled { background:#cccccc; color:#888888; cursor:not-allowed; }
 
-  /* Registration */
+  /* Registration card */
   #nlPredictor .nlsp__register-card {
     background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
-    padding:20px 22px; box-shadow:var(--shadow);
+    padding:24px; box-shadow:var(--shadow);
   }
   #nlPredictor .nlsp__register-card label {
-    display:block; font-size:13px; margin:14px 0 6px;
+    display:block; font-size:13px; margin:18px 0 6px;
     font-weight:800; font-variation-settings:'wght' 800;
   }
   #nlPredictor .nlsp__register-card select {
     width:100%; padding:10px 12px; font-size:15px; font-family:inherit;
-    border:1px solid #d0d0d0; border-radius:var(--radius); background:var(--white);
-    color:var(--text);
+    color:var(--text); background:var(--white);
+    border:1px solid var(--border); border-radius:var(--radius);
     font-weight:600; font-variation-settings:'wght' 600;
   }
   #nlPredictor .nlsp__register-card select:focus {
@@ -295,46 +286,70 @@
     box-shadow:0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent);
   }
   #nlPredictor .nlsp__lockwarn {
-    margin:14px 0; padding:10px 12px;
+    margin:18px 0; padding:10px 12px;
     background:var(--amber-light); border:1px solid var(--amber); color:var(--amber);
     font-size:13px; border-radius:var(--radius);
     font-weight:700; font-variation-settings:'wght' 700;
   }
 
-  /* League table */
+  /* Leaderboard */
   #nlPredictor .nlsp__table {
     background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
     padding:14px 0; margin-bottom:24px; box-shadow:var(--shadow);
   }
-  #nlPredictor .nlsp__tablehead {
-    padding:0 16px 10px; border-bottom:1px solid var(--border);
+  #nlPredictor .nlsp__tablehead { padding:0 16px 10px; border-bottom:1px solid var(--border); }
+  #nlPredictor .nlsp__tablehead .nlsp__kicker {
+    font-size:11px; text-transform:uppercase; letter-spacing:1.5px;
+    color:var(--text-muted);
+    font-weight:800; font-variation-settings:'wght' 800;
   }
+  #nlPredictor .nlsp__tablehead .nlsp__tsub { font-size:12px; color:var(--text-muted); margin-top:2px; }
   #nlPredictor .nlsp__trow {
-    display:grid; grid-template-columns:32px 32px 1fr auto;
-    align-items:center; gap:10px; padding:8px 16px;
+    display:grid; grid-template-columns:28px 28px 1fr auto;
+    align-items:center; gap:10px; padding:10px 16px;
     border-bottom:1px solid var(--border); font-size:14px;
     font-weight:700; font-variation-settings:'wght' 700;
   }
   #nlPredictor .nlsp__trow:last-child { border-bottom:none; }
-  #nlPredictor .nlsp__trow.is-you {
-    background:var(--amber-light);
+  #nlPredictor .nlsp__trow.is-you { background:color-mix(in srgb, var(--primary) 4%, var(--white)); }
+  #nlPredictor .nlsp__trow.is-top1 { border-left:3px solid var(--gold); padding-left:13px; }
+  #nlPredictor .nlsp__trow .nlsp__rank { color:var(--text-muted); font-weight:900; font-variation-settings:'wght' 900; }
+  #nlPredictor .nlsp__trow img { width:24px; height:24px; border-radius:3px; background:var(--white); object-fit:contain; }
+  #nlPredictor .nlsp__trow .nlsp__pts { font-size:15px; font-weight:900; font-variation-settings:'wght' 900; color:var(--text); }
+  #nlPredictor .nlsp__trow .nlsp__youlbl { color:var(--text-muted); font-weight:600; font-variation-settings:'wght' 600; }
+
+  /* Sim bar (dev-only, foot of widget) */
+  #nlPredictor .nlsp__simbar {
+    margin-top:20px; padding-top:12px; border-top:1px dashed var(--border);
+    display:flex; flex-wrap:wrap; gap:6px; align-items:center;
+    font-size:11px; color:var(--text-muted);
   }
-  #nlPredictor .nlsp__trow .nlsp__rank {
-    color:var(--text-muted);
-    font-weight:900; font-variation-settings:'wght' 900;
+  #nlPredictor .nlsp__simbar .nlsp__simlbl {
+    text-transform:uppercase; letter-spacing:1.2px;
+    font-weight:800; font-variation-settings:'wght' 800;
+    margin-right:4px;
   }
-  #nlPredictor .nlsp__trow img {
-    width:24px; height:24px; border-radius:3px; background:var(--white); object-fit:contain;
+  #nlPredictor .nlsp__simbar button {
+    font-family:inherit; font-size:11px;
+    font-weight:700; font-variation-settings:'wght' 700;
+    padding:4px 10px; border-radius:999px; cursor:pointer;
+    background:var(--white); color:var(--text-muted); border:1px solid var(--border);
   }
-  #nlPredictor .nlsp__trow .nlsp__pts {
-    font-size:15px;
-    font-weight:900; font-variation-settings:'wght' 900;
+  #nlPredictor .nlsp__simbar button:hover { color:var(--primary); border-color:var(--primary); }
+  #nlPredictor .nlsp__simbar button.is-active {
+    background:var(--text); color:var(--white); border-color:var(--text);
+  }
+  #nlPredictor .nlsp__simbar .nlsp__clock {
+    font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px;
+    color:var(--text-muted); margin-left:auto;
   }
 
   @media (max-width:520px) {
-    #nlPredictor .nlsp__team img { width:24px; height:24px; }
-    #nlPredictor .nlsp__team { font-size:13px; }
-    #nlPredictor .nlsp__score-cell input { width:38px; }
+    #nlPredictor .nlsp__team img { width:30px; height:30px; }
+    #nlPredictor .nlsp__tname { font-size:14px; }
+    #nlPredictor .nlsp__scoreboard input { width:42px; height:40px; font-size:20px; }
+    #nlPredictor .nlsp__scoreboard .nlsp__num { min-width:26px; }
+    #nlPredictor .nlsp__hero h1 { font-size:24px; }
   }
 </style>
 
@@ -350,7 +365,7 @@
     messagingSenderId: '164767666899',
     appId:             '1:164767666899:web:6a2320d96fa2dd2009fa26'
   };
-  var APP_NAME   = 'nlPredictor'; // named Firebase app to avoid clashes with other NL widgets on the same page
+  var APP_NAME   = 'nlPredictor';
   var FB_SDK_URL = 'https://www.gstatic.com/firebasejs/10.12.0/';
   var FB_SDK     = ['firebase-app-compat.js','firebase-auth-compat.js','firebase-database-compat.js'];
 
@@ -362,21 +377,22 @@
   var MAX_PAGES  = 10;
   var IN_PLAY_MIN = 105;
   var SIM_OPTIONS = [
-    { id:'pre',  label:'12:00 BST',    utc:'2025-08-09T11:00:00Z' },
-    { id:'live', label:'16:00 BST',    utc:'2025-08-09T15:00:00Z' },
-    { id:'post', label:'18:00 BST',    utc:'2025-08-09T17:00:00Z' },
-    { id:'demo', label:'🎬 2:59:50',   utc:'2025-08-09T13:59:50Z' }
+    { id:'pre',  label:'12:00',  utc:'2025-08-09T11:00:00Z' },
+    { id:'live', label:'16:00',  utc:'2025-08-09T15:00:00Z' },
+    { id:'post', label:'18:00',  utc:'2025-08-09T17:00:00Z' },
+    { id:'demo', label:'Demo',   utc:'2025-08-09T13:59:50Z' }
   ];
 
   // ---------- DOM refs ----------
   var banner   = document.getElementById('nlsp-banner');
   var register = document.getElementById('nlsp-register');
   var main     = document.getElementById('nlsp-main');
-  var greet    = document.getElementById('nlsp-greet');
-  var simbar   = document.getElementById('nlsp-sim');
+  var hero     = document.getElementById('nlsp-hero');
+  var jokerEl  = document.getElementById('nlsp-joker');
   var fixtures = document.getElementById('nlsp-fixtures');
   var submitb  = document.getElementById('nlsp-submitbar');
   var tableEl  = document.getElementById('nlsp-table');
+  var simEl    = document.getElementById('nlsp-sim');
 
   // ---------- helpers ----------
   function $h(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -389,8 +405,7 @@
   }
   function decodeJwtPayload(jwt) {
     if (!jwt) return null;
-    var parts = jwt.split('.');
-    if (parts.length !== 3) return null;
+    var parts = jwt.split('.'); if (parts.length !== 3) return null;
     try {
       var s = parts[1].replace(/-/g, '+').replace(/_/g, '/');
       while (s.length % 4) s += '=';
@@ -418,45 +433,59 @@
   }
   function fmtBST(d) {
     if (!d) return '';
-    return d.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', timeZone:'Europe/London' }) + ' BST';
+    return d.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', timeZone:'Europe/London' });
   }
   function showBanner(msg, kind) {
     banner.className = 'nlsp__banner' + (kind === 'err' ? ' is-err' : kind === 'ok' ? ' is-ok' : '');
-    banner.textContent = msg;
-    banner.hidden = false;
+    banner.textContent = msg; banner.hidden = false;
   }
   function hideBanner() { banner.hidden = true; }
   function setBannerOK(msg) {
     showBanner(msg, 'ok');
     setTimeout(function () { if (banner.textContent === msg) hideBanner(); }, 3000);
   }
-  function crestImg(url, alt) {
-    if (!url) return '<span></span>';
+  function crestImg(url, alt, size) {
+    if (!url) return '<span style="width:' + (size || 36) + 'px;height:' + (size || 36) + 'px;flex:none;display:inline-block;"></span>';
     return '<img src="' + $h(url) + '" alt="' + $h(alt || '') + '" ' +
            'onerror="this.onerror=null;this.style.visibility=\'hidden\';">';
+  }
+  function clampScore(raw) {
+    if (raw == null || raw === '') return null;
+    var n = parseInt(String(raw).replace(/[^0-9]/g, ''), 10);
+    if (isNaN(n)) return null;
+    return Math.max(0, Math.min(20, n));
+  }
+
+  // ---------- sim mode (URL-driven) ----------
+  function parseSimMode() {
+    var p = new URLSearchParams(window.location.search).get('sim');
+    if (!p) return null; // real time
+    p = p.toLowerCase();
+    if (p === '1' || p === 'on' || p === 'true') return { showBar: true, index: 0 };
+    if (p === 'pre')  return { showBar: false, index: 0 };
+    if (p === 'live') return { showBar: false, index: 1 };
+    if (p === 'post') return { showBar: false, index: 2 };
+    if (p === 'demo') return { showBar: false, index: 3, autoDemo: true };
+    return null;
   }
 
   // ---------- state ----------
   var fbApp = null, fbDb = null, fbAuth = null;
   var state = {
-    user: null,
-    fbAuthed: false,
+    user: null, fbAuthed: false,
     matches: [],
     registration: null,
-    predictions: {},
-    draft: {},
-    draftJoker: null,
-    allUsers: {},
-    allPreds: {},
-    sim: { index: 0, demoTick: null, demoStartReal: 0, demoStartUtc: 0 }
+    predictions: {}, draft: {}, draftJoker: null,
+    allUsers: {}, allPreds: {},
+    sim: { mode: null, index: 0, demoTick: null, demoStartReal: 0, demoStartUtc: 0 }
   };
 
   // ---------- sim clock ----------
   function simNow() {
     var s = state.sim;
+    if (!s.mode) return new Date(); // real time
     if (s.demoTick) {
-      var elapsedMs = Date.now() - s.demoStartReal;
-      return new Date(s.demoStartUtc + elapsedMs);
+      return new Date(s.demoStartUtc + (Date.now() - s.demoStartReal));
     }
     return new Date(SIM_OPTIONS[s.index].utc);
   }
@@ -468,20 +497,14 @@
     state.sim.demoStartReal = Date.now();
     state.sim.demoStartUtc  = new Date(SIM_OPTIONS[3].utc).getTime();
     state.sim.demoTick = setInterval(function () {
-      renderClock();
-      renderFixtures();
-      renderSubmitbar();
-      renderTable();
+      renderClock(); renderFixtures(); renderSubmitbar(); renderTable();
     }, 1000);
   }
   function setSim(i) {
     stopDemo();
     state.sim.index = i;
     if (SIM_OPTIONS[i].id === 'demo') startDemo();
-    renderSimBar();
-    renderFixtures();
-    renderSubmitbar();
-    renderTable();
+    renderSimBar(); renderFixtures(); renderSubmitbar(); renderTable();
   }
 
   // ---------- match state ----------
@@ -504,10 +527,12 @@
     if (outcome(predH, predA) === outcome(realH, realA)) return 1;
     return 0;
   }
+  function isOwnTeamMatch(m, reg) {
+    return reg && (m.attributes.homeTeam.teamID === reg.teamId || m.attributes.awayTeam.teamID === reg.teamId);
+  }
   function multiplierFor(m, pred) {
     var mult = 1;
-    if (state.registration && (m.attributes.homeTeam.teamID === state.registration.teamId ||
-                               m.attributes.awayTeam.teamID === state.registration.teamId)) mult *= 2;
+    if (isOwnTeamMatch(m, state.registration)) mult *= 2;
     if (pred && pred.joker) mult *= 2;
     return mult;
   }
@@ -531,8 +556,7 @@
       var mult = 1;
       if (reg && (m.attributes.homeTeam.teamID === reg.teamId || m.attributes.awayTeam.teamID === reg.teamId)) mult *= 2;
       if (p.joker) mult *= 2;
-      total += base * mult;
-      settled += 1;
+      total += base * mult; settled += 1;
     }
     return { total: total, settled: settled };
   }
@@ -543,7 +567,7 @@
     function page(n) {
       var url = API_BASE + '/matches/?competitionID=' + COMP_ID + '&seasonID=' + SEASON_ID +
                 '&sort=kickOffDateUTC&page.number=' + n + '&page.size=100';
-      showBanner('Loading fixtures… (page ' + n + ')');
+      showBanner('Loading fixtures…');
       return fetch(url, { credentials:'omit' })
         .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
         .then(function (json) {
@@ -584,9 +608,13 @@
     }
     register.innerHTML =
       '<div class="nlsp__register-card">' +
-        '<div class="nlsp__kicker">National League Predictor</div>' +
-        '<h2>Welcome, ' + $h(state.user.forename) + '</h2>' +
-        '<p class="nlsp__muted">Pick your team for the season. Your team\'s match each week will <b>auto-double</b> your points.</p>' +
+        '<div class="nlsp__hero" style="padding:0 0 6px;">' +
+          '<div class="nlsp__kicker">National League Predictor</div>' +
+          '<h1>Welcome, ' + $h(state.user.forename) + '</h1>' +
+        '</div>' +
+        '<p style="color:var(--text-muted);font-size:14px;margin:6px 0 0;">' +
+          'Pick your team for the season. Your team\'s match each week will <b style="color:var(--gold);">auto-double</b> your points.' +
+        '</p>' +
         '<label for="nlsp-team-select">Your team</label>' +
         '<select id="nlsp-team-select">' +
           '<option value="">— choose a team —</option>' +
@@ -594,173 +622,189 @@
             return '<option value="' + $h(o.id) + '"' + (o.id === defaultId ? ' selected' : '') + '>' + $h(o.name) + '</option>';
           }).join('') +
         '</select>' +
-        '<div class="nlsp__lockwarn">⚠️ This locks for the season — pick carefully. You won\'t be able to change your team later.</div>' +
-        '<button class="nlsp__btn" id="nlsp-register-btn"' + (defaultId ? '' : ' disabled') + '>Confirm &amp; lock my team</button>' +
+        '<div class="nlsp__lockwarn">This locks for the season. Pick carefully — you can\'t change your team later.</div>' +
+        '<button class="nlsp__btn" id="nlsp-register-btn"' + (defaultId ? '' : ' disabled') + '>Confirm and lock my team</button>' +
       '</div>';
 
     var sel = document.getElementById('nlsp-team-select');
     var btn = document.getElementById('nlsp-register-btn');
     sel.addEventListener('change', function () { btn.disabled = !sel.value; });
     btn.addEventListener('click', function () {
-      var teamId = sel.value;
-      if (!teamId) return;
+      var teamId = sel.value; if (!teamId) return;
       var team = opts.filter(function (o) { return o.id === teamId; })[0];
       btn.disabled = true; btn.textContent = 'Saving…';
       var payload = {
-        teamId:         team.id,
-        teamName:       team.name,
-        crestUrl:       team.crest || '',
-        forename:       state.user.forename,
-        surnameInitial: state.user.surnameInitial,
-        email:          state.user.email || '',
-        registeredAt:   firebase.database.ServerValue.TIMESTAMP
+        teamId: team.id, teamName: team.name, crestUrl: team.crest || '',
+        forename: state.user.forename, surnameInitial: state.user.surnameInitial,
+        email: state.user.email || '',
+        registeredAt: firebase.database.ServerValue.TIMESTAMP
       };
       fbDb.ref('users/' + state.user.id).set(payload).then(function () {
-        setBannerOK('Locked in — let\'s predict!');
+        setBannerOK('Locked in — let\'s predict.');
       }).catch(function (err) {
-        btn.disabled = false; btn.textContent = 'Confirm & lock my team';
+        btn.disabled = false; btn.textContent = 'Confirm and lock my team';
         showBanner('Could not save registration: ' + err.message, 'err');
       });
     });
   }
 
-  // ---------- main UI ----------
-  function renderGreet() {
+  // ---------- hero ----------
+  function renderHero() {
+    var firstKO = state.matches.length ? koOf(state.matches[0]) : null;
+    var dateLabel = firstKO ? firstKO.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long' }) : MATCH_DAY;
     var r = state.registration;
-    greet.className = 'nlsp__greet';
-    greet.innerHTML =
-      (r && r.crestUrl ? crestImg(r.crestUrl, r.teamName) : '<span style="width:40px;height:40px;flex:none;"></span>') +
-      '<div>' +
-        '<div class="nlsp__name">Welcome back, ' + $h(state.user.forename) + ' 👋</div>' +
-        '<div class="nlsp__muted">' +
-          (r ? 'Your team: <b>' + $h(r.teamName) + '</b> — every match auto-doubles your points.' : '') +
-        '</div>' +
+    hero.className = 'nlsp__hero';
+    hero.innerHTML =
+      '<div class="nlsp__kicker">National League · Matchday</div>' +
+      '<h1>' + $h(dateLabel) + '</h1>' +
+      '<div class="nlsp__welcome">' +
+        'Welcome back, <b>' + $h(state.user.forename) + '</b>' +
+        (r ? '<span class="nlsp__myteam">' + crestImg(r.crestUrl, r.teamName, 18) + $h(r.teamName) + '</span>' : '') +
       '</div>';
   }
-  function renderClock() {
-    var el = simbar.querySelector('.nlsp__clock');
-    if (!el) return;
-    var n = simNow();
-    el.textContent = n.toLocaleTimeString('en-GB', { hour:'2-digit',minute:'2-digit',second:'2-digit', timeZone:'Europe/London' }) + ' BST';
+
+  // ---------- joker picker ----------
+  function eligibleJokerMatches() {
+    return state.matches.filter(function (m) { return !isOwnTeamMatch(m, state.registration); });
   }
-  function renderSimBar() {
-    simbar.className = 'nlsp__sim';
-    simbar.innerHTML =
-      '<span class="nlsp__sim-label">Sim time:</span>' +
-      SIM_OPTIONS.map(function (o, i) {
-        var cls = '';
-        if (i === state.sim.index) cls += ' is-active';
-        if (o.id === 'demo') cls += ' is-demo';
-        return '<button data-i="' + i + '" class="' + cls.trim() + '">' + $h(o.label) + '</button>';
-      }).join('') +
-      '<span class="nlsp__clock"></span>';
-    Array.prototype.forEach.call(simbar.querySelectorAll('button'), function (b) {
-      b.addEventListener('click', function () { setSim(Number(b.getAttribute('data-i'))); });
+  function currentJokerMatchId() {
+    // submitted joker (if any) wins; otherwise draft joker
+    var fromSubmitted = Object.keys(state.predictions).filter(function (mid) {
+      return state.predictions[mid] && state.predictions[mid].joker;
+    })[0];
+    return state.draftJoker || fromSubmitted || '';
+  }
+  function renderJoker() {
+    var now = simNow();
+    var anyPre = state.matches.some(function (m) { return stateOf(m, now) === 'pre'; });
+    if (!anyPre) { jokerEl.innerHTML = ''; return; }
+
+    var eligible = eligibleJokerMatches();
+    var current = currentJokerMatchId();
+    jokerEl.className = '';
+    jokerEl.innerHTML =
+      '<div class="nlsp__jokerbar">' +
+        '<span class="nlsp__jokerlbl">Joker</span>' +
+        '<select id="nlsp-joker-select">' +
+          '<option value="">— pick one match to ×2 —</option>' +
+          eligible.map(function (m) {
+            var ko = koOf(m);
+            var label = m.attributes.homeTeam.name + ' v ' + m.attributes.awayTeam.name + ' · ' + fmtBST(ko);
+            return '<option value="' + $h(m.id) + '"' + (m.id === current ? ' selected' : '') + '>' + $h(label) + '</option>';
+          }).join('') +
+        '</select>' +
+        '<div class="nlsp__jokerhint">' +
+          (current
+            ? 'Your joker match counts <b>×2</b>. Change it any time before its kick-off.'
+            : 'Pick one match (other than your own team\'s) to double its points.') +
+        '</div>' +
+      '</div>';
+
+    document.getElementById('nlsp-joker-select').addEventListener('change', function (e) {
+      var mid = e.target.value || null;
+      state.draftJoker = mid;
+      // if the user already submitted other matches, the joker flag will get rewritten on next Save
+      renderJoker(); renderFixtures(); renderSubmitbar();
     });
-    renderClock();
   }
 
+  // ---------- fixtures ----------
   function renderFixtures() {
     if (!state.matches.length) {
-      fixtures.innerHTML = '<div class="nlsp__muted" style="padding:20px;text-align:center;">No matches found for ' + MATCH_DAY + '.</div>';
+      fixtures.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">No matches found for ' + MATCH_DAY + '.</div>';
       return;
     }
     var now = simNow();
-    var firstKO = koOf(state.matches[0]);
-    var dateLabel = firstKO ? firstKO.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long' }) : MATCH_DAY;
-    var head =
-      '<div class="nlsp__matchday">' +
-        '<div class="nlsp__kicker">National League</div>' +
-        '<h2>' + $h(dateLabel) + '</h2>' +
-      '</div>';
+    var jokerMid = currentJokerMatchId();
 
-    var rows = state.matches.map(function (m) {
+    fixtures.innerHTML = state.matches.map(function (m) {
       var a = m.attributes;
       var s = stateOf(m, now);
       var ko = koOf(m);
       var reg = state.registration;
-      var isOwn = reg && (a.homeTeam.teamID === reg.teamId || a.awayTeam.teamID === reg.teamId);
+      var isOwn = isOwnTeamMatch(m, reg);
       var submittedPred = state.predictions[m.id];
       var draft = state.draft[m.id] || {};
-      var isJoker = submittedPred ? !!submittedPred.joker : (state.draftJoker === m.id);
+      var isJoker = (jokerMid === m.id);
+      var hasMult = (isOwn || isJoker);
 
-      var pillCls, pillText;
-      if (s === 'pre')  { pillCls = 'is-pre';  pillText = 'KO ' + fmtBST(ko); }
-      if (s === 'live') { pillCls = 'is-live'; pillText = 'IN PLAY'; }
-      if (s === 'post') { pillCls = 'is-post'; pillText = 'FULL TIME'; }
-      var ownPill   = isOwn   ? '<span class="nlsp__pill is-own">×2 OWN TEAM</span>' : '';
-      var jokerPill = (isJoker && !isOwn) ? '<span class="nlsp__pill is-joke">×2 JOKER</span>' : '';
+      // Meta strip
+      var meta = '';
+      if (s === 'pre')  meta = 'Kicks off ' + fmtBST(ko);
+      if (s === 'live') meta = '<span class="nlsp__livedot"></span>Live · ' + fmtBST(ko);
+      if (s === 'post') meta = 'Full time · ' + fmtBST(ko);
+      var multCaption = '';
+      if (hasMult) multCaption = '<span class="nlsp__multbadge">×2 ' + (isOwn ? 'OWN TEAM' : 'JOKER') + '</span>';
 
-      var pts = pointsForMatch(m, submittedPred, now);
-      var ptsHTML = (pts != null) ? '<span class="nlsp__points">+' + pts + ' pts</span>' : '';
-
-      var scoreInputs;
+      // Scoreboard
+      var scoreboard;
       if (s === 'pre' && !submittedPred) {
         var hv = draft.home != null ? draft.home : '';
         var av = draft.away != null ? draft.away : '';
-        scoreInputs =
-          '<input type="number" min="0" max="20" inputmode="numeric" data-side="home" data-m="' + $h(m.id) + '" value="' + $h(hv) + '">' +
-          '<span class="nlsp__fs">v</span>' +
-          '<input type="number" min="0" max="20" inputmode="numeric" data-side="away" data-m="' + $h(m.id) + '" value="' + $h(av) + '">';
+        scoreboard =
+          '<input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="off" data-side="home" data-m="' + $h(m.id) + '" value="' + $h(hv) + '" aria-label="' + $h(a.homeTeam.name + ' score') + '">' +
+          '<span class="nlsp__dash">–</span>' +
+          '<input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="off" data-side="away" data-m="' + $h(m.id) + '" value="' + $h(av) + '" aria-label="' + $h(a.awayTeam.name + ' score') + '">';
       } else if (s === 'pre' && submittedPred) {
-        scoreInputs =
-          '<input type="number" min="0" max="20" inputmode="numeric" data-side="home" data-m="' + $h(m.id) + '" value="' + $h(submittedPred.home) + '" disabled>' +
-          '<span class="nlsp__fs">v</span>' +
-          '<input type="number" min="0" max="20" inputmode="numeric" data-side="away" data-m="' + $h(m.id) + '" value="' + $h(submittedPred.away) + '" disabled>';
+        scoreboard =
+          '<span class="nlsp__num">' + submittedPred.home + '</span>' +
+          '<span class="nlsp__dash">–</span>' +
+          '<span class="nlsp__num">' + submittedPred.away + '</span>';
       } else if (s === 'live') {
-        scoreInputs = '<span class="nlsp__fs">·</span><span class="nlsp__fs">vs</span><span class="nlsp__fs">·</span>';
+        scoreboard =
+          '<span class="nlsp__num" style="color:var(--text-muted);">·</span>' +
+          '<span class="nlsp__dash">–</span>' +
+          '<span class="nlsp__num" style="color:var(--text-muted);">·</span>';
       } else {
-        scoreInputs =
-          '<span class="nlsp__fs">' + (a.homeTeam.score != null ? a.homeTeam.score : '?') + '</span>' +
-          '<span class="nlsp__fs">—</span>' +
-          '<span class="nlsp__fs">' + (a.awayTeam.score != null ? a.awayTeam.score : '?') + '</span>';
+        scoreboard =
+          '<span class="nlsp__num">' + (a.homeTeam.score != null ? a.homeTeam.score : '?') + '</span>' +
+          '<span class="nlsp__dash">–</span>' +
+          '<span class="nlsp__num">' + (a.awayTeam.score != null ? a.awayTeam.score : '?') + '</span>';
       }
 
+      // Foot
       var foot = '';
-      if (s === 'pre') {
-        if (!submittedPred) {
-          var jokerBtn = isOwn
-            ? '<button class="nlsp__joker" disabled title="Own team already auto-doubles">🃏 (own team)</button>'
-            : '<button class="nlsp__joker' + (isJoker ? ' is-on' : '') + '" data-joker="' + $h(m.id) + '">🃏 ' + (isJoker ? 'Joker set' : 'Set as joker') + '</button>';
-          foot = '<div class="nlsp__rowfoot">' + jokerBtn + '</div>';
-        } else {
-          foot = '<div class="nlsp__rowfoot">' +
-            '<button class="nlsp__edit" data-edit="' + $h(m.id) + '">Edit until KO</button>' +
-            '<span class="nlsp__yourpred">You: ' + submittedPred.home + '–' + submittedPred.away + (submittedPred.joker ? ' 🃏' : '') + '</span>' +
-          '</div>';
-        }
+      if (s === 'pre' && submittedPred) {
+        foot = '<div class="nlsp__foot">' +
+                 '<span class="nlsp__yours">Your pick: <b>' + submittedPred.home + '–' + submittedPred.away + '</b></span>' +
+                 '<button class="nlsp__edit" data-edit="' + $h(m.id) + '">Edit</button>' +
+               '</div>';
       } else if (s === 'live') {
-        foot = '<div class="nlsp__rowfoot">' +
-          (submittedPred ? '<span class="nlsp__yourpred">You: ' + submittedPred.home + '–' + submittedPred.away + (submittedPred.joker ? ' 🃏' : '') + '</span>'
-                         : '<span class="nlsp__yourpred">No prediction</span>') +
-        '</div>';
+        foot = '<div class="nlsp__foot">' +
+                 (submittedPred
+                   ? '<span class="nlsp__yours">Your pick: <b>' + submittedPred.home + '–' + submittedPred.away + '</b></span>'
+                   : '<span class="nlsp__yours">No prediction</span>') +
+               '</div>';
       } else if (s === 'post') {
-        var basis;
         if (submittedPred) {
           var b = basePoints(submittedPred.home, submittedPred.away, a.homeTeam.score, a.awayTeam.score);
           var mult = multiplierFor(m, submittedPred);
-          basis = 'You: ' + submittedPred.home + '–' + submittedPred.away + (submittedPred.joker ? ' 🃏' : '') +
-                  ' · ' + (b === 3 ? 'exact' : b === 1 ? 'right result' : 'wrong') +
-                  (mult > 1 ? ' (×' + mult + ')' : '');
+          var pts = (b == null) ? null : b * mult;
+          var verdict = b === 3 ? 'Exact score' : b === 1 ? 'Right result' : 'Wrong';
+          foot = '<div class="nlsp__foot">' +
+                   '<span class="nlsp__yours">Your pick: <b>' + submittedPred.home + '–' + submittedPred.away + '</b> · ' + verdict + (mult > 1 ? ' (×' + mult + ')' : '') + '</span>' +
+                   (pts != null ? '<span class="nlsp__pts' + (pts === 0 ? ' is-zero' : '') + '">+' + pts + ' pts</span>' : '') +
+                 '</div>';
         } else {
-          basis = 'No prediction';
+          foot = '<div class="nlsp__foot"><span class="nlsp__yours">No prediction</span></div>';
         }
-        foot = '<div class="nlsp__rowfoot"><span class="nlsp__yourpred">' + basis + '</span></div>';
       }
 
-      return '<div class="nlsp__row">' +
-        '<div class="nlsp__status">' +
-          '<span class="nlsp__pill ' + pillCls + '">' + $h(pillText) + '</span>' +
-          ownPill + jokerPill + ptsHTML +
-        '</div>' +
+      var cls = 'nlsp__row';
+      if (hasMult) cls += ' is-mult';
+      if (s === 'live') cls += ' is-live';
+      if (s === 'post') cls += ' is-post';
+
+      return '<div class="' + cls + '">' +
+        '<div class="nlsp__row-meta">' + meta + multCaption + '</div>' +
         '<div class="nlsp__teams">' +
           '<div class="nlsp__team is-home">' +
-            crestImg(a.homeTeam.crest, a.homeTeam.name) +
+            crestImg(a.homeTeam.crest, a.homeTeam.name, 36) +
             '<span class="nlsp__tname">' + $h(a.homeTeam.name) + '</span>' +
           '</div>' +
-          '<div class="nlsp__score-cell">' + scoreInputs + '</div>' +
+          '<div class="nlsp__scoreboard">' + scoreboard + '</div>' +
           '<div class="nlsp__team is-away">' +
-            crestImg(a.awayTeam.crest, a.awayTeam.name) +
+            crestImg(a.awayTeam.crest, a.awayTeam.name, 36) +
             '<span class="nlsp__tname">' + $h(a.awayTeam.name) + '</span>' +
           '</div>' +
         '</div>' +
@@ -768,26 +812,21 @@
       '</div>';
     }).join('');
 
-    fixtures.innerHTML = head + rows;
-
+    // Wire score inputs
     Array.prototype.forEach.call(fixtures.querySelectorAll('input[data-m]'), function (inp) {
       inp.addEventListener('input', function () {
         var mid = inp.getAttribute('data-m');
         var side = inp.getAttribute('data-side');
-        var val = inp.value === '' ? null : Math.max(0, Math.min(20, parseInt(inp.value, 10) || 0));
+        // strip non-digits in place (keeps caret behaviour reasonable)
+        var cleaned = inp.value.replace(/[^0-9]/g, '').slice(0, 2);
+        if (cleaned !== inp.value) inp.value = cleaned;
+        var val = clampScore(cleaned);
         state.draft[mid] = state.draft[mid] || {};
         state.draft[mid][side] = val;
         renderSubmitbar();
       });
     });
-    Array.prototype.forEach.call(fixtures.querySelectorAll('button.nlsp__joker[data-joker]'), function (b) {
-      b.addEventListener('click', function () {
-        var mid = b.getAttribute('data-joker');
-        state.draftJoker = (state.draftJoker === mid) ? null : mid;
-        renderFixtures();
-        renderSubmitbar();
-      });
-    });
+    // Edit
     Array.prototype.forEach.call(fixtures.querySelectorAll('button[data-edit]'), function (b) {
       b.addEventListener('click', function () {
         var mid = b.getAttribute('data-edit');
@@ -795,12 +834,12 @@
         state.draft[mid] = { home: p.home, away: p.away };
         if (p.joker) state.draftJoker = mid;
         delete state.predictions[mid];
-        renderFixtures();
-        renderSubmitbar();
+        renderFixtures(); renderSubmitbar();
       });
     });
   }
 
+  // ---------- submit bar ----------
   function preCount() {
     var now = simNow();
     var preMatches = state.matches.filter(function (m) { return stateOf(m, now) === 'pre'; });
@@ -811,9 +850,7 @@
       if (p && p.home != null && p.away != null) ready++;
       else if (d && d.home != null && d.away != null) ready++;
     });
-    var jokerOK = !!(state.draftJoker || Object.keys(state.predictions).some(function (mid) {
-      return state.predictions[mid].joker;
-    }));
+    var jokerOK = !!currentJokerMatchId();
     return { total: preMatches.length, ready: ready, jokerOK: jokerOK };
   }
   function renderSubmitbar() {
@@ -821,33 +858,39 @@
     var hasPre = state.matches.some(function (m) { return stateOf(m, now) === 'pre'; });
     if (!hasPre) { submitb.innerHTML = ''; return; }
     var c = preCount();
-    var draftsPending = Object.keys(state.draft).length > 0 || state.draftJoker;
+    var draftsPending = Object.keys(state.draft).length > 0 || (state.draftJoker !== null && state.draftJoker !== undefined);
     var canSubmit = (c.ready === c.total) && c.jokerOK && draftsPending;
     submitb.innerHTML =
       '<div class="nlsp__submitbar">' +
-        '<div class="nlsp__count">' + c.ready + '/' + c.total + ' predicted · ' + (c.jokerOK ? 'joker ✓' : 'joker needed') + '</div>' +
-        '<button class="nlsp__btn" id="nlsp-submit"' + (canSubmit ? '' : ' disabled') + '>' +
-          (Object.keys(state.predictions).length ? 'Save changes' : 'Submit all predictions') +
+        '<div class="nlsp__count">' +
+          '<b>' + c.ready + '/' + c.total + '</b> predicted · ' + (c.jokerOK ? 'joker set' : 'no joker yet') +
+        '</div>' +
+        '<button class="nlsp__btn" id="nlsp-submit"' + (canSubmit ? '' : ' disabled') +
+          ' style="margin-left:auto;">' +
+          (Object.keys(state.predictions).length ? 'Save changes' : 'Submit predictions') +
         '</button>' +
       '</div>';
     var btn = document.getElementById('nlsp-submit');
     if (btn) btn.addEventListener('click', submitDrafts);
   }
-
   function submitDrafts() {
     var ref = fbDb.ref('predictions/' + state.user.id + '/' + MATCHDAY_KEY);
     var updates = {};
     var now = simNow();
+    var jokerMid = currentJokerMatchId();
     state.matches.forEach(function (m) {
       if (stateOf(m, now) !== 'pre') return;
       var d = state.draft[m.id];
-      if (!d || d.home == null || d.away == null) return;
-      updates[m.id] = {
-        home: d.home,
-        away: d.away,
-        joker: (state.draftJoker === m.id),
-        submittedAt: firebase.database.ServerValue.TIMESTAMP
-      };
+      // include rows that are in draft OR previously-submitted rows where joker flag has changed
+      var submitted = state.predictions[m.id];
+      var newJoker = (jokerMid === m.id);
+      if (d && d.home != null && d.away != null) {
+        updates[m.id] = { home: d.home, away: d.away, joker: newJoker,
+                          submittedAt: firebase.database.ServerValue.TIMESTAMP };
+      } else if (submitted && !!submitted.joker !== newJoker) {
+        updates[m.id] = { home: submitted.home, away: submitted.away, joker: newJoker,
+                          submittedAt: firebase.database.ServerValue.TIMESTAMP };
+      }
     });
     if (Object.keys(updates).length === 0) { setBannerOK('No changes to save.'); return; }
 
@@ -880,25 +923,46 @@
     var inner =
       '<div class="nlsp__tablehead">' +
         '<div class="nlsp__kicker">Leaderboard</div>' +
-        '<div class="nlsp__muted" style="margin-top:2px;">' +
+        '<div class="nlsp__tsub">' +
           (rows[0].settled ? rows[0].settled + ' settled · ' : '') +
           rows.length + ' player' + (rows.length === 1 ? '' : 's') +
         '</div>' +
       '</div>' +
       rows.map(function (r, i) {
         var name = $h(r.reg.forename) + ' ' + $h(r.reg.surnameInitial || '');
-        var crest = crestImg(r.reg.crestUrl, r.reg.teamName);
-        var youCls = (r.uid === state.user.id) ? ' is-you' : '';
-        return '<div class="nlsp__trow' + youCls + '">' +
+        var cls = 'nlsp__trow';
+        if (r.uid === state.user.id) cls += ' is-you';
+        if (i === 0) cls += ' is-top1';
+        return '<div class="' + cls + '">' +
           '<span class="nlsp__rank">' + (i + 1) + '</span>' +
-          crest +
-          '<span>' + name + (r.uid === state.user.id ? ' <span class="nlsp__muted">(you)</span>' : '') + '</span>' +
+          crestImg(r.reg.crestUrl, r.reg.teamName, 24) +
+          '<span>' + name + (r.uid === state.user.id ? ' <span class="nlsp__youlbl">(you)</span>' : '') + '</span>' +
           '<span class="nlsp__pts">' + r.total + '</span>' +
         '</div>';
       }).join('');
 
     tableEl.className = 'nlsp__table';
     tableEl.innerHTML = inner;
+  }
+
+  // ---------- sim bar (dev only) ----------
+  function renderClock() {
+    var el = simEl.querySelector('.nlsp__clock'); if (!el) return;
+    el.textContent = simNow().toLocaleTimeString('en-GB', { hour:'2-digit',minute:'2-digit',second:'2-digit', timeZone:'Europe/London' });
+  }
+  function renderSimBar() {
+    if (!state.sim.mode || !state.sim.mode.showBar) { simEl.innerHTML = ''; return; }
+    simEl.className = 'nlsp__simbar';
+    simEl.innerHTML =
+      '<span class="nlsp__simlbl">Sim</span>' +
+      SIM_OPTIONS.map(function (o, i) {
+        return '<button data-i="' + i + '" class="' + (i === state.sim.index ? 'is-active' : '') + '">' + $h(o.label) + '</button>';
+      }).join('') +
+      '<span class="nlsp__clock"></span>';
+    Array.prototype.forEach.call(simEl.querySelectorAll('button'), function (b) {
+      b.addEventListener('click', function () { setSim(Number(b.getAttribute('data-i'))); });
+    });
+    renderClock();
   }
 
   // ---------- RTDB listeners ----------
@@ -909,13 +973,13 @@
       if (!state.registration) {
         renderRegistration();
       } else {
-        register.hidden = true;
-        main.hidden = false;
-        renderGreet();
-        renderSimBar();
+        register.hidden = true; main.hidden = false;
+        renderHero();
+        renderJoker();
         renderFixtures();
         renderSubmitbar();
         renderTable();
+        renderSimBar();
       }
     });
     fbDb.ref('predictions').on('value', function (snap) {
@@ -926,9 +990,7 @@
       });
       state.predictions = state.allPreds[state.user.id] || {};
       if (!main.hidden) {
-        renderFixtures();
-        renderSubmitbar();
-        renderTable();
+        renderJoker(); renderFixtures(); renderSubmitbar(); renderTable();
       }
     });
   }
@@ -942,13 +1004,20 @@
       return;
     }
     state.user = {
-      id:             claims.id,
-      forename:       claims.forename || 'there',
-      surname:        claims.surname  || '',
+      id: claims.id,
+      forename: claims.forename || 'there',
+      surname:  claims.surname  || '',
       surnameInitial: (claims.surname || '').charAt(0).toUpperCase(),
-      email:          claims.email    || '',
-      favTeamName:    claims.favourite_team || null
+      email:    claims.email    || '',
+      favTeamName: claims.favourite_team || null
     };
+
+    // Init sim mode from URL
+    state.sim.mode = parseSimMode();
+    if (state.sim.mode) {
+      state.sim.index = state.sim.mode.index;
+      if (state.sim.mode.autoDemo) startDemo();
+    }
 
     Promise.all([
       loadFirebase().then(function () {
