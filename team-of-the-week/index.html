@@ -1,17 +1,24 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Team of the Week
-  Version: v0.1 (15/05/2026)
+  Version: v0.2 (15/05/2026)
   File: /tools/team-of-the-week/index.html
 
   Browse fan MOTM votes and notes — pick your Team of the Week.
 
   Storage (RTDB):
-    app-data/staff-team-of-the-week/...      tool-owned data
-    tools/staff-team-of-the-week             tool registration (label, defaults)
+    app-data/staff-team-of-the-week/prefs/{uid}    per-user prefs (last division/matchday)
+    tools/staff-team-of-the-week                   tool registration (label, defaults)
 
-  Access (auth-guard registry — see system/auth-guard.js):
-    role X + access Y → ...
+  Reads fan data from a second Firebase project (nl-widgets) via a named
+  app (`nlTotwRead`) with anonymous auth — same model the embed widgets
+  use. No data is mirrored into nl-tools; this tool is a window onto the
+  fan database.
+
+  Access tiers (resolved via auth-guard / session.tools[toolKey] or role
+  fallback):
+    admin       → full access incl. note text
+    access      → counts, charts, drills, voter clubs — but no note text
 -->
 <html lang="en">
 <head>
@@ -27,7 +34,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 
-  <!-- Firebase init -->
+  <!-- Firebase init (nl-tools default app) -->
   <script>
     firebase.initializeApp({
       apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -41,8 +48,6 @@
     var db = firebase.database();
   </script>
 
-  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
-       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
   <script>
     window.NL_TOOL = {
       title: 'Team of the Week',
@@ -53,16 +58,20 @@
     window.NL_CHANGELOG = [
       {
         date: '15/05/2026',
+        version: 'v0.2',
+        items: [
+          'First features build: division + matchday filters, summary tiles, per-match cards with ranked vote bars / donut, voter-club drill, admin-only notes panel, copy/export.'
+        ]
+      },
+      {
+        date: '15/05/2026',
         version: 'v0.1',
         items: [
-          'Initial build.'
+          'Initial scaffold from system/_template.'
         ]
       }
     ];
 
-    /* auth-guard fires this once the session is verified + pageWrap is
-       revealed. Boot the main app from here so RTDB reads happen with a
-       live auth token. Do NOT read RTDB before this fires. */
     window.nlAuthReady = function (userData) {
       window.NL = window.NL || {};
       window.NL.session = userData;
@@ -80,35 +89,235 @@
   <script src="/tools/system/auth-guard.js?v=8"></script>
 
 <style>
-  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
-     style.display = 'block'. Don't clear with '' — would re-trigger the
-     brand rule and re-hide the page. */
+  /* ----- Page header ----- */
+  #pageWrap .totw-h1 { color: var(--navy); margin: 0 0 4px; font-size: var(--text-lg); }
+  #pageWrap .totw-sub { color: var(--text-muted); margin: 0 0 4px; font-size: var(--text-sm); }
+  #pageWrap .totw-rolebar { display: flex; gap: 8px; align-items: center; margin: 8px 0 22px; font-size: 12px; color: var(--text-muted); }
+  #pageWrap .totw-rolebar .pill { font-size: 10px; padding: 3px 9px; letter-spacing: var(--tracking-wide); }
+  #pageWrap .totw-rolebar .pill--admin { background: var(--red-light); color: var(--primary); font-weight: 800; }
+  #pageWrap .totw-rolebar .pill--access { background: var(--info-light); color: var(--navy); font-weight: 800; }
 
-  /* Tool-specific styles go here. Prefer brand tokens
-     (var(--primary), var(--navy), var(--text-muted), etc.) over hex.
-     See system/nl-brand.css for the full token list. */
+  /* ----- Banner / loading ----- */
+  #pageWrap .totw-banner {
+    padding: 10px 14px; margin: 0 0 18px;
+    border-radius: var(--radius); font-size: 13px;
+    background: var(--info-light); color: var(--navy);
+    border: 1px solid color-mix(in srgb, var(--navy) 12%, var(--border));
+  }
+  #pageWrap .totw-banner.is-err { background: var(--red-light); color: var(--red-deep); border-color: color-mix(in srgb, var(--red) 25%, var(--border)); }
+  #pageWrap .totw-banner.is-ok  { background: var(--green-light); color: var(--green); border-color: color-mix(in srgb, var(--green) 25%, var(--border)); }
+  #pageWrap .totw-banner[hidden] { display: none; }
+
+  /* ----- Controls (division + matchday pills) ----- */
+  #pageWrap .totw-controls {
+    display: grid; row-gap: 12px; margin-bottom: 18px;
+  }
+  #pageWrap .totw-divrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  #pageWrap .totw-divlabel { font-size: 11px; text-transform: uppercase; letter-spacing: var(--tracking-wider); font-weight: 800; color: var(--text-muted); margin-right: 4px; }
+  #pageWrap .totw-divpill {
+    -webkit-appearance: none; appearance: none;
+    font: inherit; font-size: 13px; font-weight: 800;
+    padding: 7px 14px; border-radius: var(--radius-pill);
+    background: var(--white); color: var(--text);
+    border: 1px solid var(--border); cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: background .15s, color .15s, border-color .15s;
+  }
+  #pageWrap .totw-divpill img { width: 18px; height: 18px; object-fit: contain; }
+  #pageWrap .totw-divpill:hover { background: var(--off-white); }
+  #pageWrap .totw-divpill.is-active { background: var(--primary); color: var(--white); border-color: var(--primary); }
+  #pageWrap .totw-divpill.is-active img { filter: brightness(0) invert(1); }
+
+  #pageWrap .totw-mdrow {
+    display: flex; gap: 6px; overflow-x: auto;
+    padding-bottom: 6px; margin: 0 -4px; padding: 0 4px 6px;
+    scrollbar-width: thin;
+  }
+  #pageWrap .totw-mdrow::-webkit-scrollbar { height: 6px; }
+  #pageWrap .totw-mdrow::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  #pageWrap .totw-mdpill {
+    -webkit-appearance: none; appearance: none;
+    font: inherit; font-size: 12px; font-weight: 800;
+    padding: 6px 12px; border-radius: var(--radius-pill);
+    background: var(--white); color: var(--text);
+    border: 1px solid var(--border); cursor: pointer;
+    flex: none; white-space: nowrap;
+    text-transform: uppercase; letter-spacing: var(--tracking-tight);
+  }
+  #pageWrap .totw-mdpill:hover { background: var(--off-white); }
+  #pageWrap .totw-mdpill.is-active { background: var(--navy); color: var(--white); border-color: var(--navy); }
+  #pageWrap .totw-mdpill.is-today { box-shadow: inset 0 0 0 2px var(--primary); }
+
+  /* ----- Summary tiles ----- */
+  #pageWrap .totw-summary {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 10px; margin-bottom: 20px;
+  }
+  #pageWrap .totw-tile {
+    background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 16px; box-shadow: var(--shadow);
+  }
+  #pageWrap .totw-tile__label { font-size: 10px; text-transform: uppercase; letter-spacing: var(--tracking-wider); color: var(--text-muted); font-weight: 800; }
+  #pageWrap .totw-tile__value { font-size: 26px; font-weight: 900; font-variation-settings: 'wght' 900; color: var(--navy); line-height: 1.1; margin-top: 2px; }
+  #pageWrap .totw-tile__sub   { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+  /* ----- Match cards ----- */
+  #pageWrap .totw-matches { display: grid; gap: 14px; }
+  #pageWrap .totw-card {
+    background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px 16px; box-shadow: var(--shadow);
+  }
+  #pageWrap .totw-card.is-void { opacity: .6; }
+  #pageWrap .totw-card__head {
+    display: grid; grid-template-columns: 1fr auto 1fr;
+    align-items: center; gap: 10px; padding-bottom: 12px;
+    border-bottom: 1px solid var(--border); margin-bottom: 12px;
+  }
+  #pageWrap .totw-team { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  #pageWrap .totw-team--away { justify-content: flex-end; }
+  #pageWrap .totw-team img { width: 28px; height: 28px; object-fit: contain; flex: none; }
+  #pageWrap .totw-team__name { font-weight: 800; font-variation-settings: 'wght' 800; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #pageWrap .totw-score { font-weight: 900; font-variation-settings: 'wght' 900; font-size: 22px; color: var(--text); letter-spacing: -0.02em; min-width: 70px; text-align: center; }
+  #pageWrap .totw-score.is-future { color: var(--text-muted); font-size: 14px; }
+  #pageWrap .totw-card__meta { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; font-size: 11px; color: var(--text-muted); }
+  #pageWrap .totw-card__meta .pill { font-size: 10px; padding: 3px 9px; letter-spacing: var(--tracking-wide); }
+
+  /* ----- Voter-club filter chips ----- */
+  #pageWrap .totw-clubchips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  #pageWrap .totw-clubchip {
+    -webkit-appearance: none; appearance: none;
+    font: inherit; font-size: 11px; font-weight: 700;
+    padding: 4px 10px; border-radius: var(--radius-pill);
+    background: var(--off-white); color: var(--text-muted);
+    border: 1px solid var(--border); cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  #pageWrap .totw-clubchip .totw-swatch { width: 8px; height: 8px; border-radius: 50%; background: var(--swatch, var(--navy)); }
+  #pageWrap .totw-clubchip:hover { background: var(--white); color: var(--text); }
+  #pageWrap .totw-clubchip.is-active { background: var(--primary); color: var(--white); border-color: var(--primary); }
+  #pageWrap .totw-clubchip.is-active .totw-swatch { box-shadow: 0 0 0 2px rgba(255,255,255,.5); }
+  #pageWrap .totw-clearfilter { margin-left: auto; font-size: 11px; color: var(--primary); background: none; border: none; cursor: pointer; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; padding: 4px 0; }
+
+  /* ----- Vote share controls ----- */
+  #pageWrap .totw-vctrls { display: flex; gap: 6px; justify-content: flex-end; margin-bottom: 8px; }
+  #pageWrap .totw-vctrl {
+    -webkit-appearance: none; appearance: none;
+    font: inherit; font-size: 11px; font-weight: 700;
+    padding: 4px 10px; border-radius: var(--radius-sm);
+    background: var(--white); color: var(--text-muted);
+    border: 1px solid var(--border); cursor: pointer;
+  }
+  #pageWrap .totw-vctrl.is-active { background: var(--navy); color: var(--white); border-color: var(--navy); }
+
+  /* ----- Votes table (bars view) ----- */
+  #pageWrap .totw-votes { display: grid; gap: 4px; }
+  #pageWrap .totw-row {
+    display: grid; grid-template-columns: 22px 1fr 60px 50px 32px;
+    align-items: center; gap: 10px;
+    padding: 8px 10px; border-radius: var(--radius-sm);
+    background: var(--off-white); cursor: pointer;
+    transition: background .12s;
+  }
+  #pageWrap .totw-row:hover { background: color-mix(in srgb, var(--navy) 4%, var(--off-white)); }
+  #pageWrap .totw-row.is-expanded { background: color-mix(in srgb, var(--primary) 6%, var(--off-white)); }
+  #pageWrap .totw-row__pos { font-size: 11px; font-weight: 800; color: var(--text-muted); text-align: center; }
+  #pageWrap .totw-row__name { min-width: 0; font-weight: 700; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #pageWrap .totw-row__team { display: block; font-size: 10px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: var(--tracking-tight); margin-top: 1px; }
+  #pageWrap .totw-row__bar { background: var(--off-white); border-radius: 4px; height: 8px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--border); }
+  #pageWrap .totw-row__bar > span { display: block; height: 100%; background: var(--bar, var(--navy)); border-radius: 4px; }
+  #pageWrap .totw-row__count { font-weight: 900; font-variation-settings: 'wght' 900; font-size: 14px; color: var(--text); text-align: right; }
+  #pageWrap .totw-row__count em { font-style: normal; font-weight: 700; font-size: 10px; color: var(--text-muted); display: block; margin-top: -1px; }
+  #pageWrap .totw-row__notebadge { text-align: right; }
+  #pageWrap .totw-row__notebadge span {
+    display: inline-block; min-width: 22px; padding: 2px 6px;
+    background: var(--amber-light); color: var(--amber-deep);
+    font-size: 10px; font-weight: 800; border-radius: var(--radius-pill);
+  }
+  #pageWrap .totw-row__notebadge span.is-empty { background: transparent; color: var(--text-muted); font-weight: 400; }
+
+  /* ----- Donut view ----- */
+  #pageWrap .totw-donutwrap {
+    display: grid; grid-template-columns: 180px 1fr; gap: 18px; align-items: center;
+  }
+  @media (max-width: 540px) { #pageWrap .totw-donutwrap { grid-template-columns: 1fr; justify-items: center; } }
+  #pageWrap .totw-donut { width: 180px; height: 180px; }
+  #pageWrap .totw-donut__centre { font-weight: 900; font-size: 22px; fill: var(--navy); }
+  #pageWrap .totw-donut__centre-sub { font-weight: 700; font-size: 10px; fill: var(--text-muted); text-transform: uppercase; letter-spacing: var(--tracking-wide); }
+  #pageWrap .totw-legend { display: grid; gap: 4px; font-size: 12px; }
+  #pageWrap .totw-legend__item { display: grid; grid-template-columns: 14px 1fr auto auto; gap: 8px; align-items: center; padding: 4px 8px; border-radius: var(--radius-sm); cursor: pointer; }
+  #pageWrap .totw-legend__item:hover { background: var(--off-white); }
+  #pageWrap .totw-legend__item.is-expanded { background: color-mix(in srgb, var(--primary) 6%, var(--off-white)); }
+  #pageWrap .totw-legend__swatch { width: 12px; height: 12px; border-radius: 2px; background: var(--seg); }
+  #pageWrap .totw-legend__name { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #pageWrap .totw-legend__count { font-weight: 900; font-size: 13px; }
+  #pageWrap .totw-legend__pct   { font-size: 11px; color: var(--text-muted); }
+
+  /* ----- Drill drawer (player click) ----- */
+  #pageWrap .totw-drawer {
+    margin: 4px 0 8px; padding: 14px;
+    background: color-mix(in srgb, var(--navy) 3%, var(--white));
+    border: 1px solid var(--border); border-radius: var(--radius);
+  }
+  #pageWrap .totw-drawer__title { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: var(--tracking-wide); color: var(--text-muted); margin: 0 0 8px; }
+  #pageWrap .totw-drillbars { display: grid; gap: 4px; margin-bottom: 12px; }
+  #pageWrap .totw-drillrow { display: grid; grid-template-columns: 12px 1fr 50px 40px; align-items: center; gap: 8px; font-size: 12px; }
+  #pageWrap .totw-drillrow__sw { width: 10px; height: 10px; border-radius: 2px; background: var(--seg); }
+  #pageWrap .totw-drillrow__name { font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #pageWrap .totw-drillrow__bar { background: var(--off-white); border-radius: 3px; height: 6px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--border); }
+  #pageWrap .totw-drillrow__bar > span { display: block; height: 100%; background: var(--seg); border-radius: 3px; }
+  #pageWrap .totw-drillrow__count { text-align: right; font-weight: 800; font-size: 12px; }
+  #pageWrap .totw-notes { display: grid; gap: 8px; }
+  #pageWrap .totw-noteshead { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  #pageWrap .totw-noteshead h4 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: var(--tracking-wide); color: var(--navy); font-weight: 800; }
+  #pageWrap .totw-noteshead .pill { font-size: 9px; padding: 2px 7px; }
+  #pageWrap .totw-note {
+    background: var(--white); border: 1px solid var(--border); border-left: 3px solid var(--primary);
+    border-radius: var(--radius-sm); padding: 10px 12px;
+    display: grid; row-gap: 4px; font-size: 13px;
+  }
+  #pageWrap .totw-note__quote { line-height: 1.45; color: var(--text); font-style: italic; }
+  #pageWrap .totw-note__attrib { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
+  #pageWrap .totw-note__attrib b { color: var(--navy); font-weight: 800; }
+  #pageWrap .totw-note__copy { margin-left: auto; font: inherit; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: var(--tracking-tight); background: none; border: none; color: var(--primary); cursor: pointer; padding: 2px 0; text-decoration: underline; text-underline-offset: 3px; }
+  #pageWrap .totw-notes--locked {
+    padding: 12px; text-align: center; font-size: 12px; color: var(--text-muted);
+    background: var(--off-white); border: 1px dashed var(--border); border-radius: var(--radius-sm);
+  }
+
+  /* ----- Card footer (per-match copy) ----- */
+  #pageWrap .totw-card__foot { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); }
+
+  /* ----- Empty state ----- */
+  #pageWrap .totw-empty {
+    padding: 28px 18px; text-align: center;
+    background: var(--white); border: 1px dashed var(--border); border-radius: var(--radius);
+    color: var(--text-muted); font-size: 13px;
+  }
+  #pageWrap .totw-empty b { color: var(--text); }
+
+  /* ----- Page footer (exports) ----- */
+  #pageWrap .totw-actions { margin-top: 22px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 </style>
 </head>
 <body>
 
-<!-- Topbar — auto-rendered by /tools/system/nl-topbar.js from window.NL_TOOL -->
 <div id="nlTopbar"></div>
 
 <div id="pageWrap">
   <div class="page">
 
-    <!-- Page content goes here. The whole pageWrap stays hidden until
-         auth-guard reveals it, so you don't need to handle the
-         not-yet-authed state in markup. -->
-
-    <header style="margin-bottom:24px;">
-      <h1 style="color:var(--navy);">Team of the Week</h1>
-      <p style="color:var(--text-muted);">Browse fan MOTM votes and notes — pick your Team of the Week.</p>
+    <header>
+      <h1 class="totw-h1">Team of the Week</h1>
+      <p class="totw-sub">Browse fan MOTM votes and notes — pick your Team of the Week.</p>
+      <div class="totw-rolebar" id="totw-rolebar"></div>
     </header>
 
-    <section>
-      <!-- ... -->
-    </section>
+    <div id="totw-banner" class="totw-banner" hidden></div>
+
+    <div id="totw-controls"></div>
+    <div id="totw-summary" class="totw-summary"></div>
+    <div id="totw-matches" class="totw-matches"></div>
+    <div id="totw-actions" class="totw-actions"></div>
 
   </div>
 </div>
@@ -118,23 +327,976 @@
 (function () {
   'use strict';
 
-  /* Public boot entry point — called by nlAuthReady once the session is
-     verified. Don't read RTDB before this fires. */
-  window.TOOL = window.TOOL || {};
-  window.TOOL.boot = function (session) {
-    /* Example: wait for a live auth token before any RTDB read.
-       NL.ensureAuth lives in nl-utils.js — use it for tools that boot
-       async (e.g. fetch + render after auth). */
-    if (!window.NL || !NL.ensureAuth) {
-      console.warn('[team-of-the-week] NL.ensureAuth missing — check nl-utils.js is loaded');
-    }
-    /* NL.ensureAuth().then(function () { ... read RTDB here ... }); */
+  /* ============================================================
+     CONSTANTS
+     ============================================================ */
+  var WIDGETS_CONFIG = {
+    apiKey:            'AIzaSyAOePUiyfACJ546b08Z7oGWahAEYzEadMo',
+    authDomain:        'nl-widgets.firebaseapp.com',
+    databaseURL:       'https://nl-widgets-default-rtdb.europe-west1.firebasedatabase.app',
+    projectId:         'nl-widgets',
+    storageBucket:     'nl-widgets.firebasestorage.app',
+    messagingSenderId: '440054238126',
+    appId:             '1:440054238126:web:349a1aeaf3c65ff281563f'
+  };
+  var WIDGETS_APP_NAME = 'nlTotwRead';
 
-    /* For now just confirm we booted: */
-    console.log('[team-of-the-week] booted with session', session);
+  var COMPS = {
+    89:  { id: 89,  name: 'National Division',     shortName: 'National', logoFile: 'National.png' },
+    373: { id: 373, name: 'National League North', shortName: 'North',    logoFile: 'North.png'    },
+    372: { id: 372, name: 'National League South', shortName: 'South',    logoFile: 'South.png'    }
+  };
+  var COMP_IDS = [89, 373, 372];
+  var DEFAULT_COMP_ID = 89;
+  var SEASON_ID = 2025;
+  var API_BASE = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
+  var CLUBS_META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/data/clubs-meta.json';
+  var DIVISION_LOGO_BASE = 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/divisions/';
+  var MAX_PAGES = 10;
+  var PREFS_DEBOUNCE_MS = 600;
+
+  /* ============================================================
+     STATE
+     ============================================================ */
+  var state = {
+    session: null,
+    canSeeNotes: false,
+    widgetsDb: null,
+    allMatches: [],
+    allUsers: {},
+    allVotes: {},
+    clubsByOpta: {},
+    selectedComp: DEFAULT_COMP_ID,
+    selectedMatchday: null,
+    chartMode: {},        // matchId -> 'bars' | 'donut'
+    activeClub: {},       // matchId -> club name (filter active)
+    expanded: {},         // matchId -> playerId
+    loaded: false
   };
 
-  /* If auth-guard fired before this script loaded, replay the session. */
+  /* ============================================================
+     DOM
+     ============================================================ */
+  var $banner   = document.getElementById('totw-banner');
+  var $rolebar  = document.getElementById('totw-rolebar');
+  var $ctrls    = document.getElementById('totw-controls');
+  var $summary  = document.getElementById('totw-summary');
+  var $matches  = document.getElementById('totw-matches');
+  var $actions  = document.getElementById('totw-actions');
+
+  /* ============================================================
+     UTIL
+     ============================================================ */
+  function h(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function showBanner(msg, cls) {
+    $banner.hidden = false;
+    $banner.className = 'totw-banner' + (cls ? ' is-' + cls : '');
+    $banner.textContent = msg;
+  }
+  function hideBanner() { $banner.hidden = true; }
+  function copy(text) {
+    if (!text) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        if (window.NL && NL.toast) NL.toast('Copied', 'success');
+      });
+    } else {
+      var ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch (e) {}
+      document.body.removeChild(ta);
+      if (window.NL && NL.toast) NL.toast('Copied', 'success');
+    }
+  }
+  function koOf(m) {
+    var ks = m && m.attributes && m.attributes.kickOffDateUTC;
+    if (!ks) return null;
+    return new Date(String(ks).replace(' ', 'T') + 'Z');
+  }
+  function bstDateOf(d) {
+    return d ? d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' }) : '';
+  }
+  function bstDayLabel(d) {
+    if (!d) return '';
+    var parts = d.toLocaleDateString('en-GB', { timeZone: 'Europe/London', weekday: 'short', day: 'numeric', month: 'short' }).split(' ');
+    return parts.join(' ').toUpperCase();
+  }
+  function fmtMatchTime(d) {
+    if (!d) return '';
+    return d.toLocaleString('en-GB', { timeZone: 'Europe/London', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  }
+  function matchStateOf(m) {
+    var period = m.attributes && m.attributes.matchPeriod;
+    if (period === 'Postponed') return 'postponed';
+    if (period === 'Abandoned') return 'abandoned';
+    var ko = koOf(m);
+    if (!ko) return 'pre';
+    var now = Date.now();
+    if (now < ko.getTime()) return 'pre';
+    if (period === 'FullTime' || period === 'PostMatch') return 'post';
+    if (now < ko.getTime() + 105 * 60000) return 'live';
+    return 'post';
+  }
+  function paletteForTeam(teamId) {
+    var c = state.clubsByOpta[teamId];
+    var cols = c && c.colors;
+    return {
+      primary:   (cols && cols.primary)   || '#223b7c',
+      secondary: (cols && cols.secondary) || '#ffffff'
+    };
+  }
+  function teamNameFor(teamId) {
+    var c = state.clubsByOpta[teamId];
+    if (c && (c.short || c.name)) return c.short || c.name;
+    for (var i = 0; i < state.allMatches.length; i++) {
+      var a = state.allMatches[i].attributes;
+      if (a.homeTeam.teamID === teamId) return a.homeTeam.shortName || a.homeTeam.name;
+      if (a.awayTeam.teamID === teamId) return a.awayTeam.shortName || a.awayTeam.name;
+    }
+    return teamId;
+  }
+
+  /* ============================================================
+     LEVEL RESOLUTION
+     ============================================================ */
+  function resolveLevel(session) {
+    var raw = session && session.tools && session.tools[NL_TOOL_KEY];
+    if (typeof raw === 'string') return raw;
+    if (raw && typeof raw === 'object') {
+      if (raw.admin)  return 'admin';
+      if (raw.access) return 'access';
+      return 'off';
+    }
+    var role = session && session.role;
+    if (role === 'superadmin' || role === 'admin') return 'admin';
+    if (role === 'staff') return 'access';
+    return 'hidden';
+  }
+
+  /* ============================================================
+     DATA: clubs meta
+     ============================================================ */
+  function loadClubsMeta() {
+    return fetch(CLUBS_META_URL, { credentials: 'omit', cache: 'no-store' })
+      .then(function (r) { if (!r.ok) throw new Error('clubs-meta ' + r.status); return r.json(); })
+      .then(function (json) {
+        var clubs = (json && json.clubs) || [];
+        var map = {};
+        clubs.forEach(function (c) { if (c && c.optaID) map[c.optaID] = c; });
+        state.clubsByOpta = map;
+      })
+      .catch(function () { state.clubsByOpta = {}; });
+  }
+
+  /* ============================================================
+     DATA: fixtures
+     ============================================================ */
+  function fetchAllFixtures() {
+    return Promise.all(COMP_IDS.map(fetchOneComp))
+      .then(function (results) { return [].concat.apply([], results); });
+  }
+  function fetchOneComp(compId) {
+    var all = [];
+    function page(n) {
+      var url = API_BASE + '/matches/?competitionID=' + compId +
+                '&seasonID=' + SEASON_ID +
+                '&sort=kickOffDateUTC&page.number=' + n + '&page.size=100';
+      return fetch(url, { credentials: 'omit' })
+        .then(function (r) { if (!r.ok) throw new Error('fixtures ' + compId + ' ' + r.status); return r.json(); })
+        .then(function (json) {
+          var d = (json && json.data) || [];
+          all = all.concat(d);
+          var total = json && json.meta && json.meta.totalCount;
+          if (d.length === 100 && (total == null || all.length < total) && n < MAX_PAGES) return page(n + 1);
+        });
+    }
+    return page(1).then(function () { return all; });
+  }
+
+  /* ============================================================
+     DATA: nl-widgets (users + votes)
+     ============================================================ */
+  function initWidgetsApp() {
+    var existing = firebase.apps && firebase.apps.filter(function (a) { return a.name === WIDGETS_APP_NAME; })[0];
+    var fb = existing || firebase.initializeApp(WIDGETS_CONFIG, WIDGETS_APP_NAME);
+    state.widgetsDb = firebase.database(fb);
+    return firebase.auth(fb).signInAnonymously();
+  }
+  function loadFanData() {
+    return Promise.all([
+      state.widgetsDb.ref('users').once('value').then(function (s) { state.allUsers = s.val() || {}; }),
+      new Promise(function (resolve) {
+        // Live subscription so the staff dashboard ticks during the
+        // voting window. First snapshot resolves the boot.
+        var first = true;
+        state.widgetsDb.ref('motm').on('value', function (s) {
+          state.allVotes = s.val() || {};
+          if (first) { first = false; resolve(); }
+          else if (state.loaded) { render(); }
+        });
+      })
+    ]);
+  }
+
+  /* ============================================================
+     PREFS (nl-tools, default app)
+     ============================================================ */
+  var prefsTimer = null;
+  function savePrefsSoon() {
+    if (prefsTimer) clearTimeout(prefsTimer);
+    prefsTimer = setTimeout(function () {
+      var uid = state.session && state.session.uid;
+      if (!uid) return;
+      db.ref('app-data/staff-team-of-the-week/prefs/' + uid).update({
+        compId: state.selectedComp,
+        matchday: state.selectedMatchday,
+        updatedAt: firebase.database.ServerValue.TIMESTAMP
+      }).catch(function () { /* non-critical */ });
+    }, PREFS_DEBOUNCE_MS);
+  }
+  function loadPrefs() {
+    var uid = state.session && state.session.uid;
+    if (!uid) return Promise.resolve(null);
+    return db.ref('app-data/staff-team-of-the-week/prefs/' + uid).once('value')
+      .then(function (s) { return s.val() || null; })
+      .catch(function () { return null; });
+  }
+
+  /* ============================================================
+     DERIVED: matchday keys for the selected comp
+     ============================================================ */
+  function matchdayKeys() {
+    var seen = {};
+    state.allMatches.forEach(function (m) {
+      if (m.attributes.competitionID !== state.selectedComp) return;
+      var k = bstDateOf(koOf(m));
+      if (k) seen[k] = true;
+    });
+    return Object.keys(seen).sort();
+  }
+  function defaultMatchday() {
+    var keys = matchdayKeys();
+    if (!keys.length) return null;
+    var todayKey = bstDateOf(new Date());
+    var past = keys.filter(function (k) { return k <= todayKey; });
+    return past.length ? past[past.length - 1] : keys[0];
+  }
+  function matchesForSelected() {
+    return state.allMatches.filter(function (m) {
+      if (m.attributes.competitionID !== state.selectedComp) return false;
+      return bstDateOf(koOf(m)) === state.selectedMatchday;
+    }).sort(function (a, b) {
+      return (a.attributes.kickOffDateUTC || '').localeCompare(b.attributes.kickOffDateUTC || '');
+    });
+  }
+
+  /* ============================================================
+     DERIVED: votes per match (with optional voter-club filter)
+     ============================================================ */
+  function votesForMatch(matchId, clubFilter) {
+    var voters = state.allVotes;
+    var rows = [];
+    Object.keys(voters).forEach(function (jwtId) {
+      var v = voters[jwtId] && voters[jwtId][matchId];
+      if (!v || !v.playerId) return;
+      var u = state.allUsers[jwtId];
+      var voterTeamName = (u && u.teamName) || '— (unregistered) —';
+      if (clubFilter && voterTeamName !== clubFilter) return;
+      rows.push({
+        jwtId: jwtId,
+        playerId: v.playerId,
+        playerName: v.playerName || v.playerId,
+        teamId: v.teamId,
+        note: v.note || '',
+        submittedAt: v.submittedAt || 0,
+        voter: u || null,
+        voterTeamName: voterTeamName
+      });
+    });
+    return rows;
+  }
+  function rankPlayers(votes) {
+    var by = {};
+    votes.forEach(function (v) {
+      var k = v.playerId;
+      if (!by[k]) by[k] = { playerId: v.playerId, name: v.playerName, teamId: v.teamId, votes: 0, notes: 0, voterClubs: {}, notesList: [] };
+      by[k].votes += 1;
+      if (v.note) { by[k].notes += 1; by[k].notesList.push(v); }
+      by[k].voterClubs[v.voterTeamName] = (by[k].voterClubs[v.voterTeamName] || 0) + 1;
+    });
+    return Object.keys(by).map(function (k) { return by[k]; }).sort(function (a, b) {
+      return b.votes - a.votes || a.name.localeCompare(b.name);
+    });
+  }
+  function clubBreakdown(votes) {
+    var by = {};
+    votes.forEach(function (v) {
+      by[v.voterTeamName] = (by[v.voterTeamName] || 0) + 1;
+    });
+    return Object.keys(by).map(function (k) {
+      return { name: k, count: by[k] };
+    }).sort(function (a, b) { return b.count - a.count || a.name.localeCompare(b.name); });
+  }
+
+  /* ============================================================
+     RENDER: role bar
+     ============================================================ */
+  function renderRolebar() {
+    var pillCls = state.canSeeNotes ? 'pill--admin' : 'pill--access';
+    var pillLbl = state.canSeeNotes ? 'Admin tier' : 'Access tier';
+    var detail  = state.canSeeNotes
+      ? 'You can read voter notes.'
+      : 'You see counts and charts; note text is hidden.';
+    $rolebar.innerHTML =
+      '<span class="pill ' + pillCls + '">' + h(pillLbl) + '</span>' +
+      '<span>' + h(detail) + '</span>';
+  }
+
+  /* ============================================================
+     RENDER: controls (division + matchday pills)
+     ============================================================ */
+  function renderControls() {
+    var divHtml = '<div class="totw-divrow">' +
+      '<span class="totw-divlabel">Division</span>' +
+      COMP_IDS.map(function (id) {
+        var c = COMPS[id];
+        var active = (id === state.selectedComp) ? ' is-active' : '';
+        return '<button type="button" class="totw-divpill' + active + '" data-comp="' + id + '">' +
+          '<img src="' + DIVISION_LOGO_BASE + h(c.logoFile) + '" alt="" onerror="this.style.display=\'none\';">' +
+          h(c.shortName) +
+        '</button>';
+      }).join('') +
+    '</div>';
+
+    var keys = matchdayKeys();
+    var todayKey = bstDateOf(new Date());
+    var mdHtml = keys.length
+      ? '<div class="totw-mdrow">' +
+          keys.map(function (k) {
+            var active = (k === state.selectedMatchday) ? ' is-active' : '';
+            var today  = (k === todayKey) ? ' is-today' : '';
+            var d = new Date(k + 'T12:00:00Z'); // safe parse for label
+            return '<button type="button" class="totw-mdpill' + active + today + '" data-md="' + h(k) + '">' +
+              h(bstDayLabel(d)) +
+            '</button>';
+          }).join('') +
+        '</div>'
+      : '<div class="totw-mdrow"><span style="font-size:11px;color:var(--text-muted);padding:6px 0;">No fixtures in this division yet.</span></div>';
+
+    $ctrls.innerHTML = '<div class="totw-controls">' + divHtml + mdHtml + '</div>';
+
+    // Wire
+    Array.prototype.forEach.call($ctrls.querySelectorAll('[data-comp]'), function (b) {
+      b.addEventListener('click', function () {
+        state.selectedComp = Number(b.getAttribute('data-comp'));
+        state.selectedMatchday = defaultMatchday();
+        state.expanded = {}; state.activeClub = {}; state.chartMode = {};
+        savePrefsSoon();
+        render();
+      });
+    });
+    Array.prototype.forEach.call($ctrls.querySelectorAll('[data-md]'), function (b) {
+      b.addEventListener('click', function () {
+        state.selectedMatchday = b.getAttribute('data-md');
+        state.expanded = {}; state.activeClub = {};
+        savePrefsSoon();
+        render();
+      });
+    });
+    var active = $ctrls.querySelector('.totw-mdpill.is-active');
+    if (active && active.scrollIntoView) active.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'auto' });
+  }
+
+  /* ============================================================
+     RENDER: summary tiles
+     ============================================================ */
+  function renderSummary() {
+    var matches = matchesForSelected();
+    if (!matches.length) { $summary.innerHTML = ''; return; }
+    var totalVotes = 0, totalNotes = 0, voters = {}, topPlayer = null;
+    matches.forEach(function (m) {
+      var rows = votesForMatch(m.id, null);
+      totalVotes += rows.length;
+      rows.forEach(function (v) {
+        if (v.note) totalNotes++;
+        voters[v.jwtId] = true;
+      });
+      var ranked = rankPlayers(rows);
+      if (ranked.length && (!topPlayer || ranked[0].votes > topPlayer.votes)) {
+        topPlayer = { name: ranked[0].name, teamId: ranked[0].teamId, votes: ranked[0].votes };
+      }
+    });
+    var top = topPlayer
+      ? h(topPlayer.name) + ' <span class="totw-tile__sub">' + h(teamNameFor(topPlayer.teamId)) + ' · ' + topPlayer.votes + ' votes</span>'
+      : '<span style="color:var(--text-muted);font-size:14px;font-weight:700;">No votes yet</span>';
+    $summary.innerHTML =
+      tile('Matches', matches.length, '') +
+      tile('Total votes', totalVotes, '') +
+      tile('Distinct voters', Object.keys(voters).length, '') +
+      tile('Notes left', totalNotes, totalNotes ? Math.round(totalNotes / Math.max(totalVotes, 1) * 100) + '% of votes' : '') +
+      '<div class="totw-tile"><div class="totw-tile__label">Top pick</div><div class="totw-tile__value" style="font-size:16px;line-height:1.3;">' + top + '</div></div>';
+
+    function tile(label, value, sub) {
+      return '<div class="totw-tile">' +
+        '<div class="totw-tile__label">' + h(label) + '</div>' +
+        '<div class="totw-tile__value">' + h(value) + '</div>' +
+        (sub ? '<div class="totw-tile__sub">' + h(sub) + '</div>' : '') +
+      '</div>';
+    }
+  }
+
+  /* ============================================================
+     RENDER: per-match cards
+     ============================================================ */
+  function renderMatches() {
+    var matches = matchesForSelected();
+    if (!matches.length) {
+      $matches.innerHTML = '<div class="totw-empty">No fixtures on this matchday in ' +
+        h(COMPS[state.selectedComp].shortName) + '.</div>';
+      return;
+    }
+    $matches.innerHTML = matches.map(renderCard).join('');
+    wireCards();
+  }
+
+  function renderCard(m) {
+    var a = m.attributes;
+    var ms = matchStateOf(m);
+    var clubFilter = state.activeClub[m.id] || null;
+    var votes = votesForMatch(m.id, clubFilter);
+    var allVotes = clubFilter ? votesForMatch(m.id, null) : votes;
+    var ranked = rankPlayers(votes);
+    var totalForPct = votes.length || 1;
+
+    var homePal = paletteForTeam(a.homeTeam.teamID);
+    var awayPal = paletteForTeam(a.awayTeam.teamID);
+
+    var stateBadge = '';
+    if (ms === 'postponed') stateBadge = '<span class="pill pill--rejected">Postponed</span>';
+    else if (ms === 'abandoned') stateBadge = '<span class="pill pill--rejected">Abandoned</span>';
+    else if (ms === 'live') stateBadge = '<span class="pill pill--live">Live</span>';
+    else if (ms === 'post') stateBadge = '<span class="pill pill--approved">FT</span>';
+    else stateBadge = '<span class="pill pill--soon">' + h(fmtMatchTime(koOf(m))) + '</span>';
+
+    var scoreHtml;
+    if (ms === 'pre') {
+      scoreHtml = '<div class="totw-score is-future">' + h(fmtMatchTime(koOf(m))) + '</div>';
+    } else if (ms === 'postponed' || ms === 'abandoned') {
+      scoreHtml = '<div class="totw-score is-future">—</div>';
+    } else {
+      var hs = (a.homeTeam.score != null) ? a.homeTeam.score : '?';
+      var as = (a.awayTeam.score != null) ? a.awayTeam.score : '?';
+      scoreHtml = '<div class="totw-score">' + h(hs) + ' – ' + h(as) + '</div>';
+    }
+
+    var head =
+      '<div class="totw-card__head">' +
+        '<div class="totw-team">' +
+          (a.homeTeam.crest ? '<img src="' + h(a.homeTeam.crest) + '" alt="" onerror="this.style.visibility=\'hidden\';">' : '') +
+          '<span class="totw-team__name">' + h(a.homeTeam.name || a.homeTeam.shortName) + '</span>' +
+        '</div>' +
+        scoreHtml +
+        '<div class="totw-team totw-team--away">' +
+          '<span class="totw-team__name">' + h(a.awayTeam.name || a.awayTeam.shortName) + '</span>' +
+          (a.awayTeam.crest ? '<img src="' + h(a.awayTeam.crest) + '" alt="" onerror="this.style.visibility=\'hidden\';">' : '') +
+        '</div>' +
+      '</div>';
+
+    var meta =
+      '<div class="totw-card__meta">' +
+        '<div>' + stateBadge + '</div>' +
+        '<div>' + allVotes.length + ' vote' + (allVotes.length === 1 ? '' : 's') +
+        (allVotes.length ? ' · ' + ranked.length + ' player' + (ranked.length === 1 ? '' : 's') + ' picked' : '') +
+        '</div>' +
+      '</div>';
+
+    var body = '';
+    if (!allVotes.length && (ms === 'voting' || ms === 'post' || ms === 'live')) {
+      body = '<div class="totw-empty" style="padding:16px;">No votes recorded for this match.</div>';
+    } else if (!allVotes.length) {
+      body = '<div class="totw-empty" style="padding:16px;">Voting opens 2.5 hours after kick-off.</div>';
+    } else {
+      body = renderCardBody(m, votes, allVotes, ranked, totalForPct, clubFilter, homePal, awayPal);
+    }
+
+    var foot =
+      '<div class="totw-card__foot">' +
+        '<button type="button" class="btn btn--ghost btn--sm" data-copy-match="' + h(m.id) + '">Copy match line</button>' +
+      '</div>';
+
+    var voidCls = (ms === 'postponed' || ms === 'abandoned') ? ' is-void' : '';
+    return '<div class="totw-card' + voidCls + '" data-match="' + h(m.id) + '">' +
+      head + meta + body + foot + '</div>';
+  }
+
+  function renderCardBody(m, votes, allVotes, ranked, totalForPct, clubFilter, homePal, awayPal) {
+    // Voter-club chip strip (top 6 clubs based on ALL votes, not filtered)
+    var fullBreakdown = clubBreakdown(allVotes);
+    var topClubs = fullBreakdown.slice(0, 6);
+    var palForClub = function (name) {
+      // find a matching teamId by name to colour the swatch
+      for (var i = 0; i < state.allMatches.length; i++) {
+        var a = state.allMatches[i].attributes;
+        if ((a.homeTeam.name === name) || (a.homeTeam.shortName === name)) return paletteForTeam(a.homeTeam.teamID);
+        if ((a.awayTeam.name === name) || (a.awayTeam.shortName === name)) return paletteForTeam(a.awayTeam.teamID);
+      }
+      return { primary: 'var(--navy)' };
+    };
+    var chips = topClubs.map(function (c) {
+      var pal = palForClub(c.name);
+      var active = (clubFilter === c.name) ? ' is-active' : '';
+      return '<button type="button" class="totw-clubchip' + active + '" data-club="' + h(c.name) + '" style="--swatch:' + h(pal.primary) + ';">' +
+        '<span class="totw-swatch"></span>' +
+        h(c.name) + ' · ' + c.count +
+      '</button>';
+    }).join('');
+    if (clubFilter) chips += '<button type="button" class="totw-clearfilter" data-clear-club="1">Clear filter</button>';
+    var clubchipsHtml = chips ? '<div class="totw-clubchips">' + chips + '</div>' : '';
+
+    // Chart-mode controls + table/donut
+    var mode = state.chartMode[m.id] || 'bars';
+    var vctrls =
+      '<div class="totw-vctrls">' +
+        '<button type="button" class="totw-vctrl' + (mode === 'bars' ? ' is-active' : '') + '" data-mode="bars">Bars</button>' +
+        '<button type="button" class="totw-vctrl' + (mode === 'donut' ? ' is-active' : '') + '" data-mode="donut">Donut</button>' +
+      '</div>';
+
+    var votesView = (mode === 'donut')
+      ? renderDonutView(m, ranked, votes.length, homePal, awayPal)
+      : renderBarsView(m, ranked, totalForPct, homePal, awayPal);
+
+    return clubchipsHtml + vctrls + votesView;
+  }
+
+  function teamPal(teamId, homePal, awayPal, homeId, awayId) {
+    if (teamId === homeId) return homePal;
+    if (teamId === awayId) return awayPal;
+    return paletteForTeam(teamId);
+  }
+
+  function renderBarsView(m, ranked, totalForPct, homePal, awayPal) {
+    var a = m.attributes;
+    var homeId = a.homeTeam.teamID, awayId = a.awayTeam.teamID;
+    var maxVotes = ranked.length ? ranked[0].votes : 0;
+    var rowsHtml = ranked.slice(0, 12).map(function (p, i) {
+      var pal = teamPal(p.teamId, homePal, awayPal, homeId, awayId);
+      var pct = totalForPct ? Math.round(p.votes / totalForPct * 100) : 0;
+      var barPct = maxVotes ? Math.round(p.votes / maxVotes * 100) : 0;
+      var expanded = (state.expanded[m.id] === p.playerId);
+      var notesBadge = p.notes
+        ? '<span>' + p.notes + '</span>'
+        : '<span class="is-empty">·</span>';
+      var row =
+        '<div class="totw-row' + (expanded ? ' is-expanded' : '') + '" data-player="' + h(p.playerId) + '" style="--bar:' + h(pal.primary) + ';">' +
+          '<div class="totw-row__pos">' + (i + 1) + '</div>' +
+          '<div class="totw-row__name">' +
+            h(p.name) +
+            '<span class="totw-row__team">' + h(teamNameFor(p.teamId)) + '</span>' +
+          '</div>' +
+          '<div class="totw-row__bar"><span style="width:' + barPct + '%;"></span></div>' +
+          '<div class="totw-row__count">' + p.votes + '<em>' + pct + '%</em></div>' +
+          '<div class="totw-row__notebadge">' + notesBadge + '</div>' +
+        '</div>';
+      var drawer = expanded ? renderDrawer(p, homePal, awayPal, homeId, awayId) : '';
+      return row + drawer;
+    }).join('');
+    return '<div class="totw-votes">' + rowsHtml + '</div>';
+  }
+
+  function renderDonutView(m, ranked, total, homePal, awayPal) {
+    var a = m.attributes;
+    var homeId = a.homeTeam.teamID, awayId = a.awayTeam.teamID;
+    if (!total) return '<div class="totw-empty" style="padding:16px;">No votes yet.</div>';
+    // Top 6 explicit, rest grouped "Other"
+    var top = ranked.slice(0, 6);
+    var rest = ranked.slice(6);
+    var restVotes = rest.reduce(function (a, b) { return a + b.votes; }, 0);
+    var segs = top.map(function (p) {
+      return { id: p.playerId, name: p.name, teamId: p.teamId, votes: p.votes, colour: teamPal(p.teamId, homePal, awayPal, homeId, awayId).primary };
+    });
+    if (restVotes) segs.push({ id: '__other', name: 'Other (' + rest.length + ')', votes: restVotes, colour: 'var(--text-muted)' });
+
+    var cx = 90, cy = 90, r = 70, ir = 44;
+    var start = -Math.PI / 2;
+    var paths = segs.map(function (s) {
+      var sweep = s.votes / total * Math.PI * 2;
+      var end = start + sweep;
+      var p = donutPath(cx, cy, r, ir, start, end);
+      start = end;
+      return '<path d="' + p + '" fill="' + s.colour + '"></path>';
+    }).join('');
+
+    var legend = segs.map(function (s) {
+      var pct = Math.round(s.votes / total * 100);
+      var expanded = (state.expanded[m.id] === s.id);
+      var clickable = s.id !== '__other';
+      return '<div class="totw-legend__item' + (expanded ? ' is-expanded' : '') + '"' +
+        (clickable ? ' data-player="' + h(s.id) + '"' : ' style="cursor:default;"') +
+        ' style="--seg:' + h(s.colour) + ';">' +
+        '<span class="totw-legend__swatch"></span>' +
+        '<span class="totw-legend__name">' + h(s.name) + '</span>' +
+        '<span class="totw-legend__count">' + s.votes + '</span>' +
+        '<span class="totw-legend__pct">' + pct + '%</span>' +
+      '</div>';
+    }).join('');
+
+    var expandedDrawer = '';
+    var expandedPid = state.expanded[m.id];
+    if (expandedPid && expandedPid !== '__other') {
+      var p = ranked.filter(function (r) { return r.playerId === expandedPid; })[0];
+      if (p) expandedDrawer = renderDrawer(p, homePal, awayPal, homeId, awayId);
+    }
+
+    return '<div class="totw-donutwrap">' +
+      '<svg class="totw-donut" viewBox="0 0 180 180">' +
+        paths +
+        '<text x="90" y="92" text-anchor="middle" class="totw-donut__centre">' + total + '</text>' +
+        '<text x="90" y="106" text-anchor="middle" class="totw-donut__centre-sub">votes</text>' +
+      '</svg>' +
+      '<div class="totw-legend">' + legend + '</div>' +
+    '</div>' + expandedDrawer;
+  }
+
+  function donutPath(cx, cy, r, ir, startAngle, endAngle) {
+    var sweep = endAngle - startAngle;
+    if (sweep <= 0) return '';
+    var x1 = cx + r * Math.cos(startAngle), y1 = cy + r * Math.sin(startAngle);
+    var x2 = cx + r * Math.cos(endAngle),   y2 = cy + r * Math.sin(endAngle);
+    var ix1 = cx + ir * Math.cos(startAngle), iy1 = cy + ir * Math.sin(startAngle);
+    var ix2 = cx + ir * Math.cos(endAngle),   iy2 = cy + ir * Math.sin(endAngle);
+    var large = sweep > Math.PI ? 1 : 0;
+    // Tiny near-full-circle guard: SVG arcs render as 0-length when start==end.
+    if (sweep > Math.PI * 2 - 0.0001) {
+      // render as a near-full ring by splitting in two
+      return 'M ' + (cx + r) + ' ' + cy +
+        ' A ' + r + ' ' + r + ' 0 1 1 ' + (cx - r) + ' ' + cy +
+        ' A ' + r + ' ' + r + ' 0 1 1 ' + (cx + r) + ' ' + cy +
+        ' M ' + (cx + ir) + ' ' + cy +
+        ' A ' + ir + ' ' + ir + ' 0 1 0 ' + (cx - ir) + ' ' + cy +
+        ' A ' + ir + ' ' + ir + ' 0 1 0 ' + (cx + ir) + ' ' + cy + ' Z';
+    }
+    return 'M ' + x1 + ' ' + y1 +
+      ' A ' + r + ' ' + r + ' 0 ' + large + ' 1 ' + x2 + ' ' + y2 +
+      ' L ' + ix2 + ' ' + iy2 +
+      ' A ' + ir + ' ' + ir + ' 0 ' + large + ' 0 ' + ix1 + ' ' + iy1 +
+      ' Z';
+  }
+
+  /* ============================================================
+     RENDER: player drawer (voter-club drill + notes)
+     ============================================================ */
+  function renderDrawer(player, homePal, awayPal, homeId, awayId) {
+    var clubsArr = Object.keys(player.voterClubs).map(function (k) {
+      return { name: k, count: player.voterClubs[k] };
+    }).sort(function (a, b) { return b.count - a.count || a.name.localeCompare(b.name); });
+    var maxC = clubsArr.length ? clubsArr[0].count : 0;
+    var drillHtml = clubsArr.map(function (c) {
+      var pal = palForClub(c.name);
+      var pct = maxC ? Math.round(c.count / maxC * 100) : 0;
+      return '<div class="totw-drillrow" style="--seg:' + h(pal.primary) + ';">' +
+        '<span class="totw-drillrow__sw"></span>' +
+        '<span class="totw-drillrow__name">' + h(c.name) + '</span>' +
+        '<div class="totw-drillrow__bar"><span style="width:' + pct + '%;"></span></div>' +
+        '<div class="totw-drillrow__count">' + c.count + '</div>' +
+      '</div>';
+    }).join('');
+
+    var notesHtml = '';
+    if (state.canSeeNotes) {
+      if (player.notesList.length) {
+        var items = player.notesList.sort(function (a, b) { return (b.submittedAt || 0) - (a.submittedAt || 0); })
+          .map(renderNote).join('');
+        notesHtml =
+          '<div class="totw-notes">' +
+            '<div class="totw-noteshead"><h4>Notes (' + player.notesList.length + ')</h4>' +
+              '<span class="pill pill--info">Admin tier</span>' +
+            '</div>' +
+            items +
+          '</div>';
+      } else {
+        notesHtml =
+          '<div class="totw-notes">' +
+            '<div class="totw-noteshead"><h4>Notes</h4></div>' +
+            '<div class="totw-notes--locked" style="border-style:solid;">No fan left a note for this player.</div>' +
+          '</div>';
+      }
+    } else if (player.notesList.length) {
+      notesHtml =
+        '<div class="totw-notes">' +
+          '<div class="totw-noteshead"><h4>Notes (' + player.notesList.length + ')</h4></div>' +
+          '<div class="totw-notes--locked">Notes are visible to <b>admin tier</b> only.</div>' +
+        '</div>';
+    }
+
+    return '<div class="totw-drawer">' +
+      '<h5 class="totw-drawer__title">Picked by</h5>' +
+      '<div class="totw-drillbars">' + drillHtml + '</div>' +
+      notesHtml +
+    '</div>';
+
+    function palForClub(name) {
+      for (var i = 0; i < state.allMatches.length; i++) {
+        var a = state.allMatches[i].attributes;
+        if (a.homeTeam.name === name || a.homeTeam.shortName === name) return paletteForTeam(a.homeTeam.teamID);
+        if (a.awayTeam.name === name || a.awayTeam.shortName === name) return paletteForTeam(a.awayTeam.teamID);
+      }
+      return { primary: 'var(--navy)' };
+    }
+  }
+
+  function renderNote(v) {
+    var voter = v.voter || {};
+    var name = ((voter.forename || '') + ' ' + (voter.surnameInitial || '')).trim();
+    if (voter.surnameInitial) name += '.';
+    if (!name) name = '(name not on record)';
+    var email = voter.email || '';
+    var club = v.voterTeamName || '';
+    var stamp = v.submittedAt ? new Date(v.submittedAt).toLocaleString('en-GB', { timeZone: 'Europe/London', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+    return '<div class="totw-note">' +
+      '<div class="totw-note__quote">"' + h(v.note) + '"</div>' +
+      '<div class="totw-note__attrib">' +
+        '<b>' + h(name) + '</b>' +
+        '<span>· ' + h(club) + ' fan</span>' +
+        (email ? '<span>· ' + h(email) + '</span>' : '') +
+        (stamp ? '<span>· ' + h(stamp) + '</span>' : '') +
+        '<button type="button" class="totw-note__copy" data-copy-note="' + h(encodeURIComponent(v.note + ' — ' + name + ' (' + club + ' fan)')) + '">Copy</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  /* ============================================================
+     EVENT WIRING
+     ============================================================ */
+  function wireCards() {
+    Array.prototype.forEach.call($matches.querySelectorAll('[data-mode]'), function (b) {
+      b.addEventListener('click', function () {
+        var card = b.closest('.totw-card');
+        var mid = card && card.getAttribute('data-match'); if (!mid) return;
+        state.chartMode[mid] = b.getAttribute('data-mode');
+        state.expanded[mid] = null;
+        renderMatches();
+      });
+    });
+    Array.prototype.forEach.call($matches.querySelectorAll('[data-club]'), function (b) {
+      b.addEventListener('click', function () {
+        var card = b.closest('.totw-card');
+        var mid = card && card.getAttribute('data-match'); if (!mid) return;
+        var c = b.getAttribute('data-club');
+        state.activeClub[mid] = (state.activeClub[mid] === c) ? null : c;
+        state.expanded[mid] = null;
+        renderMatches();
+      });
+    });
+    Array.prototype.forEach.call($matches.querySelectorAll('[data-clear-club]'), function (b) {
+      b.addEventListener('click', function () {
+        var card = b.closest('.totw-card');
+        var mid = card && card.getAttribute('data-match'); if (!mid) return;
+        state.activeClub[mid] = null;
+        state.expanded[mid] = null;
+        renderMatches();
+      });
+    });
+    Array.prototype.forEach.call($matches.querySelectorAll('[data-player]'), function (b) {
+      b.addEventListener('click', function () {
+        var card = b.closest('.totw-card');
+        var mid = card && card.getAttribute('data-match'); if (!mid) return;
+        var pid = b.getAttribute('data-player');
+        state.expanded[mid] = (state.expanded[mid] === pid) ? null : pid;
+        renderMatches();
+      });
+    });
+    Array.prototype.forEach.call($matches.querySelectorAll('[data-copy-match]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var mid = b.getAttribute('data-copy-match');
+        copy(matchLineFor(mid));
+      });
+    });
+    Array.prototype.forEach.call($matches.querySelectorAll('[data-copy-note]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        try { copy(decodeURIComponent(b.getAttribute('data-copy-note'))); } catch (err) {}
+      });
+    });
+  }
+
+  /* ============================================================
+     RENDER: page footer actions
+     ============================================================ */
+  function renderActions() {
+    var matches = matchesForSelected();
+    if (!matches.length) { $actions.innerHTML = ''; return; }
+    $actions.innerHTML =
+      '<button type="button" class="btn btn--ghost btn--sm" id="totw-copy-md">Copy roundup (Markdown)</button>' +
+      '<button type="button" class="btn btn--ghost btn--sm" id="totw-copy-tsv">Copy roundup (TSV)</button>' +
+      '<button type="button" class="btn btn--navy btn--sm" id="totw-export-csv">Export CSV</button>';
+    document.getElementById('totw-copy-md').addEventListener('click', function () { copy(buildRoundupMarkdown()); });
+    document.getElementById('totw-copy-tsv').addEventListener('click', function () { copy(buildRoundupTsv()); });
+    document.getElementById('totw-export-csv').addEventListener('click', function () { downloadCsv(); });
+  }
+
+  /* ============================================================
+     EXPORT BUILDERS
+     ============================================================ */
+  function matchLineFor(mid) {
+    var m = state.allMatches.filter(function (x) { return x.id === mid; })[0];
+    if (!m) return '';
+    var a = m.attributes;
+    var rows = votesForMatch(mid, null);
+    var ranked = rankPlayers(rows);
+    var top = ranked[0];
+    var score = (a.homeTeam.score != null && a.awayTeam.score != null) ? (a.homeTeam.score + '-' + a.awayTeam.score) : 'vs';
+    var head = a.homeTeam.shortName + ' ' + score + ' ' + a.awayTeam.shortName;
+    if (!top) return head + '\tno votes';
+    return [head, top.name, top.votes, ranked.length + ' players', rows.length + ' votes'].join('\t');
+  }
+  function buildRoundupMarkdown() {
+    var matches = matchesForSelected();
+    var lines = [];
+    lines.push('## ' + COMPS[state.selectedComp].shortName + ' — ' + state.selectedMatchday);
+    lines.push('');
+    matches.forEach(function (m) {
+      var a = m.attributes;
+      var rows = votesForMatch(m.id, null);
+      var ranked = rankPlayers(rows);
+      var score = (a.homeTeam.score != null && a.awayTeam.score != null) ? (a.homeTeam.score + '-' + a.awayTeam.score) : 'vs';
+      lines.push('**' + a.homeTeam.name + ' ' + score + ' ' + a.awayTeam.name + '**');
+      if (!ranked.length) { lines.push('- No votes.'); lines.push(''); return; }
+      ranked.slice(0, 3).forEach(function (p, i) {
+        var pct = rows.length ? Math.round(p.votes / rows.length * 100) : 0;
+        lines.push('- ' + (i + 1) + '. **' + p.name + '** (' + teamNameFor(p.teamId) + ') — ' + p.votes + ' votes (' + pct + '%)');
+      });
+      if (state.canSeeNotes) {
+        var notes = rows.filter(function (r) { return r.note; });
+        if (notes.length) {
+          lines.push('  - Notes:');
+          notes.slice(0, 5).forEach(function (v) {
+            var voter = v.voter || {};
+            var name = ((voter.forename || '') + ' ' + (voter.surnameInitial || '')).trim();
+            if (voter.surnameInitial) name += '.';
+            lines.push('    - "' + v.note + '" — ' + name + ' (' + v.voterTeamName + ' fan)');
+          });
+        }
+      }
+      lines.push('');
+    });
+    return lines.join('\n');
+  }
+  function buildRoundupTsv() {
+    var matches = matchesForSelected();
+    var head = ['Match', 'Top player', 'Team', 'Votes', '% share', 'Notes', 'Distinct players'].join('\t');
+    var rows = [head];
+    matches.forEach(function (m) {
+      var a = m.attributes;
+      var votes = votesForMatch(m.id, null);
+      var ranked = rankPlayers(votes);
+      var top = ranked[0];
+      var score = (a.homeTeam.score != null && a.awayTeam.score != null) ? (a.homeTeam.score + '-' + a.awayTeam.score) : 'vs';
+      var label = a.homeTeam.shortName + ' ' + score + ' ' + a.awayTeam.shortName;
+      if (!top) { rows.push([label, '', '', 0, '', 0, 0].join('\t')); return; }
+      var pct = votes.length ? Math.round(top.votes / votes.length * 100) + '%' : '';
+      rows.push([label, top.name, teamNameFor(top.teamId), top.votes, pct, ranked.reduce(function (a, b) { return a + b.notes; }, 0), ranked.length].join('\t'));
+    });
+    return rows.join('\n');
+  }
+  function csvCell(v) {
+    var s = String(v == null ? '' : v);
+    if (s.indexOf(',') !== -1 || s.indexOf('"') !== -1 || s.indexOf('\n') !== -1) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }
+  function downloadCsv() {
+    var matches = matchesForSelected();
+    var headers = ['matchId', 'match', 'player', 'playerTeam', 'voterName', 'voterEmail', 'voterClub', 'note', 'submittedAt'];
+    var lines = [headers.join(',')];
+    matches.forEach(function (m) {
+      var a = m.attributes;
+      var score = (a.homeTeam.score != null && a.awayTeam.score != null) ? (a.homeTeam.score + '-' + a.awayTeam.score) : 'vs';
+      var label = a.homeTeam.shortName + ' ' + score + ' ' + a.awayTeam.shortName;
+      var rows = votesForMatch(m.id, null);
+      rows.forEach(function (v) {
+        var voter = v.voter || {};
+        var name = ((voter.forename || '') + ' ' + (voter.surnameInitial || '')).trim();
+        if (voter.surnameInitial) name += '.';
+        var note = state.canSeeNotes ? v.note : (v.note ? '[admin-only]' : '');
+        var stamp = v.submittedAt ? new Date(v.submittedAt).toISOString() : '';
+        lines.push([
+          csvCell(m.id), csvCell(label), csvCell(v.playerName),
+          csvCell(teamNameFor(v.teamId)), csvCell(name),
+          csvCell(state.canSeeNotes ? (voter.email || '') : ''),
+          csvCell(v.voterTeamName), csvCell(note), csvCell(stamp)
+        ].join(','));
+      });
+    });
+    var csv = lines.join('\n');
+    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'totw-' + COMPS[state.selectedComp].shortName.toLowerCase() + '-' + state.selectedMatchday + '.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
+  /* ============================================================
+     MAIN RENDER
+     ============================================================ */
+  function render() {
+    renderControls();
+    renderSummary();
+    renderMatches();
+    renderActions();
+  }
+
+  /* ============================================================
+     BOOT
+     ============================================================ */
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function (session) {
+    state.session = session;
+    state.canSeeNotes = (resolveLevel(session) === 'admin');
+    renderRolebar();
+    showBanner('Loading fan votes…');
+
+    // 1. Ensure nl-tools auth (for prefs writes). Then 2. init nl-widgets app
+    // and anonymous-auth. Then 3. parallel: fetch fixtures + clubs meta +
+    // fan data. Then 4. apply prefs → render.
+    var ensure = (window.NL && NL.ensureAuth) ? NL.ensureAuth() : Promise.resolve();
+    ensure
+      .then(function () { return initWidgetsApp(); })
+      .then(function () {
+        return Promise.all([
+          fetchAllFixtures().then(function (ms) { state.allMatches = ms; }),
+          loadClubsMeta(),
+          loadFanData(),
+          loadPrefs()
+        ]).then(function (results) {
+          var prefs = results[3];
+          if (prefs && prefs.compId && COMPS[prefs.compId]) state.selectedComp = prefs.compId;
+          state.selectedMatchday = (prefs && prefs.matchday) || defaultMatchday();
+          if (!state.selectedMatchday) state.selectedMatchday = defaultMatchday();
+        });
+      })
+      .then(function () {
+        state.loaded = true;
+        hideBanner();
+        render();
+        if (window.NL && NL.writeAudit) {
+          NL.writeAudit('totw_opened', COMPS[state.selectedComp].shortName + ' / ' + (state.selectedMatchday || '—'));
+        }
+      })
+      .catch(function (err) {
+        showBanner('Could not load fan data: ' + (err && err.message ? err.message : err), 'err');
+        // eslint-disable-next-line no-console
+        console.error('[team-of-the-week] boot failed', err);
+      });
+  };
+
   if (window._toolDeferredSession) {
     window.TOOL.boot(window._toolDeferredSession);
     delete window._toolDeferredSession;
