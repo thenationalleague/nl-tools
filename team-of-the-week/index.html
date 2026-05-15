@@ -58,6 +58,17 @@
     window.NL_CHANGELOG = [
       {
         date: '15/05/2026',
+        version: 'v0.9',
+        items: [
+          'Fix (real): the active class on every .tab in the tool was being set as ".is-active" while nl-brand.css expects ".active". So the active class was getting applied but having no visual effect — that\'s why no division was ever highlighted, view toggle didn\'t mark Cards/List, main tabs didn\'t mark the current tab, etc. Swapped every "is-active" on .tab elements to "active". (My own .totw-mdpill and .totw-clubchip classes keep "is-active" because they have matching custom CSS.)',
+          'List view is now the default (was Cards) — denser and faster to scan, which is what you want by default on a busy matchday.',
+          'Dropped the division-code prefix on matchday pills when the All filter is on — it was noise more than signal.',
+          'In By Club view and single-division Matchday view, the division subtitle under each match card now hides — you already picked the scope, so the "National" line was redundant clutter. Only shows on the All-filter Matchday view (where matches are genuinely mixed).',
+          'Boot UX: renders the page shell (tabs + filter row) immediately, with a brand .loading-row + spinner in the matches area, instead of a blank panel until all fetches resolve. Page feels alive from the first paint.'
+        ]
+      },
+      {
+        date: '15/05/2026',
         version: 'v0.8',
         items: [
           'Fix: division switcher could hang/crash on mobile because state.selectedComp was occasionally a stringified number (from a stale prefs payload). This made === comparisons fail across matchInComp, the active-tab check, and a couple of other places — the visible symptoms being "no division highlighted" and an empty matchday list. Now normalised to a number on prefs load, and the active-class check compares via String() on both sides as belt-and-braces.',
@@ -513,7 +524,7 @@
     allVotes: {},
     clubsByOpta: {},
     activeTab: 'matchday',     // 'matchday' | 'byclub' | 'season'
-    viewMode: 'cards',         // matchday view: 'cards' | 'list'
+    viewMode: 'list',          // matchday view: 'cards' | 'list' (list is the default — denser, faster to scan)
     selectedComp: DEFAULT_COMP_ID,  // numeric comp id, or 'all'
     selectedMatchday: null,
     selectedClub: null,        // teamId — for By Club tab
@@ -909,7 +920,8 @@
   ];
   function renderMaintabs() {
     $maintabs.innerHTML = TABS.map(function (t) {
-      var active = (t.id === state.activeTab) ? ' is-active' : '';
+      /* Brand .tab modifier is `.active` (not `.is-active`). */
+      var active = (t.id === state.activeTab) ? ' active' : '';
       return '<button type="button" class="tab' + active + '" data-tab="' + h(t.id) + '">' + h(t.label) + '</button>';
     }).join('');
     Array.prototype.forEach.call($maintabs.querySelectorAll('[data-tab]'), function (b) {
@@ -940,7 +952,7 @@
              selectedComp (e.g. from a stale prefs payload) still
              matches the numeric COMP_IDS — defence in depth on top of
              the boot-time normalisation. */
-          var active = (String(state.selectedComp) === String(item.id)) ? ' is-active' : '';
+          var active = (String(state.selectedComp) === String(item.id)) ? ' active' : '';
           return '<button type="button" class="tab' + active + '" data-comp="' + h(String(item.id)) + '">' + h(item.label) + '</button>';
         }).join('') +
       '</div>';
@@ -963,8 +975,8 @@
     if (state.activeTab === 'matchday') {
       viewToggle =
         '<div class="tabs totw-viewtoggle" style="margin-left:auto;">' +
-          '<button type="button" class="tab' + (state.viewMode === 'cards' ? ' is-active' : '') + '" data-view="cards">Cards</button>' +
-          '<button type="button" class="tab' + (state.viewMode === 'list'  ? ' is-active' : '') + '" data-view="list">List</button>' +
+          '<button type="button" class="tab' + (state.viewMode === 'cards' ? ' active' : '') + '" data-view="cards">Cards</button>' +
+          '<button type="button" class="tab' + (state.viewMode === 'list'  ? ' active' : '') + '" data-view="list">List</button>' +
         '</div>';
     }
 
@@ -1005,37 +1017,14 @@
       $mdrow.innerHTML = '<div class="totw-mdrow"><span class="text-secondary" style="padding:6px 0;">No fixtures in this division yet.</span></div>';
       return;
     }
-    /* When the All filter is on we tag each pill with a division code.
-       Pre-compute the date → divisions map ONCE per render — was being
-       computed per pill via matchdayDivisions(), which is O(matches)
-       per call. With ~40 matchdays × 500 matches that's a 20k-iteration
-       hang on click. Single O(matches) pass now, then O(1) per pill. */
-    var divsByDay = null;
-    if (state.selectedComp === 'all') {
-      divsByDay = {};
-      state.allMatches.forEach(function (m) {
-        var k = bstDateOf(koOf(m));
-        if (!k) return;
-        var short = COMPS[m.attributes.competitionID] ? COMPS[m.attributes.competitionID].shortName : '';
-        if (!short) return;
-        if (!divsByDay[k]) divsByDay[k] = {};
-        divsByDay[k][short] = true;
-      });
-    }
     $mdrow.innerHTML =
       '<div class="totw-mdrow">' +
         keys.map(function (k) {
           var active = (k === state.selectedMatchday) ? ' is-active' : '';
           var today  = (k === todayKey) ? ' is-today' : '';
           var d = new Date(k + 'T12:00:00Z');
-          var divPrefix = '';
-          if (divsByDay) {
-            var dks = Object.keys(divsByDay[k] || {});
-            if (dks.length === 1) divPrefix = '<span class="totw-mdpill__div">' + h(dks[0]) + '</span>';
-            /* Multi-division days get no prefix — it's a true cross-league date. */
-          }
           return '<button type="button" class="totw-mdpill' + active + today + '" data-md="' + h(k) + '">' +
-            divPrefix + h(bstDayLabel(d)) +
+            h(bstDayLabel(d)) +
           '</button>';
         }).join('') +
       '</div>';
@@ -1267,7 +1256,13 @@
     /* One-line summary: match label, score, top pick, vote/note counts.
        Click anywhere on it to expand the full detail panel beneath. */
     var match = (a.homeTeam.shortName || a.homeTeam.name || '') + ' v ' + (a.awayTeam.shortName || a.awayTeam.name || '');
-    var divCode = COMPS[a.competitionID] ? COMPS[a.competitionID].shortName : '';
+    /* Show the division code under the match name only when it carries
+       new information — i.e. on the matchday tab when All is selected
+       (mixed-division view). Hidden on a single-division view (you
+       already picked the division) and on By Club (you picked the
+       club, so its division is implicit). */
+    var showDivCode = (state.activeTab === 'matchday' && state.selectedComp === 'all');
+    var divCode = (showDivCode && COMPS[a.competitionID]) ? COMPS[a.competitionID].shortName : '';
 
     var scoreHtml;
     if (ms === 'pre') {
@@ -1364,8 +1359,8 @@
     var vctrls =
       '<div class="totw-charttabs-row">' +
         '<div class="tabs totw-charttabs">' +
-          '<button type="button" class="tab' + (mode === 'bars' ? ' is-active' : '') + '" data-mode="bars">Bars</button>' +
-          '<button type="button" class="tab' + (mode === 'donut' ? ' is-active' : '') + '" data-mode="donut">Donut</button>' +
+          '<button type="button" class="tab' + (mode === 'bars' ? ' active' : '') + '" data-mode="bars">Bars</button>' +
+          '<button type="button" class="tab' + (mode === 'donut' ? ' active' : '') + '" data-mode="donut">Donut</button>' +
         '</div>' +
       '</div>';
 
@@ -2076,15 +2071,29 @@
   /* ============================================================
      BOOT
      ============================================================ */
+  /* Render an inline loader (brand .loading-row + .spinner) while the
+     boot fetches resolve. Replaces any previous content of $matches. */
+  function showLoading(msg) {
+    if (!$matches) return;
+    $matches.innerHTML =
+      '<div class="loading-row" style="padding: 32px 16px; justify-content: center;">' +
+        '<span class="spinner"></span>' +
+        '<span>' + h(msg || 'Loading fan votes…') + '</span>' +
+      '</div>';
+  }
+
   window.TOOL = window.TOOL || {};
   window.TOOL.boot = function (session) {
     state.session = session;
     state.canSeeNotes = (resolveLevel(session) === 'admin');
-    showBanner('Loading fan votes…');
 
-    // 1. Ensure nl-tools auth (for prefs writes). Then 2. init nl-widgets app
-    // and anonymous-auth. Then 3. parallel: fetch fixtures + clubs meta +
-    // fan data. Then 4. apply prefs → render.
+    /* Render the shell (tabs + filter row + matchday strip) IMMEDIATELY
+       so the page feels responsive while fetches run. Put a spinner in
+       the matches slot. Full render() runs once data is in. */
+    renderMaintabs();
+    renderFilters();
+    showLoading('Loading fan votes…');
+
     var ensure = (window.NL && NL.ensureAuth) ? NL.ensureAuth() : Promise.resolve();
     ensure
       .then(function () { return initWidgetsApp(); })
