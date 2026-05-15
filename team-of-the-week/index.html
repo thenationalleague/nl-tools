@@ -58,6 +58,15 @@
     window.NL_CHANGELOG = [
       {
         date: '15/05/2026',
+        version: 'v0.6',
+        items: [
+          'By Club tab built: pick a club from a division-grouped picker, see season totals (matches played, votes cast, notes left, most-voted player across their fixtures) and every match they played as a collapsed card. Click any match to drill into bars / donut / voter-club / notes.',
+          'Season tab built: top 50 players in the selected division by total MOTM votes this season, with notes and match counts. Includes season-wide stat tiles. Honours the All filter and the Notes only toggle.',
+          'Both new tabs share the same collapsed-card rendering and click-to-expand mechanism as the Matchday tab via a new wireCardsIn(root) helper.'
+        ]
+      },
+      {
+        date: '15/05/2026',
         version: 'v0.5',
         items: [
           'Restructured around three main tabs: Matchday / By Club / Season (last two are placeholders in this commit — full builds next).',
@@ -1434,24 +1443,330 @@
     }
   }
 
-  /* By Club + Season are stubs in this commit; the next commit adds the
-     real implementations. Showing a friendly placeholder so the tabs
-     are wired and clickable but flag what's coming. */
-  function renderByClub() {
-    $tabByClub.innerHTML =
-      '<div class="empty-state">' +
-        '<div class="empty-state__icon">🏟️</div>' +
-        '<div class="empty-state__title">By Club view — coming in the next commit</div>' +
-        '<div class="empty-state__text">Pick a club to see every match they\'ve played this season with the vote totals for each.</div>' +
-      '</div>';
+  /* ============================================================
+     DERIVED helpers for By Club + Season tabs
+     ============================================================ */
+  /* All clubs that have played a fixture this season, grouped by
+     division. Source of truth is the fixtures list (not clubs-meta)
+     so the picker always matches the real season set. */
+  function allClubsCatalogue() {
+    var seen = {};
+    state.allMatches.forEach(function (m) {
+      var a = m.attributes;
+      [a.homeTeam, a.awayTeam].forEach(function (t) {
+        if (!t || !t.teamID) return;
+        if (!seen[t.teamID]) {
+          seen[t.teamID] = {
+            teamId: t.teamID,
+            name: t.name || t.shortName || t.teamID,
+            shortName: t.shortName,
+            divisionId: a.competitionID,
+            divisionShort: COMPS[a.competitionID] ? COMPS[a.competitionID].shortName : '?'
+          };
+        }
+      });
+    });
+    return Object.keys(seen).map(function (k) { return seen[k]; })
+      .sort(function (a, b) {
+        var di = (a.divisionId || 0) - (b.divisionId || 0);
+        if (di) return di;
+        return a.name.localeCompare(b.name);
+      });
   }
-  function renderSeason() {
-    $tabSeason.innerHTML =
-      '<div class="empty-state">' +
-        '<div class="empty-state__icon">📈</div>' +
-        '<div class="empty-state__title">Season leaderboard — coming in the next commit</div>' +
-        '<div class="empty-state__text">Top voted players across the whole season in the selected division.</div>' +
+  /* Every match where the given club played, sorted most-recent first. */
+  function matchesForClub(teamId) {
+    return state.allMatches.filter(function (m) {
+      var a = m.attributes;
+      return (a.homeTeam && a.homeTeam.teamID === teamId) ||
+             (a.awayTeam && a.awayTeam.teamID === teamId);
+    }).sort(function (a, b) {
+      return (b.attributes.kickOffDateUTC || '').localeCompare(a.attributes.kickOffDateUTC || '');
+    });
+  }
+  /* Season-wide player aggregation, filtered by comp (or 'all'). */
+  function seasonPlayerRanks() {
+    var byPlayer = {};
+    state.allMatches.forEach(function (m) {
+      if (!matchInComp(m)) return;
+      var mid = m.id;
+      var voters = state.allVotes || {};
+      Object.keys(voters).forEach(function (jwtId) {
+        var v = voters[jwtId] && voters[jwtId][mid];
+        if (!v || !v.playerId) return;
+        var k = v.playerId;
+        if (!byPlayer[k]) byPlayer[k] = { playerId: k, name: v.playerName || k, teamId: v.teamId, votes: 0, notes: 0, matches: {} };
+        byPlayer[k].votes += 1;
+        if (v.note) byPlayer[k].notes += 1;
+        byPlayer[k].matches[mid] = true;
+      });
+    });
+    return Object.keys(byPlayer).map(function (k) {
+      var p = byPlayer[k];
+      p.matchCount = Object.keys(p.matches).length;
+      return p;
+    }).sort(function (a, b) {
+      return b.votes - a.votes || b.notes - a.notes || a.name.localeCompare(b.name);
+    });
+  }
+
+  /* ============================================================
+     RENDER: By Club tab
+     ============================================================ */
+  function renderByClub() {
+    var catalogue = allClubsCatalogue();
+    if (!catalogue.length) {
+      $tabByClub.innerHTML = '<div class="empty-state"><div class="empty-state__icon">⏳</div><div class="empty-state__title">No fixtures loaded yet</div></div>';
+      return;
+    }
+
+    /* Group catalogue by division for the optgroup'd select. */
+    var byDiv = {};
+    catalogue.forEach(function (c) {
+      (byDiv[c.divisionShort] = byDiv[c.divisionShort] || []).push(c);
+    });
+
+    var picker =
+      '<div class="form-group" style="max-width: 360px; margin-bottom: 18px;">' +
+        '<label for="totw-club-select">Pick a club</label>' +
+        '<select id="totw-club-select">' +
+          '<option value="">— select a club —</option>' +
+          ['National', 'North', 'South'].filter(function (d) { return byDiv[d]; }).map(function (d) {
+            return '<optgroup label="' + h(d) + ' Division">' +
+              byDiv[d].map(function (c) {
+                var sel = (state.selectedClub === c.teamId) ? ' selected' : '';
+                return '<option value="' + h(c.teamId) + '"' + sel + '>' + h(c.name) + '</option>';
+              }).join('') +
+            '</optgroup>';
+          }).join('') +
+        '</select>' +
       '</div>';
+
+    var body = '';
+    if (!state.selectedClub) {
+      body =
+        '<div class="empty-state">' +
+          '<div class="empty-state__icon">🏟️</div>' +
+          '<div class="empty-state__title">Pick a club above</div>' +
+          '<div class="empty-state__text">You\'ll see every match that club played this season, with the MOTM votes per match.</div>' +
+        '</div>';
+    } else {
+      var club = catalogue.filter(function (c) { return c.teamId === state.selectedClub; })[0];
+      var clubName = club ? club.name : state.selectedClub;
+      var clubDiv  = club ? club.divisionShort : '';
+      var ms = matchesForClub(state.selectedClub);
+
+      /* Aggregate season totals across this club's matches. */
+      var totalVotes = 0, totalNotes = 0, mostVotes = null;
+      ms.forEach(function (m) {
+        var rows = votesForMatch(m.id, null);
+        totalVotes += rows.length;
+        rows.forEach(function (v) { if (v.note) totalNotes++; });
+        var ranked = rankPlayers(rows);
+        if (ranked.length && (!mostVotes || ranked[0].votes > mostVotes.votes)) {
+          mostVotes = { name: ranked[0].name, teamId: ranked[0].teamId, votes: ranked[0].votes };
+        }
+      });
+
+      var topInner = mostVotes
+        ? '<div class="totw-toppick">' + h(mostVotes.name) +
+            '<small>' + h(teamNameFor(mostVotes.teamId)) + ' · ' + mostVotes.votes + ' vote' + (mostVotes.votes === 1 ? '' : 's') + '</small>' +
+          '</div>'
+        : '<div class="totw-toppick" style="color:var(--text-muted);">No votes yet</div>';
+
+      /* Notes-only filter: only show matches with at least one note. */
+      var shown = state.notesOnly
+        ? ms.filter(function (m) {
+            return votesForMatch(m.id, null).some(function (v) { return !!v.note; });
+          })
+        : ms;
+
+      var stats =
+        '<div class="stats" style="margin-bottom: 18px;">' +
+          '<div class="stat"><div class="stat__num">' + ms.length + '</div><div class="stat__label">Matches played</div></div>' +
+          '<div class="stat"><div class="stat__num">' + totalVotes + '</div><div class="stat__label">Votes cast across them</div></div>' +
+          '<div class="stat"><div class="stat__num">' + totalNotes + '</div><div class="stat__label">Notes left</div></div>' +
+          '<div class="stat">' +
+            '<div class="stat__label">Most voted across the season</div>' + topInner +
+          '</div>' +
+        '</div>';
+
+      var heading =
+        '<h2 class="text-heading" style="margin: 0 0 10px;">' + h(clubName) + ' · ' + h(clubDiv) + ' Division</h2>' +
+        '<p class="text-secondary" style="margin: 0 0 14px;">' + ms.length + ' fixture' + (ms.length === 1 ? '' : 's') + ' this season, sorted most recent first.</p>';
+
+      var listHtml;
+      if (!shown.length) {
+        if (state.notesOnly) {
+          listHtml =
+            '<div class="empty-state">' +
+              '<div class="empty-state__icon">📝</div>' +
+              '<div class="empty-state__title">No notes on any of this club\'s matches</div>' +
+              '<div class="empty-state__text">Untoggle "Notes only" to see every match regardless.</div>' +
+            '</div>';
+        } else {
+          listHtml = '<div class="totw-noresults">No matches found for this club.</div>';
+        }
+      } else {
+        listHtml = '<div class="totw-matches">' + shown.map(renderCard).join('') + '</div>';
+      }
+
+      body = heading + stats + listHtml;
+    }
+
+    $tabByClub.innerHTML = picker + body;
+
+    /* Wire picker + card expansions. wireCards uses $matches by default,
+       but here the cards live under $tabByClub — re-implement the
+       click-to-expand handler locally for this scope. */
+    var sel = document.getElementById('totw-club-select');
+    if (sel) sel.addEventListener('change', function () {
+      state.selectedClub = sel.value || null;
+      state.expanded = {}; state.expandedMatch = {}; state.activeClub = {}; state.chartMode = {};
+      savePrefsSoon();
+      render();
+    });
+    wireCardsIn($tabByClub);
+  }
+
+  /* ============================================================
+     RENDER: Season tab
+     ============================================================ */
+  function renderSeason() {
+    var ranked = seasonPlayerRanks();
+    if (state.notesOnly) ranked = ranked.filter(function (p) { return p.notes > 0; });
+
+    var divLbl = (state.selectedComp === 'all') ? 'all three divisions' : (COMPS[state.selectedComp] ? COMPS[state.selectedComp].name : '');
+    var totalVotes = ranked.reduce(function (a, p) { return a + p.votes; }, 0);
+    var totalNotes = ranked.reduce(function (a, p) { return a + p.notes; }, 0);
+
+    if (!ranked.length) {
+      $tabSeason.innerHTML =
+        '<p class="text-secondary" style="margin: 0 0 14px;">' + h(divLbl[0].toUpperCase() + divLbl.slice(1)) + '.</p>' +
+        '<div class="empty-state">' +
+          '<div class="empty-state__icon">📈</div>' +
+          '<div class="empty-state__title">' + (state.notesOnly ? 'No notes anywhere this season yet' : 'No votes in this division yet') + '</div>' +
+          '<div class="empty-state__text">' + (state.notesOnly ? 'Untoggle "Notes only" to see all voted players.' : 'Switch division or wait for matches to be voted on.') + '</div>' +
+        '</div>';
+      return;
+    }
+
+    var stats =
+      '<div class="stats" style="margin-bottom: 18px;">' +
+        '<div class="stat"><div class="stat__num">' + ranked.length + '</div><div class="stat__label">Players voted for</div></div>' +
+        '<div class="stat"><div class="stat__num">' + totalVotes + '</div><div class="stat__label">Total votes</div></div>' +
+        '<div class="stat"><div class="stat__num">' + totalNotes + '</div><div class="stat__label">Total notes</div></div>' +
+        '<div class="stat">' +
+          '<div class="stat__label">Season leader</div>' +
+          '<div class="totw-toppick">' + h(ranked[0].name) + '<small>' + h(teamNameFor(ranked[0].teamId)) + ' · ' + ranked[0].votes + ' vote' + (ranked[0].votes === 1 ? '' : 's') + '</small></div>' +
+        '</div>' +
+      '</div>';
+
+    /* Top 50 keeps the render fast and the table scannable; if you ever
+       have a long-tail division where >50 distinct players got votes,
+       the rest are aggregated into a footnote. */
+    var TOP_N = 50;
+    var top = ranked.slice(0, TOP_N);
+    var rest = ranked.slice(TOP_N);
+
+    var rows = top.map(function (p, i) {
+      var notesBadge = p.notes
+        ? '<span class="pill pill--soon" style="font-size: var(--text-xs); padding: 2px 8px;">' + p.notes + '</span>'
+        : '<span style="color: var(--text-muted);">—</span>';
+      return '<tr>' +
+        '<td style="text-align:center; color: var(--text-muted); font-weight: 800;">' + (i + 1) + '</td>' +
+        '<td><strong>' + h(p.name) + '</strong></td>' +
+        '<td>' + h(teamNameFor(p.teamId)) + '</td>' +
+        '<td style="text-align:right; font-weight: 900; font-variation-settings: \'wght\' 900;">' + p.votes + '</td>' +
+        '<td style="text-align:center;">' + notesBadge + '</td>' +
+        '<td style="text-align:center; color: var(--text-muted);">' + p.matchCount + '</td>' +
+      '</tr>';
+    }).join('');
+
+    var footnote = rest.length
+      ? '<p class="text-secondary" style="margin: 10px 0 0;">Plus ' + rest.length + ' more player' + (rest.length === 1 ? '' : 's') + ' with fewer votes (not shown).</p>'
+      : '';
+
+    var heading =
+      '<h2 class="text-heading" style="margin: 0 0 6px;">Season leaderboard</h2>' +
+      '<p class="text-secondary" style="margin: 0 0 14px;">Top voted players across ' + h(divLbl) + ' this season.</p>';
+
+    $tabSeason.innerHTML =
+      heading +
+      stats +
+      '<div class="table-wrap">' +
+        '<table class="table">' +
+          '<thead><tr>' +
+            '<th style="width: 40px; text-align: center;">#</th>' +
+            '<th>Player</th>' +
+            '<th>Club</th>' +
+            '<th style="text-align: right; width: 80px;">Votes</th>' +
+            '<th style="text-align: center; width: 70px;">Notes</th>' +
+            '<th style="text-align: center; width: 80px;">Matches</th>' +
+          '</tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table>' +
+      '</div>' +
+      footnote;
+  }
+
+  /* Variant of wireCards scoped to an arbitrary root (used by the
+     By Club tab, which renders cards outside of $matches). */
+  function wireCardsIn(root) {
+    Array.prototype.forEach.call(root.querySelectorAll('[data-mode]'), function (b) {
+      b.addEventListener('click', function () {
+        var card = b.closest('.totw-card');
+        var mid = card && card.getAttribute('data-match'); if (!mid) return;
+        state.chartMode[mid] = b.getAttribute('data-mode');
+        state.expanded[mid] = null;
+        render();
+      });
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-club]'), function (b) {
+      b.addEventListener('click', function () {
+        var card = b.closest('.totw-card');
+        var mid = card && card.getAttribute('data-match'); if (!mid) return;
+        var c = b.getAttribute('data-club');
+        state.activeClub[mid] = (state.activeClub[mid] === c) ? null : c;
+        state.expanded[mid] = null;
+        render();
+      });
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-clear-club]'), function (b) {
+      b.addEventListener('click', function () {
+        var card = b.closest('.totw-card');
+        var mid = card && card.getAttribute('data-match'); if (!mid) return;
+        state.activeClub[mid] = null;
+        state.expanded[mid] = null;
+        render();
+      });
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-player]'), function (b) {
+      b.addEventListener('click', function () {
+        var card = b.closest('.totw-card');
+        var mid = card && card.getAttribute('data-match'); if (!mid) return;
+        var pid = b.getAttribute('data-player');
+        state.expanded[mid] = (state.expanded[mid] === pid) ? null : pid;
+        render();
+      });
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-copy-note]'), function (b) {
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        try { copy(decodeURIComponent(b.getAttribute('data-copy-note'))); } catch (err) {}
+      });
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-expand-card]'), function (b) {
+      b.addEventListener('click', function (e) {
+        if (e.target.closest('.totw-card__details')) return;
+        var mid = b.getAttribute('data-expand-card');
+        state.expandedMatch[mid] = !state.expandedMatch[mid];
+        if (!state.expandedMatch[mid]) {
+          state.expanded[mid] = null;
+          state.activeClub[mid] = null;
+        }
+        render();
+      });
+    });
   }
 
   /* ============================================================
