@@ -25,19 +25,17 @@
      ============================================================ -->
 
 <div id="nlPredictor">
-  <div class="nlsp__banner" id="nlsp-banner">Loading predictor…</div>
+  <div class="nlsp__banner" id="nlsp-banner" hidden>Loading predictor…</div>
   <div class="nlsp__screen" id="nlsp-register" hidden></div>
-  <div class="nlsp__main-wrap">
-    <div class="nlsp__screen" id="nlsp-main" hidden>
-      <div id="nlsp-hero"></div>
-      <div id="nlsp-statusbar"></div>
-      <div id="nlsp-fixtures"></div>
-      <div id="nlsp-submitbar"></div>
-      <div id="nlsp-table"></div>
-      <div id="nlsp-sim"></div>
-    </div>
-    <div class="nlsp__signin-overlay" id="nlsp-signin" hidden></div>
+  <div class="nlsp__screen" id="nlsp-main" hidden>
+    <div id="nlsp-hero"></div>
+    <div id="nlsp-statusbar"></div>
+    <div id="nlsp-fixtures"></div>
+    <div id="nlsp-submitbar"></div>
+    <div id="nlsp-table"></div>
+    <div id="nlsp-sim"></div>
   </div>
+  <div class="nlsp__gate" id="nlsp-gate"></div>
 </div>
 
 <style>
@@ -84,46 +82,40 @@
   #nlPredictor .nlsp__banner.is-err { background:var(--red-light);   border-color:var(--red);   color:var(--red); }
   #nlPredictor .nlsp__banner.is-ok  { background:var(--green-light); border-color:var(--green); color:var(--green); }
 
-  /* Signed-out: blurred main + modal */
-  #nlPredictor .nlsp__main-wrap { position:relative; }
-  #nlPredictor .nlsp__main-wrap.is-locked > .nlsp__screen {
-    filter:blur(4px); pointer-events:none; user-select:none;
+  /* Gate card — covers loading + signed-out, replaces the previous overlay/blur approach */
+  #nlPredictor .nlsp__gate {
+    padding:48px 16px;
+    display:flex; justify-content:center;
   }
-  #nlPredictor .nlsp__signin-overlay {
-    position:absolute; inset:0;
-    display:flex; align-items:flex-start; justify-content:center;
-    padding-top:80px;
-    background:linear-gradient(180deg, rgba(244,246,249,.45) 0%, rgba(244,246,249,.85) 60%);
-    z-index:2;
-  }
-  #nlPredictor .nlsp__signin-card {
+  #nlPredictor .nlsp__gate-card {
     background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
     box-shadow:var(--shadow);
-    padding:28px 28px 24px; max-width:380px; width:calc(100% - 24px);
+    padding:28px 28px 24px;
+    max-width:380px; width:100%;
     text-align:center;
   }
-  #nlPredictor .nlsp__signin-mark {
-    display:inline-flex; align-items:baseline; gap:0;
-    padding:6px 14px; margin-bottom:18px;
-    background:var(--primary); color:var(--white);
-    border-radius:var(--radius);
-    font-weight:900; font-variation-settings:'wght' 900;
-    font-size:22px; letter-spacing:.5px;
+  #nlPredictor .nlsp__gate-card img.nlsp__gate-mark {
+    height:56px; width:auto; display:block; margin:0 auto 18px;
+    max-width:200px; object-fit:contain;
   }
-  #nlPredictor .nlsp__signin-mark .nlsp__plus {
-    color:var(--gold); margin-left:2px; font-size:24px;
-  }
-  #nlPredictor .nlsp__signin-card h2 {
-    margin:0 0 8px;
+  #nlPredictor .nlsp__gate-card h2 {
+    margin:0 0 6px;
     font-size:20px; font-weight:900; font-variation-settings:'wght' 900;
     color:var(--text);
   }
-  #nlPredictor .nlsp__signin-card p {
-    margin:0 0 20px;
+  #nlPredictor .nlsp__gate-card p {
+    margin:0 0 18px;
     color:var(--text-muted); font-size:14px;
     font-weight:500; font-variation-settings:'wght' 500;
   }
-  #nlPredictor .nlsp__signin-card .nlsp__btn { width:100%; padding:12px 22px; }
+  #nlPredictor .nlsp__gate-card .nlsp__btn { width:100%; padding:12px 22px; }
+  #nlPredictor .nlsp__gate-spinner {
+    width:22px; height:22px; margin:0 auto 12px;
+    border:2px solid var(--border); border-top-color:var(--primary);
+    border-radius:50%;
+    animation:nlsp-spin .8s linear infinite;
+  }
+  @keyframes nlsp-spin { to { transform:rotate(360deg); } }
 
   /* Hero — compressed */
   #nlPredictor .nlsp__hero { padding:2px 0 12px; }
@@ -1084,55 +1076,54 @@
   }
 
   // ---------- signed-out experience ----------
-  function renderSignInModal() {
-    var wrap   = document.querySelector('#nlPredictor .nlsp__main-wrap');
-    var modal  = document.getElementById('nlsp-signin');
-    register.hidden = true; main.hidden = false;
-    wrap.classList.add('is-locked');
-    modal.hidden = false;
-    // Build placeholder "preview" content so the blurred background isn't empty.
-    hero.className = 'nlsp__hero';
-    hero.innerHTML =
-      '<div class="nlsp__kicker">National League · Matchday</div>' +
-      '<h1>Score Predictor</h1>' +
-      '<div class="nlsp__welcome">Predict every match · Auto ×3 on your team’s game · Compete on the leaderboard</div>';
-    statusbar.className = 'nlsp__status';
-    statusbar.innerHTML = '<span class="nlsp__count">0/12 predicted</span>';
-    // 12 stub fixture rows so the blur has substance
-    var stubs = [];
-    for (var i = 0; i < 12; i++) {
-      stubs.push(
-        '<div class="nlsp__row">' +
-          '<div class="nlsp__ko">15:00</div>' +
-          '<div class="nlsp__team is-home"><span style="display:inline-block;width:26px;height:26px;background:var(--off-white);border-radius:3px;"></span><span class="nlsp__tname">Team A</span></div>' +
-          '<div class="nlsp__score"><span class="nlsp__num is-locked">–</span><span class="nlsp__dash">–</span><span class="nlsp__num is-locked">–</span></div>' +
-          '<div class="nlsp__team is-away"><span style="display:inline-block;width:26px;height:26px;background:var(--off-white);border-radius:3px;"></span><span class="nlsp__tname">Team B</span></div>' +
-        '</div>'
-      );
-    }
-    fixtures.innerHTML = stubs.join('');
-    submitb.innerHTML = ''; tableEl.innerHTML = ''; simEl.innerHTML = '';
+  // ---------- gate card (loading + signed-out) ----------
+  var gateEl = document.getElementById('nlsp-gate');
 
-    modal.innerHTML =
-      '<div class="nlsp__signin-card">' +
-        '<div class="nlsp__signin-mark">NL<span class="nlsp__plus">+</span></div>' +
+  function renderGateLoading() {
+    gateEl.hidden = false;
+    register.hidden = true;
+    main.hidden = true;
+    hideBanner();
+    gateEl.innerHTML =
+      '<div class="nlsp__gate-card">' +
+        '<img class="nlsp__gate-mark" src="' + NLPLUS_LOGO_URL + '" alt="NL+" ' +
+          'onerror="this.onerror=null;this.style.display=\'none\';">' +
+        '<div class="nlsp__gate-spinner" aria-hidden="true"></div>' +
+        '<h2>Score Predictor</h2>' +
+        '<p>Loading…</p>' +
+      '</div>';
+  }
+  function renderGateSignIn() {
+    gateEl.hidden = false;
+    register.hidden = true;
+    main.hidden = true;
+    hideBanner();
+    gateEl.innerHTML =
+      '<div class="nlsp__gate-card">' +
+        '<img class="nlsp__gate-mark" src="' + NLPLUS_LOGO_URL + '" alt="NL+" ' +
+          'onerror="this.onerror=null;this.style.display=\'none\';">' +
         '<h2>Sign in with NL+ to play for free</h2>' +
         '<p>Pick scores for every match. Your team’s game is worth triple. Climb the leaderboard.</p>' +
         '<a class="nlsp__btn" href="' + $h(signInHref()) + '">Sign in with NL+</a>' +
       '</div>';
   }
+  function hideGate() { gateEl.hidden = true; gateEl.innerHTML = ''; }
+
   function signInHref() {
-    // SSO entry point. Cookie set by signin.thenationalleague.org.uk is scoped
-    // to .thenationalleague.org.uk so it'll be visible to JS on www / beta when
-    // the user lands back here.
-    return 'https://signin.thenationalleague.org.uk/';
+    // SSO entry point. Best-effort redirect_uri so the SSO can route fans back
+    // to the predictor page after authentication. If the SA SSO product
+    // requires a different param name (e.g. returnUrl / continueTo), this is
+    // the one-line tweak.
+    var here = '';
+    try { here = window.location.href; } catch (e) {}
+    return 'https://signin.thenationalleague.org.uk/' + (here ? '?redirect_uri=' + encodeURIComponent(here) : '');
   }
 
   // ---------- boot ----------
   // The SSO cookie is sometimes not yet on document.cookie at initial script
   // execution (Nuxt hydration / SSO middleware writes it asynchronously). We
-  // poll for up to ~2.5s before deciding the user is signed out. During that
-  // window the existing "Loading predictor…" banner stays up.
+  // poll for up to ~4s before deciding the user is signed out. During that
+  // window the gate card sits there with a spinner + "Loading…".
   function tryDecodeClaims() {
     var jwt = readCookie('_gc_sa_sso_access');
     return decodeJwtPayload(jwt);
@@ -1151,12 +1142,10 @@
   }
 
   (function boot() {
-    waitForJwt(2500).then(function (claims) {
-      if (!claims || !claims.id) {
-        hideBanner();
-        renderSignInModal();
-        return;
-      }
+    renderGateLoading();
+    waitForJwt(4000).then(function (claims) {
+      if (!claims || !claims.id) { renderGateSignIn(); return; }
+      hideGate();
       startSignedIn(claims);
     });
   })();
