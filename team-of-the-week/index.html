@@ -57,6 +57,15 @@
 
     window.NL_CHANGELOG = [
       {
+        date: '16/05/2026',
+        version: 'v1.1',
+        items: [
+          'Club picker on the By Club tab swapped from a native <select> to the brand .club-picker typeahead (same component used in Vacancies / Judgements). Crest shows in the input, dropdown shows each club with its crest + division. Brand-correct.',
+          'Dropped the Notes-only toggle entirely. The amber 📝N badge on each row already signals which players have notes; the toggle was unnecessary UI.',
+          'Cleaned up the now-orphaned state (notesOnly), prefs key, and CSS (.totw-toggle).'
+        ]
+      },
+      {
         date: '15/05/2026',
         version: 'v1.0',
         items: [
@@ -185,24 +194,6 @@
   #pageWrap .totw-filterrow .tabs { margin-bottom: 0; }
   #pageWrap .totw-divtabs { display: inline-flex; background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); padding: 3px; gap: 2px; }
   #pageWrap .totw-divtabs .tab { padding: 6px 14px; font-size: var(--text-xs); flex: none; }
-  /* "Notes only" toggle — looks like a togglable .pill */
-  #pageWrap .totw-toggle {
-    -webkit-appearance: none; appearance: none;
-    font: inherit; cursor: pointer;
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 6px 12px;
-    background: var(--white); color: var(--text-muted);
-    border: 1px solid var(--border); border-radius: var(--radius-pill);
-    font-size: var(--text-xs); font-weight: 800;
-    text-transform: uppercase; letter-spacing: var(--tracking-wide);
-  }
-  #pageWrap .totw-toggle:hover { background: var(--off-white); color: var(--text); }
-  #pageWrap .totw-toggle.is-on { background: var(--amber); color: var(--white); border-color: var(--amber); }
-  #pageWrap .totw-toggle .totw-toggle__dot {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: var(--border); transition: background .15s;
-  }
-  #pageWrap .totw-toggle.is-on .totw-toggle__dot { background: var(--white); }
 
   /* Matchday strip — many items, horizontal scroll. */
   #pageWrap .totw-mdrow {
@@ -393,6 +384,7 @@
   var SEASON_ID = 2025;
   var API_BASE = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
   var CLUBS_META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/data/clubs-meta.json';
+  var NL_FALLBACK_CREST = 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/National%20League%20rose.png';
   var MAX_PAGES = 10;
   var PREFS_DEBOUNCE_MS = 600;
 
@@ -411,7 +403,6 @@
     selectedComp: DEFAULT_COMP_ID,
     selectedMatchday: null,
     selectedClub: null,        // teamId — for By Club tab
-    notesOnly: false,          // notes-only filter
     expandedRow: null,         // rowKey of the inline-note-expanded list row
     players: {},               // matchId -> { loading, error, list:[{playerId,name,position,shirt,...}] }
     loaded: false
@@ -606,7 +597,6 @@
         compId: state.selectedComp,
         matchday: state.selectedMatchday,
         selectedClub: state.selectedClub || null,
-        notesOnly: !!state.notesOnly,
         updatedAt: firebase.database.ServerValue.TIMESTAMP
       }).catch(function () { /* non-critical */ });
     }, PREFS_DEBOUNCE_MS);
@@ -793,33 +783,18 @@
   }
 
   /* ============================================================
-     RENDER: filter row (division tabs + notes-only toggle)
+     RENDER: filter row (division tabs only — Notes-only toggle gone)
      ============================================================ */
   function renderFilters() {
     /* Division filter — National / North / South.
-       Hidden on the By Club tab (the picked club already implies a
-       division). The previous "All" option is gone — TOTW is per-
-       division, so pooling added complexity without earning its
-       keep. */
-    var divs = '';
-    if (state.activeTab !== 'byclub') {
-      divs = '<div class="tabs totw-divtabs">' +
-        COMP_IDS.map(function (id) {
-          var active = (String(state.selectedComp) === String(id)) ? ' active' : '';
-          return '<button type="button" class="tab' + active + '" data-comp="' + h(String(id)) + '">' + h(COMPS[id].shortName) + '</button>';
-        }).join('') +
-      '</div>';
-    }
-
-    /* Notes-only toggle — filters matches/players to those with
-       at least one fan note. */
-    var notesToggle =
-      '<button type="button" class="totw-toggle' + (state.notesOnly ? ' is-on' : '') + '" id="totw-notesonly">' +
-        '<span class="totw-toggle__dot"></span>' +
-        'Notes only' +
-      '</button>';
-
-    $filters.innerHTML = divs + notesToggle;
+       Hidden on the By Club tab (the picked club implies a division). */
+    if (state.activeTab === 'byclub') { $filters.innerHTML = ''; return; }
+    $filters.innerHTML = '<div class="tabs totw-divtabs">' +
+      COMP_IDS.map(function (id) {
+        var active = (String(state.selectedComp) === String(id)) ? ' active' : '';
+        return '<button type="button" class="tab' + active + '" data-comp="' + h(String(id)) + '">' + h(COMPS[id].shortName) + '</button>';
+      }).join('') +
+    '</div>';
 
     Array.prototype.forEach.call($filters.querySelectorAll('[data-comp]'), function (b) {
       b.addEventListener('click', function () {
@@ -829,13 +804,6 @@
         savePrefsSoon();
         render();
       });
-    });
-    var toggle = document.getElementById('totw-notesonly');
-    if (toggle) toggle.addEventListener('click', function () {
-      state.notesOnly = !state.notesOnly;
-      state.expandedRow = null;
-      savePrefsSoon();
-      render();
     });
   }
 
@@ -958,15 +926,14 @@
       });
     });
 
-    if (state.notesOnly) rows = rows.filter(function (r) { return r.notes > 0; });
     rows.sort(function (a, b) { return b.votes - a.votes || a.name.localeCompare(b.name); });
 
     if (!rows.length) {
       $matches.innerHTML =
         '<div class="empty-state">' +
-          '<div class="empty-state__icon">' + (state.notesOnly ? '📝' : '📭') + '</div>' +
-          '<div class="empty-state__title">' + (state.notesOnly ? 'No notes on this matchday' : 'No votes recorded yet') + '</div>' +
-          '<div class="empty-state__text">' + (state.notesOnly ? 'Untoggle "Notes only" to see everything.' : 'Wait for the voting window to open.') + '</div>' +
+          '<div class="empty-state__icon">📭</div>' +
+          '<div class="empty-state__title">No votes recorded yet</div>' +
+          '<div class="empty-state__text">Wait for the voting window to open.</div>' +
         '</div>';
       return;
     }
@@ -1143,12 +1110,16 @@
       [a.homeTeam, a.awayTeam].forEach(function (t) {
         if (!t || !t.teamID) return;
         if (!seen[t.teamID]) {
+          /* Resolve crest from clubs-meta first (most reliable), then
+             fall back to the API-provided crest URL on the fixture. */
+          var meta = state.clubsByOpta[t.teamID];
           seen[t.teamID] = {
             teamId: t.teamID,
             name: t.name || t.shortName || t.teamID,
             shortName: t.shortName,
             divisionId: a.competitionID,
-            divisionShort: COMPS[a.competitionID] ? COMPS[a.competitionID].shortName : '?'
+            divisionShort: COMPS[a.competitionID] ? COMPS[a.competitionID].shortName : '?',
+            crest: (meta && meta.crest) || t.crest || ''
           };
         }
       });
@@ -1206,23 +1177,25 @@
       return;
     }
 
-    /* Picker — division-grouped club select. */
-    var byDiv = {};
-    catalogue.forEach(function (c) { (byDiv[c.divisionShort] = byDiv[c.divisionShort] || []).push(c); });
+    /* Picker — brand .club-picker typeahead with crest. Native <select>
+       looks systemy on every browser and can't show crests; the brand
+       component is the right call for clubs (same as Vacancies /
+       Judgements). */
+    var selected = state.selectedClub ? catalogue.filter(function (c) { return c.teamId === state.selectedClub; })[0] : null;
+    var pickerCrest = (selected && selected.crest) || NL_FALLBACK_CREST;
+    var pickerValue = selected ? selected.name : '';
     var picker =
-      '<div class="form-group" style="max-width: 360px; margin-bottom: 18px;">' +
-        '<label for="totw-club-select">Pick a club</label>' +
-        '<select id="totw-club-select">' +
-          '<option value="">— select a club —</option>' +
-          ['National', 'North', 'South'].filter(function (d) { return byDiv[d]; }).map(function (d) {
-            return '<optgroup label="' + h(d) + ' Division">' +
-              byDiv[d].map(function (c) {
-                var sel = (state.selectedClub === c.teamId) ? ' selected' : '';
-                return '<option value="' + h(c.teamId) + '"' + sel + '>' + h(c.name) + '</option>';
-              }).join('') +
-            '</optgroup>';
-          }).join('') +
-        '</select>' +
+      '<div class="form-group" style="max-width: 380px; margin-bottom: 18px;">' +
+        '<label for="totw-club-input">Pick a club</label>' +
+        '<div class="club-picker" id="totw-club-picker">' +
+          '<div class="club-picker__wrap">' +
+            '<img class="club-picker__crest" id="totw-club-crest" src="' + h(pickerCrest) + '" alt="" ' +
+              'onerror="this.onerror=null;this.src=\'' + h(NL_FALLBACK_CREST) + '\';">' +
+            '<input class="club-picker__input" id="totw-club-input" type="text" autocomplete="off" ' +
+              'placeholder="Type or pick a club…" value="' + h(pickerValue) + '">' +
+          '</div>' +
+          '<div class="club-picker__dropdown" id="totw-club-drop"></div>' +
+        '</div>' +
       '</div>';
 
     var body = '';
@@ -1292,7 +1265,6 @@
         });
       });
 
-      if (state.notesOnly) rows = rows.filter(function (r) { return r.notes > 0; });
       rows.sort(function (a, b) { return b.votes - a.votes || a.name.localeCompare(b.name); });
 
       var heading =
@@ -1303,8 +1275,8 @@
       if (!rows.length) {
         listHtml =
           '<div class="empty-state">' +
-            '<div class="empty-state__icon">' + (state.notesOnly ? '📝' : '📭') + '</div>' +
-            '<div class="empty-state__title">' + (state.notesOnly ? 'No notes on any of this club\'s matches' : 'No votes for this club\'s matches yet') + '</div>' +
+            '<div class="empty-state__icon">📭</div>' +
+            '<div class="empty-state__title">No votes for this club\'s matches yet</div>' +
           '</div>';
       } else {
         var maxVotes = rows[0].votes || 1;
@@ -1317,14 +1289,64 @@
 
     $tabByClub.innerHTML = picker + body;
 
-    var sel = document.getElementById('totw-club-select');
-    if (sel) sel.addEventListener('change', function () {
-      state.selectedClub = sel.value || null;
-      state.expandedRow = null;
+    wireClubPicker(catalogue);
+    wireListRows($tabByClub);
+  }
+
+  /* Brand .club-picker typeahead wiring. Single instance scoped to
+     the By Club tab. */
+  function wireClubPicker(catalogue) {
+    var input = document.getElementById('totw-club-input');
+    var drop  = document.getElementById('totw-club-drop');
+    var crest = document.getElementById('totw-club-crest');
+    if (!input || !drop) return;
+
+    function buildOptions(q) {
+      var needle = (q || '').trim().toLowerCase();
+      var matches = needle
+        ? catalogue.filter(function (c) { return c.name.toLowerCase().indexOf(needle) !== -1; })
+        : catalogue.slice();
+      if (!matches.length) {
+        return '<div class="club-picker__freetext">No clubs match "' + h(q || '') + '"</div>';
+      }
+      /* Cap to 60 visible — entire NL is ~70 clubs so this only matters
+         briefly while typing. */
+      return matches.slice(0, 60).map(function (c) {
+        var cr = c.crest || NL_FALLBACK_CREST;
+        return '<div class="club-picker__option" data-teamid="' + h(c.teamId) + '">' +
+          '<img src="' + h(cr) + '" alt="" onerror="this.onerror=null;this.src=\'' + h(NL_FALLBACK_CREST) + '\';">' +
+          '<span class="club-picker__option-name">' + h(c.name) + '</span>' +
+          '<span class="club-picker__option-div">' + h(c.divisionShort) + '</span>' +
+        '</div>';
+      }).join('');
+    }
+    function open() {
+      drop.innerHTML = buildOptions(input.value);
+      drop.classList.add('open');
+    }
+    function close() { drop.classList.remove('open'); }
+
+    input.addEventListener('focus', open);
+    input.addEventListener('input', open);
+    input.addEventListener('blur', function () {
+      /* Delay close so a click on a .club-picker__option lands first. */
+      setTimeout(close, 150);
+    });
+    drop.addEventListener('mousedown', function (e) {
+      var opt = e.target.closest('.club-picker__option');
+      if (!opt) return;
+      e.preventDefault();
+      var teamId = opt.getAttribute('data-teamid');
+      var club = catalogue.filter(function (c) { return c.teamId === teamId; })[0];
+      if (!club) return;
+      state.selectedClub = teamId;
+      state.expandedRow  = null;
+      input.value = club.name;
+      if (crest) crest.src = club.crest || NL_FALLBACK_CREST;
+      close();
       savePrefsSoon();
       render();
     });
-    wireListRows($tabByClub);
   }
 
   /* ============================================================
@@ -1332,8 +1354,6 @@
      ============================================================ */
   function renderSeason() {
     var ranked = seasonPlayerRanks();
-    if (state.notesOnly) ranked = ranked.filter(function (p) { return p.notes > 0; });
-
     var divLbl = (state.selectedComp === 'all') ? 'all three divisions' : (COMPS[state.selectedComp] ? COMPS[state.selectedComp].name : '');
 
     if (!ranked.length) {
@@ -1341,8 +1361,8 @@
         '<p class="text-secondary" style="margin: 0 0 14px;">' + h(divLbl[0].toUpperCase() + divLbl.slice(1)) + '.</p>' +
         '<div class="empty-state">' +
           '<div class="empty-state__icon">📈</div>' +
-          '<div class="empty-state__title">' + (state.notesOnly ? 'No notes anywhere this season yet' : 'No votes in this division yet') + '</div>' +
-          '<div class="empty-state__text">' + (state.notesOnly ? 'Untoggle "Notes only" to see all voted players.' : 'Switch division or wait for matches to be voted on.') + '</div>' +
+          '<div class="empty-state__title">No votes in this division yet</div>' +
+          '<div class="empty-state__text">Switch division or wait for matches to be voted on.</div>' +
         '</div>';
       return;
     }
@@ -1462,7 +1482,6 @@
               if (!isNaN(n) && COMPS[n]) state.selectedComp = n;
             }
             if (prefs.selectedClub) state.selectedClub = prefs.selectedClub;
-            if (typeof prefs.notesOnly === 'boolean') state.notesOnly = prefs.notesOnly;
           }
           state.selectedMatchday = (prefs && prefs.matchday) || defaultMatchday();
           if (!state.selectedMatchday) state.selectedMatchday = defaultMatchday();
