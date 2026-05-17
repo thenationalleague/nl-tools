@@ -10,6 +10,61 @@
 
      TECHNICAL CHANGELOG
      -------------------
+     v2.9.3 (2026-05-17) Brand club-picker collapse — both pickers in
+                         the tool now use the shared .club-picker widget
+                         from nl-brand.css, NO freetext.
+
+                         1. ADD CUP FIXTURE pickers. The local .acf-picker
+                            fork (~95 lines of CSS) is gone. HTML/JS class
+                            names switched to brand .club-picker (with
+                            __option-tag → __option-div per brand naming).
+                            Only the keyboard-active and empty-hint
+                            modifiers remain as local additions on top of
+                            the brand class.
+
+                            FREETEXT IS REMOVED. v2.9 added the freetext
+                            commit row (.club-picker__option--freetext)
+                            for non-NL teams (L1/L2 in FA Cup R1+); that's
+                            now gone — cup fixtures must be NL-vs-NL.
+                            Knock-on:
+                              - acfHomeIsNL / acfAwayIsNL hidden inputs
+                                deleted (every commit is NL now).
+                              - commitAcfPicker drops its isNL param.
+                              - submitAddCupFixtureForm assumes both
+                                teams are committed NL clubs; if either
+                                hidden field is empty the form errors with
+                                "Pick a … club from the dropdown." (used
+                                to fall back to raw input text). Opta IDs
+                                resolve unconditionally via
+                                resolveClubOptaID.
+
+                         2. FOCUS-ON-A-CLUB selector. The native <select>
+                            at the top of Crowd Insights is replaced by the
+                            brand .club-picker. New IDs: #focusClubPicker,
+                            #focusClubCrest, #focusClubInput,
+                            #focusClubDropdown. The existing #clearFocusBtn
+                            stays.
+
+                            populateClubFocusDropdown is now a no-op stub
+                            — the picker reads S.clubs lazily on each
+                            focus/input event. wireFocusControl rebuilt
+                            around input/focus listeners and outside-click
+                            close. State changes route through new
+                            setFocusedClub(name|null) helper so commit and
+                            clear share one render path.
+
+                         3. CSS surface. .focus-control select rules
+                            replaced by .focus-control__picker (min-width
+                            260 / max-width 360, flex:1) which constrains
+                            the picker width inside the focus-control
+                            flex row.
+
+                         No version bump on system canonicals — this is a
+                         pure attendance/index.html change. nl-brand.css
+                         already exposes .club-picker (v2.16) and
+                         .club-picker__option--freetext (v2.17, unused
+                         here and inert).
+
      v2.9.2 (2026-05-17) Match-list mini-bar polish, addressing screenshot
                          feedback after v2.9.1 stuck the typography back.
 
@@ -882,6 +937,14 @@
   window.NL_CHANGELOG = [
     {
       date: '17 May 2026',
+      version: 'v2.9.3',
+      items: [
+        '"Focus on a club" admin selector is now a proper club picker — type to search, crests in the dropdown, division tag on each row. Matches the picker style used elsewhere in the platform.',
+        '"Add cup fixture" home/away pickers also moved to the same picker style. NL clubs only now — the free-text "Use as entered" option is gone, so cup fixtures must be NL-club vs NL-club. If you need to record an FA Cup tie against a non-NL team, flag it to the NL team.'
+      ]
+    },
+    {
+      date: '17 May 2026',
       version: 'v2.9.2',
       items: [
         'Match-list mini-bars: home and away segments now use flat brand colours (red, navy) instead of two-stop gradients. Reads cleaner on mobile and matches the rest of the brand.',
@@ -1280,17 +1343,7 @@
     flex-wrap: wrap;
   }
   .focus-control-label { font-size: 14px; font-variation-settings: 'wght' 800; }
-  .focus-control select {
-    font-family: var(--font);
-    font-size: 14px; font-variation-settings: 'wght' 700;
-    padding: 8px 12px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--white);
-    color: var(--text);
-    cursor: pointer;
-    min-width: 220px;
-  }
+  .focus-control__picker { min-width: 260px; max-width: 360px; flex: 1; }
 
   /* Rank grid &mdash; stat cards */
   .rank-grid {
@@ -1925,104 +1978,21 @@
     border-bottom-color: var(--navy);
   }
 
-  /* Add Cup Fixture &mdash; club picker (NL-club-aware combobox)
-     Shows a crest on the left, type-to-filter input, dropdown with NL club
-     matches. A "Use '{typed}' as entered" option appears at the bottom of
-     the dropdown so non-NL teams can be committed explicitly. */
-  .acf-picker { position: relative; }
-  .acf-picker__wrap {
-    display: flex; align-items: center; gap: 10px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 7px 12px; background: var(--white);
-    transition: border-color 0.15s, box-shadow 0.15s;
-  }
-  .acf-picker__wrap:focus-within {
-    border-color: var(--primary);
-    box-shadow: 0 0 0 3px rgba(158, 0, 0, 0.08);
-  }
-  .acf-picker__crest {
-    width: 28px; height: 28px;
-    object-fit: contain;
-    flex-shrink: 0;
-  }
-  .acf-picker__input {
-    flex: 1;
-    border: none !important;
-    padding: 0 !important;
-    font-size: 14px;
-    outline: none;
-    background: transparent;
-    font-family: var(--font);
-    font-variation-settings: 'wght' 400;
-    color: var(--text);
-  }
-  .acf-picker__input::placeholder { color: var(--text-muted); }
-  .acf-picker__dropdown {
-    position: absolute;
-    top: 100%; left: 0; right: 0;
-    z-index: 200;
-    background: var(--white);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    max-height: 280px;
-    overflow-y: auto;
-    display: none;
-    margin-top: 3px;
-  }
-  .acf-picker__dropdown.open { display: block; }
-  .acf-picker__option {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
-    cursor: pointer;
-    font-size: 13px;
-    border-bottom: 1px solid var(--border);
-  }
-  .acf-picker__option:last-child { border-bottom: none; }
-  .acf-picker__option:hover,
-  .acf-picker__option.is-keyboard-active { background: var(--off-white); }
-  .acf-picker__option img {
-    width: 24px; height: 24px;
-    object-fit: contain;
-    flex-shrink: 0;
-  }
-  .acf-picker__option-name {
-    flex: 1;
-    font-variation-settings: 'wght' 700;
-  }
-  .acf-picker__option-tag {
-    font-size: 10px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    font-variation-settings: 'wght' 700;
-  }
-  /* "Use '{typed}' as entered" option &mdash; visually distinct non-NL commit */
-  .acf-picker__option--freetext {
-    border-top: 2px dashed var(--border);
-    background: var(--off-white);
-    font-style: italic;
-    color: var(--text-muted);
-  }
-  .acf-picker__option--freetext:hover { background: var(--off-white); }
-  .acf-picker__option--freetext .acf-picker__option-name {
-    color: var(--text);
-    font-style: normal;
-  }
-  .acf-picker__option--freetext .acf-picker__option-tag {
-    color: var(--primary);
-  }
-  .acf-picker__option--empty {
+  /* Add Cup Fixture &mdash; club picker now uses the brand .club-picker
+     directly (see system/nl-brand.css). Local additions:
+       - .club-picker__option.is-keyboard-active: keyboard-driven hover state.
+       - .club-picker__option--empty: hint row when nothing typed.
+     The freetext-commit row (.club-picker__option--freetext) is intentionally
+     NOT used here — cup fixtures must be NL-club vs NL-club. */
+  .club-picker__option.is-keyboard-active { background: var(--off-white); }
+  .club-picker__option--empty {
     padding: 10px 12px;
     color: var(--text-muted);
     font-size: 13px;
     font-style: italic;
     cursor: default;
   }
-  .acf-picker__option--empty:hover { background: transparent; }
+  .club-picker__option--empty:hover { background: transparent; }
 
   .tab-badge {
     display: inline-block;
@@ -2184,9 +2154,13 @@
       <!-- Focus-on-a-club (staff/admin only) -->
       <div class="focus-control" id="focusControl" style="display:none;">
         <span class="focus-control-label">Focus on a club:</span>
-        <select id="clubFocusSelect">
-          <option value="">&mdash; league-wide view &mdash;</option>
-        </select>
+        <div class="club-picker focus-control__picker" id="focusClubPicker">
+          <div class="club-picker__wrap">
+            <img class="club-picker__crest" id="focusClubCrest" src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png" alt="" onerror="this.onerror=null;this.style.visibility='hidden';">
+            <input class="club-picker__input" id="focusClubInput" type="text" autocomplete="off" placeholder="&mdash; league-wide view &mdash;">
+          </div>
+          <div class="club-picker__dropdown" id="focusClubDropdown"></div>
+        </div>
         <button class="btn btn--navy btn--sm" id="clearFocusBtn" style="display:none;margin-left:auto;">&larr; Return to league view</button>
       </div>
 
@@ -2588,29 +2562,27 @@
 
           <div class="form-group">
             <label for="acfHomeInput">Home team <span style="color:var(--primary);">*</span></label>
-            <div class="acf-picker" id="acfHomePicker">
-              <div class="acf-picker__wrap">
-                <img class="acf-picker__crest" id="acfHomeCrest" src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png" alt="" onerror="this.onerror=null;this.style.visibility='hidden';">
-                <input class="acf-picker__input" id="acfHomeInput" type="text" autocomplete="off" placeholder="Start typing &mdash; NL clubs auto-suggest">
+            <div class="club-picker" id="acfHomePicker">
+              <div class="club-picker__wrap">
+                <img class="club-picker__crest" id="acfHomeCrest" src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png" alt="" onerror="this.onerror=null;this.style.visibility='hidden';">
+                <input class="club-picker__input" id="acfHomeInput" type="text" autocomplete="off" placeholder="Start typing &mdash; NL clubs only">
               </div>
-              <div class="acf-picker__dropdown" id="acfHomeDropdown"></div>
+              <div class="club-picker__dropdown" id="acfHomeDropdown"></div>
             </div>
-            <!-- Hidden fields resolved by picker: committed name + whether NL club -->
+            <!-- Hidden field: committed NL club name (resolved by picker). -->
             <input type="hidden" id="acfHomeCommitted" value="">
-            <input type="hidden" id="acfHomeIsNL" value="">
           </div>
 
           <div class="form-group">
             <label for="acfAwayInput">Away team <span style="color:var(--primary);">*</span></label>
-            <div class="acf-picker" id="acfAwayPicker">
-              <div class="acf-picker__wrap">
-                <img class="acf-picker__crest" id="acfAwayCrest" src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png" alt="" onerror="this.onerror=null;this.style.visibility='hidden';">
-                <input class="acf-picker__input" id="acfAwayInput" type="text" autocomplete="off" placeholder="Start typing &mdash; NL clubs auto-suggest">
+            <div class="club-picker" id="acfAwayPicker">
+              <div class="club-picker__wrap">
+                <img class="club-picker__crest" id="acfAwayCrest" src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png" alt="" onerror="this.onerror=null;this.style.visibility='hidden';">
+                <input class="club-picker__input" id="acfAwayInput" type="text" autocomplete="off" placeholder="Start typing &mdash; NL clubs only">
               </div>
-              <div class="acf-picker__dropdown" id="acfAwayDropdown"></div>
+              <div class="club-picker__dropdown" id="acfAwayDropdown"></div>
             </div>
             <input type="hidden" id="acfAwayCommitted" value="">
-            <input type="hidden" id="acfAwayIsNL" value="">
           </div>
 
           <div id="acfError" style="display:none;color:var(--red);font-size:13px;font-variation-settings:'wght' 700;"></div>
@@ -3174,32 +3146,116 @@
     updateSubtitle();
   }
 
-  function populateClubFocusDropdown() {
-    var sel = document.getElementById('clubFocusSelect');
-    /* Clear existing options except the first (league-wide) */
-    while (sel.options.length > 1) sel.remove(1);
-    var sorted = S.clubs.slice().sort(function(a, b) { return a.name.localeCompare(b.name); });
-    for (var i = 0; i < sorted.length; i++) {
-      var opt = document.createElement('option');
-      opt.value = sorted[i].name;
-      opt.textContent = sorted[i].name + '  (' + sorted[i].division + ')';
-      sel.appendChild(opt);
+  /* Focus picker — brand .club-picker driven combobox. Renders dropdown
+     options from S.clubs, filtering on the input string. Freetext is not
+     supported (staff focus on an existing NL club or league-wide). */
+  function renderFocusPickerDropdown(filterStr) {
+    var dd = document.getElementById('focusClubDropdown');
+    if (!dd) return;
+    dd.innerHTML = '';
+
+    var q = (filterStr || '').toLowerCase().trim();
+    var clubs = (S.clubs || []).slice().sort(function(a, b) { return a.name.localeCompare(b.name); });
+    var matches = clubs.filter(function(c) { return clubMatchesQuery(c, q); });
+
+    if (matches.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'club-picker__option club-picker__option--empty';
+      empty.textContent = q
+        ? 'No National League club matches “' + q + '”'
+        : 'Start typing to search clubs';
+      dd.appendChild(empty);
+      dd.classList.add('open');
+      return;
     }
+
+    matches.forEach(function(c) {
+      var opt = document.createElement('div');
+      opt.className = 'club-picker__option';
+      opt.setAttribute('data-name', c.name);
+
+      var img = document.createElement('img');
+      img.src = CREST_BASE + encodeURIComponent(c.name) + '.png';
+      img.onerror = function() { this.onerror = null; this.src = FALLBACK_CREST; };
+      opt.appendChild(img);
+
+      var name = document.createElement('span');
+      name.className = 'club-picker__option-name';
+      name.textContent = c.name;
+      opt.appendChild(name);
+
+      var tag = document.createElement('span');
+      tag.className = 'club-picker__option-div';
+      tag.textContent = c.division || '';
+      opt.appendChild(tag);
+
+      opt.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        commitFocusPicker(c.name);
+      });
+      dd.appendChild(opt);
+    });
+    dd.classList.add('open');
   }
 
+  function commitFocusPicker(name) {
+    var input = document.getElementById('focusClubInput');
+    var crest = document.getElementById('focusClubCrest');
+    var dd    = document.getElementById('focusClubDropdown');
+    input.value = name;
+    crest.style.visibility = 'visible';
+    crest.onerror = function() { this.onerror = null; this.src = FALLBACK_CREST; };
+    crest.src = CREST_BASE + encodeURIComponent(name) + '.png';
+    dd.classList.remove('open');
+    setFocusedClub(name);
+  }
+
+  function clearFocusPicker() {
+    var input = document.getElementById('focusClubInput');
+    var crest = document.getElementById('focusClubCrest');
+    var dd    = document.getElementById('focusClubDropdown');
+    if (input) input.value = '';
+    if (crest) {
+      crest.onerror = function() { this.onerror = null; this.style.visibility = 'hidden'; };
+      crest.src = FALLBACK_CREST;
+      crest.style.visibility = 'visible';
+    }
+    if (dd) dd.classList.remove('open');
+    setFocusedClub(null);
+  }
+
+  /* Single source of truth for staff focus changes. Updates state, the
+     clear button, and triggers a re-render. */
+  function setFocusedClub(clubName) {
+    S.focusedClub = clubName || null;
+    S.effectiveClub = S.focusedClub || (S.session.role === 'club' ? S.session.club : null);
+    document.getElementById('clearFocusBtn').style.display = S.focusedClub ? '' : 'none';
+    updateSubtitle();
+    renderForCurrentView();
+  }
+
+  /* populateClubFocusDropdown is a no-op now — the brand picker reads
+     S.clubs lazily on each focus/input. Kept as a stub because the wiring
+     calls it during the staff-like role setup. */
+  function populateClubFocusDropdown() {}
+
   function wireFocusControl() {
-    var sel = document.getElementById('clubFocusSelect');
-    sel.addEventListener('change', function(e) {
-      S.focusedClub = e.target.value || null;
-      S.effectiveClub = S.focusedClub || (S.session.role === 'club' ? S.session.club : null);
-      document.getElementById('clearFocusBtn').style.display = S.focusedClub ? '' : 'none';
-      updateSubtitle();
-      renderForCurrentView();
+    var input = document.getElementById('focusClubInput');
+    var dd    = document.getElementById('focusClubDropdown');
+    if (!input || !dd) return;
+
+    input.addEventListener('input', function() {
+      renderFocusPickerDropdown(input.value);
     });
-    document.getElementById('clearFocusBtn').addEventListener('click', function() {
-      sel.value = '';
-      sel.dispatchEvent(new Event('change'));
+    input.addEventListener('focus', function() {
+      renderFocusPickerDropdown(input.value);
     });
+    document.addEventListener('click', function(e) {
+      var wrap = document.getElementById('focusClubPicker');
+      if (wrap && !wrap.contains(e.target)) dd.classList.remove('open');
+    });
+
+    document.getElementById('clearFocusBtn').addEventListener('click', clearFocusPicker);
   }
 
   /* pageSubtitle H1+P removed in v1.4 \u2014 this is now a no-op kept to avoid
@@ -3255,22 +3311,23 @@
     var matches = clubs.filter(function(c) { return clubMatchesQuery(c, q); });
     var rawTyped = filterStr == null ? '' : filterStr.trim();
 
-    if (matches.length === 0 && !rawTyped) {
-      /* Fresh focus with no typing \u2014 show hint row */
+    if (matches.length === 0) {
       var empty = document.createElement('div');
-      empty.className = 'acf-picker__option acf-picker__option--empty';
-      empty.textContent = 'Start typing to search National League clubs';
+      empty.className = 'club-picker__option club-picker__option--empty';
+      empty.textContent = rawTyped
+        ? 'No National League club matches \u201C' + rawTyped + '\u201D'
+        : 'Start typing to search National League clubs';
       dd.appendChild(empty);
       dd.classList.add('open');
       return;
     }
 
-    /* NL club matches */
+    /* NL club matches \u2014 only valid commit option (freetext is intentionally
+       not offered; cup fixtures must be NL-club vs NL-club). */
     matches.forEach(function(c) {
       var opt = document.createElement('div');
-      opt.className = 'acf-picker__option';
+      opt.className = 'club-picker__option';
       opt.setAttribute('data-name', c.name);
-      opt.setAttribute('data-is-nl', '1');
 
       var img = document.createElement('img');
       img.src = CREST_BASE + encodeURIComponent(c.name) + '.png';
@@ -3278,72 +3335,34 @@
       opt.appendChild(img);
 
       var name = document.createElement('span');
-      name.className = 'acf-picker__option-name';
+      name.className = 'club-picker__option-name';
       name.textContent = c.name;
       opt.appendChild(name);
 
       var tag = document.createElement('span');
-      tag.className = 'acf-picker__option-tag';
+      tag.className = 'club-picker__option-div';
       tag.textContent = c.division || '';
       opt.appendChild(tag);
 
       opt.addEventListener('mousedown', function(e) {
         e.preventDefault();  /* keep focus so blur doesn't close before click */
-        commitAcfPicker(pickerName, c.name, true);
+        commitAcfPicker(pickerName, c.name);
       });
       dd.appendChild(opt);
     });
 
-    /* Free-text commit row \u2014 only when something has been typed AND the typed
-       text isn't already an exact match for an NL club. */
-    var exactMatch = matches.some(function(c) {
-      return c.name.toLowerCase() === q;
-    });
-    if (rawTyped && !exactMatch) {
-      var freetext = document.createElement('div');
-      freetext.className = 'acf-picker__option acf-picker__option--freetext';
-      freetext.setAttribute('data-name', rawTyped);
-      freetext.setAttribute('data-is-nl', '0');
-
-      var nameFt = document.createElement('span');
-      nameFt.className = 'acf-picker__option-name';
-      nameFt.textContent = '\u201C' + rawTyped + '\u201D';
-      freetext.appendChild(nameFt);
-
-      var tagFt = document.createElement('span');
-      tagFt.className = 'acf-picker__option-tag';
-      tagFt.textContent = 'Use as entered \u2014 non-NL';
-      freetext.appendChild(tagFt);
-
-      freetext.addEventListener('mousedown', function(e) {
-        e.preventDefault();
-        commitAcfPicker(pickerName, rawTyped, false);
-      });
-      dd.appendChild(freetext);
-    }
-
     dd.classList.add('open');
   }
 
-  function commitAcfPicker(pickerName, name, isNL) {
+  function commitAcfPicker(pickerName, name) {
     var input = document.getElementById('acf' + pickerName + 'Input');
     var crest = document.getElementById('acf' + pickerName + 'Crest');
     var hiddenName = document.getElementById('acf' + pickerName + 'Committed');
-    var hiddenIsNL = document.getElementById('acf' + pickerName + 'IsNL');
     var dd = document.getElementById('acf' + pickerName + 'Dropdown');
 
     input.value = name;
     hiddenName.value = name;
-    hiddenIsNL.value = isNL ? '1' : '0';
 
-    /* Crest resolution:
-       - NL club \u2192 we know there's a crest by the same filename as the club name
-       - Free text \u2192 OPTIMISTICALLY try to load a crest with the typed name;
-         if it 404s, onerror falls back to the NL rose. This means adding a
-         crest file like "Manchester United.png" to /assets/crests/ later
-         makes it work with no code change.
-       Both paths end up visible (no hidden crest) so the space next to the
-       input is never empty. */
     crest.style.visibility = 'visible';
     crest.onerror = function() {
       this.onerror = null;
@@ -3357,10 +3376,7 @@
   function clearAcfPicker(pickerName) {
     document.getElementById('acf' + pickerName + 'Input').value = '';
     document.getElementById('acf' + pickerName + 'Committed').value = '';
-    document.getElementById('acf' + pickerName + 'IsNL').value = '';
     var crest = document.getElementById('acf' + pickerName + 'Crest');
-    /* Reset to NL rose placeholder \u2014 keeps layout consistent instead of
-       collapsing the crest slot when the field is empty. */
     crest.onerror = function() { this.onerror = null; this.style.visibility = 'hidden'; };
     crest.src = FALLBACK_CREST;
     crest.style.visibility = 'visible';
@@ -3376,8 +3392,6 @@
     input.addEventListener('input', function() {
       /* Any typing invalidates previous commit until they pick again. */
       document.getElementById('acf' + pickerName + 'Committed').value = '';
-      document.getElementById('acf' + pickerName + 'IsNL').value = '';
-      /* Crest reverts to NL rose placeholder while user is typing. */
       var crest = document.getElementById('acf' + pickerName + 'Crest');
       crest.onerror = function() { this.onerror = null; this.style.visibility = 'hidden'; };
       crest.src = FALLBACK_CREST;
@@ -3537,8 +3551,8 @@
     document.getElementById('acfVenueWrap').style.display = isNeutral ? '' : 'none';
 
     /* Pre-commit team names on pickers */
-    commitAcfPicker('Home', fix.homeTeamName, !!fix.homeTeamID);
-    commitAcfPicker('Away', fix.awayTeamName, !!fix.awayTeamID);
+    commitAcfPicker('Home', fix.homeTeamName);
+    commitAcfPicker('Away', fix.awayTeamName);
 
     /* Update chrome to reflect edit mode */
     document.getElementById('acfFormHeading').textContent = 'Edit cup fixture';
@@ -3559,32 +3573,19 @@
     var dateStr = document.getElementById('acfDate').value.trim();
     var timeStr = document.getElementById('acfTime').value.trim();
     var home    = document.getElementById('acfHomeCommitted').value.trim();
-    var homeIsNL = document.getElementById('acfHomeIsNL').value === '1';
     var away    = document.getElementById('acfAwayCommitted').value.trim();
-    var awayIsNL = document.getElementById('acfAwayIsNL').value === '1';
     var isNeutral = document.getElementById('acfNeutral').checked;
     var venueName = document.getElementById('acfVenue').value.trim();
 
-    /* If the user typed but never committed (never picked an NL option and
-       never clicked the "Use as entered" row), we pull the raw input and
-       treat as free text \u2014 safer than blocking the submit. */
-    if (!home) {
-      var rawHome = document.getElementById('acfHomeInput').value.trim();
-      if (rawHome) { home = rawHome; homeIsNL = false; }
-    }
-    if (!away) {
-      var rawAway = document.getElementById('acfAwayInput').value.trim();
-      if (rawAway) { away = rawAway; awayIsNL = false; }
-    }
-
-    /* Validation */
+    /* Validation. Both teams MUST be committed NL clubs from the picker
+       (freetext is intentionally not supported \u2014 NL-vs-NL cup ties only). */
     if (!comp)    { setAddCupFixtureError('Select a competition.'); return; }
     if (!dateStr) { setAddCupFixtureError('Pick a date.'); return; }
     if (!timeStr) { setAddCupFixtureError('Pick a kickoff time.'); return; }
-    if (!home)    { setAddCupFixtureError('Enter a home team.'); return; }
-    if (!away)    { setAddCupFixtureError('Enter an away team.'); return; }
+    if (!home)    { setAddCupFixtureError('Pick a home club from the dropdown.'); return; }
+    if (!away)    { setAddCupFixtureError('Pick an away club from the dropdown.'); return; }
     if (home.toLowerCase() === away.toLowerCase()) {
-      setAddCupFixtureError('Home and away teams must be different.');
+      setAddCupFixtureError('Home and away clubs must be different.');
       return;
     }
     if (isNeutral && !venueName) {
@@ -3603,8 +3604,8 @@
     }
 
     var compLabel = comp === 'fa-cup' ? 'FA Cup' : 'FA Trophy';
-    var homeOptaID = homeIsNL ? resolveClubOptaID(home) : null;
-    var awayOptaID = awayIsNL ? resolveClubOptaID(away) : null;
+    var homeOptaID = resolveClubOptaID(home);
+    var awayOptaID = resolveClubOptaID(away);
 
     var fixture = {
       matchID:        matchID,
