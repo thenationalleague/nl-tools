@@ -10,6 +10,51 @@
 
      TECHNICAL CHANGELOG
      -------------------
+     v2.6  (2026-05-17)  Neutral-venue fixtures get their own scale-independent
+                         band below the match chart, so a 38k Wembley cup final
+                         doesn't compress the regular 2-3k league bars.
+
+                         Data:
+                         - Fixture record gains two optional fields:
+                             isNeutral: boolean
+                             venueName: string (e.g. "Wembley Stadium")
+                           Both stripped via stripNullKeys when not set, so
+                           non-neutral fixtures stay byte-identical.
+                         - perClub gains a third bucket `neutralMatches` —
+                           neutral fixtures are kept OUT of homeMatches /
+                           awayMatches so they don't distort averages or rank
+                           charts. Both clubs in a neutral tie see the fixture
+                           in their band (we push into BOTH clubs' arrays).
+
+                         Admin form (Add cup fixture):
+                         - New "Played at a neutral venue" checkbox + reveal-on-
+                           tick venue text input (required when ticked).
+                         - Reset + edit-load + submit flows all wire to the new
+                           fields. Validation refuses neutral-without-venue.
+                         - Existing cup fixtures list shows "@ Venue" beneath
+                           the comp label so admins can verify tagging.
+
+                         Render:
+                         - New #neutralBandCard sits between the main chart
+                           card and the totals card. Hidden when this club has
+                           no neutral fixtures.
+                         - renderNeutralBand() computes its OWN maxTotal from
+                           its OWN submissions, so the two charts can't blow
+                           each other out.
+                         - Bar colour convention swaps to user-club perspective:
+                           the focused club's fans always render red regardless
+                           of nominal home/away designation (at a neutral venue
+                           the home/away label is arbitrary).
+                         - Opponent line tagged with .match-venue-tag pill
+                           ("@ Wembley Stadium").
+                         - renderCupToggles now also scans neutralMatches so
+                           the FA Cup/FA Trophy toggle pill still appears when
+                           the only fixture for that comp is a Wembley one.
+
+                         CSS:
+                         - .match-venue-tag — small pill with off-white fill
+                           and muted text, distinct from the .comp-badge.
+
      v2.5  (2026-05-03)  Brand sweep — second pass on remaining hardcoded hexes.
 
                          CSS:
@@ -684,6 +729,15 @@
   var NL_TOOL_KEY = 'ops-attendance';
 
   window.NL_CHANGELOG = [
+    {
+      date: '17 May 2026',
+      version: 'v2.6',
+      items: [
+        'Neutral-venue cup fixtures (e.g. Wembley finals) now render in their own band beneath the match chart, on an independent scale — a 38k cup final no longer crushes the regular 2-3k league bars.',
+        'Admins can tag a cup fixture as neutral via a new checkbox on the Add cup fixture form, then enter the venue name (e.g. "Wembley Stadium"). The fixture appears in BOTH clubs’ attendance views.',
+        'Neutral fixtures are excluded from your averages and rank chart so a one-off Wembley crowd doesn’t distort your season-long numbers.'
+      ]
+    },
     {
       date: '3 May 2026',
       version: 'v2.5',
@@ -1534,6 +1588,20 @@
 
   /* Cup toggles now use .filter-pill from nl-brand.css v2.4+ */
 
+  /* Neutral-venue tag &mdash; sits next to the opponent name on band rows.
+     Distinct from .comp-badge so the venue (not the competition) reads first. */
+  .match-venue-tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px;
+    font-variation-settings: 'wght' 700;
+    color: var(--text-muted);
+    background: var(--off-white);
+    border: 1px solid var(--border);
+    padding: 2px 7px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+
   /* Home/Away switch */
   .home-away-switch {
     display: inline-flex;
@@ -2127,6 +2195,20 @@
           </div>
         </div>
 
+        <!-- NEUTRAL-VENUE BAND
+             Cup finals / semis at Wembley etc. Rendered on its own scale so a
+             38k Wembley crowd doesn't compress the regular 2-3k league bars.
+             Hidden when this club has no neutral-venue fixtures. -->
+        <div class="chart-card" id="neutralBandCard" style="display:none;margin-top:18px;">
+          <div class="chart-header">
+            <div class="chart-header-left">
+              <h2>Neutral-venue fixtures</h2>
+              <p class="section-subtitle">Cup ties played at a neutral venue. Scaled independently so the regular-season chart above stays readable.</p>
+            </div>
+          </div>
+          <div class="match-chart" id="neutralMatchChart"></div>
+        </div>
+
         <!-- TOTALS CARD -->
         <div class="totals-card">
           <h2>Attendance to date</h2>
@@ -2282,6 +2364,18 @@
             <div class="form-group">
               <label for="acfTime">Kickoff <span style="color:var(--primary);">*</span></label>
               <input type="time" id="acfTime" required value="15:00" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:6px;font-family:var(--font);font-size:14px;">
+            </div>
+          </div>
+
+          <div class="form-group" id="acfNeutralGroup">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-variation-settings:'wght' 700;">
+              <input type="checkbox" id="acfNeutral" style="margin:0;width:16px;height:16px;cursor:pointer;">
+              <span>Played at a neutral venue</span>
+            </label>
+            <p class="section-subtitle" style="margin:6px 0 0 24px;">Use for finals / semis at Wembley etc. The fixture renders in its own scale-independent band so the regular season chart stays readable.</p>
+            <div id="acfVenueWrap" style="display:none;margin-top:10px;">
+              <label for="acfVenue">Venue name <span style="color:var(--primary);">*</span></label>
+              <input type="text" id="acfVenue" placeholder="e.g. Wembley Stadium" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:6px;font-family:var(--font);font-size:14px;">
             </div>
           </div>
 
@@ -2586,16 +2680,30 @@
       S.perClub[c.name] = {
         club:          c,
         division:      c.division,
-        homeMatches:   [],   /* { fix, sub } for each home fixture of this club */
-        awayMatches:   []    /* { fix, sub } for each away fixture this club played */
+        homeMatches:    [],   /* { fix, sub } for each home fixture of this club */
+        awayMatches:    [],   /* { fix, sub } for each away fixture this club played */
+        neutralMatches: []    /* { fix, sub } for each neutral-venue fixture this club is in */
       };
     }
 
-    /* Walk every fixture, bucket into each club's home/away list */
+    /* Walk every fixture, bucket into each club's home/away/neutral list.
+       Neutral-venue fixtures are kept OUT of home/away so they don't distort
+       averages or rank charts — a Wembley final is exceptional and gets its
+       own band in the UI. Both clubs in a neutral tie see it in their band. */
     for (var matchID in S.fixtures) {
       var fix = S.fixtures[matchID];
       if (!fix) continue;
       var sub = S.submissions[matchID] || null;
+
+      if (fix.isNeutral) {
+        if (fix.homeTeamName && S.perClub[fix.homeTeamName]) {
+          S.perClub[fix.homeTeamName].neutralMatches.push({ fix: fix, sub: sub, matchID: matchID });
+        }
+        if (fix.awayTeamName && S.perClub[fix.awayTeamName]) {
+          S.perClub[fix.awayTeamName].neutralMatches.push({ fix: fix, sub: sub, matchID: matchID });
+        }
+        continue;
+      }
 
       /* Home side */
       if (fix.homeTeamName && S.perClub[fix.homeTeamName]) {
@@ -3034,6 +3142,19 @@
     wireAcfPicker('Home');
     wireAcfPicker('Away');
 
+    /* Neutral-venue checkbox — reveal/hide the venue text input. */
+    var neutralBox = document.getElementById('acfNeutral');
+    if (neutralBox) {
+      neutralBox.addEventListener('change', function() {
+        var wrap = document.getElementById('acfVenueWrap');
+        wrap.style.display = neutralBox.checked ? '' : 'none';
+        if (neutralBox.checked) {
+          var v = document.getElementById('acfVenue');
+          if (v && !v.value) v.focus();
+        }
+      });
+    }
+
     document.getElementById('acfReset').addEventListener('click', resetAddCupFixtureForm);
     document.getElementById('acfSubmit').addEventListener('click', submitAddCupFixtureForm);
 
@@ -3067,6 +3188,9 @@
   function resetAddCupFixtureForm() {
     document.getElementById('acfDate').value = '';
     document.getElementById('acfTime').value = '15:00';
+    document.getElementById('acfNeutral').checked = false;
+    document.getElementById('acfVenue').value = '';
+    document.getElementById('acfVenueWrap').style.display = 'none';
     clearAcfPicker('Home');
     clearAcfPicker('Away');
     setAddCupFixtureError('');
@@ -3109,6 +3233,12 @@
     document.getElementById('acfDate').value = dayPart;
     document.getElementById('acfTime').value = timePart || '15:00';
 
+    /* Neutral venue state */
+    var isNeutral = !!fix.isNeutral;
+    document.getElementById('acfNeutral').checked = isNeutral;
+    document.getElementById('acfVenue').value = fix.venueName || '';
+    document.getElementById('acfVenueWrap').style.display = isNeutral ? '' : 'none';
+
     /* Pre-commit team names on pickers */
     commitAcfPicker('Home', fix.homeTeamName, !!fix.homeTeamID);
     commitAcfPicker('Away', fix.awayTeamName, !!fix.awayTeamID);
@@ -3135,6 +3265,8 @@
     var homeIsNL = document.getElementById('acfHomeIsNL').value === '1';
     var away    = document.getElementById('acfAwayCommitted').value.trim();
     var awayIsNL = document.getElementById('acfAwayIsNL').value === '1';
+    var isNeutral = document.getElementById('acfNeutral').checked;
+    var venueName = document.getElementById('acfVenue').value.trim();
 
     /* If the user typed but never committed (never picked an NL option and
        never clicked the "Use as entered" row), we pull the raw input and
@@ -3156,6 +3288,10 @@
     if (!away)    { setAddCupFixtureError('Enter an away team.'); return; }
     if (home.toLowerCase() === away.toLowerCase()) {
       setAddCupFixtureError('Home and away teams must be different.');
+      return;
+    }
+    if (isNeutral && !venueName) {
+      setAddCupFixtureError('Enter a venue name (e.g. Wembley Stadium) for the neutral fixture.');
       return;
     }
 
@@ -3184,6 +3320,8 @@
       awayTeamID:     awayOptaID,
       awayTeamName:   away,
       awayScore:      null,
+      isNeutral:      isNeutral ? true : null,
+      venueName:      isNeutral ? venueName : null,
       lastSyncedAt:   Date.now(),
       source:         editingID ? 'manual-admin-edit' : 'manual-admin-add'
     };
@@ -3294,6 +3432,15 @@
       /* Comp */
       var tdComp = document.createElement('td');
       tdComp.textContent = f.competitionKey === 'fa-cup' ? 'FA Cup' : 'FA Trophy';
+      if (f.isNeutral && f.venueName) {
+        var venueTag = document.createElement('div');
+        venueTag.textContent = '@ ' + f.venueName;
+        venueTag.style.fontSize = '11px';
+        venueTag.style.color = 'var(--text-muted)';
+        venueTag.style.fontVariationSettings = "'wght' 700";
+        venueTag.style.marginTop = '2px';
+        tdComp.appendChild(venueTag);
+      }
       tr.appendChild(tdComp);
 
       /* Home */
@@ -4799,6 +4946,14 @@
       var ck = matchSource[i].fix.competitionKey;
       if (COMP_KEY_CUP[ck] || COMP_KEY_LEAGUE[ck]) matchPresent[ck] = true;
     }
+    /* Neutral-venue fixtures share the same toggle row — surface their comps too
+       so admins can hide/show a Wembley FA Cup tie via the existing pill. */
+    if (club.neutralMatches) {
+      for (var n = 0; n < club.neutralMatches.length; n++) {
+        var nck = club.neutralMatches[n].fix.competitionKey;
+        if (COMP_KEY_CUP[nck] || COMP_KEY_LEAGUE[nck]) matchPresent[nck] = true;
+      }
+    }
 
     var totalsPresent = {};
     for (var i = 0; i < club.homeMatches.length; i++) {
@@ -5069,6 +5224,165 @@
     }
 
     renderMatchChartLegend(statesPresent);
+    renderNeutralBand();
+  }
+
+  /* Neutral-venue band — renders BELOW the main chart on its OWN scale.
+     A 38k Wembley cup final would crush a 3k league bar to ~8% of its current
+     width if rendered inline; the band's independent maxTotal keeps the
+     regular-season chart readable while still surfacing the neutral fixture.
+     Both clubs in a neutral tie see it on either tab (Home or Away) since
+     "home/away" is meaningless at a neutral venue. */
+  function renderNeutralBand() {
+    var card = document.getElementById('neutralBandCard');
+    var container = document.getElementById('neutralMatchChart');
+    if (!card || !container) return;
+
+    var club = S.perClub[S.effectiveClub];
+    var neutrals = (club && club.neutralMatches) ? club.neutralMatches : [];
+
+    /* Honour the same comp toggles as the main chart. */
+    var filtered = neutrals.filter(function(m) {
+      return S.matchToggles[m.fix.competitionKey] !== false;
+    });
+    filtered.sort(function(a, b) {
+      var ka = parseKickoff(a.fix.kickoffUTC);
+      var kb = parseKickoff(b.fix.kickoffUTC);
+      return (ka ? ka.getTime() : 0) - (kb ? kb.getTime() : 0);
+    });
+
+    if (filtered.length === 0) {
+      card.style.display = 'none';
+      container.innerHTML = '';
+      return;
+    }
+    card.style.display = '';
+    container.innerHTML = '';
+
+    /* Independent scale — only this band's submitted totals contribute. */
+    var maxTotal = 0;
+    for (var i = 0; i < filtered.length; i++) {
+      if (filtered[i].sub && filtered[i].sub.total > maxTotal) maxTotal = filtered[i].sub.total;
+    }
+    if (maxTotal === 0) maxTotal = 1;
+    function isTiny(val) { return (val / maxTotal) < 0.06; }
+
+    var clubName = S.effectiveClub;
+
+    for (var j = 0; j < filtered.length; j++) {
+      var m = filtered[j];
+      var fix = m.fix;
+      var played = isPlayed(fix);
+      var isUpcoming = !played;
+      var row = document.createElement('div');
+      row.className = 'match-row' + (isUpcoming ? ' match-row--upcoming' : '');
+
+      /* Date */
+      var dateEl = document.createElement('div');
+      dateEl.className = 'match-date';
+      dateEl.textContent = formatDateShort(fix.kickoffUTC);
+      row.appendChild(dateEl);
+
+      /* Opponent + venue tag. From the user's club's perspective the opponent
+         is whichever side they're NOT — but at a neutral venue neither side
+         "hosts", so we use "v" rather than "vs"/"at". */
+      var oppEl = document.createElement('div');
+      oppEl.className = 'match-opp';
+      var badge = document.createElement('span');
+      badge.className = 'comp-badge ' + (COMP_KEY_TO_BADGE[fix.competitionKey] || 'NAT');
+      badge.textContent = COMP_KEY_TO_BADGE[fix.competitionKey] || '';
+      oppEl.appendChild(badge);
+
+      var opponent = (fix.homeTeamName === clubName) ? fix.awayTeamName : fix.homeTeamName;
+      var oppName = document.createElement('span');
+      oppName.textContent = 'v ' + opponent;
+      if (isUpcoming) oppName.style.color = 'var(--text-muted)';
+      oppEl.appendChild(oppName);
+
+      if (fix.venueName) {
+        var venueTag = document.createElement('span');
+        venueTag.className = 'match-venue-tag';
+        venueTag.textContent = '@ ' + fix.venueName;
+        oppEl.appendChild(venueTag);
+      }
+      row.appendChild(oppEl);
+
+      if (!isUpcoming) {
+        row.style.cursor = 'pointer';
+        (function(match) {
+          row.addEventListener('click', function() { handleMatchRowClick(match); });
+        })(m);
+      } else {
+        row.style.cursor = 'default';
+      }
+
+      /* Bar track — render the home-side / away-side split if known, otherwise
+         a single bar. We keep the same colour semantics as the main chart so
+         the user's club fans are red and the opponent's are navy regardless of
+         nominal home/away designation. */
+      var track = document.createElement('div');
+      track.className = 'match-bar-track';
+
+      if (isUpcoming) {
+        /* nothing — empty track */
+      } else if (!m.sub) {
+        var miss = document.createElement('div');
+        miss.className = 'match-bar-missing';
+        miss.textContent = 'Awaiting attendance submission';
+        track.appendChild(miss);
+      } else {
+        var total = m.sub.total;
+        var awayRecorded = m.sub.awayRecorded !== false && m.sub.away != null;
+        if (awayRecorded) {
+          var nominalHomeFans = total - m.sub.away;
+          var nominalAwayFans = m.sub.away;
+          /* User-club fans → red; opponent fans → navy. */
+          var userIsNominalHome = (fix.homeTeamName === clubName);
+          var userFans = userIsNominalHome ? nominalHomeFans : nominalAwayFans;
+          var oppFans  = userIsNominalHome ? nominalAwayFans : nominalHomeFans;
+          var userTiny = isTiny(userFans), oppTiny = isTiny(oppFans);
+
+          var userBar = document.createElement('div');
+          userBar.className = 'match-bar-home' + (userTiny ? ' tiny' : '');
+          userBar.style.width = (userFans / maxTotal * 100) + '%';
+          userBar.textContent = fmt(userFans);
+          track.appendChild(userBar);
+          if (userTiny) {
+            var uf = document.createElement('div');
+            uf.className = 'match-bar-float-label match-bar-float-label--home';
+            uf.textContent = fmt(userFans);
+            track.appendChild(uf);
+          }
+
+          var oppBar = document.createElement('div');
+          oppBar.className = 'match-bar-away' + (oppTiny ? ' tiny' : '');
+          oppBar.style.width = (oppFans / maxTotal * 100) + '%';
+          oppBar.textContent = fmt(oppFans);
+          track.appendChild(oppBar);
+          if (oppTiny) {
+            var of = document.createElement('div');
+            of.className = 'match-bar-float-label match-bar-float-label--away';
+            of.textContent = fmt(oppFans);
+            track.appendChild(of);
+          }
+        } else {
+          var split = document.createElement('div');
+          split.className = 'match-bar-split-unknown';
+          split.style.width = (total / maxTotal * 100) + '%';
+          split.innerHTML = '<span>' + fmt(total) + '</span><span class="split-star">★</span>';
+          track.appendChild(split);
+        }
+      }
+      row.appendChild(track);
+
+      /* Total column */
+      var totalCol = document.createElement('div');
+      totalCol.className = 'match-total';
+      totalCol.textContent = (isUpcoming || !m.sub) ? '' : fmt(m.sub.total);
+      row.appendChild(totalCol);
+
+      container.appendChild(row);
+    }
   }
 
   /* Renders the legend below the match chart. Only includes swatches for states
