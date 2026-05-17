@@ -10,6 +10,33 @@
 
      TECHNICAL CHANGELOG
      -------------------
+     v2.7  (2026-05-17)  Admin can now tag ANY fixture as neutral, not just
+                         manually-added cup fixtures. Closes the gap exposed
+                         by the playoff final coming in auto-pulled from NLS
+                         under competitionKey 'nl' — previously the form's
+                         list filtered to 'fa-cup' / 'fa-trophy' only.
+
+                         UI:
+                         - New "Tag a fixture as neutral venue" section inside
+                           the '+ Add cup fixture' tab, below the existing
+                           cup fixtures list. Table lists all fixtures (capped
+                           to 60 most recent; search bypasses the cap).
+                         - Status filter pills (All / Tagged / Untagged) and a
+                           team-name search. Mirrors the existing list's filter
+                           bar pattern.
+                         - "Tag neutral" / "Edit tag" action per row opens a
+                           lightweight modal: just a venue text input, with
+                           Save / Untag / Cancel. Untag is hidden for
+                           untagged fixtures.
+                         - Surgical write: only isNeutral + venueName are
+                           touched (via .update(), not .set()), so NLS-owned
+                           fields stay intact. Untag uses null on both fields
+                           which RTDB treats as a delete.
+
+                         Audit:
+                         - New audit actions: 'tag_neutral_venue',
+                           'untag_neutral_venue'.
+
      v2.6  (2026-05-17)  Neutral-venue fixtures get their own scale-independent
                          band below the match chart, so a 38k Wembley cup final
                          doesn't compress the regular 2-3k league bars.
@@ -729,6 +756,14 @@
   var NL_TOOL_KEY = 'ops-attendance';
 
   window.NL_CHANGELOG = [
+    {
+      date: '17 May 2026',
+      version: 'v2.7',
+      items: [
+        'Admins can now tag ANY fixture as neutral venue, not just manually-added cup fixtures — useful for the playoff final and other NLS-derived fixtures at Wembley. New section in the "+ Add cup fixture" tab with a search + tag/untag flow.',
+        'Tagging only writes the venue + neutral flag; teams, date and competition stay owned by NLS so a re-sync won’t clobber your tag.'
+      ]
+    },
     {
       date: '17 May 2026',
       version: 'v2.6',
@@ -2458,8 +2493,74 @@
         </div>
         <div id="acfListEmpty" style="display:none;padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">No cup fixtures match your filters.</div>
       </div>
+
+      <!-- ==== Tag any fixture as neutral venue ==== -->
+      <div class="chart-card" style="margin-top:20px;">
+        <div class="chart-header">
+          <div class="chart-header-left">
+            <h2>Tag a fixture as neutral venue</h2>
+            <p class="section-subtitle">Use this for fixtures that came in from the NLS feed and need flagging as neutral &mdash; e.g. the playoff final, an FA Cup tie at Wembley. Tagging here writes only the venue + neutral flag; teams, date and competition stay owned by NLS.</p>
+          </div>
+        </div>
+
+        <div class="filter-bar filter-bar--stacked" style="margin-top:8px;margin-bottom:14px;">
+          <div class="filter-row">
+            <span class="filter-label">STATUS</span>
+            <div class="filter-pill-row" style="margin-bottom:0;">
+              <button class="filter-pill active" data-tag-filter="all" type="button">All</button>
+              <button class="filter-pill" data-tag-filter="tagged" type="button">Tagged</button>
+              <button class="filter-pill" data-tag-filter="untagged" type="button">Untagged</button>
+            </div>
+          </div>
+          <div class="filter-row">
+            <span class="filter-label">SEARCH</span>
+            <input type="text" id="acfTagSearch" placeholder="Filter by team name&hellip;" style="flex:1;min-width:220px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-family:var(--font);font-size:13px;">
+          </div>
+        </div>
+
+        <div style="overflow-x:auto;">
+          <table class="table" id="acfTagTable">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Comp</th>
+                <th>Fixture</th>
+                <th>Venue</th>
+                <th style="text-align:right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="acfTagBody"></tbody>
+          </table>
+        </div>
+        <div id="acfTagEmpty" style="display:none;padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">No fixtures match your filters.</div>
+        <p class="section-subtitle" style="margin-top:14px;">Showing the 60 most recent fixtures by default. Use search to find older fixtures.</p>
+      </div>
     </div>
     <!-- END PANEL: addcupfixture -->
+
+    <!-- Tag-neutral modal -->
+    <div class="modal-backdrop" id="acfTagModal" style="display:none;">
+      <div class="modal">
+        <div class="modal__head">
+          <h3 style="margin:0;font-size:17px;font-variation-settings:'wght' 900;">Tag fixture as neutral</h3>
+          <button class="modal__close" id="acfTagClose" type="button" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal__body">
+          <p id="acfTagMessage" style="margin:0 0 14px;font-size:14px;line-height:1.5;"></p>
+          <div class="form-group">
+            <label for="acfTagVenue">Venue name <span style="color:var(--primary);">*</span></label>
+            <input type="text" id="acfTagVenue" placeholder="e.g. Wembley Stadium" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:6px;font-family:var(--font);font-size:14px;">
+          </div>
+          <p style="margin:10px 0 0;font-size:12px;color:var(--text-muted);">An audit entry will be written. The fixture will move to the neutral-venue band on Home views for both clubs.</p>
+          <div id="acfTagError" style="display:none;color:var(--red);font-size:13px;font-variation-settings:'wght' 700;margin-top:10px;"></div>
+        </div>
+        <div class="modal__footer">
+          <button type="button" class="btn btn--ghost" id="acfTagCancel">Cancel</button>
+          <button type="button" class="btn btn--ghost" id="acfTagUntag" style="display:none;">Untag</button>
+          <button type="button" class="btn btn--primary" id="acfTagConfirm">Save tag</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Delete confirmation modal -->
     <div class="modal-backdrop" id="acfDeleteModal" style="display:none;">
@@ -3177,12 +3278,36 @@
       });
     }
 
+    /* Neutral-tag list filters + modal wiring */
+    S._acfTagStatusFilter = 'all';
+    S._acfTagSearch = '';
+    var tagFilterPills = document.querySelectorAll('.panel[data-panel="addcupfixture"] .filter-pill[data-tag-filter]');
+    tagFilterPills.forEach(function(p) {
+      p.addEventListener('click', function(e) {
+        S._acfTagStatusFilter = e.currentTarget.getAttribute('data-tag-filter');
+        tagFilterPills.forEach(function(x) { x.classList.toggle('active', x === e.currentTarget); });
+        renderAcfTagList();
+      });
+    });
+    var tagSearch = document.getElementById('acfTagSearch');
+    if (tagSearch) {
+      tagSearch.addEventListener('input', function() {
+        S._acfTagSearch = tagSearch.value.toLowerCase().trim();
+        renderAcfTagList();
+      });
+    }
+    document.getElementById('acfTagClose').addEventListener('click', closeAcfTagModal);
+    document.getElementById('acfTagCancel').addEventListener('click', closeAcfTagModal);
+    document.getElementById('acfTagConfirm').addEventListener('click', confirmAcfTag);
+    document.getElementById('acfTagUntag').addEventListener('click', confirmAcfUntag);
+
     /* Delete-confirm modal wiring */
     document.getElementById('acfDeleteClose').addEventListener('click', closeAcfDeleteModal);
     document.getElementById('acfDeleteCancel').addEventListener('click', closeAcfDeleteModal);
     document.getElementById('acfDeleteConfirm').addEventListener('click', confirmAcfDelete);
 
     renderAcfList();
+    renderAcfTagList();
   }
 
   function resetAddCupFixtureForm() {
@@ -3369,6 +3494,7 @@
       resetAddCupFixtureForm();
       if (typeof computeAggregates === 'function') computeAggregates();
       renderAcfList();
+      renderAcfTagList();
     }).catch(function(err) {
       setAddCupFixtureError('Write failed: ' + (err && err.message ? err.message : err));
     }).then(function() {
@@ -3565,6 +3691,7 @@
         closeAcfDeleteModal();
         if (typeof computeAggregates === 'function') computeAggregates();
         renderAcfList();
+        renderAcfTagList();
         /* If we were editing this one, clear the form */
         if (S._acfEditing === matchID) resetAddCupFixtureForm();
       })
@@ -3574,6 +3701,241 @@
       .then(function() {
         confirmBtn.disabled = false;
         confirmBtn.textContent = 'Delete fixture';
+      });
+  }
+
+
+  /* ---- Neutral-venue tagging (any fixture, incl. NLS-derived) --------- */
+
+  /* Builds the "Tag a fixture as neutral venue" list. Distinct from
+     renderAcfList — that one handles manually-added FA Cup/FA Trophy
+     fixtures (full edit/delete). This one is a pure tag/untag surface
+     that touches only isNeutral + venueName, leaving NLS-owned fields
+     (teams, date, comp) intact. Caps to 60 most recent so the list
+     doesn't balloon mid-season; search bypasses the cap. */
+  function renderAcfTagList() {
+    var body = document.getElementById('acfTagBody');
+    var empty = document.getElementById('acfTagEmpty');
+    if (!body) return;
+
+    var statusFilter = S._acfTagStatusFilter || 'all';
+    var q = S._acfTagSearch || '';
+
+    var rows = [];
+    for (var mid in S.fixtures) {
+      var f = S.fixtures[mid];
+      if (!f) continue;
+      var tagged = !!f.isNeutral;
+      if (statusFilter === 'tagged'   && !tagged) continue;
+      if (statusFilter === 'untagged' &&  tagged) continue;
+      if (q) {
+        var h = (f.homeTeamName || '').toLowerCase();
+        var a = (f.awayTeamName || '').toLowerCase();
+        if (h.indexOf(q) === -1 && a.indexOf(q) === -1) continue;
+      }
+      rows.push(f);
+    }
+    rows.sort(function(a, b) {
+      var ka = parseKickoff(a.kickoffUTC);
+      var kb = parseKickoff(b.kickoffUTC);
+      return (kb ? kb.getTime() : 0) - (ka ? ka.getTime() : 0);   /* newest first */
+    });
+
+    /* Cap unless searching — keeps the list manageable mid-season. */
+    if (!q) rows = rows.slice(0, 60);
+
+    body.innerHTML = '';
+    if (rows.length === 0) {
+      empty.style.display = '';
+      return;
+    }
+    empty.style.display = 'none';
+
+    rows.forEach(function(f) {
+      var tr = document.createElement('tr');
+
+      /* Date */
+      var tdDate = document.createElement('td');
+      tdDate.textContent = formatDateShort(f.kickoffUTC);
+      tr.appendChild(tdDate);
+
+      /* Comp badge + label */
+      var tdComp = document.createElement('td');
+      var badge = document.createElement('span');
+      badge.className = 'comp-badge ' + (COMP_KEY_TO_BADGE[f.competitionKey] || 'NAT');
+      badge.textContent = COMP_KEY_TO_BADGE[f.competitionKey] || '';
+      badge.style.marginRight = '6px';
+      tdComp.appendChild(badge);
+      var compLabel = document.createElement('span');
+      compLabel.textContent = COMP_KEY_TO_LABEL[f.competitionKey] || f.competitionKey;
+      compLabel.style.fontSize = '12px';
+      tdComp.appendChild(compLabel);
+      tr.appendChild(tdComp);
+
+      /* Fixture (home v away) */
+      var tdFix = document.createElement('td');
+      tdFix.textContent = (f.homeTeamName || '?') + ' v ' + (f.awayTeamName || '?');
+      tr.appendChild(tdFix);
+
+      /* Venue */
+      var tdVenue = document.createElement('td');
+      if (f.isNeutral && f.venueName) {
+        var venueTag = document.createElement('span');
+        venueTag.className = 'match-venue-tag';
+        venueTag.textContent = '@ ' + f.venueName;
+        tdVenue.appendChild(venueTag);
+      } else {
+        var dash = document.createElement('span');
+        dash.textContent = '—';
+        dash.style.color = 'var(--text-muted)';
+        tdVenue.appendChild(dash);
+      }
+      tr.appendChild(tdVenue);
+
+      /* Actions */
+      var tdAct = document.createElement('td');
+      tdAct.style.textAlign = 'right';
+      tdAct.style.whiteSpace = 'nowrap';
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn--ghost btn--sm';
+      btn.textContent = f.isNeutral ? 'Edit tag' : 'Tag neutral';
+      btn.addEventListener('click', (function(mid) {
+        return function() { openAcfTagModal(mid); };
+      })(f.matchID));
+      tdAct.appendChild(btn);
+      tr.appendChild(tdAct);
+
+      body.appendChild(tr);
+    });
+  }
+
+  function openAcfTagModal(matchID) {
+    var f = S.fixtures[matchID];
+    if (!f) return;
+    S._acfPendingTag = matchID;
+    var modal = document.getElementById('acfTagModal');
+    var msg = document.getElementById('acfTagMessage');
+    var venueInput = document.getElementById('acfTagVenue');
+    var untagBtn = document.getElementById('acfTagUntag');
+    var confirmBtn = document.getElementById('acfTagConfirm');
+
+    var line = (f.homeTeamName || '?') + ' v ' + (f.awayTeamName || '?') +
+               ' · ' + formatDateShort(f.kickoffUTC) +
+               ' · ' + (COMP_KEY_TO_LABEL[f.competitionKey] || f.competitionKey);
+    msg.textContent = line;
+
+    venueInput.value = f.venueName || '';
+    if (f.isNeutral) {
+      untagBtn.style.display = '';
+      confirmBtn.textContent = 'Save changes';
+    } else {
+      untagBtn.style.display = 'none';
+      confirmBtn.textContent = 'Save tag';
+    }
+    setAcfTagError('');
+    modal.style.display = 'flex';
+    setTimeout(function() { venueInput.focus(); }, 60);
+  }
+
+  function closeAcfTagModal() {
+    document.getElementById('acfTagModal').style.display = 'none';
+    S._acfPendingTag = null;
+    setAcfTagError('');
+  }
+
+  function setAcfTagError(msg) {
+    var el = document.getElementById('acfTagError');
+    if (!el) return;
+    if (msg) { el.textContent = msg; el.style.display = ''; }
+    else     { el.textContent = '';  el.style.display = 'none'; }
+  }
+
+  function confirmAcfTag() {
+    var matchID = S._acfPendingTag;
+    if (!matchID) { closeAcfTagModal(); return; }
+    var f = S.fixtures[matchID];
+    if (!f) { closeAcfTagModal(); return; }
+
+    var venue = document.getElementById('acfTagVenue').value.trim();
+    if (!venue) {
+      setAcfTagError('Enter a venue name (e.g. Wembley Stadium).');
+      return;
+    }
+    var btn = document.getElementById('acfTagConfirm');
+    btn.disabled = true;
+    var originalText = btn.textContent;
+    btn.textContent = 'Saving…';
+
+    NL.ensureAuth()
+      .then(function() {
+        return firebase.database().ref('app-data/ops-attendance/fixtures/' + matchID).update({
+          isNeutral: true,
+          venueName: venue
+        });
+      })
+      .then(function() {
+        f.isNeutral = true;
+        f.venueName = venue;
+        if (NL.writeAudit) {
+          NL.writeAudit('tag_neutral_venue',
+            matchID + ' · ' + (f.homeTeamName || '?') + ' v ' + (f.awayTeamName || '?') +
+            ' · ' + venue);
+        }
+        NL.toast('Fixture tagged as neutral', 'success');
+        closeAcfTagModal();
+        if (typeof computeAggregates === 'function') computeAggregates();
+        renderAcfTagList();
+        renderForCurrentView();
+      })
+      .catch(function(err) {
+        setAcfTagError('Save failed: ' + (err && err.message ? err.message : err));
+      })
+      .then(function() {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      });
+  }
+
+  function confirmAcfUntag() {
+    var matchID = S._acfPendingTag;
+    if (!matchID) { closeAcfTagModal(); return; }
+    var f = S.fixtures[matchID];
+    if (!f) { closeAcfTagModal(); return; }
+
+    var btn = document.getElementById('acfTagUntag');
+    btn.disabled = true;
+    var originalText = btn.textContent;
+    btn.textContent = 'Removing…';
+
+    NL.ensureAuth()
+      .then(function() {
+        /* Remove both fields so the fixture goes back to a regular home/away
+           bucketing on the next aggregate pass. */
+        return firebase.database().ref('app-data/ops-attendance/fixtures/' + matchID).update({
+          isNeutral: null,
+          venueName: null
+        });
+      })
+      .then(function() {
+        delete f.isNeutral;
+        delete f.venueName;
+        if (NL.writeAudit) {
+          NL.writeAudit('untag_neutral_venue',
+            matchID + ' · ' + (f.homeTeamName || '?') + ' v ' + (f.awayTeamName || '?'));
+        }
+        NL.toast('Neutral tag removed', 'success');
+        closeAcfTagModal();
+        if (typeof computeAggregates === 'function') computeAggregates();
+        renderAcfTagList();
+        renderForCurrentView();
+      })
+      .catch(function(err) {
+        setAcfTagError('Remove failed: ' + (err && err.message ? err.message : err));
+      })
+      .then(function() {
+        btn.disabled = false;
+        btn.textContent = originalText;
       });
   }
 
