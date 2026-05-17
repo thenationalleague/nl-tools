@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — DAZN VIP
-  Version: v1.0 (11/05/2026)
+  Version: v1.2 (17/05/2026)
   File: /tools/dazn-vip/index.html
 
   Tool for logging VIP access changes for the DAZN feed.
@@ -28,6 +28,23 @@
     role=staff + access=access  → browse all, view only
     role=admin/superadmin + admin → action requests, manage non-club orgs
 
+  v1.2 — Club landing redesign. The list is now the page, not a tab buried
+         behind a banner. Three changes that matter:
+         - Trust strip at the top says how recently the local mirror was
+           verified against DAZN's real list (fresh / stale / unknown).
+           Reads org.lastVerifiedAt — until the future paste-to-overwrite
+           admin tool ships, all clubs show "unknown", which is the
+           honest state.
+         - Pending changes now render INLINE in the list itself: dashed
+           ghost rows for pending adds, strike-through with a "pending
+           removal" chip for pending removes, "pending edit" chip for
+           proposed edits. The open-request banner is now secondary.
+         - History collapsed into a <details> at the bottom, expanded
+           on click. Shows 12 most recent (was 8).
+         Card-row layout replaces the table — more breathing room, easier
+         to scan, plays nicer on narrow screens. No backend changes; no
+         change to the rules. lastVerifiedAt is read-only-tolerant: absent
+         field => "unknown" state, no errors.
   v1.1 — Wiring fix to match the canonical NL Tools page structure:
          - Moved Firebase SDKs + NL_TOOL_KEY + nl-utils + nl-topbar + auth-guard
            from bottom-of-body to <head>. Page now bootstraps in the same
@@ -83,6 +100,16 @@
     var NL_TOOL_KEY = 'media-dazn-vip';
 
     window.NL_CHANGELOG = [
+      {
+        date: '17 May 2026',
+        version: 'v1.2',
+        items: [
+          'Redesigned the club view — your VIP list is now the page itself, not a tab.',
+          'New trust strip at the top tells you when the list was last verified against DAZN.',
+          'Pending changes show inline in the list (dashed row for adds, strike-through for removes) — no more guessing what changed.',
+          'History tucked into an expandable section at the bottom, now showing 12 most recent changes.'
+        ]
+      },
       {
         date: '11 May 2026',
         version: 'v1.1',
@@ -824,6 +851,159 @@
     resize: vertical;
     line-height: 1.45;
   }
+
+  /* ════════════════════════════════════════════════════════════════════
+     v1.2 — Club landing redesign
+     The list is the page. Trust strip tells you how fresh it is.
+     Pending changes render inline (ghost rows / strike-through),
+     so the list answers "who has access right now?" at a glance.
+     ════════════════════════════════════════════════════════════════════ */
+
+  /* Hero — list is the page, hero is the title bar */
+  .vip-list-hero {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 4px 0 22px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 18px;
+  }
+  .vip-list-hero__crest { width: 72px; height: 72px; object-fit: contain; flex-shrink: 0; }
+  .vip-list-hero__text  { flex: 1; min-width: 0; }
+  .vip-list-hero__title {
+    font-size: clamp(24px, 2.2vw, 32px);
+    font-weight: 900;
+    font-variation-settings: 'wght' 900;
+    color: var(--navy);
+    margin: 0 0 4px;
+    line-height: 1.05;
+  }
+  .vip-list-hero__sub  { color: var(--text-muted); font-size: var(--text-sm); line-height: 1.4; }
+  .vip-list-hero__sub strong { color: var(--text); font-weight: 700; }
+  .vip-list-hero__cta  { flex-shrink: 0; }
+
+  /* Trust strip — the single most important new pixel.
+     data-state controls the colour: fresh / stale / unknown */
+  .vip-trust {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: var(--green-light);
+    border: 1px solid color-mix(in srgb, var(--green) 25%, white);
+    margin-bottom: 18px;
+    font-size: 13px;
+    color: var(--text);
+    line-height: 1.4;
+  }
+  .vip-trust[data-state="stale"] {
+    background: var(--amber-light);
+    border-color: color-mix(in srgb, var(--amber) 35%, white);
+  }
+  .vip-trust[data-state="unknown"] {
+    background: color-mix(in srgb, var(--text-muted) 8%, white);
+    border-color: var(--border);
+  }
+  .vip-trust__dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--green);
+    flex-shrink: 0;
+  }
+  .vip-trust[data-state="stale"]   .vip-trust__dot { background: var(--amber); }
+  .vip-trust[data-state="unknown"] .vip-trust__dot { background: var(--text-muted); }
+  .vip-trust__text  { flex: 1; min-width: 0; }
+  .vip-trust__hint  { color: var(--text-muted); font-size: 12px; }
+  @media (max-width: 640px) {
+    .vip-trust { flex-wrap: wrap; }
+    .vip-trust__hint { flex-basis: 100%; }
+  }
+
+  /* The list — card rows, not a table. Easier to scan, more breathing room. */
+  .vip-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 18px; }
+  .vip-row {
+    display: grid;
+    grid-template-columns: minmax(140px, 1.1fr) minmax(180px, 1.6fr) auto auto;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--white);
+  }
+  .vip-row__name  { font-weight: 700; color: var(--navy); font-size: 15px; }
+  .vip-row__email { color: var(--text); font-size: 13px; word-break: break-all; }
+  .vip-row__meta  { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+  .vip-row__actions { display: flex; gap: 6px; }
+  .vip-row .vip-row-btn { /* reuse existing row btn styling but tighter */
+    font-size: 12px;
+    padding: 5px 10px;
+  }
+
+  .vip-row--pending-add {
+    background: color-mix(in srgb, var(--info-light) 60%, white);
+    border-style: dashed;
+    border-color: color-mix(in srgb, var(--info) 35%, white);
+  }
+  .vip-row--pending-add .vip-row__name { color: var(--text); }
+  .vip-row--pending-remove .vip-row__name,
+  .vip-row--pending-remove .vip-row__email { text-decoration: line-through; opacity: 0.6; }
+  .vip-row--pending-edit { border-color: color-mix(in srgb, var(--info) 30%, white); }
+
+  .vip-row .vip-row-blank { font-style: italic; color: var(--text-muted); font-weight: 500; }
+
+  .vip-chip {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 3px 8px;
+    border-radius: 99px;
+    white-space: nowrap;
+  }
+  .vip-chip--add    { background: var(--info-light); color: var(--info); }
+  .vip-chip--remove { background: var(--amber-light); color: color-mix(in srgb, var(--amber) 70%, black); }
+  .vip-chip--edit   { background: var(--info-light); color: var(--info); }
+
+  /* Empty state when there are zero VIPs and no pending */
+  .vip-list-empty {
+    padding: 28px 16px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 14px;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    background: var(--white);
+  }
+
+  /* History — collapsed by default, opens to a tidy list */
+  .vip-history { margin-top: 22px; border-top: 1px solid var(--border); padding-top: 12px; }
+  .vip-history > summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--navy);
+    padding: 6px 0;
+    list-style: none;
+    user-select: none;
+  }
+  .vip-history > summary::-webkit-details-marker { display: none; }
+  .vip-history > summary::before {
+    content: '▸';
+    display: inline-block;
+    margin-right: 8px;
+    transition: transform 120ms ease;
+    color: var(--text-muted);
+  }
+  .vip-history[open] > summary::before { transform: rotate(90deg); }
+  .vip-history__list {
+    margin: 8px 0 0;
+    padding-left: 24px;
+    color: var(--text);
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .vip-history__list .vip-log__date { color: var(--text-muted); font-weight: 600; margin-right: 8px; }
+  .vip-history__empty { color: var(--text-muted); font-size: 13px; padding: 6px 0; }
 </style>
 </head>
 <body>
@@ -836,34 +1016,43 @@
     <!-- Loading flash while we figure out which view to render -->
     <div id="vipBoot" class="vip-flash">Loading…</div>
 
-    <!-- ── CLUB VIEW (role=club) ─────────────────────────────────────── -->
+    <!-- ── CLUB VIEW (role=club) ─────────────────────────────────────────
+         v1.2 redesign — the list IS the page. Hero shows what club +
+         how many slots. Trust strip says how fresh the list is. The
+         list itself renders pending changes inline (ghost rows for adds,
+         strike-through for removes) so it always answers "who has
+         access right now (and what's about to change)?" at a glance.
+         The open-request banner is now secondary, just an audit summary
+         of what's in flight. -->
     <section id="clubView" style="display:none">
-      <div class="vip-header">
-        <img id="clubCrest" class="vip-header__crest" alt="" src="">
-        <div class="vip-header__text">
-          <h1 class="vip-header__title" id="clubTitle">VIP access</h1>
-          <div class="vip-header__sub" id="clubSubtitle">—</div>
+
+      <!-- 1. Hero -->
+      <header class="vip-list-hero">
+        <img id="clubCrest" class="vip-list-hero__crest" alt="" src="">
+        <div class="vip-list-hero__text">
+          <h1 class="vip-list-hero__title" id="clubTitle">VIP access</h1>
+          <div class="vip-list-hero__sub" id="clubSubtitle">—</div>
         </div>
-      </div>
-
-      <div id="openRequestBanner" style="display:none"></div>
-
-      <div class="vip-table-wrap">
-        <table class="vip-table" id="clubVipTable">
-          <thead>
-            <tr><th class="col-name">Name</th><th>Email</th><th class="col-actions"></th></tr>
-          </thead>
-          <tbody id="clubVipBody"></tbody>
-        </table>
-      </div>
-
-      <div class="vip-action-bar">
-        <div class="vip-cap-note" id="clubCapNote"></div>
-        <div>
-          <button class="btn btn--navy" id="addVipBtn">+ Add VIP</button>
+        <div class="vip-list-hero__cta">
+          <button class="btn btn--primary" id="addVipBtn">+ Add VIP</button>
         </div>
+      </header>
+
+      <!-- 2. Trust strip — green/amber/grey depending on how recently
+              the list was reconciled against DAZN's real list. Populated
+              by org.lastVerifiedAt (set by the future paste-to-overwrite
+              admin tool). Defaults to "unknown" if absent. -->
+      <div class="vip-trust" id="clubTrustStrip" data-state="unknown">
+        <span class="vip-trust__dot"></span>
+        <span class="vip-trust__text" id="clubTrustText">Checking…</span>
+        <span class="vip-trust__hint" id="clubTrustHint"></span>
       </div>
 
+      <!-- 3. The list itself — card rows with inline pending markers -->
+      <div class="vip-list" id="clubVipList"></div>
+
+      <!-- 4. Pending-but-not-yet-submitted basket — only shows while
+              the club is assembling a new request. -->
       <div class="vip-basket" id="clubBasket" style="display:none">
         <div class="vip-basket__title">Pending changes — not yet submitted</div>
         <ul class="vip-basket__list" id="clubBasketList"></ul>
@@ -873,10 +1062,17 @@
         </div>
       </div>
 
-      <div class="vip-log" id="clubRecentLog" style="display:none">
-        <div class="vip-log__title">Recent changes</div>
-        <ul class="vip-log__list" id="clubRecentList"></ul>
-      </div>
+      <!-- 5. Open-request banner (secondary now — list shows status inline) -->
+      <div id="openRequestBanner" style="display:none"></div>
+
+      <!-- 6. Cap note (kept for the "at cap" edge case messaging) -->
+      <div class="vip-cap-note" id="clubCapNote" style="margin-top:8px"></div>
+
+      <!-- 7. History — collapsed by default -->
+      <details class="vip-history" id="clubRecentLog">
+        <summary>Show change history for this club</summary>
+        <ol class="vip-history__list" id="clubRecentList"></ol>
+      </details>
     </section>
 
     <!-- ── STAFF VIEW (role=staff/admin/superadmin) ──────────────────── -->
@@ -1668,10 +1864,13 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
   }
 
   var _openReqUnsub = null;
+  var _currentOpenReq = null;   /* cached so paintClubBody can render in-flight markers */
   function paintClubView() {
     var org = S.orgs[S.clubName] || { vips: {} };
     var vips = listValues(org.vips);
     vips.sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); });
+
+    paintTrustStrip(org);
 
     /* Detach any prior open-request listener */
     if (_openReqUnsub) { try { _openReqUnsub.off(); } catch (e) {} _openReqUnsub = null; }
@@ -1683,56 +1882,175 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       ref.on('value', function (snap) {
         var openReq = snap.val();
         if (openReq) openReq._key = openId;
+        _currentOpenReq = openReq;
         paintOpenRequestBanner(openReq, openId);
         paintClubBody(vips, !!openReq && (openReq.status === 'pending' || openReq.status === 'sent'));
       });
     } else {
+      _currentOpenReq = null;
       paintOpenRequestBanner(null, null);
       paintClubBody(vips, false);
     }
   }
 
+  /* Trust strip — green/amber/grey based on how stale the local mirror
+     is vs DAZN. Reads org.lastVerifiedAt (admin sets this when they
+     paste-overwrite). Until that feature ships nothing writes it, so
+     all clubs show "unknown" — which is the honest state. */
+  function paintTrustStrip(org) {
+    var stripEl = document.getElementById('clubTrustStrip');
+    var textEl  = document.getElementById('clubTrustText');
+    var hintEl  = document.getElementById('clubTrustHint');
+    if (!stripEl) return;
+
+    var ts = org && org.lastVerifiedAt;
+    if (!ts) {
+      stripEl.setAttribute('data-state', 'unknown');
+      textEl.innerHTML = 'This list has <strong>not yet been verified</strong> against DAZN’s records.';
+      hintEl.textContent = 'Treat as a working copy until the National League runs a reconciliation.';
+      return;
+    }
+    var ageMs   = Date.now() - ts;
+    var ageDays = Math.floor(ageMs / (1000 * 60 * 60 * 24));
+    var stale   = ageDays > 90;   /* anything over ~3 months is amber */
+    stripEl.setAttribute('data-state', stale ? 'stale' : 'fresh');
+    textEl.innerHTML = 'Last verified against DAZN on <strong>' + esc(fmtDate(ts)) + '</strong>'
+      + (ageDays > 0 ? ' (' + ageDays + ' day' + (ageDays === 1 ? '' : 's') + ' ago).' : ' (today).');
+    hintEl.textContent = stale
+      ? 'Overdue — ask the National League to re-verify if anything looks off.'
+      : 'If a name looks wrong, request a change and we’ll confirm with DAZN.';
+  }
+
+  /* Build a "pending" overlay map: vipId → {kind, change}. Sources:
+       - if the request is in flight (locked), use req.changes
+       - otherwise use the unsubmitted basket
+     Then merge with current vips to render rows in three states:
+       confirmed | pending-remove | pending-edit
+     Plus standalone "pending-add" rows appended at the bottom. */
+  function buildPendingOverlay(vips, locked) {
+    var byVipId = {};           /* vipId → {action,...} for existing rows */
+    var byEmail = {};
+    var adds = [];              /* standalone added rows */
+    var src;
+    if (locked && _currentOpenReq && _currentOpenReq.changes) {
+      src = _currentOpenReq.changes;
+    } else {
+      src = S.basket || [];
+    }
+    vips.forEach(function (v) { if (v.email) byEmail[(v.email || '').toLowerCase()] = v._key; });
+
+    src.forEach(function (c) {
+      if (c.action === 'add') {
+        adds.push(c);
+      } else if (c.action === 'remove') {
+        var k = c.vipId || byEmail[(c.email || '').toLowerCase()];
+        if (k) byVipId[k] = { kind: 'remove', change: c };
+      } else if (c.action === 'edit') {
+        var k2 = c.vipId || byEmail[((c.before && c.before.email) || '').toLowerCase()];
+        if (k2) byVipId[k2] = { kind: 'edit', change: c };
+      }
+    });
+    return { byVipId: byVipId, adds: adds };
+  }
+
   function paintClubBody(vips, locked) {
-    var tbody = document.getElementById('clubVipBody');
+    var listEl = document.getElementById('clubVipList');
     var section = document.getElementById('clubView');
     if (locked) section.classList.add('vip-locked'); else section.classList.remove('vip-locked');
 
-    document.getElementById('clubSubtitle').innerHTML =
-      '<strong>' + vips.length + '</strong> of ' + CLUB_VIP_CAP + ' slots used';
+    var overlay = buildPendingOverlay(vips, locked);
 
-    if (!vips.length) {
-      tbody.innerHTML = '<tr><td colspan="3" class="vip-empty">No VIPs on the list yet. Use “Add VIP” to start.</td></tr>';
-    } else {
-      var rows = vips.map(function (v) {
-        var nameHtml = v.name ? esc(v.name) : '<span class="vip-name-blank">(no name)</span>';
-        return '<tr>'
-          + '<td class="col-name">' + nameHtml + '</td>'
-          + '<td class="vip-email">' + esc(v.email) + '</td>'
-          + '<td class="col-actions">'
-          +   '<button class="vip-row-btn" data-act="edit"   data-vip="' + esc(v._key) + '">Edit</button>'
-          +   '<button class="vip-row-btn is-danger" data-act="remove" data-vip="' + esc(v._key) + '">Remove</button>'
-          + '</td>'
-          + '</tr>';
-      });
-      tbody.innerHTML = rows.join('');
+    /* Subtitle — confirmed count + any pending-add total */
+    var confirmedLive = vips.length;   /* what DAZN currently has */
+    var pendingAdds   = overlay.adds.length;
+    var pendingRems   = Object.keys(overlay.byVipId).filter(function (k) { return overlay.byVipId[k].kind === 'remove'; }).length;
+    var sub = '<strong>' + confirmedLive + '</strong> of ' + CLUB_VIP_CAP + ' slots in use';
+    if (pendingAdds || pendingRems) {
+      var bits = [];
+      if (pendingAdds) bits.push('+' + pendingAdds + ' pending add' + (pendingAdds === 1 ? '' : 's'));
+      if (pendingRems) bits.push('−' + pendingRems + ' pending remove' + (pendingRems === 1 ? '' : 's'));
+      sub += ' · ' + bits.join(' · ');
     }
+    document.getElementById('clubSubtitle').innerHTML = sub;
 
-    var addBtn = document.getElementById('addVipBtn');
+    /* Build rows */
+    var rowsHtml = '';
+
+    if (!vips.length && !overlay.adds.length) {
+      rowsHtml = '<div class="vip-list-empty">No VIPs on the list yet. Use “Add VIP” to start.</div>';
+    } else {
+      rowsHtml = vips.map(function (v) { return renderVipRow(v, overlay.byVipId[v._key], locked); }).join('');
+      rowsHtml += overlay.adds.map(function (c) { return renderPendingAddRow(c, locked); }).join('');
+    }
+    listEl.innerHTML = rowsHtml;
+
+    /* CTA + cap note */
+    var addBtn  = document.getElementById('addVipBtn');
     var capNote = document.getElementById('clubCapNote');
-    var slotsLeft = CLUB_VIP_CAP - vips.length;
+    var projected = confirmedLive + pendingAdds - pendingRems;
+    var slotsLeft = CLUB_VIP_CAP - projected;
     if (slotsLeft <= 0) {
       addBtn.disabled = true;
-      capNote.textContent = 'At cap. Remove an existing VIP first to add another.';
+      capNote.textContent = 'At cap. Queue a removal first, or wait for an existing add to land.';
     } else {
       addBtn.disabled = false;
       capNote.textContent = slotsLeft + ' slot' + (slotsLeft === 1 ? '' : 's') + ' available.';
     }
     if (locked) {
       addBtn.disabled = true;
-      capNote.textContent = 'Changes locked while a request is being processed.';
+      capNote.textContent = 'Changes locked while a request is being processed by the National League / DAZN.';
     }
 
     paintBasket();
+  }
+
+  function renderVipRow(v, pending, locked) {
+    var pendKind = pending && pending.kind;
+    var cls = 'vip-row';
+    if (pendKind === 'remove') cls += ' vip-row--pending-remove';
+    if (pendKind === 'edit')   cls += ' vip-row--pending-edit';
+
+    var nameHtml  = v.name  ? esc(v.name)  : '<span class="vip-row-blank">(no name)</span>';
+    var emailHtml = esc(v.email || '');
+
+    /* If it's a pending edit, show the proposed new name/email instead */
+    if (pendKind === 'edit' && pending.change && pending.change.after) {
+      nameHtml  = (pending.change.after.name ? esc(pending.change.after.name) : '<span class="vip-row-blank">(no name)</span>');
+      emailHtml = esc(pending.change.after.email || '');
+    }
+
+    var chipHtml = '';
+    if (pendKind === 'remove') chipHtml = '<span class="vip-chip vip-chip--remove">Pending removal</span>';
+    if (pendKind === 'edit')   chipHtml = '<span class="vip-chip vip-chip--edit">Pending edit</span>';
+
+    var addedMeta = v.addedAt ? 'Added ' + esc(fmtDate(v.addedAt)) : '';
+
+    var actionsHtml = '';
+    if (!locked && !pendKind) {
+      actionsHtml = '<div class="vip-row__actions">'
+        +   '<button class="vip-row-btn" data-act="edit"   data-vip="' + esc(v._key) + '">Edit</button>'
+        +   '<button class="vip-row-btn is-danger" data-act="remove" data-vip="' + esc(v._key) + '">Remove</button>'
+        + '</div>';
+    }
+
+    return '<article class="' + cls + '">'
+      +   '<div class="vip-row__name">' + nameHtml + '</div>'
+      +   '<div class="vip-row__email">' + emailHtml + '</div>'
+      +   '<div class="vip-row__meta">' + addedMeta + '</div>'
+      +   (chipHtml || actionsHtml || '<div></div>')
+      + '</article>';
+  }
+
+  function renderPendingAddRow(c, locked) {
+    var nameHtml  = c.name  ? esc(c.name)  : '<span class="vip-row-blank">(no name)</span>';
+    var emailHtml = esc(c.email || '');
+    var meta = locked ? 'Submitted to DAZN' : 'Queued — not yet sent';
+    return '<article class="vip-row vip-row--pending-add">'
+      +   '<div class="vip-row__name">' + nameHtml + '</div>'
+      +   '<div class="vip-row__email">' + emailHtml + '</div>'
+      +   '<div class="vip-row__meta">' + esc(meta) + '</div>'
+      +   '<span class="vip-chip vip-chip--add">' + (locked ? 'Pending DAZN' : 'Pending submit') + '</span>'
+      + '</article>';
   }
 
   function paintOpenRequestBanner(req, reqId) {
@@ -1792,10 +2110,14 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     entries.sort(function (a, b) { return (b._key * 1) - (a._key * 1); });
     var log = document.getElementById('clubRecentLog');
     var list = document.getElementById('clubRecentList');
-    if (!entries.length) { log.style.display = 'none'; return; }
-    log.style.display = '';
-    list.innerHTML = entries.slice(0, 8).map(function (e) {
-      return '<li><span class="vip-log__date">' + esc(fmtDate(e._key * 1)) + '</span> '
+    if (!log || !list) return;
+    /* <details> stays in the DOM either way — just paint placeholder when empty */
+    if (!entries.length) {
+      list.innerHTML = '<li class="vip-history__empty">No history yet.</li>';
+      return;
+    }
+    list.innerHTML = entries.slice(0, 12).map(function (e) {
+      return '<li><span class="vip-log__date">' + esc(fmtDate(e._key * 1)) + '</span>'
         + esc(e.summary || '—')
         + (e.by ? ' <span style="font-size:11px;opacity:.7;">(by ' + esc(e.by) + ')</span>' : '')
         + '</li>';
@@ -1837,19 +2159,28 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     }).join('');
   }
 
+  /* Basket mutations need to repaint the list too — inline pending markers
+     are derived from basket contents. Cheap to repaint the few rows. */
+  function repaintListAfterBasket() {
+    var org = S.orgs[S.clubName] || { vips: {} };
+    var vips = listValues(org.vips);
+    vips.sort(function (a, b) { return (a.name || '').localeCompare(b.name || ''); });
+    var locked = !!_currentOpenReq && (_currentOpenReq.status === 'pending' || _currentOpenReq.status === 'sent');
+    paintClubBody(vips, locked);
+  }
   function addToBasket(change) {
     S.basket.push(change);
-    paintBasket();
+    repaintListAfterBasket();
   }
 
   function removeFromBasket(idx) {
     S.basket.splice(idx, 1);
-    paintBasket();
+    repaintListAfterBasket();
   }
 
   function discardBasket() {
     S.basket = [];
-    paintBasket();
+    repaintListAfterBasket();
   }
 
   function wireClubEvents() {
@@ -1858,8 +2189,8 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       openVipModal({ mode: 'add' });
     });
 
-    /* Edit / Remove on rows */
-    document.getElementById('clubVipBody').addEventListener('click', function (e) {
+    /* Edit / Remove on rows (delegated on the card-list container) */
+    document.getElementById('clubVipList').addEventListener('click', function (e) {
       var t = e.target;
       if (!t || !t.dataset || !t.dataset.act) return;
       var vipId = t.dataset.vip;
