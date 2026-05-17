@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — DAZN VIP
-  Version: v1.2 (17/05/2026)
+  Version: v1.3 (17/05/2026)
   File: /tools/dazn-vip/index.html
 
   Tool for logging VIP access changes for the DAZN feed.
@@ -28,6 +28,20 @@
     role=staff + access=access  → browse all, view only
     role=admin/superadmin + admin → action requests, manage non-club orgs
 
+  v1.3 — Admin: surface open requests on the Clubs grid + default-to-Clubs.
+         Requests were only visible by switching to the Requests tab,
+         which made the at-a-glance "who needs something?" question
+         require navigation. Two changes:
+         - Default landing tab flipped from Requests → Clubs (the
+           visual overview).
+         - Each club card now carries a status pill in the header AND
+           an accent border when there's an in-flight request from
+           that club: red border + "Awaiting review" pill while status
+           is pending (your move), amber border + "With DAZN" pill while
+           status is sent (waiting on external reply).
+         Cards now also repaint when requests update (previously the
+         requests listener only repainted the Requests tab).
+         No backend / rules changes.
   v1.2 — Club landing redesign. The list is now the page, not a tab buried
          behind a banner. Three changes that matter:
          - Trust strip at the top says how recently the local mirror was
@@ -100,6 +114,15 @@
     var NL_TOOL_KEY = 'media-dazn-vip';
 
     window.NL_CHANGELOG = [
+      {
+        date: '17 May 2026',
+        version: 'v1.3',
+        items: [
+          'Admin: Clubs is now the default tab — see all 72 clubs at a glance instead of landing on the request queue.',
+          'Each club card flags any open request right in the card header: red border + “Awaiting review” when it’s your move, amber + “With DAZN” when you’re waiting on their reply.',
+          'Cards refresh automatically as requests land or change status.'
+        ]
+      },
       {
         date: '17 May 2026',
         version: 'v1.2',
@@ -671,6 +694,19 @@
     border-radius: 12px;
     overflow: hidden;
   }
+  /* Open-request highlight — sits behind .is-dirty so admin's own
+     unsaved edits still win the visual battle when both apply.
+     red-tinted = needs admin review; amber-tinted = with DAZN. */
+  .club-card.has-open-request:not(.is-dirty) {
+    border-color: color-mix(in srgb, var(--red) 40%, white);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--red) 10%, transparent);
+  }
+  .club-card.has-open-request--sent:not(.is-dirty) {
+    border-color: color-mix(in srgb, var(--amber) 45%, white);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--amber) 12%, transparent);
+  }
+  .club-card__req-pill { flex-shrink: 0; }   /* sits in the header flex row */
+
   .club-card.is-dirty { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 12%, transparent); }
 
   .club-card__head {
@@ -1090,21 +1126,27 @@
       <div id="vipDiag" class="vip-diag" style="display:none"></div>
 
       <nav class="vip-tabs">
-        <button class="vip-tab is-active" data-tab="requests">Requests <span class="vip-tab__count" id="tabRequestsCount" style="display:none">0</span></button>
-        <button class="vip-tab" data-tab="clubs">Clubs</button>
+        <button class="vip-tab" data-tab="requests">Requests <span class="vip-tab__count" id="tabRequestsCount" style="display:none">0</span></button>
+        <button class="vip-tab is-active" data-tab="clubs">Clubs</button>
         <button class="vip-tab" data-tab="nonClubs" id="tabNonClubsBtn" style="display:none">Non-clubs</button>
         <button class="vip-tab" data-tab="seed" id="tabSeedBtn" style="display:none">Seed</button>
       </nav>
 
-      <div id="tabRequests" class="vip-tab-panel">
+      <!-- Requests panel is no longer the default landing; Clubs gives a
+           visual overview of all 72 clubs, with cards flagged when a
+           club has an open request awaiting action. -->
+      <div id="tabRequests" class="vip-tab-panel" style="display:none">
         <div id="reqList"></div>
       </div>
 
       <!-- Clubs tab — driven by clubs-meta.json (canonical 72 clubs).
            Per-club section with crest + 5 slots. Admin can add / edit /
            remove in any combination and "Save" opens the Review & send
-           modal which generates the DAZN email. -->
-      <div id="tabClubs" class="vip-tab-panel" style="display:none">
+           modal which generates the DAZN email. Cards now carry a
+           status pill + accent border when the club has an in-flight
+           request (status pending = awaiting admin review; status sent
+           = with DAZN). -->
+      <div id="tabClubs" class="vip-tab-panel">
         <div class="toolbar">
           <div class="toolbar__left">
             <input type="search" id="clubsSearch" class="toolbar__search" placeholder="Search club, name or email…">
@@ -2502,6 +2544,9 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       _diagState.requests = 'ok';
       _diagState.reqsCount = v ? Object.keys(v).length : 0;
       safePaint(paintRequests, 'paintRequests');
+      /* Club cards surface open-request pills + accent borders, so they
+         need to re-render when a request lands, status flips or closes. */
+      safePaint(paintClubs,    'paintClubs');
       refreshDiag();
     }, function (err) {
       console.error('[dazn-vip] requests listener error:', err);
@@ -2961,6 +3006,16 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     var canEdit = !!S.isAdmin;
     var totalFilled = 0, totalSlots = 0, shownCount = 0;
 
+    /* Map clubName → open request (status pending or sent) so card
+       headers can surface a visual signal without the admin having to
+       cross-check the Requests tab. */
+    var openReqByClub = {};
+    listValues(S.requests || {}).forEach(function (r) {
+      if (r && (r.status === 'pending' || r.status === 'sent') && r.orgName) {
+        openReqByClub[r.orgName] = r;
+      }
+    });
+
     var html = S.clubsMeta.map(function (cm) {
       var clubName = cm.name;
       var org = (S.orgs || {})[clubName];
@@ -3063,14 +3118,28 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       var crestUrl = CREST_BASE + encodeURIComponent(clubName) + '.png';
       var changeCount = pendingRemoves + Object.keys(p.edits).length + pendingAdds;
 
+      /* Open-request signal — pill in header + accent border on card. */
+      var openReq = openReqByClub[clubName];
+      var openReqPill = '';
+      var openReqCls  = '';
+      if (openReq) {
+        openReqCls = ' has-open-request has-open-request--' + esc(openReq.status);
+        if (openReq.status === 'pending') {
+          openReqPill = '<span class="pill pill--expired club-card__req-pill" title="Club submitted a request — awaiting your review">Awaiting review</span>';
+        } else if (openReq.status === 'sent') {
+          openReqPill = '<span class="pill pill--pending club-card__req-pill" title="Forwarded to DAZN — awaiting their reply">With DAZN</span>';
+        }
+      }
+
       return ''
-        + '<section class="club-card' + (dirty ? ' is-dirty' : '') + '" data-club="' + esc(clubName) + '">'
+        + '<section class="club-card' + (dirty ? ' is-dirty' : '') + openReqCls + '" data-club="' + esc(clubName) + '">'
           + '<header class="club-card__head">'
             + '<img class="club-card__crest" src="' + esc(crestUrl) + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
             + '<div class="club-card__title">'
               + '<div class="club-card__name">' + esc(clubName) + '</div>'
               + '<div class="club-card__meta">' + esc(cm.division || '') + (cm.code ? ' · ' + esc(cm.code) : '') + '</div>'
             + '</div>'
+            + openReqPill
             + '<span class="' + countCls + '">' + liveCount + ' / ' + CLUB_SLOTS + '</span>'
           + '</header>'
           + '<div class="club-card__slots">' + slotsHtml + '</div>'
