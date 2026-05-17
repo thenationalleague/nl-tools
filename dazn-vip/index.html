@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — DAZN VIP
-  Version: v1.2 (17/05/2026)
+  Version: v1.4 (17/05/2026)
   File: /tools/dazn-vip/index.html
 
   Tool for logging VIP access changes for the DAZN feed.
@@ -28,6 +28,28 @@
     role=staff + access=access  → browse all, view only
     role=admin/superadmin + admin → action requests, manage non-club orgs
 
+  v1.4 — Recently-closed requests collapse to one row each (was a full
+         action-card per closed request, which dominated the page once
+         a few requests had landed). Each row shows the status pill,
+         club, short change summary and closing timestamp / actor.
+         Click the row to expand the full audit trail (requested / sent
+         / completed / cancelled, with by-whom + change list). Open
+         requests still render as full action-cards — the buttons need
+         the room.
+  v1.3 — Admin: surface open requests on the Clubs grid + default-to-Clubs.
+         Requests were only visible by switching to the Requests tab,
+         which made the at-a-glance "who needs something?" question
+         require navigation. Two changes:
+         - Default landing tab flipped from Requests → Clubs (the
+           visual overview).
+         - Each club card now carries a status pill in the header AND
+           an accent border when there's an in-flight request from
+           that club: red border + "Awaiting review" pill while status
+           is pending (your move), amber border + "With DAZN" pill while
+           status is sent (waiting on external reply).
+         Cards now also repaint when requests update (previously the
+         requests listener only repainted the Requests tab).
+         No backend / rules changes.
   v1.2 — Club landing redesign. The list is now the page, not a tab buried
          behind a banner. Three changes that matter:
          - Trust strip at the top says how recently the local mirror was
@@ -100,6 +122,22 @@
     var NL_TOOL_KEY = 'media-dazn-vip';
 
     window.NL_CHANGELOG = [
+      {
+        date: '17 May 2026',
+        version: 'v1.4',
+        items: [
+          'Admin: recently-closed requests now collapse to a single row each — click the row to expand the audit trail. Removes the wall of huge cards.'
+        ]
+      },
+      {
+        date: '17 May 2026',
+        version: 'v1.3',
+        items: [
+          'Admin: Clubs is now the default tab — see all 72 clubs at a glance instead of landing on the request queue.',
+          'Each club card flags any open request right in the card header: red border + “Awaiting review” when it’s your move, amber + “With DAZN” when you’re waiting on their reply.',
+          'Cards refresh automatically as requests land or change status.'
+        ]
+      },
       {
         date: '17 May 2026',
         version: 'v1.2',
@@ -477,6 +515,56 @@
   }
   .req-history div { margin: 2px 0; }
 
+  /* Closed-request rows — one line per closed request, click to expand
+     the audit trail. Replaces the full .req-card for done items, which
+     bloated the recently-closed list. */
+  .req-rows { display: flex; flex-direction: column; gap: 6px; }
+  .req-row {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .req-row > summary {
+    display: grid;
+    grid-template-columns: auto 1fr 2fr auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    font-size: 13px;
+  }
+  .req-row > summary::-webkit-details-marker { display: none; }
+  .req-row > summary:hover { background: var(--off-white); }
+  .req-row__pill { justify-self: start; }
+  .req-row__org  { font-weight: 700; color: var(--navy); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .req-row__changes-short { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .req-row__when { color: var(--text-muted); font-size: 12px; white-space: nowrap; justify-self: end; }
+  .req-row__history {
+    padding: 8px 14px 12px;
+    border-top: 1px dashed var(--border);
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .req-row__history > div { margin: 2px 0; }
+  .req-row__changes { margin-top: 6px; padding-top: 6px; border-top: 1px dotted var(--border); color: var(--text); }
+  @media (max-width: 640px) {
+    .req-row > summary {
+      grid-template-columns: auto 1fr;
+      grid-template-areas:
+        "pill org"
+        "changes changes"
+        "when when";
+      row-gap: 4px;
+    }
+    .req-row__pill          { grid-area: pill; }
+    .req-row__org           { grid-area: org; }
+    .req-row__changes-short { grid-area: changes; white-space: normal; }
+    .req-row__when          { grid-area: when; justify-self: start; }
+  }
+
   /* Clubs + Non-clubs tabs both use brand .toolbar + .table widgets — no
      local card styling needed. The old .vip-org-card* rules and the
      paintNonClubs accordion they styled are gone. */
@@ -671,6 +759,19 @@
     border-radius: 12px;
     overflow: hidden;
   }
+  /* Open-request highlight — sits behind .is-dirty so admin's own
+     unsaved edits still win the visual battle when both apply.
+     red-tinted = needs admin review; amber-tinted = with DAZN. */
+  .club-card.has-open-request:not(.is-dirty) {
+    border-color: color-mix(in srgb, var(--red) 40%, white);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--red) 10%, transparent);
+  }
+  .club-card.has-open-request--sent:not(.is-dirty) {
+    border-color: color-mix(in srgb, var(--amber) 45%, white);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--amber) 12%, transparent);
+  }
+  .club-card__req-pill { flex-shrink: 0; }   /* sits in the header flex row */
+
   .club-card.is-dirty { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 12%, transparent); }
 
   .club-card__head {
@@ -1090,21 +1191,27 @@
       <div id="vipDiag" class="vip-diag" style="display:none"></div>
 
       <nav class="vip-tabs">
-        <button class="vip-tab is-active" data-tab="requests">Requests <span class="vip-tab__count" id="tabRequestsCount" style="display:none">0</span></button>
-        <button class="vip-tab" data-tab="clubs">Clubs</button>
+        <button class="vip-tab" data-tab="requests">Requests <span class="vip-tab__count" id="tabRequestsCount" style="display:none">0</span></button>
+        <button class="vip-tab is-active" data-tab="clubs">Clubs</button>
         <button class="vip-tab" data-tab="nonClubs" id="tabNonClubsBtn" style="display:none">Non-clubs</button>
         <button class="vip-tab" data-tab="seed" id="tabSeedBtn" style="display:none">Seed</button>
       </nav>
 
-      <div id="tabRequests" class="vip-tab-panel">
+      <!-- Requests panel is no longer the default landing; Clubs gives a
+           visual overview of all 72 clubs, with cards flagged when a
+           club has an open request awaiting action. -->
+      <div id="tabRequests" class="vip-tab-panel" style="display:none">
         <div id="reqList"></div>
       </div>
 
       <!-- Clubs tab — driven by clubs-meta.json (canonical 72 clubs).
            Per-club section with crest + 5 slots. Admin can add / edit /
            remove in any combination and "Save" opens the Review & send
-           modal which generates the DAZN email. -->
-      <div id="tabClubs" class="vip-tab-panel" style="display:none">
+           modal which generates the DAZN email. Cards now carry a
+           status pill + accent border when the club has an in-flight
+           request (status pending = awaiting admin review; status sent
+           = with DAZN). -->
+      <div id="tabClubs" class="vip-tab-panel">
         <div class="toolbar">
           <div class="toolbar__left">
             <input type="search" id="clubsSearch" class="toolbar__search" placeholder="Search club, name or email…">
@@ -2502,6 +2609,9 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       _diagState.requests = 'ok';
       _diagState.reqsCount = v ? Object.keys(v).length : 0;
       safePaint(paintRequests, 'paintRequests');
+      /* Club cards surface open-request pills + accent borders, so they
+         need to re-render when a request lands, status flips or closes. */
+      safePaint(paintClubs,    'paintClubs');
       refreshDiag();
     }, function (err) {
       console.error('[dazn-vip] requests listener error:', err);
@@ -2605,9 +2715,66 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     }
     if (done.length) {
       html += '<div style="margin:24px 0 10px;font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">Recently closed</div>';
-      html += done.slice(0, 20).map(renderReqCard).join('');
+      /* Closed requests collapse to a single row each — full action-card
+         only makes sense while a request is open. Audit trail (sent /
+         completed / cancelled timestamps + by-whom) is still discoverable
+         by expanding the row. */
+      html += '<div class="req-rows">' + done.slice(0, 20).map(renderReqRow).join('') + '</div>';
     }
     document.getElementById('reqList').innerHTML = html;
+  }
+
+  /* Short text summary of a request's changes — used in collapsed rows.
+     "Remove: Test (rckdorman@gmail.com)" or "+1, −2 (3 changes)" if many */
+  function summariseChangesShort(changes) {
+    var arr = changes || [];
+    if (!arr.length) return '—';
+    if (arr.length === 1) {
+      var c = arr[0];
+      var who = (c.name || (c.before && c.before.name) || '(no name)');
+      var em  = (c.email || (c.before && c.before.email) || '');
+      var act = c.action === 'add' ? 'Add' : c.action === 'remove' ? 'Remove' : c.action === 'edit' ? 'Edit' : c.action;
+      return act + ': ' + who + (em ? ' — ' + em : '');
+    }
+    var adds = arr.filter(function (c) { return c.action === 'add'; }).length;
+    var rems = arr.filter(function (c) { return c.action === 'remove'; }).length;
+    var eds  = arr.filter(function (c) { return c.action === 'edit'; }).length;
+    var bits = [];
+    if (adds) bits.push('+' + adds);
+    if (rems) bits.push('−' + rems);
+    if (eds)  bits.push('✎' + eds);
+    return bits.join(' ') + '  (' + arr.length + ' changes)';
+  }
+
+  /* Compact row for closed (complete / cancelled) requests.
+     Click anywhere on the row to toggle the audit trail. */
+  function renderReqRow(r) {
+    var statusCls   = r.status === 'cancelled' ? 'pill--rejected' : 'pill--live';
+    var statusLabel = r.status === 'cancelled' ? 'Cancelled' : 'Complete';
+    /* Closing event is what users actually care about — when did this
+       finish? Falls back to requested time if neither is set. */
+    var closedTs = r.completedAt || r.cancelledAt || r.requestedAt;
+    var closedBy = (r.completedBy && r.completedBy.name) || (r.cancelledBy && r.cancelledBy.name) || '';
+    var historyHtml = '';
+    if (r.requestedAt || r.sentAt || r.completedAt || r.cancelledAt) {
+      historyHtml = '<div class="req-row__history">'
+        + (r.requestedAt ? '<div>Requested ' + fmtTs(r.requestedAt) + (r.requestedBy ? ' by ' + esc(r.requestedBy.name || '—') : '') + '</div>' : '')
+        + (r.sentAt      ? '<div>Sent ' + fmtTs(r.sentAt) + (r.sentBy ? ' by ' + esc(r.sentBy.name || '') : '') + '</div>' : '')
+        + (r.completedAt ? '<div>Completed ' + fmtTs(r.completedAt) + (r.completedBy ? ' by ' + esc(r.completedBy.name || '') : '') + '</div>' : '')
+        + (r.cancelledAt ? '<div>Cancelled ' + fmtTs(r.cancelledAt) + (r.cancelledBy ? ' by ' + esc(r.cancelledBy.name || '') : '') + (r.cancelReason ? ' — ' + esc(r.cancelReason) : '') + '</div>' : '')
+        + '<div class="req-row__changes">' + (r.changes || []).map(function (c) { return '<div>• ' + summariseChange(c) + '</div>'; }).join('') + '</div>'
+        + '</div>';
+    }
+    return ''
+      + '<details class="req-row">'
+      +   '<summary class="req-row__summary">'
+      +     '<span class="pill ' + statusCls + ' req-row__pill">' + esc(statusLabel) + '</span>'
+      +     '<span class="req-row__org">' + esc(r.orgName) + '</span>'
+      +     '<span class="req-row__changes-short">' + esc(summariseChangesShort(r.changes)) + '</span>'
+      +     '<span class="req-row__when">' + esc(fmtTs(closedTs)) + (closedBy ? ' · ' + esc(closedBy) : '') + '</span>'
+      +   '</summary>'
+      +   historyHtml
+      + '</details>';
   }
 
   function renderReqCard(r) {
@@ -2961,6 +3128,16 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
     var canEdit = !!S.isAdmin;
     var totalFilled = 0, totalSlots = 0, shownCount = 0;
 
+    /* Map clubName → open request (status pending or sent) so card
+       headers can surface a visual signal without the admin having to
+       cross-check the Requests tab. */
+    var openReqByClub = {};
+    listValues(S.requests || {}).forEach(function (r) {
+      if (r && (r.status === 'pending' || r.status === 'sent') && r.orgName) {
+        openReqByClub[r.orgName] = r;
+      }
+    });
+
     var html = S.clubsMeta.map(function (cm) {
       var clubName = cm.name;
       var org = (S.orgs || {})[clubName];
@@ -3063,14 +3240,28 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       var crestUrl = CREST_BASE + encodeURIComponent(clubName) + '.png';
       var changeCount = pendingRemoves + Object.keys(p.edits).length + pendingAdds;
 
+      /* Open-request signal — pill in header + accent border on card. */
+      var openReq = openReqByClub[clubName];
+      var openReqPill = '';
+      var openReqCls  = '';
+      if (openReq) {
+        openReqCls = ' has-open-request has-open-request--' + esc(openReq.status);
+        if (openReq.status === 'pending') {
+          openReqPill = '<span class="pill pill--expired club-card__req-pill" title="Club submitted a request — awaiting your review">Awaiting review</span>';
+        } else if (openReq.status === 'sent') {
+          openReqPill = '<span class="pill pill--pending club-card__req-pill" title="Forwarded to DAZN — awaiting their reply">With DAZN</span>';
+        }
+      }
+
       return ''
-        + '<section class="club-card' + (dirty ? ' is-dirty' : '') + '" data-club="' + esc(clubName) + '">'
+        + '<section class="club-card' + (dirty ? ' is-dirty' : '') + openReqCls + '" data-club="' + esc(clubName) + '">'
           + '<header class="club-card__head">'
             + '<img class="club-card__crest" src="' + esc(crestUrl) + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
             + '<div class="club-card__title">'
               + '<div class="club-card__name">' + esc(clubName) + '</div>'
               + '<div class="club-card__meta">' + esc(cm.division || '') + (cm.code ? ' · ' + esc(cm.code) : '') + '</div>'
             + '</div>'
+            + openReqPill
             + '<span class="' + countCls + '">' + liveCount + ' / ' + CLUB_SLOTS + '</span>'
           + '</header>'
           + '<div class="club-card__slots">' + slotsHtml + '</div>'
