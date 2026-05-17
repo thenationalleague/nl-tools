@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — DAZN VIP
-  Version: v1.5 (17/05/2026)
+  Version: v1.6 (17/05/2026)
   File: /tools/dazn-vip/index.html
 
   Tool for logging VIP access changes for the DAZN feed.
@@ -28,6 +28,21 @@
     role=staff + access=access  → browse all, view only
     role=admin/superadmin + admin → action requests, manage non-club orgs
 
+  v1.6 — Reconcile tab (superadmin) — closes the loop on the v1.2 trust
+         strip. Workflow: paste DAZN's authoritative list (same TSV
+         format as Seed: Name⇥Email⇥Type⇥Org), see a diff against the
+         current mirror per org, type OVERWRITE to confirm, apply.
+         - Diff matches VIPs by email (case-insensitive); name changes
+           render as edits, not remove+add.
+         - Orgs missing from the paste are left untouched (their VIPs
+           AND their lastVerifiedAt — honest about what was verified).
+         - Apply writes everything in one batched update, stamps
+           lastVerifiedAt + lastVerifiedBy on every touched org, and
+           writes one concise audit row per org (not per VIP).
+         - Warns when any org in the paste has an in-flight request.
+         RULES: requires writing orgs/<name>/lastVerifiedAt|By. New
+         rules added to dazn-vip.rules.json — must be deployed to
+         Firebase Console for the timestamp writes to succeed.
   v1.5 — Suite-consistency pass to bring the tool in line with vacancies,
          judgements, attendance.
          - All `font-size: Npx` literals (71 of them) swapped to brand
@@ -141,6 +156,15 @@
     var NL_TOOL_KEY = 'media-dazn-vip';
 
     window.NL_CHANGELOG = [
+      {
+        date: '17 May 2026',
+        version: 'v1.6',
+        items: [
+          'New Reconcile tab (superadmin only) — paste DAZN’s master VIP list, see a diff against the current mirror per org, type OVERWRITE to apply.',
+          'Each touched org gets stamped with a verification timestamp, so the club’s trust strip flips from “not verified” to “Last verified on …”.',
+          'Orgs missing from the paste are left untouched (their VIPs and their verification timestamp).'
+        ]
+      },
       {
         date: '17 May 2026',
         version: 'v1.5',
@@ -659,6 +683,92 @@
   .seed-summary { display: flex; gap: 18px; font-size: var(--text-sm); margin-bottom: 14px; flex-wrap: wrap; }
   .seed-summary div strong { color: var(--text); font-weight: 800; display: block; font-size: var(--text-md); }
 
+  /* ── Reconcile (superadmin: paste DAZN's master list, diff, apply) ──── */
+  .rec-step__head {
+    display: flex; align-items: baseline; gap: 10px;
+    margin: 0 0 8px;
+    font-size: var(--text-md); font-weight: 800; color: var(--navy);
+  }
+  .rec-step__hint {
+    font-size: var(--text-sm); color: var(--text-muted);
+    margin: 0 0 14px; line-height: 1.5;
+  }
+  .rec-step__hint code {
+    background: var(--off-white); padding: 1px 6px; border-radius: var(--radius-sm);
+    font-size: var(--text-xs);
+  }
+  .rec-textarea {
+    width: 100%; min-height: 240px;
+    padding: 10px 12px;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: var(--text-xs); line-height: 1.5;
+    background: var(--white); color: var(--text);
+    resize: vertical;
+    margin-bottom: 12px;
+  }
+  .rec-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; margin-bottom: 18px; }
+
+  .rec-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+  .rec-summary__stat {
+    background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 10px 14px;
+  }
+  .rec-summary__num   { font-size: var(--text-md); font-weight: 900; color: var(--navy); line-height: 1.1; }
+  .rec-summary__label { font-size: var(--text-xs); color: var(--text-muted); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .rec-summary__num--add    { color: var(--green); }
+  .rec-summary__num--remove { color: var(--red); }
+  .rec-summary__num--edit   { color: var(--info); }
+
+  .rec-warn {
+    background: var(--amber-light);
+    border: 1px solid color-mix(in srgb, var(--amber) 35%, white);
+    border-radius: var(--radius);
+    padding: 10px 14px; margin-bottom: 14px;
+    font-size: var(--text-sm); color: color-mix(in srgb, var(--amber) 70%, black);
+  }
+  .rec-warn strong { color: var(--text); }
+  .rec-warn ul { margin: 6px 0 0; padding-left: 20px; }
+
+  .rec-diff { display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px; }
+  .rec-org {
+    background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .rec-org__head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    background: var(--off-white);
+    border-bottom: 1px solid var(--border);
+  }
+  .rec-org__name   { font-weight: 800; color: var(--navy); font-size: var(--text-sm); }
+  .rec-org__counts { font-size: var(--text-xs); color: var(--text-muted); margin-left: auto; }
+  .rec-org__counts span { margin-left: 8px; }
+  .rec-org__rows { padding: 8px 14px; font-size: var(--text-xs); line-height: 1.6; }
+  .rec-row { display: flex; gap: 10px; align-items: baseline; }
+  .rec-row__mark { width: 16px; font-weight: 800; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; flex-shrink: 0; }
+  .rec-row--add    { color: var(--green); }
+  .rec-row--remove { color: var(--red); text-decoration: line-through; opacity: 0.85; }
+  .rec-row--edit   { color: var(--info); }
+  .rec-row--keep   { color: var(--text-muted); }
+
+  .rec-confirm {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px 14px; margin-bottom: 14px;
+    font-size: var(--text-sm);
+  }
+  .rec-confirm input {
+    flex: 0 0 180px;
+    padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--text-sm);
+  }
+
   /* ── Locked state (when open request exists) ────────────────────────── */
   .vip-locked .vip-row-btn,
   .vip-locked #addVipBtn { opacity: 0.4; pointer-events: none; }
@@ -1110,6 +1220,7 @@
         <button class="tab" data-tab="requests">Requests <span class="tab__count" id="tabRequestsCount" style="display:none">0</span></button>
         <button class="tab active" data-tab="clubs">Clubs</button>
         <button class="tab" data-tab="nonClubs" id="tabNonClubsBtn" style="display:none">Non-clubs</button>
+        <button class="tab" data-tab="reconcile" id="tabReconcileBtn" style="display:none">Reconcile</button>
         <button class="tab" data-tab="seed" id="tabSeedBtn" style="display:none">Seed</button>
       </nav>
 
@@ -1197,6 +1308,14 @@
           <button type="button" class="btn btn--ghost" id="ncActionBarClear">Clear</button>
           <button type="button" class="btn btn--primary" id="ncActionBarRemove">Remove selected</button>
         </div>
+      </div>
+
+      <!-- Reconcile tab — superadmin pastes the DAZN-provided list, sees a
+           diff against the current mirror, and applies. Stamps each
+           touched org with lastVerifiedAt so the club's trust strip
+           goes green. Orgs not in the paste are left untouched. -->
+      <div id="tabReconcile" class="vip-tab-panel" style="display:none">
+        <div id="reconcileRoot"></div>
       </div>
 
       <div id="tabSeed" class="vip-tab-panel" style="display:none">
@@ -2436,6 +2555,7 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       document.getElementById('tabNonClubsBtn').style.display = '';
     }
     if (S.isSuperadmin) {
+      document.getElementById('tabReconcileBtn').style.display = '';
       document.getElementById('tabSeedBtn').style.display = '';
     }
   }
@@ -2547,8 +2667,11 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
         document.getElementById('tabRequests').style.display = 'none';
         document.getElementById('tabClubs').style.display = 'none';
         document.getElementById('tabNonClubs').style.display = 'none';
+        document.getElementById('tabReconcile').style.display = 'none';
         document.getElementById('tabSeed').style.display = 'none';
-        document.getElementById('tab' + t.dataset.tab.charAt(0).toUpperCase() + t.dataset.tab.slice(1)).style.display = '';
+        var targetId = 'tab' + t.dataset.tab.charAt(0).toUpperCase() + t.dataset.tab.slice(1);
+        document.getElementById(targetId).style.display = '';
+        if (t.dataset.tab === 'reconcile') { try { renderReconcileStart(); } catch (e) {} }
       });
     });
 
@@ -4127,6 +4250,301 @@ Match Analyst	match.analyst@yorkcityfootballclub.co.uk	Club	York City
       document.getElementById('tabSeedBtn').style.display = 'none';
     }).catch(function (e) {
       toast('Seed failed: ' + (e.message || 'error'), 'error');
+    });
+  }
+
+  /* ════════════════════════════════════════════════════════════════════
+     RECONCILE (superadmin)
+     Paste DAZN's authoritative VIP list, see a diff against the local
+     mirror, apply with a type-OVERWRITE confirm. Stamps lastVerifiedAt
+     on every touched org so the club trust strip can flip from
+     "not verified" to "verified on <date>". Orgs not in the paste are
+     left untouched (their lastVerifiedAt also unchanged).
+     ════════════════════════════════════════════════════════════════════ */
+
+  function renderReconcileStart() {
+    var root = document.getElementById('reconcileRoot');
+    if (!root) return;
+    root.innerHTML =
+        '<div class="rec-step__head">Paste DAZN’s current VIP list</div>'
+      + '<p class="rec-step__hint">'
+      +   'Tab-separated, one row per VIP: <code>Name⇥Email⇥Type⇥Org</code>. '
+      +   'Same format as the existing Seed sheet. Types: <code>Club</code>, <code>Media</code>, <code>Partner</code>, <code>Governing body</code>, <code>Agency</code>. '
+      +   'Orgs missing from the paste are <strong>left untouched</strong> — they keep their existing VIPs and their existing verification timestamp (if any).'
+      + '</p>'
+      + '<textarea class="rec-textarea" id="recInput" placeholder="Jane Doe	jane@club.com	Club	Altrincham\nJohn Smith	john@media.tv	Media	247.tv"></textarea>'
+      + '<div class="rec-actions">'
+      +   '<button class="btn btn--ghost" id="recCancelBtn">Clear</button>'
+      +   '<button class="btn btn--primary" id="recPreviewBtn">Preview diff</button>'
+      + '</div>';
+    document.getElementById('recCancelBtn').addEventListener('click', function () {
+      document.getElementById('recInput').value = '';
+    });
+    document.getElementById('recPreviewBtn').addEventListener('click', onReconcilePreview);
+  }
+
+  function parseReconcileTSV(text) {
+    var lines = (text || '').split('\n');
+    var rows = [];
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (!line || !line.trim()) continue;
+      var parts = line.split('\t');
+      if (parts.length < 4) continue;
+      var name = trim(parts[0]);
+      var email = trim(parts[1]);
+      var type = trim(parts[2]);
+      var org = trim(parts[3]);
+      if (type === 'Parner') type = 'Partner'; /* mirror seed-tsv typo fix */
+      if (!email) continue;  /* skip rows with no email (can't match) */
+      if (!org) continue;
+      rows.push({ name: name, email: email, type: type, org: org });
+    }
+    return rows;
+  }
+
+  function typeToCategory(t) {
+    return ({
+      'Club': 'club', 'Media': 'media', 'Partner': 'partner',
+      'Governing body': 'governing', 'Agency': 'agency', 'Non-NL Club': 'ex-club'
+    })[t] || (t || '').toLowerCase();
+  }
+
+  /* Diff the paste against current S.orgs. For each org in the paste:
+     - existing VIPs in current state but NOT in paste → remove
+     - VIPs in paste but NOT in current state → add
+     - VIPs in both (matched by email, case-insensitive) but with
+       different name → edit
+     - otherwise → keep (unchanged)
+     Matching is by email because that's what DAZN keys on; name can
+     drift legitimately (typo fixes, married names, etc.). */
+  function computeReconcileDiff(rows) {
+    var byOrg = {};
+    rows.forEach(function (r) {
+      if (!byOrg[r.org]) byOrg[r.org] = { name: r.org, category: typeToCategory(r.type), rows: [], types: {} };
+      byOrg[r.org].types[r.type] = (byOrg[r.org].types[r.type] || 0) + 1;
+      byOrg[r.org].rows.push(r);
+    });
+
+    var diff = {
+      orgs: [],            /* per-org diff entries */
+      missingOrgs: [],     /* orgs in current state but not in paste — untouched */
+      totals: { add: 0, remove: 0, edit: 0, keep: 0, orgsTouched: 0 },
+      openReqOrgs: []      /* orgs with an in-flight request — warn */
+    };
+
+    Object.keys(byOrg).sort().forEach(function (orgName) {
+      var pasted = byOrg[orgName];
+      var current = (S.orgs || {})[orgName];
+      var currentVips = current ? listValues(current.vips || {}) : [];
+      var currentByEmail = {};
+      currentVips.forEach(function (v) { currentByEmail[(v.email || '').toLowerCase()] = v; });
+
+      var seenEmails = {};
+      var adds = [], edits = [], removes = [], keeps = [];
+
+      pasted.rows.forEach(function (r) {
+        var k = (r.email || '').toLowerCase();
+        seenEmails[k] = true;
+        var match = currentByEmail[k];
+        if (!match) {
+          adds.push({ name: r.name, email: r.email });
+        } else if ((match.name || '') !== (r.name || '')) {
+          edits.push({ vipId: match._key, before: { name: match.name || '', email: match.email }, after: { name: r.name, email: r.email } });
+        } else {
+          keeps.push({ vipId: match._key, name: match.name, email: match.email });
+        }
+      });
+      currentVips.forEach(function (v) {
+        if (!seenEmails[(v.email || '').toLowerCase()]) {
+          removes.push({ vipId: v._key, name: v.name || '', email: v.email || '' });
+        }
+      });
+
+      var touched = adds.length + edits.length + removes.length;
+      diff.orgs.push({
+        name: orgName,
+        category: pasted.category,
+        isNewOrg: !current,
+        adds: adds, edits: edits, removes: removes, keeps: keeps,
+        touched: touched
+      });
+      diff.totals.add    += adds.length;
+      diff.totals.edit   += edits.length;
+      diff.totals.remove += removes.length;
+      diff.totals.keep   += keeps.length;
+      if (touched > 0 || !current) diff.totals.orgsTouched++;
+
+      if (current && current.openRequestId) {
+        diff.openReqOrgs.push(orgName);
+      }
+    });
+
+    /* Orgs currently in state but not in paste — untouched */
+    Object.keys(S.orgs || {}).forEach(function (orgName) {
+      if (!byOrg[orgName]) diff.missingOrgs.push(orgName);
+    });
+
+    return diff;
+  }
+
+  function onReconcilePreview() {
+    var raw = document.getElementById('recInput').value || '';
+    var rows = parseReconcileTSV(raw);
+    if (!rows.length) { toast('No parseable rows. Need Name⇥Email⇥Type⇥Org.', 'error'); return; }
+    var diff = computeReconcileDiff(rows);
+    renderReconcileDiff(diff, raw);
+  }
+
+  function renderReconcileDiff(diff, rawPaste) {
+    var root = document.getElementById('reconcileRoot');
+    var t = diff.totals;
+
+    var summary =
+        '<div class="rec-summary">'
+      +   '<div class="rec-summary__stat"><div class="rec-summary__num">' + t.orgsTouched + '</div><div class="rec-summary__label">orgs touched</div></div>'
+      +   '<div class="rec-summary__stat"><div class="rec-summary__num rec-summary__num--add">+' + t.add + '</div><div class="rec-summary__label">adds</div></div>'
+      +   '<div class="rec-summary__stat"><div class="rec-summary__num rec-summary__num--remove">−' + t.remove + '</div><div class="rec-summary__label">removes</div></div>'
+      +   '<div class="rec-summary__stat"><div class="rec-summary__num rec-summary__num--edit">✎' + t.edit + '</div><div class="rec-summary__label">edits</div></div>'
+      +   '<div class="rec-summary__stat"><div class="rec-summary__num">' + t.keep + '</div><div class="rec-summary__label">unchanged</div></div>'
+      + '</div>';
+
+    var warns = '';
+    if (diff.openReqOrgs.length) {
+      warns += '<div class="rec-warn"><strong>' + diff.openReqOrgs.length + ' org' + (diff.openReqOrgs.length === 1 ? ' has' : 's have') + ' an in-flight request:</strong><ul>'
+        + diff.openReqOrgs.map(function (n) { return '<li>' + esc(n) + '</li>'; }).join('')
+        + '</ul>Applying reconciliation will overwrite their VIPs even if the request is still pending or sent. Cancel those requests first if you don’t want that.</div>';
+    }
+    if (diff.missingOrgs.length) {
+      warns += '<div class="rec-warn"><strong>' + diff.missingOrgs.length + ' org' + (diff.missingOrgs.length === 1 ? '' : 's') + ' missing from this paste — will be left untouched:</strong> '
+        + diff.missingOrgs.slice(0, 12).map(esc).join(', ')
+        + (diff.missingOrgs.length > 12 ? ', …' : '')
+        + '</div>';
+    }
+
+    /* Only render orgs that actually change (touched > 0 or new). Hide pure
+       keep-everything orgs so the diff isn't padded with no-ops. */
+    var touchedOrgs = diff.orgs.filter(function (o) { return o.touched > 0 || o.isNewOrg; });
+    var diffHtml = touchedOrgs.map(function (o) {
+      var counts = '';
+      if (o.isNewOrg)        counts += '<span class="rec-row--add">NEW ORG</span>';
+      if (o.adds.length)     counts += '<span class="rec-row--add">+' + o.adds.length + '</span>';
+      if (o.removes.length)  counts += '<span class="rec-row--remove">−' + o.removes.length + '</span>';
+      if (o.edits.length)    counts += '<span class="rec-row--edit">✎' + o.edits.length + '</span>';
+      if (o.keeps.length)    counts += '<span>·' + o.keeps.length + ' kept</span>';
+      var rows = ''
+        + o.removes.map(function (r) { return '<div class="rec-row rec-row--remove"><span class="rec-row__mark">−</span><span>' + esc(r.name || '(no name)') + ' — ' + esc(r.email) + '</span></div>'; }).join('')
+        + o.adds.map(function (r)    { return '<div class="rec-row rec-row--add"><span class="rec-row__mark">+</span><span>' + esc(r.name || '(no name)') + ' — ' + esc(r.email) + '</span></div>'; }).join('')
+        + o.edits.map(function (r)   { return '<div class="rec-row rec-row--edit"><span class="rec-row__mark">✎</span><span>' + esc(r.before.name || '(no name)') + ' → <strong>' + esc(r.after.name || '(no name)') + '</strong> · ' + esc(r.after.email) + '</span></div>'; }).join('');
+      return ''
+        + '<div class="rec-org">'
+        +   '<div class="rec-org__head">'
+        +     '<span class="rec-org__name">' + esc(o.name) + '</span>'
+        +     '<span class="pill pill--info" style="font-size:var(--text-xs)">' + esc(o.category) + '</span>'
+        +     '<span class="rec-org__counts">' + counts + '</span>'
+        +   '</div>'
+        +   '<div class="rec-org__rows">' + rows + '</div>'
+        + '</div>';
+    }).join('') || '<div class="vip-empty">No changes — pasted state matches the current mirror.</div>';
+
+    var canApply = (t.add + t.remove + t.edit) > 0;
+
+    root.innerHTML =
+        '<div class="rec-step__head">Review changes</div>'
+      + '<p class="rec-step__hint">Diff against the current mirror. Apply will write all changes in one batch, stamp <code>lastVerifiedAt</code> on every touched org, and write a per-org audit row.</p>'
+      + summary
+      + warns
+      + '<div class="rec-diff">' + diffHtml + '</div>'
+      + (canApply
+          ? '<div class="rec-confirm">Type <strong>OVERWRITE</strong> to confirm: <input id="recConfirmInput" autocomplete="off" placeholder="OVERWRITE"></div>'
+          : '')
+      + '<div class="rec-actions">'
+      +   '<button class="btn btn--ghost" id="recBackBtn">Back to paste</button>'
+      +   (canApply ? '<button class="btn btn--primary" id="recApplyBtn" disabled>Apply reconciliation</button>' : '')
+      + '</div>';
+
+    document.getElementById('recBackBtn').addEventListener('click', function () {
+      renderReconcileStart();
+      var ta = document.getElementById('recInput');
+      if (ta) ta.value = rawPaste;
+    });
+
+    if (canApply) {
+      var confirmEl = document.getElementById('recConfirmInput');
+      var applyEl   = document.getElementById('recApplyBtn');
+      confirmEl.addEventListener('input', function () {
+        applyEl.disabled = (confirmEl.value !== 'OVERWRITE');
+      });
+      applyEl.addEventListener('click', function () { applyReconcile(diff); });
+    }
+  }
+
+  function applyReconcile(diff) {
+    var updates = {};
+    var now = Date.now();
+    var byName = (S.session && S.session.name) || 'superadmin';
+    var auditSummaries = [];
+
+    diff.orgs.forEach(function (o) {
+      if (o.touched === 0 && !o.isNewOrg) return;
+      var orgKey = sanitizeKey(o.name);
+      var base = 'app-data/media-dazn-vip/orgs/' + orgKey;
+      /* For a brand new org, set name/category/maxVips. */
+      if (o.isNewOrg) {
+        updates[base + '/name']     = o.name;
+        updates[base + '/category'] = o.category;
+        if (o.category === 'club') updates[base + '/maxVips'] = CLUB_VIP_CAP;
+      }
+      /* Removes */
+      o.removes.forEach(function (r) {
+        updates[base + '/vips/' + r.vipId] = null;
+      });
+      /* Edits — keep the existing vipId, update name (email unchanged by definition since we matched on it) */
+      o.edits.forEach(function (e) {
+        updates[base + '/vips/' + e.vipId + '/name'] = e.after.name || '';
+      });
+      /* Adds — fresh vipId */
+      o.adds.forEach(function (a, idx) {
+        var vid = 'rec-' + now.toString(36) + '-' + idx + '-' + Math.random().toString(36).slice(2, 6);
+        updates[base + '/vips/' + vid] = {
+          name: a.name || '', email: a.email, addedAt: now, addedBy: 'reconcile'
+        };
+      });
+      /* Verification stamp */
+      updates[base + '/lastVerifiedAt'] = now;
+      updates[base + '/lastVerifiedBy'] = byName;
+
+      /* Per-org audit summary (concise — one line, not one per VIP). */
+      var bits = [];
+      if (o.isNewOrg)      bits.push('new org');
+      if (o.adds.length)   bits.push('+' + o.adds.length);
+      if (o.removes.length) bits.push('−' + o.removes.length);
+      if (o.edits.length)  bits.push('✎' + o.edits.length);
+      auditSummaries.push({ org: o.name, summary: 'Reconciled · ' + bits.join(' ') });
+    });
+
+    /* Per-org audit rows — written under audit/<org>/<ts>/{summary,by} */
+    auditSummaries.forEach(function (a, i) {
+      var ts = now + i; /* unique per row */
+      var orgKey = sanitizeKey(a.org);
+      updates['app-data/media-dazn-vip/audit/' + orgKey + '/' + ts] = {
+        summary: a.summary,
+        by: byName
+      };
+    });
+
+    var btn = document.getElementById('recApplyBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
+
+    db.ref().update(updates).then(function () {
+      try { NL.writeAudit('dazn_vip_reconciled', auditSummaries.length + ' orgs'); } catch (e) {}
+      toast('Reconciled ' + auditSummaries.length + ' org' + (auditSummaries.length === 1 ? '' : 's') + '. Trust strips will refresh on each club view.', 'success');
+      /* Switch back to Clubs tab — the grid will repaint via the orgs listener. */
+      var clubsTabBtn = document.querySelector('.tabs > .tab[data-tab="clubs"]');
+      if (clubsTabBtn) clubsTabBtn.click();
+    }).catch(function (e) {
+      toast('Reconcile failed: ' + (e.message || 'error'), 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Apply reconciliation'; }
     });
   }
 
