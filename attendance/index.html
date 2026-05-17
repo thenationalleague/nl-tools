@@ -10,6 +10,35 @@
 
      TECHNICAL CHANGELOG
      -------------------
+     v2.9.5 (2026-05-17) Focus-on-a-club selector switched from the
+                         typeable .club-picker to the new brand
+                         .club-picker--select modifier (shipped in brand
+                         v2.18, ?v=16 lockstep). Click-only trigger with
+                         crest + name + chevron; full NL club list shown
+                         scrollable on open.
+
+                         Markup change: the inner .club-picker__wrap is
+                         now a <button> wrapping crest +
+                         .club-picker__value span + chevron <svg>. New
+                         #focusClubTrigger and #focusClubValue IDs (the
+                         old #focusClubInput is gone).
+
+                         JS rewrite: wireFocusControl listens to the
+                         trigger's click (instead of input/focus events),
+                         delegates to new toggleFocusPicker(forceOpen?)
+                         which toggles .open on the dropdown AND .is-open
+                         on the picker (CSS rotates the chevron via the
+                         latter). renderFocusPickerDropdown no longer
+                         takes a filterStr — the brand modifier is
+                         deliberately click-only, so it always renders
+                         the full alphabetical list. commitFocusPicker
+                         and clearFocusPicker update the value span +
+                         .club-picker__value--placeholder class instead
+                         of an input's .value.
+
+                         Outside-click and Escape both close the
+                         dropdown.
+
      v2.9.4 (2026-05-17) Per-club rank chart hidden for staff-like roles.
 
                          renderClubRankChart() now reads S.session.role
@@ -934,7 +963,7 @@
                          Based on benchmarks-v3.1 mockup, wired to RTDB.
      ============================================================================= -->
 
-<link rel="stylesheet" href="/tools/system/nl-brand.css?v=15">
+<link rel="stylesheet" href="/tools/system/nl-brand.css?v=16">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -956,6 +985,13 @@
   var NL_TOOL_KEY = 'ops-attendance';
 
   window.NL_CHANGELOG = [
+    {
+      date: '17 May 2026',
+      version: 'v2.9.5',
+      items: [
+        'The "Focus on a club" admin selector is now a true dropdown — click to open, scroll through all NL clubs with crests, click a row to focus. No more typing required. The cup-fixture pickers stay typeable (because free-text input is needed for non-NL opponents).'
+      ]
+    },
     {
       date: '17 May 2026',
       version: 'v2.9.4',
@@ -2182,14 +2218,20 @@
         Loading attendance data...
       </div>
 
-      <!-- Focus-on-a-club (staff/admin only) -->
+      <!-- Focus-on-a-club (staff/admin only). Uses .club-picker--select &mdash;
+           sheer click-to-toggle dropdown (no typing), all NL clubs scrollable
+           with crests. The typeable sibling variant (.club-picker) lives on
+           the Add cup fixture tab. -->
       <div class="focus-control" id="focusControl" style="display:none;">
         <span class="focus-control-label">Focus on a club:</span>
-        <div class="club-picker focus-control__picker" id="focusClubPicker">
-          <div class="club-picker__wrap">
+        <div class="club-picker club-picker--select focus-control__picker" id="focusClubPicker">
+          <button class="club-picker__wrap" type="button" id="focusClubTrigger">
             <img class="club-picker__crest" id="focusClubCrest" src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png" alt="" onerror="this.onerror=null;this.style.visibility='hidden';">
-            <input class="club-picker__input" id="focusClubInput" type="text" autocomplete="off" placeholder="&mdash; league-wide view &mdash;">
-          </div>
+            <span class="club-picker__value club-picker__value--placeholder" id="focusClubValue">&mdash; league-wide view &mdash;</span>
+            <svg class="club-picker__chevron" viewBox="0 0 12 12" aria-hidden="true">
+              <path d="M2 4l4 4 4-4" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
           <div class="club-picker__dropdown" id="focusClubDropdown"></div>
         </div>
         <button class="btn btn--navy btn--sm" id="clearFocusBtn" style="display:none;margin-left:auto;">&larr; Return to league view</button>
@@ -3179,30 +3221,26 @@
     updateSubtitle();
   }
 
-  /* Focus picker — brand .club-picker driven combobox. Renders dropdown
-     options from S.clubs, filtering on the input string. Freetext is not
-     supported (staff focus on an existing NL club or league-wide). */
-  function renderFocusPickerDropdown(filterStr) {
+  /* Focus picker — uses brand .club-picker--select. Click-only dropdown
+     listing all NL clubs (alphabetical) with crest + division tag. No
+     typing, no freetext — staff focus on an existing NL club or league-
+     wide. Toggling the dropdown is driven by .is-open on the wrapper
+     (chevron rotates via CSS) and .open on the dropdown itself. */
+  function renderFocusPickerDropdown() {
     var dd = document.getElementById('focusClubDropdown');
     if (!dd) return;
     dd.innerHTML = '';
 
-    var q = (filterStr || '').toLowerCase().trim();
     var clubs = (S.clubs || []).slice().sort(function(a, b) { return a.name.localeCompare(b.name); });
-    var matches = clubs.filter(function(c) { return clubMatchesQuery(c, q); });
-
-    if (matches.length === 0) {
+    if (clubs.length === 0) {
       var empty = document.createElement('div');
       empty.className = 'club-picker__option club-picker__option--empty';
-      empty.textContent = q
-        ? 'No National League club matches “' + q + '”'
-        : 'Start typing to search clubs';
+      empty.textContent = 'No clubs loaded yet';
       dd.appendChild(empty);
-      dd.classList.add('open');
       return;
     }
 
-    matches.forEach(function(c) {
+    clubs.forEach(function(c) {
       var opt = document.createElement('div');
       opt.className = 'club-picker__option';
       opt.setAttribute('data-name', c.name);
@@ -3228,32 +3266,48 @@
       });
       dd.appendChild(opt);
     });
-    dd.classList.add('open');
+  }
+
+  function toggleFocusPicker(forceOpen) {
+    var picker = document.getElementById('focusClubPicker');
+    var dd     = document.getElementById('focusClubDropdown');
+    if (!picker || !dd) return;
+    var willOpen = (forceOpen === true) || (forceOpen !== false && !dd.classList.contains('open'));
+    if (willOpen) {
+      renderFocusPickerDropdown();
+      dd.classList.add('open');
+      picker.classList.add('is-open');
+    } else {
+      dd.classList.remove('open');
+      picker.classList.remove('is-open');
+    }
   }
 
   function commitFocusPicker(name) {
-    var input = document.getElementById('focusClubInput');
+    var value = document.getElementById('focusClubValue');
     var crest = document.getElementById('focusClubCrest');
-    var dd    = document.getElementById('focusClubDropdown');
-    input.value = name;
+    value.textContent = name;
+    value.classList.remove('club-picker__value--placeholder');
     crest.style.visibility = 'visible';
     crest.onerror = function() { this.onerror = null; this.src = FALLBACK_CREST; };
     crest.src = CREST_BASE + encodeURIComponent(name) + '.png';
-    dd.classList.remove('open');
+    toggleFocusPicker(false);
     setFocusedClub(name);
   }
 
   function clearFocusPicker() {
-    var input = document.getElementById('focusClubInput');
+    var value = document.getElementById('focusClubValue');
     var crest = document.getElementById('focusClubCrest');
-    var dd    = document.getElementById('focusClubDropdown');
-    if (input) input.value = '';
+    if (value) {
+      value.textContent = '— league-wide view —';
+      value.classList.add('club-picker__value--placeholder');
+    }
     if (crest) {
       crest.onerror = function() { this.onerror = null; this.style.visibility = 'hidden'; };
       crest.src = FALLBACK_CREST;
       crest.style.visibility = 'visible';
     }
-    if (dd) dd.classList.remove('open');
+    toggleFocusPicker(false);
     setFocusedClub(null);
   }
 
@@ -3267,25 +3321,26 @@
     renderForCurrentView();
   }
 
-  /* populateClubFocusDropdown is a no-op now — the brand picker reads
-     S.clubs lazily on each focus/input. Kept as a stub because the wiring
+  /* populateClubFocusDropdown is a no-op now — the picker reads S.clubs
+     lazily each time it's opened. Kept as a stub because the wiring still
      calls it during the staff-like role setup. */
   function populateClubFocusDropdown() {}
 
   function wireFocusControl() {
-    var input = document.getElementById('focusClubInput');
-    var dd    = document.getElementById('focusClubDropdown');
-    if (!input || !dd) return;
+    var trigger = document.getElementById('focusClubTrigger');
+    var dd      = document.getElementById('focusClubDropdown');
+    if (!trigger || !dd) return;
 
-    input.addEventListener('input', function() {
-      renderFocusPickerDropdown(input.value);
-    });
-    input.addEventListener('focus', function() {
-      renderFocusPickerDropdown(input.value);
+    trigger.addEventListener('click', function(e) {
+      e.stopPropagation();
+      toggleFocusPicker();
     });
     document.addEventListener('click', function(e) {
-      var wrap = document.getElementById('focusClubPicker');
-      if (wrap && !wrap.contains(e.target)) dd.classList.remove('open');
+      var picker = document.getElementById('focusClubPicker');
+      if (picker && !picker.contains(e.target)) toggleFocusPicker(false);
+    });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') toggleFocusPicker(false);
     });
 
     document.getElementById('clearFocusBtn').addEventListener('click', clearFocusPicker);
