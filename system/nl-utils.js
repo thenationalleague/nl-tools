@@ -1,7 +1,7 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /tools/system/nl-utils.js
-   Version: v1.5 (18/05/2026)
+   Version: v1.6 (18/05/2026)
 
    Shared helper functions used by every tool page. Exposed on window.NL
    namespace. All functions are defensive — they handle missing arguments
@@ -14,6 +14,13 @@
      NL.escHtml('<script>');          // → '&lt;script&gt;'
 
    Changelog
+   v1.6 (18/05/2026)
+     - Palette tightening (brand v2.20). NL.projColours updated to
+       mirror the new --proj-* aliases: proj-1/2/3/4/5/6 now resolve
+       to navy/primary/green/amber/purple/blue from the semantic
+       palette (slight hue shifts from the old per-shade hexes).
+       proj-7/8 unchanged. Cache-busted ?v=9.
+
    v1.5 (18/05/2026)
      - Brand-compliance sweep: three identity-data exports promoted from
        tools where they used to live as local arrays/maps.
@@ -451,16 +458,19 @@
      change, change these too — see the commented hex next to each var
      reference to confirm. Promoted in v1.5 from per-tool definitions. */
 
-  /* Project identity wheel — mirrors --proj-1 … --proj-8 in brand. */
+  /* Project identity wheel — mirrors --proj-1 … --proj-8 in brand.
+     v1.6: 1-6 are aliases of the semantic palette; values must match
+     the brand var() resolution so saved DB project colours stay in
+     lockstep with what the CSS would render. */
   window.NL.projColours = [
-    '#223b7c', /* --proj-1 navy        */
-    '#9e0000', /* --proj-2 primary red */
-    '#1e7e34', /* --proj-3 green       */
-    '#e67e22', /* --proj-4 orange      */
-    '#5b21b6', /* --proj-5 violet      */
-    '#0369a1', /* --proj-6 deep blue   */
-    '#1a2f63', /* --proj-7 deep navy   */
-    '#374151'  /* --proj-8 slate       */
+    '#223b7c', /* --proj-1 -> --navy    */
+    '#9e0000', /* --proj-2 -> --primary */
+    '#1a7030', /* --proj-3 -> --green   */
+    '#c96f15', /* --proj-4 -> --amber   */
+    '#6a1b9a', /* --proj-5 -> --purple  */
+    '#1565c0', /* --proj-6 -> --blue    */
+    '#1a2f63', /* --proj-7 deep navy slate (no semantic equivalent) */
+    '#374151'  /* --proj-8 cool slate    (no semantic equivalent) */
   ];
 
   /* NL competition position-band palette — mirrors --pos-* in brand.
