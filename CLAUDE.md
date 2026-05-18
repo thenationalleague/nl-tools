@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-NL Tools — a static GitHub Pages site (`thenationalleague/tools`, served under `/tools/`) that hosts the National League's internal staff/club portal plus a family of self-contained tools (vacancies, tasks, team-of-the-week, attendance, holiday-lieu, claudio, dazn-vip, etc.) and a separate family of fan-facing embed widgets that get pasted into the Urban Zoo CMS on `thenationalleague.org.uk`.
+NL Tools — a static GitHub Pages site (`thenationalleague/tools`, served under `/tools/`) that hosts the National League's internal staff/club portal plus a family of self-contained tools (vacancies, tasks, team-of-the-week, attendance, holiday-lieu, claudio, dazn-vip, style-guide, etc.) and a separate family of fan-facing embed widgets that get pasted into the Urban Zoo CMS on `thenationalleague.org.uk`. (chase-hq existed until v2.19 of the brand sweep and was removed pending a structural rewrite.)
 
 There is **no build step** for the site. HTML/CSS/JS is served as-is from the repo. The only Node code is in `scripts/` and `.github/workflows/` (article-index and GA pipelines).
 
@@ -27,7 +27,7 @@ No test framework. No lint config beyond `system/lint-tools.sh`. Verification of
 
 ## Branching
 
-Active dev branch for this session: `claude/add-claude-documentation-KmUOK`. PRs land on `main`; pushing to `main` directly is not done.
+Active dev branch for this session: `claude/audit-brand-compliance-dIbO1`. PRs land on `main`; pushing to `main` directly is not done.
 
 ## The system/ canon and the wiring contract
 
@@ -35,8 +35,8 @@ Every gated tool's `index.html` has a near-identical `<head>`. The source of tru
 
 | File                 | Current `?v=` | Role                                                              |
 |----------------------|---------------|-------------------------------------------------------------------|
-| `nl-brand.css`       | `?v=14`       | Brand tokens, components, layout. Tools must use tokens not hex.  |
-| `nl-utils.js`        | `?v=7`        | `window.NL.*` helpers: `toast`, `ensureAuth`, `formatDate`, `escHtml`, `writeAudit`, `installAuditHook`, `icon`. |
+| `nl-brand.css`       | `?v=17`       | Brand tokens, components, layout. Tools must use tokens not hex.  |
+| `nl-utils.js`        | `?v=8`        | `window.NL.*` helpers: `toast`, `ensureAuth`, `formatDate`, `escHtml`, `writeAudit`, `installAuditHook`, `icon`, plus identity-data exports `mapStyle.drive`, `positionBands`, `projColours` (canvas/data callers). |
 | `nl-topbar.js`       | `?v=7`        | Renders `#nlTopbar` from `window.NL_TOOL`. Also injects PWA/favicon tags. |
 | `auth-guard.js`      | `?v=8`        | Gates `#pageWrap`. Verifies live Firebase Auth, re-reads RTDB user + tool registry, then reveals page and fires `nlAuthReady(session)`. |
 
@@ -96,7 +96,7 @@ Both index-rebuild and club-news jobs handle concurrent runs by `git fetch origi
 
 ## Conventions worth knowing
 
-- **Brand tokens, not hex.** `var(--primary)` (`#9e0000`), `var(--navy)`, `var(--red)`/`--green`/`--amber`/`--info`, `var(--text-muted)`. Tool-internal identity palettes (e.g. claudio personas, tasks projects, attendance tiers) are the deliberate exception — comment them as such. The brand CSS preamble (top of `nl-brand.css`) lists where this exception applies.
+- **Brand tokens, not hex.** `var(--primary)` (`#9e0000`), `var(--navy)`, `var(--red)`/`--green`/`--amber`/`--info`, `var(--text-muted)`. Solid shade ladders `--primary-50/100/.../900` and `--navy-50/.../900` for hover states, idle borders, and anywhere you would have reached for an rgba() overlay — **the brand intentionally has no rgba-overlay tokens**, use the ladder. Identity palettes that a second tool might plausibly want now live in canon too: `--proj-1…--proj-8` (project identity, mirrored as `NL.projColours`), `--cal-*` (calendar event types), `--road-sign-*` (UK road signs), `--pos-*` (NL competition position bands, mirrored as `NL.positionBands` for canvas exports). The Style Guide tool (`/tools/style-guide/`, superadmin only) is the canonical visual reference — open it when wondering "is X already a token?". Genuine one-off identity palettes still stay tool-local (claudio personas, attendance comp tiers, meeting-notes scratchpad, GA channel palette, club crest LUT) — see the policy block at the top of `nl-brand.css`.
 - **Scripts in `<head>`.** `auth-guard.js` must sit above `</head>`. Body-bottom placement breaks the gate timing and lint flags it.
 - **`#pageWrap` is hidden by default** (rule in `nl-brand.css`). Auth-guard sets `style.display = 'block'` to reveal — never clear with `''`, that re-triggers the brand rule.
 - **`window.NL_TOOL` and `var NL_TOOL_KEY` must stay in sync.** Topbar reads the former, auth-guard reads the latter.
