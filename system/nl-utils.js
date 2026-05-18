@@ -1,7 +1,7 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /tools/system/nl-utils.js
-   Version: v1.2 (26/04/2026)
+   Version: v1.5 (18/05/2026)
 
    Shared helper functions used by every tool page. Exposed on window.NL
    namespace. All functions are defensive — they handle missing arguments
@@ -14,6 +14,26 @@
      NL.escHtml('<script>');          // → '&lt;script&gt;'
 
    Changelog
+   v1.5 (18/05/2026)
+     - Brand-compliance sweep: three identity-data exports promoted from
+       tools where they used to live as local arrays/maps.
+       * NL.mapStyle.drive   — Google Maps style array, was DRIVE_MAP_STYLE
+                               in travel-planner.
+       * NL.positionBands    — NL competition position-band colours
+                               (champ / sf / qf / releg + po and r
+                               fg/bg). Was POS_*_COLOR constants in
+                               graphics/league-tables. Mirrors --pos-*
+                               CSS tokens for canvas/image-generation
+                               callers that need literal hex strings.
+       * NL.projColours      — 8-colour project-identity array,
+                               mirrors --proj-1 … --proj-8 CSS tokens.
+                               Was PROJ_COLOURS in tasks. Meeting-notes
+                               keeps a different 6-stop local palette
+                               (darker / more saturated) — its DB has
+                               existing project colours from that palette
+                               so promotion would require a migration.
+     Cache-busted via ?v=8 across every tool head in lockstep.
+
    v1.4 (11/05/2026)
      - Manual NL.writeAudit calls suppress the auto-hook for the next
        500ms, so apps that call writeAudit immediately before an RTDB
@@ -424,5 +444,64 @@
     return svg;
   };
 
+  /* ── Identity-data shared with brand CSS ────────────────────────────────
+     These mirror the matching --proj-*, --pos-*, --road-sign-* tokens in
+     nl-brand.css for JS callers that need literal hex strings (canvas
+     exports, Google Maps style arrays, etc.). When the brand tokens
+     change, change these too — see the commented hex next to each var
+     reference to confirm. Promoted in v1.5 from per-tool definitions. */
+
+  /* Project identity wheel — mirrors --proj-1 … --proj-8 in brand. */
+  window.NL.projColours = [
+    '#223b7c', /* --proj-1 navy        */
+    '#9e0000', /* --proj-2 primary red */
+    '#1e7e34', /* --proj-3 green       */
+    '#e67e22', /* --proj-4 orange      */
+    '#5b21b6', /* --proj-5 violet      */
+    '#0369a1', /* --proj-6 deep blue   */
+    '#1a2f63', /* --proj-7 deep navy   */
+    '#374151'  /* --proj-8 slate       */
+  ];
+
+  /* NL competition position-band palette — mirrors --pos-* in brand.
+     Used by canvas/image-generation in graphics tools. */
+  window.NL.positionBands = {
+    champ:   '#7F99DC', /* --pos-champ        */
+    sf:      '#3760C8', /* --pos-sf           */
+    qf:      '#2D4FA4', /* --pos-qf           */
+    releg:   '#192C5C', /* --pos-releg        */
+    cFg:     '#000000', /* --pos-c-fg         */
+    poSfBg:  '#9aa3ad', /* --pos-po-sf-bg     */
+    poFg:    '#000000', /* --pos-po-fg        */
+    rBg:     '#000000', /* --pos-r-bg         */
+    rFg:     '#ffffff'  /* --pos-r-fg         */
+  };
+
+  /* Google Maps style arrays — pass directly to new google.maps.Map({...styles: NL.mapStyle.drive}).
+     Future variants (.satellite, .transit) belong on this object too. */
+  window.NL.mapStyle = {
+    drive: [
+      {featureType:"landscape",elementType:"geometry.fill",stylers:[{color:"#f0f1f5"}]},
+      {featureType:"landscape.man_made",elementType:"geometry.fill",stylers:[{color:"#eceef3"}]},
+      {featureType:"poi",elementType:"all",stylers:[{visibility:"off"}]},
+      {featureType:"poi.park",elementType:"geometry.fill",stylers:[{visibility:"on"},{color:"#e4e7ee"}]},
+      {featureType:"poi.park",elementType:"labels",stylers:[{visibility:"off"}]},
+      {featureType:"road.highway",elementType:"geometry.fill",stylers:[{color:"#4a7abf"}]},
+      {featureType:"road.highway",elementType:"geometry.stroke",stylers:[{color:"#3a6299"},{weight:1}]},
+      {featureType:"road.highway",elementType:"labels",stylers:[{visibility:"on"}]},
+      {featureType:"road.highway",elementType:"labels.text.fill",stylers:[{color:"#1a2a44"}]},
+      {featureType:"road.highway",elementType:"labels.text.stroke",stylers:[{color:"#ffffff"},{weight:3}]},
+      {featureType:"road.arterial",elementType:"geometry.fill",stylers:[{color:"#d0d6e0"}]},
+      {featureType:"road.arterial",elementType:"labels",stylers:[{visibility:"on"}]},
+      {featureType:"road.arterial",elementType:"labels.text.fill",stylers:[{color:"#5a6a82"}]},
+      {featureType:"road.local",elementType:"geometry.fill",stylers:[{color:"#e8eaf0"}]},
+      {featureType:"road.local",elementType:"labels",stylers:[{visibility:"off"}]},
+      {featureType:"transit",elementType:"all",stylers:[{visibility:"off"}]},
+      {featureType:"water",elementType:"geometry.fill",stylers:[{color:"#cdd5e2"}]},
+      {featureType:"water",elementType:"labels.text.fill",stylers:[{color:"#9aa3b8"}]},
+      {featureType:"administrative",elementType:"labels.text.fill",stylers:[{color:"#8a90a0"}]},
+      {featureType:"administrative.locality",elementType:"labels.text.fill",stylers:[{color:"#6b7186"}]}
+    ]
+  };
 
 })();
