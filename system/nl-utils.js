@@ -14,6 +14,17 @@
      NL.escHtml('<script>');          // → '&lt;script&gt;'
 
    Changelog
+   v1.7 (09/06/2026)
+     - Added NL.season — shared multi-season helper for the new clubs-meta
+       v1.9 model. clubs-meta now carries a top-level `seasons` registry
+       ({ current, list:{<key>:{label}} }) and each club a `seasons` map
+       ({ <key>: <division that season> }). NL.season.current(meta),
+       .label(meta,key), .keys(meta) and .clubsFor(meta,key) read off the
+       parsed clubs-meta object a tool has already fetched (stateless).
+       clubsFor returns that season's clubs with `division` resolved to the
+       season's division (not the current-season top-level field).
+       Cache-busted ?v=10.
+
    v1.6 (18/05/2026)
      - Palette tightening (brand v2.20). NL.projColours updated to
        mirror the new --proj-* aliases: proj-1/2/3/4/5/6 now resolve
@@ -512,6 +523,51 @@
       {featureType:"administrative",elementType:"labels.text.fill",stylers:[{color:"#8a90a0"}]},
       {featureType:"administrative.locality",elementType:"labels.text.fill",stylers:[{color:"#6b7186"}]}
     ]
+  };
+
+  /* ── Season helper (clubs-meta v1.9+) ────────────────────────────────────
+     Stateless: every method takes the parsed clubs-meta object a tool has
+     already fetched. clubs-meta carries a top-level `seasons` registry
+     { current, list:{<key>:{label}} } and each club a `seasons` map
+     { <key>: <division that season> }. The top-level club.division stays =
+     the current season's division (null for clubs not in the current
+     league), so legacy consumers are unaffected; season-aware tools use
+     clubsFor() to get the right roster + per-season division. */
+  window.NL.season = {
+    /* Current season key, e.g. '2026'. */
+    current: function(meta) {
+      return (meta && meta.seasons && meta.seasons.current) || null;
+    },
+    /* All season keys, newest first, e.g. ['2026','2025']. */
+    keys: function(meta) {
+      var list = (meta && meta.seasons && meta.seasons.list) || {};
+      return Object.keys(list).sort().reverse();
+    },
+    /* Human label for a season key, e.g. '2026' -> '2026-27'. Falls back to
+       deriving 'YYYY-YY' from the key if it isn't in the registry. */
+    label: function(meta, key) {
+      var list = meta && meta.seasons && meta.seasons.list;
+      if (list && list[key] && list[key].label) return list[key].label;
+      var y = parseInt(key, 10);
+      if (isNaN(y)) return String(key);
+      var nxt = String((y + 1) % 100);
+      return y + '-' + (nxt.length < 2 ? '0' + nxt : nxt);
+    },
+    /* Clubs that played in `key` (defaults to current), each shallow-cloned
+       with `division` resolved to THAT season's division. Sorted by name. */
+    clubsFor: function(meta, key) {
+      key = key || this.current(meta);
+      var clubs = (meta && meta.clubs) || [];
+      return clubs
+        .filter(function(c) { return c.seasons && c.seasons[key] != null; })
+        .map(function(c) {
+          var clone = {};
+          for (var k in c) { if (c.hasOwnProperty(k)) clone[k] = c[k]; }
+          clone.division = c.seasons[key];
+          return clone;
+        })
+        .sort(function(a, b) { return a.name.localeCompare(b.name); });
+    }
   };
 
 })();
