@@ -33,7 +33,7 @@ OUT_DIR = os.path.join(REPO_ROOT, "debug-out")
 UA = (
     "nl-tools club-news debug/"
     + VERSION
-    + " (+https://rckd-nl.github.io/nl-tools/)"
+    + " (+https://thenationalleague.github.io/tools/)"
 )
 
 FEED_CANDIDATES = [

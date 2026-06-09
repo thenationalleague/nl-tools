@@ -26,7 +26,7 @@
 
   async function mount(host){
     const jsonURL = host.getAttribute("data-json") ||
-      "https://rckd-nl.github.io/nl-tools/assets/data/club-news.json";
+      "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/club-news.json";
 
     const max = parseInt(host.getAttribute("data-max")||"30",10);
 

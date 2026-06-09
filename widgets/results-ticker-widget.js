@@ -22,8 +22,8 @@
 
   const DEFAULTS = {
     sheet: "https://docs.google.com/spreadsheets/d/e/2PACX-1vScH-aEGMzzUMsxO4GkWK-mtoNGVUrQn_Lfz3LgnoH-1Uf3D7R-sxREmJsRy3DUfKOxHxoahMihnuA/pubhtml",
-    clubsMeta: "https://rckd-nl.github.io/nl-tools/assets/data/clubs-meta.json",
-    crestBase: "https://rckd-nl.github.io/nl-tools/assets/crests/",
+    clubsMeta: "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json",
+    crestBase: "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/",
     roseImg: "National League rose.png",
 
     height: 108,
