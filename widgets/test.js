@@ -6,7 +6,7 @@
   window.__NL_TRANSFER_TICKER_V2_0__ = true;
 
   var API_URL     = 'https://script.google.com/macros/s/AKfycbxmGpOdK4oKJ8Yvjr0jl5dz-NKoS3S6tTDj4h701W0jqHYIckYZu0WAVWlY5YtHOFzK/exec';
-  var CREST_BASE  = 'https://raw.githubusercontent.com/rckd-nl/nl-tools/main/assets/crests/';
+  var CREST_BASE  = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
   var POLL_MS     = 30000;
   var FLIP_MS     = 8000;
   var MOB_FLIP_MS = 3500;

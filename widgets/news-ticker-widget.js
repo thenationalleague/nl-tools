@@ -14,13 +14,13 @@
 
   const DEFAULTS = {
     csv: "https://docs.google.com/spreadsheets/d/e/2PACX-1vSuNN7o0PQ-YzDS7-oZe_D91PMpJmF9d6CYshqXcMOpJVq-WHceJN_qanp79QuwrqBMUX7KoGCMWXZm/pub?output=csv",
-    clubsMeta: "https://rckd-nl.github.io/nl-tools/assets/data/clubs-meta.json",
+    clubsMeta: "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json",
     maxItems: 10,
     height: 64,              // px
     speed: 48,               // px/sec
     refreshMs: 120000,       // 2 min
     kitCss: "https://use.typekit.net/gff4ipy.css",
-    crestBase: "https://rckd-nl.github.io/nl-tools/assets/crests/",
+    crestBase: "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/",
     roseImg: "National League rose.png",
     bg: "#ffffff",
     headline: "#000000",
