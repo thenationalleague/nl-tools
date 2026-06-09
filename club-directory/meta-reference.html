@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clubs Meta — Reference</title>
+<!--
+  club-directory / meta-reference.html
+  v1.0 — Read-only reference viewer for assets/data/clubs-meta.json.
+
+  Sits "before" the Club Directory: surfaces the canonical clubs-meta
+  (handbook) layer only — no contacts, no people, no editing. Live-fetches
+  the JSON from main so it always reflects the published source of truth.
+
+  Use it to scan stadium names / capacities / kits etc. en masse, sort and
+  filter, and export the flattened data as CSV (the CSV doubles as the
+  fill-in template for new clubs).
+
+  NOT a gated tool — it only displays data that is already publicly
+  fetched by ~20 other tools/embeds. Brand-styled, but no auth-guard, so
+  it's out of scope for lint-tools.sh (like the embeds).
+
+  Columns are derived dynamically from the JSON, so when lat/lng/nickname
+  land in clubs-meta they appear here automatically.
+-->
+<link rel="stylesheet" href="/tools/system/nl-brand.css">
+<style>
+  body { margin: 0; }
+  a { color: var(--navy); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .wrap { padding: 18px clamp(12px, 3vw, 32px) 64px; }
+
+  .head {
+    display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap;
+    border-bottom: 2px solid var(--primary);
+    padding-bottom: 12px; margin-bottom: 16px;
+  }
+  .head h1 {
+    margin: 0; font-size: var(--text-lg, 22px);
+    text-transform: uppercase; letter-spacing: 0.02em;
+    color: var(--navy);
+  }
+  .head .meta { color: var(--text-muted); font-size: var(--text-sm); margin-left: auto; text-align: right; line-height: 1.5; }
+  .head .meta b { color: var(--text); font-variation-settings: 'wght' 700; }
+
+  .controls {
+    display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .controls__search {
+    font-family: var(--font); font-size: var(--text-sm);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 12px; background: var(--white); color: var(--text);
+    min-width: 220px; flex: 1; max-width: 360px;
+  }
+  .controls__search:focus { outline: none; border-color: var(--navy); }
+
+  .group { display: flex; align-items: center; gap: 2px; background: var(--off-white); padding: 4px; border-radius: 8px; }
+  .group__label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; font-weight: 800; font-variation-settings: 'wght' 800; color: var(--text-muted); padding: 0 8px 0 6px; }
+
+  .chip {
+    background: none; border: 1px solid transparent; border-radius: 5px;
+    font-family: var(--font); font-size: var(--text-xs); font-weight: 600; font-variation-settings: 'wght' 600;
+    color: var(--text); padding: 5px 11px; cursor: pointer; transition: all 0.12s;
+    white-space: nowrap;
+  }
+  .chip:hover:not([aria-pressed="true"]) { background: var(--white); }
+  .chip[aria-pressed="true"] { background: var(--navy); color: var(--white); }
+
+  .spacer { flex: 1; }
+
+  .tbl-scroll {
+    border: 1px solid var(--border); border-radius: 8px; overflow: auto;
+    max-height: calc(100vh - 220px); background: var(--white);
+  }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  thead th {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--navy); color: var(--white);
+    text-align: left; padding: 8px 10px; white-space: nowrap;
+    font-weight: 700; font-variation-settings: 'wght' 700;
+    cursor: pointer; user-select: none;
+    border-right: 1px solid var(--navy-600, #2a3f6b);
+  }
+  thead th:hover { background: var(--navy-600, #2a3f6b); }
+  thead th .arrow { opacity: 0.55; font-size: 10px; margin-left: 4px; }
+  /* first column (club name) sticks horizontally too */
+  thead th.col-name, tbody td.col-name {
+    position: sticky; left: 0; z-index: 1;
+    font-weight: 700; font-variation-settings: 'wght' 700;
+  }
+  thead th.col-name { z-index: 3; }
+  tbody td.col-name { background: var(--off-white); color: var(--navy); }
+
+  tbody td { padding: 6px 10px; border-top: 1px solid var(--border); white-space: nowrap; vertical-align: middle; }
+  tbody tr:hover td { background: var(--primary-50, #fdeaea); }
+  tbody tr:hover td.col-name { background: var(--primary-100, #fbd9d9); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; }
+  td.empty { color: var(--text-muted); }
+
+  .swatch { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch i { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--border); display: inline-block; }
+  .swatch span { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--text-muted); }
+
+  .div-pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; font-variation-settings: 'wght' 700; }
+  .div-National { background: var(--navy); color: var(--white); }
+  .div-North { background: var(--amber); color: var(--text); }
+  .div-South { background: var(--green); color: var(--white); }
+
+  .status { padding: 40px; text-align: center; color: var(--text-muted); }
+  .status.err { color: var(--red); }
+
+  .note { margin-top: 14px; font-size: var(--text-xs); color: var(--text-muted); line-height: 1.6; }
+  .note code { background: var(--off-white); padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="head">
+    <h1>Clubs Meta — Reference</h1>
+    <div class="meta" id="metaInfo">loading…</div>
+  </div>
+
+  <div class="controls">
+    <input type="search" class="controls__search" id="search" placeholder="Search any field…">
+
+    <div class="group" id="divGroup">
+      <span class="group__label">Division</span>
+      <button class="chip" data-div="all" aria-pressed="true">All</button>
+      <button class="chip" data-div="National" aria-pressed="false">National</button>
+      <button class="chip" data-div="North" aria-pressed="false">North</button>
+      <button class="chip" data-div="South" aria-pressed="false">South</button>
+    </div>
+
+    <div class="group" id="colGroup">
+      <span class="group__label">Columns</span>
+      <!-- group toggles injected here -->
+    </div>
+
+    <div class="spacer"></div>
+
+    <button class="chip" id="copyCsv" style="border-color:var(--border)">Copy CSV</button>
+    <button class="chip" id="dlCsv" style="border-color:var(--border)">Download CSV</button>
+    <button class="chip" id="reload" style="border-color:var(--border)">↻ Reload</button>
+  </div>
+
+  <div class="tbl-scroll">
+    <div class="status" id="status">Loading clubs-meta.json…</div>
+    <table id="tbl" hidden>
+      <thead><tr id="thead"></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <p class="note">
+    Read-only. Live from <code>assets/data/clubs-meta.json</code> on <code>main</code> —
+    the single source of truth fetched by the embeds, widgets, graphics tools and the rest.
+    Columns are derived from the JSON, so new fields (e.g. <code>lat</code>/<code>lng</code>/<code>nickname</code>) appear automatically.
+    <b>Download CSV</b> exports the current filtered view (all columns) — that flat file doubles as the fill-in template for new clubs.
+  </p>
+
+</div>
+
+<script>
+(function(){
+  var SRC = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
+
+  // Preferred column order + grouping. Columns not listed here are appended
+  // (in first-seen order) under "Other", so the table never silently drops data.
+  var GROUPS = [
+    { key:'identity', label:'Identity', cols:['code','short','nickname','division','domain','optaID'], on:true },
+    { key:'stadium',  label:'Stadium',  cols:['stadium_name','stadium_sponsor_name','capacity','capacity_seated','pitch.dimensions','pitch.type'], on:true },
+    { key:'location', label:'Location', cols:['address','postcode','station','lat','lng','fa_membership'], on:true },
+    { key:'colours',  label:'Colours',  cols:['colors.primary','colors.secondary','colors.tertiary'], on:false },
+    { key:'kit',      label:'Kit',      cols:['kit.home.shirts','kit.home.shorts','kit.home.socks','kit.away.shirts','kit.away.shorts','kit.away.socks','kit.gk.first','kit.gk.second'], on:false },
+    { key:'sponsors', label:'Sponsors', cols:['sponsors.main_club','sponsors.main_shirt','sponsors.left_sleeve'], on:false }
+  ];
+  var NUMERIC = { 'capacity':1, 'capacity_seated':1, 'lat':1, 'lng':1 };
+  var HEX = /^#?[0-9a-f]{3,8}$/i;
+
+  var state = { rows:[], cols:[], colGroup:{}, visible:{}, q:'', div:'all', sort:'name', dir:1 };
+  var groupOn = {};
+  GROUPS.forEach(function(g){ groupOn[g.key] = g.on; });
+
+  var $ = function(id){ return document.getElementById(id); };
+  var esc = function(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); };
+
+  // Flatten nested object to dotted keys. Arrays joined with ", ".
+  function flatten(obj, prefix, out){
+    out = out || {}; prefix = prefix || '';
+    for (var k in obj){
+      var v = obj[k]; var key = prefix ? prefix+'.'+k : k;
+      if (Array.isArray(v)) out[key] = v.join(', ');
+      else if (v && typeof v === 'object') flatten(v, key, out);
+      else out[key] = v;
+    }
+    return out;
+  }
+
+  function buildColumns(rows){
+    // union of all flat keys, in preferred order then extras
+    var seen = {}; rows.forEach(function(r){ for (var k in r) seen[k] = true; });
+    var ordered = ['name']; var grp = { name:'identity' };
+    GROUPS.forEach(function(g){
+      g.cols.forEach(function(c){ if (seen[c]){ ordered.push(c); grp[c] = g.key; } });
+    });
+    // any leftover keys -> "other" group
+    var hasOther = false;
+    Object.keys(seen).forEach(function(k){
+      if (ordered.indexOf(k) === -1){ ordered.push(k); grp[k] = 'other'; hasOther = true; }
+    });
+    if (hasOther && !GROUPS.some(function(g){return g.key==='other';})){
+      GROUPS.push({ key:'other', label:'Other', cols:[], on:true }); groupOn.other = true;
+    }
+    state.colGroup = grp;
+    return ordered;
+  }
+
+  function label(col){
+    if (col === 'name') return 'Club';
+    return col.split('.').map(function(p){ return p.replace(/_/g,' '); }).join(' · ')
+              .replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+  }
+
+  function visibleCols(){
+    return state.cols.filter(function(c){
+      if (c === 'name') return true;
+      var g = state.colGroup[c];
+      return groupOn[g];
+    });
+  }
+
+  function filteredSorted(){
+    var q = state.q.trim().toLowerCase();
+    var rows = state.rows.filter(function(r){
+      if (state.div !== 'all' && r.division !== state.div) return false;
+      if (!q) return true;
+      for (var k in r){ if (String(r[k]==null?'':r[k]).toLowerCase().indexOf(q) !== -1) return true; }
+      return false;
+    });
+    var s = state.sort, dir = state.dir, numeric = NUMERIC[s];
+    rows.sort(function(a,b){
+      var x = a[s], y = b[s];
+      if (numeric){ x = parseFloat(x); y = parseFloat(y); x = isNaN(x)?-Infinity:x; y = isNaN(y)?-Infinity:y; return (x-y)*dir; }
+      x = String(x==null?'':x).toLowerCase(); y = String(y==null?'':y).toLowerCase();
+      return x < y ? -dir : x > y ? dir : 0;
+    });
+    return rows;
+  }
+
+  function cell(col, val){
+    if (val == null || val === '') return '<td class="col-'+(col==='name'?'name':'')+' empty">—</td>';
+    var cls = col === 'name' ? 'col-name' : '';
+    if (NUMERIC[col]) return '<td class="num '+cls+'">'+esc(Number(val).toLocaleString())+'</td>';
+    if (col === 'division') return '<td class="'+cls+'"><span class="div-pill div-'+esc(val)+'">'+esc(val)+'</span></td>';
+    if (/colors?\./.test(col) && HEX.test(String(val))){
+      var hexv = String(val).charAt(0)==='#' ? val : '#'+val;
+      return '<td class="'+cls+'"><span class="swatch"><i style="background:'+esc(hexv)+'"></i><span>'+esc(hexv)+'</span></span></td>';
+    }
+    if (col === 'optaID' || col === 'postcode' || col === 'code') return '<td class="mono '+cls+'">'+esc(val)+'</td>';
+    return '<td class="'+cls+'">'+esc(val)+'</td>';
+  }
+
+  function render(){
+    var cols = visibleCols();
+    var rows = filteredSorted();
+    var thead = cols.map(function(c){
+      var arrow = state.sort === c ? '<span class="arrow">'+(state.dir>0?'▲':'▼')+'</span>' : '';
+      return '<th class="'+(c==='name'?'col-name':'')+'" data-col="'+esc(c)+'">'+esc(label(c))+arrow+'</th>';
+    }).join('');
+    $('thead').innerHTML = thead;
+    $('tbody').innerHTML = rows.map(function(r){
+      return '<tr>'+cols.map(function(c){ return cell(c, r[c]); }).join('')+'</tr>';
+    }).join('');
+    $('thead').querySelectorAll('th').forEach(function(th){
+      th.onclick = function(){
+        var c = th.getAttribute('data-col');
+        if (state.sort === c) state.dir = -state.dir; else { state.sort = c; state.dir = 1; }
+        render();
+      };
+    });
+    $('metaInfo').innerHTML = '<b>'+rows.length+'</b> of '+state.rows.length+' clubs shown'
+      + (state.version ? ' &nbsp;·&nbsp; clubs-meta <b>'+esc(state.version)+'</b>' : '');
+  }
+
+  function buildGroupToggles(){
+    $('colGroup').querySelectorAll('.chip').forEach(function(n){ n.remove(); });
+    GROUPS.forEach(function(g){
+      if (g.key === 'identity') { /* identity always shown via individual cols; still allow toggle */ }
+      var b = document.createElement('button');
+      b.className = 'chip'; b.textContent = g.label;
+      b.setAttribute('aria-pressed', groupOn[g.key] ? 'true' : 'false');
+      b.onclick = function(){ groupOn[g.key] = !groupOn[g.key]; b.setAttribute('aria-pressed', groupOn[g.key]?'true':'false'); render(); };
+      $('colGroup').appendChild(b);
+    });
+  }
+
+  function toCSV(){
+    var cols = state.cols;              // ALL columns, canonical order
+    var rows = filteredSorted();        // current filter + sort
+    var q = function(v){ v = String(v==null?'':v); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; };
+    var lines = [cols.map(label).map(q).join(',')];
+    rows.forEach(function(r){ lines.push(cols.map(function(c){ return q(r[c]); }).join(',')); });
+    return lines.join('\r\n');
+  }
+
+  function load(){
+    $('status').textContent = 'Loading clubs-meta.json…';
+    $('status').className = 'status'; $('tbl').hidden = true; $('status').hidden = false;
+    fetch(SRC + '?cb=' + Date.now(), { cache:'no-store' })
+      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+      .then(function(data){
+        state.version = data.version || '';
+        var clubs = (data.clubs || data);
+        state.rows = clubs.map(function(c){ return flatten(c); });
+        state.cols = buildColumns(state.rows);
+        buildGroupToggles();
+        $('status').hidden = true; $('tbl').hidden = false;
+        render();
+      })
+      .catch(function(e){
+        $('status').className = 'status err';
+        $('status').textContent = 'Could not load clubs-meta.json — ' + e.message;
+      });
+  }
+
+  // wire controls
+  $('search').oninput = function(){ state.q = this.value; render(); };
+  $('divGroup').onclick = function(e){
+    var b = e.target.closest('.chip'); if(!b) return;
+    state.div = b.getAttribute('data-div');
+    $('divGroup').querySelectorAll('.chip').forEach(function(c){ c.setAttribute('aria-pressed', c===b?'true':'false'); });
+    render();
+  };
+  $('reload').onclick = load;
+  $('dlCsv').onclick = function(){
+    var blob = new Blob([toCSV()], { type:'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'clubs-meta' + (state.version?'-'+state.version:'') + '.csv';
+    a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+  };
+  $('copyCsv').onclick = function(){
+    var b = this;
+    navigator.clipboard.writeText(toCSV()).then(function(){
+      var t = b.textContent; b.textContent = 'Copied ✓'; setTimeout(function(){ b.textContent = t; }, 1400);
+    });
+  };
+
+  load();
+})();
+</script>
+</body>
+</html>
