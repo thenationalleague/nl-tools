@@ -34,8 +34,8 @@
   const VERSION = "v1.0.1";
 
   const DEFAULTS = {
-    json: "https://rckd-nl.github.io/nl-tools/assets/data/club-news.json",
-    clubsMeta: "https://rckd-nl.github.io/nl-tools/assets/data/clubs-meta.json",
+    json: "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/club-news.json",
+    clubsMeta: "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json",
     max: 25,
     refreshMs: 120000,
 
@@ -49,7 +49,7 @@
     showSource: false,
 
     kitCss: "https://use.typekit.net/gff4ipy.css",
-    crestBase: "https://rckd-nl.github.io/nl-tools/assets/crests/",
+    crestBase: "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/",
     roseImg: "National League rose.png",
 
     bg: "#ffffff",
