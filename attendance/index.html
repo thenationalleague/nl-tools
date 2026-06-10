@@ -986,6 +986,15 @@
 
   window.NL_CHANGELOG = [
     {
+      date: '10 Jun 2026',
+      version: 'v2.10.0',
+      items: [
+        'Season switcher. The header now carries a season selector — pick 2026-27 (the live season) or a past season like 2025-26 to review it read-only. Club rosters, division scopes and crests follow the selected season, so last season shows the clubs (and divisions) as they were that year.',
+        'Past seasons are read-only: submitting, tagging and adding cup fixtures are disabled while you’re viewing an archived season, with a banner to make it clear.',
+        'Under the hood the live RTDB path keeps holding the current season; past seasons live under app-data/ops-attendance/archive/<season>/. Superadmins get a one-off "Season admin" tool to archive a completed season (backup → copy → verify → clear) when the rollover happens.'
+      ]
+    },
+    {
       date: '17 May 2026',
       version: 'v2.9.5',
       items: [
@@ -2011,6 +2020,41 @@
   }
 
   /* Tabs */
+  .att-seasonbar {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 14px; flex-wrap: wrap;
+  }
+  .att-seasonbar__label {
+    font-variation-settings: 'wght' 700;
+    font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--text-muted);
+  }
+  .att-seasonbar__pills { display: flex; gap: 2px; }
+  .att-season-pill {
+    padding: 6px 14px;
+    font-family: var(--font);
+    font-variation-settings: 'wght' 700;
+    font-size: 13px;
+    color: var(--text-muted);
+    background: var(--navy-50);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .att-season-pill + .att-season-pill { margin-left: 4px; }
+  .att-season-pill[aria-pressed="true"] {
+    color: #fff; background: var(--primary); border-color: var(--primary);
+  }
+  .att-seasonbar__ro {
+    font-variation-settings: 'wght' 700;
+    font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--amber-deep);
+    background: var(--amber-light);
+    border: 1px solid var(--amber);
+    border-radius: 999px;
+    padding: 4px 12px;
+  }
   .att-tabs {
     display: flex; gap: 2px;
     border-bottom: 2px solid var(--border);
@@ -2199,6 +2243,13 @@
 
   <div class="main" id="mainContent">
 
+    <!-- Season switcher + read-only banner (rendered by renderSeasonSwitcher) -->
+    <div class="att-seasonbar" id="seasonBar" style="display:none;">
+      <span class="att-seasonbar__label">Season</span>
+      <div class="att-seasonbar__pills" id="seasonPills"></div>
+      <span class="att-seasonbar__ro" id="seasonReadOnly" style="display:none;">Read-only archive</span>
+    </div>
+
     <!-- Tabs (rendered dynamically based on role) -->
     <div class="att-tabs" id="attTabs">
       <button class="att-tab active" data-panel="insights">Crowd insights</button>
@@ -2207,6 +2258,9 @@
       </button>
       <button class="att-tab att-tab--action" data-panel="addcupfixture" id="addCupFixtureTab" style="display:none;">
         + Add cup fixture
+      </button>
+      <button class="att-tab att-tab--action" data-panel="seasonadmin" id="seasonAdminTab" style="display:none;">
+        Season admin
       </button>
     </div>
 
@@ -2246,7 +2300,7 @@
           </div>
           <div class="league-strip-text">
             <div class="league-strip-title">The National League</div>
-            <div class="league-strip-sub">2025-26 season &middot; 72 clubs across National, North and South</div>
+            <div class="league-strip-sub" id="leagueStripSub">2025-26 season &middot; 72 clubs across National, North and South</div>
           </div>
         </div>
 
@@ -2757,6 +2811,53 @@
     </div>
     <!-- END PANEL: addcupfixture -->
 
+    <!-- ==================== PANEL: SEASON ADMIN (superadmin only) ==================== -->
+    <div class="panel" data-panel="seasonadmin">
+      <div class="chart-card" style="max-width:720px;">
+        <div class="chart-header" style="margin-bottom:18px;">
+          <div class="chart-header-left">
+            <h2 style="margin:0;">Season admin</h2>
+            <p class="section-subtitle" style="margin-top:4px;">Superadmin only &middot; archive a completed season at rollover</p>
+          </div>
+        </div>
+
+        <p style="font-size:14px;line-height:1.6;color:var(--text-muted);margin:0 0 18px;">
+          When a season ends and before the new fixtures start syncing, archive the
+          live data so the new season starts clean. This copies the current live
+          <code>fixtures</code> + <code>submissions</code> to
+          <code>archive/&lt;season&gt;/</code>, then (as a separate confirmed step)
+          clears the live path. Every write is audited. Take the backup first.
+        </p>
+
+        <div id="seasonAdminBody" style="display:grid;gap:16px;">
+          <div class="rank-card" style="cursor:default;">
+            <div class="rank-label">Live data right now</div>
+            <div style="font-size:14px;margin-top:6px;" id="saLiveCounts">&mdash;</div>
+          </div>
+
+          <div class="form-group">
+            <label>Step 1 &mdash; Backup</label>
+            <button class="btn btn--navy" type="button" id="saBackupBtn">Download backup JSON</button>
+          </div>
+
+          <div class="form-group">
+            <label>Step 2 &mdash; Archive the completed season</label>
+            <p class="section-subtitle" style="margin:0 0 8px;">Copies live data to <code id="saArchiveTarget">archive/…</code> (the most recent past season). Skips if that archive already has data.</p>
+            <button class="btn btn--primary" type="button" id="saArchiveBtn" disabled>Archive to &hellip;</button>
+          </div>
+
+          <div class="form-group">
+            <label>Step 3 &mdash; Clear the live path</label>
+            <p class="section-subtitle" style="margin:0 0 8px;">Only after Step 2 is verified. Removes the live <code>fixtures</code> + <code>submissions</code> so the new season starts empty.</p>
+            <button class="btn btn--danger" type="button" id="saClearBtn" disabled>Clear live data</button>
+          </div>
+
+          <div id="saStatus" style="font-size:13px;line-height:1.6;"></div>
+        </div>
+      </div>
+    </div>
+    <!-- END PANEL: seasonadmin -->
+
     <!-- Tag-neutral modal -->
     <div class="modal-backdrop" id="acfTagModal" style="display:none;">
       <div class="modal">
@@ -2892,9 +2993,16 @@
     session:       null,
     fixtures:      {},      /* matchID \u2192 fixture */
     submissions:   {},      /* matchID \u2192 submission */
-    clubs:         [],      /* array of clubs-meta */
+    meta:          null,    /* full clubs-meta object (for NL.season) */
+    clubs:         [],      /* clubs for the SELECTED season (division resolved) */
     clubByName:    {},      /* name \u2192 club */
     clubByTeamID:  {},      /* optaID \u2192 club */
+
+    /* Season selection. currentSeason = the live season (clubs-meta `current`);
+       season = the one being viewed. Viewing a past season is read-only and
+       reads from app-data/ops-attendance/archive/<season>/. */
+    currentSeason: null,
+    season:        null,
 
     /* Computed aggregates */
     perClub:       {},      /* clubName \u2192 { home: [...], away: [...], stats } */
@@ -2942,6 +3050,7 @@
       resolveEffectiveClub();
       computeAggregates();
       document.getElementById('insightsLoading').style.display = 'none';
+      renderSeasonSwitcher();
       setupChromeForRole();
       renderForCurrentView();
     })
@@ -2952,18 +3061,56 @@
     });
   }
 
+  /* ---- Season helpers -------------------------------------------------- */
+
+  var BASE_PATH = 'app-data/ops-attendance';
+
+  /* Is the season being viewed the live (current) one? */
+  function seasonIsCurrent() {
+    return !S.season || S.season === S.currentSeason;
+  }
+  /* Past seasons are read-only — no submitting, tagging or fixture edits. */
+  function isReadOnlySeason() {
+    return !seasonIsCurrent();
+  }
+  /* RTDB path for the selected season. The live season stays at the root
+     paths (where the NLS sync writes + public read lives); past seasons sit
+     under archive/<season>/. */
+  function fixturesPath()    { return seasonIsCurrent() ? BASE_PATH + '/fixtures'    : BASE_PATH + '/archive/' + S.season + '/fixtures'; }
+  function submissionsPath() { return seasonIsCurrent() ? BASE_PATH + '/submissions' : BASE_PATH + '/archive/' + S.season + '/submissions'; }
+
+  /* Guard at the top of every write action. Returns false (and toasts) when
+     the user is viewing an archived season, so no past-season write happens. */
+  function assertWritable() {
+    if (isReadOnlySeason()) {
+      NL.toast('That season is archived — switch to ' + NL.season.label(S.meta, S.currentSeason) + ' to make changes.', 'info');
+      return false;
+    }
+    return true;
+  }
+
+  /* Rebuild the roster (and name/optaID indexes) for the selected season.
+     Uses NL.season.clubsFor so each club carries the division it had THAT
+     season — this is what scopes the pickers and DIV_TO_SCOPE buckets. */
+  function rebuildRosterForSeason() {
+    S.clubs = NL.season.clubsFor(S.meta, S.season);
+    S.clubByName = {};
+    S.clubByTeamID = {};
+    for (var i = 0; i < S.clubs.length; i++) {
+      var c = S.clubs[i];
+      if (c.name)   S.clubByName[c.name] = c;
+      if (c.optaID) S.clubByTeamID[c.optaID] = c;
+    }
+  }
+
   function loadClubsMeta() {
     return fetch(CLUBS_META_URL + '?cb=' + Date.now())
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        S.clubs = (data && data.clubs) || [];
-        S.clubByName = {};
-        S.clubByTeamID = {};
-        for (var i = 0; i < S.clubs.length; i++) {
-          var c = S.clubs[i];
-          if (c.name)   S.clubByName[c.name] = c;
-          if (c.optaID) S.clubByTeamID[c.optaID] = c;
-        }
+        S.meta = data || { clubs: [] };
+        S.currentSeason = NL.season.current(S.meta) || (NL.season.keys(S.meta)[0] || null);
+        if (!S.season) S.season = S.currentSeason;
+        rebuildRosterForSeason();
       });
   }
 
@@ -2971,13 +3118,193 @@
     return NL.ensureAuth().then(function() {
       var db = firebase.database();
       return Promise.all([
-        db.ref('app-data/ops-attendance/fixtures').once('value'),
-        db.ref('app-data/ops-attendance/submissions').once('value')
+        db.ref(fixturesPath()).once('value'),
+        db.ref(submissionsPath()).once('value')
       ]);
     })
     .then(function(snaps) {
       S.fixtures = snaps[0].val() || {};
       S.submissions = snaps[1].val() || {};
+    });
+  }
+
+  /* Render the season pills + read-only badge. Only shows the bar when there
+     is more than one season to choose from. */
+  function renderSeasonSwitcher() {
+    var bar = document.getElementById('seasonBar');
+    var pills = document.getElementById('seasonPills');
+    var ro = document.getElementById('seasonReadOnly');
+    if (!bar || !pills) return;
+    var keys = NL.season.keys(S.meta);
+    if (keys.length < 2) { bar.style.display = 'none'; return; }
+    bar.style.display = '';
+    pills.innerHTML = '';
+    keys.forEach(function(key) {
+      var b = document.createElement('button');
+      b.className = 'att-season-pill';
+      b.type = 'button';
+      b.textContent = NL.season.label(S.meta, key) + (key === S.currentSeason ? ' · live' : '');
+      b.setAttribute('aria-pressed', key === S.season ? 'true' : 'false');
+      b.addEventListener('click', function() { switchSeason(key); });
+      pills.appendChild(b);
+    });
+    ro.style.display = isReadOnlySeason() ? '' : 'none';
+
+    var sub = document.getElementById('leagueStripSub');
+    if (sub) {
+      sub.textContent = NL.season.label(S.meta, S.season) + ' season · ' +
+        S.clubs.length + ' clubs across National, North and South' +
+        (isReadOnlySeason() ? ' · archived (read-only)' : '');
+    }
+  }
+
+  /* Switch the viewed season: re-roster, reload that season's data, recompute
+     and re-render, then refresh the read-only chrome. */
+  function switchSeason(key) {
+    if (key === S.season) return;
+    S.season = key;
+    /* Drop any staff club-focus — the focused club may not exist that season.
+       Reset the picker label + clear button to the league-wide default. */
+    if (S.focusedClub) {
+      S.focusedClub = null;
+      var fv = document.getElementById('focusClubValue');
+      if (fv) { fv.textContent = '— league-wide view —'; fv.classList.add('club-picker__value--placeholder'); }
+      var cfb = document.getElementById('clearFocusBtn');
+      if (cfb) cfb.style.display = 'none';
+    }
+    if (S.session.role !== 'club') S.effectiveClub = null;
+    rebuildRosterForSeason();
+    renderSeasonSwitcher();
+    document.getElementById('insightsLoading').style.display = '';
+    loadFixturesAndSubmissions()
+      .then(function() {
+        resolveEffectiveClub();
+        computeAggregates();
+        document.getElementById('insightsLoading').style.display = 'none';
+        setupChromeForRole();
+        if (typeof renderFocusPickerDropdown === 'function') renderFocusPickerDropdown();
+        renderForCurrentView();
+      })
+      .catch(function(err) {
+        document.getElementById('insightsLoading').innerHTML =
+          '<p style="color:var(--red);">Failed to load ' + NL.escHtml(NL.season.label(S.meta, key)) + ': ' + NL.escHtml(err.message || String(err)) + '</p>';
+      });
+  }
+
+  /* ---- Season admin (superadmin) — one-off archive at rollover ---------- */
+
+  /* The most recent PAST season key (the one we'd archive the live data into). */
+  function archiveTargetSeason() {
+    var keys = NL.season.keys(S.meta);   /* newest first */
+    for (var i = 0; i < keys.length; i++) {
+      if (keys[i] !== S.currentSeason) return keys[i];
+    }
+    return null;
+  }
+
+  var _seasonAdminWired = false;
+  function wireSeasonAdmin() {
+    var target = archiveTargetSeason();
+    var saStatus = document.getElementById('saStatus');
+    var archiveBtn = document.getElementById('saArchiveBtn');
+    var clearBtn = document.getElementById('saClearBtn');
+    var backupBtn = document.getElementById('saBackupBtn');
+
+    /* Counts from the live data already in memory (season admin only ever
+       runs on the live season). */
+    var nFix = Object.keys(S.fixtures || {}).length;
+    var nSub = Object.keys(S.submissions || {}).length;
+    document.getElementById('saLiveCounts').innerHTML =
+      '<b>' + nFix + '</b> fixtures &middot; <b>' + nSub + '</b> submissions';
+
+    var targetLabel = target ? NL.season.label(S.meta, target) : '(no past season)';
+    document.getElementById('saArchiveTarget').textContent =
+      target ? (BASE_PATH + '/archive/' + target + '/') : 'archive/…';
+    archiveBtn.textContent = 'Archive to ' + targetLabel;
+    archiveBtn.disabled = !target || nFix + nSub === 0;
+
+    if (_seasonAdminWired) return;   /* bind handlers once */
+    _seasonAdminWired = true;
+
+    function setStatus(msg, kind) {
+      saStatus.style.color = kind === 'err' ? 'var(--red)' : kind === 'ok' ? 'var(--green)' : 'var(--text-muted)';
+      saStatus.innerHTML = msg;
+    }
+
+    backupBtn.addEventListener('click', function() {
+      var payload = {
+        exportedAt: new Date().toISOString(),
+        season: S.currentSeason,
+        fixtures: S.fixtures,
+        submissions: S.submissions
+      };
+      var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'ops-attendance-backup-' + S.currentSeason + '-' + Date.now() + '.json';
+      a.click();
+      setTimeout(function() { URL.revokeObjectURL(a.href); }, 1000);
+      setStatus('Backup downloaded. Keep it somewhere safe before archiving.', 'ok');
+    });
+
+    archiveBtn.addEventListener('click', function() {
+      if (isReadOnlySeason() || !target) return;
+      if (!confirm('Copy ' + nFix + ' fixtures and ' + nSub + ' submissions to archive/' + target + '/?\n\nThis does NOT remove the live data (that is Step 3).')) return;
+      archiveBtn.disabled = true;
+      setStatus('Archiving&hellip;', 'info');
+      var db = firebase.database();
+      var aFix = BASE_PATH + '/archive/' + target + '/fixtures';
+      var aSub = BASE_PATH + '/archive/' + target + '/submissions';
+      /* Idempotency guard: refuse if the archive already holds data. */
+      Promise.all([ db.ref(aFix).once('value'), db.ref(aSub).once('value') ])
+        .then(function(snaps) {
+          if ((snaps[0].val() && Object.keys(snaps[0].val()).length) ||
+              (snaps[1].val() && Object.keys(snaps[1].val()).length)) {
+            throw new Error('archive/' + target + '/ already has data — not overwriting.');
+          }
+          if (NL.writeAudit) NL.writeAudit('attendance_season_archive', 'Archived ' + nFix + ' fixtures + ' + nSub + ' submissions to archive/' + target + '/');
+          return Promise.all([ db.ref(aFix).set(S.fixtures), db.ref(aSub).set(S.submissions) ]);
+        })
+        .then(function() {   /* verify counts landed */
+          return Promise.all([ db.ref(aFix).once('value'), db.ref(aSub).once('value') ]);
+        })
+        .then(function(snaps) {
+          var gotFix = snaps[0].val() ? Object.keys(snaps[0].val()).length : 0;
+          var gotSub = snaps[1].val() ? Object.keys(snaps[1].val()).length : 0;
+          if (gotFix !== nFix || gotSub !== nSub) {
+            throw new Error('verify mismatch — archived ' + gotFix + '/' + gotSub + ', expected ' + nFix + '/' + nSub + '.');
+          }
+          setStatus('Archived &amp; verified: <b>' + gotFix + '</b> fixtures, <b>' + gotSub + '</b> submissions now under archive/' + target + '/. Step 3 unlocked.', 'ok');
+          clearBtn.disabled = false;
+        })
+        .catch(function(err) {
+          setStatus('Archive failed: ' + NL.escHtml(err.message || String(err)), 'err');
+          archiveBtn.disabled = false;
+        });
+    });
+
+    clearBtn.addEventListener('click', function() {
+      if (isReadOnlySeason()) return;
+      if (!confirm('Permanently clear the LIVE fixtures + submissions?\n\nOnly do this once Step 2 archived & verified. The new season will start empty.')) return;
+      clearBtn.disabled = true;
+      setStatus('Clearing live data&hellip;', 'info');
+      var db = firebase.database();
+      if (NL.writeAudit) NL.writeAudit('attendance_season_clear', 'Cleared live fixtures + submissions after archiving ' + target);
+      Promise.all([
+        db.ref(BASE_PATH + '/fixtures').remove(),
+        db.ref(BASE_PATH + '/submissions').remove()
+      ])
+        .then(function() {
+          S.fixtures = {}; S.submissions = {};
+          computeAggregates();
+          renderForCurrentView();
+          wireSeasonAdmin();   /* refresh counts */
+          setStatus('Live path cleared. ' + NL.season.label(S.meta, S.currentSeason) + ' is ready for the new fixtures.', 'ok');
+        })
+        .catch(function(err) {
+          setStatus('Clear failed: ' + NL.escHtml(err.message || String(err)), 'err');
+          clearBtn.disabled = false;
+        });
     });
   }
 
@@ -3212,11 +3539,31 @@
       populateClubFocusDropdown();
     }
 
-    /* Add cup fixture tab \u2014 admin + superadmin only */
-    if (isAdmin) {
-      document.getElementById('addCupFixtureTab').style.display = '';
+    /* Add cup fixture tab \u2014 admin + superadmin only, and only on the live
+       season (archived seasons are read-only). */
+    var acfTab = document.getElementById('addCupFixtureTab');
+    if (isAdmin && !isReadOnlySeason()) {
+      acfTab.style.display = '';
       wireAddCupFixtureForm();
+    } else {
+      acfTab.style.display = 'none';
     }
+
+    /* Season admin tab \u2014 superadmin only, live season only (it operates on
+       the live path to archive a completed season). */
+    var saTab = document.getElementById('seasonAdminTab');
+    if (saTab) {
+      if (role === 'superadmin' && !isReadOnlySeason()) {
+        saTab.style.display = '';
+        if (typeof wireSeasonAdmin === 'function') wireSeasonAdmin();
+      } else {
+        saTab.style.display = 'none';
+      }
+    }
+
+    /* If the active panel just got hidden, fall back to insights. */
+    var active = document.querySelector('.att-tab.active');
+    if (active && active.style.display === 'none') switchPanel('insights');
 
     updateSubtitle();
   }
@@ -3688,6 +4035,7 @@
   }
 
   function submitAddCupFixtureForm() {
+    if (!assertWritable()) return;
     setAddCupFixtureError('');
 
     var comp    = S._acfComp;
@@ -4159,6 +4507,7 @@
   }
 
   function confirmAcfTag() {
+    if (!assertWritable()) { closeAcfTagModal(); return; }
     var matchID = S._acfPendingTag;
     if (!matchID) { closeAcfTagModal(); return; }
     var f = S.fixtures[matchID];
@@ -4205,6 +4554,7 @@
   }
 
   function confirmAcfUntag() {
+    if (!assertWritable()) { closeAcfTagModal(); return; }
     var matchID = S._acfPendingTag;
     if (!matchID) { closeAcfTagModal(); return; }
     var f = S.fixtures[matchID];
@@ -6667,6 +7017,7 @@
   }
 
   function saveSubmission() {
+    if (!assertWritable()) return;
     var fix = S.editingFixture;
     if (!fix) return;
     var matchID = fix.matchID;
