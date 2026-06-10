@@ -6,6 +6,12 @@
 <title>Clubs Meta — Reference</title>
 <!--
   club-directory / meta-reference.html
+  v1.2 — Season switcher (clubs-meta v1.9+ multi-season model). Pick a season
+         and the table shows the clubs that played that season, each with its
+         division for that season (from the per-club `seasons` tag). The
+         per-season `seasons.*` columns are folded into the switcher. NB: only
+         division membership is historical — all other fields (sponsors, kit,
+         capacity, etc.) are the latest value, not a per-season snapshot.
   v1.1 — Read-only reference viewer for assets/data/clubs-meta.json.
          Colour cells now render as full pills filled with the hex colour,
          with auto-contrast (black/white) text — so kits read at a glance.
@@ -146,6 +152,11 @@
   <div class="controls">
     <input type="search" class="controls__search" id="search" placeholder="Search any field…">
 
+    <div class="group" id="seasonGroup">
+      <span class="group__label">Season</span>
+      <!-- season chips injected here -->
+    </div>
+
     <div class="group" id="divGroup">
       <span class="group__label">Division</span>
       <button class="chip" data-div="all" aria-pressed="true">All</button>
@@ -178,6 +189,8 @@
     Read-only. Live from <code>assets/data/clubs-meta.json</code> on <code>main</code> —
     the single source of truth fetched by the embeds, widgets, graphics tools and the rest.
     Columns are derived from the JSON, so new fields (e.g. <code>lat</code>/<code>lng</code>/<code>nickname</code>) appear automatically.
+    The <b>Season</b> switcher filters to the clubs that played that season and shows each club's division for that season;
+    all other fields are the <b>latest</b> value (sponsors, kit, capacity etc. aren't snapshotted per season).
     <b>Download CSV</b> exports the current filtered view (all columns) — that flat file doubles as the fill-in template for new clubs.
   </p>
 
@@ -201,7 +214,8 @@
   var NUMERIC = { 'capacity':1, 'capacity_seated':1, 'lat':1, 'lng':1 };
   var HEX = /^#?[0-9a-f]{3,8}$/i;
 
-  var state = { rows:[], cols:[], colGroup:{}, visible:{}, q:'', div:'all', sort:'name', dir:1 };
+  var state = { rows:[], cols:[], colGroup:{}, visible:{}, q:'', div:'all', sort:'name', dir:1,
+                season:null, seasons:{} };
   var groupOn = {};
   GROUPS.forEach(function(g){ groupOn[g.key] = g.on; });
 
@@ -231,8 +245,9 @@
   }
 
   function buildColumns(rows){
-    // union of all flat keys, in preferred order then extras
-    var seen = {}; rows.forEach(function(r){ for (var k in r) seen[k] = true; });
+    // union of all flat keys, in preferred order then extras.
+    // Keys prefixed with "__" are internal (e.g. __seasons) — never columns.
+    var seen = {}; rows.forEach(function(r){ for (var k in r){ if (k.indexOf('__') !== 0) seen[k] = true; } });
     var ordered = ['name']; var grp = { name:'identity' };
     GROUPS.forEach(function(g){
       g.cols.forEach(function(c){ if (seen[c]){ ordered.push(c); grp[c] = g.key; } });
@@ -263,9 +278,25 @@
     });
   }
 
+  // Clubs that played the selected season, each shallow-cloned with `division`
+  // resolved to THAT season's division. With no season model, passes rows through.
+  function rowsForSeason(){
+    if (!state.season) return state.rows;
+    var key = state.season;
+    var out = [];
+    state.rows.forEach(function(r){
+      var sm = r.__seasons;
+      if (!sm || sm[key] == null) return;
+      var c = {}; for (var k in r){ if (r.hasOwnProperty(k) && k.indexOf('__') !== 0) c[k] = r[k]; }
+      c.division = sm[key];
+      out.push(c);
+    });
+    return out;
+  }
+
   function filteredSorted(){
     var q = state.q.trim().toLowerCase();
-    var rows = state.rows.filter(function(r){
+    var rows = rowsForSeason().filter(function(r){
       if (state.div !== 'all' && r.division !== state.div) return false;
       if (!q) return true;
       for (var k in r){ if (String(r[k]==null?'':r[k]).toLowerCase().indexOf(q) !== -1) return true; }
@@ -312,7 +343,10 @@
         render();
       };
     });
-    $('metaInfo').innerHTML = '<b>'+rows.length+'</b> of '+state.rows.length+' clubs shown'
+    var base = rowsForSeason().length;
+    var seasonLbl = state.season && state.seasons.list && state.seasons.list[state.season]
+      ? ' &nbsp;·&nbsp; <b>'+esc(state.seasons.list[state.season].label || state.season)+'</b>' : '';
+    $('metaInfo').innerHTML = '<b>'+rows.length+'</b> of '+base+' clubs shown' + seasonLbl
       + (state.version ? ' &nbsp;·&nbsp; clubs-meta <b>'+esc(state.version)+'</b>' : '');
   }
 
@@ -325,6 +359,41 @@
       b.setAttribute('aria-pressed', groupOn[g.key] ? 'true' : 'false');
       b.onclick = function(){ groupOn[g.key] = !groupOn[g.key]; b.setAttribute('aria-pressed', groupOn[g.key]?'true':'false'); render(); };
       $('colGroup').appendChild(b);
+    });
+  }
+
+  // Fallback when clubs-meta has no top-level `seasons` registry: build one
+  // from the union of per-club season keys, labelling YYYY -> YYYY-YY.
+  function deriveSeasons(clubs){
+    var set = {};
+    clubs.forEach(function(c){ if (c.seasons) for (var k in c.seasons) set[k] = true; });
+    var keys = Object.keys(set).sort();
+    if (!keys.length) return {};
+    var list = {};
+    keys.forEach(function(k){
+      var y = parseInt(k, 10);
+      var nxt = isNaN(y) ? '' : String((y+1)%100);
+      list[k] = { label: isNaN(y) ? k : (y + '-' + (nxt.length<2?'0'+nxt:nxt)) };
+    });
+    return { current: keys[keys.length-1], list: list };
+  }
+
+  function buildSeasonToggles(){
+    var box = $('seasonGroup');
+    box.querySelectorAll('.chip').forEach(function(n){ n.remove(); });
+    var keys = Object.keys(state.seasons.list || {}).sort().reverse();
+    if (!keys.length) { box.hidden = true; return; }   // no season model — hide
+    box.hidden = false;
+    keys.forEach(function(k){
+      var b = document.createElement('button');
+      b.className = 'chip'; b.textContent = state.seasons.list[k].label || k;
+      b.setAttribute('aria-pressed', state.season === k ? 'true' : 'false');
+      b.onclick = function(){
+        state.season = k;
+        box.querySelectorAll('.chip').forEach(function(c){ c.setAttribute('aria-pressed', c===b?'true':'false'); });
+        render();
+      };
+      box.appendChild(b);
     });
   }
 
@@ -345,8 +414,23 @@
       .then(function(data){
         state.version = data.version || '';
         var clubs = (data.clubs || data);
-        state.rows = clubs.map(function(c){ return flatten(c); });
+        // Keep each club's raw seasons map aside (as __seasons) and drop the
+        // flattened seasons.* keys, so seasons are driven by the switcher, not columns.
+        state.rows = clubs.map(function(c){
+          var r = flatten(c);
+          Object.keys(r).forEach(function(k){ if (k.indexOf('seasons.') === 0) delete r[k]; });
+          r.__seasons = c.seasons || null;
+          return r;
+        });
+        // Season registry: prefer the top-level one, else derive from the clubs.
+        state.seasons = data.seasons || deriveSeasons(clubs);
+        var keys = Object.keys(state.seasons.list || {});
+        state.season = keys.length
+          ? (state.seasons.current && state.seasons.list[state.seasons.current]
+             ? state.seasons.current : keys.sort().reverse()[0])
+          : null;
         state.cols = buildColumns(state.rows);
+        buildSeasonToggles();
         buildGroupToggles();
         $('status').hidden = true; $('tbl').hidden = false;
         render();
