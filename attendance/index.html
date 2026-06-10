@@ -987,6 +987,13 @@
   window.NL_CHANGELOG = [
     {
       date: '10 Jun 2026',
+      version: 'v2.10.1',
+      items: [
+        'Superadmins can now back-fill attendance into an archived season — for outstanding fixtures left over at rollover. Open the archived season, find the fixture in Outstanding (or its match row) and submit as normal; the write is routed to that season’s archive, not the live path. Tagging and adding cup fixtures stay locked on past seasons.'
+      ]
+    },
+    {
+      date: '10 Jun 2026',
       version: 'v2.10.0',
       items: [
         'Season switcher. The header now carries a season selector — pick 2026-27 (the live season) or a past season like 2025-26 to review it read-only. Club rosters, division scopes and crests follow the selected season, so last season shows the clubs (and divisions) as they were that year.',
@@ -3080,13 +3087,28 @@
   function submissionsPath() { return seasonIsCurrent() ? BASE_PATH + '/submissions' : BASE_PATH + '/archive/' + S.season + '/submissions'; }
 
   /* Guard at the top of every write action. Returns false (and toasts) when
-     the user is viewing an archived season, so no past-season write happens. */
+     the user is viewing an archived season, so no past-season write happens.
+     Used by tagging + add-cup-fixture, which stay locked on past seasons. */
   function assertWritable() {
     if (isReadOnlySeason()) {
       NL.toast('That season is archived — switch to ' + NL.season.label(S.meta, S.currentSeason) + ' to make changes.', 'info');
       return false;
     }
     return true;
+  }
+
+  /* Superadmins may back-fill attendance submissions into an archived season
+     (e.g. outstanding fixtures left over at rollover). The archive RTDB node
+     is superadmin-writable, so this matches the rules. Everything else on a
+     past season stays read-only. */
+  function canBackfillArchive() {
+    return S.session && S.session.role === 'superadmin';
+  }
+  function assertCanSubmit() {
+    if (seasonIsCurrent()) return true;
+    if (canBackfillArchive()) return true;
+    NL.toast('That season is archived — switch to ' + NL.season.label(S.meta, S.currentSeason) + ' to make changes.', 'info');
+    return false;
   }
 
   /* Rebuild the roster (and name/optaID indexes) for the selected season.
@@ -3148,13 +3170,17 @@
       b.addEventListener('click', function() { switchSeason(key); });
       pills.appendChild(b);
     });
+    /* Superadmins can back-fill attendance into an archived season, so the
+       badge reflects that rather than a blanket "read-only". */
+    var backfill = isReadOnlySeason() && canBackfillArchive();
     ro.style.display = isReadOnlySeason() ? '' : 'none';
+    ro.textContent = backfill ? 'Archived · attendance back-fill enabled' : 'Read-only archive';
 
     var sub = document.getElementById('leagueStripSub');
     if (sub) {
       sub.textContent = NL.season.label(S.meta, S.season) + ' season · ' +
         S.clubs.length + ' clubs across National, North and South' +
-        (isReadOnlySeason() ? ' · archived (read-only)' : '');
+        (isReadOnlySeason() ? (backfill ? ' · archived (back-fill)' : ' · archived (read-only)') : '');
     }
   }
 
@@ -7017,7 +7043,7 @@
   }
 
   function saveSubmission() {
-    if (!assertWritable()) return;
+    if (!assertCanSubmit()) return;
     var fix = S.editingFixture;
     if (!fix) return;
     var matchID = fix.matchID;
@@ -7095,7 +7121,7 @@
           NL.writeAudit(existing ? 'attendance_edit' : 'attendance_submit', detail);
         }
         return firebase.database()
-          .ref('app-data/ops-attendance/submissions/' + matchID)
+          .ref(submissionsPath() + '/' + matchID)
           .set(toWrite);
       })
       .then(function() {
