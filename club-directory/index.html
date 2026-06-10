@@ -6,9 +6,31 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.18 — Gate behind auth-guard; live clubs-meta; session personas.
+  v0.19 — RTDB persistence: live people/contacts editing + audit (phase C).
 
   Changelog:
+  v0.19 — (10/06/2026) RTDB wiring, phase C:
+          - People + club contact details now live at RTDB
+            app-data/ops-club-directory/clubs/<clubName> ({contact, people}
+            keyed by person id). Boot loads the corpus after clubs-meta;
+            if the node is empty the inline 2025 seed renders READ-ONLY
+            (manage capabilities disabled) and superadmin sees a one-off
+            "Import handbook seed data" banner (idempotent — refuses to
+            overwrite).
+          - Every mutation funnel (person add/edit/merge/delete, dept +
+            checklist saves, club contact details) persists the club's
+            record via persistClub(): NL.writeAudit to admin/audit, a
+            tool-local entry pushed to app-data/ops-club-directory/audit
+            ({ts, uid, email, club, action, detail}), then the data set().
+          - New Activity scene (admin/superadmin): last 200 directory
+            changes, newest first, from the tool-local audit node.
+          - email_private/phone_private dropped from the stored model —
+            the directory sits behind login; no private tier (decision
+            10/06/2026).
+          - Rules: see system/rtdb/rules.snapshot.json — clubs node reads
+            auth!=null, per-club write for own club/admin/superadmin,
+            clubs-level write superadmin only (seed); audit readable by
+            admin/superadmin, writable by any authed user.
   v0.18 — (10/06/2026) Production wiring, phase A+B:
           - Canonical system head: Firebase compat SDK + init, NL_TOOL /
             NL_TOOL_KEY ('ops-club-directory'), NL_CHANGELOG, nlAuthReady,
@@ -186,6 +208,15 @@
   var NL_TOOL_KEY = 'ops-club-directory';
 
   window.NL_CHANGELOG = [
+    {
+      date: '10 Jun 2026',
+      version: 'v0.19',
+      items: [
+        'Contacts and people are now live data. Club users edit their own club, NL admins edit any club, and every change saves instantly to the shared database — no more annual handbook lag.',
+        'New Activity view (admins): a running log of every directory change — who, what, which club, when.',
+        'One-off superadmin import button seeds the database from the 2025 handbook corpus. Until it runs, the directory shows read-only seed data.'
+      ]
+    },
     {
       date: '10 Jun 2026',
       version: 'v0.18',
@@ -1793,6 +1824,7 @@
     <button class="btn btn--toggle btn--sm" data-view-mode="directory" aria-pressed="true">Directory</button>
     <button class="btn btn--toggle btn--sm persona-gated" data-view-mode="builder" data-requires="listBuilder">List builder</button>
     <button class="btn btn--toggle btn--sm persona-gated" data-view-mode="manage" data-requires="manageContacts">Manage contacts</button>
+    <button class="btn btn--toggle btn--sm persona-gated" data-view-mode="audit" data-requires="viewActivity">Activity</button>
   </div>
   <input type="search" class="demo-bar__search" id="searchBox" placeholder="Search clubs, people, roles…">
 </div>
@@ -1866,6 +1898,11 @@
   <!-- MANAGE CONTACTS SCENE (admin + club-editor) -->
   <div class="scene" id="scene-manage">
     <div class="mc-root" id="mc-root"></div>
+  </div>
+
+  <!-- ACTIVITY SCENE (admin/superadmin) — tool-local directory audit -->
+  <div class="scene" id="scene-audit">
+    <div id="audit-root"></div>
   </div>
 </div>
 
@@ -2304,11 +2341,18 @@ var state = {
 // In production these come from the user's role.
 function personaCan(capability) {
   var p = state.persona;
+  /* Live editing needs the RTDB corpus (phase C). Until the one-off seed
+     import runs, manage capabilities are off for everyone — superadmin
+     sees the import banner on the directory listing instead. */
+  if (!RTDB.seeded && (capability === 'manageContacts' || capability === 'manageOwnClub' || capability === 'editClubDetails')) {
+    return false;
+  }
   switch (capability) {
     case 'listBuilder':    return p === 'staff' || p === 'admin';
     case 'manageContacts': return p === 'admin';
     case 'manageOwnClub':  return p === 'club-editor' || p === 'admin';
     case 'editClubDetails': return p === 'admin';
+    case 'viewActivity':   return p === 'admin';
     default: return false;
   }
 }
@@ -2326,11 +2370,59 @@ function filteredClubs() {
   });
 }
 
+/* Pre-seed banner: only superadmin sees it (they run the one-off import);
+   everyone else just gets a read-only directory until it happens. */
+function seedBannerHtml() {
+  if (RTDB.seeded) return '';
+  var sess = (window.NL && NL.session) || {};
+  if (sess.role !== 'superadmin') return '';
+  return '<div style="background:var(--amber-light);border:1px solid var(--amber);border-radius:8px;padding:14px 18px;margin-bottom:18px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">' +
+    '<div style="flex:1;min-width:240px;">' +
+      '<div style="font-variation-settings:\'wght\' 800;color:var(--amber-deep);">Directory editing not yet enabled</div>' +
+      '<div style="font-size:13px;color:var(--text-muted);margin-top:2px;">Showing the 2025 handbook seed, read-only. Import it into the live database to switch on club/staff editing. One-off — refuses to overwrite existing data.</div>' +
+    '</div>' +
+    '<button class="btn btn--navy" id="cdSeedBtn">Import handbook seed data</button>' +
+  '</div>';
+}
+
+function renderAuditScene() {
+  var root = document.getElementById('audit-root');
+  root.innerHTML = '<p style="color:var(--text-muted);padding:20px 0;">Loading activity…</p>';
+  NL.ensureAuth()
+    .then(function() {
+      return firebase.database().ref(RTDB_BASE + '/audit').orderByChild('ts').limitToLast(200).once('value');
+    })
+    .then(function(snap) {
+      var rows = [];
+      snap.forEach(function(ch) { rows.push(ch.val()); });
+      rows.reverse();
+      var html = '<div class="lb-intro"><h2>Directory activity</h2>' +
+        '<p>Every change to club contacts and people, newest first (last ' + rows.length + ').</p></div>';
+      if (!rows.length) {
+        root.innerHTML = html + '<p style="color:var(--text-muted);">No directory changes recorded yet.</p>';
+        return;
+      }
+      html += '<div style="display:grid;gap:6px;">' + rows.map(function(r) {
+        var when = r.ts ? new Date(r.ts).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+        return '<div style="display:flex;gap:14px;align-items:baseline;padding:10px 14px;background:var(--white);border:1px solid var(--border);border-radius:8px;flex-wrap:wrap;">' +
+          '<span style="font-size:12px;color:var(--text-muted);white-space:nowrap;">' + esc(when) + '</span>' +
+          '<span class="pill pill--identifier">' + esc(r.club || '—') + '</span>' +
+          '<span style="flex:1;min-width:200px;font-size:14px;">' + esc(r.detail || r.action || '') + '</span>' +
+          '<span style="font-size:12px;color:var(--text-muted);">' + esc(r.email || r.uid || '') + '</span>' +
+        '</div>';
+      }).join('') + '</div>';
+      root.innerHTML = html;
+    })
+    .catch(function(err) {
+      root.innerHTML = '<p style="color:var(--red);padding:20px 0;">Could not load activity — ' + esc(err.message || String(err)) + '</p>';
+    });
+}
+
 function renderListing() {
   var clubs = filteredClubs();
   var root = document.getElementById('listing-root');
   if (!clubs.length) {
-    root.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-muted);">No clubs match "' + esc(state.searchQuery) + '"</div>';
+    root.innerHTML = seedBannerHtml() + '<div style="padding:40px;text-align:center;color:var(--text-muted);">No clubs match "' + esc(state.searchQuery) + '"</div>';
     return;
   }
 
@@ -2358,7 +2450,7 @@ function renderListing() {
     }
   }
 
-  root.innerHTML = heroHtml + renderListStyle1(clubs);
+  root.innerHTML = seedBannerHtml() + heroHtml + renderListStyle1(clubs);
 
   // Hero card → open club page on click of the card, or go straight to manage on button
   var hero = document.getElementById('ownClubHero');
@@ -2402,9 +2494,13 @@ function showScene() {
   var club = document.getElementById('scene-club');
   var builder = document.getElementById('scene-builder');
   var manage = document.getElementById('scene-manage');
-  [listing, club, builder, manage].forEach(function(s){ s.classList.remove('scene--active'); });
+  var audit = document.getElementById('scene-audit');
+  [listing, club, builder, manage, audit].forEach(function(s){ s.classList.remove('scene--active'); });
 
-  if (state.viewMode === 'manage') {
+  if (state.viewMode === 'audit') {
+    audit.classList.add('scene--active');
+    renderAuditScene();
+  } else if (state.viewMode === 'manage') {
     manage.classList.add('scene--active');
     renderManage();
   } else if (state.viewMode === 'builder') {
@@ -3645,6 +3741,8 @@ function commitPersonPanelSave(club, isNew, draft) {
       }
     }
   }
+  persistClub(club, isNew ? 'person_add' : 'person_edit',
+    (isNew ? 'Added ' : 'Updated ') + name + ' at ' + club.name);
   state.manage.editingPersonId = null;
   state.manage.personDraft = null;
   renderEditor(document.getElementById('mc-root'));
@@ -3676,6 +3774,7 @@ function mergeIntoPerson(club, existingPerson, isNew, draft) {
       ensurePrimaryRole(existingPerson);
     }
   }
+  persistClub(club, 'person_merge', 'Merged duplicate record into ' + existingPerson.name + ' at ' + club.name);
   state.manage.editingPersonId = null;
   state.manage.personDraft = null;
   renderEditor(document.getElementById('mc-root'));
@@ -3701,6 +3800,7 @@ function deletePersonWithConfirm() {
     variant: 'danger',
     onConfirm: function() {
       club.people = club.people.filter(function(p){ return p._id !== person._id; });
+      persistClub(club, 'person_delete', 'Deleted ' + person.name + ' from ' + club.name);
       state.manage.editingPersonId = null;
       state.manage.personDraft = null;
       state.manage.confirmDialog = null;
@@ -3834,6 +3934,7 @@ function saveChecklistEdit(section) {
   // Ensure every person has exactly one primary role after mutations
   club.people.forEach(function(p){ ensurePrimaryRole(p); });
 
+  persistClub(club, 'roles_edit', 'Updated ' + section + ' assignments for ' + club.name);
   state.manage.editingDeptSection = null;
   state.manage.checklistDrafts = null;
   state.manage.checklistAddDraft = null;
@@ -3946,6 +4047,7 @@ function saveDeptEdit(section) {
   // Ensure every person has exactly one primary role (in case changes broke it)
   club.people.forEach(function(p){ ensurePrimaryRole(p); });
 
+  persistClub(club, 'roles_edit', 'Updated ' + section + ' assignments for ' + club.name);
   state.manage.editingDeptSection = null;
   state.manage.deptDrafts = null;
   state.manage.deptAddDraft = null;
@@ -4044,7 +4146,13 @@ function cancelDeptAdd() {
    and live clubs-meta has been fetched. (Replaces the old DOMContentLoaded
    handler + demo persona bar.) */
 function wireUI() {
-  // --- View toggle (Directory / List builder / Manage) ---
+  // --- One-off RTDB seed import button (superadmin banner, delegated
+  //     because renderListing re-creates it) ---
+  document.getElementById('listing-root').addEventListener('click', function(e) {
+    if (e.target && e.target.id === 'cdSeedBtn') seedRTDBFromInline();
+  });
+
+  // --- View toggle (Directory / List builder / Manage / Activity) ---
   var clubGroup = document.getElementById('clubStyleGroup');
   clubGroup.addEventListener('click', function(e) {
     var b = e.target.closest('[data-view-mode]');
@@ -4419,6 +4527,7 @@ function wireUI() {
         c.phone = d.phone;
         c.email = d.email;
         c.website = d.website;
+        persistClub(c, 'details_edit', 'Updated club contact details for ' + c.name);
       }
       state.manage.editingDetails = null;
       renderEditor(document.getElementById('mc-root'));
@@ -4639,6 +4748,164 @@ function buildWorkingData(meta) {
 
 var CLUBS_META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
 
+/* ================= RTDB persistence (phase C) =================
+   People + club contact details live in RTDB at
+   app-data/ops-club-directory/clubs/<clubName>. Rules: any signed-in user
+   reads; a club user writes their own club; admin/superadmin write any.
+   Every save also lands a tool-local audit entry (admin-readable) plus
+   the platform-wide admin/audit hook entry.
+   Until the node is seeded (one-off superadmin import of the handbook
+   corpus), the inline seed renders read-only and manage is disabled. */
+var RTDB_BASE = 'app-data/ops-club-directory';
+var RTDB = { seeded: false };
+
+/* Serialize a working club record for RTDB. People keyed by _id; roles
+   stored as arrays (RTDB re-indexes them; normalised back on read).
+   email_private/phone_private are deliberately dropped — the directory
+   is behind login, there is no private tier (decision 10/06/2026). */
+function clubToRTDB(club) {
+  var people = {};
+  (club.people || []).forEach(function(p, i) {
+    var id = p._id || ('p' + (i + 1));
+    people[id] = {
+      name: p.name || '',
+      email: p.email || null,
+      phone: p.phone || null,
+      note: p.note || null,
+      roles: (p.roles || []).map(function(r) {
+        var o = { title: r.title || '', section: r.section || '', main: !!r.main, deptHead: !!r.deptHead };
+        if (r.flags) o.flags = r.flags;
+        return o;
+      })
+    };
+  });
+  return {
+    contact: { phone: club.phone || null, email: club.email || null, website: club.website || null },
+    people: people
+  };
+}
+
+/* Inflate an RTDB record back into the working shape. Tolerates RTDB's
+   array→object coercion and missing nodes. People sorted by numeric _id
+   suffix for stable ordering. */
+function clubFromRTDB(name, val, fallbackWebsite) {
+  var rec = { name: name, phone: null, email: null, website: fallbackWebsite || null, people: [] };
+  if (!val) return rec;
+  var c = val.contact || {};
+  rec.phone = c.phone || null;
+  rec.email = c.email || null;
+  rec.website = c.website || fallbackWebsite || null;
+  var people = val.people || {};
+  Object.keys(people).forEach(function(id) {
+    var p = people[id] || {};
+    var roles = p.roles || [];
+    if (!Array.isArray(roles)) roles = Object.keys(roles).map(function(k) { return roles[k]; });
+    rec.people.push({
+      _id: id,
+      name: p.name || '',
+      email: p.email || null,
+      phone: p.phone || null,
+      note: p.note || null,
+      roles: roles.map(function(r) {
+        var o = { title: r.title || '', section: r.section || '', main: !!r.main, deptHead: !!r.deptHead };
+        if (r.flags) o.flags = r.flags;
+        return o;
+      })
+    });
+  });
+  rec.people.sort(function(a, b) {
+    var na = parseInt((/^p(\d+)$/.exec(a._id) || [])[1] || '0', 10);
+    var nb = parseInt((/^p(\d+)$/.exec(b._id) || [])[1] || '0', 10);
+    return na - nb;
+  });
+  return rec;
+}
+
+/* Keep the runtime ID counter above every ID seen in RTDB so new people
+   never collide with existing keys. */
+function bumpPersonIdCounter() {
+  var max = 0;
+  window.CLUBS.forEach(function(c) {
+    c.people.forEach(function(p) {
+      var m = /^p(\d+)$/.exec(p._id || '');
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    });
+  });
+  if (max >= _nextPersonId) _nextPersonId = max + 1;
+}
+
+/* Read the RTDB corpus. If present it REPLACES the inline seed as the
+   working data (roster still comes from clubs-meta — RTDB records for
+   departed clubs are simply left untouched in the DB). If absent, the
+   inline seed stays, read-only, awaiting the one-off import. */
+function loadRTDBClubs() {
+  return NL.ensureAuth()
+    .then(function() {
+      return firebase.database().ref(RTDB_BASE + '/clubs').once('value');
+    })
+    .then(function(snap) {
+      var data = snap.val();
+      if (!data) { RTDB.seeded = false; return; }
+      RTDB.seeded = true;
+      window.CLUBS = window.CLUBS.map(function(c) {
+        var meta = window.CLUBS_META[c.name] || {};
+        return clubFromRTDB(c.name, data[c.name], meta.domain ? 'www.' + meta.domain : null);
+      });
+      bumpPersonIdCounter();
+    });
+}
+
+/* Persist one club's record after an in-memory mutation, with audit.
+   NL.writeAudit first (rich admin/audit entry + suppresses the auto-hook
+   for the writes below), then the tool-local audit push, then the data. */
+function persistClub(club, action, detail) {
+  if (!RTDB.seeded) return;   /* manage is hidden pre-seed; safety net */
+  var session = (window.NL && NL.session) || {};
+  if (NL.writeAudit) NL.writeAudit('directory_' + action, detail);
+  var fdb = firebase.database();
+  fdb.ref(RTDB_BASE + '/audit').push({
+    ts: firebase.database.ServerValue.TIMESTAMP,
+    uid: session.uid || null,
+    email: session.email || null,
+    club: club.name,
+    action: action,
+    detail: detail
+  });
+  fdb.ref(RTDB_BASE + '/clubs/' + club.name).set(clubToRTDB(club))
+    .catch(function(err) {
+      if (NL.toast) NL.toast('Save failed — ' + (err.message || String(err)) + '. Refresh to re-sync before editing further.', 'error');
+    });
+}
+
+/* One-off superadmin import: writes the assembled working data (inline
+   2025 handbook seed mapped onto the current roster) into RTDB. Refuses
+   if the node already has data. */
+function seedRTDBFromInline() {
+  var btn = document.getElementById('cdSeedBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Importing…'; }
+  NL.ensureAuth()
+    .then(function() {
+      return firebase.database().ref(RTDB_BASE + '/clubs').once('value');
+    })
+    .then(function(snap) {
+      if (snap.val()) throw new Error('RTDB already has directory data — not overwriting.');
+      ensurePersonIds();
+      var payload = {};
+      window.CLUBS.forEach(function(c) { payload[c.name] = clubToRTDB(c); });
+      if (NL.writeAudit) NL.writeAudit('directory_seed', 'Imported handbook seed corpus: ' + window.CLUBS.length + ' clubs');
+      return firebase.database().ref(RTDB_BASE + '/clubs').set(payload);
+    })
+    .then(function() { return loadRTDBClubs(); })
+    .then(function() {
+      if (NL.toast) NL.toast('Directory data imported — live editing is now enabled.', 'success');
+      showScene();
+    })
+    .catch(function(err) {
+      if (NL.toast) NL.toast('Import failed: ' + (err.message || String(err)), 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Import handbook seed data'; }
+    });
+}
+
 window.TOOL = window.TOOL || {};
 window.TOOL.boot = function (session) {
   state.persona = personaFromSession(session);
@@ -4656,6 +4923,9 @@ window.TOOL.boot = function (session) {
           NL.toast('Your account’s club (“' + (session.club || 'not set') + '”) was not found in the current roster — contact NL staff.', 'error');
         }
       }
+      return loadRTDBClubs();
+    })
+    .then(function() {
       wireUI();
     })
     .catch(function(err) {
