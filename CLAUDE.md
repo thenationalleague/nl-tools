@@ -57,9 +57,9 @@ var NL_TOOL_KEY = 'ops-vacancies';
 
 `toolKey` is `<category>-<slug>` where `<category>` is one of `staff`, `ops`, `media`. The same key indexes three things:
 
-1. RTDB `tools/<toolKey>` — registration record (label, role defaults).
+1. RTDB `tools/<toolKey>` — registration record (label, url, icon, role `defaults`). This single record drives BOTH the portal card AND auth-guard's access fallback — there is no separate registry in code. In-repo snapshot: `system/rtdb/tools-registry.snapshot.json`.
 2. RTDB `app-data/<toolKey>/...` — that tool's owned data.
-3. `system/auth-guard.js` access registry — which roles can open the page.
+3. RTDB security rules — the full deployed document is snapshotted at `system/rtdb/rules.snapshot.json`.
 
 `auth-guard.js` runs on every page load (v6.0+ treats `sessionStorage` as cache only and always re-verifies Firebase Auth + re-reads `users/<uid>` and `tools/<toolKey>`). Per-user tool entries are strings (`"hidden"` | `"off"` | `"access"` | `"admin"`); legacy `{access:true, admin:true}` objects are still accepted. `superadmin` is always granted. With no per-user entry, it falls back to `tools/<toolKey>/defaults[<role>]` (bare role key preferred, compound `nl-<role>` accepted).
 
@@ -71,11 +71,12 @@ For async flows that need a live auth token mid-flight, use `NL.ensureAuth().the
 
 ## When you add a new tool
 
-Use the `/new-tool <slug>` skill. It copies `system/_template/`, swaps the five placeholders, and runs the lint. The skill **does not** wire the tool into the system — three follow-ups remain and the user owns the decisions:
+Use the `/new-tool <slug>` skill. It copies `system/_template/`, swaps the five placeholders, and runs the lint. The skill **does not** wire the tool into the system — two follow-ups remain, both RTDB config (the user deploys via the Firebase console; the repo carries snapshots):
 
-1. **Portal card** in `portal/index.html` so the tool is discoverable.
-2. **`system/auth-guard.js` registry** — add the toolKey or the role defaults. Without this, the page denies for everyone.
-3. **RTDB rules** for `app-data/<toolKey>/...` (and any tool-specific paths). Some tools keep their own `<slug>.rules.json` (see `dazn-vip/dazn-vip.rules.json`), some live in the central rules.
+1. **RTDB `tools/<toolKey>` record** (label, url, icon, department, `defaults` per role). One record = portal card + auth-guard access. Without it the page is superadmin-only and invisible on the portal. **Check `system/rtdb/tools-registry.snapshot.json` first — the record may already exist.** When adding one, update that snapshot in the same PR and tell the user to paste it into RTDB `tools/`.
+2. **RTDB rules** for `app-data/<toolKey>/...`. Edit the full document at `system/rtdb/rules.snapshot.json` in the PR and tell the user to paste the whole thing into the Firebase console. Do not extend the historical partial file `dazn-vip/dazn-vip.rules.json`.
+
+**Never assert that live RTDB config is missing or wrong based only on repo code — sessions cannot read the live database. Check the `system/rtdb/` snapshots, and if the answer matters, ask the user to verify in the console.** (See `system/rtdb/README.md` for the snapshot contract.)
 
 The new tool's `index.html` must keep the canonical `?v=N` values from the template — don't invent new ones.
 
