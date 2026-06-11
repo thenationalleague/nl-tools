@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Handbook
+  handbook / index.html
+  v0.1 — Book-like, editable online edition of the NL handbook (rulebook,
+         articles, tariffs, appendices). Framework + skeleton.
+
+  What this is:
+    The governance half of the printed National League booklet (everything
+    that isn't the club directory) brought online as a navigable, editable
+    "book": a contents tree of chapters -> sections -> appendices, each a
+    Markdown document, deep-linkable and searchable.
+
+  Storage (RTDB):
+    app-data/ops-handbook/nodes/<id>  { parentId, order, kind, number,
+                                        title, body(markdown), updatedAt,
+                                        updatedBy }
+    app-data/ops-handbook/audit/<k>   { ts, uid, email, action, detail }
+    tools/ops-handbook                tool registration (label/url/defaults)
+
+  Access:
+    read  — any signed-in user (clubs + staff)
+    write — admin / superadmin only (the League's governing text)
+
+  Content authored as Markdown (textarea + live preview); stored as text so
+  it audits as clean diffs and stays re-exportable (e.g. to regenerate the
+  printed handbook from this data later).
+-->
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Handbook — NL Tools</title>
+
+  <link rel="stylesheet" href="/tools/system/nl-brand.css?v=19">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <script>
+    window.NL_TOOL = { title: 'Handbook', toolKey: 'ops-handbook' };
+    var NL_TOOL_KEY = 'ops-handbook';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '10 Jun 2026',
+        version: 'v0.1',
+        items: [
+          'First release: the National League handbook (rules, articles, tariffs and appendices) as a navigable online book — contents sidebar, search, and shareable links straight to any clause.',
+          'Admins can edit any section in Markdown with live preview; every change is saved instantly and logged.',
+          'Ships with the chapter and appendix structure in place; the text of each section is filled in from here.'
+        ]
+      }
+    ];
+
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) window.TOOL.boot(userData);
+      else window._toolDeferredSession = userData;
+    };
+  </script>
+
+  <script src="/tools/system/nl-utils.js?v=10"></script>
+  <script src="/tools/system/nl-topbar.js?v=7"></script>
+  <script src="/tools/system/auth-guard.js?v=8"></script>
+
+<style>
+  /* Tool-specific styles. Brand tokens only — no raw hex / rgba overlays. */
+  .hb-layout { display: grid; grid-template-columns: 300px 1fr; gap: 0; min-height: calc(100vh - 72px); }
+  @media (max-width: 820px) { .hb-layout { grid-template-columns: 1fr; } }
+
+  /* ---- Contents sidebar ---- */
+  .hb-side {
+    border-right: 1px solid var(--border); background: var(--off-white);
+    padding: 18px 14px 40px; overflow-y: auto;
+    position: sticky; top: 0; max-height: calc(100vh - 72px);
+  }
+  @media (max-width: 820px) { .hb-side { position: static; max-height: none; border-right: none; border-bottom: 1px solid var(--border); } }
+  .hb-side__search {
+    width: 100%; font-family: var(--font); font-size: 13px; box-sizing: border-box;
+    border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 14px;
+    background: var(--white); color: var(--text);
+  }
+  .hb-toc { list-style: none; margin: 0; padding: 0; }
+  .hb-toc ul { list-style: none; margin: 0 0 0 12px; padding: 0; border-left: 1px solid var(--border); }
+  .hb-toc li { margin: 0; }
+  .hb-toc__row { display: flex; align-items: center; gap: 4px; }
+  .hb-toc__link {
+    flex: 1; display: block; padding: 5px 8px; border-radius: 5px; cursor: pointer;
+    font-size: 13px; color: var(--text); text-decoration: none; line-height: 1.35;
+  }
+  .hb-toc__link:hover { background: var(--navy-50); text-decoration: none; }
+  .hb-toc__link.is-current { background: var(--navy); color: var(--white); font-variation-settings: 'wght' 700; }
+  .hb-toc__num { color: var(--text-muted); font-size: 11px; margin-right: 5px; }
+  .hb-toc__link.is-current .hb-toc__num { color: var(--navy-100); }
+  .hb-toc__caret {
+    width: 18px; height: 18px; flex-shrink: 0; border: none; background: none; cursor: pointer;
+    color: var(--text-muted); font-size: 11px; padding: 0; line-height: 1;
+  }
+  .hb-toc__caret--spacer { visibility: hidden; }
+  .hb-toc__chapter > .hb-toc__row > .hb-toc__link { font-variation-settings: 'wght' 800; }
+
+  /* ---- Reading pane ---- */
+  .hb-main { padding: 28px 36px 80px; max-width: 820px; }
+  @media (max-width: 820px) { .hb-main { padding: 22px 18px 60px; } }
+  .hb-crumb { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
+  .hb-crumb span + span::before { content: '›'; margin: 0 6px; color: var(--border); }
+  .hb-doc__num { font-size: 13px; font-variation-settings: 'wght' 800; color: var(--primary); letter-spacing: 0.04em; }
+  .hb-doc__title { font-size: 28px; font-variation-settings: 'wght' 900; color: var(--navy); margin: 2px 0 18px; line-height: 1.15; }
+  .hb-doc__meta { font-size: 11px; color: var(--text-muted); margin-bottom: 18px; }
+
+  /* Rendered markdown */
+  .hb-body { font-size: 15px; line-height: 1.65; color: var(--text); }
+  .hb-body h2 { font-size: 20px; font-variation-settings: 'wght' 800; color: var(--navy); margin: 26px 0 8px; }
+  .hb-body h3 { font-size: 16px; font-variation-settings: 'wght' 800; margin: 20px 0 6px; }
+  .hb-body p { margin: 0 0 12px; }
+  .hb-body ul, .hb-body ol { margin: 0 0 12px; padding-left: 24px; }
+  .hb-body li { margin: 2px 0; }
+  .hb-body blockquote { margin: 0 0 12px; padding: 6px 14px; border-left: 3px solid var(--primary); background: var(--off-white); color: var(--text-muted); }
+  .hb-body code { font-family: ui-monospace, monospace; font-size: 0.9em; background: var(--navy-50); padding: 1px 5px; border-radius: 4px; }
+  .hb-body hr { border: none; border-top: 1px solid var(--border); margin: 22px 0; }
+  .hb-body a { color: var(--navy); }
+  .hb-body table { border-collapse: collapse; width: 100%; margin: 0 0 14px; font-size: 14px; }
+  .hb-body th, .hb-body td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: top; }
+  .hb-body th { background: var(--navy-50); font-variation-settings: 'wght' 700; }
+  .hb-empty { color: var(--text-muted); font-style: italic; }
+
+  .hb-prevnext { display: flex; justify-content: space-between; gap: 12px; margin-top: 36px; padding-top: 18px; border-top: 1px solid var(--border); }
+  .hb-prevnext a { font-size: 13px; color: var(--navy); cursor: pointer; max-width: 46%; }
+  .hb-prevnext a span { display: block; color: var(--text-muted); font-size: 11px; }
+
+  /* ---- Editor ---- */
+  .hb-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+  .hb-edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 720px) { .hb-edit-grid { grid-template-columns: 1fr; } }
+  .hb-field { margin-bottom: 12px; }
+  .hb-field label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; font-variation-settings: 'wght' 800; color: var(--text-muted); margin-bottom: 4px; }
+  .hb-field input, .hb-field select, .hb-field textarea {
+    width: 100%; box-sizing: border-box; font-family: var(--font); font-size: 14px;
+    border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; background: var(--white); color: var(--text);
+  }
+  .hb-field textarea { min-height: 380px; font-family: ui-monospace, monospace; font-size: 13px; line-height: 1.5; resize: vertical; }
+  .hb-preview { border: 1px solid var(--border); border-radius: 6px; padding: 14px 16px; background: var(--white); overflow-y: auto; max-height: 520px; }
+  .hb-preview__label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 8px; font-variation-settings: 'wght' 800; }
+
+  .hb-seed { max-width: 560px; margin: 40px auto; text-align: center; }
+  .hb-seed__card { background: var(--off-white); border: 1px solid var(--border); border-radius: 12px; padding: 28px; }
+</style>
+</head>
+<body>
+
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="hb-layout" id="hbLayout">
+    <aside class="hb-side" id="hbSide">
+      <input type="search" class="hb-side__search" id="hbSearch" placeholder="Search the handbook…">
+      <ul class="hb-toc" id="hbToc"></ul>
+    </aside>
+    <main class="hb-main" id="hbMain"></main>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var BASE = 'app-data/ops-handbook';
+
+  var S = {
+    session: null,
+    role: 'viewer',
+    nodes: {},          // id -> node
+    currentId: null,
+    search: '',
+    collapsed: {},      // id -> true (collapsed in toc)
+    editing: null,      // node id being edited, or '__new__'
+    draft: null,
+    seeded: false
+  };
+
+  function canEdit() { return S.role === 'admin' || S.role === 'superadmin'; }
+  function esc(s) {
+    if (s === null || s === undefined) return '';
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  /* ============ Minimal, safe Markdown -> HTML ============
+     Supports: # headings, **bold**, *italic*, `code`, [links](url),
+     - / 1. lists, > blockquote, --- rule, | pipe tables |, paragraphs.
+     Input is escaped first, so no raw HTML passes through. */
+  function mdInline(t) {
+    t = esc(t);
+    t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
+    t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    t = t.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+|mailto:[^)\s]+|#[^)\s]+)\)/g,
+      '<a href="$2">$1</a>');
+    return t;
+  }
+  function mdToHtml(md) {
+    if (!md || !md.trim()) return '<p class="hb-empty">No content yet.</p>';
+    var lines = md.replace(/\r\n/g, '\n').split('\n');
+    var html = [], i = 0;
+    function isTableSep(s) { return /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(s) && s.indexOf('-') !== -1; }
+    function splitRow(s) {
+      s = s.trim().replace(/^\|/, '').replace(/\|$/, '');
+      return s.split('|').map(function (c) { return c.trim(); });
+    }
+    while (i < lines.length) {
+      var line = lines[i];
+      if (!line.trim()) { i++; continue; }
+      // table
+      if (line.indexOf('|') !== -1 && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+        var headers = splitRow(line); i += 2;
+        var body = [];
+        while (i < lines.length && lines[i].indexOf('|') !== -1 && lines[i].trim()) { body.push(splitRow(lines[i])); i++; }
+        html.push('<table><thead><tr>' + headers.map(function (h) { return '<th>' + mdInline(h) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+          body.map(function (r) { return '<tr>' + r.map(function (c) { return '<td>' + mdInline(c) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table>');
+        continue;
+      }
+      var h = /^(#{2,4})\s+(.*)$/.exec(line);
+      if (h) { var lvl = h[1].length; html.push('<h' + lvl + '>' + mdInline(h[2]) + '</h' + lvl + '>'); i++; continue; }
+      if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { html.push('<hr>'); i++; continue; }
+      if (/^\s*>/.test(line)) {
+        var q = [];
+        while (i < lines.length && /^\s*>/.test(lines[i])) { q.push(lines[i].replace(/^\s*>\s?/, '')); i++; }
+        html.push('<blockquote>' + q.map(mdInline).join('<br>') + '</blockquote>'); continue;
+      }
+      if (/^\s*[-*]\s+/.test(line)) {
+        var ul = [];
+        while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { ul.push('<li>' + mdInline(lines[i].replace(/^\s*[-*]\s+/, '')) + '</li>'); i++; }
+        html.push('<ul>' + ul.join('') + '</ul>'); continue;
+      }
+      if (/^\s*\d+\.\s+/.test(line)) {
+        var ol = [];
+        while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { ol.push('<li>' + mdInline(lines[i].replace(/^\s*\d+\.\s+/, '')) + '</li>'); i++; }
+        html.push('<ol>' + ol.join('') + '</ol>'); continue;
+      }
+      // paragraph (gather until blank)
+      var para = [];
+      while (i < lines.length && lines[i].trim() && !/^(#{2,4}\s|>|\s*[-*]\s|\s*\d+\.\s)/.test(lines[i]) && !/^\s*(-{3,}|\*{3,})\s*$/.test(lines[i])) {
+        para.push(lines[i]); i++;
+      }
+      html.push('<p>' + para.map(mdInline).join('<br>') + '</p>');
+    }
+    return html.join('\n');
+  }
+
+  /* ============ Tree helpers ============ */
+  function childrenOf(parentId) {
+    var out = [];
+    for (var id in S.nodes) if (S.nodes[id].parentId === parentId) out.push(S.nodes[id]);
+    out.sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+    return out;
+  }
+  function flatten() {
+    // depth-first reading order
+    var out = [];
+    (function walk(pid) {
+      childrenOf(pid).forEach(function (n) { out.push(n); walk(n.id); });
+    })(null);
+    return out;
+  }
+  function breadcrumb(node) {
+    var chain = [], n = node;
+    while (n) { chain.unshift(n); n = n.parentId ? S.nodes[n.parentId] : null; }
+    return chain;
+  }
+
+  /* ============ Rendering ============ */
+  function render() {
+    if (!S.seeded) { renderSeedPrompt(); return; }
+    renderToc();
+    renderMain();
+  }
+
+  function renderSeedPrompt() {
+    var side = document.getElementById('hbSide');
+    if (side) side.style.display = 'none';
+    var main = document.getElementById('hbMain');
+    var canSeed = S.role === 'superadmin';
+    main.innerHTML = '<div class="hb-seed"><div class="hb-seed__card">' +
+      '<h2 style="margin-top:0;color:var(--navy);">The handbook is empty</h2>' +
+      '<p style="color:var(--text-muted);">' +
+        (canSeed
+          ? 'Seed the chapter &amp; appendix structure to get started — you can then fill in each section.'
+          : 'It hasn’t been set up yet. A League administrator needs to initialise it.') +
+      '</p>' +
+      (canSeed ? '<button class="btn btn--navy" id="hbSeedBtn">Create handbook structure</button>' : '') +
+    '</div></div>';
+  }
+
+  function tocItem(node) {
+    var kids = childrenOf(node.id);
+    var hasKids = kids.length > 0;
+    var collapsed = S.collapsed[node.id];
+    var cls = 'hb-toc__link' + (node.id === S.currentId ? ' is-current' : '');
+    var caret = hasKids
+      ? '<button class="hb-toc__caret" data-toc-caret="' + esc(node.id) + '">' + (collapsed ? '▸' : '▾') + '</button>'
+      : '<span class="hb-toc__caret hb-toc__caret--spacer"></span>';
+    var li = '<li class="' + (node.parentId === null ? 'hb-toc__chapter' : '') + '">' +
+      '<div class="hb-toc__row">' + caret +
+        '<a class="' + cls + '" data-toc="' + esc(node.id) + '">' +
+          (node.number ? '<span class="hb-toc__num">' + esc(node.number) + '</span>' : '') +
+          esc(node.title) +
+        '</a>' +
+      '</div>';
+    if (hasKids && !collapsed) li += '<ul>' + kids.map(tocItem).join('') + '</ul>';
+    return li + '</li>';
+  }
+  function renderToc() {
+    var side = document.getElementById('hbSide');
+    if (side) side.style.display = '';
+    var toc = document.getElementById('hbToc');
+    if (S.search) { renderSearchResults(toc); return; }
+    toc.innerHTML = childrenOf(null).map(tocItem).join('');
+  }
+  function renderSearchResults(toc) {
+    var q = S.search.toLowerCase();
+    var hits = Object.keys(S.nodes).map(function (id) { return S.nodes[id]; }).filter(function (n) {
+      return (n.title || '').toLowerCase().indexOf(q) !== -1 ||
+             (n.number || '').toLowerCase().indexOf(q) !== -1 ||
+             (n.body || '').toLowerCase().indexOf(q) !== -1;
+    }).sort(function (a, b) { return (a.number || a.title).localeCompare(b.number || b.title); });
+    if (!hits.length) { toc.innerHTML = '<li style="padding:8px;color:var(--text-muted);font-size:13px;">No matches.</li>'; return; }
+    toc.innerHTML = hits.map(function (n) {
+      return '<li><div class="hb-toc__row"><span class="hb-toc__caret hb-toc__caret--spacer"></span>' +
+        '<a class="hb-toc__link' + (n.id === S.currentId ? ' is-current' : '') + '" data-toc="' + esc(n.id) + '">' +
+        (n.number ? '<span class="hb-toc__num">' + esc(n.number) + '</span>' : '') + esc(n.title) + '</a></div></li>';
+    }).join('');
+  }
+
+  function renderMain() {
+    var main = document.getElementById('hbMain');
+    if (S.editing) { renderEditor(main); return; }
+    var node = S.nodes[S.currentId];
+    if (!node) {
+      // default to first chapter
+      var first = childrenOf(null)[0];
+      if (first) { S.currentId = first.id; node = first; }
+    }
+    if (!node) { main.innerHTML = '<p class="hb-empty">Nothing here yet.</p>'; return; }
+
+    var crumb = breadcrumb(node).map(function (n) {
+      return '<span><a data-toc="' + esc(n.id) + '" style="color:inherit;cursor:pointer;">' + esc(n.title) + '</a></span>';
+    }).join('');
+
+    var flat = flatten();
+    var idx = flat.findIndex(function (n) { return n.id === node.id; });
+    var prev = idx > 0 ? flat[idx - 1] : null;
+    var next = idx >= 0 && idx < flat.length - 1 ? flat[idx + 1] : null;
+
+    var editBar = canEdit()
+      ? '<div class="hb-toolbar">' +
+          '<button class="btn btn--navy btn--sm" id="hbEdit">Edit this section</button>' +
+          '<button class="btn btn--ghost btn--sm" id="hbAddChild">+ Add sub-section</button>' +
+          '<button class="btn btn--ghost btn--sm" id="hbAddSibling">+ Add section after</button>' +
+          '<button class="btn btn--ghost btn--sm" id="hbMoveUp">↑</button>' +
+          '<button class="btn btn--ghost btn--sm" id="hbMoveDown">↓</button>' +
+          '<button class="btn btn--danger btn--sm" id="hbDelete" style="margin-left:auto;">Delete</button>' +
+        '</div>'
+      : '';
+
+    main.innerHTML = editBar +
+      '<div class="hb-crumb">' + crumb + '</div>' +
+      (node.number ? '<div class="hb-doc__num">' + esc(node.number) + '</div>' : '') +
+      '<h1 class="hb-doc__title">' + esc(node.title) + '</h1>' +
+      (node.updatedAt ? '<div class="hb-doc__meta">Last updated ' + esc(fmtDate(node.updatedAt)) + (node.updatedBy ? ' · ' + esc(node.updatedBy) : '') + '</div>' : '') +
+      '<div class="hb-body">' + mdToHtml(node.body) + '</div>' +
+      '<div class="hb-prevnext">' +
+        (prev ? '<a data-toc="' + esc(prev.id) + '"><span>← Previous</span>' + esc(prev.title) + '</a>' : '<span></span>') +
+        (next ? '<a data-toc="' + esc(next.id) + '" style="text-align:right;"><span>Next →</span>' + esc(next.title) + '</a>' : '<span></span>') +
+      '</div>';
+  }
+
+  function renderEditor(main) {
+    var isNew = S.editing === '__new__';
+    var d = S.draft;
+    main.innerHTML =
+      '<div class="hb-toolbar"><b style="align-self:center;">' + (isNew ? 'New section' : 'Editing') + '</b>' +
+        '<button class="btn btn--navy btn--sm" id="hbSave" style="margin-left:auto;">Save</button>' +
+        '<button class="btn btn--ghost btn--sm" id="hbCancel">Cancel</button>' +
+      '</div>' +
+      '<div class="hb-edit-grid">' +
+        '<div>' +
+          '<div class="hb-field"><label>Number (optional, e.g. 4.2 or "Appendix F")</label><input id="hbfNum" value="' + esc(d.number) + '"></div>' +
+          '<div class="hb-field"><label>Title</label><input id="hbfTitle" value="' + esc(d.title) + '"></div>' +
+          '<div class="hb-field"><label>Kind</label><select id="hbfKind">' +
+            ['chapter', 'section', 'appendix'].map(function (k) { return '<option value="' + k + '"' + (d.kind === k ? ' selected' : '') + '>' + k + '</option>'; }).join('') +
+          '</select></div>' +
+          '<div class="hb-field"><label>Body (Markdown)</label><textarea id="hbfBody">' + esc(d.body) + '</textarea></div>' +
+        '</div>' +
+        '<div>' +
+          '<div class="hb-preview__label">Live preview</div>' +
+          '<div class="hb-preview hb-body" id="hbPreview">' + mdToHtml(d.body) + '</div>' +
+        '</div>' +
+      '</div>';
+    var ta = document.getElementById('hbfBody');
+    ta.addEventListener('input', function () {
+      S.draft.body = ta.value;
+      document.getElementById('hbPreview').innerHTML = mdToHtml(ta.value);
+    });
+    document.getElementById('hbfTitle').addEventListener('input', function (e) { S.draft.title = e.target.value; });
+    document.getElementById('hbfNum').addEventListener('input', function (e) { S.draft.number = e.target.value; });
+    document.getElementById('hbfKind').addEventListener('change', function (e) { S.draft.kind = e.target.value; });
+  }
+
+  function fmtDate(ts) {
+    try { return new Date(ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
+    catch (e) { return ''; }
+  }
+
+  /* ============ Mutations (admin/superadmin) ============ */
+  function genId() { return 'n' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36); }
+
+  function persistNode(node, action, detail) {
+    node.updatedAt = Date.now();
+    node.updatedBy = (S.session && (S.session.name || S.session.email)) || null;
+    var fdb = firebase.database();
+    if (NL.writeAudit) NL.writeAudit('handbook_' + action, detail);
+    fdb.ref(BASE + '/audit').push({
+      ts: firebase.database.ServerValue.TIMESTAMP,
+      uid: (S.session && S.session.uid) || null,
+      email: (S.session && S.session.email) || null,
+      action: action, detail: detail
+    });
+    return fdb.ref(BASE + '/nodes/' + node.id).set({
+      parentId: node.parentId, order: node.order, kind: node.kind || 'section',
+      number: node.number || null, title: node.title || '', body: node.body || '',
+      updatedAt: node.updatedAt, updatedBy: node.updatedBy
+    }).catch(function (err) {
+      NL.toast && NL.toast('Save failed: ' + (err.message || err) + ' — refresh before editing further.', 'error');
+    });
+  }
+
+  function startEdit(node) { S.editing = node.id; S.draft = { number: node.number || '', title: node.title || '', kind: node.kind || 'section', body: node.body || '' }; render(); }
+  function startAdd(parentId, afterOrder) {
+    S.editing = '__new__';
+    S.draft = { number: '', title: 'Untitled', kind: parentId === null ? 'chapter' : 'section', body: '', parentId: parentId, order: afterOrder };
+    render();
+  }
+  function saveDraft() {
+    var d = S.draft;
+    if (!d.title.trim()) { NL.toast && NL.toast('A title is required.', 'info'); return; }
+    if (S.editing === '__new__') {
+      var node = { id: genId(), parentId: d.parentId, order: d.order, kind: d.kind, number: d.number.trim(), title: d.title.trim(), body: d.body };
+      S.nodes[node.id] = node;
+      S.currentId = node.id;
+      persistNode(node, 'add', 'Added "' + node.title + '"');
+    } else {
+      var n = S.nodes[S.editing];
+      n.number = d.number.trim(); n.title = d.title.trim(); n.kind = d.kind; n.body = d.body;
+      persistNode(n, 'edit', 'Edited "' + n.title + '"');
+    }
+    S.editing = null; S.draft = null; render();
+  }
+  function deleteNode(node) {
+    if (childrenOf(node.id).length) { NL.toast && NL.toast('Delete or move its sub-sections first.', 'info'); return; }
+    if (!confirm('Delete "' + node.title + '"? This cannot be undone.')) return;
+    delete S.nodes[node.id];
+    var sib = childrenOf(node.parentId)[0];
+    S.currentId = sib ? sib.id : (childrenOf(null)[0] || {}).id;
+    if (NL.writeAudit) NL.writeAudit('handbook_delete', 'Deleted "' + node.title + '"');
+    firebase.database().ref(BASE + '/audit').push({ ts: firebase.database.ServerValue.TIMESTAMP, uid: (S.session && S.session.uid) || null, email: (S.session && S.session.email) || null, action: 'delete', detail: 'Deleted "' + node.title + '"' });
+    firebase.database().ref(BASE + '/nodes/' + node.id).remove();
+    render();
+  }
+  function moveNode(node, dir) {
+    var sibs = childrenOf(node.parentId);
+    var i = sibs.findIndex(function (n) { return n.id === node.id; });
+    var j = i + dir;
+    if (j < 0 || j >= sibs.length) return;
+    var a = sibs[i], b = sibs[j];
+    var ao = a.order, bo = b.order;
+    a.order = bo; b.order = ao;
+    persistNode(a, 'reorder', 'Reordered "' + a.title + '"');
+    persistNode(b, 'reorder', 'Reordered "' + b.title + '"');
+    render();
+  }
+
+  /* ============ Skeleton seed (superadmin one-off) ============ */
+  function seedSkeleton() {
+    var btn = document.getElementById('hbSeedBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+    var spec = [
+      ['Front matter', null, [
+        ['League officials & board', null], ['League contacts', null], ['Sponsors & partners', null],
+        ['Associated leagues & associations', null]
+      ]],
+      ['Articles of Association', null, []],
+      ['Standardised Membership Rules', null, [
+        ['Membership & subscriptions', null], ['Admission charges', null],
+        ['Arrangement of fixtures', null], ['General meetings & AGM', null],
+        ['Board directives', null], ['Alterations to rules', null]
+      ]],
+      ['Tariffs', null, [['Fees tariff', null], ['Fines tariff', null]]],
+      ['Appendices', null, [
+        ['Disciplinary procedures', 'Appendix A'],
+        ['The National League Play-Off Competition', 'Appendix B'],
+        ['The National League North & South Play-Off Competitions', 'Appendix C'],
+        ['Financial regulations', 'Appendix D'],
+        ['Budget monitoring scheme', 'Appendix E'],
+        ['Televising of matches', 'Appendix F'],
+        ['National League System', 'Appendix G'],
+        ['Embargo', 'Appendix H'],
+        ['Match delegate', 'Appendix I'],
+        ['Standing orders', 'Appendix J'],
+        ['Kicks from the penalty mark', 'Appendix K'],
+        ['Standardised ground criteria', 'Appendix M'],
+        ['Standardised ground grading', 'Appendix N'],
+        ['League Cup', 'Appendix P'],
+        ['The licensing system', 'Appendix Q'],
+        ['Acquisition materials', 'Appendix R']
+      ]],
+      ['Reference', null, [['Average attendances', null], ['Admission charges (reference)', null]]]
+    ];
+    var payload = {};
+    var co = 0;
+    spec.forEach(function (chap) {
+      var cid = genId();
+      payload[cid] = { parentId: null, order: co++, kind: 'chapter', number: null, title: chap[0], body: '', updatedAt: Date.now(), updatedBy: 'seed' };
+      var so = 0;
+      chap[2].forEach(function (child) {
+        var sid = genId();
+        payload[sid] = {
+          parentId: cid, order: so++, kind: chap[0] === 'Appendices' ? 'appendix' : 'section',
+          number: child[1] || null, title: child[0], body: '', updatedAt: Date.now(), updatedBy: 'seed'
+        };
+      });
+    });
+    NL.ensureAuth()
+      .then(function () { return firebase.database().ref(BASE + '/nodes').once('value'); })
+      .then(function (snap) {
+        if (snap.val()) throw new Error('Handbook already has content — not overwriting.');
+        if (NL.writeAudit) NL.writeAudit('handbook_seed', 'Seeded handbook skeleton (' + Object.keys(payload).length + ' nodes)');
+        return firebase.database().ref(BASE + '/nodes').set(payload);
+      })
+      .then(function () { return loadNodes(); })
+      .then(function () { S.seeded = true; S.currentId = childrenOf(null)[0].id; render(); NL.toast && NL.toast('Structure created — start filling in sections.', 'success'); })
+      .catch(function (err) {
+        NL.toast && NL.toast('Seed failed: ' + (err.message || err), 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Create handbook structure'; }
+      });
+  }
+
+  /* ============ Load + boot ============ */
+  function loadNodes() {
+    return NL.ensureAuth()
+      .then(function () { return firebase.database().ref(BASE + '/nodes').once('value'); })
+      .then(function (snap) {
+        var val = snap.val() || {};
+        S.nodes = {};
+        Object.keys(val).forEach(function (id) {
+          var n = val[id];
+          S.nodes[id] = { id: id, parentId: n.parentId || null, order: n.order || 0, kind: n.kind || 'section', number: n.number || '', title: n.title || '', body: n.body || '', updatedAt: n.updatedAt || null, updatedBy: n.updatedBy || null };
+        });
+        S.seeded = Object.keys(S.nodes).length > 0;
+      });
+  }
+
+  function openFromHash() {
+    var h = (location.hash || '').replace(/^#/, '');
+    if (h && S.nodes[h]) S.currentId = h;
+  }
+
+  function wire() {
+    // Sidebar nav + carets (delegated)
+    document.getElementById('hbSide').addEventListener('click', function (e) {
+      var caret = e.target.closest('[data-toc-caret]');
+      if (caret) { var cid = caret.getAttribute('data-toc-caret'); S.collapsed[cid] = !S.collapsed[cid]; renderToc(); return; }
+      var link = e.target.closest('[data-toc]');
+      if (link) { e.preventDefault(); navigate(link.getAttribute('data-toc')); }
+    });
+    document.getElementById('hbSearch').addEventListener('input', function (e) {
+      S.search = e.target.value.trim(); renderToc();
+    });
+    // Main pane (delegated: nav links + editor buttons + seed)
+    document.getElementById('hbMain').addEventListener('click', function (e) {
+      var t = e.target;
+      if (t.id === 'hbSeedBtn') { seedSkeleton(); return; }
+      var link = t.closest('[data-toc]');
+      if (link) { e.preventDefault(); navigate(link.getAttribute('data-toc')); return; }
+      if (!canEdit()) return;
+      var node = S.nodes[S.currentId];
+      if (t.id === 'hbEdit' && node) startEdit(node);
+      else if (t.id === 'hbAddChild' && node) startAdd(node.id, childrenOf(node.id).length);
+      else if (t.id === 'hbAddSibling' && node) startAdd(node.parentId, (node.order || 0) + 0.5);
+      else if (t.id === 'hbMoveUp' && node) moveNode(node, -1);
+      else if (t.id === 'hbMoveDown' && node) moveNode(node, 1);
+      else if (t.id === 'hbDelete' && node) deleteNode(node);
+      else if (t.id === 'hbSave') saveDraft();
+      else if (t.id === 'hbCancel') { S.editing = null; S.draft = null; render(); }
+    });
+    window.addEventListener('hashchange', function () { openFromHash(); render(); });
+  }
+
+  function navigate(id) {
+    if (S.editing) { S.editing = null; S.draft = null; }
+    S.currentId = id;
+    S.search = ''; var sb = document.getElementById('hbSearch'); if (sb) sb.value = '';
+    if (history.replaceState) history.replaceState(null, '', '#' + id); else location.hash = id;
+    render();
+  }
+
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function (session) {
+    S.session = session;
+    S.role = (session && session.role) || 'viewer';
+    wire();
+    loadNodes()
+      .then(function () { openFromHash(); render(); })
+      .catch(function (err) {
+        document.getElementById('hbMain').innerHTML = '<p style="color:var(--red);padding:24px;">Failed to load the handbook — ' + esc(err.message || String(err)) + '</p>';
+      });
+  };
+
+  if (window._toolDeferredSession) { window.TOOL.boot(window._toolDeferredSession); window._toolDeferredSession = null; }
+})();
+</script>
+</body>
+</html>
