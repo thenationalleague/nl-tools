@@ -6,9 +6,27 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.22 — People model v2: contacts[], role functions, vacant roles + cleanup.
+  v0.23 — List builder rebuilt on v2 model + completion dashboard.
 
   Changelog:
+  v0.23 — (10/06/2026) The payoff phases on the v2 people model:
+          - List builder: results now de-duplicate to one row per HUMAN
+            (someone holding six roles appears once, roles unioned) — the
+            CSV/email exports key on person, not person-per-section.
+            New "Contact: the person / the role inbox" toggle picks which
+            address wins when both exist (role inboxes like secretary@
+            survive staff changes; personal addresses reach the individual).
+            Vacant roles are included with their contact route, and people
+            with no contact route show "no contact route" rather than
+            being silently dropped. Multi-email people surface all their
+            addresses. Fixed a latent bug: the Heads/Whole toggle handler
+            queried a class the buttons never had, so it had been dead.
+          - NEW Completion dashboard. Club editors get a checklist of
+            their required roles (department heads + DLO/PLO/CSLO) with a
+            fill meter; staff/admin get the league-wide view — a rollup
+            ("14 clubs missing a DLO") plus a per-club completion table,
+            click a row to open the club. Requirements read off the v2
+            function keys so they're immune to title spelling.
   v0.22 — (10/06/2026) People data foundation (assessment follow-up):
           - Model v2: person.contacts[] (multiple emails/phones with
             label + preferred; person.email/.phone remain as preferred-
@@ -278,6 +296,14 @@
   var NL_TOOL_KEY = 'ops-club-directory';
 
   window.NL_CHANGELOG = [
+    {
+      date: '10 Jun 2026',
+      version: 'v0.23',
+      items: [
+        'List builder: each person now appears once however many roles they hold, and exports de-duplicate properly. A new "Contact: the person / the role inbox" switch chooses which address to use when a club has both (e.g. a personal address and a secretary@ inbox). Vacant posts are included with their contact route.',
+        'New Completion view. Your club: a checklist of the roles the League requires (department heads, DLO/PLO/CSLO) with a progress meter. NL staff: a league-wide view showing which clubs are missing what — click any club to open it.'
+      ]
+    },
     {
       date: '10 Jun 2026',
       version: 'v0.22',
@@ -594,6 +620,32 @@
     border-bottom: 1px solid var(--border);
   }
   .cp-empty { padding: 36px 20px; text-align: center; color: var(--text-muted); font-size: 14px; }
+
+  /* ---- Completion dashboard (v0.23) ---- */
+  .cp-meter { display: inline-block; width: 90px; height: 8px; border-radius: 4px; background: var(--navy-100); overflow: hidden; vertical-align: middle; }
+  .cp-meter__bar { height: 100%; border-radius: 4px; transition: width 0.2s; }
+  .cp-meter__label { font-size: 12px; font-variation-settings: 'wght' 700; color: var(--text-muted); margin-left: 8px; vertical-align: middle; }
+  .cp-dash-meter { margin: 4px 0 8px; }
+  .cp-dash-h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--navy); margin: 22px 0 10px; }
+  .cp-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px; }
+  .cp-check { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 13px; background: var(--white); }
+  .cp-check__icon { width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; color: var(--white); flex-shrink: 0; }
+  .cp-check--ok  .cp-check__icon { background: var(--green); }
+  .cp-check--gap .cp-check__icon { background: var(--red); }
+  .cp-check--gap { border-color: var(--red); }
+  .cp-check__label { font-variation-settings: 'wght' 600; }
+  .cp-check__hint { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+  .cp-rollup { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
+  .cp-rollup__item { display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: var(--amber-light); border: 1px solid var(--amber); border-radius: 8px; }
+  .cp-rollup__n { font-size: 22px; font-variation-settings: 'wght' 900; color: var(--amber-deep); }
+  .cp-rollup__lbl { font-size: 13px; }
+  .cp-dash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .cp-dash-table th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); padding: 8px 12px; border-bottom: 2px solid var(--border); }
+  .cp-dash-table td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .cp-dash-row { cursor: pointer; }
+  .cp-dash-row:hover td { background: var(--off-white); }
+  .cp-dash-meter-cell { white-space: nowrap; }
+  .cp-dash-gaps { color: var(--text-muted); font-size: 12px; }
 
   /* ================================================================
      LISTING 1 — Card Grid
@@ -1927,6 +1979,7 @@
     <button class="btn btn--toggle btn--sm persona-gated" data-view-mode="builder" data-requires="listBuilder">List builder</button>
     <button class="btn btn--toggle btn--sm persona-gated" data-view-mode="manage" data-requires="manageContacts">Manage contacts</button>
     <button class="btn btn--toggle btn--sm persona-gated" data-view-mode="audit" data-requires="viewActivity">Activity</button>
+    <button class="btn btn--toggle btn--sm persona-gated" data-view-mode="dashboard" data-requires="viewDashboard">Completion</button>
     <button class="btn btn--toggle btn--sm persona-gated" data-view-mode="cleanup" data-requires="dataCleanup">Data cleanup</button>
   </div>
   <input type="search" class="demo-bar__search" id="searchBox" placeholder="Search clubs, people, roles…">
@@ -1953,6 +2006,11 @@
       <div class="lb-modebar__group" id="lbModeGroup">
         <button class="btn btn--toggle btn--sm" data-lb-mode="heads" aria-pressed="true">Dept heads only</button>
         <button class="btn btn--toggle btn--sm" data-lb-mode="whole">Whole department</button>
+      </div>
+      <div class="lb-modebar__group" id="lbContactGroup" title="Which address to use when both a role inbox and a personal address exist">
+        <span class="demo-bar__label">Contact</span>
+        <button class="btn btn--toggle btn--sm" data-lb-contact="person" aria-pressed="true">The person</button>
+        <button class="btn btn--toggle btn--sm" data-lb-contact="role">The role inbox</button>
       </div>
     </div>
 
@@ -2006,6 +2064,11 @@
   <!-- ACTIVITY SCENE (admin/superadmin) — tool-local directory audit -->
   <div class="scene" id="scene-audit">
     <div id="audit-root"></div>
+  </div>
+
+  <!-- COMPLETION SCENE — club checklist (club-editor) / league compliance (staff+admin) -->
+  <div class="scene" id="scene-dashboard">
+    <div id="dashboard-root"></div>
   </div>
 
   <!-- DATA CLEANUP SCENE (superadmin) — one-off model-v2 migration + dedupe -->
@@ -2468,6 +2531,7 @@ var state = {
   // list builder state
   lb: {
     mode: 'heads',
+    contactMode: 'person',   // 'person' (direct) | 'role' (inbox preferred)
     selectedDepts: {},
     selectedClubs: {},
     collapsedDivisions: {},
@@ -2493,6 +2557,7 @@ function personaCan(capability) {
     case 'manageOwnClub':  return p === 'club-editor' || p === 'admin';
     case 'editClubDetails': return p === 'admin';
     case 'viewActivity':   return p === 'admin';
+    case 'viewDashboard':  return p === 'club-editor' || p === 'staff' || p === 'admin';
     case 'dataCleanup':    return !!(window.NL && NL.session && NL.session.role === 'superadmin');
     default: return false;
   }
@@ -2639,7 +2704,12 @@ function showScene() {
   var cleanup = document.getElementById('scene-cleanup');
   [listing, club, builder, manage, audit, cleanup].forEach(function(s){ s.classList.remove('scene--active'); });
 
-  if (state.viewMode === 'cleanup') {
+  var dashboard = document.getElementById('scene-dashboard');
+  dashboard.classList.remove('scene--active');
+  if (state.viewMode === 'dashboard') {
+    dashboard.classList.add('scene--active');
+    renderDashboardScene();
+  } else if (state.viewMode === 'cleanup') {
     cleanup.classList.add('scene--active');
     renderCleanupScene();
   } else if (state.viewMode === 'audit') {
@@ -2720,38 +2790,26 @@ function lbResults() {
   window.CLUBS.forEach(function(c) {
     if (!clubs[c.name]) return;
     c.people.forEach(function(p) {
-      var matched = {}; // section -> [role titles]
+      var matched = {};        // section -> [role titles]
+      var matchedContacts = {}; // section -> [role-level contacts]
       p.roles.forEach(function(r) {
         if (!depts[r.section]) return;
         var sectionMeta = SECTIONS_BY_KEY[r.section];
         if (!sectionMeta) return;
 
         if (sectionMeta.type === 'checklist') {
-          // For checklist sections, filter by the sub-role tickboxes instead of deptHead.
-          // If user hasn't set a filter, default to showing all required+optional roles
-          // and skip free-text extras in 'heads' mode.
           var subFilter = state.lb.checklistRoleFilter[r.section];
           var roleKey = r.roleKey || null;
           if (subFilter) {
-            // Explicit tickboxes rule
-            if (!roleKey) {
-              // free-text extras only included if explicitly selected via '__other' key
-              if (!subFilter.__other) return;
-            } else {
-              if (!subFilter[roleKey]) return;
-            }
+            if (!roleKey) { if (!subFilter.__other) return; }
+            else { if (!subFilter[roleKey]) return; }
           } else {
-            // Default: include DLO/PLO/CSLO (required), optional roles (SLO) and free-text
-            // except in 'heads' mode we skip free-text extras (cleaner lists)
             if (!roleKey && state.lb.mode === 'heads') return;
           }
         } else if (sectionMeta.type === 'joined-names') {
-          // Directors section — always include whoever has a role here
-          // (no dept-head concept for joined-names)
+          /* Directors — include all */
         } else {
-          // Hierarchical section — apply heads-only mode as before
           if (state.lb.mode === 'heads' && !r.deptHead) return;
-          // Apply flag filter if any flags are ticked for this section
           var flagF = state.lb.flagFilter[r.section];
           if (flagF && Object.keys(flagF).length) {
             var roleFlags = r.flags || {};
@@ -2760,8 +2818,9 @@ function lbResults() {
           }
         }
 
-        if (!matched[r.section]) matched[r.section] = [];
+        if (!matched[r.section]) { matched[r.section] = []; matchedContacts[r.section] = []; }
         matched[r.section].push(r.title);
+        (r.contacts || []).forEach(function(rc){ matchedContacts[r.section].push(rc); });
       });
       Object.keys(matched).forEach(function(section) {
         var key = c.name + '|' + (p.name||'') + '|' + section;
@@ -2771,9 +2830,31 @@ function lbResults() {
           division: divisionOf(c.name),
           section: section,
           person: p,
+          vacant: false,
           roleTitles: matched[section],
+          roleContacts: matchedContacts[section],
           omitted: !!state.lb.omittedKeys[key]
         });
+      });
+    });
+
+    /* Vacant roles: the function exists with a contact route but no named
+       person. Included so a mailout to "all programme editors" reaches the
+       clubs where the post is open. */
+    (c.vacant || []).forEach(function(v) {
+      if (!depts[v.section]) return;
+      var key = c.name + '|<vacant>|' + v.section + '|' + v.title;
+      out.push({
+        key: key,
+        club: c.name,
+        division: divisionOf(c.name),
+        section: v.section,
+        person: null,
+        vacant: true,
+        vacantTitle: v.title,
+        roleTitles: [v.title],
+        roleContacts: v.contacts || [],
+        omitted: !!state.lb.omittedKeys[key]
       });
     });
   });
@@ -2783,9 +2864,56 @@ function lbResults() {
     var sb = SECTION_ORDER.indexOf(b.section);
     if (sa !== sb) return sa - sb;
     if (a.club !== b.club) return a.club.localeCompare(b.club);
-    return (a.person.name||'').localeCompare(b.person.name||'');
+    var an = a.person ? (a.person.name||'') : a.vacantTitle;
+    var bn = b.person ? (b.person.name||'') : b.vacantTitle;
+    return an.localeCompare(bn);
   });
   return out;
+}
+
+/* Resolve a result's contact points for the current contactMode.
+   role mode: prefer the role-level inbox, fall back to the person's
+   preferred. person mode: the reverse. Vacant rows only have role
+   contacts. Returns { emails:[], phone:'' }. */
+function resolveResultContacts(r) {
+  function emailsOf(list) { return (list||[]).filter(function(c){return c.type==='email'&&c.value;}).map(function(c){return c.value;}); }
+  function phoneOf(list)  { var c=(list||[]).filter(function(x){return x.type==='phone'&&x.value;})[0]; return c?c.value:''; }
+  var roleEmails = emailsOf(r.roleContacts);
+  var rolePhone = phoneOf(r.roleContacts);
+  var personEmailList = r.person ? personEmails(r.person) : [];
+  var personPhone = r.person ? (preferredContact(r.person,'phone')||'') : '';
+  var emails, phone;
+  if (state.lb.contactMode === 'role') {
+    emails = roleEmails.length ? roleEmails : personEmailList;
+    phone  = rolePhone || personPhone;
+  } else {
+    emails = personEmailList.length ? personEmailList : roleEmails;
+    phone  = personPhone || rolePhone;
+  }
+  return { emails: emails, phone: phone };
+}
+
+/* Collapse results to one row per human (and one per vacant post),
+   unioning their matched roles + resolved contacts. Used for export. */
+function lbDedupedRows(includeOmitted) {
+  var results = lbResults().filter(function(r){ return includeOmitted || !r.omitted; });
+  var map = {}; var order = [];
+  results.forEach(function(r) {
+    var key = r.person ? (r.club + '|p|' + r.person._id) : (r.club + '|v|' + r.vacantTitle);
+    if (!map[key]) {
+      map[key] = { name: r.person ? (r.person.name||'') : (r.vacantTitle + ' (vacant)'),
+        club: r.club, division: r.division, vacant: r.vacant,
+        sections: [], roleLabels: [], emails: [], phones: [] };
+      order.push(key);
+    }
+    var row = map[key];
+    if (row.sections.indexOf(r.section) === -1) row.sections.push(r.section);
+    r.roleTitles.forEach(function(t){ if (row.roleLabels.indexOf(t) === -1) row.roleLabels.push(t); });
+    var rc = resolveResultContacts(r);
+    rc.emails.forEach(function(e){ if (row.emails.indexOf(e) === -1) row.emails.push(e); });
+    if (rc.phone && row.phones.indexOf(rc.phone) === -1) row.phones.push(rc.phone);
+  });
+  return order.map(function(k){ return map[k]; });
 }
 
 /* For warnings: find clubs missing a dept head in a given section.
@@ -3007,13 +3135,14 @@ function renderBuilderResults() {
   var subEl = document.getElementById('lbCountSub');
   var resultsRoot = document.getElementById('lbResults');
 
-  countEl.textContent = active.length;
-  var withEmail = active.filter(function(r){ return r.person.email; }).length;
+  var deduped = lbDedupedRows(false);
+  countEl.textContent = deduped.length;
+  var withEmail = deduped.filter(function(r){ return r.emails.length; }).length;
   var omittedCount = results.length - active.length;
   var omitSuffix = omittedCount ? ' · ' + omittedCount + ' omitted' : '';
   subEl.textContent = results.length === 0
     ? 'pick departments and clubs above'
-    : ((active.length === 1 ? 'person' : 'people') + ' · ' + withEmail + ' with email' + omitSuffix);
+    : ((deduped.length === 1 ? 'person/post' : 'people/posts') + ' · ' + withEmail + ' contactable' + omitSuffix);
 
   // enable/disable copy buttons
   document.querySelectorAll('.lb-copybtn').forEach(function(b){
@@ -3026,27 +3155,29 @@ function renderBuilderResults() {
   }
 
   var rows = results.map(function(r) {
-    var p = r.person;
-    var roleLabel = r.roleTitles.join(' / ');
-    var email = p.email
-      ? '<a href="mailto:' + esc(p.email) + '">' + esc(p.email) + '</a>'
-      : '<span class="lb-no-email">no email</span>';
+    var rc = resolveResultContacts(r);
+    var emailCell = rc.emails.length
+      ? rc.emails.map(function(em){ return '<a href="mailto:' + esc(em) + '">' + esc(em) + '</a>'; }).join('<br>')
+      : '<span class="lb-no-email">no contact route</span>';
+    var nameCell = r.vacant
+      ? '<span class="pill pill--status pill--status-warn">vacant</span> ' + esc(r.vacantTitle)
+      : esc(r.person.name);
     return '<tr class="' + (r.omitted ? 'lb-row-omitted' : '') + '" data-key="' + esc(r.key) + '">' +
       '<td class="lb-col-omit">' +
         '<button class="btn-icon" data-omit-key="' + esc(r.key) + '" aria-pressed="' + (r.omitted ? 'true' : 'false') + '" title="' + (r.omitted ? 'Include row' : 'Omit row') + '">' +
-        (r.omitted ? '+' : '×') +
+        (r.omitted ? '+' : '\u00d7') +
         '</button>' +
       '</td>' +
-      '<td class="lb-col-role">' + esc(r.section) + (state.lb.mode === 'whole' ? ' · ' + esc(roleLabel) : '') + '</td>' +
-      '<td class="lb-col-name">' + esc(p.name) + '</td>' +
+      '<td class="lb-col-role">' + esc(r.section) + (state.lb.mode === 'whole' || r.vacant ? ' \u00b7 ' + esc(r.roleTitles.join(' / ')) : '') + '</td>' +
+      '<td class="lb-col-name">' + nameCell + '</td>' +
       '<td class="lb-col-club">' +
         '<div class="lb-club-cell">' +
           '<img src="' + crestUrl(r.club) + '" alt="" onerror="this.onerror=null;this.src=\'' + fallbackCrest() + '\'">' +
           '<span>' + esc(r.club) + '</span>' +
         '</div>' +
       '</td>' +
-      '<td class="lb-col-email">' + email + '</td>' +
-      '<td class="lb-col-phone">' + esc(p.phone || '') + '</td>' +
+      '<td class="lb-col-email">' + emailCell + '</td>' +
+      '<td class="lb-col-phone">' + esc(rc.phone || '') + '</td>' +
     '</tr>';
   }).join('');
 
@@ -3056,24 +3187,28 @@ function renderBuilderResults() {
 }
 
 function formatForCopy(format) {
-  var results = lbResults().filter(function(r){ return !r.omitted; });
-  var withEmail = results.filter(function(r){ return r.person.email; });
+  var rows = lbDedupedRows(false);
+  var withEmail = rows.filter(function(r){ return r.emails.length; });
 
   if (format === 'named') {
+    /* one address per person — their preferred (first) email */
     return withEmail.map(function(r) {
-      return '"' + (r.person.name||'').replace(/"/g,'') + '" <' + r.person.email + '>';
+      return '"' + (r.name||'').replace(/"/g,'') + '" <' + r.emails[0] + '>';
     }).join('; ');
   }
   if (format === 'plain') {
-    return withEmail.map(function(r) { return r.person.email; }).join('; ');
+    /* every distinct email across the selection, de-duplicated */
+    var seen = {}; var all = [];
+    withEmail.forEach(function(r){ r.emails.forEach(function(e){ if(!seen[e]){seen[e]=1; all.push(e);} }); });
+    return all.join('; ');
   }
   if (format === 'csv') {
-    var header = 'Department,Role,Name,Club,Division,Email,Phone';
-    var lines = results.map(function(r) {
+    var header = 'Name,Club,Division,Roles,Emails,Phone';
+    var lines = rows.map(function(r) {
       function q(s){ s = s == null ? '' : String(s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s; }
-      return [q(r.section), q(r.roleTitles.join(' / ')), q(r.person.name),
-              q(r.club), q(r.division),
-              q(r.person.email || ''), q(r.person.phone || '')].join(',');
+      return [q(r.name), q(r.club), q(r.division),
+              q(r.roleLabels.join(' / ')),
+              q(r.emails.join(' ')), q(r.phones.join(' '))].join(',');
     });
     return [header].concat(lines).join('\n');
   }
@@ -4300,6 +4435,15 @@ function wireUI() {
     if (e.target && e.target.id === 'cdSeedBtn') seedRTDBFromInline();
   });
 
+  // --- Completion dashboard: click a league row to open that club ---
+  document.getElementById('dashboard-root').addEventListener('click', function(e) {
+    var row = e.target.closest('[data-club]');
+    if (!row) return;
+    state.viewing = row.getAttribute('data-club');
+    state.viewMode = 'directory';
+    showScene();
+  });
+
   // --- Data cleanup controls (delegated — scene re-renders) ---
   document.getElementById('cleanup-root').addEventListener('click', function(e) {
     var t = e.target;
@@ -4369,14 +4513,23 @@ function wireUI() {
   var builderScene = document.getElementById('scene-builder');
   builderScene.addEventListener('click', function(e) {
     var t = e.target;
-    var modeBtn = t.closest('.lb-mode-btn');
+    var modeBtn = t.closest('[data-lb-mode]');
     if (modeBtn) {
       state.lb.mode = modeBtn.getAttribute('data-lb-mode');
-      document.querySelectorAll('.lb-mode-btn').forEach(function(b){
+      document.querySelectorAll('#lbModeGroup [data-lb-mode]').forEach(function(b){
         b.setAttribute('aria-pressed', b === modeBtn ? 'true' : 'false');
       });
       state.lb.omittedKeys = {};
       renderBuilderWarnings();
+      renderBuilderResults();
+      return;
+    }
+    var contactBtn = t.closest('[data-lb-contact]');
+    if (contactBtn) {
+      state.lb.contactMode = contactBtn.getAttribute('data-lb-contact');
+      document.querySelectorAll('#lbContactGroup [data-lb-contact]').forEach(function(b){
+        b.setAttribute('aria-pressed', b === contactBtn ? 'true' : 'false');
+      });
       renderBuilderResults();
       return;
     }
@@ -5222,6 +5375,127 @@ function seedRTDBFromInline() {
       if (NL.toast) NL.toast('Import failed: ' + (err.message || String(err)), 'error');
       if (btn) { btn.disabled = false; btn.textContent = 'Import handbook seed data'; }
     });
+}
+
+/* ================= COMPLETION DASHBOARD =================
+   Requirements come from the existing tool definitions, expressed via the
+   v2 function keys so they're robust to title spelling:
+   - a dept HEAD for each REQUIRED_HEAD_SECTIONS
+   - the required liaison officers (DLO / PLO / CSLO; SLO optional)
+   A vacant role with a contact route satisfies a liaison requirement
+   (the function is covered + reachable); head requirements need a person. */
+
+var REQUIRED_LIAISON = { dlo: 'Disability Liaison Officer', plo: 'Police Liaison Officer', cslo: 'Competition Sponsorship Liaison Officer' };
+
+function clubCompliance(club) {
+  var missingHeads = [];
+  REQUIRED_HEAD_SECTIONS.forEach(function(section) {
+    var hasHead = club.people.some(function(p) {
+      return (p.roles || []).some(function(r) { return r.section === section && r.deptHead; });
+    });
+    if (!hasHead) missingHeads.push(section);
+  });
+  var missingLiaison = [];
+  Object.keys(REQUIRED_LIAISON).forEach(function(fk) {
+    var has = club.people.some(function(p) { return (p.roles||[]).some(function(r){ return r['function'] === fk; }); }) ||
+              (club.vacant || []).some(function(v) { return v['function'] === fk; });
+    if (!has) missingLiaison.push(fk);
+  });
+  var total = REQUIRED_HEAD_SECTIONS.length + Object.keys(REQUIRED_LIAISON).length;
+  var missing = missingHeads.length + missingLiaison.length;
+  return { missingHeads: missingHeads, missingLiaison: missingLiaison,
+           total: total, filled: total - missing, missing: missing,
+           complete: missing === 0, hasPeople: club.people.length > 0 };
+}
+
+function complianceMeter(c) {
+  var pct = c.total ? Math.round((c.filled / c.total) * 100) : 0;
+  var col = c.complete ? 'var(--green)' : (pct >= 60 ? 'var(--amber)' : 'var(--red)');
+  return '<div class="cp-meter"><div class="cp-meter__bar" style="width:' + pct + '%;background:' + col + ';"></div></div>' +
+         '<span class="cp-meter__label">' + c.filled + '/' + c.total + '</span>';
+}
+
+function renderDashboardScene() {
+  var root = document.getElementById('dashboard-root');
+  if (!root) return;
+  if (state.persona === 'club-editor') { renderClubDashboard(root); return; }
+  renderLeagueDashboard(root);
+}
+
+/* Club editor: their own checklist. */
+function renderClubDashboard(root) {
+  var club = window.CLUBS.filter(function(c){ return c.name === EDITOR_CLUB; })[0];
+  if (!club) { root.innerHTML = '<div class="lb-empty">No club associated with your account.</div>'; return; }
+  var c = clubCompliance(club);
+
+  function item(ok, label, hint) {
+    return '<div class="cp-check ' + (ok ? 'cp-check--ok' : 'cp-check--gap') + '">' +
+      '<span class="cp-check__icon">' + (ok ? '\u2713' : '\u2715') + '</span>' +
+      '<span class="cp-check__label">' + esc(label) + '</span>' +
+      (!ok && hint ? '<span class="cp-check__hint">' + esc(hint) + '</span>' : '') +
+    '</div>';
+  }
+  var heads = REQUIRED_HEAD_SECTIONS.map(function(s) {
+    return item(c.missingHeads.indexOf(s) === -1, s + ' lead', 'No department head set');
+  }).join('');
+  var liaison = Object.keys(REQUIRED_LIAISON).map(function(fk) {
+    return item(c.missingLiaison.indexOf(fk) === -1, REQUIRED_LIAISON[fk], 'Not appointed');
+  }).join('');
+
+  root.innerHTML =
+    '<div class="lb-intro"><h2>' + esc(club.name) + ' — directory completion</h2>' +
+      '<p>' + (c.complete
+        ? 'All required roles are filled. Nice.'
+        : c.missing + ' required role' + (c.missing === 1 ? '' : 's') + ' still to fill. Use <b>Manage my club</b> to add people.') +
+      '</p></div>' +
+    '<div class="cp-dash-meter">' + complianceMeter(c) + '</div>' +
+    '<h3 class="cp-dash-h3">Department heads</h3><div class="cp-checks">' + heads + '</div>' +
+    '<h3 class="cp-dash-h3">Liaison officers</h3><div class="cp-checks">' + liaison + '</div>';
+}
+
+/* Staff / admin: league-wide compliance — rollup + per-club table. */
+function renderLeagueDashboard(root) {
+  var clubs = window.CLUBS.slice().sort(function(a,b){ return a.name.localeCompare(b.name); });
+  var rows = clubs.map(function(club) {
+    return { name: club.name, division: divisionOf(club.name), c: clubCompliance(club) };
+  });
+
+  /* Requirement rollup: how many clubs miss each thing. */
+  var rollup = {};
+  REQUIRED_HEAD_SECTIONS.forEach(function(s){ rollup['head:' + s] = { label: s + ' head', n: 0 }; });
+  Object.keys(REQUIRED_LIAISON).forEach(function(fk){ rollup['lia:' + fk] = { label: REQUIRED_LIAISON[fk], n: 0 }; });
+  rows.forEach(function(r) {
+    r.c.missingHeads.forEach(function(s){ rollup['head:' + s].n++; });
+    r.c.missingLiaison.forEach(function(fk){ rollup['lia:' + fk].n++; });
+  });
+  var gaps = Object.keys(rollup).map(function(k){ return rollup[k]; })
+    .filter(function(g){ return g.n > 0; }).sort(function(a,b){ return b.n - a.n; });
+
+  var complete = rows.filter(function(r){ return r.c.complete; }).length;
+
+  var rollupHtml = gaps.length
+    ? '<div class="cp-rollup">' + gaps.map(function(g) {
+        return '<div class="cp-rollup__item"><span class="cp-rollup__n">' + g.n + '</span>' +
+          '<span class="cp-rollup__lbl">clubs missing ' + esc(g.label) + '</span></div>';
+      }).join('') + '</div>'
+    : '<p style="color:var(--green);">Every club has all required roles filled.</p>';
+
+  var tableRows = rows.map(function(r) {
+    var gapList = r.c.missingHeads.map(function(s){ return s + ' head'; })
+      .concat(r.c.missingLiaison.map(function(fk){ return fk.toUpperCase(); }));
+    return '<tr data-club="' + esc(r.name) + '" class="cp-dash-row">' +
+      '<td><div class="lb-club-cell"><img src="' + crestUrl(r.name) + '" alt="" onerror="this.onerror=null;this.src=\'' + fallbackCrest() + '\'"><span>' + esc(r.name) + '</span></div></td>' +
+      '<td class="cp-dash-meter-cell">' + complianceMeter(r.c) + '</td>' +
+      '<td class="cp-dash-gaps">' + (gapList.length ? esc(gapList.join(', ')) : '<span style="color:var(--green);">complete</span>') + '</td>' +
+    '</tr>';
+  }).join('');
+
+  root.innerHTML =
+    '<div class="lb-intro"><h2>League directory completion</h2>' +
+      '<p>' + complete + ' of ' + rows.length + ' clubs have every required role filled. Required = a head for each department plus DLO, PLO and CSLO.</p></div>' +
+    rollupHtml +
+    '<table class="cp-dash-table"><thead><tr><th>Club</th><th>Completion</th><th>Gaps</th></tr></thead>' +
+    '<tbody>' + tableRows + '</tbody></table>';
 }
 
 /* ================= DATA CLEANUP (superadmin, one-off) =================
