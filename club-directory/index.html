@@ -6,9 +6,34 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.21 — Club page redesign: full handbook record on first click.
+  v0.22 — People model v2: contacts[], role functions, vacant roles + cleanup.
 
   Changelog:
+  v0.22 — (10/06/2026) People data foundation (assessment follow-up):
+          - Model v2: person.contacts[] (multiple emails/phones with
+            label + preferred; person.email/.phone remain as preferred-
+            value MIRRORS so every existing read site stays correct);
+            roles gain `function` (closed League-owned key, free-text
+            title untouched) and optional role-level contacts[]; new
+            club.vacant[] for roles with a contact route but no named
+            person. Serialization is back-compatible — legacy records
+            load fine and are upgraded on write.
+          - FUNCTIONS catalogue + functionForTitle() title mapping
+            (reconciles Disabled/Disability Liaison Officer etc).
+          - NEW Data cleanup scene (superadmin): backup -> analyse ->
+            run. Auto-merges bare/identical same-name duplicates (the
+            ~166 bare-Directors rows), converts the 12 nameless role-
+            holders to vacant roles, stamps the v2 shape + function on
+            every record. The ~18 same-name-different-contact groups
+            (work/home email cases) are reviewed one-by-one and merge
+            into single people with multiple labelled contacts. All
+            writes audited.
+          - Club page: people rows now list ALL of a person's emails;
+            vacant roles render in their section with a "vacant" pill +
+            contact route.
+          Editor still edits the preferred email/phone (mirrors sync
+          into contacts[]; extra contacts preserved). Full multi-contact
+          editing UI lands with the list-builder rework.
   v0.21 — (10/06/2026) Club page data-surfacing pass ("feels buried —
           most of it should surface on first click into the club"):
           - Hero enriched: nickname, canonical stadium line
@@ -253,6 +278,15 @@
   var NL_TOOL_KEY = 'ops-club-directory';
 
   window.NL_CHANGELOG = [
+    {
+      date: '10 Jun 2026',
+      version: 'v0.22',
+      items: [
+        'People can now hold multiple email addresses and phone numbers (work / home / role inbox), and a role can be marked vacant-but-contactable instead of pretending to be a nameless person.',
+        'Every role now carries a League-standard function tag behind the scenes (your own job titles are untouched) — this is what will power reliable league-wide contact lists and the compliance dashboard.',
+        'One-off data cleanup (superadmin): merges the duplicate person records inherited from the handbook parse — bare director rows fold into the full record automatically; same-name-different-email cases get a review list.'
+      ]
+    },
     {
       date: '10 Jun 2026',
       version: 'v0.21',
@@ -1893,6 +1927,7 @@
     <button class="btn btn--toggle btn--sm persona-gated" data-view-mode="builder" data-requires="listBuilder">List builder</button>
     <button class="btn btn--toggle btn--sm persona-gated" data-view-mode="manage" data-requires="manageContacts">Manage contacts</button>
     <button class="btn btn--toggle btn--sm persona-gated" data-view-mode="audit" data-requires="viewActivity">Activity</button>
+    <button class="btn btn--toggle btn--sm persona-gated" data-view-mode="cleanup" data-requires="dataCleanup">Data cleanup</button>
   </div>
   <input type="search" class="demo-bar__search" id="searchBox" placeholder="Search clubs, people, roles…">
 </div>
@@ -1971,6 +2006,11 @@
   <!-- ACTIVITY SCENE (admin/superadmin) — tool-local directory audit -->
   <div class="scene" id="scene-audit">
     <div id="audit-root"></div>
+  </div>
+
+  <!-- DATA CLEANUP SCENE (superadmin) — one-off model-v2 migration + dedupe -->
+  <div class="scene" id="scene-cleanup">
+    <div id="cleanup-root"></div>
   </div>
 </div>
 
@@ -2216,10 +2256,14 @@ function renderClubKitAndSponsors(name) {
 
 function renderClubStyle2(club) {
   var bySec = peopleBySection(club);
+  var vacBySec = {};
+  (club.vacant || []).forEach(function(v) {
+    (vacBySec[v.section] = vacBySec[v.section] || []).push(v);
+  });
   var rows = '';
   SECTION_ORDER.forEach(function(s) {
-    if (!bySec[s]) return;
-    var entries = bySec[s];
+    if (!bySec[s] && !vacBySec[s]) return;
+    var entries = bySec[s] || [];
 
     // Full-width section header row (inner span carries the underline so it only
     // underlines the text, not the whole table width)
@@ -2260,11 +2304,26 @@ function renderClubStyle2(club) {
       '</tr>';
     });
 
+    // Vacant assignments: role exists, contact route known, nobody named.
+    (vacBySec[s] || []).forEach(function(v) {
+      var vEmail = (v.contacts || []).filter(function(c) { return c.type === 'email' && c.value; })
+        .map(function(c) { return '<a href="mailto:' + esc(c.value) + '">' + esc(c.value) + '</a>'; }).join('<br>');
+      var vPhone = ((v.contacts || []).filter(function(c) { return c.type === 'phone' && c.value; })[0] || {}).value || '';
+      rows += '<tr>' +
+        '<td class="s2-role">' + esc(v.title) + '</td>' +
+        '<td class="s2-name"><span class="pill pill--status pill--status-warn">vacant</span></td>' +
+        '<td class="s2-phone">' + esc(vPhone) + '</td>' +
+        '<td class="s2-email">' + vEmail + '</td>' +
+      '</tr>';
+    });
+
     // Render individual rows
     regularEntries.forEach(function(e) {
       var p = e.person;
       var roleLabel = joinRoles(e.roleTitles);
-      var email = p.email ? '<a href="mailto:' + esc(p.email) + '">' + esc(p.email) + '</a>' : '';
+      var email = personEmails(p).map(function(em) {
+        return '<a href="mailto:' + esc(em) + '">' + esc(em) + '</a>';
+      }).join('<br>');
       rows += '<tr>' +
         '<td class="s2-role">' + esc(roleLabel) + '</td>' +
         '<td class="s2-name">' + esc(p.name) + '</td>' +
@@ -2434,6 +2493,7 @@ function personaCan(capability) {
     case 'manageOwnClub':  return p === 'club-editor' || p === 'admin';
     case 'editClubDetails': return p === 'admin';
     case 'viewActivity':   return p === 'admin';
+    case 'dataCleanup':    return !!(window.NL && NL.session && NL.session.role === 'superadmin');
     default: return false;
   }
 }
@@ -2576,9 +2636,13 @@ function showScene() {
   var builder = document.getElementById('scene-builder');
   var manage = document.getElementById('scene-manage');
   var audit = document.getElementById('scene-audit');
-  [listing, club, builder, manage, audit].forEach(function(s){ s.classList.remove('scene--active'); });
+  var cleanup = document.getElementById('scene-cleanup');
+  [listing, club, builder, manage, audit, cleanup].forEach(function(s){ s.classList.remove('scene--active'); });
 
-  if (state.viewMode === 'audit') {
+  if (state.viewMode === 'cleanup') {
+    cleanup.classList.add('scene--active');
+    renderCleanupScene();
+  } else if (state.viewMode === 'audit') {
     audit.classList.add('scene--active');
     renderAuditScene();
   } else if (state.viewMode === 'manage') {
@@ -3807,6 +3871,7 @@ function commitPersonPanelSave(club, isNew, draft) {
       note: null,
       roles: [],
     };
+    ensureContacts(newPerson);
     club.people.push(newPerson);
   } else {
     var person = club.people.filter(function(p){ return p._id === state.manage.editingPersonId; })[0];
@@ -3814,6 +3879,7 @@ function commitPersonPanelSave(club, isNew, draft) {
       person.name = name;
       person.email = email;
       person.phone = phone;
+      syncContactsFromMirrors(person);
       // Apply primary role flag
       if (person.roles.length && typeof draft.primaryRoleIdx === 'number') {
         person.roles.forEach(function(r, i) {
@@ -3836,6 +3902,7 @@ function mergeIntoPerson(club, existingPerson, isNew, draft) {
     // No new record was created; just apply draft email/phone to existing if not set
     if (!existingPerson.email && (draft.email||'').trim()) existingPerson.email = draft.email.trim();
     if (!existingPerson.phone && (draft.phone||'').trim()) existingPerson.phone = draft.phone.trim();
+    syncContactsFromMirrors(existingPerson);
   } else {
     var duplicatePerson = club.people.filter(function(p){ return p._id === state.manage.editingPersonId; })[0];
     if (duplicatePerson && duplicatePerson !== existingPerson) {
@@ -4231,6 +4298,22 @@ function wireUI() {
   //     because renderListing re-creates it) ---
   document.getElementById('listing-root').addEventListener('click', function(e) {
     if (e.target && e.target.id === 'cdSeedBtn') seedRTDBFromInline();
+  });
+
+  // --- Data cleanup controls (delegated — scene re-renders) ---
+  document.getElementById('cleanup-root').addEventListener('click', function(e) {
+    var t = e.target;
+    if (t.id === 'clBackup') { cleanupDownloadBackup(); return; }
+    if (t.id === 'clAnalyse') { CLEANUP.plan = analyseCleanup(); renderCleanupScene(); return; }
+    if (t.id === 'clRun') {
+      if (confirm('Run auto cleanup? ' + CLEANUP.plan.autoMerges.length + ' merges + ' +
+        CLEANUP.plan.nameless.length + ' vacant conversions, and every club record is re-written in the v2 shape. Backup downloaded?')) {
+        runAutoCleanup();
+      }
+      return;
+    }
+    if (t.hasAttribute('data-cl-merge')) { applyReviewMerge(parseInt(t.getAttribute('data-cl-merge'), 10), true); return; }
+    if (t.hasAttribute('data-cl-keep'))  { applyReviewMerge(parseInt(t.getAttribute('data-cl-keep'), 10), false); return; }
   });
 
   // --- View toggle (Directory / List builder / Manage / Activity) ---
@@ -4837,6 +4920,117 @@ var CLUBS_META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/
    the platform-wide admin/audit hook entry.
    Until the node is seeded (one-off superadmin import of the handbook
    corpus), the inline seed renders read-only and manage is disabled. */
+/* ================= PEOPLE MODEL v2 =================
+   Three concepts (assessment 10/06/2026):
+   - Person: the human. Carries contacts[] — multiple emails/phones, each
+     {type:'email'|'phone', value, label, preferred} (work/home etc).
+     person.email / person.phone remain as MIRRORS of the preferred
+     contact of each type, so every existing read site stays correct.
+   - Assignment (the roles[] entries): a job at the club. Gains
+     `function` — a closed, League-owned key for cross-club queries (the
+     club's free-text `title` is untouched) — and may carry its own
+     contacts[] (role inboxes like secretary@ that outlive the holder).
+   - Vacant assignment: club.vacant[] — a role with a contact route but
+     no named person (was modelled as nameless people). */
+
+var FUNCTIONS = {
+  chair: 'Chair', vicechair: 'Vice Chair', president: 'President', owner: 'Owner',
+  director: 'Director', ceo: 'Chief Executive', gm: 'General Manager',
+  secretary: 'Club Secretary', fixtures: 'Fixture Secretary', finance: 'Finance',
+  commercial: 'Commercial', press: 'Press / Media', social: 'Website / Social',
+  programme: 'Programme Editor', marketing: 'Marketing', safety: 'Safety Officer',
+  operations: 'Operations', kit: 'Kit Manager', doctor: 'Club Doctor',
+  physio: 'Physio / Therapist', community: 'Community',
+  safeguarding: 'Safeguarding / Welfare',
+  dlo: 'Disability Liaison Officer', plo: 'Police Liaison Officer',
+  cslo: 'Competition Sponsorship Liaison Officer', slo: 'Supporter Liaison Officer',
+  other: 'Other'
+};
+
+/* Best-effort title -> function mapping. Built from the title-variance
+   analysis of the 2025 corpus; unmapped titles fall to 'other'. */
+function functionForTitle(title, section) {
+  var t = (title || '').toLowerCase();
+  if (/disab/.test(t) && /liaison/.test(t)) return 'dlo';
+  if (/police/.test(t) && /liaison/.test(t)) return 'plo';
+  if (/(competition )?sponsorship liaison/.test(t)) return 'cslo';
+  if (/supporter/.test(t) && /liaison/.test(t)) return 'slo';
+  if (section === 'Directors') return 'director';
+  if (/vice[- ]?chair/.test(t)) return 'vicechair';
+  if (/chair/.test(t)) return 'chair';
+  if (/president/.test(t)) return 'president';
+  if (/owner/.test(t)) return 'owner';
+  if (/chief exec|\bceo\b/.test(t)) return 'ceo';
+  if (/general manager|managing director/.test(t)) return 'gm';
+  if (/fixture/.test(t)) return 'fixtures';
+  if (/secretar/.test(t)) return 'secretary';
+  if (/financ|account|treasur/.test(t)) return 'finance';
+  if (/commercial|sponsorship|sales/.test(t)) return 'commercial';
+  if (/programme/.test(t)) return 'programme';
+  if (/website|social/.test(t)) return 'social';
+  if (/press|\bmedia\b/.test(t)) return 'press';
+  if (/marketing|communications/.test(t)) return 'marketing';
+  if (/safety/.test(t)) return 'safety';
+  if (/operation/.test(t)) return 'operations';
+  if (/\bkit\b/.test(t)) return 'kit';
+  if (/doctor/.test(t)) return 'doctor';
+  if (/physio|therapist|sports science/.test(t)) return 'physio';
+  if (/community/.test(t)) return 'community';
+  if (/welfare|safeguard/.test(t)) return 'safeguarding';
+  if (/director/.test(t)) return 'director';
+  return 'other';
+}
+
+/* ---- Contact helpers. The mirrors (person.email/.phone) always equal
+   the preferred contact of each type; these keep both views in sync. ---- */
+
+function ensureContacts(p) {
+  if (!Array.isArray(p.contacts)) {
+    p.contacts = [];
+    if (p.email) p.contacts.push({ type: 'email', value: p.email, label: '', preferred: true });
+    if (p.phone) p.contacts.push({ type: 'phone', value: p.phone, label: '', preferred: true });
+  }
+  return p.contacts;
+}
+
+function preferredContact(p, type) {
+  var cs = (p.contacts || []).filter(function(c) { return c.type === type && c.value; });
+  var pref = cs.filter(function(c) { return c.preferred; })[0];
+  return (pref || cs[0] || {}).value || null;
+}
+
+/* All email values for a person, preferred first (display + list export). */
+function personEmails(p) {
+  if (!Array.isArray(p.contacts)) return p.email ? [p.email] : [];
+  var cs = p.contacts.filter(function(c) { return c.type === 'email' && c.value; });
+  cs.sort(function(a, b) { return (b.preferred ? 1 : 0) - (a.preferred ? 1 : 0); });
+  return cs.map(function(c) { return c.value; });
+}
+
+/* Mirrors edited via the person panel -> write back into contacts[]
+   (update the preferred entry's value, or create it). Secondary
+   contacts are preserved untouched. */
+function syncContactsFromMirrors(p) {
+  ensureContacts(p);
+  ['email', 'phone'].forEach(function(type) {
+    var val = p[type] || null;
+    var cs = p.contacts.filter(function(c) { return c.type === type; });
+    var pref = cs.filter(function(c) { return c.preferred; })[0] || cs[0];
+    if (val) {
+      if (pref) { pref.value = val; pref.preferred = true; }
+      else p.contacts.push({ type: type, value: val, label: '', preferred: true });
+    } else if (pref) {
+      p.contacts.splice(p.contacts.indexOf(pref), 1);
+    }
+  });
+}
+
+/* Recompute mirrors from contacts (after a merge or RTDB load). */
+function syncMirrorsFromContacts(p) {
+  p.email = preferredContact(p, 'email');
+  p.phone = preferredContact(p, 'phone');
+}
+
 var RTDB_BASE = 'app-data/ops-club-directory';
 var RTDB = { seeded: false };
 
@@ -4845,59 +5039,102 @@ var RTDB = { seeded: false };
    email_private/phone_private are deliberately dropped — the directory
    is behind login, there is no private tier (decision 10/06/2026). */
 function clubToRTDB(club) {
+  function packContacts(cs) {
+    return (cs || []).filter(function(c) { return c && c.value; }).map(function(c) {
+      var o = { type: c.type, value: c.value };
+      if (c.label) o.label = c.label;
+      if (c.preferred) o.preferred = true;
+      return o;
+    });
+  }
+  function packRole(r) {
+    var o = { title: r.title || '', section: r.section || '', main: !!r.main, deptHead: !!r.deptHead };
+    if (r.flags) o.flags = r.flags;
+    o['function'] = r['function'] || functionForTitle(r.title, r.section);
+    var rc = packContacts(r.contacts);
+    if (rc.length) o.contacts = rc;
+    return o;
+  }
   var people = {};
   (club.people || []).forEach(function(p, i) {
     var id = p._id || ('p' + (i + 1));
+    ensureContacts(p);
     people[id] = {
       name: p.name || '',
-      email: p.email || null,
-      phone: p.phone || null,
+      email: preferredContact(p, 'email'),
+      phone: preferredContact(p, 'phone'),
       note: p.note || null,
-      roles: (p.roles || []).map(function(r) {
-        var o = { title: r.title || '', section: r.section || '', main: !!r.main, deptHead: !!r.deptHead };
-        if (r.flags) o.flags = r.flags;
-        return o;
-      })
+      contacts: packContacts(p.contacts),
+      roles: (p.roles || []).map(packRole)
     };
   });
-  return {
+  var out = {
     contact: { phone: club.phone || null, email: club.email || null, website: club.website || null },
     people: people
   };
+  var vac = (club.vacant || []).map(function(v) {
+    var o = { title: v.title || '', section: v.section || '' };
+    o['function'] = v['function'] || functionForTitle(v.title, v.section);
+    if (v.note) o.note = v.note;
+    var vc = packContacts(v.contacts);
+    if (vc.length) o.contacts = vc;
+    return o;
+  });
+  if (vac.length) out.vacant = vac;
+  return out;
 }
 
 /* Inflate an RTDB record back into the working shape. Tolerates RTDB's
    array→object coercion and missing nodes. People sorted by numeric _id
    suffix for stable ordering. */
 function clubFromRTDB(name, val, fallbackWebsite) {
-  var rec = { name: name, phone: null, email: null, website: fallbackWebsite || null, people: [] };
+  var rec = { name: name, phone: null, email: null, website: fallbackWebsite || null, people: [], vacant: [] };
   if (!val) return rec;
   var c = val.contact || {};
   rec.phone = c.phone || null;
   rec.email = c.email || null;
   rec.website = c.website || fallbackWebsite || null;
+  function arr(x) { return !x ? [] : (Array.isArray(x) ? x : Object.keys(x).map(function(k) { return x[k]; })); }
+  function unpackContacts(cs) {
+    return arr(cs).map(function(x) {
+      return { type: x.type, value: x.value || '', label: x.label || '', preferred: !!x.preferred };
+    });
+  }
+  function unpackRole(r) {
+    var o = { title: r.title || '', section: r.section || '', main: !!r.main, deptHead: !!r.deptHead };
+    if (r.flags) o.flags = r.flags;
+    o['function'] = r['function'] || functionForTitle(r.title, r.section);
+    o.contacts = unpackContacts(r.contacts);
+    return o;
+  }
   var people = val.people || {};
   Object.keys(people).forEach(function(id) {
     var p = people[id] || {};
-    var roles = p.roles || [];
-    if (!Array.isArray(roles)) roles = Object.keys(roles).map(function(k) { return roles[k]; });
-    rec.people.push({
+    var person = {
       _id: id,
       name: p.name || '',
       email: p.email || null,
       phone: p.phone || null,
       note: p.note || null,
-      roles: roles.map(function(r) {
-        var o = { title: r.title || '', section: r.section || '', main: !!r.main, deptHead: !!r.deptHead };
-        if (r.flags) o.flags = r.flags;
-        return o;
-      })
-    });
+      roles: arr(p.roles).map(unpackRole)
+    };
+    if (p.contacts) {
+      person.contacts = unpackContacts(p.contacts);
+      syncMirrorsFromContacts(person);
+    } else {
+      ensureContacts(person);   /* legacy record: derive contacts from mirrors */
+    }
+    rec.people.push(person);
   });
   rec.people.sort(function(a, b) {
     var na = parseInt((/^p(\d+)$/.exec(a._id) || [])[1] || '0', 10);
     var nb = parseInt((/^p(\d+)$/.exec(b._id) || [])[1] || '0', 10);
     return na - nb;
+  });
+  rec.vacant = arr(val.vacant).map(function(v) {
+    return { title: v.title || '', section: v.section || '',
+             'function': v['function'] || functionForTitle(v.title, v.section),
+             note: v.note || null, contacts: unpackContacts(v.contacts) };
   });
   return rec;
 }
@@ -4985,6 +5222,221 @@ function seedRTDBFromInline() {
       if (NL.toast) NL.toast('Import failed: ' + (err.message || String(err)), 'error');
       if (btn) { btn.disabled = false; btn.textContent = 'Import handbook seed data'; }
     });
+}
+
+/* ================= DATA CLEANUP (superadmin, one-off) =================
+   Migrates the corpus to model v2 and fixes the seed's known data debt:
+   - shape upgrade: email/phone -> contacts[] (handled lazily by
+     ensureContacts; the persist also stamps `function` on every role)
+   - AUTO merges: duplicate same-name records where at most one carries
+     contact details (the 166 bare-Directors-row duplicates) or where
+     contact details are identical
+   - REVIEW merges: same name, DIFFERENT contact details (the work/home
+     cases) — approved one by one, merging into multi-contact people
+   - nameless role-holders -> club.vacant[] entries
+   All writes audited; take the backup first. */
+
+var CLEANUP = { plan: null, log: [], reviewed: {} };
+
+function cleanupNameKey(name) { return (name || '').toLowerCase().replace(/[^a-z]/g, ''); }
+
+function analyseCleanup() {
+  var plan = { autoMerges: [], reviews: [], nameless: [], untagged: 0, legacyContacts: 0 };
+  window.CLUBS.forEach(function(club) {
+    var byName = {};
+    club.people.forEach(function(p) {
+      if (!Array.isArray(p.contacts)) plan.legacyContacts++;
+      ensureContacts(p);
+      (p.roles || []).forEach(function(r) { if (!r['function']) plan.untagged++; });
+      if (!p.name) { plan.nameless.push({ club: club.name, id: p._id }); return; }
+      var k = cleanupNameKey(p.name);
+      (byName[k] = byName[k] || []).push(p);
+    });
+    Object.keys(byName).forEach(function(k) {
+      var g = byName[k];
+      if (g.length < 2) return;
+      var withContact = g.filter(function(p) { return p.contacts.length > 0; });
+      var valueSets = withContact.map(function(p) {
+        return p.contacts.map(function(c) { return c.type + ':' + c.value.toLowerCase(); }).sort().join('|');
+      });
+      var distinct = {}; valueSets.forEach(function(v) { distinct[v] = 1; });
+      if (withContact.length <= 1 || Object.keys(distinct).length === 1) {
+        plan.autoMerges.push({ club: club.name, name: g[0].name, ids: g.map(function(p) { return p._id; }) });
+      } else {
+        plan.reviews.push({
+          club: club.name, name: g[0].name,
+          ids: g.map(function(p) { return p._id; }),
+          summary: g.map(function(p) {
+            return p.contacts.map(function(c) { return c.value; }).join(', ') || '(no contact)';
+          })
+        });
+      }
+    });
+  });
+  return plan;
+}
+
+/* Merge a group of same-name records on one club: survivor = first with
+   contacts (else first). Roles moved (deduped on title+section), contacts
+   unioned (deduped on type+value; survivor keeps its preferred flags). */
+function cleanupMergeGroup(club, ids) {
+  var group = club.people.filter(function(p) { return ids.indexOf(p._id) !== -1; });
+  if (group.length < 2) return false;
+  var survivor = group.filter(function(p) { return ensureContacts(p).length > 0; })[0] || group[0];
+  group.forEach(function(p) {
+    if (p === survivor) return;
+    (p.roles || []).forEach(function(r) {
+      var dup = survivor.roles.some(function(sr) { return sr.title === r.title && sr.section === r.section; });
+      if (!dup) survivor.roles.push(r);
+    });
+    ensureContacts(p).forEach(function(c) {
+      var dup = survivor.contacts.some(function(sc) {
+        return sc.type === c.type && sc.value.toLowerCase() === c.value.toLowerCase();
+      });
+      if (!dup) survivor.contacts.push({ type: c.type, value: c.value, label: c.label || '', preferred: false });
+    });
+    if (!survivor.note && p.note) survivor.note = p.note;
+  });
+  club.people = club.people.filter(function(p) { return p === survivor || ids.indexOf(p._id) === -1; });
+  syncMirrorsFromContacts(survivor);
+  ensurePrimaryRole(survivor);
+  return true;
+}
+
+function runAutoCleanup() {
+  var plan = CLEANUP.plan;
+  if (!plan) return;
+  var touched = {};
+  var clubsByName = {};
+  window.CLUBS.forEach(function(c) { clubsByName[c.name] = c; });
+
+  plan.autoMerges.forEach(function(g) {
+    if (cleanupMergeGroup(clubsByName[g.club], g.ids)) {
+      touched[g.club] = 1;
+      CLEANUP.log.push('Merged ' + g.ids.length + ' records: ' + g.name + ' (' + g.club + ')');
+    }
+  });
+  plan.nameless.forEach(function(n) {
+    var club = clubsByName[n.club];
+    var p = club.people.filter(function(x) { return x._id === n.id; })[0];
+    if (!p) return;
+    club.vacant = club.vacant || [];
+    (p.roles || []).forEach(function(r) {
+      club.vacant.push({ title: r.title, section: r.section,
+        'function': r['function'] || functionForTitle(r.title, r.section),
+        note: p.note || null, contacts: ensureContacts(p).slice() });
+    });
+    club.people = club.people.filter(function(x) { return x._id !== n.id; });
+    touched[n.club] = 1;
+    CLEANUP.log.push('Converted nameless role-holder to vacant role(s) at ' + n.club);
+  });
+  /* Persist every club so ALL records get the shape upgrade + function
+     tagging stamped by clubToRTDB, not just the merged ones. */
+  window.CLUBS.forEach(function(c) { touched[c.name] = 1; });
+  cleanupPersist(Object.keys(touched),
+    'Data cleanup: ' + plan.autoMerges.length + ' auto-merges, ' +
+    plan.nameless.length + ' nameless->vacant, model v2 shape stamped on all clubs');
+}
+
+function applyReviewMerge(idx, doMerge) {
+  var g = CLEANUP.plan.reviews[idx];
+  if (!g || CLEANUP.reviewed[idx]) return;
+  CLEANUP.reviewed[idx] = doMerge ? 'merged' : 'kept';
+  if (doMerge) {
+    var club = window.CLUBS.filter(function(c) { return c.name === g.club; })[0];
+    if (cleanupMergeGroup(club, g.ids)) {
+      cleanupPersist([g.club], 'Data cleanup review-merge: ' + g.name + ' at ' + g.club);
+      CLEANUP.log.push('Review-merged ' + g.name + ' (' + g.club + ') into one person with combined contacts');
+    }
+  } else {
+    CLEANUP.log.push('Kept separate: ' + g.name + ' (' + g.club + ')');
+  }
+  renderCleanupScene();
+}
+
+function cleanupPersist(clubNames, summary) {
+  if (NL.writeAudit) NL.writeAudit('directory_cleanup', summary);
+  var fdb = firebase.database();
+  var session = (window.NL && NL.session) || {};
+  fdb.ref(RTDB_BASE + '/audit').push({
+    ts: firebase.database.ServerValue.TIMESTAMP,
+    uid: session.uid || null, email: session.email || null,
+    club: clubNames.length === 1 ? clubNames[0] : '(' + clubNames.length + ' clubs)',
+    action: 'cleanup', detail: summary
+  });
+  var chain = Promise.resolve();
+  clubNames.forEach(function(name) {
+    var club = window.CLUBS.filter(function(c) { return c.name === name; })[0];
+    if (!club) return;
+    chain = chain.then(function() {
+      return fdb.ref(RTDB_BASE + '/clubs/' + name).set(clubToRTDB(club));
+    });
+  });
+  chain
+    .then(function() {
+      if (NL.toast) NL.toast('Cleanup written: ' + clubNames.length + ' club record(s) updated.', 'success');
+      renderCleanupScene();
+    })
+    .catch(function(err) {
+      if (NL.toast) NL.toast('Cleanup write failed: ' + (err.message || String(err)) + ' — refresh and re-run.', 'error');
+    });
+}
+
+function cleanupDownloadBackup() {
+  var payload = { exportedAt: new Date().toISOString(), clubs: {} };
+  window.CLUBS.forEach(function(c) { payload.clubs[c.name] = clubToRTDB(c); });
+  var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'ops-club-directory-backup-' + Date.now() + '.json';
+  a.click();
+  setTimeout(function() { URL.revokeObjectURL(a.href); }, 1000);
+}
+
+function renderCleanupScene() {
+  var root = document.getElementById('cleanup-root');
+  if (!root) return;
+  var plan = CLEANUP.plan;
+  var html = '<div class="lb-intro"><h2>Data cleanup</h2>' +
+    '<p>One-off migration to the v2 people model (multi-contact people, role functions, vacant roles) plus dedupe of the handbook seed. Take the backup first.</p></div>';
+
+  html += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;">' +
+    '<button class="btn btn--navy" id="clBackup">1 · Download backup</button>' +
+    '<button class="btn btn--ghost" id="clAnalyse">2 · Analyse</button>' +
+    (plan ? '<button class="btn btn--primary" id="clRun">3 · Run auto cleanup</button>' : '') +
+  '</div>';
+
+  if (plan) {
+    html += '<div class="cp-facts" style="border:1px solid var(--border);margin-bottom:18px;">' +
+      '<div class="cp-fact"><div class="cp-fact__label">Auto-merges</div><div class="cp-fact__value">' + plan.autoMerges.length + '</div><div class="cp-fact__sub">bare/identical duplicates</div></div>' +
+      '<div class="cp-fact"><div class="cp-fact__label">Review merges</div><div class="cp-fact__value">' + plan.reviews.length + '</div><div class="cp-fact__sub">different contacts — your call</div></div>' +
+      '<div class="cp-fact"><div class="cp-fact__label">Nameless &rarr; vacant</div><div class="cp-fact__value">' + plan.nameless.length + '</div></div>' +
+      '<div class="cp-fact"><div class="cp-fact__label">Legacy-shape people</div><div class="cp-fact__value">' + plan.legacyContacts + '</div><div class="cp-fact__sub">upgraded on write</div></div>' +
+    '</div>';
+
+    if (plan.reviews.length) {
+      html += '<h3 style="margin:18px 0 10px;">Review: same name, different contact details</h3>' +
+        '<div style="display:grid;gap:8px;">';
+      plan.reviews.forEach(function(g, i) {
+        var state2 = CLEANUP.reviewed[i];
+        html += '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:10px 14px;background:var(--white);border:1px solid var(--border);border-radius:8px;">' +
+          '<b>' + esc(g.name) + '</b><span class="pill pill--identifier">' + esc(g.club) + '</span>' +
+          '<span style="flex:1;font-size:12px;color:var(--text-muted);">' + g.summary.map(esc).join(' &nbsp;vs&nbsp; ') + '</span>' +
+          (state2
+            ? '<span class="pill pill--status ' + (state2 === 'merged' ? 'pill--status-good' : '') + '">' + state2 + '</span>'
+            : '<button class="btn btn--navy btn--sm" data-cl-merge="' + i + '">Merge</button>' +
+              '<button class="btn btn--ghost btn--sm" data-cl-keep="' + i + '">Keep separate</button>') +
+        '</div>';
+      });
+      html += '</div>';
+    }
+  }
+
+  if (CLEANUP.log.length) {
+    html += '<h3 style="margin:18px 0 10px;">Log</h3><div style="font-size:12px;color:var(--text-muted);display:grid;gap:3px;">' +
+      CLEANUP.log.slice(-40).map(function(l) { return '<div>' + esc(l) + '</div>'; }).join('') + '</div>';
+  }
+  root.innerHTML = html;
 }
 
 window.TOOL = window.TOOL || {};
