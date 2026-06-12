@@ -45,6 +45,13 @@
   .cda-pill { font-size: 11px; padding: 2px 10px; border-radius: 999px; background: var(--amber-light); color: var(--amber-deep); }
   .cda-pill--in { background: var(--green); color: var(--white); }
   textarea { width:100%; box-sizing:border-box; min-height:140px; font-family:ui-monospace,monospace; font-size:12px; border:1px solid var(--border); border-radius:8px; padding:10px; }
+  .cda-pill--in { cursor:pointer; }
+  .cda-pill--in:hover { filter:brightness(0.92); }
+  .cda-dl { display:grid; grid-template-columns:200px 1fr; gap:4px 14px; font-size:13px; }
+  .cda-dl dt { color:var(--text-muted); }
+  .cda-dl dd { margin:0; word-break:break-word; }
+  .cda-dl dd:empty::after { content:'—'; color:var(--border); }
+  .cda-sec { font-variation-settings:'wght' 800; color:var(--navy); margin:14px 0 6px; font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
 </style>
 </head>
 <body>
@@ -53,13 +60,29 @@
   <div class="cda">
     <h1 style="color:var(--navy);">Club data collection</h1>
     <p style="color:var(--text-muted);">One private link per club. Pre-filled for continuing clubs, blank for entrants — the form works that out itself. Tokens live only in the database.</p>
+    <div style="border:1px solid var(--border);border-radius:10px;background:var(--white);padding:16px;margin:14px 0;">
+      <div style="font-variation-settings:'wght' 800;color:var(--navy);font-size:12px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Standard message</div>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px;">Placeholders: <code>{club}</code> <code>{link}</code> <code>{note}</code> — {note} swaps between the two lines below depending on whether the club's form is pre-filled.</p>
+      <textarea id="tplBody" rows="9"></textarea>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;">
+        <div><label style="font-size:11px;color:var(--text-muted);">{note} for pre-filled clubs</label><textarea id="tplNotePre" rows="2"></textarea></div>
+        <div><label style="font-size:11px;color:var(--text-muted);">{note} for new clubs</label><textarea id="tplNoteNew" rows="2"></textarea></div>
+      </div>
+      <button class="btn btn--ghost btn--sm" id="tplSave" style="margin-top:10px;">Save standard message</button>
+      <span id="tplStatus" style="font-size:12px;color:var(--text-muted);margin-left:8px;"></span>
+    </div>
     <div style="display:flex;gap:10px;margin:14px 0;">
       <button class="btn btn--navy" id="genBtn">Generate missing links</button>
       <button class="btn btn--ghost" id="emailBtn" disabled>Build email text for all clubs</button>
+      <button class="btn btn--ghost" id="csvBtn" disabled>Download submissions CSV</button>
     </div>
     <textarea id="emails" placeholder="Generated email blurbs appear here…" style="display:none;"></textarea>
     <div id="list" style="margin-top:16px;"><p style="color:var(--text-muted);">Loading…</p></div>
   </div>
+  <div class="modal-backdrop" id="cdaModal"><div class="modal" style="max-width:640px;">
+    <div class="modal__head"><h3 id="cdaModalT" style="margin:0;"></h3><button class="btn-icon" id="cdaModalX">×</button></div>
+    <div class="modal__body" id="cdaModalB" style="max-height:70vh;overflow:auto;"></div>
+  </div></div>
 </div>
 <script>
 (function () {
@@ -82,12 +105,65 @@
       var sub = t && S.subs[t];
       return '<div class="cda-row"><b>' + esc(c.name) + '</b>' +
         (t ? '<code>' + esc(FORM_URL + t) + '</code>' : '<span style="color:var(--text-muted);">no link yet</span>') +
-        (sub ? '<span class="cda-pill cda-pill--in">submitted ' + new Date(sub.submittedAt).toLocaleDateString('en-GB') + '</span>'
+        (sub ? '<span class="cda-pill cda-pill--in" data-sub="' + esc(c.name) + '">view · submitted ' + new Date(sub.submittedAt).toLocaleDateString('en-GB') + '</span>'
              : '<span class="cda-pill">awaiting</span>') +
       '</div>';
     }).join('');
     document.getElementById('list').innerHTML = html;
     document.getElementById('emailBtn').disabled = !Object.keys(S.invites).length;
+    var anySub = Object.keys(S.subs).length > 0;
+    document.getElementById('csvBtn').disabled = !anySub;
+  }
+
+  var DEFAULT_TPL = {
+    body: 'Subject: {club} — please confirm your club information for 2026/27\n\n' +
+      'Dear {club},\n\n' +
+      'Ahead of the 2026/27 season we are confirming the core information the League holds for every club — stadium details, contacts and sponsorship.\n\n' +
+      'Please use your club’s private link below to check, amend and submit your details. {note}\n\n' +
+      '{club}’s private link (please don’t share it outside your club):\n{link}\n\n' +
+      'Kind regards,\nThe National League',
+    notePre: 'It is pre-filled with what we currently hold, so in most cases this takes two minutes.',
+    noteNew: 'As a club new to the National League, the form will be blank — please complete it in full.'
+  };
+  var TPL = { body: DEFAULT_TPL.body, notePre: DEFAULT_TPL.notePre, noteNew: DEFAULT_TPL.noteNew };
+
+  var SECTIONS = [
+    ['Submitter', [['yourName','Name'],['yourEmail','Email']]],
+    ['Stadium', [['stadium','Official stadium name'],['stadiumSponsor','Sponsored name'],['noSponsor','No sponsor'],['addr1','Address 1'],['addr2','Address 2'],['town','Town'],['county','County'],['postcode','Postcode'],['station','Nearest station'],['capacity','Capacity'],['seated','Seated'],['pitchDims','Pitch dimensions'],['pitchType','Pitch type']]],
+    ['Club contact', [['website','Website'],['mainEmail','Main email'],['phone','Switchboard'],['countyFA','County FA']]],
+    ['Sponsorship', [['spClub','Main club sponsor'],['spFront','Front of shirt'],['spBack','Back of shirt'],['spSleeve','Left sleeve'],['spShorts','Back of shorts'],['spExtra','Additional kit sponsors']]]
+  ];
+  var ALLF = SECTIONS.reduce(function (a, s) { return a.concat(s[1]); }, []);
+
+  function openSub(club, sub) {
+    document.getElementById('cdaModalT').textContent = club + ' — submitted ' + new Date(sub.submittedAt).toLocaleString('en-GB');
+    document.getElementById('cdaModalB').innerHTML = SECTIONS.map(function (s) {
+      return '<div class="cda-sec">' + esc(s[0]) + '</div><dl class="cda-dl">' +
+        s[1].map(function (f) {
+          var val = f[0] === 'noSponsor' ? (sub.noSponsor ? 'Yes' : 'No') : (sub[f[0]] || '');
+          return '<dt>' + esc(f[1]) + '</dt><dd>' + esc(val) + '</dd>';
+        }).join('') + '</dl>';
+    }).join('');
+    document.getElementById('cdaModal').classList.add('open');
+  }
+  document.getElementById('cdaModalX').addEventListener('click', function () { document.getElementById('cdaModal').classList.remove('open'); });
+  document.getElementById('cdaModal').addEventListener('click', function (e) { if (e.target.id === 'cdaModal') e.currentTarget.classList.remove('open'); });
+
+  function downloadCsv() {
+    var cols = ['Club','Submitted'].concat(ALLF.map(function (f) { return f[1]; }));
+    function q(v) { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+    var rows = [cols.map(q).join(',')];
+    S.clubs.forEach(function (c) {
+      var t = tokenFor(c.name); var sub = t && S.subs[t];
+      if (!sub) return;
+      var line = [c.name, new Date(sub.submittedAt).toLocaleString('en-GB')].concat(
+        ALLF.map(function (f) { return f[0] === 'noSponsor' ? (sub.noSponsor ? 'Yes' : 'No') : (sub[f[0]] || ''); }));
+      rows.push(line.map(q).join(','));
+    });
+    var blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = 'club-data-submissions-' + Date.now() + '.csv'; a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
   }
 
   window.TOOL = window.TOOL || {};
@@ -103,6 +179,34 @@
       renderList();
     }).catch(function (e) { document.getElementById('list').innerHTML = '<p style="color:var(--red);">' + esc(e.message || e) + '</p>'; });
 
+    db.ref(BASE + '/template').once('value').then(function (s) {
+      var t = s.val(); if (t) { TPL.body = t.body || TPL.body; TPL.notePre = t.notePre || TPL.notePre; TPL.noteNew = t.noteNew || TPL.noteNew; }
+      document.getElementById('tplBody').value = TPL.body;
+      document.getElementById('tplNotePre').value = TPL.notePre;
+      document.getElementById('tplNoteNew').value = TPL.noteNew;
+    }).catch(function () {
+      document.getElementById('tplBody').value = TPL.body;
+      document.getElementById('tplNotePre').value = TPL.notePre;
+      document.getElementById('tplNoteNew').value = TPL.noteNew;
+    });
+    document.getElementById('tplSave').addEventListener('click', function () {
+      TPL.body = document.getElementById('tplBody').value;
+      TPL.notePre = document.getElementById('tplNotePre').value;
+      TPL.noteNew = document.getElementById('tplNoteNew').value;
+      if (NL.writeAudit) NL.writeAudit('clubdata_template', 'Updated club-data standard message');
+      db.ref(BASE + '/template').set(TPL).then(function () {
+        document.getElementById('tplStatus').textContent = 'Saved ✓';
+        setTimeout(function () { document.getElementById('tplStatus').textContent = ''; }, 2000);
+      }).catch(function (e) { document.getElementById('tplStatus').textContent = 'Save failed: ' + (e.message || e); });
+    });
+
+    document.getElementById('list').addEventListener('click', function (e) {
+      var p = e.target.closest('[data-sub]'); if (!p) return;
+      var club = p.getAttribute('data-sub'); var t = tokenFor(club);
+      if (t && S.subs[t]) openSub(club, S.subs[t]);
+    });
+    document.getElementById('csvBtn').addEventListener('click', downloadCsv);
+
     document.getElementById('genBtn').addEventListener('click', function () {
       var updates = {}; var n = 0;
       S.clubs.forEach(function (c) { if (!tokenFor(c.name)) { updates[tok()] = { club: c.name, createdAt: Date.now() }; n++; } });
@@ -115,20 +219,20 @@
     });
 
     document.getElementById('emailBtn').addEventListener('click', function () {
+      var body = document.getElementById('tplBody').value || TPL.body;
+      var notePre = document.getElementById('tplNotePre').value || TPL.notePre;
+      var noteNew = document.getElementById('tplNoteNew').value || TPL.noteNew;
       var out = S.clubs.map(function (c) {
         var t = tokenFor(c.name); if (!t) return '';
-        return '=== ' + c.name + ' ===\n' +
-          'Subject: ' + c.name + ' — please confirm your club information for 2026/27\n\n' +
-          'Dear ' + c.name + ',\n\n' +
-          'Ahead of the 2026/27 season we are confirming the core information the League holds for every club — stadium details, contacts and sponsorship.\n\n' +
-          'Please use your club’s private link below to check, amend and submit your details. ' +
-          (c.stadium_name ? 'It is pre-filled with what we currently hold, so in most cases this takes two minutes.' : 'As a club new to the National League, the form will be blank — please complete it in full.') + '\n\n' +
-          c.name + '’s private link (please don’t share it outside your club):\n' + FORM_URL + t + '\n\n' +
-          'Kind regards,\nThe National League\n';
+        var note = c.stadium_name ? notePre : noteNew;
+        var msg = body.split('{club}').join(c.name)
+                      .split('{link}').join(FORM_URL + t)
+                      .split('{note}').join(note);
+        return '=== ' + c.name + ' ===\n' + msg + '\n';
       }).join('\n');
       var ta = document.getElementById('emails');
       ta.style.display = ''; ta.value = out; ta.select();
-      try { document.execCommand('copy'); NL.toast('Email text copied.', 'success'); } catch (e) {}
+      try { document.execCommand('copy'); NL.toast('Email text for ' + S.clubs.filter(function(c){return tokenFor(c.name);}).length + ' clubs copied.', 'success'); } catch (e) {}
     });
   };
   if (window._toolDeferredSession) { window.TOOL.boot(window._toolDeferredSession); window._toolDeferredSession = null; }
