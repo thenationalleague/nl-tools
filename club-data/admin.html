@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<!--
+  club-data/admin.html  v1.0 — superadmin console for the club data collection.
+  Generates one capability token per current-roster club (62 pre-fill from
+  clubs-meta + 10 blank entrants — the form itself decides via clubs-meta),
+  writes them to RTDB invites, and renders ready-to-paste email blurbs with
+  each club's private link. Also lists submissions as they arrive.
+  Gated: no tools/ registry record on purpose -> superadmin-only via
+  auth-guard's default. Tokens live only in RTDB, never in this repo.
+-->
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Club data admin — NL Tools</title>
+  <link rel="stylesheet" href="/tools/system/nl-brand.css?v=19">
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script>
+    firebase.initializeApp({
+      apiKey: "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain: "nl-tools.firebaseapp.com",
+      databaseURL: "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId: "nl-tools", storageBucket: "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005", appId: "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+  <script>
+    window.NL_TOOL = { title: 'Club Data Admin', toolKey: 'ops-club-data' };
+    var NL_TOOL_KEY = 'ops-club-data';
+    window.NL_CHANGELOG = [{ date: '12 Jun 2026', version: 'v1.0', items: [
+      'Generate private form links for every club, copy ready-made email text, and review submissions as they arrive.' ] }];
+    window.nlAuthReady = function (u) { window.NL = window.NL || {}; NL.session = u;
+      if (window.TOOL && window.TOOL.boot) window.TOOL.boot(u); else window._toolDeferredSession = u; };
+  </script>
+  <script src="/tools/system/nl-utils.js?v=10"></script>
+  <script src="/tools/system/nl-topbar.js?v=7"></script>
+  <script src="/tools/system/auth-guard.js?v=8"></script>
+<style>
+  .cda { max-width: 980px; margin: 0 auto; padding: 24px 18px 80px; }
+  .cda-row { display:flex; gap:14px; align-items:baseline; flex-wrap:wrap; padding:10px 14px; border:1px solid var(--border); border-radius:8px; background:var(--white); margin-bottom:8px; }
+  .cda-row b { min-width: 200px; }
+  .cda-row code { font-size: 11px; background: var(--navy-50); padding: 2px 6px; border-radius: 4px; word-break: break-all; flex:1; }
+  .cda-pill { font-size: 11px; padding: 2px 10px; border-radius: 999px; background: var(--amber-light); color: var(--amber-deep); }
+  .cda-pill--in { background: var(--green); color: var(--white); }
+  textarea { width:100%; box-sizing:border-box; min-height:140px; font-family:ui-monospace,monospace; font-size:12px; border:1px solid var(--border); border-radius:8px; padding:10px; }
+</style>
+</head>
+<body>
+<div id="nlTopbar"></div>
+<div id="pageWrap">
+  <div class="cda">
+    <h1 style="color:var(--navy);">Club data collection</h1>
+    <p style="color:var(--text-muted);">One private link per club. Pre-filled for continuing clubs, blank for entrants — the form works that out itself. Tokens live only in the database.</p>
+    <div style="display:flex;gap:10px;margin:14px 0;">
+      <button class="btn btn--navy" id="genBtn">Generate missing links</button>
+      <button class="btn btn--ghost" id="emailBtn" disabled>Build email text for all clubs</button>
+    </div>
+    <textarea id="emails" placeholder="Generated email blurbs appear here…" style="display:none;"></textarea>
+    <div id="list" style="margin-top:16px;"><p style="color:var(--text-muted);">Loading…</p></div>
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var META = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
+  var BASE = 'app-data/ops-club-data';
+  var FORM_URL = location.origin + '/tools/club-data/?t=';
+  var S = { clubs: [], invites: {}, subs: {} };
+  function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function tok(){ var a = new Uint8Array(24); crypto.getRandomValues(a);
+    return Array.prototype.map.call(a, function (b) { return 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'[b % 57]; }).join(''); }
+
+  function tokenFor(club) {
+    for (var t in S.invites) if (S.invites[t].club === club) return t;
+    return null;
+  }
+  function renderList() {
+    var html = S.clubs.map(function (c) {
+      var t = tokenFor(c.name);
+      var sub = t && S.subs[t];
+      return '<div class="cda-row"><b>' + esc(c.name) + '</b>' +
+        (t ? '<code>' + esc(FORM_URL + t) + '</code>' : '<span style="color:var(--text-muted);">no link yet</span>') +
+        (sub ? '<span class="cda-pill cda-pill--in">submitted ' + new Date(sub.submittedAt).toLocaleDateString('en-GB') + '</span>'
+             : '<span class="cda-pill">awaiting</span>') +
+      '</div>';
+    }).join('');
+    document.getElementById('list').innerHTML = html;
+    document.getElementById('emailBtn').disabled = !Object.keys(S.invites).length;
+  }
+
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function () {
+    Promise.all([
+      fetch(META + '?cb=' + Date.now()).then(function (r) { return r.json(); }),
+      NL.ensureAuth().then(function () { return db.ref(BASE + '/invites').once('value'); }),
+      db.ref(BASE + '/submissions').once('value')
+    ]).then(function (res) {
+      S.clubs = NL.season.clubsFor(res[0]);
+      S.invites = res[1].val() || {};
+      S.subs = res[2].val() || {};
+      renderList();
+    }).catch(function (e) { document.getElementById('list').innerHTML = '<p style="color:var(--red);">' + esc(e.message || e) + '</p>'; });
+
+    document.getElementById('genBtn').addEventListener('click', function () {
+      var updates = {}; var n = 0;
+      S.clubs.forEach(function (c) { if (!tokenFor(c.name)) { updates[tok()] = { club: c.name, createdAt: Date.now() }; n++; } });
+      if (!n) { NL.toast('Every club already has a link.', 'info'); return; }
+      if (NL.writeAudit) NL.writeAudit('clubdata_invites', 'Generated ' + n + ' club-data links');
+      db.ref(BASE + '/invites').update(updates).then(function () {
+        for (var t in updates) S.invites[t] = updates[t];
+        NL.toast(n + ' links generated.', 'success'); renderList();
+      });
+    });
+
+    document.getElementById('emailBtn').addEventListener('click', function () {
+      var out = S.clubs.map(function (c) {
+        var t = tokenFor(c.name); if (!t) return '';
+        return '=== ' + c.name + ' ===\n' +
+          'Subject: ' + c.name + ' — please confirm your club information for 2026/27\n\n' +
+          'Dear ' + c.name + ',\n\n' +
+          'Ahead of the 2026/27 season we are confirming the core information the League holds for every club — stadium details, contacts and sponsorship.\n\n' +
+          'Please use your club’s private link below to check, amend and submit your details. ' +
+          (c.stadium_name ? 'It is pre-filled with what we currently hold, so in most cases this takes two minutes.' : 'As a club new to the National League, the form will be blank — please complete it in full.') + '\n\n' +
+          c.name + '’s private link (please don’t share it outside your club):\n' + FORM_URL + t + '\n\n' +
+          'Kind regards,\nThe National League\n';
+      }).join('\n');
+      var ta = document.getElementById('emails');
+      ta.style.display = ''; ta.value = out; ta.select();
+      try { document.execCommand('copy'); NL.toast('Email text copied.', 'success'); } catch (e) {}
+    });
+  };
+  if (window._toolDeferredSession) { window.TOOL.boot(window._toolDeferredSession); window._toolDeferredSession = null; }
+})();
+</script>
+</body>
+</html>
