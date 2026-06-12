@@ -2,6 +2,7 @@
 <!--
   NL Tools — Handbook
   handbook / index.html
+  v0.3 — Import can replace an empty skeleton (not just a virgin DB).
   v0.2 — One-click import of the carved 2025/26 handbook content.
   v0.1 — Book-like, editable online edition of the NL handbook (rulebook,
          articles, tariffs, appendices). Framework + skeleton.
@@ -518,7 +519,19 @@
         return firebase.database().ref(BASE + '/nodes').once('value');
       })
       .then(function (snap) {
-        if (snap.val()) throw new Error('Handbook already has content — not overwriting.');
+        var existing = snap.val();
+        if (existing) {
+          /* Allow replacing an EMPTY skeleton (every node seed-created with
+             no body) — but never overwrite real authored content. */
+          var ids = Object.keys(existing);
+          var allSkeleton = ids.every(function (k) {
+            return !(existing[k].body && existing[k].body.trim()) && existing[k].updatedBy === 'seed';
+          });
+          if (!allSkeleton) throw new Error('Handbook already has content — not overwriting. (Clear it first if you really mean to replace it.)');
+          if (!confirm('The empty chapter skeleton is already here. Replace it with the full 2025/26 handbook import?')) {
+            throw new Error('__cancelled__');
+          }
+        }
         var payload = {};
         var now = Date.now();
         nodes.forEach(function (n) {
@@ -539,7 +552,9 @@
         NL.toast && NL.toast('Handbook imported — ' + Object.keys(S.nodes).length + ' sections. Edit any of them from here.', 'success');
       })
       .catch(function (err) {
-        NL.toast && NL.toast('Import failed: ' + (err.message || err), 'error');
+        if ((err && err.message) !== '__cancelled__') {
+          NL.toast && NL.toast('Import failed: ' + (err.message || err), 'error');
+        }
         if (btn) { btn.disabled = false; btn.textContent = 'Import 2025/26 handbook'; }
       });
   }
