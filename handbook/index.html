@@ -2,6 +2,9 @@
 <!--
   NL Tools — Handbook
   handbook / index.html
+  v0.11 — Block editor (text/cards/table), list type control + adjacent-ol
+          merge, TOC collapsed by default, nesting cap, clean directory
+          cards, read-as-one-page, link-to-section picker.
   v0.10 — Selective re-import. Import/re-import now works PER SECTION:
           only seed/import-authored (or empty) sections are replaced,
           hand-edited sections are always preserved, and import-authored
@@ -124,7 +127,7 @@
     window.NL_CHANGELOG = [
       {
         date: '10 Jun 2026',
-        version: 'v0.10',
+        version: 'v0.11',
         items: [
           'First release: the National League handbook (rules, articles, appendices and league information) as a navigable online book — contents sidebar, search, and shareable links straight to any clause.',
           'Editing now uses the same rich-text editor as the rest of the platform (Article Composer) — style dropdown, bold/italic/underline, lists, links and table insert.',
@@ -209,10 +212,10 @@
   .hb-body ul, .hb-body ol { margin: 0 0 12px; padding-left: 26px; }
   /* Legal nesting: top level decimal, then lower-alpha, then lower-roman.
      Tab/indent in the editor produces the nested <ol>; styling is automatic. */
-  .hb-body ol { list-style-type: decimal; }
-  .hb-body ol ol { list-style-type: lower-alpha; }
-  .hb-body ol ol ol { list-style-type: lower-roman; }
-  .hb-body ol ol ol ol { list-style-type: lower-alpha; }
+  .hb-body ol:not([type]) { list-style-type: decimal; }
+  .hb-body ol ol:not([type]) { list-style-type: lower-alpha; }
+  .hb-body ol ol ol:not([type]) { list-style-type: lower-roman; }
+  .hb-body ol ol ol ol:not([type]) { list-style-type: lower-alpha; }
   .hb-body li { margin: 2px 0; }
   .hb-body blockquote { margin: 0 0 12px; padding: 6px 14px; border-left: 3px solid var(--primary); background: var(--off-white); color: var(--text-muted); }
   .hb-body code { font-family: ui-monospace, monospace; font-size: 0.9em; background: var(--navy-50); padding: 1px 5px; border-radius: 4px; }
@@ -277,6 +280,20 @@
     border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; background: var(--white); color: var(--text);
   }
   .hb-card-ed__del { flex-shrink: 0; }
+
+  /* ---- Block editor (v0.11) ---- */
+  .hb-block { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; background: var(--white); }
+  .hb-block__bar { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-bottom: 1px solid var(--border); background: var(--off-white); border-radius: 8px 8px 0 0; }
+  .hb-block__kind { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); font-variation-settings: 'wght' 800; flex: 1; }
+  .hb-block .hb-ed { border: none; min-height: 120px; border-radius: 0 0 8px 8px; }
+  .hb-block__body { padding: 12px 14px; }
+  .hb-addblock { display: flex; gap: 8px; margin: 6px 0 14px; }
+  .hb-tbl-ed table { border-collapse: collapse; width: 100%; }
+  .hb-tbl-ed td, .hb-tbl-ed th { border: 1px solid var(--border); padding: 0; }
+  .hb-tbl-ed input { width: 100%; border: none; padding: 6px 8px; font-family: var(--font); font-size: 13px; box-sizing: border-box; background: transparent; color: var(--text); }
+  .hb-tbl-ed thead input { font-variation-settings: 'wght' 700; background: var(--navy-50); }
+  .hb-tbl-ed__controls { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .hb-inline-sec { margin-top: 34px; border-top: 1px solid var(--border); padding-top: 20px; }
 
   .hb-seed { max-width: 560px; margin: 40px auto; text-align: center; }
   .hb-seed__card { background: var(--off-white); border: 1px solid var(--border); border-radius: 12px; padding: 28px; }
@@ -535,7 +552,9 @@
     var editBar = canEdit()
       ? '<div class="hb-toolbar">' +
           '<button class="btn btn--navy btn--sm" id="hbEdit">Edit</button>' +
-          '<button class="btn btn--ghost btn--sm" id="hbAddChild" title="New section inside this one">+ Inside</button>' +
+          (breadcrumb(node).length < 3
+            ? '<button class="btn btn--ghost btn--sm" id="hbAddChild" title="New section inside this one">+ Inside</button>'
+            : '') +
           '<button class="btn btn--ghost btn--sm" id="hbAddSibling" title="New section at the same level, after this one">+ After</button>' +
           '<button class="btn btn--ghost btn--sm" id="hbMoveUp" title="Move up among its siblings">↑</button>' +
           '<button class="btn btn--ghost btn--sm" id="hbMoveDown" title="Move down among its siblings">↓</button>' +
@@ -558,33 +577,35 @@
        navigable landing page, and a single-section chapter (Memorandum) just
        holds its own body with no redundant child. */
     var kids = childrenOf(node.id);
-    var isContacts = node.type === 'contacts';
-    var hasBody = !!(node.body && node.body.trim());
-    var bodyHtml;
-    if (isContacts) {
-      bodyHtml = (hasBody ? '<div class="hb-body">' + bodyToHtml(node.body) + '</div>' : '') +
-        (node.contacts && node.contacts.length
-          ? contactsToHtml(node.contacts)
-          : '<p class="hb-empty">No contacts added yet.</p>');
-    } else {
-      bodyHtml = hasBody
-        ? '<div class="hb-body">' + bodyToHtml(node.body) + '</div>'
-        : (kids.length ? '' : '<div class="hb-body">' + bodyToHtml(node.body) + '</div>');
-    }
+    var blocks = deriveBlocks(node);
+    var bodyHtml = blocks.length
+      ? '<div class="hb-body">' + blocksToHtml(blocks) + '</div>'
+      : (kids.length ? '' : '<div class="hb-body"><p class="hb-empty">No content yet.</p></div>');
 
     var dirHtml = '';
-    if (kids.length) {
+    if (kids.length && S.inlineView === node.id) {
+      /* "Read as one page": every descendant inline, anchored. */
+      var flatKids = [];
+      (function gather(pid) { childrenOf(pid).forEach(function (k) { flatKids.push(k); gather(k.id); }); })(node.id);
+      dirHtml = '<p><a class="hb-crumb__pill" id="hbInlineOff">Show as section list</a></p>' +
+        flatKids.map(function (k) {
+          return '<div class="hb-inline-sec" id="' + esc(k.id) + '">' +
+            (k.number ? '<div class="hb-doc__num">' + esc(k.number) + '</div>' : '') +
+            '<h2 class="hb-doc__title" style="font-size:22px;">' + esc(k.title) + '</h2>' +
+            '<div class="hb-body">' + blocksToHtml(deriveBlocks(k)) + '</div>' +
+          '</div>';
+        }).join('');
+    } else if (kids.length) {
       dirHtml = '<div class="hb-dir">' + kids.map(function (k) {
         var sub = childrenOf(k.id).length;
-        var snippet = textSnippet(k.body, 90);
         return '<a class="hb-dir__item" data-toc="' + esc(k.id) + '">' +
           '<div class="hb-dir__t">' +
             (k.number ? '<span class="hb-dir__num">' + esc(k.number) + '</span>' : '') + esc(k.title) +
           '</div>' +
-          (snippet ? '<div class="hb-dir__s">' + esc(snippet) + '</div>'
-                   : (sub ? '<div class="hb-dir__s">' + sub + ' section' + (sub === 1 ? '' : 's') + '</div>' : '')) +
+          (sub ? '<div class="hb-dir__s">' + sub + ' section' + (sub === 1 ? '' : 's') + '</div>' : '') +
         '</a>';
-      }).join('') + '</div>';
+      }).join('') + '</div>' +
+      '<p style="margin-top:14px;"><a class="hb-crumb__pill" id="hbInlineOn">Read as one page</a></p>';
     }
 
     main.innerHTML = editBar +
@@ -643,6 +664,8 @@
             if (!/^(https?:|mailto:|#)/i.test(a.value.trim())) child.removeAttribute(a.name);
             return;
           }
+          if (tag === 'OL' && n === 'type' && /^[1aAiI]$/.test(a.value)) return;
+          if (tag === 'OL' && n === 'start' && /^\d+$/.test(a.value)) return;
           child.removeAttribute(a.name);
         });
         if (tag === 'A') {
@@ -650,6 +673,26 @@
           if (/^https?:/i.test(child.getAttribute('href') || '')) child.setAttribute('target', '_blank');
         }
       });
+    })(tpl.content);
+    /* Merge adjacent sibling <ol>s of the same declared type — fixes the
+       1. 1. 1. effect from single-item lists created per paragraph. */
+    (function mergeOls(node) {
+      var c = node.firstChild;
+      while (c) {
+        var nx = c.nextSibling;
+        if (c.nodeType === 1) {
+          mergeOls(c);
+          if (c.tagName === 'OL') {
+            while (nx && nx.nodeType === 3 && !nx.textContent.trim()) nx = nx.nextSibling;
+            if (nx && nx.nodeType === 1 && nx.tagName === 'OL' &&
+                (c.getAttribute('type') || '') === (nx.getAttribute('type') || '')) {
+              while (nx.firstChild) c.appendChild(nx.firstChild);
+              var dead = nx; nx = c; dead.parentNode.removeChild(dead);
+            }
+          }
+        }
+        c = (nx === c) ? c.nextSibling : nx;
+      }
     })(tpl.content);
     return tpl.innerHTML;
   }
@@ -666,7 +709,9 @@
   function renderEditor(main) {
     var isNew = S.editing === '__new__';
     var d = S.draft;
-    var initial = (d.body && d.body.trim()) ? bodyToHtml(d.body) : '<p><br></p>';
+    var linkOpts = flatten().map(function (n) {
+      return '<option value="' + esc(n.id) + '">' + esc((n.number ? n.number + ' ' : '') + n.title).slice(0, 60) + '</option>';
+    }).join('');
     main.innerHTML =
       '<div class="hb-toolbar"><b style="align-self:center;">' + (isNew ? 'New section' : 'Editing') + '</b>' +
         '<button class="btn btn--navy btn--sm" id="hbSave" style="margin-left:auto;">Save</button>' +
@@ -675,17 +720,14 @@
       '<div class="hb-edit-meta">' +
         '<div class="hb-field"><label>Number (optional)</label><input id="hbfNum" value="' + esc(d.number) + '" placeholder="e.g. 4.2 or Appendix F"></div>' +
         '<div class="hb-field"><label>Title</label><input id="hbfTitle" value="' + esc(d.title) + '"></div>' +
-        '<div class="hb-field"><label>Layout</label><select id="hbfType">' +
-          [['prose','Prose'],['contacts','Contact cards']].map(function (p) { return '<option value="' + p[0] + '"' + (d.type === p[0] ? ' selected' : '') + '>' + p[1] + '</option>'; }).join('') +
+        '<div class="hb-field"><label>Kind</label><select id="hbfKind">' +
+          ['chapter','section','appendix'].map(function (k) { return '<option value="' + k + '"' + (d.kind === k ? ' selected' : '') + '>' + k + '</option>'; }).join('') +
         '</select></div>' +
       '</div>' +
-      (d.type === 'contacts' ? renderContactCardsEditor(d) :
       '<div class="fmt-toolbar" id="hbFmtBar" aria-label="Formatting toolbar">' +
         '<select id="hbStyleSel" title="Apply style">' +
-          '<option value="p">Paragraph</option>' +
-          '<option value="h2">Heading</option>' +
-          '<option value="h3">Sub-heading</option>' +
-          '<option value="h4">Minor heading</option>' +
+          '<option value="p">Paragraph</option><option value="h2">Heading</option>' +
+          '<option value="h3">Sub-heading</option><option value="h4">Minor heading</option>' +
         '</select>' +
         '<span class="sep"></span>' +
         '<button type="button" data-cmd="bold" class="fmt-icon" title="Bold">B</button>' +
@@ -694,51 +736,108 @@
         '<span class="sep"></span>' +
         '<button type="button" data-cmd="insertUnorderedList" class="fmt-icon" title="Bulleted list">• list</button>' +
         '<button type="button" data-cmd="insertOrderedList" class="fmt-icon" title="Numbered list">1. list</button>' +
+        '<select id="hbListType" title="Numbering style for the list under the cursor">' +
+          '<option value="">List: auto</option><option value="1">1, 2, 3</option>' +
+          '<option value="a">a, b, c</option><option value="i">i, ii, iii</option>' +
+        '</select>' +
         '<span class="sep"></span>' +
-        '<button type="button" id="hbLinkBtn" class="fmt-icon" title="Insert link">Link</button>' +
-        '<button type="button" id="hbTableBtn" class="fmt-icon" title="Insert a 3×3 table">Table</button>' +
+        '<button type="button" id="hbLinkBtn" class="fmt-icon" title="Insert web link">Link</button>' +
+        '<select id="hbSecLink" title="Link the selected text to a handbook section">' +
+          '<option value="">Link to section…</option>' + linkOpts +
+        '</select>' +
         '<span class="sep"></span>' +
         '<button type="button" data-cmd="undo" class="fmt-icon" title="Undo">Undo</button>' +
         '<button type="button" data-cmd="redo" class="fmt-icon" title="Redo">Redo</button>' +
         '<button type="button" id="hbClearFmt" title="Clear formatting">Clear formatting</button>' +
       '</div>' +
-      '<div class="hb-ed hb-body" id="hbEd" contenteditable="true">' + initial + '</div>');
+      '<div id="hbBlocks">' + d.blocks.map(blockEditorHtml).join('') + '</div>' +
+      '<div class="hb-addblock">' +
+        '<button class="btn btn--ghost btn--sm" data-addblock="text">+ Text</button>' +
+        '<button class="btn btn--ghost btn--sm" data-addblock="cards">+ Contact cards</button>' +
+        '<button class="btn btn--ghost btn--sm" data-addblock="table">+ Table</button>' +
+      '</div>';
 
     document.getElementById('hbfTitle').addEventListener('input', function (e) { S.draft.title = e.target.value; });
     document.getElementById('hbfNum').addEventListener('input', function (e) { S.draft.number = e.target.value; });
-    document.getElementById('hbfType').addEventListener('change', function (e) {
-      /* preserve in-progress content across a layout switch, then re-render */
-      if (S.draft.type === 'contacts') S.draft.contacts = readContactCards();
-      else S.draft.body = readEditorBody();
-      S.draft.type = e.target.value;
-      renderEditor(document.getElementById('hbMain'));
-    });
-
-    if (S.draft.type === 'contacts') { wireContactCardsEditor(); return; }
-
+    document.getElementById('hbfKind').addEventListener('change', function (e) { S.draft.kind = e.target.value; });
     try { document.execCommand && document.execCommand('defaultParagraphSeparator', false, 'p'); } catch (e) {}
-    var ed = document.getElementById('hbEd');
-    document.getElementById('hbFmtBar').addEventListener('click', function (e) {
+    wireEditorChrome();
+  }
+
+  function blockEditorHtml(b, i) {
+    var bar = '<div class="hb-block__bar"><span class="hb-block__kind">' +
+      (b.t === 'cards' ? 'Contact cards' : b.t === 'table' ? 'Table' : 'Text') + '</span>' +
+      '<button class="btn-icon" data-bmove="-1" title="Move up">↑</button>' +
+      '<button class="btn-icon" data-bmove="1" title="Move down">↓</button>' +
+      '<button class="btn-icon" data-bdel title="Remove block">×</button></div>';
+    var inner;
+    if (b.t === 'cards') {
+      inner = '<div class="hb-block__body"><div class="hb-cards-ed">' +
+        (b.cards.length ? b.cards : [{}]).map(contactRow).join('') + '</div>' +
+        '<button class="btn btn--ghost btn--sm" data-addcard style="margin-top:10px;">+ Add person / organisation</button></div>';
+    } else if (b.t === 'table') {
+      var cols = Math.max(b.head.length, (b.rows[0] || []).length, 2);
+      while (b.head.length < cols) b.head.push('');
+      var headHtml = '<thead><tr>' + b.head.map(function (h) { return '<th><input data-th value="' + esc(h) + '" placeholder="Header"></th>'; }).join('') + '</tr></thead>';
+      var rowsHtml = (b.rows.length ? b.rows : [Array(cols).join(' ').split(' ')]).map(function (r) {
+        while (r.length < cols) r.push('');
+        return '<tr>' + r.map(function (c) { return '<td><input data-td value="' + esc(c) + '"></td>'; }).join('') + '</tr>';
+      }).join('');
+      inner = '<div class="hb-block__body hb-tbl-ed"><table>' + headHtml + '<tbody>' + rowsHtml + '</tbody></table>' +
+        '<div class="hb-tbl-ed__controls">' +
+          '<button class="btn btn--ghost btn--sm" data-trow="1">+ Row</button>' +
+          '<button class="btn btn--ghost btn--sm" data-trow="-1">− Row</button>' +
+          '<button class="btn btn--ghost btn--sm" data-tcol="1">+ Column</button>' +
+          '<button class="btn btn--ghost btn--sm" data-tcol="-1">− Column</button>' +
+        '</div></div>';
+    } else {
+      var initial = (b.html && b.html.trim()) ? (bodyIsHtml(b.html) ? sanitizeHtml(b.html) : mdToHtml(b.html)) : '<p><br></p>';
+      inner = '<div class="hb-ed hb-body" contenteditable="true">' + initial + '</div>';
+    }
+    return '<div class="hb-block" data-bt="' + b.t + '">' + bar + inner + '</div>';
+  }
+
+  /* Serialize the block stack back into draft.blocks. */
+  function readDraftBlocks() {
+    return Array.prototype.map.call(document.querySelectorAll('#hbBlocks .hb-block'), function (el) {
+      var t = el.getAttribute('data-bt');
+      if (t === 'cards') {
+        var cards = Array.prototype.map.call(el.querySelectorAll('.hb-card-ed'), function (row) {
+          var c = {};
+          Array.prototype.forEach.call(row.querySelectorAll('[data-cf]'), function (inp) { c[inp.getAttribute('data-cf')] = inp.value.trim(); });
+          return c;
+        }).filter(function (c) { return c.name || c.role || c.org || c.email || c.phone || c.note; });
+        return { t: 'cards', cards: cards };
+      }
+      if (t === 'table') {
+        var head = Array.prototype.map.call(el.querySelectorAll('[data-th]'), function (i) { return i.value; });
+        var rows = Array.prototype.map.call(el.querySelectorAll('tbody tr'), function (tr) {
+          return Array.prototype.map.call(tr.querySelectorAll('[data-td]'), function (i) { return i.value; });
+        }).filter(function (r) { return r.some(function (c) { return c.trim(); }); });
+        return { t: 'table', head: head, rows: rows };
+      }
+      var ed = el.querySelector('.hb-ed');
+      var html = sanitizeHtml(ed ? ed.innerHTML : '');
+      var probe = html.replace(/<[^>]+>|&nbsp;|\s/g, '');
+      return { t: 'text', html: probe ? html : '' };
+    }).filter(function (b) {
+      return (b.t === 'text' && b.html) || (b.t === 'cards' && b.cards.length) || (b.t === 'table' && b.rows.length);
+    });
+  }
+
+  function refreshBlocksFromDom() { S.draft.blocks = readDraftBlocks(); }
+
+  function wireEditorChrome() {
+    var bar = document.getElementById('hbFmtBar');
+    bar.addEventListener('click', function (e) {
       var b = e.target.closest('button');
       if (!b) return;
-      ed.focus();
       var cmd = b.getAttribute('data-cmd');
       if (cmd) { document.execCommand && document.execCommand(cmd, false, null); return; }
       if (b.id === 'hbLinkBtn') {
         var url = prompt('Link to (https://…, mailto:… )');
-        if (url) {
-          if (!/^(https?:|mailto:|#)/i.test(url)) url = 'https://' + url;
-          document.execCommand && document.execCommand('createLink', false, url);
-        }
-        return;
-      }
-      if (b.id === 'hbTableBtn') {
-        var rows = [];
-        rows.push('<tr><th>&nbsp;</th><th>&nbsp;</th><th>&nbsp;</th></tr>');
-        rows.push('<tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>');
-        rows.push('<tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>');
-        document.execCommand && document.execCommand('insertHTML', false,
-          '<table><tbody>' + rows.join('') + '</tbody></table><p><br></p>');
+        if (url) { if (!/^(https?:|mailto:|#)/i.test(url)) url = 'https://' + url;
+          document.execCommand && document.execCommand('createLink', false, url); }
         return;
       }
       if (b.id === 'hbClearFmt') {
@@ -747,19 +846,92 @@
       }
     });
     document.getElementById('hbStyleSel').addEventListener('change', function (e) {
-      ed.focus();
-      var v = e.target.value;
-      document.execCommand && document.execCommand('formatBlock', false, v.toUpperCase());
+      document.execCommand && document.execCommand('formatBlock', false, e.target.value.toUpperCase());
       e.target.value = 'p';
     });
+    document.getElementById('hbListType').addEventListener('change', function (e) {
+      var sel = window.getSelection();
+      var n = sel && sel.anchorNode;
+      while (n && n.nodeName !== 'OL') n = n.parentNode;
+      if (n) { if (e.target.value) n.setAttribute('type', e.target.value); else n.removeAttribute('type'); }
+      else NL.toast && NL.toast('Put the cursor inside a numbered list first.', 'info');
+      e.target.value = '';
+    });
+    document.getElementById('hbSecLink').addEventListener('change', function (e) {
+      var id = e.target.value;
+      if (id) document.execCommand && document.execCommand('createLink', false, '#' + id);
+      e.target.value = '';
+    });
+
+    var host = document.getElementById('hbBlocks');
+    host.addEventListener('click', function (e) {
+      var blockEl = e.target.closest('.hb-block');
+      if (e.target.closest('[data-addcard]')) {
+        refreshBlocksFromDom();
+        var idx = Array.prototype.indexOf.call(host.children, blockEl);
+        if (S.draft.blocks[idx]) S.draft.blocks[idx].cards.push({});
+        else S.draft.blocks.push({ t: 'cards', cards: [{}] });
+        rerenderBlocks(); return;
+      }
+      if (e.target.closest('.hb-card-ed__del')) {
+        e.target.closest('.hb-card-ed').remove();
+        return;
+      }
+      var mv = e.target.closest('[data-bmove]');
+      if (mv && blockEl) {
+        refreshBlocksFromDom();
+        var i = Array.prototype.indexOf.call(host.children, blockEl);
+        var j = i + parseInt(mv.getAttribute('data-bmove'), 10);
+        if (j >= 0 && j < S.draft.blocks.length) {
+          var t = S.draft.blocks[i]; S.draft.blocks[i] = S.draft.blocks[j]; S.draft.blocks[j] = t;
+          rerenderBlocks();
+        }
+        return;
+      }
+      if (e.target.closest('[data-bdel]') && blockEl) {
+        if (!confirm('Remove this block?')) return;
+        blockEl.remove(); return;
+      }
+      var tr = e.target.closest('[data-trow]');
+      if (tr && blockEl) {
+        refreshBlocksFromDom();
+        var bi = Array.prototype.indexOf.call(host.children, blockEl);
+        var blk = S.draft.blocks[bi];
+        if (blk && blk.t === 'table') {
+          if (tr.getAttribute('data-trow') === '1') blk.rows.push(blk.head.map(function () { return ''; }));
+          else if (blk.rows.length > 1) blk.rows.pop();
+          rerenderBlocks();
+        }
+        return;
+      }
+      var tc = e.target.closest('[data-tcol]');
+      if (tc && blockEl) {
+        refreshBlocksFromDom();
+        var ci = Array.prototype.indexOf.call(host.children, blockEl);
+        var blk2 = S.draft.blocks[ci];
+        if (blk2 && blk2.t === 'table') {
+          if (tc.getAttribute('data-tcol') === '1') { blk2.head.push(''); blk2.rows.forEach(function (r) { r.push(''); }); }
+          else if (blk2.head.length > 1) { blk2.head.pop(); blk2.rows.forEach(function (r) { r.pop(); }); }
+          rerenderBlocks();
+        }
+        return;
+      }
+    });
+    document.querySelector('.hb-addblock').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-addblock]');
+      if (!b) return;
+      refreshBlocksFromDom();
+      var t = b.getAttribute('data-addblock');
+      S.draft.blocks.push(t === 'cards' ? { t: 'cards', cards: [{}] } :
+        t === 'table' ? { t: 'table', head: ['', ''], rows: [['', '']] } : { t: 'text', html: '' });
+      rerenderBlocks();
+    });
+  }
+  function rerenderBlocks() {
+    document.getElementById('hbBlocks').innerHTML = S.draft.blocks.map(blockEditorHtml).join('');
   }
 
-  /* ---- Contact cards editor (for type:'contacts' nodes) ---- */
-  function renderContactCardsEditor(d) {
-    var rows = (d.contacts && d.contacts.length ? d.contacts : [{}]).map(contactRow).join('');
-    return '<div class="hb-cards-ed" id="hbCardsEd">' + rows + '</div>' +
-      '<button class="btn btn--ghost btn--sm" id="hbAddCard" style="margin-top:10px;">+ Add person / organisation</button>';
-  }
+  /* ---- Contact cards editor (for type:'contacts' nodes) ---- */  /* ---- Contact cards editor (for type:'contacts' nodes) ---- */
   function contactRow(c) {
     c = c || {};
     function f(k, ph) { return '<input data-cf="' + k + '" value="' + esc(c[k] || '') + '" placeholder="' + ph + '">'; }
@@ -771,34 +943,43 @@
       '<button class="btn-icon hb-card-ed__del" title="Remove">×</button>' +
     '</div>';
   }
-  function readContactCards() {
-    var host = document.getElementById('hbCardsEd');
-    if (!host) return (S.draft && S.draft.contacts) || [];
-    return Array.prototype.map.call(host.querySelectorAll('.hb-card-ed'), function (row) {
-      var c = {};
-      Array.prototype.forEach.call(row.querySelectorAll('[data-cf]'), function (inp) {
-        c[inp.getAttribute('data-cf')] = inp.value.trim();
+
+  /* ============ Blocks model (v0.11) ============
+     A section's content is a stack of blocks: text / cards / table.
+     Legacy nodes (body and/or contacts fields) derive their blocks on the
+     fly; saving writes blocks[] plus body/contacts mirrors (the public
+     flipbook and search read the body mirror). */
+  function arr(x) { return !x ? [] : (Array.isArray(x) ? x : Object.keys(x).map(function (k) { return x[k]; })); }
+
+  function deriveBlocks(node) {
+    if (node.blocks) {
+      return arr(node.blocks).map(function (b) {
+        if (b.t === 'cards') return { t: 'cards', cards: arr(b.cards) };
+        if (b.t === 'table') return { t: 'table', head: arr(b.head), rows: arr(b.rows).map(arr) };
+        return { t: 'text', html: b.html || '' };
       });
-      return c;
-    }).filter(function (c) { return c.name || c.role || c.org || c.email || c.phone || c.note; });
+    }
+    var out = [];
+    if (node.body && node.body.trim()) out.push({ t: 'text', html: node.body });
+    if (node.contacts && arr(node.contacts).length) out.push({ t: 'cards', cards: arr(node.contacts) });
+    return out;
   }
-  function wireContactCardsEditor() {
-    var add = document.getElementById('hbAddCard');
-    if (add) add.addEventListener('click', function () {
-      S.draft.contacts = readContactCards();
-      S.draft.contacts.push({});
-      renderEditor(document.getElementById('hbMain'));
-    });
-    var host = document.getElementById('hbCardsEd');
-    if (host) host.addEventListener('click', function (e) {
-      var del = e.target.closest('.hb-card-ed__del');
-      if (!del) return;
-      var rows = readContactCards();
-      var idx = Array.prototype.indexOf.call(host.querySelectorAll('.hb-card-ed'), del.closest('.hb-card-ed'));
-      rows.splice(idx, 1);
-      S.draft.contacts = rows;
-      renderEditor(document.getElementById('hbMain'));
-    });
+
+  function tableToHtml(b) {
+    var head = (b.head || []).some(function (h) { return h && h.trim(); })
+      ? '<thead><tr>' + b.head.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') + '</tr></thead>'
+      : '';
+    return '<table>' + head + '<tbody>' +
+      (b.rows || []).map(function (r) { return '<tr>' + r.map(function (c) { return '<td>' + linkify(esc(c)) + '</td>'; }).join('') + '</tr>'; }).join('') +
+    '</tbody></table>';
+  }
+
+  function blocksToHtml(blocks) {
+    return blocks.map(function (b) {
+      if (b.t === 'cards') return contactsToHtml(b.cards);
+      if (b.t === 'table') return tableToHtml(b);
+      return bodyIsHtml(b.html) ? linkify(sanitizeHtml(b.html)) : mdToHtml(b.html);
+    }).join('');
   }
 
   /* Read-view render of a contacts node as a card grid. */
@@ -818,15 +999,6 @@
     }).join('') + '</div>';
   }
 
-  /* Pull the current body (sanitized HTML) out of the live editor. */
-  function readEditorBody() {
-    var ed = document.getElementById('hbEd');
-    if (!ed) return S.draft ? S.draft.body : '';
-    var html = sanitizeHtml(ed.innerHTML);
-    /* an "empty" contenteditable leaves <p><br></p> etc. */
-    var probe = html.replace(/<[^>]+>|&nbsp;|\s/g, '');
-    return probe ? html : '';
-  }
 
   function fmtDate(ts) {
     try { return new Date(ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
@@ -847,19 +1019,20 @@
       email: (S.session && S.session.email) || null,
       action: action, detail: detail
     });
+    /* blocks[] is canonical; body is a rendered MIRROR for the public
+       flipbook + search; contacts mirror = first cards block (legacy). */
+    var blocks = node.blocks ? deriveBlocks(node) : deriveBlocks(node);
+    node.blocks = blocks;
+    node.body = blocks.length ? blocksToHtml(blocks) : '';
+    var firstCards = blocks.filter(function (b) { return b.t === 'cards'; })[0];
     var rec = {
       parentId: node.parentId, order: node.order, kind: node.kind || 'section',
-      type: node.type === 'contacts' ? 'contacts' : 'prose',
-      number: node.number || null, title: node.title || '', body: node.body || '',
+      type: firstCards ? 'contacts' : 'prose',
+      number: node.number || null, title: node.title || '', body: node.body,
+      blocks: blocks,
       updatedAt: node.updatedAt, updatedBy: node.updatedBy
     };
-    if (node.type === 'contacts') {
-      rec.contacts = (node.contacts || []).filter(function (c) {
-        return c.name || c.role || c.org || c.email || c.phone || c.note;
-      }).map(function (c) {
-        return { name: c.name || '', role: c.role || '', org: c.org || '', email: c.email || '', phone: c.phone || '', note: c.note || '' };
-      });
-    }
+    if (firstCards) rec.contacts = firstCards.cards;
     return fdb.ref(BASE + '/nodes/' + node.id).set(rec).catch(function (err) {
       NL.toast && NL.toast('Save failed: ' + (err.message || err) + ' — refresh before editing further.', 'error');
     });
@@ -867,32 +1040,31 @@
 
   function startEdit(node) {
     S.editing = node.id;
-    S.draft = { number: node.number || '', title: node.title || '', kind: node.kind || 'section',
-      type: node.type || 'prose', body: node.body || '',
-      contacts: (node.contacts || []).map(function (c) { return { name: c.name, role: c.role, org: c.org, email: c.email, phone: c.phone, note: c.note }; }) };
+    var blocks = deriveBlocks(node);
+    if (!blocks.length) blocks = [{ t: 'text', html: '' }];
+    S.draft = { number: node.number || '', title: node.title || '', kind: node.kind || 'section', blocks: blocks };
     render();
   }
   function startAdd(parentId, afterOrder) {
     S.editing = '__new__';
     S.draft = { number: '', title: 'Untitled', kind: parentId === null ? 'chapter' : 'section',
-      type: 'prose', body: '', contacts: [], parentId: parentId, order: afterOrder };
+      blocks: [{ t: 'text', html: '' }], parentId: parentId, order: afterOrder };
     render();
   }
   function saveDraft() {
     var d = S.draft;
-    if (d.type === 'contacts') { d.contacts = readContactCards(); d.body = ''; }
-    else { d.body = readEditorBody(); }
+    d.blocks = readDraftBlocks();
     if (!d.title.trim()) { NL.toast && NL.toast('A title is required.', 'info'); return; }
     if (S.editing === '__new__') {
-      var node = { id: genId(), parentId: d.parentId, order: d.order, kind: d.kind, type: d.type,
-        number: d.number.trim(), title: d.title.trim(), body: d.body, contacts: d.contacts || [] };
+      var node = { id: genId(), parentId: d.parentId, order: d.order, kind: d.kind,
+        number: d.number.trim(), title: d.title.trim(), blocks: d.blocks };
       S.nodes[node.id] = node;
       S.currentId = node.id;
       persistNode(node, 'add', 'Added "' + node.title + '"');
     } else {
       var n = S.nodes[S.editing];
-      n.number = d.number.trim(); n.title = d.title.trim(); n.kind = d.kind; n.type = d.type;
-      n.body = d.body; n.contacts = d.contacts || [];
+      n.number = d.number.trim(); n.title = d.title.trim(); n.kind = d.kind;
+      n.blocks = d.blocks;
       persistNode(n, 'edit', 'Edited "' + n.title + '"');
     }
     S.editing = null; S.draft = null; render();
@@ -1073,12 +1245,22 @@
             body: n.body || '', contacts: contacts, updatedAt: n.updatedAt || null, updatedBy: n.updatedBy || null };
         });
         S.seeded = Object.keys(S.nodes).length > 0;
+        /* Chapters load collapsed; the current page's path expands. */
+        Object.keys(S.nodes).forEach(function (id) {
+          if (S.nodes[id].parentId === null && S.collapsed[id] === undefined) S.collapsed[id] = true;
+        });
       });
+  }
+
+  function expandPathTo(id) {
+    var n = S.nodes[id];
+    while (n && n.parentId) { S.collapsed[n.parentId] = false; n = S.nodes[n.parentId]; }
+    if (n) S.collapsed[n.id] = false;
   }
 
   function openFromHash() {
     var h = (location.hash || '').replace(/^#/, '');
-    if (h && S.nodes[h]) S.currentId = h;
+    if (h && S.nodes[h]) { S.currentId = h; expandPathTo(h); }
   }
 
   function wire() {
@@ -1098,6 +1280,8 @@
       var t = e.target;
       if (t.id === 'hbImportBtn') { importContent(); return; }
       if (t.id === 'hbSeedBtn') { seedSkeleton(); return; }
+      if (t.id === 'hbInlineOn') { S.inlineView = S.currentId; render(); return; }
+      if (t.id === 'hbInlineOff') { S.inlineView = null; render(); return; }
       var link = t.closest('[data-toc]');
       if (link) { e.preventDefault(); navigate(link.getAttribute('data-toc')); return; }
       if (!canEdit()) return;
@@ -1117,6 +1301,7 @@
 
   function navigate(id) {
     if (S.editing) { S.editing = null; S.draft = null; }
+    expandPathTo(id);
     S.currentId = id;
     S.search = ''; var sb = document.getElementById('hbSearch'); if (sb) sb.value = '';
     if (history.replaceState) history.replaceState(null, '', '#' + id); else location.hash = id;
