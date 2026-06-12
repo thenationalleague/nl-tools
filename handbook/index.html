@@ -2,6 +2,14 @@
 <!--
   NL Tools — Handbook
   handbook / index.html
+  v0.10 — Selective re-import. Import/re-import now works PER SECTION:
+          only seed/import-authored (or empty) sections are replaced,
+          hand-edited sections are always preserved, and import-authored
+          sections superseded by the carve are removed. Safe to run
+          repeatedly as the carve improves (e.g. the two-column re-extract
+          fixing the 'DONT DEAD OPEN INSIDE' interleaving on Safeguarding
+          etc). Re-import button now always visible to superadmin; confirm
+          shows replace/preserve/remove counts.
   v0.9 — Contacts node type (Phase 2). A node's Layout can be 'Contact
          cards': structured records (name / role / org / email / phone /
          note) edited as cards, rendered as a linked card grid — for League
@@ -116,7 +124,7 @@
     window.NL_CHANGELOG = [
       {
         date: '10 Jun 2026',
-        version: 'v0.9',
+        version: 'v0.10',
         items: [
           'First release: the National League handbook (rules, articles, appendices and league information) as a navigable online book — contents sidebar, search, and shareable links straight to any clause.',
           'Editing now uses the same rich-text editor as the rest of the platform (Article Composer) — style dropdown, bold/italic/underline, lists, links and table insert.',
@@ -417,16 +425,6 @@
      seed skeleton — even if a section was opened/saved without text, which
      changes its updatedBy). The signal is simply: not one node has a real
      body. Treated like an empty DB so the import is still offered. */
-  /* Re-import is offered while nothing has been hand-edited: every node is
-     still seed/import-authored (or empty). */
-  function canReimport() {
-    var ids = Object.keys(S.nodes);
-    return ids.length > 0 && ids.every(function (id) {
-      var n = S.nodes[id];
-      return !(n.body && n.body.trim()) || n.updatedBy === 'seed' || n.updatedBy === 'import 2025/26';
-    });
-  }
-
   function isEmptySkeleton() {
     var ids = Object.keys(S.nodes);
     return ids.length > 0 && ids.every(function (id) {
@@ -541,8 +539,8 @@
           '<button class="btn btn--ghost btn--sm" id="hbAddSibling" title="New section at the same level, after this one">+ After</button>' +
           '<button class="btn btn--ghost btn--sm" id="hbMoveUp" title="Move up among its siblings">↑</button>' +
           '<button class="btn btn--ghost btn--sm" id="hbMoveDown" title="Move down among its siblings">↓</button>' +
-          (S.role === 'superadmin' && canReimport()
-            ? '<button class="btn btn--ghost btn--sm" id="hbReimport" title="Replace all (unedited) content with the latest import">Re-import</button>'
+          (S.role === 'superadmin'
+            ? '<button class="btn btn--ghost btn--sm" id="hbReimport" title="Re-import the carved booklet — only replaces sections nobody has edited">Re-import</button>'
             : '') +
           '<button class="btn btn--danger btn--sm" id="hbDelete" style="margin-left:auto;">Delete</button>' +
         '</div>'
@@ -926,58 +924,67 @@
   /* ============ Skeleton seed (superadmin one-off) ============ */
   /* One-off: import the carved 2025/26 handbook content (handbook-content.json,
      governance core only — club pages live in the directory). Idempotent. */
+  /* Import / re-import the carved 2025/26 content — SELECTIVE: only
+     sections still authored by seed/import (or empty) are replaced;
+     anything a person has edited is preserved. Import-authored sections
+     that no longer exist in the carve are removed (structure changes).
+     Safe to run repeatedly as the carve improves. */
   function importContent() {
     var btn = document.getElementById('hbImportBtn') || document.getElementById('hbReimport');
     if (btn) { btn.disabled = true; btn.textContent = 'Importing…'; }
-    var nodes;
+    function restore() { if (btn) { btn.disabled = false; btn.textContent = 'Re-import'; } }
+    var carve;
     NL.ensureAuth()
       .then(function () { return fetch('/tools/handbook/handbook-content.json?cb=' + Date.now()); })
       .then(function (r) { if (!r.ok) throw new Error('content file not found (' + r.status + ')'); return r.json(); })
       .then(function (list) {
-        nodes = list;
+        carve = list;
         return firebase.database().ref(BASE + '/nodes').once('value');
       })
       .then(function (snap) {
-        var existing = snap.val();
-        if (existing) {
-          /* Allow replacing content nobody has hand-edited yet: empty bodies
-             or untouched seed/import nodes. One manual edit anywhere locks
-             the import out — authored text is never overwritten. */
-          var ids = Object.keys(existing);
-          var untouched = ids.every(function (k) {
-            var n = existing[k];
-            return !(n.body && n.body.trim()) || n.updatedBy === 'seed' || n.updatedBy === 'import 2025/26';
-          });
-          if (!untouched) throw new Error('Handbook has hand-edited content — not overwriting. (Sections edited by a person are protected.)');
-          if (!confirm('Replace the current (unedited) handbook content with the latest 2025/26 import? This re-writes every section.')) {
-            throw new Error('__cancelled__');
-          }
-        }
-        var payload = {};
+        var existing = snap.val() || {};
+        function machine(n) { return !(n.body && n.body.trim()) && !(n.contacts && Object.keys(n.contacts).length) || n.updatedBy === 'seed' || n.updatedBy === 'import 2025/26'; }
+        var preserved = 0, replaced = 0, removed = 0;
+        var updates = {};
         var now = Date.now();
-        nodes.forEach(function (n) {
-          var body = (n.body && n.body.trim()) ? mdToHtml(n.body) : '';
-          payload[n.id] = {
+        var carveIds = {};
+        carve.forEach(function (n) { carveIds[n.id] = true; });
+        carve.forEach(function (n) {
+          var ex = existing[n.id];
+          if (ex && !machine(ex)) { preserved++; return; }
+          replaced++;
+          updates[n.id] = {
             parentId: n.parentId || null, order: n.order || 0, kind: n.kind || 'section',
-            number: n.number || null, title: n.title || '', body: body,
+            type: 'prose',
+            number: n.number || null, title: n.title || '',
+            body: (n.body && n.body.trim()) ? mdToHtml(n.body) : '',
             updatedAt: now, updatedBy: 'import 2025/26'
           };
         });
-        if (NL.writeAudit) NL.writeAudit('handbook_import', 'Imported 2025/26 handbook (' + nodes.length + ' sections)');
-        return firebase.database().ref(BASE + '/nodes').set(payload);
+        Object.keys(existing).forEach(function (id) {
+          if (!carveIds[id] && machine(existing[id])) { updates[id] = null; removed++; }
+        });
+        if (!replaced && !removed) throw new Error('Nothing to import — every section has been hand-edited.');
+        var msg = 'Import will replace ' + replaced + ' section' + (replaced === 1 ? '' : 's') +
+          (preserved ? ', preserve ' + preserved + ' hand-edited' : '') +
+          (removed ? ', remove ' + removed + ' superseded' : '') + '. Continue?';
+        if (!confirm(msg)) throw new Error('__cancelled__');
+        if (NL.writeAudit) NL.writeAudit('handbook_import', 'Imported 2025/26 content: ' + replaced + ' replaced, ' + preserved + ' preserved, ' + removed + ' removed');
+        return firebase.database().ref(BASE + '/nodes').update(updates);
       })
       .then(function () { return loadNodes(); })
       .then(function () {
         S.seeded = true;
-        S.currentId = (childrenOf(null)[0] || {}).id;
+        if (!S.nodes[S.currentId]) S.currentId = (childrenOf(null)[0] || {}).id;
         render();
-        NL.toast && NL.toast('Handbook imported — ' + Object.keys(S.nodes).length + ' sections. Edit any of them from here.', 'success');
+        NL.toast && NL.toast('Import complete.', 'success');
+        restore();
       })
       .catch(function (err) {
         if ((err && err.message) !== '__cancelled__') {
           NL.toast && NL.toast('Import failed: ' + (err.message || err), 'error');
         }
-        if (btn) { btn.disabled = false; btn.textContent = 'Import 2025/26 handbook'; }
+        restore();
       });
   }
 

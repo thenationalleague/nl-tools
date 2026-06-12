@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <!--
   handbook / extract.html
+  v1.1 — Two-column aware: information pages print in two columns and a
+         same-Y merge zipped them together mid-sentence; columns are now
+         detected per page and read left-then-right.
   v1.0 — Browser-based PDF text extractor (no install, no upload).
 
   A standalone utility for getting clean text out of the printed NL
@@ -110,8 +113,9 @@
         function nextPage(i) {
           if (i > total) { finish(pages, total); return; }
           pdf.getPage(i).then(function (page) {
+            var pageW = page.view ? (page.view[2] - page.view[0]) : 595;
             return page.getTextContent().then(function (tc) {
-              pages.push('\n\n<!-- ===== PAGE ' + i + ' ===== -->\n\n' + pageToText(tc));
+              pages.push('\n\n<!-- ===== PAGE ' + i + ' ===== -->\n\n' + pageToText(tc, pageW));
               barFill.style.width = Math.round((i / total) * 100) + '%';
               if (i % 5 === 0 || i === total) statusEl.textContent = 'Extracting… page ' + i + ' / ' + total;
               // yield to keep UI responsive
@@ -134,10 +138,41 @@
   /* Reconstruct lines from PDF.js text items by their y-position, then
      (optionally) promote lines whose glyphs are notably taller than the
      page's median into Markdown headings. */
-  function pageToText(tc) {
-    var items = tc.items.filter(function (it) { return it.str !== undefined; });
+  /* Reconstruct reading order. v1.1: two-column aware — the booklet's
+     information pages print in two columns, and a naive same-Y merge zips
+     the columns together mid-sentence ("DONT DEAD OPEN INSIDE"). If a
+     significant share of text starts in each half of the page, the page is
+     treated as two columns: the left column is read top-to-bottom first,
+     then the right. Single-column pages (rules, articles) are unaffected. */
+  function pageToText(tc, pageW) {
+    var items = tc.items.filter(function (it) { return it.str !== undefined && it.str.trim() !== ''; });
     if (!items.length) return '';
-    var rows = {};            // rounded-y -> { y, parts:[{x,str}], h }
+    var mid = (pageW || 595) * 0.5;
+    var leftStarts = 0, rightStarts = 0;
+    items.forEach(function (it) {
+      var x = (it.transform || [0,0,0,0,0,0])[4];
+      if (x < mid * 0.9) leftStarts++;
+      else if (x > mid * 1.02) rightStarts++;
+    });
+    var twoCol = items.length >= 12 &&
+      rightStarts / items.length >= 0.28 &&
+      leftStarts / items.length >= 0.28;
+
+    if (!twoCol) return linesFrom(items);
+    var left = [], right = [];
+    items.forEach(function (it) {
+      var x = (it.transform || [0,0,0,0,0,0])[4];
+      (x < mid ? left : right).push(it);
+    });
+    var l = linesFrom(left), r = linesFrom(right);
+    return l + (l && r ? '\n\n' : '') + r;
+  }
+
+  /* Group items into visual lines by y, sort within a line by x, and
+     (optionally) promote tall lines to Markdown headings. */
+  function linesFrom(items) {
+    if (!items.length) return '';
+    var rows = {};
     var heights = [];
     items.forEach(function (it) {
       var tr = it.transform || [1, 0, 0, 1, 0, 0];
@@ -150,15 +185,13 @@
       rows[key].h = Math.max(rows[key].h, h);
     });
     var median = heights.length ? heights.slice().sort(function (a, b) { return a - b; })[Math.floor(heights.length / 2)] : 0;
-
-    var keys = Object.keys(rows).map(Number).sort(function (a, b) { return b - a; }); // top-to-bottom (PDF y grows upward)
+    var keys = Object.keys(rows).map(Number).sort(function (a, b) { return b - a; });
     var lines = keys.map(function (k) {
       var r = rows[k];
       r.parts.sort(function (a, b) { return a.x - b.x; });
       var text = r.parts.map(function (p) { return p.str; }).join('').replace(/\s+/g, ' ').trim();
       return { text: text, h: r.h };
     }).filter(function (l) { return l.text; });
-
     return lines.map(function (l) {
       if (optHeadings.checked && median && l.h >= median * 1.35 && l.text.length <= 90) {
         var lvl = l.h >= median * 1.9 ? '## ' : '### ';
