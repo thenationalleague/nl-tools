@@ -2,6 +2,13 @@
 <!--
   NL Tools — Handbook
   handbook / index.html
+  v0.9 — Contacts node type (Phase 2). A node's Layout can be 'Contact
+         cards': structured records (name / role / org / email / phone /
+         note) edited as cards, rendered as a linked card grid — for League
+         officials, office staff, officers, associated leagues. Stored as
+         node.type='contacts' + node.contacts[]. Not imported (those PDF
+         pages are column-interleaved and unsalvageable by parse — entered
+         by hand from the editor).
   v0.8 — Structure: bodies-on-any-node + directory reader + legal nesting.
          - Any chapter/section can hold an intro body AND children; the
            reader shows the body then a directory of sub-sections (cards).
@@ -106,7 +113,7 @@
     window.NL_CHANGELOG = [
       {
         date: '10 Jun 2026',
-        version: 'v0.8',
+        version: 'v0.9',
         items: [
           'First release: the National League handbook (rules, articles, appendices and league information) as a navigable online book — contents sidebar, search, and shareable links straight to any clause.',
           'Editing now uses the same rich-text editor as the rest of the platform (Article Composer) — style dropdown, bold/italic/underline, lists, links and table insert.',
@@ -114,7 +121,8 @@
           'Clearer structure controls: “+ New chapter” at the bottom of the contents, and “+ Inside / + After” buttons for sections. Superadmins can re-import the carved booklet while nothing has been hand-edited.',
           'Reading view polish: the breadcrumb is now proper navigation (tappable pills), and “last updated” sits quietly at the foot of each section.',
           'Chapters are now landing pages: an optional intro followed by a directory of their sections — so a chapter like the League Rules can carry its preamble, and single-part chapters (Memorandum) no longer duplicate themselves.',
-          'Numbered sub-lists now read as the proper legal hierarchy (1, then a, then i) automatically.'
+          'Numbered sub-lists now read as the proper legal hierarchy (1, then a, then i) automatically.',
+          'New “Contact cards” layout for a section: enter people/organisations as tidy cards (name, role, email, phone) instead of free text — ideal for League officials, staff, officers and associated leagues. They display as a linked card grid.'
         ]
       }
     ];
@@ -239,6 +247,25 @@
   }
   .hb-ed:focus-visible { box-shadow: var(--focus-ring); }
   #hbFmtBar { border-radius: 8px 8px 0 0; }
+
+  /* Contacts node — read view */
+  .hb-contacts { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin: 4px 0 8px; }
+  .hb-contact { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; background: var(--white); }
+  .hb-contact__name { font-variation-settings: 'wght' 800; color: var(--navy); font-size: 15px; }
+  .hb-contact__role { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
+  .hb-contact__c { font-size: 13px; margin-top: 7px; line-height: 1.5; }
+  .hb-contact__c a { color: var(--navy); }
+  .hb-contact__note { font-size: 12px; color: var(--text-muted); margin-top: 6px; font-style: italic; }
+  /* Contacts node — card editor */
+  .hb-cards-ed { display: grid; gap: 10px; }
+  .hb-card-ed { display: flex; gap: 8px; align-items: flex-start; border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: var(--off-white); }
+  .hb-card-ed__grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; flex: 1; }
+  @media (max-width: 720px) { .hb-card-ed__grid { grid-template-columns: 1fr; } }
+  .hb-card-ed__grid input {
+    width: 100%; box-sizing: border-box; font-family: var(--font); font-size: 13px;
+    border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; background: var(--white); color: var(--text);
+  }
+  .hb-card-ed__del { flex-shrink: 0; }
 
   .hb-seed { max-width: 560px; margin: 40px auto; text-align: center; }
   .hb-seed__card { background: var(--off-white); border: 1px solid var(--border); border-radius: 12px; padding: 28px; }
@@ -530,10 +557,19 @@
        navigable landing page, and a single-section chapter (Memorandum) just
        holds its own body with no redundant child. */
     var kids = childrenOf(node.id);
+    var isContacts = node.type === 'contacts';
     var hasBody = !!(node.body && node.body.trim());
-    var bodyHtml = hasBody
-      ? '<div class="hb-body">' + bodyToHtml(node.body) + '</div>'
-      : (kids.length ? '' : '<div class="hb-body">' + bodyToHtml(node.body) + '</div>');
+    var bodyHtml;
+    if (isContacts) {
+      bodyHtml = (hasBody ? '<div class="hb-body">' + bodyToHtml(node.body) + '</div>' : '') +
+        (node.contacts && node.contacts.length
+          ? contactsToHtml(node.contacts)
+          : '<p class="hb-empty">No contacts added yet.</p>');
+    } else {
+      bodyHtml = hasBody
+        ? '<div class="hb-body">' + bodyToHtml(node.body) + '</div>'
+        : (kids.length ? '' : '<div class="hb-body">' + bodyToHtml(node.body) + '</div>');
+    }
 
     var dirHtml = '';
     if (kids.length) {
@@ -638,10 +674,11 @@
       '<div class="hb-edit-meta">' +
         '<div class="hb-field"><label>Number (optional)</label><input id="hbfNum" value="' + esc(d.number) + '" placeholder="e.g. 4.2 or Appendix F"></div>' +
         '<div class="hb-field"><label>Title</label><input id="hbfTitle" value="' + esc(d.title) + '"></div>' +
-        '<div class="hb-field"><label>Kind</label><select id="hbfKind">' +
-          ['chapter', 'section', 'appendix'].map(function (k) { return '<option value="' + k + '"' + (d.kind === k ? ' selected' : '') + '>' + k + '</option>'; }).join('') +
+        '<div class="hb-field"><label>Layout</label><select id="hbfType">' +
+          [['prose','Prose'],['contacts','Contact cards']].map(function (p) { return '<option value="' + p[0] + '"' + (d.type === p[0] ? ' selected' : '') + '>' + p[1] + '</option>'; }).join('') +
         '</select></div>' +
       '</div>' +
+      (d.type === 'contacts' ? renderContactCardsEditor(d) :
       '<div class="fmt-toolbar" id="hbFmtBar" aria-label="Formatting toolbar">' +
         '<select id="hbStyleSel" title="Apply style">' +
           '<option value="p">Paragraph</option>' +
@@ -664,14 +701,21 @@
         '<button type="button" data-cmd="redo" class="fmt-icon" title="Redo">Redo</button>' +
         '<button type="button" id="hbClearFmt" title="Clear formatting">Clear formatting</button>' +
       '</div>' +
-      '<div class="hb-ed hb-body" id="hbEd" contenteditable="true">' + initial + '</div>';
-
-    try { document.execCommand && document.execCommand('defaultParagraphSeparator', false, 'p'); } catch (e) {}
+      '<div class="hb-ed hb-body" id="hbEd" contenteditable="true">' + initial + '</div>');
 
     document.getElementById('hbfTitle').addEventListener('input', function (e) { S.draft.title = e.target.value; });
     document.getElementById('hbfNum').addEventListener('input', function (e) { S.draft.number = e.target.value; });
-    document.getElementById('hbfKind').addEventListener('change', function (e) { S.draft.kind = e.target.value; });
+    document.getElementById('hbfType').addEventListener('change', function (e) {
+      /* preserve in-progress content across a layout switch, then re-render */
+      if (S.draft.type === 'contacts') S.draft.contacts = readContactCards();
+      else S.draft.body = readEditorBody();
+      S.draft.type = e.target.value;
+      renderEditor(document.getElementById('hbMain'));
+    });
 
+    if (S.draft.type === 'contacts') { wireContactCardsEditor(); return; }
+
+    try { document.execCommand && document.execCommand('defaultParagraphSeparator', false, 'p'); } catch (e) {}
     var ed = document.getElementById('hbEd');
     document.getElementById('hbFmtBar').addEventListener('click', function (e) {
       var b = e.target.closest('button');
@@ -709,6 +753,70 @@
     });
   }
 
+  /* ---- Contact cards editor (for type:'contacts' nodes) ---- */
+  function renderContactCardsEditor(d) {
+    var rows = (d.contacts && d.contacts.length ? d.contacts : [{}]).map(contactRow).join('');
+    return '<div class="hb-cards-ed" id="hbCardsEd">' + rows + '</div>' +
+      '<button class="btn btn--ghost btn--sm" id="hbAddCard" style="margin-top:10px;">+ Add person / organisation</button>';
+  }
+  function contactRow(c) {
+    c = c || {};
+    function f(k, ph) { return '<input data-cf="' + k + '" value="' + esc(c[k] || '') + '" placeholder="' + ph + '">'; }
+    return '<div class="hb-card-ed">' +
+      '<div class="hb-card-ed__grid">' +
+        f('name', 'Name') + f('role', 'Role / title') + f('org', 'Organisation (optional)') +
+        f('email', 'Email') + f('phone', 'Phone') + f('note', 'Note (optional)') +
+      '</div>' +
+      '<button class="btn-icon hb-card-ed__del" title="Remove">×</button>' +
+    '</div>';
+  }
+  function readContactCards() {
+    var host = document.getElementById('hbCardsEd');
+    if (!host) return (S.draft && S.draft.contacts) || [];
+    return Array.prototype.map.call(host.querySelectorAll('.hb-card-ed'), function (row) {
+      var c = {};
+      Array.prototype.forEach.call(row.querySelectorAll('[data-cf]'), function (inp) {
+        c[inp.getAttribute('data-cf')] = inp.value.trim();
+      });
+      return c;
+    }).filter(function (c) { return c.name || c.role || c.org || c.email || c.phone || c.note; });
+  }
+  function wireContactCardsEditor() {
+    var add = document.getElementById('hbAddCard');
+    if (add) add.addEventListener('click', function () {
+      S.draft.contacts = readContactCards();
+      S.draft.contacts.push({});
+      renderEditor(document.getElementById('hbMain'));
+    });
+    var host = document.getElementById('hbCardsEd');
+    if (host) host.addEventListener('click', function (e) {
+      var del = e.target.closest('.hb-card-ed__del');
+      if (!del) return;
+      var rows = readContactCards();
+      var idx = Array.prototype.indexOf.call(host.querySelectorAll('.hb-card-ed'), del.closest('.hb-card-ed'));
+      rows.splice(idx, 1);
+      S.draft.contacts = rows;
+      renderEditor(document.getElementById('hbMain'));
+    });
+  }
+
+  /* Read-view render of a contacts node as a card grid. */
+  function contactsToHtml(contacts) {
+    if (!contacts || !contacts.length) return '';
+    return '<div class="hb-contacts">' + contacts.map(function (c) {
+      var lines = [];
+      if (c.email) lines.push('<a href="mailto:' + esc(c.email) + '">' + esc(c.email) + '</a>');
+      if (c.phone) lines.push('<span>' + esc(c.phone) + '</span>');
+      var sub = [c.role, c.org].filter(Boolean).map(esc).join(' · ');
+      return '<div class="hb-contact">' +
+        (c.name ? '<div class="hb-contact__name">' + esc(c.name) + '</div>' : '') +
+        (sub ? '<div class="hb-contact__role">' + sub + '</div>' : '') +
+        (lines.length ? '<div class="hb-contact__c">' + lines.join('<br>') + '</div>' : '') +
+        (c.note ? '<div class="hb-contact__note">' + esc(c.note) + '</div>' : '') +
+      '</div>';
+    }).join('') + '</div>';
+  }
+
   /* Pull the current body (sanitized HTML) out of the live editor. */
   function readEditorBody() {
     var ed = document.getElementById('hbEd');
@@ -738,33 +846,52 @@
       email: (S.session && S.session.email) || null,
       action: action, detail: detail
     });
-    return fdb.ref(BASE + '/nodes/' + node.id).set({
+    var rec = {
       parentId: node.parentId, order: node.order, kind: node.kind || 'section',
+      type: node.type === 'contacts' ? 'contacts' : 'prose',
       number: node.number || null, title: node.title || '', body: node.body || '',
       updatedAt: node.updatedAt, updatedBy: node.updatedBy
-    }).catch(function (err) {
+    };
+    if (node.type === 'contacts') {
+      rec.contacts = (node.contacts || []).filter(function (c) {
+        return c.name || c.role || c.org || c.email || c.phone || c.note;
+      }).map(function (c) {
+        return { name: c.name || '', role: c.role || '', org: c.org || '', email: c.email || '', phone: c.phone || '', note: c.note || '' };
+      });
+    }
+    return fdb.ref(BASE + '/nodes/' + node.id).set(rec).catch(function (err) {
       NL.toast && NL.toast('Save failed: ' + (err.message || err) + ' — refresh before editing further.', 'error');
     });
   }
 
-  function startEdit(node) { S.editing = node.id; S.draft = { number: node.number || '', title: node.title || '', kind: node.kind || 'section', body: node.body || '' }; render(); }
+  function startEdit(node) {
+    S.editing = node.id;
+    S.draft = { number: node.number || '', title: node.title || '', kind: node.kind || 'section',
+      type: node.type || 'prose', body: node.body || '',
+      contacts: (node.contacts || []).map(function (c) { return { name: c.name, role: c.role, org: c.org, email: c.email, phone: c.phone, note: c.note }; }) };
+    render();
+  }
   function startAdd(parentId, afterOrder) {
     S.editing = '__new__';
-    S.draft = { number: '', title: 'Untitled', kind: parentId === null ? 'chapter' : 'section', body: '', parentId: parentId, order: afterOrder };
+    S.draft = { number: '', title: 'Untitled', kind: parentId === null ? 'chapter' : 'section',
+      type: 'prose', body: '', contacts: [], parentId: parentId, order: afterOrder };
     render();
   }
   function saveDraft() {
     var d = S.draft;
-    d.body = readEditorBody();
+    if (d.type === 'contacts') { d.contacts = readContactCards(); d.body = ''; }
+    else { d.body = readEditorBody(); }
     if (!d.title.trim()) { NL.toast && NL.toast('A title is required.', 'info'); return; }
     if (S.editing === '__new__') {
-      var node = { id: genId(), parentId: d.parentId, order: d.order, kind: d.kind, number: d.number.trim(), title: d.title.trim(), body: d.body };
+      var node = { id: genId(), parentId: d.parentId, order: d.order, kind: d.kind, type: d.type,
+        number: d.number.trim(), title: d.title.trim(), body: d.body, contacts: d.contacts || [] };
       S.nodes[node.id] = node;
       S.currentId = node.id;
       persistNode(node, 'add', 'Added "' + node.title + '"');
     } else {
       var n = S.nodes[S.editing];
-      n.number = d.number.trim(); n.title = d.title.trim(); n.kind = d.kind; n.body = d.body;
+      n.number = d.number.trim(); n.title = d.title.trim(); n.kind = d.kind; n.type = d.type;
+      n.body = d.body; n.contacts = d.contacts || [];
       persistNode(n, 'edit', 'Edited "' + n.title + '"');
     }
     S.editing = null; S.draft = null; render();
@@ -924,7 +1051,16 @@
         S.nodes = {};
         Object.keys(val).forEach(function (id) {
           var n = val[id];
-          S.nodes[id] = { id: id, parentId: n.parentId || null, order: n.order || 0, kind: n.kind || 'section', number: n.number || '', title: n.title || '', body: n.body || '', updatedAt: n.updatedAt || null, updatedBy: n.updatedBy || null };
+          var contacts = [];
+          if (n.contacts) {
+            var carr = Array.isArray(n.contacts) ? n.contacts : Object.keys(n.contacts).map(function (k) { return n.contacts[k]; });
+            contacts = carr.map(function (c) {
+              return { name: c.name || '', role: c.role || '', org: c.org || '', email: c.email || '', phone: c.phone || '', note: c.note || '' };
+            });
+          }
+          S.nodes[id] = { id: id, parentId: n.parentId || null, order: n.order || 0, kind: n.kind || 'section',
+            type: n.type === 'contacts' ? 'contacts' : 'prose', number: n.number || '', title: n.title || '',
+            body: n.body || '', contacts: contacts, updatedAt: n.updatedAt || null, updatedBy: n.updatedBy || null };
         });
         S.seeded = Object.keys(S.nodes).length > 0;
       });
