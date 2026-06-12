@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<!--
+  handbook / extract.html
+  v1.0 — Browser-based PDF text extractor (no install, no upload).
+
+  A standalone utility for getting clean text out of the printed NL
+  handbook PDF so it can be poured into the Handbook tool. The chosen PDF
+  is read ENTIRELY in your browser via PDF.js (loaded from a CDN) — the
+  file is never uploaded anywhere. Output is rough Markdown (large lines
+  promoted to headings by font size) with one "PAGE n" marker per page,
+  ready to download and hand back for structured import.
+
+  Not a gated tool: it touches no NL data (no Firebase, no auth-guard),
+  it only reads a local file you pick. Out of scope for lint-tools.sh.
+-->
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Handbook PDF extractor — NL Tools</title>
+<link rel="stylesheet" href="/tools/system/nl-brand.css?v=19">
+<style>
+  body { margin: 0; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 32px 22px 80px; }
+  h1 { color: var(--navy); font-variation-settings: 'wght' 900; margin: 0 0 4px; }
+  .sub { color: var(--text-muted); margin: 0 0 24px; font-size: 14px; }
+  .card { background: var(--off-white); border: 1px solid var(--border); border-radius: 12px; padding: 22px; margin-bottom: 18px; }
+  .step { font-variation-settings: 'wght' 800; color: var(--navy); font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; }
+  input[type=file] { font-family: var(--font); font-size: 14px; }
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 14px 0; }
+  .bar { height: 8px; background: var(--navy-100); border-radius: 4px; overflow: hidden; margin-top: 12px; }
+  .bar__fill { height: 100%; width: 0; background: var(--primary); transition: width 0.1s; }
+  .status { font-size: 13px; color: var(--text-muted); margin-top: 8px; }
+  textarea { width: 100%; box-sizing: border-box; min-height: 320px; font-family: ui-monospace, monospace; font-size: 12px; line-height: 1.5; border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: var(--white); color: var(--text); resize: vertical; }
+  .note { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+  .note code { background: var(--navy-50); padding: 1px 5px; border-radius: 4px; }
+  .opt { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Handbook PDF&nbsp;→&nbsp;text</h1>
+  <p class="sub">Pulls the text out of the handbook PDF, in your browser. The file stays on your machine — nothing is uploaded.</p>
+
+  <div class="card">
+    <div class="step">1 · Choose the PDF</div>
+    <input type="file" id="file" accept="application/pdf">
+    <div class="controls">
+      <label class="opt"><input type="checkbox" id="optHeadings" checked> Promote large lines to headings (Markdown)</label>
+    </div>
+    <div class="bar" id="bar" style="display:none;"><div class="bar__fill" id="barFill"></div></div>
+    <div class="status" id="status"></div>
+  </div>
+
+  <div class="card">
+    <div class="step">2 · Get the text</div>
+    <div class="controls">
+      <button class="btn btn--navy" id="copyBtn" disabled>Copy all</button>
+      <button class="btn btn--navy" id="dlBtn" disabled>Download .md</button>
+      <span class="status" id="meta"></span>
+    </div>
+    <textarea id="out" placeholder="Extracted text appears here once a PDF is processed…" spellcheck="false"></textarea>
+    <p class="note">Then hand <code>handbook.md</code> back in the chat and it'll be carved into the Handbook tool's sections (the club-directory pages are skipped — we already have those). Rough is fine; structure gets tidied during import.</p>
+  </div>
+</div>
+
+<!-- PDF.js (legacy UMD build — exposes window.pdfjsLib; no module/build step) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+(function () {
+  'use strict';
+  if (!window.pdfjsLib) {
+    document.getElementById('status').textContent = 'Could not load the PDF engine (network blocked?). Try again on a normal connection.';
+    return;
+  }
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  var fileEl = document.getElementById('file');
+  var out = document.getElementById('out');
+  var statusEl = document.getElementById('status');
+  var metaEl = document.getElementById('meta');
+  var bar = document.getElementById('bar');
+  var barFill = document.getElementById('barFill');
+  var copyBtn = document.getElementById('copyBtn');
+  var dlBtn = document.getElementById('dlBtn');
+  var optHeadings = document.getElementById('optHeadings');
+
+  fileEl.addEventListener('change', function () {
+    var f = fileEl.files && fileEl.files[0];
+    if (!f) return;
+    extract(f);
+  });
+
+  function extract(file) {
+    out.value = '';
+    copyBtn.disabled = dlBtn.disabled = true;
+    bar.style.display = '';
+    barFill.style.width = '0';
+    statusEl.textContent = 'Reading file…';
+
+    var reader = new FileReader();
+    reader.onload = function () {
+      var data = new Uint8Array(reader.result);
+      pdfjsLib.getDocument({ data: data }).promise.then(function (pdf) {
+        var total = pdf.numPages;
+        var pages = [];
+        statusEl.textContent = 'Extracting ' + total + ' pages…';
+
+        function nextPage(i) {
+          if (i > total) { finish(pages, total); return; }
+          pdf.getPage(i).then(function (page) {
+            return page.getTextContent().then(function (tc) {
+              pages.push('\n\n<!-- ===== PAGE ' + i + ' ===== -->\n\n' + pageToText(tc));
+              barFill.style.width = Math.round((i / total) * 100) + '%';
+              if (i % 5 === 0 || i === total) statusEl.textContent = 'Extracting… page ' + i + ' / ' + total;
+              // yield to keep UI responsive
+              setTimeout(function () { nextPage(i + 1); }, 0);
+            });
+          }).catch(function (err) {
+            pages.push('\n\n<!-- PAGE ' + i + ' (error: ' + (err.message || err) + ') -->\n');
+            setTimeout(function () { nextPage(i + 1); }, 0);
+          });
+        }
+        nextPage(1);
+      }).catch(function (err) {
+        statusEl.textContent = 'Could not open the PDF: ' + (err.message || err);
+        bar.style.display = 'none';
+      });
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  /* Reconstruct lines from PDF.js text items by their y-position, then
+     (optionally) promote lines whose glyphs are notably taller than the
+     page's median into Markdown headings. */
+  function pageToText(tc) {
+    var items = tc.items.filter(function (it) { return it.str !== undefined; });
+    if (!items.length) return '';
+    var rows = {};            // rounded-y -> { y, parts:[{x,str}], h }
+    var heights = [];
+    items.forEach(function (it) {
+      var tr = it.transform || [1, 0, 0, 1, 0, 0];
+      var x = tr[4], y = tr[5];
+      var h = Math.abs(tr[3]) || it.height || 0;
+      if (h) heights.push(h);
+      var key = Math.round(y);
+      if (!rows[key]) rows[key] = { y: y, parts: [], h: h };
+      rows[key].parts.push({ x: x, str: it.str });
+      rows[key].h = Math.max(rows[key].h, h);
+    });
+    var median = heights.length ? heights.slice().sort(function (a, b) { return a - b; })[Math.floor(heights.length / 2)] : 0;
+
+    var keys = Object.keys(rows).map(Number).sort(function (a, b) { return b - a; }); // top-to-bottom (PDF y grows upward)
+    var lines = keys.map(function (k) {
+      var r = rows[k];
+      r.parts.sort(function (a, b) { return a.x - b.x; });
+      var text = r.parts.map(function (p) { return p.str; }).join('').replace(/\s+/g, ' ').trim();
+      return { text: text, h: r.h };
+    }).filter(function (l) { return l.text; });
+
+    return lines.map(function (l) {
+      if (optHeadings.checked && median && l.h >= median * 1.35 && l.text.length <= 90) {
+        var lvl = l.h >= median * 1.9 ? '## ' : '### ';
+        return lvl + l.text;
+      }
+      return l.text;
+    }).join('\n');
+  }
+
+  function finish(pages, total) {
+    var text = pages.join('').replace(/^\n+/, '');
+    out.value = text;
+    bar.style.display = 'none';
+    statusEl.textContent = 'Done — ' + total + ' pages.';
+    metaEl.textContent = text.length.toLocaleString() + ' characters';
+    copyBtn.disabled = dlBtn.disabled = false;
+  }
+
+  copyBtn.addEventListener('click', function () {
+    out.select();
+    if (navigator.clipboard) navigator.clipboard.writeText(out.value).then(flash, fallbackCopy);
+    else fallbackCopy();
+  });
+  function fallbackCopy() { try { document.execCommand('copy'); flash(); } catch (e) {} }
+  function flash() { var t = copyBtn.textContent; copyBtn.textContent = '✓ Copied'; setTimeout(function () { copyBtn.textContent = t; }, 1400); }
+
+  dlBtn.addEventListener('click', function () {
+    var blob = new Blob([out.value], { type: 'text/markdown' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'handbook.md';
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  });
+})();
+</script>
+</body>
+</html>
