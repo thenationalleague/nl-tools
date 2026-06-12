@@ -45,6 +45,13 @@
   .cda-pill { font-size: 11px; padding: 2px 10px; border-radius: 999px; background: var(--amber-light); color: var(--amber-deep); }
   .cda-pill--in { background: var(--green); color: var(--white); }
   textarea { width:100%; box-sizing:border-box; min-height:140px; font-family:ui-monospace,monospace; font-size:12px; border:1px solid var(--border); border-radius:8px; padding:10px; }
+  .cda-pill--in { cursor:pointer; }
+  .cda-pill--in:hover { filter:brightness(0.92); }
+  .cda-dl { display:grid; grid-template-columns:200px 1fr; gap:4px 14px; font-size:13px; }
+  .cda-dl dt { color:var(--text-muted); }
+  .cda-dl dd { margin:0; word-break:break-word; }
+  .cda-dl dd:empty::after { content:'—'; color:var(--border); }
+  .cda-sec { font-variation-settings:'wght' 800; color:var(--navy); margin:14px 0 6px; font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
 </style>
 </head>
 <body>
@@ -56,10 +63,15 @@
     <div style="display:flex;gap:10px;margin:14px 0;">
       <button class="btn btn--navy" id="genBtn">Generate missing links</button>
       <button class="btn btn--ghost" id="emailBtn" disabled>Build email text for all clubs</button>
+      <button class="btn btn--ghost" id="csvBtn" disabled>Download submissions CSV</button>
     </div>
     <textarea id="emails" placeholder="Generated email blurbs appear here…" style="display:none;"></textarea>
     <div id="list" style="margin-top:16px;"><p style="color:var(--text-muted);">Loading…</p></div>
   </div>
+  <div class="modal-backdrop" id="cdaModal"><div class="modal" style="max-width:640px;">
+    <div class="modal__head"><h3 id="cdaModalT" style="margin:0;"></h3><button class="btn-icon" id="cdaModalX">×</button></div>
+    <div class="modal__body" id="cdaModalB" style="max-height:70vh;overflow:auto;"></div>
+  </div></div>
 </div>
 <script>
 (function () {
@@ -82,12 +94,53 @@
       var sub = t && S.subs[t];
       return '<div class="cda-row"><b>' + esc(c.name) + '</b>' +
         (t ? '<code>' + esc(FORM_URL + t) + '</code>' : '<span style="color:var(--text-muted);">no link yet</span>') +
-        (sub ? '<span class="cda-pill cda-pill--in">submitted ' + new Date(sub.submittedAt).toLocaleDateString('en-GB') + '</span>'
+        (sub ? '<span class="cda-pill cda-pill--in" data-sub="' + esc(c.name) + '">view · submitted ' + new Date(sub.submittedAt).toLocaleDateString('en-GB') + '</span>'
              : '<span class="cda-pill">awaiting</span>') +
       '</div>';
     }).join('');
     document.getElementById('list').innerHTML = html;
     document.getElementById('emailBtn').disabled = !Object.keys(S.invites).length;
+    var anySub = Object.keys(S.subs).length > 0;
+    document.getElementById('csvBtn').disabled = !anySub;
+  }
+
+  var SECTIONS = [
+    ['Submitter', [['yourName','Name'],['yourEmail','Email']]],
+    ['Stadium', [['stadium','Official stadium name'],['stadiumSponsor','Sponsored name'],['noSponsor','No sponsor'],['addr1','Address 1'],['addr2','Address 2'],['town','Town'],['county','County'],['postcode','Postcode'],['station','Nearest station'],['capacity','Capacity'],['seated','Seated'],['pitchDims','Pitch dimensions'],['pitchType','Pitch type']]],
+    ['Club contact', [['website','Website'],['mainEmail','Main email'],['phone','Switchboard'],['countyFA','County FA']]],
+    ['Sponsorship', [['spClub','Main club sponsor'],['spFront','Front of shirt'],['spBack','Back of shirt'],['spSleeve','Left sleeve'],['spShorts','Back of shorts'],['spExtra','Additional kit sponsors']]]
+  ];
+  var ALLF = SECTIONS.reduce(function (a, s) { return a.concat(s[1]); }, []);
+
+  function openSub(club, sub) {
+    document.getElementById('cdaModalT').textContent = club + ' — submitted ' + new Date(sub.submittedAt).toLocaleString('en-GB');
+    document.getElementById('cdaModalB').innerHTML = SECTIONS.map(function (s) {
+      return '<div class="cda-sec">' + esc(s[0]) + '</div><dl class="cda-dl">' +
+        s[1].map(function (f) {
+          var val = f[0] === 'noSponsor' ? (sub.noSponsor ? 'Yes' : 'No') : (sub[f[0]] || '');
+          return '<dt>' + esc(f[1]) + '</dt><dd>' + esc(val) + '</dd>';
+        }).join('') + '</dl>';
+    }).join('');
+    document.getElementById('cdaModal').classList.add('open');
+  }
+  document.getElementById('cdaModalX').addEventListener('click', function () { document.getElementById('cdaModal').classList.remove('open'); });
+  document.getElementById('cdaModal').addEventListener('click', function (e) { if (e.target.id === 'cdaModal') e.currentTarget.classList.remove('open'); });
+
+  function downloadCsv() {
+    var cols = ['Club','Submitted'].concat(ALLF.map(function (f) { return f[1]; }));
+    function q(v) { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+    var rows = [cols.map(q).join(',')];
+    S.clubs.forEach(function (c) {
+      var t = tokenFor(c.name); var sub = t && S.subs[t];
+      if (!sub) return;
+      var line = [c.name, new Date(sub.submittedAt).toLocaleString('en-GB')].concat(
+        ALLF.map(function (f) { return f[0] === 'noSponsor' ? (sub.noSponsor ? 'Yes' : 'No') : (sub[f[0]] || ''); }));
+      rows.push(line.map(q).join(','));
+    });
+    var blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = 'club-data-submissions-' + Date.now() + '.csv'; a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
   }
 
   window.TOOL = window.TOOL || {};
@@ -102,6 +155,13 @@
       S.subs = res[2].val() || {};
       renderList();
     }).catch(function (e) { document.getElementById('list').innerHTML = '<p style="color:var(--red);">' + esc(e.message || e) + '</p>'; });
+
+    document.getElementById('list').addEventListener('click', function (e) {
+      var p = e.target.closest('[data-sub]'); if (!p) return;
+      var club = p.getAttribute('data-sub'); var t = tokenFor(club);
+      if (t && S.subs[t]) openSub(club, S.subs[t]);
+    });
+    document.getElementById('csvBtn').addEventListener('click', downloadCsv);
 
     document.getElementById('genBtn').addEventListener('click', function () {
       var updates = {}; var n = 0;
