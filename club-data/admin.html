@@ -60,6 +60,17 @@
   <div class="cda">
     <h1 style="color:var(--navy);">Club data collection</h1>
     <p style="color:var(--text-muted);">One private link per club. Pre-filled for continuing clubs, blank for entrants — the form works that out itself. Tokens live only in the database.</p>
+    <div style="border:1px solid var(--border);border-radius:10px;background:var(--white);padding:16px;margin:14px 0;">
+      <div style="font-variation-settings:'wght' 800;color:var(--navy);font-size:12px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Standard message</div>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px;">Placeholders: <code>{club}</code> <code>{link}</code> <code>{note}</code> — {note} swaps between the two lines below depending on whether the club's form is pre-filled.</p>
+      <textarea id="tplBody" rows="9"></textarea>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px;">
+        <div><label style="font-size:11px;color:var(--text-muted);">{note} for pre-filled clubs</label><textarea id="tplNotePre" rows="2"></textarea></div>
+        <div><label style="font-size:11px;color:var(--text-muted);">{note} for new clubs</label><textarea id="tplNoteNew" rows="2"></textarea></div>
+      </div>
+      <button class="btn btn--ghost btn--sm" id="tplSave" style="margin-top:10px;">Save standard message</button>
+      <span id="tplStatus" style="font-size:12px;color:var(--text-muted);margin-left:8px;"></span>
+    </div>
     <div style="display:flex;gap:10px;margin:14px 0;">
       <button class="btn btn--navy" id="genBtn">Generate missing links</button>
       <button class="btn btn--ghost" id="emailBtn" disabled>Build email text for all clubs</button>
@@ -103,6 +114,18 @@
     var anySub = Object.keys(S.subs).length > 0;
     document.getElementById('csvBtn').disabled = !anySub;
   }
+
+  var DEFAULT_TPL = {
+    body: 'Subject: {club} — please confirm your club information for 2026/27\n\n' +
+      'Dear {club},\n\n' +
+      'Ahead of the 2026/27 season we are confirming the core information the League holds for every club — stadium details, contacts and sponsorship.\n\n' +
+      'Please use your club’s private link below to check, amend and submit your details. {note}\n\n' +
+      '{club}’s private link (please don’t share it outside your club):\n{link}\n\n' +
+      'Kind regards,\nThe National League',
+    notePre: 'It is pre-filled with what we currently hold, so in most cases this takes two minutes.',
+    noteNew: 'As a club new to the National League, the form will be blank — please complete it in full.'
+  };
+  var TPL = { body: DEFAULT_TPL.body, notePre: DEFAULT_TPL.notePre, noteNew: DEFAULT_TPL.noteNew };
 
   var SECTIONS = [
     ['Submitter', [['yourName','Name'],['yourEmail','Email']]],
@@ -156,6 +179,27 @@
       renderList();
     }).catch(function (e) { document.getElementById('list').innerHTML = '<p style="color:var(--red);">' + esc(e.message || e) + '</p>'; });
 
+    db.ref(BASE + '/template').once('value').then(function (s) {
+      var t = s.val(); if (t) { TPL.body = t.body || TPL.body; TPL.notePre = t.notePre || TPL.notePre; TPL.noteNew = t.noteNew || TPL.noteNew; }
+      document.getElementById('tplBody').value = TPL.body;
+      document.getElementById('tplNotePre').value = TPL.notePre;
+      document.getElementById('tplNoteNew').value = TPL.noteNew;
+    }).catch(function () {
+      document.getElementById('tplBody').value = TPL.body;
+      document.getElementById('tplNotePre').value = TPL.notePre;
+      document.getElementById('tplNoteNew').value = TPL.noteNew;
+    });
+    document.getElementById('tplSave').addEventListener('click', function () {
+      TPL.body = document.getElementById('tplBody').value;
+      TPL.notePre = document.getElementById('tplNotePre').value;
+      TPL.noteNew = document.getElementById('tplNoteNew').value;
+      if (NL.writeAudit) NL.writeAudit('clubdata_template', 'Updated club-data standard message');
+      db.ref(BASE + '/template').set(TPL).then(function () {
+        document.getElementById('tplStatus').textContent = 'Saved ✓';
+        setTimeout(function () { document.getElementById('tplStatus').textContent = ''; }, 2000);
+      }).catch(function (e) { document.getElementById('tplStatus').textContent = 'Save failed: ' + (e.message || e); });
+    });
+
     document.getElementById('list').addEventListener('click', function (e) {
       var p = e.target.closest('[data-sub]'); if (!p) return;
       var club = p.getAttribute('data-sub'); var t = tokenFor(club);
@@ -175,20 +219,20 @@
     });
 
     document.getElementById('emailBtn').addEventListener('click', function () {
+      var body = document.getElementById('tplBody').value || TPL.body;
+      var notePre = document.getElementById('tplNotePre').value || TPL.notePre;
+      var noteNew = document.getElementById('tplNoteNew').value || TPL.noteNew;
       var out = S.clubs.map(function (c) {
         var t = tokenFor(c.name); if (!t) return '';
-        return '=== ' + c.name + ' ===\n' +
-          'Subject: ' + c.name + ' — please confirm your club information for 2026/27\n\n' +
-          'Dear ' + c.name + ',\n\n' +
-          'Ahead of the 2026/27 season we are confirming the core information the League holds for every club — stadium details, contacts and sponsorship.\n\n' +
-          'Please use your club’s private link below to check, amend and submit your details. ' +
-          (c.stadium_name ? 'It is pre-filled with what we currently hold, so in most cases this takes two minutes.' : 'As a club new to the National League, the form will be blank — please complete it in full.') + '\n\n' +
-          c.name + '’s private link (please don’t share it outside your club):\n' + FORM_URL + t + '\n\n' +
-          'Kind regards,\nThe National League\n';
+        var note = c.stadium_name ? notePre : noteNew;
+        var msg = body.split('{club}').join(c.name)
+                      .split('{link}').join(FORM_URL + t)
+                      .split('{note}').join(note);
+        return '=== ' + c.name + ' ===\n' + msg + '\n';
       }).join('\n');
       var ta = document.getElementById('emails');
       ta.style.display = ''; ta.value = out; ta.select();
-      try { document.execCommand('copy'); NL.toast('Email text copied.', 'success'); } catch (e) {}
+      try { document.execCommand('copy'); NL.toast('Email text for ' + S.clubs.filter(function(c){return tokenFor(c.name);}).length + ' clubs copied.', 'success'); } catch (e) {}
     });
   };
   if (window._toolDeferredSession) { window.TOOL.boot(window._toolDeferredSession); window._toolDeferredSession = null; }
