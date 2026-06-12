@@ -2,6 +2,21 @@
 <!--
   NL Tools — Handbook
   handbook / index.html
+  v0.6 — Content quality + editing overhaul:
+         - handbook-content.json re-carved with paragraph reflow (PDF print
+           line-wraps joined back into real paragraphs; numbered clauses get
+           their own paragraphs) and duplicated heading lines stripped.
+         - Re-import: superadmin toolbar button, available while every
+           section is still seed/import-authored (one hand-edit anywhere
+           protects content from replacement).
+         - WYSIWYG editing (Toast UI via CDN, lazy-loaded) — visual editing
+           incl. a table tool, but reads/writes MARKDOWN so storage, audit
+           and the read renderer are unchanged. Textarea+preview fallback
+           when the CDN is unreachable.
+         - Bare emails / URLs auto-link in the read view (linkify, skips
+           existing tags); league contact pages become tappable.
+         - Structure UX: '+ New chapter' at the bottom of the contents tree;
+           toolbar relabelled (+ Inside / + After) with tooltips.
   v0.5 — Detect 'no content yet' by empty bodies (not seed-author), so the
          import stays reachable even after a section was opened.
   v0.4 — Surface the import on the empty-skeleton state (button was hidden).
@@ -64,10 +79,12 @@
     window.NL_CHANGELOG = [
       {
         date: '10 Jun 2026',
-        version: 'v0.5',
+        version: 'v0.6',
         items: [
           'First release: the National League handbook (rules, articles, appendices and league information) as a navigable online book — contents sidebar, search, and shareable links straight to any clause.',
-          'One-click import of the full 2025/26 handbook (104 sections carved from the printed booklet) — superadmin, one-off, offered whether the database is empty or holds the blank chapter skeleton. Admins can then edit any section in Markdown with live preview; every change is saved instantly and logged.'
+          'Editing is now a proper rich-text editor — headings, lists, tables and links, no Markdown needed (it still saves as portable text underneath).',
+          'Imported text quality fixed: paragraphs re-flowed (no more mid-sentence line breaks), duplicate headings stripped, and email addresses / websites are now tappable links throughout.',
+          'Clearer structure controls: “+ New chapter” at the bottom of the contents, and “+ Inside / + After” buttons for sections. Superadmins can re-import the carved booklet while nothing has been hand-edited.'
         ]
       }
     ];
@@ -152,6 +169,8 @@
   /* ---- Editor ---- */
   .hb-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
   .hb-edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .hb-edit-meta { display: grid; grid-template-columns: 220px 1fr 160px; gap: 12px; }
+  @media (max-width: 720px) { .hb-edit-meta { grid-template-columns: 1fr; } }
   @media (max-width: 720px) { .hb-edit-grid { grid-template-columns: 1fr; } }
   .hb-field { margin-bottom: 12px; }
   .hb-field label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; font-variation-settings: 'wght' 800; color: var(--text-muted); margin-bottom: 4px; }
@@ -218,7 +237,23 @@
     t = t.replace(/\*([^*]+)\*/g, '<em>$1</em>');
     t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+|mailto:[^)\s]+|#[^)\s]+)\)/g,
       '<a href="$2">$1</a>');
-    return t;
+    return linkify(t);
+  }
+
+  /* Auto-link bare emails and URLs in already-escaped inline HTML, skipping
+     anything inside existing tags/anchors. The handbook text is full of
+     plain addresses (league contacts, club emails) that should be tappable. */
+  function linkify(html) {
+    return html.split(/(<a\b[^>]*>[\s\S]*?<\/a>|<[^>]+>)/g).map(function (part) {
+      if (!part || part.charAt(0) === '<') return part;
+      part = part.replace(/([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/g,
+        '<a href="mailto:$1">$1</a>');
+      part = part.replace(/(https?:\/\/[^\s<]+[^\s<.,;:)])/g,
+        '<a href="$1" target="_blank" rel="noopener">$1</a>');
+      part = part.replace(/(^|[\s(])(www\.[^\s<]+[^\s<.,;:)])/g,
+        '$1<a href="https://$2" target="_blank" rel="noopener">$2</a>');
+      return part;
+    }).join('');
   }
   function mdToHtml(md) {
     if (!md || !md.trim()) return '<p class="hb-empty">No content yet.</p>';
@@ -294,6 +329,16 @@
      seed skeleton — even if a section was opened/saved without text, which
      changes its updatedBy). The signal is simply: not one node has a real
      body. Treated like an empty DB so the import is still offered. */
+  /* Re-import is offered while nothing has been hand-edited: every node is
+     still seed/import-authored (or empty). */
+  function canReimport() {
+    var ids = Object.keys(S.nodes);
+    return ids.length > 0 && ids.every(function (id) {
+      var n = S.nodes[id];
+      return !(n.body && n.body.trim()) || n.updatedBy === 'seed' || n.updatedBy === 'import 2025/26';
+    });
+  }
+
   function isEmptySkeleton() {
     var ids = Object.keys(S.nodes);
     return ids.length > 0 && ids.every(function (id) {
@@ -361,7 +406,10 @@
     if (side) side.style.display = '';
     var toc = document.getElementById('hbToc');
     if (S.search) { renderSearchResults(toc); return; }
-    toc.innerHTML = childrenOf(null).map(tocItem).join('');
+    toc.innerHTML = childrenOf(null).map(tocItem).join('') +
+      (canEdit()
+        ? '<li style="margin-top:14px;"><button class="btn btn--ghost btn--sm" id="hbAddChapter" style="width:100%;">+ New chapter</button></li>'
+        : '');
   }
   function renderSearchResults(toc) {
     var q = S.search.toLowerCase();
@@ -400,11 +448,14 @@
 
     var editBar = canEdit()
       ? '<div class="hb-toolbar">' +
-          '<button class="btn btn--navy btn--sm" id="hbEdit">Edit this section</button>' +
-          '<button class="btn btn--ghost btn--sm" id="hbAddChild">+ Add sub-section</button>' +
-          '<button class="btn btn--ghost btn--sm" id="hbAddSibling">+ Add section after</button>' +
-          '<button class="btn btn--ghost btn--sm" id="hbMoveUp">↑</button>' +
-          '<button class="btn btn--ghost btn--sm" id="hbMoveDown">↓</button>' +
+          '<button class="btn btn--navy btn--sm" id="hbEdit">Edit</button>' +
+          '<button class="btn btn--ghost btn--sm" id="hbAddChild" title="New section inside this one">+ Inside</button>' +
+          '<button class="btn btn--ghost btn--sm" id="hbAddSibling" title="New section at the same level, after this one">+ After</button>' +
+          '<button class="btn btn--ghost btn--sm" id="hbMoveUp" title="Move up among its siblings">↑</button>' +
+          '<button class="btn btn--ghost btn--sm" id="hbMoveDown" title="Move down among its siblings">↓</button>' +
+          (S.role === 'superadmin' && canReimport()
+            ? '<button class="btn btn--ghost btn--sm" id="hbReimport" title="Replace all (unedited) content with the latest import">Re-import</button>'
+            : '') +
           '<button class="btn btn--danger btn--sm" id="hbDelete" style="margin-left:auto;">Delete</button>' +
         '</div>'
       : '';
@@ -421,6 +472,28 @@
       '</div>';
   }
 
+  /* WYSIWYG editing via Toast UI Editor (CDN, lazy-loaded). It edits
+     visually but reads/writes MARKDOWN, so storage, auditing and the
+     read-view renderer are unchanged. Falls back to the plain textarea +
+     preview if the CDN can't load. */
+  var TUI = { loading: false, failed: false, instance: null };
+
+  function loadTui() {
+    return new Promise(function (resolve) {
+      if (window.toastui && window.toastui.Editor) return resolve(true);
+      if (TUI.failed) return resolve(false);
+      var css = document.createElement('link');
+      css.rel = 'stylesheet';
+      css.href = 'https://uicdn.toast.com/editor/3.2.2/toastui-editor.min.css';
+      document.head.appendChild(css);
+      var s = document.createElement('script');
+      s.src = 'https://uicdn.toast.com/editor/3.2.2/toastui-editor-all.min.js';
+      s.onload = function () { resolve(!!(window.toastui && window.toastui.Editor)); };
+      s.onerror = function () { TUI.failed = true; resolve(false); };
+      document.head.appendChild(s);
+    });
+  }
+
   function renderEditor(main) {
     var isNew = S.editing === '__new__';
     var d = S.draft;
@@ -429,28 +502,64 @@
         '<button class="btn btn--navy btn--sm" id="hbSave" style="margin-left:auto;">Save</button>' +
         '<button class="btn btn--ghost btn--sm" id="hbCancel">Cancel</button>' +
       '</div>' +
-      '<div class="hb-edit-grid">' +
-        '<div>' +
-          '<div class="hb-field"><label>Number (optional, e.g. 4.2 or "Appendix F")</label><input id="hbfNum" value="' + esc(d.number) + '"></div>' +
-          '<div class="hb-field"><label>Title</label><input id="hbfTitle" value="' + esc(d.title) + '"></div>' +
-          '<div class="hb-field"><label>Kind</label><select id="hbfKind">' +
-            ['chapter', 'section', 'appendix'].map(function (k) { return '<option value="' + k + '"' + (d.kind === k ? ' selected' : '') + '>' + k + '</option>'; }).join('') +
-          '</select></div>' +
-          '<div class="hb-field"><label>Body (Markdown)</label><textarea id="hbfBody">' + esc(d.body) + '</textarea></div>' +
-        '</div>' +
-        '<div>' +
-          '<div class="hb-preview__label">Live preview</div>' +
-          '<div class="hb-preview hb-body" id="hbPreview">' + mdToHtml(d.body) + '</div>' +
-        '</div>' +
+      '<div class="hb-edit-meta">' +
+        '<div class="hb-field"><label>Number (optional, e.g. 4.2 or "Appendix F")</label><input id="hbfNum" value="' + esc(d.number) + '"></div>' +
+        '<div class="hb-field"><label>Title</label><input id="hbfTitle" value="' + esc(d.title) + '"></div>' +
+        '<div class="hb-field"><label>Kind</label><select id="hbfKind">' +
+          ['chapter', 'section', 'appendix'].map(function (k) { return '<option value="' + k + '"' + (d.kind === k ? ' selected' : '') + '>' + k + '</option>'; }).join('') +
+        '</select></div>' +
+      '</div>' +
+      '<div class="hb-field"><label>Content</label>' +
+        '<div id="hbEditorHost"><p style="color:var(--text-muted);font-size:13px;">Loading editor…</p></div>' +
       '</div>';
-    var ta = document.getElementById('hbfBody');
-    ta.addEventListener('input', function () {
-      S.draft.body = ta.value;
-      document.getElementById('hbPreview').innerHTML = mdToHtml(ta.value);
-    });
+
     document.getElementById('hbfTitle').addEventListener('input', function (e) { S.draft.title = e.target.value; });
     document.getElementById('hbfNum').addEventListener('input', function (e) { S.draft.number = e.target.value; });
     document.getElementById('hbfKind').addEventListener('change', function (e) { S.draft.kind = e.target.value; });
+
+    loadTui().then(function (ok) {
+      var host = document.getElementById('hbEditorHost');
+      if (!host) return;   /* editor closed while loading */
+      if (ok) {
+        host.innerHTML = '';
+        TUI.instance = new toastui.Editor({
+          el: host,
+          initialEditType: 'wysiwyg',
+          initialValue: S.draft.body || '',
+          height: '560px',
+          usageStatistics: false,
+          toolbarItems: [
+            ['heading', 'bold', 'italic'],
+            ['hr', 'quote'],
+            ['ul', 'ol'],
+            ['table', 'link']
+          ]
+        });
+      } else {
+        /* Offline / CDN blocked: plain Markdown textarea + live preview */
+        TUI.instance = null;
+        host.innerHTML =
+          '<div class="hb-edit-grid">' +
+            '<textarea id="hbfBody">' + esc(S.draft.body) + '</textarea>' +
+            '<div><div class="hb-preview__label">Live preview</div>' +
+              '<div class="hb-preview hb-body" id="hbPreview">' + mdToHtml(S.draft.body) + '</div></div>' +
+          '</div>';
+        var ta = document.getElementById('hbfBody');
+        ta.addEventListener('input', function () {
+          S.draft.body = ta.value;
+          document.getElementById('hbPreview').innerHTML = mdToHtml(ta.value);
+        });
+      }
+    });
+  }
+
+  /* Pull the current body out of whichever editor is live. */
+  function readEditorBody() {
+    if (TUI.instance) {
+      try { return TUI.instance.getMarkdown(); } catch (e) {}
+    }
+    var ta = document.getElementById('hbfBody');
+    return ta ? ta.value : (S.draft ? S.draft.body : '');
   }
 
   function fmtDate(ts) {
@@ -489,6 +598,7 @@
   }
   function saveDraft() {
     var d = S.draft;
+    d.body = readEditorBody();
     if (!d.title.trim()) { NL.toast && NL.toast('A title is required.', 'info'); return; }
     if (S.editing === '__new__') {
       var node = { id: genId(), parentId: d.parentId, order: d.order, kind: d.kind, number: d.number.trim(), title: d.title.trim(), body: d.body };
@@ -530,7 +640,7 @@
   /* One-off: import the carved 2025/26 handbook content (handbook-content.json,
      governance core only — club pages live in the directory). Idempotent. */
   function importContent() {
-    var btn = document.getElementById('hbImportBtn');
+    var btn = document.getElementById('hbImportBtn') || document.getElementById('hbReimport');
     if (btn) { btn.disabled = true; btn.textContent = 'Importing…'; }
     var nodes;
     NL.ensureAuth()
@@ -543,14 +653,16 @@
       .then(function (snap) {
         var existing = snap.val();
         if (existing) {
-          /* Allow replacing structure that has no real content yet (the empty
-             skeleton) — but never overwrite authored bodies. */
+          /* Allow replacing content nobody has hand-edited yet: empty bodies
+             or untouched seed/import nodes. One manual edit anywhere locks
+             the import out — authored text is never overwritten. */
           var ids = Object.keys(existing);
-          var allEmpty = ids.every(function (k) {
-            return !(existing[k].body && existing[k].body.trim());
+          var untouched = ids.every(function (k) {
+            var n = existing[k];
+            return !(n.body && n.body.trim()) || n.updatedBy === 'seed' || n.updatedBy === 'import 2025/26';
           });
-          if (!allEmpty) throw new Error('Handbook already has content — not overwriting. (Clear it first if you really mean to replace it.)');
-          if (!confirm('The empty chapter skeleton is already here. Replace it with the full 2025/26 handbook import?')) {
+          if (!untouched) throw new Error('Handbook has hand-edited content — not overwriting. (Sections edited by a person are protected.)');
+          if (!confirm('Replace the current (unedited) handbook content with the latest 2025/26 import? This re-writes every section.')) {
             throw new Error('__cancelled__');
           }
         }
@@ -668,6 +780,7 @@
   function wire() {
     // Sidebar nav + carets (delegated)
     document.getElementById('hbSide').addEventListener('click', function (e) {
+      if (e.target && e.target.id === 'hbAddChapter') { startAdd(null, childrenOf(null).length); return; }
       var caret = e.target.closest('[data-toc-caret]');
       if (caret) { var cid = caret.getAttribute('data-toc-caret'); S.collapsed[cid] = !S.collapsed[cid]; renderToc(); return; }
       var link = e.target.closest('[data-toc]');
@@ -685,6 +798,7 @@
       if (link) { e.preventDefault(); navigate(link.getAttribute('data-toc')); return; }
       if (!canEdit()) return;
       var node = S.nodes[S.currentId];
+      if (t.id === 'hbReimport') { importContent(); return; }
       if (t.id === 'hbEdit' && node) startEdit(node);
       else if (t.id === 'hbAddChild' && node) startAdd(node.id, childrenOf(node.id).length);
       else if (t.id === 'hbAddSibling' && node) startAdd(node.parentId, (node.order || 0) + 0.5);
@@ -692,13 +806,13 @@
       else if (t.id === 'hbMoveDown' && node) moveNode(node, 1);
       else if (t.id === 'hbDelete' && node) deleteNode(node);
       else if (t.id === 'hbSave') saveDraft();
-      else if (t.id === 'hbCancel') { S.editing = null; S.draft = null; render(); }
+      else if (t.id === 'hbCancel') { TUI.instance = null; S.editing = null; S.draft = null; render(); }
     });
     window.addEventListener('hashchange', function () { openFromHash(); render(); });
   }
 
   function navigate(id) {
-    if (S.editing) { S.editing = null; S.draft = null; }
+    if (S.editing) { TUI.instance = null; S.editing = null; S.draft = null; }
     S.currentId = id;
     S.search = ''; var sb = document.getElementById('hbSearch'); if (sb) sb.value = '';
     if (history.replaceState) history.replaceState(null, '', '#' + id); else location.hash = id;
