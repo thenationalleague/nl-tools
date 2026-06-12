@@ -2,6 +2,7 @@
 <!--
   NL Tools — Handbook
   handbook / index.html
+  v0.2 — One-click import of the carved 2025/26 handbook content.
   v0.1 — Book-like, editable online edition of the NL handbook (rulebook,
          articles, tariffs, appendices). Framework + skeleton.
 
@@ -59,11 +60,10 @@
     window.NL_CHANGELOG = [
       {
         date: '10 Jun 2026',
-        version: 'v0.1',
+        version: 'v0.2',
         items: [
-          'First release: the National League handbook (rules, articles, tariffs and appendices) as a navigable online book — contents sidebar, search, and shareable links straight to any clause.',
-          'Admins can edit any section in Markdown with live preview; every change is saved instantly and logged.',
-          'Ships with the chapter and appendix structure in place; the text of each section is filled in from here.'
+          'First release: the National League handbook (rules, articles, appendices and league information) as a navigable online book — contents sidebar, search, and shareable links straight to any clause.',
+          'One-click import of the full 2025/26 handbook (104 sections carved from the printed booklet) — superadmin, one-off. Admins can then edit any section in Markdown with live preview; every change is saved instantly and logged.'
         ]
       }
     ];
@@ -302,10 +302,16 @@
       '<h2 style="margin-top:0;color:var(--navy);">The handbook is empty</h2>' +
       '<p style="color:var(--text-muted);">' +
         (canSeed
-          ? 'Seed the chapter &amp; appendix structure to get started — you can then fill in each section.'
+          ? 'Import the full 2025/26 handbook (rules, articles, appendices and league information, carved from the printed booklet) — or just create the empty chapter structure to fill in by hand.'
           : 'It hasn’t been set up yet. A League administrator needs to initialise it.') +
       '</p>' +
-      (canSeed ? '<button class="btn btn--navy" id="hbSeedBtn">Create handbook structure</button>' : '') +
+      (canSeed
+        ? '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">' +
+            '<button class="btn btn--navy" id="hbImportBtn">Import 2025/26 handbook</button>' +
+            '<button class="btn btn--ghost" id="hbSeedBtn">Create empty structure</button>' +
+          '</div>' +
+          '<p style="color:var(--text-muted);font-size:12px;margin:14px 0 0;">Either is a one-off and refuses to overwrite existing content. Imported text is fully editable afterwards.</p>'
+        : '') +
     '</div></div>';
   }
 
@@ -498,6 +504,46 @@
   }
 
   /* ============ Skeleton seed (superadmin one-off) ============ */
+  /* One-off: import the carved 2025/26 handbook content (handbook-content.json,
+     governance core only — club pages live in the directory). Idempotent. */
+  function importContent() {
+    var btn = document.getElementById('hbImportBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Importing…'; }
+    var nodes;
+    NL.ensureAuth()
+      .then(function () { return fetch('/tools/handbook/handbook-content.json?cb=' + Date.now()); })
+      .then(function (r) { if (!r.ok) throw new Error('content file not found (' + r.status + ')'); return r.json(); })
+      .then(function (list) {
+        nodes = list;
+        return firebase.database().ref(BASE + '/nodes').once('value');
+      })
+      .then(function (snap) {
+        if (snap.val()) throw new Error('Handbook already has content — not overwriting.');
+        var payload = {};
+        var now = Date.now();
+        nodes.forEach(function (n) {
+          payload[n.id] = {
+            parentId: n.parentId || null, order: n.order || 0, kind: n.kind || 'section',
+            number: n.number || null, title: n.title || '', body: n.body || '',
+            updatedAt: now, updatedBy: 'import 2025/26'
+          };
+        });
+        if (NL.writeAudit) NL.writeAudit('handbook_import', 'Imported 2025/26 handbook (' + nodes.length + ' sections)');
+        return firebase.database().ref(BASE + '/nodes').set(payload);
+      })
+      .then(function () { return loadNodes(); })
+      .then(function () {
+        S.seeded = true;
+        S.currentId = (childrenOf(null)[0] || {}).id;
+        render();
+        NL.toast && NL.toast('Handbook imported — ' + Object.keys(S.nodes).length + ' sections. Edit any of them from here.', 'success');
+      })
+      .catch(function (err) {
+        NL.toast && NL.toast('Import failed: ' + (err.message || err), 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Import 2025/26 handbook'; }
+      });
+  }
+
   function seedSkeleton() {
     var btn = document.getElementById('hbSeedBtn');
     if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
@@ -596,6 +642,7 @@
     // Main pane (delegated: nav links + editor buttons + seed)
     document.getElementById('hbMain').addEventListener('click', function (e) {
       var t = e.target;
+      if (t.id === 'hbImportBtn') { importContent(); return; }
       if (t.id === 'hbSeedBtn') { seedSkeleton(); return; }
       var link = t.closest('[data-toc]');
       if (link) { e.preventDefault(); navigate(link.getAttribute('data-toc')); return; }
