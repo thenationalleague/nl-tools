@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<!--
+  embeds/handbook-flipbook.html
+  v1.0 — Public, embeddable page-curl flipbook of the NL handbook
+         (governance content), for pasting into the Urban Zoo CMS on
+         thenationalleague.org.uk.
+
+  Delivery model (see embeds/widget-handover.md):
+    - One self-contained file, pasted into a CMS custom-HTML block.
+    - CMS strips external <script src>; inline <script>/<style> survive.
+      The page-flip library is therefore loaded dynamically via
+      createElement('script').onload, with a plain prev/next fallback if
+      it can't load.
+    - No auth, no Firebase. Reads a PUBLIC static snapshot of the
+      governance content — the same handbook-content.json the in-tool
+      "Re-import" is built from — over CORS from the GitHub-Pages source.
+      (Tracks the carved/imported edition; a "publish my live edits"
+      path can feed a different URL later without touching this file.)
+    - Outside the brand-token system (it runs on a third-party site), so
+      NL colours are inlined as literals here by design.
+-->
+<div id="nlHb" class="nlhb">
+  <div class="nlhb__bar">
+    <span class="nlhb__title">National League Handbook <span class="nlhb__season">2025/26</span></span>
+    <span class="nlhb__spacer"></span>
+    <input class="nlhb__search" id="nlhbSearch" type="search" placeholder="Find a page…" aria-label="Search the handbook" hidden>
+  </div>
+
+  <div class="nlhb__stage" id="nlhbStage">
+    <div class="nlhb__loading" id="nlhbLoading">Loading the handbook…</div>
+    <div class="nlhb__book" id="nlhbBook" hidden></div>
+  </div>
+
+  <div class="nlhb__controls" id="nlhbControls" hidden>
+    <button class="nlhb__btn" id="nlhbPrev" aria-label="Previous page">‹</button>
+    <span class="nlhb__page" id="nlhbPageInd">—</span>
+    <button class="nlhb__btn" id="nlhbNext" aria-label="Next page">›</button>
+  </div>
+</div>
+
+<style>
+  .nlhb {
+    --nlhb-primary:#9e0000; --nlhb-navy:#223b7c; --nlhb-ink:#1c2430;
+    --nlhb-muted:#6b7280; --nlhb-line:#e4e7ee; --nlhb-paper:#fffdf9; --nlhb-cream:#f4f1ea;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--nlhb-ink); max-width: 1100px; margin: 0 auto; padding: 10px;
+    box-sizing: border-box;
+  }
+  .nlhb *, .nlhb *::before, .nlhb *::after { box-sizing: border-box; }
+  .nlhb__bar { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+  .nlhb__title { font-weight:800; font-size:17px; color:var(--nlhb-navy); }
+  .nlhb__season { color:var(--nlhb-primary); }
+  .nlhb__spacer { flex:1; }
+  .nlhb__search { border:1px solid var(--nlhb-line); border-radius:999px; padding:7px 14px; font-size:13px; min-width:180px; }
+
+  .nlhb__stage {
+    position:relative; background:var(--nlhb-cream);
+    border:1px solid var(--nlhb-line); border-radius:10px;
+    padding:18px; display:flex; justify-content:center; align-items:center;
+    min-height:420px;
+  }
+  .nlhb__loading { color:var(--nlhb-muted); font-size:14px; padding:60px 0; }
+  .nlhb__book { user-select:text; }
+
+  /* Page surface — used both by the flip lib and the fallback. */
+  .nlhb-page {
+    background:var(--nlhb-paper);
+    box-shadow: 0 2px 14px rgba(10,22,40,0.16);
+    overflow:hidden;
+  }
+  .nlhb-page__inner {
+    width:100%; height:100%; padding:46px 44px 40px;
+    display:flex; flex-direction:column;
+  }
+  .nlhb-page__flow { flex:1; overflow:hidden; }
+  .nlhb-page__num { text-align:center; font-size:12px; color:var(--nlhb-muted); padding-top:8px; }
+
+  /* Cover + chapter dividers */
+  .nlhb-cover { background:linear-gradient(160deg,#2a2f5e,#223b7c 55%,#9e0000); color:#fff; }
+  .nlhb-cover .nlhb-page__inner { justify-content:center; align-items:center; text-align:center; }
+  .nlhb-cover__kicker { letter-spacing:.22em; text-transform:uppercase; font-size:12px; opacity:.85; }
+  .nlhb-cover__title { font-size:34px; font-weight:900; line-height:1.05; margin:14px 0; }
+  .nlhb-cover__season { font-size:18px; opacity:.9; }
+  .nlhb-cover__crest { width:96px; height:96px; object-fit:contain; margin-bottom:18px; }
+  .nlhb-divider { background:var(--nlhb-navy); color:#fff; }
+  .nlhb-divider .nlhb-page__inner { justify-content:center; }
+  .nlhb-divider__eyebrow { letter-spacing:.2em; text-transform:uppercase; font-size:12px; color:#c0cade; }
+  .nlhb-divider__title { font-size:30px; font-weight:900; line-height:1.1; margin-top:10px; }
+
+  /* Content typography (governs both measuring + render) */
+  .nlhb-flow { font-size:13.5px; line-height:1.5; color:var(--nlhb-ink); }
+  .nlhb-flow h2 { font-size:18px; font-weight:800; color:var(--nlhb-navy); margin:0 0 4px; }
+  .nlhb-flow .nlhb-num { font-size:11px; font-weight:800; letter-spacing:.04em; color:var(--nlhb-primary); text-transform:uppercase; }
+  .nlhb-flow h3 { font-size:15px; font-weight:800; margin:14px 0 4px; }
+  .nlhb-flow p { margin:0 0 9px; }
+  .nlhb-flow ul, .nlhb-flow ol { margin:0 0 9px; padding-left:22px; }
+  .nlhb-flow li { margin:2px 0; }
+  .nlhb-flow ol { list-style-type:decimal; }
+  .nlhb-flow ol ol { list-style-type:lower-alpha; }
+  .nlhb-flow ol ol ol { list-style-type:lower-roman; }
+  .nlhb-flow blockquote { margin:0 0 9px; padding:4px 12px; border-left:3px solid var(--nlhb-primary); color:var(--nlhb-muted); }
+  .nlhb-flow table { border-collapse:collapse; width:100%; margin:0 0 10px; font-size:12px; }
+  .nlhb-flow th, .nlhb-flow td { border:1px solid var(--nlhb-line); padding:5px 7px; text-align:left; }
+  .nlhb-flow a { color:var(--nlhb-navy); }
+  .nlhb-flow .nlhb-conthd { font-size:11px; color:var(--nlhb-muted); font-style:italic; margin:0 0 6px; }
+
+  .nlhb__controls { display:flex; align-items:center; justify-content:center; gap:18px; margin-top:12px; }
+  .nlhb__btn {
+    border:1px solid var(--nlhb-line); background:#fff; color:var(--nlhb-navy);
+    width:42px; height:42px; border-radius:50%; font-size:22px; cursor:pointer; line-height:1;
+  }
+  .nlhb__btn:hover { background:var(--nlhb-navy); color:#fff; }
+  .nlhb__btn:disabled { opacity:.4; cursor:default; }
+  .nlhb__page { font-size:13px; color:var(--nlhb-muted); min-width:120px; text-align:center; }
+
+  /* Fallback (no flip lib): single visible page */
+  .nlhb--fallback .nlhb-page { display:none; }
+  .nlhb--fallback .nlhb-page.is-shown { display:block; margin:0 auto; }
+</style>
+
+<script>
+(function () {
+  'use strict';
+  var ROOT = document.getElementById('nlHb');
+  var DATA_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/handbook/handbook-content.json';
+  var FLIP_URL = 'https://cdn.jsdelivr.net/npm/page-flip@2.0.7/dist/js/page-flip.browser.js';
+  var CREST = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose%20white.png';
+
+  /* Logical page size; the flip lib stretches it to the stage. */
+  var PW = 760, PH = 1074, PADX = 44, PADY_TOP = 46, PADY_BOT = 40, NUM_H = 24;
+  var CONTENT_W = PW - PADX * 2;
+  var CONTENT_H = PH - PADY_TOP - PADY_BOT - NUM_H;
+
+  var stage = document.getElementById('nlhbStage');
+  var bookEl = document.getElementById('nlhbBook');
+  var loadingEl = document.getElementById('nlhbLoading');
+  var controls = document.getElementById('nlhbControls');
+  var pageInd = document.getElementById('nlhbPageInd');
+
+  function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+
+  /* ---- compact markdown + linkify (mirrors the tool's renderer) ---- */
+  function mdInline(t){
+    t = esc(t);
+    t = t.replace(/`([^`]+)`/g,'<code>$1</code>')
+         .replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>')
+         .replace(/\*([^*]+)\*/g,'<em>$1</em>')
+         .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+|mailto:[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+    return linkify(t);
+  }
+  function linkify(html){
+    return html.split(/(<a\b[^>]*>[\s\S]*?<\/a>|<[^>]+>)/g).map(function(p){
+      if(!p || p.charAt(0)==='<') return p;
+      p = p.replace(/([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/g,'<a href="mailto:$1">$1</a>');
+      p = p.replace(/(https?:\/\/[^\s<]+[^\s<.,;:)])/g,'<a href="$1" target="_blank" rel="noopener">$1</a>');
+      p = p.replace(/(^|[\s(])(www\.[^\s<]+[^\s<.,;:)])/g,'$1<a href="https://$2" target="_blank" rel="noopener">$2</a>');
+      return p;
+    }).join('');
+  }
+  function bodyIsHtml(b){ return /<(p|h[1-6]|ul|ol|table|div|blockquote|br)\b/i.test(b||''); }
+  function mdToHtml(md){
+    if(!md||!md.trim()) return '';
+    var lines = md.replace(/\r\n/g,'\n').split('\n'), out=[], i=0;
+    function sep(s){ return /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(s)&&s.indexOf('-')!==-1; }
+    function row(s){ return s.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(function(c){return c.trim();}); }
+    while(i<lines.length){
+      var line=lines[i];
+      if(!line.trim()){ i++; continue; }
+      if(line.indexOf('|')!==-1 && i+1<lines.length && sep(lines[i+1])){
+        var h=row(line); i+=2; var b=[];
+        while(i<lines.length && lines[i].indexOf('|')!==-1 && lines[i].trim()){ b.push(row(lines[i])); i++; }
+        out.push('<table><thead><tr>'+h.map(function(x){return '<th>'+mdInline(x)+'</th>';}).join('')+'</tr></thead><tbody>'+
+          b.map(function(r){return '<tr>'+r.map(function(c){return '<td>'+mdInline(c)+'</td>';}).join('')+'</tr>';}).join('')+'</tbody></table>'); continue;
+      }
+      var hm=/^(#{2,4})\s+(.*)$/.exec(line);
+      if(hm){ var lv=hm[1].length; out.push('<h'+lv+'>'+mdInline(hm[2])+'</h'+lv+'>'); i++; continue; }
+      if(/^\s*(-{3,}|\*{3,})\s*$/.test(line)){ out.push('<hr>'); i++; continue; }
+      if(/^\s*>/.test(line)){ var q=[]; while(i<lines.length&&/^\s*>/.test(lines[i])){ q.push(lines[i].replace(/^\s*>\s?/,'')); i++; } out.push('<blockquote>'+q.map(mdInline).join('<br>')+'</blockquote>'); continue; }
+      if(/^\s*[-*]\s+/.test(line)){ var ul=[]; while(i<lines.length&&/^\s*[-*]\s+/.test(lines[i])){ ul.push('<li>'+mdInline(lines[i].replace(/^\s*[-*]\s+/,''))+'</li>'); i++; } out.push('<ul>'+ul.join('')+'</ul>'); continue; }
+      if(/^\s*\d+\.\s+/.test(line)){ var ol=[]; while(i<lines.length&&/^\s*\d+\.\s+/.test(lines[i])){ ol.push('<li>'+mdInline(lines[i].replace(/^\s*\d+\.\s+/,''))+'</li>'); i++; } out.push('<ol>'+ol.join('')+'</ol>'); continue; }
+      var para=[]; while(i<lines.length && lines[i].trim() && !/^(#{2,4}\s|>|\s*[-*]\s|\s*\d+\.\s)/.test(lines[i]) && !/^\s*(-{3,}|\*{3,})\s*$/.test(lines[i])){ para.push(lines[i]); i++; }
+      out.push('<p>'+para.map(mdInline).join('<br>')+'</p>');
+    }
+    return out.join('\n');
+  }
+  function bodyToHtml(b){ return bodyIsHtml(b) ? linkify(b) : mdToHtml(b); }
+
+  /* ---- reading order ---- */
+  function orderedNodes(list){
+    var byId={}, kids={};
+    list.forEach(function(n){ byId[n.id]=n; (kids[n.parentId||'__root']=kids[n.parentId||'__root']||[]).push(n); });
+    Object.keys(kids).forEach(function(k){ kids[k].sort(function(a,b){return (a.order||0)-(b.order||0);}); });
+    var out=[];
+    (function walk(pid,depth){ (kids[pid==null?'__root':pid]||[]).forEach(function(n){ n._depth=depth; out.push(n); walk(n.id,depth+1); }); })(null,0);
+    return out;
+  }
+
+  /* ---- pagination: flow blocks into fixed-height pages ---- */
+  function buildPages(nodes){
+    var pages = [];
+    // cover
+    pages.push({ type:'cover' });
+
+    var measure = document.createElement('div');
+    measure.className = 'nlhb-flow';
+    measure.style.cssText = 'position:absolute;left:-99999px;top:0;width:'+CONTENT_W+'px;visibility:hidden;';
+    document.body.appendChild(measure);
+
+    var cur = null;   // {chapter, html:''}
+    function newPage(chapter){ cur = { type:'content', chapter:chapter, blocks:[] }; pages.push(cur); measure.innerHTML=''; }
+    function fits(){ return measure.scrollHeight <= CONTENT_H; }
+
+    nodes.forEach(function(n){
+      var depth = n._depth || 0;
+      var isChapter = depth === 0;
+      if (isChapter) {
+        pages.push({ type:'divider', title:n.title, number:n.number });
+        cur = null; // next content starts fresh
+      }
+      // heading block for this node (skip plain chapter — divider covers it)
+      var blocks = [];
+      if (!isChapter) {
+        blocks.push('<div class="nlhb-head">' +
+          (n.number ? '<div class="nlhb-num">'+esc(n.number)+'</div>' : '') +
+          '<h2>'+esc(n.title)+'</h2></div>');
+      }
+      var bodyHtml = bodyToHtml(n.body || '');
+      if (bodyHtml) {
+        // split body into top-level blocks so a long section spans pages
+        var tmp = document.createElement('div'); tmp.innerHTML = bodyHtml;
+        Array.prototype.forEach.call(tmp.children, function(ch){ blocks.push(ch.outerHTML); });
+      }
+      if (!blocks.length) return;
+
+      blocks.forEach(function(html, idx){
+        if (!cur) newPage(n.chapterTitle);
+        var prev = measure.innerHTML;
+        measure.innerHTML = prev + html;
+        if (!fits() && prev) {
+          // overflow: commit current page, start a new one with this block
+          measure.innerHTML = prev;
+          newPage(n.chapterTitle);
+          measure.innerHTML = html;
+          // keep a heading with its first content block where possible
+        }
+        cur.blocks.push(html);
+      });
+    });
+
+    document.body.removeChild(measure);
+    return pages;
+  }
+
+  function pageHtml(p, n, total){
+    if (p.type === 'cover') {
+      return '<div class="nlhb-page nlhb-cover"><div class="nlhb-page__inner">' +
+        '<img class="nlhb-cover__crest" src="'+CREST+'" alt="" onerror="this.style.display=\'none\'">' +
+        '<div class="nlhb-cover__kicker">The National League</div>' +
+        '<div class="nlhb-cover__title">Handbook</div>' +
+        '<div class="nlhb-cover__season">2025/26</div></div></div>';
+    }
+    if (p.type === 'divider') {
+      return '<div class="nlhb-page nlhb-divider"><div class="nlhb-page__inner">' +
+        (p.number ? '<div class="nlhb-divider__eyebrow">'+esc(p.number)+'</div>' : '<div class="nlhb-divider__eyebrow">Chapter</div>') +
+        '<div class="nlhb-divider__title">'+esc(p.title)+'</div></div></div>';
+    }
+    return '<div class="nlhb-page"><div class="nlhb-page__inner">' +
+      '<div class="nlhb-page__flow nlhb-flow">' + p.blocks.join('') + '</div>' +
+      '<div class="nlhb-page__num">'+ (n+1) +' / '+ total +'</div>' +
+    '</div></div>';
+  }
+
+  function loadFlip(){
+    return new Promise(function(resolve){
+      var s = document.createElement('script');
+      s.src = FLIP_URL;
+      s.onload = function(){ resolve(window.St && window.St.PageFlip ? window.St.PageFlip : null); };
+      s.onerror = function(){ resolve(null); };
+      document.head.appendChild(s);
+    });
+  }
+
+  function render(pages){
+    loadingEl.hidden = true;
+    bookEl.hidden = false;
+    var total = pages.length;
+    bookEl.innerHTML = pages.map(function(p,i){ return pageHtml(p,i,total); }).join('');
+    var pageEls = bookEl.querySelectorAll('.nlhb-page');
+
+    loadFlip().then(function(PageFlip){
+      if (!PageFlip) { fallback(pageEls); return; }
+      // size each page element for the lib
+      Array.prototype.forEach.call(pageEls, function(el){ el.style.width=PW+'px'; el.style.height=PH+'px'; });
+      var stageW = stage.clientWidth - 36;
+      var dispW = Math.min(PW, Math.floor(stageW/2));
+      var pf = new PageFlip(bookEl, {
+        width: PW, height: PH, size: 'stretch',
+        minWidth: 280, maxWidth: PW, minHeight: 396, maxHeight: PH,
+        maxShadowOpacity: 0.4, showCover: true, mobileScrollSupport: true,
+        usePortrait: true
+      });
+      pf.loadFromHTML(pageEls);
+      controls.hidden = false;
+      var prevBtn=document.getElementById('nlhbPrev'), nextBtn=document.getElementById('nlhbNext');
+      prevBtn.onclick=function(){ pf.flipPrev(); };
+      nextBtn.onclick=function(){ pf.flipNext(); };
+      function ind(){ var c=pf.getCurrentPageIndex()+1; pageInd.textContent = c+' – '+total; }
+      pf.on('flip', ind); ind();
+    });
+  }
+
+  function fallback(pageEls){
+    ROOT.classList.add('nlhb--fallback');
+    Array.prototype.forEach.call(pageEls, function(el){ el.style.width=PW+'px'; el.style.height=PH+'px'; el.style.maxWidth='100%'; });
+    var idx=0, total=pageEls.length;
+    function show(){ Array.prototype.forEach.call(pageEls,function(el,i){ el.classList.toggle('is-shown', i===idx); }); pageInd.textContent=(idx+1)+' / '+total; document.getElementById('nlhbPrev').disabled=idx===0; document.getElementById('nlhbNext').disabled=idx===total-1; }
+    controls.hidden=false;
+    document.getElementById('nlhbPrev').onclick=function(){ if(idx>0){idx--;show();} };
+    document.getElementById('nlhbNext').onclick=function(){ if(idx<total-1){idx++;show();} };
+    show();
+  }
+
+  fetch(DATA_URL + '?cb=' + Date.now())
+    .then(function(r){ if(!r.ok) throw new Error(r.status); return r.json(); })
+    .then(function(list){
+      if (!Array.isArray(list) || !list.length) { loadingEl.textContent='The handbook isn’t published yet.'; return; }
+      var nodes = orderedNodes(list);
+      // tag chapter title onto each node for running heads
+      var chTitle=''; nodes.forEach(function(n){ if((n._depth||0)===0) chTitle=n.title; n.chapterTitle=chTitle; });
+      render(buildPages(nodes));
+    })
+    .catch(function(e){ loadingEl.textContent = 'Could not load the handbook ('+ (e.message||e) +').'; });
+})();
+</script>
