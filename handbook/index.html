@@ -2,6 +2,17 @@
 <!--
   NL Tools — Handbook
   handbook / index.html
+  v0.8 — Structure: bodies-on-any-node + directory reader + legal nesting.
+         - Any chapter/section can hold an intro body AND children; the
+           reader shows the body then a directory of sub-sections (cards).
+           Chapters are navigable landing pages; the rules/articles preamble
+           has a home (the chapter's own body).
+         - Re-carve collapses redundant single-section chapters (Memorandum,
+           Board Directives) so the body sits on the chapter, not a same-
+           named child.
+         - Nested ordered lists render as the legal hierarchy 1 -> a -> i
+           (decimal / lower-alpha / lower-roman) in reader + editor; Tab to
+           indent in the editor.
   v0.7 — Editor moved to platform canon + reading-view polish:
          - Toast UI dropped. Editing is now the same pattern as
            graphics/article-composer: contenteditable + the brand
@@ -95,13 +106,15 @@
     window.NL_CHANGELOG = [
       {
         date: '10 Jun 2026',
-        version: 'v0.7',
+        version: 'v0.8',
         items: [
           'First release: the National League handbook (rules, articles, appendices and league information) as a navigable online book — contents sidebar, search, and shareable links straight to any clause.',
           'Editing now uses the same rich-text editor as the rest of the platform (Article Composer) — style dropdown, bold/italic/underline, lists, links and table insert.',
           'Imported text quality fixed: paragraphs re-flowed (no more mid-sentence line breaks), duplicate headings stripped, and email addresses / websites are now tappable links throughout.',
           'Clearer structure controls: “+ New chapter” at the bottom of the contents, and “+ Inside / + After” buttons for sections. Superadmins can re-import the carved booklet while nothing has been hand-edited.',
-          'Reading view polish: the breadcrumb is now proper navigation (tappable pills), and “last updated” sits quietly at the foot of each section.'
+          'Reading view polish: the breadcrumb is now proper navigation (tappable pills), and “last updated” sits quietly at the foot of each section.',
+          'Chapters are now landing pages: an optional intro followed by a directory of their sections — so a chapter like the League Rules can carry its preamble, and single-part chapters (Memorandum) no longer duplicate themselves.',
+          'Numbered sub-lists now read as the proper legal hierarchy (1, then a, then i) automatically.'
         ]
       }
     ];
@@ -174,7 +187,13 @@
   .hb-body h2 { font-size: 20px; font-variation-settings: 'wght' 800; color: var(--navy); margin: 26px 0 8px; }
   .hb-body h3 { font-size: 16px; font-variation-settings: 'wght' 800; margin: 20px 0 6px; }
   .hb-body p { margin: 0 0 12px; }
-  .hb-body ul, .hb-body ol { margin: 0 0 12px; padding-left: 24px; }
+  .hb-body ul, .hb-body ol { margin: 0 0 12px; padding-left: 26px; }
+  /* Legal nesting: top level decimal, then lower-alpha, then lower-roman.
+     Tab/indent in the editor produces the nested <ol>; styling is automatic. */
+  .hb-body ol { list-style-type: decimal; }
+  .hb-body ol ol { list-style-type: lower-alpha; }
+  .hb-body ol ol ol { list-style-type: lower-roman; }
+  .hb-body ol ol ol ol { list-style-type: lower-alpha; }
   .hb-body li { margin: 2px 0; }
   .hb-body blockquote { margin: 0 0 12px; padding: 6px 14px; border-left: 3px solid var(--primary); background: var(--off-white); color: var(--text-muted); }
   .hb-body code { font-family: ui-monospace, monospace; font-size: 0.9em; background: var(--navy-50); padding: 1px 5px; border-radius: 4px; }
@@ -184,6 +203,17 @@
   .hb-body th, .hb-body td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: top; }
   .hb-body th { background: var(--navy-50); font-variation-settings: 'wght' 700; }
   .hb-empty { color: var(--text-muted); font-style: italic; }
+
+  /* Directory of sub-sections shown on a chapter/section landing page. */
+  .hb-dir { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin: 8px 0 6px; }
+  .hb-dir__item {
+    display: block; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px;
+    background: var(--white); cursor: pointer; text-decoration: none; color: var(--text);
+  }
+  .hb-dir__item:hover { border-color: var(--navy); background: var(--navy-50); text-decoration: none; }
+  .hb-dir__t { font-variation-settings: 'wght' 700; color: var(--navy); font-size: 14px; }
+  .hb-dir__num { color: var(--primary); font-variation-settings: 'wght' 800; font-size: 11px; margin-right: 6px; }
+  .hb-dir__s { font-size: 12px; color: var(--text-muted); margin-top: 3px; line-height: 1.4; }
 
   .hb-prevnext { display: flex; justify-content: space-between; gap: 12px; margin-top: 36px; padding-top: 18px; border-top: 1px solid var(--border); }
   .hb-prevnext a { font-size: 13px; color: var(--navy); cursor: pointer; max-width: 46%; }
@@ -494,16 +524,52 @@
     var metaLine = node.updatedAt
       ? '<div class="hb-doc__meta">Last updated ' + esc(fmtDate(node.updatedAt)) + (!isMachine && node.updatedBy ? ' · ' + esc(node.updatedBy) : '') + '</div>'
       : '';
+
+    /* A node can carry both an intro body AND children. The reader shows the
+       body (if any), then a directory of its sub-sections — so a chapter is a
+       navigable landing page, and a single-section chapter (Memorandum) just
+       holds its own body with no redundant child. */
+    var kids = childrenOf(node.id);
+    var hasBody = !!(node.body && node.body.trim());
+    var bodyHtml = hasBody
+      ? '<div class="hb-body">' + bodyToHtml(node.body) + '</div>'
+      : (kids.length ? '' : '<div class="hb-body">' + bodyToHtml(node.body) + '</div>');
+
+    var dirHtml = '';
+    if (kids.length) {
+      dirHtml = '<div class="hb-dir">' + kids.map(function (k) {
+        var sub = childrenOf(k.id).length;
+        var snippet = textSnippet(k.body, 90);
+        return '<a class="hb-dir__item" data-toc="' + esc(k.id) + '">' +
+          '<div class="hb-dir__t">' +
+            (k.number ? '<span class="hb-dir__num">' + esc(k.number) + '</span>' : '') + esc(k.title) +
+          '</div>' +
+          (snippet ? '<div class="hb-dir__s">' + esc(snippet) + '</div>'
+                   : (sub ? '<div class="hb-dir__s">' + sub + ' section' + (sub === 1 ? '' : 's') + '</div>' : '')) +
+        '</a>';
+      }).join('') + '</div>';
+    }
+
     main.innerHTML = editBar +
       '<div class="hb-crumb">' + crumb + '</div>' +
       (node.number ? '<div class="hb-doc__num">' + esc(node.number) + '</div>' : '') +
       '<h1 class="hb-doc__title">' + esc(node.title) + '</h1>' +
-      '<div class="hb-body">' + bodyToHtml(node.body) + '</div>' +
+      bodyHtml +
+      dirHtml +
       metaLine +
       '<div class="hb-prevnext">' +
         (prev ? '<a data-toc="' + esc(prev.id) + '"><span>← Previous</span>' + esc(prev.title) + '</a>' : '<span></span>') +
         (next ? '<a data-toc="' + esc(next.id) + '" style="text-align:right;"><span>Next →</span>' + esc(next.title) + '</a>' : '<span></span>') +
       '</div>';
+  }
+
+  /* Plain-text preview of a body (HTML or markdown) for directory cards. */
+  function textSnippet(body, max) {
+    if (!body || !body.trim()) return '';
+    var tmp = document.createElement('div');
+    tmp.innerHTML = bodyIsHtml(body) ? body : mdToHtml(body);
+    var txt = (tmp.textContent || '').replace(/\s+/g, ' ').trim();
+    return txt.length > max ? txt.slice(0, max - 1) + '…' : txt;
   }
 
   /* ============ Editor — platform canon ============
