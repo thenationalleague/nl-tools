@@ -570,4 +570,43 @@
     }
   };
 
+  /* ===================================================================
+     NL.roles — canonical role model (v1.10). Three realms:
+       league  : superadmin / admin / staff
+       club    : club-admin (edit own club) / club-viewer (view only)
+       external: third-party (org-named, tools granted individually,
+                 hidden everywhere by default, never club-scoped)
+     'club' is the LEGACY key for club-admin and stays accepted until the
+     Phase-3 rename. Tools branch on these helpers, NOT raw role strings,
+     so the rename touches one place. ============================== */
+  window.NL.roles = {
+    LABELS: {
+      superadmin:    'Superadmin',
+      admin:         'League Admin',
+      staff:         'League Staff',
+      'club-admin':  'Club Admin',
+      club:          'Club Admin',      /* legacy alias */
+      'club-viewer': 'Club Viewer',
+      'third-party': 'Third Party'
+    },
+    realm: function(role) {
+      if (role === 'superadmin' || role === 'admin' || role === 'staff') return 'league';
+      if (role === 'club' || role === 'club-admin' || role === 'club-viewer') return 'club';
+      if (role === 'third-party') return 'external';
+      return null;
+    },
+    label: function(role) { return this.LABELS[role] || role || ''; }
+  };
+
+  /* A club user of either tier — scope tools to session.club for these. */
+  window.NL.isClubUser = function(role) {
+    return role === 'club' || role === 'club-admin' || role === 'club-viewer';
+  };
+  /* May this user edit their OWN club's content? club-admin (legacy
+     'club') yes; club-viewer no. League admin/superadmin editing of any
+     club stays in each tool's own admin check, not here. */
+  window.NL.canClubEdit = function(role) {
+    return role === 'club' || role === 'club-admin';
+  };
+
 })();
