@@ -2543,6 +2543,7 @@ var state = {
 };
 
 // In production these come from the user's role.
+function isClubPersona() { return state.persona === 'club-editor' || state.persona === 'club-viewer'; }
 function personaCan(capability) {
   var p = state.persona;
   /* Live editing needs the RTDB corpus (phase C). Until the one-off seed
@@ -2557,7 +2558,7 @@ function personaCan(capability) {
     case 'manageOwnClub':  return p === 'club-editor' || p === 'admin';
     case 'editClubDetails': return p === 'admin';
     case 'viewActivity':   return p === 'admin';
-    case 'viewDashboard':  return p === 'club-editor' || p === 'staff' || p === 'admin';
+    case 'viewDashboard':  return p === 'club-editor' || p === 'club-viewer' || p === 'staff' || p === 'admin';
     case 'dataCleanup':    return !!(window.NL && NL.session && NL.session.role === 'superadmin');
     default: return false;
   }
@@ -2635,7 +2636,7 @@ function renderListing() {
   // Club-editor persona: render a prominent "your club" hero card on top.
   // The regular card still appears in its division grid below (not removed).
   var heroHtml = '';
-  if (state.persona === 'club-editor') {
+  if (isClubPersona()) {
     var ownClub = window.CLUBS.filter(function(c){ return c.name === EDITOR_CLUB; })[0];
     if (ownClub) {
       var stadium = stadiumOf(ownClub.name);
@@ -2766,7 +2767,7 @@ function updateManageMyClubButton() {
   // For admin, show on any club page. For club-editor, only on their assigned club.
   var canShow = false;
   if (state.persona === 'admin' && state.viewing) canShow = true;
-  if (state.persona === 'club-editor' && state.viewing === EDITOR_CLUB) canShow = true;
+  if (isClubPersona() && state.viewing === EDITOR_CLUB) canShow = true;
   btn.style.display = canShow ? 'inline-flex' : 'none';
 }
 
@@ -5018,7 +5019,8 @@ function personaFromSession(session) {
   var role = session && session.role;
   if (role === 'admin' || role === 'superadmin') return 'admin';
   if (role === 'staff') return 'staff';
-  if (role === 'club') return 'club-editor';
+  if (role === 'club' || role === 'club-admin') return 'club-editor';
+  if (role === 'club-viewer') return 'club-viewer';
   return 'viewer';
 }
 
@@ -5418,7 +5420,7 @@ function complianceMeter(c) {
 function renderDashboardScene() {
   var root = document.getElementById('dashboard-root');
   if (!root) return;
-  if (state.persona === 'club-editor') { renderClubDashboard(root); return; }
+  if (isClubPersona()) { renderClubDashboard(root); return; }
   renderLeagueDashboard(root);
 }
 
@@ -5724,7 +5726,7 @@ window.TOOL.boot = function (session) {
     })
     .then(function(meta) {
       buildWorkingData(meta);
-      if (state.persona === 'club-editor') {
+      if (isClubPersona()) {
         EDITOR_CLUB = resolveOwnClub(session, meta.clubs || []);
         if (!EDITOR_CLUB && NL.toast) {
           NL.toast('Your account’s club (“' + (session.club || 'not set') + '”) was not found in the current roster — contact NL staff.', 'error');
