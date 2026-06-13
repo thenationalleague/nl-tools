@@ -54,12 +54,15 @@ so roster-gating is UI-level; rules stay club-name-scoped — not a hole.)
   `/tools/system/*`. The lockstep bump lands in Phase 2 with the first
   consumers, so it happens once, not twice.
 
-### Phase 2 — Club tool sweep
-Migrate **attendance, club-directory, programme-packs, dazn-vip, vacancies**
-from raw `role === 'club'` to `NL.isClubUser` (scope) and `NL.canClubEdit`
-(edit). After this, `club-viewer` is read-only everywhere; `club-admin` edits.
-**Bump `nl-utils` `?v=` in lockstep** (template + all tools) — the first real
-consumers.
+### Phase 2 — Club tool sweep, UI-gated tools — **DONE**
+Migrated **attendance** and **club-directory** to `NL.isClubUser` (scope) /
+`NL.canClubEdit` (edit). club-viewer: attendance sees its own club but can't
+submit; club-directory gets the own-club hero + completion dashboard but no
+Manage (new `club-viewer` persona). **programme-packs, dazn-vip, vacancies were
+moved to Phase 3** — their edits write to RTDB and are rule-enforced, so the UI
+affordance-hiding ships beside the rule tightening rather than alone. **No
+`?v=` bump** — `nl-utils` (with the helpers) is already live under `_headers`
+no-cache, so the new calls resolve; a forced bump buys nothing.
 
 ### Phase 3 — Rules, new roles surfaced, picker *(the one console-paste phase)*
 - Rules (`rules.snapshot.json`), one rewrite: (a) **tighten** the `auth != null`
