@@ -281,12 +281,13 @@
        for any older registry entries that haven't migrated. */
     if (!session.tools || !session.tools.hasOwnProperty(NL_TOOL_KEY)) {
       if (toolData && toolData.defaults) {
-        var role = session.role;
-        var bareKey     = role === 'club' ? 'club' : role;
-        var compoundKey = role === 'club' ? null  : ((session.orgKey || 'nl') + '-' + role);
-        level = toolData.defaults[bareKey]
-             || (compoundKey && toolData.defaults[compoundKey])
-             || 'hidden';
+        /* Bare role key IS the defaults key, uniformly for every role
+           (superadmin/admin/staff/club[-admin]/club-viewer/third-party).
+           The legacy compound `<org>-<role>` lookup is gone with the
+           deprecated orgKey (org distinction removed; all staff equal).
+           A role with no defaults entry — e.g. third-party — resolves to
+           'hidden', which is exactly the intended zero-access default. */
+        level = toolData.defaults[session.role] || 'hidden';
       }
     }
 
