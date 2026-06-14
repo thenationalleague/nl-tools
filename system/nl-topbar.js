@@ -512,17 +512,26 @@
       var t = tools[key];
       if (!t || t.placeholder) return;
 
-      var access = userTools[key];
-      var hasAccess = false;
-      var isAdmin = false;
-
-      if (typeof access === 'object' && access !== null) {
-        hasAccess = !!access.access;
-        isAdmin = !!access.admin;
-      } else if (typeof access === 'string') {
-        hasAccess = access === 'access' || access === 'admin';
-        isAdmin = access === 'admin';
+      var entry = userTools[key];
+      var level;
+      if (entry === undefined || entry === null) {
+        /* No per-user entry — fall back to the tool's role default, matching
+           auth-guard and the portal. (Legacy 'club' role maps to 'club-admin';
+           a role absent from defaults, e.g. third-party, resolves to 'off'.) */
+        var role = (session && session.role) || 'staff';
+        if (role === 'club') role = 'club-admin';
+        level = (t.defaults && t.defaults[role]) || 'off';
+      } else if (typeof entry === 'object') {
+        level = entry.admin ? 'admin' : (entry.access ? 'access' : 'off');
+      } else if (typeof entry === 'string') {
+        level = entry;            /* 'access' | 'admin' | 'off' | legacy 'hidden' */
+      } else if (entry === true) {
+        level = 'access';
+      } else {
+        level = 'off';
       }
+      var hasAccess = (level === 'access' || level === 'admin');
+      var isAdmin   = (level === 'admin');
       /* Superadmin sees everything */
       if (session && session.role === 'superadmin') {
         hasAccess = true;
