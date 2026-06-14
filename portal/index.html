@@ -1,11 +1,19 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.86 (14/06/2026)
+  Version: v5.87 (14/06/2026)
   Date: 09/04/2026
   File: /tools/portal/index.html
 
   Changelog:
+  v5.87 (14/06/2026) — Fix "Restore defaults" using the wrong role:
+           * BUGFIX: Restore defaults read the user's STORED role, not the
+             role currently chosen in the picker. Switching an NL staffer to
+             Third Party then pressing Restore defaults left them with NL
+             staff tool defaults. It now restores the SELECTED role's
+             defaults via previewRoleSliders(role, forceDefaults), so it
+             honours staff-lock, admin-cap and padlocks for restricted roles.
+
   v5.86 (14/06/2026) — Fix restricted-role tool sliders:
            * BUGFIX (regression from Phase 3b): club-admin / club-viewer
              per-tool sliders were fully locked, so admins could only move
@@ -431,6 +439,13 @@
 
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
+    {
+      date: '14 June 2026',
+      version: 'v5.87',
+      items: [
+        'Fixed "Restore defaults" so it uses the role you’ve selected, not the one the user had before.'
+      ]
+    },
     {
       date: '14 June 2026',
       version: 'v5.86',
@@ -4567,7 +4582,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
        third-party): staff-dept tools fully locked off; non-staff tools show
        Off/Access editable with Admin padlocked. League roles: fully editable
        — on the original role keep stored overrides, else show role defaults. */
-    function previewRoleSliders(newRole) {
+    function previewRoleSliders(newRole, forceDefaults) {
       var role = normRole(newRole);
       var storedTools = (STATE.allUsers[uid] || {}).tools || {};
       var isOriginalRole = (role === storedRole);
@@ -4586,7 +4601,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
         var defaultLevel = superLock ? 'admin' : (staffLock ? 'off' : roleDefaultLevel(toolKey, role));
 
         var useLevel;
-        if (fullLock || !isOriginalRole) {
+        if (fullLock || forceDefaults || !isOriginalRole) {
           useLevel = defaultLevel;
         } else {
           var sl = storedTools[toolKey];
@@ -4809,16 +4824,9 @@ function buildAccordionItem(uid, u, depts, deptMap) {
     restoreBtn.style.display = 'none';
     restoreBtn.addEventListener('click', function(e) {
       e.stopPropagation();
-      /* Reset all sliders to tool defaults for this user's role */
-      var ud2 = STATE.allUsers[uid] || {};
-      var groupKey2 = getGroupKey(ud2);
-      body.querySelectorAll('.uacc-tool-row').forEach(function(row) {
-        var slider = row.querySelector('.acc-slider');
-        if (!slider || !slider.dataset.toolkey) return;
-        var tool = STATE.tools[slider.dataset.toolkey];
-        var defaultLevel = (tool && tool.defaults && tool.defaults[groupKey2]) || 'off';
-        setSliderLevel(slider, defaultLevel);
-      });
+      /* Reset all sliders to the SELECTED role's defaults (respects staff-lock,
+         admin-cap and padlocks via previewRoleSliders' forceDefaults path). */
+      previewRoleSliders(selectedRole, true);
       showToast('Defaults restored — save to apply', 'info');
     });
 
