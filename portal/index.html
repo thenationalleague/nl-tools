@@ -1,11 +1,26 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.85 (14/06/2026)
+  Version: v5.86 (14/06/2026)
   Date: 09/04/2026
   File: /tools/portal/index.html
 
   Changelog:
+  v5.86 (14/06/2026) — Fix restricted-role tool sliders:
+           * BUGFIX (regression from Phase 3b): club-admin / club-viewer
+             per-tool sliders were fully locked, so admins could only move
+             the dept "set-all" master and not individual tools — and
+             switching role away and back left everything locked. Restored
+             per-tool Off/Access editing for these roles; only the Admin
+             stop is padlocked (club/third-party can't be admin). Edit-vs-
+             view for the two club roles stays role-based (canClubEdit),
+             independent of these sliders.
+           * Third Party now treated as a "restricted" role alongside the
+             club roles: fully locked out of staff-department tools, capped
+             at Access (no admin), but grantable Off/Access on non-staff
+             tools. Centralised via isRestrictedRole() so render, edit-mode,
+             role-preview, and dept set-all all agree.
+
   v5.85 (14/06/2026) — Access levels simplified to off / access / admin:
            * The four-state model (hidden/off/access/admin) is now three.
              The old "hidden" (invisible) and "off" (request-access) states
@@ -415,6 +430,14 @@
 
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
+    {
+      date: '14 June 2026',
+      version: 'v5.86',
+      items: [
+        'Fixed editing club users — individual tool access can be toggled again, not just the section master.',
+        'Third-party accounts are now fully blocked from staff tools, like club accounts.'
+      ]
+    },
     {
       date: '14 June 2026',
       version: 'v5.85',
@@ -2290,6 +2313,10 @@ function roleLabel(r) {
 }
 function normRole(r) { return r === 'club' ? 'club-admin' : (r || 'staff'); }
 function isClubRole(r) { return r === 'club-admin' || r === 'club-viewer' || r === 'club'; }
+/* "Restricted" roles — club roles + third-party. These can't be granted admin
+   on any tool, and are fully locked out of staff-department tools. They CAN be
+   toggled Off/Access per tool. (Edit-vs-view for club roles is separate, by role.) */
+function isRestrictedRole(r) { return isClubRole(r) || normRole(r) === 'third-party'; }
 /* Default access level a role gets on a tool, straight from the registry. */
 function roleDefaultLevel(toolKey, role) {
   var tool = STATE.tools[toolKey];
@@ -4180,7 +4207,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
 
     /* Staff dept always shown but locked to hidden for club-role users */
     var staffLocked = dept === 'staff' && u.role !== 'superadmin' &&
-                      isClubRole(u.role);
+                      isRestrictedRole(u.role);
 
     /* deptWrap MUST be declared before buildSetAllSlider so the closure captures it */
     var deptWrap = document.createElement('div');
@@ -4214,11 +4241,10 @@ function buildAccordionItem(uid, u, depts, deptMap) {
       var currentLevel  = getAccessLevel(uid, t._key);
       var defaultLevel  = getDefaultLevel(t._key, u);
       /* isSuperUser declared at item level above */
-      var isClubUser    = isClubRole(u.role);
-      var isClubLocked  = isClubUser; /* Club users cannot have admin on any tool */
+      var isClubLocked  = isRestrictedRole(u.role); /* restricted roles can't have admin */
 
-      /* If club user is somehow set to admin, cap display at access */
-      if (isClubUser && currentLevel === 'admin') currentLevel = 'access';
+      /* If a restricted user is somehow set to admin, cap display at access */
+      if (isClubLocked && currentLevel === 'admin') currentLevel = 'access';
 
       var row = document.createElement('div');
       row.className = 'uacc-tool-row';
@@ -4260,18 +4286,17 @@ function buildAccordionItem(uid, u, depts, deptMap) {
   body.insertBefore(editBar, body.firstChild);
 
   /* Helper: get current role-aware constraints for this user (6-role model).
-     Club roles get their access globally by role, so per-tool sliders are
-     read-only (lockSliders) and resolve to the role default. Staff-dept
-     tools are force-hidden for club roles. League roles + third-party keep
-     editable sliders (third-party defaults to hidden everywhere). */
+     Restricted roles (club-admin/club-viewer/third-party) can't be granted
+     admin (capAccess) and are fully locked out of staff-dept tools, but their
+     non-staff tools stay toggleable Off/Access. League roles edit freely. */
   function getRoleConstraints(roleOverride) {
     var r = normRole(roleOverride || u.role || 'staff');
-    var clubRole = (r === 'club-admin' || r === 'club-viewer');
+    var restricted = isRestrictedRole(r);
     return {
       role: r,
-      isClub: clubRole,
-      lockSliders: clubRole,
-      isStaffLocked: function(dept) { return dept === 'staff' && clubRole; }
+      isClub: isClubRole(r),
+      capAccess: restricted,
+      isStaffLocked: function(dept) { return dept === 'staff' && restricted; }
     };
   }
 
@@ -4310,22 +4335,32 @@ function buildAccordionItem(uid, u, depts, deptMap) {
       var deptKey = tool && tool.department;
 
       if (isSuperUser) return;
-      if (constraints.lockSliders) return;            /* club roles: access is role-driven, stay locked */
-      if (constraints.isStaffLocked(deptKey)) return; /* staff-dept tool for a club role stays locked */
+      if (constraints.isStaffLocked(deptKey)) return; /* staff-dept tool for restricted role stays locked off */
 
       /* Reset to stored RTDB value (or role default if no override) */
       var level = storedTools[toolKey] || getDefaultLevel(toolKey, currentU);
+      if (constraints.capAccess && level === 'admin') level = 'access';
       var idx   = ACC_LEVELS.indexOf(level);
       if (idx === -1) idx = 0;
 
       slider.querySelectorAll('.acc-slider__stop').forEach(function(stop, si) {
+        var stopLevel = ACC_LEVELS[si];
         stop.classList.remove('acc-slider__stop--active', 'acc-slider__stop--filled', 'acc-slider__stop--padlocked');
         var node = stop.querySelector('.acc-slider__node');
         var lbl  = stop.querySelector('.acc-slider__label');
-        if (node) { node.textContent = ''; node.style.cssText = ''; }
-        if (lbl) lbl.style.color = '';
-        if (si < idx)  stop.classList.add('acc-slider__stop--filled');
-        if (si === idx) stop.classList.add('acc-slider__stop--active');
+        if (constraints.capAccess && stopLevel === 'admin') {
+          /* Restricted roles: admin padlocked, Off/Access still editable */
+          stop.classList.add('acc-slider__stop--padlocked');
+          stop.style.pointerEvents = 'none';
+          if (node) { node.textContent = String.fromCodePoint(0x1F512); node.style.cssText = 'font-size:8px;background:var(--off-white);border-color:var(--border);display:flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;border:2px solid;'; }
+          if (lbl) lbl.style.color = 'var(--border)';
+        } else {
+          stop.style.pointerEvents = '';
+          if (node) { node.textContent = ''; node.style.cssText = ''; }
+          if (lbl) lbl.style.color = '';
+          if (si < idx)  stop.classList.add('acc-slider__stop--filled');
+          if (si === idx) stop.classList.add('acc-slider__stop--active');
+        }
       });
       delete slider.dataset.previewLevel;
 
@@ -4387,8 +4422,8 @@ function buildAccordionItem(uid, u, depts, deptMap) {
       });
 
       var def = roleDefaultLevel(toolKey, role);
-      if (constraints.lockSliders) level = def;            /* club roles: role-driven */
-      if (constraints.isStaffLocked(deptKey)) level = 'off';
+      if (constraints.isStaffLocked(deptKey)) level = 'off';   /* restricted: no staff tools */
+      if (constraints.capAccess && level === 'admin') level = 'access';  /* restricted: no admin */
 
       var path = 'users/' + uid + '/tools/' + toolKey;
       updates[path] = (level === def) ? null : level;      /* overrides-only */
@@ -4527,26 +4562,30 @@ function buildAccordionItem(uid, u, depts, deptMap) {
     var confirmedClub = u.club || '';
 
     /* ── Live preview: reflect the chosen role in the tool sliders ──────────
-       League roles (staff/admin): on the original role, keep the user's
-       stored overrides; on a different role, show that role's defaults.
-       Sliders stay editable. Superadmin / club-admin / club-viewer are
-       role-driven — sliders show the role default and are locked. */
+       Superadmin: everything admin, fully locked. Restricted roles (club +
+       third-party): staff-dept tools fully locked off; non-staff tools show
+       Off/Access editable with Admin padlocked. League roles: fully editable
+       — on the original role keep stored overrides, else show role defaults. */
     function previewRoleSliders(newRole) {
       var role = normRole(newRole);
       var storedTools = (STATE.allUsers[uid] || {}).tools || {};
       var isOriginalRole = (role === storedRole);
-      var lockAll = (role === 'superadmin' || role === 'club-admin' || role === 'club-viewer');
+      var superLock  = (role === 'superadmin');
+      var restricted = isRestrictedRole(role);
 
       body.querySelectorAll('.uacc-tool-row').forEach(function(row) {
         var slider = row.querySelector('.acc-slider');
         if (!slider) return;
         var toolKey = slider.dataset.toolkey;
         if (!toolKey) return;
+        var tool = STATE.tools[toolKey];
+        var staffLock = restricted && (tool && tool.department) === 'staff';
+        var fullLock  = superLock || staffLock;
 
-        var defaultLevel = (role === 'superadmin') ? 'admin' : roleDefaultLevel(toolKey, role);
+        var defaultLevel = superLock ? 'admin' : (staffLock ? 'off' : roleDefaultLevel(toolKey, role));
 
         var useLevel;
-        if (lockAll || !isOriginalRole) {
+        if (fullLock || !isOriginalRole) {
           useLevel = defaultLevel;
         } else {
           var sl = storedTools[toolKey];
@@ -4554,17 +4593,20 @@ function buildAccordionItem(uid, u, depts, deptMap) {
           else if (typeof sl === 'string') useLevel = sl;
           else useLevel = sl.admin ? 'admin' : (sl.access ? 'access' : 'off');
         }
+        if (restricted && useLevel === 'admin') useLevel = 'access';
 
         var useIdx = ACC_LEVELS.indexOf(useLevel);
         if (useIdx === -1) useIdx = 0;
 
-        slider.className = 'acc-slider' + (lockAll ? ' acc-slider--locked' : '');
+        slider.className = 'acc-slider' + (fullLock ? ' acc-slider--locked' : '');
 
         slider.querySelectorAll('.acc-slider__stop').forEach(function(stop, si) {
+          var stopLevel = ACC_LEVELS[si];
           stop.classList.remove('acc-slider__stop--active', 'acc-slider__stop--filled', 'acc-slider__stop--padlocked');
           var node = stop.querySelector('.acc-slider__node');
           var lbl  = stop.querySelector('.acc-slider__label');
-          if (lockAll) {
+          var padlock = fullLock || (restricted && stopLevel === 'admin');
+          if (padlock) {
             stop.classList.add('acc-slider__stop--padlocked');
             stop.style.pointerEvents = 'none';
             if (node) {
@@ -4572,7 +4614,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
               node.style.cssText = 'font-size:8px;background:var(--off-white);border-color:var(--border);display:flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;border:2px solid;';
             }
             if (lbl) lbl.style.color = 'var(--border)';
-            if (si === useIdx) stop.classList.add('acc-slider__stop--active');
+            if (si === useIdx && fullLock) stop.classList.add('acc-slider__stop--active');
           } else {
             stop.style.pointerEvents = '';
             if (node) { node.textContent = ''; node.style.cssText = ''; }
@@ -5058,8 +5100,8 @@ function buildSetAllSlider(uid, u, dept, deptMap, deptWrap) {
     /* fill removed */ void idx <= 0 ? '0%' : (idx / (ACC_LEVELS.length - 1) * 100) + '%';
   }
 
-  var isClubUser  = isClubRole(u.role);
-  /* org distinction removed — only club users lock staff tools */
+  var isClubUser  = isRestrictedRole(u.role);
+  /* Restricted roles (club + third-party) lock staff tools and the admin stop */
   var isStaffLocked = dept === 'staff' && isClubUser;
 
   ACC_LEVELS.forEach(function(level, idx) {
@@ -5127,8 +5169,8 @@ function buildSetAllSlider(uid, u, dept, deptMap, deptWrap) {
 function setAllInDept(uid, u, deptTools, level, bodyEl, deptLabel) {
   if (!deptTools || !deptTools.length) return;
   var updates = {};
-  var isClubUser = isClubRole(u.role);
-  /* Staff dept locked for club users only */
+  var isClubUser = isRestrictedRole(u.role);
+  /* Staff dept locked for restricted roles (club + third-party) */
   var isStaffDept = deptLabel === 'Staff' ||
     (deptTools[0] && deptTools[0].department === 'staff');
   if (isStaffDept && isClubUser) {
