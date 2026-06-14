@@ -73,10 +73,23 @@ no-cache, so the new calls resolve; a forced bump buys nothing.
   tools; `club` defaults key → `club-admin`.
 - Portal user-admin: 6-option role picker + pills; **org-name field** when
   role is `third-party`; **club picker → `NL.season.clubsFor`**; **off-roster
-  user flag**.
+  user flag**. — **DONE (Phase 3b)**
 - Migration: rewrite any `users/<uid>/role === 'club'` → `club-admin`
   (near-no-op pre-launch).
 - Owner steps: paste rules + registry; run the role migration.
+
+### Phase 3b — Portal user-admin rebuild — **DONE**
+User editor + invite form rebuilt on the six-role model. One role picker
+(no more org/role two-tier), conditional Club search (current-season roster
+via `NL.season.clubsFor`, with an off-roster badge) and Organisation-name
+field (third-party). Club roles are role-driven (sliders read-only =
+defaults); third-party defaults hidden, grantable per tool; superadmin not
+offered in invites. All writes (saveAccess, set-all-in-dept, invite) are
+**overrides-only** — a tool equal to the role default is not stored — and the
+deprecated `orgKey` is cleared on save. Portal-only change: no registry/rules
+paste (third-party = omitted = hidden; club roles already landed in 3a).
+Also re-fixed the `seed`/defaults bug as its own PR first. Needs manual
+browser verification.
 
 ### Deferred (only if a real need appears)
 - Club-admins self-managing their own club's viewers.
