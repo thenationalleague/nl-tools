@@ -6,9 +6,35 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.23 — List builder rebuilt on v2 model + completion dashboard.
+  v0.24 — Self-sufficient Add/Edit person modal (roles + multi-contact).
 
   Changelog:
+  v0.24 — (14/06/2026) Person modal redesign — the add/edit panel is now
+          complete on its own; the separate Department assignments tab is
+          no longer required (it still exists as a section-centric view).
+          - renderPersonPanel rebuilt: inline ROLE ROWS (section <select>
+            over SECTION_ORDER, free-text title with a per-section
+            <datalist> from titleSuggestionsFor(), one primary radio
+            across rows, dept-head checkbox enabled only on HEAD_SECTIONS,
+            section flagKeys as checkboxes, +Add role / × remove).
+          - Liaison unified: DLO/PLO/CSLO/SLO are ordinary role rows in
+            the Liaison officers section. functionForTitle still maps them;
+            roleKeyForRole() re-derives the legacy roleKey so the dept
+            checklist + list-builder liaison filter keep matching.
+          - CONTACT ROWS replace the single email/phone fields: repeatable
+            type/value/label rows with a preferred radio per type;
+            +Add email / +Add phone. Mirrors (person.email/.phone) are set
+            from the preferred (or first) of each type on save.
+          - Dept-head clash: an inline amber warning names the current
+            head of a section; clearPreviousHeads() strips deptHead from
+            the previous holder on save (one head per section).
+          - buildRolesFromDraft / buildContactsFromDraft / seedPersonDraft
+            added; commitPersonPanelSave + mergeIntoPerson updated to the
+            new draft shape (roleRows[]/contactRows[]). Duplicate-name
+            detection + merge and audit action names preserved.
+          - Public club view: "Head" badge (pill--marker) next to the
+            person leading each department (peopleBySection now carries
+            isHead per section entry).
   v0.23 — (10/06/2026) The payoff phases on the v2 people model:
           - List builder: results now de-duplicate to one row per HUMAN
             (someone holding six roles appears once, roles unioned) — the
@@ -296,6 +322,17 @@
   var NL_TOOL_KEY = 'ops-club-directory';
 
   window.NL_CHANGELOG = [
+    {
+      date: '14 Jun 2026',
+      version: 'v0.24',
+      items: [
+        'Add / edit person is now one complete form. Give someone their name, all their roles, and all their email and phone numbers in a single panel — no need to hop to a separate Department assignments screen.',
+        'Roles are added inline: pick a section, type the role (with handy suggestions per section), choose which one is their primary, and tick "Dept head" where it applies. Liaison contacts (DLO/PLO/CSLO/SLO) are now just roles in the Liaison officers section.',
+        'If you make someone the head of a department that already has one, the form warns you and quietly moves the badge over when you save.',
+        'Contacts now support multiple emails and phones each with a label (e.g. "direct", "main") and a preferred marker — the preferred ones become the headline contact details.',
+        'The public club view now shows a small "Head" badge next to whoever leads each department.'
+      ]
+    },
     {
       date: '10 Jun 2026',
       version: 'v0.23',
@@ -1566,6 +1603,82 @@
     line-height: 1.5;
   }
 
+  /* ---- Person modal: role rows ---- */
+  .mc-role-row {
+    background: var(--off-white);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+  }
+  .mc-role-row__main {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .mc-role-row__section { flex: 0 0 38%; }
+  .mc-role-row__title { flex: 1; min-width: 0; }
+  .mc-role-row__main select,
+  .mc-role-row__main input[type="text"] {
+    font-family: var(--font); font-size: 13px;
+    padding: 7px 9px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--white);
+  }
+  .mc-role-row__main select:focus,
+  .mc-role-row__main input:focus { outline: none; border-color: var(--navy); }
+  .mc-role-row__remove-spacer { display: inline-block; width: 28px; }
+  .mc-role-row__opts {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text);
+  }
+  .mc-role-row__opt { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+  .mc-role-row__opt.is-disabled { color: var(--text-muted); cursor: not-allowed; }
+  .mc-role-row__flags { display: inline-flex; gap: 12px; flex-wrap: wrap; }
+  .mc-role-row__flag { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+  .mc-role-row__warn {
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--amber);
+    font-weight: 600; font-variation-settings: 'wght' 600;
+    line-height: 1.4;
+  }
+
+  /* ---- Person modal: contact rows ---- */
+  .mc-contact-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .mc-contact-row__type { flex: 0 0 90px; }
+  .mc-contact-row__value { flex: 1; min-width: 0; }
+  .mc-contact-row__label { flex: 0 0 30%; }
+  .mc-contact-row select,
+  .mc-contact-row input[type="email"],
+  .mc-contact-row input[type="tel"],
+  .mc-contact-row input[type="text"] {
+    font-family: var(--font); font-size: 13px;
+    padding: 7px 9px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--white);
+  }
+  .mc-contact-row select:focus,
+  .mc-contact-row input:focus { outline: none; border-color: var(--navy); }
+  .mc-contact-row__pref {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; color: var(--text-muted);
+    white-space: nowrap; cursor: pointer;
+  }
+  .mc-person-panel__addrow-btns { display: flex; gap: 8px; margin-top: 4px; }
+
   .mc-person-panel__ftr {
     padding: 14px 22px;
     border-top: 1px solid var(--border);
@@ -2139,6 +2252,42 @@ var HEAD_SECTIONS = SECTIONS
   .filter(function(k){ return k !== 'Other'; });  // Other is catch-all, no head
 var REQUIRED_HEAD_SECTIONS = HEAD_SECTIONS.filter(function(k){ return !OPTIONAL_HEAD_SECTIONS[k]; });
 
+/* Per-section free-text title SUGGESTIONS for the person modal's role rows.
+   Backed by a <datalist> — free text is always still allowed. Liaison
+   officers derive from the section's roleLabels (DLO/PLO/CSLO/SLO); the
+   rest are short, sensible lists inferred from functionForTitle()'s map. */
+var TITLE_SUGGESTIONS = {
+  'Leadership':            ['Chair', 'Vice Chair', 'President', 'Owner'],
+  'Directors':            ['Director', 'Non-Executive Director'],
+  'Executive':            ['Chief Executive', 'Managing Director', 'General Manager'],
+  'Club secretary':        ['Club Secretary', 'Fixture Secretary', 'Assistant Secretary'],
+  'Finance':              ['Finance Director', 'Financial Controller', 'Treasurer'],
+  'Commercial':           ['Commercial Director', 'Commercial Manager', 'Ticketing Manager'],
+  'Media & marketing':     ['Press Officer', 'Programme Editor', 'Marketing Manager', 'Social Media Manager'],
+  'Matchday & safety':     ['Safety Officer', 'Operations Manager', 'Kit Manager'],
+  'Medical':              ['Club Doctor', 'Physiotherapist', 'Sports Therapist'],
+  'Community':            ['Community Manager', 'Community Officer'],
+  'Safeguarding & welfare':['Safeguarding Lead', 'Welfare Officer'],
+  'Other':                ['Volunteer Coordinator']
+};
+function titleSuggestionsFor(section) {
+  var meta = SECTIONS_BY_KEY[section];
+  if (meta && meta.roleLabels) {
+    /* Liaison officers: full label list (DLO/PLO/CSLO/SLO). */
+    var keys = (meta.requiredRoles || []).concat(meta.optionalRoles || []);
+    return keys.map(function(rk){ return meta.roleLabels[rk] || rk; });
+  }
+  return TITLE_SUGGESTIONS[section] || [];
+}
+/* Liaison roles still carry a legacy roleKey (DLO/PLO/CSLO/SLO) so the
+   department-surface checklist + list-builder liaison filter keep matching
+   modal-created roles. Derived from the auto-computed function. */
+var FUNCTION_TO_ROLEKEY = { dlo: 'DLO', plo: 'PLO', cslo: 'CSLO', slo: 'SLO' };
+function roleKeyForRole(section, title) {
+  if (section !== 'Liaison officers') return null;
+  return FUNCTION_TO_ROLEKEY[functionForTitle(title, section)] || null;
+}
+
 function esc(s) {
   if (s === null || s === undefined) return '';
   return String(s).replace(/[&<>"']/g, function(c) {
@@ -2162,14 +2311,16 @@ function peopleBySection(club) {
     var p = club.people[i];
     // bucket this person's roles by section
     var bucket = {};
+    var headBySection = {};
     for (var j = 0; j < p.roles.length; j++) {
       var r = p.roles[j];
       if (!bucket[r.section]) bucket[r.section] = [];
       bucket[r.section].push(r.title);
+      if (r.deptHead) headBySection[r.section] = true;
     }
     for (var section in bucket) {
       if (!out[section]) out[section] = [];
-      out[section].push({ person: p, roleTitles: bucket[section] });
+      out[section].push({ person: p, roleTitles: bucket[section], isHead: !!headBySection[section] });
     }
   }
   return out;
@@ -2387,9 +2538,10 @@ function renderClubStyle2(club) {
       var email = personEmails(p).map(function(em) {
         return '<a href="mailto:' + esc(em) + '">' + esc(em) + '</a>';
       }).join('<br>');
+      var headBadge = e.isHead ? ' <span class="pill pill--marker">Head</span>' : '';
       rows += '<tr>' +
         '<td class="s2-role">' + esc(roleLabel) + '</td>' +
-        '<td class="s2-name">' + esc(p.name) + '</td>' +
+        '<td class="s2-name">' + esc(p.name) + headBadge + '</td>' +
         '<td class="s2-phone">' + esc(p.phone||'') + '</td>' +
         '<td class="s2-email">' + email + '</td>' +
       '</tr>';
@@ -3445,46 +3597,136 @@ function renderPeopleSurface(club) {
 }
 
 /* ---------- Person side-panel ---------- */
+/* Seed a person draft (roleRows + contactRows + name + note) from an
+   existing person, or empty for a new one. The modal is now self-sufficient:
+   roles and contacts are edited inline, no separate tab needed. */
+function seedPersonDraft(person) {
+  if (!person) {
+    return {
+      name: '', note: '',
+      roleRows: [{ section: SECTION_ORDER[0], title: '', deptHead: false, flags: {} }],
+      primaryRoleIdx: 0,
+      contactRows: []
+    };
+  }
+  ensureContacts(person);
+  var roleRows = (person.roles || []).map(function(r) {
+    return {
+      section: r.section || SECTION_ORDER[0],
+      title: r.title || '',
+      deptHead: !!r.deptHead,
+      flags: Object.assign({}, r.flags || {})
+    };
+  });
+  if (!roleRows.length) roleRows = [{ section: SECTION_ORDER[0], title: '', deptHead: false, flags: {} }];
+  var primaryRoleIdx = (person.roles || []).findIndex(function(r){ return r.main; });
+  if (primaryRoleIdx === -1) primaryRoleIdx = 0;
+  var contactRows = (person.contacts || []).filter(function(c){ return c.type === 'email' || c.type === 'phone'; })
+    .map(function(c) {
+      return { type: c.type, value: c.value || '', label: c.label || '', preferred: !!c.preferred };
+    });
+  return { name: person.name || '', note: person.note || '',
+           roleRows: roleRows, primaryRoleIdx: primaryRoleIdx, contactRows: contactRows };
+}
+
+/* Render one editable role row in the person modal. */
+function renderRoleRow(club, draft, r, i) {
+  var meta = SECTIONS_BY_KEY[r.section] || {};
+  var isHeadSection = HEAD_SECTIONS.indexOf(r.section) !== -1;
+  var datalistId = 'mcRoleTitles_' + i;
+  var suggestions = titleSuggestionsFor(r.section).map(function(s) {
+    return '<option value="' + esc(s) + '"></option>';
+  }).join('');
+
+  var sectionOpts = SECTION_ORDER.map(function(key) {
+    var label = (SECTIONS_BY_KEY[key] && SECTIONS_BY_KEY[key].key) || key;
+    return '<option value="' + esc(key) + '"' + (key === r.section ? ' selected' : '') + '>' + esc(label) + '</option>';
+  }).join('');
+
+  // Department-head clash: another person already holds head of this section?
+  var headWarn = '';
+  if (isHeadSection && r.deptHead) {
+    var clash = club.people.filter(function(p) {
+      if (!state.manage.editingPersonId || p._id === state.manage.editingPersonId) return false;
+      return (p.roles || []).some(function(pr){ return pr.section === r.section && pr.deptHead; });
+    })[0];
+    if (clash) {
+      headWarn = '<div class="mc-role-row__warn">⚠ ' + esc(clash.name) +
+        ' is currently head of ' + esc(r.section) + ' — saving will replace them.</div>';
+    }
+  }
+
+  // Section flag checkboxes (e.g. Media & marketing -> programmeEditor)
+  var flagsHtml = '';
+  if (meta.flagKeys && meta.flagKeys.length) {
+    flagsHtml = '<div class="mc-role-row__flags">' + meta.flagKeys.map(function(fk) {
+      var on = r.flags && r.flags[fk.key] ? ' checked' : '';
+      return '<label class="mc-role-row__flag" title="' + esc(fk.description || '') + '">' +
+        '<input type="checkbox" data-role-flag-idx="' + i + '" data-flag-key="' + esc(fk.key) + '"' + on + '> ' +
+        esc(fk.label) + '</label>';
+    }).join('') + '</div>';
+  }
+
+  var headChecked = r.deptHead ? ' checked' : '';
+  var headDisabled = isHeadSection ? '' : ' disabled';
+  var primaryChecked = (draft.primaryRoleIdx === i) ? ' checked' : '';
+
+  return '<div class="mc-role-row" data-role-idx="' + i + '">' +
+    '<div class="mc-role-row__main">' +
+      '<select class="mc-role-row__section" data-role-section-idx="' + i + '">' + sectionOpts + '</select>' +
+      '<input class="mc-role-row__title" type="text" list="' + datalistId + '" data-role-title-idx="' + i + '" ' +
+        'value="' + esc(r.title) + '" placeholder="Role title">' +
+      '<datalist id="' + datalistId + '">' + suggestions + '</datalist>' +
+      (draft.roleRows.length > 1
+        ? '<button class="btn-icon btn-icon--danger mc-role-row__remove" data-remove-role-idx="' + i + '" title="Remove role">×</button>'
+        : '<span class="mc-role-row__remove-spacer"></span>') +
+    '</div>' +
+    '<div class="mc-role-row__opts">' +
+      '<label class="mc-role-row__opt"><input type="radio" name="personPrimaryRole" data-primary-role-idx="' + i + '"' + primaryChecked + '> Primary</label>' +
+      '<label class="mc-role-row__opt' + (isHeadSection ? '' : ' is-disabled') + '">' +
+        '<input type="checkbox" data-role-head-idx="' + i + '"' + headChecked + headDisabled + '> Dept head</label>' +
+      flagsHtml +
+    '</div>' +
+    headWarn +
+  '</div>';
+}
+
+/* Render one editable contact row in the person modal. preferred is a
+   radio scoped per type (one preferred email, one preferred phone). */
+function renderContactRow(draft, c, i) {
+  var prefName = c.type === 'email' ? 'personPrefEmail' : 'personPrefPhone';
+  return '<div class="mc-contact-row" data-contact-idx="' + i + '">' +
+    '<select class="mc-contact-row__type" data-contact-type-idx="' + i + '">' +
+      '<option value="email"' + (c.type === 'email' ? ' selected' : '') + '>Email</option>' +
+      '<option value="phone"' + (c.type === 'phone' ? ' selected' : '') + '>Phone</option>' +
+    '</select>' +
+    '<input class="mc-contact-row__value" type="' + (c.type === 'email' ? 'email' : 'tel') + '" ' +
+      'data-contact-value-idx="' + i + '" value="' + esc(c.value) + '" ' +
+      'placeholder="' + (c.type === 'email' ? 'jane@club.co.uk' : '01234 567890') + '">' +
+    '<input class="mc-contact-row__label" type="text" data-contact-label-idx="' + i + '" ' +
+      'value="' + esc(c.label) + '" placeholder="e.g. direct, mobile, main">' +
+    '<label class="mc-contact-row__pref" title="Preferred ' + esc(c.type) + '">' +
+      '<input type="radio" name="' + prefName + '" data-contact-pref-idx="' + i + '"' + (c.preferred ? ' checked' : '') + '> preferred</label>' +
+    '<button class="btn-icon btn-icon--danger" data-remove-contact-idx="' + i + '" title="Remove">×</button>' +
+  '</div>';
+}
+
 function renderPersonPanel(club) {
   var isNew = state.manage.editingPersonId === 'new';
   var person = isNew ? null : club.people.filter(function(p){ return p._id === state.manage.editingPersonId; })[0];
   if (!isNew && !person) return '';
 
-  var draft = state.manage.personDraft || (person ? {
-    name: person.name || '',
-    email: person.email || '',
-    phone: person.phone || '',
-    primaryRoleIdx: (function(){
-      if (!person) return null;
-      var idx = person.roles.findIndex(function(r){ return r.main; });
-      return idx === -1 ? (person.roles.length ? 0 : null) : idx;
-    })(),
-  } : { name: '', email: '', phone: '', primaryRoleIdx: null });
-
-  // Seed draft.primaryRoleIdx if missing (first mount after state only had name/email/phone)
-  if (!isNew && person && typeof draft.primaryRoleIdx === 'undefined') {
-    var idx = person.roles.findIndex(function(r){ return r.main; });
-    draft.primaryRoleIdx = idx === -1 ? (person.roles.length ? 0 : null) : idx;
+  var draft = state.manage.personDraft;
+  // Backstop: if a bare/legacy draft slipped through, rebuild a full one.
+  if (!draft || !Array.isArray(draft.roleRows) || !Array.isArray(draft.contactRows)) {
+    draft = seedPersonDraft(person);
     state.manage.personDraft = draft;
   }
 
-  // List department assignments with a radio column for primary.
-  var deptsHtml = '';
-  if (!isNew && person && person.roles.length) {
-    deptsHtml = person.roles.map(function(r, i) {
-      var checked = (draft.primaryRoleIdx === i) ? ' checked' : '';
-      return '<div class="mc-person-panel__dept">' +
-        '<label class="mc-person-panel__primary-radio">' +
-          '<input type="radio" name="mcPanelPrimary" data-primary-idx="' + i + '"' + checked + '>' +
-          '<span class="mc-person-panel__primary-mark">primary</span>' +
-        '</label>' +
-        '<span class="mc-person-panel__dept-info"><b>' + esc(r.section) + '</b> — ' + esc(r.title) + '</span>' +
-        (r.deptHead ? '<span class="pill pill--marker">Head</span>' : '') +
-      '</div>';
-    }).join('');
-  } else if (!isNew) {
-    deptsHtml = '<div class="mc-person-panel__depts-empty">No department assignments yet. Add them in the Department assignments tab.</div>';
-  }
+  var rolesHtml = draft.roleRows.map(function(r, i){ return renderRoleRow(club, draft, r, i); }).join('');
+  var contactsHtml = draft.contactRows.length
+    ? draft.contactRows.map(function(c, i){ return renderContactRow(draft, c, i); }).join('')
+    : '<div class="mc-person-panel__depts-empty">No contacts yet — add an email or phone below.</div>';
 
   return '<div class="mc-person-panel-overlay" id="mcPanelOverlay"></div>' +
     '<div class="mc-person-panel" id="mcPersonPanel">' +
@@ -3500,19 +3742,28 @@ function renderPersonPanel(club) {
           '<label>Full name</label>' +
           '<input type="text" id="mcPanelName" value="' + esc(draft.name) + '" placeholder="e.g. Jane Smith">' +
         '</div>' +
-        '<div class="mc-person-panel__field">' +
-          '<label>Email</label>' +
-          '<input type="email" id="mcPanelEmail" value="' + esc(draft.email) + '" placeholder="jane@club.co.uk">' +
+
+        '<div class="mc-person-panel__depts-section">' +
+          '<h4>Roles</h4>' +
+          '<div id="mcRoleRows">' + rolesHtml + '</div>' +
+          '<button class="btn btn--ghost btn--sm" id="mcAddRoleRow" type="button">+ Add role</button>' +
+          '<div class="mc-person-panel__help">The <b>primary</b> role represents this person on exports and business cards. <b>Dept head</b> is only available for sections that have a head. Liaison contacts (DLO/PLO/CSLO/SLO) are just roles in the <b>Liaison officers</b> section.</div>' +
         '</div>' +
-        '<div class="mc-person-panel__field">' +
-          '<label>Phone</label>' +
-          '<input type="tel" id="mcPanelPhone" value="' + esc(draft.phone) + '" placeholder="01234 567890">' +
+
+        '<div class="mc-person-panel__depts-section">' +
+          '<h4>Contacts</h4>' +
+          '<div id="mcContactRows">' + contactsHtml + '</div>' +
+          '<div class="mc-person-panel__addrow-btns">' +
+            '<button class="btn btn--ghost btn--sm" id="mcAddEmailRow" type="button">+ Add email</button>' +
+            '<button class="btn btn--ghost btn--sm" id="mcAddPhoneRow" type="button">+ Add phone</button>' +
+          '</div>' +
+          '<div class="mc-person-panel__help">The preferred email and phone become this person\'s headline contacts; extras are kept for the list builder.</div>' +
         '</div>' +
-        (!isNew ? '<div class="mc-person-panel__depts-section">' +
-          '<h4>Department assignments — pick primary</h4>' +
-          deptsHtml +
-          '<div class="mc-person-panel__help">The <b>primary</b> role is the one that represents them on business cards and in exports. Name, email and phone edits apply wherever this person appears. Add or remove roles in the <b>Department assignments</b> tab.</div>' +
-        '</div>' : '<div class="mc-person-panel__help">After saving, assign this person to a department in the <b>Department assignments</b> tab. Their first role becomes their primary automatically.</div>') +
+
+        '<div class="mc-person-panel__field" style="margin-top:18px;">' +
+          '<label>Note (optional)</label>' +
+          '<input type="text" id="mcPanelNote" value="' + esc(draft.note || '') + '" placeholder="e.g. Correspondence: Club">' +
+        '</div>' +
       '</div>' +
       '<div class="mc-person-panel__ftr">' +
         (isNew ? '<span></span>' : '<button class="btn btn--danger" id="mcPanelDelete">Delete person entirely</button>') +
@@ -3922,15 +4173,11 @@ function renderConfirmDialog(d) {
 function openPersonPanel(personId) {
   state.manage.editingPersonId = personId;
   if (personId === 'new') {
-    state.manage.personDraft = { name: '', email: '', phone: '' };
+    state.manage.personDraft = seedPersonDraft(null);
   } else {
     var club = window.CLUBS.filter(function(c){ return c.name === state.manage.editingClub; })[0];
     var p = club ? club.people.filter(function(x){ return x._id === personId; })[0] : null;
-    state.manage.personDraft = p ? {
-      name: p.name || '',
-      email: p.email || '',
-      phone: p.phone || '',
-    } : { name: '', email: '', phone: '' };
+    state.manage.personDraft = seedPersonDraft(p || null);
   }
   renderEditor(document.getElementById('mc-root'));
 }
@@ -3993,37 +4240,107 @@ function savePersonPanel() {
   commitPersonPanelSave(club, isNew, draft);
 }
 
+/* Build the persisted roles[] from the modal's role rows. Drops empty
+   rows (no title), recomputes function + liaison roleKey, sets exactly one
+   primary, and carries section flags through. */
+function buildRolesFromDraft(draft) {
+  var rows = (draft.roleRows || []).filter(function(r){ return (r.title || '').trim(); });
+  var primaryIdxAmongKept = -1;
+  // Map the draft primaryRoleIdx (index into ALL rows) onto the kept rows.
+  (draft.roleRows || []).forEach(function(r, allIdx) {
+    if (!(r.title || '').trim()) return;
+    var keptIdx = rows.indexOf(r);
+    if (allIdx === draft.primaryRoleIdx) primaryIdxAmongKept = keptIdx;
+  });
+  return rows.map(function(r, i) {
+    var title = (r.title || '').trim();
+    var section = r.section || SECTION_ORDER[0];
+    var isHeadSection = HEAD_SECTIONS.indexOf(section) !== -1;
+    var role = {
+      title: title,
+      section: section,
+      main: (i === primaryIdxAmongKept) || (primaryIdxAmongKept === -1 && i === 0),
+      deptHead: isHeadSection ? !!r.deptHead : false,
+      'function': functionForTitle(title, section)
+    };
+    // Keep only truthy flags.
+    var flags = {};
+    Object.keys(r.flags || {}).forEach(function(k){ if (r.flags[k]) flags[k] = true; });
+    if (Object.keys(flags).length) role.flags = flags;
+    var rk = roleKeyForRole(section, title);
+    if (rk) role.roleKey = rk;
+    return role;
+  });
+}
+
+/* Build contacts[] from the modal's contact rows; returns { contacts, email, phone }
+   where email/phone are the preferred (or first) mirror of each type. */
+function buildContactsFromDraft(draft) {
+  var contacts = (draft.contactRows || [])
+    .filter(function(c){ return (c.value || '').trim(); })
+    .map(function(c) {
+      var o = { type: c.type === 'phone' ? 'phone' : 'email', value: (c.value || '').trim(),
+                label: (c.label || '').trim(), preferred: !!c.preferred };
+      return o;
+    });
+  // Ensure exactly one preferred per type (default to the first of that type).
+  ['email', 'phone'].forEach(function(type) {
+    var cs = contacts.filter(function(c){ return c.type === type; });
+    if (!cs.length) return;
+    if (!cs.some(function(c){ return c.preferred; })) cs[0].preferred = true;
+    var seen = false;
+    cs.forEach(function(c){ if (c.preferred) { if (seen) c.preferred = false; else seen = true; } });
+  });
+  var email = (contacts.filter(function(c){ return c.type === 'email' && c.preferred; })[0] || {}).value || null;
+  var phone = (contacts.filter(function(c){ return c.type === 'phone' && c.preferred; })[0] || {}).value || null;
+  return { contacts: contacts, email: email, phone: phone };
+}
+
+/* When a role row marks someone as dept head, strip deptHead from whoever
+   else currently holds that section's head (one head per section). */
+function clearPreviousHeads(club, person, roles) {
+  roles.forEach(function(r) {
+    if (!r.deptHead) return;
+    club.people.forEach(function(p) {
+      if (p === person) return;
+      (p.roles || []).forEach(function(pr) {
+        if (pr.section === r.section && pr.deptHead) pr.deptHead = false;
+      });
+    });
+  });
+}
+
 function commitPersonPanelSave(club, isNew, draft) {
   var name = (draft.name || '').trim();
-  var email = (draft.email || '').trim() || null;
-  var phone = (draft.phone || '').trim() || null;
+  var note = (draft.note || '').trim() || null;
+  var roles = buildRolesFromDraft(draft);
+  var cc = buildContactsFromDraft(draft);
 
+  var person;
   if (isNew) {
-    var newPerson = {
+    person = {
       _id: 'p' + (_nextPersonId++),
       name: name,
-      email: email,
-      phone: phone,
-      note: null,
-      roles: [],
+      email: cc.email,
+      phone: cc.phone,
+      note: note,
+      contacts: cc.contacts,
+      roles: roles,
     };
-    ensureContacts(newPerson);
-    club.people.push(newPerson);
+    club.people.push(person);
   } else {
-    var person = club.people.filter(function(p){ return p._id === state.manage.editingPersonId; })[0];
+    person = club.people.filter(function(p){ return p._id === state.manage.editingPersonId; })[0];
     if (person) {
       person.name = name;
-      person.email = email;
-      person.phone = phone;
-      syncContactsFromMirrors(person);
-      // Apply primary role flag
-      if (person.roles.length && typeof draft.primaryRoleIdx === 'number') {
-        person.roles.forEach(function(r, i) {
-          r.main = (i === draft.primaryRoleIdx);
-        });
-      }
+      person.note = note;
+      person.contacts = cc.contacts;
+      person.email = cc.email;
+      person.phone = cc.phone;
+      person.roles = roles;
     }
   }
+  if (person) clearPreviousHeads(club, person, roles);
+
   persistClub(club, isNew ? 'person_add' : 'person_edit',
     (isNew ? 'Added ' : 'Updated ') + name + ' at ' + club.name);
   state.manage.editingPersonId = null;
@@ -4035,10 +4352,23 @@ function mergeIntoPerson(club, existingPerson, isNew, draft) {
   // Merge: keep existingPerson. If not isNew, also consolidate the other person's
   // roles onto existingPerson and delete the other.
   if (isNew) {
-    // No new record was created; just apply draft email/phone to existing if not set
-    if (!existingPerson.email && (draft.email||'').trim()) existingPerson.email = draft.email.trim();
-    if (!existingPerson.phone && (draft.phone||'').trim()) existingPerson.phone = draft.phone.trim();
-    syncContactsFromMirrors(existingPerson);
+    // No new record was created; fold the draft's roles + contacts into the
+    // existing person (skip roles it already has; add only new contacts).
+    ensureContacts(existingPerson);
+    buildRolesFromDraft(draft).forEach(function(r) {
+      var already = existingPerson.roles.some(function(er) {
+        return er.section === r.section && er.title === r.title;
+      });
+      if (!already) { r.main = false; existingPerson.roles.push(r); }
+    });
+    buildContactsFromDraft(draft).contacts.forEach(function(c) {
+      var already = existingPerson.contacts.some(function(ec) {
+        return ec.type === c.type && ec.value === c.value;
+      });
+      if (!already) { c.preferred = false; existingPerson.contacts.push(c); }
+    });
+    syncMirrorsFromContacts(existingPerson);
+    ensurePrimaryRole(existingPerson);
   } else {
     var duplicatePerson = club.people.filter(function(p){ return p._id === state.manage.editingPersonId; })[0];
     if (duplicatePerson && duplicatePerson !== existingPerson) {
@@ -4737,6 +5067,48 @@ function wireUI() {
       deletePersonWithConfirm();
       return;
     }
+    // Role rows: add / remove
+    if (t.id === 'mcAddRoleRow') {
+      var d0 = state.manage.personDraft;
+      if (d0 && Array.isArray(d0.roleRows)) {
+        d0.roleRows.push({ section: SECTION_ORDER[0], title: '', deptHead: false, flags: {} });
+        renderEditor(document.getElementById('mc-root'));
+      }
+      return;
+    }
+    var remRoleBtn = t.closest('[data-remove-role-idx]');
+    if (remRoleBtn) {
+      var dR = state.manage.personDraft;
+      var ri = parseInt(remRoleBtn.getAttribute('data-remove-role-idx'), 10);
+      if (dR && Array.isArray(dR.roleRows)) {
+        dR.roleRows.splice(ri, 1);
+        if (dR.primaryRoleIdx >= dR.roleRows.length) dR.primaryRoleIdx = dR.roleRows.length - 1;
+        if (dR.primaryRoleIdx < 0 && dR.roleRows.length) dR.primaryRoleIdx = 0;
+        renderEditor(document.getElementById('mc-root'));
+      }
+      return;
+    }
+    // Contact rows: add email / add phone / remove
+    if (t.id === 'mcAddEmailRow' || t.id === 'mcAddPhoneRow') {
+      var dC = state.manage.personDraft;
+      if (dC && Array.isArray(dC.contactRows)) {
+        var newType = (t.id === 'mcAddPhoneRow') ? 'phone' : 'email';
+        var firstOfType = !dC.contactRows.some(function(c){ return c.type === newType; });
+        dC.contactRows.push({ type: newType, value: '', label: '', preferred: firstOfType });
+        renderEditor(document.getElementById('mc-root'));
+      }
+      return;
+    }
+    var remContactBtn = t.closest('[data-remove-contact-idx]');
+    if (remContactBtn) {
+      var dRC = state.manage.personDraft;
+      var ci = parseInt(remContactBtn.getAttribute('data-remove-contact-idx'), 10);
+      if (dRC && Array.isArray(dRC.contactRows)) {
+        dRC.contactRows.splice(ci, 1);
+        renderEditor(document.getElementById('mc-root'));
+      }
+      return;
+    }
 
     /* --- Departments surface --- */
     var editDeptBtn = t.closest('[data-edit-dept-section]');
@@ -4901,9 +5273,28 @@ function wireUI() {
     }
 
     // Person side-panel fields
-    if (t.id === 'mcPanelName')  { if (!state.manage.personDraft) state.manage.personDraft = {}; state.manage.personDraft.name  = t.value; return; }
-    if (t.id === 'mcPanelEmail') { if (!state.manage.personDraft) state.manage.personDraft = {}; state.manage.personDraft.email = t.value; return; }
-    if (t.id === 'mcPanelPhone') { if (!state.manage.personDraft) state.manage.personDraft = {}; state.manage.personDraft.phone = t.value; return; }
+    if (t.id === 'mcPanelName')  { if (state.manage.personDraft) state.manage.personDraft.name = t.value; return; }
+    if (t.id === 'mcPanelNote')  { if (state.manage.personDraft) state.manage.personDraft.note = t.value; return; }
+    // Person modal role title (free text — no re-render so the field keeps focus)
+    if (t.hasAttribute('data-role-title-idx')) {
+      var rti = parseInt(t.getAttribute('data-role-title-idx'), 10);
+      var dT = state.manage.personDraft;
+      if (dT && dT.roleRows && dT.roleRows[rti]) dT.roleRows[rti].title = t.value;
+      return;
+    }
+    // Person modal contact value / label
+    if (t.hasAttribute('data-contact-value-idx')) {
+      var cvi = parseInt(t.getAttribute('data-contact-value-idx'), 10);
+      var dCV = state.manage.personDraft;
+      if (dCV && dCV.contactRows && dCV.contactRows[cvi]) dCV.contactRows[cvi].value = t.value;
+      return;
+    }
+    if (t.hasAttribute('data-contact-label-idx')) {
+      var cli = parseInt(t.getAttribute('data-contact-label-idx'), 10);
+      var dCL = state.manage.personDraft;
+      if (dCL && dCL.contactRows && dCL.contactRows[cli]) dCL.contactRows[cli].label = t.value;
+      return;
+    }
 
     // Dept edit drafts
     if (t.hasAttribute('data-draft-key')) {
@@ -4959,12 +5350,72 @@ function wireUI() {
 
   manageScene.addEventListener('change', function(e) {
     var t = e.target;
-    // Primary role radio
-    if (t.name === 'mcPanelPrimary' && t.hasAttribute('data-primary-idx')) {
-      if (!state.manage.personDraft) state.manage.personDraft = {};
-      state.manage.personDraft.primaryRoleIdx = parseInt(t.getAttribute('data-primary-idx'), 10);
+
+    /* --- Person modal: role rows --- */
+    // Section select: changes flags + datalist + dept-head availability -> re-render.
+    if (t.hasAttribute('data-role-section-idx')) {
+      var si = parseInt(t.getAttribute('data-role-section-idx'), 10);
+      var dS = state.manage.personDraft;
+      if (dS && dS.roleRows && dS.roleRows[si]) {
+        dS.roleRows[si].section = t.value;
+        // Dept head only meaningful for head sections; clear if leaving one.
+        if (HEAD_SECTIONS.indexOf(t.value) === -1) dS.roleRows[si].deptHead = false;
+        renderEditor(document.getElementById('mc-root'));
+      }
       return;
     }
+    // Primary role radio (one across all role rows).
+    if (t.name === 'personPrimaryRole' && t.hasAttribute('data-primary-role-idx')) {
+      if (state.manage.personDraft) {
+        state.manage.personDraft.primaryRoleIdx = parseInt(t.getAttribute('data-primary-role-idx'), 10);
+      }
+      return;
+    }
+    // Dept-head checkbox -> re-render to show / clear clash warning.
+    if (t.hasAttribute('data-role-head-idx')) {
+      var hi = parseInt(t.getAttribute('data-role-head-idx'), 10);
+      var dH = state.manage.personDraft;
+      if (dH && dH.roleRows && dH.roleRows[hi]) {
+        dH.roleRows[hi].deptHead = t.checked;
+        renderEditor(document.getElementById('mc-root'));
+      }
+      return;
+    }
+    // Section flag checkbox on a role row (e.g. Media -> Programme editor).
+    if (t.hasAttribute('data-role-flag-idx')) {
+      var rfi = parseInt(t.getAttribute('data-role-flag-idx'), 10);
+      var rfk = t.getAttribute('data-flag-key');
+      var dF = state.manage.personDraft;
+      if (dF && dF.roleRows && dF.roleRows[rfi]) {
+        if (!dF.roleRows[rfi].flags) dF.roleRows[rfi].flags = {};
+        dF.roleRows[rfi].flags[rfk] = t.checked;
+      }
+      return;
+    }
+
+    /* --- Person modal: contact rows --- */
+    if (t.hasAttribute('data-contact-type-idx')) {
+      var cti = parseInt(t.getAttribute('data-contact-type-idx'), 10);
+      var dCT = state.manage.personDraft;
+      if (dCT && dCT.contactRows && dCT.contactRows[cti]) {
+        dCT.contactRows[cti].type = t.value;
+        // Preferred radios are per-type; re-render so the radio grouping is correct.
+        renderEditor(document.getElementById('mc-root'));
+      }
+      return;
+    }
+    if ((t.name === 'personPrefEmail' || t.name === 'personPrefPhone') && t.hasAttribute('data-contact-pref-idx')) {
+      var pci = parseInt(t.getAttribute('data-contact-pref-idx'), 10);
+      var dP = state.manage.personDraft;
+      if (dP && dP.contactRows) {
+        var chosen = dP.contactRows[pci];
+        if (chosen) {
+          dP.contactRows.forEach(function(c){ if (c.type === chosen.type) c.preferred = (c === chosen); });
+        }
+      }
+      return;
+    }
+
     // Flag tickbox on existing role draft (e.g. Media -> Programme editor)
     if (t.hasAttribute('data-draft-flag-key')) {
       var fkey = t.getAttribute('data-draft-flag-key');
