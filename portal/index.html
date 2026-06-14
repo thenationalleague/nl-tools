@@ -1,11 +1,35 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.82 (03/05/2026)
+  Version: v5.83 (14/06/2026)
   Date: 09/04/2026
   File: /tools/portal/index.html
 
   Changelog:
+  v5.83 (14/06/2026) — Defaults-driven access (seed removed):
+           * BUGFIX: getGroupKey still returned the old compound keys
+             'nl-admin'/'nl-staff'/'club', which no longer exist in the
+             tool registry (Phase 3a moved defaults to bare role keys:
+             superadmin/admin/staff/club-admin/club-viewer). Result:
+             defaults[key] resolved to undefined -> 'hidden' for any user
+             WITHOUT an explicit per-user tools entry, so tools only
+             appeared if seeded. getGroupKey now returns the bare role
+             (legacy 'club' -> 'club-admin'), matching auth-guard's
+             defaults[role] lookup and the registry snapshot.
+           * Removed the Deploy / Seed button, deployTool(), the
+             tool-tile__deploy* CSS, and the deployedAt plumbing. Seeding
+             materialised a frozen {access,admin} copy of the role default
+             into every user record — bloat that also froze users at the
+             old value when defaults later changed. A tool is now "live"
+             the moment its tools/<toolKey> registry record exists with
+             defaults; the grid resolves visibility live. Per-user tools
+             entries are pure OVERRIDES (deviations from the role default).
+           * Invite + restore-defaults slider previews now route their
+             defaults lookup through getGroupKey too (were inline ternaries
+             producing the stale 'club' key). Single source of truth.
+           * Historical 'tool_seeded'/'tool_deployed' audit labels kept so
+             old audit-log entries still render with friendly names.
+
   v5.82 (03/05/2026) — Brand sweep + naming consistency:
            * Renamed all .welcome-* CSS classes and welcome* element IDs
              to .noticeboard-* / noticeboard* to match the in-UI label
@@ -349,6 +373,14 @@
 
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
+    {
+      date: '14 June 2026',
+      version: 'v5.83',
+      items: [
+        'Tools now appear automatically based on your role — no manual "deploy" step.',
+        'New tools are visible to the right people the moment they go live.'
+      ]
+    },
     {
       date: '26 April 2026',
       version: 'v5.81',
@@ -697,41 +729,6 @@
   padding: 2px 6px;
   align-self: flex-start;
 }
-
-/* Deploy button -- superadmin only, shown on undeployed tool tiles */
-.tool-tile__deploy {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-}
-.tool-tile__deploy-btn {
-  font-family: var(--font);
-  font-size: 9px;
-  font-weight: 900;
-  font-variation-settings: 'wght' 900;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  padding: 4px 10px;
-  border-radius: var(--radius);
-  border: none;
-  cursor: pointer;
-  transition: all 0.15s;
-  white-space: nowrap;
-}
-.tool-tile__deploy-btn--deploy {
-  background: var(--navy);
-  color: var(--white);
-}
-.tool-tile__deploy-btn--deploy:hover { background: var(--navy-600); }
-.tool-tile__deploy-btn--redeploy {
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-  font-size: 8px;
-  padding: 3px 8px;
-}
-.tool-tile__deploy-btn--redeploy:hover { border-color: var(--navy); color: var(--navy); }
 
 /* -- Available tools ------------------------------------------------------- */
 .available-grid {
@@ -2222,14 +2219,12 @@ function getAccessLevel(uid, toolKey) {
 }
 
 function getGroupKey(ud) {
-  if (ud.role === 'superadmin') return 'nl-admin';
-  if (ud.role === 'admin' || ud.role === 'staff') {
-    /* org removed — use role directly */
-    var orgKey = 'nl'; /* unused but kept for compat */
-    var role   = ud.role === 'admin' ? 'admin' : 'staff';
-    return orgKey + '-' + role;
-  }
-  return 'club';
+  /* The defaults key IS the bare role key — matches auth-guard's
+     defaults[role] lookup and the registry (superadmin/admin/staff/
+     club-admin/club-viewer/third-party). Legacy 'club' → 'club-admin'. */
+  var role = (ud && ud.role) || '';
+  if (role === 'club') return 'club-admin';
+  return role;
 }
 
 function getDefaultLevel(toolKey, ud) {
@@ -2694,37 +2689,6 @@ function buildToolTile(key, t, level) {
     tile.appendChild(soon);
   }
 
-  /* Deploy button -- superadmin only */
-  if (STATE.isSuperAdmin && !t.placeholder) {
-    var deployWrap = document.createElement('div');
-    deployWrap.className = 'tool-tile__deploy';
-
-    var deployBtn = document.createElement('button');
-    deployBtn.className = 'tool-tile__deploy-btn';
-
-    var isDeployed = !!(t.deployedAt);
-
-    if (!isDeployed) {
-      deployBtn.className += ' tool-tile__deploy-btn--deploy';
-      deployBtn.textContent = 'Deploy';
-      deployBtn.title = 'Seed default access for users who have never had this tool configured';
-    } else {
-      deployBtn.className += ' tool-tile__deploy-btn--redeploy';
-      deployBtn.textContent = 'Seed new';
-      deployBtn.dataset.isRedeployed = '1';
-      deployBtn.title = 'Seed access for any users added since the tool was first deployed';
-    }
-
-    deployBtn.addEventListener('click', function(e) {
-      e.preventDefault();
-      e.stopPropagation();
-      deployTool(t._key, deployBtn);
-    });
-
-    deployWrap.appendChild(deployBtn);
-    tile.appendChild(deployWrap);
-  }
-
   /* Star / favourite toggle */
   var starBtn = document.createElement('button');
   starBtn.className = 'tool-tile__star';
@@ -2827,61 +2791,6 @@ function requestToolAccess(key, label, btn) {
     btn.disabled = false;
     btn.textContent = 'Request';
     showToast('Could not send request', 'error');
-  });
-}
-
-/* ---- Deploy tool to existing users (superadmin only) -------------------- */
-function deployTool(toolKey, btn) {
-  if (!STATE.isSuperAdmin) return;
-  var tool = STATE.tools[toolKey];
-  if (!tool) { showToast('Tool not found', 'error'); return; }
-
-  btn.disabled = true;
-  btn.textContent = 'Deploying…';
-
-  db.ref('users').once('value').then(function(snap) {
-    var allUsers = snap.val() || {};
-    var updates  = {};
-    var count    = 0;
-
-    Object.keys(allUsers).forEach(function(uid) {
-      var u = allUsers[uid];
-      /* Skip if user already has any non-null entry for this tool.
-         This only seeds users who have never had this tool configured.
-         Never overwrites existing access levels regardless of format. */
-      if (u.tools && u.tools[toolKey] != null) return;
-      if (u.pending || u.rejected) return;
-
-      var gk = getGroupKey(u);
-      var defaultLevel = (tool.defaults && tool.defaults[gk]) || 'hidden';
-      if (u.role === 'club' && defaultLevel === 'admin') defaultLevel = 'access';
-
-      updates['users/' + uid + '/tools/' + toolKey] = {
-        access: defaultLevel === 'access' || defaultLevel === 'admin',
-        admin:  defaultLevel === 'admin'
-      };
-      count++;
-    });
-
-    if (count === 0) {
-      showToast('All users already have ' + (tool.label || toolKey) + ' configured', 'info');
-      btn.disabled = false;
-      btn.textContent = btn.dataset.isRedeployed ? 'Seed new' : 'Seed';
-      return Promise.resolve();
-    }
-
-    updates['tools/' + toolKey + '/deployedAt'] = Date.now();
-
-    return db.ref().update(updates).then(function() {
-      writeAudit('tool_seeded',
-        (tool.label || toolKey) + ' seeded to ' + count + ' user' + (count === 1 ? '' : 's') + ' (new only)');
-      showToast((tool.label || toolKey) + ' seeded to ' + count + ' new user' + (count === 1 ? '' : 's'), 'success');
-      loadTools().then(function() { renderToolGrid(); });
-    });
-  }).catch(function(err) {
-    btn.disabled = false;
-    btn.textContent = btn.dataset.isRedeployed ? 'Seed new' : 'Seed';
-    showToast('Deploy failed: ' + err.message, 'error');
   });
 }
 
@@ -5050,10 +4959,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
       e.stopPropagation();
       /* Reset all sliders to tool defaults for this user's role */
       var ud2 = STATE.allUsers[uid] || {};
-      var role2 = ud2.role || 'staff';
-      var groupKey2 = role2 === 'club' ? 'club'
-                    : (role2 === 'superadmin' || role2 === 'admin') ? role2
-                    : 'staff';
+      var groupKey2 = getGroupKey(ud2);
       body.querySelectorAll('.uacc-tool-row').forEach(function(row) {
         var slider = row.querySelector('.acc-slider');
         if (!slider || !slider.dataset.toolkey) return;
@@ -5674,10 +5580,8 @@ function renderInviteToolSliders() {
   var orgKey   = document.getElementById('inviteOrgKey').value || 'nl';
   var role     = document.getElementById('inviteRole').value    || 'staff';
   var isClubOrg = role === 'club';
-  /* Simplified role model: groupKey is just the role (staff/admin/club/superadmin) */
-  var groupKey = role === 'club' ? 'club'
-               : (role === 'admin' || role === 'superadmin') ? role
-               : 'staff';
+  /* groupKey is the bare role key via getGroupKey (legacy 'club' → 'club-admin') */
+  var groupKey = getGroupKey({ role: role });
   var tools    = STATE.toolsList.filter(function(t) { return t._key !== 'welcome'; });
   var deptMap  = {};
   tools.forEach(function(t) {
