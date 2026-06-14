@@ -1,7 +1,15 @@
 /*
  * auth-guard.js — NL Tools v2
  * File: /tools/system/auth-guard.js
- * Version: v6.0 (14/05/2026)
+ * Version: v6.1 (14/06/2026)
+ *
+ * v6.1: Access-level model simplified to off / access / admin. The old
+ *        "hidden" level is merged into "off": there is one no-access state
+ *        and it is always a silent redirect to the portal. The "off =
+ *        request access" card (showDeniedCard) and the tool-requests write
+ *        are removed — access is granted directly by an admin in the portal.
+ *        Legacy "hidden" entries and absent entries both resolve to "off",
+ *        so no data migration is required; backward-compatible at the gate.
  *
  * v6.0: BREAKING (correctness) — sessionStorage is now cache only. Every page
  *        load waits for firebase.auth() to confirm a signed-in user, then
@@ -255,12 +263,14 @@
       return;
     }
 
-    /* Resolve tool entry -- handles both string format ("admin","access","off","hidden")
-       and legacy boolean object format ({access:true, admin:true}) */
+    /* Resolve tool entry -- handles both string format ("admin","access","off")
+       and legacy boolean object format ({access:true, admin:true}). The old
+       "hidden" level was merged into "off" (v6.1): there is one no-access
+       state now, and it is always a silent redirect. */
     var rawEntry = session.tools && session.tools[NL_TOOL_KEY];
     var level;
     if (!rawEntry && rawEntry !== 0) {
-      level = 'hidden';
+      level = 'off';
     } else if (typeof rawEntry === 'string') {
       level = rawEntry;
     } else if (typeof rawEntry === 'object') {
@@ -271,7 +281,7 @@
     } else if (rawEntry === true) {
       level = 'access';
     } else {
-      level = 'hidden';
+      level = 'off';
     }
 
     /* Fallback to tool defaults if no explicit entry.
@@ -286,17 +296,15 @@
            The legacy compound `<org>-<role>` lookup is gone with the
            deprecated orgKey (org distinction removed; all staff equal).
            A role with no defaults entry — e.g. third-party — resolves to
-           'hidden', which is exactly the intended zero-access default. */
-        level = toolData.defaults[session.role] || 'hidden';
+           'off', which is exactly the intended zero-access default. */
+        level = toolData.defaults[session.role] || 'off';
       }
     }
 
     if (level === 'access' || level === 'admin') {
       grantAccess(session);
-    } else if (level === 'off') {
-      showDeniedCard(session, toolData);
     } else {
-      /* hidden -- silent redirect */
+      /* off (or legacy hidden) -- no access, silent redirect */
       window.location.replace(PORTAL_URL);
     }
   }
@@ -344,96 +352,6 @@
     } else {
       doGrant();
     }
-  }
-
-  /* ── Denied card ───────────────────────────────────────────────────────── */
-  function showDeniedCard(session, toolData) {
-    var label       = (toolData && toolData.label)       || NL_TOOL_KEY;
-    var description = (toolData && toolData.description) || '';
-
-    overlay.innerHTML  = '';
-    overlay.style.cssText += ';padding:20px;';
-
-    var card = document.createElement('div');
-    card.style.cssText = [
-      'background:#fff', 'border-radius:12px',
-      'padding:40px 36px', 'max-width:420px', 'width:100%',
-      'text-align:center', 'box-shadow:0 8px 40px rgba(0,0,0,0.25)'
-    ].join(';');
-
-    var rose = document.createElement('img');
-    rose.src = ROSE_URL;
-    rose.style.cssText = 'height:56px;width:auto;margin:0 auto 24px;display:block;';
-    card.appendChild(rose);
-
-    var heading = document.createElement('div');
-    heading.style.cssText = 'font-size:20px;font-weight:900;color:#1a2a44;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:8px;';
-    heading.textContent = label;
-    card.appendChild(heading);
-
-    if (description) {
-      var desc = document.createElement('div');
-      desc.style.cssText = 'font-size:14px;color:#5a6a82;line-height:1.6;margin-bottom:20px;';
-      desc.textContent = description;
-      card.appendChild(desc);
-    }
-
-    var divider = document.createElement('div');
-    divider.style.cssText = 'height:1px;background:#dde3ed;margin:0 0 20px;';
-    card.appendChild(divider);
-
-    var msg = document.createElement('div');
-    msg.style.cssText = 'font-size:14px;color:#1a2a44;line-height:1.6;margin-bottom:24px;';
-    msg.textContent = 'You don\u2019t currently have access to this tool. Request access below and the National League team will review your request.';
-    card.appendChild(msg);
-
-    var statusMsg = document.createElement('div');
-    statusMsg.style.cssText = 'font-size:13px;margin-bottom:16px;display:none;';
-    card.appendChild(statusMsg);
-
-    var reqBtn = document.createElement('button');
-    reqBtn.style.cssText = 'display:block;width:100%;padding:14px 24px;background:#9e0000;color:#fff;border:none;border-radius:8px;font-family:inherit;font-size:13px;font-weight:900;text-transform:uppercase;letter-spacing:0.08em;cursor:pointer;margin-bottom:12px;';
-    reqBtn.textContent = 'Request access';
-
-    reqBtn.addEventListener('click', function() {
-      reqBtn.disabled    = true;
-      reqBtn.textContent = 'Sending\u2026';
-
-      var db = firebase.database();
-      db.ref('admin/tool-requests').push({
-        uid:       session.uid,
-        name:      session.name,
-        email:     session.email,
-        role:      session.role,
-        org:       session.org,
-        club:      session.club,
-        toolKey:   NL_TOOL_KEY,
-        toolLabel: label,
-        at:        new Date().toISOString(),
-        status:    'pending'
-      }).then(function() {
-        statusMsg.style.display = 'block';
-        statusMsg.style.color   = '#1e7e34';
-        statusMsg.textContent   = 'Request sent \u2014 the NL team will be in touch.';
-        reqBtn.style.display    = 'none';
-      }).catch(function() {
-        statusMsg.style.display = 'block';
-        statusMsg.style.color   = '#9e0000';
-        statusMsg.textContent   = 'Could not send request. Please contact the National League directly.';
-        reqBtn.disabled    = false;
-        reqBtn.textContent = 'Request access';
-      });
-    });
-
-    card.appendChild(reqBtn);
-
-    var backLink = document.createElement('a');
-    backLink.href = PORTAL_URL;
-    backLink.style.cssText = 'font-size:12px;color:#5a6a82;text-decoration:none;display:block;';
-    backLink.textContent = '\u2190 Back to portal';
-    card.appendChild(backLink);
-
-    overlay.appendChild(card);
   }
 
   /* ── Wait for Firebase Auth to resolve ─────────────────────────────────── */

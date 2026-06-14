@@ -1,11 +1,29 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.84 (14/06/2026)
+  Version: v5.85 (14/06/2026)
   Date: 09/04/2026
   File: /tools/portal/index.html
 
   Changelog:
+  v5.85 (14/06/2026) — Access levels simplified to off / access / admin:
+           * The four-state model (hidden/off/access/admin) is now three.
+             The old "hidden" (invisible) and "off" (request-access) states
+             collapse into a single "off" = no access, invisible. ACC_LEVELS
+             and every slider drop from 4 stops to 3.
+           * Request-access flow removed: the portal "Available tools"
+             section + Request buttons and requestToolAccess() are gone, and
+             auth-guard no longer shows a request card (it silently redirects
+             on no access). Access is granted directly by an admin.
+           * All default/fallback resolution returns 'off' instead of
+             'hidden'; legacy stored 'hidden' entries read as 'off' (and
+             self-heal to 'off'/null on next save). No data migration needed;
+             registry snapshot 'hidden' defaults renamed to 'off' (paste it).
+           * Fixed the staff/club grid split that still keyed on the dead
+             defaults.club === 'hidden' — now uses club-admin default.
+           * Sign-up approval slider defaults are role-aware and written
+             overrides-only. NOTE: needs manual browser verification.
+
   v5.84 (14/06/2026) — Six-role user admin (Phase 3b):
            * User editor + invite form rebuilt around the six-role model
              (superadmin / League Admin / League Staff / Club Admin /
@@ -397,6 +415,14 @@
 
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
+    {
+      date: '14 June 2026',
+      version: 'v5.85',
+      items: [
+        'Access is now simply Off, Access or Admin — clearer and one fewer state.',
+        'Tools you can’t use no longer appear with a "request" button; an admin grants access directly.'
+      ]
+    },
     {
       date: '14 June 2026',
       version: 'v5.84',
@@ -1990,14 +2016,6 @@
       <div class="tool-grid" id="clubFlatGrid"><!-- Populated by JS --></div>
     </div>
 
-    <!-- Available tools (tools in tier not yet granted) -->
-    <div id="availableSection" style="display:none">
-      <div class="section-head">
-        <span class="section-head__title">Available Tools</span>
-        <button class="section-head__action" id="availableToggle">Show available tools</button>
-      </div>
-      <div id="availableGrid" class="available-grid" style="display:none"></div>
-    </div>
 
     <!-- Admin panel (admin/superadmin only) -->
     <div class="admin-panel" id="adminPanel" style="display:none">
@@ -2235,14 +2253,14 @@ function capitalise(s) {
 function getAccessLevel(uid, toolKey) {
   if (STATE.isSuperAdmin && uid === STATE.uid) return 'admin';
   var ud = (uid === STATE.uid) ? STATE.userData : (STATE.allUsers[uid] || {});
-  if (!ud) return 'hidden';
+  if (!ud) return 'off';
   if (ud.role === 'superadmin') return 'admin';
   var entry = ud.tools && ud.tools[toolKey];
   if (typeof entry === 'string') return entry;
   if (entry === true) return 'access';
   var tool = STATE.tools[toolKey];
-  if (!tool || !tool.defaults) return 'hidden';
-  return tool.defaults[getGroupKey(ud)] || 'hidden';
+  if (!tool || !tool.defaults) return 'off';
+  return tool.defaults[getGroupKey(ud)] || 'off';
 }
 
 function getGroupKey(ud) {
@@ -2256,8 +2274,8 @@ function getGroupKey(ud) {
 
 function getDefaultLevel(toolKey, ud) {
   var tool = STATE.tools[toolKey];
-  if (!tool || !tool.defaults) return 'hidden';
-  return tool.defaults[getGroupKey(ud)] || 'hidden';
+  if (!tool || !tool.defaults) return 'off';
+  return tool.defaults[getGroupKey(ud)] || 'off';
 }
 
 /* ── Six-role model (Phase 3b) ───────────────────────────────────────────
@@ -2275,8 +2293,8 @@ function isClubRole(r) { return r === 'club-admin' || r === 'club-viewer' || r =
 /* Default access level a role gets on a tool, straight from the registry. */
 function roleDefaultLevel(toolKey, role) {
   var tool = STATE.tools[toolKey];
-  if (!tool || !tool.defaults) return 'hidden';
-  return tool.defaults[normRole(role)] || 'hidden';
+  if (!tool || !tool.defaults) return 'off';
+  return tool.defaults[normRole(role)] || 'off';
 }
 /* Names of clubs in the current-season roster (for the club picker + off-roster flag). */
 function currentRosterNames() {
@@ -2451,7 +2469,6 @@ function initPortal() {
   /* renderTopbar now via nl-topbar.js; called automatically on auth */
   loadWelcomeMessages();
   renderToolGrid();
-  renderAvailableTools();
 
   if (STATE.isAdmin) {
     document.getElementById('adminPanel').style.display = 'block';
@@ -2647,8 +2664,7 @@ function renderToolGrid() {
   tools.forEach(function(t) {
     if (t._key === 'welcome') return;
     var level = getAccessLevel(STATE.uid, t._key);
-    if (level === 'hidden') return;
-    if (level === 'off' && !STATE.isAdmin) return;
+    if (level !== 'access' && level !== 'admin') return;  /* off = no access */
     myTools.push({ key: t._key, tool: t, level: level });
   });
 
@@ -2660,13 +2676,14 @@ function renderToolGrid() {
     return (a.tool.label || a.key).localeCompare(b.tool.label || b.key);
   });
 
-  /* Split by type */
-  var staffTools = myTools.filter(function(t) {
-    return t.tool.defaults && t.tool.defaults.club === 'hidden';
-  });
-  var clubTools = myTools.filter(function(t) {
-    return !t.tool.defaults || t.tool.defaults.club !== 'hidden';
-  });
+  /* Split by type: a "club tool" is one club roles can reach (club-admin
+     default is not 'off'); everything else is a staff tool. */
+  function isClubTool(t) {
+    var d = t.tool.defaults || {};
+    return (d['club-admin'] || 'off') !== 'off';
+  }
+  var staffTools = myTools.filter(function(t) { return !isClubTool(t); });
+  var clubTools  = myTools.filter(function(t) { return  isClubTool(t); });
 
   function populateGrid(gridId, items) {
     var grid = document.getElementById(gridId);
@@ -2764,93 +2781,6 @@ function buildToolTile(key, t, level) {
   tile.appendChild(starBtn);
 
   return tile;
-}
-
-/* ---- Available tools ----------------------------------------------------- */
-function renderAvailableTools() {
-  var ud     = STATE.userData;
-  var tools  = STATE.toolsList;
-  var tier   = STATE.role;
-  var available = [];
-
-  tools.forEach(function(t) {
-    if (t._key === 'welcome') return;
-    if (STATE.isSuperAdmin) return;
-    var level = getAccessLevel(STATE.uid, t._key);
-    /* Only show 'off' tools -- these are visible but not yet granted */
-    if (level !== 'off') return;
-    available.push(t);
-  });
-
-  if (available.length === 0) return;
-
-  document.getElementById('availableSection').style.display = 'block';
-  var grid = document.getElementById('availableGrid');
-
-  available.forEach(function(t) {
-    var tile = document.createElement('div');
-    tile.className = 'available-tile';
-
-    var icon = document.createElement('div');
-    icon.className = 'available-tile__icon';
-    icon.textContent = t.icon || '🔧';
-
-    var info = document.createElement('div');
-    info.className = 'available-tile__info';
-
-    var name = document.createElement('div');
-    name.className = 'available-tile__name';
-    name.textContent = t.label || t._key;
-
-    var dept = document.createElement('div');
-    dept.className = 'available-tile__dept';
-    dept.textContent = getDeptLabel(t.department || '');
-
-    info.appendChild(name);
-    info.appendChild(dept);
-
-    var reqBtn = document.createElement('button');
-    reqBtn.className = 'available-tile__req';
-    reqBtn.textContent = 'Request';
-    reqBtn.addEventListener('click', function() {
-      requestToolAccess(t._key, t.label, reqBtn);
-    });
-
-    tile.appendChild(icon);
-    tile.appendChild(info);
-    tile.appendChild(reqBtn);
-    grid.appendChild(tile);
-  });
-
-  /* Toggle show/hide */
-  document.getElementById('availableToggle').addEventListener('click', function() {
-    var g   = document.getElementById('availableGrid');
-    var btn = document.getElementById('availableToggle');
-    var vis = g.style.display !== 'none';
-    g.style.display = vis ? 'none' : 'grid';
-    btn.textContent = vis ? 'Show available tools' : 'Hide';
-  });
-}
-
-function requestToolAccess(key, label, btn) {
-  /* Write to tool-requests/ node */
-  btn.disabled = true;
-  btn.textContent = 'Requested';
-  db.ref('admin/tool-requests').push({
-    uid:       STATE.uid,
-    name:      STATE.userData.name || '',
-    email:     STATE.userData.email || '',
-    tool:      key,
-    toolLabel: label,
-    status:    'pending',
-    createdAt: Date.now()
-  }).then(function() {
-    showToast('Access requested for ' + label, 'success');
-  }).catch(function() {
-    btn.disabled = false;
-    btn.textContent = 'Request';
-    showToast('Could not send request', 'error');
-  });
 }
 
 /* ---- Admin tabs ---------------------------------------------------------- */
@@ -3609,11 +3539,10 @@ function buildRequestCard(r) {
       dl.textContent = getDeptLabel(dept);
       ss.appendChild(dl);
       dm[dept].forEach(function(t) {
-        var defaultLevel = (t.defaults && t.defaults['club']) || 'hidden';
-        /* If they requested this tool and default is hidden/off, bump to access */
+        var defaultLevel = roleDefaultLevel(t._key, r.role || 'staff');
+        /* If they requested this tool and default is off, bump to access */
         var reqLevel = reqTools[t._key];
-        if (reqLevel === 'access' && (defaultLevel === 'hidden' || defaultLevel === 'off')) defaultLevel = 'access';
-        if (defaultLevel === 'admin') defaultLevel = 'access'; /* cap club at access */
+        if (reqLevel === 'access' && defaultLevel === 'off') defaultLevel = 'access';
         var row = document.createElement('div');
         row.className = 'invite-tool-row';
         var nm = document.createElement('div');
@@ -3689,16 +3618,17 @@ function approveRequest(r, btn, ss) {
       slider.querySelectorAll('.acc-slider__stop').forEach(function(s, i) {
         if (s.classList.contains('acc-slider__stop--active')) idx = i;
       });
-      toolAccess[key] = ACC_LEVELS[idx] || 'hidden';
+      toolAccess[key] = ACC_LEVELS[idx] || 'off';
     });
   }
 
   var updates = {};
   updates['users/' + r.uid + '/pending']  = false;
   updates['users/' + r.uid + '/rejected'] = false;
-  /* Write adjusted tool access */
+  /* Write adjusted tool access — overrides-only (skip role defaults) */
   Object.keys(toolAccess).forEach(function(k) {
-    updates['users/' + r.uid + '/tools/' + k] = toolAccess[k];
+    var def = roleDefaultLevel(k, r.role || 'staff');
+    updates['users/' + r.uid + '/tools/' + k] = (toolAccess[k] === def) ? null : toolAccess[k];
   });
   updates['admin/requests/' + r._key + '/status'] = 'approved';
 
@@ -4302,7 +4232,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
       toolName.appendChild(document.createTextNode(t.label || t._key));
 
       /* For staff tools on non-NL users: force hidden and lock all options */
-      var effectiveLevel = staffLocked ? 'hidden' : currentLevel;
+      var effectiveLevel = staffLocked ? 'off' : currentLevel;
       /* All sliders start locked -- unlocked via Edit access button */
       /* locked=false: edit-mode visual lock is handled by acc-slider--locked CSS
          class on the wrapper, NOT by the locked param. The locked param is only
@@ -4451,14 +4381,14 @@ function buildAccordionItem(uid, u, depts, deptMap) {
       var deptKey = tool && tool.department;
 
       /* Read current visual level from slider */
-      var level = 'hidden';
+      var level = 'off';
       slider.querySelectorAll('.acc-slider__stop').forEach(function(s, si) {
         if (s.classList.contains('acc-slider__stop--active')) level = ACC_LEVELS[si];
       });
 
       var def = roleDefaultLevel(toolKey, role);
       if (constraints.lockSliders) level = def;            /* club roles: role-driven */
-      if (constraints.isStaffLocked(deptKey)) level = 'hidden';
+      if (constraints.isStaffLocked(deptKey)) level = 'off';
 
       var path = 'users/' + uid + '/tools/' + toolKey;
       updates[path] = (level === def) ? null : level;      /* overrides-only */
@@ -4622,7 +4552,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
           var sl = storedTools[toolKey];
           if (sl === undefined || sl === null) useLevel = defaultLevel;
           else if (typeof sl === 'string') useLevel = sl;
-          else useLevel = sl.admin ? 'admin' : (sl.access ? 'access' : 'hidden');
+          else useLevel = sl.admin ? 'admin' : (sl.access ? 'access' : 'off');
         }
 
         var useIdx = ACC_LEVELS.indexOf(useLevel);
@@ -4843,7 +4773,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
         var slider = row.querySelector('.acc-slider');
         if (!slider || !slider.dataset.toolkey) return;
         var tool = STATE.tools[slider.dataset.toolkey];
-        var defaultLevel = (tool && tool.defaults && tool.defaults[groupKey2]) || 'hidden';
+        var defaultLevel = (tool && tool.defaults && tool.defaults[groupKey2]) || 'off';
         setSliderLevel(slider, defaultLevel);
       });
       showToast('Defaults restored — save to apply', 'info');
@@ -4956,8 +4886,8 @@ function buildAccordionItem(uid, u, depts, deptMap) {
 /* ---- Welcome message editor ---------------------------------------------- */
 
 /* ---- Access slider ------------------------------------------------------- */
-var ACC_LEVELS = ['hidden', 'off', 'access', 'admin'];
-var ACC_LABELS = { hidden: 'Hidden', off: 'Off', access: 'Access', admin: 'Admin' };
+var ACC_LEVELS = ['off', 'access', 'admin'];
+var ACC_LABELS = { off: 'Off', access: 'Access', admin: 'Admin' };
 
 /* Set an acc-slider to a given level, updating dot classes.
    Used by Restore defaults to reset all sliders at once. */
@@ -5369,7 +5299,7 @@ function initInviteForm() {
       stops.forEach(function(s, i) {
         if (s.classList.contains('acc-slider__stop--active')) idx = i;
       });
-      var level = ACC_LEVELS[idx] || 'hidden';
+      var level = ACC_LEVELS[idx] || 'off';
       if (level !== roleDefaultLevel(toolKey, role)) toolAccess[toolKey] = level;
     });
 
