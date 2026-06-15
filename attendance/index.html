@@ -10,6 +10,17 @@
 
      TECHNICAL CHANGELOG
      -------------------
+     v2.10.5 (2026-06-15) Deterministic, single-shot boot. nlAuthReady now
+                         guards on S._booted so a re-fired auth callback can't
+                         re-run bootstrap() with a stale S.season (which made
+                         the live season load fixtures from archive/<prev>).
+                         bootstrap() also sequences loadClubsMeta() ->
+                         loadFixturesAndSubmissions() instead of Promise.all,
+                         so the season/roster are resolved before the fixtures
+                         path is computed (mirrors switchSeason ordering).
+                         Symptom: last season's fixtures showing under the live
+                         season on first load until you switched season + back.
+
      v2.10.4 (2026-06-15) Three fixes:
                          - clearSubmission(): new "Clear figure" button in the
                            submit/edit modal (shown only when editing an
@@ -1015,6 +1026,13 @@
   var NL_TOOL_KEY = 'ops-attendance';
 
   window.NL_CHANGELOG = [
+    {
+      date: '15 Jun 2026',
+      version: 'v2.10.5',
+      items: [
+        'Fixed last season’s fixtures briefly showing under the live season on first load (e.g. a wrong “1,507 outstanding”). The page now resolves the season before loading fixtures and boots only once, so it always opens on the live season — no need to flick to another season and back.'
+      ]
+    },
     {
       date: '15 Jun 2026',
       version: 'v2.10.4',
@@ -3112,6 +3130,13 @@
 
   window.nlAuthReady = function(session) {
     S.session = session;
+    /* auth-guard re-verifies on every load and can fire nlAuthReady more than
+       once. Boot only once: a re-fire would re-run bootstrap while a stale
+       S.season (from a manual season switch) is still set, reloading fixtures
+       from the wrong — archived — season even though the switcher shows live.
+       Later fires just refresh the session reference. */
+    if (S._booted) return;
+    S._booted = true;
     bootstrap();
   };
 
@@ -3120,23 +3145,25 @@
     wireModals();
     wireFocusControl();
 
-    Promise.all([
-      loadClubsMeta(),
-      loadFixturesAndSubmissions()
-    ])
-    .then(function() {
-      resolveEffectiveClub();
-      computeAggregates();
-      document.getElementById('insightsLoading').style.display = 'none';
-      renderSeasonSwitcher();
-      setupChromeForRole();
-      renderForCurrentView();
-    })
-    .catch(function(err) {
-      document.getElementById('insightsLoading').innerHTML =
-        '<p style="color:var(--red);">Failed to load: ' + NL.escHtml(err.message || String(err)) + '</p>';
-      console.error(err);
-    });
+    /* Resolve the season + roster (loadClubsMeta) BEFORE loading fixtures, so
+       fixturesPath()/submissionsPath() always read the selected season. Running
+       the two in parallel raced — the fixtures read could fire before the
+       season was resolved. This mirrors switchSeason's ordering. */
+    loadClubsMeta()
+      .then(loadFixturesAndSubmissions)
+      .then(function() {
+        resolveEffectiveClub();
+        computeAggregates();
+        document.getElementById('insightsLoading').style.display = 'none';
+        renderSeasonSwitcher();
+        setupChromeForRole();
+        renderForCurrentView();
+      })
+      .catch(function(err) {
+        document.getElementById('insightsLoading').innerHTML =
+          '<p style="color:var(--red);">Failed to load: ' + NL.escHtml(err.message || String(err)) + '</p>';
+        console.error(err);
+      });
   }
 
   /* ---- Season helpers -------------------------------------------------- */
