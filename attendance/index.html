@@ -10,6 +10,23 @@
 
      TECHNICAL CHANGELOG
      -------------------
+     v2.10.7 (2026-06-15) Neutral-venue tagging on archived seasons (superadmin).
+                         Previously the neutral-tag surface was unreachable after
+                         rollover: the "+ Add cup fixture" tab was hidden on any
+                         read-only season, confirmAcfTag/Untag called
+                         assertWritable() (refuses archived), and both wrote to a
+                         HARDCODED live path. A playoff final at Wembley therefore
+                         stayed mis-bucketed as a home game once the season
+                         archived. Fix: new assertCanTag() (live OR superadmin-
+                         on-archived, mirroring assertCanSubmit/canBackfillArchive);
+                         tag/untag writes now use fixturesPath() so they hit
+                         archive/<season>/fixtures; setupChromeForRole splits the
+                         panel into acfCreateCard / acfListCard / acfTagCard and,
+                         on an archived season for superadmins, shows ONLY the tag
+                         card (creation + edit/delete stay locked). The #186 season
+                         filter keeps the May playoff final inside the 2025-26
+                         window so it appears in the tag list.
+
      v2.10.6 (2026-06-15) Season-scoped fixtures. New seasonWindow(key) (1 Jul
                          -> 1 Jul UTC) + filterFixturesToSeason(); loadFixtures-
                          AndSubmissions now drops fixtures dated outside the
@@ -1035,6 +1052,13 @@
   var NL_TOOL_KEY = 'ops-attendance';
 
   window.NL_CHANGELOG = [
+    {
+      date: '15 Jun 2026',
+      version: 'v2.10.7',
+      items: [
+        'Superadmins can now tag a fixture as a neutral venue on a past (archived) season — e.g. flagging last season’s playoff final at Wembley so the crowd no longer counts as a home game. Open the past season, go to the tag surface, tag it. Creating/editing fixtures stays locked on archived seasons.'
+      ]
+    },
     {
       date: '15 Jun 2026',
       version: 'v2.10.6',
@@ -2758,7 +2782,7 @@
 
     <!-- ==================== PANEL: ADD CUP FIXTURE (admin only) ==================== -->
     <div class="panel" data-panel="addcupfixture">
-      <div class="chart-card" style="max-width:720px;">
+      <div class="chart-card" id="acfCreateCard" style="max-width:720px;">
         <div class="chart-header" style="margin-bottom:18px;">
           <div class="chart-header-left">
             <h2 id="acfFormHeading" style="margin:0;">Add cup fixture</h2>
@@ -2836,7 +2860,7 @@
       </div>
 
       <!-- ==== Existing cup fixtures &mdash; list with edit + delete ==== -->
-      <div class="chart-card" style="margin-top:20px;">
+      <div class="chart-card" id="acfListCard" style="margin-top:20px;">
         <div class="chart-header">
           <div class="chart-header-left">
             <h2>Existing cup fixtures</h2>
@@ -2879,7 +2903,7 @@
       </div>
 
       <!-- ==== Tag any fixture as neutral venue ==== -->
-      <div class="chart-card" style="margin-top:20px;">
+      <div class="chart-card" id="acfTagCard" style="margin-top:20px;">
         <div class="chart-header">
           <div class="chart-header-left">
             <h2>Tag a fixture as neutral venue</h2>
@@ -3226,9 +3250,10 @@
     return kept;
   }
 
-  /* Guard at the top of every write action. Returns false (and toasts) when
-     the user is viewing an archived season, so no past-season write happens.
-     Used by tagging + add-cup-fixture, which stay locked on past seasons. */
+  /* Guard for writes that stay fully locked on past seasons. Returns false
+     (and toasts) when viewing an archived season. Used by add-cup-fixture
+     creation; neutral tagging uses the looser assertCanTag() (superadmins may
+     tag on archived seasons). */
   function assertWritable() {
     if (isReadOnlySeason()) {
       NL.toast('That season is archived — switch to ' + NL.season.label(S.meta, S.currentSeason) + ' to make changes.', 'info');
@@ -3248,6 +3273,17 @@
     if (seasonIsCurrent()) return true;
     if (canBackfillArchive()) return true;
     NL.toast('That season is archived — switch to ' + NL.season.label(S.meta, S.currentSeason) + ' to make changes.', 'info');
+    return false;
+  }
+  /* Tagging a fixture neutral follows the same rule as submission back-fill:
+     allowed on the live season, or by a superadmin on an archived season
+     (e.g. flagging last season's playoff final at Wembley after rollover).
+     Fixture creation/edit/delete stay locked on archived seasons — only the
+     surgical isNeutral/venueName tag is exposed there. */
+  function assertCanTag() {
+    if (seasonIsCurrent()) return true;
+    if (canBackfillArchive()) return true;
+    NL.toast('That season is archived — only a superadmin can tag fixtures there.', 'info');
     return false;
   }
 
@@ -3705,12 +3741,27 @@
       populateClubFocusDropdown();
     }
 
-    /* Add cup fixture tab \u2014 admin + superadmin only, and only on the live
-       season (archived seasons are read-only). */
-    var acfTab = document.getElementById('addCupFixtureTab');
-    if (isAdmin && !isReadOnlySeason()) {
+    /* Add cup fixture tab \u2014 admin + superadmin only. On the live season the
+       full surface shows (create cup fixtures, edit/delete, tag neutral). On an
+       archived season a superadmin still gets the neutral-tag surface \u2014 so a
+       playoff final / Wembley tie can be flagged after rollover \u2014 while fixture
+       creation + edit/delete stay locked. */
+    var acfTab     = document.getElementById('addCupFixtureTab');
+    var createCard = document.getElementById('acfCreateCard');
+    var listCard   = document.getElementById('acfListCard');
+    var tagCard    = document.getElementById('acfTagCard');
+    if (isAdmin && seasonIsCurrent()) {
       acfTab.style.display = '';
       wireAddCupFixtureForm();
+      if (createCard) createCard.style.display = '';
+      if (listCard)   listCard.style.display = '';
+      if (tagCard)    tagCard.style.display = '';
+    } else if (isAdmin && canBackfillArchive()) {   /* superadmin on archived season */
+      acfTab.style.display = '';
+      wireAddCupFixtureForm();
+      if (createCard) createCard.style.display = 'none';
+      if (listCard)   listCard.style.display = 'none';
+      if (tagCard)    tagCard.style.display = '';
     } else {
       acfTab.style.display = 'none';
     }
@@ -4673,7 +4724,7 @@
   }
 
   function confirmAcfTag() {
-    if (!assertWritable()) { closeAcfTagModal(); return; }
+    if (!assertCanTag()) { closeAcfTagModal(); return; }
     var matchID = S._acfPendingTag;
     if (!matchID) { closeAcfTagModal(); return; }
     var f = S.fixtures[matchID];
@@ -4691,7 +4742,7 @@
 
     NL.ensureAuth()
       .then(function() {
-        return firebase.database().ref('app-data/ops-attendance/fixtures/' + matchID).update({
+        return firebase.database().ref(fixturesPath() + '/' + matchID).update({
           isNeutral: true,
           venueName: venue
         });
@@ -4720,7 +4771,7 @@
   }
 
   function confirmAcfUntag() {
-    if (!assertWritable()) { closeAcfTagModal(); return; }
+    if (!assertCanTag()) { closeAcfTagModal(); return; }
     var matchID = S._acfPendingTag;
     if (!matchID) { closeAcfTagModal(); return; }
     var f = S.fixtures[matchID];
@@ -4735,7 +4786,7 @@
       .then(function() {
         /* Remove both fields so the fixture goes back to a regular home/away
            bucketing on the next aggregate pass. */
-        return firebase.database().ref('app-data/ops-attendance/fixtures/' + matchID).update({
+        return firebase.database().ref(fixturesPath() + '/' + matchID).update({
           isNeutral: null,
           venueName: null
         });
