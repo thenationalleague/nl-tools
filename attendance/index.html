@@ -10,6 +10,15 @@
 
      TECHNICAL CHANGELOG
      -------------------
+     v2.10.6 (2026-06-15) Season-scoped fixtures. New seasonWindow(key) (1 Jul
+                         -> 1 Jul UTC) + filterFixturesToSeason(); loadFixtures-
+                         AndSubmissions now drops fixtures dated outside the
+                         viewed season. The live node accumulates feed fixtures
+                         and isn't always cleared at rollover, so last season's
+                         fixtures were surfacing as this season's outstanding.
+                         Date-less fixtures are kept (can't classify). Pairs
+                         with the operational Season-admin archive+clear.
+
      v2.10.5 (2026-06-15) Deterministic, single-shot boot. nlAuthReady now
                          guards on S._booted so a re-fired auth callback can't
                          re-run bootstrap() with a stale S.season (which made
@@ -1026,6 +1035,13 @@
   var NL_TOOL_KEY = 'ops-attendance';
 
   window.NL_CHANGELOG = [
+    {
+      date: '15 Jun 2026',
+      version: 'v2.10.6',
+      items: [
+        'Belt-and-braces: the live season now only ever counts fixtures dated within that season. If last season’s fixtures linger in the feed, they can no longer show up as this season’s “outstanding”.'
+      ]
+    },
     {
       date: '15 Jun 2026',
       version: 'v2.10.5',
@@ -3184,6 +3200,32 @@
   function fixturesPath()    { return seasonIsCurrent() ? BASE_PATH + '/fixtures'    : BASE_PATH + '/archive/' + S.season + '/fixtures'; }
   function submissionsPath() { return seasonIsCurrent() ? BASE_PATH + '/submissions' : BASE_PATH + '/archive/' + S.season + '/submissions'; }
 
+  /* Inclusive-start / exclusive-end UTC window (ms) for a season key. NL
+     seasons run ~Aug–May, so 1 Jul → 1 Jul is a safe boundary that still
+     catches pre-season cup ties and late playoff finals. Used to keep
+     prior-season fixtures (which the NLS feed can leave behind in the live
+     node) out of the view — see filterFixturesToSeason. */
+  function seasonWindow(key) {
+    var y = parseInt(key, 10);
+    if (isNaN(y)) return null;
+    return { start: Date.UTC(y, 6, 1), end: Date.UTC(y + 1, 6, 1) };
+  }
+  /* Drop fixtures dated outside the selected season's window. The live node
+     accumulates fixtures from the feed and isn't always cleared at rollover,
+     so without this last season's fixtures show as this season's outstanding.
+     Date-less fixtures are kept (can't be classified — better than hiding). */
+  function filterFixturesToSeason(fixtures, key) {
+    var win = seasonWindow(key);
+    if (!win) return fixtures;
+    var kept = {};
+    for (var id in fixtures) {
+      if (!fixtures.hasOwnProperty(id)) continue;
+      var ko = parseKickoff(fixtures[id] && fixtures[id].kickoffUTC);
+      if (!ko || (ko.getTime() >= win.start && ko.getTime() < win.end)) kept[id] = fixtures[id];
+    }
+    return kept;
+  }
+
   /* Guard at the top of every write action. Returns false (and toasts) when
      the user is viewing an archived season, so no past-season write happens.
      Used by tagging + add-cup-fixture, which stay locked on past seasons. */
@@ -3243,7 +3285,7 @@
       ]);
     })
     .then(function(snaps) {
-      S.fixtures = snaps[0].val() || {};
+      S.fixtures = filterFixturesToSeason(snaps[0].val() || {}, S.season || S.currentSeason);
       S.submissions = snaps[1].val() || {};
     });
   }
