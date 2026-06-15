@@ -10,6 +10,28 @@
 
      TECHNICAL CHANGELOG
      -------------------
+     v2.10.9 (2026-06-15) Full superadmin edit on archived seasons + tab-bar
+                         tidy. Cup-fixture create/edit/delete were locked to the
+                         live season (assertWritable) and, like the old tag bug,
+                         wrote to HARDCODED live paths
+                         (app-data/ops-attendance/fixtures|submissions/...), so
+                         they'd have hit the wrong node even past the guard.
+                         Now: submitAddCupFixtureForm + confirmAcfDelete use
+                         assertCanSubmit() (live OR superadmin-on-archived) and
+                         write via fixturesPath()/submissionsPath(); the "+ Add
+                         cup fixture" tab shows for superadmins on archived
+                         seasons. assertWritable() removed (dead — every write
+                         now routes through assertCanSubmit/assertCanTag, which
+                         share one rule). Attendance back-fill already worked
+                         (saveSubmission/clearSubmission were on assertCanSubmit
+                         + submissionsPath since the back-fill change). Archived
+                         badge reworded "attendance back-fill" -> "superadmin
+                         editing enabled". Tab bar: the per-tab margin-left:auto
+                         (which spread the action tabs apart once there were
+                         three) is gone; the action tabs now live in a
+                         .att-tabs__actions flex cluster (margin-left:auto +
+                         divider), toggled hidden when no action tab is visible.
+
      v2.10.8 (2026-06-15) Neutral-venue tagging promoted to its own tab.
                          The "Tag a fixture as neutral venue" card was bolted
                          onto the "+ Add cup fixture" panel for historical
@@ -1068,6 +1090,14 @@
   var NL_TOOL_KEY = 'ops-attendance';
 
   window.NL_CHANGELOG = [
+    {
+      date: '15 Jun 2026',
+      version: 'v2.10.9',
+      items: [
+        'Superadmins can now fully edit a past (archived) season — add, edit and delete cup fixtures, tag neutral venues, and back-fill attendances. Open the season and the admin tabs appear with a “superadmin editing enabled” badge.',
+        'Tidied the tab bar: the admin tabs (Add cup fixture, Neutral venues, Season admin) now cluster together on the right behind a divider, instead of being spread across the bar.'
+      ]
+    },
     {
       date: '15 Jun 2026',
       version: 'v2.10.8',
@@ -2234,9 +2264,17 @@
     margin-bottom: -2px;
   }
   .att-tab.active { color: var(--primary); border-bottom-color: var(--primary); }
-  /* Action tabs (create, not view) &mdash; sit to the right, slightly different feel */
-  .att-tab--action {
+  /* Action tabs (create/admin, not view) cluster together to the right of the
+     view tabs, behind a thin divider, so they read as a distinct group rather
+     than being spread across the bar. */
+  .att-tabs__actions {
     margin-left: auto;
+    display: flex;
+    gap: 2px;
+    padding-left: 12px;
+    border-left: 1px solid var(--border);
+  }
+  .att-tab--action {
     color: var(--navy);
     font-variation-settings: 'wght' 800;
   }
@@ -2414,15 +2452,17 @@
       <button class="att-tab" data-panel="outstanding" id="outstandingTab">
         Outstanding <span class="tab-badge red" id="outstandingTabBadge" style="display:none;">&mdash;</span>
       </button>
-      <button class="att-tab att-tab--action" data-panel="addcupfixture" id="addCupFixtureTab" style="display:none;">
-        + Add cup fixture
-      </button>
-      <button class="att-tab att-tab--action" data-panel="neutralvenues" id="neutralVenuesTab" style="display:none;">
-        Neutral venues
-      </button>
-      <button class="att-tab att-tab--action" data-panel="seasonadmin" id="seasonAdminTab" style="display:none;">
-        Season admin
-      </button>
+      <div class="att-tabs__actions" id="attActionTabs" style="display:none;">
+        <button class="att-tab att-tab--action" data-panel="addcupfixture" id="addCupFixtureTab" style="display:none;">
+          + Add cup fixture
+        </button>
+        <button class="att-tab att-tab--action" data-panel="neutralvenues" id="neutralVenuesTab" style="display:none;">
+          Neutral venues
+        </button>
+        <button class="att-tab att-tab--action" data-panel="seasonadmin" id="seasonAdminTab" style="display:none;">
+          Season admin
+        </button>
+      </div>
     </div>
 
     <!-- ==================== PANEL: CROWD INSIGHTS ==================== -->
@@ -3280,36 +3320,23 @@
     return kept;
   }
 
-  /* Guard for writes that stay fully locked on past seasons. Returns false
-     (and toasts) when viewing an archived season. Used by add-cup-fixture
-     creation; neutral tagging uses the looser assertCanTag() (superadmins may
-     tag on archived seasons). */
-  function assertWritable() {
-    if (isReadOnlySeason()) {
-      NL.toast('That season is archived — switch to ' + NL.season.label(S.meta, S.currentSeason) + ' to make changes.', 'info');
-      return false;
-    }
-    return true;
-  }
-
-  /* Superadmins may back-fill attendance submissions into an archived season
-     (e.g. outstanding fixtures left over at rollover). The archive RTDB node
-     is superadmin-writable, so this matches the rules. Everything else on a
-     past season stays read-only. */
+  /* Superadmins may edit an archived season — back-fill attendance left over at
+     rollover, add/fix/delete a cup fixture, tag a neutral venue. The archive
+     RTDB node is superadmin-writable, so this matches the rules. For everyone
+     else, and for admins on a past season, archived data stays read-only. */
   function canBackfillArchive() {
     return S.session && S.session.role === 'superadmin';
   }
+  /* The single write gate: allowed on the live season, or by a superadmin on an
+     archived season. Used by attendance submit/clear AND cup-fixture
+     create/edit/delete. */
   function assertCanSubmit() {
     if (seasonIsCurrent()) return true;
     if (canBackfillArchive()) return true;
     NL.toast('That season is archived — switch to ' + NL.season.label(S.meta, S.currentSeason) + ' to make changes.', 'info');
     return false;
   }
-  /* Tagging a fixture neutral follows the same rule as submission back-fill:
-     allowed on the live season, or by a superadmin on an archived season
-     (e.g. flagging last season's playoff final at Wembley after rollover).
-     Fixture creation/edit/delete stay locked on archived seasons — only the
-     surgical isNeutral/venueName tag is exposed there. */
+  /* Same rule as assertCanSubmit, with a tagging-specific message. */
   function assertCanTag() {
     if (seasonIsCurrent()) return true;
     if (canBackfillArchive()) return true;
@@ -3376,17 +3403,17 @@
       b.addEventListener('click', function() { switchSeason(key); });
       pills.appendChild(b);
     });
-    /* Superadmins can back-fill attendance into an archived season, so the
-       badge reflects that rather than a blanket "read-only". */
+    /* Superadmins can edit an archived season (attendance, cup fixtures, neutral
+       tags), so the badge reflects that rather than a blanket "read-only". */
     var backfill = isReadOnlySeason() && canBackfillArchive();
     ro.style.display = isReadOnlySeason() ? '' : 'none';
-    ro.textContent = backfill ? 'Archived · attendance back-fill enabled' : 'Read-only archive';
+    ro.textContent = backfill ? 'Archived · superadmin editing enabled' : 'Read-only archive';
 
     var sub = document.getElementById('leagueStripSub');
     if (sub) {
       sub.textContent = NL.season.label(S.meta, S.season) + ' season · ' +
         S.clubs.length + ' clubs across National, North and South' +
-        (isReadOnlySeason() ? (backfill ? ' · archived (back-fill)' : ' · archived (read-only)') : '');
+        (isReadOnlySeason() ? (backfill ? ' · archived (superadmin edit)' : ' · archived (read-only)') : '');
     }
   }
 
@@ -3772,10 +3799,10 @@
     }
 
     /* "+ Add cup fixture" tab \u2014 create/edit/delete cup fixtures. Admin +
-       superadmin only, and live season only (fixtures are owned by the live
-       feed; archived seasons are read-only for creation). */
+       superadmin on the live season; superadmins also on archived seasons, so a
+       missed cup tie / playoff fixture can be corrected after rollover. */
     var acfTab = document.getElementById('addCupFixtureTab');
-    if (isAdmin && seasonIsCurrent()) {
+    if (isAdmin && (seasonIsCurrent() || canBackfillArchive())) {
       acfTab.style.display = '';
       wireAddCupFixtureForm();
     } else {
@@ -3805,6 +3832,16 @@
       } else {
         saTab.style.display = 'none';
       }
+    }
+
+    /* Hide the right-hand action cluster entirely when none of its tabs show,
+       so its divider/spacing doesn't float on its own (e.g. club users). */
+    var actionsWrap = document.getElementById('attActionTabs');
+    if (actionsWrap) {
+      var anyAction = [acfTab, nvTab, saTab].some(function(t) {
+        return t && t.style.display !== 'none';
+      });
+      actionsWrap.style.display = anyAction ? '' : 'none';
     }
 
     /* If the active panel just got hidden, fall back to insights. */
@@ -4289,7 +4326,7 @@
   }
 
   function submitAddCupFixtureForm() {
-    if (!assertWritable()) return;
+    if (!assertCanSubmit()) return;
     setAddCupFixtureError('');
 
     var comp    = S._acfComp;
@@ -4372,17 +4409,17 @@
        write the new one. This keeps RTDB tidy and avoids orphans. */
     if (editingID && editingID !== matchID) {
       chain = chain.then(function() {
-        return firebase.database().ref('app-data/ops-attendance/fixtures/' + editingID).remove();
+        return firebase.database().ref(fixturesPath() + '/' + editingID).remove();
       }).then(function() {
         delete S.fixtures[editingID];
         /* Move any submission under the old matchID to the new one */
         var oldSub = S.submissions[editingID];
         if (oldSub) {
           delete S.submissions[editingID];
-          return firebase.database().ref('app-data/ops-attendance/submissions/' + editingID).remove()
+          return firebase.database().ref(submissionsPath() + '/' + editingID).remove()
             .then(function() {
               var movedSub = Object.assign({}, oldSub, { matchID: matchID });
-              return firebase.database().ref('app-data/ops-attendance/submissions/' + matchID).set(movedSub)
+              return firebase.database().ref(submissionsPath() + '/' + matchID).set(movedSub)
                 .then(function() {
                   S.submissions[matchID] = movedSub;
                 });
@@ -4392,7 +4429,7 @@
     }
 
     chain = chain.then(function() {
-      return firebase.database().ref('app-data/ops-attendance/fixtures/' + matchID).set(clean);
+      return firebase.database().ref(fixturesPath() + '/' + matchID).set(clean);
     }).then(function() {
       S.fixtures[matchID] = clean;
       if (NL.writeAudit) {
@@ -4568,6 +4605,7 @@
   }
 
   function confirmAcfDelete() {
+    if (!assertCanSubmit()) { closeAcfDeleteModal(); return; }
     var matchID = S._acfPendingDelete;
     if (!matchID) { closeAcfDeleteModal(); return; }
     var f = S.fixtures[matchID];
@@ -4581,10 +4619,10 @@
     NL.ensureAuth()
       .then(function() {
         var tasks = [
-          firebase.database().ref('app-data/ops-attendance/fixtures/' + matchID).remove()
+          firebase.database().ref(fixturesPath() + '/' + matchID).remove()
         ];
         if (hadSub) {
-          tasks.push(firebase.database().ref('app-data/ops-attendance/submissions/' + matchID).remove());
+          tasks.push(firebase.database().ref(submissionsPath() + '/' + matchID).remove());
         }
         return Promise.all(tasks);
       })
