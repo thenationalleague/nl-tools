@@ -10,6 +10,20 @@
 
      TECHNICAL CHANGELOG
      -------------------
+     v2.10.4 (2026-06-15) Three fixes:
+                         - clearSubmission(): new "Clear figure" button in the
+                           submit/edit modal (shown only when editing an
+                           existing sub). Two-tap arm-then-commit on the button
+                           itself, gated by assertCanSubmit(); removes
+                           submissionsPath()/<matchID>, drops the cached sub on
+                           both clubs' match lists, audits attendance_clear.
+                         - formatDateShort() now appends the year (d mmm yyyy)
+                           so the Outstanding list / match rows / reminder
+                           emails make the season obvious. .match-row date
+                           column widened 92px -> 104px to fit.
+                         - .match-row gains a <=560px two-row layout (grid
+                           areas: date/opp/total on top, full-width bar below).
+
      v2.10.3 (2026-06-15) renderClubView empty-state is now membership-aware.
                          Branches on S.clubs roster membership for the
                          selected season: not-in-roster -> "Did not compete
@@ -1003,6 +1017,15 @@
   window.NL_CHANGELOG = [
     {
       date: '15 Jun 2026',
+      version: 'v2.10.4',
+      items: [
+        'Admins (and clubs, on their own matches) can now clear a submitted attendance figure. Open the figure to edit it and use “Clear figure” — it asks for a second tap to confirm, then returns the match to Outstanding.',
+        'Dates now show the year (e.g. “9 Aug 2025”) across the Outstanding list, match breakdowns and reminder emails — makes it obvious at a glance which season a fixture belongs to.',
+        'Mobile: the match-by-match bars now stack — opponent and total on top, a full-width bar underneath — instead of being crushed into a sliver on narrow screens.'
+      ]
+    },
+    {
+      date: '15 Jun 2026',
       version: 'v2.10.3',
       items: [
         'The empty-club card now tells you why there’s no data. A newly-promoted club in the live season (in the league, but fixtures not released yet) gets “No attendance recorded yet — matches appear once the fixtures are released” instead of the misleading “wasn’t in the National League”. Clubs that genuinely weren’t in the league that season read “Did not compete in the National League in 2025-26”.'
@@ -1852,10 +1875,27 @@
   .match-chart { display: flex; flex-direction: column; gap: 6px; }
   .match-row {
     display: grid;
-    grid-template-columns: 92px minmax(180px, 1fr) 2.2fr 70px;
+    grid-template-columns: 104px minmax(160px, 1fr) 2.2fr 70px;
     align-items: center;
     gap: 10px;
     padding: 4px 0;
+  }
+  /* Mobile: stack into two rows — date · opponent · total on top, full-width
+     bar below. The single-line grid crushed the bar to a sliver on phones. */
+  @media (max-width: 560px) {
+    .match-row {
+      grid-template-columns: auto 1fr auto;
+      grid-template-areas:
+        "date opp total"
+        "bar  bar bar";
+      align-items: center;
+      gap: 4px 8px;
+      padding: 9px 0;
+    }
+    .match-date      { grid-area: date; }
+    .match-opp       { grid-area: opp; }
+    .match-total     { grid-area: total; }
+    .match-bar-track { grid-area: bar; }
   }
   .match-date {
     font-size: 12px; color: var(--text-muted);
@@ -2965,6 +3005,7 @@
       </form>
     </div>
     <div class="modal__footer">
+      <button class="btn btn--ghost" id="submitModalClear" type="button" style="display:none;margin-right:auto;color:var(--red);">Clear figure</button>
       <button class="btn btn--ghost" id="submitModalCancel" type="button">Cancel</button>
       <button class="btn btn--primary" id="submitModalSave" type="button">Submit</button>
     </div>
@@ -7030,6 +7071,8 @@
     document.getElementById('submitModalClose').addEventListener('click', closeSubmitModal);
     document.getElementById('submitModalCancel').addEventListener('click', closeSubmitModal);
     document.getElementById('submitModalSave').addEventListener('click', saveSubmission);
+    var clearBtnEl = document.getElementById('submitModalClear');
+    if (clearBtnEl) clearBtnEl.addEventListener('click', clearSubmission);
     document.getElementById('viewModalClose').addEventListener('click', closeViewModal);
     document.getElementById('viewModalOk').addEventListener('click', closeViewModal);
 
@@ -7066,6 +7109,16 @@
     title.textContent = sub ? 'Edit attendance' : 'Submit attendance';
     var saveBtn = document.getElementById('submitModalSave');
     saveBtn.textContent = sub ? 'Save changes' : 'Submit';
+
+    /* Clear-figure button: only when editing an existing submission. Reset its
+       two-tap arm state each time the modal opens. */
+    var clearBtn = document.getElementById('submitModalClear');
+    if (clearBtn) {
+      clearBtn.style.display = sub ? '' : 'none';
+      clearBtn.disabled = false;
+      clearBtn.textContent = 'Clear figure';
+      clearBtn.dataset.armed = '';
+    }
 
     var meta = document.getElementById('submitModalMeta');
     meta.innerHTML = '';
@@ -7215,6 +7268,76 @@
       });
   }
 
+  /* Remove a submitted attendance figure entirely, returning the match to the
+     outstanding list. Two-tap confirm on the button itself (destructive).
+     Same permission as submitting (assertCanSubmit). */
+  function clearSubmission() {
+    if (!assertCanSubmit()) return;
+    var fix = S.editingFixture;
+    var existing = S.editingSubmission;
+    if (!fix || !existing) return;
+    var matchID = fix.matchID;
+    var btn = document.getElementById('submitModalClear');
+
+    /* First tap arms; second tap (within 4s) commits. */
+    if (btn && btn.dataset.armed !== 'yes') {
+      btn.dataset.armed = 'yes';
+      btn.textContent = 'Tap again to clear';
+      btn.style.fontVariationSettings = "'wght' 800";
+      setTimeout(function() {
+        if (btn && btn.dataset.armed === 'yes') {
+          btn.dataset.armed = '';
+          btn.textContent = 'Clear figure';
+          btn.style.fontVariationSettings = '';
+        }
+      }, 4000);
+      return;
+    }
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Clearing…'; }
+
+    NL.ensureAuth()
+      .then(function() {
+        if (NL.writeAudit) {
+          var kickoffStr = fix.kickoffUTC
+            ? new Date(fix.kickoffUTC).toLocaleString('en-GB', {
+                day: '2-digit', month: 'short', year: 'numeric',
+                hour: '2-digit', minute: '2-digit'
+              })
+            : '';
+          NL.writeAudit('attendance_clear',
+            'Cleared attendance — ' + fix.homeTeamName + ' v ' + fix.awayTeamName +
+            (kickoffStr ? ' (' + kickoffStr + ')' : '') +
+            (existing.total != null ? ' — was total ' + existing.total : ''));
+        }
+        return firebase.database().ref(submissionsPath() + '/' + matchID).remove();
+      })
+      .then(function() {
+        delete S.submissions[matchID];
+        /* Drop the cached sub on both clubs' match lists. */
+        if (fix.homeTeamName && S.perClub[fix.homeTeamName]) {
+          var hm = S.perClub[fix.homeTeamName].homeMatches;
+          for (var i = 0; i < hm.length; i++) {
+            if (hm[i].matchID === matchID) { hm[i].sub = null; break; }
+          }
+        }
+        if (fix.awayTeamName && S.perClub[fix.awayTeamName]) {
+          var am = S.perClub[fix.awayTeamName].awayMatches;
+          for (var j = 0; j < am.length; j++) {
+            if (am[j].matchID === matchID) { am[j].sub = null; break; }
+          }
+        }
+        NL.toast('Attendance cleared', 'success');
+        closeSubmitModal();
+        renderForCurrentView();
+      })
+      .catch(function(err) {
+        NL.toast('Clear failed: ' + err.message, 'error');
+        console.error(err);
+        if (btn) { btn.disabled = false; btn.textContent = 'Clear figure'; btn.dataset.armed = ''; btn.style.fontVariationSettings = ''; }
+      });
+  }
+
   function openViewModal(fix, sub) {
     var body = document.getElementById('viewModalBody');
     body.innerHTML = '';
@@ -7268,7 +7391,7 @@
     if (!d) return str || '';
     var day = d.getDate();
     var mo = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
-    return day + ' ' + mo;
+    return day + ' ' + mo + ' ' + d.getFullYear();
   }
 
   function setActiveWithin(parentSel, childSel, active) {
