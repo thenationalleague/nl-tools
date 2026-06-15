@@ -250,9 +250,12 @@
     var titleRow  = el('div', { class: 'topbar__title-row' });
     titleRow.appendChild(el('span', { class: 'topbar__title', text: opts.title }));
 
-    /* Version badge — clickable, opens What's new modal */
+    /* Version badge — clickable, opens What's new modal. League roles only:
+       version/changelog detail is internal, hidden from club + third-party. */
+    var vbRole = (session && session.role) || '';
+    var vbIsLeague = (vbRole === 'superadmin' || vbRole === 'admin' || vbRole === 'staff');
     var changelog = window.NL_CHANGELOG;
-    if (changelog && changelog.length && changelog[0].version) {
+    if (vbIsLeague && changelog && changelog.length && changelog[0].version) {
       var versionBtn = el('button', {
         class: 'topbar__version',
         type:  'button',
