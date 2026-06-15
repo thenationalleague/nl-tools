@@ -10,6 +10,22 @@
 
      TECHNICAL CHANGELOG
      -------------------
+     v2.10.8 (2026-06-15) Neutral-venue tagging promoted to its own tab.
+                         The "Tag a fixture as neutral venue" card was bolted
+                         onto the "+ Add cup fixture" panel for historical
+                         reasons, but it always applied to ANY fixture (e.g. a
+                         league playoff final), so the cup-fixture framing was
+                         misleading. Moved the acfTagCard into a new
+                         data-panel="neutralvenues" panel behind a "Neutral
+                         venues" tab. Split the wiring: wireNeutralVenues()
+                         (own S._nvWired guard) now owns the tag-list filters +
+                         modal wiring + renderAcfTagList; wireAddCupFixtureForm()
+                         keeps only cup-fixture create/edit/delete. The two tabs
+                         are now independent in setupChromeForRole — "+ Add cup
+                         fixture" is admin+ on the live season; "Neutral venues"
+                         is admin+ on the live season and superadmin on archived
+                         seasons (replacing the per-card show/hide from v2.10.7).
+
      v2.10.7 (2026-06-15) Neutral-venue tagging on archived seasons (superadmin).
                          Previously the neutral-tag surface was unreachable after
                          rollover: the "+ Add cup fixture" tab was hidden on any
@@ -1052,6 +1068,13 @@
   var NL_TOOL_KEY = 'ops-attendance';
 
   window.NL_CHANGELOG = [
+    {
+      date: '15 Jun 2026',
+      version: 'v2.10.8',
+      items: [
+        'Neutral-venue tagging now has its own “Neutral venues” tab, separate from “Add cup fixture” — it always applied to any fixture (a league playoff final, not just cup ties), so it no longer hides under the cup-fixture heading.'
+      ]
+    },
     {
       date: '15 Jun 2026',
       version: 'v2.10.7',
@@ -2394,6 +2417,9 @@
       <button class="att-tab att-tab--action" data-panel="addcupfixture" id="addCupFixtureTab" style="display:none;">
         + Add cup fixture
       </button>
+      <button class="att-tab att-tab--action" data-panel="neutralvenues" id="neutralVenuesTab" style="display:none;">
+        Neutral venues
+      </button>
       <button class="att-tab att-tab--action" data-panel="seasonadmin" id="seasonAdminTab" style="display:none;">
         Season admin
       </button>
@@ -2901,13 +2927,17 @@
         </div>
         <div id="acfListEmpty" style="display:none;padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">No cup fixtures match your filters.</div>
       </div>
+    </div>
+    <!-- END PANEL: addcupfixture -->
 
+    <!-- ==================== PANEL: NEUTRAL VENUES ==================== -->
+    <div class="panel" data-panel="neutralvenues">
       <!-- ==== Tag any fixture as neutral venue ==== -->
-      <div class="chart-card" id="acfTagCard" style="margin-top:20px;">
+      <div class="chart-card" id="acfTagCard" style="max-width:980px;">
         <div class="chart-header">
           <div class="chart-header-left">
             <h2>Tag a fixture as neutral venue</h2>
-            <p class="section-subtitle">Use this for fixtures that came in from the NLS feed and need flagging as neutral &mdash; e.g. the playoff final, an FA Cup tie at Wembley. Tagging here writes only the venue + neutral flag; teams, date and competition stay owned by NLS.</p>
+            <p class="section-subtitle">Use this for any fixture &mdash; league or cup &mdash; played away from a club's own ground: a playoff final or FA Cup tie at Wembley, a relocated game, etc. Tagging writes only the venue + neutral flag; teams, date and competition stay owned by the NLS feed. The crowd then renders in its own scale-independent band so it no longer counts toward either club's home average. Superadmins can also tag fixtures on past (archived) seasons.</p>
           </div>
         </div>
 
@@ -2944,7 +2974,7 @@
         <p class="section-subtitle" style="margin-top:14px;">Showing the 60 most recent fixtures by default. Use search to find older fixtures.</p>
       </div>
     </div>
-    <!-- END PANEL: addcupfixture -->
+    <!-- END PANEL: neutralvenues -->
 
     <!-- ==================== PANEL: SEASON ADMIN (superadmin only) ==================== -->
     <div class="panel" data-panel="seasonadmin">
@@ -3741,29 +3771,28 @@
       populateClubFocusDropdown();
     }
 
-    /* Add cup fixture tab \u2014 admin + superadmin only. On the live season the
-       full surface shows (create cup fixtures, edit/delete, tag neutral). On an
-       archived season a superadmin still gets the neutral-tag surface \u2014 so a
-       playoff final / Wembley tie can be flagged after rollover \u2014 while fixture
-       creation + edit/delete stay locked. */
-    var acfTab     = document.getElementById('addCupFixtureTab');
-    var createCard = document.getElementById('acfCreateCard');
-    var listCard   = document.getElementById('acfListCard');
-    var tagCard    = document.getElementById('acfTagCard');
+    /* "+ Add cup fixture" tab \u2014 create/edit/delete cup fixtures. Admin +
+       superadmin only, and live season only (fixtures are owned by the live
+       feed; archived seasons are read-only for creation). */
+    var acfTab = document.getElementById('addCupFixtureTab');
     if (isAdmin && seasonIsCurrent()) {
       acfTab.style.display = '';
       wireAddCupFixtureForm();
-      if (createCard) createCard.style.display = '';
-      if (listCard)   listCard.style.display = '';
-      if (tagCard)    tagCard.style.display = '';
-    } else if (isAdmin && canBackfillArchive()) {   /* superadmin on archived season */
-      acfTab.style.display = '';
-      wireAddCupFixtureForm();
-      if (createCard) createCard.style.display = 'none';
-      if (listCard)   listCard.style.display = 'none';
-      if (tagCard)    tagCard.style.display = '';
     } else {
       acfTab.style.display = 'none';
+    }
+
+    /* "Neutral venues" tab \u2014 tag ANY fixture neutral. Admin + superadmin on the
+       live season; superadmins also on archived seasons, so a playoff final /
+       Wembley tie can be corrected after rollover. */
+    var nvTab = document.getElementById('neutralVenuesTab');
+    if (nvTab) {
+      if (isAdmin && (seasonIsCurrent() || canBackfillArchive())) {
+        nvTab.style.display = '';
+        wireNeutralVenues();
+      } else {
+        nvTab.style.display = 'none';
+      }
     }
 
     /* Season admin tab \u2014 superadmin only, live season only (it operates on
@@ -4149,10 +4178,24 @@
       });
     }
 
-    /* Neutral-tag list filters + modal wiring */
+    /* Delete-confirm modal wiring */
+    document.getElementById('acfDeleteClose').addEventListener('click', closeAcfDeleteModal);
+    document.getElementById('acfDeleteCancel').addEventListener('click', closeAcfDeleteModal);
+    document.getElementById('acfDeleteConfirm').addEventListener('click', confirmAcfDelete);
+
+    renderAcfList();
+  }
+
+  /* Neutral-venues tab — tag ANY fixture (league or cup) as a neutral venue.
+     Lives in its own panel so superadmins can reach it on archived seasons even
+     when the cup-fixture creation tab (live-season only) is hidden. */
+  function wireNeutralVenues() {
+    if (S._nvWired) return;
+    S._nvWired = true;
+
     S._acfTagStatusFilter = 'all';
     S._acfTagSearch = '';
-    var tagFilterPills = document.querySelectorAll('.panel[data-panel="addcupfixture"] .filter-pill[data-tag-filter]');
+    var tagFilterPills = document.querySelectorAll('.panel[data-panel="neutralvenues"] .filter-pill[data-tag-filter]');
     tagFilterPills.forEach(function(p) {
       p.addEventListener('click', function(e) {
         S._acfTagStatusFilter = e.currentTarget.getAttribute('data-tag-filter');
@@ -4172,12 +4215,6 @@
     document.getElementById('acfTagConfirm').addEventListener('click', confirmAcfTag);
     document.getElementById('acfTagUntag').addEventListener('click', confirmAcfUntag);
 
-    /* Delete-confirm modal wiring */
-    document.getElementById('acfDeleteClose').addEventListener('click', closeAcfDeleteModal);
-    document.getElementById('acfDeleteCancel').addEventListener('click', closeAcfDeleteModal);
-    document.getElementById('acfDeleteConfirm').addEventListener('click', confirmAcfDelete);
-
-    renderAcfList();
     renderAcfTagList();
   }
 
