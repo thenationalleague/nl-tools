@@ -10,6 +10,16 @@
 
      TECHNICAL CHANGELOG
      -------------------
+     v2.10.3 (2026-06-15) renderClubView empty-state is now membership-aware.
+                         Branches on S.clubs roster membership for the
+                         selected season: not-in-roster -> "Did not compete
+                         in the National League in <season>"; in-roster +
+                         seasonIsCurrent() -> "no attendance recorded yet,
+                         fixtures not released"; in-roster + past -> "no
+                         attendance recorded". Drops the blanket (and for
+                         newly-promoted live-season clubs, wrong) "wasn't in
+                         the National League then" wording.
+
      v2.10.2 (2026-06-14) renderClubView: when S.perClub[effectiveClub] is
                          absent (club not in the selected season's roster /
                          no data), render a styled empty-state card with the
@@ -991,6 +1001,13 @@
   var NL_TOOL_KEY = 'ops-attendance';
 
   window.NL_CHANGELOG = [
+    {
+      date: '15 Jun 2026',
+      version: 'v2.10.3',
+      items: [
+        'The empty-club card now tells you why there’s no data. A newly-promoted club in the live season (in the league, but fixtures not released yet) gets “No attendance recorded yet — matches appear once the fixtures are released” instead of the misleading “wasn’t in the National League”. Clubs that genuinely weren’t in the league that season read “Did not compete in the National League in 2025-26”.'
+      ]
+    },
     {
       date: '14 Jun 2026',
       version: 'v2.10.2',
@@ -5195,6 +5212,24 @@
     var club = S.perClub[S.effectiveClub];
     if (!club) {
       var seasonLabel = (window.NL && NL.season && S.meta) ? NL.season.label(S.meta, S.season) : (S.season || '');
+      var seasonStr = seasonLabel ? 'the <strong>' + NL.escHtml(seasonLabel) + '</strong> season' : 'this season';
+      /* Distinguish "wasn't in the league that season" from "is in the league
+         but no attendance recorded yet" (e.g. a newly-promoted club in the
+         live season before fixtures are released). Roster membership comes
+         from S.clubs, which is resolved for the selected season. */
+      var inRoster = (S.clubs || []).some(function(c) { return c.name === S.effectiveClub; });
+      var body, cta;
+      if (!inRoster) {
+        body = 'Did not compete in the National League in ' + seasonStr + '.';
+        cta = 'Choose another season from the switcher above.';
+      } else if (seasonIsCurrent()) {
+        body = 'No attendance has been recorded yet for ' + seasonStr +
+               ' — matches will appear here once the fixtures are released.';
+        cta = '';
+      } else {
+        body = 'No attendance was recorded for ' + seasonStr + '.';
+        cta = 'Choose another season from the switcher above.';
+      }
       document.getElementById('clubViewSection').innerHTML =
         '<div style="text-align:center;max-width:440px;margin:48px auto;padding:32px 24px;border:1px solid var(--border);border-radius:var(--radius);background:var(--off-white);">' +
           '<img src="' + CREST_BASE + encodeURIComponent(S.effectiveClub || '') + '.png" alt="" ' +
@@ -5202,10 +5237,8 @@
             'onerror="this.style.display=\'none\'">' +
           '<div style="font-size:18px;font-weight:800;font-variation-settings:\'wght\' 800;color:var(--navy);margin-bottom:8px;">' +
             NL.escHtml(S.effectiveClub || 'This club') + '</div>' +
-          '<p style="font-size:14px;color:var(--text-muted);line-height:1.55;margin:0;">No attendance data for ' +
-            (seasonLabel ? 'the <strong>' + NL.escHtml(seasonLabel) + '</strong> season' : 'this season') +
-            ' — this club wasn’t in the National League then.</p>' +
-          '<p style="font-size:13px;color:var(--text-muted);margin:14px 0 0;">Choose another season from the switcher above.</p>' +
+          '<p style="font-size:14px;color:var(--text-muted);line-height:1.55;margin:0;">' + body + '</p>' +
+          (cta ? '<p style="font-size:13px;color:var(--text-muted);margin:14px 0 0;">' + cta + '</p>' : '') +
         '</div>';
       return;
     }
