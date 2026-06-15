@@ -6,9 +6,25 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.25 — Per-person directory visibility, encouraged contacts, no-flash panel.
+  v0.26 — Person editor: centred modal, branded visibility, 2-col contacts.
 
   Changelog:
+  v0.26 — (15/06/2026) Person editor presentation pass.
+          - Centred MODAL instead of a right-side slide-in drawer:
+            .mc-person-panel is now fixed/centred (translate -50%) with a
+            rounded card + modalpop animation; widened to 600px to seat two
+            contact columns.
+          - VISIBILITY is a branded segmented control (.mc-seg, buttons with
+            data-vis) replacing the native <select>; click handler sets
+            draft.visibility + refreshPersonPanel(). Old select change-branch
+            removed.
+          - CONTACTS in two columns (email | phone). The per-row type <select>
+            is gone — type is implied by column; renderContactRow stacks the
+            value over a meta row (label + preferred + remove). renderPersonPanelInner
+            splits draft.contactRows into emailRows/phoneRows preserving the
+            flat index so value/label/pref/remove handlers still map. The
+            data-contact-type-idx change-branch removed.
+          - Role row label "Primary" -> "Primary role".
   v0.25 — (15/06/2026) Person panel: in-place refresh + visibility + contact
           discipline.
           - FLASH FIX: adding/removing a role or contact row, and changing a
@@ -342,6 +358,16 @@
   var NL_TOOL_KEY = 'ops-club-directory';
 
   window.NL_CHANGELOG = [
+    {
+      date: '15 Jun 2026',
+      version: 'v0.26',
+      items: [
+        'The add / edit person window is now a centred pop-up box rather than a panel that slid in from the right — easier to focus on.',
+        'Directory visibility is now a tidy Public / Staff only / Hidden switch in the brand style, instead of a plain grey dropdown.',
+        'Contacts are laid out in two columns — emails on the left, phones on the right — so there\'s no little type dropdown to set on each line.',
+        'The role options now read "Primary role" rather than just "Primary".'
+      ]
+    },
     {
       date: '15 Jun 2026',
       version: 'v0.25',
@@ -1509,19 +1535,22 @@
     animation: fadein 0.15s;
   }
   @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
-  @keyframes slidein { from { transform: translateX(100%); } to { transform: translateX(0); } }
+  @keyframes modalpop { from { opacity: 0; transform: translate(-50%, -48%) scale(0.98); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
   .mc-person-panel {
     position: fixed;
-    top: 0; right: 0;
-    height: 100vh;
-    width: 420px;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 600px;
     max-width: 94vw;
+    max-height: 90vh;
     background: var(--white);
-    box-shadow: -8px 0 40px rgba(0,0,0,0.15);
+    border-radius: 12px;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.28);
+    overflow: hidden;
     z-index: 160;
     display: flex;
     flex-direction: column;
-    animation: slidein 0.22s;
+    animation: modalpop 0.16s ease-out;
   }
   .mc-person-panel__hd {
     padding: 18px 22px;
@@ -1679,17 +1708,28 @@
     line-height: 1.4;
   }
 
-  /* ---- Person modal: contact rows ---- */
-  .mc-contact-row {
-    display: flex;
-    gap: 8px;
-    align-items: center;
+  /* ---- Person modal: contacts (two columns — email | phone) ---- */
+  .mc-contacts-cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+  }
+  @media (max-width: 520px) { .mc-contacts-cols { grid-template-columns: 1fr; } }
+  .mc-contacts-col__hd {
+    font-size: 11px; color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    font-variation-settings: 'wght' 700;
     margin-bottom: 8px;
   }
-  .mc-contact-row__type { flex: 0 0 90px; }
-  .mc-contact-row__value { flex: 1; min-width: 0; }
-  .mc-contact-row__label { flex: 0 0 30%; }
-  .mc-contact-row select,
+  .mc-contact-row {
+    margin-bottom: 10px;
+  }
+  .mc-contact-row__value { width: 100%; }
+  .mc-contact-row__meta {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 5px;
+  }
+  .mc-contact-row__label { flex: 1; min-width: 0; }
   .mc-contact-row input[type="email"],
   .mc-contact-row input[type="tel"],
   .mc-contact-row input[type="text"] {
@@ -1699,20 +1739,42 @@
     border-radius: 4px;
     background: var(--white);
   }
-  .mc-contact-row select:focus,
   .mc-contact-row input:focus { outline: none; border-color: var(--navy); }
   .mc-contact-row__pref {
     display: inline-flex; align-items: center; gap: 4px;
     font-size: 11px; color: var(--text-muted);
     white-space: nowrap; cursor: pointer;
   }
-  .mc-person-panel__addrow-btns { display: flex; gap: 8px; margin-top: 4px; }
-  .mc-person-panel__noneboxes { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px; }
+  .mc-contacts-col__empty {
+    font-size: 12px; color: var(--text-muted);
+    font-style: italic; margin-bottom: 8px;
+  }
+  .mc-contacts-col .btn { margin-top: 2px; }
   .mc-person-panel__nonebox {
     display: inline-flex; align-items: center; gap: 6px;
+    margin-top: 10px;
     font-size: 12px; color: var(--text-muted);
     cursor: pointer; white-space: nowrap;
   }
+  /* Branded segmented control (visibility). */
+  .mc-seg {
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .mc-seg__opt {
+    padding: 7px 14px;
+    font-family: var(--font); font-size: 12px;
+    font-variation-settings: 'wght' 700;
+    color: var(--text-muted);
+    background: var(--white);
+    border: none; border-right: 1px solid var(--border);
+    cursor: pointer; white-space: nowrap;
+  }
+  .mc-seg__opt:last-child { border-right: none; }
+  .mc-seg__opt:hover { background: var(--navy-50); }
+  .mc-seg__opt.is-active { background: var(--navy); color: #fff; }
   /* Visibility badges on the manage people list. */
   .mc-vis-badge {
     display: inline-block; vertical-align: middle;
@@ -3744,7 +3806,7 @@ function renderRoleRow(club, draft, r, i) {
         : '<span class="mc-role-row__remove-spacer"></span>') +
     '</div>' +
     '<div class="mc-role-row__opts">' +
-      '<label class="mc-role-row__opt"><input type="radio" name="personPrimaryRole" data-primary-role-idx="' + i + '"' + primaryChecked + '> Primary</label>' +
+      '<label class="mc-role-row__opt"><input type="radio" name="personPrimaryRole" data-primary-role-idx="' + i + '"' + primaryChecked + '> Primary role</label>' +
       '<label class="mc-role-row__opt' + (isHeadSection ? '' : ' is-disabled') + '">' +
         '<input type="checkbox" data-role-head-idx="' + i + '"' + headChecked + headDisabled + '> Dept head</label>' +
       flagsHtml +
@@ -3755,21 +3817,23 @@ function renderRoleRow(club, draft, r, i) {
 
 /* Render one editable contact row in the person modal. preferred is a
    radio scoped per type (one preferred email, one preferred phone). */
+/* One contact entry. Type is implied by which column it lives in (email or
+   phone), so there's no per-row type switcher — i stays the index into the
+   flat draft.contactRows array so the value/label/pref/remove handlers map
+   straight through. */
 function renderContactRow(draft, c, i) {
   var prefName = c.type === 'email' ? 'personPrefEmail' : 'personPrefPhone';
   return '<div class="mc-contact-row" data-contact-idx="' + i + '">' +
-    '<select class="mc-contact-row__type" data-contact-type-idx="' + i + '">' +
-      '<option value="email"' + (c.type === 'email' ? ' selected' : '') + '>Email</option>' +
-      '<option value="phone"' + (c.type === 'phone' ? ' selected' : '') + '>Phone</option>' +
-    '</select>' +
     '<input class="mc-contact-row__value" type="' + (c.type === 'email' ? 'email' : 'tel') + '" ' +
       'data-contact-value-idx="' + i + '" value="' + esc(c.value) + '" ' +
       'placeholder="' + (c.type === 'email' ? 'jane@club.co.uk' : '01234 567890') + '">' +
-    '<input class="mc-contact-row__label" type="text" data-contact-label-idx="' + i + '" ' +
-      'value="' + esc(c.label) + '" placeholder="e.g. direct, mobile, main">' +
-    '<label class="mc-contact-row__pref" title="Preferred ' + esc(c.type) + '">' +
-      '<input type="radio" name="' + prefName + '" data-contact-pref-idx="' + i + '"' + (c.preferred ? ' checked' : '') + '> preferred</label>' +
-    '<button class="btn-icon btn-icon--danger" data-remove-contact-idx="' + i + '" title="Remove">×</button>' +
+    '<div class="mc-contact-row__meta">' +
+      '<input class="mc-contact-row__label" type="text" data-contact-label-idx="' + i + '" ' +
+        'value="' + esc(c.label) + '" placeholder="label — e.g. direct, mobile, main">' +
+      '<label class="mc-contact-row__pref" title="Preferred ' + esc(c.type) + '">' +
+        '<input type="radio" name="' + prefName + '" data-contact-pref-idx="' + i + '"' + (c.preferred ? ' checked' : '') + '> preferred</label>' +
+      '<button class="btn-icon btn-icon--danger" data-remove-contact-idx="' + i + '" title="Remove">×</button>' +
+    '</div>' +
   '</div>';
 }
 
@@ -3808,10 +3872,14 @@ function renderPersonPanelInner(club) {
   }
 
   var rolesHtml = draft.roleRows.map(function(r, i){ return renderRoleRow(club, draft, r, i); }).join('');
-  var contactsHtml = draft.contactRows.length
-    ? draft.contactRows.map(function(c, i){ return renderContactRow(draft, c, i); }).join('')
-    : '<div class="mc-person-panel__depts-empty">No contacts yet — add an email or phone below.</div>';
+  // Contacts render in two columns by type; keep the flat-array index so the
+  // value/label/pref/remove handlers still line up.
+  var emailRows = draft.contactRows.map(function(c, i){ return c.type === 'email' ? renderContactRow(draft, c, i) : ''; }).join('');
+  var phoneRows = draft.contactRows.map(function(c, i){ return c.type === 'phone' ? renderContactRow(draft, c, i) : ''; }).join('');
   var vis = draft.visibility || 'staff';
+  function visOpt(val, label) {
+    return '<button type="button" class="mc-seg__opt' + (vis === val ? ' is-active' : '') + '" data-vis="' + val + '">' + label + '</button>';
+  }
 
   return '<div class="mc-person-panel__hd">' +
         '<div>' +
@@ -3828,12 +3896,12 @@ function renderPersonPanelInner(club) {
 
         '<div class="mc-person-panel__field">' +
           '<label>Directory visibility</label>' +
-          '<select id="mcPanelVisibility">' +
-            '<option value="public"' + (vis === 'public' ? ' selected' : '') + '>Public — staff directory + public website</option>' +
-            '<option value="staff"' + (vis === 'staff' ? ' selected' : '') + '>Staff only — internal directory (default)</option>' +
-            '<option value="hidden"' + (vis === 'hidden' ? ' selected' : '') + '>Hidden — not shown anywhere</option>' +
-          '</select>' +
-          '<div class="mc-person-panel__help"><b>Public</b> appears on the staff directory and the public website. <b>Staff only</b> stays internal. <b>Hidden</b> people remain editable here but appear nowhere else (lists, exports, public site).</div>' +
+          '<div class="mc-seg" id="mcPanelVisibility" role="radiogroup" aria-label="Directory visibility">' +
+            visOpt('public', 'Public') +
+            visOpt('staff', 'Staff only') +
+            visOpt('hidden', 'Hidden') +
+          '</div>' +
+          '<div class="mc-person-panel__help"><b>Public</b> appears on the staff directory and the public website. <b>Staff only</b> stays internal (the default). <b>Hidden</b> people remain editable here but appear nowhere else (lists, exports, public site).</div>' +
         '</div>' +
 
         '<div class="mc-person-panel__depts-section">' +
@@ -3845,14 +3913,19 @@ function renderPersonPanelInner(club) {
 
         '<div class="mc-person-panel__depts-section">' +
           '<h4>Contacts</h4>' +
-          '<div id="mcContactRows">' + contactsHtml + '</div>' +
-          '<div class="mc-person-panel__addrow-btns">' +
-            '<button class="btn btn--ghost btn--sm" id="mcAddEmailRow" type="button">+ Add email</button>' +
-            '<button class="btn btn--ghost btn--sm" id="mcAddPhoneRow" type="button">+ Add phone</button>' +
-          '</div>' +
-          '<div class="mc-person-panel__noneboxes">' +
-            '<label class="mc-person-panel__nonebox"><input type="checkbox" id="mcNoEmail"' + (draft.noEmail ? ' checked' : '') + '> No email on file</label>' +
-            '<label class="mc-person-panel__nonebox"><input type="checkbox" id="mcNoPhone"' + (draft.noPhone ? ' checked' : '') + '> No phone on file</label>' +
+          '<div class="mc-contacts-cols">' +
+            '<div class="mc-contacts-col">' +
+              '<div class="mc-contacts-col__hd">Email</div>' +
+              '<div id="mcEmailRows">' + emailRows + '</div>' +
+              '<button class="btn btn--ghost btn--sm" id="mcAddEmailRow" type="button">+ Add email</button>' +
+              '<label class="mc-person-panel__nonebox"><input type="checkbox" id="mcNoEmail"' + (draft.noEmail ? ' checked' : '') + '> No email on file</label>' +
+            '</div>' +
+            '<div class="mc-contacts-col">' +
+              '<div class="mc-contacts-col__hd">Phone</div>' +
+              '<div id="mcPhoneRows">' + phoneRows + '</div>' +
+              '<button class="btn btn--ghost btn--sm" id="mcAddPhoneRow" type="button">+ Add phone</button>' +
+              '<label class="mc-person-panel__nonebox"><input type="checkbox" id="mcNoPhone"' + (draft.noPhone ? ' checked' : '') + '> No phone on file</label>' +
+            '</div>' +
           '</div>' +
           '<div class="mc-person-panel__help">Add an email and a phone, or tick the matching <b>"No … on file"</b> box. The preferred email and phone become this person\'s headline contacts; extras are kept for the list builder.</div>' +
         '</div>' +
@@ -5232,6 +5305,15 @@ function wireUI() {
       }
       return;
     }
+    // Visibility segmented control (Public / Staff only / Hidden)
+    var visBtn = t.closest('[data-vis]');
+    if (visBtn) {
+      if (state.manage.personDraft) {
+        state.manage.personDraft.visibility = visBtn.getAttribute('data-vis');
+        refreshPersonPanel();
+      }
+      return;
+    }
 
     /* --- Departments surface --- */
     var editDeptBtn = t.closest('[data-edit-dept-section]');
@@ -5517,16 +5599,6 @@ function wireUI() {
     }
 
     /* --- Person modal: contact rows --- */
-    if (t.hasAttribute('data-contact-type-idx')) {
-      var cti = parseInt(t.getAttribute('data-contact-type-idx'), 10);
-      var dCT = state.manage.personDraft;
-      if (dCT && dCT.contactRows && dCT.contactRows[cti]) {
-        dCT.contactRows[cti].type = t.value;
-        // Preferred radios are per-type; re-render so the radio grouping is correct.
-        refreshPersonPanel();
-      }
-      return;
-    }
     if ((t.name === 'personPrefEmail' || t.name === 'personPrefPhone') && t.hasAttribute('data-contact-pref-idx')) {
       var pci = parseInt(t.getAttribute('data-contact-pref-idx'), 10);
       var dP = state.manage.personDraft;
@@ -5536,11 +5608,6 @@ function wireUI() {
           dP.contactRows.forEach(function(c){ if (c.type === chosen.type) c.preferred = (c === chosen); });
         }
       }
-      return;
-    }
-    // Directory visibility (Public / Staff only / Hidden) — no re-render needed.
-    if (t.id === 'mcPanelVisibility') {
-      if (state.manage.personDraft) state.manage.personDraft.visibility = t.value;
       return;
     }
     // "No email/phone on file" — records a deliberate blank so save doesn't block.
