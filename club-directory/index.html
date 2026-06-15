@@ -6,9 +6,17 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.26 — Person editor: centred modal, branded visibility, 2-col contacts.
+  v0.27 — Person editor: wider modal, trimmed contact fields, no note.
 
   Changelog:
+  v0.27 — (15/06/2026) Person editor trim. Widened modal 600 -> 820px.
+          Dropped the optional Note field (person.note is preserved silently
+          on save — just no longer editable here). Contact rows are now value
+          + remove only: removed the per-contact label input and the preferred
+          radio. The first email/phone of each type is the headline mirror
+          (buildContactsFromDraft already defaults preferred to the first when
+          none is set). Removed the now-dead mcPanelNote / data-contact-label-idx
+          / data-contact-pref-idx handler branches.
   v0.26 — (15/06/2026) Person editor presentation pass.
           - Centred MODAL instead of a right-side slide-in drawer:
             .mc-person-panel is now fixed/centred (translate -50%) with a
@@ -358,6 +366,15 @@
   var NL_TOOL_KEY = 'ops-club-directory';
 
   window.NL_CHANGELOG = [
+    {
+      date: '15 Jun 2026',
+      version: 'v0.27',
+      items: [
+        'Widened the add / edit person box so there\'s more room to work.',
+        'Simplified contacts: just type the email or phone — no per-line label to fill and no "preferred" toggle. The first email and phone you list are used as the headline contacts.',
+        'Removed the optional note field at the bottom of the editor.'
+      ]
+    },
     {
       date: '15 Jun 2026',
       version: 'v0.26',
@@ -1540,7 +1557,7 @@
     position: fixed;
     top: 50%; left: 50%;
     transform: translate(-50%, -50%);
-    width: 600px;
+    width: 820px;
     max-width: 94vw;
     max-height: 90vh;
     background: var(--white);
@@ -1722,14 +1739,10 @@
     margin-bottom: 8px;
   }
   .mc-contact-row {
-    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 6px;
+    margin-bottom: 8px;
   }
-  .mc-contact-row__value { width: 100%; }
-  .mc-contact-row__meta {
-    display: flex; align-items: center; gap: 8px;
-    margin-top: 5px;
-  }
-  .mc-contact-row__label { flex: 1; min-width: 0; }
+  .mc-contact-row__value { flex: 1; min-width: 0; }
   .mc-contact-row input[type="email"],
   .mc-contact-row input[type="tel"],
   .mc-contact-row input[type="text"] {
@@ -1740,11 +1753,6 @@
     background: var(--white);
   }
   .mc-contact-row input:focus { outline: none; border-color: var(--navy); }
-  .mc-contact-row__pref {
-    display: inline-flex; align-items: center; gap: 4px;
-    font-size: 11px; color: var(--text-muted);
-    white-space: nowrap; cursor: pointer;
-  }
   .mc-contacts-col__empty {
     font-size: 12px; color: var(--text-muted);
     font-style: italic; margin-bottom: 8px;
@@ -3817,23 +3825,16 @@ function renderRoleRow(club, draft, r, i) {
 
 /* Render one editable contact row in the person modal. preferred is a
    radio scoped per type (one preferred email, one preferred phone). */
-/* One contact entry. Type is implied by which column it lives in (email or
-   phone), so there's no per-row type switcher — i stays the index into the
-   flat draft.contactRows array so the value/label/pref/remove handlers map
-   straight through. */
+/* One contact entry — just the value plus a remove button. Type is implied by
+   which column it lives in (email or phone); i stays the index into the flat
+   draft.contactRows array so the value/remove handlers map straight through.
+   The first entry of each type becomes the headline (person.email/.phone). */
 function renderContactRow(draft, c, i) {
-  var prefName = c.type === 'email' ? 'personPrefEmail' : 'personPrefPhone';
   return '<div class="mc-contact-row" data-contact-idx="' + i + '">' +
     '<input class="mc-contact-row__value" type="' + (c.type === 'email' ? 'email' : 'tel') + '" ' +
       'data-contact-value-idx="' + i + '" value="' + esc(c.value) + '" ' +
       'placeholder="' + (c.type === 'email' ? 'jane@club.co.uk' : '01234 567890') + '">' +
-    '<div class="mc-contact-row__meta">' +
-      '<input class="mc-contact-row__label" type="text" data-contact-label-idx="' + i + '" ' +
-        'value="' + esc(c.label) + '" placeholder="label — e.g. direct, mobile, main">' +
-      '<label class="mc-contact-row__pref" title="Preferred ' + esc(c.type) + '">' +
-        '<input type="radio" name="' + prefName + '" data-contact-pref-idx="' + i + '"' + (c.preferred ? ' checked' : '') + '> preferred</label>' +
-      '<button class="btn-icon btn-icon--danger" data-remove-contact-idx="' + i + '" title="Remove">×</button>' +
-    '</div>' +
+    '<button class="btn-icon btn-icon--danger" data-remove-contact-idx="' + i + '" title="Remove">×</button>' +
   '</div>';
 }
 
@@ -3927,12 +3928,7 @@ function renderPersonPanelInner(club) {
               '<label class="mc-person-panel__nonebox"><input type="checkbox" id="mcNoPhone"' + (draft.noPhone ? ' checked' : '') + '> No phone on file</label>' +
             '</div>' +
           '</div>' +
-          '<div class="mc-person-panel__help">Add an email and a phone, or tick the matching <b>"No … on file"</b> box. The preferred email and phone become this person\'s headline contacts; extras are kept for the list builder.</div>' +
-        '</div>' +
-
-        '<div class="mc-person-panel__field" style="margin-top:18px;">' +
-          '<label>Note (optional)</label>' +
-          '<input type="text" id="mcPanelNote" value="' + esc(draft.note || '') + '" placeholder="e.g. Correspondence: Club">' +
+          '<div class="mc-person-panel__help">Add an email and a phone, or tick the matching <b>"No … on file"</b> box. The first email and phone become this person\'s headline contacts; extras are kept for the list builder.</div>' +
         '</div>' +
       '</div>' +
       '<div class="mc-person-panel__ftr">' +
@@ -5479,7 +5475,6 @@ function wireUI() {
 
     // Person side-panel fields
     if (t.id === 'mcPanelName')  { if (state.manage.personDraft) state.manage.personDraft.name = t.value; return; }
-    if (t.id === 'mcPanelNote')  { if (state.manage.personDraft) state.manage.personDraft.note = t.value; return; }
     // Person modal role title (free text — no re-render so the field keeps focus)
     if (t.hasAttribute('data-role-title-idx')) {
       var rti = parseInt(t.getAttribute('data-role-title-idx'), 10);
@@ -5492,12 +5487,6 @@ function wireUI() {
       var cvi = parseInt(t.getAttribute('data-contact-value-idx'), 10);
       var dCV = state.manage.personDraft;
       if (dCV && dCV.contactRows && dCV.contactRows[cvi]) dCV.contactRows[cvi].value = t.value;
-      return;
-    }
-    if (t.hasAttribute('data-contact-label-idx')) {
-      var cli = parseInt(t.getAttribute('data-contact-label-idx'), 10);
-      var dCL = state.manage.personDraft;
-      if (dCL && dCL.contactRows && dCL.contactRows[cli]) dCL.contactRows[cli].label = t.value;
       return;
     }
 
@@ -5598,18 +5587,6 @@ function wireUI() {
       return;
     }
 
-    /* --- Person modal: contact rows --- */
-    if ((t.name === 'personPrefEmail' || t.name === 'personPrefPhone') && t.hasAttribute('data-contact-pref-idx')) {
-      var pci = parseInt(t.getAttribute('data-contact-pref-idx'), 10);
-      var dP = state.manage.personDraft;
-      if (dP && dP.contactRows) {
-        var chosen = dP.contactRows[pci];
-        if (chosen) {
-          dP.contactRows.forEach(function(c){ if (c.type === chosen.type) c.preferred = (c === chosen); });
-        }
-      }
-      return;
-    }
     // "No email/phone on file" — records a deliberate blank so save doesn't block.
     if (t.id === 'mcNoEmail') { if (state.manage.personDraft) state.manage.personDraft.noEmail = t.checked; return; }
     if (t.id === 'mcNoPhone') { if (state.manage.personDraft) state.manage.personDraft.noPhone = t.checked; return; }
