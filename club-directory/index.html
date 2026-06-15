@@ -6,9 +6,29 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.24 — Self-sufficient Add/Edit person modal (roles + multi-contact).
+  v0.25 — Per-person directory visibility, encouraged contacts, no-flash panel.
 
   Changelog:
+  v0.25 — (15/06/2026) Person panel: in-place refresh + visibility + contact
+          discipline.
+          - FLASH FIX: adding/removing a role or contact row, and changing a
+            role section / dept-head / contact type, called renderEditor()
+            which rebuilt the whole editor INCLUDING the panel overlay, so the
+            slide-in animation replayed ("flash out/in"). Split renderPersonPanel
+            into a wrapper + renderPersonPanelInner(); new refreshPersonPanel()
+            swaps only the open panel's innerHTML, leaving the overlay/panel
+            element intact. Draft is already synced live by the input/change
+            handlers so nothing is lost; +Add email/phone now focuses the new row.
+          - VISIBILITY: each person carries visibility ∈ public|staff|hidden
+            (default staff). Editor select + manage-list badge. lbResults()
+            drops hidden people from generated lists/exports; the future public
+            site will further restrict to 'public'. Persisted in clubToRTDB /
+            inflated in clubFromRTDB; ensurePersonIds() defaults legacy records
+            to 'staff'.
+          - CONTACT DISCIPLINE: new people seed a blank email + phone row.
+            Save requires an email and a phone OR the matching "No email/phone
+            on file" checkbox (draft.noEmail/noPhone, persisted) — no silent
+            blanks.
   v0.24 — (14/06/2026) Person modal redesign — the add/edit panel is now
           complete on its own; the separate Department assignments tab is
           no longer required (it still exists as a section-centric view).
@@ -322,6 +342,15 @@
   var NL_TOOL_KEY = 'ops-club-directory';
 
   window.NL_CHANGELOG = [
+    {
+      date: '15 Jun 2026',
+      version: 'v0.25',
+      items: [
+        'Adding or editing a person no longer flashes when you add a role or a contact row — the panel now updates in place instead of redrawing the whole screen.',
+        'New people start with an email and a phone row ready to fill in. Saving now needs an email and a phone, or the matching "No email / No phone on file" box ticked — so a blank contact is always a deliberate choice, never an oversight.',
+        'Each person now has a Directory visibility setting: Public (staff directory + public website), Staff only (internal — the default), or Hidden (still editable here, but kept out of lists, exports and the public site). New people default to Staff only, so nobody is exposed publicly until you choose to.'
+      ]
+    },
     {
       date: '14 Jun 2026',
       version: 'v0.24',
@@ -1678,6 +1707,21 @@
     white-space: nowrap; cursor: pointer;
   }
   .mc-person-panel__addrow-btns { display: flex; gap: 8px; margin-top: 4px; }
+  .mc-person-panel__noneboxes { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px; }
+  .mc-person-panel__nonebox {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--text-muted);
+    cursor: pointer; white-space: nowrap;
+  }
+  /* Visibility badges on the manage people list. */
+  .mc-vis-badge {
+    display: inline-block; vertical-align: middle;
+    margin-left: 8px; padding: 1px 7px; border-radius: 999px;
+    font-size: 10px; font-variation-settings: 'wght' 700;
+    text-transform: uppercase; letter-spacing: .04em;
+  }
+  .mc-vis-badge--public { color: #fff; background: var(--green); }
+  .mc-vis-badge--hidden { color: var(--text-muted); background: var(--navy-100); border: 1px solid var(--border); }
 
   .mc-person-panel__ftr {
     padding: 14px 22px;
@@ -2943,6 +2987,9 @@ function lbResults() {
   window.CLUBS.forEach(function(c) {
     if (!clubs[c.name]) return;
     c.people.forEach(function(p) {
+      // Hidden people never surface in generated lists/exports. (The future
+      // public site will further restrict to visibility === 'public'.)
+      if (p.visibility === 'hidden') return;
       var matched = {};        // section -> [role titles]
       var matchedContacts = {}; // section -> [role-level contacts]
       p.roles.forEach(function(r) {
@@ -3403,6 +3450,8 @@ function ensurePersonIds() {
   window.CLUBS.forEach(function(c) {
     c.people.forEach(function(p) {
       if (!p._id) p._id = 'p' + (_nextPersonId++);
+      // Legacy records default to staff-only: visible internally, not public.
+      if (!p.visibility) p.visibility = 'staff';
     });
   });
 }
@@ -3570,10 +3619,13 @@ function renderPeopleSurface(club) {
     });
 
     var selectedClass = (state.manage.editingPersonId === p._id) ? ' is-selected' : '';
+    var visBadge = p.visibility === 'public'
+      ? ' <span class="mc-vis-badge mc-vis-badge--public">Public</span>'
+      : (p.visibility === 'hidden' ? ' <span class="mc-vis-badge mc-vis-badge--hidden">Hidden</span>' : '');
 
     return '<div class="mc-person-card' + selectedClass + '" data-person-id="' + esc(p._id) + '">' +
       '<div class="mc-person-card-main">' +
-        '<div class="mc-person-card-name">' + esc(p.name||'(unnamed)') + '</div>' +
+        '<div class="mc-person-card-name">' + esc(p.name||'(unnamed)') + visBadge + '</div>' +
         (contactParts.length ? '<div class="mc-person-card-contact">' + contactParts.join(' · ') + '</div>' : '') +
         (deptParts.length ? '<div class="mc-person-card-depts">' + deptParts.join(' · ') + '</div>' : '<div class="mc-person-card-depts"><i>No department assignments</i></div>') +
       '</div>' +
@@ -3603,10 +3655,18 @@ function renderPeopleSurface(club) {
 function seedPersonDraft(person) {
   if (!person) {
     return {
-      name: '', note: '',
+      name: '', note: '', visibility: 'staff',
       roleRows: [{ section: SECTION_ORDER[0], title: '', deptHead: false, flags: {} }],
       primaryRoleIdx: 0,
-      contactRows: []
+      // New people start with a blank email + phone row already on show, so
+      // contact details are encouraged rather than an afterthought. If a type
+      // is genuinely unknown the editor ticks "No email/phone on file" — save
+      // requires one or the other (no silent blanks).
+      contactRows: [
+        { type: 'email', value: '', label: '', preferred: true },
+        { type: 'phone', value: '', label: '', preferred: true }
+      ],
+      noEmail: false, noPhone: false
     };
   }
   ensureContacts(person);
@@ -3626,6 +3686,8 @@ function seedPersonDraft(person) {
       return { type: c.type, value: c.value || '', label: c.label || '', preferred: !!c.preferred };
     });
   return { name: person.name || '', note: person.note || '',
+           visibility: person.visibility || 'staff',
+           noEmail: !!person.noEmail, noPhone: !!person.noPhone,
            roleRows: roleRows, primaryRoleIdx: primaryRoleIdx, contactRows: contactRows };
 }
 
@@ -3712,6 +3774,28 @@ function renderContactRow(draft, c, i) {
 }
 
 function renderPersonPanel(club) {
+  return '<div class="mc-person-panel-overlay" id="mcPanelOverlay"></div>' +
+    '<div class="mc-person-panel" id="mcPersonPanel">' +
+      renderPersonPanelInner(club) +
+    '</div>';
+}
+
+/* Re-render only the OPEN panel's inner content, not the overlay/panel
+   wrapper — so adding or removing a row doesn't tear down and recreate the
+   panel element, which replayed its slide-in animation (the "flash"). The
+   draft is kept in sync live by the input/change handlers, so re-rendering
+   from it loses nothing. Falls back to a full editor render if the panel
+   isn't mounted. */
+function refreshPersonPanel() {
+  var panel = document.getElementById('mcPersonPanel');
+  var club = window.CLUBS.filter(function(c){ return c.name === state.manage.editingClub; })[0];
+  if (!panel || !club) { renderEditor(document.getElementById('mc-root')); return; }
+  panel.innerHTML = renderPersonPanelInner(club);
+}
+
+/* The panel's inner HTML (header + body + footer). Split out from
+   renderPersonPanel so refreshPersonPanel() can swap it in place. */
+function renderPersonPanelInner(club) {
   var isNew = state.manage.editingPersonId === 'new';
   var person = isNew ? null : club.people.filter(function(p){ return p._id === state.manage.editingPersonId; })[0];
   if (!isNew && !person) return '';
@@ -3727,10 +3811,9 @@ function renderPersonPanel(club) {
   var contactsHtml = draft.contactRows.length
     ? draft.contactRows.map(function(c, i){ return renderContactRow(draft, c, i); }).join('')
     : '<div class="mc-person-panel__depts-empty">No contacts yet — add an email or phone below.</div>';
+  var vis = draft.visibility || 'staff';
 
-  return '<div class="mc-person-panel-overlay" id="mcPanelOverlay"></div>' +
-    '<div class="mc-person-panel" id="mcPersonPanel">' +
-      '<div class="mc-person-panel__hd">' +
+  return '<div class="mc-person-panel__hd">' +
         '<div>' +
           '<h3>' + (isNew ? 'Add new person' : 'Edit person') + '</h3>' +
           '<div class="mc-person-panel__hd-sub">' + esc(club.name) + '</div>' +
@@ -3741,6 +3824,16 @@ function renderPersonPanel(club) {
         '<div class="mc-person-panel__field">' +
           '<label>Full name</label>' +
           '<input type="text" id="mcPanelName" value="' + esc(draft.name) + '" placeholder="e.g. Jane Smith">' +
+        '</div>' +
+
+        '<div class="mc-person-panel__field">' +
+          '<label>Directory visibility</label>' +
+          '<select id="mcPanelVisibility">' +
+            '<option value="public"' + (vis === 'public' ? ' selected' : '') + '>Public — staff directory + public website</option>' +
+            '<option value="staff"' + (vis === 'staff' ? ' selected' : '') + '>Staff only — internal directory (default)</option>' +
+            '<option value="hidden"' + (vis === 'hidden' ? ' selected' : '') + '>Hidden — not shown anywhere</option>' +
+          '</select>' +
+          '<div class="mc-person-panel__help"><b>Public</b> appears on the staff directory and the public website. <b>Staff only</b> stays internal. <b>Hidden</b> people remain editable here but appear nowhere else (lists, exports, public site).</div>' +
         '</div>' +
 
         '<div class="mc-person-panel__depts-section">' +
@@ -3757,7 +3850,11 @@ function renderPersonPanel(club) {
             '<button class="btn btn--ghost btn--sm" id="mcAddEmailRow" type="button">+ Add email</button>' +
             '<button class="btn btn--ghost btn--sm" id="mcAddPhoneRow" type="button">+ Add phone</button>' +
           '</div>' +
-          '<div class="mc-person-panel__help">The preferred email and phone become this person\'s headline contacts; extras are kept for the list builder.</div>' +
+          '<div class="mc-person-panel__noneboxes">' +
+            '<label class="mc-person-panel__nonebox"><input type="checkbox" id="mcNoEmail"' + (draft.noEmail ? ' checked' : '') + '> No email on file</label>' +
+            '<label class="mc-person-panel__nonebox"><input type="checkbox" id="mcNoPhone"' + (draft.noPhone ? ' checked' : '') + '> No phone on file</label>' +
+          '</div>' +
+          '<div class="mc-person-panel__help">Add an email and a phone, or tick the matching <b>"No … on file"</b> box. The preferred email and phone become this person\'s headline contacts; extras are kept for the list builder.</div>' +
         '</div>' +
 
         '<div class="mc-person-panel__field" style="margin-top:18px;">' +
@@ -3771,8 +3868,7 @@ function renderPersonPanel(club) {
           '<button class="btn btn--ghost" id="mcPanelCancel">Cancel</button>' +
           '<button class="btn btn--navy" id="mcPanelSave">Save</button>' +
         '</div>' +
-      '</div>' +
-    '</div>';
+      '</div>';
 }
 
 /* ---------- Surface 2: Department assignments ---------- */
@@ -4202,6 +4298,20 @@ function savePersonPanel() {
     return;
   }
 
+  // Contact details are encouraged: each type must either have a value or be
+  // explicitly marked "none on file" — no silent blanks.
+  var draftContacts = draft.contactRows || [];
+  var hasEmail = draftContacts.some(function(c){ return c.type === 'email' && (c.value || '').trim(); });
+  var hasPhone = draftContacts.some(function(c){ return c.type === 'phone' && (c.value || '').trim(); });
+  if (!hasEmail && !draft.noEmail) {
+    alert('Add an email address, or tick "No email on file".');
+    return;
+  }
+  if (!hasPhone && !draft.noPhone) {
+    alert('Add a phone number, or tick "No phone on file".');
+    return;
+  }
+
   var isNew = state.manage.editingPersonId === 'new';
   var normNew = normaliseName(name);
 
@@ -4317,6 +4427,9 @@ function commitPersonPanelSave(club, isNew, draft) {
   var cc = buildContactsFromDraft(draft);
 
   var person;
+  var visibility = (['public', 'staff', 'hidden'].indexOf(draft.visibility) !== -1) ? draft.visibility : 'staff';
+  var noEmail = !cc.email && !!draft.noEmail;
+  var noPhone = !cc.phone && !!draft.noPhone;
   if (isNew) {
     person = {
       _id: 'p' + (_nextPersonId++),
@@ -4326,6 +4439,9 @@ function commitPersonPanelSave(club, isNew, draft) {
       note: note,
       contacts: cc.contacts,
       roles: roles,
+      visibility: visibility,
+      noEmail: noEmail,
+      noPhone: noPhone,
     };
     club.people.push(person);
   } else {
@@ -4337,6 +4453,9 @@ function commitPersonPanelSave(club, isNew, draft) {
       person.email = cc.email;
       person.phone = cc.phone;
       person.roles = roles;
+      person.visibility = visibility;
+      person.noEmail = noEmail;
+      person.noPhone = noPhone;
     }
   }
   if (person) clearPreviousHeads(club, person, roles);
@@ -5072,7 +5191,7 @@ function wireUI() {
       var d0 = state.manage.personDraft;
       if (d0 && Array.isArray(d0.roleRows)) {
         d0.roleRows.push({ section: SECTION_ORDER[0], title: '', deptHead: false, flags: {} });
-        renderEditor(document.getElementById('mc-root'));
+        refreshPersonPanel();
       }
       return;
     }
@@ -5084,7 +5203,7 @@ function wireUI() {
         dR.roleRows.splice(ri, 1);
         if (dR.primaryRoleIdx >= dR.roleRows.length) dR.primaryRoleIdx = dR.roleRows.length - 1;
         if (dR.primaryRoleIdx < 0 && dR.roleRows.length) dR.primaryRoleIdx = 0;
-        renderEditor(document.getElementById('mc-root'));
+        refreshPersonPanel();
       }
       return;
     }
@@ -5095,7 +5214,11 @@ function wireUI() {
         var newType = (t.id === 'mcAddPhoneRow') ? 'phone' : 'email';
         var firstOfType = !dC.contactRows.some(function(c){ return c.type === newType; });
         dC.contactRows.push({ type: newType, value: '', label: '', preferred: firstOfType });
-        renderEditor(document.getElementById('mc-root'));
+        refreshPersonPanel();
+        // Drop focus straight into the new row so it can be filled in.
+        var newIdx = dC.contactRows.length - 1;
+        var newInput = document.querySelector('[data-contact-value-idx="' + newIdx + '"]');
+        if (newInput) newInput.focus();
       }
       return;
     }
@@ -5105,7 +5228,7 @@ function wireUI() {
       var ci = parseInt(remContactBtn.getAttribute('data-remove-contact-idx'), 10);
       if (dRC && Array.isArray(dRC.contactRows)) {
         dRC.contactRows.splice(ci, 1);
-        renderEditor(document.getElementById('mc-root'));
+        refreshPersonPanel();
       }
       return;
     }
@@ -5360,7 +5483,7 @@ function wireUI() {
         dS.roleRows[si].section = t.value;
         // Dept head only meaningful for head sections; clear if leaving one.
         if (HEAD_SECTIONS.indexOf(t.value) === -1) dS.roleRows[si].deptHead = false;
-        renderEditor(document.getElementById('mc-root'));
+        refreshPersonPanel();
       }
       return;
     }
@@ -5377,7 +5500,7 @@ function wireUI() {
       var dH = state.manage.personDraft;
       if (dH && dH.roleRows && dH.roleRows[hi]) {
         dH.roleRows[hi].deptHead = t.checked;
-        renderEditor(document.getElementById('mc-root'));
+        refreshPersonPanel();
       }
       return;
     }
@@ -5400,7 +5523,7 @@ function wireUI() {
       if (dCT && dCT.contactRows && dCT.contactRows[cti]) {
         dCT.contactRows[cti].type = t.value;
         // Preferred radios are per-type; re-render so the radio grouping is correct.
-        renderEditor(document.getElementById('mc-root'));
+        refreshPersonPanel();
       }
       return;
     }
@@ -5415,6 +5538,14 @@ function wireUI() {
       }
       return;
     }
+    // Directory visibility (Public / Staff only / Hidden) — no re-render needed.
+    if (t.id === 'mcPanelVisibility') {
+      if (state.manage.personDraft) state.manage.personDraft.visibility = t.value;
+      return;
+    }
+    // "No email/phone on file" — records a deliberate blank so save doesn't block.
+    if (t.id === 'mcNoEmail') { if (state.manage.personDraft) state.manage.personDraft.noEmail = t.checked; return; }
+    if (t.id === 'mcNoPhone') { if (state.manage.personDraft) state.manage.personDraft.noPhone = t.checked; return; }
 
     // Flag tickbox on existing role draft (e.g. Media -> Programme editor)
     if (t.hasAttribute('data-draft-flag-key')) {
@@ -5670,6 +5801,9 @@ function clubToRTDB(club) {
       email: preferredContact(p, 'email'),
       phone: preferredContact(p, 'phone'),
       note: p.note || null,
+      visibility: (['public', 'staff', 'hidden'].indexOf(p.visibility) !== -1) ? p.visibility : 'staff',
+      noEmail: !!p.noEmail || null,
+      noPhone: !!p.noPhone || null,
       contacts: packContacts(p.contacts),
       roles: (p.roles || []).map(packRole)
     };
@@ -5722,6 +5856,9 @@ function clubFromRTDB(name, val, fallbackWebsite) {
       email: p.email || null,
       phone: p.phone || null,
       note: p.note || null,
+      visibility: (['public', 'staff', 'hidden'].indexOf(p.visibility) !== -1) ? p.visibility : 'staff',
+      noEmail: !!p.noEmail,
+      noPhone: !!p.noPhone,
       roles: arr(p.roles).map(unpackRole)
     };
     if (p.contacts) {
