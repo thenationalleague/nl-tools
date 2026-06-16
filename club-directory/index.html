@@ -6,9 +6,34 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.40 — People list shows mailing-list membership; all lists equal.
+  v0.42 — List builder pulls in opt-in department inboxes.
 
   Changelog:
+  v0.42 — (16/06/2026) List builder now consumes the per-list department
+          inboxes added in v0.41. In list mode, each club that has opted to
+          record a shared inbox (club.listInboxes[<listKey>]) for a selected
+          list contributes one extra recipient row for that function —
+          person:null, inbox:true, the inbox email/phone carried as
+          roleContacts so resolveResultContacts/export reuse unchanged. New
+          row shape is handled in lbResultsByList() (emit + null-safe sort),
+          renderBuilderResults() (a 'dept inbox' marker in the Name cell) and
+          lbDedupedRows() (keyed club|i|<listKey>, named as '<list> inbox').
+          Opt-in and additive: no club holds an inbox yet, so this changes
+          nothing in practice until one is filled in under Club details.
+  v0.41 — (16/06/2026) Foundation for the reseed data-collection flow.
+          EXTENSIONS: every phone (person contacts) gains an optional `ext`
+          field — stored on the contact, round-tripped through the draft +
+          clubTo/FromRTDB, shown as '01253 123456 · ext 204' via phoneDisplay()
+          / preferredPhoneExt() on the people list, club page table and
+          contactBits.
+          DEPARTMENT INBOXES: a club can hold one optional shared inbox
+          (email + phone + ext) per mailing list — club.listInboxes keyed by
+          list key (e.g. commercial@, ticketing@). Edited in Club details
+          (data-inbox-key/field), shown on the club page (.cp-inboxes), and
+          persisted via clubToRTDB/clubFromRTDB. No rules change — the club
+          record write rules carry no field validation. (List-builder export
+          of inboxes is the next step.)
+  v0.40 — People list shows mailing-list membership; all lists equal.
   v0.40 — (16/06/2026) Review follow-ups on the v0.39 simplification.
           PEOPLE LIST: each person card now shows the mailing lists they're on
           (.mc-person-card-lists — a quieter chip row than the role tags) so you
@@ -523,6 +548,21 @@
   var NL_TOOL_KEY = 'ops-club-directory';
 
   window.NL_CHANGELOG = [
+    {
+      date: '16 Jun 2026',
+      version: 'v0.42',
+      items: [
+        'List builder now includes a club\'s department inboxes. If a club has recorded a shared address for a list (e.g. commercial@ on Commercial leads), it shows up as its own "dept inbox" recipient when you build that list — and is copied/exported with everyone else. Most clubs have none recorded yet, so nothing changes until one is added under Club details.'
+      ]
+    },
+    {
+      date: '16 Jun 2026',
+      version: 'v0.41',
+      items: [
+        'Phone numbers can now carry an extension — there\'s a small "ext" box next to every phone, and it shows as "01253 123456 · ext 204" wherever the number appears.',
+        'Clubs can record department inboxes — shared addresses like commercial@ or ticketing@ that belong to a function rather than a person. Add them under Club details; they show on the club page and stick around through staff changes.'
+      ]
+    },
     {
       date: '16 Jun 2026',
       version: 'v0.40',
@@ -2078,6 +2118,41 @@
     margin-bottom: 8px;
   }
   .mc-contact-row__value { flex: 1; min-width: 0; }
+  .mc-contact-row__ext {
+    width: 64px; flex: none; text-align: center;
+  }
+  .phone-ext { color: var(--text-muted); font-size: 0.88em; }
+
+  /* Department inboxes — editor (Club details) */
+  .mc-inboxes { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .mc-inboxes__hd {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--text-muted); font-variation-settings: 'wght' 700; margin-bottom: 6px;
+  }
+  .mc-inboxes__hint { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin: 0 0 12px; }
+  .mc-inbox-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .mc-inbox-row__list { width: 150px; flex: none; font-size: 12px; font-variation-settings: 'wght' 600; }
+  .mc-inbox-row .mc-field-input { flex: 1; min-width: 0; }
+  .mc-inbox-row__phone { flex: 0 0 130px; }
+  .mc-inbox-row__ext { flex: 0 0 60px; text-align: center; }
+  @media (max-width: 560px) {
+    .mc-inbox-row { flex-wrap: wrap; }
+    .mc-inbox-row__list { width: 100%; }
+  }
+
+  /* Department inboxes — club page (read) */
+  .cp-inboxes {
+    margin-top: 6px; padding: 16px 20px;
+    background: var(--navy-50); border-top: 1px solid var(--border);
+  }
+  .cp-inboxes__label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--text-muted); font-variation-settings: 'wght' 700; margin-bottom: 8px;
+  }
+  .cp-inbox { display: flex; flex-wrap: wrap; gap: 4px 10px; padding: 3px 0; font-size: 13px; }
+  .cp-inbox__list { font-variation-settings: 'wght' 700; color: var(--navy); min-width: 150px; }
+  .cp-inbox__sep { color: var(--text-muted); }
+  .cp-inbox a { color: var(--navy); font-variation-settings: 'wght' 600; }
   .mc-contact-row input[type="email"],
   .mc-contact-row input[type="tel"],
   .mc-contact-row input[type="text"] {
@@ -2615,10 +2690,22 @@ function formatPhone(v) {
   }
   return v;                                     // unusual length: show as-is
 }
+/* The extension on a person's preferred phone (extensions live per phone). */
+function preferredPhoneExt(p) {
+  var cs = (p.contacts || []).filter(function(c){ return c.type === 'phone' && c.value; });
+  if (!cs.length) return '';
+  return ((cs.filter(function(c){ return c.preferred; })[0] || cs[0]).ext || '').trim();
+}
+/* Formatted phone + optional extension as display-safe HTML. */
+function phoneDisplay(value, ext) {
+  var out = esc(formatPhone(value || ''));
+  if (ext) out += ' <span class="phone-ext">ext ' + esc(ext) + '</span>';
+  return out;
+}
 
 function contactBits(p) {
   var bits = [];
-  if (p.phone) bits.push('<span>' + esc(formatPhone(p.phone)) + '</span>');
+  if (p.phone) bits.push('<span>' + phoneDisplay(p.phone, preferredPhoneExt(p)) + '</span>');
   if (p.email) bits.push('<a href="mailto:' + esc(p.email) + '">' + esc(p.email) + '</a>');
   return bits;
 }
@@ -2767,7 +2854,7 @@ function renderClubStyle2(club) {
       rows += '<tr data-person-id="' + esc(p._id || '') + '">' +
         '<td class="s2-role">' + esc(roleLabel) + '</td>' +
         '<td class="s2-name">' + esc(p.name) + '</td>' +
-        '<td class="s2-phone">' + esc(formatPhone(p.phone||'')) + '</td>' +
+        '<td class="s2-phone">' + phoneDisplay(p.phone||'', preferredPhoneExt(p)) + '</td>' +
         '<td class="s2-email">' + email + '</td>' +
       '</tr>';
     });
@@ -2796,6 +2883,20 @@ function renderClubStyle2(club) {
     '</table>';
   }
 
+  var setInboxes = MAILING_LISTS.filter(function(l){ var ib = (club.listInboxes||{})[l.key]; return ib && (ib.email || ib.phone); });
+  var inboxesHtml = setInboxes.length
+    ? '<div class="cp-inboxes"><div class="cp-inboxes__label">Department inboxes</div>' +
+        setInboxes.map(function(l) {
+          var ib = club.listInboxes[l.key];
+          var bits = [];
+          if (ib.email) bits.push('<a href="mailto:' + esc(ib.email) + '">' + esc(ib.email) + '</a>');
+          if (ib.phone) bits.push(phoneDisplay(ib.phone, ib.ext || ''));
+          return '<div class="cp-inbox"><span class="cp-inbox__list">' + esc(l.label) + '</span>' +
+            '<span class="cp-inbox__bits">' + bits.join('<span class="cp-inbox__sep"> · </span>') + '</span></div>';
+        }).join('') +
+      '</div>'
+    : '';
+
   return '<div class="s2-club" style="border-top:4px solid ' + esc(accent) + ';">' +
     '<div class="s2-header">' +
       '<img class="s2-crest" src="' + crestUrl(club.name) + '" alt="" onerror="this.onerror=null;this.src=\'' + fallbackCrest() + '\'">' +
@@ -2810,6 +2911,7 @@ function renderClubStyle2(club) {
     '<div class="cp-correction">Club details above are managed by the League. Spotted an error? ' +
       '<a href="' + correctionMailto(club.name) + '">Request a correction</a>.</div>' +
     peopleHtml +
+    inboxesHtml +
   '</div>';
 }
 
@@ -3300,9 +3402,37 @@ function lbResultsByList() {
       });
     });
   });
+
+  /* Department inboxes — shared addresses (commercial@, ticketing@) a club has
+     opted to record against a list. They belong to the function, not a person,
+     so each set inbox at a selected club joins that list's recipients as its
+     own row. Opt-in per club: most carry none, so this adds nothing until a
+     club fills one in. */
+  window.CLUBS.forEach(function(c) {
+    if (!allClubs && !clubs[c.name]) return;
+    var inboxes = c.listInboxes || {};
+    MAILING_LISTS.forEach(function(l) {
+      if (!lists[l.key]) return;
+      var ib = inboxes[l.key];
+      if (!ib || !(ib.email || ib.phone)) return;
+      var contacts = [];
+      if (ib.email) contacts.push({ type: 'email', value: ib.email });
+      if (ib.phone) contacts.push({ type: 'phone', value: ib.phone });
+      var ikey = c.name + '|inbox|' + l.key;
+      out.push({
+        key: ikey, club: c.name, division: divisionOf(c.name),
+        section: l.label, person: null, vacant: false,
+        inbox: true, inboxKey: l.key, inboxLabel: l.label + ' inbox',
+        roleTitles: ['Department inbox'], roleContacts: contacts,
+        omitted: !!state.lb.omittedKeys[ikey]
+      });
+    });
+  });
+
+  function lbName(r) { return r.person ? (r.person.name || '') : (r.inboxLabel || r.section || ''); }
   out.sort(function(a, b) {
     if (a.club !== b.club) return a.club.localeCompare(b.club);
-    return (a.person.name || '').localeCompare(b.person.name || '');
+    return lbName(a).localeCompare(lbName(b));
   });
   return out;
 }
@@ -3405,9 +3535,11 @@ function lbDedupedRows(includeOmitted) {
   var results = lbResults().filter(function(r){ return includeOmitted || !r.omitted; });
   var map = {}; var order = [];
   results.forEach(function(r) {
-    var key = r.person ? (r.club + '|p|' + r.person._id) : (r.club + '|v|' + r.vacantTitle);
+    var key = r.person ? (r.club + '|p|' + r.person._id)
+            : r.inbox ? (r.club + '|i|' + r.inboxKey)
+            : (r.club + '|v|' + r.vacantTitle);
     if (!map[key]) {
-      map[key] = { name: r.person ? (r.person.name||'') : (r.vacantTitle + ' (vacant)'),
+      map[key] = { name: r.person ? (r.person.name||'') : r.inbox ? r.inboxLabel : (r.vacantTitle + ' (vacant)'),
         club: r.club, division: r.division, vacant: r.vacant,
         sections: [], roleLabels: [], emails: [], phones: [] };
       order.push(key);
@@ -3655,9 +3787,11 @@ function renderBuilderResults() {
     var emailCell = rc.emails.length
       ? rc.emails.map(function(em){ return '<a href="mailto:' + esc(em) + '">' + esc(em) + '</a>'; }).join('<br>')
       : '<span class="lb-no-email">no contact route</span>';
-    var nameCell = r.vacant
-      ? '<span class="pill pill--status pill--status-warn">vacant</span> ' + esc(r.vacantTitle)
-      : esc(r.person.name);
+    var nameCell = r.inbox
+      ? '<span class="pill pill--marker">dept inbox</span>'
+      : r.vacant
+        ? '<span class="pill pill--status pill--status-warn">vacant</span> ' + esc(r.vacantTitle)
+        : esc(r.person.name);
     return '<tr class="' + (r.omitted ? 'lb-row-omitted' : '') + '" data-key="' + esc(r.key) + '">' +
       '<td class="lb-col-omit">' +
         '<button class="btn-icon" data-omit-key="' + esc(r.key) + '" aria-pressed="' + (r.omitted ? 'true' : 'false') + '" title="' + (r.omitted ? 'Include row' : 'Omit row') + '">' +
@@ -3894,7 +4028,7 @@ function renderPeopleSurface(club) {
 
     var contactParts = [];
     if (p.email) contactParts.push('<a href="mailto:' + esc(p.email) + '" onclick="event.stopPropagation();">' + esc(p.email) + '</a>');
-    if (p.phone) contactParts.push('<span>' + esc(formatPhone(p.phone)) + '</span>');
+    if (p.phone) contactParts.push('<span>' + phoneDisplay(p.phone, preferredPhoneExt(p)) + '</span>');
 
     var nm = (p.name || '').trim();
     var initials = nm ? nm.split(/\s+/).map(function(w){ return w.charAt(0); }).slice(0, 2).join('').toUpperCase() : '?';
@@ -3986,7 +4120,7 @@ function seedPersonDraft(person) {
   if (primaryRoleIdx === -1) primaryRoleIdx = 0;
   var contactRows = (person.contacts || []).filter(function(c){ return c.type === 'email' || c.type === 'phone'; })
     .map(function(c) {
-      return { type: c.type, value: c.value || '', label: c.label || '', preferred: !!c.preferred };
+      return { type: c.type, value: c.value || '', label: c.label || '', preferred: !!c.preferred, ext: c.ext || '' };
     });
   return { name: person.name || '', note: person.note || '',
            noEmail: !!person.noEmail, noPhone: !!person.noPhone,
@@ -4057,10 +4191,15 @@ function renderRoleRow(club, draft, r, i) {
    removable is false for the sole row of a type — there's always at least one
    email row and one phone row; "No … on file" handles a genuine blank. */
 function renderContactRow(draft, c, i, removable) {
+  var isPhone = c.type !== 'email';
   return '<div class="mc-contact-row" data-contact-idx="' + i + '">' +
-    '<input class="mc-contact-row__value" type="' + (c.type === 'email' ? 'email' : 'tel') + '" ' +
+    '<input class="mc-contact-row__value" type="' + (isPhone ? 'tel' : 'email') + '" ' +
       'data-contact-value-idx="' + i + '" value="' + esc(c.value) + '" ' +
-      'placeholder="' + (c.type === 'email' ? 'Email address' : 'Phone number') + '">' +
+      'placeholder="' + (isPhone ? 'Phone number' : 'Email address') + '">' +
+    (isPhone
+      ? '<input class="mc-contact-row__ext" type="text" data-contact-ext-idx="' + i + '" ' +
+          'value="' + esc(c.ext || '') + '" placeholder="ext" maxlength="8" title="Extension (optional)">'
+      : '') +
     (removable
       ? '<button class="btn-icon btn-icon--danger" data-remove-contact-idx="' + i + '" title="Remove">×</button>'
       : '') +
@@ -4210,6 +4349,37 @@ function renderClubDetails(club) {
     '</div>';
   }
 
+  function inboxBlock() {
+    if (isEditing) {
+      var src = d.inboxes || {};
+      var rows = MAILING_LISTS.map(function(l) {
+        var ib = src[l.key] || {};
+        return '<div class="mc-inbox-row">' +
+          '<div class="mc-inbox-row__list">' + esc(l.label) + '</div>' +
+          '<input class="mc-field-input" data-inbox-key="' + l.key + '" data-inbox-field="email" placeholder="shared email (optional)" value="' + esc(ib.email || '') + '">' +
+          '<input class="mc-field-input mc-inbox-row__phone" data-inbox-key="' + l.key + '" data-inbox-field="phone" placeholder="phone" value="' + esc(ib.phone || '') + '">' +
+          '<input class="mc-field-input mc-inbox-row__ext" data-inbox-key="' + l.key + '" data-inbox-field="ext" placeholder="ext" maxlength="8" value="' + esc(ib.ext || '') + '">' +
+        '</div>';
+      }).join('');
+      return '<div class="mc-inboxes"><div class="mc-inboxes__hd">Department inboxes</div>' +
+        '<p class="mc-inboxes__hint">Shared addresses (e.g. commercial@, ticketing@) that belong to a function rather than a person. Each is added to that mailing list and kept through staff changes. Leave blank if there is none.</p>' +
+        rows + '</div>';
+    }
+    var setList = MAILING_LISTS.filter(function(l){ var ib = (club.listInboxes||{})[l.key]; return ib && (ib.email || ib.phone); });
+    return '<div class="mc-inboxes"><div class="mc-inboxes__hd">Department inboxes</div>' +
+      (setList.length
+        ? setList.map(function(l) {
+            var ib = club.listInboxes[l.key];
+            var bits = [];
+            if (ib.email) bits.push(esc(ib.email));
+            if (ib.phone) bits.push(esc(formatPhone(ib.phone)) + (ib.ext ? ' ext ' + esc(ib.ext) : ''));
+            return '<div class="mc-field-row"><div class="mc-field-label">' + esc(l.label) + '</div>' +
+              '<div class="mc-field-value">' + bits.join(' · ') + '</div></div>';
+          }).join('')
+        : '<div class="mc-field-value mc-field-value--muted">none set</div>') +
+    '</div>';
+  }
+
   var actions = isEditing
     ? '<div class="mc-dept-footer" style="border-top:none;padding-top:0;margin-top:10px;">' +
         '<button class="btn btn--ghost" id="mcDetailsCancel">Cancel</button>' +
@@ -4223,6 +4393,7 @@ function renderClubDetails(club) {
     editableRow('Email', 'email') +
     editableRow('Website', 'website') +
     readOnlyRow('FA membership', faOf(club.name), 'League-managed') +
+    inboxBlock() +
     '<div class="mc-details__note">Address and FA membership are maintained by the League. Spotted an error? ' +
       '<a href="' + correctionMailto(club.name) + '">Request a correction</a>.</div>' +
     actions +
@@ -4424,7 +4595,9 @@ function buildContactsFromDraft(draft) {
       var type = c.type === 'phone' ? 'phone' : 'email';
       // Phones are stored normalised (bare 11 digits / verbatim +overseas).
       var value = type === 'phone' ? normalisePhone(c.value) : (c.value || '').trim();
-      return { type: type, value: value, label: (c.label || '').trim(), preferred: !!c.preferred };
+      var o = { type: type, value: value, label: (c.label || '').trim(), preferred: !!c.preferred };
+      if (type === 'phone' && (c.ext || '').trim()) o.ext = (c.ext || '').trim();
+      return o;
     });
   // Ensure exactly one preferred per type (default to the first of that type).
   ['email', 'phone'].forEach(function(type) {
@@ -4950,6 +5123,7 @@ function wireUI() {
         phone: club.phone || '',
         email: club.email || '',
         website: club.website || '',
+        inboxes: JSON.parse(JSON.stringify(club.listInboxes || {}))
       };
       renderEditor(document.getElementById('mc-root'));
       return;
@@ -4966,6 +5140,15 @@ function wireUI() {
         c.phone = d.phone ? normalisePhone(d.phone) : d.phone;
         c.email = d.email;
         c.website = d.website;
+        var inb = {};
+        Object.keys(d.inboxes || {}).forEach(function(k) {
+          var ib = d.inboxes[k] || {};
+          var email = (ib.email || '').trim();
+          var phone = (ib.phone || '').trim();
+          var ext = (ib.ext || '').trim();
+          if (email || phone) inb[k] = { email: email, phone: phone ? normalisePhone(phone) : '', ext: ext };
+        });
+        c.listInboxes = inb;
         persistClub(c, 'details_edit', 'Updated club contact details for ' + c.name);
       }
       state.manage.editingDetails = null;
@@ -5037,8 +5220,23 @@ function wireUI() {
       if (dCV && dCV.contactRows && dCV.contactRows[cvi]) dCV.contactRows[cvi].value = t.value;
       return;
     }
+    if (t.hasAttribute('data-contact-ext-idx')) {
+      var cei = parseInt(t.getAttribute('data-contact-ext-idx'), 10);
+      var dCE = state.manage.personDraft;
+      if (dCE && dCE.contactRows && dCE.contactRows[cei]) dCE.contactRows[cei].ext = t.value;
+      return;
+    }
 
     // Club details drafts
+    if (t.hasAttribute('data-inbox-key')) {
+      var ik = t.getAttribute('data-inbox-key');
+      var ifield = t.getAttribute('data-inbox-field');
+      var ed = state.manage.editingDetails || (state.manage.editingDetails = {});
+      if (!ed.inboxes) ed.inboxes = {};
+      if (!ed.inboxes[ik]) ed.inboxes[ik] = {};
+      ed.inboxes[ik][ifield] = t.value;
+      return;
+    }
     if (t.hasAttribute('data-details-field')) {
       var df = t.getAttribute('data-details-field');
       if (!state.manage.editingDetails) state.manage.editingDetails = {};
@@ -5293,6 +5491,7 @@ function clubToRTDB(club) {
       var o = { type: c.type, value: c.value };
       if (c.label) o.label = c.label;
       if (c.preferred) o.preferred = true;
+      if (c.ext) o.ext = c.ext;
       return o;
     });
   }
@@ -5320,10 +5519,19 @@ function clubToRTDB(club) {
       roles: (p.roles || []).map(packRole)
     };
   });
+  var inboxesOut = {};
+  Object.keys(club.listInboxes || {}).forEach(function(k) {
+    var ib = club.listInboxes[k] || {}, r = {};
+    if (ib.email) r.email = ib.email;
+    if (ib.phone) r.phone = ib.phone;
+    if (ib.ext) r.ext = ib.ext;
+    if (Object.keys(r).length) inboxesOut[k] = r;
+  });
   var out = {
     contact: { phone: club.phone || null, email: club.email || null, website: club.website || null },
     people: people
   };
+  if (Object.keys(inboxesOut).length) out.listInboxes = inboxesOut;
   var vac = (club.vacant || []).map(function(v) {
     var o = { title: v.title || '', section: v.section || '' };
     o['function'] = v['function'] || functionForTitle(v.title, v.section);
@@ -5346,10 +5554,16 @@ function clubFromRTDB(name, val, fallbackWebsite) {
   rec.phone = c.phone || null;
   rec.email = c.email || null;
   rec.website = c.website || fallbackWebsite || null;
+  rec.listInboxes = {};
+  var ibIn = val.listInboxes || {};
+  Object.keys(ibIn).forEach(function(k) {
+    var x = ibIn[k] || {};
+    rec.listInboxes[k] = { email: x.email || '', phone: x.phone || '', ext: x.ext || '' };
+  });
   function arr(x) { return !x ? [] : (Array.isArray(x) ? x : Object.keys(x).map(function(k) { return x[k]; })); }
   function unpackContacts(cs) {
     return arr(cs).map(function(x) {
-      return { type: x.type, value: x.value || '', label: x.label || '', preferred: !!x.preferred };
+      return { type: x.type, value: x.value || '', label: x.label || '', preferred: !!x.preferred, ext: x.ext || '' };
     });
   }
   function unpackRole(r) {
