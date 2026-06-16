@@ -1,9 +1,16 @@
 <!DOCTYPE html>
 <!--
-  club-roster/index.html  v1.5
-  Public club ROSTER collection — GUIDED WIZARD (capability-URL pattern).
+  club-contacts/index.html  v1.6
+  Public club CONTACTS collection — GUIDED WIZARD (capability-URL pattern).
   Sibling of club-data. Gathers a club's people directory for club-directory.
+  (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
 
+  v1.6 (16/06/2026) — feedback round 5:
+    - Tool renamed roster -> "Club contacts" (slug, toolKey, RTDB path, copy).
+    - Cards/bands now span the full column width — the hero, stepper and footer
+      bands are no longer wider than the middle cards (only inner text is inset).
+    - Stepper chips are a uniform fixed width (blocky grid) instead of
+      content-hugging pills of different widths.
   v1.5 (16/06/2026) — feedback round 4:
     - Department pairings regrouped for intuitiveness (Media&marketing solo,
       Matchday/safety/medical together, Safeguarding&community, Team ops solo) —
@@ -42,7 +49,7 @@
 <html lang="en-GB">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Club roster — The National League</title>
+<title>Club contacts — The National League</title>
 <link rel="stylesheet" href="/tools/system/nl-brand.css?v=20">
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
@@ -70,16 +77,17 @@ firebase.initializeApp({
   .ri-stepper { position: sticky; top: 0; z-index: 5; background: var(--white); border-bottom: 1px solid var(--border); padding: 14px 20px 4px; }
   .ri-stepbar { height: 5px; background: var(--navy-50); border-radius: 3px; overflow: hidden; margin-bottom: 12px; }
   .ri-stepbar__fill { height: 100%; background: var(--primary); border-radius: 3px; transition: width .25s; }
-  .ri-steps { display: flex; flex-wrap: wrap; gap: 7px; padding-bottom: 12px; }
-  .ri-step { flex: none; font-size: 13px; padding: 8px 14px; border-radius: 20px; cursor: pointer; white-space: nowrap; border: 1px solid var(--border); background: var(--off-white); color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+  .ri-steps { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; padding-bottom: 12px; }
+  .ri-step { font-size: 12.5px; padding: 9px 8px; border-radius: 8px; cursor: pointer; border: 1px solid var(--border); background: var(--off-white); color: var(--text-muted); display: flex; align-items: center; justify-content: center; text-align: center; line-height: 1.25; gap: 6px; }
   .ri-step.is-done { color: var(--green); border-color: var(--green); background: var(--white); }
   .ri-step.is-current { background: var(--navy); border-color: var(--navy); color: #fff; font-variation-settings:'wght' 700; }
   .ri-step__tick { font-size: 11px; }
 
-  /* Body / cards */
-  .ri-body { padding: 22px 20px 0; }
-  .ri-stephead { margin: 0 0 4px; font-size: 20px; color: var(--navy); font-variation-settings:'wght' 900; }
-  .ri-stepsub { color: var(--text-muted); font-size: 14px; margin: 0 0 20px; line-height: 1.55; }
+  /* Body / cards — cards span the full column width like the hero/stepper/nav
+     bands; only the step heading + intro text keep the 20px inset. */
+  .ri-body { padding: 22px 0 0; }
+  .ri-stephead { margin: 0 0 4px; padding: 0 20px; font-size: 20px; color: var(--navy); font-variation-settings:'wght' 900; }
+  .ri-stepsub { color: var(--text-muted); font-size: 14px; margin: 0 0 20px; padding: 0 20px; line-height: 1.55; }
   .ri-card { background: var(--white); border:1px solid var(--border); border-top: 3px solid var(--primary); border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; box-shadow: 0 1px 3px var(--navy-50); }
   .ri-card > h2 { margin: 0 0 3px; font-size: 15px; color: var(--navy); font-variation-settings:'wght' 800; }
   .ri-card__sub { font-size: 12.5px; color: var(--text-muted); margin: 0 0 14px; line-height: 1.5; }
@@ -162,7 +170,7 @@ firebase.initializeApp({
   <div id="riApp" style="display:none;">
     <div class="ri-hero">
       <img class="ri-hero__crest" id="riCrest" alt="" src="" onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png';">
-      <div class="ri-hero__t"><div class="kicker">The National League · 2026/27 · Club roster</div><h1 id="riClub">Club roster</h1></div>
+      <div class="ri-hero__t"><div class="kicker">The National League · 2026/27 · Club contacts</div><h1 id="riClub">Club contacts</h1></div>
     </div>
     <div class="ri-stepper">
       <div class="ri-stepbar"><div class="ri-stepbar__fill" id="riBar"></div></div>
@@ -248,7 +256,7 @@ firebase.initializeApp({
 
   /* ---- State ---- */
   var token = new URLSearchParams(location.search).get('t') || '';
-  var LS_KEY = 'nl-club-roster-' + token;
+  var LS_KEY = 'nl-club-contacts-' + token;
   var db = firebase.database();
   var clubName = null;
   var cur = 0;
@@ -270,11 +278,11 @@ firebase.initializeApp({
 
   if (!/^[A-Za-z0-9_-]{20,}$/.test(token)) { gate('This link isn’t valid. Please use the link the League sent to your club.'); return; }
 
-  db.ref('app-data/ops-club-roster/invites/' + token).once('value').then(function (snap) {
+  db.ref('app-data/ops-club-contacts/invites/' + token).once('value').then(function (snap) {
     var inv = snap.val();
     if (!inv || !inv.club) { gate('This link isn’t valid or has expired. Please contact the League.'); return; }
     clubName = inv.club;
-    return db.ref('app-data/ops-club-roster/submissions/' + token).once('value').then(function (s) {
+    return db.ref('app-data/ops-club-contacts/submissions/' + token).once('value').then(function (s) {
       var prev = s.val();
       el('riClub').textContent = clubName;
       el('riCrest').src = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/' + encodeURIComponent(clubName) + '.png';
@@ -605,7 +613,7 @@ firebase.initializeApp({
 
     host.innerHTML =
       '<h2 class="ri-stephead">Check &amp; submit</h2>' +
-      '<p class="ri-stepsub">You’ve added <b>' + nPeople + '</b> ' + (nPeople === 1 ? 'person' : 'people') + ' and <b>' + nInbox + '</b> shared ' + (nInbox === 1 ? 'address' : 'addresses') + '. Please check the roster below before submitting.</p>' +
+      '<p class="ri-stepsub">You’ve added <b>' + nPeople + '</b> ' + (nPeople === 1 ? 'person' : 'people') + ' and <b>' + nInbox + '</b> shared ' + (nInbox === 1 ? 'address' : 'addresses') + '. Please check the details below before submitting.</p>' +
       (probs.length ? '<div class="ri-prob"><b>' + probs.length + ' thing' + (probs.length > 1 ? 's' : '') + ' to fix before you can submit:</b>' +
         probs.slice(0, 8).map(function (p) { return '<div>• ' + esc(p.msg) + ' <a data-fix="' + p.step + '">Fix</a></div>'; }).join('') +
         (probs.length > 8 ? '<div>…and ' + (probs.length - 8) + ' more.</div>' : '') + '</div>' : '') +
@@ -616,7 +624,7 @@ firebase.initializeApp({
         return '<div class="ri-cov__cell is-' + st + '" data-coverlist="' + s[0][0] + '">' +
           '<div class="ri-cov__list">' + esc(s[0][1]) + '</div><div class="ri-cov__st">' + label + '</div></div>';
       }).join('') + '</div></div>' +
-      '<div class="ri-card"><h2>Your roster</h2><p class="ri-card__sub">Everyone you’ve entered, by department.</p>' + rosterHtml + '</div>';
+      '<div class="ri-card"><h2>Your contacts</h2><p class="ri-card__sub">Everyone you’ve entered, by department.</p>' + rosterHtml + '</div>';
 
     Array.prototype.forEach.call(host.querySelectorAll('[data-coverlist]'), function (c) {
       c.addEventListener('click', function () { jumpToList(c.getAttribute('data-coverlist')); });
@@ -666,7 +674,7 @@ firebase.initializeApp({
     if (probs.length) { renderReview(el('riStep')); el('riStatus').textContent = 'Please fix ' + probs.length + ' highlighted ' + (probs.length === 1 ? 'item' : 'items') + '.'; return; }
     var rec = { club: clubName, yourName: data.yourName, yourEmail: data.yourEmail, inboxes: data.inboxes, people: data.people, submittedAt: Date.now() };
     var btn = el('riNext'); btn.disabled = true; btn.textContent = 'Submitting…';
-    db.ref('app-data/ops-club-roster/submissions/' + token).set(rec).then(function () {
+    db.ref('app-data/ops-club-contacts/submissions/' + token).set(rec).then(function () {
       try { localStorage.removeItem(LS_KEY); } catch (e) {}
       renderLocked(rec);
     }).catch(function (e) {
@@ -686,7 +694,7 @@ firebase.initializeApp({
     el('riStep').innerHTML =
       '<div class="ri-card" style="border-top-color:var(--green);">' +
         '<h2 style="color:var(--green);">✓ Submitted &amp; locked</h2>' +
-        '<p class="ri-card__sub">Received by the League' + (when ? ' on ' + esc(when) : '') + '. Your roster is shown below for reference. To change anything, please contact the League and we’ll re-open your form.</p></div>' +
+        '<p class="ri-card__sub">Received by the League' + (when ? ' on ' + esc(when) : '') + '. Your submission is shown below for reference. To change anything, please contact the League and we’ll re-open your form.</p></div>' +
       (inboxKeys.length ? '<div class="ri-card"><h2>Shared addresses</h2>' + inboxKeys.map(function (k) {
         var ib = rec.inboxes[k]; return '<div style="font-size:13px;padding:3px 0;"><b style="color:var(--navy);">' + esc(LIST_LABEL[k] || k) + '</b> — ' + esc([ib.email, ib.phone].filter(Boolean).join(' · ')) + '</div>';
       }).join('') + '</div>' : '') +
