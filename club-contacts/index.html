@@ -1,10 +1,16 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/index.html  v1.7
+  club-contacts/index.html  v1.8
   Public club CONTACTS collection — GUIDED WIZARD (capability-URL pattern).
   Sibling of club-data. Gathers a club's people directory for club-directory.
   (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
 
+  v1.8 (16/06/2026) — feedback round 7:
+    - Shared-inbox function dropdown sizes to its content (width:auto) instead
+      of filling the whole column — no longer "huge".
+    - Function list gains "Other (type your own)…" which reveals a freetext box;
+      custom inboxes save with a `label` and show that name verbatim everywhere
+      (review, locked view, admin). Keyed as other-<slug> in the submission.
   v1.7 (16/06/2026) — feedback round 6:
     - Shared-inbox dropdown properly branded: the chevron used an off-brand navy
       (#001a4b); now uses the real --navy (#223b7c) plus a navy-tinted field,
@@ -106,9 +112,11 @@ firebase.initializeApp({
     width: 100%; box-sizing: border-box; font-family: var(--font); font-size: 14px;
     border: 1px solid var(--border); border-radius: 6px; padding: 9px 11px; background: var(--white); color: var(--text);
   }
-  /* Branded select: drop the native OS arrow for an NL chevron + navy chrome */
+  /* Branded select: drop the native OS arrow for an NL chevron + navy chrome.
+     width:auto so it sizes to its content rather than filling the whole column. */
   select {
     -webkit-appearance: none; -moz-appearance: none; appearance: none;
+    width: auto; max-width: 100%; min-width: 200px;
     padding-right: 40px; cursor: pointer; font-variation-settings:'wght' 700; color: var(--navy);
     border: 1.5px solid var(--navy-300); background-color: var(--navy-50);
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9'%3E%3Cpath fill='none' stroke='%23223b7c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' d='M1 1.5 7 7.5 13 1.5'/%3E%3C/svg%3E");
@@ -384,6 +392,9 @@ firebase.initializeApp({
 
   /* ---- Inbox row (function select + email + phone + ext) ---- */
   function inboxRow(key, ib) {
+    ib = ib || {};
+    var isCustom = !!ib.label;                       // a previously-saved custom function
+    var selVal = isCustom ? '__other' : (key || '');
     var row = document.createElement('div');
     row.className = 'ri-person';
     row.innerHTML =
@@ -392,13 +403,19 @@ firebase.initializeApp({
       '<div class="ri-grid">' +
         '<div><label>Function</label><select data-ib="key">' +
           '<option value="">— choose —</option>' +
-          LISTS.map(function (l) { return '<option value="' + l[0] + '"' + (l[0] === key ? ' selected' : '') + '>' + esc(l[1]) + '</option>'; }).join('') +
-        '</select></div>' +
+          LISTS.map(function (l) { return '<option value="' + l[0] + '"' + (l[0] === selVal ? ' selected' : '') + '>' + esc(l[1]) + '</option>'; }).join('') +
+          '<option value="__other"' + (selVal === '__other' ? ' selected' : '') + '>Other (type your own)…</option>' +
+        '</select>' +
+        '<input type="text" data-ib="otherlabel" placeholder="Name this function" value="' + esc(ib.label || '') + '" style="margin-top:8px;display:' + (selVal === '__other' ? 'block' : 'none') + ';"></div>' +
         '<div><label>Shared email</label><input type="email" data-ib="email" value="' + esc(ib.email || '') + '"><p class="ri-err">Not a valid email address.</p></div>' +
         '<div><label>Phone (optional)</label><input type="tel" data-ib="phone" value="' + esc(ib.phone || '') + '"><p class="ri-err">Doesn’t look like a UK phone number.</p></div>' +
         '<div><label>Ext (optional)</label><input type="text" maxlength="8" data-ib="ext" value="' + esc(ib.ext || '') + '"></div>' +
       '</div>';
     row.querySelector('.ri-del').addEventListener('click', function () { row.parentNode.removeChild(row); markSaved(); });
+    var sel = row.querySelector('[data-ib="key"]'), other = row.querySelector('[data-ib="otherlabel"]');
+    sel.addEventListener('change', function () {
+      var on = sel.value === '__other'; other.style.display = on ? 'block' : 'none'; if (on) other.focus();
+    });
     wireValidation(row);
     return row;
   }
@@ -531,9 +548,17 @@ firebase.initializeApp({
       data.inboxes = {};
       Array.prototype.forEach.call(el('riStep').querySelectorAll('.ri-person'), function (row) {
         var g = function (k) { var n = row.querySelector('[data-ib="' + k + '"]'); return n ? n.value.trim() : ''; };
-        var key = g('key'); if (!key) return;
+        var sel = g('key'); if (!sel) return;
         var ib = { email: g('email'), phone: g('phone'), ext: g('ext') };
-        if (ib.email || ib.phone) data.inboxes[key] = ib;
+        if (!ib.email && !ib.phone) return;
+        if (sel === '__other') {
+          var label = g('otherlabel'); if (!label) return;
+          var slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+          ib.label = label;                                   // custom function name, shown verbatim
+          data.inboxes['other-' + (slug || Object.keys(data.inboxes).length)] = ib;
+        } else {
+          data.inboxes[sel] = ib;
+        }
       });
     } else if (step.kind === 'depts') {
       step.sections.forEach(function (section) {
@@ -570,9 +595,9 @@ firebase.initializeApp({
     var probs = [];
     if (!validEmail(data.yourEmail)) probs.push({ step: stepIndexById('you'), msg: 'Your email address looks invalid.' });
     Object.keys(data.inboxes).forEach(function (k) {
-      var ib = data.inboxes[k];
-      if (ib.email && !validEmail(ib.email)) probs.push({ step: stepIndexById('inboxes'), msg: 'Shared “' + (LIST_LABEL[k] || k) + '” email looks invalid.' });
-      if (ib.phone && !validPhone(ib.phone)) probs.push({ step: stepIndexById('inboxes'), msg: 'Shared “' + (LIST_LABEL[k] || k) + '” phone looks invalid.' });
+      var ib = data.inboxes[k], nm = ib.label || LIST_LABEL[k] || k;
+      if (ib.email && !validEmail(ib.email)) probs.push({ step: stepIndexById('inboxes'), msg: 'Shared “' + nm + '” email looks invalid.' });
+      if (ib.phone && !validPhone(ib.phone)) probs.push({ step: stepIndexById('inboxes'), msg: 'Shared “' + nm + '” phone looks invalid.' });
     });
     data.people.forEach(function (p) {
       var st = p.section === 'Liaison officers' ? stepIndexById('liaison') : stepForSection(p.section);
@@ -704,7 +729,7 @@ firebase.initializeApp({
         '<h2 style="color:var(--green);">✓ Submitted &amp; locked</h2>' +
         '<p class="ri-card__sub">Received by the League' + (when ? ' on ' + esc(when) : '') + '. Your submission is shown below for reference. To change anything, please contact the League and we’ll re-open your form.</p></div>' +
       (inboxKeys.length ? '<div class="ri-card"><h2>Shared addresses</h2>' + inboxKeys.map(function (k) {
-        var ib = rec.inboxes[k]; return '<div style="font-size:13px;padding:3px 0;"><b style="color:var(--navy);">' + esc(LIST_LABEL[k] || k) + '</b> — ' + esc([ib.email, ib.phone].filter(Boolean).join(' · ')) + '</div>';
+        var ib = rec.inboxes[k]; return '<div style="font-size:13px;padding:3px 0;"><b style="color:var(--navy);">' + esc(ib.label || LIST_LABEL[k] || k) + '</b> — ' + esc([ib.email, ib.phone].filter(Boolean).join(' · ')) + '</div>';
       }).join('') + '</div>' : '') +
       order.map(function (sec) {
         return '<div class="ri-card"><h2>' + esc(sec) + '</h2>' + bySection[sec].map(function (p) {
