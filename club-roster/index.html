@@ -4,6 +4,10 @@
   Public club ROSTER collection — GUIDED WIZARD (capability-URL pattern).
   Sibling of club-data. Gathers a club's people directory for club-directory.
 
+  v1.3 (16/06/2026) — stepper completion is now EXPLICIT: each step carries a
+    "Mark this section as done" checkbox (persisted in the draft) and only a
+    step the club has ticked shows a ✓ in the stepper. Visiting/▸jumping no
+    longer implies completion.
   v1.2 (16/06/2026) — club feedback round 2:
     - Stepper uses a VISITED model — a step only shows a tick once you've
       actually landed on it; jumping ahead no longer marks skipped steps done.
@@ -129,6 +133,8 @@ firebase.initializeApp({
   /* Footer nav */
   .ri-nav { position: sticky; bottom: 0; background: var(--white); border-top: 1px solid var(--border); padding: 12px 18px; display: flex; align-items: center; gap: 12px; }
   .ri-nav__spacer { flex: 1; }
+  .ri-donec { display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--text-muted); cursor:pointer; white-space:nowrap; }
+  .ri-donec input { width:16px; height:16px; }
   .ri-saved { font-size: 12px; color: var(--green); opacity: 0; transition: opacity .2s; }
   .ri-saved.show { opacity: 1; }
   .ri-status { font-size: 13px; color: var(--red); }
@@ -149,6 +155,7 @@ firebase.initializeApp({
     <div class="ri-body" id="riStep"></div>
     <div class="ri-nav">
       <button class="btn btn--ghost" id="riBack">← Back</button>
+      <label class="ri-donec" id="riDoneWrap"><input type="checkbox" id="riDone"> Mark this section as done</label>
       <span class="ri-status" id="riStatus"></span>
       <span class="ri-nav__spacer"></span>
       <span class="ri-saved" id="riSaved">Saved ✓</span>
@@ -229,8 +236,7 @@ firebase.initializeApp({
   var db = firebase.database();
   var clubName = null;
   var cur = 0;
-  var visited = {};          // step index -> true once landed on
-  var data = { yourName:'', yourEmail:'', inboxes:{}, people:[], emptied:{} };
+  var data = { yourName:'', yourEmail:'', inboxes:{}, people:[], emptied:{}, done:{} };
 
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
   function el(id){ return document.getElementById(id); }
@@ -260,19 +266,19 @@ firebase.initializeApp({
       el('riApp').style.display = '';
       if (prev) { renderLocked(prev); return; }
       var draft = loadDraft();
-      if (draft) data = Object.assign({ yourName:'', yourEmail:'', inboxes:{}, people:[], emptied:{} }, draft);
+      if (draft) data = Object.assign({ yourName:'', yourEmail:'', inboxes:{}, people:[], emptied:{}, done:{} }, draft);
       bindNav();
-      visited[0] = true;
       renderSteps(); renderStep();
     });
   }).catch(function () { gate('Could not check this link — please try again shortly.'); });
 
-  /* ---- Stepper (visited model — no false "complete") ---- */
+  /* ---- Stepper (explicit completion — a step only ticks once marked done) ---- */
   function renderSteps() {
     el('riSteps').innerHTML = STEPS.map(function (s, i) {
-      var cls = (i === cur) ? 'is-current' : (visited[i] ? 'is-done' : '');
+      var done = !!data.done[s.id];
+      var cls = (i === cur) ? 'is-current' : (done ? 'is-done' : '');
       return '<div class="ri-step ' + cls + '" data-step="' + i + '">' +
-        (visited[i] && i !== cur ? '<span class="ri-step__tick">✓</span>' : '') + esc(s.label) + '</div>';
+        (done && i !== cur ? '<span class="ri-step__tick">✓</span>' : '') + esc(s.label) + '</div>';
     }).join('');
     el('riBar').style.width = Math.round((cur / (STEPS.length - 1)) * 100) + '%';
     var active = el('riSteps').querySelector('.is-current');
@@ -286,6 +292,10 @@ firebase.initializeApp({
     el('riStatus').textContent = '';
     el('riBack').style.visibility = cur === 0 ? 'hidden' : 'visible';
     el('riNext').textContent = (cur === STEPS.length - 1) ? 'Submit to the League' : 'Next →';
+    // The "mark done" toggle shows on every step except the final review.
+    var doneWrap = el('riDoneWrap');
+    doneWrap.style.display = (step.kind === 'review') ? 'none' : 'flex';
+    el('riDone').checked = !!data.done[step.id];
 
     if (step.kind === 'you') {
       host.innerHTML =
@@ -613,8 +623,11 @@ firebase.initializeApp({
     });
     el('riStep').addEventListener('input', markSaved);
     el('riStep').addEventListener('change', markSaved);
+    el('riDone').addEventListener('change', function () {
+      data.done[STEPS[cur].id] = el('riDone').checked; renderSteps(); saveDraft(true);
+    });
   }
-  function goTo(idx) { syncStep(); saveDraft(); cur = idx; visited[idx] = true; renderSteps(); renderStep(); window.scrollTo(0, 0); }
+  function goTo(idx) { syncStep(); saveDraft(); cur = idx; renderSteps(); renderStep(); window.scrollTo(0, 0); }
 
   /* ---- Draft persistence ---- */
   var saveTimer = null;
