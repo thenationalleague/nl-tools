@@ -6,9 +6,25 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.27 — Person editor: wider modal, trimmed contact fields, no note.
+  v0.28 — Manage-contacts polish; per-person visibility scrapped.
 
   Changelog:
+  v0.28 — (15/06/2026) Manage-contacts polish + visibility removed.
+          - Scrapped per-person visibility entirely (segmented control, list
+            badge, lbResults hidden-filter, clubToRTDB/clubFromRTDB fields,
+            ensurePersonIds default, seedPersonDraft/commit fields, .mc-seg /
+            .mc-vis-badge CSS). Visibility is decided by where the directory is
+            published, not per person.
+          - Contacts: ensureContactFloor() keeps at least one email row and one
+            phone row; the sole row of a type renders no × (renderContactRow
+            takes a removable flag) — a genuine blank is the "No … on file"
+            checkbox, now on its own line clear of the +Add button. Lighter
+            ::placeholder (Email address / Phone number) so empty fields don't
+            read as entered. Removed the contacts help paragraph.
+          - People list redesigned: initials avatar, larger name + primary-role
+            subtitle, clearer contact line, departments as tags.
+          - renderEditor club header no longer shows "Division · N people".
+          - Club picker "Edit →" link -> branded ghost button.
   v0.27 — (15/06/2026) Person editor trim. Widened modal 600 -> 820px.
           Dropped the optional Note field (person.note is preserved silently
           on save — just no longer editable here). Contact rows are now value
@@ -366,6 +382,16 @@
   var NL_TOOL_KEY = 'ops-club-directory';
 
   window.NL_CHANGELOG = [
+    {
+      date: '15 Jun 2026',
+      version: 'v0.28',
+      items: [
+        'Removed the per-person visibility setting — whether the directory is internal or public is decided by where it\'s published, not on each person.',
+        'Contacts always keep at least one email and one phone slot now: you can\'t delete the last one — use the "No email / No phone on file" box (now given room to breathe) to record a genuine blank. Empty boxes show lighter prompt text so they no longer look already filled in.',
+        'Redesigned the people list so each person reads more clearly — an initials badge, a bigger name with their main role beside it, and department roles shown as tidy tags.',
+        'Tidied the club page header (no more repeated division and people count) and replaced the off-brand "Edit →" links on the club list with proper buttons.'
+      ]
+    },
     {
       date: '15 Jun 2026',
       version: 'v0.27',
@@ -1482,12 +1508,11 @@
     overflow: hidden;
   }
   .mc-person-card {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 16px;
-    padding: 12px 16px;
+    display: flex;
+    gap: 14px;
+    padding: 16px 18px;
     border-bottom: 1px solid var(--border);
-    align-items: center;
+    align-items: flex-start;
     cursor: pointer;
     transition: background 0.1s;
   }
@@ -1495,35 +1520,55 @@
   .mc-person-card:hover { background: var(--off-white); }
   .mc-person-card.is-selected {
     background: color-mix(in srgb, var(--navy) 8%, white);
-    border-left: 3px solid var(--navy);
-    padding-left: 13px;
+    box-shadow: inset 3px 0 0 var(--navy);
   }
-  .mc-person-card-main { min-width: 0; }
+  .mc-person-card__avatar {
+    flex: 0 0 42px; width: 42px; height: 42px;
+    border-radius: 50%;
+    background: var(--navy-100); color: var(--navy);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-variation-settings: 'wght' 800;
+    letter-spacing: 0.02em;
+  }
+  .mc-person-card-main { flex: 1; min-width: 0; }
+  .mc-person-card__top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .mc-person-card-name {
-    font-weight: 700; font-variation-settings: 'wght' 700;
-    font-size: 14px;
-    color: var(--text);
+    font-variation-settings: 'wght' 800;
+    font-size: 16px; color: var(--text); line-height: 1.2;
+  }
+  .mc-person-card__role {
+    font-size: 12px; color: var(--text-muted);
+    font-variation-settings: 'wght' 600;
   }
   .mc-person-card-contact {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-muted);
-    margin-top: 2px;
+    margin-top: 5px;
     display: flex;
-    gap: 10px;
+    gap: 14px;
     flex-wrap: wrap;
   }
-  .mc-person-card-contact a { color: var(--navy); }
+  .mc-person-card-contact a { color: var(--navy); font-variation-settings: 'wght' 600; }
+  .mc-person-card__nocontact { font-style: italic; }
   .mc-person-card-depts {
-    font-size: 11px;
-    color: var(--text-muted);
-    margin-top: 4px;
-    font-style: italic;
+    margin-top: 10px;
+    display: flex; flex-wrap: wrap; gap: 6px;
   }
-  .mc-person-card-depts b {
-    font-style: normal;
-    font-weight: 600;
-    font-variation-settings: 'wght' 600;
+  .mc-person-card__tag {
+    font-size: 11px; line-height: 1.4;
+    background: var(--off-white);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px 9px;
     color: var(--text);
+  }
+  .mc-person-card__tag b {
+    font-variation-settings: 'wght' 700;
+    color: var(--navy);
+  }
+  .mc-person-card__tag--none {
+    background: transparent; border: 1px dashed var(--border);
+    color: var(--text-muted); font-style: italic;
   }
   .mc-person-card-actions {
     display: flex;
@@ -1753,45 +1798,19 @@
     background: var(--white);
   }
   .mc-contact-row input:focus { outline: none; border-color: var(--navy); }
+  .mc-contact-row input::placeholder { color: var(--navy-300); opacity: 1; }
   .mc-contacts-col__empty {
     font-size: 12px; color: var(--text-muted);
     font-style: italic; margin-bottom: 8px;
   }
-  .mc-contacts-col .btn { margin-top: 2px; }
+  .mc-contacts-col .btn { display: inline-flex; margin-top: 4px; }
+  /* On its own line, well clear of the +Add button above it. */
   .mc-person-panel__nonebox {
-    display: inline-flex; align-items: center; gap: 6px;
-    margin-top: 10px;
+    display: flex; align-items: center; gap: 6px;
+    margin-top: 16px;
     font-size: 12px; color: var(--text-muted);
-    cursor: pointer; white-space: nowrap;
+    cursor: pointer;
   }
-  /* Branded segmented control (visibility). */
-  .mc-seg {
-    display: inline-flex;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-  .mc-seg__opt {
-    padding: 7px 14px;
-    font-family: var(--font); font-size: 12px;
-    font-variation-settings: 'wght' 700;
-    color: var(--text-muted);
-    background: var(--white);
-    border: none; border-right: 1px solid var(--border);
-    cursor: pointer; white-space: nowrap;
-  }
-  .mc-seg__opt:last-child { border-right: none; }
-  .mc-seg__opt:hover { background: var(--navy-50); }
-  .mc-seg__opt.is-active { background: var(--navy); color: #fff; }
-  /* Visibility badges on the manage people list. */
-  .mc-vis-badge {
-    display: inline-block; vertical-align: middle;
-    margin-left: 8px; padding: 1px 7px; border-radius: 999px;
-    font-size: 10px; font-variation-settings: 'wght' 700;
-    text-transform: uppercase; letter-spacing: .04em;
-  }
-  .mc-vis-badge--public { color: #fff; background: var(--green); }
-  .mc-vis-badge--hidden { color: var(--text-muted); background: var(--navy-100); border: 1px solid var(--border); }
 
   .mc-person-panel__ftr {
     padding: 14px 22px;
@@ -3057,9 +3076,6 @@ function lbResults() {
   window.CLUBS.forEach(function(c) {
     if (!clubs[c.name]) return;
     c.people.forEach(function(p) {
-      // Hidden people never surface in generated lists/exports. (The future
-      // public site will further restrict to visibility === 'public'.)
-      if (p.visibility === 'hidden') return;
       var matched = {};        // section -> [role titles]
       var matchedContacts = {}; // section -> [role-level contacts]
       p.roles.forEach(function(r) {
@@ -3520,8 +3536,6 @@ function ensurePersonIds() {
   window.CLUBS.forEach(function(c) {
     c.people.forEach(function(p) {
       if (!p._id) p._id = 'p' + (_nextPersonId++);
-      // Legacy records default to staff-only: visible internally, not public.
-      if (!p.visibility) p.visibility = 'staff';
     });
   });
 }
@@ -3571,7 +3585,7 @@ function renderClubPicker(root) {
       '<td><span class="pill pill--identifier">' + esc(DIVISION_FULL_NAMES[divisionOf(c.name)] || divisionOf(c.name)) + '</span></td>' +
       '<td>' + c.people.length + ' people</td>' +
       '<td>' + status + '</td>' +
-      '<td class="mc-action-col"><a href="#">Edit →</a></td>' +
+      '<td class="mc-action-col"><button class="btn btn--ghost btn--sm" type="button">Edit</button></td>' +
     '</tr>';
   }).join('');
 
@@ -3614,7 +3628,6 @@ function renderEditor(root) {
       '<img src="' + crestUrl(club.name) + '" alt="" onerror="this.onerror=null;this.src=\'' + fallbackCrest() + '\'">' +
       esc(club.name) +
     '</h2>' +
-    '<div class="mc-title-sub">' + esc(divisionOf(club.name)) + ' · ' + club.people.length + ' ' + (club.people.length===1?'person':'people') + '</div>' +
   '</div>';
 
   // Surface tabs — People / Departments / (Details only if admin)
@@ -3675,29 +3688,39 @@ function renderPeopleSurface(club) {
 
     var contactParts = [];
     if (p.email) contactParts.push('<a href="mailto:' + esc(p.email) + '" onclick="event.stopPropagation();">' + esc(p.email) + '</a>');
-    if (p.phone) contactParts.push(esc(p.phone));
+    if (p.phone) contactParts.push('<span>' + esc(p.phone) + '</span>');
 
-    // Summarise departments
+    var nm = (p.name || '').trim();
+    var initials = nm ? nm.split(/\s+/).map(function(w){ return w.charAt(0); }).slice(0, 2).join('').toUpperCase() : '?';
+    var primaryRole = (p.roles || []).filter(function(r){ return r.main; })[0] || (p.roles || [])[0];
+    var roleLabel = primaryRole && primaryRole.title ? primaryRole.title : '';
+
+    // Summarise departments as tags (section: roles).
     var deptMap = {};
     p.roles.forEach(function(r) {
       if (!deptMap[r.section]) deptMap[r.section] = [];
       deptMap[r.section].push(r.title);
     });
-    var deptParts = Object.keys(deptMap).map(function(section) {
-      var roles = deptMap[section].join(' / ');
-      return '<b>' + esc(section) + '</b>: ' + esc(roles);
+    var deptTags = Object.keys(deptMap).map(function(section) {
+      return '<span class="mc-person-card__tag"><b>' + esc(section) + '</b> · ' + esc(deptMap[section].join(' / ')) + '</span>';
     });
+    var deptHtml = deptTags.length
+      ? deptTags.join('')
+      : '<span class="mc-person-card__tag mc-person-card__tag--none">No department assignments</span>';
 
     var selectedClass = (state.manage.editingPersonId === p._id) ? ' is-selected' : '';
-    var visBadge = p.visibility === 'public'
-      ? ' <span class="mc-vis-badge mc-vis-badge--public">Public</span>'
-      : (p.visibility === 'hidden' ? ' <span class="mc-vis-badge mc-vis-badge--hidden">Hidden</span>' : '');
 
     return '<div class="mc-person-card' + selectedClass + '" data-person-id="' + esc(p._id) + '">' +
+      '<div class="mc-person-card__avatar" aria-hidden="true">' + esc(initials) + '</div>' +
       '<div class="mc-person-card-main">' +
-        '<div class="mc-person-card-name">' + esc(p.name||'(unnamed)') + visBadge + '</div>' +
-        (contactParts.length ? '<div class="mc-person-card-contact">' + contactParts.join(' · ') + '</div>' : '') +
-        (deptParts.length ? '<div class="mc-person-card-depts">' + deptParts.join(' · ') + '</div>' : '<div class="mc-person-card-depts"><i>No department assignments</i></div>') +
+        '<div class="mc-person-card__top">' +
+          '<span class="mc-person-card-name">' + esc(p.name||'(unnamed)') + '</span>' +
+          (roleLabel ? '<span class="mc-person-card__role">' + esc(roleLabel) + '</span>' : '') +
+        '</div>' +
+        (contactParts.length
+          ? '<div class="mc-person-card-contact">' + contactParts.join('') + '</div>'
+          : '<div class="mc-person-card-contact mc-person-card__nocontact">No contact details</div>') +
+        '<div class="mc-person-card-depts">' + deptHtml + '</div>' +
       '</div>' +
       '<div class="mc-person-card-actions">' +
         '<button class="btn btn--ghost btn--sm" data-edit-person="' + esc(p._id) + '">Edit</button>' +
@@ -3725,7 +3748,7 @@ function renderPeopleSurface(club) {
 function seedPersonDraft(person) {
   if (!person) {
     return {
-      name: '', note: '', visibility: 'staff',
+      name: '', note: '',
       roleRows: [{ section: SECTION_ORDER[0], title: '', deptHead: false, flags: {} }],
       primaryRoleIdx: 0,
       // New people start with a blank email + phone row already on show, so
@@ -3756,9 +3779,21 @@ function seedPersonDraft(person) {
       return { type: c.type, value: c.value || '', label: c.label || '', preferred: !!c.preferred };
     });
   return { name: person.name || '', note: person.note || '',
-           visibility: person.visibility || 'staff',
            noEmail: !!person.noEmail, noPhone: !!person.noPhone,
            roleRows: roleRows, primaryRoleIdx: primaryRoleIdx, contactRows: contactRows };
+}
+
+/* Guarantee the editor always shows at least one email row and one phone row.
+   You can't delete the last of either — a genuine blank is recorded with the
+   "No email/phone on file" checkbox instead. */
+function ensureContactFloor(draft) {
+  if (!Array.isArray(draft.contactRows)) draft.contactRows = [];
+  if (!draft.contactRows.some(function(c){ return c.type === 'email'; })) {
+    draft.contactRows.push({ type: 'email', value: '', label: '', preferred: true });
+  }
+  if (!draft.contactRows.some(function(c){ return c.type === 'phone'; })) {
+    draft.contactRows.push({ type: 'phone', value: '', label: '', preferred: true });
+  }
 }
 
 /* Render one editable role row in the person modal. */
@@ -3823,18 +3858,20 @@ function renderRoleRow(club, draft, r, i) {
   '</div>';
 }
 
-/* Render one editable contact row in the person modal. preferred is a
-   radio scoped per type (one preferred email, one preferred phone). */
 /* One contact entry — just the value plus a remove button. Type is implied by
    which column it lives in (email or phone); i stays the index into the flat
    draft.contactRows array so the value/remove handlers map straight through.
-   The first entry of each type becomes the headline (person.email/.phone). */
-function renderContactRow(draft, c, i) {
+   The first entry of each type becomes the headline (person.email/.phone).
+   removable is false for the sole row of a type — there's always at least one
+   email row and one phone row; "No … on file" handles a genuine blank. */
+function renderContactRow(draft, c, i, removable) {
   return '<div class="mc-contact-row" data-contact-idx="' + i + '">' +
     '<input class="mc-contact-row__value" type="' + (c.type === 'email' ? 'email' : 'tel') + '" ' +
       'data-contact-value-idx="' + i + '" value="' + esc(c.value) + '" ' +
-      'placeholder="' + (c.type === 'email' ? 'jane@club.co.uk' : '01234 567890') + '">' +
-    '<button class="btn-icon btn-icon--danger" data-remove-contact-idx="' + i + '" title="Remove">×</button>' +
+      'placeholder="' + (c.type === 'email' ? 'Email address' : 'Phone number') + '">' +
+    (removable
+      ? '<button class="btn-icon btn-icon--danger" data-remove-contact-idx="' + i + '" title="Remove">×</button>'
+      : '') +
   '</div>';
 }
 
@@ -3871,16 +3908,15 @@ function renderPersonPanelInner(club) {
     draft = seedPersonDraft(person);
     state.manage.personDraft = draft;
   }
+  ensureContactFloor(draft);   // always at least one email row and one phone row
 
   var rolesHtml = draft.roleRows.map(function(r, i){ return renderRoleRow(club, draft, r, i); }).join('');
   // Contacts render in two columns by type; keep the flat-array index so the
-  // value/label/pref/remove handlers still line up.
-  var emailRows = draft.contactRows.map(function(c, i){ return c.type === 'email' ? renderContactRow(draft, c, i) : ''; }).join('');
-  var phoneRows = draft.contactRows.map(function(c, i){ return c.type === 'phone' ? renderContactRow(draft, c, i) : ''; }).join('');
-  var vis = draft.visibility || 'staff';
-  function visOpt(val, label) {
-    return '<button type="button" class="mc-seg__opt' + (vis === val ? ' is-active' : '') + '" data-vis="' + val + '">' + label + '</button>';
-  }
+  // value/remove handlers still line up. The sole row of a type isn't removable.
+  var emailCount = draft.contactRows.filter(function(c){ return c.type === 'email'; }).length;
+  var phoneCount = draft.contactRows.filter(function(c){ return c.type === 'phone'; }).length;
+  var emailRows = draft.contactRows.map(function(c, i){ return c.type === 'email' ? renderContactRow(draft, c, i, emailCount > 1) : ''; }).join('');
+  var phoneRows = draft.contactRows.map(function(c, i){ return c.type === 'phone' ? renderContactRow(draft, c, i, phoneCount > 1) : ''; }).join('');
 
   return '<div class="mc-person-panel__hd">' +
         '<div>' +
@@ -3893,16 +3929,6 @@ function renderPersonPanelInner(club) {
         '<div class="mc-person-panel__field">' +
           '<label>Full name</label>' +
           '<input type="text" id="mcPanelName" value="' + esc(draft.name) + '" placeholder="e.g. Jane Smith">' +
-        '</div>' +
-
-        '<div class="mc-person-panel__field">' +
-          '<label>Directory visibility</label>' +
-          '<div class="mc-seg" id="mcPanelVisibility" role="radiogroup" aria-label="Directory visibility">' +
-            visOpt('public', 'Public') +
-            visOpt('staff', 'Staff only') +
-            visOpt('hidden', 'Hidden') +
-          '</div>' +
-          '<div class="mc-person-panel__help"><b>Public</b> appears on the staff directory and the public website. <b>Staff only</b> stays internal (the default). <b>Hidden</b> people remain editable here but appear nowhere else (lists, exports, public site).</div>' +
         '</div>' +
 
         '<div class="mc-person-panel__depts-section">' +
@@ -3928,7 +3954,6 @@ function renderPersonPanelInner(club) {
               '<label class="mc-person-panel__nonebox"><input type="checkbox" id="mcNoPhone"' + (draft.noPhone ? ' checked' : '') + '> No phone on file</label>' +
             '</div>' +
           '</div>' +
-          '<div class="mc-person-panel__help">Add an email and a phone, or tick the matching <b>"No … on file"</b> box. The first email and phone become this person\'s headline contacts; extras are kept for the list builder.</div>' +
         '</div>' +
       '</div>' +
       '<div class="mc-person-panel__ftr">' +
@@ -4496,7 +4521,6 @@ function commitPersonPanelSave(club, isNew, draft) {
   var cc = buildContactsFromDraft(draft);
 
   var person;
-  var visibility = (['public', 'staff', 'hidden'].indexOf(draft.visibility) !== -1) ? draft.visibility : 'staff';
   var noEmail = !cc.email && !!draft.noEmail;
   var noPhone = !cc.phone && !!draft.noPhone;
   if (isNew) {
@@ -4508,7 +4532,6 @@ function commitPersonPanelSave(club, isNew, draft) {
       note: note,
       contacts: cc.contacts,
       roles: roles,
-      visibility: visibility,
       noEmail: noEmail,
       noPhone: noPhone,
     };
@@ -4522,7 +4545,6 @@ function commitPersonPanelSave(club, isNew, draft) {
       person.email = cc.email;
       person.phone = cc.phone;
       person.roles = roles;
-      person.visibility = visibility;
       person.noEmail = noEmail;
       person.noPhone = noPhone;
     }
@@ -5301,15 +5323,6 @@ function wireUI() {
       }
       return;
     }
-    // Visibility segmented control (Public / Staff only / Hidden)
-    var visBtn = t.closest('[data-vis]');
-    if (visBtn) {
-      if (state.manage.personDraft) {
-        state.manage.personDraft.visibility = visBtn.getAttribute('data-vis');
-        refreshPersonPanel();
-      }
-      return;
-    }
 
     /* --- Departments surface --- */
     var editDeptBtn = t.closest('[data-edit-dept-section]');
@@ -5845,7 +5858,6 @@ function clubToRTDB(club) {
       email: preferredContact(p, 'email'),
       phone: preferredContact(p, 'phone'),
       note: p.note || null,
-      visibility: (['public', 'staff', 'hidden'].indexOf(p.visibility) !== -1) ? p.visibility : 'staff',
       noEmail: !!p.noEmail || null,
       noPhone: !!p.noPhone || null,
       contacts: packContacts(p.contacts),
@@ -5900,7 +5912,6 @@ function clubFromRTDB(name, val, fallbackWebsite) {
       email: p.email || null,
       phone: p.phone || null,
       note: p.note || null,
-      visibility: (['public', 'staff', 'hidden'].indexOf(p.visibility) !== -1) ? p.visibility : 'staff',
       noEmail: !!p.noEmail,
       noPhone: !!p.noPhone,
       roles: arr(p.roles).map(unpackRole)
