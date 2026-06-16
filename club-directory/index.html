@@ -6,9 +6,20 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.32 — Phone formatting + duplicate-contact warning.
+  v0.33 — Back-button anchoring (History API).
 
   Changelog:
+  v0.33 — (16/06/2026) Browser-back anchoring.
+          - Navigation is state-driven; previously the browser Back button left
+            the tool entirely (→ portal). Added a small History layer:
+            navSnapshot()/navHash() capture {viewMode, viewing (club),
+            manage.editingClub, manage.surface}; syncHistory() pushes a history
+            entry when that changes (replaceState seeds the base), hooked at the
+            three leaf renderers (showScene / renderClubPicker / renderEditor)
+            with hash dedup so ordinary re-renders don't push. popstate →
+            applyNav() restores state (and drops transient edit state) then
+            showScene(). Back now steps list ↔ club ↔ section; only the
+            top-level exits to the portal.
   v0.32 — (16/06/2026) Phone formatting + duplicate-contact guard.
           - normalisePhone (storage: bare 11 digits / verbatim +overseas) +
             formatPhone (display: UK 11-digit grouped ##### ### ###; overseas /
@@ -438,6 +449,13 @@
   var NL_TOOL_KEY = 'ops-club-directory';
 
   window.NL_CHANGELOG = [
+    {
+      date: '16 Jun 2026',
+      version: 'v0.33',
+      items: [
+        'The browser Back button now moves you back through the tool — from a club to the club list, and back out of a section — instead of jumping straight out to the portal. Only Back from the top level leaves the tool.'
+      ]
+    },
     {
       date: '16 Jun 2026',
       version: 'v0.32',
@@ -3179,6 +3197,63 @@ function renderClub() {
   root.innerHTML = renderClubStyle2(club);
 }
 
+/* ---- Back-button anchoring (History API) ----
+   Navigation is state-driven; without this the browser Back button leaves the
+   tool entirely (→ portal). We snapshot the meaningful view (scene + club +
+   manage surface) and push a history entry whenever it changes, so Back steps
+   list ↔ club ↔ section within the tool. Hooked at the three leaf renderers
+   (showScene / renderClubPicker / renderEditor); dedup by hash means ordinary
+   re-renders (after an edit) never push. */
+var _navSuppress = false;
+function navSnapshot() {
+  return {
+    nav: true,
+    viewMode: state.viewMode || 'directory',
+    viewing: state.viewing || null,
+    editingClub: (state.manage && state.manage.editingClub) || null,
+    surface: (state.manage && state.manage.surface) || 'people'
+  };
+}
+function navHash(s) {
+  if (s.viewMode === 'manage') {
+    return s.editingClub
+      ? '#manage/' + encodeURIComponent(s.editingClub) + '/' + (s.surface || 'people')
+      : '#manage';
+  }
+  if (s.viewMode && s.viewMode !== 'directory') return '#' + s.viewMode;
+  if (s.viewing) return '#club/' + encodeURIComponent(s.viewing);
+  return '#';
+}
+function syncHistory() {
+  if (_navSuppress) return;
+  var s = navSnapshot();
+  var hash = navHash(s);
+  var cur = history.state;
+  if (cur && cur.nav && navHash(cur) === hash) return;          // unchanged — no push
+  if (!cur || !cur.nav) history.replaceState(s, '', hash);      // seed the base entry
+  else history.pushState(s, '', hash);
+}
+function applyNav(s) {
+  _navSuppress = true;
+  state.viewMode = s.viewMode || 'directory';
+  state.viewing = s.viewing || null;
+  if (state.manage) {
+    state.manage.editingClub = s.editingClub || null;
+    if (s.surface) state.manage.surface = s.surface;
+    // Drop any transient edit state when moving via the back/forward buttons.
+    state.manage.editingPersonId = null;
+    state.manage.personDraft = null;
+    state.manage.editingDetails = null;
+    state.manage.editingDeptSection = null;
+  }
+  showScene();
+  _navSuppress = false;
+}
+window.addEventListener('popstate', function(e) {
+  applyNav((e.state && e.state.nav) ? e.state
+    : { viewMode: 'directory', viewing: null, editingClub: null, surface: 'people' });
+});
+
 function showScene() {
   var listing = document.getElementById('scene-listing');
   var club = document.getElementById('scene-club');
@@ -3223,6 +3298,7 @@ function showScene() {
   }
 
   updatePersonaGatedElements();
+  syncHistory();
   window.scrollTo(0, 0);
 }
 
@@ -3795,6 +3871,7 @@ function renderClubPicker(root) {
         '<tbody>' + (rows || '<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--text-muted);">No clubs match</td></tr>') + '</tbody>' +
       '</table>' +
     '</div>';
+  syncHistory();
 }
 
 /* ---------- Editor (two surfaces) ---------- */
@@ -3854,6 +3931,7 @@ function renderEditor(root) {
     detailsHtml +
     panelHtml +
     confirmHtml;
+  syncHistory();
 }
 
 /* ---------- Surface 1: People ---------- */
