@@ -6,9 +6,53 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.28 — Manage-contacts polish; per-person visibility scrapped.
+  v0.31 — Mailing lists (phase 1): per-person membership, defaults, gap flag.
 
   Changelog:
+  v0.31 — (16/06/2026) Mailing lists — phase 1 (membership + editor + gaps).
+          - MAILING_LISTS: League-defined fixed set (Chairs, CEOs, Secretaries*,
+            Finance, Commercial, Ticketing, Media, Safety*, Medical, Team ops,
+            Community, Safeguarding*, DLO*, PLO*, CSLO*, SLO). * = required.
+          - Membership DEFAULTS from role (listDerivedFromRoles via section /
+            functionForTitle) and is editable per person via person.listOverrides
+            ({key:true|false}); effectiveOnList = override ?? derived. So a CEO
+            can join 'Secretaries' without holding the role, and people can opt
+            out. Overrides equal to the default are pruned on save.
+          - Person editor gains a 'Mailing lists' checkbox grid (auto-ticked
+            from role, with an 'auto' tag); listOverrides round-trips through
+            clubToRTDB / clubFromRTDB.
+          - Gap flag: clubListGaps() — required lists with nobody on them are
+            shown as a warn pill in the manage club picker.
+          (Phase 2: list-builder/export by mailing list.)
+  v0.30 — (16/06/2026) Granular department fixes.
+          - Ticketing split out of Commercial into its own 'Ticketing'
+            department (so "every ticket-office manager" stays list-able).
+          - Kit moved out of 'Matchday & safety' into a new 'Team operations'
+            department (kit, equipment, logistics). 'Matchday & safety' is now
+            Safety Officer + Operations Manager only.
+          - Both new depts are OPTIONAL-head (no "missing head" warning on what
+            are usually single-person functions).
+          - functionForTitle gains a 'ticketing' function (ahead of commercial).
+          - migrateSections() remaps legacy seed roles; remapSectionForRole is
+            also applied in clubFromRTDB.unpackRole. Idempotent.
+          (Mailing lists — editable per-person distribution lists — are the next
+           piece; departments stay granular to seed them cleanly.)
+  v0.29 — (16/06/2026) Public club-view polish.
+          - Stadium shows the sponsor name only when sponsored (stadiumDisplay
+            no longer concatenates "name / sponsor"; facts grid drops the
+            "currently <sponsor>" sub).
+          - Address promoted to the second fact (after Stadium).
+          - Nickname removed from the hero.
+          - Club contact chips now sit under a "Club correspondence" label so
+            they're not mistaken for a personal address.
+          - "Head" badge restyled from the loud amber pill to a quiet navy
+            outline (.s2-head, "Head of dept").
+          - VACANT posts removed from the directory: the club-view vacant rows
+            and the list-builder vacant entries no longer render. (Underlying
+            club.vacant plumbing is now unreachable and can be stripped later.)
+          - Manage > Club details: "managed in clubs-meta" replaced with a
+            "Spotted an error? Request a correction" note (wired to the existing
+            correctionMailto helper).
   v0.28 — (15/06/2026) Manage-contacts polish + visibility removed.
           - Scrapped per-person visibility entirely (segmented control, list
             badge, lbResults hidden-filter, clubToRTDB/clubFromRTDB fields,
@@ -383,6 +427,33 @@
 
   window.NL_CHANGELOG = [
     {
+      date: '16 Jun 2026',
+      version: 'v0.31',
+      items: [
+        'New Mailing lists. Each person can belong to League mailing lists (Club secretaries, Safety officers, Commercial, Ticketing, DLOs, and so on). Membership is set automatically from their role, but you can override it per person — so, for example, a CEO who wants all the secretary emails can simply be ticked onto the Club secretaries list.',
+        'The club list now flags when a club has nobody on a required mailing list, so gaps are easy to spot.'
+      ]
+    },
+    {
+      date: '16 Jun 2026',
+      version: 'v0.30',
+      items: [
+        'Ticketing is now its own department (split out of Commercial), so you can pull a clean list of every ticket-office contact.',
+        'Kit and equipment moved out of "Matchday & safety" into a new "Team operations" department — "Matchday & safety" is now just the Safety Officer and matchday operations.'
+      ]
+    },
+    {
+      date: '16 Jun 2026',
+      version: 'v0.29',
+      items: [
+        'Club pages now show the sponsored stadium name only (no more showing the old name alongside the sponsor), and the address has moved up to sit just under the stadium.',
+        'Removed the nickname from the club header, and labelled the club’s phone/email/website as "Club correspondence" so they’re not mistaken for someone’s personal details.',
+        'Restyled the "Head of dept" marker into a quieter, tidier badge.',
+        'Removed the leftover "VACANT" posts — only real, named people show now.',
+        'In Manage › Club details, the "managed in clubs-meta" note is now a friendly "Spotted an error? Request a correction" link.'
+      ]
+    },
+    {
       date: '15 Jun 2026',
       version: 'v0.28',
       items: [
@@ -708,15 +779,49 @@
      panels, correction line. People table unchanged below.
      ================================================================ */
   .s2-header__main { min-width: 0; flex: 1; }
-  .cp-nickname { font-size: 12px; color: var(--navy-200); margin-top: 3px; font-style: italic; }
   .cp-stadium { font-size: 14px; font-variation-settings: 'wght' 700; margin-top: 8px; }
-  .cp-contact { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .cp-contact { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .cp-contact__label {
+    flex-basis: 100%; margin-bottom: 1px;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
+    font-variation-settings: 'wght' 800; color: var(--navy-200);
+  }
   .cp-chip {
     display: inline-flex; align-items: center; font-size: 12px;
     padding: 4px 11px; border-radius: 999px;
     background: var(--navy-600); color: var(--white); text-decoration: none;
   }
   a.cp-chip:hover { background: var(--navy-700); text-decoration: none; }
+  /* "Head of dept" marker on the club people table — a quiet navy pill,
+     a calmer treatment than the old amber uppercase badge. */
+  .s2-head {
+    display: inline-block; margin-left: 8px; vertical-align: middle;
+    font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em;
+    font-variation-settings: 'wght' 700;
+    color: var(--navy); background: var(--navy-50);
+    border: 1px solid var(--navy-200); border-radius: 999px;
+    padding: 1px 8px; white-space: nowrap;
+  }
+  .mc-details__note { font-size: 12px; color: var(--text-muted); margin-top: 12px; line-height: 1.5; }
+  .mc-details__note a { color: var(--navy); }
+  /* Mailing-list checkboxes in the person editor. */
+  .mc-mlists { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px; }
+  @media (max-width: 520px) { .mc-mlists { grid-template-columns: 1fr; } }
+  .mc-mlist {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 13px; color: var(--text-muted);
+    padding: 3px 0; cursor: pointer; min-width: 0;
+  }
+  .mc-mlist.is-on { color: var(--text); }
+  .mc-mlist > span { flex: 1; min-width: 0; }
+  .mc-mlist__req { color: var(--primary); font-weight: 900; }
+  .mc-mlist__auto {
+    font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em;
+    font-variation-settings: 'wght' 700;
+    color: var(--navy); background: var(--navy-50);
+    border: 1px solid var(--navy-200); border-radius: 999px;
+    padding: 0 6px;
+  }
   .cp-facts {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
     gap: 1px; background: var(--border); border-bottom: 1px solid var(--border);
@@ -2341,7 +2446,8 @@ var SECTIONS = [
   { key: 'Executive',              type: 'hierarchical', subtitle: 'Chief executive and senior management' },
   { key: 'Club secretary',         type: 'hierarchical', subtitle: 'Administration and fixture compliance' },
   { key: 'Finance',                type: 'hierarchical', subtitle: 'Financial reporting and treasury' },
-  { key: 'Commercial',             type: 'hierarchical', subtitle: 'Sponsorship, ticketing, partnerships' },
+  { key: 'Commercial',             type: 'hierarchical', subtitle: 'Sponsorship, partnerships, retail' },
+  { key: 'Ticketing',              type: 'hierarchical', subtitle: 'Ticket office and box office' },
   {
     key: 'Media & marketing',
     type: 'hierarchical',
@@ -2352,8 +2458,9 @@ var SECTIONS = [
       { key: 'programmeEditor', label: 'Programme editor', description: 'Also writes / edits the matchday programme' }
     ]
   },
-  { key: 'Matchday & safety',      type: 'hierarchical', subtitle: 'Safety officer, operations, kit' },
+  { key: 'Matchday & safety',      type: 'hierarchical', subtitle: 'Safety officer and matchday operations' },
   { key: 'Medical',                type: 'hierarchical', subtitle: 'Doctor, physiotherapist, therapist' },
+  { key: 'Team operations',        type: 'hierarchical', subtitle: 'Kit, equipment and team logistics' },
   { key: 'Community',              type: 'hierarchical', subtitle: 'Community engagement and outreach' },
   { key: 'Safeguarding & welfare', type: 'hierarchical', subtitle: 'Named safeguarding lead for children and adults at risk' },
   {
@@ -2378,12 +2485,85 @@ var SECTIONS_BY_KEY = (function(){ var m = {}; SECTIONS.forEach(function(s){ m[s
 
 // Sections where a dept head is REQUIRED (warning if zero heads).
 // Only applies to 'hierarchical' sections — other types don't have a head concept.
-var OPTIONAL_HEAD_SECTIONS = {};  // e.g. { 'Other': true } — none currently optional
+// Ticketing and Team operations are usually single-person functions — a head
+// isn't required (no "missing head" warning), though one can still be marked.
+var OPTIONAL_HEAD_SECTIONS = { 'Ticketing': true, 'Team operations': true };
 var HEAD_SECTIONS = SECTIONS
   .filter(function(s){ return s.type === 'hierarchical'; })
   .map(function(s){ return s.key; })
   .filter(function(k){ return k !== 'Other'; });  // Other is catch-all, no head
 var REQUIRED_HEAD_SECTIONS = HEAD_SECTIONS.filter(function(k){ return !OPTIONAL_HEAD_SECTIONS[k]; });
+
+/* v0.30 section split: Kit used to live under 'Matchday & safety' and Ticketing
+   under 'Commercial'. Both now have their own departments so they stay
+   individually list-able. Remap legacy role.section on the way in (seed + RTDB).
+   Idempotent — anything already in the new section is left alone. */
+function remapSectionForRole(section, title) {
+  var t = (title || '').toLowerCase();
+  if (section === 'Matchday & safety' && (/\bkit\b/.test(t) || /equipment/.test(t))) return 'Team operations';
+  if (section === 'Commercial' && (/ticket/.test(t) || /box office/.test(t))) return 'Ticketing';
+  return section;
+}
+function migrateSections() {
+  (window.CLUBS || []).forEach(function(c) {
+    (c.people || []).forEach(function(p) {
+      (p.roles || []).forEach(function(r) {
+        r.section = remapSectionForRole(r.section, r.title);
+      });
+    });
+  });
+}
+
+/* ================= MAILING LISTS =================
+   League-defined distribution lists. A person's membership DEFAULTS from
+   their role(s) (match below), but is editable per person via listOverrides
+   ({listKey: true|false}) — so a CEO can be added to 'secretaries', or someone
+   opted out. required: the League flags a club with nobody on that list.
+   match(section, fn) — fn is functionForTitle(title, section). */
+var MAILING_LISTS = [
+  { key: 'chairs',       label: 'Chairs & leadership',  match: function(sec, fn){ return sec === 'Leadership'; } },
+  { key: 'ceos',         label: 'Chief executives',     match: function(sec, fn){ return sec === 'Executive'; } },
+  { key: 'secretaries',  label: 'Club secretaries',     required: true, match: function(sec, fn){ return sec === 'Club secretary'; } },
+  { key: 'finance',      label: 'Finance',              match: function(sec, fn){ return sec === 'Finance'; } },
+  { key: 'commercial',   label: 'Commercial',           match: function(sec, fn){ return sec === 'Commercial'; } },
+  { key: 'ticketing',    label: 'Ticketing',            match: function(sec, fn){ return sec === 'Ticketing'; } },
+  { key: 'media',        label: 'Media & marketing',    match: function(sec, fn){ return sec === 'Media & marketing'; } },
+  { key: 'safety',       label: 'Safety officers',      required: true, match: function(sec, fn){ return fn === 'safety'; } },
+  { key: 'medical',      label: 'Medical',              match: function(sec, fn){ return sec === 'Medical'; } },
+  { key: 'teamops',      label: 'Team operations',      match: function(sec, fn){ return sec === 'Team operations'; } },
+  { key: 'community',    label: 'Community',            match: function(sec, fn){ return sec === 'Community'; } },
+  { key: 'safeguarding', label: 'Safeguarding leads',   required: true, match: function(sec, fn){ return sec === 'Safeguarding & welfare'; } },
+  { key: 'dlo',          label: 'DLO',                  required: true, match: function(sec, fn){ return fn === 'dlo'; } },
+  { key: 'plo',          label: 'PLO',                  required: true, match: function(sec, fn){ return fn === 'plo'; } },
+  { key: 'cslo',         label: 'CSLO',                 required: true, match: function(sec, fn){ return fn === 'cslo'; } },
+  { key: 'slo',          label: 'SLO',                  match: function(sec, fn){ return fn === 'slo'; } }
+];
+var MAILING_LISTS_BY_KEY = (function(){ var m = {}; MAILING_LISTS.forEach(function(l){ m[l.key] = l; }); return m; })();
+
+function roleMatchesList(role, list) {
+  var fn = role['function'] || functionForTitle(role.title, role.section);
+  return !!list.match(role.section, fn);
+}
+/* Default membership for a roles array (used live in the editor from roleRows,
+   and from a stored person's roles). */
+function listDerivedFromRoles(roles, listKey) {
+  var list = MAILING_LISTS_BY_KEY[listKey];
+  if (!list) return false;
+  return (roles || []).some(function(r){ return roleMatchesList(r, list); });
+}
+/* Effective membership = explicit override if set, else the role-derived default. */
+function effectiveOnList(roles, overrides, listKey) {
+  if (overrides && Object.prototype.hasOwnProperty.call(overrides, listKey)) return !!overrides[listKey];
+  return listDerivedFromRoles(roles, listKey);
+}
+function personOnList(person, listKey) {
+  return effectiveOnList(person.roles, person.listOverrides, listKey);
+}
+/* Required lists a club has nobody on. */
+function clubListGaps(club) {
+  return MAILING_LISTS.filter(function(l){ return l.required; })
+    .filter(function(l){ return !(club.people || []).some(function(p){ return personOnList(p, l.key); }); });
+}
 
 /* Per-section free-text title SUGGESTIONS for the person modal's role rows.
    Backed by a <datalist> — free text is always still allowed. Liaison
@@ -2395,10 +2575,12 @@ var TITLE_SUGGESTIONS = {
   'Executive':            ['Chief Executive', 'Managing Director', 'General Manager'],
   'Club secretary':        ['Club Secretary', 'Fixture Secretary', 'Assistant Secretary'],
   'Finance':              ['Finance Director', 'Financial Controller', 'Treasurer'],
-  'Commercial':           ['Commercial Director', 'Commercial Manager', 'Ticketing Manager'],
+  'Commercial':           ['Commercial Director', 'Commercial Manager', 'Partnerships Manager'],
+  'Ticketing':            ['Ticketing Manager', 'Ticket Office Manager', 'Box Office Manager'],
   'Media & marketing':     ['Press Officer', 'Programme Editor', 'Marketing Manager', 'Social Media Manager'],
-  'Matchday & safety':     ['Safety Officer', 'Operations Manager', 'Kit Manager'],
+  'Matchday & safety':     ['Safety Officer', 'Operations Manager', 'Stadium Manager'],
   'Medical':              ['Club Doctor', 'Physiotherapist', 'Sports Therapist'],
+  'Team operations':       ['Kit Manager', 'Equipment Manager'],
   'Community':            ['Community Manager', 'Community Officer'],
   'Safeguarding & welfare':['Safeguarding Lead', 'Welfare Officer'],
   'Other':                ['Volunteer Coordinator']
@@ -2490,13 +2672,11 @@ function stadiumOf(name) {
   var m = clubMeta(name);
   return m.stadium_sponsor_name || m.stadium_name || '';
 }
-// Returns "Glanford Park / Attis Arena" when both are set; otherwise just one.
+// Stadium name for display: the current sponsor name when there is one, else
+// the permanent name. We never show the unsponsored name alongside a sponsor.
 function stadiumDisplay(name) {
   var m = clubMeta(name);
-  if (m.stadium_name && m.stadium_sponsor_name && m.stadium_sponsor_name !== m.stadium_name) {
-    return m.stadium_name + ' / ' + m.stadium_sponsor_name;
-  }
-  return m.stadium_name || m.stadium_sponsor_name || '';
+  return m.stadium_sponsor_name || m.stadium_name || '';
 }
 function addressOf(name) { return clubMeta(name).address || ''; }
 function divisionOf(name) { return clubMeta(name).division || ''; }
@@ -2551,11 +2731,10 @@ function renderClubFacts(name) {
       (sub ? '<div class="cp-fact__sub">' + esc(sub) + '</div>' : '') +
     '</div>');
   }
-  if (m.stadium_name && m.stadium_sponsor_name && m.stadium_sponsor_name !== m.stadium_name) {
-    fact('Stadium', m.stadium_name, 'currently ' + m.stadium_sponsor_name);
-  } else {
-    fact('Stadium', m.stadium_name || m.stadium_sponsor_name);
-  }
+  // Sponsor name only when there's a sponsor; never the unsponsored name too.
+  fact('Stadium', m.stadium_sponsor_name || m.stadium_name);
+  // Address sits high — it's one of the first things people look for.
+  fact('Address', m.address, m.postcode || null);
   fact('Capacity',
     m.capacity != null ? Number(m.capacity).toLocaleString('en-GB') : null,
     m.capacity_seated != null ? Number(m.capacity_seated).toLocaleString('en-GB') + ' seated' : null);
@@ -2563,7 +2742,6 @@ function renderClubFacts(name) {
     fact('Pitch', m.pitch.dimensions || m.pitch.type, m.pitch.dimensions ? (m.pitch.type || null) : null);
   }
   fact('Nearest station', Array.isArray(m.station) ? m.station.join(', ') : m.station);
-  fact('Address', m.address, m.postcode || null);
   fact('FA membership', m.fa_membership);
   return facts.length ? '<div class="cp-facts">' + facts.join('') + '</div>' : '';
 }
@@ -2603,13 +2781,9 @@ function renderClubKitAndSponsors(name) {
 
 function renderClubStyle2(club) {
   var bySec = peopleBySection(club);
-  var vacBySec = {};
-  (club.vacant || []).forEach(function(v) {
-    (vacBySec[v.section] = vacBySec[v.section] || []).push(v);
-  });
   var rows = '';
   SECTION_ORDER.forEach(function(s) {
-    if (!bySec[s] && !vacBySec[s]) return;
+    if (!bySec[s]) return;
     var entries = bySec[s] || [];
 
     // Full-width section header row (inner span carries the underline so it only
@@ -2651,19 +2825,6 @@ function renderClubStyle2(club) {
       '</tr>';
     });
 
-    // Vacant assignments: role exists, contact route known, nobody named.
-    (vacBySec[s] || []).forEach(function(v) {
-      var vEmail = (v.contacts || []).filter(function(c) { return c.type === 'email' && c.value; })
-        .map(function(c) { return '<a href="mailto:' + esc(c.value) + '">' + esc(c.value) + '</a>'; }).join('<br>');
-      var vPhone = ((v.contacts || []).filter(function(c) { return c.type === 'phone' && c.value; })[0] || {}).value || '';
-      rows += '<tr>' +
-        '<td class="s2-role">' + esc(v.title) + '</td>' +
-        '<td class="s2-name"><span class="pill pill--status pill--status-warn">vacant</span></td>' +
-        '<td class="s2-phone">' + esc(vPhone) + '</td>' +
-        '<td class="s2-email">' + vEmail + '</td>' +
-      '</tr>';
-    });
-
     // Render individual rows
     regularEntries.forEach(function(e) {
       var p = e.person;
@@ -2671,7 +2832,7 @@ function renderClubStyle2(club) {
       var email = personEmails(p).map(function(em) {
         return '<a href="mailto:' + esc(em) + '">' + esc(em) + '</a>';
       }).join('<br>');
-      var headBadge = e.isHead ? ' <span class="pill pill--marker">Head</span>' : '';
+      var headBadge = e.isHead ? ' <span class="s2-head">Head of dept</span>' : '';
       rows += '<tr>' +
         '<td class="s2-role">' + esc(roleLabel) + '</td>' +
         '<td class="s2-name">' + esc(p.name) + headBadge + '</td>' +
@@ -2709,9 +2870,8 @@ function renderClubStyle2(club) {
       '<img class="s2-crest" src="' + crestUrl(club.name) + '" alt="" onerror="this.onerror=null;this.src=\'' + fallbackCrest() + '\'">' +
       '<div class="s2-header__main">' +
         '<h2>' + esc(club.name) + '<span class="s2-div">' + esc(divFull) + '</span></h2>' +
-        (m.nickname ? '<div class="cp-nickname">' + esc(m.nickname) + '</div>' : '') +
         (stadiumLine ? '<div class="cp-stadium">' + esc(stadiumLine) + '</div>' : '') +
-        (chips ? '<div class="cp-contact">' + chips + '</div>' : '') +
+        (chips ? '<div class="cp-contact"><span class="cp-contact__label">Club correspondence</span>' + chips + '</div>' : '') +
       '</div>' +
     '</div>' +
     renderClubFacts(club.name) +
@@ -3121,26 +3281,6 @@ function lbResults() {
           roleContacts: matchedContacts[section],
           omitted: !!state.lb.omittedKeys[key]
         });
-      });
-    });
-
-    /* Vacant roles: the function exists with a contact route but no named
-       person. Included so a mailout to "all programme editors" reaches the
-       clubs where the post is open. */
-    (c.vacant || []).forEach(function(v) {
-      if (!depts[v.section]) return;
-      var key = c.name + '|<vacant>|' + v.section + '|' + v.title;
-      out.push({
-        key: key,
-        club: c.name,
-        division: divisionOf(c.name),
-        section: v.section,
-        person: null,
-        vacant: true,
-        vacantTitle: v.title,
-        roleTitles: [v.title],
-        roleContacts: v.contacts || [],
-        omitted: !!state.lb.omittedKeys[key]
       });
     });
   });
@@ -3577,6 +3717,11 @@ function renderClubPicker(root) {
     var status = missing.length === 0
       ? '<span class="pill pill--status pill--status-good">✓ all heads set</span>'
       : '<span class="pill pill--status pill--status-warn">⚠ ' + missing.length + ' missing head' + (missing.length===1?'':'s') + '</span>';
+    var gaps = clubListGaps(c);
+    if (gaps.length) {
+      status += ' <span class="pill pill--status pill--status-warn" title="No contact on: ' +
+        esc(gaps.map(function(l){ return l.label; }).join(', ')) + '">⚠ ' + gaps.length + ' list gap' + (gaps.length===1?'':'s') + '</span>';
+    }
     return '<tr data-club="' + esc(c.name) + '">' +
       '<td><div class="mc-club-cell">' +
         '<img src="' + crestUrl(c.name) + '" alt="" onerror="this.onerror=null;this.src=\'' + fallbackCrest() + '\'">' +
@@ -3759,7 +3904,8 @@ function seedPersonDraft(person) {
         { type: 'email', value: '', label: '', preferred: true },
         { type: 'phone', value: '', label: '', preferred: true }
       ],
-      noEmail: false, noPhone: false
+      noEmail: false, noPhone: false,
+      listOverrides: {}
     };
   }
   ensureContacts(person);
@@ -3780,6 +3926,7 @@ function seedPersonDraft(person) {
     });
   return { name: person.name || '', note: person.note || '',
            noEmail: !!person.noEmail, noPhone: !!person.noPhone,
+           listOverrides: Object.assign({}, person.listOverrides || {}),
            roleRows: roleRows, primaryRoleIdx: primaryRoleIdx, contactRows: contactRows };
 }
 
@@ -3918,6 +4065,20 @@ function renderPersonPanelInner(club) {
   var emailRows = draft.contactRows.map(function(c, i){ return c.type === 'email' ? renderContactRow(draft, c, i, emailCount > 1) : ''; }).join('');
   var phoneRows = draft.contactRows.map(function(c, i){ return c.type === 'phone' ? renderContactRow(draft, c, i, phoneCount > 1) : ''; }).join('');
 
+  // Mailing lists — checked = effective membership (role-derived default, or
+  // an explicit override). draftRoles drives the live default as roles change.
+  var draftRoles = draft.roleRows.map(function(r){ return { section: r.section, title: r.title }; });
+  if (!draft.listOverrides) draft.listOverrides = {};
+  var mlistHtml = MAILING_LISTS.map(function(l) {
+    var on = effectiveOnList(draftRoles, draft.listOverrides, l.key);
+    var auto = listDerivedFromRoles(draftRoles, l.key);
+    return '<label class="mc-mlist' + (on ? ' is-on' : '') + '">' +
+      '<input type="checkbox" data-mlist="' + l.key + '"' + (on ? ' checked' : '') + '> ' +
+      '<span>' + esc(l.label) + (l.required ? ' <span class="mc-mlist__req" title="League-required list">•</span>' : '') + '</span>' +
+      (auto ? '<span class="mc-mlist__auto">auto</span>' : '') +
+    '</label>';
+  }).join('');
+
   return '<div class="mc-person-panel__hd">' +
         '<div>' +
           '<h3>' + (isNew ? 'Add new person' : 'Edit person') + '</h3>' +
@@ -3954,6 +4115,12 @@ function renderPersonPanelInner(club) {
               '<label class="mc-person-panel__nonebox"><input type="checkbox" id="mcNoPhone"' + (draft.noPhone ? ' checked' : '') + '> No phone on file</label>' +
             '</div>' +
           '</div>' +
+        '</div>' +
+
+        '<div class="mc-person-panel__depts-section">' +
+          '<h4>Mailing lists</h4>' +
+          '<div class="mc-mlists">' + mlistHtml + '</div>' +
+          '<div class="mc-person-panel__help">Ticked lists are auto-set from this person\'s role(s); tick or untick to override — e.g. add a CEO to <b>Club secretaries</b>, or opt someone out.</div>' +
         '</div>' +
       '</div>' +
       '<div class="mc-person-panel__ftr">' +
@@ -4333,11 +4500,13 @@ function renderClubDetails(club) {
     : '<div style="margin-top:14px;text-align:right;"><button class="btn btn--ghost btn--sm" id="mcDetailsEdit">Edit contact details</button></div>';
 
   return '<div class="mc-details">' +
-    readOnlyRow('Address', addressOf(club.name), 'managed in clubs-meta') +
+    readOnlyRow('Address', addressOf(club.name), 'League-managed') +
     editableRow('Phone', 'phone') +
     editableRow('Email', 'email') +
     editableRow('Website', 'website') +
-    readOnlyRow('FA membership', faOf(club.name), 'managed in clubs-meta') +
+    readOnlyRow('FA membership', faOf(club.name), 'League-managed') +
+    '<div class="mc-details__note">Address and FA membership are maintained by the League. Spotted an error? ' +
+      '<a href="' + correctionMailto(club.name) + '">Request a correction</a>.</div>' +
     actions +
   '</div>';
 }
@@ -4523,6 +4692,12 @@ function commitPersonPanelSave(club, isNew, draft) {
   var person;
   var noEmail = !cc.email && !!draft.noEmail;
   var noPhone = !cc.phone && !!draft.noPhone;
+  // Keep only mailing-list overrides that actually differ from the role-derived
+  // default for the FINAL roles — so memberships stay live where possible.
+  var listOverrides = {};
+  Object.keys(draft.listOverrides || {}).forEach(function(key) {
+    if (draft.listOverrides[key] !== listDerivedFromRoles(roles, key)) listOverrides[key] = draft.listOverrides[key];
+  });
   if (isNew) {
     person = {
       _id: 'p' + (_nextPersonId++),
@@ -4534,6 +4709,7 @@ function commitPersonPanelSave(club, isNew, draft) {
       roles: roles,
       noEmail: noEmail,
       noPhone: noPhone,
+      listOverrides: listOverrides,
     };
     club.people.push(person);
   } else {
@@ -4547,6 +4723,7 @@ function commitPersonPanelSave(club, isNew, draft) {
       person.roles = roles;
       person.noEmail = noEmail;
       person.noPhone = noPhone;
+      person.listOverrides = listOverrides;
     }
   }
   if (person) clearPreviousHeads(club, person, roles);
@@ -5603,6 +5780,21 @@ function wireUI() {
     // "No email/phone on file" — records a deliberate blank so save doesn't block.
     if (t.id === 'mcNoEmail') { if (state.manage.personDraft) state.manage.personDraft.noEmail = t.checked; return; }
     if (t.id === 'mcNoPhone') { if (state.manage.personDraft) state.manage.personDraft.noPhone = t.checked; return; }
+    // Mailing-list checkbox: store an override only when it differs from the
+    // role-derived default, so memberships stay live as roles change.
+    if (t.hasAttribute('data-mlist')) {
+      var d = state.manage.personDraft;
+      if (d) {
+        var key = t.getAttribute('data-mlist');
+        var roles = (d.roleRows || []).map(function(r){ return { section: r.section, title: r.title }; });
+        if (!d.listOverrides) d.listOverrides = {};
+        if (t.checked === listDerivedFromRoles(roles, key)) delete d.listOverrides[key];
+        else d.listOverrides[key] = t.checked;
+        var lbl = t.closest('.mc-mlist');
+        if (lbl) lbl.classList.toggle('is-on', t.checked);
+      }
+      return;
+    }
 
     // Flag tickbox on existing role draft (e.g. Media -> Programme editor)
     if (t.hasAttribute('data-draft-flag-key')) {
@@ -5702,6 +5894,7 @@ function buildWorkingData(meta) {
       people: []
     };
   });
+  migrateSections();   // remap legacy Kit/Ticketing roles into their new departments
 }
 
 var CLUBS_META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
@@ -5759,7 +5952,8 @@ function functionForTitle(title, section) {
   if (/fixture/.test(t)) return 'fixtures';
   if (/secretar/.test(t)) return 'secretary';
   if (/financ|account|treasur/.test(t)) return 'finance';
-  if (/commercial|sponsorship|sales/.test(t)) return 'commercial';
+  if (/ticket|box office/.test(t)) return 'ticketing';
+  if (/commercial|sponsorship|sales|partnership|retail/.test(t)) return 'commercial';
   if (/programme/.test(t)) return 'programme';
   if (/website|social/.test(t)) return 'social';
   if (/press|\bmedia\b/.test(t)) return 'press';
@@ -5860,6 +6054,7 @@ function clubToRTDB(club) {
       note: p.note || null,
       noEmail: !!p.noEmail || null,
       noPhone: !!p.noPhone || null,
+      listOverrides: (p.listOverrides && Object.keys(p.listOverrides).length) ? p.listOverrides : null,
       contacts: packContacts(p.contacts),
       roles: (p.roles || []).map(packRole)
     };
@@ -5897,7 +6092,8 @@ function clubFromRTDB(name, val, fallbackWebsite) {
     });
   }
   function unpackRole(r) {
-    var o = { title: r.title || '', section: r.section || '', main: !!r.main, deptHead: !!r.deptHead };
+    var section = remapSectionForRole(r.section || '', r.title || '');
+    var o = { title: r.title || '', section: section, main: !!r.main, deptHead: !!r.deptHead };
     if (r.flags) o.flags = r.flags;
     o['function'] = r['function'] || functionForTitle(r.title, r.section);
     o.contacts = unpackContacts(r.contacts);
@@ -5914,6 +6110,7 @@ function clubFromRTDB(name, val, fallbackWebsite) {
       note: p.note || null,
       noEmail: !!p.noEmail,
       noPhone: !!p.noPhone,
+      listOverrides: p.listOverrides || {},
       roles: arr(p.roles).map(unpackRole)
     };
     if (p.contacts) {
