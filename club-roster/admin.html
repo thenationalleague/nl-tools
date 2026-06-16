@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<!--
+  club-roster/admin.html  v1.0 — superadmin console for the club roster collection.
+  Sibling of club-data/admin.html. Generates one capability token per current-
+  roster club, writes them to RTDB invites, renders ready-to-paste email blurbs
+  with each club's private link, and lists submissions as they arrive with a
+  review modal (department inboxes + people).
+
+  Importing an accepted submission into club-directory is deliberately a manual,
+  review-gated step (phase 2) — this console only mints links and shows what
+  came back. "Copy as JSON" hands a submission to that future import.
+
+  Gated: no tools/ registry record on purpose -> superadmin-only via
+  auth-guard's default. Tokens live only in RTDB, never in this repo.
+-->
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Club roster admin — NL Tools</title>
+  <link rel="stylesheet" href="/tools/system/nl-brand.css?v=20">
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script>
+    firebase.initializeApp({
+      apiKey: "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain: "nl-tools.firebaseapp.com",
+      databaseURL: "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId: "nl-tools", storageBucket: "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005", appId: "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+  <script>
+    window.NL_TOOL = { title: 'Club Roster Admin', toolKey: 'ops-club-roster' };
+    var NL_TOOL_KEY = 'ops-club-roster';
+    window.NL_CHANGELOG = [{ date: '16 Jun 2026', version: 'v1.0', items: [
+      'Generate private roster-form links for every club, copy ready-made email text, and review submissions (department inboxes + people) as they arrive.' ] }];
+    window.nlAuthReady = function (u) { window.NL = window.NL || {}; NL.session = u;
+      if (window.TOOL && window.TOOL.boot) window.TOOL.boot(u); else window._toolDeferredSession = u; };
+  </script>
+  <script src="/tools/system/nl-utils.js?v=10"></script>
+  <script src="/tools/system/nl-topbar.js?v=7"></script>
+  <script src="/tools/system/auth-guard.js?v=8"></script>
+<style>
+  .cra { max-width: 980px; margin: 0 auto; padding: 24px 18px 80px; }
+  .cra-row { display:flex; gap:14px; align-items:baseline; flex-wrap:wrap; padding:10px 14px; border:1px solid var(--border); border-radius:8px; background:var(--white); margin-bottom:8px; }
+  .cra-row b { min-width: 200px; }
+  .cra-row code { font-size: 11px; background: var(--navy-50); padding: 2px 6px; border-radius: 4px; word-break: break-all; flex:1; }
+  .cra-pill { font-size: 11px; padding: 2px 10px; border-radius: 999px; background: var(--amber-light); color: var(--amber-deep); }
+  .cra-pill--in { background: var(--green); color: var(--white); cursor:pointer; }
+  .cra-pill--in:hover { filter:brightness(0.92); }
+  textarea { width:100%; box-sizing:border-box; min-height:140px; font-family:ui-monospace,monospace; font-size:12px; border:1px solid var(--border); border-radius:8px; padding:10px; }
+  .cra-sec { font-variation-settings:'wght' 800; color:var(--navy); margin:16px 0 6px; font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
+  .cra-dl { display:grid; grid-template-columns:170px 1fr; gap:4px 14px; font-size:13px; }
+  .cra-dl dt { color:var(--text-muted); }
+  .cra-dl dd { margin:0; word-break:break-word; }
+  .cra-dl dd:empty::after { content:'—'; color:var(--border); }
+  .cra-person { border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:8px; }
+  .cra-person__n { font-variation-settings:'wght' 800; color:var(--navy); font-size:13px; }
+  .cra-person__c { font-size:12px; color:var(--text-muted); margin-top:3px; }
+  .cra-person__l { font-size:12px; color:var(--navy); margin-top:5px; }
+</style>
+</head>
+<body>
+<div id="nlTopbar"></div>
+<div id="pageWrap">
+  <div class="cra">
+    <h1 style="color:var(--navy);">Club roster collection</h1>
+    <p style="color:var(--text-muted);">One private link per club to gather their people directory for 2026/27 — department email addresses and staff. Forms start blank (we want a fresh picture). Submissions are reviewed here and imported into the Club Directory manually. Tokens live only in the database.</p>
+    <div style="border:1px solid var(--border);border-radius:10px;background:var(--white);padding:16px;margin:14px 0;">
+      <div style="font-variation-settings:'wght' 800;color:var(--navy);font-size:12px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Standard message</div>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px;">Placeholders: <code>{club}</code> <code>{link}</code></p>
+      <textarea id="tplBody" rows="9"></textarea>
+      <button class="btn btn--ghost btn--sm" id="tplSave" style="margin-top:10px;">Save standard message</button>
+      <span id="tplStatus" style="font-size:12px;color:var(--text-muted);margin-left:8px;"></span>
+    </div>
+    <div style="display:flex;gap:10px;margin:14px 0;flex-wrap:wrap;">
+      <button class="btn btn--navy" id="genBtn">Generate missing links</button>
+      <button class="btn btn--ghost" id="emailBtn" disabled>Build email text for all clubs</button>
+    </div>
+    <textarea id="emails" placeholder="Generated email blurbs appear here…" style="display:none;"></textarea>
+    <div id="list" style="margin-top:16px;"><p style="color:var(--text-muted);">Loading…</p></div>
+  </div>
+  <div class="modal-backdrop" id="craModal"><div class="modal" style="max-width:680px;">
+    <div class="modal__head"><h3 id="craModalT" style="margin:0;"></h3><button class="btn-icon" id="craModalX">×</button></div>
+    <div class="modal__body" id="craModalB" style="max-height:72vh;overflow:auto;"></div>
+  </div></div>
+</div>
+<script>
+(function () {
+  'use strict';
+  var META = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
+  var BASE = 'app-data/ops-club-roster';
+  var FORM_URL = location.origin + '/tools/club-roster/?t=';
+  var LISTS = [
+    ['chairs','Chairs'], ['ceos','Chief executives'], ['secretaries','Club secretaries'],
+    ['finance','Finance leads'], ['commercial','Commercial leads'], ['ticketing','Ticketing managers'],
+    ['media','Media officers'], ['safety','Safety officers'], ['medical','Medical leads'],
+    ['safeguarding','Safeguarding leads'], ['community','Community leads'],
+    ['dlo','DLO'], ['plo','PLO'], ['cslo','CSLO']
+  ];
+  var LIST_LABEL = {}; LISTS.forEach(function (l) { LIST_LABEL[l[0]] = l[1]; });
+  var S = { clubs: [], invites: {}, subs: {} };
+  function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function tok(){ var a = new Uint8Array(24); crypto.getRandomValues(a);
+    return Array.prototype.map.call(a, function (b) { return 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'[b % 57]; }).join(''); }
+  function tokenFor(club) { for (var t in S.invites) if (S.invites[t].club === club) return t; return null; }
+
+  function renderList() {
+    document.getElementById('list').innerHTML = S.clubs.map(function (c) {
+      var t = tokenFor(c.name);
+      var sub = t && S.subs[t];
+      return '<div class="cra-row"><b>' + esc(c.name) + '</b>' +
+        (t ? '<code>' + esc(FORM_URL + t) + '</code>' : '<span style="color:var(--text-muted);">no link yet</span>') +
+        (sub ? '<span class="cra-pill cra-pill--in" data-sub="' + esc(c.name) + '">view · ' +
+                 ((sub.people||[]).length) + ' people · ' + new Date(sub.submittedAt).toLocaleDateString('en-GB') + '</span>'
+             : '<span class="cra-pill">awaiting</span>') +
+      '</div>';
+    }).join('');
+    document.getElementById('emailBtn').disabled = !Object.keys(S.invites).length;
+  }
+
+  var DEFAULT_TPL =
+    'Subject: {club} — please confirm your club staff for 2026/27\n\n' +
+    'Dear {club},\n\n' +
+    'Ahead of the 2026/27 season we are refreshing the staff directory the League holds for every club — your key people and any shared department email addresses.\n\n' +
+    'Please use your club’s private link below to complete and submit your roster. It starts blank so we capture an up-to-date picture; your progress is saved on your device if you need to finish later.\n\n' +
+    '{club}’s private link (please don’t share it outside your club):\n{link}\n\n' +
+    'Kind regards,\nThe National League';
+  var TPL = DEFAULT_TPL;
+
+  function openSub(club, sub) {
+    document.getElementById('craModalT').textContent = club + ' — submitted ' + new Date(sub.submittedAt).toLocaleString('en-GB');
+    var inboxKeys = Object.keys(sub.inboxes || {});
+    var inboxHtml = inboxKeys.length ? '<dl class="cra-dl">' + inboxKeys.map(function (k) {
+      var ib = sub.inboxes[k];
+      return '<dt>' + esc(LIST_LABEL[k] || k) + '</dt><dd>' + esc([ib.email, ib.phone && (ib.phone + (ib.ext ? ' ext ' + ib.ext : ''))].filter(Boolean).join(' · ')) + '</dd>';
+    }).join('') + '</dl>' : '<p style="color:var(--text-muted);font-size:13px;margin:0;">None given.</p>';
+
+    var peopleHtml = (sub.people || []).length ? sub.people.map(function (p) {
+      var lists = (p.lists || []).map(function (k) { return LIST_LABEL[k] || k; }).join(', ');
+      return '<div class="cra-person"><div class="cra-person__n">' + esc(p.name || '(unnamed)') + (p.title ? ' · ' + esc(p.title) : '') + '</div>' +
+        '<div class="cra-person__c">' + esc([p.email, p.phone && (p.phone + (p.ext ? ' ext ' + p.ext : ''))].filter(Boolean).join(' · ') || 'no contact details') + '</div>' +
+        (lists ? '<div class="cra-person__l">' + esc(lists) + '</div>' : '') + '</div>';
+    }).join('') : '<p style="color:var(--text-muted);font-size:13px;margin:0;">None given.</p>';
+
+    document.getElementById('craModalB').innerHTML =
+      '<div style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap;">' +
+        '<button class="btn btn--ghost btn--sm" data-copyjson="' + esc(club) + '">Copy as JSON (for import)</button>' +
+        '<button class="btn btn--danger btn--sm" data-reopen="' + esc(club) + '">Re-open this form</button>' +
+      '</div>' +
+      '<p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">Submitted by ' + esc(sub.yourName || '—') + (sub.yourEmail ? ' (' + esc(sub.yourEmail) + ')' : '') + '. Import into the Club Directory is done manually for now.</p>' +
+      '<div class="cra-sec">Department email addresses</div>' + inboxHtml +
+      '<div class="cra-sec">People</div>' + peopleHtml;
+    document.getElementById('craModal').classList.add('open');
+  }
+
+  document.getElementById('craModalB').addEventListener('click', function (e) {
+    var cj = e.target.closest('[data-copyjson]');
+    if (cj) {
+      var t1 = tokenFor(cj.getAttribute('data-copyjson'));
+      if (t1 && S.subs[t1]) {
+        var ta = document.createElement('textarea'); ta.value = JSON.stringify(S.subs[t1], null, 2);
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); NL.toast('Submission JSON copied.', 'success'); } catch (er) {}
+        document.body.removeChild(ta);
+      }
+      return;
+    }
+    var b = e.target.closest('[data-reopen]'); if (!b) return;
+    var club = b.getAttribute('data-reopen'); var t = tokenFor(club);
+    if (!t) return;
+    if (!confirm('Re-open ' + club + '’s form? This deletes their submitted data so they can edit and resubmit via the same link.')) return;
+    if (NL.writeAudit) NL.writeAudit('clubroster_reopen', 'Re-opened club-roster form for ' + club);
+    db.ref(BASE + '/submissions/' + t).remove().then(function () {
+      delete S.subs[t];
+      document.getElementById('craModal').classList.remove('open');
+      NL.toast(club + '’s form re-opened.', 'success');
+      renderList();
+    }).catch(function (err) { NL.toast('Could not re-open: ' + (err.message || err), 'error'); });
+  });
+  document.getElementById('craModalX').addEventListener('click', function () { document.getElementById('craModal').classList.remove('open'); });
+  document.getElementById('craModal').addEventListener('click', function (e) { if (e.target.id === 'craModal') e.currentTarget.classList.remove('open'); });
+
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function () {
+    Promise.all([
+      fetch(META + '?cb=' + Date.now()).then(function (r) { return r.json(); }),
+      NL.ensureAuth().then(function () { return db.ref(BASE + '/invites').once('value'); }),
+      db.ref(BASE + '/submissions').once('value')
+    ]).then(function (res) {
+      S.clubs = NL.season.clubsFor(res[0]);
+      S.invites = res[1].val() || {};
+      S.subs = res[2].val() || {};
+      renderList();
+    }).catch(function (e) { document.getElementById('list').innerHTML = '<p style="color:var(--red);">' + esc(e.message || e) + '</p>'; });
+
+    db.ref(BASE + '/template').once('value').then(function (s) {
+      var t = s.val(); if (t && t.body) TPL = t.body;
+      document.getElementById('tplBody').value = TPL;
+    }).catch(function () { document.getElementById('tplBody').value = TPL; });
+
+    document.getElementById('tplSave').addEventListener('click', function () {
+      TPL = document.getElementById('tplBody').value;
+      if (NL.writeAudit) NL.writeAudit('clubroster_template', 'Updated club-roster standard message');
+      db.ref(BASE + '/template').set({ body: TPL }).then(function () {
+        document.getElementById('tplStatus').textContent = 'Saved ✓';
+        setTimeout(function () { document.getElementById('tplStatus').textContent = ''; }, 2000);
+      }).catch(function (e) { document.getElementById('tplStatus').textContent = 'Save failed: ' + (e.message || e); });
+    });
+
+    document.getElementById('list').addEventListener('click', function (e) {
+      var p = e.target.closest('[data-sub]'); if (!p) return;
+      var club = p.getAttribute('data-sub'); var t = tokenFor(club);
+      if (t && S.subs[t]) openSub(club, S.subs[t]);
+    });
+
+    document.getElementById('genBtn').addEventListener('click', function () {
+      var updates = {}; var n = 0;
+      S.clubs.forEach(function (c) { if (!tokenFor(c.name)) { updates[tok()] = { club: c.name, createdAt: Date.now() }; n++; } });
+      if (!n) { NL.toast('Every club already has a link.', 'info'); return; }
+      if (NL.writeAudit) NL.writeAudit('clubroster_invites', 'Generated ' + n + ' club-roster links');
+      db.ref(BASE + '/invites').update(updates).then(function () {
+        for (var t in updates) S.invites[t] = updates[t];
+        NL.toast(n + ' links generated.', 'success'); renderList();
+      });
+    });
+
+    document.getElementById('emailBtn').addEventListener('click', function () {
+      var body = document.getElementById('tplBody').value || TPL;
+      var out = S.clubs.map(function (c) {
+        var t = tokenFor(c.name); if (!t) return '';
+        return '=== ' + c.name + ' ===\n' + body.split('{club}').join(c.name).split('{link}').join(FORM_URL + t) + '\n';
+      }).join('\n');
+      var ta = document.getElementById('emails');
+      ta.style.display = ''; ta.value = out; ta.select();
+      try { document.execCommand('copy'); NL.toast('Email text for ' + S.clubs.filter(function(c){return tokenFor(c.name);}).length + ' clubs copied.', 'success'); } catch (e) {}
+    });
+  };
+  if (window._toolDeferredSession) { window.TOOL.boot(window._toolDeferredSession); window._toolDeferredSession = null; }
+})();
+</script>
+</body>
+</html>

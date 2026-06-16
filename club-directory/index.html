@@ -6,9 +6,19 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.42 — List builder pulls in opt-in department inboxes.
+  v0.43 — People tab: read-only "Mailing lists" view.
 
   Changelog:
+  v0.43 — (16/06/2026) People surface gains a "People | Mailing lists" view
+          toggle (state.manage.peopleView). The new read-only view
+          (renderPeopleListsView) lists all 15 mailing lists for the club,
+          naming who's on each — click a name to open them — and flags the
+          empty ones ("Nobody on this list yet"), so a club can see its own
+          list coverage at a glance. Inverse of the per-person chips on the
+          cards. Reuses MAILING_LISTS + personOnList; it never writes —
+          membership is still edited only in the person editor, so this is
+          not a second edit route (the thing #204 removed). Search box hides
+          in list view; the data-people-view handler swaps the view.
   v0.42 — (16/06/2026) List builder now consumes the per-list department
           inboxes added in v0.41. In list mode, each club that has opted to
           record a shared inbox (club.listInboxes[<listKey>]) for a selected
@@ -548,6 +558,13 @@
   var NL_TOOL_KEY = 'ops-club-directory';
 
   window.NL_CHANGELOG = [
+    {
+      date: '16 Jun 2026',
+      version: 'v0.43',
+      items: [
+        'The People tab now has a "Mailing lists" view (toggle at the top). It flips the question round: instead of each person showing their lists, you see each list and who’s on it — with the empty ones flagged "Nobody on this list yet" — so you can check your club’s coverage at a glance. Click a name to open and edit them; membership is still only edited in the person editor.'
+      ]
+    },
     {
       date: '16 Jun 2026',
       version: 'v0.42',
@@ -1936,6 +1953,53 @@
   .mc-person-card-btn:hover { border-color: var(--navy); color: var(--navy); }
   .mc-person-card-btn--danger:hover { border-color: var(--red); color: var(--red); }
 
+  /* People-surface view toggle — People (cards) vs Mailing lists (read-only). */
+  .mc-people-viewtoggle { display: inline-flex; gap: 0; flex: none; }
+  .mc-people-viewtoggle button {
+    font-family: var(--font); font-size: 12px;
+    font-variation-settings: 'wght' 600;
+    padding: 7px 14px; cursor: pointer;
+    background: var(--off-white); color: var(--text-muted);
+    border: 1px solid var(--border); border-right: none;
+  }
+  .mc-people-viewtoggle button:first-child { border-radius: 6px 0 0 6px; }
+  .mc-people-viewtoggle button:last-child { border-radius: 0 6px 6px 0; border-right: 1px solid var(--border); }
+  .mc-people-viewtoggle button.is-active {
+    background: var(--navy); color: #fff; border-color: var(--navy);
+  }
+
+  /* Mailing-lists read-only view — one row per list, who's on it at this club. */
+  .mc-listview { display: flex; flex-direction: column; gap: 2px; }
+  .mc-listview__row {
+    display: flex; gap: 14px; padding: 12px 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .mc-listview__row:last-child { border-bottom: none; }
+  .mc-listview__label {
+    flex: 0 0 170px; font-variation-settings: 'wght' 700;
+    color: var(--navy); font-size: 14px;
+    display: flex; align-items: baseline; gap: 7px;
+  }
+  .mc-listview__count {
+    font-size: 11px; color: var(--text-muted);
+    font-variation-settings: 'wght' 600;
+  }
+  .mc-listview__people { flex: 1; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .mc-listview__person {
+    font-size: 13px; background: var(--navy-50); color: var(--navy);
+    border-radius: 10px; padding: 3px 11px; cursor: pointer;
+    font-variation-settings: 'wght' 600; border: 1px solid transparent;
+  }
+  .mc-listview__person:hover { border-color: var(--navy-300); }
+  .mc-listview__person small { color: var(--text-muted); font-variation-settings: normal; }
+  .mc-listview__empty {
+    font-size: 13px; color: var(--text-muted); font-style: italic;
+  }
+  @media (max-width: 640px) {
+    .mc-listview__row { flex-direction: column; gap: 6px; }
+    .mc-listview__label { flex-basis: auto; }
+  }
+
   /* Right-side slide-out panel for editing a person */
   .mc-person-panel-overlay {
     position: fixed;
@@ -2991,6 +3055,7 @@ var state = {
     surface: 'people',              // 'people' | 'details'
     // People surface
     peopleSearch: '',
+    peopleView: 'people',           // 'people' (cards) | 'lists' (read-only by-mailing-list)
     editingPersonId: null,          // ID of person whose side-panel is open
     personDraft: null,              // { name, email, phone } in the side panel
     // Club details surface
@@ -4078,11 +4143,48 @@ function renderPeopleSurface(club) {
     '</div>';
   }
 
-  return '<div class="mc-people-actions">' +
-    '<input type="search" class="mc-people-search" placeholder="Search people by name or email..." id="mcPeopleSearch" value="' + esc(state.manage.peopleSearch||'') + '">' +
+  var listView = state.manage.peopleView === 'lists';
+  var toggle = '<div class="mc-people-viewtoggle">' +
+      '<button data-people-view="people"' + (!listView ? ' class="is-active"' : '') + '>People</button>' +
+      '<button data-people-view="lists"' + (listView ? ' class="is-active"' : '') + '>Mailing lists</button>' +
+    '</div>';
+
+  var toolbar = '<div class="mc-people-actions">' +
+    toggle +
+    (listView ? '' : '<input type="search" class="mc-people-search" placeholder="Search people by name or email..." id="mcPeopleSearch" value="' + esc(state.manage.peopleSearch||'') + '">') +
     '<button class="btn btn--navy" id="mcAddPersonBtn">+ Add person</button>' +
-  '</div>' +
-  '<div class="mc-people-list">' + rowsHtml + '</div>';
+  '</div>';
+
+  var body = listView
+    ? renderPeopleListsView(club)
+    : '<div class="mc-people-list">' + rowsHtml + '</div>';
+
+  return toolbar + body;
+}
+
+/* Read-only "by mailing list" view of a club's people: one row per list,
+   naming who's on it (click to open them) and flagging the empty ones.
+   Editing membership still happens only in the person editor — this view
+   never writes, so it can't become a second, drifting edit route. */
+function renderPeopleListsView(club) {
+  var rows = MAILING_LISTS.map(function(l) {
+    var on = (club.people || []).filter(function(p){ return personOnList(p, l.key); })
+      .sort(function(a, b){ return (a.name||'').localeCompare(b.name||''); });
+    var people = on.length
+      ? on.map(function(p) {
+          var role = (p.roles || []).filter(function(r){ return r.main; })[0] || (p.roles || [])[0];
+          var roleTxt = role && role.title ? ' <small>· ' + esc(role.title) + '</small>' : '';
+          return '<span class="mc-listview__person" data-edit-person="' + esc(p._id) + '">' +
+            esc(p.name || '(unnamed)') + roleTxt + '</span>';
+        }).join('')
+      : '<span class="mc-listview__empty">Nobody on this list yet</span>';
+    return '<div class="mc-listview__row">' +
+      '<div class="mc-listview__label">' + esc(l.label) +
+        '<span class="mc-listview__count">' + on.length + '</span></div>' +
+      '<div class="mc-listview__people">' + people + '</div>' +
+    '</div>';
+  }).join('');
+  return '<div class="mc-listview">' + rows + '</div>';
 }
 
 /* ---------- Person side-panel ---------- */
@@ -5039,6 +5141,13 @@ function wireUI() {
     }
 
     /* --- People surface --- */
+    // View toggle: People (cards) vs Mailing lists (read-only grouping)
+    var viewBtn = t.closest('[data-people-view]');
+    if (viewBtn) {
+      state.manage.peopleView = viewBtn.getAttribute('data-people-view');
+      renderEditor(document.getElementById('mc-root'));
+      return;
+    }
     // Row click or edit button opens panel
     var editPersonBtn = t.closest('[data-edit-person]');
     if (editPersonBtn) {
