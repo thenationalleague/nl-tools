@@ -6,9 +6,17 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.34 — Phone formatting: UK area-code-aware grouping.
+  v0.35 — Mailing lists phase 2: build/export recipients by list.
 
   Changelog:
+  v0.35 — (16/06/2026) List builder gains a "Build by: Department | Mailing
+          list" toggle. In list mode the left panel shows MAILING_LISTS and
+          lbResults() routes to lbResultsByList() — one row per person on any
+          selected list (effectiveOnList) at the selected clubs, shaped like
+          the dept rows so the results table, dedup and copy/CSV export all
+          reuse unchanged. Heads/whole + role-inbox toggles hide in list mode
+          (contact is always the person); all/none, empty-state and the column
+          header adapt to the mode.
   v0.34 — (16/06/2026) formatPhone now groups by UK area-code length instead of
           a flat 5-3-3 (which mangled metropolitan landlines like 0121). Mobiles
           + 5-digit-area landlines 5-3-3; 4-digit metro codes (0121/0161/0131…)
@@ -454,6 +462,13 @@
   var NL_TOOL_KEY = 'ops-club-directory';
 
   window.NL_CHANGELOG = [
+    {
+      date: '16 Jun 2026',
+      version: 'v0.35',
+      items: [
+        'The List builder can now build by mailing list, not just by department. Flip "Build by" to "Mailing list", tick the lists you want (e.g. Club secretaries), choose your clubs, and copy the recipients straight out as an email string or CSV — including anyone you\'ve added to a list manually.'
+      ]
+    },
     {
       date: '16 Jun 2026',
       version: 'v0.34',
@@ -2400,10 +2415,15 @@
   <div class="scene" id="scene-builder">
     <div class="lb-intro">
       <h2>List builder</h2>
-      <p>Pick departments and clubs. Export contact list with copy-to-clipboard.</p>
+      <p>Build a contact list by department or by mailing list, pick your clubs, and copy it to the clipboard.</p>
     </div>
 
     <div class="lb-modebar">
+      <div class="lb-modebar__group" id="lbByGroup">
+        <span class="demo-bar__label">Build by</span>
+        <button class="btn btn--toggle btn--sm" data-lb-by="department" aria-pressed="true">Department</button>
+        <button class="btn btn--toggle btn--sm" data-lb-by="list">Mailing list</button>
+      </div>
       <div class="lb-modebar__group" id="lbModeGroup">
         <button class="btn btn--toggle btn--sm" data-lb-mode="heads" aria-pressed="true">Dept heads only</button>
         <button class="btn btn--toggle btn--sm" data-lb-mode="whole">Whole department</button>
@@ -2418,7 +2438,7 @@
     <div class="lb-grid">
       <section class="lb-panel">
         <div class="lb-panel-hd">
-          <h3>Departments</h3>
+          <h3 id="lbDeptsTitle">Departments</h3>
           <div class="lb-panel-actions">
             <button class="btn btn--link" id="lbDeptsAll">all</button>
             <button class="btn btn--link" id="lbDeptsNone">none</button>
@@ -3054,8 +3074,10 @@ var state = {
   // list builder state
   lb: {
     mode: 'heads',
+    buildBy: 'department',   // 'department' | 'list' (mailing lists)
     contactMode: 'person',   // 'person' (direct) | 'role' (inbox preferred)
     selectedDepts: {},
+    selectedLists: {},       // mailing-list keys when buildBy === 'list'
     selectedClubs: {},
     collapsedDivisions: {},
     clubSearch: {},
@@ -3361,7 +3383,38 @@ function updateManageMyClubButton() {
      - if mode === 'heads', include only people where some role in that section has deptHead=true
      - if mode === 'whole', include everyone who has any role in that section
    Returns rows with a stable `key` for per-row omit tracking. */
+/* Recipients by mailing list: one row per person who is on any selected list
+   at a selected club. Shaped like the department rows so the results table,
+   dedup and export all work unchanged. Contact = the person (lists are about
+   reaching the human, not a role inbox). */
+function lbResultsByList() {
+  var lists = state.lb.selectedLists || {};
+  var clubs = state.lb.selectedClubs;
+  if (!Object.keys(lists).length || !Object.keys(clubs).length) return [];
+  var out = [];
+  window.CLUBS.forEach(function(c) {
+    if (!clubs[c.name]) return;
+    c.people.forEach(function(p) {
+      var on = MAILING_LISTS.filter(function(l){ return lists[l.key] && personOnList(p, l.key); });
+      if (!on.length) return;
+      var labels = on.map(function(l){ return l.label; });
+      var key = c.name + '|' + (p.name || '') + '|lists';
+      out.push({
+        key: key, club: c.name, division: divisionOf(c.name),
+        section: labels.join(', '), person: p, vacant: false,
+        roleTitles: labels, roleContacts: [], omitted: !!state.lb.omittedKeys[key]
+      });
+    });
+  });
+  out.sort(function(a, b) {
+    if (a.club !== b.club) return a.club.localeCompare(b.club);
+    return (a.person.name || '').localeCompare(b.person.name || '');
+  });
+  return out;
+}
+
 function lbResults() {
+  if (state.lb.buildBy === 'list') return lbResultsByList();
   var depts = state.lb.selectedDepts;
   var clubs = state.lb.selectedClubs;
   var anyDept = Object.keys(depts).length > 0;
@@ -3536,13 +3589,37 @@ function lbMissingHeads() {
 }
 
 function renderBuilder() {
+  var byList = state.lb.buildBy === 'list';
+  // The heads/whole + role-inbox toggles only apply to department mode.
+  var modeGroup = document.getElementById('lbModeGroup');
+  var contactGroup = document.getElementById('lbContactGroup');
+  if (modeGroup) modeGroup.style.display = byList ? 'none' : '';
+  if (contactGroup) contactGroup.style.display = byList ? 'none' : '';
+  var title = document.getElementById('lbDeptsTitle');
+  if (title) title.textContent = byList ? 'Mailing lists' : 'Departments';
+  document.querySelectorAll('#lbByGroup [data-lb-by]').forEach(function(b) {
+    b.setAttribute('aria-pressed', b.getAttribute('data-lb-by') === state.lb.buildBy ? 'true' : 'false');
+  });
   renderBuilderDepts();
   renderBuilderDivisions();
   renderBuilderWarnings();
   renderBuilderResults();
 }
 
+function renderBuilderLists() {
+  var root = document.getElementById('lbDepts');
+  root.innerHTML = MAILING_LISTS.map(function(l) {
+    var id = 'lb-list-' + l.key;
+    var checked = state.lb.selectedLists[l.key] ? ' checked' : '';
+    return '<div class="lb-section-group"><div class="lb-section-row">' +
+      '<input type="checkbox" id="' + id + '" data-lb-list="' + l.key + '"' + checked + '>' +
+      '<label for="' + id + '">' + esc(l.label) + (l.required ? ' <span class="lb-section-count">(required)</span>' : '') + '</label>' +
+    '</div></div>';
+  }).join('');
+}
+
 function renderBuilderDepts() {
+  if (state.lb.buildBy === 'list') { renderBuilderLists(); return; }
   var root = document.getElementById('lbDepts');
   var html = SECTION_ORDER.map(function(section) {
     var meta = SECTIONS_BY_KEY[section];
@@ -3702,8 +3779,9 @@ function renderBuilderResults() {
   var withEmail = deduped.filter(function(r){ return r.emails.length; }).length;
   var omittedCount = results.length - active.length;
   var omitSuffix = omittedCount ? ' · ' + omittedCount + ' omitted' : '';
+  var byList = state.lb.buildBy === 'list';
   subEl.textContent = results.length === 0
-    ? 'pick departments and clubs above'
+    ? (byList ? 'pick mailing lists and clubs above' : 'pick departments and clubs above')
     : ((deduped.length === 1 ? 'person/post' : 'people/posts') + ' · ' + withEmail + ' contactable' + omitSuffix);
 
   // enable/disable copy buttons
@@ -3712,7 +3790,7 @@ function renderBuilderResults() {
   });
 
   if (results.length === 0) {
-    resultsRoot.innerHTML = '<div class="lb-empty">Pick at least one department and one club to see matches.</div>';
+    resultsRoot.innerHTML = '<div class="lb-empty">Pick at least one ' + (byList ? 'mailing list' : 'department') + ' and one club to see matches.</div>';
     return;
   }
 
@@ -3744,7 +3822,7 @@ function renderBuilderResults() {
   }).join('');
 
   resultsRoot.innerHTML = '<table class="lb-table">' +
-    '<thead><tr><th></th><th>Department</th><th>Name</th><th>Club</th><th>Email</th><th>Phone</th></tr></thead>' +
+    '<thead><tr><th></th><th>' + (byList ? 'Mailing list' : 'Department') + '</th><th>Name</th><th>Club</th><th>Email</th><th>Phone</th></tr></thead>' +
     '<tbody>' + rows + '</tbody></table>';
 }
 
@@ -5423,6 +5501,13 @@ function wireUI() {
   var builderScene = document.getElementById('scene-builder');
   builderScene.addEventListener('click', function(e) {
     var t = e.target;
+    var byBtn = t.closest('[data-lb-by]');
+    if (byBtn) {
+      state.lb.buildBy = byBtn.getAttribute('data-lb-by');
+      state.lb.omittedKeys = {};
+      renderBuilder();
+      return;
+    }
     var modeBtn = t.closest('[data-lb-mode]');
     if (modeBtn) {
       state.lb.mode = modeBtn.getAttribute('data-lb-mode');
@@ -5465,13 +5550,13 @@ function wireUI() {
       return;
     }
     if (t.id === 'lbDeptsAll') {
-      SECTION_ORDER.forEach(function(s){ state.lb.selectedDepts[s] = true; });
+      if (state.lb.buildBy === 'list') MAILING_LISTS.forEach(function(l){ state.lb.selectedLists[l.key] = true; });
+      else SECTION_ORDER.forEach(function(s){ state.lb.selectedDepts[s] = true; });
       renderBuilderDepts(); renderBuilderWarnings(); renderBuilderResults(); return;
     }
     if (t.id === 'lbDeptsNone') {
-      state.lb.selectedDepts = {};
-      state.lb.checklistRoleFilter = {};
-      state.lb.flagFilter = {};
+      if (state.lb.buildBy === 'list') { state.lb.selectedLists = {}; }
+      else { state.lb.selectedDepts = {}; state.lb.checklistRoleFilter = {}; state.lb.flagFilter = {}; }
       renderBuilderDepts(); renderBuilderWarnings(); renderBuilderResults(); return;
     }
     if (t.id === 'lbClubsAll') {
@@ -5485,6 +5570,13 @@ function wireUI() {
   });
   builderScene.addEventListener('change', function(e) {
     var t = e.target;
+    if (t.hasAttribute('data-lb-list')) {
+      var lk = t.getAttribute('data-lb-list');
+      if (t.checked) state.lb.selectedLists[lk] = true;
+      else delete state.lb.selectedLists[lk];
+      renderBuilderWarnings(); renderBuilderResults();
+      return;
+    }
     if (t.hasAttribute('data-dept')) {
       var dept = t.getAttribute('data-dept');
       if (t.checked) state.lb.selectedDepts[dept] = true;
