@@ -6,9 +6,24 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.30 — Department split: Ticketing and Team operations get their own depts.
+  v0.31 — Mailing lists (phase 1): per-person membership, defaults, gap flag.
 
   Changelog:
+  v0.31 — (16/06/2026) Mailing lists — phase 1 (membership + editor + gaps).
+          - MAILING_LISTS: League-defined fixed set (Chairs, CEOs, Secretaries*,
+            Finance, Commercial, Ticketing, Media, Safety*, Medical, Team ops,
+            Community, Safeguarding*, DLO*, PLO*, CSLO*, SLO). * = required.
+          - Membership DEFAULTS from role (listDerivedFromRoles via section /
+            functionForTitle) and is editable per person via person.listOverrides
+            ({key:true|false}); effectiveOnList = override ?? derived. So a CEO
+            can join 'Secretaries' without holding the role, and people can opt
+            out. Overrides equal to the default are pruned on save.
+          - Person editor gains a 'Mailing lists' checkbox grid (auto-ticked
+            from role, with an 'auto' tag); listOverrides round-trips through
+            clubToRTDB / clubFromRTDB.
+          - Gap flag: clubListGaps() — required lists with nobody on them are
+            shown as a warn pill in the manage club picker.
+          (Phase 2: list-builder/export by mailing list.)
   v0.30 — (16/06/2026) Granular department fixes.
           - Ticketing split out of Commercial into its own 'Ticketing'
             department (so "every ticket-office manager" stays list-able).
@@ -413,6 +428,14 @@
   window.NL_CHANGELOG = [
     {
       date: '16 Jun 2026',
+      version: 'v0.31',
+      items: [
+        'New Mailing lists. Each person can belong to League mailing lists (Club secretaries, Safety officers, Commercial, Ticketing, DLOs, and so on). Membership is set automatically from their role, but you can override it per person — so, for example, a CEO who wants all the secretary emails can simply be ticked onto the Club secretaries list.',
+        'The club list now flags when a club has nobody on a required mailing list, so gaps are easy to spot.'
+      ]
+    },
+    {
+      date: '16 Jun 2026',
       version: 'v0.30',
       items: [
         'Ticketing is now its own department (split out of Commercial), so you can pull a clean list of every ticket-office contact.',
@@ -781,6 +804,24 @@
   }
   .mc-details__note { font-size: 12px; color: var(--text-muted); margin-top: 12px; line-height: 1.5; }
   .mc-details__note a { color: var(--navy); }
+  /* Mailing-list checkboxes in the person editor. */
+  .mc-mlists { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 18px; }
+  @media (max-width: 520px) { .mc-mlists { grid-template-columns: 1fr; } }
+  .mc-mlist {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 13px; color: var(--text-muted);
+    padding: 3px 0; cursor: pointer; min-width: 0;
+  }
+  .mc-mlist.is-on { color: var(--text); }
+  .mc-mlist > span { flex: 1; min-width: 0; }
+  .mc-mlist__req { color: var(--primary); font-weight: 900; }
+  .mc-mlist__auto {
+    font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em;
+    font-variation-settings: 'wght' 700;
+    color: var(--navy); background: var(--navy-50);
+    border: 1px solid var(--navy-200); border-radius: 999px;
+    padding: 0 6px;
+  }
   .cp-facts {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
     gap: 1px; background: var(--border); border-bottom: 1px solid var(--border);
@@ -2473,6 +2514,57 @@ function migrateSections() {
   });
 }
 
+/* ================= MAILING LISTS =================
+   League-defined distribution lists. A person's membership DEFAULTS from
+   their role(s) (match below), but is editable per person via listOverrides
+   ({listKey: true|false}) — so a CEO can be added to 'secretaries', or someone
+   opted out. required: the League flags a club with nobody on that list.
+   match(section, fn) — fn is functionForTitle(title, section). */
+var MAILING_LISTS = [
+  { key: 'chairs',       label: 'Chairs & leadership',  match: function(sec, fn){ return sec === 'Leadership'; } },
+  { key: 'ceos',         label: 'Chief executives',     match: function(sec, fn){ return sec === 'Executive'; } },
+  { key: 'secretaries',  label: 'Club secretaries',     required: true, match: function(sec, fn){ return sec === 'Club secretary'; } },
+  { key: 'finance',      label: 'Finance',              match: function(sec, fn){ return sec === 'Finance'; } },
+  { key: 'commercial',   label: 'Commercial',           match: function(sec, fn){ return sec === 'Commercial'; } },
+  { key: 'ticketing',    label: 'Ticketing',            match: function(sec, fn){ return sec === 'Ticketing'; } },
+  { key: 'media',        label: 'Media & marketing',    match: function(sec, fn){ return sec === 'Media & marketing'; } },
+  { key: 'safety',       label: 'Safety officers',      required: true, match: function(sec, fn){ return fn === 'safety'; } },
+  { key: 'medical',      label: 'Medical',              match: function(sec, fn){ return sec === 'Medical'; } },
+  { key: 'teamops',      label: 'Team operations',      match: function(sec, fn){ return sec === 'Team operations'; } },
+  { key: 'community',    label: 'Community',            match: function(sec, fn){ return sec === 'Community'; } },
+  { key: 'safeguarding', label: 'Safeguarding leads',   required: true, match: function(sec, fn){ return sec === 'Safeguarding & welfare'; } },
+  { key: 'dlo',          label: 'DLO',                  required: true, match: function(sec, fn){ return fn === 'dlo'; } },
+  { key: 'plo',          label: 'PLO',                  required: true, match: function(sec, fn){ return fn === 'plo'; } },
+  { key: 'cslo',         label: 'CSLO',                 required: true, match: function(sec, fn){ return fn === 'cslo'; } },
+  { key: 'slo',          label: 'SLO',                  match: function(sec, fn){ return fn === 'slo'; } }
+];
+var MAILING_LISTS_BY_KEY = (function(){ var m = {}; MAILING_LISTS.forEach(function(l){ m[l.key] = l; }); return m; })();
+
+function roleMatchesList(role, list) {
+  var fn = role['function'] || functionForTitle(role.title, role.section);
+  return !!list.match(role.section, fn);
+}
+/* Default membership for a roles array (used live in the editor from roleRows,
+   and from a stored person's roles). */
+function listDerivedFromRoles(roles, listKey) {
+  var list = MAILING_LISTS_BY_KEY[listKey];
+  if (!list) return false;
+  return (roles || []).some(function(r){ return roleMatchesList(r, list); });
+}
+/* Effective membership = explicit override if set, else the role-derived default. */
+function effectiveOnList(roles, overrides, listKey) {
+  if (overrides && Object.prototype.hasOwnProperty.call(overrides, listKey)) return !!overrides[listKey];
+  return listDerivedFromRoles(roles, listKey);
+}
+function personOnList(person, listKey) {
+  return effectiveOnList(person.roles, person.listOverrides, listKey);
+}
+/* Required lists a club has nobody on. */
+function clubListGaps(club) {
+  return MAILING_LISTS.filter(function(l){ return l.required; })
+    .filter(function(l){ return !(club.people || []).some(function(p){ return personOnList(p, l.key); }); });
+}
+
 /* Per-section free-text title SUGGESTIONS for the person modal's role rows.
    Backed by a <datalist> — free text is always still allowed. Liaison
    officers derive from the section's roleLabels (DLO/PLO/CSLO/SLO); the
@@ -3625,6 +3717,11 @@ function renderClubPicker(root) {
     var status = missing.length === 0
       ? '<span class="pill pill--status pill--status-good">✓ all heads set</span>'
       : '<span class="pill pill--status pill--status-warn">⚠ ' + missing.length + ' missing head' + (missing.length===1?'':'s') + '</span>';
+    var gaps = clubListGaps(c);
+    if (gaps.length) {
+      status += ' <span class="pill pill--status pill--status-warn" title="No contact on: ' +
+        esc(gaps.map(function(l){ return l.label; }).join(', ')) + '">⚠ ' + gaps.length + ' list gap' + (gaps.length===1?'':'s') + '</span>';
+    }
     return '<tr data-club="' + esc(c.name) + '">' +
       '<td><div class="mc-club-cell">' +
         '<img src="' + crestUrl(c.name) + '" alt="" onerror="this.onerror=null;this.src=\'' + fallbackCrest() + '\'">' +
@@ -3807,7 +3904,8 @@ function seedPersonDraft(person) {
         { type: 'email', value: '', label: '', preferred: true },
         { type: 'phone', value: '', label: '', preferred: true }
       ],
-      noEmail: false, noPhone: false
+      noEmail: false, noPhone: false,
+      listOverrides: {}
     };
   }
   ensureContacts(person);
@@ -3828,6 +3926,7 @@ function seedPersonDraft(person) {
     });
   return { name: person.name || '', note: person.note || '',
            noEmail: !!person.noEmail, noPhone: !!person.noPhone,
+           listOverrides: Object.assign({}, person.listOverrides || {}),
            roleRows: roleRows, primaryRoleIdx: primaryRoleIdx, contactRows: contactRows };
 }
 
@@ -3966,6 +4065,20 @@ function renderPersonPanelInner(club) {
   var emailRows = draft.contactRows.map(function(c, i){ return c.type === 'email' ? renderContactRow(draft, c, i, emailCount > 1) : ''; }).join('');
   var phoneRows = draft.contactRows.map(function(c, i){ return c.type === 'phone' ? renderContactRow(draft, c, i, phoneCount > 1) : ''; }).join('');
 
+  // Mailing lists — checked = effective membership (role-derived default, or
+  // an explicit override). draftRoles drives the live default as roles change.
+  var draftRoles = draft.roleRows.map(function(r){ return { section: r.section, title: r.title }; });
+  if (!draft.listOverrides) draft.listOverrides = {};
+  var mlistHtml = MAILING_LISTS.map(function(l) {
+    var on = effectiveOnList(draftRoles, draft.listOverrides, l.key);
+    var auto = listDerivedFromRoles(draftRoles, l.key);
+    return '<label class="mc-mlist' + (on ? ' is-on' : '') + '">' +
+      '<input type="checkbox" data-mlist="' + l.key + '"' + (on ? ' checked' : '') + '> ' +
+      '<span>' + esc(l.label) + (l.required ? ' <span class="mc-mlist__req" title="League-required list">•</span>' : '') + '</span>' +
+      (auto ? '<span class="mc-mlist__auto">auto</span>' : '') +
+    '</label>';
+  }).join('');
+
   return '<div class="mc-person-panel__hd">' +
         '<div>' +
           '<h3>' + (isNew ? 'Add new person' : 'Edit person') + '</h3>' +
@@ -4002,6 +4115,12 @@ function renderPersonPanelInner(club) {
               '<label class="mc-person-panel__nonebox"><input type="checkbox" id="mcNoPhone"' + (draft.noPhone ? ' checked' : '') + '> No phone on file</label>' +
             '</div>' +
           '</div>' +
+        '</div>' +
+
+        '<div class="mc-person-panel__depts-section">' +
+          '<h4>Mailing lists</h4>' +
+          '<div class="mc-mlists">' + mlistHtml + '</div>' +
+          '<div class="mc-person-panel__help">Ticked lists are auto-set from this person\'s role(s); tick or untick to override — e.g. add a CEO to <b>Club secretaries</b>, or opt someone out.</div>' +
         '</div>' +
       '</div>' +
       '<div class="mc-person-panel__ftr">' +
@@ -4573,6 +4692,12 @@ function commitPersonPanelSave(club, isNew, draft) {
   var person;
   var noEmail = !cc.email && !!draft.noEmail;
   var noPhone = !cc.phone && !!draft.noPhone;
+  // Keep only mailing-list overrides that actually differ from the role-derived
+  // default for the FINAL roles — so memberships stay live where possible.
+  var listOverrides = {};
+  Object.keys(draft.listOverrides || {}).forEach(function(key) {
+    if (draft.listOverrides[key] !== listDerivedFromRoles(roles, key)) listOverrides[key] = draft.listOverrides[key];
+  });
   if (isNew) {
     person = {
       _id: 'p' + (_nextPersonId++),
@@ -4584,6 +4709,7 @@ function commitPersonPanelSave(club, isNew, draft) {
       roles: roles,
       noEmail: noEmail,
       noPhone: noPhone,
+      listOverrides: listOverrides,
     };
     club.people.push(person);
   } else {
@@ -4597,6 +4723,7 @@ function commitPersonPanelSave(club, isNew, draft) {
       person.roles = roles;
       person.noEmail = noEmail;
       person.noPhone = noPhone;
+      person.listOverrides = listOverrides;
     }
   }
   if (person) clearPreviousHeads(club, person, roles);
@@ -5653,6 +5780,21 @@ function wireUI() {
     // "No email/phone on file" — records a deliberate blank so save doesn't block.
     if (t.id === 'mcNoEmail') { if (state.manage.personDraft) state.manage.personDraft.noEmail = t.checked; return; }
     if (t.id === 'mcNoPhone') { if (state.manage.personDraft) state.manage.personDraft.noPhone = t.checked; return; }
+    // Mailing-list checkbox: store an override only when it differs from the
+    // role-derived default, so memberships stay live as roles change.
+    if (t.hasAttribute('data-mlist')) {
+      var d = state.manage.personDraft;
+      if (d) {
+        var key = t.getAttribute('data-mlist');
+        var roles = (d.roleRows || []).map(function(r){ return { section: r.section, title: r.title }; });
+        if (!d.listOverrides) d.listOverrides = {};
+        if (t.checked === listDerivedFromRoles(roles, key)) delete d.listOverrides[key];
+        else d.listOverrides[key] = t.checked;
+        var lbl = t.closest('.mc-mlist');
+        if (lbl) lbl.classList.toggle('is-on', t.checked);
+      }
+      return;
+    }
 
     // Flag tickbox on existing role draft (e.g. Media -> Programme editor)
     if (t.hasAttribute('data-draft-flag-key')) {
@@ -5912,6 +6054,7 @@ function clubToRTDB(club) {
       note: p.note || null,
       noEmail: !!p.noEmail || null,
       noPhone: !!p.noPhone || null,
+      listOverrides: (p.listOverrides && Object.keys(p.listOverrides).length) ? p.listOverrides : null,
       contacts: packContacts(p.contacts),
       roles: (p.roles || []).map(packRole)
     };
@@ -5967,6 +6110,7 @@ function clubFromRTDB(name, val, fallbackWebsite) {
       note: p.note || null,
       noEmail: !!p.noEmail,
       noPhone: !!p.noPhone,
+      listOverrides: p.listOverrides || {},
       roles: arr(p.roles).map(unpackRole)
     };
     if (p.contacts) {
