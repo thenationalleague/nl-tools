@@ -6,9 +6,21 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.31 — Mailing lists (phase 1): per-person membership, defaults, gap flag.
+  v0.32 — Phone formatting + duplicate-contact warning.
 
   Changelog:
+  v0.32 — (16/06/2026) Phone formatting + duplicate-contact guard.
+          - normalisePhone (storage: bare 11 digits / verbatim +overseas) +
+            formatPhone (display: UK 11-digit grouped ##### ### ###; overseas /
+            unusual lengths shown as-is). Applied at every on-screen phone
+            (club view table, hero correspondence chip, people card, list
+            builder column, contactBits). Phones stored normalised via
+            buildContactsFromDraft + club-details save.
+          - findContactDuplicates(): on save, if a draft email/phone already
+            sits on another person (any club), a soft confirm names who holds
+            it and offers "Save anyway" (shared inboxes are legitimate).
+            draft._dupConfirmed lets the confirmed save through; runs before the
+            existing name-collision check.
   v0.31 — (16/06/2026) Mailing lists — phase 1 (membership + editor + gaps).
           - MAILING_LISTS: League-defined fixed set (Chairs, CEOs, Secretaries*,
             Finance, Commercial, Ticketing, Media, Safety*, Medical, Team ops,
@@ -426,6 +438,14 @@
   var NL_TOOL_KEY = 'ops-club-directory';
 
   window.NL_CHANGELOG = [
+    {
+      date: '16 Jun 2026',
+      version: 'v0.32',
+      items: [
+        'Phone numbers are now shown in a consistent ##### ### ### format and stored tidily as 11 digits (international numbers beginning with + are left exactly as entered).',
+        'When you save someone whose email or phone already belongs to another person, you now get a heads-up showing who has it — you can still save (handy for shared inboxes), it just stops accidental duplicates.'
+      ]
+    },
     {
       date: '16 Jun 2026',
       version: 'v0.31',
@@ -2687,9 +2707,27 @@ function mainRole(p) {
   return p.roles[0];
 }
 
+/* Phone helpers. Storage: UK numbers as bare 11 digits (no spaces); overseas
+   kept verbatim with a leading +. Display: UK 11-digit grouped ##### ### ###;
+   overseas and unusual lengths shown as-is. */
+function normalisePhone(v) {
+  v = (v || '').trim();
+  if (!v) return '';
+  if (v.charAt(0) === '+') return v.replace(/[^\d+]/g, '');
+  return v.replace(/\D/g, '');
+}
+function formatPhone(v) {
+  v = (v || '').trim();
+  if (!v) return '';
+  if (v.charAt(0) === '+') return v;            // overseas: leave as entered
+  var d = v.replace(/\D/g, '');
+  if (d.length === 11) return d.slice(0, 5) + ' ' + d.slice(5, 8) + ' ' + d.slice(8);
+  return v;                                     // unusual length: show as-is
+}
+
 function contactBits(p) {
   var bits = [];
-  if (p.phone) bits.push('<span>' + esc(p.phone) + '</span>');
+  if (p.phone) bits.push('<span>' + esc(formatPhone(p.phone)) + '</span>');
   if (p.email) bits.push('<a href="mailto:' + esc(p.email) + '">' + esc(p.email) + '</a>');
   return bits;
 }
@@ -2836,7 +2874,7 @@ function renderClubStyle2(club) {
       rows += '<tr>' +
         '<td class="s2-role">' + esc(roleLabel) + '</td>' +
         '<td class="s2-name">' + esc(p.name) + headBadge + '</td>' +
-        '<td class="s2-phone">' + esc(p.phone||'') + '</td>' +
+        '<td class="s2-phone">' + esc(formatPhone(p.phone||'')) + '</td>' +
         '<td class="s2-email">' + email + '</td>' +
       '</tr>';
     });
@@ -2847,7 +2885,7 @@ function renderClubStyle2(club) {
   var stadiumLine = stadiumDisplay(club.name);
 
   var chips = '';
-  if (club.phone)   chips += '<span class="cp-chip">' + esc(club.phone) + '</span>';
+  if (club.phone)   chips += '<span class="cp-chip">' + esc(formatPhone(club.phone)) + '</span>';
   if (club.email)   chips += '<a class="cp-chip" href="mailto:' + esc(club.email) + '">' + esc(club.email) + '</a>';
   if (club.website) chips += '<a class="cp-chip" href="https://' + esc(club.website) + '" target="_blank" rel="noopener">' + esc(club.website) + '</a>';
 
@@ -3603,7 +3641,7 @@ function renderBuilderResults() {
         '</div>' +
       '</td>' +
       '<td class="lb-col-email">' + emailCell + '</td>' +
-      '<td class="lb-col-phone">' + esc(rc.phone || '') + '</td>' +
+      '<td class="lb-col-phone">' + esc(formatPhone(rc.phone || '')) + '</td>' +
     '</tr>';
   }).join('');
 
@@ -3833,7 +3871,7 @@ function renderPeopleSurface(club) {
 
     var contactParts = [];
     if (p.email) contactParts.push('<a href="mailto:' + esc(p.email) + '" onclick="event.stopPropagation();">' + esc(p.email) + '</a>');
-    if (p.phone) contactParts.push('<span>' + esc(p.phone) + '</span>');
+    if (p.phone) contactParts.push('<span>' + esc(formatPhone(p.phone)) + '</span>');
 
     var nm = (p.name || '').trim();
     var initials = nm ? nm.split(/\s+/).map(function(w){ return w.charAt(0); }).slice(0, 2).join('').toUpperCase() : '?';
@@ -4551,6 +4589,36 @@ function normaliseName(s) {
   return (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
+/* Find other people (any club) who already hold one of this draft's email or
+   phone values. Emails matched case-insensitively; phones by normalised digits.
+   Used for a soft "are you sure" warning — shared inboxes are legitimate. */
+function findContactDuplicates(draft) {
+  var editingId = state.manage.editingPersonId;
+  var mine = (draft.contactRows || [])
+    .filter(function(c){ return (c.value || '').trim(); })
+    .map(function(c){
+      return { type: c.type, raw: c.value.trim(),
+               norm: c.type === 'phone' ? normalisePhone(c.value) : c.value.trim().toLowerCase() };
+    });
+  if (!mine.length) return [];
+  var hits = [];
+  (window.CLUBS || []).forEach(function(club) {
+    (club.people || []).forEach(function(p) {
+      if (p._id === editingId) return;
+      (p.contacts || []).forEach(function(pc) {
+        if (!pc.value) return;
+        var pn = pc.type === 'phone' ? normalisePhone(pc.value) : String(pc.value).trim().toLowerCase();
+        mine.forEach(function(m) {
+          if (m.type === pc.type && m.norm && m.norm === pn) {
+            hits.push({ type: m.type, value: m.raw, person: p.name || '(unnamed)', club: club.name });
+          }
+        });
+      });
+    });
+  });
+  return hits;
+}
+
 function savePersonPanel() {
   var club = window.CLUBS.filter(function(c){ return c.name === state.manage.editingClub; })[0];
   if (!club) return;
@@ -4573,6 +4641,29 @@ function savePersonPanel() {
   if (!hasPhone && !draft.noPhone) {
     alert('Add a phone number, or tick "No phone on file".');
     return;
+  }
+
+  // Soft duplicate-contact guard — warn (with who), but allow (shared inboxes
+  // are legitimate). _dupConfirmed lets the "Save anyway" path through.
+  if (!draft._dupConfirmed) {
+    var dups = findContactDuplicates(draft);
+    if (dups.length) {
+      var lines = dups.map(function(h) {
+        return (h.type === 'phone' ? 'Phone ' : 'Email ') + esc(h.value) +
+          ' is already on <b>' + esc(h.person) + '</b> (' + esc(h.club) + ')';
+      });
+      state.manage.confirmDialog = {
+        title: 'Possible duplicate contact',
+        message: lines.join('<br>') + '<br><br>Save anyway?',
+        confirmText: 'Save anyway',
+        cancelText: 'Go back',
+        variant: 'primary',
+        onConfirm: function() { state.manage.confirmDialog = null; draft._dupConfirmed = true; savePersonPanel(); },
+        onCancel: function() { state.manage.confirmDialog = null; renderEditor(document.getElementById('mc-root')); }
+      };
+      renderEditor(document.getElementById('mc-root'));
+      return;
+    }
   }
 
   var isNew = state.manage.editingPersonId === 'new';
@@ -4652,9 +4743,10 @@ function buildContactsFromDraft(draft) {
   var contacts = (draft.contactRows || [])
     .filter(function(c){ return (c.value || '').trim(); })
     .map(function(c) {
-      var o = { type: c.type === 'phone' ? 'phone' : 'email', value: (c.value || '').trim(),
-                label: (c.label || '').trim(), preferred: !!c.preferred };
-      return o;
+      var type = c.type === 'phone' ? 'phone' : 'email';
+      // Phones are stored normalised (bare 11 digits / verbatim +overseas).
+      var value = type === 'phone' ? normalisePhone(c.value) : (c.value || '').trim();
+      return { type: type, value: value, label: (c.label || '').trim(), preferred: !!c.preferred };
     });
   // Ensure exactly one preferred per type (default to the first of that type).
   ['email', 'phone'].forEach(function(type) {
@@ -5605,7 +5697,7 @@ function wireUI() {
       var c = window.CLUBS.filter(function(x){ return x.name === state.manage.editingClub; })[0];
       var d = state.manage.editingDetails;
       if (c && d) {
-        c.phone = d.phone;
+        c.phone = d.phone ? normalisePhone(d.phone) : d.phone;
         c.email = d.email;
         c.website = d.website;
         persistClub(c, 'details_edit', 'Updated club contact details for ' + c.name);
