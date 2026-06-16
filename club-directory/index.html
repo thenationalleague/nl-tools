@@ -6,9 +6,18 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.36 — Global people search with jump-to-person.
+  v0.37 — List builder reworked: mailing-list-first (department mode retired).
 
   Changelog:
+  v0.37 — (16/06/2026) List builder is now mailing-list-first. Removed the
+          Build-by / heads-whole / contact-mode toggles and the department
+          picker UI: the builder simply shows the canonical MAILING_LISTS
+          (15: Chairs, Chief executives, Club secretaries, Finance/Commercial
+          leads, Ticketing managers, Media officers, Safety officers, Medical/
+          Safeguarding/Community leads, DLO/PLO/CSLO/SLO; Team operations
+          dropped) each with a live recipient count, plus an optional club
+          filter (empty = all clubs in lbResultsByList). state.lb.buildBy
+          defaults to 'list'; the dept lbResults branch is retired from the UI.
   v0.36 — (16/06/2026) Global search. The directory search now surfaces a
           "People" results block above the club grid (searchPeople(): match by
           name / role title / email across all clubs, capped 60). Clicking a
@@ -469,6 +478,13 @@
   var NL_TOOL_KEY = 'ops-club-directory';
 
   window.NL_CHANGELOG = [
+    {
+      date: '16 Jun 2026',
+      version: 'v0.37',
+      items: [
+        'The List builder is now all about mailing lists — no more confusing "build by department / heads vs whole" options. You just see the lists (Chief executives, Club secretaries, Commercial leads, Ticketing managers, Media officers, and so on), each showing how many people are on it, tick the one(s) you want, and copy the recipients. Leave clubs unticked for the whole league, or tick a few to narrow it.'
+      ]
+    },
     {
       date: '16 Jun 2026',
       version: 'v0.36',
@@ -2458,31 +2474,14 @@
   </div>
   <div class="scene" id="scene-builder">
     <div class="lb-intro">
-      <h2>List builder</h2>
-      <p>Build a contact list by department or by mailing list, pick your clubs, and copy it to the clipboard.</p>
-    </div>
-
-    <div class="lb-modebar">
-      <div class="lb-modebar__group" id="lbByGroup">
-        <span class="demo-bar__label">Build by</span>
-        <button class="btn btn--toggle btn--sm" data-lb-by="department" aria-pressed="true">Department</button>
-        <button class="btn btn--toggle btn--sm" data-lb-by="list">Mailing list</button>
-      </div>
-      <div class="lb-modebar__group" id="lbModeGroup">
-        <button class="btn btn--toggle btn--sm" data-lb-mode="heads" aria-pressed="true">Dept heads only</button>
-        <button class="btn btn--toggle btn--sm" data-lb-mode="whole">Whole department</button>
-      </div>
-      <div class="lb-modebar__group" id="lbContactGroup" title="Which address to use when both a role inbox and a personal address exist">
-        <span class="demo-bar__label">Contact</span>
-        <button class="btn btn--toggle btn--sm" data-lb-contact="person" aria-pressed="true">The person</button>
-        <button class="btn btn--toggle btn--sm" data-lb-contact="role">The role inbox</button>
-      </div>
+      <h2>Mailing lists</h2>
+      <p>Pick a mailing list (or several) and copy the recipients. Membership comes from each person's role; add a club filter to narrow it down.</p>
     </div>
 
     <div class="lb-grid">
       <section class="lb-panel">
         <div class="lb-panel-hd">
-          <h3 id="lbDeptsTitle">Departments</h3>
+          <h3 id="lbDeptsTitle">Mailing lists</h3>
           <div class="lb-panel-actions">
             <button class="btn btn--link" id="lbDeptsAll">all</button>
             <button class="btn btn--link" id="lbDeptsNone">none</button>
@@ -2493,7 +2492,7 @@
 
       <section class="lb-panel">
         <div class="lb-panel-hd">
-          <h3>Divisions &amp; clubs</h3>
+          <h3>Clubs <span class="lb-section-count">(none = all clubs)</span></h3>
           <div class="lb-panel-actions">
             <button class="btn btn--link" id="lbClubsAll">all</button>
             <button class="btn btn--link" id="lbClubsNone">none</button>
@@ -2635,18 +2634,17 @@ function migrateSections() {
    opted out. required: the League flags a club with nobody on that list.
    match(section, fn) — fn is functionForTitle(title, section). */
 var MAILING_LISTS = [
-  { key: 'chairs',       label: 'Chairs & leadership',  match: function(sec, fn){ return sec === 'Leadership'; } },
+  { key: 'chairs',       label: 'Chairs',               match: function(sec, fn){ return sec === 'Leadership'; } },
   { key: 'ceos',         label: 'Chief executives',     match: function(sec, fn){ return sec === 'Executive'; } },
   { key: 'secretaries',  label: 'Club secretaries',     required: true, match: function(sec, fn){ return sec === 'Club secretary'; } },
-  { key: 'finance',      label: 'Finance',              match: function(sec, fn){ return sec === 'Finance'; } },
-  { key: 'commercial',   label: 'Commercial',           match: function(sec, fn){ return sec === 'Commercial'; } },
-  { key: 'ticketing',    label: 'Ticketing',            match: function(sec, fn){ return sec === 'Ticketing'; } },
-  { key: 'media',        label: 'Media & marketing',    match: function(sec, fn){ return sec === 'Media & marketing'; } },
+  { key: 'finance',      label: 'Finance leads',        match: function(sec, fn){ return sec === 'Finance'; } },
+  { key: 'commercial',   label: 'Commercial leads',     match: function(sec, fn){ return sec === 'Commercial'; } },
+  { key: 'ticketing',    label: 'Ticketing managers',   match: function(sec, fn){ return sec === 'Ticketing'; } },
+  { key: 'media',        label: 'Media officers',       match: function(sec, fn){ return sec === 'Media & marketing'; } },
   { key: 'safety',       label: 'Safety officers',      required: true, match: function(sec, fn){ return fn === 'safety'; } },
-  { key: 'medical',      label: 'Medical',              match: function(sec, fn){ return sec === 'Medical'; } },
-  { key: 'teamops',      label: 'Team operations',      match: function(sec, fn){ return sec === 'Team operations'; } },
-  { key: 'community',    label: 'Community',            match: function(sec, fn){ return sec === 'Community'; } },
+  { key: 'medical',      label: 'Medical leads',        match: function(sec, fn){ return sec === 'Medical'; } },
   { key: 'safeguarding', label: 'Safeguarding leads',   required: true, match: function(sec, fn){ return sec === 'Safeguarding & welfare'; } },
+  { key: 'community',    label: 'Community leads',      match: function(sec, fn){ return sec === 'Community'; } },
   { key: 'dlo',          label: 'DLO',                  required: true, match: function(sec, fn){ return fn === 'dlo'; } },
   { key: 'plo',          label: 'PLO',                  required: true, match: function(sec, fn){ return fn === 'plo'; } },
   { key: 'cslo',         label: 'CSLO',                 required: true, match: function(sec, fn){ return fn === 'cslo'; } },
@@ -3118,7 +3116,7 @@ var state = {
   // list builder state
   lb: {
     mode: 'heads',
-    buildBy: 'department',   // 'department' | 'list' (mailing lists)
+    buildBy: 'list',         // builder is mailing-list-first (department mode retired from the UI)
     contactMode: 'person',   // 'person' (direct) | 'role' (inbox preferred)
     selectedDepts: {},
     selectedLists: {},       // mailing-list keys when buildBy === 'list'
@@ -3505,11 +3503,12 @@ function updateManageMyClubButton() {
    reaching the human, not a role inbox). */
 function lbResultsByList() {
   var lists = state.lb.selectedLists || {};
+  if (!Object.keys(lists).length) return [];
   var clubs = state.lb.selectedClubs;
-  if (!Object.keys(lists).length || !Object.keys(clubs).length) return [];
+  var allClubs = Object.keys(clubs).length === 0;   // no club filter = every club
   var out = [];
   window.CLUBS.forEach(function(c) {
-    if (!clubs[c.name]) return;
+    if (!allClubs && !clubs[c.name]) return;
     c.people.forEach(function(p) {
       var on = MAILING_LISTS.filter(function(l){ return lists[l.key] && personOnList(p, l.key); });
       if (!on.length) return;
@@ -3705,21 +3704,19 @@ function lbMissingHeads() {
 }
 
 function renderBuilder() {
-  var byList = state.lb.buildBy === 'list';
-  // The heads/whole + role-inbox toggles only apply to department mode.
-  var modeGroup = document.getElementById('lbModeGroup');
-  var contactGroup = document.getElementById('lbContactGroup');
-  if (modeGroup) modeGroup.style.display = byList ? 'none' : '';
-  if (contactGroup) contactGroup.style.display = byList ? 'none' : '';
-  var title = document.getElementById('lbDeptsTitle');
-  if (title) title.textContent = byList ? 'Mailing lists' : 'Departments';
-  document.querySelectorAll('#lbByGroup [data-lb-by]').forEach(function(b) {
-    b.setAttribute('aria-pressed', b.getAttribute('data-lb-by') === state.lb.buildBy ? 'true' : 'false');
-  });
   renderBuilderDepts();
   renderBuilderDivisions();
   renderBuilderWarnings();
   renderBuilderResults();
+}
+
+/* Total people on a list across every club — shown as a count per list. */
+function listMemberCount(listKey) {
+  var n = 0;
+  window.CLUBS.forEach(function(c) {
+    c.people.forEach(function(p) { if (personOnList(p, listKey)) n++; });
+  });
+  return n;
 }
 
 function renderBuilderLists() {
@@ -3727,14 +3724,19 @@ function renderBuilderLists() {
   root.innerHTML = MAILING_LISTS.map(function(l) {
     var id = 'lb-list-' + l.key;
     var checked = state.lb.selectedLists[l.key] ? ' checked' : '';
+    var n = listMemberCount(l.key);
     return '<div class="lb-section-group"><div class="lb-section-row">' +
       '<input type="checkbox" id="' + id + '" data-lb-list="' + l.key + '"' + checked + '>' +
-      '<label for="' + id + '">' + esc(l.label) + (l.required ? ' <span class="lb-section-count">(required)</span>' : '') + '</label>' +
+      '<label for="' + id + '">' + esc(l.label) +
+        (l.required ? ' <span class="lb-section-count">(required)</span>' : '') +
+        ' <span class="pill pill--count">' + n + '</span>' +
+      '</label>' +
     '</div></div>';
   }).join('');
 }
 
 function renderBuilderDepts() {
+  // The builder is mailing-list-first; department mode is retired from the UI.
   if (state.lb.buildBy === 'list') { renderBuilderLists(); return; }
   var root = document.getElementById('lbDepts');
   var html = SECTION_ORDER.map(function(section) {
@@ -5617,13 +5619,6 @@ function wireUI() {
   var builderScene = document.getElementById('scene-builder');
   builderScene.addEventListener('click', function(e) {
     var t = e.target;
-    var byBtn = t.closest('[data-lb-by]');
-    if (byBtn) {
-      state.lb.buildBy = byBtn.getAttribute('data-lb-by');
-      state.lb.omittedKeys = {};
-      renderBuilder();
-      return;
-    }
     var modeBtn = t.closest('[data-lb-mode]');
     if (modeBtn) {
       state.lb.mode = modeBtn.getAttribute('data-lb-mode');
