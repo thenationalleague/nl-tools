@@ -1,13 +1,17 @@
 <!DOCTYPE html>
 <!--
-  club-roster/index.html  v1.2
+  club-roster/index.html  v1.4
   Public club ROSTER collection — GUIDED WIZARD (capability-URL pattern).
   Sibling of club-data. Gathers a club's people directory for club-directory.
 
-  v1.3 (16/06/2026) — stepper completion is now EXPLICIT: each step carries a
-    "Mark this section as done" checkbox (persisted in the draft) and only a
-    step the club has ticked shows a ✓ in the stepper. Visiting/▸jumping no
-    longer implies completion.
+  v1.4 (16/06/2026) — feedback round 3:
+    - Shared-inbox function dropdown is now branded (NL chevron, navy text)
+      rather than the bare native select.
+    - "Add a person" button becomes "Add another person" once one exists.
+    - Step completion is DERIVED, not a manual checkbox: a step turns green
+      once it holds viable data (or, for a department, every area is filled or
+      marked "no one"). The stepper updates live as the club types.
+  v1.3 (16/06/2026) — (superseded) brief explicit "mark done" checkbox.
   v1.2 (16/06/2026) — club feedback round 2:
     - Stepper uses a VISITED model — a step only shows a tick once you've
       actually landed on it; jumping ahead no longer marks skipped steps done.
@@ -81,6 +85,13 @@ firebase.initializeApp({
     width: 100%; box-sizing: border-box; font-family: var(--font); font-size: 14px;
     border: 1px solid var(--border); border-radius: 6px; padding: 9px 11px; background: var(--white); color: var(--text);
   }
+  /* Branded select: drop the native OS arrow for an NL chevron */
+  select {
+    -webkit-appearance: none; -moz-appearance: none; appearance: none;
+    padding-right: 34px; cursor: pointer; font-variation-settings:'wght' 600; color: var(--navy);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='none' stroke='%23001a4b' stroke-width='2' d='M1 1.5 6 6.5 11 1.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 12px center;
+  }
   input.is-bad { border-color: var(--red); background: var(--red-light); }
   .ri-err { color: var(--red); font-size: 11.5px; margin: 4px 0 0; display: none; }
   .ri-err.show { display: block; }
@@ -133,8 +144,6 @@ firebase.initializeApp({
   /* Footer nav */
   .ri-nav { position: sticky; bottom: 0; background: var(--white); border-top: 1px solid var(--border); padding: 12px 18px; display: flex; align-items: center; gap: 12px; }
   .ri-nav__spacer { flex: 1; }
-  .ri-donec { display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--text-muted); cursor:pointer; white-space:nowrap; }
-  .ri-donec input { width:16px; height:16px; }
   .ri-saved { font-size: 12px; color: var(--green); opacity: 0; transition: opacity .2s; }
   .ri-saved.show { opacity: 1; }
   .ri-status { font-size: 13px; color: var(--red); }
@@ -155,7 +164,6 @@ firebase.initializeApp({
     <div class="ri-body" id="riStep"></div>
     <div class="ri-nav">
       <button class="btn btn--ghost" id="riBack">← Back</button>
-      <label class="ri-donec" id="riDoneWrap"><input type="checkbox" id="riDone"> Mark this section as done</label>
       <span class="ri-status" id="riStatus"></span>
       <span class="ri-nav__spacer"></span>
       <span class="ri-saved" id="riSaved">Saved ✓</span>
@@ -236,7 +244,7 @@ firebase.initializeApp({
   var db = firebase.database();
   var clubName = null;
   var cur = 0;
-  var data = { yourName:'', yourEmail:'', inboxes:{}, people:[], emptied:{}, done:{} };
+  var data = { yourName:'', yourEmail:'', inboxes:{}, people:[], emptied:{} };
 
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
   function el(id){ return document.getElementById(id); }
@@ -266,16 +274,26 @@ firebase.initializeApp({
       el('riApp').style.display = '';
       if (prev) { renderLocked(prev); return; }
       var draft = loadDraft();
-      if (draft) data = Object.assign({ yourName:'', yourEmail:'', inboxes:{}, people:[], emptied:{}, done:{} }, draft);
+      if (draft) data = Object.assign({ yourName:'', yourEmail:'', inboxes:{}, people:[], emptied:{} }, draft);
       bindNav();
       renderSteps(); renderStep();
     });
   }).catch(function () { gate('Could not check this link — please try again shortly.'); });
 
-  /* ---- Stepper (explicit completion — a step only ticks once marked done) ---- */
+  /* ---- Stepper (completion is DERIVED — green once a step has viable data
+     or, for a department, every area is filled or marked "no one") ---- */
+  function isStepDone(step) {
+    if (step.kind === 'you') return !!data.yourName && validEmail(data.yourEmail);
+    if (step.kind === 'inboxes') return Object.keys(data.inboxes).length > 0;
+    if (step.kind === 'liaison') return data.people.some(function (p) { return p.section === 'Liaison officers'; });
+    if (step.kind === 'depts') return step.sections.every(function (s) {
+      return data.emptied[s] || data.people.some(function (p) { return p.section === s; });
+    });
+    return false;
+  }
   function renderSteps() {
     el('riSteps').innerHTML = STEPS.map(function (s, i) {
-      var done = !!data.done[s.id];
+      var done = isStepDone(s);
       var cls = (i === cur) ? 'is-current' : (done ? 'is-done' : '');
       return '<div class="ri-step ' + cls + '" data-step="' + i + '">' +
         (done && i !== cur ? '<span class="ri-step__tick">✓</span>' : '') + esc(s.label) + '</div>';
@@ -292,10 +310,6 @@ firebase.initializeApp({
     el('riStatus').textContent = '';
     el('riBack').style.visibility = cur === 0 ? 'hidden' : 'visible';
     el('riNext').textContent = (cur === STEPS.length - 1) ? 'Submit to the League' : 'Next →';
-    // The "mark done" toggle shows on every step except the final review.
-    var doneWrap = el('riDoneWrap');
-    doneWrap.style.display = (step.kind === 'review') ? 'none' : 'flex';
-    el('riDone').checked = !!data.done[step.id];
 
     if (step.kind === 'you') {
       host.innerHTML =
@@ -385,12 +399,15 @@ firebase.initializeApp({
     var existing = data.people.filter(function (p) { return p.section === section; });
     existing.forEach(function (p) { holder.appendChild(personRow(section, p)); });
 
+    var addBtn = card.querySelector('.ri-addperson');
     function refresh() {
-      var blank = holder.children.length === 0;
+      var n = holder.children.length, blank = n === 0;
+      addBtn.textContent = blank ? '+ Add a person' : '+ Add another person';
       // "No one" only offered while the area is blank — so it can never wipe entered people.
       noneWrap.style.display = blank ? 'flex' : 'none';
       if (!blank && noneck.checked) noneck.checked = false;
       noneWrap.classList.toggle('is-set', noneck.checked);
+      renderSteps();
     }
     card.querySelector('.ri-addperson').addEventListener('click', function () {
       noneck.checked = false; data.emptied[section] = false;
@@ -623,15 +640,12 @@ firebase.initializeApp({
     });
     el('riStep').addEventListener('input', markSaved);
     el('riStep').addEventListener('change', markSaved);
-    el('riDone').addEventListener('change', function () {
-      data.done[STEPS[cur].id] = el('riDone').checked; renderSteps(); saveDraft(true);
-    });
   }
   function goTo(idx) { syncStep(); saveDraft(); cur = idx; renderSteps(); renderStep(); window.scrollTo(0, 0); }
 
   /* ---- Draft persistence ---- */
   var saveTimer = null;
-  function markSaved() { clearTimeout(saveTimer); saveTimer = setTimeout(function () { syncStep(); saveDraft(true); }, 500); }
+  function markSaved() { clearTimeout(saveTimer); saveTimer = setTimeout(function () { syncStep(); renderSteps(); saveDraft(true); }, 500); }
   function saveDraft(flash) {
     try { localStorage.setItem(LS_KEY, JSON.stringify(data)); if (flash) { var s = el('riSaved'); s.classList.add('show'); setTimeout(function () { s.classList.remove('show'); }, 1000); } } catch (e) {}
   }
