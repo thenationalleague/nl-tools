@@ -6,9 +6,20 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.41 — Phone extensions + per-list department inboxes.
+  v0.42 — List builder pulls in opt-in department inboxes.
 
   Changelog:
+  v0.42 — (16/06/2026) List builder now consumes the per-list department
+          inboxes added in v0.41. In list mode, each club that has opted to
+          record a shared inbox (club.listInboxes[<listKey>]) for a selected
+          list contributes one extra recipient row for that function —
+          person:null, inbox:true, the inbox email/phone carried as
+          roleContacts so resolveResultContacts/export reuse unchanged. New
+          row shape is handled in lbResultsByList() (emit + null-safe sort),
+          renderBuilderResults() (a 'dept inbox' marker in the Name cell) and
+          lbDedupedRows() (keyed club|i|<listKey>, named as '<list> inbox').
+          Opt-in and additive: no club holds an inbox yet, so this changes
+          nothing in practice until one is filled in under Club details.
   v0.41 — (16/06/2026) Foundation for the reseed data-collection flow.
           EXTENSIONS: every phone (person contacts) gains an optional `ext`
           field — stored on the contact, round-tripped through the draft +
@@ -537,6 +548,13 @@
   var NL_TOOL_KEY = 'ops-club-directory';
 
   window.NL_CHANGELOG = [
+    {
+      date: '16 Jun 2026',
+      version: 'v0.42',
+      items: [
+        'List builder now includes a club\'s department inboxes. If a club has recorded a shared address for a list (e.g. commercial@ on Commercial leads), it shows up as its own "dept inbox" recipient when you build that list — and is copied/exported with everyone else. Most clubs have none recorded yet, so nothing changes until one is added under Club details.'
+      ]
+    },
     {
       date: '16 Jun 2026',
       version: 'v0.41',
@@ -3384,9 +3402,37 @@ function lbResultsByList() {
       });
     });
   });
+
+  /* Department inboxes — shared addresses (commercial@, ticketing@) a club has
+     opted to record against a list. They belong to the function, not a person,
+     so each set inbox at a selected club joins that list's recipients as its
+     own row. Opt-in per club: most carry none, so this adds nothing until a
+     club fills one in. */
+  window.CLUBS.forEach(function(c) {
+    if (!allClubs && !clubs[c.name]) return;
+    var inboxes = c.listInboxes || {};
+    MAILING_LISTS.forEach(function(l) {
+      if (!lists[l.key]) return;
+      var ib = inboxes[l.key];
+      if (!ib || !(ib.email || ib.phone)) return;
+      var contacts = [];
+      if (ib.email) contacts.push({ type: 'email', value: ib.email });
+      if (ib.phone) contacts.push({ type: 'phone', value: ib.phone });
+      var ikey = c.name + '|inbox|' + l.key;
+      out.push({
+        key: ikey, club: c.name, division: divisionOf(c.name),
+        section: l.label, person: null, vacant: false,
+        inbox: true, inboxKey: l.key, inboxLabel: l.label + ' inbox',
+        roleTitles: ['Department inbox'], roleContacts: contacts,
+        omitted: !!state.lb.omittedKeys[ikey]
+      });
+    });
+  });
+
+  function lbName(r) { return r.person ? (r.person.name || '') : (r.inboxLabel || r.section || ''); }
   out.sort(function(a, b) {
     if (a.club !== b.club) return a.club.localeCompare(b.club);
-    return (a.person.name || '').localeCompare(b.person.name || '');
+    return lbName(a).localeCompare(lbName(b));
   });
   return out;
 }
@@ -3489,9 +3535,11 @@ function lbDedupedRows(includeOmitted) {
   var results = lbResults().filter(function(r){ return includeOmitted || !r.omitted; });
   var map = {}; var order = [];
   results.forEach(function(r) {
-    var key = r.person ? (r.club + '|p|' + r.person._id) : (r.club + '|v|' + r.vacantTitle);
+    var key = r.person ? (r.club + '|p|' + r.person._id)
+            : r.inbox ? (r.club + '|i|' + r.inboxKey)
+            : (r.club + '|v|' + r.vacantTitle);
     if (!map[key]) {
-      map[key] = { name: r.person ? (r.person.name||'') : (r.vacantTitle + ' (vacant)'),
+      map[key] = { name: r.person ? (r.person.name||'') : r.inbox ? r.inboxLabel : (r.vacantTitle + ' (vacant)'),
         club: r.club, division: r.division, vacant: r.vacant,
         sections: [], roleLabels: [], emails: [], phones: [] };
       order.push(key);
@@ -3739,9 +3787,11 @@ function renderBuilderResults() {
     var emailCell = rc.emails.length
       ? rc.emails.map(function(em){ return '<a href="mailto:' + esc(em) + '">' + esc(em) + '</a>'; }).join('<br>')
       : '<span class="lb-no-email">no contact route</span>';
-    var nameCell = r.vacant
-      ? '<span class="pill pill--status pill--status-warn">vacant</span> ' + esc(r.vacantTitle)
-      : esc(r.person.name);
+    var nameCell = r.inbox
+      ? '<span class="pill pill--marker">dept inbox</span>'
+      : r.vacant
+        ? '<span class="pill pill--status pill--status-warn">vacant</span> ' + esc(r.vacantTitle)
+        : esc(r.person.name);
     return '<tr class="' + (r.omitted ? 'lb-row-omitted' : '') + '" data-key="' + esc(r.key) + '">' +
       '<td class="lb-col-omit">' +
         '<button class="btn-icon" data-omit-key="' + esc(r.key) + '" aria-pressed="' + (r.omitted ? 'true' : 'false') + '" title="' + (r.omitted ? 'Include row' : 'Omit row') + '">' +
