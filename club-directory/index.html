@@ -6,9 +6,16 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.35 — Mailing lists phase 2: build/export recipients by list.
+  v0.36 — Global people search with jump-to-person.
 
   Changelog:
+  v0.36 — (16/06/2026) Global search. The directory search now surfaces a
+          "People" results block above the club grid (searchPeople(): match by
+          name / role title / email across all clubs, capped 60). Clicking a
+          result opens that club's page and scrolls to + flashes the person
+          (renderClub honours state.jumpToPerson; s2 rows carry data-person-id;
+          .s2-row--flash). filteredClubs() already narrowed the grid by people;
+          this makes the matching people directly visible and jumpable.
   v0.35 — (16/06/2026) List builder gains a "Build by: Department | Mailing
           list" toggle. In list mode the left panel shows MAILING_LISTS and
           lbResults() routes to lbResultsByList() — one row per person on any
@@ -464,6 +471,13 @@
   window.NL_CHANGELOG = [
     {
       date: '16 Jun 2026',
+      version: 'v0.36',
+      items: [
+        'Search now finds people, not just clubs. Type a name, role or email and a "People" list appears above the clubs — click anyone to jump straight to them on their club page, with their row briefly highlighted.'
+      ]
+    },
+    {
+      date: '16 Jun 2026',
       version: 'v0.35',
       items: [
         'The List builder can now build by mailing list, not just by department. Flip "Build by" to "Mailing list", tick the lists you want (e.g. Club secretaries), choose your clubs, and copy the recipients straight out as an email string or CSV — including anyone you\'ve added to a list manually.'
@@ -812,6 +826,36 @@
   .s2-phone { width: 18%; color: var(--text-muted); font-size: 12px; }
   .s2-email { width: 32%; font-size: 12px; }
   .s2-table tbody tr:not(.s2-sec-row):hover td { background: var(--off-white); }
+  /* Flash a person's row when arrived at via global search. */
+  .s2-table tbody tr.s2-row--flash td { background: var(--amber-light); transition: background 0.4s; }
+
+  /* ===== Global people search results (above the club grid) ===== */
+  .gs-results {
+    background: var(--white); border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden; margin-bottom: 18px;
+  }
+  .gs-results__hd {
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    font-variation-settings: 'wght' 800; font-size: 13px;
+    background: var(--off-white);
+  }
+  .gs-row {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    padding: 10px 16px; border: none; border-bottom: 1px solid var(--border);
+    background: var(--white); cursor: pointer; text-align: left;
+    font-family: var(--font); font-size: 13px;
+  }
+  .gs-row:last-child { border-bottom: none; }
+  .gs-row:hover { background: var(--off-white); }
+  .gs-row__crest { width: 24px; height: 24px; object-fit: contain; flex: 0 0 24px; }
+  .gs-row__name { font-variation-settings: 'wght' 700; color: var(--text); }
+  .gs-row__role { color: var(--text-muted); }
+  .gs-row__club { color: var(--navy); font-variation-settings: 'wght' 600; }
+  .gs-row__contact { margin-left: auto; color: var(--text-muted); font-size: 12px; text-align: right; }
+  @media (max-width: 560px) {
+    .gs-row { flex-wrap: wrap; gap: 4px 10px; }
+    .gs-row__contact { margin-left: 0; flex-basis: 100%; text-align: left; }
+  }
 
   /* Section header row — typographic only. The td has no borders, no fill;
      the inner wrapper carries the navy text and the short red underline. */
@@ -2931,7 +2975,7 @@ function renderClubStyle2(club) {
         return '<a href="mailto:' + esc(em) + '">' + esc(em) + '</a>';
       }).join('<br>');
       var headBadge = e.isHead ? ' <span class="s2-head">Head of dept</span>' : '';
-      rows += '<tr>' +
+      rows += '<tr data-person-id="' + esc(p._id || '') + '">' +
         '<td class="s2-role">' + esc(roleLabel) + '</td>' +
         '<td class="s2-name">' + esc(p.name) + headBadge + '</td>' +
         '<td class="s2-phone">' + esc(formatPhone(p.phone||'')) + '</td>' +
@@ -3109,6 +3153,28 @@ function personaCan(capability) {
   }
 }
 
+/* Global people search — match across ALL clubs by name, role title or email.
+   Returns up to `cap` hits, each with the club + the person's primary role. */
+function searchPeople(q, cap) {
+  q = (q || '').trim().toLowerCase();
+  if (!q) return [];
+  cap = cap || 60;
+  var hits = [];
+  for (var ci = 0; ci < window.CLUBS.length && hits.length < cap; ci++) {
+    var c = window.CLUBS[ci];
+    for (var pi = 0; pi < c.people.length && hits.length < cap; pi++) {
+      var p = c.people[pi];
+      var name = (p.name || '').toLowerCase();
+      var roleHit = (p.roles || []).some(function(r){ return (r.title || '').toLowerCase().indexOf(q) !== -1; });
+      var emailHit = personEmails(p).some(function(em){ return em.toLowerCase().indexOf(q) !== -1; });
+      if (name.indexOf(q) === -1 && !roleHit && !emailHit) continue;
+      var pr = mainRole(p);
+      hits.push({ club: c.name, person: p, roleLabel: pr && pr.title ? pr.title : '' });
+    }
+  }
+  return hits;
+}
+
 function filteredClubs() {
   var q = state.searchQuery.trim().toLowerCase();
   if (!q) return window.CLUBS;
@@ -3202,7 +3268,43 @@ function renderListing() {
     }
   }
 
-  root.innerHTML = seedBannerHtml() + heroHtml + renderListStyle1(clubs);
+  // Global people search results — shown above the club grid when searching,
+  // so you can jump straight to a person instead of hunting through clubs.
+  var peopleHtml = '';
+  var sq = state.searchQuery.trim();
+  if (sq) {
+    var hits = searchPeople(sq, 60);
+    if (hits.length) {
+      var rows = hits.map(function(h) {
+        var pr = h.person;
+        var contact = [];
+        if (pr.email) contact.push(esc(pr.email));
+        if (pr.phone) contact.push(esc(formatPhone(pr.phone)));
+        return '<button class="gs-row" type="button" data-jump-club="' + esc(h.club) + '" data-jump-person="' + esc(pr._id || '') + '">' +
+          '<img class="gs-row__crest" src="' + crestUrl(h.club) + '" alt="" onerror="this.onerror=null;this.src=\'' + fallbackCrest() + '\'">' +
+          '<span class="gs-row__name">' + esc(pr.name || '(unnamed)') + '</span>' +
+          (h.roleLabel ? '<span class="gs-row__role">' + esc(h.roleLabel) + '</span>' : '') +
+          '<span class="gs-row__club">' + esc(h.club) + '</span>' +
+          '<span class="gs-row__contact">' + contact.join(' · ') + '</span>' +
+        '</button>';
+      }).join('');
+      peopleHtml = '<div class="gs-results">' +
+        '<div class="gs-results__hd">People <span class="pill pill--count">' + hits.length + (hits.length === 60 ? '+' : '') + '</span></div>' +
+        rows +
+      '</div>';
+    }
+  }
+
+  root.innerHTML = seedBannerHtml() + heroHtml + peopleHtml + renderListStyle1(clubs);
+
+  // Global-search person rows → open that club and flash the person.
+  root.querySelectorAll('.gs-row[data-jump-person]').forEach(function(el) {
+    el.addEventListener('click', function() {
+      state.viewing = el.getAttribute('data-jump-club');
+      state.jumpToPerson = el.getAttribute('data-jump-person');
+      showScene();
+    });
+  });
 
   // Hero card → open club page on click of the card, or go straight to manage on button
   var hero = document.getElementById('ownClubHero');
@@ -3239,6 +3341,20 @@ function renderClub() {
   var root = document.getElementById('club-root');
   if (!club) { root.innerHTML = '<div>Club not found</div>'; return; }
   root.innerHTML = renderClubStyle2(club);
+  // Arrived here from a global-search result? Scroll to and flash that person.
+  if (state.jumpToPerson) {
+    var pid = state.jumpToPerson;
+    state.jumpToPerson = null;
+    var rows = root.querySelectorAll('[data-person-id="' + pid + '"]');
+    if (rows.length) {
+      var row = rows[0];
+      setTimeout(function() {
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        row.classList.add('s2-row--flash');
+        setTimeout(function(){ row.classList.remove('s2-row--flash'); }, 2200);
+      }, 60);
+    }
+  }
 }
 
 /* ---- Back-button anchoring (History API) ----
