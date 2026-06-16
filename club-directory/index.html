@@ -6,9 +6,22 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.29 — Club-view polish: stadium/address/contacts/Head; vacancies removed.
+  v0.30 — Department split: Ticketing and Team operations get their own depts.
 
   Changelog:
+  v0.30 — (16/06/2026) Granular department fixes.
+          - Ticketing split out of Commercial into its own 'Ticketing'
+            department (so "every ticket-office manager" stays list-able).
+          - Kit moved out of 'Matchday & safety' into a new 'Team operations'
+            department (kit, equipment, logistics). 'Matchday & safety' is now
+            Safety Officer + Operations Manager only.
+          - Both new depts are OPTIONAL-head (no "missing head" warning on what
+            are usually single-person functions).
+          - functionForTitle gains a 'ticketing' function (ahead of commercial).
+          - migrateSections() remaps legacy seed roles; remapSectionForRole is
+            also applied in clubFromRTDB.unpackRole. Idempotent.
+          (Mailing lists — editable per-person distribution lists — are the next
+           piece; departments stay granular to seed them cleanly.)
   v0.29 — (16/06/2026) Public club-view polish.
           - Stadium shows the sponsor name only when sponsored (stadiumDisplay
             no longer concatenates "name / sponsor"; facts grid drops the
@@ -398,6 +411,14 @@
   var NL_TOOL_KEY = 'ops-club-directory';
 
   window.NL_CHANGELOG = [
+    {
+      date: '16 Jun 2026',
+      version: 'v0.30',
+      items: [
+        'Ticketing is now its own department (split out of Commercial), so you can pull a clean list of every ticket-office contact.',
+        'Kit and equipment moved out of "Matchday & safety" into a new "Team operations" department — "Matchday & safety" is now just the Safety Officer and matchday operations.'
+      ]
+    },
     {
       date: '16 Jun 2026',
       version: 'v0.29',
@@ -2384,7 +2405,8 @@ var SECTIONS = [
   { key: 'Executive',              type: 'hierarchical', subtitle: 'Chief executive and senior management' },
   { key: 'Club secretary',         type: 'hierarchical', subtitle: 'Administration and fixture compliance' },
   { key: 'Finance',                type: 'hierarchical', subtitle: 'Financial reporting and treasury' },
-  { key: 'Commercial',             type: 'hierarchical', subtitle: 'Sponsorship, ticketing, partnerships' },
+  { key: 'Commercial',             type: 'hierarchical', subtitle: 'Sponsorship, partnerships, retail' },
+  { key: 'Ticketing',              type: 'hierarchical', subtitle: 'Ticket office and box office' },
   {
     key: 'Media & marketing',
     type: 'hierarchical',
@@ -2395,8 +2417,9 @@ var SECTIONS = [
       { key: 'programmeEditor', label: 'Programme editor', description: 'Also writes / edits the matchday programme' }
     ]
   },
-  { key: 'Matchday & safety',      type: 'hierarchical', subtitle: 'Safety officer, operations, kit' },
+  { key: 'Matchday & safety',      type: 'hierarchical', subtitle: 'Safety officer and matchday operations' },
   { key: 'Medical',                type: 'hierarchical', subtitle: 'Doctor, physiotherapist, therapist' },
+  { key: 'Team operations',        type: 'hierarchical', subtitle: 'Kit, equipment and team logistics' },
   { key: 'Community',              type: 'hierarchical', subtitle: 'Community engagement and outreach' },
   { key: 'Safeguarding & welfare', type: 'hierarchical', subtitle: 'Named safeguarding lead for children and adults at risk' },
   {
@@ -2421,12 +2444,34 @@ var SECTIONS_BY_KEY = (function(){ var m = {}; SECTIONS.forEach(function(s){ m[s
 
 // Sections where a dept head is REQUIRED (warning if zero heads).
 // Only applies to 'hierarchical' sections — other types don't have a head concept.
-var OPTIONAL_HEAD_SECTIONS = {};  // e.g. { 'Other': true } — none currently optional
+// Ticketing and Team operations are usually single-person functions — a head
+// isn't required (no "missing head" warning), though one can still be marked.
+var OPTIONAL_HEAD_SECTIONS = { 'Ticketing': true, 'Team operations': true };
 var HEAD_SECTIONS = SECTIONS
   .filter(function(s){ return s.type === 'hierarchical'; })
   .map(function(s){ return s.key; })
   .filter(function(k){ return k !== 'Other'; });  // Other is catch-all, no head
 var REQUIRED_HEAD_SECTIONS = HEAD_SECTIONS.filter(function(k){ return !OPTIONAL_HEAD_SECTIONS[k]; });
+
+/* v0.30 section split: Kit used to live under 'Matchday & safety' and Ticketing
+   under 'Commercial'. Both now have their own departments so they stay
+   individually list-able. Remap legacy role.section on the way in (seed + RTDB).
+   Idempotent — anything already in the new section is left alone. */
+function remapSectionForRole(section, title) {
+  var t = (title || '').toLowerCase();
+  if (section === 'Matchday & safety' && (/\bkit\b/.test(t) || /equipment/.test(t))) return 'Team operations';
+  if (section === 'Commercial' && (/ticket/.test(t) || /box office/.test(t))) return 'Ticketing';
+  return section;
+}
+function migrateSections() {
+  (window.CLUBS || []).forEach(function(c) {
+    (c.people || []).forEach(function(p) {
+      (p.roles || []).forEach(function(r) {
+        r.section = remapSectionForRole(r.section, r.title);
+      });
+    });
+  });
+}
 
 /* Per-section free-text title SUGGESTIONS for the person modal's role rows.
    Backed by a <datalist> — free text is always still allowed. Liaison
@@ -2438,10 +2483,12 @@ var TITLE_SUGGESTIONS = {
   'Executive':            ['Chief Executive', 'Managing Director', 'General Manager'],
   'Club secretary':        ['Club Secretary', 'Fixture Secretary', 'Assistant Secretary'],
   'Finance':              ['Finance Director', 'Financial Controller', 'Treasurer'],
-  'Commercial':           ['Commercial Director', 'Commercial Manager', 'Ticketing Manager'],
+  'Commercial':           ['Commercial Director', 'Commercial Manager', 'Partnerships Manager'],
+  'Ticketing':            ['Ticketing Manager', 'Ticket Office Manager', 'Box Office Manager'],
   'Media & marketing':     ['Press Officer', 'Programme Editor', 'Marketing Manager', 'Social Media Manager'],
-  'Matchday & safety':     ['Safety Officer', 'Operations Manager', 'Kit Manager'],
+  'Matchday & safety':     ['Safety Officer', 'Operations Manager', 'Stadium Manager'],
   'Medical':              ['Club Doctor', 'Physiotherapist', 'Sports Therapist'],
+  'Team operations':       ['Kit Manager', 'Equipment Manager'],
   'Community':            ['Community Manager', 'Community Officer'],
   'Safeguarding & welfare':['Safeguarding Lead', 'Welfare Officer'],
   'Other':                ['Volunteer Coordinator']
@@ -5705,6 +5752,7 @@ function buildWorkingData(meta) {
       people: []
     };
   });
+  migrateSections();   // remap legacy Kit/Ticketing roles into their new departments
 }
 
 var CLUBS_META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
@@ -5762,7 +5810,8 @@ function functionForTitle(title, section) {
   if (/fixture/.test(t)) return 'fixtures';
   if (/secretar/.test(t)) return 'secretary';
   if (/financ|account|treasur/.test(t)) return 'finance';
-  if (/commercial|sponsorship|sales/.test(t)) return 'commercial';
+  if (/ticket|box office/.test(t)) return 'ticketing';
+  if (/commercial|sponsorship|sales|partnership|retail/.test(t)) return 'commercial';
   if (/programme/.test(t)) return 'programme';
   if (/website|social/.test(t)) return 'social';
   if (/press|\bmedia\b/.test(t)) return 'press';
@@ -5900,7 +5949,8 @@ function clubFromRTDB(name, val, fallbackWebsite) {
     });
   }
   function unpackRole(r) {
-    var o = { title: r.title || '', section: r.section || '', main: !!r.main, deptHead: !!r.deptHead };
+    var section = remapSectionForRole(r.section || '', r.title || '');
+    var o = { title: r.title || '', section: section, main: !!r.main, deptHead: !!r.deptHead };
     if (r.flags) o.flags = r.flags;
     o['function'] = r['function'] || functionForTitle(r.title, r.section);
     o.contacts = unpackContacts(r.contacts);
