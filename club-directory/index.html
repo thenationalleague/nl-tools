@@ -6,9 +6,25 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.28 — Manage-contacts polish; per-person visibility scrapped.
+  v0.29 — Club-view polish: stadium/address/contacts/Head; vacancies removed.
 
   Changelog:
+  v0.29 — (16/06/2026) Public club-view polish.
+          - Stadium shows the sponsor name only when sponsored (stadiumDisplay
+            no longer concatenates "name / sponsor"; facts grid drops the
+            "currently <sponsor>" sub).
+          - Address promoted to the second fact (after Stadium).
+          - Nickname removed from the hero.
+          - Club contact chips now sit under a "Club correspondence" label so
+            they're not mistaken for a personal address.
+          - "Head" badge restyled from the loud amber pill to a quiet navy
+            outline (.s2-head, "Head of dept").
+          - VACANT posts removed from the directory: the club-view vacant rows
+            and the list-builder vacant entries no longer render. (Underlying
+            club.vacant plumbing is now unreachable and can be stripped later.)
+          - Manage > Club details: "managed in clubs-meta" replaced with a
+            "Spotted an error? Request a correction" note (wired to the existing
+            correctionMailto helper).
   v0.28 — (15/06/2026) Manage-contacts polish + visibility removed.
           - Scrapped per-person visibility entirely (segmented control, list
             badge, lbResults hidden-filter, clubToRTDB/clubFromRTDB fields,
@@ -383,6 +399,17 @@
 
   window.NL_CHANGELOG = [
     {
+      date: '16 Jun 2026',
+      version: 'v0.29',
+      items: [
+        'Club pages now show the sponsored stadium name only (no more showing the old name alongside the sponsor), and the address has moved up to sit just under the stadium.',
+        'Removed the nickname from the club header, and labelled the club’s phone/email/website as "Club correspondence" so they’re not mistaken for someone’s personal details.',
+        'Restyled the "Head of dept" marker into a quieter, tidier badge.',
+        'Removed the leftover "VACANT" posts — only real, named people show now.',
+        'In Manage › Club details, the "managed in clubs-meta" note is now a friendly "Spotted an error? Request a correction" link.'
+      ]
+    },
+    {
       date: '15 Jun 2026',
       version: 'v0.28',
       items: [
@@ -708,15 +735,31 @@
      panels, correction line. People table unchanged below.
      ================================================================ */
   .s2-header__main { min-width: 0; flex: 1; }
-  .cp-nickname { font-size: 12px; color: var(--navy-200); margin-top: 3px; font-style: italic; }
   .cp-stadium { font-size: 14px; font-variation-settings: 'wght' 700; margin-top: 8px; }
-  .cp-contact { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .cp-contact { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .cp-contact__label {
+    flex-basis: 100%; margin-bottom: 1px;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
+    font-variation-settings: 'wght' 800; color: var(--navy-200);
+  }
   .cp-chip {
     display: inline-flex; align-items: center; font-size: 12px;
     padding: 4px 11px; border-radius: 999px;
     background: var(--navy-600); color: var(--white); text-decoration: none;
   }
   a.cp-chip:hover { background: var(--navy-700); text-decoration: none; }
+  /* "Head of dept" marker on the club people table — a quiet navy pill,
+     a calmer treatment than the old amber uppercase badge. */
+  .s2-head {
+    display: inline-block; margin-left: 8px; vertical-align: middle;
+    font-size: 9px; text-transform: uppercase; letter-spacing: 0.08em;
+    font-variation-settings: 'wght' 700;
+    color: var(--navy); background: var(--navy-50);
+    border: 1px solid var(--navy-200); border-radius: 999px;
+    padding: 1px 8px; white-space: nowrap;
+  }
+  .mc-details__note { font-size: 12px; color: var(--text-muted); margin-top: 12px; line-height: 1.5; }
+  .mc-details__note a { color: var(--navy); }
   .cp-facts {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
     gap: 1px; background: var(--border); border-bottom: 1px solid var(--border);
@@ -2490,13 +2533,11 @@ function stadiumOf(name) {
   var m = clubMeta(name);
   return m.stadium_sponsor_name || m.stadium_name || '';
 }
-// Returns "Glanford Park / Attis Arena" when both are set; otherwise just one.
+// Stadium name for display: the current sponsor name when there is one, else
+// the permanent name. We never show the unsponsored name alongside a sponsor.
 function stadiumDisplay(name) {
   var m = clubMeta(name);
-  if (m.stadium_name && m.stadium_sponsor_name && m.stadium_sponsor_name !== m.stadium_name) {
-    return m.stadium_name + ' / ' + m.stadium_sponsor_name;
-  }
-  return m.stadium_name || m.stadium_sponsor_name || '';
+  return m.stadium_sponsor_name || m.stadium_name || '';
 }
 function addressOf(name) { return clubMeta(name).address || ''; }
 function divisionOf(name) { return clubMeta(name).division || ''; }
@@ -2551,11 +2592,10 @@ function renderClubFacts(name) {
       (sub ? '<div class="cp-fact__sub">' + esc(sub) + '</div>' : '') +
     '</div>');
   }
-  if (m.stadium_name && m.stadium_sponsor_name && m.stadium_sponsor_name !== m.stadium_name) {
-    fact('Stadium', m.stadium_name, 'currently ' + m.stadium_sponsor_name);
-  } else {
-    fact('Stadium', m.stadium_name || m.stadium_sponsor_name);
-  }
+  // Sponsor name only when there's a sponsor; never the unsponsored name too.
+  fact('Stadium', m.stadium_sponsor_name || m.stadium_name);
+  // Address sits high — it's one of the first things people look for.
+  fact('Address', m.address, m.postcode || null);
   fact('Capacity',
     m.capacity != null ? Number(m.capacity).toLocaleString('en-GB') : null,
     m.capacity_seated != null ? Number(m.capacity_seated).toLocaleString('en-GB') + ' seated' : null);
@@ -2563,7 +2603,6 @@ function renderClubFacts(name) {
     fact('Pitch', m.pitch.dimensions || m.pitch.type, m.pitch.dimensions ? (m.pitch.type || null) : null);
   }
   fact('Nearest station', Array.isArray(m.station) ? m.station.join(', ') : m.station);
-  fact('Address', m.address, m.postcode || null);
   fact('FA membership', m.fa_membership);
   return facts.length ? '<div class="cp-facts">' + facts.join('') + '</div>' : '';
 }
@@ -2603,13 +2642,9 @@ function renderClubKitAndSponsors(name) {
 
 function renderClubStyle2(club) {
   var bySec = peopleBySection(club);
-  var vacBySec = {};
-  (club.vacant || []).forEach(function(v) {
-    (vacBySec[v.section] = vacBySec[v.section] || []).push(v);
-  });
   var rows = '';
   SECTION_ORDER.forEach(function(s) {
-    if (!bySec[s] && !vacBySec[s]) return;
+    if (!bySec[s]) return;
     var entries = bySec[s] || [];
 
     // Full-width section header row (inner span carries the underline so it only
@@ -2651,19 +2686,6 @@ function renderClubStyle2(club) {
       '</tr>';
     });
 
-    // Vacant assignments: role exists, contact route known, nobody named.
-    (vacBySec[s] || []).forEach(function(v) {
-      var vEmail = (v.contacts || []).filter(function(c) { return c.type === 'email' && c.value; })
-        .map(function(c) { return '<a href="mailto:' + esc(c.value) + '">' + esc(c.value) + '</a>'; }).join('<br>');
-      var vPhone = ((v.contacts || []).filter(function(c) { return c.type === 'phone' && c.value; })[0] || {}).value || '';
-      rows += '<tr>' +
-        '<td class="s2-role">' + esc(v.title) + '</td>' +
-        '<td class="s2-name"><span class="pill pill--status pill--status-warn">vacant</span></td>' +
-        '<td class="s2-phone">' + esc(vPhone) + '</td>' +
-        '<td class="s2-email">' + vEmail + '</td>' +
-      '</tr>';
-    });
-
     // Render individual rows
     regularEntries.forEach(function(e) {
       var p = e.person;
@@ -2671,7 +2693,7 @@ function renderClubStyle2(club) {
       var email = personEmails(p).map(function(em) {
         return '<a href="mailto:' + esc(em) + '">' + esc(em) + '</a>';
       }).join('<br>');
-      var headBadge = e.isHead ? ' <span class="pill pill--marker">Head</span>' : '';
+      var headBadge = e.isHead ? ' <span class="s2-head">Head of dept</span>' : '';
       rows += '<tr>' +
         '<td class="s2-role">' + esc(roleLabel) + '</td>' +
         '<td class="s2-name">' + esc(p.name) + headBadge + '</td>' +
@@ -2709,9 +2731,8 @@ function renderClubStyle2(club) {
       '<img class="s2-crest" src="' + crestUrl(club.name) + '" alt="" onerror="this.onerror=null;this.src=\'' + fallbackCrest() + '\'">' +
       '<div class="s2-header__main">' +
         '<h2>' + esc(club.name) + '<span class="s2-div">' + esc(divFull) + '</span></h2>' +
-        (m.nickname ? '<div class="cp-nickname">' + esc(m.nickname) + '</div>' : '') +
         (stadiumLine ? '<div class="cp-stadium">' + esc(stadiumLine) + '</div>' : '') +
-        (chips ? '<div class="cp-contact">' + chips + '</div>' : '') +
+        (chips ? '<div class="cp-contact"><span class="cp-contact__label">Club correspondence</span>' + chips + '</div>' : '') +
       '</div>' +
     '</div>' +
     renderClubFacts(club.name) +
@@ -3121,26 +3142,6 @@ function lbResults() {
           roleContacts: matchedContacts[section],
           omitted: !!state.lb.omittedKeys[key]
         });
-      });
-    });
-
-    /* Vacant roles: the function exists with a contact route but no named
-       person. Included so a mailout to "all programme editors" reaches the
-       clubs where the post is open. */
-    (c.vacant || []).forEach(function(v) {
-      if (!depts[v.section]) return;
-      var key = c.name + '|<vacant>|' + v.section + '|' + v.title;
-      out.push({
-        key: key,
-        club: c.name,
-        division: divisionOf(c.name),
-        section: v.section,
-        person: null,
-        vacant: true,
-        vacantTitle: v.title,
-        roleTitles: [v.title],
-        roleContacts: v.contacts || [],
-        omitted: !!state.lb.omittedKeys[key]
       });
     });
   });
@@ -4333,11 +4334,13 @@ function renderClubDetails(club) {
     : '<div style="margin-top:14px;text-align:right;"><button class="btn btn--ghost btn--sm" id="mcDetailsEdit">Edit contact details</button></div>';
 
   return '<div class="mc-details">' +
-    readOnlyRow('Address', addressOf(club.name), 'managed in clubs-meta') +
+    readOnlyRow('Address', addressOf(club.name), 'League-managed') +
     editableRow('Phone', 'phone') +
     editableRow('Email', 'email') +
     editableRow('Website', 'website') +
-    readOnlyRow('FA membership', faOf(club.name), 'managed in clubs-meta') +
+    readOnlyRow('FA membership', faOf(club.name), 'League-managed') +
+    '<div class="mc-details__note">Address and FA membership are maintained by the League. Spotted an error? ' +
+      '<a href="' + correctionMailto(club.name) + '">Request a correction</a>.</div>' +
     actions +
   '</div>';
 }
