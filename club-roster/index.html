@@ -1,25 +1,31 @@
 <!DOCTYPE html>
 <!--
-  club-roster/index.html  v1.1
+  club-roster/index.html  v1.2
   Public club ROSTER collection — GUIDED WIZARD (capability-URL pattern).
   Sibling of club-data. Gathers a club's people directory for club-directory.
 
-  v1.1 (16/06/2026) — rebuilt from the v1.0 single page into a stepped wizard,
-  per club feedback ("too much manual work, not enough handholding"):
-    - Step 1 You · Step 2 Shared inboxes (add → pick function → email/phone,
-      ext optional) · Steps 3–N one DEPARTMENT GROUP per screen (paired 2-up:
-      Ownership&board, Exec&secretary, Finance, Commercial&ticketing,
-      Media&community, Matchday&team-ops, Medical&safeguarding, Liaison
-      officers, Anyone else) · final COVERAGE GRID then submit.
-    - A persistent stepper shows done / current / upcoming the whole way.
-    - People entered BY DEPARTMENT, so mailing-list membership DERIVES
-      (section -> list) — no per-person list ticking. The end grid is a pure
-      coverage check (green = someone given, amber = empty -> tap to jump back).
-    - Starts blank (no prefill), localStorage-backed draft, write-once submit.
+  v1.3 (16/06/2026) — stepper completion is now EXPLICIT: each step carries a
+    "Mark this section as done" checkbox (persisted in the draft) and only a
+    step the club has ticked shows a ✓ in the stepper. Visiting/▸jumping no
+    longer implies completion.
+  v1.2 (16/06/2026) — club feedback round 2:
+    - Stepper uses a VISITED model — a step only shows a tick once you've
+      actually landed on it; jumping ahead no longer marks skipped steps done.
+    - Mailing-list membership is now an explicit per-person CHECKBOX (defaults
+      ON for the department's list, untickable) — section no longer ASSUMES
+      membership. Coverage counts only ticked people.
+    - Each person can hold MULTIPLE emails and MULTIPLE phones (+ add another).
+    - "Add a person" is a prominent solid button.
+    - "No one in this area" is NON-destructive: it only appears while the area
+      is blank, and adding anyone removes it — it can't wipe entered data.
+    - Review step shows a full department-by-department roster as well as the
+      coverage grid.
+    - Email + UK-phone validation: bad values are flagged inline and block
+      submit (jumps to the first offending step).
+  v1.1 — first wizard rebuild (see git history).
   Submission shape: { club, yourName, yourEmail, submittedAt,
-    inboxes:{<listKey>:{email,phone,ext}}, people:[{section,roleKey?,name,
-    title,email,phone,ext}] }. Section keys + list keys mirror club-directory
-    so a later (manual, review-gated) import maps straight across.
+    inboxes:{<listKey>:{email,phone,ext}},
+    people:[{section,roleKey?,name,title,emails:[..],phones:[{number,ext}],onList}] }.
   NOT a gated tool (no auth-guard) — out of lint-tools scope by design.
 -->
 <html lang="en-GB">
@@ -68,13 +74,16 @@ firebase.initializeApp({
   .ri-card__sub { font-size: 12.5px; color: var(--text-muted); margin: 0 0 14px; line-height: 1.5; }
 
   input:focus, select:focus { outline: none; border-color: var(--navy); box-shadow: var(--focus-ring); }
-  .ri-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: end; }
+  .ri-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
   @media (max-width: 620px) { .ri-grid { grid-template-columns: 1fr; } }
   label { display:block; font-size: 11px; text-transform: uppercase; letter-spacing:.07em; font-variation-settings:'wght' 800; color: var(--text-muted); margin: 0 0 4px; }
   input[type=text], input[type=email], input[type=tel], select {
     width: 100%; box-sizing: border-box; font-family: var(--font); font-size: 14px;
     border: 1px solid var(--border); border-radius: 6px; padding: 9px 11px; background: var(--white); color: var(--text);
   }
+  input.is-bad { border-color: var(--red); background: var(--red-light); }
+  .ri-err { color: var(--red); font-size: 11.5px; margin: 4px 0 0; display: none; }
+  .ri-err.show { display: block; }
 
   /* Person rows */
   .ri-person { border: 1px solid var(--border); border-radius: 9px; padding: 14px; margin-bottom: 10px; background: var(--off-white); }
@@ -82,26 +91,50 @@ firebase.initializeApp({
   .ri-person__n { font-variation-settings:'wght' 800; color: var(--navy); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
   .ri-del { background: none; border: 1px solid var(--border); color: var(--text-muted); border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; font-family: var(--font); }
   .ri-del:hover { border-color: var(--red); color: var(--red); }
-  .ri-phone { display: grid; grid-template-columns: 1fr 80px; gap: 8px; }
-  .btn-add { background: var(--white); border: 1px dashed var(--navy-300); color: var(--navy); border-radius: 8px; padding: 10px; width: 100%; font-family: var(--font); font-size: 13px; font-variation-settings:'wght' 700; cursor: pointer; }
-  .btn-add:hover { background: var(--navy-50); }
-  .ri-none { display:flex; gap:8px; align-items:center; font-size: 13px; color: var(--text-muted); margin-top: 4px; cursor: pointer; }
-  .ri-none input { width:16px; height:16px; }
-  .ri-empty { font-size: 13px; color: var(--text-muted); font-style: italic; padding: 4px 0 10px; }
+  .ri-multi { margin-bottom: 4px; }
+  .ri-multirow { display: flex; gap: 8px; margin-bottom: 6px; align-items: start; }
+  .ri-multirow .ri-mfield { flex: 1; }
+  .ri-phonerow .ri-ext { width: 78px; flex: none; }
+  .ri-x { background: none; border: none; color: var(--text-muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 6px 4px 0; }
+  .ri-x:hover { color: var(--red); }
+  .ri-addmore { background: none; border: none; color: var(--navy); font-size: 12px; font-variation-settings:'wght' 700; cursor: pointer; padding: 2px 0 8px; font-family: var(--font); }
+  .ri-addmore:hover { text-decoration: underline; }
+  .ri-onlist { display:flex; gap:8px; align-items:center; font-size: 13px; color: var(--text); margin-top: 8px; padding-top: 10px; border-top: 1px dashed var(--border); cursor: pointer; }
+  .ri-onlist input { width:16px; height:16px; }
+  .ri-onlist b { color: var(--navy); }
 
-  /* Coverage grid */
+  .btn-addperson { background: var(--navy); color: #fff; border: none; border-radius: 8px; padding: 12px 16px; width: 100%; font-family: var(--font); font-size: 14px; font-variation-settings:'wght' 800; cursor: pointer; margin-top: 4px; display:flex; align-items:center; justify-content:center; gap: 8px; }
+  .btn-addperson:hover { background: var(--navy-600); }
+  .btn-add { background: var(--white); border: 1px dashed var(--navy-300); color: var(--navy); border-radius: 8px; padding: 11px; width: 100%; font-family: var(--font); font-size: 13.5px; font-variation-settings:'wght' 700; cursor: pointer; }
+  .btn-add:hover { background: var(--navy-50); }
+  .ri-none { display:flex; gap:8px; align-items:center; font-size: 13px; color: var(--text-muted); margin-top: 12px; cursor: pointer; padding: 10px 12px; border: 1px dashed var(--border); border-radius: 8px; }
+  .ri-none input { width:16px; height:16px; }
+  .ri-none.is-set { color: var(--green); border-color: var(--green); background: var(--white); }
+
+  /* Coverage grid + review */
   .ri-cov { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px,1fr)); gap: 8px; }
   .ri-cov__cell { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 13px; cursor: pointer; background: var(--white); }
   .ri-cov__cell.is-ok { border-color: var(--green); }
+  .ri-cov__cell.is-none { border-color: var(--border); background: var(--off-white); }
   .ri-cov__cell.is-gap { border-color: var(--amber); background: var(--amber-light); }
   .ri-cov__list { font-variation-settings:'wght' 700; color: var(--navy); }
   .ri-cov__st { font-size: 11.5px; margin-top: 3px; }
   .ri-cov__cell.is-ok .ri-cov__st { color: var(--green); }
   .ri-cov__cell.is-gap .ri-cov__st { color: var(--amber-deep); }
+  .ri-cov__cell.is-none .ri-cov__st { color: var(--text-muted); }
+  .ri-rev__sec { margin: 0 0 4px; font-size: 13px; color: var(--navy); font-variation-settings:'wght' 800; }
+  .ri-rev__p { font-size: 13px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+  .ri-rev__p:last-child { border-bottom: none; }
+  .ri-rev__p .muted { color: var(--text-muted); }
+  .ri-prob { background: var(--red-light); border: 1px solid var(--red); border-radius: 8px; padding: 12px 14px; font-size: 13px; color: var(--red-deep, var(--red)); margin-bottom: 16px; }
+  .ri-prob b { display:block; margin-bottom: 4px; }
+  .ri-prob a { color: var(--red); cursor: pointer; text-decoration: underline; }
 
   /* Footer nav */
   .ri-nav { position: sticky; bottom: 0; background: var(--white); border-top: 1px solid var(--border); padding: 12px 18px; display: flex; align-items: center; gap: 12px; }
   .ri-nav__spacer { flex: 1; }
+  .ri-donec { display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--text-muted); cursor:pointer; white-space:nowrap; }
+  .ri-donec input { width:16px; height:16px; }
   .ri-saved { font-size: 12px; color: var(--green); opacity: 0; transition: opacity .2s; }
   .ri-saved.show { opacity: 1; }
   .ri-status { font-size: 13px; color: var(--red); }
@@ -122,6 +155,7 @@ firebase.initializeApp({
     <div class="ri-body" id="riStep"></div>
     <div class="ri-nav">
       <button class="btn btn--ghost" id="riBack">← Back</button>
+      <label class="ri-donec" id="riDoneWrap"><input type="checkbox" id="riDone"> Mark this section as done</label>
       <span class="ri-status" id="riStatus"></span>
       <span class="ri-nav__spacer"></span>
       <span class="ri-saved" id="riSaved">Saved ✓</span>
@@ -144,7 +178,7 @@ firebase.initializeApp({
   ];
   var LIST_LABEL = {}; LISTS.forEach(function (l) { LIST_LABEL[l[0]] = l[1]; });
 
-  // Department (section) -> the mailing list it feeds (for derived coverage).
+  // Department (section) -> the mailing list it can feed (drives the per-person tickbox default).
   var SECTION_LIST = {
     'Leadership':'chairs', 'Executive':'ceos', 'Club secretary':'secretaries',
     'Finance':'finance', 'Commercial':'commercial', 'Ticketing':'ticketing',
@@ -189,6 +223,12 @@ firebase.initializeApp({
     { id:'g8', label:'Anyone else',               kind:'depts', sections:['Other'] },
     { id:'review',  label:'Check & submit',       kind:'review' }
   ];
+  // Section -> the step index that edits it (for "jump back" from coverage).
+  function stepForSection(section) {
+    for (var i = 0; i < STEPS.length; i++) { if (STEPS[i].sections && STEPS[i].sections.indexOf(section) !== -1) return i; }
+    return -1;
+  }
+  function stepIndexById(id) { for (var i = 0; i < STEPS.length; i++) if (STEPS[i].id === id) return i; return -1; }
 
   /* ---- State ---- */
   var token = new URLSearchParams(location.search).get('t') || '';
@@ -196,11 +236,21 @@ firebase.initializeApp({
   var db = firebase.database();
   var clubName = null;
   var cur = 0;
-  var data = { yourName:'', yourEmail:'', inboxes:{}, people:[] };
+  var data = { yourName:'', yourEmail:'', inboxes:{}, people:[], emptied:{}, done:{} };
 
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
   function el(id){ return document.getElementById(id); }
   function gate(msg){ el('riGate').textContent = msg; }
+
+  /* ---- Validators ---- */
+  function validEmail(s){ return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(s).trim()); }
+  function validPhone(s){
+    var t = String(s).trim().replace(/[()\s-]/g,'');
+    if (t.indexOf('+44') === 0) t = '0' + t.slice(3);
+    else if (t.indexOf('0044') === 0) t = '0' + t.slice(4);
+    if (!/^0\d+$/.test(t)) return false;          // UK national numbers start 0, digits only
+    return t.length === 10 || t.length === 11;    // 10–11 digits incl. leading 0 (rejects 12-digit etc.)
+  }
 
   if (!/^[A-Za-z0-9_-]{20,}$/.test(token)) { gate('This link isn’t valid. Please use the link the League sent to your club.'); return; }
 
@@ -216,18 +266,19 @@ firebase.initializeApp({
       el('riApp').style.display = '';
       if (prev) { renderLocked(prev); return; }
       var draft = loadDraft();
-      if (draft) data = Object.assign({ yourName:'', yourEmail:'', inboxes:{}, people:[] }, draft);
+      if (draft) data = Object.assign({ yourName:'', yourEmail:'', inboxes:{}, people:[], emptied:{}, done:{} }, draft);
       bindNav();
       renderSteps(); renderStep();
     });
   }).catch(function () { gate('Could not check this link — please try again shortly.'); });
 
-  /* ---- Stepper ---- */
+  /* ---- Stepper (explicit completion — a step only ticks once marked done) ---- */
   function renderSteps() {
     el('riSteps').innerHTML = STEPS.map(function (s, i) {
-      var cls = i < cur ? 'is-done' : (i === cur ? 'is-current' : '');
+      var done = !!data.done[s.id];
+      var cls = (i === cur) ? 'is-current' : (done ? 'is-done' : '');
       return '<div class="ri-step ' + cls + '" data-step="' + i + '">' +
-        (i < cur ? '<span class="ri-step__tick">✓</span>' : '') + esc(s.label) + '</div>';
+        (done && i !== cur ? '<span class="ri-step__tick">✓</span>' : '') + esc(s.label) + '</div>';
     }).join('');
     el('riBar').style.width = Math.round((cur / (STEPS.length - 1)) * 100) + '%';
     var active = el('riSteps').querySelector('.is-current');
@@ -241,6 +292,10 @@ firebase.initializeApp({
     el('riStatus').textContent = '';
     el('riBack').style.visibility = cur === 0 ? 'hidden' : 'visible';
     el('riNext').textContent = (cur === STEPS.length - 1) ? 'Submit to the League' : 'Next →';
+    // The "mark done" toggle shows on every step except the final review.
+    var doneWrap = el('riDoneWrap');
+    doneWrap.style.display = (step.kind === 'review') ? 'none' : 'flex';
+    el('riDone').checked = !!data.done[step.id];
 
     if (step.kind === 'you') {
       host.innerHTML =
@@ -248,7 +303,7 @@ firebase.initializeApp({
         '<p class="ri-stepsub">So we know who to come back to with any questions. Your progress is saved on this device as you go — you can close this and return to the same link later.</p>' +
         '<div class="ri-card"><div class="ri-grid">' +
           '<div><label>Your name</label><input type="text" id="f_yourName" value="' + esc(data.yourName) + '"></div>' +
-          '<div><label>Your email</label><input type="email" id="f_yourEmail" value="' + esc(data.yourEmail) + '"></div>' +
+          '<div><label>Your email</label><input type="email" id="f_yourEmail" value="' + esc(data.yourEmail) + '"><p class="ri-err">Please enter a valid email address.</p></div>' +
         '</div></div>';
     } else if (step.kind === 'inboxes') {
       host.innerHTML =
@@ -263,17 +318,32 @@ firebase.initializeApp({
     } else if (step.kind === 'depts') {
       host.innerHTML =
         '<h2 class="ri-stephead">' + esc(step.label) + '</h2>' +
-        '<p class="ri-stepsub">Add the people at your club in ' + (step.sections.length > 1 ? 'these areas' : 'this area') + '. Leave an area marked “no one” if it doesn’t apply.</p>' +
+        '<p class="ri-stepsub">Add the people at your club in ' + (step.sections.length > 1 ? 'these areas' : 'this area') + '. Each person can have more than one email or phone number, and you choose whether they go on the matching mailing list.</p>' +
         step.sections.map(deptCard).join('');
       step.sections.forEach(wireDeptCard);
     } else if (step.kind === 'liaison') {
       host.innerHTML =
         '<h2 class="ri-stephead">Liaison officers</h2>' +
-        '<p class="ri-stepsub">Named contacts for specific League functions. Fill in whichever apply — DLO, PLO and CSLO are expected at every club; SLO is optional.</p>' +
+        '<p class="ri-stepsub">Named contacts for specific League functions. Fill in whichever apply — DLO, PLO and CSLO are expected at every club; SLO is optional. These automatically go on the matching mailing list.</p>' +
         '<div class="ri-card">' + LIAISON.map(liaisonRow).join('') + '</div>';
+      wireValidation(host);
     } else if (step.kind === 'review') {
       renderReview(host);
     }
+  }
+
+  /* ---- Multi-value field helpers ---- */
+  function emailFieldHtml(v) {
+    return '<div class="ri-multirow"><div class="ri-mfield"><input type="email" data-email value="' + esc(v || '') + '">' +
+      '<p class="ri-err">Not a valid email address.</p></div>' +
+      '<button type="button" class="ri-x" title="Remove">×</button></div>';
+  }
+  function phoneFieldHtml(p) {
+    p = p || {};
+    return '<div class="ri-multirow ri-phonerow"><div class="ri-mfield"><input type="tel" data-phone value="' + esc(p.number || '') + '">' +
+      '<p class="ri-err">Doesn’t look like a UK phone number.</p></div>' +
+      '<div class="ri-ext"><input type="text" maxlength="8" data-ext placeholder="ext" value="' + esc(p.ext || '') + '"></div>' +
+      '<button type="button" class="ri-x" title="Remove">×</button></div>';
   }
 
   /* ---- Inbox row (function select + email + phone + ext) ---- */
@@ -288,44 +358,55 @@ firebase.initializeApp({
           '<option value="">— choose —</option>' +
           LISTS.map(function (l) { return '<option value="' + l[0] + '"' + (l[0] === key ? ' selected' : '') + '>' + esc(l[1]) + '</option>'; }).join('') +
         '</select></div>' +
-        '<div><label>Shared email</label><input type="email" data-ib="email" value="' + esc(ib.email || '') + '"></div>' +
-        '<div class="ri-phone"><div><label>Phone (optional)</label><input type="tel" data-ib="phone" value="' + esc(ib.phone || '') + '"></div>' +
-          '<div><label>Ext (opt.)</label><input type="text" maxlength="8" data-ib="ext" value="' + esc(ib.ext || '') + '"></div></div>' +
+        '<div><label>Shared email</label><input type="email" data-ib="email" value="' + esc(ib.email || '') + '"><p class="ri-err">Not a valid email address.</p></div>' +
+        '<div><label>Phone (optional)</label><input type="tel" data-ib="phone" value="' + esc(ib.phone || '') + '"><p class="ri-err">Doesn’t look like a UK phone number.</p></div>' +
+        '<div><label>Ext (optional)</label><input type="text" maxlength="8" data-ib="ext" value="' + esc(ib.ext || '') + '"></div>' +
       '</div>';
     row.querySelector('.ri-del').addEventListener('click', function () { row.parentNode.removeChild(row); markSaved(); });
+    wireValidation(row);
     return row;
   }
 
-  /* ---- Department card with people rows + "no one" toggle ---- */
+  /* ---- Department card with people rows + non-destructive "no one" toggle ---- */
   function deptCard(section) {
     return '<div class="ri-card" data-section="' + esc(section) + '">' +
       '<h2>' + esc(section) + '</h2>' +
       '<p class="ri-card__sub">' + esc(SECTION_SUB[section] || '') + '</p>' +
       '<div class="ri-people"></div>' +
-      '<button type="button" class="btn-add ri-addperson">+ Add a person</button>' +
-      '<label class="ri-none"><input type="checkbox" class="ri-noneck"> No one in this area at our club</label>' +
+      '<button type="button" class="btn-addperson ri-addperson">+ Add a person</button>' +
+      '<label class="ri-none"><input type="checkbox" class="ri-noneck"> <span>No one in this area at our club</span></label>' +
     '</div>';
   }
   function wireDeptCard(section) {
     var card = el('riStep').querySelector('[data-section="' + cssesc(section) + '"]');
     var holder = card.querySelector('.ri-people');
+    var noneWrap = card.querySelector('.ri-none');
+    var noneck = card.querySelector('.ri-noneck');
     var existing = data.people.filter(function (p) { return p.section === section; });
     existing.forEach(function (p) { holder.appendChild(personRow(section, p)); });
-    var noneck = card.querySelector('.ri-noneck');
+
     function refresh() {
-      var has = holder.children.length > 0;
-      card.querySelector('.ri-addperson').style.display = noneck.checked ? 'none' : '';
-      holder.style.display = noneck.checked ? 'none' : '';
+      var blank = holder.children.length === 0;
+      // "No one" only offered while the area is blank — so it can never wipe entered people.
+      noneWrap.style.display = blank ? 'flex' : 'none';
+      if (!blank && noneck.checked) noneck.checked = false;
+      noneWrap.classList.toggle('is-set', noneck.checked);
     }
-    card.querySelector('.ri-addperson').addEventListener('click', function () { holder.appendChild(personRow(section, {})); markSaved(); });
-    noneck.addEventListener('change', function () {
-      if (noneck.checked) { holder.innerHTML = ''; }
-      refresh(); markSaved();
+    card.querySelector('.ri-addperson').addEventListener('click', function () {
+      noneck.checked = false; data.emptied[section] = false;
+      holder.appendChild(personRow(section, {})); refresh(); markSaved();
     });
-    if (!existing.length) noneck.checked = false;
+    holder.addEventListener('click', function (e) { if (e.target.classList.contains('ri-del')) setTimeout(refresh, 0); });
+    noneck.addEventListener('change', function () { data.emptied[section] = noneck.checked; refresh(); markSaved(); });
+    if (!existing.length && data.emptied[section]) noneck.checked = true;
     refresh();
   }
   function personRow(section, p) {
+    p = p || {};
+    var emails = (p.emails && p.emails.length) ? p.emails : (p.email ? [p.email] : ['']);
+    var phones = (p.phones && p.phones.length) ? p.phones : (p.phone ? [{ number:p.phone, ext:p.ext }] : [{}]);
+    var listKey = SECTION_LIST[section];
+    var onList = (p.onList === undefined) ? true : !!p.onList;
     var row = document.createElement('div');
     row.className = 'ri-person'; row.setAttribute('data-prow','1');
     row.innerHTML =
@@ -334,33 +415,79 @@ firebase.initializeApp({
       '<div class="ri-grid">' +
         '<div><label>Full name</label><input type="text" data-p="name" value="' + esc(p.name || '') + '"></div>' +
         '<div><label>Role / job title</label><input type="text" data-p="title" value="' + esc(p.title || '') + '"></div>' +
-        '<div><label>Email</label><input type="email" data-p="email" value="' + esc(p.email || '') + '"></div>' +
-        '<div class="ri-phone"><div><label>Phone</label><input type="tel" data-p="phone" value="' + esc(p.phone || '') + '"></div>' +
-          '<div><label>Ext (opt.)</label><input type="text" maxlength="8" data-p="ext" value="' + esc(p.ext || '') + '"></div></div>' +
-      '</div>';
-    row.querySelector('.ri-del').addEventListener('click', function () {
-      var card = row.closest('[data-section]'); row.parentNode.removeChild(row); markSaved();
+      '</div>' +
+      '<div style="margin-top:12px;"><label>Email address(es)</label>' +
+        '<div class="ri-multi" data-emails>' + emails.map(emailFieldHtml).join('') + '</div>' +
+        '<button type="button" class="ri-addmore" data-addemail>+ Add another email</button></div>' +
+      '<div style="margin-top:6px;"><label>Phone number(s)</label>' +
+        '<div class="ri-multi" data-phones>' + phones.map(phoneFieldHtml).join('') + '</div>' +
+        '<button type="button" class="ri-addmore" data-addphone>+ Add another phone</button></div>' +
+      (listKey ? '<label class="ri-onlist"><input type="checkbox" data-onlist' + (onList ? ' checked' : '') + '> ' +
+        '<span>Include on the <b>' + esc(LIST_LABEL[listKey]) + '</b> mailing list</span></label>' : '');
+    row.querySelector('.ri-del').addEventListener('click', function () { row.parentNode.removeChild(row); markSaved(); });
+    row.querySelector('[data-addemail]').addEventListener('click', function () {
+      var box = row.querySelector('[data-emails]'); box.insertAdjacentHTML('beforeend', emailFieldHtml(''));
+      wireValidation(box.lastElementChild); markSaved();
     });
+    row.querySelector('[data-addphone]').addEventListener('click', function () {
+      var box = row.querySelector('[data-phones]'); box.insertAdjacentHTML('beforeend', phoneFieldHtml({}));
+      wireValidation(box.lastElementChild); markSaved();
+    });
+    row.addEventListener('click', function (e) {
+      if (!e.target.classList.contains('ri-x')) return;
+      var mr = e.target.closest('.ri-multirow'); var box = mr.parentNode;
+      if (box.children.length > 1) mr.parentNode.removeChild(mr);
+      else { var inp = mr.querySelector('input'); if (inp) inp.value = ''; }
+      markSaved();
+    });
+    wireValidation(row);
     return row;
   }
   function liaisonRow(L) {
     var existing = data.people.filter(function (p) { return p.section === 'Liaison officers' && p.roleKey === L[0]; })[0] || {};
+    var phone = (existing.phones && existing.phones[0]) || { number: existing.phone, ext: existing.ext };
+    var email = (existing.emails && existing.emails[0]) || existing.email || '';
     return '<div class="ri-person" data-role="' + L[0] + '">' +
       '<div class="ri-person__n" style="margin-bottom:10px;">' + esc(L[0]) + ' · ' + esc(L[1]) + '</div>' +
       '<div class="ri-grid">' +
         '<div><label>Name</label><input type="text" data-l="name" value="' + esc(existing.name || '') + '"></div>' +
-        '<div><label>Email</label><input type="email" data-l="email" value="' + esc(existing.email || '') + '"></div>' +
-        '<div class="ri-phone"><div><label>Phone</label><input type="tel" data-l="phone" value="' + esc(existing.phone || '') + '"></div>' +
-          '<div><label>Ext (opt.)</label><input type="text" maxlength="8" data-l="ext" value="' + esc(existing.ext || '') + '"></div></div>' +
+        '<div><label>Email</label><input type="email" data-l="email" value="' + esc(email) + '"><p class="ri-err">Not a valid email address.</p></div>' +
+        '<div><label>Phone</label><input type="tel" data-l="phone" value="' + esc(phone.number || '') + '"><p class="ri-err">Doesn’t look like a UK phone number.</p></div>' +
+        '<div><label>Ext (optional)</label><input type="text" maxlength="8" data-l="ext" value="' + esc(phone.ext || '') + '"></div>' +
       '</div></div>';
   }
 
+  /* ---- Inline validation wiring ---- */
+  function wireValidation(scope) {
+    Array.prototype.forEach.call(scope.querySelectorAll('input[type=email],input[type=tel]'), function (inp) {
+      if (inp.getAttribute('data-ext') !== null) return;
+      inp.addEventListener('blur', function () { checkField(inp); });
+      inp.addEventListener('input', function () { if (inp.classList.contains('is-bad')) checkField(inp); });
+    });
+  }
+  function checkField(inp) {
+    var v = inp.value.trim();
+    var ok = !v || (inp.type === 'email' ? validEmail(v) : validPhone(v));
+    inp.classList.toggle('is-bad', !ok);
+    var err = inp.parentNode.querySelector('.ri-err'); if (err) err.classList.toggle('show', !ok);
+    return ok;
+  }
+
   /* ---- Read current step's DOM into `data` ---- */
+  function readEmails(scope) {
+    return Array.prototype.map.call(scope.querySelectorAll('[data-email]'), function (i) { return i.value.trim(); }).filter(Boolean);
+  }
+  function readPhones(scope) {
+    return Array.prototype.map.call(scope.querySelectorAll('.ri-phonerow'), function (r) {
+      var num = r.querySelector('[data-phone]').value.trim(); var ext = r.querySelector('[data-ext]').value.trim();
+      return num ? { number: num, ext: ext } : null;
+    }).filter(Boolean);
+  }
   function syncStep() {
     var step = STEPS[cur];
     if (step.kind === 'you') {
-      data.yourName = (el('f_yourName') || {}).value ? el('f_yourName').value.trim() : data.yourName;
-      data.yourEmail = (el('f_yourEmail') || {}).value ? el('f_yourEmail').value.trim() : data.yourEmail;
+      if (el('f_yourName')) data.yourName = el('f_yourName').value.trim();
+      if (el('f_yourEmail')) data.yourEmail = el('f_yourEmail').value.trim();
     } else if (step.kind === 'inboxes') {
       data.inboxes = {};
       Array.prototype.forEach.call(el('riStep').querySelectorAll('.ri-person'), function (row) {
@@ -376,8 +503,13 @@ firebase.initializeApp({
         if (!card) return;
         Array.prototype.forEach.call(card.querySelectorAll('[data-prow]'), function (row) {
           var g = function (k) { var n = row.querySelector('[data-p="' + k + '"]'); return n ? n.value.trim() : ''; };
-          var person = { section: section, name: g('name'), title: g('title'), email: g('email'), phone: g('phone'), ext: g('ext') };
-          if (person.name || person.email || person.phone) data.people.push(person);
+          var emails = readEmails(row.querySelector('[data-emails]'));
+          var phones = readPhones(row.querySelector('[data-phones]'));
+          var onListEl = row.querySelector('[data-onlist]');
+          if (g('name') || emails.length || phones.length) {
+            data.people.push({ section: section, name: g('name'), title: g('title'),
+              emails: emails, phones: phones, onList: onListEl ? onListEl.checked : false });
+          }
         });
       });
     } else if (step.kind === 'liaison') {
@@ -387,59 +519,101 @@ firebase.initializeApp({
         var roleKey = row.getAttribute('data-role');
         if (g('name') || g('email') || g('phone')) {
           var label = (LIAISON.filter(function (x) { return x[0] === roleKey; })[0] || [])[1] || roleKey;
-          data.people.push({ section: 'Liaison officers', roleKey: roleKey, title: label, name: g('name'), email: g('email'), phone: g('phone'), ext: g('ext') });
+          data.people.push({ section: 'Liaison officers', roleKey: roleKey, title: label, name: g('name'),
+            emails: g('email') ? [g('email')] : [], phones: g('phone') ? [{ number: g('phone'), ext: g('ext') }] : [], onList: true });
         }
       });
     }
   }
 
+  /* ---- Validation sweep across all data (used at submit) ---- */
+  function findProblems() {
+    var probs = [];
+    if (!validEmail(data.yourEmail)) probs.push({ step: stepIndexById('you'), msg: 'Your email address looks invalid.' });
+    Object.keys(data.inboxes).forEach(function (k) {
+      var ib = data.inboxes[k];
+      if (ib.email && !validEmail(ib.email)) probs.push({ step: stepIndexById('inboxes'), msg: 'Shared “' + (LIST_LABEL[k] || k) + '” email looks invalid.' });
+      if (ib.phone && !validPhone(ib.phone)) probs.push({ step: stepIndexById('inboxes'), msg: 'Shared “' + (LIST_LABEL[k] || k) + '” phone looks invalid.' });
+    });
+    data.people.forEach(function (p) {
+      var st = p.section === 'Liaison officers' ? stepIndexById('liaison') : stepForSection(p.section);
+      var who = (p.name || p.title || p.section);
+      (p.emails || []).forEach(function (e) { if (!validEmail(e)) probs.push({ step: st, msg: who + ': email “' + e + '” looks invalid.' }); });
+      (p.phones || []).forEach(function (ph) { if (ph.number && !validPhone(ph.number)) probs.push({ step: st, msg: who + ': phone “' + ph.number + '” looks invalid.' }); });
+    });
+    return probs;
+  }
+
   /* ---- Coverage / review ---- */
-  function listCovered(key) {
-    // direct section->list
+  function listState(key) {
     var sects = Object.keys(SECTION_LIST).filter(function (s) { return SECTION_LIST[s] === key; });
-    var hit = data.people.some(function (p) { return sects.indexOf(p.section) !== -1; });
-    if (hit) return true;
-    // liaison roles
     var li = LIAISON.filter(function (x) { return x[2] === key; })[0];
-    if (li) return data.people.some(function (p) { return p.section === 'Liaison officers' && p.roleKey === li[0]; });
-    return false;
+    var hasPerson = data.people.some(function (p) {
+      if (li) return p.section === 'Liaison officers' && p.roleKey === li[0];
+      return sects.indexOf(p.section) !== -1 && p.onList;
+    });
+    if (hasPerson) return 'ok';
+    var allEmpty = sects.length && sects.every(function (s) { return data.emptied[s]; });
+    return allEmpty ? 'none' : 'gap';
+  }
+  function contactLine(p) {
+    var bits = [];
+    (p.emails || []).forEach(function (e) { bits.push(e); });
+    (p.phones || []).forEach(function (ph) { bits.push(ph.number + (ph.ext ? ' ext ' + ph.ext : '')); });
+    return bits.length ? bits.join(' · ') : 'no contact details';
   }
   function renderReview(host) {
-    var covered = LISTS.filter(function (l) { return listCovered(l[0]); }).length;
+    var states = LISTS.map(function (l) { return [l, listState(l[0])]; });
+    var covered = states.filter(function (s) { return s[1] === 'ok'; }).length;
     var nPeople = data.people.length, nInbox = Object.keys(data.inboxes).length;
+    var probs = findProblems();
+
+    // department-by-department roster, in step order
+    var secOrder = []; STEPS.forEach(function (s) { if (s.sections) s.sections.forEach(function (x) { secOrder.push(x); }); }); secOrder.push('Liaison officers');
+    var bySec = {}; data.people.forEach(function (p) { (bySec[p.section] = bySec[p.section] || []).push(p); });
+    var rosterHtml = secOrder.filter(function (s) { return bySec[s]; }).map(function (s) {
+      return '<div style="margin-bottom:12px;"><div class="ri-rev__sec">' + esc(s) + '</div>' + bySec[s].map(function (p) {
+        var listKey = p.section === 'Liaison officers' ? null : SECTION_LIST[p.section];
+        var tag = (listKey && p.onList) ? ' <span style="color:var(--green);">· on ' + esc(LIST_LABEL[listKey]) + '</span>' : (listKey && !p.onList ? ' <span class="muted">· not on list</span>' : '');
+        return '<div class="ri-rev__p"><b>' + esc(p.name || '(unnamed)') + '</b>' + (p.title ? ' · ' + esc(p.title) : '') + tag +
+          '<br><span class="muted">' + esc(contactLine(p)) + '</span></div>';
+      }).join('') + '</div>';
+    }).join('') || '<p class="muted" style="color:var(--text-muted);font-size:13px;">No people added yet.</p>';
+
     host.innerHTML =
       '<h2 class="ri-stephead">Check &amp; submit</h2>' +
-      '<p class="ri-stepsub">You’ve given us <b>' + nPeople + '</b> ' + (nPeople === 1 ? 'person' : 'people') + ' and <b>' + nInbox + '</b> shared ' + (nInbox === 1 ? 'address' : 'addresses') + '. The grid shows which mailing lists are covered — tap an amber one to jump back and add someone. Gaps are fine if that role genuinely doesn’t apply.</p>' +
-      '<div class="ri-card"><h2>Mailing-list coverage</h2><p class="ri-card__sub">' + covered + ' of ' + LISTS.length + ' lists have someone.</p>' +
-      '<div class="ri-cov">' + LISTS.map(function (l) {
-        var ok = listCovered(l[0]);
-        return '<div class="ri-cov__cell ' + (ok ? 'is-ok' : 'is-gap') + '" data-coverlist="' + l[0] + '">' +
-          '<div class="ri-cov__list">' + esc(l[1]) + '</div>' +
-          '<div class="ri-cov__st">' + (ok ? '✓ covered' : '— no one yet') + '</div></div>';
-      }).join('') + '</div></div>';
+      '<p class="ri-stepsub">You’ve added <b>' + nPeople + '</b> ' + (nPeople === 1 ? 'person' : 'people') + ' and <b>' + nInbox + '</b> shared ' + (nInbox === 1 ? 'address' : 'addresses') + '. Please check the roster below before submitting.</p>' +
+      (probs.length ? '<div class="ri-prob"><b>' + probs.length + ' thing' + (probs.length > 1 ? 's' : '') + ' to fix before you can submit:</b>' +
+        probs.slice(0, 8).map(function (p) { return '<div>• ' + esc(p.msg) + ' <a data-fix="' + p.step + '">Fix</a></div>'; }).join('') +
+        (probs.length > 8 ? '<div>…and ' + (probs.length - 8) + ' more.</div>' : '') + '</div>' : '') +
+      '<div class="ri-card"><h2>Mailing-list coverage</h2><p class="ri-card__sub">' + covered + ' of ' + LISTS.length + ' lists have someone. Tap an amber one to jump back. Gaps are fine if that role genuinely doesn’t apply.</p>' +
+      '<div class="ri-cov">' + states.map(function (s) {
+        var st = s[1];
+        var label = st === 'ok' ? '✓ covered' : (st === 'none' ? 'marked as none' : '— no one yet');
+        return '<div class="ri-cov__cell is-' + st + '" data-coverlist="' + s[0][0] + '">' +
+          '<div class="ri-cov__list">' + esc(s[0][1]) + '</div><div class="ri-cov__st">' + label + '</div></div>';
+      }).join('') + '</div></div>' +
+      '<div class="ri-card"><h2>Your roster</h2><p class="ri-card__sub">Everyone you’ve entered, by department.</p>' + rosterHtml + '</div>';
+
     Array.prototype.forEach.call(host.querySelectorAll('[data-coverlist]'), function (c) {
       c.addEventListener('click', function () { jumpToList(c.getAttribute('data-coverlist')); });
     });
+    Array.prototype.forEach.call(host.querySelectorAll('[data-fix]'), function (a) {
+      a.addEventListener('click', function () { goTo(parseInt(a.getAttribute('data-fix'), 10)); });
+    });
   }
-  // Jump back to the step that feeds a given list.
   function jumpToList(key) {
     var sects = Object.keys(SECTION_LIST).filter(function (s) { return SECTION_LIST[s] === key; });
     var li = LIAISON.filter(function (x) { return x[2] === key; })[0];
-    var targetSection = sects[0];
-    var idx = -1;
-    if (li) { idx = stepIndexById('liaison'); }
-    else if (targetSection) {
-      for (var i = 0; i < STEPS.length; i++) { if (STEPS[i].sections && STEPS[i].sections.indexOf(targetSection) !== -1) { idx = i; break; } }
-    }
+    var idx = li ? stepIndexById('liaison') : (sects[0] ? stepForSection(sects[0]) : -1);
     if (idx >= 0) goTo(idx);
   }
-  function stepIndexById(id) { for (var i = 0; i < STEPS.length; i++) if (STEPS[i].id === id) return i; return -1; }
 
   /* ---- Navigation ---- */
   function bindNav() {
     el('riNext').addEventListener('click', function () {
       if (cur === STEPS.length - 1) { submit(); return; }
-      if (cur === 0) { syncStep(); if (!data.yourName || !data.yourEmail) { el('riStatus').textContent = 'Please add your name and email.'; return; } }
+      if (cur === 0) { syncStep(); if (!data.yourName || !validEmail(data.yourEmail)) { el('riStatus').textContent = 'Please add your name and a valid email.'; if (el('f_yourEmail')) checkField(el('f_yourEmail')); return; } }
       goTo(cur + 1);
     });
     el('riBack').addEventListener('click', function () { if (cur > 0) goTo(cur - 1); });
@@ -449,6 +623,9 @@ firebase.initializeApp({
     });
     el('riStep').addEventListener('input', markSaved);
     el('riStep').addEventListener('change', markSaved);
+    el('riDone').addEventListener('change', function () {
+      data.done[STEPS[cur].id] = el('riDone').checked; renderSteps(); saveDraft(true);
+    });
   }
   function goTo(idx) { syncStep(); saveDraft(); cur = idx; renderSteps(); renderStep(); window.scrollTo(0, 0); }
 
@@ -460,11 +637,13 @@ firebase.initializeApp({
   }
   function loadDraft() { try { var r = localStorage.getItem(LS_KEY); return r ? JSON.parse(r) : null; } catch (e) { return null; } }
 
-  /* ---- Submit (write-once) ---- */
+  /* ---- Submit (write-once, validated) ---- */
   function submit() {
     syncStep();
-    if (!data.yourName || !data.yourEmail) { goTo(0); el('riStatus').textContent = 'Please add your name and email.'; return; }
+    if (!data.yourName || !validEmail(data.yourEmail)) { goTo(stepIndexById('you')); el('riStatus').textContent = 'Please add your name and a valid email.'; return; }
     if (!data.people.length && !Object.keys(data.inboxes).length) { el('riStatus').textContent = 'Please add at least one person or shared address before submitting.'; return; }
+    var probs = findProblems();
+    if (probs.length) { renderReview(el('riStep')); el('riStatus').textContent = 'Please fix ' + probs.length + ' highlighted ' + (probs.length === 1 ? 'item' : 'items') + '.'; return; }
     var rec = { club: clubName, yourName: data.yourName, yourEmail: data.yourEmail, inboxes: data.inboxes, people: data.people, submittedAt: Date.now() };
     var btn = el('riNext'); btn.disabled = true; btn.textContent = 'Submitting…';
     db.ref('app-data/ops-club-roster/submissions/' + token).set(rec).then(function () {
@@ -480,11 +659,10 @@ firebase.initializeApp({
   function renderLocked(rec) {
     el('riApp').querySelector('.ri-stepper').style.display = 'none';
     el('riApp').querySelector('.ri-nav').style.display = 'none';
-    var bySection = {};
-    (rec.people || []).forEach(function (p) { (bySection[p.section] = bySection[p.section] || []).push(p); });
+    var bySection = {}; var order = [];
+    (rec.people || []).forEach(function (p) { if (!bySection[p.section]) { bySection[p.section] = []; order.push(p.section); } bySection[p.section].push(p); });
     var inboxKeys = Object.keys(rec.inboxes || {});
     var when = rec.submittedAt ? new Date(rec.submittedAt).toLocaleString('en-GB', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
-    function contact(p){ return esc([p.email, p.phone && (p.phone + (p.ext ? ' ext ' + p.ext : ''))].filter(Boolean).join(' · ') || 'no contact details'); }
     el('riStep').innerHTML =
       '<div class="ri-card" style="border-top-color:var(--green);">' +
         '<h2 style="color:var(--green);">✓ Submitted &amp; locked</h2>' +
@@ -492,9 +670,9 @@ firebase.initializeApp({
       (inboxKeys.length ? '<div class="ri-card"><h2>Shared addresses</h2>' + inboxKeys.map(function (k) {
         var ib = rec.inboxes[k]; return '<div style="font-size:13px;padding:3px 0;"><b style="color:var(--navy);">' + esc(LIST_LABEL[k] || k) + '</b> — ' + esc([ib.email, ib.phone].filter(Boolean).join(' · ')) + '</div>';
       }).join('') + '</div>' : '') +
-      Object.keys(bySection).map(function (sec) {
+      order.map(function (sec) {
         return '<div class="ri-card"><h2>' + esc(sec) + '</h2>' + bySection[sec].map(function (p) {
-          return '<div style="padding:4px 0;font-size:13px;"><b>' + esc(p.name || '(unnamed)') + '</b>' + (p.title ? ' · ' + esc(p.title) : '') + '<br><span style="color:var(--text-muted);">' + contact(p) + '</span></div>';
+          return '<div style="padding:4px 0;font-size:13px;"><b>' + esc(p.name || '(unnamed)') + '</b>' + (p.title ? ' · ' + esc(p.title) : '') + '<br><span style="color:var(--text-muted);">' + esc(contactLine(p)) + '</span></div>';
         }).join('') + '</div>';
       }).join('');
   }
