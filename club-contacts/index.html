@@ -1,9 +1,15 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/index.html  v2.8
+  club-contacts/index.html  v2.9
   Public club DETAILS collection — GUIDED WIZARD (capability-URL pattern).
   Gathers a club's information AND people directory for club-directory.
   (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
+  THIS IS THE UNIFIED FORM — supersedes the old club-data tool.
+
+  v2.9 (17/06/2026) — cleanup: removed the retired mailing-list machinery now that
+    Lead contacts (v2.8) is the model — LISTS/LIST_LABEL/SECTION_LIST/LIAISON and
+    the derive*/inboxLists/liaisonRow helpers are gone; normalizePerson no longer
+    computes legacy list membership. No behaviour change.
 
   v2.8 (17/06/2026) — contacts restructure (feedback round 18 #3/#5/#6/#7):
     - #3 People are now ONE PAGE PER AREA (Chair & deputies, Directors, Executive,
@@ -305,22 +311,6 @@ firebase.initializeApp({
   'use strict';
 
   /* ---- Canon mirrored from club-directory (keep in sync) ---- */
-  var LISTS = [
-    ['chairs','Chairs'], ['ceos','Chief executives'], ['secretaries','Club secretaries'],
-    ['finance','Finance leads'], ['commercial','Commercial leads'], ['ticketing','Ticketing managers'],
-    ['media','Media officers'], ['safety','Safety officers'], ['medical','Medical leads'],
-    ['safeguarding','Safeguarding leads'], ['community','Community leads'],
-    ['dlo','DLO'], ['plo','PLO'], ['cslo','CSLO']
-  ];
-  var LIST_LABEL = {}; LISTS.forEach(function (l) { LIST_LABEL[l[0]] = l[1]; });
-
-  // Department (section) -> the mailing list it feeds (used to derive list membership).
-  var SECTION_LIST = {
-    'Leadership':'chairs', 'Executive':'ceos', 'Club secretary':'secretaries',
-    'Finance':'finance', 'Commercial':'commercial', 'Ticketing':'ticketing',
-    'Media & marketing':'media', 'Matchday & safety':'safety', 'Medical':'medical',
-    'Community':'community', 'Safeguarding & welfare':'safeguarding'
-  };
   var SECTION_SUB = {
     'Leadership':'Chair, vice chair, president, owner',
     'Directors':'Board directors',
@@ -338,13 +328,6 @@ firebase.initializeApp({
     'Safeguarding & welfare':'Named safeguarding lead for children and adults at risk',
     'Other':"Anyone who doesn't fit the areas above"
   };
-  var LIAISON = [
-    ['DLO','Disability Liaison Officer','dlo'],
-    ['PLO','Police Liaison Officer','plo'],
-    ['CSLO','Competition Sponsorship Liaison Officer','cslo'],
-    ['SLO','Supporter Liaison Officer', null]
-  ];
-  function liaisonListFor(roleKey) { var x = LIAISON.filter(function (y) { return y[0] === roleKey; })[0]; return x ? x[2] : null; }
 
   // Lead contacts (v2.8) — the single nominated point of contact per League area.
   // Replaces the old "mailing lists" step; absorbs liaison officers (DLO/SLO/PLO).
@@ -415,21 +398,6 @@ firebase.initializeApp({
   function findPerson(id){ return data.people.filter(function (p) { return p.id === id; })[0]; }
   function hasRole(p, section){ return (p.roles || []).some(function (r) { return r.section === section; }); }
   function roleFor(p, section){ return (p.roles || []).filter(function (r) { return r.section === section; })[0]; }
-  function isLiaison(p){ return (p.roles || []).some(function (r) { return r.section === 'Liaison officers'; }); }
-  function derivedLists(p){
-    var out = [];
-    (p.roles || []).forEach(function (r) {
-      var key = r.section === 'Liaison officers' ? liaisonListFor(r.roleKey) : SECTION_LIST[r.section];
-      if (key && out.indexOf(key) === -1) out.push(key);
-    });
-    return out;
-  }
-  function personLists(p){ return (p.lists !== undefined) ? p.lists : derivedLists(p); }
-  // Shared (departmental) addresses can sit on mailing lists too. A real-list-keyed
-  // inbox (e.g. 'commercial') belongs on that list by default; custom 'other-*' ones don't.
-  function derivedInboxLists(k){ return LIST_LABEL[k] ? [k] : []; }
-  function inboxLists(k){ var ib = data.inboxes[k]; return (ib && ib.lists !== undefined) ? ib.lists : derivedInboxLists(k); }
-  function inboxLabel(k){ var ib = data.inboxes[k]; return (ib && ib.label) || LIST_LABEL[k] || k; }
   // Force closed-select text size at inline !important (beats UA form-control styling).
   function pinSelect(s){ s.style.setProperty('font-size', '14px', 'important'); s.style.setProperty('line-height', '1.2', 'important'); }
   function rolesText(p){ return (p.roles || []).map(function (r) { return r.section + (r.title ? ' (' + r.title + ')' : ''); }).join(', '); }
@@ -439,17 +407,11 @@ firebase.initializeApp({
     (p.phones || []).forEach(function (ph) { bits.push(ph.number + (ph.ext ? ' ext ' + ph.ext : '')); });
     return bits.length ? bits.join(' · ') : 'no contact details';
   }
-  // Convert any legacy v1.x person (flat section/onList/alsoLists) into the v2 roles shape.
+  // Convert any legacy v1.x person (flat section/title) into the v2 roles shape.
   function normalizePerson(p){
     if (p.roles) { if (!p.id) p.id = uid(); return p; }
     var role = { section: p.section, title: p.title || '' };
-    if (p.roleKey) role.roleKey = p.roleKey;
-    var np = { id: uid(), name: p.name || '', emails: p.emails || [], phones: p.phones || [], roles: [role] };
-    var lists = [];
-    if (p.onList !== false) { var hk = p.section === 'Liaison officers' ? liaisonListFor(p.roleKey) : SECTION_LIST[p.section]; if (hk) lists.push(hk); }
-    (p.alsoLists || []).forEach(function (k) { if (lists.indexOf(k) === -1) lists.push(k); });
-    if (lists.length) np.lists = lists;
-    return np;
+    return { id: uid(), name: p.name || '', emails: p.emails || [], phones: p.phones || [], roles: [role] };
   }
 
   /* ---- Club information (merged from the old club-data tool; pre-fills from
@@ -718,7 +680,7 @@ firebase.initializeApp({
 
     people.forEach(function (p) { holder.appendChild(editing[p.id] ? personEditCard(p, section) : personSummaryRow(p, section)); });
 
-    var candidates = data.people.filter(function (p) { return !isLiaison(p) && !hasRole(p, section) && p.name; });
+    var candidates = data.people.filter(function (p) { return !hasRole(p, section) && p.name; });
     addWrap.innerHTML = '<button type="button" class="btn-addperson" data-addnew>+ Add a person</button>' +
       (candidates.length ? '<div class="ri-pick"><span class="ri-pick__lbl">…or add someone already listed (keeps them as one record):</span>' +
         candidates.map(function (p) { return '<button type="button" class="ri-pickbtn" data-pick="' + p.id + '">' + esc(p.name) + ' ＋</button>'; }).join('') + '</div>' : '');
@@ -835,19 +797,6 @@ firebase.initializeApp({
       '<div class="ri-sum__act"><button type="button" data-edit data-pid="' + p.id + '">Edit</button>' +
         '<button type="button" data-remove data-pid="' + p.id + '">Remove</button></div>';
     return div;
-  }
-  function liaisonRow(L) {
-    var existing = data.people.filter(function (p) { return isLiaison(p) && (p.roles[0].roleKey === L[0]); })[0] || {};
-    var phone = (existing.phones && existing.phones[0]) || {};
-    var email = (existing.emails && existing.emails[0]) || '';
-    return '<div class="ri-person" data-role="' + L[0] + '">' +
-      '<div class="ri-person__n" style="margin-bottom:10px;">' + esc(L[0]) + ' · ' + esc(L[1]) + '</div>' +
-      '<div class="ri-grid">' +
-        '<div><label>Name</label><input type="text" data-l="name" value="' + esc(existing.name || '') + '"></div>' +
-        '<div><label>Email</label><input type="email" data-l="email" value="' + esc(email) + '"><p class="ri-err">Not a valid email address.</p></div>' +
-        '<div><label>Phone</label><input type="tel" data-l="phone" value="' + esc(phone.number || '') + '"><p class="ri-err">Doesn’t look like a UK phone number.</p></div>' +
-        '<div><label>Ext (optional)</label><input type="text" maxlength="8" data-l="ext" value="' + esc(phone.ext || '') + '"></div>' +
-      '</div></div>';
   }
 
   /* ---- Lead contacts step (#7) — nominate >=1 named contact per League area;
