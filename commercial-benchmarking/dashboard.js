@@ -17,7 +17,7 @@ window.CBDash = (function () {
   function mount(AGG, clubs, opts) {
     opts = opts || {};
     var OWN = clubs[0];
-    var state = { scope: 'div', view: 'bars', cardView: {} };
+    var state = { scope: 'div', view: 'graph', cardView: {} };
     var $ = function (id) { return document.getElementById(id); };
 
     function fmt(v, u) {
@@ -178,6 +178,7 @@ window.CBDash = (function () {
     function renderAll() { renderHeader(); renderChips(); render(); }
 
     if (opts.staff) {
+      var updateShare = function () {};
       var staffCtl = $('staffCtl');
       if (staffCtl) {
         staffCtl.style.display = '';
@@ -188,10 +189,33 @@ window.CBDash = (function () {
         });
         html += '</optgroup>';
         sel.innerHTML = html;
-        sel.addEventListener('change', function () { OWN = clubs[+this.value]; renderAll(); });
+        sel.addEventListener('change', function () { OWN = clubs[+this.value]; renderAll(); updateShare(); });
+
+        // Staff: show the selected club's no-login capability link to copy & send.
+        if (opts.tokenByClub) {
+          var ctl = document.createElement('div');
+          ctl.className = 'cb-ctl'; ctl.id = 'cb-shareCtl';
+          ctl.innerHTML = '<span class="lbl">Club link</span>' +
+            '<input id="cb-shareUrl" class="cb-shareurl" readonly>' +
+            '<button id="cb-shareCopy" class="cb-copy" type="button">Copy</button>';
+          staffCtl.parentNode.insertBefore(ctl, staffCtl.nextSibling);
+          var urlEl = $('cb-shareUrl'), copyBtn = $('cb-shareCopy');
+          updateShare = function () {
+            var tok = opts.tokenByClub[OWN.club];
+            urlEl.value = tok ? new URL('link.html?t=' + tok, location.href).href : 'No link for this club';
+            copyBtn.disabled = !tok;
+          };
+          copyBtn.addEventListener('click', function () {
+            if (copyBtn.disabled) return;
+            var done = function () { copyBtn.textContent = 'Copied'; setTimeout(function () { copyBtn.textContent = 'Copy'; }, 1500); };
+            if (navigator.clipboard) navigator.clipboard.writeText(urlEl.value).then(done, function () { urlEl.select(); document.execCommand('copy'); done(); });
+            else { urlEl.select(); document.execCommand('copy'); done(); }
+          });
+          updateShare();
+        }
       }
       var pt = $('privacyTxt');
-      if (pt) pt.innerHTML = '<b>NL staff view.</b> You can see every club’s named figures here. Clubs only ever see their own data plus anonymous benchmarks.';
+      if (pt) pt.innerHTML = '<b>NL staff view.</b> You can see every club’s named figures here, and copy a club’s private no-login link to send them. Clubs only ever see their own data plus anonymous benchmarks.';
     }
 
     $('scopeSeg').addEventListener('click', function (e) {
