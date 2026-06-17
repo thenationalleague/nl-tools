@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/admin.html  v1.3 — superadmin console for the club contacts collection.
+  club-contacts/admin.html  v1.6 — superadmin console for the club contacts collection.
   (Renamed from "club-roster" in v1.3 — toolKey/RTDB path now ops-club-contacts.)
+  Submissions use the v2 people shape: people[].roles[] + people[].lists[].
   Sibling of club-data/admin.html. Generates one capability token per current
   club, writes them to RTDB invites, renders ready-to-paste email blurbs
   with each club's private link, and lists submissions as they arrive with a
@@ -35,11 +36,11 @@
   <script>
     window.NL_TOOL = { title: 'Club Contacts Admin', toolKey: 'ops-club-contacts' };
     var NL_TOOL_KEY = 'ops-club-contacts';
-    window.NL_CHANGELOG = [{ date: '17 Jun 2026', version: 'v1.5', items: [
+    window.NL_CHANGELOG = [{ date: '17 Jun 2026', version: 'v1.6', items: [
+      'Roles model: each person is one record that can hold several roles; the review modal now lists each person with all their roles and finalised mailing lists.',
       'Renamed from "Club roster" to "Club contacts" (slug, toolKey and RTDB path now ops-club-contacts).',
-      'People can hold several roles: the review modal now shows each person’s extra "also on" mailing lists.',
-      'Shared inboxes can use a custom "Other" function — its typed name now shows verbatim in the review modal.',
-      'Generate private contacts-form links for every club, copy ready-made email text, and review submissions as they arrive — people grouped by department, with multiple emails/phones, mailing-list opt-in, shared inboxes and Copy-as-JSON for import.' ] }];
+      'Shared inboxes can use a custom "Other" function — its typed name shows verbatim in the review modal.',
+      'Generate private contacts-form links for every club, copy ready-made email text, and review submissions as they arrive, with Copy-as-JSON for import.' ] }];
     window.nlAuthReady = function (u) { window.NL = window.NL || {}; NL.session = u;
       if (window.TOOL && window.TOOL.boot) window.TOOL.boot(u); else window._toolDeferredSession = u; };
   </script>
@@ -142,21 +143,21 @@
       return '<dt>' + esc(ib.label || LIST_LABEL[k] || k) + '</dt><dd>' + esc([ib.email, ib.phone && (ib.phone + (ib.ext ? ' ext ' + ib.ext : ''))].filter(Boolean).join(' · ')) + '</dd>';
     }).join('') + '</dl>' : '<p style="color:var(--text-muted);font-size:13px;margin:0;">None given.</p>';
 
-    var bySection = {}; var order = [];
-    (sub.people || []).forEach(function (p) { var s = p.section || 'Other'; if (!bySection[s]) { bySection[s] = []; order.push(s); } bySection[s].push(p); });
     function contactLine(p) {
       var bits = [];
       (p.emails && p.emails.length ? p.emails : (p.email ? [p.email] : [])).forEach(function (e) { bits.push(e); });
       (p.phones && p.phones.length ? p.phones : (p.phone ? [{ number:p.phone, ext:p.ext }] : [])).forEach(function (ph) { bits.push(ph.number + (ph.ext ? ' ext ' + ph.ext : '')); });
       return bits.length ? bits.join(' · ') : 'no contact details';
     }
-    var peopleHtml = order.length ? order.map(function (sec) {
-      return '<div class="cra-person__l" style="margin:10px 0 4px;">' + esc(sec) + '</div>' + bySection[sec].map(function (p) {
-        var listTag = (p.onList === false) ? ' <span style="color:var(--text-muted);font-variation-settings:\'wght\' 400;">(not on mailing list)</span>' : '';
-        var also = (p.alsoLists && p.alsoLists.length) ? '<div class="cra-person__l">also on: ' + esc(p.alsoLists.map(function (k) { return LIST_LABEL[k] || k; }).join(', ')) + '</div>' : '';
-        return '<div class="cra-person"><div class="cra-person__n">' + esc(p.name || '(unnamed)') + (p.title ? ' · ' + esc(p.title) : '') + listTag + '</div>' +
-          '<div class="cra-person__c">' + esc(contactLine(p)) + '</div>' + also + '</div>';
-      }).join('');
+    function rolesOf(p) {  // v2 roles[] with a fallback to legacy flat section/title
+      if (p.roles && p.roles.length) return p.roles.map(function (r) { return r.section + (r.title ? ' (' + r.title + ')' : ''); }).join(', ');
+      return (p.section || '') + (p.title ? ' (' + p.title + ')' : '');
+    }
+    var peopleHtml = (sub.people || []).length ? (sub.people || []).map(function (p) {
+      var lists = (p.lists && p.lists.length) ? p.lists.map(function (k) { return LIST_LABEL[k] || k; }).join(', ') : '';
+      return '<div class="cra-person"><div class="cra-person__n">' + esc(p.name || '(unnamed)') + ' <span style="color:var(--text-muted);font-variation-settings:\'wght\' 400;">— ' + esc(rolesOf(p)) + '</span></div>' +
+        '<div class="cra-person__c">' + esc(contactLine(p)) + '</div>' +
+        (lists ? '<div class="cra-person__l">mailing lists: ' + esc(lists) + '</div>' : '<div class="cra-person__l" style="color:var(--text-muted);">no mailing lists</div>') + '</div>';
     }).join('') : '<p style="color:var(--text-muted);font-size:13px;margin:0;">None given.</p>';
 
     document.getElementById('craModalB').innerHTML =
