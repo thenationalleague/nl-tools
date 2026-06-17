@@ -1,9 +1,19 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/index.html  v2.6
-  Public club CONTACTS collection — GUIDED WIZARD (capability-URL pattern).
-  Sibling of club-data. Gathers a club's people directory for club-directory.
+  club-contacts/index.html  v2.7
+  Public club DETAILS collection — GUIDED WIZARD (capability-URL pattern).
+  Gathers a club's information AND people directory for club-directory.
   (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
+
+  v2.7 (17/06/2026) — merge step 1 of the unified form (feedback round 18 #1):
+    - Absorbs the old club-data "Club information" capture as a new step right
+      after "You": stadium, address, capacity, pitch, club contact, sponsorship.
+      Pre-fills from the public clubs-meta.json by club name (same mapping +
+      address split club-data used). Submission now carries `info`. Shown in
+      review, the locked view and admin. club-data is superseded by this form
+      (League issues one ops-club-contacts link per club).
+    - Next: granular people pages (#3), Lead contacts replacing mailing lists
+      (#7), department inboxes (#5), liaison step removed (#6).
 
   v2.6 (17/06/2026) — feedback round 17 (navigation + polish; precursor to the
         club-data merge):
@@ -79,7 +89,7 @@
 <html lang="en-GB">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Club contacts — The National League</title>
+<title>Club details — The National League</title>
 <link rel="stylesheet" href="/tools/system/nl-brand.css?v=20">
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
@@ -126,10 +136,17 @@ firebase.initializeApp({
   .ri-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
   @media (max-width: 620px) { .ri-grid { grid-template-columns: 1fr; } }
   label { display:block; font-size: 11px; text-transform: uppercase; letter-spacing:.07em; font-variation-settings:'wght' 800; color: var(--text-muted); margin: 0 0 4px; }
-  input[type=text], input[type=email], input[type=tel], select {
+  input[type=text], input[type=email], input[type=tel], input[type=number], textarea, select {
     width: 100%; box-sizing: border-box; font-family: var(--font); font-size: 14px; line-height: 1.3;
     border: 1px solid var(--border); border-radius: 6px; padding: 9px 11px; background: var(--white); color: var(--text);
   }
+  textarea { min-height: 70px; resize: vertical; }
+  input[type=number] { -moz-appearance: textfield; appearance: textfield; }
+  input[type=number]::-webkit-outer-spin-button, input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .ri-grid .full { grid-column: 1 / -1; }
+  /* No-sponsor checkbox (club info) — sentence case, not the all-caps label style */
+  .ri-check { display: flex; gap: 8px; align-items: center; font-size: 13px; margin-top: 8px; text-transform: none; letter-spacing: normal; font-variation-settings: 'wght' 400; color: var(--text); }
+  .ri-check input { width: 16px; height: 16px; }
   /* Select matches the text inputs exactly; only the native OS arrow is swapped
      for a branded NL chevron. (Pinned size so it never picks up the body clamp.) */
   select {
@@ -242,7 +259,7 @@ firebase.initializeApp({
   <div id="riApp" style="display:none;">
     <div class="ri-hero">
       <img class="ri-hero__crest" id="riCrest" alt="" src="" onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png';">
-      <div class="ri-hero__t"><div class="kicker">The National League · 2026/27 · Club contacts</div><h1 id="riClub">Club contacts</h1></div>
+      <div class="ri-hero__t"><div class="kicker">The National League · 2026/27 · Club details</div><h1 id="riClub">Club details</h1></div>
     </div>
     <div class="ri-stepper">
       <div class="ri-stepbar"><div class="ri-stepbar__fill" id="riBar"></div></div>
@@ -309,6 +326,7 @@ firebase.initializeApp({
 
   var STEPS = [
     { id:'you',     label:'You',                 kind:'you' },
+    { id:'info',    label:'Club information',     kind:'info' },
     { id:'inboxes', label:'Shared inboxes',       kind:'inboxes' },
     { id:'g1', label:'Ownership & board',         kind:'depts', sections:['Leadership','Directors'] },
     { id:'g2', label:'Executive & secretary',     kind:'depts', sections:['Executive','Club secretary'] },
@@ -337,7 +355,7 @@ firebase.initializeApp({
   var editing = {};   // person id -> true while its card is open for editing
   var unlockedShared = {};  // person id -> true while a linked person's shared details (name/email/phone) are being edited
   var DEBUG = /[?&]debug/.test(location.search);   // ?debug=1 surfaces the select's computed font-size
-  var data = { yourName:'', yourEmail:'', inboxes:{}, people:[], emptied:{} };
+  var data = { yourName:'', yourEmail:'', info:{}, inboxes:{}, people:[], emptied:{} };
 
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
   function el(id){ return document.getElementById(id); }
@@ -385,6 +403,60 @@ firebase.initializeApp({
     return np;
   }
 
+  /* ---- Club information (merged from the old club-data tool; pre-fills from
+     the public clubs-meta.json by club name, exactly as club-data did) ---- */
+  var META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
+  var INFO_GROUPS = [
+    ['Stadium', [
+      ['stadium','Official / legal stadium name (without sponsor)','text',true],
+      ['stadiumSponsor','Current sponsored stadium name','text',true],
+      ['addr1','Address line 1','text'], ['addr2','Address line 2','text'],
+      ['town','Town','text'], ['county','County','text'],
+      ['postcode','Postcode','text'], ['station','Closest National Rail / TfL / metro station','text'],
+      ['capacity','Stadium capacity','number'], ['seated','…of which, seated','number'],
+      ['pitchDims','Pitch dimensions (e.g. 112y x 72y)','text'], ['pitchType','Pitch type (e.g. Grass, Artificial – FIFA Quality Pro)','text']
+    ]],
+    ['Club contact', [
+      ['website','Club website','text'], ['mainEmail','Main contact email (e.g. info@)','email'],
+      ['phone','Main switchboard telephone','tel'], ['countyFA','County FA membership (e.g. Surrey FA)','text']
+    ]],
+    ['Sponsorship', [
+      ['spClub','Main club sponsor','text'], ['spFront','Front-of-shirt sponsor','text'],
+      ['spBack','Back-of-shirt sponsor','text'], ['spSleeve','Left-sleeve sponsor','text'],
+      ['spShorts','Back-of-shorts sponsor','text'], ['spExtra','Any additional kit sponsors (e.g. goalkeeper-specific, away shirt only)','textarea',true]
+    ]]
+  ];
+  var INFO_KEYS = []; INFO_GROUPS.forEach(function (g) { g[1].forEach(function (f) { INFO_KEYS.push(f[0]); }); });
+  // Best-effort split of a one-line address into 1/2/town/county (editable, so rough is fine).
+  function splitAddress(addr) {
+    var out = { addr1:'', addr2:'', town:'', county:'', postcode:'' };
+    if (!addr) return out;
+    var parts = addr.split(',').map(function (p) { return p.trim(); }).filter(Boolean);
+    var pc = /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i;
+    if (parts.length && pc.test(parts[parts.length - 1])) out.postcode = parts.pop();
+    if (!parts.length) return out;
+    if (parts.length === 1) { out.addr1 = parts[0]; return out; }
+    out.addr1 = parts.shift(); out.county = parts.pop();
+    if (parts.length) out.town = parts.pop();
+    out.addr2 = parts.join(', ');
+    return out;
+  }
+  function buildInfoFromMeta(c) {
+    var info = {}, ap = splitAddress(c.address || '');
+    info.stadium = c.stadium_name || ''; info.stadiumSponsor = c.stadium_sponsor_name || '';
+    info.noSponsor = !!(c.stadium_name && !c.stadium_sponsor_name);
+    info.addr1 = ap.addr1; info.addr2 = ap.addr2; info.town = ap.town; info.county = ap.county;
+    info.postcode = c.postcode || ap.postcode || '';
+    info.station = Array.isArray(c.station) ? c.station.join(', ') : (c.station || '');
+    info.capacity = c.capacity != null ? String(c.capacity) : '';
+    info.seated = c.capacity_seated != null ? String(c.capacity_seated) : '';
+    if (c.pitch) { info.pitchDims = c.pitch.dimensions || ''; info.pitchType = c.pitch.type || ''; }
+    info.website = c.domain ? 'www.' + c.domain : '';
+    info.countyFA = (c.fa_membership || '').replace(/^Member of the\s*/i, '');
+    if (c.sponsors) { info.spClub = c.sponsors.main_club || ''; info.spFront = c.sponsors.main_shirt || ''; info.spSleeve = c.sponsors.left_sleeve || ''; }
+    return info;
+  }
+
   /* ---- Validators ---- */
   function validEmail(s){ return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(s).trim()); }
   function validPhone(s){
@@ -401,15 +473,23 @@ firebase.initializeApp({
     var inv = snap.val();
     if (!inv || !inv.club) { gate('This link isn’t valid or has expired. Please contact the League.'); return; }
     clubName = inv.club;
-    return db.ref('app-data/ops-club-contacts/submissions/' + token).once('value').then(function (s) {
-      var prev = s.val();
+    return Promise.all([
+      db.ref('app-data/ops-club-contacts/submissions/' + token).once('value'),
+      fetch(META_URL + '?cb=' + Date.now()).then(function (r) { return r.json(); }).catch(function () { return null; })
+    ]).then(function (res) {
+      var prev = res[0].val(), meta = res[1];
       el('riClub').textContent = clubName;
       el('riCrest').src = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/' + encodeURIComponent(clubName) + '.png';
       el('riGate').style.display = 'none';
       el('riApp').style.display = '';
       if (prev) { renderLocked(prev); return; }
       var draft = loadDraft();
-      if (draft) { data = Object.assign({ yourName:'', yourEmail:'', inboxes:{}, people:[], emptied:{} }, draft); data.people = (data.people || []).map(normalizePerson); }
+      if (draft) { data = Object.assign({ yourName:'', yourEmail:'', info:{}, inboxes:{}, people:[], emptied:{} }, draft); data.people = (data.people || []).map(normalizePerson); }
+      // Pre-fill club information from clubs-meta when we don't already have it (fresh, or a draft from before info existed).
+      if (!data.info || !Object.keys(data.info).length) {
+        var c = meta && (meta.clubs || []).filter(function (x) { return x.name === clubName; })[0];
+        data.info = c ? buildInfoFromMeta(c) : {};
+      }
       bindNav();
       renderSteps(); renderStep();
     });
@@ -418,6 +498,7 @@ firebase.initializeApp({
   /* ---- Stepper (completion DERIVED from data) ---- */
   function isStepDone(step) {
     if (step.kind === 'you') return !!data.yourName && validEmail(data.yourEmail);
+    if (step.kind === 'info') return !!(data.info && (data.info.stadium || data.info.capacity || data.info.mainEmail));
     if (step.kind === 'inboxes') return Object.keys(data.inboxes).length > 0;
     if (step.kind === 'liaison') return data.people.some(isLiaison);
     if (step.kind === 'depts') return step.sections.every(function (s) {
@@ -453,6 +534,8 @@ firebase.initializeApp({
           '<div><label>Your name</label><input type="text" id="f_yourName" value="' + esc(data.yourName) + '"></div>' +
           '<div><label>Your email</label><input type="email" id="f_yourEmail" value="' + esc(data.yourEmail) + '"><p class="ri-err">Please enter a valid email address.</p></div>' +
         '</div></div>';
+    } else if (step.kind === 'info') {
+      renderInfoStep(host);
     } else if (step.kind === 'inboxes') {
       host.innerHTML =
         '<h2 class="ri-stephead">Shared department email addresses</h2>' +
@@ -480,6 +563,31 @@ firebase.initializeApp({
     } else if (step.kind === 'review') {
       renderReview(host);
     }
+  }
+
+  /* ---- Club information step ---- */
+  function renderInfoStep(host) {
+    var info = data.info || {};
+    host.innerHTML =
+      '<h2 class="ri-stephead">Club information</h2>' +
+      '<p class="ri-stepsub">Pre-filled with what the League currently holds — please check it and correct anything that’s wrong or out of date for 2026/27.</p>' +
+      INFO_GROUPS.map(function (g) {
+        return '<div class="ri-card"><h2>' + esc(g[0]) + '</h2><div class="ri-grid">' +
+          g[1].map(function (f) {
+            var key = f[0], label = f[1], type = f[2], full = f[3];
+            var val = info[key] != null ? info[key] : '';
+            var ctrl = (type === 'textarea')
+              ? '<textarea data-info="' + key + '">' + esc(val) + '</textarea>'
+              : '<input type="' + (type === 'number' ? 'number' : type === 'email' ? 'email' : type === 'tel' ? 'tel' : 'text') + '" data-info="' + key + '" value="' + esc(val) + '">' +
+                (type === 'email' ? '<p class="ri-err">Not a valid email address.</p>' : type === 'tel' ? '<p class="ri-err">Doesn’t look like a UK phone number.</p>' : '');
+            var extra = (key === 'stadiumSponsor')
+              ? '<label class="ri-check"><input type="checkbox" data-info-nosponsor' + (info.noSponsor ? ' checked' : '') + '> <span>No stadium naming-rights sponsor</span></label>'
+              : '';
+            return '<div' + (full ? ' class="full"' : '') + '><label>' + esc(label) + '</label>' + ctrl + extra + '</div>';
+          }).join('') +
+        '</div></div>';
+      }).join('');
+    wireValidation(host);
   }
 
   /* ---- Multi-value field helpers ---- */
@@ -788,6 +896,9 @@ firebase.initializeApp({
     if (step.kind === 'you') {
       if (el('f_yourName')) data.yourName = el('f_yourName').value.trim();
       if (el('f_yourEmail')) data.yourEmail = el('f_yourEmail').value.trim();
+    } else if (step.kind === 'info') {
+      INFO_KEYS.forEach(function (k) { var n = el('riStep').querySelector('[data-info="' + k + '"]'); if (n) data.info[k] = n.value.trim(); });
+      var ns = el('riStep').querySelector('[data-info-nosponsor]'); if (ns) data.info.noSponsor = ns.checked;
     } else if (step.kind === 'inboxes') {
       data.inboxes = {};
       Array.prototype.forEach.call(el('riStep').querySelectorAll('.ri-person'), function (row) {
@@ -833,6 +944,10 @@ firebase.initializeApp({
   function findProblems() {
     var probs = [];
     if (!validEmail(data.yourEmail)) probs.push({ step: stepIndexById('you'), msg: 'Your email address looks invalid.' });
+    if (data.info) {
+      if (data.info.mainEmail && !validEmail(data.info.mainEmail)) probs.push({ step: stepIndexById('info'), msg: 'Club main contact email looks invalid.' });
+      if (data.info.phone && !validPhone(data.info.phone)) probs.push({ step: stepIndexById('info'), msg: 'Club switchboard phone looks invalid.' });
+    }
     Object.keys(data.inboxes).forEach(function (k) {
       var ib = data.inboxes[k], nm = ib.label || LIST_LABEL[k] || k;
       if (ib.email && !validEmail(ib.email)) probs.push({ step: stepIndexById('inboxes'), msg: 'Shared “' + nm + '” email looks invalid.' });
@@ -888,6 +1003,14 @@ firebase.initializeApp({
         '<br><span class="muted">' + esc(contactLine(p)) + (lists ? ' · lists: ' + lists : ' · no mailing lists') + '</span></div>';
     }).join('') : '<p class="muted" style="color:var(--text-muted);font-size:13px;">No people added yet.</p>';
 
+    var info = data.info || {};
+    var infoRows = INFO_GROUPS.map(function (g) {
+      var rows = g[1].filter(function (f) { return (info[f[0]] != null ? String(info[f[0]]) : '').trim(); })
+        .map(function (f) { return '<div class="ri-rev__p"><span class="muted">' + esc(f[1].replace(/\s*\(.*\)$/, '')) + ':</span> ' + esc(info[f[0]]) + '</div>'; }).join('');
+      return rows ? '<div style="margin-bottom:10px;"><div style="font-size:12px;text-transform:uppercase;letter-spacing:.06em;font-variation-settings:\'wght\' 800;color:var(--navy);margin-bottom:2px;">' + esc(g[0]) + '</div>' + rows + '</div>' : '';
+    }).join('');
+    var infoCard = '<div class="ri-card"><h2>Club information</h2>' + (infoRows || '<p class="ri-card__sub">Nothing entered yet.</p>') + '</div>';
+
     host.innerHTML =
       '<h2 class="ri-stephead">Check &amp; submit</h2>' +
       '<p class="ri-stepsub">You’ve added <b>' + nPeople + '</b> ' + (nPeople === 1 ? 'person' : 'people') + ' and <b>' + nInbox + '</b> shared ' + (nInbox === 1 ? 'address' : 'addresses') + '. Please check the details below before submitting.</p>' +
@@ -897,6 +1020,7 @@ firebase.initializeApp({
       (dups.length ? '<div class="ri-dupnote"><b>The same email appears on more than one person:</b>' +
         dups.map(function (d) { return '<div>• ' + esc(d.email) + ' — ' + esc(d.who.join(', ')) + '</div>'; }).join('') +
         '<div style="margin-top:6px;">If that’s one person, enter them once and use <b>“add someone already listed”</b> on the other department so they stay a single record.</div></div>' : '') +
+      infoCard +
       '<div class="ri-card"><h2>Mailing-list coverage</h2><p class="ri-card__sub">' + covered + ' of ' + LISTS.length + ' lists have someone. Tap an amber one to jump back. Gaps are fine if that role genuinely doesn’t apply.</p>' +
       '<div class="ri-cov">' + states.map(function (s) {
         var st = s[1];
@@ -951,7 +1075,7 @@ firebase.initializeApp({
     if (probs.length) { renderReview(el('riStep')); el('riStatus').textContent = 'Please fix ' + probs.length + ' highlighted ' + (probs.length === 1 ? 'item' : 'items') + '.'; return; }
     data.people.forEach(function (p) { if (p.lists === undefined) p.lists = derivedLists(p); });
     Object.keys(data.inboxes).forEach(function (k) { if (data.inboxes[k].lists === undefined) data.inboxes[k].lists = derivedInboxLists(k); });
-    var rec = { club: clubName, yourName: data.yourName, yourEmail: data.yourEmail, inboxes: data.inboxes, people: data.people, submittedAt: Date.now() };
+    var rec = { club: clubName, yourName: data.yourName, yourEmail: data.yourEmail, info: data.info, inboxes: data.inboxes, people: data.people, submittedAt: Date.now() };
     var btn = el('riNext'); btn.disabled = true; btn.textContent = 'Submitting…';
     db.ref('app-data/ops-club-contacts/submissions/' + token).set(rec).then(function () {
       try { localStorage.removeItem(LS_KEY); } catch (e) {}
@@ -968,6 +1092,12 @@ firebase.initializeApp({
     el('riApp').querySelector('.ri-nav').style.display = 'none';
     var inboxKeys = Object.keys(rec.inboxes || {});
     var when = rec.submittedAt ? new Date(rec.submittedAt).toLocaleString('en-GB', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
+    var ri = rec.info || {};
+    var infoHtml = INFO_GROUPS.map(function (g) {
+      var rows = g[1].filter(function (f) { return (ri[f[0]] != null ? String(ri[f[0]]) : '').trim(); })
+        .map(function (f) { return '<div style="font-size:13px;padding:2px 0;"><span style="color:var(--text-muted);">' + esc(f[1].replace(/\s*\(.*\)$/, '')) + ':</span> ' + esc(ri[f[0]]) + '</div>'; }).join('');
+      return rows ? '<div style="margin-bottom:8px;"><b style="color:var(--navy);font-size:12px;text-transform:uppercase;letter-spacing:.05em;">' + esc(g[0]) + '</b>' + rows + '</div>' : '';
+    }).join('');
     var peopleHtml = (rec.people || []).map(function (p) {
       var roles = (p.roles || []).map(function (r) { return esc(r.section) + (r.title ? ' (' + esc(r.title) + ')' : ''); }).join(', ');
       var lists = (p.lists || []).map(function (k) { return esc(LIST_LABEL[k] || k); }).join(', ');
@@ -978,6 +1108,7 @@ firebase.initializeApp({
       '<div class="ri-card" style="border-top-color:var(--green);">' +
         '<h2 style="color:var(--green);">✓ Submitted &amp; locked</h2>' +
         '<p class="ri-card__sub">Received by the League' + (when ? ' on ' + esc(when) : '') + '. Your submission is shown below for reference. To change anything, please contact the League and we’ll re-open your form.</p></div>' +
+      (infoHtml ? '<div class="ri-card"><h2>Club information</h2>' + infoHtml + '</div>' : '') +
       (inboxKeys.length ? '<div class="ri-card"><h2>Shared addresses</h2>' + inboxKeys.map(function (k) {
         var ib = rec.inboxes[k]; var ll = (ib.lists || []).map(function (x) { return esc(LIST_LABEL[x] || x); }).join(', ');
         return '<div style="font-size:13px;padding:3px 0;"><b style="color:var(--navy);">' + esc(ib.label || LIST_LABEL[k] || k) + '</b> — ' + esc([ib.email, ib.phone].filter(Boolean).join(' · ')) + (ll ? ' <span style="color:var(--text-muted);">· lists: ' + ll + '</span>' : '') + '</div>';
