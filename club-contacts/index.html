@@ -1,11 +1,20 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/index.html  v2.10
+  club-contacts/index.html  v2.11
   Public club DETAILS collection — GUIDED WIZARD (capability-URL pattern).
   Gathers a club's information AND people directory for club-directory.
   (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
   THIS IS THE UNIFIED FORM — supersedes the old club-data tool.
 
+  v2.11 (17/06/2026) — Lead contacts fixed (feedback round 20):
+    - BUG: handlers were bound to the persistent #riStep host every render, so
+      they accumulated and one pick added a nominee N times (the "quadrupling").
+      Now bound to the fresh per-render checkboxes/selects/buttons — no leak.
+    - Redesigned to a CHECKBOX-per-area model: everyone in that function is
+      pre-ticked; untick/tick to curate, "+ Add someone from another area",
+      or "+ Add a new person". Auto-suggest now tracks function members until
+      the club first curates an area (data.leadsTouched), so late-added people
+      still get pre-ticked and explicit unticks are never overwritten.
   v2.10 (17/06/2026) — Department inboxes page can now be FINALISED (feedback
     round 19): no auto-shown blank row on entry — start with just "+ Add a shared
     address" plus a "No shared department inboxes at our club" toggle (mirrors the
@@ -393,7 +402,7 @@ firebase.initializeApp({
   var editing = {};   // person id -> true while its card is open for editing
   var unlockedShared = {};  // person id -> true while a linked person's shared details (name/email/phone) are being edited
   var DEBUG = /[?&]debug/.test(location.search);   // ?debug=1 surfaces the select's computed font-size
-  var data = { yourName:'', yourEmail:'', info:{}, inboxes:{}, noInboxes:false, people:[], leads:{}, emptied:{} };
+  var data = { yourName:'', yourEmail:'', info:{}, inboxes:{}, noInboxes:false, people:[], leads:{}, leadsTouched:{}, emptied:{} };
 
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
   function el(id){ return document.getElementById(id); }
@@ -501,7 +510,7 @@ firebase.initializeApp({
       el('riApp').style.display = '';
       if (prev) { renderLocked(prev); return; }
       var draft = loadDraft();
-      if (draft) { data = Object.assign({ yourName:'', yourEmail:'', info:{}, inboxes:{}, noInboxes:false, people:[], leads:{}, emptied:{} }, draft); data.people = (data.people || []).map(normalizePerson); }
+      if (draft) { data = Object.assign({ yourName:'', yourEmail:'', info:{}, inboxes:{}, noInboxes:false, people:[], leads:{}, leadsTouched:{}, emptied:{} }, draft); data.people = (data.people || []).map(normalizePerson); }
       // Pre-fill club information from clubs-meta when we don't already have it (fresh, or a draft from before info existed).
       if (!data.info || !Object.keys(data.info).length) {
         var c = meta && (meta.clubs || []).filter(function (x) { return x.name === clubName; })[0];
@@ -820,28 +829,37 @@ firebase.initializeApp({
   /* ---- Lead contacts step (#7) — nominate >=1 named contact per League area;
      pick from people already entered, or add a new person. Replaces mailing lists. ---- */
   function leadNominees(key) { return (data.leads[key] || []).map(findPerson).filter(Boolean); }
+  function functionMembers(rec) { return rec ? data.people.filter(function (p) { return p.name && hasRole(p, rec); }) : []; }
   function renderLeadsStep(host) {
-    // Recommend defaults once (people whose role matches the area); prune dangling ids thereafter.
+    // Pre-tick everyone in each area's function. We keep tracking the function
+    // members until the club first curates an area (data.leadsTouched[key]); after
+    // that we respect their explicit ticks. This way late-added people still get
+    // auto-suggested, and unticks/extra picks are never re-overwritten.
     LEAD_AREAS.forEach(function (a) {
-      if (data.leads[a.key] === undefined) {
-        data.leads[a.key] = a.rec ? data.people.filter(function (p) { return hasRole(p, a.rec); }).map(function (p) { return p.id; }) : [];
-      } else {
-        data.leads[a.key] = data.leads[a.key].filter(function (id) { return findPerson(id); });
-      }
+      if (!data.leadsTouched[a.key]) data.leads[a.key] = functionMembers(a.rec).map(function (p) { return p.id; });
+      else data.leads[a.key] = (data.leads[a.key] || []).filter(function (id) { return findPerson(id); });
     });
     host.innerHTML =
       '<h2 class="ri-stephead">Lead contacts</h2>' +
-      '<p class="ri-stepsub">Nominate the single point of contact the League should use for each area below. We’ve suggested people from the roles you entered — change them, or add someone new (e.g. a dedicated SLO). At least one per area where you have one.</p>' +
+      '<p class="ri-stepsub">The single point of contact the League uses for each area. Everyone you put in that function is ticked by default — untick anyone who isn’t the lead, tick others, or add a new person (e.g. a dedicated SLO).</p>' +
       LEAD_AREAS.map(function (a) {
-        var noms = leadNominees(a.key);
-        var nonNoms = data.people.filter(function (p) { return p.name && (data.leads[a.key] || []).indexOf(p.id) === -1; });
+        var nominated = data.leads[a.key] || [];
+        var members = functionMembers(a.rec);
+        var memberIds = members.map(function (p) { return p.id; });
+        var extras = nominated.filter(function (id) { return memberIds.indexOf(id) === -1; }).map(findPerson).filter(Boolean);
+        var candidates = members.concat(extras);
+        var others = data.people.filter(function (p) { return p.name && candidates.indexOf(p) === -1; });
         return '<div class="ri-card" data-area="' + a.key + '"><h2>' + esc(a.label) + '</h2>' +
-          '<div class="ri-leadnoms">' + (noms.length
-            ? noms.map(function (p) { return '<span class="ri-leadchip">' + esc(p.name || '(unnamed)') + '<button type="button" data-leadrm="' + a.key + '|' + p.id + '" title="Remove">×</button></span>'; }).join('')
-            : '<span class="ri-listempty">No one nominated yet.</span>') + '</div>' +
-          (nonNoms.length
-            ? '<select class="ri-leadpick" data-leadpick="' + a.key + '"><option value="">+ Nominate someone already listed…</option>' +
-                nonNoms.map(function (p) { return '<option value="' + p.id + '">' + esc(p.name) + ' — ' + esc(rolesText(p)) + '</option>'; }).join('') + '</select>'
+          (candidates.length
+            ? candidates.map(function (p) {
+                var on = nominated.indexOf(p.id) !== -1;
+                return '<label class="ri-listmember"><input type="checkbox" data-leadck="' + a.key + '|' + p.id + '"' + (on ? ' checked' : '') + '> ' +
+                  '<span>' + esc(p.name) + ' <span class="muted">' + esc(rolesText(p)) + '</span></span></label>';
+              }).join('')
+            : '<p class="ri-listempty">No one yet' + (a.rec ? ' — add someone on the ' + esc(a.rec) + ' page, or add one here.' : '.') + '</p>') +
+          (others.length
+            ? '<select class="ri-leadpick" data-leadpick="' + a.key + '"><option value="">+ Add someone from another area…</option>' +
+                others.map(function (p) { return '<option value="' + p.id + '">' + esc(p.name) + ' — ' + esc(rolesText(p)) + '</option>'; }).join('') + '</select>'
             : '') +
           '<button type="button" class="ri-addmore" data-leadnew="' + a.key + '">+ Add a new person</button>' +
           '<div class="ri-leadform" data-leadform="' + a.key + '" style="display:none;">' +
@@ -850,31 +868,46 @@ firebase.initializeApp({
               '<div><label>Email</label><input type="email" data-lf="email"><p class="ri-err">Not a valid email address.</p></div>' +
             '</div>' +
             '<div class="ri-grid" style="margin-top:8px;"><div><label>Phone</label><input type="tel" data-lf="phone"><p class="ri-err">Doesn’t look like a UK phone number.</p></div><div></div></div>' +
-            '<button type="button" class="btn-confirm" data-leadadd="' + a.key + '">Add &amp; nominate</button>' +
+            '<button type="button" class="btn-confirm" data-leadadd="' + a.key + '">Add &amp; tick</button>' +
           '</div>' +
         '</div>';
       }).join('');
-    Array.prototype.forEach.call(host.querySelectorAll('.ri-leadpick'), pinSelect);
     wireValidation(host);
-    host.addEventListener('click', function (e) {
-      var rm = e.target.closest('[data-leadrm]');
-      if (rm) { var parts = rm.getAttribute('data-leadrm').split('|'); data.leads[parts[0]] = (data.leads[parts[0]] || []).filter(function (id) { return id !== parts[1]; }); saveDraft(true); renderStep(); renderSteps(); return; }
-      var nw = e.target.closest('[data-leadnew]');
-      if (nw) { var form = host.querySelector('[data-leadform="' + nw.getAttribute('data-leadnew') + '"]'); if (form) { form.style.display = 'block'; var n = form.querySelector('[data-lf="name"]'); if (n) n.focus(); } return; }
-      var add = e.target.closest('[data-leadadd]');
-      if (add) {
-        var key = add.getAttribute('data-leadadd'), form = host.querySelector('[data-leadform="' + key + '"]');
-        var g = function (k) { var x = form.querySelector('[data-lf="' + k + '"]'); return x ? x.value.trim() : ''; };
+    // Listeners bound to the FRESH per-render elements (never to the persistent
+    // host) so they can't accumulate and multiply nominations.
+    function touch(key) { data.leadsTouched[key] = true; data.leads[key] = data.leads[key] || []; return data.leads[key]; }
+    Array.prototype.forEach.call(host.querySelectorAll('[data-leadck]'), function (cb) {
+      cb.addEventListener('change', function () {
+        var parts = cb.getAttribute('data-leadck').split('|'), arr = touch(parts[0]), i = arr.indexOf(parts[1]);
+        if (cb.checked && i === -1) arr.push(parts[1]);
+        else if (!cb.checked && i !== -1) arr.splice(i, 1);
+        saveDraft(true); renderSteps();
+      });
+    });
+    Array.prototype.forEach.call(host.querySelectorAll('[data-leadpick]'), function (sel) {
+      pinSelect(sel);
+      sel.addEventListener('change', function () {
+        if (!sel.value) return; var arr = touch(sel.getAttribute('data-leadpick'));
+        if (arr.indexOf(sel.value) === -1) arr.push(sel.value);
+        saveDraft(true); renderStep(); renderSteps();
+      });
+    });
+    Array.prototype.forEach.call(host.querySelectorAll('[data-leadnew]'), function (btn) {
+      btn.addEventListener('click', function () {
+        var f = host.querySelector('[data-leadform="' + btn.getAttribute('data-leadnew') + '"]');
+        if (f) { f.style.display = 'block'; var n = f.querySelector('[data-lf="name"]'); if (n) n.focus(); }
+      });
+    });
+    Array.prototype.forEach.call(host.querySelectorAll('[data-leadadd]'), function (btn) {
+      btn.addEventListener('click', function () {
+        var key = btn.getAttribute('data-leadadd'), f = host.querySelector('[data-leadform="' + key + '"]');
+        var g = function (k) { var x = f.querySelector('[data-lf="' + k + '"]'); return x ? x.value.trim() : ''; };
         if (!g('name')) { el('riStatus').textContent = 'Please enter a name for the new person.'; return; }
         var a = leadArea(key);
         var np = { id: uid(), name: g('name'), emails: g('email') ? [g('email')] : [], phones: g('phone') ? [{ number: g('phone'), ext: '' }] : [], roles: [{ section: a.rec || 'Other', title: a.label }] };
-        data.people.push(np); (data.leads[key] = data.leads[key] || []).push(np.id);
-        saveDraft(true); renderStep(); renderSteps(); return;
-      }
-    });
-    host.addEventListener('change', function (e) {
-      var pk = e.target.closest('[data-leadpick]');
-      if (pk && pk.value) { var key = pk.getAttribute('data-leadpick'); (data.leads[key] = data.leads[key] || []).push(pk.value); saveDraft(true); renderStep(); renderSteps(); }
+        data.people.push(np); touch(key).push(np.id);
+        saveDraft(true); renderStep(); renderSteps();
+      });
     });
   }
 
