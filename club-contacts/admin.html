@@ -37,7 +37,8 @@
   <script>
     window.NL_TOOL = { title: 'Club Contacts Admin', toolKey: 'ops-club-contacts' };
     var NL_TOOL_KEY = 'ops-club-contacts';
-    window.NL_CHANGELOG = [{ date: '17 Jun 2026', version: 'v1.8', items: [
+    window.NL_CHANGELOG = [{ date: '17 Jun 2026', version: 'v1.9', items: [
+      'Restructure: review modal now shows Lead contacts (nominated point of contact per League area) and Department inboxes; mailing-list columns retired.',
       'Club information (stadium, contact, sponsorship) is now collected in the same form and shown in the review modal — the old club-data tool is superseded.',
       'Shared addresses can now carry mailing-list memberships too — the review modal shows each inbox’s lists alongside its email/phone.',
       'Roles model: each person is one record that can hold several roles; the review modal lists each person with all their roles and finalised mailing lists.',
@@ -143,8 +144,7 @@
     var inboxKeys = Object.keys(sub.inboxes || {});
     var inboxHtml = inboxKeys.length ? '<dl class="cra-dl">' + inboxKeys.map(function (k) {
       var ib = sub.inboxes[k];
-      var ll = (ib.lists && ib.lists.length) ? ' · lists: ' + ib.lists.map(function (x) { return LIST_LABEL[x] || x; }).join(', ') : '';
-      return '<dt>' + esc(ib.label || LIST_LABEL[k] || k) + '</dt><dd>' + esc([ib.email, ib.phone && (ib.phone + (ib.ext ? ' ext ' + ib.ext : ''))].filter(Boolean).join(' · ') + ll) + '</dd>';
+      return '<dt>' + esc(ib.dept || ib.label || LIST_LABEL[k] || k) + '</dt><dd>' + esc([ib.email, ib.phone && (ib.phone + (ib.ext ? ' ext ' + ib.ext : ''))].filter(Boolean).join(' · ')) + '</dd>';
     }).join('') + '</dl>' : '<p style="color:var(--text-muted);font-size:13px;margin:0;">None given.</p>';
 
     function contactLine(p) {
@@ -158,11 +158,18 @@
       return (p.section || '') + (p.title ? ' (' + p.title + ')' : '');
     }
     var peopleHtml = (sub.people || []).length ? (sub.people || []).map(function (p) {
-      var lists = (p.lists && p.lists.length) ? p.lists.map(function (k) { return LIST_LABEL[k] || k; }).join(', ') : '';
       return '<div class="cra-person"><div class="cra-person__n">' + esc(p.name || '(unnamed)') + ' <span style="color:var(--text-muted);font-variation-settings:\'wght\' 400;">— ' + esc(rolesOf(p)) + '</span></div>' +
-        '<div class="cra-person__c">' + esc(contactLine(p)) + '</div>' +
-        (lists ? '<div class="cra-person__l">mailing lists: ' + esc(lists) + '</div>' : '<div class="cra-person__l" style="color:var(--text-muted);">no mailing lists</div>') + '</div>';
+        '<div class="cra-person__c">' + esc(contactLine(p)) + '</div></div>';
     }).join('') : '<p style="color:var(--text-muted);font-size:13px;margin:0;">None given.</p>';
+
+    // Lead contacts (v2.8) — nominated point of contact per League area
+    var LEAD_LABELS = [['secretary','Club secretary'],['media','Media / press officer'],['programme','Programme editor'],['commercial','Commercial lead'],['finance','Finance lead'],['ticketing','Ticketing manager'],['safety','Safety officer'],['medical','Medical lead'],['dlo','Disability Liaison Officer'],['slo','Supporter Liaison Officer'],['plo','Police Liaison Officer']];
+    function leadName(id) { var p = (sub.people || []).filter(function (x) { return x.id === id; })[0]; return p ? (p.name || '(unnamed)') : ''; }
+    var leadsRows = LEAD_LABELS.map(function (a) {
+      var names = ((sub.leads && sub.leads[a[0]]) || []).map(leadName).filter(Boolean).join(', ');
+      return names ? '<dt>' + esc(a[1]) + '</dt><dd>' + esc(names) + '</dd>' : '';
+    }).join('');
+    var leadsHtml = leadsRows ? '<dl class="cra-dl">' + leadsRows + '</dl>' : '<p style="color:var(--text-muted);font-size:13px;margin:0;">None nominated.</p>';
 
     // Club information (merged in v2.7 — present on newer submissions only)
     var info = sub.info || {};
@@ -178,7 +185,8 @@
       '</div>' +
       '<p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">Submitted by ' + esc(sub.yourName || '—') + (sub.yourEmail ? ' (' + esc(sub.yourEmail) + ')' : '') + '. Import into the Club Directory is done manually for now.</p>' +
       '<div class="cra-sec">Club information</div>' + infoHtml +
-      '<div class="cra-sec">Department email addresses</div>' + inboxHtml +
+      '<div class="cra-sec">Department inboxes</div>' + inboxHtml +
+      '<div class="cra-sec">Lead contacts</div>' + leadsHtml +
       '<div class="cra-sec">People</div>' + peopleHtml;
     document.getElementById('craModal').classList.add('open');
   }
