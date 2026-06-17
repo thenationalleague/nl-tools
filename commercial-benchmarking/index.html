@@ -1,32 +1,39 @@
 <!DOCTYPE html>
 <!--
-  commercial-benchmarking/index.html  v1.0
-  Per-club Commercial Benchmarking dashboard (capability-URL pattern).
+  commercial-benchmarking/index.html  v1.1
+  Per-club Commercial Benchmarking dashboard.
 
-  Each club receives a private link /commercial-benchmarking/?t=<token>. The
-  token maps to that club's dashboard node in RTDB:
-    app-data/ops-commercial-benchmarking/dash/<token>   (this club's own row
-        + precomputed division/league percentiles — readable only at the known
-        token path; the collection can't be listed)
-    app-data/ops-commercial-benchmarking/aggregates      (ANONYMISED medians /
-        ranges / histograms / counts — no club is ever named)
+  TWO ways in:
+   1. Club capability link  /commercial-benchmarking/?t=<token>  — no login.
+      The token resolves to that club's own node in RTDB plus the shared
+      anonymous aggregates, and nothing else (anonymisation is structural).
+   2. NL staff view  /commercial-benchmarking/  (no token) — opened from the
+      portal while signed in. Staff/admin/superadmin get a club picker and can
+      view any club. Anyone else (or signed-out) is told to use their club link.
 
-  Anonymisation is structural: a token resolves to its own club's node plus the
-  shared anonymous aggregates, and nothing else. No other club's named figure is
-  reachable from any link. NOT a gated tool (no auth-guard, no account) — the
-  unguessable link is the credential, exactly like /club-data/. Out of
-  lint-tools scope by design. Data lives only in RTDB; nothing club-identifiable
-  is baked into this (public) file.
+  RTDB:
+    app-data/ops-commercial-benchmarking/aggregates   ANONYMISED stats per
+        metric/scope: count/min/p25/median/p75/max/mean + `values` (the full
+        sorted, unnamed list — one entry per club — powering the graph).
+    app-data/ops-commercial-benchmarking/dash/<token>  this club's own row +
+        precomputed division/league percentiles. Readable only at the known
+        token path; the collection is readable to NL staff only.
 
-  Two view controls (per Richard): Bars <-> Graph (the histogram exposes skew —
-  you can be above the median yet a fraction of the top), and Your division <->
-  All divisions.
+  Data lives only in RTDB; nothing club-identifiable is baked into this (public)
+  file. NOT wired through auth-guard (it must also serve no-login club links) —
+  out of lint-tools scope by design, like /club-data/.
+
+  View controls: Bars <-> Graph (graph = one rising bar per club, your bar
+  highlighted — shows skew, e.g. above median yet a fraction of the top), and
+  Your division <-> All divisions.
 
   Changelog
   ---------
+  v1.1 — Graph view changed to one rising bar per club (was a histogram).
+         Added NL staff view: signed-in staff get a club picker and can view
+         any club; clubs still use their no-login capability link.
   v1.0 — Initial build. Capability-URL dashboard; bars/graph + division/league
-         toggles; loads aggregates + own row from RTDB; graceful "not provided"
-         and invalid-link states.
+         toggles; graceful invalid-link / not-provided states.
 -->
 <html lang="en-GB">
 <head>
@@ -35,6 +42,7 @@
 <title>Commercial Benchmarking — The National League</title>
 <link rel="stylesheet" href="/tools/system/nl-brand.css?v=20">
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script>
 firebase.initializeApp({
@@ -51,7 +59,6 @@ body{background:var(--off-white);color:var(--text)}
 .kicker{font-size:11px;font-variation-settings:'wght' 800;letter-spacing:.10em;
   text-transform:uppercase;color:var(--text-muted)}
 
-/* topbar */
 .topbar{background:var(--navy);border-bottom:4px solid var(--primary);color:var(--white);
   padding:14px clamp(16px,2.5vw,44px);display:flex;align-items:center;gap:14px}
 .topbar img{height:34px;width:auto;display:block}
@@ -59,17 +66,18 @@ body{background:var(--off-white);color:var(--text)}
 .topbar .tb-sub{font-size:11px;color:var(--navy-100);font-variation-settings:'wght' 600}
 .topbar .tb-right{margin-left:auto;font-size:11px;color:var(--navy-100);display:flex;align-items:center;gap:8px}
 .tb-dot{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block}
+.tb-staff{background:var(--amber);color:var(--white);font-size:10px;font-variation-settings:'wght' 800;
+  padding:2px 8px;border-radius:100px;letter-spacing:.03em}
 
 .page{max-width:1080px;margin:0 auto;padding:clamp(24px,3vw,48px) clamp(16px,2.5vw,44px) 80px}
 
-/* gate / loading / error */
 .gate{max-width:560px;margin:80px auto;text-align:center;padding:0 24px;color:var(--text-muted)}
 .gate h2{font-variation-settings:'wght' 900;color:var(--navy);font-size:22px;margin-bottom:10px}
+.gate a{color:var(--primary);font-variation-settings:'wght' 700}
 .spinner{width:34px;height:34px;border:3px solid var(--navy-100);border-top-color:var(--navy);
   border-radius:50%;margin:0 auto 18px;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-/* club header */
 .club{display:flex;align-items:center;gap:20px;margin-bottom:10px}
 .club .crest{width:74px;height:74px;object-fit:contain;flex:none;background:var(--white);
   border:1px solid var(--border);border-radius:6px;padding:7px}
@@ -87,7 +95,6 @@ body{background:var(--off-white);color:var(--text)}
 .privacy b{color:var(--text);font-variation-settings:'wght' 700}
 .privacy svg{flex:none;margin-top:2px}
 
-/* controls */
 .controls{display:flex;gap:18px;align-items:center;flex-wrap:wrap;background:var(--white);
   border:1px solid var(--border);border-radius:6px;padding:11px 15px;margin-bottom:28px;
   box-shadow:0 1px 3px var(--navy-50)}
@@ -99,8 +106,10 @@ body{background:var(--off-white);color:var(--text)}
   font-size:11px;font-variation-settings:'wght' 800;color:var(--text-muted);padding:5px 13px;
   border-radius:100px;transition:all .15s}
 .seg button.on{background:var(--navy);color:var(--white)}
+#staffCtl{margin-right:auto}
+#clubPick{font-family:inherit;font-size:13px;font-variation-settings:'wght' 700;color:var(--text);
+  border:1px solid var(--border);border-radius:6px;padding:6px 10px;background:var(--white);max-width:240px}
 
-/* sections */
 .section{margin-bottom:34px}
 .section-head{display:flex;align-items:baseline;gap:12px;margin-bottom:14px;padding-bottom:9px;
   border-bottom:2px solid var(--navy)}
@@ -108,7 +117,6 @@ body{background:var(--off-white);color:var(--text)}
   letter-spacing:.06em;color:var(--navy)}
 .section-head .count{font-size:11px;color:var(--text-muted);font-variation-settings:'wght' 600}
 
-/* metric cards */
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media(max-width:680px){.grid{grid-template-columns:1fr}}
 .card{background:var(--white);border:1px solid var(--border);border-radius:6px;
@@ -129,7 +137,6 @@ body{background:var(--off-white);color:var(--text)}
 .posn.lo{background:var(--navy-50);color:var(--navy)}
 .posn.na{background:var(--navy-50);color:var(--text-muted)}
 
-/* range bar */
 .bar-wrap{margin-top:18px}
 .bar{position:relative;height:8px;border-radius:100px;background:var(--navy-100)}
 .bar .median{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--navy);border-radius:2px;opacity:.55}
@@ -144,17 +151,14 @@ body{background:var(--off-white);color:var(--text)}
   border-top:1px dashed var(--border);font-size:11px;color:var(--text-muted)}
 .league-line .lg-pos{margin-left:auto;font-variation-settings:'wght' 800;color:var(--text)}
 
-/* histogram */
-.hist{margin-top:18px}
-.hist-bars{display:flex;align-items:flex-end;gap:3px;height:96px;padding-top:18px;position:relative}
-.hbar{flex:1;background:var(--navy-100);border-radius:3px 3px 0 0;min-height:2px;position:relative;
-  transition:height .6s cubic-bezier(.22,1,.36,1)}
+/* graph: one rising bar per club */
+.hist{margin-top:22px}
+.hist-bars{display:flex;align-items:flex-end;gap:2px;height:104px;position:relative}
+.hbar{flex:1;background:var(--navy-100);border-radius:2px 2px 0 0;min-height:2px;position:relative}
 .hbar.you{background:var(--primary)}
-.hbar .hc{position:absolute;top:-15px;left:50%;transform:translateX(-50%);font-size:10px;
-  font-variation-settings:'wght' 700;color:var(--text-muted)}
-.hbar.you .youtag{position:absolute;top:-32px;left:50%;transform:translateX(-50%);white-space:nowrap;
+.hbar.you .youtag{position:absolute;top:-30px;left:50%;transform:translateX(-50%);white-space:nowrap;
   background:var(--primary);color:var(--white);font-size:10px;font-variation-settings:'wght' 800;
-  padding:2px 6px;border-radius:4px}
+  padding:2px 6px;border-radius:4px;z-index:2}
 .hbar.you .youtag::after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);
   border:4px solid transparent;border-top-color:var(--primary)}
 .hist-axis{display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--text-muted)}
@@ -164,7 +168,6 @@ body{background:var(--off-white);color:var(--text)}
   border-top:1px dashed var(--border);line-height:1.45}
 .hist-note b{color:var(--text);font-variation-settings:'wght' 700}
 
-/* chips */
 .chips{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
 @media(max-width:680px){.chips{grid-template-columns:1fr}}
 .chip{background:var(--white);border:1px solid var(--border);border-radius:6px;padding:15px 16px}
@@ -174,7 +177,7 @@ body{background:var(--off-white);color:var(--text)}
 .foot{margin-top:14px;font-size:11px;color:var(--text-muted);border-top:1px solid var(--border);
   padding-top:16px;line-height:1.6}
 .foot b{color:var(--text);font-variation-settings:'wght' 700}
-@media(prefers-reduced-motion:reduce){.bar .marker,.hbar{transition:none}}
+@media(prefers-reduced-motion:reduce){.bar .marker{transition:none}}
 </style>
 </head>
 <body>
@@ -187,7 +190,7 @@ body{background:var(--off-white);color:var(--text)}
     <div class="tb-title">Commercial Benchmarking</div>
     <div class="tb-sub">2025/26 season</div>
   </div>
-  <div class="tb-right"><span class="tb-dot"></span> <b style="color:var(--white);font-variation-settings:'wght' 800;margin-left:3px" id="tbClub">Loading…</b></div>
+  <div class="tb-right" id="tbRight"><span class="tb-dot"></span> <b style="color:var(--white);font-variation-settings:'wght' 800;margin-left:3px" id="tbClub">Loading…</b></div>
 </div>
 
 <div id="gate" class="gate"><div class="spinner"></div>Loading your dashboard…</div>
@@ -205,12 +208,16 @@ body{background:var(--off-white);color:var(--text)}
     </div>
   </div>
 
-  <div class="privacy">
+  <div class="privacy" id="privacy">
     <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--navy)" stroke-width="2"><path d="M12 2 4 6v6c0 5 3.5 8 8 10 4.5-2 8-5 8-10V6z"/></svg>
-    <div>This is your club's private view. Every figure for other clubs is shown only as a <b>benchmark</b> — a median, a range, a distribution or a count. <b>No other club is ever named.</b></div>
+    <div id="privacyTxt">This is your club's private view. Every figure for other clubs is shown only as a <b>benchmark</b> — a median, a range, a distribution or a count. <b>No other club is ever named.</b></div>
   </div>
 
   <div class="controls">
+    <div class="ctl" id="staffCtl" style="display:none">
+      <span class="lbl">Club</span>
+      <select id="clubPick"></select>
+    </div>
     <div class="ctl">
       <span class="lbl">Compare against</span>
       <span class="seg" id="scopeSeg">
@@ -230,14 +237,15 @@ body{background:var(--off-white);color:var(--text)}
   <div id="sections"></div>
 
   <div class="section">
-    <div class="section-head"><h2>Your commercial profile</h2><span class="count">how your setup compares</span></div>
+    <div class="section-head"><h2>Commercial profile</h2><span class="count">how the setup compares</span></div>
     <div class="chips" id="chips"></div>
   </div>
 
   <div class="foot">
     Benchmarks computed across <b id="lgn"></b> responding clubs (<b id="dvn"></b> in <span id="divName"></span>).
-    Figures are per season, excluding VAT. Position bands describe where you sit in the current comparison group,
-    not whether higher is better. Switch <b>Bars → Graph</b> on any card to see the full spread.
+    Figures are per season, excluding VAT. Position bands describe where the club sits in the current comparison
+    group, not whether higher is better. In <b>Graph</b> view each bar is one club (sorted low to high); the
+    highlighted bar is this club.
   </div>
 </div>
 
@@ -246,39 +254,71 @@ body{background:var(--off-white);color:var(--text)}
   'use strict';
   var token = (new URLSearchParams(location.search).get('t') || '').trim();
   var gate = document.getElementById('gate');
-  function fail(msg) { gate.innerHTML = '<h2>Link not valid</h2><p>' + msg + '</p>'; }
-
-  if (!/^[A-Za-z0-9_-]{20,}$/.test(token)) {
-    fail('Please use the private link the League sent to your club.'); return;
-  }
   var db = firebase.database();
   var ROOT = 'app-data/ops-commercial-benchmarking/';
+  var DIV_ORDER = { National: 0, North: 1, South: 2 };
 
-  Promise.all([
-    db.ref(ROOT + 'aggregates').once('value'),
-    db.ref(ROOT + 'dash/' + token).once('value')
-  ]).then(function (res) {
-    var AGG = res[0].val(), OWN = res[1].val();
-    if (!OWN) { fail('This link isn’t recognised. Please use the link the League sent to your club.'); return; }
-    if (!AGG) { fail('Benchmark data isn’t available yet. Please try again shortly.'); return; }
-    boot(AGG, OWN);
-  }).catch(function (e) {
-    console.error(e);
-    fail('Something went wrong loading your dashboard. Please try again.');
-  });
+  function msg(title, body) { gate.innerHTML = '<h2>' + title + '</h2><p>' + body + '</p>'; gate.style.display = ''; }
+
+  if (token) {
+    if (!/^[A-Za-z0-9_-]{20,}$/.test(token)) {
+      msg('Link not valid', 'Please use the private link the League sent to your club.'); return;
+    }
+    Promise.all([
+      db.ref(ROOT + 'aggregates').once('value'),
+      db.ref(ROOT + 'dash/' + token).once('value')
+    ]).then(function (res) {
+      var AGG = res[0].val(), OWN = res[1].val();
+      if (!OWN) { msg('Link not recognised', 'Please use the link the League sent to your club.'); return; }
+      if (!AGG) { msg('Not available yet', 'Benchmark data isn’t available yet. Please try again shortly.'); return; }
+      mount(AGG, [OWN], { staff: false });
+    }).catch(function (e) { console.error(e); msg('Something went wrong', 'Please try again.'); });
+  } else {
+    // NL staff view — requires a signed-in staff/admin/superadmin session.
+    firebase.auth().onAuthStateChanged(function (user) {
+      if (!user) {
+        msg('NL staff sign-in', 'Open this from the <a href="/tools/portal/">portal</a> while signed in, or use the private link the League sent to your club.');
+        return;
+      }
+      db.ref('users/' + user.uid).once('value').then(function (s) {
+        var role = (s.val() || {}).role;
+        if (['staff', 'admin', 'superadmin'].indexOf(role) < 0) {
+          msg('Use your club link', 'Your account doesn’t have NL staff access to this tool. Clubs view their own dashboard via the private link the League sent.');
+          return;
+        }
+        return Promise.all([
+          db.ref(ROOT + 'aggregates').once('value'),
+          db.ref(ROOT + 'dash').once('value')
+        ]).then(function (res) {
+          var AGG = res[0].val(), dash = res[1].val() || {};
+          var clubs = Object.keys(dash).map(function (k) { return dash[k]; });
+          clubs.sort(function (a, b) {
+            return (DIV_ORDER[a.division] - DIV_ORDER[b.division]) || a.club.localeCompare(b.club);
+          });
+          if (!AGG || !clubs.length) { msg('Not available yet', 'Benchmark data isn’t loaded yet.'); return; }
+          mount(AGG, clubs, { staff: true });
+        });
+      }).catch(function (e) { console.error(e); msg('Something went wrong', 'Please try again.'); });
+    });
+  }
 
   /* ---------------- render ---------------- */
-  function boot(AGG, OWN) {
+  function mount(AGG, clubs, opts) {
+    var OWN = clubs[0];
     var state = { scope: 'div', view: 'bars', cardView: {} };
 
-    var fmt = function (v, u) { return v == null ? '—' : (u === '£' ? '£' + Math.round(v).toLocaleString('en-GB') : Math.round(v).toLocaleString('en-GB')); };
+    function fmt(v, u) {
+      if (v == null) return '—';
+      var s = Math.round(v).toLocaleString('en-GB');
+      return u === '£' ? '£' + s : (u ? s + u : s);
+    }
     function fmtShort(v, u) {
       if (v == null) return '—';
       var s, a = Math.abs(v);
       if (a >= 1e6) s = (v / 1e6).toFixed(v % 1e6 ? 1 : 0) + 'm';
       else if (a >= 1000) s = (v / 1000).toFixed(v % 1000 ? 1 : 0) + 'k';
       else s = Math.round(v).toString();
-      return (u === '£' ? '£' : '') + s;
+      return (u === '£' ? '£' : '') + s + (u && u !== '£' ? u : '');
     }
     function band(pct) {
       if (pct == null) return { cls: 'na', txt: 'Not provided' };
@@ -309,30 +349,38 @@ body{background:var(--off-white);color:var(--text)}
         '<span class="lg-pos">' + band(pctFor(own, os === 'league' ? 'league' : 'div')).txt + '</span></div></div>';
     }
 
-    function histogram(agg, own) {
-      var s = agg.scopes[scopeKey()], u = agg.unit, maxc = Math.max.apply(null, s.counts.concat(1)), nb = s.counts.length;
-      var youBin = -1;
-      if (own.value != null) {
-        for (var i = 0; i < nb; i++) {
-          if (own.value >= s.edges[i] && (i === nb - 1 ? own.value <= s.edges[i + 1] : own.value < s.edges[i + 1])) { youBin = i; break; }
+    // graph: one rising bar per club, this club's bar highlighted
+    function clubBars(agg, own) {
+      var s = agg.scopes[scopeKey()], u = agg.unit, vals = s.values || [], n = vals.length;
+      var maxv = s.max || 1;
+      var youIdx = -1;
+      if (own.value != null && n) {
+        // place own bar at its rank; use percentile to disambiguate ties
+        var pct = pctFor(own, state.scope === 'league' ? 'league' : 'div');
+        var guess = pct == null ? -1 : Math.round((pct / 100) * (n - 1));
+        // snap to the nearest bar whose value matches own.value
+        var best = -1, bestD = Infinity;
+        for (var i = 0; i < n; i++) {
+          var d = Math.abs(vals[i] - own.value) + Math.abs(i - (guess < 0 ? i : guess)) * 1e-6;
+          if (d < bestD) { bestD = d; best = i; }
         }
-        if (own.value <= s.edges[0]) youBin = 0;
-        if (own.value >= s.edges[nb]) youBin = nb - 1;
+        youIdx = best;
       }
-      var bars = s.counts.map(function (c, i) {
-        var h = Math.round(8 + 80 * (c / maxc)), you = i === youBin;
-        return '<div class="hbar' + (you ? ' you' : '') + '" style="height:' + (c ? h : 3) + 'px">' +
-          (c ? '<span class="hc">' + c + '</span>' : '') +
+      var bars = '';
+      for (var j = 0; j < n; j++) {
+        var h = Math.round(6 + 92 * (vals[j] / maxv));
+        var you = j === youIdx;
+        bars += '<div class="hbar' + (you ? ' you' : '') + '" style="height:' + h + 'px" title="' + fmtShort(vals[j], u) + '">' +
           (you ? '<span class="youtag">You ' + fmtShort(own.value, u) + '</span>' : '') + '</div>';
-      }).join('');
+      }
       var note;
       if (own.value != null) {
         var ratio = s.max > 0 ? Math.round(100 * own.value / s.max) : null;
-        note = "You're <b>" + (own.value >= s.median ? 'above' : 'below') + ' the median</b> (' + fmtShort(s.median, u) + ')';
+        note = (own.value >= s.median ? 'Above' : 'Below') + ' the median (' + fmtShort(s.median, u) + ')';
         if (ratio != null) note += ' and at <b>' + ratio + '%</b> of the highest (' + fmtShort(s.max, u) + ')';
-        note += '.';
+        note += ' &middot; ' + n + ' clubs, lowest to highest.';
       } else {
-        note = "You didn't provide this figure — distribution shown for " + s.count + ' clubs.';
+        note = 'Not provided — distribution shown for ' + n + ' clubs, lowest to highest.';
       }
       return '<div class="hist"><div class="hist-bars">' + bars + '</div><div class="hist-axis">' +
         '<span>' + fmtShort(s.min, u) + '<b>Lowest</b></span>' +
@@ -346,7 +394,7 @@ body{background:var(--off-white);color:var(--text)}
       var pct = pctFor(own, state.scope === 'league' ? 'league' : 'div');
       var b = band(provided ? pct : null);
       var view = state.cardView[key] || state.view;
-      var body = view === 'graph' ? histogram(agg, own) : rangeBar(agg, own);
+      var body = view === 'graph' ? clubBars(agg, own) : rangeBar(agg, own);
       var nextView = view === 'graph' ? 'bars' : 'graph';
       var icon = view === 'graph'
         ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="4" y1="20" x2="20" y2="20"/><line x1="4" y1="20" x2="4" y2="4"/><path d="M7 14l3-3 3 2 4-6"/></svg> Bars'
@@ -376,15 +424,18 @@ body{background:var(--off-white);color:var(--text)}
       var d = AGG.chips;
       if (kind === 'progFormat') return 'Most clubs print — ' + (d.progFormat.Printed || 0) + ' printed, ' + (d.progFormat.Digital || 0) + ' digital, ' + (d.progFormat.Both || 0) + ' both';
       if (kind === 'rollingFront') return 'Only ' + (d.rollingFront.Yes || 0) + ' of ' + ((d.rollingFront.Yes || 0) + (d.rollingFront.No || 0)) + ' clubs run a rolling front-shirt deal';
-      if (kind === 'emailPartners') return 'You can email on behalf of partners — ' + (d.emailPartners.Yes || 0) + ' of ' + ((d.emailPartners.Yes || 0) + (d.emailPartners.No || 0)) + ' clubs can';
+      if (kind === 'emailSupporters') return 'Can email their own supporters — ' + (d.emailSupporters.Yes || 0) + ' of ' + ((d.emailSupporters.Yes || 0) + (d.emailSupporters.No || 0)) + ' clubs can';
+      if (kind === 'emailPartners') return 'Email on behalf of partners — ' + (d.emailPartners.Yes || 0) + ' of ' + ((d.emailPartners.Yes || 0) + (d.emailPartners.No || 0)) + ' clubs can';
       return '';
     }
     function renderChips() {
       var c = OWN.chips || {};
+      var yn = function (x, on, off) { return x === 'Yes' ? on : (x ? off : '—'); };
       var items = [
         { k: 'Programme format', v: c.progFormat || '—', kind: 'progFormat' },
-        { k: 'Front-shirt deal', v: c.rollingFront === 'Yes' ? 'Rolling' : (c.rollingFront ? 'Fixed term' : '—'), kind: 'rollingFront' },
-        { k: 'Email partner offers', v: c.emailPartners === 'Yes' ? 'Enabled' : (c.emailPartners ? 'Not enabled' : '—'), kind: 'emailPartners' }
+        { k: 'Front-shirt deal', v: yn(c.rollingFront, 'Rolling', 'Fixed term'), kind: 'rollingFront' },
+        { k: 'Email supporters', v: yn(c.emailSupporters, 'Enabled', 'Not enabled'), kind: 'emailSupporters' },
+        { k: 'Email partner offers', v: yn(c.emailPartners, 'Enabled', 'Not enabled'), kind: 'emailPartners' }
       ];
       document.getElementById('chips').innerHTML = items.map(function (it) {
         return '<div class="chip"><div class="kicker">' + it.k + '</div><div class="cv">' + it.v + '</div>' +
@@ -392,20 +443,36 @@ body{background:var(--off-white);color:var(--text)}
       }).join('');
     }
 
-    // header
-    var crestUrl = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/' + encodeURIComponent(OWN.club) + '.png';
-    document.getElementById('crest').src = crestUrl;
-    document.getElementById('crest').alt = OWN.club;
-    document.getElementById('tbClub').textContent = OWN.club;
-    document.getElementById('clubName').textContent = OWN.club;
-    document.getElementById('divPill').textContent = OWN.division + ' League';
-    if (OWN.fsSponsor) document.getElementById('fsSpon').textContent = OWN.fsSponsor;
-    else document.getElementById('sponWrap').style.display = 'none';
-    document.getElementById('lgn').textContent = AGG.meta.leagueN;
-    document.getElementById('dvn').textContent = AGG.meta.divN[OWN.division];
-    document.getElementById('divName').textContent = OWN.division;
+    function renderHeader() {
+      document.getElementById('crest').src = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/' + encodeURIComponent(OWN.club) + '.png';
+      document.getElementById('crest').alt = OWN.club;
+      document.getElementById('clubName').textContent = OWN.club;
+      document.getElementById('divPill').textContent = OWN.division + ' League';
+      if (OWN.fsSponsor) { document.getElementById('fsSpon').textContent = OWN.fsSponsor; document.getElementById('sponWrap').style.display = ''; }
+      else document.getElementById('sponWrap').style.display = 'none';
+      document.getElementById('dvn').textContent = AGG.meta.divN[OWN.division];
+      document.getElementById('divName').textContent = OWN.division;
+      if (!opts.staff) document.getElementById('tbClub').textContent = OWN.club;
+    }
 
-    // events
+    function renderAll() { renderHeader(); renderChips(); render(); }
+
+    // staff picker
+    if (opts.staff) {
+      document.getElementById('tbRight').innerHTML = '<span class="tb-staff">NL STAFF</span>';
+      document.getElementById('staffCtl').style.display = '';
+      document.getElementById('privacyTxt').innerHTML = '<b>NL staff view.</b> You can see every club’s named figures here. Clubs only ever see their own data plus anonymous benchmarks.';
+      var sel = document.getElementById('clubPick');
+      var html = '', curDiv = '';
+      clubs.forEach(function (c, i) {
+        if (c.division !== curDiv) { if (curDiv) html += '</optgroup>'; html += '<optgroup label="' + c.division + ' League">'; curDiv = c.division; }
+        html += '<option value="' + i + '">' + c.club + '</option>';
+      });
+      html += '</optgroup>';
+      sel.innerHTML = html;
+      sel.addEventListener('change', function () { OWN = clubs[+this.value]; renderAll(); });
+    }
+
     document.getElementById('scopeSeg').addEventListener('click', function (e) {
       var b = e.target.closest('button'); if (!b) return;
       state.scope = b.dataset.scope;
@@ -423,10 +490,10 @@ body{background:var(--off-white);color:var(--text)}
       state.cardView[b.dataset.card] = b.dataset.next; render();
     });
 
+    document.getElementById('lgn').textContent = AGG.meta.leagueN;
     gate.style.display = 'none';
     document.getElementById('page').style.display = 'block';
-    renderChips();
-    render();
+    renderAll();
   }
 })();
 </script>
