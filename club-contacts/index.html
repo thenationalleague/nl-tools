@@ -1,10 +1,17 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/index.html  v1.11
+  club-contacts/index.html  v1.12
   Public club CONTACTS collection — GUIDED WIZARD (capability-URL pattern).
   Sibling of club-data. Gathers a club's people directory for club-directory.
   (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
 
+  v1.12 (17/06/2026) — multi-role people:
+    - One person can now hold several roles without a duplicate entry. Each
+      person card has "Also on another mailing list" — a chip multi-select of
+      the other functions they cover (e.g. a director who also runs media).
+      Stored as people[].alsoLists[]; coverage + admin count these too.
+    - Safety net: the Check & submit screen flags when the same email appears on
+      more than one person, suggesting the "also on" option (non-blocking).
   v1.11 (17/06/2026) — feedback round 10:
     - The OPEN dropdown's options rendered huge: the closed select is pinned to
       14px, but native option lists inherit font-size from <body>, which the
@@ -69,7 +76,7 @@
   v1.1 — first wizard rebuild (see git history).
   Submission shape: { club, yourName, yourEmail, submittedAt,
     inboxes:{<listKey>:{email,phone,ext}},
-    people:[{section,roleKey?,name,title,emails:[..],phones:[{number,ext}],onList}] }.
+    people:[{section,roleKey?,name,title,emails:[..],phones:[{number,ext}],onList,alsoLists?:[listKey]}] }.
   NOT a gated tool (no auth-guard) — out of lint-tools scope by design.
 -->
 <html lang="en-GB">
@@ -160,6 +167,12 @@ firebase.initializeApp({
   .ri-onlist { display:flex; gap:8px; align-items:center; font-size: 13px; color: var(--text); margin-top: 8px; padding-top: 10px; border-top: 1px dashed var(--border); cursor: pointer; }
   .ri-onlist input { width:16px; height:16px; }
   .ri-onlist b { color: var(--navy); }
+  /* "Also on these mailing lists" — extra list memberships for one person */
+  .ri-also { margin-top: 6px; }
+  .ri-listchips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .ri-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-muted); border: 1px solid var(--border); background: var(--white); border-radius: 20px; padding: 5px 11px; cursor: pointer; }
+  .ri-chip input { width: 14px; height: 14px; }
+  .ri-chip.is-on { color: var(--navy); border-color: var(--navy); background: var(--navy-50); font-variation-settings:'wght' 700; }
 
   .btn-addperson { background: var(--navy); color: #fff; border: none; border-radius: 8px; padding: 12px 16px; width: 100%; font-family: var(--font); font-size: 14px; font-variation-settings:'wght' 800; cursor: pointer; margin-top: 4px; display:flex; align-items:center; justify-content:center; gap: 8px; }
   .btn-addperson:hover { background: var(--navy-600); }
@@ -186,6 +199,8 @@ firebase.initializeApp({
   .ri-rev__p .muted { color: var(--text-muted); }
   .ri-prob { background: var(--red-light); border: 1px solid var(--red); border-radius: 8px; padding: 12px 14px; font-size: 13px; color: var(--red-deep, var(--red)); margin-bottom: 16px; }
   .ri-prob b { display:block; margin-bottom: 4px; }
+  .ri-dupnote { background: var(--amber-light); border: 1px solid var(--amber); border-radius: 8px; padding: 12px 14px; font-size: 13px; color: var(--amber-deep); margin-bottom: 16px; line-height: 1.5; }
+  .ri-dupnote b { color: var(--navy); }
   .ri-prob a { color: var(--red); cursor: pointer; text-decoration: underline; }
 
   /* Footer nav */
@@ -473,6 +488,19 @@ firebase.initializeApp({
     if (!existing.length && data.emptied[section]) noneck.checked = true;
     refresh();
   }
+  // "Also on these mailing lists" — lets one person (e.g. a director who also
+  // runs media) carry extra list memberships without a duplicate entry.
+  function alsoListsHtml(homeKey, selected) {
+    selected = selected || [];
+    var has = selected.length > 0;
+    var chips = LISTS.filter(function (l) { return l[0] !== homeKey; }).map(function (l) {
+      var on = selected.indexOf(l[0]) !== -1;
+      return '<label class="ri-chip' + (on ? ' is-on' : '') + '"><input type="checkbox" data-list="' + l[0] + '"' + (on ? ' checked' : '') + '> ' + esc(l[1]) + '</label>';
+    }).join('');
+    return '<div class="ri-also">' +
+      '<button type="button" class="ri-addmore" data-togglelists>' + (has ? '− Hide other mailing lists' : '+ Also on another mailing list') + '</button>' +
+      '<div class="ri-listchips" data-listchips style="display:' + (has ? 'flex' : 'none') + ';">' + chips + '</div></div>';
+  }
   function personRow(section, p) {
     p = p || {};
     var emails = (p.emails && p.emails.length) ? p.emails : (p.email ? [p.email] : ['']);
@@ -495,7 +523,8 @@ firebase.initializeApp({
         '<div class="ri-multi" data-phones>' + phones.map(phoneFieldHtml).join('') + '</div>' +
         '<button type="button" class="ri-addmore" data-addphone>+ Add another phone</button></div>' +
       (listKey ? '<label class="ri-onlist"><input type="checkbox" data-onlist' + (onList ? ' checked' : '') + '> ' +
-        '<span>Include on the <b>' + esc(LIST_LABEL[listKey]) + '</b> mailing list</span></label>' : '');
+        '<span>Include on the <b>' + esc(LIST_LABEL[listKey]) + '</b> mailing list</span></label>' : '') +
+      alsoListsHtml(listKey, p.alsoLists || []);
     row.querySelector('.ri-del').addEventListener('click', function () { row.parentNode.removeChild(row); markSaved(); });
     row.querySelector('[data-addemail]').addEventListener('click', function () {
       var box = row.querySelector('[data-emails]'); box.insertAdjacentHTML('beforeend', emailFieldHtml(''));
@@ -504,6 +533,14 @@ firebase.initializeApp({
     row.querySelector('[data-addphone]').addEventListener('click', function () {
       var box = row.querySelector('[data-phones]'); box.insertAdjacentHTML('beforeend', phoneFieldHtml({}));
       wireValidation(box.lastElementChild); markSaved();
+    });
+    var toggleAlso = row.querySelector('[data-togglelists]'), chips = row.querySelector('[data-listchips]');
+    if (toggleAlso) toggleAlso.addEventListener('click', function () {
+      var show = chips.style.display === 'none'; chips.style.display = show ? 'flex' : 'none';
+      toggleAlso.textContent = show ? '− Hide other mailing lists' : '+ Also on another mailing list';
+    });
+    if (chips) chips.addEventListener('change', function (e) {
+      if (e.target.getAttribute('data-list') !== null) e.target.closest('.ri-chip').classList.toggle('is-on', e.target.checked);
     });
     row.addEventListener('click', function (e) {
       if (!e.target.classList.contains('ri-x')) return;
@@ -586,9 +623,12 @@ firebase.initializeApp({
           var emails = readEmails(row.querySelector('[data-emails]'));
           var phones = readPhones(row.querySelector('[data-phones]'));
           var onListEl = row.querySelector('[data-onlist]');
+          var alsoLists = Array.prototype.map.call(row.querySelectorAll('[data-list]:checked'), function (c) { return c.getAttribute('data-list'); });
           if (g('name') || emails.length || phones.length) {
-            data.people.push({ section: section, name: g('name'), title: g('title'),
-              emails: emails, phones: phones, onList: onListEl ? onListEl.checked : false });
+            var rec = { section: section, name: g('name'), title: g('title'),
+              emails: emails, phones: phones, onList: onListEl ? onListEl.checked : false };
+            if (alsoLists.length) rec.alsoLists = alsoLists;
+            data.people.push(rec);
           }
         });
       });
@@ -629,6 +669,7 @@ firebase.initializeApp({
     var sects = Object.keys(SECTION_LIST).filter(function (s) { return SECTION_LIST[s] === key; });
     var li = LIAISON.filter(function (x) { return x[2] === key; })[0];
     var hasPerson = data.people.some(function (p) {
+      if (p.alsoLists && p.alsoLists.indexOf(key) !== -1) return true;   // extra "also on" memberships
       if (li) return p.section === 'Liaison officers' && p.roleKey === li[0];
       return sects.indexOf(p.section) !== -1 && p.onList;
     });
@@ -648,6 +689,18 @@ firebase.initializeApp({
     var nPeople = data.people.length, nInbox = Object.keys(data.inboxes).length;
     var probs = findProblems();
 
+    // (B) duplicate-email safety net: same email on more than one person record.
+    var emailMap = {};
+    data.people.forEach(function (p) {
+      (p.emails || []).forEach(function (e) {
+        var k = e.trim().toLowerCase(); if (!k) return;
+        emailMap[k] = emailMap[k] || []; if (emailMap[k].indexOf(p) === -1) emailMap[k].push(p);
+      });
+    });
+    var dups = Object.keys(emailMap).filter(function (k) { return emailMap[k].length > 1; }).map(function (k) {
+      return { email: k, areas: emailMap[k].map(function (p) { return p.section + (p.title ? ' (' + p.title + ')' : ''); }) };
+    });
+
     // department-by-department roster, in step order
     var secOrder = []; STEPS.forEach(function (s) { if (s.sections) s.sections.forEach(function (x) { secOrder.push(x); }); }); secOrder.push('Liaison officers');
     var bySec = {}; data.people.forEach(function (p) { (bySec[p.section] = bySec[p.section] || []).push(p); });
@@ -655,7 +708,8 @@ firebase.initializeApp({
       return '<div style="margin-bottom:12px;"><div class="ri-rev__sec">' + esc(s) + '</div>' + bySec[s].map(function (p) {
         var listKey = p.section === 'Liaison officers' ? null : SECTION_LIST[p.section];
         var tag = (listKey && p.onList) ? ' <span style="color:var(--green);">· on ' + esc(LIST_LABEL[listKey]) + '</span>' : (listKey && !p.onList ? ' <span class="muted">· not on list</span>' : '');
-        return '<div class="ri-rev__p"><b>' + esc(p.name || '(unnamed)') + '</b>' + (p.title ? ' · ' + esc(p.title) : '') + tag +
+        var also = (p.alsoLists && p.alsoLists.length) ? ' <span style="color:var(--green);">· also on ' + p.alsoLists.map(function (k) { return esc(LIST_LABEL[k] || k); }).join(', ') + '</span>' : '';
+        return '<div class="ri-rev__p"><b>' + esc(p.name || '(unnamed)') + '</b>' + (p.title ? ' · ' + esc(p.title) : '') + tag + also +
           '<br><span class="muted">' + esc(contactLine(p)) + '</span></div>';
       }).join('') + '</div>';
     }).join('') || '<p class="muted" style="color:var(--text-muted);font-size:13px;">No people added yet.</p>';
@@ -666,6 +720,9 @@ firebase.initializeApp({
       (probs.length ? '<div class="ri-prob"><b>' + probs.length + ' thing' + (probs.length > 1 ? 's' : '') + ' to fix before you can submit:</b>' +
         probs.slice(0, 8).map(function (p) { return '<div>• ' + esc(p.msg) + ' <a data-fix="' + p.step + '">Fix</a></div>'; }).join('') +
         (probs.length > 8 ? '<div>…and ' + (probs.length - 8) + ' more.</div>' : '') + '</div>' : '') +
+      (dups.length ? '<div class="ri-dupnote"><b>Looks like the same person in more than one area:</b>' +
+        dups.map(function (d) { return '<div>• ' + esc(d.email) + ' — ' + esc(d.areas.join(', ')) + '</div>'; }).join('') +
+        '<div style="margin-top:6px;">If that’s one person wearing two hats, enter them once and tick <b>“Also on another mailing list”</b> on their card rather than adding a second entry. Leaving it as-is is fine too — we’ll treat them as one contact.</div></div>' : '') +
       '<div class="ri-card"><h2>Mailing-list coverage</h2><p class="ri-card__sub">' + covered + ' of ' + LISTS.length + ' lists have someone. Tap an amber one to jump back. Gaps are fine if that role genuinely doesn’t apply.</p>' +
       '<div class="ri-cov">' + states.map(function (s) {
         var st = s[1];
@@ -749,7 +806,8 @@ firebase.initializeApp({
       }).join('') + '</div>' : '') +
       order.map(function (sec) {
         return '<div class="ri-card"><h2>' + esc(sec) + '</h2>' + bySection[sec].map(function (p) {
-          return '<div style="padding:4px 0;font-size:13px;"><b>' + esc(p.name || '(unnamed)') + '</b>' + (p.title ? ' · ' + esc(p.title) : '') + '<br><span style="color:var(--text-muted);">' + esc(contactLine(p)) + '</span></div>';
+          var also = (p.alsoLists && p.alsoLists.length) ? ' <span style="color:var(--green);">· also on ' + p.alsoLists.map(function (k) { return esc(LIST_LABEL[k] || k); }).join(', ') + '</span>' : '';
+          return '<div style="padding:4px 0;font-size:13px;"><b>' + esc(p.name || '(unnamed)') + '</b>' + (p.title ? ' · ' + esc(p.title) : '') + also + '<br><span style="color:var(--text-muted);">' + esc(contactLine(p)) + '</span></div>';
         }).join('') + '</div>';
       }).join('');
   }
