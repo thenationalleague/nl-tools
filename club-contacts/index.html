@@ -1,10 +1,20 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/index.html  v2.1
+  club-contacts/index.html  v2.2
   Public club CONTACTS collection — GUIDED WIZARD (capability-URL pattern).
   Sibling of club-data. Gathers a club's people directory for club-directory.
   (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
 
+  v2.2 (17/06/2026) — feedback round 13:
+    - Linked (multi-role) people now show their name as a READ-ONLY header on the
+      second card, not a typeable box. Stops the silent-corruption trap where a
+      mis-click on an "already listed" chip + retyping the name renamed that
+      shared contact everywhere. "✎ Edit name" makes a rename deliberate;
+      "Not this person? Add someone else" detaches the role and starts a fresh
+      blank person instead. syncEditCards no longer writes name when the field
+      is absent (locked cards), so the shared name can't be wiped.
+    - Inbox function placeholder changed "— choose —" → "Select a function…"
+      (also a cache tell: if the old text still shows, the page is stale).
   v2.1 (17/06/2026) — feedback round 12:
     - Footer Back/Next bar is no longer sticky — a fixed bottom bar read as the
       page end and masked that there was more content to scroll to. It now sits
@@ -125,6 +135,14 @@ firebase.initializeApp({
   .ri-sum__act button { background: none; border: 1px solid var(--border); color: var(--navy); border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; font-family: var(--font); }
   .ri-sum__act button:hover { border-color: var(--navy); }
   .ri-rolebadge { display: inline-block; font-size: 11px; background: var(--navy-50); color: var(--navy); border-radius: 12px; padding: 2px 8px; margin: 0 0 0 6px; font-variation-settings:'wght' 700; }
+
+  /* Linked (multi-role) person: name shown read-only so it can't be retyped by accident */
+  .ri-linked { background: var(--navy-50); border: 1px solid var(--navy-100); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+  .ri-linked__name { font-variation-settings:'wght' 800; color: var(--navy); font-size: 15px; }
+  .ri-linked__note { font-size: 12px; color: var(--text-muted); margin-top: 4px; line-height: 1.55; }
+  .ri-linked__note b { color: var(--navy); }
+  .ri-linked__note button { background: none; border: none; color: var(--navy); font-size: 12px; font-variation-settings:'wght' 700; cursor: pointer; padding: 0; font-family: var(--font); text-decoration: underline; }
+  .ri-linked__note button:hover { color: var(--primary); }
 
   /* Add buttons + "pick existing" */
   .btn-addperson { background: var(--navy); color: #fff; border: none; border-radius: 8px; padding: 12px 16px; width: 100%; font-family: var(--font); font-size: 14px; font-variation-settings:'wght' 800; cursor: pointer; margin-top: 4px; }
@@ -272,6 +290,7 @@ firebase.initializeApp({
   var clubName = null;
   var cur = 0;
   var editing = {};   // person id -> true while its card is open for editing
+  var unlockedName = {};  // person id -> true while a linked person's name is deliberately being edited
   var data = { yourName:'', yourEmail:'', inboxes:{}, people:[], emptied:{} };
 
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
@@ -444,7 +463,7 @@ firebase.initializeApp({
         '<button type="button" class="ri-del">Remove</button></div>' +
       '<div class="ri-grid">' +
         '<div><label>Function</label><select data-ib="key">' +
-          '<option value="">— choose —</option>' +
+          '<option value="">Select a function…</option>' +
           LISTS.map(function (l) { return '<option value="' + l[0] + '"' + (l[0] === selVal ? ' selected' : '') + '>' + esc(l[1]) + '</option>'; }).join('') +
           '<option value="__other"' + (selVal === '__other' ? ' selected' : '') + '>Other…</option>' +
         '</select>' +
@@ -514,8 +533,21 @@ firebase.initializeApp({
       if (save) {
         syncEditCards(); var sp = findPerson(save.getAttribute('data-pid'));
         if (sp && !sp.name) { el('riStatus').textContent = 'Please enter a name for this person.'; return; }
-        if (sp) delete editing[sp.id];
+        if (sp) { delete editing[sp.id]; delete unlockedName[sp.id]; }
         afterStructural(section, null); return;
+      }
+      var en = t.closest('[data-editname]');
+      if (en) { syncEditCards(); unlockedName[en.getAttribute('data-pid')] = true; afterStructural(section, en.getAttribute('data-pid')); return; }
+      var unlink = t.closest('[data-unlink]');
+      if (unlink) {
+        syncEditCards(); var up = findPerson(unlink.getAttribute('data-pid'));
+        if (up) {
+          up.roles = up.roles.filter(function (r) { return r.section !== section; });  // detach the just-linked role
+          delete editing[up.id]; delete unlockedName[up.id];
+        }
+        var fresh = { id: uid(), name: '', emails: [], phones: [], roles: [{ section: section, title: '' }] };
+        data.people.push(fresh); editing[fresh.id] = true;
+        afterStructural(section, fresh.id); return;
       }
       var edit = t.closest('[data-edit]');
       if (edit) { syncEditCards(); editing[edit.getAttribute('data-pid')] = true; afterStructural(section, edit.getAttribute('data-pid')); return; }
@@ -539,16 +571,31 @@ firebase.initializeApp({
     var role = roleFor(p, section) || { title: '' };
     var emails = (p.emails && p.emails.length) ? p.emails : [''];
     var phones = (p.phones && p.phones.length) ? p.phones : [{}];
-    var others = (p.roles || []).filter(function (r) { return r.section !== section; }).map(function (r) { return '<span class="ri-rolebadge">also: ' + esc(r.section) + '</span>'; }).join('');
+    var otherSecs = (p.roles || []).filter(function (r) { return r.section !== section; }).map(function (r) { return r.section; });
+    // A "linked" person holds another role too, so their name is a shared identity.
+    // Show it read-only (not a typeable box) to kill the "I thought I was adding
+    // someone new and renamed them everywhere" trap — unless the user explicitly
+    // chose "Edit name", which makes the rename a deliberate act.
+    var linked = (p.roles || []).length > 1;
+    var locked = linked && !unlockedName[p.id];
+    var nameBlock = locked
+      ? '<div class="ri-linked">' +
+          '<div class="ri-linked__name">' + esc(p.name || '(unnamed)') + '</div>' +
+          '<div class="ri-linked__note">Same contact as in <b>' + esc(otherSecs.join(', ')) + '</b> — name and contact details are shared across both areas. ' +
+            '<button type="button" data-editname data-pid="' + p.id + '">✎ Edit name</button> · ' +
+            '<button type="button" data-unlink data-pid="' + p.id + '">Not this person? Add someone else</button></div></div>' +
+        '<div><label>Role / job title (in this area)</label><input type="text" data-p="title" value="' + esc(role.title || '') + '"></div>'
+      : '<div class="ri-grid">' +
+          '<div><label>Full name</label><input type="text" data-p="name" value="' + esc(p.name || '') + '"></div>' +
+          '<div><label>Role / job title (in this area)</label><input type="text" data-p="title" value="' + esc(role.title || '') + '"></div>' +
+        '</div>';
+    var headBadges = otherSecs.map(function (s) { return '<span class="ri-rolebadge">also: ' + esc(s) + '</span>'; }).join('');
     var div = document.createElement('div');
     div.className = 'ri-person'; div.setAttribute('data-pedit', '1'); div.setAttribute('data-pid', p.id); div.setAttribute('data-section', section);
     div.innerHTML =
-      '<div class="ri-person__hd"><span class="ri-person__n">' + esc(section) + others + '</span>' +
+      '<div class="ri-person__hd"><span class="ri-person__n">' + esc(section) + headBadges + '</span>' +
         '<button type="button" class="ri-del" data-remove data-pid="' + p.id + '">Remove</button></div>' +
-      '<div class="ri-grid">' +
-        '<div><label>Full name</label><input type="text" data-p="name" value="' + esc(p.name || '') + '"></div>' +
-        '<div><label>Role / job title (in this area)</label><input type="text" data-p="title" value="' + esc(role.title || '') + '"></div>' +
-      '</div>' +
+      nameBlock +
       '<div style="margin-top:12px;"><label>Email address(es)</label>' +
         '<div class="ri-multi" data-emails>' + emails.map(emailFieldHtml).join('') + '</div>' +
         '<button type="button" class="ri-addmore" data-addemail>+ Add another email</button></div>' +
@@ -625,7 +672,10 @@ firebase.initializeApp({
       var p = findPerson(card.getAttribute('data-pid')); if (!p) return;
       var section = card.getAttribute('data-section');
       var g = function (k) { var n = card.querySelector('[data-p="' + k + '"]'); return n ? n.value.trim() : ''; };
-      p.name = g('name');
+      // A linked person's card has NO name input (it's a read-only header), so only
+      // overwrite the shared name when the field is actually present — otherwise we'd wipe it.
+      var nameEl = card.querySelector('[data-p="name"]');
+      if (nameEl) p.name = nameEl.value.trim();
       p.emails = readEmails(card.querySelector('[data-emails]'));
       p.phones = readPhones(card.querySelector('[data-phones]'));
       var role = roleFor(p, section); if (role) role.title = g('title');
