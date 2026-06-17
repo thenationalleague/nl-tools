@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<!--
+  commercial-benchmarking/index.html  v1.0
+  Per-club Commercial Benchmarking dashboard (capability-URL pattern).
+
+  Each club receives a private link /commercial-benchmarking/?t=<token>. The
+  token maps to that club's dashboard node in RTDB:
+    app-data/ops-commercial-benchmarking/dash/<token>   (this club's own row
+        + precomputed division/league percentiles — readable only at the known
+        token path; the collection can't be listed)
+    app-data/ops-commercial-benchmarking/aggregates      (ANONYMISED medians /
+        ranges / histograms / counts — no club is ever named)
+
+  Anonymisation is structural: a token resolves to its own club's node plus the
+  shared anonymous aggregates, and nothing else. No other club's named figure is
+  reachable from any link. NOT a gated tool (no auth-guard, no account) — the
+  unguessable link is the credential, exactly like /club-data/. Out of
+  lint-tools scope by design. Data lives only in RTDB; nothing club-identifiable
+  is baked into this (public) file.
+
+  Two view controls (per Richard): Bars <-> Graph (the histogram exposes skew —
+  you can be above the median yet a fraction of the top), and Your division <->
+  All divisions.
+
+  Changelog
+  ---------
+  v1.0 — Initial build. Capability-URL dashboard; bars/graph + division/league
+         toggles; loads aggregates + own row from RTDB; graceful "not provided"
+         and invalid-link states.
+-->
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Commercial Benchmarking — The National League</title>
+<link rel="stylesheet" href="/tools/system/nl-brand.css?v=20">
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script>
+firebase.initializeApp({
+  apiKey: "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+  authDomain: "nl-tools.firebaseapp.com",
+  databaseURL: "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "nl-tools", storageBucket: "nl-tools.firebasestorage.app",
+  messagingSenderId: "801354670005", appId: "1:801354670005:web:05d8ebad3e7e63610d03fc"
+});
+</script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--off-white);color:var(--text)}
+.kicker{font-size:11px;font-variation-settings:'wght' 800;letter-spacing:.10em;
+  text-transform:uppercase;color:var(--text-muted)}
+
+/* topbar */
+.topbar{background:var(--navy);border-bottom:4px solid var(--primary);color:var(--white);
+  padding:14px clamp(16px,2.5vw,44px);display:flex;align-items:center;gap:14px}
+.topbar img{height:34px;width:auto;display:block}
+.topbar .tb-title{font-variation-settings:'wght' 900;font-size:14px;letter-spacing:.02em;line-height:1.1}
+.topbar .tb-sub{font-size:11px;color:var(--navy-100);font-variation-settings:'wght' 600}
+.topbar .tb-right{margin-left:auto;font-size:11px;color:var(--navy-100);display:flex;align-items:center;gap:8px}
+.tb-dot{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block}
+
+.page{max-width:1080px;margin:0 auto;padding:clamp(24px,3vw,48px) clamp(16px,2.5vw,44px) 80px}
+
+/* gate / loading / error */
+.gate{max-width:560px;margin:80px auto;text-align:center;padding:0 24px;color:var(--text-muted)}
+.gate h2{font-variation-settings:'wght' 900;color:var(--navy);font-size:22px;margin-bottom:10px}
+.spinner{width:34px;height:34px;border:3px solid var(--navy-100);border-top-color:var(--navy);
+  border-radius:50%;margin:0 auto 18px;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* club header */
+.club{display:flex;align-items:center;gap:20px;margin-bottom:10px}
+.club .crest{width:74px;height:74px;object-fit:contain;flex:none;background:var(--white);
+  border:1px solid var(--border);border-radius:6px;padding:7px}
+.club h1{font-size:clamp(28px,3.4vw,40px);font-variation-settings:'wght' 900;line-height:1.02;
+  letter-spacing:-.01em;color:var(--text)}
+.club .meta{display:flex;align-items:center;gap:10px;margin-top:7px;flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;gap:6px;background:var(--navy);color:var(--white);
+  font-size:11px;font-variation-settings:'wght' 800;padding:4px 11px;border-radius:100px;letter-spacing:.02em}
+.spon{font-size:14px;color:var(--text-muted)}
+.spon b{color:var(--text);font-variation-settings:'wght' 700}
+
+.privacy{display:flex;gap:10px;align-items:flex-start;background:var(--white);border:1px solid var(--border);
+  border-left:3px solid var(--navy);border-radius:6px;padding:12px 15px;margin:18px 0 22px;
+  font-size:14px;color:var(--text-muted)}
+.privacy b{color:var(--text);font-variation-settings:'wght' 700}
+.privacy svg{flex:none;margin-top:2px}
+
+/* controls */
+.controls{display:flex;gap:18px;align-items:center;flex-wrap:wrap;background:var(--white);
+  border:1px solid var(--border);border-radius:6px;padding:11px 15px;margin-bottom:28px;
+  box-shadow:0 1px 3px var(--navy-50)}
+.ctl{display:flex;align-items:center;gap:9px}
+.ctl .lbl{font-size:11px;font-variation-settings:'wght' 800;text-transform:uppercase;
+  letter-spacing:.06em;color:var(--text-muted)}
+.seg{display:inline-flex;background:var(--off-white);border:1px solid var(--border);border-radius:100px;padding:3px}
+.seg button{appearance:none;border:0;background:transparent;cursor:pointer;font-family:inherit;
+  font-size:11px;font-variation-settings:'wght' 800;color:var(--text-muted);padding:5px 13px;
+  border-radius:100px;transition:all .15s}
+.seg button.on{background:var(--navy);color:var(--white)}
+
+/* sections */
+.section{margin-bottom:34px}
+.section-head{display:flex;align-items:baseline;gap:12px;margin-bottom:14px;padding-bottom:9px;
+  border-bottom:2px solid var(--navy)}
+.section-head h2{font-size:14px;font-variation-settings:'wght' 900;text-transform:uppercase;
+  letter-spacing:.06em;color:var(--navy)}
+.section-head .count{font-size:11px;color:var(--text-muted);font-variation-settings:'wght' 600}
+
+/* metric cards */
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:680px){.grid{grid-template-columns:1fr}}
+.card{background:var(--white);border:1px solid var(--border);border-radius:6px;
+  box-shadow:0 2px 12px var(--navy-50);padding:18px 18px 20px;position:relative}
+.card .lab{font-size:14px;font-variation-settings:'wght' 800;color:var(--text)}
+.card .desc{font-size:11px;color:var(--text-muted);margin-top:2px;max-width:78%}
+.card .vtoggle{position:absolute;top:14px;right:14px}
+.card .vtoggle button{appearance:none;border:1px solid var(--border);background:var(--off-white);
+  cursor:pointer;font-family:inherit;font-size:11px;font-variation-settings:'wght' 800;
+  color:var(--text-muted);padding:3px 8px;border-radius:5px;display:inline-flex;align-items:center;gap:5px}
+.card .vtoggle button:hover{border-color:var(--navy-300);color:var(--navy)}
+.value-row{display:flex;align-items:flex-end;gap:9px;margin:13px 0 3px}
+.value{font-size:clamp(30px,3.8vw,40px);font-variation-settings:'wght' 900;line-height:.95;
+  letter-spacing:-.02em;color:var(--text)}
+.posn{font-size:11px;font-variation-settings:'wght' 800;padding:3px 9px;border-radius:100px;margin-bottom:5px}
+.posn.hi{background:var(--green-100,#e7f3ea);color:var(--green)}
+.posn.mid{background:var(--amber-100,#fdf0e2);color:var(--amber)}
+.posn.lo{background:var(--navy-50);color:var(--navy)}
+.posn.na{background:var(--navy-50);color:var(--text-muted)}
+
+/* range bar */
+.bar-wrap{margin-top:18px}
+.bar{position:relative;height:8px;border-radius:100px;background:var(--navy-100)}
+.bar .median{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--navy);border-radius:2px;opacity:.55}
+.bar .marker{position:absolute;top:50%;width:15px;height:15px;border-radius:50%;background:var(--primary);
+  border:2.5px solid var(--white);box-shadow:0 1px 4px var(--primary-200,rgba(158,0,0,.4));
+  transform:translate(-50%,-50%);transition:left .8s cubic-bezier(.22,1,.36,1)}
+.scale{display:flex;justify-content:space-between;margin-top:10px;font-size:11px;color:var(--text-muted)}
+.scale .mid{text-align:center}
+.scale b{display:block;color:var(--text);font-variation-settings:'wght' 800;font-size:14px}
+.scale .mid b{color:var(--navy)}
+.league-line{display:flex;align-items:center;gap:7px;margin-top:13px;padding-top:11px;
+  border-top:1px dashed var(--border);font-size:11px;color:var(--text-muted)}
+.league-line .lg-pos{margin-left:auto;font-variation-settings:'wght' 800;color:var(--text)}
+
+/* histogram */
+.hist{margin-top:18px}
+.hist-bars{display:flex;align-items:flex-end;gap:3px;height:96px;padding-top:18px;position:relative}
+.hbar{flex:1;background:var(--navy-100);border-radius:3px 3px 0 0;min-height:2px;position:relative;
+  transition:height .6s cubic-bezier(.22,1,.36,1)}
+.hbar.you{background:var(--primary)}
+.hbar .hc{position:absolute;top:-15px;left:50%;transform:translateX(-50%);font-size:10px;
+  font-variation-settings:'wght' 700;color:var(--text-muted)}
+.hbar.you .youtag{position:absolute;top:-32px;left:50%;transform:translateX(-50%);white-space:nowrap;
+  background:var(--primary);color:var(--white);font-size:10px;font-variation-settings:'wght' 800;
+  padding:2px 6px;border-radius:4px}
+.hbar.you .youtag::after{content:"";position:absolute;top:100%;left:50%;transform:translateX(-50%);
+  border:4px solid transparent;border-top-color:var(--primary)}
+.hist-axis{display:flex;justify-content:space-between;margin-top:8px;font-size:11px;color:var(--text-muted)}
+.hist-axis b{display:block;color:var(--text);font-variation-settings:'wght' 800;font-size:14px}
+.hist-axis .mid{text-align:center;color:var(--navy)}
+.hist-note{font-size:11px;color:var(--text-muted);margin-top:11px;padding-top:10px;
+  border-top:1px dashed var(--border);line-height:1.45}
+.hist-note b{color:var(--text);font-variation-settings:'wght' 700}
+
+/* chips */
+.chips{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media(max-width:680px){.chips{grid-template-columns:1fr}}
+.chip{background:var(--white);border:1px solid var(--border);border-radius:6px;padding:15px 16px}
+.chip .cv{font-size:clamp(18px,2vw,22px);font-variation-settings:'wght' 900;margin:6px 0 4px;color:var(--text)}
+.chip .cn{font-size:11px;color:var(--text-muted)}
+
+.foot{margin-top:14px;font-size:11px;color:var(--text-muted);border-top:1px solid var(--border);
+  padding-top:16px;line-height:1.6}
+.foot b{color:var(--text);font-variation-settings:'wght' 700}
+@media(prefers-reduced-motion:reduce){.bar .marker,.hbar{transition:none}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <img src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose%20white.png"
+       alt="National League"
+       onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png'">
+  <div>
+    <div class="tb-title">Commercial Benchmarking</div>
+    <div class="tb-sub">2025/26 season</div>
+  </div>
+  <div class="tb-right"><span class="tb-dot"></span> <b style="color:var(--white);font-variation-settings:'wght' 800;margin-left:3px" id="tbClub">Loading…</b></div>
+</div>
+
+<div id="gate" class="gate"><div class="spinner"></div>Loading your dashboard…</div>
+
+<div class="page" id="page" style="display:none">
+  <div class="club">
+    <img class="crest" id="crest" alt=""
+         onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png'">
+    <div>
+      <h1 id="clubName"></h1>
+      <div class="meta">
+        <span class="pill" id="divPill"></span>
+        <span class="spon" id="sponWrap">Front of shirt: <b id="fsSpon"></b></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="privacy">
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--navy)" stroke-width="2"><path d="M12 2 4 6v6c0 5 3.5 8 8 10 4.5-2 8-5 8-10V6z"/></svg>
+    <div>This is your club's private view. Every figure for other clubs is shown only as a <b>benchmark</b> — a median, a range, a distribution or a count. <b>No other club is ever named.</b></div>
+  </div>
+
+  <div class="controls">
+    <div class="ctl">
+      <span class="lbl">Compare against</span>
+      <span class="seg" id="scopeSeg">
+        <button data-scope="div" class="on">Your division</button>
+        <button data-scope="league">All divisions</button>
+      </span>
+    </div>
+    <div class="ctl">
+      <span class="lbl">Show as</span>
+      <span class="seg" id="viewSeg">
+        <button data-view="bars" class="on">Bars</button>
+        <button data-view="graph">Graph</button>
+      </span>
+    </div>
+  </div>
+
+  <div id="sections"></div>
+
+  <div class="section">
+    <div class="section-head"><h2>Your commercial profile</h2><span class="count">how your setup compares</span></div>
+    <div class="chips" id="chips"></div>
+  </div>
+
+  <div class="foot">
+    Benchmarks computed across <b id="lgn"></b> responding clubs (<b id="dvn"></b> in <span id="divName"></span>).
+    Figures are per season, excluding VAT. Position bands describe where you sit in the current comparison group,
+    not whether higher is better. Switch <b>Bars → Graph</b> on any card to see the full spread.
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var token = (new URLSearchParams(location.search).get('t') || '').trim();
+  var gate = document.getElementById('gate');
+  function fail(msg) { gate.innerHTML = '<h2>Link not valid</h2><p>' + msg + '</p>'; }
+
+  if (!/^[A-Za-z0-9_-]{20,}$/.test(token)) {
+    fail('Please use the private link the League sent to your club.'); return;
+  }
+  var db = firebase.database();
+  var ROOT = 'app-data/ops-commercial-benchmarking/';
+
+  Promise.all([
+    db.ref(ROOT + 'aggregates').once('value'),
+    db.ref(ROOT + 'dash/' + token).once('value')
+  ]).then(function (res) {
+    var AGG = res[0].val(), OWN = res[1].val();
+    if (!OWN) { fail('This link isn’t recognised. Please use the link the League sent to your club.'); return; }
+    if (!AGG) { fail('Benchmark data isn’t available yet. Please try again shortly.'); return; }
+    boot(AGG, OWN);
+  }).catch(function (e) {
+    console.error(e);
+    fail('Something went wrong loading your dashboard. Please try again.');
+  });
+
+  /* ---------------- render ---------------- */
+  function boot(AGG, OWN) {
+    var state = { scope: 'div', view: 'bars', cardView: {} };
+
+    var fmt = function (v, u) { return v == null ? '—' : (u === '£' ? '£' + Math.round(v).toLocaleString('en-GB') : Math.round(v).toLocaleString('en-GB')); };
+    function fmtShort(v, u) {
+      if (v == null) return '—';
+      var s, a = Math.abs(v);
+      if (a >= 1e6) s = (v / 1e6).toFixed(v % 1e6 ? 1 : 0) + 'm';
+      else if (a >= 1000) s = (v / 1000).toFixed(v % 1000 ? 1 : 0) + 'k';
+      else s = Math.round(v).toString();
+      return (u === '£' ? '£' : '') + s;
+    }
+    function band(pct) {
+      if (pct == null) return { cls: 'na', txt: 'Not provided' };
+      if (pct >= 75) return { cls: 'hi', txt: 'Top quartile' };
+      if (pct >= 50) return { cls: 'hi', txt: 'Upper half' };
+      if (pct >= 25) return { cls: 'mid', txt: 'Lower half' };
+      return { cls: 'lo', txt: 'Bottom quartile' };
+    }
+    function scopeKey() { return state.scope === 'league' ? 'league' : OWN.division; }
+    function otherScope() { return state.scope === 'league' ? OWN.division : 'league'; }
+    function pctFor(m, scope) { return scope === 'league' ? m.leaguePct : m.divPct; }
+
+    function rangeBar(agg, own) {
+      var s = agg.scopes[scopeKey()], u = agg.unit, os = otherScope(), o = agg.scopes[os];
+      var provided = own.value != null, left = 50;
+      if (provided && s.max > s.min) left = 3 + 94 * Math.max(0, Math.min(1, (own.value - s.min) / (s.max - s.min)));
+      var medLeft = s.max > s.min ? 3 + 94 * ((s.median - s.min) / (s.max - s.min)) : 50;
+      var osLabel = os === 'league' ? 'All divisions' : os + ' division';
+      return '<div class="bar-wrap"><div class="bar">' +
+        '<div class="median" style="left:' + medLeft.toFixed(1) + '%"></div>' +
+        (provided ? '<div class="marker" style="left:' + left.toFixed(1) + '%"></div>' : '') +
+        '</div><div class="scale">' +
+        '<span>' + fmtShort(s.min, u) + '<b>Lowest</b></span>' +
+        '<span class="mid">' + fmtShort(s.median, u) + '<b>Median</b></span>' +
+        '<span style="text-align:right">' + fmtShort(s.max, u) + '<b>Highest</b></span>' +
+        '</div><div class="league-line"><span>' + osLabel + ' median <b style="color:var(--text)">' +
+        fmtShort(o.median, u) + '</b> (' + o.count + ' clubs)</span>' +
+        '<span class="lg-pos">' + band(pctFor(own, os === 'league' ? 'league' : 'div')).txt + '</span></div></div>';
+    }
+
+    function histogram(agg, own) {
+      var s = agg.scopes[scopeKey()], u = agg.unit, maxc = Math.max.apply(null, s.counts.concat(1)), nb = s.counts.length;
+      var youBin = -1;
+      if (own.value != null) {
+        for (var i = 0; i < nb; i++) {
+          if (own.value >= s.edges[i] && (i === nb - 1 ? own.value <= s.edges[i + 1] : own.value < s.edges[i + 1])) { youBin = i; break; }
+        }
+        if (own.value <= s.edges[0]) youBin = 0;
+        if (own.value >= s.edges[nb]) youBin = nb - 1;
+      }
+      var bars = s.counts.map(function (c, i) {
+        var h = Math.round(8 + 80 * (c / maxc)), you = i === youBin;
+        return '<div class="hbar' + (you ? ' you' : '') + '" style="height:' + (c ? h : 3) + 'px">' +
+          (c ? '<span class="hc">' + c + '</span>' : '') +
+          (you ? '<span class="youtag">You ' + fmtShort(own.value, u) + '</span>' : '') + '</div>';
+      }).join('');
+      var note;
+      if (own.value != null) {
+        var ratio = s.max > 0 ? Math.round(100 * own.value / s.max) : null;
+        note = "You're <b>" + (own.value >= s.median ? 'above' : 'below') + ' the median</b> (' + fmtShort(s.median, u) + ')';
+        if (ratio != null) note += ' and at <b>' + ratio + '%</b> of the highest (' + fmtShort(s.max, u) + ')';
+        note += '.';
+      } else {
+        note = "You didn't provide this figure — distribution shown for " + s.count + ' clubs.';
+      }
+      return '<div class="hist"><div class="hist-bars">' + bars + '</div><div class="hist-axis">' +
+        '<span>' + fmtShort(s.min, u) + '<b>Lowest</b></span>' +
+        '<span class="mid">' + fmtShort(s.median, u) + '<b>Median</b></span>' +
+        '<span style="text-align:right">' + fmtShort(s.max, u) + '<b>Highest</b></span>' +
+        '</div><div class="hist-note">' + note + '</div></div>';
+    }
+
+    function metricCard(key) {
+      var agg = AGG.aggregates[key], own = OWN.metrics[key], provided = own.value != null;
+      var pct = pctFor(own, state.scope === 'league' ? 'league' : 'div');
+      var b = band(provided ? pct : null);
+      var view = state.cardView[key] || state.view;
+      var body = view === 'graph' ? histogram(agg, own) : rangeBar(agg, own);
+      var nextView = view === 'graph' ? 'bars' : 'graph';
+      var icon = view === 'graph'
+        ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="4" y1="20" x2="20" y2="20"/><line x1="4" y1="20" x2="4" y2="4"/><path d="M7 14l3-3 3 2 4-6"/></svg> Bars'
+        : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="4" y="11" width="3.5" height="9"/><rect x="10.25" y="6" width="3.5" height="14"/><rect x="16.5" y="13" width="3.5" height="7"/></svg> Graph';
+      return '<div class="card"><div class="vtoggle"><button data-card="' + key + '" data-next="' + nextView + '">' + icon + '</button></div>' +
+        '<div class="lab">' + agg.label + '</div><div class="desc">' + agg.desc + '</div>' +
+        '<div class="value-row"><span class="value">' + (provided ? fmt(own.value, agg.unit) : '—') + '</span>' +
+        '<span class="posn ' + b.cls + '">' + b.txt + '</span></div>' + body + '</div>';
+    }
+
+    function render() {
+      var groups = [];
+      Object.keys(AGG.aggregates).forEach(function (k) {
+        var g = AGG.aggregates[k].group, grp = groups.filter(function (x) { return x.title === g; })[0];
+        if (!grp) { grp = { title: g, keys: [] }; groups.push(grp); }
+        grp.keys.push(k);
+      });
+      var scopeTxt = state.scope === 'league' ? 'all divisions' : OWN.division + ' division';
+      document.getElementById('sections').innerHTML = groups.map(function (g) {
+        return '<div class="section"><div class="section-head"><h2>' + g.title + '</h2>' +
+          '<span class="count">vs ' + scopeTxt + '</span></div>' +
+          '<div class="grid">' + g.keys.map(metricCard).join('') + '</div></div>';
+      }).join('');
+    }
+
+    function chipNarrative(kind) {
+      var d = AGG.chips;
+      if (kind === 'progFormat') return 'Most clubs print — ' + (d.progFormat.Printed || 0) + ' printed, ' + (d.progFormat.Digital || 0) + ' digital, ' + (d.progFormat.Both || 0) + ' both';
+      if (kind === 'rollingFront') return 'Only ' + (d.rollingFront.Yes || 0) + ' of ' + ((d.rollingFront.Yes || 0) + (d.rollingFront.No || 0)) + ' clubs run a rolling front-shirt deal';
+      if (kind === 'emailPartners') return 'You can email on behalf of partners — ' + (d.emailPartners.Yes || 0) + ' of ' + ((d.emailPartners.Yes || 0) + (d.emailPartners.No || 0)) + ' clubs can';
+      return '';
+    }
+    function renderChips() {
+      var c = OWN.chips || {};
+      var items = [
+        { k: 'Programme format', v: c.progFormat || '—', kind: 'progFormat' },
+        { k: 'Front-shirt deal', v: c.rollingFront === 'Yes' ? 'Rolling' : (c.rollingFront ? 'Fixed term' : '—'), kind: 'rollingFront' },
+        { k: 'Email partner offers', v: c.emailPartners === 'Yes' ? 'Enabled' : (c.emailPartners ? 'Not enabled' : '—'), kind: 'emailPartners' }
+      ];
+      document.getElementById('chips').innerHTML = items.map(function (it) {
+        return '<div class="chip"><div class="kicker">' + it.k + '</div><div class="cv">' + it.v + '</div>' +
+          '<div class="cn">' + chipNarrative(it.kind) + '</div></div>';
+      }).join('');
+    }
+
+    // header
+    var crestUrl = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/' + encodeURIComponent(OWN.club) + '.png';
+    document.getElementById('crest').src = crestUrl;
+    document.getElementById('crest').alt = OWN.club;
+    document.getElementById('tbClub').textContent = OWN.club;
+    document.getElementById('clubName').textContent = OWN.club;
+    document.getElementById('divPill').textContent = OWN.division + ' League';
+    if (OWN.fsSponsor) document.getElementById('fsSpon').textContent = OWN.fsSponsor;
+    else document.getElementById('sponWrap').style.display = 'none';
+    document.getElementById('lgn').textContent = AGG.meta.leagueN;
+    document.getElementById('dvn').textContent = AGG.meta.divN[OWN.division];
+    document.getElementById('divName').textContent = OWN.division;
+
+    // events
+    document.getElementById('scopeSeg').addEventListener('click', function (e) {
+      var b = e.target.closest('button'); if (!b) return;
+      state.scope = b.dataset.scope;
+      [].forEach.call(this.children, function (x) { x.classList.toggle('on', x === b); });
+      render();
+    });
+    document.getElementById('viewSeg').addEventListener('click', function (e) {
+      var b = e.target.closest('button'); if (!b) return;
+      state.view = b.dataset.view; state.cardView = {};
+      [].forEach.call(this.children, function (x) { x.classList.toggle('on', x === b); });
+      render();
+    });
+    document.getElementById('sections').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-card]'); if (!b) return;
+      state.cardView[b.dataset.card] = b.dataset.next; render();
+    });
+
+    gate.style.display = 'none';
+    document.getElementById('page').style.display = 'block';
+    renderChips();
+    render();
+  }
+})();
+</script>
+</body>
+</html>
