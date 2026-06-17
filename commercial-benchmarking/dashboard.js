@@ -17,7 +17,7 @@ window.CBDash = (function () {
   function mount(AGG, clubs, opts) {
     opts = opts || {};
     var OWN = clubs[0];
-    var state = { scope: 'div', view: 'bars', cardView: {} };
+    var state = { scope: 'div', view: 'graph', cardView: {} };
     var $ = function (id) { return document.getElementById(id); };
 
     function fmt(v, u) {
