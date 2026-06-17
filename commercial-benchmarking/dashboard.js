@@ -14,11 +14,60 @@
    (the gated tool uses nl-topbar instead) and updated only if present.
 */
 window.CBDash = (function () {
+
+  /* ---- recompute (mirrors scripts/build-benchmarks.py) ----
+     One club's edit shifts the division/league medians, the sorted graph
+     values, and every club's percentiles — so recompute the lot from the
+     full clubs array before writing back. Used by the admin editor. */
+  var SCOPES = ['National', 'North', 'South'];
+  function r2(x) { return Math.round(x * 100) / 100; }
+  function stats(vals) {
+    vals = vals.slice().sort(function (a, b) { return a - b; });
+    var n = vals.length; if (!n) return null;
+    function q(p) {
+      if (n === 1) return vals[0];
+      var idx = p * (n - 1), lo = Math.floor(idx), hi = Math.min(lo + 1, n - 1);
+      return vals[lo] + (vals[hi] - vals[lo]) * (idx - lo);
+    }
+    return {
+      count: n, min: vals[0], p25: r2(q(.25)), median: r2(q(.5)), p75: r2(q(.75)),
+      max: vals[n - 1], mean: r2(vals.reduce(function (a, b) { return a + b; }, 0) / n),
+      values: vals.map(r2)
+    };
+  }
+  function pctOf(vals, x) {
+    if (x == null || !vals.length) return null;
+    var below = 0, eq = 0;
+    vals.forEach(function (v) { if (v < x) below++; else if (v === x) eq++; });
+    return Math.round(100 * (below + eq / 2) / vals.length);
+  }
+  function recompute(AGG, clubs) {
+    Object.keys(AGG.aggregates).forEach(function (key) {
+      var league = [], byDiv = { National: [], North: [], South: [] };
+      clubs.forEach(function (c) {
+        var m = c.metrics && c.metrics[key], v = m ? m.value : null;
+        if (v != null) { league.push(v); if (byDiv[c.division]) byDiv[c.division].push(v); }
+      });
+      AGG.aggregates[key].scopes.league = stats(league);
+      SCOPES.forEach(function (d) { AGG.aggregates[key].scopes[d] = stats(byDiv[d]); });
+    });
+    clubs.forEach(function (c) {
+      Object.keys(AGG.aggregates).forEach(function (key) {
+        var m = c.metrics && c.metrics[key]; if (!m) return;
+        var lg = (AGG.aggregates[key].scopes.league || {}).values || [];
+        var dv = (AGG.aggregates[key].scopes[c.division] || {}).values || [];
+        m.divPct = pctOf(dv, m.value); m.leaguePct = pctOf(lg, m.value);
+      });
+    });
+    return AGG;
+  }
+
   function mount(AGG, clubs, opts) {
     opts = opts || {};
     var OWN = clubs[0];
     var state = { scope: 'div', view: 'graph', cardView: {} };
     var $ = function (id) { return document.getElementById(id); };
+    var editMode = false, ebtn = null;
 
     function fmt(v, u) {
       if (v == null) return '—';
@@ -177,6 +226,52 @@ window.CBDash = (function () {
 
     function renderAll() { renderHeader(); renderChips(); render(); }
 
+    function setEditUI() { if (ebtn) ebtn.textContent = editMode ? 'Cancel edit' : 'Edit data'; }
+
+    function groupedKeys() {
+      var groups = [];
+      Object.keys(AGG.aggregates).forEach(function (k) {
+        var g = AGG.aggregates[k].group, grp = groups.filter(function (x) { return x.title === g; })[0];
+        if (!grp) { grp = { title: g, keys: [] }; groups.push(grp); }
+        grp.keys.push(k);
+      });
+      return groups;
+    }
+
+    function renderEditForm() {
+      var body = groupedKeys().map(function (g) {
+        return '<div class="section"><div class="section-head"><h2>' + g.title + '</h2></div>' +
+          '<div class="cb-edit-grid">' + g.keys.map(function (k) {
+            var agg = AGG.aggregates[k], m = OWN.metrics[k] || (OWN.metrics[k] = { value: null });
+            var u = (agg.unit || '').trim();
+            return '<label class="cb-edit-row"><span>' + agg.label + (u ? ' (' + u + ')' : '') + '</span>' +
+              '<input type="number" step="any" data-ekey="' + k + '" value="' + (m.value == null ? '' : m.value) + '" placeholder="not provided"></label>';
+          }).join('') + '</div></div>';
+      }).join('');
+      body += '<div class="cb-edit-actions"><button id="cb-save" class="cb-edit-btn" type="button">Save changes</button>' +
+        '<button id="cb-cancel" class="cb-cancel" type="button">Cancel</button>' +
+        '<span id="cb-editnote">Editing <b>' + OWN.club + '</b> — blank = not provided. Saving recomputes all benchmarks.</span></div>';
+      $('sections').innerHTML = body;
+      $('cb-cancel').onclick = function () { editMode = false; setEditUI(); render(); };
+      $('cb-save').onclick = doSave;
+    }
+
+    function doSave() {
+      [].forEach.call($('sections').querySelectorAll('input[data-ekey]'), function (inp) {
+        var raw = inp.value.trim();
+        OWN.metrics[inp.getAttribute('data-ekey')].value = raw === '' ? null : Number(raw);
+      });
+      recompute(AGG, clubs);
+      $('cb-save').disabled = true; $('cb-editnote').textContent = 'Saving…';
+      Promise.resolve(opts.onSave(AGG, clubs)).then(function () {
+        editMode = false; setEditUI(); renderAll();
+        if (window.NL && NL.toast) NL.toast('Saved ' + OWN.club);
+      }, function (e) {
+        console.error(e); $('cb-save').disabled = false;
+        $('cb-editnote').textContent = 'Save failed — please try again.';
+      });
+    }
+
     if (opts.staff) {
       var updateShare = function () {};
       var staffCtl = $('staffCtl');
@@ -189,7 +284,7 @@ window.CBDash = (function () {
         });
         html += '</optgroup>';
         sel.innerHTML = html;
-        sel.addEventListener('change', function () { OWN = clubs[+this.value]; renderAll(); updateShare(); });
+        sel.addEventListener('change', function () { OWN = clubs[+this.value]; if (editMode) { editMode = false; setEditUI(); } renderAll(); updateShare(); });
 
         // Staff: show the selected club's no-login capability link to copy & send.
         if (opts.tokenByClub) {
@@ -212,6 +307,19 @@ window.CBDash = (function () {
             else { urlEl.select(); document.execCommand('copy'); done(); }
           });
           updateShare();
+        }
+
+        if (opts.canEdit) {
+          var ewrap = document.createElement('div');
+          ewrap.className = 'cb-ctl'; ewrap.style.marginLeft = 'auto';
+          ebtn = document.createElement('button');
+          ebtn.type = 'button'; ebtn.className = 'cb-edit-btn'; ebtn.textContent = 'Edit data';
+          ewrap.appendChild(ebtn);
+          var controls = staffCtl.parentNode; if (controls) controls.appendChild(ewrap);
+          ebtn.addEventListener('click', function () {
+            editMode = !editMode; setEditUI();
+            if (editMode) renderEditForm(); else render();
+          });
         }
       }
       var pt = $('privacyTxt');
@@ -239,5 +347,5 @@ window.CBDash = (function () {
     renderAll();
   }
 
-  return { mount: mount };
+  return { mount: mount, recompute: recompute };
 })();
