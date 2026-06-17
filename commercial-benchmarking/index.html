@@ -81,7 +81,7 @@
   <script src="/tools/system/nl-topbar.js?v=7"></script>
   <script src="/tools/system/auth-guard.js?v=8"></script>
 
-  <link rel="stylesheet" href="/tools/commercial-benchmarking/dashboard.css?v=3">
+  <link rel="stylesheet" href="/tools/commercial-benchmarking/dashboard.css?v=4">
 <style>
   body { background: var(--off-white); }
   .page { max-width: 1080px; margin: 0 auto; padding: clamp(20px,3vw,40px) clamp(16px,2.5vw,44px) 80px; }
@@ -156,7 +156,7 @@
   </div>
 </div>
 
-<script src="/tools/commercial-benchmarking/dashboard.js?v=3"></script>
+<script src="/tools/commercial-benchmarking/dashboard.js?v=4"></script>
 <script>
 (function () {
   'use strict';
@@ -185,8 +185,26 @@
           if (!AGG || !clubs.length) { showMsg('Not available yet', 'Benchmark data isn’t loaded yet.'); return; }
           var tokenByClub = {};
           Object.keys(linksObj).forEach(function (tok) { var p = linksObj[tok]; if (p && p.club) tokenByClub[p.club] = tok; });
+
+          // Admins can correct figures in place. Saving writes the recomputed
+          // aggregates + every club row (percentiles shift) + the link copies.
+          var canEdit = role === 'admin' || role === 'superadmin';
+          var onSave = function (AGG2, clubs2) {
+            var clubsUpd = {}, linksUpd = {};
+            clubs2.forEach(function (c) {
+              clubsUpd[c.club] = c;
+              var tok = tokenByClub[c.club];
+              if (tok) linksUpd[tok] = c;
+            });
+            return Promise.all([
+              db.ref(ROOT + 'aggregates').set(AGG2),
+              db.ref(ROOT + 'clubs').update(clubsUpd),
+              db.ref(ROOT + 'links').update(linksUpd)
+            ]);
+          };
+
           document.getElementById('cbBody').style.display = '';
-          CBDash.mount(AGG, clubs, { staff: true, tokenByClub: tokenByClub });
+          CBDash.mount(AGG, clubs, { staff: true, tokenByClub: tokenByClub, canEdit: canEdit, onSave: onSave });
         }).catch(err);
       } else {
         var club = session.club;
