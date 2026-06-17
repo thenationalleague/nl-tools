@@ -1,10 +1,18 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/index.html  v2.3
+  club-contacts/index.html  v2.4
   Public club CONTACTS collection — GUIDED WIZARD (capability-URL pattern).
   Sibling of club-data. Gathers a club's people directory for club-directory.
   (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
 
+  v2.4 (17/06/2026) — feedback round 15:
+    - On a linked (multi-role) card, email and phone are now LOCKED (read-only)
+      alongside the name, since they're one shared identity — you no longer
+      re-type them. "+ Add an extra email/phone" appends editable fields for
+      department-specific extras. The single "✎ Edit shared details" hook
+      (was "Edit name") unlocks name + email + phone together for deliberate
+      edits. Locked values are real inputs (readonly), so they're still captured
+      on save and never wiped.
   v2.3 (17/06/2026) — feedback round 14 (oversized select value):
     - Confirmed NOT cache (the renamed placeholder showed) and NOT an override
       (nl-brand.css has no select/option font rule, no font:inherit reset). The
@@ -127,6 +135,8 @@ firebase.initializeApp({
   .ri-multi { margin-bottom: 4px; }
   .ri-multirow { display: flex; gap: 8px; margin-bottom: 6px; align-items: start; }
   .ri-multirow .ri-mfield { flex: 1; }
+  /* Locked (shared) contact value on a linked card — read-only, visibly inert */
+  .ri-multirow--locked input { background: var(--navy-50); color: var(--text-muted); border-style: dashed; cursor: default; }
   .ri-phonerow .ri-ext { width: 78px; flex: none; }
   .ri-x { background: none; border: none; color: var(--text-muted); font-size: 18px; line-height: 1; cursor: pointer; padding: 6px 4px 0; }
   .ri-x:hover { color: var(--red); }
@@ -297,7 +307,7 @@ firebase.initializeApp({
   var clubName = null;
   var cur = 0;
   var editing = {};   // person id -> true while its card is open for editing
-  var unlockedName = {};  // person id -> true while a linked person's name is deliberately being edited
+  var unlockedShared = {};  // person id -> true while a linked person's shared details (name/email/phone) are being edited
   var DEBUG = /[?&]debug/.test(location.search);   // ?debug=1 surfaces the select's computed font-size
   var data = { yourName:'', yourEmail:'', inboxes:{}, people:[], emptied:{} };
 
@@ -437,13 +447,22 @@ firebase.initializeApp({
   }
 
   /* ---- Multi-value field helpers ---- */
-  function emailFieldHtml(v) {
+  function emailFieldHtml(v, locked) {
+    if (locked) {  // shared value on a linked card: read-only, no remove (edit via "Edit shared details")
+      return '<div class="ri-multirow ri-multirow--locked"><div class="ri-mfield">' +
+        '<input type="email" data-email value="' + esc(v || '') + '" readonly></div></div>';
+    }
     return '<div class="ri-multirow"><div class="ri-mfield"><input type="email" data-email value="' + esc(v || '') + '">' +
       '<p class="ri-err">Not a valid email address.</p></div>' +
       '<button type="button" class="ri-x" title="Remove">×</button></div>';
   }
-  function phoneFieldHtml(p) {
+  function phoneFieldHtml(p, locked) {
     p = p || {};
+    if (locked) {
+      return '<div class="ri-multirow ri-phonerow ri-multirow--locked"><div class="ri-mfield">' +
+        '<input type="tel" data-phone value="' + esc(p.number || '') + '" readonly></div>' +
+        '<div class="ri-ext"><input type="text" data-ext value="' + esc(p.ext || '') + '" readonly></div></div>';
+    }
     return '<div class="ri-multirow ri-phonerow"><div class="ri-mfield"><input type="tel" data-phone value="' + esc(p.number || '') + '">' +
       '<p class="ri-err">Doesn’t look like a UK phone number.</p></div>' +
       '<div class="ri-ext"><input type="text" maxlength="8" data-ext placeholder="ext" value="' + esc(p.ext || '') + '"></div>' +
@@ -550,17 +569,17 @@ firebase.initializeApp({
       if (save) {
         syncEditCards(); var sp = findPerson(save.getAttribute('data-pid'));
         if (sp && !sp.name) { el('riStatus').textContent = 'Please enter a name for this person.'; return; }
-        if (sp) { delete editing[sp.id]; delete unlockedName[sp.id]; }
+        if (sp) { delete editing[sp.id]; delete unlockedShared[sp.id]; }
         afterStructural(section, null); return;
       }
-      var en = t.closest('[data-editname]');
-      if (en) { syncEditCards(); unlockedName[en.getAttribute('data-pid')] = true; afterStructural(section, en.getAttribute('data-pid')); return; }
+      var en = t.closest('[data-editshared]');
+      if (en) { syncEditCards(); unlockedShared[en.getAttribute('data-pid')] = true; afterStructural(section, en.getAttribute('data-pid')); return; }
       var unlink = t.closest('[data-unlink]');
       if (unlink) {
         syncEditCards(); var up = findPerson(unlink.getAttribute('data-pid'));
         if (up) {
           up.roles = up.roles.filter(function (r) { return r.section !== section; });  // detach the just-linked role
-          delete editing[up.id]; delete unlockedName[up.id];
+          delete editing[up.id]; delete unlockedShared[up.id];
         }
         var fresh = { id: uid(), name: '', emails: [], phones: [], roles: [{ section: section, title: '' }] };
         data.people.push(fresh); editing[fresh.id] = true;
@@ -586,20 +605,21 @@ firebase.initializeApp({
   }
   function personEditCard(p, section) {
     var role = roleFor(p, section) || { title: '' };
-    var emails = (p.emails && p.emails.length) ? p.emails : [''];
-    var phones = (p.phones && p.phones.length) ? p.phones : [{}];
     var otherSecs = (p.roles || []).filter(function (r) { return r.section !== section; }).map(function (r) { return r.section; });
-    // A "linked" person holds another role too, so their name is a shared identity.
-    // Show it read-only (not a typeable box) to kill the "I thought I was adding
-    // someone new and renamed them everywhere" trap — unless the user explicitly
-    // chose "Edit name", which makes the rename a deliberate act.
+    // A "linked" person holds another role too, so their NAME, EMAILS and PHONES
+    // are one shared identity. Lock them (read-only) on the second card to kill the
+    // "I thought I was adding someone new and edited them everywhere" trap. You can
+    // still bolt on EXTRA contacts; deliberate edits go through "Edit shared details".
     var linked = (p.roles || []).length > 1;
-    var locked = linked && !unlockedName[p.id];
+    var locked = linked && !unlockedShared[p.id];
+    // Locked: show only the existing shared values (no blank starter row). Editable: one blank if empty.
+    var emails = locked ? (p.emails || []) : ((p.emails && p.emails.length) ? p.emails : ['']);
+    var phones = locked ? (p.phones || []) : ((p.phones && p.phones.length) ? p.phones : [{}]);
     var nameBlock = locked
       ? '<div class="ri-linked">' +
           '<div class="ri-linked__name">' + esc(p.name || '(unnamed)') + '</div>' +
-          '<div class="ri-linked__note">Same contact as in <b>' + esc(otherSecs.join(', ')) + '</b> — name and contact details are shared across both areas. ' +
-            '<button type="button" data-editname data-pid="' + p.id + '">✎ Edit name</button> · ' +
+          '<div class="ri-linked__note">Same contact as in <b>' + esc(otherSecs.join(', ')) + '</b> — name, email and phone are shared across both areas, so they’re locked here. Add extras below if needed. ' +
+            '<button type="button" data-editshared data-pid="' + p.id + '">✎ Edit shared details</button> · ' +
             '<button type="button" data-unlink data-pid="' + p.id + '">Not this person? Add someone else</button></div></div>' +
         '<div><label>Role / job title (in this area)</label><input type="text" data-p="title" value="' + esc(role.title || '') + '"></div>'
       : '<div class="ri-grid">' +
@@ -607,6 +627,7 @@ firebase.initializeApp({
           '<div><label>Role / job title (in this area)</label><input type="text" data-p="title" value="' + esc(role.title || '') + '"></div>' +
         '</div>';
     var headBadges = otherSecs.map(function (s) { return '<span class="ri-rolebadge">also: ' + esc(s) + '</span>'; }).join('');
+    var addWord = locked ? 'an extra' : 'another';
     var div = document.createElement('div');
     div.className = 'ri-person'; div.setAttribute('data-pedit', '1'); div.setAttribute('data-pid', p.id); div.setAttribute('data-section', section);
     div.innerHTML =
@@ -614,11 +635,11 @@ firebase.initializeApp({
         '<button type="button" class="ri-del" data-remove data-pid="' + p.id + '">Remove</button></div>' +
       nameBlock +
       '<div style="margin-top:12px;"><label>Email address(es)</label>' +
-        '<div class="ri-multi" data-emails>' + emails.map(emailFieldHtml).join('') + '</div>' +
-        '<button type="button" class="ri-addmore" data-addemail>+ Add another email</button></div>' +
+        '<div class="ri-multi" data-emails>' + emails.map(function (v) { return emailFieldHtml(v, locked); }).join('') + '</div>' +
+        '<button type="button" class="ri-addmore" data-addemail>+ Add ' + addWord + ' email</button></div>' +
       '<div style="margin-top:6px;"><label>Phone number(s)</label>' +
-        '<div class="ri-multi" data-phones>' + phones.map(phoneFieldHtml).join('') + '</div>' +
-        '<button type="button" class="ri-addmore" data-addphone>+ Add another phone</button></div>' +
+        '<div class="ri-multi" data-phones>' + phones.map(function (ph) { return phoneFieldHtml(ph, locked); }).join('') + '</div>' +
+        '<button type="button" class="ri-addmore" data-addphone>+ Add ' + addWord + ' phone</button></div>' +
       '<button type="button" class="btn-confirm" data-save data-pid="' + p.id + '">Save this person</button>';
     wireValidation(div);
     return div;
