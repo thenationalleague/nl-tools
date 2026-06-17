@@ -18,14 +18,28 @@ Usage:
 The links CSV (club, division, url) is the list of per-club dashboard links to
 send to clubs. Tokens are unguessable; treat the CSV as confidential.
 """
-import sys, json, secrets, csv, re
+import sys, os, json, secrets, csv, re, hmac, hashlib, base64
 import openpyxl
 
 SRC = sys.argv[1] if len(sys.argv) > 1 else 'Commercial_Benchmarking_Cleaned_v5.0.xlsx'
 OUT = sys.argv[2] if len(sys.argv) > 2 else 'commercial-benchmarking-rtdb-import.json'
 LINKS = sys.argv[3] if len(sys.argv) > 3 else 'commercial-benchmarking-links.csv'
-BASE_URL = 'https://thenationalleague.github.io/tools/commercial-benchmarking/?t='
+BASE_URL = 'https://thenationalleague.github.io/tools/commercial-benchmarking/link.html?t='
 DIVS = ['National', 'North', 'South']
+
+# Capability tokens are derived deterministically from the club name + a secret
+# salt, so re-running this (e.g. after a data correction) yields the SAME tokens
+# and never breaks links already sent to clubs. Keep CB_TOKEN_SALT secret and
+# constant. With no salt set, tokens are random (NOT stable) — fine for a
+# throwaway run, never for one whose links get distributed.
+SALT = os.environ.get('CB_TOKEN_SALT', '').encode('utf-8')
+
+
+def make_token(club):
+    if not SALT:
+        return secrets.token_urlsafe(24)
+    dig = hmac.new(SALT, club.encode('utf-8'), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(dig).decode('ascii').rstrip('=')[:32]
 
 # Categorical profile chips: (key, label, column header)
 CHIP_FIELDS = [
@@ -168,38 +182,45 @@ def main():
             'divN': {d: sum(1 for r in data if r[1] == d) for d in DIVS}}
     aggregates = {'meta': meta, 'aggregates': agg, 'chips': chips}
 
-    # ---- per-club dash nodes (capability-keyed) ----
-    dash = {}
-    links = []
+    # ---- per-club payloads, served two ways ----
+    #   clubs/<club name>   read by logged-in staff (all) or the matching club
+    #   links/<token>       public read at the known token path (no login)
+    # Both carry the same payload so each access path is self-contained.
+    clubs = {}
+    links = {}
+    link_rows = []
     for r in data:
         club = r[0]; div = r[1]
-        token = secrets.token_urlsafe(24)
         metrics = {}
         for m in METRICS:
             v = m['ext'](r)
             league = [x for x in (m['ext'](rr) for rr in data) if x is not None]
             dv = [x for x in (m['ext'](rr) for rr in data if rr[1] == div) if x is not None]
             metrics[m['key']] = {'value': v, 'divPct': pct_of(dv, v), 'leaguePct': pct_of(league, v)}
-        dash[token] = {
+        payload = {
             'club': club,
             'division': div,
             'fsSponsor': r[H['Front Shirt — Sponsor Name']] or '',
             'metrics': metrics,
             'chips': {ck: (r[H[col]] or '') for ck, _lbl, col in CHIP_FIELDS},
         }
-        links.append((club, div, BASE_URL + token))
+        clubs[club] = payload
+        token = make_token(club)
+        links[token] = payload
+        link_rows.append((club, div, BASE_URL + token))
 
-    payload = {'aggregates': aggregates, 'dash': dash}
+    out = {'aggregates': aggregates, 'clubs': clubs, 'links': links}
     with open(OUT, 'w') as f:
-        json.dump(payload, f, ensure_ascii=False, indent=1)
+        json.dump(out, f, ensure_ascii=False, indent=1)
     with open(LINKS, 'w', newline='') as f:
         w = csv.writer(f)
-        w.writerow(['Club', 'Division', 'Dashboard link'])
-        for row in sorted(links, key=lambda x: (DIVS.index(x[1]), x[0])):
+        w.writerow(['Club', 'Division', 'Dashboard link (no login)'])
+        for row in sorted(link_rows, key=lambda x: (DIVS.index(x[1]), x[0])):
             w.writerow(row)
 
-    print('Wrote %s  (%d metrics, %d club nodes)' % (OUT, len(METRICS), len(dash)))
+    print('Wrote %s  (%d metrics, %d clubs)' % (OUT, len(METRICS), len(clubs)))
     print('Wrote %s' % LINKS)
+    print('Tokens: %s' % ('STABLE (salted)' if SALT else 'RANDOM — set CB_TOKEN_SALT for stable links'))
     print('Import at RTDB node: app-data/ops-commercial-benchmarking')
 
 
