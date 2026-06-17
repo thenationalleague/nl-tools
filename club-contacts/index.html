@@ -1,9 +1,22 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/index.html  v2.7
+  club-contacts/index.html  v2.8
   Public club DETAILS collection — GUIDED WIZARD (capability-URL pattern).
   Gathers a club's information AND people directory for club-directory.
   (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
+
+  v2.8 (17/06/2026) — contacts restructure (feedback round 18 #3/#5/#6/#7):
+    - #3 People are now ONE PAGE PER AREA (Chair & deputies, Directors, Executive,
+      Club secretary, Finance, Commercial, Ticketing, Media, Programme, Matchday &
+      safety, Medical, Safeguarding, Community, Team operations, Anyone else).
+    - #7 "Mailing lists" step replaced by LEAD CONTACTS: nominate >=1 named contact
+      per League area (secretary, media, programme, commercial, finance, ticketing,
+      safety, medical, DLO, SLO, PLO), recommended from the roles entered, pick an
+      existing person or add a new one. Stored as data.leads{areaKey:[personId]}.
+    - #6 Liaison step removed — DLO/SLO/PLO are Lead-contact areas now.
+    - #5 Shared inboxes choose a DEPARTMENT, not a mailing-list name
+      (stored inboxes[k].dept). Mailing-list machinery retired.
+    - Review shows lead-contact coverage; locked view + admin updated.
 
   v2.7 (17/06/2026) — merge step 1 of the unified form (feedback round 18 #1):
     - Absorbs the old club-data "Club information" capture as a new step right
@@ -80,10 +93,11 @@
       summary row (name + role badges + contact) with Edit / Remove.
     - Page added to _headers no-cache so clubs always get the latest form.
   Submission shape: { club, yourName, yourEmail, submittedAt,
-    inboxes:{<listKey>:{email,phone,ext,label?,lists:[listKey]}},
-    people:[{id,name,emails:[..],phones:[{number,ext}],
-             roles:[{section,roleKey?,title}], lists:[listKey]}] }.
-  See git history for v1.x (single-role + per-person list ticks).
+    info:{stadium,addr1..,capacity,..,spClub,..},
+    inboxes:{<deptSlug>:{dept,email,phone,ext}},
+    people:[{id,name,emails:[..],phones:[{number,ext}], roles:[{section,title}]}],
+    leads:{<areaKey>:[personId,..]} }.
+  See git history for v1.x–v2.7 (mailing-list era, separate club-data tool).
   NOT a gated tool (no auth-guard) — out of lint-tools scope by design.
 -->
 <html lang="en-GB">
@@ -222,6 +236,13 @@ firebase.initializeApp({
   .ri-listmember .muted { color: var(--text-muted); font-size: 12px; }
   .ri-listempty { font-size: 12.5px; color: var(--text-muted); font-style: italic; }
   .ri-listadd { width: auto; max-width: 280px; margin-top: 10px; font-size: 13px; padding: 7px 32px 7px 11px; height: auto; border-style: dashed; border-color: var(--navy-300); color: var(--navy); }
+  /* Lead contacts */
+  .ri-leadnoms { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .ri-leadchip { display: inline-flex; align-items: center; gap: 4px; background: var(--navy-50); color: var(--navy); border: 1px solid var(--navy-100); border-radius: 16px; padding: 4px 6px 4px 12px; font-size: 13px; font-variation-settings:'wght' 700; }
+  .ri-leadchip button { background: none; border: none; color: var(--navy); font-size: 17px; line-height: 1; cursor: pointer; padding: 0 3px; }
+  .ri-leadchip button:hover { color: var(--red); }
+  .ri-leadpick { display: block; width: auto; max-width: 340px; height: auto; padding: 8px 32px 8px 11px; font-size: 13px; margin-bottom: 4px; }
+  .ri-leadform { margin-top: 8px; padding-top: 10px; border-top: 1px dashed var(--border); }
 
   /* Review */
   .ri-cov { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px,1fr)); gap: 8px; }
@@ -308,7 +329,8 @@ firebase.initializeApp({
     'Finance':'Financial reporting and treasury',
     'Commercial':'Sponsorship, partnerships and retail',
     'Ticketing':'Ticket office and box office',
-    'Media & marketing':'Press, programme, social and marketing',
+    'Media & marketing':'Press, social and marketing',
+    'Programme':'Matchday programme editor and production',
     'Matchday & safety':'Safety officer and matchday operations',
     'Medical':'Doctor, physiotherapist, therapist',
     'Team operations':'Kit, equipment and team logistics',
@@ -324,20 +346,47 @@ firebase.initializeApp({
   ];
   function liaisonListFor(roleKey) { var x = LIAISON.filter(function (y) { return y[0] === roleKey; })[0]; return x ? x[2] : null; }
 
+  // Lead contacts (v2.8) — the single nominated point of contact per League area.
+  // Replaces the old "mailing lists" step; absorbs liaison officers (DLO/SLO/PLO).
+  // rec = the people-page section we recommend a nominee from (null = no home page).
+  var LEAD_AREAS = [
+    { key:'secretary',  label:'Club secretary',                   rec:'Club secretary' },
+    { key:'media',      label:'Media / press officer',            rec:'Media & marketing' },
+    { key:'programme',  label:'Programme editor',                 rec:'Programme' },
+    { key:'commercial', label:'Commercial lead',                  rec:'Commercial' },
+    { key:'finance',    label:'Finance lead',                     rec:'Finance' },
+    { key:'ticketing',  label:'Ticketing manager',                rec:'Ticketing' },
+    { key:'safety',     label:'Safety officer',                   rec:'Matchday & safety' },
+    { key:'medical',    label:'Medical lead',                     rec:'Medical' },
+    { key:'dlo',        label:'Disability Liaison Officer (DLO)',  rec:null },
+    { key:'slo',        label:'Supporter Liaison Officer (SLO)',   rec:null },
+    { key:'plo',        label:'Police Liaison Officer (PLO)',      rec:null }
+  ];
+  function leadArea(key) { return LEAD_AREAS.filter(function (a) { return a.key === key; })[0]; }
+  // Departments a shared inbox can belong to (#5 — a choice of depts, not list names).
+  var DEPARTMENTS = ['Leadership / board','Executive','Club secretary','Finance','Commercial','Ticketing','Media & marketing','Programme','Matchday & safety','Medical','Safeguarding & welfare','Community','Team operations'];
+  function deptSlug(s) { return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''); }
+
   var STEPS = [
     { id:'you',     label:'You',                 kind:'you' },
     { id:'info',    label:'Club information',     kind:'info' },
-    { id:'inboxes', label:'Shared inboxes',       kind:'inboxes' },
-    { id:'g1', label:'Ownership & board',         kind:'depts', sections:['Leadership','Directors'] },
-    { id:'g2', label:'Executive & secretary',     kind:'depts', sections:['Executive','Club secretary'] },
-    { id:'g4', label:'Commercial, ticketing & finance', kind:'depts', sections:['Commercial','Ticketing','Finance'] },
-    { id:'g5', label:'Media & marketing',         kind:'depts', sections:['Media & marketing'] },
-    { id:'g6', label:'Matchday, safety & medical', kind:'depts', sections:['Matchday & safety','Medical'] },
-    { id:'g7', label:'Safeguarding & community',  kind:'depts', sections:['Safeguarding & welfare','Community'] },
-    { id:'g8', label:'Team operations',           kind:'depts', sections:['Team operations'] },
-    { id:'liaison', label:'Liaison officers',     kind:'liaison' },
-    { id:'g9', label:'Anyone else',               kind:'depts', sections:['Other'] },
-    { id:'lists',   label:'Mailing lists',        kind:'lists' },
+    { id:'inboxes', label:'Department inboxes',   kind:'inboxes' },
+    { id:'s_chair', label:'Chair & deputies',     kind:'depts', sections:['Leadership'] },
+    { id:'s_dir',   label:'Directors',            kind:'depts', sections:['Directors'] },
+    { id:'s_exec',  label:'Executive (CEO/COO/GM)', kind:'depts', sections:['Executive'] },
+    { id:'s_sec',   label:'Club secretary',       kind:'depts', sections:['Club secretary'] },
+    { id:'s_fin',   label:'Finance',              kind:'depts', sections:['Finance'] },
+    { id:'s_comm',  label:'Commercial',           kind:'depts', sections:['Commercial'] },
+    { id:'s_tick',  label:'Ticketing',            kind:'depts', sections:['Ticketing'] },
+    { id:'s_media', label:'Media & marketing',    kind:'depts', sections:['Media & marketing'] },
+    { id:'s_prog',  label:'Programme',            kind:'depts', sections:['Programme'] },
+    { id:'s_safety',label:'Matchday & safety',    kind:'depts', sections:['Matchday & safety'] },
+    { id:'s_med',   label:'Medical',              kind:'depts', sections:['Medical'] },
+    { id:'s_safe',  label:'Safeguarding & welfare', kind:'depts', sections:['Safeguarding & welfare'] },
+    { id:'s_comm2', label:'Community',            kind:'depts', sections:['Community'] },
+    { id:'s_team',  label:'Team operations',      kind:'depts', sections:['Team operations'] },
+    { id:'s_other', label:'Anyone else',          kind:'depts', sections:['Other'] },
+    { id:'leads',   label:'Lead contacts',        kind:'leads' },
     { id:'review',  label:'Check & submit',       kind:'review' }
   ];
   function stepForSection(section) {
@@ -355,7 +404,7 @@ firebase.initializeApp({
   var editing = {};   // person id -> true while its card is open for editing
   var unlockedShared = {};  // person id -> true while a linked person's shared details (name/email/phone) are being edited
   var DEBUG = /[?&]debug/.test(location.search);   // ?debug=1 surfaces the select's computed font-size
-  var data = { yourName:'', yourEmail:'', info:{}, inboxes:{}, people:[], emptied:{} };
+  var data = { yourName:'', yourEmail:'', info:{}, inboxes:{}, people:[], leads:{}, emptied:{} };
 
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
   function el(id){ return document.getElementById(id); }
@@ -484,7 +533,7 @@ firebase.initializeApp({
       el('riApp').style.display = '';
       if (prev) { renderLocked(prev); return; }
       var draft = loadDraft();
-      if (draft) { data = Object.assign({ yourName:'', yourEmail:'', info:{}, inboxes:{}, people:[], emptied:{} }, draft); data.people = (data.people || []).map(normalizePerson); }
+      if (draft) { data = Object.assign({ yourName:'', yourEmail:'', info:{}, inboxes:{}, people:[], leads:{}, emptied:{} }, draft); data.people = (data.people || []).map(normalizePerson); }
       // Pre-fill club information from clubs-meta when we don't already have it (fresh, or a draft from before info existed).
       if (!data.info || !Object.keys(data.info).length) {
         var c = meta && (meta.clubs || []).filter(function (x) { return x.name === clubName; })[0];
@@ -500,11 +549,12 @@ firebase.initializeApp({
     if (step.kind === 'you') return !!data.yourName && validEmail(data.yourEmail);
     if (step.kind === 'info') return !!(data.info && (data.info.stadium || data.info.capacity || data.info.mainEmail));
     if (step.kind === 'inboxes') return Object.keys(data.inboxes).length > 0;
-    if (step.kind === 'liaison') return data.people.some(isLiaison);
     if (step.kind === 'depts') return step.sections.every(function (s) {
       return data.emptied[s] || data.people.some(function (p) { return hasRole(p, s); });
     });
-    if (step.kind === 'lists') return !data.people.length || data.people.some(function (p) { return personLists(p).length > 0; });
+    // Lead contacts is "done" once every area that has a recommended home page is filled
+    // (DLO/SLO/PLO are optional for the glyph; review still flags any gap).
+    if (step.kind === 'leads') return LEAD_AREAS.filter(function (a) { return a.rec; }).every(function (a) { return (data.leads[a.key] || []).some(findPerson); });
     return false;
   }
   function renderSteps() {
@@ -538,8 +588,8 @@ firebase.initializeApp({
       renderInfoStep(host);
     } else if (step.kind === 'inboxes') {
       host.innerHTML =
-        '<h2 class="ri-stephead">Shared department email addresses</h2>' +
-        '<p class="ri-stepsub">First, any <b>shared</b> addresses that belong to a function rather than a person — e.g. <code>commercial@</code>, <code>tickets@</code> — and stay the same when staff change. Add one per function. Skip this entirely if you only use people’s own addresses (you’ll add those next). A phone and extension are optional.</p>' +
+        '<h2 class="ri-stephead">Department inboxes</h2>' +
+        '<p class="ri-stepsub">Any <b>shared</b> addresses that belong to a department rather than a person — e.g. <code>commercial@</code>, <code>tickets@</code> — and stay the same when staff change. Pick the department each one belongs to. Skip this entirely if you only use people’s own addresses. A phone and extension are optional.</p>' +
         '<div class="ri-card"><div id="riInboxRows"></div>' +
         '<button type="button" class="btn-add" id="riAddInbox">+ Add a shared address</button></div>';
       var rows = el('riInboxRows');
@@ -549,17 +599,11 @@ firebase.initializeApp({
     } else if (step.kind === 'depts') {
       host.innerHTML =
         '<h2 class="ri-stephead">' + esc(step.label) + '</h2>' +
-        '<p class="ri-stepsub">Add the people at your club in ' + (step.sections.length > 1 ? 'these areas' : 'this area') + '. Someone who also appears elsewhere can be added with “already listed” so they stay one record. You’ll sort mailing lists at the end.</p>' +
+        '<p class="ri-stepsub">Add the people at your club in this area. Someone who also appears elsewhere can be added with “already listed” so they stay one record. You’ll nominate lead contacts near the end.</p>' +
         step.sections.map(deptCard).join('');
       step.sections.forEach(wireDeptCard);
-    } else if (step.kind === 'liaison') {
-      host.innerHTML =
-        '<h2 class="ri-stephead">Liaison officers</h2>' +
-        '<p class="ri-stepsub">Named contacts for specific League functions. Fill in whichever apply — DLO, PLO and CSLO are expected at every club; SLO is optional.</p>' +
-        '<div class="ri-card">' + LIAISON.map(liaisonRow).join('') + '</div>';
-      wireValidation(host);
-    } else if (step.kind === 'lists') {
-      renderListsStep(host);
+    } else if (step.kind === 'leads') {
+      renderLeadsStep(host);
     } else if (step.kind === 'review') {
       renderReview(host);
     }
@@ -622,35 +666,31 @@ firebase.initializeApp({
     }).filter(Boolean);
   }
 
-  /* ---- Inbox row (function select + email + phone + ext) ---- */
+  /* ---- Inbox row (department select + email + phone + ext) ---- */
   function inboxRow(key, ib) {
     ib = ib || {};
-    var isCustom = !!ib.label;
-    var selVal = isCustom ? '__other' : (key || '');
+    var dept = ib.dept || '';
+    var isOther = !!dept && DEPARTMENTS.indexOf(dept) === -1;
+    var selVal = isOther ? '__other' : dept;
     var row = document.createElement('div');
     row.className = 'ri-person';
     row.innerHTML =
       '<div class="ri-person__hd"><span class="ri-person__n">Shared address</span>' +
         '<button type="button" class="ri-del">Remove</button></div>' +
       '<div class="ri-grid">' +
-        '<div><label>Function</label><select data-ib="key">' +
-          '<option value="">Select a function…</option>' +
-          LISTS.map(function (l) { return '<option value="' + l[0] + '"' + (l[0] === selVal ? ' selected' : '') + '>' + esc(l[1]) + '</option>'; }).join('') +
+        '<div><label>Department</label><select data-ib="key">' +
+          '<option value="">Select a department…</option>' +
+          DEPARTMENTS.map(function (d) { return '<option value="' + esc(d) + '"' + (d === selVal ? ' selected' : '') + '>' + esc(d) + '</option>'; }).join('') +
           '<option value="__other"' + (selVal === '__other' ? ' selected' : '') + '>Other…</option>' +
         '</select>' +
-        '<input type="text" data-ib="otherlabel" placeholder="Name this function" value="' + esc(ib.label || '') + '" style="margin-top:8px;display:' + (selVal === '__other' ? 'block' : 'none') + ';"></div>' +
+        '<input type="text" data-ib="otherlabel" placeholder="Name this department" value="' + esc(isOther ? dept : '') + '" style="margin-top:8px;display:' + (selVal === '__other' ? 'block' : 'none') + ';"></div>' +
         '<div><label>Shared email</label><input type="email" data-ib="email" value="' + esc(ib.email || '') + '"><p class="ri-err">Not a valid email address.</p></div>' +
         '<div><label>Phone (optional)</label><input type="tel" data-ib="phone" value="' + esc(ib.phone || '') + '"><p class="ri-err">Doesn’t look like a UK phone number.</p></div>' +
         '<div><label>Ext (optional)</label><input type="text" maxlength="8" data-ib="ext" value="' + esc(ib.ext || '') + '"></div>' +
       '</div>';
     row.querySelector('.ri-del').addEventListener('click', function () { row.parentNode.removeChild(row); markSaved(); });
     var sel = row.querySelector('[data-ib="key"]'), other = row.querySelector('[data-ib="otherlabel"]');
-    // Force the closed-select text size at inline !important (beats UA form-control styling).
     pinSelect(sel);
-    if (DEBUG) requestAnimationFrame(function () {
-      var cs = getComputedStyle(sel), lbl = sel.previousElementSibling;
-      if (lbl) lbl.textContent = 'Function [computed ' + cs.fontSize + ' / lh ' + cs.lineHeight + ']';
-    });
     sel.addEventListener('change', function () {
       var on = sel.value === '__other'; other.style.display = on ? 'block' : 'none'; if (on) other.focus();
     });
@@ -810,50 +850,64 @@ firebase.initializeApp({
       '</div></div>';
   }
 
-  /* ---- Mailing-list step (derive from roles, tick/untick) ---- */
-  function renderListsStep(host) {
-    data.people.forEach(function (p) { if (p.lists === undefined) p.lists = derivedLists(p); });
-    Object.keys(data.inboxes).forEach(function (k) { if (data.inboxes[k].lists === undefined) data.inboxes[k].lists = derivedInboxLists(k); });
-    var ibKeys = Object.keys(data.inboxes);
+  /* ---- Lead contacts step (#7) — nominate >=1 named contact per League area;
+     pick from people already entered, or add a new person. Replaces mailing lists. ---- */
+  function leadNominees(key) { return (data.leads[key] || []).map(findPerson).filter(Boolean); }
+  function renderLeadsStep(host) {
+    // Recommend defaults once (people whose role matches the area); prune dangling ids thereafter.
+    LEAD_AREAS.forEach(function (a) {
+      if (data.leads[a.key] === undefined) {
+        data.leads[a.key] = a.rec ? data.people.filter(function (p) { return hasRole(p, a.rec); }).map(function (p) { return p.id; }) : [];
+      } else {
+        data.leads[a.key] = data.leads[a.key].filter(function (id) { return findPerson(id); });
+      }
+    });
     host.innerHTML =
-      '<h2 class="ri-stephead">Mailing lists</h2>' +
-      '<p class="ri-stepsub">Now everyone’s in, here’s who lands on each League mailing list — worked out from the roles and shared addresses you entered. Untick anyone who shouldn’t get that list’s emails, or use <b>Add to this list</b> to put someone (or a shared address) on a list they don’t fall into automatically.</p>' +
-      LISTS.map(function (l) {
-        var key = l[0];
-        var pMembers = data.people.filter(function (p) { return derivedLists(p).indexOf(key) !== -1 || (p.lists || []).indexOf(key) !== -1; });
-        var ibMembers = ibKeys.filter(function (k) { return derivedInboxLists(k).indexOf(key) !== -1 || (data.inboxes[k].lists || []).indexOf(key) !== -1; });
-        var rows = pMembers.map(function (p) {
-          var on = (p.lists || []).indexOf(key) !== -1;
-          return '<label class="ri-listmember"><input type="checkbox" data-listpid="' + p.id + '" data-listkey="' + key + '"' + (on ? ' checked' : '') + '> ' +
-            '<span>' + esc(p.name || '(unnamed)') + ' <span class="muted">' + esc(rolesText(p)) + '</span></span></label>';
-        }).join('') + ibMembers.map(function (k) {
-          var on = (data.inboxes[k].lists || []).indexOf(key) !== -1;
-          return '<label class="ri-listmember"><input type="checkbox" data-listib="' + esc(k) + '" data-listkey="' + key + '"' + (on ? ' checked' : '') + '> ' +
-            '<span>' + esc(inboxLabel(k)) + ' <span class="muted">shared address</span></span></label>';
-        }).join('');
-        // "Add to this list" picker — everyone/every inbox not already shown here.
-        var nonP = data.people.filter(function (p) { return p.name && pMembers.indexOf(p) === -1; });
-        var nonIb = ibKeys.filter(function (k) { return ibMembers.indexOf(k) === -1; });
-        var adder = (nonP.length || nonIb.length)
-          ? '<select class="ri-listadd" data-listadd="' + key + '"><option value="">+ Add to this list…</option>' +
-              (nonP.length ? '<optgroup label="People">' + nonP.map(function (p) { return '<option value="p:' + p.id + '">' + esc(p.name) + '</option>'; }).join('') + '</optgroup>' : '') +
-              (nonIb.length ? '<optgroup label="Shared addresses">' + nonIb.map(function (k) { return '<option value="i:' + esc(k) + '">' + esc(inboxLabel(k)) + '</option>'; }).join('') + '</optgroup>' : '') +
-            '</select>'
-          : '';
-        return '<div class="ri-card"><h2>' + esc(l[1]) + '</h2>' +
-          (rows || '<p class="ri-listempty">No one on this list yet.</p>') + adder +
+      '<h2 class="ri-stephead">Lead contacts</h2>' +
+      '<p class="ri-stepsub">Nominate the single point of contact the League should use for each area below. We’ve suggested people from the roles you entered — change them, or add someone new (e.g. a dedicated SLO). At least one per area where you have one.</p>' +
+      LEAD_AREAS.map(function (a) {
+        var noms = leadNominees(a.key);
+        var nonNoms = data.people.filter(function (p) { return p.name && (data.leads[a.key] || []).indexOf(p.id) === -1; });
+        return '<div class="ri-card" data-area="' + a.key + '"><h2>' + esc(a.label) + '</h2>' +
+          '<div class="ri-leadnoms">' + (noms.length
+            ? noms.map(function (p) { return '<span class="ri-leadchip">' + esc(p.name || '(unnamed)') + '<button type="button" data-leadrm="' + a.key + '|' + p.id + '" title="Remove">×</button></span>'; }).join('')
+            : '<span class="ri-listempty">No one nominated yet.</span>') + '</div>' +
+          (nonNoms.length
+            ? '<select class="ri-leadpick" data-leadpick="' + a.key + '"><option value="">+ Nominate someone already listed…</option>' +
+                nonNoms.map(function (p) { return '<option value="' + p.id + '">' + esc(p.name) + ' — ' + esc(rolesText(p)) + '</option>'; }).join('') + '</select>'
+            : '') +
+          '<button type="button" class="ri-addmore" data-leadnew="' + a.key + '">+ Add a new person</button>' +
+          '<div class="ri-leadform" data-leadform="' + a.key + '" style="display:none;">' +
+            '<div class="ri-grid">' +
+              '<div><label>Full name</label><input type="text" data-lf="name"></div>' +
+              '<div><label>Email</label><input type="email" data-lf="email"><p class="ri-err">Not a valid email address.</p></div>' +
+            '</div>' +
+            '<div class="ri-grid" style="margin-top:8px;"><div><label>Phone</label><input type="tel" data-lf="phone"><p class="ri-err">Doesn’t look like a UK phone number.</p></div><div></div></div>' +
+            '<button type="button" class="btn-confirm" data-leadadd="' + a.key + '">Add &amp; nominate</button>' +
+          '</div>' +
         '</div>';
       }).join('');
-    // Wire the per-list "Add" pickers (and pin their font-size like every other select).
-    Array.prototype.forEach.call(host.querySelectorAll('[data-listadd]'), function (sel) {
-      pinSelect(sel);
-      sel.addEventListener('change', function () {
-        var key = sel.getAttribute('data-listadd'), val = sel.value; if (!val) return;
-        var id = val.slice(2);
-        if (val.charAt(0) === 'p') { var p = findPerson(id); if (p) { if (p.lists === undefined) p.lists = derivedLists(p); if (p.lists.indexOf(key) === -1) p.lists.push(key); } }
-        else { var ib = data.inboxes[id]; if (ib) { if (ib.lists === undefined) ib.lists = derivedInboxLists(id); if (ib.lists.indexOf(key) === -1) ib.lists.push(key); } }
-        saveDraft(true); renderStep();
-      });
+    Array.prototype.forEach.call(host.querySelectorAll('.ri-leadpick'), pinSelect);
+    wireValidation(host);
+    host.addEventListener('click', function (e) {
+      var rm = e.target.closest('[data-leadrm]');
+      if (rm) { var parts = rm.getAttribute('data-leadrm').split('|'); data.leads[parts[0]] = (data.leads[parts[0]] || []).filter(function (id) { return id !== parts[1]; }); saveDraft(true); renderStep(); renderSteps(); return; }
+      var nw = e.target.closest('[data-leadnew]');
+      if (nw) { var form = host.querySelector('[data-leadform="' + nw.getAttribute('data-leadnew') + '"]'); if (form) { form.style.display = 'block'; var n = form.querySelector('[data-lf="name"]'); if (n) n.focus(); } return; }
+      var add = e.target.closest('[data-leadadd]');
+      if (add) {
+        var key = add.getAttribute('data-leadadd'), form = host.querySelector('[data-leadform="' + key + '"]');
+        var g = function (k) { var x = form.querySelector('[data-lf="' + k + '"]'); return x ? x.value.trim() : ''; };
+        if (!g('name')) { el('riStatus').textContent = 'Please enter a name for the new person.'; return; }
+        var a = leadArea(key);
+        var np = { id: uid(), name: g('name'), emails: g('email') ? [g('email')] : [], phones: g('phone') ? [{ number: g('phone'), ext: '' }] : [], roles: [{ section: a.rec || 'Other', title: a.label }] };
+        data.people.push(np); (data.leads[key] = data.leads[key] || []).push(np.id);
+        saveDraft(true); renderStep(); renderSteps(); return;
+      }
+    });
+    host.addEventListener('change', function (e) {
+      var pk = e.target.closest('[data-leadpick]');
+      if (pk && pk.value) { var key = pk.getAttribute('data-leadpick'); (data.leads[key] = data.leads[key] || []).push(pk.value); saveDraft(true); renderStep(); renderSteps(); }
     });
   }
 
@@ -908,36 +962,15 @@ firebase.initializeApp({
         if (!ib.email && !ib.phone) return;
         if (sel === '__other') {
           var label = g('otherlabel'); if (!label) return;
-          var slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-          ib.label = label;
-          data.inboxes['other-' + (slug || Object.keys(data.inboxes).length)] = ib;
-        } else { data.inboxes[sel] = ib; }
+          ib.dept = label;
+          data.inboxes['other-' + (deptSlug(label) || Object.keys(data.inboxes).length)] = ib;
+        } else { ib.dept = sel; data.inboxes[deptSlug(sel)] = ib; }
       });
     } else if (step.kind === 'depts') {
       syncEditCards();
-    } else if (step.kind === 'liaison') {
-      // rebuild liaison people (kept separate from department records)
-      data.people = data.people.filter(function (p) { return !isLiaison(p); });
-      Array.prototype.forEach.call(el('riStep').querySelectorAll('[data-role]'), function (row) {
-        var g = function (k) { var n = row.querySelector('[data-l="' + k + '"]'); return n ? n.value.trim() : ''; };
-        var roleKey = row.getAttribute('data-role');
-        if (g('name') || g('email') || g('phone')) {
-          var label = (LIAISON.filter(function (x) { return x[0] === roleKey; })[0] || [])[1] || roleKey;
-          data.people.push({ id: uid(), name: g('name'),
-            emails: g('email') ? [g('email')] : [], phones: g('phone') ? [{ number: g('phone'), ext: g('ext') }] : [],
-            roles: [{ section: 'Liaison officers', roleKey: roleKey, title: label }] });
-        }
-      });
-    } else if (step.kind === 'lists') {
-      data.people.forEach(function (p) { p.lists = []; });
-      Object.keys(data.inboxes).forEach(function (k) { data.inboxes[k].lists = []; });
-      Array.prototype.forEach.call(el('riStep').querySelectorAll('[data-listpid]:checked'), function (cb) {
-        var p = findPerson(cb.getAttribute('data-listpid')); if (p) p.lists.push(cb.getAttribute('data-listkey'));
-      });
-      Array.prototype.forEach.call(el('riStep').querySelectorAll('[data-listib]:checked'), function (cb) {
-        var ib = data.inboxes[cb.getAttribute('data-listib')]; if (ib) ib.lists.push(cb.getAttribute('data-listkey'));
-      });
     }
+    // 'leads' needs no DOM sweep — nominations are mutated straight into data.leads
+    // by the lead-step handlers (and the inline "add new" form commits on click).
   }
 
   /* ---- Validation sweep (submit) ---- */
@@ -949,12 +982,12 @@ firebase.initializeApp({
       if (data.info.phone && !validPhone(data.info.phone)) probs.push({ step: stepIndexById('info'), msg: 'Club switchboard phone looks invalid.' });
     }
     Object.keys(data.inboxes).forEach(function (k) {
-      var ib = data.inboxes[k], nm = ib.label || LIST_LABEL[k] || k;
+      var ib = data.inboxes[k], nm = ib.dept || ib.label || k;
       if (ib.email && !validEmail(ib.email)) probs.push({ step: stepIndexById('inboxes'), msg: 'Shared “' + nm + '” email looks invalid.' });
       if (ib.phone && !validPhone(ib.phone)) probs.push({ step: stepIndexById('inboxes'), msg: 'Shared “' + nm + '” phone looks invalid.' });
     });
     data.people.forEach(function (p) {
-      var st = isLiaison(p) ? stepIndexById('liaison') : stepForSection((p.roles[0] || {}).section);
+      var st = stepForSection((p.roles[0] || {}).section);
       var who = (p.name || rolesText(p) || 'someone');
       (p.emails || []).forEach(function (e) { if (!validEmail(e)) probs.push({ step: st, msg: who + ': email “' + e + '” looks invalid.' }); });
       (p.phones || []).forEach(function (ph) { if (ph.number && !validPhone(ph.number)) probs.push({ step: st, msg: who + ': phone “' + ph.number + '” looks invalid.' }); });
@@ -963,18 +996,9 @@ firebase.initializeApp({
   }
 
   /* ---- Coverage / review ---- */
-  function listState(key) {
-    var hasPerson = data.people.some(function (p) { return personLists(p).indexOf(key) !== -1; });
-    var hasInbox = Object.keys(data.inboxes).some(function (k) { return inboxLists(k).indexOf(key) !== -1; });
-    if (hasPerson || hasInbox) return 'ok';
-    var sects = Object.keys(SECTION_LIST).filter(function (s) { return SECTION_LIST[s] === key; });
-    var li = LIAISON.filter(function (x) { return x[2] === key; })[0];
-    if (li) return 'gap';
-    var allEmpty = sects.length && sects.every(function (s) { return data.emptied[s]; });
-    return allEmpty ? 'none' : 'gap';
-  }
+  function leadState(key) { return (data.leads[key] || []).some(findPerson) ? 'ok' : 'gap'; }
   function renderReview(host) {
-    var states = LISTS.map(function (l) { return [l, listState(l[0])]; });
+    var states = LEAD_AREAS.map(function (a) { return [a, leadState(a.key)]; });
     var covered = states.filter(function (s) { return s[1] === 'ok'; }).length;
     var nPeople = data.people.length, nInbox = Object.keys(data.inboxes).length;
     var probs = findProblems();
@@ -992,15 +1016,14 @@ firebase.initializeApp({
     });
 
     // people, ordered by their first role's department
-    var secOrder = []; STEPS.forEach(function (s) { if (s.sections) s.sections.forEach(function (x) { secOrder.push(x); }); }); secOrder.push('Liaison officers');
+    var secOrder = []; STEPS.forEach(function (s) { if (s.sections) s.sections.forEach(function (x) { secOrder.push(x); }); });
     var ordered = data.people.slice().sort(function (a, b) {
       return secOrder.indexOf((a.roles[0] || {}).section) - secOrder.indexOf((b.roles[0] || {}).section);
     });
     var rosterHtml = ordered.length ? ordered.map(function (p) {
       var roles = (p.roles || []).map(function (r) { return esc(r.section) + (r.title ? ' (' + esc(r.title) + ')' : ''); }).join(', ');
-      var lists = personLists(p).map(function (k) { return esc(LIST_LABEL[k] || k); }).join(', ');
       return '<div class="ri-rev__p"><b>' + esc(p.name || '(unnamed)') + '</b> <span class="muted">— ' + roles + '</span>' +
-        '<br><span class="muted">' + esc(contactLine(p)) + (lists ? ' · lists: ' + lists : ' · no mailing lists') + '</span></div>';
+        '<br><span class="muted">' + esc(contactLine(p)) + '</span></div>';
     }).join('') : '<p class="muted" style="color:var(--text-muted);font-size:13px;">No people added yet.</p>';
 
     var info = data.info || {};
@@ -1021,27 +1044,20 @@ firebase.initializeApp({
         dups.map(function (d) { return '<div>• ' + esc(d.email) + ' — ' + esc(d.who.join(', ')) + '</div>'; }).join('') +
         '<div style="margin-top:6px;">If that’s one person, enter them once and use <b>“add someone already listed”</b> on the other department so they stay a single record.</div></div>' : '') +
       infoCard +
-      '<div class="ri-card"><h2>Mailing-list coverage</h2><p class="ri-card__sub">' + covered + ' of ' + LISTS.length + ' lists have someone. Tap an amber one to jump back. Gaps are fine if that role genuinely doesn’t apply.</p>' +
+      '<div class="ri-card"><h2>Lead-contact coverage</h2><p class="ri-card__sub">' + covered + ' of ' + LEAD_AREAS.length + ' areas have a nominated lead. Tap an amber one to jump back. Gaps are fine if that role genuinely doesn’t apply.</p>' +
       '<div class="ri-cov">' + states.map(function (s) {
-        var st = s[1];
-        var label = st === 'ok' ? '✓ covered' : (st === 'none' ? 'marked as none' : '— no one yet');
-        return '<div class="ri-cov__cell is-' + st + '" data-coverlist="' + s[0][0] + '">' +
-          '<div class="ri-cov__list">' + esc(s[0][1]) + '</div><div class="ri-cov__st">' + label + '</div></div>';
+        var ok = s[1] === 'ok';
+        return '<div class="ri-cov__cell is-' + (ok ? 'ok' : 'gap') + '" data-coverarea="' + s[0].key + '">' +
+          '<div class="ri-cov__list">' + esc(s[0].label) + '</div><div class="ri-cov__st">' + (ok ? '✓ ' + esc((leadNominees(s[0].key)[0] || {}).name || 'nominated') : '— no one yet') + '</div></div>';
       }).join('') + '</div></div>' +
-      '<div class="ri-card"><h2>Your contacts</h2><p class="ri-card__sub">Everyone you’ve entered, with their roles and mailing lists.</p>' + rosterHtml + '</div>';
+      '<div class="ri-card"><h2>Your contacts</h2><p class="ri-card__sub">Everyone you’ve entered, with their roles.</p>' + rosterHtml + '</div>';
 
-    Array.prototype.forEach.call(host.querySelectorAll('[data-coverlist]'), function (c) {
-      c.addEventListener('click', function () { jumpToList(c.getAttribute('data-coverlist')); });
+    Array.prototype.forEach.call(host.querySelectorAll('[data-coverarea]'), function (c) {
+      c.addEventListener('click', function () { goTo(stepIndexById('leads')); });
     });
     Array.prototype.forEach.call(host.querySelectorAll('[data-fix]'), function (a) {
       a.addEventListener('click', function () { goTo(parseInt(a.getAttribute('data-fix'), 10)); });
     });
-  }
-  function jumpToList(key) {
-    var li = LIAISON.filter(function (x) { return x[2] === key; })[0];
-    if (li) { goTo(stepIndexById('liaison')); return; }
-    var sect = Object.keys(SECTION_LIST).filter(function (s) { return SECTION_LIST[s] === key; })[0];
-    var idx = sect ? stepForSection(sect) : -1; if (idx >= 0) goTo(idx);
   }
 
   /* ---- Navigation ---- */
@@ -1073,9 +1089,7 @@ firebase.initializeApp({
     if (!data.people.length && !Object.keys(data.inboxes).length) { el('riStatus').textContent = 'Please add at least one person or shared address before submitting.'; return; }
     var probs = findProblems();
     if (probs.length) { renderReview(el('riStep')); el('riStatus').textContent = 'Please fix ' + probs.length + ' highlighted ' + (probs.length === 1 ? 'item' : 'items') + '.'; return; }
-    data.people.forEach(function (p) { if (p.lists === undefined) p.lists = derivedLists(p); });
-    Object.keys(data.inboxes).forEach(function (k) { if (data.inboxes[k].lists === undefined) data.inboxes[k].lists = derivedInboxLists(k); });
-    var rec = { club: clubName, yourName: data.yourName, yourEmail: data.yourEmail, info: data.info, inboxes: data.inboxes, people: data.people, submittedAt: Date.now() };
+    var rec = { club: clubName, yourName: data.yourName, yourEmail: data.yourEmail, info: data.info, inboxes: data.inboxes, people: data.people, leads: data.leads, submittedAt: Date.now() };
     var btn = el('riNext'); btn.disabled = true; btn.textContent = 'Submitting…';
     db.ref('app-data/ops-club-contacts/submissions/' + token).set(rec).then(function () {
       try { localStorage.removeItem(LS_KEY); } catch (e) {}
@@ -1100,19 +1114,24 @@ firebase.initializeApp({
     }).join('');
     var peopleHtml = (rec.people || []).map(function (p) {
       var roles = (p.roles || []).map(function (r) { return esc(r.section) + (r.title ? ' (' + esc(r.title) + ')' : ''); }).join(', ');
-      var lists = (p.lists || []).map(function (k) { return esc(LIST_LABEL[k] || k); }).join(', ');
       return '<div style="padding:6px 0;font-size:13px;border-bottom:1px solid var(--border);"><b>' + esc(p.name || '(unnamed)') + '</b> <span style="color:var(--text-muted);">— ' + roles + '</span>' +
-        '<br><span style="color:var(--text-muted);">' + esc(contactLine(p)) + (lists ? ' · lists: ' + lists : '') + '</span></div>';
+        '<br><span style="color:var(--text-muted);">' + esc(contactLine(p)) + '</span></div>';
+    }).join('');
+    function lockedName(id) { var p = (rec.people || []).filter(function (x) { return x.id === id; })[0]; return p ? (p.name || '(unnamed)') : ''; }
+    var leadsHtml = LEAD_AREAS.map(function (a) {
+      var names = (rec.leads && rec.leads[a.key] || []).map(lockedName).filter(Boolean).join(', ');
+      return names ? '<div style="font-size:13px;padding:3px 0;"><span style="color:var(--text-muted);">' + esc(a.label) + ':</span> <b>' + esc(names) + '</b></div>' : '';
     }).join('');
     el('riStep').innerHTML =
       '<div class="ri-card" style="border-top-color:var(--green);">' +
         '<h2 style="color:var(--green);">✓ Submitted &amp; locked</h2>' +
         '<p class="ri-card__sub">Received by the League' + (when ? ' on ' + esc(when) : '') + '. Your submission is shown below for reference. To change anything, please contact the League and we’ll re-open your form.</p></div>' +
       (infoHtml ? '<div class="ri-card"><h2>Club information</h2>' + infoHtml + '</div>' : '') +
-      (inboxKeys.length ? '<div class="ri-card"><h2>Shared addresses</h2>' + inboxKeys.map(function (k) {
-        var ib = rec.inboxes[k]; var ll = (ib.lists || []).map(function (x) { return esc(LIST_LABEL[x] || x); }).join(', ');
-        return '<div style="font-size:13px;padding:3px 0;"><b style="color:var(--navy);">' + esc(ib.label || LIST_LABEL[k] || k) + '</b> — ' + esc([ib.email, ib.phone].filter(Boolean).join(' · ')) + (ll ? ' <span style="color:var(--text-muted);">· lists: ' + ll + '</span>' : '') + '</div>';
+      (inboxKeys.length ? '<div class="ri-card"><h2>Department inboxes</h2>' + inboxKeys.map(function (k) {
+        var ib = rec.inboxes[k];
+        return '<div style="font-size:13px;padding:3px 0;"><b style="color:var(--navy);">' + esc(ib.dept || ib.label || k) + '</b> — ' + esc([ib.email, ib.phone].filter(Boolean).join(' · ')) + '</div>';
       }).join('') + '</div>' : '') +
+      (leadsHtml ? '<div class="ri-card"><h2>Lead contacts</h2>' + leadsHtml + '</div>' : '') +
       (peopleHtml ? '<div class="ri-card"><h2>People</h2>' + peopleHtml + '</div>' : '');
   }
 
