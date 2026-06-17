@@ -1,11 +1,17 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/index.html  v2.9
+  club-contacts/index.html  v2.10
   Public club DETAILS collection — GUIDED WIZARD (capability-URL pattern).
   Gathers a club's information AND people directory for club-directory.
   (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
   THIS IS THE UNIFIED FORM — supersedes the old club-data tool.
 
+  v2.10 (17/06/2026) — Department inboxes page can now be FINALISED (feedback
+    round 19): no auto-shown blank row on entry — start with just "+ Add a shared
+    address" plus a "No shared department inboxes at our club" toggle (mirrors the
+    "No one in this area" toggle on people pages). Ticking it marks the step done
+    (data.noInboxes); adding an address clears it. This is what made the inbox
+    page impossible to mark complete before.
   v2.9 (17/06/2026) — cleanup: removed the retired mailing-list machinery now that
     Lead contacts (v2.8) is the model — LISTS/LIST_LABEL/SECTION_LIST/LIAISON and
     the derive*/inboxLists/liaisonRow helpers are gone; normalizePerson no longer
@@ -387,7 +393,7 @@ firebase.initializeApp({
   var editing = {};   // person id -> true while its card is open for editing
   var unlockedShared = {};  // person id -> true while a linked person's shared details (name/email/phone) are being edited
   var DEBUG = /[?&]debug/.test(location.search);   // ?debug=1 surfaces the select's computed font-size
-  var data = { yourName:'', yourEmail:'', info:{}, inboxes:{}, people:[], leads:{}, emptied:{} };
+  var data = { yourName:'', yourEmail:'', info:{}, inboxes:{}, noInboxes:false, people:[], leads:{}, emptied:{} };
 
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
   function el(id){ return document.getElementById(id); }
@@ -495,7 +501,7 @@ firebase.initializeApp({
       el('riApp').style.display = '';
       if (prev) { renderLocked(prev); return; }
       var draft = loadDraft();
-      if (draft) { data = Object.assign({ yourName:'', yourEmail:'', info:{}, inboxes:{}, people:[], leads:{}, emptied:{} }, draft); data.people = (data.people || []).map(normalizePerson); }
+      if (draft) { data = Object.assign({ yourName:'', yourEmail:'', info:{}, inboxes:{}, noInboxes:false, people:[], leads:{}, emptied:{} }, draft); data.people = (data.people || []).map(normalizePerson); }
       // Pre-fill club information from clubs-meta when we don't already have it (fresh, or a draft from before info existed).
       if (!data.info || !Object.keys(data.info).length) {
         var c = meta && (meta.clubs || []).filter(function (x) { return x.name === clubName; })[0];
@@ -510,7 +516,7 @@ firebase.initializeApp({
   function isStepDone(step) {
     if (step.kind === 'you') return !!data.yourName && validEmail(data.yourEmail);
     if (step.kind === 'info') return !!(data.info && (data.info.stadium || data.info.capacity || data.info.mainEmail));
-    if (step.kind === 'inboxes') return Object.keys(data.inboxes).length > 0;
+    if (step.kind === 'inboxes') return Object.keys(data.inboxes).length > 0 || !!data.noInboxes;
     if (step.kind === 'depts') return step.sections.every(function (s) {
       return data.emptied[s] || data.people.some(function (p) { return hasRole(p, s); });
     });
@@ -551,13 +557,25 @@ firebase.initializeApp({
     } else if (step.kind === 'inboxes') {
       host.innerHTML =
         '<h2 class="ri-stephead">Department inboxes</h2>' +
-        '<p class="ri-stepsub">Any <b>shared</b> addresses that belong to a department rather than a person — e.g. <code>commercial@</code>, <code>tickets@</code> — and stay the same when staff change. Pick the department each one belongs to. Skip this entirely if you only use people’s own addresses. A phone and extension are optional.</p>' +
+        '<p class="ri-stepsub">Any <b>shared</b> addresses that belong to a department rather than a person — e.g. <code>commercial@</code>, <code>tickets@</code> — and stay the same when staff change. Pick the department each one belongs to. A phone and extension are optional.</p>' +
         '<div class="ri-card"><div id="riInboxRows"></div>' +
-        '<button type="button" class="btn-add" id="riAddInbox">+ Add a shared address</button></div>';
+        '<button type="button" class="btn-addperson" id="riAddInbox">+ Add a shared address</button>' +
+        '<label class="ri-none" id="riNoInbox"><input type="checkbox" id="riNoInboxCk"> <span>No shared department inboxes at our club</span></label>' +
+        '</div>';
       var rows = el('riInboxRows');
       Object.keys(data.inboxes).forEach(function (k) { rows.appendChild(inboxRow(k, data.inboxes[k])); });
-      if (!rows.children.length) rows.appendChild(inboxRow('', {}));
-      el('riAddInbox').addEventListener('click', function () { rows.appendChild(inboxRow('', {})); markSaved(); });
+      var noWrap = el('riNoInbox'), noCk = el('riNoInboxCk');
+      function refreshNoInbox() {
+        var blank = rows.children.length === 0;
+        noWrap.style.display = blank ? 'flex' : 'none';
+        if (!blank && noCk.checked) { noCk.checked = false; data.noInboxes = false; }
+        noWrap.classList.toggle('is-set', noCk.checked);
+      }
+      el('riAddInbox').addEventListener('click', function () { noCk.checked = false; data.noInboxes = false; rows.appendChild(inboxRow('', {})); refreshNoInbox(); markSaved(); });
+      rows.addEventListener('click', function (e) { if (e.target.classList.contains('ri-del')) setTimeout(function () { refreshNoInbox(); renderSteps(); }, 0); });
+      noCk.addEventListener('change', function () { data.noInboxes = noCk.checked; refreshNoInbox(); renderSteps(); markSaved(); });
+      if (!rows.children.length && data.noInboxes) noCk.checked = true;
+      refreshNoInbox();
     } else if (step.kind === 'depts') {
       host.innerHTML =
         '<h2 class="ri-stephead">' + esc(step.label) + '</h2>' +
@@ -915,6 +933,7 @@ firebase.initializeApp({
           data.inboxes['other-' + (deptSlug(label) || Object.keys(data.inboxes).length)] = ib;
         } else { ib.dept = sel; data.inboxes[deptSlug(sel)] = ib; }
       });
+      if (Object.keys(data.inboxes).length) data.noInboxes = false;
     } else if (step.kind === 'depts') {
       syncEditCards();
     }
