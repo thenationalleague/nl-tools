@@ -66,6 +66,49 @@ window.CBDash = (function () {
     return AGG;
   }
 
+  // Rebuild the anonymised sector distributions from the (possibly edited) club
+  // rows so the donuts stay accurate after a staff edit. Mirrors the Python
+  // sector_dist / sector_dist_multi: counts only, sorted most-common first.
+  function recomputeSectors(AGG, clubs) {
+    function toArr(d) {
+      return Object.keys(d).map(function (k) { return { label: k, count: d[k] }; })
+        .sort(function (a, b) { return b.count - a.count; });
+    }
+    function single(field) {
+      var d = {};
+      clubs.forEach(function (c) { var v = (c[field] || '').trim(); if (v) d[v] = (d[v] || 0) + 1; });
+      return toArr(d);
+    }
+    var st = {};
+    clubs.forEach(function (c) {
+      (c.standSectors || '').split('|').forEach(function (p) { p = p.trim(); if (p) st[p] = (st[p] || 0) + 1; });
+    });
+    AGG.sectors = AGG.sectors || {};
+    AGG.sectors.front = single('fsSector');
+    AGG.sectors.back = single('bsSector');
+    AGG.sectors.sleeve = single('slSector');
+    AGG.sectors.stand = toArr(st);
+    return AGG;
+  }
+
+  // Rebuild the categorical chip distributions (programme format, rolling
+  // flags, email permissions) from the club rows after a staff edit, so the
+  // chip cards' "N of M clubs" narratives stay accurate.
+  function recomputeChips(AGG, clubs) {
+    var kinds = ['progFormat', 'rollingFront', 'rollingBack', 'rollingSleeve', 'emailSupporters', 'emailPartners'];
+    var out = {};
+    kinds.forEach(function (k) { out[k] = {}; });
+    clubs.forEach(function (c) {
+      var ch = c.chips || {};
+      kinds.forEach(function (k) {
+        var v = ch[k]; if (v == null) return; v = String(v).trim(); if (!v) return;
+        out[k][v] = (out[k][v] || 0) + 1;
+      });
+    });
+    AGG.chips = out;
+    return AGG;
+  }
+
   function mount(AGG, clubs, opts) {
     opts = opts || {};
     var OWN = clubs[0];
@@ -320,6 +363,8 @@ window.CBDash = (function () {
     ];
     // rolling/fixed shown as a tag on each shirt-slot's deal-length card
     var TERM_ROLL = { frontTerm: 'rollingFront', backTerm: 'rollingBack', sleeveTerm: 'rollingSleeve' };
+    // every categorical chip the survey captured (editable in the staff editor)
+    var CHIP_KINDS = ['progFormat', 'rollingFront', 'rollingBack', 'rollingSleeve', 'emailSupporters', 'emailPartners'];
     var SPONSOR_OF = { frontShirt: 'fsSponsor', backShirt: 'bsSponsor', sleeve: 'slSponsor' };
     function chipValue(kind) {
       var c = OWN.chips || {};
@@ -431,41 +476,177 @@ window.CBDash = (function () {
       return groups;
     }
 
+    function escAttr(s) {
+      return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    }
+
+    // Union of every sector seen across front/back/sleeve/stand, for the dropdown.
+    function allSectors() {
+      var set = {};
+      ['front', 'back', 'sleeve', 'stand'].forEach(function (k) {
+        ((AGG.sectors && AGG.sectors[k]) || []).forEach(function (d) { if (d.label) set[d.label] = 1; });
+      });
+      return Object.keys(set).sort(function (a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()); });
+    }
+
+    // Known values for a categorical chip: sensible defaults merged with
+    // whatever's actually present, so the dropdown is useful even pre-data.
+    function chipOpts(kind) {
+      var base = kind === 'progFormat' ? ['Printed', 'Digital', 'Both'] : ['Yes', 'No'];
+      Object.keys((AGG.chips && AGG.chips[kind]) || {}).forEach(function (k) { if (base.indexOf(k) < 0) base.push(k); });
+      return base;
+    }
+
+    // Generic picker: a dropdown of `opts` plus an "Other…" option that reveals
+    // a freetext box. `key` namespaces the control, e.g. 'sec:fsSector',
+    // 'sec:stand0', 'chip:rollingFront'. Empty selection means "not provided".
+    function pickerControl(cur, key, opts, placeholder) {
+      cur = (cur == null ? '' : String(cur)).trim();
+      var known = opts.indexOf(cur) >= 0, custom = !known && !!cur;
+      return '<select class="cb-edit-sel" data-pick="' + key + '">' +
+        '<option value=""' + (cur ? '' : ' selected') + '>— none —</option>' +
+        opts.map(function (o) { return '<option' + (known && o === cur ? ' selected' : '') + '>' + escAttr(o) + '</option>'; }).join('') +
+        '<option value="__other"' + (custom ? ' selected' : '') + '>Other…</option></select>' +
+        '<input type="text" class="cb-edit-other" data-pickother="' + key + '" placeholder="' + (placeholder || 'Specify') + '" value="' +
+          (custom ? escAttr(cur) : '') + '"' + (custom ? '' : ' style="display:none"') + '>';
+    }
+    function sectorControl(cur, attr) { return pickerControl(cur, 'sec:' + attr, allSectors(), 'Specify sector'); }
+    function chipPicker(kind) { return pickerControl((OWN.chips || {})[kind], 'chip:' + kind, chipOpts(kind)); }
+
+    function numCtl(k) {
+      var m = OWN.metrics[k] || (OWN.metrics[k] = { value: null }), np = m.value == null;
+      return '<input type="number" step="any" data-ekey="' + k + '" value="' + (np ? '' : m.value) + '"' + (np ? ' disabled' : '') + '>' +
+        '<label class="cb-np"><input type="checkbox" data-np="' + k + '"' + (np ? ' checked' : '') + '> None</label>';
+    }
+
+    function editRow(lab, ctl) {
+      return '<div class="cb-edit-row"><span class="cb-edit-lab">' + lab + '</span><span class="cb-edit-ctl">' + ctl + '</span></div>';
+    }
+
+    var SHIRT_SLOTS = [
+      { kind: 'Front-of-shirt', spon: 'fsSponsor', sec: 'fsSector', income: 'frontShirt', term: 'frontTerm', roll: 'rollingFront' },
+      { kind: 'Back-of-shirt', spon: 'bsSponsor', sec: 'bsSector', income: 'backShirt', term: 'backTerm', roll: 'rollingBack' },
+      { kind: 'Sleeve', spon: 'slSponsor', sec: 'slSector', income: 'sleeve', term: 'sleeveTerm', roll: 'rollingSleeve' }
+    ];
+
+    function shirtEditSection() {
+      return '<div class="section"><div class="section-head"><h2>Shirt &amp; kit sponsorship</h2></div>' +
+        SHIRT_SLOTS.map(function (sl) {
+          return '<div class="cb-edit-slot"><div class="cb-edit-slot-kind">' + sl.kind + ' sponsorship</div>' +
+            editRow('Sponsor name', '<input type="text" data-espon="' + sl.spon + '" value="' + escAttr(OWN[sl.spon] || '') + '" placeholder="None">') +
+            editRow('Sector', sectorControl(OWN[sl.sec], sl.sec)) +
+            editRow('Income (£)', numCtl(sl.income)) +
+            editRow('Deal length (yrs)', numCtl(sl.term)) +
+            editRow('Rolling deal? (Yes/No)', chipPicker(sl.roll)) +
+            '</div>';
+        }).join('') + '</div>';
+    }
+
+    function standEditSection() {
+      OWN.stands = OWN.stands || [];
+      var rows = '';
+      for (var i = 0; i < 4; i++) {
+        var st = OWN.stands[i] || {};
+        var nm = st.name && st.name !== '—' ? st.name : '';
+        rows += '<div class="cb-edit-slot"><div class="cb-edit-slot-kind">Stand sponsor ' + (i + 1) + '</div>' +
+          editRow('Name', '<input type="text" data-estand="' + i + '-name" value="' + escAttr(nm) + '" placeholder="None">') +
+          editRow('Sector', sectorControl(st.sector, 'stand' + i)) +
+          editRow('Income (£)', '<input type="number" step="any" data-estand="' + i + '-income" value="' + (st.income != null ? st.income : '') + '" placeholder="—">') +
+          '</div>';
+      }
+      return '<div class="section"><div class="section-head"><h2>Stand sponsorship</h2></div>' + rows +
+        '<div class="cb-edit-hint">Number of stand sponsors, combined total and average per stand are calculated from these rows.</div></div>';
+    }
+
     function renderEditForm() {
       var body = groupedKeys().map(function (g) {
+        if (g.title === 'Shirt & kit sponsorship') return shirtEditSection();
+        if (g.title === 'Stand sponsorship') return standEditSection();
+        // numeric metrics, plus any categorical chips that belong in this group
+        var chipRows = CHIP_DEFS.filter(function (d) { return d.group === g.title; }).map(function (d) {
+          return editRow(d.label, chipPicker(d.kind));
+        }).join('');
         return '<div class="section"><div class="section-head"><h2>' + g.title + '</h2></div>' +
           '<div class="cb-edit-grid">' + g.keys.map(function (k) {
-            var agg = AGG.aggregates[k], m = OWN.metrics[k] || (OWN.metrics[k] = { value: null });
-            var u = (agg.unit || '').trim(), np = m.value == null;
-            return '<div class="cb-edit-row"><span class="cb-edit-lab">' + agg.label + (u ? ' (' + u + ')' : '') + '</span>' +
-              '<span class="cb-edit-ctl">' +
-                '<input type="number" step="any" data-ekey="' + k + '" value="' + (np ? '' : m.value) + '"' + (np ? ' disabled' : '') + '>' +
-                '<label class="cb-np"><input type="checkbox" data-np="' + k + '"' + (np ? ' checked' : '') + '> n/p</label>' +
-              '</span></div>';
-          }).join('') + '</div></div>';
+            var agg = AGG.aggregates[k], u = (agg.unit || '').trim();
+            return editRow(agg.label + (u ? ' (' + u + ')' : ''), numCtl(k));
+          }).join('') + chipRows + '</div></div>';
       }).join('');
       body += '<div class="cb-edit-actions"><button id="cb-save" class="cb-edit-btn" type="button">Save changes</button>' +
         '<button id="cb-cancel" class="cb-cancel" type="button">Cancel</button>' +
-        '<span id="cb-editnote">Editing <b>' + OWN.club + '</b> — tick <b>n/p</b> for not provided; 0 is a real zero. Saving recomputes all benchmarks.</span></div>';
+        '<span id="cb-editnote">Editing <b>' + OWN.club + '</b> — tick <b>None</b> for no figure; 0 is a real zero. Pick a sector or choose <b>Other…</b> to type your own. Saving recomputes all benchmarks.</span></div>';
       $('sections').innerHTML = body;
       $('sections').onchange = function (e) {
-        var cb = e.target, key = cb.getAttribute && cb.getAttribute('data-np');
-        if (key == null) return;
-        var inp = $('sections').querySelector('input[data-ekey="' + key + '"]');
-        if (inp) { inp.disabled = cb.checked; if (!cb.checked) { inp.focus(); } }
+        var t = e.target;
+        if (!t || !t.getAttribute) return;
+        var npk = t.getAttribute('data-np');
+        if (npk != null) {
+          var inp = $('sections').querySelector('input[data-ekey="' + npk + '"]');
+          if (inp) { inp.disabled = t.checked; if (!t.checked) inp.focus(); }
+          return;
+        }
+        var pick = t.getAttribute('data-pick');
+        if (pick != null) {
+          var other = $('sections').querySelector('input[data-pickother="' + pick + '"]');
+          if (other) { var show = t.value === '__other'; other.style.display = show ? '' : 'none'; if (show) other.focus(); }
+        }
       };
       $('cb-cancel').onclick = function () { editMode = false; setEditUI(); render(); };
       $('cb-save').onclick = doSave;
     }
 
+    function readPicker(key) {
+      var sel = $('sections').querySelector('select[data-pick="' + key + '"]');
+      if (!sel) return null;
+      if (sel.value === '__other') {
+        var o = $('sections').querySelector('input[data-pickother="' + key + '"]');
+        return o ? o.value.trim() : '';
+      }
+      return (sel.value || '').trim();
+    }
+    function readSector(attr) { return readPicker('sec:' + attr); }
+
     function doSave() {
+      // numeric metrics (incl. shirt income/term; stand totals are derived below)
       [].forEach.call($('sections').querySelectorAll('input[data-ekey]'), function (inp) {
         var k = inp.getAttribute('data-ekey');
         var np = $('sections').querySelector('input[data-np="' + k + '"]');
-        if (np && np.checked) { OWN.metrics[k].value = null; }
-        else { var raw = inp.value.trim(); OWN.metrics[k].value = raw === '' ? 0 : Number(raw); }
+        if (np && np.checked) { OWN.metrics[k] = OWN.metrics[k] || {}; OWN.metrics[k].value = null; }
+        else { var raw = inp.value.trim(); OWN.metrics[k] = OWN.metrics[k] || {}; OWN.metrics[k].value = raw === '' ? 0 : Number(raw); }
       });
+      // shirt sponsor names + sectors
+      [].forEach.call($('sections').querySelectorAll('input[data-espon]'), function (inp) {
+        OWN[inp.getAttribute('data-espon')] = cleanSpon(inp.value);
+      });
+      ['fsSector', 'bsSector', 'slSector'].forEach(function (a) { var v = readSector(a); if (v != null) OWN[a] = v; });
+      // categorical chips (programme format, rolling flags, email permissions)
+      OWN.chips = OWN.chips || {};
+      CHIP_KINDS.forEach(function (k) { var v = readPicker('chip:' + k); if (v != null) OWN.chips[k] = v; });
+      // stand sponsors -> rebuild list, derive count/total/avg + standSectors
+      var stands = [], standSecs = [];
+      for (var i = 0; i < 4; i++) {
+        var nmEl = $('sections').querySelector('input[data-estand="' + i + '-name"]');
+        var incEl = $('sections').querySelector('input[data-estand="' + i + '-income"]');
+        var nm = cleanSpon(nmEl ? nmEl.value : '');
+        var sec = readSector('stand' + i) || '';
+        var incRaw = incEl ? incEl.value.trim() : '';
+        var inc = incRaw === '' ? null : Number(incRaw);
+        if (nm || inc != null) stands.push({ name: nm || '—', sector: sec, income: inc });
+        if (sec) standSecs.push(sec);
+      }
+      OWN.stands = stands;
+      OWN.standSectors = standSecs.join(' | ');
+      var incomes = stands.map(function (s) { return s.income; }).filter(function (x) { return x != null; });
+      var total = incomes.length ? incomes.reduce(function (a, b) { return a + b; }, 0) : null;
+      var count = stands.length;
+      function setM(k, v) { OWN.metrics[k] = OWN.metrics[k] || {}; OWN.metrics[k].value = v; }
+      setM('standCount', count);
+      setM('standTotal', total);
+      setM('standAvg', (total != null && count) ? total / count : null);
+
       recompute(AGG, clubs);
+      recomputeSectors(AGG, clubs);
+      recomputeChips(AGG, clubs);
       $('cb-save').disabled = true; $('cb-editnote').textContent = 'Saving…';
       Promise.resolve(opts.onSave(AGG, clubs)).then(function () {
         editMode = false; setEditUI(); renderAll();
