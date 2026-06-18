@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<!--
+  station-distance/index.html  v1.0
+  STANDALONE utility (not a gated tool, no auth-guard, out of lint scope).
+
+  Works out the by-road distance (miles) from each club's ground to its named
+  closest station, in the browser. It does NOT write anything — it produces a
+  copy-paste JSON block you hand back to Claude to insert into clubs-meta.json
+  (field: station_distance_mi). The club-contacts form then displays it.
+
+  Runs in YOUR browser (which has internet), so it can reach the public
+  Nominatim (geocoding) + OSRM (routing) services that the Claude sandbox can't.
+  Open it deployed (/tools/station-distance/) or just open the file locally.
+-->
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Station distance calculator — NL Tools</title>
+<style>
+  :root { --navy:#223b7c; --red:#9e0000; --amber:#9a6700; --border:#d8dde6; --muted:#5b6472; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; color:#1b2430; background:#f4f6f9; line-height:1.5; }
+  .wrap { max-width:980px; margin:0 auto; padding:24px 20px 60px; }
+  h1 { color:var(--navy); font-size:22px; margin:0 0 4px; }
+  p.sub { color:var(--muted); margin:0 0 20px; font-size:14px; }
+  .card { background:#fff; border:1px solid var(--border); border-top:3px solid var(--red); border-radius:10px; padding:18px 20px; margin-bottom:16px; }
+  button { font:inherit; cursor:pointer; border-radius:8px; border:none; padding:11px 18px; font-weight:700; }
+  .btn-go { background:var(--navy); color:#fff; }
+  .btn-go:disabled { opacity:.5; cursor:default; }
+  .btn-copy { background:#fff; border:1px solid var(--navy); color:var(--navy); }
+  label { display:block; font-size:12px; text-transform:uppercase; letter-spacing:.06em; font-weight:800; color:var(--muted); margin:0 0 4px; }
+  input[type=text], textarea { width:100%; font:inherit; font-size:13px; border:1px solid var(--border); border-radius:6px; padding:9px 11px; }
+  textarea { min-height:160px; font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .prog { font-size:13px; color:var(--muted); margin:10px 0 0; }
+  table { width:100%; border-collapse:collapse; font-size:13px; margin-top:10px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th { font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+  td.mi { font-weight:700; white-space:nowrap; }
+  tr.flag td.mi { color:var(--amber); }
+  tr.bad td.mi { color:var(--red); }
+  .geo { color:var(--muted); font-size:12px; }
+  code { background:#eef1f6; padding:1px 5px; border-radius:4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Station distance calculator</h1>
+  <p class="sub">Computes by-road distance (miles) from each club’s ground to its named station, using OpenStreetMap’s Nominatim (geocoding) + OSRM (routing). Nothing is saved — copy the JSON at the bottom and paste it back to Claude to drop into <code>clubs-meta.json</code>. Rows ≥ 20 mi (amber) are likely a bad station match — check the matched name.</p>
+
+  <div class="card">
+    <div class="row">
+      <button class="btn-go" id="go">Calculate distances</button>
+      <span class="prog" id="prog">Ready. Reads the live clubs-meta.json (~1 second per club, so ~1–2 min).</span>
+    </div>
+    <details style="margin-top:12px;">
+      <summary style="cursor:pointer;font-size:13px;color:var(--muted);">clubs-meta source (advanced)</summary>
+      <div style="margin-top:8px;">
+        <label>clubs-meta.json URL</label>
+        <input type="text" id="metaUrl" value="https://raw.githubusercontent.com/thenationalleague/tools/main/assets/data/clubs-meta.json">
+        <label style="margin-top:10px;">…or paste clubs-meta.json here (used if the URL fails)</label>
+        <textarea id="metaPaste" placeholder="(optional) paste the contents of clubs-meta.json"></textarea>
+      </div>
+    </details>
+  </div>
+
+  <div class="card" id="resultsCard" style="display:none;">
+    <table><thead><tr><th>Club</th><th>Station (entered)</th><th>Miles</th><th>Matched (Nominatim)</th></tr></thead>
+      <tbody id="rows"></tbody></table>
+  </div>
+
+  <div class="card" id="outCard" style="display:none;">
+    <div class="row" style="justify-content:space-between;">
+      <label style="margin:0;">Paste this back to Claude</label>
+      <button class="btn-copy" id="copy">Copy JSON</button>
+    </div>
+    <textarea id="out" readonly style="margin-top:8px;"></textarea>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+
+  async function getJSON(url) {
+    var res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+  }
+  async function geocode(name) {
+    var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=gb&q=' + encodeURIComponent(name + ' station');
+    var arr = await getJSON(url);
+    if (!arr || !arr.length) return null;
+    return { lat: parseFloat(arr[0].lat), lng: parseFloat(arr[0].lon), display: arr[0].display_name };
+  }
+  async function road(fromLng, fromLat, toLng, toLat) {
+    var url = 'https://router.project-osrm.org/route/v1/driving/' + fromLng + ',' + fromLat + ';' + toLng + ',' + toLat + '?overview=false';
+    var j = await getJSON(url);
+    if (!j || j.code !== 'Ok' || !j.routes || !j.routes.length) return null;
+    return j.routes[0].distance;
+  }
+
+  function addRow(name, stn, mi, geo, cls) {
+    var tr = document.createElement('tr');
+    if (cls) tr.className = cls;
+    tr.innerHTML = '<td>' + esc(name) + '</td><td>' + esc(stn || '—') + '</td><td class="mi">' +
+      esc(mi) + '</td><td class="geo">' + esc(geo || '') + '</td>';
+    $('rows').appendChild(tr);
+  }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+
+  async function loadMeta() {
+    var paste = $('metaPaste').value.trim();
+    try { return await getJSON($('metaUrl').value.trim() + '?cb=' + Date.now()); }
+    catch (e) { if (paste) { try { return JSON.parse(paste); } catch (e2) {} } throw e; }
+  }
+
+  $('go').addEventListener('click', async function () {
+    var btn = $('go'); btn.disabled = true;
+    $('rows').innerHTML = ''; $('resultsCard').style.display = 'block'; $('outCard').style.display = 'none';
+    var out = [];
+    try {
+      var meta = await loadMeta();
+      var clubs = (meta && meta.clubs) || [];
+      for (var i = 0; i < clubs.length; i++) {
+        var c = clubs[i];
+        var stn = Array.isArray(c.station) ? c.station[0] : c.station;
+        $('prog').textContent = 'Working… ' + (i + 1) + ' / ' + clubs.length + '  —  ' + (c.name || '');
+        if (c.lat == null || c.lng == null || !stn) { addRow(c.name, stn, 'skip (no coords/station)', ''); continue; }
+        try {
+          await sleep(1100); // Nominatim: <= 1 req/sec
+          var g = await geocode(stn);
+          if (!g) { addRow(c.name, stn, 'no geocode', '', 'bad'); continue; }
+          var m = await road(c.lng, c.lat, g.lng, g.lat);
+          if (m == null) { addRow(c.name, stn, 'no route', g.display, 'bad'); continue; }
+          var mi = Math.round((m / 1609.344) * 10) / 10;
+          out.push({ name: c.name, station_distance_mi: mi, station_distance_from: stn, station_geocoded: g.display });
+          addRow(c.name, stn, mi + ' mi', g.display, mi >= 20 ? 'flag' : '');
+        } catch (e) { addRow(c.name, stn, 'error: ' + e.message, '', 'bad'); }
+      }
+      var flagged = out.filter(function (o) { return o.station_distance_mi >= 20; }).length;
+      $('prog').textContent = 'Done — ' + out.length + ' computed' + (flagged ? ', ' + flagged + ' flagged ≥ 20 mi (check those).' : '.');
+      $('out').value = JSON.stringify(out, null, 2);
+      $('outCard').style.display = 'block';
+    } catch (e) {
+      $('prog').textContent = 'Could not load clubs-meta.json: ' + e.message + ' — paste it in the advanced box and retry.';
+    }
+    btn.disabled = false;
+  });
+
+  $('copy').addEventListener('click', function () {
+    $('out').select(); document.execCommand('copy');
+    $('copy').textContent = 'Copied ✓'; setTimeout(function () { $('copy').textContent = 'Copy JSON'; }, 1500);
+  });
+})();
+</script>
+</body>
+</html>
