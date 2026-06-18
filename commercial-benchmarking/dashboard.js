@@ -192,11 +192,19 @@ window.CBDash = (function () {
     // fixed display order; 'Sponsor sectors' (the donuts) sits after the shirt group
     var GROUP_ORDER = ['Shirt & kit sponsorship', 'Stand sponsorship', 'Ground advertising',
       'Ticketing', 'Hospitality', 'Programme', 'Email & audience'];
+    // explicit metric order within groups — RTDB returns object keys
+    // alphabetically, so we can't rely on key order (front before back, etc.)
+    var METRIC_ORDER = ['msTicket', 'seasonTicket', 'frontShirt', 'frontTerm', 'backShirt', 'backTerm',
+      'sleeve', 'sleeveTerm', 'standCount', 'standTotal', 'standAvg', 'tvBoard', 'nonTvBoard',
+      'mdHosp', 'seasonHosp', 'progAd', 'emailDb', 'optedIn'];
     function render() {
       var sx = $('sections'); if (sx) sx.onclick = null;
       var byGroup = {};
       Object.keys(AGG.aggregates).forEach(function (k) {
         var g = AGG.aggregates[k].group; (byGroup[g] = byGroup[g] || []).push(k);
+      });
+      Object.keys(byGroup).forEach(function (g) {
+        byGroup[g].sort(function (a, b) { return METRIC_ORDER.indexOf(a) - METRIC_ORDER.indexOf(b); });
       });
       var scopeTxt = curScopeLabel();
       function sectionHtml(title) {
