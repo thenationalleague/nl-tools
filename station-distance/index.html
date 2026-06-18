@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <!--
-  station-distance/index.html  v1.1
+  station-distance/index.html  v1.2
   STANDALONE utility (not a gated tool, no auth-guard, out of lint scope).
-  v1.1: geocodes the station with up to 10 candidates and picks the one NEAREST
-  the club — fixes wrong-town matches (e.g. "Radcliffe on Trent" vs the Manchester
-  Metrolink stop). Clubs still need lat/lng + a station name in clubs-meta.
+  v1.2: constrains the station geocode to a bounded box around the club, then
+  picks the nearest candidate — fixes wrong-town matches the v1.1 nearest-only
+  pass still missed (e.g. "Radcliffe on Trent" 190km away). Falls back to an
+  unbounded search if the box is empty. Clubs need lat/lng + a station in clubs-meta.
 
   Works out the by-road distance (miles) from each club's ground to its named
   closest station, in the browser. It does NOT write anything — it produces a
@@ -99,11 +100,16 @@
       Math.cos(aLat * toR) * Math.cos(bLat * toR) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
     return 2 * R * Math.asin(Math.sqrt(s));
   }
-  // Geocode a station and pick the candidate NEAREST the club (kills wrong-town
-  // matches like "Radcliffe on Trent" vs the Manchester Metrolink stop).
+  // Geocode a station and pick the candidate NEAREST the club. We first constrain
+  // the search to a box around the club (bounded viewbox), which is what kills
+  // wrong-town matches like "Radcliffe on Trent" 190km away vs the local stop;
+  // if that returns nothing we retry unbounded so we never lose a club.
   async function geocodeStation(name, nearLat, nearLng) {
-    var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=10&countrycodes=gb&q=' + encodeURIComponent(name + ' station');
-    var arr = await getJSON(url);
+    var base = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=10&countrycodes=gb&q=' + encodeURIComponent(name + ' station');
+    var d = 0.5; // ~35-55km box around the club
+    var vb = '&viewbox=' + (nearLng - d) + ',' + (nearLat + d) + ',' + (nearLng + d) + ',' + (nearLat - d) + '&bounded=1';
+    var arr = await getJSON(base + vb);
+    if (!arr || !arr.length) arr = await getJSON(base); // fallback: unbounded
     if (!arr || !arr.length) return null;
     var best = null, bestD = Infinity;
     arr.forEach(function (r) {
