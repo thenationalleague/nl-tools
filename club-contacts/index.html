@@ -1,11 +1,14 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/index.html  v2.19
+  club-contacts/index.html  v2.20
   Public club DETAILS collection — GUIDED WIZARD (capability-URL pattern).
   Gathers a club's information AND people directory for club-directory.
   (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
   THIS IS THE UNIFIED FORM — supersedes the old club-data tool.
 
+  v2.20 (18/06/2026) — clubs-meta address is now a nested object {line1,line2,town,
+    county,postcode}; buildInfoFromMeta reads it (string fallback kept). Part of a
+    repo-wide pass: club-directory, travel-planner and club-data updated to read it.
   v2.19 (18/06/2026) — optional honorifics: a Title dropdown (Mr/Mrs/Dr/Sir...)
     so people don't free-type inconsistently, and a Post-nominals field with
     common suggestions (MBE/OBE...) that still allows combined entries. Folded
@@ -551,14 +554,17 @@ firebase.initializeApp({
     return vals[0] + 'm x ' + vals[1] + 'm';
   }
   function buildInfoFromMeta(c) {
-    // Prefer structured address fields if clubs-meta has them; else split the one-liner.
-    var hasStruct = (c.addr1 != null || c.town != null || c.county != null);
-    var ap = hasStruct ? { addr1: c.addr1 || '', addr2: c.addr2 || '', town: c.town || '', county: c.county || '', postcode: '' } : splitAddress(c.address || '');
+    // clubs-meta `address` is a nested object {line1,line2,town,county,postcode};
+    // fall back to splitting a legacy one-line string if an older record has one.
+    var a = c.address;
+    var ap = (a && typeof a === 'object')
+      ? { addr1: a.line1 || '', addr2: a.line2 || '', town: a.town || '', county: a.county || '', postcode: a.postcode || '' }
+      : splitAddress(a || '');
     var info = {};
     info.stadium = c.stadium_name || ''; info.stadiumSponsor = c.stadium_sponsor_name || '';
     info.noSponsor = !!(c.stadium_name && !c.stadium_sponsor_name);
     info.addr1 = ap.addr1; info.addr2 = ap.addr2; info.town = ap.town; info.county = ap.county;
-    info.postcode = c.postcode || ap.postcode || '';
+    info.postcode = ap.postcode || c.postcode || '';
     info.station = Array.isArray(c.station) ? c.station.join(', ') : (c.station || '');
     info.stationDistance = c.station_distance_mi != null ? String(c.station_distance_mi) : '';
     info.capacity = c.capacity != null ? String(c.capacity) : '';
