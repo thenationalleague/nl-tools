@@ -1,11 +1,15 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/index.html  v2.18
+  club-contacts/index.html  v2.19
   Public club DETAILS collection — GUIDED WIZARD (capability-URL pattern).
   Gathers a club's information AND people directory for club-directory.
   (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
   THIS IS THE UNIFIED FORM — supersedes the old club-data tool.
 
+  v2.19 (18/06/2026) — optional honorifics: a Title dropdown (Mr/Mrs/Dr/Sir...)
+    so people don't free-type inconsistently, and a Post-nominals field with
+    common suggestions (MBE/OBE...) that still allows combined entries. Folded
+    into personName() (e.g. "Dr Jane Smith MBE") and the CSV export.
   v2.18 (18/06/2026) — Club information split into 3 steps (Stadium -> Sponsorship
     -> Club contact) before the people pages, so it isn't one lump. Address
     splitter only labels a part as 'county' when it's a recognised UK county
@@ -465,7 +469,15 @@ firebase.initializeApp({
     return bits.length ? bits.join(' · ') : 'no contact details';
   }
   // Display name from the split first/surname (falls back to a legacy single `name`).
-  function personName(p){ var n = ((p.firstName || '') + ' ' + (p.lastName || '')).trim(); return n || (p.name || ''); }
+  // Optional honorific dropdown (avoids everyone free-typing "Mrs"); post-nominals
+  // are a free-ish field with common suggestions (they vary/combine: "OBE DL").
+  var TITLES = ['Mr', 'Mrs', 'Ms', 'Miss', 'Mx', 'Dr', 'Prof', 'Sir', 'Dame', 'Lord', 'Lady', 'Rev', 'Cllr'];
+  var POSTNOMS = ['MBE', 'OBE', 'CBE', 'BEM', 'DL', 'JP', 'QPM', 'OStJ', 'KStJ'];
+  function personName(p){
+    var core = ((p.firstName || '') + ' ' + (p.lastName || '')).trim() || (p.name || '');
+    if (!core) return '';
+    return (p.title ? p.title + ' ' : '') + core + (p.postNominals ? ' ' + p.postNominals : '');
+  }
   // Normalise a person from an older draft into the current shape (roles[] +
   // split firstName/lastName). Splits any legacy single `name` on first space.
   function normalizePerson(p){
@@ -879,6 +891,12 @@ firebase.initializeApp({
       : '<div class="ri-grid">' +
           '<div><label>First name</label><input type="text" data-p="firstName" value="' + esc(p.firstName || '') + '"></div>' +
           '<div><label>Surname</label><input type="text" data-p="lastName" value="' + esc(p.lastName || '') + '"></div>' +
+        '</div>' +
+        '<div class="ri-grid" style="margin-top:8px;">' +
+          '<div><label>Title (optional)</label><select data-honorific><option value="">— none —</option>' +
+            TITLES.map(function (t) { return '<option' + (p.title === t ? ' selected' : '') + '>' + esc(t) + '</option>'; }).join('') + '</select></div>' +
+          '<div><label>Post-nominals (optional)</label><input type="text" data-postnoms list="pn_' + p.id + '" value="' + esc(p.postNominals || '') + '" placeholder="e.g. MBE">' +
+            '<datalist id="pn_' + p.id + '">' + POSTNOMS.map(function (x) { return '<option value="' + x + '">'; }).join('') + '</datalist></div>' +
         '</div>' + titleBlock;
     var headBadges = otherSecs.map(function (s) { return '<span class="ri-rolebadge">also: ' + esc(s) + '</span>'; }).join('');
     var addWord = locked ? 'an extra' : 'another';
@@ -908,6 +926,7 @@ firebase.initializeApp({
       extra +
       '<button type="button" class="btn-confirm" data-save data-pid="' + p.id + '">Save this person</button>';
     wireValidation(div);
+    Array.prototype.forEach.call(div.querySelectorAll('select'), pinSelect);
     return div;
   }
   function personSummaryRow(p, section) {
@@ -1038,6 +1057,8 @@ firebase.initializeApp({
       var fn = card.querySelector('[data-p="firstName"]'), ln = card.querySelector('[data-p="lastName"]');
       if (fn) p.firstName = fn.value.trim();
       if (ln) p.lastName = ln.value.trim();
+      var hon = card.querySelector('[data-honorific]'); if (hon) p.title = hon.value;
+      var pnm = card.querySelector('[data-postnoms]'); if (pnm) p.postNominals = pnm.value.trim();
       p.emails = readEmails(card.querySelector('[data-emails]'));
       p.phones = readPhones(card.querySelector('[data-phones]'));
       var role = roleFor(p, section); if (role) role.title = g('title');
