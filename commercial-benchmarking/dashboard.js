@@ -187,26 +187,34 @@ window.CBDash = (function () {
         '<span class="posn ' + b.cls + '">' + b.txt + '</span>' + rollPill + '</div>' + body + '</div>';
     }
 
+    // fixed display order; 'Sponsor sectors' (the donuts) sits after the shirt group
+    var GROUP_ORDER = ['Shirt & kit sponsorship', 'Stand sponsorship', 'Ground advertising',
+      'Ticketing', 'Hospitality', 'Programme', 'Email & audience'];
     function render() {
       var sx = $('sections'); if (sx) sx.onclick = null;
-      var groups = [];
+      var byGroup = {};
       Object.keys(AGG.aggregates).forEach(function (k) {
-        var g = AGG.aggregates[k].group, grp = groups.filter(function (x) { return x.title === g; })[0];
-        if (!grp) { grp = { title: g, keys: [] }; groups.push(grp); }
-        grp.keys.push(k);
+        var g = AGG.aggregates[k].group; (byGroup[g] = byGroup[g] || []).push(k);
       });
       var scopeTxt = curScopeLabel();
-      var banner = OWN._noData
-        ? '<div class="cb-nodata">No commercial data submitted for <b>' + OWN.club + '</b> — benchmarks shown for context only.</div>'
-        : '';
-      $('sections').innerHTML = banner + groups.map(function (g) {
-        var cards = g.keys.map(metricCard);
-        CHIP_DEFS.filter(function (d) { return d.group === g.title; }).forEach(function (d) { cards.push(chipCard(d)); });
-        return '<div class="section"><div class="section-head"><h2>' + g.title + '</h2>' +
+      function sectionHtml(title) {
+        var cards = byGroup[title].map(metricCard);
+        CHIP_DEFS.filter(function (d) { return d.group === title; }).forEach(function (d) { cards.push(chipCard(d)); });
+        return '<div class="section"><div class="section-head"><h2>' + title + '</h2>' +
           '<span class="count">vs ' + scopeTxt + '</span></div>' +
           '<div class="grid">' + cards.join('') + '</div>' +
-          (g.title === 'Stand sponsorship' ? standExtras() : '') + '</div>';
-      }).join('');
+          (title === 'Stand sponsorship' ? standExtras() : '') + '</div>';
+      }
+      var html = OWN._noData
+        ? '<div class="cb-nodata">No commercial data submitted for <b>' + OWN.club + '</b> — benchmarks shown for context only.</div>'
+        : '';
+      GROUP_ORDER.forEach(function (g) {
+        if (byGroup[g]) html += sectionHtml(g);
+        if (g === 'Shirt & kit sponsorship') html += sectorsHtml();
+      });
+      // any group not in the explicit order (safety) appended at the end
+      Object.keys(byGroup).forEach(function (g) { if (GROUP_ORDER.indexOf(g) < 0) html += sectionHtml(g); });
+      $('sections').innerHTML = html;
     }
 
     function standExtras() {
@@ -305,13 +313,13 @@ window.CBDash = (function () {
       var other = total - shown.reduce(function (a, e) { return a + e.count; }, 0);
       var segs = shown.slice();
       if (other > 0) segs.push({ label: 'Other', count: other, other: true });
-      var r = 54, cx = 64, cy = 64, sw = 22, C = 2 * Math.PI * r, off = 0, pi = 0, arcs = '';
+      var r = 47, cx = 64, cy = 64, sw = 20, C = 2 * Math.PI * r, off = 0, pi = 0, arcs = '';
       segs.forEach(function (s) {
         var len = s.count / total * C, isOwn = !s.other && own.indexOf(s.label) >= 0;
         s._c = isOwn ? 'var(--primary)' : (s.other ? 'var(--navy-300)' : SECTOR_PALETTE[pi++ % SECTOR_PALETTE.length]);
         s._own = isOwn;
         arcs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + s._c +
-          '" stroke-width="' + (isOwn ? sw + 5 : sw) + '" stroke-dasharray="' + len.toFixed(2) + ' ' +
+          '" stroke-width="' + (isOwn ? sw + 4 : sw) + '" stroke-dasharray="' + len.toFixed(2) + ' ' +
           (C - len).toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) + '"></circle>';
         off += len;
       });
@@ -326,19 +334,18 @@ window.CBDash = (function () {
         (!own.length ? 'Not provided' : (own.length > 2 ? own.length + ' sectors' : own.join(', '))) + '</span></div></div>' +
         '<div class="cb-legend">' + legend + '</div></div></div>';
     }
-    function renderSectors() {
-      var host = $('sectorChart'), section = $('sectorSection');
-      if (!host) return;
-      var S = AGG.sectors;
-      if (!S) { if (section) section.style.display = 'none'; return; }
-      if (section) section.style.display = '';
-      host.innerHTML =
-        donutBlock('Front-of-shirt sponsorship', S.front, OWN.fsSector) +
+    function sectorsHtml() {
+      var S = AGG.sectors; if (!S) return '';
+      var d = donutBlock('Front-of-shirt sponsorship', S.front, OWN.fsSector) +
         donutBlock('Back-of-shirt sponsorship', S.back, OWN.bsSector) +
         donutBlock('Sleeve sponsorship', S.sleeve, OWN.slSector);
+      if (!d) return '';
+      return '<div class="section"><div class="section-head"><h2>Sponsor sectors</h2>' +
+        '<span class="count">front · back · sleeve — league mix</span></div>' +
+        '<div class="cb-sectorchart">' + d + '</div></div>';
     }
 
-    function renderAll() { renderHeader(); renderScopeControl(); renderSectors(); render(); }
+    function renderAll() { renderHeader(); renderScopeControl(); render(); }
 
     function setEditUI() { if (ebtn) ebtn.textContent = editMode ? 'Cancel edit' : 'Edit data'; }
 
@@ -482,7 +489,7 @@ window.CBDash = (function () {
         if (opts.canEdit && opts.writeLink) btns += '<button class="cb-cancel" id="cb-links" type="button">Links</button>';
         if (opts.canEdit) btns += '<button class="cb-edit-btn" id="cb-edit" type="button">Edit data</button>';
         bar.innerHTML = '<span class="cb-staff-tag">NL STAFF</span>' +
-          '<label class="cb-staff-pick"><span class="lbl">Club</span><select id="clubPick">' + opt + '</select></label>' +
+          '<select id="clubPick" class="cb-staff-pick">' + opt + '</select>' +
           '<span class="cb-staff-actions">' + btns + '</span>';
         $('clubPick').addEventListener('change', function () {
           OWN = clubs[+this.value];
