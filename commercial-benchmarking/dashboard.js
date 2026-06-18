@@ -210,10 +210,11 @@ window.CBDash = (function () {
       function sectionHtml(title) {
         var cards = byGroup[title].map(metricCard);
         CHIP_DEFS.filter(function (d) { return d.group === title; }).forEach(function (d) { cards.push(chipCard(d)); });
+        if (title === 'Stand sponsorship') cards.push(standListCard());  // half-width card alongside Avg per stand
         return '<div class="section"><div class="section-head"><h2>' + title + '</h2>' +
           '<span class="count">vs ' + scopeTxt + '</span></div>' +
           '<div class="grid">' + cards.join('') + '</div>' +
-          (title === 'Stand sponsorship' ? standExtras() : '') + '</div>';
+          (title === 'Stand sponsorship' ? standDonut() : '') + '</div>';
       }
       var html = OWN._noData
         ? '<div class="cb-nodata">No commercial data submitted for <b>' + OWN.club + '</b> — benchmarks shown for context only.</div>'
@@ -227,27 +228,25 @@ window.CBDash = (function () {
       $('sections').innerHTML = html;
     }
 
-    function standExtras() {
-      var html = '';
-      // largest income at the top
+    // half-width card listing this club's stand sponsors (largest first)
+    function standListCard() {
       var st = (OWN.stands || []).slice().sort(function (a, b) {
         return (b.income == null ? -1 : b.income) - (a.income == null ? -1 : a.income);
       });
-      // sectors without a fixed colour show as "Other (Name)" — consistent with
-      // the donut, but keeping what the sector actually is.
+      // sectors without a fixed colour show as "Other (Name)" — consistent with the donut.
       var secLabel = function (sec) { return !sec ? '' : (SECTOR_COLORS[sec] ? sec : 'Other (' + sec + ')'); };
-      if (st.length) {
-        html += '<div class="cb-standlist"><div class="cb-standlist-h">Your stand sponsors</div>' +
-          st.map(function (s) {
-            return '<div class="cb-standrow"><span class="cb-standname">' + (s.name || '—') + '</span>' +
-              '<span class="cb-standsec">' + secLabel(s.sector) + '</span>' +
-              '<span class="cb-standinc">' + (s.income != null ? fmt(s.income, '£') : '—') + '</span></div>';
-          }).join('') + '</div>';
-      }
-      if (AGG.sectors && AGG.sectors.stand && AGG.sectors.stand.length) {
-        html += donutBlock('Stand sponsor sectors', AGG.sectors.stand, OWN.standSectors);
-      }
-      return html ? '<div class="cb-standextra">' + html + '</div>' : '';
+      var rows = st.length
+        ? st.map(function (s) {
+          return '<div class="cb-standrow"><span class="cb-standname">' + (s.name || '—') + '</span>' +
+            '<span class="cb-standsec">' + secLabel(s.sector) + '</span>' +
+            '<span class="cb-standinc">' + (s.income != null ? fmt(s.income, '£') : '—') + '</span></div>';
+        }).join('')
+        : '<div class="cb-standnone">No stand sponsors recorded.</div>';
+      return '<div class="card"><div class="lab">Your stand sponsors</div><div class="cb-standlist">' + rows + '</div></div>';
+    }
+    function standDonut() {
+      if (!(AGG.sectors && AGG.sectors.stand && AGG.sectors.stand.length)) return '';
+      return '<div class="cb-standdonut">' + donutBlock('Stand sponsor sectors', AGG.sectors.stand, OWN.standSectors) + '</div>';
     }
 
     function chipNarrative(kind) {
@@ -337,8 +336,11 @@ window.CBDash = (function () {
       var segs = known.slice();
       if (otherCount > 0) segs.push({ label: 'Other', count: otherCount, other: true });
       var r = 60, cx = 80, cy = 80, sw = 24, C = 2 * Math.PI * r, off = 0, arcs = '';
+      // own sector highlighted; if the club's sector is itself uncommon, the
+      // Other slice is the highlighted one.
+      var ownInOther = own.some(function (o) { return !SECTOR_COLORS[o]; });
       segs.forEach(function (s) {
-        var len = s.count / total * C, isOwn = !s.other && own.indexOf(s.label) >= 0;
+        var len = s.count / total * C, isOwn = s.other ? ownInOther : own.indexOf(s.label) >= 0;
         s._c = s.other ? OTHER_COLOR : SECTOR_COLORS[s.label];
         s._own = isOwn;
         arcs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + s._c +
@@ -352,7 +354,8 @@ window.CBDash = (function () {
           '<span class="cb-leg-lab">' + s.label + (s._own ? ' — your sector' : '') + '</span>' +
           '<span class="cb-leg-n">' + s.count + ' (' + pct + '%)</span></div>';
       }).join('');
-      return '<div class="cb-sector"><div class="cb-sector-h">' + title + '</div><div class="cb-sector-body">' +
+      return '<div class="cb-sector"><div class="cb-sector-h">' + title +
+        '<span class="cb-sector-sub">' + total + ' clubs with a sponsor · all divisions</span></div><div class="cb-sector-body">' +
         '<div class="cb-donut-col"><div class="cb-donut">' +
         '<svg viewBox="0 0 160 160" width="100%" height="100%" style="transform:rotate(-90deg);display:block">' + arcs + '</svg></div>' +
         '<div class="cb-donut-cap"><span class="cb-donut-k">Your sector</span>' +
