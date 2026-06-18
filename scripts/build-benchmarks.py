@@ -64,6 +64,19 @@ def num(v):
     return v if isinstance(v, (int, float)) else None
 
 
+_JUNK_NAME = re.compile(r'^(0|-|–|—|n/?a|none|nil|tbc|n\.?a\.?)$', re.I)
+
+
+def clean_name(v):
+    """Sponsor-name fields sometimes carry placeholders ('0', '-', 'n/a') that
+    actually mean 'no sponsor'. Hard-wipe those to empty at source so the
+    dashboard shows 'No sponsor named' rather than the junk token."""
+    if v is None:
+        return ''
+    s = str(v).strip()
+    return '' if _JUNK_NAME.match(s) else s
+
+
 def parse_money_text(v):
     """Board-price columns are free text; accept a clean single number, else skip.
     Prose / ranges ('300-500', 'Same as above', 'From £600') -> None."""
@@ -286,7 +299,7 @@ def main():
         # per-club stand sponsor list + combined stand sectors
         stands = []; stand_secs = []
         for s in (1, 2, 3, 4):
-            nm = r[H['Stand %d — Sponsor Name' % s]]; nm = str(nm).strip() if nm not in (None,) else ''
+            nm = clean_name(r[H['Stand %d — Sponsor Name' % s]])
             sec = r[H['Stand %d — Sector' % s]]; sec = str(sec).strip() if sec not in (None,) else ''
             inc = num(r[H['Stand %d — Income/season (£, ex-VAT)' % s]])
             if nm or inc is not None:
@@ -295,8 +308,8 @@ def main():
                 stand_secs.append(sec)
         # extra fields beyond the original payload (additive — included in patch)
         extra = {
-            'bsSponsor': r[H['Back Shirt — Sponsor Name']] or '',
-            'slSponsor': r[H['Sleeve — Sponsor Name']] or '',
+            'bsSponsor': clean_name(r[H['Back Shirt — Sponsor Name']]),
+            'slSponsor': clean_name(r[H['Sleeve — Sponsor Name']]),
             'fsSector': r[H['Front Shirt — Sector']] or '',
             'bsSector': r[H['Back Shirt — Sector']] or '',
             'slSector': r[H['Sleeve — Sector']] or '',
@@ -306,7 +319,7 @@ def main():
         payload = dict({
             'club': club,
             'division': div,
-            'fsSponsor': r[H['Front Shirt — Sponsor Name']] or '',
+            'fsSponsor': clean_name(r[H['Front Shirt — Sponsor Name']]),
             'metrics': metrics,
             'chips': {ck: (r[H[col]] or '') for ck, _lbl, col in CHIP_FIELDS},
         }, **extra)
