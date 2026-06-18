@@ -50,6 +50,7 @@ window.CBDash = (function () {
       });
       AGG.aggregates[key].scopes.league = stats(league);
       SCOPES.forEach(function (d) { AGG.aggregates[key].scopes[d] = stats(byDiv[d]); });
+      AGG.aggregates[key].scopes.Step2 = stats(byDiv.North.concat(byDiv.South));
     });
     clubs.forEach(function (c) {
       Object.keys(AGG.aggregates).forEach(function (key) {
@@ -57,6 +58,9 @@ window.CBDash = (function () {
         var lg = (AGG.aggregates[key].scopes.league || {}).values || [];
         var dv = (AGG.aggregates[key].scopes[c.division] || {}).values || [];
         m.divPct = pctOf(dv, m.value); m.leaguePct = pctOf(lg, m.value);
+        if (c.division === 'North' || c.division === 'South') {
+          m.step2Pct = pctOf((AGG.aggregates[key].scopes.Step2 || {}).values || [], m.value);
+        }
       });
     });
     return AGG;
@@ -89,17 +93,31 @@ window.CBDash = (function () {
       if (pct >= 25) return { cls: 'mid', txt: 'Lower half' };
       return { cls: 'lo', txt: 'Bottom quartile' };
     }
-    function scopeKey() { return state.scope === 'league' ? 'league' : OWN.division; }
-    function otherScope() { return state.scope === 'league' ? OWN.division : 'league'; }
-    function pctFor(m, scope) { return scope === 'league' ? m.leaguePct : m.divPct; }
+    // scope model: 'div' (own division), 'step2' (North+South), 'league' (all)
+    var DIV_FULL = { National: 'National League', North: 'National League North', South: 'National League South' };
+    function divName(d) { return DIV_FULL[d] || d; }
+    function scopeOptions() {
+      if (OWN.division === 'National') return [{ k: 'div', l: divName('National') }, { k: 'league', l: 'All divisions' }];
+      return [{ k: 'div', l: divName(OWN.division) }, { k: 'step2', l: 'Step 2' }, { k: 'league', l: 'All divisions' }];
+    }
+    function scopeKey() { return state.scope === 'league' ? 'league' : state.scope === 'step2' ? 'Step2' : OWN.division; }
+    function pctSel(m, sel) { return sel === 'league' ? m.leaguePct : sel === 'step2' ? m.step2Pct : m.divPct; }
+    function curScopeLabel() { var o = scopeOptions().filter(function (x) { return x.k === state.scope; })[0]; return o ? o.l : ''; }
+    function scopeNoun() {
+      return state.scope === 'league' ? 'clubs across all divisions'
+        : state.scope === 'step2' ? 'Step 2 clubs'
+        : divName(OWN.division) + ' clubs';
+    }
 
     function rangeBar(agg, own) {
-      var s = agg.scopes[scopeKey()], u = agg.unit, os = otherScope(), o = agg.scopes[os];
+      var s = agg.scopes[scopeKey()], u = agg.unit;
       if (!s) return '<div class="hist-note">No benchmark for this group.</div>';
+      var secSel = state.scope === 'league' ? 'div' : 'league';
+      var o = agg.scopes[secSel === 'league' ? 'league' : OWN.division];
       var provided = own.value != null, left = 50;
       if (provided && s.max > s.min) left = 3 + 94 * Math.max(0, Math.min(1, (own.value - s.min) / (s.max - s.min)));
       var medLeft = s.max > s.min ? 3 + 94 * ((s.median - s.min) / (s.max - s.min)) : 50;
-      var osLabel = os === 'league' ? 'All divisions' : os + ' division';
+      var osLabel = secSel === 'league' ? 'All divisions' : divName(OWN.division);
       return '<div class="bar-wrap"><div class="bar">' +
         '<div class="median" style="left:' + medLeft.toFixed(1) + '%"></div>' +
         (provided ? '<div class="marker" style="left:' + left.toFixed(1) + '%"></div>' : '') +
@@ -109,7 +127,7 @@ window.CBDash = (function () {
         '<span style="text-align:right">' + fmtShort(s.max, u) + '<b>Highest</b></span>' +
         '</div><div class="league-line"><span>' + osLabel + ' median <b style="color:var(--text)">' +
         fmtShort(o.median, u) + '</b> (' + o.count + ' clubs)</span>' +
-        '<span class="lg-pos">' + band(pctFor(own, os === 'league' ? 'league' : 'div')).txt + '</span></div></div>';
+        '<span class="lg-pos">' + band(pctSel(own, secSel)).txt + '</span></div></div>';
     }
 
     // graph: one rising bar per club, this club's bar highlighted
@@ -118,7 +136,7 @@ window.CBDash = (function () {
       if (!s) return '<div class="hist-note">No benchmark for this group.</div>';
       var vals = s.values || [], n = vals.length, maxv = s.max || 1, youIdx = -1;
       if (own.value != null && n) {
-        var pct = pctFor(own, state.scope === 'league' ? 'league' : 'div');
+        var pct = pctSel(own, state.scope);
         var guess = pct == null ? -1 : Math.round((pct / 100) * (n - 1));
         var best = -1, bestD = Infinity;
         for (var i = 0; i < n; i++) {
@@ -138,9 +156,9 @@ window.CBDash = (function () {
         var ratio = s.max > 0 ? Math.round(100 * own.value / s.max) : null;
         note = (own.value >= s.median ? 'Above' : 'Below') + ' the median (' + fmtShort(s.median, u) + ')';
         if (ratio != null) note += ' and at <b>' + ratio + '%</b> of the highest (' + fmtShort(s.max, u) + ')';
-        note += ' &middot; ' + n + ' clubs, lowest to highest.';
+        note += ' &middot; ' + n + ' ' + scopeNoun() + ', lowest to highest.';
       } else {
-        note = 'Not provided — distribution shown for ' + n + ' clubs, lowest to highest.';
+        note = 'Not provided — distribution shown for ' + n + ' ' + scopeNoun() + ', lowest to highest.';
       }
       return '<div class="hist"><div class="hist-bars">' + bars + '</div><div class="hist-axis">' +
         '<span>' + fmtShort(s.min, u) + '<b>Lowest</b></span>' +
@@ -152,7 +170,7 @@ window.CBDash = (function () {
     function metricCard(key) {
       var agg = AGG.aggregates[key], own = (OWN.metrics && OWN.metrics[key]) || { value: null };
       var provided = own.value != null;
-      var pct = pctFor(own, state.scope === 'league' ? 'league' : 'div');
+      var pct = pctSel(own, state.scope);
       var b = band(provided ? pct : null);
       var view = state.cardView[key] || state.view;
       var body = view === 'graph' ? clubBars(agg, own) : rangeBar(agg, own);
@@ -173,11 +191,13 @@ window.CBDash = (function () {
         if (!grp) { grp = { title: g, keys: [] }; groups.push(grp); }
         grp.keys.push(k);
       });
-      var scopeTxt = state.scope === 'league' ? 'all divisions' : OWN.division + ' division';
+      var scopeTxt = curScopeLabel();
       $('sections').innerHTML = groups.map(function (g) {
+        var cards = g.keys.map(metricCard);
+        CHIP_DEFS.filter(function (d) { return d.group === g.title; }).forEach(function (d) { cards.push(chipCard(d)); });
         return '<div class="section"><div class="section-head"><h2>' + g.title + '</h2>' +
           '<span class="count">vs ' + scopeTxt + '</span></div>' +
-          '<div class="grid">' + g.keys.map(metricCard).join('') + '</div></div>';
+          '<div class="grid">' + cards.join('') + '</div></div>';
       }).join('');
     }
 
@@ -190,19 +210,26 @@ window.CBDash = (function () {
       if (kind === 'emailPartners') return 'Email on behalf of partners — ' + ((d.emailPartners || {}).Yes || 0) + ' of ' + tot(d.emailPartners) + ' clubs can';
       return '';
     }
-    function renderChips() {
+    // categorical fields, folded into the relevant metric group as cards
+    var CHIP_DEFS = [
+      { kind: 'rollingFront', group: 'Shirt & kit sponsorship', label: 'Front-shirt deal' },
+      { kind: 'progFormat', group: 'Audience & reach', label: 'Programme format' },
+      { kind: 'emailSupporters', group: 'Audience & reach', label: 'Email supporters' },
+      { kind: 'emailPartners', group: 'Audience & reach', label: 'Email partner offers' }
+    ];
+    function chipValue(kind) {
       var c = OWN.chips || {};
       var yn = function (x, on, off) { return x === 'Yes' ? on : (x ? off : '—'); };
-      var items = [
-        { k: 'Programme format', v: c.progFormat || '—', kind: 'progFormat' },
-        { k: 'Front-shirt deal', v: yn(c.rollingFront, 'Rolling', 'Fixed term'), kind: 'rollingFront' },
-        { k: 'Email supporters', v: yn(c.emailSupporters, 'Enabled', 'Not enabled'), kind: 'emailSupporters' },
-        { k: 'Email partner offers', v: yn(c.emailPartners, 'Enabled', 'Not enabled'), kind: 'emailPartners' }
-      ];
-      $('chips').innerHTML = items.map(function (it) {
-        return '<div class="chip"><div class="kicker">' + it.k + '</div><div class="cv">' + it.v + '</div>' +
-          '<div class="cn">' + chipNarrative(it.kind) + '</div></div>';
-      }).join('');
+      if (kind === 'rollingFront') return yn(c.rollingFront, 'Rolling', 'Fixed term');
+      if (kind === 'progFormat') return c.progFormat || '—';
+      if (kind === 'emailSupporters') return yn(c.emailSupporters, 'Enabled', 'Not enabled');
+      if (kind === 'emailPartners') return yn(c.emailPartners, 'Enabled', 'Not enabled');
+      return '—';
+    }
+    function chipCard(def) {
+      return '<div class="card chip-card"><div class="lab">' + def.label + '</div>' +
+        '<div class="chip-val">' + chipValue(def.kind) + '</div>' +
+        '<div class="chip-note">' + chipNarrative(def.kind) + '</div></div>';
     }
 
     function setText(id, txt) { var el = $(id); if (el) el.textContent = txt; }
@@ -213,18 +240,82 @@ window.CBDash = (function () {
         crest.alt = OWN.club;
       }
       setText('clubName', OWN.club);
-      setText('divPill', OWN.division + ' League');
+      setText('divPill', divName(OWN.division));
       var sponWrap = $('sponWrap');
       if (sponWrap) {
-        if (OWN.fsSponsor) { setText('fsSpon', OWN.fsSponsor); sponWrap.style.display = ''; }
-        else sponWrap.style.display = 'none';
+        sponWrap.style.display = '';
+        var spon = function (lab, v) { return lab + ': <b>' + (v && String(v).trim() ? v : '—') + '</b>'; };
+        sponWrap.innerHTML = [spon('Front', OWN.fsSponsor), spon('Back', OWN.bsSponsor), spon('Sleeve', OWN.slSponsor)].join(' &nbsp;·&nbsp; ');
       }
       setText('dvn', AGG.meta.divN[OWN.division]);
-      setText('divName', OWN.division);
+      setText('divName', divName(OWN.division));
       setText('tbClub', OWN.club);
     }
 
-    function renderAll() { renderHeader(); renderChips(); render(); }
+    function renderScopeControl() {
+      var opts = scopeOptions();
+      if (!opts.some(function (o) { return o.k === state.scope; })) state.scope = 'div';
+      $('scopeSeg').innerHTML = opts.map(function (o) {
+        return '<button data-scope="' + o.k + '"' + (o.k === state.scope ? ' class="on"' : '') + '>' + o.l + '</button>';
+      }).join('');
+    }
+
+    // Sponsor-sector donut: top sectors + own (force-shown) + Other; own slice red.
+    var SECTOR_PALETTE = ['var(--navy)', 'var(--blue)', 'var(--green)', 'var(--amber)',
+      'var(--purple)', 'var(--navy-300)', 'var(--blue-light)', 'var(--navy-600)'];
+    function donutBlock(title, dist, ownStr) {
+      if (!dist) return '';
+      // dist is an array of {label,count} (RTDB returns it as an array);
+      // tolerate the old object form too.
+      var arr = Array.isArray(dist) ? dist
+        : Object.keys(dist).map(function (k) { return { label: k, count: dist[k] }; });
+      var own = (ownStr || '').split('|').map(function (s) { return s.trim(); }).filter(Boolean);
+      var entries = arr.slice().sort(function (a, b) { return b.count - a.count; });
+      var cmap = {}; entries.forEach(function (e) { cmap[e.label] = e.count; });
+      var total = entries.reduce(function (a, e) { return a + e.count; }, 0);
+      if (!total) return '';
+      var keep = {};
+      entries.slice(0, 7).forEach(function (e) { keep[e.label] = e.count; });
+      own.forEach(function (o) { if (cmap[o] != null) keep[o] = cmap[o]; });
+      var shown = Object.keys(keep).map(function (k) { return { label: k, count: keep[k] }; })
+        .sort(function (a, b) { return b.count - a.count; });
+      var other = total - shown.reduce(function (a, e) { return a + e.count; }, 0);
+      var segs = shown.slice();
+      if (other > 0) segs.push({ label: 'Other', count: other, other: true });
+      var r = 54, cx = 64, cy = 64, sw = 22, C = 2 * Math.PI * r, off = 0, pi = 0, arcs = '';
+      segs.forEach(function (s) {
+        var len = s.count / total * C, isOwn = own.indexOf(s.label) >= 0;
+        s._c = isOwn ? 'var(--primary)' : (s.other ? 'var(--navy-100)' : SECTOR_PALETTE[pi++ % SECTOR_PALETTE.length]);
+        s._own = isOwn;
+        arcs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + s._c +
+          '" stroke-width="' + (isOwn ? sw + 5 : sw) + '" stroke-dasharray="' + len.toFixed(2) + ' ' +
+          (C - len).toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) + '"></circle>';
+        off += len;
+      });
+      var legend = segs.map(function (s) {
+        var pct = Math.round(100 * s.count / total);
+        return '<div class="cb-leg' + (s._own ? ' own' : '') + '"><span class="cb-leg-sw" style="background:' + s._c + '"></span>' +
+          '<span class="cb-leg-lab">' + s.label + '</span><span class="cb-leg-n">' + s.count + ' (' + pct + '%)</span></div>';
+      }).join('');
+      return '<div class="cb-sector"><div class="cb-sector-h">' + title + '</div><div class="cb-sector-body">' +
+        '<div class="cb-donut"><svg viewBox="0 0 128 128" width="128" height="128" style="transform:rotate(-90deg)">' + arcs + '</svg>' +
+        '<div class="cb-donut-center"><span class="cb-donut-k">Your sector</span><span class="cb-donut-v">' +
+        (own.length ? own.join(', ') : 'Not provided') + '</span></div></div>' +
+        '<div class="cb-legend">' + legend + '</div></div></div>';
+    }
+    function renderSectors() {
+      var host = $('sectorChart'), section = $('sectorSection');
+      if (!host) return;
+      var S = AGG.sectors;
+      if (!S) { if (section) section.style.display = 'none'; return; }
+      if (section) section.style.display = '';
+      host.innerHTML =
+        donutBlock('Front of shirt', S.front, OWN.fsSector) +
+        donutBlock('Back of shirt', S.back, OWN.bsSector) +
+        donutBlock('Sleeve', S.sleeve, OWN.slSector);
+    }
+
+    function renderAll() { renderHeader(); renderScopeControl(); renderSectors(); render(); }
 
     function setEditUI() { if (ebtn) ebtn.textContent = editMode ? 'Cancel edit' : 'Edit data'; }
 
