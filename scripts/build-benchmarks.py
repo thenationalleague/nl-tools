@@ -161,9 +161,9 @@ def build_metrics(H):
         dict(key='standAvg', label='Average per stand', unit='£', group='Stand sponsorship',
              desc='Mean income per stand sponsor', ext=stand_avg),
 
-        dict(key='tvBoard', label='TV-facing board', unit='£', group='Advertising boards',
+        dict(key='tvBoard', label='TV-facing board', unit='£', group='Ground advertising',
              desc='Price per season (clean figures only)', ext=board('TV-facing board price/season (£)')),
-        dict(key='nonTvBoard', label='Non-TV board', unit='£', group='Advertising boards',
+        dict(key='nonTvBoard', label='Non-TV board', unit='£', group='Ground advertising',
              desc='Price per season (clean figures only)', ext=board('Non-TV board price/season (£)')),
 
         dict(key='mdHosp', label='Matchday hospitality', unit='£', group='Hospitality',
