@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/admin.html  v1.10 — superadmin console for the club contacts collection.
+  club-contacts/admin.html  v1.11 — superadmin console for the club contacts collection.
   (Renamed from "club-roster" in v1.3 — toolKey/RTDB path now ops-club-contacts.)
-  Submissions use the v2 people shape: people[].roles[] + people[].lists[],
-  and inboxes[k].lists[] for shared-address mailing-list membership.
+  Submissions: { info, inboxes{deptSlug:{dept,email,phone,ext}},
+  people[{firstName,lastName,name,roles[{section,title}],hideContact,qualification}],
+  leads{areaKey:[personId]} }. Review modal + CSV export read this shape.
   Sibling of club-data/admin.html. Generates one capability token per current
   club, writes them to RTDB invites, renders ready-to-paste email blurbs
   with each club's private link, and lists submissions as they arrive with a
@@ -37,7 +38,9 @@
   <script>
     window.NL_TOOL = { title: 'Club Contacts Admin', toolKey: 'ops-club-contacts' };
     var NL_TOOL_KEY = 'ops-club-contacts';
-    window.NL_CHANGELOG = [{ date: '18 Jun 2026', version: 'v1.10', items: [
+    window.NL_CHANGELOG = [{ date: '18 Jun 2026', version: 'v1.11', items: [
+      'CSV export (People, Club info, Dept inboxes, Lead contacts) across all submitted clubs, plus a Clear-all-submissions reset for clearing test data before rollout.',
+      'People now captured as First name + Surname; review + exports use both.',
       'Review modal flags owners/board contacts hidden from the public directory, and shows safety/medical qualifications.',
       'Restructure: review modal now shows Lead contacts (nominated point of contact per League area) and Department inboxes; mailing-list columns retired.',
       'Club information (stadium, contact, sponsorship) is now collected in the same form and shown in the review modal — the old club-data tool is superseded.',
@@ -90,6 +93,15 @@
       <button class="btn btn--ghost" id="emailBtn" disabled>Build email text for all clubs</button>
     </div>
     <textarea id="emails" placeholder="Generated email blurbs appear here…" style="display:none;"></textarea>
+    <div style="display:flex;gap:8px;margin:10px 0 0;flex-wrap:wrap;align-items:center;border-top:1px solid var(--border);padding-top:12px;">
+      <span style="font-size:12px;color:var(--text-muted);font-variation-settings:'wght' 800;text-transform:uppercase;letter-spacing:.06em;">Export CSV</span>
+      <button class="btn btn--ghost btn--sm" id="csvPeople">People</button>
+      <button class="btn btn--ghost btn--sm" id="csvInfo">Club info</button>
+      <button class="btn btn--ghost btn--sm" id="csvInbox">Dept inboxes</button>
+      <button class="btn btn--ghost btn--sm" id="csvLeads">Lead contacts</button>
+      <span style="flex:1;"></span>
+      <button class="btn btn--danger btn--sm" id="clearAll" title="Wipe all submitted forms — for clearing test data before rollout">Clear all submissions (test reset)</button>
+    </div>
     <div id="list" style="margin-top:16px;"><p style="color:var(--text-muted);">Loading…</p></div>
   </div>
   <div class="modal-backdrop" id="craModal"><div class="modal" style="max-width:680px;">
@@ -116,6 +128,57 @@
   function tok(){ var a = new Uint8Array(24); crypto.getRandomValues(a);
     return Array.prototype.map.call(a, function (b) { return 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'[b % 57]; }).join(''); }
   function tokenFor(club) { for (var t in S.invites) if (S.invites[t].club === club) return t; return null; }
+  function pname(p) { return p.name || ((p.firstName || '') + ' ' + (p.lastName || '')).trim() || '(unnamed)'; }
+  var LEAD_LABELS = [['secretary','Club secretary'],['media','Media / press officer'],['programme','Programme editor'],['commercial','Commercial lead'],['finance','Finance lead'],['ticketing','Ticketing manager'],['safety','Safety officer'],['medical','Medical lead'],['dlo','Disability Liaison Officer'],['slo','Supporter Liaison Officer'],['plo','Police Liaison Officer']];
+  var INFO_LABELS = [['stadium','Stadium'],['stadiumSponsor','Sponsored name'],['addr1','Address 1'],['addr2','Address 2'],['town','Town'],['county','County'],['postcode','Postcode'],['station','Nearest station'],['stationDistance','Distance from station (mi)'],['capacity','Capacity'],['seated','Seated'],['pitchDims','Pitch'],['pitchType','Pitch type'],['website','Website'],['mainEmail','Main email'],['phone','Switchboard'],['countyFA','County FA'],['spClub','Club sponsor'],['spFront','Front-of-shirt'],['spBack','Back-of-shirt'],['spSleeve','Sleeve'],['spShorts','Shorts'],['spExtra','Other kit sponsors']];
+
+  /* ---- CSV export (client-side, from the submissions already loaded) ---- */
+  function subsList() { return Object.keys(S.subs).map(function (t) { return S.subs[t]; }).filter(function (s) { return s && s.club; }); }
+  function csvCell(v) { v = (v == null ? '' : String(v)); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+  function toCSV(headers, rows) { return [headers].concat(rows).map(function (r) { return r.map(csvCell).join(','); }).join('\r\n'); }
+  function downloadCSV(name, text) {
+    var blob = new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' });
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  }
+  function leadAreasFor(sub, pid) { return LEAD_LABELS.filter(function (a) { return ((sub.leads && sub.leads[a[0]]) || []).indexOf(pid) !== -1; }).map(function (a) { return a[1]; }).join('; '); }
+  function peopleCSV() {
+    var rows = [];
+    subsList().forEach(function (s) {
+      (s.people || []).forEach(function (p) {
+        rows.push([s.club, p.firstName || '', p.lastName || '', pname(p),
+          (p.roles || []).map(function (r) { return r.section + (r.title ? ' (' + r.title + ')' : ''); }).join('; '),
+          (p.emails || []).join('; '),
+          (p.phones || []).map(function (ph) { return ph.number + (ph.ext ? ' ext ' + ph.ext : ''); }).join('; '),
+          p.hideContact ? 'Yes' : 'No', p.qualification || '', leadAreasFor(s, p.id)]);
+      });
+    });
+    return toCSV(['Club', 'First name', 'Surname', 'Full name', 'Roles', 'Emails', 'Phones', 'Hidden from directory', 'Qualification', 'Lead areas'], rows);
+  }
+  function clubInfoCSV() {
+    var headers = ['Club'].concat(INFO_LABELS.map(function (f) { return f[1]; }));
+    var rows = subsList().map(function (s) { var info = s.info || {}; return [s.club].concat(INFO_LABELS.map(function (f) { var v = info[f[0]]; return v == null ? '' : String(v); })); });
+    return toCSV(headers, rows);
+  }
+  function inboxesCSV() {
+    var rows = [];
+    subsList().forEach(function (s) { Object.keys(s.inboxes || {}).forEach(function (k) { var ib = s.inboxes[k]; rows.push([s.club, ib.dept || ib.label || k, ib.email || '', ib.phone || '', ib.ext || '']); }); });
+    return toCSV(['Club', 'Department', 'Email', 'Phone', 'Ext'], rows);
+  }
+  function leadsCSV() {
+    var rows = [];
+    subsList().forEach(function (s) { LEAD_LABELS.forEach(function (a) {
+      var names = ((s.leads && s.leads[a[0]]) || []).map(function (id) { var p = (s.people || []).filter(function (x) { return x.id === id; })[0]; return p ? pname(p) : ''; }).filter(Boolean).join('; ');
+      rows.push([s.club, a[1], names]);
+    }); });
+    return toCSV(['Club', 'Lead area', 'Nominee(s)'], rows);
+  }
+  function exportCSV(kind) {
+    if (!subsList().length) { NL.toast('No submissions yet.', 'info'); return; }
+    var d = new Date().toISOString().slice(0, 10);
+    var map = { people: ['club-people-', peopleCSV], info: ['club-info-', clubInfoCSV], inbox: ['club-inboxes-', inboxesCSV], leads: ['club-leads-', leadsCSV] };
+    var m = map[kind]; downloadCSV(m[0] + d + '.csv', m[1]());
+  }
 
   function renderList() {
     document.getElementById('list').innerHTML = S.clubs.map(function (c) {
@@ -165,9 +228,7 @@
         '<div class="cra-person__c">' + esc(contactLine(p)) + '</div>' + tags + '</div>';
     }).join('') : '<p style="color:var(--text-muted);font-size:13px;margin:0;">None given.</p>';
 
-    // Lead contacts (v2.8) — nominated point of contact per League area
-    var LEAD_LABELS = [['secretary','Club secretary'],['media','Media / press officer'],['programme','Programme editor'],['commercial','Commercial lead'],['finance','Finance lead'],['ticketing','Ticketing manager'],['safety','Safety officer'],['medical','Medical lead'],['dlo','Disability Liaison Officer'],['slo','Supporter Liaison Officer'],['plo','Police Liaison Officer']];
-    function pname(p) { return p.name || ((p.firstName || '') + ' ' + (p.lastName || '')).trim() || '(unnamed)'; }
+    // Lead contacts — labels + pname are module-scope (shared with CSV export).
     function leadName(id) { var p = (sub.people || []).filter(function (x) { return x.id === id; })[0]; return p ? pname(p) : ''; }
     var leadsRows = LEAD_LABELS.map(function (a) {
       var names = ((sub.leads && sub.leads[a[0]]) || []).map(leadName).filter(Boolean).join(', ');
@@ -175,9 +236,8 @@
     }).join('');
     var leadsHtml = leadsRows ? '<dl class="cra-dl">' + leadsRows + '</dl>' : '<p style="color:var(--text-muted);font-size:13px;margin:0;">None nominated.</p>';
 
-    // Club information (merged in v2.7 — present on newer submissions only)
+    // Club information (INFO_LABELS is module-scope, shared with CSV export)
     var info = sub.info || {};
-    var INFO_LABELS = [['stadium','Stadium'],['stadiumSponsor','Sponsored name'],['addr1','Address 1'],['addr2','Address 2'],['town','Town'],['county','County'],['postcode','Postcode'],['station','Nearest station'],['stationDistance','Distance from station (mi)'],['capacity','Capacity'],['seated','Seated'],['pitchDims','Pitch'],['pitchType','Pitch type'],['website','Website'],['mainEmail','Main email'],['phone','Switchboard'],['countyFA','County FA'],['spClub','Club sponsor'],['spFront','Front-of-shirt'],['spBack','Back-of-shirt'],['spSleeve','Sleeve'],['spShorts','Shorts'],['spExtra','Other kit sponsors']];
     var infoRows = INFO_LABELS.filter(function (f) { return (info[f[0]] != null ? String(info[f[0]]) : '').trim(); })
       .map(function (f) { return '<dt>' + esc(f[1]) + '</dt><dd>' + esc(info[f[0]]) + '</dd>'; }).join('');
     var infoHtml = infoRows ? '<dl class="cra-dl">' + infoRows + '</dl>' : '<p style="color:var(--text-muted);font-size:13px;margin:0;">None given.</p>';
@@ -253,6 +313,19 @@
       var p = e.target.closest('[data-sub]'); if (!p) return;
       var club = p.getAttribute('data-sub'); var t = tokenFor(club);
       if (t && S.subs[t]) openSub(club, S.subs[t]);
+    });
+
+    document.getElementById('csvPeople').addEventListener('click', function () { exportCSV('people'); });
+    document.getElementById('csvInfo').addEventListener('click', function () { exportCSV('info'); });
+    document.getElementById('csvInbox').addEventListener('click', function () { exportCSV('inbox'); });
+    document.getElementById('csvLeads').addEventListener('click', function () { exportCSV('leads'); });
+    document.getElementById('clearAll').addEventListener('click', function () {
+      var n = subsList().length;
+      if (!n) { NL.toast('No submissions to clear.', 'info'); return; }
+      if (!confirm('Delete ALL ' + n + ' submitted form(s)?\n\nThis is for clearing TEST data before rollout — clubs would have to resubmit. It cannot be undone.')) return;
+      if (NL.writeAudit) NL.writeAudit('clubcontacts_clear_all', 'Cleared ALL ' + n + ' club-contacts submissions (test reset)');
+      db.ref(BASE + '/submissions').remove().then(function () { S.subs = {}; renderList(); NL.toast('All submissions cleared.', 'success'); })
+        .catch(function (e) { NL.toast('Clear failed: ' + (e.message || e), 'error'); });
     });
 
     document.getElementById('genBtn').addEventListener('click', function () {
