@@ -243,23 +243,34 @@ window.CBDash = (function () {
         return '<div class="section"><div class="section-head"><h2>' + g.title + '</h2></div>' +
           '<div class="cb-edit-grid">' + g.keys.map(function (k) {
             var agg = AGG.aggregates[k], m = OWN.metrics[k] || (OWN.metrics[k] = { value: null });
-            var u = (agg.unit || '').trim();
-            return '<label class="cb-edit-row"><span>' + agg.label + (u ? ' (' + u + ')' : '') + '</span>' +
-              '<input type="number" step="any" data-ekey="' + k + '" value="' + (m.value == null ? '' : m.value) + '" placeholder="not provided"></label>';
+            var u = (agg.unit || '').trim(), np = m.value == null;
+            return '<div class="cb-edit-row"><span class="cb-edit-lab">' + agg.label + (u ? ' (' + u + ')' : '') + '</span>' +
+              '<span class="cb-edit-ctl">' +
+                '<input type="number" step="any" data-ekey="' + k + '" value="' + (np ? '' : m.value) + '"' + (np ? ' disabled' : '') + '>' +
+                '<label class="cb-np"><input type="checkbox" data-np="' + k + '"' + (np ? ' checked' : '') + '> n/p</label>' +
+              '</span></div>';
           }).join('') + '</div></div>';
       }).join('');
       body += '<div class="cb-edit-actions"><button id="cb-save" class="cb-edit-btn" type="button">Save changes</button>' +
         '<button id="cb-cancel" class="cb-cancel" type="button">Cancel</button>' +
-        '<span id="cb-editnote">Editing <b>' + OWN.club + '</b> — blank = not provided. Saving recomputes all benchmarks.</span></div>';
+        '<span id="cb-editnote">Editing <b>' + OWN.club + '</b> — tick <b>n/p</b> for not provided; 0 is a real zero. Saving recomputes all benchmarks.</span></div>';
       $('sections').innerHTML = body;
+      $('sections').onchange = function (e) {
+        var cb = e.target, key = cb.getAttribute && cb.getAttribute('data-np');
+        if (key == null) return;
+        var inp = $('sections').querySelector('input[data-ekey="' + key + '"]');
+        if (inp) { inp.disabled = cb.checked; if (!cb.checked) { inp.focus(); } }
+      };
       $('cb-cancel').onclick = function () { editMode = false; setEditUI(); render(); };
       $('cb-save').onclick = doSave;
     }
 
     function doSave() {
       [].forEach.call($('sections').querySelectorAll('input[data-ekey]'), function (inp) {
-        var raw = inp.value.trim();
-        OWN.metrics[inp.getAttribute('data-ekey')].value = raw === '' ? null : Number(raw);
+        var k = inp.getAttribute('data-ekey');
+        var np = $('sections').querySelector('input[data-np="' + k + '"]');
+        if (np && np.checked) { OWN.metrics[k].value = null; }
+        else { var raw = inp.value.trim(); OWN.metrics[k].value = raw === '' ? 0 : Number(raw); }
       });
       recompute(AGG, clubs);
       $('cb-save').disabled = true; $('cb-editnote').textContent = 'Saving…';
@@ -270,6 +281,27 @@ window.CBDash = (function () {
         console.error(e); $('cb-save').disabled = false;
         $('cb-editnote').textContent = 'Save failed — please try again.';
       });
+    }
+
+    function exportData() {
+      var keys = Object.keys(AGG.aggregates);
+      function cell(s) { s = s == null ? '' : String(s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+      var chipCols = [['progFormat', 'Programme format'], ['rollingFront', 'Front-shirt rolling?'],
+        ['emailSupporters', 'Can email supporters?'], ['emailPartners', 'Can email partners?']];
+      var header = ['Club', 'Division'].concat(keys.map(function (k) {
+        var u = (AGG.aggregates[k].unit || '').trim(); return AGG.aggregates[k].label + (u ? ' (' + u + ')' : '');
+      })).concat(chipCols.map(function (c) { return c[1]; }));
+      var lines = [header.map(cell).join(',')];
+      clubs.forEach(function (c) {
+        var row = [c.club, c.division];
+        keys.forEach(function (k) { var m = c.metrics && c.metrics[k]; row.push(m && m.value != null ? m.value : ''); });
+        chipCols.forEach(function (cc) { row.push((c.chips && c.chips[cc[0]]) || ''); });
+        lines.push(row.map(cell).join(','));
+      });
+      var blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+      var url = URL.createObjectURL(blob), a = document.createElement('a');
+      a.href = url; a.download = 'commercial-benchmarking-' + new Date().toISOString().slice(0, 10) + '.csv';
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     }
 
     if (opts.staff) {
@@ -309,18 +341,22 @@ window.CBDash = (function () {
           updateShare();
         }
 
+        var actions = document.createElement('div');
+        actions.className = 'cb-ctl'; actions.style.marginLeft = 'auto'; actions.style.gap = '8px';
+        var xbtn = document.createElement('button');
+        xbtn.type = 'button'; xbtn.className = 'cb-cancel'; xbtn.textContent = 'Export (Excel)';
+        xbtn.addEventListener('click', exportData);
+        actions.appendChild(xbtn);
         if (opts.canEdit) {
-          var ewrap = document.createElement('div');
-          ewrap.className = 'cb-ctl'; ewrap.style.marginLeft = 'auto';
           ebtn = document.createElement('button');
           ebtn.type = 'button'; ebtn.className = 'cb-edit-btn'; ebtn.textContent = 'Edit data';
-          ewrap.appendChild(ebtn);
-          var controls = staffCtl.parentNode; if (controls) controls.appendChild(ewrap);
           ebtn.addEventListener('click', function () {
             editMode = !editMode; setEditUI();
             if (editMode) renderEditForm(); else render();
           });
+          actions.appendChild(ebtn);
         }
+        var controls = staffCtl.parentNode; if (controls) controls.appendChild(actions);
       }
       var pt = $('privacyTxt');
       if (pt) pt.innerHTML = '<b>NL staff view.</b> You can see every club’s named figures here, and copy a club’s private no-login link to send them. Clubs only ever see their own data plus anonymous benchmarks.';
