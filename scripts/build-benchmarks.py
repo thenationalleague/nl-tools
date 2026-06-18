@@ -197,6 +197,8 @@ def main():
     # Sponsor sector distributions (front/back/sleeve). Multi-valued fields are
     # " | "-split and counted per sector. Anonymised — counts only, no names.
     def sector_dist(col):
+        # Returned as a sorted LIST of {label, count} — sector names are free
+        # text (e.g. they can contain '.'), which is illegal in an RTDB key.
         d = {}
         for r in data:
             v = r[H[col]]
@@ -206,7 +208,7 @@ def main():
                 p = p.strip()
                 if p:
                     d[p] = d.get(p, 0) + 1
-        return d
+        return sorted([{'label': k, 'count': v} for k, v in d.items()], key=lambda x: -x['count'])
     sectors = {
         'front': sector_dist('Front Shirt — Sector'),
         'back': sector_dist('Back Shirt — Sector'),

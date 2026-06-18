@@ -265,14 +265,18 @@ window.CBDash = (function () {
       'var(--purple)', 'var(--navy-300)', 'var(--blue-light)', 'var(--navy-600)'];
     function donutBlock(title, dist, ownStr) {
       if (!dist) return '';
+      // dist is an array of {label,count} (RTDB returns it as an array);
+      // tolerate the old object form too.
+      var arr = Array.isArray(dist) ? dist
+        : Object.keys(dist).map(function (k) { return { label: k, count: dist[k] }; });
       var own = (ownStr || '').split('|').map(function (s) { return s.trim(); }).filter(Boolean);
-      var entries = Object.keys(dist).map(function (k) { return { label: k, count: dist[k] }; })
-        .sort(function (a, b) { return b.count - a.count; });
+      var entries = arr.slice().sort(function (a, b) { return b.count - a.count; });
+      var cmap = {}; entries.forEach(function (e) { cmap[e.label] = e.count; });
       var total = entries.reduce(function (a, e) { return a + e.count; }, 0);
       if (!total) return '';
       var keep = {};
       entries.slice(0, 7).forEach(function (e) { keep[e.label] = e.count; });
-      own.forEach(function (o) { if (dist[o] != null) keep[o] = dist[o]; });
+      own.forEach(function (o) { if (cmap[o] != null) keep[o] = cmap[o]; });
       var shown = Object.keys(keep).map(function (k) { return { label: k, count: keep[k] }; })
         .sort(function (a, b) { return b.count - a.count; });
       var other = total - shown.reduce(function (a, e) { return a + e.count; }, 0);
