@@ -50,6 +50,7 @@ window.CBDash = (function () {
       });
       AGG.aggregates[key].scopes.league = stats(league);
       SCOPES.forEach(function (d) { AGG.aggregates[key].scopes[d] = stats(byDiv[d]); });
+      AGG.aggregates[key].scopes.Step2 = stats(byDiv.North.concat(byDiv.South));
     });
     clubs.forEach(function (c) {
       Object.keys(AGG.aggregates).forEach(function (key) {
@@ -57,6 +58,9 @@ window.CBDash = (function () {
         var lg = (AGG.aggregates[key].scopes.league || {}).values || [];
         var dv = (AGG.aggregates[key].scopes[c.division] || {}).values || [];
         m.divPct = pctOf(dv, m.value); m.leaguePct = pctOf(lg, m.value);
+        if (c.division === 'North' || c.division === 'South') {
+          m.step2Pct = pctOf((AGG.aggregates[key].scopes.Step2 || {}).values || [], m.value);
+        }
       });
     });
     return AGG;
