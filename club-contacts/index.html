@@ -1,11 +1,16 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/index.html  v2.25
+  club-contacts/index.html  v2.26
   Public club DETAILS collection — GUIDED WIZARD (capability-URL pattern).
   Gathers a club's information AND people directory for club-directory.
   (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
   THIS IS THE UNIFIED FORM — supersedes the old club-data tool.
 
+  v2.26 (18/06/2026) — guard against "didn't press Save": moving between sections
+    (Next/Back/jump) now commits AND tidies any open person card just like the Save
+    button — syncStep already captured the fields, so we collapse named cards to a
+    summary row and drop empties. Added a green note that entries are kept
+    automatically so clubs don't fear losing a half-filled card.
   v2.25 (18/06/2026) — jump-to-section menu is keyboard-navigable: opening it
     focuses the current page, Up/Down (and Home/End) move through items, Enter
     jumps, Esc closes; Down also opens it from the button.
@@ -257,6 +262,7 @@ firebase.initializeApp({
   .ri-body { padding: 22px 0 0; }
   .ri-stephead { margin: 0 0 4px; padding: 0 20px; font-size: 20px; color: var(--navy); font-variation-settings:'wght' 900; }
   .ri-stepsub { color: var(--text-muted); font-size: 14px; margin: 0 0 20px; padding: 0 20px; line-height: 1.55; }
+  .ri-autosave-note { color: var(--green); font-variation-settings:'wght' 700; }
   .ri-card { background: var(--white); border:1px solid var(--border); border-top: 3px solid var(--primary); border-radius: 10px; padding: 18px 20px; margin-bottom: 16px; box-shadow: 0 1px 3px var(--navy-50); }
   .ri-card > h2 { margin: 0 0 3px; font-size: 15px; color: var(--navy); font-variation-settings:'wght' 800; }
   .ri-card__sub { font-size: 12.5px; color: var(--text-muted); margin: 0 0 14px; line-height: 1.5; }
@@ -774,9 +780,10 @@ firebase.initializeApp({
       if (!rows.children.length && data.noInboxes) noCk.checked = true;
       refreshNoInbox();
     } else if (step.kind === 'depts') {
-      var deptIntro = (step.sections[0] === 'Other')
+      var deptIntro = ((step.sections[0] === 'Other')
         ? 'Please add any other key members of staff you want listed in the League Directory.'
-        : 'Add the people at your club in this area. Someone who also appears elsewhere can be added with “already listed” so they stay one record. You’ll nominate lead contacts near the end.';
+        : 'Add the people at your club in this area. Someone who also appears elsewhere can be added with “already listed” so they stay one record. You’ll nominate lead contacts near the end.')
+        + ' <span class="ri-autosave-note">No need to press “Save this person” before moving on — your entries are kept automatically.</span>';
       host.innerHTML =
         '<h2 class="ri-stephead">' + esc(step.label) + '</h2>' +
         '<p class="ri-stepsub">' + deptIntro + '</p>' +
@@ -1304,7 +1311,19 @@ firebase.initializeApp({
     el('riStep').addEventListener('input', markSaved);
     el('riStep').addEventListener('change', markSaved);
   }
-  function goTo(idx) { syncStep(); pruneEmpty(); saveDraft(); cur = idx; renderSteps(); renderStep(); window.scrollTo(0, 0); }
+  function goTo(idx) {
+    syncStep(); pruneEmpty();
+    // Leaving a page commits any open person card just as "Save this person" would:
+    // syncStep() has already read the fields into data, so here we collapse cards
+    // for anyone with a name to a tidy summary row (and drop edit state for cards
+    // pruneEmpty removed) — so a half-filled card is never silently lost or left
+    // looking unsaved when the club returns.
+    Object.keys(editing).forEach(function (id) {
+      var p = findPerson(id);
+      if (!p || personName(p)) { delete editing[id]; delete unlockedShared[id]; }
+    });
+    saveDraft(); cur = idx; renderSteps(); renderStep(); window.scrollTo(0, 0);
+  }
 
   /* ---- Draft persistence ---- */
   var saveTimer = null;
