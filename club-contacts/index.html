@@ -1,11 +1,14 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/index.html  v2.24
+  club-contacts/index.html  v2.25
   Public club DETAILS collection — GUIDED WIZARD (capability-URL pattern).
   Gathers a club's information AND people directory for club-directory.
   (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
   THIS IS THE UNIFIED FORM — supersedes the old club-data tool.
 
+  v2.25 (18/06/2026) — jump-to-section menu is keyboard-navigable: opening it
+    focuses the current page, Up/Down (and Home/End) move through items, Enter
+    jumps, Esc closes; Down also opens it from the button.
   v2.24 (18/06/2026) — jump-to-section menu is now a single compact column (the
     two-column layout broke arrow-key reading); rows are tight enough that all the
     pages fit without a scrollbar on a normal screen. Lead-contacts intro now spells
@@ -243,6 +246,7 @@ firebase.initializeApp({
     padding: 5px 9px; border-radius: 6px; cursor: pointer; line-height: 1.2;
   }
   .ri-jumpitem:hover { background: var(--navy-50); }
+  .ri-jumpitem:focus { outline: none; background: var(--navy-50); box-shadow: inset 0 0 0 2px var(--navy); }
   .ri-jumpitem.is-current { background: var(--primary-50); color: var(--primary); font-variation-settings:'wght' 800; }
   .ri-jumpitem__g { flex: 0 0 16px; text-align: center; font-size: 12px; }
   .ri-jumpitem.is-done .ri-jumpitem__g { color: var(--green); }
@@ -710,7 +714,23 @@ firebase.initializeApp({
   function openJump(open) {
     var menu = el('riJumpMenu'), btn = el('riJumpBtn');
     menu.hidden = !open; btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-    if (open) { var c = menu.querySelector('.is-current'); if (c) c.scrollIntoView({ block: 'nearest' }); }
+    if (open) {
+      // Focus the current item so Up/Down arrows step through the list immediately.
+      var c = menu.querySelector('.is-current') || menu.querySelector('.ri-jumpitem');
+      if (c) { c.scrollIntoView({ block: 'nearest' }); c.focus(); }
+    } else { btn.focus(); }
+  }
+  // Roving keyboard nav inside the open menu (arrows / Home / End; Enter activates the button natively).
+  function jumpKeydown(e) {
+    var menu = el('riJumpMenu');
+    if (menu.hidden) return;
+    var items = Array.prototype.slice.call(menu.querySelectorAll('.ri-jumpitem'));
+    if (!items.length) return;
+    var i = items.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown') { e.preventDefault(); items[i < 0 ? 0 : Math.min(i + 1, items.length - 1)].focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); items[i <= 0 ? 0 : i - 1].focus(); }
+    else if (e.key === 'Home') { e.preventDefault(); items[0].focus(); }
+    else if (e.key === 'End') { e.preventDefault(); items[items.length - 1].focus(); }
   }
 
   /* ---- Render the current step ---- */
@@ -1271,6 +1291,7 @@ firebase.initializeApp({
     });
     el('riBack').addEventListener('click', function () { if (cur > 0) goTo(cur - 1); });
     el('riJumpBtn').addEventListener('click', function (e) { e.stopPropagation(); openJump(el('riJumpMenu').hidden); });
+    el('riJumpBtn').addEventListener('keydown', function (e) { if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && el('riJumpMenu').hidden) { e.preventDefault(); openJump(true); } });
     el('riJumpMenu').addEventListener('click', function (e) {
       var b = e.target.closest('[data-jump]'); if (!b) return;
       openJump(false); goTo(parseInt(b.getAttribute('data-jump'), 10));
@@ -1278,6 +1299,7 @@ firebase.initializeApp({
     document.addEventListener('click', function (e) {
       if (!el('riJumpMenu').hidden && !e.target.closest('.ri-jumpwrap')) openJump(false);
     });
+    el('riJumpMenu').addEventListener('keydown', jumpKeydown);
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') openJump(false); });
     el('riStep').addEventListener('input', markSaved);
     el('riStep').addEventListener('change', markSaved);
