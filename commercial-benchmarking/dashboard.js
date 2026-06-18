@@ -220,11 +220,18 @@ window.CBDash = (function () {
     function standExtras() {
       var html = '';
       var st = OWN.stands || [];
+      // sectors outside the donut's shown top-8 display as "Other" (consistent
+      // with the chart) rather than a one-off label like "Waste".
+      var standDist = (AGG.sectors && AGG.sectors.stand) || [];
+      var topSet = {};
+      standDist.slice().sort(function (a, b) { return b.count - a.count; }).slice(0, 8)
+        .forEach(function (e) { topSet[e.label] = 1; });
+      var secLabel = function (sec) { return !sec ? '' : (topSet[sec] ? sec : 'Other'); };
       if (st.length) {
         html += '<div class="cb-standlist"><div class="cb-standlist-h">Your stand sponsors</div>' +
           st.map(function (s) {
             return '<div class="cb-standrow"><span class="cb-standname">' + (s.name || '—') + '</span>' +
-              '<span class="cb-standsec">' + (s.sector || '') + '</span>' +
+              '<span class="cb-standsec">' + secLabel(s.sector) + '</span>' +
               '<span class="cb-standinc">' + (s.income != null ? fmt(s.income, '£') : '—') + '</span></div>';
           }).join('') + '</div>';
       }
@@ -313,7 +320,7 @@ window.CBDash = (function () {
       var other = total - shown.reduce(function (a, e) { return a + e.count; }, 0);
       var segs = shown.slice();
       if (other > 0) segs.push({ label: 'Other', count: other, other: true });
-      var r = 47, cx = 64, cy = 64, sw = 20, C = 2 * Math.PI * r, off = 0, pi = 0, arcs = '';
+      var r = 60, cx = 80, cy = 80, sw = 24, C = 2 * Math.PI * r, off = 0, pi = 0, arcs = '';
       segs.forEach(function (s) {
         var len = s.count / total * C, isOwn = !s.other && own.indexOf(s.label) >= 0;
         s._c = isOwn ? 'var(--primary)' : (s.other ? 'var(--navy-300)' : SECTOR_PALETTE[pi++ % SECTOR_PALETTE.length]);
@@ -329,7 +336,7 @@ window.CBDash = (function () {
           '<span class="cb-leg-lab">' + s.label + '</span><span class="cb-leg-n">' + s.count + ' (' + pct + '%)</span></div>';
       }).join('');
       return '<div class="cb-sector"><div class="cb-sector-h">' + title + '</div><div class="cb-sector-body">' +
-        '<div class="cb-donut"><svg viewBox="0 0 128 128" width="128" height="128" style="transform:rotate(-90deg)">' + arcs + '</svg>' +
+        '<div class="cb-donut"><svg viewBox="0 0 160 160" width="160" height="160" style="transform:rotate(-90deg)">' + arcs + '</svg>' +
         '<div class="cb-donut-center"><span class="cb-donut-k">Your sector</span><span class="cb-donut-v">' +
         (!own.length ? 'Not provided' : (own.length > 2 ? own.length + ' sectors' : own.join(', '))) + '</span></div></div>' +
         '<div class="cb-legend">' + legend + '</div></div></div>';
@@ -488,17 +495,25 @@ window.CBDash = (function () {
         var btns = '<button class="cb-cancel" id="cb-export" type="button">Export (Excel)</button>';
         if (opts.canEdit && opts.writeLink) btns += '<button class="cb-cancel" id="cb-links" type="button">Links</button>';
         if (opts.canEdit) btns += '<button class="cb-edit-btn" id="cb-edit" type="button">Edit data</button>';
-        bar.innerHTML = '<span class="cb-staff-tag">NL STAFF</span>' +
+        bar.innerHTML =
           '<select id="clubPick" class="cb-staff-pick">' + opt + '</select>' +
+          '<a id="cb-selLink" class="cb-sellink" target="_blank" rel="noopener"></a>' +
           '<span class="cb-staff-actions">' + btns + '</span>';
+        function updateSelLink() {
+          var a = $('cb-selLink'); if (!a) return;
+          var tok = (opts.tokenByClub || {})[OWN.club];
+          if (tok) { a.href = new URL('link.html?t=' + tok, location.href).href; a.textContent = 'Open club link ↗'; a.style.display = ''; }
+          else { a.removeAttribute('href'); a.style.display = 'none'; }
+        }
         $('clubPick').addEventListener('change', function () {
           OWN = clubs[+this.value];
           if (editMode) { editMode = false; setEditUI(); }
-          renderAll();
+          renderAll(); updateSelLink();
         });
         $('cb-export').onclick = exportData;
         if ($('cb-links')) $('cb-links').onclick = function () { editMode = false; setEditUI(); renderLinks(); };
         if ($('cb-edit')) { ebtn = $('cb-edit'); ebtn.onclick = function () { editMode = !editMode; setEditUI(); if (editMode) renderEditForm(); else render(); }; }
+        updateSelLink();
       }
       var pt = $('privacyTxt');
       if (pt) pt.innerHTML = '<b>NL staff view.</b> Every club’s named figures are visible here; use <b>Links</b> to copy a club’s private link. Clubs only ever see their own data plus anonymous benchmarks.';
