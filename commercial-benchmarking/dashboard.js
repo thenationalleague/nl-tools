@@ -480,13 +480,12 @@ window.CBDash = (function () {
       return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
     }
 
-    // Union of every sector seen across front/back/sleeve/stand, for the dropdown.
+    // The dropdown offers exactly the sectors that surface individually on the
+    // front end — the 8 most common league-wide (keys of SECTOR_COLORS). Any
+    // rarer sector is "Other" on the donuts, so in the editor it lands on the
+    // "Other…" option with the club's specific value kept in the freetext box.
     function allSectors() {
-      var set = {};
-      ['front', 'back', 'sleeve', 'stand'].forEach(function (k) {
-        ((AGG.sectors && AGG.sectors[k]) || []).forEach(function (d) { if (d.label) set[d.label] = 1; });
-      });
-      return Object.keys(set).sort(function (a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()); });
+      return Object.keys(SECTOR_COLORS).sort(function (a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()); });
     }
 
     // Known values for a categorical chip: sensible defaults merged with
