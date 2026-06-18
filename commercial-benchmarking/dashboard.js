@@ -191,6 +191,35 @@ window.CBDash = (function () {
         '<span class="posn ' + b.cls + '">' + b.txt + '</span>' + rollPill + '</div>' + body + '</div>';
     }
 
+    // metric content without the card wrapper (for the composite shirt cards)
+    function metricBody(key, sublabel) {
+      var agg = AGG.aggregates[key], own = (OWN.metrics && OWN.metrics[key]) || { value: null };
+      var provided = own.value != null;
+      var pct = pctSel(own, state.scope);
+      var sc = agg.scopes[scopeKey()];
+      var onMedian = provided && sc && own.value === sc.median;
+      var b = !provided ? band(null) : (onMedian ? { cls: 'mid', txt: 'On the median' } : band(pct));
+      var view = state.cardView[key] || state.view;
+      var body = view === 'graph' ? clubBars(agg, own) : rangeBar(agg, own);
+      var nextView = view === 'graph' ? 'bars' : 'graph';
+      var roll = TERM_ROLL[key];
+      var rollPill = roll ? '<span class="posn roll">' + chipValue(roll) + '</span>' : '';
+      return '<div class="cb-sm"><div class="cb-sm-head"><span class="cb-sm-lab">' + sublabel + '</span>' +
+        '<button class="cb-sm-toggle" data-card="' + key + '" data-next="' + nextView + '">' + (view === 'graph' ? 'Bars' : 'Graph') + '</button></div>' +
+        '<div class="value-row"><span class="value">' + (provided ? fmt(own.value, agg.unit) : '—') + '</span>' +
+        '<span class="posn ' + b.cls + '">' + b.txt + '</span>' + rollPill + '</div>' + body + '</div>';
+    }
+
+    // one card per shirt placement: prominent sponsor + income + deal length + sector donut
+    function shirtSlotCard(sl) {
+      var spon = OWN[sl.sponKey];
+      var head = '<div class="cb-slot-head"><span class="cb-slot-kind">' + sl.kind + '</span>' +
+        '<span class="cb-slotspon' + (spon ? '' : ' cb-slotspon-none') + '">' + (spon || 'No sponsor named') + '</span></div>';
+      var metrics = '<div class="cb-slot-metrics">' + metricBody(sl.incomeKey, 'Income') + metricBody(sl.termKey, 'Deal length') + '</div>';
+      var donut = (sl.dist && sl.dist.length) ? donutBlock('Sector mix', sl.dist, sl.ownSec, sl.noun) : '';
+      return '<div class="card cb-slotcard">' + head + metrics + donut + '</div>';
+    }
+
     // fixed display order; 'Sponsor sectors' (the donuts) sits after the shirt group
     var GROUP_ORDER = ['Shirt & kit sponsorship', 'Stand sponsorship', 'Ground advertising',
       'Ticketing', 'Hospitality', 'Programme', 'Email & audience'];
@@ -218,20 +247,17 @@ window.CBDash = (function () {
           '<div class="grid">' + cards.join('') + '</div>' +
           (title === 'Stand sponsorship' ? standDonut() : '') + '</div>';
       }
-      // Shirt & kit: each slot's income+term cards with that slot's sector donut directly beneath.
+      // Shirt & kit: one composite card per placement (sponsor + income + term + sector donut).
       function shirtSectionHtml() {
         var S = AGG.sectors || {};
         var slots = [
-          { keys: ['frontShirt', 'frontTerm'], dist: S.front, own: OWN.fsSector, dt: 'Front-of-shirt sponsor sectors', noun: 'front-of-shirt sponsors' },
-          { keys: ['backShirt', 'backTerm'], dist: S.back, own: OWN.bsSector, dt: 'Back-of-shirt sponsor sectors', noun: 'back-of-shirt sponsors' },
-          { keys: ['sleeve', 'sleeveTerm'], dist: S.sleeve, own: OWN.slSector, dt: 'Sleeve sponsor sectors', noun: 'sleeve sponsors' }
+          { kind: 'Front-of-shirt sponsorship', incomeKey: 'frontShirt', termKey: 'frontTerm', sponKey: 'fsSponsor', dist: S.front, ownSec: OWN.fsSector, noun: 'front-of-shirt sponsors' },
+          { kind: 'Back-of-shirt sponsorship', incomeKey: 'backShirt', termKey: 'backTerm', sponKey: 'bsSponsor', dist: S.back, ownSec: OWN.bsSector, noun: 'back-of-shirt sponsors' },
+          { kind: 'Sleeve sponsorship', incomeKey: 'sleeve', termKey: 'sleeveTerm', sponKey: 'slSponsor', dist: S.sleeve, ownSec: OWN.slSector, noun: 'sleeve sponsors' }
         ];
-        var body = slots.map(function (sl) {
-          var donut = sl.dist ? '<div class="cb-slotdonut">' + donutBlock(sl.dt, sl.dist, sl.own, sl.noun) + '</div>' : '';
-          return '<div class="cb-shirtslot"><div class="grid">' + sl.keys.map(metricCard).join('') + '</div>' + donut + '</div>';
-        }).join('');
         return '<div class="section"><div class="section-head"><h2>Shirt &amp; kit sponsorship</h2>' +
-          '<span class="count">vs ' + scopeTxt + '</span></div>' + body + '</div>';
+          '<span class="count">vs ' + scopeTxt + '</span></div>' +
+          slots.map(shirtSlotCard).join('') + '</div>';
       }
       var html = OWN._noData
         ? '<div class="cb-nodata">No commercial data submitted for <b>' + OWN.club + '</b> — benchmarks shown for context only.</div>'
