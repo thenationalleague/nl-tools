@@ -24,6 +24,7 @@ import openpyxl
 SRC = sys.argv[1] if len(sys.argv) > 1 else 'Commercial_Benchmarking_Cleaned_v5.0.xlsx'
 OUT = sys.argv[2] if len(sys.argv) > 2 else 'commercial-benchmarking-rtdb-import.json'
 LINKS = sys.argv[3] if len(sys.argv) > 3 else 'commercial-benchmarking-links.csv'
+PATCH = sys.argv[4] if len(sys.argv) > 4 else 'commercial-benchmarking-sector-patch.json'
 BASE_URL = 'https://thenationalleague.github.io/tools/commercial-benchmarking/link.html?t='
 DIVS = ['National', 'North', 'South']
 
@@ -106,11 +107,20 @@ def build_metrics(H):
         return lambda r: parse_money_text(r[i])
 
     stand_i = [H['Stand %d — Income/season (£, ex-VAT)' % s] for s in (1, 2, 3, 4)]
+    stand_name_i = [H['Stand %d — Sponsor Name' % s] for s in (1, 2, 3, 4)]
 
     def stand_total(r):
         vs = [num(r[i]) for i in stand_i]
         vs = [x for x in vs if x is not None]
         return float(sum(vs)) if vs else None
+
+    def stand_count(r):
+        n = 0
+        for ni, ii in zip(stand_name_i, stand_i):
+            nm = r[ni]
+            if (nm is not None and str(nm).strip() != '') or isinstance(r[ii], (int, float)):
+                n += 1
+        return float(n)
 
     return [
         dict(key='msTicket', label='Matchday ticket', unit='£', group='Ticketing',
@@ -127,6 +137,8 @@ def build_metrics(H):
         dict(key='frontTerm', label='Front-shirt deal length', unit=' yrs', group='Shirt & kit sponsorship',
              desc='Contract length in years', ext=col('Front Shirt — Contract Length')),
 
+        dict(key='standCount', label='Stand sponsors', unit='', group='Ground & stand advertising',
+             desc='Number of stand/ground sponsors sold (0–4)', ext=stand_count),
         dict(key='standTotal', label='Stand sponsorship (total)', unit='£', group='Ground & stand advertising',
              desc='Combined income across all stand sponsors', ext=stand_total),
         dict(key='tvBoard', label='TV-facing board', unit='£', group='Ground & stand advertising',
@@ -165,6 +177,9 @@ def main():
         for d in DIVS:
             dv = [v for v in (m['ext'](r) for r in data if r[1] == d) if v is not None]
             entry['scopes'][d] = stats(dv)
+        # Step 2 = National League North + South combined.
+        s2 = [v for v in (m['ext'](r) for r in data if r[1] in ('North', 'South')) if v is not None]
+        entry['scopes']['Step2'] = stats(s2)
         agg[m['key']] = entry
 
     def dist(col):
@@ -178,9 +193,31 @@ def main():
         return c
 
     chips = {ck: dist(col) for ck, _lbl, col in CHIP_FIELDS}
+
+    # Sponsor sector distributions (front/back/sleeve). Multi-valued fields are
+    # " | "-split and counted per sector. Anonymised — counts only, no names.
+    def sector_dist(col):
+        # Returned as a sorted LIST of {label, count} — sector names are free
+        # text (e.g. they can contain '.'), which is illegal in an RTDB key.
+        d = {}
+        for r in data:
+            v = r[H[col]]
+            if v is None or str(v).strip() == '':
+                continue
+            for p in str(v).split('|'):
+                p = p.strip()
+                if p:
+                    d[p] = d.get(p, 0) + 1
+        return sorted([{'label': k, 'count': v} for k, v in d.items()], key=lambda x: -x['count'])
+    sectors = {
+        'front': sector_dist('Front Shirt — Sector'),
+        'back': sector_dist('Back Shirt — Sector'),
+        'sleeve': sector_dist('Sleeve — Sector'),
+    }
+
     meta = {'leagueN': len(data),
             'divN': {d: sum(1 for r in data if r[1] == d) for d in DIVS}}
-    aggregates = {'meta': meta, 'aggregates': agg, 'chips': chips}
+    aggregates = {'meta': meta, 'aggregates': agg, 'chips': chips, 'sectors': sectors}
 
     # ---- per-club payloads, served two ways ----
     #   clubs/<club name>   read by logged-in staff (all) or the matching club
@@ -189,29 +226,60 @@ def main():
     clubs = {}
     links = {}
     link_rows = []
+    # Additive merge-patch: only the NEW keys (sectors, standCount metric,
+    # per-club sector fields + standCount). Applied with a single RTDB update()
+    # it adds these without overwriting any figures corrected live in the tool.
+    patch = {'aggregates/sectors': sectors, 'aggregates/aggregates/standCount': agg['standCount']}
+    # Step 2 scope for every other metric (standCount's full object already carries it).
+    for k in agg:
+        if k != 'standCount':
+            patch['aggregates/aggregates/' + k + '/scopes/Step2'] = agg[k]['scopes']['Step2']
     for r in data:
         club = r[0]; div = r[1]
+        is_step2 = div in ('North', 'South')
         metrics = {}
         for m in METRICS:
             v = m['ext'](r)
             league = [x for x in (m['ext'](rr) for rr in data) if x is not None]
             dv = [x for x in (m['ext'](rr) for rr in data if rr[1] == div) if x is not None]
-            metrics[m['key']] = {'value': v, 'divPct': pct_of(dv, v), 'leaguePct': pct_of(league, v)}
-        payload = {
+            entry = {'value': v, 'divPct': pct_of(dv, v), 'leaguePct': pct_of(league, v)}
+            if is_step2:
+                s2 = [x for x in (m['ext'](rr) for rr in data if rr[1] in ('North', 'South')) if x is not None]
+                entry['step2Pct'] = pct_of(s2, v)
+            metrics[m['key']] = entry
+        # extra fields beyond the original payload (additive — included in patch)
+        extra = {
+            'bsSponsor': r[H['Back Shirt — Sponsor Name']] or '',
+            'slSponsor': r[H['Sleeve — Sponsor Name']] or '',
+            'fsSector': r[H['Front Shirt — Sector']] or '',
+            'bsSector': r[H['Back Shirt — Sector']] or '',
+            'slSector': r[H['Sleeve — Sector']] or '',
+        }
+        payload = dict({
             'club': club,
             'division': div,
             'fsSponsor': r[H['Front Shirt — Sponsor Name']] or '',
             'metrics': metrics,
             'chips': {ck: (r[H[col]] or '') for ck, _lbl, col in CHIP_FIELDS},
-        }
+        }, **extra)
         clubs[club] = payload
         token = make_token(club)
         links[token] = payload
         link_rows.append((club, div, BASE_URL + token))
+        for base in ('clubs/' + club, 'links/' + token):
+            patch[base + '/metrics/standCount'] = metrics['standCount']
+            for sk, sv in extra.items():
+                patch[base + '/' + sk] = sv
+            if is_step2:
+                for mk in metrics:
+                    if mk != 'standCount':
+                        patch[base + '/metrics/' + mk + '/step2Pct'] = metrics[mk]['step2Pct']
 
     out = {'aggregates': aggregates, 'clubs': clubs, 'links': links}
     with open(OUT, 'w') as f:
         json.dump(out, f, ensure_ascii=False, indent=1)
+    with open(PATCH, 'w') as f:
+        json.dump(patch, f, ensure_ascii=False, indent=1)
     with open(LINKS, 'w', newline='') as f:
         w = csv.writer(f)
         w.writerow(['Club', 'Division', 'Dashboard link (no login)'])
@@ -219,6 +287,7 @@ def main():
             w.writerow(row)
 
     print('Wrote %s  (%d metrics, %d clubs)' % (OUT, len(METRICS), len(clubs)))
+    print('Wrote %s  (edit-safe additive patch, %d paths)' % (PATCH, len(patch)))
     print('Wrote %s' % LINKS)
     print('Tokens: %s' % ('STABLE (salted)' if SALT else 'RANDOM — set CB_TOKEN_SALT for stable links'))
     print('Import at RTDB node: app-data/ops-commercial-benchmarking')
