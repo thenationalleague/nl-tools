@@ -155,7 +155,7 @@ window.CBDash = (function () {
       var note;
       if (own.value != null) {
         var ratio = s.max > 0 ? Math.round(100 * own.value / s.max) : null;
-        note = (own.value >= s.median ? 'Above' : 'Below') + ' the median (' + fmtShort(s.median, u) + ')';
+        note = (own.value > s.median ? 'Above' : own.value < s.median ? 'Below' : 'On') + ' the median (' + fmtShort(s.median, u) + ')';
         if (ratio != null) note += ' and at <b>' + ratio + '%</b> of the highest (' + fmtShort(s.max, u) + ')';
         note += ' &middot; ' + n + ' ' + scopeNoun() + ', lowest to highest.';
       } else {
@@ -172,7 +172,9 @@ window.CBDash = (function () {
       var agg = AGG.aggregates[key], own = (OWN.metrics && OWN.metrics[key]) || { value: null };
       var provided = own.value != null;
       var pct = pctSel(own, state.scope);
-      var b = band(provided ? pct : null);
+      var sc = agg.scopes[scopeKey()];
+      var onMedian = provided && sc && own.value === sc.median;
+      var b = !provided ? band(null) : (onMedian ? { cls: 'mid', txt: 'On the median' } : band(pct));
       var view = state.cardView[key] || state.view;
       var body = view === 'graph' ? clubBars(agg, own) : rangeBar(agg, own);
       var nextView = view === 'graph' ? 'bars' : 'graph';
@@ -246,7 +248,7 @@ window.CBDash = (function () {
     }
     function standDonut() {
       if (!(AGG.sectors && AGG.sectors.stand && AGG.sectors.stand.length)) return '';
-      return '<div class="cb-standdonut">' + donutBlock('Stand sponsor sectors', AGG.sectors.stand, OWN.standSectors) + '</div>';
+      return '<div class="cb-standdonut">' + donutBlock('Stand sponsor sectors', AGG.sectors.stand, OWN.standSectors, 'stand sponsors') + '</div>';
     }
 
     function chipNarrative(kind) {
@@ -322,7 +324,7 @@ window.CBDash = (function () {
       return map;
     })();
     var OTHER_COLOR = 'var(--navy-200, #c8d0e0)';
-    function donutBlock(title, dist, ownStr) {
+    function donutBlock(title, dist, ownStr, noun) {
       if (!dist) return '';
       var arr = Array.isArray(dist) ? dist
         : Object.keys(dist).map(function (k) { return { label: k, count: dist[k] }; });
@@ -355,7 +357,7 @@ window.CBDash = (function () {
           '<span class="cb-leg-n">' + s.count + ' (' + pct + '%)</span></div>';
       }).join('');
       return '<div class="cb-sector"><div class="cb-sector-h">' + title +
-        '<span class="cb-sector-sub">' + total + ' clubs with a sponsor · all divisions</span></div><div class="cb-sector-body">' +
+        '<span class="cb-sector-sub">' + total + ' ' + (noun || 'sponsors') + ' · all divisions</span></div><div class="cb-sector-body">' +
         '<div class="cb-donut-col"><div class="cb-donut">' +
         '<svg viewBox="0 0 160 160" width="100%" height="100%" style="transform:rotate(-90deg);display:block">' + arcs + '</svg></div>' +
         '<div class="cb-donut-cap"><span class="cb-donut-k">Your sector</span>' +
@@ -365,9 +367,9 @@ window.CBDash = (function () {
     }
     function sectorsHtml() {
       var S = AGG.sectors; if (!S) return '';
-      var d = donutBlock('Front-of-shirt sponsorship', S.front, OWN.fsSector) +
-        donutBlock('Back-of-shirt sponsorship', S.back, OWN.bsSector) +
-        donutBlock('Sleeve sponsorship', S.sleeve, OWN.slSector);
+      var d = donutBlock('Front-of-shirt sponsorship', S.front, OWN.fsSector, 'front-of-shirt sponsors') +
+        donutBlock('Back-of-shirt sponsorship', S.back, OWN.bsSector, 'back-of-shirt sponsors') +
+        donutBlock('Sleeve sponsorship', S.sleeve, OWN.slSector, 'sleeve sponsors');
       if (!d) return '';
       return '<div class="section"><div class="section-head"><h2>Sponsor sectors</h2>' +
         '<span class="count">front · back · sleeve — league mix</span></div>' +
