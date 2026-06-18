@@ -1,11 +1,24 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/index.html  v2.20
+  club-contacts/index.html  v2.23
   Public club DETAILS collection — GUIDED WIZARD (capability-URL pattern).
   Gathers a club's information AND people directory for club-directory.
   (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
   THIS IS THE UNIFIED FORM — supersedes the old club-data tool.
 
+  v2.23 (18/06/2026) — "Jump to section" nav is now a custom two-column popover
+    instead of a native <select>, so all the granular pages show at once without
+    the option list needing to scroll. Same ✓/●/○ status glyphs; Esc / outside-
+    click closes it.
+  v2.22 (18/06/2026) — Title dropdown trimmed to distinctive honorifics only
+    (Dr, Prof, Rev, Cllr, Sir, Dame, Lord, Lady) — the everyday Mr/Mrs/Ms/Miss/Mx
+    courtesy titles are gone; we don't record them.
+  v2.21 (18/06/2026) — Club contact step now captures the six social channels
+    (Facebook / X / Instagram / TikTok / LinkedIn / YouTube), pre-filled from
+    clubs-meta `social` using full URLs. The "Executive" people area is relabelled
+    "Senior management" (heading + nav) with CEO/COO/GM examples and a note that
+    heads of department are added on their own pages later; the underlying section
+    key stays 'Executive' so the directory/admin are unaffected.
   v2.20 (18/06/2026) — clubs-meta address is now a nested object {line1,line2,town,
     county,postcode}; buildInfoFromMeta reads it (string fallback kept). Part of a
     repo-wide pass: club-directory, travel-planner and club-data updated to read it.
@@ -197,7 +210,37 @@ firebase.initializeApp({
      (scales to many granular pages where a grid of chips would not). Back/Next live in the footer. */
   .ri-stepnav { display: flex; align-items: center; gap: 12px; padding-bottom: 12px; }
   .ri-stepcount { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; font-variation-settings:'wght' 800; color: var(--text-muted); white-space: nowrap; }
-  .ri-jump { flex: 1; min-width: 0; }
+  /* Custom "Jump to section" dropdown: a button + a popover that lays every step
+     out in two columns, so all the granular pages fit at once with no inner scroll
+     (a native <select> popup scrolls once it has this many options). */
+  .ri-jumpwrap { position: relative; flex: 1; min-width: 0; }
+  .ri-jump {
+    width: 100%; box-sizing: border-box; text-align: left; font-family: var(--font); font-size: 14px; line-height: 1.3;
+    border: 1px solid var(--border); border-radius: 6px; padding: 9px 36px 9px 11px; height: 38px; background: var(--white); color: var(--text); cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9'%3E%3Cpath fill='none' stroke='%23223b7c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' d='M1 1.5 7 7.5 13 1.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 12px center;
+  }
+  .ri-jump:hover { border-color: var(--navy); }
+  .ri-jump:focus { outline: none; border-color: var(--navy); box-shadow: var(--focus-ring); }
+  .ri-jumpmenu {
+    position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 20;
+    background: var(--white); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 8px 28px var(--navy-100); padding: 6px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
+    max-height: calc(100vh - 140px); overflow: auto;
+  }
+  @media (max-width: 560px) { .ri-jumpmenu { grid-template-columns: 1fr; } }
+  .ri-jumpitem {
+    display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; text-align: left;
+    border: 0; background: none; font-family: var(--font); font-size: 13px; color: var(--text);
+    padding: 7px 9px; border-radius: 6px; cursor: pointer; line-height: 1.25;
+  }
+  .ri-jumpitem:hover { background: var(--navy-50); }
+  .ri-jumpitem.is-current { background: var(--primary-50); color: var(--primary); font-variation-settings:'wght' 800; }
+  .ri-jumpitem__g { flex: 0 0 16px; text-align: center; font-size: 12px; }
+  .ri-jumpitem.is-done .ri-jumpitem__g { color: var(--green); }
+  .ri-jumpitem__t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* Body / cards — cards span the full column width like the bands; only the
      step heading + intro text keep the 20px inset. */
@@ -348,7 +391,10 @@ firebase.initializeApp({
       <div class="ri-stepbar"><div class="ri-stepbar__fill" id="riBar"></div></div>
       <div class="ri-stepnav">
         <span class="ri-stepcount" id="riCount"></span>
-        <select class="ri-jump" id="riJump" aria-label="Jump to section"></select>
+        <div class="ri-jumpwrap">
+          <button type="button" class="ri-jump" id="riJumpBtn" aria-haspopup="true" aria-expanded="false"><span id="riJumpLabel"></span></button>
+          <div class="ri-jumpmenu" id="riJumpMenu" role="menu" hidden></div>
+        </div>
       </div>
     </div>
     <div class="ri-body" id="riStep"></div>
@@ -370,7 +416,7 @@ firebase.initializeApp({
   var SECTION_SUB = {
     'Leadership':'Chair, vice chair, president, owner',
     'Directors':'Board directors',
-    'Executive':'Chief executive and senior management',
+    'Executive':'Chief executive, chief operating officer, general manager and other senior management — not heads of department (e.g. commercial, media, ticketing), who you add on their own pages later',
     'Club secretary':'Administration and fixture compliance',
     'Finance':'Financial reporting and treasury',
     'Commercial':'Sponsorship, partnerships and retail',
@@ -384,6 +430,10 @@ firebase.initializeApp({
     'Safeguarding & welfare':'Named safeguarding lead for children and adults at risk',
     'Other':"Anyone who doesn't fit the areas above"
   };
+  // Friendly heading override for a people-area card / step (defaults to the
+  // canonical section key). The directory still indexes the section key itself.
+  var SECTION_LABEL = { 'Executive':'Senior management' };
+  function sectionLabel(s) { return SECTION_LABEL[s] || s; }
 
   // Lead contacts (v2.8) — the single nominated point of contact per League area.
   // Replaces the old "mailing lists" step; absorbs liaison officers (DLO/SLO/PLO).
@@ -420,7 +470,7 @@ firebase.initializeApp({
     { id:'inboxes', label:'Department inboxes',   kind:'inboxes' },
     { id:'s_chair', label:'Chair & deputies',     kind:'depts', sections:['Leadership'] },
     { id:'s_dir',   label:'Directors',            kind:'depts', sections:['Directors'] },
-    { id:'s_exec',  label:'Executive (CEO/COO/GM)', kind:'depts', sections:['Executive'] },
+    { id:'s_exec',  label:'Senior management',      kind:'depts', sections:['Executive'] },
     { id:'s_sec',   label:'Club secretary',       kind:'depts', sections:['Club secretary'] },
     { id:'s_fin',   label:'Finance',              kind:'depts', sections:['Finance'] },
     { id:'s_comm',  label:'Commercial',           kind:'depts', sections:['Commercial'] },
@@ -472,9 +522,11 @@ firebase.initializeApp({
     return bits.length ? bits.join(' · ') : 'no contact details';
   }
   // Display name from the split first/surname (falls back to a legacy single `name`).
-  // Optional honorific dropdown (avoids everyone free-typing "Mrs"); post-nominals
-  // are a free-ish field with common suggestions (they vary/combine: "OBE DL").
-  var TITLES = ['Mr', 'Mrs', 'Ms', 'Miss', 'Mx', 'Dr', 'Prof', 'Sir', 'Dame', 'Lord', 'Lady', 'Rev', 'Cllr'];
+  // Optional honorific dropdown — only DISTINCTIVE titles (academic, clergy,
+  // civic, peerage/knighthood); deliberately NO Mr/Mrs/Ms/Miss/Mx, which we don't
+  // record. Post-nominals are a free-ish field with common suggestions (they
+  // vary/combine: "OBE DL").
+  var TITLES = ['Dr', 'Prof', 'Rev', 'Cllr', 'Sir', 'Dame', 'Lord', 'Lady'];
   var POSTNOMS = ['MBE', 'OBE', 'CBE', 'BEM', 'DL', 'JP', 'QPM', 'OStJ', 'KStJ'];
   function personName(p){
     var core = ((p.firstName || '') + ' ' + (p.lastName || '')).trim() || (p.name || '');
@@ -516,7 +568,10 @@ firebase.initializeApp({
     ]],
     ['Club contact', [
       ['website','Club website','text'], ['mainEmail','Main contact email (e.g. info@)','email'],
-      ['phone','Main switchboard telephone','tel'], ['countyFA','County FA membership (e.g. Surrey FA)','text']
+      ['phone','Main switchboard telephone','tel'], ['countyFA','County FA membership (e.g. Surrey FA)','text'],
+      ['facebook','Facebook page (full URL)','text',true], ['x','X / Twitter (full URL)','text',true],
+      ['instagram','Instagram (full URL)','text',true], ['tiktok','TikTok (full URL)','text',true],
+      ['linkedin','LinkedIn (full URL)','text',true], ['youtube','YouTube (full URL)','text',true]
     ]]
   ];
   function infoGroup(name) { return INFO_GROUPS.filter(function (g) { return g[0] === name; })[0]; }
@@ -572,6 +627,7 @@ firebase.initializeApp({
     if (c.pitch) { info.pitchDims = normalizePitch(c.pitch.dimensions || ''); info.pitchType = c.pitch.type || ''; }
     info.website = c.domain ? 'www.' + c.domain : '';
     info.countyFA = (c.fa_membership || '').replace(/^Member of the\s*/i, '');
+    if (c.social) { info.facebook = c.social.facebook || ''; info.x = c.social.x || ''; info.instagram = c.social.instagram || ''; info.tiktok = c.social.tiktok || ''; info.linkedin = c.social.linkedin || ''; info.youtube = c.social.youtube || ''; }
     if (c.sponsors) { info.spClub = c.sponsors.main_club || ''; info.spFront = c.sponsors.main_shirt || ''; info.spSleeve = c.sponsors.left_sleeve || ''; }
     return info;
   }
@@ -633,14 +689,22 @@ firebase.initializeApp({
     return false;
   }
   function renderSteps() {
-    var sel = el('riJump');
-    sel.innerHTML = STEPS.map(function (s, i) {
-      var glyph = (i === cur) ? '●' : (isStepDone(s) ? '✓' : '○');
-      return '<option value="' + i + '"' + (i === cur ? ' selected' : '') + '>' + glyph + '  ' + esc(s.label) + '</option>';
+    var menu = el('riJumpMenu');
+    menu.innerHTML = STEPS.map(function (s, i) {
+      var done = isStepDone(s), current = (i === cur);
+      var glyph = current ? '●' : (done ? '✓' : '○');
+      return '<button type="button" class="ri-jumpitem' + (current ? ' is-current' : '') + (done ? ' is-done' : '') +
+        '" role="menuitem" data-jump="' + i + '"><span class="ri-jumpitem__g">' + glyph + '</span>' +
+        '<span class="ri-jumpitem__t">' + esc(s.label) + '</span></button>';
     }).join('');
-    pinSelect(sel);
+    el('riJumpLabel').textContent = STEPS[cur].label;
     el('riCount').textContent = 'Step ' + (cur + 1) + ' of ' + STEPS.length;
     el('riBar').style.width = Math.round((cur / (STEPS.length - 1)) * 100) + '%';
+  }
+  function openJump(open) {
+    var menu = el('riJumpMenu'), btn = el('riJumpBtn');
+    menu.hidden = !open; btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) { var c = menu.querySelector('.is-current'); if (c) c.scrollIntoView({ block: 'nearest' }); }
   }
 
   /* ---- Render the current step ---- */
@@ -790,7 +854,7 @@ firebase.initializeApp({
   /* ---- Department card: confirmed summary rows + open edit cards ---- */
   function deptCard(section) {
     return '<div class="ri-card" data-section="' + esc(section) + '">' +
-      '<h2>' + esc(section) + '</h2>' +
+      '<h2>' + esc(sectionLabel(section)) + '</h2>' +
       '<p class="ri-card__sub">' + esc(SECTION_SUB[section] || '') + '</p>' +
       '<div class="ri-people"></div>' +
       '<div class="ri-deptadd"></div>' +
@@ -1200,7 +1264,15 @@ firebase.initializeApp({
       goTo(cur + 1);
     });
     el('riBack').addEventListener('click', function () { if (cur > 0) goTo(cur - 1); });
-    el('riJump').addEventListener('change', function () { goTo(parseInt(this.value, 10)); });
+    el('riJumpBtn').addEventListener('click', function (e) { e.stopPropagation(); openJump(el('riJumpMenu').hidden); });
+    el('riJumpMenu').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-jump]'); if (!b) return;
+      openJump(false); goTo(parseInt(b.getAttribute('data-jump'), 10));
+    });
+    document.addEventListener('click', function (e) {
+      if (!el('riJumpMenu').hidden && !e.target.closest('.ri-jumpwrap')) openJump(false);
+    });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') openJump(false); });
     el('riStep').addEventListener('input', markSaved);
     el('riStep').addEventListener('change', markSaved);
   }
