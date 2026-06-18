@@ -311,39 +311,50 @@ window.CBDash = (function () {
       }).join('');
     }
 
-    // Sponsor-sector donut: top sectors + own (force-shown) + Other; own slice red.
-    var SECTOR_PALETTE = ['var(--navy)', 'var(--blue)', 'var(--green)', 'var(--amber)',
-      'var(--purple)', 'var(--navy-300)', 'var(--blue-light)', 'var(--navy-600)'];
+    // Fixed colour per sector so the same sector reads the same in every donut.
+    // The 8 most common sectors league-wide take the brand categorical palette
+    // (--proj-1..8); everything rarer folds into a neutral grey "Other".
+    var SECTOR_COLORS = (function () {
+      var S = AGG.sectors || {}, tot = {};
+      ['front', 'back', 'sleeve', 'stand'].forEach(function (b) {
+        (S[b] || []).forEach(function (e) { tot[e.label] = (tot[e.label] || 0) + e.count; });
+      });
+      var pal = ['var(--proj-1)', 'var(--proj-2)', 'var(--proj-3)', 'var(--proj-4)',
+        'var(--proj-5)', 'var(--proj-6)', 'var(--proj-7)', 'var(--proj-8)'];
+      var map = {};
+      Object.keys(tot).sort(function (a, b) { return tot[b] - tot[a]; })
+        .forEach(function (lab, i) { if (i < pal.length) map[lab] = pal[i]; });
+      return map;
+    })();
+    var OTHER_COLOR = 'var(--navy-200, #c8d0e0)';
     function donutBlock(title, dist, ownStr) {
       if (!dist) return '';
-      // dist is an array of {label,count} (RTDB returns it as an array);
-      // tolerate the old object form too.
       var arr = Array.isArray(dist) ? dist
         : Object.keys(dist).map(function (k) { return { label: k, count: dist[k] }; });
       var own = (ownStr || '').split('|').map(function (s) { return s.trim(); }).filter(Boolean);
-      var entries = arr.slice().sort(function (a, b) { return b.count - a.count; });
-      var total = entries.reduce(function (a, e) { return a + e.count; }, 0);
+      var total = arr.reduce(function (a, e) { return a + e.count; }, 0);
       if (!total) return '';
-      // top 8 by count; everything else (incl. one-off / odd sectors) -> Other,
-      // even if it's this club's own sector.
-      var shown = entries.slice(0, 8);
-      var other = total - shown.reduce(function (a, e) { return a + e.count; }, 0);
-      var segs = shown.slice();
-      if (other > 0) segs.push({ label: 'Other', count: other, other: true });
-      var r = 60, cx = 80, cy = 80, sw = 24, C = 2 * Math.PI * r, off = 0, pi = 0, arcs = '';
+      // sectors with a fixed colour are shown individually; the rest -> Other
+      var known = arr.filter(function (e) { return SECTOR_COLORS[e.label]; })
+        .sort(function (a, b) { return b.count - a.count; });
+      var otherCount = total - known.reduce(function (a, e) { return a + e.count; }, 0);
+      var segs = known.slice();
+      if (otherCount > 0) segs.push({ label: 'Other', count: otherCount, other: true });
+      var r = 60, cx = 80, cy = 80, sw = 24, C = 2 * Math.PI * r, off = 0, arcs = '';
       segs.forEach(function (s) {
         var len = s.count / total * C, isOwn = !s.other && own.indexOf(s.label) >= 0;
-        s._c = isOwn ? 'var(--primary)' : (s.other ? 'var(--navy-300)' : SECTOR_PALETTE[pi++ % SECTOR_PALETTE.length]);
+        s._c = s.other ? OTHER_COLOR : SECTOR_COLORS[s.label];
         s._own = isOwn;
         arcs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + s._c +
-          '" stroke-width="' + (isOwn ? sw + 4 : sw) + '" stroke-dasharray="' + len.toFixed(2) + ' ' +
+          '" stroke-width="' + (isOwn ? sw + 7 : sw) + '" stroke-dasharray="' + len.toFixed(2) + ' ' +
           (C - len).toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) + '"></circle>';
         off += len;
       });
       var legend = segs.map(function (s) {
         var pct = Math.round(100 * s.count / total);
         return '<div class="cb-leg' + (s._own ? ' own' : '') + '"><span class="cb-leg-sw" style="background:' + s._c + '"></span>' +
-          '<span class="cb-leg-lab">' + s.label + '</span><span class="cb-leg-n">' + s.count + ' (' + pct + '%)</span></div>';
+          '<span class="cb-leg-lab">' + s.label + (s._own ? ' — your sector' : '') + '</span>' +
+          '<span class="cb-leg-n">' + s.count + ' (' + pct + '%)</span></div>';
       }).join('');
       return '<div class="cb-sector"><div class="cb-sector-h">' + title + '</div><div class="cb-sector-body">' +
         '<div class="cb-donut-col"><div class="cb-donut">' +
