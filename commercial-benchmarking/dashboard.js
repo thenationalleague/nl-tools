@@ -72,6 +72,7 @@ window.CBDash = (function () {
     var state = { scope: 'div', view: 'graph', cardView: {} };
     var $ = function (id) { return document.getElementById(id); };
     var editMode = false, ebtn = null;
+    var clubByName = {}; clubs.forEach(function (c) { clubByName[c.club] = c; });
 
     function fmt(v, u) {
       if (v == null) return '—';
@@ -185,6 +186,7 @@ window.CBDash = (function () {
     }
 
     function render() {
+      var sx = $('sections'); if (sx) sx.onclick = null;
       var groups = [];
       Object.keys(AGG.aggregates).forEach(function (k) {
         var g = AGG.aggregates[k].group, grp = groups.filter(function (x) { return x.title === g; })[0];
@@ -395,6 +397,56 @@ window.CBDash = (function () {
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     }
 
+    // ---- admin: generate & manage per-club capability links ----
+    function token24() {
+      var a = new Uint8Array(24); window.crypto.getRandomValues(a);
+      var s = ''; for (var i = 0; i < a.length; i++) s += String.fromCharCode(a[i]);
+      return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+    function linkUrl(tok) { return new URL('link.html?t=' + tok, location.href).href; }
+    function linkNote(t) { var el = $('cb-linknote'); if (el) el.textContent = t || ''; }
+    function genOne(club) {
+      var c = clubByName[club]; if (!c || !opts.writeLink) return;
+      var tok = token24();
+      linkNote('Generating link for ' + club + '…');
+      return opts.writeLink(tok, c).then(function () { opts.tokenByClub[club] = tok; renderLinks(); });
+    }
+    function genMissing() {
+      var tb = opts.tokenByClub || {};
+      var missing = clubs.filter(function (c) { return !tb[c.club]; });
+      if (!missing.length) { linkNote('Every club already has a link.'); return; }
+      linkNote('Generating ' + missing.length + ' link' + (missing.length > 1 ? 's' : '') + '…');
+      Promise.all(missing.map(function (c) { var tok = token24(); opts.tokenByClub[c.club] = tok; return opts.writeLink(tok, c); }))
+        .then(function () { renderLinks(); linkNote('Generated ' + missing.length + '.'); },
+          function (e) { console.error(e); linkNote('Generation failed — please try again.'); });
+    }
+    function renderLinks() {
+      var tb = opts.tokenByClub || {};
+      var rows = clubs.map(function (c) {
+        var tok = tb[c.club];
+        var cell = tok
+          ? '<input class="cb-shareurl" readonly value="' + linkUrl(tok) + '"><button class="cb-copy" type="button" data-copy="' + tok + '">Copy</button>'
+          : '<button class="cb-edit-btn" type="button" data-gen="' + c.club.replace(/"/g, '&quot;') + '">Generate</button>';
+        return '<tr><td>' + c.club + '</td><td>' + c.division + '</td><td class="cb-linkcell">' + cell + '</td></tr>';
+      }).join('');
+      var have = clubs.filter(function (c) { return tb[c.club]; }).length;
+      $('sections').innerHTML = '<div class="cb-edit-actions">' +
+        '<button id="cb-genall" class="cb-edit-btn" type="button">Generate all missing</button>' +
+        '<button id="cb-linkdone" class="cb-cancel" type="button">Done</button>' +
+        '<span id="cb-linknote">' + have + ' of ' + clubs.length + ' clubs have a link. Links are private — share each only with that club.</span></div>' +
+        '<table class="cb-linktable"><thead><tr><th>Club</th><th>Division</th><th>Private link (no login)</th></tr></thead><tbody>' + rows + '</tbody></table>';
+      $('cb-linkdone').onclick = function () { $('sections').onclick = null; render(); };
+      $('cb-genall').onclick = genMissing;
+      $('sections').onclick = function (e) {
+        var b = e.target.closest('button'); if (!b) return;
+        if (b.getAttribute('data-copy')) {
+          var inp = b.previousElementSibling;
+          if (navigator.clipboard) navigator.clipboard.writeText(inp.value); else { inp.select(); document.execCommand('copy'); }
+          b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1200);
+        } else if (b.getAttribute('data-gen')) { genOne(b.getAttribute('data-gen')); }
+      };
+    }
+
     if (opts.staff) {
       var updateShare = function () {};
       var staffCtl = $('staffCtl');
@@ -438,6 +490,12 @@ window.CBDash = (function () {
         xbtn.type = 'button'; xbtn.className = 'cb-cancel'; xbtn.textContent = 'Export (Excel)';
         xbtn.addEventListener('click', exportData);
         actions.appendChild(xbtn);
+        if (opts.canEdit && opts.writeLink) {
+          var lbtn = document.createElement('button');
+          lbtn.type = 'button'; lbtn.className = 'cb-cancel'; lbtn.textContent = 'Links';
+          lbtn.addEventListener('click', function () { editMode = false; setEditUI(); renderLinks(); });
+          actions.appendChild(lbtn);
+        }
         if (opts.canEdit) {
           ebtn = document.createElement('button');
           ebtn.type = 'button'; ebtn.className = 'cb-edit-btn'; ebtn.textContent = 'Edit data';
