@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/admin.html  v1.11 — superadmin console for the club contacts collection.
+  club-contacts/admin.html  v1.12 — superadmin console for the club contacts collection.
   (Renamed from "club-roster" in v1.3 — toolKey/RTDB path now ops-club-contacts.)
   Submissions: { info, inboxes{deptSlug:{dept,email,phone,ext}},
   people[{firstName,lastName,name,roles[{section,title}],hideContact,qualification}],
@@ -38,7 +38,8 @@
   <script>
     window.NL_TOOL = { title: 'Club Contacts Admin', toolKey: 'ops-club-contacts' };
     var NL_TOOL_KEY = 'ops-club-contacts';
-    window.NL_CHANGELOG = [{ date: '18 Jun 2026', version: 'v1.11', items: [
+    window.NL_CHANGELOG = [{ date: '18 Jun 2026', version: 'v1.12', items: [
+      'People CSV gains Title + Post-nominals columns; names shown with honorifics.',
       'CSV export (People, Club info, Dept inboxes, Lead contacts) across all submitted clubs, plus a Clear-all-submissions reset for clearing test data before rollout.',
       'People now captured as First name + Surname; review + exports use both.',
       'Review modal flags owners/board contacts hidden from the public directory, and shows safety/medical qualifications.',
@@ -128,7 +129,12 @@
   function tok(){ var a = new Uint8Array(24); crypto.getRandomValues(a);
     return Array.prototype.map.call(a, function (b) { return 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'[b % 57]; }).join(''); }
   function tokenFor(club) { for (var t in S.invites) if (S.invites[t].club === club) return t; return null; }
-  function pname(p) { return p.name || ((p.firstName || '') + ' ' + (p.lastName || '')).trim() || '(unnamed)'; }
+  function pname(p) {
+    if (p.name) return p.name; // submissions store the derived full name (incl. title/post-noms)
+    var core = ((p.firstName || '') + ' ' + (p.lastName || '')).trim();
+    if (!core) return '(unnamed)';
+    return (p.title ? p.title + ' ' : '') + core + (p.postNominals ? ' ' + p.postNominals : '');
+  }
   var LEAD_LABELS = [['secretary','Club secretary'],['media','Media / press officer'],['programme','Programme editor'],['commercial','Commercial lead'],['finance','Finance lead'],['ticketing','Ticketing manager'],['safety','Safety officer'],['medical','Medical lead'],['dlo','Disability Liaison Officer'],['slo','Supporter Liaison Officer'],['plo','Police Liaison Officer']];
   var INFO_LABELS = [['stadium','Stadium'],['stadiumSponsor','Sponsored name'],['addr1','Address 1'],['addr2','Address 2'],['town','Town'],['county','County'],['postcode','Postcode'],['station','Nearest station'],['stationDistance','Distance from station (mi)'],['capacity','Capacity'],['seated','Seated'],['pitchDims','Pitch'],['pitchType','Pitch type'],['website','Website'],['mainEmail','Main email'],['phone','Switchboard'],['countyFA','County FA'],['spClub','Club sponsor'],['spFront','Front-of-shirt'],['spBack','Back-of-shirt'],['spSleeve','Sleeve'],['spShorts','Shorts'],['spExtra','Other kit sponsors']];
 
@@ -146,14 +152,14 @@
     var rows = [];
     subsList().forEach(function (s) {
       (s.people || []).forEach(function (p) {
-        rows.push([s.club, p.firstName || '', p.lastName || '', pname(p),
+        rows.push([s.club, p.title || '', p.firstName || '', p.lastName || '', p.postNominals || '', pname(p),
           (p.roles || []).map(function (r) { return r.section + (r.title ? ' (' + r.title + ')' : ''); }).join('; '),
           (p.emails || []).join('; '),
           (p.phones || []).map(function (ph) { return ph.number + (ph.ext ? ' ext ' + ph.ext : ''); }).join('; '),
           p.hideContact ? 'Yes' : 'No', p.qualification || '', leadAreasFor(s, p.id)]);
       });
     });
-    return toCSV(['Club', 'First name', 'Surname', 'Full name', 'Roles', 'Emails', 'Phones', 'Hidden from directory', 'Qualification', 'Lead areas'], rows);
+    return toCSV(['Club', 'Title', 'First name', 'Surname', 'Post-nominals', 'Full name', 'Roles', 'Emails', 'Phones', 'Hidden from directory', 'Qualification', 'Lead areas'], rows);
   }
   function clubInfoCSV() {
     var headers = ['Club'].concat(INFO_LABELS.map(function (f) { return f[1]; }));
