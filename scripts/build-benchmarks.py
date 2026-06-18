@@ -52,6 +52,13 @@ CHIP_FIELDS = [
     ('emailPartners', 'Can email on behalf of partners?', 'Can email on behalf of partners?'),
 ]
 
+# Official 72-club roster (from clean_survey.py) — drives the full staff dropdown
+# incl. clubs that submitted nothing or never entered.
+_NAT = "Aldershot Town|Altrincham|Boreham Wood|Boston United|Brackley Town|Braintree Town|Carlisle United|Eastleigh|FC Halifax Town|Forest Green Rovers|Gateshead|Hartlepool United|Morecambe|Rochdale|Scunthorpe United|Solihull Moors|Southend United|Sutton United|Tamworth|Truro City|Wealdstone|Woking|Yeovil Town|York City".split("|")
+_NTH = "AFC Fylde|AFC Telford United|Alfreton Town|Bedford Town|Buxton|Chester|Chorley|Curzon Ashton|Darlington|Hereford|Kidderminster Harriers|King's Lynn Town|Leamington|Macclesfield|Marine|Merthyr Town|Oxford City|Peterborough Sports|Radcliffe|Scarborough Athletic|South Shields|Southport|Spennymoor Town|Worksop Town".split("|")
+_STH = "AFC Totton|Bath City|Chelmsford City|Chesham United|Chippenham Town|Dagenham & Redbridge|Dorking Wanderers|Dover Athletic|Eastbourne Borough|Ebbsfleet United|Enfield Town|Farnborough|Hampton & Richmond Borough|Hemel Hempstead Town|Hornchurch|Horsham|Maidenhead United|Maidstone United|Salisbury|Slough Town|Tonbridge Angels|Torquay United|Weston-super-Mare|Worthing".split("|")
+DIVSHORT = dict([(c, 'National') for c in _NAT] + [(c, 'North') for c in _NTH] + [(c, 'South') for c in _STH])
+
 
 def num(v):
     return v if isinstance(v, (int, float)) else None
@@ -124,32 +131,39 @@ def build_metrics(H):
                 n += 1
         return float(n)
 
+    def stand_avg(r):
+        t = stand_total(r); c = stand_count(r)
+        return (t / c) if (t is not None and c) else None
+
     return [
         dict(key='msTicket', label='Matchday ticket', unit='£', group='Ticketing',
              desc='Highest-priced GA adult matchday ticket', ext=col('Top GA matchday ticket (£)')),
         dict(key='seasonTicket', label='Season ticket', unit='£', group='Ticketing',
              desc='Highest-priced GA adult season ticket', ext=col('Top GA season ticket (£)')),
 
-        dict(key='frontShirt', label='Front-of-shirt income', unit='£', group='Shirt & kit sponsorship',
-             desc='Per season, excluding VAT', ext=col('Front Shirt — Income/season (£, ex-VAT)')),
-        dict(key='frontTerm', label='Front-shirt deal length', unit=' yrs', group='Shirt & kit sponsorship',
+        dict(key='frontShirt', label='Front-of-shirt sponsorship', unit='£', group='Shirt & kit sponsorship',
+             desc='Income per season, excluding VAT', ext=col('Front Shirt — Income/season (£, ex-VAT)')),
+        dict(key='frontTerm', label='Front-of-shirt deal length', unit=' yrs', group='Shirt & kit sponsorship',
              desc='Contract length in years', ext=col('Front Shirt — Contract Length')),
-        dict(key='backShirt', label='Back-of-shirt income', unit='£', group='Shirt & kit sponsorship',
-             desc='Per season, excluding VAT', ext=col('Back Shirt — Income/season (£, ex-VAT)')),
-        dict(key='backTerm', label='Back-shirt deal length', unit=' yrs', group='Shirt & kit sponsorship',
+        dict(key='backShirt', label='Back-of-shirt sponsorship', unit='£', group='Shirt & kit sponsorship',
+             desc='Income per season, excluding VAT', ext=col('Back Shirt — Income/season (£, ex-VAT)')),
+        dict(key='backTerm', label='Back-of-shirt deal length', unit=' yrs', group='Shirt & kit sponsorship',
              desc='Contract length in years', ext=col('Back Shirt — Contract Length')),
-        dict(key='sleeve', label='Sleeve income', unit='£', group='Shirt & kit sponsorship',
-             desc='Per season, excluding VAT', ext=col('Sleeve — Income/season (£, ex-VAT)')),
+        dict(key='sleeve', label='Sleeve sponsorship', unit='£', group='Shirt & kit sponsorship',
+             desc='Income per season, excluding VAT', ext=col('Sleeve — Income/season (£, ex-VAT)')),
         dict(key='sleeveTerm', label='Sleeve deal length', unit=' yrs', group='Shirt & kit sponsorship',
              desc='Contract length in years', ext=col('Sleeve — Contract Length')),
 
-        dict(key='standCount', label='Stand sponsors', unit='', group='Ground & stand advertising',
+        dict(key='standCount', label='Stand sponsors', unit='', group='Stand sponsorship',
              desc='Number of stand/ground sponsors sold (0–4)', ext=stand_count),
-        dict(key='standTotal', label='Stand sponsorship (total)', unit='£', group='Ground & stand advertising',
+        dict(key='standTotal', label='Stand sponsorship (total)', unit='£', group='Stand sponsorship',
              desc='Combined income across all stand sponsors', ext=stand_total),
-        dict(key='tvBoard', label='TV-facing board', unit='£', group='Ground & stand advertising',
+        dict(key='standAvg', label='Average per stand', unit='£', group='Stand sponsorship',
+             desc='Mean income per stand sponsor', ext=stand_avg),
+
+        dict(key='tvBoard', label='TV-facing board', unit='£', group='Advertising boards',
              desc='Price per season (clean figures only)', ext=board('TV-facing board price/season (£)')),
-        dict(key='nonTvBoard', label='Non-TV board', unit='£', group='Ground & stand advertising',
+        dict(key='nonTvBoard', label='Non-TV board', unit='£', group='Advertising boards',
              desc='Price per season (clean figures only)', ext=board('Non-TV board price/season (£)')),
 
         dict(key='mdHosp', label='Matchday hospitality', unit='£', group='Hospitality',
@@ -157,12 +171,13 @@ def build_metrics(H):
         dict(key='seasonHosp', label='Seasonal hospitality', unit='£', group='Hospitality',
              desc='Highest-priced seasonal package', ext=col('Top seasonal hospitality (£)')),
 
+        dict(key='progAd', label='Programme advert', unit='£', group='Programme',
+             desc='Full-page seasonal advert', ext=col('Full-page programme advert/season (£)')),
+
         dict(key='emailDb', label='Email database', unit='', group='Email & audience',
              desc='Total contactable supporter emails', ext=col('Total email database size')),
         dict(key='optedIn', label='Opted-in to partner emails', unit='', group='Email & audience',
              desc='Supporters opted in to partner emails', ext=col('Opted-in to partner emails')),
-        dict(key='progAd', label='Programme advert', unit='£', group='Programme',
-             desc='Full-page seasonal advert', ext=col('Full-page programme advert/season (£)')),
     ]
 
 
@@ -215,10 +230,25 @@ def main():
                 if p:
                     d[p] = d.get(p, 0) + 1
         return sorted([{'label': k, 'count': v} for k, v in d.items()], key=lambda x: -x['count'])
+
+    def sector_dist_multi(cols):
+        d = {}
+        for r in data:
+            for c in cols:
+                v = r[H[c]]
+                if v is None or str(v).strip() == '':
+                    continue
+                for p in str(v).split('|'):
+                    p = p.strip()
+                    if p:
+                        d[p] = d.get(p, 0) + 1
+        return sorted([{'label': k, 'count': v} for k, v in d.items()], key=lambda x: -x['count'])
+
     sectors = {
         'front': sector_dist('Front Shirt — Sector'),
         'back': sector_dist('Back Shirt — Sector'),
         'sleeve': sector_dist('Sleeve — Sector'),
+        'stand': sector_dist_multi(['Stand %d — Sector' % s for s in (1, 2, 3, 4)]),
     }
 
     meta = {'leagueN': len(data),
@@ -253,6 +283,16 @@ def main():
                 s2 = [x for x in (m['ext'](rr) for rr in data if rr[1] in ('North', 'South')) if x is not None]
                 entry['step2Pct'] = pct_of(s2, v)
             metrics[m['key']] = entry
+        # per-club stand sponsor list + combined stand sectors
+        stands = []; stand_secs = []
+        for s in (1, 2, 3, 4):
+            nm = r[H['Stand %d — Sponsor Name' % s]]; nm = str(nm).strip() if nm not in (None,) else ''
+            sec = r[H['Stand %d — Sector' % s]]; sec = str(sec).strip() if sec not in (None,) else ''
+            inc = num(r[H['Stand %d — Income/season (£, ex-VAT)' % s]])
+            if nm or inc is not None:
+                stands.append({'name': nm or '—', 'sector': sec, 'income': inc})
+            if sec:
+                stand_secs.append(sec)
         # extra fields beyond the original payload (additive — included in patch)
         extra = {
             'bsSponsor': r[H['Back Shirt — Sponsor Name']] or '',
@@ -260,6 +300,8 @@ def main():
             'fsSector': r[H['Front Shirt — Sector']] or '',
             'bsSector': r[H['Back Shirt — Sector']] or '',
             'slSector': r[H['Sleeve — Sector']] or '',
+            'stands': stands,
+            'standSectors': ' | '.join(stand_secs),
         }
         payload = dict({
             'club': club,
@@ -280,6 +322,21 @@ def main():
                 for mk in metrics:
                     if mk != 'standCount':
                         patch[base + '/metrics/' + mk + '/step2Pct'] = metrics[mk]['step2Pct']
+
+    # Full 72-club roster for the staff dropdown. data=False for clubs that
+    # submitted nothing (blank rows) or never entered (absent from the dataset).
+    order = {'National': 0, 'North': 1, 'South': 2}
+    def has_data(c):
+        # standCount is always 0-4 (never null), so ignore it when deciding
+        # whether a club actually submitted anything.
+        p = clubs.get(c)
+        return bool(p and any(k != 'standCount' and m.get('value') is not None
+                              for k, m in p['metrics'].items()))
+    roster = sorted(
+        [{'club': c, 'division': DIVSHORT[c], 'data': has_data(c)} for c in DIVSHORT],
+        key=lambda e: (order[e['division']], e['club']))
+    aggregates['roster'] = roster
+    patch['aggregates/roster'] = roster
 
     out = {'aggregates': aggregates, 'clubs': clubs, 'links': links}
     with open(OUT, 'w') as f:
