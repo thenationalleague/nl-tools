@@ -196,13 +196,34 @@ window.CBDash = (function () {
         grp.keys.push(k);
       });
       var scopeTxt = curScopeLabel();
-      $('sections').innerHTML = groups.map(function (g) {
+      var banner = OWN._noData
+        ? '<div class="cb-nodata">No commercial data submitted for <b>' + OWN.club + '</b> — benchmarks shown for context only.</div>'
+        : '';
+      $('sections').innerHTML = banner + groups.map(function (g) {
         var cards = g.keys.map(metricCard);
         CHIP_DEFS.filter(function (d) { return d.group === g.title; }).forEach(function (d) { cards.push(chipCard(d)); });
         return '<div class="section"><div class="section-head"><h2>' + g.title + '</h2>' +
           '<span class="count">vs ' + scopeTxt + '</span></div>' +
-          '<div class="grid">' + cards.join('') + '</div></div>';
+          '<div class="grid">' + cards.join('') + '</div>' +
+          (g.title === 'Stand sponsorship' ? standExtras() : '') + '</div>';
       }).join('');
+    }
+
+    function standExtras() {
+      var html = '';
+      var st = OWN.stands || [];
+      if (st.length) {
+        html += '<div class="cb-standlist"><div class="cb-standlist-h">Your stand sponsors</div>' +
+          st.map(function (s) {
+            return '<div class="cb-standrow"><span class="cb-standname">' + (s.name || '—') + '</span>' +
+              '<span class="cb-standsec">' + (s.sector || '') + '</span>' +
+              '<span class="cb-standinc">' + (s.income != null ? fmt(s.income, '£') : '—') + '</span></div>';
+          }).join('') + '</div>';
+      }
+      if (AGG.sectors && AGG.sectors.stand && AGG.sectors.stand.length) {
+        html += donutBlock('Stand sponsor sectors', AGG.sectors.stand, OWN.standSectors);
+      }
+      return html ? '<div class="cb-standextra">' + html + '</div>' : '';
     }
 
     function chipNarrative(kind) {
@@ -302,7 +323,7 @@ window.CBDash = (function () {
       return '<div class="cb-sector"><div class="cb-sector-h">' + title + '</div><div class="cb-sector-body">' +
         '<div class="cb-donut"><svg viewBox="0 0 128 128" width="128" height="128" style="transform:rotate(-90deg)">' + arcs + '</svg>' +
         '<div class="cb-donut-center"><span class="cb-donut-k">Your sector</span><span class="cb-donut-v">' +
-        (own.length ? own.join(', ') : 'Not provided') + '</span></div></div>' +
+        (!own.length ? 'Not provided' : (own.length > 2 ? own.length + ' sectors' : own.join(', '))) + '</span></div></div>' +
         '<div class="cb-legend">' + legend + '</div></div></div>';
     }
     function renderSectors() {
@@ -312,9 +333,9 @@ window.CBDash = (function () {
       if (!S) { if (section) section.style.display = 'none'; return; }
       if (section) section.style.display = '';
       host.innerHTML =
-        donutBlock('Front of shirt', S.front, OWN.fsSector) +
-        donutBlock('Back of shirt', S.back, OWN.bsSector) +
-        donutBlock('Sleeve', S.sleeve, OWN.slSector);
+        donutBlock('Front-of-shirt sponsorship', S.front, OWN.fsSector) +
+        donutBlock('Back-of-shirt sponsorship', S.back, OWN.bsSector) +
+        donutBlock('Sleeve sponsorship', S.sleeve, OWN.slSector);
     }
 
     function renderAll() { renderHeader(); renderScopeControl(); renderSectors(); render(); }
@@ -448,67 +469,32 @@ window.CBDash = (function () {
     }
 
     if (opts.staff) {
-      var updateShare = function () {};
-      var staffCtl = $('staffCtl');
-      if (staffCtl) {
-        staffCtl.style.display = '';
-        var sel = $('clubPick'), html = '', curDiv = '';
+      var bar = $('staffBar');
+      if (bar) {
+        bar.style.display = '';
+        var opt = '', curDiv = '';
         clubs.forEach(function (c, i) {
-          if (c.division !== curDiv) { if (curDiv) html += '</optgroup>'; html += '<optgroup label="' + c.division + ' League">'; curDiv = c.division; }
-          html += '<option value="' + i + '">' + c.club + '</option>';
+          if (c.division !== curDiv) { if (curDiv) opt += '</optgroup>'; opt += '<optgroup label="' + divName(c.division) + '">'; curDiv = c.division; }
+          opt += '<option value="' + i + '">' + c.club + (c._noData ? ' — no data' : '') + '</option>';
         });
-        html += '</optgroup>';
-        sel.innerHTML = html;
-        sel.addEventListener('change', function () { OWN = clubs[+this.value]; if (editMode) { editMode = false; setEditUI(); } renderAll(); updateShare(); });
-
-        // Staff: show the selected club's no-login capability link to copy & send.
-        if (opts.tokenByClub) {
-          var ctl = document.createElement('div');
-          ctl.className = 'cb-ctl'; ctl.id = 'cb-shareCtl';
-          ctl.innerHTML = '<span class="lbl">Club link</span>' +
-            '<input id="cb-shareUrl" class="cb-shareurl" readonly>' +
-            '<button id="cb-shareCopy" class="cb-copy" type="button">Copy</button>';
-          staffCtl.parentNode.insertBefore(ctl, staffCtl.nextSibling);
-          var urlEl = $('cb-shareUrl'), copyBtn = $('cb-shareCopy');
-          updateShare = function () {
-            var tok = opts.tokenByClub[OWN.club];
-            urlEl.value = tok ? new URL('link.html?t=' + tok, location.href).href : 'No link for this club';
-            copyBtn.disabled = !tok;
-          };
-          copyBtn.addEventListener('click', function () {
-            if (copyBtn.disabled) return;
-            var done = function () { copyBtn.textContent = 'Copied'; setTimeout(function () { copyBtn.textContent = 'Copy'; }, 1500); };
-            if (navigator.clipboard) navigator.clipboard.writeText(urlEl.value).then(done, function () { urlEl.select(); document.execCommand('copy'); done(); });
-            else { urlEl.select(); document.execCommand('copy'); done(); }
-          });
-          updateShare();
-        }
-
-        var actions = document.createElement('div');
-        actions.className = 'cb-ctl'; actions.style.marginLeft = 'auto'; actions.style.gap = '8px';
-        var xbtn = document.createElement('button');
-        xbtn.type = 'button'; xbtn.className = 'cb-cancel'; xbtn.textContent = 'Export (Excel)';
-        xbtn.addEventListener('click', exportData);
-        actions.appendChild(xbtn);
-        if (opts.canEdit && opts.writeLink) {
-          var lbtn = document.createElement('button');
-          lbtn.type = 'button'; lbtn.className = 'cb-cancel'; lbtn.textContent = 'Links';
-          lbtn.addEventListener('click', function () { editMode = false; setEditUI(); renderLinks(); });
-          actions.appendChild(lbtn);
-        }
-        if (opts.canEdit) {
-          ebtn = document.createElement('button');
-          ebtn.type = 'button'; ebtn.className = 'cb-edit-btn'; ebtn.textContent = 'Edit data';
-          ebtn.addEventListener('click', function () {
-            editMode = !editMode; setEditUI();
-            if (editMode) renderEditForm(); else render();
-          });
-          actions.appendChild(ebtn);
-        }
-        var controls = staffCtl.parentNode; if (controls) controls.appendChild(actions);
+        opt += '</optgroup>';
+        var btns = '<button class="cb-cancel" id="cb-export" type="button">Export (Excel)</button>';
+        if (opts.canEdit && opts.writeLink) btns += '<button class="cb-cancel" id="cb-links" type="button">Links</button>';
+        if (opts.canEdit) btns += '<button class="cb-edit-btn" id="cb-edit" type="button">Edit data</button>';
+        bar.innerHTML = '<span class="cb-staff-tag">NL STAFF</span>' +
+          '<label class="cb-staff-pick"><span class="lbl">Club</span><select id="clubPick">' + opt + '</select></label>' +
+          '<span class="cb-staff-actions">' + btns + '</span>';
+        $('clubPick').addEventListener('change', function () {
+          OWN = clubs[+this.value];
+          if (editMode) { editMode = false; setEditUI(); }
+          renderAll();
+        });
+        $('cb-export').onclick = exportData;
+        if ($('cb-links')) $('cb-links').onclick = function () { editMode = false; setEditUI(); renderLinks(); };
+        if ($('cb-edit')) { ebtn = $('cb-edit'); ebtn.onclick = function () { editMode = !editMode; setEditUI(); if (editMode) renderEditForm(); else render(); }; }
       }
       var pt = $('privacyTxt');
-      if (pt) pt.innerHTML = '<b>NL staff view.</b> You can see every club’s named figures here, and copy a club’s private no-login link to send them. Clubs only ever see their own data plus anonymous benchmarks.';
+      if (pt) pt.innerHTML = '<b>NL staff view.</b> Every club’s named figures are visible here; use <b>Links</b> to copy a club’s private link. Clubs only ever see their own data plus anonymous benchmarks.';
     }
 
     $('scopeSeg').addEventListener('click', function (e) {
