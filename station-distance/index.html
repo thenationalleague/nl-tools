@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
-  station-distance/index.html  v1.0
+  station-distance/index.html  v1.1
   STANDALONE utility (not a gated tool, no auth-guard, out of lint scope).
+  v1.1: geocodes the station with up to 10 candidates and picks the one NEAREST
+  the club — fixes wrong-town matches (e.g. "Radcliffe on Trent" vs the Manchester
+  Metrolink stop). Clubs still need lat/lng + a station name in clubs-meta.
 
   Works out the by-road distance (miles) from each club's ground to its named
   closest station, in the browser. It does NOT write anything — it produces a
@@ -89,11 +92,25 @@
     if (!res.ok) throw new Error('HTTP ' + res.status);
     return res.json();
   }
-  async function geocode(name) {
-    var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=gb&q=' + encodeURIComponent(name + ' station');
+  function haversine(aLat, aLng, bLat, bLng) {
+    var R = 6371, toR = Math.PI / 180;
+    var dLat = (bLat - aLat) * toR, dLng = (bLng - aLng) * toR;
+    var s = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(aLat * toR) * Math.cos(bLat * toR) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    return 2 * R * Math.asin(Math.sqrt(s));
+  }
+  // Geocode a station and pick the candidate NEAREST the club (kills wrong-town
+  // matches like "Radcliffe on Trent" vs the Manchester Metrolink stop).
+  async function geocodeStation(name, nearLat, nearLng) {
+    var url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=10&countrycodes=gb&q=' + encodeURIComponent(name + ' station');
     var arr = await getJSON(url);
     if (!arr || !arr.length) return null;
-    return { lat: parseFloat(arr[0].lat), lng: parseFloat(arr[0].lon), display: arr[0].display_name };
+    var best = null, bestD = Infinity;
+    arr.forEach(function (r) {
+      var d = haversine(nearLat, nearLng, parseFloat(r.lat), parseFloat(r.lon));
+      if (d < bestD) { bestD = d; best = r; }
+    });
+    return { lat: parseFloat(best.lat), lng: parseFloat(best.lon), display: best.display_name, awayKm: Math.round(bestD * 10) / 10 };
   }
   async function road(fromLng, fromLat, toLng, toLat) {
     var url = 'https://router.project-osrm.org/route/v1/driving/' + fromLng + ',' + fromLat + ';' + toLng + ',' + toLat + '?overview=false';
@@ -131,7 +148,7 @@
         if (c.lat == null || c.lng == null || !stn) { addRow(c.name, stn, 'skip (no coords/station)', ''); continue; }
         try {
           await sleep(1100); // Nominatim: <= 1 req/sec
-          var g = await geocode(stn);
+          var g = await geocodeStation(stn, c.lat, c.lng);
           if (!g) { addRow(c.name, stn, 'no geocode', '', 'bad'); continue; }
           var m = await road(c.lng, c.lat, g.lng, g.lat);
           if (m == null) { addRow(c.name, stn, 'no route', g.display, 'bad'); continue; }
