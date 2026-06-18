@@ -1,0 +1,59 @@
+name: Backfill station distance
+
+# On-demand: works out the by-road distance (miles) from each club's ground to
+# its named closest station and writes it into clubs-meta.json.
+# Uses Nominatim (geocoding) + OSRM (routing) — GitHub runners have the internet
+# egress these need, which the Claude Code sandbox does not.
+#
+# Run from the Actions tab → "Backfill station distance" → Run workflow.
+# The run log lists everything it matched and flags anything >= 20 mi (likely a
+# bad station match) for you to backfill / correct by hand. Tick "force" to
+# recompute clubs that already have a figure.
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Recompute clubs that already have a distance'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Backfill station distances
+        env:
+          FORCE: ${{ github.event.inputs.force == 'true' && '1' || '' }}
+        run: node scripts/backfill-station-distance.js
+
+      - name: Commit clubs-meta
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/data/clubs-meta.json 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "chore: backfill station distances into clubs-meta"
+          for i in 1 2 3; do
+            if git push; then exit 0; fi
+            echo "Push attempt $i failed - fetching and rebasing"
+            git fetch origin main
+            git rebase origin/main || { echo "Rebase failed"; exit 1; }
+          done
+          exit 1
