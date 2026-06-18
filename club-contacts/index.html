@@ -1,11 +1,14 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/index.html  v2.15
+  club-contacts/index.html  v2.16
   Public club DETAILS collection — GUIDED WIZARD (capability-URL pattern).
   Gathers a club's information AND people directory for club-directory.
   (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
   THIS IS THE UNIFIED FORM — supersedes the old club-data tool.
 
+  v2.16 (18/06/2026) — pre-fill fix: clubs-meta is now the BASE for club info,
+    with the draft's non-empty values layered on top. Fixes fields added after a
+    draft was saved (e.g. station distance) not pre-filling for returning clubs.
   v2.15 (18/06/2026) — safety qualification example spelled out: "NVQ Level 4
     Spectator Safety (FSOA-accredited); Level 2 for deputies".
   v2.14 (18/06/2026) — qualification examples are now section-specific: safety
@@ -552,11 +555,16 @@ firebase.initializeApp({
       if (prev) { renderLocked(prev); return; }
       var draft = loadDraft();
       if (draft) { data = Object.assign({ yourName:'', yourEmail:'', info:{}, inboxes:{}, noInboxes:false, people:[], leads:{}, leadsTouched:{}, emptied:{} }, draft); data.people = (data.people || []).map(normalizePerson); }
-      // Pre-fill club information from clubs-meta when we don't already have it (fresh, or a draft from before info existed).
-      if (!data.info || !Object.keys(data.info).length) {
-        var c = meta && (meta.clubs || []).filter(function (x) { return x.name === clubName; })[0];
-        data.info = c ? buildInfoFromMeta(c) : {};
-      }
+      // Pre-fill club information from clubs-meta as the BASE, then layer the
+      // club's own non-empty draft values on top. This way fields added to the
+      // form after a draft was saved (e.g. station distance) still pre-fill for a
+      // returning club, without clobbering anything they've actually entered.
+      var c = meta && (meta.clubs || []).filter(function (x) { return x.name === clubName; })[0];
+      var draftInfo = data.info || {};
+      data.info = c ? buildInfoFromMeta(c) : {};
+      Object.keys(draftInfo).forEach(function (k) {
+        if (draftInfo[k] !== '' && draftInfo[k] != null) data.info[k] = draftInfo[k];
+      });
       bindNav();
       renderSteps(); renderStep();
     });
