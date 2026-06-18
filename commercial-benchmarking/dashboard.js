@@ -218,12 +218,27 @@ window.CBDash = (function () {
           '<div class="grid">' + cards.join('') + '</div>' +
           (title === 'Stand sponsorship' ? standDonut() : '') + '</div>';
       }
+      // Shirt & kit: each slot's income+term cards with that slot's sector donut directly beneath.
+      function shirtSectionHtml() {
+        var S = AGG.sectors || {};
+        var slots = [
+          { keys: ['frontShirt', 'frontTerm'], dist: S.front, own: OWN.fsSector, dt: 'Front-of-shirt sponsor sectors', noun: 'front-of-shirt sponsors' },
+          { keys: ['backShirt', 'backTerm'], dist: S.back, own: OWN.bsSector, dt: 'Back-of-shirt sponsor sectors', noun: 'back-of-shirt sponsors' },
+          { keys: ['sleeve', 'sleeveTerm'], dist: S.sleeve, own: OWN.slSector, dt: 'Sleeve sponsor sectors', noun: 'sleeve sponsors' }
+        ];
+        var body = slots.map(function (sl) {
+          var donut = sl.dist ? '<div class="cb-slotdonut">' + donutBlock(sl.dt, sl.dist, sl.own, sl.noun) + '</div>' : '';
+          return '<div class="cb-shirtslot"><div class="grid">' + sl.keys.map(metricCard).join('') + '</div>' + donut + '</div>';
+        }).join('');
+        return '<div class="section"><div class="section-head"><h2>Shirt &amp; kit sponsorship</h2>' +
+          '<span class="count">vs ' + scopeTxt + '</span></div>' + body + '</div>';
+      }
       var html = OWN._noData
         ? '<div class="cb-nodata">No commercial data submitted for <b>' + OWN.club + '</b> — benchmarks shown for context only.</div>'
         : '';
       GROUP_ORDER.forEach(function (g) {
-        if (byGroup[g]) html += sectionHtml(g);
-        if (g === 'Shirt & kit sponsorship') html += sectorsHtml();
+        if (g === 'Shirt & kit sponsorship') { if (byGroup[g]) html += shirtSectionHtml(); }
+        else if (byGroup[g]) html += sectionHtml(g);
       });
       // any group not in the explicit order (safety) appended at the end
       Object.keys(byGroup).forEach(function (g) { if (GROUP_ORDER.indexOf(g) < 0) html += sectionHtml(g); });
@@ -365,17 +380,6 @@ window.CBDash = (function () {
           own.map(function (s) { return SECTOR_COLORS[s] ? s : 'Other (' + s + ')'; }).join(', '))) + '</span></div></div>' +
         '<div class="cb-legend">' + legend + '</div></div></div>';
     }
-    function sectorsHtml() {
-      var S = AGG.sectors; if (!S) return '';
-      var d = donutBlock('Front-of-shirt sponsorship', S.front, OWN.fsSector, 'front-of-shirt sponsors') +
-        donutBlock('Back-of-shirt sponsorship', S.back, OWN.bsSector, 'back-of-shirt sponsors') +
-        donutBlock('Sleeve sponsorship', S.sleeve, OWN.slSector, 'sleeve sponsors');
-      if (!d) return '';
-      return '<div class="section"><div class="section-head"><h2>Sponsor sectors</h2>' +
-        '<span class="count">front · back · sleeve — league mix</span></div>' +
-        '<div class="cb-sectorchart">' + d + '</div></div>';
-    }
-
     function renderAll() { renderHeader(); renderScopeControl(); render(); }
 
     function setEditUI() { if (ebtn) ebtn.textContent = editMode ? 'Cancel edit' : 'Edit data'; }
