@@ -91,6 +91,24 @@ window.CBDash = (function () {
     return AGG;
   }
 
+  // Rebuild the categorical chip distributions (programme format, rolling
+  // flags, email permissions) from the club rows after a staff edit, so the
+  // chip cards' "N of M clubs" narratives stay accurate.
+  function recomputeChips(AGG, clubs) {
+    var kinds = ['progFormat', 'rollingFront', 'rollingBack', 'rollingSleeve', 'emailSupporters', 'emailPartners'];
+    var out = {};
+    kinds.forEach(function (k) { out[k] = {}; });
+    clubs.forEach(function (c) {
+      var ch = c.chips || {};
+      kinds.forEach(function (k) {
+        var v = ch[k]; if (v == null) return; v = String(v).trim(); if (!v) return;
+        out[k][v] = (out[k][v] || 0) + 1;
+      });
+    });
+    AGG.chips = out;
+    return AGG;
+  }
+
   function mount(AGG, clubs, opts) {
     opts = opts || {};
     var OWN = clubs[0];
@@ -345,6 +363,8 @@ window.CBDash = (function () {
     ];
     // rolling/fixed shown as a tag on each shirt-slot's deal-length card
     var TERM_ROLL = { frontTerm: 'rollingFront', backTerm: 'rollingBack', sleeveTerm: 'rollingSleeve' };
+    // every categorical chip the survey captured (editable in the staff editor)
+    var CHIP_KINDS = ['progFormat', 'rollingFront', 'rollingBack', 'rollingSleeve', 'emailSupporters', 'emailPartners'];
     var SPONSOR_OF = { frontShirt: 'fsSponsor', backShirt: 'bsSponsor', sleeve: 'slSponsor' };
     function chipValue(kind) {
       var c = OWN.chips || {};
@@ -469,18 +489,29 @@ window.CBDash = (function () {
       return Object.keys(set).sort(function (a, b) { return a.toLowerCase().localeCompare(b.toLowerCase()); });
     }
 
-    // Sector picker: known sectors + an "Other…" option that reveals a freetext
-    // box. `attr` keys the control (e.g. 'fsSector', 'stand0').
-    function sectorControl(cur, attr) {
-      cur = (cur || '').trim();
-      var opts = allSectors(), known = opts.indexOf(cur) >= 0, custom = !known && !!cur;
-      return '<select class="cb-edit-sel" data-esec="' + attr + '">' +
+    // Known values for a categorical chip: sensible defaults merged with
+    // whatever's actually present, so the dropdown is useful even pre-data.
+    function chipOpts(kind) {
+      var base = kind === 'progFormat' ? ['Printed', 'Digital', 'Both'] : ['Yes', 'No'];
+      Object.keys((AGG.chips && AGG.chips[kind]) || {}).forEach(function (k) { if (base.indexOf(k) < 0) base.push(k); });
+      return base;
+    }
+
+    // Generic picker: a dropdown of `opts` plus an "Other…" option that reveals
+    // a freetext box. `key` namespaces the control, e.g. 'sec:fsSector',
+    // 'sec:stand0', 'chip:rollingFront'. Empty selection means "not provided".
+    function pickerControl(cur, key, opts, placeholder) {
+      cur = (cur == null ? '' : String(cur)).trim();
+      var known = opts.indexOf(cur) >= 0, custom = !known && !!cur;
+      return '<select class="cb-edit-sel" data-pick="' + key + '">' +
         '<option value=""' + (cur ? '' : ' selected') + '>— none —</option>' +
         opts.map(function (o) { return '<option' + (known && o === cur ? ' selected' : '') + '>' + escAttr(o) + '</option>'; }).join('') +
         '<option value="__other"' + (custom ? ' selected' : '') + '>Other…</option></select>' +
-        '<input type="text" class="cb-edit-other" data-eother="' + attr + '" placeholder="Specify sector" value="' +
+        '<input type="text" class="cb-edit-other" data-pickother="' + key + '" placeholder="' + (placeholder || 'Specify') + '" value="' +
           (custom ? escAttr(cur) : '') + '"' + (custom ? '' : ' style="display:none"') + '>';
     }
+    function sectorControl(cur, attr) { return pickerControl(cur, 'sec:' + attr, allSectors(), 'Specify sector'); }
+    function chipPicker(kind) { return pickerControl((OWN.chips || {})[kind], 'chip:' + kind, chipOpts(kind)); }
 
     function numCtl(k) {
       var m = OWN.metrics[k] || (OWN.metrics[k] = { value: null }), np = m.value == null;
@@ -493,9 +524,9 @@ window.CBDash = (function () {
     }
 
     var SHIRT_SLOTS = [
-      { kind: 'Front-of-shirt', spon: 'fsSponsor', sec: 'fsSector', income: 'frontShirt', term: 'frontTerm' },
-      { kind: 'Back-of-shirt', spon: 'bsSponsor', sec: 'bsSector', income: 'backShirt', term: 'backTerm' },
-      { kind: 'Sleeve', spon: 'slSponsor', sec: 'slSector', income: 'sleeve', term: 'sleeveTerm' }
+      { kind: 'Front-of-shirt', spon: 'fsSponsor', sec: 'fsSector', income: 'frontShirt', term: 'frontTerm', roll: 'rollingFront' },
+      { kind: 'Back-of-shirt', spon: 'bsSponsor', sec: 'bsSector', income: 'backShirt', term: 'backTerm', roll: 'rollingBack' },
+      { kind: 'Sleeve', spon: 'slSponsor', sec: 'slSector', income: 'sleeve', term: 'sleeveTerm', roll: 'rollingSleeve' }
     ];
 
     function shirtEditSection() {
@@ -506,6 +537,7 @@ window.CBDash = (function () {
             editRow('Sector', sectorControl(OWN[sl.sec], sl.sec)) +
             editRow('Income (£)', numCtl(sl.income)) +
             editRow('Deal length (yrs)', numCtl(sl.term)) +
+            editRow('Rolling deal? (Yes/No)', chipPicker(sl.roll)) +
             '</div>';
         }).join('') + '</div>';
     }
@@ -530,11 +562,15 @@ window.CBDash = (function () {
       var body = groupedKeys().map(function (g) {
         if (g.title === 'Shirt & kit sponsorship') return shirtEditSection();
         if (g.title === 'Stand sponsorship') return standEditSection();
+        // numeric metrics, plus any categorical chips that belong in this group
+        var chipRows = CHIP_DEFS.filter(function (d) { return d.group === g.title; }).map(function (d) {
+          return editRow(d.label, chipPicker(d.kind));
+        }).join('');
         return '<div class="section"><div class="section-head"><h2>' + g.title + '</h2></div>' +
           '<div class="cb-edit-grid">' + g.keys.map(function (k) {
             var agg = AGG.aggregates[k], u = (agg.unit || '').trim();
             return editRow(agg.label + (u ? ' (' + u + ')' : ''), numCtl(k));
-          }).join('') + '</div></div>';
+          }).join('') + chipRows + '</div></div>';
       }).join('');
       body += '<div class="cb-edit-actions"><button id="cb-save" class="cb-edit-btn" type="button">Save changes</button>' +
         '<button id="cb-cancel" class="cb-cancel" type="button">Cancel</button>' +
@@ -549,9 +585,9 @@ window.CBDash = (function () {
           if (inp) { inp.disabled = t.checked; if (!t.checked) inp.focus(); }
           return;
         }
-        var seck = t.getAttribute('data-esec');
-        if (seck != null) {
-          var other = $('sections').querySelector('input[data-eother="' + seck + '"]');
+        var pick = t.getAttribute('data-pick');
+        if (pick != null) {
+          var other = $('sections').querySelector('input[data-pickother="' + pick + '"]');
           if (other) { var show = t.value === '__other'; other.style.display = show ? '' : 'none'; if (show) other.focus(); }
         }
       };
@@ -559,15 +595,16 @@ window.CBDash = (function () {
       $('cb-save').onclick = doSave;
     }
 
-    function readSector(attr) {
-      var sel = $('sections').querySelector('select[data-esec="' + attr + '"]');
+    function readPicker(key) {
+      var sel = $('sections').querySelector('select[data-pick="' + key + '"]');
       if (!sel) return null;
       if (sel.value === '__other') {
-        var o = $('sections').querySelector('input[data-eother="' + attr + '"]');
+        var o = $('sections').querySelector('input[data-pickother="' + key + '"]');
         return o ? o.value.trim() : '';
       }
       return (sel.value || '').trim();
     }
+    function readSector(attr) { return readPicker('sec:' + attr); }
 
     function doSave() {
       // numeric metrics (incl. shirt income/term; stand totals are derived below)
@@ -582,6 +619,9 @@ window.CBDash = (function () {
         OWN[inp.getAttribute('data-espon')] = cleanSpon(inp.value);
       });
       ['fsSector', 'bsSector', 'slSector'].forEach(function (a) { var v = readSector(a); if (v != null) OWN[a] = v; });
+      // categorical chips (programme format, rolling flags, email permissions)
+      OWN.chips = OWN.chips || {};
+      CHIP_KINDS.forEach(function (k) { var v = readPicker('chip:' + k); if (v != null) OWN.chips[k] = v; });
       // stand sponsors -> rebuild list, derive count/total/avg + standSectors
       var stands = [], standSecs = [];
       for (var i = 0; i < 4; i++) {
@@ -606,6 +646,7 @@ window.CBDash = (function () {
 
       recompute(AGG, clubs);
       recomputeSectors(AGG, clubs);
+      recomputeChips(AGG, clubs);
       $('cb-save').disabled = true; $('cb-editnote').textContent = 'Saving…';
       Promise.resolve(opts.onSave(AGG, clubs)).then(function () {
         editMode = false; setEditUI(); renderAll();
