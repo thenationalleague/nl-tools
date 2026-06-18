@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/admin.html  v1.13 — superadmin console for the club contacts collection.
+  club-contacts/admin.html  v1.14 — superadmin console for the club contacts collection.
   (Renamed from "club-roster" in v1.3 — toolKey/RTDB path now ops-club-contacts.)
   Submissions: { info, inboxes{deptSlug:{dept,email,phone,ext}},
   people[{firstName,lastName,name,roles[{section,title}],hideContact,qualification}],
@@ -38,7 +38,8 @@
   <script>
     window.NL_TOOL = { title: 'Club Contacts Admin', toolKey: 'ops-club-contacts' };
     var NL_TOOL_KEY = 'ops-club-contacts';
-    window.NL_CHANGELOG = [{ date: '18 Jun 2026', version: 'v1.13', items: [
+    window.NL_CHANGELOG = [{ date: '18 Jun 2026', version: 'v1.14', items: [
+      '“View all submitted data” shows every submitted club on one page, collapsible per club, reusing the per-club review layout (with expand/collapse all).',
       'Club-info review + CSV gain the six social channels (Facebook, X, Instagram, TikTok, LinkedIn, YouTube).',
       'People CSV gains Title + Post-nominals columns; names shown with honorifics.',
       'CSV export (People, Club info, Dept inboxes, Lead contacts) across all submitted clubs, plus a Clear-all-submissions reset for clearing test data before rollout.',
@@ -75,6 +76,16 @@
   .cra-person__n { font-variation-settings:'wght' 800; color:var(--navy); font-size:13px; }
   .cra-person__c { font-size:12px; color:var(--text-muted); margin-top:3px; }
   .cra-person__l { font-size:12px; color:var(--navy); margin-top:5px; }
+  /* All-submissions view: one collapsible block per submitted club */
+  .cra-all { margin-top:16px; }
+  .cra-all__bar { display:flex; gap:8px; align-items:center; margin-bottom:10px; }
+  .cra-all__club { border:1px solid var(--border); border-radius:10px; background:var(--white); margin-bottom:10px; overflow:hidden; }
+  .cra-all__club > summary { list-style:none; cursor:pointer; padding:12px 16px; font-variation-settings:'wght' 800; color:var(--navy); display:flex; gap:10px; align-items:baseline; }
+  .cra-all__club > summary::-webkit-details-marker { display:none; }
+  .cra-all__club > summary::before { content:'▸'; color:var(--text-muted); font-size:11px; }
+  .cra-all__club[open] > summary::before { content:'▾'; }
+  .cra-all__club > summary .meta { font-variation-settings:'wght' 400; color:var(--text-muted); font-size:12px; }
+  .cra-all__body { padding:4px 16px 16px; border-top:1px solid var(--border); }
 </style>
 </head>
 <body>
@@ -104,6 +115,11 @@
       <span style="flex:1;"></span>
       <button class="btn btn--danger btn--sm" id="clearAll" title="Wipe all submitted forms — for clearing test data before rollout">Clear all submissions (test reset)</button>
     </div>
+    <div style="display:flex;gap:8px;margin:12px 0 0;flex-wrap:wrap;align-items:center;border-top:1px solid var(--border);padding-top:12px;">
+      <span style="font-size:12px;color:var(--text-muted);font-variation-settings:'wght' 800;text-transform:uppercase;letter-spacing:.06em;">View on screen</span>
+      <button class="btn btn--navy btn--sm" id="viewAllBtn">View all submitted data</button>
+    </div>
+    <div id="allSubs" class="cra-all" style="display:none;"></div>
     <div id="list" style="margin-top:16px;"><p style="color:var(--text-muted);">Loading…</p></div>
   </div>
   <div class="modal-backdrop" id="craModal"><div class="modal" style="max-width:680px;">
@@ -210,32 +226,33 @@
     'Kind regards,\nThe National League';
   var TPL = DEFAULT_TPL;
 
-  function openSub(club, sub) {
-    document.getElementById('craModalT').textContent = club + ' — submitted ' + new Date(sub.submittedAt).toLocaleString('en-GB');
+  /* ---- Shared readable renderers (per-club modal AND the all-submissions view) ---- */
+  function contactLineOf(p) {
+    var bits = [];
+    (p.emails && p.emails.length ? p.emails : (p.email ? [p.email] : [])).forEach(function (e) { bits.push(e); });
+    (p.phones && p.phones.length ? p.phones : (p.phone ? [{ number:p.phone, ext:p.ext }] : [])).forEach(function (ph) { bits.push(ph.number + (ph.ext ? ' ext ' + ph.ext : '')); });
+    return bits.length ? bits.join(' · ') : 'no contact details';
+  }
+  function rolesOf(p) {  // v2 roles[] with a fallback to legacy flat section/title
+    if (p.roles && p.roles.length) return p.roles.map(function (r) { return r.section + (r.title ? ' (' + r.title + ')' : ''); }).join(', ');
+    return (p.section || '') + (p.title ? ' (' + p.title + ')' : '');
+  }
+  var NONE = '<p style="color:var(--text-muted);font-size:13px;margin:0;">None given.</p>';
+  // The four readable sections (Club info / Inboxes / Lead contacts / People) for one submission.
+  function subSectionsHtml(sub) {
     var inboxKeys = Object.keys(sub.inboxes || {});
     var inboxHtml = inboxKeys.length ? '<dl class="cra-dl">' + inboxKeys.map(function (k) {
       var ib = sub.inboxes[k];
       return '<dt>' + esc(ib.dept || ib.label || LIST_LABEL[k] || k) + '</dt><dd>' + esc([ib.email, ib.phone && (ib.phone + (ib.ext ? ' ext ' + ib.ext : ''))].filter(Boolean).join(' · ')) + '</dd>';
-    }).join('') + '</dl>' : '<p style="color:var(--text-muted);font-size:13px;margin:0;">None given.</p>';
+    }).join('') + '</dl>' : NONE;
 
-    function contactLine(p) {
-      var bits = [];
-      (p.emails && p.emails.length ? p.emails : (p.email ? [p.email] : [])).forEach(function (e) { bits.push(e); });
-      (p.phones && p.phones.length ? p.phones : (p.phone ? [{ number:p.phone, ext:p.ext }] : [])).forEach(function (ph) { bits.push(ph.number + (ph.ext ? ' ext ' + ph.ext : '')); });
-      return bits.length ? bits.join(' · ') : 'no contact details';
-    }
-    function rolesOf(p) {  // v2 roles[] with a fallback to legacy flat section/title
-      if (p.roles && p.roles.length) return p.roles.map(function (r) { return r.section + (r.title ? ' (' + r.title + ')' : ''); }).join(', ');
-      return (p.section || '') + (p.title ? ' (' + p.title + ')' : '');
-    }
     var peopleHtml = (sub.people || []).length ? (sub.people || []).map(function (p) {
       var tags = (p.qualification ? '<span class="cra-person__l">qualification: ' + esc(p.qualification) + '</span>' : '') +
         (p.hideContact ? '<span class="cra-person__l" style="color:var(--amber-deep,#9a6700);">⚠ contact details hidden from public directory</span>' : '');
       return '<div class="cra-person"><div class="cra-person__n">' + esc(pname(p)) + ' <span style="color:var(--text-muted);font-variation-settings:\'wght\' 400;">— ' + esc(rolesOf(p)) + '</span></div>' +
-        '<div class="cra-person__c">' + esc(contactLine(p)) + '</div>' + tags + '</div>';
-    }).join('') : '<p style="color:var(--text-muted);font-size:13px;margin:0;">None given.</p>';
+        '<div class="cra-person__c">' + esc(contactLineOf(p)) + '</div>' + tags + '</div>';
+    }).join('') : NONE;
 
-    // Lead contacts — labels + pname are module-scope (shared with CSV export).
     function leadName(id) { var p = (sub.people || []).filter(function (x) { return x.id === id; })[0]; return p ? pname(p) : ''; }
     var leadsRows = LEAD_LABELS.map(function (a) {
       var names = ((sub.leads && sub.leads[a[0]]) || []).map(leadName).filter(Boolean).join(', ');
@@ -243,26 +260,52 @@
     }).join('');
     var leadsHtml = leadsRows ? '<dl class="cra-dl">' + leadsRows + '</dl>' : '<p style="color:var(--text-muted);font-size:13px;margin:0;">None nominated.</p>';
 
-    // Club information (INFO_LABELS is module-scope, shared with CSV export)
     var info = sub.info || {};
     var infoRows = INFO_LABELS.filter(function (f) { return (info[f[0]] != null ? String(info[f[0]]) : '').trim(); })
       .map(function (f) { return '<dt>' + esc(f[1]) + '</dt><dd>' + esc(info[f[0]]) + '</dd>'; }).join('');
-    var infoHtml = infoRows ? '<dl class="cra-dl">' + infoRows + '</dl>' : '<p style="color:var(--text-muted);font-size:13px;margin:0;">None given.</p>';
+    var infoHtml = infoRows ? '<dl class="cra-dl">' + infoRows + '</dl>' : NONE;
 
-    document.getElementById('craModalB').innerHTML =
-      '<div style="margin-bottom:14px;display:flex;gap:8px;flex-wrap:wrap;">' +
-        '<button class="btn btn--ghost btn--sm" data-copyjson="' + esc(club) + '">Copy as JSON (for import)</button>' +
-        '<button class="btn btn--danger btn--sm" data-reopen="' + esc(club) + '">Re-open this form</button>' +
-      '</div>' +
-      '<p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">Submitted by ' + esc(sub.yourName || '—') + (sub.yourEmail ? ' (' + esc(sub.yourEmail) + ')' : '') + '. Import into the Club Directory is done manually for now.</p>' +
-      '<div class="cra-sec">Club information</div>' + infoHtml +
+    return '<div class="cra-sec">Club information</div>' + infoHtml +
       '<div class="cra-sec">Department inboxes</div>' + inboxHtml +
       '<div class="cra-sec">Lead contacts</div>' + leadsHtml +
       '<div class="cra-sec">People</div>' + peopleHtml;
+  }
+  function subActionsHtml(club) {
+    return '<div style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;">' +
+      '<button class="btn btn--ghost btn--sm" data-copyjson="' + esc(club) + '">Copy as JSON (for import)</button>' +
+      '<button class="btn btn--danger btn--sm" data-reopen="' + esc(club) + '">Re-open this form</button>' +
+    '</div>';
+  }
+  function submitterLine(sub) {
+    return '<p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">Submitted by ' + esc(sub.yourName || '—') + (sub.yourEmail ? ' (' + esc(sub.yourEmail) + ')' : '') + '. Import into the Club Directory is done manually for now.</p>';
+  }
+
+  function openSub(club, sub) {
+    document.getElementById('craModalT').textContent = club + ' — submitted ' + new Date(sub.submittedAt).toLocaleString('en-GB');
+    document.getElementById('craModalB').innerHTML =
+      subActionsHtml(club) + submitterLine(sub) + subSectionsHtml(sub);
     document.getElementById('craModal').classList.add('open');
   }
 
-  document.getElementById('craModalB').addEventListener('click', function (e) {
+  /* ---- All-submissions view: every submitted club inline, collapsible ---- */
+  function renderAllSubs() {
+    var box = document.getElementById('allSubs');
+    var subs = subsList().sort(function (a, b) { return a.club.localeCompare(b.club); });
+    if (!subs.length) { box.innerHTML = '<p style="color:var(--text-muted);">No submissions yet.</p>'; return; }
+    box.innerHTML =
+      '<div class="cra-all__bar"><span style="font-size:13px;color:var(--text-muted);">' + subs.length + ' submitted</span>' +
+        '<span style="flex:1;"></span>' +
+        '<button class="btn btn--ghost btn--sm" data-allexpand="1">Expand all</button>' +
+        '<button class="btn btn--ghost btn--sm" data-allexpand="0">Collapse all</button></div>' +
+      subs.map(function (sub) {
+        return '<details class="cra-all__club"><summary>' + esc(sub.club) +
+          ' <span class="meta">' + ((sub.people || []).length) + ' people · submitted ' + new Date(sub.submittedAt).toLocaleDateString('en-GB') + '</span></summary>' +
+          '<div class="cra-all__body">' + subActionsHtml(sub.club) + submitterLine(sub) + subSectionsHtml(sub) + '</div></details>';
+      }).join('');
+  }
+
+  // Copy-as-JSON / Re-open, shared by the modal and the all-submissions view.
+  function handleSubAction(e, afterReopen) {
     var cj = e.target.closest('[data-copyjson]');
     if (cj) {
       var t1 = tokenFor(cj.getAttribute('data-copyjson'));
@@ -281,10 +324,26 @@
     if (NL.writeAudit) NL.writeAudit('clubcontacts_reopen', 'Re-opened club-contacts form for ' + club);
     db.ref(BASE + '/submissions/' + t).remove().then(function () {
       delete S.subs[t];
-      document.getElementById('craModal').classList.remove('open');
       NL.toast(club + '’s form re-opened.', 'success');
       renderList();
+      if (afterReopen) afterReopen();
     }).catch(function (err) { NL.toast('Could not re-open: ' + (err.message || err), 'error'); });
+  }
+  document.getElementById('craModalB').addEventListener('click', function (e) {
+    handleSubAction(e, function () { document.getElementById('craModal').classList.remove('open'); });
+  });
+  // All-submissions view: same actions, plus expand/collapse all.
+  var allSubsEl = document.getElementById('allSubs');
+  allSubsEl.addEventListener('click', function (e) {
+    var ex = e.target.closest('[data-allexpand]');
+    if (ex) { var open = ex.getAttribute('data-allexpand') === '1';
+      Array.prototype.forEach.call(allSubsEl.querySelectorAll('details.cra-all__club'), function (d) { d.open = open; }); return; }
+    handleSubAction(e, renderAllSubs);
+  });
+  document.getElementById('viewAllBtn').addEventListener('click', function () {
+    var shown = allSubsEl.style.display !== 'none';
+    if (shown) { allSubsEl.style.display = 'none'; this.textContent = 'View all submitted data'; }
+    else { renderAllSubs(); allSubsEl.style.display = ''; this.textContent = 'Hide all submitted data'; }
   });
   document.getElementById('craModalX').addEventListener('click', function () { document.getElementById('craModal').classList.remove('open'); });
   document.getElementById('craModal').addEventListener('click', function (e) { if (e.target.id === 'craModal') e.currentTarget.classList.remove('open'); });
