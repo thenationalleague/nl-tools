@@ -181,8 +181,10 @@ window.CBDash = (function () {
         : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="4" y="11" width="3.5" height="9"/><rect x="10.25" y="6" width="3.5" height="14"/><rect x="16.5" y="13" width="3.5" height="7"/></svg> Graph';
       var roll = TERM_ROLL[key];
       var rollPill = roll ? '<span class="posn roll">' + chipValue(roll) + '</span>' : '';
+      var sponName = SPONSOR_OF[key] ? OWN[SPONSOR_OF[key]] : '';
+      var sponLine = sponName ? '<div class="cb-cardspon">' + sponName + '</div>' : '';
       return '<div class="card"><div class="vtoggle"><button data-card="' + key + '" data-next="' + nextView + '">' + icon + '</button></div>' +
-        '<div class="lab">' + agg.label + '</div><div class="desc">' + agg.desc + '</div>' +
+        '<div class="lab">' + agg.label + '</div>' + sponLine + '<div class="desc">' + agg.desc + '</div>' +
         '<div class="value-row"><span class="value">' + (provided ? fmt(own.value, agg.unit) : '—') + '</span>' +
         '<span class="posn ' + b.cls + '">' + b.txt + '</span>' + rollPill + '</div>' + body + '</div>';
     }
@@ -219,7 +221,10 @@ window.CBDash = (function () {
 
     function standExtras() {
       var html = '';
-      var st = OWN.stands || [];
+      // largest income at the top
+      var st = (OWN.stands || []).slice().sort(function (a, b) {
+        return (b.income == null ? -1 : b.income) - (a.income == null ? -1 : a.income);
+      });
       // sectors outside the donut's shown top-8 display as "Other" (consistent
       // with the chart) rather than a one-off label like "Waste".
       var standDist = (AGG.sectors && AGG.sectors.stand) || [];
@@ -258,6 +263,7 @@ window.CBDash = (function () {
     ];
     // rolling/fixed shown as a tag on each shirt-slot's deal-length card
     var TERM_ROLL = { frontTerm: 'rollingFront', backTerm: 'rollingBack', sleeveTerm: 'rollingSleeve' };
+    var SPONSOR_OF = { frontShirt: 'fsSponsor', backShirt: 'bsSponsor', sleeve: 'slSponsor' };
     function chipValue(kind) {
       var c = OWN.chips || {};
       var yn = function (x, on, off) { return x === 'Yes' ? on : (x ? off : '—'); };
@@ -283,11 +289,7 @@ window.CBDash = (function () {
       setText('clubName', OWN.club);
       setText('divPill', divName(OWN.division));
       var sponWrap = $('sponWrap');
-      if (sponWrap) {
-        sponWrap.style.display = '';
-        var spon = function (lab, v) { return lab + ': <b>' + (v && String(v).trim() ? v : '—') + '</b>'; };
-        sponWrap.innerHTML = [spon('Front', OWN.fsSponsor), spon('Back', OWN.bsSponsor), spon('Sleeve', OWN.slSponsor)].join(' &nbsp;·&nbsp; ');
-      }
+      if (sponWrap) sponWrap.style.display = 'none';  // sponsors now named on the kit cards
       setText('dvn', AGG.meta.divN[OWN.division]);
       setText('divName', divName(OWN.division));
       setText('tbClub', OWN.club);
@@ -336,9 +338,10 @@ window.CBDash = (function () {
           '<span class="cb-leg-lab">' + s.label + '</span><span class="cb-leg-n">' + s.count + ' (' + pct + '%)</span></div>';
       }).join('');
       return '<div class="cb-sector"><div class="cb-sector-h">' + title + '</div><div class="cb-sector-body">' +
-        '<div class="cb-donut"><svg viewBox="0 0 160 160" width="160" height="160" style="transform:rotate(-90deg)">' + arcs + '</svg>' +
-        '<div class="cb-donut-center"><span class="cb-donut-k">Your sector</span><span class="cb-donut-v">' +
-        (!own.length ? 'Not provided' : (own.length > 2 ? own.length + ' sectors' : own.join(', '))) + '</span></div></div>' +
+        '<div class="cb-donut-col"><div class="cb-donut">' +
+        '<svg viewBox="0 0 160 160" width="100%" height="100%" style="transform:rotate(-90deg);display:block">' + arcs + '</svg></div>' +
+        '<div class="cb-donut-cap"><span class="cb-donut-k">Your sector</span>' +
+        '<span class="cb-donut-capv">' + (!own.length ? 'Not provided' : (own.length > 2 ? own.length + ' sectors' : own.join(', '))) + '</span></div></div>' +
         '<div class="cb-legend">' + legend + '</div></div></div>';
     }
     function sectorsHtml() {
