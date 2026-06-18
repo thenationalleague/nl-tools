@@ -1,11 +1,15 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/index.html  v2.16
+  club-contacts/index.html  v2.17
   Public club DETAILS collection — GUIDED WIZARD (capability-URL pattern).
   Gathers a club's information AND people directory for club-directory.
   (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
   THIS IS THE UNIFIED FORM — supersedes the old club-data tool.
 
+  v2.17 (18/06/2026) — split person name into First name + Surname (stored
+    firstName/lastName; display name derived via personName(); submission also
+    carries a derived 'name'). Role/job title moved onto its own line. Fresh
+    recollection, so no migration needed; legacy single names split on load.
   v2.16 (18/06/2026) — pre-fill fix: clubs-meta is now the BASE for club info,
     with the draft's non-empty values layered on top. Fixes fields added after a
     draft was saved (e.g. station distance) not pre-filling for returning clubs.
@@ -139,7 +143,7 @@
   Submission shape: { club, yourName, yourEmail, submittedAt,
     info:{stadium,addr1..,capacity,..,spClub,..},
     inboxes:{<deptSlug>:{dept,email,phone,ext}},
-    people:[{id,name,emails:[..],phones:[{number,ext}], roles:[{section,title}],
+    people:[{id,firstName,lastName,name,emails:[..],phones:[{number,ext}], roles:[{section,title}],
              hideContact?:bool, qualification?:str}],
     leads:{<areaKey>:[personId,..]} }.
   See git history for v1.x–v2.7 (mailing-list era, separate club-data tool).
@@ -452,11 +456,20 @@ firebase.initializeApp({
     (p.phones || []).forEach(function (ph) { bits.push(ph.number + (ph.ext ? ' ext ' + ph.ext : '')); });
     return bits.length ? bits.join(' · ') : 'no contact details';
   }
-  // Convert any legacy v1.x person (flat section/title) into the v2 roles shape.
+  // Display name from the split first/surname (falls back to a legacy single `name`).
+  function personName(p){ var n = ((p.firstName || '') + ' ' + (p.lastName || '')).trim(); return n || (p.name || ''); }
+  // Normalise a person from an older draft into the current shape (roles[] +
+  // split firstName/lastName). Splits any legacy single `name` on first space.
   function normalizePerson(p){
-    if (p.roles) { if (!p.id) p.id = uid(); return p; }
-    var role = { section: p.section, title: p.title || '' };
-    return { id: uid(), name: p.name || '', emails: p.emails || [], phones: p.phones || [], roles: [role] };
+    if (!p.id) p.id = uid();
+    if (!p.roles) p.roles = [{ section: p.section, title: p.title || '' }];
+    if (p.firstName == null && p.lastName == null) {
+      var parts = (p.name || '').trim().split(/\s+/);
+      p.firstName = parts.shift() || '';
+      p.lastName = parts.join(' ');
+    }
+    p.emails = p.emails || []; p.phones = p.phones || [];
+    return p;
   }
 
   /* ---- Club information (merged from the old club-data tool; pre-fills from
@@ -759,10 +772,10 @@ firebase.initializeApp({
 
     people.forEach(function (p) { holder.appendChild(editing[p.id] ? personEditCard(p, section) : personSummaryRow(p, section)); });
 
-    var candidates = data.people.filter(function (p) { return !hasRole(p, section) && p.name; });
+    var candidates = data.people.filter(function (p) { return !hasRole(p, section) && personName(p); });
     addWrap.innerHTML = '<button type="button" class="btn-addperson" data-addnew>+ Add a person</button>' +
       (candidates.length ? '<div class="ri-pick"><span class="ri-pick__lbl">…or add someone already listed (keeps them as one record):</span>' +
-        candidates.map(function (p) { return '<button type="button" class="ri-pickbtn" data-pick="' + p.id + '">' + esc(p.name) + ' ＋</button>'; }).join('') + '</div>' : '');
+        candidates.map(function (p) { return '<button type="button" class="ri-pickbtn" data-pick="' + p.id + '">' + esc(personName(p)) + ' ＋</button>'; }).join('') + '</div>' : '');
 
     var blank = people.length === 0;
     noneWrap.style.display = blank ? 'flex' : 'none';
@@ -777,7 +790,7 @@ firebase.initializeApp({
       var t = e.target;
       if (t.closest('[data-addnew]')) {
         syncEditCards(); data.emptied[section] = false;
-        var np = { id: uid(), name: '', emails: [], phones: [], roles: [{ section: section, title: '' }] };
+        var np = { id: uid(), firstName: '', lastName: '', emails: [], phones: [], roles: [{ section: section, title: '' }] };
         data.people.push(np); editing[np.id] = true;
         afterStructural(section, np.id); return;
       }
@@ -790,7 +803,7 @@ firebase.initializeApp({
       var save = t.closest('[data-save]');
       if (save) {
         syncEditCards(); var sp = findPerson(save.getAttribute('data-pid'));
-        if (sp && !sp.name) { el('riStatus').textContent = 'Please enter a name for this person.'; return; }
+        if (sp && !personName(sp)) { el('riStatus').textContent = 'Please enter a name for this person.'; return; }
         if (sp) { delete editing[sp.id]; delete unlockedShared[sp.id]; }
         afterStructural(section, null); return;
       }
@@ -803,7 +816,7 @@ firebase.initializeApp({
           up.roles = up.roles.filter(function (r) { return r.section !== section; });  // detach the just-linked role
           delete editing[up.id]; delete unlockedShared[up.id];
         }
-        var fresh = { id: uid(), name: '', emails: [], phones: [], roles: [{ section: section, title: '' }] };
+        var fresh = { id: uid(), firstName: '', lastName: '', emails: [], phones: [], roles: [{ section: section, title: '' }] };
         data.people.push(fresh); editing[fresh.id] = true;
         afterStructural(section, fresh.id); return;
       }
@@ -823,7 +836,7 @@ firebase.initializeApp({
   }
   function afterStructural(section, focusId) {
     saveDraft(true); renderStep(); renderSteps();
-    if (focusId) { var f = el('riStep').querySelector('.ri-person[data-pid="' + focusId + '"] [data-p="name"]'); if (f) f.focus(); }
+    if (focusId) { var f = el('riStep').querySelector('.ri-person[data-pid="' + focusId + '"] [data-p="firstName"]'); if (f) f.focus(); }
   }
   function personEditCard(p, section) {
     var role = roleFor(p, section) || { title: '' };
@@ -837,17 +850,19 @@ firebase.initializeApp({
     // Locked: show only the existing shared values (no blank starter row). Editable: one blank if empty.
     var emails = locked ? (p.emails || []) : ((p.emails && p.emails.length) ? p.emails : ['']);
     var phones = locked ? (p.phones || []) : ((p.phones && p.phones.length) ? p.phones : [{}]);
+    var titleBlock = '<div style="margin-top:12px;"><label>Role / job title (in this area)</label>' +
+      '<input type="text" data-p="title" value="' + esc(role.title || '') + '"></div>';
     var nameBlock = locked
       ? '<div class="ri-linked">' +
-          '<div class="ri-linked__name">' + esc(p.name || '(unnamed)') + '</div>' +
+          '<div class="ri-linked__name">' + esc(personName(p) || '(unnamed)') + '</div>' +
           '<div class="ri-linked__note">Same contact as in <b>' + esc(otherSecs.join(', ')) + '</b> — name, email and phone are shared across both areas, so they’re locked here. Add extras below if needed. ' +
             '<button type="button" data-editshared data-pid="' + p.id + '">✎ Edit shared details</button> · ' +
             '<button type="button" data-unlink data-pid="' + p.id + '">Not this person? Add someone else</button></div></div>' +
-        '<div><label>Role / job title (in this area)</label><input type="text" data-p="title" value="' + esc(role.title || '') + '"></div>'
+        titleBlock
       : '<div class="ri-grid">' +
-          '<div><label>Full name</label><input type="text" data-p="name" value="' + esc(p.name || '') + '"></div>' +
-          '<div><label>Role / job title (in this area)</label><input type="text" data-p="title" value="' + esc(role.title || '') + '"></div>' +
-        '</div>';
+          '<div><label>First name</label><input type="text" data-p="firstName" value="' + esc(p.firstName || '') + '"></div>' +
+          '<div><label>Surname</label><input type="text" data-p="lastName" value="' + esc(p.lastName || '') + '"></div>' +
+        '</div>' + titleBlock;
     var headBadges = otherSecs.map(function (s) { return '<span class="ri-rolebadge">also: ' + esc(s) + '</span>'; }).join('');
     var addWord = locked ? 'an extra' : 'another';
     // Per-area extras: privacy opt-out for owners/board; qualification for safety/medical.
@@ -884,7 +899,7 @@ firebase.initializeApp({
     var badges = (p.roles || []).map(function (r) { return '<span class="ri-rolebadge">' + esc(r.section) + (r.title ? ' · ' + esc(r.title) : '') + '</span>'; }).join('');
     var meta = (p.qualification ? ' · ' + esc(p.qualification) : '') + (p.hideContact ? ' · <span style="color:var(--amber-deep);">hidden from directory</span>' : '');
     div.innerHTML =
-      '<div class="ri-sum__main"><b>' + esc(p.name || '(unnamed)') + '</b>' + badges +
+      '<div class="ri-sum__main"><b>' + esc(personName(p) || '(unnamed)') + '</b>' + badges +
         '<br><span class="muted">' + esc(contactLine(p)) + '</span>' + meta + '</div>' +
       '<div class="ri-sum__act"><button type="button" data-edit data-pid="' + p.id + '">Edit</button>' +
         '<button type="button" data-remove data-pid="' + p.id + '">Remove</button></div>';
@@ -894,7 +909,7 @@ firebase.initializeApp({
   /* ---- Lead contacts step (#7) — nominate >=1 named contact per League area;
      pick from people already entered, or add a new person. Replaces mailing lists. ---- */
   function leadNominees(key) { return (data.leads[key] || []).map(findPerson).filter(Boolean); }
-  function functionMembers(rec) { return rec ? data.people.filter(function (p) { return p.name && hasRole(p, rec); }) : []; }
+  function functionMembers(rec) { return rec ? data.people.filter(function (p) { return personName(p) && hasRole(p, rec); }) : []; }
   function renderLeadsStep(host) {
     // Pre-tick everyone in each area's function. We keep tracking the function
     // members until the club first curates an area (data.leadsTouched[key]); after
@@ -913,26 +928,29 @@ firebase.initializeApp({
         var memberIds = members.map(function (p) { return p.id; });
         var extras = nominated.filter(function (id) { return memberIds.indexOf(id) === -1; }).map(findPerson).filter(Boolean);
         var candidates = members.concat(extras);
-        var others = data.people.filter(function (p) { return p.name && candidates.indexOf(p) === -1; });
+        var others = data.people.filter(function (p) { return personName(p) && candidates.indexOf(p) === -1; });
         return '<div class="ri-card" data-area="' + a.key + '"><h2>' + esc(a.label) + '</h2>' +
           (candidates.length
             ? candidates.map(function (p) {
                 var on = nominated.indexOf(p.id) !== -1;
                 return '<label class="ri-listmember"><input type="checkbox" data-leadck="' + a.key + '|' + p.id + '"' + (on ? ' checked' : '') + '> ' +
-                  '<span>' + esc(p.name) + ' <span class="muted">' + esc(rolesText(p)) + '</span></span></label>';
+                  '<span>' + esc(personName(p)) + ' <span class="muted">' + esc(rolesText(p)) + '</span></span></label>';
               }).join('')
             : '<p class="ri-listempty">No one yet' + (a.rec ? ' — add someone on the ' + esc(a.rec) + ' page, or add one here.' : '.') + '</p>') +
           (others.length
             ? '<select class="ri-leadpick" data-leadpick="' + a.key + '"><option value="">+ Add someone from another area…</option>' +
-                others.map(function (p) { return '<option value="' + p.id + '">' + esc(p.name) + ' — ' + esc(rolesText(p)) + '</option>'; }).join('') + '</select>'
+                others.map(function (p) { return '<option value="' + p.id + '">' + esc(personName(p)) + ' — ' + esc(rolesText(p)) + '</option>'; }).join('') + '</select>'
             : '') +
           '<button type="button" class="ri-addmore" data-leadnew="' + a.key + '">+ Add a new person</button>' +
           '<div class="ri-leadform" data-leadform="' + a.key + '" style="display:none;">' +
             '<div class="ri-grid">' +
-              '<div><label>Full name</label><input type="text" data-lf="name"></div>' +
-              '<div><label>Email</label><input type="email" data-lf="email"><p class="ri-err">Not a valid email address.</p></div>' +
+              '<div><label>First name</label><input type="text" data-lf="firstName"></div>' +
+              '<div><label>Surname</label><input type="text" data-lf="lastName"></div>' +
             '</div>' +
-            '<div class="ri-grid" style="margin-top:8px;"><div><label>Phone</label><input type="tel" data-lf="phone"><p class="ri-err">Doesn’t look like a UK phone number.</p></div><div></div></div>' +
+            '<div class="ri-grid" style="margin-top:8px;">' +
+              '<div><label>Email</label><input type="email" data-lf="email"><p class="ri-err">Not a valid email address.</p></div>' +
+              '<div><label>Phone</label><input type="tel" data-lf="phone"><p class="ri-err">Doesn’t look like a UK phone number.</p></div>' +
+            '</div>' +
             '<button type="button" class="btn-confirm" data-leadadd="' + a.key + '">Add &amp; tick</button>' +
           '</div>' +
         '</div>';
@@ -960,16 +978,16 @@ firebase.initializeApp({
     Array.prototype.forEach.call(host.querySelectorAll('[data-leadnew]'), function (btn) {
       btn.addEventListener('click', function () {
         var f = host.querySelector('[data-leadform="' + btn.getAttribute('data-leadnew') + '"]');
-        if (f) { f.style.display = 'block'; var n = f.querySelector('[data-lf="name"]'); if (n) n.focus(); }
+        if (f) { f.style.display = 'block'; var n = f.querySelector('[data-lf="firstName"]'); if (n) n.focus(); }
       });
     });
     Array.prototype.forEach.call(host.querySelectorAll('[data-leadadd]'), function (btn) {
       btn.addEventListener('click', function () {
         var key = btn.getAttribute('data-leadadd'), f = host.querySelector('[data-leadform="' + key + '"]');
         var g = function (k) { var x = f.querySelector('[data-lf="' + k + '"]'); return x ? x.value.trim() : ''; };
-        if (!g('name')) { el('riStatus').textContent = 'Please enter a name for the new person.'; return; }
+        if (!g('firstName') && !g('lastName')) { el('riStatus').textContent = 'Please enter a name for the new person.'; return; }
         var a = leadArea(key);
-        var np = { id: uid(), name: g('name'), emails: g('email') ? [g('email')] : [], phones: g('phone') ? [{ number: g('phone'), ext: '' }] : [], roles: [{ section: a.rec || 'Other', title: a.label }] };
+        var np = { id: uid(), firstName: g('firstName'), lastName: g('lastName'), emails: g('email') ? [g('email')] : [], phones: g('phone') ? [{ number: g('phone'), ext: '' }] : [], roles: [{ section: a.rec || 'Other', title: a.label }] };
         data.people.push(np); touch(key).push(np.id);
         saveDraft(true); renderStep(); renderSteps();
       });
@@ -998,10 +1016,11 @@ firebase.initializeApp({
       var p = findPerson(card.getAttribute('data-pid')); if (!p) return;
       var section = card.getAttribute('data-section');
       var g = function (k) { var n = card.querySelector('[data-p="' + k + '"]'); return n ? n.value.trim() : ''; };
-      // A linked person's card has NO name input (it's a read-only header), so only
-      // overwrite the shared name when the field is actually present — otherwise we'd wipe it.
-      var nameEl = card.querySelector('[data-p="name"]');
-      if (nameEl) p.name = nameEl.value.trim();
+      // A linked person's card has NO name inputs (read-only header), so only
+      // overwrite the shared name when the fields are present — otherwise we'd wipe it.
+      var fn = card.querySelector('[data-p="firstName"]'), ln = card.querySelector('[data-p="lastName"]');
+      if (fn) p.firstName = fn.value.trim();
+      if (ln) p.lastName = ln.value.trim();
       p.emails = readEmails(card.querySelector('[data-emails]'));
       p.phones = readPhones(card.querySelector('[data-phones]'));
       var role = roleFor(p, section); if (role) role.title = g('title');
@@ -1010,7 +1029,7 @@ firebase.initializeApp({
     });
   }
   function pruneEmpty() {
-    data.people = data.people.filter(function (p) { return p.name || (p.emails && p.emails.length) || (p.phones && p.phones.length); });
+    data.people = data.people.filter(function (p) { return personName(p) || (p.emails && p.emails.length) || (p.phones && p.phones.length); });
   }
   function syncStep() {
     var step = STEPS[cur];
@@ -1056,7 +1075,7 @@ firebase.initializeApp({
     });
     data.people.forEach(function (p) {
       var st = stepForSection((p.roles[0] || {}).section);
-      var who = (p.name || rolesText(p) || 'someone');
+      var who = (personName(p) || rolesText(p) || 'someone');
       (p.emails || []).forEach(function (e) { if (!validEmail(e)) probs.push({ step: st, msg: who + ': email “' + e + '” looks invalid.' }); });
       (p.phones || []).forEach(function (ph) { if (ph.number && !validPhone(ph.number)) probs.push({ step: st, msg: who + ': phone “' + ph.number + '” looks invalid.' }); });
     });
@@ -1080,7 +1099,7 @@ firebase.initializeApp({
       });
     });
     var dups = Object.keys(emailMap).filter(function (k) { return emailMap[k].length > 1; }).map(function (k) {
-      return { email: k, who: emailMap[k].map(function (p) { return p.name || rolesText(p); }) };
+      return { email: k, who: emailMap[k].map(function (p) { return personName(p) || rolesText(p); }) };
     });
 
     // people, ordered by their first role's department
@@ -1091,7 +1110,7 @@ firebase.initializeApp({
     var rosterHtml = ordered.length ? ordered.map(function (p) {
       var roles = (p.roles || []).map(function (r) { return esc(r.section) + (r.title ? ' (' + esc(r.title) + ')' : ''); }).join(', ');
       var meta = (p.qualification ? ' · ' + esc(p.qualification) : '') + (p.hideContact ? ' · hidden from directory' : '');
-      return '<div class="ri-rev__p"><b>' + esc(p.name || '(unnamed)') + '</b> <span class="muted">— ' + roles + '</span>' +
+      return '<div class="ri-rev__p"><b>' + esc(personName(p) || '(unnamed)') + '</b> <span class="muted">— ' + roles + '</span>' +
         '<br><span class="muted">' + esc(contactLine(p)) + meta + '</span></div>';
     }).join('') : '<p class="muted" style="color:var(--text-muted);font-size:13px;">No people added yet.</p>';
 
@@ -1117,7 +1136,7 @@ firebase.initializeApp({
       '<div class="ri-cov">' + states.map(function (s) {
         var ok = s[1] === 'ok';
         return '<div class="ri-cov__cell is-' + (ok ? 'ok' : 'gap') + '" data-coverarea="' + s[0].key + '">' +
-          '<div class="ri-cov__list">' + esc(s[0].label) + '</div><div class="ri-cov__st">' + (ok ? '✓ ' + esc((leadNominees(s[0].key)[0] || {}).name || 'nominated') : '— no one yet') + '</div></div>';
+          '<div class="ri-cov__list">' + esc(s[0].label) + '</div><div class="ri-cov__st">' + (ok ? '✓ ' + esc(personName(leadNominees(s[0].key)[0] || {}) || 'nominated') : '— no one yet') + '</div></div>';
       }).join('') + '</div></div>' +
       '<div class="ri-card"><h2>Your contacts</h2><p class="ri-card__sub">Everyone you’ve entered, with their roles.</p>' + rosterHtml + '</div>';
 
@@ -1158,6 +1177,7 @@ firebase.initializeApp({
     if (!data.people.length && !Object.keys(data.inboxes).length) { el('riStatus').textContent = 'Please add at least one person or shared address before submitting.'; return; }
     var probs = findProblems();
     if (probs.length) { renderReview(el('riStep')); el('riStatus').textContent = 'Please fix ' + probs.length + ' highlighted ' + (probs.length === 1 ? 'item' : 'items') + '.'; return; }
+    data.people.forEach(function (p) { p.name = personName(p); });   // derived full name, handy for export/import
     var rec = { club: clubName, yourName: data.yourName, yourEmail: data.yourEmail, info: data.info, inboxes: data.inboxes, people: data.people, leads: data.leads, submittedAt: Date.now() };
     var btn = el('riNext'); btn.disabled = true; btn.textContent = 'Submitting…';
     db.ref('app-data/ops-club-contacts/submissions/' + token).set(rec).then(function () {
@@ -1184,10 +1204,10 @@ firebase.initializeApp({
     var peopleHtml = (rec.people || []).map(function (p) {
       var roles = (p.roles || []).map(function (r) { return esc(r.section) + (r.title ? ' (' + esc(r.title) + ')' : ''); }).join(', ');
       var meta = (p.qualification ? ' · ' + esc(p.qualification) : '') + (p.hideContact ? ' · hidden from directory' : '');
-      return '<div style="padding:6px 0;font-size:13px;border-bottom:1px solid var(--border);"><b>' + esc(p.name || '(unnamed)') + '</b> <span style="color:var(--text-muted);">— ' + roles + '</span>' +
+      return '<div style="padding:6px 0;font-size:13px;border-bottom:1px solid var(--border);"><b>' + esc(personName(p) || '(unnamed)') + '</b> <span style="color:var(--text-muted);">— ' + roles + '</span>' +
         '<br><span style="color:var(--text-muted);">' + esc(contactLine(p)) + meta + '</span></div>';
     }).join('');
-    function lockedName(id) { var p = (rec.people || []).filter(function (x) { return x.id === id; })[0]; return p ? (p.name || '(unnamed)') : ''; }
+    function lockedName(id) { var p = (rec.people || []).filter(function (x) { return x.id === id; })[0]; return p ? (personName(p) || '(unnamed)') : ''; }
     var leadsHtml = LEAD_AREAS.map(function (a) {
       var names = (rec.leads && rec.leads[a.key] || []).map(lockedName).filter(Boolean).join(', ');
       return names ? '<div style="font-size:13px;padding:3px 0;"><span style="color:var(--text-muted);">' + esc(a.label) + ':</span> <b>' + esc(names) + '</b></div>' : '';
