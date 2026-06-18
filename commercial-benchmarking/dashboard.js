@@ -233,13 +233,9 @@ window.CBDash = (function () {
       var st = (OWN.stands || []).slice().sort(function (a, b) {
         return (b.income == null ? -1 : b.income) - (a.income == null ? -1 : a.income);
       });
-      // sectors outside the donut's shown top-8 display as "Other" (consistent
-      // with the chart) rather than a one-off label like "Waste".
-      var standDist = (AGG.sectors && AGG.sectors.stand) || [];
-      var topSet = {};
-      standDist.slice().sort(function (a, b) { return b.count - a.count; }).slice(0, 8)
-        .forEach(function (e) { topSet[e.label] = 1; });
-      var secLabel = function (sec) { return !sec ? '' : (topSet[sec] ? sec : 'Other'); };
+      // sectors without a fixed colour show as "Other (Name)" — consistent with
+      // the donut, but keeping what the sector actually is.
+      var secLabel = function (sec) { return !sec ? '' : (SECTOR_COLORS[sec] ? sec : 'Other (' + sec + ')'); };
       if (st.length) {
         html += '<div class="cb-standlist"><div class="cb-standlist-h">Your stand sponsors</div>' +
           st.map(function (s) {
@@ -360,7 +356,8 @@ window.CBDash = (function () {
         '<div class="cb-donut-col"><div class="cb-donut">' +
         '<svg viewBox="0 0 160 160" width="100%" height="100%" style="transform:rotate(-90deg);display:block">' + arcs + '</svg></div>' +
         '<div class="cb-donut-cap"><span class="cb-donut-k">Your sector</span>' +
-        '<span class="cb-donut-capv">' + (!own.length ? 'Not provided' : (own.length > 2 ? own.length + ' sectors' : own.join(', '))) + '</span></div></div>' +
+        '<span class="cb-donut-capv">' + (!own.length ? 'Not provided' : (own.length > 2 ? own.length + ' sectors' :
+          own.map(function (s) { return SECTOR_COLORS[s] ? s : 'Other (' + s + ')'; }).join(', '))) + '</span></div></div>' +
         '<div class="cb-legend">' + legend + '</div></div></div>';
     }
     function sectorsHtml() {
