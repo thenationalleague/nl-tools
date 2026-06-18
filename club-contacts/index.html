@@ -1,11 +1,17 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/index.html  v2.20
+  club-contacts/index.html  v2.21
   Public club DETAILS collection — GUIDED WIZARD (capability-URL pattern).
   Gathers a club's information AND people directory for club-directory.
   (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
   THIS IS THE UNIFIED FORM — supersedes the old club-data tool.
 
+  v2.21 (18/06/2026) — Club contact step now captures the six social channels
+    (Facebook / X / Instagram / TikTok / LinkedIn / YouTube), pre-filled from
+    clubs-meta `social` using full URLs. The "Executive" people area is relabelled
+    "Senior management" (heading + nav) with CEO/COO/GM examples and a note that
+    heads of department are added on their own pages later; the underlying section
+    key stays 'Executive' so the directory/admin are unaffected.
   v2.20 (18/06/2026) — clubs-meta address is now a nested object {line1,line2,town,
     county,postcode}; buildInfoFromMeta reads it (string fallback kept). Part of a
     repo-wide pass: club-directory, travel-planner and club-data updated to read it.
@@ -370,7 +376,7 @@ firebase.initializeApp({
   var SECTION_SUB = {
     'Leadership':'Chair, vice chair, president, owner',
     'Directors':'Board directors',
-    'Executive':'Chief executive and senior management',
+    'Executive':'Chief executive, chief operating officer, general manager and other senior management — not heads of department (e.g. commercial, media, ticketing), who you add on their own pages later',
     'Club secretary':'Administration and fixture compliance',
     'Finance':'Financial reporting and treasury',
     'Commercial':'Sponsorship, partnerships and retail',
@@ -384,6 +390,10 @@ firebase.initializeApp({
     'Safeguarding & welfare':'Named safeguarding lead for children and adults at risk',
     'Other':"Anyone who doesn't fit the areas above"
   };
+  // Friendly heading override for a people-area card / step (defaults to the
+  // canonical section key). The directory still indexes the section key itself.
+  var SECTION_LABEL = { 'Executive':'Senior management' };
+  function sectionLabel(s) { return SECTION_LABEL[s] || s; }
 
   // Lead contacts (v2.8) — the single nominated point of contact per League area.
   // Replaces the old "mailing lists" step; absorbs liaison officers (DLO/SLO/PLO).
@@ -420,7 +430,7 @@ firebase.initializeApp({
     { id:'inboxes', label:'Department inboxes',   kind:'inboxes' },
     { id:'s_chair', label:'Chair & deputies',     kind:'depts', sections:['Leadership'] },
     { id:'s_dir',   label:'Directors',            kind:'depts', sections:['Directors'] },
-    { id:'s_exec',  label:'Executive (CEO/COO/GM)', kind:'depts', sections:['Executive'] },
+    { id:'s_exec',  label:'Senior management',      kind:'depts', sections:['Executive'] },
     { id:'s_sec',   label:'Club secretary',       kind:'depts', sections:['Club secretary'] },
     { id:'s_fin',   label:'Finance',              kind:'depts', sections:['Finance'] },
     { id:'s_comm',  label:'Commercial',           kind:'depts', sections:['Commercial'] },
@@ -516,7 +526,10 @@ firebase.initializeApp({
     ]],
     ['Club contact', [
       ['website','Club website','text'], ['mainEmail','Main contact email (e.g. info@)','email'],
-      ['phone','Main switchboard telephone','tel'], ['countyFA','County FA membership (e.g. Surrey FA)','text']
+      ['phone','Main switchboard telephone','tel'], ['countyFA','County FA membership (e.g. Surrey FA)','text'],
+      ['facebook','Facebook page (full URL)','text',true], ['x','X / Twitter (full URL)','text',true],
+      ['instagram','Instagram (full URL)','text',true], ['tiktok','TikTok (full URL)','text',true],
+      ['linkedin','LinkedIn (full URL)','text',true], ['youtube','YouTube (full URL)','text',true]
     ]]
   ];
   function infoGroup(name) { return INFO_GROUPS.filter(function (g) { return g[0] === name; })[0]; }
@@ -572,6 +585,7 @@ firebase.initializeApp({
     if (c.pitch) { info.pitchDims = normalizePitch(c.pitch.dimensions || ''); info.pitchType = c.pitch.type || ''; }
     info.website = c.domain ? 'www.' + c.domain : '';
     info.countyFA = (c.fa_membership || '').replace(/^Member of the\s*/i, '');
+    if (c.social) { info.facebook = c.social.facebook || ''; info.x = c.social.x || ''; info.instagram = c.social.instagram || ''; info.tiktok = c.social.tiktok || ''; info.linkedin = c.social.linkedin || ''; info.youtube = c.social.youtube || ''; }
     if (c.sponsors) { info.spClub = c.sponsors.main_club || ''; info.spFront = c.sponsors.main_shirt || ''; info.spSleeve = c.sponsors.left_sleeve || ''; }
     return info;
   }
@@ -790,7 +804,7 @@ firebase.initializeApp({
   /* ---- Department card: confirmed summary rows + open edit cards ---- */
   function deptCard(section) {
     return '<div class="ri-card" data-section="' + esc(section) + '">' +
-      '<h2>' + esc(section) + '</h2>' +
+      '<h2>' + esc(sectionLabel(section)) + '</h2>' +
       '<p class="ri-card__sub">' + esc(SECTION_SUB[section] || '') + '</p>' +
       '<div class="ri-people"></div>' +
       '<div class="ri-deptadd"></div>' +
