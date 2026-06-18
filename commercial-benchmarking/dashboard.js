@@ -211,8 +211,13 @@ window.CBDash = (function () {
     }
 
     // one card per shirt placement: prominent sponsor + income + deal length + sector donut
+    function cleanSpon(v) {
+      if (v == null) return '';
+      var s = String(v).trim();
+      return /^(0|-|–|—|n\/?a|none|nil|tbc|n\.?a\.?)$/i.test(s) ? '' : s;
+    }
     function shirtSlotCard(sl) {
-      var spon = OWN[sl.sponKey];
+      var spon = cleanSpon(OWN[sl.sponKey]);
       var head = '<div class="cb-slot-head"><span class="cb-slot-kind">' + sl.kind + '</span>' +
         '<span class="cb-slotspon' + (spon ? '' : ' cb-slotspon-none') + '">' + (spon || 'No sponsor named') + '</span></div>';
       var metrics = '<div class="cb-slot-metrics">' + metricBody(sl.incomeKey, 'Income') + metricBody(sl.termKey, 'Deal length') + '</div>';
