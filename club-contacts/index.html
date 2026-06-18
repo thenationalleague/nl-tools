@@ -1,11 +1,17 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/index.html  v2.17
+  club-contacts/index.html  v2.18
   Public club DETAILS collection — GUIDED WIZARD (capability-URL pattern).
   Gathers a club's information AND people directory for club-directory.
   (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
   THIS IS THE UNIFIED FORM — supersedes the old club-data tool.
 
+  v2.18 (18/06/2026) — Club information split into 3 steps (Stadium -> Sponsorship
+    -> Club contact) before the people pages, so it isn't one lump. Address
+    splitter only labels a part as 'county' when it's a recognised UK county
+    (incl. Welsh principal areas), else leaves county blank and treats the last
+    part as the town — stops towns being mislabelled as counties. buildInfoFromMeta
+    now prefers structured addr1/addr2/town/county from clubs-meta if present.
   v2.17 (18/06/2026) — split person name into First name + Surname (stored
     firstName/lastName; display name derived via personName(); submission also
     carries a derived 'name'). Role/job title moved onto its own line. Fresh
@@ -401,7 +407,9 @@ firebase.initializeApp({
 
   var STEPS = [
     { id:'you',     label:'You',                 kind:'you' },
-    { id:'info',    label:'Club information',     kind:'info' },
+    { id:'info_stadium', label:'Stadium',       kind:'info', group:'Stadium' },
+    { id:'info_sponsor', label:'Sponsorship',   kind:'info', group:'Sponsorship' },
+    { id:'info_contact', label:'Club contact',  kind:'info', group:'Club contact' },
     { id:'inboxes', label:'Department inboxes',   kind:'inboxes' },
     { id:'s_chair', label:'Chair & deputies',     kind:'depts', sections:['Leadership'] },
     { id:'s_dir',   label:'Directors',            kind:'depts', sections:['Directors'] },
@@ -486,28 +494,35 @@ firebase.initializeApp({
       ['capacity','Stadium capacity','number'], ['seated','…of which, seated','number'],
       ['pitchDims','Pitch dimensions (longest x shortest, in metres)','text'], ['pitchType','Pitch type (e.g. Grass, Artificial – FIFA Quality Pro)','text']
     ]],
-    ['Club contact', [
-      ['website','Club website','text'], ['mainEmail','Main contact email (e.g. info@)','email'],
-      ['phone','Main switchboard telephone','tel'], ['countyFA','County FA membership (e.g. Surrey FA)','text']
-    ]],
     ['Sponsorship', [
       ['spClub','Main club sponsor','text'], ['spFront','Front-of-shirt sponsor','text'],
       ['spBack','Back-of-shirt sponsor','text'], ['spSleeve','Left-sleeve sponsor','text'],
       ['spShorts','Back-of-shorts sponsor','text'], ['spExtra','Any additional kit sponsors (e.g. goalkeeper-specific, away shirt only)','textarea',true]
+    ]],
+    ['Club contact', [
+      ['website','Club website','text'], ['mainEmail','Main contact email (e.g. info@)','email'],
+      ['phone','Main switchboard telephone','tel'], ['countyFA','County FA membership (e.g. Surrey FA)','text']
     ]]
   ];
+  function infoGroup(name) { return INFO_GROUPS.filter(function (g) { return g[0] === name; })[0]; }
   var INFO_KEYS = []; INFO_GROUPS.forEach(function (g) { g[1].forEach(function (f) { INFO_KEYS.push(f[0]); }); });
-  // Best-effort split of a one-line address into 1/2/town/county (editable, so rough is fine).
+  // Recognised UK counties — so the address splitter only promotes a part to
+  // "county" when it really is one (else it'd wrongly call the town a county).
+  var COUNTY_SET = new Set(['bedfordshire','berkshire','bristol','buckinghamshire','cambridgeshire','cambridgeshire and peterborough','cheshire','cornwall','cumbria','cumberland','westmorland and furness','derbyshire','devon','dorset','durham','county durham','east riding of yorkshire','east sussex','essex','gloucestershire','greater london','london','greater manchester','hampshire','herefordshire','hertfordshire','isle of wight','kent','lancashire','leicestershire','lincolnshire','greater lincolnshire','merseyside','norfolk','north yorkshire','northamptonshire','northumberland','nottinghamshire','oxfordshire','rutland','shropshire','somerset','south yorkshire','staffordshire','suffolk','surrey','tyne and wear','tees valley','warwickshire','west midlands','west sussex','west yorkshire','wiltshire','worcestershire','wales','cardiff','swansea','newport','wrexham','flintshire','denbighshire','conwy','gwynedd','anglesey','isle of anglesey','powys','ceredigion','pembrokeshire','carmarthenshire','monmouthshire','torfaen','blaenau gwent','caerphilly','merthyr tydfil','rhondda cynon taf','bridgend','neath port talbot','vale of glamorgan']);
+  // Split a one-line address into addr1/addr2/town/county/postcode. County is only
+  // set when a recognised county appears; otherwise the LAST part is the town (most
+  // on-file addresses are "Street, Town" with no county). Editable, so rough is fine.
   function splitAddress(addr) {
     var out = { addr1:'', addr2:'', town:'', county:'', postcode:'' };
     if (!addr) return out;
     var parts = addr.split(',').map(function (p) { return p.trim(); }).filter(Boolean);
     var pc = /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i;
     if (parts.length && pc.test(parts[parts.length - 1])) out.postcode = parts.pop();
+    for (var i = parts.length - 1; i >= 0; i--) { if (COUNTY_SET.has(parts[i].toLowerCase())) { out.county = parts.splice(i, 1)[0]; break; } }
     if (!parts.length) return out;
     if (parts.length === 1) { out.addr1 = parts[0]; return out; }
-    out.addr1 = parts.shift(); out.county = parts.pop();
-    if (parts.length) out.town = parts.pop();
+    out.addr1 = parts.shift();
+    out.town = parts.pop();
     out.addr2 = parts.join(', ');
     return out;
   }
@@ -524,7 +539,10 @@ firebase.initializeApp({
     return vals[0] + 'm x ' + vals[1] + 'm';
   }
   function buildInfoFromMeta(c) {
-    var info = {}, ap = splitAddress(c.address || '');
+    // Prefer structured address fields if clubs-meta has them; else split the one-liner.
+    var hasStruct = (c.addr1 != null || c.town != null || c.county != null);
+    var ap = hasStruct ? { addr1: c.addr1 || '', addr2: c.addr2 || '', town: c.town || '', county: c.county || '', postcode: '' } : splitAddress(c.address || '');
+    var info = {};
     info.stadium = c.stadium_name || ''; info.stadiumSponsor = c.stadium_sponsor_name || '';
     info.noSponsor = !!(c.stadium_name && !c.stadium_sponsor_name);
     info.addr1 = ap.addr1; info.addr2 = ap.addr2; info.town = ap.town; info.county = ap.county;
@@ -586,7 +604,7 @@ firebase.initializeApp({
   /* ---- Stepper (completion DERIVED from data) ---- */
   function isStepDone(step) {
     if (step.kind === 'you') return !!data.yourName && validEmail(data.yourEmail);
-    if (step.kind === 'info') return !!(data.info && (data.info.stadium || data.info.capacity || data.info.mainEmail));
+    if (step.kind === 'info') { var ig = infoGroup(step.group); return !!ig && ig[1].some(function (f) { return (data.info && data.info[f[0]] != null ? String(data.info[f[0]]) : '').trim(); }); }
     if (step.kind === 'inboxes') return Object.keys(data.inboxes).length > 0 || !!data.noInboxes;
     if (step.kind === 'depts') return step.sections.every(function (s) {
       return data.emptied[s] || data.people.some(function (p) { return hasRole(p, s); });
@@ -624,7 +642,7 @@ firebase.initializeApp({
           '<div><label>Your email</label><input type="email" id="f_yourEmail" value="' + esc(data.yourEmail) + '"><p class="ri-err">Please enter a valid email address.</p></div>' +
         '</div></div>';
     } else if (step.kind === 'info') {
-      renderInfoStep(host);
+      renderInfoStep(host, step.group);
     } else if (step.kind === 'inboxes') {
       host.innerHTML =
         '<h2 class="ri-stephead">Department inboxes</h2>' +
@@ -663,28 +681,27 @@ firebase.initializeApp({
     }
   }
 
-  /* ---- Club information step ---- */
-  function renderInfoStep(host) {
+  /* ---- Club information steps (one per group: Stadium / Sponsorship / Club contact) ---- */
+  function renderInfoStep(host, groupName) {
     var info = data.info || {};
+    var g = infoGroup(groupName);
     host.innerHTML =
-      '<h2 class="ri-stephead">Club information</h2>' +
+      '<h2 class="ri-stephead">' + esc(groupName) + '</h2>' +
       '<p class="ri-stepsub">Pre-filled with what the League currently holds — please check it and correct anything that’s wrong or out of date for 2026/27.</p>' +
-      INFO_GROUPS.map(function (g) {
-        return '<div class="ri-card"><h2>' + esc(g[0]) + '</h2><div class="ri-grid">' +
-          g[1].map(function (f) {
-            var key = f[0], label = f[1], type = f[2], full = f[3];
-            var val = info[key] != null ? info[key] : '';
-            var ctrl = (type === 'textarea')
-              ? '<textarea data-info="' + key + '">' + esc(val) + '</textarea>'
-              : '<input type="' + (type === 'number' ? 'number' : type === 'email' ? 'email' : type === 'tel' ? 'tel' : 'text') + '" data-info="' + key + '" value="' + esc(val) + '">' +
-                (type === 'email' ? '<p class="ri-err">Not a valid email address.</p>' : type === 'tel' ? '<p class="ri-err">Doesn’t look like a UK phone number.</p>' : '');
-            var extra = (key === 'stadiumSponsor')
-              ? '<label class="ri-check"><input type="checkbox" data-info-nosponsor' + (info.noSponsor ? ' checked' : '') + '> <span>No stadium naming-rights sponsor</span></label>'
-              : '';
-            return '<div' + (full ? ' class="full"' : '') + '><label>' + esc(label) + '</label>' + ctrl + extra + '</div>';
-          }).join('') +
-        '</div></div>';
-      }).join('');
+      '<div class="ri-card"><div class="ri-grid">' +
+        g[1].map(function (f) {
+          var key = f[0], label = f[1], type = f[2], full = f[3];
+          var val = info[key] != null ? info[key] : '';
+          var ctrl = (type === 'textarea')
+            ? '<textarea data-info="' + key + '">' + esc(val) + '</textarea>'
+            : '<input type="' + (type === 'number' ? 'number' : type === 'email' ? 'email' : type === 'tel' ? 'tel' : 'text') + '" data-info="' + key + '" value="' + esc(val) + '">' +
+              (type === 'email' ? '<p class="ri-err">Not a valid email address.</p>' : type === 'tel' ? '<p class="ri-err">Doesn’t look like a UK phone number.</p>' : '');
+          var extra = (key === 'stadiumSponsor')
+            ? '<label class="ri-check"><input type="checkbox" data-info-nosponsor' + (info.noSponsor ? ' checked' : '') + '> <span>No stadium naming-rights sponsor</span></label>'
+            : '';
+          return '<div' + (full ? ' class="full"' : '') + '><label>' + esc(label) + '</label>' + ctrl + extra + '</div>';
+        }).join('') +
+      '</div></div>';
     wireValidation(host);
   }
 
