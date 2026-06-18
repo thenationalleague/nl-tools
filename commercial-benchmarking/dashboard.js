@@ -179,10 +179,12 @@ window.CBDash = (function () {
       var icon = view === 'graph'
         ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="4" y1="20" x2="20" y2="20"/><line x1="4" y1="20" x2="4" y2="4"/><path d="M7 14l3-3 3 2 4-6"/></svg> Bars'
         : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="4" y="11" width="3.5" height="9"/><rect x="10.25" y="6" width="3.5" height="14"/><rect x="16.5" y="13" width="3.5" height="7"/></svg> Graph';
+      var roll = TERM_ROLL[key];
+      var rollPill = roll ? '<span class="posn roll">' + chipValue(roll) + '</span>' : '';
       return '<div class="card"><div class="vtoggle"><button data-card="' + key + '" data-next="' + nextView + '">' + icon + '</button></div>' +
         '<div class="lab">' + agg.label + '</div><div class="desc">' + agg.desc + '</div>' +
         '<div class="value-row"><span class="value">' + (provided ? fmt(own.value, agg.unit) : '—') + '</span>' +
-        '<span class="posn ' + b.cls + '">' + b.txt + '</span></div>' + body + '</div>';
+        '<span class="posn ' + b.cls + '">' + b.txt + '</span>' + rollPill + '</div>' + body + '</div>';
     }
 
     function render() {
@@ -214,15 +216,16 @@ window.CBDash = (function () {
     }
     // categorical fields, folded into the relevant metric group as cards
     var CHIP_DEFS = [
-      { kind: 'rollingFront', group: 'Shirt & kit sponsorship', label: 'Front-shirt deal' },
-      { kind: 'progFormat', group: 'Audience & reach', label: 'Programme format' },
-      { kind: 'emailSupporters', group: 'Audience & reach', label: 'Email supporters' },
-      { kind: 'emailPartners', group: 'Audience & reach', label: 'Email partner offers' }
+      { kind: 'emailSupporters', group: 'Email & audience', label: 'Email supporters' },
+      { kind: 'emailPartners', group: 'Email & audience', label: 'Email partner offers' },
+      { kind: 'progFormat', group: 'Programme', label: 'Programme format' }
     ];
+    // rolling/fixed shown as a tag on each shirt-slot's deal-length card
+    var TERM_ROLL = { frontTerm: 'rollingFront', backTerm: 'rollingBack', sleeveTerm: 'rollingSleeve' };
     function chipValue(kind) {
       var c = OWN.chips || {};
       var yn = function (x, on, off) { return x === 'Yes' ? on : (x ? off : '—'); };
-      if (kind === 'rollingFront') return yn(c.rollingFront, 'Rolling', 'Fixed term');
+      if (kind === 'rollingFront' || kind === 'rollingBack' || kind === 'rollingSleeve') return yn(c[kind], 'Rolling', 'Fixed term');
       if (kind === 'progFormat') return c.progFormat || '—';
       if (kind === 'emailSupporters') return yn(c.emailSupporters, 'Enabled', 'Not enabled');
       if (kind === 'emailPartners') return yn(c.emailPartners, 'Enabled', 'Not enabled');
@@ -273,21 +276,18 @@ window.CBDash = (function () {
         : Object.keys(dist).map(function (k) { return { label: k, count: dist[k] }; });
       var own = (ownStr || '').split('|').map(function (s) { return s.trim(); }).filter(Boolean);
       var entries = arr.slice().sort(function (a, b) { return b.count - a.count; });
-      var cmap = {}; entries.forEach(function (e) { cmap[e.label] = e.count; });
       var total = entries.reduce(function (a, e) { return a + e.count; }, 0);
       if (!total) return '';
-      var keep = {};
-      entries.slice(0, 7).forEach(function (e) { keep[e.label] = e.count; });
-      own.forEach(function (o) { if (cmap[o] != null) keep[o] = cmap[o]; });
-      var shown = Object.keys(keep).map(function (k) { return { label: k, count: keep[k] }; })
-        .sort(function (a, b) { return b.count - a.count; });
+      // top 8 by count; everything else (incl. one-off / odd sectors) -> Other,
+      // even if it's this club's own sector.
+      var shown = entries.slice(0, 8);
       var other = total - shown.reduce(function (a, e) { return a + e.count; }, 0);
       var segs = shown.slice();
       if (other > 0) segs.push({ label: 'Other', count: other, other: true });
       var r = 54, cx = 64, cy = 64, sw = 22, C = 2 * Math.PI * r, off = 0, pi = 0, arcs = '';
       segs.forEach(function (s) {
-        var len = s.count / total * C, isOwn = own.indexOf(s.label) >= 0;
-        s._c = isOwn ? 'var(--primary)' : (s.other ? 'var(--navy-100)' : SECTOR_PALETTE[pi++ % SECTOR_PALETTE.length]);
+        var len = s.count / total * C, isOwn = !s.other && own.indexOf(s.label) >= 0;
+        s._c = isOwn ? 'var(--primary)' : (s.other ? 'var(--navy-300)' : SECTOR_PALETTE[pi++ % SECTOR_PALETTE.length]);
         s._own = isOwn;
         arcs += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + s._c +
           '" stroke-width="' + (isOwn ? sw + 5 : sw) + '" stroke-dasharray="' + len.toFixed(2) + ' ' +

@@ -46,6 +46,8 @@ def make_token(club):
 CHIP_FIELDS = [
     ('progFormat', 'Programme format', 'Programme format'),
     ('rollingFront', 'Front Shirt — Rolling?', 'Front Shirt — Rolling?'),
+    ('rollingBack', 'Back Shirt — Rolling?', 'Back Shirt — Rolling?'),
+    ('rollingSleeve', 'Sleeve — Rolling?', 'Sleeve — Rolling?'),
     ('emailSupporters', 'Can email supporters?', 'Can email supporters?'),
     ('emailPartners', 'Can email on behalf of partners?', 'Can email on behalf of partners?'),
 ]
@@ -130,12 +132,16 @@ def build_metrics(H):
 
         dict(key='frontShirt', label='Front-of-shirt income', unit='£', group='Shirt & kit sponsorship',
              desc='Per season, excluding VAT', ext=col('Front Shirt — Income/season (£, ex-VAT)')),
-        dict(key='backShirt', label='Back-of-shirt income', unit='£', group='Shirt & kit sponsorship',
-             desc='Per season, excluding VAT', ext=col('Back Shirt — Income/season (£, ex-VAT)')),
-        dict(key='sleeve', label='Sleeve income', unit='£', group='Shirt & kit sponsorship',
-             desc='Per season, excluding VAT', ext=col('Sleeve — Income/season (£, ex-VAT)')),
         dict(key='frontTerm', label='Front-shirt deal length', unit=' yrs', group='Shirt & kit sponsorship',
              desc='Contract length in years', ext=col('Front Shirt — Contract Length')),
+        dict(key='backShirt', label='Back-of-shirt income', unit='£', group='Shirt & kit sponsorship',
+             desc='Per season, excluding VAT', ext=col('Back Shirt — Income/season (£, ex-VAT)')),
+        dict(key='backTerm', label='Back-shirt deal length', unit=' yrs', group='Shirt & kit sponsorship',
+             desc='Contract length in years', ext=col('Back Shirt — Contract Length')),
+        dict(key='sleeve', label='Sleeve income', unit='£', group='Shirt & kit sponsorship',
+             desc='Per season, excluding VAT', ext=col('Sleeve — Income/season (£, ex-VAT)')),
+        dict(key='sleeveTerm', label='Sleeve deal length', unit=' yrs', group='Shirt & kit sponsorship',
+             desc='Contract length in years', ext=col('Sleeve — Contract Length')),
 
         dict(key='standCount', label='Stand sponsors', unit='', group='Ground & stand advertising',
              desc='Number of stand/ground sponsors sold (0–4)', ext=stand_count),
@@ -151,11 +157,11 @@ def build_metrics(H):
         dict(key='seasonHosp', label='Seasonal hospitality', unit='£', group='Hospitality',
              desc='Highest-priced seasonal package', ext=col('Top seasonal hospitality (£)')),
 
-        dict(key='emailDb', label='Email database', unit='', group='Audience & reach',
+        dict(key='emailDb', label='Email database', unit='', group='Email & audience',
              desc='Total contactable supporter emails', ext=col('Total email database size')),
-        dict(key='optedIn', label='Opted-in to partner emails', unit='', group='Audience & reach',
+        dict(key='optedIn', label='Opted-in to partner emails', unit='', group='Email & audience',
              desc='Supporters opted in to partner emails', ext=col('Opted-in to partner emails')),
-        dict(key='progAd', label='Programme advert', unit='£', group='Audience & reach',
+        dict(key='progAd', label='Programme advert', unit='£', group='Programme',
              desc='Full-page seasonal advert', ext=col('Full-page programme advert/season (£)')),
     ]
 
