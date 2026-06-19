@@ -109,6 +109,25 @@ window.CBDash = (function () {
     return AGG;
   }
 
+  // Whether a club has actually submitted usable commercial data. Mirrors the
+  // Python has_data(): any metric other than standCount (which is always 0–4,
+  // never null) carries a value. Used to lock out the "no data submitted"
+  // cohort from their own dashboard.
+  function hasData(own) {
+    if (!own || !own.metrics) return false;
+    return Object.keys(own.metrics).some(function (k) {
+      return k !== 'standCount' && own.metrics[k] && own.metrics[k].value != null;
+    });
+  }
+
+  // Shown to a club whose data hasn't been submitted — they must request access.
+  var NO_DATA = {
+    title: 'Benchmarking not available yet',
+    body: 'Your club hasn’t submitted its commercial data yet, so there’s nothing to benchmark. ' +
+      'To get access, email <a href="mailto:commercial@thenationalleague.org.uk">commercial@thenationalleague.org.uk</a> ' +
+      'and the League’s commercial team will get you set up.'
+  };
+
   function mount(AGG, clubs, opts) {
     opts = opts || {};
     var OWN = clubs[0];
@@ -785,5 +804,5 @@ window.CBDash = (function () {
     renderAll();
   }
 
-  return { mount: mount, recompute: recompute };
+  return { mount: mount, recompute: recompute, hasData: hasData, NO_DATA: NO_DATA };
 })();
