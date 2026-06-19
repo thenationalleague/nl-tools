@@ -18,7 +18,7 @@ Usage:
 The links CSV (club, division, url) is the list of per-club dashboard links to
 send to clubs. Tokens are unguessable; treat the CSV as confidential.
 """
-import sys, os, json, secrets, csv, re, hmac, hashlib, base64
+import sys, os, json, secrets, csv, re, hmac, hashlib, base64, datetime
 import openpyxl
 
 SRC = sys.argv[1] if len(sys.argv) > 1 else 'Commercial_Benchmarking_Cleaned_v5.0.xlsx'
@@ -109,6 +109,24 @@ def parse_month(v):
     return ''
 
 
+# Tenure is measured to a FIXED reference — the end of the 2025/26 season
+# (June 2026) — not "today". This is a one-off seasonal analysis, so anchoring
+# it means the benchmark never drifts and re-imports stay consistent.
+TENURE_REF = (2026, 6)
+
+
+def tenure_years(iso):
+    """Years from a 'YYYY-MM'/'YYYY' start date to the fixed reference month."""
+    if not iso:
+        return None
+    m = re.match(r'^(\d{4})(?:-(\d{1,2}))?$', str(iso))
+    if not m:
+        return None
+    y = int(m.group(1)); mo = int(m.group(2)) if m.group(2) else 7
+    months = (TENURE_REF[0] * 12 + TENURE_REF[1]) - (y * 12 + mo)
+    return round(max(0, months) / 12.0, 1)
+
+
 def extract_stands(r, H):
     """Real stand sponsors only. A stand counts when it has a genuine sponsor
     name OR a positive income; blank / "0" / "vacant" slots (income 0 or empty)
@@ -179,6 +197,10 @@ def build_metrics(H):
         i = H[name]
         return lambda r: parse_money_text(r[i])
 
+    def tenure(prefix):
+        di = _find(H, prefix, 'commenc') or _find(H, prefix, 'start')
+        return lambda r: (tenure_years(parse_month(r[di])) if di is not None else None)
+
     def stand_count(r):
         return float(len(extract_stands(r, H)))
 
@@ -200,6 +222,8 @@ def build_metrics(H):
              desc='Income per season, excluding VAT', ext=col('Front Shirt — Income/season (£, ex-VAT)')),
         dict(key='frontTerm', label='Front-of-shirt deal length', unit=' yrs', group='Shirt & kit sponsorship',
              desc='Contract length in years', ext=col('Front Shirt — Contract Length')),
+        dict(key='fsTenure', label='Time with front-of-shirt sponsor', unit=' yrs', group='Shirt & kit sponsorship',
+             desc='Years the current front-of-shirt sponsor has been on board (to June 2026)', ext=tenure('front shirt')),
         dict(key='backShirt', label='Back-of-shirt sponsorship', unit='£', group='Shirt & kit sponsorship',
              desc='Income per season, excluding VAT', ext=col('Back Shirt — Income/season (£, ex-VAT)')),
         dict(key='backTerm', label='Back-of-shirt deal length', unit=' yrs', group='Shirt & kit sponsorship',
