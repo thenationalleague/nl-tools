@@ -16,8 +16,8 @@
  * Add to doPost router (Code.gs):
  *   if (action === 'pp_bootstrap')       return pp_bootstrap(body);
  *   if (action === 'pp_upload')          return pp_upload(body);
- *   if (action === 'pp_upload_init')     return pp_upload_init(body);
- *   if (action === 'pp_upload_finalize') return pp_upload_finalize(body);
+ *   if (action === 'pp_upload_begin')    return pp_upload_begin(body);
+ *   if (action === 'pp_upload_chunk')    return pp_upload_chunk(body);
  *   if (action === 'pp_download')        return pp_download(body);
  *   if (action === 'pp_preview')         return pp_preview(body);
  *   if (action === 'pp_list_folder')     return pp_list_folder(body);
@@ -48,11 +48,18 @@
 function pp_getChangelog() {
   return [
     {
+      version: 'v1.2',
+      date:    '19 June 2026',
+      changes: [
+        'Phase 2b (chunked upload, replaces the v1.1 direct-PUT approach). The v1.1 pp_upload_init/pp_upload_finalize had the browser PUT straight to the Drive resumable session — but Drive session URLs reject cross-origin browser PUTs (no CORS headers), so that path could never work from the page. Replaced with pp_upload_begin + pp_upload_chunk: the browser streams 8MB slices to GAS, which relays each to the resumable session server-side (no CORS in play) with the Content-Range header. Each chunk is its own call, so there is no single-request size or 6-minute limit. On the final chunk GAS writes the RTDB record. Files still land directly in the owner\'s Drive folder and are never shared.',
+        'Session state between chunks is held in CacheService (6h) keyed by an uploadId; only the user who began an upload may push its chunks.'
+      ]
+    },
+    {
       version: 'v1.1',
       date:    '19 June 2026',
       changes: [
-        'Phase 2 (resumable upload). New pp_upload_init + pp_upload_finalize let the browser upload files larger than the ~25MB base64 cap by PUTting straight to a Drive resumable session (minted by GAS with its own OAuth token), then registering the result in RTDB. finalize verifies the file actually landed in the target folder before writing metadata, so a forged finalize can\'t register an arbitrary file. Files land directly in the owner\'s Drive folder and are never shared — privacy is identical to the base64 path.',
-        'Extracted pp_resolveTargetFolderId_ and pp_canUploadTo_ helpers (shared by the resumable handlers; pp_upload\'s own inline copies left untouched).'
+        'Phase 2 (resumable upload, SUPERSEDED by v1.2). Added pp_upload_init + pp_upload_finalize for browser-direct PUT to a Drive resumable session. Withdrawn because Drive session URLs are not CORS-enabled for browser PUTs — see v1.2.'
       ]
     },
     {
@@ -435,27 +442,38 @@ function pp_upload(body) {
 
 
 /* ============================================================================
-   2b. RESUMABLE UPLOAD (Phase 2) — for files too big for base64-through-GAS
+   2b. CHUNKED UPLOAD (Phase 2b) — for files too big for base64-through-GAS
    ============================================================================
    pp_upload's base64 path is capped ~25MB (base64 inflation + GAS POST limit).
-   For larger files the browser uploads STRAIGHT TO DRIVE via a resumable
-   session that GAS mints with its own OAuth token, then calls finalize to
-   register the file in RTDB.
+   For larger files the browser streams the file to GAS in chunks, and GAS
+   relays each chunk to a Drive resumable session it drives server-side.
+
+   Why relayed through GAS (not browser->Drive directly): Drive's resumable
+   session URLs reject cross-origin PUTs from a browser (no CORS headers), so a
+   direct browser upload is impossible. Routing through GAS sidesteps CORS
+   entirely — browser<->GAS works, and GAS<->Google is server-to-server.
+   Because each chunk is its own GAS call, there is no single-request size or
+   6-minute limit; arbitrarily large files work.
 
    Flow:
-     1. pp_upload_init     — auth + permission, mint a Drive resumable session
-                             into the target folder, return its sessionUrl.
-     2. (browser) PUT the file bytes to sessionUrl (no token needed — the
-        session URL itself authorises the upload). Drive returns the file JSON.
-     3. pp_upload_finalize — verify the file is really in the target folder
-                             (guards against a forged finalize), write RTDB.
+     1. pp_upload_begin  — auth + permission, mint a Drive resumable session,
+                           stash it in CacheService under an uploadId, return it.
+     2. pp_upload_chunk  — (called per 8MB slice) decode the chunk and PUT it to
+                           the session with the resumable Content-Range header.
+                           Drive answers 308 until the last chunk, then 200/201;
+                           on completion GAS writes the RTDB record.
 
-   The file lands directly in the owner's Drive folder — it is NEVER shared,
-   so privacy is identical to the base64 path. Only the transport differs.
+   The file lands directly in the owner's Drive folder — it is NEVER shared, so
+   privacy is identical to the base64 path. Only the transport differs.
+
+   Chunk size must be a multiple of 256KB (Drive requirement) for every chunk
+   except the last. The client uses 8MB (= 32 x 256KB).
    ============================================================================ */
 
+var PP_UPLOAD_CHUNK = 8 * 1024 * 1024;   /* 8MB — advertised to the client */
+
 /* Resolve a (clubKey, folderKey) to its Drive folder ID. Shared by the
-   resumable handlers. Returns { ok, folderId } or { ok:false, error }. */
+   chunked handlers. Returns { ok, folderId } or { ok:false, error }. */
 function pp_resolveTargetFolderId_(clubKey, folderKey) {
   if (clubKey === '_nl-central') {
     var nlf = pp_read_(PP_DATA + '/nl-assets-folders/' + folderKey);
@@ -469,9 +487,9 @@ function pp_resolveTargetFolderId_(clubKey, folderKey) {
   return { ok: true, folderId: folderIds[folderKey] };
 }
 
-/* Permission check shared by pp_upload_init / pp_upload_finalize — mirrors
-   pp_upload: NL Assets is admin-only, club folders allow admins or own-club
-   reps (tolerates user.club being a display name vs slug). */
+/* Permission check shared by the chunked handlers — mirrors pp_upload: NL
+   Assets is admin-only, club folders allow admins or own-club reps (tolerates
+   user.club being a display name vs slug). */
 function pp_canUploadTo_(user, clubKey) {
   var isAdmin = (user.role === 'superadmin' || user.role === 'admin');
   if (clubKey === '_nl-central') {
@@ -482,15 +500,15 @@ function pp_canUploadTo_(user, clubKey) {
   return { ok: false, error: 'Not permitted to upload to ' + clubKey + ' (your club: ' + (user.club || 'none') + ')' };
 }
 
-/* Body: { idToken, clubKey, folderKey, filename, mimeType }
-   Returns: { ok, sessionUrl, folderId } */
-function pp_upload_init(body) {
+/* Body: { idToken, clubKey, folderKey, filename, mimeType, totalSize }
+   Returns: { ok, uploadId, chunkSize } */
+function pp_upload_begin(body) {
   var verified = pp_verifyToken_(body.idToken);
   if (!verified.ok) return respond({ ok: false, error: 'Auth failed: ' + verified.error });
   var user = verified.user;
 
-  if (!body.clubKey || !body.folderKey || !body.filename) {
-    return respond({ ok: false, error: 'Missing required fields: clubKey, folderKey, filename' });
+  if (!body.clubKey || !body.folderKey || !body.filename || !body.totalSize) {
+    return respond({ ok: false, error: 'Missing required fields: clubKey, folderKey, filename, totalSize' });
   }
   var perm = pp_canUploadTo_(user, body.clubKey);
   if (!perm.ok) return respond({ ok: false, error: perm.error });
@@ -499,6 +517,7 @@ function pp_upload_init(body) {
   if (!target.ok) return respond({ ok: false, error: target.error });
 
   /* Mint the resumable session with the script's own Drive OAuth token. */
+  var mime = body.mimeType || 'application/octet-stream';
   var meta = { name: body.filename, parents: [target.folderId] };
   var init = UrlFetchApp.fetch(
     'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true&fields=id',
@@ -507,7 +526,7 @@ function pp_upload_init(body) {
       contentType: 'application/json; charset=UTF-8',
       headers: {
         Authorization: 'Bearer ' + ScriptApp.getOAuthToken(),
-        'X-Upload-Content-Type': body.mimeType || 'application/octet-stream'
+        'X-Upload-Content-Type': mime
       },
       payload: JSON.stringify(meta),
       muteHttpExceptions: true
@@ -520,74 +539,128 @@ function pp_upload_init(body) {
   var sessionUrl = headers['Location'] || headers['location'];
   if (!sessionUrl) return respond({ ok: false, error: 'Drive returned no upload session URL' });
 
-  return respond({ ok: true, sessionUrl: sessionUrl, folderId: target.folderId });
+  /* Stash session state for the chunk calls. CacheService (6h) is plenty for an
+     in-progress upload; if evicted mid-flight the upload fails and the user
+     retries. Value is tiny (URLs + a few fields), well under the 100KB cap. */
+  var uploadId = pp_pushKey_();
+  var state = {
+    sessionUrl:     sessionUrl,
+    folderId:       target.folderId,
+    clubKey:        body.clubKey,
+    folderKey:      body.folderKey,
+    filename:       body.filename,
+    mimeType:       mime,
+    totalSize:      Number(body.totalSize),
+    description:    body.description || '',
+    uploadedBy:     user.uid,
+    uploadedByName: user.email
+  };
+  CacheService.getScriptCache().put('ppupl_' + uploadId, JSON.stringify(state), 21600);
+
+  return respond({ ok: true, uploadId: uploadId, chunkSize: PP_UPLOAD_CHUNK });
 }
 
-/* Body: { idToken, clubKey, folderKey, filename, mimeType, driveFileId, description }
-   Returns: { ok, fileId, driveFileId, size } */
-function pp_upload_finalize(body) {
+/* Body: { idToken, uploadId, offset, dataB64 }
+   Returns (mid-upload): { ok, done:false, received }
+   Returns (final chunk): { ok, done:true, fileId, driveFileId, size } */
+function pp_upload_chunk(body) {
   var verified = pp_verifyToken_(body.idToken);
   if (!verified.ok) return respond({ ok: false, error: 'Auth failed: ' + verified.error });
   var user = verified.user;
 
-  if (!body.driveFileId || !body.clubKey || !body.folderKey || !body.filename) {
-    return respond({ ok: false, error: 'Missing required fields: driveFileId, clubKey, folderKey, filename' });
-  }
-  var perm = pp_canUploadTo_(user, body.clubKey);
-  if (!perm.ok) return respond({ ok: false, error: perm.error });
-
-  var target = pp_resolveTargetFolderId_(body.clubKey, body.folderKey);
-  if (!target.ok) return respond({ ok: false, error: target.error });
-
-  /* Verify the uploaded file exists and really sits in the target folder.
-     Without this, a forged finalize could register an arbitrary Drive file. */
-  var driveFile;
-  try { driveFile = DriveApp.getFileById(body.driveFileId); }
-  catch (e) { return respond({ ok: false, error: 'Uploaded file not found: ' + e.message }); }
-
-  var inFolder = false;
-  var parents = driveFile.getParents();
-  while (parents.hasNext()) {
-    if (parents.next().getId() === target.folderId) { inFolder = true; break; }
-  }
-  if (!inFolder) {
-    return respond({ ok: false, error: 'Uploaded file is not in the expected folder — refusing to register it' });
+  if (!body.uploadId || body.offset == null || !body.dataB64) {
+    return respond({ ok: false, error: 'Missing required fields: uploadId, offset, dataB64' });
   }
 
-  var size = driveFile.getSize();
-  var mime = driveFile.getMimeType();
-  var fileId = pp_pushKey_();
-  var now = Date.now();
-  var meta = {
-    clubKey:        body.clubKey,
-    folderKey:      body.folderKey,
-    name:           body.filename,
-    size:           size,
-    mimeType:       mime,
-    type:           pp_typeFromMime_(mime),
-    driveFileId:    body.driveFileId,
-    uploadedBy:     user.uid,
-    uploadedByName: user.email,
-    uploadedAt:     now,
-    lastModifiedAt: now,
-    lastModifiedBy: user.uid,
-    description:    body.description || '',
-    isDeleted:      false,
-    uploadMethod:   'resumable'
-  };
-  try { pp_write_(PP_DATA + '/files/' + fileId, meta); }
-  catch (e) {
-    try { driveFile.setTrashed(true); } catch (ignore) {}
-    return respond({ ok: false, error: 'Metadata write failed (Drive file removed): ' + e.message });
+  var cache = CacheService.getScriptCache();
+  var raw = cache.get('ppupl_' + body.uploadId);
+  if (!raw) return respond({ ok: false, error: 'Upload session expired or unknown — please restart the upload' });
+  var state = JSON.parse(raw);
+
+  /* Only the user who began the upload may push chunks to it. */
+  if (state.uploadedBy !== user.uid) {
+    return respond({ ok: false, error: 'This upload belongs to another user' });
   }
 
-  pp_audit_('uploaded', {
-    userUid: user.uid, userName: user.email, fileId: fileId,
-    fileName: body.filename, clubKey: body.clubKey, folderKey: body.folderKey,
-    via: 'resumable', size: size
+  var bytes;
+  try { bytes = Utilities.base64Decode(body.dataB64); }
+  catch (e) { return respond({ ok: false, error: 'Base64 decode failed: ' + e.message }); }
+
+  var offset = Number(body.offset);
+  var total  = state.totalSize;
+  var end    = offset + bytes.length - 1;
+
+  /* PUT this slice to the resumable session. No Authorization header — the
+     session URL itself authorises. followRedirects:false so the 308 "Resume
+     Incomplete" comes back to us instead of being chased. */
+  var resp = UrlFetchApp.fetch(state.sessionUrl, {
+    method: 'put',
+    contentType: state.mimeType,
+    headers: { 'Content-Range': 'bytes ' + offset + '-' + end + '/' + total },
+    payload: bytes,
+    followRedirects: false,
+    muteHttpExceptions: true
   });
+  var code = resp.getResponseCode();
 
-  return respond({ ok: true, fileId: fileId, driveFileId: body.driveFileId, size: size });
+  if (code === 308) {
+    /* More to come. Drive's Range header reports bytes stored; fall back to end+1. */
+    return respond({ ok: true, done: false, received: end + 1 });
+  }
+
+  if (code === 200 || code === 201) {
+    /* Upload complete — Drive returns the file resource (fields=id). */
+    var fileMeta;
+    try { fileMeta = JSON.parse(resp.getContentText()); }
+    catch (e) { return respond({ ok: false, error: 'Upload finished but Drive response was unreadable: ' + e.message }); }
+    var driveFileId = fileMeta.id;
+    if (!driveFileId) return respond({ ok: false, error: 'Upload finished but Drive returned no file id' });
+
+    /* Authoritative size/mime from Drive; also re-confirms the file is real. */
+    var driveFile;
+    try { driveFile = DriveApp.getFileById(driveFileId); }
+    catch (e) { return respond({ ok: false, error: 'Uploaded file not found after completion: ' + e.message }); }
+
+    var size = driveFile.getSize();
+    var mime = driveFile.getMimeType();
+    var fileId = pp_pushKey_();
+    var now = Date.now();
+    var meta = {
+      clubKey:        state.clubKey,
+      folderKey:      state.folderKey,
+      name:           state.filename,
+      size:           size,
+      mimeType:       mime,
+      type:           pp_typeFromMime_(mime),
+      driveFileId:    driveFileId,
+      uploadedBy:     state.uploadedBy,
+      uploadedByName: state.uploadedByName,
+      uploadedAt:     now,
+      lastModifiedAt: now,
+      lastModifiedBy: state.uploadedBy,
+      description:    state.description || '',
+      isDeleted:      false,
+      uploadMethod:   'chunked'
+    };
+    try { pp_write_(PP_DATA + '/files/' + fileId, meta); }
+    catch (e) {
+      try { driveFile.setTrashed(true); } catch (ignore) {}
+      return respond({ ok: false, error: 'Metadata write failed (Drive file removed): ' + e.message });
+    }
+
+    cache.remove('ppupl_' + body.uploadId);
+
+    pp_audit_('uploaded', {
+      userUid: state.uploadedBy, userName: state.uploadedByName, fileId: fileId,
+      fileName: state.filename, clubKey: state.clubKey, folderKey: state.folderKey,
+      via: 'chunked', size: size
+    });
+
+    return respond({ ok: true, done: true, fileId: fileId, driveFileId: driveFileId, size: size });
+  }
+
+  /* Any other code is a real failure. */
+  return respond({ ok: false, error: 'Chunk upload failed (HTTP ' + code + '): ' + resp.getContentText() });
 }
 
 

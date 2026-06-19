@@ -1,6 +1,6 @@
 /**
  * NL Tools — Consolidated GAS
- * Version: v2.2 (19/06/2026)
+ * Version: v2.3 (19/06/2026)
  * Date: 19/06/2026
  *
  * This is the shared Apps Script ROUTER for the whole NL Tools backend — the
@@ -11,10 +11,15 @@
  * ProgrammePacks.gs is mirrored in this repo so far, under programme-packs/gas/).
  *
  * CHANGELOG
+ * v2.3 (19/06/2026)
+ *   - Programme Packs: swapped the Phase 2 upload routes — pp_upload_init/
+ *     pp_upload_finalize (browser-direct PUT, blocked by Drive's lack of CORS)
+ *     replaced by pp_upload_begin + pp_upload_chunk (chunked upload relayed
+ *     through GAS). Handlers in ProgrammePacks.gs v1.2.
+ *
  * v2.2 (19/06/2026)
  *   - Programme Packs: added pp_upload_init + pp_upload_finalize to the router
- *     (Phase 2 resumable upload — files over ~25MB upload straight to a Drive
- *     resumable session instead of base64-through-GAS). Handlers in
+ *     (Phase 2 resumable upload — superseded by v2.3). Handlers in
  *     ProgrammePacks.gs v1.1.
  *
  * v2.1 (19/06/2026)
@@ -184,8 +189,8 @@ function doPost(e) {
     /* Programme Packs */
     if (action === 'pp_bootstrap')         return pp_bootstrap(body);
     if (action === 'pp_upload')            return pp_upload(body);
-    if (action === 'pp_upload_init')       return pp_upload_init(body);
-    if (action === 'pp_upload_finalize')   return pp_upload_finalize(body);
+    if (action === 'pp_upload_begin')      return pp_upload_begin(body);
+    if (action === 'pp_upload_chunk')      return pp_upload_chunk(body);
     if (action === 'pp_download')          return pp_download(body);
     if (action === 'pp_preview')           return pp_preview(body);
     if (action === 'pp_list_folder')       return pp_list_folder(body);
