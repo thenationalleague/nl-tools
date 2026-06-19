@@ -19,9 +19,12 @@
  *   if (action === 'pp_upload_begin')    return pp_upload_begin(body);
  *   if (action === 'pp_upload_chunk')    return pp_upload_chunk(body);
  *   if (action === 'pp_download')        return pp_download(body);
+ *   if (action === 'pp_download_link')   return pp_download_link(body);
  *   if (action === 'pp_preview')         return pp_preview(body);
  *   if (action === 'pp_list_folder')     return pp_list_folder(body);
  *   (plus pp_thumbnails, pp_zip, pp_delete, pp_reconcile_folder, pp_nlf_* as before)
+ *   One-off from the editor: run pp_setupShareCleanupTrigger() once to install
+ *   the 15-min trigger that re-locks temp-shared download files.
  *
  * NOTE: This file uses the existing Utils.gs helpers respond(), rtdbRead() and
  * rtdbWrite() — but wraps the latter two in private pp_read_/pp_write_ helpers
@@ -47,6 +50,13 @@
  */
 function pp_getChangelog() {
   return [
+    {
+      version: 'v1.3',
+      date:    '19 June 2026',
+      changes: [
+        'Phase 3 (big-file download). New pp_download_link: for files too large for the base64 pp_download path, briefly sets the Drive file to ANYONE_WITH_LINK and returns a direct uc?export=download URL so the browser pulls bytes straight from Drive (none through GAS). pp_cleanupTempShares (15-min time trigger, installed via pp_setupShareCleanupTrigger) re-locks anything shared more than 15 min ago. Brief, unguessable, auto-revoked — same trade-off pp_zip already makes. Files under the client threshold keep the fully-private base64 path.'
+      ]
+    },
     {
       version: 'v1.2',
       date:    '19 June 2026',
@@ -710,6 +720,106 @@ function pp_download(body) {
     size: (meta && meta.size) || driveFile.getSize(),
     dataB64: b64
   });
+}
+
+
+/* ============================================================================
+   3b. BIG-FILE DOWNLOAD (Phase 3) — temp link-and-revoke
+   ============================================================================
+   pp_download base64-encodes the whole file through GAS, which fails for large
+   files (base64 inflation + GAS response/memory limits) — the same wall uploads
+   hit. For files over the client's threshold, the page asks for a temporary
+   direct-download link instead:
+
+     1. pp_download_link  — auth, briefly set the Drive file to ANYONE_WITH_LINK,
+                            record it under /shared-temp, return a direct
+                            uc?export=download URL. The browser downloads straight
+                            from Drive's CDN (no bytes through GAS).
+     2. pp_cleanupTempShares — a time-driven trigger re-locks (sets PRIVATE) any
+                            file shared more than ~15 min ago and clears the
+                            record. Install once via pp_setupShareCleanupTrigger().
+
+   The exposure is brief, via an unguessable URL, and auto-revoked — the same
+   trade-off pp_zip already makes for bulk downloads. Files under the threshold
+   never get shared (they keep the fully-private base64 path).
+   ============================================================================ */
+
+/* Body: { idToken, fileId | driveFileId }
+   Returns: { ok, downloadUrl, filename, driveFileId } */
+function pp_download_link(body) {
+  var verified = pp_verifyToken_(body.idToken);
+  if (!verified.ok) return respond({ ok: false, error: 'Auth failed: ' + verified.error });
+
+  var resolved = pp_resolveFile_(body);
+  if (!resolved.ok) return respond({ ok: false, error: resolved.error });
+  var driveFileId = resolved.driveFileId;
+  var meta = resolved.meta;
+
+  var file;
+  try { file = DriveApp.getFileById(driveFileId); }
+  catch (e) { return respond({ ok: false, error: 'Drive file access failed: ' + e.message }); }
+
+  /* Self-healing rename (same as pp_download) so the link serves the right name. */
+  var driveName = file.getName();
+  if (meta && meta._id && driveName && driveName !== meta.name) {
+    try {
+      pp_write_(PP_DATA + '/files/' + meta._id + '/name', driveName);
+      meta.name = driveName;
+    } catch (e) { /* swallow */ }
+  }
+
+  try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); }
+  catch (e) { return respond({ ok: false, error: 'Could not create download link: ' + e.message }); }
+
+  /* Record so the cleanup trigger can re-lock it even if the user vanishes. */
+  try {
+    pp_write_(PP_DATA + '/shared-temp/' + driveFileId, { sharedAt: Date.now(), by: verified.user.uid });
+  } catch (e) { /* non-fatal — trigger also re-locks anything ANYONE-shared it finds */ }
+
+  pp_audit_('download_link', {
+    userUid: verified.user.uid, userName: verified.user.email,
+    driveFileId: driveFileId, fileName: (meta && meta.name) || driveName
+  });
+
+  return respond({
+    ok: true,
+    downloadUrl: 'https://drive.google.com/uc?export=download&id=' + driveFileId + '&confirm=t',
+    filename: (meta && meta.name) || driveName,
+    driveFileId: driveFileId
+  });
+}
+
+/* Time-driven trigger: re-lock (set PRIVATE) any temp-shared file older than
+   ~15 minutes and clear its record. Install once via pp_setupShareCleanupTrigger(). */
+function pp_cleanupTempShares() {
+  try {
+    var shared = pp_read_(PP_DATA + '/shared-temp') || {};
+    var cutoff = Date.now() - (15 * 60 * 1000);
+    var revoked = 0;
+    Object.keys(shared).forEach(function(driveFileId) {
+      var rec = shared[driveFileId];
+      if (!rec) return;
+      if ((rec.sharedAt || 0) >= cutoff) return;   /* still inside the window */
+      try {
+        DriveApp.getFileById(driveFileId).setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE);
+        revoked++;
+      } catch (e) { /* file may be gone; clear the record anyway */ }
+      try { pp_write_(PP_DATA + '/shared-temp/' + driveFileId, null); } catch (e) { /* ignore */ }
+    });
+    if (revoked > 0) Logger.log('pp_cleanupTempShares: re-locked ' + revoked + ' file(s)');
+  } catch (e) {
+    Logger.log('pp_cleanupTempShares error: ' + e.message);
+  }
+}
+
+/* Run once from the GAS editor to install the 15-minute share-cleanup trigger. */
+function pp_setupShareCleanupTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(function(t) {
+    if (t.getHandlerFunction() === 'pp_cleanupTempShares') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('pp_cleanupTempShares').timeBased().everyMinutes(15).create();
+  Logger.log('pp_cleanupTempShares trigger installed (every 15 min)');
 }
 
 
