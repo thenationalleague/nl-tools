@@ -3,10 +3,17 @@
 <head>
 <!--
   NL Tools — Programme Packs
-  Version: 3.9
+  Version: 3.10
   Date: 19/06/2026
 
   CHANGELOG
+  v3.10 (19/06/2026)
+    - Phase 3 big-file download: files over 20MB now download via a temporary
+      direct Drive link (pp_download_link) instead of base64-through-GAS, which
+      choked past ~25MB. The link is brief, unguessable and auto-revoked by a
+      15-min GAS trigger; smaller files keep the fully-private base64 path.
+      Requires GAS ProgrammePacks.gs v1.3 + Code.gs v2.4, and a one-off
+      pp_setupShareCleanupTrigger() run in the editor to install the trigger.
   v3.9 (19/06/2026)
     - Phase 2b chunked upload (replaces v3.8's direct-to-Drive attempt, which
       Drive blocks via CORS). Files over 20MB now stream to GAS in 8MB slices
@@ -182,6 +189,13 @@
 
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
+    {
+      date:    '19 June 2026',
+      version: 'v3.10',
+      items: [
+        'Large files now download properly too — no more failures on big files.'
+      ]
+    },
     {
       date:    '19 June 2026',
       version: 'v3.9',
@@ -3708,11 +3722,18 @@ function ppBlobToBase64(blob) {
    DOWNLOAD
    ============================================================================ */
 
+/* Files at/above this download via a temporary direct Drive link (Phase 3);
+   smaller ones come back as base64 through GAS (fully private). Mirrors the
+   upload threshold. */
+var PP_DOWNLOAD_LINK_THRESHOLD = 20 * 1024 * 1024;   /* 20 MB */
+
 function ppDoDownload(fileId) {
   var meta = STATE.files[fileId];
   if (!meta) return;
-  NL.toast('Preparing download…', 'info');
 
+  if ((meta.size || 0) > PP_DOWNLOAD_LINK_THRESHOLD) { ppDownloadViaLink(fileId, meta); return; }
+
+  NL.toast('Preparing download…', 'info');
   ppCallGas({ action: 'pp_download', fileId: fileId })
     .then(function(result) {
       if (!result.ok) throw new Error(result.error || 'Download failed');
@@ -3722,6 +3743,33 @@ function ppDoDownload(fileId) {
         fileName:  meta.name,
         clubKey:   meta.clubKey,
         folderKey: meta.folderKey
+      });
+    })
+    .catch(function(err) {
+      NL.toast('Download failed: ' + err.message, 'error');
+    });
+}
+
+/* Big-file download: GAS briefly link-shares the Drive file and returns a direct
+   download URL; the browser pulls bytes straight from Drive. GAS re-locks the
+   file a few minutes later via the share-cleanup trigger. */
+function ppDownloadViaLink(fileId, meta) {
+  NL.toast('Preparing download…', 'info');
+  ppCallGas({ action: 'pp_download_link', fileId: fileId })
+    .then(function(result) {
+      if (!result.ok) throw new Error(result.error || 'Download failed');
+      var a = document.createElement('a');
+      a.href = result.downloadUrl;
+      a.download = result.filename || meta.name || '';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      ppAudit('downloaded', {
+        fileId:    fileId,
+        fileName:  meta.name,
+        clubKey:   meta.clubKey,
+        folderKey: meta.folderKey,
+        via:       'link'
       });
     })
     .catch(function(err) {
