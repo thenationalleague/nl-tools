@@ -707,6 +707,7 @@ window.CBDash = (function () {
       return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     }
     function linkUrl(tok) { return new URL('link.html?t=' + tok, location.href).href; }
+    function proofUrl(tok) { return linkUrl(tok) + '&mode=verify'; }
     function linkNote(t) { var el = $('cb-linknote'); if (el) el.textContent = t || ''; }
     function genOne(club) {
       var c = clubByName[club]; if (!c || !opts.writeLink) return;
@@ -725,26 +726,36 @@ window.CBDash = (function () {
     }
     function renderLinks() {
       var tb = opts.tokenByClub || {};
+      function cellLink(word, url) {
+        return '<a class="cb-linkword" href="' + url + '" target="_blank" rel="noopener">' + word + '</a>' +
+          '<button class="cb-copy" type="button" data-copy="' + url + '">Copy</button>';
+      }
       var rows = clubs.map(function (c) {
         var tok = tb[c.club];
-        var cell = tok
-          ? '<input class="cb-shareurl" readonly value="' + linkUrl(tok) + '"><button class="cb-copy" type="button" data-copy="' + tok + '">Copy</button>'
-          : '<button class="cb-edit-btn" type="button" data-gen="' + c.club.replace(/"/g, '&quot;') + '">Generate</button>';
-        return '<tr><td>' + c.club + '</td><td>' + c.division + '</td><td class="cb-linkcell">' + cell + '</td></tr>';
+        var nameCell = c.club + (c._noData ? ' <span class="cb-nodata">(no data yet)</span>' : '');
+        var proof, bench;
+        if (tok) {
+          proof = '<td class="cb-linkcell">' + cellLink('Proof', proofUrl(tok)) + '</td>';
+          bench = '<td class="cb-linkcell">' + cellLink('Benchmarked', linkUrl(tok)) + '</td>';
+        } else {
+          proof = '<td class="cb-linkcell" colspan="2"><button class="cb-edit-btn" type="button" data-gen="' + c.club.replace(/"/g, '&quot;') + '">Generate links</button></td>';
+          bench = '';
+        }
+        return '<tr><td>' + nameCell + '</td><td>' + c.division + '</td>' + proof + bench + '</tr>';
       }).join('');
       var have = clubs.filter(function (c) { return tb[c.club]; }).length;
       $('sections').innerHTML = '<div class="cb-edit-actions">' +
         '<button id="cb-genall" class="cb-edit-btn" type="button">Generate all missing</button>' +
         '<button id="cb-linkdone" class="cb-cancel" type="button">Done</button>' +
-        '<span id="cb-linknote">' + have + ' of ' + clubs.length + ' clubs have a link. Links are private — share each only with that club.</span></div>' +
-        '<table class="cb-linktable"><thead><tr><th>Club</th><th>Division</th><th>Private link (no login)</th></tr></thead><tbody>' + rows + '</tbody></table>';
+        '<span id="cb-linknote">' + have + ' of ' + clubs.length + ' clubs have links. <b>Proof</b> = the club checks its own data; <b>Benchmarked</b> = the full comparison. Share each privately with that club only.</span></div>' +
+        '<table class="cb-linktable"><thead><tr><th>Club</th><th>Division</th><th>Proof</th><th>Benchmarked</th></tr></thead><tbody>' + rows + '</tbody></table>';
       $('cb-linkdone').onclick = function () { $('sections').onclick = null; render(); };
       $('cb-genall').onclick = genMissing;
       $('sections').onclick = function (e) {
         var b = e.target.closest('button'); if (!b) return;
         if (b.getAttribute('data-copy')) {
-          var inp = b.previousElementSibling;
-          if (navigator.clipboard) navigator.clipboard.writeText(inp.value); else { inp.select(); document.execCommand('copy'); }
+          var url = b.getAttribute('data-copy');
+          if (navigator.clipboard) navigator.clipboard.writeText(url);
           b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1200);
         } else if (b.getAttribute('data-gen')) { genOne(b.getAttribute('data-gen')); }
       };
