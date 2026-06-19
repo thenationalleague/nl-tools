@@ -18,19 +18,28 @@ The input JSON can be any of:
 Export it from the Firebase console: open the node, ⋮ → Export JSON.
 
 Usage:
-    python scripts/build-qa-workbook.py <data.json> [out.xlsx]
+    python scripts/build-qa-workbook.py <data.json> [out.xlsx] [survey.xlsx]
+
+If the raw SurveyMonkey export is passed as a third argument, each duplicated
+club's IGNORED submissions are added beneath its kept row, struck through, so
+it's visible which returns were superseded.
 
 NOTHING here is committed — the workbook contains club-identifiable figures.
 Treat the output as confidential.
 """
-import sys, json
+import sys, json, re, datetime
 import statistics as st
+import openpyxl
 from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-SRC = sys.argv[1] if len(sys.argv) > 1 else 'commercial-benchmarking-rtdb-import.json'
-OUT = sys.argv[2] if len(sys.argv) > 2 else 'commercial-benchmarking-QA.xlsx'
+_args = sys.argv[1:]
+_json = [a for a in _args if a.endswith('.json')]
+_xlsx = [a for a in _args if a.endswith('.xlsx')]
+SRC = _json[0] if _json else 'commercial-benchmarking-rtdb-import.json'
+OUT = _xlsx[0] if _xlsx else 'commercial-benchmarking-QA.xlsx'
+SURVEY = _xlsx[1] if len(_xlsx) > 1 else None
 
 # (metric key, column header, numeric?, flag-outliers?)
 METRICS = [
@@ -159,8 +168,8 @@ def main():
 
     # ---- outlier fences per numeric metric (robust: IQR*3 and 6x median) ----
     fences = {}
-    for key, _h, num, flag in METRICS:
-        if not (num and flag):
+    for key, _h, _isnum, flag in METRICS:
+        if not (_isnum and flag):
             continue
         vals = sorted(v for v in (mval(c, key) for c in clubs) if isnum(v))
         if len(vals) < 4:
@@ -217,6 +226,79 @@ def main():
     def has_data(c):
         return any(k != 'standCount' and isnum(mval(c, k)) for k, *_ in METRICS)
 
+    # ---- ignored duplicate survey submissions (optional) ----
+    # {norm club: [pseudo-record, ...]} for submissions that were NOT the one kept.
+    discards = {}
+    if SURVEY:
+        S_NUM = {'msTicket': 249, 'seasonTicket': 250, 'frontShirt': 109, 'backShirt': 131, 'sleeve': 153,
+                 'tvBoard': 240, 'nonTvBoard': 242, 'mdHosp': 251, 'seasonHosp': 260, 'progAd': 248,
+                 'emailDb': 276, 'optedIn': 277}
+        S_TERM = {'frontTerm': 108, 'backTerm': 130, 'sleeveTerm': 152}
+        S_NAME = {'fsSponsor': 89, 'bsSponsor': 111, 'slSponsor': 133}
+        S_STAND = [(155, 175), (176, 196), (197, 217), (218, 238)]
+        S_MATCH = ['frontShirt', 'msTicket', 'seasonTicket', 'emailDb', 'backShirt', 'sleeve']
+
+        def numv(v):
+            return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+        def clubof(r):
+            for ci in range(11, 82):
+                if r[ci] not in (None, ''):
+                    return str(r[ci]).strip()
+            return None
+
+        def to_record(r, club, division):
+            rec = {'club': club, 'division': division, 'metrics': {}, 'chips': {}}
+            for k, ci in S_NUM.items():
+                rec['metrics'][k] = {'value': numv(r[ci])}
+            for k, ci in S_TERM.items():
+                rec['metrics'][k] = {'value': r[ci]}   # raw text ("One year", etc.)
+            for k, ci in S_NAME.items():
+                rec[k] = str(r[ci]).strip() if r[ci] not in (None, '') else ''
+            stands = []
+            for ncol, icol in S_STAND:
+                nm = r[ncol]; inc = numv(r[icol])
+                if (nm not in (None, '')) or inc is not None:
+                    stands.append({'name': str(nm).strip() if nm not in (None, '') else '—', 'sector': '', 'income': r[icol]})
+            rec['stands'] = stands
+            rec['metrics']['standCount'] = {'value': float(len(stands))}
+            return rec
+
+        def completeness(rec):
+            n = sum(1 for k in list(S_NUM) + list(S_TERM) if rec['metrics'].get(k, {}).get('value') not in (None, ''))
+            n += sum(1 for k in S_NAME if rec.get(k))
+            return n + len(rec.get('stands', []))
+
+        def score(rec, live):
+            s = 0
+            for k in S_MATCH:
+                a, b = rec['metrics'].get(k, {}).get('value'), mval(live, k)
+                if isnum(a) and isnum(b) and abs(a - b) < 0.5:
+                    s += 1
+            if rec.get('fsSponsor') and norm(rec['fsSponsor']) == norm(live.get('fsSponsor')):
+                s += 1
+            return s
+
+        ws_s = openpyxl.load_workbook(SURVEY, data_only=True).active
+        rows = list(ws_s.iter_rows(values_only=True))[2:]
+        live_by = {norm(c.get('club', '')): c for c in clubs}
+        subs = {}
+        for r in rows:
+            cl = clubof(r)
+            if cl:
+                subs.setdefault(norm(cl), {'name': cl, 'rows': []})['rows'].append(r)
+        for key, g in subs.items():
+            if len(g['rows']) < 2:
+                continue
+            live = live_by.get(key, {})
+            recs = [to_record(r, g['name'], live.get('division', '')) for r in g['rows']]
+            kept = max(range(len(recs)), key=lambda i: score(recs[i], live)) if live else 0
+            ignored = [recs[i] for i in range(len(recs)) if i != kept and completeness(recs[i]) >= 3]
+            if ignored:
+                discards[key] = ignored
+
+    STRIKE = Font(strike=True, color='9A9A9A')
+
     wb = Workbook()
 
     # ================= sheet 1: All clubs =================
@@ -236,36 +318,47 @@ def main():
     cols += ['Outlier flags', 'Data-quality flags']
     ws.append(cols)
 
+    def base_cells(rec):
+        cells = []
+        for key, _h, _n, _f in METRICS:
+            cells.append(money(mval(rec, key)))
+        for k, _h in SPON:
+            cells.append(rec.get(k, '') or '')
+        sts = rec.get('stands') or []
+        for i in range(4):
+            sd = sts[i] if i < len(sts) else {}
+            nm = sd.get('name', '') if isinstance(sd, dict) else ''
+            cells += [('' if nm == '—' else nm), sd.get('sector', '') if isinstance(sd, dict) else '',
+                      money(sd.get('income')) if isinstance(sd, dict) else '']
+        ch = rec.get('chips') or {}
+        for k, _h in CHIPS:
+            cells.append(ch.get(k, '') or '')
+        return cells
+
     for c in clubs:
         club = c.get('club', '')
-        row = [club, c.get('division', ''), 'OK' if has_data(c) else 'NO DATA SUBMITTED']
-        for key, _h, _n, _f in METRICS:
-            row.append(money(mval(c, key)))
-        for k, _h in SPON:
-            row.append(c.get(k, '') or '')
-        stands = c.get('stands') or []
-        for i in range(4):
-            sd = stands[i] if i < len(stands) else {}
-            nm = sd.get('name', '') if isinstance(sd, dict) else ''
-            row += [('' if nm == '—' else nm), sd.get('sector', '') if isinstance(sd, dict) else '',
-                    money(sd.get('income')) if isinstance(sd, dict) else '']
-        ch = c.get('chips') or {}
-        for k, _h in CHIPS:
-            row.append(ch.get(k, '') or '')
         outs = outliers_for(c)
         notes = '; '.join('%s %s (%s× median)' % (HDR[k], money(v), round(r, 1) if r else '?')
                           for k, v, _med, r in outs)
-        row.append(notes)
         qf = quality_flags(c)
-        row.append('; '.join('%s — %s' % (t, d) for t, d in qf))
+        row = [club, c.get('division', ''), 'OK' if has_data(c) else 'NO DATA SUBMITTED'] + base_cells(c) \
+            + [notes, '; '.join('%s — %s' % (t, d) for t, d in qf)]
         ws.append(row)
-
         r = ws.max_row
         if qf:
             for ci in range(1, len(cols) + 1):
                 ws.cell(r, ci).fill = RED
         for k, _v, _med, _ratio in outs:
             ws.cell(r, metric_cols[k] + 1).fill = AMBER
+
+        # ignored duplicate submissions, struck through beneath the kept row
+        for drec in discards.get(norm(club), []):
+            drow = [club, c.get('division', ''), 'IGNORED — duplicate submission'] + base_cells(drec) \
+                + ['', 'Superseded by the kept submission above — shown for reference']
+            ws.append(drow)
+            rr = ws.max_row
+            for ci in range(1, len(cols) + 1):
+                ws.cell(rr, ci).font = STRIKE
 
     # ================= sheet 2: Outliers =================
     wo = wb.create_sheet('Outliers')
