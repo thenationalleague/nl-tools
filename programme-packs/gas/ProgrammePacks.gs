@@ -51,6 +51,14 @@
 function pp_getChangelog() {
   return [
     {
+      version: 'v1.4',
+      date:    '19 June 2026',
+      changes: [
+        'pp_list_folder now also returns driveFolderId — powers an admin/superadmin "Open in Drive" button in the folder view so they can jump straight to the underlying Drive folder to investigate.',
+        'PERF: pp_list_folder no longer reads the entire /files RTDB tree on every folder-open. That enrichment (uploader/description) was unused by the page (it renders detail from STATE.files), and on a large library that read was the bulk of the open latency. It now returns just the Drive listing.'
+      ]
+    },
+    {
       version: 'v1.3',
       date:    '19 June 2026',
       changes: [
@@ -1420,17 +1428,15 @@ function pp_reconcile_folder(body) {
    DriveApp.getFiles()), a file removed from Drive simply isn't returned — there
    is no "ghost" to clean up, no reconcile to run.
 
-   We still read /files once to ENRICH each Drive file with the two things Drive
-   doesn't track natively — uploader name and description — and to hand back the
-   RTDB push-key (rtdbId) when one exists, so existing download/delete/preview
-   calls keep working unchanged. Files in Drive with no /files record (dropped
-   straight into Drive) come back with rtdbId:null; the page acts on them by
-   driveFileId (see the driveFileId branches in pp_download/pp_preview/pp_delete).
+   We return only the Drive listing — NOT a join against the /files tree. The
+   page just needs the set of Drive ids present (to hide ghosts) plus the folder
+   id; it renders per-row detail (uploader/description) from the records it
+   already holds in STATE.files. Reading all of /files here on every open was
+   the bulk of the latency, so it's gone.
 
    Body: { idToken, clubKey, folderKey }   (clubKey '_nl-central' => NL Assets)
-   Returns: { ok, clubKey, folderKey, files: [ {
-       driveFileId, rtdbId|null, name, mimeType, type, size,
-       modifiedTime, uploadedAt, uploadedByName, description } ] }
+   Returns: { ok, clubKey, folderKey, driveFolderId, files: [ {
+       driveFileId, name, mimeType, type, size, modifiedTime } ] }
    Permission: any authenticated user (read), matching pp_download. */
 function pp_list_folder(body) {
   var verified = pp_verifyToken_(body.idToken);
@@ -1462,43 +1468,27 @@ function pp_list_folder(body) {
   try { driveFolder = DriveApp.getFolderById(driveFolderId); }
   catch (e) { return respond({ ok: false, error: 'Drive folder access failed: ' + e.message }); }
 
-  /* Build a driveFileId -> RTDB-metadata index for enrichment. One read. */
-  var allFiles = pp_read_(PP_DATA + '/files') || {};
-  var byDriveId = {};
-  Object.keys(allFiles).forEach(function(fid) {
-    var m = allFiles[fid];
-    if (!m || m.isDeleted || !m.driveFileId) return;
-    byDriveId[m.driveFileId] = {
-      rtdbId:         fid,
-      uploadedByName: m.uploadedByName || '',
-      description:    m.description || '',
-      uploadedAt:     m.uploadedAt || 0
-    };
-  });
-
-  /* DriveApp.getFiles() returns only non-trashed files — the whole point. */
+  /* DriveApp.getFiles() returns only non-trashed files — the whole point.
+     We deliberately do NOT read the (potentially huge) /files tree here: the
+     page only needs the set of Drive ids present (to hide ghosts) and renders
+     row detail from the records it already holds in STATE.files. Reading all of
+     /files on every folder-open was the bulk of the latency. */
   var out = [];
   var iter = driveFolder.getFiles();
   while (iter.hasNext()) {
     var f = iter.next();
-    var driveId = f.getId();
     var mime = f.getMimeType();
-    var meta = byDriveId[driveId] || {};
     out.push({
-      driveFileId:    driveId,
-      rtdbId:         meta.rtdbId || null,
-      name:           f.getName(),
-      mimeType:       mime,
-      type:           pp_typeFromMime_(mime),
-      size:           f.getSize(),
-      modifiedTime:   f.getLastUpdated().getTime(),
-      uploadedAt:     meta.uploadedAt || f.getDateCreated().getTime(),
-      uploadedByName: meta.uploadedByName || '',
-      description:    meta.description || ''
+      driveFileId:  f.getId(),
+      name:         f.getName(),
+      mimeType:     mime,
+      type:         pp_typeFromMime_(mime),
+      size:         f.getSize(),
+      modifiedTime: f.getLastUpdated().getTime()
     });
   }
 
-  return respond({ ok: true, clubKey: clubKey, folderKey: folderKey, files: out });
+  return respond({ ok: true, clubKey: clubKey, folderKey: folderKey, driveFolderId: driveFolderId, files: out });
 }
 
 
