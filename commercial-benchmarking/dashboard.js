@@ -282,7 +282,7 @@ window.CBDash = (function () {
     function cleanSpon(v) {
       if (v == null) return '';
       var s = String(v).trim();
-      return /^(0|-|–|—|n\/?a|none|nil|tbc|n\.?a\.?)$/i.test(s) ? '' : s;
+      return /^(0|-|–|—|n\/?a|none|nil|tbc|tbd|n\.?a\.?|vacant)$/i.test(s) ? '' : s;
     }
     function shirtSlotCard(sl) {
       var spon = cleanSpon(OWN[sl.sponKey]);
@@ -649,8 +649,12 @@ window.CBDash = (function () {
         var sec = readSector('stand' + i) || '';
         var incRaw = incEl ? incEl.value.trim() : '';
         var inc = incRaw === '' ? null : Number(incRaw);
-        if (nm || inc != null) stands.push({ name: nm || '—', sector: sec, income: inc });
-        if (sec) standSecs.push(sec);
+        // A real stand needs a genuine sponsor name OR positive income; blank /
+        // "0" / vacant slots are dropped entirely so they never inflate the count.
+        if (nm || (inc != null && inc > 0)) {
+          stands.push({ name: nm || '—', sector: sec, income: inc });
+          if (sec) standSecs.push(sec);
+        }
       }
       OWN.stands = stands;
       OWN.standSectors = standSecs.join(' | ');

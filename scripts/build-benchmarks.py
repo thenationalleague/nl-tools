@@ -64,17 +64,34 @@ def num(v):
     return v if isinstance(v, (int, float)) else None
 
 
-_JUNK_NAME = re.compile(r'^(0|-|–|—|n/?a|none|nil|tbc|n\.?a\.?)$', re.I)
+_JUNK_NAME = re.compile(r'^(0|-|–|—|n/?a|none|nil|tbc|tbd|n\.?a\.?|vacant)$', re.I)
 
 
 def clean_name(v):
-    """Sponsor-name fields sometimes carry placeholders ('0', '-', 'n/a') that
-    actually mean 'no sponsor'. Hard-wipe those to empty at source so the
-    dashboard shows 'No sponsor named' rather than the junk token."""
+    """Sponsor-name fields sometimes carry placeholders ('0', '-', 'n/a',
+    'vacant') that actually mean 'no sponsor'. Hard-wipe those to empty at
+    source so the dashboard shows 'No sponsor named' rather than the junk."""
     if v is None:
         return ''
     s = str(v).strip()
     return '' if _JUNK_NAME.match(s) else s
+
+
+def extract_stands(r, H):
+    """Real stand sponsors only. A stand counts when it has a genuine sponsor
+    name OR a positive income; blank / "0" / "vacant" slots (income 0 or empty)
+    are dropped entirely — they are NOT a stand, so they must not inflate the
+    stand count or drag down the average. Returns a list of {name, sector,
+    income} for the real stands."""
+    out = []
+    for s in (1, 2, 3, 4):
+        nm = clean_name(r[H['Stand %d — Sponsor Name' % s]])
+        inc = num(r[H['Stand %d — Income/season (£, ex-VAT)' % s]])
+        sec = r[H['Stand %d — Sector' % s]]
+        sec = str(sec).strip() if sec is not None else ''
+        if nm or (inc is not None and inc > 0):
+            out.append({'name': nm or '—', 'sector': sec, 'income': inc})
+    return out
 
 
 def parse_money_text(v):
@@ -128,21 +145,12 @@ def build_metrics(H):
         i = H[name]
         return lambda r: parse_money_text(r[i])
 
-    stand_i = [H['Stand %d — Income/season (£, ex-VAT)' % s] for s in (1, 2, 3, 4)]
-    stand_name_i = [H['Stand %d — Sponsor Name' % s] for s in (1, 2, 3, 4)]
+    def stand_count(r):
+        return float(len(extract_stands(r, H)))
 
     def stand_total(r):
-        vs = [num(r[i]) for i in stand_i]
-        vs = [x for x in vs if x is not None]
+        vs = [st['income'] for st in extract_stands(r, H) if st['income'] is not None]
         return float(sum(vs)) if vs else None
-
-    def stand_count(r):
-        n = 0
-        for ni, ii in zip(stand_name_i, stand_i):
-            nm = r[ni]
-            if (nm is not None and str(nm).strip() != '') or isinstance(r[ii], (int, float)):
-                n += 1
-        return float(n)
 
     def stand_avg(r):
         t = stand_total(r); c = stand_count(r)
@@ -296,16 +304,9 @@ def main():
                 s2 = [x for x in (m['ext'](rr) for rr in data if rr[1] in ('North', 'South')) if x is not None]
                 entry['step2Pct'] = pct_of(s2, v)
             metrics[m['key']] = entry
-        # per-club stand sponsor list + combined stand sectors
-        stands = []; stand_secs = []
-        for s in (1, 2, 3, 4):
-            nm = clean_name(r[H['Stand %d — Sponsor Name' % s]])
-            sec = r[H['Stand %d — Sector' % s]]; sec = str(sec).strip() if sec not in (None,) else ''
-            inc = num(r[H['Stand %d — Income/season (£, ex-VAT)' % s]])
-            if nm or inc is not None:
-                stands.append({'name': nm or '—', 'sector': sec, 'income': inc})
-            if sec:
-                stand_secs.append(sec)
+        # per-club stand sponsor list + combined stand sectors (real stands only)
+        stands = extract_stands(r, H)
+        stand_secs = [st['sector'] for st in stands if st['sector']]
         # extra fields beyond the original payload (additive — included in patch)
         extra = {
             'bsSponsor': clean_name(r[H['Back Shirt — Sponsor Name']]),
