@@ -367,6 +367,7 @@ window.CBDash = (function () {
         ? st.map(function (s) {
           return '<div class="cb-standrow"><span class="cb-standname">' + (s.name || '—') + '</span>' +
             '<span class="cb-standsec">' + secLabel(s.sector) + '</span>' +
+            '<span class="cb-standstart">' + (monthYear(s.start) || '') + '</span>' +
             '<span class="cb-standinc">' + (s.income != null ? fmt(s.income, '£') : '—') + '</span></div>';
         }).join('')
         : '<div class="cb-standnone">No stand sponsors recorded.</div>';
