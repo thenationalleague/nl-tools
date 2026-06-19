@@ -138,15 +138,17 @@ window.CBDash = (function () {
 
     function fmt(v, u) {
       if (v == null) return '—';
-      var s = Math.round(v).toLocaleString('en-GB');
-      return u === '£' ? '£' + s : (u ? s + u : s);
+      if (u === '£') return '£' + Math.round(v).toLocaleString('en-GB');
+      var n = (Math.abs(v - Math.round(v)) > 1e-9) ? Number(v.toFixed(1)) : Math.round(v);
+      var s = n.toLocaleString('en-GB');
+      return u ? s + u : s;
     }
     function fmtShort(v, u) {
       if (v == null) return '—';
       var s, a = Math.abs(v);
       if (a >= 1e6) s = (v / 1e6).toFixed(v % 1e6 ? 1 : 0) + 'm';
       else if (a >= 1000) s = (v / 1000).toFixed(v % 1000 ? 1 : 0) + 'k';
-      else s = Math.round(v).toString();
+      else s = (Math.abs(v - Math.round(v)) > 1e-9) ? v.toFixed(1) : Math.round(v).toString();
       return (u === '£' ? '£' : '') + s + (u && u !== '£' ? u : '');
     }
     function band(pct) {
@@ -303,8 +305,11 @@ window.CBDash = (function () {
       // dates live with Deal length, not under the sponsor pill
       var dealCell = '<div class="cb-slot-deal">' + metricBody(sl.termKey, 'Deal length') + tenure + '</div>';
       var metrics = '<div class="cb-slot-metrics">' + metricBody(sl.incomeKey, 'Income') + dealCell + '</div>';
+      // headline-only: benchmark how long the current sponsor has been on board
+      var tenureMetric = (sl.tenureKey && AGG.aggregates[sl.tenureKey])
+        ? '<div class="cb-slot-full">' + metricBody(sl.tenureKey, 'Time with current sponsor') + '</div>' : '';
       var donut = (sl.dist && sl.dist.length) ? donutBlock('Sector mix', sl.dist, sl.ownSec, sl.noun) : '';
-      return '<div class="card cb-slotcard">' + head + metrics + donut + '</div>';
+      return '<div class="card cb-slotcard">' + head + metrics + tenureMetric + donut + '</div>';
     }
 
     // fixed display order; 'Sponsor sectors' (the donuts) sits after the shirt group
@@ -312,7 +317,7 @@ window.CBDash = (function () {
       'Ticketing', 'Hospitality', 'Programme', 'Email & audience'];
     // explicit metric order within groups — RTDB returns object keys
     // alphabetically, so we can't rely on key order (front before back, etc.)
-    var METRIC_ORDER = ['msTicket', 'seasonTicket', 'frontShirt', 'frontTerm', 'backShirt', 'backTerm',
+    var METRIC_ORDER = ['msTicket', 'seasonTicket', 'frontShirt', 'frontTerm', 'fsTenure', 'backShirt', 'backTerm',
       'sleeve', 'sleeveTerm', 'standCount', 'standTotal', 'standAvg', 'tvBoard', 'nonTvBoard',
       'mdHosp', 'seasonHosp', 'progAd', 'emailDb', 'optedIn'];
     function render() {
@@ -338,7 +343,7 @@ window.CBDash = (function () {
       function shirtSectionHtml() {
         var S = AGG.sectors || {};
         var slots = [
-          { kind: 'Front-of-shirt sponsorship', incomeKey: 'frontShirt', termKey: 'frontTerm', sponKey: 'fsSponsor', startKey: 'fsStart', rollKey: 'rollingFront', dist: S.front, ownSec: OWN.fsSector, noun: 'front-of-shirt sponsors' },
+          { kind: 'Front-of-shirt sponsorship', incomeKey: 'frontShirt', termKey: 'frontTerm', tenureKey: 'fsTenure', sponKey: 'fsSponsor', startKey: 'fsStart', rollKey: 'rollingFront', dist: S.front, ownSec: OWN.fsSector, noun: 'front-of-shirt sponsors' },
           { kind: 'Back-of-shirt sponsorship', incomeKey: 'backShirt', termKey: 'backTerm', sponKey: 'bsSponsor', startKey: 'bsStart', rollKey: 'rollingBack', dist: S.back, ownSec: OWN.bsSector, noun: 'back-of-shirt sponsors' },
           { kind: 'Sleeve sponsorship', incomeKey: 'sleeve', termKey: 'sleeveTerm', sponKey: 'slSponsor', startKey: 'slStart', rollKey: 'rollingSleeve', dist: S.sleeve, ownSec: OWN.slSector, noun: 'sleeve sponsors' }
         ];
