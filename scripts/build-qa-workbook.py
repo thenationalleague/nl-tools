@@ -194,11 +194,8 @@ def main():
 
     def quality_flags(c):
         flags = []
-        # same sponsor name in more than one slot of the club (e.g. typo'd twice)
-        for _n, occ in within_dups(c).items():
-            where = ', '.join('%s "%s"%s' % (s, raw, (' £%s' % money(inc)) if inc is not None else '')
-                              for s, raw, inc in occ)
-            flags.append(('Duplicate sponsor', '"%s" appears in %d slots: %s' % (occ[0][1], len(occ), where)))
+        # NB: the same sponsor appearing in more than one slot is expected (a
+        # sponsor can buy several assets), so it is deliberately NOT flagged.
         # blank / "0" / vacant stands that are still counted in the stand total
         ph = placeholder_stands(c)
         if ph:
