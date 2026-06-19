@@ -51,6 +51,13 @@
 function pp_getChangelog() {
   return [
     {
+      version: 'v1.5',
+      date:    '19 June 2026',
+      changes: [
+        'pp_purge_legacy_folders: one-shot editor function to clean up old Drive subfolders (and their files + orphaned /files records) left behind when folders-config was slimmed. Dry-run by default; skips NL Assets. Run after pp_bootstrap.'
+      ]
+    },
+    {
       version: 'v1.4',
       date:    '19 June 2026',
       changes: [
@@ -1204,6 +1211,74 @@ function pp_delete(body) {
 /* Admin-only one-shot: scan /files/ for any record with isDeleted: true
    (legacy soft-delete records from before pp_delete existed) and hard-delete
    each. Returns counts. Run this once after deploying v3.1, then never again. */
+/* ----------------------------------------------------------------------------
+   ONE-SHOT: purge legacy folders left over from a previous folder structure.
+   ----------------------------------------------------------------------------
+   When folders-config is slimmed, the old Drive subfolders (and any files in
+   them) are left behind — they just stop appearing in the tool, so you can't
+   delete them in-app. Run this ONCE from the editor to clean them up:
+
+     - Trashes every Drive subfolder inside each CLUB whose name isn't one of the
+       current folders-config folders (Drive's 30-day trash = recovery). This
+       cascades to the files inside, which is what nukes the leftover test files.
+     - Removes the orphaned /files records that pointed into those folders.
+
+   Skips NL Assets ('_nl-central') entirely — that tree is dynamic, not driven by
+   folders-config, so we must never touch it here.
+
+   SAFETY: starts in DRY-RUN. Run it once, read the Execution log to see what it
+   WOULD trash, then set DRY_RUN=false and run again to actually do it.
+   Run AFTER pp_bootstrap has created the new folders. */
+function pp_purge_legacy_folders() {
+  var DRY_RUN = true;   /* <<< set to false to actually trash, then re-run */
+
+  var cfg = pp_read_(PP_DATA + '/folders-config') || {};
+  var currentNames = {};   /* current folder display names (what to KEEP) */
+  var currentKeys  = {};
+  Object.keys(cfg).forEach(function(k) {
+    if (k.charAt(0) === '_') return;
+    currentKeys[k] = true;
+    if (cfg[k] && cfg[k].name) currentNames[cfg[k].name] = true;
+  });
+
+  var folderIds = pp_read_(PP_DATA + '/folder-ids') || {};
+  var report = { dryRun: DRY_RUN, clubsScanned: 0, foldersTrashed: 0, foldersKept: 0, recordsRemoved: 0, willTrash: [] };
+
+  Object.keys(folderIds).forEach(function(clubKey) {
+    if (clubKey === '_nl-central') return;                 /* never touch NL Assets */
+    var rootId = folderIds[clubKey] && folderIds[clubKey]._root;
+    if (!rootId) return;
+    var root;
+    try { root = DriveApp.getFolderById(rootId); } catch (e) { return; }
+    report.clubsScanned++;
+
+    var subs = root.getFolders();
+    while (subs.hasNext()) {
+      var sub = subs.next();
+      var name = sub.getName();
+      if (name === '_trash' || currentNames[name]) { report.foldersKept++; continue; }
+      report.foldersTrashed++;
+      if (report.willTrash.length < 25) report.willTrash.push(clubKey + ' / ' + name);
+      if (!DRY_RUN) { try { sub.setTrashed(true); } catch (e) { /* ignore */ } }
+    }
+  });
+
+  /* Remove orphaned /files records (club files whose folderKey is no longer a
+     current folder). NL Assets records are left alone. */
+  var allFiles = pp_read_(PP_DATA + '/files') || {};
+  Object.keys(allFiles).forEach(function(fid) {
+    var f = allFiles[fid];
+    if (!f || f.clubKey === '_nl-central') return;
+    if (currentKeys[f.folderKey]) return;
+    report.recordsRemoved++;
+    if (!DRY_RUN) { try { pp_write_(PP_DATA + '/files/' + fid, null); } catch (e) { /* ignore */ } }
+  });
+
+  Logger.log(JSON.stringify(report, null, 2));
+  return report;
+}
+
+
 function pp_purge_orphans(body) {
   var verified = pp_verifyToken_(body.idToken);
   if (!verified.ok) return respond({ ok: false, error: 'Auth failed: ' + verified.error });
