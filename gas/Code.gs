@@ -1,6 +1,6 @@
 /**
  * NL Tools — Consolidated GAS
- * Version: v2.3 (19/06/2026)
+ * Version: v2.4 (19/06/2026)
  * Date: 19/06/2026
  *
  * This is the shared Apps Script ROUTER for the whole NL Tools backend — the
@@ -11,6 +11,11 @@
  * ProgrammePacks.gs is mirrored in this repo so far, under programme-packs/gas/).
  *
  * CHANGELOG
+ * v2.4 (19/06/2026)
+ *   - Programme Packs: added pp_download_link to the router (Phase 3 big-file
+ *     download — temp link-and-revoke for files too large for base64). Handler
+ *     in ProgrammePacks.gs v1.3. Also run pp_setupShareCleanupTrigger() once.
+ *
  * v2.3 (19/06/2026)
  *   - Programme Packs: swapped the Phase 2 upload routes — pp_upload_init/
  *     pp_upload_finalize (browser-direct PUT, blocked by Drive's lack of CORS)
@@ -192,6 +197,7 @@ function doPost(e) {
     if (action === 'pp_upload_begin')      return pp_upload_begin(body);
     if (action === 'pp_upload_chunk')      return pp_upload_chunk(body);
     if (action === 'pp_download')          return pp_download(body);
+    if (action === 'pp_download_link')     return pp_download_link(body);
     if (action === 'pp_preview')           return pp_preview(body);
     if (action === 'pp_list_folder')       return pp_list_folder(body);
     if (action === 'pp_thumbnail')         return pp_thumbnail(body);
