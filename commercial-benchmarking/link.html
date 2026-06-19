@@ -29,7 +29,7 @@ firebase.initializeApp({
   messagingSenderId: "801354670005", appId: "1:801354670005:web:05d8ebad3e7e63610d03fc"
 });
 </script>
-<link rel="stylesheet" href="/tools/commercial-benchmarking/dashboard.css?v=32">
+<link rel="stylesheet" href="/tools/commercial-benchmarking/dashboard.css?v=34">
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{background:var(--off-white);color:var(--text)}
@@ -112,19 +112,42 @@ firebase.initializeApp({
   </div>
 </div>
 
-<script src="/tools/commercial-benchmarking/dashboard.js?v=33"></script>
+<script src="/tools/commercial-benchmarking/dashboard.js?v=34"></script>
 <script>
 (function () {
   'use strict';
-  var token = (new URLSearchParams(location.search).get('t') || '').trim();
+  var params = new URLSearchParams(location.search);
+  var token = (params.get('t') || '').trim();
+  var verify = params.get('mode') === 'verify';   // own-data review page, no benchmarks
   var gate = document.getElementById('gate');
   var db = firebase.database();
   var ROOT = 'app-data/ops-commercial-benchmarking/';
   function msg(title, body) { gate.innerHTML = '<h2>' + title + '</h2><p>' + body + '</p>'; }
+  function show() {
+    gate.style.display = 'none';
+    document.getElementById('page').style.display = 'block';
+  }
 
   if (!/^[A-Za-z0-9_-]{20,}$/.test(token)) {
     msg('Link not valid', 'Please use the private link the League sent to your club.'); return;
   }
+
+  if (verify) {
+    // Verify page: read ONLY this club's own record — never fetch the
+    // aggregates — so no other club's data is involved at all.
+    document.title = 'Check your commercial data — The National League';
+    ['.cb-privacy', '.cb-controls', '.cb-foot'].forEach(function (sel) {
+      var el = document.querySelector(sel); if (el) el.style.display = 'none';
+    });
+    db.ref(ROOT + 'links/' + token).once('value').then(function (s) {
+      var OWN = s.val();
+      if (!OWN) { msg('Link not recognised', 'Please use the link the League sent to your club.'); return; }
+      show();
+      CBDash.review(OWN, { reportEmail: 'commercial@thenationalleague.org.uk' });
+    }).catch(function (e) { console.error(e); msg('Something went wrong', 'Please try again.'); });
+    return;
+  }
+
   Promise.all([
     db.ref(ROOT + 'aggregates').once('value'),
     db.ref(ROOT + 'links/' + token).once('value')
@@ -133,8 +156,7 @@ firebase.initializeApp({
     if (!OWN) { msg('Link not recognised', 'Please use the link the League sent to your club.'); return; }
     if (!AGG) { msg('Not available yet', 'Benchmark data isn’t available yet. Please try again shortly.'); return; }
     if (!CBDash.hasData(OWN)) { msg(CBDash.NO_DATA.title, CBDash.NO_DATA.body); return; }
-    gate.style.display = 'none';
-    document.getElementById('page').style.display = 'block';
+    show();
     CBDash.mount(AGG, [OWN], { staff: false });
   }).catch(function (e) { console.error(e); msg('Something went wrong', 'Please try again.'); });
 })();
