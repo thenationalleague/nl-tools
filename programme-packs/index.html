@@ -16,6 +16,9 @@
     - Admin/superadmin: "⤴ Open in Drive" button in the folder view jumps to the
       underlying Drive folder (folderId now returned by pp_list_folder). Needs
       GAS ProgrammePacks.gs v1.4.
+    - Removed the "Replace" button/flow entirely (every file row, all users).
+      Redundant now that delete + re-upload is clean and live-listing prevents
+      duplicates/ghosts. Dropped ppOpenReplace and the replace-mode branches.
   v3.10 (19/06/2026)
     - Phase 3 big-file download: files over 20MB now download via a temporary
       direct Drive link (pp_download_link) instead of base64-through-GAS, which
@@ -203,7 +206,9 @@
       version: 'v3.11',
       items: [
         'Fixed: a file you just uploaded sometimes didn\'t appear in the folder until a refresh — it shows straight away now.',
-        'Admins get an "Open in Drive" button to jump to a folder directly in Google Drive.'
+        'Folders open faster.',
+        'Admins get an "Open in Drive" button to jump to a folder directly in Google Drive.',
+        'Removed the "Replace" button — just delete and upload again.'
       ]
     },
     {
@@ -2663,9 +2668,7 @@ function ppRenderFilesView() {
       var ic = ppFileTypeIcon(f.type);
       var actions = '<button class="pp-file__btn pp-file__btn--primary" onclick="event.stopPropagation();ppDoDownload(\'' + NL.escJ(f.id) + '\')"> ' + PP_DOWNLOAD_ICON + 'Download</button>';
       if (canEdit) {
-        actions +=
-            '<button class="pp-file__btn pp-file__btn--edit" onclick="event.stopPropagation();ppOpenReplace(\'' + NL.escJ(f.id) + '\')">Replace</button>'
-          + '<button class="pp-file__btn pp-file__btn--danger" onclick="event.stopPropagation();ppOpenDelete(\'' + NL.escJ(f.id) + '\')">Delete</button>';
+        actions += '<button class="pp-file__btn pp-file__btn--danger" onclick="event.stopPropagation();ppOpenDelete(\'' + NL.escJ(f.id) + '\')">Delete</button>';
       }
       return '<div class="pp-file" data-editable="' + (canEdit ? 'true' : 'false') + '" '
         + 'onclick="ppOpenPreview(\'' + NL.escJ(f.id) + '\')">'
@@ -2890,7 +2893,6 @@ function ppRenderFileGrid(files, canEdit) {
 
     var actions = '<button class="pp-file__btn pp-file__btn--primary" onclick="event.stopPropagation();ppDoDownload(\'' + NL.escJ(f.id) + '\')"> ' + PP_DOWNLOAD_ICON + 'Download</button>';
     if (canEdit) {
-      actions += '<button class="pp-file__btn pp-file__btn--edit" onclick="event.stopPropagation();ppOpenReplace(\'' + NL.escJ(f.id) + '\')">Replace</button>';
       actions += '<button class="pp-file__btn pp-file__btn--danger" onclick="event.stopPropagation();ppOpenDelete(\'' + NL.escJ(f.id) + '\')">Delete</button>';
     }
 
@@ -3130,7 +3132,6 @@ function ppRenderNlAssets() {
         var ic = ppFileTypeIcon(f.type);
         var actions = '<button class="pp-file__btn pp-file__btn--primary" onclick="event.stopPropagation();ppDoDownload(\'' + NL.escJ(f.id) + '\')"> ' + PP_DOWNLOAD_ICON + 'Download</button>';
         if (canEdit) {
-          actions += '<button class="pp-file__btn pp-file__btn--edit" onclick="event.stopPropagation();ppOpenReplace(\'' + NL.escJ(f.id) + '\')">Replace</button>';
           actions += '<button class="pp-file__btn pp-file__btn--danger" onclick="event.stopPropagation();ppOpenDelete(\'' + NL.escJ(f.id) + '\')">Delete</button>';
         }
         return '<div class="pp-file" data-editable="' + (canEdit ? 'true' : 'false') + '" '
@@ -3445,27 +3446,6 @@ function ppOpenUpload() {
   document.getElementById('ppUploadModal').classList.add('open');
 }
 
-function ppOpenReplace(fileId) {
-  var meta = STATE.files[fileId];
-  if (!meta) return;
-  if (!ppCanEditClub(meta.clubKey)) {
-    NL.toast('You can only replace files in your own club\'s folders.', 'error');
-    return;
-  }
-  STATE.upload = { mode: 'replace', files: [], replaceFileId: fileId, replaceFilename: meta.name };
-  document.getElementById('ppUploadTitle').textContent = 'Replace file';
-  var club   = STATE.clubsByKey[meta.clubKey];
-  var folder = STATE.folders.find(function(f) { return f.key === meta.folderKey; });
-  document.getElementById('ppUploadDest').value = (club ? club.name : meta.clubKey) + ' — ' + (folder ? folder.name : meta.folderKey) + ' — replacing "' + meta.name + '"';
-  document.getElementById('ppUploadDesc').value = meta.description || '';
-  ppRefreshUploadList();
-  document.getElementById('ppFileInput').value = '';
-  document.getElementById('ppUploadProgress').style.display = 'none';
-  document.getElementById('ppUploadConfirm').disabled = false;
-  document.getElementById('ppUploadConfirm').textContent = 'Upload';
-  document.getElementById('ppUploadModal').classList.add('open');
-}
-
 function ppCloseUpload() {
   document.getElementById('ppUploadModal').classList.remove('open');
 }
@@ -3474,13 +3454,9 @@ function ppOnFileChosen(ev) {
   var picked = ev.target.files;
   if (!picked || !picked.length) return;
 
-  if (STATE.upload.mode === 'replace') {
-    /* Replace = single-file. Take the first only. */
-    if (picked.length > 1) NL.toast('Replace takes one file. Using the first.', 'info');
-    STATE.upload.files = [{ file: picked[0], status: 'pending', err: null }];
-  } else {
-    /* Create mode: append to existing selection. Files over 20MB upload via the
-       resumable path; cap at a generous ceiling to catch accidental huge picks. */
+  {
+    /* Append to existing selection. Files over 20MB upload via the chunked
+       path; cap at a generous ceiling to catch accidental huge picks. */
     var added = 0, oversized = 0;
     for (var i = 0; i < picked.length; i++) {
       if (picked[i].size > PP_UPLOAD_MAX_BYTES) { oversized++; continue; }
@@ -3555,13 +3531,7 @@ function ppDoUpload() {
 
   /* Resolve destination once for the whole batch */
   var clubKey, folderKey, destLabel;
-  if (STATE.upload.mode === 'replace' && STATE.upload.replaceFileId) {
-    var existing = STATE.files[STATE.upload.replaceFileId];
-    if (!existing) { NL.toast('Original file not found.', 'error'); return; }
-    clubKey   = existing.clubKey;
-    folderKey = existing.folderKey;
-    destLabel = existing.name;
-  } else if (STATE.upload.nlAssetsFolderId) {
+  if (STATE.upload.nlAssetsFolderId) {
     clubKey   = '_nl-central';
     folderKey = STATE.upload.nlAssetsFolderId;
     destLabel = 'NL Assets';
@@ -3578,10 +3548,6 @@ function ppDoUpload() {
   var btn = document.getElementById('ppUploadConfirm');
   btn.disabled = true;
   document.getElementById('ppUploadProgress').style.display = 'flex';
-
-  /* For replace mode: hard-delete old file after first successful upload */
-  var doReplaceCleanup = (STATE.upload.mode === 'replace' && STATE.upload.replaceFileId);
-  var oldFileIdToDelete = doReplaceCleanup ? STATE.upload.replaceFileId : null;
 
   /* Pending items only (skip already-done ones if user retries). */
   var queue = [];
@@ -3610,12 +3576,6 @@ function ppDoUpload() {
       }
       if (failCount === 0 && successCount > 0) {
         NL.toast(successCount + ' file' + (successCount === 1 ? '' : 's') + ' uploaded.', 'success');
-        /* All-good in single replace mode → cleanup old file */
-        if (doReplaceCleanup && oldFileIdToDelete) {
-          ppCallGas({ action: 'pp_delete', fileId: oldFileIdToDelete }).then(function(r) {
-            if (!r.ok) NL.toast('Replaced — but couldn\'t remove old file: ' + r.error, 'info');
-          }).catch(function() { /* not fatal */ });
-        }
         setTimeout(ppCloseUpload, 800);
       } else if (failCount > 0 && successCount > 0) {
         NL.toast(successCount + ' uploaded, ' + failCount + ' failed. Hover failed rows to see why.', 'error');
@@ -3661,7 +3621,7 @@ function ppDoUpload() {
         if (r.driveFileId && STATE.liveSets && STATE.liveSets[liveKey]) {
           STATE.liveSets[liveKey].driveIds[r.driveFileId] = true;
         }
-        ppAudit(STATE.upload.mode === 'replace' ? 'replaced' : 'uploaded', {
+        ppAudit('uploaded', {
           fileId:    r.fileId,
           fileName:  item.file.name,
           clubKey:   clubKey,
