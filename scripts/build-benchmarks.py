@@ -64,17 +64,68 @@ def num(v):
     return v if isinstance(v, (int, float)) else None
 
 
-_JUNK_NAME = re.compile(r'^(0|-|–|—|n/?a|none|nil|tbc|n\.?a\.?)$', re.I)
+_JUNK_NAME = re.compile(r'^(0|-|–|—|n/?a|none|nil|tbc|tbd|n\.?a\.?|vacant)$', re.I)
 
 
 def clean_name(v):
-    """Sponsor-name fields sometimes carry placeholders ('0', '-', 'n/a') that
-    actually mean 'no sponsor'. Hard-wipe those to empty at source so the
-    dashboard shows 'No sponsor named' rather than the junk token."""
+    """Sponsor-name fields sometimes carry placeholders ('0', '-', 'n/a',
+    'vacant') that actually mean 'no sponsor'. Hard-wipe those to empty at
+    source so the dashboard shows 'No sponsor named' rather than the junk."""
     if v is None:
         return ''
     s = str(v).strip()
     return '' if _JUNK_NAME.match(s) else s
+
+
+def _find(H, *subs):
+    """First header index whose name contains all of `subs` (case-insensitive),
+    else None — tolerant to small wording differences in the cleaned workbook."""
+    subs = [s.lower() for s in subs]
+    for k, i in H.items():
+        kl = str(k).lower()
+        if all(s in kl for s in subs):
+            return i
+    return None
+
+
+def parse_month(v):
+    """Normalise a commencement date to 'YYYY-MM' (or 'YYYY' if only a year is
+    given); '' if blank/unparseable. Accepts Excel dates and common strings."""
+    if v is None or v == '':
+        return ''
+    import datetime
+    if isinstance(v, (datetime.datetime, datetime.date)):
+        return '%04d-%02d' % (v.year, v.month)
+    s = str(v).strip()
+    m = re.match(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$', s)      # DD/MM/YYYY
+    if m:
+        return '%s-%02d' % (m.group(3), int(m.group(2)))
+    m = re.match(r'^(\d{4})[-/](\d{1,2})', s)                     # YYYY-MM
+    if m:
+        return '%s-%02d' % (m.group(1), int(m.group(2)))
+    m = re.match(r'^(\d{4})$', s)                                 # YYYY
+    if m:
+        return s
+    return ''
+
+
+def extract_stands(r, H):
+    """Real stand sponsors only. A stand counts when it has a genuine sponsor
+    name OR a positive income; blank / "0" / "vacant" slots (income 0 or empty)
+    are dropped entirely — they are NOT a stand, so they must not inflate the
+    stand count or drag down the average. Returns a list of {name, sector,
+    income, start} for the real stands."""
+    out = []
+    for s in (1, 2, 3, 4):
+        nm = clean_name(r[H['Stand %d — Sponsor Name' % s]])
+        inc = num(r[H['Stand %d — Income/season (£, ex-VAT)' % s]])
+        sec = r[H['Stand %d — Sector' % s]]
+        sec = str(sec).strip() if sec is not None else ''
+        di = _find(H, 'stand %d' % s, 'commenc') or _find(H, 'stand %d' % s, 'start')
+        start = parse_month(r[di]) if di is not None else ''
+        if nm or (inc is not None and inc > 0):
+            out.append({'name': nm or '—', 'sector': sec, 'income': inc, 'start': start})
+    return out
 
 
 def parse_money_text(v):
@@ -128,21 +179,12 @@ def build_metrics(H):
         i = H[name]
         return lambda r: parse_money_text(r[i])
 
-    stand_i = [H['Stand %d — Income/season (£, ex-VAT)' % s] for s in (1, 2, 3, 4)]
-    stand_name_i = [H['Stand %d — Sponsor Name' % s] for s in (1, 2, 3, 4)]
+    def stand_count(r):
+        return float(len(extract_stands(r, H)))
 
     def stand_total(r):
-        vs = [num(r[i]) for i in stand_i]
-        vs = [x for x in vs if x is not None]
+        vs = [st['income'] for st in extract_stands(r, H) if st['income'] is not None]
         return float(sum(vs)) if vs else None
-
-    def stand_count(r):
-        n = 0
-        for ni, ii in zip(stand_name_i, stand_i):
-            nm = r[ni]
-            if (nm is not None and str(nm).strip() != '') or isinstance(r[ii], (int, float)):
-                n += 1
-        return float(n)
 
     def stand_avg(r):
         t = stand_total(r); c = stand_count(r)
@@ -296,16 +338,17 @@ def main():
                 s2 = [x for x in (m['ext'](rr) for rr in data if rr[1] in ('North', 'South')) if x is not None]
                 entry['step2Pct'] = pct_of(s2, v)
             metrics[m['key']] = entry
-        # per-club stand sponsor list + combined stand sectors
-        stands = []; stand_secs = []
-        for s in (1, 2, 3, 4):
-            nm = clean_name(r[H['Stand %d — Sponsor Name' % s]])
-            sec = r[H['Stand %d — Sector' % s]]; sec = str(sec).strip() if sec not in (None,) else ''
-            inc = num(r[H['Stand %d — Income/season (£, ex-VAT)' % s]])
-            if nm or inc is not None:
-                stands.append({'name': nm or '—', 'sector': sec, 'income': inc})
-            if sec:
-                stand_secs.append(sec)
+        # per-club stand sponsor list + combined stand sectors (real stands only)
+        stands = extract_stands(r, H)
+        stand_secs = [st['sector'] for st in stands if st['sector']]
+        # commencement dates (tolerant to the cleaned workbook's exact header)
+        def start_of(*subs):
+            i = None
+            for extra_sub in (('commenc',), ('start',)):
+                i = _find(H, *(subs + extra_sub))
+                if i is not None:
+                    break
+            return parse_month(r[i]) if i is not None else ''
         # extra fields beyond the original payload (additive — included in patch)
         extra = {
             'bsSponsor': clean_name(r[H['Back Shirt — Sponsor Name']]),
@@ -313,6 +356,9 @@ def main():
             'fsSector': r[H['Front Shirt — Sector']] or '',
             'bsSector': r[H['Back Shirt — Sector']] or '',
             'slSector': r[H['Sleeve — Sector']] or '',
+            'fsStart': start_of('front shirt'),
+            'bsStart': start_of('back shirt'),
+            'slStart': start_of('sleeve'),
             'stands': stands,
             'standSectors': ' | '.join(stand_secs),
         }

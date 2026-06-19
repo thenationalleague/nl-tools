@@ -282,7 +282,7 @@ window.CBDash = (function () {
     function cleanSpon(v) {
       if (v == null) return '';
       var s = String(v).trim();
-      return /^(0|-|–|—|n\/?a|none|nil|tbc|n\.?a\.?)$/i.test(s) ? '' : s;
+      return /^(0|-|–|—|n\/?a|none|nil|tbc|tbd|n\.?a\.?|vacant)$/i.test(s) ? '' : s;
     }
     function shirtSlotCard(sl) {
       var spon = cleanSpon(OWN[sl.sponKey]);
@@ -649,8 +649,12 @@ window.CBDash = (function () {
         var sec = readSector('stand' + i) || '';
         var incRaw = incEl ? incEl.value.trim() : '';
         var inc = incRaw === '' ? null : Number(incRaw);
-        if (nm || inc != null) stands.push({ name: nm || '—', sector: sec, income: inc });
-        if (sec) standSecs.push(sec);
+        // A real stand needs a genuine sponsor name OR positive income; blank /
+        // "0" / vacant slots are dropped entirely so they never inflate the count.
+        if (nm || (inc != null && inc > 0)) {
+          stands.push({ name: nm || '—', sector: sec, income: inc });
+          if (sec) standSecs.push(sec);
+        }
       }
       OWN.stands = stands;
       OWN.standSectors = standSecs.join(' | ');
@@ -804,5 +808,103 @@ window.CBDash = (function () {
     renderAll();
   }
 
-  return { mount: mount, recompute: recompute, hasData: hasData, NO_DATA: NO_DATA };
+  // 'YYYY-MM' (or 'YYYY') -> 'Mmm YYYY' for the verify page.
+  function monthYear(s) {
+    if (!s) return '';
+    var m = String(s).match(/^(\d{4})-(\d{1,2})/);
+    if (m) {
+      var mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][(+m[2]) - 1];
+      return mon ? mon + ' ' + m[1] : m[1];
+    }
+    return /^\d{4}$/.test(String(s)) ? String(s) : '';
+  }
+
+  // Verify / "check your data" view: a club's OWN captured figures only — no
+  // benchmarks, no other clubs, no aggregates even fetched — plus a "report a
+  // correction" email CTA. Renders into the same #sections container.
+  function review(OWN, opts) {
+    opts = opts || {};
+    var $ = function (id) { return document.getElementById(id); };
+    function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    function val(k) { var m = (OWN.metrics || {})[k]; return m && m.value != null ? m.value : null; }
+    function money(v) { return v == null ? '—' : '£' + Number(v).toLocaleString('en-GB'); }
+    function plain(v) { return v == null ? '—' : Number(v).toLocaleString('en-GB'); }
+    function yrs(v) { return v == null ? '—' : (v + (v === 1 ? ' year' : ' years')); }
+    function txt(v) { v = (v == null ? '' : String(v)).trim(); return v || '—'; }
+    function chip(k) { var v = ((OWN.chips || {})[k] || '').trim(); return v ? (v.toLowerCase() === 'yes' ? 'Yes' : 'No') : '—'; }
+    function rolling(k) { var v = ((OWN.chips || {})[k] || '').trim(); return v ? (v.toLowerCase() === 'yes' ? 'Rolling' : 'Fixed term') : '—'; }
+
+    var crest = $('crest');
+    if (crest) { crest.src = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/' + encodeURIComponent(OWN.club) + '.png'; crest.alt = OWN.club; }
+    if ($('clubName')) $('clubName').textContent = OWN.club;
+    if ($('tbClub')) $('tbClub').textContent = OWN.club;
+    var DIV_FULL = { National: 'National League', North: 'National League North', South: 'National League South' };
+    if ($('divPill')) $('divPill').textContent = DIV_FULL[OWN.division] || OWN.division || '';
+    if ($('sponWrap')) $('sponWrap').style.display = 'none';
+
+    var has = Object.keys(OWN.metrics || {}).some(function (k) { return k !== 'standCount' && (OWN.metrics[k] || {}).value != null; });
+
+    function item(lab, v) { return '<div class="cb-rev-item"><span class="cb-rev-lab">' + lab + '</span><span class="cb-rev-val">' + v + '</span></div>'; }
+    // expiry = start + deal length (years); a rolling deal has no fixed expiry
+    function endLabel(startKey, termKey, rollKey) {
+      if (((OWN.chips || {})[rollKey] || '').trim().toLowerCase() === 'yes') return 'Rolling / ongoing';
+      var st = OWN[startKey], t = val(termKey);
+      if (!st || t == null) return '—';
+      var m = String(st).match(/^(\d{4})(?:-(\d{1,2}))?/);
+      if (!m) return '—';
+      var y = (+m[1]) + Math.round(t);
+      if (m[2]) { var mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][(+m[2]) - 1]; return (mon ? mon + ' ' : '') + y; }
+      return String(y);
+    }
+    function shirt(kind, sponKey, secKey, incKey, termKey, startKey, rollKey) {
+      return '<div class="card cb-rev-card"><div class="cb-rev-h">' + kind + '</div><div class="cb-rev-grid">'
+        + item('Sponsor', esc(txt(OWN[sponKey])))
+        + item('Sector', esc(txt(OWN[secKey])))
+        + item('Income / season', money(val(incKey)))
+        + item('Deal length', yrs(val(termKey)))
+        + item('Started', monthYear(OWN[startKey]) || '—')
+        + item('Expires', endLabel(startKey, termKey, rollKey))
+        + item('Rolling deal?', rolling(rollKey))
+        + '</div></div>';
+    }
+    function group(title, inner) { return '<div class="section"><div class="section-head"><h2>' + title + '</h2></div>' + inner + '</div>'; }
+    function card(inner) { return '<div class="card cb-rev-card"><div class="cb-rev-grid">' + inner + '</div></div>'; }
+
+    var mail = opts.reportEmail || 'commercial@thenationalleague.org.uk';
+    var subj = encodeURIComponent('Commercial data correction — ' + OWN.club);
+    var body = encodeURIComponent('Club: ' + OWN.club + '\n\nPlease describe anything below that is wrong or out of date:\n\n');
+    var html = '<div class="cb-rev-banner"><div class="cb-rev-blurb"><b>Please check the details below.</b> This is the commercial information we currently hold for '
+      + esc(OWN.club) + ' (2025/26 season). '
+      + (has ? 'If anything is wrong or out of date, let us know — none of this is shared with other clubs.'
+             : 'We don’t currently hold commercial data for your club. If that’s not right, please get in touch.')
+      + '</div><a class="cb-rev-btn" href="mailto:' + mail + '?subject=' + subj + '&body=' + body + '">Report a correction</a></div>';
+
+    if (has) {
+      html += group('Shirt &amp; kit sponsorship',
+        shirt('Front of shirt', 'fsSponsor', 'fsSector', 'frontShirt', 'frontTerm', 'fsStart', 'rollingFront')
+        + shirt('Back of shirt', 'bsSponsor', 'bsSector', 'backShirt', 'backTerm', 'bsStart', 'rollingBack')
+        + shirt('Sleeve', 'slSponsor', 'slSector', 'sleeve', 'sleeveTerm', 'slStart', 'rollingSleeve'));
+
+      var stands = OWN.stands || [];
+      var srows = stands.length ? stands.map(function (s) {
+        return '<div class="cb-rev-stand"><span class="cb-rev-sname">' + esc(txt(s.name)) + '</span>'
+          + '<span class="cb-rev-ssec">' + esc(txt(s.sector)) + '</span>'
+          + '<span class="cb-rev-sinc">' + (s.income != null ? money(s.income) : '—') + '</span>'
+          + '<span class="cb-rev-sstart">' + (monthYear(s.start) || '') + '</span></div>';
+      }).join('') : '<div class="cb-rev-empty">No stand sponsors on file.</div>';
+      html += group('Stand sponsorship', '<div class="card cb-rev-card"><div class="cb-rev-stands">' + srows + '</div></div>');
+
+      html += group('Ground advertising', card(item('TV-facing board / season', money(val('tvBoard'))) + item('Non-TV board / season', money(val('nonTvBoard')))));
+      html += group('Ticketing', card(item('Top adult matchday ticket', money(val('msTicket'))) + item('Top adult season ticket', money(val('seasonTicket')))));
+      html += group('Hospitality', card(item('Top matchday package', money(val('mdHosp'))) + item('Top seasonal package', money(val('seasonHosp')))));
+      html += group('Programme', card(item('Format', esc(txt((OWN.chips || {}).progFormat))) + item('Full-page advert / season', money(val('progAd')))));
+      html += group('Email &amp; audience', card(item('Can email supporters?', chip('emailSupporters'))
+        + item('Can email partner offers?', chip('emailPartners'))
+        + item('Email database', plain(val('emailDb')))
+        + item('Opted in to partner emails', plain(val('optedIn')))));
+    }
+    if ($('sections')) $('sections').innerHTML = html;
+  }
+
+  return { mount: mount, recompute: recompute, hasData: hasData, NO_DATA: NO_DATA, review: review };
 })();

@@ -104,6 +104,52 @@ def money(v):
     return round(v, 2) if v % 1 else int(v)
 
 
+PLACEHOLDER = {'', '0', '-', '–', '—', 'n/a', 'na', 'n.a.', 'none', 'nil', 'tbc', 'tbd', 'vacant'}
+
+
+def is_placeholder(s):
+    return str(s if s is not None else '').strip().lower() in PLACEHOLDER
+
+
+def norm(s):
+    return ' '.join(str(s if s is not None else '').strip().lower().split())
+
+
+def pos(x):
+    return isnum(x) and x > 0
+
+
+def name_slots(c):
+    """All sponsor-bearing slots for a club: the three shirt slots + stands."""
+    slots = [('Front shirt', c.get('fsSponsor'), None),
+             ('Back shirt',  c.get('bsSponsor'), None),
+             ('Sleeve',      c.get('slSponsor'), None)]
+    for i, sd in enumerate(c.get('stands') or [], 1):
+        if isinstance(sd, dict):
+            slots.append(('Stand %d' % i, sd.get('name'), sd.get('income')))
+    return slots
+
+
+def within_dups(c):
+    """Same sponsor name appearing in >1 slot of one club (case-insensitive).
+    Returns {normalised name: [(slot, raw, income), ...]}."""
+    seen = {}
+    for slot, raw, inc in name_slots(c):
+        if is_placeholder(raw):
+            continue
+        seen.setdefault(norm(raw), []).append((slot, raw, inc))
+    return {n: v for n, v in seen.items() if len(v) > 1}
+
+
+def placeholder_stands(c):
+    """Stand slots that are placeholders / vacant yet still counted."""
+    out = []
+    for i, sd in enumerate(c.get('stands') or [], 1):
+        if isinstance(sd, dict) and is_placeholder(sd.get('name')) and not pos(sd.get('income')):
+            out.append(i)
+    return out
+
+
 def main():
     clubs = load_clubs(SRC)
     if not clubs:
@@ -141,20 +187,32 @@ def main():
                 out.append((key, v, med, (v / med) if med else None))
         return out
 
-    # ---- duplicate detection (clubs sharing the same core figures) ----
-    sig_map = {}
-    for c in clubs:
-        sig = tuple(mval(c, k) for k in DUP_FIELDS)
-        if sum(1 for x in sig if isnum(x)) >= 2:
-            sig_map.setdefault(sig, []).append(c['club'])
-    club_dup, dup_groups, gid = {}, [], 0
-    for sig, members in sig_map.items():
-        if len(members) > 1:
-            gid += 1
-            label = 'D%d' % gid
-            dup_groups.append((label, members))
-            for m in members:
-                club_dup[m] = label
+    # ---- data-quality flags per club ----
+    TERM_ROLL = {'frontTerm': ('rollingFront', 'Front'), 'backTerm': ('rollingBack', 'Back'),
+                 'sleeveTerm': ('rollingSleeve', 'Sleeve')}
+    LONG_TERM = 10  # yrs — a deal this long usually means "rolling", not a fixed term
+
+    def quality_flags(c):
+        flags = []
+        # NB: the same sponsor appearing in more than one slot is expected (a
+        # sponsor can buy several assets), so it is deliberately NOT flagged.
+        # blank / "0" / vacant stands that are still counted in the stand total
+        ph = placeholder_stands(c)
+        if ph:
+            flags.append(('Placeholder stand', 'Stand %s blank/"0"/vacant but counted (stand count = %s)'
+                          % (', '.join(map(str, ph)), money(mval(c, 'standCount')))))
+        # implausibly long deal lengths — usually a rolling deal entered as a number
+        for tk, (rk, lab) in TERM_ROLL.items():
+            v = mval(c, tk)
+            if isnum(v) and v >= LONG_TERM:
+                roll = str((c.get('chips') or {}).get(rk, '')).strip()
+                extra = ' but marked NOT rolling' if roll.lower() == 'no' else (' (rolling = %s)' % roll if roll else '')
+                flags.append(('Long deal length', '%s-shirt term = %s yrs%s — confirm if rolling' % (lab, money(v), extra)))
+        # two sectors packed into one stand field
+        for i, sd in enumerate(c.get('stands') or [], 1):
+            if isinstance(sd, dict) and '|' in str(sd.get('sector', '')):
+                flags.append(('Malformed sector', 'Stand %d sector holds two values: "%s"' % (i, sd.get('sector'))))
+        return flags
 
     def has_data(c):
         return any(k != 'standCount' and isnum(mval(c, k)) for k, *_ in METRICS)
@@ -175,7 +233,7 @@ def main():
         cols += ['Stand %d name' % i, 'Stand %d sector' % i, 'Stand %d income (£)' % i]
     for _k, h in CHIPS:
         cols.append(h)
-    cols += ['Outlier flags', 'Duplicate group']
+    cols += ['Outlier flags', 'Data-quality flags']
     ws.append(cols)
 
     for c in clubs:
@@ -198,11 +256,12 @@ def main():
         notes = '; '.join('%s %s (%s× median)' % (HDR[k], money(v), round(r, 1) if r else '?')
                           for k, v, _med, r in outs)
         row.append(notes)
-        row.append(club_dup.get(club, ''))
+        qf = quality_flags(c)
+        row.append('; '.join('%s — %s' % (t, d) for t, d in qf))
         ws.append(row)
 
         r = ws.max_row
-        if club in club_dup:
+        if qf:
             for ci in range(1, len(cols) + 1):
                 ws.cell(r, ci).fill = RED
         for k, _v, _med, _ratio in outs:
@@ -220,15 +279,15 @@ def main():
     for f in flat:
         wo.append(f)
 
-    # ================= sheet 3: Duplicates =================
-    wd = wb.create_sheet('Duplicates')
-    wd.append(['Group', 'Club', 'Division'] + [HDR[k] for k in DUP_FIELDS])
-    by_club = {c.get('club', ''): c for c in clubs}
-    for label, members in dup_groups:
-        for m in members:
-            c = by_club.get(m, {})
-            wd.append([label, m, c.get('division', '')] + [money(mval(c, k)) for k in DUP_FIELDS])
-        wd.append([])  # blank line between groups
+    # ================= sheet 3: Data quality =================
+    wd = wb.create_sheet('Data quality')
+    wd.append(['Club', 'Division', 'Issue', 'Detail'])
+    qrows = []
+    for c in clubs:
+        for t, d in quality_flags(c):
+            qrows.append([c.get('club', ''), c.get('division', ''), t, d])
+    for q in qrows:
+        wd.append(q)
 
     # ---- styling pass: header row, borders, widths, freeze ----
     for sheet in wb.worksheets:
@@ -245,7 +304,9 @@ def main():
                     width = max(width, min(40, len(str(v)) + 2))
             sheet.column_dimensions[get_column_letter(ci)].width = width
     ws.column_dimensions['A'].width = 24
-    ws.column_dimensions[get_column_letter(len(cols) - 1)].width = 40  # Outlier flags
+    ws.column_dimensions[get_column_letter(len(cols) - 1)].width = 48  # Outlier flags
+    ws.column_dimensions[get_column_letter(len(cols))].width = 60       # Data-quality flags
+    wd.column_dimensions['D'].width = 80
 
     wb.save(OUT)
     nd = sum(1 for c in clubs if not has_data(c))
@@ -253,8 +314,8 @@ def main():
     print('  %d clubs (%d with data, %d no data submitted)' % (len(clubs), len(clubs) - nd, nd))
     print('  %d outlier values flagged across %d clubs'
           % (len(flat), len(set(f[0] for f in flat))))
-    print('  %d suspected duplicate group(s): %s'
-          % (len(dup_groups), ', '.join('%s=%s' % (l, '/'.join(m)) for l, m in dup_groups) or 'none'))
+    print('  %d data-quality flag(s) across %d clubs'
+          % (len(qrows), len(set(q[0] for q in qrows))))
 
 
 if __name__ == '__main__':
