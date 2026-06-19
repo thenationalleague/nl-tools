@@ -300,9 +300,11 @@ window.CBDash = (function () {
         else if (endTxt) parts.push('expires <b>' + endTxt + '</b>');
         if (parts.length) tenure = '<div class="cb-slot-tenure">' + parts.join(' &middot; ') + '</div>';
       }
-      var metrics = '<div class="cb-slot-metrics">' + metricBody(sl.incomeKey, 'Income') + metricBody(sl.termKey, 'Deal length') + '</div>';
+      // dates live with Deal length, not under the sponsor pill
+      var dealCell = '<div class="cb-slot-deal">' + metricBody(sl.termKey, 'Deal length') + tenure + '</div>';
+      var metrics = '<div class="cb-slot-metrics">' + metricBody(sl.incomeKey, 'Income') + dealCell + '</div>';
       var donut = (sl.dist && sl.dist.length) ? donutBlock('Sector mix', sl.dist, sl.ownSec, sl.noun) : '';
-      return '<div class="card cb-slotcard">' + head + tenure + metrics + donut + '</div>';
+      return '<div class="card cb-slotcard">' + head + metrics + donut + '</div>';
     }
 
     // fixed display order; 'Sponsor sectors' (the donuts) sits after the shirt group
