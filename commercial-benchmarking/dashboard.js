@@ -726,19 +726,15 @@ window.CBDash = (function () {
     }
     function renderLinks() {
       var tb = opts.tokenByClub || {};
-      function cellLink(word, url) {
-        return '<a class="cb-linkword" href="' + url + '" target="_blank" rel="noopener">' + word + '</a>' +
-          '<button class="cb-copy" type="button" data-copy="' + url + '">Copy</button>';
-      }
       var rows = clubs.map(function (c) {
         var tok = tb[c.club];
         var nameCell = c.club + (c._noData ? ' <span class="cb-nodata">(no data yet)</span>' : '');
         var proof, bench;
         if (tok) {
-          proof = '<td class="cb-linkcell">' + cellLink('Proof', proofUrl(tok)) + '</td>';
-          bench = '<td class="cb-linkcell">' + cellLink('Benchmarked', linkUrl(tok)) + '</td>';
+          proof = '<td><a class="cb-linkword" href="' + proofUrl(tok) + '" target="_blank" rel="noopener">Proof</a></td>';
+          bench = '<td><a class="cb-linkword" href="' + linkUrl(tok) + '" target="_blank" rel="noopener">Benchmarked</a></td>';
         } else {
-          proof = '<td class="cb-linkcell" colspan="2"><button class="cb-edit-btn" type="button" data-gen="' + c.club.replace(/"/g, '&quot;') + '">Generate links</button></td>';
+          proof = '<td colspan="2"><button class="cb-edit-btn" type="button" data-gen="' + c.club.replace(/"/g, '&quot;') + '">Generate links</button></td>';
           bench = '';
         }
         return '<tr><td>' + nameCell + '</td><td>' + c.division + '</td>' + proof + bench + '</tr>';
@@ -747,17 +743,13 @@ window.CBDash = (function () {
       $('sections').innerHTML = '<div class="cb-edit-actions">' +
         '<button id="cb-genall" class="cb-edit-btn" type="button">Generate all missing</button>' +
         '<button id="cb-linkdone" class="cb-cancel" type="button">Done</button>' +
-        '<span id="cb-linknote">' + have + ' of ' + clubs.length + ' clubs have links. <b>Proof</b> = the club checks its own data; <b>Benchmarked</b> = the full comparison. Share each privately with that club only.</span></div>' +
+        '<span id="cb-linknote">' + have + ' of ' + clubs.length + ' clubs have links. <b>Proof</b> opens the club\'s own-data check; <b>Benchmarked</b> opens the full comparison. Share each privately with that club only.</span></div>' +
         '<table class="cb-linktable"><thead><tr><th>Club</th><th>Division</th><th>Proof</th><th>Benchmarked</th></tr></thead><tbody>' + rows + '</tbody></table>';
       $('cb-linkdone').onclick = function () { $('sections').onclick = null; render(); };
       $('cb-genall').onclick = genMissing;
       $('sections').onclick = function (e) {
         var b = e.target.closest('button'); if (!b) return;
-        if (b.getAttribute('data-copy')) {
-          var url = b.getAttribute('data-copy');
-          if (navigator.clipboard) navigator.clipboard.writeText(url);
-          b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy'; }, 1200);
-        } else if (b.getAttribute('data-gen')) { genOne(b.getAttribute('data-gen')); }
+        if (b.getAttribute('data-gen')) genOne(b.getAttribute('data-gen'));
       };
     }
 
