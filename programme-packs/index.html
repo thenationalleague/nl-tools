@@ -3,10 +3,19 @@
 <head>
 <!--
   NL Tools — Programme Packs
-  Version: 3.6
-  Date: 03/05/2026
+  Version: 3.7
+  Date: 19/06/2026
 
   CHANGELOG
+  v3.7 (19/06/2026)
+    - Phase 1 live-listing: when you open a folder, the tool now asks Drive
+      what's actually in it (new GAS action pp_list_folder) and hides any
+      cached row whose Drive file is gone. Files removed from Drive can no
+      longer linger as "ghosts" — and this works for every signed-in user,
+      not just admins (reconcile was admin-only). Cached per folder for 60s.
+      The existing download/delete/preview/thumbnail paths are unchanged
+      (they still key on the RTDB id); this only filters what's shown.
+      Requires GAS ProgrammePacks.gs v1.0 (pp_list_folder) deployed.
   v3.6 (03/05/2026)
     - Brand sweep + bug fix. Three local CSS tokens (--primary-dim,
       --navy-mid, --navy-light) were referenced 12 times across the
@@ -161,6 +170,14 @@
 
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
+    {
+      date:    '19 June 2026',
+      version: 'v3.7',
+      items: [
+        'Files that have been removed from Google Drive no longer show up here — when you open a folder, the tool now checks Drive directly and hides anything that\'s gone.',
+        'This works for everyone, not just admins.'
+      ]
+    },
     {
       date:    '3 May 2026',
       version: 'v3.6',
@@ -2087,11 +2104,16 @@ function ppCurrentFolder() {
 
 function ppFilesIn(clubKey, folderKey) {
   var out = [];
+  /* Live-listing (Phase 1): once we've fetched what Drive actually holds for
+     this folder, hide any cached record whose Drive file is no longer there —
+     that's a "ghost". The list then reflects Drive, not the RTDB mirror. */
+  var live = folderKey ? (STATE.liveSets || {})[clubKey + '::' + folderKey] : null;
   Object.keys(STATE.files).forEach(function(id) {
     var f = STATE.files[id];
     if (!f || f.isDeleted) return;
     if (f.clubKey !== clubKey) return;
     if (folderKey && f.folderKey !== folderKey) return;
+    if (live && f.driveFileId && !live.driveIds[f.driveFileId]) return;  /* ghost */
     var copy = {};
     Object.keys(f).forEach(function(k) { copy[k] = f[k]; });
     copy.id = id;
@@ -2478,10 +2500,40 @@ function ppOpenFolder(folderKey) {
   ppRenderMyClubBanner();
   ppRenderMainPanel();
 
-  /* Background sync if this admin hasn't synced this folder in the cooldown
-     window. Cached view renders first; live listener catches any imports. */
   var club = ppCurrentClub();
-  if (club && !club.isCentral) ppMaybeAutoSync(club.key, folderKey);
+  if (club) {
+    /* Live-listing (Phase 1): fetch what Drive actually holds so ghosts vanish.
+       Works for everyone (not just admins), unlike reconcile. */
+    ppLoadLiveFolder(club.key, folderKey);
+    /* Keep the admin auto-reconcile: it still IMPORTS Drive-dropped files into
+       the RTDB mirror so they appear (live-listing only hides, doesn't import). */
+    if (!club.isCentral) ppMaybeAutoSync(club.key, folderKey);
+  }
+}
+
+/* Fetch the live Drive contents of a folder and remember which Drive files are
+   actually present. ppFilesIn / ppNlfFilesIn then hide any cached record that
+   isn't in this set (ghosts). Cached per session with a short TTL so flipping
+   between folders doesn't re-hit Drive constantly. */
+var PP_LIVE_TTL_MS = 60 * 1000;
+function ppLoadLiveFolder(clubKey, folderKey) {
+  if (!clubKey || !folderKey) return;
+  var key = clubKey + '::' + folderKey;
+  STATE.liveSets = STATE.liveSets || {};
+  var cached = STATE.liveSets[key];
+  if (cached && (Date.now() - cached.loadedAt) < PP_LIVE_TTL_MS) return;
+
+  ppCallGas({ action: 'pp_list_folder', clubKey: clubKey, folderKey: folderKey })
+    .then(function(r) {
+      if (!r || !r.ok || !Array.isArray(r.files)) return;
+      var ids = {};
+      r.files.forEach(function(f) { if (f.driveFileId) ids[f.driveFileId] = true; });
+      STATE.liveSets[key] = { driveIds: ids, loadedAt: Date.now() };
+      /* Re-render only if we're still looking at this folder. */
+      if (STATE.activeClub === clubKey && STATE.activeFolder === folderKey) ppRenderMainPanel();
+      else if (clubKey === '_nl-central' && STATE.activeClub === '_nl-central') ppRenderMainPanel();
+    })
+    .catch(function() { /* silent — the cached view stays; no worse than before */ });
 }
 
 function ppBackToFolders() {
@@ -2857,10 +2909,14 @@ function ppNlfChildren(parentId) {
 
 function ppNlfFilesIn(folderId) {
   var out = [];
+  /* Live-listing (Phase 1): hide ghosts using the live Drive snapshot, same as
+     ppFilesIn. Only applies inside a real folder (root has no Drive folder). */
+  var live = folderId ? (STATE.liveSets || {})['_nl-central::' + folderId] : null;
   Object.keys(STATE.files).forEach(function(id) {
     var f = STATE.files[id];
     if (!f || f.isDeleted) return;
     if (f.clubKey !== '_nl-central') return;
+    if (live && f.driveFileId && !live.driveIds[f.driveFileId]) return;  /* ghost */
     /* Root level: folderKey is null/empty/undefined */
     if (!folderId) {
       if (!f.folderKey) {
@@ -3090,7 +3146,8 @@ function ppNlfOpen(folderId) {
   STATE.nlAssetsPath = STATE.nlAssetsPath.concat([folderId]);
   STATE.search = '';
   ppRenderMainPanel();
-  /* Background sync — Drive may have changes admins didn't make through the tool. */
+  /* Live-listing (Phase 1): hide ghosts. Plus admin auto-sync to import. */
+  ppLoadLiveFolder('_nl-central', folderId);
   ppMaybeAutoSync('_nl-central', folderId);
 }
 
@@ -3100,7 +3157,10 @@ function ppNlfNavigateTo(pathArr) {
   ppRenderMainPanel();
   /* If we landed on a non-root NL Assets folder, sync it. */
   var currentId = pathArr.length > 0 ? pathArr[pathArr.length - 1] : null;
-  if (currentId) ppMaybeAutoSync('_nl-central', currentId);
+  if (currentId) {
+    ppLoadLiveFolder('_nl-central', currentId);
+    ppMaybeAutoSync('_nl-central', currentId);
+  }
 }
 
 /* === Folder create modal === */

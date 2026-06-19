@@ -30,7 +30,11 @@ against the dead key. v0.9 repoints to `media-` via the `PP_DATA` constant.
 1. Open the consolidated Apps Script project (Web App URL matches `PP_GAS_URL`).
 2. Replace the contents of `ProgrammePacks.gs` with this file.
 3. Confirm `Code.gs`'s `doPost` router dispatches the `pp_*` actions (see the
-   header comment in this file for the list).
+   header comment in `ProgrammePacks.gs` for the list). **v1.0 adds a new action**
+   — make sure the router includes:
+   `if (action === 'pp_list_folder') return pp_list_folder(body);`
+   (Without it the page falls back to the cached list — no breakage, but ghosts
+   won't be hidden.)
 4. **Deploy → Manage deployments → edit the active Web App deployment → Deploy.**
    Do not create a new deployment — the URL in `index.html` must stay the same.
 
