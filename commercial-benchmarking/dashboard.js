@@ -288,9 +288,21 @@ window.CBDash = (function () {
       var spon = cleanSpon(OWN[sl.sponKey]);
       var head = '<div class="cb-slot-head"><span class="cb-slot-kind">' + sl.kind + '</span>' +
         '<span class="cb-slotspon' + (spon ? '' : ' cb-slotspon-none') + '">' + (spon || 'No sponsor named') + '</span></div>';
+      var tenure = '';
+      if (spon) {
+        var startTxt = monthYear(OWN[sl.startKey]);
+        var rollingYes = ((OWN.chips || {})[sl.rollKey] || '').trim().toLowerCase() === 'yes';
+        var termV = (OWN.metrics && OWN.metrics[sl.termKey]) ? OWN.metrics[sl.termKey].value : null;
+        var endTxt = rollingYes ? '' : expiry(OWN[sl.startKey], termV);
+        var parts = [];
+        if (startTxt) parts.push('Since <b>' + startTxt + '</b>');
+        if (rollingYes) parts.push('<b>rolling</b>');
+        else if (endTxt) parts.push('expires <b>' + endTxt + '</b>');
+        if (parts.length) tenure = '<div class="cb-slot-tenure">' + parts.join(' &middot; ') + '</div>';
+      }
       var metrics = '<div class="cb-slot-metrics">' + metricBody(sl.incomeKey, 'Income') + metricBody(sl.termKey, 'Deal length') + '</div>';
       var donut = (sl.dist && sl.dist.length) ? donutBlock('Sector mix', sl.dist, sl.ownSec, sl.noun) : '';
-      return '<div class="card cb-slotcard">' + head + metrics + donut + '</div>';
+      return '<div class="card cb-slotcard">' + head + tenure + metrics + donut + '</div>';
     }
 
     // fixed display order; 'Sponsor sectors' (the donuts) sits after the shirt group
@@ -324,9 +336,9 @@ window.CBDash = (function () {
       function shirtSectionHtml() {
         var S = AGG.sectors || {};
         var slots = [
-          { kind: 'Front-of-shirt sponsorship', incomeKey: 'frontShirt', termKey: 'frontTerm', sponKey: 'fsSponsor', dist: S.front, ownSec: OWN.fsSector, noun: 'front-of-shirt sponsors' },
-          { kind: 'Back-of-shirt sponsorship', incomeKey: 'backShirt', termKey: 'backTerm', sponKey: 'bsSponsor', dist: S.back, ownSec: OWN.bsSector, noun: 'back-of-shirt sponsors' },
-          { kind: 'Sleeve sponsorship', incomeKey: 'sleeve', termKey: 'sleeveTerm', sponKey: 'slSponsor', dist: S.sleeve, ownSec: OWN.slSector, noun: 'sleeve sponsors' }
+          { kind: 'Front-of-shirt sponsorship', incomeKey: 'frontShirt', termKey: 'frontTerm', sponKey: 'fsSponsor', startKey: 'fsStart', rollKey: 'rollingFront', dist: S.front, ownSec: OWN.fsSector, noun: 'front-of-shirt sponsors' },
+          { kind: 'Back-of-shirt sponsorship', incomeKey: 'backShirt', termKey: 'backTerm', sponKey: 'bsSponsor', startKey: 'bsStart', rollKey: 'rollingBack', dist: S.back, ownSec: OWN.bsSector, noun: 'back-of-shirt sponsors' },
+          { kind: 'Sleeve sponsorship', incomeKey: 'sleeve', termKey: 'sleeveTerm', sponKey: 'slSponsor', startKey: 'slStart', rollKey: 'rollingSleeve', dist: S.sleeve, ownSec: OWN.slSector, noun: 'sleeve sponsors' }
         ];
         return '<div class="section"><div class="section-head"><h2>Shirt &amp; kit sponsorship</h2>' +
           '<span class="count">vs ' + scopeTxt + '</span></div>' +
@@ -355,6 +367,7 @@ window.CBDash = (function () {
         ? st.map(function (s) {
           return '<div class="cb-standrow"><span class="cb-standname">' + (s.name || '—') + '</span>' +
             '<span class="cb-standsec">' + secLabel(s.sector) + '</span>' +
+            '<span class="cb-standstart">' + (monthYear(s.start) || '') + '</span>' +
             '<span class="cb-standinc">' + (s.income != null ? fmt(s.income, '£') : '—') + '</span></div>';
         }).join('')
         : '<div class="cb-standnone">No stand sponsors recorded.</div>';
@@ -820,6 +833,16 @@ window.CBDash = (function () {
       return mon ? mon + ' ' + m[1] : m[1];
     }
     return /^\d{4}$/.test(String(s)) ? String(s) : '';
+  }
+
+  // start 'YYYY-MM'/'YYYY' + term in years -> expiry as 'Mmm YYYY' (or 'YYYY').
+  function expiry(s, years) {
+    if (!s || years == null || isNaN(years)) return '';
+    var m = String(s).match(/^(\d{4})(?:-(\d{1,2}))?/);
+    if (!m) return '';
+    var y = (+m[1]) + Math.round(Number(years));
+    if (m[2]) { var mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][(+m[2]) - 1]; return (mon ? mon + ' ' : '') + y; }
+    return String(y);
   }
 
   // Verify / "check your data" view: a club's OWN captured figures only — no
