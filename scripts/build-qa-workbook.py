@@ -242,7 +242,7 @@ def main():
             return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
         def clubof(r):
-            for ci in range(11, 82):
+            for ci in range(10, 82):   # incl. col 10 ('Club name') — one club typed it there
                 if r[ci] not in (None, ''):
                     return str(r[ci]).strip()
             return None

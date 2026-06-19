@@ -27,7 +27,7 @@ SURVEY = sys.argv[1] if len(sys.argv) > 1 else 'survey.xlsx'
 CLUBS = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2].endswith('.json') else None
 OUT = next((a for a in sys.argv[2:] if a.endswith('.xlsx')), 'commercial-benchmarking-duplicates.xlsx')
 
-CLUB_BLOCK = range(11, 82)   # one column per club option, between 'Club name'(10) and 'Division'(82)
+CLUB_BLOCK = range(10, 82)   # 'Club name' (10) + one column per club option, up to 'Division'(82)
 
 # (header, column index in the raw export) — single-answer columns only
 FIELDS = [
