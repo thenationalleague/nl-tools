@@ -3,10 +3,18 @@
 <head>
 <!--
   NL Tools — Programme Packs
-  Version: 3.11
+  Version: 3.12
   Date: 19/06/2026
 
   CHANGELOG
+  v3.12 (19/06/2026)
+    - Simplification pass: removed the per-file "Description" field from the
+      upload modal entirely (and stopped sending description on upload — GAS
+      tolerates its absence, no GAS change needed).
+    - Slimmer folder structure (config, not code): the seeded folders are cut to
+      four — Crest & Logos, Photos, Club Info, Miscellaneous. Lives in RTDB
+      folders-config; snapshot tracked at programme-packs/folders-config.snapshot.json.
+      Apply by pasting that into RTDB then running pp_bootstrap once.
   v3.11 (19/06/2026)
     - FIX: a file uploaded into the folder you're viewing no longer stays
       invisible. The Phase 1 live-listing snapshot is cached when a folder
@@ -201,6 +209,14 @@
 
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
+    {
+      date:    '19 June 2026',
+      version: 'v3.12',
+      items: [
+        'Simpler folders — just Crest & Logos, Photos, Club Info and Miscellaneous.',
+        'Dropped the description box when uploading — just pick your files and go.'
+      ]
+    },
     {
       date:    '19 June 2026',
       version: 'v3.11',
@@ -1756,12 +1772,6 @@
 
       <!-- Selected files list (visible only when 1+ files chosen) -->
       <ul class="pp-upload-list" id="ppUploadList" style="display:none;"></ul>
-
-      <div class="form-group" id="ppUploadDescGroup" style="margin-top:14px;">
-        <label>Description (optional)</label>
-        <input type="text" id="ppUploadDesc" placeholder="Brief note about this file…">
-        <div class="form-hint" id="ppUploadDescHint" style="display:none;">Description applies to all files in this upload.</div>
-      </div>
 
       <div class="pp-upload-progress" id="ppUploadProgress" style="display:none;">
         <div class="spinner"></div>
@@ -3413,7 +3423,6 @@ function ppOpenNlfUpload() {
   var pathLabel = 'National League Assets';
   ppNlfPathTrail().forEach(function(crumb) { pathLabel += ' › ' + crumb.name; });
   document.getElementById('ppUploadDest').value = pathLabel;
-  document.getElementById('ppUploadDesc').value = '';
   ppRefreshUploadList();
   document.getElementById('ppFileInput').value = '';
   document.getElementById('ppUploadProgress').style.display = 'none';
@@ -3437,7 +3446,6 @@ function ppOpenUpload() {
   STATE.upload = { mode: 'create', files: [], replaceFileId: null, replaceFilename: null };
   document.getElementById('ppUploadTitle').textContent = 'Upload files';
   document.getElementById('ppUploadDest').value = club.name + ' — ' + folder.name;
-  document.getElementById('ppUploadDesc').value = '';
   ppRefreshUploadList();
   document.getElementById('ppFileInput').value = '';
   document.getElementById('ppUploadProgress').style.display = 'none';
@@ -3473,7 +3481,6 @@ function ppOnFileChosen(ev) {
 /* Render the selected-files list inside the upload modal. */
 function ppRefreshUploadList() {
   var list  = document.getElementById('ppUploadList');
-  var hint  = document.getElementById('ppUploadDescHint');
   var dropFn = document.getElementById('ppDropzoneFilename');
   var files = STATE.upload.files || [];
 
@@ -3481,12 +3488,10 @@ function ppRefreshUploadList() {
     list.style.display = 'none';
     list.innerHTML = '';
     dropFn.textContent = '';
-    if (hint) hint.style.display = 'none';
     return;
   }
 
   dropFn.textContent = files.length + ' file' + (files.length === 1 ? '' : 's') + ' selected';
-  if (hint) hint.style.display = files.length > 1 ? 'block' : 'none';
 
   list.style.display = 'block';
   list.innerHTML = files.map(function(item, idx) {
@@ -3544,7 +3549,6 @@ function ppDoUpload() {
     destLabel = club.name + ' / ' + folder.name;
   }
 
-  var description = document.getElementById('ppUploadDesc').value;
   var btn = document.getElementById('ppUploadConfirm');
   btn.disabled = true;
   document.getElementById('ppUploadProgress').style.display = 'flex';
@@ -3596,7 +3600,7 @@ function ppDoUpload() {
     /* Files over the threshold stream up in chunks through GAS (no ~25MB base64
        wall); smaller ones keep the simple single-shot base64 path. */
     var uploadStep = (item.file.size > PP_RESUMABLE_THRESHOLD)
-      ? ppUploadChunked(item, clubKey, folderKey, description)
+      ? ppUploadChunked(item, clubKey, folderKey)
       : ppFileToBase64(item.file).then(function(b64) {
           return ppCallGas({
             action:      'pp_upload',
@@ -3604,8 +3608,7 @@ function ppDoUpload() {
             folderKey:   folderKey,
             filename:    item.file.name,
             mimeType:    item.file.type || 'application/octet-stream',
-            dataB64:     b64,
-            description: description
+            dataB64:     b64
           });
         });
 
@@ -3665,7 +3668,7 @@ var PP_CHUNK_FALLBACK      = 8 * 1024 * 1024;           /* 8MB if GAS doesn't ad
    (no CORS, no size/time ceiling). Resolves to the same { ok, fileId, ... }
    shape as the base64 pp_upload so the caller is uniform. The file goes
    directly into the owner's Drive folder — never shared. */
-function ppUploadChunked(item, clubKey, folderKey, description) {
+function ppUploadChunked(item, clubKey, folderKey) {
   var file = item.file;
   return ppCallGas({
     action:    'pp_upload_begin',
@@ -3673,8 +3676,7 @@ function ppUploadChunked(item, clubKey, folderKey, description) {
     folderKey: folderKey,
     filename:  file.name,
     mimeType:  file.type || 'application/octet-stream',
-    totalSize: file.size,
-    description: description
+    totalSize: file.size
   }).then(function(begin) {
     if (!begin.ok) throw new Error(begin.error || 'Could not start upload');
     var uploadId  = begin.uploadId;
