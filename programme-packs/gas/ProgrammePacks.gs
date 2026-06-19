@@ -51,6 +51,13 @@
 function pp_getChangelog() {
   return [
     {
+      version: 'v1.4',
+      date:    '19 June 2026',
+      changes: [
+        'pp_list_folder now also returns driveFolderId — powers an admin/superadmin "Open in Drive" button in the folder view so they can jump straight to the underlying Drive folder to investigate.'
+      ]
+    },
+    {
       version: 'v1.3',
       date:    '19 June 2026',
       changes: [
@@ -1498,7 +1505,7 @@ function pp_list_folder(body) {
     });
   }
 
-  return respond({ ok: true, clubKey: clubKey, folderKey: folderKey, files: out });
+  return respond({ ok: true, clubKey: clubKey, folderKey: folderKey, driveFolderId: driveFolderId, files: out });
 }
 
 

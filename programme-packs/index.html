@@ -3,10 +3,19 @@
 <head>
 <!--
   NL Tools — Programme Packs
-  Version: 3.10
+  Version: 3.11
   Date: 19/06/2026
 
   CHANGELOG
+  v3.11 (19/06/2026)
+    - FIX: a file uploaded into the folder you're viewing no longer stays
+      invisible. The Phase 1 live-listing snapshot is cached when a folder
+      opens, so a fresh upload wasn't in it and the ghost-filter hid it. Now the
+      snapshot is patched with the new file's Drive id on success and re-pulled
+      when the batch finishes.
+    - Admin/superadmin: "⤴ Open in Drive" button in the folder view jumps to the
+      underlying Drive folder (folderId now returned by pp_list_folder). Needs
+      GAS ProgrammePacks.gs v1.4.
   v3.10 (19/06/2026)
     - Phase 3 big-file download: files over 20MB now download via a temporary
       direct Drive link (pp_download_link) instead of base64-through-GAS, which
@@ -189,6 +198,14 @@
 
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
+    {
+      date:    '19 June 2026',
+      version: 'v3.11',
+      items: [
+        'Fixed: a file you just uploaded sometimes didn\'t appear in the folder until a refresh — it shows straight away now.',
+        'Admins get an "Open in Drive" button to jump to a folder directly in Google Drive.'
+      ]
+    },
     {
       date:    '19 June 2026',
       version: 'v3.10',
@@ -2561,7 +2578,7 @@ function ppLoadLiveFolder(clubKey, folderKey) {
       if (!r || !r.ok || !Array.isArray(r.files)) return;
       var ids = {};
       r.files.forEach(function(f) { if (f.driveFileId) ids[f.driveFileId] = true; });
-      STATE.liveSets[key] = { driveIds: ids, loadedAt: Date.now() };
+      STATE.liveSets[key] = { driveIds: ids, folderId: r.driveFolderId || null, loadedAt: Date.now() };
       /* Re-render only if we're still looking at this folder. */
       if (STATE.activeClub === clubKey && STATE.activeFolder === folderKey) ppRenderMainPanel();
       else if (clubKey === '_nl-central' && STATE.activeClub === '_nl-central') ppRenderMainPanel();
@@ -2614,6 +2631,12 @@ function ppRenderFilesView() {
   }
   if (STATE.isAdmin) {
     actionsHtml += '<button class="btn btn--ghost btn--sm" onclick="ppDoReconcile(\'' + NL.escJ(club.key) + '\', \'' + NL.escJ(folder.key) + '\')" title="Sync this folder with Drive — imports new files, fixes renames, marks deletions">↻ Sync with Drive</button>';
+    /* Admin/superadmin: jump straight to the underlying Drive folder to
+       investigate. folderId comes from the live-listing fetch (Phase 1). */
+    var liveSet = (STATE.liveSets || {})[club.key + '::' + folder.key];
+    if (liveSet && liveSet.folderId) {
+      actionsHtml += '<a class="btn btn--ghost btn--sm" href="https://drive.google.com/drive/folders/' + NL.escHtml(liveSet.folderId) + '" target="_blank" rel="noopener" title="Open this folder directly in Google Drive">⤴ Open in Drive</a>';
+    }
   }
   if (canEdit) {
     actionsHtml += '<button class="btn btn--primary btn--sm" onclick="ppOpenUpload()">⬆ Upload files</button>';
@@ -3579,6 +3602,12 @@ function ppDoUpload() {
       document.getElementById('ppUploadProgress').style.display = 'none';
       btn.disabled = false;
       btn.textContent = 'Upload';
+      /* Refresh the live-listing snapshot for this folder so new uploads show
+         even if the per-file patch missed (e.g. a render fired in between). */
+      if (successCount > 0) {
+        if (STATE.liveSets) delete STATE.liveSets[clubKey + '::' + folderKey];
+        ppLoadLiveFolder(clubKey, folderKey);
+      }
       if (failCount === 0 && successCount > 0) {
         NL.toast(successCount + ' file' + (successCount === 1 ? '' : 's') + ' uploaded.', 'success');
         /* All-good in single replace mode → cleanup old file */
@@ -3625,6 +3654,13 @@ function ppDoUpload() {
         if (!r.ok) throw new Error(r.error || 'Upload failed');
         item.status = 'ok';
         successCount++;
+        /* Phase-1 live listing cached what Drive held when the folder opened —
+           it won't include this just-uploaded file, so the ghost filter in
+           ppFilesIn would hide it. Add its Drive id to the cached snapshot. */
+        var liveKey = clubKey + '::' + folderKey;
+        if (r.driveFileId && STATE.liveSets && STATE.liveSets[liveKey]) {
+          STATE.liveSets[liveKey].driveIds[r.driveFileId] = true;
+        }
         ppAudit(STATE.upload.mode === 'replace' ? 'replaced' : 'uploaded', {
           fileId:    r.fileId,
           fileName:  item.file.name,
