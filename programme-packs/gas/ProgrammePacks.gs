@@ -14,10 +14,14 @@
  *     from the URL (the long string after /folders/), set this property to it.
  *
  * Add to doPost router (Code.gs):
- *   if (action === 'pp_bootstrap')   return pp_bootstrap(body);
- *   if (action === 'pp_upload')      return pp_upload(body);
- *   if (action === 'pp_download')    return pp_download(body);
- *   if (action === 'pp_preview')     return pp_preview(body);
+ *   if (action === 'pp_bootstrap')       return pp_bootstrap(body);
+ *   if (action === 'pp_upload')          return pp_upload(body);
+ *   if (action === 'pp_upload_begin')    return pp_upload_begin(body);
+ *   if (action === 'pp_upload_chunk')    return pp_upload_chunk(body);
+ *   if (action === 'pp_download')        return pp_download(body);
+ *   if (action === 'pp_preview')         return pp_preview(body);
+ *   if (action === 'pp_list_folder')     return pp_list_folder(body);
+ *   (plus pp_thumbnails, pp_zip, pp_delete, pp_reconcile_folder, pp_nlf_* as before)
  *
  * NOTE: This file uses the existing Utils.gs helpers respond(), rtdbRead() and
  * rtdbWrite() — but wraps the latter two in private pp_read_/pp_write_ helpers
@@ -43,6 +47,29 @@
  */
 function pp_getChangelog() {
   return [
+    {
+      version: 'v1.2',
+      date:    '19 June 2026',
+      changes: [
+        'Phase 2b (chunked upload, replaces the v1.1 direct-PUT approach). The v1.1 pp_upload_init/pp_upload_finalize had the browser PUT straight to the Drive resumable session — but Drive session URLs reject cross-origin browser PUTs (no CORS headers), so that path could never work from the page. Replaced with pp_upload_begin + pp_upload_chunk: the browser streams 8MB slices to GAS, which relays each to the resumable session server-side (no CORS in play) with the Content-Range header. Each chunk is its own call, so there is no single-request size or 6-minute limit. On the final chunk GAS writes the RTDB record. Files still land directly in the owner\'s Drive folder and are never shared.',
+        'Session state between chunks is held in CacheService (6h) keyed by an uploadId; only the user who began an upload may push its chunks.'
+      ]
+    },
+    {
+      version: 'v1.1',
+      date:    '19 June 2026',
+      changes: [
+        'Phase 2 (resumable upload, SUPERSEDED by v1.2). Added pp_upload_init + pp_upload_finalize for browser-direct PUT to a Drive resumable session. Withdrawn because Drive session URLs are not CORS-enabled for browser PUTs — see v1.2.'
+      ]
+    },
+    {
+      version: 'v1.0',
+      date:    '19 June 2026',
+      changes: [
+        'Phase 1 (live listing) groundwork. New pp_list_folder: lists a folder straight from Drive (non-trashed only) and joins each file to its RTDB record for uploader/description. This is the source the page will render from instead of the RTDB /files mirror, so files removed from Drive can no longer appear as "ghosts" — the list IS Drive.',
+        'pp_download / pp_preview / pp_delete now accept an optional driveFileId and act on it directly when no RTDB fileId is given. Lets the page operate on files that exist in Drive but have no /files record (e.g. dropped straight into Drive), which the live list surfaces.'
+      ]
+    },
     {
       version: 'v0.9',
       date:    '19 June 2026',
@@ -415,6 +442,229 @@ function pp_upload(body) {
 
 
 /* ============================================================================
+   2b. CHUNKED UPLOAD (Phase 2b) — for files too big for base64-through-GAS
+   ============================================================================
+   pp_upload's base64 path is capped ~25MB (base64 inflation + GAS POST limit).
+   For larger files the browser streams the file to GAS in chunks, and GAS
+   relays each chunk to a Drive resumable session it drives server-side.
+
+   Why relayed through GAS (not browser->Drive directly): Drive's resumable
+   session URLs reject cross-origin PUTs from a browser (no CORS headers), so a
+   direct browser upload is impossible. Routing through GAS sidesteps CORS
+   entirely — browser<->GAS works, and GAS<->Google is server-to-server.
+   Because each chunk is its own GAS call, there is no single-request size or
+   6-minute limit; arbitrarily large files work.
+
+   Flow:
+     1. pp_upload_begin  — auth + permission, mint a Drive resumable session,
+                           stash it in CacheService under an uploadId, return it.
+     2. pp_upload_chunk  — (called per 8MB slice) decode the chunk and PUT it to
+                           the session with the resumable Content-Range header.
+                           Drive answers 308 until the last chunk, then 200/201;
+                           on completion GAS writes the RTDB record.
+
+   The file lands directly in the owner's Drive folder — it is NEVER shared, so
+   privacy is identical to the base64 path. Only the transport differs.
+
+   Chunk size must be a multiple of 256KB (Drive requirement) for every chunk
+   except the last. The client uses 8MB (= 32 x 256KB).
+   ============================================================================ */
+
+var PP_UPLOAD_CHUNK = 8 * 1024 * 1024;   /* 8MB — advertised to the client */
+
+/* Resolve a (clubKey, folderKey) to its Drive folder ID. Shared by the
+   chunked handlers. Returns { ok, folderId } or { ok:false, error }. */
+function pp_resolveTargetFolderId_(clubKey, folderKey) {
+  if (clubKey === '_nl-central') {
+    var nlf = pp_read_(PP_DATA + '/nl-assets-folders/' + folderKey);
+    if (!nlf || !nlf.driveFolderId) return { ok: false, error: 'NL Assets folder not found' };
+    return { ok: true, folderId: nlf.driveFolderId };
+  }
+  var folderIds = pp_read_(PP_DATA + '/folder-ids/' + clubKey);
+  if (!folderIds || !folderIds[folderKey]) {
+    return { ok: false, error: 'Folder mapping not found for ' + clubKey + '/' + folderKey + '. Run pp_bootstrap?' };
+  }
+  return { ok: true, folderId: folderIds[folderKey] };
+}
+
+/* Permission check shared by the chunked handlers — mirrors pp_upload: NL
+   Assets is admin-only, club folders allow admins or own-club reps (tolerates
+   user.club being a display name vs slug). */
+function pp_canUploadTo_(user, clubKey) {
+  var isAdmin = (user.role === 'superadmin' || user.role === 'admin');
+  if (clubKey === '_nl-central') {
+    return isAdmin ? { ok: true } : { ok: false, error: 'Only NL admins can upload to National League Assets' };
+  }
+  var userClubSlug = user.club ? pp_clubKey_(user.club) : null;
+  if (isAdmin || (userClubSlug && userClubSlug === clubKey)) return { ok: true };
+  return { ok: false, error: 'Not permitted to upload to ' + clubKey + ' (your club: ' + (user.club || 'none') + ')' };
+}
+
+/* Body: { idToken, clubKey, folderKey, filename, mimeType, totalSize }
+   Returns: { ok, uploadId, chunkSize } */
+function pp_upload_begin(body) {
+  var verified = pp_verifyToken_(body.idToken);
+  if (!verified.ok) return respond({ ok: false, error: 'Auth failed: ' + verified.error });
+  var user = verified.user;
+
+  if (!body.clubKey || !body.folderKey || !body.filename || !body.totalSize) {
+    return respond({ ok: false, error: 'Missing required fields: clubKey, folderKey, filename, totalSize' });
+  }
+  var perm = pp_canUploadTo_(user, body.clubKey);
+  if (!perm.ok) return respond({ ok: false, error: perm.error });
+
+  var target = pp_resolveTargetFolderId_(body.clubKey, body.folderKey);
+  if (!target.ok) return respond({ ok: false, error: target.error });
+
+  /* Mint the resumable session with the script's own Drive OAuth token. */
+  var mime = body.mimeType || 'application/octet-stream';
+  var meta = { name: body.filename, parents: [target.folderId] };
+  var init = UrlFetchApp.fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true&fields=id',
+    {
+      method: 'post',
+      contentType: 'application/json; charset=UTF-8',
+      headers: {
+        Authorization: 'Bearer ' + ScriptApp.getOAuthToken(),
+        'X-Upload-Content-Type': mime
+      },
+      payload: JSON.stringify(meta),
+      muteHttpExceptions: true
+    }
+  );
+  if (init.getResponseCode() !== 200) {
+    return respond({ ok: false, error: 'Resumable init failed (' + init.getResponseCode() + '): ' + init.getContentText() });
+  }
+  var headers = init.getHeaders();
+  var sessionUrl = headers['Location'] || headers['location'];
+  if (!sessionUrl) return respond({ ok: false, error: 'Drive returned no upload session URL' });
+
+  /* Stash session state for the chunk calls. CacheService (6h) is plenty for an
+     in-progress upload; if evicted mid-flight the upload fails and the user
+     retries. Value is tiny (URLs + a few fields), well under the 100KB cap. */
+  var uploadId = pp_pushKey_();
+  var state = {
+    sessionUrl:     sessionUrl,
+    folderId:       target.folderId,
+    clubKey:        body.clubKey,
+    folderKey:      body.folderKey,
+    filename:       body.filename,
+    mimeType:       mime,
+    totalSize:      Number(body.totalSize),
+    description:    body.description || '',
+    uploadedBy:     user.uid,
+    uploadedByName: user.email
+  };
+  CacheService.getScriptCache().put('ppupl_' + uploadId, JSON.stringify(state), 21600);
+
+  return respond({ ok: true, uploadId: uploadId, chunkSize: PP_UPLOAD_CHUNK });
+}
+
+/* Body: { idToken, uploadId, offset, dataB64 }
+   Returns (mid-upload): { ok, done:false, received }
+   Returns (final chunk): { ok, done:true, fileId, driveFileId, size } */
+function pp_upload_chunk(body) {
+  var verified = pp_verifyToken_(body.idToken);
+  if (!verified.ok) return respond({ ok: false, error: 'Auth failed: ' + verified.error });
+  var user = verified.user;
+
+  if (!body.uploadId || body.offset == null || !body.dataB64) {
+    return respond({ ok: false, error: 'Missing required fields: uploadId, offset, dataB64' });
+  }
+
+  var cache = CacheService.getScriptCache();
+  var raw = cache.get('ppupl_' + body.uploadId);
+  if (!raw) return respond({ ok: false, error: 'Upload session expired or unknown — please restart the upload' });
+  var state = JSON.parse(raw);
+
+  /* Only the user who began the upload may push chunks to it. */
+  if (state.uploadedBy !== user.uid) {
+    return respond({ ok: false, error: 'This upload belongs to another user' });
+  }
+
+  var bytes;
+  try { bytes = Utilities.base64Decode(body.dataB64); }
+  catch (e) { return respond({ ok: false, error: 'Base64 decode failed: ' + e.message }); }
+
+  var offset = Number(body.offset);
+  var total  = state.totalSize;
+  var end    = offset + bytes.length - 1;
+
+  /* PUT this slice to the resumable session. No Authorization header — the
+     session URL itself authorises. followRedirects:false so the 308 "Resume
+     Incomplete" comes back to us instead of being chased. */
+  var resp = UrlFetchApp.fetch(state.sessionUrl, {
+    method: 'put',
+    contentType: state.mimeType,
+    headers: { 'Content-Range': 'bytes ' + offset + '-' + end + '/' + total },
+    payload: bytes,
+    followRedirects: false,
+    muteHttpExceptions: true
+  });
+  var code = resp.getResponseCode();
+
+  if (code === 308) {
+    /* More to come. Drive's Range header reports bytes stored; fall back to end+1. */
+    return respond({ ok: true, done: false, received: end + 1 });
+  }
+
+  if (code === 200 || code === 201) {
+    /* Upload complete — Drive returns the file resource (fields=id). */
+    var fileMeta;
+    try { fileMeta = JSON.parse(resp.getContentText()); }
+    catch (e) { return respond({ ok: false, error: 'Upload finished but Drive response was unreadable: ' + e.message }); }
+    var driveFileId = fileMeta.id;
+    if (!driveFileId) return respond({ ok: false, error: 'Upload finished but Drive returned no file id' });
+
+    /* Authoritative size/mime from Drive; also re-confirms the file is real. */
+    var driveFile;
+    try { driveFile = DriveApp.getFileById(driveFileId); }
+    catch (e) { return respond({ ok: false, error: 'Uploaded file not found after completion: ' + e.message }); }
+
+    var size = driveFile.getSize();
+    var mime = driveFile.getMimeType();
+    var fileId = pp_pushKey_();
+    var now = Date.now();
+    var meta = {
+      clubKey:        state.clubKey,
+      folderKey:      state.folderKey,
+      name:           state.filename,
+      size:           size,
+      mimeType:       mime,
+      type:           pp_typeFromMime_(mime),
+      driveFileId:    driveFileId,
+      uploadedBy:     state.uploadedBy,
+      uploadedByName: state.uploadedByName,
+      uploadedAt:     now,
+      lastModifiedAt: now,
+      lastModifiedBy: state.uploadedBy,
+      description:    state.description || '',
+      isDeleted:      false,
+      uploadMethod:   'chunked'
+    };
+    try { pp_write_(PP_DATA + '/files/' + fileId, meta); }
+    catch (e) {
+      try { driveFile.setTrashed(true); } catch (ignore) {}
+      return respond({ ok: false, error: 'Metadata write failed (Drive file removed): ' + e.message });
+    }
+
+    cache.remove('ppupl_' + body.uploadId);
+
+    pp_audit_('uploaded', {
+      userUid: state.uploadedBy, userName: state.uploadedByName, fileId: fileId,
+      fileName: state.filename, clubKey: state.clubKey, folderKey: state.folderKey,
+      via: 'chunked', size: size
+    });
+
+    return respond({ ok: true, done: true, fileId: fileId, driveFileId: driveFileId, size: size });
+  }
+
+  /* Any other code is a real failure. */
+  return respond({ ok: false, error: 'Chunk upload failed (HTTP ' + code + '): ' + resp.getContentText() });
+}
+
+
+/* ============================================================================
    3. DOWNLOAD
    ============================================================================
    Body:
@@ -430,24 +680,23 @@ function pp_download(body) {
   var verified = pp_verifyToken_(body.idToken);
   if (!verified.ok) return respond({ ok: false, error: 'Auth failed: ' + verified.error });
 
-  var meta = pp_read_(PP_DATA + '/files/' + body.fileId);
-  if (!meta) return respond({ ok: false, error: 'File not found: ' + body.fileId });
-  if (meta.isDeleted) return respond({ ok: false, error: 'File has been deleted' });
+  /* Accept either an RTDB fileId or a driveFileId (live-listing path). */
+  var resolved = pp_resolveFile_(body);
+  if (!resolved.ok) return respond({ ok: false, error: resolved.error });
+  var meta = resolved.meta;  /* may be null when called by driveFileId */
 
   var driveFile;
-  try { driveFile = DriveApp.getFileById(meta.driveFileId); }
+  try { driveFile = DriveApp.getFileById(resolved.driveFileId); }
   catch (e) { return respond({ ok: false, error: 'Drive file access failed: ' + e.message }); }
 
-  /* Self-healing: if Drive's name has drifted from RTDB's stored name (someone
-     renamed in Drive directly), patch RTDB silently. The user gets the file
-     they asked for, with the correct (current) filename. Cheap to do — we
-     already have both values. */
+  /* Self-healing: if a matching RTDB record exists and Drive's name has drifted
+     from it (renamed directly in Drive), patch RTDB silently. */
   var driveName = driveFile.getName();
-  if (driveName && driveName !== meta.name) {
+  if (meta && meta._id && driveName && driveName !== meta.name) {
     try {
-      pp_write_(PP_DATA + '/files/' + body.fileId + '/name', driveName);
-      pp_write_(PP_DATA + '/files/' + body.fileId + '/lastReconciledAt', Date.now());
-      meta.name = driveName;  /* use updated name in this response too */
+      pp_write_(PP_DATA + '/files/' + meta._id + '/name', driveName);
+      pp_write_(PP_DATA + '/files/' + meta._id + '/lastReconciledAt', Date.now());
+      meta.name = driveName;
     } catch (e) { /* swallow — the download still works regardless */ }
   }
 
@@ -456,9 +705,9 @@ function pp_download(body) {
 
   return respond({
     ok: true,
-    filename: meta.name,
-    mimeType: meta.mimeType,
-    size: meta.size,
+    filename: (meta && meta.name) || driveName,
+    mimeType: (meta && meta.mimeType) || driveFile.getMimeType(),
+    size: (meta && meta.size) || driveFile.getSize(),
     dataB64: b64
   });
 }
@@ -482,16 +731,16 @@ function pp_preview(body) {
   var verified = pp_verifyToken_(body.idToken);
   if (!verified.ok) return respond({ ok: false, error: 'Auth failed: ' + verified.error });
 
-  var meta = pp_read_(PP_DATA + '/files/' + body.fileId);
-  if (!meta) return respond({ ok: false, error: 'File not found' });
-  if (meta.isDeleted) return respond({ ok: false, error: 'File has been deleted' });
+  /* Accept either an RTDB fileId or a driveFileId (live-listing path). */
+  var resolved = pp_resolveFile_(body);
+  if (!resolved.ok) return respond({ ok: false, error: resolved.error });
 
   // Phase 0 placeholder: return the embed URL but note it requires the file
-  // to be shared. A proper signed approach lands in Phase 1.
+  // to be shared. The page currently falls back to pp_download for the bytes.
   return respond({
     ok: true,
-    embedUrl: 'https://drive.google.com/file/d/' + meta.driveFileId + '/preview',
-    note: 'Phase 0: this URL only works if file is shared. Phase 1 adds signed embed.'
+    embedUrl: 'https://drive.google.com/file/d/' + resolved.driveFileId + '/preview',
+    note: 'Embed URL only works if file is shared; page falls back to pp_download.'
   });
 }
 
@@ -779,47 +1028,52 @@ function pp_delete(body) {
   if (!verified.ok) return respond({ ok: false, error: 'Auth failed: ' + verified.error });
   var user = verified.user;
 
-  var fileId = body.fileId;
-  if (!fileId) return respond({ ok: false, error: 'fileId required' });
+  /* Accept either an RTDB fileId or a driveFileId (live-listing path). */
+  var resolved = pp_resolveFile_(body);
+  if (!resolved.ok) return respond({ ok: false, error: resolved.error });
+  var meta   = resolved.meta;            /* may be null (file not in /files) */
+  var rtdbId = meta ? meta._id : null;
+  var driveFileId = resolved.driveFileId;
 
-  var meta = pp_read_(PP_DATA + '/files/' + fileId);
-  if (!meta) return respond({ ok: false, error: 'File not found' });
-
+  /* Permission: admins always; otherwise only the uploader (which we can only
+     verify if an RTDB record exists). A Drive-only file with no record can be
+     deleted by admins only. */
   var isAdmin = (user.role === 'superadmin' || user.role === 'admin');
-  var isOwner = (meta.uploadedBy === user.uid);
+  var isOwner = !!(meta && meta.uploadedBy === user.uid);
   if (!isAdmin && !isOwner) {
     return respond({ ok: false, error: 'Not permitted to delete this file' });
   }
 
   /* Trash the Drive file. Drive holds it 30 days then permanently purges. */
   var driveError = null;
-  if (meta.driveFileId) {
+  if (driveFileId) {
     try {
-      var driveFile = DriveApp.getFileById(meta.driveFileId);
-      driveFile.setTrashed(true);
+      DriveApp.getFileById(driveFileId).setTrashed(true);
     } catch (e) {
-      /* If Drive file is already gone (manual delete or orphan from earlier
-         soft-delete behaviour), proceed anyway — we still want to clean
-         up the RTDB record. Log but don't fail. */
+      /* If Drive file is already gone, proceed anyway — we still want to clean
+         up any RTDB record. Log but don't fail. */
       driveError = e.message;
     }
   }
 
-  /* Remove the RTDB record entirely */
-  try {
-    pp_write_(PP_DATA + '/files/' + fileId, null);
-  } catch (e) {
-    return respond({ ok: false, error: 'RTDB delete failed: ' + e.message });
+  /* Remove the RTDB record entirely (if there is one) */
+  if (rtdbId) {
+    try {
+      pp_write_(PP_DATA + '/files/' + rtdbId, null);
+    } catch (e) {
+      return respond({ ok: false, error: 'RTDB delete failed: ' + e.message });
+    }
   }
 
   pp_audit_('hard_deleted', {
-    userUid:    user.uid,
-    userName:   user.email,
-    fileId:     fileId,
-    fileName:   meta.name,
-    clubKey:    meta.clubKey,
-    folderKey:  meta.folderKey,
-    driveError: driveError
+    userUid:     user.uid,
+    userName:    user.email,
+    fileId:      rtdbId,
+    driveFileId: driveFileId,
+    fileName:    meta ? meta.name : '',
+    clubKey:     meta ? meta.clubKey : '',
+    folderKey:   meta ? meta.folderKey : '',
+    driveError:  driveError
   });
 
   return respond({
@@ -1049,8 +1303,126 @@ function pp_reconcile_folder(body) {
 
 
 /* ============================================================================
+   LIVE LISTING — read a folder straight from Drive (Phase 1)
+   ============================================================================
+   The page renders folder contents from THIS instead of the RTDB /files mirror.
+   Because the list is whatever Drive actually holds (trashed files excluded by
+   DriveApp.getFiles()), a file removed from Drive simply isn't returned — there
+   is no "ghost" to clean up, no reconcile to run.
+
+   We still read /files once to ENRICH each Drive file with the two things Drive
+   doesn't track natively — uploader name and description — and to hand back the
+   RTDB push-key (rtdbId) when one exists, so existing download/delete/preview
+   calls keep working unchanged. Files in Drive with no /files record (dropped
+   straight into Drive) come back with rtdbId:null; the page acts on them by
+   driveFileId (see the driveFileId branches in pp_download/pp_preview/pp_delete).
+
+   Body: { idToken, clubKey, folderKey }   (clubKey '_nl-central' => NL Assets)
+   Returns: { ok, clubKey, folderKey, files: [ {
+       driveFileId, rtdbId|null, name, mimeType, type, size,
+       modifiedTime, uploadedAt, uploadedByName, description } ] }
+   Permission: any authenticated user (read), matching pp_download. */
+function pp_list_folder(body) {
+  var verified = pp_verifyToken_(body.idToken);
+  if (!verified.ok) return respond({ ok: false, error: 'Auth failed: ' + verified.error });
+
+  var clubKey   = body.clubKey;
+  var folderKey = body.folderKey;
+  if (!clubKey || !folderKey) {
+    return respond({ ok: false, error: 'clubKey and folderKey required' });
+  }
+
+  /* Resolve target Drive folder ID (same source map as upload/reconcile) */
+  var driveFolderId;
+  if (clubKey === '_nl-central') {
+    var nlf = pp_read_(PP_DATA + '/nl-assets-folders/' + folderKey);
+    if (!nlf || !nlf.driveFolderId) {
+      return respond({ ok: false, error: 'NL Assets folder not found' });
+    }
+    driveFolderId = nlf.driveFolderId;
+  } else {
+    var folderIds = pp_read_(PP_DATA + '/folder-ids/' + clubKey);
+    if (!folderIds || !folderIds[folderKey]) {
+      return respond({ ok: false, error: 'Folder mapping not found. Run pp_bootstrap?' });
+    }
+    driveFolderId = folderIds[folderKey];
+  }
+
+  var driveFolder;
+  try { driveFolder = DriveApp.getFolderById(driveFolderId); }
+  catch (e) { return respond({ ok: false, error: 'Drive folder access failed: ' + e.message }); }
+
+  /* Build a driveFileId -> RTDB-metadata index for enrichment. One read. */
+  var allFiles = pp_read_(PP_DATA + '/files') || {};
+  var byDriveId = {};
+  Object.keys(allFiles).forEach(function(fid) {
+    var m = allFiles[fid];
+    if (!m || m.isDeleted || !m.driveFileId) return;
+    byDriveId[m.driveFileId] = {
+      rtdbId:         fid,
+      uploadedByName: m.uploadedByName || '',
+      description:    m.description || '',
+      uploadedAt:     m.uploadedAt || 0
+    };
+  });
+
+  /* DriveApp.getFiles() returns only non-trashed files — the whole point. */
+  var out = [];
+  var iter = driveFolder.getFiles();
+  while (iter.hasNext()) {
+    var f = iter.next();
+    var driveId = f.getId();
+    var mime = f.getMimeType();
+    var meta = byDriveId[driveId] || {};
+    out.push({
+      driveFileId:    driveId,
+      rtdbId:         meta.rtdbId || null,
+      name:           f.getName(),
+      mimeType:       mime,
+      type:           pp_typeFromMime_(mime),
+      size:           f.getSize(),
+      modifiedTime:   f.getLastUpdated().getTime(),
+      uploadedAt:     meta.uploadedAt || f.getDateCreated().getTime(),
+      uploadedByName: meta.uploadedByName || '',
+      description:    meta.description || ''
+    });
+  }
+
+  return respond({ ok: true, clubKey: clubKey, folderKey: folderKey, files: out });
+}
+
+
+/* ============================================================================
    HELPERS
    ============================================================================ */
+
+/* Resolve the Drive file for a request that may carry either an RTDB fileId
+   (look up /files/<id>.driveFileId) or a driveFileId directly. Returns
+   { ok, driveFileId, meta }  where meta is the RTDB record or null.
+   Used by pp_download/pp_preview so the live-listing page can act on files
+   that have no /files record yet. */
+function pp_resolveFile_(body) {
+  if (body.driveFileId) {
+    var m = null;
+    /* best-effort: find the RTDB record (for name/mime/size) if one exists */
+    var all = pp_read_(PP_DATA + '/files') || {};
+    Object.keys(all).some(function(fid) {
+      if (all[fid] && all[fid].driveFileId === body.driveFileId && !all[fid].isDeleted) {
+        m = all[fid]; m._id = fid; return true;
+      }
+      return false;
+    });
+    return { ok: true, driveFileId: body.driveFileId, meta: m };
+  }
+  if (body.fileId) {
+    var meta = pp_read_(PP_DATA + '/files/' + body.fileId);
+    if (!meta) return { ok: false, error: 'File not found: ' + body.fileId };
+    if (meta.isDeleted) return { ok: false, error: 'File has been deleted' };
+    meta._id = body.fileId;
+    return { ok: true, driveFileId: meta.driveFileId, meta: meta };
+  }
+  return { ok: false, error: 'fileId or driveFileId required' };
+}
 
 /* Find an existing child folder by name, or create it. */
 function pp_findOrCreateFolder_(parentFolder, name) {
