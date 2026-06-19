@@ -14,11 +14,13 @@
  *     from the URL (the long string after /folders/), set this property to it.
  *
  * Add to doPost router (Code.gs):
- *   if (action === 'pp_bootstrap')    return pp_bootstrap(body);
- *   if (action === 'pp_upload')       return pp_upload(body);
- *   if (action === 'pp_download')     return pp_download(body);
- *   if (action === 'pp_preview')      return pp_preview(body);
- *   if (action === 'pp_list_folder')  return pp_list_folder(body);
+ *   if (action === 'pp_bootstrap')       return pp_bootstrap(body);
+ *   if (action === 'pp_upload')          return pp_upload(body);
+ *   if (action === 'pp_upload_init')     return pp_upload_init(body);
+ *   if (action === 'pp_upload_finalize') return pp_upload_finalize(body);
+ *   if (action === 'pp_download')        return pp_download(body);
+ *   if (action === 'pp_preview')         return pp_preview(body);
+ *   if (action === 'pp_list_folder')     return pp_list_folder(body);
  *   (plus pp_thumbnails, pp_zip, pp_delete, pp_reconcile_folder, pp_nlf_* as before)
  *
  * NOTE: This file uses the existing Utils.gs helpers respond(), rtdbRead() and
@@ -45,6 +47,14 @@
  */
 function pp_getChangelog() {
   return [
+    {
+      version: 'v1.1',
+      date:    '19 June 2026',
+      changes: [
+        'Phase 2 (resumable upload). New pp_upload_init + pp_upload_finalize let the browser upload files larger than the ~25MB base64 cap by PUTting straight to a Drive resumable session (minted by GAS with its own OAuth token), then registering the result in RTDB. finalize verifies the file actually landed in the target folder before writing metadata, so a forged finalize can\'t register an arbitrary file. Files land directly in the owner\'s Drive folder and are never shared — privacy is identical to the base64 path.',
+        'Extracted pp_resolveTargetFolderId_ and pp_canUploadTo_ helpers (shared by the resumable handlers; pp_upload\'s own inline copies left untouched).'
+      ]
+    },
     {
       version: 'v1.0',
       date:    '19 June 2026',
@@ -421,6 +431,163 @@ function pp_upload(body) {
     driveFileId: driveFile.getId(),
     folderId: targetFolder.getId()
   });
+}
+
+
+/* ============================================================================
+   2b. RESUMABLE UPLOAD (Phase 2) — for files too big for base64-through-GAS
+   ============================================================================
+   pp_upload's base64 path is capped ~25MB (base64 inflation + GAS POST limit).
+   For larger files the browser uploads STRAIGHT TO DRIVE via a resumable
+   session that GAS mints with its own OAuth token, then calls finalize to
+   register the file in RTDB.
+
+   Flow:
+     1. pp_upload_init     — auth + permission, mint a Drive resumable session
+                             into the target folder, return its sessionUrl.
+     2. (browser) PUT the file bytes to sessionUrl (no token needed — the
+        session URL itself authorises the upload). Drive returns the file JSON.
+     3. pp_upload_finalize — verify the file is really in the target folder
+                             (guards against a forged finalize), write RTDB.
+
+   The file lands directly in the owner's Drive folder — it is NEVER shared,
+   so privacy is identical to the base64 path. Only the transport differs.
+   ============================================================================ */
+
+/* Resolve a (clubKey, folderKey) to its Drive folder ID. Shared by the
+   resumable handlers. Returns { ok, folderId } or { ok:false, error }. */
+function pp_resolveTargetFolderId_(clubKey, folderKey) {
+  if (clubKey === '_nl-central') {
+    var nlf = pp_read_(PP_DATA + '/nl-assets-folders/' + folderKey);
+    if (!nlf || !nlf.driveFolderId) return { ok: false, error: 'NL Assets folder not found' };
+    return { ok: true, folderId: nlf.driveFolderId };
+  }
+  var folderIds = pp_read_(PP_DATA + '/folder-ids/' + clubKey);
+  if (!folderIds || !folderIds[folderKey]) {
+    return { ok: false, error: 'Folder mapping not found for ' + clubKey + '/' + folderKey + '. Run pp_bootstrap?' };
+  }
+  return { ok: true, folderId: folderIds[folderKey] };
+}
+
+/* Permission check shared by pp_upload_init / pp_upload_finalize — mirrors
+   pp_upload: NL Assets is admin-only, club folders allow admins or own-club
+   reps (tolerates user.club being a display name vs slug). */
+function pp_canUploadTo_(user, clubKey) {
+  var isAdmin = (user.role === 'superadmin' || user.role === 'admin');
+  if (clubKey === '_nl-central') {
+    return isAdmin ? { ok: true } : { ok: false, error: 'Only NL admins can upload to National League Assets' };
+  }
+  var userClubSlug = user.club ? pp_clubKey_(user.club) : null;
+  if (isAdmin || (userClubSlug && userClubSlug === clubKey)) return { ok: true };
+  return { ok: false, error: 'Not permitted to upload to ' + clubKey + ' (your club: ' + (user.club || 'none') + ')' };
+}
+
+/* Body: { idToken, clubKey, folderKey, filename, mimeType }
+   Returns: { ok, sessionUrl, folderId } */
+function pp_upload_init(body) {
+  var verified = pp_verifyToken_(body.idToken);
+  if (!verified.ok) return respond({ ok: false, error: 'Auth failed: ' + verified.error });
+  var user = verified.user;
+
+  if (!body.clubKey || !body.folderKey || !body.filename) {
+    return respond({ ok: false, error: 'Missing required fields: clubKey, folderKey, filename' });
+  }
+  var perm = pp_canUploadTo_(user, body.clubKey);
+  if (!perm.ok) return respond({ ok: false, error: perm.error });
+
+  var target = pp_resolveTargetFolderId_(body.clubKey, body.folderKey);
+  if (!target.ok) return respond({ ok: false, error: target.error });
+
+  /* Mint the resumable session with the script's own Drive OAuth token. */
+  var meta = { name: body.filename, parents: [target.folderId] };
+  var init = UrlFetchApp.fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true&fields=id',
+    {
+      method: 'post',
+      contentType: 'application/json; charset=UTF-8',
+      headers: {
+        Authorization: 'Bearer ' + ScriptApp.getOAuthToken(),
+        'X-Upload-Content-Type': body.mimeType || 'application/octet-stream'
+      },
+      payload: JSON.stringify(meta),
+      muteHttpExceptions: true
+    }
+  );
+  if (init.getResponseCode() !== 200) {
+    return respond({ ok: false, error: 'Resumable init failed (' + init.getResponseCode() + '): ' + init.getContentText() });
+  }
+  var headers = init.getHeaders();
+  var sessionUrl = headers['Location'] || headers['location'];
+  if (!sessionUrl) return respond({ ok: false, error: 'Drive returned no upload session URL' });
+
+  return respond({ ok: true, sessionUrl: sessionUrl, folderId: target.folderId });
+}
+
+/* Body: { idToken, clubKey, folderKey, filename, mimeType, driveFileId, description }
+   Returns: { ok, fileId, driveFileId, size } */
+function pp_upload_finalize(body) {
+  var verified = pp_verifyToken_(body.idToken);
+  if (!verified.ok) return respond({ ok: false, error: 'Auth failed: ' + verified.error });
+  var user = verified.user;
+
+  if (!body.driveFileId || !body.clubKey || !body.folderKey || !body.filename) {
+    return respond({ ok: false, error: 'Missing required fields: driveFileId, clubKey, folderKey, filename' });
+  }
+  var perm = pp_canUploadTo_(user, body.clubKey);
+  if (!perm.ok) return respond({ ok: false, error: perm.error });
+
+  var target = pp_resolveTargetFolderId_(body.clubKey, body.folderKey);
+  if (!target.ok) return respond({ ok: false, error: target.error });
+
+  /* Verify the uploaded file exists and really sits in the target folder.
+     Without this, a forged finalize could register an arbitrary Drive file. */
+  var driveFile;
+  try { driveFile = DriveApp.getFileById(body.driveFileId); }
+  catch (e) { return respond({ ok: false, error: 'Uploaded file not found: ' + e.message }); }
+
+  var inFolder = false;
+  var parents = driveFile.getParents();
+  while (parents.hasNext()) {
+    if (parents.next().getId() === target.folderId) { inFolder = true; break; }
+  }
+  if (!inFolder) {
+    return respond({ ok: false, error: 'Uploaded file is not in the expected folder — refusing to register it' });
+  }
+
+  var size = driveFile.getSize();
+  var mime = driveFile.getMimeType();
+  var fileId = pp_pushKey_();
+  var now = Date.now();
+  var meta = {
+    clubKey:        body.clubKey,
+    folderKey:      body.folderKey,
+    name:           body.filename,
+    size:           size,
+    mimeType:       mime,
+    type:           pp_typeFromMime_(mime),
+    driveFileId:    body.driveFileId,
+    uploadedBy:     user.uid,
+    uploadedByName: user.email,
+    uploadedAt:     now,
+    lastModifiedAt: now,
+    lastModifiedBy: user.uid,
+    description:    body.description || '',
+    isDeleted:      false,
+    uploadMethod:   'resumable'
+  };
+  try { pp_write_(PP_DATA + '/files/' + fileId, meta); }
+  catch (e) {
+    try { driveFile.setTrashed(true); } catch (ignore) {}
+    return respond({ ok: false, error: 'Metadata write failed (Drive file removed): ' + e.message });
+  }
+
+  pp_audit_('uploaded', {
+    userUid: user.uid, userName: user.email, fileId: fileId,
+    fileName: body.filename, clubKey: body.clubKey, folderKey: body.folderKey,
+    via: 'resumable', size: size
+  });
+
+  return respond({ ok: true, fileId: fileId, driveFileId: body.driveFileId, size: size });
 }
 
 
