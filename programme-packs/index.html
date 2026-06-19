@@ -3,10 +3,19 @@
 <head>
 <!--
   NL Tools — Programme Packs
-  Version: 3.7
+  Version: 3.8
   Date: 19/06/2026
 
   CHANGELOG
+  v3.8 (19/06/2026)
+    - Phase 2 resumable upload: files over 20MB no longer hit the ~25MB wall.
+      They upload straight to a Drive resumable session (minted by GAS via
+      pp_upload_init), with a live % progress bar, then register in RTDB via
+      pp_upload_finalize. Smaller files keep the existing base64 path. Selection
+      cap raised 25MB → 2GB. Files are never shared — they land directly in the
+      owner's Drive folder, same privacy as before.
+      Requires GAS ProgrammePacks.gs v1.1 + Code.gs v2.2 (pp_upload_init /
+      pp_upload_finalize routed).
   v3.7 (19/06/2026)
     - Phase 1 live-listing: when you open a folder, the tool now asks Drive
       what's actually in it (new GAS action pp_list_folder) and hides any
@@ -170,6 +179,13 @@
 
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
+    {
+      date:    '19 June 2026',
+      version: 'v3.8',
+      items: [
+        'You can now upload large files — the old 25MB limit is gone. Big files show a progress bar while they upload.'
+      ]
+    },
     {
       date:    '19 June 2026',
       version: 'v3.7',
@@ -1695,7 +1711,7 @@
       <div class="pp-dropzone" id="ppDropzone" onclick="document.getElementById('ppFileInput').click();">
         <div class="pp-dropzone__icon">⬆</div>
         <div class="pp-dropzone__title">Drop files here or click to browse</div>
-        <div class="pp-dropzone__hint">Pick one or many · max 25MB each</div>
+        <div class="pp-dropzone__hint">Pick one or many · large files supported</div>
         <div class="pp-dropzone__filename" id="ppDropzoneFilename"></div>
       </div>
 
@@ -3423,15 +3439,15 @@ function ppOnFileChosen(ev) {
     if (picked.length > 1) NL.toast('Replace takes one file. Using the first.', 'info');
     STATE.upload.files = [{ file: picked[0], status: 'pending', err: null }];
   } else {
-    /* Create mode: append to existing selection. Cap at 25MB per file (server-side
-       guard) — surface oversized files immediately so user can drop them. */
+    /* Create mode: append to existing selection. Files over 20MB upload via the
+       resumable path; cap at a generous ceiling to catch accidental huge picks. */
     var added = 0, oversized = 0;
     for (var i = 0; i < picked.length; i++) {
-      if (picked[i].size > 25 * 1024 * 1024) { oversized++; continue; }
+      if (picked[i].size > PP_UPLOAD_MAX_BYTES) { oversized++; continue; }
       STATE.upload.files.push({ file: picked[i], status: 'pending', err: null });
       added++;
     }
-    if (oversized) NL.toast(oversized + ' file' + (oversized === 1 ? '' : 's') + ' over 25MB skipped.', 'error');
+    if (oversized) NL.toast(oversized + ' file' + (oversized === 1 ? '' : 's') + ' over ' + (PP_UPLOAD_MAX_BYTES / 1024 / 1024 / 1024).toFixed(1) + 'GB skipped.', 'error');
   }
   /* Reset the input so re-picking the same file fires onchange */
   ev.target.value = '';
@@ -3571,18 +3587,23 @@ function ppDoUpload() {
     document.getElementById('ppUploadProgressText').textContent =
       'Uploading ' + (++doneCount) + ' of ' + totalToUpload + '… ' + item.file.name;
 
-    ppFileToBase64(item.file)
-      .then(function(b64) {
-        return ppCallGas({
-          action:      'pp_upload',
-          clubKey:     clubKey,
-          folderKey:   folderKey,
-          filename:    item.file.name,
-          mimeType:    item.file.type || 'application/octet-stream',
-          dataB64:     b64,
-          description: description
+    /* Files over the threshold go straight to Drive via a resumable session
+       (no ~25MB base64 wall); smaller ones keep the simple base64 path. */
+    var uploadStep = (item.file.size > PP_RESUMABLE_THRESHOLD)
+      ? ppUploadResumable(item, clubKey, folderKey, description)
+      : ppFileToBase64(item.file).then(function(b64) {
+          return ppCallGas({
+            action:      'pp_upload',
+            clubKey:     clubKey,
+            folderKey:   folderKey,
+            filename:    item.file.name,
+            mimeType:    item.file.type || 'application/octet-stream',
+            dataB64:     b64,
+            description: description
+          });
         });
-      })
+
+    uploadStep
       .then(function(r) {
         if (!r.ok) throw new Error(r.error || 'Upload failed');
         item.status = 'ok';
@@ -3617,6 +3638,70 @@ function ppFileToBase64(file) {
     };
     reader.onerror = function() { reject(reader.error || new Error('Read failed')); };
     reader.readAsDataURL(file);
+  });
+}
+
+/* Files bigger than this skip the base64-through-GAS path (which caps ~25MB
+   due to base64 inflation + GAS POST limits) and upload straight to Drive via
+   a resumable session minted server-side. */
+var PP_RESUMABLE_THRESHOLD = 20 * 1024 * 1024;          /* 20 MB — above this, resumable */
+var PP_UPLOAD_MAX_BYTES    = 2 * 1024 * 1024 * 1024;    /* 2 GB ceiling (sanity guard) */
+
+/* Resumable upload (Phase 2): init a Drive session via GAS, PUT the bytes
+   straight to Drive, then finalize (register in RTDB). Resolves to the same
+   { ok, fileId, ... } shape as the base64 pp_upload so the caller is uniform.
+   The file goes directly into the owner's Drive folder — never shared. */
+function ppUploadResumable(item, clubKey, folderKey, description) {
+  return ppCallGas({
+    action:    'pp_upload_init',
+    clubKey:   clubKey,
+    folderKey: folderKey,
+    filename:  item.file.name,
+    mimeType:  item.file.type || 'application/octet-stream'
+  }).then(function(init) {
+    if (!init.ok) throw new Error(init.error || 'Could not start upload');
+    return ppPutToDriveSession(init.sessionUrl, item);
+  }).then(function(driveFile) {
+    if (!driveFile || !driveFile.id) throw new Error('Upload completed but Drive returned no file id');
+    return ppCallGas({
+      action:      'pp_upload_finalize',
+      clubKey:     clubKey,
+      folderKey:   folderKey,
+      filename:    item.file.name,
+      mimeType:    item.file.type || 'application/octet-stream',
+      driveFileId: driveFile.id,
+      description: description
+    });
+  });
+}
+
+/* PUT the whole file to a Drive resumable session URL. Uses XHR (not fetch) so
+   we get upload.onprogress for the progress bar. The session URL authorises the
+   upload by itself, so no Authorization header is sent. Resolves to the parsed
+   Drive file JSON ({ id, ... }) on 200/201. */
+function ppPutToDriveSession(sessionUrl, item) {
+  return new Promise(function(resolve, reject) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('PUT', sessionUrl, true);
+    xhr.setRequestHeader('Content-Type', item.file.type || 'application/octet-stream');
+    xhr.upload.onprogress = function(e) {
+      if (!e.lengthComputable) return;
+      var pct = Math.round((e.loaded / e.total) * 100);
+      item.progress = pct;
+      var el = document.getElementById('ppUploadProgressText');
+      if (el) el.textContent = 'Uploading ' + item.file.name + '… ' + pct + '%';
+    };
+    xhr.onload = function() {
+      if (xhr.status === 200 || xhr.status === 201) {
+        try { resolve(JSON.parse(xhr.responseText)); }
+        catch (e) { reject(new Error('Upload finished but Drive response was unreadable')); }
+      } else {
+        reject(new Error('Upload failed (HTTP ' + xhr.status + ')'));
+      }
+    };
+    xhr.onerror = function() { reject(new Error('Network/CORS error during upload')); };
+    xhr.onabort = function() { reject(new Error('Upload aborted')); };
+    xhr.send(item.file);
   });
 }
 
