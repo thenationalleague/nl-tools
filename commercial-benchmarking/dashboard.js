@@ -180,17 +180,7 @@ window.CBDash = (function () {
       var provided = own.value != null, left = 50;
       if (provided && s.max > s.min) left = 3 + 94 * Math.max(0, Math.min(1, (own.value - s.min) / (s.max - s.min)));
       var medLeft = s.max > s.min ? 3 + 94 * ((s.median - s.min) / (s.max - s.min)) : 50;
-      // Secondary cross-reference line. Only shown when looking across all
-      // divisions, where it adds context (here's where you sit in your own
-      // division). On a single-division (or Step 2) view we never mention a
-      // broader scope — a second median/band for "All divisions" just confuses.
-      var crossRef = '';
-      if (state.scope === 'league') {
-        var o = agg.scopes[OWN.division];
-        if (o) crossRef = '<div class="league-line"><span>' + divName(OWN.division) + ' median <b style="color:var(--text)">' +
-          fmtShort(o.median, u) + '</b> (' + o.count + ' clubs)</span>' +
-          '<span class="lg-pos">' + band(pctSel(own, 'div')).txt + '</span></div>';
-      }
+      // Only ever the selected scope — no secondary cross-reference line.
       return '<div class="bar-wrap"><div class="bar">' +
         '<div class="median" style="left:' + medLeft.toFixed(1) + '%"></div>' +
         (provided ? '<div class="marker" style="left:' + left.toFixed(1) + '%"></div>' : '') +
@@ -198,7 +188,7 @@ window.CBDash = (function () {
         '<span>' + fmtShort(s.min, u) + '<b>Lowest</b></span>' +
         '<span class="mid">' + fmtShort(s.median, u) + '<b>Median</b></span>' +
         '<span style="text-align:right">' + fmtShort(s.max, u) + '<b>Highest</b></span>' +
-        '</div>' + crossRef + '</div>';
+        '</div></div>';
     }
 
     // graph: one rising bar per club, this club's bar highlighted
