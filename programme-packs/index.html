@@ -3,10 +3,17 @@
 <head>
 <!--
   NL Tools — Programme Packs
-  Version: 3.15
+  Version: 3.16
   Date: 19/06/2026
 
   CHANGELOG
+  v3.16 (19/06/2026)
+    - "Open in Drive" everywhere + reliable. Now driven by folder-ids read from
+      RTDB (ppLoadFolderIds / ppDriveFolderId / ppDriveLinkBtn) instead of the
+      live-listing fetch, so the admin button shows instantly and at every level:
+      the club folder-grid (opens the whole club folder), inside each club
+      folder, the NL Assets root (opens the NL Assets area), and inside each NL
+      Assets folder. No GAS change (folder-ids is auth-readable per rules).
   v3.15 (19/06/2026)
     - Thumbnails now key off the Drive id, so Drive-only images (uploaded
       straight into Drive) get real thumbnails too — not just tool uploads.
@@ -225,6 +232,13 @@
 
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
+    {
+      date:    '19 June 2026',
+      version: 'v3.16',
+      items: [
+        'Admins: "Open in Drive" buttons now appear everywhere — on the club folder list, inside every folder, and across NL Assets.'
+      ]
+    },
     {
       date:    '19 June 2026',
       version: 'v3.14',
@@ -2009,7 +2023,8 @@ window.nlAuthReady = function(session) {
         ppLoadFolders(),
         ppLoadFiles(),
         ppLoadUsersIfNeeded(),
-        ppLoadNlAssetsFolders()
+        ppLoadNlAssetsFolders(),
+        ppLoadFolderIds()
       ]);
     })
     .then(function() {
@@ -2080,6 +2095,35 @@ function ppLoadClubs() {
       STATE.clubsByKey = {};
       arr.forEach(function(c) { STATE.clubsByKey[c.key] = c; });
     });
+}
+
+/* Drive folder ids per club: { clubKey: { _root, <folderKey>: driveId } }.
+   Readable by any signed-in user (rules). Powers "Open in Drive" links at every
+   level, instantly, without waiting on the live-listing fetch. */
+function ppLoadFolderIds() {
+  return firebase.database().ref(TOOL_DATA_PATH + '/folder-ids').once('value')
+    .then(function(snap) { STATE.folderIds = snap.val() || {}; })
+    .catch(function() { STATE.folderIds = {}; });
+}
+
+/* Drive id for a club folder, its club root, or an NL Assets folder. */
+function ppDriveFolderId(clubKey, folderKey) {
+  if (clubKey === '_nl-central' && folderKey) {
+    var nlf = STATE.nlAssetsFolders[folderKey];
+    return nlf && nlf.driveFolderId;
+  }
+  var club = (STATE.folderIds || {})[clubKey];
+  if (!club) return null;
+  return folderKey ? club[folderKey] : club._root;
+}
+
+/* Admin-only "Open in Drive" button HTML for a given Drive folder id ('' if
+   not admin or id unknown). */
+function ppDriveLinkBtn(driveFolderId, label) {
+  if (!STATE.isAdmin || !driveFolderId) return '';
+  return '<a class="btn btn--ghost btn--sm" href="https://drive.google.com/drive/folders/'
+    + NL.escHtml(driveFolderId) + '" target="_blank" rel="noopener" title="Open '
+    + (label || 'this folder') + ' directly in Google Drive">⤴ Open in Drive</a>';
 }
 
 function ppLoadFolders() {
@@ -2627,11 +2671,13 @@ function ppRenderFolderGrid() {
   var headClass = 'pp-panel__head';
   if (ppIsOwnClub(club.key)) headClass += ' pp-panel__head--own';
 
-  /* Download all in pack — all files across all 8 folders. Show only if any. */
+  /* Download all in pack — all files across all folders. Show only if any. */
   var packActionsHtml = '';
   if (totalFiles > 0) {
     packActionsHtml = '<button class="btn btn--ghost btn--sm" onclick="ppDownloadAllInClub(\'' + NL.escJ(club.key) + '\')" title="Download every file in this club\'s pack as a ZIP"> ' + PP_DOWNLOAD_ICON + 'Download pack</button>';
   }
+  /* Admin: open the whole club folder in Drive, without drilling into a folder. */
+  if (!club.isCentral) packActionsHtml += ppDriveLinkBtn(ppDriveFolderId(club.key, null), 'this club\'s folder');
 
   panel.innerHTML =
     '<div class="pp-panel">'
@@ -2736,12 +2782,7 @@ function ppRenderFilesView() {
   }
   if (STATE.isAdmin) {
     actionsHtml += '<button class="btn btn--ghost btn--sm" onclick="ppDoReconcile(\'' + NL.escJ(club.key) + '\', \'' + NL.escJ(folder.key) + '\')" title="Sync this folder with Drive — imports new files, fixes renames, marks deletions">↻ Sync with Drive</button>';
-    /* Admin/superadmin: jump straight to the underlying Drive folder to
-       investigate. folderId comes from the live-listing fetch (Phase 1). */
-    var liveSet = (STATE.liveSets || {})[club.key + '::' + folder.key];
-    if (liveSet && liveSet.folderId) {
-      actionsHtml += '<a class="btn btn--ghost btn--sm" href="https://drive.google.com/drive/folders/' + NL.escHtml(liveSet.folderId) + '" target="_blank" rel="noopener" title="Open this folder directly in Google Drive">⤴ Open in Drive</a>';
-    }
+    actionsHtml += ppDriveLinkBtn(ppDriveFolderId(club.key, folder.key), 'this folder');
   }
   if (canEdit) {
     actionsHtml += '<button class="btn btn--primary btn--sm" onclick="ppOpenUpload()">⬆ Upload files</button>';
@@ -3181,12 +3222,10 @@ function ppRenderNlAssets() {
   /* Sync with Drive (admin only, inside a folder) */
   if (currentId && STATE.isAdmin) {
     headerActions += '<button class="btn btn--ghost btn--sm" onclick="ppDoReconcile(\'_nl-central\', \'' + NL.escJ(currentId) + '\')" title="Sync this folder with Drive — imports new files, fixes renames, marks deletions">↻ Sync with Drive</button>';
-    /* Open this folder directly in Google Drive. folderId from the live fetch. */
-    var nlfLive = (STATE.liveSets || {})['_nl-central::' + currentId];
-    if (nlfLive && nlfLive.folderId) {
-      headerActions += '<a class="btn btn--ghost btn--sm" href="https://drive.google.com/drive/folders/' + NL.escHtml(nlfLive.folderId) + '" target="_blank" rel="noopener" title="Open this folder directly in Google Drive">⤴ Open in Drive</a>';
-    }
+    headerActions += ppDriveLinkBtn(ppDriveFolderId('_nl-central', currentId), 'this folder');
   }
+  /* At the NL Assets root, link to the whole NL Assets area in Drive. */
+  if (!currentId) headerActions += ppDriveLinkBtn(ppDriveFolderId('_nl-central', null), 'National League Assets');
 
   if (canEdit) {
     /* "New folder" only if depth allows */
