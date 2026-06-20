@@ -3,10 +3,14 @@
 <head>
 <!--
   NL Tools — Programme Packs
-  Version: 3.14
+  Version: 3.15
   Date: 19/06/2026
 
   CHANGELOG
+  v3.15 (19/06/2026)
+    - Thumbnails now key off the Drive id, so Drive-only images (uploaded
+      straight into Drive) get real thumbnails too — not just tool uploads.
+      Requires GAS ProgrammePacks.gs v1.6 (pp_thumbnails accepts driveFileIds).
   v3.14 (19/06/2026)
     - Drive mirror: folders now render straight from Drive's live listing
       (ppMergedFiles), so a file dropped directly into Drive shows for EVERYONE
@@ -2882,9 +2886,9 @@ function ppGetThumbObserver() {
 /* Queue a thumb fetch. Multiple cards intersecting at once are gathered into a
    single batched GAS call. ~5x faster than per-thumb roundtrips. */
 function ppQueueThumb(fileId) {
-  /* Drive-only files (id 'd:'+driveId) have no RTDB record, so pp_thumbnails
-     can't resolve them — skip straight to the type-icon fallback. */
-  if (typeof fileId === 'string' && fileId.indexOf('d:') === 0) return;
+  /* fileId here is a Drive file id (data-thumb-file-id). Cache + paint key off
+     it, so tool-uploaded and Drive-only images both thumbnail. */
+  if (!fileId) return;
   /* Already cached or in-flight — short-circuit */
   var existing = ppThumbCache[fileId];
   if (existing && existing.status === 'loaded') {
@@ -2911,7 +2915,7 @@ function ppFlushThumbQueue() {
 
   /* If more remain, schedule another flush after this batch's response (avoid
      firing parallel batches — they'd compete for GAS execution time). */
-  ppCallGas({ action: 'pp_thumbnails', fileIds: batch })
+  ppCallGas({ action: 'pp_thumbnails', driveFileIds: batch })
     .then(function(r) {
       if (!r.ok) throw new Error(r.error || 'Thumbnail batch failed');
       var results = r.results || {};
@@ -2973,11 +2977,12 @@ function ppRenderFileGrid(files, canEdit) {
   html += files.map(function(f) {
     var ic = ppFileTypeIcon(f.type);
     var isImage = (f.type === 'img');
-    var thumbAttr = isImage ? ' data-thumb-file-id="' + NL.escHtml(f.id) + '"' : '';
+    /* Thumbnails are keyed by Drive id, so they work for Drive-only files too. */
+    var thumbAttr = (isImage && f.driveFileId) ? ' data-thumb-file-id="' + NL.escHtml(f.driveFileId) + '"' : '';
     var thumbInner;
     if (isImage) {
       /* If already cached, paint immediately */
-      var cached = ppThumbCache[f.id];
+      var cached = ppThumbCache[f.driveFileId];
       if (cached && cached.status === 'loaded') {
         thumbInner = '<div class="pp-card__thumb is-loaded" style="background-image:url(\'' + cached.url + '\');"></div>';
       } else {
