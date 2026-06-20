@@ -3,10 +3,18 @@
 <head>
 <!--
   NL Tools — Programme Packs
-  Version: 3.13
+  Version: 3.14
   Date: 19/06/2026
 
   CHANGELOG
+  v3.14 (19/06/2026)
+    - Drive mirror: folders now render straight from Drive's live listing
+      (ppMergedFiles), so a file dropped directly into Drive shows for EVERYONE
+      the moment they open the folder — no admin Sync needed. Drive-only files
+      (no tool record) get id 'd:'+driveFileId and act via Drive id through the
+      download/delete/preview handlers (ppGetFile/ppGasRef). Thumbnails fall back
+      to a type icon for Drive-only files; "Download all" (zip) still covers only
+      tool-registered files for now. Requires GAS pp_list_folder (v1.4+).
   v3.13 (19/06/2026)
     - "⤴ Open in Drive" button now also appears in the NL Assets view (it was
       only in club folders before). Admin-only, uses the folder id from
@@ -213,6 +221,13 @@
 
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
+    {
+      date:    '19 June 2026',
+      version: 'v3.14',
+      items: [
+        'The tool now mirrors Google Drive live — files added straight into Drive show up here for everyone automatically, no Sync needed.'
+      ]
+    },
     {
       date:    '19 June 2026',
       version: 'v3.12',
@@ -2105,6 +2120,73 @@ function ppLoadFiles() {
   });
 }
 
+/* ----------------------------------------------------------------------------
+   DRIVE MIRROR — render a folder from Drive's live listing, not just RTDB.
+   ----------------------------------------------------------------------------
+   ppFilesIn renders only files the tool uploaded (RTDB records). The mirror
+   instead renders whatever Drive actually holds (from pp_list_folder), so files
+   dropped straight into Drive show up for EVERYONE the moment they open the
+   folder — no admin Sync needed. Each Drive file is joined to its RTDB record
+   (by driveFileId) for uploader/description; files with no record ("Drive-only")
+   get a synthetic id 'd:'+driveFileId and their basics cached in
+   STATE.liveFileMeta so download/delete/preview can act on them by Drive id.
+
+   Falls back to the cached ppFilesIn view until the live fetch lands. */
+function ppMergedFiles(clubKey, folderKey) {
+  var live = folderKey ? (STATE.liveSets || {})[clubKey + '::' + folderKey] : null;
+  if (!live || !Array.isArray(live.files)) return ppFilesIn(clubKey, folderKey);
+
+  /* index RTDB records by driveFileId for enrichment */
+  var byDrive = {};
+  Object.keys(STATE.files).forEach(function(id) {
+    var f = STATE.files[id];
+    if (f && !f.isDeleted && f.driveFileId) byDrive[f.driveFileId] = id;
+  });
+
+  STATE.liveFileMeta = STATE.liveFileMeta || {};
+  return live.files.map(function(lf) {
+    var rtdbId = byDrive[lf.driveFileId];
+    if (rtdbId) {
+      var m = STATE.files[rtdbId];
+      return {
+        id: rtdbId, driveFileId: lf.driveFileId, driveOnly: false,
+        name: m.name || lf.name, type: m.type || lf.type, size: m.size || lf.size,
+        uploadedAt: m.uploadedAt || lf.modifiedTime,
+        uploadedByName: m.uploadedByName || '', description: m.description || '',
+        clubKey: m.clubKey, folderKey: m.folderKey
+      };
+    }
+    /* Drive-only file — no RTDB record. Cache basics for the action handlers. */
+    var sid = 'd:' + lf.driveFileId;
+    STATE.liveFileMeta[sid] = {
+      id: sid, driveFileId: lf.driveFileId, driveOnly: true,
+      name: lf.name, type: lf.type, size: lf.size, mimeType: lf.mimeType,
+      uploadedAt: lf.modifiedTime, clubKey: clubKey, folderKey: folderKey
+    };
+    return {
+      id: sid, driveFileId: lf.driveFileId, driveOnly: true,
+      name: lf.name, type: lf.type, size: lf.size,
+      uploadedAt: lf.modifiedTime, uploadedByName: '', description: '',
+      clubKey: clubKey, folderKey: folderKey
+    };
+  });
+}
+
+/* Resolve a row id (RTDB key OR 'd:'+driveFileId) to its metadata. */
+function ppGetFile(id) {
+  if (!id) return null;
+  return STATE.files[id] || (STATE.liveFileMeta && STATE.liveFileMeta[id]) || null;
+}
+
+/* The GAS file reference for a row id — { fileId } for tool files, or
+   { driveFileId } for Drive-only files. Spread into a GAS action body. */
+function ppGasRef(id) {
+  if (STATE.files[id]) return { fileId: id };
+  var lf = STATE.liveFileMeta && STATE.liveFileMeta[id];
+  if (lf && lf.driveFileId) return { driveFileId: lf.driveFileId };
+  return { fileId: id };
+}
+
 function ppLoadNlAssetsFolders() {
   var db = firebase.database();
   return db.ref(TOOL_DATA_PATH + '/nl-assets-folders').once('value').then(function(snap) {
@@ -2597,7 +2679,7 @@ function ppLoadLiveFolder(clubKey, folderKey) {
       if (!r || !r.ok || !Array.isArray(r.files)) return;
       var ids = {};
       r.files.forEach(function(f) { if (f.driveFileId) ids[f.driveFileId] = true; });
-      STATE.liveSets[key] = { driveIds: ids, folderId: r.driveFolderId || null, loadedAt: Date.now() };
+      STATE.liveSets[key] = { driveIds: ids, files: r.files, folderId: r.driveFolderId || null, loadedAt: Date.now() };
       /* Re-render only if we're still looking at this folder. */
       if (STATE.activeClub === clubKey && STATE.activeFolder === folderKey) ppRenderMainPanel();
       else if (clubKey === '_nl-central' && STATE.activeClub === '_nl-central') ppRenderMainPanel();
@@ -2619,7 +2701,7 @@ function ppRenderFilesView() {
   if (!folder) { ppBackToFolders(); return; }
 
   var canEdit  = ppCanEditClub(club.key);
-  var allFiles = ppFilesIn(club.key, folder.key);
+  var allFiles = ppMergedFiles(club.key, folder.key);
 
   /* Apply search */
   var files = allFiles;
@@ -2800,6 +2882,9 @@ function ppGetThumbObserver() {
 /* Queue a thumb fetch. Multiple cards intersecting at once are gathered into a
    single batched GAS call. ~5x faster than per-thumb roundtrips. */
 function ppQueueThumb(fileId) {
+  /* Drive-only files (id 'd:'+driveId) have no RTDB record, so pp_thumbnails
+     can't resolve them — skip straight to the type-icon fallback. */
+  if (typeof fileId === 'string' && fileId.indexOf('d:') === 0) return;
   /* Already cached or in-flight — short-circuit */
   var existing = ppThumbCache[fileId];
   if (existing && existing.status === 'loaded') {
@@ -3036,7 +3121,9 @@ function ppRenderNlAssets() {
   var canEdit = STATE.isAdmin;
   var currentId = ppCurrentNlfId();
   var childFolders = ppNlfChildren(currentId);
-  var filesHere    = ppNlfFilesIn(currentId);
+  /* Inside a folder, mirror Drive (shows files dropped straight into Drive).
+     At the root there's no single Drive folder to list, so keep the RTDB view. */
+  var filesHere    = currentId ? ppMergedFiles('_nl-central', currentId) : ppNlfFilesIn(currentId);
 
   /* Apply search across both folders + files at current level */
   var foldersFiltered = childFolders;
@@ -3735,13 +3822,14 @@ function ppBlobToBase64(blob) {
 var PP_DOWNLOAD_LINK_THRESHOLD = 20 * 1024 * 1024;   /* 20 MB */
 
 function ppDoDownload(fileId) {
-  var meta = STATE.files[fileId];
+  var meta = ppGetFile(fileId);
   if (!meta) return;
 
   if ((meta.size || 0) > PP_DOWNLOAD_LINK_THRESHOLD) { ppDownloadViaLink(fileId, meta); return; }
 
   NL.toast('Preparing download…', 'info');
-  ppCallGas({ action: 'pp_download', fileId: fileId })
+  var body = ppGasRef(fileId); body.action = 'pp_download';
+  ppCallGas(body)
     .then(function(result) {
       if (!result.ok) throw new Error(result.error || 'Download failed');
       ppTriggerBrowserDownload(result.dataB64, result.mimeType, result.filename);
@@ -3762,7 +3850,8 @@ function ppDoDownload(fileId) {
    file a few minutes later via the share-cleanup trigger. */
 function ppDownloadViaLink(fileId, meta) {
   NL.toast('Preparing download…', 'info');
-  ppCallGas({ action: 'pp_download_link', fileId: fileId })
+  var body = ppGasRef(fileId); body.action = 'pp_download_link';
+  ppCallGas(body)
     .then(function(result) {
       if (!result.ok) throw new Error(result.error || 'Download failed');
       var a = document.createElement('a');
@@ -4032,7 +4121,7 @@ function ppMaybeAutoSync(clubKey, folderKey) {
    ============================================================================ */
 
 function ppOpenDelete(fileId) {
-  var meta = STATE.files[fileId];
+  var meta = ppGetFile(fileId);
   if (!meta) return;
   if (!ppCanEditClub(meta.clubKey)) {
     NL.toast('You can only delete files in your own club\'s folders.', 'error');
@@ -4051,19 +4140,17 @@ function ppCloseDelete() {
 function ppDoDelete() {
   if (!STATE.deleteId) return;
   var fileId = STATE.deleteId;
-  var meta = STATE.files[fileId];
+  var meta = ppGetFile(fileId);
   if (!meta) { ppCloseDelete(); return; }
 
   var btn = document.getElementById('ppDeleteConfirm');
   btn.disabled = true;
   btn.textContent = 'Deleting…';
 
-  /* v3.1: hard delete via GAS — Drive setTrashed (30-day Drive trash gives
-     recovery) + RTDB record removed. No more soft-delete metadata churn. */
-  ppCallGas({
-    action: 'pp_delete',
-    fileId: fileId
-  }).then(function(r) {
+  /* Hard delete via GAS — Drive setTrashed (30-day Drive trash gives recovery)
+     + RTDB record removed. Works by Drive id for Drive-only files too. */
+  var body = ppGasRef(fileId); body.action = 'pp_delete';
+  ppCallGas(body).then(function(r) {
     if (!r.ok) throw new Error(r.error || 'Delete failed');
     NL.toast('File deleted.', 'success');
     ppAudit('hard_deleted', {
@@ -4072,6 +4159,12 @@ function ppDoDelete() {
       clubKey:   meta.clubKey,
       folderKey: meta.folderKey
     });
+    /* Drive-only files have no RTDB listener to refresh the view — re-pull the
+       live snapshot so the deleted file drops out. (Harmless for RTDB files.) */
+    if (meta.clubKey && meta.folderKey && STATE.liveSets) {
+      delete STATE.liveSets[meta.clubKey + '::' + meta.folderKey];
+      ppLoadLiveFolder(meta.clubKey, meta.folderKey);
+    }
     ppCloseDelete();
     btn.disabled = false;
     btn.textContent = 'Delete';
@@ -4087,7 +4180,7 @@ function ppDoDelete() {
    ============================================================================ */
 
 function ppOpenPreview(fileId) {
-  var meta = STATE.files[fileId];
+  var meta = ppGetFile(fileId);
   if (!meta) return;
   STATE.previewId = fileId;
 
@@ -4119,7 +4212,8 @@ function ppOpenPreview(fileId) {
      For office docs / unknown types, show "download to view" prompt. */
   if (meta.type === 'pdf') {
     /* Try Drive embed first */
-    ppCallGas({ action: 'pp_preview', fileId: fileId }).then(function(r) {
+    var pvBody = ppGasRef(fileId); pvBody.action = 'pp_preview';
+    ppCallGas(pvBody).then(function(r) {
       if (!r.ok || !r.embedUrl) {
         /* fallback: download as base64 then blob-url it */
         return ppPreviewViaDownload(fileId, meta);
@@ -4141,7 +4235,8 @@ function ppOpenPreview(fileId) {
 
 function ppPreviewViaDownload(fileId, meta) {
   var canvas = document.getElementById('ppPreviewCanvas');
-  ppCallGas({ action: 'pp_download', fileId: fileId }).then(function(r) {
+  var dlBody = ppGasRef(fileId); dlBody.action = 'pp_download';
+  ppCallGas(dlBody).then(function(r) {
     if (!r.ok) {
       canvas.innerHTML = '<div style="padding:30px; color:var(--red-light);">Preview failed: ' + NL.escHtml(r.error || 'unknown') + '</div>';
       return;
