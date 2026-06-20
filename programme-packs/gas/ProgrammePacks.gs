@@ -51,6 +51,13 @@
 function pp_getChangelog() {
   return [
     {
+      version: 'v1.6',
+      date:    '19 June 2026',
+      changes: [
+        'pp_thumbnails now accepts driveFileIds directly (keyed by Drive id) so thumbnails work for Drive-only files (uploaded straight into Drive, no tool record) too — not just tool-uploaded ones. Also skips the /files read on this path. Legacy fileIds path kept for backward compatibility.'
+      ]
+    },
+    {
       version: 'v1.5',
       date:    '19 June 2026',
       changes: [
@@ -920,13 +927,39 @@ function pp_thumbnails(body) {
   var verified = pp_verifyToken_(body.idToken);
   if (!verified.ok) return respond({ ok: false, error: 'Auth failed: ' + verified.error });
 
+  var results = {};
+
+  /* Preferred path (v1.6+): the page sends Drive ids directly, so thumbnails
+     work for Drive-only files too and we skip the /files read entirely. Results
+     are keyed by Drive id. */
+  if (body.driveFileIds) {
+    var driveIds = body.driveFileIds;
+    if (!driveIds.length) return respond({ ok: false, error: 'No driveFileIds specified' });
+    if (driveIds.length > 20) return respond({ ok: false, error: 'Max 20 thumbs per batch' });
+    for (var d = 0; d < driveIds.length; d++) {
+      var did = driveIds[d];
+      try {
+        var dThumb = DriveApp.getFileById(did).getThumbnail();
+        if (!dThumb) { results[did] = { ok: false, error: 'No thumbnail' }; continue; }
+        results[did] = {
+          ok:       true,
+          dataB64:  Utilities.base64Encode(dThumb.getBytes()),
+          mimeType: dThumb.getContentType() || 'image/png'
+        };
+      } catch (e) {
+        results[did] = { ok: false, error: e.message };
+      }
+    }
+    return respond({ ok: true, results: results });
+  }
+
+  /* Legacy path: RTDB fileIds → resolve driveFileId via /files (kept for
+     backward compatibility with older page versions). */
   var fileIds = body.fileIds || [];
   if (!fileIds.length) return respond({ ok: false, error: 'No fileIds specified' });
   if (fileIds.length > 20) return respond({ ok: false, error: 'Max 20 thumbs per batch' });
 
   var allFiles = pp_read_(PP_DATA + '/files') || {};
-  var results = {};
-
   for (var i = 0; i < fileIds.length; i++) {
     var fid = fileIds[i];
     var meta = allFiles[fid];
