@@ -710,6 +710,21 @@ window.CBDash = (function () {
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     }
 
+    // CSV of every club's two links (check / benchmarking) to share alongside
+    function exportLinks() {
+      var tb = opts.tokenByClub || {};
+      function cell(s) { s = s == null ? '' : String(s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+      var lines = [['Club', 'Division', 'Check link (own data)', 'Benchmarking link'].map(cell).join(',')];
+      clubs.forEach(function (c) {
+        var tok = tb[c.club];
+        lines.push([c.club, c.division, tok ? proofUrl(tok) : '', tok ? linkUrl(tok) : ''].map(cell).join(','));
+      });
+      var blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+      var url = URL.createObjectURL(blob), a = document.createElement('a');
+      a.href = url; a.download = 'commercial-benchmarking-links-' + new Date().toISOString().slice(0, 10) + '.csv';
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    }
+
     // ---- admin: generate & manage per-club capability links ----
     function token24() {
       var a = new Uint8Array(24); window.crypto.getRandomValues(a);
@@ -752,11 +767,13 @@ window.CBDash = (function () {
       var have = clubs.filter(function (c) { return tb[c.club]; }).length;
       $('sections').innerHTML = '<div class="cb-edit-actions">' +
         '<button id="cb-genall" class="cb-edit-btn" type="button">Generate all missing</button>' +
+        '<button id="cb-linkdl" class="cb-edit-btn" type="button">Download links (CSV)</button>' +
         '<button id="cb-linkdone" class="cb-cancel" type="button">Done</button>' +
         '<span id="cb-linknote">' + have + ' of ' + clubs.length + ' clubs have links. <b>Proof</b> opens the club\'s own-data check; <b>Benchmarked</b> opens the full comparison. Share each privately with that club only.</span></div>' +
         '<table class="cb-linktable"><thead><tr><th>Club</th><th>Division</th><th>Proof</th><th>Benchmarked</th></tr></thead><tbody>' + rows + '</tbody></table>';
       $('cb-linkdone').onclick = function () { $('sections').onclick = null; render(); };
       $('cb-genall').onclick = genMissing;
+      $('cb-linkdl').onclick = exportLinks;
       $('sections').onclick = function (e) {
         var b = e.target.closest('button'); if (!b) return;
         if (b.getAttribute('data-gen')) genOne(b.getAttribute('data-gen'));
