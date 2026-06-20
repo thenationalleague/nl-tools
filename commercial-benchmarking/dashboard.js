@@ -710,18 +710,31 @@ window.CBDash = (function () {
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     }
 
-    // CSV of every club's two links (check / benchmarking) to share alongside
+    // Excel workbook of every club's two links, styled like the on-screen
+    // table, with "Proof"/"Benchmarking" as live hyperlinks (not raw URLs).
+    // Built as Excel-flavoured HTML so it carries both styling and clickable
+    // links without any library.
     function exportLinks() {
       var tb = opts.tokenByClub || {};
-      function cell(s) { s = s == null ? '' : String(s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
-      var lines = [['Club', 'Division', 'Check link (own data)', 'Benchmarking link'].map(cell).join(',')];
-      clubs.forEach(function (c) {
+      function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+      var th = 'style="background:#1B2A4A;color:#fff;font-weight:bold;text-align:left;padding:7px 12px;border:1px solid #cfd6e4"';
+      var td = 'style="padding:6px 12px;border:1px solid #e2e6ee"';
+      function lk(word, url) { return '<a href="' + esc(url) + '" style="color:#9e0000;font-weight:bold;text-decoration:none">' + word + '</a>'; }
+      var rows = clubs.map(function (c) {
         var tok = tb[c.club];
-        lines.push([c.club, c.division, tok ? proofUrl(tok) : '', tok ? linkUrl(tok) : ''].map(cell).join(','));
-      });
-      var blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+        return '<tr><td ' + td + '>' + esc(c.club) + '</td><td ' + td + '>' + esc(c.division) + '</td>' +
+          '<td ' + td + '>' + (tok ? lk('Proof', proofUrl(tok)) : '') + '</td>' +
+          '<td ' + td + '>' + (tok ? lk('Benchmarking', linkUrl(tok)) : '') + '</td></tr>';
+      }).join('');
+      var html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8">' +
+        '<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Club links</x:Name>' +
+        '<x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->' +
+        '<style>table{border-collapse:collapse;font-family:Arial,sans-serif;font-size:11pt}</style></head><body>' +
+        '<table><tr><th ' + th + '>Club</th><th ' + th + '>Division</th><th ' + th + '>Proof</th><th ' + th + '>Benchmarking</th></tr>' +
+        rows + '</table></body></html>';
+      var blob = new Blob(['﻿' + html], { type: 'application/vnd.ms-excel' });
       var url = URL.createObjectURL(blob), a = document.createElement('a');
-      a.href = url; a.download = 'commercial-benchmarking-links-' + new Date().toISOString().slice(0, 10) + '.csv';
+      a.href = url; a.download = 'commercial-benchmarking-links-' + new Date().toISOString().slice(0, 10) + '.xls';
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     }
 
@@ -767,7 +780,7 @@ window.CBDash = (function () {
       var have = clubs.filter(function (c) { return tb[c.club]; }).length;
       $('sections').innerHTML = '<div class="cb-edit-actions">' +
         '<button id="cb-genall" class="cb-edit-btn" type="button">Generate all missing</button>' +
-        '<button id="cb-linkdl" class="cb-edit-btn" type="button">Download links (CSV)</button>' +
+        '<button id="cb-linkdl" class="cb-edit-btn" type="button">Download links (Excel)</button>' +
         '<button id="cb-linkdone" class="cb-cancel" type="button">Done</button>' +
         '<span id="cb-linknote">' + have + ' of ' + clubs.length + ' clubs have links. <b>Proof</b> opens the club\'s own-data check; <b>Benchmarked</b> opens the full comparison. Share each privately with that club only.</span></div>' +
         '<table class="cb-linktable"><thead><tr><th>Club</th><th>Division</th><th>Proof</th><th>Benchmarked</th></tr></thead><tbody>' + rows + '</tbody></table>';
