@@ -3,10 +3,16 @@
 <head>
 <!--
   NL Tools — Programme Packs
-  Version: 3.16
+  Version: 3.17
   Date: 19/06/2026
 
   CHANGELOG
+  v3.17 (19/06/2026)
+    - Mirror freshness fix: the live Drive listing is now force-refreshed on
+      every folder open and after Sync / upload / delete, so a file added in
+      Drive shows on reopen (and "Sync" now reveals it immediately) without a
+      hard refresh. Previously the 60s cache could hide a just-synced file —
+      reconcile imported it but the mirror was still showing the stale snapshot.
   v3.16 (19/06/2026)
     - "Open in Drive" everywhere + reliable. Now driven by folder-ids read from
       RTDB (ppLoadFolderIds / ppDriveFolderId / ppDriveLinkBtn) instead of the
@@ -2703,11 +2709,11 @@ function ppOpenFolder(folderKey) {
 
   var club = ppCurrentClub();
   if (club) {
-    /* Live-listing (Phase 1): fetch what Drive actually holds so ghosts vanish.
-       Works for everyone (not just admins), unlike reconcile. */
-    ppLoadLiveFolder(club.key, folderKey);
-    /* Keep the admin auto-reconcile: it still IMPORTS Drive-dropped files into
-       the RTDB mirror so they appear (live-listing only hides, doesn't import). */
+    /* Mirror: pull what Drive actually holds, fresh on every open (force) so a
+       file added in Drive shows on reopen without a hard refresh. */
+    ppLoadLiveFolder(club.key, folderKey, true);
+    /* Auto-reconcile still imports Drive-dropped files into RTDB so they carry
+       proper metadata (uploader etc.); the mirror shows them regardless. */
     if (!club.isCentral) ppMaybeAutoSync(club.key, folderKey);
   }
 }
@@ -2717,12 +2723,15 @@ function ppOpenFolder(folderKey) {
    isn't in this set (ghosts). Cached per session with a short TTL so flipping
    between folders doesn't re-hit Drive constantly. */
 var PP_LIVE_TTL_MS = 60 * 1000;
-function ppLoadLiveFolder(clubKey, folderKey) {
+function ppLoadLiveFolder(clubKey, folderKey, force) {
   if (!clubKey || !folderKey) return;
   var key = clubKey + '::' + folderKey;
   STATE.liveSets = STATE.liveSets || {};
   var cached = STATE.liveSets[key];
-  if (cached && (Date.now() - cached.loadedAt) < PP_LIVE_TTL_MS) return;
+  /* `force` (used on folder open + after sync/upload/delete) bypasses the TTL so
+     the mirror reflects Drive right now. We keep the old snapshot in place while
+     the fetch is in flight, so the view doesn't flicker. */
+  if (!force && cached && (Date.now() - cached.loadedAt) < PP_LIVE_TTL_MS) return;
 
   ppCallGas({ action: 'pp_list_folder', clubKey: clubKey, folderKey: folderKey })
     .then(function(r) {
@@ -3353,8 +3362,8 @@ function ppNlfOpen(folderId) {
   STATE.nlAssetsPath = STATE.nlAssetsPath.concat([folderId]);
   STATE.search = '';
   ppRenderMainPanel();
-  /* Live-listing (Phase 1): hide ghosts. Plus admin auto-sync to import. */
-  ppLoadLiveFolder('_nl-central', folderId);
+  /* Mirror fresh on open + admin auto-sync to import metadata. */
+  ppLoadLiveFolder('_nl-central', folderId, true);
   ppMaybeAutoSync('_nl-central', folderId);
 }
 
@@ -3365,7 +3374,7 @@ function ppNlfNavigateTo(pathArr) {
   /* If we landed on a non-root NL Assets folder, sync it. */
   var currentId = pathArr.length > 0 ? pathArr[pathArr.length - 1] : null;
   if (currentId) {
-    ppLoadLiveFolder('_nl-central', currentId);
+    ppLoadLiveFolder('_nl-central', currentId, true);
     ppMaybeAutoSync('_nl-central', currentId);
   }
 }
@@ -3712,12 +3721,8 @@ function ppDoUpload() {
       document.getElementById('ppUploadProgress').style.display = 'none';
       btn.disabled = false;
       btn.textContent = 'Upload';
-      /* Refresh the live-listing snapshot for this folder so new uploads show
-         even if the per-file patch missed (e.g. a render fired in between). */
-      if (successCount > 0) {
-        if (STATE.liveSets) delete STATE.liveSets[clubKey + '::' + folderKey];
-        ppLoadLiveFolder(clubKey, folderKey);
-      }
+      /* Re-pull the live snapshot so new uploads show in the mirror. */
+      if (successCount > 0) ppLoadLiveFolder(clubKey, folderKey, true);
       if (failCount === 0 && successCount > 0) {
         NL.toast(successCount + ' file' + (successCount === 1 ? '' : 's') + ' uploaded.', 'success');
         setTimeout(ppCloseUpload, 800);
@@ -4092,6 +4097,10 @@ function ppDoReconcile(clubKey, folderKey) {
 
     /* Mark this folder as synced now so lazy auto-sync doesn't fire soon. */
     ppMarkSynced(clubKey, folderKey);
+
+    /* The Drive mirror renders from the cached live listing — re-pull it so any
+       just-imported/renamed/removed files show without a page refresh. */
+    ppLoadLiveFolder(clubKey, folderKey, true);
   }).catch(function(err) {
     NL.toast('Sync failed: ' + err.message, 'error');
   });
@@ -4152,8 +4161,10 @@ function ppMaybeAutoSync(clubKey, folderKey) {
         orphanedRtdb: r.orphanedRtdb,
         trigger:      'auto-on-open'
       });
+      /* Mirror renders from the cached live listing — re-pull so imported files
+         show without a refresh. */
+      ppLoadLiveFolder(clubKey, folderKey, true);
     }
-    /* Live RTDB listener picks up the changes — no manual rerender needed. */
   }).catch(function() {
     /* Silent — manual sync button is the explicit option if it matters. */
     ppLastSyncedAt[key] = last;
@@ -4205,9 +4216,8 @@ function ppDoDelete() {
     });
     /* Drive-only files have no RTDB listener to refresh the view — re-pull the
        live snapshot so the deleted file drops out. (Harmless for RTDB files.) */
-    if (meta.clubKey && meta.folderKey && STATE.liveSets) {
-      delete STATE.liveSets[meta.clubKey + '::' + meta.folderKey];
-      ppLoadLiveFolder(meta.clubKey, meta.folderKey);
+    if (meta.clubKey && meta.folderKey) {
+      ppLoadLiveFolder(meta.clubKey, meta.folderKey, true);
     }
     ppCloseDelete();
     btn.disabled = false;
