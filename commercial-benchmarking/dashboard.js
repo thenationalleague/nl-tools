@@ -926,11 +926,13 @@ window.CBDash = (function () {
     var mail = opts.reportEmail || 'commercial@thenationalleague.org.uk';
     var subj = encodeURIComponent('Commercial data correction — ' + OWN.club);
     var body = encodeURIComponent('Club: ' + OWN.club + '\n\nPlease describe anything below that is wrong or out of date:\n\n');
+    var mailto = 'mailto:' + mail + '?subject=' + subj + '&body=' + body;
+    var emailLink = '<a href="' + mailto + '">' + mail + '</a>';
     var html = '<div class="cb-rev-banner"><div class="cb-rev-blurb"><b>Please check the details below.</b> This is the commercial information we currently hold for '
       + esc(OWN.club) + ' (2025/26 season). '
-      + (has ? 'If anything is wrong or out of date, let us know — none of this is shared with other clubs.'
-             : 'We don’t currently hold commercial data for your club. If that’s not right, please get in touch.')
-      + '</div><a class="cb-rev-btn" href="mailto:' + mail + '?subject=' + subj + '&body=' + body + '">Report a correction</a></div>';
+      + (has ? 'If anything is wrong or out of date, let us know by emailing ' + emailLink + ' — none of this is shared with other clubs.'
+             : 'We don’t currently hold commercial data for your club. If that’s not right, please get in touch by emailing ' + emailLink + '.')
+      + '</div><a class="cb-rev-btn" href="' + mailto + '">Report a correction</a></div>';
 
     if (has) {
       html += group('Shirt &amp; kit sponsorship',
