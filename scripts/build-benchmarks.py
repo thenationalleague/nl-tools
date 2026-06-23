@@ -127,12 +127,28 @@ def tenure_years(iso):
     return round(max(0, months) / 12.0, 1)
 
 
+def parse_years(v):
+    """Free-text contract length -> number of years (None if blank/rolling)."""
+    if v is None:
+        return None
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return float(v)
+    s = str(v).strip().lower()
+    if not s or 'roll' in s:
+        return None
+    m = re.search(r'(\d+(?:\.\d+)?)', s)
+    if not m:
+        return 1.0 if ('annual' in s or 'season' in s or 'year' in s) else None
+    n = float(m.group(1))
+    return round(n / 12.0, 1) if 'month' in s else n
+
+
 def extract_stands(r, H):
     """Real stand sponsors only. A stand counts when it has a genuine sponsor
     name OR a positive income; blank / "0" / "vacant" slots (income 0 or empty)
     are dropped entirely — they are NOT a stand, so they must not inflate the
     stand count or drag down the average. Returns a list of {name, sector,
-    income, start} for the real stands."""
+    income, start, term} for the real stands."""
     out = []
     for s in (1, 2, 3, 4):
         nm = clean_name(r[H['Stand %d — Sponsor Name' % s]])
@@ -141,8 +157,10 @@ def extract_stands(r, H):
         sec = str(sec).strip() if sec is not None else ''
         di = _find(H, 'stand %d' % s, 'commenc') or _find(H, 'stand %d' % s, 'start')
         start = parse_month(r[di]) if di is not None else ''
+        ti = _find(H, 'stand %d' % s, 'length') or _find(H, 'stand %d' % s, 'contract length')
+        term = parse_years(r[ti]) if ti is not None else None
         if nm or (inc is not None and inc > 0):
-            out.append({'name': nm or '—', 'sector': sec, 'income': inc, 'start': start})
+            out.append({'name': nm or '—', 'sector': sec, 'income': inc, 'start': start, 'term': term})
     return out
 
 
