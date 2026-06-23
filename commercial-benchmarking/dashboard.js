@@ -992,39 +992,41 @@ window.CBDash = (function () {
       + item('Email database', plain(val('emailDb')))
       + item('Opted in to partner emails', plain(val('optedIn')))), HELP.email);
 
-    // Sign-off footer: confirm (recorded for the League) + report a correction.
+    // Sign-off footer: a confirm tickbox (recorded for the League, toggleable
+    // with an "are you sure?" both ways) + report a correction.
     function confirmedOn(ts) {
       if (!ts) return '';
       var d = new Date(ts);
       return isNaN(d) ? '' : ' on ' + d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
     }
-    var done = OWN.confirm && OWN.confirm.confirmed;
-    var confirmWrap = done
-      ? '<span class="cb-rev-confirmed">✓ Confirmed' + confirmedOn(OWN.confirm.at) + '</span>'
-      : '<label class="cb-rev-confirm"><input type="checkbox" id="cb-rev-ok"> I confirm the above is correct</label>';
-    html += '<div class="cb-rev-foot"><div id="cb-rev-confirmwrap">' + confirmWrap + '</div>' +
-      '<a class="cb-rev-btn cb-rev-btn-alt" href="' + mailto + '">Report a correction</a></div>';
+    var done = !!(OWN.confirm && OWN.confirm.confirmed);
+    html += '<div class="cb-rev-foot"><div class="cb-rev-confirmwrap">' +
+      '<label class="cb-rev-confirm"><input type="checkbox" id="cb-rev-ok"' + (done ? ' checked' : '') + '> I confirm the above is correct</label>' +
+      '<span id="cb-rev-confirmnote" class="cb-rev-confirmed">' + (done ? '✓ Confirmed' + confirmedOn(OWN.confirm.at) : '') + '</span>' +
+      '</div><a class="cb-rev-btn cb-rev-btn-alt" href="' + mailto + '">Report a correction</a></div>';
 
     if ($('sections')) $('sections').innerHTML = html;
 
-    // Record the confirmation in RTDB so staff can track completion / chase.
-    function wireConfirm() {
-      var ok = $('cb-rev-ok');
-      if (!ok || !opts.onConfirm) return;
+    // Record / clear the confirmation in RTDB, with a confirmation prompt both ways.
+    var ok = $('cb-rev-ok'), note = $('cb-rev-confirmnote'), current = done;
+    if (ok && opts.onConfirm) {
       ok.onchange = function () {
-        if (!ok.checked) return;
+        var want = ok.checked;
+        var ask = want
+          ? 'Please confirm that all the commercial information shown above is correct.'
+          : 'Remove your confirmation for this data? You can re-confirm at any time.';
+        if (!window.confirm(ask)) { ok.checked = current; return; }
         ok.disabled = true;
-        var wrap = $('cb-rev-confirmwrap');
-        if (wrap) wrap.innerHTML = '<span class="cb-rev-confirm">Saving…</span>';
-        Promise.resolve(opts.onConfirm()).then(function () {
-          if (wrap) wrap.innerHTML = '<span class="cb-rev-confirmed">✓ Confirmed — thank you</span>';
+        if (note) note.textContent = 'Saving…';
+        Promise.resolve(opts.onConfirm(want)).then(function () {
+          current = want; ok.disabled = false;
+          if (note) note.textContent = want ? '✓ Confirmed — thank you' : 'Not confirmed';
         }, function () {
-          if (wrap) wrap.innerHTML = '<label class="cb-rev-confirm"><input type="checkbox" id="cb-rev-ok"> I confirm the above is correct</label> <span class="cb-rev-err">Couldn’t save — please try again.</span>';
-          wireConfirm();
+          ok.checked = current; ok.disabled = false;
+          if (note) note.textContent = 'Couldn’t save — please try again.';
         });
       };
     }
-    wireConfirm();
   }
 
   return { mount: mount, recompute: recompute, hasData: hasData, NO_DATA: NO_DATA, review: review };
