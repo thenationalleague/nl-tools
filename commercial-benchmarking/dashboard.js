@@ -920,44 +920,71 @@ window.CBDash = (function () {
         + item('Rolling deal?', rolling(rollKey))
         + '</div></div>';
     }
-    function group(title, inner) { return '<div class="section"><div class="section-head"><h2>' + title + '</h2></div>' + inner + '</div>'; }
+    function help(t) { return '<div class="cb-rev-help">' + t + '</div>'; }
+    function group(title, inner, h) {
+      return '<div class="section"><div class="section-head"><h2>' + title + '</h2></div>' + (h ? help(h) : '') + inner + '</div>';
+    }
     function card(inner) { return '<div class="card cb-rev-card"><div class="cb-rev-grid">' + inner + '</div></div>'; }
+
+    // Gentle per-section guidance (incl. what each figure is NOT).
+    var HELP = {
+      shirt: 'Your shirt and kit sponsors. <b>Deal length</b> is the agreed contract term in years — if the deal simply renews each season that is a <b>1-year rolling</b> deal, not a multi-year one (please don’t enter, say, 25 years for a long-standing annual arrangement). Income is per season and excludes VAT.',
+      stand: 'Individual stand, ground or perimeter <b>sponsorships</b> and what each pays per season (excluding VAT). This is <b>not</b> matchday hospitality, a shirt deal, or an advertising board.',
+      boards: 'The price of a <b>single</b> pitch-side perimeter advertising board for the season — per board, not the whole ground. TV-facing boards sit within the broadcast camera arc; non-TV boards do not.',
+      tickets: 'Your <b>highest-priced general-admission adult</b> ticket — the standard top adult price, not concessions, hospitality or members’ rates. Matchday is a single game; Season is the full season.',
+      hosp: 'The price of your highest <b>individual matchday hospitality package, per person</b> — typically a seat in a lounge with food. This is <b>not</b> a private box hire, a match-sponsorship package, or a per-table price.',
+      programme: 'Whether you produce a matchday programme (printed or digital) and the cost of a <b>full-page advert for the season</b>.',
+      email: 'The size of your contactable supporter email database, and how many supporters have <b>opted in</b> to hear from commercial partners. Used to value digital and partner activations.'
+    };
 
     var mail = opts.reportEmail || 'commercial@thenationalleague.org.uk';
     var subj = encodeURIComponent('Commercial data correction — ' + OWN.club);
     var body = encodeURIComponent('Club: ' + OWN.club + '\n\nPlease describe anything below that is wrong or out of date:\n\n');
     var mailto = 'mailto:' + mail + '?subject=' + subj + '&body=' + body;
     var emailLink = '<a href="' + mailto + '">' + mail + '</a>';
-    var html = '<div class="cb-rev-banner"><div class="cb-rev-blurb"><b>Please check the details below.</b> This is the commercial information we currently hold for '
-      + esc(OWN.club) + ' (2025/26 season). '
-      + (has ? 'If anything is wrong or out of date, let us know by emailing ' + emailLink + ' — none of this is shared with other clubs.'
-             : 'We don’t currently hold commercial data for your club. If that’s not right, please get in touch by emailing ' + emailLink + '.')
-      + '</div><a class="cb-rev-btn" href="' + mailto + '">Report a correction</a></div>';
 
-    if (has) {
-      html += group('Shirt &amp; kit sponsorship',
-        shirt('Front of shirt', 'fsSponsor', 'fsSector', 'frontShirt', 'frontTerm', 'fsStart', 'rollingFront')
-        + shirt('Back of shirt', 'bsSponsor', 'bsSector', 'backShirt', 'backTerm', 'bsStart', 'rollingBack')
-        + shirt('Sleeve', 'slSponsor', 'slSector', 'sleeve', 'sleeveTerm', 'slStart', 'rollingSleeve'));
-
-      var stands = OWN.stands || [];
-      var srows = stands.length ? stands.map(function (s) {
-        return '<div class="cb-rev-stand"><span class="cb-rev-sname">' + esc(txt(s.name)) + '</span>'
-          + '<span class="cb-rev-ssec">' + esc(txt(s.sector)) + '</span>'
-          + '<span class="cb-rev-sinc">' + (s.income != null ? money(s.income) : '—') + '</span>'
-          + '<span class="cb-rev-sstart">' + (monthYear(s.start) || '') + '</span></div>';
-      }).join('') : '<div class="cb-rev-empty">No stand sponsors on file.</div>';
-      html += group('Stand sponsorship', '<div class="card cb-rev-card"><div class="cb-rev-stands">' + srows + '</div></div>');
-
-      html += group('Ground advertising', card(item('TV-facing board / season', money(val('tvBoard'))) + item('Non-TV board / season', money(val('nonTvBoard')))));
-      html += group('Ticketing', card(item('Top adult matchday ticket', money(val('msTicket'))) + item('Top adult season ticket', money(val('seasonTicket')))));
-      html += group('Hospitality', card(item('Top matchday package', money(val('mdHosp'))) + item('Top seasonal package', money(val('seasonHosp')))));
-      html += group('Programme', card(item('Format', esc(txt((OWN.chips || {}).progFormat))) + item('Full-page advert / season', money(val('progAd')))));
-      html += group('Email &amp; audience', card(item('Can email supporters?', chip('emailSupporters'))
-        + item('Can email partner offers?', chip('emailPartners'))
-        + item('Email database', plain(val('emailDb')))
-        + item('Opted in to partner emails', plain(val('optedIn')))));
+    // No data on file: skip the "check your data" page — point them at the survey.
+    if (!has) {
+      var surveyUrl = opts.surveyUrl || '';
+      var surveyTxt = surveyUrl ? '<a href="' + esc(surveyUrl) + '" target="_blank" rel="noopener">the survey</a>' : 'the survey';
+      if ($('sections')) $('sections').innerHTML =
+        '<div class="cb-rev-banner"><div class="cb-rev-blurb"><b>Your benchmarking isn’t available yet.</b> ' +
+        'Please fill in ' + surveyTxt + ' which was issued by Jon Warburton to get access to your benchmarking portal.</div></div>';
+      return;
     }
+
+    var html = '<div class="cb-rev-banner"><div class="cb-rev-blurb"><b>Please check the details below.</b> This is the commercial information we currently hold for ' +
+      esc(OWN.club) + ' (2025/26 season). If anything is wrong or out of date, let us know by emailing ' + emailLink +
+      ' — none of this is shared with other clubs.</div><a class="cb-rev-btn" href="' + mailto + '">Report a correction</a></div>';
+
+    html += group('Shirt &amp; kit sponsorship',
+      shirt('Front of shirt', 'fsSponsor', 'fsSector', 'frontShirt', 'frontTerm', 'fsStart', 'rollingFront')
+      + shirt('Back of shirt', 'bsSponsor', 'bsSector', 'backShirt', 'backTerm', 'bsStart', 'rollingBack')
+      + shirt('Sleeve', 'slSponsor', 'slSector', 'sleeve', 'sleeveTerm', 'slStart', 'rollingSleeve'), HELP.shirt);
+
+    var stands = OWN.stands || [];
+    var shead = '<div class="cb-rev-strow cb-rev-shead"><span>Stand sponsor</span><span>Sector</span><span>Value</span><span>Start date</span><span>Expiry</span></div>';
+    var srows = stands.length ? stands.map(function (s) {
+      return '<div class="cb-rev-strow"><span class="cb-rev-sname">' + esc(txt(s.name)) + '</span>' +
+        '<span class="cb-rev-ssec">' + esc(txt(s.sector)) + '</span>' +
+        '<span>' + (s.income != null ? money(s.income) : '—') + '</span>' +
+        '<span>' + (monthYear(s.start) || '—') + '</span>' +
+        '<span>' + (expiry(s.start, s.term) || '—') + '</span></div>';
+    }).join('') : '';
+    var standInner = stands.length
+      ? '<div class="cb-rev-stands">' + shead + srows + '</div>'
+      : '<div class="cb-rev-empty">No stand sponsors on file.</div>';
+    html += group('Stand sponsorship', '<div class="card cb-rev-card">' + standInner + '</div>', HELP.stand);
+
+    html += group('Ground advertising', card(item('TV-facing board / season', money(val('tvBoard'))) + item('Non-TV board / season', money(val('nonTvBoard')))), HELP.boards);
+    html += group('Ticketing', card(item('Top adult matchday ticket', money(val('msTicket'))) + item('Top adult season ticket', money(val('seasonTicket')))), HELP.tickets);
+    html += group('Hospitality', card(item('Top matchday package', money(val('mdHosp'))) + item('Top seasonal package', money(val('seasonHosp')))), HELP.hosp);
+    html += group('Programme', card(item('Format', esc(txt((OWN.chips || {}).progFormat))) + item('Full-page advert / season', money(val('progAd')))), HELP.programme);
+    html += group('Email &amp; audience', card(item('Can email supporters?', chip('emailSupporters'))
+      + item('Can email partner offers?', chip('emailPartners'))
+      + item('Email database', plain(val('emailDb')))
+      + item('Opted in to partner emails', plain(val('optedIn')))), HELP.email);
+
     if ($('sections')) $('sections').innerHTML = html;
   }
 
