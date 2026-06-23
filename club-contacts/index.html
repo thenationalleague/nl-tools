@@ -1,11 +1,15 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/index.html  v2.28
+  club-contacts/index.html  v2.29
   Public club DETAILS collection — GUIDED WIZARD (capability-URL pattern).
   Gathers a club's information AND people directory for club-directory.
   (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
   THIS IS THE UNIFIED FORM — supersedes the old club-data tool.
 
+  v2.29 (18/06/2026) — jump-to-section dropdown close fixed: outside clicks now use
+    a document pointerdown handler (dropped the fragile click+stopPropagation combo
+    that could leave it stuck open). Closes on select, on re-clicking the button,
+    on any outside press, and on Esc; outside-press no longer steals focus back.
   v2.28 (18/06/2026) — added a reminder bar under the hero linking clubs to the
     2025-26 Handbook (Calaméo) so they can check the data the League currently holds
     (club directory, pages 10–85).
@@ -739,14 +743,14 @@ firebase.initializeApp({
     el('riCount').textContent = 'Step ' + (cur + 1) + ' of ' + STEPS.length;
     el('riBar').style.width = Math.round((cur / (STEPS.length - 1)) * 100) + '%';
   }
-  function openJump(open) {
+  function openJump(open, focusBtn) {
     var menu = el('riJumpMenu'), btn = el('riJumpBtn');
     menu.hidden = !open; btn.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (open) {
       // Focus the current item so Up/Down arrows step through the list immediately.
       var c = menu.querySelector('.is-current') || menu.querySelector('.ri-jumpitem');
       if (c) { c.scrollIntoView({ block: 'nearest' }); c.focus(); }
-    } else { btn.focus(); }
+    } else if (focusBtn) { btn.focus(); }   // only return focus to the button on keyboard/button close
   }
   // Roving keyboard nav inside the open menu (arrows / Home / End; Enter activates the button natively).
   function jumpKeydown(e) {
@@ -1349,17 +1353,22 @@ firebase.initializeApp({
       goTo(cur + 1);
     });
     el('riBack').addEventListener('click', function () { if (cur > 0) goTo(cur - 1); });
-    el('riJumpBtn').addEventListener('click', function (e) { e.stopPropagation(); openJump(el('riJumpMenu').hidden); });
+    el('riJumpBtn').addEventListener('click', function () { openJump(el('riJumpMenu').hidden, true); });
     el('riJumpBtn').addEventListener('keydown', function (e) { if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && el('riJumpMenu').hidden) { e.preventDefault(); openJump(true); } });
     el('riJumpMenu').addEventListener('click', function (e) {
       var b = e.target.closest('[data-jump]'); if (!b) return;
       openJump(false); goTo(parseInt(b.getAttribute('data-jump'), 10));
     });
-    document.addEventListener('click', function (e) {
-      if (!el('riJumpMenu').hidden && !e.target.closest('.ri-jumpwrap')) openJump(false);
+    // Close on any press outside the button/menu. pointerdown (not click) fires
+    // reliably before focus moves, and we don't steal focus back to the button so
+    // the click the user intended elsewhere still lands.
+    document.addEventListener('pointerdown', function (e) {
+      if (el('riJumpMenu').hidden) return;
+      if (e.target.closest('.ri-jumpwrap')) return;
+      openJump(false);
     });
     el('riJumpMenu').addEventListener('keydown', jumpKeydown);
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') openJump(false); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !el('riJumpMenu').hidden) openJump(false, true); });
     el('riStep').addEventListener('input', markSaved);
     el('riStep').addEventListener('change', markSaved);
   }
