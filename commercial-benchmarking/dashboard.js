@@ -992,39 +992,55 @@ window.CBDash = (function () {
       + item('Email database', plain(val('emailDb')))
       + item('Opted in to partner emails', plain(val('optedIn')))), HELP.email);
 
-    // Sign-off footer: a confirm tickbox (recorded for the League, toggleable
-    // with an "are you sure?" both ways) + report a correction.
+    // Sign-off footer: the confirm control is a pill; the "are you sure?" is a
+    // modal. Toggleable both ways and recorded in RTDB.
     function confirmedOn(ts) {
       if (!ts) return '';
       var d = new Date(ts);
       return isNaN(d) ? '' : ' on ' + d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
     }
-    var done = !!(OWN.confirm && OWN.confirm.confirmed);
-    html += '<div class="cb-rev-foot"><div class="cb-rev-confirmwrap">' +
-      '<label class="cb-rev-confirm"><input type="checkbox" id="cb-rev-ok"' + (done ? ' checked' : '') + '> I confirm the above is correct</label>' +
-      '<span id="cb-rev-confirmnote" class="cb-rev-confirmed">' + (done ? '✓ Confirmed' + confirmedOn(OWN.confirm.at) : '') + '</span>' +
-      '</div><a class="cb-rev-btn cb-rev-btn-alt" href="' + mailto + '">Report a correction</a></div>';
+    var cstate = !!(OWN.confirm && OWN.confirm.confirmed), cat = (OWN.confirm && OWN.confirm.at) || null;
+    html += '<div class="cb-rev-foot"><button type="button" id="cb-confirm-pill" class="cb-confirm-pill"></button>' +
+      '<a class="cb-rev-btn cb-rev-btn-alt" href="' + mailto + '">Report a correction</a></div>';
 
     if ($('sections')) $('sections').innerHTML = html;
 
-    // Record / clear the confirmation in RTDB, with a confirmation prompt both ways.
-    var ok = $('cb-rev-ok'), note = $('cb-rev-confirmnote'), current = done;
-    if (ok && opts.onConfirm) {
-      ok.onchange = function () {
-        var want = ok.checked;
-        var ask = want
-          ? 'Please confirm that all the commercial information shown above is correct.'
-          : 'Remove your confirmation for this data? You can re-confirm at any time.';
-        if (!window.confirm(ask)) { ok.checked = current; return; }
-        ok.disabled = true;
-        if (note) note.textContent = 'Saving…';
-        Promise.resolve(opts.onConfirm(want)).then(function () {
-          current = want; ok.disabled = false;
-          if (note) note.textContent = want ? '✓ Confirmed — thank you' : 'Not confirmed';
-        }, function () {
-          ok.checked = current; ok.disabled = false;
-          if (note) note.textContent = 'Couldn’t save — please try again.';
-        });
+    function modal(title, bodyTxt, okLabel, okClass, onOk) {
+      var ov = document.createElement('div');
+      ov.className = 'cb-modal-overlay';
+      ov.innerHTML = '<div class="cb-modal" role="dialog" aria-modal="true"><div class="cb-modal-title">' + title + '</div>' +
+        '<div class="cb-modal-body">' + bodyTxt + '</div><div class="cb-modal-actions">' +
+        '<button type="button" class="cb-modal-cancel">Cancel</button>' +
+        '<button type="button" class="cb-modal-ok ' + okClass + '">' + okLabel + '</button></div></div>';
+      function close() { if (ov.parentNode) ov.parentNode.removeChild(ov); document.removeEventListener('keydown', onKey); }
+      function onKey(e) { if (e.key === 'Escape') close(); }
+      ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+      ov.querySelector('.cb-modal-cancel').onclick = close;
+      ov.querySelector('.cb-modal-ok').onclick = function () { close(); onOk(); };
+      document.addEventListener('keydown', onKey);
+      document.body.appendChild(ov);
+      ov.querySelector('.cb-modal-ok').focus();
+    }
+    function paintPill() {
+      var p = $('cb-confirm-pill'); if (!p) return;
+      p.disabled = false;
+      if (cstate) { p.className = 'cb-confirm-pill cb-confirm-pill--done'; p.innerHTML = '✓ Confirmed correct' + confirmedOn(cat); }
+      else { p.className = 'cb-confirm-pill cb-confirm-pill--do'; p.textContent = 'Confirm these details are correct'; }
+    }
+    function setConfirm(want) {
+      var p = $('cb-confirm-pill'); if (p) { p.disabled = true; p.textContent = 'Saving…'; }
+      Promise.resolve(opts.onConfirm(want)).then(function () {
+        cstate = want; cat = Date.now(); paintPill();
+      }, function () { paintPill(); modal('Couldn’t save', 'Something went wrong saving your confirmation. Please try again.', 'OK', 'cb-modal-ok-go', function () {}); });
+    }
+    paintPill();
+    if (opts.onConfirm) {
+      $('cb-confirm-pill').onclick = function () {
+        if (cstate) {
+          modal('Remove your confirmation?', 'You’re saying this data is no longer confirmed as correct. You can re-confirm at any time.', 'Remove confirmation', 'cb-modal-ok-warn', function () { setConfirm(false); });
+        } else {
+          modal('Confirm your data is correct', 'Please confirm that <b>all</b> the commercial information shown above is correct for your club.', 'Yes, it’s correct', 'cb-modal-ok-go', function () { setConfirm(true); });
+        }
       };
     }
   }
