@@ -763,7 +763,13 @@ window.CBDash = (function () {
           function (e) { console.error(e); linkNote('Generation failed — please try again.'); });
     }
     function renderLinks() {
-      var tb = opts.tokenByClub || {};
+      var tb = opts.tokenByClub || {}, cf = opts.confirmByClub || {};
+      function confCell(c) {
+        var v = cf[c.club];
+        if (!v) return '<span class="cb-unconf">—</span>';
+        var d = (typeof v === 'number') ? new Date(v) : null;
+        return '<span class="cb-conf">✓' + (d && !isNaN(d) ? ' ' + d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '') + '</span>';
+      }
       var rows = clubs.map(function (c) {
         var tok = tb[c.club];
         var nameCell = c.club + (c._noData ? ' <span class="cb-nodata">(no data yet)</span>' : '');
@@ -775,15 +781,16 @@ window.CBDash = (function () {
           proof = '<td colspan="2"><button class="cb-edit-btn" type="button" data-gen="' + c.club.replace(/"/g, '&quot;') + '">Generate links</button></td>';
           bench = '';
         }
-        return '<tr><td>' + nameCell + '</td><td>' + c.division + '</td>' + proof + bench + '</tr>';
+        return '<tr><td>' + nameCell + '</td><td>' + c.division + '</td>' + proof + bench + '<td>' + confCell(c) + '</td></tr>';
       }).join('');
       var have = clubs.filter(function (c) { return tb[c.club]; }).length;
+      var confirmed = clubs.filter(function (c) { return cf[c.club]; }).length;
       $('sections').innerHTML = '<div class="cb-edit-actions">' +
         '<button id="cb-genall" class="cb-edit-btn" type="button">Generate all missing</button>' +
         '<button id="cb-linkdl" class="cb-edit-btn" type="button">Download links (Excel)</button>' +
         '<button id="cb-linkdone" class="cb-cancel" type="button">Done</button>' +
-        '<span id="cb-linknote">' + have + ' of ' + clubs.length + ' clubs have links. <b>Proof</b> opens the club\'s own-data check; <b>Benchmarked</b> opens the full comparison. Share each privately with that club only.</span></div>' +
-        '<table class="cb-linktable"><thead><tr><th>Club</th><th>Division</th><th>Proof</th><th>Benchmarked</th></tr></thead><tbody>' + rows + '</tbody></table>';
+        '<span id="cb-linknote"><b>' + confirmed + ' of ' + clubs.length + '</b> clubs have confirmed their data. ' + have + ' have links. <b>Proof</b> = own-data check; <b>Benchmarked</b> = full comparison.</span></div>' +
+        '<table class="cb-linktable"><thead><tr><th>Club</th><th>Division</th><th>Proof</th><th>Benchmarked</th><th>Confirmed</th></tr></thead><tbody>' + rows + '</tbody></table>';
       $('cb-linkdone').onclick = function () { $('sections').onclick = null; render(); };
       $('cb-genall').onclick = genMissing;
       $('cb-linkdl').onclick = exportLinks;
@@ -955,7 +962,7 @@ window.CBDash = (function () {
 
     var html = '<div class="cb-rev-banner"><div class="cb-rev-blurb"><b>Please check the details below.</b> This is the commercial information we currently hold for ' +
       esc(OWN.club) + ' (2025/26 season). If anything is wrong or out of date, let us know by emailing ' + emailLink +
-      ' — none of this is shared with other clubs.</div><a class="cb-rev-btn" href="' + mailto + '">Report a correction</a></div>';
+      ' — none of this is shared with other clubs.</div></div>';
 
     html += group('Shirt &amp; kit sponsorship',
       shirt('Front of shirt', 'fsSponsor', 'fsSector', 'frontShirt', 'frontTerm', 'fsStart', 'rollingFront')
@@ -985,7 +992,39 @@ window.CBDash = (function () {
       + item('Email database', plain(val('emailDb')))
       + item('Opted in to partner emails', plain(val('optedIn')))), HELP.email);
 
+    // Sign-off footer: confirm (recorded for the League) + report a correction.
+    function confirmedOn(ts) {
+      if (!ts) return '';
+      var d = new Date(ts);
+      return isNaN(d) ? '' : ' on ' + d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+    var done = OWN.confirm && OWN.confirm.confirmed;
+    var confirmWrap = done
+      ? '<span class="cb-rev-confirmed">✓ Confirmed' + confirmedOn(OWN.confirm.at) + '</span>'
+      : '<label class="cb-rev-confirm"><input type="checkbox" id="cb-rev-ok"> I confirm the above is correct</label>';
+    html += '<div class="cb-rev-foot"><div id="cb-rev-confirmwrap">' + confirmWrap + '</div>' +
+      '<a class="cb-rev-btn cb-rev-btn-alt" href="' + mailto + '">Report a correction</a></div>';
+
     if ($('sections')) $('sections').innerHTML = html;
+
+    // Record the confirmation in RTDB so staff can track completion / chase.
+    function wireConfirm() {
+      var ok = $('cb-rev-ok');
+      if (!ok || !opts.onConfirm) return;
+      ok.onchange = function () {
+        if (!ok.checked) return;
+        ok.disabled = true;
+        var wrap = $('cb-rev-confirmwrap');
+        if (wrap) wrap.innerHTML = '<span class="cb-rev-confirm">Saving…</span>';
+        Promise.resolve(opts.onConfirm()).then(function () {
+          if (wrap) wrap.innerHTML = '<span class="cb-rev-confirmed">✓ Confirmed — thank you</span>';
+        }, function () {
+          if (wrap) wrap.innerHTML = '<label class="cb-rev-confirm"><input type="checkbox" id="cb-rev-ok"> I confirm the above is correct</label> <span class="cb-rev-err">Couldn’t save — please try again.</span>';
+          wireConfirm();
+        });
+      };
+    }
+    wireConfirm();
   }
 
   return { mount: mount, recompute: recompute, hasData: hasData, NO_DATA: NO_DATA, review: review };
