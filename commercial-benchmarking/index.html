@@ -81,7 +81,7 @@
   <script src="/tools/system/nl-topbar.js?v=7"></script>
   <script src="/tools/system/auth-guard.js?v=8"></script>
 
-  <link rel="stylesheet" href="/tools/commercial-benchmarking/dashboard.css?v=45">
+  <link rel="stylesheet" href="/tools/commercial-benchmarking/dashboard.css?v=46">
 <style>
   body { background: var(--off-white); }
   .page { max-width: 1240px; margin: 0 auto; padding: clamp(20px,3vw,40px) clamp(16px,2.5vw,44px) 80px; }
@@ -149,7 +149,7 @@
   </div>
 </div>
 
-<script src="/tools/commercial-benchmarking/dashboard.js?v=45"></script>
+<script src="/tools/commercial-benchmarking/dashboard.js?v=46"></script>
 <script>
 (function () {
   'use strict';
@@ -191,8 +191,14 @@
             clubs.sort(function (a, b) { return (DIV_ORDER[a.division] - DIV_ORDER[b.division]) || a.club.localeCompare(b.club); });
           }
           if (!clubs.length) { showMsg('Not available yet', 'Benchmark data isn’t loaded yet.'); return; }
-          var tokenByClub = {};
-          Object.keys(linksObj).forEach(function (tok) { var p = linksObj[tok]; if (p && p.club) tokenByClub[p.club] = tok; });
+          var tokenByClub = {}, confirmByClub = {};
+          Object.keys(linksObj).forEach(function (tok) {
+            var p = linksObj[tok];
+            if (p && p.club) {
+              tokenByClub[p.club] = tok;
+              if (p.confirm && p.confirm.confirmed) confirmByClub[p.club] = p.confirm.at || true;
+            }
+          });
 
           // Admins can correct figures in place. Saving writes the recomputed
           // aggregates + every club row with data + the link copies. Empty stub
@@ -205,7 +211,12 @@
               var rec = {}; for (var k in c) if (k !== '_noData') rec[k] = c[k];
               clubsUpd[c.club] = rec;
               var tok = tokenByClub[c.club];
-              if (tok) linksUpd[tok] = rec;
+              if (tok) {
+                var lrec = {}; for (var k2 in rec) lrec[k2] = rec[k2];
+                // keep the club's own confirmation when rewriting the link copy
+                if (linksObj[tok] && linksObj[tok].confirm) lrec.confirm = linksObj[tok].confirm;
+                linksUpd[tok] = lrec;
+              }
             });
             return Promise.all([
               db.ref(ROOT + 'aggregates').set(AGG2),
@@ -216,7 +227,7 @@
           var writeLink = function (token, payload) { return db.ref(ROOT + 'links/' + token).set(payload); };
 
           document.getElementById('cbBody').style.display = '';
-          CBDash.mount(AGG, clubs, { staff: true, tokenByClub: tokenByClub, canEdit: canEdit, onSave: onSave, writeLink: writeLink });
+          CBDash.mount(AGG, clubs, { staff: true, tokenByClub: tokenByClub, confirmByClub: confirmByClub, canEdit: canEdit, onSave: onSave, writeLink: writeLink });
         }).catch(err);
       } else {
         var club = session.club;
