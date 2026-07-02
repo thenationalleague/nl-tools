@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<!--
+  League Table Graphic — NL Tools (Graphics sub-tool)
+  Version: v1.0 (02/07/2026)
+  File: /tools/graphics/table-graphic/index.html
+
+  On-brand league-table social graphic (Broadsheet design). Paste a
+  CSV/TSV table → live preview → 1:1 / 4:5 / 9:16 PNG export. Gated to
+  NL Staff via the shared graphics tool key.
+
+  Storage:
+    localStorage nl-table-gfx-v1   (tool state only — no RTDB)
+  Data:
+    /tools/assets/data/clubs-meta.json           (live club list / short names)
+    /tools/assets/crests|divisions|partners/*     (crests, Enterprise lockups, TIC Health)
+  Access (auth-guard):
+    toolKey 'staff-graphics' — same gate as the other graphics sub-tools.
+
+  NOTE: this redesigned table graphic sits ALONGSIDE the existing
+  graphics/league-tables tool and is intended to replace it in a later
+  pass — do not remove league-tables yet.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>League Table Graphic — NL Tools</title>
+<meta name="robots" content="noindex,nofollow">
+
+<!-- Firebase compat SDK — must load + init BEFORE auth-guard.js -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script>
+  firebase.initializeApp({
+    apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+    authDomain:        "nl-tools.firebaseapp.com",
+    databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId:         "nl-tools",
+    storageBucket:     "nl-tools.firebasestorage.app",
+    messagingSenderId: "801354670005",
+    appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+  });
+  var db = firebase.database();
+</script>
+
+<!-- Portal brand + graphic tokens/fonts + the graphic artwork CSS -->
+<link rel="stylesheet" href="/tools/system/nl-brand.css?v=20">
+<link rel="stylesheet" href="/tools/graphics/_shared/brand-graphic.css">
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.js"></script>
+
+<!-- Tool identity + changelog. Keep window.NL_TOOL and NL_TOOL_KEY in sync. -->
+<script>
+  window.NL_TOOL = {
+    title: 'League Table Graphic',
+    toolKey: 'staff-graphics'
+  };
+  var NL_TOOL_KEY = 'staff-graphics';
+
+  window.NL_CHANGELOG = [
+    {
+      date: '2 July 2026',
+      version: 'v1.0',
+      items: [
+        'New on-brand league-table graphic (Broadsheet design) built into the portal.',
+        'Gated to NL Staff, standard topbar, brand tokens and Carbona fonts.',
+        'Club list, crests and Enterprise division lockups load from NL Tools assets.'
+      ]
+    }
+  ];
+
+  /* auth-guard fires this once the session is verified and #pageWrap is
+     revealed — boot the app here so the preview measures a visible stage. */
+  window.nlAuthReady = function (userData) {
+    window.NL = window.NL || {};
+    window.NL.session = userData;
+    if (window.TOOL && window.TOOL.boot) window.TOOL.boot(userData);
+    else window._toolDeferredSession = userData;
+  };
+</script>
+
+<script src="/tools/system/nl-utils.js?v=10"></script>
+<script src="/tools/system/nl-topbar.js?v=7"></script>
+<script src="/tools/system/auth-guard.js?v=8"></script>
+
+<style>
+  html, body { background: var(--nl-grey-100); color: var(--nl-ink); }
+  body { font-family: var(--font-regular); }
+
+  /* ---- segmented control (Size / Type) — lives in the right-hand panel ---- */
+  .seg { display: inline-flex; border: 1px solid var(--nl-grey-300); border-radius: var(--radius-sm); overflow: hidden; }
+  .seg button {
+    border: none; background: var(--nl-white); color: var(--nl-grey-700);
+    font-family: var(--font-bold); font-size: 13px; letter-spacing: var(--tracking-wide);
+    text-transform: uppercase; padding: 8px 15px; cursor: pointer;
+    transition: background var(--dur-fast) var(--ease-standard);
+  }
+  .seg button + button { border-left: 1px solid var(--nl-grey-300); }
+  .seg button:hover { background: var(--nl-grey-100); }
+  .seg button.active { background: var(--nl-rose-red); color: #fff; }
+
+  .tool {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 460px;
+    gap: 24px;
+    align-items: start;
+    max-width: 1640px;
+    margin: 0 auto;
+    padding: 24px;
+  }
+  @media (max-width: 1100px) { .tool { grid-template-columns: 1fr; } }
+
+  /* preview */
+  .preview {
+    position: sticky; top: 84px;
+    background: var(--nl-white);
+    border: 2px solid var(--nl-ink);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    box-shadow: var(--shadow-md);
+  }
+  .preview-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .preview-head .eyebrow { color: var(--nl-league-navy); }
+  .preview-head .fmt-pills { display: flex; gap: 6px; }
+  .stage-wrap { width: 100%; display: flex; justify-content: center; }
+  #gfxHost { position: relative; box-shadow: 0 12px 44px rgba(0,0,0,0.20), 0 2px 8px rgba(0,0,0,0.12); }
+
+  /* control panel */
+  .panel { display: flex; flex-direction: column; gap: 16px; }
+  .card {
+    background: var(--nl-white);
+    border: 1px solid var(--nl-grey-200);
+    border-radius: var(--radius-md);
+    padding: 16px;
+  }
+  .card h2 {
+    font-family: var(--font-bold); font-size: 13px; letter-spacing: var(--tracking-wider);
+    text-transform: uppercase; color: var(--nl-grey-500); margin: 0 0 12px;
+  }
+
+  .dir-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .dir-btn {
+    border: 1.5px solid var(--nl-grey-300); background: var(--nl-white);
+    border-radius: var(--radius-sm); padding: 12px 8px; cursor: pointer;
+    font-family: var(--font-bold); text-align: left; transition: all var(--dur-fast) var(--ease-standard);
+  }
+  .dir-btn .n { display:block; font-size: 11px; color: var(--nl-grey-500); letter-spacing: var(--tracking-wide); }
+  .dir-btn .t { display:block; font-size: 15px; color: var(--nl-ink); margin-top: 3px; }
+  .dir-btn:hover { border-color: var(--nl-league-navy); }
+  .dir-btn.active { border-color: var(--nl-rose-red); border-width: 2px; box-shadow: 0 0 0 3px rgba(158,0,0,.10); }
+
+  .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+  .field:last-child { margin-bottom: 0; }
+  .field label {
+    font-family: var(--font-bold); font-size: 12px; letter-spacing: var(--tracking-wide);
+    text-transform: uppercase; color: var(--nl-grey-700);
+  }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  select, input[type="text"], textarea {
+    width: 100%; padding: 9px 11px; border: 1px solid var(--nl-grey-300);
+    border-radius: var(--radius-sm); background: var(--nl-white);
+    font-family: var(--font-regular); font-size: 14px; color: var(--nl-ink);
+  }
+  select:focus, input:focus, textarea:focus {
+    outline: none; border-color: var(--nl-rose-red); box-shadow: 0 0 0 3px rgba(158,0,0,.10);
+  }
+  textarea { resize: vertical; line-height: 1.4; font-size: 12.5px; }
+
+  .btns { display: flex; gap: 8px; }
+  .btn {
+    border: none; border-radius: var(--radius-sm); padding: 11px 16px; cursor: pointer;
+    font-family: var(--font-bold); font-size: 14px; letter-spacing: var(--tracking-wide);
+    transition: filter var(--dur-fast) var(--ease-standard);
+  }
+  .btn:hover { filter: brightness(0.93); }
+  .btn--primary { background: var(--nl-rose-red); color: #fff; flex: 1; }
+  .btn--navy { background: var(--nl-league-navy); color: #fff; }
+  .btn--ghost { background: var(--nl-grey-100); color: var(--nl-grey-700); }
+
+  .fmt-pills .btn { padding: 6px 10px; font-size: 12px; }
+
+  /* grid editor */
+  .grid-scroller { max-height: 460px; overflow: auto; border: 1px solid var(--nl-grey-200); border-radius: var(--radius-sm); }
+  table.grid { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .grid thead th {
+    position: sticky; top: 0; z-index: 2; background: var(--nl-navy-900); color: #fff;
+    font-family: var(--font-bold); font-size: 10px; letter-spacing: var(--tracking-wide);
+    text-transform: uppercase; text-align: left; padding: 8px; white-space: nowrap;
+  }
+  .grid tbody td { border-bottom: 1px solid var(--nl-grey-100); padding: 4px 5px; }
+  .grid .g-pos { text-align: center; font-family: var(--font-bold); color: var(--nl-grey-500); width: 30px; }
+  .grid select, .grid input { padding: 6px 7px; font-size: 13px; }
+  .grid .g-flag { width: 64px; }
+  .grid .g-num { width: 56px; text-align: center; }
+
+  footer.status {
+    display: flex; justify-content: space-between; align-items: center;
+    font-family: var(--font-bold); font-size: 12px; letter-spacing: var(--tracking-wide);
+    text-transform: uppercase; color: var(--nl-grey-500); padding-top: 4px;
+  }
+  .note { font-size: 12px; color: var(--nl-grey-500); line-height: 1.5; font-family: var(--font-regular); }
+</style>
+</head>
+<body>
+
+<div id="pageWrap">
+
+<!-- Standard NL topbar — auto-rendered by /tools/system/nl-topbar.js -->
+<div id="nlTopbar"></div>
+
+<datalist id="teamList"></datalist>
+
+<div class="tool">
+
+  <!-- PREVIEW -->
+  <div class="preview">
+    <div class="preview-head">
+      <span class="eyebrow">Live preview</span>
+    </div>
+    <div class="stage-wrap" id="stageWrap">
+      <div id="gfxHost"></div>
+    </div>
+  </div>
+
+  <!-- CONTROLS -->
+  <div class="panel">
+
+    <div class="card">
+      <h2>Setup</h2>
+      <div class="row2">
+        <div class="field">
+          <label for="divisionSel">Division</label>
+          <select id="divisionSel">
+            <option value="National">National League</option>
+            <option value="North">National League North</option>
+            <option value="South">National League South</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="matchdaySel">Matchday</label>
+        <select id="matchdaySel"></select>
+      </div>
+      <div class="field">
+        <label for="subIn">Season</label>
+        <input type="text" id="subIn" maxlength="48">
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Format</h2>
+      <div class="field">
+        <label>Size</label>
+        <div class="seg" id="sizeSeg">
+          <button type="button" class="size-btn active" data-fmt="1x1">1:1</button>
+          <button type="button" class="size-btn" data-fmt="4x5">4:5</button>
+          <button type="button" class="size-btn" data-fmt="9x16">9:16</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Paste table (CSV / TSV)</h2>
+      <textarea id="pasteIn" rows="7" placeholder="Paste columns: flag/pos · team · P · W · D · L · F · A · GD · Pts"></textarea>
+      <p class="note" style="margin:8px 0 0;">Column 1 accepts <b>C</b> (champion), <b>SF</b>/<b>QF</b> (play-offs), <b>R</b> (relegation) or a plain position number. P, GD and Pts are shown.</p>
+    </div>
+
+    <div class="card">
+      <h2>Grid editor</h2>
+      <div class="grid-scroller">
+        <table class="grid">
+          <thead><tr><th>#</th><th>Zone</th><th>Team</th><th>P</th><th>GD</th><th>Pts</th></tr></thead>
+          <tbody id="gridBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="btns">
+      <button type="button" class="btn btn--primary" id="downloadBtn">Download PNG</button>
+      <button type="button" class="btn btn--ghost" id="resetBtn">Reset</button>
+    </div>
+
+    <footer class="status">
+      <span id="status">Ready</span>
+      <span>Screenshot the preview, or use Download PNG</span>
+    </footer>
+
+  </div>
+</div>
+
+</div><!-- /#pageWrap -->
+
+<script src="/tools/graphics/_shared/clubs-data.js"></script>
+<script src="engine.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>
