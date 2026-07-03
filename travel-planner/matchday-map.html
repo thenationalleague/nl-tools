@@ -5,10 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Matchday Travel Map — NL Tools</title>
 <!--
-  NL Matchday Travel Map v1.6
-  v1.6 — Fix: selecting a fixture froze its pulse. Flow lines now stay on the
-         map permanently and dimmed pulses are hidden via icon opacity (not
-         setMap), so the selected route keeps animating.
+  NL Matchday Travel Map v1.7
+  v1.7 — Real fix for the selected pulse freezing: the animation loop now
+         assigns a brand-new icons array every frame. Mutating the icon in
+         place + re-setting the same array reference stops re-rendering once a
+         structural prop (scale) changes on highlight — which is why the
+         selected route stalled while the overview kept moving. Selection now
+         only sets per-route pScale/pOpacity; flowTick is the sole icons writer.
+  v1.6 — (superseded) Kept flow lines on map, hid dimmed via opacity.
   v1.5 — Pulse speed/size fix: 0.16%/frame was sub-pixel on short routes (read
          as static). Bumped to 0.4%/frame with denser (55px), larger dots so
          motion is visible on short and long legs alike.
@@ -411,7 +415,8 @@ function drawMap(legs){
       path.forEach(function(pt){bounds.extend(pt);});
       var away=crestMarker(path[0],l.f.away.name,5);
       var home=crestMarker(path[path.length-1],l.f.home.name,6);
-      var o={idx:idx,colour:l.colour,halo:halo,base:base,flow:flow,away:away,home:home};
+      // pScale/pOpacity are the per-route pulse state the animation loop reads.
+      var o={idx:idx,colour:l.colour,halo:halo,base:base,flow:flow,away:away,home:home,pScale:2.8,pOpacity:.95};
       routeObjs.push(o);
       base.addListener('click',function(){selectRoute(idx);});
       flow.addListener('click',function(){selectRoute(idx);});
@@ -425,15 +430,21 @@ function drawMap(legs){
   flowTick();
 }
 
-// Animate every pulse one step along its route each frame. Every flow line
-// stays on the map at all times (visibility is controlled by icon opacity in
-// applyHighlight, not by setMap) so the selected route's animation is never
-// interrupted by add/remove churn.
+// Animate every pulse one step along its route each frame. IMPORTANT: assign a
+// brand-new icons array (with fresh icon objects) every frame. Mutating the
+// existing icon in place and re-setting the same array reference stops
+// re-rendering once a structural property (scale) has been changed — which is
+// what previously froze the selected route on highlight. A new reference each
+// frame forces the redraw unconditionally. This is the single writer of icons;
+// applyHighlight only updates each route's pScale/pOpacity.
 function flowTick(){
   flowOffset=(flowOffset+0.4)%100;
+  var off=flowOffset+'%';
   routeObjs.forEach(function(o){
-    var ic=o.flow.get('icons');
-    if(ic&&ic[0]){ic[0].offset=flowOffset+'%';o.flow.set('icons',ic);}
+    o.flow.set('icons',[{
+      icon:{path:google.maps.SymbolPath.CIRCLE,scale:o.pScale,fillColor:'#ffffff',fillOpacity:o.pOpacity,strokeColor:'#ffffff',strokeOpacity:0,strokeWeight:0},
+      offset:off,repeat:'55px'
+    }]);
   });
   flowRAF=requestAnimationFrame(flowTick);
 }
@@ -456,11 +467,11 @@ function applyHighlight(){
     o.base.setOptions({strokeWeight:sel?6:(dim?3:4),strokeOpacity:dim?.2:.98,zIndex:sel?50:2});
     o.halo.setOptions({strokeWeight:sel?10:7,strokeOpacity:dim?.15:.7,zIndex:sel?49:1});
     // With nothing selected, every route pulses. Once a fixture is highlighted,
-    // ONLY the selected route shows its moving pulse — dimmed routes' pulses are
-    // made invisible (opacity 0) rather than removed, so the selected one keeps
-    // animating uninterrupted.
-    var ic=o.flow.get('icons');
-    if(ic&&ic[0]){ic[0].icon.scale=sel?3.8:2.8;ic[0].icon.fillOpacity=dim?0:.95;o.flow.set('icons',ic);}
+    // ONLY the selected route shows its moving pulse — dimmed routes' pulses go
+    // invisible (opacity 0). We only set the target scale/opacity here; flowTick
+    // rebuilds the icons array each frame so the motion never stalls.
+    o.pScale=sel?3.8:2.8;
+    o.pOpacity=dim?0:.95;
     if(o.away)o.away.setOpacity(dim?.3:1);
     if(o.home)o.home.setOpacity(dim?.35:1);
     if(o.away)o.away.setZIndex(sel?52:5);
