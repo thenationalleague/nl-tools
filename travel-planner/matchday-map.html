@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Matchday Travel Map — NL Tools</title>
 <!--
-  NL Matchday Travel Map v1.7
-  v1.7 — Real fix for the selected pulse freezing: the animation loop now
-         assigns a brand-new icons array every frame. Mutating the icon in
-         place + re-setting the same array reference stops re-rendering once a
-         structural prop (scale) changes on highlight — which is why the
-         selected route stalled while the overview kept moving. Selection now
-         only sets per-route pScale/pOpacity; flowTick is the sole icons writer.
+  NL Matchday Travel Map v1.8
+  v1.8 — Rebuilt the motion effect entirely: pulse is now real marker dots that
+         travel along each route via Marker.setPosition (toward the home ground),
+         replacing the polyline-symbol animation that stopped repainting on some
+         devices after highlighting. Reliable everywhere; selected route's dots
+         stay visible + moving, dimmed routes hide theirs.
+  v1.7 — (superseded) Rebuilt icons array each frame — still froze on device.
   v1.6 — (superseded) Kept flow lines on map, hid dimmed via opacity.
   v1.5 — Pulse speed/size fix: 0.16%/frame was sub-pixel on short routes (read
          as static). Bumped to 0.4%/frame with denser (55px), larger dots so
@@ -174,7 +174,7 @@ var DFM='routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,r
 var PALETTE=['#223b7c','#9e0000','#1a7030','#c96f15','#6a1b9a','#1565c0','#1a2f63','#374151'];
 
 var clubs=[],mapOK=false,gMap=null,panelHidden=false,lastLegs=null,lastLabel='';
-var routeObjs=[],selectedIdx=null,flowRAF=null,flowOffset=0;
+var routeObjs=[],selectedIdx=null,flowRAF=null,flowPhase=0;
 
 // ── Boot ──
 async function boot(){
@@ -389,17 +389,43 @@ function crestMarker(pos,name,z){
   });
 }
 
-// Icon that marches along a polyline in path order (away → home), giving the
-// "motion toward the home ground" pulse. Offset is animated in flowTick().
-function flowIcon(scale){
-  return{icon:{path:google.maps.SymbolPath.CIRCLE,scale:scale,fillColor:'#ffffff',fillOpacity:.95,strokeColor:'#ffffff',strokeOpacity:0,strokeWeight:0},offset:'0%',repeat:'55px'};
+// Pulse dots that physically travel along each route (via Marker.setPosition)
+// toward the home ground. This replaces the earlier polyline-symbol animation,
+// which stopped repainting on some devices once a route was highlighted. Moving
+// a real marker's position repaints reliably everywhere.
+var NDOTS=4;             // dots per route (a short "train" that reads as flow)
+var FLOW_SPEED=0.003;    // fraction of route length advanced per frame
+
+function pulseDot(scale){
+  return new google.maps.Marker({
+    map:gMap,zIndex:20,clickable:false,optimized:false,
+    icon:{path:google.maps.SymbolPath.CIRCLE,scale:scale,fillColor:'#ffffff',fillOpacity:.95,strokeColor:'#ffffff',strokeOpacity:.9,strokeWeight:1}
+  });
+}
+
+// Cumulative distance along the path so we can map a 0..1 fraction to a LatLng.
+function measurePath(path){
+  var cum=[0];
+  for(var i=1;i<path.length;i++){
+    cum[i]=cum[i-1]+google.maps.geometry.spherical.computeDistanceBetween(path[i-1],path[i]);
+  }
+  return cum;
+}
+// Position at fraction f (0=away ground, 1=home ground) along route o.
+function posAt(o,f){
+  if(!o.total)return o.path[0];
+  var target=f*o.total,cum=o.cum,i=1;
+  while(i<cum.length&&cum[i]<target)i++;
+  if(i>=o.path.length)return o.path[o.path.length-1];
+  var seg=cum[i]-cum[i-1],fr=seg>0?(target-cum[i-1])/seg:0;
+  return google.maps.geometry.spherical.interpolate(o.path[i-1],o.path[i],fr);
 }
 
 function drawMap(legs){
   var el=document.getElementById('mmMap');
   if(!el||!mapOK){if(el)el.innerHTML='<div class="mm__loading">Map failed to load.</div>';return;}
   if(flowRAF){cancelAnimationFrame(flowRAF);flowRAF=null;}
-  routeObjs=[];selectedIdx=null;
+  routeObjs=[];selectedIdx=null;flowPhase=0;
   gMap=new google.maps.Map(el,{zoom:6,center:{lat:53.2,lng:-1.8},disableDefaultUI:true,zoomControl:true,styles:DRIVE_STYLE});
   var bounds=new google.maps.LatLngBounds();
 
@@ -410,16 +436,14 @@ function drawMap(legs){
       // white halo under each line for separation
       var halo=new google.maps.Polyline({path:path,strokeColor:'#ffffff',strokeWeight:7,strokeOpacity:.7,map:gMap,zIndex:1});
       var base=new google.maps.Polyline({path:path,strokeColor:l.colour,strokeWeight:4,strokeOpacity:.95,map:gMap,zIndex:2});
-      // invisible carrier line whose marching icons are the directional pulse
-      var flow=new google.maps.Polyline({path:path,strokeOpacity:0,map:gMap,zIndex:3,icons:[flowIcon(2.8)]});
       path.forEach(function(pt){bounds.extend(pt);});
       var away=crestMarker(path[0],l.f.away.name,5);
       var home=crestMarker(path[path.length-1],l.f.home.name,6);
-      // pScale/pOpacity are the per-route pulse state the animation loop reads.
-      var o={idx:idx,colour:l.colour,halo:halo,base:base,flow:flow,away:away,home:home,pScale:2.8,pOpacity:.95};
+      var cum=measurePath(path);
+      var dots=[];for(var d=0;d<NDOTS;d++)dots.push(pulseDot(3));
+      var o={idx:idx,colour:l.colour,halo:halo,base:base,away:away,home:home,path:path,cum:cum,total:cum[cum.length-1],dots:dots,hidden:false};
       routeObjs.push(o);
       base.addListener('click',function(){selectRoute(idx);});
-      flow.addListener('click',function(){selectRoute(idx);});
     }catch(e){}
   });
 
@@ -430,21 +454,15 @@ function drawMap(legs){
   flowTick();
 }
 
-// Animate every pulse one step along its route each frame. IMPORTANT: assign a
-// brand-new icons array (with fresh icon objects) every frame. Mutating the
-// existing icon in place and re-setting the same array reference stops
-// re-rendering once a structural property (scale) has been changed — which is
-// what previously froze the selected route on highlight. A new reference each
-// frame forces the redraw unconditionally. This is the single writer of icons;
-// applyHighlight only updates each route's pScale/pOpacity.
+// Advance every visible route's pulse dots one step along the path each frame.
 function flowTick(){
-  flowOffset=(flowOffset+0.4)%100;
-  var off=flowOffset+'%';
+  flowPhase=(flowPhase+FLOW_SPEED)%1;
   routeObjs.forEach(function(o){
-    o.flow.set('icons',[{
-      icon:{path:google.maps.SymbolPath.CIRCLE,scale:o.pScale,fillColor:'#ffffff',fillOpacity:o.pOpacity,strokeColor:'#ffffff',strokeOpacity:0,strokeWeight:0},
-      offset:off,repeat:'55px'
-    }]);
+    if(o.hidden)return;
+    for(var k=0;k<o.dots.length;k++){
+      var f=(flowPhase+k/o.dots.length)%1;
+      o.dots[k].setPosition(posAt(o,f));
+    }
   });
   flowRAF=requestAnimationFrame(flowTick);
 }
@@ -466,12 +484,15 @@ function applyHighlight(){
     var dim=selectedIdx!==null&&!sel;
     o.base.setOptions({strokeWeight:sel?6:(dim?3:4),strokeOpacity:dim?.2:.98,zIndex:sel?50:2});
     o.halo.setOptions({strokeWeight:sel?10:7,strokeOpacity:dim?.15:.7,zIndex:sel?49:1});
-    // With nothing selected, every route pulses. Once a fixture is highlighted,
-    // ONLY the selected route shows its moving pulse — dimmed routes' pulses go
-    // invisible (opacity 0). We only set the target scale/opacity here; flowTick
-    // rebuilds the icons array each frame so the motion never stalls.
-    o.pScale=sel?3.8:2.8;
-    o.pOpacity=dim?0:.95;
+    // With nothing selected, every route's dots flow. Once a fixture is
+    // highlighted, only the selected route's dots stay visible + moving; dimmed
+    // routes hide their dots (and are skipped by flowTick).
+    o.hidden=dim;
+    o.dots.forEach(function(m){
+      m.setVisible(!dim);
+      m.setZIndex(sel?55:20);
+      var ic=m.getIcon();ic.scale=sel?4.2:3;m.setIcon(ic);
+    });
     if(o.away)o.away.setOpacity(dim?.3:1);
     if(o.home)o.home.setOpacity(dim?.35:1);
     if(o.away)o.away.setZIndex(sel?52:5);
