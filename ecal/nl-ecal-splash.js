@@ -1,6 +1,6 @@
 /* ============================================================================
    NL ECAL Club-Aware Splash / Interstitial — external script (GTM-safe)
-   Version: v8.0
+   Version: v8.1
    Date: 09/07/2026
    Commit this to the repo as:  ecal/nl-ecal-splash.js
    Deploy via GTM Custom HTML tag (All Pages) with ONE line:
@@ -23,6 +23,13 @@
    during testing) so the new version is served.
 
    CHANGELOG
+   v8.1 — CRITICAL FIX: the overlay's id rule (#nl-ecal-splash{display:flex})
+          out-specified the browser's [hidden] rule, so the full-screen dimmer
+          stayed in the DOM at zero opacity on suppressed/closed states —
+          invisible but capturing every click and trapping the page. Added
+          #nl-ecal-splash[hidden]{display:none!important} and a
+          :not(.nl-splash--in){pointer-events:none} safety net so the overlay
+          can never block the page unless it is actually open. No other change.
    v8.0 — Externalised the v7.1 inline tag into a hosted, self-injecting script
           so the GTM Custom HTML tag is a single <script src> (clears GTM's
           "Invalid HTML" validation). Builds its own <style> + DOM on load.
@@ -137,6 +144,8 @@
   function injectCss(){
     var css =
       "#nl-ecal-splash{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .28s ease}"+
+      "#nl-ecal-splash[hidden]{display:none!important}"+
+      "#nl-ecal-splash:not(.nl-splash--in){pointer-events:none}"+
       "#nl-ecal-splash.nl-splash--in{opacity:1}"+
       "#nl-ecal-splash .nl-splash__backdrop{position:absolute;inset:0;background:rgba(10,16,28,.72);backdrop-filter:saturate(.85) blur(1px)}"+
       "#nl-ecal-splash .nl-splash__modal{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;transform:scale(.96);transition:transform .28s ease}"+
