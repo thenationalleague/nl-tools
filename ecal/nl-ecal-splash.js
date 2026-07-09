@@ -1,6 +1,6 @@
 /* ============================================================================
    NL ECAL Club-Aware Splash / Interstitial — external script (GTM-safe)
-   Version: v8.1
+   Version: v8.3
    Date: 09/07/2026
    Commit this to the repo as:  ecal/nl-ecal-splash.js
    Deploy via GTM Custom HTML tag (All Pages) with ONE line:
@@ -23,6 +23,16 @@
    during testing) so the new version is served.
 
    CHANGELOG
+   v8.3 — Auto-dismiss: the splash now closes itself after CONFIG.AUTO_CLOSE_MS
+          (default 8s) if untouched — a hard guarantee against ever locking the
+          page. The timer is cancelled the moment the fan engages (hovers or taps
+          the ad, presses a key, or dismisses), so it's never yanked away mid-
+          interaction. Auto-closes log as dismissed with method 'timeout' in GA4.
+          Set AUTO_CLOSE_MS to 0 to disable.
+   v8.2 — Square splash assets are now JPG (smaller for solid-gradient creatives;
+          no transparency needed). IMAGE_SUFFIX -> " - 1x1.jpg". Upload the JPGs
+          to the same ecal/ folder with identical names, e.g.
+          "Torquay United - 1x1.jpg", "National League - 1x1.jpg".
    v8.1 — CRITICAL FIX: the overlay's id rule (#nl-ecal-splash{display:flex})
           out-specified the browser's [hidden] rule, so the full-screen dimmer
           stayed in the DOM at zero opacity on suppressed/closed states —
@@ -45,11 +55,12 @@
     EXCLUDE_PATHS: ["/ticket","/checkout","/basket","/cart","/booking",
                     "/signin","/sign-in","/login","/account","/my-account","/auth","/register"],
     SHOW_DELAY_MS: 650,
+    AUTO_CLOSE_MS: 8000,                  // auto-dismiss if untouched (0 = never)
     JWT_WAIT_MS:   2500,
     COOKIE_NAME:   "_gc_sa_sso_access",
     CLAIM:         "favourite_team",
     IMAGE_BASE:    "https://cdn.jsdelivr.net/gh/thenationalleague/tools@main/ecal/",
-    IMAGE_SUFFIX:  " - 1x1.png",
+    IMAGE_SUFFIX:  " - 1x1.jpg",
     ECAL_APIKEY:   "sMJhxXuD7phKwU4rcepysZh2E4oJwM6ahS5hzho1YM62e82018",
     ECAL_SCRIPT:   "//sync.ecal.com/v2/ecal.widget.js",
     NL_WIDGET_ID:  "6a3c898fbbf8c400029e0a2c",
@@ -193,6 +204,10 @@
   }
   function lockScroll(on){ try{ document.documentElement.classList.toggle("nl-splash-lock",on); document.body.classList.toggle("nl-splash-lock",on);}catch(e){} }
 
+  var autoTimer=null;
+  function startAuto(){ if(CONFIG.AUTO_CLOSE_MS>0){ cancelAuto(); autoTimer=setTimeout(function(){ close("timeout"); }, CONFIG.AUTO_CLOSE_MS); } }
+  function cancelAuto(){ if(autoTimer){ clearTimeout(autoTimer); autoTimer=null; } }
+
   function open(){
     if(isOpen) return; isOpen=true;
     lastFocus=document.activeElement; root.hidden=false;
@@ -200,9 +215,11 @@
     lockScroll(true); markSeen(); track("shown");
     try{ xBtn.focus(); }catch(e){}
     document.addEventListener("keydown", onKey, true);
+    startAuto();
   }
   function close(reason){
     if(!isOpen) return; isOpen=false;
+    cancelAuto();
     if(reason && reason!=="synced") track("dismissed", { splash_dismiss_method: reason });
     root.classList.remove("nl-splash--in"); lockScroll(false);
     document.removeEventListener("keydown", onKey, true);
@@ -210,6 +227,7 @@
     try{ if(lastFocus && lastFocus.focus) lastFocus.focus(); }catch(e){}
   }
   function onKey(e){
+    cancelAuto();
     if(e.key==="Escape"){ e.preventDefault(); close("esc"); }
     if(e.key==="Tab"){ e.preventDefault(); (document.activeElement===xBtn?btn:xBtn).focus(); }
   }
@@ -259,6 +277,12 @@
     });
     xBtn.addEventListener("click", function(e){ e.preventDefault(); e.stopPropagation(); close("x"); });
     btn.addEventListener("click", function(){ track("synced"); setTimeout(function(){ close("synced"); }, 0); });
+
+    var modal = root.querySelector(".nl-splash__modal");
+    if(modal){
+      modal.addEventListener("mouseenter", cancelAuto);
+      modal.addEventListener("touchstart", cancelAuto, { passive:true });
+    }
 
     setTimeout(start, CONFIG.SHOW_DELAY_MS);
   }
