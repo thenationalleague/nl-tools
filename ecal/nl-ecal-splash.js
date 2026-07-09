@@ -1,6 +1,6 @@
 /* ============================================================================
    NL ECAL Club-Aware Splash / Interstitial — external script (GTM-safe)
-   Version: v8.3
+   Version: v8.4
    Date: 09/07/2026
    Commit this to the repo as:  ecal/nl-ecal-splash.js
    Deploy via GTM Custom HTML tag (All Pages) with ONE line:
@@ -23,6 +23,12 @@
    during testing) so the new version is served.
 
    CHANGELOG
+   v8.4 — Auto-close made reliable. Removed the hover/touch/keypress "engagement"
+          cancels (a mobile scroll-swipe was landing as a touch on the modal and
+          cancelling the timer, so it never closed). The 8s timer now always runs
+          and is cancelled ONLY when the splash actually closes — ad click, X,
+          backdrop, Esc, or the timeout itself. Clicking the ad still cancels via
+          close(), so ECAL's popup is never affected.
    v8.3 — Auto-dismiss: the splash now closes itself after CONFIG.AUTO_CLOSE_MS
           (default 8s) if untouched — a hard guarantee against ever locking the
           page. The timer is cancelled the moment the fan engages (hovers or taps
@@ -227,7 +233,6 @@
     try{ if(lastFocus && lastFocus.focus) lastFocus.focus(); }catch(e){}
   }
   function onKey(e){
-    cancelAuto();
     if(e.key==="Escape"){ e.preventDefault(); close("esc"); }
     if(e.key==="Tab"){ e.preventDefault(); (document.activeElement===xBtn?btn:xBtn).focus(); }
   }
@@ -277,12 +282,6 @@
     });
     xBtn.addEventListener("click", function(e){ e.preventDefault(); e.stopPropagation(); close("x"); });
     btn.addEventListener("click", function(){ track("synced"); setTimeout(function(){ close("synced"); }, 0); });
-
-    var modal = root.querySelector(".nl-splash__modal");
-    if(modal){
-      modal.addEventListener("mouseenter", cancelAuto);
-      modal.addEventListener("touchstart", cancelAuto, { passive:true });
-    }
 
     setTimeout(start, CONFIG.SHOW_DELAY_MS);
   }
