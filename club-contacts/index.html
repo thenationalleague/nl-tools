@@ -6,14 +6,20 @@
   (Renamed from "club-roster" in v1.6 — toolKey/RTDB path now ops-club-contacts.)
   THIS IS THE UNIFIED FORM — supersedes the old club-data tool.
 
-  v2.31 (09/07/2026) — phone validation made LOOSE so it stops blocking valid
-    entries. The old check required a leading 0, stripped only ()/space/hyphen,
-    and capped at 10–11 digits — so a dot/slash/en-dash separator, an inline
-    extension, a missing trunk zero, or the very common "+44 (0)7…" form (which
-    normalised to 12 digits) were all wrongly rejected even when the club typed a
-    correct 11-digit number. validPhone now just counts digits (7–15) and ignores
-    all formatting. Applies everywhere validPhone is used: club switchboard,
-    shared-inbox phones, and every person phone.
+  v2.31 (09/07/2026) — phone validation made LOOSE and NON-BLOCKING so it stops
+    getting in clubs' way.
+    - validPhone rewritten: the old check required a leading 0, stripped only
+      ()/space/hyphen, and capped at 10–11 digits — so a dot/slash/en-dash
+      separator, an inline extension, a missing trunk zero, spaces (incl. a
+      trailing one), or the very common "+44 (0)7…" form (which normalised to 12
+      digits) were all wrongly rejected even when the club typed a correct
+      11-digit number. It now counts digits only (7–15) and ignores ALL
+      formatting/whitespace. Applies everywhere: club switchboard, shared-inbox
+      phones, every person phone.
+    - SOFT BLOCK: an odd-looking phone no longer stops submission. findProblems
+      tags phone issues soft:true; submit() blocks only on hard problems (bad
+      emails). The review screen shows soft ones under "Worth a quick check (you
+      can still submit)" (amber .ri-softnote) instead of the red must-fix list.
   v2.30 (18/06/2026) — jump-to-section moved OFF the custom popover and into the
     shared modal component (a colleague's browser still saw it stick open). The
     button now opens a modal list of all sections (same ✓/●/○ tick-off markers);
@@ -409,6 +415,9 @@ firebase.initializeApp({
   .ri-prob a { color: var(--red); cursor: pointer; text-decoration: underline; }
   .ri-dupnote { background: var(--amber-light); border: 1px solid var(--amber); border-radius: 8px; padding: 12px 14px; font-size: 13px; color: var(--amber-deep); margin-bottom: 16px; line-height: 1.5; }
   .ri-dupnote b { color: var(--navy); }
+  .ri-softnote { background: var(--amber-light); border: 1px solid var(--amber); border-radius: 8px; padding: 12px 14px; font-size: 13px; color: var(--amber-deep); margin-bottom: 16px; line-height: 1.5; }
+  .ri-softnote b { display:block; margin-bottom: 4px; color: var(--navy); }
+  .ri-softnote a { color: var(--amber-deep); cursor: pointer; text-decoration: underline; }
 
   /* Footer nav */
   /* Normal-flow footer nav (NOT sticky) — a sticky bar reads as the page bottom
@@ -1273,18 +1282,18 @@ firebase.initializeApp({
     if (!validEmail(data.yourEmail)) probs.push({ step: stepIndexById('you'), msg: 'Your email address looks invalid.' });
     if (data.info) {
       if (data.info.mainEmail && !validEmail(data.info.mainEmail)) probs.push({ step: stepIndexById('info'), msg: 'Club main contact email looks invalid.' });
-      if (data.info.phone && !validPhone(data.info.phone)) probs.push({ step: stepIndexById('info'), msg: 'Club switchboard phone looks invalid.' });
+      if (data.info.phone && !validPhone(data.info.phone)) probs.push({ step: stepIndexById('info'), soft: true, msg: 'Club switchboard phone “' + data.info.phone + '” looks unusual — worth a check.' });
     }
     Object.keys(data.inboxes).forEach(function (k) {
       var ib = data.inboxes[k], nm = ib.dept || ib.label || k;
       if (ib.email && !validEmail(ib.email)) probs.push({ step: stepIndexById('inboxes'), msg: 'Shared “' + nm + '” email looks invalid.' });
-      if (ib.phone && !validPhone(ib.phone)) probs.push({ step: stepIndexById('inboxes'), msg: 'Shared “' + nm + '” phone looks invalid.' });
+      if (ib.phone && !validPhone(ib.phone)) probs.push({ step: stepIndexById('inboxes'), soft: true, msg: 'Shared “' + nm + '” phone “' + ib.phone + '” looks unusual — worth a check.' });
     });
     data.people.forEach(function (p) {
       var st = stepForSection((p.roles[0] || {}).section);
       var who = (personName(p) || rolesText(p) || 'someone');
       (p.emails || []).forEach(function (e) { if (!validEmail(e)) probs.push({ step: st, msg: who + ': email “' + e + '” looks invalid.' }); });
-      (p.phones || []).forEach(function (ph) { if (ph.number && !validPhone(ph.number)) probs.push({ step: st, msg: who + ': phone “' + ph.number + '” looks invalid.' }); });
+      (p.phones || []).forEach(function (ph) { if (ph.number && !validPhone(ph.number)) probs.push({ step: st, soft: true, msg: who + ': phone “' + ph.number + '” looks unusual — worth a check.' }); });
     });
     return probs;
   }
@@ -1295,7 +1304,9 @@ firebase.initializeApp({
     var states = LEAD_AREAS.map(function (a) { return [a, leadState(a.key)]; });
     var covered = states.filter(function (s) { return s[1] === 'ok'; }).length;
     var nPeople = data.people.length, nInbox = Object.keys(data.inboxes).length;
-    var probs = findProblems();
+    var allProbs = findProblems();
+    var probs = allProbs.filter(function (p) { return !p.soft; });   // hard — block submit
+    var softProbs = allProbs.filter(function (p) { return p.soft; }); // worth a check — never block
 
     // duplicate-email safety net
     var emailMap = {};
@@ -1335,6 +1346,9 @@ firebase.initializeApp({
       (probs.length ? '<div class="ri-prob"><b>' + probs.length + ' thing' + (probs.length > 1 ? 's' : '') + ' to fix before you can submit:</b>' +
         probs.slice(0, 8).map(function (p) { return '<div>• ' + esc(p.msg) + ' <a data-fix="' + p.step + '">Fix</a></div>'; }).join('') +
         (probs.length > 8 ? '<div>…and ' + (probs.length - 8) + ' more.</div>' : '') + '</div>' : '') +
+      (softProbs.length ? '<div class="ri-softnote"><b>Worth a quick check (you can still submit):</b>' +
+        softProbs.slice(0, 8).map(function (p) { return '<div>• ' + esc(p.msg) + ' <a data-fix="' + p.step + '">Check</a></div>'; }).join('') +
+        (softProbs.length > 8 ? '<div>…and ' + (softProbs.length - 8) + ' more.</div>' : '') + '</div>' : '') +
       (dups.length ? '<div class="ri-dupnote"><b>The same email appears on more than one person:</b>' +
         dups.map(function (d) { return '<div>• ' + esc(d.email) + ' — ' + esc(d.who.join(', ')) + '</div>'; }).join('') +
         '<div style="margin-top:6px;">If that’s one person, enter them once and use <b>“add someone already listed”</b> on the other department so they stay a single record.</div></div>' : '') +
@@ -1404,8 +1418,10 @@ firebase.initializeApp({
     syncStep(); pruneEmpty();
     if (!data.yourName || !validEmail(data.yourEmail)) { goTo(stepIndexById('you')); el('riStatus').textContent = 'Please add your name and a valid email.'; return; }
     if (!data.people.length && !Object.keys(data.inboxes).length) { el('riStatus').textContent = 'Please add at least one person or shared address before submitting.'; return; }
-    var probs = findProblems();
-    if (probs.length) { renderReview(el('riStep')); el('riStatus').textContent = 'Please fix ' + probs.length + ' highlighted ' + (probs.length === 1 ? 'item' : 'items') + '.'; return; }
+    // Only HARD problems (bad emails) block submission. Soft ones — phone
+    // numbers that look unusual — are surfaced for a check but never a blocker.
+    var hard = findProblems().filter(function (p) { return !p.soft; });
+    if (hard.length) { renderReview(el('riStep')); el('riStatus').textContent = 'Please fix ' + hard.length + ' highlighted ' + (hard.length === 1 ? 'item' : 'items') + '.'; return; }
     data.people.forEach(function (p) { p.name = personName(p); });   // derived full name, handy for export/import
     var rec = { club: clubName, yourName: data.yourName, yourEmail: data.yourEmail, info: data.info, inboxes: data.inboxes, people: data.people, leads: data.leads, submittedAt: Date.now() };
     var btn = el('riNext'); btn.disabled = true; btn.textContent = 'Submitting…';
