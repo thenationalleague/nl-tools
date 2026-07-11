@@ -126,6 +126,14 @@
                           fixtures dating back decades, "met just once". NL-only
                           data, so it never claims "first ever meeting". Preview
                           hold now scales to line length so longer ones breathe.
+    v0.12.0 (2026-07-11) — Goal-timing layer. Reveals mention the timing
+                          directly: stoppage ("deep into stoppage time — the
+                          96th minute!"), on the stroke of half-time, straight
+                          after the restart, and early goals. Timing storylines
+                          for the big moments: a late/stoppage winner or
+                          equaliser from a level score ("what a time to strike —
+                          this could be the winner", "a priceless point pinched
+                          at the very last").
   ============================================================================
 -->
 
@@ -537,7 +545,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "15";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "16";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -890,6 +898,7 @@ body{overflow:hidden}
     ]
   };
   var C_LATE=["What a time to score!","Surely decisive, this late on!","Right at the death!","You sense that's a big one."];
+  var C_EARLY=["Barely a minute gone!","Inside the opening exchanges!","Straight from the off!"];
   var C_BEAT={
     ko:["We're underway across the National League!","And they're off around the grounds.","Here we go — kick-off across the division!"],
     ht:["It's half-time.","The whistle goes for the break.","That's the first half done and dusted."],
@@ -994,8 +1003,14 @@ body{overflow:hidden}
     return buildSegs(pick(C_INTRO,"in")+pick(C_TEASE[c.state],"tz"+c.state), c, BOLD);
   }
   function baseRevealSegs(c){
-    var s=pick(C_REVEAL[c.sig],"rv"+c.sig);
-    if(c.sig!=="og" && c._ev.min>=85 && Math.random()<0.5) s+=" "+pick(C_LATE,"late");
+    var s=pick(C_REVEAL[c.sig],"rv"+c.sig), m=c._ev.min;
+    if(c.sig!=="og"){
+      if(m>90)                              s+=" Deep into stoppage time — the "+ordinal(m)+" minute!";
+      else if(m>=85 && Math.random()<0.55) s+=" "+pick(C_LATE,"late");
+      else if(m<=2)                         s+=" "+pick(C_EARLY,"early");
+      else if(m>=44 && m<=45 && Math.random()<0.6) s+=" Right on the stroke of half-time!";
+      else if(m>=46 && m<=48 && Math.random()<0.5) s+=" Straight after the restart!";
+    }
     return buildSegs(s, c, BOLD);
   }
   function revealSegs(fx,ev){ return baseRevealSegs(goalCtx(fx,ev)); }  // 4× instant path
@@ -1057,6 +1072,13 @@ body{overflow:hidden}
     if((leadNow||c.sig==="equaliser") && cl.losses>=3) opts.push({w:4,s:"Could this end "+cl.name+"'s "+cl.losses+"-game losing run?"});
     if(leadNow && cl.wins<2 && cl.unbeaten>=6) opts.push({w:2,s:cl.name+", unbeaten in "+cl.unbeaten+", look good for it here."});
     if(ev.strk>=2) opts.push({w:3,s:ev.name+" — on the scoresheet in "+ev.strk+" straight games now."});
+    // GOAL TIMING — late/stoppage strikes from a level score are the big moments
+    var mn=ev.min, breaksLevel=(c.sig==="goahead"||c.sig==="opener");
+    if(breaksLevel && mn>90)       opts.push({w:9,s:"What a time to strike — this could be the winner for "+cl.name+"."});
+    else if(breaksLevel && mn>=80) opts.push({w:6,s:"A late blow — this could prove decisive for "+cl.name+"."});
+    if(c.sig==="equaliser" && mn>90)       opts.push({w:9,s:"A priceless point for "+cl.name+", pinched at the very last!"});
+    else if(c.sig==="equaliser" && mn>=80) opts.push({w:5,s:"A late leveller — "+cl.name+" snatch a share right at the end."});
+    if(mn<=2) opts.push({w:3,s:cl.name+" are up and running inside the opening minute!"});
     // #3 smarter margins on an extend goal — restore vs stretch vs rout
     if(c.sig==="extend"){
       var af=scoreAt(fx,r+0.001), margin=c._forHome? af.h-af.a : af.a-af.h;
