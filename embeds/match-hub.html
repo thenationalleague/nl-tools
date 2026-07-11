@@ -156,6 +156,16 @@
                           ("in the National League" / "at this level" / "in this
                           division" / "last season's league defeat"), since the
                           record is NL-only and these clubs have EFL history.
+    v0.14.0 (2026-07-11) — DESKTOP LAYOUT (≥1024px). The ticker moved out of the
+                          tabbed stage into its own top-level panel; the FT table
+                          became a top-level overlay. On desktop #nlHub becomes a
+                          CSS grid: the map fills a tall left column while the
+                          commentary and the (now-persistent) ticker stack in
+                          rows down the right. The Map/Cards tabs swap only the
+                          left panel; the Ticker tab is hidden (it's always on).
+                          Mobile is unchanged — a data-view attribute on #nlHub
+                          drives the three-way tabbing. paint() now refreshes all
+                          panels every tick so map + ticker stay in lockstep.
   ============================================================================
 -->
 
@@ -282,7 +292,7 @@ window.__DATA__ = {
 /* END __DATA__ */
 </script>
 
-<div id="nlHub" aria-label="National League Match Hub">
+<div id="nlHub" data-view="map" aria-label="National League Match Hub">
   <div class="nlh__topbar">
     <div class="nlh__brandrow">
       <span class="nlh__wordmark">MATCH&nbsp;HUB</span>
@@ -309,20 +319,12 @@ window.__DATA__ = {
     <section class="nlh__view nlh__cards" data-view="cards">
       <div class="nlh__grid" id="nlhGrid"></div>
     </section>
-    <!-- TICKER -->
-    <section class="nlh__view nlh__ticker" data-view="ticker">
-      <ol class="nlh__feed" id="nlhFeed"></ol>
-    </section>
-    <!-- FT league-table bottom-sheet (all views) -->
-    <div class="nlh__sheet" id="nlhSheet" hidden>
-      <div class="nlh__sheetcard">
-        <div class="nlh__sheethead">
-          <span>National League — after Round <span id="nlhSheetRound"></span></span>
-          <button class="nlh__sheetclose" id="nlhSheetClose" aria-label="Close table">&times;</button>
-        </div>
-        <div class="nlh__tablewrap"><table class="nlh__table"><tbody id="nlhTableBody"></tbody></table></div>
-      </div>
-    </div>
+  </div>
+
+  <!-- TICKER (own panel: a tab on mobile, the right-hand column on desktop) -->
+  <div class="nlh__tickerwrap" id="nlhTickerWrap">
+    <div class="nlh__tickerhd">Vidiprinter</div>
+    <ol class="nlh__feed" id="nlhFeed"></ol>
   </div>
 
   <div class="nlh__comm" id="nlhComm" aria-live="polite">
@@ -346,6 +348,17 @@ window.__DATA__ = {
   <div class="nlh__foot">
     <span id="nlhFootTable" class="nlh__footlink">Final table</span>
     <span class="nlh__footnote">Replay · Sat 21 Mar 2026 <span class="nlh__ver" id="nlhVer"></span></span>
+  </div>
+
+  <!-- FT league-table overlay (all views) -->
+  <div class="nlh__sheet" id="nlhSheet" hidden>
+    <div class="nlh__sheetcard">
+      <div class="nlh__sheethead">
+        <span>National League — after Round <span id="nlhSheetRound"></span></span>
+        <button class="nlh__sheetclose" id="nlhSheetClose" aria-label="Close table">&times;</button>
+      </div>
+      <div class="nlh__tablewrap"><table class="nlh__table"><tbody id="nlhTableBody"></tbody></table></div>
+    </div>
   </div>
 </div>
 
@@ -378,6 +391,7 @@ body{overflow:hidden}
   font-variation-settings:"wght" 400;
   -webkit-font-smoothing:antialiased;
   /* full-page app: fill the viewport on mobile, centred phone column on desktop */
+  position:relative;
   width:100%; max-width:560px; margin:0 auto;
   height:100vh; height:100dvh;
   display:flex; flex-direction:column;
@@ -481,7 +495,17 @@ body{overflow:hidden}
 #nlHub .nlh__scorer.og .m::after{content:" OG"}
 
 /* ===== Ticker ===== */
-#nlHub .nlh__ticker{overflow:hidden}
+/* Own top-level panel: a tab on mobile (hidden unless data-view=ticker),
+   the persistent right-hand column on desktop. */
+#nlHub .nlh__tickerwrap{flex:1 1 auto;min-height:0;overflow:hidden;
+  background:radial-gradient(120% 90% at 50% 8%,#101a30 0%,var(--ink) 70%);
+  display:none;flex-direction:column}
+#nlHub[data-view=ticker] .nlh__tickerwrap{display:flex}
+#nlHub[data-view=ticker] .nlh__stage{display:none}
+#nlHub .nlh__tickerhd{display:none;flex:0 0 auto;padding:9px 14px 7px;
+  font-size:10.5px;font-variation-settings:"wght" 800;font-weight:800;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+  border-bottom:1px solid var(--line)}
 #nlHub .nlh__feed{list-style:none;margin:0;padding:10px 12px;height:100%;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
 #nlHub .nlh__line{background:var(--ink-2);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:8px;padding:7px 10px;font-size:12.5px;line-height:1.3;animation:nlhLineIn .28s ease;display:flex;gap:7px;align-items:center}
 @keyframes nlhLineIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
@@ -561,6 +585,42 @@ body{overflow:hidden}
 @media (max-width:380px){
   #nlHub .nlh__grid{grid-template-columns:1fr}
 }
+
+/* ===== Desktop (≥1024px): map fills the left, everything else stacks right ===== */
+@media (min-width:1024px){
+  #nlHub{
+    max-width:none;
+    display:grid;
+    grid-template-columns:minmax(0,1fr) minmax(380px,460px);
+    grid-template-rows:auto auto minmax(0,1fr) auto auto;
+    grid-template-areas:
+      "topbar   topbar"
+      "stage    comm"
+      "stage    ticker"
+      "controls controls"
+      "foot     foot";
+  }
+  #nlHub .nlh__topbar{grid-area:topbar}
+  /* Map (and Cards) always occupy the tall left column */
+  #nlHub .nlh__stage{grid-area:stage;display:block!important}
+  /* Commentary + ticker are the right column, in rows */
+  #nlHub .nlh__comm{grid-area:comm;height:auto;min-height:118px;
+    align-items:flex-start;padding:16px 16px;border-left:1px solid var(--line)}
+  #nlHub .nlh__commdot{margin-top:5px}
+  #nlHub .nlh__commtext{font-size:14.5px;line-height:1.4}
+  #nlHub .nlh__tickerwrap{grid-area:ticker;display:flex!important;border-left:1px solid var(--line)}
+  #nlHub .nlh__tickerhd{display:block}
+  #nlHub .nlh__controls{grid-area:controls}
+  #nlHub .nlh__foot{grid-area:foot}
+  /* Ticker lives permanently on the right, so its tab is redundant here */
+  #nlHub .nlh__seg[data-view=ticker]{display:none}
+  /* the tab strip only needs to swap the LEFT panel (Map / Cards) */
+  #nlHub .nlh__switch{max-width:260px;margin-left:auto}
+  #nlHub .nlh__brandrow{margin-bottom:0}
+  #nlHub .nlh__topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 18px}
+  #nlHub .nlh__wordmark{font-size:19px}
+}
+
 @media (prefers-reduced-motion:reduce){
   #nlHub *{animation-duration:.01ms!important}
 }
@@ -573,7 +633,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "19";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "20";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -1309,9 +1369,9 @@ body{overflow:hidden}
   function paint(){
     $("nlhClock").textContent = clockLabel(st.T);
     $("nlhScrubFill").style.width = (st.T/maxT()*100)+"%";
-    if (st.view==="map")    paintPins();
-    else if (st.view==="cards")  paintCards();
-    else if (st.view==="ticker") paintFeed();
+    // All three painters are idempotent diff-renders, so keeping them all live
+    // costs nothing and means the desktop map + ticker update in lockstep.
+    paintPins(); paintCards(); paintFeed();
   }
   // cinematic zoom: fly the map into a fixture's ground, then back out
   function zoomTo(fx){
@@ -1323,14 +1383,20 @@ body{overflow:hidden}
     zoom.style.transform="translate("+dx.toFixed(1)+"px,"+dy.toFixed(1)+"px) scale("+Z+")";
   }
   function zoomReset(){ var z=$("nlhMapZoom"); if(z) z.style.transform="none"; }
+  function isDesktop(){ return window.matchMedia("(min-width:1024px)").matches; }
   function setView(v){
+    // On desktop the ticker is permanently on the right, so the tab only swaps
+    // the LEFT panel between Map and Cards.
+    if (isDesktop() && v==="ticker") return;
     st.view=v;
     zoomReset();
-    var stage=$("nlhStage");
-    stage.querySelectorAll(".nlh__view").forEach(function(el){ el.classList.toggle("is-active", el.getAttribute("data-view")===v); });
+    var hub=$("nlHub"); if(hub) hub.setAttribute("data-view", v);
+    // stage shows map or cards; on ticker (mobile) the map stays active underneath
+    var sub = v==="cards" ? "cards" : "map";
+    $("nlhStage").querySelectorAll(".nlh__view").forEach(function(el){ el.classList.toggle("is-active", el.getAttribute("data-view")===sub); });
     document.querySelectorAll("#nlHub .nlh__seg").forEach(function(b){ b.classList.toggle("is-active", b.getAttribute("data-view")===v); });
     stingHide(); $("nlhBeat").hidden=true;
-    if (v==="map") layoutPins();
+    if (v!=="cards") layoutPins();
     paint();
   }
 
