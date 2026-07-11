@@ -104,6 +104,17 @@
                           doubled up", "are {team} running riot"). New swing
                           storyline: come-from-behind to lead ("turned this right
                           around — from behind to in front").
+    v0.10.0 (2026-07-11) — Big context + presentation pass. KICKOFF previews:
+                          before the action, the map floats ground to ground
+                          (ordered by KO time, ties alphabetical) with a team-
+                          news line for each ("the hosts chasing a 3rd straight
+                          win, the visitors desperate to end a losing run").
+                          Two-phase sting: the full-screen fires EARLY as we
+                          float in — neutral colour, score hidden — then washes
+                          to the scoring team's colour with a glow and the score
+                          rolls over; longer dwell after. New storylines: brace/
+                          hat-trick; smarter margins (restore vs stretch vs
+                          rout); six-pointers; title/play-off/drop-race stakes.
   ============================================================================
 -->
 
@@ -374,8 +385,10 @@ body{overflow:hidden}
 @keyframes nlhTick{0%{transform:translateY(-.66em) scale(.5);opacity:.15;color:var(--live)}55%{transform:translateY(.05em) scale(1.35);color:var(--live)}100%{transform:none}}
 
 /* Goal sting (full-stage, dramatic — crests fly in, score slams) */
-#nlHub .nlh__sting{position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;overflow:hidden}
-#nlHub .nlh__sting::before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 50% 44%,rgba(255,255,255,.28),transparent 46%);animation:nlhFlash .55s ease-out both}
+#nlHub .nlh__sting{position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:24px;overflow:hidden;transition:background .55s ease}
+#nlHub .nlh__sting::before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 50% 44%,rgba(255,255,255,.30),transparent 46%);opacity:0}
+#nlHub .nlh__sting.revealing::before{animation:nlhFlash .6s ease-out both}
+#nlHub .nlh__sting.revealing{box-shadow:inset 0 0 120px 10px rgba(255,255,255,.10)}
 @keyframes nlhFlash{0%{opacity:0;transform:scale(.2)}28%{opacity:1}100%{opacity:0;transform:scale(1.7)}}
 #nlHub .nlh__sting-goal{position:relative;font-variation-settings:"wght" 900;font-weight:900;letter-spacing:.2em;font-size:34px;color:#fff;animation:nlhGoalPop .5s cubic-bezier(.2,1.35,.3,1) both}
 @keyframes nlhGoalPop{0%{transform:scale(.3) rotate(-7deg);opacity:0}60%{transform:scale(1.16) rotate(1deg)}100%{transform:none;opacity:1}}
@@ -513,7 +526,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "11";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "12";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -625,7 +638,7 @@ body{overflow:hidden}
   // ---- state ---------------------------------------------------------------
   var st = { T:0, playing:false, rate:1, view:"map", raf:0, last:0,
              fired:{}, ftShown:false, feedBuilt:{}, beatShown:{},
-             suspend:null, _pick:{}, _typeIv:0 };
+             suspend:null, kickoff:null, koShown:false, _pick:{}, _typeIv:0 };
   function evId(fx,ev){ return fx.gc+"_"+ev.type+"_"+ev.min+"_"+(ev.name||""); }
 
   // ---- MAP: static outline + pins ------------------------------------------
@@ -880,6 +893,29 @@ body{overflow:hidden}
   ];
   var C_IDLE="Team news is in — we're moments from kick-off across the National League.";
   var C_OUTRO=["And that's your lot — here's how the table looks.","Full-time everywhere. Let's see the standings.","That's all she wrote — the final table.","The dust settles — this is how it finished."];
+  // KICKOFF previews — one fixture at a time, ordered by KO time then alphabetically
+  var KO_ORDER = D.fixtures.slice().sort(function(a,b){ return (a.slot||"").localeCompare(b.slot||"") || club(a.home).name.localeCompare(club(b.home).name); });
+  var KO_TMPL=[
+    "At {venue}, {home} host {away} — the hosts {hp}, the visitors {ap}.",
+    "{home} welcome {away} to {venue}: {home} {hp}, {away} {ap}.",
+    "Down at {venue}, {away} are the visitors — {home} {hp}, {away} {ap}.",
+    "Kick-off at {venue} — {home} {hp}, up against {away}, {ap}."
+  ];
+  function formPhrase(cl){
+    if(cl.wins>=2)     return "chasing a "+ordinal(cl.wins+1)+" straight win";
+    if(cl.losses>=3)   return "desperate to end a "+cl.losses+"-game losing run";
+    if(cl.winless>=5)  return "still searching for a first win in "+cl.winless;
+    if(cl.unbeaten>=6) return "unbeaten in "+cl.unbeaten;
+    if(cl.pos<=5)      return "flying high in "+ordinal(cl.pos);
+    if(cl.pos>=21)     return "down in "+ordinal(cl.pos)+" and scrapping for survival";
+    if(cl.wins===1)    return "fresh off a win";
+    if(cl.losses===1)  return "looking to bounce back";
+    return "sitting "+ordinal(cl.pos);
+  }
+  function kickoffSegs(fx){
+    var h=club(fx.home), a=club(fx.away);
+    return buildSegs(pick(KO_TMPL,"kop"), {venue:h.venue||h.name, home:h.name, away:a.name, hp:formPhrase(h), ap:formPhrase(a)}, ["venue","home","away"]);
+  }
 
   function pick(arr,key){
     if(!arr||!arr.length) return "";
@@ -956,6 +992,14 @@ body{overflow:hidden}
     return behind;
   }
   // an OCCASIONAL extra sentence of context (table swings, droughts, streaks…)
+  function word(n){ return ["zero","one","two","three","four","five","six","seven","eight"][n]||(""+n); }
+  // biggest lead the scoring side held before this goal (to tell "restore" from "stretch")
+  function maxLead(fx,forHome,beforeR){
+    var evs=fx.events.filter(function(e){return e.type==="goal"&&evRmin(e,fx)<beforeR;}).sort(function(a,b){return evRmin(a,fx)-evRmin(b,fx);});
+    var my=0,opp=0,mx=0;
+    evs.forEach(function(e){var fh=(e.team===fx.home)!==!!e.og; if(fh===forHome)my++;else opp++; if(my-opp>mx)mx=my-opp;});
+    return mx;
+  }
   function storylineSegs(c){
     if(Math.random()>0.55) return null;
     var fx=c._fx, ev=c._ev, k=c._teamK, r=evRmin(ev,fx), cl=club(k);
@@ -980,6 +1024,29 @@ body{overflow:hidden}
     if((leadNow||c.sig==="equaliser") && cl.losses>=3) opts.push({w:4,s:"Could this end "+cl.name+"'s "+cl.losses+"-game losing run?"});
     if(leadNow && cl.wins<2 && cl.unbeaten>=6) opts.push({w:2,s:cl.name+", unbeaten in "+cl.unbeaten+", look good for it here."});
     if(ev.strk>=2) opts.push({w:3,s:ev.name+" — on the scoresheet in "+ev.strk+" straight games now."});
+    // #3 smarter margins on an extend goal — restore vs stretch vs rout
+    if(c.sig==="extend"){
+      var af=scoreAt(fx,r+0.001), margin=c._forHome? af.h-af.a : af.a-af.h;
+      if(maxLead(fx,c._forHome,r)>=margin) opts.push({w:4,s:cl.name+" restore their "+word(margin)+"-goal cushion."});
+      else if(margin>=4) opts.push({w:5,s:"This is becoming a rout — "+cl.name+" "+word(margin)+" to the good."});
+      else opts.push({w:3,s:cl.name+" stretch it to "+word(margin)+"."});
+    }
+    // #2 brace / hat-trick (match by scorer name within the fixture)
+    var braceN=fx.events.filter(function(e){return e.type==="goal"&&!e.og&&e.team===ev.team&&e.name===ev.name&&evRmin(e,fx)<=r;}).length;
+    if(braceN===2) opts.push({w:3,s:"That's "+ev.name+"'s second of the afternoon."});
+    else if(braceN===3) opts.push({w:6,s:"A hat-trick for "+ev.name+"!"});
+    else if(braceN>=4) opts.push({w:6,s:braceN+" goals for "+ev.name+" today — take a bow."});
+    // #5 race implications for the scoring side (after this goal)
+    var leadOrLevel=(c.sig!=="consolation");
+    if(leadOrLevel && posA<=2) opts.push({w:2,s:"Massive at the top — "+cl.name+" keeping the title race alight."});
+    else if(leadOrLevel && posA<=7) opts.push({w:2,s:"Big points in the play-off hunt for "+cl.name+"."});
+    else if(leadOrLevel && posA>=21) opts.push({w:2,s:"Precious points in the drop fight for "+cl.name+"."});
+    // #4 six-pointer — the two clubs close together in the same zone
+    var oppK=(k===fx.home)?fx.away:fx.home, po=after.pos[oppK], hi=Math.max(posA,po), lo=Math.min(posA,po);
+    if(Math.abs(posA-po)<=3){
+      if(lo>=2 && hi<=7) opts.push({w:3,s:"A real six-pointer in the play-off race, these two."});
+      else if(lo>=20) opts.push({w:3,s:"A six-pointer at the wrong end for both of these."});
+    }
     if(!opts.length) return null;
     var tot=opts.reduce(function(n,o){return n+o.w;},0), x=Math.random()*tot, ch=opts[0];
     for(var i=0;i<opts.length;i++){ x-=opts[i].w; if(x<=0){ch=opts[i];break;} }
@@ -1007,27 +1074,34 @@ body{overflow:hidden}
   function commStatic(str){ clearInterval(st._typeIv); $("nlhComm").className="nlh__comm"; $("nlhCommText").textContent=str; }
 
   // ---- stings & beats (map view) ------------------------------------------
-  function fireSting(fx, ev){
+  function odoHTML(o,n,roll){ return '<span class="nlh__odo'+(roll?" rolling":"")+'"><span class="reel"><i>'+o+'</i>'+(roll?'<i>'+n+'</i>':'')+'</span></span>'; }
+  // TEASE: full-screen fires EARLY as we float in — neutral colour, current score, no scorer
+  function stingTease(fx){
     if (st.view!=="map") return;
-    var sc=scoreAt(fx, evRmin(ev,fx)), h=club(fx.home), a=club(fx.away);
-    var scorer=club(ev.team), wash=washCol(scorer.col);
-    var forHome=(ev.team===fx.home)!==!!ev.og;
-    var oldH=sc.h-(forHome?1:0), oldA=sc.a-(forHome?0:1);   // score BEFORE this goal
-    function odo(o,n,roll){ return '<span class="nlh__odo'+(roll?" rolling":"")+'"><span class="reel"><i>'+o+'</i><i>'+n+'</i></span></span>'; }
-    var pin=$("pin_"+fx.gc);
-    if (pin){ pin.classList.add("is-goal"); setTimeout(function(){pin.classList.remove("is-goal");},700); }
-    var el=$("nlhSting");
-    el.style.background = "radial-gradient(120% 90% at 50% 40%,"+wash+" 0%, rgba(6,10,22,.92) 72%)";
+    var h=club(fx.home), a=club(fx.away), sc=scoreAt(fx, st.T);
+    var el=$("nlhSting"); el.classList.remove("revealing");
+    el.style.background = "radial-gradient(120% 90% at 50% 42%, #223052 0%, rgba(6,10,22,.94) 72%)";  // neutral
     el.innerHTML =
       '<div class="nlh__sting-goal">G&nbsp;O&nbsp;A&nbsp;L</div>'+
       '<div class="nlh__sting-crests">'+crestHTML(fx.home,"home")+crestHTML(fx.away,"away")+'</div>'+
-      '<div class="nlh__sting-score">'+odo(oldH,sc.h,forHome)+'<span>–</span>'+odo(oldA,sc.a,!forHome)+'</div>'+
-      '<div class="nlh__sting-scorer"><span class="m">'+ev.min+"'"+'</span>'+esc(ev.name)+(ev.og?" (OG)":"")+'</div>'+
+      '<div class="nlh__sting-score" id="nlhStingScore">'+odoHTML(sc.h,sc.h,false)+'<span>–</span>'+odoHTML(sc.a,sc.a,false)+'</div>'+
+      '<div class="nlh__sting-scorer" id="nlhStingScorer" style="visibility:hidden">·</div>'+
       '<div class="nlh__sting-tag">'+esc(h.short)+' v '+esc(a.short)+'</div>';
     el.hidden=false;
-    clearTimeout(st._stingT);
-    st._stingT=setTimeout(function(){ el.hidden=true; }, st.playing? Math.max(900, 2200/st.rate) : 2400);
   }
+  // REVEAL: wash to the scoring team's colour (glow), roll the score, name the scorer
+  function stingReveal(fx, ev){
+    if (st.view!=="map") return;
+    var el=$("nlhSting"); if(el.hidden) stingTease(fx);
+    var sc=scoreAt(fx, evRmin(ev,fx)), forHome=(ev.team===fx.home)!==!!ev.og;
+    var oldH=sc.h-(forHome?1:0), oldA=sc.a-(forHome?0:1);
+    el.classList.add("revealing");
+    el.style.background = "radial-gradient(120% 90% at 50% 40%,"+washCol(club(ev.team).col)+" 0%, rgba(6,10,22,.92) 72%)";
+    var se=$("nlhStingScore"); if(se) se.innerHTML = odoHTML(oldH,sc.h,forHome)+'<span>–</span>'+odoHTML(oldA,sc.a,!forHome);
+    var scr=$("nlhStingScorer"); if(scr){ scr.style.visibility="visible"; scr.innerHTML='<span class="m">'+ev.min+"'"+'</span>'+esc(ev.name)+(ev.og?" (OG)":""); }
+    var pin=$("pin_"+fx.gc); if(pin){ pin.classList.add("is-goal"); setTimeout(function(){pin.classList.remove("is-goal");},700); }
+  }
+  function stingHide(){ var el=$("nlhSting"); el.hidden=true; el.classList.remove("revealing"); }
   function fireBeat(text){
     if (st.view!=="map") return;
     var el=$("nlhBeat"); el.innerHTML="<span>"+esc(text)+"</span>"; el.hidden=false;
@@ -1052,7 +1126,7 @@ body{overflow:hidden}
       var r=evRmin(ev,fx), id=evId(fx,ev);
       if(r<=prevT || r>T || st.fired[id]) return;
       if(ev.type==="red"){ st.fired[id]=1; if(st.playing) typeSegs(redSegs(fx,ev),"red"); }
-      else if(ev.type==="goal" && instantGoals){ st.fired[id]=1; fireSting(fx,ev); if(st.playing) typeSegs(revealSegs(fx,ev),"reveal-goal"); }
+      else if(ev.type==="goal" && instantGoals){ st.fired[id]=1; stingReveal(fx,ev); clearTimeout(st._stingT); st._stingT=setTimeout(stingHide, Math.max(1400,2600/st.rate)); if(st.playing) typeSegs(revealSegs(fx,ev),"reveal-goal"); }
     }); });
     BEATS.forEach(function(b){
       if(b.r>=prevT && b.r<=T && !st.beatShown[b.r]){ st.beatShown[b.r]=1; fireBeat(b.t); if(st.playing) typeSegs(buildSegs(pick(C_BEAT[b.c],"bc"+b.c),{},[]),"beat"); }
@@ -1061,14 +1135,14 @@ body{overflow:hidden}
   // goal suspense: hold the score, TEASE it, REVEAL, then DWELL so it can be read
   function beginSuspense(g, ts){
     st.fired[g.id]=1;
-    st.suspend={ g:g, phase:"tease", until: ts + (st.rate===2?1600:2700) };
-    if (st.view==="map") zoomTo(g.fx);          // fly to the ground during the tease
+    st.suspend={ g:g, phase:"tease", until: ts + (st.rate===2?1800:2900) };
+    if (st.view==="map"){ zoomTo(g.fx); stingTease(g.fx); }  // float in + neutral full-screen, ready
     typeSegs(teaseSegs(g.fx,g.ev),"tease");
   }
   function revealGoal(g){
     st.T = g.rmin + 0.0015;          // the score now includes this goal
     paint();                          // pins/cards tick over on the reveal
-    fireSting(g.fx, g.ev);            // dramatic full-screen sting (map view)
+    stingReveal(g.fx, g.ev);          // neutral card washes to team colour + score rolls
     var c=goalCtx(g.fx,g.ev), segs=baseRevealSegs(c), story=storylineSegs(c);
     if(story) segs=segs.concat([{t:"  "}]).concat(story);   // occasional context line
     typeSegs(segs, "reveal-goal");
@@ -1137,7 +1211,7 @@ body{overflow:hidden}
     var stage=$("nlhStage");
     stage.querySelectorAll(".nlh__view").forEach(function(el){ el.classList.toggle("is-active", el.getAttribute("data-view")===v); });
     document.querySelectorAll("#nlHub .nlh__seg").forEach(function(b){ b.classList.toggle("is-active", b.getAttribute("data-view")===v); });
-    $("nlhSting").hidden=true; $("nlhBeat").hidden=true;
+    stingHide(); $("nlhBeat").hidden=true;
     if (v==="map") layoutPins();
     paint();
   }
@@ -1146,14 +1220,28 @@ body{overflow:hidden}
   function tick(ts){
     if (!st.playing) return;
     if (!st.last) st.last=ts;
+    // KICKOFF PREVIEWS — float ground to ground, one at a time, before the action
+    if (st.kickoff){
+      if (ts>=st.kickoff.until){
+        var ki=st.kickoff.i;
+        if (ki>=KO_ORDER.length){ st.kickoff=null; zoomReset(); st.last=ts; }   // done — action begins
+        else {
+          var kfx=KO_ORDER[ki];
+          if (st.view==="map") zoomTo(kfx);
+          typeSegs(kickoffSegs(kfx),"beat");
+          st.kickoff={ i:ki+1, until: ts + (st.rate>=2?1300:2100) };
+        }
+      }
+      st.raf=requestAnimationFrame(tick); return;
+    }
     // goal suspense — freeze the clock through the tease, the reveal, and a dwell
     if (st.suspend){
       if (ts>=st.suspend.until){
         if (st.suspend.phase==="tease"){
           var story=revealGoal(st.suspend.g);
-          st.suspend={ g:st.suspend.g, phase:"hold", until: ts + (st.rate===2?1700:2800) + (story?1700:0) };
+          st.suspend={ g:st.suspend.g, phase:"hold", until: ts + (st.rate===2?2400:4000) + (story?2000:0) };
         } else {
-          st.suspend=null; zoomReset();          // dwell over — zoom back out and resume
+          st.suspend=null; zoomReset(); stingHide();   // dwell over — zoom back out, drop the card, resume
         }
         st.last=ts;
       }
@@ -1194,6 +1282,7 @@ body{overflow:hidden}
     $("nlhPlay").querySelector(".nlh__ico-play").hidden=true;
     $("nlhPlay").querySelector(".nlh__ico-pause").hidden=false;
     $("nlhPlay").setAttribute("aria-label","Pause");
+    if (st.T===0 && !st.koShown){ st.koShown=true; st.kickoff={ i:0, until:0 }; }  // team-news build-up
     st.raf=requestAnimationFrame(tick);
   }
   function pause(){
@@ -1203,13 +1292,13 @@ body{overflow:hidden}
     $("nlhPlay").setAttribute("aria-label","Play");
   }
   function restart(){
-    pause(); st.T=0; st.fired={}; st.feedBuilt={}; st.beatShown={}; st.ftShown=false; st.suspend=null;
-    $("nlhFeed").innerHTML=""; hideSheet(); $("nlhSting").hidden=true; $("nlhBeat").hidden=true; zoomReset();
+    pause(); st.T=0; st.fired={}; st.feedBuilt={}; st.beatShown={}; st.ftShown=false; st.suspend=null; st.kickoff=null; st.koShown=false;
+    $("nlhFeed").innerHTML=""; hideSheet(); stingHide(); $("nlhBeat").hidden=true; zoomReset();
     commStatic(C_IDLE);
     paint(); play();
   }
   function seek(frac){
-    pause(); st.suspend=null; zoomReset(); st.T=Math.max(0,Math.min(frac,1))*maxT();
+    pause(); st.suspend=null; st.kickoff=null; st.koShown=true; zoomReset(); stingHide(); st.T=Math.max(0,Math.min(frac,1))*maxT();
     // rebuild derived-once state so nothing double-fires on resume
     st.fired={}; st.beatShown={}; st.feedBuilt={}; $("nlhFeed").innerHTML="";
     D.fixtures.forEach(function(fx){ fx.events.forEach(function(ev){ if(evRmin(ev,fx)<=st.T) st.fired[evId(fx,ev)]=1; }); });
