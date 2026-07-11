@@ -52,6 +52,13 @@
                           (force relaxation); ticker shows the scoring team
                           (crest + colour), adds per-match FT lines, and puts
                           newest at the top.
+    v0.4.0 (2026-07-11) — Live commentary engine: radio-style captions with a
+                          big varied phrase pool. Each goal gets a two-beat
+                          treatment — a TEASE ("a goal at Damson Park… but who?")
+                          while the score is held hidden, then a REVEAL naming
+                          the team + scorer. Context-aware by situation (opener /
+                          equaliser / go-ahead / extends / consolation / OG).
+                          Also narrates KO / HT / FT and red cards.
   ============================================================================
 -->
 
@@ -205,6 +212,11 @@ window.__DATA__ = {
         <div class="nlh__tablewrap"><table class="nlh__table"><tbody id="nlhTableBody"></tbody></table></div>
       </div>
     </div>
+  </div>
+
+  <div class="nlh__comm" id="nlhComm" aria-live="polite">
+    <span class="nlh__commdot"></span>
+    <span class="nlh__commtext" id="nlhCommText"></span>
   </div>
 
   <div class="nlh__controls">
@@ -390,6 +402,17 @@ body{overflow:hidden}
 #nlHub .nlh__table tr.moved .nm::after{content:"▲";color:var(--live);font-size:9px;margin-left:5px}
 #nlHub .nlh__table tr.moved.down .nm::after{content:"▼";color:#ff7a7a}
 
+/* ===== Commentary (radio-style live caption) ===== */
+#nlHub .nlh__comm{flex:0 0 auto;display:flex;align-items:center;gap:9px;min-height:46px;padding:9px 14px;background:linear-gradient(180deg,var(--ink),var(--ink-2));border-top:1px solid var(--line)}
+#nlHub .nlh__commdot{width:8px;height:8px;border-radius:50%;background:var(--primary);flex:0 0 auto;box-shadow:0 0 0 0 var(--primary);animation:nlhCommDot 1.6s ease-out infinite}
+@keyframes nlhCommDot{0%{box-shadow:0 0 0 0 rgba(158,0,0,.55)}70%{box-shadow:0 0 0 7px rgba(158,0,0,0)}100%{box-shadow:0 0 0 0 rgba(158,0,0,0)}}
+#nlHub .nlh__comm.is-goal .nlh__commdot{background:var(--live)}
+#nlHub .nlh__comm.is-goal{animation:nlhCommFlash .5s ease}
+@keyframes nlhCommFlash{0%{background:rgba(74,222,128,.18)}100%{}}
+#nlHub .nlh__commtext{font-size:13px;line-height:1.32;font-variation-settings:"wght" 600;font-weight:600;color:var(--text)}
+#nlHub .nlh__commtext .cbold{font-variation-settings:"wght" 900;font-weight:900}
+#nlHub .nlh__commtext .ccar{display:inline-block;width:2px;height:1.05em;background:var(--live);vertical-align:-2px;margin-left:1px;animation:nlhCaret .7s steps(1) infinite}
+
 /* ===== Controls ===== */
 #nlHub .nlh__controls{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:11px 14px;background:var(--ink-2);border-top:1px solid var(--line)}
 #nlHub .nlh__play{width:38px;height:38px;border-radius:999px;background:var(--primary);display:flex;align-items:center;justify-content:center;flex:0 0 auto}
@@ -518,7 +541,9 @@ body{overflow:hidden}
 
   // ---- state ---------------------------------------------------------------
   var st = { T:0, playing:false, rate:1, view:"map", raf:0, last:0,
-             fired:{}, ftShown:false, feedBuilt:{} , beatShown:{} };
+             fired:{}, ftShown:false, feedBuilt:{}, beatShown:{},
+             suspend:null, _pick:{}, _typeIv:0 };
+  function evId(fx,ev){ return fx.gc+"_"+ev.type+"_"+ev.min+"_"+(ev.name||""); }
 
   // ---- MAP: static outline + pins ------------------------------------------
   function buildMap(){
@@ -681,6 +706,157 @@ body{overflow:hidden}
     if (atTop) feed.scrollTop = 0;
   }
 
+  // ---- COMMENTARY ENGINE ---------------------------------------------------
+  // Radio-style captions with a big varied phrase pool. Goals get a two-beat
+  // treatment: a TEASE (venue + "which team?") while the score is still hidden,
+  // then a REVEAL naming the team + scorer. Context-aware by match situation.
+  var C_INTRO=[
+    "Now we head over to {venue}","Let's go across to {venue}","News reaching us from {venue}",
+    "Straight to {venue}","There's a roar at {venue}","Something's happening at {venue}",
+    "The net ripples at {venue}","Drama at {venue}","They're up on their feet at {venue}",
+    "Over to {venue} we go","A big moment at {venue}","Hold on — {venue} has a goal",
+    "Ears to {venue}","The crowd erupts at {venue}","Wait for it — {venue}"
+  ];
+  var C_TEASE={
+    deadlock:[
+      " — the deadlock's broken! But who's got the opener, {home} or {away}?",
+      " — and someone's in front! Is it {home}, or {away}?",
+      " — the first goal of the afternoon! But which side?",
+      " — we're off the mark! {home}… or {away}?",
+      " — someone's drawn first blood! But who?"
+    ],
+    level:[
+      " — and somebody's nudged in front again! {home} or {away}?",
+      " — the deadlock's broken once more! But by whom?",
+      " — someone's edged ahead! Is it {home}, or {away}?",
+      " — we've got a new leader! But which one?"
+    ],
+    lead1:[
+      " — but is it a second for {leader}, or an equaliser for {trailer}?",
+      " — has {leader} doubled up, or {trailer} levelled it?",
+      " — {leader} out of sight, or {trailer} right back in it?",
+      " — two for {leader}, or a lifeline for {trailer}?"
+    ],
+    lead2:[
+      " — is {leader} running riot, or {trailer} pulling one back?",
+      " — another for {leader}, or a consolation for {trailer}?",
+      " — {leader} piling it on, or {trailer} with a reply?"
+    ]
+  };
+  var C_REVEAL={
+    opener:[
+      "…and it's {team}! {scorer} breaks the deadlock — {score}.",
+      "It's {team}! {scorer} with the opener, {score}.",
+      "{scorer}! {team} lead it, {score}."
+    ],
+    equaliser:[
+      "…and it's {team}! {scorer} levels it up — {score}.",
+      "It's {team}! {scorer} with the equaliser — game on!",
+      "{scorer} hauls {team} level, {score}."
+    ],
+    goahead:[
+      "…and it's {team}! {scorer} puts them ahead — {score}.",
+      "It's {team}! {scorer} turns it around, {score}.",
+      "{scorer}! {team} in front now, {score}."
+    ],
+    extend:[
+      "…and it's {team} again! {scorer} makes it {score}.",
+      "It's {team}! {scorer} adds {another} — {score}, they're pulling clear.",
+      "{scorer} with {another} — {team} {score} and cruising."
+    ],
+    consolation:[
+      "…and it's {team} — {scorer} pulls one back, {score}.",
+      "It's {team}! {scorer} with a consolation, {score}.",
+      "{scorer} gets one back for {team} — {score}."
+    ],
+    og:[
+      "…oh no — it's an own goal! {scorer} turns into his own net, {team} benefit — {score}.",
+      "Disaster! {scorer}'s own goal hands it to {team}, {score}.",
+      "Into his own net! {scorer} gifts {team} the goal — {score}."
+    ]
+  };
+  var C_LATE=["What a time to score!","Surely decisive, this late on!","Right at the death!","You sense that's a big one."];
+  var C_BEAT={
+    ko:["We're underway across the National League!","And they're off around the grounds.","Here we go — kick-off across the division!"],
+    ht:["It's half-time.","The whistle goes for the break.","That's the first half done and dusted."],
+    "2h":["We're back underway.","Second halves are go across the grounds.","Off we go again — forty-five more."],
+    ft:["That's full-time across the board.","The final whistles are sounding.","And that's that — let's tot up the table."]
+  };
+  var C_RED=[
+    "Red card at {venue}! {team} down to ten — {scorer} off.",
+    "{scorer} sees red for {team} at {venue}.",
+    "Trouble for {team} — {scorer} is dismissed at {venue}.",
+    "Off! {scorer} gets his marching orders at {venue}."
+  ];
+  var C_IDLE="Team news is in — we're moments from kick-off across the National League.";
+
+  function pick(arr,key){
+    if(!arr||!arr.length) return "";
+    if(arr.length<2) return arr[0];
+    var i,guard=0; do{ i=Math.floor(Math.random()*arr.length); } while(i===st._pick[key] && guard++<6);
+    st._pick[key]=i; return arr[i];
+  }
+  function nth(n){ return n===2?"a second":n===3?"a third":n===4?"a fourth":"another"; }
+  // segments for the typewriter, with {tokens}; boldKeys get bolded
+  function buildSegs(tmpl,ctx,boldKeys){
+    var segs=[], re=/\{(\w+)\}/g, last=0, m;
+    while((m=re.exec(tmpl))){
+      if(m.index>last) segs.push({t:tmpl.slice(last,m.index)});
+      var v=ctx[m[1]]!=null?String(ctx[m[1]]):"";
+      segs.push({t:v, b:boldKeys.indexOf(m[1])>=0});
+      last=m.index+m[0].length;
+    }
+    if(last<tmpl.length) segs.push({t:tmpl.slice(last)});
+    return segs;
+  }
+  function goalCtx(fx,ev){
+    var before=scoreAt(fx, evRmin(ev,fx)-0.002);
+    var forHome=(ev.team===fx.home)!==!!ev.og;
+    var h=club(fx.home), a=club(fx.away), team=club(forHome?fx.home:fx.away);
+    var myB=forHome?before.h:before.a, opB=forHome?before.a:before.h, myA=myB+1;
+    var hA=before.h+(forHome?1:0), aA=before.a+(forHome?0:1);
+    var sig = ev.og?"og" : (before.h===0&&before.a===0)?"opener"
+            : (myB<opB && myA===opB)?"equaliser"
+            : (myB===opB)?"goahead" : (myB>opB)?"extend":"consolation";
+    var leader = before.h>before.a?h:(before.a>before.h?a:null);
+    var trailer= leader?(leader===h?a:h):null;
+    return { venue:h.venue||h.name, home:h.short, away:a.short,
+      leader:leader&&leader.short, trailer:trailer&&trailer.short,
+      team:team.short, scorer:ev.name, another:nth(myA),
+      score:h.short+" "+hA+"–"+aA+" "+a.short,
+      state: before.h===before.a?(before.h===0?"deadlock":"level"):(Math.abs(before.h-before.a)===1?"lead1":"lead2"),
+      sig:sig };
+  }
+  function teaseSegs(fx,ev){
+    var c=goalCtx(fx,ev);
+    return buildSegs(pick(C_INTRO,"in")+pick(C_TEASE[c.state],"tz"+c.state), c, ["venue","home","away","leader","trailer"]);
+  }
+  function revealSegs(fx,ev){
+    var c=goalCtx(fx,ev), s=pick(C_REVEAL[c.sig],"rv"+c.sig);
+    if(c.sig!=="og" && ev.min>=85 && Math.random()<0.55) s+=" "+pick(C_LATE,"late");
+    return buildSegs(s, c, ["team","scorer","score","venue"]);
+  }
+  function redSegs(fx,ev){
+    var t=club(ev.team), h=club(fx.home);
+    return buildSegs(pick(C_RED,"red"), {venue:h.venue||h.name,team:t.short,scorer:ev.name}, ["venue","team","scorer"]);
+  }
+  function typeSegs(segs,cls){
+    var box=$("nlhCommText"), bar=$("nlhComm");
+    clearInterval(st._typeIv);
+    bar.className="nlh__comm"+(cls&&/goal|red/.test(cls)?" is-goal":"");
+    var total=segs.reduce(function(n,s){return n+s.t.length;},0), shown=0;
+    function render(){
+      var out="", left=shown;
+      for(var i=0;i<segs.length;i++){ var s=segs[i], take=Math.max(0,Math.min(s.t.length,left)); left-=s.t.length;
+        var txt=esc(s.t.slice(0,take)); if(!txt) continue; out+= s.b?'<span class="cbold">'+txt+'</span>':txt; }
+      box.innerHTML=out+(shown<total?'<span class="ccar"></span>':'');
+    }
+    render();
+    var speed=Math.max(8, 24/(st.rate||1));
+    st._typeIv=setInterval(function(){ shown+=2; if(shown>=total){shown=total;clearInterval(st._typeIv);} render(); }, speed);
+  }
+  function commStatic(str){ clearInterval(st._typeIv); $("nlhComm").className="nlh__comm"; $("nlhCommText").textContent=str; }
+
   // ---- stings & beats (map view) ------------------------------------------
   function fireSting(fx, ev){
     if (st.view!=="map") return;
@@ -707,19 +883,40 @@ body{overflow:hidden}
     st._beatT=setTimeout(function(){ el.hidden=true; }, st.playing? Math.max(700,1500/st.rate) : 1600);
   }
 
-  // fire moments crossed between prevT and T (goals sting, phase beats)
-  var BEATS = [{r:0,t:"Kick-off"},{r:HALF,t:"Half-time"},{r:HALF+BREAK,t:"Second half"},{r:FT_RMIN,t:"Full-time"}];
-  function fireCrossed(prevT, T){
-    D.fixtures.forEach(function(fx){
-      fx.events.forEach(function(ev){
-        if (ev.type!=="goal") return;
-        var r=evRmin(ev,fx), id=fx.gc+"_"+ev.min+"_"+ev.name;
-        if (r>prevT && r<=T && !st.fired[id]){ st.fired[id]=1; fireSting(fx,ev); }
-      });
-    });
+  var BEATS = [{r:0,t:"Kick-off",c:"ko"},{r:HALF,t:"Half-time",c:"ht"},{r:HALF+BREAK,t:"Second half",c:"2h"},{r:FT_RMIN,t:"Full-time",c:"ft"}];
+  // earliest not-yet-fired GOAL with rmin in (a,b]
+  function nextGoalAt(a,b){
+    var best=null;
+    D.fixtures.forEach(function(fx){ fx.events.forEach(function(ev){
+      if(ev.type!=="goal") return;
+      var r=evRmin(ev,fx);
+      if(r>a && r<=b && !st.fired[evId(fx,ev)] && (!best||r<best.rmin)) best={fx:fx,ev:ev,rmin:r,id:evId(fx,ev)};
+    }); });
+    return best;
+  }
+  // beats + reds fire on crossing; goals only when instantGoals (4× — no tease)
+  function fireCrossed(prevT, T, instantGoals){
+    D.fixtures.forEach(function(fx){ fx.events.forEach(function(ev){
+      var r=evRmin(ev,fx), id=evId(fx,ev);
+      if(r<=prevT || r>T || st.fired[id]) return;
+      if(ev.type==="red"){ st.fired[id]=1; if(st.playing) typeSegs(redSegs(fx,ev),"red"); }
+      else if(ev.type==="goal" && instantGoals){ st.fired[id]=1; fireSting(fx,ev); if(st.playing) typeSegs(revealSegs(fx,ev),"reveal-goal"); }
+    }); });
     BEATS.forEach(function(b){
-      if (b.r>prevT && b.r<=T && !st.beatShown[b.r]){ st.beatShown[b.r]=1; if(b.r>0||T>0) fireBeat(b.t); }
+      if(b.r>=prevT && b.r<=T && !st.beatShown[b.r]){ st.beatShown[b.r]=1; fireBeat(b.t); if(st.playing) typeSegs(buildSegs(pick(C_BEAT[b.c],"bc"+b.c),{},[]),"beat"); }
     });
+  }
+  // goal suspense: hold the score, tease it, then reveal after a beat
+  function beginSuspense(g, ts){
+    st.fired[g.id]=1;
+    st.suspend={ g:g, until: ts + (st.rate===2?1500:2600) };
+    typeSegs(teaseSegs(g.fx,g.ev),"tease");
+  }
+  function revealGoal(g){
+    st.T = g.rmin + 0.0015;          // the score now includes this goal
+    paint();                          // pins/cards tick over on the reveal
+    fireSting(g.fx, g.ev);            // dramatic full-screen sting (map view)
+    typeSegs(revealSegs(g.fx, g.ev), "reveal-goal");
   }
 
   // ---- FT league table (prior + this matchday, FLIP re-sort) ---------------
@@ -782,14 +979,31 @@ body{overflow:hidden}
   function tick(ts){
     if (!st.playing) return;
     if (!st.last) st.last=ts;
+    // in a goal suspense hold — freeze the clock, wait out the tease, then reveal
+    if (st.suspend){
+      if (ts>=st.suspend.until){ revealGoal(st.suspend.g); st.suspend=null; st.last=ts; }
+      st.raf=requestAnimationFrame(tick); return;
+    }
     var dt=(ts-st.last)/1000; st.last=ts;
     var prevT=st.T;
     // ~1 match-min/sec × rate; accelerate through goalless lulls
     var gap=nextMoment(st.T)-st.T, eff=st.rate*(gap>4?6:1);
-    st.T = Math.min(prevT + dt*eff, maxT()); // 1 unit = 1 match-minute/sec × rate
-    fireCrossed(prevT, st.T);
+    var target=Math.min(prevT + dt*eff, maxT());
+    // <4×: stop just before the next goal so the tease can hide the score
+    if (st.rate<4){
+      var g=nextGoalAt(prevT, target);
+      if (g){
+        st.T=g.rmin-0.0015;
+        fireCrossed(prevT, st.T, false);   // fire any beats/reds up to the goal
+        beginSuspense(g, ts);
+        paint();
+        st.raf=requestAnimationFrame(tick); return;
+      }
+    }
+    st.T=target;
+    fireCrossed(prevT, st.T, true);        // 4× (or no goal ahead): goals fire instantly
     paint();
-    if (st.T>=maxT()){ pause(); if(!st.ftShown){ st.ftShown=true; setTimeout(showSheet, 500);} return; }
+    if (st.T>=maxT()){ pause(); if(!st.ftShown){ st.ftShown=true; setTimeout(showSheet, 700);} return; }
     st.raf=requestAnimationFrame(tick);
   }
   function play(){
@@ -807,17 +1021,19 @@ body{overflow:hidden}
     $("nlhPlay").setAttribute("aria-label","Play");
   }
   function restart(){
-    pause(); st.T=0; st.fired={}; st.feedBuilt={}; st.beatShown={}; st.ftShown=false;
+    pause(); st.T=0; st.fired={}; st.feedBuilt={}; st.beatShown={}; st.ftShown=false; st.suspend=null;
     $("nlhFeed").innerHTML=""; hideSheet(); $("nlhSting").hidden=true; $("nlhBeat").hidden=true;
+    commStatic(C_IDLE);
     paint(); play();
   }
   function seek(frac){
-    pause(); st.T=Math.max(0,Math.min(frac,1))*maxT();
+    pause(); st.suspend=null; st.T=Math.max(0,Math.min(frac,1))*maxT();
     // rebuild derived-once state so nothing double-fires on resume
     st.fired={}; st.beatShown={}; st.feedBuilt={}; $("nlhFeed").innerHTML="";
-    D.fixtures.forEach(function(fx){ fx.events.forEach(function(ev){ if(ev.type==="goal"&&evRmin(ev,fx)<=st.T) st.fired[fx.gc+"_"+ev.min+"_"+ev.name]=1; }); });
+    D.fixtures.forEach(function(fx){ fx.events.forEach(function(ev){ if(evRmin(ev,fx)<=st.T) st.fired[evId(fx,ev)]=1; }); });
     BEATS.forEach(function(b){ if(b.r<=st.T) st.beatShown[b.r]=1; });
     st.ftShown = st.T>=maxT();
+    commStatic(st.T<=0?C_IDLE:(st.T>=maxT()?"Full-time across the division.":"Replay paused — press play to resume."));
     paint();
   }
 
@@ -826,6 +1042,7 @@ body{overflow:hidden}
     $("nlhRound").textContent = D.competition+" · MD"+D.round+" · "+D.season;
     buildMap(); buildCards();
     setView("map"); paint();
+    commStatic(C_IDLE);
 
     document.querySelectorAll("#nlHub .nlh__seg").forEach(function(b){
       b.addEventListener("click", function(){ setView(b.getAttribute("data-view")); });
