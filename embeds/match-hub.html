@@ -1,0 +1,743 @@
+<!--
+  ============================================================================
+  NL MATCH HUB  —  fan-facing matchday replay embed
+  ============================================================================
+  One matchday, three lenses the fan flips between, sharing ONE timeline model:
+    • MAP    — full-bleed England+Wales map, pins are mini-scoreboards,
+               goals erupt as full-screen stings.
+    • CARDS  — responsive grid of match cards (crests · live score · scorers).
+    • TICKER — vidiprinter strip, events typed in real-minute order.
+
+  DELIVERY: self-contained single HTML pasted into the Urban Zoo CMS on
+  thenationalleague.org.uk (like embeds/score-predictor.html). The CMS strips
+  <script src>, so EVERYTHING here is inline. No auth-guard, no Firebase gate,
+  no nl-brand.css (portal-only) — brand tokens are declared inline on the root.
+
+  MODE: REPLAY of a FINISHED matchday. The real-minute clock already models a
+  live clock, so "live later" is a DATA SWAP (point window.__DATA__ at a live
+  feed), not a rebuild. Match state is DERIVED from a single wall clock.
+
+  DATA: window.__DATA__ below is SAMPLE data for a single National Division
+  matchday, built from real clubs (coords/colours/divisions come from the
+  canonical assets/data/clubs-meta.json, keyed by optaID). The production build
+  replaces the __DATA__ block via GitHub Actions (the sandbox/CMS can't reach
+  the football host). Scores/scorers here are illustrative, not real results.
+
+  CHANGELOG
+    v0.1.0 (2026-07-11) — Initial v1: switcher + shared timeline engine +
+                          map / cards / ticker views, replay playback, goal
+                          stings, FT league-table sheet. Sample data inlined.
+  ============================================================================
+-->
+
+<!-- ==== DATA (Actions-replaceable block: BEGIN __DATA__ / END __DATA__) ==== -->
+<script>
+/* BEGIN __DATA__ */
+window.__DATA__ = {
+  round: 34,
+  season: "2025-26",
+  competition: "National League",
+
+  /* Simplified England + Wales outline (NL doesn't reach Scotland). The
+     production builder clips a Natural-Earth GB polygon; this hand-simplified
+     ring is a stand-in — recognisable silhouette, not survey-accurate. */
+  gb: [
+    [-2.03,55.81],[-1.70,55.63],[-1.58,55.28],[-1.52,54.97],[-1.35,54.77],
+    [-1.18,54.62],[-0.80,54.55],[-0.42,54.28],[-0.20,54.15],[-0.10,53.90],
+    [-0.33,53.74],[0.10,53.62],[0.35,53.10],[0.28,52.90],[0.55,52.97],
+    [0.95,52.96],[1.29,52.93],[1.66,52.75],[1.75,52.58],[1.72,52.48],
+    [1.56,52.08],[1.28,51.95],[1.06,51.79],[0.94,51.62],[1.27,51.38],
+    [1.42,51.33],[1.31,51.13],[0.97,50.91],[0.55,50.85],[0.27,50.74],
+    [-0.14,50.82],[-0.77,50.77],[-1.09,50.79],[-1.40,50.72],[-1.87,50.72],
+    [-2.06,50.60],[-2.45,50.57],[-2.94,50.70],[-3.40,50.62],[-3.53,50.43],
+    [-3.78,50.22],[-4.18,50.33],[-4.76,50.30],[-5.05,50.15],[-5.20,49.96],
+    [-5.55,50.05],[-5.72,50.07],[-5.48,50.21],[-5.05,50.35],[-4.53,51.02],
+    [-4.21,51.19],[-3.55,51.30],[-3.18,51.46],[-3.55,51.40],[-3.94,51.62],
+    [-4.29,51.57],[-4.69,51.73],[-5.17,51.71],[-5.30,51.88],[-4.90,52.02],
+    [-4.66,52.08],[-4.35,52.24],[-4.08,52.41],[-4.06,52.72],[-4.45,52.79],
+    [-4.71,52.79],[-4.35,52.90],[-4.20,53.05],[-4.63,53.31],[-4.20,53.30],
+    [-3.83,53.33],[-3.30,53.35],[-3.00,53.30],[-3.02,53.42],[-3.05,53.65],
+    [-3.05,53.82],[-2.90,53.95],[-2.87,54.07],[-3.05,54.10],[-3.24,54.11],
+    [-3.41,54.28],[-3.56,54.47],[-3.44,54.65],[-3.58,54.90],[-3.10,54.95],
+    [-2.75,55.10],[-2.35,55.45],[-2.03,55.81]
+  ],
+
+  /* Club identity — real values from clubs-meta.json (optaID → …). col:{p,s,t} */
+  clubs: {
+    t1493:{name:"Solihull Moors",short:"Solihull",lat:52.4389,lng:-1.7572,venue:"Damson Park",col:{p:"#F0E000",s:"#1A2A4A",t:"#000000"},div:"National"},
+    t81:  {name:"Southend United",short:"Southend",lat:51.5490,lng:0.7016,venue:"Roots Hall",col:{p:"#0F3E7A",s:"#FFFFFF",t:"#FFFFFF"},div:"National"},
+    t447: {name:"Gateshead",short:"Gateshead",lat:54.9610,lng:-1.5797,venue:"Gateshead Int. Stadium",col:{p:"#FFFFFF",s:"#000000",t:"#000000"},div:"National"},
+    t89:  {name:"Hartlepool United",short:"Hartlepool",lat:54.6891,lng:-1.2127,venue:"Victoria Park",col:{p:"#0056A0",s:"#FFFFFF",t:"#FFFFFF"},div:"National"},
+    t283: {name:"Yeovil Town",short:"Yeovil",lat:50.9502,lng:-2.6740,venue:"Huish Park",col:{p:"#3E8C3D",s:"#FFFFFF",t:"#FFFFFF"},div:"National"},
+    t300: {name:"Woking",short:"Woking",lat:51.3063,lng:-0.5589,venue:"Kingfield",col:{p:"#B50F1C",s:"#FFFFFF",t:"#FFFFFF"},div:"National"},
+    t444: {name:"Boston United",short:"Boston",lat:52.9563,lng:-0.0286,venue:"Boston Community Stadium",col:{p:"#F5C400",s:"#000000",t:"#000000"},div:"National"},
+    t295: {name:"Altrincham",short:"Altrincham",lat:53.3834,lng:-2.3352,venue:"Moss Lane",col:{p:"#C62228",s:"#FFFFFF",t:"#FFFFFF"},div:"National"},
+    t69:  {name:"FC Halifax Town",short:"Halifax",lat:53.7161,lng:-1.8591,venue:"The Shay",col:{p:"#1C5D9B",s:"#FFFFFF",t:"#FFFFFF"},div:"National"},
+    t434: {name:"Aldershot Town",short:"Aldershot",lat:51.2484,lng:-0.7547,venue:"Recreation Ground",col:{p:"#E43C2F",s:"#00038D",t:"#000000"},div:"National"},
+    t2625:{name:"Eastleigh",short:"Eastleigh",lat:50.9523,lng:-1.3720,venue:"Ten Acres",col:{p:"#132A9C",s:"#FFFFFF",t:"#FFFFFF"},div:"National"},
+    t296: {name:"Sutton United",short:"Sutton",lat:51.3676,lng:-0.2043,venue:"Gander Green Lane",col:{p:"#F2BD2F",s:"#000000",t:"#000000"},div:"National"}
+  },
+
+  /* Standings AFTER the previous round (drives the FT bottom-sheet re-sort). */
+  prior: {
+    t283: {P:33,W:21,D:7,L:5,GF:58,GA:30,Pts:70},
+    t447: {P:33,W:20,D:6,L:7,GF:55,GA:34,Pts:66},
+    t1493:{P:33,W:18,D:9,L:6,GF:51,GA:33,Pts:63},
+    t2625:{P:33,W:17,D:8,L:8,GF:49,GA:37,Pts:59},
+    t81:  {P:33,W:16,D:8,L:9,GF:47,GA:38,Pts:56},
+    t69:  {P:33,W:14,D:10,L:9,GF:44,GA:40,Pts:52},
+    t434: {P:33,W:13,D:9,L:11,GF:42,GA:41,Pts:48},
+    t89:  {P:33,W:12,D:10,L:11,GF:40,GA:42,Pts:46},
+    t295: {P:33,W:11,D:9,L:13,GF:38,GA:44,Pts:42},
+    t444: {P:33,W:10,D:8,L:15,GF:36,GA:49,Pts:38},
+    t300: {P:33,W:9,D:7,L:17,GF:34,GA:53,Pts:34},
+    t296: {P:33,W:7,D:8,L:18,GF:31,GA:56,Pts:29}
+  },
+
+  /* This matchday's fixtures. All KO 15:00 (koOffset 0 = synchronised).
+     hs/as = final. events[] minute-sorted; type goal|red; og=own goal
+     (credited to the OTHER side); sec=second-yellow red. */
+  fixtures: [
+    { gc:"g1", home:"t1493", away:"t81", hs:2, as:2, date:"2026-04-18T14:00:00Z", slot:"15:00", pp:false,
+      events:[
+        {min:12,type:"goal",team:"t1493",name:"Dan Kemp",og:false},
+        {min:45,type:"goal",team:"t81",name:"Gus Scott-Morriss",og:false},
+        {min:67,type:"goal",team:"t1493",name:"Andrew Dallas",og:false},
+        {min:88,type:"goal",team:"t81",name:"Josh Walker",og:false}
+      ] },
+    { gc:"g2", home:"t447", away:"t89", hs:1, as:0, date:"2026-04-18T14:00:00Z", slot:"15:00", pp:false,
+      events:[
+        {min:34,type:"goal",team:"t447",name:"Cedwyn Scott",og:false},
+        {min:71,type:"red",team:"t89",name:"Tom Crawford",sec:true}
+      ] },
+    { gc:"g3", home:"t283", away:"t300", hs:3, as:1, date:"2026-04-18T14:00:00Z", slot:"15:00", pp:false,
+      events:[
+        {min:5, type:"goal",team:"t283",name:"Alex Fisher",og:false},
+        {min:23,type:"goal",team:"t300",name:"Josh Casey",og:false},
+        {min:51,type:"goal",team:"t283",name:"Jake Hesketh",og:false},
+        {min:79,type:"goal",team:"t283",name:"Alex Fisher",og:false}
+      ] },
+    { gc:"g4", home:"t444", away:"t295", hs:0, as:0, date:"2026-04-18T14:00:00Z", slot:"15:00", pp:false,
+      events:[] },
+    { gc:"g5", home:"t69", away:"t434", hs:1, as:1, date:"2026-04-18T14:00:00Z", slot:"15:00", pp:false,
+      events:[
+        {min:61,type:"goal",team:"t69",name:"Jamie Cooke",og:false},
+        {min:90,type:"goal",team:"t69",name:"Will Evans",og:true}
+      ] },
+    { gc:"g6", home:"t2625", away:"t296", hs:2, as:1, date:"2026-04-18T14:00:00Z", slot:"15:00", pp:false,
+      events:[
+        {min:18,type:"goal",team:"t2625",name:"Paul McCallum",og:false},
+        {min:40,type:"goal",team:"t296",name:"Will Randall",og:false},
+        {min:73,type:"goal",team:"t2625",name:"Tyrone Marsh",og:false},
+        {min:84,type:"red",team:"t296",name:"Craig Eastmond",sec:false}
+      ] }
+  ]
+};
+/* END __DATA__ */
+</script>
+
+<div id="nlHub" aria-label="National League Match Hub">
+  <div class="nlh__topbar">
+    <div class="nlh__brandrow">
+      <span class="nlh__wordmark">MATCH&nbsp;HUB</span>
+      <span class="nlh__round" id="nlhRound"></span>
+    </div>
+    <div class="nlh__switch" role="tablist" aria-label="View">
+      <button class="nlh__seg is-active" data-view="map"    role="tab">Map</button>
+      <button class="nlh__seg"           data-view="cards"  role="tab">Cards</button>
+      <button class="nlh__seg"           data-view="ticker" role="tab">Ticker</button>
+    </div>
+  </div>
+
+  <div class="nlh__stage" id="nlhStage">
+    <!-- MAP -->
+    <section class="nlh__view nlh__map is-active" data-view="map">
+      <svg class="nlh__mapsvg" id="nlhMapSvg" viewBox="0 0 1000 1333" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
+      <div class="nlh__pins" id="nlhPins"></div>
+      <div class="nlh__sting" id="nlhSting" hidden></div>
+      <div class="nlh__beat" id="nlhBeat" hidden></div>
+    </section>
+    <!-- CARDS -->
+    <section class="nlh__view nlh__cards" data-view="cards">
+      <div class="nlh__grid" id="nlhGrid"></div>
+    </section>
+    <!-- TICKER -->
+    <section class="nlh__view nlh__ticker" data-view="ticker">
+      <ol class="nlh__feed" id="nlhFeed"></ol>
+    </section>
+    <!-- FT league-table bottom-sheet (all views) -->
+    <div class="nlh__sheet" id="nlhSheet" hidden>
+      <div class="nlh__sheetcard">
+        <div class="nlh__sheethead">
+          <span>National League — after Round <span id="nlhSheetRound"></span></span>
+          <button class="nlh__sheetclose" id="nlhSheetClose" aria-label="Close table">&times;</button>
+        </div>
+        <div class="nlh__tablewrap"><table class="nlh__table"><tbody id="nlhTableBody"></tbody></table></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="nlh__controls">
+    <button class="nlh__play" id="nlhPlay" aria-label="Play">
+      <svg class="nlh__ico-play"  viewBox="0 0 24 24" width="20" height="20"><path d="M8 5v14l11-7z"/></svg>
+      <svg class="nlh__ico-pause" viewBox="0 0 24 24" width="20" height="20" hidden><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>
+    </button>
+    <div class="nlh__scrub" id="nlhScrub"><div class="nlh__scrubfill" id="nlhScrubFill"></div></div>
+    <span class="nlh__clock" id="nlhClock">0'</span>
+    <button class="nlh__restart" id="nlhRestart" aria-label="Restart" title="Restart">
+      <svg viewBox="0 0 24 24" width="17" height="17"><path d="M12 5V2L7 7l5 5V8a5 5 0 1 1-5 5H5a7 7 0 1 0 7-8z"/></svg>
+    </button>
+    <button class="nlh__speed" id="nlhSpeed" title="Playback speed">1&times;</button>
+  </div>
+
+  <div class="nlh__foot">
+    <span id="nlhFootTable" class="nlh__footlink">Final table</span>
+    <span class="nlh__footnote">Replay · sample data</span>
+  </div>
+</div>
+
+<style>
+/* ===== Carbona (inline @font-face; brand typeface) ===== */
+@font-face{
+  font-family:"carbona-variable";
+  src:url("https://use.typekit.net/af/184cf2/0000000000000000774c3175/31/l?primer=f592e0a4b6b1256c81f68bd41bc4b0a3bd190f4b48b7f0d1e7c4b1e5f8f5c7d2&fkit-token=eyJhbGciOiJIUzI1NiJ9&fvd=n4&v=3") format("woff2");
+  font-display:swap;font-style:normal;font-weight:200 900;font-stretch:normal;
+}
+
+#nlHub{
+  /* brand tokens (inline — embeds must NOT load nl-brand.css) */
+  --primary:#9e0000; --primary-600:#7e0000;
+  --navy:#223b7c; --navy-800:#091533; --navy-900:#03081b;
+  --green:#1a7030; --amber:#c96f15; --blue:#1565c0;
+  --gold:#b8860b; --live:#4ade80;
+  --ink:#0a1020;        /* near-black stage bg          */
+  --ink-2:#131c31;      /* raised surface               */
+  --line:#26324c;       /* hairlines on dark            */
+  --text:#eef2f9; --muted:#9fb0cc;
+  --pos-champ:#7F99DC; --pos-po:#3760C8; --pos-releg:#192C5C;
+
+  box-sizing:border-box;
+  font-family:"carbona-variable","carbona",system-ui,sans-serif;
+  font-variation-settings:"wght" 400;
+  -webkit-font-smoothing:antialiased;
+  max-width:460px; margin:24px auto; padding:0;
+  color:var(--text);
+  background:var(--ink);
+  border-radius:14px; overflow:hidden;
+  box-shadow:0 10px 40px rgba(3,8,27,.45);
+}
+#nlHub *,#nlHub *::before,#nlHub *::after{box-sizing:border-box}
+#nlHub button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+/* our display:flex rules out-specify the UA [hidden] default — restore it */
+#nlHub [hidden]{display:none!important}
+
+/* ===== Topbar ===== */
+#nlHub .nlh__topbar{padding:12px 14px 10px;background:linear-gradient(180deg,var(--navy-900),var(--ink));border-bottom:1px solid var(--line)}
+#nlHub .nlh__brandrow{display:flex;align-items:baseline;gap:9px;margin-bottom:10px}
+#nlHub .nlh__wordmark{font-variation-settings:"wght" 900;font-weight:900;letter-spacing:.10em;font-size:17px}
+#nlHub .nlh__round{font-variation-settings:"wght" 700;color:var(--muted);font-size:11px;letter-spacing:.07em;text-transform:uppercase}
+#nlHub .nlh__switch{display:flex;gap:4px;background:var(--ink-2);padding:4px;border-radius:999px}
+#nlHub .nlh__seg{flex:1;padding:7px 0;border-radius:999px;font-size:12.5px;font-variation-settings:"wght" 800;font-weight:800;letter-spacing:.04em;color:var(--muted);transition:.18s}
+#nlHub .nlh__seg.is-active{background:var(--primary);color:#fff}
+
+/* ===== Stage ===== */
+#nlHub .nlh__stage{position:relative;width:100%;aspect-ratio:3/4;background:radial-gradient(120% 90% at 50% 8%,#101a30 0%,var(--ink) 70%);overflow:hidden}
+#nlHub .nlh__view{position:absolute;inset:0;opacity:0;visibility:hidden;transition:opacity .22s}
+#nlHub .nlh__view.is-active{opacity:1;visibility:visible}
+
+/* ===== Map ===== */
+#nlHub .nlh__mapsvg{position:absolute;inset:0;width:100%;height:100%}
+#nlHub .nlh__mapsvg path{fill:#0e1a33;stroke:#2b3d63;stroke-width:2.2;stroke-linejoin:round}
+#nlHub .nlh__pins{position:absolute;inset:0}
+#nlHub .nlh__pin{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:2px;transition:top .3s,left .3s}
+#nlHub .nlh__pinboard{display:flex;align-items:center;gap:0;background:var(--ink-2);border:1px solid var(--line);border-radius:7px;box-shadow:0 3px 10px rgba(0,0,0,.5);overflow:hidden}
+#nlHub .nlh__pinside{display:flex;align-items:center;gap:3px;padding:2px 4px}
+#nlHub .nlh__pinside img,#nlHub .nlh__crestfb{width:15px;height:15px;object-fit:contain;border-radius:2px;flex:0 0 auto}
+#nlHub .nlh__crestfb{display:flex;align-items:center;justify-content:center;font-size:7px;font-variation-settings:"wght" 900;font-weight:900;color:#fff}
+#nlHub .nlh__pinsc{font-variation-settings:"wght" 900;font-weight:900;font-size:12px;min-width:9px;text-align:center;font-variant-numeric:tabular-nums}
+#nlHub .nlh__pindiv{width:1px;align-self:stretch;background:var(--line)}
+#nlHub .nlh__pinmin{font-variation-settings:"wght" 800;font-weight:800;font-size:9px;padding:1px 5px;border-radius:999px;background:#0a1428;color:var(--muted);border:1px solid var(--line);letter-spacing:.03em;white-space:nowrap}
+#nlHub .nlh__pinmin.is-live{color:#031;background:var(--live);border-color:var(--live)}
+#nlHub .nlh__pinmin.is-ft{color:#eafff0;background:var(--green);border-color:var(--green)}
+#nlHub .nlh__pin.is-goal .nlh__pinboard{animation:nlhPulse .7s ease}
+@keyframes nlhPulse{0%{transform:scale(1)}35%{transform:scale(1.28)}100%{transform:scale(1)}}
+
+/* Goal sting (full-stage) */
+#nlHub .nlh__sting{position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:24px;animation:nlhStingIn .3s ease}
+@keyframes nlhStingIn{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
+#nlHub .nlh__sting-goal{font-variation-settings:"wght" 900;font-weight:900;letter-spacing:.18em;font-size:15px;color:#fff;opacity:.85}
+#nlHub .nlh__sting-crests{display:flex;align-items:center;gap:16px}
+#nlHub .nlh__sting-crests img,#nlHub .nlh__sting-crests .nlh__crestfb{width:44px;height:44px}
+#nlHub .nlh__sting-score{font-variation-settings:"wght" 900;font-weight:900;font-size:56px;line-height:1;font-variant-numeric:tabular-nums;display:flex;gap:14px;align-items:center}
+#nlHub .nlh__roll{display:inline-block;animation:nlhRoll .5s cubic-bezier(.2,.8,.2,1)}
+@keyframes nlhRoll{from{transform:translateY(-40%);opacity:0}to{transform:none;opacity:1}}
+#nlHub .nlh__sting-scorer{font-variation-settings:"wght" 800;font-weight:800;font-size:16px}
+#nlHub .nlh__sting-scorer .m{color:#fff;opacity:.8;margin-right:6px}
+#nlHub .nlh__sting-tag{font-size:11px;letter-spacing:.14em;text-transform:uppercase;font-variation-settings:"wght" 800;font-weight:800;opacity:.7}
+
+/* Beat cards (KO/HT/2nd half/FT) */
+#nlHub .nlh__beat{position:absolute;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;animation:nlhStingIn .3s ease;background:rgba(3,8,27,.35)}
+#nlHub .nlh__beat span{font-variation-settings:"wght" 900;font-weight:900;letter-spacing:.16em;font-size:30px;text-transform:uppercase;padding:14px 26px;border:2px solid rgba(255,255,255,.25);border-radius:12px;background:rgba(10,20,40,.6)}
+
+/* ===== Cards ===== */
+#nlHub .nlh__cards{overflow-y:auto;padding:12px}
+#nlHub .nlh__grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+#nlHub .nlh__card{background:var(--ink-2);border:1px solid var(--line);border-radius:10px;padding:9px;display:flex;flex-direction:column;gap:7px}
+#nlHub .nlh__cardhd{display:flex;justify-content:space-between;align-items:center}
+#nlHub .nlh__cardmin{font-size:9.5px;font-variation-settings:"wght" 800;font-weight:800;padding:1px 6px;border-radius:999px;background:#0a1428;border:1px solid var(--line);color:var(--muted);letter-spacing:.03em}
+#nlHub .nlh__cardmin.is-live{color:#031;background:var(--live);border-color:var(--live)}
+#nlHub .nlh__cardmin.is-ft{color:#eafff0;background:var(--green);border-color:var(--green)}
+#nlHub .nlh__cardteam{display:flex;align-items:center;gap:6px}
+#nlHub .nlh__cardteam img,#nlHub .nlh__cardteam .nlh__crestfb{width:18px;height:18px;object-fit:contain}
+#nlHub .nlh__cardteam .nm{flex:1;font-size:12px;font-variation-settings:"wght" 700;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#nlHub .nlh__cardteam .sc{font-variation-settings:"wght" 900;font-weight:900;font-size:16px;font-variant-numeric:tabular-nums;min-width:12px;text-align:right}
+#nlHub .nlh__cardteam.win .nm,#nlHub .nlh__cardteam.win .sc{color:#fff}
+#nlHub .nlh__cardteam.lose{opacity:.62}
+#nlHub .nlh__scorers{border-top:1px solid var(--line);padding-top:6px;min-height:14px;display:flex;flex-wrap:wrap;gap:2px 10px}
+#nlHub .nlh__scorer{font-size:9.5px;color:var(--muted);font-variation-settings:"wght" 600;font-weight:600}
+#nlHub .nlh__scorer .m{color:var(--text);opacity:.65}
+#nlHub .nlh__scorer.og .m::after{content:" OG"}
+
+/* ===== Ticker ===== */
+#nlHub .nlh__ticker{overflow:hidden}
+#nlHub .nlh__feed{list-style:none;margin:0;padding:10px 12px;height:100%;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+#nlHub .nlh__line{background:var(--ink-2);border:1px solid var(--line);border-left:3px solid var(--line);border-radius:8px;padding:8px 11px;font-size:12.5px;line-height:1.35;animation:nlhLineIn .28s ease;display:flex;gap:8px;align-items:baseline}
+@keyframes nlhLineIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+#nlHub .nlh__line .lm{font-variation-settings:"wght" 900;font-weight:900;font-variant-numeric:tabular-nums;color:var(--muted);min-width:26px}
+#nlHub .nlh__line .lt{flex:1}
+#nlHub .nlh__line.goal{border-left-color:var(--live)}
+#nlHub .nlh__line.goal .tag{color:var(--live);font-variation-settings:"wght" 900;font-weight:900;letter-spacing:.05em;margin-right:5px}
+#nlHub .nlh__line.red{border-left-color:var(--primary)}
+#nlHub .nlh__line.red .tag{color:#ff6b6b;font-variation-settings:"wght" 900;font-weight:900;margin-right:5px}
+#nlHub .nlh__line.divider{background:transparent;border:0;border-radius:0;justify-content:center;padding:2px 0;color:var(--muted);font-variation-settings:"wght" 800;font-weight:800;letter-spacing:.16em;font-size:10px;text-transform:uppercase}
+#nlHub .nlh__line.divider::before,#nlHub .nlh__line.divider::after{content:"";flex:1;height:1px;background:var(--line);align-self:center}
+#nlHub .nlh__line .caret{border-right:2px solid var(--text);animation:nlhCaret .7s steps(1) infinite}
+@keyframes nlhCaret{50%{border-color:transparent}}
+
+/* ===== FT sheet ===== */
+#nlHub .nlh__sheet{position:absolute;inset:0;z-index:8;display:flex;align-items:flex-end;background:rgba(3,8,27,.55)}
+#nlHub .nlh__sheetcard{width:100%;max-height:88%;background:var(--ink-2);border-top:2px solid var(--primary);border-radius:14px 14px 0 0;padding:12px 12px 14px;animation:nlhSheetUp .3s ease;overflow:hidden;display:flex;flex-direction:column}
+@keyframes nlhSheetUp{from{transform:translateY(100%)}to{transform:none}}
+#nlHub .nlh__sheethead{display:flex;justify-content:space-between;align-items:center;font-size:11.5px;font-variation-settings:"wght" 800;font-weight:800;letter-spacing:.04em;color:var(--muted);margin-bottom:8px}
+#nlHub .nlh__sheetclose{font-size:20px;line-height:1;color:var(--muted)}
+#nlHub .nlh__tablewrap{overflow-y:auto}
+#nlHub .nlh__table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
+#nlHub .nlh__table tr{transition:transform .5s cubic-bezier(.2,.8,.2,1)}
+#nlHub .nlh__table td{padding:5px 4px;border-bottom:1px solid var(--line)}
+#nlHub .nlh__table .pos{width:20px;color:var(--muted);text-align:center;font-variation-settings:"wght" 800;font-weight:800}
+#nlHub .nlh__table .cl{display:flex;align-items:center;gap:6px}
+#nlHub .nlh__table .cl img,#nlHub .nlh__table .nlh__crestfb{width:15px;height:15px}
+#nlHub .nlh__table .nm{font-variation-settings:"wght" 700;font-weight:700}
+#nlHub .nlh__table .pts{text-align:right;font-variation-settings:"wght" 900;font-weight:900}
+#nlHub .nlh__table td.num{text-align:center;color:var(--muted)}
+#nlHub .nlh__table tr.champ td.pos{color:var(--pos-champ)}
+#nlHub .nlh__table tr.po td.pos{color:var(--pos-po)}
+#nlHub .nlh__table tr.releg td.pos{color:#ff7a7a}
+#nlHub .nlh__table tr.moved .nm::after{content:"▲";color:var(--live);font-size:9px;margin-left:5px}
+#nlHub .nlh__table tr.moved.down .nm::after{content:"▼";color:#ff7a7a}
+
+/* ===== Controls ===== */
+#nlHub .nlh__controls{display:flex;align-items:center;gap:10px;padding:11px 14px;background:var(--ink-2);border-top:1px solid var(--line)}
+#nlHub .nlh__play{width:38px;height:38px;border-radius:999px;background:var(--primary);display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+#nlHub .nlh__play svg{fill:#fff}
+#nlHub .nlh__scrub{flex:1;height:6px;border-radius:999px;background:#0a1428;position:relative;cursor:pointer}
+#nlHub .nlh__scrubfill{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:999px;background:linear-gradient(90deg,var(--primary),#d64545)}
+#nlHub .nlh__clock{font-variation-settings:"wght" 900;font-weight:900;font-size:14px;font-variant-numeric:tabular-nums;min-width:34px;text-align:center}
+#nlHub .nlh__restart svg,#nlHub .nlh__speed{fill:var(--muted);color:var(--muted)}
+#nlHub .nlh__restart{width:30px;height:30px;display:flex;align-items:center;justify-content:center}
+#nlHub .nlh__speed{font-variation-settings:"wght" 800;font-weight:800;font-size:12px;padding:5px 8px;border:1px solid var(--line);border-radius:7px}
+
+/* ===== Footer ===== */
+#nlHub .nlh__foot{display:flex;justify-content:space-between;align-items:center;padding:8px 14px;font-size:10.5px;color:var(--muted);background:var(--navy-900)}
+#nlHub .nlh__footlink{font-variation-settings:"wght" 800;font-weight:800;letter-spacing:.03em;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+#nlHub .nlh__footnote{letter-spacing:.06em;text-transform:uppercase;opacity:.7}
+
+@media (max-width:380px){
+  #nlHub .nlh__grid{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){
+  #nlHub *{animation-duration:.01ms!important}
+}
+</style>
+
+<script>
+(function () {
+  "use strict";
+  var D = window.__DATA__;
+  if (!D) return;
+
+  var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
+  var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
+
+  // ---- helpers -------------------------------------------------------------
+  var $  = function (id) { return document.getElementById(id); };
+  function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
+  function crestURL(name){ return CREST_BASE + encodeURIComponent(name) + ".png"; }
+  function club(k){ return D.clubs[k] || {name:k,short:k,col:{p:"#666",s:"#fff",t:"#fff"},lat:53,lng:-2}; }
+  // crest <img> with coloured-disc fallback (crests can't be verified in CI)
+  function crestHTML(k, cls){
+    var c = club(k), init = (c.short||c.name).slice(0,3).toUpperCase();
+    var fb = "this.onerror=null;this.outerHTML='<span class=\\'nlh__crestfb\\' style=\\'background:"+c.col.p+";color:"+ideal(c.col.p)+"\\'>"+init+"</span>';";
+    return '<img class="'+(cls||"")+'" src="'+crestURL(c.name)+'" alt="'+esc(c.name)+'" onerror="'+fb+'">';
+  }
+  // pick black/white text for a bg (also used for near-white crest fallback legibility)
+  function ideal(hex){
+    var m = /^#?([0-9a-f]{6})$/i.exec(hex||""); if(!m) return "#fff";
+    var n=parseInt(m[1],16), r=n>>16, g=(n>>8)&255, b=n&255;
+    return (0.299*r+0.587*g+0.114*b) > 150 ? "#111" : "#fff";
+  }
+  // near-white club colour → fall back to secondary for washes/legibility
+  function washCol(c){ return ideal(c.p)==="#111" && c.s ? c.s : c.p; }
+
+  // ---- timeline model ------------------------------------------------------
+  // real-minute of an event, HT break folded in, plus its slot's KO offset
+  function evRmin(ev, fx){ return koOffset(fx) + (ev.min <= HALF ? ev.min : ev.min + BREAK); }
+  function koOffset(fx){ return fx._ko || 0; } // all 0 in sample (synchronised KO)
+
+  // per-fixture derived state at global time T (real-minutes since first KO)
+  function stateOf(fx, T){
+    var local = T - koOffset(fx);
+    if (fx.pp) return {phase:"pp", label:"P-P", live:false};
+    if (local < 0)        return {phase:"pre", label:fx.slot, live:false};
+    if (local < HALF)     return {phase:"1h",  label:Math.max(1,Math.floor(local))+"'", live:true};
+    if (local < HALF+BREAK) return {phase:"ht", label:"HT", live:true};
+    if (local < FT_RMIN)  return {phase:"2h",  label:Math.floor(local-BREAK)+"'", live:true};
+    return {phase:"ft", label:"FT", live:false};
+  }
+  // running score at T (own goals credited to the other side)
+  function scoreAt(fx, T){
+    var h=0,a=0;
+    fx.events.forEach(function(ev){
+      if (ev.type!=="goal") return;
+      if (evRmin(ev,fx) > T) return;
+      var forHome = (ev.team===fx.home) !== !!ev.og; // XOR own-goal flip
+      if (forHome) h++; else a++;
+    });
+    return {h:h,a:a};
+  }
+  function scorersAt(fx, side, T){ // side 'h'|'a' → array of {name,min,og}
+    return fx.events.filter(function(ev){
+      if (ev.type!=="goal" || evRmin(ev,fx)>T) return false;
+      var forHome=(ev.team===fx.home)!==!!ev.og;
+      return side==="h" ? forHome : !forHome;
+    }).map(function(ev){ return {name:ev.name,min:ev.min,og:ev.og}; });
+  }
+  function maxT(){
+    return D.fixtures.reduce(function(m,fx){ return Math.max(m, koOffset(fx)+FT_RMIN); }, FT_RMIN) + 4;
+  }
+  // clock label for the shared matchday wall clock
+  function clockLabel(T){
+    if (T <= 0) return "0'";
+    if (T < HALF) return Math.floor(T)+"'";
+    if (T < HALF+BREAK) return "HT";
+    if (T < FT_RMIN) return Math.floor(T-BREAK)+"'";
+    return "FT";
+  }
+
+  // sorted list of every timeline "moment" (events + phase beats) for lull-skip
+  var MOMENTS = [];
+  D.fixtures.forEach(function(fx){
+    fx.events.forEach(function(ev){ MOMENTS.push(evRmin(ev,fx)); });
+  });
+  [0,HALF,HALF+BREAK,FT_RMIN].forEach(function(m){ MOMENTS.push(m); });
+  MOMENTS = MOMENTS.filter(function(v,i,a){return a.indexOf(v)===i;}).sort(function(x,y){return x-y;});
+  function nextMoment(T){
+    for (var i=0;i<MOMENTS.length;i++){ if (MOMENTS[i] > T+0.001) return MOMENTS[i]; }
+    return maxT();
+  }
+
+  // ---- map projection (preserve England+Wales shape into the 3:4 stage) ----
+  var proj = (function(){
+    var midLat = 53, k = Math.cos(midLat*Math.PI/180); // lng compression
+    var xs = D.gb.map(function(p){return p[0]*k;}), ys = D.gb.map(function(p){return p[1];});
+    var minX=Math.min.apply(0,xs), maxX=Math.max.apply(0,xs);
+    var minY=Math.min.apply(0,ys), maxY=Math.max.apply(0,ys);
+    var cX=(minX+maxX)/2, cY=(minY+maxY)/2;
+    var boxW=3, boxH=4, pad=0.90;
+    var scale = Math.min(boxW/(maxX-minX), boxH/(maxY-minY)) * pad;
+    return function(lng,lat){
+      var x = boxW/2 + (lng*k - cX)*scale;
+      var y = boxH/2 - (lat  - cY)*scale;
+      return { nx:x/boxW, ny:y/boxH }; // normalised 0..1 within stage
+    };
+  })();
+
+  // ---- state ---------------------------------------------------------------
+  var st = { T:0, playing:false, rate:1, view:"map", raf:0, last:0,
+             fired:{}, ftShown:false, feedBuilt:{} , beatShown:{} };
+
+  // ---- MAP: static outline + pins ------------------------------------------
+  function buildMap(){
+    var d = D.gb.map(function(p,i){ var q=proj(p[0],p[1]); return (i?"L":"M")+(q.nx*1000).toFixed(1)+" "+(q.ny*1333).toFixed(1); }).join(" ")+" Z";
+    $("nlhMapSvg").innerHTML = '<path d="'+d+'"/>';
+    var pins = D.fixtures.map(function(fx){
+      var c = club(fx.home), q = proj(c.lng, c.lat);
+      return '<div class="nlh__pin" id="pin_'+fx.gc+'" style="left:'+(q.nx*100).toFixed(2)+'%;top:'+(q.ny*100).toFixed(2)+'%">'+
+               '<div class="nlh__pinboard">'+
+                 '<div class="nlh__pinside">'+crestHTML(fx.home)+'<span class="nlh__pinsc" data-h></span></div>'+
+                 '<div class="nlh__pindiv"></div>'+
+                 '<div class="nlh__pinside"><span class="nlh__pinsc" data-a></span>'+crestHTML(fx.away)+'</div>'+
+               '</div>'+
+               '<div class="nlh__pinmin" data-min></div>'+
+             '</div>';
+    }).join("");
+    $("nlhPins").innerHTML = pins;
+  }
+  function paintPins(){
+    D.fixtures.forEach(function(fx){
+      var pin=$("pin_"+fx.gc); if(!pin) return;
+      var sc=scoreAt(fx,st.T), s=stateOf(fx,st.T);
+      pin.querySelector("[data-h]").textContent = s.phase==="pre" ? "" : sc.h;
+      pin.querySelector("[data-a]").textContent = s.phase==="pre" ? "" : sc.a;
+      var min=pin.querySelector("[data-min]");
+      min.textContent = s.label;
+      min.className = "nlh__pinmin"+(s.phase==="ft"?" is-ft":s.live?" is-live":"");
+    });
+  }
+
+  // ---- CARDS ---------------------------------------------------------------
+  function buildCards(){
+    $("nlhGrid").innerHTML = D.fixtures.map(function(fx){
+      return '<div class="nlh__card" id="card_'+fx.gc+'">'+
+        '<div class="nlh__cardhd"><span class="nlh__cardmin" data-min></span></div>'+
+        row(fx,"h")+row(fx,"a")+
+        '<div class="nlh__scorers" data-scorers></div></div>';
+    }).join("");
+    function row(fx,side){
+      var k = side==="h"?fx.home:fx.away, c=club(k);
+      return '<div class="nlh__cardteam" data-side="'+side+'">'+crestHTML(k)+
+             '<span class="nm">'+esc(c.short)+'</span><span class="sc" data-sc></span></div>';
+    }
+  }
+  function paintCards(){
+    D.fixtures.forEach(function(fx){
+      var card=$("card_"+fx.gc); if(!card) return;
+      var sc=scoreAt(fx,st.T), s=stateOf(fx,st.T);
+      var min=card.querySelector("[data-min]");
+      min.textContent=s.phase==="pre"?fx.slot:s.label;
+      min.className="nlh__cardmin"+(s.phase==="ft"?" is-ft":s.live?" is-live":"");
+      card.querySelectorAll(".nlh__cardteam").forEach(function(t){
+        var side=t.getAttribute("data-side"), v=side==="h"?sc.h:sc.a, ov=side==="h"?sc.a:sc.h;
+        t.querySelector("[data-sc]").textContent = s.phase==="pre"?"":v;
+        t.classList.toggle("win",  s.phase!=="pre" && v>ov);
+        t.classList.toggle("lose", s.phase!=="pre" && v<ov);
+      });
+      var box=card.querySelector("[data-scorers]");
+      var hs=scorersAt(fx,"h",st.T), as=scorersAt(fx,"a",st.T);
+      box.innerHTML = hs.concat(as).length ?
+        [].concat(
+          hs.map(function(g){return sc_("h",g);}),
+          as.map(function(g){return sc_("a",g);})
+        ).join("") : "";
+      function sc_(sd,g){ return '<span class="nlh__scorer'+(g.og?" og":"")+'">'+esc(g.name)+' <span class="m">'+g.min+"'"+'</span></span>'; }
+    });
+  }
+
+  // ---- TICKER --------------------------------------------------------------
+  // ordered feed items: KO/HT/FT dividers + each event, all in rmin order
+  var FEED = (function(){
+    var items = [];
+    items.push({rmin:0, kind:"divider", text:"Kick-off"});
+    D.fixtures.forEach(function(fx){
+      fx.events.forEach(function(ev){
+        items.push({rmin:evRmin(ev,fx), kind:ev.type, ev:ev, fx:fx});
+      });
+    });
+    items.push({rmin:HALF+0.5, kind:"divider", text:"Half-time"});
+    items.push({rmin:HALF+BREAK+0.01, kind:"divider", text:"Second half"});
+    items.push({rmin:FT_RMIN, kind:"divider", text:"Full-time"});
+    return items.map(function(it,i){it._id="f"+i;return it;}).sort(function(a,b){return a.rmin-b.rmin;});
+  })();
+  function lineHTML(it){
+    if (it.kind==="divider") return '<li class="nlh__line divider" data-id="'+it._id+'">'+esc(it.text)+'</li>';
+    var fx=it.fx, ev=it.ev, sc=scoreAt(fx, it.rmin), h=club(fx.home), a=club(fx.away);
+    var mm = ev.min+"'";
+    if (it.kind==="goal"){
+      return '<li class="nlh__line goal" data-id="'+it._id+'"><span class="lm">'+mm+'</span>'+
+        '<span class="lt"><span class="tag">GOAL</span>'+esc(h.short)+' '+sc.h+'–'+sc.a+' '+esc(a.short)+
+        ' · '+esc(ev.name)+(ev.og?" (OG)":"")+'</span></li>';
+    }
+    var who = ev.team===fx.home?h.short:a.short;
+    return '<li class="nlh__line red" data-id="'+it._id+'"><span class="lm">'+mm+'</span>'+
+      '<span class="lt"><span class="tag">RED</span>'+esc(who)+' · '+esc(ev.name)+(ev.sec?" (2nd yellow)":"")+'</span></li>';
+  }
+  function paintFeed(){
+    var feed=$("nlhFeed"), atBottom = feed.scrollHeight-feed.scrollTop-feed.clientHeight < 30;
+    FEED.forEach(function(it){
+      var shown = !!st.feedBuilt[it._id], due = it.rmin <= st.T+0.001;
+      if (due && !shown){
+        feed.insertAdjacentHTML("beforeend", lineHTML(it));
+        st.feedBuilt[it._id]=1;
+      } else if (!due && shown){
+        var el=feed.querySelector('[data-id="'+it._id+'"]'); if(el) el.remove();
+        st.feedBuilt[it._id]=0;
+      }
+    });
+    if (atBottom) feed.scrollTop = feed.scrollHeight;
+  }
+
+  // ---- stings & beats (map view) ------------------------------------------
+  function fireSting(fx, ev){
+    if (st.view!=="map") return;
+    var sc=scoreAt(fx, evRmin(ev,fx)), h=club(fx.home), a=club(fx.away);
+    var scorer=club(ev.team), wash=washCol(scorer.col);
+    var pin=$("pin_"+fx.gc);
+    if (pin){ pin.classList.add("is-goal"); setTimeout(function(){pin.classList.remove("is-goal");},700); }
+    var el=$("nlhSting");
+    el.style.background = "radial-gradient(120% 90% at 50% 40%,"+wash+" 0%, rgba(6,10,22,.92) 72%)";
+    el.innerHTML =
+      '<div class="nlh__sting-goal">G&nbsp;O&nbsp;A&nbsp;L</div>'+
+      '<div class="nlh__sting-crests">'+crestHTML(fx.home)+crestHTML(fx.away)+'</div>'+
+      '<div class="nlh__sting-score"><span class="nlh__roll">'+sc.h+'</span><span>–</span><span class="nlh__roll">'+sc.a+'</span></div>'+
+      '<div class="nlh__sting-scorer"><span class="m">'+ev.min+"'"+'</span>'+esc(ev.name)+(ev.og?" (OG)":"")+'</div>'+
+      '<div class="nlh__sting-tag">'+esc(h.short)+' v '+esc(a.short)+'</div>';
+    el.hidden=false;
+    clearTimeout(st._stingT);
+    st._stingT=setTimeout(function(){ el.hidden=true; }, st.playing? Math.max(900, 2200/st.rate) : 2400);
+  }
+  function fireBeat(text){
+    if (st.view!=="map") return;
+    var el=$("nlhBeat"); el.innerHTML="<span>"+esc(text)+"</span>"; el.hidden=false;
+    clearTimeout(st._beatT);
+    st._beatT=setTimeout(function(){ el.hidden=true; }, st.playing? Math.max(700,1500/st.rate) : 1600);
+  }
+
+  // fire moments crossed between prevT and T (goals sting, phase beats)
+  var BEATS = [{r:0,t:"Kick-off"},{r:HALF,t:"Half-time"},{r:HALF+BREAK,t:"Second half"},{r:FT_RMIN,t:"Full-time"}];
+  function fireCrossed(prevT, T){
+    D.fixtures.forEach(function(fx){
+      fx.events.forEach(function(ev){
+        if (ev.type!=="goal") return;
+        var r=evRmin(ev,fx), id=fx.gc+"_"+ev.min+"_"+ev.name;
+        if (r>prevT && r<=T && !st.fired[id]){ st.fired[id]=1; fireSting(fx,ev); }
+      });
+    });
+    BEATS.forEach(function(b){
+      if (b.r>prevT && b.r<=T && !st.beatShown[b.r]){ st.beatShown[b.r]=1; if(b.r>0||T>0) fireBeat(b.t); }
+    });
+  }
+
+  // ---- FT league table (prior + this matchday, FLIP re-sort) ---------------
+  function computeTable(T){
+    var rows={};
+    Object.keys(D.prior).forEach(function(k){ var p=D.prior[k]; rows[k]={k:k,P:p.P,W:p.W,D:p.D,L:p.L,GF:p.GF,GA:p.GA,Pts:p.Pts}; });
+    D.fixtures.forEach(function(fx){
+      if (stateOf(fx,T).phase!=="ft") return;
+      var sc=scoreAt(fx,T);
+      [[fx.home,sc.h,sc.a],[fx.away,sc.a,sc.h]].forEach(function(x){
+        var r=rows[x[0]]; if(!r) return;
+        r.P++; r.GF+=x[1]; r.GA+=x[2];
+        if (x[1]>x[2]){ r.W++; r.Pts+=3; } else if (x[1]===x[2]){ r.D++; r.Pts+=1; } else r.L++;
+      });
+    });
+    return Object.keys(rows).map(function(k){var r=rows[k];r.GD=r.GF-r.GA;return r;})
+      .sort(function(a,b){ return b.Pts-a.Pts || b.GD-a.GD || b.GF-a.GF || club(a.k).name.localeCompare(club(b.k).name); });
+  }
+  function priorRank(){
+    var arr=Object.keys(D.prior).map(function(k){var p=D.prior[k];return{k:k,Pts:p.Pts,GD:p.GF-p.GA,GF:p.GF};})
+      .sort(function(a,b){return b.Pts-a.Pts||b.GD-a.GD||b.GF-a.GF;});
+    var m={}; arr.forEach(function(r,i){m[r.k]=i;}); return m;
+  }
+  function renderTable(){
+    var final=computeTable(maxT()), was=priorRank(), n=final.length;
+    $("nlhSheetRound").textContent = D.round;
+    $("nlhTableBody").innerHTML = final.map(function(r,i){
+      var cls = i===0?"champ":(i>=1&&i<=4?"po":(i>=n-3?"releg":""));
+      var moved = was[r.k]!==undefined && was[r.k]!==i;
+      var dir = moved && was[r.k]<i ? "down":"";
+      return '<tr class="'+cls+(moved?" moved "+dir:"")+'">'+
+        '<td class="pos">'+(i+1)+'</td>'+
+        '<td><span class="cl">'+crestHTML(r.k)+'<span class="nm">'+esc(club(r.k).short)+'</span></span></td>'+
+        '<td class="num">'+r.P+'</td><td class="num">'+(r.GD>0?"+":"")+r.GD+'</td>'+
+        '<td class="pts">'+r.Pts+'</td></tr>';
+    }).join("");
+  }
+  function showSheet(){ renderTable(); $("nlhSheet").hidden=false; }
+  function hideSheet(){ $("nlhSheet").hidden=true; }
+
+  // ---- render dispatch -----------------------------------------------------
+  function paint(){
+    $("nlhClock").textContent = clockLabel(st.T);
+    $("nlhScrubFill").style.width = (st.T/maxT()*100)+"%";
+    if (st.view==="map")    paintPins();
+    else if (st.view==="cards")  paintCards();
+    else if (st.view==="ticker") paintFeed();
+  }
+  function setView(v){
+    st.view=v;
+    var stage=$("nlhStage");
+    stage.querySelectorAll(".nlh__view").forEach(function(el){ el.classList.toggle("is-active", el.getAttribute("data-view")===v); });
+    document.querySelectorAll("#nlHub .nlh__seg").forEach(function(b){ b.classList.toggle("is-active", b.getAttribute("data-view")===v); });
+    $("nlhSting").hidden=true; $("nlhBeat").hidden=true;
+    paint();
+  }
+
+  // ---- playback loop -------------------------------------------------------
+  function tick(ts){
+    if (!st.playing) return;
+    if (!st.last) st.last=ts;
+    var dt=(ts-st.last)/1000; st.last=ts;
+    var prevT=st.T;
+    // ~1 match-min/sec × rate; accelerate through goalless lulls
+    var gap=nextMoment(st.T)-st.T, eff=st.rate*(gap>4?6:1);
+    st.T = Math.min(prevT + dt*eff, maxT()); // 1 unit = 1 match-minute/sec × rate
+    fireCrossed(prevT, st.T);
+    paint();
+    if (st.T>=maxT()){ pause(); if(!st.ftShown){ st.ftShown=true; setTimeout(showSheet, 500);} return; }
+    st.raf=requestAnimationFrame(tick);
+  }
+  function play(){
+    if (st.T>=maxT()) return restart();
+    st.playing=true; st.last=0;
+    $("nlhPlay").querySelector(".nlh__ico-play").hidden=true;
+    $("nlhPlay").querySelector(".nlh__ico-pause").hidden=false;
+    $("nlhPlay").setAttribute("aria-label","Pause");
+    st.raf=requestAnimationFrame(tick);
+  }
+  function pause(){
+    st.playing=false; cancelAnimationFrame(st.raf);
+    $("nlhPlay").querySelector(".nlh__ico-play").hidden=false;
+    $("nlhPlay").querySelector(".nlh__ico-pause").hidden=true;
+    $("nlhPlay").setAttribute("aria-label","Play");
+  }
+  function restart(){
+    pause(); st.T=0; st.fired={}; st.feedBuilt={}; st.beatShown={}; st.ftShown=false;
+    $("nlhFeed").innerHTML=""; hideSheet(); $("nlhSting").hidden=true; $("nlhBeat").hidden=true;
+    paint(); play();
+  }
+  function seek(frac){
+    pause(); st.T=Math.max(0,Math.min(frac,1))*maxT();
+    // rebuild derived-once state so nothing double-fires on resume
+    st.fired={}; st.beatShown={}; st.feedBuilt={}; $("nlhFeed").innerHTML="";
+    D.fixtures.forEach(function(fx){ fx.events.forEach(function(ev){ if(ev.type==="goal"&&evRmin(ev,fx)<=st.T) st.fired[fx.gc+"_"+ev.min+"_"+ev.name]=1; }); });
+    BEATS.forEach(function(b){ if(b.r<=st.T) st.beatShown[b.r]=1; });
+    st.ftShown = st.T>=maxT();
+    paint();
+  }
+
+  // ---- wiring --------------------------------------------------------------
+  function boot(){
+    $("nlhRound").textContent = D.competition+" · MD"+D.round+" · "+D.season;
+    buildMap(); buildCards();
+    setView("map"); paint();
+
+    document.querySelectorAll("#nlHub .nlh__seg").forEach(function(b){
+      b.addEventListener("click", function(){ setView(b.getAttribute("data-view")); });
+    });
+    $("nlhPlay").addEventListener("click", function(){ st.playing?pause():play(); });
+    $("nlhRestart").addEventListener("click", restart);
+    $("nlhSpeed").addEventListener("click", function(){
+      st.rate = st.rate===1?2:st.rate===2?4:1;
+      $("nlhSpeed").textContent = st.rate+"×";
+    });
+    var scrub=$("nlhScrub");
+    scrub.addEventListener("click", function(e){
+      var r=scrub.getBoundingClientRect(); seek((e.clientX-r.left)/r.width);
+    });
+    $("nlhFootTable").addEventListener("click", function(){ renderTable(); $("nlhSheet").hidden=false; });
+    $("nlhSheetClose").addEventListener("click", hideSheet);
+    $("nlhSheet").addEventListener("click", function(e){ if(e.target===$("nlhSheet")) hideSheet(); });
+  }
+  boot();
+})();
+</script>
