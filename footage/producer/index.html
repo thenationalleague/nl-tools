@@ -119,7 +119,7 @@
     <button class="pbar__out" id="signout">Sign out</button>
   </div>
   <div class="wrap">
-    <div class="dummy-flag">⚠️ Prototype — real files you drop/choose upload to <b>Firebase Storage</b> (once Anonymous auth + Storage rules are on); the demo samples are simulated. Uploaded footage goes <b>live to clubs immediately</b>; fix or delete your own files for 24h.</div>
+    <div class="dummy-flag">Footage uploads to the cup's storage and goes <b>live to clubs immediately</b>. You can re-map or delete your own files for 24h.</div>
     <div id="doneMsg"></div>
 
     <div class="drop" id="drop">
@@ -128,7 +128,6 @@
       <div class="drop__s">Name files <code>YYYY-MM-DD_HOME_AWAY_TYPE_VARIANT.mp4</code> and they map themselves.</div>
       <div class="drop__row">
         <button class="btn btn--primary btn--sm" id="pickBtn">Choose files</button>
-        <button class="btn btn--ghost btn--sm" id="sampleBtn">Add sample files (demo)</button>
       </div>
       <input type="file" id="fileInput" accept="video/mp4,.mp4" multiple style="display:none">
     </div>
@@ -284,17 +283,6 @@
   ['dragleave','drop'].forEach(function(ev){ drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.remove('over'); }); });
   drop.addEventListener('drop', function(e){ addItems([].slice.call(e.dataTransfer.files)); });
 
-  document.getElementById('sampleBtn').addEventListener('click', function(){
-    // Generate demo names off real fixtures: 2 that match, 1 that won't. (No bytes → simulated.)
-    var names = [];
-    var g1 = playable[0], g2 = playable[3] || playable[1];
-    if (g1) names.push(isoDate(g1.date)+'_'+g1.home+'_'+g1.away+'_HL_DIRTY.mp4');
-    if (g2) names.push(isoDate(g2.date)+'_'+g2.home+'_'+g2.away+'_FMR_CLEAN.mp4');
-    names.push('MATCHDAY1_clip_final_v2.mp4');   // unparseable → needs mapping
-    addItems(names);
-    toast('Added 3 sample files');
-  });
-
   document.getElementById('clearBtn').addEventListener('click', function(){ staged=[]; renderStaged(); });
 
   /* ---- Firebase Storage helpers ---- */
@@ -304,11 +292,9 @@
     } catch(e){ return Promise.reject(e); }
   }
   function humanSize(b){ if(b==null) return '—'; var u=['B','KB','MB','GB'], i=0; while(b>=1024&&i<u.length-1){ b/=1024; i++; } return (i>=2?b.toFixed(1):Math.round(b))+' '+u[i]; }
-  function simulate(){ return new Promise(function(res){ setTimeout(res, 450); }); }
-  // Real upload where we have File bytes; simulate for demo names. Never rejects
-  // fatally — a failed real upload falls back to a simulated record.
+  // Real upload to Firebase Storage.
   function uploadOne(s){
-    if (!s.file) return simulate().then(function(){ return null; });
+    if (!s.file) return Promise.reject(new Error('no file bytes'));
     var path = 'footage/national-league-cup/' + s.fname;
     return ensureAuth().then(function(){ return firebase.storage().ref(path).put(s.file); }).then(function(){ return path; });
   }
@@ -320,13 +306,13 @@
     var note = document.getElementById('abNote');
     note.innerHTML = 'Uploading…<div class="prog"><div class="prog__fill" id="pf"></div></div>';
     var btn = document.getElementById('submitBtn'); btn.disabled = true;
-    var total = ready.length, done = 0, stamp = Date.now();
+    var total = ready.length, done = 0, ok = 0, failed = [], stamp = Date.now();
     function bump(){ done++; var pf=document.getElementById('pf'); if(pf) pf.style.transform='scaleX('+(done/total)+')'; }
     Promise.all(ready.map(function(s){
       return uploadOne(s)
-        .then(function(storagePath){ recordFile(s, stamp, storagePath); bump(); })
-        .catch(function(){ recordFile(s, stamp, null); bump(); });   // fall back to a simulated record
-    })).then(function(){ finishUpload(ready); btn.disabled = false; });
+        .then(function(storagePath){ recordFile(s, stamp, storagePath); ok++; bump(); })
+        .catch(function(e){ failed.push({ s:s, e:e }); bump(); });   // upload failed — no phantom record
+    })).then(function(){ finishUpload(ok, failed); btn.disabled = false; });
   });
 
   function recordFile(s, stamp, storagePath){
@@ -336,21 +322,24 @@
       id: g.id+'-'+s.type.toLowerCase()+(s.variant?('_'+s.variant.toLowerCase()):'')+'-'+s.key,
       type: s.type.toLowerCase(), variant: s.variant?s.variant.toLowerCase():null,
       label: labelFor(s.type, s.variant), name: s.fname,
-      size: s.file ? humanSize(s.file.size) : '—',
+      size: humanSize(s.file.size),
       preview: s.type==='HL'||s.type==='CLIPS', live: true,
-      url: storagePath ? '#stored' : '#uploaded', storagePath: storagePath || null,
+      url: '#stored', storagePath: storagePath,
       uploadedBy: 'producer', uploadedAt: stamp
     });
   }
 
-  function finishUpload(ready){
+  function finishUpload(ok, failed){
     persist();
-    var n = ready.length, real = ready.filter(function(s){ return s.file; }).length;
-    staged = staged.filter(function(s){ return !isReady(s); });
+    // keep failed items staged so they can be retried; drop the succeeded ones
+    var failedKeys = {}; failed.forEach(function(f){ failedKeys[f.s.key]=1; });
+    staged = staged.filter(function(s){ return !isReady(s) || failedKeys[s.key]; });
     renderStaged(); renderMine();
-    document.getElementById('doneMsg').innerHTML = '<div class="done">✓ Uploaded '+n+' file'+(n>1?'s':'')+' — <b>live to clubs now</b>'
-      + (real ? ' ('+real+' to Firebase Storage)' : '') + '. You can re-map or delete '+(n>1?'them':'it')+' below for 24h.</div>';
-    toast('Uploaded '+n+' file'+(n>1?'s':''), 'success');
+    if (ok) document.getElementById('doneMsg').innerHTML = '<div class="done">✓ Uploaded '+ok+' file'+(ok>1?'s':'')+' — <b>live to clubs now</b>. You can re-map or delete '+(ok>1?'them':'it')+' below for 24h.</div>';
+    if (failed.length){
+      var code = (failed[0].e && (failed[0].e.code||failed[0].e.message)) || 'upload error';
+      toast(failed.length+' upload'+(failed.length>1?'s':'')+' failed: '+code, 'error');
+    } else if (ok){ toast('Uploaded '+ok+' file'+(ok>1?'s':''), 'success'); }
     window.scrollTo({top:0,behavior:'smooth'});
   }
 
