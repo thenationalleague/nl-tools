@@ -1,7 +1,7 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /tools/system/nl-utils.js
-   Version: v1.6 (18/05/2026)
+   Version: v1.11 (12/07/2026)
 
    Shared helper functions used by every tool page. Exposed on window.NL
    namespace. All functions are defensive — they handle missing arguments
@@ -14,6 +14,20 @@
      NL.escHtml('<script>');          // → '&lt;script&gt;'
 
    Changelog
+   v1.11 (12/07/2026)
+     - Added NL.clubs — session-cached clubs-meta accessor (load/meta/all/
+       forSeason/byName/crestUrl). Promise-memoised: one fetch per page
+       session, replacing ~30 independent clubs-meta fetches across tools.
+     - Added NL.clubPicker(mount, options) — the shared, accessible club
+       picker. Renders the canonical .club-picker shell and wires
+       search/select modes, keyboard (type-ahead + arrow keys, Enter/Esc/
+       Home/End), combobox/listbox ARIA, freetext commit, season/division
+       filtering (season-specific rosters via NL.season), and crest
+       fallback ONCE, so every migrated caller inherits it. Additive —
+       wired to no tool yet. Cache-busted ?v=10 → ?v=11 in lockstep with
+       nl-brand.css ?v=20 → ?v=21 (new .club-picker rules) across the
+       template + every tool head.
+
    v1.7 (09/06/2026)
      - Added NL.season — shared multi-season helper for the new clubs-meta
        v1.9 model. clubs-meta now carries a top-level `seasons` registry
@@ -607,6 +621,326 @@
      club stays in each tool's own admin check, not here. */
   window.NL.canClubEdit = function(role) {
     return role === 'club' || role === 'club-admin';
+  };
+
+  /* ===================================================================
+     NL.clubs — cached clubs-meta accessor (v1.11)
+     One fetch per page session, promise-memoised. Replaces ~30
+     independent clubs-meta fetches across tools. Reads the same
+     assets/data/clubs-meta.json every tool already used.
+     =================================================================== */
+  var _clubsPromise = null;
+  var _clubsMeta    = null;
+  var _clubsCb      = null;  /* per-session cache-buster, stamped once */
+  var CLUBS_URL     = '/tools/assets/data/clubs-meta.json';
+  var CREST_BASE    = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
+  var CLUB_ROSE     = CREST_BASE + 'National%20League%20rose.png';
+
+  window.NL.clubs = {
+    ROSE: CLUB_ROSE,
+    /* Absolute crest URL for a club name (byte-identical to the URL every
+       existing picker builds, so migration causes no crest change). */
+    crestUrl: function(name) {
+      return name ? CREST_BASE + encodeURIComponent(name) + '.png' : CLUB_ROSE;
+    },
+    /* Load + memoise clubs-meta. One network hit per session. */
+    load: function() {
+      if (_clubsPromise) return _clubsPromise;
+      if (!_clubsCb) _clubsCb = Date.now();
+      _clubsPromise = fetch(CLUBS_URL + '?cb=' + _clubsCb, { cache: 'no-store' })
+        .then(function(r) { if (!r.ok) throw new Error('clubs-meta ' + r.status); return r.json(); })
+        .then(function(data) { _clubsMeta = data; return data; })
+        .catch(function(err) { _clubsPromise = null; throw err; }); /* soft: allow retry */
+      return _clubsPromise;
+    },
+    /* Synchronous accessor once loaded (null before). */
+    meta: function() { return _clubsMeta; },
+    /* Every club, name-sorted (base division left as-is). */
+    all: function() {
+      return this.load().then(function(meta) {
+        return (meta.clubs || []).slice().sort(function(a, b) { return a.name.localeCompare(b.name); });
+      });
+    },
+    /* Clubs for a season key (defaults to current), division resolved to
+       that season's tier. Wraps NL.season.clubsFor. */
+    forSeason: function(key) {
+      return this.load().then(function(meta) {
+        return window.NL.season.clubsFor(meta, (key && key !== 'current') ? key : null);
+      });
+    },
+    /* Sync lookup by exact name (once loaded). */
+    byName: function(name) {
+      if (!_clubsMeta || !name) return null;
+      var lc = String(name).toLowerCase(), list = _clubsMeta.clubs || [];
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].name && list[i].name.toLowerCase() === lc) return list[i];
+      }
+      return null;
+    }
+  };
+
+  /* ===================================================================
+     NL.clubPicker(mount, options) — shared, accessible club picker (v1.11)
+     Renders the canonical .club-picker shell (see nl-brand.css) and wires
+     search/select, keyboard (type-ahead + arrows), freetext and crest
+     fallback ONCE so every caller inherits it. Returns a controller:
+       { setValue, getValue, clear, setDisabled, setSeason, setDivisions,
+         refresh, destroy }
+     Options (all optional except onSelect):
+       mode 'search'|'select' · season 'current'|'all'|'<key>' ·
+       divisions ['North'] · offRoster 'hide'|'flag'|'allow' ·
+       secondary 'division'|'stadium'|fn · crestFallback 'rose'|'hide' ·
+       clearable · value · disabled · placeholder · limit · onSelect(sel)
+     onSelect payload: { name, club, division, crestUrl, isFreetext,
+                         isOffRoster, seasonKey }
+     =================================================================== */
+  var _cpSeq = 0;
+  window.NL.clubPicker = function(mount, options) {
+    options = options || {};
+    var el = (typeof mount === 'string') ? document.querySelector(mount) : mount;
+    if (!el) throw new Error('NL.clubPicker: mount not found');
+
+    var opt = {
+      mode:          options.mode === 'select' ? 'select' : 'search',
+      season:        options.season || 'current',
+      divisions:     options.divisions || null,
+      offRoster:     options.offRoster || 'hide',
+      secondary:     options.secondary || 'division',
+      crestFallback: options.crestFallback || 'rose',
+      clearable:     !!options.clearable,
+      value:         options.value || null,
+      disabled:      !!options.disabled,
+      placeholder:   options.placeholder || 'Search club…',
+      limit:         options.limit || 12,
+      onSelect:      typeof options.onSelect === 'function' ? options.onSelect : function() {}
+    };
+
+    var id = 'nlcp' + (++_cpSeq), listId = id + '-list';
+    var clubs = [], rendered = [], activeIdx = -1, selectedName = null, open = false;
+
+    el.classList.add('club-picker');
+    if (opt.mode === 'select') el.classList.add('club-picker--select');
+    el.innerHTML = '';
+
+    var wrap = document.createElement(opt.mode === 'select' ? 'button' : 'div');
+    wrap.className = 'club-picker__wrap';
+    if (opt.mode === 'select') { wrap.type = 'button'; wrap.setAttribute('aria-haspopup', 'listbox'); wrap.setAttribute('aria-expanded', 'false'); }
+
+    var crest = document.createElement('img');
+    crest.className = 'club-picker__crest'; crest.alt = ''; crest.src = CLUB_ROSE;
+
+    var input = null, valueSpan = null;
+    if (opt.mode === 'select') {
+      valueSpan = document.createElement('span');
+      valueSpan.className = 'club-picker__value club-picker__value--placeholder';
+      valueSpan.textContent = opt.placeholder;
+      var chev = document.createElement('span'); chev.className = 'club-picker__chevron'; chev.textContent = '▾';
+      wrap.appendChild(crest); wrap.appendChild(valueSpan); wrap.appendChild(chev);
+    } else {
+      input = document.createElement('input');
+      input.type = 'text'; input.className = 'club-picker__input';
+      input.placeholder = opt.placeholder; input.autocomplete = 'off';
+      input.setAttribute('role', 'combobox');
+      input.setAttribute('aria-expanded', 'false');
+      input.setAttribute('aria-controls', listId);
+      input.setAttribute('aria-autocomplete', 'list');
+      wrap.appendChild(crest); wrap.appendChild(input);
+    }
+
+    var clearBtn = null;
+    if (opt.clearable) {
+      clearBtn = document.createElement('button');
+      clearBtn.type = 'button'; clearBtn.className = 'club-picker__clear';
+      clearBtn.setAttribute('aria-label', 'Clear selection');
+      clearBtn.textContent = '×'; clearBtn.style.display = 'none';
+      wrap.appendChild(clearBtn);
+    }
+
+    var dd = document.createElement('div');
+    dd.className = 'club-picker__dropdown'; dd.id = listId; dd.setAttribute('role', 'listbox');
+
+    el.appendChild(wrap); el.appendChild(dd);
+
+    function seasonKey() {
+      if (opt.season && opt.season !== 'current' && opt.season !== 'all') return opt.season;
+      var m = window.NL.clubs.meta();
+      return m ? window.NL.season.current(m) : null;
+    }
+    function loadRoster() {
+      var p = (opt.season === 'all') ? window.NL.clubs.all() : window.NL.clubs.forSeason(opt.season);
+      return p.then(function(list) {
+        if (opt.divisions && opt.divisions.length) {
+          var set = {};
+          opt.divisions.forEach(function(d) { set[String(d).toLowerCase()] = true; });
+          list = list.filter(function(c) { return set[String(c.division).toLowerCase()]; });
+        }
+        clubs = list; return list;
+      }).catch(function() { clubs = []; return []; });
+    }
+    function secondaryText(c) {
+      if (typeof opt.secondary === 'function') return opt.secondary(c) || '';
+      if (opt.secondary === 'stadium') return c.stadium_name || '';
+      return c.division || '';
+    }
+    function filtered(q) {
+      q = (q || '').toLowerCase().trim();
+      if (!q) return clubs.slice(0, opt.limit);
+      return clubs.filter(function(c) {
+        return c.name.toLowerCase().indexOf(q) !== -1 || (c.short && c.short.toLowerCase().indexOf(q) !== -1);
+      }).slice(0, opt.limit);
+    }
+    function renderList(q) {
+      var matches = filtered(q);
+      rendered = matches.map(function(c) { return { club: c, freetext: false }; });
+      dd.innerHTML = '';
+      matches.forEach(function(c, i) {
+        var o = document.createElement('div');
+        o.className = 'club-picker__option'; o.id = id + '-opt' + i;
+        o.setAttribute('role', 'option'); o.setAttribute('aria-selected', 'false');
+        var img = document.createElement('img'); img.alt = ''; img.src = window.NL.clubs.crestUrl(c.name);
+        img.onerror = function() { this.onerror = null; if (opt.crestFallback === 'hide') this.style.display = 'none'; else this.src = CLUB_ROSE; };
+        var nm = document.createElement('span'); nm.className = 'club-picker__option-name'; nm.textContent = c.name;
+        o.appendChild(img); o.appendChild(nm);
+        var sec = secondaryText(c);
+        if (sec) { var dv = document.createElement('span'); dv.className = 'club-picker__option-div'; dv.textContent = sec; o.appendChild(dv); }
+        o.addEventListener('mousedown', function(e) { e.preventDefault(); commit(i); });
+        dd.appendChild(o);
+      });
+      if (opt.freetext === 'commit' && q && q.trim()) {
+        var typed = q.trim(), fi = rendered.length;
+        rendered.push({ club: null, freetext: true, typed: typed });
+        var fo = document.createElement('div');
+        fo.className = 'club-picker__option club-picker__option--freetext'; fo.id = id + '-opt' + fi;
+        fo.setAttribute('role', 'option');
+        var fn = document.createElement('span'); fn.className = 'club-picker__option-name';
+        fn.textContent = 'Use “' + typed + '” as entered';
+        fo.appendChild(fn);
+        fo.addEventListener('mousedown', function(e) { e.preventDefault(); commit(fi); });
+        dd.appendChild(fo);
+      }
+      if (!rendered.length) {
+        var em = document.createElement('div');
+        em.className = 'club-picker__option'; em.textContent = 'No clubs found';
+        em.style.cssText = 'color:var(--text-muted);cursor:default;';
+        dd.appendChild(em);
+      }
+      activeIdx = rendered.length ? 0 : -1; paintActive();
+    }
+    function paintActive() {
+      var opts = dd.querySelectorAll('.club-picker__option');
+      for (var i = 0; i < opts.length; i++) {
+        var on = (i === activeIdx);
+        opts[i].classList.toggle('club-picker__option--active', on);
+        if (rendered[i]) opts[i].setAttribute('aria-selected', on ? 'true' : 'false');
+        if (on) { if (input) input.setAttribute('aria-activedescendant', opts[i].id); opts[i].scrollIntoView({ block: 'nearest' }); }
+      }
+      if (!rendered.length && input) input.removeAttribute('aria-activedescendant');
+    }
+    function openDd() {
+      if (open || opt.disabled) return;
+      open = true; dd.classList.add('open'); el.classList.add('is-open');
+      if (input) input.setAttribute('aria-expanded', 'true');
+      if (opt.mode === 'select') wrap.setAttribute('aria-expanded', 'true');
+    }
+    function closeDd() {
+      if (!open) return;
+      open = false; dd.classList.remove('open'); el.classList.remove('is-open');
+      if (input) input.setAttribute('aria-expanded', 'false');
+      if (opt.mode === 'select') wrap.setAttribute('aria-expanded', 'false');
+    }
+    function applySelection(sel) {
+      selectedName = sel.name;
+      crest.onerror = function() { this.onerror = null; this.src = CLUB_ROSE; };
+      crest.src = sel.crestUrl || CLUB_ROSE;
+      if (opt.mode === 'select') { valueSpan.textContent = sel.name; valueSpan.classList.remove('club-picker__value--placeholder'); }
+      else { input.value = sel.name; }
+      if (clearBtn) clearBtn.style.display = sel.name ? '' : 'none';
+      el.classList.toggle('has-crest', !!sel.name);
+    }
+    function commit(idx) {
+      var row = rendered[idx]; if (!row) return;
+      var sel = row.freetext
+        ? { name: row.typed, club: null, division: '', crestUrl: CLUB_ROSE, isFreetext: true, isOffRoster: false, seasonKey: seasonKey() }
+        : { name: row.club.name, club: row.club, division: row.club.division || '', crestUrl: window.NL.clubs.crestUrl(row.club.name), isFreetext: false, isOffRoster: false, seasonKey: seasonKey() };
+      applySelection(sel); closeDd(); opt.onSelect(sel);
+    }
+    function move(delta) { if (!rendered.length) return; activeIdx = (activeIdx + delta + rendered.length) % rendered.length; paintActive(); }
+    function onKey(e) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); if (!open) { openDd(); loadRoster().then(function() { renderList(input ? input.value : ''); }); } else move(1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
+      else if (e.key === 'Enter') { if (open && activeIdx >= 0) { e.preventDefault(); commit(activeIdx); } }
+      else if (e.key === 'Escape') { if (open) { e.preventDefault(); closeDd(); } }
+      else if (e.key === 'Home') { if (open && rendered.length) { e.preventDefault(); activeIdx = 0; paintActive(); } }
+      else if (e.key === 'End') { if (open && rendered.length) { e.preventDefault(); activeIdx = rendered.length - 1; paintActive(); } }
+    }
+
+    if (opt.mode === 'search') {
+      input.addEventListener('input', function() {
+        selectedName = null; crest.src = CLUB_ROSE; el.classList.remove('has-crest');
+        if (clearBtn) clearBtn.style.display = input.value ? '' : 'none';
+        openDd(); loadRoster().then(function() { renderList(input.value); });
+      });
+      input.addEventListener('focus', function() {
+        if (input.value.trim()) { openDd(); loadRoster().then(function() { renderList(input.value); }); }
+      });
+      input.addEventListener('keydown', onKey);
+    } else {
+      var typeBuf = '', typeTimer = null;
+      function jumpType() {
+        for (var i = 0; i < rendered.length; i++) {
+          if (rendered[i].club && rendered[i].club.name.toLowerCase().indexOf(typeBuf) === 0) { activeIdx = i; paintActive(); return; }
+        }
+      }
+      wrap.addEventListener('click', function() { if (open) { closeDd(); return; } openDd(); loadRoster().then(function() { renderList(''); }); });
+      wrap.addEventListener('keydown', function(e) {
+        onKey(e);
+        if (e.key && e.key.length === 1 && /\S/.test(e.key)) {
+          if (!open) { openDd(); loadRoster().then(function() { renderList(''); typeBuf += e.key.toLowerCase(); jumpType(); }); return; }
+          typeBuf += e.key.toLowerCase(); clearTimeout(typeTimer); typeTimer = setTimeout(function() { typeBuf = ''; }, 800); jumpType();
+        }
+      });
+    }
+    if (clearBtn) clearBtn.addEventListener('click', function(e) { e.preventDefault(); e.stopPropagation(); controller.clear(); });
+
+    function onDocClick(e) { if (!el.contains(e.target)) closeDd(); }
+    document.addEventListener('click', onDocClick);
+
+    var controller = {
+      setValue: function(name) {
+        if (!name) return this.clear();
+        var apply = function(c) {
+          applySelection({ name: name, club: c || null, division: (c && c.division) || '', crestUrl: window.NL.clubs.crestUrl(name), isFreetext: !c, isOffRoster: false, seasonKey: seasonKey() });
+        };
+        var found = window.NL.clubs.byName(name);
+        if (found) apply(found);
+        else window.NL.clubs.load().then(function() { apply(window.NL.clubs.byName(name)); }).catch(function() { apply(null); });
+        return this;
+      },
+      getValue: function() { return selectedName; },
+      clear: function() {
+        selectedName = null; crest.src = CLUB_ROSE;
+        if (opt.mode === 'select') { valueSpan.textContent = opt.placeholder; valueSpan.classList.add('club-picker__value--placeholder'); }
+        else { input.value = ''; }
+        if (clearBtn) clearBtn.style.display = 'none';
+        el.classList.remove('has-crest'); return this;
+      },
+      setDisabled: function(d) {
+        opt.disabled = !!d;
+        if (input) input.disabled = !!d;
+        if (opt.mode === 'select') wrap.disabled = !!d;
+        el.classList.toggle('is-disabled', !!d); return this;
+      },
+      setSeason:    function(key)  { opt.season = key || 'current'; clubs = []; return this; },
+      setDivisions: function(divs) { opt.divisions = divs || null; clubs = []; return this; },
+      refresh:      function()     { clubs = []; return loadRoster(); },
+      destroy:      function()     { document.removeEventListener('click', onDocClick); el.innerHTML = ''; el.className = el.className.replace(/\bclub-picker\S*/g, '').replace(/\bis-open\b|\bhas-crest\b|\bis-disabled\b/g, '').trim(); }
+    };
+
+    if (opt.disabled) controller.setDisabled(true);
+    if (opt.value) controller.setValue(opt.value);
+    loadRoster(); /* warm the cache */
+
+    return controller;
   };
 
 })();
