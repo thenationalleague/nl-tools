@@ -1,6 +1,6 @@
 # NL Cup Footage — spec + MVP
 
-A tool to deliver match footage to the 32 clubs of the NL × PL2 Cup
+A tool to deliver match footage to the 32 clubs of the National League Cup
 (16 National League + 16 Premier League 2). Clubs get their **own** games to
 **preview + download**; NL sees everything.
 
@@ -24,7 +24,7 @@ A tool to deliver match footage to the 32 clubs of the NL × PL2 Cup
 | **Files/game** | A **flexible list** — usually the 4 standard (`fmr/clean`, `fmr/dirty`, `hl/clean`, `hl/dirty`) but tolerant of reality: missing fulls, extra `clips`, held/pending files. Data model is `game.files[]`, not a fixed 2×2 grid. |
 | **Security** | Simple gating + short-lived links; no watermark/DRM |
 | **Retention** | Hot recent + cold archive |
-| **Preview** | Highlights/clips preview inline; fulls are download-only. Preview streams a **360p ~500 kbps faststart proxy** (auto-made by the `makeProxy` Cloud Function at `footage/proxies/<name>`), falling back to the full file if the proxy isn't ready. Download always serves the full-quality file. |
+| **Preview** | Highlights/clips preview inline; fulls are download-only. Preview streams a **360p ~500 kbps faststart proxy** (auto-made by the `makeProxy` Cloud Function at `footage/national-league-cup/proxies/<name>`), falling back to the full file if the proxy isn't ready. Download always serves the full-quality file. |
 | **Use** | Club media/comms + archive (social clips + records) — not analysis/broadcast |
 | **Scope** | 64 group + 7 knockout = 71 games. Knockout teams TBD, unlock as clubs qualify |
 | **Field** | 32 clubs (16 NL + 16 PL2) |
@@ -154,7 +154,7 @@ becomes RTDB and the two pages share live server state.
   and enter a club passcode.
 
 **Real wiring (behind fallbacks):** the pipe is wired — a real file the producer
-drops/chooses **uploads to Firebase Storage** (`footage/incoming/…`), and a club
+drops/chooses **uploads to Firebase Storage** (`footage/national-league-cup/…`), and a club
 file that carries a real `storagePath` **plays inline (`<video>`) and downloads for
 real** (`getDownloadURL`), both via anonymous auth. Dummy files (no `storagePath`)
 keep the placeholder toast/player, and if auth/rules aren't enabled the real path
@@ -178,7 +178,7 @@ Anonymous auth + the Storage read/write rules (see the go-live steps).
       passcode-bridge Cloud Function mints the scoped claim
 - [ ] Real 16-club PL2 meta (names + crests + codes)
 - [x] Wire real downloads (`getDownloadURL()`) + `<video>` preview (club) **and**
-      real uploads (producer → `footage/incoming/`), via anon auth, behind fallbacks.
+      real uploads (producer → `footage/national-league-cup/`), via anon auth, behind fallbacks.
       **Activation pending:** enable Anonymous auth + Storage read/write rules.
 - [x] 360p preview proxy — `makeProxy` Cloud Function (`functions/`) + club plays
       proxy-with-fallback. **Deploy pending:** `firebase deploy --only functions`.

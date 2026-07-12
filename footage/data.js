@@ -2,7 +2,7 @@
    Edit via the master tool or replace with live data. Files are scrappy on
    purpose (uneven counts, occasional clips, a held file) to mirror reality. */
 window.FOOTAGE_DATA = {
-  "competition": "NL × PL2 Cup 2026-27",
+  "competition": "National League Cup 2026-27",
   "updated": "2026-07-12",
   "producer": {
     "name": "Match footage supplier",

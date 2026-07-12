@@ -41,10 +41,10 @@ already authed as owner), then `git clone` the repo and
 
 ## What it does once live
 
-- Fires when a file lands under **`footage/incoming/`**.
+- Fires when a file lands under **`footage/national-league-cup/`**.
 - Only for **highlights / clips** (`…_HL_…`, `…_CLIPS…`); full matches are skipped
   (download-only).
-- Writes a **360p ~500 kbps faststart MP4** to **`footage/proxies/<same-name>`**.
+- Writes a **360p ~500 kbps faststart MP4** to **`footage/national-league-cup/proxies/<same-name>`**.
 - Idempotent (skips if the proxy already exists).
 
 The club page derives the proxy path from the original and streams it for
