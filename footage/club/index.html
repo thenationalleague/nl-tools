@@ -335,6 +335,21 @@
   }
   function isReal(f){ return !!(f && f.storagePath); }
   function resolveUrl(f){ return ensureAuth().then(function(){ return firebase.storage().ref(f.storagePath).getDownloadURL(); }); }
+  // 360p preview proxy (made by the makeProxy Cloud Function at footage/proxies/<name>,
+  // for highlights/clips only). Preview streams the proxy if present, else the full file.
+  function proxyPathFor(f){
+    if (!f.storagePath || f.storagePath.indexOf('footage/incoming/') !== 0) return null;
+    var t = (f.type||'').toLowerCase(); if (t !== 'hl' && t !== 'clips') return null;
+    return f.storagePath.replace('footage/incoming/', 'footage/proxies/');
+  }
+  function previewUrl(f){
+    var pp = proxyPathFor(f);
+    return ensureAuth().then(function(){
+      if (pp) return firebase.storage().ref(pp).getDownloadURL()
+        .catch(function(){ return firebase.storage().ref(f.storagePath).getDownloadURL(); });  // proxy not ready → full
+      return firebase.storage().ref(f.storagePath).getDownloadURL();
+    });
+  }
   function fileByRef(ref){ var p=ref.split('|'), g=DATA.games.filter(function(x){return x.id===p[0];})[0]; if(!g) return null; var f=filesForGame(g).filter(function(x){return x.id===p[1];})[0]; return f?{g:g,f:f}:null; }
 
   function openPreview(ref){
@@ -345,7 +360,7 @@
     document.getElementById('pvBackdrop').classList.add('open');
     if (isReal(f)){
       stage.style.display='flex'; stage.innerHTML='Loading…'; vid.style.display='none';
-      resolveUrl(f).then(function(url){ vid.src=url; vid.style.display='block'; stage.style.display='none'; var p=vid.play(); if(p&&p.catch)p.catch(function(){}); })
+      previewUrl(f).then(function(url){ vid.src=url; vid.style.display='block'; stage.style.display='none'; var p=vid.play(); if(p&&p.catch)p.catch(function(){}); })
         .catch(function(e){ stage.innerHTML='Could not load preview.<br><small style="opacity:0.6">'+esc(e.code||e.message||'')+'</small>'; });
     } else {
       try{ vid.pause(); }catch(e){} vid.removeAttribute('src'); vid.style.display='none';
