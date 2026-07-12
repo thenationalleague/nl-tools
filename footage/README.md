@@ -14,9 +14,9 @@ A tool to deliver match footage to the 32 clubs of the NL × PL2 Cup
 
 | Area | Decision |
 |---|---|
-| **Access matrix** | A club sees only its own games (home + away); NL staff see all |
-| **Access method** | Per-club **direct link** (auto sign-in) **and** per-club **passcode** — works fully standalone. NL clubs can *also* reach it from the portal (convenience), PL2 clubs use the passcode/link |
-| **Admin** | One superadmin (you) runs it: curate uploads, manage passcodes, open knockout access |
+| **Access matrix** | Graded (full table below): NL **admin** manages (upload/tag/edit) + sees all; NL **staff** view+download all but can't edit; **clubs** (NL + PL2) see only their own games; **producer** uploads only. |
+| **Access method** | **Portal login = NL people** (admin/staff, and NL clubs eventually). **Passcode / direct link = outside** (PL2 clubs, and the producer). NL clubs can use either. |
+| **Admin** | Superadmin/**admin** curate: tag files to matches, manage passcodes, toggle live/held, open knockout access. The management surface (today's standalone master) becomes the **admin portal view**. |
 | **Ingest** | Producer is **external — treated like a PL2 club**: reaches a gated upload page by **passcode / direct link** (→ anon-auth with an upload scope), no NL portal account. Uploads direct to Firebase Storage — not a raw key dump |
 | **File → game** | Auto-mapped by filename on upload; an unmatched file **forces the producer to map it** (pick game + type) before it counts as delivered — no orphans for NL to chase |
 | **Naming** | `YYYY-MM-DD_<HOME>_<AWAY>_<TYPE>_<VARIANT>.mp4` — ISO date, underscore-delimited, uppercase (e.g. `2025-10-21_TRU_BHA_HL_CLEAN.mp4`). `TYPE` = `HL`\|`FMR` **and is extensible** (`CLIPS` etc. may follow); `VARIANT` = `CLEAN`\|`DIRTY` (clean = no gfx). Codes 2 & 3 are HOME/AWAY and route the game to *both* clubs; codes match `clubs-meta` `code`. Parser is case-insensitive and tolerant — an unknown `TYPE` still ingests into a "needs retag" state rather than being dropped |
@@ -31,6 +31,18 @@ A tool to deliver match footage to the 32 clubs of the NL × PL2 Cup
 | **Downloads** | Direct browser download of ~6–10 GB fmr; link valid for hours, resumable |
 | **Notifications** | Nice-to-have (auto-email the two clubs when a game publishes); shippable without |
 | **Timeline** | Weeks away → phased build |
+
+### Who can do what
+
+| Actor | Gets in via | Can do |
+|---|---|---|
+| NL **admin** / superadmin | Portal login | View + download **all**, **and upload, tag-to-match, manage/edit** |
+| NL **staff** (non-admin) | Portal login | View + download **all** — **no editing** |
+| NL **club** (eventually) | Portal login *(or passcode)* | View + download **own club's** games |
+| **PL2 club** | Passcode / link | View + download **own** games |
+| **Producer** | Passcode / link | **Upload** only |
+
+Rule of thumb: **portal = NL people; passcode = outside**. One auth bridge (passcode → anon-auth + scoped claim) covers all the outside actors; portal roles (`superadmin`/`admin`/`staff`/`club-admin`) cover the NL side.
 
 ---
 
@@ -58,12 +70,16 @@ Club ──direct link / passcode──▶ Club page
   current games; move archived seasons to Coldline/Archive class to cut cold-storage
   cost. Range-request resume works, so 6–10 GB fulls download resumably.
 - **Auth: two paths, no Worker.** Firebase Storage **Security Rules** replace the
-  presigning Worker entirely. **NL staff** use the existing portal session (full
-  access). **Everyone external** — PL2 clubs *and* the producer — is standalone by
-  **passcode / direct link → anonymous auth + a scoped custom claim** (a small Cloud
-  Function validates the passcode and mints the token). The claim's scope differs by
-  who it is: a **club** gets *read* of its own games; the **producer** gets *write*
-  to the upload path. Stays all-Firebase either way.
+  presigning Worker entirely.
+  - **NL people → portal session, graded by role:** `superadmin`/`admin` = read all
+    + write/manage (upload, tag, live-toggle); `staff` = read all, no write;
+    `club-admin` (NL club) = read its own games.
+  - **Outside → passcode / direct link → anonymous auth + a scoped custom claim**
+    (a small Cloud Function validates the passcode and mints the token). Scope by
+    who: a **club** claim = *read* its own games; the **producer** claim = *write*
+    to the upload path.
+
+  Stays all-Firebase either way.
 - **Catalogue/state: RTDB `app-data/media-footage/`** — clubs, passcodes, fixtures,
   asset availability. Token-gated public read for club direct-links; superadmin
   write. (Rules go in `system/rtdb/rules.snapshot.json` when built.) **Not
