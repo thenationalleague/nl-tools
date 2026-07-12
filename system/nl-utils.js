@@ -1,7 +1,7 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /tools/system/nl-utils.js
-   Version: v1.14 (12/07/2026)
+   Version: v1.15 (12/07/2026)
 
    Shared helper functions used by every tool page. Exposed on window.NL
    namespace. All functions are defensive — they handle missing arguments
@@ -14,6 +14,17 @@
      NL.escHtml('<script>');          // → '&lt;script&gt;'
 
    Changelog
+   v1.15 (12/07/2026)
+     - NL.clubPicker: ROOT-CAUSE FIX — `freetext` was never copied from
+       options into the internal opt object, so opt.freetext was always
+       undefined. Result: the "use as entered" row never rendered and blur
+       always hit the wipe branch, i.e. freetext never worked at all (the
+       crest + blur-commit changes in v1.12–v1.14 were dead code behind the
+       unset flag). Now opt.freetext = options.freetext, so freetext:'commit'
+       actually engages: the commit row shows, Enter/click/blur commit the
+       typed value, and the crest resolves via crests/<name>.png.
+       Cache-busted ?v=14 → ?v=15.
+
    v1.14 (12/07/2026)
      - NL.clubPicker: blur auto-commit now fires SYNCHRONOUSLY (was a
        160ms setTimeout). The deferred version lost a race against any
@@ -740,6 +751,10 @@
       offRoster:     options.offRoster || 'hide',
       secondary:     options.secondary || 'division',
       crestFallback: options.crestFallback || 'rose',
+      /* Freetext: false | 'commit' ('use as entered' row + auto-commit on
+         blur for off-roster names). This key was missing, so freetext never
+         actually engaged — renderList and the blur commit both read it. */
+      freetext:      options.freetext || false,
       /* Clear (×) defaults ON in search mode (typing available); opt-out via
          clearable:false. Select mode stays opt-in. */
       clearable:     options.clearable != null ? !!options.clearable : (_mode === 'search'),
