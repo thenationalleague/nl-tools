@@ -60,6 +60,24 @@ test('clubs.crestUrl encodes the name and falls back to the rose', () => {
   assert.match(NL.clubs.crestUrl(''), /National%20League%20rose\.png$/);
 });
 
+test('clubs.crestUrl(name, "thumb") points at the thumbs folder; no-arg unchanged', () => {
+  const full = NL.clubs.crestUrl('AFC Fylde');
+  const thumb = NL.clubs.crestUrl('AFC Fylde', 'thumb');
+  assert.ok(thumb.endsWith('/thumbs/AFC%20Fylde.png'), 'thumb path + encoded name');
+  assert.ok(!full.includes('/thumbs/'), 'no-arg stays full-res (backwards compatible)');
+  assert.equal(NL.clubs.crestUrl('', 'thumb'), NL.clubs.ROSE, 'empty name → rose (either size)');
+});
+
+test('clubs.wireCrestImg degrades thumb → full → rose', () => {
+  const img = { src: '', onerror: null, style: {} };
+  NL.clubs.wireCrestImg(img, 'Barrow', false);
+  img.src = NL.clubs.crestUrl('Barrow', 'thumb');
+  img.onerror();                                   // thumb 404
+  assert.equal(img.src, NL.clubs.crestUrl('Barrow'), 'falls back to full-res');
+  img.onerror();                                   // full 404
+  assert.equal(img.src, NL.clubs.ROSE, 'then to the rose');
+});
+
 test('season.current / keys / label read the registry', () => {
   assert.equal(NL.season.current(meta), '2026');
   assert.deepEqual(NL.season.keys(meta), ['2026', '2025']);

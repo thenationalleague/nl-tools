@@ -13,12 +13,17 @@ as steps land.
 | `system/auth-guard.js` | — | 8 |
 
 ## Crest assets (Step 2/3 target)
-| Metric | Baseline | Target (96px thumbs) |
+| Metric | Baseline | Achieved (Step 2, 96px thumbs) |
 |---|---|---|
-| Folder | **91M** (94,305,176 bytes), 175 PNGs | ~2.5M thumbs alongside |
-| Average crest | **526 KB** | ~15 KB |
+| Folder | **91M** (94,305,176 bytes), 175 PNGs | **thumbs 2.47MB**, 175 files (full-res kept for exports) |
+| Average crest | **526 KB** | **14.4 KB** thumb |
+| Worst (Curzon Ashton) | 5.3 MB @3000px | **24 KB** @96px |
 | Files > 300 KB | 101 | — |
-| Files > 1 MB | 19 (worst: Curzon Ashton 5.3 MB @3000px) | — |
+| Files > 1 MB | 19 | — |
+
+Step 2 built the thumbs + `crestUrl(name,'thumb')` + switched the shared picker
+(so every dropdown now loads ~14KB not ~526KB per option). Step 3 rolls thumbs
+into the heavy full-page views (club-directory, portal, vacancies, …).
 
 Worst real-world page loads (audit estimates, cold cache):
 | View | Crests | Est. transfer |
