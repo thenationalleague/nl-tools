@@ -1,7 +1,7 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /tools/system/nl-utils.js
-   Version: v1.13 (12/07/2026)
+   Version: v1.15 (12/07/2026)
 
    Shared helper functions used by every tool page. Exposed on window.NL
    namespace. All functions are defensive — they handle missing arguments
@@ -14,6 +14,25 @@
      NL.escHtml('<script>');          // → '&lt;script&gt;'
 
    Changelog
+   v1.15 (12/07/2026)
+     - NL.clubPicker: ROOT-CAUSE FIX — `freetext` was never copied from
+       options into the internal opt object, so opt.freetext was always
+       undefined. Result: the "use as entered" row never rendered and blur
+       always hit the wipe branch, i.e. freetext never worked at all (the
+       crest + blur-commit changes in v1.12–v1.14 were dead code behind the
+       unset flag). Now opt.freetext = options.freetext, so freetext:'commit'
+       actually engages: the commit row shows, Enter/click/blur commit the
+       typed value, and the crest resolves via crests/<name>.png.
+       Cache-busted ?v=14 → ?v=15.
+
+   v1.14 (12/07/2026)
+     - NL.clubPicker: blur auto-commit now fires SYNCHRONOUSLY (was a
+       160ms setTimeout). The deferred version lost a race against any
+       side-effect of the click that caused the blur (e.g. a caller that
+       rebuilds its picker on change), so the typed value appeared to
+       "wipe" instead of committing. Firing during blur lands the commit
+       first. Guarded with input.isConnected. Cache-busted ?v=13 → ?v=14.
+
    v1.13 (12/07/2026)
      - NL.clubPicker (search mode): blur now auto-commits a typed-but-
        uncommitted value, so a typed club "takes" without an explicit
@@ -732,6 +751,10 @@
       offRoster:     options.offRoster || 'hide',
       secondary:     options.secondary || 'division',
       crestFallback: options.crestFallback || 'rose',
+      /* Freetext: false | 'commit' ('use as entered' row + auto-commit on
+         blur for off-roster names). This key was missing, so freetext never
+         actually engaged — renderList and the blur commit both read it. */
+      freetext:      options.freetext || false,
       /* Clear (×) defaults ON in search mode (typing available); opt-out via
          clearable:false. Select mode stays opt-in. */
       clearable:     options.clearable != null ? !!options.clearable : (_mode === 'search'),
@@ -939,9 +962,13 @@
       });
       input.addEventListener('keydown', onKey);
       input.addEventListener('blur', function() {
-        /* Defer so a click on an option (which commits via mousedown) wins;
-           otherwise land the typed value. */
-        setTimeout(autoCommitTyped, 160);
+        /* Commit synchronously on blur. Option clicks don't blur (they use
+           mousedown + preventDefault), so this only fires on a genuine leave —
+           and firing during blur means the commit lands BEFORE any external
+           side-effect of the click (e.g. a demo/tool that rebuilds on change).
+           A deferred (setTimeout) commit would lose that race and appear to
+           "wipe". Guard against a torn-down input. */
+        if (input.isConnected) autoCommitTyped();
       });
     } else {
       var typeBuf = '', typeTimer = null;
