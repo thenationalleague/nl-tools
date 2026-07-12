@@ -2,8 +2,10 @@
  * NL Cup Footage — 360p preview proxy.
  *
  * Trigger: a file finalised under `footage/national-league-cup/` in the nl-tools bucket.
- * For previewable types only (HL / CLIPS — full matches are download-only), make
- * a small 360p ~500 kbps faststart MP4 and store it at `footage/national-league-cup/proxies/<name>`.
+ * For any file up to MAX_PROXY_BYTES (full matches are much larger → download-only),
+ * make a small 360p ~500 kbps faststart MP4 and store it at
+ * `footage/national-league-cup/proxies/<name>`. The gate is file SIZE, not the
+ * filename — a mis-named highlights file still gets a preview.
  * The club page streams the proxy for preview and serves the full file for
  * download; if the proxy isn't there yet it falls back to the full file.
  *
@@ -26,9 +28,14 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 setGlobalOptions({ region: "europe-west2" });
 
 const BUCKET = "nl-tools.firebasestorage.app";
+// Proxy any file up to this size. Highlights/clips are small (hundreds of MB);
+// full matches are 6–10 GB and stay download-only. We gate on SIZE, not the
+// filename — the producer can misname a file, but they can't fake its size, so
+// every normal upload gets a preview regardless of naming convention.
+const MAX_PROXY_BYTES = 2 * 1024 * 1024 * 1024;   // 2 GiB
 
 exports.makeProxy = onObjectFinalized(
-  { bucket: BUCKET, memory: "2GiB", cpu: 2, timeoutSeconds: 540 },
+  { bucket: BUCKET, memory: "4GiB", cpu: 2, timeoutSeconds: 540 },
   async (event) => {
     const obj = event.data;
     const filePath = obj.name || "";
@@ -39,11 +46,11 @@ exports.makeProxy = onObjectFinalized(
     if (!/\.mp4$/i.test(filePath)) return;
 
     const base = path.basename(filePath);
-    // Type is the 4th underscore token: YYYY-MM-DD_HOME_AWAY_TYPE_VARIANT.mp4
-    const type = (base.split("_")[3] || "").toUpperCase();
-    const previewable = type === "HL" || type === "CLIPS" || /CLIPS/i.test(base);
-    if (!previewable) {
-      logger.info(`Skipping non-previewable file: ${base}`);
+    // Gate on size, not filename — full matches (huge) are download-only; anything
+    // smaller gets a preview proxy even if the producer named it wrong.
+    const size = parseInt(obj.size || "0", 10);
+    if (size > MAX_PROXY_BYTES) {
+      logger.info(`Skipping large file (${size} bytes, download-only): ${base}`);
       return;
     }
 

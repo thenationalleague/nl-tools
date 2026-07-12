@@ -3,6 +3,11 @@
 <head>
 <!--
   NL Cup Footage — Club-facing standalone page
+  Version: v0.4 (12/07/2026) — every file shows a Preview button (full matches get an
+           explainer + download instead of a dead player); missing Storage objects
+           degrade to a clear "no longer available" message rather than a hard fail.
+  Version: v0.3 (12/07/2026) — preview tries the 360p proxy for any file (size-gated,
+           not filename-gated), falling back to the full file.
   Version: v0.2 (12/07/2026) — cross-device delivery: producer uploads read live
            from RTDB (app-data/media-footage/uploads) and merged into the games.
   Version: v0.1 (12/07/2026) — MVP prototype.
@@ -263,8 +268,11 @@
     var sub = [f.name, f.size].filter(Boolean).map(esc).join(' · ');
     var meta = '<div class="file__meta"><span class="file__label">'+esc(f.label)+'</span>'
              + (sub?'<span class="file__name">'+sub+'</span>':'') + '</div>';
+    // Every file gets a Preview button so no row looks "missing" one. For a
+    // full match (not previewable) the preview opens an explainer + download,
+    // rather than a dead player — see openPreview().
     var acts = '<div class="file__actions">'
-      + (vid?'<button class="file__btn file__btn--pv" data-pv="'+esc(g.id)+'|'+esc(f.id)+'">Play</button>':'')
+      + '<button class="file__btn file__btn--pv" data-pv="'+esc(g.id)+'|'+esc(f.id)+'">Preview</button>'
       + '<button class="file__btn file__btn--dl" data-dl="'+esc(g.id)+'|'+esc(f.id)+'">Download</button></div>';
     return '<div class="file">'+ic+meta+acts+'</div>';
   }
@@ -340,7 +348,9 @@
   // for highlights/clips only). Preview streams the proxy if present, else the full file.
   function proxyPathFor(f){
     if (!f.storagePath || f.storagePath.indexOf('footage/national-league-cup/') !== 0) return null;
-    var t = (f.type||'').toLowerCase(); if (t !== 'hl' && t !== 'clips') return null;
+    if (f.storagePath.indexOf('/proxies/') !== -1) return null;   // already a proxy
+    // Try the proxy for any file (the fallback handles files that never got one,
+    // e.g. full matches over the size cap). No filename/type gate.
     return f.storagePath.replace('footage/national-league-cup/', 'footage/national-league-cup/proxies/');
   }
   function previewUrl(f){
@@ -353,19 +363,39 @@
   }
   function fileByRef(ref){ var p=ref.split('|'), g=DATA.games.filter(function(x){return x.id===p[0];})[0]; if(!g) return null; var f=filesForGame(g).filter(function(x){return x.id===p[1];})[0]; return f?{g:g,f:f}:null; }
 
+  function downloadFile(f){
+    toast('Preparing download…');
+    return resolveUrl(f).then(function(url){ var a=document.createElement('a'); a.href=url; a.download=f.name||''; a.target='_blank'; document.body.appendChild(a); a.click(); a.remove(); })
+      .catch(function(e){ toast(missingObj(e)?'This file is no longer available.':('Download failed'+(e.code?(': '+e.code):'')), 'error'); });
+  }
+  function missingObj(e){ var c=(e&&(e.code||e.message))||''; return /object-not-found|not-?found|404/i.test(c); }
   function openPreview(ref){
     var o = fileByRef(ref); if(!o) return;
     var g=o.g, f=o.f, h=byCode[g.home], a=byCode[g.away];
     document.getElementById('pvTitle').textContent = (h?h.short:g.home)+' v '+(a?a.short:g.away)+' — '+f.label;
     var vid = document.getElementById('pvVideo'), stage = document.getElementById('pvStage');
     document.getElementById('pvBackdrop').classList.add('open');
-    if (isReal(f)){
+    try{ vid.pause(); }catch(e){}
+    if (isReal(f) && f.preview){
+      // previewable → stream the 360p proxy (falls back to the full file)
       stage.style.display='flex'; stage.innerHTML='Loading…'; vid.style.display='none';
       previewUrl(f).then(function(url){ vid.src=url; vid.style.display='block'; stage.style.display='none'; var p=vid.play(); if(p&&p.catch)p.catch(function(){}); })
-        .catch(function(e){ stage.innerHTML='Could not load preview.<br><small style="opacity:0.6">'+esc(e.code||e.message||'')+'</small>'; });
+        .catch(function(e){
+          vid.style.display='none'; stage.style.display='flex';
+          stage.innerHTML = missingObj(e)
+            ? '<div style="text-align:center;max-width:320px"><div style="font-weight:800;margin-bottom:6px">File no longer available</div><div style="font-size:13px;color:var(--text-muted)">This footage has been removed. Ask the NL media team if you were expecting it.</div></div>'
+            : 'Could not load preview.<br><small style="opacity:0.6">'+esc(e.code||e.message||'')+'</small>';
+        });
+    } else if (isReal(f)){
+      // real file but not previewable (full match / over the size cap) → explain + offer the download
+      vid.removeAttribute('src'); vid.style.display='none'; stage.style.display='flex';
+      stage.innerHTML = '<div style="text-align:center;max-width:340px">'
+        + '<div style="font-weight:800;margin-bottom:6px">Full match — download only</div>'
+        + '<div style="font-size:13px;color:var(--text-muted);margin-bottom:14px">This file is too large to preview online'+(f.size?(' ('+esc(f.size)+')'):'')+'. Download it to watch in your own player.</div>'
+        + '<button class="file__btn file__btn--dl" id="pvDl">Download</button></div>';
+      var b=document.getElementById('pvDl'); if(b) b.onclick=function(){ downloadFile(f); };
     } else {
-      try{ vid.pause(); }catch(e){} vid.removeAttribute('src'); vid.style.display='none';
-      stage.style.display='flex';
+      vid.removeAttribute('src'); vid.style.display='none'; stage.style.display='flex';
       stage.innerHTML = 'Preview not available for this file.';
     }
   }
@@ -404,13 +434,8 @@
     var dl = t.closest && t.closest('[data-dl]');
     if (dl){
       var o = fileByRef(dl.getAttribute('data-dl'));
-      if (o && isReal(o.f)){
-        toast('Preparing download…');
-        resolveUrl(o.f).then(function(url){ var a=document.createElement('a'); a.href=url; a.download=o.f.name||''; a.target='_blank'; document.body.appendChild(a); a.click(); a.remove(); })
-          .catch(function(e){ toast('Download failed'+(e.code?(': '+e.code):''),'error'); });
-      } else {
-        toast('This file isn’t available to download yet.');
-      }
+      if (o && isReal(o.f)) downloadFile(o.f);
+      else toast('This file isn’t available to download yet.');
       return;
     }
     var pv = t.closest && t.closest('[data-pv]'); if (pv){ openPreview(pv.getAttribute('data-pv')); return; }

@@ -3,6 +3,9 @@
 <head>
 <!--
   NL Cup Footage — MASTER control tool (superadmin)
+  Version: v0.3 (12/07/2026) — delete (✕) on producer-upload chips removes the
+           Storage file + its RTDB record for everyone (fixes catalogue/Storage
+           drift when files are deleted directly in the console). Loads storage SDK.
   Version: v0.2 (12/07/2026) — producer uploads (app-data/media-footage/uploads)
            surfaced live as file chips; pull-back toggle on an upload writes its
            live flag to RTDB. Catalogue publish unchanged (base only, no uploads).
@@ -25,6 +28,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
 <script>
   firebase.initializeApp({
     apiKey:"AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU", authDomain:"nl-tools.firebaseapp.com",
@@ -86,6 +90,13 @@
     border-radius: 20px; cursor: pointer; border: 1px solid var(--border); background: var(--white); color: var(--text-muted); font-family: var(--font); }
   .chip.on { background: var(--green-light); border-color: color-mix(in srgb,var(--green) 30%,white); color: var(--green); }
   .chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .chipwrap { display: inline-flex; align-items: stretch; gap: 0; }
+  .chipwrap .chip { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  .chipx { font-size: 11px; font-weight: 800; line-height: 1; padding: 0 8px; cursor: pointer;
+    border: 1px solid var(--border); border-left: 0; border-radius: 0 20px 20px 0;
+    background: var(--white); color: var(--text-muted); font-family: var(--font); }
+  .chipx:hover { background: var(--red-light); border-color: color-mix(in srgb,var(--red) 30%,white); color: var(--red); }
+  .chipx:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
   .helptext { font-size: 12px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.5; }
 </style>
@@ -221,7 +232,11 @@
         var chips = files.length
           ? files.map(function(f){
               var lbl = esc(f.label || (f.type + (f.variant?(' '+f.variant):'')));
-              return '<button class="chip'+(f.live!==false?' on':'')+'" data-file="'+esc(g.id)+'|'+esc(f.id)+'" title="'+esc(f.label)+(f.size?(' · '+esc(f.size)):'')+' — click to '+(f.live!==false?'hide from clubs':'show to clubs')+'">'+lbl+'</button>';
+              var chip = '<button class="chip'+(f.live!==false?' on':'')+'" data-file="'+esc(g.id)+'|'+esc(f.id)+'" title="'+esc(f.label)+(f.size?(' · '+esc(f.size)):'')+' — click to '+(f.live!==false?'hide from clubs':'show to clubs')+'">'+lbl+'</button>';
+              // Producer uploads get a delete (removes the Storage file + its record);
+              // catalogue files don't (they live in the published blob).
+              if (f._up) return '<span class="chipwrap">'+chip+'<button class="chipx" data-delup="'+esc(f.id)+'" title="Delete this upload — removes the file and its record for everyone">✕</button></span>';
+              return chip;
             }).join('')
           : '<span style="font-size:11px;color:var(--text-muted);font-style:italic;">no files yet</span>';
         return '<div class="fx"><div class="fx__row"><span class="fx__meta">'+esc(g.round)+' · '+esc(g.date)+'</span>'+fixHTML+'</div><div class="fx__assets">'+chips+'</div></div>';
@@ -229,6 +244,16 @@
     });
     host.innerHTML=html;
     host.onclick=function(e){
+      var dup=e.target.getAttribute('data-delup');
+      if(dup){
+        var u=uploadsCache[dup];
+        if(!confirm('Delete this upload? Removes the file from Storage and from all club views immediately. This cannot be undone.')) return;
+        if(u && u.storagePath){ try{ firebase.storage().ref(u.storagePath).delete().catch(function(){}); }catch(err){} }
+        firebase.database().ref(UPLOADS_REF+'/'+dup).remove()
+          .then(function(){ toast('Upload deleted'); })
+          .catch(function(err){ var d=(err.code==='PERMISSION_DENIED')||/permission/i.test(err.message||''); toast(d?'Delete denied — sign into the NL portal as superadmin here.':('Delete failed: '+(err.code||err.message)),'error'); });
+        return;
+      }
       var tg=e.target.getAttribute('data-file');
       if(tg){
         var p=tg.split('|'), g=DATA.games.filter(function(x){return x.id===p[0];})[0];
