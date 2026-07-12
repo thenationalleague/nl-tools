@@ -1,0 +1,45 @@
+name: Deploy footage proxy function
+
+# Deploys functions/ (the NL Cup Footage 360p proxy) to the nl-tools Firebase
+# project. Runs when the function changes, or on demand ("Run workflow").
+# Auth reuses the same Workload Identity Federation secrets as the GA pipeline —
+# no terminal needed. One-time IAM grant + API enable required (see functions/README.md).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'functions/**'
+      - 'firebase.json'
+      - '.github/workflows/deploy-footage-proxy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install function dependencies
+        working-directory: functions
+        run: npm install
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Deploy functions
+        run: npx --yes firebase-tools@latest deploy --only functions --project nl-tools --non-interactive --force
