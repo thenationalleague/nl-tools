@@ -677,14 +677,36 @@
   var _clubsCb      = null;  /* per-session cache-buster, stamped once */
   var CLUBS_URL     = '/tools/assets/data/clubs-meta.json';
   var CREST_BASE    = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
+  var THUMB_BASE    = CREST_BASE + 'thumbs/';
   var CLUB_ROSE     = CREST_BASE + 'National%20League%20rose.png';
 
   window.NL.clubs = {
     ROSE: CLUB_ROSE,
-    /* Absolute crest URL for a club name (byte-identical to the URL every
-       existing picker builds, so migration causes no crest change). */
-    crestUrl: function(name) {
-      return name ? CREST_BASE + encodeURIComponent(name) + '.png' : CLUB_ROSE;
+    /* Absolute crest URL for a club name.
+         crestUrl(name)          → full-res (byte-identical to the legacy URL,
+                                    so no-arg callers are unaffected).
+         crestUrl(name, 'thumb') → 96px thumbnail (assets/crests/thumbs/…) for
+                                    lists/dropdowns. ~15KB vs ~526KB.
+       Thumbs are auto-generated (scripts/build-crest-thumbs.py + the
+       crest-thumbs Action). Always pair a thumb <img> with the thumb→full→rose
+       onerror chain (NL.clubs.wireCrestImg) so a not-yet-built thumb still
+       renders. Canvas/export tools must use full-res (no size arg). */
+    crestUrl: function(name, size) {
+      if (!name) return CLUB_ROSE;
+      var base = (size === 'thumb') ? THUMB_BASE : CREST_BASE;
+      return base + encodeURIComponent(name) + '.png';
+    },
+    /* Wire a crest <img> so a missing thumb degrades thumb → full → rose
+       (or hides, if hideOnFail). Safe to call on a full-res <img> too. */
+    wireCrestImg: function(img, name, hideOnFail) {
+      if (!img) return img;
+      var full = this.crestUrl(name), rose = CLUB_ROSE;
+      img.onerror = function() {
+        if (img.src !== full && name) { img.src = full; return; }
+        img.onerror = null;
+        if (hideOnFail) img.style.display = 'none'; else img.src = rose;
+      };
+      return img;
     },
     /* Load + memoise clubs-meta. One network hit per session. */
     load: function() {
@@ -850,8 +872,9 @@
         var o = document.createElement('div');
         o.className = 'club-picker__option'; o.id = id + '-opt' + i;
         o.setAttribute('role', 'option'); o.setAttribute('aria-selected', 'false');
-        var img = document.createElement('img'); img.alt = ''; img.src = window.NL.clubs.crestUrl(c.name);
-        img.onerror = function() { this.onerror = null; if (opt.crestFallback === 'hide') this.style.display = 'none'; else this.src = CLUB_ROSE; };
+        var img = document.createElement('img'); img.alt = '';
+        window.NL.clubs.wireCrestImg(img, c.name, opt.crestFallback === 'hide');
+        img.src = window.NL.clubs.crestUrl(c.name, 'thumb');
         var nm = document.createElement('span'); nm.className = 'club-picker__option-name'; nm.textContent = c.name;
         o.appendChild(img); o.appendChild(nm);
         var sec = secondaryText(c);
@@ -903,8 +926,15 @@
     }
     function applySelection(sel) {
       selectedName = sel.name;
-      crest.onerror = function() { this.onerror = null; this.src = CLUB_ROSE; };
-      crest.src = sel.crestUrl || CLUB_ROSE;
+      /* Visible crest uses the thumb (thumb→full→rose fallback); the payload's
+         sel.crestUrl stays full-res for onSelect callers. */
+      if (sel.name) {
+        window.NL.clubs.wireCrestImg(crest, sel.name, false);
+        crest.src = window.NL.clubs.crestUrl(sel.name, 'thumb');
+      } else {
+        crest.onerror = function() { this.onerror = null; this.src = CLUB_ROSE; };
+        crest.src = sel.crestUrl || CLUB_ROSE;
+      }
       if (opt.mode === 'select') { valueSpan.textContent = sel.name; valueSpan.classList.remove('club-picker__value--placeholder'); }
       else { input.value = sel.name; }
       if (clearBtn) clearBtn.style.display = sel.name ? '' : 'none';

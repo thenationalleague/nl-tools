@@ -61,7 +61,9 @@ check_asset() {
     echo "  $slug: missing $file"
     return
   fi
-  versioned=$(grep -oE "$file\?v=[0-9]+" "$index" | head -1 || true)
+  # Anchor to the /tools/system/ path so a version mentioned in a changelog
+  # comment (e.g. "nl-utils.js?v=15") isn't mistaken for the live script tag.
+  versioned=$(grep -oE "/tools/system/$file\?v=[0-9]+" "$index" | head -1 || true)
   if [[ -z "$versioned" ]]; then
     echo "  $slug: $file loaded without ?v= cache-bust (canonical ?v=$canon)"
     return

@@ -1,0 +1,62 @@
+name: Build crest thumbnails
+
+# Keeps assets/crests/thumbs/ in sync with the full-size crests. Add or remove
+# a badge in assets/crests/ and the matching 96px thumbnail is regenerated
+# (or pruned) automatically — you never touch the thumbs/ folder by hand.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'assets/crests/*.png'
+      - 'scripts/build-crest-thumbs.py'
+      - '.github/workflows/crest-thumbs.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: crest-thumbs
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Pillow
+        run: |
+          python -m pip install --upgrade pip
+          pip install Pillow
+
+      - name: Sync with origin/main (clean tree)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git reset --hard origin/main
+
+      - name: Build thumbnails
+        run: python3 -u scripts/build-crest-thumbs.py
+
+      - name: Commit & push if changed
+        run: |
+          if [ -z "$(git status --porcelain assets/crests/thumbs)" ]; then
+            echo "Thumbnails already up to date"
+            exit 0
+          fi
+          git add -A assets/crests/thumbs
+          git commit -m "Rebuild crest thumbnails"
+          git fetch origin main
+          git pull --rebase origin main
+          git push origin HEAD:main
