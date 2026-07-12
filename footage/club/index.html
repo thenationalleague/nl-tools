@@ -410,7 +410,24 @@
   function applyLive(d){
     if (!d || !d.clubs || !d.games) return;
     DATA = d; byCode = {}; DATA.clubs.forEach(function(c){ byCode[c.code] = c; });
+    graftLocalUploads();   // keep producer uploads from the local bridge (same browser)
     if (currentClubCode && byCode[currentClubCode]) render(byCode[currentClubCode]);
+  }
+  // Producer uploads land in the local bridge (nlFootageData). Adopting the live
+  // RTDB catalogue would otherwise wipe them, so graft any producer-uploaded files
+  // back on top of the live data (matched by game + file id). Same-browser bridge;
+  // true cross-device delivery moves these records into RTDB (next step).
+  function graftLocalUploads(){
+    var overlay; try { overlay = JSON.parse(localStorage.getItem('nlFootageData') || 'null'); } catch(e){ return; }
+    if (!overlay || !overlay.games) return;
+    var byId = {}; DATA.games.forEach(function(g){ byId[g.id] = g; });
+    overlay.games.forEach(function(og){
+      (og.files || []).forEach(function(f){
+        if (f.uploadedBy !== 'producer') return;
+        var g = byId[og.id]; if (!g) return; if (!Array.isArray(g.files)) g.files = [];
+        if (!g.files.some(function(x){ return x.id === f.id; })) g.files.push(f);
+      });
+    });
   }
   try {
     firebase.database().ref(LIVE_REF).once('value')
