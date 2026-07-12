@@ -3,17 +3,18 @@
 <head>
 <!--
   NL Cup Footage — Club-facing standalone page
-  Version: v0.1 (12/07/2026) — MVP prototype, DUMMY content.
+  Version: v0.2 (12/07/2026) — cross-device delivery: producer uploads read live
+           from RTDB (app-data/media-footage/uploads) and merged into the games.
+  Version: v0.1 (12/07/2026) — MVP prototype.
   File: /tools/footage/index.html
 
   Standalone (NO auth-guard). Access model: per-club direct link
-  (?c=<token>) or per-club passcode. Reads footage/data.js. A master-tool
-  localStorage overlay (nlFootageData) wins when present, so admin edits
-  preview live in the same browser.
+  (?c=<token>) or per-club passcode. Reads footage/data.js.
 
-  Catalogue reads from RTDB (app-data/media-footage); real files stream/download
-  from Firebase Storage via getDownloadURL. Cross-device upload delivery is the
-  remaining step (producer records → RTDB).
+  Two live RTDB nodes feed the view: the base catalogue (app-data/media-footage/data,
+  published by the master tool) and producer uploads (app-data/media-footage/uploads),
+  both via .on('value') so an upload from any device shows without a refresh. Real
+  files stream/download from Firebase Storage via getDownloadURL.
 -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -421,35 +422,45 @@
   var club = findClubByToken(params.get('c'));
   if (club) render(club); else showGate();
 
-  // Stage B: adopt the live RTDB catalogue if published, then re-render the
-  // current view. Layered over the committed dummy — a missing/empty node or
-  // an offline read is swallowed and the page keeps working.
+  // Cross-device delivery. Two live RTDB nodes feed the club view:
+  //   • LIVE_REF   (data)    — the base catalogue the master tool publishes
+  //   • UPLOADS_REF (uploads) — individual producer-uploaded files
+  // Both are read with .on('value') so a producer upload from any device shows
+  // up here without a refresh. Everything is layered over the committed data,
+  // so a missing/empty node or an offline read just leaves the page working.
+  var UPLOADS_REF = 'app-data/media-footage/uploads';
+  var baseData = DATA;      // catalogue (committed → live RTDB when published)
+  var uploadsCache = {};    // pushId -> upload record
+
   function applyLive(d){
-    if (!d || !d.clubs || !d.games) return;
-    DATA = d; byCode = {}; DATA.clubs.forEach(function(c){ byCode[c.code] = c; });
-    graftLocalUploads();   // keep producer uploads from the local bridge (same browser)
+    if (d && d.clubs && d.games) baseData = d;
+    rebuild();
+  }
+  // Rebuild DATA = base catalogue + producer uploads (merged by gameId).
+  function rebuild(){
+    DATA = baseData; byCode = {}; DATA.clubs.forEach(function(c){ byCode[c.code] = c; });
+    var byId = {};
+    DATA.games.forEach(function(g){
+      if (!Array.isArray(g.files)) g.files = [];
+      g.files = g.files.filter(function(f){ return !f._up; });   // drop prior merge
+      byId[g.id] = g;
+    });
+    Object.keys(uploadsCache).forEach(function(k){
+      var u = uploadsCache[k]; if (!u || !u.gameId) return;
+      var g = byId[u.gameId]; if (!g) return;
+      g.files.push({ id:k, type:(u.type||'').toUpperCase(), variant:u.variant?u.variant.toUpperCase():null,
+        label:u.label, name:u.name, size:u.size, preview:!!u.preview,
+        live:u.live!==false, storagePath:u.storagePath, url:u.url||'#stored', _up:true });
+    });
     if (currentClubCode && byCode[currentClubCode]) render(byCode[currentClubCode]);
   }
-  // Producer uploads land in the local bridge (nlFootageData). Adopting the live
-  // RTDB catalogue would otherwise wipe them, so graft any producer-uploaded files
-  // back on top of the live data (matched by game + file id). Same-browser bridge;
-  // true cross-device delivery moves these records into RTDB (next step).
-  function graftLocalUploads(){
-    var overlay; try { overlay = JSON.parse(localStorage.getItem('nlFootageData') || 'null'); } catch(e){ return; }
-    if (!overlay || !overlay.games) return;
-    var byId = {}; DATA.games.forEach(function(g){ byId[g.id] = g; });
-    overlay.games.forEach(function(og){
-      (og.files || []).forEach(function(f){
-        if (f.uploadedBy !== 'producer') return;
-        var g = byId[og.id]; if (!g) return; if (!Array.isArray(g.files)) g.files = [];
-        if (!g.files.some(function(x){ return x.id === f.id; })) g.files.push(f);
-      });
-    });
-  }
   try {
-    firebase.database().ref(LIVE_REF).once('value')
-      .then(function(s){ applyLive(s.val()); })
-      .catch(function(){ /* offline / rules not deployed — keep committed data */ });
+    firebase.database().ref(LIVE_REF).on('value',
+      function(s){ applyLive(s.val()); },
+      function(){ /* offline / rules not deployed — keep committed data */ });
+    firebase.database().ref(UPLOADS_REF).on('value',
+      function(s){ uploadsCache = s.val() || {}; rebuild(); },
+      function(){ /* offline / rules not deployed — no uploads merged */ });
   } catch(e){}
 })();
 </script>
