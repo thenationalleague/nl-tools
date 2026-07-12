@@ -13,6 +13,11 @@ import { NL, REPO } from './load-canon.mjs';
 
 const meta = JSON.parse(readFileSync(join(REPO, 'assets/data/clubs-meta.json'), 'utf8'));
 
+test('NL.endpoints.gas is present and is an Apps Script exec URL', () => {
+  assert.equal(typeof NL.endpoints, 'object');
+  assert.match(NL.endpoints.gas, /^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/);
+});
+
 test('NL namespace loads', () => {
   assert.ok(NL, 'window.NL present');
   for (const fn of ['escHtml', 'escJ', 'parseDate', 'formatDate', 'formatDateShort']) {
