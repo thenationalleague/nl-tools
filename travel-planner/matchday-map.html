@@ -5,7 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Matchday Travel Map — NL Tools</title>
 <!--
-  NL Matchday Travel Map v1.8
+  NL Matchday Travel Map v1.9
+  v1.9 — Crest images (panel list + map markers) now load 96px thumbnails from
+         assets/crests/thumbs/ instead of full-res files. List imgs fall back
+         thumb→full→rose via <img onerror>; markers can't, so they probe the
+         thumb and swap the icon to full-res, then the rose, on miss. New cUt()
+         builds the thumb URL by string (no nl-utils on this page).
   v1.8 — Rebuilt the motion effect entirely: pulse is now real marker dots that
          travel along each route via Marker.setPosition (toward the home ground),
          replacing the polyline-symbol animation that stopped repainting on some
@@ -241,7 +246,8 @@ function parseFixtures(text){
 
 // ── Address helper (postcode geocodes cleanly, same as planner) ──
 function addr(c){return c.postcode?c.postcode+', UK':(c.stadium||c.short||c.name)+', UK';}
-function cU(n){return CB+encodeURIComponent(n)+'.png';}
+function cU(n){return CB+encodeURIComponent(n)+'.png';}            // full-res crest
+function cUt(n){return CB+'thumbs/'+encodeURIComponent(n)+'.png';} // 96px thumbnail (assets/crests/thumbs/) — no nl-utils here, so built by string
 
 // ── Formatting ──
 function fmtMiles(m){if(m==null)return'';return Math.round(m/1609.34)+' mi';}
@@ -337,7 +343,7 @@ function render(legs){
       h+='<div class="mm__leg'+(l.err?' mm__leg--err':'')+'" data-idx="'+idx+'"'+(l.route?' onclick="selectRoute('+idx+')"':'')+'>';
       h+='<div class="mm__leg-sw" style="background:'+l.colour+'"></div>';
       h+='<div class="mm__leg-body">';
-      h+='<div class="mm__leg-teams"><img src="'+cU(f.away.name)+'" onerror="this.onerror=null;this.src=\''+FC+'\'"><span>'+esc(f.away.short||f.away.name)+'</span><span class="arw">→</span><img src="'+cU(f.home.name)+'" onerror="this.onerror=null;this.src=\''+FC+'\'"><span>'+esc(f.home.short||f.home.name)+'</span></div>';
+      h+='<div class="mm__leg-teams"><img src="'+cUt(f.away.name)+'" onerror="this.onerror=function(){this.onerror=null;this.src=\''+FC+'\'};this.src=\''+cU(f.away.name)+'\'"><span>'+esc(f.away.short||f.away.name)+'</span><span class="arw">→</span><img src="'+cUt(f.home.name)+'" onerror="this.onerror=function(){this.onerror=null;this.src=\''+FC+'\'};this.src=\''+cU(f.home.name)+'\'"><span>'+esc(f.home.short||f.home.name)+'</span></div>';
       if(l.err){h+='<div class="mm__leg-err">Route unavailable ('+esc(l.err)+')</div>';}
       else{
         h+='<div class="mm__leg-meta">'+fmtMiles(l.miles)+' · '+fmtDur(l.dur)+'</div>';
@@ -382,11 +388,22 @@ var DRIVE_STYLE=[
 ];
 
 function crestMarker(pos,name,z){
-  return new google.maps.Marker({
+  var m=new google.maps.Marker({
     position:pos,map:gMap,zIndex:z,
-    icon:{url:cU(name),scaledSize:new google.maps.Size(26,26),anchor:new google.maps.Point(13,13)},
+    icon:{url:cUt(name),scaledSize:new google.maps.Size(26,26),anchor:new google.maps.Point(13,13)},
     title:name
   });
+  // Markers can't use <img onerror>, so probe the thumb; on miss fall back
+  // full-res, then to the rose. Mirrors the list crests' thumb→full→rose chain.
+  var thumbProbe=new Image();
+  thumbProbe.onerror=function(){
+    var fullProbe=new Image();
+    fullProbe.onload=function(){m.setIcon({url:cU(name),scaledSize:new google.maps.Size(26,26),anchor:new google.maps.Point(13,13)});};
+    fullProbe.onerror=function(){m.setIcon({url:FC,scaledSize:new google.maps.Size(26,26),anchor:new google.maps.Point(13,13)});};
+    fullProbe.src=cU(name);
+  };
+  thumbProbe.src=cUt(name);
+  return m;
 }
 
 // Pulse dots that physically travel along each route (via Marker.setPosition)

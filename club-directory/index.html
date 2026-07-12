@@ -6,9 +6,19 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.43 — People tab: read-only "Mailing lists" view.
+  v0.45 — Crests load lightweight thumbnails in every list/grid/table.
 
   Changelog:
+  v0.45 — (12/07/2026) Crest weight cut. All list/grid/table/card crests now
+          load the 96px THUMB (~14KB vs ~526KB each) instead of the full-res
+          badge — the heaviest page in the repo dropped from ~43MB of crests
+          per view. Introduced crestImg(name, cls, size): builds the <img>
+          markup routed through canon (NL.clubs.crestUrl + wireCrestImg) with
+          the thumb→full→rose degrade wired inline, replacing the hand-rolled
+          local crestUrl/fallbackCrest (now deleted). The two LARGE single
+          badges keep full-res via size='full': the club-page header crest
+          (.s2-crest, 56px) and the "your club" landing hero (.l1-hero__crest,
+          64px). Behaviour otherwise unchanged.
   v0.43 — (16/06/2026) People surface gains a "People | Mailing lists" view
           toggle (state.manage.peopleView). The new read-only view
           (renderPeopleListsView) lists all 15 mailing lists for the club,
@@ -559,6 +569,13 @@
 
   window.NL_CHANGELOG = [
     {
+      date: '12 Jul 2026',
+      version: 'v0.45',
+      items: [
+        'Club crests now load a lightweight 96px thumbnail (~14KB instead of ~526KB) everywhere they appear in a list, grid or table — so the directory, global search, list builder and compliance table open far faster. Large single badges (the club-page header and your-club hero) stay full resolution.'
+      ]
+    },
+    {
       date: '16 Jun 2026',
       version: 'v0.44',
       items: [
@@ -799,7 +816,7 @@
 </script>
 
 <!-- NL system scripts (lint canonical: ?v=10 / ?v=7 / ?v=8) -->
-<script src="/tools/system/nl-utils.js?v=16"></script>
+<script src="/tools/system/nl-utils.js?v=17"></script>
 <script src="/tools/system/nl-topbar.js?v=7"></script>
 <script src="/tools/system/auth-guard.js?v=8"></script>
 
@@ -2652,12 +2669,21 @@ function esc(s) {
     return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
   });
 }
-function crestUrl(name) {
-  return 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/' +
-    encodeURIComponent(name) + '.png';
-}
-function fallbackCrest() {
-  return 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png';
+/* Crest <img> markup for a list/grid/table/card. Loads the lightweight
+   96px THUMB (~14KB vs ~526KB) and wires the canon thumb→full→rose degrade
+   (NL.clubs.wireCrestImg) via an inline onerror, so a not-yet-built thumb
+   still renders. Pass size='full' for a large hero/detail badge (>~56px) or
+   anything exported — that skips the thumbnail. URLs and fallback all route
+   through canon (window.NL.clubs) — no hand-rolled crest URLs. */
+function crestImg(name, cls, size) {
+  /* size: 'full' original · 'medium' 512px hero/detail · default 'thumb' 96px.
+     onerror degrades whichever tier → full → rose via wireCrestImg. */
+  var src = (size === 'full')
+    ? window.NL.clubs.crestUrl(name)
+    : window.NL.clubs.crestUrl(name, size === 'medium' ? 'medium' : 'thumb');
+  return '<img' + (cls ? ' class="' + cls + '"' : '') +
+    ' src="' + src + '" alt="" data-club="' + esc(name) +
+    '" onerror="NL.clubs.wireCrestImg(this,this.getAttribute(\'data-club\'));this.onerror()">';
 }
 
 /* Expand a club's people[] into a list of (person, roleTitles[]) groups per section.
@@ -2966,7 +2992,7 @@ function renderClubStyle2(club) {
 
   return '<div class="s2-club" style="border-top:4px solid ' + esc(accent) + ';">' +
     '<div class="s2-header">' +
-      '<img class="s2-crest" src="' + crestUrl(club.name) + '" alt="" onerror="this.onerror=null;this.src=\'' + fallbackCrest() + '\'">' +
+      crestImg(club.name, 's2-crest', 'medium') +
       '<div class="s2-header__main">' +
         '<h2>' + esc(club.name) + '<span class="s2-div">' + esc(divFull) + '</span></h2>' +
         (stadiumLine ? '<div class="cp-stadium">' + esc(stadiumLine) + '</div>' : '') +
@@ -3017,7 +3043,7 @@ function renderListStyle1(clubs) {
         ? '<span class="pill pill--status pill--status-warn" style="margin-top:4px;">awaiting contacts</span>'
         : '';
       return '<div class="l1-card" data-club="' + esc(c.name) + '">' +
-        '<img class="l1-crest" src="' + crestUrl(c.name) + '" alt="" onerror="this.onerror=null;this.src=\'' + fallbackCrest() + '\'">' +
+        crestImg(c.name, 'l1-crest') +
         '<div class="l1-card-body">' +
           '<h3>' + esc(c.name) + '</h3>' +
           (stadium ? '<div class="l1-stadium">' + esc(stadium) + '</div>' : '') +
@@ -3207,7 +3233,7 @@ function renderListing() {
       var divLabel = DIVISION_FULL_NAMES[divisionOf(ownClub.name)] || divisionOf(ownClub.name);
       heroHtml =
         '<div class="l1-hero" id="ownClubHero" data-club="' + esc(ownClub.name) + '">' +
-          '<img class="l1-hero__crest" src="' + crestUrl(ownClub.name) + '" alt="" onerror="this.onerror=null;this.src=\'' + fallbackCrest() + '\'">' +
+          crestImg(ownClub.name, 'l1-hero__crest', 'medium') +
           '<div class="l1-hero__body">' +
             '<div class="l1-hero__kicker">Your club</div>' +
             '<div class="l1-hero__name">' + esc(ownClub.name) + '</div>' +
@@ -3234,7 +3260,7 @@ function renderListing() {
         if (pr.email) contact.push(esc(pr.email));
         if (pr.phone) contact.push(esc(formatPhone(pr.phone)));
         return '<button class="gs-row" type="button" data-jump-club="' + esc(h.club) + '" data-jump-person="' + esc(pr._id || '') + '">' +
-          '<img class="gs-row__crest" src="' + crestUrl(h.club) + '" alt="" onerror="this.onerror=null;this.src=\'' + fallbackCrest() + '\'">' +
+          crestImg(h.club, 'gs-row__crest') +
           '<span class="gs-row__name">' + esc(pr.name || '(unnamed)') + '</span>' +
           (h.roleLabel ? '<span class="gs-row__role">' + esc(h.roleLabel) + '</span>' : '') +
           '<span class="gs-row__club">' + esc(h.club) + '</span>' +
@@ -3804,7 +3830,7 @@ function renderBuilderWarnings() {
     if (!cov.missing.length) return '';
     var crests = cov.missing.slice(0, 30).map(function(cn) {
       return '<span class="lb-warning-crest">' +
-        '<img src="' + crestUrl(cn) + '" alt="" onerror="this.onerror=null;this.src=\'' + fallbackCrest() + '\'">' +
+        crestImg(cn) +
         esc(cn) +
       '</span>';
     }).join('');
@@ -3870,7 +3896,7 @@ function renderBuilderResults() {
       '<td class="lb-col-name">' + nameCell + '</td>' +
       '<td class="lb-col-club">' +
         '<div class="lb-club-cell">' +
-          '<img src="' + crestUrl(r.club) + '" alt="" onerror="this.onerror=null;this.src=\'' + fallbackCrest() + '\'">' +
+          crestImg(r.club) +
           '<span>' + esc(r.club) + '</span>' +
         '</div>' +
       '</td>' +
@@ -3987,7 +4013,7 @@ function renderClubPicker(root) {
         esc(gaps.map(function(l){ return l.label; }).join(', ')) + '">⚠ ' + gaps.length + ' list gap' + (gaps.length===1?'':'s') + '</span>';
     return '<tr data-club="' + esc(c.name) + '">' +
       '<td><div class="mc-club-cell">' +
-        '<img src="' + crestUrl(c.name) + '" alt="" onerror="this.onerror=null;this.src=\'' + fallbackCrest() + '\'">' +
+        crestImg(c.name) +
         '<span>' + esc(c.name) + '</span>' +
       '</div></td>' +
       '<td><span class="pill pill--identifier">' + esc(DIVISION_FULL_NAMES[divisionOf(c.name)] || divisionOf(c.name)) + '</span></td>' +
@@ -4037,7 +4063,7 @@ function renderEditor(root) {
 
   var title = '<div class="mc-title">' +
     '<h2>' +
-      '<img src="' + crestUrl(club.name) + '" alt="" onerror="this.onerror=null;this.src=\'' + fallbackCrest() + '\'">' +
+      crestImg(club.name) +
       esc(club.name) +
     '</h2>' +
   '</div>';
@@ -5897,7 +5923,7 @@ function renderLeagueDashboard(root) {
   var tableRows = rows.map(function(r) {
     var gapList = r.c.missing.map(function(l){ return l.label; });
     return '<tr data-club="' + esc(r.name) + '" class="cp-dash-row">' +
-      '<td><div class="lb-club-cell"><img src="' + crestUrl(r.name) + '" alt="" onerror="this.onerror=null;this.src=\'' + fallbackCrest() + '\'"><span>' + esc(r.name) + '</span></div></td>' +
+      '<td><div class="lb-club-cell">' + crestImg(r.name) + '<span>' + esc(r.name) + '</span></div></td>' +
       '<td class="cp-dash-meter-cell">' + complianceMeter(r.c) + '</td>' +
       '<td class="cp-dash-gaps">' + (gapList.length ? esc(gapList.join(', ')) : '<span style="color:var(--green);">complete</span>') + '</td>' +
     '</tr>';
