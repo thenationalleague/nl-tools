@@ -1,4 +1,4 @@
-/* commercial-benchmarking/dashboard.js  v1.2
+/* commercial-benchmarking/dashboard.js  v1.3
    Shared dashboard renderer for the Commercial Benchmarking tool. Pure
    rendering — no Firebase, no data loading. Both entry points use it:
      - index.html  (gated NL tool: staff picker / club's own row via auth-guard)
@@ -716,7 +716,7 @@ window.CBDash = (function () {
     // links without any library.
     function exportLinks() {
       var tb = opts.tokenByClub || {};
-      function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+      function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
       var th = 'style="background:#1B2A4A;color:#fff;font-weight:bold;text-align:left;padding:7px 12px;border:1px solid #cfd6e4"';
       var td = 'style="padding:6px 12px;border:1px solid #e2e6ee"';
       function lk(word, url) { return '<a href="' + esc(url) + '" style="color:#9e0000;font-weight:bold;text-decoration:none">' + word + '</a>'; }
@@ -885,7 +885,7 @@ window.CBDash = (function () {
   function review(OWN, opts) {
     opts = opts || {};
     var $ = function (id) { return document.getElementById(id); };
-    function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
     function val(k) { var m = (OWN.metrics || {})[k]; return m && m.value != null ? m.value : null; }
     function money(v) { return v == null ? '—' : '£' + Number(v).toLocaleString('en-GB'); }
     function plain(v) { return v == null ? '—' : Number(v).toLocaleString('en-GB'); }
