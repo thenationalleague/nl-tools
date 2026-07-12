@@ -4,7 +4,8 @@ A tool to deliver match footage to the 32 clubs of the National League Cup
 (16 National League + 16 Premier League 2). Clubs get their **own** games to
 **preview + download**; NL sees everything.
 
-> **This folder is the MVP prototype (dummy content, client-side).** The
+> **Live tool.** Seed data (clubs + fixtures, no footage) ships in `data.js`; real
+> footage arrives via the producer upload page. The
 > production architecture (all-Firebase — Storage + RTDB, no Cloudflare) is Phase 2,
 > specced below. Nothing here touches live footage yet.
 
@@ -133,13 +134,13 @@ not just storage.
 
 ## The MVP in this folder (Phase 1 — done)
 
-Fully client-side, zero backend, **dummy content** — proves the whole flow today.
+The four surfaces (landing · club · master · producer). Seed data only — no footage until the producer uploads it.
 
 | File | What |
 |---|---|
 | `index.html` | **Landing** at `/tools/footage/` — the reserved home / future portal-card destination. Light placeholder that points clubs to the deeper login. |
 | `club/index.html` | **Club-facing** login. `?c=<token>` auto-signs a club in; otherwise a passcode gate. Shows that club's games as **folders** (grouped by stage) — open a match to see its files listed like a file browser (label, filename, size, Play for video, Download). Flexible file counts. Deliberately one level deep (like `master/`) so the root stays free for the portal card. |
-| `master/index.html` | **Master** control tool. The 32 clubs with copy-able direct links + passcodes (regenerate per club), and a fixtures tab: assign knockout teams + a **pull-back toggle per file** (files are live on upload; the toggle only hides one as an override). Export/Import JSON, reset to dummy. |
+| `master/index.html` | **Master** control tool. The 32 clubs with copy-able direct links + passcodes (regenerate per club), and a fixtures tab: assign knockout teams + a **pull-back toggle per file** (files are live on upload; the toggle only hides one as an override). Export/Import JSON, reset to seed. |
 | `producer/index.html` | **Producer upload** page. Passcode / `?p=<token>` gate (external, like a club). Drop/pick footage → each file **auto-maps by filename** to a fixture; an unmatched file goes to a **"needs mapping" tray** and must be mapped (game + type) before **Upload** un-greys — mapping is forced. Uploaded footage is **live to clubs immediately (no approval)**; a **"My uploads"** list lets the producer **re-map / delete their own files for 24h**, then it locks. Has an "Add sample files (demo)" button. _Dummy:_ upload is simulated and writes live files into the localStorage overlay so master/club (same browser) reflect them; production wires real Storage upload + RTDB. |
 | `data.js` | Dummy dataset: 32 clubs (16 real NL + 16 placeholder PL2 with monogram crests), 64 group games + 7 knockout placeholders, tokens + passcodes. |
 
