@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--
+  NL × PL2 Footage Handoff — MASTER control tool (superadmin)
+  Version: v0.1 (12/07/2026) — MVP prototype, DUMMY content.
+  File: /tools/handoff/master/index.html
+
+  Edits a localStorage overlay (nlHandoffData) that the club-facing page
+  reads, so changes preview live in the same browser. Export/Import JSON to
+  persist. PHASE 2: this becomes superadmin-gated and writes to RTDB;
+  passcodes + presigned R2 links replace the dummy ones. See ../README.md.
+-->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Master · Footage Handoff</title>
+<link rel="stylesheet" href="/tools/system/nl-brand.css?v=21">
+<style>
+  body { background: var(--off-white); }
+  .mbar { background: var(--navy); color: var(--white); padding: 14px clamp(16px,3vw,32px);
+    display: flex; align-items: center; gap: 14px; border-bottom: 7px solid var(--primary); flex-wrap: wrap; }
+  .mbar__title { flex: 1; font-size: clamp(15px,1.6vw,20px); font-weight: 900; font-variation-settings:'wght' 900;
+    text-transform: uppercase; letter-spacing: 0.04em; min-width: 200px; }
+  .mbar__title small { display: block; font-size: 10px; font-weight: 700; letter-spacing: 0.14em; color: rgba(255,255,255,0.8); }
+  .mbar .btn--ghost { background: rgba(255,255,255,0.08); color: var(--white); border-color: rgba(255,255,255,0.3); }
+  .mbar .btn--ghost:hover { background: rgba(255,255,255,0.16); }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: clamp(20px,3vw,32px) clamp(14px,2.5vw,28px) 80px; }
+
+  .dummy-flag { background: var(--amber-light); border: 1px solid color-mix(in srgb,var(--amber) 35%,white);
+    color: var(--amber); border-radius: var(--radius); padding: 10px 14px; font-size: 12px; font-weight: 700; margin-bottom: 22px; }
+  .saved-flag { background: var(--green-light); color: var(--green); border: 1px solid color-mix(in srgb,var(--green) 30%,white); }
+
+  .tabs { display: flex; gap: 4px; background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 3px; margin-bottom: 24px; max-width: 420px; }
+  .tab { flex: 1; text-align: center; padding: 9px 12px; border-radius: 4px; font-size: 12px; font-weight: 800;
+    cursor: pointer; color: var(--text-muted); border: none; background: none; font-family: var(--font);
+    text-transform: uppercase; letter-spacing: 0.06em; }
+  .tab.active { background: var(--navy); color: var(--white); }
+  .tab:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .pane { display: none; } .pane.active { display: block; }
+
+  .tier-head { font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.14em; color: var(--navy);
+    margin: 22px 0 10px; } .tier-head:first-child { margin-top: 0; }
+
+  .clubrow { display: flex; align-items: center; gap: 12px; background: var(--white); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow); padding: 10px 14px; margin-bottom: 8px; flex-wrap: wrap; }
+  .clubrow__crest { width: 34px; height: 34px; object-fit: contain; flex-shrink: 0; }
+  .clubrow__mono { width: 34px; height: 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+    color: var(--white); font-weight: 900; font-size: 11px; flex-shrink: 0; }
+  .clubrow__name { flex: 1 1 160px; min-width: 0; font-weight: 800; font-variation-settings:'wght' 800; font-size: 14px; }
+  .clubrow__name small { display: block; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .clubrow__pass { font-family: ui-monospace, Menlo, monospace; font-size: 14px; font-weight: 800; letter-spacing: 0.15em;
+    background: var(--off-white); border: 1px solid var(--border); border-radius: var(--radius); padding: 5px 10px; color: var(--navy); }
+  .clubrow__actions { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; }
+  .mini { border: 1px solid var(--border); background: var(--white); border-radius: var(--radius); font-family: var(--font);
+    font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; padding: 6px 10px; cursor: pointer; color: var(--navy); }
+  .mini:hover { border-color: var(--navy); } .mini:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .mini--warn { color: var(--amber); }
+
+  .fx { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 10px 14px; margin-bottom: 8px; }
+  .fx__row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .fx__meta { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); flex-shrink: 0; }
+  .fx__fix { flex: 1 1 220px; font-weight: 800; font-size: 13px; }
+  .fx__sel { font-family: var(--font); font-size: 12px; padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--white); }
+  .fx__assets { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .chip { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 9px;
+    border-radius: 20px; cursor: pointer; border: 1px solid var(--border); background: var(--white); color: var(--text-muted); font-family: var(--font); }
+  .chip.on { background: var(--green-light); border-color: color-mix(in srgb,var(--green) 30%,white); color: var(--green); }
+  .chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+  .helptext { font-size: 12px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<div class="mbar">
+  <div class="mbar__title">Footage Handoff — Master<small>NL × PL2 Cup · superadmin control</small></div>
+  <button class="btn btn--ghost btn--sm" id="exportBtn">Export JSON</button>
+  <button class="btn btn--ghost btn--sm" id="importBtn">Import</button>
+  <button class="btn btn--ghost btn--sm" id="resetBtn">Reset to dummy</button>
+  <input type="file" id="importFile" accept="application/json" style="display:none">
+</div>
+
+<div class="wrap">
+  <div class="dummy-flag" id="stateFlag">⚠️ Prototype — editing a local (this-browser) copy. Use Export to save. Phase 2 moves this to RTDB.</div>
+
+  <div class="tabs">
+    <button class="tab active" data-pane="clubs">Clubs &amp; links</button>
+    <button class="tab" data-pane="fixtures">Fixtures</button>
+  </div>
+
+  <div class="pane active" id="pane-clubs">
+    <div class="helptext">Each club has a private <strong>direct link</strong> (auto-signs them in) and a <strong>passcode</strong> (manual entry). Hand these to the club's media contact. 32 clubs — 16 National League + 16 Premier League 2.</div>
+    <div id="clubsList"></div>
+  </div>
+
+  <div class="pane" id="pane-fixtures">
+    <div class="helptext">64 group games + 7 knockouts. Assign knockout teams once known, and toggle which of the four assets are live per game (green = available to clubs).</div>
+    <div id="fxList"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/tools/handoff/data.js"></script>
+<script>
+(function(){
+  'use strict';
+  var CREST_ROSE='https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png';
+  var LS='nlHandoffData';
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function toast(m,k){ var t=document.getElementById('toast'); t.textContent=m; t.className='toast toast--'+(k||'success')+' show'; setTimeout(function(){t.classList.remove('show');},2400); }
+
+  function load(){ try{ var o=localStorage.getItem(LS); if(o) return JSON.parse(o);}catch(e){} return JSON.parse(JSON.stringify(window.HANDOFF_DATA)); }
+  var DATA = load();
+  var overlayActive = !!localStorage.getItem(LS);
+  var byCode={}; DATA.clubs.forEach(function(c){ byCode[c.code]=c; });
+
+  function save(){ localStorage.setItem(LS, JSON.stringify(DATA)); overlayActive=true; flag(); }
+  function flag(){
+    var f=document.getElementById('stateFlag');
+    if(overlayActive){ f.className='dummy-flag saved-flag'; f.innerHTML='✓ Editing a saved local copy — the club pages in this browser reflect your changes. Export to keep a backup.'; }
+  }
+  flag();
+
+  var linkBase = location.origin + '/tools/handoff/?c=';
+  function pass6(){ var p=''; for(var i=0;i<6;i++) p+='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random()*31)]; return p; }
+  function tok(code){ var h=''; for(var i=0;i<4;i++) h+='abcdefghjkmnpqrstuvwxyz23456789'[Math.floor(Math.random()*30)]; return code.toLowerCase()+'-'+h; }
+
+  function crestHTML(c, cls){
+    if (c.crest) return '<img class="'+cls+'" src="'+esc(c.crest)+'" alt="" onerror="this.onerror=null;this.src=\''+CREST_ROSE+'\'">';
+    return '<span class="'+cls.replace('crest','mono')+'" style="background:'+esc(c.mono||'#223b7c')+'">'+esc(c.code)+'</span>';
+  }
+
+  function copy(text, what){
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function(){toast('Copied '+what);},function(){toast(text,'info');});
+    else toast(text,'info');
+  }
+
+  /* ---- Clubs & links ---- */
+  function renderClubs(){
+    var host=document.getElementById('clubsList');
+    function group(tier,label){
+      var rows = DATA.clubs.filter(function(c){return c.tier===tier;}).map(function(c){
+        return '<div class="clubrow">'+crestHTML(c,'clubrow__crest')
+          +'<div class="clubrow__name">'+esc(c.name)+'<small>'+esc(c.code)+' · '+(c.tier==='PL2'?'Premier League 2':'National League')+'</small></div>'
+          +'<span class="clubrow__pass" title="Passcode">'+esc(c.passcode)+'</span>'
+          +'<div class="clubrow__actions">'
+          +'<button class="mini" data-copylink="'+esc(c.token)+'">Copy link</button>'
+          +'<button class="mini" data-copypass="'+esc(c.passcode)+'">Copy code</button>'
+          +'<button class="mini" data-open="'+esc(c.token)+'">Open</button>'
+          +'<button class="mini mini--warn" data-regen="'+esc(c.code)+'">New code</button>'
+          +'</div></div>';
+      }).join('');
+      return '<div class="tier-head">'+label+' ('+DATA.clubs.filter(function(c){return c.tier===tier;}).length+')</div>'+rows;
+    }
+    host.innerHTML = group('NL','National League') + group('PL2','Premier League 2');
+    host.onclick=function(e){
+      var t=e.target;
+      var cl=t.getAttribute('data-copylink'); if(cl){ copy(linkBase+cl,'direct link'); return; }
+      var cp=t.getAttribute('data-copypass'); if(cp){ copy(cp,'passcode'); return; }
+      var op=t.getAttribute('data-open'); if(op){ window.open(linkBase+op,'_blank'); return; }
+      var rg=t.getAttribute('data-regen'); if(rg){ var c=byCode[rg]; c.passcode=pass6(); c.token=tok(c.code); save(); renderClubs(); toast('New code + link for '+c.short); return; }
+    };
+  }
+
+  /* ---- Fixtures ---- */
+  function clubOptions(sel){
+    return '<option value="">— team —</option>'+DATA.clubs.map(function(c){ return '<option value="'+esc(c.code)+'"'+(c.code===sel?' selected':'')+'>'+esc(c.short)+'</option>'; }).join('');
+  }
+  function renderFx(){
+    var host=document.getElementById('fxList');
+    var order=[],byStage={};
+    DATA.games.forEach(function(g){ if(!byStage[g.stage]){byStage[g.stage]=[];order.push(g.stage);} byStage[g.stage].push(g); });
+    var html='';
+    order.forEach(function(st){
+      html+='<div class="tier-head">'+esc(st)+' ('+byStage[st].length+')</div>';
+      html+=byStage[st].map(function(g){
+        var fixHTML;
+        if (g.home==null){
+          fixHTML='<span class="fx__fix">'+esc(g.round)+': <select class="fx__sel" data-home="'+g.id+'">'+clubOptions(g.home)+'</select> v <select class="fx__sel" data-away="'+g.id+'">'+clubOptions(g.away)+'</select></span>';
+        } else {
+          fixHTML='<span class="fx__fix">'+esc((byCode[g.home]||{}).short||g.home)+' v '+esc((byCode[g.away]||{}).short||g.away)+'</span>';
+        }
+        var chips = DATA.assetTypes.map(function(at){
+          var on = g.assets && g.assets[at.key];
+          return '<button class="chip'+(on?' on':'')+'" data-toggle="'+g.id+'|'+at.key+'">'+esc(at.key.replace('_',' '))+'</button>';
+        }).join('');
+        return '<div class="fx"><div class="fx__row"><span class="fx__meta">'+esc(g.round)+' · '+esc(g.date)+'</span>'+fixHTML+'</div><div class="fx__assets">'+chips+'</div></div>';
+      }).join('');
+    });
+    host.innerHTML=html;
+    host.onclick=function(e){
+      var tg=e.target.getAttribute('data-toggle');
+      if(tg){ var p=tg.split('|'), g=DATA.games.filter(function(x){return x.id===p[0];})[0]; if(!g.assets)g.assets={}; g.assets[p[1]]=g.assets[p[1]]?null:'#dummy'; save(); renderFx(); return; }
+    };
+    host.onchange=function(e){
+      var hh=e.target.getAttribute('data-home'), aa=e.target.getAttribute('data-away');
+      if(hh){ var g=DATA.games.filter(function(x){return x.id===hh;})[0]; g.home=e.target.value||null; if(g.home&&g.away&&!hasAssets(g)) g.assets={fmr_clean:null,fmr_dirty:null,hl_clean:null,hl_dirty:null}; save(); toast('Knockout updated'); }
+      if(aa){ var g2=DATA.games.filter(function(x){return x.id===aa;})[0]; g2.away=e.target.value||null; save(); toast('Knockout updated'); }
+    };
+  }
+  function hasAssets(g){ return g.assets && (g.assets.fmr_clean||g.assets.fmr_dirty||g.assets.hl_clean||g.assets.hl_dirty); }
+
+  /* ---- tabs ---- */
+  document.querySelectorAll('.tab').forEach(function(t){ t.addEventListener('click',function(){
+    document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active');}); t.classList.add('active');
+    document.querySelectorAll('.pane').forEach(function(p){p.classList.remove('active');});
+    document.getElementById('pane-'+t.dataset.pane).classList.add('active');
+  });});
+
+  /* ---- export / import / reset ---- */
+  document.getElementById('exportBtn').addEventListener('click', function(){
+    var blob=new Blob([JSON.stringify(DATA,null,2)],{type:'application/json'});
+    var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='handoff-data.json'; a.click(); toast('Exported handoff-data.json');
+  });
+  document.getElementById('importBtn').addEventListener('click', function(){ document.getElementById('importFile').click(); });
+  document.getElementById('importFile').addEventListener('change', function(e){
+    var f=e.target.files[0]; if(!f) return; var r=new FileReader();
+    r.onload=function(){ try{ DATA=JSON.parse(r.result); byCode={}; DATA.clubs.forEach(function(c){byCode[c.code]=c;}); save(); renderClubs(); renderFx(); toast('Imported'); }catch(err){ toast('Invalid JSON','error'); } };
+    r.readAsText(f);
+  });
+  document.getElementById('resetBtn').addEventListener('click', function(){
+    if(!confirm('Discard local edits and reset to the dummy dataset?')) return;
+    localStorage.removeItem(LS); DATA=JSON.parse(JSON.stringify(window.HANDOFF_DATA)); byCode={}; DATA.clubs.forEach(function(c){byCode[c.code]=c;}); overlayActive=false;
+    document.getElementById('stateFlag').className='dummy-flag';
+    document.getElementById('stateFlag').innerHTML='⚠️ Prototype — editing a local (this-browser) copy. Use Export to save. Phase 2 moves this to RTDB.';
+    renderClubs(); renderFx(); toast('Reset to dummy');
+  });
+
+  renderClubs(); renderFx();
+})();
+</script>
+</body>
+</html>
