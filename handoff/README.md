@@ -80,11 +80,14 @@ layer. Accepted for a single-admin, modest-scale tool. Archived-season class
 downgrades and the naturally bursty download pattern (2 clubs per game) pull the real
 number toward the low end.
 
-**Business case — one bucket, many uses:** because Storage is general-purpose, the
-same bucket + auth model can double as the org's **club-asset exchange** — clubs
-uploading/sharing headshots, club-history docs, programme-pack assets (small files,
-negligible storage *and* egress cost). A reason to consolidate on Firebase rather
-than stand up a single-purpose R2 silo.
+**Business case — one bucket, many uses (now concrete):** the same bucket + auth
+model is set to host the **programme-packs** club-asset tool too, path-prefixed
+(`handoff/…` for footage, `programme-packs/<clubKey>/…` for club assets — small
+files, negligible storage *and* egress cost). That tool exists today on Google
+Drive via an Apps Script proxy and is being **rebuilt onto this Firebase stack** to
+retire the scrappy GAS/Drive layer — see [`../programme-packs/REBUILD.md`](../programme-packs/REBUILD.md).
+One bucket, one auth model, no Apps Script: a real reason to consolidate on Firebase
+rather than stand up single-purpose silos.
 
 **Open item — compression test:** the supplier suggested they *can* provide
 uncompressed. We don't want it — uncompressed would be ~1–2 TB/game (≈100 TB total,
