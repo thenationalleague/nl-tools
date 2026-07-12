@@ -20,7 +20,7 @@ A tool to deliver match footage to the 32 clubs of the NL × PL2 Cup
 | **Ingest** | Supplier uploads direct into a raw "lake" (scoped S3/R2 keys) |
 | **File → game** | Naming convention, auto-parsed; staff layer to rename/retag/reroute |
 | **Naming** | `YYYY-MM-DD_<HOME>_<AWAY>_<TYPE>_<VARIANT>.mp4` — ISO date, underscore-delimited, uppercase (e.g. `2025-10-21_TRU_BHA_HL_CLEAN.mp4`). `TYPE` = `HL`\|`FMR` **and is extensible** (`CLIPS` etc. may follow); `VARIANT` = `CLEAN`\|`DIRTY` (clean = no gfx). Codes 2 & 3 are HOME/AWAY and route the game to *both* clubs; codes match `clubs-meta` `code`. Parser is case-insensitive and tolerant — an unknown `TYPE` still ingests into a "needs retag" state rather than being dropped |
-| **Assets/game** | 4: `fmr/clean`, `fmr/dirty`, `hl/clean`, `hl/dirty` |
+| **Files/game** | A **flexible list** — usually the 4 standard (`fmr/clean`, `fmr/dirty`, `hl/clean`, `hl/dirty`) but tolerant of reality: missing fulls, extra `clips`, held/pending files. Data model is `game.files[]`, not a fixed 2×2 grid. |
 | **Security** | Simple gating + short-lived links; no watermark/DRM |
 | **Retention** | Hot recent + cold archive |
 | **Preview** | Highlights (MP4) double as the in-browser preview; fulls are download-only |
@@ -104,7 +104,7 @@ Fully client-side, zero backend, **dummy content** — proves the whole flow tod
 | File | What |
 |---|---|
 | `index.html` | **Landing** at `/tools/footage/` — the reserved home / future portal-card destination. Light placeholder that points clubs to the deeper login. |
-| `club/index.html` | **Club-facing** login. `?c=<token>` auto-signs a club in; otherwise a passcode gate. Shows that club's games grouped by stage, each with the 4 assets (highlights preview + downloads). Deliberately one level deep (like `master/`) so the root stays free for the portal card. |
+| `club/index.html` | **Club-facing** login. `?c=<token>` auto-signs a club in; otherwise a passcode gate. Shows that club's games as **folders** (grouped by stage) — open a match to see its files listed like a file browser (label, filename, size, Play for video, Download). Flexible file counts. Deliberately one level deep (like `master/`) so the root stays free for the portal card. |
 | `master/index.html` | **Master** control tool. The 32 clubs with copy-able direct links + passcodes (regenerate per club), and a fixtures tab to assign knockout teams + toggle which assets are live. Export/Import JSON, reset to dummy. |
 | `data.js` | Dummy dataset: 32 clubs (16 real NL + 16 placeholder PL2 with monogram crests), 64 group games + 7 knockout placeholders, tokens + passcodes. |
 
