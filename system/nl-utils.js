@@ -1,7 +1,7 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /tools/system/nl-utils.js
-   Version: v1.11 (12/07/2026)
+   Version: v1.12 (12/07/2026)
 
    Shared helper functions used by every tool page. Exposed on window.NL
    namespace. All functions are defensive — they handle missing arguments
@@ -14,6 +14,14 @@
      NL.escHtml('<script>');          // → '&lt;script&gt;'
 
    Changelog
+   v1.12 (12/07/2026)
+     - NL.clubPicker: an empty search box now shows the WHOLE eligible
+       roster (the dropdown scrolls) instead of capping at `limit` (12);
+       `limit` now only bounds typed searches. Search-mode also opens on
+       focus/click when empty, so a plain click reveals the full list to
+       browse rather than requiring a keystroke first. Cache-busted
+       ?v=11 → ?v=12 (nl-brand.css unchanged at ?v=21).
+
    v1.11 (12/07/2026)
      - Added NL.clubs — session-cached clubs-meta accessor (load/meta/all/
        forSeason/byName/crestUrl). Promise-memoised: one fetch per page
@@ -784,7 +792,9 @@
     }
     function filtered(q) {
       q = (q || '').toLowerCase().trim();
-      if (!q) return clubs.slice(0, opt.limit);
+      /* Empty box = browsing → show the WHOLE eligible roster (the dropdown
+         scrolls). opt.limit only caps typed searches, so it stays snappy. */
+      if (!q) return clubs.slice();
       return clubs.filter(function(c) {
         return c.name.toLowerCase().indexOf(q) !== -1 || (c.short && c.short.toLowerCase().indexOf(q) !== -1);
       }).slice(0, opt.limit);
@@ -881,7 +891,9 @@
         openDd(); loadRoster().then(function() { renderList(input.value); });
       });
       input.addEventListener('focus', function() {
-        if (input.value.trim()) { openDd(); loadRoster().then(function() { renderList(input.value); }); }
+        /* Open on focus/click even when empty, so a plain click reveals the
+           full eligible list to browse (not just after typing). */
+        openDd(); loadRoster().then(function() { renderList(input.value); });
       });
       input.addEventListener('keydown', onKey);
     } else {
