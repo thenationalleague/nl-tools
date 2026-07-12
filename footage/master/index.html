@@ -112,7 +112,7 @@
   </div>
 
   <div class="pane" id="pane-fixtures">
-    <div class="helptext">64 group games + 7 knockouts. Assign knockout teams once known, and toggle which of the four assets are live per game (green = available to clubs).</div>
+    <div class="helptext">64 group games + 7 knockouts. Assign knockout teams once known. Each game shows the files delivered for it — click a file chip to show/hide it from clubs (green = live to clubs, grey = held back). File counts vary per game — that's expected.</div>
     <div id="fxList"></div>
   </div>
 </div>
@@ -185,6 +185,13 @@
   function clubOptions(sel){
     return '<option value="">— team —</option>'+DATA.clubs.map(function(c){ return '<option value="'+esc(c.code)+'"'+(c.code===sel?' selected':'')+'>'+esc(c.short)+'</option>'; }).join('');
   }
+  /* Files per game: flexible files[] model, with a shim for legacy 4-slot assets{}. */
+  var LEGACY_LABEL = { fmr_clean:'Full match (clean)', fmr_dirty:'Full match (graphics)', hl_clean:'Highlights (clean)', hl_dirty:'Highlights (graphics)' };
+  function filesForGame(g){
+    if (Array.isArray(g.files)) return g.files;
+    if (g.assets){ var out=[]; Object.keys(g.assets).forEach(function(k){ if(!g.assets[k])return; var p=k.split('_'); out.push({id:g.id+'-'+k,type:p[0],variant:p[1]||null,label:LEGACY_LABEL[k]||k,name:'',size:'',preview:p[0]==='hl',live:true,url:g.assets[k]}); }); return out; }
+    return [];
+  }
   function renderFx(){
     var host=document.getElementById('fxList');
     var order=[],byStage={};
@@ -199,25 +206,27 @@
         } else {
           fixHTML='<span class="fx__fix">'+esc((byCode[g.home]||{}).short||g.home)+' v '+esc((byCode[g.away]||{}).short||g.away)+'</span>';
         }
-        var chips = DATA.assetTypes.map(function(at){
-          var on = g.assets && g.assets[at.key];
-          return '<button class="chip'+(on?' on':'')+'" data-toggle="'+g.id+'|'+at.key+'">'+esc(at.key.replace('_',' '))+'</button>';
-        }).join('');
+        var files = filesForGame(g);
+        var chips = files.length
+          ? files.map(function(f){
+              var lbl = esc(f.type + (f.variant?(' '+f.variant):''));
+              return '<button class="chip'+(f.live!==false?' on':'')+'" data-file="'+esc(g.id)+'|'+esc(f.id)+'" title="'+esc(f.label)+(f.size?(' · '+esc(f.size)):'')+' — click to '+(f.live!==false?'hide from clubs':'show to clubs')+'">'+lbl+'</button>';
+            }).join('')
+          : '<span style="font-size:11px;color:var(--text-muted);font-style:italic;">no files yet</span>';
         return '<div class="fx"><div class="fx__row"><span class="fx__meta">'+esc(g.round)+' · '+esc(g.date)+'</span>'+fixHTML+'</div><div class="fx__assets">'+chips+'</div></div>';
       }).join('');
     });
     host.innerHTML=html;
     host.onclick=function(e){
-      var tg=e.target.getAttribute('data-toggle');
-      if(tg){ var p=tg.split('|'), g=DATA.games.filter(function(x){return x.id===p[0];})[0]; if(!g.assets)g.assets={}; g.assets[p[1]]=g.assets[p[1]]?null:'#dummy'; save(); renderFx(); return; }
+      var tg=e.target.getAttribute('data-file');
+      if(tg){ var p=tg.split('|'), g=DATA.games.filter(function(x){return x.id===p[0];})[0]; var f=filesForGame(g).filter(function(x){return x.id===p[1];})[0]; if(f){ f.live=(f.live===false); save(); renderFx(); } return; }
     };
     host.onchange=function(e){
       var hh=e.target.getAttribute('data-home'), aa=e.target.getAttribute('data-away');
-      if(hh){ var g=DATA.games.filter(function(x){return x.id===hh;})[0]; g.home=e.target.value||null; if(g.home&&g.away&&!hasAssets(g)) g.assets={fmr_clean:null,fmr_dirty:null,hl_clean:null,hl_dirty:null}; save(); toast('Knockout updated'); }
-      if(aa){ var g2=DATA.games.filter(function(x){return x.id===aa;})[0]; g2.away=e.target.value||null; save(); toast('Knockout updated'); }
+      if(hh){ var g=DATA.games.filter(function(x){return x.id===hh;})[0]; g.home=e.target.value||null; if(!Array.isArray(g.files)) g.files=[]; save(); toast('Knockout updated'); }
+      if(aa){ var g2=DATA.games.filter(function(x){return x.id===aa;})[0]; g2.away=e.target.value||null; if(!Array.isArray(g2.files)) g2.files=[]; save(); toast('Knockout updated'); }
     };
   }
-  function hasAssets(g){ return g.assets && (g.assets.fmr_clean||g.assets.fmr_dirty||g.assets.hl_clean||g.assets.hl_dirty); }
 
   /* ---- tabs ---- */
   document.querySelectorAll('.tab').forEach(function(t){ t.addEventListener('click',function(){
