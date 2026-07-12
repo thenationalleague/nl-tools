@@ -103,7 +103,8 @@ Fully client-side, zero backend, **dummy content** — proves the whole flow tod
 
 | File | What |
 |---|---|
-| `index.html` | **Club-facing** standalone page. `?c=<token>` auto-signs a club in; otherwise a passcode gate. Shows that club's games grouped by stage, each with the 4 assets (highlights preview + downloads). |
+| `index.html` | **Landing** at `/tools/footage/` — the reserved home / future portal-card destination. Light placeholder that points clubs to the deeper login. |
+| `club/index.html` | **Club-facing** login. `?c=<token>` auto-signs a club in; otherwise a passcode gate. Shows that club's games grouped by stage, each with the 4 assets (highlights preview + downloads). Deliberately one level deep (like `master/`) so the root stays free for the portal card. |
 | `master/index.html` | **Master** control tool. The 32 clubs with copy-able direct links + passcodes (regenerate per club), and a fixtures tab to assign knockout teams + toggle which assets are live. Export/Import JSON, reset to dummy. |
 | `data.js` | Dummy dataset: 32 clubs (16 real NL + 16 placeholder PL2 with monogram crests), 64 group games + 7 knockout placeholders, tokens + passcodes. |
 
@@ -114,7 +115,7 @@ becomes RTDB and the two pages share live server state.
 
 **Try it:**
 - Master: `/tools/footage/master/` → copy any club's link or passcode.
-- Club: open a copied `/tools/footage/?c=<token>` link, or hit `/tools/footage/`
+- Club: open a copied `/tools/footage/club/?c=<token>` link, or hit `/tools/footage/club/`
   and enter a club passcode.
 
 **Explicitly dummy:** every Download shows a "Phase 2" toast; Preview opens a
