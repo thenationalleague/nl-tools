@@ -5,8 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Travel Planner — NL Tools</title>
 <!--
-  NL Travel Planner v39.2
+  NL Travel Planner v39.3
   Changelog:
+  v39.3| 12/07/2026 | Club fields migrated to the shared NL.clubPicker
+       |            | (nl-utils). Removed the local club-picker markup, the
+       |            | setupAC/fAC autocomplete, and the picker-DOM halves of
+       |            | selFC/selManHome/selManAway — the component owns the input,
+       |            | crest and dropdown now. season:'all' (manual mode routes to
+       |            | any club) + freetext:false (a typed non-roster name has no
+       |            | stadium/postcode/station to geocode). KEPT the local
+       |            | loadClubs/clubs array/CMU/cU/FC/CB and all journey math:
+       |            | each pick is re-resolved to the flattened local club by name
+       |            | so addr()/stationAddr()/optaID resolution are unchanged.
+       |            | Restore paths (URL + last-club) now call picker.setValue to
+       |            | repaint the field. Minor: dropdown subtitle is now the
+       |            | club's division (was stadium) — the component default.
   v39.2| 11/07/2026 | Fixture loader now pages through the whole NLS feed
        |            | (was page.number=1 only → first 100 matches of the
        |            | competition, so a club surfaced in just ~8 fixtures) and
@@ -54,6 +67,7 @@
   window.NL_TOOL={title:'Travel Planner',toolKey:'staff-travel-planner'};
   var NL_TOOL_KEY='staff-travel-planner';
   window.NL_CHANGELOG=[
+    {date:'12 Jul 2026',version:'v3.4',items:['Club selectors now use the shared National League club picker — same search, crest and clear button, with consistent behaviour across every tool.','Minor: the club dropdown now shows each club\'s division underneath the name (was the stadium).']},
     {date:'11 Jul 2026',version:'v3.3',items:['Picking a club now lists its full season of fixtures (46), not just a partial tail — the fixture feed was only reading the first page (100 matches) of the competition.']},
     {date:'10 Jul 2026',version:'v3.2',items:['Rolled the NLS fixture feed over to the 2026-27 season (seasonID 2025 → 2026) so upcoming fixtures load for the new campaign.']},
     {date:'3 May 2026',version:'v3.1',items:['Tidied a few stray colours so the tool now pulls everything from the central NL palette — future tweaks flow through automatically.']},
@@ -257,14 +271,7 @@
     <div class="tp__panel">
       <div class="tp__panel-title">Select Your Club</div>
       <div class="tp__field">
-        <div class="club-picker" id="fixClubWrap">
-          <div class="club-picker__wrap">
-            <img class="club-picker__crest" id="fixClubCrest" src="" alt="" onerror="this.onerror=null;this.style.display='none';">
-            <input class="club-picker__input" type="text" id="fixClubInput" placeholder="Start typing a club name…" autocomplete="off">
-            <button class="club-picker__clear" onclick="selFC(null);document.getElementById('fixClubInput').value=''" title="Clear">✕</button>
-          </div>
-          <div class="club-picker__dropdown" id="fixClubAC"></div>
-        </div>
+        <div id="fixClubWrap"></div>
       </div>
     </div>
     <div id="fixFixtureArea"></div>
@@ -320,10 +327,10 @@
     <div class="tp__panel">
       <div class="tp__panel-title">Custom Fixture</div>
       <div class="tp__field"><label class="tp__label">Home club</label>
-        <div class="club-picker" id="manHomeW"><div class="club-picker__wrap"><img class="club-picker__crest" id="manHomeCr" src="" alt="" onerror="this.onerror=null;this.style.display='none';"><input class="club-picker__input" type="text" id="manHomeI" placeholder="Home club…" autocomplete="off"><button class="club-picker__clear" onclick="selManHome(null);document.getElementById('manHomeI').value=''" title="Clear">✕</button></div><div class="club-picker__dropdown" id="manHomeAC"></div></div>
+        <div id="manHomeW"></div>
       </div>
       <div class="tp__field"><label class="tp__label">Away club</label>
-        <div class="club-picker" id="manAwayW"><div class="club-picker__wrap"><img class="club-picker__crest" id="manAwayCr" src="" alt="" onerror="this.onerror=null;this.style.display='none';"><input class="club-picker__input" type="text" id="manAwayI" placeholder="Away club…" autocomplete="off"><button class="club-picker__clear" onclick="selManAway(null);document.getElementById('manAwayI').value=''" title="Clear">✕</button></div><div class="club-picker__dropdown" id="manAwayAC"></div></div>
+        <div id="manAwayW"></div>
       </div>
       <div class="tp__field"><label class="tp__label">Kick-off</label>
         <input class="tp__input" type="datetime-local" id="manKO">
@@ -391,6 +398,7 @@ var NLS='https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk
 var SID=2026,CIDS=[89,373,372];
 
 var clubs=[],fixClub=null,fixMatch=null,fixDir='to',fixPreset='station',fixTM='transit';
+var fixClubPicker=null,manHomePicker=null,manAwayPicker=null; /* NL.clubPicker controllers */
 var gMap=null,gPoly=null,allR=[],aIdx=0,mapOK=false;
 var crsLookup={}; // station name → CRS code
 var lastSkipWalk=null; // 'first','last', or null
@@ -455,12 +463,10 @@ function stationLabel(c){
   return c.station.join(' / ');
 }
 
-// ── AC ──
-function setupAC(iid,lid,wid,cb){var inp=document.getElementById(iid),l=document.getElementById(lid);inp.addEventListener('input',function(){fAC(this.value,lid,cb);cb(null)});inp.addEventListener('focus',function(){if(!this.value.trim())fAC('',lid,cb)});document.addEventListener('click',function(e){if(!e.target.closest('#'+wid))l.classList.remove('open')})}
-function fAC(q,lid,cb){var l=document.getElementById(lid);q=(q||'').toLowerCase().trim();var f=q?clubs.filter(function(c){return c.name.toLowerCase().indexOf(q)!==-1||(c.short&&c.short.toLowerCase().indexOf(q)!==-1)||(c.code&&c.code.toLowerCase()===q)}):clubs;if(!f.length){l.innerHTML='<div class="club-picker__option" style="color:var(--text-muted);justify-content:center;cursor:default">No clubs found</div>';l.classList.add('open');return}l.innerHTML=f.slice(0,12).map(function(c){return'<div class="club-picker__option" data-c="'+c.name.replace(/"/g,'&quot;')+'"><img src="'+cU(c.name)+'" alt="" onerror="this.onerror=null;this.src=\''+FC+'\'"><span class="club-picker__option-name">'+c.name+'</span><span class="club-picker__option-div">'+c.stadium+'</span></div>'}).join('');l.classList.add('open');l.querySelectorAll('[data-c]').forEach(function(el){el.addEventListener('mousedown',function(){cb(clubs.find(function(c){return c.name===el.getAttribute('data-c')}));l.classList.remove('open')})})}
+// ── AC ── (local autocomplete replaced by shared NL.clubPicker — see nlAuthReady)
 
 // ── Fix club → fixtures ──
-function selFC(c){fixClub=c;fixMatch=null;document.getElementById('fixConfig').style.display='none';var i=document.getElementById('fixClubInput'),cr=document.getElementById('fixClubCrest'),w=document.getElementById('fixClubWrap');if(c){i.value=c.name;cr.src=cU(c.name);w.classList.add('has-crest');updatePresetLabels();loadFix(c);saveLastClub(c.code)}else{w.classList.remove('has-crest');document.getElementById('fixFixtureArea').innerHTML=''}syncURL()}
+function selFC(c){fixClub=c;fixMatch=null;document.getElementById('fixConfig').style.display='none';if(c){updatePresetLabels();loadFix(c);saveLastClub(c.code)}else{document.getElementById('fixFixtureArea').innerHTML=''}syncURL()}
 function loadFix(club){var a=document.getElementById('fixFixtureArea');a.innerHTML='<div class="tp__loading"><div class="tp__spinner"></div>Loading fixtures…</div>';if(!club.optaID){a.innerHTML='<div class="tp__error">No Opta ID.</div>';return}function pg(cid,n,acc){return fetch(NLS+'/matches/?seasonID='+SID+'&competitionID='+cid+'&sort=kickOffDateUTC&page.size=100&page.number='+n).then(function(r){return r.json()}).then(function(r){var d=(r&&r.data)||[];acc=acc.concat(d);return(d.length>=100&&n<12)?pg(cid,n+1,acc):acc}).catch(function(){return acc})}Promise.all(CIDS.map(function(cid){return pg(cid,1,[])})).then(function(res){var all=[];res.forEach(function(r){all=all.concat(r)});var tid=club.optaID;var up=all.filter(function(m){var x=m.attributes,p=(x.matchPeriod||'').toLowerCase();return(p==='prematch'||!p||p==='fixture')&&((x.homeTeam&&x.homeTeam.teamID===tid)||(x.awayTeam&&x.awayTeam.teamID===tid))}).sort(function(a,b){return new Date(nd(a.attributes.kickOffDateUTC))-new Date(nd(b.attributes.kickOffDateUTC))});if(!up.length){a.innerHTML='<div class="tp__error">No upcoming fixtures.</div>';return}var h='<div class="tp__panel"><div class="tp__panel-title">Upcoming Fixtures</div><div class="tp__fix-list">';up.forEach(function(m,i){var x=m.attributes,isH=x.homeTeam&&x.homeTeam.teamID===tid,opp=isH?x.awayTeam:x.homeTeam,oc=clubs.find(function(c){return c.optaID===(opp?opp.teamID:'')}),ko=new Date(nd(x.kickOffDateUTC));h+='<div class="tp__fix-item" onclick="selFix('+i+')"><img src="'+cU(opp?opp.name:(oc?oc.name:''))+'" alt="" onerror="this.onerror=null;this.src=\''+FC+'\'"><div class="info"><div class="teams">'+(isH?club.name+' v '+(opp?opp.name:'TBC'):(opp?opp.name:'TBC')+' v '+club.name)+'</div><div class="meta">'+fd(ko)+' '+ft(ko)+(oc?' · '+oc.stadium:'')+'</div></div><span class="badge badge--'+(isH?'home':'away')+'">'+(isH?'H':'A')+'</span></div>'});h+='</div></div>';a.innerHTML=h;a._m=up;if(_pendingMatchID){var pi=a._m.findIndex(function(m){return m.id===_pendingMatchID});if(pi!==-1)selFix(pi);_pendingMatchID=null}}).catch(function(){a.innerHTML='<div class="tp__error">Failed to load fixtures.</div>'})}
 function selFix(i){var a=document.getElementById('fixFixtureArea');if(!a._m||!a._m[i])return;fixMatch=a._m[i];a.querySelectorAll('.tp__fix-item').forEach(function(el,j){el.classList.toggle('selected',j===i)});document.getElementById('fixConfig').style.display='block';updatePresetLabels();upPostNote();syncURL();document.getElementById('fixConfig').scrollIntoView({behavior:'smooth'})}
 
@@ -533,16 +539,12 @@ function setKOPreset(dayOfWeek,hh,mm){
 
 function selManHome(c){
   manHomeClub=c;
-  var i=document.getElementById('manHomeI'),cr=document.getElementById('manHomeCr'),w=document.getElementById('manHomeW');
-  if(c){i.value=c.name;cr.src=cU(c.name);w.classList.add('has-crest');updateManPresetLabels()}
-  else{w.classList.remove('has-crest')}
+  if(c){updateManPresetLabels()}
   syncURL();
 }
 function selManAway(c){
   manAwayClub=c;
-  var i=document.getElementById('manAwayI'),cr=document.getElementById('manAwayCr'),w=document.getElementById('manAwayW');
-  if(c){i.value=c.name;cr.src=cU(c.name);w.classList.add('has-crest');updateManPresetLabels()}
-  else{w.classList.remove('has-crest')}
+  if(c){updateManPresetLabels()}
   syncURL();
 }
 function setManDir(d){
@@ -1557,6 +1559,7 @@ function readURL(){
       if(c){
         _pendingMatchID=matchID||null;
         selFC(c);
+        if(fixClubPicker)fixClubPicker.setValue(c.name);
       }
     }
   }else{
@@ -1585,8 +1588,8 @@ function readURL(){
     if(p.has('post')){document.getElementById('manExtraAfter').value=p.get('post');upManPostLbl()}
 
     var homeCode=p.get('home'),awayCode=p.get('away');
-    if(homeCode){var hc=clubs.find(function(cl){return cl.code===homeCode});if(hc)selManHome(hc)}
-    if(awayCode){var ac=clubs.find(function(cl){return cl.code===awayCode});if(ac)selManAway(ac)}
+    if(homeCode){var hc=clubs.find(function(cl){return cl.code===homeCode});if(hc){selManHome(hc);if(manHomePicker)manHomePicker.setValue(hc.name)}}
+    if(awayCode){var ac=clubs.find(function(cl){return cl.code===awayCode});if(ac){selManAway(ac);if(manAwayPicker)manAwayPicker.setValue(ac.name)}}
   }
   _urlSuppressed=false;
 }
@@ -1608,9 +1611,6 @@ window.nlAuthReady=function(){
   var dd=String(now.getDate()).padStart(2,'0');
   document.getElementById('manKO').value=yyyy+'-'+mo+'-'+dd+'T'+hh+':'+mm;
   setTimeout(function(){
-    setupAC('fixClubInput','fixClubAC','fixClubWrap',selFC);
-    setupAC('manHomeI','manHomeAC','manHomeW',selManHome);
-    setupAC('manAwayI','manAwayAC','manAwayW',selManAway);
     // Hook sliders and inputs for URL sync
     ['arrBefore','extraAfter','manArrBefore','manExtraAfter'].forEach(function(id){
       var el=document.getElementById(id);
@@ -1620,10 +1620,17 @@ window.nlAuthReady=function(){
       var el=document.getElementById(id);
       if(el)el.addEventListener('change',syncURL);
     });
-    // Wait for clubs then restore URL or localStorage
+    // Wait for the local `clubs` array (needed to resolve full club objects with
+    // postcode/station/optaID from a picked name), then mount the shared pickers
+    // and restore URL / localStorage.
     var waitForClubs=setInterval(function(){
       if(clubs.length>0){
         clearInterval(waitForClubs);
+        fixClubPicker=NL.clubPicker('#fixClubWrap',{season:'all',freetext:false,placeholder:'Start typing a club name…',onSelect:function(sel){selFC(clubs.find(function(c){return c.name===sel.name})||null)}});
+        manHomePicker=NL.clubPicker('#manHomeW',{season:'all',freetext:false,placeholder:'Home club…',onSelect:function(sel){selManHome(clubs.find(function(c){return c.name===sel.name})||null)}});
+        manAwayPicker=NL.clubPicker('#manAwayW',{season:'all',freetext:false,placeholder:'Away club…',onSelect:function(sel){selManAway(clubs.find(function(c){return c.name===sel.name})||null)}});
+        // The component's clear (×) doesn't fire onSelect, so also reset downstream state on clear.
+        [['#fixClubWrap',function(){selFC(null)}],['#manHomeW',function(){selManHome(null)}],['#manAwayW',function(){selManAway(null)}]].forEach(function(pr){var b=document.querySelector(pr[0]+' .club-picker__clear');if(b)b.addEventListener('click',pr[1])});
         if(window.location.search){readURL()}
         else{restoreLastClub()}
       }
@@ -1640,7 +1647,7 @@ function restoreLastClub(){
     var code=localStorage.getItem('nl_tp_club');
     if(!code)return;
     var c=clubs.find(function(cl){return cl.code===code});
-    if(c)selFC(c);
+    if(c){selFC(c);if(fixClubPicker)fixClubPicker.setValue(c.name)}
   }catch(e){}
 }
 </script>

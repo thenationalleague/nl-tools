@@ -10,6 +10,36 @@
 
      TECHNICAL CHANGELOG
      -------------------
+     v2.10.10 (2026-07-12) Focus-on-a-club selector migrated onto the shared
+                         NL.clubPicker (nl-utils, select mode). The hand-built
+                         .club-picker--select markup (#focusClubTrigger /
+                         #focusClubValue / #focusClubCrest / #focusClubDropdown
+                         and the inline chevron SVG) is replaced by a bare
+                         <div id="focusClubPicker" class="focus-control__picker">
+                         mount; the component builds trigger/crest/value/dropdown
+                         and adds .club-picker .club-picker--select itself. New
+                         module var focusPicker holds the controller. Local
+                         renderFocusPickerDropdown / toggleFocusPicker /
+                         commitFocusPicker / clearFocusPicker are deleted —
+                         open/close, outside-click and Escape are the
+                         component's job now. wireFocusControl creates the picker
+                         with mode:'select', season:'current', clearable:false,
+                         placeholder '— league-wide view —', and
+                         onSelect → setFocusedClub(sel.name); the external
+                         #clearFocusBtn ("Return to league view") now calls
+                         focusPicker.clear() + setFocusedClub(null). switchSeason
+                         clears via focusPicker.clear() and retargets the roster
+                         with focusPicker.setSeason(S.season) (replacing the
+                         renderFocusPickerDropdown re-render). No behaviour change:
+                         the selectable list is still the full clubs-meta roster
+                         for the viewed season (NL.clubs.forSeason wraps the same
+                         NL.season.clubsFor), and the empty/cleared state is the
+                         league-wide view. setFocusedClub, S.effectiveClub and its
+                         readers, #clubViewSection and #clearFocusBtn markup are
+                         untouched. Cosmetic: chevron is now the component's ▾
+                         glyph rather than the inline SVG. No ?v= bump (nl-utils
+                         already ships NL.clubPicker).
+
      v2.10.9 (2026-06-15) Full superadmin edit on archived seasons + tab-bar
                          tidy. Cup-fixture create/edit/delete were locked to the
                          live season (assertWritable) and, like the old tag bug,
@@ -1090,6 +1120,13 @@
   var NL_TOOL_KEY = 'ops-attendance';
 
   window.NL_CHANGELOG = [
+    {
+      date: '12 Jul 2026',
+      version: 'v2.10.10',
+      items: [
+        'Under-the-hood tidy: the “Focus on a club” selector now uses the platform’s shared club picker. It looks and works exactly the same — click to open, scroll the season’s clubs with crests, pick one to focus, or “Return to league view” to clear — just built on the common component so it stays consistent with the rest of the tools.'
+      ]
+    },
     {
       date: '15 Jun 2026',
       version: 'v2.10.9',
@@ -2479,16 +2516,11 @@
            the Add cup fixture tab. -->
       <div class="focus-control" id="focusControl" style="display:none;">
         <span class="focus-control-label">Focus on a club:</span>
-        <div class="club-picker club-picker--select focus-control__picker" id="focusClubPicker">
-          <button class="club-picker__wrap" type="button" id="focusClubTrigger">
-            <img class="club-picker__crest" id="focusClubCrest" src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png" alt="" onerror="this.onerror=null;this.style.visibility='hidden';">
-            <span class="club-picker__value club-picker__value--placeholder" id="focusClubValue">&mdash; league-wide view &mdash;</span>
-            <svg class="club-picker__chevron" viewBox="0 0 12 12" aria-hidden="true">
-              <path d="M2 4l4 4 4-4" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-          </button>
-          <div class="club-picker__dropdown" id="focusClubDropdown"></div>
-        </div>
+        <!-- Mount for the shared NL.clubPicker (select mode). The component
+             builds the trigger/crest/value/dropdown and adds .club-picker
+             .club-picker--select itself; we keep the id + the
+             .focus-control__picker sizing class. -->
+        <div class="focus-control__picker" id="focusClubPicker"></div>
         <button class="btn btn--navy btn--sm" id="clearFocusBtn" style="display:none;margin-left:auto;">&larr; Return to league view</button>
       </div>
 
@@ -3426,8 +3458,7 @@
        Reset the picker label + clear button to the league-wide default. */
     if (S.focusedClub) {
       S.focusedClub = null;
-      var fv = document.getElementById('focusClubValue');
-      if (fv) { fv.textContent = '— league-wide view —'; fv.classList.add('club-picker__value--placeholder'); }
+      if (focusPicker) focusPicker.clear();
       var cfb = document.getElementById('clearFocusBtn');
       if (cfb) cfb.style.display = 'none';
     }
@@ -3441,7 +3472,7 @@
         computeAggregates();
         document.getElementById('insightsLoading').style.display = 'none';
         setupChromeForRole();
-        if (typeof renderFocusPickerDropdown === 'function') renderFocusPickerDropdown();
+        if (focusPicker) focusPicker.setSeason(S.season);
         renderForCurrentView();
       })
       .catch(function(err) {
@@ -3851,95 +3882,8 @@
     updateSubtitle();
   }
 
-  /* Focus picker — uses brand .club-picker--select. Click-only dropdown
-     listing all NL clubs (alphabetical) with crest + division tag. No
-     typing, no freetext — staff focus on an existing NL club or league-
-     wide. Toggling the dropdown is driven by .is-open on the wrapper
-     (chevron rotates via CSS) and .open on the dropdown itself. */
-  function renderFocusPickerDropdown() {
-    var dd = document.getElementById('focusClubDropdown');
-    if (!dd) return;
-    dd.innerHTML = '';
-
-    var clubs = (S.clubs || []).slice().sort(function(a, b) { return a.name.localeCompare(b.name); });
-    if (clubs.length === 0) {
-      var empty = document.createElement('div');
-      empty.className = 'club-picker__option club-picker__option--empty';
-      empty.textContent = 'No clubs loaded yet';
-      dd.appendChild(empty);
-      return;
-    }
-
-    clubs.forEach(function(c) {
-      var opt = document.createElement('div');
-      opt.className = 'club-picker__option';
-      opt.setAttribute('data-name', c.name);
-
-      var img = document.createElement('img');
-      img.src = CREST_BASE + encodeURIComponent(c.name) + '.png';
-      img.onerror = function() { this.onerror = null; this.src = FALLBACK_CREST; };
-      opt.appendChild(img);
-
-      var name = document.createElement('span');
-      name.className = 'club-picker__option-name';
-      name.textContent = c.name;
-      opt.appendChild(name);
-
-      var tag = document.createElement('span');
-      tag.className = 'club-picker__option-div';
-      tag.textContent = c.division || '';
-      opt.appendChild(tag);
-
-      opt.addEventListener('mousedown', function(e) {
-        e.preventDefault();
-        commitFocusPicker(c.name);
-      });
-      dd.appendChild(opt);
-    });
-  }
-
-  function toggleFocusPicker(forceOpen) {
-    var picker = document.getElementById('focusClubPicker');
-    var dd     = document.getElementById('focusClubDropdown');
-    if (!picker || !dd) return;
-    var willOpen = (forceOpen === true) || (forceOpen !== false && !dd.classList.contains('open'));
-    if (willOpen) {
-      renderFocusPickerDropdown();
-      dd.classList.add('open');
-      picker.classList.add('is-open');
-    } else {
-      dd.classList.remove('open');
-      picker.classList.remove('is-open');
-    }
-  }
-
-  function commitFocusPicker(name) {
-    var value = document.getElementById('focusClubValue');
-    var crest = document.getElementById('focusClubCrest');
-    value.textContent = name;
-    value.classList.remove('club-picker__value--placeholder');
-    crest.style.visibility = 'visible';
-    crest.onerror = function() { this.onerror = null; this.src = FALLBACK_CREST; };
-    crest.src = CREST_BASE + encodeURIComponent(name) + '.png';
-    toggleFocusPicker(false);
-    setFocusedClub(name);
-  }
-
-  function clearFocusPicker() {
-    var value = document.getElementById('focusClubValue');
-    var crest = document.getElementById('focusClubCrest');
-    if (value) {
-      value.textContent = '— league-wide view —';
-      value.classList.add('club-picker__value--placeholder');
-    }
-    if (crest) {
-      crest.onerror = function() { this.onerror = null; this.style.visibility = 'hidden'; };
-      crest.src = FALLBACK_CREST;
-      crest.style.visibility = 'visible';
-    }
-    toggleFocusPicker(false);
-    setFocusedClub(null);
-  }
+  /* Focus picker dropdown, toggle, commit and clear are now handled by the
+     shared NL.clubPicker (created in wireFocusControl). */
 
   /* Single source of truth for staff focus changes. Updates state, the
      clear button, and triggers a re-render. */
@@ -3956,24 +3900,27 @@
      calls it during the staff-like role setup. */
   function populateClubFocusDropdown() {}
 
+  var focusPicker = null;   /* NL.clubPicker controller (select mode) */
+
+  /* Focus picker — shared NL.clubPicker in select mode. Empty/cleared state
+     is the league-wide view (S.focusedClub = null); picking a club focuses it.
+     The external "Return to league view" button clears the picker. Component
+     handles open/close, outside-click and Escape internally. */
   function wireFocusControl() {
-    var trigger = document.getElementById('focusClubTrigger');
-    var dd      = document.getElementById('focusClubDropdown');
-    if (!trigger || !dd) return;
-
-    trigger.addEventListener('click', function(e) {
-      e.stopPropagation();
-      toggleFocusPicker();
+    var mount = document.getElementById('focusClubPicker');
+    if (!mount) return;
+    focusPicker = NL.clubPicker('#focusClubPicker', {
+      mode:        'select',
+      season:      'current',
+      clearable:   false,
+      placeholder: '— league-wide view —',
+      onSelect:    function(sel) { setFocusedClub(sel.name); }
     });
-    document.addEventListener('click', function(e) {
-      var picker = document.getElementById('focusClubPicker');
-      if (picker && !picker.contains(e.target)) toggleFocusPicker(false);
+    var clearBtn = document.getElementById('clearFocusBtn');
+    if (clearBtn) clearBtn.addEventListener('click', function() {
+      focusPicker.clear();
+      setFocusedClub(null);
     });
-    document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape') toggleFocusPicker(false);
-    });
-
-    document.getElementById('clearFocusBtn').addEventListener('click', clearFocusPicker);
   }
 
   /* pageSubtitle H1+P removed in v1.4 \u2014 this is now a no-op kept to avoid

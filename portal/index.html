@@ -1,11 +1,25 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.89 (12/07/2026)
+  Version: v5.90 (12/07/2026)
   Date: 09/04/2026
   File: /tools/portal/index.html
 
   Changelog:
+  v5.90 (12/07/2026) — Invite club picker migrated to shared NL.clubPicker:
+           * The invite form's club field now uses the shared, accessible
+             NL.clubPicker (nl-utils) via a #invClubPicker mount, replacing the
+             bespoke .inv-club-picker input/dropdown/crest markup and the local
+             renderInvClubList/selectInvClub/initInvClubPicker functions.
+             season:'current' (offer only the live roster) and freetext:false
+             (an invite must map to a real NL club). Value is read via
+             invClubPicker.getValue(); the post-send reset uses .clear().
+           * Kept CREST_BASE/FALLBACK_CREST, loadInvClubs/INV_CLUBS_DATA/
+             INV_META, isOffRoster and the .inv-club-picker CSS — still used by
+             the separate inline role-editor picker.
+           * No /tools/system/* ?v= bumps — portal-local change (consumes the
+             already-shipped NL.clubPicker in nl-utils.js).
+
   v5.89 (12/07/2026) — Accessibility pass (portal audit):
            * Contrast: invite club-picker placeholder moved off
              color-mix(--text-muted 50% white) (2.07:1, fails AA) to solid
@@ -474,6 +488,13 @@
 
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
+    {
+      date: '12 July 2026',
+      version: 'v5.90',
+      items: [
+        'The club selector on the invite form now uses the shared, accessible club picker — same search, keyboard support and crests as elsewhere in the tools.'
+      ]
+    },
     {
       date: '12 July 2026',
       version: 'v5.89',
@@ -2232,18 +2253,7 @@
             <!-- Club picker (shown when Club org selected) -->
             <div class="field" id="inviteClubField" style="display:none">
               <label>Club</label>
-              <div class="inv-club-picker">
-                <div class="inv-club-picker__wrap">
-                  <img class="inv-club-picker__crest" id="invClubCrest"
-                    src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png"
-                    alt=""
-                    onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png'">
-                  <input class="inv-club-picker__input" id="invClubInput" type="text"
-                    placeholder="Search club name..." autocomplete="off">
-                </div>
-                <div class="inv-club-picker__dropdown" id="invClubDropdown"></div>
-              </div>
-              <input type="hidden" id="inviteClub">
+              <div id="invClubPicker"></div>
             </div>
             <div class="field" id="inviteJobTitleField">
               <label>Job title</label>
@@ -5322,8 +5332,9 @@ function setAllInDept(uid, u, deptTools, level, bodyEl, deptLabel) {
 }
 
 /* ---- Invite club picker -------------------------------------------------- */
+var invClubPicker = null; /* NL.clubPicker controller (created in initInviteForm) */
 var INV_CLUBS_DATA = [];
-var INV_META = null; /* full parsed clubs-meta — needed for NL.season roster */
+var INV_META = null; /* full parsed clubs-meta — still needed for the inline role picker + off-roster flag */
 
 function loadInvClubs() {
   if (INV_CLUBS_DATA.length) return Promise.resolve();
@@ -5334,76 +5345,16 @@ function loadInvClubs() {
     .catch(function() { INV_META = null; INV_CLUBS_DATA = []; });
 }
 
-function renderInvClubList(filter) {
-  var dd = document.getElementById('invClubDropdown');
-  var q  = (filter || '').toLowerCase().trim();
-  var matches = q
-    ? INV_CLUBS_DATA.filter(function(c) {
-        return c.name.toLowerCase().indexOf(q) !== -1 ||
-               (c.short && c.short.toLowerCase().indexOf(q) !== -1);
-      }).slice(0, 12)
-    : INV_CLUBS_DATA.slice(0, 12);
-
-  dd.innerHTML = '';
-  if (matches.length === 0) {
-    var empty = document.createElement('div');
-    empty.style.cssText = 'padding:8px 12px;font-size:13px;color:var(--text-muted);';
-    empty.textContent = 'No clubs found';
-    dd.appendChild(empty);
-    dd.classList.add('open');
-    return;
-  }
-  matches.forEach(function(c) {
-    var item = document.createElement('div');
-    item.className = 'inv-club-picker__option';
-    var img = document.createElement('img');
-    img.alt = '';
-    img.src = CREST_BASE + encodeURIComponent(c.name) + '.png';
-    img.onerror = function() { this.onerror = null; this.src = FALLBACK_CREST; };
-    var nameSpan = document.createElement('span');
-    nameSpan.className = 'inv-club-picker__option-name';
-    nameSpan.textContent = c.name;
-    var divSpan = document.createElement('span');
-    divSpan.className = 'inv-club-picker__option-div';
-    divSpan.textContent = c.division || '';
-    item.appendChild(img);
-    item.appendChild(nameSpan);
-    item.appendChild(divSpan);
-    item.addEventListener('click', function() { selectInvClub(c.name); });
-    dd.appendChild(item);
-  });
-  dd.classList.add('open');
-}
-
-function selectInvClub(name) {
-  document.getElementById('invClubInput').value = name;
-  document.getElementById('inviteClub').value   = name;
-  var img = document.getElementById('invClubCrest');
-  img.onerror = function() { this.onerror = null; this.src = FALLBACK_CREST; };
-  img.src = CREST_BASE + encodeURIComponent(name) + '.png';
-  document.getElementById('invClubDropdown').classList.remove('open');
-}
-
-function initInvClubPicker() {
-  var input = document.getElementById('invClubInput');
-  var dd    = document.getElementById('invClubDropdown');
-  if (!input) return;
-  input.addEventListener('input', function() {
-    document.getElementById('inviteClub').value = '';
-    var val = input.value.trim();
-    if (!val) { dd.classList.remove('open'); return; }
-    loadInvClubs().then(function() { renderInvClubList(val); });
-  });
-  input.addEventListener('focus', function() {
-    if (input.value.trim() && INV_CLUBS_DATA.length) renderInvClubList(input.value);
-  });
-  document.addEventListener('click', function(e) {
-    var picker = document.querySelector('.inv-club-picker');
-    if (picker && !picker.contains(e.target)) dd.classList.remove('open');
-  });
-}
 function initInviteForm() {
-  initInvClubPicker();
+  /* Shared club picker (nl-utils). season:'current' offers only the live
+     roster; freetext:false because an invite must map to a real NL club. */
+  if (!invClubPicker) {
+    invClubPicker = NL.clubPicker('#invClubPicker', {
+      season: 'current',
+      freetext: false,
+      placeholder: 'Search club name…'
+    });
+  }
 
   document.querySelectorAll('.invite-role-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
@@ -5426,7 +5377,7 @@ function initInviteForm() {
     var email    = document.getElementById('inviteEmail').value.trim();
     var name     = document.getElementById('inviteName').value.trim();
     var role     = normRole(document.getElementById('inviteRole').value);
-    var club     = document.getElementById('inviteClub').value.trim();
+    var club     = (invClubPicker.getValue() || '').trim();
     var orgNameEl = document.getElementById('inviteOrgName');
     var orgName  = orgNameEl ? orgNameEl.value.trim() : '';
     var jobTitle = document.getElementById('inviteClubRole').value.trim();
@@ -5504,10 +5455,8 @@ function initInviteForm() {
         showToast('Invite sent to ' + email, 'success');
         document.getElementById('inviteEmail').value    = '';
         document.getElementById('inviteName').value     = '';
-        document.getElementById('inviteClub').value     = '';
         document.getElementById('inviteClubRole').value = ''; /* clears job title */
-        if (document.getElementById('invClubInput'))
-          document.getElementById('invClubInput').value = '';
+        if (invClubPicker) invClubPicker.clear();
         loadUsers();
       }
     })
