@@ -8,10 +8,12 @@
   (YYYY-MM-DD_HOME_AWAY_TYPE_VARIANT) to a fixture, and an unmatched file must be
   mapped (game + type) before it can be submitted — mapping is forced.
 
-  DUMMY: "upload" is simulated and writes the file into the localStorage overlay
-  (nlFootageData) as a held (live:false) file, so master/club in the same browser
-  reflect it. Production wires real Firebase Storage upload (passcode → anon-auth +
-  upload claim) + an RTDB write. Firebase is initialised for that future wiring.
+  LIVE: on submit the file bytes go to Firebase Storage
+  (footage/national-league-cup/<name>) under an anonymous-auth session, then a
+  record is pushed to RTDB (app-data/media-footage/uploads) — cross-device, so
+  clubs on any device see it immediately (footage is live on upload, no approval).
+  "My uploads" reads that same RTDB node filtered to this producer's uid, and
+  re-map / delete for 24h write straight back to it.
 -->
 <html lang="en">
 <head>
@@ -310,31 +312,31 @@
     function bump(){ done++; var pf=document.getElementById('pf'); if(pf) pf.style.transform='scaleX('+(done/total)+')'; }
     Promise.all(ready.map(function(s){
       return uploadOne(s)
-        .then(function(storagePath){ recordFile(s, stamp, storagePath); ok++; bump(); })
-        .catch(function(e){ failed.push({ s:s, e:e }); bump(); });   // upload failed — no phantom record
+        .then(function(storagePath){ return recordFile(s, stamp, storagePath); })   // store bytes → then record in RTDB
+        .then(function(){ ok++; bump(); })
+        .catch(function(e){ failed.push({ s:s, e:e }); bump(); });
     })).then(function(){ finishUpload(ok, failed); btn.disabled = false; });
   });
 
+  // Records live in RTDB (app-data/media-footage/uploads) → cross-device: any club
+  // on any device sees them. push() returns a promise the submit flow awaits.
+  var UPLOADS_REF = 'app-data/media-footage/uploads';
   function recordFile(s, stamp, storagePath){
-    var g = DATA.games.filter(function(x){return x.id===s.gameId;})[0]; if(!g) return;
-    if (!Array.isArray(g.files)) g.files=[];
-    g.files.push({
-      id: g.id+'-'+s.type.toLowerCase()+(s.variant?('_'+s.variant.toLowerCase()):'')+'-'+s.key,
-      type: s.type.toLowerCase(), variant: s.variant?s.variant.toLowerCase():null,
-      label: labelFor(s.type, s.variant), name: s.fname,
-      size: humanSize(s.file.size),
-      preview: s.type==='HL'||s.type==='CLIPS', live: true,
-      url: '#stored', storagePath: storagePath,
-      uploadedBy: 'producer', uploadedAt: stamp
+    var uid = (firebase.auth().currentUser || {}).uid || null;
+    return firebase.database().ref(UPLOADS_REF).push({
+      gameId: s.gameId,
+      type: s.type.toLowerCase(), variant: s.variant ? s.variant.toLowerCase() : null,
+      label: labelFor(s.type, s.variant), name: s.fname, size: humanSize(s.file.size),
+      preview: s.type==='HL'||s.type==='CLIPS', live: true, url: '#stored', storagePath: storagePath,
+      uploadedBy: uid, uploadedAt: stamp
     });
   }
 
   function finishUpload(ok, failed){
-    persist();
     // keep failed items staged so they can be retried; drop the succeeded ones
     var failedKeys = {}; failed.forEach(function(f){ failedKeys[f.s.key]=1; });
     staged = staged.filter(function(s){ return !isReady(s) || failedKeys[s.key]; });
-    renderStaged(); renderMine();
+    renderStaged();   // My uploads re-renders from the RTDB listener
     if (ok) document.getElementById('doneMsg').innerHTML = '<div class="done">✓ Uploaded '+ok+' file'+(ok>1?'s':'')+' — <b>live to clubs now</b>. You can re-map or delete '+(ok>1?'them':'it')+' below for 24h.</div>';
     if (failed.length){
       var code = (failed[0].e && (failed[0].e.code||failed[0].e.message)) || 'upload error';
@@ -343,70 +345,87 @@
     window.scrollTo({top:0,behavior:'smooth'});
   }
 
-  /* ---- my uploads (correctable by the uploader for 24h) ---- */
+  /* ---- my uploads (from RTDB; correctable by the uploader for 24h) ---- */
   var WINDOW_MS = 24*60*60*1000;
-  var editing = {};   // fileId -> showing the re-map dropdowns
-  function persist(){ try{ localStorage.setItem('nlFootageData', JSON.stringify(DATA)); }catch(e){} }
-  function remainingMs(f){ return f.uploadedAt ? Math.max(0, f.uploadedAt + WINDOW_MS - Date.now()) : 0; }
+  var myUid = null;
+  var uploadsCache = {};   // pushId -> record (live from RTDB)
+  var editing = {};        // pushId -> re-map dropdowns open
+  function remainingMs(u){ return u.uploadedAt ? Math.max(0, u.uploadedAt + WINDOW_MS - Date.now()) : 0; }
   function fmtDur(ms){ var h=Math.floor(ms/3600000), m=Math.floor((ms%3600000)/60000); return h>0?(h+'h '+m+'m'):(m+'m'); }
-  function locate(id){ for(var i=0;i<DATA.games.length;i++){ var g=DATA.games[i], arr=g.files||[]; for(var j=0;j<arr.length;j++){ if(arr[j].id===id) return {g:g,f:arr[j],idx:j}; } } return null; }
-  function relabel(f){ var T=(f.type||'').toUpperCase(), V=(f.variant||'').toUpperCase(); f.label=labelFor(T,V); f.preview=(T==='HL'||T==='CLIPS'); }
+  function gameById(id){ return DATA.games.filter(function(x){return x.id===id;})[0]; }
+  function updRec(id, patch){ return firebase.database().ref(UPLOADS_REF+'/'+id).update(patch)
+    .then(function(){ toast('Updated'); }).catch(function(e){ toast('Update failed: '+(e.code||e.message),'error'); }); }
 
   function renderMine(){
     var host = document.getElementById('mine');
     var mine = [];
-    DATA.games.forEach(function(g){ (g.files||[]).forEach(function(f){ if(f.uploadedBy==='producer') mine.push({g:g,f:f}); }); });
-    mine.sort(function(a,b){ return (b.f.uploadedAt||0)-(a.f.uploadedAt||0); });
+    Object.keys(uploadsCache).forEach(function(k){ var u=uploadsCache[k]; if(u && u.uploadedBy && u.uploadedBy===myUid) mine.push({key:k,u:u}); });
+    mine.sort(function(a,b){ return (b.u.uploadedAt||0)-(a.u.uploadedAt||0); });
     if(!mine.length){ host.innerHTML=''; return; }
     host.innerHTML = '<div class="sec-head">My uploads <span class="pill pill--ok">'+mine.length+'</span></div>'
-      + mine.map(function(o){ return mineHTML(o.g, o.f); }).join('');
+      + mine.map(function(o){ return mineHTML(o.key, o.u); }).join('');
   }
-  function mineHTML(g, f){
-    var h=(byCode[g.home]||{}).short||g.home, a=(byCode[g.away]||{}).short||g.away;
-    var rem = remainingMs(f), editable = rem>0;
+  function mineHTML(key, u){
+    var g = gameById(u.gameId) || {};
+    var h=(byCode[g.home]||{}).short||g.home||'?', a=(byCode[g.away]||{}).short||g.away||'?';
+    var rem = remainingMs(u), editable = rem>0;
     var status = editable
       ? '<span style="color:var(--green);font-weight:800">● Live to clubs</span> · editable for '+fmtDur(rem)
       : '<span style="color:var(--green);font-weight:800">● Live to clubs</span> · locked (ask NL to change)';
     var actions = editable
-      ? '<button class="btn btn--ghost btn--sm" data-remap="'+esc(f.id)+'">'+(editing[f.id]?'Done':'Re-map')+'</button> <button class="btn btn--ghost btn--sm" data-del="'+esc(f.id)+'">Delete</button>'
+      ? '<button class="btn btn--ghost btn--sm" data-remap="'+esc(key)+'">'+(editing[key]?'Done':'Re-map')+'</button> <button class="btn btn--ghost btn--sm" data-del="'+esc(key)+'">Delete</button>'
       : '';
     var row = '<div class="stage__row"><span class="stage__ic stage__ic--ok">✓</span>'
-      + '<div class="stage__meta"><div class="stage__name">'+esc(f.name||f.label)+'</div>'
-      + '<div class="stage__map">→ <b>'+esc(h+' v '+a)+'</b> · '+esc(f.label)+' &nbsp;·&nbsp; '+status+'</div></div>'
+      + '<div class="stage__meta"><div class="stage__name">'+esc(u.name||u.label)+'</div>'
+      + '<div class="stage__map">→ <b>'+esc(h+' v '+a)+'</b> · '+esc(u.label)+' &nbsp;·&nbsp; '+status+'</div></div>'
       + '<div style="flex-shrink:0;display:flex;gap:6px">'+actions+'</div></div>';
-    var T=(f.type||'').toUpperCase();
-    var editor = (editable && editing[f.id]) ?
+    var T=(u.type||'').toUpperCase();
+    var editor = (editable && editing[key]) ?
       '<div class="stage__fix">'
-      + '<select data-mg="'+esc(f.id)+'">'+gameOptions(g.id)+'</select>'
-      + '<select data-mt="'+esc(f.id)+'">'+typeOptions(T)+'</select>'
-      + '<select data-mv="'+esc(f.id)+'"'+(T==='CLIPS'?' disabled':'')+'>'+variantOptions((f.variant||'').toUpperCase())+'</select>'
+      + '<select data-mg="'+esc(key)+'">'+gameOptions(u.gameId)+'</select>'
+      + '<select data-mt="'+esc(key)+'">'+typeOptions(T)+'</select>'
+      + '<select data-mv="'+esc(key)+'"'+(T==='CLIPS'?' disabled':'')+'>'+variantOptions((u.variant||'').toUpperCase())+'</select>'
       + '</div>' : '';
     return '<div class="stage">'+row+editor+'</div>';
   }
   document.getElementById('mine').addEventListener('click', function(e){
     var t=e.target, id;
-    if((id=t.getAttribute('data-del'))){ var L=locate(id); if(L){ if(L.f.storagePath){ try{ firebase.storage().ref(L.f.storagePath).delete().catch(function(){}); }catch(e){} } L.g.files.splice(L.idx,1); delete editing[id]; persist(); renderMine(); toast('Deleted'); } }
-    else if((id=t.getAttribute('data-remap'))){ editing[id]=!editing[id]; renderMine(); }
+    if((id=t.getAttribute('data-del'))){
+      var u=uploadsCache[id];
+      if(u && u.storagePath){ try{ firebase.storage().ref(u.storagePath).delete().catch(function(){}); }catch(e){} }
+      delete editing[id];
+      firebase.database().ref(UPLOADS_REF+'/'+id).remove().then(function(){ toast('Deleted'); }).catch(function(e){ toast('Delete failed: '+(e.code||e.message),'error'); });
+    } else if((id=t.getAttribute('data-remap'))){ editing[id]=!editing[id]; renderMine(); }
   });
   document.getElementById('mine').addEventListener('change', function(e){
     var t=e.target, id;
-    if((id=t.getAttribute('data-mg'))){
-      var to=t.value; if(!to) return; var L=locate(id); if(!L) return;
-      var g2=DATA.games.filter(function(x){return x.id===to;})[0]; if(!g2||g2===L.g){ return; }
-      L.g.files.splice(L.idx,1); if(!Array.isArray(g2.files)) g2.files=[]; g2.files.push(L.f); persist(); renderMine(); toast('Re-mapped');
-    } else if((id=t.getAttribute('data-mt'))){
-      var L2=locate(id); if(!L2) return; L2.f.type=t.value.toLowerCase(); if(L2.f.type==='clips') L2.f.variant=null; relabel(L2.f); persist(); renderMine();
+    if((id=t.getAttribute('data-mg'))){ if(t.value) updRec(id, { gameId: t.value }); }
+    else if((id=t.getAttribute('data-mt'))){
+      var T=t.value.toUpperCase(), u=uploadsCache[id]||{};
+      var patch={ type:t.value.toLowerCase(), label:labelFor(T,(u.variant||'').toUpperCase()), preview:(T==='HL'||T==='CLIPS') };
+      if(patch.type==='clips') patch.variant=null;
+      updRec(id, patch);
     } else if((id=t.getAttribute('data-mv'))){
-      var L3=locate(id); if(!L3) return; L3.f.variant=t.value?t.value.toLowerCase():null; relabel(L3.f); persist(); renderMine();
+      var v=t.value?t.value.toLowerCase():null, u2=uploadsCache[id]||{};
+      updRec(id, { variant:v, label:labelFor((u2.type||'').toUpperCase(), (v||'').toUpperCase()) });
     }
   });
+
+  var uploadsListening = false;
+  function startUploadsListener(){
+    if(uploadsListening) return; uploadsListening = true;
+    firebase.database().ref(UPLOADS_REF).on('value', function(s){ uploadsCache = s.val() || {}; renderMine(); });
+  }
 
   /* ---- gate ---- */
   function enter(){
     document.getElementById('gate').style.display='none';
     document.getElementById('app').style.display='block';
     document.getElementById('pbarSub').textContent = producer.name || 'Upload & map footage';
-    renderMine();
+    // Auth first (anonymous), then read the shared uploads node so this
+    // producer's own uploads render — cross-device, from any browser.
+    ensureAuth().then(function(u){ myUid = u ? u.uid : null; startUploadsListener(); renderMine(); })
+      .catch(function(){ renderMine(); });
   }
   function showGate(){
     document.getElementById('app').style.display='none';

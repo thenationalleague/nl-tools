@@ -3,7 +3,10 @@
 <head>
 <!--
   NL Cup Footage — MASTER control tool (superadmin)
-  Version: v0.1 (12/07/2026) — MVP prototype, DUMMY content.
+  Version: v0.2 (12/07/2026) — producer uploads (app-data/media-footage/uploads)
+           surfaced live as file chips; pull-back toggle on an upload writes its
+           live flag to RTDB. Catalogue publish unchanged (base only, no uploads).
+  Version: v0.1 (12/07/2026) — MVP prototype.
   File: /tools/footage/master/index.html
 
   Edits a localStorage overlay (nlFootageData) that the club-facing page
@@ -189,6 +192,17 @@
     if (g.assets){ var out=[]; Object.keys(g.assets).forEach(function(k){ if(!g.assets[k])return; var p=k.split('_'); out.push({id:g.id+'-'+k,type:p[0],variant:p[1]||null,label:LEGACY_LABEL[k]||k,name:'',size:'',preview:p[0]==='hl',live:true,url:g.assets[k]}); }); return out; }
     return [];
   }
+  // Producer uploads live in their own RTDB node (not baked into the catalogue).
+  // Surface them here as file chips so NL staff can see + pull-back any file.
+  var UPLOADS_REF = 'app-data/media-footage/uploads';
+  var uploadsCache = {};   // pushId -> upload record
+  function uploadsForGame(gid){
+    return Object.keys(uploadsCache).map(function(k){ return {k:k,u:uploadsCache[k]}; })
+      .filter(function(o){ return o.u && o.u.gameId===gid; })
+      .map(function(o){ var u=o.u; return { id:o.k, type:(u.type||'').toUpperCase(), variant:u.variant?u.variant.toUpperCase():null,
+        label:u.label, name:u.name, size:u.size, preview:!!u.preview, live:u.live!==false,
+        url:u.url||'#stored', storagePath:u.storagePath, _up:true }; });
+  }
   function renderFx(){
     var host=document.getElementById('fxList');
     var order=[],byStage={};
@@ -203,7 +217,7 @@
         } else {
           fixHTML='<span class="fx__fix">'+esc((byCode[g.home]||{}).short||g.home)+' v '+esc((byCode[g.away]||{}).short||g.away)+'</span>';
         }
-        var files = filesForGame(g);
+        var files = filesForGame(g).concat(uploadsForGame(g.id));
         var chips = files.length
           ? files.map(function(f){
               var lbl = esc(f.label || (f.type + (f.variant?(' '+f.variant):'')));
@@ -216,7 +230,17 @@
     host.innerHTML=html;
     host.onclick=function(e){
       var tg=e.target.getAttribute('data-file');
-      if(tg){ var p=tg.split('|'), g=DATA.games.filter(function(x){return x.id===p[0];})[0]; var f=filesForGame(g).filter(function(x){return x.id===p[1];})[0]; if(f){ f.live=(f.live===false); save(); renderFx(); } return; }
+      if(tg){
+        var p=tg.split('|'), g=DATA.games.filter(function(x){return x.id===p[0];})[0];
+        var up=uploadsCache[p[1]];
+        if(up && up.gameId===p[0]){
+          // producer upload → toggle live in RTDB (listener re-renders)
+          firebase.database().ref(UPLOADS_REF+'/'+p[1]).update({ live: up.live===false })
+            .catch(function(e){ var d=(e.code==='PERMISSION_DENIED')||/permission/i.test(e.message||''); toast(d?'Change denied — sign into the NL portal as superadmin here.':('Failed: '+(e.code||e.message)),'error'); });
+          return;
+        }
+        var f=filesForGame(g).filter(function(x){return x.id===p[1];})[0]; if(f){ f.live=(f.live===false); save(); renderFx(); } return;
+      }
     };
     host.onchange=function(e){
       var hh=e.target.getAttribute('data-home'), aa=e.target.getAttribute('data-away');
@@ -288,6 +312,12 @@
 
   renderClubs(); renderFx();
   if(!overlayActive){ pullLive(true); }   // no local edits → adopt whatever is live
+  // Live producer uploads → re-render fixtures whenever they change (cross-device).
+  try {
+    firebase.database().ref(UPLOADS_REF).on('value',
+      function(s){ uploadsCache = s.val() || {}; renderFx(); },
+      function(){ /* offline / rules not deployed — no uploads shown */ });
+  } catch(e){}
 })();
 </script>
 </body>
