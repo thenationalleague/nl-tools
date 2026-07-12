@@ -17,8 +17,8 @@ A tool to deliver match footage to the 32 clubs of the NL × PL2 Cup
 | **Access matrix** | A club sees only its own games (home + away); NL staff see all |
 | **Access method** | Per-club **direct link** (auto sign-in) **and** per-club **passcode** — works fully standalone. NL clubs can *also* reach it from the portal (convenience), PL2 clubs use the passcode/link |
 | **Admin** | One superadmin (you) runs it: curate uploads, manage passcodes, open knockout access |
-| **Ingest** | Supplier uploads direct into a raw "lake" (scoped S3/R2 keys) |
-| **File → game** | Naming convention, auto-parsed; staff layer to rename/retag/reroute |
+| **Ingest** | Producer logs into a gated **upload portal** (own `producer` role) and uploads direct to Firebase Storage — not a raw key dump |
+| **File → game** | Auto-mapped by filename on upload; an unmatched file **forces the producer to map it** (pick game + type) before it counts as delivered — no orphans for NL to chase |
 | **Naming** | `YYYY-MM-DD_<HOME>_<AWAY>_<TYPE>_<VARIANT>.mp4` — ISO date, underscore-delimited, uppercase (e.g. `2025-10-21_TRU_BHA_HL_CLEAN.mp4`). `TYPE` = `HL`\|`FMR` **and is extensible** (`CLIPS` etc. may follow); `VARIANT` = `CLEAN`\|`DIRTY` (clean = no gfx). Codes 2 & 3 are HOME/AWAY and route the game to *both* clubs; codes match `clubs-meta` `code`. Parser is case-insensitive and tolerant — an unknown `TYPE` still ingests into a "needs retag" state rather than being dropped |
 | **Files/game** | A **flexible list** — usually the 4 standard (`fmr/clean`, `fmr/dirty`, `hl/clean`, `hl/dirty`) but tolerant of reality: missing fulls, extra `clips`, held/pending files. Data model is `game.files[]`, not a fixed 2×2 grid. |
 | **Security** | Simple gating + short-lived links; no watermark/DRM |
@@ -68,7 +68,13 @@ Club ──direct link / passcode──▶ Club page
   Firestore** — RTDB is already the nl-tools canon, so adding Firestore would grow
   the stack, not shrink it.
 - **Preview:** highlights `<video>`; no transcoding pipeline.
-- **Ingest:** supplier writes to the Storage lake by naming convention; the master
+- **Ingest (producer portal):** the producer signs in (a `producer` role) to a
+  gated upload page and uploads **direct to Firebase Storage** (resumable, with
+  progress). Each file is auto-parsed by filename → linked to its game + type;
+  an unmatched file lands in a **"needs mapping" tray and the producer must map
+  it (game + type) before it's marked delivered** — mapping is forced, so NL
+  never inherits orphan/mis-named files. NL (master) still has final rename/retag/
+  reroute + the live/held toggle. _Legacy note:_ the master
   tool parses `YYYY-MM-DD_<HOME>_<AWAY>_<TYPE>_<VARIANT>.mp4` → game + assets, with
   manual override to rename/retag/reroute. Unknown `TYPE` tokens ingest into a
   "needs retag" state rather than being dropped.
@@ -123,12 +129,17 @@ placeholder player; downloads are not wired to real files.
 
 ---
 
-## Not yet built (Phase 2 checklist)
-- [ ] Firebase Storage bucket + scoped supplier upload path + lake naming parser
-      (`YYYY-MM-DD_<HOME>_<AWAY>_<TYPE>_<VARIANT>.mp4`, extensible/tolerant)
-- [ ] Firebase Storage Security Rules (portal session + passcode→anon-auth claim);
-      passcode-bridge Cloud Function if a custom claim is needed
-- [ ] Move catalogue/state + passcodes to RTDB (`app-data/media-footage`, rules snapshot)
+## Phase 2 checklist
+- [x] Firebase Storage bucket (europe-west2) — download pipe proven end-to-end (Stage A)
+- [x] Catalogue/state + passcodes in RTDB `app-data/media-footage`; rules deployed (Stage B)
+- [x] Folder UI + flexible `files[]` model, tolerant of scrappy delivery (Stage C)
+- [ ] **Producer upload portal** — a `producer` role signs in and uploads direct
+      to Firebase Storage; files auto-map by filename
+      (`YYYY-MM-DD_<HOME>_<AWAY>_<TYPE>_<VARIANT>.mp4`, extensible/tolerant), and an
+      **unmatched file forces a manual map (game + type)** via a "needs mapping" tray
+      before it counts as delivered
+- [ ] Firebase Storage Security Rules — producer write (own path), club read
+      (portal session + passcode→anon-auth claim); passcode-bridge Cloud Function if needed
 - [ ] Real 16-club PL2 meta (names + crests + codes)
 - [ ] Wire real downloads (`getDownloadURL()`) + highlights `<video>` preview
 - [ ] Superadmin-gate the master tool
