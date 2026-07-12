@@ -1,7 +1,7 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /tools/system/nl-utils.js
-   Version: v1.11 (12/07/2026)
+   Version: v1.12 (12/07/2026)
 
    Shared helper functions used by every tool page. Exposed on window.NL
    namespace. All functions are defensive — they handle missing arguments
@@ -14,6 +14,20 @@
      NL.escHtml('<script>');          // → '&lt;script&gt;'
 
    Changelog
+   v1.12 (12/07/2026) — NL.clubPicker refinements:
+     - Browsing shows the WHOLE eligible roster: an empty search box no
+       longer caps at `limit` (12) — `limit` now only bounds typed searches
+       — and search mode opens on focus/click when empty, so a plain click
+       reveals the full list to scroll rather than needing a keystroke first.
+     - Freetext commits resolve their crest by the same crests/<name>.png
+       rule (was hardcoded to the rose), so an off-roster club (e.g. an EFL
+       side entered in transfer-centre) shows its repo crest when present.
+     - `clearable` now defaults ON in search mode (opt-out via clearable:false);
+       select mode stays opt-in.
+     - `placeholder` derives from mode when not supplied ("Search or select a
+       club…" / "Select a club").
+     Cache-busted ?v=11 → ?v=12 (nl-brand.css unchanged at ?v=21).
+
    v1.11 (12/07/2026)
      - Added NL.clubs — session-cached clubs-meta accessor (load/meta/all/
        forSeason/byName/crestUrl). Promise-memoised: one fetch per page
@@ -700,17 +714,21 @@
     var el = (typeof mount === 'string') ? document.querySelector(mount) : mount;
     if (!el) throw new Error('NL.clubPicker: mount not found');
 
+    var _mode = options.mode === 'select' ? 'select' : 'search';
     var opt = {
-      mode:          options.mode === 'select' ? 'select' : 'search',
+      mode:          _mode,
       season:        options.season || 'current',
       divisions:     options.divisions || null,
       offRoster:     options.offRoster || 'hide',
       secondary:     options.secondary || 'division',
       crestFallback: options.crestFallback || 'rose',
-      clearable:     !!options.clearable,
+      /* Clear (×) defaults ON in search mode (typing available); opt-out via
+         clearable:false. Select mode stays opt-in. */
+      clearable:     options.clearable != null ? !!options.clearable : (_mode === 'search'),
       value:         options.value || null,
       disabled:      !!options.disabled,
-      placeholder:   options.placeholder || 'Search club…',
+      /* Placeholder derives from mode unless the caller overrides. */
+      placeholder:   options.placeholder || (_mode === 'select' ? 'Select a club' : 'Search or select a club…'),
       limit:         options.limit || 12,
       onSelect:      typeof options.onSelect === 'function' ? options.onSelect : function() {}
     };
@@ -784,7 +802,9 @@
     }
     function filtered(q) {
       q = (q || '').toLowerCase().trim();
-      if (!q) return clubs.slice(0, opt.limit);
+      /* Empty box = browsing → show the WHOLE eligible roster (the dropdown
+         scrolls). opt.limit only caps typed searches, so it stays snappy. */
+      if (!q) return clubs.slice();
       return clubs.filter(function(c) {
         return c.name.toLowerCase().indexOf(q) !== -1 || (c.short && c.short.toLowerCase().indexOf(q) !== -1);
       }).slice(0, opt.limit);
@@ -860,7 +880,10 @@
     function commit(idx) {
       var row = rendered[idx]; if (!row) return;
       var sel = row.freetext
-        ? { name: row.typed, club: null, division: '', crestUrl: CLUB_ROSE, isFreetext: true, isOffRoster: false, seasonKey: seasonKey() }
+        /* Freetext (e.g. an EFL club not on the NL roster): still resolve the
+           crest by the same crests/<name>.png rule, so a repo crest shows if
+           present (onerror falls back to the rose). */
+        ? { name: row.typed, club: null, division: '', crestUrl: window.NL.clubs.crestUrl(row.typed), isFreetext: true, isOffRoster: false, seasonKey: seasonKey() }
         : { name: row.club.name, club: row.club, division: row.club.division || '', crestUrl: window.NL.clubs.crestUrl(row.club.name), isFreetext: false, isOffRoster: false, seasonKey: seasonKey() };
       applySelection(sel); closeDd(); opt.onSelect(sel);
     }
@@ -881,7 +904,9 @@
         openDd(); loadRoster().then(function() { renderList(input.value); });
       });
       input.addEventListener('focus', function() {
-        if (input.value.trim()) { openDd(); loadRoster().then(function() { renderList(input.value); }); }
+        /* Open on focus/click even when empty, so a plain click reveals the
+           full eligible list to browse (not just after typing). */
+        openDd(); loadRoster().then(function() { renderList(input.value); });
       });
       input.addEventListener('keydown', onKey);
     } else {
