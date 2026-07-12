@@ -1,7 +1,7 @@
 # Programme Packs — v2 rebuild spec (retire Apps Script + Drive)
 
 > **Status: planned, not started.** The live tool (`index.html` + `gas/`) keeps
-> running until v2 is ready. Build sequencing: **after** the footage handoff tool's
+> running until v2 is ready. Build sequencing: **after** the NL Cup Footage tool's
 > Stages C/D, which prove the exact Firebase Storage patterns this reuses.
 
 ## Why rebuild
@@ -19,7 +19,7 @@ It works, but it fights the platform. Owner decision: **replace it.**
 
 ## Decision
 
-Rebuild on the **same clean stack as the footage handoff tool**: Firebase Storage
+Rebuild on the **same clean stack as the NL Cup Footage tool**: Firebase Storage
 for the bytes, RTDB for metadata, Firebase Storage Security Rules for access.
 **Zero Apps Script.**
 
@@ -27,7 +27,7 @@ This makes the footage tool's "one bucket, many uses" business case concrete —
 one bucket (`nl-tools.firebasestorage.app`), path-prefixed:
 
 ```
-handoff/…                        cup footage (one-way, passcode + portal)
+footage/…                        cup footage (one-way, passcode + portal)
 programme-packs/<clubKey>/…      club assets (two-way, portal club-admin)
 ```
 

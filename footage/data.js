@@ -1,5 +1,5 @@
-/* NL × PL2 footage handoff — DUMMY dataset (generated). Edit via the master tool or replace with live data. */
-window.HANDOFF_DATA = {
+/* NL Cup Footage — DUMMY dataset (generated). Edit via the master tool or replace with live data. */
+window.FOOTAGE_DATA = {
   "competition": "NL × PL2 Cup 2026-27",
   "updated": "2026-07-12",
   "assetTypes": [

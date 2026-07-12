@@ -1,4 +1,4 @@
-# NL × PL2 Footage Handoff — spec + MVP
+# NL Cup Footage — spec + MVP
 
 A tool to deliver match footage to the 32 clubs of the NL × PL2 Cup
 (16 National League + 16 Premier League 2). Clubs get their **own** games to
@@ -44,7 +44,7 @@ the supplier's delivered MP4 **is** the deliverable — no master/proxy, no tran
 Supplier ──(scoped upload path)──▶ Firebase Storage "lake" bucket
                                         │  (naming convention)
                                    Master tool (you) ── curate / rename / reroute
-                                        │  publishes catalogue → RTDB app-data/handoff
+                                        │  publishes catalogue → RTDB app-data/media-footage
 Club ──direct link / passcode──▶ Club page
                                         │ portal session ─────────────┐
                                         │ passcode → anon-auth + claim ┤
@@ -62,7 +62,7 @@ Club ──direct link / passcode──▶ Club page
   clubs use the existing portal session; passcode-only clubs (PL2) are bridged with
   **anonymous auth + a custom claim** (or a small Cloud Function that validates the
   passcode and mints a scoped token). Stays all-Firebase either way.
-- **Catalogue/state: RTDB `app-data/handoff/`** — clubs, passcodes, fixtures,
+- **Catalogue/state: RTDB `app-data/media-footage/`** — clubs, passcodes, fixtures,
   asset availability. Token-gated public read for club direct-links; superadmin
   write. (Rules go in `system/rtdb/rules.snapshot.json` when built.) **Not
   Firestore** — RTDB is already the nl-tools canon, so adding Firestore would grow
@@ -82,7 +82,7 @@ number toward the low end.
 
 **Business case — one bucket, many uses (now concrete):** the same bucket + auth
 model is set to host the **programme-packs** club-asset tool too, path-prefixed
-(`handoff/…` for footage, `programme-packs/<clubKey>/…` for club assets — small
+(`footage/…` for footage, `programme-packs/<clubKey>/…` for club assets — small
 files, negligible storage *and* egress cost). That tool exists today on Google
 Drive via an Apps Script proxy and is being **rebuilt onto this Firebase stack** to
 retire the scrappy GAS/Drive layer — see [`../programme-packs/REBUILD.md`](../programme-packs/REBUILD.md).
@@ -108,13 +108,13 @@ Fully client-side, zero backend, **dummy content** — proves the whole flow tod
 | `data.js` | Dummy dataset: 32 clubs (16 real NL + 16 placeholder PL2 with monogram crests), 64 group games + 7 knockout placeholders, tokens + passcodes. |
 
 **How the two connect today:** the master tool writes a `localStorage` overlay
-(`nlHandoffData`) that the club page reads, so edits preview live in the same
+(`nlFootageData`) that the club page reads, so edits preview live in the same
 browser. Export/Import JSON to move data between machines. In Phase 2 this overlay
 becomes RTDB and the two pages share live server state.
 
 **Try it:**
-- Master: `/tools/handoff/master/` → copy any club's link or passcode.
-- Club: open a copied `/tools/handoff/?c=<token>` link, or hit `/tools/handoff/`
+- Master: `/tools/footage/master/` → copy any club's link or passcode.
+- Club: open a copied `/tools/footage/?c=<token>` link, or hit `/tools/footage/`
   and enter a club passcode.
 
 **Explicitly dummy:** every Download shows a "Phase 2" toast; Preview opens a
@@ -127,7 +127,7 @@ placeholder player; downloads are not wired to real files.
       (`YYYY-MM-DD_<HOME>_<AWAY>_<TYPE>_<VARIANT>.mp4`, extensible/tolerant)
 - [ ] Firebase Storage Security Rules (portal session + passcode→anon-auth claim);
       passcode-bridge Cloud Function if a custom claim is needed
-- [ ] Move catalogue/state + passcodes to RTDB (`app-data/handoff`, rules snapshot)
+- [ ] Move catalogue/state + passcodes to RTDB (`app-data/media-footage`, rules snapshot)
 - [ ] Real 16-club PL2 meta (names + crests + codes)
 - [ ] Wire real downloads (`getDownloadURL()`) + highlights `<video>` preview
 - [ ] Superadmin-gate the master tool
