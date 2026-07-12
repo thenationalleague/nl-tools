@@ -1,9 +1,9 @@
 /**
  * NL Cup Footage — 360p preview proxy.
  *
- * Trigger: a file finalised under `footage/incoming/` in the nl-tools bucket.
+ * Trigger: a file finalised under `footage/national-league-cup/` in the nl-tools bucket.
  * For previewable types only (HL / CLIPS — full matches are download-only), make
- * a small 360p ~500 kbps faststart MP4 and store it at `footage/proxies/<name>`.
+ * a small 360p ~500 kbps faststart MP4 and store it at `footage/national-league-cup/proxies/<name>`.
  * The club page streams the proxy for preview and serves the full file for
  * download; if the proxy isn't there yet it falls back to the full file.
  *
@@ -33,8 +33,9 @@ exports.makeProxy = onObjectFinalized(
     const obj = event.data;
     const filePath = obj.name || "";
 
-    // Only originals under footage/incoming/, .mp4, and not a proxy re-trigger.
-    if (filePath.indexOf("footage/incoming/") !== 0) return;
+    // Only originals under footage/national-league-cup/, .mp4, and not a proxy re-trigger.
+    if (filePath.indexOf("footage/national-league-cup/") !== 0) return;
+    if (filePath.indexOf("/proxies/") !== -1) return;   // don't proxy the proxies (loop-safe)
     if (!/\.mp4$/i.test(filePath)) return;
 
     const base = path.basename(filePath);
@@ -47,7 +48,7 @@ exports.makeProxy = onObjectFinalized(
     }
 
     const bucket = admin.storage().bucket(obj.bucket || BUCKET);
-    const proxyPath = "footage/proxies/" + base;
+    const proxyPath = "footage/national-league-cup/proxies/" + base;
 
     // Idempotent: skip if the proxy already exists.
     const [exists] = await bucket.file(proxyPath).exists();
