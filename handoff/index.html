@@ -12,12 +12,27 @@
   preview live in the same browser.
 
   PHASE 2 (see README.md): data + passcodes move to RTDB; downloads become
-  presigned Cloudflare R2 links via a Worker. Today everything is dummy.
+  signed Firebase Storage download URLs (getDownloadURL). Today everything is dummy.
 -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Match Footage — NL × PL2 Cup</title>
 <link rel="stylesheet" href="/tools/system/nl-brand.css?v=21">
+
+<!-- Firebase 10.12.0 (compat) — RTDB catalogue read (Stage B). Public read of
+     app-data/handoff/data; layered over the committed dummy so a missing/empty
+     node never regresses the page. -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script>
+  firebase.initializeApp({
+    apiKey:"AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU", authDomain:"nl-tools.firebaseapp.com",
+    databaseURL:"https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app", projectId:"nl-tools",
+    storageBucket:"nl-tools.firebasestorage.app", messagingSenderId:"801354670005",
+    appId:"1:801354670005:web:05d8ebad3e7e63610d03fc"
+  });
+</script>
 <style>
   body { background: var(--off-white); }
   .hbar {
@@ -163,6 +178,8 @@
   }
   var DATA = getData();
   var byCode = {}; DATA.clubs.forEach(function(c){ byCode[c.code] = c; });
+  var LIVE_REF = 'app-data/handoff/data';   // RTDB catalogue (Stage B)
+  var currentClubCode = null;
 
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.className='toast toast--info show'; setTimeout(function(){t.classList.remove('show');},2600); }
@@ -210,6 +227,7 @@
   }
 
   function render(club){
+    currentClubCode = club.code;
     document.getElementById('gate').style.display='none';
     document.getElementById('app').style.display='block';
     document.getElementById('hbarCrest').innerHTML = club.crest
@@ -229,13 +247,6 @@
       html += byStage[st].map(function(g){ return gameHTML(g, club.code); }).join('');
     });
     document.getElementById('games').innerHTML = html;
-
-    // wire buttons
-    document.getElementById('games').addEventListener('click', function(e){
-      var dl = e.target.getAttribute('data-dl'); var pv = e.target.getAttribute('data-pv');
-      if (dl) toast('Dummy content — real download arrives in Phase 2 (R2).');
-      if (pv) openPreview(pv);
-    });
   }
 
   function openPreview(ref){
@@ -244,7 +255,7 @@
     if(!g||!at) return;
     var h = byCode[g.home], a = byCode[g.away];
     document.getElementById('pvTitle').textContent = (h?h.short:g.home)+' v '+(a?a.short:g.away)+' — '+at.label;
-    document.getElementById('pvStage').innerHTML = '▶ Dummy preview player<br><small style="opacity:0.7">Real highlights stream from R2 in Phase 2</small>';
+    document.getElementById('pvStage').innerHTML = '▶ Dummy preview player<br><small style="opacity:0.7">Real highlights stream from Firebase Storage in Phase 2</small>';
     document.getElementById('pvBackdrop').classList.add('open');
   }
   document.getElementById('pvClose').addEventListener('click', function(){ document.getElementById('pvBackdrop').classList.remove('open'); });
@@ -252,6 +263,7 @@
   document.addEventListener('keydown', function(e){ if(e.key==='Escape') document.getElementById('pvBackdrop').classList.remove('open'); });
 
   function showGate(msg){
+    currentClubCode = null;
     document.getElementById('app').style.display='none';
     document.getElementById('gate').style.display='flex';
     if (msg) document.getElementById('gateSub').textContent = msg;
@@ -273,10 +285,32 @@
     showGate();
   });
 
+  // one-time delegated bind on #games (survives render()'s innerHTML swaps,
+  // so adopting live data and re-rendering never double-binds).
+  document.getElementById('games').addEventListener('click', function(e){
+    var dl = e.target.getAttribute('data-dl'); var pv = e.target.getAttribute('data-pv');
+    if (dl) toast('Dummy content — real download arrives in Phase 2 (Firebase Storage).');
+    if (pv) openPreview(pv);
+  });
+
   // boot: ?c=<token> → direct in; else passcode gate
   var params = new URLSearchParams(location.search);
   var club = findClubByToken(params.get('c'));
   if (club) render(club); else showGate();
+
+  // Stage B: adopt the live RTDB catalogue if published, then re-render the
+  // current view. Layered over the committed dummy — a missing/empty node or
+  // an offline read is swallowed and the page keeps working.
+  function applyLive(d){
+    if (!d || !d.clubs || !d.games) return;
+    DATA = d; byCode = {}; DATA.clubs.forEach(function(c){ byCode[c.code] = c; });
+    if (currentClubCode && byCode[currentClubCode]) render(byCode[currentClubCode]);
+  }
+  try {
+    firebase.database().ref(LIVE_REF).once('value')
+      .then(function(s){ applyLive(s.val()); })
+      .catch(function(){ /* offline / rules not deployed — keep committed data */ });
+  } catch(e){}
 })();
 </script>
 </body>

@@ -9,12 +9,27 @@
   Edits a localStorage overlay (nlHandoffData) that the club-facing page
   reads, so changes preview live in the same browser. Export/Import JSON to
   persist. PHASE 2: this becomes superadmin-gated and writes to RTDB;
-  passcodes + presigned R2 links replace the dummy ones. See ../README.md.
+  passcodes + signed Firebase Storage URLs replace the dummy ones. See ../README.md.
 -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Master · Footage Handoff</title>
 <link rel="stylesheet" href="/tools/system/nl-brand.css?v=21">
+
+<!-- Firebase 10.12.0 (compat) — RTDB catalogue read/write (Stage B). Publish
+     writes app-data/handoff/data (superadmin only; uses the portal session on
+     the same origin). Read is public. -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script>
+  firebase.initializeApp({
+    apiKey:"AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU", authDomain:"nl-tools.firebaseapp.com",
+    databaseURL:"https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app", projectId:"nl-tools",
+    storageBucket:"nl-tools.firebasestorage.app", messagingSenderId:"801354670005",
+    appId:"1:801354670005:web:05d8ebad3e7e63610d03fc"
+  });
+</script>
 <style>
   body { background: var(--off-white); }
   .mbar { background: var(--navy); color: var(--white); padding: 14px clamp(16px,3vw,32px);
@@ -75,6 +90,8 @@
 <body>
 <div class="mbar">
   <div class="mbar__title">Footage Handoff — Master<small>NL × PL2 Cup · superadmin control</small></div>
+  <button class="btn btn--ghost btn--sm" id="pullBtn">Load from live</button>
+  <button class="btn btn--sm" id="publishBtn">Publish to live</button>
   <button class="btn btn--ghost btn--sm" id="exportBtn">Export JSON</button>
   <button class="btn btn--ghost btn--sm" id="importBtn">Import</button>
   <button class="btn btn--ghost btn--sm" id="resetBtn">Reset to dummy</button>
@@ -82,7 +99,7 @@
 </div>
 
 <div class="wrap">
-  <div class="dummy-flag" id="stateFlag">⚠️ Prototype — editing a local (this-browser) copy. Use Export to save. Phase 2 moves this to RTDB.</div>
+  <div class="dummy-flag" id="stateFlag">Editing a local (this-browser) working copy. <strong>Publish to live</strong> pushes it to every club page via RTDB; <strong>Load from live</strong> pulls the published copy; Export saves a JSON backup.</div>
 
   <div class="tabs">
     <button class="tab active" data-pane="clubs">Clubs &amp; links</button>
@@ -224,11 +241,42 @@
     if(!confirm('Discard local edits and reset to the dummy dataset?')) return;
     localStorage.removeItem(LS); DATA=JSON.parse(JSON.stringify(window.HANDOFF_DATA)); byCode={}; DATA.clubs.forEach(function(c){byCode[c.code]=c;}); overlayActive=false;
     document.getElementById('stateFlag').className='dummy-flag';
-    document.getElementById('stateFlag').innerHTML='⚠️ Prototype — editing a local (this-browser) copy. Use Export to save. Phase 2 moves this to RTDB.';
+    document.getElementById('stateFlag').innerHTML='Reset to the built-in dummy dataset (local only). Publish to live to push it, or edit first.';
     renderClubs(); renderFx(); toast('Reset to dummy');
   });
 
+  /* ---- Stage B: live RTDB catalogue (app-data/handoff/data) ----
+     Read is public; write is superadmin-only. Publish uses the portal session
+     that persists on this origin — so publish only works when signed into the
+     NL portal on the same domain. NOTE for Stage D: real passcodes must move
+     out of this public-read blob into an admin-only node + server verification. */
+  var LIVE_REF = 'app-data/handoff/data';
+  function adopt(d){ DATA=d; byCode={}; DATA.clubs.forEach(function(c){byCode[c.code]=c;}); save(); renderClubs(); renderFx(); }
+  function pullLive(silent){
+    return firebase.database().ref(LIVE_REF).once('value').then(function(s){
+      var d=s.val();
+      if(d && d.clubs && d.games){ adopt(d); if(!silent) toast('Loaded live data from RTDB'); return true; }
+      if(!silent) toast('No live data published yet','info'); return false;
+    }).catch(function(e){ if(!silent) toast('Load failed: '+(e.code||e.message),'error'); return false; });
+  }
+  function publishLive(){
+    function push(){
+      firebase.database().ref(LIVE_REF).set(DATA)
+        .then(function(){ toast('Published to live — all club pages now see this'); })
+        .catch(function(e){ toast('Publish failed: '+(e.code||e.message),'error'); });
+    }
+    if(firebase.auth().currentUser) return push();
+    var done=false;   // session may still be restoring — wait once for auth state
+    firebase.auth().onAuthStateChanged(function(x){
+      if(done) return; done=true;
+      if(x) push(); else toast('Sign into the NL portal (superadmin) on this domain first','error');
+    });
+  }
+  document.getElementById('publishBtn').addEventListener('click', publishLive);
+  document.getElementById('pullBtn').addEventListener('click', function(){ pullLive(false); });
+
   renderClubs(); renderFx();
+  if(!overlayActive){ pullLive(true); }   // no local edits → adopt whatever is live
 })();
 </script>
 </body>
