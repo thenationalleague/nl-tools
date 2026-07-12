@@ -3,10 +3,17 @@
 <head>
 <!--
   NL Tools — Vacancy Submission Form (PUBLIC, no auth)
-  Version: 3.0 (17/04/2026)
+  Version: 3.1 (12/07/2026)
   File: /tools/vacancies/submit/index.html
 
   CHANGELOG
+  v3.1 (12/07/2026)
+    - Club field migrated to the shared NL.clubPicker (nl-utils). Removed the
+      local club-picker markup + onClubInput/selectClub/updateCrest/
+      closeDropdown and the local clubs-meta fetch. Behaviour preserved
+      (search + "use as entered" freetext + crest); gains keyboard/ARIA/
+      contrast. Reads via clubPicker.getValue().
+
   v3.0 (17/04/2026)
     - System file migration: loads /tools/system/nl-brand.css + nl-utils.js.
       No auth-guard (public form — unauthenticated staff/clubs can submit).
@@ -283,17 +290,7 @@
 
           <div class="form-group span2">
             <label>Club <span class="req">*</span></label>
-            <div class="club-picker">
-              <div class="club-picker__wrap">
-                <img class="club-picker__crest" id="pickerCrest"
-                  src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png" alt="">
-                <input class="club-picker__input" id="clubInput" type="text"
-                  placeholder="Search or type your club name…" autocomplete="off"
-                  oninput="onClubInput(this.value)"
-                  onblur="setTimeout(closeDropdown,150)">
-              </div>
-              <div class="club-picker__dropdown" id="clubDropdown"></div>
-            </div>
+            <div id="clubPicker"></div>
           </div>
 
           <div class="form-group span2">
@@ -428,53 +425,22 @@
 <script>
 
 var API_URL        = 'https://script.google.com/macros/s/AKfycbyHutd1esz1kykMR5aLXBkgXY2LPC-CzhUWOLBAFjhN-6XCPlxocQ1N9BAoCpE6cdof/exec';
-var FALLBACK_CREST = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png';
-var CREST_BASE     = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
-var CLUBS_URL      = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
-
-var clubs        = [];
 var codeVerified = false;
 var countdownInt = null;
+var clubPicker   = null;   /* NL.clubPicker controller */
 
-/* ── Load clubs from GitHub ── */
+/* ── Shared club picker (nl-utils) — loads clubs-meta itself via NL.clubs ── */
 window.addEventListener('load', function() {
-  fetch(CLUBS_URL + '?cb=' + Date.now(), { cache: 'no-store' })
-    .then(function(r) { return r.json(); })
-    .then(function(d) { clubs = d.clubs || []; })
-    .catch(function() {});
+  clubPicker = NL.clubPicker('#clubPicker', {
+    season: 'all',
+    freetext: 'commit',
+    placeholder: 'Search or type your club name…'
+  });
 });
 
-/* ── Club picker ── */
-function onClubInput(val) {
-  var dd = document.getElementById('clubDropdown');
-  if (!val.trim()) { dd.classList.remove('open'); updateCrest(''); return; }
-  var lower = val.toLowerCase();
-  var matches = clubs.filter(function(c) {
-    return c.name.toLowerCase().indexOf(lower) !== -1 || (c.short && c.short.toLowerCase().indexOf(lower) !== -1);
-  }).slice(0, 10);
-  var html = matches.map(function(c) {
-    var cr = CREST_BASE + encodeURIComponent(c.name) + '.png';
-    return '<div class="club-picker__option" onmousedown="selectClub(\'' + NL.escJ(c.name) + '\',\'' + NL.escJ(cr) + '\')">'
-      + '<img src="' + NL.escHtml(cr) + '" onerror="this.onerror=null;this.src=\'' + FALLBACK_CREST + '\'">'
-      + '<span class="club-picker__option-name">' + NL.escHtml(c.name) + '</span>'
-      + '<span class="club-picker__option-div">' + NL.escHtml(c.division || '') + '</span>'
-      + '</div>';
-  }).join('');
-  html += '<div class="club-picker__freetext" onmousedown="selectClub(\'' + NL.escJ(val) + '\',\'\')">Use "' + NL.escHtml(val) + '" as entered</div>';
-  dd.innerHTML = html;
-  dd.classList.add('open');
-}
-function selectClub(name, cr) {
-  document.getElementById('clubInput').value = name;
-  updateCrest(cr || (CREST_BASE + encodeURIComponent(name) + '.png'));
-  closeDropdown();
-}
-function updateCrest(url) {
-  var img = document.getElementById('pickerCrest');
-  img.src = url || FALLBACK_CREST;
-  img.onerror = function() { this.src = FALLBACK_CREST; };
-}
-function closeDropdown() { document.getElementById('clubDropdown').classList.remove('open'); }
+/* Club picker: the shared NL.clubPicker (created on load). The local
+   onClubInput/selectClub/updateCrest/closeDropdown + clubs-meta fetch were
+   removed in favour of the component. */
 
 /* ── Helpers ── */
 function onNoTimeToggle(checked) {
@@ -511,7 +477,7 @@ function setStep(n) {
 }
 function goToStep1() { setStep(1); }
 function goToStep2() {
-  var club  = document.getElementById('clubInput').value.trim();
+  var club  = (clubPicker.getValue() || '').trim();
   var title = document.getElementById('fJobTitle').value.trim();
   var live  = document.getElementById('fLiveUrl').value.trim();
   if (!club)        { showAlert('Club name is required.', 'error'); return; }
@@ -614,7 +580,7 @@ function submitForm() {
   btn.innerHTML = '<span class="spinner"></span>Submitting…';
   var payload = {
     action:             'vacancies_submit',
-    'Club':             document.getElementById('clubInput').value.trim(),
+    'Club':             (clubPicker.getValue() || '').trim(),
     'Job Title':        document.getElementById('fJobTitle').value.trim(),
     'Location':         document.getElementById('fLocation').value.trim(),
     'Vacancy Type':     document.getElementById('fVacancyType').value,
