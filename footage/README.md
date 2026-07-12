@@ -24,7 +24,7 @@ A tool to deliver match footage to the 32 clubs of the NL × PL2 Cup
 | **Files/game** | A **flexible list** — usually the 4 standard (`fmr/clean`, `fmr/dirty`, `hl/clean`, `hl/dirty`) but tolerant of reality: missing fulls, extra `clips`, held/pending files. Data model is `game.files[]`, not a fixed 2×2 grid. |
 | **Security** | Simple gating + short-lived links; no watermark/DRM |
 | **Retention** | Hot recent + cold archive |
-| **Preview** | Highlights (MP4) double as the in-browser preview; fulls are download-only |
+| **Preview** | Highlights/clips preview inline; fulls are download-only. Preview streams a **360p ~500 kbps faststart proxy** (auto-made by the `makeProxy` Cloud Function at `footage/proxies/<name>`), falling back to the full file if the proxy isn't ready. Download always serves the full-quality file. |
 | **Use** | Club media/comms + archive (social clips + records) — not analysis/broadcast |
 | **Scope** | 64 group + 7 knockout = 71 games. Knockout teams TBD, unlock as clubs qualify |
 | **Field** | 32 clubs (16 NL + 16 PL2) |
@@ -49,9 +49,15 @@ Rule of thumb: **portal = NL people; passcode = outside**. One auth bridge (pass
 
 ## Production architecture (Phase 2)
 
-**All-Firebase stack** — one vendor, one auth model, no Cloudflare. Single-tier:
-the supplier's delivered MP4 **is** the deliverable — no master/proxy, no transcode
-(raw is off the table).
+**All-Firebase stack** — one vendor, one auth model, no Cloudflare. The supplier's
+delivered MP4 **is** the deliverable — it is never re-encoded (raw is off the table;
+the 6–10 GB files move as-is). **One narrow exception (decided later):** a tiny
+**360p preview proxy** is auto-generated for *highlights/clips only* by the
+`makeProxy` Cloud Function — this is a small companion asset for streaming, not a
+re-encode of the deliverable, so it's pennies of compute and doesn't touch the cost
+model. It also means preview no longer depends on the supplier faststart-encoding
+their originals (the proxy is always faststart). This adds the repo's only
+server-side code (`functions/`).
 
 ```
 Supplier ──(scoped upload path)──▶ Firebase Storage "lake" bucket
@@ -174,6 +180,8 @@ Anonymous auth + the Storage read/write rules (see the go-live steps).
 - [x] Wire real downloads (`getDownloadURL()`) + `<video>` preview (club) **and**
       real uploads (producer → `footage/incoming/`), via anon auth, behind fallbacks.
       **Activation pending:** enable Anonymous auth + Storage read/write rules.
+- [x] 360p preview proxy — `makeProxy` Cloud Function (`functions/`) + club plays
+      proxy-with-fallback. **Deploy pending:** `firebase deploy --only functions`.
 - [ ] Superadmin-gate the master tool
 - [ ] (Optional) auto-notify the two clubs on publish
 - [ ] Confirm supplier delivery format (compression test)
