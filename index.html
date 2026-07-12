@@ -3,10 +3,16 @@
 <head>
 <!--
   NL Tools — Login Page
-  Version: v4.3 (03/05/2026)
+  Version: v4.5 (12/07/2026)
   File: /tools/index.html
 
   CHANGELOG
+  v4.5 (12/07/2026) — Shared component:
+    - Request-access "Club" field migrated to the shared NL.clubPicker
+      (system/nl-utils.js). Removed the local reqClub picker JS + the local
+      clubs-meta fetch. Lists current-season (2026) clubs; freetext off
+      (a request must map to a real club). Value read via getValue().
+
   v4.4 (12/07/2026) — Accessibility pass (portal audit):
     - Placeholder text contrast fixed. Club-picker placeholder and the
       "No clubs found" empty message used color-mix(--text-muted 50% white)
@@ -502,17 +508,7 @@ body {
         </div>
         <div class="form-group">
           <label>Club</label>
-          <div class="club-picker">
-            <div class="club-picker__wrap">
-              <img class="club-picker__crest" id="reqClubCrest"
-                src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png"
-                alt=""
-                onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png'">
-              <input class="club-picker__input" id="reqClubInput" type="text" placeholder="Search club name..." autocomplete="off">
-            </div>
-            <div class="club-picker__dropdown" id="reqClubDropdown"></div>
-          </div>
-          <input type="hidden" id="reqClub">
+          <div id="reqClubPicker"></div>
         </div>
         <div class="form-group">
           <label for="reqClubRole">Your role at the club</label>
@@ -595,9 +591,7 @@ var db   = firebase.database();
 
 var PORTAL_URL     = '/tools/portal/';
 var NL_GAS_URL     = 'https://script.google.com/macros/s/AKfycbyHutd1esz1kykMR5aLXBkgXY2LPC-CzhUWOLBAFjhN-6XCPlxocQ1N9BAoCpE6cdof/exec';
-var CLUBS_META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
-var CREST_BASE     = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
-var FALLBACK_CREST = CREST_BASE + 'National%20League%20rose.png';
+var reqClubPicker  = null;   /* NL.clubPicker controller (created in showPanel) */
 
 var urlParams    = new URLSearchParams(window.location.search);
 var INVITE_TOKEN = urlParams.get('invite') || '';
@@ -665,7 +659,12 @@ function showPanel(id) {
       (parts.length > 1 ? ' <span class="word-secondary">' + NL.escHtml(parts.slice(1).join(' ')) + '</span>' : '');
     document.getElementById('pageSubtitle').innerHTML = info.sub;
   }
-  if (id === 'panelRequest') { loadReqTools(); initReqClubPicker(); }
+  if (id === 'panelRequest') {
+    loadReqTools();
+    if (!reqClubPicker && window.NL && NL.clubPicker) {
+      reqClubPicker = NL.clubPicker('#reqClubPicker', { season: 'current', freetext: false, placeholder: 'Search club name...' });
+    }
+  }
   clearAllMsgs();
 }
 
@@ -864,7 +863,7 @@ function goReqStep2() {
   var name     = document.getElementById('reqName').value.trim();
   var email    = document.getElementById('reqEmail').value.trim();
   var pass     = document.getElementById('reqPassword').value;
-  var club     = document.getElementById('reqClub').value.trim();
+  var club     = (reqClubPicker && reqClubPicker.getValue() || '').trim();
   var jobTitle = document.getElementById('reqClubRole').value.trim();
   if (!name || !email || !jobTitle) { showMsg('reqMsg1', 'Please fill in all fields.', 'error'); return; }
   if (!club) { showMsg('reqMsg1', 'Please select your club from the dropdown.', 'error'); return; }
@@ -883,7 +882,7 @@ function doSubmitRequest() {
   var name     = document.getElementById('reqName').value.trim();
   var email    = document.getElementById('reqEmail').value.trim();
   var pass     = document.getElementById('reqPassword').value;
-  var club     = document.getElementById('reqClub').value.trim();
+  var club     = (reqClubPicker && reqClubPicker.getValue() || '').trim();
   var jobTitle = document.getElementById('reqClubRole').value.trim();
   var selectedTools = {};
   document.querySelectorAll('#reqToolContainer input[name="reqTool"]:checked').forEach(function(cb) { selectedTools[cb.value] = 'access'; });
@@ -958,75 +957,10 @@ function doWithdraw() {
     });
 }
 
-var reqClubsData = [];
-var reqClubPickerInited = false;
-
-function loadReqClubs() {
-  if (reqClubsData.length) return Promise.resolve();
-  return fetch(CLUBS_META_URL + '?cb=' + Date.now())
-    .then(function(r) { return r.json(); })
-    .then(function(data) { reqClubsData = data.clubs || []; })
-    .catch(function() { reqClubsData = []; });
-}
-
-function initReqClubPicker() {
-  if (reqClubPickerInited) return;
-  reqClubPickerInited = true;
-  var input = document.getElementById('reqClubInput');
-  var dd    = document.getElementById('reqClubDropdown');
-  input.addEventListener('input', function() {
-    document.getElementById('reqClub').value = '';
-    setReqCrest('');
-    var val = input.value.trim();
-    if (!val) { dd.classList.remove('open'); return; }
-    loadReqClubs().then(function() { renderReqClubList(val); });
-  });
-  input.addEventListener('focus', function() { if (input.value.trim() && reqClubsData.length) renderReqClubList(input.value); });
-  document.addEventListener('click', function(e) {
-    var picker = document.querySelector('#panelRequest .club-picker');
-    if (picker && !picker.contains(e.target)) dd.classList.remove('open');
-  });
-}
-
-function renderReqClubList(filter) {
-  var dd = document.getElementById('reqClubDropdown');
-  var q  = filter.toLowerCase().trim();
-  var matches = reqClubsData.filter(function(c) {
-    return c.name.toLowerCase().indexOf(q) !== -1 || (c.short && c.short.toLowerCase().indexOf(q) !== -1);
-  }).slice(0, 12);
-  dd.innerHTML = '';
-  if (!matches.length) {
-    var empty = document.createElement('div');
-    empty.style.cssText = 'padding:10px 14px;font-size:13px;color:var(--text-muted);';
-    empty.textContent = 'No clubs found';
-    dd.appendChild(empty); dd.classList.add('open'); return;
-  }
-  matches.forEach(function(c) {
-    var item = document.createElement('div'); item.className = 'club-picker__option';
-    var img = document.createElement('img');
-    img.src = CREST_BASE + encodeURIComponent(c.name) + '.png';
-    img.onerror = function() { this.onerror = null; this.src = FALLBACK_CREST; };
-    var nameSpan = document.createElement('span'); nameSpan.className = 'club-picker__option-name'; nameSpan.textContent = c.name;
-    var divSpan  = document.createElement('span'); divSpan.className  = 'club-picker__option-div';  divSpan.textContent  = c.division || '';
-    item.appendChild(img); item.appendChild(nameSpan); item.appendChild(divSpan);
-    item.addEventListener('mousedown', function(e) { e.preventDefault(); selectReqClub(c.name); });
-    dd.appendChild(item);
-  });
-  dd.classList.add('open');
-}
-
-function selectReqClub(name) {
-  document.getElementById('reqClubInput').value = name;
-  document.getElementById('reqClub').value      = name;
-  setReqCrest(CREST_BASE + encodeURIComponent(name) + '.png');
-  document.getElementById('reqClubDropdown').classList.remove('open');
-}
-
-function setReqCrest(url) {
-  var img = document.getElementById('reqClubCrest');
-  img.onerror = function() { this.onerror = null; this.src = FALLBACK_CREST; };
-  img.src = url || FALLBACK_CREST;
-}
+/* Request-access club field is now the shared NL.clubPicker (created in
+   showPanel when #panelRequest opens). The former local reqClub picker JS
+   (loadReqClubs/initReqClubPicker/renderReqClubList/selectReqClub/setReqCrest)
+   and the local clubs-meta fetch were removed in the migration. */
 
 var reqToolsLoaded = false;
 function loadReqTools() {
