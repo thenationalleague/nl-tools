@@ -3,10 +3,17 @@
 <head>
 <!--
   NL Tools — Vacancies
-  Version: 3.11
-  Date: 28/04/2026
+  Version: 3.12
+  Date: 12/07/2026
 
   CHANGELOG
+  v3.12 (12/07/2026)
+    - Club pickers migrated to the shared NL.clubPicker canon component
+      (system/nl-utils.js). Removed the three local generic-ID pickers
+      (fClub / sClub / sfClub) and their onClubInput/selectClub/
+      updatePickerCrest/closeDropdown helpers + the local clubs-meta fetch.
+      Club users still get the locked hidden #sfClub field on the submit form.
+
   v3.11 (28/04/2026)
     - Brand CSS consistency pass:
         * Stripped ?v= params from system file references.
@@ -139,6 +146,13 @@
      Keep entries user-friendly. Most recent first. */
   window.NL_CHANGELOG = [
     {
+      date: '12 July 2026',
+      version: 'v3.12',
+      items: [
+        'Club fields now use the shared NL club picker — same search, crest previews, and "use as typed" behaviour everywhere.'
+      ]
+    },
+    {
       date: '28 April 2026',
       version: 'v3.10',
       items: [
@@ -261,17 +275,7 @@
       <div class="form-grid">
         <div class="form-group span2">
           <label>Club <span class="req">*</span></label>
-          <div class="club-picker" id="adminPicker">
-            <div class="club-picker__wrap">
-              <img class="club-picker__crest" id="adminPickerCrest"
-                src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png" alt="">
-              <input class="club-picker__input" id="fClub" type="text"
-                placeholder="Search or type club name…" autocomplete="off"
-                oninput="onClubInput('fClub','fClubDrop','adminPickerCrest',this.value)"
-                onblur="setTimeout(function(){closeDropdown('fClubDrop');},150)">
-            </div>
-            <div class="club-picker__dropdown" id="fClubDrop"></div>
-          </div>
+          <div id="fClubPicker"></div>
         </div>
         <div class="form-group span2">
           <label>Job Title <span class="req">*</span></label>
@@ -360,16 +364,7 @@
       <div class="form-grid">
         <div class="form-group span2">
           <label>Club</label>
-          <div class="club-picker">
-            <div class="club-picker__wrap">
-              <img class="club-picker__crest" id="subPickerCrest"
-                src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png" alt="">
-              <input class="club-picker__input" id="sClub" type="text" autocomplete="off"
-                oninput="onClubInput('sClub','sClubDrop','subPickerCrest',this.value)"
-                onblur="setTimeout(function(){closeDropdown('sClubDrop');},150)">
-            </div>
-            <div class="club-picker__dropdown" id="sClubDrop"></div>
-          </div>
+          <div id="sClubPicker"></div>
         </div>
         <div class="form-group span2"><label>Job Title</label><input type="text" id="sJobTitle"></div>
         <div class="form-group"><label>Location</label><input type="text" id="sLocation"></div>
@@ -432,12 +427,14 @@
 var db           = firebase.database();
 var FALLBACK     = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png';
 var CREST_BASE   = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
-var CLUBS_URL    = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
 var GAS_URL      = 'https://script.google.com/macros/s/AKfycbyHutd1esz1kykMR5aLXBkgXY2LPC-CzhUWOLBAFjhN-6XCPlxocQ1N9BAoCpE6cdof/exec';
+
+/* Club pickers — shared NL.clubPicker controllers (created lazily, see nlAuthReady / renderSubmitStep1) */
+var fClubPicker = null, sClubPicker = null, sfClubPicker = null;
 
 var STATE = {
   session: null, isAdmin: false,
-  clubs: [], allVacancies: [], allSubs: [], analytics: {},
+  allVacancies: [], allSubs: [], analytics: {},
   currentTab: 'live', editId: null, reviewSubId: null,
   pendingAction: null, pendingId: null, pendingTitle: null,
   submitCodeVerified: false, submitCountdownInt: null,
@@ -465,7 +462,8 @@ window.nlAuthReady = function(session) {
   STATE.isAdmin = (toolLevel === 'admin' || session.role === 'superadmin');
   /* topbarSubtitle removed in v2.0 topbar standardisation — line kept no-op for safety */
 
-  loadClubs();
+  fClubPicker = NL.clubPicker('#fClubPicker', { season:'all', freetext:'commit', placeholder:'Search or type club name…' });
+  sClubPicker = NL.clubPicker('#sClubPicker', { season:'all', freetext:'commit', placeholder:'Search or type club name…' });
   startVacanciesListener();
   if (STATE.isAdmin) { loadSubs(); loadAnalytics(); }
   renderPage();
@@ -705,7 +703,7 @@ function openEditModal(id) {
   document.getElementById('modalTitle').textContent='Edit Vacancy';
   document.getElementById('saveBtn').textContent='Update Vacancy';
   document.getElementById('addedByGroup').style.display='none';
-  document.getElementById('fClub').value=v.club||'';
+  fClubPicker.setValue(v.club||'');
   document.getElementById('fJobTitle').value=v.jobTitle||'';
   document.getElementById('fLocation').value=v.location||'';
   document.getElementById('fVacancyType').value=v.vacancyType||'';
@@ -713,18 +711,17 @@ function openEditModal(id) {
   document.getElementById('fSalary').value=v.salary||'';
   document.getElementById('fDesc').value=v.description||'';
   document.getElementById('fApplyUrl').value=v.applyUrl||'';
-  updatePickerCrest('adminPickerCrest',v.crestUrl||'');
   setClosingFields('fClosingDate','fClosingTime','fNoTime',v.closingDate||'');
   openModal('formModal');
 }
 function clearForm() {
-  ['fClub','fJobTitle','fLocation','fDept','fSalary','fDesc','fApplyUrl','fAddedBy'].forEach(function(id){document.getElementById(id).value='';});
+  ['fJobTitle','fLocation','fDept','fSalary','fDesc','fApplyUrl','fAddedBy'].forEach(function(id){document.getElementById(id).value='';});
+  fClubPicker.clear();
   document.getElementById('fVacancyType').value='';
   document.getElementById('fClosingDate').value='';
   document.getElementById('fClosingTime').value='17:00';
   document.getElementById('fNoTime').checked=false;
   onNoTimeToggle('fClosingTime',false);
-  updatePickerCrest('adminPickerCrest','');
 }
 /* ── Ensure Firebase Auth is live ── */
 // Never trust currentUser synchronously — auth-guard cached session means
@@ -732,7 +729,7 @@ function clearForm() {
 /* ensureAuth moved to NL.ensureAuth in nl-utils.js */
 
 function saveJob() {
-  var club=document.getElementById('fClub').value.trim();
+  var club=(fClubPicker.getValue()||'').trim();
   var title=document.getElementById('fJobTitle').value.trim();
   if(!club){NL.toast('Club is required.','error');return;}
   if(!title){NL.toast('Job title is required.','error');return;}
@@ -802,7 +799,7 @@ function openSubModal(id) {
     +'<br><a href="mailto:'+esc(sub.submitterEmail)+'" style="color:var(--navy)">'+esc(sub.submitterEmail)+'</a>'
     +(sub.liveListingUrl?'&nbsp;·&nbsp;<a href="'+esc(sub.liveListingUrl)+'" target="_blank" style="color:var(--navy)">View live listing ↗</a>':'')
     +'<br><span style="color:var(--text-muted);font-size:11px;">Submitted '+esc(sub.submittedAt?fmtDT(new Date(sub.submittedAt)):'—')+'</span>';
-  document.getElementById('sClub').value       = sub.club||'';
+  sClubPicker.setValue(sub.club||'');
   document.getElementById('sJobTitle').value   = sub.jobTitle||'';
   document.getElementById('sLocation').value   = sub.location||'';
   document.getElementById('sVacancyType').value= sub.vacancyType||'';
@@ -812,7 +809,6 @@ function openSubModal(id) {
   document.getElementById('sLiveUrl').value    = sub.liveListingUrl||'';
   document.getElementById('sNotes').value      = sub.notes||'';
   document.getElementById('sApprovedBy').value = STATE.session?STATE.session.name:'';
-  updatePickerCrest('subPickerCrest',sub.crestUrl||'');
   setClosingFields('sClosingDate','sClosingTime',null,sub.closingDate||'');
   document.getElementById('subModalTitle').textContent=sub.status==='Pending'?'Review Submission':'Submission — '+sub.status;
   document.getElementById('subRejectBtn').style.display=sub.status==='Rejected'?'none':'';
@@ -821,7 +817,7 @@ function openSubModal(id) {
 }
 function getSubData(){
   return {
-    club:           document.getElementById('sClub').value.trim(),
+    club:           (sClubPicker.getValue()||'').trim(),
     jobTitle:       document.getElementById('sJobTitle').value.trim(),
     location:       document.getElementById('sLocation').value.trim(),
     vacancyType:    document.getElementById('sVacancyType').value,
@@ -928,12 +924,7 @@ function renderSubmitStep1(){
       +'<input type="hidden" id="sfClub" value="'+esc(clubVal)+'">'
       +'<span class="form-hint">Your club is set by your portal account</span></div>'
     : '<div class="form-group span2"><label>Club <span class="req">*</span></label>'
-      +'<div class="club-picker"><div class="club-picker__wrap">'
-      +'<img class="club-picker__crest" id="subFormCrest" src="'+FALLBACK+'" alt="">'
-      +'<input class="club-picker__input" id="sfClub" type="text" placeholder="Search or type club name…" autocomplete="off"'
-      +' oninput="onClubInput(\'sfClub\',\'sfClubDrop\',\'subFormCrest\',this.value)"'
-      +' onblur="setTimeout(function(){closeDropdown(\'sfClubDrop\');},150)">'
-      +'</div><div class="club-picker__dropdown" id="sfClubDrop"></div></div></div>';
+      +'<div id="sfClubPicker"></div></div>';
 
   // Submitter section — authed users see locked display, external users see form + code
   var submitterSection = STATE.submitIsAuthed
@@ -986,6 +977,9 @@ function renderSubmitStep1(){
     +'<button class="btn btn--ghost" onclick="closeModal(\'submitModal\')">Cancel</button>'
     +'<button class="btn btn--accent" id="sfSubmitBtn" onclick="doSubmit()"'+(STATE.submitIsAuthed?'':' disabled')+'>Submit Vacancy</button>'
     +'</div>';
+
+  // Club field: club users get a locked hidden #sfClub above; NL staff get the shared picker.
+  sfClubPicker = isClubUser ? null : NL.clubPicker('#sfClubPicker', { season:'all', freetext:'commit', placeholder:'Search or type club name…' });
 
   // Wire up code input for external users
   if(!STATE.submitIsAuthed){
@@ -1052,7 +1046,7 @@ function verifySubmitCode(code){
 }
 
 function doSubmit(){
-  var club=document.getElementById('sfClub').value.trim();
+  var club=sfClubPicker ? (sfClubPicker.getValue()||'').trim() : (document.getElementById('sfClub').value||'').trim();
   var title=document.getElementById('sfTitle').value.trim();
   var liveUrl=document.getElementById('sfLiveUrl').value.trim();
   var email=document.getElementById('sfEmail').value.trim();
@@ -1105,35 +1099,9 @@ function doSubmit(){
     .catch(function(e){NL.toast(e.message,'error');btn.disabled=false;btn.textContent='Submit Vacancy';STATE.submitCodeVerified=false;});
 }
 
-/* ── Club picker (generic, takes IDs) ── */
-function loadClubs(){
-  fetch(CLUBS_URL).then(function(r){return r.json();}).then(function(d){STATE.clubs=d.clubs||[];}).catch(function(){});
-}
-function onClubInput(inputId,dropId,crestId,val){
-  var dd=document.getElementById(dropId);if(!dd)return;
-  if(!val.trim()){dd.classList.remove('open');updatePickerCrest(crestId,'');return;}
-  var lower=val.toLowerCase();
-  var matches=STATE.clubs.filter(function(c){return c.name.toLowerCase().indexOf(lower)!==-1||(c.short&&c.short.toLowerCase().indexOf(lower)!==-1);}).slice(0,10);
-  var html=matches.map(function(c){
-    var cr=CREST_BASE+encodeURIComponent(c.name)+'.png';
-    return '<div class="club-picker__option" onmousedown="selectClub(\''+inputId+'\',\''+dropId+'\',\''+crestId+'\',\''+NL.escJ(c.name)+'\',\''+NL.escJ(cr)+'\')">'
-      +'<img src="'+esc(cr)+'" onerror="this.src=\''+FALLBACK+'\'">'
-      +'<span class="club-picker__option-name">'+esc(c.name)+'</span>'
-      +'<span class="club-picker__option-div">'+esc(c.division||'')+'</span></div>';
-  }).join('');
-  html+='<div class="club-picker__freetext" onmousedown="selectClub(\''+inputId+'\',\''+dropId+'\',\''+crestId+'\',\''+NL.escJ(val)+'\',\'\')">Use "'+esc(val)+'" as entered</div>';
-  dd.innerHTML=html;dd.classList.add('open');
-}
-function selectClub(inputId,dropId,crestId,name,cr){
-  var el=document.getElementById(inputId);if(el)el.value=name;
-  updatePickerCrest(crestId,cr||(CREST_BASE+encodeURIComponent(name)+'.png'));
-  closeDropdown(dropId);
-}
-function updatePickerCrest(id,url){
-  var img=document.getElementById(id);if(!img)return;
-  img.src=url||FALLBACK;img.onerror=function(){this.src=FALLBACK;};
-}
-function closeDropdown(id){var el=document.getElementById(id);if(el)el.classList.remove('open');}
+/* ── Club picker: now the shared NL.clubPicker (see nlAuthReady / renderSubmitStep1).
+   The former local onClubInput/selectClub/updatePickerCrest/closeDropdown + clubs-meta
+   fetch were removed when the three pickers migrated to the canon component. ── */
 
 /* ── Date helpers ── */
 
