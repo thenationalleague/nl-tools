@@ -4,6 +4,11 @@
 window.FOOTAGE_DATA = {
   "competition": "NL × PL2 Cup 2026-27",
   "updated": "2026-07-12",
+  "producer": {
+    "name": "Match footage supplier",
+    "passcode": "PROD24",
+    "token": "prod-9x2k"
+  },
   "clubs": [
     {
       "code": "FYL",

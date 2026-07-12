@@ -130,7 +130,8 @@ Fully client-side, zero backend, **dummy content** — proves the whole flow tod
 |---|---|
 | `index.html` | **Landing** at `/tools/footage/` — the reserved home / future portal-card destination. Light placeholder that points clubs to the deeper login. |
 | `club/index.html` | **Club-facing** login. `?c=<token>` auto-signs a club in; otherwise a passcode gate. Shows that club's games as **folders** (grouped by stage) — open a match to see its files listed like a file browser (label, filename, size, Play for video, Download). Flexible file counts. Deliberately one level deep (like `master/`) so the root stays free for the portal card. |
-| `master/index.html` | **Master** control tool. The 32 clubs with copy-able direct links + passcodes (regenerate per club), and a fixtures tab to assign knockout teams + toggle which assets are live. Export/Import JSON, reset to dummy. |
+| `master/index.html` | **Master** control tool. The 32 clubs with copy-able direct links + passcodes (regenerate per club), and a fixtures tab: assign knockout teams + a live/held toggle **per file**. Export/Import JSON, reset to dummy. |
+| `producer/index.html` | **Producer upload** page. Passcode / `?p=<token>` gate (external, like a club). Drop/pick footage → each file **auto-maps by filename** to a fixture; an unmatched file goes to a **"needs mapping" tray** and must be mapped (game + type) before **Upload** un-greys — mapping is forced. Includes an "Add sample files (demo)" button. _Dummy:_ upload is simulated and writes **held** files into the localStorage overlay so master/club (same browser) reflect them; production wires real Storage upload + RTDB. |
 | `data.js` | Dummy dataset: 32 clubs (16 real NL + 16 placeholder PL2 with monogram crests), 64 group games + 7 knockout placeholders, tokens + passcodes. |
 
 **How the two connect today:** the master tool writes a `localStorage` overlay
