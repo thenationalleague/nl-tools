@@ -1,5 +1,7 @@
 /**
- * NL Cup Footage — 360p preview proxy.
+ * NL Cup Footage — Cloud Functions.
+ *   makeProxy         — makes the 360p preview proxy on upload (below).
+ *   onFootageDeleted  — mirrors Storage deletes back to the catalogue (bottom).
  *
  * Trigger: a file finalised under `footage/national-league-cup/` in the nl-tools bucket.
  * For any file up to MAX_PROXY_BYTES (full matches are much larger → download-only),
@@ -13,7 +15,7 @@
  * small highlights files, so it's pennies of compute and doesn't reopen the
  * full-match cost question. See footage/README.md.
  */
-const { onObjectFinalized } = require("firebase-functions/v2/storage");
+const { onObjectFinalized, onObjectDeleted } = require("firebase-functions/v2/storage");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
@@ -93,6 +95,51 @@ exports.makeProxy = onObjectFinalized(
       throw err;
     } finally {
       [tmpIn, tmpOut].forEach((p) => { try { fs.unlinkSync(p); } catch (e) {} });
+    }
+  }
+);
+
+/**
+ * Mirror direct-Storage deletes back into the catalogue (self-healing).
+ *
+ * When a footage original is deleted — Firebase console, gsutil, or the master ✕ —
+ * remove its RTDB upload record(s) and delete its 360p proxy. So deleting a file
+ * straight in Storage now "just works": it disappears from every club view and
+ * leaves no orphan record or orphan proxy. Deletes of a proxy itself are ignored
+ * (no record points at a proxy, and it stops any delete loop).
+ */
+exports.onFootageDeleted = onObjectDeleted(
+  { bucket: BUCKET, memory: "256MiB" },
+  async (event) => {
+    const filePath = (event.data && event.data.name) || "";
+    if (filePath.indexOf("footage/national-league-cup/") !== 0) return;
+    if (filePath.indexOf("/proxies/") !== -1) return;   // a proxy was deleted → nothing to reconcile
+
+    // 1) Drop any upload record(s) pointing at this file (uploads aren't indexed
+    //    on storagePath, so read the small node and match).
+    try {
+      const ref = admin.database().ref("app-data/media-footage/uploads");
+      const snap = await ref.once("value");
+      const updates = {};
+      snap.forEach((child) => {
+        const v = child.val();
+        if (v && v.storagePath === filePath) updates[child.key] = null;
+      });
+      if (Object.keys(updates).length) {
+        await ref.update(updates);
+        logger.info(`Removed ${Object.keys(updates).length} record(s) for deleted ${filePath}`);
+      }
+    } catch (err) {
+      logger.error(`RTDB cleanup failed for ${filePath}: ${err && err.message}`);
+    }
+
+    // 2) Delete the matching proxy, if one was made.
+    try {
+      const proxyPath = "footage/national-league-cup/proxies/" + path.basename(filePath);
+      await admin.storage().bucket(BUCKET).file(proxyPath).delete();
+      logger.info(`Deleted proxy ${proxyPath}`);
+    } catch (err) {
+      // proxy may not exist (full match, or already gone) — not an error
     }
   }
 );
