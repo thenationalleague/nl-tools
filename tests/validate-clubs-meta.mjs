@@ -64,8 +64,12 @@ export function validateClubsMeta(repo = REPO) {
       // crest file must exist (raw.githubusercontent + every tool key on <name>.png)
       const crest = join(repo, 'assets/crests', c.name + '.png');
       if (!existsSync(crest)) W(`${at}: no crest file assets/crests/${c.name}.png`);
-      else if (!existsSync(join(repo, 'assets/crests/thumbs', c.name + '.png'))) {
-        W(`${at}: no thumbnail assets/crests/thumbs/${c.name}.png (run build-crest-thumbs)`);
+      else {
+        for (const tier of ['thumbs', 'medium']) {
+          if (!existsSync(join(repo, 'assets/crests', tier, c.name + '.png'))) {
+            W(`${at}: no ${tier} tier assets/crests/${tier}/${c.name}.png (run build-crest-thumbs)`);
+          }
+        }
       }
     }
     if (c.optaID) optaSeen.set(c.optaID, (optaSeen.get(c.optaID) || 0) + 1);

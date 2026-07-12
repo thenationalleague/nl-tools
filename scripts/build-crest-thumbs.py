@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Generate low-res crest thumbnails for fast list/dropdown rendering.
+"""Generate downscaled crest tiers for fast rendering.
 
-Reads every  assets/crests/<name>.png  and writes a downscaled copy to
-assets/crests/thumbs/<same name>.png  (max 96px on the long side, aspect +
-transparency preserved). Identical filenames are load-bearing: every consumer
-resolves a crest as `<base>/<encoded name>.png`, so a thumb at
-`<base>/thumbs/<encoded name>.png` needs no per-call changes.
+For every  assets/crests/<name>.png  it writes:
+  assets/crests/thumbs/<name>.png   — 96px  long edge  (lists, dropdowns, markers)
+  assets/crests/medium/<name>.png   — 512px long edge  (on-page hero/detail badges)
+Filenames are identical to the source (load-bearing: every consumer resolves a
+crest as `<base>/<encoded name>.png`, so a tier is just a folder prefix).
+Aspect ratio + transparency preserved. Full-res originals are untouched
+(graphics/canvas exports + downloads keep using them).
 
-Idempotent + CI-safe: a thumb is only rewritten when its bytes would actually
-change, so re-runs on a fresh checkout (where mtimes are meaningless) produce
-no spurious git diff. Orphan thumbs (source crest deleted) are removed.
-
-Full-res originals are untouched — graphics/canvas exporters keep using them.
+Idempotent + CI-safe: a tier file is only rewritten when its bytes would change,
+so re-runs on a fresh checkout produce no spurious git diff. Orphan tier files
+(source crest deleted) are pruned.
 
 Usage:  python3 scripts/build-crest-thumbs.py [--check]
         --check : report what WOULD change, write nothing, exit 1 if stale
@@ -22,17 +22,18 @@ import sys
 from pathlib import Path
 from PIL import Image
 
-MAX_PX = 96
+# tier folder → max long-edge px
+TIERS = {"thumbs": 96, "medium": 512}
+
 ROOT = Path(__file__).resolve().parent.parent
 CRESTS = ROOT / "assets" / "crests"
-THUMBS = CRESTS / "thumbs"
 
 
-def render_thumb(src: Path) -> bytes:
-    """Return the optimized PNG bytes of the thumbnail for one crest."""
+def render(src: Path, px: int) -> bytes:
+    """Optimized PNG bytes of `src` downscaled so its long edge is <= px."""
     with Image.open(src) as im:
         im = im.convert("RGBA")
-        im.thumbnail((MAX_PX, MAX_PX), Image.LANCZOS)
+        im.thumbnail((px, px), Image.LANCZOS)  # keeps aspect, caps long edge
         buf = io.BytesIO()
         im.save(buf, format="PNG", optimize=True)
         return buf.getvalue()
@@ -43,48 +44,49 @@ def main() -> int:
     if not CRESTS.is_dir():
         print(f"no crests dir at {CRESTS}", file=sys.stderr)
         return 1
-    THUMBS.mkdir(exist_ok=True)
 
     sources = sorted(p for p in CRESTS.glob("*.png"))
-    written, unchanged, removed, total_bytes = 0, 0, 0, 0
-    stale = []
+    wanted = {p.name for p in sources}
+    any_stale = False
 
-    wanted = set()
-    for src in sources:
-        wanted.add(src.name)
-        dst = THUMBS / src.name
-        new_bytes = render_thumb(src)
-        total_bytes += len(new_bytes)
-        old_bytes = dst.read_bytes() if dst.exists() else None
-        if old_bytes == new_bytes:
-            unchanged += 1
-            continue
-        stale.append(src.name)
-        if check:
-            continue
-        dst.write_bytes(new_bytes)
-        written += 1
-
-    # prune orphan thumbs whose source crest no longer exists
-    for t in sorted(THUMBS.glob("*.png")):
-        if t.name not in wanted:
-            stale.append("orphan:" + t.name)
+    for tier, px in TIERS.items():
+        outdir = CRESTS / tier
+        outdir.mkdir(exist_ok=True)
+        written = unchanged = removed = 0
+        total = 0
+        stale = []
+        for src in sources:
+            new_bytes = render(src, px)
+            total += len(new_bytes)
+            dst = outdir / src.name
+            old = dst.read_bytes() if dst.exists() else None
+            if old == new_bytes:
+                unchanged += 1
+                continue
+            stale.append(src.name)
             if not check:
-                t.unlink()
-                removed += 1
+                dst.write_bytes(new_bytes)
+                written += 1
+        for t in sorted(outdir.glob("*.png")):
+            if t.name not in wanted:
+                stale.append("orphan:" + t.name)
+                if not check:
+                    t.unlink()
+                    removed += 1
+        avg_kb = round(total / len(sources) / 1024, 1) if sources else 0
+        print(f"[{tier} {px}px] {total/1024/1024:.2f}MB total (~{avg_kb}KB avg)")
+        if check:
+            if stale:
+                any_stale = True
+                print(f"  STALE: {len(stale)} would change: " + ", ".join(stale[:10]))
+        else:
+            print(f"  wrote={written} unchanged={unchanged} removed={removed}")
 
-    avg_kb = round(total_bytes / len(sources) / 1024, 1) if sources else 0
-    print(
-        f"crests={len(sources)}  thumbs={total_bytes/1024/1024:.2f}MB total "
-        f"(~{avg_kb}KB avg, {MAX_PX}px)"
-    )
     if check:
-        if stale:
-            print(f"STALE: {len(stale)} thumb(s) would change: " + ", ".join(stale[:12]))
+        if any_stale:
+            print("run: python3 scripts/build-crest-thumbs.py")
             return 1
-        print("thumbs up to date")
-        return 0
-    print(f"wrote={written}  unchanged={unchanged}  removed={removed}")
+        print("all tiers up to date")
     return 0
 
 

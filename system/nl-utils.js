@@ -678,22 +678,25 @@
   var CLUBS_URL     = '/tools/assets/data/clubs-meta.json';
   var CREST_BASE    = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
   var THUMB_BASE    = CREST_BASE + 'thumbs/';
+  var MEDIUM_BASE   = CREST_BASE + 'medium/';
   var CLUB_ROSE     = CREST_BASE + 'National%20League%20rose.png';
 
   window.NL.clubs = {
     ROSE: CLUB_ROSE,
     /* Absolute crest URL for a club name.
-         crestUrl(name)          → full-res (byte-identical to the legacy URL,
-                                    so no-arg callers are unaffected).
-         crestUrl(name, 'thumb') → 96px thumbnail (assets/crests/thumbs/…) for
-                                    lists/dropdowns. ~15KB vs ~526KB.
-       Thumbs are auto-generated (scripts/build-crest-thumbs.py + the
-       crest-thumbs Action). Always pair a thumb <img> with the thumb→full→rose
-       onerror chain (NL.clubs.wireCrestImg) so a not-yet-built thumb still
-       renders. Canvas/export tools must use full-res (no size arg). */
+         crestUrl(name)           → full-res original (byte-identical to the
+                                     legacy URL, so no-arg callers are unaffected).
+         crestUrl(name, 'thumb')  → 96px  (assets/crests/thumbs/…)  ~14KB —
+                                     lists, dropdowns, tables, markers.
+         crestUrl(name, 'medium') → 512px (assets/crests/medium/…) ~130KB —
+                                     on-page hero/detail badges.
+       Tiers are auto-generated (scripts/build-crest-thumbs.py + the crest-thumbs
+       Action). Pair a thumb/medium <img> with the ...→full→rose onerror chain
+       (NL.clubs.wireCrestImg) so a not-yet-built tier file still renders.
+       Canvas/social exports + downloads use full-res (no size arg). */
     crestUrl: function(name, size) {
       if (!name) return CLUB_ROSE;
-      var base = (size === 'thumb') ? THUMB_BASE : CREST_BASE;
+      var base = size === 'thumb' ? THUMB_BASE : size === 'medium' ? MEDIUM_BASE : CREST_BASE;
       return base + encodeURIComponent(name) + '.png';
     },
     /* Wire a crest <img> so a missing thumb degrades thumb → full → rose
