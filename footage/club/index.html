@@ -25,6 +25,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
 <script>
   firebase.initializeApp({
     apiKey:"AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU", authDomain:"nl-tools.firebaseapp.com",
@@ -150,6 +151,7 @@
   .pv__close { background: none; border: none; color: var(--white); font-size: 24px; cursor: pointer; line-height: 1; }
   .pv__stage { aspect-ratio: 16/9; background: #000; display: flex; align-items: center; justify-content: center;
     color: rgba(255,255,255,0.6); font-size: 13px; text-align: center; padding: 20px; }
+  .pv__video { width: 100%; display: block; background: #000; aspect-ratio: 16/9; }
 </style>
 </head>
 <body>
@@ -185,6 +187,7 @@
 <div class="pv-backdrop" id="pvBackdrop">
   <div class="pv">
     <div class="pv__head"><span class="pv__title" id="pvTitle">Preview</span><button class="pv__close" id="pvClose" aria-label="Close preview">&times;</button></div>
+    <video id="pvVideo" class="pv__video" controls playsinline preload="metadata" style="display:none"></video>
     <div class="pv__stage" id="pvStage"></div>
   </div>
 </div>
@@ -319,21 +322,39 @@
     }
   }
 
-  function openPreview(ref){
-    var parts = ref.split('|'), g = DATA.games.filter(function(x){return x.id===parts[0];})[0];
-    if(!g) return;
-    var f = filesForGame(g).filter(function(x){return x.id===parts[1];})[0];
-    if(!f) return;
-    var h = byCode[g.home], a = byCode[g.away];
-    document.getElementById('pvTitle').textContent = (h?h.short:g.home)+' v '+(a?a.short:g.away)+' — '+f.label;
-    document.getElementById('pvStage').innerHTML = '▶ Dummy preview player'
-      + (f.name?'<br><small style="opacity:0.7">'+esc(f.name)+'</small>':'')
-      + '<br><small style="opacity:0.6">Real footage streams from Firebase Storage once files are wired</small>';
-    document.getElementById('pvBackdrop').classList.add('open');
+  // Real Firebase Storage helpers — activate for any file carrying a real
+  // storagePath; dummy files (no storagePath) keep the placeholder behaviour.
+  function ensureAuth(){
+    try { var u = firebase.auth().currentUser; if (u) return Promise.resolve(u);
+      return firebase.auth().signInAnonymously().then(function(c){ return c.user; });
+    } catch(e){ return Promise.reject(e); }
   }
-  document.getElementById('pvClose').addEventListener('click', function(){ document.getElementById('pvBackdrop').classList.remove('open'); });
-  document.getElementById('pvBackdrop').addEventListener('click', function(e){ if(e.target===this) this.classList.remove('open'); });
-  document.addEventListener('keydown', function(e){ if(e.key==='Escape') document.getElementById('pvBackdrop').classList.remove('open'); });
+  function isReal(f){ return !!(f && f.storagePath); }
+  function resolveUrl(f){ return ensureAuth().then(function(){ return firebase.storage().ref(f.storagePath).getDownloadURL(); }); }
+  function fileByRef(ref){ var p=ref.split('|'), g=DATA.games.filter(function(x){return x.id===p[0];})[0]; if(!g) return null; var f=filesForGame(g).filter(function(x){return x.id===p[1];})[0]; return f?{g:g,f:f}:null; }
+
+  function openPreview(ref){
+    var o = fileByRef(ref); if(!o) return;
+    var g=o.g, f=o.f, h=byCode[g.home], a=byCode[g.away];
+    document.getElementById('pvTitle').textContent = (h?h.short:g.home)+' v '+(a?a.short:g.away)+' — '+f.label;
+    var vid = document.getElementById('pvVideo'), stage = document.getElementById('pvStage');
+    document.getElementById('pvBackdrop').classList.add('open');
+    if (isReal(f)){
+      stage.style.display='flex'; stage.innerHTML='Loading…'; vid.style.display='none';
+      resolveUrl(f).then(function(url){ vid.src=url; vid.style.display='block'; stage.style.display='none'; var p=vid.play(); if(p&&p.catch)p.catch(function(){}); })
+        .catch(function(e){ stage.innerHTML='Could not load preview.<br><small style="opacity:0.6">'+esc(e.code||e.message||'')+'</small>'; });
+    } else {
+      try{ vid.pause(); }catch(e){} vid.removeAttribute('src'); vid.style.display='none';
+      stage.style.display='flex';
+      stage.innerHTML = '▶ Dummy preview player'
+        + (f.name?'<br><small style="opacity:0.7">'+esc(f.name)+'</small>':'')
+        + '<br><small style="opacity:0.6">Real footage streams once a real file is uploaded</small>';
+    }
+  }
+  function closePreview(){ var v=document.getElementById('pvVideo'); try{ v.pause(); }catch(e){} v.removeAttribute('src'); v.style.display='none'; document.getElementById('pvBackdrop').classList.remove('open'); }
+  document.getElementById('pvClose').addEventListener('click', closePreview);
+  document.getElementById('pvBackdrop').addEventListener('click', function(e){ if(e.target===this) closePreview(); });
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') closePreview(); });
 
   function showGate(msg){
     currentClubCode = null;
@@ -362,7 +383,18 @@
   // so adopting live data and re-rendering never double-binds).
   document.getElementById('games').addEventListener('click', function(e){
     var t = e.target;
-    var dl = t.closest && t.closest('[data-dl]'); if (dl){ toast('Dummy content — real download arrives once files are wired (Firebase Storage).'); return; }
+    var dl = t.closest && t.closest('[data-dl]');
+    if (dl){
+      var o = fileByRef(dl.getAttribute('data-dl'));
+      if (o && isReal(o.f)){
+        toast('Preparing download…');
+        resolveUrl(o.f).then(function(url){ var a=document.createElement('a'); a.href=url; a.download=o.f.name||''; a.target='_blank'; document.body.appendChild(a); a.click(); a.remove(); })
+          .catch(function(e){ toast('Download failed'+(e.code?(': '+e.code):''),'error'); });
+      } else {
+        toast('Dummy content — real download arrives once a real file is uploaded (Firebase Storage).');
+      }
+      return;
+    }
     var pv = t.closest && t.closest('[data-pv]'); if (pv){ openPreview(pv.getAttribute('data-pv')); return; }
     var tg = t.closest && t.closest('[data-toggle]'); if (tg){ toggleFolder(tg); return; }
   });

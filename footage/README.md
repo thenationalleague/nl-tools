@@ -147,8 +147,13 @@ becomes RTDB and the two pages share live server state.
 - Club: open a copied `/tools/footage/club/?c=<token>` link, or hit `/tools/footage/club/`
   and enter a club passcode.
 
-**Explicitly dummy:** every Download shows a "Phase 2" toast; Preview opens a
-placeholder player; downloads are not wired to real files.
+**Real wiring (behind fallbacks):** the pipe is wired — a real file the producer
+drops/chooses **uploads to Firebase Storage** (`footage/incoming/…`), and a club
+file that carries a real `storagePath` **plays inline (`<video>`) and downloads for
+real** (`getDownloadURL`), both via anonymous auth. Dummy files (no `storagePath`)
+keep the placeholder toast/player, and if auth/rules aren't enabled the real path
+falls back to a simulated upload — so nothing breaks. **To activate:** enable
+Anonymous auth + the Storage read/write rules (see the go-live steps).
 
 ---
 
@@ -166,7 +171,9 @@ placeholder player; downloads are not wired to real files.
       **producer write** (upload path), **club read** (own games), NL portal full;
       passcode-bridge Cloud Function mints the scoped claim
 - [ ] Real 16-club PL2 meta (names + crests + codes)
-- [ ] Wire real downloads (`getDownloadURL()`) + highlights `<video>` preview
+- [x] Wire real downloads (`getDownloadURL()`) + `<video>` preview (club) **and**
+      real uploads (producer → `footage/incoming/`), via anon auth, behind fallbacks.
+      **Activation pending:** enable Anonymous auth + Storage read/write rules.
 - [ ] Superadmin-gate the master tool
 - [ ] (Optional) auto-notify the two clubs on publish
 - [ ] Confirm supplier delivery format (compression test)
