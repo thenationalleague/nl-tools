@@ -3,10 +3,20 @@
 <head>
 <!--
   NL Tools — Judgements & Decisions
-  Version: 2.4
-  Date: 28/04/2026
+  Version: 2.5
+  Date: 12/07/2026
 
   CHANGELOG
+  v2.5 (12/07/2026)
+    - Club field migrated to the shared NL.clubPicker (nl-utils). Removed the
+      local club-picker markup, the ~35 lines of onClubInput/selectClub/
+      updatePickerCrest/closeDropdown, the local clubs-meta fetch (loadClubs
+      + STATE.clubs) and the CREST_BASE/FALLBACK/CLUBS_META constants — the
+      component owns all of it now. Behaviour preserved: search + "use as
+      entered" freetext (freetext:'commit'), crest, division. Inherits the
+      component's keyboard nav, ARIA, contrast and full-list browsing.
+      Reference implementation for the wider club-picker migration.
+
   v2.4 (28/04/2026)
     - Brand CSS consistency pass:
         * Stripped ?v= params from system file references.
@@ -79,6 +89,13 @@
 
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
+    {
+      date: '12 July 2026',
+      version: 'v2.5',
+      items: [
+        'The club field now uses the shared NL club picker — the same smart search, badges and “use as entered” across tools, with better keyboard and accessibility support.'
+      ]
+    },
     {
       date: '28 April 2026',
       version: 'v2.3',
@@ -236,19 +253,7 @@
       <div class="form-row">
         <div class="form-group">
           <label>Club</label>
-          <div class="club-picker">
-            <div class="club-picker__wrap">
-              <img class="club-picker__crest" id="pickerCrest"
-                src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png"
-                alt=""
-                onerror="this.onerror=null;this.src='https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png'">
-              <input class="club-picker__input" id="clubInput" type="text"
-                placeholder="Search or type club name…" autocomplete="off"
-                oninput="onClubInput(this.value)"
-                onblur="setTimeout(closeDropdown, 150)">
-            </div>
-            <div class="club-picker__dropdown" id="clubDropdown"></div>
-          </div>
+          <div id="clubPicker"></div>
         </div>
         <div class="form-group">
           <label>Rule breached</label>
@@ -318,14 +323,11 @@
 var STATE = {
   uid: null,
   isAdmin: false,
-  clubs: [],
   records: [],
   deleteId: null
 };
+var clubPicker = null;   /* NL.clubPicker controller (created in nlAuthReady) */
 
-var CREST_BASE     = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
-var FALLBACK_CREST = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png';
-var CLUBS_META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
 
 /* ── Auth ready — called once access is confirmed ── */
 window.nlAuthReady = function(session) {
@@ -348,21 +350,18 @@ window.nlAuthReady = function(session) {
     document.getElementById('statsPanel').style.display = '';
   }
 
-  loadClubs();
+  /* Shared club picker (nl-utils). freetext:'commit' keeps the "use as
+     entered" behaviour for clubs outside the roster; it loads clubs-meta
+     itself via NL.clubs, so no local fetch is needed. */
+  if (!clubPicker) {
+    clubPicker = NL.clubPicker('#clubPicker', {
+      season: 'all',
+      freetext: 'commit',
+      placeholder: 'Search or type club name…'
+    });
+  }
   listenForRecords();
 };
-
-/* ── Load clubs meta ── */
-function loadClubs() {
-  fetch(CLUBS_META_URL + '?cb=' + Date.now())
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      STATE.clubs = data.clubs || [];
-    })
-    .catch(function(err) {
-      console.warn('Failed to load clubs-meta:', err);
-    });
-}
 
 /* ── Listen for records (realtime) ── */
 function listenForRecords() {
@@ -479,20 +478,18 @@ function openForm(id) {
     if (!r) return;
     document.getElementById('formTitle').textContent = 'Edit record';
     document.getElementById('editId').value = id;
-    document.getElementById('clubInput').value = r.club || '';
+    clubPicker.setValue(r.club || '');
     document.getElementById('ruleInput').value = r.rule || '';
     document.getElementById('startInput').value = r.startDate || '';
     document.getElementById('endInput').value = r.endDate || '';
-    updatePickerCrest(r.club ? (CREST_BASE + encodeURIComponent(r.club) + '.png') : '');
   } else {
     // Add mode
     document.getElementById('formTitle').textContent = 'Add new record';
     document.getElementById('editId').value = '';
-    document.getElementById('clubInput').value = '';
+    clubPicker.clear();
     document.getElementById('ruleInput').value = '';
     document.getElementById('startInput').value = '';
     document.getElementById('endInput').value = '';
-    updatePickerCrest('');
   }
 
   panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -505,7 +502,7 @@ function closeForm() {
 
 /* ── Save record ── */
 function saveRecord() {
-  var club = document.getElementById('clubInput').value.trim();
+  var club = (clubPicker.getValue() || '').trim();
   var rule = document.getElementById('ruleInput').value.trim();
   var startDate = document.getElementById('startInput').value;
   var endDate = document.getElementById('endInput').value;
@@ -583,41 +580,9 @@ function confirmDelete() {
   });
 }
 
-/* ── Club picker ── */
-function onClubInput(val) {
-  var dd = document.getElementById('clubDropdown');
-  if (!val.trim()) { dd.classList.remove('open'); updatePickerCrest(''); return; }
-  var lower = val.toLowerCase();
-  var matches = STATE.clubs.filter(function(c) {
-    return c.name.toLowerCase().indexOf(lower) !== -1
-        || (c.short && c.short.toLowerCase().indexOf(lower) !== -1);
-  }).slice(0, 10);
-  var html = matches.map(function(c) {
-    var cr = CREST_BASE + encodeURIComponent(c.name) + '.png';
-    return '<div class="club-picker__option" onmousedown="selectClub(\'' + NL.escJ(c.name) + '\',\'' + NL.escJ(cr) + '\')">'
-      + '<img src="' + NL.escHtml(cr) + '" onerror="this.onerror=null;this.src=\'' + FALLBACK_CREST + '\'">'
-      + '<span class="club-picker__option-name">' + NL.escHtml(c.name) + '</span>'
-      + '<span class="club-picker__option-div">' + NL.escHtml(c.division || '') + '</span>'
-      + '</div>';
-  }).join('');
-  html += '<div class="club-picker__freetext" onmousedown="selectClub(\'' + NL.escJ(val) + '\',\'\')">Use "' + NL.escHtml(val) + '" as entered</div>';
-  dd.innerHTML = html;
-  dd.classList.add('open');
-}
-
-function selectClub(name, cr) {
-  document.getElementById('clubInput').value = name;
-  updatePickerCrest(cr || (CREST_BASE + encodeURIComponent(name) + '.png'));
-  closeDropdown();
-}
-
-function updatePickerCrest(url) {
-  var img = document.getElementById('pickerCrest');
-  img.onerror = function() { this.onerror = null; this.src = FALLBACK_CREST; };
-  img.src = url || FALLBACK_CREST;
-}
-
-function closeDropdown() { document.getElementById('clubDropdown').classList.remove('open'); }
+/* Club picker: now the shared NL.clubPicker (see nlAuthReady). The former
+   ~35 lines of onClubInput / selectClub / updatePickerCrest / closeDropdown
+   plus the local clubs-meta fetch were removed in favour of the component. */
 </script>
 
 </body>
