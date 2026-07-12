@@ -35,8 +35,8 @@ Every gated tool's `index.html` has a near-identical `<head>`. The source of tru
 
 | File                 | Current `?v=` | Role                                                              |
 |----------------------|---------------|-------------------------------------------------------------------|
-| `nl-brand.css`       | `?v=19`       | Brand tokens, components, layout. Tools must use tokens not hex.  |
-| `nl-utils.js`        | `?v=9`        | `window.NL.*` helpers: `toast`, `ensureAuth`, `formatDate`, `escHtml`, `writeAudit`, `installAuditHook`, `icon`, plus identity-data exports `mapStyle.drive`, `positionBands`, `projColours` (canvas/data callers). |
+| `nl-brand.css`       | `?v=21`       | Brand tokens, components, layout. Tools must use tokens not hex.  |
+| `nl-utils.js`        | `?v=11`       | `window.NL.*` helpers: `toast`, `ensureAuth`, `formatDate`, `escHtml`, `writeAudit`, `installAuditHook`, `icon`, `clubs`, `clubPicker`, plus identity-data exports `mapStyle.drive`, `positionBands`, `projColours` (canvas/data callers). |
 | `nl-topbar.js`       | `?v=7`        | Renders `#nlTopbar` from `window.NL_TOOL`. Also injects PWA/favicon tags. |
 | `auth-guard.js`      | `?v=8`        | Gates `#pageWrap`. Verifies live Firebase Auth, re-reads RTDB user + tool registry, then reveals page and fires `nlAuthReady(session)`. |
 
