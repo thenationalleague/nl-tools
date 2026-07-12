@@ -1,7 +1,12 @@
 # NL Tools — Cloud Functions
 
-One function today: **`makeProxy`** — generates the 360p preview proxy for
-NL Cup Footage highlights. See the header of `index.js` for what it does.
+Two functions:
+- **`makeProxy`** — generates the 360p preview proxy for NL Cup Footage on upload.
+- **`onFootageDeleted`** — when a footage file is deleted in Storage (console, gsutil,
+  or the master ✕), it removes the file's RTDB record(s) and its proxy, so a
+  direct-in-Storage delete self-heals (no orphan record or orphan proxy).
+
+See the header of `index.js` for details.
 
 This is the **only server-side code** in the repo; everything else is a static
 site. It runs in the `nl-tools` Firebase project (Blaze), region `europe-west2`.
