@@ -3,10 +3,17 @@
 <head>
 <!--
   NL Tools — Vacancies
-  Version: 3.13
+  Version: 3.14
   Date: 12/07/2026
 
   CHANGELOG
+  v3.14 (12/07/2026)
+    - Listing tables (vacancies, access, submissions) and the locked club-user
+      crest now load ~15KB thumbnails via NL.clubs.crestUrl(name,'thumb') with an
+      inline thumb → full → rose onerror fallback (~526KB→~15KB per row). Added a
+      local crestImg() helper; removed the local CREST_BASE and the per-row
+      v.crestUrl/s.crestUrl assignments. Club pickers (NL.clubPicker) unchanged.
+
   v3.13 (12/07/2026)
     - Club pickers now list current-season (2026) clubs only (was all
       seasons). Freetext "use as entered" still covers any off-roster club.
@@ -149,6 +156,13 @@
   /* Public-facing "What's new" — shown when users click the version badge.
      Keep entries user-friendly. Most recent first. */
   window.NL_CHANGELOG = [
+    {
+      date: '12 July 2026',
+      version: 'v3.14',
+      items: [
+        'Club crests in the listing tables now load as lightweight thumbnails, so the page loads faster.'
+      ]
+    },
     {
       date: '12 July 2026',
       version: 'v3.13',
@@ -437,8 +451,19 @@
 <script>
 var db           = firebase.database();
 var FALLBACK     = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png';
-var CREST_BASE   = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
 var GAS_URL      = 'https://script.google.com/macros/s/AKfycbyHutd1esz1kykMR5aLXBkgXY2LPC-CzhUWOLBAFjhN-6XCPlxocQ1N9BAoCpE6cdof/exec';
+
+/* Row/list crest <img> — loads the ~15KB thumbnail, degrading thumb → full → rose
+   on error. String-built table rows can't call NL.clubs.wireCrestImg on a live
+   element, so the thumb→full→rose chain is inlined via onerror. Pickers use the
+   shared NL.clubPicker (already thumbs); this is for the listing tables. */
+function crestImg(name, cls, extra){
+  var thumb = NL.clubs.crestUrl(name || '', 'thumb');
+  var full  = NL.clubs.crestUrl(name || '');
+  return '<img class="'+cls+'" src="'+esc(thumb)+'" alt=""'
+    +(extra?' '+extra:'')
+    +' onerror="this.onerror=function(){this.onerror=null;this.src=\''+FALLBACK+'\'};this.src=\''+esc(full)+'\'">';
+}
 
 /* Club pickers — shared NL.clubPicker controllers (created lazily, see nlAuthReady / renderSubmitStep1) */
 var fClubPicker = null, sClubPicker = null, sfClubPicker = null;
@@ -538,7 +563,6 @@ function startVacanciesListener() {
     var raw = snap.val() || {};
     STATE.allVacancies = Object.keys(raw).map(function(id) {
       var v = raw[id]; v.id = id;
-      v.crestUrl = CREST_BASE + encodeURIComponent(v.club || '') + '.png';
       return v;
     }).sort(function(a,b) {
       var da=NL.parseDate(a.closingDate), db2=NL.parseDate(b.closingDate);
@@ -557,7 +581,6 @@ function loadSubs() {
       var raw = snap.val() || {};
       STATE.allSubs = Object.keys(raw).map(function(id) {
         var s = raw[id]; s.id = id;
-        s.crestUrl = CREST_BASE + encodeURIComponent(s.club || '') + '.png';
         return s;
       }).sort(function(a,b) {
         // Newest first
@@ -641,7 +664,7 @@ function renderVacTable() {
       :'<button class="btn btn--ghost btn--sm" onclick="openEditModal(\''+v.id+'\')">Edit</button> '
         +'<button class="btn btn--danger btn--sm" onclick="confirmDelete(\''+v.id+'\',\''+NL.escJ(v.jobTitle)+'\')">Delete</button>';
     return '<tr class="'+(v.deleted?'is-deleted':'')+'">'
-      +'<td><img class="job-crest" src="'+esc(v.crestUrl)+'" alt="" onerror="this.src=\''+FALLBACK+'\'"></td>'
+      +'<td>'+crestImg(v.club, 'job-crest')+'</td>'
       +'<td><strong style="font-variation-settings:\'wght\' 700">'+esc(v.club)+'</strong></td>'
       +'<td>'+esc(v.jobTitle)+'</td>'
       +'<td>'+esc(v.vacancyType||'—')+'</td>'
@@ -668,7 +691,7 @@ function renderAccessTable() {
     if(d&&d<=soon) pillCls='soon'; else pillCls='live';
     var closing=d?fmtDT(d):'—';
     return '<tr>'
-      +'<td><img class="job-crest" src="'+esc(v.crestUrl)+'" alt="" onerror="this.src=\''+FALLBACK+'\'"></td>'
+      +'<td>'+crestImg(v.club, 'job-crest')+'</td>'
       +'<td><strong style="font-variation-settings:\'wght\' 700">'+esc(v.club)+'</strong></td>'
       +'<td>'+esc(v.jobTitle)+'</td>'
       +'<td>'+esc(v.vacancyType||'—')+'</td>'
@@ -687,7 +710,7 @@ function renderSubsTable() {
     var pillCls=s.status==='Approved'?'approved':s.status==='Rejected'?'rejected':'pending';
     var approvedLabel=s.status==='Approved'&&s.approvedBy?'Approved: '+s.approvedBy:s.status;
     return '<tr>'
-      +'<td><img class="job-crest" src="'+esc(s.crestUrl||FALLBACK)+'" alt="" onerror="this.src=\''+FALLBACK+'\'"></td>'
+      +'<td>'+crestImg(s.club, 'job-crest')+'</td>'
       +'<td><strong style="font-variation-settings:\'wght\' 700">'+esc(s.club)+'</strong></td>'
       +'<td>'+esc(s.jobTitle)+'</td>'
       +'<td style="font-size:var(--text-xs);white-space:nowrap;">'+when+'</td>'
@@ -923,13 +946,12 @@ function renderSubmitStep1(){
   var session=STATE.session||{};
   var isClubUser = !!(session.club && session.club.trim());
   var clubVal = isClubUser ? session.club.trim() : '';
-  var clubCrest = isClubUser ? (CREST_BASE+encodeURIComponent(clubVal)+'.png') : FALLBACK;
 
   // Club picker — locked for club users, open for NL staff
   var clubField = isClubUser
     ? '<div class="form-group span2"><label>Club</label>'
       +'<div class="club-picker__wrap" style="opacity:0.75;pointer-events:none;cursor:default;">'
-      +'<img class="club-picker__crest" src="'+esc(clubCrest)+'" alt="" onerror="this.src=\''+FALLBACK+'\'" style="width:28px;height:28px;object-fit:contain;">'
+      +crestImg(clubVal, 'club-picker__crest', 'style="width:28px;height:28px;object-fit:contain;"')
       +'<span style="font-size:var(--text-sm);font-weight:600;font-variation-settings:\'wght\' 600;padding:0;flex:1;">'+esc(clubVal)+'</span>'
       +'</div>'
       +'<input type="hidden" id="sfClub" value="'+esc(clubVal)+'">'
