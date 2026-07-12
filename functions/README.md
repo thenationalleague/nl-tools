@@ -42,8 +42,9 @@ already authed as owner), then `git clone` the repo and
 ## What it does once live
 
 - Fires when a file lands under **`footage/national-league-cup/`**.
-- Only for **highlights / clips** (`…_HL_…`, `…_CLIPS…`); full matches are skipped
-  (download-only).
+- Proxies **any file up to 2 GiB** (`MAX_PROXY_BYTES`); larger files (full matches,
+  6–10 GB) are skipped and stay **download-only**. The gate is **file size, not the
+  filename** — a producer can misname a highlights file and it still gets a preview.
 - Writes a **360p ~500 kbps faststart MP4** to **`footage/national-league-cup/proxies/<same-name>`**.
 - Idempotent (skips if the proxy already exists).
 
