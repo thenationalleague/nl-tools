@@ -1,7 +1,7 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /tools/system/nl-utils.js
-   Version: v1.16 (12/07/2026)
+   Version: v1.17 (12/07/2026)
 
    Shared helper functions used by every tool page. Exposed on window.NL
    namespace. All functions are defensive — they handle missing arguments
@@ -14,6 +14,13 @@
      NL.escHtml('<script>');          // → '&lt;script&gt;'
 
    Changelog
+   v1.17 (12/07/2026)
+     - Added NL.endpoints — one home for shared backend URLs (public locations
+       only, never secrets). NL.endpoints.gas is the consolidated Apps Script
+       deployment, previously pasted into 7 files under 4 names (NL_GAS_URL /
+       GAS_URL / API_URL / PP_GAS_URL). Rotate here → every tool follows; a
+       lint rule flags any new inline script.google.com URL. Cache-bust ?v=18.
+
    v1.16 (12/07/2026)
      - NL.clubs.crestUrl gained a size arg: 'thumb' (96px) and 'medium'
        (256px) resolve to assets/crests/thumbs|medium/; no-arg stays full-res
@@ -151,6 +158,17 @@
   'use strict';
 
   window.NL = window.NL || {};
+
+  /* ── Shared backend endpoints ────────────────────────────────────────────
+     One place to rotate a URL instead of hunting down pasted copies. PUBLIC
+     service locations + identifiers only — NEVER credentials or secrets. */
+  window.NL.endpoints = {
+    /* Consolidated Google Apps Script deployment: invite + notification
+       emails (sign-in, portal), vacancy submissions (vacancies + submit),
+       the Claudio AI proxy, meeting-minutes generation, and programme-pack
+       Drive operations. Rotate here → every tool follows. */
+    gas: 'https://script.google.com/macros/s/AKfycbyHutd1esz1kykMR5aLXBkgXY2LPC-CzhUWOLBAFjhN-6XCPlxocQ1N9BAoCpE6cdof/exec'
+  };
 
   /* ── Toast notification ──────────────────────────────────────────────── */
   var toastTimeout = null;

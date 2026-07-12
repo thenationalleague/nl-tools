@@ -127,6 +127,12 @@ for dir in */; do
     grep -q "firebasejs/10\.12\.0/firebase-database-compat" "$index" || drift+=("  $slug: missing firebase-database SDK")
   fi
 
+  # No inline Apps Script URL — those belong in NL.endpoints (system/nl-utils.js),
+  # so a deployment rotation is a one-line change, not a repo-wide hunt.
+  if grep -q "script\.google\.com/macros" "$index"; then
+    drift+=("  $slug: inline Apps Script URL — use NL.endpoints.gas")
+  fi
+
   if [[ ${#drift[@]} -eq 0 ]]; then
     clean_count=$((clean_count + 1))
   else
