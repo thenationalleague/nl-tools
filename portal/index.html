@@ -1,11 +1,23 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.90 (12/07/2026)
+  Version: v5.91 (12/07/2026)
   Date: 09/04/2026
   File: /tools/portal/index.html
 
   Changelog:
+  v5.91 (12/07/2026) — Inline role-editor club picker migrated to shared
+           NL.clubPicker:
+           * The per-user "Edit access" panel's Club field now uses the shared
+             NL.clubPicker (search mode) via a mount div, replacing the bespoke
+             .inv-club-picker input/dropdown/crest + local crSearch. season:
+             'current', freetext:false, clearable:false. The off-roster warning
+             badge is preserved (computed via the portal's own isOffRoster()
+             since the component reports isOffRoster:false); an existing user's
+             departed club still shows via setValue(). confirmedClub remains the
+             save-time source of truth, updated from the picker's onSelect.
+             This was the last local club picker in the system.
+
   v5.90 (12/07/2026) — Invite club picker migrated to shared NL.clubPicker:
            * The invite form's club field now uses the shared, accessible
              NL.clubPicker (nl-utils) via a #invClubPicker mount, replacing the
@@ -488,6 +500,13 @@
 
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
+    {
+      date: '12 July 2026',
+      version: 'v5.91',
+      items: [
+        'The club selector in the per-user Edit access panel now uses the shared club picker too, with the same search and crests. The "off current roster" warning for departed clubs is unchanged.'
+      ]
+    },
     {
       date: '12 July 2026',
       version: 'v5.90',
@@ -4771,73 +4790,30 @@ function buildAccordionItem(uid, u, depts, deptMap) {
     offRosterBadge.textContent = '⚠ off current roster';
     clubLbl2.appendChild(offRosterBadge);
     var crPicker = document.createElement('div');
-    crPicker.className = 'inv-club-picker';
     crPicker.style.cssText = 'flex:1;';
-    var crWrap = document.createElement('div');
-    crWrap.className = 'inv-club-picker__wrap';
-    var crCrest = document.createElement('img');
-    crCrest.className = 'inv-club-picker__crest';
-    crCrest.alt = '';
-    crCrest.src = u.club ? CREST_BASE + encodeURIComponent(u.club) + '.png' : FALLBACK_CREST;
-    crCrest.onerror = function() { this.onerror = null; this.src = FALLBACK_CREST; };
-    var clubInput = document.createElement('input');
-    clubInput.type = 'text';
-    clubInput.className = 'inv-club-picker__input';
-    clubInput.value = u.club || '';
-    clubInput.placeholder = 'Search clubs…';
-    var crDropdown = document.createElement('div');
-    crDropdown.className = 'inv-club-picker__dropdown';
+    /* Off-roster badge is computed here (the component always reports
+       isOffRoster:false), so keep the portal's own isOffRoster() check. */
     function refreshOffRoster() {
       loadInvClubs().then(function() {
         offRosterBadge.style.display = isOffRoster(confirmedClub) ? 'inline' : 'none';
       });
     }
-    function crSearch() {
-      confirmedClub = '';
-      offRosterBadge.style.display = 'none';
-      var val = clubInput.value.trim();
-      if (!val) { crDropdown.classList.remove('open'); return; }
-      loadInvClubs().then(function() {
-        /* Source the current-season roster — departed clubs drop, entrants appear */
-        var roster = (window.NL && NL.season && INV_META) ? NL.season.clubsFor(INV_META) : INV_CLUBS_DATA;
-        var filtered = roster.filter(function(c) {
-          return c.name.toLowerCase().indexOf(val.toLowerCase()) !== -1;
-        }).slice(0, 8);
-        crDropdown.innerHTML = '';
-        filtered.forEach(function(c) {
-          var item = document.createElement('div');
-          item.className = 'inv-club-picker__option';
-          item.style.cssText = 'display:flex;align-items:center;gap:8px;padding:7px 12px;cursor:pointer;border-bottom:1px solid var(--border);';
-          var img2 = document.createElement('img');
-          img2.alt = '';
-          img2.src = CREST_BASE + encodeURIComponent(c.name) + '.png';
-          img2.onerror = function() { this.onerror = null; this.src = FALLBACK_CREST; };
-          img2.style.cssText = 'width:24px;height:24px;object-fit:contain;flex-shrink:0;';
-          var nameEl2 = document.createElement('span');
-          nameEl2.style.cssText = 'font-size:13px;font-weight:600;';
-          nameEl2.textContent = c.name;
-          item.appendChild(img2);
-          item.appendChild(nameEl2);
-          item.addEventListener('mousedown', function(e) {
-            e.preventDefault();
-            confirmedClub = c.name;
-            clubInput.value = c.name;
-            crCrest.src = CREST_BASE + encodeURIComponent(c.name) + '.png';
-            crDropdown.classList.remove('open');
-            offRosterBadge.style.display = 'none';
-          });
-          crDropdown.appendChild(item);
-        });
-        crDropdown.classList.toggle('open', filtered.length > 0);
-      });
-    }
-    clubInput.addEventListener('input', crSearch);
-    clubInput.addEventListener('focus', function() { if (clubInput.value.trim()) crSearch(); });
-    clubInput.addEventListener('blur', function() { setTimeout(function() { crDropdown.classList.remove('open'); }, 150); });
-    crWrap.appendChild(crCrest);
-    crWrap.appendChild(clubInput);
-    crPicker.appendChild(crWrap);
-    crPicker.appendChild(crDropdown);
+    /* Shared NL.clubPicker (search mode). The dropdown lists the current-season
+       roster (departed clubs drop, entrants appear); an existing user's
+       off-roster club is still shown via setValue and flagged by the badge.
+       freetext:false + clearable:false keep the contract that a club role must
+       map to a real club chosen from the roster. */
+    var clubCtl = NL.clubPicker(crPicker, {
+      season:      'current',
+      freetext:    false,
+      clearable:   false,
+      placeholder: 'Search clubs…',
+      onSelect: function(sel) {
+        confirmedClub = sel.name;
+        offRosterBadge.style.display = isOffRoster(confirmedClub) ? 'inline' : 'none';
+      }
+    });
+    if (confirmedClub) { clubCtl.setValue(confirmedClub); refreshOffRoster(); }
     clubPickerRow.appendChild(clubLbl2);
     clubPickerRow.appendChild(crPicker);
     rolePicker.appendChild(clubPickerRow);
@@ -4881,7 +4857,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
       roleBtns.querySelectorAll('.invite-role-btn').forEach(function(b) {
         b.classList.toggle('active', b.dataset.role === selectedRole);
       });
-      if (clubRole) { clubInput.value = confirmedClub || ''; refreshOffRoster(); }
+      if (clubRole) { clubCtl.setValue(confirmedClub || ''); refreshOffRoster(); }
     }
 
     /* ── Wire up the six role buttons ── */
