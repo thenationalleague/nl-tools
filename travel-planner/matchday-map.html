@@ -5,12 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Matchday Travel Map — NL Tools</title>
 <!--
-  NL Matchday Travel Map v1.8
-  v1.8 — Rebuilt the motion effect entirely: pulse is now real marker dots that
-         travel along each route via Marker.setPosition (toward the home ground),
-         replacing the polyline-symbol animation that stopped repainting on some
-         devices after highlighting. Reliable everywhere; selected route's dots
-         stay visible + moving, dimmed routes hide theirs.
+  NL Matchday Travel Map v1.9
+  v1.9 — Make the pulse dots actually visible: white fill + solid navy ring,
+         larger (4.5 default / 6 selected), positioned on creation. The v1.8
+         dots were tiny white-on-colour and hard to spot; the motion was running
+         but not readable. Selected line slimmed slightly so dots sit clear.
+  v1.8 — Pulse rebuilt as real marker dots travelling via Marker.setPosition.
   v1.7 — (superseded) Rebuilt icons array each frame — still froze on device.
   v1.6 — (superseded) Kept flow lines on map, hid dimmed via opacity.
   v1.5 — Pulse speed/size fix: 0.16%/frame was sub-pixel on short routes (read
@@ -394,12 +394,14 @@ function crestMarker(pos,name,z){
 // which stopped repainting on some devices once a route was highlighted. Moving
 // a real marker's position repaints reliably everywhere.
 var NDOTS=4;             // dots per route (a short "train" that reads as flow)
-var FLOW_SPEED=0.003;    // fraction of route length advanced per frame
+var FLOW_SPEED=0.0035;   // fraction of route length advanced per frame
 
+// High-contrast pulse dot: white fill + solid navy ring so it reads clearly on
+// any coloured route line and against the pale basemap.
 function pulseDot(scale){
   return new google.maps.Marker({
     map:gMap,zIndex:20,clickable:false,optimized:false,
-    icon:{path:google.maps.SymbolPath.CIRCLE,scale:scale,fillColor:'#ffffff',fillOpacity:.95,strokeColor:'#ffffff',strokeOpacity:.9,strokeWeight:1}
+    icon:{path:google.maps.SymbolPath.CIRCLE,scale:scale,fillColor:'#ffffff',fillOpacity:1,strokeColor:'#223b7c',strokeOpacity:1,strokeWeight:2}
   });
 }
 
@@ -440,8 +442,10 @@ function drawMap(legs){
       var away=crestMarker(path[0],l.f.away.name,5);
       var home=crestMarker(path[path.length-1],l.f.home.name,6);
       var cum=measurePath(path);
-      var dots=[];for(var d=0;d<NDOTS;d++)dots.push(pulseDot(3));
+      var dots=[];for(var d=0;d<NDOTS;d++)dots.push(pulseDot(4.5));
       var o={idx:idx,colour:l.colour,halo:halo,base:base,away:away,home:home,path:path,cum:cum,total:cum[cum.length-1],dots:dots,hidden:false};
+      // Position dots immediately so they're visible before the first frame.
+      for(var k=0;k<dots.length;k++)dots[k].setPosition(posAt(o,k/dots.length));
       routeObjs.push(o);
       base.addListener('click',function(){selectRoute(idx);});
     }catch(e){}
@@ -482,16 +486,17 @@ function applyHighlight(){
   routeObjs.forEach(function(o){
     var sel=selectedIdx===o.idx;
     var dim=selectedIdx!==null&&!sel;
-    o.base.setOptions({strokeWeight:sel?6:(dim?3:4),strokeOpacity:dim?.2:.98,zIndex:sel?50:2});
-    o.halo.setOptions({strokeWeight:sel?10:7,strokeOpacity:dim?.15:.7,zIndex:sel?49:1});
+    o.base.setOptions({strokeWeight:sel?5:(dim?3:4),strokeOpacity:dim?.2:.98,zIndex:sel?50:2});
+    o.halo.setOptions({strokeWeight:sel?9:7,strokeOpacity:dim?.15:.7,zIndex:sel?49:1});
     // With nothing selected, every route's dots flow. Once a fixture is
     // highlighted, only the selected route's dots stay visible + moving; dimmed
-    // routes hide their dots (and are skipped by flowTick).
+    // routes hide their dots (and are skipped by flowTick). Dots sit above the
+    // line (zIndex) and grow on the selected route so the motion is obvious.
     o.hidden=dim;
     o.dots.forEach(function(m){
       m.setVisible(!dim);
-      m.setZIndex(sel?55:20);
-      var ic=m.getIcon();ic.scale=sel?4.2:3;m.setIcon(ic);
+      m.setZIndex(sel?60:20);
+      var ic=m.getIcon();ic.scale=sel?6:4.5;m.setIcon(ic);
     });
     if(o.away)o.away.setOpacity(dim?.3:1);
     if(o.home)o.home.setOpacity(dim?.35:1);
