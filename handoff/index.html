@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--
+  NL × PL2 Footage Handoff — Club-facing standalone page
+  Version: v0.1 (12/07/2026) — MVP prototype, DUMMY content.
+  File: /tools/handoff/index.html
+
+  Standalone (NO auth-guard). Access model: per-club direct link
+  (?c=<token>) or per-club passcode. Reads handoff/data.js. A master-tool
+  localStorage overlay (nlHandoffData) wins when present, so admin edits
+  preview live in the same browser.
+
+  PHASE 2 (see README.md): data + passcodes move to RTDB; downloads become
+  presigned Cloudflare R2 links via a Worker. Today everything is dummy.
+-->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Match Footage — NL × PL2 Cup</title>
+<link rel="stylesheet" href="/tools/system/nl-brand.css?v=20">
+<style>
+  body { background: var(--off-white); }
+  .hbar {
+    background: var(--primary); color: var(--white);
+    border-bottom: 7px solid var(--navy);
+    padding: 14px clamp(16px,3vw,32px);
+    display: flex; align-items: center; gap: 14px;
+    position: sticky; top: 0; z-index: 50;
+  }
+  .hbar__crest { width: 44px; height: 44px; object-fit: contain; flex-shrink: 0;
+    background: var(--white); border-radius: 50%; padding: 3px; }
+  .hbar__mono { width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 900; font-size: 13px; color: var(--white); }
+  .hbar__id { flex: 1; min-width: 0; line-height: 1.15; }
+  .hbar__club { font-size: clamp(15px,1.6vw,20px); font-weight: 900; font-variation-settings:'wght' 900;
+    text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hbar__sub { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em; color: rgba(255,255,255,0.85); }
+  .hbar__signout { background: none; border: 1px solid rgba(255,255,255,0.35); color: var(--white);
+    padding: 7px 12px; border-radius: var(--radius); font-family: var(--font); font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer; flex-shrink: 0; }
+  .hbar__signout:hover { background: rgba(255,255,255,0.12); }
+  .hbar__signout:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+  .wrap { max-width: 900px; margin: 0 auto; padding: clamp(20px,3vw,36px) clamp(14px,2.5vw,28px) 80px; }
+
+  .dummy-flag { background: var(--amber-light); border: 1px solid color-mix(in srgb,var(--amber) 35%,white);
+    color: var(--amber); border-radius: var(--radius); padding: 10px 14px; font-size: 12px; font-weight: 700;
+    margin-bottom: 24px; display: flex; align-items: center; gap: 8px; }
+
+  /* Passcode gate */
+  .gate { min-height: 70vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .gate__card { background: var(--white); border-radius: 12px; box-shadow: var(--shadow); padding: 40px 36px;
+    width: 100%; max-width: 400px; text-align: center; border: 1px solid var(--border); }
+  .gate__logo { width: 64px; margin-bottom: 18px; }
+  .gate__title { font-size: 20px; font-weight: 900; font-variation-settings:'wght' 900; color: var(--navy);
+    text-transform: uppercase; letter-spacing: 0.02em; margin-bottom: 6px; }
+  .gate__sub { font-size: 12px; color: var(--text-muted); margin-bottom: 24px; line-height: 1.5; }
+  .gate__input { width: 100%; text-align: center; text-transform: uppercase; letter-spacing: 0.3em;
+    font-size: 22px; font-weight: 800; font-family: var(--font); padding: 12px; border: 1px solid var(--border);
+    border-radius: var(--radius); color: var(--text); margin-bottom: 14px; outline: none; }
+  .gate__input:focus { border-color: var(--primary); box-shadow: var(--focus-ring); }
+  .gate__err { color: var(--red); font-size: 12px; font-weight: 700; min-height: 18px; margin-bottom: 10px; }
+
+  .stage-head { font-size: 12px; font-weight: 900; font-variation-settings:'wght' 900; text-transform: uppercase;
+    letter-spacing: 0.14em; color: var(--navy); margin: 32px 0 14px; padding-bottom: 8px; border-bottom: 2px solid var(--border); }
+  .stage-head:first-of-type { margin-top: 0; }
+
+  .game { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); margin-bottom: 14px; overflow: hidden; }
+  .game__top { display: flex; align-items: center; gap: 12px; padding: 14px 18px; background: var(--off-white);
+    border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .game__date { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--text-muted); flex-shrink: 0; }
+  .game__fix { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; font-weight: 800;
+    font-variation-settings:'wght' 800; font-size: 14px; }
+  .game__team { display: inline-flex; align-items: center; gap: 6px; }
+  .game__team.me { color: var(--primary); }
+  .game__team img, .game__team .mono { width: 22px; height: 22px; flex-shrink: 0; }
+  .game__team .mono { border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+    color: var(--white); font-size: 8px; font-weight: 900; }
+  .game__v { color: var(--text-muted); font-weight: 700; font-size: 11px; }
+  .game__round { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; }
+
+  .assets { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); }
+  @media (max-width: 560px) { .assets { grid-template-columns: 1fr; } }
+  .asset { background: var(--white); padding: 12px 16px; display: flex; align-items: center; gap: 10px; }
+  .asset__label { flex: 1; font-size: 12px; font-weight: 700; font-variation-settings:'wght' 700; color: var(--text); }
+  .asset__label small { display: block; font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .asset__btn { border: none; border-radius: var(--radius); font-family: var(--font); font-size: 11px; font-weight: 800;
+    text-transform: uppercase; letter-spacing: 0.05em; padding: 7px 12px; cursor: pointer; white-space: nowrap; }
+  .asset__btn--dl { background: var(--navy); color: var(--white); }
+  .asset__btn--dl:hover { background: var(--navy-600); }
+  .asset__btn--pv { background: var(--white); color: var(--navy); border: 1px solid var(--border); margin-right: 6px; }
+  .asset__btn--pv:hover { border-color: var(--navy); }
+  .asset__btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .asset__none { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+  .asset--empty .asset__label { color: var(--text-muted); }
+
+  .tbd { padding: 18px; text-align: center; color: var(--text-muted); font-size: 13px; font-weight: 600; }
+
+  /* Preview modal */
+  .pv-backdrop { position: fixed; inset: 0; background: rgba(10,22,40,0.7); z-index: 200; display: none;
+    align-items: center; justify-content: center; padding: 24px; }
+  .pv-backdrop.open { display: flex; }
+  .pv { background: var(--navy-900); border-radius: 10px; width: 100%; max-width: 720px; overflow: hidden; box-shadow: 0 16px 60px rgba(0,0,0,0.4); }
+  .pv__head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--navy); color: var(--white); }
+  .pv__title { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; }
+  .pv__close { background: none; border: none; color: var(--white); font-size: 24px; cursor: pointer; line-height: 1; }
+  .pv__stage { aspect-ratio: 16/9; background: #000; display: flex; align-items: center; justify-content: center;
+    color: rgba(255,255,255,0.6); font-size: 13px; text-align: center; padding: 20px; }
+</style>
+</head>
+<body>
+
+<!-- Passcode gate (shown when no valid club token) -->
+<div class="gate" id="gate" style="display:none">
+  <div class="gate__card">
+    <img class="gate__logo" src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png" alt="National League">
+    <div class="gate__title">Match Footage</div>
+    <div class="gate__sub" id="gateSub">Enter your club passcode to access your games.</div>
+    <input class="gate__input" id="gateInput" maxlength="6" placeholder="••••••" autocomplete="off" aria-label="Club passcode">
+    <div class="gate__err" id="gateErr" role="alert"></div>
+    <button class="btn btn--primary" id="gateBtn" style="width:100%;justify-content:center;">View my games</button>
+  </div>
+</div>
+
+<!-- Club view -->
+<div id="app" style="display:none">
+  <div class="hbar">
+    <span id="hbarCrest"></span>
+    <div class="hbar__id">
+      <div class="hbar__club" id="hbarClub"></div>
+      <div class="hbar__sub" id="hbarSub"></div>
+    </div>
+    <button class="hbar__signout" id="signout">Not you?</button>
+  </div>
+  <div class="wrap">
+    <div class="dummy-flag">⚠️ Prototype — all footage below is dummy content for layout testing.</div>
+    <div id="games"></div>
+  </div>
+</div>
+
+<div class="pv-backdrop" id="pvBackdrop">
+  <div class="pv">
+    <div class="pv__head"><span class="pv__title" id="pvTitle">Preview</span><button class="pv__close" id="pvClose" aria-label="Close preview">&times;</button></div>
+    <div class="pv__stage" id="pvStage"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/tools/handoff/data.js"></script>
+<script>
+(function(){
+  'use strict';
+  var CREST_ROSE = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png';
+
+  /* Data source: master-tool localStorage overlay wins, else the committed dummy. */
+  function getData(){
+    try { var o = localStorage.getItem('nlHandoffData'); if (o) return JSON.parse(o); } catch(e){}
+    return window.HANDOFF_DATA;
+  }
+  var DATA = getData();
+  var byCode = {}; DATA.clubs.forEach(function(c){ byCode[c.code] = c; });
+
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function toast(m){ var t=document.getElementById('toast'); t.textContent=m; t.className='toast toast--info show'; setTimeout(function(){t.classList.remove('show');},2600); }
+
+  function crestHTML(club, size){
+    size = size || 22;
+    if (club && club.crest) return '<img src="'+esc(club.crest)+'" alt="" onerror="this.onerror=null;this.src=\''+CREST_ROSE+'\'" style="width:'+size+'px;height:'+size+'px;object-fit:contain;">';
+    var col = (club && club.mono) || '#5a6a82';
+    return '<span class="mono" style="background:'+esc(col)+';width:'+size+'px;height:'+size+'px;">'+esc(club?club.code:'?')+'</span>';
+  }
+
+  function findClubByToken(tok){ if(!tok) return null; for(var i=0;i<DATA.clubs.length;i++){ if(DATA.clubs[i].token===tok) return DATA.clubs[i]; } return null; }
+  function findClubByPass(p){ p=(p||'').toUpperCase().trim(); for(var i=0;i<DATA.clubs.length;i++){ if((DATA.clubs[i].passcode||'').toUpperCase()===p) return DATA.clubs[i]; } return null; }
+
+  function gamesForClub(code){
+    return DATA.games.filter(function(g){ return g.home===code || g.away===code; })
+      .sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); });
+  }
+
+  function teamHTML(code, meCode){
+    var c = byCode[code];
+    var cls = 'game__team' + (code===meCode ? ' me' : '');
+    return '<span class="'+cls+'">'+crestHTML(c,22)+esc(c?c.short:code)+'</span>';
+  }
+
+  function assetRow(g, at){
+    var url = g.assets ? g.assets[at.key] : null;
+    var right;
+    if (url){
+      var pv = at.preview ? '<button class="asset__btn asset__btn--pv" data-pv="'+g.id+'|'+at.key+'">Preview</button>' : '';
+      right = pv + '<button class="asset__btn asset__btn--dl" data-dl="'+g.id+'|'+at.key+'">Download</button>';
+    } else {
+      right = '<span class="asset__none">Not ready</span>';
+    }
+    return '<div class="asset'+(url?'':' asset--empty')+'"><span class="asset__label">'+esc(at.label)+'</span>'+right+'</div>';
+  }
+
+  function gameHTML(g, meCode){
+    if (g.home==null){ // knockout TBD
+      return '<div class="game"><div class="game__top"><span class="game__round">'+esc(g.round)+'</span><span class="game__v">Teams to be confirmed</span></div><div class="tbd">Fixtures unlock once the teams are known.</div></div>';
+    }
+    var top = '<div class="game__top"><span class="game__date">'+esc(g.date)+'</span><span class="game__fix">'+teamHTML(g.home,meCode)+'<span class="game__v">v</span>'+teamHTML(g.away,meCode)+'</span><span class="game__round">'+esc(g.round)+'</span></div>';
+    var assets = DATA.assetTypes.map(function(at){ return assetRow(g, at); }).join('');
+    return '<div class="game">'+top+'<div class="assets">'+assets+'</div></div>';
+  }
+
+  function render(club){
+    document.getElementById('gate').style.display='none';
+    document.getElementById('app').style.display='block';
+    document.getElementById('hbarCrest').innerHTML = club.crest
+      ? '<img class="hbar__crest" src="'+esc(club.crest)+'" alt="" onerror="this.onerror=null;this.src=\''+CREST_ROSE+'\'">'
+      : '<span class="hbar__mono" style="background:'+esc(club.mono||'#223b7c')+'">'+esc(club.code)+'</span>';
+    document.getElementById('hbarClub').textContent = club.name;
+    document.getElementById('hbarSub').textContent = (club.tier==='PL2'?'Premier League 2':'National League') + ' · ' + DATA.competition;
+
+    var games = gamesForClub(club.code);
+    // group by stage, preserving order
+    var order = [], byStage = {};
+    games.forEach(function(g){ if(!byStage[g.stage]){ byStage[g.stage]=[]; order.push(g.stage);} byStage[g.stage].push(g); });
+    var html = '';
+    if (!games.length) html = '<div class="tbd">No games assigned to your club yet.</div>';
+    order.forEach(function(st){
+      html += '<div class="stage-head">'+esc(st)+'</div>';
+      html += byStage[st].map(function(g){ return gameHTML(g, club.code); }).join('');
+    });
+    document.getElementById('games').innerHTML = html;
+
+    // wire buttons
+    document.getElementById('games').addEventListener('click', function(e){
+      var dl = e.target.getAttribute('data-dl'); var pv = e.target.getAttribute('data-pv');
+      if (dl) toast('Dummy content — real download arrives in Phase 2 (R2).');
+      if (pv) openPreview(pv);
+    });
+  }
+
+  function openPreview(ref){
+    var parts = ref.split('|'), g = DATA.games.filter(function(x){return x.id===parts[0];})[0];
+    var at = DATA.assetTypes.filter(function(x){return x.key===parts[1];})[0];
+    if(!g||!at) return;
+    var h = byCode[g.home], a = byCode[g.away];
+    document.getElementById('pvTitle').textContent = (h?h.short:g.home)+' v '+(a?a.short:g.away)+' — '+at.label;
+    document.getElementById('pvStage').innerHTML = '▶ Dummy preview player<br><small style="opacity:0.7">Real highlights stream from R2 in Phase 2</small>';
+    document.getElementById('pvBackdrop').classList.add('open');
+  }
+  document.getElementById('pvClose').addEventListener('click', function(){ document.getElementById('pvBackdrop').classList.remove('open'); });
+  document.getElementById('pvBackdrop').addEventListener('click', function(e){ if(e.target===this) this.classList.remove('open'); });
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') document.getElementById('pvBackdrop').classList.remove('open'); });
+
+  function showGate(msg){
+    document.getElementById('app').style.display='none';
+    document.getElementById('gate').style.display='flex';
+    if (msg) document.getElementById('gateSub').textContent = msg;
+    var inp = document.getElementById('gateInput'), err = document.getElementById('gateErr');
+    inp.focus();
+    function submit(){
+      var club = findClubByPass(inp.value);
+      if (!club){ err.textContent = 'Passcode not recognised. Check with the NL media team.'; return; }
+      err.textContent='';
+      history.replaceState({},'', location.pathname + '?c=' + encodeURIComponent(club.token));
+      render(club);
+    }
+    document.getElementById('gateBtn').onclick = submit;
+    inp.onkeydown = function(e){ if(e.key==='Enter') submit(); };
+  }
+
+  document.getElementById('signout').addEventListener('click', function(){
+    history.replaceState({},'', location.pathname);
+    showGate();
+  });
+
+  // boot: ?c=<token> → direct in; else passcode gate
+  var params = new URLSearchParams(location.search);
+  var club = findClubByToken(params.get('c'));
+  if (club) render(club); else showGate();
+})();
+</script>
+</body>
+</html>
