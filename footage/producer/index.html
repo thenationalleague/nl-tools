@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — NL Cup Footage — PRODUCER upload page
+  File: /tools/footage/producer/index.html
+
+  External, gated like a PL2 club: a producer passcode / ?p=<token> direct link.
+  Producer uploads footage; each file auto-maps by filename
+  (YYYY-MM-DD_HOME_AWAY_TYPE_VARIANT) to a fixture, and an unmatched file must be
+  mapped (game + type) before it can be submitted — mapping is forced.
+
+  DUMMY: "upload" is simulated and writes the file into the localStorage overlay
+  (nlFootageData) as a held (live:false) file, so master/club in the same browser
+  reflect it. Production wires real Firebase Storage upload (passcode → anon-auth +
+  upload claim) + an RTDB write. Firebase is initialised for that future wiring.
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Producer · NL Cup Footage</title>
+<link rel="stylesheet" href="/tools/system/nl-brand.css?v=21">
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script>
+  firebase.initializeApp({
+    apiKey:"AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU", authDomain:"nl-tools.firebaseapp.com",
+    databaseURL:"https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app", projectId:"nl-tools",
+    storageBucket:"nl-tools.firebasestorage.app", messagingSenderId:"801354670005",
+    appId:"1:801354670005:web:05d8ebad3e7e63610d03fc"
+  });
+</script>
+<style>
+  body { background: var(--off-white); }
+  .pbar { background: var(--navy); color: var(--white); padding: 14px clamp(16px,3vw,32px);
+    display: flex; align-items: center; gap: 12px; border-bottom: 7px solid var(--primary); flex-wrap: wrap; }
+  .pbar__title { flex: 1; font-size: clamp(15px,1.6vw,20px); font-weight: 900; font-variation-settings:'wght' 900;
+    text-transform: uppercase; letter-spacing: 0.04em; min-width: 180px; }
+  .pbar__title small { display: block; font-size: 10px; font-weight: 700; letter-spacing: 0.14em; color: rgba(255,255,255,0.8); }
+  .pbar__out { background: none; border: 1px solid rgba(255,255,255,0.35); color: var(--white); padding: 7px 12px;
+    border-radius: var(--radius); font-family: var(--font); font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; cursor: pointer; }
+  .pbar__out:hover { background: rgba(255,255,255,0.12); }
+  .wrap { max-width: 820px; margin: 0 auto; padding: clamp(20px,3vw,34px) clamp(14px,2.5vw,26px) 80px; }
+
+  .dummy-flag { background: var(--amber-light); border: 1px solid color-mix(in srgb,var(--amber) 35%,white);
+    color: var(--amber); border-radius: var(--radius); padding: 10px 14px; font-size: 12px; font-weight: 700; margin-bottom: 22px; }
+
+  /* Gate */
+  .gate { min-height: 68vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .gate__card { background: var(--white); border-radius: 12px; box-shadow: var(--shadow); padding: 38px 34px; width: 100%;
+    max-width: 400px; text-align: center; border: 1px solid var(--border); border-top: 6px solid var(--navy); }
+  .gate__title { font-size: 20px; font-weight: 900; font-variation-settings:'wght' 900; color: var(--navy); text-transform: uppercase; letter-spacing: 0.02em; }
+  .gate__sub { font-size: 12px; color: var(--text-muted); margin: 6px 0 22px; line-height: 1.5; }
+  .gate__input { width: 100%; text-align: center; text-transform: uppercase; letter-spacing: 0.25em; font-size: 20px; font-weight: 800;
+    font-family: var(--font); padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 12px; outline: none; }
+  .gate__input:focus { border-color: var(--navy); box-shadow: var(--focus-ring); }
+  .gate__err { color: var(--red); font-size: 12px; font-weight: 700; min-height: 18px; margin-bottom: 8px; }
+
+  /* Drop zone */
+  .drop { border: 2px dashed color-mix(in srgb,var(--navy) 30%,white); border-radius: var(--radius); background: var(--white);
+    padding: 30px 20px; text-align: center; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+  .drop:hover, .drop.over { background: var(--navy-50); border-color: var(--navy); }
+  .drop__ic { font-size: 30px; }
+  .drop__t { font-weight: 800; color: var(--navy); margin-top: 6px; font-size: 15px; }
+  .drop__s { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+  .drop__row { display: flex; gap: 10px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+
+  .sec-head { font-size: 12px; font-weight: 900; font-variation-settings:'wght' 900; text-transform: uppercase; letter-spacing: 0.12em;
+    color: var(--navy); margin: 26px 0 12px; display: flex; align-items: center; gap: 8px; }
+  .sec-head .pill { font-size: 10px; font-weight: 800; border-radius: 20px; padding: 2px 9px; letter-spacing: 0.04em; }
+  .pill--ok { background: var(--green-light); color: var(--green); }
+  .pill--warn { background: var(--amber-light); color: var(--amber); }
+
+  .stage { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+    padding: 12px 14px; margin-bottom: 9px; }
+  .stage__row { display: flex; align-items: center; gap: 11px; }
+  .stage__ic { width: 30px; height: 30px; border-radius: 7px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; }
+  .stage__ic--ok { background: var(--green-light); color: var(--green); }
+  .stage__ic--warn { background: var(--amber-light); color: var(--amber); }
+  .stage__meta { flex: 1; min-width: 0; line-height: 1.3; }
+  .stage__name { font-size: 13px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stage__map { font-size: 11px; color: var(--text-muted); font-weight: 600; }
+  .stage__map b { color: var(--navy); font-weight: 800; }
+  .stage__x { background: none; border: none; color: var(--text-muted); font-size: 18px; cursor: pointer; flex-shrink: 0; line-height: 1; }
+  .stage__x:hover { color: var(--red); }
+  .stage__fix { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 10px; padding-left: 41px; }
+  .stage__fix select { font-family: var(--font); font-size: 12px; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--white); }
+  .stage__fix select.bad { border-color: var(--amber); }
+
+  .actionbar { position: sticky; bottom: 0; background: var(--white); border-top: 1px solid var(--border);
+    margin: 18px -14px -80px; padding: 14px clamp(14px,2.5vw,26px); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; box-shadow: 0 -4px 14px rgba(10,22,40,0.06); }
+  .actionbar__note { flex: 1; font-size: 12px; color: var(--text-muted); font-weight: 600; min-width: 160px; }
+  .prog { height: 6px; background: var(--navy-50); border-radius: 20px; overflow: hidden; margin-top: 8px; }
+  .prog__fill { height: 100%; width: 100%; background: var(--green); transform: scaleX(0); transform-origin: left; transition: transform 0.2s; }
+
+  .done { background: var(--green-light); border: 1px solid color-mix(in srgb,var(--green) 30%,white); color: var(--green);
+    border-radius: var(--radius); padding: 12px 14px; font-size: 13px; font-weight: 700; margin-bottom: 14px; }
+</style>
+</head>
+<body>
+
+<!-- Gate -->
+<div class="gate" id="gate" style="display:none">
+  <div class="gate__card">
+    <div class="gate__title">Producer upload</div>
+    <div class="gate__sub" id="gateSub">Enter your producer passcode to upload match footage.</div>
+    <input class="gate__input" id="gateInput" maxlength="8" placeholder="••••••" autocomplete="off" aria-label="Producer passcode">
+    <div class="gate__err" id="gateErr" role="alert"></div>
+    <button class="btn btn--primary" id="gateBtn" style="width:100%;justify-content:center;">Start uploading</button>
+  </div>
+</div>
+
+<!-- App -->
+<div id="app" style="display:none">
+  <div class="pbar">
+    <div class="pbar__title">NL Cup Footage — Producer<small id="pbarSub">Upload &amp; map footage</small></div>
+    <button class="pbar__out" id="signout">Sign out</button>
+  </div>
+  <div class="wrap">
+    <div class="dummy-flag">⚠️ Prototype — uploads are simulated (no real file leaves your device yet). They appear as <b>held</b> files for NL to review.</div>
+    <div id="doneMsg"></div>
+
+    <div class="drop" id="drop">
+      <div class="drop__ic">⬆️</div>
+      <div class="drop__t">Drop footage here, or choose files</div>
+      <div class="drop__s">Name files <code>YYYY-MM-DD_HOME_AWAY_TYPE_VARIANT.mp4</code> and they map themselves.</div>
+      <div class="drop__row">
+        <button class="btn btn--primary btn--sm" id="pickBtn">Choose files</button>
+        <button class="btn btn--ghost btn--sm" id="sampleBtn">Add sample files (demo)</button>
+      </div>
+      <input type="file" id="fileInput" accept="video/mp4,.mp4" multiple style="display:none">
+    </div>
+
+    <div id="staged"></div>
+  </div>
+
+  <div class="actionbar" id="actionbar" style="display:none">
+    <div class="actionbar__note" id="abNote"></div>
+    <button class="btn btn--ghost btn--sm" id="clearBtn">Clear</button>
+    <button class="btn btn--primary" id="submitBtn">Upload to NL</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="/tools/footage/data.js"></script>
+<script>
+(function(){
+  'use strict';
+  function getData(){ try{ var o=localStorage.getItem('nlFootageData'); if(o) return JSON.parse(o);}catch(e){} return window.FOOTAGE_DATA; }
+  var DATA = getData();
+  var byCode = {}; DATA.clubs.forEach(function(c){ byCode[c.code]=c; });
+  var producer = DATA.producer || { passcode:'PROD24', token:'prod-9x2k', name:'Producer' };
+
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function toast(m,k){ var t=document.getElementById('toast'); t.textContent=m; t.className='toast toast--'+(k||'info')+' show'; setTimeout(function(){t.classList.remove('show');},2600); }
+
+  var MONTHS={JAN:'01',FEB:'02',MAR:'03',APR:'04',MAY:'05',JUN:'06',JUL:'07',AUG:'08',SEP:'09',OCT:'10',NOV:'11',DEC:'12'};
+  function isoDate(d){ if(!d) return ''; var p=String(d).trim().split(/\s+/); if(p.length!==3) return d; return p[0]+'-'+(MONTHS[p[1].toUpperCase()]||'01')+'-'+p[2].padStart(2,'0'); }
+  var TYPES=['HL','FMR','CLIPS'], VARIANTS=['CLEAN','DIRTY'];
+  var LABEL={ 'HL|CLEAN':'Highlights (clean)','HL|DIRTY':'Highlights (with graphics)','FMR|CLEAN':'Full match (clean)','FMR|DIRTY':'Full match (with graphics)','CLIPS|':'Social clips' };
+  function labelFor(type,variant){ return LABEL[type+'|'+(variant||'')] || (type+(variant?(' '+variant):'')); }
+
+  var playable = DATA.games.filter(function(g){ return g.home && g.away; });
+
+  /* Parse a filename to its parts. */
+  function parseName(fname){
+    var base = fname.replace(/\.[^.]+$/,'');
+    var p = base.split('_');
+    if (p.length < 4) return null;
+    var date=p[0], home=(p[1]||'').toUpperCase(), away=(p[2]||'').toUpperCase(), type=(p[3]||'').toUpperCase(), variant=(p[4]||'').toUpperCase()||null;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+    return { date:date, home:home, away:away, type:type, variant:variant };
+  }
+  /* Find the fixture a parsed name belongs to. */
+  function matchGame(pr){
+    if(!pr) return null;
+    for (var i=0;i<playable.length;i++){ var g=playable[i];
+      if (isoDate(g.date)===pr.date && g.home===pr.home && g.away===pr.away) return g;
+    }
+    return null;
+  }
+
+  /* ---- staging ---- */
+  var staged = [];   // { key, fname, gameId, type, variant, matched }
+  var seq = 0;
+  function stageFile(fname){
+    var pr = parseName(fname);
+    var g = pr ? matchGame(pr) : null;
+    var typeOk = pr && TYPES.indexOf(pr.type)>-1;
+    staged.push({
+      key: 'f'+(seq++),
+      fname: fname,
+      gameId: g ? g.id : '',
+      type: (typeOk ? pr.type : ''),
+      variant: pr ? pr.variant : null,
+      matched: !!(g && typeOk)
+    });
+  }
+
+  function gameOptions(sel){
+    return '<option value="">— pick match —</option>'+playable.map(function(g){
+      var h=(byCode[g.home]||{}).short||g.home, a=(byCode[g.away]||{}).short||g.away;
+      return '<option value="'+esc(g.id)+'"'+(g.id===sel?' selected':'')+'>'+esc(isoDate(g.date)+'  '+h+' v '+a)+'</option>';
+    }).join('');
+  }
+  function typeOptions(sel){ return '<option value="">— type —</option>'+TYPES.map(function(t){ return '<option'+(t===sel?' selected':'')+'>'+t+'</option>'; }).join(''); }
+  function variantOptions(sel){ return '<option value="">— variant —</option>'+VARIANTS.map(function(v){ return '<option'+(v===sel?' selected':'')+'>'+v+'</option>'; }).join(''); }
+
+  function isReady(s){ return !!(s.gameId && s.type && (s.type==='CLIPS' || s.variant)); }
+
+  function renderStaged(){
+    var host = document.getElementById('staged');
+    if (!staged.length){ host.innerHTML=''; document.getElementById('actionbar').style.display='none'; return; }
+    var ok = staged.filter(isReady), need = staged.filter(function(s){ return !isReady(s); });
+    var html='';
+    if (need.length){
+      html += '<div class="sec-head">Needs mapping <span class="pill pill--warn">'+need.length+'</span></div>';
+      html += need.map(stageHTML).join('');
+    }
+    if (ok.length){
+      html += '<div class="sec-head">Ready <span class="pill pill--ok">'+ok.length+'</span></div>';
+      html += ok.map(stageHTML).join('');
+    }
+    host.innerHTML = html;
+
+    document.getElementById('actionbar').style.display='flex';
+    var note = document.getElementById('abNote');
+    var submit = document.getElementById('submitBtn');
+    if (need.length){ note.innerHTML='<b style="color:var(--amber)">'+need.length+' file'+(need.length>1?'s':'')+' still '+(need.length>1?'need':'needs')+' mapping</b> — map every file before uploading.'; submit.disabled=true; submit.classList.add('is-disabled'); }
+    else { note.textContent = ok.length+' file'+(ok.length>1?'s':'')+' ready to upload.'; submit.disabled=false; submit.classList.remove('is-disabled'); }
+  }
+
+  function stageHTML(s){
+    var ready = isReady(s);
+    var ic = '<span class="stage__ic '+(ready?'stage__ic--ok':'stage__ic--warn')+'">'+(ready?'✓':'?')+'</span>';
+    var mapLine;
+    if (ready){
+      var g = playable.filter(function(x){return x.id===s.gameId;})[0];
+      var h=(byCode[g.home]||{}).short||g.home, a=(byCode[g.away]||{}).short||g.away;
+      mapLine = '<div class="stage__map">→ <b>'+esc(h+' v '+a)+'</b> · '+esc(labelFor(s.type,s.variant))+'</div>';
+    } else {
+      mapLine = '<div class="stage__map">Couldn’t read this filename — map it below.</div>';
+    }
+    var head = '<div class="stage__row">'+ic
+      + '<div class="stage__meta"><div class="stage__name">'+esc(s.fname)+'</div>'+mapLine+'</div>'
+      + '<button class="stage__x" data-x="'+s.key+'" title="Remove">&times;</button></div>';
+    var mapper = ready ? '' :
+      '<div class="stage__fix">'
+      + '<select data-g="'+s.key+'" class="'+(s.gameId?'':'bad')+'">'+gameOptions(s.gameId)+'</select>'
+      + '<select data-t="'+s.key+'" class="'+(s.type?'':'bad')+'">'+typeOptions(s.type)+'</select>'
+      + '<select data-v="'+s.key+'" class="'+((s.type==='CLIPS'||s.variant)?'':'bad')+'"'+(s.type==='CLIPS'?' disabled':'')+'>'+variantOptions(s.variant)+'</select>'
+      + '</div>';
+    return '<div class="stage stage--'+(ready?'ok':'warn')+'">'+head+mapper+'</div>';
+  }
+
+  document.getElementById('staged').addEventListener('click', function(e){
+    var x = e.target.getAttribute && e.target.getAttribute('data-x');
+    if (x){ staged = staged.filter(function(s){return s.key!==x;}); renderStaged(); }
+  });
+  document.getElementById('staged').addEventListener('change', function(e){
+    var t=e.target, k;
+    if ((k=t.getAttribute('data-g'))){ find(k).gameId=t.value; }
+    else if ((k=t.getAttribute('data-t'))){ var s=find(k); s.type=t.value; if(s.type==='CLIPS') s.variant=null; }
+    else if ((k=t.getAttribute('data-v'))){ find(k).variant=t.value||null; }
+    else return;
+    renderStaged();
+  });
+  function find(k){ return staged.filter(function(s){return s.key===k;})[0]; }
+
+  /* ---- intake ---- */
+  function addFiles(names){ names.forEach(stageFile); renderStaged(); }
+  var fi = document.getElementById('fileInput');
+  document.getElementById('pickBtn').addEventListener('click', function(){ fi.click(); });
+  fi.addEventListener('change', function(){ addFiles([].map.call(fi.files, function(f){return f.name;})); fi.value=''; });
+  var drop = document.getElementById('drop');
+  ['dragenter','dragover'].forEach(function(ev){ drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.add('over'); }); });
+  ['dragleave','drop'].forEach(function(ev){ drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.remove('over'); }); });
+  drop.addEventListener('drop', function(e){ addFiles([].map.call(e.dataTransfer.files, function(f){return f.name;})); });
+
+  document.getElementById('sampleBtn').addEventListener('click', function(){
+    // Generate demo names off real fixtures: 2 that match, 1 that won't.
+    var names = [];
+    var g1 = playable[0], g2 = playable[3] || playable[1];
+    if (g1) names.push(isoDate(g1.date)+'_'+g1.home+'_'+g1.away+'_HL_DIRTY.mp4');
+    if (g2) names.push(isoDate(g2.date)+'_'+g2.home+'_'+g2.away+'_FMR_CLEAN.mp4');
+    names.push('MATCHDAY1_clip_final_v2.mp4');   // unparseable → needs mapping
+    addFiles(names);
+    toast('Added 3 sample files');
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', function(){ staged=[]; renderStaged(); });
+
+  /* ---- submit (simulated) ---- */
+  document.getElementById('submitBtn').addEventListener('click', function(){
+    var ready = staged.filter(isReady);
+    if (!ready.length) return;
+    var note = document.getElementById('abNote');
+    note.innerHTML = 'Uploading…<div class="prog"><div class="prog__fill" id="pf"></div></div>';
+    document.getElementById('submitBtn').disabled = true;
+    var pct=0, iv=setInterval(function(){
+      pct = Math.min(100, pct+18); var pf=document.getElementById('pf'); if(pf) pf.style.transform='scaleX('+(pct/100)+')';
+      if (pct>=100){ clearInterval(iv); finishUpload(ready); }
+    }, 160);
+  });
+
+  function finishUpload(ready){
+    // DUMMY: write each mapped file into the localStorage overlay as a held file.
+    ready.forEach(function(s){
+      var g = DATA.games.filter(function(x){return x.id===s.gameId;})[0]; if(!g) return;
+      if (!Array.isArray(g.files)) g.files=[];
+      var vU = s.variant||''; var name = s.date ? '' : '';
+      var fileName = s.fname;
+      g.files.push({
+        id: g.id+'-'+s.type.toLowerCase()+(s.variant?('_'+s.variant.toLowerCase()):'')+'-'+s.key,
+        type: s.type.toLowerCase(), variant: s.variant?s.variant.toLowerCase():null,
+        label: labelFor(s.type, s.variant), name: fileName, size: '—',
+        preview: s.type==='HL'||s.type==='CLIPS', live: false, url: '#uploaded'
+      });
+    });
+    try { localStorage.setItem('nlFootageData', JSON.stringify(DATA)); } catch(e){}
+    var n = ready.length;
+    staged = staged.filter(function(s){ return !isReady(s); });
+    renderStaged();
+    document.getElementById('doneMsg').innerHTML = '<div class="done">✓ Uploaded '+n+' file'+(n>1?'s':'')+'. They’re now with NL as <b>held</b> files — NL will review and release them to clubs.</div>';
+    toast('Uploaded '+n+' file'+(n>1?'s':''), 'success');
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+
+  /* ---- gate ---- */
+  function enter(){
+    document.getElementById('gate').style.display='none';
+    document.getElementById('app').style.display='block';
+    document.getElementById('pbarSub').textContent = producer.name || 'Upload & map footage';
+  }
+  function showGate(){
+    document.getElementById('app').style.display='none';
+    document.getElementById('gate').style.display='flex';
+    var inp=document.getElementById('gateInput'), err=document.getElementById('gateErr');
+    inp.focus();
+    function submit(){
+      if ((inp.value||'').toUpperCase().trim() === String(producer.passcode||'').toUpperCase()){
+        history.replaceState({},'', location.pathname+'?p='+encodeURIComponent(producer.token||''));
+        enter();
+      } else { err.textContent='Passcode not recognised. Check with the NL media team.'; }
+    }
+    document.getElementById('gateBtn').onclick = submit;
+    inp.onkeydown = function(e){ if(e.key==='Enter') submit(); };
+  }
+  document.getElementById('signout').addEventListener('click', function(){ history.replaceState({},'', location.pathname); staged=[]; renderStaged(); showGate(); });
+
+  // boot: ?p=<token> → straight in; else passcode gate
+  var params = new URLSearchParams(location.search);
+  if (params.get('p') && params.get('p')===producer.token) enter(); else showGate();
+})();
+</script>
+</body>
+</html>
