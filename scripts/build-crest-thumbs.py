@@ -23,7 +23,7 @@ from pathlib import Path
 from PIL import Image
 
 # tier folder → max long-edge px
-TIERS = {"thumbs": 96, "medium": 512}
+TIERS = {"thumbs": 96, "medium": 256}
 
 ROOT = Path(__file__).resolve().parent.parent
 CRESTS = ROOT / "assets" / "crests"

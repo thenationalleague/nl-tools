@@ -1,7 +1,7 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /tools/system/nl-utils.js
-   Version: v1.15 (12/07/2026)
+   Version: v1.16 (12/07/2026)
 
    Shared helper functions used by every tool page. Exposed on window.NL
    namespace. All functions are defensive — they handle missing arguments
@@ -14,6 +14,14 @@
      NL.escHtml('<script>');          // → '&lt;script&gt;'
 
    Changelog
+   v1.16 (12/07/2026)
+     - NL.clubs.crestUrl gained a size arg: 'thumb' (96px) and 'medium'
+       (256px) resolve to assets/crests/thumbs|medium/; no-arg stays full-res
+       (byte-identical, backwards compatible). Added NL.clubs.wireCrestImg for
+       the tier→full→rose onerror chain. NL.clubPicker renders option/selected
+       crests as thumbs. Tiers auto-generated (scripts/build-crest-thumbs.py).
+       Cache-busted ?v=15 → ?v=16 (thumbs) → ?v=17 (medium).
+
    v1.15 (12/07/2026)
      - NL.clubPicker: ROOT-CAUSE FIX — `freetext` was never copied from
        options into the internal opt object, so opt.freetext was always
@@ -688,7 +696,7 @@
                                      legacy URL, so no-arg callers are unaffected).
          crestUrl(name, 'thumb')  → 96px  (assets/crests/thumbs/…)  ~14KB —
                                      lists, dropdowns, tables, markers.
-         crestUrl(name, 'medium') → 512px (assets/crests/medium/…) ~130KB —
+         crestUrl(name, 'medium') → 256px (assets/crests/medium/…) ~57KB —
                                      on-page hero/detail badges.
        Tiers are auto-generated (scripts/build-crest-thumbs.py + the crest-thumbs
        Action). Pair a thumb/medium <img> with the ...→full→rose onerror chain
