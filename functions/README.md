@@ -6,22 +6,38 @@ NL Cup Footage highlights. See the header of `index.js` for what it does.
 This is the **only server-side code** in the repo; everything else is a static
 site. It runs in the `nl-tools` Firebase project (Blaze), region `europe-west2`.
 
-## Deploy
+## Deploy — via GitHub Actions (no terminal)
 
-Prereqs: Node 20, the Firebase CLI (`npm i -g firebase-tools`), and access to the
-`nl-tools` project. The project is already on the Blaze plan.
+Deployment is automated by `.github/workflows/deploy-footage-proxy.yml`, which
+reuses the same Workload Identity Federation auth as the GA pipeline. It runs on
+any push that changes `functions/**`, or on demand (**Actions → Deploy footage
+proxy function → Run workflow**).
 
-```bash
-# from the repo root
-cd functions && npm install && cd ..
-firebase login          # once
-firebase use nl-tools   # or rely on .firebaserc (default: nl-tools)
-firebase deploy --only functions
-```
+**One-time setup** (Google Cloud console, no terminal), so the deploy identity is
+allowed to deploy:
 
-The first deploy enables the required APIs (Cloud Functions, Cloud Build,
-Artifact Registry, Eventarc) — accept the prompts. `ffmpeg` ships with the
-function via `ffmpeg-static`, so nothing else to install.
+1. **Enable APIs** — console → *APIs & Services* (project `nl-tools`): enable
+   **Cloud Functions**, **Cloud Build**, **Artifact Registry**, **Eventarc**,
+   **Cloud Run**.
+2. **Grant roles** — console → *IAM* → find the service account used by
+   `GCP_SERVICE_ACCOUNT` → **Edit** → add:
+   - Cloud Functions Admin (`roles/cloudfunctions.admin`)
+   - Cloud Run Admin (`roles/run.admin`)
+   - Cloud Build Editor (`roles/cloudbuild.builds.editor`)
+   - Artifact Registry Administrator (`roles/artifactregistry.admin`)
+   - Eventarc Admin (`roles/eventarc.admin`)
+   - Service Account User (`roles/iam.serviceAccountUser`)
+   - Firebase Admin (`roles/firebase.admin`)
+   _(If that's fiddly, `roles/editor` + Service Account User gets it working; tighten later.)_
+3. **Run it** — Actions tab → *Deploy footage proxy function* → **Run workflow**.
+
+`ffmpeg` ships with the function via `ffmpeg-static`, so there's nothing else to
+install. Logs: `firebase functions:log` — or the **Functions** page in the console.
+
+### Alternative — Google Cloud Shell (browser terminal)
+If you'd rather do a one-off: open **Cloud Shell** in the Firebase console (you're
+already authed as owner), then `git clone` the repo and
+`firebase deploy --only functions --project nl-tools` from the repo root.
 
 ## What it does once live
 
