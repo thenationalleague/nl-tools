@@ -16,9 +16,10 @@ A tool to deliver match footage to the 32 clubs of the NL × PL2 Cup
 |---|---|
 | **Access matrix** | Graded (full table below): NL **admin** manages (upload/tag/edit) + sees all; NL **staff** view+download all but can't edit; **clubs** (NL + PL2) see only their own games; **producer** uploads only. |
 | **Access method** | **Portal login = NL people** (admin/staff, and NL clubs eventually). **Passcode / direct link = outside** (PL2 clubs, and the producer). NL clubs can use either. |
-| **Admin** | Superadmin/**admin** curate: tag files to matches, manage passcodes, toggle live/held, open knockout access. The management surface (today's standalone master) becomes the **admin portal view**. |
+| **Admin** | Superadmin/**admin** curate: tag/retag files, manage passcodes, **pull a file back** (override — not an approval gate), open knockout access. The management surface (today's standalone master) becomes the **admin portal view**. |
 | **Ingest** | Producer is **external — treated like a PL2 club**: reaches a gated upload page by **passcode / direct link** (→ anon-auth with an upload scope), no NL portal account. Uploads direct to Firebase Storage — not a raw key dump |
 | **File → game** | Auto-mapped by filename on upload; an unmatched file **forces the producer to map it** (pick game + type) before it counts as delivered — no orphans for NL to chase |
+| **Availability** | **No approval step** — footage is **live to clubs the instant the producer uploads it**. The producer can **re-map / delete their own files for 24h** to fix mistakes, then it locks; NL keeps a pull-back override for exceptions |
 | **Naming** | `YYYY-MM-DD_<HOME>_<AWAY>_<TYPE>_<VARIANT>.mp4` — ISO date, underscore-delimited, uppercase (e.g. `2025-10-21_TRU_BHA_HL_CLEAN.mp4`). `TYPE` = `HL`\|`FMR` **and is extensible** (`CLIPS` etc. may follow); `VARIANT` = `CLEAN`\|`DIRTY` (clean = no gfx). Codes 2 & 3 are HOME/AWAY and route the game to *both* clubs; codes match `clubs-meta` `code`. Parser is case-insensitive and tolerant — an unknown `TYPE` still ingests into a "needs retag" state rather than being dropped |
 | **Files/game** | A **flexible list** — usually the 4 standard (`fmr/clean`, `fmr/dirty`, `hl/clean`, `hl/dirty`) but tolerant of reality: missing fulls, extra `clips`, held/pending files. Data model is `game.files[]`, not a fixed 2×2 grid. |
 | **Security** | Simple gating + short-lived links; no watermark/DRM |
@@ -40,7 +41,7 @@ A tool to deliver match footage to the 32 clubs of the NL × PL2 Cup
 | NL **staff** (non-admin) | Portal login | View + download **all** — **no editing** |
 | NL **club** (eventually) | Portal login *(or passcode)* | View + download **own club's** games |
 | **PL2 club** | Passcode / link | View + download **own** games |
-| **Producer** | Passcode / link | **Upload** only |
+| **Producer** | Passcode / link | **Upload** — files go **live to clubs at once**; re-map / delete own files for **24h**, then locked |
 
 Rule of thumb: **portal = NL people; passcode = outside**. One auth bridge (passcode → anon-auth + scoped claim) covers all the outside actors; portal roles (`superadmin`/`admin`/`staff`/`club-admin`) cover the NL side.
 
@@ -92,8 +93,10 @@ Club ──direct link / passcode──▶ Club page
   (resumable, with progress). Each file is auto-parsed by filename → linked to its
   game + type; an unmatched file lands in a **"needs mapping" tray and the producer
   must map it (game + type) before it's marked delivered** — mapping is forced, so
-  NL never inherits orphan/mis-named files. NL (master) still has final rename/
-  retag/reroute + the live/held toggle. _Legacy note:_ the master
+  NL never inherits orphan/mis-named files. Once mapped it's **live to clubs
+  immediately (no approval)**; the producer can **re-map/delete their own files for
+  24h** (a "My uploads" list) before it locks. NL (master) keeps final
+  rename/retag/reroute + a **pull-back override**. _Legacy note:_ the master
   tool parses `YYYY-MM-DD_<HOME>_<AWAY>_<TYPE>_<VARIANT>.mp4` → game + assets, with
   manual override to rename/retag/reroute. Unknown `TYPE` tokens ingest into a
   "needs retag" state rather than being dropped.
@@ -130,8 +133,8 @@ Fully client-side, zero backend, **dummy content** — proves the whole flow tod
 |---|---|
 | `index.html` | **Landing** at `/tools/footage/` — the reserved home / future portal-card destination. Light placeholder that points clubs to the deeper login. |
 | `club/index.html` | **Club-facing** login. `?c=<token>` auto-signs a club in; otherwise a passcode gate. Shows that club's games as **folders** (grouped by stage) — open a match to see its files listed like a file browser (label, filename, size, Play for video, Download). Flexible file counts. Deliberately one level deep (like `master/`) so the root stays free for the portal card. |
-| `master/index.html` | **Master** control tool. The 32 clubs with copy-able direct links + passcodes (regenerate per club), and a fixtures tab: assign knockout teams + a live/held toggle **per file**. Export/Import JSON, reset to dummy. |
-| `producer/index.html` | **Producer upload** page. Passcode / `?p=<token>` gate (external, like a club). Drop/pick footage → each file **auto-maps by filename** to a fixture; an unmatched file goes to a **"needs mapping" tray** and must be mapped (game + type) before **Upload** un-greys — mapping is forced. Includes an "Add sample files (demo)" button. _Dummy:_ upload is simulated and writes **held** files into the localStorage overlay so master/club (same browser) reflect them; production wires real Storage upload + RTDB. |
+| `master/index.html` | **Master** control tool. The 32 clubs with copy-able direct links + passcodes (regenerate per club), and a fixtures tab: assign knockout teams + a **pull-back toggle per file** (files are live on upload; the toggle only hides one as an override). Export/Import JSON, reset to dummy. |
+| `producer/index.html` | **Producer upload** page. Passcode / `?p=<token>` gate (external, like a club). Drop/pick footage → each file **auto-maps by filename** to a fixture; an unmatched file goes to a **"needs mapping" tray** and must be mapped (game + type) before **Upload** un-greys — mapping is forced. Uploaded footage is **live to clubs immediately (no approval)**; a **"My uploads"** list lets the producer **re-map / delete their own files for 24h**, then it locks. Has an "Add sample files (demo)" button. _Dummy:_ upload is simulated and writes live files into the localStorage overlay so master/club (same browser) reflect them; production wires real Storage upload + RTDB. |
 | `data.js` | Dummy dataset: 32 clubs (16 real NL + 16 placeholder PL2 with monogram crests), 64 group games + 7 knockout placeholders, tokens + passcodes. |
 
 **How the two connect today:** the master tool writes a `localStorage` overlay
