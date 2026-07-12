@@ -1,7 +1,7 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /tools/system/nl-utils.js
-   Version: v1.12 (12/07/2026)
+   Version: v1.13 (12/07/2026)
 
    Shared helper functions used by every tool page. Exposed on window.NL
    namespace. All functions are defensive — they handle missing arguments
@@ -14,6 +14,16 @@
      NL.escHtml('<script>');          // → '&lt;script&gt;'
 
    Changelog
+   v1.13 (12/07/2026)
+     - NL.clubPicker (search mode): blur now auto-commits a typed-but-
+       uncommitted value, so a typed club "takes" without an explicit
+       Enter/click. An exact roster name commits that club; otherwise, if
+       freetext is enabled, the typed value commits as freetext (crest
+       resolved by crests/<name>.png); with freetext off, dangling text
+       reverts to the last selection. Fixes the "I typed a club but the
+       payload didn't fire" trap (e.g. an EFL club in transfer-centre).
+       Cache-busted ?v=12 → ?v=13 (nl-brand.css unchanged at ?v=21).
+
    v1.12 (12/07/2026) — NL.clubPicker refinements:
      - Browsing shows the WHOLE eligible roster: an empty search box no
        longer caps at `limit` (12) — `limit` now only bounds typed searches
@@ -877,6 +887,7 @@
       if (clearBtn) clearBtn.style.display = sel.name ? '' : 'none';
       el.classList.toggle('has-crest', !!sel.name);
     }
+    function commitSel(sel) { applySelection(sel); closeDd(); opt.onSelect(sel); }
     function commit(idx) {
       var row = rendered[idx]; if (!row) return;
       var sel = row.freetext
@@ -885,7 +896,25 @@
            present (onerror falls back to the rose). */
         ? { name: row.typed, club: null, division: '', crestUrl: window.NL.clubs.crestUrl(row.typed), isFreetext: true, isOffRoster: false, seasonKey: seasonKey() }
         : { name: row.club.name, club: row.club, division: row.club.division || '', crestUrl: window.NL.clubs.crestUrl(row.club.name), isFreetext: false, isOffRoster: false, seasonKey: seasonKey() };
-      applySelection(sel); closeDd(); opt.onSelect(sel);
+      commitSel(sel);
+    }
+    /* Blur with a typed-but-uncommitted value: land it so nothing dangles. An
+       exact roster name commits that club; otherwise, if freetext is enabled,
+       the typed value commits as freetext; else the dangling text reverts to
+       the last committed selection. */
+    function autoCommitTyped() {
+      if (!input) return;
+      var typed = input.value.trim();
+      if (!typed || typed === selectedName) return;
+      var lc = typed.toLowerCase(), exact = null;
+      for (var i = 0; i < clubs.length; i++) { if (clubs[i].name.toLowerCase() === lc) { exact = clubs[i]; break; } }
+      if (exact) {
+        commitSel({ name: exact.name, club: exact, division: exact.division || '', crestUrl: window.NL.clubs.crestUrl(exact.name), isFreetext: false, isOffRoster: false, seasonKey: seasonKey() });
+      } else if (opt.freetext) {
+        commitSel({ name: typed, club: null, division: '', crestUrl: window.NL.clubs.crestUrl(typed), isFreetext: true, isOffRoster: false, seasonKey: seasonKey() });
+      } else {
+        input.value = selectedName || '';
+      }
     }
     function move(delta) { if (!rendered.length) return; activeIdx = (activeIdx + delta + rendered.length) % rendered.length; paintActive(); }
     function onKey(e) {
@@ -909,6 +938,11 @@
         openDd(); loadRoster().then(function() { renderList(input.value); });
       });
       input.addEventListener('keydown', onKey);
+      input.addEventListener('blur', function() {
+        /* Defer so a click on an option (which commits via mousedown) wins;
+           otherwise land the typed value. */
+        setTimeout(autoCommitTyped, 160);
+      });
     } else {
       var typeBuf = '', typeTimer = null;
       function jumpType() {
