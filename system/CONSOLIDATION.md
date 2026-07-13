@@ -255,3 +255,18 @@ validator, a component ships with its acceptance checks.
    checks** (Escape, focus trap + restore, labels, keyboard-only).
 9. Lint hardening, tests, docs and template updates ride **alongside** every
    step above — never a separate "we'll test it later" phase.
+
+---
+
+## After the programme — Brand v3 scale pass (parked, not started)
+
+Separate from the code-consolidation above: the tools read **small and narrow
+on a real 1920×1200 @ 100%** because the shared type/spacing/control scale was
+tuned for a ~1280–1440px (150%-zoomed) viewport. Fixing it is a **wholesale,
+cross-tool token pass** — one canon change (`nl-brand.css` `--text-*` clamps +
+`.btn`/grid sizing) plus a per-tool QA sweep at the reference viewport, shipped
+in lockstep. Explicitly NOT a one-tool-at-a-time job (that would re-fork the
+scale this programme just unified).
+
+Full write-up, evidence, proposed token values, and 1920×1200 mockups (Travel
+Planner, Portal, Tasks): **`system/brand-v3-scale-plan.md`** + `system/brand-v3-mockups/`.
