@@ -548,15 +548,23 @@
   // 15-min signed URL — not getDownloadURL. The gate verifies the caller's club
   // and does the proxy→full fallback server-side.
   function signedUrl(path){
-    // Try the per-club gate first. It's currently blocked by an org policy
-    // (Domain Restricted Sharing forbids public callable functions), so fall
-    // back to a direct Storage URL (needs open Storage read rules). Temporary
-    // until the gate is activated (org-policy exception or a non-public design).
-    return ensureAuth().then(function(){
-      return firebase.app().functions('europe-west2').httpsCallable('getFootageUrl')({ path: path });
-    }).then(function(r){ if (r && r.data && r.data.url) return r.data.url; throw new Error('gate returned no url'); })
-    .catch(function(e){
-      if (/permission-denied/i.test(((e&&e.code)||'')+' '+((e&&e.message)||''))) throw e;   // respect a club denial
+    // Per-club gate via RTDB (no public function — org-policy-proof): push a request
+    // with our uid; an event-driven Cloud Function checks club access and writes back
+    // a 15-min signed URL (or an error). Temp getDownloadURL fallback kept only while
+    // Storage is open + we confirm the gate; it's removed at lockdown.
+    return ensureAuth().then(function(u){
+      var ref = firebase.database().ref('app-data/media-footage/urlRequests').push();
+      return ref.set({ path: path, uid: u.uid, createdAt: firebase.database.ServerValue.TIMESTAMP }).then(function(){
+        return new Promise(function(resolve, reject){
+          var settled = false, to;
+          function finish(ok, arg){ if(settled) return; settled = true; clearTimeout(to); try{ref.off();}catch(e){} try{ref.remove();}catch(e){} ok ? resolve(arg) : reject(arg); }
+          to = setTimeout(function(){ finish(false, new Error('gate-timeout')); }, 20000);
+          ref.on('value', function(s){ var v = s.val(); if(!v) return; if(v.url) finish(true, v.url); else if(v.error) finish(false, new Error(v.error)); });
+        });
+      });
+    }).catch(function(e){
+      var m = (e&&e.message)||'';
+      if (/not-your-club|no-club-access|bad-path|file-not-recognised/i.test(m)) throw e;   // real denial — never fall past it
       return firebase.storage().ref(path).getDownloadURL().catch(function(){
         return firebase.storage().ref(path.replace('footage/national-league-cup/proxies/','footage/national-league-cup/')).getDownloadURL();
       });
