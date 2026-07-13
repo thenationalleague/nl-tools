@@ -133,6 +133,15 @@ for dir in */; do
     drift+=("  $slug: inline Apps Script URL — use NL.endpoints.gas")
   fi
 
+  # No private fetch of the tools clubs-meta — gated tools read clubs via
+  # NL.clubs.load()/NL.season (one shared, memoised fetch). The site-repo
+  # clubs-meta (thenationalleague/site) is a different dataset and allowed.
+  # dazn-vip is skipped: WIP overhaul, rejoins canon in its rebuild.
+  if [[ "$slug" != "dazn-vip" ]]; then
+    cm=$(grep -E "=[[:space:]]*['\"][^'\"]*clubs-meta\.json" "$index" | grep -v "thenationalleague/site" || true)
+    [[ -n "$cm" ]] && drift+=("  $slug: direct clubs-meta URL — use NL.clubs.load()")
+  fi
+
   if [[ ${#drift[@]} -eq 0 ]]; then
     clean_count=$((clean_count + 1))
   else

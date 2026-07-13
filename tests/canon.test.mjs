@@ -84,6 +84,15 @@ test('clubs.wireCrestImg degrades thumb → full → rose', () => {
   assert.equal(img.src, NL.clubs.ROSE, 'then to the rose');
 });
 
+test('clubs.load + byOpta / byName resolve real records', async () => {
+  await NL.clubs.load();
+  const byOpta = NL.clubs.byOpta('t3360');           // AFC Fylde
+  assert.ok(byOpta && byOpta.name === 'AFC Fylde', 'byOpta finds the club');
+  assert.equal(NL.clubs.byOpta('t-nope'), null, 'unknown teamID → null');
+  assert.equal(NL.clubs.byOpta(''), null, 'empty → null');
+  assert.equal(NL.clubs.byName('AFC Fylde').optaID, 't3360', 'byName agrees');
+});
+
 test('season.current / keys / label read the registry', () => {
   assert.equal(NL.season.current(meta), '2026');
   assert.deepEqual(NL.season.keys(meta), ['2026', '2025']);

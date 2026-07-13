@@ -6,9 +6,15 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.45 — Crests load lightweight thumbnails in every list/grid/table.
+  v0.46 — clubs-meta loads via the shared canon loader (NL.clubs.load).
 
   Changelog:
+  v0.46 — (13/07/2026) clubs-meta now loads through the shared canon loader
+          (NL.clubs.load / NL.clubs.meta, session-memoised) instead of a
+          direct fetch of clubs-meta.json in TOOL.boot. Removed the local
+          CLUBS_META_URL const; buildWorkingData() and resolveOwnClub() are
+          fed the resolved meta object exactly as before. Roster still derives
+          from the current season via NL.season.clubsFor.
   v0.45 — (12/07/2026) Crest weight cut. All list/grid/table/card crests now
           load the 96px THUMB (~14KB vs ~526KB each) instead of the full-res
           badge — the heaviest page in the repo dropped from ~43MB of crests
@@ -569,6 +575,13 @@
 
   window.NL_CHANGELOG = [
     {
+      date: '13 Jul 2026',
+      version: 'v0.46',
+      items: [
+        'Under-the-hood tidy: club identity data (rosters, stadiums, divisions) now loads through the platform’s shared loader, so it’s fetched once and reused across tools. No visible change — the directory and club pages work exactly as before.'
+      ]
+    },
+    {
       date: '12 Jul 2026',
       version: 'v0.45',
       items: [
@@ -816,7 +829,7 @@
 </script>
 
 <!-- NL system scripts (lint canonical: ?v=10 / ?v=7 / ?v=8) -->
-<script src="/tools/system/nl-utils.js?v=18"></script>
+<script src="/tools/system/nl-utils.js?v=19"></script>
 <script src="/tools/system/nl-topbar.js?v=7"></script>
 <script src="/tools/system/auth-guard.js?v=8"></script>
 
@@ -5494,7 +5507,8 @@ function buildWorkingData(meta) {
   migrateSections();   // remap legacy Kit/Ticketing roles into their new departments
 }
 
-var CLUBS_META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
+/* clubs-meta is loaded via the shared canon loader (NL.clubs.load /
+   NL.clubs.meta) — session-memoised, one network hit. No local URL const. */
 
 /* ================= RTDB persistence (phase C) =================
    People + club contact details live in RTDB at
@@ -6156,12 +6170,9 @@ window.TOOL = window.TOOL || {};
 window.TOOL.boot = function (session) {
   state.persona = personaFromSession(session);
 
-  fetch(CLUBS_META_URL + '?cb=' + Date.now())
-    .then(function(r) {
-      if (!r.ok) throw new Error('clubs-meta fetch failed (' + r.status + ')');
-      return r.json();
-    })
-    .then(function(meta) {
+  NL.clubs.load()
+    .then(function(loaded) {
+      var meta = loaded || NL.clubs.meta() || { clubs: [] };
       buildWorkingData(meta);
       if (isClubPersona()) {
         EDITOR_CLUB = resolveOwnClub(session, meta.clubs || []);
