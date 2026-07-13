@@ -16,7 +16,6 @@
  * full-match cost question. See footage/README.md.
  */
 const { onObjectFinalized, onObjectDeleted } = require("firebase-functions/v2/storage");
-const { onValueCreated } = require("firebase-functions/v2/database");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
@@ -141,107 +140,6 @@ exports.onFootageDeleted = onObjectDeleted(
       logger.info(`Deleted proxy ${proxyPath}`);
     } catch (err) {
       // proxy may not exist (full match, or already gone) — not an error
-    }
-  }
-);
-
-/**
- * Per-club footage access — RTDB-mediated signed URLs (Layer 2).
- *
- * Firebase *callable* functions must be publicly invokable, which the org's Domain
- * Restricted Sharing policy forbids (allUsers invoker → 403). So instead of a
- * callable, the client writes a request to app-data/media-footage/urlRequests/<id>
- * and this EVENT-DRIVEN function (no public invoker needed) checks the caller's club
- * against the file's game (home OR away, from the CATALOGUE not the filename) and
- * writes back a short-lived (15 min) signed URL — or an error. NL staff/admin/
- * superadmin get any file.
- *
- * Caller identity — `uid` is enforced `=== auth.uid` by the RTDB write rule, so the
- * function can trust it:
- *   - Portal user  → users/<uid>/role + users/<uid>/club.
- *   - Passcode user (/club, anon) → token → app-data/media-footage/access/clubTokens/<token>.
- */
-const NL_CUP_PREFIX = "footage/national-league-cup/";
-function normName(s) { return String(s == null ? "" : s).trim().toLowerCase(); }
-
-// Authorise the caller for reqPath and return a 15-min signed URL, or throw
-// Error(reason) — reason is written back to the request node for the client.
-async function signFootageUrl(uid, token, reqPath) {
-  if (typeof reqPath !== "string" || reqPath.indexOf(NL_CUP_PREFIX) !== 0 || reqPath.indexOf("..") !== -1)
-    throw new Error("bad-path");
-
-  const userSnap = await admin.database().ref("users/" + uid).once("value");
-  const user = userSnap.val() || {};
-  const role = user.role || "";
-  const nlFull = role === "superadmin" || role === "admin" || role === "staff";
-  let club = user.club || null;                        // portal club user
-  if (!nlFull && !club && token) {                     // passcode /club user
-    const tSnap = await admin.database()
-      .ref("app-data/media-footage/access/clubTokens/" + token).once("value");
-    club = tSnap.val() || null;
-  }
-  if (!nlFull && !club) throw new Error("no-club-access");
-
-  const original = reqPath.replace(NL_CUP_PREFIX + "proxies/", NL_CUP_PREFIX);
-  if (!nlFull) {
-    const [catSnap, upSnap] = await Promise.all([
-      admin.database().ref("app-data/media-footage/data").once("value"),
-      admin.database().ref("app-data/media-footage/uploads").once("value"),
-    ]);
-    const cat = catSnap.val() || {};
-    const clubsByCode = {};
-    (cat.clubs || []).forEach((c) => { if (c && c.code) clubsByCode[c.code] = c; });
-    const gamesById = {};
-    (cat.games || []).forEach((g) => { if (g && g.id) gamesById[g.id] = g; });
-
-    let game = null;
-    const ups = upSnap.val() || {};
-    for (const k in ups) {
-      if (ups[k] && ups[k].storagePath === original) { game = gamesById[ups[k].gameId] || null; break; }
-    }
-    if (!game) {
-      (cat.games || []).forEach((g) => {
-        (g.files || []).forEach((f) => { if (f && f.storagePath === original) game = g; });
-      });
-    }
-    if (!game) throw new Error("file-not-recognised");
-
-    const myClub = normName(club);
-    const homeName = normName((clubsByCode[game.home] || {}).name);
-    const awayName = normName((clubsByCode[game.away] || {}).name);
-    if (myClub !== homeName && myClub !== awayName) throw new Error("not-your-club");
-  }
-
-  let signPath = reqPath;
-  if (reqPath.indexOf(NL_CUP_PREFIX + "proxies/") === 0) {
-    const [exists] = await admin.storage().bucket(BUCKET).file(reqPath).exists();
-    if (!exists) signPath = original;
-  }
-  // v4 signing uses the IAM SignBlob API (Token Creator + IAM Credentials API),
-  // which is what a keyless Cloud Functions runtime has (v2/default needs a key).
-  const [url] = await admin.storage().bucket(BUCKET).file(signPath)
-    .getSignedUrl({ version: "v4", action: "read", expires: Date.now() + 15 * 60 * 1000 });
-  return url;
-}
-
-exports.onFootageUrlRequest = onValueCreated(
-  // The RTDB instance (nl-tools-default-rtdb) is in europe-west1, and v2 database
-  // triggers must be created in the database's region — NOT europe-west2 (where the
-  // storage-triggered functions run), which RTDB Eventarc hasn't "revealed".
-  // minInstances:1 keeps one instance warm so previews never pay a cold start (the
-  // shared ffmpeg binary bloats the image → slow cold start). memory kept small.
-  { ref: "/app-data/media-footage/urlRequests/{id}", region: "europe-west1",
-    memory: "256MiB", minInstances: 1 },
-  async (event) => {
-    const ref = event.data.ref;
-    const req = event.data.val() || {};
-    if (req.url || req.error) return;   // already fulfilled (idempotent)
-    try {
-      const url = await signFootageUrl(req.uid || "", req.token || null, req.path || "");
-      await ref.child("url").set(url);
-    } catch (err) {
-      logger.error(`urlRequest failed (${req.path}): ${err && err.message}`);
-      await ref.child("error").set(String((err && err.message) || "error"));
     }
   }
 );

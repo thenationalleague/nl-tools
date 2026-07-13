@@ -23,9 +23,10 @@ and what's left.
 - **Preview download-protection:** the `<video>` player hides its download control.
 
 ### Deployed Cloud Functions (project nl-tools, europe-west2)
-`makeProxy` (storage finalize), `onFootageDeleted` (storage delete), `getFootageUrl`
-(callable — the per-club signed-URL gate; **currently org-blocked, see below**).
-Deploy is automatic on merge via `.github/workflows/deploy-footage-proxy.yml`.
+`makeProxy` (storage finalize), `onFootageDeleted` (storage delete). Deploy is
+automatic on merge via `.github/workflows/deploy-footage-proxy.yml`.
+(The per-club signed-URL gate — first a `getFootageUrl` callable, then an
+`onFootageUrlRequest` RTDB trigger — has been **removed**; see the security note.)
 
 ### One-time infra already done
 Enabled APIs (Functions/Build/Artifact Registry/Run/Eventarc/Pub-Sub/IAM Credentials);
@@ -35,34 +36,31 @@ Service Account Token Creator.
 
 ## ⚠️ Current security posture (READ THIS)
 
+- **Access rests on UI scoping.** Club users (portal or `/club` passcode) only ever
+  *see* their own club's games; staff/admin see all. This is the enforced model.
 - **Storage rules are OPEN** (`allow read: if request.auth != null` on `footage/**`).
-  Any signed-in user can read any footage file **if they have its URL**. In the
-  portal, club users only *see* their own games (UI scoping), but the *download
-  lock* is not enforced.
-- **Layer 2 (the per-club download lock) is built but NOT active.** The gate
-  `getFootageUrl` checks club-vs-game and mints 15-min signed URLs, but it's a
-  **callable function, which must be publicly invokable** — and the org's **Domain
-  Restricted Sharing** policy forbids that (`allUsers` invoker → 403). So the
-  clients currently fall back to direct `getDownloadURL` (hence the open rules).
-- The **locked** ruleset that finishes the job is saved at repo root `storage.rules`
-  (reads denied → gate only). Swap to it the moment the gate is reachable.
+  Any signed-in user can read any footage file **if they have its URL** — i.e. the
+  download lock is not cryptographically enforced, only UI-scoped. Given the audience
+  (32 known clubs + NL staff, all authenticated) this is an accepted trade-off.
+- **The per-club cryptographic download-lock was DROPPED (decision, 13/07/2026).**
+  Two invocation paths were built and both rejected:
+  - A `getFootageUrl` **callable** — but callables must be publicly invokable, and the
+    org's **Domain Restricted Sharing** policy forbids that (`allUsers` invoker → 403).
+  - An **RTDB-triggered** signer (`onFootageUrlRequest`, org-policy-proof) — but RTDB
+    Eventarc delivery added **~15-20s** per preview (structural, not a cold start;
+    `minInstances:1` didn't help). Direct `getDownloadURL` is sub-1s.
+  Loosening the org policy was rejected. So both the gate function and the client-side
+  gate calls have been removed; previews/downloads use `getDownloadURL` directly.
 
-## To activate the per-club download lock (pick one)
+## If the download lock is ever wanted again
 
-1. **Org-policy exception.** As org owner, override "Domain restricted sharing"
-   (`constraints/iam.allowedPolicyMemberDomains`) for the `nl-tools` project to
-   permit the callable's public invoker. Then: `gcloud run services
-   add-iam-policy-binding getfootageurl --region=europe-west2 --member=allUsers
-   --role=roles/run.invoker`, switch clients back to gate-only (remove the
-   getDownloadURL fallback), and publish the locked `storage.rules`.
-2. **Re-architect the gate to avoid a public function** (recommended if the org
-   policy can't/shouldn't change). Make it **RTDB-triggered**: client writes a
-   request to `app-data/media-footage/urlRequests/<id>` (RTDB rule enforces
-   `uid === auth.uid`); an event-driven function (no public invoker needed, like
-   makeProxy) checks club access, signs, writes the URL back; client listens.
-   Then publish the locked `storage.rules`.
-
-Either way the gate LOGIC is done — it's purely an invocation-path problem.
+The gate LOGIC (club-vs-game check + v4 signing) is preserved in git history
+(`functions/index.js` `signFootageUrl`/`onFootageUrlRequest`, removed here) and the
+**locked** ruleset is still at repo root `storage.rules` (reads denied → gate only).
+To revive it you'd need a faster invocation path than RTDB Eventarc — e.g. an
+org-policy exception permitting a public callable (fast, ~sub-1s), or an HTTPS
+function fronted so it doesn't need `allUsers`. Not worth it unless the threat model
+changes (the current audience is all authenticated + known).
 
 ## Other remaining work
 
