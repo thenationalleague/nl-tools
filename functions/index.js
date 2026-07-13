@@ -16,6 +16,7 @@
  * full-match cost question. See footage/README.md.
  */
 const { onObjectFinalized, onObjectDeleted } = require("firebase-functions/v2/storage");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
@@ -143,3 +144,92 @@ exports.onFootageDeleted = onObjectDeleted(
     }
   }
 );
+
+/**
+ * Signed-URL gate for footage — per-club access control (Layer 2).
+ *
+ * Every preview/download calls this instead of getDownloadURL(). It checks the
+ * caller's club against the file's game (home OR away, read from the CATALOGUE,
+ * not the filename — so a mis-named file can't leak), then returns a short-lived
+ * (15 min) signed URL. NL staff/admin/superadmin get any file.
+ *
+ * Caller identity:
+ *   - Portal user  → users/<uid>/role + users/<uid>/club.
+ *   - Passcode user (/club, anon auth) → passes { token }, mapped to a club via
+ *     app-data/media-footage/access/clubTokens/<token> (admin-only node).
+ *
+ * Requesting a proxy path that doesn't exist yet falls back to the full file,
+ * so the client just asks for the proxy for preview and the original for download.
+ */
+const NL_CUP_PREFIX = "footage/national-league-cup/";
+function normName(s) { return String(s == null ? "" : s).trim().toLowerCase(); }
+
+exports.getFootageUrl = onCall(async (request) => {
+  const auth = request.auth;
+  if (!auth) throw new HttpsError("unauthenticated", "Sign in required.");
+
+  const reqPath = (request.data && request.data.path) || "";
+  const token   = (request.data && request.data.token) || null;
+  if (typeof reqPath !== "string" || reqPath.indexOf(NL_CUP_PREFIX) !== 0 || reqPath.indexOf("..") !== -1)
+    throw new HttpsError("invalid-argument", "Bad path.");
+
+  // 1) Caller role + club.
+  const userSnap = await admin.database().ref("users/" + auth.uid).once("value");
+  const user = userSnap.val() || {};
+  const role = user.role || "";
+  const nlFull = role === "superadmin" || role === "admin" || role === "staff";
+  let club = user.club || null;                        // portal club user
+  if (!nlFull && !club && token) {                     // passcode /club user
+    const tSnap = await admin.database()
+      .ref("app-data/media-footage/access/clubTokens/" + token).once("value");
+    club = tSnap.val() || null;
+  }
+  if (!nlFull && !club) throw new HttpsError("permission-denied", "No club access.");
+
+  // 2) Non-NL callers must own the game (home OR away). Resolve via the catalogue.
+  const original = reqPath.replace(NL_CUP_PREFIX + "proxies/", NL_CUP_PREFIX);
+  if (!nlFull) {
+    const [catSnap, upSnap] = await Promise.all([
+      admin.database().ref("app-data/media-footage/data").once("value"),
+      admin.database().ref("app-data/media-footage/uploads").once("value"),
+    ]);
+    const cat = catSnap.val() || {};
+    const clubsByCode = {};
+    (cat.clubs || []).forEach((c) => { if (c && c.code) clubsByCode[c.code] = c; });
+    const gamesById = {};
+    (cat.games || []).forEach((g) => { if (g && g.id) gamesById[g.id] = g; });
+
+    let game = null;
+    const ups = upSnap.val() || {};
+    for (const k in ups) {
+      if (ups[k] && ups[k].storagePath === original) { game = gamesById[ups[k].gameId] || null; break; }
+    }
+    if (!game) {
+      (cat.games || []).forEach((g) => {
+        (g.files || []).forEach((f) => { if (f && f.storagePath === original) game = g; });
+      });
+    }
+    if (!game) throw new HttpsError("permission-denied", "File not recognised.");
+
+    const myClub = normName(club);
+    const homeName = normName((clubsByCode[game.home] || {}).name);
+    const awayName = normName((clubsByCode[game.away] || {}).name);
+    if (myClub !== homeName && myClub !== awayName)
+      throw new HttpsError("permission-denied", "Not your club's footage.");
+  }
+
+  // 3) Sign the requested file (proxy → full fallback if the proxy isn't there yet).
+  let signPath = reqPath;
+  if (reqPath.indexOf(NL_CUP_PREFIX + "proxies/") === 0) {
+    const [exists] = await admin.storage().bucket(BUCKET).file(reqPath).exists();
+    if (!exists) signPath = original;
+  }
+  try {
+    const [url] = await admin.storage().bucket(BUCKET).file(signPath)
+      .getSignedUrl({ action: "read", expires: Date.now() + 15 * 60 * 1000 });
+    return { url: url };
+  } catch (err) {
+    logger.error(`Signing failed for ${signPath}: ${err && err.message}`);
+    throw new HttpsError("internal", "Could not sign URL (Token Creator role missing?).");
+  }
+});
