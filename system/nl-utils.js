@@ -1,7 +1,7 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /tools/system/nl-utils.js
-   Version: v1.20 (13/07/2026)
+   Version: v1.21 (13/07/2026)
 
    Shared helper functions used by every tool page. Exposed on window.NL
    namespace. All functions are defensive — they handle missing arguments
@@ -14,6 +14,15 @@
      NL.escHtml('<script>');          // → '&lt;script&gt;'
 
    Changelog
+   v1.21 (13/07/2026)
+     - Added NL.copy(text, {ok, err, silent, onOk, onErr}) — clipboard copy
+       with the async-API-then-execCommand fallback, returning Promise<bool>.
+       Collapses 13 hand-rolled copy sites; {silent:true} lets callers keep
+       their own confirmation UI. Added NL.download(filename, data, mime) —
+       the Blob → object-URL → temp <a download> → click → revoke dance,
+       copy-pasted ~10 times. Added NL.csv(rows, {bom}) — RFC-4180 escaping,
+       replacing three divergent per-cell escapers. Cache-bust ?v=21 -> ?v=22.
+
    v1.20 (13/07/2026)
      - NL.parseDate now accepts a Date (passthrough) or an epoch-ms number
        (Date.now() / Firebase server timestamps), not only strings.
@@ -354,6 +363,83 @@
     return String(s == null ? '' : s)
       .replace(/\\/g, '\\\\')
       .replace(/'/g, "\\'");
+  };
+
+  /* ── Clipboard + file download ───────────────────────────────────────── */
+  /* Copy text to the clipboard. Tries the async Clipboard API, falls back to
+     a hidden-textarea execCommand for older/insecure contexts. Always returns
+     a Promise<boolean> (true = copied). Confirmation options:
+       (default)      → NL.toast('Copied', 'success') on ok, error toast on fail
+       {ok, err}      → custom toast messages (still via NL.toast)
+       {silent:true}  → no toast — caller owns the UI (button flash, setStatus…)
+       {onOk, onErr}  → callbacks fired in addition to / instead of the toast */
+  function execCopyFallback(text) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-1000px';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return !!ok;
+    } catch (e) { return false; }
+  }
+  window.NL.copy = function(text, opts) {
+    opts = opts || {};
+    text = text == null ? '' : String(text);
+    function done(ok) {
+      if (!opts.silent) {
+        if (ok) window.NL.toast(opts.ok || 'Copied', 'success');
+        else    window.NL.toast(opts.err || 'Copy failed', 'error');
+      }
+      if (ok && typeof opts.onOk === 'function') opts.onOk();
+      if (!ok && typeof opts.onErr === 'function') opts.onErr();
+      return ok;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(
+        function () { return done(true); },
+        function () { return done(execCopyFallback(text)); }
+      );
+    }
+    return Promise.resolve(done(execCopyFallback(text)));
+  };
+
+  /* Trigger a browser download of `data` as `filename`. `data` may be a Blob
+     or a string (wrapped in a Blob with `mime`, default UTF-8 text). Handles
+     the object-URL lifecycle (create → temp <a download> → click → revoke). */
+  window.NL.download = function(filename, data, mime) {
+    var blob = (typeof Blob !== 'undefined' && data instanceof Blob)
+      ? data
+      : new Blob([data == null ? '' : data], { type: mime || 'text/plain;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename || 'download';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+  };
+
+  /* Build a CSV string from an array of rows (each an array of cells). Escapes
+     per RFC 4180: a cell containing a comma, quote or newline is wrapped in
+     double-quotes with internal quotes doubled. {bom:true} prefixes a UTF-8
+     BOM so Excel reads accented text correctly. */
+  window.NL.csv = function(rows, opts) {
+    opts = opts || {};
+    function cell(v) {
+      v = v == null ? '' : String(v);
+      return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+    }
+    var body = (rows || []).map(function (r) {
+      return (r || []).map(cell).join(',');
+    }).join('\r\n');
+    return (opts.bom ? '\ufeff' : '') + body;
   };
 
   /* ── Session helper ──────────────────────────────────────────────────── */

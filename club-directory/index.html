@@ -6,9 +6,14 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.46 — clubs-meta loads via the shared canon loader (NL.clubs.load).
+  v0.47 — clipboard + backup download routed through shared canon (NL.copy / NL.download).
 
   Changelog:
+  v0.47 — (13/07/2026) copyToClipboard now delegates to NL.copy(text,{silent:true})
+          — keeping the custom ✓ Copied button flash on success and the manual-copy
+          alert on failure — instead of its own navigator.clipboard/execCommand
+          fallback. cleanupDownloadBackup builds the same JSON string and filename
+          but hands the Blob+anchor plumbing to NL.download. No behaviour change.
   v0.46 — (13/07/2026) clubs-meta now loads through the shared canon loader
           (NL.clubs.load / NL.clubs.meta, session-memoised) instead of a
           direct fetch of clubs-meta.json in TOOL.boot. Removed the local
@@ -576,6 +581,13 @@
   window.NL_CHANGELOG = [
     {
       date: '13 Jul 2026',
+      version: 'v0.47',
+      items: [
+        'Under-the-hood tidy: the “copy” buttons and the cleanup JSON backup now use the platform’s shared clipboard and download helpers. No visible change — copying still flashes “✓ Copied” and the backup file downloads exactly as before.'
+      ]
+    },
+    {
+      date: '13 Jul 2026',
       version: 'v0.46',
       items: [
         'Under-the-hood tidy: club identity data (rosters, stadiums, divisions) now loads through the platform’s shared loader, so it’s fetched once and reused across tools. No visible change — the directory and club pages work exactly as before.'
@@ -829,7 +841,7 @@
 </script>
 
 <!-- NL system scripts (lint canonical: ?v=10 / ?v=7 / ?v=8) -->
-<script src="/tools/system/nl-utils.js?v=21"></script>
+<script src="/tools/system/nl-utils.js?v=22"></script>
 <script src="/tools/system/nl-topbar.js?v=7"></script>
 <script src="/tools/system/auth-guard.js?v=8"></script>
 
@@ -3962,19 +3974,10 @@ function copyToClipboard(text, btn) {
       btn.textContent = original;
     }, 1600);
   }
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).then(flashCopied, function(err) {
-      console.warn('clipboard write failed:', err);
-      alert('Copy failed. Please copy manually from the list below.');
-    });
-  } else {
-    var ta = document.createElement('textarea');
-    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
-    document.body.appendChild(ta); ta.select();
-    try { document.execCommand('copy'); flashCopied(); }
-    catch(err) { alert('Copy not supported in this browser.'); }
-    document.body.removeChild(ta);
-  }
+  NL.copy(text, { silent: true }).then(function(ok) {
+    if (ok) { flashCopied(); }
+    else { alert('Copy failed. Please copy manually from the list below.'); }
+  });
 }
 
 /* ================================================================
@@ -6112,12 +6115,7 @@ function cleanupPersist(clubNames, summary) {
 function cleanupDownloadBackup() {
   var payload = { exportedAt: new Date().toISOString(), clubs: {} };
   window.CLUBS.forEach(function(c) { payload.clubs[c.name] = clubToRTDB(c); });
-  var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-  var a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'ops-club-directory-backup-' + Date.now() + '.json';
-  a.click();
-  setTimeout(function() { URL.revokeObjectURL(a.href); }, 1000);
+  NL.download('ops-club-directory-backup-' + Date.now() + '.json', JSON.stringify(payload, null, 2), 'application/json');
 }
 
 function renderCleanupScene() {
