@@ -1,7 +1,7 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /tools/system/nl-utils.js
-   Version: v1.21 (13/07/2026)
+   Version: v1.22 (13/07/2026)
 
    Shared helper functions used by every tool page. Exposed on window.NL
    namespace. All functions are defensive — they handle missing arguments
@@ -14,6 +14,17 @@
      NL.escHtml('<script>');          // → '&lt;script&gt;'
 
    Changelog
+   v1.22 (13/07/2026)
+     - Added NL.modal(opts) — accessible modal primitive over the shared
+       .modal-backdrop/.modal CSS (focus-trap, Escape, backdrop-click, autofocus,
+       focus restore — the bits tools did inconsistently or not at all). On top:
+       NL.confirm(msg,{title,confirmText,cancelText,detail,variant}) → Promise<bool>,
+       NL.prompt(msg,{default,placeholder,multiline}) → Promise<string|null>,
+       NL.alert(msg,{title}) → Promise<void>. Replaces native window.confirm/
+       alert/prompt and the hand-wired confirm modals. Paired with nl-brand.css
+       .modal--sm / .modal__input. Cache-bust nl-utils ?v=22 -> ?v=23,
+       nl-brand ?v=21 -> ?v=22.
+
    v1.21 (13/07/2026)
      - Added NL.copy(text, {ok, err, silent, onOk, onErr}) — clipboard copy
        with the async-API-then-execCommand fallback, returning Promise<bool>.
@@ -440,6 +451,226 @@
       return (r || []).map(cell).join(',');
     }).join('\r\n');
     return (opts.bom ? '\ufeff' : '') + body;
+  };
+
+  /* ── Modal / confirm / prompt / alert ────────────────────────────────── */
+  /* Accessible modal primitive driving the shared .modal-backdrop/.modal CSS.
+     Bakes in — once — the bits every hand-wired modal did inconsistently or
+     not at all: focus-trap, Escape-to-close, backdrop-click-to-close, initial
+     autofocus, and focus restore to the trigger on close.
+
+     NL.modal(opts) → controller { el, body, backdrop, close(result) }
+       opts.title        head bar text (omit for a chromeless panel)
+       opts.body         string (HTML) or a DOM Node for .modal__body
+       opts.buttons      [{ label, className, autofocus, onClick(ctrl) }]
+       opts.size         'sm' (440px) — omit for the default 640px
+       opts.width        'wide' (740px)
+       opts.dismissable  false disables Escape + backdrop-click (default true)
+       opts.closeButton  false hides the header X (default shown when titled)
+       opts.footerSplit  true → space-between footer (destructive-left layout)
+       opts.onClose(result)  fired after teardown
+
+     NL.confirm / NL.prompt / NL.alert are thin Promise wrappers over it. */
+  var _modalSeq = 0;
+  window.NL.modal = function(opts) {
+    opts = opts || {};
+    var prevFocus = (typeof document !== 'undefined') ? document.activeElement : null;
+
+    var backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+
+    var modal = document.createElement('div');
+    modal.className = 'modal' +
+      (opts.width === 'wide' ? ' modal--wide' : '') +
+      (opts.size === 'sm' ? ' modal--sm' : '');
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    backdrop.appendChild(modal);
+
+    if (opts.title) {
+      var titleId = 'nlmodal-title-' + (++_modalSeq);
+      modal.setAttribute('aria-labelledby', titleId);
+      var head = document.createElement('div');
+      head.className = 'modal__head';
+      var h = document.createElement('h3');
+      h.id = titleId;
+      h.textContent = opts.title;
+      head.appendChild(h);
+      if (opts.closeButton !== false) {
+        var x = document.createElement('button');
+        x.className = 'modal__close';
+        x.type = 'button';
+        x.setAttribute('aria-label', 'Close');
+        x.innerHTML = '&times;';
+        x.addEventListener('click', function() { ctrl.close(); });
+        head.appendChild(x);
+      }
+      modal.appendChild(head);
+    }
+
+    var body = document.createElement('div');
+    body.className = 'modal__body';
+    if (typeof opts.body === 'string') body.innerHTML = opts.body;
+    else if (opts.body) body.appendChild(opts.body);
+    modal.appendChild(body);
+
+    var footer = null;
+    if (opts.buttons && opts.buttons.length) {
+      footer = document.createElement('div');
+      footer.className = 'modal__footer' + (opts.footerSplit ? ' modal__footer--split' : '');
+      opts.buttons.forEach(function(b) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn ' + (b.className || 'btn--ghost');
+        btn.textContent = b.label;
+        if (b.autofocus) btn.setAttribute('data-nl-autofocus', '1');
+        btn.addEventListener('click', function() { if (b.onClick) b.onClick(ctrl); });
+        footer.appendChild(btn);
+      });
+      modal.appendChild(footer);
+    }
+
+    function focusables() {
+      return modal.querySelectorAll(
+        'a[href],button:not([disabled]),textarea:not([disabled]),' +
+        'input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])'
+      );
+    }
+    function onKeydown(e) {
+      if (e.key === 'Escape' && opts.dismissable !== false) { e.preventDefault(); ctrl.close(); return; }
+      if (e.key !== 'Tab') return;
+      var f = focusables();
+      if (!f.length) return;
+      var first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+    function onBackdrop(e) {
+      if (e.target === backdrop && opts.dismissable !== false) ctrl.close();
+    }
+    backdrop.addEventListener('mousedown', onBackdrop);
+    document.addEventListener('keydown', onKeydown, true);
+
+    var closed = false;
+    var ctrl = {
+      el: modal, backdrop: backdrop, body: body,
+      close: function(result) {
+        if (closed) return;
+        closed = true;
+        document.removeEventListener('keydown', onKeydown, true);
+        backdrop.classList.remove('open');
+        if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
+        if (prevFocus && prevFocus.focus) { try { prevFocus.focus(); } catch (e) {} }
+        if (opts.onClose) opts.onClose(result);
+      }
+    };
+
+    document.body.appendChild(backdrop);
+    backdrop.classList.add('open');
+
+    /* Autofocus: explicit [autofocus] / data-nl-autofocus, else first field,
+       else first footer button. */
+    var af = modal.querySelector('[autofocus],[data-nl-autofocus]') ||
+             body.querySelector('input,textarea,select') ||
+             (footer && footer.querySelector('button'));
+    if (af && af.focus) { try { af.focus(); } catch (e) {} }
+
+    return ctrl;
+  };
+
+  /* NL.confirm(message, opts) → Promise<boolean>. Cancel/Escape/backdrop/X
+     resolve false; the confirm button resolves true.
+       opts.title, opts.confirmText, opts.cancelText, opts.detail (secondary
+       .confirm-job line), opts.variant 'danger'|'restore'|'primary' (button
+       colour), opts.html (treat message as trusted HTML). Newlines in a plain
+       message render as line breaks. Danger confirms autofocus Cancel. */
+  window.NL.confirm = function(message, opts) {
+    opts = opts || {};
+    return new Promise(function(resolve) {
+      var settled = false;
+      function settle(v) { if (!settled) { settled = true; resolve(v); } }
+      var variant = opts.variant || 'primary';
+      var okClass = variant === 'danger' ? 'btn--danger'
+                  : variant === 'restore' ? 'btn--restore' : 'btn--primary';
+      var msg = opts.html ? message : window.NL.escHtml(message).replace(/\n/g, '<br>');
+      var html = '<p class="confirm-text">' + msg + '</p>';
+      if (opts.detail) html += '<p class="confirm-job">' + window.NL.escHtml(opts.detail) + '</p>';
+      window.NL.modal({
+        title: opts.title || 'Confirm',
+        size: 'sm',
+        body: html,
+        onClose: function() { settle(false); },
+        buttons: [
+          { label: opts.cancelText || 'Cancel', className: 'btn--ghost',
+            autofocus: variant === 'danger',
+            onClick: function(c) { c.close(); } },
+          { label: opts.confirmText || 'Confirm', className: okClass,
+            autofocus: variant !== 'danger',
+            onClick: function(c) { settle(true); c.close(); } }
+        ]
+      });
+    });
+  };
+
+  /* NL.prompt(message, opts) → Promise<string|null>. OK resolves the input
+     value; Cancel/Escape/backdrop resolve null. opts.default, opts.placeholder,
+     opts.multiline, opts.title, opts.confirmText, opts.cancelText. */
+  window.NL.prompt = function(message, opts) {
+    opts = opts || {};
+    return new Promise(function(resolve) {
+      var settled = false;
+      function settle(v) { if (!settled) { settled = true; resolve(v); } }
+      var wrap = document.createElement('div');
+      if (message) {
+        var p = document.createElement('p');
+        p.className = 'confirm-text';
+        p.textContent = message;
+        wrap.appendChild(p);
+      }
+      var input = document.createElement(opts.multiline ? 'textarea' : 'input');
+      if (!opts.multiline) input.type = 'text';
+      input.className = 'modal__input';
+      input.value = opts.default != null ? String(opts.default) : '';
+      if (opts.placeholder) input.placeholder = opts.placeholder;
+      wrap.appendChild(input);
+      var ctrl = window.NL.modal({
+        title: opts.title || 'Enter a value',
+        size: 'sm',
+        body: wrap,
+        onClose: function() { settle(null); },
+        buttons: [
+          { label: opts.cancelText || 'Cancel', className: 'btn--ghost',
+            onClick: function(c) { c.close(); } },
+          { label: opts.confirmText || 'OK', className: 'btn--primary',
+            onClick: function(c) { settle(input.value); c.close(); } }
+        ]
+      });
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !opts.multiline) { e.preventDefault(); settle(input.value); ctrl.close(); }
+      });
+      if (input.focus) { try { input.focus(); } catch (e) {} }
+    });
+  };
+
+  /* NL.alert(message, opts) → Promise<void>. A single OK button; Escape/
+     backdrop/OK all resolve. opts.title, opts.confirmText, opts.html. */
+  window.NL.alert = function(message, opts) {
+    opts = opts || {};
+    return new Promise(function(resolve) {
+      var settled = false;
+      function settle() { if (!settled) { settled = true; resolve(); } }
+      var msg = opts.html ? message : window.NL.escHtml(message).replace(/\n/g, '<br>');
+      window.NL.modal({
+        title: opts.title || 'Notice',
+        size: 'sm',
+        body: '<p class="confirm-text">' + msg + '</p>',
+        onClose: settle,
+        buttons: [
+          { label: opts.confirmText || 'OK', className: 'btn--primary',
+            autofocus: true, onClick: function(c) { c.close(); } }
+        ]
+      });
+    });
   };
 
   /* ── Session helper ──────────────────────────────────────────────────── */
