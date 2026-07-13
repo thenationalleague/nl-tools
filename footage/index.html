@@ -32,6 +32,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-functions-compat.js"></script>
 
 <!-- Firebase init -->
 <script>
@@ -421,7 +422,24 @@
     } catch(e){ return Promise.reject(e); }
   }
   function isReal(f){ return !!(f && f.storagePath); }
-  function resolveUrl(f){ return ensureAuth().then(function(){ return firebase.storage().ref(f.storagePath).getDownloadURL(); }); }
+  // Layer 2: every footage URL comes from the getFootageUrl gate — a per-club,
+  // 15-min signed URL — not getDownloadURL. The gate verifies the caller's club
+  // and does the proxy→full fallback server-side.
+  function signedUrl(path){
+    return ensureAuth().then(function(){
+      return firebase.app().functions('europe-west2').httpsCallable('getFootageUrl')({ path: path });
+    }).then(function(r){ if (r && r.data && r.data.url) return r.data.url; throw new Error('no-url'); })
+    .catch(function(e){
+      var msg = ((e&&e.code)||'') + ' ' + ((e&&e.message)||'');
+      if (/permission-denied/i.test(msg)) throw e;   // respect a club denial — never fall back past it
+      // Gate unavailable (deploy hiccup) — direct URL fallback while Storage is
+      // still open this stage; once Storage is locked (stage 3) this no-ops.
+      return firebase.storage().ref(path).getDownloadURL().catch(function(){
+        return firebase.storage().ref(path.replace('footage/national-league-cup/proxies/','footage/national-league-cup/')).getDownloadURL();
+      });
+    });
+  }
+  function resolveUrl(f){ return signedUrl(f.storagePath); }
   // 360p preview proxy (footage/national-league-cup/proxies/<name>). Preview streams
   // the proxy if present, else the full file. Size-based, not filename-gated.
   function proxyPathFor(f){
@@ -429,14 +447,7 @@
     if (f.storagePath.indexOf('/proxies/') !== -1) return null;   // already a proxy
     return f.storagePath.replace('footage/national-league-cup/', 'footage/national-league-cup/proxies/');
   }
-  function previewUrl(f){
-    var pp = proxyPathFor(f);
-    return ensureAuth().then(function(){
-      if (pp) return firebase.storage().ref(pp).getDownloadURL()
-        .catch(function(){ return firebase.storage().ref(f.storagePath).getDownloadURL(); });  // proxy not ready → full
-      return firebase.storage().ref(f.storagePath).getDownloadURL();
-    });
-  }
+  function previewUrl(f){ return signedUrl(proxyPathFor(f) || f.storagePath); }
   function fileByRef(ref){ var p=ref.split('|'), g=DATA.games.filter(function(x){return x.id===p[0];})[0]; if(!g) return null; var f=filesForGame(g).filter(function(x){return x.id===p[1];})[0]; return f?{g:g,f:f}:null; }
   function missingObj(e){ var c=(e&&(e.code||e.message))||''; return /object-not-found|not-?found|404/i.test(c); }
 
