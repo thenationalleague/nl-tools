@@ -16,7 +16,7 @@
  * full-match cost question. See footage/README.md.
  */
 const { onObjectFinalized, onObjectDeleted } = require("firebase-functions/v2/storage");
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onValueCreated } = require("firebase-functions/v2/database");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
@@ -146,36 +146,31 @@ exports.onFootageDeleted = onObjectDeleted(
 );
 
 /**
- * Signed-URL gate for footage — per-club access control (Layer 2).
+ * Per-club footage access — RTDB-mediated signed URLs (Layer 2).
  *
- * Every preview/download calls this instead of getDownloadURL(). It checks the
- * caller's club against the file's game (home OR away, read from the CATALOGUE,
- * not the filename — so a mis-named file can't leak), then returns a short-lived
- * (15 min) signed URL. NL staff/admin/superadmin get any file.
+ * Firebase *callable* functions must be publicly invokable, which the org's Domain
+ * Restricted Sharing policy forbids (allUsers invoker → 403). So instead of a
+ * callable, the client writes a request to app-data/media-footage/urlRequests/<id>
+ * and this EVENT-DRIVEN function (no public invoker needed) checks the caller's club
+ * against the file's game (home OR away, from the CATALOGUE not the filename) and
+ * writes back a short-lived (15 min) signed URL — or an error. NL staff/admin/
+ * superadmin get any file.
  *
- * Caller identity:
+ * Caller identity — `uid` is enforced `=== auth.uid` by the RTDB write rule, so the
+ * function can trust it:
  *   - Portal user  → users/<uid>/role + users/<uid>/club.
- *   - Passcode user (/club, anon auth) → passes { token }, mapped to a club via
- *     app-data/media-footage/access/clubTokens/<token> (admin-only node).
- *
- * Requesting a proxy path that doesn't exist yet falls back to the full file,
- * so the client just asks for the proxy for preview and the original for download.
+ *   - Passcode user (/club, anon) → token → app-data/media-footage/access/clubTokens/<token>.
  */
 const NL_CUP_PREFIX = "footage/national-league-cup/";
 function normName(s) { return String(s == null ? "" : s).trim().toLowerCase(); }
 
-exports.getFootageUrl = onCall(async (request) => {
- try {
-  const auth = request.auth;
-  if (!auth) throw new HttpsError("unauthenticated", "Sign in required.");
-
-  const reqPath = (request.data && request.data.path) || "";
-  const token   = (request.data && request.data.token) || null;
+// Authorise the caller for reqPath and return a 15-min signed URL, or throw
+// Error(reason) — reason is written back to the request node for the client.
+async function signFootageUrl(uid, token, reqPath) {
   if (typeof reqPath !== "string" || reqPath.indexOf(NL_CUP_PREFIX) !== 0 || reqPath.indexOf("..") !== -1)
-    throw new HttpsError("invalid-argument", "Bad path.");
+    throw new Error("bad-path");
 
-  // 1) Caller role + club.
-  const userSnap = await admin.database().ref("users/" + auth.uid).once("value");
+  const userSnap = await admin.database().ref("users/" + uid).once("value");
   const user = userSnap.val() || {};
   const role = user.role || "";
   const nlFull = role === "superadmin" || role === "admin" || role === "staff";
@@ -185,9 +180,8 @@ exports.getFootageUrl = onCall(async (request) => {
       .ref("app-data/media-footage/access/clubTokens/" + token).once("value");
     club = tSnap.val() || null;
   }
-  if (!nlFull && !club) throw new HttpsError("permission-denied", "No club access.");
+  if (!nlFull && !club) throw new Error("no-club-access");
 
-  // 2) Non-NL callers must own the game (home OR away). Resolve via the catalogue.
   const original = reqPath.replace(NL_CUP_PREFIX + "proxies/", NL_CUP_PREFIX);
   if (!nlFull) {
     const [catSnap, upSnap] = await Promise.all([
@@ -210,36 +204,38 @@ exports.getFootageUrl = onCall(async (request) => {
         (g.files || []).forEach((f) => { if (f && f.storagePath === original) game = g; });
       });
     }
-    if (!game) throw new HttpsError("permission-denied", "File not recognised.");
+    if (!game) throw new Error("file-not-recognised");
 
     const myClub = normName(club);
     const homeName = normName((clubsByCode[game.home] || {}).name);
     const awayName = normName((clubsByCode[game.away] || {}).name);
-    if (myClub !== homeName && myClub !== awayName)
-      throw new HttpsError("permission-denied", "Not your club's footage.");
+    if (myClub !== homeName && myClub !== awayName) throw new Error("not-your-club");
   }
 
-  // 3) Sign the requested file (proxy → full fallback if the proxy isn't there yet).
   let signPath = reqPath;
   if (reqPath.indexOf(NL_CUP_PREFIX + "proxies/") === 0) {
     const [exists] = await admin.storage().bucket(BUCKET).file(reqPath).exists();
     if (!exists) signPath = original;
   }
-  try {
-    // v4 signing uses the IAM SignBlob API (Token Creator + IAM Credentials API),
-    // which is what a keyless Cloud Functions runtime has. The default (v2) signer
-    // needs a private key the runtime doesn't have → "cannot sign without client_email".
-    const [url] = await admin.storage().bucket(BUCKET).file(signPath)
-      .getSignedUrl({ version: "v4", action: "read", expires: Date.now() + 15 * 60 * 1000 });
-    return { url: url };
-  } catch (err) {
-    logger.error(`Signing failed for ${signPath}: ${err && err.message}`);
-    // Surface the real reason to the client so it's diagnosable without log-diving.
-    throw new HttpsError("internal", "sign-failed: " + ((err && (err.message || err.code)) || "unknown"));
+  // v4 signing uses the IAM SignBlob API (Token Creator + IAM Credentials API),
+  // which is what a keyless Cloud Functions runtime has (v2/default needs a key).
+  const [url] = await admin.storage().bucket(BUCKET).file(signPath)
+    .getSignedUrl({ version: "v4", action: "read", expires: Date.now() + 15 * 60 * 1000 });
+  return url;
+}
+
+exports.onFootageUrlRequest = onValueCreated(
+  { ref: "/app-data/media-footage/urlRequests/{id}", region: "europe-west2" },
+  async (event) => {
+    const ref = event.data.ref;
+    const req = event.data.val() || {};
+    if (req.url || req.error) return;   // already fulfilled (idempotent)
+    try {
+      const url = await signFootageUrl(req.uid || "", req.token || null, req.path || "");
+      await ref.child("url").set(url);
+    } catch (err) {
+      logger.error(`urlRequest failed (${req.path}): ${err && err.message}`);
+      await ref.child("error").set(String((err && err.message) || "error"));
+    }
   }
- } catch (outer) {
-   if (outer instanceof HttpsError) throw outer;   // keep intended denials + sign-failed
-   logger.error(`getFootageUrl error: ${(outer && outer.stack) || outer}`);
-   throw new HttpsError("internal", "gate: " + ((outer && (outer.message || outer.code)) || "unknown"));
- }
-});
+);
