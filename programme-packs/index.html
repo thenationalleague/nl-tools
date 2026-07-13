@@ -3,10 +3,24 @@
 <head>
 <!--
   NL Tools — Programme Packs
-  Version: 3.16
-  Date: 19/06/2026
+  Version: 3.17
+  Date: 13/07/2026
 
   CHANGELOG
+  v3.17 (13/07/2026)
+    - Canon sweep: clubs list + crests now come from the shared nl-utils canon.
+      * Club roster loads via NL.clubs.all() (memoised clubs-meta — one fetch per
+        session, shared with every other tool) instead of a private direct fetch
+        of clubs-meta.json. Behaviour preserved: NL.clubs.all() returns the whole
+        file, name-sorted, with each club's base `division` — identical roster to
+        before. (Did NOT switch to NL.season.clubsFor(meta), which would show only
+        the current-season roster — kept the whole-file behaviour deliberately.)
+      * Small list/panel/trigger crests now load the lightweight 96px thumb via
+        NL.clubs.crestUrl(name,'thumb') and degrade thumb → full → rose on error
+        (was full-res → rose). Rose fallback unchanged (NL.clubs.ROSE). NL Assets
+        rose treatment unchanged. No large/hero crest exists here.
+      * Dropped the local CREST_BASE / CLUBS_META_URL / ppCrestUrl scaffolding —
+        all crest + clubs-meta URLs now flow through canon.
   v3.16 (19/06/2026)
     - "Open in Drive" everywhere + reliable. Now driven by folder-ids read from
       RTDB (ppLoadFolderIds / ppDriveFolderId / ppDriveLinkBtn) instead of the
@@ -233,6 +247,13 @@
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
     {
+      date:    '13 July 2026',
+      version: 'v3.17',
+      items: [
+        'Under-the-hood tidy: club crests now load a smaller, faster thumbnail and share the tool suite’s central club list, so pages open a touch quicker. No visible change.'
+      ]
+    },
+    {
       date:    '19 June 2026',
       version: 'v3.16',
       items: [
@@ -389,7 +410,7 @@
 
 </script>
 
-<script src="/tools/system/nl-utils.js?v=18"></script>
+<script src="/tools/system/nl-utils.js?v=19"></script>
 <script src="/tools/system/nl-topbar.js?v=7"></script>
 <script src="/tools/system/auth-guard.js?v=8"></script>
 <script>
@@ -1969,9 +1990,9 @@ var STATE = {
   previewBlobUrl: null
 };
 
-var CREST_BASE     = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
-var FALLBACK_CREST = CREST_BASE + 'National%20League%20rose.png';
-var CLUBS_META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
+/* Crest URLs + clubs-meta now come from canon (nl-utils NL.clubs). The rose is
+   the shared fallback (NL.clubs.ROSE === the old hand-rolled rose URL). */
+var FALLBACK_CREST = NL.clubs.ROSE;
 var TOOL_DATA_PATH = 'app-data/media-programme-packs';
 
 /* Inline SVG for the download icon — universal "tray with arrow" pattern.
@@ -2079,24 +2100,29 @@ function ppResolveMyClub(raw) {
    ============================================================================ */
 
 function ppLoadClubs() {
-  return fetch(CLUBS_META_URL + '?cb=' + Date.now())
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      var arr = (data.clubs || []).map(function(c) {
-        return {
-          key:      ppClubKey(c.name),
-          name:     c.name,
-          short:    c.short || c.code || '',
-          division: c.division || '',
-          isCentral: false
-        };
-      });
-      arr.sort(function(a, b) { return a.name.localeCompare(b.name); });
-      arr.unshift({ key: '_nl-central', name: 'National League Assets', short: 'NL', division: 'Reference', isCentral: true });
-      STATE.clubs = arr;
-      STATE.clubsByKey = {};
-      arr.forEach(function(c) { STATE.clubsByKey[c.key] = c; });
+  /* Whole-roster read via canon (NL.clubs — memoised clubs-meta, one fetch per
+     session). NL.clubs.all() returns EVERY club in the file, name-sorted, with
+     each club's base `division` field left as-is — byte-for-byte the behaviour
+     of the old direct fetch that mapped `c.division||''` over data.clubs with no
+     season filter. NB: NL.season.clubsFor(meta) would instead give only the
+     current-season roster (dropping clubs whose `seasons` map lacks the current
+     key); that is deliberately NOT used here so the club list shown is unchanged. */
+  return NL.clubs.all().then(function(clubs) {
+    var arr = clubs.map(function(c) {
+      return {
+        key:      ppClubKey(c.name),
+        name:     c.name,
+        short:    c.short || c.code || '',
+        division: c.division || '',
+        isCentral: false
+      };
     });
+    arr.sort(function(a, b) { return a.name.localeCompare(b.name); });
+    arr.unshift({ key: '_nl-central', name: 'National League Assets', short: 'NL', division: 'Reference', isCentral: true });
+    STATE.clubs = arr;
+    STATE.clubsByKey = {};
+    arr.forEach(function(c) { STATE.clubsByKey[c.key] = c; });
+  });
 }
 
 /* Drive folder ids per club: { clubKey: { _root, <folderKey>: driveId } }.
@@ -2290,9 +2316,23 @@ function ppClubKey(name) {
     .replace(/^-|-$/g, '');
 }
 
-function ppCrestUrl(clubName) {
-  return CREST_BASE + encodeURIComponent(clubName) + '.png';
+/* Small club crest (<img>) built as an HTML string: loads the lightweight thumb
+   from canon and degrades thumb → full → rose on error. Returns the `src` +
+   `onerror` attribute pair; the class/id are supplied by the caller. Use full-res
+   (NL.clubs.crestUrl(name), no size arg) only for large/hero imagery. */
+function ppCrestSrc(clubName) {
+  return 'src="' + NL.escHtml(NL.clubs.crestUrl(clubName, 'thumb')) + '" '
+    + 'data-crest-full="' + NL.escHtml(NL.clubs.crestUrl(clubName)) + '" '
+    + 'onerror="ppCrestOnError(this)"';
 }
+
+/* thumb → full → rose fallback for crests rendered via ppCrestSrc. */
+window.ppCrestOnError = function(img) {
+  var full = img.getAttribute('data-crest-full');
+  if (full && img.src !== full) { img.src = full; return; }
+  img.onerror = null;
+  img.src = FALLBACK_CREST;
+};
 
 function ppCurrentClub() {
   return STATE.clubsByKey[STATE.activeClub] || STATE.clubs[0];
@@ -2498,8 +2538,8 @@ function ppRenderClubTrigger() {
   if (club.isCentral) {
     crestEl.outerHTML = '<div id="ppClubTriggerCrest" class="pp-club-trigger__crest--nl"><img src="' + FALLBACK_CREST + '" alt=""></div>';
   } else {
-    crestEl.outerHTML = '<img id="ppClubTriggerCrest" class="pp-club-trigger__crest" src="' + NL.escHtml(ppCrestUrl(club.name)) + '" '
-      + 'onerror="this.onerror=null;this.src=\'' + FALLBACK_CREST + '\'" alt="">';
+    crestEl.outerHTML = '<img id="ppClubTriggerCrest" class="pp-club-trigger__crest" '
+      + ppCrestSrc(club.name) + ' alt="">';
   }
   document.getElementById('ppClubTriggerName').textContent = club.name;
 }
@@ -2566,8 +2606,7 @@ function ppRenderClubItem(c) {
       + '<img src="' + FALLBACK_CREST + '" alt="NL">'
       + '</div>';
   } else {
-    crestHtml = '<img class="pp-club-list__crest" src="' + NL.escHtml(ppCrestUrl(c.name)) + '" '
-      + 'onerror="this.onerror=null;this.src=\'' + FALLBACK_CREST + '\'" alt="">';
+    crestHtml = '<img class="pp-club-list__crest" ' + ppCrestSrc(c.name) + ' alt="">';
   }
 
   /* Modifier classes:
@@ -2634,8 +2673,7 @@ function ppRenderFolderGrid() {
   if (club.isCentral) {
     crestHtml = '<div class="pp-panel__crest pp-panel__crest--nl"><img src="' + FALLBACK_CREST + '" alt="NL"></div>';
   } else {
-    crestHtml = '<img class="pp-panel__crest" src="' + NL.escHtml(ppCrestUrl(club.name)) + '" '
-      + 'onerror="this.onerror=null;this.src=\'' + FALLBACK_CREST + '\'" alt="">';
+    crestHtml = '<img class="pp-panel__crest" ' + ppCrestSrc(club.name) + ' alt="">';
   }
 
   var subText;

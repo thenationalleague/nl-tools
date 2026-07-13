@@ -1,7 +1,7 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /tools/system/nl-utils.js
-   Version: v1.17 (12/07/2026)
+   Version: v1.18 (13/07/2026)
 
    Shared helper functions used by every tool page. Exposed on window.NL
    namespace. All functions are defensive — they handle missing arguments
@@ -14,6 +14,11 @@
      NL.escHtml('<script>');          // → '&lt;script&gt;'
 
    Changelog
+   v1.18 (13/07/2026)
+     - Added NL.clubs.byOpta(id) — club record by Opta teamID, memoised across
+       all clubs. Replaces the optaID→club maps tools hand-built (team-of-the-
+       week, attendance). Cache-bust ?v=18 → ?v=19.
+
    v1.17 (12/07/2026)
      - Added NL.endpoints — one home for shared backend URLs (public locations
        only, never secrets). NL.endpoints.gas is the consolidated Apps Script
@@ -701,6 +706,7 @@
   var _clubsPromise = null;
   var _clubsMeta    = null;
   var _clubsCb      = null;  /* per-session cache-buster, stamped once */
+  var _optaIndex    = null;  /* lazy optaID → club map, built by byOpta */
   var CLUBS_URL     = '/tools/assets/data/clubs-meta.json';
   var CREST_BASE    = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
   var THUMB_BASE    = CREST_BASE + 'thumbs/';
@@ -743,7 +749,7 @@
       if (!_clubsCb) _clubsCb = Date.now();
       _clubsPromise = fetch(CLUBS_URL + '?cb=' + _clubsCb, { cache: 'no-store' })
         .then(function(r) { if (!r.ok) throw new Error('clubs-meta ' + r.status); return r.json(); })
-        .then(function(data) { _clubsMeta = data; return data; })
+        .then(function(data) { _clubsMeta = data; _optaIndex = null; return data; })
         .catch(function(err) { _clubsPromise = null; throw err; }); /* soft: allow retry */
       return _clubsPromise;
     },
@@ -770,6 +776,17 @@
         if (list[i].name && list[i].name.toLowerCase() === lc) return list[i];
       }
       return null;
+    },
+    /* Club record by Opta teamID (e.g. 't3360'), across ALL clubs. Requires
+       load() first; memoised. Returns null if not loaded or not found.
+       Replaces the optaID→club maps tools used to hand-build. */
+    byOpta: function(id) {
+      if (!_clubsMeta || !id) return null;
+      if (!_optaIndex) {
+        _optaIndex = {};
+        (_clubsMeta.clubs || []).forEach(function(c) { if (c.optaID) _optaIndex[c.optaID] = c; });
+      }
+      return _optaIndex[id] || null;
     }
   };
 

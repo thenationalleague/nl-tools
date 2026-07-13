@@ -10,6 +10,12 @@
 
      TECHNICAL CHANGELOG
      -------------------
+     v2.10.12 (2026-07-13) clubs-meta now loads via the shared canon loader
+                         (NL.clubs.load / NL.clubs.meta, session-memoised)
+                         instead of a direct fetch of clubs-meta.json. Removed
+                         the local CLUBS_META_URL const; loadClubsMeta() sets
+                         S.meta from the resolved object. S.clubs and season
+                         switching (NL.season.clubsFor) unchanged.
      v2.10.11 (2026-07-12) Crest images the tool renders itself (league-strip
                          badge, club-strip header crest, no-data empty-state
                          crest, and the Add-cup-fixture picker crests +
@@ -1132,6 +1138,13 @@
 
   window.NL_CHANGELOG = [
     {
+      date: '13 Jul 2026',
+      version: 'v2.10.12',
+      items: [
+        'Under-the-hood tidy: club identity data (rosters, seasons, divisions) now loads through the platform’s shared loader, so it’s fetched once and reused. No visible change — seasons and club lists work exactly as before.'
+      ]
+    },
+    {
       date: '12 Jul 2026',
       version: 'v2.10.11',
       items: [
@@ -1452,7 +1465,7 @@
   ];
 </script>
 
-<script src="/tools/system/nl-utils.js?v=18"></script>
+<script src="/tools/system/nl-utils.js?v=19"></script>
 <script src="/tools/system/nl-topbar.js?v=7"></script>
 <script src="/tools/system/auth-guard.js?v=8"></script>
 
@@ -3212,7 +3225,8 @@
      CONSTANTS
      ========================================================================= */
 
-  var CLUBS_META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
+  /* clubs-meta is loaded via the shared canon loader (NL.clubs.load /
+     NL.clubs.meta) — session-memoised, one network hit. No local URL const. */
   /* Crest URLs come from the shared canon (NL.clubs.crestUrl / wireCrestImg):
      list/header/picker crests render as 96px thumbs with a thumb→full→rose
      onerror chain. No local CREST_BASE — see nl-utils.js. */
@@ -3253,7 +3267,6 @@
     meta:          null,    /* full clubs-meta object (for NL.season) */
     clubs:         [],      /* clubs for the SELECTED season (division resolved) */
     clubByName:    {},      /* name \u2192 club */
-    clubByTeamID:  {},      /* optaID \u2192 club */
 
     /* Season selection. currentSeason = the live season (clubs-meta `current`);
        season = the one being viewed. Viewing a past season is read-only and
@@ -3401,19 +3414,16 @@
   function rebuildRosterForSeason() {
     S.clubs = NL.season.clubsFor(S.meta, S.season);
     S.clubByName = {};
-    S.clubByTeamID = {};
     for (var i = 0; i < S.clubs.length; i++) {
       var c = S.clubs[i];
       if (c.name)   S.clubByName[c.name] = c;
-      if (c.optaID) S.clubByTeamID[c.optaID] = c;
     }
   }
 
   function loadClubsMeta() {
-    return fetch(CLUBS_META_URL + '?cb=' + Date.now())
-      .then(function(r) { return r.json(); })
+    return NL.clubs.load()
       .then(function(data) {
-        S.meta = data || { clubs: [] };
+        S.meta = data || NL.clubs.meta() || { clubs: [] };
         S.currentSeason = NL.season.current(S.meta) || (NL.season.keys(S.meta)[0] || null);
         if (!S.season) S.season = S.currentSeason;
         rebuildRosterForSeason();

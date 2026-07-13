@@ -51,7 +51,16 @@ const sandbox = {
   location: { search: '', href: '', hash: '' },
   localStorage: memStore(),
   sessionStorage: memStore(),
-  fetch: () => Promise.reject(new Error('fetch is not available in the test sandbox')),
+  /* Serve the real clubs-meta.json off disk so NL.clubs.load()/byName/byOpta
+     can be exercised; anything else is intentionally unstubbed. */
+  fetch: (url) => {
+    const u = String(url).split('?')[0];
+    if (u.endsWith('clubs-meta.json')) {
+      const body = readFileSync(join(REPO, 'assets/data/clubs-meta.json'), 'utf8');
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(JSON.parse(body)) });
+    }
+    return Promise.reject(new Error('unstubbed fetch in test sandbox: ' + url));
+  },
 };
 sandbox.window = sandbox;
 sandbox.globalThis = sandbox;
