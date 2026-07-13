@@ -165,6 +165,7 @@ const NL_CUP_PREFIX = "footage/national-league-cup/";
 function normName(s) { return String(s == null ? "" : s).trim().toLowerCase(); }
 
 exports.getFootageUrl = onCall(async (request) => {
+ try {
   const auth = request.auth;
   if (!auth) throw new HttpsError("unauthenticated", "Sign in required.");
 
@@ -236,4 +237,9 @@ exports.getFootageUrl = onCall(async (request) => {
     // Surface the real reason to the client so it's diagnosable without log-diving.
     throw new HttpsError("internal", "sign-failed: " + ((err && (err.message || err.code)) || "unknown"));
   }
+ } catch (outer) {
+   if (outer instanceof HttpsError) throw outer;   // keep intended denials + sign-failed
+   logger.error(`getFootageUrl error: ${(outer && outer.stack) || outer}`);
+   throw new HttpsError("internal", "gate: " + ((outer && (outer.message || outer.code)) || "unknown"));
+ }
 });
