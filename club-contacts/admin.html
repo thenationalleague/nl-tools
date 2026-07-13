@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/admin.html  v1.17 — superadmin console for the club contacts collection.
+  club-contacts/admin.html  v1.18 — superadmin console for the club contacts collection.
   (Renamed from "club-roster" in v1.3 — toolKey/RTDB path now ops-club-contacts.)
   Submissions: { info, inboxes{deptSlug:{dept,email,phone,ext}},
   people[{firstName,lastName,name,roles[{section,title}],hideContact,qualification}],
@@ -38,7 +38,9 @@
   <script>
     window.NL_TOOL = { title: 'Club Contacts Admin', toolKey: 'ops-club-contacts' };
     var NL_TOOL_KEY = 'ops-club-contacts';
-    window.NL_CHANGELOG = [{ date: '13 Jul 2026', version: 'v1.17', items: [
+    window.NL_CHANGELOG = [{ date: '13 Jul 2026', version: 'v1.18', items: [
+      'Clipboard copy (Submission JSON, email text) and CSV download now go through the canon NL.copy()/NL.download() helpers instead of inline execCommand/Blob plumbing.',
+    ] }, { date: '13 Jul 2026', version: 'v1.17', items: [
       'Clubs list now loads via the canon NL.clubs.load() (session-memoised) instead of a direct clubs-meta.json fetch.',
     ] }, { date: '8 Jul 2026', version: 'v1.16', items: [
       'Removed the “Clear all submissions (test reset)” button — testing is done and the destructive wipe is no longer needed.',
@@ -60,7 +62,7 @@
     window.nlAuthReady = function (u) { window.NL = window.NL || {}; NL.session = u;
       if (window.TOOL && window.TOOL.boot) window.TOOL.boot(u); else window._toolDeferredSession = u; };
   </script>
-  <script src="/tools/system/nl-utils.js?v=21"></script>
+  <script src="/tools/system/nl-utils.js?v=22"></script>
   <script src="/tools/system/nl-topbar.js?v=7"></script>
   <script src="/tools/system/auth-guard.js?v=8"></script>
 <style>
@@ -186,9 +188,7 @@
   function csvCell(v) { v = (v == null ? '' : String(v)); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
   function toCSV(headers, rows) { return [headers].concat(rows).map(function (r) { return r.map(csvCell).join(','); }).join('\r\n'); }
   function downloadCSV(name, text) {
-    var blob = new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8' });
-    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
-    document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+    NL.download(name, '﻿' + text, 'text/csv;charset=utf-8');
   }
   function leadAreasFor(sub, pid) { return LEAD_LABELS.filter(function (a) { return ((sub.leads && sub.leads[a[0]]) || []).indexOf(pid) !== -1; }).map(function (a) { return a[1]; }).join('; '); }
   function peopleCSV() {
@@ -336,10 +336,7 @@
     if (cj) {
       var t1 = tokenFor(cj.getAttribute('data-copyjson'));
       if (t1 && S.subs[t1]) {
-        var ta = document.createElement('textarea'); ta.value = JSON.stringify(S.subs[t1], null, 2);
-        document.body.appendChild(ta); ta.select();
-        try { document.execCommand('copy'); NL.toast('Submission JSON copied.', 'success'); } catch (er) {}
-        document.body.removeChild(ta);
+        NL.copy(JSON.stringify(S.subs[t1], null, 2), { ok: 'Submission JSON copied.' });
       }
       return;
     }
@@ -430,7 +427,7 @@
       }).join('\n');
       var ta = document.getElementById('emails');
       ta.style.display = ''; ta.value = out; ta.select();
-      try { document.execCommand('copy'); NL.toast('Email text for ' + S.clubs.filter(function(c){return tokenFor(c.name);}).length + ' clubs copied.', 'success'); } catch (e) {}
+      NL.copy(out, { ok: 'Email text for ' + S.clubs.filter(function(c){return tokenFor(c.name);}).length + ' clubs copied.' });
     });
   };
   if (window._toolDeferredSession) { window.TOOL.boot(window._toolDeferredSession); window._toolDeferredSession = null; }
