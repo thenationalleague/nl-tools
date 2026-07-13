@@ -36,6 +36,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-functions-compat.js"></script>
 <script>
   firebase.initializeApp({
     apiKey:"AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU", authDomain:"nl-tools.firebaseapp.com",
@@ -312,6 +313,7 @@
 
   function render(club){
     currentClubCode = club.code;
+    currentClubToken = club.token || null;
     document.getElementById('gate').style.display='none';
     document.getElementById('app').style.display='block';
     document.getElementById('hbarCrest').innerHTML = club.crest
@@ -346,7 +348,24 @@
     } catch(e){ return Promise.reject(e); }
   }
   function isReal(f){ return !!(f && f.storagePath); }
-  function resolveUrl(f){ return ensureAuth().then(function(){ return firebase.storage().ref(f.storagePath).getDownloadURL(); }); }
+  // Layer 2: URLs come from the getFootageUrl gate (per-club 15-min signed URLs).
+  // A passcode /club user is anonymous, so we pass the club's token; the function
+  // maps it (admin-only clubTokens node) to a club and checks it owns the game.
+  var currentClubToken = null;   // set on render(club)
+  function signedUrl(path){
+    return ensureAuth().then(function(){
+      return firebase.app().functions('europe-west2').httpsCallable('getFootageUrl')({ path: path, token: currentClubToken });
+    }).then(function(r){ if (r && r.data && r.data.url) return r.data.url; throw new Error('no-url'); })
+    .catch(function(e){
+      var msg = ((e&&e.code)||'') + ' ' + ((e&&e.message)||'');
+      if (/permission-denied/i.test(msg)) throw e;   // respect a club denial
+      // Gate unavailable → direct URL fallback while Storage is open (stage 3 locks it).
+      return firebase.storage().ref(path).getDownloadURL().catch(function(){
+        return firebase.storage().ref(path.replace('footage/national-league-cup/proxies/','footage/national-league-cup/')).getDownloadURL();
+      });
+    });
+  }
+  function resolveUrl(f){ return signedUrl(f.storagePath); }
   // 360p preview proxy (made by the makeProxy Cloud Function at footage/national-league-cup/proxies/<name>,
   // for highlights/clips only). Preview streams the proxy if present, else the full file.
   function proxyPathFor(f){
@@ -356,14 +375,7 @@
     // e.g. full matches over the size cap). No filename/type gate.
     return f.storagePath.replace('footage/national-league-cup/', 'footage/national-league-cup/proxies/');
   }
-  function previewUrl(f){
-    var pp = proxyPathFor(f);
-    return ensureAuth().then(function(){
-      if (pp) return firebase.storage().ref(pp).getDownloadURL()
-        .catch(function(){ return firebase.storage().ref(f.storagePath).getDownloadURL(); });  // proxy not ready → full
-      return firebase.storage().ref(f.storagePath).getDownloadURL();
-    });
-  }
+  function previewUrl(f){ return signedUrl(proxyPathFor(f) || f.storagePath); }
   function fileByRef(ref){ var p=ref.split('|'), g=DATA.games.filter(function(x){return x.id===p[0];})[0]; if(!g) return null; var f=filesForGame(g).filter(function(x){return x.id===p[1];})[0]; return f?{g:g,f:f}:null; }
 
   function downloadFile(f){
