@@ -2,7 +2,16 @@
 <html lang="en">
 <head>
 <!--
-  NL Cup Footage — MASTER control tool (superadmin)
+  NL Cup Footage — MASTER control tool (admin editor)
+  Version: v0.5 (13/07/2026) — portal-gated + house-style re-skin. Replaced the
+           bespoke navy .mbar head with the canonical NL Tools head (auth-guard
+           toolKey media-footage; nl-topbar renders the tool header). Editing is
+           now admin/superadmin only — view-access users (e.g. staff) get a
+           branded "admin tool" notice + a link to the read-only viewer. Init
+           (renderClubs/renderFx, RTDB listeners, pullLive) moved into
+           window.TOOL.boot so no RTDB read happens before the session verifies.
+           Chrome restyled to the portal house style (in-page toolbar, brand
+           tokens, border-left primary accents); all editor logic unchanged.
   Version: v0.4 (13/07/2026) — migrated clipboard copy + JSON export to shared
            canon (NL.copy / NL.download); local toast confirmations unchanged.
   Version: v0.3 (12/07/2026) — delete (✕) on producer-upload chips removes the
@@ -16,124 +25,228 @@
 
   Edits a localStorage overlay (nlFootageData) that the club-facing page
   reads, so changes preview live in the same browser. Export/Import JSON to
-  persist. PHASE 2: this becomes superadmin-gated and writes to RTDB;
-  passcodes + signed Firebase Storage URLs replace the dummy ones. See ../README.md.
+  persist. Publish to live pushes the catalogue to app-data/media-footage/data
+  (admin/superadmin RTDB write); Load from live pulls the published copy.
+
+  Storage (RTDB):
+    app-data/media-footage/data        base catalogue (published by this tool)
+    app-data/media-footage/uploads     producer-uploaded files (live flag toggled here)
+    tools/media-footage                tool registration (label, defaults)
 -->
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Master · NL Cup Footage</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cup Footage — Manage · NL Tools</title>
+
+<!-- Brand stylesheet (lint canonical: ?v=22) -->
 <link rel="stylesheet" href="/tools/system/nl-brand.css?v=22">
 
-<!-- Firebase 10.12.0 (compat) — RTDB catalogue read/write (Stage B). Publish
-     writes app-data/media-footage/data (superadmin only; uses the portal session on
-     the same origin). Read is public. -->
+<!-- Firebase 10.12.0 SDK (compat) — app/auth/database + storage. This tool
+     needs both database (catalogue publish/pull, upload live-flag) and storage
+     (delete a producer upload's file), so storage is added on top of the
+     canonical app/auth/database trio. -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+
+<!-- Firebase init -->
 <script>
   firebase.initializeApp({
-    apiKey:"AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU", authDomain:"nl-tools.firebaseapp.com",
-    databaseURL:"https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app", projectId:"nl-tools",
-    storageBucket:"nl-tools.firebasestorage.app", messagingSenderId:"801354670005",
-    appId:"1:801354670005:web:05d8ebad3e7e63610d03fc"
+    apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+    authDomain:        "nl-tools.firebaseapp.com",
+    databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId:         "nl-tools",
+    storageBucket:     "nl-tools.firebasestorage.app",
+    messagingSenderId: "801354670005",
+    appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
   });
 </script>
+
+<!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+     in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+<script>
+  window.NL_TOOL = {
+    title: 'Cup Footage — Manage',
+    toolKey: 'media-footage'
+  };
+  var NL_TOOL_KEY = 'media-footage';
+
+  window.NL_CHANGELOG = [
+    {
+      date: '13/07/2026',
+      version: 'v0.5',
+      items: [
+        'Portal-gated + house-style re-skin — canonical NL Tools head (auth-guard/nl-topbar), editing restricted to admin/superadmin, init moved into TOOL.boot.'
+      ]
+    },
+    {
+      date: '13/07/2026',
+      version: 'v0.4',
+      items: [ 'Clipboard copy + JSON export moved to shared canon (NL.copy / NL.download).' ]
+    },
+    {
+      date: '12/07/2026',
+      version: 'v0.3',
+      items: [ 'Delete (✕) on producer-upload chips removes the Storage file + its RTDB record for everyone.' ]
+    },
+    {
+      date: '12/07/2026',
+      version: 'v0.2',
+      items: [ 'Producer uploads surfaced as file chips with a live/held toggle.' ]
+    },
+    {
+      date: '12/07/2026',
+      version: 'v0.1',
+      items: [ 'MVP prototype.' ]
+    }
+  ];
+
+  /* auth-guard fires this once the session is verified + pageWrap is
+     revealed. Boot the main app from here so RTDB reads happen with a
+     live auth token. Do NOT read RTDB before this fires. */
+  window.nlAuthReady = function (userData) {
+    window.NL = window.NL || {};
+    window.NL.session = userData;
+    if (window.TOOL && window.TOOL.boot) {
+      window.TOOL.boot(userData);
+    } else {
+      window._toolDeferredSession = userData;
+    }
+  };
+</script>
+
+<!-- NL system scripts (lint canonical: ?v=23 / ?v=7 / ?v=8) -->
+<script src="/tools/system/nl-utils.js?v=23"></script>
+<script src="/tools/system/nl-topbar.js?v=7"></script>
+<script src="/tools/system/auth-guard.js?v=8"></script>
+
 <style>
-  body { background: var(--off-white); }
-  .mbar { background: var(--navy); color: var(--white); padding: 14px clamp(16px,3vw,32px);
-    display: flex; align-items: center; gap: 14px; border-bottom: 7px solid var(--primary); flex-wrap: wrap; }
-  .mbar__title { flex: 1; font-size: clamp(15px,1.6vw,20px); font-weight: 900; font-variation-settings:'wght' 900;
-    text-transform: uppercase; letter-spacing: 0.04em; min-width: 200px; }
-  .mbar__title small { display: block; font-size: 10px; font-weight: 700; letter-spacing: 0.14em; color: rgba(255,255,255,0.8); }
-  .mbar .btn--ghost { background: rgba(255,255,255,0.08); color: var(--white); border-color: rgba(255,255,255,0.3); }
-  .mbar .btn--ghost:hover { background: rgba(255,255,255,0.16); }
-  .wrap { max-width: 1100px; margin: 0 auto; padding: clamp(20px,3vw,32px) clamp(14px,2.5vw,28px) 80px; }
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. All styles below are scoped under #pageWrap so
+     they never fight the shared portal topbar. The bespoke navy .mbar header
+     is gone — nl-topbar renders the tool header; a lightweight in-page
+     toolbar carries the action buttons. */
 
-  .dummy-flag { background: var(--amber-light); border: 1px solid color-mix(in srgb,var(--amber) 35%,white);
+  #pageWrap .wrap { max-width: 1100px; margin: 0 auto; padding: clamp(18px,3vw,32px) clamp(14px,2.5vw,28px) 80px; }
+
+  /* View-access notice (non-admin users) */
+  #pageWrap .view-notice { max-width: 520px; margin: 48px auto; background: var(--white); border: 1px solid var(--border);
+    border-left: 4px solid var(--primary); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px 26px; }
+  #pageWrap .view-notice__title { font-size: 12px; font-weight: 900; font-variation-settings:'wght' 900; text-transform: uppercase;
+    letter-spacing: 0.12em; color: var(--navy); margin-bottom: 10px; }
+  #pageWrap .view-notice p { font-size: 14px; color: var(--text-muted); line-height: 1.55; margin: 0 0 18px; }
+
+  /* In-page action toolbar (Publish / Pull / Export / Import / Reset) */
+  #pageWrap .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--white);
+    border: 1px solid var(--border); border-left: 4px solid var(--primary); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 12px 16px; margin-bottom: 18px; }
+  #pageWrap .toolbar__lead { flex: 1 1 auto; min-width: 130px; font-size: 12px; font-weight: 900; font-variation-settings:'wght' 900;
+    text-transform: uppercase; letter-spacing: 0.1em; color: var(--navy); }
+
+  #pageWrap .dummy-flag { background: var(--amber-light); border: 1px solid color-mix(in srgb,var(--amber) 35%,white);
     color: var(--amber); border-radius: var(--radius); padding: 10px 14px; font-size: 12px; font-weight: 700; margin-bottom: 22px; }
-  .saved-flag { background: var(--green-light); color: var(--green); border: 1px solid color-mix(in srgb,var(--green) 30%,white); }
+  #pageWrap .saved-flag { background: var(--green-light); color: var(--green); border: 1px solid color-mix(in srgb,var(--green) 30%,white); }
 
-  .tabs { display: flex; gap: 4px; background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+  #pageWrap .tabs { display: flex; gap: 4px; background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
     padding: 3px; margin-bottom: 24px; max-width: 420px; }
-  .tab { flex: 1; text-align: center; padding: 9px 12px; border-radius: 4px; font-size: 12px; font-weight: 800;
+  #pageWrap .tab { flex: 1; text-align: center; padding: 9px 12px; border-radius: 4px; font-size: 12px; font-weight: 800;
     cursor: pointer; color: var(--text-muted); border: none; background: none; font-family: var(--font);
     text-transform: uppercase; letter-spacing: 0.06em; }
-  .tab.active { background: var(--navy); color: var(--white); }
-  .tab:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-  .pane { display: none; } .pane.active { display: block; }
+  #pageWrap .tab.active { background: var(--navy); color: var(--white); }
+  #pageWrap .tab:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  #pageWrap .pane { display: none; } #pageWrap .pane.active { display: block; }
 
-  .tier-head { font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.14em; color: var(--navy);
-    margin: 22px 0 10px; } .tier-head:first-child { margin-top: 0; }
+  #pageWrap .tier-head { font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.14em; color: var(--navy);
+    margin: 22px 0 10px; } #pageWrap .tier-head:first-child { margin-top: 0; }
 
-  .clubrow { display: flex; align-items: center; gap: 12px; background: var(--white); border: 1px solid var(--border);
-    border-radius: var(--radius); box-shadow: var(--shadow); padding: 10px 14px; margin-bottom: 8px; flex-wrap: wrap; }
-  .clubrow__crest { width: 34px; height: 34px; object-fit: contain; flex-shrink: 0; }
-  .clubrow__mono { width: 34px; height: 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  #pageWrap .clubrow { display: flex; align-items: center; gap: 12px; background: var(--white); border: 1px solid var(--border);
+    border-left: 3px solid transparent; border-radius: var(--radius); box-shadow: var(--shadow); padding: 10px 14px; margin-bottom: 8px; flex-wrap: wrap; }
+  #pageWrap .clubrow:hover { border-left-color: var(--primary); }
+  #pageWrap .clubrow__crest { width: 34px; height: 34px; object-fit: contain; flex-shrink: 0; }
+  #pageWrap .clubrow__mono { width: 34px; height: 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
     color: var(--white); font-weight: 900; font-size: 11px; flex-shrink: 0; }
-  .clubrow__name { flex: 1 1 160px; min-width: 0; font-weight: 800; font-variation-settings:'wght' 800; font-size: 14px; }
-  .clubrow__name small { display: block; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; }
-  .clubrow__pass { font-family: ui-monospace, Menlo, monospace; font-size: 14px; font-weight: 800; letter-spacing: 0.15em;
+  #pageWrap .clubrow__name { flex: 1 1 160px; min-width: 0; font-weight: 800; font-variation-settings:'wght' 800; font-size: 14px; }
+  #pageWrap .clubrow__name small { display: block; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  #pageWrap .clubrow__pass { font-family: ui-monospace, Menlo, monospace; font-size: 14px; font-weight: 800; letter-spacing: 0.15em;
     background: var(--off-white); border: 1px solid var(--border); border-radius: var(--radius); padding: 5px 10px; color: var(--navy); }
-  .clubrow__actions { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; }
-  .mini { border: 1px solid var(--border); background: var(--white); border-radius: var(--radius); font-family: var(--font);
+  #pageWrap .clubrow__actions { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; }
+  #pageWrap .mini { border: 1px solid var(--border); background: var(--white); border-radius: var(--radius); font-family: var(--font);
     font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; padding: 6px 10px; cursor: pointer; color: var(--navy); }
-  .mini:hover { border-color: var(--navy); } .mini:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-  .mini--warn { color: var(--amber); }
+  #pageWrap .mini:hover { border-color: var(--navy); } #pageWrap .mini:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  #pageWrap .mini--warn { color: var(--amber); }
 
-  .fx { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
-    padding: 10px 14px; margin-bottom: 8px; }
-  .fx__row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .fx__meta { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); flex-shrink: 0; }
-  .fx__fix { flex: 1 1 220px; font-weight: 800; font-size: 13px; }
-  .fx__sel { font-family: var(--font); font-size: 12px; padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--white); }
-  .fx__assets { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-  .chip { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 9px;
+  #pageWrap .fx { background: var(--white); border: 1px solid var(--border); border-left: 3px solid transparent;
+    border-radius: var(--radius); box-shadow: var(--shadow); padding: 10px 14px; margin-bottom: 8px; }
+  #pageWrap .fx:hover { border-left-color: var(--primary); }
+  #pageWrap .fx__row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  #pageWrap .fx__meta { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); flex-shrink: 0; }
+  #pageWrap .fx__fix { flex: 1 1 220px; font-weight: 800; font-size: 13px; }
+  #pageWrap .fx__sel { font-family: var(--font); font-size: 12px; padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--white); }
+  #pageWrap .fx__assets { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  #pageWrap .chip { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 9px;
     border-radius: 20px; cursor: pointer; border: 1px solid var(--border); background: var(--white); color: var(--text-muted); font-family: var(--font); }
-  .chip.on { background: var(--green-light); border-color: color-mix(in srgb,var(--green) 30%,white); color: var(--green); }
-  .chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-  .chipwrap { display: inline-flex; align-items: stretch; gap: 0; }
-  .chipwrap .chip { border-top-right-radius: 0; border-bottom-right-radius: 0; }
-  .chipx { font-size: 11px; font-weight: 800; line-height: 1; padding: 0 8px; cursor: pointer;
+  #pageWrap .chip.on { background: var(--green-light); border-color: color-mix(in srgb,var(--green) 30%,white); color: var(--green); }
+  #pageWrap .chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  #pageWrap .chipwrap { display: inline-flex; align-items: stretch; gap: 0; }
+  #pageWrap .chipwrap .chip { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  #pageWrap .chipx { font-size: 11px; font-weight: 800; line-height: 1; padding: 0 8px; cursor: pointer;
     border: 1px solid var(--border); border-left: 0; border-radius: 0 20px 20px 0;
     background: var(--white); color: var(--text-muted); font-family: var(--font); }
-  .chipx:hover { background: var(--red-light); border-color: color-mix(in srgb,var(--red) 30%,white); color: var(--red); }
-  .chipx:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  #pageWrap .chipx:hover { background: var(--red-light); border-color: color-mix(in srgb,var(--red) 30%,white); color: var(--red); }
+  #pageWrap .chipx:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
-  .helptext { font-size: 12px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.5; }
+  #pageWrap .helptext { font-size: 12px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.5; }
 </style>
 </head>
 <body>
-<div class="mbar">
-  <div class="mbar__title">NL Cup Footage — Master<small>National League Cup · superadmin control</small></div>
-  <button class="btn btn--ghost btn--sm" id="pullBtn">Load from live</button>
-  <button class="btn btn--sm" id="publishBtn">Publish to live</button>
-  <button class="btn btn--ghost btn--sm" id="exportBtn">Export JSON</button>
-  <button class="btn btn--ghost btn--sm" id="importBtn">Import</button>
-  <button class="btn btn--ghost btn--sm" id="resetBtn">Reset</button>
-  <input type="file" id="importFile" accept="application/json" style="display:none">
+
+<!-- Topbar — auto-rendered by /tools/system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="wrap">
+
+    <!-- View-access notice — shown to non-admins by TOOL.boot -->
+    <div class="view-notice" id="viewNotice" style="display:none">
+      <div class="view-notice__title">Admin tool</div>
+      <p>This is the admin tool — you have view access. Editing the footage catalogue is limited to NL admins.</p>
+      <a class="btn btn--primary" href="/tools/footage/">Open the footage viewer</a>
+    </div>
+
+    <!-- Editor — shown to admin/superadmin by TOOL.boot -->
+    <div id="editorRoot" style="display:none">
+      <div class="toolbar">
+        <div class="toolbar__lead">NL Cup Footage — catalogue</div>
+        <button class="btn btn--ghost btn--sm" id="pullBtn">Load from live</button>
+        <button class="btn btn--sm" id="publishBtn">Publish to live</button>
+        <button class="btn btn--ghost btn--sm" id="exportBtn">Export JSON</button>
+        <button class="btn btn--ghost btn--sm" id="importBtn">Import</button>
+        <button class="btn btn--ghost btn--sm" id="resetBtn">Reset</button>
+        <input type="file" id="importFile" accept="application/json" style="display:none">
+      </div>
+
+      <div class="dummy-flag" id="stateFlag">Editing a local (this-browser) working copy. <strong>Publish to live</strong> pushes it to every club page via RTDB; <strong>Load from live</strong> pulls the published copy; Export saves a JSON backup.</div>
+
+      <div class="tabs">
+        <button class="tab active" data-pane="clubs">Clubs &amp; links</button>
+        <button class="tab" data-pane="fixtures">Fixtures</button>
+      </div>
+
+      <div class="pane active" id="pane-clubs">
+        <div class="helptext">Each club has a private <strong>direct link</strong> (auto-signs them in) and a <strong>passcode</strong> (manual entry). Hand these to the club's media contact. All 32 cup clubs.</div>
+        <div id="clubsList"></div>
+      </div>
+
+      <div class="pane" id="pane-fixtures">
+        <div class="helptext"><b>Each pill is a file for that game</b> (Highlights, Full match, Clips…). <b style="color:var(--green)">Green = live to clubs</b>; grey = held back. Files go live automatically when the producer uploads them — click a pill only to <b>pull one back</b> (an override, not an approval step). Counts vary per game — that's expected. Knockout teams fill in as clubs qualify.</div>
+        <div id="fxList"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="toast" id="toast"></div>
 </div>
-
-<div class="wrap">
-  <div class="dummy-flag" id="stateFlag">Editing a local (this-browser) working copy. <strong>Publish to live</strong> pushes it to every club page via RTDB; <strong>Load from live</strong> pulls the published copy; Export saves a JSON backup.</div>
-
-  <div class="tabs">
-    <button class="tab active" data-pane="clubs">Clubs &amp; links</button>
-    <button class="tab" data-pane="fixtures">Fixtures</button>
-  </div>
-
-  <div class="pane active" id="pane-clubs">
-    <div class="helptext">Each club has a private <strong>direct link</strong> (auto-signs them in) and a <strong>passcode</strong> (manual entry). Hand these to the club's media contact. All 32 cup clubs.</div>
-    <div id="clubsList"></div>
-  </div>
-
-  <div class="pane" id="pane-fixtures">
-    <div class="helptext"><b>Each pill is a file for that game</b> (Highlights, Full match, Clips…). <b style="color:var(--green)">Green = live to clubs</b>; grey = held back. Files go live automatically when the producer uploads them — click a pill only to <b>pull one back</b> (an override, not an approval step). Counts vary per game — that's expected. Knockout teams fill in as clubs qualify.</div>
-    <div id="fxList"></div>
-  </div>
-</div>
-
-<div class="toast" id="toast"></div>
 
 <script src="/tools/footage/data.js"></script>
 <script>
@@ -335,14 +448,42 @@
   document.getElementById('publishBtn').addEventListener('click', publishLive);
   document.getElementById('pullBtn').addEventListener('click', function(){ pullLive(false); });
 
-  renderClubs(); renderFx();
-  if(!overlayActive){ pullLive(true); }   // no local edits → adopt whatever is live
-  // Live producer uploads → re-render fixtures whenever they change (cross-device).
-  try {
-    firebase.database().ref(UPLOADS_REF).on('value',
-      function(s){ uploadsCache = s.val() || {}; renderFx(); },
-      function(){ /* offline / rules not deployed — no uploads shown */ });
-  } catch(e){}
+  /* ---- boot: called by nlAuthReady once the session is verified. Editing is
+     admin/superadmin only; view-access users (e.g. a staff user with access to
+     the tool) get a branded notice + a link to the read-only viewer. No RTDB
+     read happens before this fires. ---- */
+  window.TOOL = window.TOOL || {};
+  var started = false;
+  window.TOOL.boot = function(session){
+    session = session || {};
+    var role = session.role || '';
+    var isAdmin = (role === 'admin' || role === 'superadmin');
+    var ed = document.getElementById('editorRoot');
+    var vn = document.getElementById('viewNotice');
+    if (!isAdmin){
+      if (ed) ed.style.display = 'none';
+      if (vn) vn.style.display = '';
+      return;
+    }
+    if (ed) ed.style.display = '';
+    if (vn) vn.style.display = 'none';
+    if (started) return; started = true;
+
+    renderClubs(); renderFx();
+    if(!overlayActive){ pullLive(true); }   // no local edits → adopt whatever is live
+    // Live producer uploads → re-render fixtures whenever they change (cross-device).
+    try {
+      firebase.database().ref(UPLOADS_REF).on('value',
+        function(s){ uploadsCache = s.val() || {}; renderFx(); },
+        function(){ /* offline / rules not deployed — no uploads shown */ });
+    } catch(e){}
+  };
+
+  /* If auth-guard fired before this script loaded, replay the session. */
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
 })();
 </script>
 </body>
