@@ -2,21 +2,25 @@
 <html lang="en">
 <head>
 <!--
-  NL Cup Footage — Portal-gated, role-aware VIEWER
-  Version: v0.1 (13/07/2026) — portal-gated role-aware footage viewer. Replaces the
-           standalone passcode-gated landing page at this path; access is now handled
-           by auth-guard (toolKey media-footage) and the view is scoped by session role:
-             • club-admin / club-viewer → only their own club's games (crest header)
-             • staff                    → all games, read-only
-             • admin / superadmin       → all games + a "Manage footage" link to /master/
-           Reuses the club viewer's folder UI, preview/proxy logic, download logic and the
-           two live RTDB listeners (catalogue app-data/media-footage/data + producer
-           uploads app-data/media-footage/uploads). No editing/upload here — that lives in
-           /tools/footage/master/. Reads footage/data.js as the committed fallback catalogue.
+  NL Cup Footage — Portal-gated, role-aware VIEWER + inline admin EDITOR
+  Version: v0.4 (13/07/2026) — the standalone /master/ admin editor is now merged
+           into this page. Access is gated by auth-guard (toolKey media-footage)
+           and the page dispatches by session role:
+             • club-admin / club-viewer → own club's games viewer (crest header)
+             • staff                    → all games viewer, read-only
+             • admin / superadmin       → the full catalogue EDITOR (Clubs + Fixtures)
+           Two independent code bodies live here in separate IIFEs so their
+           internals never collide (both define DATA/esc/toast/byCode/…):
+             window.FootageViewer.init(session)  — the folder viewer
+             window.FootageEditor.init(session)  — the ported /master/ editor
+           A single window.TOOL.boot(session) dispatches: admin/superadmin →
+           FootageEditor.init, everyone else → FootageViewer.init. Both markup
+           trees start hidden; each init reveals its own root. Reads
+           footage/data.js as the committed fallback catalogue.
   File: /tools/footage/index.html
 
   Storage (RTDB):
-    app-data/media-footage/data        base catalogue (published by the master tool)
+    app-data/media-footage/data        base catalogue (published by the editor)
     app-data/media-footage/uploads     producer-uploaded files (merged by gameId)
     tools/media-footage                tool registration (label, defaults)
 -->
@@ -27,7 +31,10 @@
 <!-- Brand stylesheet (lint canonical: ?v=21) -->
 <link rel="stylesheet" href="/tools/system/nl-brand.css?v=22">
 
-<!-- Firebase 10.12.0 SDK (compat) — app/auth/database + storage (preview/download) -->
+<!-- Firebase 10.12.0 SDK (compat) — app/auth/database + storage + functions.
+     The viewer needs functions (the getFootageUrl gate) + storage (preview/
+     download); the editor needs database (publish/pull, upload live-flag) +
+     storage (delete a producer upload). Load every SDK both bodies need. -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
@@ -57,6 +64,11 @@
   var NL_TOOL_KEY = 'media-footage';
 
   window.NL_CHANGELOG = [
+    {
+      date: '13/07/2026',
+      version: 'v0.4',
+      items: [ 'Admin editor merged inline (admin/superadmin); /master retired.' ]
+    },
     {
       date: '13/07/2026',
       version: 'v0.3',
@@ -104,10 +116,11 @@
      brand rule and re-hide the page. All styles below are scoped under
      #pageWrap so they never fight the portal topbar. */
 
+  /* ===== VIEWER (staff + club-admin/club-viewer) ===== */
   .footage-wrap { max-width: 900px; margin: 0 auto; padding: clamp(18px,3vw,32px) clamp(14px,2.5vw,28px) 80px; }
 
-  /* Context header — whose view this is (crest + name), plus the admin
-     "Manage footage" link. Replaces the standalone page's sign-out hbar. */
+  /* Context header — whose view this is (crest + name). Replaces the
+     standalone page's sign-out hbar. */
   #pageWrap .ctx { display: flex; align-items: center; gap: 13px; margin-bottom: 24px;
     padding: 14px 16px; background: var(--white); border: 1px solid var(--border);
     border-left: 4px solid var(--primary); border-radius: var(--radius); box-shadow: var(--shadow); }
@@ -118,7 +131,6 @@
   #pageWrap .ctx__name { font-size: clamp(15px,1.8vw,20px); font-weight: 900; font-variation-settings:'wght' 900;
     color: var(--navy); text-transform: uppercase; letter-spacing: 0.02em; }
   #pageWrap .ctx__sub { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); }
-  #pageWrap .ctx__manage { flex-shrink: 0; text-decoration: none; }
 
   #pageWrap .stage-head { font-size: 12px; font-weight: 900; font-variation-settings:'wght' 900; text-transform: uppercase;
     letter-spacing: 0.14em; color: var(--navy); margin: 32px 0 14px; padding-bottom: 8px; border-bottom: 2px solid var(--border); }
@@ -184,7 +196,6 @@
     #pageWrap .file { padding-left: 15px; flex-wrap: wrap; }
     #pageWrap .file__actions { width: 100%; padding-left: 41px; }
     #pageWrap .ctx { flex-wrap: wrap; }
-    #pageWrap .ctx__manage { width: 100%; text-align: center; }
   }
 
   #pageWrap .tbd { padding: 40px 18px; text-align: center; color: var(--text-muted); font-size: 13px; font-weight: 600; }
@@ -200,6 +211,70 @@
   #pageWrap .pv__stage { aspect-ratio: 16/9; background: #000; display: flex; align-items: center; justify-content: center;
     color: rgba(255,255,255,0.6); font-size: 13px; text-align: center; padding: 20px; }
   #pageWrap .pv__video { width: 100%; display: block; background: #000; aspect-ratio: 16/9; }
+
+  /* ===== EDITOR (admin/superadmin) — ported from the retired /master/ ===== */
+  #pageWrap .wrap { max-width: 1100px; margin: 0 auto; padding: clamp(18px,3vw,32px) clamp(14px,2.5vw,28px) 80px; }
+
+  /* In-page action toolbar (Publish / Pull / Export / Import / Reset) */
+  #pageWrap .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--white);
+    border: 1px solid var(--border); border-left: 4px solid var(--primary); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 12px 16px; margin-bottom: 18px; }
+  #pageWrap .toolbar__lead { flex: 1 1 auto; min-width: 130px; font-size: 12px; font-weight: 900; font-variation-settings:'wght' 900;
+    text-transform: uppercase; letter-spacing: 0.1em; color: var(--navy); }
+
+  #pageWrap .dummy-flag { background: var(--amber-light); border: 1px solid color-mix(in srgb,var(--amber) 35%,white);
+    color: var(--amber); border-radius: var(--radius); padding: 10px 14px; font-size: 12px; font-weight: 700; margin-bottom: 22px; }
+  #pageWrap .saved-flag { background: var(--green-light); color: var(--green); border: 1px solid color-mix(in srgb,var(--green) 30%,white); }
+
+  #pageWrap .tabs { display: flex; gap: 4px; background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 3px; margin-bottom: 24px; max-width: 420px; }
+  #pageWrap .tab { flex: 1; text-align: center; padding: 9px 12px; border-radius: 4px; font-size: 12px; font-weight: 800;
+    cursor: pointer; color: var(--text-muted); border: none; background: none; font-family: var(--font);
+    text-transform: uppercase; letter-spacing: 0.06em; }
+  #pageWrap .tab.active { background: var(--navy); color: var(--white); }
+  #pageWrap .tab:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  #pageWrap .pane { display: none; } #pageWrap .pane.active { display: block; }
+
+  #pageWrap .tier-head { font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.14em; color: var(--navy);
+    margin: 22px 0 10px; } #pageWrap .tier-head:first-child { margin-top: 0; }
+
+  #pageWrap .clubrow { display: flex; align-items: center; gap: 12px; background: var(--white); border: 1px solid var(--border);
+    border-left: 3px solid transparent; border-radius: var(--radius); box-shadow: var(--shadow); padding: 10px 14px; margin-bottom: 8px; flex-wrap: wrap; }
+  #pageWrap .clubrow:hover { border-left-color: var(--primary); }
+  #pageWrap .clubrow__crest { width: 34px; height: 34px; object-fit: contain; flex-shrink: 0; }
+  #pageWrap .clubrow__mono { width: 34px; height: 34px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+    color: var(--white); font-weight: 900; font-size: 11px; flex-shrink: 0; }
+  #pageWrap .clubrow__name { flex: 1 1 160px; min-width: 0; font-weight: 800; font-variation-settings:'wght' 800; font-size: 14px; }
+  #pageWrap .clubrow__name small { display: block; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  #pageWrap .clubrow__pass { font-family: ui-monospace, Menlo, monospace; font-size: 14px; font-weight: 800; letter-spacing: 0.15em;
+    background: var(--off-white); border: 1px solid var(--border); border-radius: var(--radius); padding: 5px 10px; color: var(--navy); }
+  #pageWrap .clubrow__actions { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; }
+  #pageWrap .mini { border: 1px solid var(--border); background: var(--white); border-radius: var(--radius); font-family: var(--font);
+    font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; padding: 6px 10px; cursor: pointer; color: var(--navy); }
+  #pageWrap .mini:hover { border-color: var(--navy); } #pageWrap .mini:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  #pageWrap .mini--warn { color: var(--amber); }
+
+  #pageWrap .fx { background: var(--white); border: 1px solid var(--border); border-left: 3px solid transparent;
+    border-radius: var(--radius); box-shadow: var(--shadow); padding: 10px 14px; margin-bottom: 8px; }
+  #pageWrap .fx:hover { border-left-color: var(--primary); }
+  #pageWrap .fx__row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  #pageWrap .fx__meta { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); flex-shrink: 0; }
+  #pageWrap .fx__fix { flex: 1 1 220px; font-weight: 800; font-size: 13px; }
+  #pageWrap .fx__sel { font-family: var(--font); font-size: 12px; padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--white); }
+  #pageWrap .fx__assets { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  #pageWrap .chip { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 9px;
+    border-radius: 20px; cursor: pointer; border: 1px solid var(--border); background: var(--white); color: var(--text-muted); font-family: var(--font); }
+  #pageWrap .chip.on { background: var(--green-light); border-color: color-mix(in srgb,var(--green) 30%,white); color: var(--green); }
+  #pageWrap .chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  #pageWrap .chipwrap { display: inline-flex; align-items: stretch; gap: 0; }
+  #pageWrap .chipwrap .chip { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  #pageWrap .chipx { font-size: 11px; font-weight: 800; line-height: 1; padding: 0 8px; cursor: pointer;
+    border: 1px solid var(--border); border-left: 0; border-radius: 0 20px 20px 0;
+    background: var(--white); color: var(--text-muted); font-family: var(--font); }
+  #pageWrap .chipx:hover { background: var(--red-light); border-color: color-mix(in srgb,var(--red) 30%,white); color: var(--red); }
+  #pageWrap .chipx:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+  #pageWrap .helptext { font-size: 12px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.5; }
 </style>
 </head>
 <body>
@@ -208,16 +283,17 @@
 <div id="nlTopbar"></div>
 
 <div id="pageWrap">
-  <div class="footage-wrap">
 
-    <!-- Context header (whose view) — filled by TOOL.boot -->
+  <!-- ===== VIEWER root (staff + club users). Revealed by FootageViewer.init ===== -->
+  <div class="footage-wrap" id="viewerRoot" style="display:none">
+
+    <!-- Context header (whose view) — filled by FootageViewer.init -->
     <div class="ctx" id="ctx" style="display:none">
       <span id="ctxCrest"></span>
       <div class="ctx__id">
         <div class="ctx__name" id="ctxName"></div>
         <div class="ctx__sub" id="ctxSub"></div>
       </div>
-      <a class="btn btn--primary ctx__manage" id="ctxManage" href="/tools/footage/master/" style="display:none">&#9881; Manage footage</a>
     </div>
 
     <div id="games"></div>
@@ -231,19 +307,56 @@
       </div>
     </div>
 
-    <div class="toast" id="toast"></div>
-
   </div>
+
+  <!-- ===== EDITOR root (admin/superadmin). Revealed by FootageEditor.init ===== -->
+  <div class="wrap" id="editorWrap">
+    <div id="editorRoot" style="display:none">
+      <div class="toolbar">
+        <div class="toolbar__lead">NL Cup Footage — catalogue</div>
+        <button class="btn btn--ghost btn--sm" id="pullBtn">Load from live</button>
+        <button class="btn btn--sm" id="publishBtn">Publish to live</button>
+        <button class="btn btn--ghost btn--sm" id="exportBtn">Export JSON</button>
+        <button class="btn btn--ghost btn--sm" id="importBtn">Import</button>
+        <button class="btn btn--ghost btn--sm" id="resetBtn">Reset</button>
+        <input type="file" id="importFile" accept="application/json" style="display:none">
+      </div>
+
+      <div class="dummy-flag" id="stateFlag">Editing a local (this-browser) working copy. <strong>Publish to live</strong> pushes it to every club page via RTDB; <strong>Load from live</strong> pulls the published copy; Export saves a JSON backup.</div>
+
+      <div class="tabs">
+        <button class="tab active" data-pane="clubs">Clubs &amp; links</button>
+        <button class="tab" data-pane="fixtures">Fixtures</button>
+      </div>
+
+      <div class="pane active" id="pane-clubs">
+        <div class="helptext">Each club has a private <strong>direct link</strong> (auto-signs them in) and a <strong>passcode</strong> (manual entry). Hand these to the club's media contact. All 32 cup clubs.</div>
+        <div id="clubsList"></div>
+      </div>
+
+      <div class="pane" id="pane-fixtures">
+        <div class="helptext"><b>Each pill is a file for that game</b> (Highlights, Full match, Clips…). <b style="color:var(--green)">Green = live to clubs</b>; grey = held back. Files go live automatically when the producer uploads them — click a pill only to <b>pull one back</b> (an override, not an approval step). Counts vary per game — that's expected. Knockout teams fill in as clubs qualify.</div>
+        <div id="fxList"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
 </div>
 
 <script src="/tools/footage/data.js"></script>
+
+<!-- ============================================================================
+     VIEWER (staff + club-admin/club-viewer). Own IIFE — internals never collide
+     with the editor's. Exposes window.FootageViewer.init(session).
+     ============================================================================ -->
 <script>
 (function () {
   'use strict';
 
   var CREST_ROSE = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png';
 
-  var LIVE_REF    = 'app-data/media-footage/data';      // base catalogue (published by master)
+  var LIVE_REF    = 'app-data/media-footage/data';      // base catalogue (published by editor)
   var UPLOADS_REF = 'app-data/media-footage/uploads';   // producer uploads (merged by gameId)
 
   /* State */
@@ -253,7 +366,6 @@
   var byCode        = {};                    // code -> club (rebuilt on every merge)
   var scopeClubName = null;                  // session.club raw string (club users only)
   var scopeMode     = 'all';                 // 'club' | 'all'
-  var showManage    = false;                 // admin/superadmin → Manage footage link
   var booted        = false;
   var listenersWired = false;
 
@@ -372,8 +484,6 @@
     var ctx = document.getElementById('ctx');
     ctx.style.display = 'flex';
     var crestEl = document.getElementById('ctxCrest');
-    var manage = document.getElementById('ctxManage');
-    manage.style.display = showManage ? '' : 'none';
 
     if (scopeMode==='club' && scopeClub){
       crestEl.innerHTML = scopeClub.crest
@@ -529,7 +639,7 @@
   function wireListeners(){
     if (listenersWired) return; listenersWired = true;
     // Cross-device delivery. Two live RTDB nodes feed the view:
-    //   • LIVE_REF    (data)    — the base catalogue the master tool publishes
+    //   • LIVE_REF    (data)    — the base catalogue the editor publishes
     //   • UPLOADS_REF (uploads) — individual producer-uploaded files
     // Both are read with .on('value') so an upload from any device shows without a
     // refresh. Everything is layered over the committed data, so a missing/empty
@@ -562,23 +672,267 @@
     var tg = t.closest && t.closest('[data-toggle]'); if (tg){ toggleFolder(tg); return; }
   });
 
-  /* ---- boot: called by nlAuthReady once the session is verified ---- */
+  /* ---- init: called by the dispatcher for staff / club-admin / club-viewer ---- */
+  window.FootageViewer = {
+    init: function (session){
+      session = session || {};
+      var role = session.role || '';
+      document.getElementById('viewerRoot').style.display = '';
+      if (role === 'club-admin' || role === 'club-viewer'){
+        scopeMode = 'club';
+        scopeClubName = session.club || '';
+      } else {
+        scopeMode = 'all';                 // staff (admins go to the editor)
+        scopeClubName = null;
+      }
+      booted = true;
+      render();          // paint from the committed catalogue immediately
+      wireListeners();   // live catalogue + uploads then override in place
+    }
+  };
+})();
+</script>
+
+<!-- ============================================================================
+     EDITOR (admin/superadmin) — ported from the retired /master/. Own IIFE —
+     internals never collide with the viewer's. Exposes window.FootageEditor.init(session).
+     ============================================================================ -->
+<script>
+(function(){
+  'use strict';
+  var CREST_ROSE='https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png';
+  var LS='nlFootageData';
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function toast(m,k){ var t=document.getElementById('toast'); t.textContent=m; t.className='toast toast--'+(k||'success')+' show'; setTimeout(function(){t.classList.remove('show');},2400); }
+
+  function load(){ try{ var o=localStorage.getItem(LS); if(o) return JSON.parse(o);}catch(e){} return JSON.parse(JSON.stringify(window.FOOTAGE_DATA)); }
+  var DATA = load();
+  var overlayActive = !!localStorage.getItem(LS);
+  var byCode={}; DATA.clubs.forEach(function(c){ byCode[c.code]=c; });
+
+  function save(){ localStorage.setItem(LS, JSON.stringify(DATA)); overlayActive=true; flag(); }
+  function flag(){
+    var f=document.getElementById('stateFlag');
+    if(overlayActive){ f.className='dummy-flag saved-flag'; f.innerHTML='✓ Editing a saved local copy — the club pages in this browser reflect your changes. Export to keep a backup.'; }
+  }
+  flag();
+
+  var linkBase = location.origin + '/tools/footage/club/?c=';
+  function pass6(){ var p=''; for(var i=0;i<6;i++) p+='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random()*31)]; return p; }
+  function tok(code){ var h=''; for(var i=0;i<4;i++) h+='abcdefghjkmnpqrstuvwxyz23456789'[Math.floor(Math.random()*30)]; return code.toLowerCase()+'-'+h; }
+
+  function crestHTML(c, cls){
+    if (c.crest) return '<img class="'+cls+'" src="'+esc(c.crest)+'" alt="" onerror="this.onerror=null;this.src=\''+CREST_ROSE+'\'">';
+    return '<span class="'+cls.replace('crest','mono')+'" style="background:'+esc(c.mono||'#223b7c')+'">'+esc(c.code)+'</span>';
+  }
+
+  function copy(text, what){
+    NL.copy(text, {silent:true}).then(function(ok){ if(ok) toast('Copied '+what); });
+  }
+
+  /* ---- Clubs & links ---- */
+  function renderClubs(){
+    var host=document.getElementById('clubsList');
+    var rows = DATA.clubs.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); }).map(function(c){
+      return '<div class="clubrow">'+crestHTML(c,'clubrow__crest')
+        +'<div class="clubrow__name">'+esc(c.name)+'<small>'+esc(c.code)+'</small></div>'
+        +'<span class="clubrow__pass" title="Passcode">'+esc(c.passcode)+'</span>'
+        +'<div class="clubrow__actions">'
+        +'<button class="mini" data-copylink="'+esc(c.token)+'">Copy link</button>'
+        +'<button class="mini" data-copypass="'+esc(c.passcode)+'">Copy code</button>'
+        +'<button class="mini" data-open="'+esc(c.token)+'">Open</button>'
+        +'<button class="mini mini--warn" data-regen="'+esc(c.code)+'">New code</button>'
+        +'</div></div>';
+    }).join('');
+    host.innerHTML = '<div class="tier-head">All clubs ('+DATA.clubs.length+')</div>'+rows;
+    host.onclick=function(e){
+      var t=e.target;
+      var cl=t.getAttribute('data-copylink'); if(cl){ copy(linkBase+cl,'direct link'); return; }
+      var cp=t.getAttribute('data-copypass'); if(cp){ copy(cp,'passcode'); return; }
+      var op=t.getAttribute('data-open'); if(op){ window.open(linkBase+op,'_blank'); return; }
+      var rg=t.getAttribute('data-regen'); if(rg){ var c=byCode[rg]; c.passcode=pass6(); c.token=tok(c.code); save(); renderClubs(); toast('New code + link for '+c.short); return; }
+    };
+  }
+
+  /* ---- Fixtures ---- */
+  function clubOptions(sel){
+    return '<option value="">— team —</option>'+DATA.clubs.map(function(c){ return '<option value="'+esc(c.code)+'"'+(c.code===sel?' selected':'')+'>'+esc(c.short)+'</option>'; }).join('');
+  }
+  /* Files per game: flexible files[] model, with a shim for legacy 4-slot assets{}. */
+  var LEGACY_LABEL = { fmr_clean:'Full match (clean)', fmr_dirty:'Full match (graphics)', hl_clean:'Highlights (clean)', hl_dirty:'Highlights (graphics)' };
+  function filesForGame(g){
+    if (Array.isArray(g.files)) return g.files;
+    if (g.assets){ var out=[]; Object.keys(g.assets).forEach(function(k){ if(!g.assets[k])return; var p=k.split('_'); out.push({id:g.id+'-'+k,type:p[0],variant:p[1]||null,label:LEGACY_LABEL[k]||k,name:'',size:'',preview:p[0]==='hl',live:true,url:g.assets[k]}); }); return out; }
+    return [];
+  }
+  // Producer uploads live in their own RTDB node (not baked into the catalogue).
+  // Surface them here as file chips so NL staff can see + pull-back any file.
+  var UPLOADS_REF = 'app-data/media-footage/uploads';
+  var uploadsCache = {};   // pushId -> upload record
+  function uploadsForGame(gid){
+    return Object.keys(uploadsCache).map(function(k){ return {k:k,u:uploadsCache[k]}; })
+      .filter(function(o){ return o.u && o.u.gameId===gid; })
+      .map(function(o){ var u=o.u; return { id:o.k, type:(u.type||'').toUpperCase(), variant:u.variant?u.variant.toUpperCase():null,
+        label:u.label, name:u.name, size:u.size, preview:!!u.preview, live:u.live!==false,
+        url:u.url||'#stored', storagePath:u.storagePath, _up:true }; });
+  }
+  function renderFx(){
+    var host=document.getElementById('fxList');
+    var order=[],byStage={};
+    DATA.games.forEach(function(g){ if(!byStage[g.stage]){byStage[g.stage]=[];order.push(g.stage);} byStage[g.stage].push(g); });
+    var html='';
+    order.forEach(function(st){
+      html+='<div class="tier-head">'+esc(st)+' ('+byStage[st].length+')</div>';
+      html+=byStage[st].map(function(g){
+        var fixHTML;
+        if (g.home==null){
+          fixHTML='<span class="fx__fix">'+esc(g.round)+': <select class="fx__sel" data-home="'+g.id+'">'+clubOptions(g.home)+'</select> v <select class="fx__sel" data-away="'+g.id+'">'+clubOptions(g.away)+'</select></span>';
+        } else {
+          fixHTML='<span class="fx__fix">'+esc((byCode[g.home]||{}).short||g.home)+' v '+esc((byCode[g.away]||{}).short||g.away)+'</span>';
+        }
+        var files = filesForGame(g).concat(uploadsForGame(g.id));
+        var chips = files.length
+          ? files.map(function(f){
+              var lbl = esc(f.label || (f.type + (f.variant?(' '+f.variant):'')));
+              var chip = '<button class="chip'+(f.live!==false?' on':'')+'" data-file="'+esc(g.id)+'|'+esc(f.id)+'" title="'+esc(f.label)+(f.size?(' · '+esc(f.size)):'')+' — click to '+(f.live!==false?'hide from clubs':'show to clubs')+'">'+lbl+'</button>';
+              // Producer uploads get a delete (removes the Storage file + its record);
+              // catalogue files don't (they live in the published blob).
+              if (f._up) return '<span class="chipwrap">'+chip+'<button class="chipx" data-delup="'+esc(f.id)+'" title="Delete this upload — removes the file and its record for everyone">✕</button></span>';
+              return chip;
+            }).join('')
+          : '<span style="font-size:11px;color:var(--text-muted);font-style:italic;">no files yet</span>';
+        return '<div class="fx"><div class="fx__row"><span class="fx__meta">'+esc(g.round)+' · '+esc(g.date)+'</span>'+fixHTML+'</div><div class="fx__assets">'+chips+'</div></div>';
+      }).join('');
+    });
+    host.innerHTML=html;
+    host.onclick=function(e){
+      var dup=e.target.getAttribute('data-delup');
+      if(dup){
+        var u=uploadsCache[dup];
+        if(!confirm('Delete this upload? Removes the file from Storage and from all club views immediately. This cannot be undone.')) return;
+        if(u && u.storagePath){ try{ firebase.storage().ref(u.storagePath).delete().catch(function(){}); }catch(err){} }
+        firebase.database().ref(UPLOADS_REF+'/'+dup).remove()
+          .then(function(){ toast('Upload deleted'); })
+          .catch(function(err){ var d=(err.code==='PERMISSION_DENIED')||/permission/i.test(err.message||''); toast(d?'Delete denied — sign into the NL portal as superadmin here.':('Delete failed: '+(err.code||err.message)),'error'); });
+        return;
+      }
+      var tg=e.target.getAttribute('data-file');
+      if(tg){
+        var p=tg.split('|'), g=DATA.games.filter(function(x){return x.id===p[0];})[0];
+        var up=uploadsCache[p[1]];
+        if(up && up.gameId===p[0]){
+          // producer upload → toggle live in RTDB (listener re-renders)
+          firebase.database().ref(UPLOADS_REF+'/'+p[1]).update({ live: up.live===false })
+            .catch(function(e){ var d=(e.code==='PERMISSION_DENIED')||/permission/i.test(e.message||''); toast(d?'Change denied — sign into the NL portal as superadmin here.':('Failed: '+(e.code||e.message)),'error'); });
+          return;
+        }
+        var f=filesForGame(g).filter(function(x){return x.id===p[1];})[0]; if(f){ f.live=(f.live===false); save(); renderFx(); } return;
+      }
+    };
+    host.onchange=function(e){
+      var hh=e.target.getAttribute('data-home'), aa=e.target.getAttribute('data-away');
+      if(hh){ var g=DATA.games.filter(function(x){return x.id===hh;})[0]; g.home=e.target.value||null; if(!Array.isArray(g.files)) g.files=[]; save(); toast('Knockout updated'); }
+      if(aa){ var g2=DATA.games.filter(function(x){return x.id===aa;})[0]; g2.away=e.target.value||null; if(!Array.isArray(g2.files)) g2.files=[]; save(); toast('Knockout updated'); }
+    };
+  }
+
+  /* ---- tabs ---- */
+  document.querySelectorAll('.tab').forEach(function(t){ t.addEventListener('click',function(){
+    document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('active');}); t.classList.add('active');
+    document.querySelectorAll('.pane').forEach(function(p){p.classList.remove('active');});
+    document.getElementById('pane-'+t.dataset.pane).classList.add('active');
+  });});
+
+  /* ---- export / import / reset ---- */
+  document.getElementById('exportBtn').addEventListener('click', function(){
+    NL.download('footage-data.json', JSON.stringify(DATA,null,2), 'application/json'); toast('Exported footage-data.json');
+  });
+  document.getElementById('importBtn').addEventListener('click', function(){ document.getElementById('importFile').click(); });
+  document.getElementById('importFile').addEventListener('change', function(e){
+    var f=e.target.files[0]; if(!f) return; var r=new FileReader();
+    r.onload=function(){ try{ DATA=JSON.parse(r.result); byCode={}; DATA.clubs.forEach(function(c){byCode[c.code]=c;}); save(); renderClubs(); renderFx(); toast('Imported'); }catch(err){ toast('Invalid JSON','error'); } };
+    r.readAsText(f);
+  });
+  document.getElementById('resetBtn').addEventListener('click', function(){
+    if(!confirm('Discard local edits and reset to the seed data (clubs + fixtures, no footage)?')) return;
+    localStorage.removeItem(LS); DATA=JSON.parse(JSON.stringify(window.FOOTAGE_DATA)); byCode={}; DATA.clubs.forEach(function(c){byCode[c.code]=c;}); overlayActive=false;
+    document.getElementById('stateFlag').className='dummy-flag';
+    document.getElementById('stateFlag').innerHTML='Reset to the seed data (clubs + fixtures, no footage). Publish to live to push it.';
+    renderClubs(); renderFx(); toast('Reset');
+  });
+
+  /* ---- Stage B: live RTDB catalogue (app-data/media-footage/data) ----
+     Read is public; write is superadmin-only. Publish uses the portal session
+     that persists on this origin — so publish only works when signed into the
+     NL portal on the same domain. NOTE for Stage D: real passcodes must move
+     out of this public-read blob into an admin-only node + server verification. */
+  var LIVE_REF = 'app-data/media-footage/data';
+  function adopt(d){ DATA=d; byCode={}; DATA.clubs.forEach(function(c){byCode[c.code]=c;}); save(); renderClubs(); renderFx(); }
+  function pullLive(silent){
+    return firebase.database().ref(LIVE_REF).once('value').then(function(s){
+      var d=s.val();
+      if(d && d.clubs && d.games){ adopt(d); if(!silent) toast('Loaded live data from RTDB'); return true; }
+      if(!silent) toast('No live data published yet','info'); return false;
+    }).catch(function(e){ if(!silent) toast('Load failed: '+(e.code||e.message),'error'); return false; });
+  }
+  function publishLive(){
+    function push(){
+      var u = firebase.auth().currentUser;
+      if (u && u.isAnonymous){ toast('You’re signed in anonymously (from the producer/club page). Sign into the NL portal as superadmin here, then publish.', 'error'); return; }
+      firebase.database().ref(LIVE_REF).set(DATA)
+        .then(function(){ toast('Published to live — all club pages now see this'); })
+        .catch(function(e){
+          var d = (e.code==='PERMISSION_DENIED') || /permission/i.test(e.message||'');
+          toast(d ? 'Publish denied — sign into the NL portal as superadmin on this domain.' : ('Publish failed: '+(e.code||e.message)), 'error');
+        });
+    }
+    if(firebase.auth().currentUser) return push();
+    var done=false;   // session may still be restoring — wait once for auth state
+    firebase.auth().onAuthStateChanged(function(x){
+      if(done) return; done=true;
+      if(x) push(); else toast('Sign into the NL portal (superadmin) on this domain first','error');
+    });
+  }
+  document.getElementById('publishBtn').addEventListener('click', publishLive);
+  document.getElementById('pullBtn').addEventListener('click', function(){ pullLive(false); });
+
+  /* ---- init: called by the dispatcher only for admin/superadmin. No RTDB read
+     happens before this fires. ---- */
+  var started = false;
+  window.FootageEditor = {
+    init: function(session){
+      var ed = document.getElementById('editorRoot');
+      if (ed) ed.style.display = '';
+      if (started) return; started = true;
+
+      renderClubs(); renderFx();
+      if(!overlayActive){ pullLive(true); }   // no local edits → adopt whatever is live
+      // Live producer uploads → re-render fixtures whenever they change (cross-device).
+      try {
+        firebase.database().ref(UPLOADS_REF).on('value',
+          function(s){ uploadsCache = s.val() || {}; renderFx(); },
+          function(){ /* offline / rules not deployed — no uploads shown */ });
+      } catch(e){}
+    }
+  };
+})();
+</script>
+
+<!-- ============================================================================
+     DISPATCH — one TOOL.boot, called by nlAuthReady once the session is verified.
+     admin/superadmin → the inline editor; everyone else → the folder viewer.
+     ============================================================================ -->
+<script>
+(function(){
   window.TOOL = window.TOOL || {};
-  window.TOOL.boot = function (session){
+  window.TOOL.boot = function(session){
     session = session || {};
     var role = session.role || '';
-    if (role === 'club-admin' || role === 'club-viewer'){
-      scopeMode = 'club';
-      scopeClubName = session.club || '';
-      showManage = false;
+    if (role === 'admin' || role === 'superadmin'){
+      if (window.FootageEditor) window.FootageEditor.init(session);
     } else {
-      scopeMode = 'all';                 // staff / admin / superadmin
-      scopeClubName = null;
-      showManage = (role === 'admin' || role === 'superadmin');
+      if (window.FootageViewer) window.FootageViewer.init(session);
     }
-    booted = true;
-    render();          // paint from the committed catalogue immediately
-    wireListeners();   // live catalogue + uploads then override in place
   };
 
   /* If auth-guard fired before this script loaded, replay the session. */
