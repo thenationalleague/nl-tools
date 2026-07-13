@@ -225,7 +225,10 @@ async function signFootageUrl(uid, token, reqPath) {
 }
 
 exports.onFootageUrlRequest = onValueCreated(
-  { ref: "/app-data/media-footage/urlRequests/{id}", region: "europe-west2" },
+  // The RTDB instance (nl-tools-default-rtdb) is in europe-west1, and v2 database
+  // triggers must be created in the database's region — NOT europe-west2 (where the
+  // storage-triggered functions run), which RTDB Eventarc hasn't "revealed".
+  { ref: "/app-data/media-footage/urlRequests/{id}", region: "europe-west1" },
   async (event) => {
     const ref = event.data.ref;
     const req = event.data.val() || {};
