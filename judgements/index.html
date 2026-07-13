@@ -3,10 +3,17 @@
 <head>
 <!--
   NL Tools — Judgements & Decisions
-  Version: 2.5
-  Date: 12/07/2026
+  Version: 2.6
+  Date: 13/07/2026
 
   CHANGELOG
+  v2.6 (13/07/2026)
+    - Delete confirm migrated to the shared canon NL.confirm (nl-utils).
+      Removed the hand-wired #deleteModal markup and the closeDeleteModal/
+      confirmDelete/STATE.deleteId wiring; openDeleteModal now awaits
+      NL.confirm (danger variant, record label as the detail line) and runs
+      the RTDB remove on confirm. Inherits focus-trap/Escape/backdrop-close.
+
   v2.5 (12/07/2026)
     - Club field migrated to the shared NL.clubPicker (nl-utils). Removed the
       local club-picker markup, the ~35 lines of onClubInput/selectClub/
@@ -63,7 +70,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Judgements & Decisions — NL Tools</title>
 
-<link rel="stylesheet" href="/tools/system/nl-brand.css?v=21">
+<link rel="stylesheet" href="/tools/system/nl-brand.css?v=22">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -115,7 +122,7 @@
   ];
 </script>
 
-<script src="/tools/system/nl-utils.js?v=22"></script>
+<script src="/tools/system/nl-utils.js?v=23"></script>
 <script src="/tools/system/nl-topbar.js?v=7"></script>
 <script src="/tools/system/auth-guard.js?v=8"></script>
 
@@ -301,22 +308,6 @@
 </div>
 
 <!-- Delete confirmation modal — uses shared .modal-backdrop pattern -->
-<div class="modal-backdrop" id="deleteModal">
-  <div class="modal">
-    <div class="modal__head">
-      <h3>Delete record</h3>
-      <button class="modal__close" onclick="closeDeleteModal()">×</button>
-    </div>
-    <div class="modal__body">
-      <p class="confirm-text">Are you sure you want to delete this record?</p>
-      <p class="confirm-job" id="deleteMsg"></p>
-    </div>
-    <div class="modal__footer">
-      <button class="btn btn--ghost" onclick="closeDeleteModal()">Cancel</button>
-      <button class="btn btn--danger" onclick="confirmDelete()">Delete</button>
-    </div>
-  </div>
-</div>
 
 <script>
 /* ── State ── */
@@ -545,33 +536,23 @@ function saveRecord() {
 function editRecord(id) { openForm(id); }
 
 /* ── Delete modal ── */
+/* Delete confirm — the shared canon NL.confirm (replaces the hand-wired
+   #deleteModal + closeDeleteModal/confirmDelete). */
 function openDeleteModal(id) {
-  STATE.deleteId = id;
-  var r = STATE.records.find(function(rec) { return rec.id === id; });
-  document.getElementById('deleteMsg').textContent = r ? (r.club + ' — ' + (r.rule || '')) : '';
-  document.getElementById('deleteModal').classList.add('open');
-}
-
-function closeDeleteModal() {
-  document.getElementById('deleteModal').classList.remove('open');
-  STATE.deleteId = null;
-}
-
-function confirmDelete() {
-  if (!STATE.deleteId) return;
-  var id = STATE.deleteId;
   var r = STATE.records.find(function(rec) { return rec.id === id; });
   var label = r ? (r.club + ' — ' + (r.rule || '')) : id;
-
-  NL.ensureAuth().then(function() {
-    return firebase.database().ref('app-data/ops-judgements/records/' + id).remove();
-  }).then(function() {
-    NL.toast('Record deleted', 'success');
-    if (NL.writeAudit) NL.writeAudit('judgement_deleted', label);
-    closeDeleteModal();
-  }).catch(function(err) {
-    NL.toast('Error: ' + err.message, 'error');
-    closeDeleteModal();
+  NL.confirm('Are you sure you want to delete this record?', {
+    title: 'Delete record', detail: label, confirmText: 'Delete', variant: 'danger'
+  }).then(function(ok) {
+    if (!ok) return;
+    NL.ensureAuth().then(function() {
+      return firebase.database().ref('app-data/ops-judgements/records/' + id).remove();
+    }).then(function() {
+      NL.toast('Record deleted', 'success');
+      if (NL.writeAudit) NL.writeAudit('judgement_deleted', label);
+    }).catch(function(err) {
+      NL.toast('Error: ' + err.message, 'error');
+    });
   });
 }
 

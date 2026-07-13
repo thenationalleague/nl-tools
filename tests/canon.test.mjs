@@ -139,6 +139,16 @@ test('copy / download are exposed (behaviour covered by smoke test)', () => {
   assert.equal(typeof NL.download, 'function');
 });
 
+test('modal / confirm / prompt / alert are exposed (behaviour covered by smoke test)', () => {
+  for (const fn of ['modal', 'confirm', 'prompt', 'alert']) {
+    assert.equal(typeof NL[fn], 'function', `NL.${fn} is a function`);
+  }
+  // confirm/prompt/alert return promises without throwing under the DOM stub
+  assert.ok(NL.confirm('ok?') instanceof Promise);
+  assert.ok(NL.prompt('name?') instanceof Promise);
+  assert.ok(NL.alert('hi') instanceof Promise);
+});
+
 test('roles: norm / label / realm / isClubUser fold the legacy "club" key', () => {
   // norm — legacy 'club' → 'club-admin', empty → 'staff', else identity
   assert.equal(NL.roles.norm('club'), 'club-admin');
