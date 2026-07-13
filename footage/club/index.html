@@ -353,11 +353,18 @@
   // maps it (admin-only clubTokens node) to a club and checks it owns the game.
   var currentClubToken = null;   // set on render(club)
   function signedUrl(path){
-    // Storage is locked — the gate is the only path. No getDownloadURL fallback
-    // (it would just fail and mask the gate's real error). Surface errors instead.
+    // Try the per-club gate first; it's currently blocked by an org policy
+    // (Domain Restricted Sharing), so fall back to a direct Storage URL (needs
+    // open Storage read rules). Temporary until the gate is activated.
     return ensureAuth().then(function(){
       return firebase.app().functions('europe-west2').httpsCallable('getFootageUrl')({ path: path, token: currentClubToken });
-    }).then(function(r){ if (r && r.data && r.data.url) return r.data.url; throw new Error('gate returned no url'); });
+    }).then(function(r){ if (r && r.data && r.data.url) return r.data.url; throw new Error('gate returned no url'); })
+    .catch(function(e){
+      if (/permission-denied/i.test(((e&&e.code)||'')+' '+((e&&e.message)||''))) throw e;
+      return firebase.storage().ref(path).getDownloadURL().catch(function(){
+        return firebase.storage().ref(path.replace('footage/national-league-cup/proxies/','footage/national-league-cup/')).getDownloadURL();
+      });
+    });
   }
   function resolveUrl(f){ return signedUrl(f.storagePath); }
   // 360p preview proxy (made by the makeProxy Cloud Function at footage/national-league-cup/proxies/<name>,
