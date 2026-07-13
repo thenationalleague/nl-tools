@@ -124,6 +124,21 @@ test('clubs.load + byOpta / byName resolve real records', async () => {
   assert.equal(NL.clubs.byName('AFC Fylde').optaID, 't3360', 'byName agrees');
 });
 
+test('csv: RFC-4180 escaping, CRLF rows, optional BOM', () => {
+  assert.equal(NL.csv([['a', 'b'], ['c', 'd']]), 'a,b\r\nc,d');
+  // comma, quote and newline each force quoting; internal quotes doubled
+  assert.equal(NL.csv([['x,y', 'he said "hi"', 'line1\nline2']]),
+    '"x,y","he said ""hi""","line1\nline2"');
+  assert.equal(NL.csv([[1, 0, null, undefined]]), '1,0,,', 'numbers incl 0; null/undefined → empty');
+  assert.equal(NL.csv([['é']], { bom: true }), '\ufeff' + 'é', 'BOM prefixed when asked');
+  assert.equal(NL.csv([]), '', 'no rows → empty string');
+});
+
+test('copy / download are exposed (behaviour covered by smoke test)', () => {
+  assert.equal(typeof NL.copy, 'function');
+  assert.equal(typeof NL.download, 'function');
+});
+
 test('roles: norm / label / realm / isClubUser fold the legacy "club" key', () => {
   // norm — legacy 'club' → 'club-admin', empty → 'staff', else identity
   assert.equal(NL.roles.norm('club'), 'club-admin');

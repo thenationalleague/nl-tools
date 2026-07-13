@@ -2,10 +2,18 @@
 <html lang="en-GB">
 <!--
   Claudio — NL AI Assistant
-  Version: 4.4-alpha
+  Version: 4.5-alpha
   Date: 13/07/2026
 
   CHANGELOG
+  v4.5-alpha (13/07/2026) — Canon clipboard migration:
+    - buildDraftBlock() copy button now uses NL.copy(code, {silent:true})
+      from system/nl-utils.js instead of the inline
+      navigator.clipboard.writeText + textarea/execCommand fallback.
+      Custom success UI (button text 'Copied', restored to 'Copy' after
+      1500ms) and the local showToast(...,'error') failure path are
+      unchanged.
+
   v4.4-alpha (13/07/2026) — Canon clubs migration:
     - loadClubs() now uses NL.clubs.load() + NL.clubs.meta() from
       system/nl-utils.js instead of fetching assets/data/clubs-meta.json
@@ -728,9 +736,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="app-version" content="4.4-alpha">
+  <meta name="app-version" content="4.5-alpha">
   <meta name="build-time" content="2026-04-20T17:00:00Z">
-  <title>Claudio v4.4-alpha — NL Tools</title>
+  <title>Claudio v4.5-alpha — NL Tools</title>
 
   <!-- Firebase SDKs — must come before auth-guard.js -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -763,7 +771,7 @@
     window.NL_TOOL = { title: 'Claudio', toolKey: 'staff-claudio' };
     var NL_TOOL_KEY = 'staff-claudio';
   </script>
-  <script src="/tools/system/nl-utils.js?v=21"></script>
+  <script src="/tools/system/nl-utils.js?v=22"></script>
   <script src="/tools/system/nl-topbar.js?v=7"></script>
   <script src="/tools/system/auth-guard.js?v=8"></script>
 
@@ -2033,7 +2041,7 @@
   </div>
   <div class="topbar__meta">
     <div class="topbar__meta-item" title="Claudio build">
-      <span class="topbar__meta-num" style="opacity:0.7;">v4.4-alpha</span>
+      <span class="topbar__meta-num" style="opacity:0.7;">v4.5-alpha</span>
     </div>
     <div class="topbar__meta-item" id="dailyMeta" title="Messages used today">
       <span class="topbar__meta-num" id="dailyCount">0</span>
@@ -3063,25 +3071,15 @@ function wireTopbar(session) {
       copy.type = 'button';
       copy.textContent = 'Copy';
       copy.addEventListener('click', function() {
-        // Use the clipboard API where available, fall back to execCommand.
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(code).then(function() {
+        // Canon clipboard helper; keep the tool's own button-text + showToast UI.
+        NL.copy(code, { silent: true }).then(function(ok) {
+          if (ok) {
             copy.textContent = 'Copied';
             setTimeout(function() { copy.textContent = 'Copy'; }, 1500);
-          }).catch(function() {
+          } else {
             showToast('Could not copy to clipboard', 'error');
-          });
-        } else {
-          // Fallback: select + execCommand
-          var ta = document.createElement('textarea');
-          ta.value = code;
-          document.body.appendChild(ta);
-          ta.select();
-          try { document.execCommand('copy'); } catch(e) {}
-          document.body.removeChild(ta);
-          copy.textContent = 'Copied';
-          setTimeout(function() { copy.textContent = 'Copy'; }, 1500);
-        }
+          }
+        });
       });
 
       label.appendChild(copy);
