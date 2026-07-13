@@ -178,7 +178,7 @@
   </script>
 
   <!-- NL system scripts (lint canonical: ?v=7 / ?v=7 / ?v=8) -->
-  <script src="/tools/system/nl-utils.js?v=18"></script>
+  <script src="/tools/system/nl-utils.js?v=19"></script>
   <script src="/tools/system/nl-topbar.js?v=7"></script>
   <script src="/tools/system/auth-guard.js?v=8"></script>
 
@@ -390,7 +390,6 @@
   var DEFAULT_COMP_ID = 89;
   var SEASON_ID = 2026;
   var API_BASE = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
-  var CLUBS_META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/data/clubs-meta.json';
   var NL_FALLBACK_CREST = 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/National%20League%20rose.png';
   var MAX_PAGES = 10;
   var PREFS_DEBOUNCE_MS = 600;
@@ -405,7 +404,6 @@
     allMatches: [],
     allUsers: {},
     allVotes: {},
-    clubsByOpta: {},
     activeTab: 'matchday',     // 'matchday' | 'byclub' | 'season'
     selectedComp: DEFAULT_COMP_ID,
     selectedMatchday: null,
@@ -486,7 +484,7 @@
     return 'post';
   }
   function paletteForTeam(teamId) {
-    var c = state.clubsByOpta[teamId];
+    var c = window.NL.clubs.byOpta(teamId);
     var cols = c && c.colors;
     return {
       primary:   (cols && cols.primary)   || '#223b7c',
@@ -494,7 +492,7 @@
     };
   }
   function teamNameFor(teamId) {
-    var c = state.clubsByOpta[teamId];
+    var c = window.NL.clubs.byOpta(teamId);
     if (c && (c.short || c.name)) return c.short || c.name;
     for (var i = 0; i < state.allMatches.length; i++) {
       var a = state.allMatches[i].attributes;
@@ -528,16 +526,9 @@
   /* ============================================================
      DATA: clubs meta
      ============================================================ */
+  /* clubs-meta is loaded + the optaID index is served by canon (NL.clubs). */
   function loadClubsMeta() {
-    return fetch(CLUBS_META_URL, { credentials: 'omit', cache: 'no-store' })
-      .then(function (r) { if (!r.ok) throw new Error('clubs-meta ' + r.status); return r.json(); })
-      .then(function (json) {
-        var clubs = (json && json.clubs) || [];
-        var map = {};
-        clubs.forEach(function (c) { if (c && c.optaID) map[c.optaID] = c; });
-        state.clubsByOpta = map;
-      })
-      .catch(function () { state.clubsByOpta = {}; });
+    return window.NL.clubs.load().catch(function () {});
   }
 
   /* ============================================================
@@ -1119,7 +1110,7 @@
         if (!seen[t.teamID]) {
           /* Resolve crest from clubs-meta first (most reliable), then
              fall back to the API-provided crest URL on the fixture. */
-          var meta = state.clubsByOpta[t.teamID];
+          var meta = window.NL.clubs.byOpta(t.teamID);
           seen[t.teamID] = {
             teamId: t.teamID,
             name: t.name || t.shortName || t.teamID,

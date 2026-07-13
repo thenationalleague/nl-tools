@@ -2,10 +2,18 @@
 <html lang="en-GB">
 <!--
   Claudio — NL AI Assistant
-  Version: 4.3-alpha
-  Date: 03/05/2026
+  Version: 4.4-alpha
+  Date: 13/07/2026
 
   CHANGELOG
+  v4.4-alpha (13/07/2026) — Canon clubs migration:
+    - loadClubs() now uses NL.clubs.load() + NL.clubs.meta() from
+      system/nl-utils.js instead of fetching assets/data/clubs-meta.json
+      directly. Drops the local CLUBS_META_URL constant. Club-list shape
+      (name/division array) for the system prompt is unchanged.
+    - The DIFFERENT historical SITE_* datasets (from the 'site' repo) are
+      untouched.
+
   v4.3-alpha (03/05/2026) — Brand CSS migration:
     - Linked /tools/system/nl-brand.css. Deleted the duplicated local
       @font-face, *-reset, body rule, brand-token :root entries, and
@@ -720,9 +728,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="app-version" content="4.2-alpha">
+  <meta name="app-version" content="4.4-alpha">
   <meta name="build-time" content="2026-04-20T17:00:00Z">
-  <title>Claudio v4.2-alpha — NL Tools</title>
+  <title>Claudio v4.4-alpha — NL Tools</title>
 
   <!-- Firebase SDKs — must come before auth-guard.js -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -755,7 +763,7 @@
     window.NL_TOOL = { title: 'Claudio', toolKey: 'staff-claudio' };
     var NL_TOOL_KEY = 'staff-claudio';
   </script>
-  <script src="/tools/system/nl-utils.js?v=18"></script>
+  <script src="/tools/system/nl-utils.js?v=19"></script>
   <script src="/tools/system/nl-topbar.js?v=7"></script>
   <script src="/tools/system/auth-guard.js?v=8"></script>
 
@@ -2025,7 +2033,7 @@
   </div>
   <div class="topbar__meta">
     <div class="topbar__meta-item" title="Claudio build">
-      <span class="topbar__meta-num" style="opacity:0.7;">v4.2-alpha</span>
+      <span class="topbar__meta-num" style="opacity:0.7;">v4.4-alpha</span>
     </div>
     <div class="topbar__meta-item" id="dailyMeta" title="Messages used today">
       <span class="topbar__meta-num" id="dailyCount">0</span>
@@ -2093,10 +2101,11 @@
     // CONSTANTS
     // =========================================================================
     var NL_GAS_URL = NL.endpoints.gas;
-    var CLUBS_META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
+    // Current-72-clubs list comes from the shared canon (NL.clubs, backed by
+    // /tools/assets/data/clubs-meta.json) — see loadClubs(). No local fetch URL.
 
     // Historical context files — fetched from the 'site' repo (not 'tools').
-    // These are DIFFERENT to the current-72-clubs list above. They contain
+    // These are DIFFERENT to the current-72-clubs canon list. They contain
     // rich historical metadata (phoenix/merger/nicknames/first-season) and
     // season notes (points deductions, expulsions, reprieves, format history).
     // Injected into Claudio's system prompt for historical awareness.
@@ -2231,10 +2240,13 @@ function wireTopbar(session) {
     // DATA LOADING
     // =========================================================================
     function loadClubs() {
-      return fetch(CLUBS_META_URL)
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          STATE.clubs = (data && data.clubs) ? data.clubs : [];
+      // Uses the shared canon (NL.clubs, session-memoised) instead of fetching
+      // clubs-meta.json ourselves. STATE.clubs stays the same shape: an array
+      // of club objects with .name/.division, consumed by buildClaudioSystemPrompt.
+      return NL.clubs.load()
+        .then(function() {
+          var meta = NL.clubs.meta();
+          STATE.clubs = (meta && meta.clubs) ? meta.clubs : [];
         })
         .catch(function() { STATE.clubs = []; });
     }
