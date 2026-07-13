@@ -1,0 +1,31 @@
+rules_version = '2';
+
+// NL Tools — Firebase Storage security rules.
+// Snapshot / source of truth. Paste into Firebase console → Storage → Rules.
+// (Not auto-deployed — kept here so the deployed rules are reviewable in-repo,
+//  same idea as system/rtdb/rules.snapshot.json.)
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ── NL Cup Footage ────────────────────────────────────────────────────
+    // Reads go ONLY through the getFootageUrl Cloud Function, which checks the
+    // caller's club and returns a short-lived signed URL. Signed URLs are
+    // authorised by the service-account signature, NOT these rules, so they keep
+    // working while direct client reads are denied. A leaked download URL to
+    // another club's game is therefore worthless.
+    //
+    // Writes: any signed-in user may upload an ORIGINAL (the producer). The 360p
+    // proxies under proxies/ are written by the Cloud Function via the admin SDK
+    // (which bypasses these rules), so clients are blocked from writing there.
+    match /footage/national-league-cup/{path=**} {
+      allow read: if false;
+      allow write: if request.auth != null && path[0] != 'proxies';
+    }
+
+    // ── Everything else: locked ───────────────────────────────────────────
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
