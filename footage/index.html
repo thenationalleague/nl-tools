@@ -31,15 +31,14 @@
 <!-- Brand stylesheet (lint canonical: ?v=21) -->
 <link rel="stylesheet" href="/tools/system/nl-brand.css?v=22">
 
-<!-- Firebase 10.12.0 SDK (compat) — app/auth/database + storage + functions.
-     The viewer needs functions (the getFootageUrl gate) + storage (preview/
-     download); the editor needs database (publish/pull, upload live-flag) +
-     storage (delete a producer upload). Load every SDK both bodies need. -->
+<!-- Firebase 10.12.0 SDK (compat) — app/auth/database/storage.
+     The viewer needs storage (preview/download via getDownloadURL); the editor
+     needs database (publish/pull, upload live-flag) + storage (delete a producer
+     upload). Load every SDK both bodies need. -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-functions-compat.js"></script>
 
 <!-- Firebase init -->
 <script>
@@ -64,6 +63,11 @@
   var NL_TOOL_KEY = 'media-footage';
 
   window.NL_CHANGELOG = [
+    {
+      date: '13/07/2026',
+      version: 'v0.6',
+      items: [ 'Reverted to fast direct getDownloadURL (sub-1s previews); dropped the RTDB download-gate (~15-20s Eventarc lag). Access rests on UI scoping — see NEXT.md.' ]
+    },
     {
       date: '13/07/2026',
       version: 'v0.5',
@@ -549,27 +553,13 @@
     } catch(e){ return Promise.reject(e); }
   }
   function isReal(f){ return !!(f && f.storagePath); }
-  // Layer 2: every footage URL comes from the getFootageUrl gate — a per-club,
-  // 15-min signed URL — not getDownloadURL. The gate verifies the caller's club
-  // and does the proxy→full fallback server-side.
+  // Footage URLs come straight from getDownloadURL — fast (sub-1s). Access is
+  // scoped in the UI (club users only ever see their own games). The per-club
+  // cryptographic download-lock was dropped: the org-policy-proof RTDB gate added
+  // ~15-20s Eventarc latency, and loosening Domain Restricted Sharing was rejected.
+  // See footage/NEXT.md. Falls back proxy→full when a proxy isn't present yet.
   function signedUrl(path){
-    // Per-club gate via RTDB (no public function — org-policy-proof): push a request
-    // with our uid; an event-driven Cloud Function checks club access and writes back
-    // a 15-min signed URL (or an error). Temp getDownloadURL fallback kept only while
-    // Storage is open + we confirm the gate; it's removed at lockdown.
-    return ensureAuth().then(function(u){
-      var ref = firebase.database().ref('app-data/media-footage/urlRequests').push();
-      return ref.set({ path: path, uid: u.uid, createdAt: firebase.database.ServerValue.TIMESTAMP }).then(function(){
-        return new Promise(function(resolve, reject){
-          var settled = false, to;
-          function finish(ok, arg){ if(settled) return; settled = true; clearTimeout(to); try{ref.off();}catch(e){} try{ref.remove();}catch(e){} ok ? resolve(arg) : reject(arg); }
-          to = setTimeout(function(){ finish(false, new Error('gate-timeout')); }, 20000);
-          ref.on('value', function(s){ var v = s.val(); if(!v) return; if(v.url) finish(true, v.url); else if(v.error) finish(false, new Error(v.error)); });
-        });
-      });
-    }).catch(function(e){
-      var m = (e&&e.message)||'';
-      if (/not-your-club|no-club-access|bad-path|file-not-recognised/i.test(m)) throw e;   // real denial — never fall past it
+    return ensureAuth().then(function(){
       return firebase.storage().ref(path).getDownloadURL().catch(function(){
         return firebase.storage().ref(path.replace('footage/national-league-cup/proxies/','footage/national-league-cup/')).getDownloadURL();
       });
