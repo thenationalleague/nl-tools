@@ -225,11 +225,15 @@ exports.getFootageUrl = onCall(async (request) => {
     if (!exists) signPath = original;
   }
   try {
+    // v4 signing uses the IAM SignBlob API (Token Creator + IAM Credentials API),
+    // which is what a keyless Cloud Functions runtime has. The default (v2) signer
+    // needs a private key the runtime doesn't have → "cannot sign without client_email".
     const [url] = await admin.storage().bucket(BUCKET).file(signPath)
-      .getSignedUrl({ action: "read", expires: Date.now() + 15 * 60 * 1000 });
+      .getSignedUrl({ version: "v4", action: "read", expires: Date.now() + 15 * 60 * 1000 });
     return { url: url };
   } catch (err) {
     logger.error(`Signing failed for ${signPath}: ${err && err.message}`);
-    throw new HttpsError("internal", "Could not sign URL (Token Creator role missing?).");
+    // Surface the real reason to the client so it's diagnosable without log-diving.
+    throw new HttpsError("internal", "sign-failed: " + ((err && (err.message || err.code)) || "unknown"));
   }
 });
