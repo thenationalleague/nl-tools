@@ -1,7 +1,7 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /tools/system/nl-utils.js
-   Version: v1.18 (13/07/2026)
+   Version: v1.19 (13/07/2026)
 
    Shared helper functions used by every tool page. Exposed on window.NL
    namespace. All functions are defensive — they handle missing arguments
@@ -14,6 +14,10 @@
      NL.escHtml('<script>');          // → '&lt;script&gt;'
 
    Changelog
+   v1.19 (13/07/2026)
+     - Added NL.roles.norm(role) — legacy 'club' -> 'club-admin', empty -> 'staff'.
+       The single place the planned club->club-admin rename lands. Cache-bust ?v=20.
+
    v1.18 (13/07/2026)
      - Added NL.clubs.byOpta(id) — club record by Opta teamID, memoised across
        all clubs. Replaces the optaID→club maps tools hand-built (team-of-the-
@@ -683,7 +687,10 @@
       if (role === 'third-party') return 'external';
       return null;
     },
-    label: function(role) { return this.LABELS[role] || role || ''; }
+    label: function(role) { return this.LABELS[role] || role || ''; },
+    /* Normalise a role for access lookups: legacy 'club' → 'club-admin',
+       empty → 'staff'. The one place the Phase-3 rename lands. */
+    norm: function(role) { return role === 'club' ? 'club-admin' : (role || 'staff'); }
   };
 
   /* A club user of either tier — scope tools to session.club for these. */
