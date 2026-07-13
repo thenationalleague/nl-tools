@@ -653,7 +653,7 @@
     });
   }
 </script>
-<script src="/tools/system/nl-utils.js?v=20"></script>
+<script src="/tools/system/nl-utils.js?v=21"></script>
 <script src="/tools/system/nl-topbar.js?v=7"></script>
 <script src="/tools/system/auth-guard.js?v=8"></script>
 
@@ -2749,7 +2749,7 @@ function renderWelcomeSlides() {
     var dateLine = document.createElement('div');
     dateLine.style.cssText = 'font-size:11px;color:var(--text-muted);margin-bottom:10px;';
     dateLine.textContent = 'By ' + (m.author || 'The National League') +
-      (m.createdAt ? '  —  ' + new Date(m.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : '');
+      (m.createdAt ? '  —  ' + NL.formatDate(m.createdAt) : '');   // canon '17 April 2026'
 
     var msgContent = document.createElement('div');
     msgContent.className = 'noticeboard-slide__content';
@@ -3548,30 +3548,20 @@ function formatAuditAction(e) {
 
 function formatAuditTime(val) {
   if (!val) return '';
-  var d;
-  if (typeof val === 'number') {
-    d = new Date(val);
-  } else if (typeof val === 'string') {
-    /* ISO string, pure numeric string, or "<ts>_<rand>" key — try in order */
+  /* Resolve the many audit-key shapes to something NL.parseDate reads, then
+     let the canon ladder format it. Pure numeric strings → epoch; a
+     "<ts>_<rand>" audit key → its leading timestamp; ISO strings pass through. */
+  var ts = val;
+  if (typeof val === 'string') {
     if (!isNaN(val)) {
-      d = new Date(parseInt(val, 10));
-    } else {
-      d = new Date(val);
-      if (isNaN(d.getTime())) {
-        var m = val.match(/^(\d{10,})/);
-        if (m) d = new Date(parseInt(m[1], 10));
-      }
+      ts = parseInt(val, 10);
+    } else if (isNaN(new Date(val).getTime())) {
+      var m = val.match(/^(\d{10,})/);
+      if (m) ts = parseInt(m[1], 10);
     }
   }
-  if (!d || isNaN(d.getTime())) return '';
-  var now  = new Date();
-  var diff = now - d;
-  if (diff < 60000)    return 'Just now';
-  if (diff < 3600000)  return Math.floor(diff / 60000) + 'm ago';
-  if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
-  if (diff < 604800000) return Math.floor(diff / 86400000) + 'd ago';
-  return d.toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' }) +
-    ' ' + d.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' });
+  var out = NL.timeAgo(ts);      // 'Just now' path shows as 'just now'; >=7d → '17 Apr 2026, 09:30'
+  return out === '—' ? '' : out;
 }
 
 function initAdminTabs() {
