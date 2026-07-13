@@ -1,7 +1,7 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /tools/system/nl-utils.js
-   Version: v1.19 (13/07/2026)
+   Version: v1.20 (13/07/2026)
 
    Shared helper functions used by every tool page. Exposed on window.NL
    namespace. All functions are defensive — they handle missing arguments
@@ -14,6 +14,15 @@
      NL.escHtml('<script>');          // → '&lt;script&gt;'
 
    Changelog
+   v1.20 (13/07/2026)
+     - NL.parseDate now accepts a Date (passthrough) or an epoch-ms number
+       (Date.now() / Firebase server timestamps), not only strings.
+     - Added NL.formatDateTime(x, {weekday, year, seconds}) — default
+       '17 Apr 2026, 09:30', local tz. Collapses ~19 hand-rolled date+time
+       formatters. Added NL.timeAgo(x) — 'just now' / 'Nm ago' / 'Nh ago' /
+       'Nd ago' (<7d) then an absolute formatDateTime; replaces the relative-
+       time ladders in portal / claudio / tasks. Cache-bust ?v=20 -> ?v=21.
+
    v1.19 (13/07/2026)
      - Added NL.roles.norm(role) — legacy 'club' -> 'club-admin', empty -> 'staff'.
        The single place the planned club->club-admin rename lands. Cache-bust ?v=20.
@@ -225,7 +234,17 @@
      - UK date only: "17/04/2026"
   */
   window.NL.parseDate = function(str) {
-    if (!str) return null;
+    if (!str) return null;                    // null / undefined / '' / 0 / NaN
+
+    /* Already a Date — pass through (reject Invalid Date). */
+    if (str instanceof Date) return isNaN(str.getTime()) ? null : str;
+    /* Epoch milliseconds (Date.now() / Firebase server timestamps). A 0/NaN
+       epoch is caught by the falsy guard above — treated as "no timestamp". */
+    if (typeof str === 'number') {
+      var dn = new Date(str);
+      return isNaN(dn.getTime()) ? null : dn;
+    }
+
     str = String(str).trim();
     if (!str) return null;
 
@@ -280,6 +299,44 @@
     var d = window.NL.parseDate(str);
     if (!d) return '—';
     return d.getDate() + ' ' + MONTHS[d.getMonth()].substring(0, 3) + ' ' + d.getFullYear();
+  };
+
+  var WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  /* Date + time, local tz. Default '17 Apr 2026, 09:30'. Options:
+       weekday:true  → 'Sat 17 Apr 2026, 09:30'
+       year:false    → '17 Apr, 09:30'
+       seconds:true  → '17 Apr 2026, 09:30:05'
+     Accepts anything parseDate accepts (string / Date / epoch number). */
+  window.NL.formatDateTime = function(x, opts) {
+    var d = window.NL.parseDate(x);
+    if (!d) return '—';
+    opts = opts || {};
+    var out = '';
+    if (opts.weekday) out += WEEKDAYS[d.getDay()] + ' ';
+    out += d.getDate() + ' ' + MONTHS[d.getMonth()].substring(0, 3);
+    if (opts.year !== false) out += ' ' + d.getFullYear();
+    out += ', ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    if (opts.seconds) out += ':' + pad2(d.getSeconds());
+    return out;
+  };
+
+  /* Relative past time: 'just now', '5m ago', '3h ago', '2d ago' (<7d),
+     else an absolute formatDateTime. Accepts string / Date / epoch number. */
+  window.NL.timeAgo = function(x) {
+    var d = window.NL.parseDate(x);
+    if (!d) return '—';
+    var secs = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (secs < 0) secs = 0;                     // clock skew / future → 'just now'
+    if (secs < 60) return 'just now';
+    var mins = Math.floor(secs / 60);
+    if (mins < 60) return mins + 'm ago';
+    var hrs = Math.floor(mins / 60);
+    if (hrs < 24) return hrs + 'h ago';
+    var days = Math.floor(hrs / 24);
+    if (days < 7) return days + 'd ago';
+    return window.NL.formatDateTime(d);
   };
 
   /* ── HTML escape ─────────────────────────────────────────────────────── */

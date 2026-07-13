@@ -58,6 +58,37 @@ test('formatDate / formatDateShort produce the canon shapes', () => {
   assert.equal(NL.formatDate('rubbish'), '—');
 });
 
+test('parseDate passes through a Date and reads an epoch-ms number', () => {
+  const d = new Date(2026, 3, 17, 9, 30);
+  assert.equal(NL.parseDate(d), d, 'a valid Date is returned as-is');
+  assert.equal(NL.parseDate(new Date('nonsense')), null, 'Invalid Date → null');
+  const fromEpoch = NL.parseDate(d.getTime());
+  assert.ok(fromEpoch instanceof Date && fromEpoch.getTime() === d.getTime(), 'epoch-ms number → same instant');
+  assert.equal(NL.parseDate(0), null, 'falsy 0 is treated as empty, not the epoch');
+});
+
+test('formatDateTime: default, weekday, no-year, seconds', () => {
+  const d = new Date(2026, 3, 17, 9, 30, 5);          // Fri 17 Apr 2026 09:30:05
+  assert.equal(NL.formatDateTime(d), '17 Apr 2026, 09:30');
+  assert.equal(NL.formatDateTime(d, { weekday: true }), 'Fri 17 Apr 2026, 09:30');
+  assert.equal(NL.formatDateTime(d, { year: false }), '17 Apr, 09:30');
+  assert.equal(NL.formatDateTime(d, { seconds: true }), '17 Apr 2026, 09:30:05');
+  assert.equal(NL.formatDateTime('2026-04-17T09:05'), '17 Apr 2026, 09:05', 'pads single-digit minute');
+  assert.equal(NL.formatDateTime('rubbish'), '—');
+});
+
+test('timeAgo: ladder tiers then absolute fallback', () => {
+  const now = Date.now();
+  assert.equal(NL.timeAgo(now - 10 * 1000), 'just now');
+  assert.equal(NL.timeAgo(now - 5 * 60 * 1000), '5m ago');
+  assert.equal(NL.timeAgo(now - 3 * 3600 * 1000), '3h ago');
+  assert.equal(NL.timeAgo(now - 2 * 86400 * 1000), '2d ago');
+  assert.equal(NL.timeAgo(now + 60 * 1000), 'just now', 'future/skew clamps to just now');
+  const old = new Date(2026, 3, 17, 9, 30);
+  assert.equal(NL.timeAgo(old), NL.formatDateTime(old), '>=7d old → absolute formatDateTime');
+  assert.equal(NL.timeAgo('rubbish'), '—');
+});
+
 test('clubs.crestUrl encodes the name and falls back to the rose', () => {
   const url = NL.clubs.crestUrl('AFC Fylde');
   assert.ok(url.startsWith('https://'), 'absolute URL');
