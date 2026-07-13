@@ -11,12 +11,15 @@ and what's left.
   download-only. Deployed, working.
 - **Delete-sync:** `onFootageDeleted` Cloud Function — deleting a file in Storage
   (console/gsutil/master ✕) removes its RTDB record + its proxy. Self-healing.
-- **Portal tool (`/tools/footage/`):** gated, role-aware VIEWER. `toolKey =
+- **Portal tool (`/tools/footage/`):** gated, role-aware. `toolKey =
   media-footage`. Club users see only their club's games (home OR away, matched on
-  `users/<uid>/club` full name); staff see all read-only; admin/superadmin see all
-  + a "Manage footage" link to `/master/`. On brand (canon head, topbar).
+  `users/<uid>/club` full name); staff see all read-only; admin/superadmin get the
+  **full catalogue editor inline** (the former `/master/`, merged in v0.4 — Clubs +
+  Fixtures tabs, publish/pull, chip live/held toggle, upload delete). On brand
+  (canon head, topbar).
 - **Standalone pages (passcode):** `/club/` (per-club link/passcode), `/producer/`
-  (upload, passcode `PROD24`), `/master/` (admin editor). These still work.
+  (upload, passcode `PROD24`). These still work. (`/master/` retired — the admin
+  editor now lives inline in the portal tool.)
 - **Preview download-protection:** the `<video>` player hides its download control.
 
 ### Deployed Cloud Functions (project nl-tools, europe-west2)
@@ -63,10 +66,10 @@ Either way the gate LOGIC is done — it's purely an invocation-path problem.
 
 ## Other remaining work
 
-- **Canon re-skin (option B, agreed):** promote `/master/` to a proper gated portal
-  tool (auth-guard + its own card); bring `/club/`, `/producer/`, landing onto the
-  house style (shared `NL.*`, `clubs-meta.json` for club identity). Currently these
-  three wear bespoke chrome.
+- **Canon re-skin (option B, agreed):** the admin editor is now a gated portal
+  surface (merged inline into `/tools/footage/`, v0.4 — `/master/` retired). Still
+  to do: bring `/club/` and `/producer/` onto the house style (shared `NL.*`,
+  `clubs-meta.json` for club identity). Those two still wear bespoke chrome.
 - **Real club names:** the 16 PL2/U21 sides in `footage/data.js` are placeholders.
   Best fixed by sourcing clubs from `clubs-meta.json` during the re-skin.
 - **Fixtures from the NLS feed:** derive games for the National League Cup
@@ -83,7 +86,7 @@ Either way the gate LOGIC is done — it's purely an invocation-path problem.
 
 | Who | Route | Sees | Can do |
 |---|---|---|---|
-| NL superadmin / admin | Portal | All 32 | Everything (via `/master/`) |
+| NL superadmin / admin | Portal | All 32 | Everything (inline editor) |
 | NL staff | Portal | All 32 | Preview + download |
 | NL club (club-admin/club-viewer) | Portal OR `/club` passcode | Own team | Preview + download |
 | PL2 / U21 club | `/club` passcode | Own team | Preview + download |

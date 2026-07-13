@@ -134,13 +134,13 @@ not just storage.
 
 ## The MVP in this folder (Phase 1 — done)
 
-The four surfaces (landing · club · master · producer). Seed data only — no footage until the producer uploads it.
+The surfaces (portal · club · producer). Seed data only — no footage until the producer uploads it.
 
 | File | What |
 |---|---|
-| `index.html` | **Landing** at `/tools/footage/` — the reserved home / future portal-card destination. Light placeholder that points clubs to the deeper login. |
-| `club/index.html` | **Club-facing** login. `?c=<token>` auto-signs a club in; otherwise a passcode gate. Shows that club's games as **folders** (grouped by stage) — open a match to see its files listed like a file browser (label, filename, size, Play for video, Download). Flexible file counts. Deliberately one level deep (like `master/`) so the root stays free for the portal card. |
-| `master/index.html` | **Master** control tool. The 32 clubs with copy-able direct links + passcodes (regenerate per club), and a fixtures tab: assign knockout teams + a **pull-back toggle per file** (files are live on upload; the toggle only hides one as an override). Export/Import JSON, reset to seed. |
+| `index.html` | **Portal tool** at `/tools/footage/` — gated by auth-guard (`toolKey media-footage`), role-aware. staff/club users get the read-only folder **viewer** (own club or all games); **admin/superadmin get the full catalogue editor inline** (the former `/master/`, merged v0.4). Two IIFEs (`FootageViewer` / `FootageEditor`) dispatched by `TOOL.boot`. |
+| `club/index.html` | **Club-facing** login. `?c=<token>` auto-signs a club in; otherwise a passcode gate. Shows that club's games as **folders** (grouped by stage) — open a match to see its files listed like a file browser (label, filename, size, Play for video, Download). Flexible file counts. Deliberately one level deep so the root stays free for the portal card. |
+| _(admin editor)_ | **Merged into the portal tool** (v0.4). The 32 clubs with copy-able direct links + passcodes (regenerate per club), and a fixtures tab: assign knockout teams + a **pull-back toggle per file** (files are live on upload; the toggle only hides one as an override). Export/Import JSON, reset to seed. Was the standalone `/master/` page, now retired. |
 | `producer/index.html` | **Producer upload** page. Passcode / `?p=<token>` gate (external, like a club). Drop/pick footage → each file **auto-maps by filename** to a fixture; an unmatched file goes to a **"needs mapping" tray** and must be mapped (game + type) before **Upload** un-greys — mapping is forced. Uploaded footage is **live to clubs immediately (no approval)**; a **"My uploads"** list lets the producer **re-map / delete their own files for 24h**, then it locks. Has an "Add sample files (demo)" button. _Dummy:_ upload is simulated and writes live files into the localStorage overlay so master/club (same browser) reflect them; production wires real Storage upload + RTDB. |
 | `data.js` | Dummy dataset: 32 clubs (16 real NL + 16 placeholder PL2 with monogram crests), 64 group games + 7 knockout placeholders, tokens + passcodes. |
 
@@ -150,7 +150,8 @@ browser. Export/Import JSON to move data between machines. In Phase 2 this overl
 becomes RTDB and the two pages share live server state.
 
 **Try it:**
-- Master: `/tools/footage/master/` → copy any club's link or passcode.
+- Admin editor: sign into the portal as admin/superadmin and open `/tools/footage/`
+  → copy any club's link or passcode (Clubs & links tab).
 - Club: open a copied `/tools/footage/club/?c=<token>` link, or hit `/tools/footage/club/`
   and enter a club passcode.
 
@@ -183,7 +184,8 @@ Anonymous auth + the Storage read/write rules (see the go-live steps).
       **Activation pending:** enable Anonymous auth + Storage read/write rules.
 - [x] 360p preview proxy — `makeProxy` Cloud Function (`functions/`) + club plays
       proxy-with-fallback. **Deploy pending:** `firebase deploy --only functions`.
-- [ ] Superadmin-gate the master tool
+- [x] Superadmin-gate the master tool — done; the admin editor is now gated
+      (admin/superadmin) and merged inline into the portal tool (`/master/` retired, v0.4)
 - [ ] (Optional) auto-notify the two clubs on publish
 - [ ] Confirm supplier delivery format (compression test)
 - [ ] (Future) generalise the bucket for club-asset sharing (headshots, docs, packs)
