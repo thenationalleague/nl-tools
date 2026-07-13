@@ -225,7 +225,16 @@
      - UK date only: "17/04/2026"
   */
   window.NL.parseDate = function(str) {
-    if (!str) return null;
+    if (str == null || str === '') return null;
+
+    /* Already a Date — pass through (reject Invalid Date). */
+    if (str instanceof Date) return isNaN(str.getTime()) ? null : str;
+    /* Epoch milliseconds (Date.now() / Firebase server timestamps). */
+    if (typeof str === 'number') {
+      var dn = new Date(str);
+      return isNaN(dn.getTime()) ? null : dn;
+    }
+
     str = String(str).trim();
     if (!str) return null;
 
