@@ -65,6 +65,11 @@
   window.NL_CHANGELOG = [
     {
       date: '14/07/2026',
+      version: 'v0.10',
+      items: [ 'Removed the per-file “tap to hide/hold from clubs” toggle — footage is live to clubs on upload, so a hide step just contradicted that. File chips are now static labels; the ✕ still deletes a producer upload.' ]
+    },
+    {
+      date: '14/07/2026',
       version: 'v0.9',
       items: [ 'Foldery simplification: dropped the file-type/variant taxonomy (Highlights/Full-match/Clips, clean/dirty). A game is a folder; files show as name + size with Preview + Download. Preview-ability is size-based (the proxy), not a tag. Producer maps a file to a GAME only.' ]
     },
@@ -289,8 +294,8 @@
   #pageWrap .fx__fix { flex: 1 1 220px; font-weight: 800; font-size: 13px; }
   #pageWrap .fx__sel { font-family: var(--font); font-size: 12px; padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--white); }
   #pageWrap .fx__assets { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-  #pageWrap .chip { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 9px;
-    border-radius: 20px; cursor: pointer; border: 1px solid var(--border); background: var(--white); color: var(--text-muted); font-family: var(--font); }
+  #pageWrap .chip { font-size: 11px; font-weight: 700; padding: 4px 10px;
+    border-radius: 20px; cursor: default; border: 1px solid var(--border); background: var(--white); color: var(--text-muted); font-family: var(--font); }
   #pageWrap .chip.on { background: var(--green-light); border-color: color-mix(in srgb,var(--green) 30%,white); color: var(--green); }
   #pageWrap .chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   #pageWrap .chipwrap { display: inline-flex; align-items: stretch; gap: 0; }
@@ -362,7 +367,7 @@
       </div>
 
       <div class="pane" id="pane-fixtures">
-        <div class="helptext"><b>Each pill is a file for that game</b> (Highlights, Full match, Clips…). <b style="color:var(--green)">Green = live to clubs</b>; grey = held back. Files go live automatically when the producer uploads them — click a pill only to <b>pull one back</b> (an override, not an approval step). Counts vary per game — that's expected. Knockout teams fill in as clubs qualify.</div>
+        <div class="helptext"><b>Each pill is a file for that game.</b> Files go live to clubs automatically when the producer uploads them — no approval step. Use the ✕ on a file only to <b>delete</b> it (removes it for everyone). Counts vary per game — that's expected. Knockout teams fill in as clubs qualify.</div>
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
           <button class="btn btn--ghost btn--sm" id="importFxBtn" style="flex-shrink:0">↧ Import NL Cup fixtures from the attendance feed</button>
           <span class="helptext" style="margin:0;flex:1;min-width:220px">Pulls this season's <b>NL Cup</b> fixtures from the attendance feed and maps them to your roster. You review the matches before anything is added, then <b>Publish</b> to push live.</span>
@@ -876,7 +881,7 @@
     return [];
   }
   // Producer uploads live in their own RTDB node (not baked into the catalogue).
-  // Surface them here as file chips so NL staff can see + pull-back any file.
+  // Surface them here as file chips so NL staff can see (and delete) any file.
   var UPLOADS_REF = 'app-data/media-footage/uploads';
   var uploadsCache = {};   // pushId -> upload record
   function uploadsForGame(gid){
@@ -903,7 +908,8 @@
         var chips = files.length
           ? files.map(function(f){
               var nm = f.name || f.label || 'Footage';
-              var chip = '<button class="chip'+(f.live!==false?' on':'')+'" data-file="'+esc(g.id)+'|'+esc(f.id)+'" title="'+esc(nm)+(f.size?(' · '+esc(f.size)):'')+' — click to '+(f.live!==false?'hide from clubs':'show to clubs')+'">'+esc(nm)+'</button>';
+              // A file is just a file — live to clubs on upload (no hide/hold toggle).
+              var chip = '<span class="chip on" title="'+esc(nm)+(f.size?(' · '+esc(f.size)):'')+'">'+esc(nm)+'</span>';
               // Producer uploads get a delete (removes the Storage file + its record);
               // catalogue files don't (they live in the published blob).
               if (f._up) return '<span class="chipwrap">'+chip+'<button class="chipx" data-delup="'+esc(f.id)+'" title="Delete this upload — removes the file and its record for everyone">✕</button></span>';
@@ -924,18 +930,6 @@
           .then(function(){ toast('Upload deleted'); })
           .catch(function(err){ var d=(err.code==='PERMISSION_DENIED')||/permission/i.test(err.message||''); toast(d?'Delete denied — sign into the NL portal as superadmin here.':('Delete failed: '+(err.code||err.message)),'error'); });
         return;
-      }
-      var tg=e.target.getAttribute('data-file');
-      if(tg){
-        var p=tg.split('|'), g=DATA.games.filter(function(x){return x.id===p[0];})[0];
-        var up=uploadsCache[p[1]];
-        if(up && up.gameId===p[0]){
-          // producer upload → toggle live in RTDB (listener re-renders)
-          firebase.database().ref(UPLOADS_REF+'/'+p[1]).update({ live: up.live===false })
-            .catch(function(e){ var d=(e.code==='PERMISSION_DENIED')||/permission/i.test(e.message||''); toast(d?'Change denied — sign into the NL portal as superadmin here.':('Failed: '+(e.code||e.message)),'error'); });
-          return;
-        }
-        var f=filesForGame(g).filter(function(x){return x.id===p[1];})[0]; if(f){ f.live=(f.live===false); save(); renderFx(); } return;
       }
     };
     host.onchange=function(e){
