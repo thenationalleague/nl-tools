@@ -791,21 +791,32 @@
   }
 
   /* ---- Import fixtures from the attendance feed (app-data/ops-attendance) ----
-     The attendance tool's feed carries NL Cup fixtures under competitionKey
-     'nl-cup', teams stored by NAME (homeTeamName/awayTeamName), date in kickoffUTC.
-     We read that public node, filter to NL Cup, map each team name to a roster code
-     with a tolerant normaliser (handles "U21"/"PL2"/accents/punctuation so a PL2
-     side listed as "Stoke City" or "Stoke City U21" matches our "Stoke City PL2"),
-     preview, then merge into DATA.games keyed on the feed's matchID so re-imports
-     update rather than duplicate. Superadmin still has to Publish afterwards. */
+     The attendance node is populated by the NLS fixture-sync GAS (gas/FixtureSync.gs)
+     — it pulls competitions from the NLS API incl. NL Cup (competitionID 1275) and
+     writes each match to app-data/ops-attendance/fixtures/<matchID> with
+     competitionKey 'nl-cup', teams by NAME (homeTeamName/awayTeamName from NLS
+     home.name), date in kickoffUTC. We read that public node, filter to NL Cup, map
+     each team name to a roster code via normTeam() (tolerant: strips U21/PL2/etc so
+     a PL2 side under any NLS spelling matches our "… PL2"), preview, then merge into
+     DATA.games keyed on the feed's matchID so re-imports update, never duplicate.
+     Superadmin still has to Publish afterwards. */
   var ATT_FIXTURES_REF = 'app-data/ops-attendance/fixtures';
   var FX_MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  // Normalise a team name for matching. NLS names the PL2/U21 sides however it
+  // likes, so strip the dev-squad tags (U18/U21/U23, "under-21s", PL2, Development,
+  // Academy, Reserves), accents and punctuation. Punctuation → space runs FIRST so
+  // hyphenated tags like "under-21s" split before the tag strip. Leaves the senior
+  // club name, which is what our roster carries.
   function normTeam(s){
     return String(s==null?'':s).toLowerCase()
       .normalize('NFD').replace(/[̀-ͯ]/g,'')       // strip accents
-      .replace(/\b(u ?21|under ?21|pl ?2|development|dev|reserves?|res)\b/g,' ')  // dev-squad tags
-      .replace(/&/g,' and ').replace(/\bfootball club\b/g,' ')
-      .replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
+      .replace(/&/g,' and ')
+      .replace(/[^a-z0-9]+/g,' ')                             // punctuation → space
+      .replace(/\b(u|under)\s?\d{2}s?\b/g,' ')                // u21 / under 21 / under-21s / u23
+      .replace(/\bpl\s?2\b/g,' ')                             // PL2
+      .replace(/\b(development|academy|reserves?|dev|res)\b/g,' ')
+      .replace(/\bfootball club\b/g,' ')
+      .trim().replace(/\s+/g,' ');
   }
   function codeForTeamName(name){
     var n = normTeam(name); if(!n) return null;
