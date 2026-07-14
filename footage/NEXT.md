@@ -98,7 +98,10 @@ changes (the current audience is all authenticated + known).
   **Open sub-item:** all imported games default to `stage: 'Group Stage'` — the feed
   carries no round/stage, so knockout ties need a manual stage edit (or a heuristic
   later; NLS does expose `matchPeriod`/scores if we ever want richer round logic).
-- **Node runtime:** functions on Node 20 (deprecated Oct 2026) → bump to 22.
+- ~~**Node runtime:**~~ **Done (14/07).** Functions bumped Node 20 → 22
+  (`functions/package.json` engines, `firebase.json` runtime `nodejs22`, and the
+  deploy workflow's setup-node). Redeploys on merge (the workflow triggers on
+  `functions/**` + `firebase.json`).
 - **Passcode data:** club tokens live in `data.js` (public) for the UI + in the
   admin-only `app-data/media-footage/access/clubTokens` node (the gate's trusted
   copy). Full hardening (remove from data.js, redeem-via-function) only matters
