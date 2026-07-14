@@ -3,6 +3,10 @@
 <head>
 <!--
   NL Cup Footage — Club-facing standalone page
+  Version: v0.8 (14/07/2026) — same-browser isolation: runs on a NAMED Firebase app
+           ('nlFootageExt') so its anonymous sign-in can't clobber a portal
+           (superadmin) login open in another tab; and it no longer reads the portal
+           editor's local draft (localStorage) — shows only the seed + PUBLISHED RTDB.
   Version: v0.7 (14/07/2026) — foldery simplification: files show as name + size (no
            Highlights/Full-match/clean-dirty labels). Folder = game; Preview + Download
            per file; preview-ability is size-based. Reads tolerate old labelled records.
@@ -45,12 +49,16 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
 <script>
-  firebase.initializeApp({
+  // Named app ('nlFootageExt') — NOT the default app. This page signs in
+  // anonymously; the NL portal (same origin) signs in as superadmin on the DEFAULT
+  // app. A named app has its own auth-persistence namespace, so this anonymous
+  // session can't clobber a portal login open in another tab (and vice versa).
+  var FB_APP = firebase.initializeApp({
     apiKey:"AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU", authDomain:"nl-tools.firebaseapp.com",
     databaseURL:"https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app", projectId:"nl-tools",
     storageBucket:"nl-tools.firebasestorage.app", messagingSenderId:"801354670005",
     appId:"1:801354670005:web:05d8ebad3e7e63610d03fc"
-  });
+  }, 'nlFootageExt');
 </script>
 <style>
   body { background: var(--off-white); }
@@ -226,11 +234,12 @@
   'use strict';
   var CREST_ROSE = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png';
 
-  /* Data source: master-tool localStorage overlay wins, else the committed dummy. */
-  function getData(){
-    try { var o = localStorage.getItem('nlFootageData'); if (o) return JSON.parse(o); } catch(e){}
-    return window.FOOTAGE_DATA;
-  }
+  /* Data source: the committed seed, then the PUBLISHED catalogue via the RTDB
+     /data listener overrides it. We deliberately do NOT read the portal editor's
+     local working copy (localStorage 'nlFootageData') — a club must only ever see
+     what's been Published, and reading it caused the editor's unsaved draft to
+     bleed into this page when both are open in the same browser. */
+  function getData(){ return window.FOOTAGE_DATA; }
   var DATA = getData();
   var byCode = {}; DATA.clubs.forEach(function(c){ byCode[c.code] = c; });
   var LIVE_REF = 'app-data/media-footage/data';   // RTDB catalogue (Stage B)
@@ -355,8 +364,8 @@
   // Real Firebase Storage helpers — activate for any file carrying a real
   // storagePath; dummy files (no storagePath) keep the placeholder behaviour.
   function ensureAuth(){
-    try { var u = firebase.auth().currentUser; if (u) return Promise.resolve(u);
-      return firebase.auth().signInAnonymously().then(function(c){ return c.user; });
+    try { var u = FB_APP.auth().currentUser; if (u) return Promise.resolve(u);
+      return FB_APP.auth().signInAnonymously().then(function(c){ return c.user; });
     } catch(e){ return Promise.reject(e); }
   }
   function isReal(f){ return !!(f && f.storagePath); }
@@ -368,8 +377,8 @@
   var currentClubToken = null;   // set on render(club)
   function signedUrl(path){
     return ensureAuth().then(function(){
-      return firebase.storage().ref(path).getDownloadURL().catch(function(){
-        return firebase.storage().ref(path.replace('footage/national-league-cup/proxies/','footage/national-league-cup/')).getDownloadURL();
+      return FB_APP.storage().ref(path).getDownloadURL().catch(function(){
+        return FB_APP.storage().ref(path.replace('footage/national-league-cup/proxies/','footage/national-league-cup/')).getDownloadURL();
       });
     });
   }
@@ -504,10 +513,10 @@
     if (currentClubCode && byCode[currentClubCode]) render(byCode[currentClubCode]);
   }
   try {
-    firebase.database().ref(LIVE_REF).on('value',
+    FB_APP.database().ref(LIVE_REF).on('value',
       function(s){ applyLive(s.val()); },
       function(){ /* offline / rules not deployed — keep committed data */ });
-    firebase.database().ref(UPLOADS_REF).on('value',
+    FB_APP.database().ref(UPLOADS_REF).on('value',
       function(s){ uploadsCache = s.val() || {}; rebuild(); },
       function(){ /* offline / rules not deployed — no uploads merged */ });
   } catch(e){}
