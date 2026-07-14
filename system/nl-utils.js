@@ -1,7 +1,18 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /tools/system/nl-utils.js
-   Version: v1.22 (13/07/2026)
+   Version: v1.23 (14/07/2026)
+
+   Changelog
+   v1.23 (14/07/2026)
+     - installAuditHook() now no-ops when there is no DEFAULT Firebase app
+       (try firebase.app()). Lets pages that run only a NAMED app — the
+       /footage/club + /producer isolation — load nl-utils for its pure UI
+       helpers (NL.toast/confirm/escHtml) without the global RTDB audit proxy
+       throwing "No [DEFAULT] app" on every write. No change for the other
+       tools (they have a default app → hook installs as before).
+       Cache-bust nl-utils ?v=23 -> ?v=24.
+
 
    Shared helper functions used by every tool page. Exposed on window.NL
    namespace. All functions are defensive — they handle missing arguments
@@ -802,6 +813,11 @@
   window.NL.installAuditHook = function() {
     if (window.NL._auditHookInstalled) return;
     if (!window.firebase || !firebase.database || !firebase.database.Reference) return;
+    // Needs the DEFAULT Firebase app: the audit write runs through NL.ensureAuth →
+    // firebase.auth() (default app). Pages that init only a NAMED app (e.g. the
+    // /footage/club + /producer isolation) have no default app — skip, else the
+    // global Reference proxy would throw "No [DEFAULT] app" on every RTDB write.
+    try { firebase.app(); } catch (e) { return; }
     var R = firebase.database.Reference.prototype;
     if (!R) return;
 
