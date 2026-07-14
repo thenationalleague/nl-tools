@@ -65,6 +65,11 @@
   window.NL_CHANGELOG = [
     {
       date: '14/07/2026',
+      version: 'v0.8',
+      items: [ 'Fixtures tab: “Import NL Cup fixtures from the attendance feed” (admin) — reads app-data/ops-attendance (competitionKey nl-cup), tolerant name-match to the roster (handles U21/PL2 spellings), previews matched vs unmatched, merges keyed on the feed matchID (re-import updates, never duplicates). Publish to push live.' ]
+    },
+    {
+      date: '14/07/2026',
       version: 'v0.7',
       items: [
         'Seed roster replaced with the real 2026-27 field: 16 National League clubs + 16 PL2 sides (labelled “… PL2”). Fixtures/groups TBC — no games seeded. Reset → Publish to push live.',
@@ -353,6 +358,10 @@
 
       <div class="pane" id="pane-fixtures">
         <div class="helptext"><b>Each pill is a file for that game</b> (Highlights, Full match, Clips…). <b style="color:var(--green)">Green = live to clubs</b>; grey = held back. Files go live automatically when the producer uploads them — click a pill only to <b>pull one back</b> (an override, not an approval step). Counts vary per game — that's expected. Knockout teams fill in as clubs qualify.</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
+          <button class="btn btn--ghost btn--sm" id="importFxBtn" style="flex-shrink:0">↧ Import NL Cup fixtures from the attendance feed</button>
+          <span class="helptext" style="margin:0;flex:1;min-width:220px">Pulls this season's <b>NL Cup</b> fixtures from the attendance feed and maps them to your roster. You review the matches before anything is added, then <b>Publish</b> to push live.</span>
+        </div>
         <div id="fxList"></div>
       </div>
     </div>
@@ -780,6 +789,70 @@
   function clubOptions(sel){
     return '<option value="">— team —</option>'+DATA.clubs.map(function(c){ return '<option value="'+esc(c.code)+'"'+(c.code===sel?' selected':'')+'>'+esc(c.short)+'</option>'; }).join('');
   }
+
+  /* ---- Import fixtures from the attendance feed (app-data/ops-attendance) ----
+     The attendance tool's feed carries NL Cup fixtures under competitionKey
+     'nl-cup', teams stored by NAME (homeTeamName/awayTeamName), date in kickoffUTC.
+     We read that public node, filter to NL Cup, map each team name to a roster code
+     with a tolerant normaliser (handles "U21"/"PL2"/accents/punctuation so a PL2
+     side listed as "Stoke City" or "Stoke City U21" matches our "Stoke City PL2"),
+     preview, then merge into DATA.games keyed on the feed's matchID so re-imports
+     update rather than duplicate. Superadmin still has to Publish afterwards. */
+  var ATT_FIXTURES_REF = 'app-data/ops-attendance/fixtures';
+  var FX_MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  function normTeam(s){
+    return String(s==null?'':s).toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g,'')       // strip accents
+      .replace(/\b(u ?21|under ?21|pl ?2|development|dev|reserves?|res)\b/g,' ')  // dev-squad tags
+      .replace(/&/g,' and ').replace(/\bfootball club\b/g,' ')
+      .replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
+  }
+  function codeForTeamName(name){
+    var n = normTeam(name); if(!n) return null;
+    for (var i=0;i<DATA.clubs.length;i++){
+      var c = DATA.clubs[i];
+      if (normTeam(c.name)===n || (c.short && normTeam(c.short)===n)) return c.code;
+    }
+    return null;
+  }
+  function fxDateFromISO(iso){
+    var m = String(iso||'').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if(!m) return 'TBD';
+    return m[1]+' '+FX_MONTHS[parseInt(m[2],10)-1]+' '+m[3];
+  }
+  function importFixturesFromAttendance(){
+    toast('Reading the attendance feed…');
+    firebase.database().ref(ATT_FIXTURES_REF).once('value').then(function(snap){
+      var fx = snap.val() || {};
+      var cupKeys = Object.keys(fx).filter(function(k){ return fx[k] && fx[k].competitionKey === 'nl-cup'; });
+      if (!cupKeys.length){ toast('No NL Cup fixtures in the attendance feed yet.','info'); return; }
+      var matched = [], unmatched = [];
+      cupKeys.forEach(function(k){
+        var f = fx[k], h = codeForTeamName(f.homeTeamName), a = codeForTeamName(f.awayTeamName);
+        if (h && a) matched.push({ id:'att-'+k, stage:'Group Stage', round:'', date:fxDateFromISO(f.kickoffUTC), home:h, away:a, files:[] });
+        else unmatched.push(((f.homeTeamName||'?')+' v '+(f.awayTeamName||'?')));
+      });
+      if (!matched.length){
+        toast(cupKeys.length+' NL Cup fixture(s) found but none matched your roster — check the names.','error'); return;
+      }
+      var msg = 'Attendance feed — '+cupKeys.length+' NL Cup fixture(s):\n\n'
+        + '• '+matched.length+' matched your roster\n'
+        + (unmatched.length ? ('• '+unmatched.length+' could NOT be matched (add these by hand):\n   '+unmatched.join('\n   ')+'\n') : '')
+        + '\nImport the '+matched.length+' matched fixture(s)? You still need to Publish afterwards.';
+      if (!confirm(msg)) return;
+      var byId = {}; DATA.games.forEach(function(g){ byId[g.id] = g; });
+      var added = 0, updated = 0;
+      matched.forEach(function(g){
+        var ex = byId[g.id];
+        if (ex){ ex.home = g.home; ex.away = g.away; ex.date = g.date; if(!Array.isArray(ex.files)) ex.files = []; updated++; }
+        else { DATA.games.push(g); byId[g.id] = g; added++; }
+      });
+      save(); renderFx();
+      toast('Imported '+added+' new, updated '+updated+'. Now Publish to push live.');
+    }).catch(function(e){
+      toast('Feed read failed: '+(e.code||e.message||'error'),'error');
+    });
+  }
   /* Files per game: flexible files[] model, with a shim for legacy 4-slot assets{}. */
   var LEGACY_LABEL = { fmr_clean:'Full match (clean)', fmr_dirty:'Full match (graphics)', hl_clean:'Highlights (clean)', hl_dirty:'Highlights (graphics)' };
   function filesForGame(g){
@@ -857,6 +930,7 @@
       if(aa){ var g2=DATA.games.filter(function(x){return x.id===aa;})[0]; g2.away=e.target.value||null; if(!Array.isArray(g2.files)) g2.files=[]; save(); toast('Knockout updated'); }
     };
   }
+  document.getElementById('importFxBtn').addEventListener('click', importFixturesFromAttendance);
 
   /* ---- tabs ---- */
   document.querySelectorAll('.tab').forEach(function(t){ t.addEventListener('click',function(){
