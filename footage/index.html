@@ -65,6 +65,11 @@
   window.NL_CHANGELOG = [
     {
       date: '14/07/2026',
+      version: 'v0.11',
+      items: [ 'Fixtures tab: “Add a fixture” — hand-add a game (home v away + date) without waiting for the NLS draw. Unblocks practising the upload flow (producer needs a game to map to), and lets you seed the draw manually if NLS is slow. Publish to push live.' ]
+    },
+    {
+      date: '14/07/2026',
       version: 'v0.10',
       items: [ 'Removed the per-file “tap to hide/hold from clubs” toggle — footage is live to clubs on upload, so a hide step just contradicted that. File chips are now static labels; the ✕ still deletes a producer upload.' ]
     },
@@ -368,9 +373,18 @@
 
       <div class="pane" id="pane-fixtures">
         <div class="helptext"><b>Each pill is a file for that game.</b> Files go live to clubs automatically when the producer uploads them — no approval step. Use the ✕ on a file only to <b>delete</b> it (removes it for everyone). Counts vary per game — that's expected. Knockout teams fill in as clubs qualify.</div>
-        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:16px">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
           <button class="btn btn--ghost btn--sm" id="importFxBtn" style="flex-shrink:0">↧ Import NL Cup fixtures from the attendance feed</button>
           <span class="helptext" style="margin:0;flex:1;min-width:220px">Pulls this season's <b>NL Cup</b> fixtures from the attendance feed and maps them to your roster. You review the matches before anything is added, then <b>Publish</b> to push live.</span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px;padding:12px 14px;background:var(--navy-50);border:1px solid var(--border);border-radius:var(--radius)">
+          <b style="font-size:11px;color:var(--navy);text-transform:uppercase;letter-spacing:0.08em;flex-shrink:0">Add a fixture</b>
+          <select id="addFxHome" class="fx__sel" aria-label="Home team"></select>
+          <span style="color:var(--text-muted);font-weight:800">v</span>
+          <select id="addFxAway" class="fx__sel" aria-label="Away team"></select>
+          <input type="date" id="addFxDate" class="fx__sel" aria-label="Kick-off date" style="min-width:150px">
+          <button class="btn btn--sm" id="addFxBtn" style="flex-shrink:0">+ Add</button>
+          <span class="helptext" style="margin:0;flex:1;min-width:180px">Hand-add a game — to <b>practise</b>, or to seed the draw before NLS publishes. Publish to push it live.</span>
         </div>
         <div id="fxList"></div>
       </div>
@@ -920,6 +934,7 @@
       }).join('');
     });
     host.innerHTML=html;
+    try { fillAddFx(); } catch(e){}   // keep the "Add a fixture" team pickers populated
     host.onclick=function(e){
       var dup=e.target.getAttribute('data-delup');
       if(dup){
@@ -939,6 +954,21 @@
     };
   }
   document.getElementById('importFxBtn').addEventListener('click', importFixturesFromAttendance);
+
+  // ---- Add a fixture by hand (practice, or seed the draw before NLS publishes) ----
+  function fillAddFx(){
+    var h=document.getElementById('addFxHome'), a=document.getElementById('addFxAway');
+    if(h) h.innerHTML=clubOptions(h.value||''); if(a) a.innerHTML=clubOptions(a.value||'');
+  }
+  document.getElementById('addFxBtn').addEventListener('click', function(){
+    var h=document.getElementById('addFxHome').value, a=document.getElementById('addFxAway').value, d=document.getElementById('addFxDate').value;
+    if(!h || !a){ toast('Pick both teams','error'); return; }
+    if(h===a){ toast('Home and away can’t be the same team','error'); return; }
+    DATA.games.push({ id:'man-'+Date.now(), stage:'Group Stage', round:'', date: d ? fxDateFromISO(d) : 'TBD', home:h, away:a, files:[] });
+    save(); renderFx(); fillAddFx();
+    document.getElementById('addFxDate').value='';
+    toast('Fixture added — Publish to push it live');
+  });
 
   /* ---- tabs ---- */
   document.querySelectorAll('.tab').forEach(function(t){ t.addEventListener('click',function(){
