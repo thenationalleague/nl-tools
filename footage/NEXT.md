@@ -79,17 +79,22 @@ changes (the current audience is all authenticated + known).
   `footageHydrateClubs()` — NL clubs live in one place, no duplication. The 16 PL2
   sides aren't in that registry (no other NL fixtures) so they carry local identity
   in `data.js`. Fixtures/groups TBC — `games[]` empty until the draw.
-- ~~**Fixtures from the NLS feed:**~~ **Done (14/07).** The "NLS feed" is really the
+- ~~**Fixtures from the NLS feed:**~~ **Done (14/07).** The "NLS feed" is the
   attendance tool's RTDB node `app-data/ops-attendance/fixtures` (public-read),
-  populated by an external ingestion; NL Cup is `competitionKey: 'nl-cup'` (not
-  `nlc`), teams stored by NAME. The footage editor now has **Import NL Cup fixtures
-  from the attendance feed** (admin, Fixtures tab): reads that node, filters
-  `nl-cup`, tolerant name-match to the roster (`normTeam()` strips U21/PL2/accents),
-  previews matched vs unmatched, merges keyed on the feed `matchID` (re-import
-  updates, never duplicates). Empty feed → "fixtures TBC" (games stay empty).
-  Superadmin still Publishes. **Open sub-item:** all imported games default to
-  `stage: 'Group Stage'` — the feed carries no round/stage, so knockout ties need a
-  manual stage edit (or a heuristic later).
+  populated by the **NLS fixture-sync GAS** (`gas/FixtureSync.gs`, now mirrored in
+  repo): it pulls the NLS API for four comps incl. **NL Cup (competitionID 1275)**
+  and writes each match with `competitionKey: 'nl-cup'`, teams by NAME
+  (`homeTeamName`/`awayTeamName` from NLS `home.name`), date in `kickoffUTC`, keyed
+  by `matchID`. The footage editor now has **Import NL Cup fixtures from the
+  attendance feed** (admin, Fixtures tab): reads that node, filters `nl-cup`,
+  tolerant name-match to the roster (`normTeam()` strips U21/U23/Under-21s/PL2/
+  Development/Academy/accents/punctuation), previews matched vs unmatched, merges
+  keyed on `matchID` (re-import updates, never duplicates). Empty feed → "fixtures
+  TBC" (games stay empty). Superadmin still Publishes. **Open sub-items:** (a) all
+  imported games default to `stage: 'Group Stage'` — the feed carries no round/stage,
+  so knockout ties need a manual stage edit (or a heuristic later); (b) the exact
+  NLS spelling of the PL2 sides is unconfirmed until a real sync runs — the matcher
+  covers the likely forms, and the import preview lists anything it can't match.
 - **Node runtime:** functions on Node 20 (deprecated Oct 2026) → bump to 22.
 - **Passcode data:** club tokens live in `data.js` (public) for the UI + in the
   admin-only `app-data/media-footage/access/clubTokens` node (the gate's trusted
