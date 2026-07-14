@@ -27,6 +27,32 @@ keep the canonical `?v=` wiring untouched, and run `bash system/lint-tools.sh`
 before you're done. When in doubt, the Style Guide tool (`/tools/style-guide/`)
 is the living visual reference for what's already a token/component.
 
+### The other half: grow the canon deliberately
+
+Reuse-first has a corollary — **actively spot things that should become shared
+standards, and propose promoting them.** If you're writing something a second
+tool would plausibly want, or you notice the same pattern hand-rolled in 2+
+tools, don't leave a one-off: flag it as a canon candidate and (with the user's
+nod) promote it to the right layer, in lockstep:
+
+- **Reusable behaviour / helper / component** → `system/nl-utils.js` (`NL.*`),
+  the versioned **code contract**. Bump `?v=` across the template + every head
+  together; ship the helper with a test.
+- **Colour / spacing / type / CSS component** → `system/nl-brand.css`, the
+  **design system**. Same lockstep `?v=` rule; update the Style Guide so it
+  stays the living reference. (nl-brand.css already carries the heuristic —
+  "would another tool plausibly want this?" — at the top of the file.)
+- **A shared data shape** (e.g. club fields) → the `clubs-meta.json` **data
+  schema** + its validator/snapshot. Keep these three layers distinct: `NL.*`
+  is an API contract, brand tokens are a design system, `clubs-meta` is a data
+  schema — don't conflate them.
+
+Rule of thumb: **first use stays tool-local; the second time you'd write it,
+promote it.** Surface the opportunity even if you don't act on it — a one-line
+"this looks like a canon candidate" in your summary is enough to get it tracked.
+Genuine one-offs stay local (see the policy block atop `nl-brand.css`); the goal
+is deliberate promotion, not hoarding every snippet into the canon.
+
 ## What this repo is
 
 NL Tools — a static GitHub Pages site (`thenationalleague/tools`, served under `/tools/`) that hosts the National League's internal staff/club portal plus a family of self-contained tools (vacancies, tasks, team-of-the-week, attendance, holiday-lieu, claudio, dazn-vip, style-guide, etc.) and a separate family of fan-facing embed widgets that get pasted into the Urban Zoo CMS on `thenationalleague.org.uk`. (chase-hq existed until v2.19 of the brand sweep and was removed pending a structural rewrite.)
