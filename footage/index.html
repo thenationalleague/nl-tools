@@ -65,6 +65,11 @@
   window.NL_CHANGELOG = [
     {
       date: '14/07/2026',
+      version: 'v0.13',
+      items: [ 'Canon compliance: confirm dialogs now use the branded NL.confirm modal (not the native OS popup); toast + escHtml route through NL.* too, instead of hand-rolled copies.' ]
+    },
+    {
+      date: '14/07/2026',
       version: 'v0.12',
       items: [
         'Fixtures tab is now a proper “Manage fixtures” hub: per-fixture Edit (teams + date) and Remove, plus a publish-state bar that flags “unpublished changes” and puts Publish/Load-from-live right here.',
@@ -780,8 +785,11 @@
   'use strict';
   var CREST_ROSE='https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png';
   var LS='nlFootageData';
-  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-  function toast(m,k){ var t=document.getElementById('toast'); t.textContent=m; t.className='toast toast--'+(k||'success')+' show'; setTimeout(function(){t.classList.remove('show');},2400); }
+  // Canon helpers: escHtml, toast and the confirm modal come from NL.* (nl-utils),
+  // with a tiny fallback so the tool still works if the canon ever fails to load.
+  function esc(s){ return (window.NL && NL.escHtml) ? NL.escHtml(s) : String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function toast(m,k){ if(window.NL && NL.toast){ NL.toast(m,k); return; } var t=document.getElementById('toast'); if(!t) return; t.textContent=m; t.className='toast toast--'+(k||'success')+' show'; setTimeout(function(){t.classList.remove('show');},2400); }
+  function ask(m,o){ return (window.NL && NL.confirm) ? NL.confirm(m,o||{}) : Promise.resolve(window.confirm(m)); }
 
   function load(){ try{ var o=localStorage.getItem(LS); if(o) return JSON.parse(o);}catch(e){} return JSON.parse(JSON.stringify(window.FOOTAGE_DATA)); }
   var DATA = load();
@@ -900,20 +908,20 @@
       if (!matched.length){
         toast(cupKeys.length+' NL Cup fixture(s) found but none matched your roster — check the names.','error'); return;
       }
-      var msg = 'Attendance feed — '+cupKeys.length+' NL Cup fixture(s):\n\n'
-        + '• '+matched.length+' matched your roster\n'
-        + (unmatched.length ? ('• '+unmatched.length+' could NOT be matched (add these by hand):\n   '+unmatched.join('\n   ')+'\n') : '')
-        + '\nImport the '+matched.length+' matched fixture(s)? You still need to Publish afterwards.';
-      if (!confirm(msg)) return;
-      var byId = {}; DATA.games.forEach(function(g){ byId[g.id] = g; });
-      var added = 0, updated = 0;
-      matched.forEach(function(g){
-        var ex = byId[g.id];
-        if (ex){ ex.home = g.home; ex.away = g.away; ex.date = g.date; if(!Array.isArray(ex.files)) ex.files = []; updated++; }
-        else { DATA.games.push(g); byId[g.id] = g; added++; }
+      var detail = unmatched.length ? (unmatched.length+' couldn’t be matched (add these by hand): '+unmatched.join('; ')) : '';
+      ask('Import '+matched.length+' matched fixture'+(matched.length===1?'':'s')+' from the attendance feed? You’ll still need to Publish afterwards.',
+          { title:'Import NL Cup fixtures', confirmText:'Import', detail:detail }).then(function(ok){
+        if (!ok) return;
+        var byId = {}; DATA.games.forEach(function(g){ byId[g.id] = g; });
+        var added = 0, updated = 0;
+        matched.forEach(function(g){
+          var ex = byId[g.id];
+          if (ex){ ex.home = g.home; ex.away = g.away; ex.date = g.date; if(!Array.isArray(ex.files)) ex.files = []; updated++; }
+          else { DATA.games.push(g); byId[g.id] = g; added++; }
+        });
+        save(); renderFx();
+        toast('Imported '+added+' new, updated '+updated+'. Now Publish to push live.');
       });
-      save(); renderFx();
-      toast('Imported '+added+' new, updated '+updated+'. Now Publish to push live.');
     }).catch(function(e){
       toast('Feed read failed: '+(e.code||e.message||'error'),'error');
     });
@@ -1003,11 +1011,13 @@
     var t=e.target, id;
     if((id=t.getAttribute('data-delup'))){
       var u=uploadsCache[id];
-      if(!confirm('Delete this upload? Removes the file from Storage and from all club views immediately. This cannot be undone.')) return;
-      if(u && u.storagePath){ try{ firebase.storage().ref(u.storagePath).delete().catch(function(){}); }catch(err){} }
-      firebase.database().ref(UPLOADS_REF+'/'+id).remove()
-        .then(function(){ toast('Upload deleted'); })
-        .catch(function(err){ var d=(err.code==='PERMISSION_DENIED')||/permission/i.test(err.message||''); toast(d?'Delete denied — sign in as superadmin here.':('Delete failed: '+(err.code||err.message)),'error'); });
+      ask('Delete this upload?', { title:'Delete upload', detail:'Removes the file from Storage and from all club views immediately. This cannot be undone.', confirmText:'Delete', variant:'danger' }).then(function(ok){
+        if(!ok) return;
+        if(u && u.storagePath){ try{ firebase.storage().ref(u.storagePath).delete().catch(function(){}); }catch(err){} }
+        firebase.database().ref(UPLOADS_REF+'/'+id).remove()
+          .then(function(){ toast('Upload deleted'); })
+          .catch(function(err){ var d=(err.code==='PERMISSION_DENIED')||/permission/i.test(err.message||''); toast(d?'Delete denied — sign in as superadmin here.':('Delete failed: '+(err.code||err.message)),'error'); });
+      });
       return;
     }
     if((id=t.getAttribute('data-up'))){ uploadTargetGid=id; var fi=document.getElementById('fxUpInput'); fi.value=''; fi.click(); return; }
@@ -1025,8 +1035,10 @@
     if((id=t.getAttribute('data-remove'))){
       var gg=gameById(id); if(!gg) return;
       var nm=(gg.home&&gg.away)?((byCode[gg.home]||{}).short||gg.home)+' v '+((byCode[gg.away]||{}).short||gg.away):(gg.round||'this fixture');
-      if(!confirm('Remove “'+nm+'”? Deletes the fixture from your working copy — Publish to make it live. (Any uploaded files for it aren’t deleted.)')) return;
-      DATA.games=DATA.games.filter(function(x){ return x.id!==id; }); delete editingFx[id]; save(); renderFx(); toast('Fixture removed — Publish to push it live');
+      ask('Remove “'+nm+'”?', { title:'Remove fixture', detail:'Deletes it from your working copy — Publish to make it live. Any uploaded files for it aren’t deleted.', confirmText:'Remove', variant:'danger' }).then(function(ok){
+        if(!ok) return;
+        DATA.games=DATA.games.filter(function(x){ return x.id!==id; }); delete editingFx[id]; save(); renderFx(); toast('Fixture removed — Publish to push it live');
+      });
       return;
     }
   }
@@ -1112,11 +1124,13 @@
     r.readAsText(f);
   });
   document.getElementById('resetBtn').addEventListener('click', function(){
-    if(!confirm('Discard local edits and reset to the seed data (clubs + fixtures, no footage)?')) return;
-    localStorage.removeItem(LS); DATA=JSON.parse(JSON.stringify(window.FOOTAGE_DATA)); hydrateClubs(); overlayActive=false;
-    document.getElementById('stateFlag').className='dummy-flag';
-    document.getElementById('stateFlag').innerHTML='Reset to the seed data (clubs + fixtures, no footage). Publish to live to push it.';
-    renderClubs(); renderFx(); toast('Reset');
+    ask('Discard local edits and reset to the seed data?', { title:'Reset working copy', detail:'Resets clubs + fixtures to the committed seed (no footage). Publish to live to push it.', confirmText:'Reset', variant:'danger' }).then(function(ok){
+      if(!ok) return;
+      localStorage.removeItem(LS); DATA=JSON.parse(JSON.stringify(window.FOOTAGE_DATA)); hydrateClubs(); overlayActive=false;
+      document.getElementById('stateFlag').className='dummy-flag';
+      document.getElementById('stateFlag').innerHTML='Reset to the seed data (clubs + fixtures, no footage). Publish to live to push it.';
+      renderClubs(); renderFx(); toast('Reset');
+    });
   });
 
   /* ---- Stage B: live RTDB catalogue (app-data/media-footage/data) ----
