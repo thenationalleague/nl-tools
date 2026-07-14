@@ -21,6 +21,10 @@
                rows and action bar restyled to the NL portal house style (brand
                tokens, primary/navy system, clean white cards, left-accent). No
                behaviour, JS logic, Firebase SDK or upload-path changes.
+  14/07/2026 — same-browser isolation: runs on a NAMED Firebase app ('nlFootageExt')
+               so its anonymous sign-in can't clobber a portal (superadmin) login in
+               another tab; and no longer reads the portal editor's local draft
+               (localStorage) — shows only the seed + the PUBLISHED RTDB catalogue.
   14/07/2026 — DROPPED the file-type/variant taxonomy. Producer now maps each file
                to a GAME only (no HL/Full-match/Clips, no clean/dirty). Files are
                name + size; preview-ability is size-based. Filename convention
@@ -48,12 +52,16 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script>
-  firebase.initializeApp({
+  // Named app ('nlFootageExt') — NOT the default app. This page signs in
+  // anonymously; the NL portal (same origin) signs in as superadmin on the DEFAULT
+  // app. A named app keeps its own auth-persistence namespace, so this anonymous
+  // session can't clobber a portal login open in another tab (and vice versa).
+  var FB_APP = firebase.initializeApp({
     apiKey:"AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU", authDomain:"nl-tools.firebaseapp.com",
     databaseURL:"https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app", projectId:"nl-tools",
     storageBucket:"nl-tools.firebasestorage.app", messagingSenderId:"801354670005",
     appId:"1:801354670005:web:05d8ebad3e7e63610d03fc"
-  });
+  }, 'nlFootageExt');
 </script>
 <style>
   body { background: var(--off-white); }
@@ -184,7 +192,10 @@
 <script>
 (function(){
   'use strict';
-  function getData(){ try{ var o=localStorage.getItem('nlFootageData'); if(o) return JSON.parse(o);}catch(e){} return window.FOOTAGE_DATA; }
+  // Seed only; the published catalogue arrives via the LIVE_REF listener. We do NOT
+  // read the portal editor's local draft (localStorage 'nlFootageData') — it would
+  // bleed the editor's unsaved edits into this page when both are open in one browser.
+  function getData(){ return window.FOOTAGE_DATA; }
   var DATA = getData();
   var byCode = {};
   var playable = [];
@@ -325,8 +336,8 @@
 
   /* ---- Firebase Storage helpers ---- */
   function ensureAuth(){
-    try { var u = firebase.auth().currentUser; if (u) return Promise.resolve(u);
-      return firebase.auth().signInAnonymously().then(function(c){ return c.user; });
+    try { var u = FB_APP.auth().currentUser; if (u) return Promise.resolve(u);
+      return FB_APP.auth().signInAnonymously().then(function(c){ return c.user; });
     } catch(e){ return Promise.reject(e); }
   }
   function humanSize(b){ if(b==null) return '—'; var u=['B','KB','MB','GB'], i=0; while(b>=1024&&i<u.length-1){ b/=1024; i++; } return (i>=2?b.toFixed(1):Math.round(b))+' '+u[i]; }
@@ -334,7 +345,7 @@
   function uploadOne(s){
     if (!s.file) return Promise.reject(new Error('no file bytes'));
     var path = 'footage/national-league-cup/' + s.fname;
-    return ensureAuth().then(function(){ return firebase.storage().ref(path).put(s.file); }).then(function(){ return path; });
+    return ensureAuth().then(function(){ return FB_APP.storage().ref(path).put(s.file); }).then(function(){ return path; });
   }
 
   /* ---- submit ---- */
@@ -362,8 +373,8 @@
   // Size, not filename/type — a mis-named highlights file still previews.
   var MAX_PREVIEW_BYTES = 2 * 1024 * 1024 * 1024;   // 2 GiB
   function recordFile(s, stamp, storagePath){
-    var uid = (firebase.auth().currentUser || {}).uid || null;
-    return firebase.database().ref(UPLOADS_REF).push({
+    var uid = (FB_APP.auth().currentUser || {}).uid || null;
+    return FB_APP.database().ref(UPLOADS_REF).push({
       gameId: s.gameId,
       name: s.fname, size: humanSize(s.file.size), bytes: s.file.size,
       preview: s.file.size <= MAX_PREVIEW_BYTES, live: true, url: '#stored', storagePath: storagePath,
@@ -392,7 +403,7 @@
   function remainingMs(u){ return u.uploadedAt ? Math.max(0, u.uploadedAt + WINDOW_MS - Date.now()) : 0; }
   function fmtDur(ms){ var h=Math.floor(ms/3600000), m=Math.floor((ms%3600000)/60000); return h>0?(h+'h '+m+'m'):(m+'m'); }
   function gameById(id){ return DATA.games.filter(function(x){return x.id===id;})[0]; }
-  function updRec(id, patch){ return firebase.database().ref(UPLOADS_REF+'/'+id).update(patch)
+  function updRec(id, patch){ return FB_APP.database().ref(UPLOADS_REF+'/'+id).update(patch)
     .then(function(){ toast('Updated'); }).catch(function(e){ toast('Update failed: '+(e.code||e.message),'error'); }); }
 
   function renderMine(){
@@ -428,9 +439,9 @@
     var t=e.target, id;
     if((id=t.getAttribute('data-del'))){
       var u=uploadsCache[id];
-      if(u && u.storagePath){ try{ firebase.storage().ref(u.storagePath).delete().catch(function(){}); }catch(e){} }
+      if(u && u.storagePath){ try{ FB_APP.storage().ref(u.storagePath).delete().catch(function(){}); }catch(e){} }
       delete editing[id];
-      firebase.database().ref(UPLOADS_REF+'/'+id).remove().then(function(){ toast('Deleted'); }).catch(function(e){ toast('Delete failed: '+(e.code||e.message),'error'); });
+      FB_APP.database().ref(UPLOADS_REF+'/'+id).remove().then(function(){ toast('Deleted'); }).catch(function(e){ toast('Delete failed: '+(e.code||e.message),'error'); });
     } else if((id=t.getAttribute('data-remap'))){ editing[id]=!editing[id]; renderMine(); }
   });
   document.getElementById('mine').addEventListener('change', function(e){
@@ -441,7 +452,7 @@
   var uploadsListening = false;
   function startUploadsListener(){
     if(uploadsListening) return; uploadsListening = true;
-    firebase.database().ref(UPLOADS_REF).on('value', function(s){ uploadsCache = s.val() || {}; renderMine(); });
+    FB_APP.database().ref(UPLOADS_REF).on('value', function(s){ uploadsCache = s.val() || {}; renderMine(); });
   }
 
   // The published catalogue (fixtures the admin drew + published) lives at LIVE_REF.
@@ -451,7 +462,7 @@
   function startCatalogueListener(){
     if(catalogueListening) return; catalogueListening = true;
     try {
-      firebase.database().ref(LIVE_REF).on('value',
+      FB_APP.database().ref(LIVE_REF).on('value',
         function(s){ var d=s.val(); if(d && d.clubs && d.games) DATA=d; refreshCatalogue(); },
         function(){ /* offline / rules not deployed — keep the seed catalogue */ });
     } catch(e){}
