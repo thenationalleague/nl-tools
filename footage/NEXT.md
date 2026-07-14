@@ -68,8 +68,12 @@ changes (the current audience is all authenticated + known).
   surface (merged inline into `/tools/footage/`, v0.4 — `/master/` retired). Still
   to do: bring `/club/` and `/producer/` onto the house style (shared `NL.*`,
   `clubs-meta.json` for club identity). Those two still wear bespoke chrome.
-- **Real club names:** the 16 PL2/U21 sides in `footage/data.js` are placeholders.
-  Best fixed by sourcing clubs from `clubs-meta.json` during the re-skin.
+- ~~**Real club names:**~~ **Done (14/07).** Roster is the real 2026-27 field —
+  16 NL clubs + 16 PL2 sides (`"<Club> PL2"`). NL club identity (name/short/crest)
+  is sourced from the master `assets/data/clubs-meta.json` at load via
+  `footageHydrateClubs()` — NL clubs live in one place, no duplication. The 16 PL2
+  sides aren't in that registry (no other NL fixtures) so they carry local identity
+  in `data.js`. Fixtures/groups TBC — `games[]` empty until the draw.
 - **Fixtures from the NLS feed:** derive games for the National League Cup
   (competition id — Richard guesses **1275**, token `nlc`; trace via the attendance
   tool's NLS sync). 2026-27 is blank until NLS publishes — show a "fixtures to be

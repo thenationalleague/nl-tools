@@ -1,6 +1,20 @@
-/* NL Cup Footage — seed data (clubs + fixtures). No footage until real files
-   are uploaded by the producer. 16 National League clubs + 16 PL2 sides.
-   Fixtures/groups TBC — games[] is intentionally empty until the draw is made. */
+/* NL Cup Footage — seed data (roster + fixtures). No footage until real files are
+   uploaded by the producer.
+
+   ROSTER = 16 National League clubs + 16 PL2 sides. Fixtures/groups are TBC, so
+   games[] is intentionally empty until the draw is made.
+
+   SINGLE SOURCE OF IDENTITY: the National League clubs are stored THIN below
+   (code + cup-specific fields only). Their name / short / crest are sourced from
+   the master registry (assets/clubs-meta.json) at load via footageHydrateClubs(),
+   so NL clubs live in ONE place. The 16 PL2 sides aren't in that registry (they
+   play no other NL fixtures) so they carry their own identity here.
+
+   Every page that shows clubs must, after loading FOOTAGE_DATA (seed) or the
+   published RTDB catalogue, call footageLoadMeta().then(m => footageHydrateClubs(
+   clubs, m)) then rebuild its code->club map and re-render. Hydrate is idempotent
+   and degrades gracefully if the registry can't be fetched (NL club falls back to
+   its code + the rose crest). */
 window.FOOTAGE_DATA = {
   "competition": "National League Cup 2026-27",
   "updated": "2026-07-14",
@@ -12,161 +26,97 @@ window.FOOTAGE_DATA = {
   "clubs": [
     {
       "code": "ALD",
-      "name": "Aldershot Town",
-      "short": "Aldershot",
       "tier": "NL",
-      "crest": "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/Aldershot%20Town.png",
-      "mono": null,
       "token": "ald-qm3t",
       "passcode": "8GFFF8"
     },
     {
       "code": "BHW",
-      "name": "Boreham Wood",
-      "short": "Boreham Wood",
       "tier": "NL",
-      "crest": "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/Boreham%20Wood.png",
-      "mono": null,
       "token": "bhw-rayq",
       "passcode": "ZER24Q"
     },
     {
       "code": "BOS",
-      "name": "Boston United",
-      "short": "Boston",
       "tier": "NL",
-      "crest": "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/Boston%20United.png",
-      "mono": null,
       "token": "bos-4zks",
       "passcode": "HM3THG"
     },
     {
       "code": "BRA",
-      "name": "Braintree Town",
-      "short": "Braintree",
       "tier": "NL",
-      "crest": "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/Braintree%20Town.png",
-      "mono": null,
       "token": "bra-efsd",
       "passcode": "XL3DCJ"
     },
     {
       "code": "HAL",
-      "name": "FC Halifax Town",
-      "short": "Halifax",
       "tier": "NL",
-      "crest": "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/FC%20Halifax%20Town.png",
-      "mono": null,
       "token": "hal-4neu",
       "passcode": "ARMJTL"
     },
     {
       "code": "GAT",
-      "name": "Gateshead",
-      "short": "Gateshead",
       "tier": "NL",
-      "crest": "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/Gateshead.png",
-      "mono": null,
       "token": "gat-qduz",
       "passcode": "3DTU3C"
     },
     {
       "code": "HAR",
-      "name": "Hartlepool United",
-      "short": "Hartlepool",
       "tier": "NL",
-      "crest": "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/Hartlepool%20United.png",
-      "mono": null,
       "token": "har-683t",
       "passcode": "GYWX8Q"
     },
     {
       "code": "HOR",
-      "name": "Hornchurch",
-      "short": "Hornchurch",
       "tier": "NL",
-      "crest": "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/Hornchurch.png",
-      "mono": null,
       "token": "hor-apxy",
       "passcode": "J3WE7Z"
     },
     {
       "code": "SCU",
-      "name": "Scunthorpe United",
-      "short": "Scunthorpe",
       "tier": "NL",
-      "crest": "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/Scunthorpe%20United.png",
-      "mono": null,
       "token": "scu-4pet",
       "passcode": "8QFGGC"
     },
     {
       "code": "SOL",
-      "name": "Solihull Moors",
-      "short": "Solihull",
       "tier": "NL",
-      "crest": "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/Solihull%20Moors.png",
-      "mono": null,
       "token": "sol-gv8e",
       "passcode": "BLEM2L"
     },
     {
       "code": "SUT",
-      "name": "Sutton United",
-      "short": "Sutton",
       "tier": "NL",
-      "crest": "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/Sutton%20United.png",
-      "mono": null,
       "token": "sut-tj95",
       "passcode": "9P0WVH"
     },
     {
       "code": "TAM",
-      "name": "Tamworth",
-      "short": "Tamworth",
       "tier": "NL",
-      "crest": "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/Tamworth.png",
-      "mono": null,
       "token": "tam-5rsr",
       "passcode": "TH4BYE"
     },
     {
       "code": "TRU",
-      "name": "Truro City",
-      "short": "Truro",
       "tier": "NL",
-      "crest": "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/Truro%20City.png",
-      "mono": null,
       "token": "tru-egti",
       "passcode": "KEBJ7G"
     },
     {
       "code": "WEA",
-      "name": "Wealdstone",
-      "short": "Wealdstone",
       "tier": "NL",
-      "crest": "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/Wealdstone.png",
-      "mono": null,
       "token": "wea-8rt7",
       "passcode": "SKZJ3F"
     },
     {
       "code": "WOK",
-      "name": "Woking",
-      "short": "Woking",
       "tier": "NL",
-      "crest": "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/Woking.png",
-      "mono": null,
       "token": "wok-r8sc",
       "passcode": "3GA3V7"
     },
     {
       "code": "WOR",
-      "name": "Worthing",
-      "short": "Worthing",
       "tier": "NL",
-      "crest": "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/Worthing.png",
-      "mono": null,
       "token": "wor-ml2b",
       "passcode": "5AWWLP"
     },
@@ -349,4 +299,38 @@ window.FOOTAGE_DATA = {
       "preview": true
     }
   ]
+};
+
+
+/* ---- club identity hydration (see header) ------------------------------------ */
+window.FOOTAGE_META_URL   = '/tools/assets/data/clubs-meta.json';
+window.FOOTAGE_CREST_BASE = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
+
+/* Fill NL clubs' identity (name/short/crest) from the master registry, in place.
+   Idempotent. PL2 clubs are left untouched. A registry miss leaves the club as-is
+   (never blanked). Returns the same array for chaining. */
+window.footageHydrateClubs = function(clubs, meta){
+  var byCode = {};
+  ((meta && meta.clubs) || []).forEach(function(m){ if (m && m.code) byCode[m.code] = m; });
+  (clubs || []).forEach(function(c){
+    if (!c || c.tier !== 'NL') return;                 /* PL2 keep local identity */
+    var m = byCode[c.code];
+    if (!m){ if (!c.name) c.name = c.code; return; }    /* registry miss → don't blank */
+    c.name  = m.name;
+    c.short = m.short || m.name;
+    c.crest = window.FOOTAGE_CREST_BASE + encodeURIComponent(m.name) + '.png';
+  });
+  return clubs;
+};
+
+/* Fetch the master registry once; result cached on window. Resolves to the meta
+   object or null (offline / not found). Never rejects. */
+window.footageLoadMeta = function(){
+  if (window._footageMeta !== undefined) return Promise.resolve(window._footageMeta);
+  if (window._footageMetaP) return window._footageMetaP;
+  window._footageMetaP = fetch(window.FOOTAGE_META_URL, { cache: 'no-cache' })
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(j){ window._footageMeta = j; return j; })
+    .catch(function(){ window._footageMeta = null; return null; });
+  return window._footageMetaP;
 };
