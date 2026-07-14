@@ -90,11 +90,14 @@ changes (the current audience is all authenticated + known).
   tolerant name-match to the roster (`normTeam()` strips U21/U23/Under-21s/PL2/
   Development/Academy/accents/punctuation), previews matched vs unmatched, merges
   keyed on `matchID` (re-import updates, never duplicates). Empty feed → "fixtures
-  TBC" (games stay empty). Superadmin still Publishes. **Open sub-items:** (a) all
-  imported games default to `stage: 'Group Stage'` — the feed carries no round/stage,
-  so knockout ties need a manual stage edit (or a heuristic later); (b) the exact
-  NLS spelling of the PL2 sides is unconfirmed until a real sync runs — the matcher
-  covers the likely forms, and the import preview lists anything it can't match.
+  TBC" (games stay empty). Superadmin still Publishes.
+  **PL2 naming — confirmed (14/07):** NLS returns the PL2 sides in the `name` field
+  as `"<Club> PL2"` (e.g. `"West Ham United PL2"`, `officialName` `"… Under 21"`) —
+  byte-identical to our roster naming, so it's an EXACT match; the tolerant matcher
+  is now just insurance. Verified against real competitionID-1275 data.
+  **Open sub-item:** all imported games default to `stage: 'Group Stage'` — the feed
+  carries no round/stage, so knockout ties need a manual stage edit (or a heuristic
+  later; NLS does expose `matchPeriod`/scores if we ever want richer round logic).
 - **Node runtime:** functions on Node 20 (deprecated Oct 2026) → bump to 22.
 - **Passcode data:** club tokens live in `data.js` (public) for the UI + in the
   admin-only `app-data/media-footage/access/clubTokens` node (the gate's trusted
