@@ -65,6 +65,14 @@
   window.NL_CHANGELOG = [
     {
       date: '14/07/2026',
+      version: 'v0.12',
+      items: [
+        'Fixtures tab is now a proper “Manage fixtures” hub: per-fixture Edit (teams + date) and Remove, plus a publish-state bar that flags “unpublished changes” and puts Publish/Load-from-live right here.',
+        'Admin upload: “＋ Footage” on any fixture uploads a file straight to that game from the portal (no producer passcode) — real byte progress; live to clubs on upload.'
+      ]
+    },
+    {
+      date: '14/07/2026',
       version: 'v0.11',
       items: [ 'Fixtures tab: “Add a fixture” — hand-add a game (home v away + date) without waiting for the NLS draw. Unblocks practising the upload flow (producer needs a game to map to), and lets you seed the draw manually if NLS is slow. Publish to push live.' ]
     },
@@ -311,6 +319,26 @@
   #pageWrap .chipx:hover { background: var(--red-light); border-color: color-mix(in srgb,var(--red) 30%,white); color: var(--red); }
   #pageWrap .chipx:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
+  /* Manage-fixtures controls */
+  #pageWrap .fx__acts { display: flex; gap: 6px; flex-shrink: 0; align-items: center; }
+  #pageWrap .fx__btn { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; padding: 5px 9px;
+    border-radius: var(--radius); border: 1px solid var(--border); background: var(--white); color: var(--navy); cursor: pointer; font-family: var(--font); }
+  #pageWrap .fx__btn:hover { background: var(--navy-50); border-color: var(--navy-300); }
+  #pageWrap .fx__btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  #pageWrap .fx__btn--up { color: var(--primary); }
+  #pageWrap .fx__btn--up:hover { background: var(--primary-50); border-color: var(--primary); }
+  #pageWrap .fx__btn--danger:hover { background: var(--red-light); border-color: color-mix(in srgb,var(--red) 30%,white); color: var(--red); }
+  #pageWrap .fx__editrow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; padding: 10px 12px; background: var(--navy-50); border-radius: var(--radius); }
+  #pageWrap .fx__up { font-size: 11px; font-weight: 700; color: var(--primary); margin-top: 8px; }
+  #pageWrap .fx__upbar { height: 5px; background: var(--navy-100); border-radius: var(--radius-pill); overflow: hidden; margin-top: 4px; max-width: 280px; }
+  #pageWrap .fx__upfill { height: 100%; background: var(--green); transform: scaleX(0); transform-origin: left; transition: transform 0.2s; }
+  /* Publish state bar in the Fixtures tab */
+  #pageWrap .fx-pubbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; padding: 11px 14px;
+    background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); font-size: 12px; }
+  #pageWrap .fx-pubbar .grow { flex: 1; min-width: 120px; color: var(--text-muted); font-weight: 600; }
+  #pageWrap .fx-pub-dirty { color: var(--amber); font-weight: 800; }
+  #pageWrap .fx-pub-clean { color: var(--green); font-weight: 800; }
+
   #pageWrap .helptext { font-size: 12px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.5; }
 </style>
 </head>
@@ -372,7 +400,9 @@
       </div>
 
       <div class="pane" id="pane-fixtures">
-        <div class="helptext"><b>Each pill is a file for that game.</b> Files go live to clubs automatically when the producer uploads them — no approval step. Use the ✕ on a file only to <b>delete</b> it (removes it for everyone). Counts vary per game — that's expected. Knockout teams fill in as clubs qualify.</div>
+        <div class="helptext"><b>Manage the cup's fixtures and footage here.</b> Add or import games, edit or remove them, and upload footage straight to a game. Files go live to clubs the moment they're uploaded — the ✕ on a file <b>deletes</b> it for everyone. <b>Publish to live</b> pushes fixture changes to the producer and club pages.</div>
+        <div class="fx-pubbar" id="fxPublishBar"></div>
+        <input type="file" id="fxUpInput" accept="video/mp4,.mp4" multiple style="display:none">
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
           <button class="btn btn--ghost btn--sm" id="importFxBtn" style="flex-shrink:0">↧ Import NL Cup fixtures from the attendance feed</button>
           <span class="helptext" style="margin:0;flex:1;min-width:220px">Pulls this season's <b>NL Cup</b> fixtures from the attendance feed and maps them to your roster. You review the matches before anything is added, then <b>Publish</b> to push live.</span>
@@ -764,7 +794,7 @@
     byCode={}; DATA.clubs.forEach(function(c){ byCode[c.code]=c; });
   }
 
-  function save(){ localStorage.setItem(LS, JSON.stringify(DATA)); overlayActive=true; flag(); }
+  function save(){ localStorage.setItem(LS, JSON.stringify(DATA)); overlayActive=true; dirty=true; flag(); try{ renderPublishState(); }catch(e){} }
   function flag(){
     var f=document.getElementById('stateFlag');
     if(overlayActive){ f.className='dummy-flag saved-flag'; f.innerHTML='✓ Editing a saved local copy — the club pages in this browser reflect your changes. Export to keep a backup.'; }
@@ -904,55 +934,148 @@
       .map(function(o){ var u=o.u; return { id:o.k, name:u.name, size:u.size, preview:!!u.preview, live:u.live!==false,
         url:u.url||'#stored', storagePath:u.storagePath, _up:true }; });
   }
+  function gameById(id){ return DATA.games.filter(function(x){ return x.id===id; })[0]; }
+  function fxDateToISO(d){   // "2026 SEP 06" → "2026-09-06" for the date input
+    var p=String(d||'').trim().split(/\s+/); if(p.length!==3) return '';
+    var mi=FX_MONTHS.indexOf(p[1].toUpperCase()); if(mi<0) return '';
+    return p[0]+'-'+String(mi+1).padStart(2,'0')+'-'+String(p[2]).padStart(2,'0');
+  }
+  function fxLabel(g){ return esc((byCode[g.home]||{}).short||g.home)+' v '+esc((byCode[g.away]||{}).short||g.away); }
+  var editingFx = {};   // gid → true while its inline editor is open
+  var dirty = false;    // local fixture edits not yet Published
+
   function renderFx(){
     var host=document.getElementById('fxList');
     var order=[],byStage={};
     DATA.games.forEach(function(g){ if(!byStage[g.stage]){byStage[g.stage]=[];order.push(g.stage);} byStage[g.stage].push(g); });
     var html='';
+    if(!DATA.games.length){
+      html='<div class="helptext" style="font-style:italic">No fixtures yet — <b>Add a fixture</b> above, or <b>Import</b> from the attendance feed once the draw is in.</div>';
+    }
     order.forEach(function(st){
       html+='<div class="tier-head">'+esc(st)+' ('+byStage[st].length+')</div>';
       html+=byStage[st].map(function(g){
-        var fixHTML;
-        if (g.home==null){
-          fixHTML='<span class="fx__fix">'+esc(g.round)+': <select class="fx__sel" data-home="'+g.id+'">'+clubOptions(g.home)+'</select> v <select class="fx__sel" data-away="'+g.id+'">'+clubOptions(g.away)+'</select></span>';
+        var isKO = (g.home==null || g.away==null);
+        var fixHTML, acts;
+        if (isKO){
+          fixHTML='<span class="fx__fix">'+esc(g.round||'TBD')+': <select class="fx__sel" data-home="'+g.id+'">'+clubOptions(g.home)+'</select> v <select class="fx__sel" data-away="'+g.id+'">'+clubOptions(g.away)+'</select></span>';
+          acts='<span class="fx__acts"><button class="fx__btn fx__btn--danger" data-remove="'+g.id+'">Remove</button></span>';
         } else {
-          fixHTML='<span class="fx__fix">'+esc((byCode[g.home]||{}).short||g.home)+' v '+esc((byCode[g.away]||{}).short||g.away)+'</span>';
+          fixHTML='<span class="fx__fix">'+fxLabel(g)+'</span>';
+          acts='<span class="fx__acts">'
+            +'<button class="fx__btn fx__btn--up" data-up="'+g.id+'">＋ Footage</button>'
+            +'<button class="fx__btn" data-edit="'+g.id+'">'+(editingFx[g.id]?'Close':'Edit')+'</button>'
+            +'<button class="fx__btn fx__btn--danger" data-remove="'+g.id+'">Remove</button></span>';
         }
+        var editRow = (editingFx[g.id] && !isKO)
+          ? '<div class="fx__editrow">'
+            +'<select class="fx__sel" data-ehome="'+g.id+'">'+clubOptions(g.home)+'</select>'
+            +'<span style="font-weight:800;color:var(--text-muted)">v</span>'
+            +'<select class="fx__sel" data-eaway="'+g.id+'">'+clubOptions(g.away)+'</select>'
+            +'<input type="date" class="fx__sel" data-edate="'+g.id+'" value="'+esc(fxDateToISO(g.date))+'">'
+            +'<button class="fx__btn" data-esave="'+g.id+'">Save</button>'
+            +'<button class="fx__btn" data-ecancel="'+g.id+'">Cancel</button></div>'
+          : '';
         var files = filesForGame(g).concat(uploadsForGame(g.id));
         var chips = files.length
           ? files.map(function(f){
               var nm = f.name || f.label || 'Footage';
-              // A file is just a file — live to clubs on upload (no hide/hold toggle).
               var chip = '<span class="chip on" title="'+esc(nm)+(f.size?(' · '+esc(f.size)):'')+'">'+esc(nm)+'</span>';
-              // Producer uploads get a delete (removes the Storage file + its record);
-              // catalogue files don't (they live in the published blob).
               if (f._up) return '<span class="chipwrap">'+chip+'<button class="chipx" data-delup="'+esc(f.id)+'" title="Delete this upload — removes the file and its record for everyone">✕</button></span>';
               return chip;
             }).join('')
           : '<span style="font-size:11px;color:var(--text-muted);font-style:italic;">no files yet</span>';
-        return '<div class="fx"><div class="fx__row"><span class="fx__meta">'+esc(g.round)+' · '+esc(g.date)+'</span>'+fixHTML+'</div><div class="fx__assets">'+chips+'</div></div>';
+        return '<div class="fx"><div class="fx__row"><span class="fx__meta">'+esc(g.date||'TBD')+'</span>'+fixHTML+acts+'</div>'
+          + editRow
+          + '<div class="fx__assets">'+chips+'</div><div class="fx__up" id="fxup-'+esc(g.id)+'"></div></div>';
       }).join('');
     });
     host.innerHTML=html;
-    try { fillAddFx(); } catch(e){}   // keep the "Add a fixture" team pickers populated
-    host.onclick=function(e){
-      var dup=e.target.getAttribute('data-delup');
-      if(dup){
-        var u=uploadsCache[dup];
-        if(!confirm('Delete this upload? Removes the file from Storage and from all club views immediately. This cannot be undone.')) return;
-        if(u && u.storagePath){ try{ firebase.storage().ref(u.storagePath).delete().catch(function(){}); }catch(err){} }
-        firebase.database().ref(UPLOADS_REF+'/'+dup).remove()
-          .then(function(){ toast('Upload deleted'); })
-          .catch(function(err){ var d=(err.code==='PERMISSION_DENIED')||/permission/i.test(err.message||''); toast(d?'Delete denied — sign into the NL portal as superadmin here.':('Delete failed: '+(err.code||err.message)),'error'); });
-        return;
-      }
-    };
-    host.onchange=function(e){
-      var hh=e.target.getAttribute('data-home'), aa=e.target.getAttribute('data-away');
-      if(hh){ var g=DATA.games.filter(function(x){return x.id===hh;})[0]; g.home=e.target.value||null; if(!Array.isArray(g.files)) g.files=[]; save(); toast('Knockout updated'); }
-      if(aa){ var g2=DATA.games.filter(function(x){return x.id===aa;})[0]; g2.away=e.target.value||null; if(!Array.isArray(g2.files)) g2.files=[]; save(); toast('Knockout updated'); }
-    };
+    try { fillAddFx(); } catch(e){}          // keep the "Add a fixture" pickers populated
+    try { renderPublishState(); } catch(e){} // keep the publish bar in sync
+    host.onclick=fxClick;
+    host.onchange=fxChange;
   }
+
+  var uploadTargetGid=null;
+  function fxClick(e){
+    var t=e.target, id;
+    if((id=t.getAttribute('data-delup'))){
+      var u=uploadsCache[id];
+      if(!confirm('Delete this upload? Removes the file from Storage and from all club views immediately. This cannot be undone.')) return;
+      if(u && u.storagePath){ try{ firebase.storage().ref(u.storagePath).delete().catch(function(){}); }catch(err){} }
+      firebase.database().ref(UPLOADS_REF+'/'+id).remove()
+        .then(function(){ toast('Upload deleted'); })
+        .catch(function(err){ var d=(err.code==='PERMISSION_DENIED')||/permission/i.test(err.message||''); toast(d?'Delete denied — sign in as superadmin here.':('Delete failed: '+(err.code||err.message)),'error'); });
+      return;
+    }
+    if((id=t.getAttribute('data-up'))){ uploadTargetGid=id; var fi=document.getElementById('fxUpInput'); fi.value=''; fi.click(); return; }
+    if((id=t.getAttribute('data-edit'))){ editingFx[id]=!editingFx[id]; renderFx(); return; }
+    if((id=t.getAttribute('data-ecancel'))){ delete editingFx[id]; renderFx(); return; }
+    if((id=t.getAttribute('data-esave'))){
+      var g=gameById(id); if(!g) return;
+      var h=(document.querySelector('[data-ehome="'+id+'"]')||{}).value, a=(document.querySelector('[data-eaway="'+id+'"]')||{}).value, d=(document.querySelector('[data-edate="'+id+'"]')||{}).value;
+      if(!h||!a){ toast('Pick both teams','error'); return; }
+      if(h===a){ toast('Home and away can’t be the same team','error'); return; }
+      g.home=h; g.away=a; if(d) g.date=fxDateFromISO(d);
+      delete editingFx[id]; save(); renderFx(); toast('Fixture updated — Publish to push it live');
+      return;
+    }
+    if((id=t.getAttribute('data-remove'))){
+      var gg=gameById(id); if(!gg) return;
+      var nm=(gg.home&&gg.away)?((byCode[gg.home]||{}).short||gg.home)+' v '+((byCode[gg.away]||{}).short||gg.away):(gg.round||'this fixture');
+      if(!confirm('Remove “'+nm+'”? Deletes the fixture from your working copy — Publish to make it live. (Any uploaded files for it aren’t deleted.)')) return;
+      DATA.games=DATA.games.filter(function(x){ return x.id!==id; }); delete editingFx[id]; save(); renderFx(); toast('Fixture removed — Publish to push it live');
+      return;
+    }
+  }
+  function fxChange(e){
+    var hh=e.target.getAttribute('data-home'), aa=e.target.getAttribute('data-away');
+    if(hh){ var g=gameById(hh); if(g){ g.home=e.target.value||null; if(!Array.isArray(g.files)) g.files=[]; save(); renderFx(); toast('Knockout updated'); } }
+    if(aa){ var g2=gameById(aa); if(g2){ g2.away=e.target.value||null; if(!Array.isArray(g2.files)) g2.files=[]; save(); renderFx(); toast('Knockout updated'); } }
+  }
+
+  // ---- Admin upload: footage straight to a game (no producer passcode needed) ----
+  var MAX_PREVIEW_BYTES = 2*1024*1024*1024;   // must match the Cloud Function's proxy cap
+  function humanSize(b){ if(b==null) return ''; var u=['B','KB','MB','GB'],i=0; while(b>=1024&&i<u.length-1){b/=1024;i++;} return (i>=2?b.toFixed(1):Math.round(b))+' '+u[i]; }
+  function adminUploadToGame(gid, files){
+    files=(files||[]).filter(function(f){ return f && f.name; });
+    if(!files.length) return;
+    var el=document.getElementById('fxup-'+gid);
+    var stamp=Date.now(), uid=(firebase.auth().currentUser||{}).uid||null;
+    var totalBytes=files.reduce(function(s,f){ return s+((f.size)||0); },0), sent={};
+    function paint(){ var s=0; files.forEach(function(f,i){ s+=sent[i]||0; }); var pct=totalBytes?Math.min(1,s/totalBytes):0;
+      if(el) el.innerHTML='Uploading '+files.length+' file'+(files.length>1?'s':'')+'… '+Math.round(pct*100)+'%<div class="fx__upbar"><div class="fx__upfill" style="transform:scaleX('+pct+')"></div></div>'; }
+    paint();
+    Promise.all(files.map(function(f,i){
+      var path='footage/national-league-cup/'+f.name;
+      return new Promise(function(resolve,reject){
+        var task=firebase.storage().ref(path).put(f);
+        task.on('state_changed', function(snap){ sent[i]=snap.bytesTransferred; paint(); }, reject, function(){ sent[i]=f.size||0; paint(); resolve(path); });
+      }).then(function(storagePath){
+        return firebase.database().ref(UPLOADS_REF).push({ gameId:gid, name:f.name, size:humanSize(f.size), bytes:f.size,
+          preview:(f.size<=MAX_PREVIEW_BYTES), live:true, url:'#stored', storagePath:storagePath, uploadedBy:uid, uploadedAt:stamp });
+      });
+    })).then(function(){ if(el) el.innerHTML=''; toast('Uploaded '+files.length+' file'+(files.length>1?'s':'')+' — live to clubs now'); })
+      .catch(function(e){ if(el) el.innerHTML=''; var d=(e.code==='PERMISSION_DENIED')||/permission/i.test(e.message||''); toast(d?'Upload denied — sign in as superadmin here.':('Upload failed: '+(e.code||e.message)),'error'); });
+  }
+  document.getElementById('fxUpInput').addEventListener('change', function(){
+    var gid=uploadTargetGid, files=[].slice.call(this.files); this.value=''; uploadTargetGid=null;
+    if(gid && files.length) adminUploadToGame(gid, files);
+  });
+
+  // ---- Publish-state bar (surfaces unpublished fixture changes right here) ----
+  function renderPublishState(){
+    var el=document.getElementById('fxPublishBar'); if(!el) return;
+    var n=DATA.games.length;
+    el.innerHTML='<span class="grow"><b>'+n+'</b> fixture'+(n===1?'':'s')+' in the editor'
+      +(dirty?' · <span class="fx-pub-dirty">● unpublished changes</span>':'')+'.</span>'
+      +'<button class="btn btn--ghost btn--sm" id="fxPullBtn2">Load from live</button>'
+      +'<button class="btn btn--sm" id="fxPublishBtn">Publish to live</button>';
+    var pb=document.getElementById('fxPublishBtn'); if(pb) pb.onclick=function(){ publishLive(); };
+    var lb=document.getElementById('fxPullBtn2'); if(lb) lb.onclick=function(){ pullLive(false); };
+  }
+
   document.getElementById('importFxBtn').addEventListener('click', importFixturesFromAttendance);
 
   // ---- Add a fixture by hand (practice, or seed the draw before NLS publishes) ----
@@ -1001,7 +1124,7 @@
      NL portal on the same domain. NOTE for Stage D: real passcodes must move
      out of this public-read blob into an admin-only node + server verification. */
   var LIVE_REF = 'app-data/media-footage/data';
-  function adopt(d){ DATA=d; hydrateClubs(); save(); renderClubs(); renderFx(); }
+  function adopt(d){ DATA=d; hydrateClubs(); save(); dirty=false; renderClubs(); renderFx(); }   // pulled live = in sync
   function pullLive(silent){
     return firebase.database().ref(LIVE_REF).once('value').then(function(s){
       var d=s.val();
@@ -1014,7 +1137,7 @@
       var u = firebase.auth().currentUser;
       if (u && u.isAnonymous){ toast('You’re signed in anonymously (from the producer/club page). Sign into the NL portal as superadmin here, then publish.', 'error'); return; }
       firebase.database().ref(LIVE_REF).set(DATA)
-        .then(function(){ toast('Published to live — all club pages now see this'); })
+        .then(function(){ dirty=false; try{ renderPublishState(); }catch(e){} toast('Published to live — all club pages now see this'); })
         .catch(function(e){
           var d = (e.code==='PERMISSION_DENIED') || /permission/i.test(e.message||'');
           toast(d ? 'Publish denied — sign into the NL portal as superadmin on this domain.' : ('Publish failed: '+(e.code||e.message)), 'error');
