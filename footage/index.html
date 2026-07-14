@@ -64,6 +64,14 @@
 
   window.NL_CHANGELOG = [
     {
+      date: '14/07/2026',
+      version: 'v0.7',
+      items: [
+        'Seed roster replaced with the real 2026-27 field: 16 National League clubs + 16 PL2 sides (labelled “… PL2”). Fixtures/groups TBC — no games seeded. Reset → Publish to push live.',
+        'NL club identity (name/short/crest) now sourced from the master clubs-meta.json at load — no duplication; NL clubs live in one place. PL2 sides (not in that registry) keep local identity.'
+      ]
+    },
+    {
       date: '13/07/2026',
       version: 'v0.6',
       items: [ 'Reverted to fast direct getDownloadURL (sub-1s previews); dropped the RTDB download-gate (~15-20s Eventarc lag). Access rests on UI scoping — see NEXT.md.' ]
@@ -622,7 +630,9 @@
   }
   // Rebuild DATA = base catalogue + producer uploads (merged by gameId).
   function rebuild(){
-    DATA = baseData; byCode = {}; DATA.clubs.forEach(function(c){ byCode[c.code] = c; });
+    DATA = baseData;
+    window.footageHydrateClubs(DATA.clubs, window._footageMeta);   // NL identity ← clubs-meta.json
+    byCode = {}; DATA.clubs.forEach(function(c){ byCode[c.code] = c; });
     var byId = {};
     DATA.games.forEach(function(g){
       if (!Array.isArray(g.files)) g.files = [];
@@ -691,6 +701,8 @@
       booted = true;
       render();          // paint from the committed catalogue immediately
       wireListeners();   // live catalogue + uploads then override in place
+      // NL club identity lives in clubs-meta.json — fetch once, then re-render hydrated.
+      window.footageLoadMeta().then(function(){ rebuild(); });
     }
   };
 })();
@@ -712,6 +724,13 @@
   var DATA = load();
   var overlayActive = !!localStorage.getItem(LS);
   var byCode={}; DATA.clubs.forEach(function(c){ byCode[c.code]=c; });
+
+  // NL club identity is sourced from clubs-meta.json (see data.js). Fill it in and
+  // rebuild the code→club map; call after any (re)load of DATA.
+  function hydrateClubs(){
+    window.footageHydrateClubs(DATA.clubs, window._footageMeta);
+    byCode={}; DATA.clubs.forEach(function(c){ byCode[c.code]=c; });
+  }
 
   function save(){ localStorage.setItem(LS, JSON.stringify(DATA)); overlayActive=true; flag(); }
   function flag(){
@@ -853,12 +872,12 @@
   document.getElementById('importBtn').addEventListener('click', function(){ document.getElementById('importFile').click(); });
   document.getElementById('importFile').addEventListener('change', function(e){
     var f=e.target.files[0]; if(!f) return; var r=new FileReader();
-    r.onload=function(){ try{ DATA=JSON.parse(r.result); byCode={}; DATA.clubs.forEach(function(c){byCode[c.code]=c;}); save(); renderClubs(); renderFx(); toast('Imported'); }catch(err){ toast('Invalid JSON','error'); } };
+    r.onload=function(){ try{ DATA=JSON.parse(r.result); hydrateClubs(); save(); renderClubs(); renderFx(); toast('Imported'); }catch(err){ toast('Invalid JSON','error'); } };
     r.readAsText(f);
   });
   document.getElementById('resetBtn').addEventListener('click', function(){
     if(!confirm('Discard local edits and reset to the seed data (clubs + fixtures, no footage)?')) return;
-    localStorage.removeItem(LS); DATA=JSON.parse(JSON.stringify(window.FOOTAGE_DATA)); byCode={}; DATA.clubs.forEach(function(c){byCode[c.code]=c;}); overlayActive=false;
+    localStorage.removeItem(LS); DATA=JSON.parse(JSON.stringify(window.FOOTAGE_DATA)); hydrateClubs(); overlayActive=false;
     document.getElementById('stateFlag').className='dummy-flag';
     document.getElementById('stateFlag').innerHTML='Reset to the seed data (clubs + fixtures, no footage). Publish to live to push it.';
     renderClubs(); renderFx(); toast('Reset');
@@ -870,7 +889,7 @@
      NL portal on the same domain. NOTE for Stage D: real passcodes must move
      out of this public-read blob into an admin-only node + server verification. */
   var LIVE_REF = 'app-data/media-footage/data';
-  function adopt(d){ DATA=d; byCode={}; DATA.clubs.forEach(function(c){byCode[c.code]=c;}); save(); renderClubs(); renderFx(); }
+  function adopt(d){ DATA=d; hydrateClubs(); save(); renderClubs(); renderFx(); }
   function pullLive(silent){
     return firebase.database().ref(LIVE_REF).once('value').then(function(s){
       var d=s.val();
@@ -910,6 +929,8 @@
 
       renderClubs(); renderFx();
       if(!overlayActive){ pullLive(true); }   // no local edits → adopt whatever is live
+      // NL club identity lives in clubs-meta.json — fetch once, then re-render hydrated.
+      window.footageLoadMeta().then(function(){ hydrateClubs(); renderClubs(); renderFx(); });
       // Live producer uploads → re-render fixtures whenever they change (cross-device).
       try {
         firebase.database().ref(UPLOADS_REF).on('value',
