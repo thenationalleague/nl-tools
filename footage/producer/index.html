@@ -4,9 +4,11 @@
   File: /tools/footage/producer/index.html
 
   External, gated like a club: a producer passcode / ?p=<token> direct link (no NL portal account).
-  Producer uploads footage; each file auto-maps by filename
-  (YYYY-MM-DD_HOME_AWAY_TYPE_VARIANT) to a fixture, and an unmatched file must be
-  mapped (game + type) before it can be submitted — mapping is forced.
+  Producer uploads footage; each file auto-maps to a fixture by its filename prefix
+  (YYYY-MM-DD_HOME_AWAY_…), and an unmatched file must be mapped to a game before it
+  can be submitted — the game↔fixture mapping is the only thing forced. There is no
+  file-type/variant taxonomy: a file is just its name + size, and preview-ability is
+  decided by size (the proxy the Cloud Function makes). Foldery, not a taxonomy.
 
   LIVE: on submit the file bytes go to Firebase Storage
   (footage/national-league-cup/<name>) under an anonymous-auth session, then a
@@ -19,6 +21,10 @@
                rows and action bar restyled to the NL portal house style (brand
                tokens, primary/navy system, clean white cards, left-accent). No
                behaviour, JS logic, Firebase SDK or upload-path changes.
+  14/07/2026 — DROPPED the file-type/variant taxonomy. Producer now maps each file
+               to a GAME only (no HL/Full-match/Clips, no clean/dirty). Files are
+               name + size; preview-ability is size-based. Filename convention
+               shrinks to YYYY-MM-DD_HOME_AWAY_… (rest is free). Foldery.
   14/07/2026 — mapping rows now fill the card width (the three selects flex to
                spread), fixing the "massively wide, controls crammed left" look.
                Copy: the unmatched-file note is accurate — "No fixtures published
@@ -154,7 +160,7 @@
     <div class="drop" id="drop">
       <div class="drop__ic">⬆️</div>
       <div class="drop__t">Drop footage here, or choose files</div>
-      <div class="drop__s">Name files <code>YYYY-MM-DD_HOME_AWAY_TYPE_VARIANT.mp4</code> and they map themselves.</div>
+      <div class="drop__s">Start filenames with <code>YYYY-MM-DD_HOME_AWAY</code> and they drop into the right game. Call the rest whatever you like.</div>
       <div class="drop__row">
         <button class="btn btn--primary btn--sm" id="pickBtn">Choose files</button>
       </div>
@@ -203,19 +209,16 @@
 
   var MONTHS={JAN:'01',FEB:'02',MAR:'03',APR:'04',MAY:'05',JUN:'06',JUL:'07',AUG:'08',SEP:'09',OCT:'10',NOV:'11',DEC:'12'};
   function isoDate(d){ if(!d) return ''; var p=String(d).trim().split(/\s+/); if(p.length!==3) return d; return p[0]+'-'+(MONTHS[p[1].toUpperCase()]||'01')+'-'+p[2].padStart(2,'0'); }
-  var TYPES=['HL','FMR','CLIPS'], VARIANTS=['CLEAN','DIRTY'];
-  var LABEL={ 'HL|CLEAN':'Highlights (clean)','HL|DIRTY':'Highlights (with graphics)','FMR|CLEAN':'Full match (clean)','FMR|DIRTY':'Full match (with graphics)','CLIPS|':'Social clips' };
-  function labelFor(type,variant){ return LABEL[type+'|'+(variant||'')] || (type+(variant?(' '+variant):'')); }
 
-
-  /* Parse a filename to its parts. */
+  /* Parse the leading DATE_HOME_AWAY of a filename to find the game it belongs to.
+     Anything after that is just the file's own name — no type/variant taxonomy. */
   function parseName(fname){
     var base = fname.replace(/\.[^.]+$/,'');
     var p = base.split('_');
-    if (p.length < 4) return null;
-    var date=p[0], home=(p[1]||'').toUpperCase(), away=(p[2]||'').toUpperCase(), type=(p[3]||'').toUpperCase(), variant=(p[4]||'').toUpperCase()||null;
+    if (p.length < 3) return null;
+    var date=p[0], home=(p[1]||'').toUpperCase(), away=(p[2]||'').toUpperCase();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-    return { date:date, home:home, away:away, type:type, variant:variant };
+    return { date:date, home:home, away:away };
   }
   /* Find the fixture a parsed name belongs to. */
   function matchGame(pr){
@@ -232,15 +235,12 @@
   function stageFile(fname, fileObj){
     var pr = parseName(fname);
     var g = pr ? matchGame(pr) : null;
-    var typeOk = pr && TYPES.indexOf(pr.type)>-1;
     staged.push({
       key: 'f'+(seq++),
       fname: fname,
       file: fileObj || null,   // real File bytes (picked/dropped); null for demo names
       gameId: g ? g.id : '',
-      type: (typeOk ? pr.type : ''),
-      variant: pr ? pr.variant : null,
-      matched: !!(g && typeOk)
+      matched: !!g
     });
   }
 
@@ -250,10 +250,7 @@
       return '<option value="'+esc(g.id)+'"'+(g.id===sel?' selected':'')+'>'+esc(isoDate(g.date)+'  '+h+' v '+a)+'</option>';
     }).join('');
   }
-  function typeOptions(sel){ return '<option value="">— type —</option>'+TYPES.map(function(t){ return '<option'+(t===sel?' selected':'')+'>'+t+'</option>'; }).join(''); }
-  function variantOptions(sel){ return '<option value="">— variant —</option>'+VARIANTS.map(function(v){ return '<option'+(v===sel?' selected':'')+'>'+v+'</option>'; }).join(''); }
-
-  function isReady(s){ return !!(s.gameId && s.type && (s.type==='CLIPS' || s.variant)); }
+  function isReady(s){ return !!s.gameId; }
 
   function renderStaged(){
     var host = document.getElementById('staged');
@@ -284,11 +281,11 @@
     if (ready){
       var g = playable.filter(function(x){return x.id===s.gameId;})[0];
       var h=(byCode[g.home]||{}).short||g.home, a=(byCode[g.away]||{}).short||g.away;
-      mapLine = '<div class="stage__map">→ <b>'+esc(h+' v '+a)+'</b> · '+esc(labelFor(s.type,s.variant))+'</div>';
+      mapLine = '<div class="stage__map">→ <b>'+esc(h+' v '+a)+'</b></div>';
     } else if (!playable.length){
       mapLine = '<div class="stage__map">No fixtures published yet — mapping opens once the draw is in.</div>';
     } else {
-      mapLine = '<div class="stage__map">Map this file to a fixture below.</div>';
+      mapLine = '<div class="stage__map">Pick the match this file belongs to.</div>';
     }
     var head = '<div class="stage__row">'+ic
       + '<div class="stage__meta"><div class="stage__name">'+esc(s.fname)+'</div>'+mapLine+'</div>'
@@ -296,8 +293,6 @@
     var mapper = ready ? '' :
       '<div class="stage__fix">'
       + '<select data-g="'+s.key+'" class="'+(s.gameId?'':'bad')+'">'+gameOptions(s.gameId)+'</select>'
-      + '<select data-t="'+s.key+'" class="'+(s.type?'':'bad')+'">'+typeOptions(s.type)+'</select>'
-      + '<select data-v="'+s.key+'" class="'+((s.type==='CLIPS'||s.variant)?'':'bad')+'"'+(s.type==='CLIPS'?' disabled':'')+'>'+variantOptions(s.variant)+'</select>'
       + '</div>';
     return '<div class="stage stage--'+(ready?'ok':'warn')+'">'+head+mapper+'</div>';
   }
@@ -309,8 +304,6 @@
   document.getElementById('staged').addEventListener('change', function(e){
     var t=e.target, k;
     if ((k=t.getAttribute('data-g'))){ find(k).gameId=t.value; }
-    else if ((k=t.getAttribute('data-t'))){ var s=find(k); s.type=t.value; if(s.type==='CLIPS') s.variant=null; }
-    else if ((k=t.getAttribute('data-v'))){ find(k).variant=t.value||null; }
     else return;
     renderStaged();
   });
@@ -372,8 +365,7 @@
     var uid = (firebase.auth().currentUser || {}).uid || null;
     return firebase.database().ref(UPLOADS_REF).push({
       gameId: s.gameId,
-      type: s.type.toLowerCase(), variant: s.variant ? s.variant.toLowerCase() : null,
-      label: labelFor(s.type, s.variant), name: s.fname, size: humanSize(s.file.size), bytes: s.file.size,
+      name: s.fname, size: humanSize(s.file.size), bytes: s.file.size,
       preview: s.file.size <= MAX_PREVIEW_BYTES, live: true, url: '#stored', storagePath: storagePath,
       uploadedBy: uid, uploadedAt: stamp
     });
@@ -423,15 +415,12 @@
       ? '<button class="btn btn--ghost btn--sm" data-remap="'+esc(key)+'">'+(editing[key]?'Done':'Re-map')+'</button> <button class="btn btn--ghost btn--sm" data-del="'+esc(key)+'">Delete</button>'
       : '';
     var row = '<div class="stage__row"><span class="stage__ic stage__ic--ok">✓</span>'
-      + '<div class="stage__meta"><div class="stage__name">'+esc(u.name||u.label)+'</div>'
-      + '<div class="stage__map">→ <b>'+esc(h+' v '+a)+'</b> · '+esc(u.label)+' &nbsp;·&nbsp; '+status+'</div></div>'
+      + '<div class="stage__meta"><div class="stage__name">'+esc(u.name||'Footage')+'</div>'
+      + '<div class="stage__map">→ <b>'+esc(h+' v '+a)+'</b> &nbsp;·&nbsp; '+status+'</div></div>'
       + '<div style="flex-shrink:0;display:flex;gap:6px">'+actions+'</div></div>';
-    var T=(u.type||'').toUpperCase();
     var editor = (editable && editing[key]) ?
       '<div class="stage__fix">'
       + '<select data-mg="'+esc(key)+'">'+gameOptions(u.gameId)+'</select>'
-      + '<select data-mt="'+esc(key)+'">'+typeOptions(T)+'</select>'
-      + '<select data-mv="'+esc(key)+'"'+(T==='CLIPS'?' disabled':'')+'>'+variantOptions((u.variant||'').toUpperCase())+'</select>'
       + '</div>' : '';
     return '<div class="stage">'+row+editor+'</div>';
   }
@@ -447,15 +436,6 @@
   document.getElementById('mine').addEventListener('change', function(e){
     var t=e.target, id;
     if((id=t.getAttribute('data-mg'))){ if(t.value) updRec(id, { gameId: t.value }); }
-    else if((id=t.getAttribute('data-mt'))){
-      var T=t.value.toUpperCase(), u=uploadsCache[id]||{};
-      var patch={ type:t.value.toLowerCase(), label:labelFor(T,(u.variant||'').toUpperCase()), preview:(T==='HL'||T==='CLIPS') };
-      if(patch.type==='clips') patch.variant=null;
-      updRec(id, patch);
-    } else if((id=t.getAttribute('data-mv'))){
-      var v=t.value?t.value.toLowerCase():null, u2=uploadsCache[id]||{};
-      updRec(id, { variant:v, label:labelFor((u2.type||'').toUpperCase(), (v||'').toUpperCase()) });
-    }
   });
 
   var uploadsListening = false;

@@ -281,24 +281,7 @@ window.FOOTAGE_DATA = {
       "passcode": "EGM3MU"
     }
   ],
-  "games": [],
-  "fileKinds": [
-    {
-      "type": "hl",
-      "label": "Highlights",
-      "preview": true
-    },
-    {
-      "type": "fmr",
-      "label": "Full match",
-      "preview": false
-    },
-    {
-      "type": "clips",
-      "label": "Social clips",
-      "preview": true
-    }
-  ]
+  "games": []
 };
 
 
