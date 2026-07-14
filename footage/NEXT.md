@@ -65,9 +65,14 @@ changes (the current audience is all authenticated + known).
 ## Other remaining work
 
 - **Canon re-skin (option B, agreed):** the admin editor is now a gated portal
-  surface (merged inline into `/tools/footage/`, v0.4 — `/master/` retired). Still
-  to do: bring `/club/` and `/producer/` onto the house style (shared `NL.*`,
-  `clubs-meta.json` for club identity). Those two still wear bespoke chrome.
+  surface (merged inline into `/tools/footage/`, v0.4 — `/master/` retired).
+  `/producer/` re-skinned (13/07) + mapping-row layout fixed (14/07). Still to do:
+  a house-style once-over of `/club/`.
+- ~~**Producer reads published fixtures.**~~ **Done (14/07).** `/producer/` now
+  listens to `LIVE_REF` (`app-data/media-footage/data`), so drawn fixtures reach it
+  — the "pick match" list fills from what the admin published and correctly-named
+  files auto-map. Was previously seed-only (couldn't map anything once the seed's
+  fixtures went empty).
 - ~~**Real club names:**~~ **Done (14/07).** Roster is the real 2026-27 field —
   16 NL clubs + 16 PL2 sides (`"<Club> PL2"`). NL club identity (name/short/crest)
   is sourced from the master `assets/data/clubs-meta.json` at load via

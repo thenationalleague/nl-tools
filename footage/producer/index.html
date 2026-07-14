@@ -24,6 +24,12 @@
                Copy: the unmatched-file note is accurate — "No fixtures published
                yet…" when the draw isn't in, else "Map this file to a fixture below"
                (was a misleading "Couldn't read this filename").
+  14/07/2026 — reads the PUBLISHED catalogue (LIVE_REF app-data/media-footage/data)
+               so drawn fixtures reach the producer: the "pick match" list now fills
+               from what the admin published, and correctly-named files auto-map.
+               Previously the producer only read the seed, so an empty draw meant
+               nothing could ever be mapped. refreshCatalogue() recomputes fixtures +
+               club identity + repaints on every catalogue change.
 -->
 <html lang="en">
 <head>
@@ -174,14 +180,23 @@
   'use strict';
   function getData(){ try{ var o=localStorage.getItem('nlFootageData'); if(o) return JSON.parse(o);}catch(e){} return window.FOOTAGE_DATA; }
   var DATA = getData();
-  var byCode = {}; DATA.clubs.forEach(function(c){ byCode[c.code]=c; });
+  var byCode = {};
+  var playable = [];
   var producer = DATA.producer || { passcode:'PROD24', token:'prod-9x2k', name:'Producer' };
-  // NL club identity lives in clubs-meta.json — fetch once, hydrate, re-render.
-  window.footageLoadMeta().then(function(){
+
+  // Recompute everything derived from DATA — NL identity hydrated from
+  // clubs-meta.json, the code→club map, and the list of playable fixtures — then
+  // repaint. Called on load, when the registry arrives, and whenever the published
+  // catalogue changes (see the LIVE_REF listener). Cheap + idempotent.
+  function refreshCatalogue(){
     window.footageHydrateClubs(DATA.clubs, window._footageMeta);
     byCode = {}; DATA.clubs.forEach(function(c){ byCode[c.code]=c; });
+    playable = DATA.games.filter(function(g){ return g.home && g.away; });
+    try { renderStaged(); } catch(e){}
     try { renderMine(); } catch(e){}
-  });
+  }
+  refreshCatalogue();                                  // seed / localStorage overlay
+  window.footageLoadMeta().then(refreshCatalogue);     // NL identity ← registry
 
   function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function toast(m,k){ var t=document.getElementById('toast'); t.textContent=m; t.className='toast toast--'+(k||'info')+' show'; setTimeout(function(){t.classList.remove('show');},2600); }
@@ -192,7 +207,6 @@
   var LABEL={ 'HL|CLEAN':'Highlights (clean)','HL|DIRTY':'Highlights (with graphics)','FMR|CLEAN':'Full match (clean)','FMR|DIRTY':'Full match (with graphics)','CLIPS|':'Social clips' };
   function labelFor(type,variant){ return LABEL[type+'|'+(variant||'')] || (type+(variant?(' '+variant):'')); }
 
-  var playable = DATA.games.filter(function(g){ return g.home && g.away; });
 
   /* Parse a filename to its parts. */
   function parseName(fname){
@@ -350,6 +364,7 @@
   // Records live in RTDB (app-data/media-footage/uploads) → cross-device: any club
   // on any device sees them. push() returns a promise the submit flow awaits.
   var UPLOADS_REF = 'app-data/media-footage/uploads';
+  var LIVE_REF    = 'app-data/media-footage/data';   // published catalogue (fixtures + clubs)
   // Previewable = small enough to proxy (must match the Cloud Function's gate).
   // Size, not filename/type — a mis-named highlights file still previews.
   var MAX_PREVIEW_BYTES = 2 * 1024 * 1024 * 1024;   // 2 GiB
@@ -449,6 +464,19 @@
     firebase.database().ref(UPLOADS_REF).on('value', function(s){ uploadsCache = s.val() || {}; renderMine(); });
   }
 
+  // The published catalogue (fixtures the admin drew + published) lives at LIVE_REF.
+  // Adopt it so the producer can map uploads to real games — without it the "pick
+  // match" list is empty. Layered over the seed; a missing/empty node keeps the seed.
+  var catalogueListening = false;
+  function startCatalogueListener(){
+    if(catalogueListening) return; catalogueListening = true;
+    try {
+      firebase.database().ref(LIVE_REF).on('value',
+        function(s){ var d=s.val(); if(d && d.clubs && d.games) DATA=d; refreshCatalogue(); },
+        function(){ /* offline / rules not deployed — keep the seed catalogue */ });
+    } catch(e){}
+  }
+
   /* ---- gate ---- */
   function enter(){
     document.getElementById('gate').style.display='none';
@@ -456,7 +484,7 @@
     document.getElementById('pbarSub').textContent = producer.name || 'Upload & map footage';
     // Auth first (anonymous), then read the shared uploads node so this
     // producer's own uploads render — cross-device, from any browser.
-    ensureAuth().then(function(u){ myUid = u ? u.uid : null; startUploadsListener(); renderMine(); })
+    ensureAuth().then(function(u){ myUid = u ? u.uid : null; startUploadsListener(); startCatalogueListener(); renderMine(); })
       .catch(function(){ renderMine(); });
   }
   function showGate(){
