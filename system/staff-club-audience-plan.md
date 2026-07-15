@@ -80,6 +80,48 @@ then reviewed — no guesswork.
 
 ---
 
+## The role × access model (confirmed with Richard)
+
+Access is **three separate axes**, not one. The `audience` field is only axis 1;
+axes 2 and 3 already exist and are unchanged by this plan. Keeping them distinct
+is what makes each decision explainable.
+
+**The six roles, three realms:** league (`superadmin`, `admin`, `staff`) ·
+club (`club-admin`, `club-viewer`) · external (`third-party`).
+
+**Axis 1 — can they open the tool at all?** (the new `audience` gate)
+
+| Role | staff-audience | club-audience |
+|------|:---:|:---|
+| `superadmin`  | ✅ | ✅ (everything, always) |
+| `admin`       | ✅ | ✅ |
+| `staff`       | ✅ | ✅ |
+| `club-admin`  | ❌ never | ✅ |
+| `club-viewer` | ❌ never | ✅ |
+| `third-party` | ❌ never | ✅ **individually granted, tool-by-tool** — not the whole club suite |
+
+**Axis 2 — what can they do inside?** (the existing `off`/`access`/`admin` level,
+from the per-user entry or `defaults[role]`)
+- `superadmin` → `admin` on everything, always.
+- `admin` vs `staff` → both get *in*; whether they get **admin** vs **access** on a
+  given tool follows the **role** (League Admin gets admin where warranted; League
+  Staff gets access).
+- `third-party` → **never** admin. `access` only.
+
+**Axis 3 — what data do they see?** (tool-internal scope)
+- League roles → the **full** view (all clubs).
+- Club roles → **only their own club's slice** (e.g. Attendance shows a club just
+  their own attendance). Driven by `NL.isClubUser` + the user's `session.club`,
+  inside each tool — not by this gate.
+
+**The key nuance:** a club user is **never a tool-wide admin**. `club-admin`'s
+"admin" means **edit their own club's data** (`NL.canClubEdit`); `club-viewer` is
+read-only on their own club. Global/tool admin is a league-role concept only.
+
+So this plan changes **axis 1 only** (adds the enforced `audience` gate). Axis 2
+(`defaults` levels) and axis 3 (own-club scoping) are already in place and carry
+over untouched.
+
 ## The toolKey rename — do it, but with eyes open
 
 You want the naming retired too, so nothing implies an unenforced rule. Agreed —
