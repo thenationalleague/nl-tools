@@ -159,10 +159,31 @@ Nothing enforces it yet — safe.
 `audience === 'staff'`). Bump `?v=` in lockstep. Now mis-granting is impossible
 client-side. `department` still present (harmless) for now.
 
-**Phase 3 — Enforce in RTDB rules.** Add audience cross-reference gating on
-`app-data/<toolKey>` reads/writes; close the `".read": true` gap. **Test in the
+**Phase 3 — Enforce in RTDB rules.** The true security boundary. **Test in the
 Firebase rules simulator**, snapshot the old rules for rollback, deploy off-peak.
-This is the true security boundary.
+Split into two, because the audience field isn't reachable from the rules for
+*parked* staff tools (they have no `tools/<toolKey>` record), and because
+tightening live tools' reads carries regression risk:
+
+- **3a (done):** lock the 5 staff-audience tools that have `app-data`
+  (`staff-tasks`, `staff-holiday-lieu`, `staff-meeting-notes`, `staff-chase-hq`,
+  `staff-claudio`) to LEAGUE roles — AND-in a league requirement on every
+  `.read`/`.write` (monotonic; league users unchanged, club/external denied).
+  Closes the "any signed-in user can read staff tasks/holidays/notes" leak. All
+  5 are parked, so zero live-user regression. Hard-coded league (not an
+  `audience` cross-reference) so it holds even though parked tools aren't in
+  `tools/`.
+- **3b (investigated → mostly a non-issue):** the anonymous `".read": true`
+  paths on *club-audience* tools were reviewed against the code and are almost
+  all **intentional** — they feed no-login capability pages and external site
+  widgets, so locking them would break live features. `ops-judgements/records`
+  is read by an **external widget on thenationalleague.org.uk** (published
+  decisions are meant to be public); `ops-commercial-benchmarking/aggregates`
+  by the no-login `link.html`; `media-footage/data|uploads` by the footage
+  passcode pages; `ops-club-data|contacts` submissions are token-gated; and
+  `ops-vacancies/analytics` is public-write click tracking by design. The full
+  list + "do not lock" note lives in `system/rtdb/README.md`. Net: no club-tool
+  read needed locking — the only real fix was the staff lockdown (3a).
 
 **Phase 4 — Portal regroup.** Two buckets (Staff / Club) driven off `audience`;
 drop the media/ops/staff grouping UI and the "restricted role" special-casing.
