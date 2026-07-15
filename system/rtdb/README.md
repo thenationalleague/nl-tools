@@ -28,6 +28,25 @@ in-repo answer to "what's deployed right now?".
 5. **Before telling anyone a registry record or rule is missing, check
    here first.**
 
+## Intentionally public reads — do NOT "fix" these
+
+Several `app-data/*` paths are `".read": true` (readable without login) **on
+purpose** — they feed no-login capability pages and external site widgets.
+Tightening them to `auth != null` would break a live feature. Leave them:
+
+| Path | Why it's public |
+|---|---|
+| `ops-judgements/records` | An **external widget on thenationalleague.org.uk** reads published disciplinary decisions anonymously. |
+| `ops-commercial-benchmarking/aggregates` + `.../links/$token` | `commercial-benchmarking/link.html` — a no-login capability page for clubs without an account (anonymised data, unguessable token). |
+| `media-footage/data` + `.../uploads` | `footage/club` (`?c=` token + passcode) and `footage/producer` (`?p=` token) — external capability pages, no NL account. (Footage's per-club scoping is being reworked; handle there.) |
+| `ops-club-data/*/submissions/$token`, `ops-club-contacts/*/submissions/$token` | Invite-token submission flows — access is gated by *token existence*, not login. |
+| `ops-vacancies/analytics` | Public **write** for anonymous click tracking (by design). |
+
+Rule of thumb: a broad `".read": true` here is usually load-bearing for a
+capability page or a public widget — **confirm the consumer before locking**.
+Staff-audience tools are the opposite: their `app-data` is league-only (locked
+in the audience-gating work); see `system/staff-club-audience-plan.md`.
+
 ## Known divergence risk
 
 These are manual snapshots — they can drift if someone edits the console

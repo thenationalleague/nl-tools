@@ -173,14 +173,17 @@ tightening live tools' reads carries regression risk:
   5 are parked, so zero live-user regression. Hard-coded league (not an
   `audience` cross-reference) so it holds even though parked tools aren't in
   `tools/`.
-- **3b (follow-up):** close the anonymous `".read": true` gaps on *club-audience*
-  tools — most notably `ops-judgements/records` (disciplinary records are
-  world-readable). Needs a per-tool "does it read before auth?" check first
-  (several tools read on load; flipping to `auth != null` blind would break any
-  that read pre-`ensureAuth`). Others: `media-footage/data|uploads`,
-  `ops-vacancies/listings|analytics`, `ops-attendance/fixtures`,
-  `ops-commercial-benchmarking/aggregates` — several are legitimately public;
-  review case-by-case, don't sweep.
+- **3b (investigated → mostly a non-issue):** the anonymous `".read": true`
+  paths on *club-audience* tools were reviewed against the code and are almost
+  all **intentional** — they feed no-login capability pages and external site
+  widgets, so locking them would break live features. `ops-judgements/records`
+  is read by an **external widget on thenationalleague.org.uk** (published
+  decisions are meant to be public); `ops-commercial-benchmarking/aggregates`
+  by the no-login `link.html`; `media-footage/data|uploads` by the footage
+  passcode pages; `ops-club-data|contacts` submissions are token-gated; and
+  `ops-vacancies/analytics` is public-write click tracking by design. The full
+  list + "do not lock" note lives in `system/rtdb/README.md`. Net: no club-tool
+  read needed locking — the only real fix was the staff lockdown (3a).
 
 **Phase 4 — Portal regroup.** Two buckets (Staff / Club) driven off `audience`;
 drop the media/ops/staff grouping UI and the "restricted role" special-casing.
