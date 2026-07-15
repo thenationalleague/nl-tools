@@ -159,10 +159,28 @@ Nothing enforces it yet — safe.
 `audience === 'staff'`). Bump `?v=` in lockstep. Now mis-granting is impossible
 client-side. `department` still present (harmless) for now.
 
-**Phase 3 — Enforce in RTDB rules.** Add audience cross-reference gating on
-`app-data/<toolKey>` reads/writes; close the `".read": true` gap. **Test in the
+**Phase 3 — Enforce in RTDB rules.** The true security boundary. **Test in the
 Firebase rules simulator**, snapshot the old rules for rollback, deploy off-peak.
-This is the true security boundary.
+Split into two, because the audience field isn't reachable from the rules for
+*parked* staff tools (they have no `tools/<toolKey>` record), and because
+tightening live tools' reads carries regression risk:
+
+- **3a (done):** lock the 5 staff-audience tools that have `app-data`
+  (`staff-tasks`, `staff-holiday-lieu`, `staff-meeting-notes`, `staff-chase-hq`,
+  `staff-claudio`) to LEAGUE roles — AND-in a league requirement on every
+  `.read`/`.write` (monotonic; league users unchanged, club/external denied).
+  Closes the "any signed-in user can read staff tasks/holidays/notes" leak. All
+  5 are parked, so zero live-user regression. Hard-coded league (not an
+  `audience` cross-reference) so it holds even though parked tools aren't in
+  `tools/`.
+- **3b (follow-up):** close the anonymous `".read": true` gaps on *club-audience*
+  tools — most notably `ops-judgements/records` (disciplinary records are
+  world-readable). Needs a per-tool "does it read before auth?" check first
+  (several tools read on load; flipping to `auth != null` blind would break any
+  that read pre-`ensureAuth`). Others: `media-footage/data|uploads`,
+  `ops-vacancies/listings|analytics`, `ops-attendance/fixtures`,
+  `ops-commercial-benchmarking/aggregates` — several are legitimately public;
+  review case-by-case, don't sweep.
 
 **Phase 4 — Portal regroup.** Two buckets (Staff / Club) driven off `audience`;
 drop the media/ops/staff grouping UI and the "restricted role" special-casing.
