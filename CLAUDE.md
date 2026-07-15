@@ -86,10 +86,10 @@ Every gated tool's `index.html` has a near-identical `<head>`. The source of tru
 
 | File                 | Current `?v=` | Role                                                              |
 |----------------------|---------------|-------------------------------------------------------------------|
-| `nl-brand.css`       | `?v=21`       | Brand tokens, components, layout. Tools must use tokens not hex.  |
-| `nl-utils.js`        | `?v=21`       | `window.NL.*` helpers: `toast`, `ensureAuth`, `formatDate`/`formatDateShort`/`formatDateTime`/`timeAgo`, `parseDate` (string/Date/epoch), `escHtml`, `writeAudit`, `installAuditHook`, `icon`, `endpoints`, `clubs` (incl. `crestUrl(name[,'thumb'\|'medium'])`, `wireCrestImg`, `byOpta`), `clubPicker`, `roles` (incl. `norm`, `label`, `realm`), `isClubUser`, `canClubEdit`, plus identity-data exports `mapStyle.drive`, `positionBands`, `projColours` (canvas/data callers). |
+| `nl-brand.css`       | `?v=22`       | Brand tokens, components, layout. Tools must use tokens not hex.  |
+| `nl-utils.js`        | `?v=24`       | `window.NL.*` helpers: `toast`, `ensureAuth`, `formatDate`/`formatDateShort`/`formatDateTime`/`timeAgo`, `parseDate` (string/Date/epoch), `escHtml`, `writeAudit`, `installAuditHook`, `icon`, `endpoints`, `clubs` (incl. `crestUrl(name[,'thumb'\|'medium'])`, `wireCrestImg`, `byOpta`), `clubPicker`, `roles` (incl. `norm`, `label`, `realm`), `isClubUser`, `canClubEdit`, plus identity-data exports `mapStyle.drive`, `positionBands`, `projColours` (canvas/data callers). |
 | `nl-topbar.js`       | `?v=7`        | Renders `#nlTopbar` from `window.NL_TOOL`. Also injects PWA/favicon tags. |
-| `auth-guard.js`      | `?v=8`        | Gates `#pageWrap`. Verifies live Firebase Auth, re-reads RTDB user + tool registry, then reveals page and fires `nlAuthReady(session)`. |
+| `auth-guard.js`      | `?v=9`        | Gates `#pageWrap`. Verifies live Firebase Auth, re-reads RTDB user + tool registry, then reveals page and fires `nlAuthReady(session)`. |
 
 `_headers` (at repo root) sends `Cache-Control: no-cache, must-revalidate` for `/tools/system/*` so a new deploy of these files takes effect immediately — but the `?v=N` query is the **belt-and-braces** mechanism. The canonical versions live in `system/_template/index.html`; `lint-tools.sh` reads them from there and reports any tool whose head drifts (stale `?v=`, missing script, script below `</head>`, missing `window.NL_TOOL`/`NL_TOOL_KEY`/`#pageWrap`/`nlAuthReady`, or missing Firebase compat SDK when `firebase.initializeApp` is called).
 

@@ -1,7 +1,15 @@
 /*
  * auth-guard.js — NL Tools v2
  * File: /tools/system/auth-guard.js
- * Version: v6.1 (14/06/2026)
+ * Version: v6.2 (14/07/2026)
+ *
+ * v6.2: Audience gate — a tool whose registry record carries
+ *        `audience: "staff"` is now reachable by LEAGUE roles only
+ *        (superadmin/admin/staff). Club and external realms are hard-denied
+ *        at the gate, regardless of any per-user entry or role default, so a
+ *        stray grant can never leak a staff tool to a club. Fail-safe
+ *        (allow-list league roles). Tools with no `audience` field are
+ *        unaffected. Cache-bust ?v=8 -> ?v=9.
  *
  * v6.1: Access-level model simplified to off / access / admin. The old
  *        "hidden" level is merged into "off": there is one no-access state
@@ -261,6 +269,20 @@
     if (session.role === 'superadmin') {
       grantAccess(session);
       return;
+    }
+
+    /* Audience gate (v6.2): a staff-audience tool is reachable by LEAGUE roles
+       only. Club and external realms (and any unknown role) are hard-denied
+       regardless of a per-user entry or default — the structural boundary, so
+       a stray grant can't leak a staff tool to a club. Fail-safe: allow-list
+       league roles rather than deny-list club ones. A tool with no `audience`
+       field (not yet classified / legacy) skips this and behaves as before. */
+    if (toolData && toolData.audience === 'staff') {
+      var LEAGUE = { superadmin: true, admin: true, staff: true };
+      if (!LEAGUE[session.role]) {
+        window.location.replace(PORTAL_URL);
+        return;
+      }
     }
 
     /* Resolve tool entry -- handles both string format ("admin","access","off")
