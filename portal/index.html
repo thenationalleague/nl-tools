@@ -1,11 +1,21 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.92 (12/07/2026)
+  Version: v5.93 (14/07/2026)
   Date: 09/04/2026
   File: /tools/portal/index.html
 
   Changelog:
+  v5.93 (14/07/2026) — Staff/Club split now reads the canonical `audience`
+    field (Phase 4 of audience gating). New top-level toolAudience(tool)
+    helper is the single source of truth; the tool-grid grouping (isClubTool)
+    and the restricted-role staff-tool lockouts (staffLock / isStaffDept /
+    the per-tool club-user guard) all route through it. Falls back to the old
+    department / club-admin-default heuristic when the audience field is
+    absent, so behaviour is identical until the field is live in RTDB, then
+    follows it. The `department` field is still used only for the admin
+    role-editor's section grouping (retired in Phase 5).
+
   v5.92 (12/07/2026) — User-account card crests now load thumbnails:
            * The per-user account cards (accordion header crest + the club
              context crest under the role pill) now load the 96px crest thumb
@@ -2461,6 +2471,16 @@ function isClubRole(r) {
    on any tool, and are fully locked out of staff-department tools. They CAN be
    toggled Off/Access per tool. (Edit-vs-view for club roles is separate, by role.) */
 function isRestrictedRole(r) { return isClubRole(r) || normRole(r) === 'third-party'; }
+/* Canonical staff/club split for a tool RECORD — the `audience` field is the
+   source of truth (Phase 4). Falls back to the old department / club-admin-
+   default heuristic for any record that predates the audience field, so this
+   is behaviour-identical until the field is live, then follows it. */
+function toolAudience(tool) {
+  if (!tool) return 'club';
+  if (tool.audience === 'staff' || tool.audience === 'club') return tool.audience;
+  if (tool.department === 'staff') return 'staff';
+  return (((tool.defaults && tool.defaults['club-admin']) || 'off') !== 'off') ? 'club' : 'staff';
+}
 /* Default access level a role gets on a tool, straight from the registry. */
 function roleDefaultLevel(toolKey, role) {
   var tool = STATE.tools[toolKey];
@@ -2856,10 +2876,7 @@ function renderToolGrid() {
 
   /* Split by type: a "club tool" is one club roles can reach (club-admin
      default is not 'off'); everything else is a staff tool. */
-  function isClubTool(t) {
-    var d = t.tool.defaults || {};
-    return (d['club-admin'] || 'off') !== 'off';
-  }
+  function isClubTool(t) { return toolAudience(t.tool) === 'club'; }
   var staffTools = myTools.filter(function(t) { return !isClubTool(t); });
   var clubTools  = myTools.filter(function(t) { return  isClubTool(t); });
 
@@ -4723,7 +4740,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
         var toolKey = slider.dataset.toolkey;
         if (!toolKey) return;
         var tool = STATE.tools[toolKey];
-        var staffLock = restricted && (tool && tool.department) === 'staff';
+        var staffLock = restricted && toolAudience(tool) === 'staff';
         var fullLock  = superLock || staffLock;
 
         var defaultLevel = superLock ? 'admin' : (staffLock ? 'off' : roleDefaultLevel(toolKey, role));
@@ -5279,7 +5296,7 @@ function setAllInDept(uid, u, deptTools, level, bodyEl, deptLabel) {
   var isClubUser = isRestrictedRole(u.role);
   /* Staff dept locked for restricted roles (club + third-party) */
   var isStaffDept = deptLabel === 'Staff' ||
-    (deptTools[0] && deptTools[0].department === 'staff');
+    (deptTools[0] && toolAudience(deptTools[0]) === 'staff');
   if (isStaffDept && isClubUser) {
     showToast('Staff tools are locked for this user', 'error');
     return;
@@ -5289,7 +5306,7 @@ function setAllInDept(uid, u, deptTools, level, bodyEl, deptLabel) {
   var safeLevel = (isClubUser && level === 'admin') ? 'access' : level;
   deptTools.forEach(function(t) {
     /* Never write staff tools for restricted users even if called directly */
-    if ((t.department === 'staff') && isClubUser) return;
+    if (toolAudience(t) === 'staff' && isClubUser) return;
     /* Overrides-only: clear the entry when it matches the role default */
     var def = roleDefaultLevel(t._key, u.role);
     updates['users/' + uid + '/tools/' + t._key] = (safeLevel === def) ? null : safeLevel;
