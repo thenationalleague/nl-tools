@@ -55,4 +55,4 @@ rules/registry (denied for everyone, PERMISSION_DENIED on a path the
 snapshot says is writable), trust the console over this folder, then
 re-sync the snapshot.
 
-Snapshots last verified against live: **10 Jun 2026**.
+Snapshots last verified against live: **14 Jul 2026** (tools registry + rules).
