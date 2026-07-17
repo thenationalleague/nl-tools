@@ -1,11 +1,20 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.93 (14/07/2026)
+  Version: v5.94 (14/07/2026)
   Date: 09/04/2026
   File: /tools/portal/index.html
 
   Changelog:
+  v5.94 (14/07/2026) — Retired the `department` field (Phase 5). The admin
+    role-editor's tool grouping now uses toolAudience() too, so DEPT_MAP
+    collapses from staff/ops/media/commercial to the two audience buckets
+    (Staff Tools / Club Tools). Removed the last `department` reads
+    (grouping x3, deptKey x2, the isStaffDept label check, and the
+    toolAudience department fallback). `audience` is now the sole tool
+    classifier; the `department` field is deleted from the registry snapshot
+    + parked file (paste the registry to drop it live).
+
   v5.93 (14/07/2026) — Staff/Club split now reads the canonical `audience`
     field (Phase 4 of audience gating). New top-level toolAudience(tool)
     helper is the single source of truth; the tool-grid grouping (isClubTool)
@@ -2367,11 +2376,12 @@ var LOGIN_URL      = '/tools/';
 /* ---- State --------------------------------------------------------------- */
 
 /* ---- Department display map and sort order ------------------------------- */
+/* Tool grouping in the admin role-editor — the two audience buckets (Phase 5;
+   replaces the retired staff/ops/media/commercial department split). Keyed by
+   the values toolAudience() returns. */
 var DEPT_MAP = {
-  'staff':      { label: 'Staff',                      order: 1 },
-  'ops':        { label: 'Administration & Operations', order: 2 },
-  'media':      { label: 'Media & Marketing',           order: 3 },
-  'commercial': { label: 'Commercial',                  order: 4 },
+  'staff': { label: 'Staff Tools', order: 1 },
+  'club':  { label: 'Club Tools',  order: 2 },
 };
 
 function getDeptLabel(code) {
@@ -2472,13 +2482,11 @@ function isClubRole(r) {
    toggled Off/Access per tool. (Edit-vs-view for club roles is separate, by role.) */
 function isRestrictedRole(r) { return isClubRole(r) || normRole(r) === 'third-party'; }
 /* Canonical staff/club split for a tool RECORD — the `audience` field is the
-   source of truth (Phase 4). Falls back to the old department / club-admin-
-   default heuristic for any record that predates the audience field, so this
-   is behaviour-identical until the field is live, then follows it. */
+   source of truth. Falls back to the club-admin-default heuristic only for a
+   record that somehow lacks the audience field (all live records have it). */
 function toolAudience(tool) {
   if (!tool) return 'club';
   if (tool.audience === 'staff' || tool.audience === 'club') return tool.audience;
-  if (tool.department === 'staff') return 'staff';
   return (((tool.defaults && tool.defaults['club-admin']) || 'off') !== 'off') ? 'club' : 'staff';
 }
 /* Default access level a role gets on a tool, straight from the registry. */
@@ -3716,7 +3724,7 @@ function buildRequestCard(r) {
       ? r.tools
       : {};
 
-    tools.forEach(function(t) { var d = t.department || 'General'; if (!dm[d]) dm[d] = []; dm[d].push(t); });
+    tools.forEach(function(t) { var d = toolAudience(t); if (!dm[d]) dm[d] = []; dm[d].push(t); });
     sortDepts(Object.keys(dm)).forEach(function(dept) {
       if (dept === 'staff') return; /* never show staff tools on request cards */
       var dl = document.createElement('div');
@@ -4255,7 +4263,7 @@ function renderUsersAccordion(users) {
   var tools   = STATE.toolsList.filter(function(t) { return t._key !== 'welcome'; });
   var deptMap = {};
   tools.forEach(function(t) {
-    var d = t.department || 'General';
+    var d = toolAudience(t);
     if (!deptMap[d]) deptMap[d] = [];
     deptMap[d].push(t);
   });
@@ -4493,7 +4501,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
       if (!slider || !slider.dataset.toolkey) return;
       var toolKey = slider.dataset.toolkey;
       var tool    = STATE.tools[toolKey];
-      var deptKey = tool && tool.department;
+      var deptKey = toolAudience(tool);
 
       if (isSuperUser) return;
       if (constraints.isStaffLocked(deptKey)) return; /* staff-dept tool for restricted role stays locked off */
@@ -4574,7 +4582,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
       if (!slider || !slider.dataset.toolkey) return;
       var toolKey = slider.dataset.toolkey;
       var tool    = STATE.tools[toolKey];
-      var deptKey = tool && tool.department;
+      var deptKey = toolAudience(tool);
 
       /* Read current visual level from slider */
       var level = 'off';
@@ -5295,8 +5303,7 @@ function setAllInDept(uid, u, deptTools, level, bodyEl, deptLabel) {
   var updates = {};
   var isClubUser = isRestrictedRole(u.role);
   /* Staff dept locked for restricted roles (club + third-party) */
-  var isStaffDept = deptLabel === 'Staff' ||
-    (deptTools[0] && toolAudience(deptTools[0]) === 'staff');
+  var isStaffDept = deptTools[0] && toolAudience(deptTools[0]) === 'staff';
   if (isStaffDept && isClubUser) {
     showToast('Staff tools are locked for this user', 'error');
     return;
@@ -5483,7 +5490,7 @@ function renderInviteToolSliders() {
   var tools     = STATE.toolsList.filter(function(t) { return t._key !== 'welcome'; });
   var deptMap  = {};
   tools.forEach(function(t) {
-    var d = t.department || 'General';
+    var d = toolAudience(t);
     if (!deptMap[d]) deptMap[d] = [];
     deptMap[d].push(t);
   });
