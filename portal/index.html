@@ -1,11 +1,19 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.94 (14/07/2026)
+  Version: v5.95 (17/07/2026)
   Date: 09/04/2026
   File: /tools/portal/index.html
 
   Changelog:
+  v5.95 (17/07/2026) — Privileged GAS calls now send the caller's Firebase ID
+    token so the backend can authorise them (Phase 7 — invite/approval authz).
+    New nlGasFetch() helper attaches a fresh idToken to the payload; the five
+    sensitive call sites (sendInvite ×3, sendApproval, sendRejection) route
+    through it instead of a bare fetch. Closes the hole where anyone with the
+    public GAS URL could POST sendInvite with role:'superadmin'. GAS-side gate
+    (verifyCaller_ + role checks) is documented in gas/SECURITY-invite-authz.md.
+
   v5.94 (14/07/2026) — Retired the `department` field (Phase 5). The admin
     role-editor's tool grouping now uses toolAudience() too, so DEPT_MAP
     collapses from staff/ops/media/commercial to the two audience buckets
@@ -2369,6 +2377,28 @@ var db   = firebase.database();
 
 /* ---- Constants ----------------------------------------------------------- */
 var NL_GAS_URL = NL.endpoints.gas; /* Consolidated GAS — invite + notifications + drive */
+
+/* Privileged GAS calls (sendInvite / sendApproval / sendRejection) are verified
+   server-side: GAS checks the caller's Firebase ID token and role before acting.
+   nlGasFetch attaches a fresh idToken to the payload; the URL alone no longer
+   grants privilege. Returns the fetch() promise so existing .then/.catch chains
+   are unchanged. */
+function nlGasFetch(payload) {
+  return (NL && NL.ensureAuth ? NL.ensureAuth() : Promise.resolve())
+    .then(function() {
+      var u = firebase.auth().currentUser;
+      return u ? u.getIdToken() : null;
+    })
+    .then(function(idToken) {
+      payload.idToken = idToken || '';
+      return fetch(NL_GAS_URL + '?cb=' + Date.now(), {
+        method:  'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body:    JSON.stringify(payload)
+      });
+    });
+}
+
 var CREST_BASE     = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
 var FALLBACK_CREST = CREST_BASE + 'National%20League%20rose.png';
 var LOGIN_URL      = '/tools/';
@@ -3830,12 +3860,9 @@ function approveRequest(r, btn, ss) {
 
   db.ref().update(updates)
     .then(function() {
-      /* Fire approval email -- fire and forget */
-      fetch(NL_GAS_URL + '?cb=' + Date.now(), {
-        method:  'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body:    JSON.stringify({ action: 'sendApproval', name: r.name || '', email: r.email || '', club: r.club || '' })
-      }).catch(function() {});
+      /* Fire approval email -- fire and forget (idToken verified GAS-side) */
+      nlGasFetch({ action: 'sendApproval', name: r.name || '', email: r.email || '', club: r.club || '' })
+        .catch(function() {});
       showToast('Approved — ' + (r.name || r.email || ''), 'success');
       loadRequests();
       loadUsers();
@@ -3870,12 +3897,9 @@ function rejectRequest(r, btn) {
 
   db.ref().update(updates)
     .then(function() {
-      /* Fire rejection email -- fire and forget */
-      fetch(NL_GAS_URL + '?cb=' + Date.now(), {
-        method:  'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body:    JSON.stringify({ action: 'sendRejection', name: r.name || '', email: r.email || '' })
-      }).catch(function() {});
+      /* Fire rejection email -- fire and forget (idToken verified GAS-side) */
+      nlGasFetch({ action: 'sendRejection', name: r.name || '', email: r.email || '' })
+        .catch(function() {});
       showToast('Request rejected', 'success');
       loadRequests();
       loadUsers();
@@ -4045,20 +4069,15 @@ function buildPendingInviteCard(inv) {
   resendBtn.addEventListener('click', function() {
     resendBtn.disabled = true;
     resendBtn.textContent = 'Sending…';
-    fetch(NL_GAS_URL + '?cb=' + Date.now(), {
-      method:  'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body:    JSON.stringify({
-        action:   'sendInvite',
-        email:    inv.email    || '',
-        name:     inv.name     || '',
-        role:     inv.role     || 'staff',
-        /* org/orgKey removed */ org: '', orgKey: '',
-        club:     inv.club     || '',
-        jobTitle: inv.jobTitle || '',
-        jobTitle: inv.jobTitle || '',
-        tools:    inv.tools    || {}
-      })
+    nlGasFetch({
+      action:   'sendInvite',
+      email:    inv.email    || '',
+      name:     inv.name     || '',
+      role:     inv.role     || 'staff',
+      /* org/orgKey removed */ org: '', orgKey: '',
+      club:     inv.club     || '',
+      jobTitle: inv.jobTitle || '',
+      tools:    inv.tools    || {}
     })
     .then(function(r) { return r.json(); })
     .then(function(result) {
@@ -5425,19 +5444,15 @@ function initInviteForm() {
 
     /* Send invite via GAS -- GAS stores token in RTDB invites/{token}
        with full user payload. Login page creates user record after auth. */
-    fetch(NL_GAS_URL + '?cb=' + Date.now(), {
-      method:  'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body:    JSON.stringify({
-        action:   'sendInvite',
-        email:    email,
-        name:     name,
-        role:     role,
-        org:      org      || '',
-        club:     club     || '',
-        jobTitle: jobTitle || '',
-        tools:    toolAccess
-      })
+    nlGasFetch({
+      action:   'sendInvite',
+      email:    email,
+      name:     name,
+      role:     role,
+      org:      org      || '',
+      club:     club     || '',
+      jobTitle: jobTitle || '',
+      tools:    toolAccess
     })
     .then(function(r) { return r.json(); })
     .then(function(result) {
@@ -5682,11 +5697,7 @@ function resendInvite(email, btn) {
   if (!email) return;
   btn.textContent = 'Sending...';
   btn.disabled = true;
-  fetch(NL_GAS_URL + '?cb=' + Date.now(), {
-    method:  'POST',
-    headers: { 'Content-Type': 'text/plain' },
-    body:    JSON.stringify({ action: 'sendInvite', email: email, name: '', role: '', org: '', club: '', jobTitle: '' })
-  })
+  nlGasFetch({ action: 'sendInvite', email: email, name: '', role: '', org: '', club: '', jobTitle: '' })
   .then(function(r) { return r.json(); })
   .then(function(result) {
     if (result && result.ok === false) {
