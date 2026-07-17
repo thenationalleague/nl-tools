@@ -1,10 +1,13 @@
 # Migrating the GAS backend → Firebase Cloud Functions
 
-**Goal:** retire the consolidated Apps Script web app and move its work into
-`nl-tools` Cloud Functions, so the backend runs on the same platform as Auth +
-RTDB, with **native authentication** and repo-based deploys. End state: **almost
-no Apps Script** — only whatever we deliberately choose to leave there (see
-"the two hard pieces").
+**Goal:** retire the public consolidated Apps Script web app and move its work
+into `nl-tools` Cloud Functions, so the backend runs on the same platform as
+Auth + RTDB, with **native authentication** and repo-based deploys.
+
+**Decided end state (locked):** the stack is **Firebase — Auth + RTDB + Storage
++ Functions — for everything**, plus **one private GAS email shim** for outbound
+mail (the single "strictly necessary" bit of Apps Script). The public GAS web
+app is fully decommissioned; no browser ever calls GAS again.
 
 Status of this doc: **plan**. The interim security patch (Phase 0) is landed
 in PR #468; everything below is the deliberate follow-on.
@@ -34,37 +37,34 @@ this is pennies/month, but it is a change from GAS's "free."
 
 ---
 
-## The two hard pieces (decide these first)
+## The two reasons GAS was ever used — both now resolved
 
-Everything else moves mechanically. These two are the reason GAS was ever used:
+These two things are the *only* reason Apps Script was chosen. Both decisions
+are now made, so neither blocks the migration.
 
-### 1. Email (`MailApp` as `media@thenationalleague.org.uk`)
-GAS sends mail from the Workspace alias for free. Functions can't send email
-natively. Options:
+### 1. Email — **DECISION: keep one locked-down GAS email shim**
+Email is the single thing GAS does uniquely well for free: send as the Workspace
+alias `media@thenationalleague.org.uk` via `MailApp`, zero setup. Firebase can't
+send mail natively, and the slimmest-stack goal rules out adding a third-party
+provider (Resend/SendGrid = another vendor + account + DNS). So:
 
-- **(A) Transactional provider — recommended.** [Resend](https://resend.com) or
-  SendGrid, with **SPF + DKIM** on `thenationalleague.org.uk`. More reliable and
-  auditable than Gmail-alias send; ~free at this volume. One-time DNS setup.
-- **(B) Keep a tiny GAS email shim.** A single `doPost` that only sends mail,
-  called by a Function over HTTPS with a shared secret. Keeps free send, but
-  keeps a sliver of GAS alive. Acceptable as a bridge, not the end state.
+- A **single GAS function that only sends mail** survives — nothing else.
+- It is **never exposed to browsers.** Only Cloud Functions call it,
+  server-to-server, with a **shared secret** in a header that GAS verifies. The
+  public-URL problem this whole migration exists to kill simply doesn't apply —
+  no user-facing client ever hits it.
+- No new vendor, no DNS, no domain-wide-delegation grant; keeps free alias send.
 
-**Recommendation: (A).** It's the clean answer and removes the last real reason
-to keep GAS.
+*(Rejected: Resend/SendGrid — adds a vendor. Gmail API + domain-wide delegation —
+zero GAS but more Google Cloud setup and a powerful delegation grant; not worth
+it when a private shim is this small and safe.)*
 
-### 2. Drive-backed files (Programme Packs + shared-file browser)
-Programme Packs uses Google Drive as free storage (upload/download/zip/
-thumbnails/reconcile). Options:
-
-- **(A) Migrate to Firebase Storage — clean long-term.** Native to the platform,
-  rules-gated, but it's a **data migration** (move existing files) and has
-  storage/egress cost. Do this **last**.
-- **(B) Keep Drive via a service account.** A Function talks to Drive with a
-  service-account credential + shared drive. No data migration; keeps a Google
-  Drive dependency. Reasonable interim.
-
-**Recommendation:** (B) as a bridge, (A) as the eventual target — but this is
-the heaviest lift, so it's the last thing we touch.
+### 2. Drive-backed files — **DECISION: gone, Programme Packs moves to Storage**
+Programme Packs is being reworked to use **Firebase Storage** instead of Google
+Drive as its own piece of work. That removes the Drive dependency entirely, so
+there is **no Drive-vs-Storage question** for this migration and no
+service-account-to-Drive bridge to build. The `pp_*` / `getTree` /
+`getDownloadUrl` / `getThumbnail` Drive actions retire with the rework.
 
 ---
 
@@ -82,20 +82,24 @@ exposure before Phase 3, comment out the `chaseEmail` (dead) and optionally
 redeploy.
 
 ### Phase 1 — scaffold Functions
-- Upgrade project to **Blaze**.
+- **Blaze: already active** (you have it for Storage) — prerequisite done.
 - `firebase init functions` (region **europe-west1**, to match RTDB).
 - Establish the **callable pattern** + a shared `requireRole(context, roles)`
   middleware (the native replacement for `verifyCaller_`).
 - A client helper `nlCall(name, payload)` wrapping `httpsCallable` — the
   successor to this PR's interim `nlGasFetch`.
 - Put Anthropic keys in **Secret Manager**.
+- Stand up the **private GAS email shim** + its shared secret, and a
+  `sendMail(...)` helper Function that calls it. All later phases send mail
+  through this one path.
 
 ### Phase 2 — invites, notifications, vacancies *(highest payoff)*
 These are pure RTDB + email — exactly the actions with the security problem.
 Migrate to callables with native auth:
 - `sendInvite` / `validateInvite`, `notifyAdmin` / `confirmRequest` /
   `sendApproval` / `sendRejection`, `vacancies_*`.
-- **Decide + wire email provider here** (the Phase-decision above).
+- Mail goes out via the **`sendMail` helper → private GAS email shim** from
+  Phase 1.
 - Retire the invite-consumption self-write trust: the Function mints the
   `users/<uid>/role`, so the portal no longer writes its own role on first login.
 
@@ -105,18 +109,23 @@ Migrate to callables with native auth:
 - **Delete `chaseEmail` entirely** — chase-hq was removed from the site at brand
   sweep v2.19; the router still dispatches it (`gas/Code.gs`). Dead endpoint.
 
-### Phase 4 — Drive / Programme Packs *(heaviest)*
-Per the Drive decision above. Migrate the `pp_*` + `getTree` / `getDownloadUrl`
-/ `getThumbnail` actions. Storage-vs-Drive is the call to make when we get here.
+### Phase 4 — Programme Packs → Firebase Storage *(separate rework)*
+Handled by the **Programme Packs on-Storage rework**, not this migration — when
+that lands, the Drive-backed `pp_*` + `getTree` / `getDownloadUrl` /
+`getThumbnail` GAS actions retire with it. No Drive work happens here; this
+phase just tracks that the rework removes the last Drive dependency.
 
 ### Phase 5 — FixtureSync
 `gas/FixtureSync.gs` (time-driven NLS → RTDB) → **Cloud Scheduler + a Function**.
 Self-contained; can move any time after Phase 1.
 
-### Phase 6 — decommission GAS
+### Phase 6 — decommission the public GAS web app
 - Remove `NL.endpoints.gas` from `nl-utils.js` (lockstep `?v=` bump).
-- Delete the `gas/` mirrors (or keep only the email shim if we chose option B).
-- Retire the Apps Script deployment.
+- Delete the `gas/` router + handler mirrors.
+- Retire the public Apps Script web-app deployment.
+- **Keep only** the private email shim (Phase 1), reachable server-to-server by
+  Functions with the shared secret — the one deliberate, non-public sliver of
+  GAS that remains.
 
 ---
 
@@ -144,7 +153,8 @@ that one flow while it's fixed.
 ## What I'd want before writing Phase 2 code
 
 To turn this plan into Functions I'd need the current handler bodies I haven't
-seen (`Utils.gs`, `Invite.gs`, `Vacancies.gs`, `Drive.gs`, `ClaudioChat.gs`,
+seen (`Utils.gs`, `Invite.gs`, `Vacancies.gs`, `ClaudioChat.gs`,
 `MeetingNotes.gs`) — not for the interim patch, but so the ported Functions
 match today's behaviour exactly. We gather those at the start of each phase, not
-all up front.
+all up front. (`Drive.gs` isn't needed — Programme Packs' Storage rework retires
+it.)
