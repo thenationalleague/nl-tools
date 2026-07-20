@@ -3,8 +3,19 @@
 `Code.gs` is the **in-repo mirror** of the consolidated Apps Script project's
 router (the `doGet`/`doPost` entry points). It dispatches each `action` to a
 per-tool handler. The handler bodies live in their own `.gs` files inside the
-Apps Script project; only **Programme Packs** is mirrored in this repo so far,
-at [`../programme-packs/gas/ProgrammePacks.gs`](../programme-packs/gas/ProgrammePacks.gs).
+Apps Script project; the ones mirrored in this repo so far are **Programme
+Packs** ([`../programme-packs/gas/ProgrammePacks.gs`](../programme-packs/gas/ProgrammePacks.gs))
+and **Notifications** ([`Notifications.gs`](Notifications.gs), the request-flow
+emails).
+
+## Backend authz — `SECURITY-invite-authz.md`
+
+[`SECURITY-invite-authz.md`](SECURITY-invite-authz.md) documents the Phase 7
+authorization fix for the invite / approval actions and the exact GAS blocks to
+paste (a shared `verifyCaller_` in `Utils.gs`, plus role gates on `sendInvite`,
+`sendApproval`, `sendRejection`). The client half is committed in
+`portal/index.html` (v5.95, `nlGasFetch`); the GAS half must be pasted and
+redeployed for the fix to take effect.
 
 This is a **mirror for version control and review** — the live source of truth
 is the Apps Script project. When you change the router here, paste it into
