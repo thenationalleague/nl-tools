@@ -172,6 +172,7 @@ function doPost(e) {
     /* Invite flow */
     if (action === 'sendInvite')     return respond(sendInvite(body));
     if (action === 'validateInvite') return respond(validateInvite(body));
+    if (action === 'consumeInvite')  return respond(consumeInvite(body));
     /* Notification flow */
     if (action === 'notifyAdmin')    return respond(notifyAdmin(body));
     if (action === 'confirmRequest') return respond(confirmRequest(body));
