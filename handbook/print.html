@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Handbook 2026-27 (print / PDF edition)
+  Version: v0.1 (22/07/2026)
+  File: /tools/handbook/print.html
+
+  Print-engineered rendering of the PUBLISHED handbook edition, for on-demand
+  PDF generation in the browser (Download PDF -> window.print() -> Save as PDF).
+  No server: reads the world-readable publishedEditionId -> editions/<id>, the
+  same data as reader.html.
+
+  Page plan: cover (locked version) -> linked contents -> per area: full-colour
+  title page then the document itself. A version-stamped footer repeats on
+  every page (position:fixed prints per-page). @page margin is 0 so browser
+  headers/footers disappear and colour panels can run large; content padding
+  is handled per-page in CSS.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>The National League Handbook — PDF edition</title>
+  <link rel="stylesheet" href="/tools/system/nl-brand.css?v=24">
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+  </script>
+  <script src="/tools/system/nl-utils.js?v=24"></script>
+  <style>
+    * { box-sizing: border-box; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    html, body { margin: 0; }
+    body { font-family: var(--font); background: var(--navy-100); color: var(--text); }
+
+    @page { size: A4; margin: 0; }
+
+    /* ---- Screen-only action bar ---- */
+    .pr-bar {
+      position: sticky; top: 0; z-index: 50; display: flex; align-items: center; gap: 14px;
+      padding: 10px 20px; background: var(--navy); color: var(--white);
+    }
+    .pr-bar__t { font-variation-settings: 'wght' 800; font-size: 14px; }
+    .pr-bar__note { font-size: 12px; color: var(--navy-100); }
+    .pr-bar .btn { margin-left: auto; }
+
+    /* ---- Pages ----
+       Fixed A4 sheets for cover/contents/section pages; content areas flow and
+       paginate naturally. On screen, sheets preview on a grey desk. */
+    .pg { width: 210mm; min-height: 297mm; margin: 0 auto; background: var(--white); position: relative; }
+    @media screen {
+      .pg, .flow { width: 210mm; margin: 10px auto; box-shadow: var(--shadow); }
+    }
+    @media print {
+      .pr-bar { display: none; }
+      body { background: var(--white); }
+      .pg { page-break-after: always; }
+      .flow { page-break-after: always; }
+    }
+
+    /* Every page: quiet version-stamped footer (fixed prints on each sheet) */
+    .pr-foot {
+      display: none;
+    }
+    @media print {
+      .pr-foot {
+        display: block; position: fixed; left: 0; right: 0; bottom: 5mm;
+        text-align: center; font-size: 8.5pt; font-style: italic; color: var(--text-muted);
+      }
+    }
+
+    /* ---- Cover ---- */
+    .pg--cover { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24mm 18mm 26mm; }
+    .pg--cover .lockup { width: 118mm; height: auto; margin-bottom: 16mm; }
+    .pg--cover h1 { margin: 0; font-size: 46pt; letter-spacing: .05em; color: var(--navy); font-variation-settings: 'wght' 900; line-height: 1; text-transform: uppercase; }
+    .pg--cover .season { font-size: 24pt; color: var(--primary); font-variation-settings: 'wght' 800; margin-top: 4mm; }
+    .pg--cover .rule { width: 26mm; height: 1.2mm; background: var(--navy); margin: 14mm auto; border-radius: 1mm; }
+    .pg--cover .divs { display: flex; gap: 8mm; justify-content: center; }
+    .pg--cover .divs img { width: 42mm; height: auto; }
+
+    /* ---- Contents ---- */
+    .pg--toc { padding: 26mm 24mm; }
+    .pg--toc h2 { font-size: 22pt; color: var(--navy); font-variation-settings: 'wght' 900; margin: 0 0 4mm; text-transform: uppercase; letter-spacing: .04em; }
+    .pg--toc .toc-rule { width: 22mm; height: 1.1mm; background: var(--primary); border-radius: 1mm; margin: 0 0 12mm; }
+    .toc-item {
+      display: flex; align-items: baseline; gap: 6mm; padding: 6mm 0; border-bottom: 1px solid var(--border);
+      text-decoration: none; color: var(--text);
+    }
+    .toc-item__n { font-size: 16pt; color: var(--primary); font-variation-settings: 'wght' 900; min-width: 10mm; }
+    .toc-item__t { font-size: 14pt; color: var(--navy); font-variation-settings: 'wght' 800; }
+
+    /* ---- Section title pages: large full-colour panel, print-safe ---- */
+    .pg--sec { padding: 10mm 10mm 18mm; display: flex; }
+    .pg--sec .panel {
+      flex: 1; background: var(--navy); border-radius: 3mm; position: relative;
+      display: flex; flex-direction: column; justify-content: center; padding: 0 16mm;
+    }
+    .pg--sec .panel .n { font-size: 30pt; color: var(--primary-100); font-variation-settings: 'wght' 900; opacity: .9; }
+    .pg--sec .panel h2 { margin: 2mm 0 0; font-size: 34pt; line-height: 1.08; color: var(--white); font-variation-settings: 'wght' 900; text-transform: uppercase; letter-spacing: .03em; }
+    .pg--sec .panel .r { width: 24mm; height: 1.4mm; background: var(--primary); border-radius: 1mm; margin-top: 8mm; }
+    .pg--sec .panel .sub { margin-top: 6mm; font-size: 11pt; color: var(--navy-100); }
+    .pg--sec .panel .rose { position: absolute; right: 14mm; bottom: 12mm; width: 26mm; opacity: .95; }
+
+    /* ---- Flowing document content (paginates naturally) ---- */
+    .flow { background: var(--white); padding: 18mm 20mm 16mm; }
+    .flow .nl-doc { max-width: none; padding: 0; font-size: 10pt; line-height: 1.5; }
+    .flow .nl-doc__head { display: none; }           /* the section title page carries this */
+    .flow .nl-art { margin: 7mm 0 2mm; }
+    .flow .nl-art__num { font-size: 13pt; }
+    .flow .nl-art__title { font-size: 13pt; }
+    .flow .nl-clause__num { font-size: 9pt; min-width: 12mm; }
+    .flow .nl-tbl { font-size: 8.5pt; }
+    .flow .nl-clause__num, .flow .nl-art__num { cursor: default; }
+    /* pagination hygiene */
+    .flow .nl-art__head { break-after: avoid-page; }
+    .flow .nl-clause__title { break-after: avoid-page; }
+    .flow .nl-tbl tr { break-inside: avoid; }
+    /* editor chrome never prints */
+    .nl-tools, .nl-tbl-ctrl { display: none !important; }
+
+    .pr-state { max-width: 620px; margin: 12vh auto; padding: 0 24px; text-align: center; color: var(--text-muted); font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="pr-bar">
+    <span class="pr-bar__t">Handbook — PDF edition</span>
+    <span class="pr-bar__note">Use “Save as PDF” as the destination. Enable background graphics for the colour title pages.</span>
+    <button class="btn btn--primary" id="prGo" type="button">Save as PDF</button>
+  </div>
+  <div id="prDoc"><p class="pr-state">Loading the published handbook…</p></div>
+  <div class="pr-foot" id="prFoot"></div>
+
+<script>
+(function () {
+  'use strict';
+  var BASE = 'app-data/ops-handbook';
+  var db = firebase.database();
+  var esc = NL.escHtml;
+  var AREAS = [
+    { id: 'memorandum', title: 'Memorandum of Association' },
+    { id: 'articles', title: 'Articles of Association' },
+    { id: 'league-rules', title: 'League Rules' },
+    { id: 'appendices', title: 'Appendices' },
+    { id: 'board-directives', title: 'Board Directives' }
+  ];
+
+  function render(ed) {
+    var label = ed.label || '';
+    var pub = ed.publishedAt ? NL.formatDate(ed.publishedAt) : '';
+    var sm = String(label).match(/^\s*(\d{4}\s*[-\/]\s*\d{2,4})/);
+    var season = sm ? sm[1] : label;
+    var present = AREAS.filter(function (a) { return ed.docs && ed.docs[a.id]; });
+
+    var h = '';
+    // Cover — page 1. The version is locked here and in the running footer.
+    h += '<section class="pg pg--cover">' +
+      '<img class="lockup" src="/tools/assets/divisions/The National League.png" alt="The National League">' +
+      '<h1>Handbook</h1><div class="season">' + esc(season) + '</div>' +
+      '<div class="rule"></div>' +
+      '<div class="divs">' + ['National', 'North', 'South'].map(function (n) {
+        return '<img src="/tools/assets/divisions/' + n + '.png" alt="National League ' + n + '">';
+      }).join('') + '</div>' +
+      '</section>';
+
+    // Contents — linked to each section (links stay clickable in the PDF).
+    h += '<section class="pg pg--toc"><h2>Contents</h2><div class="toc-rule"></div>' +
+      present.map(function (a, i) {
+        return '<a class="toc-item" href="#sec-' + a.id + '">' +
+          '<span class="toc-item__n">' + (i + 1) + '</span>' +
+          '<span class="toc-item__t">' + esc(ed.docs[a.id].title || a.title) + '</span></a>';
+      }).join('') + '</section>';
+
+    // Areas: full-colour title page, then the document flow.
+    present.forEach(function (a, i) {
+      var d = ed.docs[a.id];
+      h += '<section class="pg pg--sec" id="sec-' + a.id + '"><div class="panel">' +
+        '<div class="n">' + ('0' + (i + 1)).slice(-2) + '</div>' +
+        '<h2>' + esc(d.title || a.title) + '</h2>' +
+        '<div class="r"></div>' +
+        (d.subtitle ? '<div class="sub">' + esc(d.subtitle) + '</div>' : '') +
+        '<img class="rose" src="/tools/assets/crests/National League rose white.png" alt="">' +
+        '</div></section>';
+      h += '<div class="flow">' + (d.html || '') + '</div>';
+    });
+
+    document.getElementById('prDoc').innerHTML = h;
+    document.getElementById('prFoot').textContent =
+      'The National League Handbook · Edition ' + label + (pub ? ' · Published ' + pub : '');
+    document.title = 'The National League Handbook ' + season;
+  }
+
+  function ready() {
+    // Wait for fonts + images so the print snapshot is complete.
+    var imgs = [].slice.call(document.images).filter(function (im) { return !im.complete; });
+    var waits = imgs.map(function (im) {
+      return new Promise(function (res) { im.onload = im.onerror = res; });
+    });
+    if (document.fonts && document.fonts.ready) waits.push(document.fonts.ready);
+    return Promise.all(waits);
+  }
+
+  db.ref(BASE + '/publishedEditionId').once('value').then(function (s) {
+    var id = s.val();
+    if (!id) { document.getElementById('prDoc').innerHTML = '<p class="pr-state">The handbook has not been published yet.</p>'; return null; }
+    return db.ref(BASE + '/editions/' + id).once('value').then(function (s2) { return s2.val(); });
+  }).then(function (ed) {
+    if (!ed) return;
+    render(ed);
+    return ready().then(function () {
+      if (/[?&]print=1/.test(location.search)) setTimeout(function () { window.print(); }, 150);
+    });
+  }).catch(function (e) {
+    document.getElementById('prDoc').innerHTML = '<p class="pr-state">Sorry — the handbook could not be loaded. ' + esc(e && e.message || '') + '</p>';
+  });
+
+  document.getElementById('prGo').addEventListener('click', function () { window.print(); });
+})();
+</script>
+</body>
+</html>
