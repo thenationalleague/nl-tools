@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Clause Editor
-  Version: v0.11 (22/07/2026)
+  Version: v0.12 (22/07/2026)
   File: /tools/clause-editor/index.html
 
   Structured editor for the League's governing documents — computed clause
@@ -70,6 +70,13 @@
     var NL_TOOL_KEY = 'ops-clause-editor';
 
     window.NL_CHANGELOG = [
+      {
+        date: '22/07/2026',
+        version: 'v0.12',
+        items: [
+          'Added a Re-import button (admin) so an already-imported area can be refreshed from its source — with a clear warning that it replaces that area’s current draft.'
+        ]
+      },
       {
         date: '22/07/2026',
         version: 'v0.11',
@@ -415,6 +422,7 @@
         </div>
         <span class="ce-mode-note" id="ceModeNote"></span>
         <div class="ce-bar__spacer"></div>
+        <button class="btn btn--ghost" id="ceReimport" type="button" hidden>Re-import</button>
         <button class="btn btn--ghost" id="ceDownload" type="button">Download HTML</button>
         <button class="btn btn--primary" id="cePublish" type="button" hidden>Publish edition</button>
       </div>
@@ -766,6 +774,7 @@
   function syncBar() {
     $('ceEditBtn').hidden = !canEdit();
     $('cePublish').hidden = !canEdit() || !Object.keys(S.nodes).length;
+    $('ceReimport').hidden = !(canSeed() && SEEDS[S.docId] && Object.keys(S.nodes).length);
     $('ceFmt').hidden = !(S.mode === 'edit' && canEdit());
     var note = $('ceModeNote');
     if (!canEdit()) note.textContent = 'Read-only access';
@@ -816,7 +825,11 @@
   function importSeed() {
     var file = SEEDS[S.docId], title = docTitle(S.docId), target = S.docId;
     if (!file) { NL.alert('There’s no import file for ' + title + ' yet. Start it by hand in Edit mode, or send the source document to seed it.', { title: 'No source yet' }); return; }
-    NL.confirm('Import ' + title + ' into the draft? This is a best-effort parse from the Word document — you’ll refine it here.', { confirmText: 'Import', title: 'Import ' + title })
+    var hasContent = Object.keys(S.nodes).length > 0;
+    var msg = hasContent
+      ? 'Re-import ' + title + ' from the source? This replaces everything currently in the ' + title + ' area with a fresh import — any edits you have made here will be lost. (Other areas are unaffected.)'
+      : 'Import ' + title + ' into the draft? This is a best-effort parse from the source — you’ll refine it here.';
+    NL.confirm(msg, { confirmText: hasContent ? 'Replace with fresh import' : 'Import', title: (hasContent ? 'Re-import ' : 'Import ') + title, variant: hasContent ? 'danger' : 'primary' })
       .then(function (ok) {
         if (!ok) return;
         return fetch(file).then(function (r) {
@@ -1147,6 +1160,7 @@
       S.mode = b.dataset.mode; render();
     });
     $('ceDownload').addEventListener('click', downloadHtml);
+    $('ceReimport').addEventListener('click', importSeed);
     $('cePublish').addEventListener('click', publish);
     $('ceDocNav').addEventListener('click', function (e) {
       var b = e.target.closest('[data-doc]'); if (b) switchDoc(b.dataset.doc);
