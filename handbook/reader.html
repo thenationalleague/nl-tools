@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Handbook 2026-27 (public reader)
+  Version: v0.1 (22/07/2026)
+  File: /tools/handbook/reader.html
+
+  Public, no-login reader of the PUBLISHED handbook edition. Reads
+  app-data/ops-handbook/publishedEditionId -> editions/<id> (both world-readable
+  per the rules snapshot) and renders the frozen, baked document. Standalone page;
+  also fine to iframe-embed on the public site.
+
+  It deliberately does NOT use auth-guard (public) and never reads the draft.
+  Presentation reuses the .nl-doc component (a canon-promotion candidate — the
+  editor at /tools/handbook is the second consumer of this CSS).
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The National League Handbook 2026-27</title>
+  <link rel="stylesheet" href="/tools/system/nl-brand.css?v=22">
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+  </script>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body { font-family: var(--font); background: var(--off-white); color: var(--text); }
+
+    /* ---- Header ---- */
+    .rd-top {
+      position: sticky; top: 0; z-index: 40; display: flex; align-items: center; gap: 14px;
+      padding: 12px 20px; background: var(--navy); color: var(--white);
+    }
+    .rd-top__brand { font-size: 16px; font-variation-settings: 'wght' 900; letter-spacing: .01em; }
+    .rd-top__brand span { color: var(--primary-100); }
+    .rd-top__ed { margin-left: auto; font-size: 12px; color: var(--navy-100); text-align: right; line-height: 1.35; }
+    .rd-top__ed b { color: var(--white); font-variation-settings: 'wght' 700; }
+    .rd-menu {
+      display: none; flex: 0 0 auto; width: 36px; height: 36px; border: 1px solid var(--navy-600);
+      border-radius: 8px; background: var(--navy-600); color: var(--white); font-size: 16px; cursor: pointer;
+    }
+
+    /* ---- Shell ---- */
+    .rd-shell { display: grid; grid-template-columns: 320px 1fr; min-height: calc(100vh - 61px); }
+    .rd-side {
+      border-right: 1px solid var(--border); background: var(--white);
+      position: sticky; top: 61px; align-self: start; height: calc(100vh - 61px); overflow-y: auto; padding: 16px 12px 40px;
+    }
+    .rd-main { min-width: 0; }
+    .rd-search {
+      width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px;
+      font-family: var(--font); font-size: 14px; margin-bottom: 12px; background: var(--off-white);
+    }
+    .rd-search:focus { outline: none; border-color: var(--navy); background: var(--white); }
+    .rd-nav { display: flex; flex-direction: column; gap: 2px; margin-bottom: 14px; }
+    .rd-nav__item {
+      text-align: left; padding: 8px 10px; border: 0; border-radius: 7px; background: transparent;
+      font-family: var(--font); font-size: 13.5px; font-variation-settings: 'wght' 700; color: var(--navy);
+      cursor: pointer;
+    }
+    .rd-nav__item:hover { background: var(--navy-50); }
+    .rd-nav__item.is-active { background: var(--navy); color: var(--white); }
+    .rd-toc { border-top: 1px solid var(--border); padding-top: 10px; }
+    .rd-toc__item {
+      display: flex; gap: 8px; padding: 5px 8px; border-radius: 6px; cursor: pointer; text-decoration: none;
+      color: var(--text); font-size: 13px; line-height: 1.4;
+    }
+    .rd-toc__item:hover { background: var(--navy-50); }
+    .rd-toc__item.is-current { background: var(--navy); color: var(--white); }
+    .rd-toc__num { flex: 0 0 auto; color: var(--primary); font-variation-settings: 'wght' 800; min-width: 34px; font-variant-numeric: tabular-nums; }
+    .rd-toc__item.is-current .rd-toc__num { color: var(--primary-100); }
+    .rd-toc__group { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin: 10px 8px 4px; font-variation-settings: 'wght' 700; }
+
+    /* ---- Number-click deep links (read) ---- */
+    .nl-doc .nl-clause__num, .nl-doc .nl-art__num { cursor: pointer; }
+    .nl-doc .nl-clause__num:hover, .nl-doc .nl-art__num:hover { text-decoration: underline; text-underline-offset: 3px; }
+    .nl-art.is-sel { box-shadow: -3px 0 0 var(--primary); padding-left: 8px; margin-left: -11px; }
+    .nl-clause.is-sel > .nl-clause__body { box-shadow: -3px 0 0 var(--primary); padding-left: 8px; margin-left: -11px; }
+
+    .rd-state { max-width: 620px; margin: 12vh auto; padding: 0 24px; text-align: center; color: var(--text-muted); }
+    .rd-state h1 { color: var(--navy); font-size: 22px; }
+
+    /* ===== .nl-doc presentation (mirrors the editor; keep in sync) ===== */
+    .nl-doc { max-width: 820px; margin: 0 auto; padding: 30px 28px 100px; color: var(--text); font-size: 15px; line-height: 1.62; }
+    @media (max-width: 860px) { .nl-doc { padding: 22px 16px 70px; } }
+    .nl-doc__head { margin-bottom: 26px; padding-bottom: 18px; border-bottom: 2px solid var(--navy); }
+    .nl-doc__title { font-size: 27px; font-variation-settings: 'wght' 900; color: var(--navy); line-height: 1.15; }
+    .nl-doc__sub { font-size: 14px; color: var(--text-muted); margin-top: 4px; }
+    .nl-doc__season { display: inline-block; margin-top: 10px; font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--navy-50); color: var(--navy); font-variation-settings: 'wght' 700; }
+    .nl-art { margin: 30px 0 6px; scroll-margin-top: 14px; }
+    .nl-art__head { display: flex; gap: 12px; align-items: baseline; }
+    .nl-art__num { font-size: 18px; font-variation-settings: 'wght' 900; color: var(--primary); flex-shrink: 0; min-width: 30px; }
+    .nl-art__title { font-size: 18px; font-variation-settings: 'wght' 800; color: var(--navy); letter-spacing: 0.01em; }
+    .nl-clause { display: flex; gap: 12px; margin: 9px 0; scroll-margin-top: 14px; }
+    .nl-clause__num { flex-shrink: 0; min-width: 46px; text-align: left; color: var(--primary); font-variation-settings: 'wght' 800; font-size: 13px; padding-top: 1px; font-variant-numeric: tabular-nums; }
+    .nl-clause__body { flex: 1; min-width: 0; }
+    .nl-clause__title { font-variation-settings: 'wght' 800; color: var(--navy); margin-bottom: 2px; }
+    .nl-clause__text > p { margin: 0 0 8px; }
+    .nl-clause__text > p:last-child { margin-bottom: 0; }
+    .nl-clause__text ul, .nl-clause__text ol { margin: 6px 0 8px; padding-left: 26px; }
+    .nl-clause__text ul { list-style: disc; }
+    .nl-clause__text ol { list-style: decimal; }
+    .nl-clause__text ol ol { list-style: lower-alpha; }
+    .nl-clause__text ol ol ol { list-style: lower-roman; }
+    .nl-clause__text li { margin: 2px 0; }
+    .nl-clause--bullet .nl-clause__num { color: var(--text-muted); min-width: 20px; }
+    .nl-clause--nonum > .nl-clause__num { display: none; }
+    .nl-art--nonum .nl-art__num { display: none; }
+    .nl-clause__text a { color: var(--navy); }
+    .nl-clause[data-depth="2"] .nl-clause__num { color: var(--navy); }
+    .nl-clause[data-depth="3"] .nl-clause__num, .nl-clause[data-depth="4"] .nl-clause__num { color: var(--navy-600); font-variation-settings: 'wght' 700; }
+    .nl-tbl-wrap { overflow-x: auto; margin: 6px 0 10px; }
+    .nl-tbl { border-collapse: collapse; width: 100%; font-size: 14px; }
+    .nl-tbl th, .nl-tbl td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: top; }
+    .nl-tbl th { background: var(--navy-50); font-variation-settings: 'wght' 800; color: var(--navy); }
+    /* Editor-only chrome that may be present in baked html — hide it in the reader. */
+    .nl-tools, .nl-tbl-ctrl { display: none !important; }
+
+    /* ---- Mobile ---- */
+    @media (max-width: 820px) {
+      .rd-shell { grid-template-columns: 1fr; }
+      .rd-menu { display: inline-flex; align-items: center; justify-content: center; }
+      .rd-side {
+        position: fixed; top: 61px; left: 0; bottom: 0; width: 86%; max-width: 340px; z-index: 60;
+        height: auto; transform: translateX(-100%); transition: transform .24s ease; box-shadow: 8px 0 26px var(--navy-100);
+      }
+      .rd-side.is-open { transform: none; }
+      .rd-scrim { position: fixed; inset: 61px 0 0 0; background: var(--navy-900); opacity: 0; pointer-events: none; transition: opacity .24s; z-index: 55; }
+      .rd-scrim.is-open { opacity: .42; pointer-events: auto; }
+    }
+  </style>
+</head>
+<body>
+  <header class="rd-top">
+    <button class="rd-menu" id="rdMenu" type="button" aria-label="Contents">☰</button>
+    <div class="rd-top__brand">The National League <span>Handbook</span></div>
+    <div class="rd-top__ed" id="rdEd"></div>
+  </header>
+
+  <div class="rd-shell">
+    <aside class="rd-side" id="rdSide">
+      <input class="rd-search" id="rdSearch" type="search" placeholder="Search the handbook…" aria-label="Search the handbook">
+      <nav class="rd-nav" id="rdNav"></nav>
+      <div class="rd-toc" id="rdToc"></div>
+    </aside>
+    <main class="rd-main"><div id="rdDoc"></div></main>
+    <div class="rd-scrim" id="rdScrim"></div>
+  </div>
+
+<script>
+(function () {
+  'use strict';
+  var BASE = 'app-data/ops-handbook';
+  var db = firebase.database();
+  var $ = function (id) { return document.getElementById(id); };
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]; }); }
+
+  // Fixed area order (matches the editor).
+  var AREAS = [
+    { id: 'memorandum', title: 'Memorandum of Association' },
+    { id: 'articles', title: 'Articles of Association' },
+    { id: 'league-rules', title: 'League Rules' },
+    { id: 'appendices', title: 'Appendices' },
+    { id: 'board-directives', title: 'Board Directives' }
+  ];
+  var S = { edition: null, area: null, selected: null };
+
+  function fmtDate(ms) {
+    if (!ms) return '';
+    try {
+      var d = new Date(ms);
+      return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+    } catch (_) { return ''; }
+  }
+  function areaTitle(id) { for (var i = 0; i < AREAS.length; i++) if (AREAS[i].id === id) return AREAS[i].title; return id; }
+  function docOf(id) { return S.edition && S.edition.docs && S.edition.docs[id]; }
+  function nodesOf(id) {
+    var d = docOf(id); if (!d) return [];
+    // editions store nodes as an array; be tolerant of an object map too.
+    return Array.isArray(d.nodes) ? d.nodes : (d.nodes ? Object.keys(d.nodes).map(function (k) { return d.nodes[k]; }) : []);
+  }
+
+  function state(title, msg) {
+    $('rdDoc').innerHTML = '<div class="rd-state"><h1>' + esc(title) + '</h1><p>' + esc(msg) + '</p></div>';
+  }
+
+  /* ---------- load ---------- */
+  db.ref(BASE + '/publishedEditionId').once('value').then(function (snap) {
+    var id = snap.val();
+    if (!id) { state('Not published yet', 'The handbook has not been published. Please check back soon.'); return null; }
+    return db.ref(BASE + '/editions/' + id).once('value').then(function (s2) { return s2.val(); });
+  }).then(function (ed) {
+    if (!ed) return;
+    S.edition = ed;
+    $('rdEd').innerHTML = 'Published edition<br><b>' + esc(ed.label || '') + '</b>' + (ed.publishedAt ? ' · ' + esc(fmtDate(ed.publishedAt)) : '');
+    renderNav();
+    var t = parseHash();
+    if (t && docOf(t.area)) { showArea(t.area, t.nodeId); }
+    else {
+      var first = AREAS.filter(function (a) { return docOf(a.id); })[0];
+      showArea(first ? first.id : AREAS[0].id, null);
+    }
+  }).catch(function (e) {
+    state('Unavailable', 'Sorry — the handbook could not be loaded. ' + (e && e.message || ''));
+  });
+
+  /* ---------- render ---------- */
+  function renderNav() {
+    $('rdNav').innerHTML = AREAS.map(function (a) {
+      var has = !!docOf(a.id);
+      return '<button class="rd-nav__item" data-area="' + a.id + '"' + (has ? '' : ' disabled style="opacity:.4;cursor:default"') + '>' + esc(a.title) + '</button>';
+    }).join('');
+  }
+
+  function showArea(area, nodeId) {
+    S.area = area; S.selected = nodeId || null;
+    closeDrawer();
+    [].forEach.call($('rdNav').children, function (b) { b.classList.toggle('is-active', b.dataset.area === area); });
+    var d = docOf(area);
+    $('rdDoc').innerHTML = (d && d.html) || '<div class="rd-state"><p>This area has no published content.</p></div>';
+    applySelection();
+    renderToc();
+    if (nodeId) scrollTo(nodeId);
+    else $('rdDoc').scrollIntoView ? window.scrollTo(0, 0) : null;
+    setHash(area, nodeId);
+  }
+
+  function renderToc() {
+    var q = ($('rdSearch').value || '').trim();
+    if (q) { renderSearch(q); return; }
+    var roots = nodesOf(S.area).filter(function (n) { return n.parentId == null; })
+      .sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+    $('rdToc').innerHTML = roots.map(function (n) {
+      var label = n.title || textOf(n).slice(0, 70) || '(untitled)';
+      var cur = (n.id === S.selected) ? ' is-current' : '';
+      return '<a class="rd-toc__item' + cur + '" data-goto="' + n.id + '"><span class="rd-toc__num">' + esc(n.number || '') + '</span><span>' + esc(label) + '</span></a>';
+    }).join('') || '<p style="color:var(--text-muted);font-size:13px;padding:6px 8px">No sections.</p>';
+  }
+
+  function textOf(n) {
+    if (n.title) return n.title;
+    if (n.body) return n.body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (n.table) return tableText(n);
+    return '';
+  }
+  function tableText(n) {
+    if (!n.table) return '';
+    var s = (n.table.header || []).join(' ');
+    (n.table.rows || []).forEach(function (r) { s += ' ' + (Array.isArray(r) ? r.join(' ') : ''); });
+    return s;
+  }
+
+  function renderSearch(q) {
+    var ql = q.toLowerCase(), out = [], total = 0;
+    AREAS.forEach(function (a) {
+      var ns = nodesOf(a.id); if (!ns.length) return;
+      var hits = ns.filter(function (n) {
+        var t = ((n.title || '') + ' ' + (n.body || '').replace(/<[^>]+>/g, ' ') + ' ' + tableText(n) + ' ' + (n.number || '')).toLowerCase();
+        return t.indexOf(ql) !== -1;
+      });
+      if (!hits.length) return;
+      total += hits.length;
+      out.push('<div class="rd-toc__group">' + esc(a.title) + ' · ' + hits.length + '</div>');
+      hits.slice(0, 40).forEach(function (n) {
+        var label = n.title || textOf(n).slice(0, 80) || '(untitled)';
+        out.push('<a class="rd-toc__item" data-goto="' + n.id + '" data-area="' + a.id + '"><span class="rd-toc__num">' + esc(n.number || '') + '</span><span>' + esc(label) + '</span></a>');
+      });
+    });
+    $('rdToc').innerHTML = total ? out.join('') : '<p style="color:var(--text-muted);font-size:13px;padding:6px 8px">No matches.</p>';
+  }
+
+  function applySelection() {
+    var host = $('rdDoc');
+    [].forEach.call(host.querySelectorAll('.is-sel'), function (el) { el.classList.remove('is-sel'); });
+    if (!S.selected) return;
+    var el = document.getElementById('c-' + S.selected);
+    if (el) el.classList.add('is-sel');
+  }
+  function scrollTo(nodeId) {
+    var el = document.getElementById('c-' + nodeId);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  /* ---------- deep links ---------- */
+  var _suppress = false;
+  function setHash(area, nodeId) {
+    _suppress = true;
+    try { location.hash = '#' + area + (nodeId ? '/' + nodeId : ''); } catch (_) {}
+    setTimeout(function () { _suppress = false; }, 0);
+  }
+  function parseHash() {
+    var h = (location.hash || '').replace(/^#/, ''); if (!h) return null;
+    var i = h.indexOf('/'); var area = i < 0 ? h : h.slice(0, i); var nodeId = i < 0 ? null : h.slice(i + 1);
+    if (!AREAS.some(function (a) { return a.id === area; })) return null;
+    return { area: area, nodeId: nodeId };
+  }
+  function goto(area, nodeId) {
+    if (area && area !== S.area) { showArea(area, nodeId); return; }
+    S.selected = nodeId; applySelection(); renderToc(); if (nodeId) scrollTo(nodeId); setHash(S.area, nodeId);
+  }
+  function copyLink(nodeId) {
+    var url = location.origin + location.pathname + '#' + S.area + '/' + nodeId;
+    if (navigator.clipboard) navigator.clipboard.writeText(url).catch(function () {});
+    setHash(S.area, nodeId);
+  }
+
+  /* ---------- events ---------- */
+  $('rdNav').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-area]'); if (b && !b.disabled) showArea(b.dataset.area, null);
+  });
+  $('rdToc').addEventListener('click', function (e) {
+    var a = e.target.closest('[data-goto]'); if (!a) return;
+    e.preventDefault(); goto(a.dataset.area || S.area, a.dataset.goto);
+  });
+  $('rdSearch').addEventListener('input', renderToc);
+  $('rdDoc').addEventListener('click', function (e) {
+    var num = e.target.closest('.nl-clause__num, .nl-art__num'); if (!num) return;
+    var host = num.closest('[data-id]'); if (host) copyLink(host.dataset.id);
+  });
+  window.addEventListener('hashchange', function () {
+    if (_suppress) return; var t = parseHash(); if (t) goto(t.area, t.nodeId);
+  });
+
+  // Mobile drawer
+  function closeDrawer() { $('rdSide').classList.remove('is-open'); $('rdScrim').classList.remove('is-open'); }
+  $('rdMenu').addEventListener('click', function () {
+    var open = !$('rdSide').classList.contains('is-open');
+    $('rdSide').classList.toggle('is-open', open); $('rdScrim').classList.toggle('is-open', open);
+  });
+  $('rdScrim').addEventListener('click', closeDrawer);
+})();
+</script>
+</body>
+</html>
