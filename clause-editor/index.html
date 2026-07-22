@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Clause Editor
-  Version: v0.3 (22/07/2026)
+  Version: v0.5 (22/07/2026)
   File: /tools/clause-editor/index.html
 
   Structured editor for the League's governing documents — computed clause
@@ -72,6 +72,22 @@
     window.NL_CHANGELOG = [
       {
         date: '22/07/2026',
+        version: 'v0.5',
+        items: [
+          'Search now spans the whole handbook — results are grouped by area and jump straight to the clause, switching area if needed.',
+          'Contents rail shows a text preview for clauses without a heading (e.g. the Memorandum).'
+        ]
+      },
+      {
+        date: '22/07/2026',
+        version: 'v0.4',
+        items: [
+          'Multiple documents: switch between the five governing-document areas (Memorandum, Articles, League Rules, Appendices, Board Directives) from the contents rail.',
+          'Memorandum of Association added as an importable area; empty areas invite import (where a source exists) or hand-authoring.'
+        ]
+      },
+      {
+        date: '22/07/2026',
         version: 'v0.3',
         items: [
           'Fixed: the document appeared empty after a reload (and on other devices) because Firebase drops null fields, so top-level articles lost their parentId. Root nodes are now detected reliably and the tree is restored on load.'
@@ -129,8 +145,13 @@
     border-right: 1px solid var(--border); background: var(--off-white);
     padding: 18px 14px 40px; overflow-y: auto; min-height: 0;
   }
-  .ce-side__doc { font-variation-settings: 'wght' 900; color: var(--navy); font-size: 16px; }
-  .ce-side__season { font-size: 12px; color: var(--text-muted); margin: 2px 0 14px; }
+  .ce-side__picker {
+    width: 100%; box-sizing: border-box; font-family: var(--font); font-size: 14px;
+    font-variation-settings: 'wght' 800; color: var(--navy); background: var(--white);
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; cursor: pointer;
+  }
+  .ce-side__picker:focus-visible { box-shadow: var(--focus-ring); outline: none; }
+  .ce-side__season { font-size: 12px; color: var(--text-muted); margin: 4px 0 14px; }
   .ce-side__search {
     width: 100%; font-family: var(--font); font-size: 13px; box-sizing: border-box;
     border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 12px;
@@ -146,8 +167,12 @@
   .ce-toc__num { color: var(--primary); font-variation-settings: 'wght' 800; flex-shrink: 0; min-width: 20px; }
   .ce-toc__item.is-current .ce-toc__num { color: var(--navy-100); }
   .ce-toc__t { font-variation-settings: 'wght' 600; }
-  .ce-toc__result { font-size: 12px; color: var(--text-muted); }
+  .ce-toc__result { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
   .ce-toc__result b { color: var(--primary); font-variation-settings: 'wght' 800; }
+  .ce-toc__group {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+    font-variation-settings: 'wght' 800; color: var(--navy); margin: 12px 0 4px;
+  }
 
   /* ---- Main / toolbar ---- */
   .ce-main { min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
@@ -268,7 +293,7 @@
 <div id="pageWrap">
   <div class="ce-layout">
     <aside class="ce-side" id="ceSide">
-      <div class="ce-side__doc" id="ceDocTitle">Articles of Association</div>
+      <select class="ce-side__picker" id="ceDocPicker" aria-label="Choose a document area"></select>
       <div class="ce-side__season" id="ceDocSeason"></div>
       <input type="search" class="ce-side__search" id="ceSearch" placeholder="Search clauses…" autocomplete="off">
       <div id="ceToc"></div>
@@ -299,14 +324,28 @@
 
   var BASE = 'app-data/ops-clause-editor';
 
+  // The five governing-document areas, fixed order. Each is its own tree at
+  // draft/docs/<id>/nodes. SEEDS maps an area to a best-effort import file where
+  // one exists; areas without a seed are built by hand until a source arrives.
+  var DOCS = [
+    { id: 'memorandum',       title: 'Memorandum of Association' },
+    { id: 'articles',         title: 'Articles of Association' },
+    { id: 'league-rules',     title: 'League Rules' },
+    { id: 'appendices',       title: 'Appendices' },
+    { id: 'board-directives', title: 'Board Directives' }
+  ];
+  var SEEDS = { articles: 'seed-articles.json', memorandum: 'seed-memorandum.json' };
+  function docTitle(id) { for (var i = 0; i < DOCS.length; i++) if (DOCS[i].id === id) return DOCS[i].title; return id; }
+
   var S = {
     session: null,
     role: 'viewer',
-    docId: 'articles',
+    docId: 'articles',   // current area
     doc: { id: 'articles', title: 'Articles of Association', subtitle: '', season: '' },
     nodes: {},           // id -> node  (flat; tree via parentId + order)
     mode: 'read',        // 'read' | 'edit'
-    selectedId: null
+    selectedId: null,
+    index: null          // cross-area search cache: { docId: {title,nodes,numMap} }
   };
 
   function canEdit()  { return S.role === 'admin' || S.role === 'superadmin'; }
@@ -457,45 +496,111 @@
     roots.forEach(function (r) { html += renderNode(r, numMap); });
     html += '</div>';
     host.innerHTML = html;
-    renderToc(numMap);
+    refreshToc();
     syncBar();
   }
 
   function renderEmpty() {
+    var title = docTitle(S.docId), hasSeed = !!SEEDS[S.docId], btn = '', msg;
+    if (canSeed() && hasSeed) {
+      msg = 'This area is empty. Import ' + esc(title) + ' to seed the clause tree, then refine it here.';
+      btn = '<button class="btn btn--primary" id="ceImport" type="button">Import ' + esc(title) + '</button>';
+    } else if (canEdit()) {
+      msg = esc(title) + ' is empty. Add the first clause in Edit mode' +
+        (canSeed() ? ', or send the source document and I can seed it automatically.' : '.');
+    } else {
+      msg = 'This area has no content yet.';
+    }
     $('ceDoc').innerHTML =
-      '<div class="ce-empty"><div class="ce-empty__card">' +
-      '<h2>No document loaded</h2>' +
-      '<p>The draft is empty. ' + (canSeed()
-        ? 'Import the Articles of Association to seed the clause tree, then refine it here.'
-        : 'A superadmin needs to import the starting content.') + '</p>' +
-      (canSeed() ? '<button class="btn btn--primary" id="ceImport" type="button">Import Articles of Association</button>' : '') +
-      '</div></div>';
-    if (canSeed()) $('ceImport').addEventListener('click', importSeed);
+      '<div class="ce-empty"><div class="ce-empty__card"><h2>' + esc(title) + '</h2><p>' + msg + '</p>' + btn + '</div></div>';
+    if (btn) $('ceImport').addEventListener('click', importSeed);
   }
 
-  function renderToc(numMap) {
-    var q = ($('ceSearch').value || '').trim().toLowerCase();
+  // Contents rail: shows the current area's outline, or — when searching —
+  // matches from across ALL areas. The search index is built once from
+  // draft/docs and invalidated on any write (see commit/importSeed).
+  function refreshToc() {
+    if (($('ceSearch').value || '').trim()) doSearch();
+    else renderTocRoots();
+  }
+
+  function renderTocRoots() {
+    var numMap = computeNumbers(S.nodes);
     var host = $('ceToc');
-    if (q) {
-      var hits = [];
-      Object.keys(S.nodes).forEach(function (id) {
-        var n = S.nodes[id];
-        var text = ((n.title || '') + ' ' + (n.body || '').replace(/<[^>]+>/g, ' ')).toLowerCase();
-        var num = (numMap[id] || '').toLowerCase();
-        if (text.indexOf(q) !== -1 || num.indexOf(q) !== -1) hits.push(n);
-      });
-      host.innerHTML = '<div class="ce-toc__result" style="margin-bottom:8px">' + hits.length + ' match' + (hits.length === 1 ? '' : 'es') + '</div>' +
-        hits.slice(0, 60).map(function (n) {
-          var snip = (n.title || (n.body || '').replace(/<[^>]+>/g, ' ')).slice(0, 60);
-          return '<a class="ce-toc__item" data-goto="' + n.id + '"><span class="ce-toc__num">' + esc(numMap[n.id] || '') + '</span><span class="ce-toc__t">' + esc(snip) + '</span></a>';
-        }).join('');
-      return;
-    }
     var roots = childrenOf(S.nodes, null);
     host.innerHTML = '<div class="ce-toc">' + roots.map(function (r) {
       var cur = (r.id === S.selectedId) ? ' is-current' : '';
-      return '<a class="ce-toc__item' + cur + '" data-goto="' + r.id + '"><span class="ce-toc__num">' + esc(numMap[r.id] || '') + '</span><span class="ce-toc__t">' + esc(r.title || '') + '</span></a>';
+      var label = r.title || (r.body || '').replace(/<[^>]+>/g, ' ').slice(0, 48);
+      return '<a class="ce-toc__item' + cur + '" data-goto="' + r.id + '"><span class="ce-toc__num">' + esc(numMap[r.id] || '') + '</span><span class="ce-toc__t">' + esc(label) + '</span></a>';
     }).join('') + '</div>';
+  }
+
+  // Read every area once so search can span the whole handbook.
+  function buildIndex() {
+    return NL.ensureAuth().then(function () {
+      return db.ref(BASE + '/draft/docs').once('value');
+    }).then(function (snap) {
+      var all = snap.val() || {}, idx = {};
+      DOCS.forEach(function (d) {
+        var doc = all[d.id]; if (!doc || !doc.nodes) return;
+        var nodes = doc.nodes;
+        Object.keys(nodes).forEach(function (id) {
+          var n = nodes[id];
+          if (n.parentId === undefined) n.parentId = null;
+          if (n.order === undefined) n.order = 0;
+        });
+        idx[d.id] = { title: (doc.meta && doc.meta.title) || docTitle(d.id), nodes: nodes, numMap: computeNumbers(nodes) };
+      });
+      S.index = idx;
+      return idx;
+    });
+  }
+
+  function doSearch() {
+    var q = ($('ceSearch').value || '').trim();
+    if (!q) { renderTocRoots(); return; }
+    if (!S.index) {
+      $('ceToc').innerHTML = '<div class="ce-toc__result">Searching…</div>';
+      buildIndex().then(function () { renderSearch(q); }).catch(function () { renderSearch(q); });
+    } else {
+      renderSearch(q);
+    }
+  }
+
+  function renderSearch(q) {
+    var ql = q.toLowerCase(), host = $('ceToc'), out = [], total = 0;
+    DOCS.forEach(function (d) {
+      var nodes, numMap, title;
+      if (d.id === S.docId) { nodes = S.nodes; numMap = computeNumbers(S.nodes); title = S.doc.title; }      // freshest
+      else if (S.index && S.index[d.id]) { nodes = S.index[d.id].nodes; numMap = S.index[d.id].numMap; title = S.index[d.id].title; }
+      else return;
+      var hits = [];
+      Object.keys(nodes).forEach(function (id) {
+        var n = nodes[id];
+        var text = ((n.title || '') + ' ' + (n.body || '').replace(/<[^>]+>/g, ' ')).toLowerCase();
+        if (text.indexOf(ql) !== -1 || (numMap[id] || '').toLowerCase().indexOf(ql) !== -1) hits.push(n);
+      });
+      if (!hits.length) return;
+      total += hits.length;
+      out.push('<div class="ce-toc__group">' + esc(title) + ' · ' + hits.length + '</div>');
+      hits.slice(0, 40).forEach(function (n) {
+        var snip = (n.title || (n.body || '').replace(/<[^>]+>/g, ' ')).slice(0, 56);
+        out.push('<a class="ce-toc__item" data-goto="' + n.id + '" data-doc="' + d.id + '"><span class="ce-toc__num">' + esc(numMap[n.id] || '') + '</span><span class="ce-toc__t">' + esc(snip) + '</span></a>');
+      });
+    });
+    host.innerHTML = '<div class="ce-toc__result">' + total + ' match' + (total === 1 ? '' : 'es') + ' across the handbook</div>' +
+      (out.join('') || '<div class="ce-toc__result">No matches</div>');
+  }
+
+  function scrollToNode(id) { var el = $('c-' + id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+
+  // Jump to a clause, switching area first if the match is in another document.
+  function goto(docId, nodeId) {
+    closeDrawer();
+    S.selectedId = nodeId;
+    if (docId === S.docId) { scrollToNode(nodeId); refreshToc(); return; }
+    S.docId = docId; S.mode = 'read';
+    load().then(function () { scrollToNode(nodeId); });
   }
 
   function syncBar() {
@@ -508,7 +613,7 @@
     [].forEach.call(document.querySelectorAll('#ceMode button'), function (b) {
       b.classList.toggle('is-on', b.dataset.mode === S.mode);
     });
-    $('ceDocTitle').textContent = S.doc.title || 'Document';
+    var picker = $('ceDocPicker'); if (picker) picker.value = S.docId;
     $('ceDocSeason').textContent = S.doc.season ? S.doc.season + ' edition (draft)' : '';
   }
 
@@ -516,10 +621,25 @@
   function nodesRef() { return db.ref(BASE + '/draft/docs/' + S.docId + '/nodes'); }
   function metaRef()  { return db.ref(BASE + '/draft/docs/' + S.docId + '/meta'); }
 
+  function switchDoc(id) {
+    if (id === S.docId) return;
+    S.docId = id; S.selectedId = null; S.mode = 'read';
+    if ($('ceSearch')) $('ceSearch').value = '';   // manual switch shows that area's outline
+    closeDrawer();
+    load();
+  }
+
   function load() {
+    // Reset to the area's fallback identity so an un-imported area still shows
+    // its proper name (meta, if present, overrides below).
+    var reqDoc = S.docId;
+    S.doc = { id: S.docId, title: docTitle(S.docId), subtitle: '', season: '' };
+    S.nodes = {};
+    render(); // show the area heading / empty state immediately while data loads
     return NL.ensureAuth().then(function () {
       return Promise.all([metaRef().once('value'), nodesRef().once('value')]);
     }).then(function (res) {
+      if (reqDoc !== S.docId) return; // user switched area before this resolved
       var meta = res[0].val(), nodes = res[1].val() || {};
       if (meta) S.doc = Object.assign(S.doc, meta);
       // Restore fields Firebase drops when they are null/0 so the tree is whole.
@@ -537,14 +657,17 @@
   }
 
   function importSeed() {
-    NL.confirm('Import the Articles of Association into the draft? This is a best-effort parse from the Word document — you’ll refine it here.', { confirmText: 'Import', title: 'Import Articles' })
+    var file = SEEDS[S.docId], title = docTitle(S.docId), target = S.docId;
+    if (!file) { NL.alert('There’s no import file for ' + title + ' yet. Start it by hand in Edit mode, or send the source document to seed it.', { title: 'No source yet' }); return; }
+    NL.confirm('Import ' + title + ' into the draft? This is a best-effort parse from the Word document — you’ll refine it here.', { confirmText: 'Import', title: 'Import ' + title })
       .then(function (ok) {
         if (!ok) return;
-        return fetch('seed-articles.json').then(function (r) {
-          if (!r.ok) throw new Error('seed-articles.json not found (' + r.status + ')');
+        return fetch(file).then(function (r) {
+          if (!r.ok) throw new Error(file + ' not found (' + r.status + ')');
           return r.json();
         });
       }).then(function (seed) {
+        if (seed && target !== S.docId) { NL.toast && NL.toast('Area changed — import cancelled', 'info'); return; }
         if (!seed) return;
         var map = {}, now = Date.now();
         seed.nodes.forEach(function (n) {
@@ -562,6 +685,7 @@
         }).then(function () {
           S.doc = Object.assign(S.doc, seed.doc);
           S.nodes = map;
+          S.index = null; // search index is now stale
           NL.writeAudit && NL.writeAudit('import', 'Imported ' + seed.nodes.length + ' nodes into ' + S.docId);
           NL.toast && NL.toast('Imported ' + seed.nodes.length + ' clauses', 'success');
           render();
@@ -585,6 +709,7 @@
     if (!Object.keys(updates).length) return Promise.resolve();
     return NL.ensureAuth().then(function () { return nodesRef().update(updates); }).then(function () {
       S.nodes = clone;
+      S.index = null; // search index is now stale
       NL.writeAudit && NL.writeAudit('edit', label);
       render();
     }).catch(function (e) {
@@ -788,12 +913,12 @@
     });
     $('ceDownload').addEventListener('click', downloadHtml);
     $('cePublish').addEventListener('click', publish);
-    $('ceSearch').addEventListener('input', function () { renderToc(computeNumbers(S.nodes)); });
+    $('ceDocPicker').addEventListener('change', function (e) { switchDoc(e.target.value); });
+    $('ceSearch').addEventListener('input', doSearch);
 
     $('ceToc').addEventListener('click', function (e) {
       var a = e.target.closest('[data-goto]'); if (!a) return;
-      var el = $('c-' + a.dataset.goto);
-      if (el) { S.selectedId = a.dataset.goto; closeDrawer(); el.scrollIntoView({ behavior: 'smooth', block: 'start' }); renderToc(computeNumbers(S.nodes)); }
+      goto(a.dataset.doc || S.docId, a.dataset.goto);
     });
 
     var doc = $('ceDoc');
@@ -831,6 +956,9 @@
     S.session = session;
     S.role = (session && session.role) || 'viewer';
     if (!window.NL || !NL.ensureAuth) { console.warn('[clause-editor] NL.ensureAuth missing'); return; }
+    $('ceDocPicker').innerHTML = DOCS.map(function (d) {
+      return '<option value="' + d.id + '">' + esc(d.title) + '</option>';
+    }).join('');
     wire();
     syncBar();
     load();
