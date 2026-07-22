@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
-  Version: v0.21 (22/07/2026)
+  Version: v0.22 (22/07/2026)
   File: /tools/handbook/index.html
 
   Structured editor for the League's governing documents — computed clause
@@ -70,6 +70,13 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '22/07/2026',
+        version: 'v0.22',
+        items: [
+          'Added a title page — NL lockup, HANDBOOK 2026-27, and the three division crests — as the landing view in both the tool and the public reader, with a "Title page" entry in the area nav.'
+        ]
+      },
       {
         date: '22/07/2026',
         version: 'v0.21',
@@ -362,6 +369,19 @@
     .ce-scrim.is-open { opacity: 0.42; pointer-events: auto; }
   }
 
+  /* ---- Title page (cover) — shown on landing and via the "Title page" nav ---- */
+  .hb-cover { max-width: 760px; margin: 0 auto; padding: 44px 24px 90px; text-align: center; }
+  .hb-cover__lockup { display: block; width: min(430px, 82%); height: auto; margin: 18px auto 34px; }
+  .hb-cover__title { margin: 0; font-size: clamp(46px, 9vw, 74px); letter-spacing: .05em; color: var(--navy); font-variation-settings: 'wght' 900; line-height: 1.02; text-transform: uppercase; }
+  .hb-cover__season { font-size: clamp(24px, 5vw, 36px); color: var(--primary); font-variation-settings: 'wght' 800; margin-top: 8px; }
+  .hb-cover__meta { margin-top: 16px; color: var(--text-muted); font-size: 13px; }
+  .hb-cover__areas { margin: 38px auto 0; display: flex; flex-direction: column; gap: 8px; max-width: 400px; }
+  .hb-cover__area { font-family: var(--font); font-size: 15px; font-variation-settings: 'wght' 700; color: var(--navy); background: var(--white); border: 1px solid var(--border); border-radius: 9px; padding: 12px 16px; cursor: pointer; }
+  .hb-cover__area:hover { border-color: var(--navy); background: var(--navy-50); }
+  .hb-cover__rule { width: 76px; height: 3px; background: var(--navy); margin: 44px auto 30px; border-radius: 2px; }
+  .hb-cover__divs { display: flex; justify-content: center; gap: 16px; flex-wrap: wrap; }
+  .hb-cover__divs img { width: 150px; max-width: 28%; height: auto; }
+
   /* =====================================================================
      .nl-doc — document presentation (CANON PROMOTION CANDIDATE)
      Renders identically for editor, draft preview, published edition and
@@ -544,6 +564,7 @@
     { id: 'board-directives', title: 'Board Directives' }
   ];
   var SEEDS = { articles: 'seed-articles.json', memorandum: 'seed-memorandum.json', 'league-rules': 'seed-league-rules.json', appendices: 'seed-appendices.json', 'board-directives': 'seed-board-directives.json' };
+  var SEASON = '2026-27';   // the season this handbook edition covers — stamps the title page
   function docTitle(id) { for (var i = 0; i < DOCS.length; i++) if (DOCS[i].id === id) return DOCS[i].title; return id; }
 
   var S = {
@@ -732,6 +753,7 @@
 
   function render() {
     var host = $('ceDoc');
+    if (!S.docId) { S.numMap = {}; renderCover(); $('ceToc').innerHTML = ''; syncBar(); updateCrumb(); return; }
     var ids = Object.keys(S.nodes);
     if (!ids.length) { S.numMap = {}; renderEmpty(); syncBar(); updateCrumb(); return; }
     var numMap = computeNumbers(S.nodes);
@@ -766,6 +788,7 @@
   }
   function updateCrumb() {
     var crumb = $('ceCrumb'); if (!crumb) return;
+    if (!S.docId) { crumb.innerHTML = '<span class="ce-crumb__area">Handbook ' + esc(SEASON) + '</span>'; return; }
     if (!Object.keys(S.nodes).length) {
       crumb.innerHTML = '<span class="ce-crumb__area">' + esc(S.doc.title || docTitle(S.docId)) + '</span>';
       return;
@@ -782,6 +805,32 @@
         a.classList.toggle('is-current', a.dataset.goto === secId);
       });
     }
+  }
+
+  // Title page — the handbook's front cover. Landing view; also via "Title page" in the nav.
+  function renderCover() {
+    $('ceDoc').innerHTML =
+      '<div class="hb-cover">' +
+        '<img class="hb-cover__lockup" src="/tools/assets/divisions/The National League.png" alt="The National League">' +
+        '<h1 class="hb-cover__title">Handbook</h1>' +
+        '<div class="hb-cover__season">' + esc(SEASON) + '</div>' +
+        '<div class="hb-cover__meta">Working draft' + (canEdit() ? ' · your edits are recorded' : ' · read-only') + '</div>' +
+        '<nav class="hb-cover__areas">' + DOCS.map(function (d) {
+          return '<button type="button" class="hb-cover__area" data-doc="' + d.id + '">' + esc(d.title) + '</button>';
+        }).join('') + '</nav>' +
+        '<div class="hb-cover__rule"></div>' +
+        '<div class="hb-cover__divs">' + ['National', 'North', 'South'].map(function (n) {
+          return '<img src="/tools/assets/divisions/' + n + '.png" alt="National League ' + n + '">';
+        }).join('') + '</div>' +
+      '</div>';
+  }
+  function showCover() {
+    S.docId = null; S.selectedId = null; S.mode = 'read';
+    S.doc = { id: null, title: 'Handbook', subtitle: '', season: '' };
+    S.nodes = {};
+    if ($('ceSearch')) $('ceSearch').value = '';
+    closeDrawer();
+    render();
   }
 
   function renderEmpty() {
@@ -809,10 +858,12 @@
   }
 
   function renderDocNav() {
-    $('ceDocNav').innerHTML = DOCS.map(function (d) {
-      return '<button type="button" class="ce-nav__item' + (d.id === S.docId ? ' is-active' : '') +
-        '" data-doc="' + d.id + '">' + esc(d.title) + '</button>';
-    }).join('');
+    $('ceDocNav').innerHTML =
+      '<button type="button" class="ce-nav__item' + (S.docId ? '' : ' is-active') + '" data-doc="__cover">Title page</button>' +
+      DOCS.map(function (d) {
+        return '<button type="button" class="ce-nav__item' + (d.id === S.docId ? ' is-active' : '') +
+          '" data-doc="' + d.id + '">' + esc(d.title) + '</button>';
+      }).join('');
   }
 
   function renderTocRoots() {
@@ -927,9 +978,9 @@
   }
 
   function syncBar() {
-    $('ceEditBtn').hidden = !canEdit();
-    $('cePublish').hidden = !canEdit() || !Object.keys(S.nodes).length;
-    $('ceReimport').hidden = !(canSeed() && SEEDS[S.docId] && Object.keys(S.nodes).length);
+    $('ceEditBtn').hidden = !canEdit() || !S.docId;
+    $('cePublish').hidden = !canEdit() || !S.docId || !Object.keys(S.nodes).length;
+    $('ceReimport').hidden = !(S.docId && canSeed() && SEEDS[S.docId] && Object.keys(S.nodes).length);
     $('ceFmt').hidden = !(S.mode === 'edit' && canEdit());
     var note = $('ceModeNote');
     if (!canEdit()) note.textContent = 'Read-only access';
@@ -947,6 +998,7 @@
   function metaRef()  { return db.ref(BASE + '/draft/docs/' + S.docId + '/meta'); }
 
   function switchDoc(id) {
+    if (id === '__cover') { if (S.docId !== null) showCover(); return; }
     if (id === S.docId) return;
     S.docId = id; S.selectedId = null; S.mode = 'read';
     if ($('ceSearch')) $('ceSearch').value = '';   // manual switch shows that area's outline
@@ -955,6 +1007,7 @@
   }
 
   function load() {
+    if (!S.docId) { render(); return Promise.resolve(); }   // cover — nothing to fetch
     // Reset to the area's fallback identity so an un-imported area still shows
     // its proper name (meta, if present, overrides below).
     var reqDoc = S.docId;
@@ -1404,6 +1457,9 @@
     var doc = $('ceDoc');
     // structural op buttons + table row/col controls + select
     doc.addEventListener('click', function (e) {
+      // Title-page area buttons open that area.
+      var cv = e.target.closest('.hb-cover [data-doc]');
+      if (cv) { switchDoc(cv.dataset.doc); return; }
       // Read mode: clicking a clause number copies a shareable deep link to it.
       if (S.mode !== 'edit') {
         var numEl = e.target.closest('.nl-clause__num, .nl-art__num');
@@ -1451,10 +1507,10 @@
     renderDocNav();
     wire();
     syncBar();
-    // Deep link in the URL? Open there; otherwise load the default area.
+    // Deep link in the URL? Open there; otherwise land on the title page.
     var t = parseHash();
     if (t) { S.docId = t.docId; S.selectedId = t.nodeId; load().then(function () { scrollToNode(t.nodeId); refreshToc(); }); }
-    else { load(); }
+    else { showCover(); }
     window.addEventListener('hashchange', function () { if (!_suppressHash) routeHash(); });
   };
   if (window._toolDeferredSession) { window.TOOL.boot(window._toolDeferredSession); delete window._toolDeferredSession; }
