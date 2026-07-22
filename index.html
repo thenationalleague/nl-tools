@@ -3,16 +3,21 @@
 <head>
 <!--
   NL Tools — Login Page
-  Version: v4.6 (17/07/2026)
+  Version: v4.7 (17/07/2026)
   File: /tools/index.html
 
   CHANGELOG
-  v4.6 (17/07/2026) — Security: invite acceptance no longer writes its own role.
-    doSetPassword() now creates the account, then calls the GAS consumeInvite
-    action (with the fresh ID token); GAS verifies the token + invite and writes
-    the user record (incl. role/tools) with the RTDB secret. Closes the path
-    where a client could self-assert its role. Pending-invite cleanup moved
-    server-side too. See system/rtdb/SECURITY-role-self-grant.md.
+  v4.7 (17/07/2026) — Reverted the v4.6 GAS consumeInvite call: this Workspace
+    blocks anonymous Apps Script web apps at the org level, so invitees not
+    signed into Google (esp. club users) could not reach GAS during signup
+    ("Sorry, unable to open the file"). Restored the client-side write so invite
+    acceptance works for everyone again. The takeover vector stays closed by the
+    RTDB users/$uid .validate rule; the durable server-side role write moves to
+    a Firebase Function (no Google access gate). See
+    system/rtdb/SECURITY-role-self-grant.md.
+  v4.6 (17/07/2026) — [reverted by v4.7] invite acceptance called GAS
+    consumeInvite to write the role server-side. Blocked by the Workspace
+    anonymous-web-app policy.
 
   v4.5 (12/07/2026) — Shared component:
     - Request-access "Club" field migrated to the shared NL.clubPicker
@@ -823,10 +828,13 @@ function doSetPassword() {
   if (!INVITE_TOKEN)    { showMsg('setpwMsg', 'Invalid invite link. Please use the link from your invite email.', 'error'); return; }
   setBtnLoading('setPwBtn', true);
   showMsg('setpwMsg', 'Verifying invite...', 'info');
-  /* Pre-check the invite (fail before creating an account), then let GAS do the
-     authoritative validate + write. The role is NEVER written by the client —
-     consumeInvite verifies the ID token + invite server-side and writes the
-     user record (incl. role) with the RTDB secret. */
+  /* NOTE: acceptance writes the user record CLIENT-SIDE. A GAS consumeInvite was
+     tried (v4.6) but this Workspace blocks anonymous Apps Script web apps at the
+     org level, so a not-signed-into-Google invitee (esp. club users) can't reach
+     GAS during signup. The takeover vector is held by the RTDB users/$uid
+     .validate rule (blocks self-granted admin/superadmin). The durable
+     server-side write moves to a Firebase Function (no Google gate) — see
+     system/rtdb/SECURITY-role-self-grant.md. */
   db.ref('admin/invites/' + INVITE_TOKEN).once('value')
     .then(function(snap) {
       var invite = snap.val();
@@ -836,23 +844,27 @@ function doSetPassword() {
       var now = new Date(); var expires = new Date(invite.expiresAt);
       if (now > expires)  throw { message: 'This invite link has expired. Please ask for a new invite.' };
       showMsg('setpwMsg', 'Creating your account...', 'info');
-      return auth.createUserWithEmailAndPassword(email, pass);
+      return auth.createUserWithEmailAndPassword(email, pass)
+        .then(function(credential) {
+          var uid = credential.user.uid;
+          var updates = {};
+          updates['admin/invites/' + INVITE_TOKEN + '/used'] = true;
+          updates['users/' + uid + '/name']     = invite.name     || '';
+          updates['users/' + uid + '/email']    = email;
+          updates['users/' + uid + '/role']     = invite.role     || 'staff';
+          updates['users/' + uid + '/org']      = invite.org      || '';
+          updates['users/' + uid + '/orgKey']   = invite.orgKey   || '';
+          updates['users/' + uid + '/club']     = invite.club     || '';
+          updates['users/' + uid + '/jobTitle'] = invite.jobTitle || '';
+          updates['users/' + uid + '/pending']  = false;
+          updates['users/' + uid + '/tools']    = invite.tools    || {};
+          return db.ref().update(updates);
+        });
     })
-    .then(function(credential) {
-      showMsg('setpwMsg', 'Finishing setup...', 'info');
-      return credential.user.getIdToken();
-    })
-    .then(function(idToken) {
-      return fetch(NL_GAS_URL + '?cb=' + Date.now(), {
-        method:  'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body:    JSON.stringify({ action: 'consumeInvite', token: INVITE_TOKEN, email: email, idToken: idToken })
-      }).then(function(r) { return r.json(); });
-    })
-    .then(function(result) {
-      if (!result || result.ok === false) {
-        throw { message: (result && result.error) || 'Could not finish setting up your account. Please contact media@thenationalleague.org.uk.' };
-      }
+    .then(function() {
+      db.ref('admin/invites-pending').orderByChild('email').equalTo(email.toLowerCase()).once('value')
+        .then(function(snap) { snap.forEach(function(child) { db.ref('admin/invites-pending/' + child.key).remove().catch(function() {}); }); })
+        .catch(function() {});
       window.location.replace(PORTAL_URL);
     })
     .catch(function(err) {
