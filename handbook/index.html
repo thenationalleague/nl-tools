@@ -74,7 +74,9 @@
         date: '22/07/2026',
         version: 'v0.24',
         items: [
-          'Navigation polish (tool + reader): removed the red selection line after jumping to a clause (the breadcrumb and contents highlight already say where you are), and jumps are now instant instead of a long smooth-scroll.'
+          'Navigation polish (tool + reader): removed the red selection line after jumping to a clause — the breadcrumb and contents highlight already say where you are.',
+          'Tapping a section now locks the nav highlight on it while the page scrolls there, instead of snapping back and rattling through every section in between.',
+          'Removed the mobile contents drawer’s shadow, which bled a glow onto the navy header.'
         ]
       },
       {
@@ -367,7 +369,7 @@
     .ce-side {
       position: fixed; top: var(--ce-top, 60px); left: 0; bottom: 0; width: 84%; max-width: 330px;
       z-index: 60; transform: translateX(-100%); transition: transform .24s ease;
-      box-shadow: 8px 0 26px var(--navy-100);
+      border-right: 1px solid var(--border);   /* crisp edge — no glow bleeding onto the topbar */
     }
     .ce-side.is-open { transform: none; }
     .ce-scrim {
@@ -779,6 +781,7 @@
 
   // "You are here": breadcrumb of the current area + the top-level section
   // (article/appendix/directive) at the top of the viewport, kept in sync on scroll.
+  var spyLock = null;   // {secId, until} — pins the highlight on a jump target mid-scroll
   function currentSectionEl() {
     var host = $('ceDoc'); if (!host) return null;
     // The active line must sit BELOW .nl-art's scroll-margin-top (14px), otherwise a
@@ -797,8 +800,16 @@
       crumb.innerHTML = '<span class="ce-crumb__area">' + esc(S.doc.title || docTitle(S.docId)) + '</span>';
       return;
     }
-    var el = currentSectionEl();
-    var secId = el && el.dataset.id, node = secId && S.nodes[secId];
+    // While a jump's smooth scroll is in flight, keep the highlight pinned on the
+    // target; release once it arrives (or on timeout for safety).
+    if (spyLock) {
+      var curEl = currentSectionEl();
+      if ((curEl && curEl.dataset.id) === spyLock.secId || Date.now() > spyLock.until) spyLock = null;
+    }
+    var secId;
+    if (spyLock) { secId = spyLock.secId; }
+    else { var el = currentSectionEl(); secId = el && el.dataset.id; }
+    var node = secId && S.nodes[secId];
     var num = (S.numMap && secId && S.numMap[secId]) || '';
     var sec = node ? ((num ? esc(num) + ' · ' : '') + esc(node.title || '')) : '';
     crumb.innerHTML = '<span class="ce-crumb__area">' + esc(S.doc.title || docTitle(S.docId)) + '</span>' +
@@ -935,7 +946,16 @@
       (out.join('') || '<div class="ce-toc__result">No matches</div>');
   }
 
-  function scrollToNode(id) { var el = $('c-' + id); if (el) el.scrollIntoView({ block: 'start' }); }   // instant — no long smooth-scroll rattle
+  function scrollToNode(id) {
+    var el = $('c-' + id); if (!el) return;
+    // Lock the scroll-spy on the tapped section while the smooth scroll is in
+    // flight — otherwise the nav highlight snaps back to the current section and
+    // rattles through every one in between until the scroll arrives.
+    var art = el.closest('.nl-art') || el;
+    spyLock = { secId: art.dataset.id, until: Date.now() + 2500 };
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    updateCrumb();
+  }
 
   // Jump to a clause, switching area first if the match is in another document.
   function goto(docId, nodeId) {

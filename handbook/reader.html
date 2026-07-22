@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27 (public reader)
-  Version: v0.5 (22/07/2026) — no selection line/glow after navigating; instant jumps
+  Version: v0.5 (22/07/2026) — no selection line; nav highlight locks to the tapped
+  section during the smooth scroll; mobile drawer shadow removed (glow on header)
   File: /tools/handbook/reader.html
 
   Public, no-login reader of the PUBLISHED handbook edition. Reads
@@ -162,7 +163,8 @@
       .rd-menu { display: inline-flex; align-items: center; justify-content: center; }
       .rd-side {
         position: fixed; top: var(--rd-top, 61px); left: 0; bottom: 0; width: 86%; max-width: 340px; z-index: 60;
-        transform: translateX(-100%); transition: transform .24s ease; box-shadow: 8px 0 26px var(--navy-100);
+        transform: translateX(-100%); transition: transform .24s ease;
+        border-right: 1px solid var(--border);   /* crisp edge — no glow bleeding onto the header */
       }
       .rd-side.is-open { transform: none; }
       .rd-scrim { position: fixed; inset: var(--rd-top, 61px) 0 0 0; background: var(--navy-900); opacity: 0; pointer-events: none; transition: opacity .24s; z-index: 55; }
@@ -303,6 +305,7 @@
   }
 
   /* ---------- "you are here" breadcrumb (mirrors the editor's scroll-spy) ---------- */
+  var spyLock = null;   // {secId, until} — pins the highlight on a jump target mid-scroll
   function currentSectionEl() {
     var host = $('rdDoc');
     // The active line must sit BELOW .nl-art's scroll-margin-top (14px), otherwise a
@@ -317,8 +320,16 @@
   function updateCrumb() {
     var crumb = $('rdCrumb'); if (!crumb) return;
     if (!S.area) { crumb.innerHTML = '<span class="rd-crumb__area">Handbook' + (seasonOf() ? ' ' + esc(seasonOf()) : '') + '</span>'; return; }
-    var el = currentSectionEl();
-    var secId = el && el.getAttribute('data-id'), node = secId && S.nodeById[secId];
+    // While a jump's smooth scroll is in flight, keep the highlight pinned on the
+    // target; release once it arrives (or on timeout for safety).
+    if (spyLock) {
+      var curEl = currentSectionEl();
+      if ((curEl && curEl.getAttribute('data-id')) === spyLock.secId || Date.now() > spyLock.until) spyLock = null;
+    }
+    var secId;
+    if (spyLock) { secId = spyLock.secId; }
+    else { var el = currentSectionEl(); secId = el && el.getAttribute('data-id'); }
+    var node = secId && S.nodeById[secId];
     var sec = node ? ((node.number ? esc(node.number) + ' · ' : '') + esc(node.title || textOf(node).slice(0, 60))) : '';
     crumb.innerHTML = '<span class="rd-crumb__area">' + esc(areaTitle(S.area)) + '</span>' +
       (sec ? '<span class="rd-crumb__sep">›</span><span class="rd-crumb__sec">' + sec + '</span>' : '');
@@ -383,7 +394,14 @@
   }
   function scrollTo(nodeId) {
     var el = document.getElementById('c-' + nodeId);
-    if (el) el.scrollIntoView({ block: 'start' });   // instant — no long smooth-scroll rattle
+    if (!el) return;
+    // Lock the scroll-spy on the tapped section while the smooth scroll is in
+    // flight — otherwise the nav highlight snaps back to the current section and
+    // rattles through every one in between until the scroll arrives.
+    var art = el.closest('.nl-art') || el;
+    spyLock = { secId: art.getAttribute('data-id'), until: Date.now() + 2500 };
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    updateCrumb();
   }
 
   /* ---------- deep links ---------- */
