@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
-  Version: v0.19 (22/07/2026)
+  Version: v0.20 (22/07/2026)
   File: /tools/handbook/index.html
 
   Structured editor for the League's governing documents — computed clause
@@ -70,6 +70,14 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '22/07/2026',
+        version: 'v0.20',
+        items: [
+          'Publish edition now freezes the whole handbook (all five areas) into one edition, not just the open area.',
+          'Added a public reader (reader.html): a no-login page that renders the published edition with area navigation, search and clause deep links — the public handbook layer.'
+        ]
+      },
       {
         date: '22/07/2026',
         version: 'v0.19',
@@ -1236,6 +1244,16 @@
     S.mode = save;
     return inner;
   }
+  // Bake a given area's nodes to static reader HTML (renderNode reads S.nodes, so we
+  // swap it in briefly). Used when freezing a whole-handbook edition.
+  function bakeDoc(nodes, meta) {
+    var sv = { nodes: S.nodes, doc: S.doc, mode: S.mode };
+    S.nodes = nodes; S.mode = 'read';
+    S.doc = { id: '', title: (meta && meta.title) || '', subtitle: (meta && meta.subtitle) || '', season: (meta && meta.season) || '' };
+    var html = staticDocHtml();
+    S.nodes = sv.nodes; S.doc = sv.doc; S.mode = sv.mode;
+    return html;
+  }
   // Editing the live handbook draft is consequential and attributed — make the first
   // edit of a session a deliberate, acknowledged, audited action.
   function confirmEditEntry() {
@@ -1257,29 +1275,46 @@
       .then(function (label) {
         if (label === null) return;
         var lbl = label.trim() || (S.doc.season || 'Edition');
-        // Type-to-confirm: publishing freezes the draft and changes what the public sees.
+        // Type-to-confirm: publishing freezes the WHOLE handbook and changes what the public sees.
         return NL.prompt(
-          'Publishing freezes the current ' + docTitle(S.docId) + ' draft as edition “' + lbl + '” and updates what public surfaces show. This cannot be edited afterwards — you publish a new edition instead.\n\nType PUBLISH to confirm.',
+          'Publishing freezes the whole handbook draft — all five areas — as edition “' + lbl + '” and updates what public surfaces show. This cannot be edited afterwards; you publish a new edition instead.\n\nType PUBLISH to confirm.',
           { title: 'Confirm publish', confirmText: 'Publish edition' }
         ).then(function (word) {
           if ((word || '').trim().toUpperCase() !== 'PUBLISH') { NL.toast && NL.toast('Publish cancelled', 'info'); return; }
-        var numMap = computeNumbers(S.nodes);
-        var snapshot = Object.keys(S.nodes).map(function (id) {
-          return Object.assign({}, strip(S.nodes[id]), { id: id, number: numMap[id] || '' });
-        });
-        var edition = {
-          label: label.trim() || (S.doc.season || 'Edition'), status: 'published',
-          publishedAt: Date.now(), publishedBy: (S.session && (S.session.name || S.session.email)) || null,
-          docs: {}
-        };
-        edition.docs[S.docId] = { title: S.doc.title, subtitle: S.doc.subtitle || '', html: staticDocHtml(), nodes: snapshot };
-        NL.ensureAuth().then(function () {
-          var ref = db.ref(BASE + '/editions').push();
-          return ref.set(edition).then(function () { return db.ref(BASE + '/publishedEditionId').set(ref.key); });
-        }).then(function () {
-          NL.writeAudit && NL.writeAudit('publish', 'Published edition "' + edition.label + '"');
-          NL.toast && NL.toast('Published edition “' + edition.label + '”', 'success');
-        }).catch(function (e) { NL.toast && NL.toast('Publish failed: ' + (e && e.message || e), 'error'); });
+          NL.ensureAuth().then(function () {
+            return db.ref(BASE + '/draft/docs').once('value');   // snapshot every area, not just the open one
+          }).then(function (snap) {
+            var all = snap.val() || {};
+            var edition = {
+              label: lbl, status: 'published',
+              publishedAt: Date.now(), publishedBy: (S.session && (S.session.name || S.session.email)) || null,
+              docs: {}
+            };
+            var count = 0;
+            DOCS.forEach(function (d) {
+              var doc = all[d.id]; if (!doc || !doc.nodes) return;
+              var nodes = doc.nodes;
+              Object.keys(nodes).forEach(function (id) { normNode(nodes[id]); });
+              var numMap = computeNumbers(nodes);
+              var meta = doc.meta || { title: docTitle(d.id) };
+              var snapshot = Object.keys(nodes).map(function (id) {
+                return Object.assign({}, strip(nodes[id]), { id: id, number: numMap[id] || '' });
+              });
+              edition.docs[d.id] = {
+                title: meta.title || docTitle(d.id), subtitle: meta.subtitle || '', season: meta.season || '',
+                html: bakeDoc(nodes, meta), nodes: snapshot
+              };
+              count++;
+            });
+            if (!count) { NL.toast && NL.toast('Nothing to publish yet — import or add content first', 'info'); return; }
+            var ref = db.ref(BASE + '/editions').push();
+            return ref.set(edition)
+              .then(function () { return db.ref(BASE + '/publishedEditionId').set(ref.key); })
+              .then(function () {
+                NL.writeAudit && NL.writeAudit('publish', 'Published edition "' + lbl + '" (' + count + ' areas)');
+                NL.toast && NL.toast('Published edition “' + lbl + '” — ' + count + ' area' + (count === 1 ? '' : 's'), 'success');
+              });
+          }).catch(function (e) { NL.toast && NL.toast('Publish failed: ' + (e && e.message || e), 'error'); });
         });
       });
   }
