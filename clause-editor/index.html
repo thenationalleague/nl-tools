@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Clause Editor
-  Version: v0.8 (22/07/2026)
+  Version: v0.9 (22/07/2026)
   File: /tools/clause-editor/index.html
 
   Structured editor for the League's governing documents — computed clause
@@ -70,6 +70,14 @@
     var NL_TOOL_KEY = 'ops-clause-editor';
 
     window.NL_CHANGELOG = [
+      {
+        date: '22/07/2026',
+        version: 'v0.9',
+        items: [
+          'Tables are now supported — add a table to any clause, edit cells inline, add/remove rows and columns; tables render in the reader, published editions, HTML export and search.',
+          'Backfilled the table-based appendices: Fees Tariff (M) and Fines Tariff (N) as real tables, Acquisition Materials (R) as a numbered list, and Televising (F) as prose — so all of Appendices A–R are now imported.'
+        ]
+      },
       {
         date: '22/07/2026',
         version: 'v0.8',
@@ -284,6 +292,19 @@
   .nl-art--nonum .nl-art__num { display: none; }
   .nl-clause__text a { color: var(--navy); }
   .nl-clause__title { margin-bottom: 2px; }
+
+  /* ---- Tables ---- */
+  .nl-tbl-wrap { overflow-x: auto; margin: 6px 0 10px; }
+  .nl-tbl { border-collapse: collapse; width: 100%; font-size: 14px; }
+  .nl-tbl th, .nl-tbl td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: top; }
+  .nl-tbl th { background: var(--navy-50); font-variation-settings: 'wght' 800; color: var(--navy); }
+  .nl-doc.is-editing .nl-tbl [contenteditable]:focus { box-shadow: inset 0 0 0 2px var(--primary); outline: none; }
+  .nl-tbl-ctrl { display: flex; gap: 6px; margin: 0 0 12px; }
+  .nl-tbl-ctrl button {
+    font-family: var(--font); font-size: 11px; padding: 3px 8px; border: 1px solid var(--border);
+    background: var(--white); color: var(--text); border-radius: 5px; cursor: pointer;
+  }
+  .nl-tbl-ctrl button:hover { border-color: var(--navy); background: var(--navy-50); }
 
   /* Depth tints for the gutter number (subtle legal hierarchy cue) */
   .nl-clause[data-depth="2"] .nl-clause__num { color: var(--navy); }
@@ -513,6 +534,7 @@
     return '<div class="nl-tools" contenteditable="false">' +
       '<button data-op="addAfter" title="Add a clause after this one">+ clause</button>' +
       '<button data-op="addSub" title="Add a sub-clause inside this one">+ sub</button>' +
+      '<button data-op="addTable" title="Add a table after this one">+ table</button>' +
       '<span class="sep"></span>' +
       '<button data-op="outdent" title="Promote one level">← outdent</button>' +
       '<button data-op="indent" title="Demote one level">indent →</button>' +
@@ -549,10 +571,41 @@
       '<div class="nl-clause__num">' + esc(num) + '</div>' +
       '<div class="nl-clause__body">';
     if (node.title || editing) out += '<div class="nl-clause__title" data-ph="Heading (optional)"' + editable('title') + '>' + esc(node.title || '') + '</div>';
-    out += '<div class="nl-clause__text" data-ph="Write the clause text…"' + editable('body') + '>' + (node.body || '') + '</div>';
+    if (node.kind === 'table') {
+      out += renderTable(node, editing);
+    } else {
+      out += '<div class="nl-clause__text" data-ph="Write the clause text…"' + editable('body') + '>' + (node.body || '') + '</div>';
+    }
     out += toolbar(node);
     kids.forEach(function (c) { out += renderNode(c, numMap); });
     return out + '</div></div>';
+  }
+
+  function renderTable(node, editing) {
+    var t = node.table || { header: [], rows: [] };
+    var head = Array.isArray(t.header) ? t.header : [];
+    var rows = Array.isArray(t.rows) ? t.rows : [];
+    var h = '<div class="nl-tbl-wrap"><table class="nl-tbl">';
+    if (head.length) {
+      h += '<thead><tr>' + head.map(function (c, ci) {
+        return '<th' + (editing ? ' contenteditable="true" data-th="' + ci + '"' : '') + '>' + esc(c || '') + '</th>';
+      }).join('') + '</tr></thead>';
+    }
+    h += '<tbody>' + rows.map(function (row, ri) {
+      row = Array.isArray(row) ? row : [];
+      return '<tr>' + row.map(function (c, ci) {
+        return '<td' + (editing ? ' contenteditable="true" data-tr="' + ri + '" data-tc="' + ci + '"' : '') + '>' + esc(c || '') + '</td>';
+      }).join('') + '</tr>';
+    }).join('') + '</tbody></table></div>';
+    if (editing) {
+      h += '<div class="nl-tbl-ctrl" contenteditable="false">' +
+        '<button type="button" data-tblop="addRow">+ row</button>' +
+        '<button type="button" data-tblop="addCol">+ col</button>' +
+        '<button type="button" data-tblop="delRow">− row</button>' +
+        '<button type="button" data-tblop="delCol">− col</button>' +
+        '</div>';
+    }
+    return h;
   }
   function editable(field) {
     return (S.mode === 'edit' && canEdit()) ? ' contenteditable="true" data-field="' + field + '"' : '';
@@ -630,11 +683,7 @@
       DOCS.forEach(function (d) {
         var doc = all[d.id]; if (!doc || !doc.nodes) return;
         var nodes = doc.nodes;
-        Object.keys(nodes).forEach(function (id) {
-          var n = nodes[id];
-          if (n.parentId === undefined) n.parentId = null;
-          if (n.order === undefined) n.order = 0;
-        });
+        Object.keys(nodes).forEach(function (id) { normNode(nodes[id]); });
         idx[d.id] = { title: (doc.meta && doc.meta.title) || docTitle(d.id), nodes: nodes, numMap: computeNumbers(nodes) };
       });
       S.index = idx;
@@ -663,7 +712,7 @@
       var hits = [];
       Object.keys(nodes).forEach(function (id) {
         var n = nodes[id];
-        var text = ((n.title || '') + ' ' + (n.body || '').replace(/<[^>]+>/g, ' ')).toLowerCase();
+        var text = ((n.title || '') + ' ' + (n.body || '').replace(/<[^>]+>/g, ' ') + ' ' + tableText(n)).toLowerCase();
         if (text.indexOf(ql) !== -1 || (numMap[id] || '').toLowerCase().indexOf(ql) !== -1) hits.push(n);
       });
       if (!hits.length) return;
@@ -671,7 +720,7 @@
       out.push('<div class="ce-toc__group">' + esc(title) + ' · ' + hits.length + '</div>');
       hits.slice(0, 40).forEach(function (n) {
         var hasTitle = !!n.title;
-        var snip = hasTitle ? n.title : (n.body || '').replace(/<[^>]+>/g, ' ').trim();
+        var snip = hasTitle ? n.title : ((n.body || '').replace(/<[^>]+>/g, ' ').trim() || (n.kind === 'table' ? '▦ ' + tableText(n).trim() : ''));
         var tcls = 'ce-toc__t' + (hasTitle ? '' : ' ce-toc__t--preview');
         out.push('<a class="ce-toc__item" data-goto="' + n.id + '" data-doc="' + d.id + '"><span class="ce-toc__num">' + esc(numMap[n.id] || '') + '</span><span class="' + tcls + '">' + esc(snip) + '</span></a>');
       });
@@ -731,12 +780,8 @@
       if (reqDoc !== S.docId) return; // user switched area before this resolved
       var meta = res[0].val(), nodes = res[1].val() || {};
       if (meta) S.doc = Object.assign(S.doc, meta);
-      // Restore fields Firebase drops when they are null/0 so the tree is whole.
-      Object.keys(nodes).forEach(function (id) {
-        var n = nodes[id];
-        if (n.parentId === undefined) n.parentId = null;
-        if (n.order === undefined) n.order = 0;
-      });
+      // Restore fields Firebase drops/coerces (null parentId, sparse table arrays).
+      Object.keys(nodes).forEach(function (id) { normNode(nodes[id]); });
       S.nodes = nodes;
       render();
     }).catch(function (e) {
@@ -763,7 +808,8 @@
           map[n.id] = {
             id: n.id, parentId: n.parentId, order: n.order || 0, kind: n.kind || 'clause',
             numStyle: n.numStyle || 'decimal', numberOverride: n.numberOverride || null,
-            title: n.title || null, body: n.body || null, updatedAt: now, updatedBy: 'import'
+            title: n.title || null, body: n.body || null, table: n.table || null,
+            updatedAt: now, updatedBy: 'import'
           };
         });
         return NL.ensureAuth().then(function () {
@@ -807,7 +853,19 @@
       load();
     });
   }
-  function strip(n) { return { parentId: n.parentId, order: n.order, kind: n.kind, numStyle: n.numStyle, numberOverride: n.numberOverride, title: n.title, body: n.body }; }
+  function strip(n) { return { parentId: n.parentId, order: n.order, kind: n.kind, numStyle: n.numStyle, numberOverride: n.numberOverride, title: n.title, body: n.body, table: n.table || null }; }
+  // Firebase returns arrays as objects when sparse — coerce a node's table back to arrays.
+  function normNode(n) {
+    if (n.parentId === undefined) n.parentId = null;
+    if (n.order === undefined) n.order = 0;
+    if (n.table) {
+      var t = n.table;
+      t.header = Array.isArray(t.header) ? t.header : (t.header ? Object.values(t.header) : []);
+      t.rows = Array.isArray(t.rows) ? t.rows : (t.rows ? Object.values(t.rows) : []);
+      t.rows = t.rows.map(function (r) { return Array.isArray(r) ? r : (r ? Object.values(r) : []); });
+    }
+    return n;
+  }
   function clone() { return JSON.parse(JSON.stringify(S.nodes)); }
   function uid() { return 'n' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36); }
   function reindex(nodes, pid) { childrenOf(nodes, pid).forEach(function (n, i) { n.order = i; }); }
@@ -866,6 +924,17 @@
       reindex(c, t.parentId);
       S.selectedId = n.id; S.focusNew = n.id;
       previewThenCommit(c, 'Add clause after ' + id);
+    },
+    addTable: function (id) {
+      var c = clone(), t = c[id];
+      var n = {
+        id: uid(), parentId: t.parentId, order: (t.order || 0) + 0.5, kind: 'table',
+        numStyle: 'none', numberOverride: null, title: null, body: null,
+        table: { header: ['Column 1', 'Column 2'], rows: [['', ''], ['', '']] }
+      };
+      c[n.id] = n; reindex(c, t.parentId);
+      S.selectedId = n.id;
+      previewThenCommit(c, 'Add table after ' + id);
     },
     addSub: function (id) {
       var c = clone(), t = c[id];
@@ -935,6 +1004,47 @@
     t.order = (sibs[j].order || 0) + (dir < 0 ? -0.5 : 0.5);
     reindex(c, t.parentId);
     previewThenCommit(c, 'Move ' + id);
+  }
+
+  // Add/remove table rows and columns (structural — re-renders).
+  function tableOp(id, op) {
+    var node = S.nodes[id]; if (!node || !node.table) return;
+    var c = clone(), t = c[id].table;
+    if (!Array.isArray(t.header)) t.header = [];
+    if (!Array.isArray(t.rows)) t.rows = [];
+    var cols = t.header.length || (t.rows[0] ? t.rows[0].length : 1);
+    if (op === 'addRow') { var r = []; for (var i = 0; i < cols; i++) r.push(''); t.rows.push(r); }
+    else if (op === 'delRow') { if (t.rows.length) t.rows.pop(); }
+    else if (op === 'addCol') { if (t.header.length) t.header.push(''); t.rows.forEach(function (r) { r.push(''); }); }
+    else if (op === 'delCol') { if (t.header.length > 1) t.header.pop(); t.rows.forEach(function (r) { if (r.length > 1) r.pop(); }); }
+    commit(c, 'Edit table ' + id);
+  }
+
+  // Persist a single table cell without re-rendering (keeps focus while tabbing).
+  function saveTableCell(cell) {
+    var host = cell.closest('[data-id]'); if (!host) return;
+    var id = host.dataset.id, node = S.nodes[id]; if (!node || !node.table) return;
+    var val = cell.textContent;
+    if (cell.hasAttribute('data-th')) {
+      var ci = +cell.getAttribute('data-th');
+      if ((node.table.header[ci] || '') === val) return;
+      node.table.header[ci] = val;
+    } else {
+      var ri = +cell.getAttribute('data-tr'), cc = +cell.getAttribute('data-tc');
+      if (!node.table.rows[ri]) return;
+      if ((node.table.rows[ri][cc] || '') === val) return;
+      node.table.rows[ri][cc] = val;
+    }
+    NL.ensureAuth().then(function () {
+      return nodesRef().child(id).update({ table: node.table, updatedAt: Date.now(), updatedBy: (S.session && (S.session.name || S.session.email)) || null });
+    }).then(function () { S.index = null; }).catch(function (e) { NL.toast && NL.toast('Save failed: ' + (e && e.message || e), 'error'); });
+  }
+
+  function tableText(n) {
+    if (!n.table) return '';
+    var s = (n.table.header || []).join(' ');
+    (n.table.rows || []).forEach(function (r) { s += ' ' + (r || []).join(' '); });
+    return s;
   }
 
   /* ================= Publish + export ================= */
@@ -1040,8 +1150,10 @@
     });
 
     var doc = $('ceDoc');
-    // structural op buttons + select
+    // structural op buttons + table row/col controls + select
     doc.addEventListener('click', function (e) {
+      var tb = e.target.closest('[data-tblop]');
+      if (tb) { var th = tb.closest('[data-id]'); if (th) tableOp(th.dataset.id, tb.dataset.tblop); return; }
       var el = e.target.closest('[data-op]'); if (!el || el.tagName === 'SELECT') return;
       var host = el.closest('[data-id]'); if (!host) return;
       var op = el.dataset.op; if (OPS[op]) OPS[op](host.dataset.id);
@@ -1050,6 +1162,11 @@
       var sel = e.target.closest('select[data-op="style"]'); if (!sel) return;
       var host = sel.closest('[data-id]'); OPS.style(host.dataset.id, sel.value);
     });
+    // table cell editing — quiet save on blur (no re-render, so Tab keeps working)
+    doc.addEventListener('blur', function (e) {
+      var cell = e.target.closest && e.target.closest('[contenteditable][data-th], [contenteditable][data-tr]');
+      if (cell) saveTableCell(cell);
+    }, true);
     // inline text editing — save on blur
     doc.addEventListener('blur', function (e) {
       var ed = e.target.closest('[contenteditable][data-field]'); if (!ed) return;
