@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Clause Editor
-  Version: v0.6 (22/07/2026)
+  Version: v0.7 (22/07/2026)
   File: /tools/clause-editor/index.html
 
   Structured editor for the League's governing documents — computed clause
@@ -70,6 +70,16 @@
     var NL_TOOL_KEY = 'ops-clause-editor';
 
     window.NL_CHANGELOG = [
+      {
+        date: '22/07/2026',
+        version: 'v0.7',
+        items: [
+          'Editing is clearer: every clause shows a heading slot and a body slot with “where to type” placeholders, and the cursor drops straight into a newly-added clause.',
+          'Added a formatting toolbar — bold, italic, underline, bullet/numbered lists and clear formatting.',
+          'Unnumbered clauses no longer show an empty number gutter, so their text sits flush.',
+          'All five document areas are now shown in a pinned list in the contents rail (replacing the dropdown), so any area is always one tap away.'
+        ]
+      },
       {
         date: '22/07/2026',
         version: 'v0.6',
@@ -150,15 +160,22 @@
   /* ---- Sidebar / contents ---- */
   .ce-side {
     border-right: 1px solid var(--border); background: var(--off-white);
-    padding: 18px 14px 40px; overflow-y: auto; min-height: 0;
+    padding: 0 14px 40px; overflow-y: auto; min-height: 0;
   }
-  .ce-side__picker {
-    width: 100%; box-sizing: border-box; font-family: var(--font); font-size: 14px;
-    font-variation-settings: 'wght' 800; color: var(--navy); background: var(--white);
-    border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; cursor: pointer;
+  /* Sticky header: the five areas + search stay pinned while the outline scrolls. */
+  .ce-side__head {
+    position: sticky; top: 0; z-index: 2; background: var(--off-white);
+    margin: 0 -14px 8px; padding: 16px 14px 10px; border-bottom: 1px solid var(--border);
   }
-  .ce-side__picker:focus-visible { box-shadow: var(--focus-ring); outline: none; }
-  .ce-side__season { font-size: 12px; color: var(--text-muted); margin: 4px 0 14px; }
+  .ce-nav { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
+  .ce-nav__item {
+    display: block; width: 100%; text-align: left; font-family: var(--font); font-size: 13px;
+    font-variation-settings: 'wght' 700; color: var(--text); background: none; border: none;
+    padding: 7px 9px; border-radius: 7px; cursor: pointer;
+  }
+  .ce-nav__item:hover { background: var(--navy-50); }
+  .ce-nav__item.is-active { background: var(--navy); color: var(--white); }
+  .ce-side__season { font-size: 12px; color: var(--text-muted); margin: 0 0 10px; }
   .ce-side__search {
     width: 100%; font-family: var(--font); font-size: 13px; box-sizing: border-box;
     border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 12px;
@@ -255,7 +272,11 @@
   .nl-clause__text > p { margin: 0 0 8px; }
   .nl-clause__text > p:last-child { margin-bottom: 0; }
   .nl-clause--bullet .nl-clause__num { color: var(--text-muted); min-width: 20px; }
+  /* Unnumbered nodes: collapse the empty gutter so content sits flush. */
+  .nl-clause--nonum > .nl-clause__num { display: none; }
+  .nl-art--nonum .nl-art__num { display: none; }
   .nl-clause__text a { color: var(--navy); }
+  .nl-clause__title { margin-bottom: 2px; }
 
   /* Depth tints for the gutter number (subtle legal hierarchy cue) */
   .nl-clause[data-depth="2"] .nl-clause__num { color: var(--navy); }
@@ -268,6 +289,25 @@
   .nl-doc.is-editing .nl-art__title { border-radius: 5px; }
   .nl-doc.is-editing [contenteditable]:hover { box-shadow: 0 0 0 1px var(--border); }
   .nl-doc.is-editing [contenteditable]:focus { box-shadow: var(--focus-ring); outline: none; background: var(--white); }
+  .nl-doc.is-editing [contenteditable] { padding: 2px 4px; min-height: 1.2em; }
+  /* Placeholder shown in an empty editable slot so it's clear where to type. */
+  .nl-doc.is-editing [contenteditable][data-ph]:empty::before {
+    content: attr(data-ph); color: var(--text-muted); font-style: italic; pointer-events: none;
+  }
+
+  /* ---- Formatting toolbar (edit mode) ---- */
+  .ce-fmt {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+    padding: 6px 28px; border-bottom: 1px solid var(--border); background: var(--off-white);
+  }
+  .ce-fmt[hidden] { display: none; }
+  .ce-fmt button {
+    font-family: var(--font); font-size: 13px; min-width: 30px; padding: 4px 9px;
+    border: 1px solid var(--border); background: var(--white); color: var(--text); border-radius: 6px; cursor: pointer;
+  }
+  .ce-fmt button:hover { border-color: var(--navy); background: var(--navy-50); }
+  .ce-fmt__sep { width: 1px; align-self: stretch; background: var(--border); margin: 2px 4px; }
+  @media (max-width: 860px) { .ce-fmt { padding: 6px 14px; } }
   .nl-clause.is-sel > .nl-clause__body { box-shadow: -3px 0 0 var(--primary); padding-left: 8px; margin-left: -11px; }
   .nl-art.is-sel { box-shadow: -3px 0 0 var(--primary); padding-left: 8px; margin-left: -11px; }
 
@@ -307,9 +347,11 @@
 <div id="pageWrap">
   <div class="ce-layout">
     <aside class="ce-side" id="ceSide">
-      <select class="ce-side__picker" id="ceDocPicker" aria-label="Choose a document area"></select>
-      <div class="ce-side__season" id="ceDocSeason"></div>
-      <input type="search" class="ce-side__search" id="ceSearch" placeholder="Search clauses…" autocomplete="off">
+      <div class="ce-side__head">
+        <nav class="ce-nav" id="ceDocNav" aria-label="Document areas"></nav>
+        <div class="ce-side__season" id="ceDocSeason"></div>
+        <input type="search" class="ce-side__search" id="ceSearch" placeholder="Search the whole handbook…" autocomplete="off">
+      </div>
       <div id="ceToc"></div>
     </aside>
 
@@ -324,6 +366,16 @@
         <div class="ce-bar__spacer"></div>
         <button class="btn btn--ghost" id="ceDownload" type="button">Download HTML</button>
         <button class="btn btn--primary" id="cePublish" type="button" hidden>Publish edition</button>
+      </div>
+      <div class="ce-fmt" id="ceFmt" hidden>
+        <button type="button" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+        <button type="button" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+        <button type="button" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>
+        <span class="ce-fmt__sep"></span>
+        <button type="button" data-cmd="insertUnorderedList" title="Bullet list">• List</button>
+        <button type="button" data-cmd="insertOrderedList" title="Numbered list">1. List</button>
+        <span class="ce-fmt__sep"></span>
+        <button type="button" data-cmd="removeFormat" title="Clear formatting">Clear</button>
       </div>
       <div id="ceDoc"></div>
     </main>
@@ -359,6 +411,7 @@
     nodes: {},           // id -> node  (flat; tree via parentId + order)
     mode: 'read',        // 'read' | 'edit'
     selectedId: null,
+    focusNew: null,      // node id to focus after the next commit (just-added clause)
     index: null          // cross-area search cache: { docId: {title,nodes,numMap} }
   };
 
@@ -468,25 +521,28 @@
   function renderNode(node, numMap) {
     var kids = childrenOf(S.nodes, node.id);
     var sel = (node.id === S.selectedId) ? ' is-sel' : '';
+    var editing = (S.mode === 'edit' && canEdit());
+    var num = numMap[node.id] || '';
     if (node.parentId == null) {
       // Article (top level)
-      var h = '<section class="nl-art' + sel + '" id="c-' + node.id + '" data-id="' + node.id + '">' +
+      var h = '<section class="nl-art' + (num ? '' : ' nl-art--nonum') + sel + '" id="c-' + node.id + '" data-id="' + node.id + '">' +
         '<div class="nl-art__head">' +
-        '<span class="nl-art__num">' + esc(numMap[node.id] || '') + '</span>' +
-        '<span class="nl-art__title"' + editable('title') + '>' + esc(node.title || '') + '</span>' +
+        '<span class="nl-art__num">' + esc(num) + '</span>' +
+        '<span class="nl-art__title" data-ph="Section title"' + editable('title') + '>' + esc(node.title || '') + '</span>' +
         '</div>' + toolbar(node);
-      if (node.body) h += '<div class="nl-clause__text" style="margin-top:6px"' + editable('body') + '>' + node.body + '</div>';
-      else if (S.mode === 'edit') h += '<div class="nl-clause__text ce-empty-body" style="margin-top:6px;color:var(--text-muted)"' + editable('body') + '></div>';
+      if (node.body) h += '<div class="nl-clause__text" data-ph="Write the text…" style="margin-top:6px"' + editable('body') + '>' + node.body + '</div>';
+      else if (editing) h += '<div class="nl-clause__text" data-ph="Write the text…" style="margin-top:6px"' + editable('body') + '></div>';
       kids.forEach(function (c) { h += renderNode(c, numMap); });
       return h + '</section>';
     }
     var depth = depthOf(node);
-    var bulletCls = node.kind === 'bullet' ? ' nl-clause--bullet' : '';
-    var out = '<div class="nl-clause' + bulletCls + sel + '" id="c-' + node.id + '" data-id="' + node.id + '" data-depth="' + depth + '">' +
-      '<div class="nl-clause__num">' + esc(numMap[node.id] || '') + '</div>' +
+    var noNum = !num && node.kind !== 'bullet';
+    var cls = node.kind === 'bullet' ? ' nl-clause--bullet' : (noNum ? ' nl-clause--nonum' : '');
+    var out = '<div class="nl-clause' + cls + sel + '" id="c-' + node.id + '" data-id="' + node.id + '" data-depth="' + depth + '">' +
+      '<div class="nl-clause__num">' + esc(num) + '</div>' +
       '<div class="nl-clause__body">';
-    if (node.title) out += '<div class="nl-clause__title"' + editable('title') + '>' + esc(node.title) + '</div>';
-    out += '<div class="nl-clause__text"' + editable('body') + '>' + (node.body || '') + '</div>';
+    if (node.title || editing) out += '<div class="nl-clause__title" data-ph="Heading (optional)"' + editable('title') + '>' + esc(node.title || '') + '</div>';
+    out += '<div class="nl-clause__text" data-ph="Write the clause text…"' + editable('body') + '>' + (node.body || '') + '</div>';
     out += toolbar(node);
     kids.forEach(function (c) { out += renderNode(c, numMap); });
     return out + '</div></div>';
@@ -536,6 +592,13 @@
   function refreshToc() {
     if (($('ceSearch').value || '').trim()) doSearch();
     else renderTocRoots();
+  }
+
+  function renderDocNav() {
+    $('ceDocNav').innerHTML = DOCS.map(function (d) {
+      return '<button type="button" class="ce-nav__item' + (d.id === S.docId ? ' is-active' : '') +
+        '" data-doc="' + d.id + '">' + esc(d.title) + '</button>';
+    }).join('');
   }
 
   function renderTocRoots() {
@@ -624,6 +687,7 @@
   function syncBar() {
     $('ceEditBtn').hidden = !canEdit();
     $('cePublish').hidden = !canEdit() || !Object.keys(S.nodes).length;
+    $('ceFmt').hidden = !(S.mode === 'edit' && canEdit());
     var note = $('ceModeNote');
     if (!canEdit()) note.textContent = 'Read-only access';
     else if (S.mode === 'edit') note.textContent = 'Editing the draft · numbers recalculate live';
@@ -631,7 +695,7 @@
     [].forEach.call(document.querySelectorAll('#ceMode button'), function (b) {
       b.classList.toggle('is-on', b.dataset.mode === S.mode);
     });
-    var picker = $('ceDocPicker'); if (picker) picker.value = S.docId;
+    renderDocNav();
     $('ceDocSeason').textContent = S.doc.season ? S.doc.season + ' edition (draft)' : '';
   }
 
@@ -730,6 +794,7 @@
       S.index = null; // search index is now stale
       NL.writeAudit && NL.writeAudit('edit', label);
       render();
+      if (S.focusNew) { focusNode(S.focusNew); S.focusNew = null; }  // drop the cursor into a just-added clause
     }).catch(function (e) {
       NL.toast && NL.toast('Save failed: ' + (e && e.message || e), 'error');
       load();
@@ -764,13 +829,25 @@
         { label: 'Cancel', onClick: function (ctrl) { ctrl.close(false); } },
         { label: 'Apply', className: 'btn--primary', autofocus: true, onClick: function (ctrl) { ctrl.close(true); } }
       ],
-      onClose: function (ok) { if (ok) commit(c, label); }
+      onClose: function (ok) { if (ok) commit(c, label); else S.focusNew = null; }
     });
+  }
+
+  // Drop the caret into a clause's body (used after adding a clause).
+  function focusNode(id) {
+    var el = document.querySelector('#c-' + id + ' .nl-clause__text[contenteditable]');
+    if (!el) return;
+    el.focus();
+    try {
+      var r = document.createRange(); r.selectNodeContents(el); r.collapse(true);
+      var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    } catch (e) {}
+    el.scrollIntoView({ block: 'center' });
   }
 
   /* ================= Structural operations ================= */
   function newNode(parentId, numStyle, kind) {
-    return { id: uid(), parentId: parentId, order: 0, kind: kind || 'clause', numStyle: numStyle || 'decimal', numberOverride: null, title: null, body: '<p></p>' };
+    return { id: uid(), parentId: parentId, order: 0, kind: kind || 'clause', numStyle: numStyle || 'decimal', numberOverride: null, title: null, body: '' };
   }
   // Structural ops use fractional orders + reindex() so a node lands exactly
   // where intended, then orders are normalised to 0..n within each parent.
@@ -780,7 +857,7 @@
       var n = newNode(t.parentId, t.kind === 'bullet' ? 'bullet' : t.numStyle, t.kind);
       n.order = (t.order || 0) + 0.5; c[n.id] = n;
       reindex(c, t.parentId);
-      S.selectedId = n.id;
+      S.selectedId = n.id; S.focusNew = n.id;
       previewThenCommit(c, 'Add clause after ' + id);
     },
     addSub: function (id) {
@@ -791,7 +868,7 @@
       var n = newNode(id, style, 'clause');
       n.order = 1e6; c[n.id] = n;
       reindex(c, id);
-      S.selectedId = n.id;
+      S.selectedId = n.id; S.focusNew = n.id;
       previewThenCommit(c, 'Add sub-clause under ' + id);
     },
     indent: function (id) {
@@ -931,8 +1008,24 @@
     });
     $('ceDownload').addEventListener('click', downloadHtml);
     $('cePublish').addEventListener('click', publish);
-    $('ceDocPicker').addEventListener('change', function (e) { switchDoc(e.target.value); });
+    $('ceDocNav').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-doc]'); if (b) switchDoc(b.dataset.doc);
+    });
     $('ceSearch').addEventListener('input', doSearch);
+
+    // Formatting toolbar: keep the editable's selection (mousedown preventDefault),
+    // then apply the command to the focused clause body. The edit saves on blur.
+    var fmt = $('ceFmt');
+    fmt.addEventListener('mousedown', function (e) { if (e.target.closest('button')) e.preventDefault(); });
+    fmt.addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-cmd]'); if (!b) return;
+      var ed = document.activeElement;
+      if (!ed || !ed.getAttribute || ed.getAttribute('contenteditable') !== 'true') {
+        NL.toast && NL.toast('Click into a clause first, then format', 'info'); return;
+      }
+      try { document.execCommand('styleWithCSS', false, false); } catch (_) {}
+      document.execCommand(b.dataset.cmd, false, null);
+    });
 
     $('ceToc').addEventListener('click', function (e) {
       var a = e.target.closest('[data-goto]'); if (!a) return;
@@ -974,9 +1067,7 @@
     S.session = session;
     S.role = (session && session.role) || 'viewer';
     if (!window.NL || !NL.ensureAuth) { console.warn('[clause-editor] NL.ensureAuth missing'); return; }
-    $('ceDocPicker').innerHTML = DOCS.map(function (d) {
-      return '<option value="' + d.id + '">' + esc(d.title) + '</option>';
-    }).join('');
+    renderDocNav();
     wire();
     syncBar();
     load();
