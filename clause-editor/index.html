@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Clause Editor
-  Version: v0.12 (22/07/2026)
+  Version: v0.13 (22/07/2026)
   File: /tools/clause-editor/index.html
 
   Structured editor for the League's governing documents — computed clause
@@ -70,6 +70,13 @@
     var NL_TOOL_KEY = 'ops-clause-editor';
 
     window.NL_CHANGELOG = [
+      {
+        date: '22/07/2026',
+        version: 'v0.13',
+        items: [
+          'Added a “you are here” breadcrumb under the toolbar showing the current area and section (e.g. “Articles of Association › 12 · Voting…”), updating as you scroll and highlighting the section in the contents rail. On mobile, tap it to open the contents.'
+        ]
+      },
       {
         date: '22/07/2026',
         version: 'v0.12',
@@ -250,6 +257,17 @@
     padding: 12px 28px; border-bottom: 1px solid var(--border); background: var(--white);
   }
   #ceDoc { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
+  /* Breadcrumb "you are here" — sits above the scrolling document, updates on scroll */
+  .ce-crumb {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+    padding: 8px 28px; border-bottom: 1px solid var(--border); background: var(--off-white);
+    font-size: 13px; color: var(--text-muted); min-height: 18px;
+  }
+  .ce-crumb:empty { display: none; }
+  .ce-crumb__area { font-variation-settings: 'wght' 700; color: var(--navy); flex: 0 0 auto; }
+  .ce-crumb__sep { color: var(--text-muted); flex: 0 0 auto; }
+  .ce-crumb__sec { font-variation-settings: 'wght' 700; color: var(--primary); flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  @media (max-width: 860px) { .ce-crumb { padding: 8px 14px; cursor: pointer; } }
   .ce-bar__spacer { flex: 1; }
   .ce-menu-btn { display: none; }
   .ce-scrim { display: none; }
@@ -436,6 +454,7 @@
         <span class="ce-fmt__sep"></span>
         <button type="button" data-cmd="removeFormat" title="Clear formatting">Clear</button>
       </div>
+      <div class="ce-crumb" id="ceCrumb" title="Where you are"></div>
       <div id="ceDoc"></div>
     </main>
     <div class="ce-scrim" id="ceScrim"></div>
@@ -645,8 +664,9 @@
   function render() {
     var host = $('ceDoc');
     var ids = Object.keys(S.nodes);
-    if (!ids.length) { renderEmpty(); syncBar(); return; }
+    if (!ids.length) { S.numMap = {}; renderEmpty(); syncBar(); updateCrumb(); return; }
     var numMap = computeNumbers(S.nodes);
+    S.numMap = numMap;
     var roots = childrenOf(S.nodes, null);
     var html = '<div class="nl-doc' + (S.mode === 'edit' ? ' is-editing' : '') + '" id="ceDocInner">';
     html += '<div class="nl-doc__head">' +
@@ -659,6 +679,37 @@
     host.innerHTML = html;
     refreshToc();
     syncBar();
+    updateCrumb();
+  }
+
+  // "You are here": breadcrumb of the current area + the top-level section
+  // (article/appendix/directive) at the top of the viewport, kept in sync on scroll.
+  function currentSectionEl() {
+    var host = $('ceDoc'); if (!host) return null;
+    var top = host.getBoundingClientRect().top, arts = host.querySelectorAll('.nl-art'), cur = arts[0] || null;
+    for (var i = 0; i < arts.length; i++) {
+      if (arts[i].getBoundingClientRect().top - top <= 12) cur = arts[i]; else break;
+    }
+    return cur;
+  }
+  function updateCrumb() {
+    var crumb = $('ceCrumb'); if (!crumb) return;
+    if (!Object.keys(S.nodes).length) {
+      crumb.innerHTML = '<span class="ce-crumb__area">' + esc(S.doc.title || docTitle(S.docId)) + '</span>';
+      return;
+    }
+    var el = currentSectionEl();
+    var secId = el && el.dataset.id, node = secId && S.nodes[secId];
+    var num = (S.numMap && secId && S.numMap[secId]) || '';
+    var sec = node ? ((num ? esc(num) + ' · ' : '') + esc(node.title || '')) : '';
+    crumb.innerHTML = '<span class="ce-crumb__area">' + esc(S.doc.title || docTitle(S.docId)) + '</span>' +
+      (sec ? '<span class="ce-crumb__sep">›</span><span class="ce-crumb__sec">' + sec + '</span>' : '');
+    // reflect the current section in the contents rail (only when showing the outline)
+    if (secId && !($('ceSearch').value || '').trim()) {
+      [].forEach.call($('ceToc').querySelectorAll('.ce-toc__item'), function (a) {
+        a.classList.toggle('is-current', a.dataset.goto === secId);
+      });
+    }
   }
 
   function renderEmpty() {
@@ -1153,6 +1204,19 @@
       scrim.classList.toggle('is-open', open);
     });
     if (scrim) scrim.addEventListener('click', closeDrawer);
+
+    // Scroll-spy breadcrumb: update "you are here" as the document scrolls.
+    var crumbRaf = null;
+    $('ceDoc').addEventListener('scroll', function () {
+      if (crumbRaf) return;
+      crumbRaf = requestAnimationFrame(function () { crumbRaf = null; updateCrumb(); });
+    });
+    // On mobile the breadcrumb is the quickest way back to the contents.
+    $('ceCrumb').addEventListener('click', function () {
+      if (menu && getComputedStyle(menu).display !== 'none') {
+        side.classList.add('is-open'); scrim.classList.add('is-open');
+      }
+    });
 
     document.querySelector('#ceMode').addEventListener('click', function (e) {
       var b = e.target.closest('button[data-mode]'); if (!b) return;
