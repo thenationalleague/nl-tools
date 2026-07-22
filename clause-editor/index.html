@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Clause Editor
-  Version: v0.17 (22/07/2026)
+  Version: v0.18 (22/07/2026)
   File: /tools/clause-editor/index.html
 
   Structured editor for the League's governing documents — computed clause
@@ -70,6 +70,16 @@
     var NL_TOOL_KEY = 'ops-clause-editor';
 
     window.NL_CHANGELOG = [
+      {
+        date: '22/07/2026',
+        version: 'v0.18',
+        items: [
+          'Editing the live draft now asks for confirmation the first time each session, and entering edit mode is written to the audit log.',
+          'Publishing an edition now requires typing PUBLISH to confirm.',
+          'Deep links: in read mode, click a clause number to copy a shareable link that opens the handbook at that clause (URL like #league-rules/<id>).',
+          'Removed the plain HTML download (a branded PDF export is planned instead).'
+        ]
+      },
       {
         date: '22/07/2026',
         version: 'v0.17',
@@ -387,6 +397,12 @@
   .nl-clause[data-depth="3"] .nl-clause__num,
   .nl-clause[data-depth="4"] .nl-clause__num { color: var(--navy-600); font-variation-settings: 'wght' 700; }
 
+  /* ---- Read mode: numbers are click-to-copy deep links ---- */
+  .nl-doc:not(.is-editing) .nl-clause__num,
+  .nl-doc:not(.is-editing) .nl-art__num { cursor: pointer; }
+  .nl-doc:not(.is-editing) .nl-clause__num:hover,
+  .nl-doc:not(.is-editing) .nl-art__num:hover { text-decoration: underline; text-underline-offset: 3px; }
+
   /* ---- Editing chrome (only in edit mode) ---- */
   .nl-doc.is-editing .nl-clause__text,
   .nl-doc.is-editing .nl-clause__title,
@@ -469,7 +485,6 @@
         <span class="ce-mode-note" id="ceModeNote"></span>
         <div class="ce-bar__spacer"></div>
         <button class="btn btn--ghost" id="ceReimport" type="button" hidden>Re-import</button>
-        <button class="btn btn--ghost" id="ceDownload" type="button">Download HTML</button>
         <button class="btn btn--primary" id="cePublish" type="button" hidden>Publish edition</button>
       </div>
       <div class="ce-fmt" id="ceFmt" hidden>
@@ -518,7 +533,8 @@
     mode: 'read',        // 'read' | 'edit'
     selectedId: null,
     focusNew: null,      // node id to focus after the next commit (just-added clause)
-    index: null          // cross-area search cache: { docId: {title,nodes,numMap} }
+    index: null,         // cross-area search cache: { docId: {title,nodes,numMap} }
+    editConfirmed: false // acknowledged the "you are editing the live draft" warning this session
   };
 
   function canEdit()  { return S.role === 'admin' || S.role === 'superadmin'; }
@@ -851,9 +867,41 @@
   function goto(docId, nodeId) {
     closeDrawer();
     S.selectedId = nodeId;
+    setHash(docId, nodeId);
     if (docId === S.docId) { scrollToNode(nodeId); refreshToc(); return; }
     S.docId = docId; S.mode = 'read';
     load().then(function () { scrollToNode(nodeId); });
+  }
+
+  /* ---- Deep links: #<area>/<nodeId> opens the handbook at a specific clause ---- */
+  var _suppressHash = false;
+  function setHash(docId, nodeId) {
+    _suppressHash = true;
+    try { location.hash = '#' + docId + '/' + nodeId; } catch (_) {}
+    setTimeout(function () { _suppressHash = false; }, 0);
+  }
+  function parseHash() {
+    var h = (location.hash || '').replace(/^#/, '');
+    if (!h) return null;
+    var i = h.indexOf('/'); if (i < 0) return null;
+    var docId = h.slice(0, i), nodeId = h.slice(i + 1);
+    if (!nodeId || !DOCS.some(function (d) { return d.id === docId; })) return null;
+    return { docId: docId, nodeId: nodeId };
+  }
+  // Route to whatever the URL points at. Called on boot and on manual hash changes.
+  function routeHash() {
+    var t = parseHash(); if (!t) return false;
+    S.selectedId = t.nodeId;
+    if (t.docId === S.docId) { render(); scrollToNode(t.nodeId); refreshToc(); }
+    else { S.docId = t.docId; S.mode = 'read'; load().then(function () { scrollToNode(t.nodeId); }); }
+    return true;
+  }
+  // Copy a shareable link to a clause (read mode: click its number).
+  function copyClauseLink(nodeId) {
+    var url = location.origin + location.pathname + '#' + S.docId + '/' + nodeId;
+    if (NL.copy) NL.copy(url);
+    setHash(S.docId, nodeId);
+    NL.toast && NL.toast('Link copied — opens the handbook at this clause', 'success');
   }
 
   function syncBar() {
@@ -1181,10 +1229,33 @@
     S.mode = save;
     return inner;
   }
+  // Editing the live handbook draft is consequential and attributed — make the first
+  // edit of a session a deliberate, acknowledged, audited action.
+  function confirmEditEntry() {
+    var who = (S.session && (S.session.name || S.session.email)) || 'your account';
+    NL.confirm(
+      'You are about to edit the live handbook draft. Every change saves immediately and is recorded against ' + who + ' in the audit log. Only continue if you mean to amend the official text.',
+      { title: 'Edit the live draft?', confirmText: 'I understand — start editing', variant: 'danger' }
+    ).then(function (ok) {
+      if (!ok) return;
+      S.editConfirmed = true;
+      S.mode = 'edit';
+      NL.writeAudit && NL.writeAudit('edit-mode', 'Entered edit mode on ' + docTitle(S.docId));
+      render();
+    });
+  }
+
   function publish() {
     NL.prompt('Name this edition (public surfaces will show this label):', { title: 'Publish edition', default: S.doc.season || '' })
       .then(function (label) {
         if (label === null) return;
+        var lbl = label.trim() || (S.doc.season || 'Edition');
+        // Type-to-confirm: publishing freezes the draft and changes what the public sees.
+        return NL.prompt(
+          'Publishing freezes the current ' + docTitle(S.docId) + ' draft as edition “' + lbl + '” and updates what public surfaces show. This cannot be edited afterwards — you publish a new edition instead.\n\nType PUBLISH to confirm.',
+          { title: 'Confirm publish', confirmText: 'Publish edition' }
+        ).then(function (word) {
+          if ((word || '').trim().toUpperCase() !== 'PUBLISH') { NL.toast && NL.toast('Publish cancelled', 'info'); return; }
         var numMap = computeNumbers(S.nodes);
         var snapshot = Object.keys(S.nodes).map(function (id) {
           return Object.assign({}, strip(S.nodes[id]), { id: id, number: numMap[id] || '' });
@@ -1202,18 +1273,9 @@
           NL.writeAudit && NL.writeAudit('publish', 'Published edition "' + edition.label + '"');
           NL.toast && NL.toast('Published edition “' + edition.label + '”', 'success');
         }).catch(function (e) { NL.toast && NL.toast('Publish failed: ' + (e && e.message || e), 'error'); });
+        });
       });
   }
-  function downloadHtml() {
-    var css = document.querySelector('style').textContent;
-    var doc = '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
-      '<title>' + esc(S.doc.title) + '</title>' +
-      '<link rel="stylesheet" href="https://thenationalleague.org.uk/tools/system/nl-brand.css?v=22">' +
-      '<style>body{background:var(--white)}' + css + '</style></head><body>' + staticDocHtml(true) + '</body></html>';
-    NL.download(S.docId + '-' + (S.doc.season || 'draft').replace(/[^\w]+/g, '-') + '.html', doc, 'text/html');
-    NL.toast && NL.toast('Downloaded', 'success');
-  }
-
   /* ================= Events ================= */
   function closeDrawer() {
     var side = $('ceSide'), scrim = $('ceScrim');
@@ -1254,10 +1316,12 @@
 
     document.querySelector('#ceMode').addEventListener('click', function (e) {
       var b = e.target.closest('button[data-mode]'); if (!b) return;
-      if (b.dataset.mode === 'edit' && !canEdit()) return;
+      if (b.dataset.mode === 'edit') {
+        if (!canEdit()) return;
+        if (!S.editConfirmed) { confirmEditEntry(); return; }  // gate the first edit of the session
+      }
       S.mode = b.dataset.mode; render();
     });
-    $('ceDownload').addEventListener('click', downloadHtml);
     $('ceReimport').addEventListener('click', importSeed);
     $('cePublish').addEventListener('click', publish);
     $('ceDocNav').addEventListener('click', function (e) {
@@ -1287,6 +1351,11 @@
     var doc = $('ceDoc');
     // structural op buttons + table row/col controls + select
     doc.addEventListener('click', function (e) {
+      // Read mode: clicking a clause number copies a shareable deep link to it.
+      if (S.mode !== 'edit') {
+        var numEl = e.target.closest('.nl-clause__num, .nl-art__num');
+        if (numEl) { var nh = numEl.closest('[data-id]'); if (nh) { copyClauseLink(nh.dataset.id); return; } }
+      }
       var tb = e.target.closest('[data-tblop]');
       if (tb) { var th = tb.closest('[data-id]'); if (th) tableOp(th.dataset.id, tb.dataset.tblop); return; }
       var el = e.target.closest('[data-op]'); if (!el || el.tagName === 'SELECT') return;
@@ -1329,7 +1398,11 @@
     renderDocNav();
     wire();
     syncBar();
-    load();
+    // Deep link in the URL? Open there; otherwise load the default area.
+    var t = parseHash();
+    if (t) { S.docId = t.docId; S.selectedId = t.nodeId; load().then(function () { scrollToNode(t.nodeId); refreshToc(); }); }
+    else { load(); }
+    window.addEventListener('hashchange', function () { if (!_suppressHash) routeHash(); });
   };
   if (window._toolDeferredSession) { window.TOOL.boot(window._toolDeferredSession); delete window._toolDeferredSession; }
 })();
