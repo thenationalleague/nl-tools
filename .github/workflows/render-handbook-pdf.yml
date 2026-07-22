@@ -1,0 +1,75 @@
+name: Render handbook PDF (v1.0)
+
+# Regenerates handbook/handbook.pdf from the PUBLISHED edition so the reader's
+# Download PDF button serves a real file (CDN-style), not a print dialog.
+# Cheap no-op when pdf-meta.json already matches the live publishedEditionId —
+# so the hourly schedule only does real work after a publish. Run manually
+# (workflow_dispatch, optionally force=true) for an immediate render.
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Re-render even if the PDF is already current"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "25 * * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: render-handbook-pdf
+  cancel-in-progress: true
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Chrome
+        id: chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Install puppeteer-core
+        run: npm install --no-save puppeteer-core
+
+      - name: Sync with origin/main (clean tree)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git reset --hard origin/main
+
+      - name: Serve repo under /tools/
+        run: |
+          mkdir -p /tmp/site
+          ln -s "$PWD" /tmp/site/tools
+          (cd /tmp/site && python3 -m http.server 8899 &)
+          sleep 1
+          curl -sf -o /dev/null http://127.0.0.1:8899/tools/handbook/print.html
+
+      - name: Render PDF
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+          FORCE: ${{ inputs.force && '1' || '' }}
+        run: node scripts/render-handbook-pdf.js
+
+      - name: Commit & push if changed
+        run: |
+          git status --porcelain
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git add -f handbook/handbook.pdf handbook/pdf-meta.json
+          git commit -m "Render handbook.pdf for published edition"
+          # Another run may have pushed while we were building.
+          git fetch origin main
+          git pull --rebase origin main
+          git push origin HEAD:main
