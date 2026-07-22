@@ -59,7 +59,32 @@ then an existing admin elevates them in the portal user-editor (that write is
 allowed — the caller is already an admin). Inviting brand-new admins is rare;
 elevation-after-signup is the normal path.
 
-## The proper fix — server-side role writes (IMPLEMENTED, staged deploy)
+## ⚠️ Update — GAS `consumeInvite` abandoned (Workspace blocks it)
+
+The GAS approach below was built and deployed, then **reverted** (login page
+v4.7). The `nl-tools` Apps Script web app is owned by a Google **Workspace** that
+**blocks anonymous access to Apps Script web apps at the org level** — an invitee
+who is not signed into a Google account (every **club** invitee, and staff
+accepting in a fresh browser) gets *"Sorry, unable to open the file"* and never
+reaches the script. GAS web apps sit behind a Google-account gate that a
+brand-new Firebase user cannot pass, so GAS is the wrong home for a
+signup-time endpoint.
+
+**Current state:** invite acceptance is back to the **client-side write** (works
+for everyone). The takeover vector stays closed by the interim `users/$uid`
+`.validate` rule (blocks self-granted admin/superadmin). The GAS `consumeInvite`
+code remains mirrored in `gas/Invite.gs` as the reference implementation but is
+**not called**.
+
+**The real durable fix → a Firebase Cloud Function.** A callable/HTTPS Function
+verifies the Firebase ID token and is reachable by any Firebase-authenticated
+user (no Google-account gate), so a club invitee *can* call it. Port the
+`consumeInvite` logic there, then: client calls the Function instead of writing
+its own role, and the rule tightens to forbid client role writes (also closing
+the self-signup-as-`staff` gap and restoring direct admin invites). This is
+Phase 2 of `system/gas-to-functions-migration.md` and is now the path of record.
+
+## The (reverted) GAS approach — kept for reference
 
 Roles are now written by the **trusted backend**, never self-asserted by the
 client. Landed in code:
