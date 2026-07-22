@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
-  Version: v0.28 (22/07/2026)
+  Version: v0.29 (22/07/2026)
   File: /tools/handbook/index.html
 
   Structured editor for the League's governing documents — computed clause
@@ -70,6 +70,14 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '22/07/2026',
+        version: 'v0.29',
+        items: [
+          'PDF fix: page text no longer overlaps the running footer — real page margins are reserved and the downloadable file draws its footer in them.',
+          'Area subtitles are now editable in Edit mode (click the line under the area title) — they feed the reader and the PDF section title pages on the next publish. The League Rules and Board Directives seed subtitles are no longer ALL CAPS.'
+        ]
+      },
       {
         date: '22/07/2026',
         version: 'v0.28',
@@ -720,9 +728,15 @@
     S.numMap = numMap;
     var roots = childrenOf(S.nodes, null);
     var html = '<div class="nl-doc' + (S.mode === 'edit' ? ' is-editing' : '') + '" id="ceDocInner">';
+    var metaEditing = (S.mode === 'edit' && canEdit());
     html += '<div class="nl-doc__head">' +
       '<div class="nl-doc__title">' + esc(S.doc.title) + '</div>' +
-      (S.doc.subtitle ? '<div class="nl-doc__sub">' + esc(S.doc.subtitle) + '</div>' : '') +
+      // Subtitle is area metadata (seeded from the source doc); editable in edit
+      // mode so wording/casing can be managed — it feeds the reader and the PDF
+      // section title pages on the next publish.
+      ((S.doc.subtitle || metaEditing)
+        ? '<div class="nl-doc__sub"' + (metaEditing ? ' contenteditable="true" data-meta="subtitle" data-ph="Area subtitle (optional)"' : '') + '>' + esc(S.doc.subtitle || '') + '</div>'
+        : '') +
       '</div>';
     roots.forEach(function (r) { html += renderNode(r, numMap); });
     html += '</div>';
@@ -1450,6 +1464,21 @@
     doc.addEventListener('blur', function (e) {
       var cell = e.target.closest && e.target.closest('[contenteditable][data-th], [contenteditable][data-tr]');
       if (cell) saveTableCell(cell);
+    }, true);
+    // area metadata (subtitle) — save on blur to draft/docs/<id>/meta
+    doc.addEventListener('blur', function (e) {
+      var m = e.target.closest && e.target.closest('[contenteditable][data-meta]'); if (!m) return;
+      var field = m.dataset.meta, val = (m.textContent || '').trim();
+      if ((S.doc[field] || '') === val) return;
+      S.doc[field] = val;
+      var patch = {}; patch[field] = val;
+      NL.ensureAuth().then(function () { return metaRef().update(patch); }).then(function () {
+        S.index = null;
+        NL.writeAudit && NL.writeAudit('edit', 'Edited area ' + field + ' (' + S.docId + ')');
+        NL.toast && NL.toast('Saved', 'success');
+      }).catch(function (err) {
+        NL.toast && NL.toast('Save failed: ' + (err && err.message || err), 'error');
+      });
     }, true);
     // inline text editing — save on blur
     doc.addEventListener('blur', function (e) {

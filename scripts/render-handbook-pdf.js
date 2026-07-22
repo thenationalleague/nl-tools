@@ -66,7 +66,22 @@ async function rtdb(p) {
     await page.evaluate(() => (document.fonts && document.fonts.ready) || Promise.resolve());
     await new Promise(r => setTimeout(r, 1500));  // image/paint settle
 
-    await page.pdf({ path: OUT_PDF, format: 'A4', printBackground: true, preferCSSPageSize: true });
+    // The running footer lives in the reserved @page bottom margin, drawn by the
+    // PDF engine itself — flowed content can never overlap it. (footerTemplate
+    // only supports inline styles + system fonts.)
+    const escHtml = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const pubDate = publishedAt ? new Date(publishedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+    await page.pdf({
+      path: OUT_PDF,
+      format: 'A4',
+      printBackground: true,
+      preferCSSPageSize: true,
+      displayHeaderFooter: true,
+      headerTemplate: '<div></div>',
+      footerTemplate: '<div style="width:100%;text-align:center;font-size:7pt;font-style:italic;color:#7a8296;font-family:Helvetica,Arial,sans-serif;">' +
+        'The National League Handbook · Edition ' + escHtml(label) + (pubDate ? ' · Published ' + escHtml(pubDate) : '') + '</div>',
+      margin: { top: '14mm', bottom: '16mm', left: '0mm', right: '0mm' }
+    });
     fs.writeFileSync(OUT_META, JSON.stringify({
       editionId: editionId,
       label: label || '',
