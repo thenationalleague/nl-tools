@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27 (print / PDF edition)
-  Version: v0.2 (22/07/2026) — real page margins (no footer overlap); running footer
-  moves to the render workflow's footerTemplate; cover carries the imprint
+  Version: v0.3 (22/07/2026) — part rendering (?part=front|<areaId>, ?pages=) for the
+  multi-part workflow build: section strip headers, contents page numbers
   File: /tools/handbook/print.html
 
   Print-engineered rendering of the PUBLISHED handbook edition, for on-demand
@@ -81,16 +81,22 @@
     .pg--cover .divs { display: flex; gap: 8mm; justify-content: center; }
     .pg--cover .divs img { width: 42mm; height: auto; }
 
-    /* ---- Contents ---- */
-    .pg--toc { padding: 26mm 24mm; }
-    .pg--toc h2 { font-size: 22pt; color: var(--navy); font-variation-settings: 'wght' 900; margin: 0 0 4mm; text-transform: uppercase; letter-spacing: .04em; }
-    .pg--toc .toc-rule { width: 22mm; height: 1.1mm; background: var(--primary); border-radius: 1mm; margin: 0 0 12mm; }
+    /* ---- Contents ----
+       FIXED geometry — the render workflow places clickable link annotations
+       over these rows in the merged PDF, so heights are exact mm, not font-
+       derived. First row top = 26 (pad) + 12 (h2) + 6 + 1.2 + 8 (rule) = 53.2mm
+       from content top; rows are 16mm. Keep scripts/render-handbook-pdf.js's
+       TOC constants in sync if this changes. */
+    .pg--toc { padding: 26mm 24mm 0; }
+    .pg--toc h2 { font-size: 22pt; height: 12mm; line-height: 12mm; color: var(--navy); font-variation-settings: 'wght' 900; margin: 0; text-transform: uppercase; letter-spacing: .04em; }
+    .pg--toc .toc-rule { width: 22mm; height: 1.2mm; background: var(--primary); border-radius: 1mm; margin: 6mm 0 8mm; }
     .toc-item {
-      display: flex; align-items: baseline; gap: 6mm; padding: 6mm 0; border-bottom: 1px solid var(--border);
-      text-decoration: none; color: var(--text);
+      display: flex; align-items: center; gap: 6mm; height: 16mm; padding: 0; border-bottom: 1px solid var(--border);
+      text-decoration: none; color: var(--text); box-sizing: border-box;
     }
     .toc-item__n { font-size: 16pt; color: var(--primary); font-variation-settings: 'wght' 900; min-width: 10mm; }
     .toc-item__t { font-size: 14pt; color: var(--navy); font-variation-settings: 'wght' 800; }
+    .toc-item__p { margin-left: auto; font-size: 12pt; color: var(--primary); font-variation-settings: 'wght' 800; }
 
     /* ---- Section title pages: large full-colour panel, print-safe ---- */
     .pg--sec { padding: 0 10mm; display: flex; }
@@ -146,35 +152,52 @@
     { id: 'board-directives', title: 'Board Directives' }
   ];
 
+  // ?part= lets the render workflow build the PDF in parts (front matter, then
+  // one part per area) so each part carries its own section strip in the page
+  // header and the contents can show real page numbers (?pages=id:n,...).
+  // No ?part (browser view / print fallback) renders the whole document.
+  var QS = {};
+  location.search.replace(/[?&]([^=&]+)=?([^&]*)/g, function (_, k, v) { QS[k] = decodeURIComponent(v); });
+  var PART = QS.part || 'full';
+  var PAGENOS = {};
+  (QS.pages || '').split(',').forEach(function (kv) { var m = kv.split(':'); if (m[0]) PAGENOS[m[0]] = m[1]; });
+
   function render(ed) {
     var label = ed.label || '';
     var pub = ed.publishedAt ? NL.formatDate(ed.publishedAt) : '';
     var sm = String(label).match(/^\s*(\d{4}\s*[-\/]\s*\d{2,4})/);
     var season = sm ? sm[1] : label;
     var present = AREAS.filter(function (a) { return ed.docs && ed.docs[a.id]; });
+    var wantFront = (PART === 'full' || PART === 'front');
 
     var h = '';
-    // Cover — page 1. The version is locked here and in the running footer.
-    h += '<section class="pg pg--cover">' +
-      '<img class="lockup" src="/tools/assets/divisions/The National League.png" alt="The National League">' +
-      '<h1>Handbook</h1><div class="season">' + esc(season) + '</div>' +
-      '<div class="rule"></div>' +
-      '<div class="divs">' + ['National', 'North', 'South'].map(function (n) {
-        return '<img src="/tools/assets/divisions/' + n + '.png" alt="National League ' + n + '">';
-      }).join('') + '</div>' +
-      '<div class="imprint">The National League Handbook · Edition ' + esc(label) + (pub ? ' · Published ' + esc(pub) : '') + '</div>' +
-      '</section>';
+    if (wantFront) {
+      // Cover — page 1. The version is locked here and in the running footer.
+      h += '<section class="pg pg--cover">' +
+        '<img class="lockup" src="/tools/assets/divisions/The National League.png" alt="The National League">' +
+        '<h1>Handbook</h1><div class="season">' + esc(season) + '</div>' +
+        '<div class="rule"></div>' +
+        '<div class="divs">' + ['National', 'North', 'South'].map(function (n) {
+          return '<img src="/tools/assets/divisions/' + n + '.png" alt="National League ' + n + '">';
+        }).join('') + '</div>' +
+        '<div class="imprint">The National League Handbook · Edition ' + esc(label) + (pub ? ' · Published ' + esc(pub) : '') + '</div>' +
+        '</section>';
 
-    // Contents — linked to each section (links stay clickable in the PDF).
-    h += '<section class="pg pg--toc"><h2>Contents</h2><div class="toc-rule"></div>' +
-      present.map(function (a, i) {
-        return '<a class="toc-item" href="#sec-' + a.id + '">' +
-          '<span class="toc-item__n">' + (i + 1) + '</span>' +
-          '<span class="toc-item__t">' + esc(ed.docs[a.id].title || a.title) + '</span></a>';
-      }).join('') + '</section>';
+      // Contents. In-browser the anchors link; in the workflow-built file the
+      // rows carry page numbers and clickable zones are added at merge time.
+      h += '<section class="pg pg--toc"><h2>Contents</h2><div class="toc-rule"></div>' +
+        present.map(function (a, i) {
+          return '<a class="toc-item" href="#sec-' + a.id + '">' +
+            '<span class="toc-item__n">' + (i + 1) + '</span>' +
+            '<span class="toc-item__t">' + esc(ed.docs[a.id].title || a.title) + '</span>' +
+            (PAGENOS[a.id] ? '<span class="toc-item__p">' + esc(PAGENOS[a.id]) + '</span>' : '') +
+            '</a>';
+        }).join('') + '</section>';
+    }
 
     // Areas: full-colour title page, then the document flow.
     present.forEach(function (a, i) {
+      if (PART !== 'full' && PART !== a.id) return;
       var d = ed.docs[a.id];
       h += '<section class="pg pg--sec" id="sec-' + a.id + '"><div class="panel">' +
         '<div class="n">' + ('0' + (i + 1)).slice(-2) + '</div>' +
@@ -186,7 +209,7 @@
       h += '<div class="flow">' + (d.html || '') + '</div>';
     });
 
-    document.getElementById('prDoc').innerHTML = h;
+    document.getElementById('prDoc').innerHTML = h || '<p class="pr-state">Nothing to render for this part.</p>';
     document.title = 'The National League Handbook ' + season;
   }
 
