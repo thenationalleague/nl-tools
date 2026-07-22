@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Clause Editor
-  Version: v0.2 (22/07/2026)
+  Version: v0.3 (22/07/2026)
   File: /tools/clause-editor/index.html
 
   Structured editor for the League's governing documents — computed clause
@@ -70,6 +70,13 @@
     var NL_TOOL_KEY = 'ops-clause-editor';
 
     window.NL_CHANGELOG = [
+      {
+        date: '22/07/2026',
+        version: 'v0.3',
+        items: [
+          'Fixed: the document appeared empty after a reload (and on other devices) because Firebase drops null fields, so top-level articles lost their parentId. Root nodes are now detected reliably and the tree is restored on load.'
+        ]
+      },
       {
         date: '22/07/2026',
         version: 'v0.2',
@@ -314,7 +321,12 @@
   /* ================= Numbering engine (verified against source) ================= */
   function childrenOf(nodes, pid) {
     var a = [];
-    for (var id in nodes) { if (nodes[id].parentId === pid) a.push(nodes[id]); }
+    // Firebase strips null values, so a root node reads back with parentId
+    // missing — treat undefined as null so root detection survives a reload.
+    for (var id in nodes) {
+      var p = nodes[id].parentId; if (p === undefined) p = null;
+      if (p === pid) a.push(nodes[id]);
+    }
     a.sort(function (x, y) { return (x.order || 0) - (y.order || 0); });
     return a;
   }
@@ -510,6 +522,12 @@
     }).then(function (res) {
       var meta = res[0].val(), nodes = res[1].val() || {};
       if (meta) S.doc = Object.assign(S.doc, meta);
+      // Restore fields Firebase drops when they are null/0 so the tree is whole.
+      Object.keys(nodes).forEach(function (id) {
+        var n = nodes[id];
+        if (n.parentId === undefined) n.parentId = null;
+        if (n.order === undefined) n.order = 0;
+      });
       S.nodes = nodes;
       render();
     }).catch(function (e) {
