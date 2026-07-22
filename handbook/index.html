@@ -1,105 +1,44 @@
 <!DOCTYPE html>
 <!--
-  NL Tools — Handbook
-  handbook / index.html
-  v0.11 — Block editor (text/cards/table), list type control + adjacent-ol
-          merge, TOC collapsed by default, nesting cap, clean directory
-          cards, read-as-one-page, link-to-section picker.
-  v0.10 — Selective re-import. Import/re-import now works PER SECTION:
-          only seed/import-authored (or empty) sections are replaced,
-          hand-edited sections are always preserved, and import-authored
-          sections superseded by the carve are removed. Safe to run
-          repeatedly as the carve improves (e.g. the two-column re-extract
-          fixing the 'DONT DEAD OPEN INSIDE' interleaving on Safeguarding
-          etc). Re-import button now always visible to superadmin; confirm
-          shows replace/preserve/remove counts.
-  v0.9 — Contacts node type (Phase 2). A node's Layout can be 'Contact
-         cards': structured records (name / role / org / email / phone /
-         note) edited as cards, rendered as a linked card grid — for League
-         officials, office staff, officers, associated leagues. Stored as
-         node.type='contacts' + node.contacts[]. Not imported (those PDF
-         pages are column-interleaved and unsalvageable by parse — entered
-         by hand from the editor).
-         - Fix: Cancel (and navigating away mid-edit) threw a ReferenceError
-           on a leftover TUI.instance from the dropped Toast UI editor, so
-           the buttons appeared dead. References removed.
-  v0.8 — Structure: bodies-on-any-node + directory reader + legal nesting.
-         - Any chapter/section can hold an intro body AND children; the
-           reader shows the body then a directory of sub-sections (cards).
-           Chapters are navigable landing pages; the rules/articles preamble
-           has a home (the chapter's own body).
-         - Re-carve collapses redundant single-section chapters (Memorandum,
-           Board Directives) so the body sits on the chapter, not a same-
-           named child.
-         - Nested ordered lists render as the legal hierarchy 1 -> a -> i
-           (decimal / lower-alpha / lower-roman) in reader + editor; Tab to
-           indent in the editor.
-  v0.7 — Editor moved to platform canon + reading-view polish:
-         - Toast UI dropped. Editing is now the same pattern as
-           graphics/article-composer: contenteditable + the brand
-           .fmt-toolbar (style select, B/I/U, lists, link, 3x3 table
-           insert, undo/redo, clear formatting). No external library.
-         - Storage moves to SANITIZED HTML (whitelist tags, href
-           http/https/mailto/# only, all other attributes stripped).
-           Legacy Markdown bodies still render (bodyToHtml dual-mode) and
-           convert to HTML on first save; the importer converts the carve
-           at write time.
-         - Breadcrumb is now navigation: pill links with a visible ›
-           separator (was border-grey ::before — invisible).
-         - 'Last updated' moved below the content; seed/import provenance
-           no longer shown on the page (audit trail keeps it).
-         - Editor meta row no longer misaligns (shorter label, hint moved
-           to placeholder, align-items:end).
-  v0.6 — Content quality + editing overhaul:
-         - handbook-content.json re-carved with paragraph reflow (PDF print
-           line-wraps joined back into real paragraphs; numbered clauses get
-           their own paragraphs) and duplicated heading lines stripped.
-         - Re-import: superadmin toolbar button, available while every
-           section is still seed/import-authored (one hand-edit anywhere
-           protects content from replacement).
-         - WYSIWYG editing (Toast UI via CDN, lazy-loaded) — visual editing
-           incl. a table tool, but reads/writes MARKDOWN so storage, audit
-           and the read renderer are unchanged. Textarea+preview fallback
-           when the CDN is unreachable.
-         - Bare emails / URLs auto-link in the read view (linkify, skips
-           existing tags); league contact pages become tappable.
-         - Structure UX: '+ New chapter' at the bottom of the contents tree;
-           toolbar relabelled (+ Inside / + After) with tooltips.
-  v0.5 — Detect 'no content yet' by empty bodies (not seed-author), so the
-         import stays reachable even after a section was opened.
-  v0.4 — Surface the import on the empty-skeleton state (button was hidden).
-  v0.3 — Import can replace an empty skeleton (not just a virgin DB).
-  v0.2 — One-click import of the carved 2025/26 handbook content.
-  v0.1 — Book-like, editable online edition of the NL handbook (rulebook,
-         articles, tariffs, appendices). Framework + skeleton.
+  NL Tools — Handbook 2026-27
+  Version: v0.19 (22/07/2026)
+  File: /tools/handbook/index.html
 
-  What this is:
-    The governance half of the printed National League booklet (everything
-    that isn't the club directory) brought online as a navigable, editable
-    "book": a contents tree of chapters -> sections -> appendices, each a
-    Markdown document, deep-linkable and searchable.
+  Structured editor for the League's governing documents — computed clause
+  numbering, draft and published editions.
 
   Storage (RTDB):
-    app-data/ops-handbook/nodes/<id>  { parentId, order, kind, number,
-                                        title, body(markdown), updatedAt,
-                                        updatedBy }
-    app-data/ops-handbook/audit/<k>   { ts, uid, email, action, detail }
-    tools/ops-handbook                tool registration (label/url/defaults)
+    app-data/ops-handbook/draft/docs/<docId>/meta        doc metadata
+    app-data/ops-handbook/draft/docs/<docId>/nodes/<id>  clause tree (flat map)
+    app-data/ops-handbook/editions/<editionId>           frozen published snapshots
+    app-data/ops-handbook/publishedEditionId             pointer read by public surfaces
+    app-data/ops-handbook/audit                          write log
+    tools/ops-handbook                                   tool registration (label, defaults)
 
-  Access:
-    read  — any signed-in user (clubs + staff)
-    write — admin / superadmin only (the League's governing text)
+  Data model — every node can carry ANY combination of a computed number, an
+  optional title, body prose, and children. That single rule handles all the
+  documentary irregularity (heading-only articles, straight-to-.1 articles,
+  clause + sub-clauses, deep nesting, fixed-exception overrides like 13.B.4).
+  numStyle sets how a node's number renders; numberOverride pins an exact label.
+  The displayed number is NEVER stored on the draft — it is computed from tree
+  position each render by computeNumbers().
 
-  Content authored as Markdown (textarea + live preview); stored as text so
-  it audits as clean diffs and stays re-exportable (e.g. to regenerate the
-  printed handbook from this data later).
+  CANON NOTE: the `.nl-doc` document-presentation block below (number gutter +
+  legal clause hierarchy + reading typography) is a strong candidate to promote
+  into system/nl-brand.css — the handbook already hand-rolls the 1→a→i list CSS
+  locally, so this is the second use. Kept tool-local for its first outing here;
+  promote in lockstep (?v= bump + Style Guide) once its shape has settled.
+
+  Access (auth-guard registry — see system/auth-guard.js):
+    superadmin/admin → edit + publish; staff/club → read the draft.
 -->
-<html lang="en-GB">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Handbook — NL Tools</title>
+  <title>Handbook 2026-27 — NL Tools</title>
 
+  <!-- Brand stylesheet (lint canonical: ?v=19) -->
   <link rel="stylesheet" href="/tools/system/nl-brand.css?v=22">
 
   <!-- Firebase 10.12.0 SDK (compat) -->
@@ -107,6 +46,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 
+  <!-- Firebase init -->
   <script>
     firebase.initializeApp({
       apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -120,1208 +60,1360 @@
     var db = firebase.database();
   </script>
 
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
   <script>
-    window.NL_TOOL = { title: 'Handbook', toolKey: 'ops-handbook' };
+    window.NL_TOOL = {
+      title: 'Handbook 2026-27',
+      toolKey: 'ops-handbook'
+    };
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
       {
-        date: '10 Jun 2026',
+        date: '22/07/2026',
+        version: 'v0.19',
+        items: [
+          'Became Handbook 2026-27, living at /tools/handbook and replacing the old handbook tool. Internal key is now ops-handbook; admins edit, everyone else reads.'
+        ]
+      },
+      {
+        date: '22/07/2026',
+        version: 'v0.18',
+        items: [
+          'Editing the live draft now asks for confirmation the first time each session, and entering edit mode is written to the audit log.',
+          'Publishing an edition now requires typing PUBLISH to confirm.',
+          'Deep links: in read mode, click a clause number to copy a shareable link that opens the handbook at that clause (URL like #league-rules/<id>).',
+          'Removed the plain HTML download (a branded PDF export is planned instead).'
+        ]
+      },
+      {
+        date: '22/07/2026',
+        version: 'v0.17',
+        items: [
+          'Deep list nesting: a clause can now nest five levels (e.g. Rule 23.5 → (b) → (ii) → 1.), with a number list under a bracketed item restarting at 1 rather than reading 23.5.1. Bracketed (i)/(v)/(x) are read as roman or alpha from context, and fused roman markers (i.By) are recognised.'
+        ]
+      },
+      {
+        date: '22/07/2026',
+        version: 'v0.16',
+        items: [
+          'League Rules import fixes: recovered clauses fused into one source paragraph (e.g. 8.35–8.39 under "Post match management"), stripped trailing full stops from rule titles, made the Rules Index its own unnumbered section, and stopped table top rows being treated as headers when they are ordinary data.'
+        ]
+      },
+      {
+        date: '22/07/2026',
+        version: 'v0.15',
+        items: [
+          'Imported League Rules (FA Standardised Membership Rules 2025/26) — 42 rules, the 13.A/13.B insolvency sub-tiers, sub-clauses, bracketed (a)/(i) lists, four tables and the Rules Index.'
+        ]
+      },
+      {
+        date: '22/07/2026',
+        version: 'v0.14',
+        items: [
+          'Fixed the breadcrumb/contents highlight landing on the previous section after tapping one — the scroll-spy line now sits below the section scroll-margin.'
+        ]
+      },
+      {
+        date: '22/07/2026',
+        version: 'v0.13',
+        items: [
+          'Added a “you are here” breadcrumb under the toolbar showing the current area and section (e.g. “Articles of Association › 12 · Voting…”), updating as you scroll and highlighting the section in the contents rail. On mobile, tap it to open the contents.'
+        ]
+      },
+      {
+        date: '22/07/2026',
+        version: 'v0.12',
+        items: [
+          'Added a Re-import button (admin) so an already-imported area can be refreshed from its source — with a clear warning that it replaces that area’s current draft.'
+        ]
+      },
+      {
+        date: '22/07/2026',
         version: 'v0.11',
         items: [
-          'First release: the National League handbook (rules, articles, appendices and league information) as a navigable online book — contents sidebar, search, and shareable links straight to any clause.',
-          'Editing now uses the same rich-text editor as the rest of the platform (Article Composer) — style dropdown, bold/italic/underline, lists, links and table insert.',
-          'Imported text quality fixed: paragraphs re-flowed (no more mid-sentence line breaks), duplicate headings stripped, and email addresses / websites are now tappable links throughout.',
-          'Clearer structure controls: “+ New chapter” at the bottom of the contents, and “+ Inside / + After” buttons for sections. Superadmins can re-import the carved booklet while nothing has been hand-edited.',
-          'Reading view polish: the breadcrumb is now proper navigation (tappable pills), and “last updated” sits quietly at the foot of each section.',
-          'Chapters are now landing pages: an optional intro followed by a directory of their sections — so a chapter like the League Rules can carry its preamble, and single-part chapters (Memorandum) no longer duplicate themselves.',
-          'Numbered sub-lists now read as the proper legal hierarchy (1, then a, then i) automatically.',
-          'New “Contact cards” layout for a section: enter people/organisations as tidy cards (name, role, email, phone) instead of free text — ideal for League officials, staff, officers and associated leagues. They display as a linked card grid.'
+          'Bulleted and numbered lists inside a clause now render properly (both imported lists and lists made with the formatting toolbar).',
+          'Article titles are now sentence case instead of all-caps.',
+          'Appendix R bullet points render as a proper list; stray import characters removed.'
+        ]
+      },
+      {
+        date: '22/07/2026',
+        version: 'v0.10',
+        items: [
+          'Board Directives added as an importable area — the 11 directives (with directive 1’s a)–e) sub-points) parsed from the National League Booklet. All five areas now have content.'
+        ]
+      },
+      {
+        date: '22/07/2026',
+        version: 'v0.9',
+        items: [
+          'Tables are now supported — add a table to any clause, edit cells inline, add/remove rows and columns; tables render in the reader, published editions, HTML export and search.',
+          'Backfilled the table-based appendices: Fees Tariff (M) and Fines Tariff (N) as real tables, Acquisition Materials (R) as a numbered list, and Televising (F) as prose — so all of Appendices A–R are now imported.'
+        ]
+      },
+      {
+        date: '22/07/2026',
+        version: 'v0.8',
+        items: [
+          'Appendices added as an importable area — the ten prose appendices (A, B, C, D, E, H, I, K, P, Q) parsed from the National League Booklet, with their numbers pinned to match the printed handbook. Table-based appendices (Fees/Fines Tariffs, Televising, Acquisition) follow once table support lands.'
+        ]
+      },
+      {
+        date: '22/07/2026',
+        version: 'v0.7',
+        items: [
+          'Editing is clearer: every clause shows a heading slot and a body slot with “where to type” placeholders, and the cursor drops straight into a newly-added clause.',
+          'Added a formatting toolbar — bold, italic, underline, bullet/numbered lists and clear formatting.',
+          'Unnumbered clauses no longer show an empty number gutter, so their text sits flush.',
+          'All five document areas are now shown in a pinned list in the contents rail (replacing the dropdown), so any area is always one tap away.'
+        ]
+      },
+      {
+        date: '22/07/2026',
+        version: 'v0.6',
+        items: [
+          'Contents-rail text previews now read as secondary text (not bold) and truncate with an ellipsis.'
+        ]
+      },
+      {
+        date: '22/07/2026',
+        version: 'v0.5',
+        items: [
+          'Search now spans the whole handbook — results are grouped by area and jump straight to the clause, switching area if needed.',
+          'Contents rail shows a text preview for clauses without a heading (e.g. the Memorandum).'
+        ]
+      },
+      {
+        date: '22/07/2026',
+        version: 'v0.4',
+        items: [
+          'Multiple documents: switch between the five governing-document areas (Memorandum, Articles, League Rules, Appendices, Board Directives) from the contents rail.',
+          'Memorandum of Association added as an importable area; empty areas invite import (where a source exists) or hand-authoring.'
+        ]
+      },
+      {
+        date: '22/07/2026',
+        version: 'v0.3',
+        items: [
+          'Fixed: the document appeared empty after a reload (and on other devices) because Firebase drops null fields, so top-level articles lost their parentId. Root nodes are now detected reliably and the tree is restored on load.'
+        ]
+      },
+      {
+        date: '22/07/2026',
+        version: 'v0.2',
+        items: [
+          'Fixed page/side-rail scroll conflict — the contents rail and the document now scroll independently and the window itself stays put.',
+          'Mobile: the contents rail is now a slide-in drawer (☰) with the document full-width; layout height tracks the topbar exactly.'
+        ]
+      },
+      {
+        date: '16/07/2026',
+        version: 'v0.1',
+        items: [
+          'Initial build — browseable document view with computed clause numbering.',
+          'Structured clause tree: title / body / children in any combination; per-level numbering styles and fixed-exception overrides.',
+          'Inline editing with live renumber preview; import from the Articles of Association; HTML download; publish a frozen edition.'
         ]
       }
     ];
 
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
     window.nlAuthReady = function (userData) {
       window.NL = window.NL || {};
       window.NL.session = userData;
-      if (window.TOOL && window.TOOL.boot) window.TOOL.boot(userData);
-      else window._toolDeferredSession = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
     };
   </script>
 
+  <!-- NL system scripts (lint canonical: ?v=9 / ?v=7 / ?v=8) -->
   <script src="/tools/system/nl-utils.js?v=24"></script>
   <script src="/tools/system/nl-topbar.js?v=7"></script>
   <script src="/tools/system/auth-guard.js?v=9"></script>
 
 <style>
-  /* Tool-specific styles. Brand tokens only — no raw hex / rgba overlays. */
-  .hb-layout { display: grid; grid-template-columns: 300px 1fr; gap: 0; min-height: calc(100vh - 72px); }
-  @media (max-width: 820px) { .hb-layout { grid-template-columns: 1fr; } }
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals it. */
 
-  /* ---- Contents sidebar ---- */
-  .hb-side {
+  /* Full-height shell: the side rail and the document each scroll independently,
+     and the window itself does not scroll. --ce-top is the topbar height, set
+     from JS (it is position:sticky and ~72px, but measured to stay exact). */
+  .ce-layout { display: grid; grid-template-columns: 300px 1fr; gap: 0;
+    height: calc(100dvh - var(--ce-top, 72px)); overflow: hidden; }
+
+  /* ---- Sidebar / contents ---- */
+  .ce-side {
     border-right: 1px solid var(--border); background: var(--off-white);
-    padding: 18px 14px 40px; overflow-y: auto;
-    position: sticky; top: 0; max-height: calc(100vh - 72px);
+    padding: 0 14px 40px; overflow-y: auto; min-height: 0;
   }
-  @media (max-width: 820px) { .hb-side { position: static; max-height: none; border-right: none; border-bottom: 1px solid var(--border); } }
-  .hb-side__search {
+  /* Sticky header: the five areas + search stay pinned while the outline scrolls. */
+  .ce-side__head {
+    position: sticky; top: 0; z-index: 2; background: var(--off-white);
+    margin: 0 -14px 8px; padding: 16px 14px 10px; border-bottom: 1px solid var(--border);
+  }
+  .ce-nav { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
+  .ce-nav__item {
+    display: block; width: 100%; text-align: left; font-family: var(--font); font-size: 13px;
+    font-variation-settings: 'wght' 700; color: var(--text); background: none; border: none;
+    padding: 7px 9px; border-radius: 7px; cursor: pointer;
+  }
+  .ce-nav__item:hover { background: var(--navy-50); }
+  .ce-nav__item.is-active { background: var(--navy); color: var(--white); }
+  .ce-side__season { font-size: 12px; color: var(--text-muted); margin: 0 0 10px; }
+  .ce-side__search {
     width: 100%; font-family: var(--font); font-size: 13px; box-sizing: border-box;
-    border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 14px;
+    border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 12px;
     background: var(--white); color: var(--text);
   }
-  .hb-toc { list-style: none; margin: 0; padding: 0; }
-  .hb-toc ul { list-style: none; margin: 0 0 0 12px; padding: 0; border-left: 1px solid var(--border); }
-  .hb-toc li { margin: 0; }
-  .hb-toc__row { display: flex; align-items: center; gap: 4px; }
-  .hb-toc__link {
-    flex: 1; display: block; padding: 5px 8px; border-radius: 5px; cursor: pointer;
-    font-size: 13px; color: var(--text); text-decoration: none; line-height: 1.35;
+  .ce-toc { list-style: none; margin: 0; padding: 0; }
+  .ce-toc__item {
+    display: flex; gap: 6px; padding: 6px 8px; border-radius: 6px; cursor: pointer;
+    font-size: 13px; color: var(--text); line-height: 1.35; text-decoration: none;
   }
-  .hb-toc__link:hover { background: var(--navy-50); text-decoration: none; }
-  .hb-toc__link.is-current { background: var(--navy); color: var(--white); font-variation-settings: 'wght' 700; }
-  .hb-toc__num { color: var(--text-muted); font-size: 11px; margin-right: 5px; }
-  .hb-toc__link.is-current .hb-toc__num { color: var(--navy-100); }
-  .hb-toc__caret {
-    width: 18px; height: 18px; flex-shrink: 0; border: none; background: none; cursor: pointer;
-    color: var(--text-muted); font-size: 11px; padding: 0; line-height: 1;
+  .ce-toc__item:hover { background: var(--navy-50); }
+  .ce-toc__item.is-current { background: var(--navy); color: var(--white); }
+  .ce-toc__num { color: var(--primary); font-variation-settings: 'wght' 800; flex-shrink: 0; min-width: 20px; }
+  .ce-toc__item.is-current .ce-toc__num { color: var(--navy-100); }
+  .ce-toc__t { font-variation-settings: 'wght' 600; }
+  /* Headingless clauses (e.g. the Memorandum) show a body preview: secondary
+     weight/colour, truncated to one line with an ellipsis. */
+  .ce-toc__t--preview {
+    flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-variation-settings: 'wght' 400; color: var(--text-muted);
   }
-  .hb-toc__caret--spacer { visibility: hidden; }
-  .hb-toc__chapter > .hb-toc__row > .hb-toc__link { font-variation-settings: 'wght' 800; }
+  .ce-toc__item.is-current .ce-toc__t--preview { color: var(--navy-100); }
+  .ce-toc__result { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+  .ce-toc__result b { color: var(--primary); font-variation-settings: 'wght' 800; }
+  .ce-toc__group {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+    font-variation-settings: 'wght' 800; color: var(--navy); margin: 12px 0 4px;
+  }
 
-  /* ---- Reading pane ---- */
-  .hb-main { padding: 28px 36px 80px; max-width: 820px; }
-  @media (max-width: 820px) { .hb-main { padding: 22px 18px 60px; } }
-  .hb-crumb { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
-  .hb-crumb__pill {
-    display: inline-block; font-size: 12px; padding: 3px 10px; border-radius: 999px;
-    background: var(--navy-50); color: var(--navy); cursor: pointer; text-decoration: none;
+  /* ---- Main / toolbar ---- */
+  .ce-main { min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .ce-bar {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 12px 28px; border-bottom: 1px solid var(--border); background: var(--white);
+  }
+  #ceDoc { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
+  /* Breadcrumb "you are here" — sits above the scrolling document, updates on scroll */
+  .ce-crumb {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+    padding: 8px 28px; border-bottom: 1px solid var(--border); background: var(--off-white);
+    font-size: 13px; color: var(--text-muted); min-height: 18px;
+  }
+  .ce-crumb:empty { display: none; }
+  .ce-crumb__area { font-variation-settings: 'wght' 700; color: var(--navy); flex: 0 0 auto; }
+  .ce-crumb__sep { color: var(--text-muted); flex: 0 0 auto; }
+  .ce-crumb__sec { font-variation-settings: 'wght' 700; color: var(--primary); flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  @media (max-width: 860px) { .ce-crumb { padding: 8px 14px; cursor: pointer; } }
+  .ce-bar__spacer { flex: 1; }
+  .ce-menu-btn { display: none; }
+  .ce-scrim { display: none; }
+  .ce-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .ce-seg button {
+    border: none; background: var(--white); color: var(--text); font-family: var(--font);
+    font-size: 13px; padding: 7px 14px; cursor: pointer; font-variation-settings: 'wght' 600;
+  }
+  .ce-seg button.is-on { background: var(--navy); color: var(--white); }
+  .ce-mode-note { font-size: 12px; color: var(--text-muted); }
+
+  /* ---- Mobile: side rail becomes a slide-in drawer; document goes full width ---- */
+  @media (max-width: 860px) {
+    .ce-layout { grid-template-columns: 1fr; }
+    .ce-bar { padding: 10px 14px; }
+    .ce-mode-note { display: none; }
+    .ce-menu-btn {
+      display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+      width: 38px; height: 38px; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--white); color: var(--navy); font-size: 17px; cursor: pointer;
+    }
+    .ce-side {
+      position: fixed; top: var(--ce-top, 60px); left: 0; bottom: 0; width: 84%; max-width: 330px;
+      z-index: 60; transform: translateX(-100%); transition: transform .24s ease;
+      box-shadow: 8px 0 26px var(--navy-100);
+    }
+    .ce-side.is-open { transform: none; }
+    .ce-scrim {
+      display: block; position: fixed; inset: var(--ce-top, 60px) 0 0 0; background: var(--navy-900);
+      opacity: 0; pointer-events: none; transition: opacity .24s ease; z-index: 55;
+    }
+    .ce-scrim.is-open { opacity: 0.42; pointer-events: auto; }
+  }
+
+  /* =====================================================================
+     .nl-doc — document presentation (CANON PROMOTION CANDIDATE)
+     Renders identically for editor, draft preview, published edition and
+     (once repointed) the flipbook. Number lives in a gutter, never in text.
+     ===================================================================== */
+  .nl-doc { max-width: 820px; margin: 0 auto; padding: 30px 28px 100px; color: var(--text); font-size: 15px; line-height: 1.62; }
+  @media (max-width: 860px) { .nl-doc { padding: 22px 16px 70px; } }
+  .nl-doc__head { margin-bottom: 26px; padding-bottom: 18px; border-bottom: 2px solid var(--navy); }
+  .nl-doc__title { font-size: 27px; font-variation-settings: 'wght' 900; color: var(--navy); line-height: 1.15; }
+  .nl-doc__sub { font-size: 14px; color: var(--text-muted); margin-top: 4px; }
+  .nl-doc__season { display: inline-block; margin-top: 10px; font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--navy-50); color: var(--navy); font-variation-settings: 'wght' 700; }
+
+  /* Article (top-level node) */
+  .nl-art { margin: 30px 0 6px; scroll-margin-top: 14px; }
+  .nl-art__head { display: flex; gap: 12px; align-items: baseline; }
+  .nl-art__num { font-size: 18px; font-variation-settings: 'wght' 900; color: var(--primary); flex-shrink: 0; min-width: 30px; }
+  .nl-art__title { font-size: 18px; font-variation-settings: 'wght' 800; color: var(--navy); letter-spacing: 0.01em; }
+
+  /* Clause row: number gutter + body; children nest inside body → auto-indent */
+  .nl-clause { display: flex; gap: 12px; margin: 9px 0; scroll-margin-top: 14px; }
+  .nl-clause__num { flex-shrink: 0; min-width: 46px; text-align: left; color: var(--primary); font-variation-settings: 'wght' 800; font-size: 13px; padding-top: 1px; font-variant-numeric: tabular-nums; }
+  .nl-clause__body { flex: 1; min-width: 0; }
+  .nl-clause__title { font-variation-settings: 'wght' 800; color: var(--navy); }
+  .nl-clause__text > p { margin: 0 0 8px; }
+  .nl-clause__text > p:last-child { margin-bottom: 0; }
+  /* Lists inside a clause body (imported, or made with the formatting toolbar) */
+  .nl-clause__text ul, .nl-clause__text ol { margin: 6px 0 8px; padding-left: 26px; }
+  .nl-clause__text ul { list-style: disc; }
+  .nl-clause__text ol { list-style: decimal; }
+  .nl-clause__text ol ol { list-style: lower-alpha; }
+  .nl-clause__text ol ol ol { list-style: lower-roman; }
+  .nl-clause__text li { margin: 2px 0; }
+  .nl-clause--bullet .nl-clause__num { color: var(--text-muted); min-width: 20px; }
+  /* Unnumbered nodes: collapse the empty gutter so content sits flush. */
+  .nl-clause--nonum > .nl-clause__num { display: none; }
+  .nl-art--nonum .nl-art__num { display: none; }
+  .nl-clause__text a { color: var(--navy); }
+  .nl-clause__title { margin-bottom: 2px; }
+
+  /* ---- Tables ---- */
+  .nl-tbl-wrap { overflow-x: auto; margin: 6px 0 10px; }
+  .nl-tbl { border-collapse: collapse; width: 100%; font-size: 14px; }
+  .nl-tbl th, .nl-tbl td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: top; }
+  .nl-tbl th { background: var(--navy-50); font-variation-settings: 'wght' 800; color: var(--navy); }
+  .nl-doc.is-editing .nl-tbl [contenteditable]:focus { box-shadow: inset 0 0 0 2px var(--primary); outline: none; }
+  .nl-tbl-ctrl { display: flex; gap: 6px; margin: 0 0 12px; }
+  .nl-tbl-ctrl button {
+    font-family: var(--font); font-size: 11px; padding: 3px 8px; border: 1px solid var(--border);
+    background: var(--white); color: var(--text); border-radius: 5px; cursor: pointer;
+  }
+  .nl-tbl-ctrl button:hover { border-color: var(--navy); background: var(--navy-50); }
+
+  /* Depth tints for the gutter number (subtle legal hierarchy cue) */
+  .nl-clause[data-depth="2"] .nl-clause__num { color: var(--navy); }
+  .nl-clause[data-depth="3"] .nl-clause__num,
+  .nl-clause[data-depth="4"] .nl-clause__num { color: var(--navy-600); font-variation-settings: 'wght' 700; }
+
+  /* ---- Read mode: numbers are click-to-copy deep links ---- */
+  .nl-doc:not(.is-editing) .nl-clause__num,
+  .nl-doc:not(.is-editing) .nl-art__num { cursor: pointer; }
+  .nl-doc:not(.is-editing) .nl-clause__num:hover,
+  .nl-doc:not(.is-editing) .nl-art__num:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+  /* ---- Editing chrome (only in edit mode) ---- */
+  .nl-doc.is-editing .nl-clause__text,
+  .nl-doc.is-editing .nl-clause__title,
+  .nl-doc.is-editing .nl-art__title { border-radius: 5px; }
+  .nl-doc.is-editing [contenteditable]:hover { box-shadow: 0 0 0 1px var(--border); }
+  .nl-doc.is-editing [contenteditable]:focus { box-shadow: var(--focus-ring); outline: none; background: var(--white); }
+  .nl-doc.is-editing [contenteditable] { padding: 2px 4px; min-height: 1.2em; }
+  /* Placeholder shown in an empty editable slot so it's clear where to type. */
+  .nl-doc.is-editing [contenteditable][data-ph]:empty::before {
+    content: attr(data-ph); color: var(--text-muted); font-style: italic; pointer-events: none;
+  }
+
+  /* ---- Formatting toolbar (edit mode) ---- */
+  .ce-fmt {
+    flex: 0 0 auto; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+    padding: 6px 28px; border-bottom: 1px solid var(--border); background: var(--off-white);
+  }
+  .ce-fmt[hidden] { display: none; }
+  .ce-fmt button {
+    font-family: var(--font); font-size: 13px; min-width: 30px; padding: 4px 9px;
+    border: 1px solid var(--border); background: var(--white); color: var(--text); border-radius: 6px; cursor: pointer;
+  }
+  .ce-fmt button:hover { border-color: var(--navy); background: var(--navy-50); }
+  .ce-fmt__sep { width: 1px; align-self: stretch; background: var(--border); margin: 2px 4px; }
+  @media (max-width: 860px) { .ce-fmt { padding: 6px 14px; } }
+  .nl-clause.is-sel > .nl-clause__body { box-shadow: -3px 0 0 var(--primary); padding-left: 8px; margin-left: -11px; }
+  .nl-art.is-sel { box-shadow: -3px 0 0 var(--primary); padding-left: 8px; margin-left: -11px; }
+
+  .nl-tools { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 2px; }
+  .nl-tools button {
+    font-family: var(--font); font-size: 11px; padding: 3px 8px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--white); color: var(--text); border-radius: 5px;
     font-variation-settings: 'wght' 600;
   }
-  .hb-crumb__pill:hover { background: var(--navy-100); text-decoration: none; }
-  .hb-crumb__sep { color: var(--text-muted); font-size: 12px; }
-  .hb-doc__num { font-size: 13px; font-variation-settings: 'wght' 800; color: var(--primary); letter-spacing: 0.04em; }
-  .hb-doc__title { font-size: 28px; font-variation-settings: 'wght' 900; color: var(--navy); margin: 2px 0 18px; line-height: 1.15; }
-  .hb-doc__meta { font-size: 11px; color: var(--text-muted); margin-top: 22px; }
-
-  /* Rendered markdown */
-  .hb-body { font-size: 15px; line-height: 1.65; color: var(--text); }
-  .hb-body h2 { font-size: 20px; font-variation-settings: 'wght' 800; color: var(--navy); margin: 26px 0 8px; }
-  .hb-body h3 { font-size: 16px; font-variation-settings: 'wght' 800; margin: 20px 0 6px; }
-  .hb-body p { margin: 0 0 12px; }
-  .hb-body ul, .hb-body ol { margin: 0 0 12px; padding-left: 26px; }
-  /* Legal nesting: top level decimal, then lower-alpha, then lower-roman.
-     Tab/indent in the editor produces the nested <ol>; styling is automatic. */
-  .hb-body ol:not([type]) { list-style-type: decimal; }
-  .hb-body ol ol:not([type]) { list-style-type: lower-alpha; }
-  .hb-body ol ol ol:not([type]) { list-style-type: lower-roman; }
-  .hb-body ol ol ol ol:not([type]) { list-style-type: lower-alpha; }
-  .hb-body li { margin: 2px 0; }
-  .hb-body blockquote { margin: 0 0 12px; padding: 6px 14px; border-left: 3px solid var(--primary); background: var(--off-white); color: var(--text-muted); }
-  .hb-body code { font-family: ui-monospace, monospace; font-size: 0.9em; background: var(--navy-50); padding: 1px 5px; border-radius: 4px; }
-  .hb-body hr { border: none; border-top: 1px solid var(--border); margin: 22px 0; }
-  .hb-body a { color: var(--navy); }
-  .hb-body table { border-collapse: collapse; width: 100%; margin: 0 0 14px; font-size: 14px; }
-  .hb-body th, .hb-body td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: top; }
-  .hb-body th { background: var(--navy-50); font-variation-settings: 'wght' 700; }
-  .hb-empty { color: var(--text-muted); font-style: italic; }
-
-  /* Directory of sub-sections shown on a chapter/section landing page. */
-  .hb-dir { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin: 8px 0 6px; }
-  .hb-dir__item {
-    display: block; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px;
-    background: var(--white); cursor: pointer; text-decoration: none; color: var(--text);
+  .nl-tools button:hover { border-color: var(--navy); background: var(--navy-50); }
+  .nl-tools select {
+    font-family: var(--font); font-size: 11px; padding: 2px 6px; border: 1px solid var(--border);
+    border-radius: 5px; background: var(--white); color: var(--text);
   }
-  .hb-dir__item:hover { border-color: var(--navy); background: var(--navy-50); text-decoration: none; }
-  .hb-dir__t { font-variation-settings: 'wght' 700; color: var(--navy); font-size: 14px; }
-  .hb-dir__num { color: var(--primary); font-variation-settings: 'wght' 800; font-size: 11px; margin-right: 6px; }
-  .hb-dir__s { font-size: 12px; color: var(--text-muted); margin-top: 3px; line-height: 1.4; }
+  .nl-tools .sep { width: 1px; align-self: stretch; background: var(--border); margin: 2px 3px; }
 
-  .hb-prevnext { display: flex; justify-content: space-between; gap: 12px; margin-top: 36px; padding-top: 18px; border-top: 1px solid var(--border); }
-  .hb-prevnext a { font-size: 13px; color: var(--navy); cursor: pointer; max-width: 46%; }
-  .hb-prevnext a span { display: block; color: var(--text-muted); font-size: 11px; }
+  .ce-empty { max-width: 560px; margin: 60px auto; text-align: center; }
+  .ce-empty__card { background: var(--off-white); border: 1px solid var(--border); border-radius: 12px; padding: 30px; }
+  .ce-empty h2 { color: var(--navy); margin: 0 0 8px; }
+  .ce-empty p { color: var(--text-muted); margin: 0 0 18px; line-height: 1.55; }
 
-  /* ---- Editor ---- */
-  .hb-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
-  .hb-edit-meta { display: grid; grid-template-columns: 200px 1fr 150px; gap: 12px; align-items: end; }
-  .hb-edit-meta label { white-space: nowrap; }
-  @media (max-width: 720px) { .hb-edit-meta { grid-template-columns: 1fr; } }
-  .hb-field { margin-bottom: 12px; }
-  .hb-field label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; font-variation-settings: 'wght' 800; color: var(--text-muted); margin-bottom: 4px; }
-  .hb-field input, .hb-field select, .hb-field textarea {
-    width: 100%; box-sizing: border-box; font-family: var(--font); font-size: 14px;
-    border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; background: var(--white); color: var(--text);
-  }
+  .ce-preview-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--navy); background: var(--navy-50); padding: 4px 10px; border-radius: 999px; font-variation-settings: 'wght' 700; }
 
-  /* The editing pane — shares .hb-body typography so editing is WYSIWYG
-     against the same styles the reader uses. */
-  .hb-ed {
-    min-height: 480px; border: 1px solid var(--border); border-radius: 0 0 8px 8px;
-    border-top: none; padding: 16px 18px; background: var(--white); outline: none;
-  }
-  .hb-ed:focus-visible { box-shadow: var(--focus-ring); }
-  #hbFmtBar { border-radius: 8px 8px 0 0; }
-
-  /* Contacts node — read view */
-  .hb-contacts { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin: 4px 0 8px; }
-  .hb-contact { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; background: var(--white); }
-  .hb-contact__name { font-variation-settings: 'wght' 800; color: var(--navy); font-size: 15px; }
-  .hb-contact__role { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
-  .hb-contact__c { font-size: 13px; margin-top: 7px; line-height: 1.5; }
-  .hb-contact__c a { color: var(--navy); }
-  .hb-contact__note { font-size: 12px; color: var(--text-muted); margin-top: 6px; font-style: italic; }
-  /* Contacts node — card editor */
-  .hb-cards-ed { display: grid; gap: 10px; }
-  .hb-card-ed { display: flex; gap: 8px; align-items: flex-start; border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: var(--off-white); }
-  .hb-card-ed__grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; flex: 1; }
-  @media (max-width: 720px) { .hb-card-ed__grid { grid-template-columns: 1fr; } }
-  .hb-card-ed__grid input {
-    width: 100%; box-sizing: border-box; font-family: var(--font); font-size: 13px;
-    border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; background: var(--white); color: var(--text);
-  }
-  .hb-card-ed__del { flex-shrink: 0; }
-
-  /* ---- Block editor (v0.11) ---- */
-  .hb-block { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; background: var(--white); }
-  .hb-block__bar { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-bottom: 1px solid var(--border); background: var(--off-white); border-radius: 8px 8px 0 0; }
-  .hb-block__kind { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); font-variation-settings: 'wght' 800; flex: 1; }
-  .hb-block .hb-ed { border: none; min-height: 120px; border-radius: 0 0 8px 8px; }
-  .hb-block__body { padding: 12px 14px; }
-  .hb-addblock { display: flex; gap: 8px; margin: 6px 0 14px; }
-  .hb-tbl-ed table { border-collapse: collapse; width: 100%; }
-  .hb-tbl-ed td, .hb-tbl-ed th { border: 1px solid var(--border); padding: 0; }
-  .hb-tbl-ed input { width: 100%; border: none; padding: 6px 8px; font-family: var(--font); font-size: 13px; box-sizing: border-box; background: transparent; color: var(--text); }
-  .hb-tbl-ed thead input { font-variation-settings: 'wght' 700; background: var(--navy-50); }
-  .hb-tbl-ed__controls { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-  .hb-inline-sec { margin-top: 34px; border-top: 1px solid var(--border); padding-top: 20px; }
-
-  .hb-seed { max-width: 560px; margin: 40px auto; text-align: center; }
-  .hb-seed__card { background: var(--off-white); border: 1px solid var(--border); border-radius: 12px; padding: 28px; }
+  /* renumber-preview diff table inside NL.modal */
+  .ce-diff { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 6px; }
+  .ce-diff td { padding: 4px 8px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  .ce-diff .from { color: var(--text-muted); text-decoration: line-through; }
+  .ce-diff .to { color: var(--primary); font-variation-settings: 'wght' 800; }
+  .ce-diff .arrow { color: var(--text-muted); }
 </style>
 </head>
 <body>
 
+<!-- Topbar — auto-rendered by /tools/system/nl-topbar.js from window.NL_TOOL -->
 <div id="nlTopbar"></div>
 
 <div id="pageWrap">
-  <div class="hb-layout" id="hbLayout">
-    <aside class="hb-side" id="hbSide">
-      <input type="search" class="hb-side__search" id="hbSearch" placeholder="Search the handbook…">
-      <ul class="hb-toc" id="hbToc"></ul>
+  <div class="ce-layout">
+    <aside class="ce-side" id="ceSide">
+      <div class="ce-side__head">
+        <nav class="ce-nav" id="ceDocNav" aria-label="Document areas"></nav>
+        <div class="ce-side__season" id="ceDocSeason"></div>
+        <input type="search" class="ce-side__search" id="ceSearch" placeholder="Search the whole handbook…" autocomplete="off">
+      </div>
+      <div id="ceToc"></div>
     </aside>
-    <main class="hb-main" id="hbMain"></main>
+
+    <main class="ce-main">
+      <div class="ce-bar" id="ceBar">
+        <button class="ce-menu-btn" id="ceMenu" type="button" aria-label="Show contents">☰</button>
+        <div class="ce-seg" id="ceMode">
+          <button data-mode="read" class="is-on">Read</button>
+          <button data-mode="edit" id="ceEditBtn" hidden>Edit</button>
+        </div>
+        <span class="ce-mode-note" id="ceModeNote"></span>
+        <div class="ce-bar__spacer"></div>
+        <button class="btn btn--ghost" id="ceReimport" type="button" hidden>Re-import</button>
+        <button class="btn btn--primary" id="cePublish" type="button" hidden>Publish edition</button>
+      </div>
+      <div class="ce-fmt" id="ceFmt" hidden>
+        <button type="button" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+        <button type="button" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+        <button type="button" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>
+        <span class="ce-fmt__sep"></span>
+        <button type="button" data-cmd="insertUnorderedList" title="Bullet list">• List</button>
+        <button type="button" data-cmd="insertOrderedList" title="Numbered list">1. List</button>
+        <span class="ce-fmt__sep"></span>
+        <button type="button" data-cmd="removeFormat" title="Clear formatting">Clear</button>
+      </div>
+      <div class="ce-crumb" id="ceCrumb" title="Where you are"></div>
+      <div id="ceDoc"></div>
+    </main>
+    <div class="ce-scrim" id="ceScrim"></div>
   </div>
 </div>
 
+<!-- Main app -->
 <script>
 (function () {
   'use strict';
 
   var BASE = 'app-data/ops-handbook';
 
+  // The five governing-document areas, fixed order. Each is its own tree at
+  // draft/docs/<id>/nodes. SEEDS maps an area to a best-effort import file where
+  // one exists; areas without a seed are built by hand until a source arrives.
+  var DOCS = [
+    { id: 'memorandum',       title: 'Memorandum of Association' },
+    { id: 'articles',         title: 'Articles of Association' },
+    { id: 'league-rules',     title: 'League Rules' },
+    { id: 'appendices',       title: 'Appendices' },
+    { id: 'board-directives', title: 'Board Directives' }
+  ];
+  var SEEDS = { articles: 'seed-articles.json', memorandum: 'seed-memorandum.json', 'league-rules': 'seed-league-rules.json', appendices: 'seed-appendices.json', 'board-directives': 'seed-board-directives.json' };
+  function docTitle(id) { for (var i = 0; i < DOCS.length; i++) if (DOCS[i].id === id) return DOCS[i].title; return id; }
+
   var S = {
     session: null,
     role: 'viewer',
-    nodes: {},          // id -> node
-    currentId: null,
-    search: '',
-    collapsed: {},      // id -> true (collapsed in toc)
-    editing: null,      // node id being edited, or '__new__'
-    draft: null,
-    seeded: false
+    docId: 'articles',   // current area
+    doc: { id: 'articles', title: 'Articles of Association', subtitle: '', season: '' },
+    nodes: {},           // id -> node  (flat; tree via parentId + order)
+    mode: 'read',        // 'read' | 'edit'
+    selectedId: null,
+    focusNew: null,      // node id to focus after the next commit (just-added clause)
+    index: null,         // cross-area search cache: { docId: {title,nodes,numMap} }
+    editConfirmed: false // acknowledged the "you are editing the live draft" warning this session
   };
 
-  function canEdit() { return S.role === 'admin' || S.role === 'superadmin'; }
-  function esc(s) {
-    if (s === null || s === undefined) return '';
-    return String(s).replace(/[&<>"']/g, function (c) {
+  function canEdit()  { return S.role === 'admin' || S.role === 'superadmin'; }
+  function canSeed()  { return S.role === 'superadmin'; }
+  var esc = (window.NL && NL.escHtml) ? NL.escHtml : function (s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
-  }
+  };
+  function $(id) { return document.getElementById(id); }
 
-  /* ============ Minimal, safe Markdown -> HTML ============
-     Supports: # headings, **bold**, *italic*, `code`, [links](url),
-     - / 1. lists, > blockquote, --- rule, | pipe tables |, paragraphs.
-     Input is escaped first, so no raw HTML passes through. */
-  function mdInline(t) {
-    t = esc(t);
-    t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
-    t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    t = t.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-    t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+|mailto:[^)\s]+|#[^)\s]+)\)/g,
-      '<a href="$2">$1</a>');
-    return linkify(t);
-  }
-
-  /* Auto-link bare emails and URLs in already-escaped inline HTML, skipping
-     anything inside existing tags/anchors. The handbook text is full of
-     plain addresses (league contacts, club emails) that should be tappable. */
-  function linkify(html) {
-    return html.split(/(<a\b[^>]*>[\s\S]*?<\/a>|<[^>]+>)/g).map(function (part) {
-      if (!part || part.charAt(0) === '<') return part;
-      part = part.replace(/([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/g,
-        '<a href="mailto:$1">$1</a>');
-      part = part.replace(/(https?:\/\/[^\s<]+[^\s<.,;:)])/g,
-        '<a href="$1" target="_blank" rel="noopener">$1</a>');
-      part = part.replace(/(^|[\s(])(www\.[^\s<]+[^\s<.,;:)])/g,
-        '$1<a href="https://$2" target="_blank" rel="noopener">$2</a>');
-      return part;
-    }).join('');
-  }
-  function mdToHtml(md) {
-    if (!md || !md.trim()) return '<p class="hb-empty">No content yet.</p>';
-    var lines = md.replace(/\r\n/g, '\n').split('\n');
-    var html = [], i = 0;
-    function isTableSep(s) { return /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(s) && s.indexOf('-') !== -1; }
-    function splitRow(s) {
-      s = s.trim().replace(/^\|/, '').replace(/\|$/, '');
-      return s.split('|').map(function (c) { return c.trim(); });
+  /* ================= Numbering engine (verified against source) ================= */
+  function childrenOf(nodes, pid) {
+    var a = [];
+    // Firebase strips null values, so a root node reads back with parentId
+    // missing — treat undefined as null so root detection survives a reload.
+    for (var id in nodes) {
+      var p = nodes[id].parentId; if (p === undefined) p = null;
+      if (p === pid) a.push(nodes[id]);
     }
-    while (i < lines.length) {
-      var line = lines[i];
-      if (!line.trim()) { i++; continue; }
-      // table
-      if (line.indexOf('|') !== -1 && i + 1 < lines.length && isTableSep(lines[i + 1])) {
-        var headers = splitRow(line); i += 2;
-        var body = [];
-        while (i < lines.length && lines[i].indexOf('|') !== -1 && lines[i].trim()) { body.push(splitRow(lines[i])); i++; }
-        html.push('<table><thead><tr>' + headers.map(function (h) { return '<th>' + mdInline(h) + '</th>'; }).join('') + '</tr></thead><tbody>' +
-          body.map(function (r) { return '<tr>' + r.map(function (c) { return '<td>' + mdInline(c) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table>');
-        continue;
-      }
-      var h = /^(#{2,4})\s+(.*)$/.exec(line);
-      if (h) { var lvl = h[1].length; html.push('<h' + lvl + '>' + mdInline(h[2]) + '</h' + lvl + '>'); i++; continue; }
-      if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { html.push('<hr>'); i++; continue; }
-      if (/^\s*>/.test(line)) {
-        var q = [];
-        while (i < lines.length && /^\s*>/.test(lines[i])) { q.push(lines[i].replace(/^\s*>\s?/, '')); i++; }
-        html.push('<blockquote>' + q.map(mdInline).join('<br>') + '</blockquote>'); continue;
-      }
-      if (/^\s*[-*]\s+/.test(line)) {
-        var ul = [];
-        while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) { ul.push('<li>' + mdInline(lines[i].replace(/^\s*[-*]\s+/, '')) + '</li>'); i++; }
-        html.push('<ul>' + ul.join('') + '</ul>'); continue;
-      }
-      if (/^\s*\d+\.\s+/.test(line)) {
-        var ol = [];
-        while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) { ol.push('<li>' + mdInline(lines[i].replace(/^\s*\d+\.\s+/, '')) + '</li>'); i++; }
-        html.push('<ol>' + ol.join('') + '</ol>'); continue;
-      }
-      // paragraph (gather until blank)
-      var para = [];
-      while (i < lines.length && lines[i].trim() && !/^(#{2,4}\s|>|\s*[-*]\s|\s*\d+\.\s)/.test(lines[i]) && !/^\s*(-{3,}|\*{3,})\s*$/.test(lines[i])) {
-        para.push(lines[i]); i++;
-      }
-      html.push('<p>' + para.map(mdInline).join('<br>') + '</p>');
-    }
-    return html.join('\n');
+    a.sort(function (x, y) { return (x.order || 0) - (y.order || 0); });
+    return a;
   }
-
-  /* ============ Tree helpers ============ */
-  function childrenOf(parentId) {
-    var out = [];
-    for (var id in S.nodes) if (S.nodes[id].parentId === parentId) out.push(S.nodes[id]);
-    out.sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
-    return out;
+  function alpha(i, up) { var s = ''; while (i > 0) { i--; s = String.fromCharCode(65 + (i % 26)) + s; i = Math.floor(i / 26); } return up ? s : s.toLowerCase(); }
+  function roman(i, up) {
+    var m = [[1000, 'm'], [900, 'cm'], [500, 'd'], [400, 'cd'], [100, 'c'], [90, 'xc'], [50, 'l'], [40, 'xl'], [10, 'x'], [9, 'ix'], [5, 'v'], [4, 'iv'], [1, 'i']], s = '';
+    for (var k = 0; k < m.length; k++) { while (i >= m[k][0]) { s += m[k][1]; i -= m[k][0]; } }
+    return up ? s.toUpperCase() : s;
   }
-  function flatten() {
-    // depth-first reading order
-    var out = [];
-    (function walk(pid) {
-      childrenOf(pid).forEach(function (n) { out.push(n); walk(n.id); });
-    })(null);
-    return out;
-  }
-  function breadcrumb(node) {
-    var chain = [], n = node;
-    while (n) { chain.unshift(n); n = n.parentId ? S.nodes[n.parentId] : null; }
-    return chain;
-  }
-
-  /* The DB has structure but no actual content written yet (e.g. the empty
-     seed skeleton — even if a section was opened/saved without text, which
-     changes its updatedBy). The signal is simply: not one node has a real
-     body. Treated like an empty DB so the import is still offered. */
-  function isEmptySkeleton() {
-    var ids = Object.keys(S.nodes);
-    return ids.length > 0 && ids.every(function (id) {
-      var n = S.nodes[id];
-      return !(n.body && n.body.trim());
-    });
-  }
-
-  /* ============ Rendering ============ */
-  function render() {
-    if (!S.seeded || isEmptySkeleton()) { renderSeedPrompt(); return; }
-    renderToc();
-    renderMain();
-  }
-
-  function renderSeedPrompt() {
-    var side = document.getElementById('hbSide');
-    if (side) side.style.display = 'none';
-    var main = document.getElementById('hbMain');
-    var canSeed = S.role === 'superadmin';
-    var skeleton = isEmptySkeleton();
-    main.innerHTML = '<div class="hb-seed"><div class="hb-seed__card">' +
-      '<h2 style="margin-top:0;color:var(--navy);">' + (skeleton ? 'Ready to import' : 'The handbook is empty') + '</h2>' +
-      '<p style="color:var(--text-muted);">' +
-        (canSeed
-          ? (skeleton
-              ? 'The empty chapter structure is in place. Import the full 2025/26 handbook (rules, articles, appendices and league information, carved from the printed booklet) to fill it in.'
-              : 'Import the full 2025/26 handbook (rules, articles, appendices and league information, carved from the printed booklet) — or just create the empty chapter structure to fill in by hand.')
-          : 'It hasn’t been set up yet. A League administrator needs to initialise it.') +
-      '</p>' +
-      (canSeed
-        ? '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">' +
-            '<button class="btn btn--navy" id="hbImportBtn">Import 2025/26 handbook</button>' +
-            (skeleton ? '' : '<button class="btn btn--ghost" id="hbSeedBtn">Create empty structure</button>') +
-          '</div>' +
-          '<p style="color:var(--text-muted);font-size:12px;margin:14px 0 0;">' +
-            (skeleton
-              ? 'Import will replace the empty structure (it won’t touch real content). Imported text is fully editable afterwards.'
-              : 'Either is a one-off and refuses to overwrite existing content. Imported text is fully editable afterwards.') +
-          '</p>'
-        : '') +
-    '</div></div>';
-  }
-
-  function tocItem(node) {
-    var kids = childrenOf(node.id);
-    var hasKids = kids.length > 0;
-    var collapsed = S.collapsed[node.id];
-    var cls = 'hb-toc__link' + (node.id === S.currentId ? ' is-current' : '');
-    var caret = hasKids
-      ? '<button class="hb-toc__caret" data-toc-caret="' + esc(node.id) + '">' + (collapsed ? '▸' : '▾') + '</button>'
-      : '<span class="hb-toc__caret hb-toc__caret--spacer"></span>';
-    var li = '<li class="' + (node.parentId === null ? 'hb-toc__chapter' : '') + '">' +
-      '<div class="hb-toc__row">' + caret +
-        '<a class="' + cls + '" data-toc="' + esc(node.id) + '">' +
-          (node.number ? '<span class="hb-toc__num">' + esc(node.number) + '</span>' : '') +
-          esc(node.title) +
-        '</a>' +
-      '</div>';
-    if (hasKids && !collapsed) li += '<ul>' + kids.map(tocItem).join('') + '</ul>';
-    return li + '</li>';
-  }
-  function renderToc() {
-    var side = document.getElementById('hbSide');
-    if (side) side.style.display = '';
-    var toc = document.getElementById('hbToc');
-    if (S.search) { renderSearchResults(toc); return; }
-    toc.innerHTML = childrenOf(null).map(tocItem).join('') +
-      (canEdit()
-        ? '<li style="margin-top:14px;"><button class="btn btn--ghost btn--sm" id="hbAddChapter" style="width:100%;">+ New chapter</button></li>'
-        : '');
-  }
-  function renderSearchResults(toc) {
-    var q = S.search.toLowerCase();
-    var hits = Object.keys(S.nodes).map(function (id) { return S.nodes[id]; }).filter(function (n) {
-      return (n.title || '').toLowerCase().indexOf(q) !== -1 ||
-             (n.number || '').toLowerCase().indexOf(q) !== -1 ||
-             (n.body || '').toLowerCase().indexOf(q) !== -1;
-    }).sort(function (a, b) { return (a.number || a.title).localeCompare(b.number || b.title); });
-    if (!hits.length) { toc.innerHTML = '<li style="padding:8px;color:var(--text-muted);font-size:13px;">No matches.</li>'; return; }
-    toc.innerHTML = hits.map(function (n) {
-      return '<li><div class="hb-toc__row"><span class="hb-toc__caret hb-toc__caret--spacer"></span>' +
-        '<a class="hb-toc__link' + (n.id === S.currentId ? ' is-current' : '') + '" data-toc="' + esc(n.id) + '">' +
-        (n.number ? '<span class="hb-toc__num">' + esc(n.number) + '</span>' : '') + esc(n.title) + '</a></div></li>';
-    }).join('');
-  }
-
-  function renderMain() {
-    var main = document.getElementById('hbMain');
-    if (S.editing) { renderEditor(main); return; }
-    var node = S.nodes[S.currentId];
-    if (!node) {
-      // default to first chapter
-      var first = childrenOf(null)[0];
-      if (first) { S.currentId = first.id; node = first; }
-    }
-    if (!node) { main.innerHTML = '<p class="hb-empty">Nothing here yet.</p>'; return; }
-
-    var crumb = breadcrumb(node).map(function (n) {
-      return '<a class="hb-crumb__pill" data-toc="' + esc(n.id) + '">' + esc(n.title) + '</a>';
-    }).join('<span class="hb-crumb__sep">›</span>');
-
-    var flat = flatten();
-    var idx = flat.findIndex(function (n) { return n.id === node.id; });
-    var prev = idx > 0 ? flat[idx - 1] : null;
-    var next = idx >= 0 && idx < flat.length - 1 ? flat[idx + 1] : null;
-
-    var editBar = canEdit()
-      ? '<div class="hb-toolbar">' +
-          '<button class="btn btn--navy btn--sm" id="hbEdit">Edit</button>' +
-          (breadcrumb(node).length < 3
-            ? '<button class="btn btn--ghost btn--sm" id="hbAddChild" title="New section inside this one">+ Inside</button>'
-            : '') +
-          '<button class="btn btn--ghost btn--sm" id="hbAddSibling" title="New section at the same level, after this one">+ After</button>' +
-          '<button class="btn btn--ghost btn--sm" id="hbMoveUp" title="Move up among its siblings">↑</button>' +
-          '<button class="btn btn--ghost btn--sm" id="hbMoveDown" title="Move down among its siblings">↓</button>' +
-          (S.role === 'superadmin'
-            ? '<button class="btn btn--ghost btn--sm" id="hbReimport" title="Re-import the carved booklet — only replaces sections nobody has edited">Re-import</button>'
-            : '') +
-          '<button class="btn btn--danger btn--sm" id="hbDelete" style="margin-left:auto;">Delete</button>' +
-        '</div>'
-      : '';
-
-    /* Attribution only for human edits — seed/import provenance stays out
-       of the page (it's in the audit trail). Meta sits at the base. */
-    var isMachine = node.updatedBy === 'seed' || node.updatedBy === 'import 2025/26';
-    var metaLine = node.updatedAt
-      ? '<div class="hb-doc__meta">Last updated ' + esc(fmtDate(node.updatedAt)) + (!isMachine && node.updatedBy ? ' · ' + esc(node.updatedBy) : '') + '</div>'
-      : '';
-
-    /* A node can carry both an intro body AND children. The reader shows the
-       body (if any), then a directory of its sub-sections — so a chapter is a
-       navigable landing page, and a single-section chapter (Memorandum) just
-       holds its own body with no redundant child. */
-    var kids = childrenOf(node.id);
-    var blocks = deriveBlocks(node);
-    var bodyHtml = blocks.length
-      ? '<div class="hb-body">' + blocksToHtml(blocks) + '</div>'
-      : (kids.length ? '' : '<div class="hb-body"><p class="hb-empty">No content yet.</p></div>');
-
-    var dirHtml = '';
-    if (kids.length && S.inlineView === node.id) {
-      /* "Read as one page": every descendant inline, anchored. */
-      var flatKids = [];
-      (function gather(pid) { childrenOf(pid).forEach(function (k) { flatKids.push(k); gather(k.id); }); })(node.id);
-      dirHtml = '<p><a class="hb-crumb__pill" id="hbInlineOff">Show as section list</a></p>' +
-        flatKids.map(function (k) {
-          return '<div class="hb-inline-sec" id="' + esc(k.id) + '">' +
-            (k.number ? '<div class="hb-doc__num">' + esc(k.number) + '</div>' : '') +
-            '<h2 class="hb-doc__title" style="font-size:22px;">' + esc(k.title) + '</h2>' +
-            '<div class="hb-body">' + blocksToHtml(deriveBlocks(k)) + '</div>' +
-          '</div>';
-        }).join('');
-    } else if (kids.length) {
-      dirHtml = '<div class="hb-dir">' + kids.map(function (k) {
-        var sub = childrenOf(k.id).length;
-        return '<a class="hb-dir__item" data-toc="' + esc(k.id) + '">' +
-          '<div class="hb-dir__t">' +
-            (k.number ? '<span class="hb-dir__num">' + esc(k.number) + '</span>' : '') + esc(k.title) +
-          '</div>' +
-          (sub ? '<div class="hb-dir__s">' + sub + ' section' + (sub === 1 ? '' : 's') + '</div>' : '') +
-        '</a>';
-      }).join('') + '</div>' +
-      '<p style="margin-top:14px;"><a class="hb-crumb__pill" id="hbInlineOn">Read as one page</a></p>';
-    }
-
-    main.innerHTML = editBar +
-      '<div class="hb-crumb">' + crumb + '</div>' +
-      (node.number ? '<div class="hb-doc__num">' + esc(node.number) + '</div>' : '') +
-      '<h1 class="hb-doc__title">' + esc(node.title) + '</h1>' +
-      bodyHtml +
-      dirHtml +
-      metaLine +
-      '<div class="hb-prevnext">' +
-        (prev ? '<a data-toc="' + esc(prev.id) + '"><span>← Previous</span>' + esc(prev.title) + '</a>' : '<span></span>') +
-        (next ? '<a data-toc="' + esc(next.id) + '" style="text-align:right;"><span>Next →</span>' + esc(next.title) + '</a>' : '<span></span>') +
-      '</div>';
-  }
-
-  /* Plain-text preview of a body (HTML or markdown) for directory cards. */
-  function textSnippet(body, max) {
-    if (!body || !body.trim()) return '';
-    var tmp = document.createElement('div');
-    tmp.innerHTML = bodyIsHtml(body) ? body : mdToHtml(body);
-    var txt = (tmp.textContent || '').replace(/\s+/g, ' ').trim();
-    return txt.length > max ? txt.slice(0, max - 1) + '…' : txt;
-  }
-
-  /* ============ Editor — platform canon ============
-     Same pattern as graphics/article-composer: a contenteditable pane with
-     the brand .fmt-toolbar component (nl-brand.css v2.19). No external
-     library. Bodies are stored as SANITIZED HTML; legacy Markdown bodies
-     (the original carve) still render via mdToHtml and are converted to
-     HTML the first time they're saved. */
-
-  var ALLOWED_TAGS = { P:1, H2:1, H3:1, H4:1, STRONG:1, B:1, EM:1, I:1, U:1,
-    UL:1, OL:1, LI:1, A:1, TABLE:1, THEAD:1, TBODY:1, TR:1, TH:1, TD:1,
-    BR:1, BLOCKQUOTE:1, HR:1, CODE:1, DIV:1, SPAN:1 };
-
-  function sanitizeHtml(html) {
-    var tpl = document.createElement('template');
-    tpl.innerHTML = html || '';
-    (function walk(node) {
-      var kids = Array.prototype.slice.call(node.childNodes);
-      kids.forEach(function (child) {
-        if (child.nodeType === 8) { child.parentNode.removeChild(child); return; }
-        if (child.nodeType !== 1) return;
-        var tag = child.tagName;
-        if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'IFRAME' || tag === 'OBJECT' || tag === 'EMBED' || tag === 'FORM' || tag === 'INPUT') {
-          child.parentNode.removeChild(child); return;
-        }
-        walk(child);
-        if (!ALLOWED_TAGS[tag]) {
-          while (child.firstChild) child.parentNode.insertBefore(child.firstChild, child);
-          child.parentNode.removeChild(child); return;
-        }
-        Array.prototype.slice.call(child.attributes).forEach(function (a) {
-          var n = a.name.toLowerCase();
-          if (tag === 'A' && n === 'href') {
-            if (!/^(https?:|mailto:|#)/i.test(a.value.trim())) child.removeAttribute(a.name);
-            return;
-          }
-          if (tag === 'OL' && n === 'type' && /^[1aAiI]$/.test(a.value)) return;
-          if (tag === 'OL' && n === 'start' && /^\d+$/.test(a.value)) return;
-          child.removeAttribute(a.name);
-        });
-        if (tag === 'A') {
-          child.setAttribute('rel', 'noopener');
-          if (/^https?:/i.test(child.getAttribute('href') || '')) child.setAttribute('target', '_blank');
-        }
+  // Pure: nodes map -> { id: displayNumber }
+  function computeNumbers(nodes) {
+    var map = {};
+    (function walk(pid, base) {
+      var kids = childrenOf(nodes, pid), c = {};
+      kids.forEach(function (k) {
+        if (k.kind === 'bullet') { map[k.id] = '•'; walk(k.id, base); return; }
+        if (k.numStyle === 'none') { map[k.id] = ''; walk(k.id, base); return; }
+        c[k.numStyle] = (c[k.numStyle] || 0) + 1;
+        var idx = c[k.numStyle], disp;
+        if (k.numberOverride) disp = k.numberOverride;
+        else if (k.numStyle === 'decimal') disp = (base ? base + '.' : '') + idx;
+        else if (k.numStyle === 'lower-alpha') disp = '(' + alpha(idx) + ')';
+        else if (k.numStyle === 'upper-alpha') disp = '(' + alpha(idx, true) + ')';
+        else if (k.numStyle === 'lower-roman') disp = '(' + roman(idx) + ')';
+        else if (k.numStyle === 'upper-roman') disp = '(' + roman(idx, true) + ')';
+        else disp = '' + idx;
+        map[k.id] = disp;
+        // decimal / upper-alpha carry their number down; lower-alpha & lower-roman reset
+        // the decimal base so a number list nested under (a)/(i) restarts (1, 2), not 23.5.1
+        var childBase = (k.numStyle === 'decimal' || k.numStyle === 'upper-alpha') ? (k.numberOverride || disp)
+          : ((k.numStyle === 'lower-alpha' || k.numStyle === 'lower-roman') ? '' : base);
+        walk(k.id, childBase);
       });
-    })(tpl.content);
-    /* Merge adjacent sibling <ol>s of the same declared type — fixes the
-       1. 1. 1. effect from single-item lists created per paragraph. */
-    (function mergeOls(node) {
-      var c = node.firstChild;
-      while (c) {
-        var nx = c.nextSibling;
+    })(null, '');
+    return map;
+  }
+  function depthOf(node) { var d = 0, n = node; while (n && n.parentId != null) { n = S.nodes[n.parentId]; d++; } return d; }
+
+  /* ================= Rich-text sanitiser (edit -> stored body) ================= */
+  var OK_TAGS = ['p', 'br', 'b', 'strong', 'i', 'em', 'u', 'ul', 'ol', 'li', 'a', 'span'];
+  function sanitize(html) {
+    var d = document.createElement('div'); d.innerHTML = html;
+    (function clean(node) {
+      [].slice.call(node.childNodes).forEach(function (c) {
         if (c.nodeType === 1) {
-          mergeOls(c);
-          if (c.tagName === 'OL') {
-            while (nx && nx.nodeType === 3 && !nx.textContent.trim()) nx = nx.nextSibling;
-            if (nx && nx.nodeType === 1 && nx.tagName === 'OL' &&
-                (c.getAttribute('type') || '') === (nx.getAttribute('type') || '')) {
-              while (nx.firstChild) c.appendChild(nx.firstChild);
-              var dead = nx; nx = c; dead.parentNode.removeChild(dead);
-            }
+          var tag = c.tagName.toLowerCase();
+          if (OK_TAGS.indexOf(tag) === -1) {
+            while (c.firstChild) node.insertBefore(c.firstChild, c);
+            node.removeChild(c);
+          } else {
+            [].slice.call(c.attributes).forEach(function (a) {
+              if (!(tag === 'a' && a.name === 'href')) c.removeAttribute(a.name);
+            });
+            if (tag === 'a') { c.setAttribute('rel', 'noopener'); c.setAttribute('target', '_blank'); }
+            clean(c);
           }
-        }
-        c = (nx === c) ? c.nextSibling : nx;
-      }
-    })(tpl.content);
-    return tpl.innerHTML;
+        } else if (c.nodeType === 8) { node.removeChild(c); }
+      });
+    })(d);
+    return d.innerHTML.replace(/<div>/gi, '<p>').replace(/<\/div>/gi, '</p>');
   }
 
-  function bodyIsHtml(body) {
-    return /<(p|h[1-6]|ul|ol|table|div|blockquote|br)\b/i.test(body || '');
-  }
-  /* Render a stored body (HTML or legacy Markdown) to safe display HTML. */
-  function bodyToHtml(body) {
-    if (!body || !body.trim()) return '<p class="hb-empty">No content yet.</p>';
-    return bodyIsHtml(body) ? linkify(sanitizeHtml(body)) : mdToHtml(body);
-  }
+  /* ================= Render ================= */
+  var STYLE_LABELS = {
+    'decimal': '1, 2, 3', 'lower-alpha': '(a) (b)', 'upper-alpha': '(A) (B)',
+    'lower-roman': '(i) (ii)', 'upper-roman': '(I) (II)', 'bullet': '• bullet', 'none': 'no number'
+  };
 
-  function renderEditor(main) {
-    var isNew = S.editing === '__new__';
-    var d = S.draft;
-    var linkOpts = flatten().map(function (n) {
-      return '<option value="' + esc(n.id) + '">' + esc((n.number ? n.number + ' ' : '') + n.title).slice(0, 60) + '</option>';
+  function toolbar(node) {
+    if (S.mode !== 'edit' || !canEdit()) return '';
+    var opts = Object.keys(STYLE_LABELS).map(function (v) {
+      return '<option value="' + v + '"' + (node.numStyle === v ? ' selected' : '') + '>' + esc(STYLE_LABELS[v]) + '</option>';
     }).join('');
-    main.innerHTML =
-      '<div class="hb-toolbar"><b style="align-self:center;">' + (isNew ? 'New section' : 'Editing') + '</b>' +
-        '<button class="btn btn--navy btn--sm" id="hbSave" style="margin-left:auto;">Save</button>' +
-        '<button class="btn btn--ghost btn--sm" id="hbCancel">Cancel</button>' +
-      '</div>' +
-      '<div class="hb-edit-meta">' +
-        '<div class="hb-field"><label>Number (optional)</label><input id="hbfNum" value="' + esc(d.number) + '" placeholder="e.g. 4.2 or Appendix F"></div>' +
-        '<div class="hb-field"><label>Title</label><input id="hbfTitle" value="' + esc(d.title) + '"></div>' +
-        '<div class="hb-field"><label>Kind</label><select id="hbfKind">' +
-          ['chapter','section','appendix'].map(function (k) { return '<option value="' + k + '"' + (d.kind === k ? ' selected' : '') + '>' + k + '</option>'; }).join('') +
-        '</select></div>' +
-      '</div>' +
-      '<div class="fmt-toolbar" id="hbFmtBar" aria-label="Formatting toolbar">' +
-        '<select id="hbStyleSel" title="Apply style">' +
-          '<option value="p">Paragraph</option><option value="h2">Heading</option>' +
-          '<option value="h3">Sub-heading</option><option value="h4">Minor heading</option>' +
-        '</select>' +
-        '<span class="sep"></span>' +
-        '<button type="button" data-cmd="bold" class="fmt-icon" title="Bold">B</button>' +
-        '<button type="button" data-cmd="italic" class="fmt-icon" title="Italic"><i>I</i></button>' +
-        '<button type="button" data-cmd="underline" class="fmt-icon" title="Underline"><u>U</u></button>' +
-        '<span class="sep"></span>' +
-        '<button type="button" data-cmd="insertUnorderedList" class="fmt-icon" title="Bulleted list">• list</button>' +
-        '<button type="button" data-cmd="insertOrderedList" class="fmt-icon" title="Numbered list">1. list</button>' +
-        '<select id="hbListType" title="Numbering style for the list under the cursor">' +
-          '<option value="">List: auto</option><option value="1">1, 2, 3</option>' +
-          '<option value="a">a, b, c</option><option value="i">i, ii, iii</option>' +
-        '</select>' +
-        '<span class="sep"></span>' +
-        '<button type="button" id="hbLinkBtn" class="fmt-icon" title="Insert web link">Link</button>' +
-        '<select id="hbSecLink" title="Link the selected text to a handbook section">' +
-          '<option value="">Link to section…</option>' + linkOpts +
-        '</select>' +
-        '<span class="sep"></span>' +
-        '<button type="button" data-cmd="undo" class="fmt-icon" title="Undo">Undo</button>' +
-        '<button type="button" data-cmd="redo" class="fmt-icon" title="Redo">Redo</button>' +
-        '<button type="button" id="hbClearFmt" title="Clear formatting">Clear formatting</button>' +
-      '</div>' +
-      '<div id="hbBlocks">' + d.blocks.map(blockEditorHtml).join('') + '</div>' +
-      '<div class="hb-addblock">' +
-        '<button class="btn btn--ghost btn--sm" data-addblock="text">+ Text</button>' +
-        '<button class="btn btn--ghost btn--sm" data-addblock="cards">+ Contact cards</button>' +
-        '<button class="btn btn--ghost btn--sm" data-addblock="table">+ Table</button>' +
+    return '<div class="nl-tools" contenteditable="false">' +
+      '<button data-op="addAfter" title="Add a clause after this one">+ clause</button>' +
+      '<button data-op="addSub" title="Add a sub-clause inside this one">+ sub</button>' +
+      '<button data-op="addTable" title="Add a table after this one">+ table</button>' +
+      '<span class="sep"></span>' +
+      '<button data-op="outdent" title="Promote one level">← outdent</button>' +
+      '<button data-op="indent" title="Demote one level">indent →</button>' +
+      '<button data-op="up" title="Move up">↑</button>' +
+      '<button data-op="down" title="Move down">↓</button>' +
+      '<span class="sep"></span>' +
+      '<select data-op="style" title="Numbering style">' + opts + '</select>' +
+      '<button data-op="override" title="Pin an exact number (e.g. 13.B)">¹₂ fix…</button>' +
+      '<button data-op="delete" title="Delete this clause and its children">✕</button>' +
       '</div>';
-
-    document.getElementById('hbfTitle').addEventListener('input', function (e) { S.draft.title = e.target.value; });
-    document.getElementById('hbfNum').addEventListener('input', function (e) { S.draft.number = e.target.value; });
-    document.getElementById('hbfKind').addEventListener('change', function (e) { S.draft.kind = e.target.value; });
-    try { document.execCommand && document.execCommand('defaultParagraphSeparator', false, 'p'); } catch (e) {}
-    wireEditorChrome();
   }
 
-  function blockEditorHtml(b, i) {
-    var bar = '<div class="hb-block__bar"><span class="hb-block__kind">' +
-      (b.t === 'cards' ? 'Contact cards' : b.t === 'table' ? 'Table' : 'Text') + '</span>' +
-      '<button class="btn-icon" data-bmove="-1" title="Move up">↑</button>' +
-      '<button class="btn-icon" data-bmove="1" title="Move down">↓</button>' +
-      '<button class="btn-icon" data-bdel title="Remove block">×</button></div>';
-    var inner;
-    if (b.t === 'cards') {
-      inner = '<div class="hb-block__body"><div class="hb-cards-ed">' +
-        (b.cards.length ? b.cards : [{}]).map(contactRow).join('') + '</div>' +
-        '<button class="btn btn--ghost btn--sm" data-addcard style="margin-top:10px;">+ Add person / organisation</button></div>';
-    } else if (b.t === 'table') {
-      var cols = Math.max(b.head.length, (b.rows[0] || []).length, 2);
-      while (b.head.length < cols) b.head.push('');
-      var headHtml = '<thead><tr>' + b.head.map(function (h) { return '<th><input data-th value="' + esc(h) + '" placeholder="Header"></th>'; }).join('') + '</tr></thead>';
-      var rowsHtml = (b.rows.length ? b.rows : [Array(cols).join(' ').split(' ')]).map(function (r) {
-        while (r.length < cols) r.push('');
-        return '<tr>' + r.map(function (c) { return '<td><input data-td value="' + esc(c) + '"></td>'; }).join('') + '</tr>';
-      }).join('');
-      inner = '<div class="hb-block__body hb-tbl-ed"><table>' + headHtml + '<tbody>' + rowsHtml + '</tbody></table>' +
-        '<div class="hb-tbl-ed__controls">' +
-          '<button class="btn btn--ghost btn--sm" data-trow="1">+ Row</button>' +
-          '<button class="btn btn--ghost btn--sm" data-trow="-1">− Row</button>' +
-          '<button class="btn btn--ghost btn--sm" data-tcol="1">+ Column</button>' +
-          '<button class="btn btn--ghost btn--sm" data-tcol="-1">− Column</button>' +
-        '</div></div>';
-    } else {
-      var initial = (b.html && b.html.trim()) ? (bodyIsHtml(b.html) ? sanitizeHtml(b.html) : mdToHtml(b.html)) : '<p><br></p>';
-      inner = '<div class="hb-ed hb-body" contenteditable="true">' + initial + '</div>';
+  function renderNode(node, numMap) {
+    var kids = childrenOf(S.nodes, node.id);
+    var sel = (node.id === S.selectedId) ? ' is-sel' : '';
+    var editing = (S.mode === 'edit' && canEdit());
+    var num = numMap[node.id] || '';
+    if (node.parentId == null) {
+      // Article (top level)
+      var h = '<section class="nl-art' + (num ? '' : ' nl-art--nonum') + sel + '" id="c-' + node.id + '" data-id="' + node.id + '">' +
+        '<div class="nl-art__head">' +
+        '<span class="nl-art__num">' + esc(num) + '</span>' +
+        '<span class="nl-art__title" data-ph="Section title"' + editable('title') + '>' + esc(node.title || '') + '</span>' +
+        '</div>' + toolbar(node);
+      if (node.body) h += '<div class="nl-clause__text" data-ph="Write the text…" style="margin-top:6px"' + editable('body') + '>' + node.body + '</div>';
+      else if (editing) h += '<div class="nl-clause__text" data-ph="Write the text…" style="margin-top:6px"' + editable('body') + '></div>';
+      kids.forEach(function (c) { h += renderNode(c, numMap); });
+      return h + '</section>';
     }
-    return '<div class="hb-block" data-bt="' + b.t + '">' + bar + inner + '</div>';
+    var depth = depthOf(node);
+    var noNum = !num && node.kind !== 'bullet';
+    var cls = node.kind === 'bullet' ? ' nl-clause--bullet' : (noNum ? ' nl-clause--nonum' : '');
+    var out = '<div class="nl-clause' + cls + sel + '" id="c-' + node.id + '" data-id="' + node.id + '" data-depth="' + depth + '">' +
+      '<div class="nl-clause__num">' + esc(num) + '</div>' +
+      '<div class="nl-clause__body">';
+    if (node.title || editing) out += '<div class="nl-clause__title" data-ph="Heading (optional)"' + editable('title') + '>' + esc(node.title || '') + '</div>';
+    if (node.kind === 'table') {
+      out += renderTable(node, editing);
+    } else {
+      out += '<div class="nl-clause__text" data-ph="Write the clause text…"' + editable('body') + '>' + (node.body || '') + '</div>';
+    }
+    out += toolbar(node);
+    kids.forEach(function (c) { out += renderNode(c, numMap); });
+    return out + '</div></div>';
   }
 
-  /* Serialize the block stack back into draft.blocks. */
-  function readDraftBlocks() {
-    return Array.prototype.map.call(document.querySelectorAll('#hbBlocks .hb-block'), function (el) {
-      var t = el.getAttribute('data-bt');
-      if (t === 'cards') {
-        var cards = Array.prototype.map.call(el.querySelectorAll('.hb-card-ed'), function (row) {
-          var c = {};
-          Array.prototype.forEach.call(row.querySelectorAll('[data-cf]'), function (inp) { c[inp.getAttribute('data-cf')] = inp.value.trim(); });
-          return c;
-        }).filter(function (c) { return c.name || c.role || c.org || c.email || c.phone || c.note; });
-        return { t: 'cards', cards: cards };
-      }
-      if (t === 'table') {
-        var head = Array.prototype.map.call(el.querySelectorAll('[data-th]'), function (i) { return i.value; });
-        var rows = Array.prototype.map.call(el.querySelectorAll('tbody tr'), function (tr) {
-          return Array.prototype.map.call(tr.querySelectorAll('[data-td]'), function (i) { return i.value; });
-        }).filter(function (r) { return r.some(function (c) { return c.trim(); }); });
-        return { t: 'table', head: head, rows: rows };
-      }
-      var ed = el.querySelector('.hb-ed');
-      var html = sanitizeHtml(ed ? ed.innerHTML : '');
-      var probe = html.replace(/<[^>]+>|&nbsp;|\s/g, '');
-      return { t: 'text', html: probe ? html : '' };
-    }).filter(function (b) {
-      return (b.t === 'text' && b.html) || (b.t === 'cards' && b.cards.length) || (b.t === 'table' && b.rows.length);
-    });
+  function renderTable(node, editing) {
+    var t = node.table || { header: [], rows: [] };
+    var head = Array.isArray(t.header) ? t.header : [];
+    var rows = Array.isArray(t.rows) ? t.rows : [];
+    var h = '<div class="nl-tbl-wrap"><table class="nl-tbl">';
+    if (head.length) {
+      h += '<thead><tr>' + head.map(function (c, ci) {
+        return '<th' + (editing ? ' contenteditable="true" data-th="' + ci + '"' : '') + '>' + esc(c || '') + '</th>';
+      }).join('') + '</tr></thead>';
+    }
+    h += '<tbody>' + rows.map(function (row, ri) {
+      row = Array.isArray(row) ? row : [];
+      return '<tr>' + row.map(function (c, ci) {
+        return '<td' + (editing ? ' contenteditable="true" data-tr="' + ri + '" data-tc="' + ci + '"' : '') + '>' + esc(c || '') + '</td>';
+      }).join('') + '</tr>';
+    }).join('') + '</tbody></table></div>';
+    if (editing) {
+      h += '<div class="nl-tbl-ctrl" contenteditable="false">' +
+        '<button type="button" data-tblop="addRow">+ row</button>' +
+        '<button type="button" data-tblop="addCol">+ col</button>' +
+        '<button type="button" data-tblop="delRow">− row</button>' +
+        '<button type="button" data-tblop="delCol">− col</button>' +
+        '</div>';
+    }
+    return h;
+  }
+  function editable(field) {
+    return (S.mode === 'edit' && canEdit()) ? ' contenteditable="true" data-field="' + field + '"' : '';
   }
 
-  function refreshBlocksFromDom() { S.draft.blocks = readDraftBlocks(); }
-
-  function wireEditorChrome() {
-    var bar = document.getElementById('hbFmtBar');
-    bar.addEventListener('click', function (e) {
-      var b = e.target.closest('button');
-      if (!b) return;
-      var cmd = b.getAttribute('data-cmd');
-      if (cmd) { document.execCommand && document.execCommand(cmd, false, null); return; }
-      if (b.id === 'hbLinkBtn') {
-        var url = prompt('Link to (https://…, mailto:… )');
-        if (url) { if (!/^(https?:|mailto:|#)/i.test(url)) url = 'https://' + url;
-          document.execCommand && document.execCommand('createLink', false, url); }
-        return;
-      }
-      if (b.id === 'hbClearFmt') {
-        document.execCommand && document.execCommand('removeFormat', false, null);
-        document.execCommand && document.execCommand('formatBlock', false, 'P');
-      }
-    });
-    document.getElementById('hbStyleSel').addEventListener('change', function (e) {
-      document.execCommand && document.execCommand('formatBlock', false, e.target.value.toUpperCase());
-      e.target.value = 'p';
-    });
-    document.getElementById('hbListType').addEventListener('change', function (e) {
-      var sel = window.getSelection();
-      var n = sel && sel.anchorNode;
-      while (n && n.nodeName !== 'OL') n = n.parentNode;
-      if (n) { if (e.target.value) n.setAttribute('type', e.target.value); else n.removeAttribute('type'); }
-      else NL.toast && NL.toast('Put the cursor inside a numbered list first.', 'info');
-      e.target.value = '';
-    });
-    document.getElementById('hbSecLink').addEventListener('change', function (e) {
-      var id = e.target.value;
-      if (id) document.execCommand && document.execCommand('createLink', false, '#' + id);
-      e.target.value = '';
-    });
-
-    var host = document.getElementById('hbBlocks');
-    host.addEventListener('click', function (e) {
-      var blockEl = e.target.closest('.hb-block');
-      if (e.target.closest('[data-addcard]')) {
-        refreshBlocksFromDom();
-        var idx = Array.prototype.indexOf.call(host.children, blockEl);
-        if (S.draft.blocks[idx]) S.draft.blocks[idx].cards.push({});
-        else S.draft.blocks.push({ t: 'cards', cards: [{}] });
-        rerenderBlocks(); return;
-      }
-      if (e.target.closest('.hb-card-ed__del')) {
-        e.target.closest('.hb-card-ed').remove();
-        return;
-      }
-      var mv = e.target.closest('[data-bmove]');
-      if (mv && blockEl) {
-        refreshBlocksFromDom();
-        var i = Array.prototype.indexOf.call(host.children, blockEl);
-        var j = i + parseInt(mv.getAttribute('data-bmove'), 10);
-        if (j >= 0 && j < S.draft.blocks.length) {
-          var t = S.draft.blocks[i]; S.draft.blocks[i] = S.draft.blocks[j]; S.draft.blocks[j] = t;
-          rerenderBlocks();
-        }
-        return;
-      }
-      if (e.target.closest('[data-bdel]') && blockEl) {
-        if (!confirm('Remove this block?')) return;
-        blockEl.remove(); return;
-      }
-      var tr = e.target.closest('[data-trow]');
-      if (tr && blockEl) {
-        refreshBlocksFromDom();
-        var bi = Array.prototype.indexOf.call(host.children, blockEl);
-        var blk = S.draft.blocks[bi];
-        if (blk && blk.t === 'table') {
-          if (tr.getAttribute('data-trow') === '1') blk.rows.push(blk.head.map(function () { return ''; }));
-          else if (blk.rows.length > 1) blk.rows.pop();
-          rerenderBlocks();
-        }
-        return;
-      }
-      var tc = e.target.closest('[data-tcol]');
-      if (tc && blockEl) {
-        refreshBlocksFromDom();
-        var ci = Array.prototype.indexOf.call(host.children, blockEl);
-        var blk2 = S.draft.blocks[ci];
-        if (blk2 && blk2.t === 'table') {
-          if (tc.getAttribute('data-tcol') === '1') { blk2.head.push(''); blk2.rows.forEach(function (r) { r.push(''); }); }
-          else if (blk2.head.length > 1) { blk2.head.pop(); blk2.rows.forEach(function (r) { r.pop(); }); }
-          rerenderBlocks();
-        }
-        return;
-      }
-    });
-    document.querySelector('.hb-addblock').addEventListener('click', function (e) {
-      var b = e.target.closest('[data-addblock]');
-      if (!b) return;
-      refreshBlocksFromDom();
-      var t = b.getAttribute('data-addblock');
-      S.draft.blocks.push(t === 'cards' ? { t: 'cards', cards: [{}] } :
-        t === 'table' ? { t: 'table', head: ['', ''], rows: [['', '']] } : { t: 'text', html: '' });
-      rerenderBlocks();
-    });
-  }
-  function rerenderBlocks() {
-    document.getElementById('hbBlocks').innerHTML = S.draft.blocks.map(blockEditorHtml).join('');
+  function render() {
+    var host = $('ceDoc');
+    var ids = Object.keys(S.nodes);
+    if (!ids.length) { S.numMap = {}; renderEmpty(); syncBar(); updateCrumb(); return; }
+    var numMap = computeNumbers(S.nodes);
+    S.numMap = numMap;
+    var roots = childrenOf(S.nodes, null);
+    var html = '<div class="nl-doc' + (S.mode === 'edit' ? ' is-editing' : '') + '" id="ceDocInner">';
+    html += '<div class="nl-doc__head">' +
+      '<div class="nl-doc__title">' + esc(S.doc.title) + '</div>' +
+      (S.doc.subtitle ? '<div class="nl-doc__sub">' + esc(S.doc.subtitle) + '</div>' : '') +
+      (S.doc.season ? '<span class="nl-doc__season">' + esc(S.doc.season) + ' edition · draft</span>' : '') +
+      '</div>';
+    roots.forEach(function (r) { html += renderNode(r, numMap); });
+    html += '</div>';
+    host.innerHTML = html;
+    refreshToc();
+    syncBar();
+    updateCrumb();
   }
 
-  /* ---- Contact cards editor (for type:'contacts' nodes) ---- */  /* ---- Contact cards editor (for type:'contacts' nodes) ---- */
-  function contactRow(c) {
-    c = c || {};
-    function f(k, ph) { return '<input data-cf="' + k + '" value="' + esc(c[k] || '') + '" placeholder="' + ph + '">'; }
-    return '<div class="hb-card-ed">' +
-      '<div class="hb-card-ed__grid">' +
-        f('name', 'Name') + f('role', 'Role / title') + f('org', 'Organisation (optional)') +
-        f('email', 'Email') + f('phone', 'Phone') + f('note', 'Note (optional)') +
-      '</div>' +
-      '<button class="btn-icon hb-card-ed__del" title="Remove">×</button>' +
-    '</div>';
+  // "You are here": breadcrumb of the current area + the top-level section
+  // (article/appendix/directive) at the top of the viewport, kept in sync on scroll.
+  function currentSectionEl() {
+    var host = $('ceDoc'); if (!host) return null;
+    // The active line must sit BELOW .nl-art's scroll-margin-top (14px), otherwise a
+    // section you just jumped to lands above the line and the previous one wins.
+    var line = host.getBoundingClientRect().top + 28;
+    var arts = host.querySelectorAll('.nl-art'), cur = arts[0] || null;
+    for (var i = 0; i < arts.length; i++) {
+      if (arts[i].getBoundingClientRect().top <= line) cur = arts[i]; else break;
+    }
+    return cur;
   }
-
-  /* ============ Blocks model (v0.11) ============
-     A section's content is a stack of blocks: text / cards / table.
-     Legacy nodes (body and/or contacts fields) derive their blocks on the
-     fly; saving writes blocks[] plus body/contacts mirrors (the public
-     flipbook and search read the body mirror). */
-  function arr(x) { return !x ? [] : (Array.isArray(x) ? x : Object.keys(x).map(function (k) { return x[k]; })); }
-
-  function deriveBlocks(node) {
-    if (node.blocks) {
-      return arr(node.blocks).map(function (b) {
-        if (b.t === 'cards') return { t: 'cards', cards: arr(b.cards) };
-        if (b.t === 'table') return { t: 'table', head: arr(b.head), rows: arr(b.rows).map(arr) };
-        return { t: 'text', html: b.html || '' };
+  function updateCrumb() {
+    var crumb = $('ceCrumb'); if (!crumb) return;
+    if (!Object.keys(S.nodes).length) {
+      crumb.innerHTML = '<span class="ce-crumb__area">' + esc(S.doc.title || docTitle(S.docId)) + '</span>';
+      return;
+    }
+    var el = currentSectionEl();
+    var secId = el && el.dataset.id, node = secId && S.nodes[secId];
+    var num = (S.numMap && secId && S.numMap[secId]) || '';
+    var sec = node ? ((num ? esc(num) + ' · ' : '') + esc(node.title || '')) : '';
+    crumb.innerHTML = '<span class="ce-crumb__area">' + esc(S.doc.title || docTitle(S.docId)) + '</span>' +
+      (sec ? '<span class="ce-crumb__sep">›</span><span class="ce-crumb__sec">' + sec + '</span>' : '');
+    // reflect the current section in the contents rail (only when showing the outline)
+    if (secId && !($('ceSearch').value || '').trim()) {
+      [].forEach.call($('ceToc').querySelectorAll('.ce-toc__item'), function (a) {
+        a.classList.toggle('is-current', a.dataset.goto === secId);
       });
     }
-    var out = [];
-    if (node.body && node.body.trim()) out.push({ t: 'text', html: node.body });
-    if (node.contacts && arr(node.contacts).length) out.push({ t: 'cards', cards: arr(node.contacts) });
-    return out;
   }
 
-  function tableToHtml(b) {
-    var head = (b.head || []).some(function (h) { return h && h.trim(); })
-      ? '<thead><tr>' + b.head.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') + '</tr></thead>'
-      : '';
-    return '<table>' + head + '<tbody>' +
-      (b.rows || []).map(function (r) { return '<tr>' + r.map(function (c) { return '<td>' + linkify(esc(c)) + '</td>'; }).join('') + '</tr>'; }).join('') +
-    '</tbody></table>';
+  function renderEmpty() {
+    var title = docTitle(S.docId), hasSeed = !!SEEDS[S.docId], btn = '', msg;
+    if (canSeed() && hasSeed) {
+      msg = 'This area is empty. Import ' + esc(title) + ' to seed the clause tree, then refine it here.';
+      btn = '<button class="btn btn--primary" id="ceImport" type="button">Import ' + esc(title) + '</button>';
+    } else if (canEdit()) {
+      msg = esc(title) + ' is empty. Add the first clause in Edit mode' +
+        (canSeed() ? ', or send the source document and I can seed it automatically.' : '.');
+    } else {
+      msg = 'This area has no content yet.';
+    }
+    $('ceDoc').innerHTML =
+      '<div class="ce-empty"><div class="ce-empty__card"><h2>' + esc(title) + '</h2><p>' + msg + '</p>' + btn + '</div></div>';
+    if (btn) $('ceImport').addEventListener('click', importSeed);
   }
 
-  function blocksToHtml(blocks) {
-    return blocks.map(function (b) {
-      if (b.t === 'cards') return contactsToHtml(b.cards);
-      if (b.t === 'table') return tableToHtml(b);
-      return bodyIsHtml(b.html) ? linkify(sanitizeHtml(b.html)) : mdToHtml(b.html);
+  // Contents rail: shows the current area's outline, or — when searching —
+  // matches from across ALL areas. The search index is built once from
+  // draft/docs and invalidated on any write (see commit/importSeed).
+  function refreshToc() {
+    if (($('ceSearch').value || '').trim()) doSearch();
+    else renderTocRoots();
+  }
+
+  function renderDocNav() {
+    $('ceDocNav').innerHTML = DOCS.map(function (d) {
+      return '<button type="button" class="ce-nav__item' + (d.id === S.docId ? ' is-active' : '') +
+        '" data-doc="' + d.id + '">' + esc(d.title) + '</button>';
     }).join('');
   }
 
-  /* Read-view render of a contacts node as a card grid. */
-  function contactsToHtml(contacts) {
-    if (!contacts || !contacts.length) return '';
-    return '<div class="hb-contacts">' + contacts.map(function (c) {
-      var lines = [];
-      if (c.email) lines.push('<a href="mailto:' + esc(c.email) + '">' + esc(c.email) + '</a>');
-      if (c.phone) lines.push('<span>' + esc(c.phone) + '</span>');
-      var sub = [c.role, c.org].filter(Boolean).map(esc).join(' · ');
-      return '<div class="hb-contact">' +
-        (c.name ? '<div class="hb-contact__name">' + esc(c.name) + '</div>' : '') +
-        (sub ? '<div class="hb-contact__role">' + sub + '</div>' : '') +
-        (lines.length ? '<div class="hb-contact__c">' + lines.join('<br>') + '</div>' : '') +
-        (c.note ? '<div class="hb-contact__note">' + esc(c.note) + '</div>' : '') +
-      '</div>';
+  function renderTocRoots() {
+    var numMap = computeNumbers(S.nodes);
+    var host = $('ceToc');
+    var roots = childrenOf(S.nodes, null);
+    host.innerHTML = '<div class="ce-toc">' + roots.map(function (r) {
+      var cur = (r.id === S.selectedId) ? ' is-current' : '';
+      var hasTitle = !!r.title;
+      var label = hasTitle ? r.title : (r.body || '').replace(/<[^>]+>/g, ' ').trim();
+      var tcls = 'ce-toc__t' + (hasTitle ? '' : ' ce-toc__t--preview');
+      return '<a class="ce-toc__item' + cur + '" data-goto="' + r.id + '"><span class="ce-toc__num">' + esc(numMap[r.id] || '') + '</span><span class="' + tcls + '">' + esc(label) + '</span></a>';
     }).join('') + '</div>';
   }
 
-
-  function fmtDate(ts) {
-    var s = NL.formatDateShort(ts);   // canon '17 Apr 2026' (no leading-zero day)
-    return s === '—' ? '' : s;        // preserve this tool's blank-on-missing contract
-  }
-
-  /* ============ Mutations (admin/superadmin) ============ */
-  function genId() { return 'n' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36); }
-
-  function persistNode(node, action, detail) {
-    node.updatedAt = Date.now();
-    node.updatedBy = (S.session && (S.session.name || S.session.email)) || null;
-    var fdb = firebase.database();
-    if (NL.writeAudit) NL.writeAudit('handbook_' + action, detail);
-    fdb.ref(BASE + '/audit').push({
-      ts: firebase.database.ServerValue.TIMESTAMP,
-      uid: (S.session && S.session.uid) || null,
-      email: (S.session && S.session.email) || null,
-      action: action, detail: detail
-    });
-    /* blocks[] is canonical; body is a rendered MIRROR for the public
-       flipbook + search; contacts mirror = first cards block (legacy). */
-    var blocks = node.blocks ? deriveBlocks(node) : deriveBlocks(node);
-    node.blocks = blocks;
-    node.body = blocks.length ? blocksToHtml(blocks) : '';
-    var firstCards = blocks.filter(function (b) { return b.t === 'cards'; })[0];
-    var rec = {
-      parentId: node.parentId, order: node.order, kind: node.kind || 'section',
-      type: firstCards ? 'contacts' : 'prose',
-      number: node.number || null, title: node.title || '', body: node.body,
-      blocks: blocks,
-      updatedAt: node.updatedAt, updatedBy: node.updatedBy
-    };
-    if (firstCards) rec.contacts = firstCards.cards;
-    return fdb.ref(BASE + '/nodes/' + node.id).set(rec).catch(function (err) {
-      NL.toast && NL.toast('Save failed: ' + (err.message || err) + ' — refresh before editing further.', 'error');
+  // Read every area once so search can span the whole handbook.
+  function buildIndex() {
+    return NL.ensureAuth().then(function () {
+      return db.ref(BASE + '/draft/docs').once('value');
+    }).then(function (snap) {
+      var all = snap.val() || {}, idx = {};
+      DOCS.forEach(function (d) {
+        var doc = all[d.id]; if (!doc || !doc.nodes) return;
+        var nodes = doc.nodes;
+        Object.keys(nodes).forEach(function (id) { normNode(nodes[id]); });
+        idx[d.id] = { title: (doc.meta && doc.meta.title) || docTitle(d.id), nodes: nodes, numMap: computeNumbers(nodes) };
+      });
+      S.index = idx;
+      return idx;
     });
   }
 
-  function startEdit(node) {
-    S.editing = node.id;
-    var blocks = deriveBlocks(node);
-    if (!blocks.length) blocks = [{ t: 'text', html: '' }];
-    S.draft = { number: node.number || '', title: node.title || '', kind: node.kind || 'section', blocks: blocks };
-    render();
-  }
-  function startAdd(parentId, afterOrder) {
-    S.editing = '__new__';
-    S.draft = { number: '', title: 'Untitled', kind: parentId === null ? 'chapter' : 'section',
-      blocks: [{ t: 'text', html: '' }], parentId: parentId, order: afterOrder };
-    render();
-  }
-  function saveDraft() {
-    var d = S.draft;
-    d.blocks = readDraftBlocks();
-    if (!d.title.trim()) { NL.toast && NL.toast('A title is required.', 'info'); return; }
-    if (S.editing === '__new__') {
-      var node = { id: genId(), parentId: d.parentId, order: d.order, kind: d.kind,
-        number: d.number.trim(), title: d.title.trim(), blocks: d.blocks };
-      S.nodes[node.id] = node;
-      S.currentId = node.id;
-      persistNode(node, 'add', 'Added "' + node.title + '"');
+  function doSearch() {
+    var q = ($('ceSearch').value || '').trim();
+    if (!q) { renderTocRoots(); return; }
+    if (!S.index) {
+      $('ceToc').innerHTML = '<div class="ce-toc__result">Searching…</div>';
+      buildIndex().then(function () { renderSearch(q); }).catch(function () { renderSearch(q); });
     } else {
-      var n = S.nodes[S.editing];
-      n.number = d.number.trim(); n.title = d.title.trim(); n.kind = d.kind;
-      n.blocks = d.blocks;
-      persistNode(n, 'edit', 'Edited "' + n.title + '"');
+      renderSearch(q);
     }
-    S.editing = null; S.draft = null; render();
-  }
-  function deleteNode(node) {
-    if (childrenOf(node.id).length) { NL.toast && NL.toast('Delete or move its sub-sections first.', 'info'); return; }
-    if (!confirm('Delete "' + node.title + '"? This cannot be undone.')) return;
-    delete S.nodes[node.id];
-    var sib = childrenOf(node.parentId)[0];
-    S.currentId = sib ? sib.id : (childrenOf(null)[0] || {}).id;
-    if (NL.writeAudit) NL.writeAudit('handbook_delete', 'Deleted "' + node.title + '"');
-    firebase.database().ref(BASE + '/audit').push({ ts: firebase.database.ServerValue.TIMESTAMP, uid: (S.session && S.session.uid) || null, email: (S.session && S.session.email) || null, action: 'delete', detail: 'Deleted "' + node.title + '"' });
-    firebase.database().ref(BASE + '/nodes/' + node.id).remove();
-    render();
-  }
-  function moveNode(node, dir) {
-    var sibs = childrenOf(node.parentId);
-    var i = sibs.findIndex(function (n) { return n.id === node.id; });
-    var j = i + dir;
-    if (j < 0 || j >= sibs.length) return;
-    var a = sibs[i], b = sibs[j];
-    var ao = a.order, bo = b.order;
-    a.order = bo; b.order = ao;
-    persistNode(a, 'reorder', 'Reordered "' + a.title + '"');
-    persistNode(b, 'reorder', 'Reordered "' + b.title + '"');
-    render();
   }
 
-  /* ============ Skeleton seed (superadmin one-off) ============ */
-  /* One-off: import the carved 2025/26 handbook content (handbook-content.json,
-     governance core only — club pages live in the directory). Idempotent. */
-  /* Import / re-import the carved 2025/26 content — SELECTIVE: only
-     sections still authored by seed/import (or empty) are replaced;
-     anything a person has edited is preserved. Import-authored sections
-     that no longer exist in the carve are removed (structure changes).
-     Safe to run repeatedly as the carve improves. */
-  function importContent() {
-    var btn = document.getElementById('hbImportBtn') || document.getElementById('hbReimport');
-    if (btn) { btn.disabled = true; btn.textContent = 'Importing…'; }
-    function restore() { if (btn) { btn.disabled = false; btn.textContent = 'Re-import'; } }
-    var carve;
-    NL.ensureAuth()
-      .then(function () { return fetch('/tools/handbook/handbook-content.json?cb=' + Date.now()); })
-      .then(function (r) { if (!r.ok) throw new Error('content file not found (' + r.status + ')'); return r.json(); })
-      .then(function (list) {
-        carve = list;
-        return firebase.database().ref(BASE + '/nodes').once('value');
-      })
-      .then(function (snap) {
-        var existing = snap.val() || {};
-        function machine(n) { return !(n.body && n.body.trim()) && !(n.contacts && Object.keys(n.contacts).length) || n.updatedBy === 'seed' || n.updatedBy === 'import 2025/26'; }
-        var preserved = 0, replaced = 0, removed = 0;
-        var updates = {};
-        var now = Date.now();
-        var carveIds = {};
-        carve.forEach(function (n) { carveIds[n.id] = true; });
-        carve.forEach(function (n) {
-          var ex = existing[n.id];
-          if (ex && !machine(ex)) { preserved++; return; }
-          replaced++;
-          updates[n.id] = {
-            parentId: n.parentId || null, order: n.order || 0, kind: n.kind || 'section',
-            type: 'prose',
-            number: n.number || null, title: n.title || '',
-            body: (n.body && n.body.trim()) ? mdToHtml(n.body) : '',
-            updatedAt: now, updatedBy: 'import 2025/26'
+  function renderSearch(q) {
+    var ql = q.toLowerCase(), host = $('ceToc'), out = [], total = 0;
+    DOCS.forEach(function (d) {
+      var nodes, numMap, title;
+      if (d.id === S.docId) { nodes = S.nodes; numMap = computeNumbers(S.nodes); title = S.doc.title; }      // freshest
+      else if (S.index && S.index[d.id]) { nodes = S.index[d.id].nodes; numMap = S.index[d.id].numMap; title = S.index[d.id].title; }
+      else return;
+      var hits = [];
+      Object.keys(nodes).forEach(function (id) {
+        var n = nodes[id];
+        var text = ((n.title || '') + ' ' + (n.body || '').replace(/<[^>]+>/g, ' ') + ' ' + tableText(n)).toLowerCase();
+        if (text.indexOf(ql) !== -1 || (numMap[id] || '').toLowerCase().indexOf(ql) !== -1) hits.push(n);
+      });
+      if (!hits.length) return;
+      total += hits.length;
+      out.push('<div class="ce-toc__group">' + esc(title) + ' · ' + hits.length + '</div>');
+      hits.slice(0, 40).forEach(function (n) {
+        var hasTitle = !!n.title;
+        var snip = hasTitle ? n.title : ((n.body || '').replace(/<[^>]+>/g, ' ').trim() || (n.kind === 'table' ? '▦ ' + tableText(n).trim() : ''));
+        var tcls = 'ce-toc__t' + (hasTitle ? '' : ' ce-toc__t--preview');
+        out.push('<a class="ce-toc__item" data-goto="' + n.id + '" data-doc="' + d.id + '"><span class="ce-toc__num">' + esc(numMap[n.id] || '') + '</span><span class="' + tcls + '">' + esc(snip) + '</span></a>');
+      });
+    });
+    host.innerHTML = '<div class="ce-toc__result">' + total + ' match' + (total === 1 ? '' : 'es') + ' across the handbook</div>' +
+      (out.join('') || '<div class="ce-toc__result">No matches</div>');
+  }
+
+  function scrollToNode(id) { var el = $('c-' + id); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+
+  // Jump to a clause, switching area first if the match is in another document.
+  function goto(docId, nodeId) {
+    closeDrawer();
+    S.selectedId = nodeId;
+    setHash(docId, nodeId);
+    if (docId === S.docId) { scrollToNode(nodeId); refreshToc(); return; }
+    S.docId = docId; S.mode = 'read';
+    load().then(function () { scrollToNode(nodeId); });
+  }
+
+  /* ---- Deep links: #<area>/<nodeId> opens the handbook at a specific clause ---- */
+  var _suppressHash = false;
+  function setHash(docId, nodeId) {
+    _suppressHash = true;
+    try { location.hash = '#' + docId + '/' + nodeId; } catch (_) {}
+    setTimeout(function () { _suppressHash = false; }, 0);
+  }
+  function parseHash() {
+    var h = (location.hash || '').replace(/^#/, '');
+    if (!h) return null;
+    var i = h.indexOf('/'); if (i < 0) return null;
+    var docId = h.slice(0, i), nodeId = h.slice(i + 1);
+    if (!nodeId || !DOCS.some(function (d) { return d.id === docId; })) return null;
+    return { docId: docId, nodeId: nodeId };
+  }
+  // Route to whatever the URL points at. Called on boot and on manual hash changes.
+  function routeHash() {
+    var t = parseHash(); if (!t) return false;
+    S.selectedId = t.nodeId;
+    if (t.docId === S.docId) { render(); scrollToNode(t.nodeId); refreshToc(); }
+    else { S.docId = t.docId; S.mode = 'read'; load().then(function () { scrollToNode(t.nodeId); }); }
+    return true;
+  }
+  // Copy a shareable link to a clause (read mode: click its number).
+  function copyClauseLink(nodeId) {
+    var url = location.origin + location.pathname + '#' + S.docId + '/' + nodeId;
+    if (NL.copy) NL.copy(url);
+    setHash(S.docId, nodeId);
+    NL.toast && NL.toast('Link copied — opens the handbook at this clause', 'success');
+  }
+
+  function syncBar() {
+    $('ceEditBtn').hidden = !canEdit();
+    $('cePublish').hidden = !canEdit() || !Object.keys(S.nodes).length;
+    $('ceReimport').hidden = !(canSeed() && SEEDS[S.docId] && Object.keys(S.nodes).length);
+    $('ceFmt').hidden = !(S.mode === 'edit' && canEdit());
+    var note = $('ceModeNote');
+    if (!canEdit()) note.textContent = 'Read-only access';
+    else if (S.mode === 'edit') note.textContent = 'Editing the draft · numbers recalculate live';
+    else note.textContent = '';
+    [].forEach.call(document.querySelectorAll('#ceMode button'), function (b) {
+      b.classList.toggle('is-on', b.dataset.mode === S.mode);
+    });
+    renderDocNav();
+    $('ceDocSeason').textContent = S.doc.season ? S.doc.season + ' edition (draft)' : '';
+  }
+
+  /* ================= Data layer ================= */
+  function nodesRef() { return db.ref(BASE + '/draft/docs/' + S.docId + '/nodes'); }
+  function metaRef()  { return db.ref(BASE + '/draft/docs/' + S.docId + '/meta'); }
+
+  function switchDoc(id) {
+    if (id === S.docId) return;
+    S.docId = id; S.selectedId = null; S.mode = 'read';
+    if ($('ceSearch')) $('ceSearch').value = '';   // manual switch shows that area's outline
+    closeDrawer();
+    load();
+  }
+
+  function load() {
+    // Reset to the area's fallback identity so an un-imported area still shows
+    // its proper name (meta, if present, overrides below).
+    var reqDoc = S.docId;
+    S.doc = { id: S.docId, title: docTitle(S.docId), subtitle: '', season: '' };
+    S.nodes = {};
+    render(); // show the area heading / empty state immediately while data loads
+    return NL.ensureAuth().then(function () {
+      return Promise.all([metaRef().once('value'), nodesRef().once('value')]);
+    }).then(function (res) {
+      if (reqDoc !== S.docId) return; // user switched area before this resolved
+      var meta = res[0].val(), nodes = res[1].val() || {};
+      if (meta) S.doc = Object.assign(S.doc, meta);
+      // Restore fields Firebase drops/coerces (null parentId, sparse table arrays).
+      Object.keys(nodes).forEach(function (id) { normNode(nodes[id]); });
+      S.nodes = nodes;
+      render();
+    }).catch(function (e) {
+      console.error('[handbook] load failed', e);
+      NL.toast && NL.toast('Could not load the draft: ' + (e && e.message || e), 'error');
+    });
+  }
+
+  function importSeed() {
+    var file = SEEDS[S.docId], title = docTitle(S.docId), target = S.docId;
+    if (!file) { NL.alert('There’s no import file for ' + title + ' yet. Start it by hand in Edit mode, or send the source document to seed it.', { title: 'No source yet' }); return; }
+    var hasContent = Object.keys(S.nodes).length > 0;
+    var msg = hasContent
+      ? 'Re-import ' + title + ' from the source? This replaces everything currently in the ' + title + ' area with a fresh import — any edits you have made here will be lost. (Other areas are unaffected.)'
+      : 'Import ' + title + ' into the draft? This is a best-effort parse from the source — you’ll refine it here.';
+    NL.confirm(msg, { confirmText: hasContent ? 'Replace with fresh import' : 'Import', title: (hasContent ? 'Re-import ' : 'Import ') + title, variant: hasContent ? 'danger' : 'primary' })
+      .then(function (ok) {
+        if (!ok) return;
+        return fetch(file).then(function (r) {
+          if (!r.ok) throw new Error(file + ' not found (' + r.status + ')');
+          return r.json();
+        });
+      }).then(function (seed) {
+        if (seed && target !== S.docId) { NL.toast && NL.toast('Area changed — import cancelled', 'info'); return; }
+        if (!seed) return;
+        var map = {}, now = Date.now();
+        seed.nodes.forEach(function (n) {
+          map[n.id] = {
+            id: n.id, parentId: n.parentId, order: n.order || 0, kind: n.kind || 'clause',
+            numStyle: n.numStyle || 'decimal', numberOverride: n.numberOverride || null,
+            title: n.title || null, body: n.body || null, table: n.table || null,
+            updatedAt: now, updatedBy: 'import'
           };
         });
-        Object.keys(existing).forEach(function (id) {
-          if (!carveIds[id] && machine(existing[id])) { updates[id] = null; removed++; }
+        return NL.ensureAuth().then(function () {
+          return Promise.all([
+            metaRef().set({ title: seed.doc.title, subtitle: seed.doc.subtitle || '', season: seed.doc.season || '' }),
+            nodesRef().set(map)
+          ]);
+        }).then(function () {
+          S.doc = Object.assign(S.doc, seed.doc);
+          S.nodes = map;
+          S.index = null; // search index is now stale
+          NL.writeAudit && NL.writeAudit('import', 'Imported ' + seed.nodes.length + ' nodes into ' + S.docId);
+          NL.toast && NL.toast('Imported ' + seed.nodes.length + ' clauses', 'success');
+          render();
         });
-        if (!replaced && !removed) throw new Error('Nothing to import — every section has been hand-edited.');
-        var msg = 'Import will replace ' + replaced + ' section' + (replaced === 1 ? '' : 's') +
-          (preserved ? ', preserve ' + preserved + ' hand-edited' : '') +
-          (removed ? ', remove ' + removed + ' superseded' : '') + '. Continue?';
-        if (!confirm(msg)) throw new Error('__cancelled__');
-        if (NL.writeAudit) NL.writeAudit('handbook_import', 'Imported 2025/26 content: ' + replaced + ' replaced, ' + preserved + ' preserved, ' + removed + ' removed');
-        return firebase.database().ref(BASE + '/nodes').update(updates);
-      })
-      .then(function () { return loadNodes(); })
-      .then(function () {
-        S.seeded = true;
-        if (!S.nodes[S.currentId]) S.currentId = (childrenOf(null)[0] || {}).id;
-        render();
-        NL.toast && NL.toast('Import complete.', 'success');
-        restore();
-      })
-      .catch(function (err) {
-        if ((err && err.message) !== '__cancelled__') {
-          NL.toast && NL.toast('Import failed: ' + (err.message || err), 'error');
-        }
-        restore();
+      }).catch(function (e) {
+        NL.toast && NL.toast('Import failed: ' + (e && e.message || e), 'error');
       });
   }
 
-  function seedSkeleton() {
-    var btn = document.getElementById('hbSeedBtn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
-    var spec = [
-      ['Front matter', null, [
-        ['League officials & board', null], ['League contacts', null], ['Sponsors & partners', null],
-        ['Associated leagues & associations', null]
-      ]],
-      ['Articles of Association', null, []],
-      ['Standardised Membership Rules', null, [
-        ['Membership & subscriptions', null], ['Admission charges', null],
-        ['Arrangement of fixtures', null], ['General meetings & AGM', null],
-        ['Board directives', null], ['Alterations to rules', null]
-      ]],
-      ['Tariffs', null, [['Fees tariff', null], ['Fines tariff', null]]],
-      ['Appendices', null, [
-        ['Disciplinary procedures', 'Appendix A'],
-        ['The National League Play-Off Competition', 'Appendix B'],
-        ['The National League North & South Play-Off Competitions', 'Appendix C'],
-        ['Financial regulations', 'Appendix D'],
-        ['Budget monitoring scheme', 'Appendix E'],
-        ['Televising of matches', 'Appendix F'],
-        ['National League System', 'Appendix G'],
-        ['Embargo', 'Appendix H'],
-        ['Match delegate', 'Appendix I'],
-        ['Standing orders', 'Appendix J'],
-        ['Kicks from the penalty mark', 'Appendix K'],
-        ['Standardised ground criteria', 'Appendix M'],
-        ['Standardised ground grading', 'Appendix N'],
-        ['League Cup', 'Appendix P'],
-        ['The licensing system', 'Appendix Q'],
-        ['Acquisition materials', 'Appendix R']
-      ]],
-      ['Reference', null, [['Average attendances', null], ['Admission charges (reference)', null]]]
-    ];
-    var payload = {};
-    var co = 0;
-    spec.forEach(function (chap) {
-      var cid = genId();
-      payload[cid] = { parentId: null, order: co++, kind: 'chapter', number: null, title: chap[0], body: '', updatedAt: Date.now(), updatedBy: 'seed' };
-      var so = 0;
-      chap[2].forEach(function (child) {
-        var sid = genId();
-        payload[sid] = {
-          parentId: cid, order: so++, kind: chap[0] === 'Appendices' ? 'appendix' : 'section',
-          number: child[1] || null, title: child[0], body: '', updatedAt: Date.now(), updatedBy: 'seed'
+  // Persist a clone as the new draft: diff against S.nodes, write changed + null-out removed.
+  function commit(clone, label) {
+    var updates = {}, now = Date.now();
+    var who = (S.session && (S.session.name || S.session.email)) || null;
+    Object.keys(clone).forEach(function (id) {
+      var a = clone[id], b = S.nodes[id];
+      if (!b || JSON.stringify(strip(a)) !== JSON.stringify(strip(b))) {
+        a.updatedAt = now; a.updatedBy = who; updates[id] = a;
+      }
+    });
+    Object.keys(S.nodes).forEach(function (id) { if (!clone[id]) updates[id] = null; });
+    if (!Object.keys(updates).length) return Promise.resolve();
+    return NL.ensureAuth().then(function () { return nodesRef().update(updates); }).then(function () {
+      S.nodes = clone;
+      S.index = null; // search index is now stale
+      NL.writeAudit && NL.writeAudit('edit', label);
+      render();
+      if (S.focusNew) { focusNode(S.focusNew); S.focusNew = null; }  // drop the cursor into a just-added clause
+    }).catch(function (e) {
+      NL.toast && NL.toast('Save failed: ' + (e && e.message || e), 'error');
+      load();
+    });
+  }
+  function strip(n) { return { parentId: n.parentId, order: n.order, kind: n.kind, numStyle: n.numStyle, numberOverride: n.numberOverride, title: n.title, body: n.body, table: n.table || null }; }
+  // Firebase returns arrays as objects when sparse — coerce a node's table back to arrays.
+  function normNode(n) {
+    if (n.parentId === undefined) n.parentId = null;
+    if (n.order === undefined) n.order = 0;
+    if (n.table) {
+      var t = n.table;
+      t.header = Array.isArray(t.header) ? t.header : (t.header ? Object.values(t.header) : []);
+      t.rows = Array.isArray(t.rows) ? t.rows : (t.rows ? Object.values(t.rows) : []);
+      t.rows = t.rows.map(function (r) { return Array.isArray(r) ? r : (r ? Object.values(r) : []); });
+    }
+    return n;
+  }
+  function clone() { return JSON.parse(JSON.stringify(S.nodes)); }
+  function uid() { return 'n' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36); }
+  function reindex(nodes, pid) { childrenOf(nodes, pid).forEach(function (n, i) { n.order = i; }); }
+
+  // Show a renumber preview when a structural change moves numbers, then commit.
+  function previewThenCommit(c, label) {
+    var before = computeNumbers(S.nodes), after = computeNumbers(c);
+    var changes = [];
+    Object.keys(after).forEach(function (id) {
+      if (before[id] != null && before[id] !== after[id] && S.nodes[id]) changes.push([before[id], after[id]]);
+    });
+    var added = Object.keys(c).filter(function (id) { return !S.nodes[id]; }).length;
+    var removed = Object.keys(S.nodes).filter(function (id) { return !c[id]; }).length;
+    if (!changes.length) return commit(c, label);
+    var rows = changes.slice(0, 40).map(function (p) {
+      return '<tr><td class="from">' + esc(p[0]) + '</td><td class="arrow">→</td><td class="to">' + esc(p[1]) + '</td></tr>';
+    }).join('');
+    var extra = changes.length > 40 ? '<p style="color:var(--text-muted);font-size:12px">…and ' + (changes.length - 40) + ' more.</p>' : '';
+    var body = document.createElement('div');
+    body.innerHTML = '<p>This change will renumber <b>' + changes.length + '</b> clause' + (changes.length === 1 ? '' : 's') +
+      (added ? ' · <b>' + added + '</b> added' : '') + (removed ? ' · <b>' + removed + '</b> removed' : '') + ':</p>' +
+      '<table class="ce-diff">' + rows + '</table>' + extra;
+    NL.modal({
+      title: 'Confirm renumber', body: body, width: 'wide',
+      buttons: [
+        { label: 'Cancel', onClick: function (ctrl) { ctrl.close(false); } },
+        { label: 'Apply', className: 'btn--primary', autofocus: true, onClick: function (ctrl) { ctrl.close(true); } }
+      ],
+      onClose: function (ok) { if (ok) commit(c, label); else S.focusNew = null; }
+    });
+  }
+
+  // Drop the caret into a clause's body (used after adding a clause).
+  function focusNode(id) {
+    var el = document.querySelector('#c-' + id + ' .nl-clause__text[contenteditable]');
+    if (!el) return;
+    el.focus();
+    try {
+      var r = document.createRange(); r.selectNodeContents(el); r.collapse(true);
+      var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    } catch (e) {}
+    el.scrollIntoView({ block: 'center' });
+  }
+
+  /* ================= Structural operations ================= */
+  function newNode(parentId, numStyle, kind) {
+    return { id: uid(), parentId: parentId, order: 0, kind: kind || 'clause', numStyle: numStyle || 'decimal', numberOverride: null, title: null, body: '' };
+  }
+  // Structural ops use fractional orders + reindex() so a node lands exactly
+  // where intended, then orders are normalised to 0..n within each parent.
+  var OPS = {
+    addAfter: function (id) {
+      var c = clone(), t = c[id];
+      var n = newNode(t.parentId, t.kind === 'bullet' ? 'bullet' : t.numStyle, t.kind);
+      n.order = (t.order || 0) + 0.5; c[n.id] = n;
+      reindex(c, t.parentId);
+      S.selectedId = n.id; S.focusNew = n.id;
+      previewThenCommit(c, 'Add clause after ' + id);
+    },
+    addTable: function (id) {
+      var c = clone(), t = c[id];
+      var n = {
+        id: uid(), parentId: t.parentId, order: (t.order || 0) + 0.5, kind: 'table',
+        numStyle: 'none', numberOverride: null, title: null, body: null,
+        table: { header: ['Column 1', 'Column 2'], rows: [['', ''], ['', '']] }
+      };
+      c[n.id] = n; reindex(c, t.parentId);
+      S.selectedId = n.id;
+      previewThenCommit(c, 'Add table after ' + id);
+    },
+    addSub: function (id) {
+      var c = clone(), t = c[id];
+      var childHas = childrenOf(c, id)[0];
+      var style = childHas ? childHas.numStyle
+        : (t.numStyle === 'decimal' ? 'decimal' : (t.numStyle === 'lower-alpha' ? 'lower-roman' : 'lower-alpha'));
+      var n = newNode(id, style, 'clause');
+      n.order = 1e6; c[n.id] = n;
+      reindex(c, id);
+      S.selectedId = n.id; S.focusNew = n.id;
+      previewThenCommit(c, 'Add sub-clause under ' + id);
+    },
+    indent: function (id) {
+      var c = clone(), t = c[id];
+      var sibs = childrenOf(c, t.parentId);
+      var i = sibs.map(function (x) { return x.id; }).indexOf(id);
+      if (i <= 0) { NL.toast && NL.toast('Nothing above to nest under', 'info'); return; }
+      var prev = sibs[i - 1], oldParent = t.parentId;
+      t.parentId = prev.id; t.order = 1e6;
+      reindex(c, oldParent); reindex(c, prev.id);
+      previewThenCommit(c, 'Indent ' + id);
+    },
+    outdent: function (id) {
+      var c = clone(), t = c[id];
+      if (t.parentId == null) { NL.toast && NL.toast('Already at the top level', 'info'); return; }
+      var parent = c[t.parentId], grand = parent.parentId, oldParent = t.parentId;
+      t.parentId = grand; t.order = (parent.order || 0) + 0.5;
+      reindex(c, grand); reindex(c, oldParent);
+      previewThenCommit(c, 'Outdent ' + id);
+    },
+    up:   function (id) { move(id, -1); },
+    down: function (id) { move(id, 1); },
+    style: function (id, val) {
+      var c = clone(); c[id].numStyle = val;
+      if (val === 'bullet') c[id].kind = 'bullet'; else if (c[id].kind === 'bullet') c[id].kind = 'clause';
+      previewThenCommit(c, 'Change style of ' + id + ' to ' + val);
+    },
+    override: function (id) {
+      NL.prompt('Pin an exact number for this clause (e.g. 13.B). Leave blank to clear and use the computed number.', {
+        title: 'Fixed number', default: S.nodes[id].numberOverride || ''
+      }).then(function (v) {
+        if (v === null) return;
+        var c = clone(); c[id].numberOverride = v.trim() || null;
+        previewThenCommit(c, 'Set fixed number on ' + id);
+      });
+    },
+    delete: function (id) {
+      var n = S.nodes[id];
+      var kids = childrenOf(S.nodes, id).length;
+      NL.confirm('Delete this clause' + (kids ? ' and its ' + kids + ' sub-clause' + (kids === 1 ? '' : 's') : '') + '? This cannot be undone.', { confirmText: 'Delete', variant: 'danger' })
+        .then(function (ok) {
+          if (!ok) return;
+          var c = clone();
+          (function rm(x) { childrenOf(c, x).forEach(function (k) { rm(k.id); }); delete c[x]; })(id);
+          reindex(c, n.parentId);
+          if (S.selectedId === id) S.selectedId = null;
+          previewThenCommit(c, 'Delete ' + id);
+        });
+    }
+  };
+  function move(id, dir) {
+    var c = clone(), t = c[id];
+    var sibs = childrenOf(c, t.parentId);
+    var i = sibs.map(function (x) { return x.id; }).indexOf(id);
+    var j = i + dir;
+    if (j < 0 || j >= sibs.length) return;
+    t.order = (sibs[j].order || 0) + (dir < 0 ? -0.5 : 0.5);
+    reindex(c, t.parentId);
+    previewThenCommit(c, 'Move ' + id);
+  }
+
+  // Add/remove table rows and columns (structural — re-renders).
+  function tableOp(id, op) {
+    var node = S.nodes[id]; if (!node || !node.table) return;
+    var c = clone(), t = c[id].table;
+    if (!Array.isArray(t.header)) t.header = [];
+    if (!Array.isArray(t.rows)) t.rows = [];
+    var cols = t.header.length || (t.rows[0] ? t.rows[0].length : 1);
+    if (op === 'addRow') { var r = []; for (var i = 0; i < cols; i++) r.push(''); t.rows.push(r); }
+    else if (op === 'delRow') { if (t.rows.length) t.rows.pop(); }
+    else if (op === 'addCol') { if (t.header.length) t.header.push(''); t.rows.forEach(function (r) { r.push(''); }); }
+    else if (op === 'delCol') { if (t.header.length > 1) t.header.pop(); t.rows.forEach(function (r) { if (r.length > 1) r.pop(); }); }
+    commit(c, 'Edit table ' + id);
+  }
+
+  // Persist a single table cell without re-rendering (keeps focus while tabbing).
+  function saveTableCell(cell) {
+    var host = cell.closest('[data-id]'); if (!host) return;
+    var id = host.dataset.id, node = S.nodes[id]; if (!node || !node.table) return;
+    var val = cell.textContent;
+    if (cell.hasAttribute('data-th')) {
+      var ci = +cell.getAttribute('data-th');
+      if ((node.table.header[ci] || '') === val) return;
+      node.table.header[ci] = val;
+    } else {
+      var ri = +cell.getAttribute('data-tr'), cc = +cell.getAttribute('data-tc');
+      if (!node.table.rows[ri]) return;
+      if ((node.table.rows[ri][cc] || '') === val) return;
+      node.table.rows[ri][cc] = val;
+    }
+    NL.ensureAuth().then(function () {
+      return nodesRef().child(id).update({ table: node.table, updatedAt: Date.now(), updatedBy: (S.session && (S.session.name || S.session.email)) || null });
+    }).then(function () { S.index = null; }).catch(function (e) { NL.toast && NL.toast('Save failed: ' + (e && e.message || e), 'error'); });
+  }
+
+  function tableText(n) {
+    if (!n.table) return '';
+    var s = (n.table.header || []).join(' ');
+    (n.table.rows || []).forEach(function (r) { s += ' ' + (r || []).join(' '); });
+    return s;
+  }
+
+  /* ================= Publish + export ================= */
+  function staticDocHtml(forExport) {
+    var numMap = computeNumbers(S.nodes);
+    var save = S.mode; S.mode = 'read';
+    var roots = childrenOf(S.nodes, null);
+    var inner = '<div class="nl-doc"><div class="nl-doc__head"><div class="nl-doc__title">' + esc(S.doc.title) + '</div>' +
+      (S.doc.subtitle ? '<div class="nl-doc__sub">' + esc(S.doc.subtitle) + '</div>' : '') +
+      (S.doc.season ? '<span class="nl-doc__season">' + esc(S.doc.season) + ' edition</span>' : '') + '</div>';
+    roots.forEach(function (r) { inner += renderNode(r, numMap); });
+    inner += '</div>';
+    S.mode = save;
+    return inner;
+  }
+  // Editing the live handbook draft is consequential and attributed — make the first
+  // edit of a session a deliberate, acknowledged, audited action.
+  function confirmEditEntry() {
+    var who = (S.session && (S.session.name || S.session.email)) || 'your account';
+    NL.confirm(
+      'You are about to edit the live handbook draft. Every change saves immediately and is recorded against ' + who + ' in the audit log. Only continue if you mean to amend the official text.',
+      { title: 'Edit the live draft?', confirmText: 'I understand — start editing', variant: 'danger' }
+    ).then(function (ok) {
+      if (!ok) return;
+      S.editConfirmed = true;
+      S.mode = 'edit';
+      NL.writeAudit && NL.writeAudit('edit-mode', 'Entered edit mode on ' + docTitle(S.docId));
+      render();
+    });
+  }
+
+  function publish() {
+    NL.prompt('Name this edition (public surfaces will show this label):', { title: 'Publish edition', default: S.doc.season || '' })
+      .then(function (label) {
+        if (label === null) return;
+        var lbl = label.trim() || (S.doc.season || 'Edition');
+        // Type-to-confirm: publishing freezes the draft and changes what the public sees.
+        return NL.prompt(
+          'Publishing freezes the current ' + docTitle(S.docId) + ' draft as edition “' + lbl + '” and updates what public surfaces show. This cannot be edited afterwards — you publish a new edition instead.\n\nType PUBLISH to confirm.',
+          { title: 'Confirm publish', confirmText: 'Publish edition' }
+        ).then(function (word) {
+          if ((word || '').trim().toUpperCase() !== 'PUBLISH') { NL.toast && NL.toast('Publish cancelled', 'info'); return; }
+        var numMap = computeNumbers(S.nodes);
+        var snapshot = Object.keys(S.nodes).map(function (id) {
+          return Object.assign({}, strip(S.nodes[id]), { id: id, number: numMap[id] || '' });
+        });
+        var edition = {
+          label: label.trim() || (S.doc.season || 'Edition'), status: 'published',
+          publishedAt: Date.now(), publishedBy: (S.session && (S.session.name || S.session.email)) || null,
+          docs: {}
         };
-      });
-    });
-    NL.ensureAuth()
-      .then(function () { return firebase.database().ref(BASE + '/nodes').once('value'); })
-      .then(function (snap) {
-        if (snap.val()) throw new Error('Handbook already has content — not overwriting.');
-        if (NL.writeAudit) NL.writeAudit('handbook_seed', 'Seeded handbook skeleton (' + Object.keys(payload).length + ' nodes)');
-        return firebase.database().ref(BASE + '/nodes').set(payload);
-      })
-      .then(function () { return loadNodes(); })
-      .then(function () { S.seeded = true; S.currentId = childrenOf(null)[0].id; render(); NL.toast && NL.toast('Structure created — start filling in sections.', 'success'); })
-      .catch(function (err) {
-        NL.toast && NL.toast('Seed failed: ' + (err.message || err), 'error');
-        if (btn) { btn.disabled = false; btn.textContent = 'Create handbook structure'; }
-      });
-  }
-
-  /* ============ Load + boot ============ */
-  function loadNodes() {
-    return NL.ensureAuth()
-      .then(function () { return firebase.database().ref(BASE + '/nodes').once('value'); })
-      .then(function (snap) {
-        var val = snap.val() || {};
-        S.nodes = {};
-        Object.keys(val).forEach(function (id) {
-          var n = val[id];
-          var contacts = [];
-          if (n.contacts) {
-            var carr = Array.isArray(n.contacts) ? n.contacts : Object.keys(n.contacts).map(function (k) { return n.contacts[k]; });
-            contacts = carr.map(function (c) {
-              return { name: c.name || '', role: c.role || '', org: c.org || '', email: c.email || '', phone: c.phone || '', note: c.note || '' };
-            });
-          }
-          S.nodes[id] = { id: id, parentId: n.parentId || null, order: n.order || 0, kind: n.kind || 'section',
-            type: n.type === 'contacts' ? 'contacts' : 'prose', number: n.number || '', title: n.title || '',
-            body: n.body || '', contacts: contacts, updatedAt: n.updatedAt || null, updatedBy: n.updatedBy || null };
-        });
-        S.seeded = Object.keys(S.nodes).length > 0;
-        /* Chapters load collapsed; the current page's path expands. */
-        Object.keys(S.nodes).forEach(function (id) {
-          if (S.nodes[id].parentId === null && S.collapsed[id] === undefined) S.collapsed[id] = true;
+        edition.docs[S.docId] = { title: S.doc.title, subtitle: S.doc.subtitle || '', html: staticDocHtml(), nodes: snapshot };
+        NL.ensureAuth().then(function () {
+          var ref = db.ref(BASE + '/editions').push();
+          return ref.set(edition).then(function () { return db.ref(BASE + '/publishedEditionId').set(ref.key); });
+        }).then(function () {
+          NL.writeAudit && NL.writeAudit('publish', 'Published edition "' + edition.label + '"');
+          NL.toast && NL.toast('Published edition “' + edition.label + '”', 'success');
+        }).catch(function (e) { NL.toast && NL.toast('Publish failed: ' + (e && e.message || e), 'error'); });
         });
       });
   }
-
-  function expandPathTo(id) {
-    var n = S.nodes[id];
-    while (n && n.parentId) { S.collapsed[n.parentId] = false; n = S.nodes[n.parentId]; }
-    if (n) S.collapsed[n.id] = false;
+  /* ================= Events ================= */
+  function closeDrawer() {
+    var side = $('ceSide'), scrim = $('ceScrim');
+    if (side) side.classList.remove('is-open');
+    if (scrim) scrim.classList.remove('is-open');
   }
-
-  function openFromHash() {
-    var h = (location.hash || '').replace(/^#/, '');
-    if (h && S.nodes[h]) { S.currentId = h; expandPathTo(h); }
-  }
-
   function wire() {
-    // Sidebar nav + carets (delegated)
-    document.getElementById('hbSide').addEventListener('click', function (e) {
-      if (e.target && e.target.id === 'hbAddChapter') { startAdd(null, childrenOf(null).length); return; }
-      var caret = e.target.closest('[data-toc-caret]');
-      if (caret) { var cid = caret.getAttribute('data-toc-caret'); S.collapsed[cid] = !S.collapsed[cid]; renderToc(); return; }
-      var link = e.target.closest('[data-toc]');
-      if (link) { e.preventDefault(); navigate(link.getAttribute('data-toc')); }
+    // Measure the (sticky) topbar so the shell fills the viewport exactly.
+    function setTopVar() {
+      var t = document.getElementById('nlTopbar');
+      document.documentElement.style.setProperty('--ce-top', ((t && t.offsetHeight) || 72) + 'px');
+    }
+    setTopVar();
+    window.addEventListener('resize', setTopVar);
+    setTimeout(setTopVar, 300); setTimeout(setTopVar, 1200);
+
+    // Mobile contents drawer
+    var side = $('ceSide'), scrim = $('ceScrim'), menu = $('ceMenu');
+    if (menu) menu.addEventListener('click', function () {
+      var open = !side.classList.contains('is-open');
+      side.classList.toggle('is-open', open);
+      scrim.classList.toggle('is-open', open);
     });
-    document.getElementById('hbSearch').addEventListener('input', function (e) {
-      S.search = e.target.value.trim(); renderToc();
+    if (scrim) scrim.addEventListener('click', closeDrawer);
+
+    // Scroll-spy breadcrumb: update "you are here" as the document scrolls.
+    var crumbRaf = null;
+    $('ceDoc').addEventListener('scroll', function () {
+      if (crumbRaf) return;
+      crumbRaf = requestAnimationFrame(function () { crumbRaf = null; updateCrumb(); });
     });
-    // Main pane (delegated: nav links + editor buttons + seed)
-    document.getElementById('hbMain').addEventListener('click', function (e) {
-      var t = e.target;
-      if (t.id === 'hbImportBtn') { importContent(); return; }
-      if (t.id === 'hbSeedBtn') { seedSkeleton(); return; }
-      if (t.id === 'hbInlineOn') { S.inlineView = S.currentId; render(); return; }
-      if (t.id === 'hbInlineOff') { S.inlineView = null; render(); return; }
-      var link = t.closest('[data-toc]');
-      if (link) { e.preventDefault(); navigate(link.getAttribute('data-toc')); return; }
-      if (!canEdit()) return;
-      var node = S.nodes[S.currentId];
-      if (t.id === 'hbReimport') { importContent(); return; }
-      if (t.id === 'hbEdit' && node) startEdit(node);
-      else if (t.id === 'hbAddChild' && node) startAdd(node.id, childrenOf(node.id).length);
-      else if (t.id === 'hbAddSibling' && node) startAdd(node.parentId, (node.order || 0) + 0.5);
-      else if (t.id === 'hbMoveUp' && node) moveNode(node, -1);
-      else if (t.id === 'hbMoveDown' && node) moveNode(node, 1);
-      else if (t.id === 'hbDelete' && node) deleteNode(node);
-      else if (t.id === 'hbSave') saveDraft();
-      else if (t.id === 'hbCancel') { S.editing = null; S.draft = null; render(); }
+    // On mobile the breadcrumb is the quickest way back to the contents.
+    $('ceCrumb').addEventListener('click', function () {
+      if (menu && getComputedStyle(menu).display !== 'none') {
+        side.classList.add('is-open'); scrim.classList.add('is-open');
+      }
     });
-    window.addEventListener('hashchange', function () { openFromHash(); render(); });
+
+    document.querySelector('#ceMode').addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-mode]'); if (!b) return;
+      if (b.dataset.mode === 'edit') {
+        if (!canEdit()) return;
+        if (!S.editConfirmed) { confirmEditEntry(); return; }  // gate the first edit of the session
+      }
+      S.mode = b.dataset.mode; render();
+    });
+    $('ceReimport').addEventListener('click', importSeed);
+    $('cePublish').addEventListener('click', publish);
+    $('ceDocNav').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-doc]'); if (b) switchDoc(b.dataset.doc);
+    });
+    $('ceSearch').addEventListener('input', doSearch);
+
+    // Formatting toolbar: keep the editable's selection (mousedown preventDefault),
+    // then apply the command to the focused clause body. The edit saves on blur.
+    var fmt = $('ceFmt');
+    fmt.addEventListener('mousedown', function (e) { if (e.target.closest('button')) e.preventDefault(); });
+    fmt.addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-cmd]'); if (!b) return;
+      var ed = document.activeElement;
+      if (!ed || !ed.getAttribute || ed.getAttribute('contenteditable') !== 'true') {
+        NL.toast && NL.toast('Click into a clause first, then format', 'info'); return;
+      }
+      try { document.execCommand('styleWithCSS', false, false); } catch (_) {}
+      document.execCommand(b.dataset.cmd, false, null);
+    });
+
+    $('ceToc').addEventListener('click', function (e) {
+      var a = e.target.closest('[data-goto]'); if (!a) return;
+      goto(a.dataset.doc || S.docId, a.dataset.goto);
+    });
+
+    var doc = $('ceDoc');
+    // structural op buttons + table row/col controls + select
+    doc.addEventListener('click', function (e) {
+      // Read mode: clicking a clause number copies a shareable deep link to it.
+      if (S.mode !== 'edit') {
+        var numEl = e.target.closest('.nl-clause__num, .nl-art__num');
+        if (numEl) { var nh = numEl.closest('[data-id]'); if (nh) { copyClauseLink(nh.dataset.id); return; } }
+      }
+      var tb = e.target.closest('[data-tblop]');
+      if (tb) { var th = tb.closest('[data-id]'); if (th) tableOp(th.dataset.id, tb.dataset.tblop); return; }
+      var el = e.target.closest('[data-op]'); if (!el || el.tagName === 'SELECT') return;
+      var host = el.closest('[data-id]'); if (!host) return;
+      var op = el.dataset.op; if (OPS[op]) OPS[op](host.dataset.id);
+    });
+    doc.addEventListener('change', function (e) {
+      var sel = e.target.closest('select[data-op="style"]'); if (!sel) return;
+      var host = sel.closest('[data-id]'); OPS.style(host.dataset.id, sel.value);
+    });
+    // table cell editing — quiet save on blur (no re-render, so Tab keeps working)
+    doc.addEventListener('blur', function (e) {
+      var cell = e.target.closest && e.target.closest('[contenteditable][data-th], [contenteditable][data-tr]');
+      if (cell) saveTableCell(cell);
+    }, true);
+    // inline text editing — save on blur
+    doc.addEventListener('blur', function (e) {
+      var ed = e.target.closest('[contenteditable][data-field]'); if (!ed) return;
+      var host = ed.closest('[data-id]'); if (!host) return;
+      var id = host.dataset.id, field = ed.dataset.field, node = S.nodes[id];
+      if (!node) return;
+      var val = field === 'title' ? ed.textContent.trim() : sanitize(ed.innerHTML);
+      var current = field === 'title' ? (node.title || '') : (node.body || '');
+      if (val === current) return;
+      var c = clone(); c[id][field] = (field === 'title' ? (val || null) : (val || null));
+      commit(c, 'Edit ' + field + ' of ' + id);
+    }, true);
+    // select clause on focus
+    doc.addEventListener('focusin', function (e) {
+      var host = e.target.closest('[data-id]'); if (host) { S.selectedId = host.dataset.id; }
+    });
   }
 
-  function navigate(id) {
-    if (S.editing) { S.editing = null; S.draft = null; }
-    expandPathTo(id);
-    S.currentId = id;
-    S.search = ''; var sb = document.getElementById('hbSearch'); if (sb) sb.value = '';
-    if (history.replaceState) history.replaceState(null, '', '#' + id); else location.hash = id;
-    render();
-  }
-
+  /* ================= Boot ================= */
   window.TOOL = window.TOOL || {};
   window.TOOL.boot = function (session) {
     S.session = session;
     S.role = (session && session.role) || 'viewer';
+    if (!window.NL || !NL.ensureAuth) { console.warn('[handbook] NL.ensureAuth missing'); return; }
+    renderDocNav();
     wire();
-    loadNodes()
-      .then(function () { openFromHash(); render(); })
-      .catch(function (err) {
-        document.getElementById('hbMain').innerHTML = '<p style="color:var(--red);padding:24px;">Failed to load the handbook — ' + esc(err.message || String(err)) + '</p>';
-      });
+    syncBar();
+    // Deep link in the URL? Open there; otherwise load the default area.
+    var t = parseHash();
+    if (t) { S.docId = t.docId; S.selectedId = t.nodeId; load().then(function () { scrollToNode(t.nodeId); refreshToc(); }); }
+    else { load(); }
+    window.addEventListener('hashchange', function () { if (!_suppressHash) routeHash(); });
   };
-
-  if (window._toolDeferredSession) { window.TOOL.boot(window._toolDeferredSession); window._toolDeferredSession = null; }
+  if (window._toolDeferredSession) { window.TOOL.boot(window._toolDeferredSession); delete window._toolDeferredSession; }
 })();
 </script>
+
 </body>
 </html>
