@@ -3,10 +3,12 @@
 `Code.gs` is the **in-repo mirror** of the consolidated Apps Script project's
 router (the `doGet`/`doPost` entry points). It dispatches each `action` to a
 per-tool handler. The handler bodies live in their own `.gs` files inside the
-Apps Script project; the ones mirrored in this repo so far are **Programme
-Packs** ([`../programme-packs/gas/ProgrammePacks.gs`](../programme-packs/gas/ProgrammePacks.gs))
-and **Notifications** ([`Notifications.gs`](Notifications.gs), the request-flow
-emails).
+Apps Script project; the ones mirrored in this repo so far are:
+
+- **Programme Packs** — [`../programme-packs/gas/ProgrammePacks.gs`](../programme-packs/gas/ProgrammePacks.gs)
+- **Notifications** — [`Notifications.gs`](Notifications.gs) (request-flow emails)
+- **Utils** — [`Utils.gs`](Utils.gs) (RTDB REST, `verifyIdentity_`, `verifyCaller_`)
+- **Invite** — [`Invite.gs`](Invite.gs) (`sendInvite`, `validateInvite`, `consumeInvite`)
 
 ## Backend authz — `SECURITY-invite-authz.md`
 
