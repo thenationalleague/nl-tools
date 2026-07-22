@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Clause Editor
-  Version: v0.1 (16/07/2026)
+  Version: v0.2 (22/07/2026)
   File: /tools/clause-editor/index.html
 
   Structured editor for the League's governing documents — computed clause
@@ -71,6 +71,14 @@
 
     window.NL_CHANGELOG = [
       {
+        date: '22/07/2026',
+        version: 'v0.2',
+        items: [
+          'Fixed page/side-rail scroll conflict — the contents rail and the document now scroll independently and the window itself stays put.',
+          'Mobile: the contents rail is now a slide-in drawer (☰) with the document full-width; layout height tracks the topbar exactly.'
+        ]
+      },
+      {
         date: '16/07/2026',
         version: 'v0.1',
         items: [
@@ -103,16 +111,17 @@
 <style>
   /* #pageWrap default hide is in nl-brand.css; auth-guard reveals it. */
 
-  .ce-layout { display: grid; grid-template-columns: 300px 1fr; gap: 0; min-height: calc(100vh - 72px); }
-  @media (max-width: 860px) { .ce-layout { grid-template-columns: 1fr; } }
+  /* Full-height shell: the side rail and the document each scroll independently,
+     and the window itself does not scroll. --ce-top is the topbar height, set
+     from JS (it is position:sticky and ~72px, but measured to stay exact). */
+  .ce-layout { display: grid; grid-template-columns: 300px 1fr; gap: 0;
+    height: calc(100dvh - var(--ce-top, 72px)); overflow: hidden; }
 
   /* ---- Sidebar / contents ---- */
   .ce-side {
     border-right: 1px solid var(--border); background: var(--off-white);
-    padding: 18px 14px 40px; overflow-y: auto;
-    position: sticky; top: 0; max-height: calc(100vh - 72px);
+    padding: 18px 14px 40px; overflow-y: auto; min-height: 0;
   }
-  @media (max-width: 860px) { .ce-side { position: static; max-height: none; border-right: none; border-bottom: 1px solid var(--border); } }
   .ce-side__doc { font-variation-settings: 'wght' 900; color: var(--navy); font-size: 16px; }
   .ce-side__season { font-size: 12px; color: var(--text-muted); margin: 2px 0 14px; }
   .ce-side__search {
@@ -134,13 +143,15 @@
   .ce-toc__result b { color: var(--primary); font-variation-settings: 'wght' 800; }
 
   /* ---- Main / toolbar ---- */
-  .ce-main { min-width: 0; }
+  .ce-main { min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
   .ce-bar {
-    position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    flex: 0 0 auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
     padding: 12px 28px; border-bottom: 1px solid var(--border); background: var(--white);
   }
-  @media (max-width: 860px) { .ce-bar { padding: 10px 16px; } }
+  #ceDoc { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
   .ce-bar__spacer { flex: 1; }
+  .ce-menu-btn { display: none; }
+  .ce-scrim { display: none; }
   .ce-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
   .ce-seg button {
     border: none; background: var(--white); color: var(--text); font-family: var(--font);
@@ -148,6 +159,29 @@
   }
   .ce-seg button.is-on { background: var(--navy); color: var(--white); }
   .ce-mode-note { font-size: 12px; color: var(--text-muted); }
+
+  /* ---- Mobile: side rail becomes a slide-in drawer; document goes full width ---- */
+  @media (max-width: 860px) {
+    .ce-layout { grid-template-columns: 1fr; }
+    .ce-bar { padding: 10px 14px; }
+    .ce-mode-note { display: none; }
+    .ce-menu-btn {
+      display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+      width: 38px; height: 38px; border: 1px solid var(--border); border-radius: 8px;
+      background: var(--white); color: var(--navy); font-size: 17px; cursor: pointer;
+    }
+    .ce-side {
+      position: fixed; top: var(--ce-top, 60px); left: 0; bottom: 0; width: 84%; max-width: 330px;
+      z-index: 60; transform: translateX(-100%); transition: transform .24s ease;
+      box-shadow: 8px 0 26px var(--navy-100);
+    }
+    .ce-side.is-open { transform: none; }
+    .ce-scrim {
+      display: block; position: fixed; inset: var(--ce-top, 60px) 0 0 0; background: var(--navy-900);
+      opacity: 0; pointer-events: none; transition: opacity .24s ease; z-index: 55;
+    }
+    .ce-scrim.is-open { opacity: 0.42; pointer-events: auto; }
+  }
 
   /* =====================================================================
      .nl-doc — document presentation (CANON PROMOTION CANDIDATE)
@@ -162,13 +196,13 @@
   .nl-doc__season { display: inline-block; margin-top: 10px; font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--navy-50); color: var(--navy); font-variation-settings: 'wght' 700; }
 
   /* Article (top-level node) */
-  .nl-art { margin: 30px 0 6px; scroll-margin-top: 68px; }
+  .nl-art { margin: 30px 0 6px; scroll-margin-top: 14px; }
   .nl-art__head { display: flex; gap: 12px; align-items: baseline; }
   .nl-art__num { font-size: 18px; font-variation-settings: 'wght' 900; color: var(--primary); flex-shrink: 0; min-width: 30px; }
   .nl-art__title { font-size: 18px; font-variation-settings: 'wght' 800; color: var(--navy); letter-spacing: 0.01em; }
 
   /* Clause row: number gutter + body; children nest inside body → auto-indent */
-  .nl-clause { display: flex; gap: 12px; margin: 9px 0; scroll-margin-top: 68px; }
+  .nl-clause { display: flex; gap: 12px; margin: 9px 0; scroll-margin-top: 14px; }
   .nl-clause__num { flex-shrink: 0; min-width: 46px; text-align: left; color: var(--primary); font-variation-settings: 'wght' 800; font-size: 13px; padding-top: 1px; font-variant-numeric: tabular-nums; }
   .nl-clause__body { flex: 1; min-width: 0; }
   .nl-clause__title { font-variation-settings: 'wght' 800; color: var(--navy); }
@@ -235,6 +269,7 @@
 
     <main class="ce-main">
       <div class="ce-bar" id="ceBar">
+        <button class="ce-menu-btn" id="ceMenu" type="button" aria-label="Show contents">☰</button>
         <div class="ce-seg" id="ceMode">
           <button data-mode="read" class="is-on">Read</button>
           <button data-mode="edit" id="ceEditBtn" hidden>Edit</button>
@@ -246,6 +281,7 @@
       </div>
       <div id="ceDoc"></div>
     </main>
+    <div class="ce-scrim" id="ceScrim"></div>
   </div>
 </div>
 
@@ -703,7 +739,30 @@
   }
 
   /* ================= Events ================= */
+  function closeDrawer() {
+    var side = $('ceSide'), scrim = $('ceScrim');
+    if (side) side.classList.remove('is-open');
+    if (scrim) scrim.classList.remove('is-open');
+  }
   function wire() {
+    // Measure the (sticky) topbar so the shell fills the viewport exactly.
+    function setTopVar() {
+      var t = document.getElementById('nlTopbar');
+      document.documentElement.style.setProperty('--ce-top', ((t && t.offsetHeight) || 72) + 'px');
+    }
+    setTopVar();
+    window.addEventListener('resize', setTopVar);
+    setTimeout(setTopVar, 300); setTimeout(setTopVar, 1200);
+
+    // Mobile contents drawer
+    var side = $('ceSide'), scrim = $('ceScrim'), menu = $('ceMenu');
+    if (menu) menu.addEventListener('click', function () {
+      var open = !side.classList.contains('is-open');
+      side.classList.toggle('is-open', open);
+      scrim.classList.toggle('is-open', open);
+    });
+    if (scrim) scrim.addEventListener('click', closeDrawer);
+
     document.querySelector('#ceMode').addEventListener('click', function (e) {
       var b = e.target.closest('button[data-mode]'); if (!b) return;
       if (b.dataset.mode === 'edit' && !canEdit()) return;
@@ -716,7 +775,7 @@
     $('ceToc').addEventListener('click', function (e) {
       var a = e.target.closest('[data-goto]'); if (!a) return;
       var el = $('c-' + a.dataset.goto);
-      if (el) { S.selectedId = a.dataset.goto; el.scrollIntoView({ behavior: 'smooth', block: 'start' }); renderToc(computeNumbers(S.nodes)); }
+      if (el) { S.selectedId = a.dataset.goto; closeDrawer(); el.scrollIntoView({ behavior: 'smooth', block: 'start' }); renderToc(computeNumbers(S.nodes)); }
     });
 
     var doc = $('ceDoc');
