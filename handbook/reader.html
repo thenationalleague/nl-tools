@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27 (public reader)
-  Version: v0.8 (22/07/2026) — Download PDF button in the header (opens print.html,
-  the on-demand branded PDF edition)
+  Version: v0.9 (22/07/2026) — Download PDF serves the pre-rendered static
+  handbook.pdf when current (instant file download); print view is the fallback
   File: /tools/handbook/reader.html
 
   Public, no-login reader of the PUBLISHED handbook edition. Reads
@@ -179,6 +179,7 @@
   db.ref(BASE + '/publishedEditionId').once('value').then(function (snap) {
     var id = snap.val();
     if (!id) { state('Not published yet', 'The handbook has not been published. Please check back soon.'); return null; }
+    wirePdfButton(id);
     return db.ref(BASE + '/editions/' + id).once('value').then(function (s2) { return s2.val(); });
   }).then(function (ed) {
     if (!ed) return;
@@ -190,6 +191,22 @@
   }).catch(function (e) {
     state('Unavailable', 'Sorry — the handbook could not be loaded. ' + (e && e.message || ''));
   });
+
+  // Download PDF: serve the pre-rendered static file when it matches the live
+  // edition (instant, CDN-style); otherwise fall back to the print view — e.g.
+  // in the window between a publish and the render workflow catching up.
+  function wirePdfButton(editionId) {
+    fetch('/tools/handbook/pdf-meta.json', { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (meta) {
+        if (!meta || meta.editionId !== editionId) return;   // keep print fallback
+        var a = document.querySelector('.rd-pdf'); if (!a) return;
+        a.href = '/tools/handbook/handbook.pdf?e=' + encodeURIComponent(editionId);
+        a.removeAttribute('target');
+        a.setAttribute('download', 'The National League Handbook' + (meta.label ? ' ' + meta.label : '') + '.pdf');
+      })
+      .catch(function () { /* print fallback stands */ });
+  }
 
   /* ---------- render ---------- */
   // Title page — the handbook's front cover, stamped with the published edition label.
