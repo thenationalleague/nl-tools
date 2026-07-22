@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27 (print / PDF edition)
-  Version: v0.1 (22/07/2026)
+  Version: v0.2 (22/07/2026) — real page margins (no footer overlap); running footer
+  moves to the render workflow's footerTemplate; cover carries the imprint
   File: /tools/handbook/print.html
 
   Print-engineered rendering of the PUBLISHED handbook edition, for on-demand
@@ -9,11 +10,12 @@
   No server: reads the world-readable publishedEditionId -> editions/<id>, the
   same data as reader.html.
 
-  Page plan: cover (locked version) -> linked contents -> per area: full-colour
-  title page then the document itself. A version-stamped footer repeats on
-  every page (position:fixed prints per-page). @page margin is 0 so browser
-  headers/footers disappear and colour panels can run large; content padding
-  is handled per-page in CSS.
+  Page plan: cover (locked version + imprint) -> linked contents -> per area:
+  full-colour title page then the document itself. @page reserves top/bottom
+  margins so content can never collide with the running footer, which the
+  render workflow draws there via Chrome's footerTemplate (the in-browser
+  fallback prints without a running footer — the cover imprint carries the
+  version).
 -->
 <html lang="en">
 <head>
@@ -41,7 +43,10 @@
     html, body { margin: 0; }
     body { font-family: var(--font); background: var(--navy-100); color: var(--text); }
 
-    @page { size: A4; margin: 0; }
+    /* Real page margins: content can never enter the top/bottom strips, so the
+       running footer (drawn there by the render workflow's footerTemplate) can
+       never be overlapped by text. Sides stay 0 — blocks manage their own. */
+    @page { size: A4; margin: 14mm 0 16mm; }
 
     /* ---- Screen-only action bar ---- */
     .pr-bar {
@@ -55,7 +60,7 @@
     /* ---- Pages ----
        Fixed A4 sheets for cover/contents/section pages; content areas flow and
        paginate naturally. On screen, sheets preview on a grey desk. */
-    .pg { width: 210mm; min-height: 297mm; margin: 0 auto; background: var(--white); position: relative; }
+    .pg { width: 210mm; min-height: 267mm; margin: 0 auto; background: var(--white); position: relative; }  /* 297mm minus @page top+bottom margins */
     @media screen {
       .pg, .flow { width: 210mm; margin: 10px auto; box-shadow: var(--shadow); }
     }
@@ -66,19 +71,9 @@
       .flow { page-break-after: always; }
     }
 
-    /* Every page: quiet version-stamped footer (fixed prints on each sheet) */
-    .pr-foot {
-      display: none;
-    }
-    @media print {
-      .pr-foot {
-        display: block; position: fixed; left: 0; right: 0; bottom: 5mm;
-        text-align: center; font-size: 8.5pt; font-style: italic; color: var(--text-muted);
-      }
-    }
-
     /* ---- Cover ---- */
-    .pg--cover { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24mm 18mm 26mm; }
+    .pg--cover { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 18mm 18mm 24mm; }
+    .pg--cover .imprint { position: absolute; left: 0; right: 0; bottom: 2mm; text-align: center; font-size: 8.5pt; font-style: italic; color: var(--text-muted); }
     .pg--cover .lockup { width: 118mm; height: auto; margin-bottom: 16mm; }
     .pg--cover h1 { margin: 0; font-size: 46pt; letter-spacing: .05em; color: var(--navy); font-variation-settings: 'wght' 900; line-height: 1; text-transform: uppercase; }
     .pg--cover .season { font-size: 24pt; color: var(--primary); font-variation-settings: 'wght' 800; margin-top: 4mm; }
@@ -98,7 +93,7 @@
     .toc-item__t { font-size: 14pt; color: var(--navy); font-variation-settings: 'wght' 800; }
 
     /* ---- Section title pages: large full-colour panel, print-safe ---- */
-    .pg--sec { padding: 10mm 10mm 18mm; display: flex; }
+    .pg--sec { padding: 0 10mm; display: flex; }
     .pg--sec .panel {
       flex: 1; background: var(--navy); border-radius: 3mm; position: relative;
       display: flex; flex-direction: column; justify-content: center; padding: 0 16mm;
@@ -110,7 +105,7 @@
     .pg--sec .panel .rose { position: absolute; right: 14mm; bottom: 12mm; width: 26mm; opacity: .95; }
 
     /* ---- Flowing document content (paginates naturally) ---- */
-    .flow { background: var(--white); padding: 18mm 20mm 16mm; }
+    .flow { background: var(--white); padding: 3mm 20mm 0; }
     .flow .nl-doc { max-width: none; padding: 0; font-size: 10pt; line-height: 1.5; }
     .flow .nl-doc__head { display: none; }           /* the section title page carries this */
     .flow .nl-art { margin: 7mm 0 2mm; }
@@ -132,11 +127,10 @@
 <body>
   <div class="pr-bar">
     <span class="pr-bar__t">Handbook — PDF edition</span>
-    <span class="pr-bar__note">Use “Save as PDF” as the destination. Enable background graphics for the colour title pages.</span>
+    <span class="pr-bar__note">Use “Save as PDF” as the destination, with background graphics on and headers/footers off. The downloadable file adds a running page footer automatically.</span>
     <button class="btn btn--primary" id="prGo" type="button">Save as PDF</button>
   </div>
   <div id="prDoc"><p class="pr-state">Loading the published handbook…</p></div>
-  <div class="pr-foot" id="prFoot"></div>
 
 <script>
 (function () {
@@ -168,6 +162,7 @@
       '<div class="divs">' + ['National', 'North', 'South'].map(function (n) {
         return '<img src="/tools/assets/divisions/' + n + '.png" alt="National League ' + n + '">';
       }).join('') + '</div>' +
+      '<div class="imprint">The National League Handbook · Edition ' + esc(label) + (pub ? ' · Published ' + esc(pub) : '') + '</div>' +
       '</section>';
 
     // Contents — linked to each section (links stay clickable in the PDF).
@@ -192,8 +187,6 @@
     });
 
     document.getElementById('prDoc').innerHTML = h;
-    document.getElementById('prFoot').textContent =
-      'The National League Handbook · Edition ' + label + (pub ? ' · Published ' + pub : '');
     document.title = 'The National League Handbook ' + season;
   }
 
