@@ -59,23 +59,51 @@ then an existing admin elevates them in the portal user-editor (that write is
 allowed — the caller is already an admin). Inviting brand-new admins is rare;
 elevation-after-signup is the normal path.
 
-## The proper fix (follow-up — closes the residual gaps)
+## The proper fix — server-side role writes (IMPLEMENTED, staged deploy)
 
-Move **all role writes server-side** so the client never asserts its own role:
+Roles are now written by the **trusted backend**, never self-asserted by the
+client. Landed in code:
 
-1. Client creates the auth account, then calls a GAS/Function `consumeInvite`
-   action with `{ token, idToken }` instead of writing `users/<uid>/role` itself
-   (`index.html` ~line 835).
-2. `consumeInvite` verifies the idToken (gets the uid), validates the invite
-   (token + email match, unused, unexpired), then writes `users/<uid>/{role,
-   tools,…}` with the RTDB secret and marks the invite used.
-3. Rule tightens so a self-created record **cannot set `role` at all** (only the
-   server, via the secret, may) — which also closes the **"self-signup as
-   `staff` → into internal staff tools"** gap the interim rule still leaves open,
-   and **restores direct admin/superadmin invites** (the server writes them).
+- **`gas/Utils.gs`** — `verifyIdentity_(idToken) → {uid,email}` (verifies the
+  token without needing an RTDB profile — the profile is being created);
+  `verifyCaller_` refactored to reuse it.
+- **`gas/Invite.gs`** — new **`consumeInvite(body)`**: verifies the ID token,
+  re-validates the invite (email match, unused, unexpired), writes
+  `users/<uid>/{role,tools,…}` with the RTDB secret, marks the invite used, and
+  clears the pending record. `gas/Code.gs` routes `consumeInvite`.
+- **`index.html`** (login page, v4.6) — `doSetPassword()` pre-checks the invite,
+  creates the account, then calls `consumeInvite` with a fresh ID token. It **no
+  longer writes `users/<uid>/role` itself.**
 
-This is a natural Phase-2 item in the Cloud Functions migration
-(`system/gas-to-functions-migration.md`), but can be done on GAS first.
+Because the server writes the role with the secret (bypassing rules), this
+**restores direct admin/superadmin invites** — they no longer trip the interim
+`.validate`.
+
+### Deploy order (must be in this sequence)
+
+1. **Paste the updated GAS** (`Utils.gs`, `Invite.gs`, `Code.gs`) and redeploy
+   the web app (new version of the existing deployment).
+2. **Ship the client** — merge the PR so `index.html` v4.6 deploys to Pages.
+3. **Verify** end-to-end: accept a fresh **staff** invite and a fresh **admin**
+   invite — both should complete and land in the portal.
+4. **Then tighten the rule** to also block self-signup as `staff` (the last
+   residual gap). Only safe *after* step 2, because until then the old client
+   still self-writes `staff` on invite acceptance. Replace the `users/$uid`
+   `.validate` with:
+
+   ```
+   ".validate": "root.child('users').child(auth.uid).child('role').val() === 'admin' || root.child('users').child(auth.uid).child('role').val() === 'superadmin' || !newData.child('role').exists() || newData.child('role').val() === 'club' || newData.child('role').val() === 'club-viewer'"
+   ```
+
+   *Writer is already admin/superadmin (any role), OR no role is set, OR the role
+   is a self-service club role (`club`/`club-viewer`, for the request-access
+   flow).* Self-signup as `staff`/`club-admin`/`admin`/`superadmin` is now
+   impossible; invited users of any role still work (the server writes those).
+   Test in the Playground first, then update `rules.snapshot.json` to match.
+
+This is also a natural Phase-2 item in the Cloud Functions migration
+(`system/gas-to-functions-migration.md`); the GAS `consumeInvite` becomes a
+callable there.
 
 ## Playground test steps (do before pasting live)
 
