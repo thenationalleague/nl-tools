@@ -3,17 +3,20 @@
 <head>
 <!--
   UW Promo Codes — NL master console
-  Version: v1.0 (23/07/2026) — initial build. Master-passcode gate (no direct
-           link, deliberately) with a first-run bootstrap when no passcode is
-           set. Three tabs: Codes (everything UW can do, plus redeem/unredeem
-           on behalf and revoking redeemed codes behind a typed confirm),
-           Clubs & access (seed the 72 clubs from clubs-meta, per-club
-           passcodes + direct links, UW access, master passcode), and Audit
-           (filterable trail + CSV export).
+  Version: v2.0 (23/07/2026) — pool model rebuild. Codes live in a central
+           pool (added by UW or NL, issued to customers); a club claims one by
+           redeeming it at the till. Master extras over the UW panel: redeem
+           on behalf of a club (club picker), release a redeemed code back to
+           the pool (required reason), revoke redeemed codes behind a typed
+           REVOKE, redemptions-by-club breakdown, and — in ?env=test sandbox
+           mode — a reset button that wipes the sandbox.
+  Version: v1.0 (23/07/2026) — initial build (allocate-to-club model).
   File: /tools/uw-promo/admin/index.html
 
-  Standalone (NO auth-guard) — named Firebase app + anonymous auth via
-  _shared.js. Partner dashboard: /tools/uw-promo/ · club page: /tools/uw-promo/club/.
+  Standalone (NO auth-guard) — master-passcode gate (no direct link,
+  deliberately) with a first-run bootstrap when no passcode is set. Named
+  Firebase app + anonymous auth via _shared.js. Partner dashboard:
+  /tools/uw-promo/ · club till page: /tools/uw-promo/club/.
 -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -27,7 +30,7 @@
 <link rel="stylesheet" href="/tools/uw-promo/_shared.css">
 <style>
   .tabs { margin-bottom: 20px; }
-  /* Allocation modal form rows (same shape as the UW page) */
+  /* Add-codes / redeem-on-behalf modal form rows */
   .alloc-row { margin-bottom: 14px; }
   .alloc-row label { display: block; font-size: 11px; font-weight: 800; text-transform: uppercase;
     letter-spacing: 0.07em; color: var(--text-muted); margin-bottom: 5px; }
@@ -50,6 +53,15 @@
   .pass-chip:hover { border-color: var(--navy); }
   .pass-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   .audit-detail { font-size: 12px; color: var(--text-muted); max-width: 420px; }
+  /* Redemptions-by-club breakdown */
+  .byclub { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 14px 16px; margin-bottom: 18px; }
+  .byclub__title { font-size: 12px; font-weight: 900; font-variation-settings: 'wght' 900;
+    text-transform: uppercase; letter-spacing: 0.08em; color: var(--navy); margin-bottom: 10px; }
+  .byclub__grid { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+  .byclub__item { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 700; }
+  .byclub__count { color: var(--primary); font-weight: 900; }
+  .byclub__empty { font-size: 12px; color: var(--text-muted); }
 </style>
 </head>
 <body>
@@ -95,9 +107,13 @@
     <!-- Codes tab -->
     <div id="tab-codes">
       <div class="stats" id="stats"></div>
+      <div class="byclub">
+        <div class="byclub__title">Redemptions by club</div>
+        <div id="byClubBody" class="byclub__grid"></div>
+      </div>
       <div class="toolbar">
         <div class="toolbar__left">
-          <select class="toolbar__filter" id="fClub" aria-label="Filter by club"></select>
+          <select class="toolbar__filter" id="fClub" aria-label="Filter by redeeming club"></select>
           <select class="toolbar__filter" id="fStatus" aria-label="Filter by status">
             <option value="">All statuses</option>
             <option value="active">Unredeemed</option>
@@ -108,21 +124,28 @@
         </div>
         <div class="toolbar__right">
           <button class="btn btn--ghost" id="btnExport">Export CSV</button>
-          <button class="btn btn--primary" id="btnAllocate">Allocate codes</button>
+          <button class="btn btn--primary" id="btnAdd">Add codes</button>
         </div>
       </div>
       <div class="table-wrap">
         <table class="table">
           <thead><tr>
-            <th>Code</th><th>Club</th><th>Status</th><th>Allocated</th><th>By</th><th>Redeemed</th><th></th>
+            <th>Code</th><th>Status</th><th>Redeemed by</th><th>Redeemed</th><th>Added</th><th>By</th><th>Batch</th><th></th>
           </tr></thead>
-          <tbody id="rows"><tr class="loading-row"><td colspan="7">Loading codes…</td></tr></tbody>
+          <tbody id="rows"><tr class="loading-row"><td colspan="8">Loading codes…</td></tr></tbody>
         </table>
       </div>
     </div>
 
     <!-- Clubs & access tab -->
     <div id="tab-access" style="display:none">
+      <div class="access-card" id="sandboxCard" style="display:none">
+        <div class="access-card__title">Sandbox</div>
+        <div class="access-card__row">
+          <span style="font-size:12px;color:var(--text-muted)">You’re in test mode — this data is separate from the live tool.</span>
+          <button class="btn btn--danger btn--sm" id="btnSandboxReset">Reset sandbox</button>
+        </div>
+      </div>
       <div class="access-card">
         <div class="access-card__title">Master passcode</div>
         <div class="access-card__row">
@@ -152,10 +175,10 @@
           </select>
           <select class="toolbar__filter" id="aAction" aria-label="Filter by action">
             <option value="">All actions</option>
-            <option value="allocate">Allocate</option>
-            <option value="revoke">Revoke</option>
+            <option value="add-codes">Add codes</option>
             <option value="redeem">Redeem</option>
-            <option value="unredeem">Un-redeem</option>
+            <option value="release">Release</option>
+            <option value="revoke">Revoke</option>
             <option value="seed-clubs">Seed clubs</option>
             <option value="regen-passcode">Passcode change</option>
             <option value="regen-link">Link change</option>
@@ -184,7 +207,7 @@
   'use strict';
 
   var ACTOR = 'master', ACTOR_LABEL = 'NL master';
-  var SS_KEY = 'uwPromoMasterPass';
+  var SS_KEY = 'uwPromoMasterPass' + (UWP.isTest ? ':test' : '');
 
   var CONFIG = null, CODES = {}, AUDIT = {};
   var configLoaded = false, codesLoaded = false, auditLoaded = false, unlocked = false;
@@ -263,6 +286,7 @@
     unlocked = true;
     document.getElementById('gate').style.display = 'none';
     document.getElementById('app').style.display = 'block';
+    if (UWP.isTest) document.getElementById('sandboxCard').style.display = 'block';
     buildClubFilter(); renderCodes(); renderAccess(); renderAudit();
   }
 
@@ -302,7 +326,7 @@
       if (!byDiv[c.division]) { byDiv[c.division] = []; order.push(c.division); }
       byDiv[c.division].push(c);
     });
-    var html = '<option value="">All clubs</option>';
+    var html = '<option value="">Redeemed by — all clubs</option>';
     order.forEach(function (d) {
       html += '<optgroup label="' + esc(d || 'Clubs') + '">';
       byDiv[d].forEach(function (c) { html += '<option value="' + esc(c.code) + '">' + esc(c.name) + '</option>'; });
@@ -329,42 +353,67 @@
     });
   }
 
+  function renderByClub(all) {
+    var counts = {}, order = [];
+    all.forEach(function (r) {
+      if (r.status !== 'redeemed' || !r.clubName) return;
+      if (!counts[r.clubName]) { counts[r.clubName] = 0; order.push(r.clubName); }
+      counts[r.clubName]++;
+    });
+    order.sort(function (a, b) { return counts[b] - counts[a] || a.localeCompare(b); });
+    var el = document.getElementById('byClubBody');
+    if (!order.length) {
+      el.innerHTML = '<span class="byclub__empty">No redemptions yet.</span>';
+      return;
+    }
+    el.innerHTML = order.map(function (name) {
+      return '<span class="byclub__item">' + UWP.crestImgHtml(name, 20) + esc(name) +
+        ' <span class="byclub__count">' + counts[name] + '</span></span>';
+    }).join('');
+  }
+
   function renderCodes() {
     if (!codesLoaded) return;
     var all = codeRows();
     var counts = { total: all.length, active: 0, redeemed: 0, revoked: 0 };
     all.forEach(function (r) { if (counts[r.status] != null) counts[r.status]++; });
     document.getElementById('stats').innerHTML =
-      '<div class="stat"><div class="stat__num">' + counts.total + '</div><div class="stat__label">Allocated</div></div>' +
+      '<div class="stat"><div class="stat__num">' + counts.total + '</div><div class="stat__label">Codes in pool</div></div>' +
       '<div class="stat stat--info"><div class="stat__num">' + counts.active + '</div><div class="stat__label">Unredeemed</div></div>' +
       '<div class="stat stat--approved"><div class="stat__num">' + counts.redeemed + '</div><div class="stat__label">Redeemed</div></div>' +
       '<div class="stat stat--expired"><div class="stat__num">' + counts.revoked + '</div><div class="stat__label">Revoked</div></div>';
 
+    renderByClub(all);
+
     var list = filtered();
     var tbody = document.getElementById('rows');
     if (!list.length) {
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="7">' +
-        (all.length ? 'No codes match the current filters.' : 'No codes allocated yet.') + '</td></tr>';
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="8">' +
+        (all.length ? 'No codes match the current filters.' : 'No codes in the pool yet.') + '</td></tr>';
       return;
     }
     tbody.innerHTML = list.map(function (r) {
       var acts = '';
       if (r.status === 'active') {
-        acts = '<button class="btn btn--ghost btn--sm" data-redeem="' + esc(r._id) + '">Redeem</button> ' +
+        acts = '<button class="btn btn--ghost btn--sm" data-redeem="' + esc(r._id) + '">Redeem…</button> ' +
                '<button class="btn btn--danger btn--sm" data-revoke="' + esc(r._id) + '">Revoke</button>';
       } else if (r.status === 'redeemed') {
-        acts = '<button class="btn btn--restore btn--sm" data-unredeem="' + esc(r._id) + '">Un-redeem</button> ' +
+        acts = '<button class="btn btn--restore btn--sm" data-release="' + esc(r._id) + '">Release</button> ' +
                '<button class="btn btn--danger btn--sm" data-revoke="' + esc(r._id) + '">Revoke</button>';
       }
+      var redeemedBy = r.status === 'redeemed' && r.clubName
+        ? '<span class="club-cell">' + UWP.crestImgHtml(r.clubName, 22) +
+          '<span class="club-cell__name">' + esc(r.clubName) + '</span></span>'
+        : '—';
       return '<tr' + (r.status === 'revoked' ? ' class="is-revoked"' : '') + '>' +
         '<td><span class="code-mono">' + esc(r.code) + '</span> ' +
           '<button class="code-copy" data-copy="' + esc(r.code) + '" title="Copy code" aria-label="Copy code">⧉</button></td>' +
-        '<td><span class="club-cell">' + UWP.crestImgHtml(r.clubName, 22) +
-          '<span class="club-cell__name">' + esc(r.clubName || r.club) + '</span></span></td>' +
         '<td>' + UWP.pillFor(r.status) + '</td>' +
+        '<td>' + redeemedBy + '</td>' +
+        '<td>' + esc(r.status === 'redeemed' ? UWP.fmt(r.redeemedAt) : '—') + '</td>' +
         '<td title="' + esc(UWP.fmt(r.createdAt)) + '">' + esc(UWP.ago(r.createdAt)) + '</td>' +
         '<td>' + esc(r.createdBy === 'uw' ? 'UW' : 'NL') + '</td>' +
-        '<td>' + esc(r.status === 'redeemed' ? UWP.fmt(r.redeemedAt) : '—') + '</td>' +
+        '<td>' + esc(r.batchLabel || '—') + '</td>' +
         '<td style="text-align:right;white-space:nowrap">' + acts + '</td></tr>';
     }).join('');
   }
@@ -382,16 +431,16 @@
     var rv = e.target.closest('[data-revoke]');
     if (rv) { revokeCode(rv.getAttribute('data-revoke')); return; }
     var rd = e.target.closest('[data-redeem]');
-    if (rd) { redeemCode(rd.getAttribute('data-redeem')); return; }
-    var ur = e.target.closest('[data-unredeem]');
-    if (ur) { unredeemCode(ur.getAttribute('data-unredeem')); }
+    if (rd) { redeemOnBehalf(rd.getAttribute('data-redeem')); return; }
+    var rl = e.target.closest('[data-release]');
+    if (rl) { releaseCode(rl.getAttribute('data-release')); }
   });
 
   function revokeCode(id) {
     var r = CODES[id]; if (!r || r.status === 'revoked') return;
     if (r.status === 'redeemed') {
       // Redeemed codes are a stronger action — the club believes it's used.
-      NL.prompt('This code has already been REDEEMED by ' + (r.clubName || r.club) +
+      NL.prompt('This code has already been REDEEMED by ' + (r.clubName || 'a club') +
         '. Type REVOKE to confirm you still want to revoke it.', {
         title: 'Revoke redeemed code', placeholder: 'REVOKE'
       }).then(function (v) {
@@ -403,7 +452,7 @@
     }
     NL.confirm('Revoke ' + r.code + '?', {
       title: 'Revoke code',
-      detail: 'Allocated to ' + (r.clubName || r.club) + '. The club will see it as revoked.',
+      detail: 'The code becomes invalid — a club entering it at the till will be told it’s no longer valid.',
       variant: 'danger', confirmText: 'Revoke'
     }).then(function (ok) { if (ok) applyRevoke(id, r); });
   }
@@ -416,152 +465,156 @@
     }).catch(function (err) { toast('Revoke failed: ' + err.message, 'error'); });
   }
 
-  function redeemCode(id) {
+  /* Redeem on behalf of a club (e.g. a phone-in) — same transaction as the
+     till page so it can't double-claim a code. */
+  function redeemOnBehalf(id) {
     var r = CODES[id]; if (!r || r.status !== 'active') return;
-    NL.confirm('Mark ' + r.code + ' as redeemed on behalf of ' + (r.clubName || r.club) + '?', {
-      title: 'Mark redeemed', confirmText: 'Mark redeemed'
-    }).then(function (ok) {
-      if (!ok) return;
-      UWP.ensureAuth().then(function () {
-        return UWP.ref('codes/' + id).update({ status: 'redeemed', redeemedAt: UWP.TS(), redeemedBy: ACTOR });
-      }).then(function () {
-        UWP.audit(ACTOR, ACTOR_LABEL, 'redeem', { club: r.club, clubName: r.clubName, codes: r.code, detail: 'Marked by NL master' });
-        toast('Marked as redeemed', 'success');
-      }).catch(function (err) { toast('Update failed: ' + err.message, 'error'); });
+    var clubs = clubList();
+    if (!clubs.length) { toast('Seed the clubs first (Clubs & access tab).', 'error'); return; }
+    var wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<p class="confirm-text">Mark <span class="code-mono">' + esc(r.code) + '</span> as redeemed on behalf of:</p>' +
+      '<div class="alloc-row"><select id="obClub"><option value="">Choose a club…</option>' +
+        clubs.map(function (c) { return '<option value="' + esc(c.code) + '">' + esc(c.name) + (c.division ? ' — ' + esc(c.division) : '') + '</option>'; }).join('') +
+      '</select></div>';
+    NL.modal({
+      title: 'Redeem on behalf',
+      size: 'sm',
+      body: wrap,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Mark redeemed', className: 'btn--primary', onClick: function (c) {
+            var code = wrap.querySelector('#obClub').value, club = null;
+            clubs.forEach(function (x) { if (x.code === code) club = x; });
+            if (!club) { toast('Choose a club first.', 'error'); return; }
+            UWP.ensureAuth().then(function () {
+              return UWP.ref('codes/' + id).transaction(function (cur) {
+                return UWP.redeemTxn(cur, club, ACTOR);
+              });
+            }).then(function (res) {
+              if (!res.committed) { toast('Too late — that code was just redeemed elsewhere.', 'error'); c.close(); return; }
+              UWP.audit(ACTOR, ACTOR_LABEL, 'redeem', { club: club.code, clubName: club.name, codes: r.code, detail: 'Redeemed by NL master on behalf' });
+              toast('Redeemed for ' + club.name, 'success');
+              c.close();
+            }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
+          } }
+      ]
     });
   }
 
-  function unredeemCode(id) {
-    var r = CODES[id]; if (!r || r.status !== 'redeemed') return;
-    NL.prompt('Reset ' + r.code + ' to unredeemed. Reason (recorded in the audit trail):', {
-      title: 'Un-redeem', placeholder: 'e.g. Club marked it by mistake', multiline: true
+  /* Release a redeemed code back to the open pool — required reason. */
+  function releaseCode(id) {
+    var r = CODES[id];
+    if (!r || r.status !== 'redeemed') return;
+    NL.prompt('Release ' + r.code + ' back to the pool? It was redeemed by ' +
+      (r.clubName || 'a club') + ' on ' + UWP.fmt(r.redeemedAt) +
+      '. Reason (recorded in the audit trail):', {
+      title: 'Release code', placeholder: 'e.g. Club redeemed it by mistake', multiline: true
     }).then(function (reason) {
       if (reason == null) return;
       reason = reason.trim();
       if (!reason) { toast('A reason is required.', 'error'); return; }
       UWP.ensureAuth().then(function () {
         return UWP.ref('codes/' + id).update({
-          status: 'active', redeemedAt: null, redeemedBy: null,
-          unredeemedAt: UWP.TS(), unredeemedBy: ACTOR, unredeemReason: reason
+          status: 'active', club: null, clubName: null, redeemedAt: null, redeemedBy: null,
+          releasedAt: UWP.TS(), releasedBy: ACTOR, releaseReason: reason, releasedFrom: r.clubName || null
         });
       }).then(function () {
-        UWP.audit(ACTOR, ACTOR_LABEL, 'unredeem', { club: r.club, clubName: r.clubName, codes: r.code, detail: reason });
-        toast('Code reset to unredeemed', 'success');
-      }).catch(function (err) { toast('Update failed: ' + err.message, 'error'); });
+        UWP.audit(ACTOR, ACTOR_LABEL, 'release', { club: r.club, clubName: r.clubName, codes: r.code, detail: reason });
+        toast('Code released back to the pool', 'success');
+      }).catch(function (err) { toast('Release failed: ' + err.message, 'error'); });
     });
   }
 
-  /* ── Allocate (same flow as the UW page, actor=master) ──────────────── */
-  document.getElementById('btnAllocate').addEventListener('click', function () {
-    var clubs = clubList();
-    if (!clubs.length) { toast('Seed the clubs first (Clubs & access tab).', 'error'); return; }
-
+  /* ── Add codes to the pool (same flow as the UW page, actor=master) ─── */
+  document.getElementById('btnAdd').addEventListener('click', function () {
     var wrap = document.createElement('div');
     wrap.innerHTML =
-      '<div class="alloc-row"><label for="alClub">Club</label><select id="alClub">' +
-        '<option value="">Choose a club…</option>' +
-        clubs.map(function (c) { return '<option value="' + esc(c.code) + '">' + esc(c.name) + (c.division ? ' — ' + esc(c.division) : '') + '</option>'; }).join('') +
-      '</select></div>' +
-      '<div class="alloc-row"><label for="alQty">How many codes</label>' +
-        '<input id="alQty" type="number" min="1" max="500" value="10"></div>' +
-      '<div class="alloc-row"><label for="alStyle">Code style</label><select id="alStyle">' +
-        '<option value="club">Club prefix (e.g. ALT-7F3K9C)</option>' +
-        '<option value="uw">UW prefix (e.g. UW-7F3K9C)</option>' +
-        '<option value="custom">Custom prefix…</option>' +
+      '<div class="alloc-row"><label for="alStyle">Codes</label><select id="alStyle">' +
+        '<option value="gen">Generate 6-character codes (e.g. 7F3K9C)</option>' +
         '<option value="paste">Paste a list of codes</option>' +
       '</select></div>' +
-      '<div class="alloc-row" id="alCustomRow" style="display:none"><label for="alCustom">Custom prefix (2–8 letters/numbers)</label>' +
-        '<input id="alCustom" maxlength="8" placeholder="e.g. UWNL"></div>' +
+      '<div class="alloc-row" id="alQtyRow"><label for="alQty">How many</label>' +
+        '<input id="alQty" type="number" min="1" max="500" value="25"></div>' +
       '<div class="alloc-row" id="alPasteRow" style="display:none"><label for="alPaste">Codes — one per line</label>' +
         '<textarea id="alPaste" rows="6"></textarea></div>' +
+      '<div class="alloc-row"><label for="alLabel">Batch label (optional)</label>' +
+        '<input id="alLabel" maxlength="40" placeholder="e.g. March mailout"></div>' +
       '<div class="alloc-preview" id="alPreview"></div>';
 
     var ctrl = NL.modal({
-      title: 'Allocate codes',
+      title: 'Add codes to the pool',
       body: wrap,
       buttons: [
         { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
-        { label: 'Allocate', className: 'btn--primary', onClick: function () { doAllocate(); } }
+        { label: 'Add codes', className: 'btn--primary', onClick: function () { doAdd(); } }
       ]
     });
 
-    var elClub = wrap.querySelector('#alClub'), elQty = wrap.querySelector('#alQty'),
-        elStyle = wrap.querySelector('#alStyle'), elCustom = wrap.querySelector('#alCustom'),
-        elPaste = wrap.querySelector('#alPaste');
-
-    function currentPrefix() {
-      var style = elStyle.value;
-      if (style === 'uw') return 'UW';
-      if (style === 'custom') return (elCustom.value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-      return elClub.value || 'CLB';
-    }
+    var elStyle = wrap.querySelector('#alStyle'), elQty = wrap.querySelector('#alQty'),
+        elPaste = wrap.querySelector('#alPaste'), elLabel = wrap.querySelector('#alLabel');
     function refresh() {
-      var style = elStyle.value;
-      wrap.querySelector('#alCustomRow').style.display = style === 'custom' ? 'block' : 'none';
-      wrap.querySelector('#alPasteRow').style.display = style === 'paste' ? 'block' : 'none';
-      elQty.parentNode.style.display = style === 'paste' ? 'none' : 'block';
-      wrap.querySelector('#alPreview').innerHTML = style === 'paste' ? '' :
-        'Example: <span class="code-mono">' + esc(currentPrefix() + '-7F3K9C') + '</span>';
+      var paste = elStyle.value === 'paste';
+      wrap.querySelector('#alQtyRow').style.display = paste ? 'none' : 'block';
+      wrap.querySelector('#alPasteRow').style.display = paste ? 'block' : 'none';
+      wrap.querySelector('#alPreview').innerHTML = paste ? '' : 'Example: <span class="code-mono">7F3K9C</span>';
     }
-    [elClub, elStyle, elCustom].forEach(function (el) { el.addEventListener('input', refresh); });
+    elStyle.addEventListener('input', refresh);
     refresh();
 
-    function doAllocate() {
-      var clubCode = elClub.value, club = null;
-      clubs.forEach(function (c) { if (c.code === clubCode) club = c; });
-      if (!club) { toast('Choose a club first.', 'error'); return; }
-
+    function doAdd() {
       var existing = {};
-      Object.keys(CODES).forEach(function (k) { existing[(CODES[k].code || '').toUpperCase()] = true; });
-
+      Object.keys(CODES).forEach(function (k) {
+        existing[CODES[k].norm || UWP.normCode(CODES[k].code)] = true;
+      });
       var codes;
       if (elStyle.value === 'paste') {
         codes = (elPaste.value || '').split(/\r?\n/).map(function (l) { return l.trim().toUpperCase(); })
-          .filter(function (l, i, arr) { return l && arr.indexOf(l) === i; });
+          .filter(function (l) { return l; })
+          .filter(function (l, i, arr) { return arr.findIndex(function (x) { return UWP.normCode(x) === UWP.normCode(l); }) === i; });
         if (!codes.length) { toast('Paste at least one code.', 'error'); return; }
-        if (codes.length > 500) { toast('Maximum 500 codes per allocation.', 'error'); return; }
-        var dupes = codes.filter(function (c) { return existing[c]; });
+        if (codes.length > 500) { toast('Maximum 500 codes per batch.', 'error'); return; }
+        var dupes = codes.filter(function (c) { return existing[UWP.normCode(c)]; });
         if (dupes.length) { toast('Already in the system: ' + dupes.slice(0, 3).join(', ') + (dupes.length > 3 ? '…' : ''), 'error'); return; }
       } else {
         var qty = parseInt(elQty.value, 10);
         if (!(qty >= 1 && qty <= 500)) { toast('Quantity must be between 1 and 500.', 'error'); return; }
-        var prefix = currentPrefix();
-        if (elStyle.value === 'custom' && !/^[A-Z0-9]{2,8}$/.test(prefix)) { toast('Custom prefix must be 2–8 letters/numbers.', 'error'); return; }
-        try { codes = UWP.genCodes(qty, prefix, existing); }
+        try { codes = UWP.genCodes(qty, '', existing); }
         catch (e) { toast(e.message, 'error'); return; }
       }
+      var label = (elLabel.value || '').trim();
 
-      NL.confirm('Allocate ' + codes.length + ' code' + (codes.length > 1 ? 's' : '') + ' to ' + club.name + '?', {
-        title: 'Confirm allocation', confirmText: 'Allocate'
+      NL.confirm('Add ' + codes.length + ' code' + (codes.length > 1 ? 's' : '') + ' to the pool?' +
+        (label ? '\nBatch: ' + label : ''), {
+        title: 'Confirm', confirmText: 'Add codes'
       }).then(function (ok) {
         if (!ok) return;
         var batch = UWP.ref('codes').push().key;
         var updates = {};
         codes.forEach(function (code) {
           updates[UWP.ref('codes').push().key] = {
-            code: code, club: club.code, clubName: club.name, status: 'active',
-            batch: batch, createdAt: UWP.TS(), createdBy: ACTOR
+            code: code, norm: UWP.normCode(code), status: 'active',
+            batch: batch, batchLabel: label || null, createdAt: UWP.TS(), createdBy: ACTOR
           };
         });
         UWP.ensureAuth().then(function () {
           return UWP.ref('codes').update(updates);
         }).then(function () {
-          UWP.audit(ACTOR, ACTOR_LABEL, 'allocate', {
-            club: club.code, clubName: club.name, count: codes.length, batch: batch,
+          UWP.audit(ACTOR, ACTOR_LABEL, 'add-codes', {
+            count: codes.length, batch: batch, detail: label,
             codes: codes.slice(0, 10).join(', ') + (codes.length > 10 ? ' …' : '')
           });
           ctrl.close();
           NL.modal({
-            title: 'Codes allocated',
+            title: 'Codes added',
             body: '<p class="confirm-text">' + codes.length + ' code' + (codes.length > 1 ? 's' : '') +
-              ' allocated to <strong>' + esc(club.name) + '</strong>.</p>' +
-              '<div class="gen-list">' + codes.map(esc).join('\n') + '</div>',
+              ' added to the pool.</p><div class="gen-list">' + codes.map(esc).join('\n') + '</div>',
             buttons: [
               { label: 'Copy all', className: 'btn--ghost', onClick: function () { NL.copy(codes.join('\n'), { ok: 'Codes copied' }); } },
               { label: 'Done', className: 'btn--primary', autofocus: true, onClick: function (c) { c.close(); } }
             ]
           });
-        }).catch(function (err) { toast('Allocation failed: ' + err.message, 'error'); });
+        }).catch(function (err) { toast('Adding codes failed: ' + err.message, 'error'); });
       });
     }
   });
@@ -570,11 +623,13 @@
   document.getElementById('btnExport').addEventListener('click', function () {
     var list = filtered();
     if (!list.length) { toast('Nothing to export with the current filters.', 'error'); return; }
-    var rows = [['Code', 'Club', 'Status', 'Allocated', 'Allocated by', 'Redeemed', 'Redeemed by', 'Revoked', 'Last un-redeem reason', 'Batch']];
+    var rows = [['Code', 'Status', 'Redeemed by', 'Redeemed', 'Redeemed via', 'Added', 'Added by', 'Revoked', 'Last release reason', 'Batch label', 'Batch']];
     list.forEach(function (r) {
-      rows.push([r.code, r.clubName || r.club, (UWP.STATUS[r.status] || {}).label || r.status,
-        UWP.fmt(r.createdAt), r.createdBy || '', r.redeemedAt ? UWP.fmt(r.redeemedAt) : '', r.redeemedBy || '',
-        r.revokedAt ? UWP.fmt(r.revokedAt) : '', r.unredeemReason || '', r.batch || '']);
+      rows.push([r.code, (UWP.STATUS[r.status] || {}).label || r.status,
+        r.status === 'redeemed' ? (r.clubName || r.club || '') : '',
+        r.redeemedAt ? UWP.fmt(r.redeemedAt) : '', r.redeemedBy || '',
+        UWP.fmt(r.createdAt), r.createdBy || '',
+        r.revokedAt ? UWP.fmt(r.revokedAt) : '', r.releaseReason || '', r.batchLabel || '', r.batch || '']);
     });
     var d = new Date(), stamp = d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2);
     NL.download('uw-promo-codes-' + stamp + '.csv', NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8');
@@ -617,13 +672,13 @@
       };
     }
 
-    // Clubs
+    // Clubs — the 72 URLs (QR-code targets) + passcodes live here.
     var clubs = clubList();
     document.getElementById('clubCount').textContent = clubs.length ? '· ' + clubs.length + ' clubs' : '';
     var body = document.getElementById('clubAccessBody');
     if (!clubs.length) {
       body.innerHTML = '<div class="empty-state"><div class="empty-state__title">No clubs yet</div>' +
-        '<div class="empty-state__text">Seed the current National League roster — each club gets its own passcode and direct link.</div>' +
+        '<div class="empty-state__text">Seed the current National League roster — each club gets its own passcode and direct link (the QR-code target for the point of sale).</div>' +
         '<button class="btn btn--primary" id="btnSeed">Seed clubs from roster</button></div>';
       document.getElementById('btnSeed').onclick = seedClubs;
       return;
@@ -668,7 +723,8 @@
     var what = field === 'token' ? 'direct link' : 'passcode';
     NL.confirm('Issue a new ' + what + ' for ' + c.name + '?', {
       title: 'Regenerate ' + what,
-      detail: 'The current ' + what + ' stops working immediately — you’ll need to send the club the new one.',
+      detail: 'The current ' + what + ' stops working immediately — you’ll need to send the club the new one' +
+        (field === 'token' ? ' (and reprint any QR code using it)' : '') + '.',
       variant: 'danger', confirmText: 'Regenerate'
     }).then(function (ok) {
       if (!ok) return;
@@ -756,6 +812,23 @@
     NL.download('uw-promo-access.csv', NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8');
     toast('Access CSV exported — treat it like a password list', 'success');
   }
+
+  /* ── Sandbox reset (test mode only — sandbox rules allow deletes) ───── */
+  document.getElementById('btnSandboxReset').addEventListener('click', function () {
+    if (!UWP.isTest) return;
+    NL.prompt('Wipe ALL sandbox data (codes, clubs, passcodes, audit)? Type RESET to confirm.', {
+      title: 'Reset sandbox', placeholder: 'RESET'
+    }).then(function (v) {
+      if (v == null) return;
+      if ((v || '').trim().toUpperCase() !== 'RESET') { toast('Not confirmed — type RESET exactly.', 'error'); return; }
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('').remove();
+      }).then(function () {
+        toast('Sandbox wiped — reloading', 'success');
+        setTimeout(function () { location.reload(); }, 800);
+      }).catch(function (err) { toast('Reset failed: ' + err.message, 'error'); });
+    });
+  });
 
   /* ── Audit tab ──────────────────────────────────────────────────────── */
   function auditRows() {

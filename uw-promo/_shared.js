@@ -1,5 +1,10 @@
 /*
   UW Promo Codes — shared runtime for the three standalone pages
+  Version: v2.0 (23/07/2026) — pool model: codes are no longer created against
+           a club (UW issues them to customers; a club claims one by redeeming
+           it at the till). genCodes() prefix now optional (plain 6-char is the
+           default), added normCode() + the stored/indexed `norm` field so a
+           till entry matches however it's typed.
   Version: v1.0 (23/07/2026) — initial build.
   File: /tools/uw-promo/_shared.js
 
@@ -27,7 +32,16 @@
 (function () {
   'use strict';
 
-  var ROOT = 'app-data/uw-promo';
+  /* Sandbox mode — ?env=test on any of the three pages runs the whole family
+     against app-data/uw-promo-test instead of live data (visible TEST MODE
+     banner, resettable from the master console). Direct links generated in
+     test mode carry the flag, so a seeded sandbox club's link/QR stays in the
+     sandbox. */
+  var IS_TEST = (function () {
+    try { return new URLSearchParams(location.search).get('env') === 'test'; }
+    catch (e) { return false; }
+  })();
+  var ROOT = IS_TEST ? 'app-data/uw-promo-test' : 'app-data/uw-promo';
 
   // Named app — NOT the default app (see header). nl-utils' audit hook
   // self-skips when there's no default app, which is what we want: this
@@ -58,16 +72,25 @@
     return out;
   }
 
-  /* n unique codes "PREFIX-XXXXXX", colliding with neither each other nor
-     the caller-supplied set of existing code strings (uppercased). */
+  /* Normalise a code for storage-key matching and POS entry: uppercase,
+     alphanumerics only (dashes/spaces stripped). Every stored code carries a
+     `norm` field (indexed) so a till entry matches however it's typed. */
+  function normCode(s) {
+    return String(s == null ? '' : s).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  }
+
+  /* n unique 6-char codes (optionally "PREFIX-XXXXXX"), colliding with
+     neither each other nor the caller-supplied set of existing NORMALISED
+     code strings. */
   function genCodes(n, prefix, existingSet) {
     var out = [], guard = 0;
     existingSet = existingSet || {};
     while (out.length < n && guard < n * 50) {
       guard++;
-      var c = prefix + '-' + randFrom(CODE_ALPHA, 6);
-      if (existingSet[c]) continue;
-      existingSet[c] = true;
+      var c = (prefix ? prefix + '-' : '') + randFrom(CODE_ALPHA, 6);
+      var k = normCode(c);
+      if (existingSet[k]) continue;
+      existingSet[k] = true;
       out.push(c);
     }
     if (out.length < n) throw new Error('Could not generate enough unique codes');
@@ -79,6 +102,24 @@
     redeemed: { label: 'Redeemed',   pill: 'pill--approved' },
     revoked:  { label: 'Revoked',    pill: 'pill--rejected' }
   };
+
+  /* Pure transaction updater for a till redemption — the whole "code locks to
+     the club that redeems it" state machine, factored out so tests/uw-promo
+     can exercise it without Firebase. Transaction semantics: return the
+     record to commit, `undefined` to abort (someone got there first), or the
+     null back unchanged (local cache miss — the SDK retries with server data).
+     `ts` is injectable for tests; live callers omit it and get the server
+     timestamp placeholder. */
+  function redeemTxn(cur, club, actorId, ts) {
+    if (cur === null) return cur;
+    if (cur.status !== 'active') return;
+    cur.status = 'redeemed';
+    cur.club = club.code;
+    cur.clubName = club.name;
+    cur.redeemedAt = ts || firebase.database.ServerValue.TIMESTAMP;
+    cur.redeemedBy = actorId || ('club:' + club.code);
+    return cur;
+  }
 
   function audit(actor, actorLabel, action, fields) {
     var entry = {
@@ -111,9 +152,21 @@
     // .../tools/uw-promo/(club|admin)/... → .../tools/uw-promo/
     return location.origin + '/tools/uw-promo/';
   }
+  function envTail() { return IS_TEST ? '&env=test' : ''; }
+
+  // TEST MODE banner — auto-injected so every page in the family shows it.
+  if (IS_TEST) {
+    document.addEventListener('DOMContentLoaded', function () {
+      var b = document.createElement('div');
+      b.className = 'test-banner';
+      b.textContent = 'Test mode — sandbox data';
+      document.body.appendChild(b);
+    });
+  }
 
   window.UWP = {
     ROOT: ROOT,
+    isTest: IS_TEST,
     app: app,
     db: function () { return app.database(); },
     ref: function (path) { return app.database().ref(ROOT + (path ? '/' + path : '')); },
@@ -122,7 +175,9 @@
     newPasscode: function () { return randFrom(CODE_ALPHA, 6); },
     newToken: function () { return randFrom(TOKEN_ALPHA, 14); },
     genCodes: genCodes,
+    normCode: normCode,
     STATUS: STATUS,
+    redeemTxn: redeemTxn,
     pillFor: function (status) {
       var s = STATUS[status] || STATUS.active;
       return '<span class="pill ' + s.pill + '">' + s.label + '</span>';
@@ -132,7 +187,7 @@
     ago: function (ms) { return ms ? NL.timeAgo(ms) : '—'; },
     crestImgHtml: crestImgHtml,
     ROSE: ROSE,
-    clubLink: function (token) { return pageBase() + 'club/?c=' + encodeURIComponent(token); },
-    uwLink: function (token) { return pageBase() + '?u=' + encodeURIComponent(token); }
+    clubLink: function (token) { return pageBase() + 'club/?c=' + encodeURIComponent(token) + envTail(); },
+    uwLink: function (token) { return pageBase() + '?u=' + encodeURIComponent(token) + envTail(); }
   };
 })();

@@ -1,27 +1,26 @@
 # UW Promo Codes
 
-Management of Utility Warehouse promo codes allocated to the 72 current
-National League clubs. Three standalone pages on the **footage-CDN access
-model** (trust-level passcodes + direct links, NO auth-guard/portal login),
-with a full audit trail.
+Utility Warehouse promo codes for the 72 current National League clubs.
+**Pool model**: UW puts codes into a central pool and issues them to
+*customers*; a club claims a code by redeeming it at the till. Three
+standalone pages on the **footage-CDN access model** (trust-level passcodes +
+direct links, NO auth-guard/portal login), with a full audit trail.
 
 | Page | Who | Gets in via | Can do |
 |---|---|---|---|
-| `/tools/uw-promo/` | **Utility Warehouse** (one shared login) | shared passcode or `?u=<token>` direct link | Allocate codes to a club (generate straight to the club: club-prefix / UW-prefix / custom prefix, or paste a supplied list, max 500 per allocation), revoke **unredeemed** codes, see every code + status (unredeemed / redeemed / revoked), filter by club/status, search, CSV export |
-| `/tools/uw-promo/club/` | **Each of the 72 clubs** | own passcode or own `?c=<token>` direct link (one page, per-club credentials — the link *is* the club's own route in) | See only their codes; mark redeemed (confirm dialog); undo a redeem (**required reason**, recorded); copy codes; redeemed/unredeemed filter. Revoked codes shown greyed for transparency |
-| `/tools/uw-promo/admin/` | **NL master (Richard)** | master passcode only (no direct link, deliberately) | Everything UW can do, plus: redeem/un-redeem on behalf of a club, revoke **redeemed** codes (typed `REVOKE` confirm), seed/sync the 72-club roster from clubs-meta, manage every passcode + direct link (view / copy / regenerate), access CSV, full audit-trail viewer + export |
+| `/tools/uw-promo/` | **Utility Warehouse** (one shared login) | shared passcode or `?u=<token>` direct link | Add codes to the pool (generate 6-char, or paste their own list; optional batch label; ≤500/batch), revoke **unredeemed** codes, release a redeemed code back to the pool (required reason), see every code + which club redeemed it and when, redemptions-by-club breakdown, filters, search, CSV export |
+| `/tools/uw-promo/club/` | **Each of the 72 clubs** | own `?c=<token>` direct link (the QR-code target for the point of sale) or own passcode | **Till page**: big code entry → a valid unredeemed code locks to this club (RTDB transaction — two tills can't claim the same code) and joins the club's redeemed list on the same page. Already-redeemed entry shows **which club and the exact date/time**. Revoked → "no longer valid". Clubs cannot undo — the page points them at NL |
+| `/tools/uw-promo/admin/` | **NL master (Richard)** | master passcode only (no direct link, deliberately; first-run bootstrap sets it) | Everything UW can do, plus: redeem on behalf of a club (club picker, same race-safe transaction), revoke **redeemed** codes (typed `REVOKE`), seed/sync the roster from clubs-meta, the **list of all 72 club URLs + passcodes** (copy per club, regenerate, export access CSV), audit viewer + export, sandbox reset (test mode) |
 
 ## Status model
 
-`active` (shown as **Unredeemed**) → `redeemed` → (either way) `revoked`.
+`active` (shown as **Unredeemed**, sitting in the open pool) →
+`redeemed` (locked to the club that entered it) → back to `active` only via a
+**release** by NL/UW (required reason, recorded). `revoked` ends a code either
+way (UW: unredeemed only; NL master: redeemed too, behind a typed confirm).
 
-- UW can only revoke **unredeemed** codes; once a club has redeemed, only the
-  master console can revoke (behind a typed confirm).
-- Un-redeeming always requires a reason, stored on the code
-  (`unredeemReason`) and in the audit trail.
-- "Processed" currently *means* redeemed. If UW later adds their own
-  processing step (e.g. dividend paid out to the club), add a `processed`
-  status/flag alongside `redeemed` — the data model deliberately leaves room.
+Codes are matched on a stored, indexed `norm` field (uppercase, alphanumerics
+only) so a till entry matches however it's typed — `7f3 k9c` finds `7F3K9C`.
 
 ## Data (RTDB `app-data/uw-promo/`)
 
@@ -30,13 +29,14 @@ config/
   master            { passcode, updatedAt }
   uw                { label, passcode, token, updatedAt }
   clubs/<CODE>      { name, division, passcode, token, addedAt }   # CODE = clubs-meta 3-letter code
-codes/<pushId>      { code, club, clubName, status: active|redeemed|revoked,
-                      batch, createdAt, createdBy: uw|master,
-                      redeemedAt?, redeemedBy?,                    # redeemedBy: club:<CODE>|uw|master
-                      unredeemedAt?, unredeemedBy?, unredeemReason?,
+codes/<pushId>      { code, norm, status: active|redeemed|revoked,
+                      batch, batchLabel?, createdAt, createdBy: uw|master,
+                      club?, clubName?,                            # set when redeemed (locked-to club)
+                      redeemedAt?, redeemedBy?,                    # redeemedBy: club:<CODE>|master
+                      releasedAt?, releasedBy?, releaseReason?, releasedFrom?,
                       revokedAt?, revokedBy? }
 audit/<pushId>      { ts (server), actor: master|uw|club:<CODE>, actorLabel,
-                      action: allocate|revoke|redeem|unredeem|seed-clubs|
+                      action: add-codes|redeem|release|revoke|seed-clubs|
                               regen-passcode|regen-link|bootstrap,
                       club?, clubName?, count?, batch?, codes?, detail? }
 ```
@@ -54,14 +54,34 @@ Identical to `/tools/footage/club/`: a **named Firebase app** (`nlUwPromo`,
 in `_shared.js`) signs in **anonymously** for reads/writes so it can't clobber
 a portal (superadmin) login open in another tab. Passcodes/tokens are
 generated with an unambiguous alphabet (no 0/O/1/I/L) and checked client-side
-against `config/` — this is trust-level gating (the security stance is
-"assigned passwords are kept safe", per the owner), not cryptographic
-authorisation. A leaked passcode or link is fixed by regenerating it in the
-master console, which kills the old one instantly.
+against `config/` — trust-level gating ("assigned passwords are kept safe"),
+not cryptographic authorisation. A leaked passcode, link or printed QR is
+fixed by regenerating it in the master console, which kills the old one
+instantly.
 
-Sessions: UW and club pages rewrite the URL to their token link after a
-correct passcode (refresh keeps working); the master console caches its
-passcode in `sessionStorage` only.
+The 72 club links are stable URLs — point a QR code at each club's link and
+it lands them straight on their branded till page, signed in.
+
+## Testing / simulation
+
+Two layers:
+
+1. **Unit tests** — `tests/uw-promo.test.mjs` (zero-dependency `node:test`,
+   runs with `npm test` and in the canon-checks CI on any `tests/**` change).
+   Covers code normalisation, generation (uniqueness/alphabet/collisions) and
+   the `UWP.redeemTxn` state machine (lock-to-club, abort on
+   redeemed/revoked, null-retry passthrough) — the transaction updater is a
+   pure function in `_shared.js` precisely so this is testable.
+2. **Sandbox mode** — append **`?env=test`** to any of the three pages and
+   the whole family runs against `app-data/uw-promo-test` instead of live
+   data, with an amber TEST MODE badge. Direct links generated in test mode
+   carry the flag, so sandbox club links/QRs stay in the sandbox. Walkthrough:
+   open `/admin/?env=test` → bootstrap a sandbox master passcode → seed clubs
+   → create UW access → open the sandbox UW link, add codes → open a sandbox
+   club link, redeem one at the "till" → watch it appear against the club in
+   the UW/admin panels → release/revoke it. **Reset sandbox** (Clubs & access
+   tab, test mode only) wipes the sandbox clean; sandbox rules allow deletes,
+   live rules don't.
 
 ## Go-live checklist (all Firebase console — repo carries snapshots only)
 
@@ -70,21 +90,22 @@ passcode in `sessionStorage` only.
    Database → Rules.
 2. **Anonymous auth** must be enabled (Authentication → Sign-in method).
    The footage pages use it too, so it may already be on — verify, don't assume.
-3. Open `/tools/uw-promo/admin/` → **first-run screen** → set the master
-   passcode.
-4. Clubs & access tab → **Seed clubs from roster** (creates the 72 clubs, each
-   with a passcode + direct link) → **Create UW access**.
-5. Send Utility Warehouse their link/passcode; send clubs theirs (Export
-   access CSV gives the full hand-out list — treat it as a password list).
+3. Dry-run the whole flow in **sandbox mode** (above).
+4. Open `/tools/uw-promo/admin/` → first-run screen → set the master passcode.
+5. Clubs & access tab → **Seed clubs from roster** → **Create UW access**.
+6. Send Utility Warehouse their link/passcode; generate club QR codes from
+   the **Export access CSV** links (treat the CSV as a password list).
 
 No `tools/<toolKey>` registry record and no portal card — this family is
 intentionally outside the gated suite (external users have no portal logins).
 
 ## Files
 
-- `_shared.js` — named app + anon auth, generators, audit writer, `UWP.*`
-- `_shared.css` — gate card, context header bar, code-table bits (all brand tokens)
-- `index.html` / `club/index.html` / `admin/index.html` — the three pages
+- `_shared.js` — named app + anon auth, env/sandbox switch, generators,
+  `redeemTxn`, audit writer, `UWP.*`
+- `_shared.css` — gate card, context header bar, code widgets, test banner (all brand tokens)
+- `index.html` (UW) / `club/index.html` (till) / `admin/index.html` (master)
+- `../tests/uw-promo.test.mjs` — unit tests
 
 Canon note: the passcode-gate card + context header bar now exist in both the
 footage family and here — a candidate for promotion to `nl-brand.css` /
