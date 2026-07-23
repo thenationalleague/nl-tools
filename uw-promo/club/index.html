@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--
+  UW Promo Codes — Club-facing page
+  Version: v1.0 (23/07/2026) — initial build. Per-club direct link (?c=<token>)
+           or club passcode (footage-club gate pattern). Shows the club's
+           allocated codes; mark redeemed (confirm), undo redeem (required
+           reason), redeemed/unredeemed filter, copy code. Revoked codes shown
+           greyed for transparency. Every action audited.
+  File: /tools/uw-promo/club/index.html
+
+  Standalone (NO auth-guard) — named Firebase app + anonymous auth via
+  _shared.js. Reads only this club's codes (orderByChild('club') query).
+  Partner dashboard: /tools/uw-promo/ · NL master: /tools/uw-promo/admin/.
+-->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Utility Warehouse Promo Codes</title>
+<link rel="stylesheet" href="/tools/system/nl-brand.css?v=24">
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="/tools/uw-promo/_shared.js"></script>
+<script src="/tools/system/nl-utils.js?v=24"></script>
+<link rel="stylesheet" href="/tools/uw-promo/_shared.css">
+<style>
+  /* Code cards — clubs mostly open this on a phone, so rows not a table. */
+  .code-row { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 12px 15px; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .code-row--revoked { opacity: 0.55; }
+  .code-row--revoked .code-mono { text-decoration: line-through; }
+  .code-row__main { flex: 1; min-width: 180px; line-height: 1.4; }
+  .code-row__main .code-mono { font-size: 15px; }
+  .code-row__actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .undo-link { background: none; border: none; cursor: pointer; font-family: var(--font);
+    font-size: 11px; font-weight: 700; color: var(--text-muted); text-decoration: underline; padding: 4px; }
+  .undo-link:hover { color: var(--navy); }
+  .undo-link:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
+</style>
+</head>
+<body>
+
+<!-- Loading / passcode gate -->
+<div class="gate" id="gate">
+  <div class="gate__card">
+    <img class="gate__logo" src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png" alt="National League">
+    <div class="gate__title">Promo Codes</div>
+    <div class="gate__sub" id="gateSub">Loading…</div>
+    <div id="gateForm" style="display:none">
+      <input class="gate__input" id="gateInput" maxlength="6" placeholder="••••••" autocomplete="off" aria-label="Club passcode">
+      <div class="gate__err" id="gateErr" role="alert"></div>
+      <button class="btn btn--primary" id="gateBtn" style="width:100%;justify-content:center;">View my codes</button>
+    </div>
+  </div>
+</div>
+
+<!-- Club view -->
+<div id="app" style="display:none">
+  <div class="hbar">
+    <span id="hbarCrest"></span>
+    <div class="hbar__id">
+      <div class="hbar__title" id="hbarClub"></div>
+      <div class="hbar__sub">Utility Warehouse promo codes</div>
+    </div>
+    <button class="hbar__signout" id="signout">Not you?</button>
+  </div>
+
+  <div class="wrap wrap--narrow">
+    <div class="stats" id="stats"></div>
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="">All</button>
+      <button class="tab" data-tab="active">Unredeemed</button>
+      <button class="tab" data-tab="redeemed">Redeemed</button>
+    </div>
+    <div id="list"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  var CONFIG = null, CLUB = null;      // CLUB = { code, name, division, passcode, token }
+  var CODES = {}, codesLoaded = false, unlocked = false, codesQuery = null;
+  var activeTab = '';
+
+  function esc(s) { return NL.escHtml(s); }
+  function toast(m, t) { NL.toast(m, t || 'info'); }
+  function actor() { return 'club:' + CLUB.code; }
+
+  /* ── Config + gate ──────────────────────────────────────────────────── */
+  UWP.ref('config/clubs').on('value', function (s) {
+    CONFIG = s.val() || {};
+    boot();
+  }, function () {
+    document.getElementById('gateSub').textContent = 'Could not reach the database. Check your connection and refresh.';
+  });
+
+  function findByToken(tok) {
+    if (!tok) return null;
+    var hit = null;
+    Object.keys(CONFIG || {}).forEach(function (k) {
+      if (CONFIG[k].token === tok) hit = withCode(k);
+    });
+    return hit;
+  }
+  function findByPass(p) {
+    p = (p || '').toUpperCase().trim();
+    if (!p) return null;
+    var hit = null;
+    Object.keys(CONFIG || {}).forEach(function (k) {
+      if ((CONFIG[k].passcode || '').toUpperCase() === p) hit = withCode(k);
+    });
+    return hit;
+  }
+  function withCode(k) { var c = CONFIG[k]; return { code: k, name: c.name, division: c.division, passcode: c.passcode, token: c.token }; }
+
+  function boot() {
+    if (unlocked) return;
+    if (!CONFIG || !Object.keys(CONFIG).length) {
+      document.getElementById('gateSub').textContent =
+        'This page hasn’t been switched on yet. Contact the National League.';
+      return;
+    }
+    var params = new URLSearchParams(location.search);
+    var club = findByToken(params.get('c'));
+    if (club) { enter(club); return; }
+    showGateForm();
+  }
+
+  function showGateForm() {
+    document.getElementById('gateSub').textContent = 'Enter your club passcode to see your promo codes.';
+    document.getElementById('gateForm').style.display = 'block';
+    var inp = document.getElementById('gateInput'), err = document.getElementById('gateErr');
+    inp.focus();
+    function submit() {
+      var club = findByPass(inp.value);
+      if (!club) { err.textContent = 'Passcode not recognised. Check with the NL media team.'; return; }
+      err.textContent = '';
+      history.replaceState({}, '', location.pathname + '?c=' + encodeURIComponent(club.token));
+      enter(club);
+    }
+    document.getElementById('gateBtn').onclick = submit;
+    inp.onkeydown = function (e) { if (e.key === 'Enter') submit(); };
+  }
+
+  document.getElementById('signout').addEventListener('click', function () {
+    history.replaceState({}, '', location.pathname);
+    location.reload();
+  });
+
+  /* ── Enter: subscribe to this club's codes only ─────────────────────── */
+  function enter(club) {
+    CLUB = club;
+    unlocked = true;
+    document.getElementById('gate').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+
+    var crest = document.createElement('img');
+    crest.className = 'hbar__crest';
+    crest.src = NL.clubs.crestUrl(club.name, 'medium');
+    crest.alt = '';
+    NL.clubs.wireCrestImg(crest, club.name);
+    document.getElementById('hbarCrest').replaceChildren(crest);
+    document.getElementById('hbarClub').textContent = club.name;
+
+    if (codesQuery) codesQuery.off();
+    codesQuery = UWP.ref('codes').orderByChild('club').equalTo(club.code);
+    codesQuery.on('value', function (s) {
+      CODES = s.val() || {};
+      codesLoaded = true;
+      render();
+    });
+    render();
+  }
+
+  /* ── Render ─────────────────────────────────────────────────────────── */
+  document.getElementById('tabs').addEventListener('click', function (e) {
+    var t = e.target.closest('.tab');
+    if (!t) return;
+    activeTab = t.getAttribute('data-tab');
+    Array.prototype.forEach.call(document.querySelectorAll('#tabs .tab'), function (el) {
+      el.classList.toggle('active', el === t);
+    });
+    render();
+  });
+
+  function rows() {
+    return Object.keys(CODES).map(function (k) { var r = CODES[k]; r._id = k; return r; })
+      .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+  }
+
+  function render() {
+    var all = rows();
+    var counts = { active: 0, redeemed: 0, revoked: 0 };
+    all.forEach(function (r) { if (counts[r.status] != null) counts[r.status]++; });
+
+    document.getElementById('stats').innerHTML =
+      '<div class="stat"><div class="stat__num">' + (all.length - counts.revoked) + '</div><div class="stat__label">Codes allocated</div></div>' +
+      '<div class="stat stat--info"><div class="stat__num">' + counts.active + '</div><div class="stat__label">Unredeemed</div></div>' +
+      '<div class="stat stat--approved"><div class="stat__num">' + counts.redeemed + '</div><div class="stat__label">Redeemed</div></div>';
+
+    var list = all.filter(function (r) { return !activeTab || r.status === activeTab; });
+    var el = document.getElementById('list');
+    if (!codesLoaded) { el.innerHTML = '<div class="empty-state"><div class="empty-state__text">Loading…</div></div>'; return; }
+    if (!list.length) {
+      el.innerHTML = '<div class="empty-state"><div class="empty-state__title">' +
+        (all.length ? 'Nothing here' : 'No codes yet') + '</div><div class="empty-state__text">' +
+        (all.length ? 'No codes match this filter.' : 'When Utility Warehouse allocates promo codes to your club they will appear here.') +
+        '</div></div>';
+      return;
+    }
+    el.innerHTML = list.map(function (r) {
+      var note = '';
+      if (r.status === 'redeemed') note = 'Redeemed ' + esc(UWP.fmt(r.redeemedAt));
+      else if (r.status === 'revoked') note = 'Revoked by the National League / Utility Warehouse';
+      else note = 'Allocated ' + esc(UWP.fmt(r.createdAt));
+      var actions = '';
+      if (r.status === 'active') {
+        actions = '<button class="btn btn--primary btn--sm" data-redeem="' + esc(r._id) + '">Mark redeemed</button>';
+      } else if (r.status === 'redeemed') {
+        actions = '<button class="undo-link" data-unredeem="' + esc(r._id) + '">Undo</button>';
+      }
+      return '<div class="code-row' + (r.status === 'revoked' ? ' code-row--revoked' : '') + '">' +
+        '<div class="code-row__main"><span class="code-mono">' + esc(r.code) + '</span> ' +
+        '<button class="code-copy" data-copy="' + esc(r.code) + '" title="Copy code" aria-label="Copy code">⧉</button>' +
+        '<div class="code-note">' + note + '</div></div>' +
+        '<div class="code-row__actions">' + UWP.pillFor(r.status) + actions + '</div></div>';
+    }).join('');
+  }
+
+  /* ── Actions ────────────────────────────────────────────────────────── */
+  document.getElementById('list').addEventListener('click', function (e) {
+    var cp = e.target.closest('[data-copy]');
+    if (cp) { NL.copy(cp.getAttribute('data-copy')); return; }
+    var rd = e.target.closest('[data-redeem]');
+    if (rd) { redeem(rd.getAttribute('data-redeem')); return; }
+    var ur = e.target.closest('[data-unredeem]');
+    if (ur) { unredeem(ur.getAttribute('data-unredeem')); }
+  });
+
+  function redeem(id) {
+    var r = CODES[id];
+    if (!r || r.status !== 'active') return;
+    NL.confirm('Mark ' + r.code + ' as redeemed?', {
+      title: 'Mark redeemed',
+      detail: 'Only do this once the code has actually been used. You can undo it later if something goes wrong.',
+      confirmText: 'Mark redeemed'
+    }).then(function (ok) {
+      if (!ok) return;
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('codes/' + id).update({
+          status: 'redeemed', redeemedAt: UWP.TS(), redeemedBy: actor()
+        });
+      }).then(function () {
+        UWP.audit(actor(), CLUB.name, 'redeem', { club: CLUB.code, clubName: CLUB.name, codes: r.code });
+        toast('Marked as redeemed', 'success');
+      }).catch(function (err) { toast('Update failed: ' + err.message, 'error'); });
+    });
+  }
+
+  function unredeem(id) {
+    var r = CODES[id];
+    if (!r || r.status !== 'redeemed') return;
+    var wrap = document.createElement('div');
+    var p = document.createElement('p');
+    p.className = 'confirm-text';
+    p.textContent = 'Reset ' + r.code + ' to unredeemed? Tell us why — the reason is recorded for the National League.';
+    var ta = document.createElement('textarea');
+    ta.className = 'modal__input';
+    ta.rows = 3;
+    ta.placeholder = 'e.g. Ticked by mistake — code not actually used';
+    wrap.appendChild(p); wrap.appendChild(ta);
+    NL.modal({
+      title: 'Undo redeem',
+      size: 'sm',
+      body: wrap,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Reset to unredeemed', className: 'btn--restore', onClick: function (c) {
+            var reason = ta.value.trim();
+            if (!reason) { toast('A reason is required.', 'error'); ta.focus(); return; }
+            UWP.ensureAuth().then(function () {
+              return UWP.ref('codes/' + id).update({
+                status: 'active', redeemedAt: null, redeemedBy: null,
+                unredeemedAt: UWP.TS(), unredeemedBy: actor(), unredeemReason: reason
+              });
+            }).then(function () {
+              UWP.audit(actor(), CLUB.name, 'unredeem', { club: CLUB.code, clubName: CLUB.name, codes: r.code, detail: reason });
+              toast('Code reset to unredeemed', 'success');
+              c.close();
+            }).catch(function (err) { toast('Update failed: ' + err.message, 'error'); });
+          } }
+      ]
+    });
+    try { ta.focus(); } catch (e) {}
+  }
+})();
+</script>
+</body>
+</html>
