@@ -79,15 +79,16 @@
     return String(s == null ? '' : s).toUpperCase().replace(/[^A-Z0-9]/g, '');
   }
 
-  /* n unique 6-char codes (optionally "PREFIX-XXXXXX"), colliding with
-     neither each other nor the caller-supplied set of existing NORMALISED
-     code strings. */
+  /* n unique 8-char codes, grouped "XXXX-XXXX" for till readability
+     (optionally "PREFIX-XXXX-XXXX"), colliding with neither each other nor
+     the caller-supplied set of existing NORMALISED code strings. Matching is
+     on `norm`, so the dash never has to be typed. */
   function genCodes(n, prefix, existingSet) {
     var out = [], guard = 0;
     existingSet = existingSet || {};
     while (out.length < n && guard < n * 50) {
       guard++;
-      var c = (prefix ? prefix + '-' : '') + randFrom(CODE_ALPHA, 6);
+      var c = (prefix ? prefix + '-' : '') + randFrom(CODE_ALPHA, 4) + '-' + randFrom(CODE_ALPHA, 4);
       var k = normCode(c);
       if (existingSet[k]) continue;
       existingSet[k] = true;
@@ -135,6 +136,7 @@
   }
 
   var ROSE = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png';
+  var UW_LOGO = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/Utility%20Warehouse.png';
 
   function crestImgHtml(name, px) {
     px = px || 22;
@@ -187,6 +189,7 @@
     ago: function (ms) { return ms ? NL.timeAgo(ms) : '—'; },
     crestImgHtml: crestImgHtml,
     ROSE: ROSE,
+    UW_LOGO: UW_LOGO,
     clubLink: function (token) { return pageBase() + 'club/?c=' + encodeURIComponent(token) + envTail(); },
     uwLink: function (token) { return pageBase() + '?u=' + encodeURIComponent(token) + envTail(); }
   };

@@ -8,9 +8,9 @@ direct links, NO auth-guard/portal login), with a full audit trail.
 
 | Page | Who | Gets in via | Can do |
 |---|---|---|---|
-| `/tools/uw-promo/` | **Utility Warehouse** (one shared login) | shared passcode or `?u=<token>` direct link | Add codes to the pool (generate 6-char, or paste their own list; optional batch label; ≤500/batch), revoke **unredeemed** codes, release a redeemed code back to the pool (required reason), see every code + which club redeemed it and when, redemptions-by-club breakdown, filters, search, CSV export |
-| `/tools/uw-promo/club/` | **Each of the 72 clubs** | own `?c=<token>` direct link (the QR-code target for the point of sale) or own passcode | **Till page**: big code entry → a valid unredeemed code locks to this club (RTDB transaction — two tills can't claim the same code) and joins the club's redeemed list on the same page. Already-redeemed entry shows **which club and the exact date/time**. Revoked → "no longer valid". Clubs cannot undo — the page points them at NL |
-| `/tools/uw-promo/admin/` | **NL master (Richard)** | master passcode only (no direct link, deliberately; first-run bootstrap sets it) | Everything UW can do, plus: redeem on behalf of a club (club picker, same race-safe transaction), revoke **redeemed** codes (typed `REVOKE`), seed/sync the roster from clubs-meta, the **list of all 72 club URLs + passcodes** (copy per club, regenerate, export access CSV), audit viewer + export, sandbox reset (test mode) |
+| `/tools/uw-promo/` | **Utility Warehouse** (one shared login) | shared passcode or `?u=<token>` direct link | Add codes to the pool (generate 8-character `XXXX-XXXX`, or paste their own list; optional batch label; ≤500/batch), revoke **unredeemed** codes, release a redeemed code back to the pool (required reason), see every code + which club redeemed it and when, redemptions-by-club breakdown, filters, search, CSV export |
+| `/tools/uw-promo/club/` | **Each of the 72 clubs** | own `?c=<token>` direct link (the QR-code target for the point of sale) **plus their passcode on every visit**; passcode alone also works without the link | **Till page**: big code entry → a valid unredeemed code locks to this club (RTDB transaction — two tills can't claim the same code) and joins the club's redeemed list on the same page. Already-redeemed entry shows **which club and the exact date/time**. Revoked → "no longer valid". Clubs cannot undo — the page points them at NL |
+| `/tools/uw-promo/admin/` | **NL master (Richard)** | master passcode only (no direct link, deliberately; first-run bootstrap sets it) | Everything UW can do, plus: redeem on behalf of a club (club picker, same race-safe transaction), revoke **redeemed** codes (typed `REVOKE`), seed/sync the roster from clubs-meta, the **list of all 72 club URLs + passcodes** (copy per club, regenerate, export access CSV), **Print till cards** (one A4 card per club: crest, QR of the club link, passcode + the four till steps — print-to-PDF gives the 72-page hand-out pack), audit viewer + export, sandbox reset (test mode) |
 
 ## Status model
 
@@ -20,7 +20,7 @@ direct links, NO auth-guard/portal login), with a full audit trail.
 way (UW: unredeemed only; NL master: redeemed too, behind a typed confirm).
 
 Codes are matched on a stored, indexed `norm` field (uppercase, alphanumerics
-only) so a till entry matches however it's typed — `7f3 k9c` finds `7F3K9C`.
+only) so a till entry matches however it's typed — `7f3k 9c2m` finds `7F3K-9C2M`.
 
 ## Data (RTDB `app-data/uw-promo/`)
 
@@ -59,8 +59,11 @@ not cryptographic authorisation. A leaked passcode, link or printed QR is
 fixed by regenerating it in the master console, which kills the old one
 instantly.
 
-The 72 club links are stable URLs — point a QR code at each club's link and
-it lands them straight on their branded till page, signed in.
+The 72 club links are stable URLs — point a QR code at each club's link. As
+of v2.1 the link only **identifies** the club (crest-branded gate): the club
+passcode is required on **every visit** before the till opens, so a QR on
+public display at the point of sale doesn't hand the till to anyone who
+scans it.
 
 ## Testing / simulation
 
@@ -105,7 +108,12 @@ intentionally outside the gated suite (external users have no portal logins).
   `redeemTxn`, audit writer, `UWP.*`
 - `_shared.css` — gate card, context header bar, code widgets, test banner (all brand tokens)
 - `index.html` (UW) / `club/index.html` (till) / `admin/index.html` (master)
+- `qrcode.vendor.js` — vendored QR encoder (MIT, qrcode-generator@1.4.4);
+  local so club link tokens are never sent to a third-party QR image API
 - `../tests/uw-promo.test.mjs` — unit tests
+
+The UW page shows `assets/crests/Utility Warehouse.png` (NL rose fallback
+until that file is added to the repo).
 
 Canon note: the passcode-gate card + context header bar now exist in both the
 footage family and here — a candidate for promotion to `nl-brand.css` /

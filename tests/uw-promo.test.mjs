@@ -58,19 +58,21 @@ test('normCode strips everything but alphanumerics and uppercases', () => {
   assert.equal(UWP.normCode('••••••'), '');
 });
 
-test('genCodes: count, alphabet, uniqueness', () => {
+test('genCodes: count, format, alphabet, uniqueness', () => {
   const codes = UWP.genCodes(200, '', {});
   assert.equal(codes.length, 200);
   assert.equal(new Set(codes).size, 200, 'no duplicates within a batch');
   for (const c of codes) {
-    assert.equal(c.length, 6);
-    for (const ch of c) assert.ok(ALPHA.includes(ch), `ambiguous character ${ch} in ${c}`);
+    assert.equal(c.length, 9, 'XXXX-XXXX');
+    assert.equal(c[4], '-');
+    assert.equal(UWP.normCode(c).length, 8);
+    for (const ch of UWP.normCode(c)) assert.ok(ALPHA.includes(ch), `ambiguous character ${ch} in ${c}`);
   }
 });
 
 test('genCodes: optional prefix', () => {
   const [c] = UWP.genCodes(1, 'UW', {});
-  assert.match(c, /^UW-[A-Z2-9]{6}$/);
+  assert.match(c, /^UW-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
 });
 
 test('genCodes: never reissues a code already in the pool', () => {
