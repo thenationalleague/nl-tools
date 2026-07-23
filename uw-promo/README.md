@@ -43,10 +43,13 @@ audit/<pushId>      { ts (server), actor: master|uw|club:<CODE>, actorLabel,
 
 Rules (in `system/rtdb/rules.snapshot.json`): public read (same trust level as
 `media-footage/data` — passcodes are validated client-side), writes require
-(anonymous) auth, **codes can never be hard-deleted** (`newData.exists()` —
-revoke is the only removal), and the **audit trail is append-only**
-(`!data.exists()`). Deliberate consequence: the audit trail cannot be edited
-or pruned from any of these pages, including the master console.
+(anonymous) auth, and the **audit trail is append-only** (`!data.exists()`) —
+it cannot be edited or pruned from any of these pages, master included.
+Codes can be **hard-deleted from the master console only** (typed `DELETE`
+confirm, audited as `delete`); the UW panel has no delete. With anonymous
+auth the rules can't distinguish the panels, so master-only is UI-enforced —
+the same trust level as the passcodes themselves — and every deletion still
+leaves its audit entry.
 
 ## Access / auth model
 
