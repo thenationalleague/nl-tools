@@ -3,6 +3,10 @@
 <head>
 <!--
   UW Promo Codes — NL master console
+  Version: v2.5 (23/07/2026) — "Batches" overview + batch delete (fat-finger
+           cleanup): removes a batch's unredeemed + revoked codes only —
+           redeemed codes are always kept; typed DELETE confirm, one audited
+           'delete' entry with counts.
   Version: v2.4 (23/07/2026) — access rows: "Copy link" renamed "Copy direct
            link" so it reads distinctly from the tap-to-copy passcode chip.
   Version: v2.3 (23/07/2026) — hard delete for codes (master only — the UW
@@ -169,6 +173,7 @@
           <input class="toolbar__search" id="fSearch" type="search" placeholder="Search codes…" aria-label="Search codes">
         </div>
         <div class="toolbar__right">
+          <button class="btn btn--ghost" id="btnBatches">Batches</button>
           <button class="btn btn--ghost" id="btnExport">Export CSV</button>
           <button class="btn btn--primary" id="btnAdd">Add codes</button>
         </div>
@@ -697,6 +702,78 @@
       });
     }
   });
+
+  /* ── Batches — overview + fat-finger cleanup ────────────────────────── */
+  /* Batch delete removes only codes that were never redeemed (active +
+     revoked); redeemed codes are a club's record and are always kept —
+     handle those individually. Audited as one 'delete' entry. */
+  document.getElementById('btnBatches').addEventListener('click', openBatches);
+
+  function batchSummary() {
+    var by = {}, order = [];
+    codeRows().forEach(function (r) {
+      var k = r.batch || '(none)';
+      if (!by[k]) { by[k] = { batch: k, label: r.batchLabel || '', createdAt: r.createdAt || 0, createdBy: r.createdBy || '', total: 0, active: 0, redeemed: 0, revoked: 0, ids: [] }; order.push(k); }
+      var b = by[k];
+      b.total++;
+      if (b[r.status] != null) b[r.status]++;
+      if (r.status !== 'redeemed') b.ids.push(r._id);
+      if ((r.createdAt || 0) < b.createdAt) b.createdAt = r.createdAt || 0;
+    });
+    return order.map(function (k) { return by[k]; })
+      .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+  }
+
+  function openBatches() {
+    var batches = batchSummary();
+    if (!batches.length) { toast('No codes in the pool yet.', 'info'); return; }
+    var html = '<div class="table-wrap"><table class="table">' +
+      '<thead><tr><th>Batch</th><th>Added</th><th>By</th><th>Codes</th><th>Redeemed</th><th></th></tr></thead><tbody>' +
+      batches.map(function (b) {
+        var deletable = b.ids.length;
+        return '<tr><td>' + esc(b.label || '—') + '</td>' +
+          '<td title="' + esc(UWP.fmt(b.createdAt)) + '">' + esc(UWP.ago(b.createdAt)) + '</td>' +
+          '<td>' + esc(b.createdBy === 'uw' ? 'UW' : 'NL') + '</td>' +
+          '<td>' + b.total + '</td>' +
+          '<td>' + b.redeemed + '</td>' +
+          '<td style="text-align:right">' + (deletable
+            ? '<button class="btn btn--danger btn--sm" data-delbatch="' + esc(b.batch) + '">Delete unused (' + deletable + ')</button>'
+            : '<span class="code-note">all redeemed</span>') + '</td></tr>';
+      }).join('') + '</tbody></table></div>' +
+      '<p class="code-note" style="margin-top:10px">Deleting a batch removes its unredeemed and revoked codes only — codes a club has redeemed are always kept.</p>';
+    var ctrl = NL.modal({ title: 'Batches', width: 'wide', body: html,
+      buttons: [{ label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } }] });
+    ctrl.body.addEventListener('click', function (e) {
+      var el = e.target.closest('[data-delbatch]');
+      if (el) deleteBatch(el.getAttribute('data-delbatch'), ctrl);
+    });
+  }
+
+  function deleteBatch(batchKey, ctrl) {
+    var b = batchSummary().filter(function (x) { return x.batch === batchKey; })[0];
+    if (!b || !b.ids.length) return;
+    var name = b.label || 'unlabelled batch';
+    NL.prompt('Delete ' + b.ids.length + ' unused code' + (b.ids.length > 1 ? 's' : '') + ' from “' + name + '”?' +
+      (b.redeemed ? ' ' + b.redeemed + ' redeemed code' + (b.redeemed > 1 ? 's' : '') + ' will be kept.' : '') +
+      ' This cannot be undone. Type DELETE to confirm.', {
+      title: 'Delete batch', placeholder: 'DELETE'
+    }).then(function (v) {
+      if (v == null) return;
+      if ((v || '').trim().toUpperCase() !== 'DELETE') { toast('Not confirmed — type DELETE exactly.', 'error'); return; }
+      var updates = {};
+      b.ids.forEach(function (id) { updates[id] = null; });
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('codes').update(updates);
+      }).then(function () {
+        UWP.audit(ACTOR, ACTOR_LABEL, 'delete', {
+          count: b.ids.length, batch: b.batch,
+          detail: 'Batch delete “' + name + '”' + (b.redeemed ? ' — kept ' + b.redeemed + ' redeemed' : '')
+        });
+        toast(b.ids.length + ' codes deleted' + (b.redeemed ? ' (' + b.redeemed + ' redeemed kept)' : ''), 'success');
+        if (ctrl) ctrl.close();
+      }).catch(function (err) { toast('Batch delete failed: ' + err.message, 'error'); });
+    });
+  }
 
   /* ── CSV export (codes) ─────────────────────────────────────────────── */
   document.getElementById('btnExport').addEventListener('click', function () {
