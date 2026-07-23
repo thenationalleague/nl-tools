@@ -3,6 +3,11 @@
 <head>
 <!--
   UW Promo Codes — NL master console
+  Version: v2.3 (23/07/2026) — hard delete for codes (master only — the UW
+           panel has no delete; UI-enforced, see deleteCode). Typed DELETE
+           confirm, audited ('delete'), audit trail itself stays append-only.
+           Requires the rules update that drops newData.exists() from
+           uw-promo codes $id.
   Version: v2.2 (23/07/2026) — per-club "Card" button (print/save a single
            club's till card); @page moved to top level so print margins apply
            (cards printed flush to the top edge in some browsers) + card
@@ -218,6 +223,7 @@
             <option value="redeem">Redeem</option>
             <option value="release">Release</option>
             <option value="revoke">Revoke</option>
+            <option value="delete">Delete</option>
             <option value="seed-clubs">Seed clubs</option>
             <option value="regen-passcode">Passcode change</option>
             <option value="regen-link">Link change</option>
@@ -434,13 +440,14 @@
       return;
     }
     tbody.innerHTML = list.map(function (r) {
-      var acts = '';
+      var del = '<button class="btn btn--ghost btn--sm" data-delete="' + esc(r._id) + '">Delete</button>';
+      var acts = del;
       if (r.status === 'active') {
         acts = '<button class="btn btn--ghost btn--sm" data-redeem="' + esc(r._id) + '">Redeem…</button> ' +
-               '<button class="btn btn--danger btn--sm" data-revoke="' + esc(r._id) + '">Revoke</button>';
+               '<button class="btn btn--danger btn--sm" data-revoke="' + esc(r._id) + '">Revoke</button> ' + del;
       } else if (r.status === 'redeemed') {
         acts = '<button class="btn btn--restore btn--sm" data-release="' + esc(r._id) + '">Release</button> ' +
-               '<button class="btn btn--danger btn--sm" data-revoke="' + esc(r._id) + '">Revoke</button>';
+               '<button class="btn btn--danger btn--sm" data-revoke="' + esc(r._id) + '">Revoke</button> ' + del;
       }
       var redeemedBy = r.status === 'redeemed' && r.clubName
         ? '<span class="club-cell">' + UWP.crestImgHtml(r.clubName, 22) +
@@ -474,8 +481,37 @@
     var rd = e.target.closest('[data-redeem]');
     if (rd) { redeemOnBehalf(rd.getAttribute('data-redeem')); return; }
     var rl = e.target.closest('[data-release]');
-    if (rl) { releaseCode(rl.getAttribute('data-release')); }
+    if (rl) { releaseCode(rl.getAttribute('data-release')); return; }
+    var dl = e.target.closest('[data-delete]');
+    if (dl) { deleteCode(dl.getAttribute('data-delete')); }
   });
+
+  /* Hard delete — NL master only (the UW panel deliberately has no delete;
+     with anonymous auth the rules can't tell the two panels apart, so this
+     is UI-enforced like the rest of the trust model). The deletion itself is
+     audited, and the audit trail stays append-only, so a deleted code always
+     leaves a trace. */
+  function deleteCode(id) {
+    var r = CODES[id]; if (!r) return;
+    var what = r.code +
+      (r.status === 'redeemed' ? ' — redeemed by ' + (r.clubName || 'a club') + ' on ' + UWP.fmt(r.redeemedAt) :
+       r.status === 'revoked' ? ' — revoked' : ' — unredeemed');
+    NL.prompt('Permanently delete ' + what + '? It disappears from every panel and cannot be undone (the audit trail keeps a record). Type DELETE to confirm.', {
+      title: 'Delete code', placeholder: 'DELETE'
+    }).then(function (v) {
+      if (v == null) return;
+      if ((v || '').trim().toUpperCase() !== 'DELETE') { toast('Not confirmed — type DELETE exactly.', 'error'); return; }
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('codes/' + id).remove();
+      }).then(function () {
+        UWP.audit(ACTOR, ACTOR_LABEL, 'delete', {
+          codes: r.code, club: r.club, clubName: r.clubName,
+          detail: 'Deleted while ' + ((UWP.STATUS[r.status] || {}).label || r.status).toLowerCase()
+        });
+        toast('Code deleted', 'success');
+      }).catch(function (err) { toast('Delete failed: ' + err.message, 'error'); });
+    });
+  }
 
   function revokeCode(id) {
     var r = CODES[id]; if (!r || r.status === 'revoked') return;
