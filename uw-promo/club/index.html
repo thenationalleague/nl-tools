@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--
+  UW Promo Codes — Club point-of-sale redemption page
+  Version: v2.0 (23/07/2026) — pool model rebuild. Codes are no longer
+           allocated to clubs; UW issues them to customers. This page is now a
+           till-side redemption terminal: big code entry → if the code exists
+           and is unredeemed it locks to this club (RTDB transaction, so two
+           clubs can't claim the same code), and appears in the club's
+           redeemed list below. Already-redeemed entries show which club and
+           the exact date/time. Clubs can no longer undo — a mistaken
+           redemption is released back to the pool by NL/UW.
+  Version: v1.0 (23/07/2026) — initial build (allocated-codes list model).
+  File: /tools/uw-promo/club/index.html
+
+  Standalone (NO auth-guard) — named Firebase app + anonymous auth via
+  _shared.js. Per-club direct link (?c=<token>) — the QR-code target for the
+  point of sale — or club passcode. Partner dashboard: /tools/uw-promo/ ·
+  NL master: /tools/uw-promo/admin/.
+-->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Utility Warehouse Promo Codes</title>
+<link rel="stylesheet" href="/tools/system/nl-brand.css?v=24">
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="/tools/uw-promo/_shared.js"></script>
+<script src="/tools/system/nl-utils.js?v=24"></script>
+<link rel="stylesheet" href="/tools/uw-promo/_shared.css">
+<style>
+  /* Till-side entry card — the page's one job, so it gets the presence. */
+  .pos { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius-lg);
+    box-shadow: var(--shadow); border-top: 3px solid var(--primary);
+    padding: clamp(24px, 4vw, 40px); text-align: center; margin-bottom: 24px; }
+  .pos__title { font-size: 15px; font-weight: 900; font-variation-settings: 'wght' 900;
+    text-transform: uppercase; letter-spacing: 0.08em; color: var(--navy); margin-bottom: 4px; }
+  .pos__sub { font-size: 12px; color: var(--text-muted); margin-bottom: 18px; }
+  .pos__input { width: 100%; max-width: 340px; text-align: center; text-transform: uppercase;
+    letter-spacing: 0.35em; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: clamp(24px, 5vw, 32px); font-weight: 600; padding: 14px 10px;
+    border: 2px solid var(--border); border-radius: var(--radius); color: var(--text);
+    outline: none; margin-bottom: 14px; }
+  .pos__input:focus { border-color: var(--primary); box-shadow: var(--focus-ring); }
+  .pos__btn { width: 100%; max-width: 340px; justify-content: center;
+    font-size: 15px; padding: 13px 18px; }
+  .pos__msg { min-height: 22px; margin-top: 12px; font-size: 13px; font-weight: 700; }
+  .pos__msg--err { color: var(--red); }
+  .pos__msg--info { color: var(--text-muted); }
+  .pos__hint { font-size: 11px; color: var(--text-muted); margin-top: 14px; }
+
+  /* Redeemed list */
+  .code-row { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 12px 15px; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .code-row__main { flex: 1; min-width: 180px; line-height: 1.4; }
+  .code-row__main .code-mono { font-size: 15px; }
+
+  .list-head { font-size: 12px; font-weight: 900; font-variation-settings: 'wght' 900;
+    text-transform: uppercase; letter-spacing: 0.14em; color: var(--navy);
+    margin: 28px 0 12px; padding-bottom: 8px; border-bottom: 2px solid var(--border); }
+</style>
+</head>
+<body>
+
+<!-- Loading / passcode gate -->
+<div class="gate" id="gate">
+  <div class="gate__card">
+    <img class="gate__logo" src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png" alt="National League">
+    <div class="gate__title">Promo Codes</div>
+    <div class="gate__sub" id="gateSub">Loading…</div>
+    <div id="gateForm" style="display:none">
+      <input class="gate__input" id="gateInput" maxlength="6" placeholder="••••••" autocomplete="off" aria-label="Club passcode">
+      <div class="gate__err" id="gateErr" role="alert"></div>
+      <button class="btn btn--primary" id="gateBtn" style="width:100%;justify-content:center;">Open</button>
+    </div>
+  </div>
+</div>
+
+<!-- Club redemption view -->
+<div id="app" style="display:none">
+  <div class="hbar">
+    <span id="hbarCrest"></span>
+    <div class="hbar__id">
+      <div class="hbar__title" id="hbarClub"></div>
+      <div class="hbar__sub">Utility Warehouse promo codes</div>
+    </div>
+    <button class="hbar__signout" id="signout">Not you?</button>
+  </div>
+
+  <div class="wrap wrap--narrow">
+    <div class="pos">
+      <div class="pos__title">Redeem a code</div>
+      <div class="pos__sub">Enter the customer’s promo code exactly as shown.</div>
+      <input class="pos__input" id="posInput" maxlength="12" placeholder="••••••" autocomplete="off"
+             autocapitalize="characters" spellcheck="false" aria-label="Promo code">
+      <div><button class="btn btn--primary pos__btn" id="posBtn">Redeem</button></div>
+      <div class="pos__msg" id="posMsg" role="alert" aria-live="polite"></div>
+      <div class="pos__hint">Redeemed by mistake? Contact the National League — codes can be released back.</div>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="list-head">Redeemed by your club</div>
+    <div id="list"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  var CONFIG = null, CLUB = null;      // CLUB = { code, name, division, passcode, token }
+  var CODES = {}, codesLoaded = false, unlocked = false, codesQuery = null;
+  var busy = false;
+
+  function esc(s) { return NL.escHtml(s); }
+  function toast(m, t) { NL.toast(m, t || 'info'); }
+  function actor() { return 'club:' + CLUB.code; }
+
+  /* ── Config + gate ──────────────────────────────────────────────────── */
+  UWP.ref('config/clubs').on('value', function (s) {
+    CONFIG = s.val() || {};
+    boot();
+  }, function () {
+    document.getElementById('gateSub').textContent = 'Could not reach the database. Check your connection and refresh.';
+  });
+
+  function findByToken(tok) {
+    if (!tok) return null;
+    var hit = null;
+    Object.keys(CONFIG || {}).forEach(function (k) {
+      if (CONFIG[k].token === tok) hit = withCode(k);
+    });
+    return hit;
+  }
+  function findByPass(p) {
+    p = (p || '').toUpperCase().trim();
+    if (!p) return null;
+    var hit = null;
+    Object.keys(CONFIG || {}).forEach(function (k) {
+      if ((CONFIG[k].passcode || '').toUpperCase() === p) hit = withCode(k);
+    });
+    return hit;
+  }
+  function withCode(k) { var c = CONFIG[k]; return { code: k, name: c.name, division: c.division, passcode: c.passcode, token: c.token }; }
+
+  function boot() {
+    if (unlocked) return;
+    if (!CONFIG || !Object.keys(CONFIG).length) {
+      document.getElementById('gateSub').textContent =
+        'This page hasn’t been switched on yet. Contact the National League.';
+      return;
+    }
+    var params = new URLSearchParams(location.search);
+    var club = findByToken(params.get('c'));
+    if (club) { enter(club); return; }
+    showGateForm();
+  }
+
+  function showGateForm() {
+    document.getElementById('gateSub').textContent = 'Enter your club passcode.';
+    document.getElementById('gateForm').style.display = 'block';
+    var inp = document.getElementById('gateInput'), err = document.getElementById('gateErr');
+    inp.focus();
+    function submit() {
+      var club = findByPass(inp.value);
+      if (!club) { err.textContent = 'Passcode not recognised. Check with the NL media team.'; return; }
+      err.textContent = '';
+      history.replaceState({}, '', location.pathname + '?c=' + encodeURIComponent(club.token) + (UWP.isTest ? '&env=test' : ''));
+      enter(club);
+    }
+    document.getElementById('gateBtn').onclick = submit;
+    inp.onkeydown = function (e) { if (e.key === 'Enter') submit(); };
+  }
+
+  document.getElementById('signout').addEventListener('click', function () {
+    history.replaceState({}, '', location.pathname + (UWP.isTest ? '?env=test' : ''));
+    location.reload();
+  });
+
+  /* ── Enter: crest branding + live list of this club's redemptions ───── */
+  function enter(club) {
+    CLUB = club;
+    unlocked = true;
+    document.getElementById('gate').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+
+    var crest = document.createElement('img');
+    crest.className = 'hbar__crest';
+    crest.src = NL.clubs.crestUrl(club.name, 'medium');
+    crest.alt = '';
+    NL.clubs.wireCrestImg(crest, club.name);
+    document.getElementById('hbarCrest').replaceChildren(crest);
+    document.getElementById('hbarClub').textContent = club.name;
+
+    if (codesQuery) codesQuery.off();
+    codesQuery = UWP.ref('codes').orderByChild('club').equalTo(club.code);
+    codesQuery.on('value', function (s) {
+      CODES = s.val() || {};
+      codesLoaded = true;
+      render();
+    });
+    document.getElementById('posInput').focus();
+    render();
+  }
+
+  /* ── Redemption ─────────────────────────────────────────────────────── */
+  var posInput = document.getElementById('posInput'), posMsg = document.getElementById('posMsg');
+  function setMsg(text, kind) {
+    posMsg.textContent = text || '';
+    posMsg.className = 'pos__msg' + (kind ? ' pos__msg--' + kind : '');
+  }
+
+  document.getElementById('posBtn').addEventListener('click', redeemEntered);
+  posInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') redeemEntered(); });
+  posInput.addEventListener('input', function () { setMsg(''); });
+
+  function redeemEntered() {
+    if (busy) return;
+    var norm = UWP.normCode(posInput.value);
+    if (norm.length < 4) { setMsg('Enter the full code.', 'err'); return; }
+    busy = true;
+    setMsg('Checking…', 'info');
+    UWP.ensureAuth().then(function () {
+      return UWP.ref('codes').orderByChild('norm').equalTo(norm).once('value');
+    }).then(function (s) {
+      var val = s.val();
+      if (!val) { busy = false; setMsg('Code not recognised — check it and try again.', 'err'); return; }
+      var id = Object.keys(val)[0], rec = val[id];
+      if (rec.status === 'revoked') {
+        busy = false;
+        setMsg('This code is no longer valid. Contact the National League if that seems wrong.', 'err');
+        return;
+      }
+      if (rec.status === 'redeemed') { busy = false; alreadyRedeemed(rec); return; }
+      attemptRedeem(id, rec);
+    }).catch(function (err) {
+      busy = false;
+      setMsg('Could not check the code: ' + err.message, 'err');
+    });
+  }
+
+  function alreadyRedeemed(rec) {
+    setMsg('', '');
+    NL.alert('Code ' + rec.code + ' has already been redeemed by ' +
+      (rec.clubName || 'another club') + ' on ' + UWP.fmt(rec.redeemedAt) + '.', {
+      title: 'Already redeemed'
+    });
+  }
+
+  /* Transaction so two tills can't claim the same code — whoever commits
+     first wins; the loser sees the already-redeemed details. The updater is
+     UWP.redeemTxn (pure, unit-tested in tests/uw-promo.test.mjs). */
+  function attemptRedeem(id, rec) {
+    UWP.ref('codes/' + id).transaction(function (cur) {
+      return UWP.redeemTxn(cur, CLUB, actor());
+    }).then(function (res) {
+      busy = false;
+      if (!res.committed) {
+        var cur = res.snapshot && res.snapshot.val();
+        if (cur && cur.status === 'redeemed') { alreadyRedeemed(cur); }
+        else { setMsg('This code is no longer valid.', 'err'); }
+        return;
+      }
+      UWP.audit(actor(), CLUB.name, 'redeem', { club: CLUB.code, clubName: CLUB.name, codes: rec.code });
+      posInput.value = '';
+      setMsg('');
+      NL.modal({
+        title: 'Code redeemed',
+        size: 'sm',
+        body: '<div class="success-screen"><div class="success-screen__icon">✓</div>' +
+          '<p class="confirm-text"><span class="code-mono" style="font-size:18px">' + esc(rec.code) + '</span><br>' +
+          'redeemed for ' + esc(CLUB.name) + '.</p></div>',
+        onClose: function () { posInput.focus(); },
+        buttons: [{ label: 'Done', className: 'btn--primary', autofocus: true, onClick: function (c) { c.close(); } }]
+      });
+    }).catch(function (err) {
+      busy = false;
+      setMsg('Redeem failed: ' + err.message, 'err');
+    });
+  }
+
+  /* ── Redeemed list + stats ──────────────────────────────────────────── */
+  function rows() {
+    return Object.keys(CODES).map(function (k) { var r = CODES[k]; r._id = k; return r; })
+      .filter(function (r) { return r.status === 'redeemed'; })
+      .sort(function (a, b) { return (b.redeemedAt || 0) - (a.redeemedAt || 0); });
+  }
+
+  function render() {
+    var list = rows();
+    var dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+    var today = list.filter(function (r) { return (r.redeemedAt || 0) >= dayStart.getTime(); }).length;
+
+    document.getElementById('stats').innerHTML =
+      '<div class="stat stat--approved"><div class="stat__num">' + list.length + '</div><div class="stat__label">Codes redeemed</div></div>' +
+      '<div class="stat stat--info"><div class="stat__num">' + today + '</div><div class="stat__label">Today</div></div>';
+
+    var el = document.getElementById('list');
+    if (!codesLoaded) { el.innerHTML = '<div class="empty-state"><div class="empty-state__text">Loading…</div></div>'; return; }
+    if (!list.length) {
+      el.innerHTML = '<div class="empty-state"><div class="empty-state__title">Nothing redeemed yet</div>' +
+        '<div class="empty-state__text">Codes you redeem at the till will appear here.</div></div>';
+      return;
+    }
+    el.innerHTML = list.map(function (r) {
+      return '<div class="code-row">' +
+        '<div class="code-row__main"><span class="code-mono">' + esc(r.code) + '</span>' +
+        '<div class="code-note">Redeemed ' + esc(UWP.fmt(r.redeemedAt)) + '</div></div>' +
+        '<div>' + UWP.pillFor(r.status) + '</div></div>';
+    }).join('');
+  }
+})();
+</script>
+</body>
+</html>
