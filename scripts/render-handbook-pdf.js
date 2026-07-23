@@ -84,7 +84,10 @@ async function assemble(frontBuf, areaParts, deco) {
   if (deco && deco.fontBytes) {
     try {
       out.registerFontkit(require('@pdf-lib/fontkit'));
-      font = await out.embedFont(deco.fontBytes, { subset: true });
+      // subset:false — fontkit's subset writer emits empty glyphs for this
+      // variable font (invisible text in every viewer); embedding the whole
+      // decompressed TTF (~130KB once) keeps the outlines intact.
+      font = await out.embedFont(deco.fontBytes, { subset: false });
       fontIt = font;                         // same face, skewed at draw time
       skew = degrees(10);                    // carbona "RegularSlanted" — right lean, level baseline
       console.log('Furniture font: carbona (slant -10 for italic)');
@@ -165,7 +168,10 @@ async function assemble(frontBuf, areaParts, deco) {
   return { bytes: await out.save(), starts, total: out.getPageCount() };
 }
 
-/* Carbona bytes: the woff2 URL is declared once, in nl-brand.css. */
+/* Carbona bytes: the woff2 URL is declared once, in nl-brand.css. The woff2 is
+   DECOMPRESSED to a raw TTF (PDF font programs must be sfnt, not woff2 — raw
+   woff2 was the source of the invisible-furniture bug), then the glyph
+   outlines are sanity-checked so blank text can never ship again. */
 async function fetchBrandFont() {
   try {
     const css = fs.readFileSync(BRAND_CSS, 'utf8');
@@ -173,9 +179,12 @@ async function fetchBrandFont() {
     if (!m) throw new Error('no typekit woff2 url in nl-brand.css');
     const res = await fetch(m[1]);
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    const buf = Buffer.from(await res.arrayBuffer());
-    console.log('Fetched carbona woff2 (' + buf.length + ' bytes)');
-    return buf;
+    const woff2 = Buffer.from(await res.arrayBuffer());
+    const ttf = Buffer.from(await require('wawoff2').decompress(woff2));
+    const cmds = require('@pdf-lib/fontkit').create(ttf).layout('M').glyphs[0].path.commands.length;
+    if (!cmds) throw new Error('decompressed font has empty glyph outlines');
+    console.log('Fetched carbona woff2 (' + woff2.length + ' b) -> ttf (' + ttf.length + ' b), M outline ok (' + cmds + ' cmds)');
+    return ttf;
   } catch (e) {
     console.error('Carbona fetch failed (' + e.message + ') — furniture falls back to Helvetica');
     return null;
