@@ -6,9 +6,30 @@
 <title>Club Directory — NL Tools</title>
 <!--
   club-directory / index.html
-  v0.48 — readability pass: brand fluid type scale, real section headings, Admin nav group, copy-button fix.
+  v0.49 — Guide | Table club-page views, honest save feedback, demo banner gated.
 
   Changelog:
+  v0.49 — (23/07/2026) Club page gains two people layouts + trust fixes.
+          GUIDE VIEW (new, renderPeopleGuide): a readable, handbook-style
+          layout — name-first entries at --text-md with role + stacked
+          contact links, grouped under the same promoted section headings,
+          same joined-role collapsing (Directors/Co-Chairs) and alphabetical
+          order as the table, and exactly the same fields (no extra
+          exposure). Default for club users and viewers; staff/admin default
+          to the dense TABLE view; a Guide | Table toggle (reuses
+          .mc-people-viewtoggle) sits above the people on every club page
+          (state.clubView, session-scoped). Search jump-and-flash works in
+          both views (.cpd-person carries data-person-id + s2-row--flash).
+          This is the first step toward the club-facing guide register.
+          CORRECTION STRIP moved below the people/inboxes (was above the
+          table, pushing governance copy between facts and contacts).
+          TRUST FIXES from the readability critique: the "Demo mode" banner
+          in the manage club picker now only renders pre-seed (it claimed
+          live edits were in-memory); persistClub now toasts success
+          ('Saved — <club>') when the RTDB write lands, and the failure
+          message is an action ("Couldn't save that change — please check
+          your connection and try again", full error to console) instead of
+          the frightening "Refresh to re-sync".
   v0.48 — (23/07/2026) Readability + typography pass (the "not easy to read" fix).
           TYPE SCALE: every raw px font-size in the CSS migrated to the canon
           fluid tokens (--text-xs/sm/base/md/lg): tables --text-sm with primary
@@ -611,6 +632,15 @@
   window.NL_CHANGELOG = [
     {
       date: '23 Jul 2026',
+      version: 'v0.49',
+      items: [
+        'Club pages now have two layouts: a readable “Guide” view (big names, contact details underneath — how the club-facing guide will look) and the compact “Table” view for quick lookups. Clubs see Guide first, League staff see Table first, and anyone can switch with the toggle above the people.',
+        'Saving a change now confirms with a “Saved” message — before, a successful save showed nothing at all.',
+        'Removed the incorrect “Demo mode” warning that appeared above the club list even when edits were being saved for real.'
+      ]
+    },
+    {
+      date: '23 Jul 2026',
       version: 'v0.48',
       items: [
         'Much easier to read: all text now uses the shared brand type scale, so it grows with your screen like every other tool. Contact names and emails are noticeably bigger; section headings are real headings instead of tiny capital letters.',
@@ -1119,6 +1149,24 @@
 
   /* Joined rows (Directors/Co-Chairs) — identical to regular rows, no special colour */
   .s2-joined-row td { /* no overrides — use regular row styling */ }
+
+  /* Guide view — readable, handbook-style people layout (default for club
+     users/viewers; staff default to the dense table; toggled via .cpd-bar). */
+  .cpd-bar { display: flex; justify-content: flex-end; padding: 16px 20px 0; }
+  .cpd-sec { padding: 10px 20px 8px; }
+  .cpd-sec:last-of-type { padding-bottom: 24px; }
+  .cpd-people {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+    gap: 2px 32px; margin-top: 8px;
+  }
+  .cpd-person { padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .cpd-person--joined { grid-column: 1 / -1; }
+  .cpd-person__name { font-size: var(--text-md); font-variation-settings: 'wght' 800; color: var(--text); }
+  .cpd-person__role { font-size: var(--text-sm); color: var(--text-muted); margin-top: 1px; }
+  .cpd-person__contact { font-size: var(--text-base); margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
+  .cpd-person__contact a { color: var(--navy); font-variation-settings: 'wght' 600; }
+  /* Search jump-and-flash works in guide view too (table rows use .s2-row--flash on td). */
+  .cpd-person.s2-row--flash { background: var(--amber-light); transition: background 0.4s; }
 
   /* ================================================================
      CLUB PAGE — handbook facts surfaced (v0.21)
@@ -2857,6 +2905,12 @@ function renderClubStyle2(club) {
   if (club.email)   chips += '<a class="cp-chip" href="mailto:' + esc(club.email) + '">' + esc(club.email) + '</a>';
   if (club.website) chips += '<a class="cp-chip" href="https://' + esc(club.website) + '" target="_blank" rel="noopener">' + esc(club.website) + '</a>';
 
+  // Two people layouts: 'guide' (readable, handbook-style — default for club
+  // users and viewers) and 'table' (dense role/name/phone/email — default for
+  // staff and admin doing lookups). Same data, same fields, different shape.
+  var view = state.clubView ||
+    ((state.persona === 'staff' || state.persona === 'admin') ? 'table' : 'guide');
+  var toggleBar = '';
   var peopleHtml;
   if (!rows) {
     peopleHtml = '<div class="cp-empty">No contacts listed for ' + esc(club.name) + ' yet.' +
@@ -2865,10 +2919,18 @@ function renderClubStyle2(club) {
         : '') +
     '</div>';
   } else {
-    peopleHtml = '<table class="s2-table">' +
-      '<thead><tr><th>Role</th><th>Name</th><th>Phone</th><th>Email</th></tr></thead>' +
-      '<tbody>' + rows + '</tbody>' +
-    '</table>';
+    toggleBar = '<div class="cpd-bar" role="group" aria-label="People layout">' +
+      '<div class="mc-people-viewtoggle">' +
+        '<button type="button" data-club-view="guide" class="' + (view === 'guide' ? 'is-active' : '') + '" aria-pressed="' + (view === 'guide') + '">Guide</button>' +
+        '<button type="button" data-club-view="table" class="' + (view === 'table' ? 'is-active' : '') + '" aria-pressed="' + (view === 'table') + '">Table</button>' +
+      '</div>' +
+    '</div>';
+    peopleHtml = view === 'guide'
+      ? renderPeopleGuide(club)
+      : '<table class="s2-table">' +
+          '<thead><tr><th>Role</th><th>Name</th><th>Phone</th><th>Email</th></tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table>';
   }
 
   var setInboxes = MAILING_LISTS.filter(function(l){ var ib = (club.listInboxes||{})[l.key]; return ib && (ib.email || ib.phone); });
@@ -2896,11 +2958,64 @@ function renderClubStyle2(club) {
     '</div>' +
     renderClubFacts(club.name) +
     renderClubKitAndSponsors(club.name) +
-    '<div class="cp-correction">Club details above are managed by the League. Spotted an error? ' +
-      '<a href="' + correctionMailto(club.name) + '">Request a correction</a>.</div>' +
+    toggleBar +
     peopleHtml +
     inboxesHtml +
+    '<div class="cp-correction">Club details are managed by the League. Spotted an error? ' +
+      '<a href="' + correctionMailto(club.name) + '">Request a correction</a>.</div>' +
   '</div>';
+}
+
+/* Guide view — the readable people layout. Same sections, same joined-role
+   collapsing and alphabetical order as the table, rendered as generous
+   name-first entries instead of 4-column rows. Renders exactly the fields
+   the table shows (no extra exposure). */
+function renderPeopleGuide(club) {
+  var bySec = peopleBySection(club);
+  var html = '';
+  SECTION_ORDER.forEach(function(s) {
+    if (!bySec[s]) return;
+    var entries = bySec[s] || [];
+    var joinedByTitle = {};
+    var regular = [];
+    entries.forEach(function(e) {
+      var joinedTitle = null;
+      for (var i = 0; i < e.roleTitles.length; i++) {
+        if (NAMES_JOINED_ROLES[e.roleTitles[i]]) { joinedTitle = e.roleTitles[i]; break; }
+      }
+      if (joinedTitle && e.roleTitles.length === 1) {
+        (joinedByTitle[joinedTitle] = joinedByTitle[joinedTitle] || []).push(e.person);
+      } else {
+        regular.push(e);
+      }
+    });
+    regular.sort(function(a, b) { return (a.person.name || '').localeCompare(b.person.name || ''); });
+    var cards = '';
+    Object.keys(joinedByTitle).forEach(function(title) {
+      cards += '<div class="cpd-person cpd-person--joined">' +
+        '<div class="cpd-person__role">' + esc(NAMES_JOINED_ROLES[title]) + '</div>' +
+        '<div class="cpd-person__name">' + joinedByTitle[title].map(function(p) { return esc(p.name); }).join(', ') + '</div>' +
+      '</div>';
+    });
+    regular.forEach(function(e) {
+      var p = e.person;
+      var bits = personEmails(p).map(function(em) {
+        return '<a href="mailto:' + esc(em) + '">' + esc(em) + '</a>';
+      });
+      var ph = phoneDisplay(p.phone || '', preferredPhoneExt(p));
+      if (ph) bits.push('<span>' + ph + '</span>');
+      cards += '<div class="cpd-person" data-person-id="' + esc(p._id || '') + '">' +
+        '<div class="cpd-person__name">' + esc(p.name) + '</div>' +
+        '<div class="cpd-person__role">' + esc(joinRoles(e.roleTitles)) + '</div>' +
+        (bits.length ? '<div class="cpd-person__contact">' + bits.join('') + '</div>' : '') +
+      '</div>';
+    });
+    html += '<section class="cpd-sec">' +
+      '<span class="s2-sec-hd">' + esc(s) + '</span>' +
+      '<div class="cpd-people">' + cards + '</div>' +
+    '</section>';
+  });
+  return html;
 }
 
 
@@ -2973,6 +3088,7 @@ var state = {
   viewMode: 'directory',          // 'directory' | 'builder' | 'manage'
   searchQuery: '',
   viewing: null,
+  clubView: null,                 // club-page people layout: 'guide' | 'table' | null = persona default
   // Manage contacts state (v0.9 — two-surface model)
   manage: {
     editingClub: null,              // club name being edited
@@ -3929,9 +4045,10 @@ function renderClubPicker(root) {
       '<h2>Manage contacts</h2>' +
       '<p>Pick a club to edit its directory entries.</p>' +
     '</div>' +
-    '<div class="mc-demo-banner">' +
-      '<b>Demo mode:</b> changes are in-memory only and reset on page reload.' +
-    '</div>' +
+    (RTDB.seeded ? '' :
+      '<div class="mc-demo-banner">' +
+        '<b>Demo mode:</b> changes are in-memory only and reset on page reload.' +
+      '</div>') +
     '<div class="mc-picker-filter">' +
       '<input type="search" placeholder="Search clubs..." id="mcPickerSearch" value="' + esc(state.manage.pickerSearch||'') + '">' +
       '<button class="btn btn--toggle btn--sm" data-div-filter=""' + (!divFilter ? ' aria-pressed="true"' : '') + '>All</button>' +
@@ -4877,6 +4994,14 @@ function wireUI() {
     showScene();
   });
 
+  // --- Guide | Table people-layout toggle on the club page ---
+  document.getElementById('scene-club').addEventListener('click', function(e) {
+    var b = e.target.closest('[data-club-view]');
+    if (!b) return;
+    state.clubView = b.getAttribute('data-club-view');
+    renderClub();
+  });
+
   // --- "Manage my club" button on club page ---
   document.getElementById('manageMyClubBtn').addEventListener('click', function(e) {
     e.preventDefault();
@@ -5719,8 +5844,12 @@ function persistClub(club, action, detail) {
     detail: detail
   });
   fdb.ref(RTDB_BASE + '/clubs/' + club.name).set(clubToRTDB(club))
+    .then(function() {
+      if (NL.toast) NL.toast('Saved — ' + club.name, 'success');
+    })
     .catch(function(err) {
-      if (NL.toast) NL.toast('Save failed — ' + (err.message || String(err)) + '. Refresh to re-sync before editing further.', 'error');
+      console.error('persistClub failed:', err);
+      if (NL.toast) NL.toast('Couldn’t save that change — please check your connection and try again.', 'error');
     });
 }
 
