@@ -3,6 +3,11 @@
 <head>
 <!--
   UW Promo Codes — NL master console
+  Version: v2.1 (23/07/2026) — "Print till cards": one A4 card per club (crest,
+           QR of the club's direct link via the vendored local qrcode.vendor.js
+           — tokens never leave the page — passcode + the four till steps);
+           print-to-PDF gives the 72-page hand-out pack. Codes now 8-character
+           XXXX-XXXX.
   Version: v2.0 (23/07/2026) — pool model rebuild. Codes live in a central
            pool (added by UW or NL, issued to customers); a club claims one by
            redeeming it at the till. Master extras over the UW panel: redeem
@@ -26,6 +31,9 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/tools/uw-promo/_shared.js"></script>
+<!-- Vendored QR encoder (MIT, Kazuhiko Arase — qrcode-generator@1.4.4). Local
+     copy so club link tokens are never sent to a third-party QR image API. -->
+<script src="/tools/uw-promo/qrcode.vendor.js"></script>
 <script src="/tools/system/nl-utils.js?v=24"></script>
 <link rel="stylesheet" href="/tools/uw-promo/_shared.css">
 <style>
@@ -62,6 +70,29 @@
   .byclub__item { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 700; }
   .byclub__count { color: var(--primary); font-weight: 900; }
   .byclub__empty { font-size: 12px; color: var(--text-muted); }
+
+  /* Print till cards — one A4 page per club, rendered into #printRoot and
+     shown only for window.print(). */
+  #printRoot { display: none; }
+  @media print {
+    @page { size: A4 portrait; margin: 16mm; }
+    body > *:not(#printRoot) { display: none !important; }
+    #printRoot { display: block; }
+  }
+  .print-card { page-break-after: always; text-align: center; font-family: var(--font); color: var(--text); }
+  .print-card__crest { width: 26mm; height: 26mm; object-fit: contain; margin: 0 auto 4mm; display: block; }
+  .print-card__club { font-size: 22pt; font-weight: 900; font-variation-settings: 'wght' 900;
+    color: var(--navy); text-transform: uppercase; letter-spacing: 0.02em; }
+  .print-card__kicker { font-size: 10pt; font-weight: 800; font-variation-settings: 'wght' 800;
+    letter-spacing: 0.12em; text-transform: uppercase; color: var(--primary); margin: 1mm 0 8mm; }
+  .print-card__qr { width: 62mm; height: 62mm; margin: 0 auto 8mm; }
+  .print-card__qr svg { width: 100%; height: 100%; }
+  .print-card__steps { text-align: left; max-width: 130mm; margin: 0 auto; font-size: 12pt; line-height: 1.55; }
+  .print-card__steps li { margin-bottom: 4mm; }
+  .print-card__pass { font-weight: 800; font-variation-settings: 'wght' 800; letter-spacing: 0.14em;
+    border: 1.5pt solid var(--navy); border-radius: 3pt; padding: 0.5mm 2.5mm; white-space: nowrap; }
+  .print-card__uw { width: 34mm; margin: 8mm auto 0; display: block; }
+  .print-card__url { margin-top: 3mm; font-size: 9pt; color: var(--text-muted); word-break: break-all; }
 </style>
 </head>
 <body>
@@ -199,6 +230,8 @@
     </div>
   </div>
 </div>
+
+<div id="printRoot"></div>
 
 <div class="toast" id="toast"></div>
 
@@ -531,7 +564,7 @@
     var wrap = document.createElement('div');
     wrap.innerHTML =
       '<div class="alloc-row"><label for="alStyle">Codes</label><select id="alStyle">' +
-        '<option value="gen">Generate 6-character codes (e.g. 7F3K9C)</option>' +
+        '<option value="gen">Generate codes (e.g. 7F3K-9C2M)</option>' +
         '<option value="paste">Paste a list of codes</option>' +
       '</select></div>' +
       '<div class="alloc-row" id="alQtyRow"><label for="alQty">How many</label>' +
@@ -557,7 +590,7 @@
       var paste = elStyle.value === 'paste';
       wrap.querySelector('#alQtyRow').style.display = paste ? 'none' : 'block';
       wrap.querySelector('#alPasteRow').style.display = paste ? 'block' : 'none';
-      wrap.querySelector('#alPreview').innerHTML = paste ? '' : 'Example: <span class="code-mono">7F3K9C</span>';
+      wrap.querySelector('#alPreview').innerHTML = paste ? '' : 'Example: <span class="code-mono">7F3K-9C2M</span>';
     }
     elStyle.addEventListener('input', refresh);
     refresh();
@@ -685,7 +718,8 @@
     }
     body.innerHTML =
       '<div style="margin-bottom:12px"><button class="btn btn--ghost btn--sm" id="btnSeedSync">Sync clubs from roster</button> ' +
-      '<button class="btn btn--ghost btn--sm" id="btnExportAccess">Export access CSV</button></div>' +
+      '<button class="btn btn--ghost btn--sm" id="btnExportAccess">Export access CSV</button> ' +
+      '<button class="btn btn--navy btn--sm" id="btnPrintCards">Print till cards</button></div>' +
       '<div class="table-wrap"><table class="table">' +
       '<thead><tr><th>Club</th><th>Division</th><th>Passcode</th><th></th></tr></thead><tbody>' +
       clubs.map(function (c) {
@@ -700,6 +734,53 @@
       }).join('') + '</tbody></table></div>';
     document.getElementById('btnSeedSync').onclick = seedClubs;
     document.getElementById('btnExportAccess').onclick = exportAccess;
+    document.getElementById('btnPrintCards').onclick = printCards;
+  }
+
+  /* One A4 till card per club — crest, QR of the club's direct link, and the
+     four till steps incl. the club passcode. Print-to-PDF gives one 72-page
+     hand-out pack. QR encoding is local (qrcode.vendor.js) so tokens never
+     leave the page. */
+  function printCards() {
+    var clubs = clubList();
+    if (!clubs.length) { toast('Seed the clubs first.', 'error'); return; }
+    if (typeof qrcode === 'undefined') { toast('QR library failed to load — refresh and try again.', 'error'); return; }
+    var root = document.getElementById('printRoot');
+    root.innerHTML = clubs.map(function (c) {
+      var link = UWP.clubLink(c.token);
+      var qr = qrcode(0, 'M');
+      qr.addData(link);
+      qr.make();
+      var svg = qr.createSvgTag({ cellSize: 2, margin: 0, scalable: true });
+      return '<div class="print-card">' +
+        '<img class="print-card__crest" src="' + esc(NL.clubs.crestUrl(c.name)) + '" alt="" ' +
+          'onerror="this.onerror=null;this.src=\'' + UWP.ROSE + '\';">' +
+        '<div class="print-card__club">' + esc(c.name) + '</div>' +
+        '<div class="print-card__kicker">Utility Warehouse promo codes — till card</div>' +
+        '<div class="print-card__qr">' + svg + '</div>' +
+        '<ol class="print-card__steps">' +
+          '<li>Scan the QR code above on your phone.</li>' +
+          '<li>Use password: <span class="print-card__pass">' + esc(c.passcode) + '</span></li>' +
+          '<li>Enter the customer’s 8-character promo code and press <strong>REDEEM</strong>.</li>' +
+          '<li>If successfully redeemed, apply the relevant discount to their items on the club system.</li>' +
+        '</ol>' +
+        '<img class="print-card__uw" src="' + UWP.UW_LOGO + '" alt="Utility Warehouse" ' +
+          'onerror="this.onerror=null;this.style.display=\'none\';">' +
+        '<div class="print-card__url">' + esc(link) + '</div>' +
+      '</div>';
+    }).join('');
+    toast('Preparing ' + clubs.length + ' till cards…');
+    // Let the crests load before the print dialog snapshots the page.
+    var imgs = root.querySelectorAll('img');
+    var fired = false, done = 0;
+    function go() { if (!fired) { fired = true; window.print(); } }
+    function maybe() { done++; if (done >= imgs.length) go(); }
+    if (!imgs.length) { go(); return; }
+    Array.prototype.forEach.call(imgs, function (img) {
+      if (img.complete) { maybe(); }
+      else { img.addEventListener('load', maybe); img.addEventListener('error', maybe); }
+    });
+    setTimeout(go, 4000);
   }
 
   document.getElementById('clubAccessBody').addEventListener('click', function (e) {
