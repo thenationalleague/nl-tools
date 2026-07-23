@@ -112,8 +112,8 @@ intentionally outside the gated suite (external users have no portal logins).
   local so club link tokens are never sent to a third-party QR image API
 - `../tests/uw-promo.test.mjs` — unit tests
 
-The UW page shows `assets/crests/Utility Warehouse.png` (NL rose fallback
-until that file is added to the repo).
+The UW page and till cards show `assets/partners/Utility Warehouse.png`
+(dashboard falls back to the NL rose; cards hide the lockup if it fails).
 
 Canon note: the passcode-gate card + context header bar now exist in both the
 footage family and here — a candidate for promotion to `nl-brand.css` /

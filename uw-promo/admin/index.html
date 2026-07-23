@@ -3,6 +3,10 @@
 <head>
 <!--
   UW Promo Codes — NL master console
+  Version: v2.2 (23/07/2026) — per-club "Card" button (print/save a single
+           club's till card); @page moved to top level so print margins apply
+           (cards printed flush to the top edge in some browsers) + card
+           padding fallback; UW wordmark now from assets/partners/.
   Version: v2.1 (23/07/2026) — "Print till cards": one A4 card per club (crest,
            QR of the club's direct link via the vendored local qrcode.vendor.js
            — tokens never leave the page — passcode + the four till steps);
@@ -72,14 +76,18 @@
   .byclub__empty { font-size: 12px; color: var(--text-muted); }
 
   /* Print till cards — one A4 page per club, rendered into #printRoot and
-     shown only for window.print(). */
+     shown only for window.print(). @page must sit at top level: nested
+     inside @media print some browsers ignore it (which printed the cards
+     with no top margin). Card padding is the belt-and-braces spacing for
+     browsers that ignore @page margins entirely. */
+  @page { size: A4 portrait; margin: 14mm; }
   #printRoot { display: none; }
   @media print {
-    @page { size: A4 portrait; margin: 16mm; }
     body > *:not(#printRoot) { display: none !important; }
     #printRoot { display: block; }
   }
-  .print-card { page-break-after: always; text-align: center; font-family: var(--font); color: var(--text); }
+  .print-card { page-break-after: always; text-align: center; font-family: var(--font); color: var(--text);
+    padding-top: 10mm; }
   .print-card__crest { width: 26mm; height: 26mm; object-fit: contain; margin: 0 auto 4mm; display: block; }
   .print-card__club { font-size: 22pt; font-weight: 900; font-variation-settings: 'wght' 900;
     color: var(--navy); text-transform: uppercase; letter-spacing: 0.02em; }
@@ -728,21 +736,23 @@
           '<td>' + esc(c.division) + '</td>' +
           '<td><button class="pass-chip" data-copypass="' + esc(c.code) + '" title="Click to copy">' + esc(c.passcode) + '</button></td>' +
           '<td style="text-align:right;white-space:nowrap">' +
+            '<button class="btn btn--navy btn--sm" data-printcard="' + esc(c.code) + '">Card</button> ' +
             '<button class="btn btn--ghost btn--sm" data-copylink="' + esc(c.code) + '">Copy link</button> ' +
             '<button class="btn btn--ghost btn--sm" data-newpass="' + esc(c.code) + '">New passcode</button> ' +
             '<button class="btn btn--ghost btn--sm" data-newlink="' + esc(c.code) + '">New link</button></td></tr>';
       }).join('') + '</tbody></table></div>';
     document.getElementById('btnSeedSync').onclick = seedClubs;
     document.getElementById('btnExportAccess').onclick = exportAccess;
-    document.getElementById('btnPrintCards').onclick = printCards;
+    document.getElementById('btnPrintCards').onclick = function () { printCards(); };
   }
 
   /* One A4 till card per club — crest, QR of the club's direct link, and the
-     four till steps incl. the club passcode. Print-to-PDF gives one 72-page
-     hand-out pack. QR encoding is local (qrcode.vendor.js) so tokens never
-     leave the page. */
-  function printCards() {
-    var clubs = clubList();
+     four till steps incl. the club passcode; UW wordmark as the footer
+     lockup. Print-to-PDF gives the 72-page hand-out pack, or a single
+     club's card via the per-row Card button. QR encoding is local
+     (qrcode.vendor.js) so tokens never leave the page. */
+  function printCards(subset) {
+    var clubs = subset || clubList();
     if (!clubs.length) { toast('Seed the clubs first.', 'error'); return; }
     if (typeof qrcode === 'undefined') { toast('QR library failed to load — refresh and try again.', 'error'); return; }
     var root = document.getElementById('printRoot');
@@ -785,7 +795,12 @@
 
   document.getElementById('clubAccessBody').addEventListener('click', function (e) {
     var el;
-    if ((el = e.target.closest('[data-copypass]'))) {
+    if ((el = e.target.closest('[data-printcard]'))) {
+      var code = el.getAttribute('data-printcard');
+      var one = clubList().filter(function (c) { return c.code === code; });
+      // The browser print dialog's "Save as PDF" is the per-club download.
+      printCards(one);
+    } else if ((el = e.target.closest('[data-copypass]'))) {
       var c1 = CONFIG.clubs[el.getAttribute('data-copypass')];
       if (c1) NL.copy(c1.passcode, { ok: c1.name + ' passcode copied' });
     } else if ((el = e.target.closest('[data-copylink]'))) {
