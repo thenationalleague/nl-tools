@@ -8,14 +8,17 @@
 
   Build is MULTI-PART: front matter (cover + contents) and each area are
   rendered as separate Chrome print jobs over handbook/print.html?part=...,
-  then merged with pdf-lib. That buys three things a single pass can't do:
-    - a running section strip in every page header, current section
-      highlighted ("Memorandum · Articles · League Rules · ..."),
-    - real page numbers in the contents (?pages=id:n,... on the front part),
-    - global page numbers stamped bottom-right at merge time.
-  Clickable contents rows are re-created as link annotations over the fixed
-  16mm TOC row geometry (see the .pg--toc comment in print.html — keep the
-  TOC constants below in sync).
+  then merged with pdf-lib. All running furniture — the navy section band,
+  the italic edition footer, page numbers — is DRAWN ONTO THE MERGED PAGES
+  with pdf-lib in the reserved @page margins, using the real carbona font
+  bytes (fetched from the Typekit URL declared in system/nl-brand.css).
+  Chrome's header/footer templates are not used at all: they cannot load
+  webfonts, and fixed in-page elements are clipped out of the margins.
+
+  The italic footer is carbona slanted -10° (the "RegularSlanted" cut) via
+  a text skew — the variable font carries no italic axis. If the font fetch
+  or parse fails, Helvetica is the logged fallback so a render never dies
+  over furniture.
 
   Env:
     CHROME_PATH  path to a Chrome/Chromium binary (required)
@@ -31,6 +34,7 @@ const RTDB = 'https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app';
 const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:8899';
 const OUT_PDF = path.join(__dirname, '..', 'handbook', 'handbook.pdf');
 const OUT_META = path.join(__dirname, '..', 'handbook', 'pdf-meta.json');
+const BRAND_CSS = path.join(__dirname, '..', 'system', 'nl-brand.css');
 
 const ORDER = ['memorandum', 'articles', 'league-rules', 'appendices', 'board-directives'];
 const SHORT = {
@@ -42,46 +46,64 @@ const MM = 72 / 25.4;                       // mm -> PDF points
 // Contents-row geometry, mirroring print.html's fixed .pg--toc layout:
 // @page top margin 14mm + 26 (pad) + 12 (h2) + 6 + 1.2 + 8 (rule) = 67.2mm.
 const TOC = { xLeftMM: 24, xRightMM: 186, firstRowTopMM: 67.2, rowMM: 16 };
+const NAVY = { r: 0x22 / 255, g: 0x3b / 255, b: 0x7c / 255 };
+const MUTED = { r: 0.48, g: 0.51, b: 0.59 };
 
-const escHtml = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-
-// The "where am I" strip: every section listed, the current one highlighted.
-function headerStrip(presentIds, currentId) {
-  const items = presentIds.map(id => {
-    const on = id === currentId;
-    return '<span style="' + (on
-      ? 'color:#9e0000;font-weight:bold;'
-      : 'color:#8a92a6;') + '">' + escHtml(SHORT[id] || id) + '</span>';
-  }).join('<span style="color:#c3c9d6;"> &middot; </span>');
-  return '<div style="width:100%;text-align:center;font-size:6.5pt;font-family:Helvetica,Arial,sans-serif;letter-spacing:.02em;">' + items + '</div>';
-}
-
-function footerLine(label, pubDate) {
-  return '<div style="width:100%;text-align:center;font-size:7pt;font-style:italic;color:#7a8296;font-family:Helvetica,Arial,sans-serif;">' +
-    'The National League Handbook · Edition ' + escHtml(label) + (pubDate ? ' · Published ' + escHtml(pubDate) : '') + '</div>';
-}
-
-function pdfOpts(headerHtml, footerHtml) {
+function pdfOpts() {
   return {
     format: 'A4',
     printBackground: true,
     preferCSSPageSize: true,
-    displayHeaderFooter: true,
-    headerTemplate: headerHtml || '<div></div>',
-    footerTemplate: footerHtml || '<div></div>',
     margin: { top: '14mm', bottom: '16mm', left: '0mm', right: '0mm' }
   };
 }
 
-/* Merge front + area parts; stamp global page numbers (all pages but the
-   cover); lay clickable link zones over the contents rows. */
-async function assemble(frontBuf, areaParts) {
-  const { PDFDocument, PDFName, StandardFonts, rgb } = require('pdf-lib');
+/* Letter-spaced caps (pdf-lib has no letter-spacing) — draw char by char. */
+function spacedText(page, text, opts) {
+  const { font, size, centerX, y, gapPt, color } = opts;
+  const chars = text.split('');
+  const widths = chars.map(c => font.widthOfTextAtSize(c, size));
+  const total = widths.reduce((a, b) => a + b, 0) + gapPt * (chars.length - 1);
+  let x = centerX - total / 2;
+  chars.forEach((c, i) => {
+    if (c !== ' ') page.drawText(c, { x, y, size, font, color });
+    x += widths[i] + gapPt;
+  });
+}
+
+/* Merge front + area parts and draw all running furniture:
+   - navy section band (area pages, skipping each area's title page)
+   - italic edition footer on every page (carbona slant -10 when available)
+   - page numbers bottom-right (every page but the cover)
+   - clickable contents rows                                            */
+async function assemble(frontBuf, areaParts, deco) {
+  const { PDFDocument, PDFName, StandardFonts, rgb, degrees } = require('pdf-lib');
   const out = await PDFDocument.create();
-  const font = await out.embedFont(StandardFonts.HelveticaOblique);
+
+  let font, fontIt, skew = null;
+  if (deco && deco.fontBytes) {
+    try {
+      out.registerFontkit(require('@pdf-lib/fontkit'));
+      font = await out.embedFont(deco.fontBytes, { subset: true });
+      fontIt = font;                         // same face, skewed at draw time
+      skew = degrees(10);                    // carbona "RegularSlanted" — right lean, level baseline
+      console.log('Furniture font: carbona (slant -10 for italic)');
+    } catch (e) {
+      console.error('Custom font failed (' + e.message + ') — falling back to Helvetica');
+      font = null;
+    }
+  }
+  if (!font) {
+    font = await out.embedFont(StandardFonts.Helvetica);
+    fontIt = await out.embedFont(StandardFonts.HelveticaOblique);
+  }
+  const navy = rgb(NAVY.r, NAVY.g, NAVY.b);
+  const muted = rgb(MUTED.r, MUTED.g, MUTED.b);
+  const white = rgb(1, 1, 1);
 
   const front = await PDFDocument.load(frontBuf);
   (await out.copyPages(front, front.getPageIndices())).forEach(p => out.addPage(p));
+  const frontCount = out.getPageCount();
 
   const starts = {};                        // areaId -> 1-based global start page
   for (const part of areaParts) {
@@ -90,13 +112,39 @@ async function assemble(frontBuf, areaParts) {
     (await out.copyPages(doc, doc.getPageIndices())).forEach(p => out.addPage(p));
   }
 
+  const bandFor = {};                       // global 0-based page index -> area id
+  areaParts.forEach(part => {
+    for (let k = 1; k < part.pages; k++) bandFor[starts[part.id] - 1 + k] = part.id;
+  });
+
+  const footText = 'The National League Handbook · Edition ' + (deco.label || '') +
+    (deco.pubDate ? ' · Published ' + deco.pubDate : '');
+
   out.getPages().forEach((p, i) => {
-    if (i === 0) return;                    // the cover stays clean
-    p.drawText(String(i + 1), { x: p.getWidth() - 12 * MM, y: 8 * MM, size: 7, font, color: rgb(0.48, 0.51, 0.59) });
+    const W = p.getWidth(), H = p.getHeight();
+    // running footer — every page, centred in the bottom margin
+    const fw = fontIt.widthOfTextAtSize(footText, 7.5);
+    p.drawText(footText, {
+      x: (W - fw) / 2, y: 8.2 * MM, size: 7.5, font: fontIt, color: muted,
+      ...(skew ? { ySkew: skew } : {})
+    });
+    // page number — every page but the cover
+    if (i > 0) {
+      const n = String(i + 1);
+      p.drawText(n, { x: W - 12 * MM - font.widthOfTextAtSize(n, 7.5), y: 8.2 * MM, size: 7.5, font, color: muted });
+    }
+    // navy section band in the top margin
+    const area = bandFor[i];
+    if (area) {
+      p.drawRectangle({ x: 0, y: H - 9.5 * MM, width: W, height: 9.5 * MM, color: navy });
+      spacedText(p, (SHORT[area] || area).toUpperCase(), {
+        font, size: 9.5, centerX: W / 2, y: H - 6.4 * MM, gapPt: 2.6, color: white
+      });
+    }
   });
 
   // Contents rows -> GoTo links (front part is cover p1 + contents p2).
-  if (out.getPageCount() > 1) {
+  if (frontCount > 1) {
     const toc = out.getPage(1);
     const H = toc.getHeight();
     const annots = areaParts.map((part, i) => {
@@ -115,6 +163,23 @@ async function assemble(frontBuf, areaParts) {
   }
 
   return { bytes: await out.save(), starts, total: out.getPageCount() };
+}
+
+/* Carbona bytes: the woff2 URL is declared once, in nl-brand.css. */
+async function fetchBrandFont() {
+  try {
+    const css = fs.readFileSync(BRAND_CSS, 'utf8');
+    const m = css.match(/url\("(https:\/\/use\.typekit\.net[^"]+)"\)\s*format\("woff2"\)/);
+    if (!m) throw new Error('no typekit woff2 url in nl-brand.css');
+    const res = await fetch(m[1]);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const buf = Buffer.from(await res.arrayBuffer());
+    console.log('Fetched carbona woff2 (' + buf.length + ' bytes)');
+    return buf;
+  } catch (e) {
+    console.error('Carbona fetch failed (' + e.message + ') — furniture falls back to Helvetica');
+    return null;
+  }
 }
 
 async function rtdb(p) {
@@ -149,6 +214,8 @@ async function main() {
   const pubDate = publishedAt ? new Date(publishedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
   console.log('Rendering edition', editionId, '(' + label + '):', present.join(', '));
 
+  const fontBytes = await fetchBrandFont();
+
   if (!process.env.CHROME_PATH) throw new Error('CHROME_PATH not set');
   const browser = await puppeteer.launch({
     executablePath: process.env.CHROME_PATH,
@@ -158,16 +225,15 @@ async function main() {
   try {
     const page = await browser.newPage();
     page.on('pageerror', e => console.error('pageerror:', e.message));
-    const foot = footerLine(label || '', pubDate);
 
-    // Pass 1 — each area as its own part, with its own section strip.
+    // Pass 1 — each area as its own part.
     const { PDFDocument } = require('pdf-lib');
     const areaParts = [];
     for (const id of present) {
       await page.goto(BASE_URL + '/tools/handbook/print.html?part=' + id, { waitUntil: 'networkidle0', timeout: 120000 });
       await page.waitForSelector('.pg--sec', { timeout: 60000 });
       await settle(page);
-      const buf = await page.pdf(pdfOpts(headerStrip(present, id), foot));
+      const buf = await page.pdf(pdfOpts());
       areaParts.push({ id, buf, pages: (await PDFDocument.load(buf)).getPageCount() });
       console.log('  part', id + ':', areaParts[areaParts.length - 1].pages, 'pages');
     }
@@ -176,15 +242,15 @@ async function main() {
     await page.goto(BASE_URL + '/tools/handbook/print.html?part=front', { waitUntil: 'networkidle0', timeout: 120000 });
     await page.waitForSelector('.pg--toc', { timeout: 60000 });
     await settle(page);
-    const frontCount = (await PDFDocument.load(await page.pdf(pdfOpts(null, foot)))).getPageCount();
+    const frontCount = (await PDFDocument.load(await page.pdf(pdfOpts()))).getPageCount();
     let cursor = frontCount + 1;
     const pagesParam = areaParts.map(p => { const s = p.id + ':' + cursor; cursor += p.pages; return s; }).join(',');
     await page.goto(BASE_URL + '/tools/handbook/print.html?part=front&pages=' + encodeURIComponent(pagesParam), { waitUntil: 'networkidle0', timeout: 120000 });
     await page.waitForSelector('.pg--toc', { timeout: 60000 });
     await settle(page);
-    const frontBuf = await page.pdf(pdfOpts(null, foot));
+    const frontBuf = await page.pdf(pdfOpts());
 
-    const { bytes, starts, total } = await assemble(frontBuf, areaParts);
+    const { bytes, starts, total } = await assemble(frontBuf, areaParts, { label: label || '', pubDate, fontBytes });
     fs.writeFileSync(OUT_PDF, bytes);
     fs.writeFileSync(OUT_META, JSON.stringify({
       editionId, label: label || '', publishedAt: publishedAt || null,
@@ -196,5 +262,5 @@ async function main() {
   }
 }
 
-module.exports = { ORDER, SHORT, TOC, MM, headerStrip, footerLine, pdfOpts, assemble };
+module.exports = { ORDER, SHORT, TOC, MM, pdfOpts, assemble, fetchBrandFont };
 if (require.main === module) main().catch(e => { console.error(e); process.exit(1); });
