@@ -3,6 +3,14 @@
 <head>
 <!--
   UW Promo Codes — Club point-of-sale redemption page
+  Version: v2.2 (23/07/2026) — codes now 8-character XXXX-XXXX; passcode and
+           promo-code entry render in Carbona ExtraBold (owner call).
+  Version: v2.1 (23/07/2026) — the ?c= link/QR no longer signs the club in by
+           itself: it identifies the club (crest-branded gate) but the club
+           passcode is required on EVERY visit before the till opens. QR codes
+           can now sit on public display at the point of sale without handing
+           the till to anyone who scans them. Passcode-only entry (no link)
+           unchanged.
   Version: v2.0 (23/07/2026) — pool model rebuild. Codes are no longer
            allocated to clubs; UW issues them to customers. This page is now a
            till-side redemption terminal: big code entry → if the code exists
@@ -37,9 +45,11 @@
   .pos__title { font-size: 15px; font-weight: 900; font-variation-settings: 'wght' 900;
     text-transform: uppercase; letter-spacing: 0.08em; color: var(--navy); margin-bottom: 4px; }
   .pos__sub { font-size: 12px; color: var(--text-muted); margin-bottom: 18px; }
+  /* Promo-code entry in Carbona ExtraBold (owner call — matches .gate__input). */
   .pos__input { width: 100%; max-width: 340px; text-align: center; text-transform: uppercase;
-    letter-spacing: 0.35em; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: clamp(24px, 5vw, 32px); font-weight: 600; padding: 14px 10px;
+    letter-spacing: 0.2em; font-family: var(--font);
+    font-size: clamp(24px, 5vw, 32px); font-weight: 800; font-variation-settings: 'wght' 800;
+    padding: 14px 10px;
     border: 2px solid var(--border); border-radius: var(--radius); color: var(--text);
     outline: none; margin-bottom: 14px; }
   .pos__input:focus { border-color: var(--primary); box-shadow: var(--focus-ring); }
@@ -67,8 +77,8 @@
 <!-- Loading / passcode gate -->
 <div class="gate" id="gate">
   <div class="gate__card">
-    <img class="gate__logo" src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png" alt="National League">
-    <div class="gate__title">Promo Codes</div>
+    <img class="gate__logo" id="gateLogo" src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png" alt="National League">
+    <div class="gate__title" id="gateTitle">Promo Codes</div>
     <div class="gate__sub" id="gateSub">Loading…</div>
     <div id="gateForm" style="display:none">
       <input class="gate__input" id="gateInput" maxlength="6" placeholder="••••••" autocomplete="off" aria-label="Club passcode">
@@ -93,7 +103,7 @@
     <div class="pos">
       <div class="pos__title">Redeem a code</div>
       <div class="pos__sub">Enter the customer’s promo code exactly as shown.</div>
-      <input class="pos__input" id="posInput" maxlength="12" placeholder="••••••" autocomplete="off"
+      <input class="pos__input" id="posInput" maxlength="14" placeholder="••••-••••" autocomplete="off"
              autocapitalize="characters" spellcheck="false" aria-label="Promo code">
       <div><button class="btn btn--primary pos__btn" id="posBtn">Redeem</button></div>
       <div class="pos__msg" id="posMsg" role="alert" aria-live="polite"></div>
@@ -155,19 +165,35 @@
         'This page hasn’t been switched on yet. Contact the National League.';
       return;
     }
+    /* The ?c= link/QR only IDENTIFIES the club — it never signs in by
+       itself. The club passcode is required on every visit, so a QR on
+       public display at the point of sale doesn't hand the till to anyone
+       who scans it. */
     var params = new URLSearchParams(location.search);
-    var club = findByToken(params.get('c'));
-    if (club) { enter(club); return; }
-    showGateForm();
+    showGateForm(findByToken(params.get('c')));
   }
 
-  function showGateForm() {
-    document.getElementById('gateSub').textContent = 'Enter your club passcode.';
+  function showGateForm(linkClub) {
+    if (linkClub) {
+      var logo = document.getElementById('gateLogo');
+      logo.src = NL.clubs.crestUrl(linkClub.name, 'medium');
+      NL.clubs.wireCrestImg(logo, linkClub.name);
+      document.getElementById('gateTitle').textContent = linkClub.name;
+      document.getElementById('gateSub').textContent = 'Enter your club passcode to open the till.';
+    } else {
+      document.getElementById('gateSub').textContent = 'Enter your club passcode.';
+    }
     document.getElementById('gateForm').style.display = 'block';
     var inp = document.getElementById('gateInput'), err = document.getElementById('gateErr');
     inp.focus();
     function submit() {
-      var club = findByPass(inp.value);
+      var club = null;
+      if (linkClub) {
+        var p = (inp.value || '').toUpperCase().trim();
+        if (p && p === (linkClub.passcode || '').toUpperCase()) club = linkClub;
+      } else {
+        club = findByPass(inp.value);
+      }
       if (!club) { err.textContent = 'Passcode not recognised. Check with the NL media team.'; return; }
       err.textContent = '';
       history.replaceState({}, '', location.pathname + '?c=' + encodeURIComponent(club.token) + (UWP.isTest ? '&env=test' : ''));
