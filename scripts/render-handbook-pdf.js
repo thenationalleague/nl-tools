@@ -80,7 +80,7 @@ async function assemble(frontBuf, areaParts, deco) {
   const { PDFDocument, PDFName, StandardFonts, rgb, degrees } = require('pdf-lib');
   const out = await PDFDocument.create();
 
-  let font, fontIt, skew = null;
+  let font, fontIt, fontBold = null, skew = null;
   if (deco && deco.fontBytes) {
     try {
       out.registerFontkit(require('@pdf-lib/fontkit'));
@@ -96,9 +96,14 @@ async function assemble(frontBuf, areaParts, deco) {
       font = null;
     }
   }
+  if (font && deco && deco.boldBytes) {
+    try { fontBold = await out.embedFont(deco.boldBytes, { subset: false }); console.log('Band font: carbona ExtraBold (wght 800 instance)'); }
+    catch (e) { console.error('Bold instance failed (' + e.message + ') — band uses regular'); }
+  }
   if (!font) {
     font = await out.embedFont(StandardFonts.Helvetica);
     fontIt = await out.embedFont(StandardFonts.HelveticaOblique);
+    fontBold = await out.embedFont(StandardFonts.HelveticaBold);
   }
   const navy = rgb(NAVY.r, NAVY.g, NAVY.b);
   const muted = rgb(MUTED.r, MUTED.g, MUTED.b);
@@ -136,12 +141,12 @@ async function assemble(frontBuf, areaParts, deco) {
       const n = String(i + 1);
       p.drawText(n, { x: W - 12 * MM - font.widthOfTextAtSize(n, 7.5), y: 8.2 * MM, size: 7.5, font, color: muted });
     }
-    // navy section band in the top margin
+    // navy section band in the top margin — full chapter title, ExtraBold caps
     const area = bandFor[i];
     if (area) {
       p.drawRectangle({ x: 0, y: H - 9.5 * MM, width: W, height: 9.5 * MM, color: navy });
-      spacedText(p, (SHORT[area] || area).toUpperCase(), {
-        font, size: 9.5, centerX: W / 2, y: H - 6.4 * MM, gapPt: 2.6, color: white
+      spacedText(p, ((deco.titles && deco.titles[area]) || SHORT[area] || area).toUpperCase(), {
+        font: fontBold || font, size: 9.5, centerX: W / 2, y: H - 6.4 * MM, gapPt: 2.2, color: white
       });
     }
   });
@@ -191,6 +196,25 @@ async function fetchBrandFont() {
   }
 }
 
+/* Pin the variable font at wght=800 for the band — the default instance is 400.
+   Uses fonttools' instancer (installed by the workflow); null on any failure. */
+function instanceBold(ttfBytes) {
+  const os = require('os');
+  const cp = require('child_process');
+  try {
+    const src = path.join(os.tmpdir(), 'carbona.ttf');
+    const dst = path.join(os.tmpdir(), 'carbona-800.ttf');
+    fs.writeFileSync(src, ttfBytes);
+    cp.execSync('python3 -m fontTools.varLib.instancer --quiet -o ' + JSON.stringify(dst) + ' ' + JSON.stringify(src) + ' wght=800', { stdio: 'pipe' });
+    const out = fs.readFileSync(dst);
+    console.log('Instanced carbona at wght=800 (' + out.length + ' bytes)');
+    return out;
+  } catch (e) {
+    console.error('wght=800 instancing failed (' + (e.stderr ? e.stderr.toString().slice(0, 200) : e.message) + ') — band uses regular');
+    return null;
+  }
+}
+
 async function rtdb(p) {
   const res = await fetch(RTDB + p);
   if (!res.ok) throw new Error('RTDB ' + p + ' -> HTTP ' + res.status);
@@ -223,7 +247,13 @@ async function main() {
   const pubDate = publishedAt ? new Date(publishedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
   console.log('Rendering edition', editionId, '(' + label + '):', present.join(', '));
 
+  const titles = {};
+  for (const id of present) {
+    titles[id] = await rtdb('/app-data/ops-handbook/editions/' + editionId + '/docs/' + id + '/title.json') || SHORT[id];
+  }
+
   const fontBytes = await fetchBrandFont();
+  const boldBytes = fontBytes ? instanceBold(fontBytes) : null;
 
   if (!process.env.CHROME_PATH) throw new Error('CHROME_PATH not set');
   const browser = await puppeteer.launch({
@@ -259,7 +289,7 @@ async function main() {
     await settle(page);
     const frontBuf = await page.pdf(pdfOpts());
 
-    const { bytes, starts, total } = await assemble(frontBuf, areaParts, { label: label || '', pubDate, fontBytes });
+    const { bytes, starts, total } = await assemble(frontBuf, areaParts, { label: label || '', pubDate, fontBytes, boldBytes, titles });
     fs.writeFileSync(OUT_PDF, bytes);
     fs.writeFileSync(OUT_META, JSON.stringify({
       editionId, label: label || '', publishedAt: publishedAt || null,
