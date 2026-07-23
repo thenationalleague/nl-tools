@@ -109,7 +109,7 @@ async function assemble(frontBuf, areaParts, deco) {
     }
   }
   if (font && deco && deco.boldBytes) {
-    try { fontBold = await out.embedFont(deco.boldBytes, { subset: false }); console.log('Band font: carbona ExtraBold (wght 800 instance)'); }
+    try { fontBold = await out.embedFont(deco.boldBytes, { subset: false }); console.log('Band font: carbona ExtraBold'); }
     catch (e) { console.error('Bold instance failed (' + e.message + ') — band uses regular'); }
   }
   if (!font) {
@@ -264,7 +264,9 @@ async function main() {
     titles[id] = await rtdb('/app-data/ops-handbook/editions/' + editionId + '/docs/' + id + '/title.json') || SHORT[id];
   }
 
-  const fontBytes = await fetchBrandFont();
+  let fontBytes = localFont('CarbonaRegular.otf');
+  if (fontBytes) console.log('Furniture font: local CarbonaRegular.otf (' + fontBytes.length + ' bytes)');
+  else fontBytes = await fetchBrandFont();
   let boldBytes = localFont('CarbonaExtraBold.otf');
   if (boldBytes) console.log('Band font: local CarbonaExtraBold.otf (' + boldBytes.length + ' bytes)');
   else boldBytes = fontBytes ? instanceBold(fontBytes) : null;
