@@ -35,6 +35,13 @@ const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:8899';
 const OUT_PDF = path.join(__dirname, '..', 'handbook', 'handbook.pdf');
 const OUT_META = path.join(__dirname, '..', 'handbook', 'pdf-meta.json');
 const BRAND_CSS = path.join(__dirname, '..', 'system', 'nl-brand.css');
+const FONT_DIR = path.join(__dirname, '..', 'assets', 'fonts');
+// Static desktop cuts (assets/fonts/) are preferred over anything derived from
+// the variable webfont. Drop CarbonaRegularSlanted.otf in and the footer picks
+// up the true italic cut on the next render, no code change.
+function localFont(name) {
+  try { const b = fs.readFileSync(path.join(FONT_DIR, name)); return b.length ? b : null; } catch (_) { return null; }
+}
 
 const ORDER = ['memorandum', 'articles', 'league-rules', 'appendices', 'board-directives'];
 const SHORT = {
@@ -88,9 +95,14 @@ async function assemble(frontBuf, areaParts, deco) {
       // variable font (invisible text in every viewer); embedding the whole
       // decompressed TTF (~130KB once) keeps the outlines intact.
       font = await out.embedFont(deco.fontBytes, { subset: false });
-      fontIt = font;                         // same face, skewed at draw time
-      skew = degrees(10);                    // carbona "RegularSlanted" — right lean, level baseline
-      console.log('Furniture font: carbona (slant -10 for italic)');
+      if (deco.slantedBytes) {
+        fontIt = await out.embedFont(deco.slantedBytes, { subset: false });
+        console.log('Footer font: carbona Slanted (true cut)');
+      } else {
+        fontIt = font;                       // same face, skewed at draw time
+        skew = degrees(10);                  // synthetic "RegularSlanted" — right lean, level baseline
+        console.log('Furniture font: carbona (synthetic slant for italic)');
+      }
     } catch (e) {
       console.error('Custom font failed (' + e.message + ') — falling back to Helvetica');
       font = null;
@@ -253,7 +265,11 @@ async function main() {
   }
 
   const fontBytes = await fetchBrandFont();
-  const boldBytes = fontBytes ? instanceBold(fontBytes) : null;
+  let boldBytes = localFont('CarbonaExtraBold.otf');
+  if (boldBytes) console.log('Band font: local CarbonaExtraBold.otf (' + boldBytes.length + ' bytes)');
+  else boldBytes = fontBytes ? instanceBold(fontBytes) : null;
+  const slantedBytes = localFont('CarbonaRegularSlanted.otf');
+  if (slantedBytes) console.log('Footer font: local CarbonaRegularSlanted.otf');
 
   if (!process.env.CHROME_PATH) throw new Error('CHROME_PATH not set');
   const browser = await puppeteer.launch({
@@ -289,7 +305,7 @@ async function main() {
     await settle(page);
     const frontBuf = await page.pdf(pdfOpts());
 
-    const { bytes, starts, total } = await assemble(frontBuf, areaParts, { label: label || '', pubDate, fontBytes, boldBytes, titles });
+    const { bytes, starts, total } = await assemble(frontBuf, areaParts, { label: label || '', pubDate, fontBytes, boldBytes, slantedBytes, titles });
     fs.writeFileSync(OUT_PDF, bytes);
     fs.writeFileSync(OUT_META, JSON.stringify({
       editionId, label: label || '', publishedAt: publishedAt || null,
