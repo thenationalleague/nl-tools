@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Newsletter
-  Version: v1.4 (24/07/2026)
+  Version: v1.5 (24/07/2026)
   File: /tools/newsletter/index.html
 
   Monthly staff newsletter builder. Editors write a title, month and a handful
@@ -11,6 +11,26 @@
   paginated by the same code (renderDocument), so they cannot drift.
 
   Technical changelog:
+    v1.5 (24/07/2026)
+      - Photo decoupled from article type: `imagePos` ('above'|'left'|
+        'right') is its own field, layout collapses to 'text-only'|'hero',
+        legacy 'image-*' layout values normalised on load. The Photo row is
+        always visible (choose → then position); the position select is
+        disabled until a photo is chosen.
+      - Editor pickers (Type/Style/Width/Columns/Photo position/Nudge) sit
+        abreast in a responsive .nlx-field-grid; caption moved inline into
+        the photo row.
+      - Blank-page-1 fix: photos are height-capped at 85mm (object-fit
+        cover centre-crop, pending the crop tool) so a tall portrait image
+        cannot balloon an article past page 1's banner capacity; and when a
+        first article still cannot fit beneath the banner, the fill gauge
+        now says so explicitly ("page 1 is empty below the banner")
+        instead of silently plonking everything onto page 2.
+      - Desktop app layout: compact .nlx-bar (title + gauge + save +
+        actions in one row, warn detail in a strip below only when needed);
+        the shell is sized to the viewport (--nlx-shell-h via sizeShell())
+        so editor and preview are two independent scrollers and the page
+        itself does not scroll.
     v1.4 (24/07/2026)
       - Banner fix: the negative-margin full-bleed approach was clipped by
         the content inner's overflow:hidden (title cut off, rose half-out).
@@ -143,6 +163,17 @@
     window.NL_CHANGELOG = [
       {
         date: '24 July 2026',
+        version: 'v1.5',
+        items: [
+          'Photos are now separate from the article type — pick the photo first, then choose where it sits (above, left or right).',
+          'The article settings now sit side by side instead of in a long stack.',
+          'Very tall photos are politely cropped rather than swallowing a whole page.',
+          'If an article is too tall to fit beneath the banner on page 1, the gauge now tells you plainly instead of leaving page 1 mysteriously empty.',
+          'On desktop the editor and preview now scroll independently — the page itself stays put — with the title, page gauge and buttons in one slim bar.'
+        ]
+      },
+      {
+        date: '24 July 2026',
         version: 'v1.4',
         items: [
           'Fixed the red banner — the title and rose logo now sit properly across the full width of the page.',
@@ -227,8 +258,12 @@
   .nlx-pane--preview { min-width: 0; position: sticky; top: 12px; }
   .nlx-preview-toggle { display: none; }
   @media (min-width: 1101px) {
-    /* Preview scrolls on its own beside the editor */
-    .nlx-pane--preview { max-height: calc(100vh - 24px); overflow-y: auto; }
+    /* App layout: the page itself doesn't scroll — the editor and the
+       preview are two independent scrollers under the compact bar */
+    body.nlx-editing .page { padding-bottom: 12px; }
+    .nlx-shell { height: var(--nlx-shell-h, auto); }
+    .nlx-pane--editor { height: 100%; overflow-y: auto; padding-right: 4px; }
+    .nlx-pane--preview { position: static; height: 100%; overflow-y: auto; }
   }
   @media (max-width: 1100px) {
     .nlx-shell { grid-template-columns: 1fr; }
@@ -264,16 +299,29 @@
   .nlx-save--saved  { color: var(--green); }
   .nlx-save--error  { color: var(--red); }
 
-  /* ── Fill gauge — the tool's core guard rail ─────────────────────────── */
-  .nlx-gauge {
+  /* ── Compact top bar: title + gauge + save + actions in one row ──────── */
+  .nlx-bar {
     position: sticky; top: 0; z-index: 5;
-    background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 12px 16px; margin-bottom: 14px; box-shadow: var(--shadow);
     display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 8px 14px; margin-bottom: 10px;
   }
-  .nlx-gauge__pages { display: flex; gap: 6px; }
+  .nlx-bar__title {
+    font-variation-settings: 'wght' 900; color: var(--navy);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 30ch;
+  }
+  .nlx-bar__actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+  .nlx-warnstrip {
+    display: none; background: var(--red-light); border: 1px solid var(--red);
+    border-radius: var(--radius); padding: 8px 14px; margin-bottom: 10px;
+    font-size: var(--text-sm); color: var(--text);
+  }
+
+  /* ── Fill gauge — the tool's core guard rail (compact, lives in the bar) */
+  .nlx-gauge { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 170px; }
+  .nlx-gauge__pages { display: flex; gap: 4px; }
   .nlx-gauge__page {
-    width: 34px; height: 46px; border: 1.5px solid var(--border); border-radius: 3px;
+    width: 20px; height: 28px; border: 1.5px solid var(--border); border-radius: 2px;
     position: relative; overflow: hidden; background: var(--off-white);
   }
   .nlx-gauge__page-fill {
@@ -282,10 +330,13 @@
   }
   .nlx-gauge__page--over { border-color: var(--red); background: var(--red-light); }
   .nlx-gauge__page--over .nlx-gauge__page-fill { background: var(--red-light); border-bottom-color: var(--red); }
-  .nlx-gauge__text { flex: 1; min-width: 200px; }
-  .nlx-gauge__headline { font-variation-settings: 'wght' 800; font-size: var(--text-sm); color: var(--text); }
+  .nlx-gauge__text { flex: 1; min-width: 120px; }
+  .nlx-gauge__headline {
+    font-variation-settings: 'wght' 800; font-size: var(--text-sm); color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   .nlx-gauge--warn .nlx-gauge__headline { color: var(--red); }
-  .nlx-gauge__detail { font-size: var(--text-sm); color: var(--text-muted); }
+  .nlx-gauge__detail { display: none; }
 
   /* ── Article cards ────────────────────────────────────────────────────── */
   .nlx-art { margin-bottom: 14px; }
@@ -302,6 +353,13 @@
   }
   .nlx-leading-row { display: flex; align-items: center; gap: 8px; }
   .nlx-leading-row input { width: 90px; }
+  /* Pickers abreast — wraps to fewer columns as the pane narrows */
+  .nlx-field-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 2px 14px;
+    align-items: start;
+  }
   .nlx-art__head-row .btn--sm { flex-shrink: 0; }
 
   /* Body editor (contenteditable) */
@@ -453,7 +511,10 @@
      stays correct. Floated figures are cleared by the body's ::after so
      measured block height always includes them. */
   .nlx-blk-art__fig { margin: 0 0 2.5mm; }
-  .nlx-blk-art__img { width: 100%; height: auto; display: block; border-radius: 1.5mm; }
+  .nlx-blk-art__img { width: 100%; height: auto; display: block; border-radius: 1.5mm;
+    /* Cap photo height so a tall portrait image cannot balloon an article
+       to page height (centre-crop until the crop tool arrives) */
+    max-height: 85mm; object-fit: cover; }
   .nlx-blk-art__cap { margin-top: 1.2mm; font-size: 7.5pt; font-style: italic; color: var(--text-muted); }
   .nlx-blk-art__fig--left  { float: left;  width: 45%; margin: 1mm 4.5mm 2mm 0; }
   .nlx-blk-art__fig--right { float: right; width: 45%; margin: 1mm 0 2mm 4.5mm; }
@@ -548,14 +609,27 @@
     { key: 'panel-red',  label: 'Soft red panel' },
     { key: 'accent-bar', label: 'Red accent bar' }
   ];
+  /* Article type and photo placement are SEPARATE controls — choose the
+     image, then where it sits. Legacy 'image-*' layout values from earlier
+     versions are normalised into imagePos on load. */
   var LAYOUTS = [
-    { key: 'text-only',   label: 'Text only',        enabled: true },
-    { key: 'hero',        label: 'Hero (lead item)', enabled: true },
-    { key: 'image-above', label: 'Image above',      enabled: true },
-    { key: 'image-left',  label: 'Image left',       enabled: true },
-    { key: 'image-right', label: 'Image right',      enabled: true }
+    { key: 'text-only', label: 'Standard' },
+    { key: 'hero',      label: 'Hero (lead item)' }
+  ];
+  var POSITIONS = [
+    { key: 'above', label: 'Above the text' },
+    { key: 'left',  label: 'Left of the text' },
+    { key: 'right', label: 'Right of the text' }
   ];
   var IMAGE_LAYOUTS = { 'image-above': 'above', 'image-left': 'left', 'image-right': 'right' };
+  function normaliseArticle(a) {
+    if (IMAGE_LAYOUTS[a.layout]) {
+      a.imagePos = a.imagePos || IMAGE_LAYOUTS[a.layout];
+      a.layout = 'text-only';
+    }
+    if (!a.imagePos) a.imagePos = 'above';
+    return a;
+  }
   var MAX_EDGE_PX = 1600;   /* long-edge cap before upload (handover §5) */
   var WIDTHS = [
     { key: 'full',       label: 'Full width', frac: 1 },
@@ -744,6 +818,7 @@
         if (!val) { NL.toast('That edition no longer exists.', 'error'); return null; }
         S.library = snaps[1].val() || {};
         S.ed = { id: id, meta: val.meta || {}, articles: val.articles || {} };
+        Object.keys(S.ed.articles).forEach(function (aid) { normaliseArticle(S.ed.articles[aid]); });
         return S.ed;
       });
   }
@@ -948,7 +1023,7 @@
   function addArticle() {
     var arts = sortedArticles();
     var order = arts.length ? (arts[arts.length - 1].order || 0) + 1 : 0;
-    var art = { order: order, layout: 'text-only', style: 'plain', columns: 1, width: 'full', leading: 0, headline: '', standfirst: '', body: '', imageId: null, imageCaption: '' };
+    var art = { order: order, layout: 'text-only', style: 'plain', columns: 1, width: 'full', leading: 0, imagePos: 'above', headline: '', standfirst: '', body: '', imageId: null, imageCaption: '' };
     return NL.ensureAuth().then(function () {
       var ref = db.ref(ROOT + '/editions/' + S.ed.id + '/articles').push();
       return ref.set(art).then(function () {
@@ -1026,8 +1101,8 @@
 
     /* Resolve the article image from the library cache — synchronous, so
        pagination measurement works before the image file has loaded. */
-    var pos = IMAGE_LAYOUTS[art.layout];
-    var rec = pos && art.imageId && S.library ? S.library[art.imageId] : null;
+    var pos = IMAGE_LAYOUTS[art.layout] || art.imagePos || 'above';
+    var rec = art.imageId && S.library ? S.library[art.imageId] : null;
     var fig = null;
     if (rec && rec.downloadUrl) {
       fig = el('div', 'nlx-blk-art__fig' + (pos !== 'above' ? ' nlx-blk-art__fig--' + pos : ''));
@@ -1120,6 +1195,7 @@
     var used = 0;
     var current = null;
     var overflowArticles = [];
+    var movedOffFirst = null;
 
     var cap = 0;                 /* capacity of the current sheet */
     var fullCap = contentH;      /* capacity of a bannerless sheet */
@@ -1152,7 +1228,12 @@
         need = h;
       }
       if (used === 0 && need > cap && need <= fullCap) {
-        /* Doesn't fit the shorter banner page but fits a full one */
+        /* Doesn't fit the shorter banner page but fits a full one. Record
+           it — leaving page 1 with only the banner looks broken unless the
+           gauge explains why. */
+        if (sheets.length === 1 && !movedOffFirst && u.arts.length) {
+          movedOffFirst = u.arts[0].headline || 'Untitled article';
+        }
         newSheet();
       }
       if (need > fullCap && u.arts.length) {
@@ -1172,7 +1253,8 @@
       sheets: sheets,
       pages: sheets.length,
       lastPageFill: Math.min(1, used / cap),
-      overflowArticles: overflowArticles
+      overflowArticles: overflowArticles,
+      movedOffFirst: movedOffFirst
     };
   }
 
@@ -1211,7 +1293,16 @@
     var fullH = scale.scrollHeight;
     frame.style.height = Math.ceil(fullH * s + padY) + 'px';
   }
-  window.addEventListener('resize', function () { applyPreviewScale(); });
+  /* Desktop app layout — the shell fills the viewport below the bar so the
+     editor and preview scroll independently and the page itself does not */
+  function sizeShell() {
+    var shell = document.getElementById('nlxShell');
+    if (!shell) return;
+    if (window.innerWidth <= 1100) { shell.style.removeProperty('--nlx-shell-h'); return; }
+    var top = shell.getBoundingClientRect().top + (window.scrollY || 0);
+    shell.style.setProperty('--nlx-shell-h', Math.max(320, window.innerHeight - top - 12) + 'px');
+  }
+  window.addEventListener('resize', function () { sizeShell(); applyPreviewScale(); });
   /* Re-measure once the real Carbona Slanted cuts arrive — pagination
      measured against a fallback face would otherwise be slightly off */
   if (document.fonts && document.fonts.addEventListener) {
@@ -1221,7 +1312,7 @@
   function updateGauge(doc) {
     var g = document.getElementById('nlxGauge');
     if (!g) return;
-    var over = doc.pages > CONFIG.pageLimit || doc.overflowArticles.length > 0;
+    var over = doc.pages > CONFIG.pageLimit || doc.overflowArticles.length > 0 || !!doc.movedOffFirst;
     g.className = 'nlx-gauge' + (over ? ' nlx-gauge--warn' : '');
     var pagesWrap = g.querySelector('.nlx-gauge__pages');
     pagesWrap.innerHTML = '';
@@ -1240,6 +1331,11 @@
       headline.textContent = 'An article is too long for a single page';
       detail.textContent = '“' + doc.overflowArticles.join('”, “') +
         '” will be cut off in the PDF – shorten it before exporting.';
+    } else if (doc.movedOffFirst) {
+      headline.textContent = 'Page 1 is empty below the banner';
+      detail.textContent = '“' + doc.movedOffFirst +
+        '” is too tall to fit beneath the banner, so it has moved to page 2. ' +
+        'Shorten it, or put a shorter article first.';
     } else if (doc.pages > CONFIG.pageLimit) {
       headline.textContent = doc.pages + ' pages – the newsletter has spilled past page ' + CONFIG.pageLimit;
       detail.textContent = 'About ' + Math.round(doc.lastPageFill * 100) +
@@ -1252,6 +1348,15 @@
       headline.textContent = doc.pages + ' page' + (doc.pages === 1 ? '' : 's') + ' – room to spare';
       detail.textContent = 'Page ' + doc.pages + ' is ' + Math.round(doc.lastPageFill * 100) + '% full.';
     }
+    /* Compact bar: full detail lives in the warning strip (warn states
+       only) and as a hover title the rest of the time */
+    g.title = detail.textContent;
+    var strip = document.getElementById('nlxWarnStrip');
+    if (strip) {
+      strip.textContent = detail.textContent;
+      strip.style.display = over ? 'block' : 'none';
+    }
+    sizeShell();
   }
 
   /* ── Export (Path A — browser print) ──────────────────────────────────── */
@@ -1324,6 +1429,7 @@
   function renderList() {
     S.ed = null;
     _pending = {};
+    document.body.classList.remove('nlx-editing');
     main.innerHTML = '';
 
     var head = el('div', 'page-header');
@@ -1427,31 +1533,12 @@
     main.innerHTML = '';
     var meta = S.ed.meta;
 
-    /* Header */
-    var head = el('div', 'page-header');
-    var titles = el('div', 'page-header__titles');
-    titles.appendChild(el('h1', 'page-header__title',
+    /* Compact bar: title + gauge + save + actions in one row */
+    document.body.classList.add('nlx-editing');
+    var head = el('div', 'nlx-bar');
+    head.appendChild(el('div', 'nlx-bar__title',
       (meta.title || CONFIG.defaultTitle) + (meta.subtitle ? ' – ' + meta.subtitle : '')));
-    head.appendChild(titles);
-    var actions = el('div', 'page-header__actions');
-    _saveEl = el('span', 'nlx-save', 'All changes saved');
-    actions.appendChild(_saveEl);
-    var back = el('button', 'btn btn--ghost', 'All editions');
-    back.type = 'button';
-    back.addEventListener('click', function () { flushSaves(); gotoList(); });
-    actions.appendChild(back);
-    var tips = el('button', 'btn btn--ghost', 'Print tips');
-    tips.type = 'button';
-    tips.addEventListener('click', function () { showPreflight(false); });
-    actions.appendChild(tips);
-    var exp = el('button', 'btn btn--primary', 'Export PDF');
-    exp.type = 'button';
-    exp.addEventListener('click', exportPdf);
-    actions.appendChild(exp);
-    head.appendChild(actions);
-    main.appendChild(head);
 
-    /* Fill gauge — persistent, sticky */
     var gauge = el('div', 'nlx-gauge');
     gauge.id = 'nlxGauge';
     gauge.appendChild(el('div', 'nlx-gauge__pages'));
@@ -1459,7 +1546,31 @@
     gtext.appendChild(el('div', 'nlx-gauge__headline', 'Measuring…'));
     gtext.appendChild(el('div', 'nlx-gauge__detail', ''));
     gauge.appendChild(gtext);
-    main.appendChild(gauge);
+    head.appendChild(gauge);
+
+    var actions = el('div', 'nlx-bar__actions');
+    _saveEl = el('span', 'nlx-save', 'All changes saved');
+    actions.appendChild(_saveEl);
+    var back = el('button', 'btn btn--ghost btn--sm', 'All editions');
+    back.type = 'button';
+    back.addEventListener('click', function () { flushSaves(); gotoList(); });
+    actions.appendChild(back);
+    var tips = el('button', 'btn btn--ghost btn--sm', 'Print tips');
+    tips.type = 'button';
+    tips.addEventListener('click', function () { showPreflight(false); });
+    actions.appendChild(tips);
+    var exp = el('button', 'btn btn--primary btn--sm', 'Export PDF');
+    exp.type = 'button';
+    exp.addEventListener('click', exportPdf);
+    actions.appendChild(exp);
+    head.appendChild(actions);
+    main.appendChild(head);
+
+    /* Warning strip — full gauge detail appears here only when something
+       needs attention; otherwise the bar stays one slim row */
+    var strip = el('div', 'nlx-warnstrip');
+    strip.id = 'nlxWarnStrip';
+    main.appendChild(strip);
 
     /* Two-pane shell */
     var shell = el('div', 'nlx-shell');
@@ -1540,6 +1651,7 @@
     frame.appendChild(scale);
     preview.appendChild(frame);
 
+    sizeShell();
     refreshPreview();
   }
 
@@ -1635,72 +1747,27 @@
 
     var body = el('div', 'form-panel__body');
 
-    /* Layout picker */
+    /* Pickers sit abreast in a grid. The photo is independent of the
+       article type — choose the image, then its placement, separately. */
+    var grid = el('div', 'nlx-field-grid');
+    body.appendChild(grid);
+
+    /* Type */
     var layoutSel = el('select');
     LAYOUTS.forEach(function (l) {
       var o = el('option', null, l.label);
       o.value = l.key;
-      if (!l.enabled) {
-        o.disabled = true;
-        o.title = 'Photo layouts arrive with the image library in a later version';
-      }
       if ((art.layout || 'text-only') === l.key) o.selected = true;
       layoutSel.appendChild(o);
     });
     layoutSel.addEventListener('change', function () {
       art.layout = layoutSel.value;
       queueSave('articles/' + id + '/layout', art.layout);
-      renderArticles(listWrap);   /* photo row appears/disappears with layout */
       schedulePreview();
     });
-    body.appendChild(fieldGroup('Layout', layoutSel));
+    grid.appendChild(fieldGroup('Type', layoutSel));
 
-    /* Photo row — only for image layouts */
-    if (IMAGE_LAYOUTS[art.layout]) {
-      var imgGroup = el('div', 'form-group');
-      imgGroup.appendChild(el('label', null, 'Photo'));
-      var imgRow = el('div', 'nlx-img-row');
-      var thumb = el('img', 'nlx-img-thumb');
-      var recNow = art.imageId && S.library ? S.library[art.imageId] : null;
-      if (recNow && recNow.downloadUrl) thumb.src = recNow.downloadUrl;
-      thumb.alt = '';
-      thumb.onerror = function () { this.onerror = null; this.removeAttribute('src'); };
-      imgRow.appendChild(thumb);
-      var choose = el('button', 'btn btn--ghost btn--sm', art.imageId ? 'Change photo' : 'Choose photo');
-      choose.type = 'button';
-      choose.addEventListener('click', function () {
-        openImagePicker(function (lid) {
-          art.imageId = lid;
-          queueSave('articles/' + id + '/imageId', lid);
-          renderArticles(listWrap);
-          schedulePreview();
-        });
-      });
-      imgRow.appendChild(choose);
-      if (art.imageId) {
-        var removeImg = el('button', 'btn btn--ghost btn--sm', 'Remove');
-        removeImg.type = 'button';
-        removeImg.addEventListener('click', function () {
-          art.imageId = null;
-          queueSave('articles/' + id + '/imageId', null);
-          renderArticles(listWrap);
-          schedulePreview();
-        });
-        imgRow.appendChild(removeImg);
-      }
-      imgGroup.appendChild(imgRow);
-      var capInput = textInput(art.imageCaption || '', function (v) {
-        art.imageCaption = v;
-        queueSave('articles/' + id + '/imageCaption', v);
-        schedulePreview();
-      });
-      capInput.placeholder = 'Optional caption';
-      capInput.style.marginTop = '8px';
-      imgGroup.appendChild(capInput);
-      body.appendChild(imgGroup);
-    }
-
-    /* Style picker — print-safe tints and accents */
+    /* Style — print-safe tints and accents */
     var styleSel = el('select');
     STYLES.forEach(function (s) {
       var o = el('option', null, s.label);
@@ -1713,9 +1780,9 @@
       queueSave('articles/' + id + '/style', art.style);
       schedulePreview();
     });
-    body.appendChild(fieldGroup('Style', styleSel));
+    grid.appendChild(fieldGroup('Style', styleSel));
 
-    /* Width picker — fractional widths pack side by side in order */
+    /* Width — fractional widths pack side by side in order */
     var widthSel = el('select');
     WIDTHS.forEach(function (w) {
       var o = el('option', null, w.label);
@@ -1728,9 +1795,9 @@
       queueSave('articles/' + id + '/width', art.width);
       schedulePreview();
     });
-    body.appendChild(fieldGroup('Width', widthSel));
+    grid.appendChild(fieldGroup('Width', widthSel));
 
-    /* Columns picker */
+    /* Columns */
     var colsSel = el('select');
     [{ v: 1, label: 'Single column' }, { v: 2, label: 'Two columns' }].forEach(function (c) {
       var o = el('option', null, c.label);
@@ -1743,7 +1810,24 @@
       queueSave('articles/' + id + '/columns', art.columns);
       schedulePreview();
     });
-    body.appendChild(fieldGroup('Columns', colsSel));
+    grid.appendChild(fieldGroup('Columns', colsSel));
+
+    /* Photo position — enabled once a photo is chosen */
+    var posSel = el('select');
+    POSITIONS.forEach(function (p) {
+      var o = el('option', null, p.label);
+      o.value = p.key;
+      if ((art.imagePos || 'above') === p.key) o.selected = true;
+      posSel.appendChild(o);
+    });
+    posSel.disabled = !art.imageId;
+    if (!art.imageId) posSel.title = 'Choose a photo first';
+    posSel.addEventListener('change', function () {
+      art.imagePos = posSel.value;
+      queueSave('articles/' + id + '/imagePos', art.imagePos);
+      schedulePreview();
+    });
+    grid.appendChild(fieldGroup('Photo position', posSel));
 
     /* Line spacing nudge — ±0.1 steps off the 1.5 base, with reset. For
        visually balancing neighbouring articles that are nearly level. */
@@ -1770,8 +1854,52 @@
     leadReset.addEventListener('click', function () { setLeading(0); });
     leadRow.appendChild(leadReset);
     leadGroup.appendChild(leadRow);
-    leadGroup.appendChild(el('div', 'form-hint', '0 is normal. Nudge by 0.1 to level up columns that almost match.'));
-    body.appendChild(leadGroup);
+    leadGroup.appendChild(el('div', 'form-hint', '0 is normal. Nudge by 0.1 to level up columns.'));
+    grid.appendChild(leadGroup);
+
+    /* Photo — always available, independent of type */
+    var imgGroup = el('div', 'form-group');
+    imgGroup.appendChild(el('label', null, 'Photo'));
+    var imgRow = el('div', 'nlx-img-row');
+    var thumb = el('img', 'nlx-img-thumb');
+    var recNow = art.imageId && S.library ? S.library[art.imageId] : null;
+    if (recNow && recNow.downloadUrl) thumb.src = recNow.downloadUrl;
+    thumb.alt = '';
+    thumb.onerror = function () { this.onerror = null; this.removeAttribute('src'); };
+    imgRow.appendChild(thumb);
+    var choose = el('button', 'btn btn--ghost btn--sm', art.imageId ? 'Change photo' : 'Choose photo');
+    choose.type = 'button';
+    choose.addEventListener('click', function () {
+      openImagePicker(function (lid) {
+        art.imageId = lid;
+        queueSave('articles/' + id + '/imageId', lid);
+        renderArticles(listWrap);
+        schedulePreview();
+      });
+    });
+    imgRow.appendChild(choose);
+    if (art.imageId) {
+      var removeImg = el('button', 'btn btn--ghost btn--sm', 'Remove');
+      removeImg.type = 'button';
+      removeImg.addEventListener('click', function () {
+        art.imageId = null;
+        queueSave('articles/' + id + '/imageId', null);
+        renderArticles(listWrap);
+        schedulePreview();
+      });
+      imgRow.appendChild(removeImg);
+    }
+    var capInput = textInput(art.imageCaption || '', function (v) {
+      art.imageCaption = v;
+      queueSave('articles/' + id + '/imageCaption', v);
+      schedulePreview();
+    });
+    capInput.placeholder = 'Optional caption';
+    capInput.style.flex = '1';
+    capInput.style.minWidth = '140px';
+    imgRow.appendChild(capInput);
+    imgGroup.appendChild(imgRow);
+    body.appendChild(imgGroup);
 
     /* Headline */
     var headlineInput = textInput(art.headline || '', function (v) {
