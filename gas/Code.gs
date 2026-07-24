@@ -109,7 +109,7 @@
  *   - Programme Packs Drive-backed asset library (ProgrammePacks.gs)
  *
  * Script Properties required:
- *   FIREBASE_CONTINUE_URL          — Login page URL e.g. https://thenationalleague.github.io/tools/
+ *   FIREBASE_CONTINUE_URL          — Login page URL e.g. https://nl.tools/
  *   SENDER_ALIAS                   — From address e.g. media@thenationalleague.org.uk
  *   RTDB_URL                       — Firebase RTDB URL e.g. https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app
  *   RTDB_SECRET                    — Firebase RTDB legacy secret

@@ -15,7 +15,7 @@
    TRIGGERS:
      - Manual:       run fixtureSyncRun() from GAS editor
      - Time-driven:  4x daily (07:00, 13:00, 18:00, 22:00 BST)
-     - HTTP (later): admin button on /tools/attendance/
+     - HTTP (later): admin button on /attendance/
 
    CHANGELOG
    ---------

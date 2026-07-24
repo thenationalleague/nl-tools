@@ -10,7 +10,7 @@ demo continues.
 |---|---|
 | **Environment** | Sandbox — every URL carries `?env=test` (amber TEST MODE badge). Identical code to live, disposable data. Nothing in this session touches live data or credentials. |
 | **Duration** | ~35 minutes |
-| **R** — Richard | NL master. Laptop, screen-sharing. Console: `https://thenationalleague.github.io/tools/uw-promo/admin/?env=test` |
+| **R** — Richard | NL master. Laptop, screen-sharing. Console: `https://nl.tools/uw-promo/admin/?env=test` |
 | **U** — UW rep | Partner dashboard. Own laptop, screen-shares in Phases B and E. Link/passcode arrive via meeting chat in B1. |
 | **N** — Nick | Club staff, playing **two different clubs**. Needs a **phone** (Club 1) **and** a laptop or second browser tab (Club 2). Credentials arrive via meeting chat in A4. |
 

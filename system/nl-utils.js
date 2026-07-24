@@ -1,6 +1,6 @@
 /* =========================================================================
    NL Tools — Shared utilities
-   File: /tools/system/nl-utils.js
+   File: /system/nl-utils.js
    Version: v1.25 (24/07/2026)
 
    Changelog
@@ -220,7 +220,7 @@
 
    v1.2 (26/04/2026)
      - Added NL.icon(name, size) helper — returns SVG element referencing
-       /tools/assets/icons/sprites.svg. Usage: NL.icon('add') or
+       /assets/icons/sprites.svg. Usage: NL.icon('add') or
        NL.icon('download', 'sm'). Sizes: sm/md/lg.
 
    v1.1 (17/04/2026)
@@ -1129,7 +1129,7 @@
     svg.setAttribute('class', cls);
     svg.setAttribute('aria-hidden', 'true');
     var use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
-    use.setAttribute('href', '/tools/assets/icons/sprites.svg#icon-' + name);
+    use.setAttribute('href', '/assets/icons/sprites.svg#icon-' + name);
     svg.appendChild(use);
     return svg;
   };
@@ -1294,7 +1294,7 @@
   var _clubsMeta    = null;
   var _clubsCb      = null;  /* per-session cache-buster, stamped once */
   var _optaIndex    = null;  /* lazy optaID → club map, built by byOpta */
-  var CLUBS_URL     = '/tools/assets/data/clubs-meta.json';
+  var CLUBS_URL     = '/assets/data/clubs-meta.json';
   var CREST_BASE    = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
   var THUMB_BASE    = CREST_BASE + 'thumbs/';
   var MEDIUM_BASE   = CREST_BASE + 'medium/';

@@ -1,6 +1,6 @@
 /*
  * auth-guard.js — NL Tools v2
- * File: /tools/system/auth-guard.js
+ * File: /system/auth-guard.js
  * Version: v6.2 (14/07/2026)
  *
  * v6.2: Audience gate — a tool whose registry record carries
@@ -46,7 +46,7 @@
  *        Fixes silent-redirect-to-portal for newly-deployed tools whose
  *        users don't yet have explicit per-user grants.
  *
- * v4.0: Moved to /tools/system/. Integrates with NL namespace:
+ * v4.0: Moved to /system/. Integrates with NL namespace:
  *   - Sets window.NL.session after auth
  *   - Calls window.NL.renderTopbar(session) for automatic topbar
  *   - Tool-requests path updated to /admin/tool-requests
@@ -85,7 +85,7 @@
  * ── Usage (two lines on every tool page) ────────────────────────────────────
  *
  *   <script>var NL_TOOL_KEY = 'ops-vacancies';</script>
- *   <script src="/tools/auth-guard.js"></script>
+ *   <script src="/auth-guard.js"></script>
  *
  *   Wrap page content in: <div id="pageWrap" style="display:none">
  *   Guard shows it when access confirmed.
@@ -111,8 +111,8 @@
   /* ── Constants ─────────────────────────────────────────────────────────── */
   var SESSION_KEY  = 'nl_session';
   var SESSION_TTL  = 4 * 60 * 60 * 1000; /* 4 hours in ms */
-  var PORTAL_URL   = '/tools/portal/';
-  var LOGIN_URL    = '/tools/';
+  var PORTAL_URL   = '/portal/';
+  var LOGIN_URL    = '/';
   var ROSE_URL     = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose%20white.png';
 
   /* ── Session helpers -- defined first so portal can always access them ─── */

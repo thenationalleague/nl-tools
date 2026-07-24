@@ -8,14 +8,14 @@
   var STORAGE_KEY = "nl-table-gfx-v1";
 
   var DIVISION_LOGO = {
-    National: "/tools/assets/divisions/National.png",
-    North:    "/tools/assets/divisions/North.png",
-    South:    "/tools/assets/divisions/South.png"
+    National: "/assets/divisions/National.png",
+    North:    "/assets/divisions/North.png",
+    South:    "/assets/divisions/South.png"
   };
-  var LOGO_FALLBACK = "/tools/assets/divisions/The%20National%20League.png";
-  var SPONSOR_URL = "/tools/assets/partners/TIC%20Health.png";
+  var LOGO_FALLBACK = "/assets/divisions/The%20National%20League.png";
+  var SPONSOR_URL = "/assets/partners/TIC%20Health.png";
 
-  var ROSE_WHITE = "/tools/assets/crests/National%20League%20rose%20white.png";
+  var ROSE_WHITE = "/assets/crests/National%20League%20rose%20white.png";
 
   var DIV_EYEBROW = {
     National: "Enterprise National League",
