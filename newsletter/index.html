@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Newsletter
-  Version: v1.5 (24/07/2026)
+  Version: v1.6 (24/07/2026)
   File: /tools/newsletter/index.html
 
   Monthly staff newsletter builder. Editors write a title, month and a handful
@@ -11,6 +11,26 @@
   paginated by the same code (renderDocument), so they cannot drift.
 
   Technical changelog:
+    v1.6 (24/07/2026)
+      - Non-destructive crop tool. Tap the photo thumb (or Crop) → modal
+        shows the WHOLE image with cropped-out regions dimmed (MS Word
+        style), 8 drag handles + move, Reset. Crop stored per article as
+        fractions {x,y,w,h} of the original; the library image is never
+        modified, so re-opening shows dimmed areas and they can be
+        reinstated. Rendered via an aspect-ratio wrapper with an
+        oversized/offset img (percent maths), so pagination measurement
+        stays synchronous. Replaces the v1.5 85mm object-fit stopgap.
+      - Image sizing follows the crop: 'above' spans article width (height
+        from crop aspect, 85mm cap); left/right figures derive their column
+        width from the crop aspect at 45mm height (60% cap), so the text
+        column adapts to the crop shape.
+      - Headline now optional: an empty headline renders nothing (body
+        reclaims the space) instead of "Untitled article". Editor cards
+        keep the placeholder label.
+      - Choosing a different photo resets the crop.
+      - defaultParagraphSeparator forced to 'p': Enter = paragraph break
+        (visible spacing in the editor, matching the rendered document),
+        Shift+Enter = <br> line break.
     v1.5 (24/07/2026)
       - Photo decoupled from article type: `imagePos` ('above'|'left'|
         'right') is its own field, layout collapses to 'text-only'|'hero',
@@ -161,6 +181,16 @@
     var NL_TOOL_KEY = 'staff-newsletter';
 
     window.NL_CHANGELOG = [
+      {
+        date: '24 July 2026',
+        version: 'v1.6',
+        items: [
+          'Photo cropping has arrived — tap a photo to crop it with drag handles, Word-style. Cropped-out areas stay dimmed and can be brought back any time; the original is never touched.',
+          'Photos now size themselves from their crop — crop one tall and narrow and the text column widens to suit.',
+          'Articles can run without a headline — leave it blank and the text simply starts higher.',
+          'In the writing box, Enter now starts a new paragraph and Shift+Enter makes a single line break — matching how the page itself renders.'
+        ]
+      },
       {
         date: '24 July 2026',
         version: 'v1.5',
@@ -511,14 +541,28 @@
      stays correct. Floated figures are cleared by the body's ::after so
      measured block height always includes them. */
   .nlx-blk-art__fig { margin: 0 0 2.5mm; }
-  .nlx-blk-art__img { width: 100%; height: auto; display: block; border-radius: 1.5mm;
-    /* Cap photo height so a tall portrait image cannot balloon an article
-       to page height (centre-crop until the crop tool arrives) */
-    max-height: 85mm; object-fit: cover; }
+  /* Cropped rendering: the wrapper carries the crop's aspect ratio and
+     clips; the img inside is oversized/offset in % so exactly the crop
+     window shows. Sizing is set inline per figure (width follows the
+     crop aspect so the text column adapts). */
+  .nlx-blk-art__imgwrap { position: relative; overflow: hidden; border-radius: 1.5mm; margin: 0 auto; }
+  .nlx-blk-art__imgwrap .nlx-blk-art__img { position: absolute; height: auto; display: block; }
   .nlx-blk-art__cap { margin-top: 1.2mm; font-size: 7.5pt; font-style: italic; color: var(--text-muted); }
   .nlx-blk-art__fig--left  { float: left;  width: 45%; margin: 1mm 4.5mm 2mm 0; }
   .nlx-blk-art__fig--right { float: right; width: 45%; margin: 1mm 0 2mm 4.5mm; }
   .nlx-blk-art__body::after { content: ''; display: block; clear: both; }
+
+  /* ── Crop tool (editor UI) ───────────────────────────────────────────── */
+  .nlx-crop-wrap { text-align: center; }
+  .nlx-crop-stage { position: relative; display: inline-block; user-select: none; touch-action: none; }
+  .nlx-crop-stage > img { display: block; max-width: 100%; max-height: 58vh; width: auto; height: auto; pointer-events: none; }
+  .nlx-crop-veil { position: absolute; background: var(--navy); opacity: 0.5; pointer-events: none; }
+  .nlx-crop-rect { position: absolute; border: 2px solid var(--white); outline: 1px solid var(--navy); cursor: move; box-sizing: border-box; }
+  .nlx-crop-handle {
+    position: absolute; width: 14px; height: 14px; box-sizing: border-box;
+    background: var(--white); border: 2px solid var(--navy); border-radius: 50%;
+    transform: translate(-50%, -50%);
+  }
   .nlx-blk-art__head {
     margin: 0 0 1.6mm; font-size: 13.5pt; line-height: 1.15; color: var(--navy);
     font-family: 'carbona-slanted', var(--font); font-weight: 800;
@@ -1020,6 +1064,119 @@
     });
   }
 
+  /* ── Crop tool — non-destructive, per-article ─────────────────────────
+     Shows the WHOLE image with the cropped-out regions dimmed; drag the
+     frame to move it, the handles to resize. The crop is stored as
+     fractions ({x,y,w,h} of the original) on the article — the library
+     original is never modified, so re-opening shows the dimmed areas and
+     they can be brought back. */
+  function openCropTool(art, id, onApplied) {
+    var rec = art.imageId && S.library ? S.library[art.imageId] : null;
+    if (!rec || !rec.downloadUrl) return;
+    var c = art.crop ? { x: art.crop.x, y: art.crop.y, w: art.crop.w, h: art.crop.h }
+                     : { x: 0, y: 0, w: 1, h: 1 };
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+    var MIN = 0.08;
+
+    var outer = el('div', 'nlx-crop-wrap');
+    var stage = el('div', 'nlx-crop-stage');
+    var img = el('img');
+    img.src = rec.downloadUrl;
+    img.alt = '';
+    stage.appendChild(img);
+    var veils = {};
+    ['t', 'b', 'l', 'r'].forEach(function (k) {
+      veils[k] = el('div', 'nlx-crop-veil');
+      stage.appendChild(veils[k]);
+    });
+    var rect = el('div', 'nlx-crop-rect');
+    stage.appendChild(rect);
+    var HANDLE_POS = {
+      nw: ['0%', '0%'], n: ['50%', '0%'], ne: ['100%', '0%'], e: ['100%', '50%'],
+      se: ['100%', '100%'], s: ['50%', '100%'], sw: ['0%', '100%'], w: ['0%', '50%']
+    };
+    Object.keys(HANDLE_POS).forEach(function (d) {
+      var h = el('div', 'nlx-crop-handle');
+      h.dataset.dir = d;
+      h.style.left = HANDLE_POS[d][0];
+      h.style.top = HANDLE_POS[d][1];
+      h.style.cursor = d + '-resize';
+      rect.appendChild(h);
+    });
+    outer.appendChild(stage);
+    outer.appendChild(el('div', 'form-hint',
+      'Drag the frame to move it, or the handles to resize. Dimmed areas are cropped out – nothing is deleted, re-open to bring them back.'));
+
+    function layout() {
+      rect.style.left = (c.x * 100) + '%';
+      rect.style.top = (c.y * 100) + '%';
+      rect.style.width = (c.w * 100) + '%';
+      rect.style.height = (c.h * 100) + '%';
+      veils.t.style.cssText += ';left:0;top:0;width:100%;height:' + (c.y * 100) + '%';
+      veils.b.style.cssText += ';left:0;top:' + ((c.y + c.h) * 100) + '%;width:100%;height:' + ((1 - c.y - c.h) * 100) + '%';
+      veils.l.style.cssText += ';left:0;top:' + (c.y * 100) + '%;width:' + (c.x * 100) + '%;height:' + (c.h * 100) + '%';
+      veils.r.style.cssText += ';left:' + ((c.x + c.w) * 100) + '%;top:' + (c.y * 100) + '%;width:' + ((1 - c.x - c.w) * 100) + '%;height:' + (c.h * 100) + '%';
+    }
+    layout();
+
+    var drag = null;
+    function onDown(e) {
+      var dir = e.target && e.target.dataset ? e.target.dataset.dir : null;
+      if (!dir && e.target !== rect) return;
+      e.preventDefault();
+      drag = { mode: dir || 'move', sx: e.clientX, sy: e.clientY, start: { x: c.x, y: c.y, w: c.w, h: c.h } };
+    }
+    function onMove(e) {
+      if (!drag) return;
+      var b = stage.getBoundingClientRect();
+      if (!b.width || !b.height) return;
+      var dx = (e.clientX - drag.sx) / b.width;
+      var dy = (e.clientY - drag.sy) / b.height;
+      var s = drag.start;
+      var x = s.x, y = s.y, w = s.w, h = s.h;
+      if (drag.mode === 'move') {
+        x = clamp(s.x + dx, 0, 1 - s.w);
+        y = clamp(s.y + dy, 0, 1 - s.h);
+      } else {
+        if (drag.mode.indexOf('w') > -1) { var nx = clamp(s.x + dx, 0, s.x + s.w - MIN); w = s.w - (nx - s.x); x = nx; }
+        if (drag.mode.indexOf('e') > -1) { w = clamp(s.w + dx, MIN, 1 - s.x); }
+        if (drag.mode.indexOf('n') > -1) { var ny = clamp(s.y + dy, 0, s.y + s.h - MIN); h = s.h - (ny - s.y); y = ny; }
+        if (drag.mode.indexOf('s') > -1) { h = clamp(s.h + dy, MIN, 1 - s.y); }
+      }
+      c = { x: x, y: y, w: w, h: h };
+      layout();
+    }
+    function onUp() { drag = null; }
+    stage.addEventListener('pointerdown', onDown);
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    function unhook() {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+    }
+
+    function r3(v) { return Math.round(v * 1000) / 1000; }
+    NL.modal({
+      title: 'Crop photo',
+      width: 'wide',
+      body: outer,
+      onClose: unhook,
+      buttons: [
+        { label: 'Reset crop', className: 'btn--ghost',
+          onClick: function () { c = { x: 0, y: 0, w: 1, h: 1 }; layout(); } },
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (cm) { cm.close(); } },
+        { label: 'Apply', className: 'btn--primary',
+          onClick: function (cm) {
+            var full = c.x < 0.005 && c.y < 0.005 && c.w > 0.995 && c.h > 0.995;
+            art.crop = full ? null : { x: r3(c.x), y: r3(c.y), w: r3(c.w), h: r3(c.h) };
+            queueSave('articles/' + id + '/crop', art.crop);
+            cm.close();
+            if (onApplied) onApplied();
+          } }
+      ]
+    });
+  }
+
   function addArticle() {
     var arts = sortedArticles();
     var order = arts.length ? (arts[arts.length - 1].order || 0) + 1 : 0;
@@ -1104,21 +1261,39 @@
     var pos = IMAGE_LAYOUTS[art.layout] || art.imagePos || 'above';
     var rec = art.imageId && S.library ? S.library[art.imageId] : null;
     var fig = null;
-    if (rec && rec.downloadUrl) {
+    if (rec && rec.downloadUrl && rec.width && rec.height) {
+      var c = (art.crop && art.crop.w > 0.05 && art.crop.h > 0.05)
+        ? art.crop : { x: 0, y: 0, w: 1, h: 1 };
+      var A = ((c.w * rec.width) / (c.h * rec.height)).toFixed(4);
       fig = el('div', 'nlx-blk-art__fig' + (pos !== 'above' ? ' nlx-blk-art__fig--' + pos : ''));
+      var wrap = el('div', 'nlx-blk-art__imgwrap');
+      wrap.style.aspectRatio = A;
+      if (pos === 'above') {
+        /* Full article width, height from the crop shape, capped at 85mm */
+        wrap.style.width = 'min(100%, calc(85mm * ' + A + '))';
+      } else {
+        /* Side placement: column width follows the crop aspect at a fixed
+           45mm visual height (capped), so the text column adapts */
+        fig.style.width = 'min(60%, calc(45mm * ' + A + '))';
+      }
       var im = el('img', 'nlx-blk-art__img');
       im.src = rec.downloadUrl;
-      if (rec.width) im.width = rec.width;
-      if (rec.height) im.height = rec.height;
       im.alt = '';
       im.onerror = function () { this.onerror = null; this.style.display = 'none'; };
-      fig.appendChild(im);
+      im.style.width = (100 / c.w).toFixed(3) + '%';
+      im.style.left = (-100 * c.x / c.w).toFixed(3) + '%';
+      im.style.top = (-100 * c.y / c.h).toFixed(3) + '%';
+      wrap.appendChild(im);
+      fig.appendChild(wrap);
       if ((art.imageCaption || '').trim()) fig.appendChild(el('div', 'nlx-blk-art__cap', art.imageCaption));
     }
 
     if (fig && pos === 'above') b.appendChild(fig);
-    b.appendChild(el('h2', 'nlx-blk-art__head', art.headline || 'Untitled article'));
-    if (isHero) b.appendChild(el('div', 'nlx-blk-art__rule'));
+    /* Headline is optional — with none, the body copy reclaims the space */
+    if ((art.headline || '').trim()) {
+      b.appendChild(el('h2', 'nlx-blk-art__head', art.headline));
+      if (isHero) b.appendChild(el('div', 'nlx-blk-art__rule'));
+    }
     if ((art.standfirst || '').trim()) b.appendChild(el('p', 'nlx-blk-art__stand', art.standfirst));
     var body = el('div', 'nlx-blk-art__body');
     body.innerHTML = sanitiseHtml(art.body);   /* stored sanitised; sanitise again on render */
@@ -1308,6 +1483,10 @@
   if (document.fonts && document.fonts.addEventListener) {
     document.fonts.addEventListener('loadingdone', function () { schedulePreview(); });
   }
+  /* Enter = paragraph break, Shift+Enter = line break. Without this,
+     contenteditable emits <div> blocks that LOOK like single line breaks
+     in the editor but render as spaced paragraphs in the document. */
+  try { document.execCommand('defaultParagraphSeparator', false, 'p'); } catch (e) {}
 
   function updateGauge(doc) {
     var g = document.getElementById('nlxGauge');
@@ -1872,18 +2051,34 @@
     choose.addEventListener('click', function () {
       openImagePicker(function (lid) {
         art.imageId = lid;
+        art.crop = null;                       /* new photo, fresh crop */
         queueSave('articles/' + id + '/imageId', lid);
+        queueSave('articles/' + id + '/crop', null);
         renderArticles(listWrap);
         schedulePreview();
       });
     });
     imgRow.appendChild(choose);
     if (art.imageId) {
+      /* Tap the photo (or the button) to crop — non-destructive */
+      thumb.style.cursor = 'pointer';
+      thumb.title = 'Crop photo';
+      function cropNow() {
+        openCropTool(art, id, function () { renderArticles(listWrap); schedulePreview(); });
+      }
+      thumb.addEventListener('click', cropNow);
+      var cropBtn = el('button', 'btn btn--ghost btn--sm', 'Crop');
+      cropBtn.type = 'button';
+      cropBtn.addEventListener('click', cropNow);
+      imgRow.appendChild(cropBtn);
+      if (art.crop) imgRow.appendChild(el('span', 'pill pill--info', 'Cropped'));
       var removeImg = el('button', 'btn btn--ghost btn--sm', 'Remove');
       removeImg.type = 'button';
       removeImg.addEventListener('click', function () {
         art.imageId = null;
+        art.crop = null;
         queueSave('articles/' + id + '/imageId', null);
+        queueSave('articles/' + id + '/crop', null);
         renderArticles(listWrap);
         schedulePreview();
       });
