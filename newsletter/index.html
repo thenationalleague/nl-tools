@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Newsletter
-  Version: v1.0 (24/07/2026)
+  Version: v1.1 (24/07/2026)
   File: /tools/newsletter/index.html
 
   Monthly staff newsletter builder. Editors write a title, month and a handful
@@ -11,6 +11,14 @@
   paginated by the same code (renderDocument), so they cannot drift.
 
   Technical changelog:
+    v1.1 (24/07/2026)
+      - Per-article presentation controls: `columns` (1|2 — CSS multicol on
+        the body, headline/standfirst stay full width) and `style`
+        ('plain'|'panel-blue'|'panel-grey'|'accent-bar'). Panels are light
+        tints with dark text only — deliberately print-safe when Chrome's
+        "Background graphics" is off (tint degrades to white, text stays
+        legible); the accent bar is a border so it always prints. Style keys
+        whitelisted at render so stored values can never inject classes.
     v1.0 (24/07/2026)
       - Initial build to handover spec (steps 1-5 + 7 of the build order).
       - RTDB data layer: editions as keyed records, articles as child nodes
@@ -76,6 +84,15 @@
     var NL_TOOL_KEY = 'staff-newsletter';
 
     window.NL_CHANGELOG = [
+      {
+        date: '24 July 2026',
+        version: 'v1.1',
+        items: [
+          'Each article can now flow its text in two columns for a denser, more newsletter-like page.',
+          'New per-article styles to set articles apart: a soft blue panel, a soft grey panel, or a red accent bar.',
+          'All styles are chosen to stay readable when printed, even if background colours are switched off.'
+        ]
+      },
       {
         date: '24 July 2026',
         version: 'v1.0',
@@ -245,6 +262,19 @@
   /* Article blocks */
   .nlx-blk-art { padding-top: 4.5mm; border-top: 0.3mm solid var(--border); }
   .nlx-blk-art--hero { border-top: none; padding-top: 0; }
+
+  /* Per-article styles. Panels are LIGHT tints with dark text only — if
+     "Background graphics" is off in the print dialog, the tint degrades to
+     white and the text stays legible. The accent bar is a border, so it
+     prints regardless. Never a dark fill with white text here. */
+  .nlx-blk-art--panel-blue,
+  .nlx-blk-art--panel-grey { border-top: none; border-radius: 2mm; padding: 4mm 5mm; }
+  .nlx-blk-art--panel-blue { background: var(--blue-light); }
+  .nlx-blk-art--panel-grey { background: var(--navy-50); }
+  .nlx-blk-art--accent-bar { border-top: none; padding-top: 1mm; border-left: 1.1mm solid var(--primary); padding-left: 4.5mm; }
+
+  /* Two-column body text — headline and standfirst stay full width */
+  .nlx-blk-art--cols2 .nlx-blk-art__body { column-count: 2; column-gap: 6mm; }
   .nlx-blk-art__head { margin: 0 0 1.6mm; font-size: 13.5pt; line-height: 1.15; color: var(--navy); font-variation-settings: 'wght' 800; }
   .nlx-blk-art--hero .nlx-blk-art__head { font-size: 19pt; }
   .nlx-blk-art--hero .nlx-blk-art__rule { width: 22mm; height: 0.9mm; background: var(--primary); border-radius: 0.5mm; margin: 0 0 2.5mm; }
@@ -314,6 +344,12 @@
   };
 
   var ROOT = 'app-data/staff-newsletter';
+  var STYLES = [
+    { key: 'plain',      label: 'Plain' },
+    { key: 'panel-blue', label: 'Soft blue panel' },
+    { key: 'panel-grey', label: 'Soft grey panel' },
+    { key: 'accent-bar', label: 'Red accent bar' }
+  ];
   var LAYOUTS = [
     { key: 'text-only',   label: 'Text only',                 enabled: true  },
     { key: 'hero',        label: 'Hero (lead item)',          enabled: true  },
@@ -497,7 +533,7 @@
   function addArticle() {
     var arts = sortedArticles();
     var order = arts.length ? (arts[arts.length - 1].order || 0) + 1 : 0;
-    var art = { order: order, layout: 'text-only', headline: '', standfirst: '', body: '', imageId: null, imageCaption: '' };
+    var art = { order: order, layout: 'text-only', style: 'plain', columns: 1, headline: '', standfirst: '', body: '', imageId: null, imageCaption: '' };
     return NL.ensureAuth().then(function () {
       var ref = db.ref(ROOT + '/editions/' + S.ed.id + '/articles').push();
       return ref.set(art).then(function () {
@@ -549,7 +585,12 @@
 
   function buildArticleBlock(art) {
     var isHero = art.layout === 'hero';
-    var b = el('div', 'nlx-blk-art' + (isHero ? ' nlx-blk-art--hero' : ''));
+    var cls = 'nlx-blk-art' + (isHero ? ' nlx-blk-art--hero' : '');
+    /* Style keys are whitelisted — stored values can never inject classes */
+    var styleOk = STYLES.some(function (s) { return s.key === art.style; });
+    if (styleOk && art.style !== 'plain') cls += ' nlx-blk-art--' + art.style;
+    if (art.columns === 2) cls += ' nlx-blk-art--cols2';
+    var b = el('div', cls);
     b.appendChild(el('h2', 'nlx-blk-art__head', art.headline || 'Untitled article'));
     if (isHero) b.appendChild(el('div', 'nlx-blk-art__rule'));
     if ((art.standfirst || '').trim()) b.appendChild(el('p', 'nlx-blk-art__stand', art.standfirst));
@@ -1095,6 +1136,36 @@
       schedulePreview();
     });
     body.appendChild(fieldGroup('Layout', layoutSel));
+
+    /* Style picker — print-safe tints and accents */
+    var styleSel = el('select');
+    STYLES.forEach(function (s) {
+      var o = el('option', null, s.label);
+      o.value = s.key;
+      if ((art.style || 'plain') === s.key) o.selected = true;
+      styleSel.appendChild(o);
+    });
+    styleSel.addEventListener('change', function () {
+      art.style = styleSel.value;
+      queueSave('articles/' + id + '/style', art.style);
+      schedulePreview();
+    });
+    body.appendChild(fieldGroup('Style', styleSel));
+
+    /* Columns picker */
+    var colsSel = el('select');
+    [{ v: 1, label: 'Single column' }, { v: 2, label: 'Two columns' }].forEach(function (c) {
+      var o = el('option', null, c.label);
+      o.value = String(c.v);
+      if ((art.columns || 1) === c.v) o.selected = true;
+      colsSel.appendChild(o);
+    });
+    colsSel.addEventListener('change', function () {
+      art.columns = parseInt(colsSel.value, 10) || 1;
+      queueSave('articles/' + id + '/columns', art.columns);
+      schedulePreview();
+    });
+    body.appendChild(fieldGroup('Columns', colsSel));
 
     /* Headline */
     var headlineInput = textInput(art.headline || '', function (v) {
