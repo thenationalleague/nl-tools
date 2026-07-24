@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Newsletter
-  Version: v1.9 (24/07/2026)
+  Version: v1.10 (24/07/2026)
   File: /tools/newsletter/index.html
 
   Monthly staff newsletter builder. Editors write a title, month and a handful
@@ -11,6 +11,13 @@
   paginated by the same code (renderDocument), so they cannot drift.
 
   Technical changelog:
+    v1.10 (24/07/2026)
+      - Editor no longer jumps to the top on add/delete/reorder/photo
+        changes: renderArticles rebuilds empty the container, momentarily
+        collapsing the pane's scroll height (browser clamps scrollTop to
+        0). Scroll position is now captured and restored across every
+        rebuild. Add article additionally scrolls the new card into view
+        and focuses its headline.
     v1.9 (24/07/2026)
       - Image sizing rebuilt to the intended model: 'above' is ALWAYS the
         full article width (no 85mm cap, no centring — height comes purely
@@ -212,6 +219,14 @@
     var NL_TOOL_KEY = 'staff-newsletter';
 
     window.NL_CHANGELOG = [
+      {
+        date: '24 July 2026',
+        version: 'v1.10',
+        items: [
+          'The editor no longer jumps back to the top when you add, delete, reorder or change a photo — it stays where you were.',
+          '"Add article" now takes you straight to the new article with the cursor ready in the headline.'
+        ]
+      },
       {
         date: '24 July 2026',
         version: 'v1.9',
@@ -1856,7 +1871,18 @@
     addBtn.type = 'button';
     addBtn.addEventListener('click', function () {
       addArticle()
-        .then(function () { renderArticles(artsWrap); schedulePreview(); })
+        .then(function () {
+          renderArticles(artsWrap);
+          schedulePreview();
+          /* Take the writer to the new article, cursor in the headline */
+          var cards = artsWrap.querySelectorAll('.nlx-art');
+          var last = cards[cards.length - 1];
+          if (last) {
+            last.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            var headInput = last.querySelector('input[placeholder="Headline"]');
+            if (headInput) headInput.focus();
+          }
+        })
         .catch(function (err) { NL.toast(err.message, 'error'); });
     });
     editor.appendChild(addBtn);
@@ -1923,18 +1949,28 @@
   }
 
   function renderArticles(wrap) {
+    /* Rebuilding empties the container, which momentarily collapses the
+       pane's scroll height and clamps the scroll to the top — capture and
+       restore it so add/delete/reorder/photo changes don't jump the view */
+    var pane = wrap.closest ? wrap.closest('.nlx-pane--editor') : null;
+    var st = pane ? pane.scrollTop : (window.scrollY || window.pageYOffset || 0);
     wrap.innerHTML = '';
     var arts = sortedArticles();
+    function restoreScroll() {
+      if (pane) pane.scrollTop = st; else window.scrollTo(0, st);
+    }
     if (!arts.length) {
       var empty = el('div', 'empty-state');
       empty.appendChild(el('div', 'empty-state__title', 'No articles yet'));
       empty.appendChild(el('div', 'empty-state__text', 'Add the first article – four to six is about right for two pages.'));
       wrap.appendChild(empty);
+      restoreScroll();
       return;
     }
     arts.forEach(function (art, idx) {
       wrap.appendChild(buildArticleCard(art, idx, arts.length, wrap));
     });
+    restoreScroll();
   }
 
   function buildArticleCard(art, idx, total, listWrap) {
