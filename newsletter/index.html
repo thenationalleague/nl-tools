@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Newsletter
-  Version: v1.15 (24/07/2026)
+  Version: v1.16 (24/07/2026)
   File: /tools/newsletter/index.html
 
   Monthly staff newsletter builder. Editors write a title, month and a handful
@@ -11,6 +11,20 @@
   paginated by the same code (renderDocument), so they cannot drift.
 
   Technical changelog:
+    v1.16 (24/07/2026)
+      - Packing generalised from same-width masonry to column TRACKS: a
+        fractional run opens tracks across the page in order (third +
+        two-thirds etc.); once the width is spoken for, each next article
+        stacks into the shortest existing track of its own width. Fixes
+        mixed-width case where a second two-thirds article started a new
+        band under a taller one-third neighbour instead of slotting under
+        the first two-thirds. Subsumes and replaces the v1.14 special
+        case.
+      - Reorder follows the article: after ↑/↓ the editor smooth-scrolls to
+        the moved card (data-art-id lookup) with a brief blue flash.
+      - Preview→editor navigation: tapping an article in the preview
+        scrolls the editor to its card (delegated click on #nlxDocScale;
+        links in the preview no longer navigate).
     v1.15 (24/07/2026)
       - Page ceiling removed: CONFIG.pageLimit = 0 means no limit — the
         newsletter runs to as many pages as required, and the gauge simply
@@ -261,6 +275,15 @@
     var NL_TOOL_KEY = 'staff-newsletter';
 
     window.NL_CHANGELOG = [
+      {
+        date: '24 July 2026',
+        version: 'v1.16',
+        items: [
+          'Mixed-width layouts now pack properly too — e.g. with a one-third column beside a two-thirds column, the next two-thirds article slots underneath its matching column instead of starting a new band.',
+          'Moving an article up or down now takes you with it — the editor glides to where it landed.',
+          'Tap any article in the preview to jump straight to it in the editor.'
+        ]
+      },
       {
         date: '24 July 2026',
         version: 'v1.15',
@@ -526,6 +549,9 @@
 
   /* ── Article cards ────────────────────────────────────────────────────── */
   .nlx-art { margin-bottom: 14px; }
+  .nlx-art--flash { outline: 2px solid var(--blue); outline-offset: 2px; transition: outline-color 0.4s; }
+  /* Preview articles are tap targets — clicking one jumps the editor there */
+  #nlxDocScale .nlx-blk-art { cursor: pointer; }
   .nlx-art__head-row { display: flex; align-items: center; gap: 8px; width: 100%; }
   /* The form-panel head is navy — white text, not brand red/navy, or it
      disappears against the bar */
@@ -1401,6 +1427,7 @@
     if (styleOk && art.style !== 'plain') cls += ' nlx-blk-art--' + art.style;
     if (art.columns === 2) cls += ' nlx-blk-art--cols2';
     var b = el('div', cls);
+    b.setAttribute('data-art-id', art._id || '');
 
     /* Resolve the article image from the library cache — synchronous, so
        pagination measurement works before the image file has loaded. */
@@ -1546,56 +1573,58 @@
       if (n.parentNode) n.parentNode.removeChild(n);
     });
 
-    var idx = 0, row = null, rowSum = 0;
+    /* Column-TRACK packing (generalises the same-width masonry): a run of
+       fractional articles opens tracks across the page in order (e.g. a
+       third track then a two-thirds track); once the page width is spoken
+       for, each next article drops into the shortest existing track of
+       ITS width. So a second two-thirds article slots beneath the first
+       one rather than starting a new band under a taller neighbour. */
+    var idx = 0, tracks = null, trackRow = null, trackSum = 0, trackUnit = null;
+    function closeTracks() { tracks = null; trackRow = null; trackSum = 0; trackUnit = null; }
     while (idx < arts.length) {
       var a = arts[idx];
       var frac = widthFrac(a.width);
       var node = nodes[a._id];
       if (frac >= 1) {
-        row = null; rowSum = 0;
+        closeTracks();
         units.push({ node: node, arts: [a] });
         idx++;
         continue;
       }
-      var ncols = a.width === 'half' ? 2 : a.width === 'third' ? 3 : 0;
-      if (ncols) {
-        var run = [a];
-        var j = idx + 1;
-        while (j < arts.length && arts[j].width === a.width) { run.push(arts[j]); j++; }
-        if (run.length > ncols) {
-          /* More items than columns → masonry columns, shortest-first */
-          row = null; rowSum = 0;
-          var rowEl = el('div', 'nlx-row');
-          var colEls = [], colHs = [];
-          for (var c = 0; c < ncols; c++) {
-            var colEl = el('div', 'nlx-rowcol nlx-w-' + a.width);
-            rowEl.appendChild(colEl);
-            colEls.push(colEl);
-            colHs.push(0);
-          }
-          var unit = { node: rowEl, arts: [] };
-          run.forEach(function (ra) {
-            var best = 0;
-            for (var c2 = 1; c2 < ncols; c2++) if (colHs[c2] < colHs[best] - 0.5) best = c2;
-            colEls[best].appendChild(nodes[ra._id]);
-            colHs[best] += (preH[ra._id] || 0) + 5 * mm;
-            unit.arts.push(ra);
-          });
-          units.push(unit);
-          idx = j;
-          continue;
+      var placed = false;
+      if (tracks) {
+        var best = null;
+        tracks.forEach(function (t) {
+          if (t.key === a.width && (!best || t.h < best.h - 0.5)) best = t;
+        });
+        /* While there is still room across the page, prefer opening a new
+           track — natural "fill across first, then stack" reading order */
+        if (trackSum + frac <= 1.001) best = null;
+        if (best) {
+          best.el.appendChild(node);
+          best.h += (preH[a._id] || 0) + 5 * mm;
+          trackUnit.arts.push(a);
+          placed = true;
+        } else if (trackSum + frac > 1.001) {
+          closeTracks();
         }
       }
-      /* Mixed widths or short runs — plain row packing as before */
-      node.classList.add('nlx-w-' + (WIDTHS.some(function (w) { return w.key === a.width; }) ? a.width : 'half'));
-      if (!row || rowSum + frac > 1.001) {
-        row = el('div', 'nlx-row');
-        rowSum = 0;
-        units.push({ node: row, arts: [] });
+      if (!placed) {
+        if (!tracks) {
+          trackRow = el('div', 'nlx-row');
+          trackUnit = { node: trackRow, arts: [] };
+          units.push(trackUnit);
+          tracks = [];
+          trackSum = 0;
+        }
+        var colEl = el('div', 'nlx-rowcol nlx-w-' +
+          (WIDTHS.some(function (w) { return w.key === a.width; }) ? a.width : 'half'));
+        trackRow.appendChild(colEl);
+        colEl.appendChild(node);
+        tracks.push({ key: a.width, el: colEl, h: (preH[a._id] || 0) + 5 * mm });
+        trackSum += frac;
+        trackUnit.arts.push(a);
       }
-      row.appendChild(node);
-      units[units.length - 1].arts.push(a);
-      rowSum += frac;
       idx++;
     }
 
@@ -2152,6 +2181,15 @@
     frame.id = 'nlxPreviewFrame';
     var scale = el('div');
     scale.id = 'nlxDocScale';
+    /* Tap an article in the preview → jump the editor to its card.
+       Links inside the preview don't navigate — the preview is for
+       orientation, not reading. */
+    scale.addEventListener('click', function (e) {
+      if (e.target.closest && e.target.closest('a')) e.preventDefault();
+      var blk = e.target.closest ? e.target.closest('.nlx-blk-art') : null;
+      var aid = blk && blk.getAttribute('data-art-id');
+      if (aid) scrollToArticleCard(aid);
+    });
     frame.appendChild(scale);
     preview.appendChild(frame);
 
@@ -2217,9 +2255,20 @@
     restoreScroll();
   }
 
+  /* Scroll the editor to an article's card (pane on desktop, window on
+     mobile — scrollIntoView finds the right scroller) with a brief flash */
+  function scrollToArticleCard(id) {
+    var card = document.querySelector('.nlx-art[data-art-id="' + id + '"]');
+    if (!card) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.add('nlx-art--flash');
+    setTimeout(function () { card.classList.remove('nlx-art--flash'); }, 1200);
+  }
+
   function buildArticleCard(art, idx, total, listWrap) {
     var id = art._id;
     var panel = el('div', 'form-panel nlx-art');
+    panel.setAttribute('data-art-id', id);
 
     var head = el('div', 'form-panel__head');
     var row = el('div', 'nlx-art__head-row');
@@ -2233,14 +2282,14 @@
     up.setAttribute('aria-label', 'Move up');
     up.appendChild(NL.icon('up', 'sm'));
     up.disabled = idx === 0;
-    up.addEventListener('click', function () { moveArticle(id, -1); renderArticles(listWrap); schedulePreview(); });
+    up.addEventListener('click', function () { moveArticle(id, -1); renderArticles(listWrap); schedulePreview(); scrollToArticleCard(id); });
     var down = el('button', 'btn btn--ghost btn--sm');
     down.type = 'button';
     down.title = 'Move down';
     down.setAttribute('aria-label', 'Move down');
     down.appendChild(NL.icon('down', 'sm'));
     down.disabled = idx === total - 1;
-    down.addEventListener('click', function () { moveArticle(id, 1); renderArticles(listWrap); schedulePreview(); });
+    down.addEventListener('click', function () { moveArticle(id, 1); renderArticles(listWrap); schedulePreview(); scrollToArticleCard(id); });
     var del = el('button', 'btn btn--danger btn--sm', 'Delete');
     del.type = 'button';
     del.addEventListener('click', function () {
