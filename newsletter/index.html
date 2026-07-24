@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Newsletter
-  Version: v1.13 (24/07/2026)
+  Version: v1.14 (24/07/2026)
   File: /tools/newsletter/index.html
 
   Monthly staff newsletter builder. Editors write a title, month and a handful
@@ -11,6 +11,16 @@
   paginated by the same code (renderDocument), so they cannot drift.
 
   Technical changelog:
+    v1.14 (24/07/2026)
+      - Masonry packing for same-width runs: when consecutive articles
+        share a fractional width and outnumber the columns (3+ halves,
+        4+ thirds), they pack into .nlx-rowcol columns shortest-first —
+        article 3 slots under the shorter of the first two instead of
+        starting a new row below the taller one. Requires pre-measuring
+        fractional blocks at target width (incl. side-fig solving) before
+        packing. Mixed-width sequences and short runs keep plain row
+        packing. Area gauge unchanged (column heights are content
+        heights).
     v1.13 (24/07/2026)
       - Article nav de-intruded: the editor pane reserves a 52px right
         gutter on desktop and the buttons sit inside it (negative margin
@@ -244,6 +254,13 @@
     var NL_TOOL_KEY = 'staff-newsletter';
 
     window.NL_CHANGELOG = [
+      {
+        date: '24 July 2026',
+        version: 'v1.14',
+        items: [
+          'Three or more same-width articles now pack like a proper newsletter page — each next one slots under whichever column is shorter, instead of leaving a gap.'
+        ]
+      },
       {
         date: '24 July 2026',
         version: 'v1.13',
@@ -636,13 +653,20 @@
   /* Article rows — fractional-width articles pack side by side. A row is
      one pagination unit; heights are top-aligned like the old editions. */
   .nlx-row { display: flex; gap: 5mm; align-items: flex-start; }
-  .nlx-row > .nlx-blk-art { border-top: none; padding-top: 0; min-width: 0; flex: 0 0 auto; }
-  .nlx-row > .nlx-blk-art--accent-bar { padding-top: 1mm; }
+  /* Descendant (not child) — blocks may sit directly in the row or inside
+     a masonry column */
+  .nlx-row .nlx-blk-art { border-top: none; padding-top: 0; min-width: 0; }
+  .nlx-row > .nlx-blk-art { flex: 0 0 auto; }
+  .nlx-row .nlx-blk-art--accent-bar { padding-top: 1mm; }
   /* The row padding reset must not flatten panels — their headlines were
      touching the panel top when panels sat side by side */
-  .nlx-row > .nlx-blk-art--panel-blue,
-  .nlx-row > .nlx-blk-art--panel-grey,
-  .nlx-row > .nlx-blk-art--panel-red { padding: 5mm 5mm 4.5mm; }
+  .nlx-row .nlx-blk-art--panel-blue,
+  .nlx-row .nlx-blk-art--panel-grey,
+  .nlx-row .nlx-blk-art--panel-red { padding: 5mm 5mm 4.5mm; }
+  /* Masonry columns for same-width runs — articles stack inside a column,
+     the packer sends each next article to the shortest column */
+  .nlx-rowcol { flex: 0 0 auto; min-width: 0; }
+  .nlx-rowcol > .nlx-blk-art + .nlx-blk-art { margin-top: 5mm; }
   .nlx-w-half       { width: calc((100% - 5mm) / 2); }
   .nlx-w-third      { width: calc((100% - 10mm) / 3); }
   .nlx-w-two-thirds { width: calc((100% - 10mm) / 3 * 2 + 5mm); }
@@ -1482,15 +1506,71 @@
     });
     arts.sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
 
-    var row = null, rowSum = 0;
+    /* Build every article node, then PRE-MEASURE the fractional ones at
+       their target width so same-width runs can pack masonry-style: each
+       next article drops into the currently shortest column, so a third
+       half-width article slots under the shorter of the first two. */
+    var nodes = {}, preH = {};
+    arts.forEach(function (a) { nodes[a._id] = buildArticleBlock(a); });
+    var pre = el('div');
     arts.forEach(function (a) {
+      if (widthFrac(a.width) >= 1) return;
+      var w = el('div', 'nlx-w-' + (WIDTHS.some(function (x) { return x.key === a.width; }) ? a.width : 'half'));
+      w.appendChild(nodes[a._id]);
+      pre.appendChild(w);
+    });
+    measure.appendChild(pre);
+    solveSideFigs(pre);
+    arts.forEach(function (a) {
+      if (widthFrac(a.width) < 1) preH[a._id] = nodes[a._id].getBoundingClientRect().height;
+    });
+    measure.removeChild(pre);
+    arts.forEach(function (a) {
+      var n = nodes[a._id];
+      if (n.parentNode) n.parentNode.removeChild(n);
+    });
+
+    var idx = 0, row = null, rowSum = 0;
+    while (idx < arts.length) {
+      var a = arts[idx];
       var frac = widthFrac(a.width);
-      var node = buildArticleBlock(a);
+      var node = nodes[a._id];
       if (frac >= 1) {
         row = null; rowSum = 0;
         units.push({ node: node, arts: [a] });
-        return;
+        idx++;
+        continue;
       }
+      var ncols = a.width === 'half' ? 2 : a.width === 'third' ? 3 : 0;
+      if (ncols) {
+        var run = [a];
+        var j = idx + 1;
+        while (j < arts.length && arts[j].width === a.width) { run.push(arts[j]); j++; }
+        if (run.length > ncols) {
+          /* More items than columns → masonry columns, shortest-first */
+          row = null; rowSum = 0;
+          var rowEl = el('div', 'nlx-row');
+          var colEls = [], colHs = [];
+          for (var c = 0; c < ncols; c++) {
+            var colEl = el('div', 'nlx-rowcol nlx-w-' + a.width);
+            rowEl.appendChild(colEl);
+            colEls.push(colEl);
+            colHs.push(0);
+          }
+          var unit = { node: rowEl, arts: [] };
+          run.forEach(function (ra) {
+            var best = 0;
+            for (var c2 = 1; c2 < ncols; c2++) if (colHs[c2] < colHs[best] - 0.5) best = c2;
+            colEls[best].appendChild(nodes[ra._id]);
+            colHs[best] += (preH[ra._id] || 0) + 5 * mm;
+            unit.arts.push(ra);
+          });
+          units.push(unit);
+          idx = j;
+          continue;
+        }
+      }
+      /* Mixed widths or short runs — plain row packing as before */
       node.classList.add('nlx-w-' + (WIDTHS.some(function (w) { return w.key === a.width; }) ? a.width : 'half'));
       if (!row || rowSum + frac > 1.001) {
         row = el('div', 'nlx-row');
@@ -1500,7 +1580,8 @@
       row.appendChild(node);
       units[units.length - 1].arts.push(a);
       rowSum += frac;
-    });
+      idx++;
+    }
 
     units.forEach(function (u) { measure.appendChild(u.node); });
     solveSideFigs(measure);
