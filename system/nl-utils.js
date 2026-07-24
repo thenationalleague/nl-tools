@@ -1,9 +1,22 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /tools/system/nl-utils.js
-   Version: v1.24 (24/07/2026)
+   Version: v1.25 (24/07/2026)
 
    Changelog
+   v1.25 (24/07/2026)
+     - NL.sanitiseHtml now normalises block structure at the top level:
+       loose inline runs are wrapped in <p>, and double-<br> sequences
+       become paragraph breaks. Fixes Enter producing line breaks instead
+       of paragraphs inside <br>-structured content (multi-paragraph
+       plain-text pastes, and bodies written before the paragraph
+       separator was enforced) — content self-heals on next load.
+     - NL.richText paste: multi-line plain text is inserted as real <p>
+       paragraphs (blank line = paragraph, single newline = <br>) via
+       escaped insertHTML; single-line paste stays insertText. Still
+       plain-text only — formatting is never carried across.
+       Cache-bust nl-utils ?v=25 -> ?v=26.
+
    v1.24 (24/07/2026)
      - Added NL.sanitiseHtml(html) — whitelist HTML sanitiser for
        user-entered rich text (p/br/b/strong/i/em/ul/li/a[http(s)/mailto];
@@ -734,7 +747,39 @@
         node = node.nextSibling;
       }
     })(src, out);
-    return out.innerHTML;
+
+    /* Normalise top-level structure: wrap loose inline runs in <p>, treat
+       double-<br> as a paragraph break (single <br> stays a line break).
+       Without this, <br>-structured content (multi-paragraph plain-text
+       pastes, legacy bodies) keeps the browser inserting line breaks on
+       Enter instead of paragraphs. */
+    var norm = document.createElement('div');
+    var para = null;
+    function flushPara() {
+      if (para && para.childNodes.length) norm.appendChild(para);
+      para = null;
+    }
+    var nodes = Array.prototype.slice.call(out.childNodes);
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      if (n.nodeType === 1 && (n.tagName === 'P' || n.tagName === 'UL')) {
+        flushPara();
+        norm.appendChild(n);
+        continue;
+      }
+      if (n.nodeType === 1 && n.tagName === 'BR') {
+        var next = nodes[i + 1];
+        if (next && next.nodeType === 1 && next.tagName === 'BR') { flushPara(); i++; continue; }
+        if (!para) continue;                 /* leading <br> — drop */
+        para.appendChild(n);
+        continue;
+      }
+      if (n.nodeType === 3 && !(n.nodeValue || '').trim() && !para) continue;
+      if (!para) para = document.createElement('p');
+      para.appendChild(n);
+    }
+    flushPara();
+    return norm.innerHTML;
   };
 
   /* NL.richText(mount, opts) → controller. Minimal rich-text editor: the
@@ -803,8 +848,20 @@
     edit.addEventListener('input', changed);
     edit.addEventListener('paste', function(e) {
       e.preventDefault();
-      var text = (e.clipboardData || window.clipboardData).getData('text/plain');
-      document.execCommand('insertText', false, text);
+      var text = (e.clipboardData || window.clipboardData).getData('text/plain') || '';
+      if (text.indexOf('\n') === -1) {
+        /* Single line — plain insertText keeps the caret's paragraph intact */
+        document.execCommand('insertText', false, text);
+      } else {
+        /* Multi-line — build REAL paragraphs (blank line = paragraph break,
+           single newline = line break) from escaped text. insertText would
+           emit <br>s, which then makes Enter continue as line breaks. */
+        var html = text.replace(/\r\n/g, '\n').split(/\n{2,}/).map(function(p) {
+          return '<p>' + window.NL.escHtml(p).replace(/\n/g, '<br>') + '</p>';
+        }).join('');
+        document.execCommand('insertHTML', false, html);
+      }
+      changed();
     });
 
     if (mount) { mount.appendChild(bar); mount.appendChild(edit); }
