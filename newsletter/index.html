@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Newsletter
-  Version: v1.11 (24/07/2026)
+  Version: v1.12 (24/07/2026)
   File: /tools/newsletter/index.html
 
   Monthly staff newsletter builder. Editors write a title, month and a handful
@@ -11,6 +11,12 @@
   paginated by the same code (renderDocument), so they cannot drift.
 
   Technical changelog:
+    v1.12 (24/07/2026)
+      - Floating article navigation: sticky round up/down buttons at the
+        editor pane's right edge (fixed bottom-right on stacked/mobile)
+        that smooth-scroll the view to the previous/next article card.
+        View-only — never reorders. Scroller-aware (pane on desktop,
+        window on mobile).
     v1.11 (24/07/2026)
       - Fill gauge measures AREA, not height: each unit contributes its
         width-fraction × height (rows sum their members individually), so
@@ -231,6 +237,13 @@
     var NL_TOOL_KEY = 'staff-newsletter';
 
     window.NL_CHANGELOG = [
+      {
+        date: '24 July 2026',
+        version: 'v1.12',
+        items: [
+          'New floating up/down buttons beside the editor jump you straight to the previous or next article — handy in long editions. They only move your view, never the articles.'
+        ]
+      },
       {
         date: '24 July 2026',
         version: 'v1.11',
@@ -479,6 +492,17 @@
   }
   .nlx-leading-row { display: flex; align-items: center; gap: 8px; }
   .nlx-leading-row input { width: 90px; }
+
+  /* Floating article navigation — jumps the view between article cards
+     (never reorders). Sticky inside the editor pane on desktop; a fixed
+     bottom-right pair on stacked/mobile layout. */
+  .nlx-artnav { position: sticky; top: 42%; height: 0; z-index: 4; text-align: right; pointer-events: none; }
+  .nlx-artnav__inner { display: inline-flex; flex-direction: column; gap: 6px; pointer-events: auto; }
+  /* Round floating variant of the canon navy button (shape-only override) */
+  .nlx-artnav .btn { width: 36px; height: 36px; padding: 0; justify-content: center; border-radius: 50%; box-shadow: var(--shadow); }
+  @media (max-width: 1100px) {
+    .nlx-artnav { position: fixed; top: auto; right: 14px; bottom: 76px; height: auto; }
+  }
   /* Pickers abreast — wraps to fewer columns as the pane narrows */
   .nlx-field-grid {
     display: grid;
@@ -1875,6 +1899,52 @@
     shell.appendChild(editor);
     shell.appendChild(preview);
     main.appendChild(shell);
+
+    /* Floating jump-to-article navigation (view only, never reorders) */
+    var artnav = el('div', 'nlx-artnav');
+    var artnavInner = el('div', 'nlx-artnav__inner');
+    function scrollerInfo() {
+      if (window.innerWidth > 1100) {
+        var r = editor.getBoundingClientRect();
+        return {
+          pos: editor.scrollTop,
+          topOf: function (elm) { return elm.getBoundingClientRect().top - r.top + editor.scrollTop; },
+          go: function (t) { editor.scrollTo({ top: t, behavior: 'smooth' }); }
+        };
+      }
+      return {
+        pos: window.scrollY || window.pageYOffset || 0,
+        topOf: function (elm) { return elm.getBoundingClientRect().top + (window.scrollY || 0); },
+        go: function (t) { window.scrollTo({ top: t, behavior: 'smooth' }); }
+      };
+    }
+    function jumpArticle(dir) {
+      var s = scrollerInfo();
+      var cards = editor.querySelectorAll('.nlx-art');
+      if (!cards.length) return;
+      var tops = Array.prototype.map.call(cards, function (c) { return s.topOf(c) - 10; });
+      var target = null;
+      if (dir > 0) {
+        for (var i = 0; i < tops.length; i++) { if (tops[i] > s.pos + 12) { target = tops[i]; break; } }
+      } else {
+        for (var j = tops.length - 1; j >= 0; j--) { if (tops[j] < s.pos - 12) { target = tops[j]; break; } }
+        if (target === null) target = 0;
+      }
+      if (target !== null) s.go(Math.max(0, target));
+    }
+    function navBtn(icon, label, dir) {
+      var b = el('button', 'btn btn--navy');
+      b.type = 'button';
+      b.title = label;
+      b.setAttribute('aria-label', label);
+      b.appendChild(NL.icon(icon, 'sm'));
+      b.addEventListener('click', function () { jumpArticle(dir); });
+      return b;
+    }
+    artnavInner.appendChild(navBtn('up', 'Previous article', -1));
+    artnavInner.appendChild(navBtn('down', 'Next article', 1));
+    artnav.appendChild(artnavInner);
+    editor.appendChild(artnav);
 
     /* Edition details panel */
     var edPanel = el('div', 'form-panel');
