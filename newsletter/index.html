@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Newsletter
-  Version: v1.8 (24/07/2026)
+  Version: v1.9 (24/07/2026)
   File: /tools/newsletter/index.html
 
   Monthly staff newsletter builder. Editors write a title, month and a handful
@@ -11,6 +11,18 @@
   paginated by the same code (renderDocument), so they cannot drift.
 
   Technical changelog:
+    v1.9 (24/07/2026)
+      - Image sizing rebuilt to the intended model: 'above' is ALWAYS the
+        full article width (no 85mm cap, no centring — height comes purely
+        from the crop; the editor manages proportions by cropping).
+        Left/right are now full-height image COLUMNS beside the text (like
+        the old editions), not floats with wrap-under: a fixed-point solver
+        (solveSideFigs) sizes the column in the measuring pass so the
+        image height matches the text height, width from the crop aspect,
+        clamped 15–60% of the article. Solved sizes are written inline, so
+        preview and print stay identical.
+      - Standfirst restyled to the house look: dark (--text), wght 700,
+        11pt — was muted 600 at 10.5pt.
     v1.8 (24/07/2026)
       - Enter-still-a-line-break fix, in canon (nl-utils v1.25, ?v=26):
         multi-line pastes were inserted via insertText, which emits <br>s —
@@ -200,6 +212,15 @@
     var NL_TOOL_KEY = 'staff-newsletter';
 
     window.NL_CHANGELOG = [
+      {
+        date: '24 July 2026',
+        version: 'v1.9',
+        items: [
+          'Photos placed above now always span the full width of their article — the shape you crop is the shape you get.',
+          'Photos placed left or right now run as a full-height column beside the text, sized from your crop, just like the old editions.',
+          'Standfirsts are now bold and dark, matching the house style.'
+        ]
+      },
       {
         date: '24 July 2026',
         version: 'v1.8',
@@ -572,8 +593,14 @@
   .nlx-blk-art__imgwrap { position: relative; overflow: hidden; border-radius: 1.5mm; margin: 0 auto; }
   .nlx-blk-art__imgwrap .nlx-blk-art__img { position: absolute; height: auto; display: block; }
   .nlx-blk-art__cap { margin-top: 1.2mm; font-size: 7.5pt; font-style: italic; color: var(--text-muted); }
-  .nlx-blk-art__fig--left  { float: left;  width: 45%; margin: 1mm 4.5mm 2mm 0; }
-  .nlx-blk-art__fig--right { float: right; width: 45%; margin: 1mm 0 2mm 4.5mm; }
+  /* Side placement = a full-height image COLUMN beside the text (like the
+     old editions), not a float with wrap-under. The image column's width
+     is solved in JS so image height matches the text height, with the
+     shape coming entirely from the crop. */
+  .nlx-blk-art__cols { display: flex; gap: 4.5mm; align-items: flex-start; }
+  .nlx-blk-art__cols--right { flex-direction: row-reverse; }
+  .nlx-blk-art__cols .nlx-blk-art__fig { flex: 0 0 auto; margin: 0; }
+  .nlx-blk-art__cols .nlx-blk-art__body { flex: 1 1 auto; min-width: 0; }
   .nlx-blk-art__body::after { content: ''; display: block; clear: both; }
 
   /* ── Crop tool (editor UI) ───────────────────────────────────────────── */
@@ -594,7 +621,7 @@
   }
   .nlx-blk-art--hero .nlx-blk-art__head { font-size: 19pt; }
   .nlx-blk-art--hero .nlx-blk-art__rule { width: 22mm; height: 0.9mm; background: var(--primary); border-radius: 0.5mm; margin: 0 0 2.5mm; }
-  .nlx-blk-art__stand { margin: 0 0 2mm; font-size: 10.5pt; line-height: 1.35; color: var(--text-muted); font-variation-settings: 'wght' 600; }
+  .nlx-blk-art__stand { margin: 0 0 2mm; font-size: 11pt; line-height: 1.35; color: var(--text); font-variation-settings: 'wght' 700; }
   .nlx-blk-art__body { font-size: 9.5pt; line-height: 1.5; }
   .nlx-blk-art__body p { margin: 0 0 2mm; }
   .nlx-blk-art__body p:last-child { margin-bottom: 0; }
@@ -1264,12 +1291,13 @@
       var wrap = el('div', 'nlx-blk-art__imgwrap');
       wrap.style.aspectRatio = A;
       if (pos === 'above') {
-        /* Full article width, height from the crop shape, capped at 85mm */
-        wrap.style.width = 'min(100%, calc(85mm * ' + A + '))';
+        /* Always the full article width — height comes purely from the
+           crop shape. The editor manages proportions by cropping. */
+        wrap.style.width = '100%';
       } else {
-        /* Side placement: column width follows the crop aspect at a fixed
-           45mm visual height (capped), so the text column adapts */
-        fig.style.width = 'min(60%, calc(45mm * ' + A + '))';
+        /* Side column: provisional width; solveSideFigs() sets the real
+           width so the image height matches the text height */
+        wrap.style.width = '35%';
       }
       var im = el('img', 'nlx-blk-art__img');
       im.src = rec.downloadUrl;
@@ -1296,9 +1324,42 @@
       var lead = Math.max(-0.4, Math.min(0.6, art.leading));
       body.style.lineHeight = (1.5 + lead).toFixed(2);
     }
-    if (fig && pos !== 'above') body.insertBefore(fig, body.firstChild);
-    b.appendChild(body);
+    if (fig && pos !== 'above') {
+      var cols = el('div', 'nlx-blk-art__cols' + (pos === 'right' ? ' nlx-blk-art__cols--right' : ''));
+      cols.setAttribute('data-nlx-sidefig', '1');
+      cols.setAttribute('data-aspect', A);
+      cols.appendChild(fig);
+      cols.appendChild(body);
+      b.appendChild(cols);
+    } else {
+      b.appendChild(body);
+    }
     return b;
+  }
+
+  /* Size side-image columns so the image runs the full height of the
+     article text. Circular on paper (image width ↔ text width ↔ text
+     height ↔ image height), so solved by short fixed-point iteration in
+     the measuring container; the result is written inline before
+     pagination measures, so preview and print see identical sizes. */
+  function solveSideFigs(scope) {
+    var colsList = scope.querySelectorAll('[data-nlx-sidefig]');
+    Array.prototype.forEach.call(colsList, function (cols) {
+      var A = parseFloat(cols.getAttribute('data-aspect')) || 1;
+      var wrap = cols.querySelector('.nlx-blk-art__imgwrap');
+      var bodyEl = cols.querySelector('.nlx-blk-art__body');
+      if (!wrap || !bodyEl) return;
+      var W = cols.clientWidth;
+      if (!W) return;
+      var w = 0.35 * W;
+      for (var k = 0; k < 3; k++) {
+        wrap.style.width = w + 'px';
+        var hTxt = bodyEl.getBoundingClientRect().height;
+        var target = Math.max(0.15 * W, Math.min(0.6 * W, hTxt * A));
+        w = (w + target) / 2;
+      }
+      wrap.style.width = Math.round(w) + 'px';
+    });
   }
 
   function renderDocument(edition) {
@@ -1358,6 +1419,7 @@
     });
 
     units.forEach(function (u) { measure.appendChild(u.node); });
+    solveSideFigs(measure);
     var heights = units.map(function (u) { return u.node.getBoundingClientRect().height; });
 
     /* Greedy pagination */
