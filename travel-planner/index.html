@@ -5,8 +5,40 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Travel Planner — NL Tools</title>
 <!--
-  NL Travel Planner v39.6
+  NL Travel Planner v40.0
   Changelog:
+  v40.0| 24/07/2026 | Single-flow redesign (demo-approved: 1A + KO buffer + merge):
+       |            | - Manual Journey tab removed. One flow: fixture list stays
+       |            |   box-bound (scrolls in its panel); "Plan a custom fixture"
+       |            |   sits pinned beneath it and expands home/away pickers + KO
+       |            |   inline. Both paths feed ONE normalised selection (`sel`)
+       |            |   and ONE Journey Options panel — the duplicated man* control
+       |            |   stack (~150 lines) is gone, as is the setDir/setManDir
+       |            |   cross-flip bug class.
+       |            | - Journey banner (P0 fix): "Travel plan — from X to Y" above
+       |            |   the options, amber variant on your own home game ("this
+       |            |   plans the visiting side's route") with a custom-start
+       |            |   escape hatch. Preset label is now "Depart from"/"Return to".
+       |            | - "Arrive before kick-off" slider removed. Transit searches
+       |            |   target kick-off itself; results lead with a KO buffer strip
+       |            |   ("Arrives 53 min before kick-off", green/amber/red) and
+       |            |   each route chip carries its own "KO −Nm" badge. Returns get
+       |            |   an info strip ("Departs Nm after estimated full-time").
+       |            | - Drive mode: est. arrival + KO buffer computed from the
+       |            |   (now disclosed) assumed departure; cards show leave→ETA.
+       |            | - A11y: fixture rows/alt chips/drive cards/board legs are
+       |            |   keyboard-operable (role=button + tabindex + delegated
+       |            |   Enter/Space), toggles carry aria-pressed, results area is
+       |            |   aria-live, sliders get for/id labels, presets meet 44px.
+       |            | - Errors: friendlyErr() translation + Retry button on all
+       |            |   search failures; custom preset validates address before
+       |            |   calling the API; plain-text address fallback if Places
+       |            |   fails to load. Removed the 1.5s boot delay.
+       |            | - URL state: single-mode params (club/fix or home/away/ko);
+       |            |   legacy mode=manual links still restore. `arr` param retired.
+       |            | - Dead code removed: duplicate getEnabledModes, setTransport,
+       |            |   .tp__tt/.tp__select/.tp__modes CSS, stale .pac-container
+       |            |   styles (old Autocomplete API).
   v39.6| 24/07/2026 | Fixture-list venue fix + direction-wording pass:
        |            | - Fixture preview meta showed the OPPONENT's stadium on
        |            |   home games (always oc.stadium). Now venue club =
@@ -89,6 +121,7 @@
   window.NL_TOOL={title:'Travel Planner',toolKey:'staff-travel-planner'};
   var NL_TOOL_KEY='staff-travel-planner';
   window.NL_CHANGELOG=[
+    {date:'24 Jul 2026',version:'v4.0',items:['One flow: the Manual Journey tab is gone — plan a custom fixture right beneath the fixture list, using the same journey options as a real fixture.','Every journey now says whose it is: "Travel plan — from Altrincham to LNER Community Stadium", with an amber note when your home game means you\'re planning the visitors\' route (and a custom start point to plan your own).','Results lead with the answer: "Arrives 53 min before kick-off" in green, amber or red, and each alternative route shows its own margin. The "arrive before kick-off" slider is gone — searches aim at kick-off and the buffer does the talking.','Driving results now show estimated arrival against kick-off and state the assumed departure time (previously a silent three-hours-before guess).','Keyboard and screen-reader access: fixtures, route chips, journey legs and drive routes can all be reached and activated without a mouse, and toggles announce their state.','Friendlier failures: plain-English error messages with a Try again button, the custom address is checked before searching, and a plain text box appears if Google\'s address suggestions fail to load.','Old share links still open; the pre-kick-off arrival setting in them is simply ignored.']},
     {date:'24 Jul 2026',version:'v3.8',items:['Fixed: the fixture list showed the opponent\'s stadium against home games — home fixtures now show your own ground as the venue.','Clearer direction controls: the toggle now reads "Travel to match" / "Return from match", and the start-point label and search button follow suit (End point, Find return journey).','Fixed: changing direction in Match Day mode no longer visually flipped the Manual Journey direction toggle as well.']},
     {date:'13 Jul 2026',version:'v3.7',items:['Club data now loads through the shared National League club store, so it is fetched once per visit and reused across the tools instead of being downloaded separately here.']},
     {date:'12 Jul 2026',version:'v3.6',items:['Fixture-list club crests now load faster — they use small thumbnail images, with the full crest as an automatic fallback.']},
@@ -111,16 +144,39 @@
 </script>
 <style>
   .tp{max-width:1100px;margin:0 auto;padding:clamp(16px,2vw,32px) clamp(12px,2vw,24px) 60px}
-  .tp__modes{display:flex;margin-bottom:16px;background:var(--white);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
-  .tp__mode-btn{flex:1;padding:10px 12px;border:none;background:var(--white);font-family:var(--font);font-size:var(--text-xs)!important;font-weight:800;font-variation-settings:'wght' 800;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);cursor:pointer;border-bottom:3px solid transparent;transition:all .15s}
-  .tp__mode-btn.active{color:var(--navy);border-bottom-color:var(--navy);background:var(--off-white)}
   .tp__panel{background:var(--white);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px;margin-bottom:16px}
   .tp__panel-title{font-size:var(--text-xs);font-weight:800;font-variation-settings:'wght' 800;text-transform:uppercase;letter-spacing:.04em;color:var(--navy);margin-bottom:14px}
   .tp__field{margin-bottom:12px}.tp__field:last-child{margin-bottom:0}
   .tp__label{display:block;font-size:var(--text-xs);font-weight:700;font-variation-settings:'wght' 700;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:4px}
-  .tp__input,.tp__select{width:100%;padding:8px 12px;border:2px solid var(--border);border-radius:var(--radius);font-family:var(--font);font-size:var(--text-sm)!important;color:var(--text);background:var(--white);transition:border-color .15s;appearance:none}
-  .tp__input:focus,.tp__select:focus{outline:none;border-color:var(--navy)}
-  .tp__select-wrap{position:relative}.tp__select-wrap::after{content:"▾";position:absolute;right:12px;top:50%;transform:translateY(-50%);color:var(--text-muted);pointer-events:none}
+  .tp__input{width:100%;padding:8px 12px;border:2px solid var(--border);border-radius:var(--radius);font-family:var(--font);font-size:var(--text-sm)!important;color:var(--text);background:var(--white);transition:border-color .15s;appearance:none}
+  .tp__input:focus{outline:none;border-color:var(--navy)}
+
+  /* Journey banner — states whose journey is being planned (P0 fix) */
+  .tp__jbanner{background:var(--blue-light);border-left:4px solid var(--navy);border-radius:var(--radius);padding:10px 12px;margin-bottom:14px}
+  .tp__jbanner .t{font-size:var(--text-sm);font-weight:800;font-variation-settings:'wght' 800;color:var(--navy)}
+  .tp__jbanner .s{font-size:var(--text-xs);color:var(--text-muted);margin-top:2px}
+  .tp__jbanner--warn{background:var(--amber-light);border-left-color:var(--amber)}
+  .tp__jbanner--warn .t{color:var(--amber)}
+
+  /* KO buffer strip — will-I-make-kick-off headline on results */
+  .tp__kobuf{padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-bottom:1px solid var(--border)}
+  .tp__kobuf .big{font-size:var(--text-sm);font-weight:800;font-variation-settings:'wght' 800}
+  .tp__kobuf .sub{font-size:var(--text-xs);margin-left:auto;text-align:right}
+  .tp__kobuf--ok{background:var(--green-light);color:var(--green)}
+  .tp__kobuf--tight{background:var(--amber-light);color:var(--amber)}
+  .tp__kobuf--late{background:var(--red-light);color:var(--red)}
+  .tp__kobuf--info{background:var(--blue-light);color:var(--navy)}
+  .chip-buf{display:block;font-size:10px;font-weight:800;font-variation-settings:'wght' 800;margin-top:1px}
+  .chip-buf--ok{color:var(--green)}.chip-buf--tight{color:var(--amber)}.chip-buf--late{color:var(--red)}
+  .tp__alt-chip.active .chip-buf{color:rgba(255,255,255,.85)}
+
+  /* Custom fixture builder — pinned beneath the (box-bound) fixture list */
+  .tp__cf-link{width:100%;min-height:44px;border:none;background:none;font-family:var(--font);font-size:var(--text-sm)!important;color:var(--text-muted);cursor:pointer;padding:4px;text-align:center}
+  .tp__cf-link b{color:var(--navy)}
+  .tp__cf-link:hover b{text-decoration:underline}
+
+  /* Keyboard focus — every operable element gets a visible ring */
+  .tp [role="button"]:focus-visible,.tp button:focus-visible,.tp input:focus-visible{outline:3px solid var(--navy);outline-offset:2px}
 
   /* AC — club-picker uses brand flex layout (crest + input as siblings).
      Only override: hide crest by default, show when club is selected. */
@@ -151,9 +207,9 @@
   .btn--loading{pointer-events:none;opacity:.7}
   .btn--loading::after{content:'';display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:var(--white);border-radius:50%;animation:tpSpin .6s linear infinite;margin-left:8px;vertical-align:middle}
 
-  /* KO quick presets */
-  .tp__ko-presets{display:flex;gap:4px;margin-top:4px;flex-wrap:wrap}
-  .tp__ko-preset{padding:3px 8px;border:1px solid var(--border);border-radius:99px;background:var(--white);font-family:var(--font);font-size:10px;font-weight:700;color:var(--text-muted);cursor:pointer;transition:all .15s}
+  /* KO quick presets — 44px touch floor */
+  .tp__ko-presets{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap}
+  .tp__ko-preset{padding:8px 12px;min-height:44px;border:1px solid var(--border);border-radius:99px;background:var(--white);font-family:var(--font);font-size:var(--text-xs)!important;font-weight:700;font-variation-settings:'wght' 700;color:var(--text-muted);cursor:pointer;transition:all .15s}
   .tp__ko-preset:hover{border-color:var(--navy);color:var(--navy)}
 
   /* Drive results card */
@@ -176,17 +232,11 @@
   .tp__road-badge--a{background:var(--road-sign-a-bg);color:var(--road-sign-a-fg)}
   .tp__road-badge--b{background:var(--white);color:var(--text);border:1px solid var(--border)}
 
-  /* Origin preset */
-  .tp__presets{display:flex;gap:6px;margin-bottom:8px}
-  .tp__preset{padding:5px 10px;border:2px solid var(--border);border-radius:99px;background:var(--white);font-family:var(--font);font-size:var(--text-xs)!important;font-weight:700;font-variation-settings:'wght' 700;color:var(--text-muted);cursor:pointer;transition:all .15s;white-space:nowrap}
+  /* Origin preset — 44px touch floor */
+  .tp__presets{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+  .tp__preset{padding:9px 14px;min-height:44px;border:2px solid var(--border);border-radius:99px;background:var(--white);font-family:var(--font);font-size:var(--text-xs)!important;font-weight:700;font-variation-settings:'wght' 700;color:var(--text-muted);cursor:pointer;transition:all .15s;white-space:nowrap}
   .tp__preset.active{border-color:var(--navy);background:var(--navy);color:var(--white)}
   .tp__preset:hover:not(.active){border-color:var(--navy);color:var(--navy)}
-
-  /* Transit toggles */
-  .tp__transit-toggles{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
-  .tp__tt{padding:5px 10px;border:2px solid var(--border);border-radius:99px;background:var(--white);font-family:var(--font);font-size:var(--text-xs)!important;font-weight:700;font-variation-settings:'wght' 700;color:var(--text-muted);cursor:pointer;transition:all .15s}
-  .tp__tt.on{border-color:var(--navy);background:var(--navy);color:var(--white)}
-  .tp__tt:hover:not(.on){border-color:var(--navy)}
 
   /* Slider */
   .tp__slider-row{display:flex;align-items:center;gap:10px}
@@ -273,13 +323,14 @@
   .tp__spinner{width:28px;height:28px;border:3px solid var(--border);border-top-color:var(--navy);border-radius:50%;animation:tpSpin .8s linear infinite;margin:0 auto 10px}
   @keyframes tpSpin{to{transform:rotate(360deg)}}
   .tp__error{text-align:center;padding:20px;color:var(--red);font-size:var(--text-xs);font-weight:600;background:var(--red-light);border-radius:var(--radius);margin-bottom:12px}
+  .tp__error .tp__error-msg{font-size:var(--text-sm);font-weight:700;font-variation-settings:'wght' 700;margin-bottom:4px}
+  .tp__error .tp__error-raw{color:var(--text-muted);font-weight:400;margin-bottom:10px;word-break:break-word}
+  .tp__error .btn{min-height:44px}
   .tp__btn-full{width:100%}
   .tp__footer{text-align:center;padding:16px;font-size:var(--text-xs);color:var(--text-muted)}
   .tp__row{display:flex;gap:8px}.tp__row>*{flex:1}
   @media(max-width:768px){.tp__results{grid-template-columns:1fr}.tp__map-col{min-height:220px}}
   @media(max-width:520px){.tp__summary{flex-direction:column;align-items:flex-start}.tp__leg-times{width:40px;min-width:40px;padding-left:8px}.tp__walk-connector .wc-times{width:40px;min-width:40px;padding-left:8px}.tp__row{flex-direction:column;gap:0}}
-  /* Google Places Autocomplete dropdown */
-  .pac-container{z-index:9999!important;font-family:var(--font)!important;font-size:var(--text-sm)!important;border-radius:var(--radius)!important;box-shadow:var(--shadow)!important}
 </style>
 </head>
 <body>
@@ -287,12 +338,7 @@
 <div id="nlTopbar"></div>
 <div class="tp">
 
-  <div class="tp__modes">
-    <button class="tp__mode-btn active" data-mode="fixture" onclick="setMode('fixture')">Match Day Travel</button>
-    <button class="tp__mode-btn" data-mode="manual" onclick="setMode('manual')">Manual Journey</button>
-  </div>
-
-  <!-- FIXTURE -->
+  <!-- SINGLE FLOW — fixtures + custom fixture builder feed the same Journey Options -->
   <div id="fixtureMode">
     <div class="tp__panel">
       <div class="tp__panel-title">Select Your Club</div>
@@ -301,44 +347,66 @@
       </div>
     </div>
     <div id="fixFixtureArea"></div>
+
+    <!-- Custom fixture builder — pinned below the box-bound fixture list -->
+    <div class="tp__panel" id="cfPanel">
+      <button type="button" class="tp__cf-link" id="cfToggle" aria-expanded="false" onclick="toggleCF()">Can't find your fixture? <b>Plan a custom one</b></button>
+      <div id="cfBody" style="display:none;margin-top:12px">
+        <div class="tp__field"><label class="tp__label">Home club (venue)</label>
+          <div id="cfHomeW"></div>
+        </div>
+        <div class="tp__field"><label class="tp__label">Away club (travelling side)</label>
+          <div id="cfAwayW"></div>
+        </div>
+        <div class="tp__field"><label class="tp__label" for="cfKO">Kick-off</label>
+          <input class="tp__input" type="datetime-local" id="cfKO">
+          <div class="tp__ko-presets">
+            <button type="button" class="tp__ko-preset" onclick="setKOPreset(6,12,30)">Sat 12.30pm</button>
+            <button type="button" class="tp__ko-preset" onclick="setKOPreset(6,15,0)">Sat 3pm</button>
+            <button type="button" class="tp__ko-preset" onclick="setKOPreset(6,17,30)">Sat 5.30pm</button>
+            <button type="button" class="tp__ko-preset" onclick="setKOPreset(2,19,45)">Tue 7.45pm</button>
+            <button type="button" class="tp__ko-preset" onclick="setKOPreset(3,19,45)">Wed 7.45pm</button>
+            <button type="button" class="tp__ko-preset" onclick="setKOPreset(5,19,45)">Fri 7.45pm</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="fixConfig" style="display:none;">
       <div class="tp__panel">
         <div class="tp__panel-title">Journey Options</div>
+        <div id="jBanner"></div>
 
         <div class="tp__field">
           <div class="tp__controls-row">
             <div class="tp__mode-toggle" id="fixModeToggle">
-              <button class="tp__mode-pill active" data-tm="transit" onclick="setFixTM('transit')">🚆 Train</button>
-              <button class="tp__mode-pill" data-tm="drive" onclick="setFixTM('drive')">🚗 Drive</button>
+              <button class="tp__mode-pill active" data-tm="transit" aria-pressed="true" onclick="setFixTM('transit')">🚆 Train</button>
+              <button class="tp__mode-pill" data-tm="drive" aria-pressed="false" onclick="setFixTM('drive')">🚗 Drive</button>
             </div>
             <div class="tp__dir-toggle">
-              <button class="tp__dir-btn active" data-dir="to" onclick="setDir('to')">➡️ Travel to match</button>
-              <button class="tp__dir-btn" data-dir="from" onclick="setDir('from')">⬅️ Return from match</button>
+              <button class="tp__dir-btn active" data-dir="to" aria-pressed="true" onclick="setDir('to')">➡️ Travel to match</button>
+              <button class="tp__dir-btn" data-dir="from" aria-pressed="false" onclick="setDir('from')">⬅️ Return from match</button>
             </div>
           </div>
         </div>
 
         <div class="tp__field" id="fixPresetField">
-          <label class="tp__label" id="fixPresetLabel">Start point</label>
+          <label class="tp__label" id="fixPresetLabel">Depart from</label>
           <div class="tp__presets" id="fixPresets">
-            <button class="tp__preset active" data-p="station" onclick="setPreset('station')">🚉 Railway Station</button>
-            <button class="tp__preset" data-p="custom" onclick="setPreset('custom')">📍 Custom</button>
+            <button class="tp__preset active" data-p="station" aria-pressed="true" onclick="setPreset('station')">🚉 Railway Station</button>
+            <button class="tp__preset" data-p="custom" aria-pressed="false" onclick="setPreset('custom')">📍 Custom</button>
           </div>
-          <div id="fixCustomAddrWrap" style="display:none"><input type="hidden" id="fixCustomAddr"></div>
+          <div id="fixCustomAddrWrap" style="display:none">
+            <input type="hidden" id="fixCustomAddr">
+            <input class="tp__input" type="text" id="fixCustomAddrText" placeholder="Postcode or address" autocomplete="street-address" style="display:none">
+          </div>
         </div>
 
-        <div class="tp__field" id="preSlider">
-          <label class="tp__label">Arrive before kick-off</label>
-          <div class="tp__slider-row">
-            <input class="tp__slider" type="range" id="arrBefore" min="15" max="120" step="5" value="60" oninput="document.getElementById('arrBeforeV').textContent=this.value+' min'">
-            <span class="tp__slider-val" id="arrBeforeV">60 min</span>
-          </div>
-        </div>
         <div class="tp__field" id="postSlider" style="display:none;">
-          <label class="tp__label">Extra time after full-time</label>
+          <label class="tp__label" for="extraAfter">Extra time after full-time</label>
           <div class="tp__slider-row">
             <input class="tp__slider" type="range" id="extraAfter" min="0" max="120" step="5" value="0" oninput="upPostLbl()">
-            <span class="tp__slider-val" id="extraAfterV">Depart at FT</span>
+            <span class="tp__slider-val" id="extraAfterV" aria-hidden="true">Depart at FT</span>
           </div>
           <div class="tp__slider-note" id="postNote"></div>
         </div>
@@ -348,67 +416,7 @@
     </div>
   </div>
 
-  <!-- MANUAL — Custom Fixture Builder -->
-  <div id="manualMode" style="display:none;">
-    <div class="tp__panel">
-      <div class="tp__panel-title">Custom Fixture</div>
-      <div class="tp__field"><label class="tp__label">Home club</label>
-        <div id="manHomeW"></div>
-      </div>
-      <div class="tp__field"><label class="tp__label">Away club</label>
-        <div id="manAwayW"></div>
-      </div>
-      <div class="tp__field"><label class="tp__label">Kick-off</label>
-        <input class="tp__input" type="datetime-local" id="manKO">
-        <div class="tp__ko-presets">
-          <button class="tp__ko-preset" onclick="setKOPreset(6,12,30)">Sat 12.30pm</button>
-          <button class="tp__ko-preset" onclick="setKOPreset(6,15,0)">Sat 3pm</button>
-          <button class="tp__ko-preset" onclick="setKOPreset(6,17,30)">Sat 5.30pm</button>
-          <button class="tp__ko-preset" onclick="setKOPreset(2,19,45)">Tue 7.45pm</button>
-          <button class="tp__ko-preset" onclick="setKOPreset(3,19,45)">Wed 7.45pm</button>
-          <button class="tp__ko-preset" onclick="setKOPreset(5,19,45)">Fri 7.45pm</button>
-        </div>
-      </div>
-      <div class="tp__field">
-        <div class="tp__controls-row">
-          <div class="tp__mode-toggle" id="manModeToggle">
-            <button class="tp__mode-pill active" data-tm="transit" onclick="setManTM('transit')">🚆 Train</button>
-            <button class="tp__mode-pill" data-tm="drive" onclick="setManTM('drive')">🚗 Drive</button>
-          </div>
-          <div class="tp__dir-toggle">
-            <button class="tp__dir-btn active" data-dir="to" onclick="setManDir('to')">➡️ Travel to match</button>
-            <button class="tp__dir-btn" data-dir="from" onclick="setManDir('from')">⬅️ Return from match</button>
-          </div>
-        </div>
-      </div>
-      <div class="tp__field" id="manPresetField">
-        <label class="tp__label" id="manPresetLabel">Start point</label>
-        <div class="tp__presets" id="manPresets">
-          <button class="tp__preset active" data-p="station" onclick="setManPreset('station')">🚉 Station</button>
-          <button class="tp__preset" data-p="custom" onclick="setManPreset('custom')">📍 Custom</button>
-        </div>
-        <div id="manCustomAddrWrap" style="display:none"><input type="hidden" id="manCustomAddr"></div>
-      </div>
-      <div class="tp__field" id="manPreSlider">
-        <label class="tp__label">Arrive before kick-off</label>
-        <div class="tp__slider-row">
-          <input class="tp__slider" type="range" id="manArrBefore" min="15" max="120" step="5" value="60" oninput="document.getElementById('manArrBeforeV').textContent=this.value+' min'">
-          <span class="tp__slider-val" id="manArrBeforeV">60 min</span>
-        </div>
-      </div>
-      <div class="tp__field" id="manPostSlider" style="display:none;">
-        <label class="tp__label">Extra time after full-time</label>
-        <div class="tp__slider-row">
-          <input class="tp__slider" type="range" id="manExtraAfter" min="0" max="120" step="5" value="0" oninput="upManPostLbl()">
-          <span class="tp__slider-val" id="manExtraAfterV">Depart at FT</span>
-        </div>
-        <div class="tp__slider-note" id="manPostNote"></div>
-      </div>
-      <button class="btn btn--primary tp__btn-full" style="margin-top:6px;" id="manBtn" onclick="doManSearch()">Find journey</button>
-    </div>
-  </div>
-
-  <div id="resultsArea"></div>
+  <div id="resultsArea" aria-live="polite"></div>
   <div class="tp__footer">Powered by Google Maps Platform & National League Services</div>
 </div>
 </div>
@@ -422,28 +430,33 @@ var FC=CB+'National%20League%20rose.png';
 var NLS='https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
 var SID=2026,CIDS=[89,373,372];
 
-var clubs=[],fixClub=null,fixMatch=null,fixDir='to',fixPreset='station',fixTM='transit';
-var fixClubPicker=null,manHomePicker=null,manAwayPicker=null; /* NL.clubPicker controllers */
+var clubs=[],fixClub=null,fixDir='to',fixPreset='station',fixTM='transit';
+var sel=null; // normalised selection: {custom,matchID,home,away,homeName,awayName,ko:Date,userIsHome}
+var cfHome=null,cfAway=null; // custom fixture builder picks
+var fixClubPicker=null,cfHomePicker=null,cfAwayPicker=null; /* NL.clubPicker controllers */
 var gMap=null,gPoly=null,allR=[],aIdx=0,mapOK=false;
 var crsLookup={}; // station name → CRS code
 var lastSkipWalk=null; // 'first','last', or null
 var lastSearch=null;
 var lastOL='',lastDL=''; // for route switcher map redraw
+var searchCtx=null; // {ko:Date,ftEst:Date,dir,tm,driveDep:Date|null} — set per search, drives KO buffer
+var _acMounted=false; // Places autocomplete element mounted OK
 
-async function initMap(){try{await google.maps.importLibrary('maps');await google.maps.importLibrary('geometry');await google.maps.importLibrary('marker');await google.maps.importLibrary('places');mapOK=true;initPlacesAC()}catch(e){}}
+async function initMap(){try{await google.maps.importLibrary('maps');await google.maps.importLibrary('geometry');await google.maps.importLibrary('marker');await google.maps.importLibrary('places');mapOK=true;initPlacesAC()}catch(e){}finally{if(!_acMounted)showAddrFallback()}}
 
 function initPlacesAC(){
-  // Attach Google Places Autocomplete (new API) to custom address wrappers
+  // Attach Google Places Autocomplete (new API) to the custom address wrapper
   if(!google.maps.places||!google.maps.places.PlaceAutocompleteElement)return;
-  [['fixCustomAddr','fixCustomAddrWrap'],['manCustomAddr','manCustomAddrWrap']].forEach(function(pair){
-    var input=document.getElementById(pair[0]);
-    var wrap=document.getElementById(pair[1]);
-    if(!input||!wrap||wrap.querySelector('gmp-place-autocomplete'))return;
+  var input=document.getElementById('fixCustomAddr');
+  var wrap=document.getElementById('fixCustomAddrWrap');
+  if(!input||!wrap||wrap.querySelector('gmp-place-autocomplete'))return;
+  try{
     var ac=new google.maps.places.PlaceAutocompleteElement({
       includedRegionCodes:['gb']
     });
     ac.style.width='100%';
     wrap.appendChild(ac);
+    _acMounted=true;
     ac.addEventListener('gmp-select',async function(ev){
       try{
         var place=ev.placePrediction.toPlace();
@@ -451,10 +464,21 @@ function initPlacesAC(){
         var addr=place.formattedAddress||place.displayName||'';
         input.value=addr;
         input.dispatchEvent(new Event('change'));
+        updateBanner();
         syncURL();
       }catch(e){}
     });
-  });
+  }catch(e){}
+}
+
+// If Places never mounts (Maps API blocked/failed), fall back to a plain text input
+function showAddrFallback(){
+  var t=document.getElementById('fixCustomAddrText');
+  if(t)t.style.display='block';
+}
+function custAddrVal(){
+  var h=document.getElementById('fixCustomAddr'),t=document.getElementById('fixCustomAddrText');
+  return((h&&h.value)||(t&&t.style.display!=='none'&&t.value)||'').trim();
 }
 
 function loadClubs(){NL.clubs.load().then(function(d){clubs=(d.clubs||[]).map(function(c){return{name:c.name||'',code:c.code||'',short:c.short||'',stadium:c.stadium_name||'',division:c.division||'',optaID:c.optaID||'',postcode:(c.address&&typeof c.address==='object'?c.address.postcode:c.postcode)||'',colors:c.colors||{},station:c.station||[]}}).sort(function(a,b){return a.name.localeCompare(b.name)})}).catch(function(){})}
@@ -492,41 +516,80 @@ function stationLabel(c){
 // ── AC ── (local autocomplete replaced by shared NL.clubPicker — see nlAuthReady)
 
 // ── Fix club → fixtures ──
-function selFC(c){fixClub=c;fixMatch=null;document.getElementById('fixConfig').style.display='none';if(c){updatePresetLabels();loadFix(c);saveLastClub(c.code)}else{document.getElementById('fixFixtureArea').innerHTML=''}syncURL()}
-function loadFix(club){var a=document.getElementById('fixFixtureArea');a.innerHTML='<div class="tp__loading"><div class="tp__spinner"></div>Loading fixtures…</div>';if(!club.optaID){a.innerHTML='<div class="tp__error">No Opta ID.</div>';return}function pg(cid,n,acc){return fetch(NLS+'/matches/?seasonID='+SID+'&competitionID='+cid+'&sort=kickOffDateUTC&page.size=100&page.number='+n).then(function(r){return r.json()}).then(function(r){var d=(r&&r.data)||[];acc=acc.concat(d);return(d.length>=100&&n<12)?pg(cid,n+1,acc):acc}).catch(function(){return acc})}Promise.all(CIDS.map(function(cid){return pg(cid,1,[])})).then(function(res){var all=[];res.forEach(function(r){all=all.concat(r)});var tid=club.optaID;var up=all.filter(function(m){var x=m.attributes,p=(x.matchPeriod||'').toLowerCase();return(p==='prematch'||!p||p==='fixture')&&((x.homeTeam&&x.homeTeam.teamID===tid)||(x.awayTeam&&x.awayTeam.teamID===tid))}).sort(function(a,b){return new Date(nd(a.attributes.kickOffDateUTC))-new Date(nd(b.attributes.kickOffDateUTC))});if(!up.length){a.innerHTML='<div class="tp__error">No upcoming fixtures.</div>';return}var h='<div class="tp__panel"><div class="tp__panel-title">Upcoming Fixtures</div><div class="tp__fix-list">';up.forEach(function(m,i){var x=m.attributes,isH=x.homeTeam&&x.homeTeam.teamID===tid,opp=isH?x.awayTeam:x.homeTeam,oc=clubs.find(function(c){return c.optaID===(opp?opp.teamID:'')}),ko=new Date(nd(x.kickOffDateUTC)),oppNm=opp?opp.name:(oc?oc.name:''),vc=isH?club:oc;h+='<div class="tp__fix-item" onclick="selFix('+i+')"><img src="'+cU(oppNm)+'" alt="" onerror="this.onerror=function(){this.onerror=null;this.src=\''+FC+'\'};this.src=\''+cUf(oppNm)+'\'"><div class="info"><div class="teams">'+(isH?club.name+' v '+(opp?opp.name:'TBC'):(opp?opp.name:'TBC')+' v '+club.name)+'</div><div class="meta">'+fd(ko)+' '+ft(ko)+(vc&&vc.stadium?' · '+vc.stadium:'')+'</div></div><span class="badge badge--'+(isH?'home':'away')+'">'+(isH?'H':'A')+'</span></div>'});h+='</div></div>';a.innerHTML=h;a._m=up;if(_pendingMatchID){var pi=a._m.findIndex(function(m){return m.id===_pendingMatchID});if(pi!==-1)selFix(pi);_pendingMatchID=null}}).catch(function(){a.innerHTML='<div class="tp__error">Failed to load fixtures.</div>'})}
-function selFix(i){var a=document.getElementById('fixFixtureArea');if(!a._m||!a._m[i])return;fixMatch=a._m[i];a.querySelectorAll('.tp__fix-item').forEach(function(el,j){el.classList.toggle('selected',j===i)});document.getElementById('fixConfig').style.display='block';updatePresetLabels();upPostNote();syncURL();document.getElementById('fixConfig').scrollIntoView({behavior:'smooth'})}
+function selFC(c){
+  fixClub=c;
+  if(sel&&sel.custom){
+    // A custom fixture stays selected — your club only affects the home-game warning
+    updateBanner();
+  }else{
+    sel=null;document.getElementById('fixConfig').style.display='none';
+  }
+  if(c){updatePresetLabels();loadFix(c);saveLastClub(c.code)}else{document.getElementById('fixFixtureArea').innerHTML=''}
+  syncURL();
+}
+function loadFix(club){var a=document.getElementById('fixFixtureArea');a.innerHTML='<div class="tp__loading"><div class="tp__spinner"></div>Loading fixtures…</div>';if(!club.optaID){a.innerHTML='<div class="tp__error">No Opta ID.</div>';return}function pg(cid,n,acc){return fetch(NLS+'/matches/?seasonID='+SID+'&competitionID='+cid+'&sort=kickOffDateUTC&page.size=100&page.number='+n).then(function(r){return r.json()}).then(function(r){var d=(r&&r.data)||[];acc=acc.concat(d);return(d.length>=100&&n<12)?pg(cid,n+1,acc):acc}).catch(function(){return acc})}Promise.all(CIDS.map(function(cid){return pg(cid,1,[])})).then(function(res){var all=[];res.forEach(function(r){all=all.concat(r)});var tid=club.optaID;var up=all.filter(function(m){var x=m.attributes,p=(x.matchPeriod||'').toLowerCase();return(p==='prematch'||!p||p==='fixture')&&((x.homeTeam&&x.homeTeam.teamID===tid)||(x.awayTeam&&x.awayTeam.teamID===tid))}).sort(function(a,b){return new Date(nd(a.attributes.kickOffDateUTC))-new Date(nd(b.attributes.kickOffDateUTC))});if(!up.length){a.innerHTML='<div class="tp__error">No upcoming fixtures.</div>';return}var h='<div class="tp__panel"><div class="tp__panel-title">Upcoming Fixtures</div><div class="tp__fix-list">';up.forEach(function(m,i){var x=m.attributes,isH=x.homeTeam&&x.homeTeam.teamID===tid,opp=isH?x.awayTeam:x.homeTeam,oc=clubs.find(function(c){return c.optaID===(opp?opp.teamID:'')}),ko=new Date(nd(x.kickOffDateUTC)),oppNm=opp?opp.name:(oc?oc.name:''),vc=isH?club:oc;h+='<div class="tp__fix-item" role="button" tabindex="0" onclick="selFix('+i+')"><img src="'+cU(oppNm)+'" alt="" onerror="this.onerror=function(){this.onerror=null;this.src=\''+FC+'\'};this.src=\''+cUf(oppNm)+'\'"><div class="info"><div class="teams">'+(isH?club.name+' v '+(opp?opp.name:'TBC'):(opp?opp.name:'TBC')+' v '+club.name)+'</div><div class="meta">'+fd(ko)+' '+ft(ko)+(vc&&vc.stadium?' · '+vc.stadium:'')+'</div></div><span class="badge badge--'+(isH?'home':'away')+'">'+(isH?'H':'A')+'</span></div>'});h+='</div></div>';a.innerHTML=h;a._m=up;if(_pendingMatchID){var pi=a._m.findIndex(function(m){return m.id===_pendingMatchID});if(pi!==-1)selFix(pi);_pendingMatchID=null}}).catch(function(){a.innerHTML='<div class="tp__error">Failed to load fixtures.</div>'})}
+function selFix(i){
+  var a=document.getElementById('fixFixtureArea');if(!a._m||!a._m[i])return;
+  var m=a._m[i],x=m.attributes,tid=fixClub?fixClub.optaID:'';
+  var isH=x.homeTeam&&x.homeTeam.teamID===tid;
+  var oppID=isH?(x.awayTeam&&x.awayTeam.teamID):(x.homeTeam&&x.homeTeam.teamID);
+  var opp=clubs.find(function(c){return c.optaID===oppID});
+  var home=isH?fixClub:opp, away=isH?opp:fixClub;
+  sel={custom:false,matchID:m.id,home:home||null,away:away||null,
+       homeName:home?home.name:((x.homeTeam&&x.homeTeam.name)||''),
+       awayName:away?away.name:((x.awayTeam&&x.awayTeam.name)||''),
+       ko:new Date(nd(x.kickOffDateUTC)),userIsHome:isH};
+  a.querySelectorAll('.tp__fix-item').forEach(function(el,j){el.classList.toggle('selected',j===i)});
+  document.getElementById('fixConfig').style.display='block';
+  updatePresetLabels();updateBanner();upPostNote();syncURL();
+  document.getElementById('fixConfig').scrollIntoView({behavior:'smooth'});
+}
+
+// ── Journey banner — states whose journey this is (P0 fix) ──
+function updateBanner(){
+  var el=document.getElementById('jBanner');if(!el)return;
+  if(!sel){el.innerHTML='';return}
+  var venue=(sel.home&&(sel.home.stadium||sel.home.short||sel.home.name))||sel.homeName||'the ground';
+  var origin;
+  if(fixPreset==='custom'){var cv=custAddrVal();origin=cv?abbr(cv):'your address'}
+  else origin=(sel.away&&(sel.away.short||sel.away.name))||sel.awayName||'the away side';
+  var from=fixDir==='to'?origin:venue, to=fixDir==='to'?venue:origin;
+  var warn=sel.userIsHome&&fixPreset!=='custom';
+  var sub=warn
+    ?'Your home game — this plans the visiting side\'s route. Travelling yourself? Set a custom start point.'
+    :'Kick-off '+fd(sel.ko)+' '+ft(sel.ko);
+  el.innerHTML='<div class="tp__jbanner'+(warn?' tp__jbanner--warn':'')+'"><div class="t">Travel plan — from '+NL.escHtml(from)+' to '+NL.escHtml(to)+'</div><div class="s">'+NL.escHtml(sub)+'</div></div>';
+}
 
 // ── Controls ──
-function setDir(d){fixDir=d;document.querySelectorAll('#fixtureMode .tp__dir-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-dir')===d)});document.getElementById('preSlider').style.display=d==='to'?'block':'none';document.getElementById('postSlider').style.display=d==='from'?'block':'none';if(d==='from')upPostNote();updateDirText();syncURL()}
+function setDir(d){
+  fixDir=d;
+  document.querySelectorAll('#fixtureMode .tp__dir-btn').forEach(function(b){var on=b.getAttribute('data-dir')===d;b.classList.toggle('active',on);b.setAttribute('aria-pressed',on?'true':'false')});
+  document.getElementById('postSlider').style.display=d==='from'?'block':'none';
+  if(d==='from')upPostNote();
+  updateDirText();updateBanner();syncURL();
+}
 // Direction-aware wording: preset label + search button follow the selected direction
 function updateDirText(){
-  var l1=document.getElementById('fixPresetLabel');if(l1)l1.textContent=fixDir==='to'?'Start point':'End point';
-  var l2=document.getElementById('manPresetLabel');if(l2)l2.textContent=manDir==='to'?'Start point':'End point';
+  var l1=document.getElementById('fixPresetLabel');if(l1)l1.textContent=fixDir==='to'?'Depart from':'Return to';
   var b1=document.getElementById('fixBtn');if(b1&&!b1.classList.contains('btn--loading'))b1.textContent=fixDir==='to'?'Find journey':'Find return journey';
-  var b2=document.getElementById('manBtn');if(b2&&!b2.classList.contains('btn--loading'))b2.textContent=manDir==='to'?'Find journey':'Find return journey';
 }
 function upPostLbl(){var v=+document.getElementById('extraAfter').value;document.getElementById('extraAfterV').textContent=v===0?'Depart at FT':'~'+v+'m after FT'}
-function upPostNote(){if(!fixMatch)return;var ko=new Date(nd(fixMatch.attributes.kickOffDateUTC));document.getElementById('postNote').textContent='Assumes 2h match. Estimated FT: '+ft(new Date(ko.getTime()+72e5))}
+function upPostNote(){if(!sel)return;document.getElementById('postNote').textContent='Assumes 2h match. Estimated FT: '+ft(new Date(sel.ko.getTime()+72e5))}
 function setPreset(p){
   fixPreset=p;
-  document.querySelectorAll('#fixPresets .tp__preset').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-p')===p)});
+  document.querySelectorAll('#fixPresets .tp__preset').forEach(function(b){var on=b.getAttribute('data-p')===p;b.classList.toggle('active',on);b.setAttribute('aria-pressed',on?'true':'false')});
   document.getElementById('fixCustomAddrWrap').style.display=p==='custom'?'block':'none';
-  updatePresetLabels();
+  if(p==='custom'&&!_acMounted)showAddrFallback();
+  updatePresetLabels();updateBanner();
   syncURL();
-  if(fixMatch&&fixClub)doFixSearch();
+  // Auto-search only when a search could actually run (custom needs an address first)
+  if(sel&&(p!=='custom'||custAddrVal()))doFixSearch();
 }
 function getEnabledModes(){return[]}  // No filter — let Google decide
 function updatePresetLabels(){
-  if(!fixClub)return;
-  var awayC=fixClub;
-  if(fixMatch){
-    var a=fixMatch.attributes,tid=fixClub.optaID;
-    var isH=a.homeTeam&&a.homeTeam.teamID===tid;
-    var oppID=isH?a.awayTeam.teamID:a.homeTeam.teamID;
-    var opp=clubs.find(function(c){return c.optaID===oppID});
-    awayC=isH?opp:fixClub;
-    if(!awayC)awayC=fixClub;
-  }
+  var awayC=(sel&&sel.away)||fixClub;
+  if(!awayC)return;
   var btns=document.querySelectorAll('#fixPresets .tp__preset');
   btns.forEach(function(b){
     var p=b.getAttribute('data-p');
@@ -536,24 +599,30 @@ function updatePresetLabels(){
     }
   });
 }
-function getEnabledModes(){var modes=[];document.querySelectorAll('#transitToggles .tp__tt.on').forEach(function(b){modes.push(b.getAttribute('data-t'))});return modes}
-function setMode(m){document.querySelectorAll('.tp__mode-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-mode')===m)});document.getElementById('fixtureMode').style.display=m==='fixture'?'block':'none';document.getElementById('manualMode').style.display=m==='manual'?'block':'none';document.getElementById('resultsArea').innerHTML='';syncURL()}
-function setTransport(b,p){document.getElementById(p+'Transport').querySelectorAll('.tp__transport-btn').forEach(function(x){x.classList.remove('active')});b.classList.add('active')}
 
-// ── Manual — custom fixture builder ──
-var manHomeClub=null,manAwayClub=null,manDir='to',manPreset='station',manTM='transit';
+// ── Custom fixture builder (replaces the old Manual Journey tab) ──
+function toggleCF(){
+  var body=document.getElementById('cfBody'),t=document.getElementById('cfToggle');
+  var open=body.style.display==='none';
+  body.style.display=open?'block':'none';
+  t.setAttribute('aria-expanded',open?'true':'false');
+}
+function cfSel(){
+  // Called on every builder change — selects the custom fixture once complete
+  var koVal=document.getElementById('cfKO').value;
+  if(!cfHome||!cfAway||!koVal)return;
+  sel={custom:true,matchID:null,home:cfHome,away:cfAway,homeName:cfHome.name,awayName:cfAway.name,
+       ko:new Date(koVal),userIsHome:!!(fixClub&&fixClub.code===cfHome.code)};
+  document.querySelectorAll('#fixFixtureArea .tp__fix-item').forEach(function(el){el.classList.remove('selected')});
+  document.getElementById('fixConfig').style.display='block';
+  updatePresetLabels();updateBanner();upPostNote();syncURL();
+}
 
-// Transport mode toggles
+// Transport mode toggle
 function setFixTM(tm){
   fixTM=tm;
-  document.querySelectorAll('#fixModeToggle .tp__mode-pill').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-tm')===tm)});
+  document.querySelectorAll('#fixModeToggle .tp__mode-pill').forEach(function(b){var on=b.getAttribute('data-tm')===tm;b.classList.toggle('active',on);b.setAttribute('aria-pressed',on?'true':'false')});
   updatePresetLabels();
-  syncURL();
-}
-function setManTM(tm){
-  manTM=tm;
-  document.querySelectorAll('#manModeToggle .tp__mode-pill').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-tm')===tm)});
-  updateManPresetLabels();
   syncURL();
 }
 
@@ -566,60 +635,9 @@ function setKOPreset(dayOfWeek,hh,mm){
   var yyyy=target.getFullYear();
   var mo=String(target.getMonth()+1).padStart(2,'0');
   var dd=String(target.getDate()).padStart(2,'0');
-  document.getElementById('manKO').value=yyyy+'-'+mo+'-'+dd+'T'+String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0');
-  syncURL();
+  document.getElementById('cfKO').value=yyyy+'-'+mo+'-'+dd+'T'+String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0');
+  cfSel();syncURL();
 }
-
-function selManHome(c){
-  manHomeClub=c;
-  if(c){updateManPresetLabels()}
-  syncURL();
-}
-function selManAway(c){
-  manAwayClub=c;
-  if(c){updateManPresetLabels()}
-  syncURL();
-}
-function setManDir(d){
-  manDir=d;
-  document.querySelectorAll('#manualMode .tp__dir-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-dir')===d)});
-  document.getElementById('manPreSlider').style.display=d==='to'?'block':'none';
-  document.getElementById('manPostSlider').style.display=d==='from'?'block':'none';
-  if(d==='from')upManPostNote();
-  updateDirText();
-  syncURL();
-}
-function setManPreset(p){
-  manPreset=p;
-  document.querySelectorAll('#manPresets .tp__preset').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-p')===p)});
-  document.getElementById('manCustomAddrWrap').style.display=p==='custom'?'block':'none';
-  syncURL();
-}
-function upManPostLbl(){
-  var v=+document.getElementById('manExtraAfter').value;
-  document.getElementById('manExtraAfterV').textContent=v===0?'Depart at FT':'~'+v+'m after FT';
-}
-function upManPostNote(){
-  var koVal=document.getElementById('manKO').value;
-  if(!koVal)return;
-  var ko=new Date(koVal);
-  document.getElementById('manPostNote').textContent='Assumes 2h match. Estimated FT: '+ft(new Date(ko.getTime()+72e5));
-}
-function updateManPresetLabels(){
-  var club=manAwayClub;
-  var btns=document.querySelectorAll('#manPresets .tp__preset');
-  btns.forEach(function(b){
-    var p=b.getAttribute('data-p');
-    if(p!=='station')return;
-    if(club){
-      if(manTM==='drive')b.textContent='🏟 '+(club.stadium||club.short||club.name);
-      else b.textContent='🚉 '+stationLabel(club);
-    }else{
-      b.textContent=manTM==='drive'?'🏟 Stadium':'🚉 Station';
-    }
-  });
-}
-function getManModes(){return[]}  // No filter
 
 // ── REST API ──
 var FM='routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.legs.duration,routes.legs.startLocation,routes.legs.endLocation,routes.legs.localizedValues,routes.legs.steps.travelMode,routes.legs.steps.staticDuration,routes.legs.steps.polyline.encodedPolyline,routes.legs.steps.startLocation,routes.legs.steps.endLocation,routes.legs.steps.navigationInstruction,routes.legs.steps.localizedValues,routes.legs.steps.transitDetails.stopDetails,routes.legs.steps.transitDetails.transitLine,routes.legs.steps.transitDetails.headsign,routes.legs.steps.transitDetails.stopCount,routes.legs.steps.transitDetails.localizedValues';
@@ -640,41 +658,46 @@ async function callAPI(origin,dest,tm,opts,modes){
   return r.json();
 }
 
-// ── Fix search ──
+// ── Search — single entry point for fixture and custom selections alike ──
 function doFixSearch(){
-  if(!fixMatch||!fixClub){
-    if(!fixClub){var el=document.getElementById('fixClubWrap');el.classList.add('tp__shake');setTimeout(function(){el.classList.remove('tp__shake')},400)}
+  if(!sel){
+    var el=document.getElementById(fixClub?'fixFixtureArea':'fixClubWrap');
+    if(el){el.classList.add('tp__shake');setTimeout(function(){el.classList.remove('tp__shake')},400)}
     return;
   }
+  // Custom start point needs an address before we call the API
+  var customVal=custAddrVal();
+  if(fixPreset==='custom'&&!customVal){
+    var w=document.getElementById('fixCustomAddrWrap');
+    if(w){w.classList.add('tp__shake');setTimeout(function(){w.classList.remove('tp__shake')},400)}
+    NL.toast('Add the custom address first');
+    return;
+  }
+
   var btn=document.getElementById('fixBtn');
   btn.classList.add('btn--loading');btn.textContent='Searching…';
 
-  var a=fixMatch.attributes,tid=fixClub.optaID;
-  var isH=a.homeTeam&&a.homeTeam.teamID===tid;
-  var oppID=isH?a.awayTeam.teamID:a.homeTeam.teamID;
-  var opp=clubs.find(function(c){return c.optaID===oppID});
+  var homeClub=sel.home,awayClub=sel.away;
+  var homeGroundAddr=homeClub?addr(homeClub):((sel.homeName||'Home')+', UK');
+  var homeStadiumLabel=homeClub?(homeClub.stadium||homeClub.short||homeClub.name):(sel.homeName||'Home');
 
-  var homeClub=isH?fixClub:opp;
-  var awayClub=isH?opp:fixClub;
-
-  var homeGroundAddr=homeClub?addr(homeClub):(a.homeTeam.name+', UK');
-  var homeStadiumLabel=homeClub?(homeClub.stadium||homeClub.short||homeClub.name):'Home';
-
-  var ko=new Date(nd(a.kickOffDateUTC)),opts={};
+  var ko=sel.ko,ftEst=new Date(ko.getTime()+72e5),opts={};
   if(fixDir==='to'){
-    var mb=+document.getElementById('arrBefore').value;
-    opts.arrivalTime=new Date(ko.getTime()-mb*6e4).toISOString();
+    // No pre-KO slider: searches target kick-off itself, and the KO buffer
+    // strip on results shows the margin each route actually gives.
+    opts.arrivalTime=ko.toISOString();
   }else{
     var ea=+document.getElementById('extraAfter').value;
-    opts.departureTime=new Date(ko.getTime()+72e5+ea*6e4).toISOString();
+    opts.departureTime=new Date(ftEst.getTime()+ea*6e4).toISOString();
   }
+  searchCtx={ko:ko,ftEst:ftEst,dir:fixDir,tm:fixTM,driveDep:null};
+  _lastRun=doFixSearch;
 
   // DRIVING mode
   if(fixTM==='drive'){
-    var fixCustomVal=document.getElementById('fixCustomAddr')?document.getElementById('fixCustomAddr').value.trim():'';
-    var useCustom=fixPreset==='custom'&&fixCustomVal;
-    var awayPoint=useCustom?fixCustomVal:(awayClub?addr(awayClub):homeGroundAddr);
-    var awayLabelTxt=useCustom?fixCustomVal:(awayClub?(awayClub.stadium||awayClub.short):'Away');
+    var useCustom=fixPreset==='custom'&&customVal;
+    var awayPoint=useCustom?customVal:(awayClub?addr(awayClub):homeGroundAddr);
+    var awayLabelTxt=useCustom?customVal:(awayClub?(awayClub.stadium||awayClub.short):(sel.awayName||'Away'));
     var awayIconCh=useCustom?'📍':'🚗';
     var dOrigin=awayPoint;
     var dDest=homeGroundAddr;
@@ -687,15 +710,20 @@ function doFixSearch(){
   }
 
   // TRANSIT mode
-  var customAddrVal=document.getElementById('fixCustomAddr')?document.getElementById('fixCustomAddr').value.trim():'';
   var awayAddrs=[];
-  if(fixPreset==='custom'){awayAddrs.push(customAddrVal)}
+  if(fixPreset==='custom'){awayAddrs.push(customVal)}
   else if(awayClub&&awayClub.station&&awayClub.station.length>1){awayClub.station.forEach(function(sn,i){awayAddrs.push(stationAddr(awayClub,i))})}
-  else{awayAddrs.push(awayClub?stationAddr(awayClub):'')}
+  else if(awayClub){awayAddrs.push(stationAddr(awayClub))}
+  else{
+    // Away side unknown to clubs-meta (e.g. TBC) — a station search has nothing to aim at
+    btn.classList.remove('btn--loading');updateDirText();
+    NL.toast('No station data for the away side — use a custom start point');
+    return;
+  }
 
-  var awayStLabel=awayClub?stationLabel(awayClub):'Away Station';
+  var awayStLabel=awayClub?stationLabel(awayClub):(sel.awayName||'Away Station');
   var awayIcon,awayDescLabel;
-  if(fixPreset==='custom'){awayDescLabel=customAddrVal||'Custom';awayIcon='📍 '}
+  if(fixPreset==='custom'){awayDescLabel=customVal||'Custom';awayIcon='📍 '}
   else{awayDescLabel=awayStLabel;awayIcon='🚉 '}
 
   var sw2=null;
@@ -714,73 +742,60 @@ function doFixSearch(){
   doMultiRoute(pairs,'TRANSIT',opts,oL,dL,getEnabledModes(),sw2).finally(function(){btn.classList.remove('btn--loading');updateDirText()});
 }
 
-function doManSearch(){
-  // Validation
-  var valid=true;
-  if(!manHomeClub){var h=document.getElementById('manHomeW');h.classList.add('tp__shake');setTimeout(function(){h.classList.remove('tp__shake')},400);valid=false}
-  if(!manAwayClub){var aw=document.getElementById('manAwayW');aw.classList.add('tp__shake');setTimeout(function(){aw.classList.remove('tp__shake')},400);valid=false}
-  var koVal=document.getElementById('manKO').value;
-  if(!koVal){var kEl=document.getElementById('manKO');kEl.classList.add('tp__shake');setTimeout(function(){kEl.classList.remove('tp__shake')},400);valid=false}
-  if(!valid)return;
+// ── Error handling: plain English + retry ──
+var _lastRun=null;
+function tpRetry(){if(_lastRun)_lastRun()}
+function friendlyErr(e){
+  var m=(e&&e.message)||'';
+  if(/failed to fetch|networkerror|load failed|network/i.test(m))return'Couldn’t reach the route service. Check your connection and try again.';
+  if(/geocod|not found|invalid.*address|address.*invalid/i.test(m))return'Couldn’t find one of the addresses. Check the custom address and try again.';
+  if(/api key|permission|denied|quota|exhausted/i.test(m))return'The route service refused the request. Try again in a minute.';
+  return'Route search failed. Try again in a moment.';
+}
+function errHTML(e){
+  var raw=(e&&e.message)||'';
+  return'<div class="tp__error"><div class="tp__error-msg">'+NL.escHtml(friendlyErr(e))+'</div>'
+    +(raw?'<div class="tp__error-raw">'+NL.escHtml(raw)+'</div>':'')
+    +'<button type="button" class="btn btn--primary" onclick="tpRetry()">Try again</button></div>';
+}
 
-  var btn=document.getElementById('manBtn');
-  btn.classList.add('btn--loading');btn.textContent='Searching…';
-
-  var ko=new Date(koVal);
-  var homeA=addr(manHomeClub);
-  var homeStadium=manHomeClub.stadium||manHomeClub.short||manHomeClub.name;
-
-  var opts={};
-  if(manDir==='to'){
-    var mb=+document.getElementById('manArrBefore').value;
-    opts.arrivalTime=new Date(ko.getTime()-mb*6e4).toISOString();
-  }else{
-    var ea=+document.getElementById('manExtraAfter').value;
-    opts.departureTime=new Date(ko.getTime()+72e5+ea*6e4).toISOString();
+// ── KO buffer — "will I make kick-off?" computed per route ──
+function routeArrDate(r){
+  // Effective arrival: last transit arrival + any trailing walk (unless hidden)
+  if(!r.legs||!r.legs[0]||!r.legs[0].steps)return null;
+  var steps=r.legs[0].steps,lastArr=null,trailingWalk=0;
+  for(var i=steps.length-1;i>=0;i--){
+    var s=steps[i];
+    if(s.transitDetails&&s.transitDetails.stopDetails&&s.transitDetails.stopDetails.arrivalTime){lastArr=new Date(s.transitDetails.stopDetails.arrivalTime);break}
+    if(s.travelMode==='WALK'&&s.staticDuration){trailingWalk+=parseInt(String(s.staticDuration).replace('s',''),10)||0}
   }
-
-  // DRIVING mode
-  if(manTM==='drive'){
-    var manCustomValD=document.getElementById('manCustomAddr')?document.getElementById('manCustomAddr').value.trim():'';
-    var useManCustom=manPreset==='custom'&&manCustomValD;
-    var awayPoint=useManCustom?manCustomValD:addr(manAwayClub);
-    var awayLabelTxt=useManCustom?manCustomValD:(manAwayClub.stadium||manAwayClub.short);
-    var awayIconCh=useManCustom?'📍':'🚗';
-    var dOrigin=awayPoint;
-    var dDest=homeA;
-    var dOL=awayIconCh+' '+awayLabelTxt;
-    var dDL='🏟 '+homeStadium;
-    if(manDir==='from'){dOrigin=homeA;dDest=awayPoint;dOL='🏟 '+homeStadium;dDL=awayIconCh+' '+awayLabelTxt}
-    lastOL=dOL;lastDL=dDL;
-    doDriveSearch(dOrigin,dDest,opts,dOL,dDL).finally(function(){btn.classList.remove('btn--loading');updateDirText()});
-    return;
+  if(!lastArr)return null;
+  if(lastSkipWalk!=='last')lastArr=new Date(lastArr.getTime()+trailingWalk*1000);
+  return lastArr;
+}
+function bufMins(r){
+  if(!searchCtx)return null;
+  if(searchCtx.dir==='to'){var a=routeArrDate(r);return a?Math.round((searchCtx.ko-a)/6e4):null}
+  var d=firstDepTime(r);return d?Math.round((new Date(d)-searchCtx.ftEst)/6e4):null;
+}
+function bufStripHTML(b,extraSub){
+  // b = minutes before KO (dir 'to') or after est. FT (dir 'from'); null = unknown
+  if(b===null||!searchCtx)return'';
+  if(searchCtx.dir==='to'){
+    var cls=b>=30?'ok':b>=0?'tight':'late';
+    var big=b>=0?('Arrives '+b+' min before kick-off'):('Arrives '+(-b)+' min after kick-off');
+    var sub=b>=30?'Comfortable margin':b>=0?'Tight — no margin for delays':'Misses kick-off — pick an earlier route';
+    if(extraSub)sub=extraSub+' · '+sub;
+    return'<div class="tp__kobuf tp__kobuf--'+cls+'"><span class="big">'+big+'</span><span class="sub">'+sub+'</span></div>';
   }
-
-  // TRANSIT mode
-  var awayStLabel=stationLabel(manAwayClub);
-  var manCustomVal=document.getElementById('manCustomAddr')?document.getElementById('manCustomAddr').value.trim():'';
-
-  var awayAddrs=[];
-  if(manPreset==='custom'){awayAddrs.push(manCustomVal)}
-  else if(manAwayClub.station&&manAwayClub.station.length>1){manAwayClub.station.forEach(function(sn,i){awayAddrs.push(stationAddr(manAwayClub,i))})}
-  else{awayAddrs.push(stationAddr(manAwayClub))}
-
-  var manIcon,awayDescLabel;
-  if(manPreset==='custom'){awayDescLabel=manCustomVal||'Custom';manIcon='📍 '}
-  else{awayDescLabel=awayStLabel;manIcon='🚉 '}
-
-  var pairs=awayAddrs.map(function(aa){
-    if(manDir==='to') return{o:aa,d:homeA};
-    else return{o:homeA,d:aa};
-  });
-
-  var oL=(manDir==='to'?manIcon+awayDescLabel:'🏟 '+homeStadium);
-  var dL=(manDir==='to'?'🏟 '+homeStadium:manIcon+awayDescLabel);
-  lastOL=oL;lastDL=dL;
-
-  var msw=null;
-  if(manPreset!=='custom'){msw=manDir==='to'?'first':'last'}
-  doMultiRoute(pairs,'TRANSIT',opts,oL,dL,getManModes(),msw).finally(function(){btn.classList.remove('btn--loading');updateDirText()});
+  var txt=b>=0?('Departs '+b+' min after estimated full-time'):('Departs '+(-b)+' min before estimated full-time');
+  return'<div class="tp__kobuf tp__kobuf--info"><span class="big">'+txt+'</span><span class="sub">'+(extraSub||'Assumes a 2-hour match')+'</span></div>';
+}
+function bufChipHTML(r){
+  if(!searchCtx||searchCtx.dir!=='to')return'';
+  var b=bufMins(r);if(b===null)return'';
+  var cls=b>=30?'ok':b>=0?'tight':'late';
+  return'<span class="chip-buf chip-buf--'+cls+'">'+(b>=0?'KO −'+b+'m':'KO +'+(-b)+'m')+'</span>';
 }
 
 // ── Driving search ──
@@ -793,17 +808,18 @@ async function doDriveSearch(origin,dest,opts,oL,dL){
     var body={origin:{address:origin},destination:{address:dest},travelMode:'DRIVE',routingPreference:'TRAFFIC_AWARE',computeAlternativeRoutes:true,languageCode:'en-GB',units:'METRIC',routeModifiers:{avoidTolls:false}};
     if(opts.departureTime)body.departureTime=opts.departureTime;
     else if(opts.arrivalTime){
-      // DRIVE doesn't support arrivalTime — calculate departure estimate
-      // Use a rough 3h buffer before desired arrival
+      // DRIVE doesn't support arrivalTime — assume departing 3h before the
+      // target arrival. This assumption is DISCLOSED on the results (KO strip).
       body.departureTime=new Date(new Date(opts.arrivalTime).getTime()-108e5).toISOString();
     }
+    if(searchCtx&&body.departureTime)searchCtx.driveDep=new Date(body.departureTime);
     var r=await fetch(RU,{method:'POST',headers:{'Content-Type':'application/json','X-Goog-Api-Key':GK,'X-Goog-FieldMask':DFM},body:JSON.stringify(body)});
     if(!r.ok){var e=await r.json().catch(function(){return{}});throw new Error((e.error&&e.error.message)||'API error '+r.status)}
     var data=await r.json();
-    if(!data.routes||!data.routes.length){ra.innerHTML='<div class="tp__error">No driving routes found.</div>';return}
+    if(!data.routes||!data.routes.length){ra.innerHTML='<div class="tp__error"><div class="tp__error-msg">No driving routes found between those two points.</div><button type="button" class="btn btn--primary" onclick="tpRetry()">Try again</button></div>';return}
     allR=data.routes.slice(0,3);aIdx=0;lastSkipWalk=null;
     renderDrive(allR,0,oL,dL);
-  }catch(e){ra.innerHTML='<div class="tp__error">'+e.message+'</div>'}
+  }catch(e){ra.innerHTML=errHTML(e)}
 }
 
 function renderDrive(routes,idx,oL,dL){
@@ -811,11 +827,33 @@ function renderDrive(routes,idx,oL,dL){
   var dur=r.duration?fmtDur(r.duration):'';
   var dist=r.distanceMeters?fmtDist(r.distanceMeters):'';
 
+  // Estimated arrival for a drive route = assumed departure + duration
+  function driveEta(rt){
+    if(!searchCtx||!searchCtx.driveDep||!rt.duration)return null;
+    var sec=parseInt(String(rt.duration).replace('s',''),10);
+    return isNaN(sec)?null:new Date(searchCtx.driveDep.getTime()+sec*1000);
+  }
+
   var h='<div class="tp__results"><div class="tp__map-col"><div id="routeMap"></div></div><div class="tp__board-col">';
   h+='<div class="tp__summary">';
-  h+='<div class="tp__summary-route">🚗 '+abbr(oL.replace(/^🚗 |^🏟 /,''))+'<span class="arrow">→</span>'+abbr(dL.replace(/^🚗 |^🏟 /,''))+'</div>';
+  h+='<div class="tp__summary-route">🚗 '+abbr(oL.replace(/^🚗 |^🏟 |^📍 /,''))+'<span class="arrow">→</span>'+abbr(dL.replace(/^🚗 |^🏟 |^📍 /,''))+'</div>';
   h+='<div class="tp__summary-duration">'+dur+(dist?' · '+dist:'')+'</div>';
+  if(searchCtx)h+='<div class="tp__summary-depart">'+(searchCtx.driveDep?'Departs '+ft(searchCtx.driveDep)+' · ':'')+'Kick-off '+ft(searchCtx.ko)+'</div>';
   h+='</div>';
+
+  // KO buffer for the active route, with the departure assumption said out loud
+  if(searchCtx&&searchCtx.driveDep){
+    var eta=driveEta(r);
+    if(eta){
+      if(searchCtx.dir==='to'){
+        var b=Math.round((searchCtx.ko-eta)/6e4);
+        h+=bufStripHTML(b,'If you leave at '+ft(searchCtx.driveDep));
+      }else{
+        var bf=Math.round((searchCtx.driveDep-searchCtx.ftEst)/6e4);
+        h+=bufStripHTML(bf,'Assumes a 2-hour match · Home by ~'+ft(eta));
+      }
+    }
+  }
 
   h+='<div class="tp__drive-results">';
   routes.forEach(function(rt,i){
@@ -823,12 +861,14 @@ function renderDrive(routes,idx,oL,dL){
     var rdist=rt.distanceMeters?fmtDist(rt.distanceMeters):'';
     var rtoll=rt.travelAdvisory&&rt.travelAdvisory.tollInfo;
     var rdesc=rt.description||'';
+    var reta=driveEta(rt);
 
     // Extract major road names from steps
     var roads=extractRoads(rt);
 
-    h+='<div class="tp__drive-card'+(i===idx?' active':'')+'" onclick="swDrive('+i+',\''+esc(oL)+'\',\''+esc(dL)+'\')">';
+    h+='<div class="tp__drive-card'+(i===idx?' active':'')+'" role="button" tabindex="0" onclick="swDrive('+i+',\''+esc(oL)+'\',\''+esc(dL)+'\')">';
     h+='<div class="tp__drive-head"><span class="tp__drive-dur">'+(i===0?'🟢 Fastest':'Route '+(i+1))+' · '+rd+'</span><span class="tp__drive-dist">'+rdist+'</span></div>';
+    if(reta&&searchCtx.dir==='to')h+='<div class="tp__drive-meta">ETA '+ft(reta)+' · kick-off '+ft(searchCtx.ko)+'</div>';
     if(rdesc)h+='<div class="tp__drive-via">via '+rdesc+'</div>';
     h+=roadBadgesHTML(roads);
     if(rtoll)h+='<div class="tp__drive-toll">💰 Tolls on this route</div>';
@@ -947,7 +987,7 @@ async function doMultiRoute(pairs,tm,opts,oL,dL,modes,skipWalk){
     results.forEach(function(data){
       if(data.routes)collected=collected.concat(data.routes);
     });
-    if(!collected.length){ra.innerHTML='<div class="tp__error">No routes found across any station.</div>';return}
+    if(!collected.length){ra.innerHTML='<div class="tp__error"><div class="tp__error-msg">No routes found from any of the away side’s stations.</div><div class="tp__error-raw">Public transport may not cover this journey at that time — try Drive mode or a custom start point.</div><button type="button" class="btn btn--primary" onclick="tpRetry()">Try again</button></div>';return}
 
     // Expand search: try earlier/later departures from each station
     for(var pass=0;pass<2;pass++){
@@ -966,7 +1006,7 @@ async function doMultiRoute(pairs,tm,opts,oL,dL,modes,skipWalk){
       }catch(e){break}
     }
     allR=dedupeRoutes(collected,isToMode);aIdx=0;lastSkipWalk=skipWalk||null;render(allR,0,oL,dL);
-  }catch(e){ra.innerHTML='<div class="tp__error">'+e.message+'</div>'}
+  }catch(e){ra.innerHTML=errHTML(e)}
 }
 
 async function doRoute(o,d,tm,opts,oL,dL,modes,skipWalk){
@@ -975,7 +1015,7 @@ async function doRoute(o,d,tm,opts,oL,dL,modes,skipWalk){
   var isToMode=!!opts.arrivalTime; // TO = arrivalTime, FROM = departureTime
   try{
     var data=await callAPI(o,d,tm,opts,modes);
-    if(!data.routes||!data.routes.length){ra.innerHTML='<div class="tp__error">No routes found.</div>';return}
+    if(!data.routes||!data.routes.length){ra.innerHTML='<div class="tp__error"><div class="tp__error-msg">No routes found for that journey.</div><div class="tp__error-raw">Public transport may not cover it at that time — try Drive mode or a custom start point.</div><button type="button" class="btn btn--primary" onclick="tpRetry()">Try again</button></div>';return}
     var collected=data.routes.slice();
     for(var pass=0;pass<2;pass++){
       var dd=dedupeRoutes(collected,isToMode);if(dd.length>=4)break;
@@ -986,7 +1026,7 @@ async function doRoute(o,d,tm,opts,oL,dL,modes,skipWalk){
       try{var mr=await callAPI(o,d,tm,no,modes);if(mr.routes)collected=collected.concat(mr.routes)}catch(e){break}
     }
     allR=dedupeRoutes(collected,isToMode);aIdx=0;lastSkipWalk=skipWalk||null;render(allR,0,oL,dL);
-  }catch(e){ra.innerHTML='<div class="tp__error">'+e.message+'</div>'}
+  }catch(e){ra.innerHTML=errHTML(e)}
 }
 
 function findEdgeDeparture(routes,which){
@@ -1123,15 +1163,19 @@ function render(routes,idx,oL,dL){
   var dClean=abbr(dL.replace(/^(?:🚗|🏟|🚉|📍)\s*/u,''));
   h+='<div class="tp__summary-route"><div>Depart '+oClean+'</div><div>Arrive '+dClean+'</div></div>';
   h+='<div class="tp__summary-duration">'+dur+(dist?' · '+dist:'')+(fareText?' · '+fareText:'')+'</div>';
-  if(overallDep||overallArr){
+  if(overallDep||overallArr||searchCtx){
     var timeStr='';
     if(overallDep)timeStr+='Departs '+overallDep;
     if(overallDep&&overallArr)timeStr+=' · ';
     if(overallArr)timeStr+='Arrives '+overallArr;
+    if(searchCtx)timeStr+=(timeStr?' · ':'')+'Kick-off '+ft(searchCtx.ko);
     h+='<div class="tp__summary-depart">'+timeStr+'</div>';
   }
   if(overnight)h+='<div class="tp__summary-depart" style="color:var(--amber-light);">⚠️ Requires overnight stay — no same-day route available</div>';
   h+='</div>';
+
+  // KO buffer strip — leads the board with "will I make kick-off?"
+  h+=bufStripHTML(bufMins(r));
 
   // Route alternatives — above the board, sticky
   if(routes.length>1){
@@ -1140,7 +1184,7 @@ function render(routes,idx,oL,dL){
       var rd=rt.duration?fmtDur(rt.duration):'',chip='Route '+(i+1);
       if(rt.legs&&rt.legs[0]&&rt.legs[0].steps){for(var j=0;j<rt.legs[0].steps.length;j++){var st=rt.legs[0].steps[j];if(st.transitDetails&&st.transitDetails.stopDetails&&st.transitDetails.stopDetails.departureTime){chip=fI(st.transitDetails.stopDetails.departureTime);break}}}
       var mNames=routeModeNames(rt);
-      h+='<div class="tp__alt-chip'+(i===idx?' active':'')+'" onclick="sw('+i+',\''+esc(oL)+'\',\''+esc(dL)+'\')"><div class="chip-time">'+chip+(rd?' <span class="dur">'+rd+'</span>':'')+'</div>'+(mNames?'<div class="chip-modes">'+mNames+'</div>':'')+'</div>';
+      h+='<div class="tp__alt-chip'+(i===idx?' active':'')+'" role="button" tabindex="0" onclick="sw('+i+',\''+esc(oL)+'\',\''+esc(dL)+'\')"><div class="chip-time">'+chip+(rd?' <span class="dur">'+rd+'</span>':'')+'</div>'+(mNames?'<div class="chip-modes">'+mNames+'</div>':'')+bufChipHTML(rt)+'</div>';
     });
     h+='</div>';
   }
@@ -1358,7 +1402,7 @@ function render(routes,idx,oL,dL){
     var dotStyle=lineCol?' style="border-color:'+lineCol+'"':'';
     var modeStyle=lineCol?' style="background:'+lineCol+';color:'+(lineTxt||'var(--white)')+'"':'';
 
-    h+='<div class="tp__leg tp__leg--'+cls+'" onclick="zoomToStep('+si2+')" style="cursor:pointer">';
+    h+='<div class="tp__leg tp__leg--'+cls+'" role="button" tabindex="0" title="Show this leg on the map" onclick="zoomToStep('+si2+')" style="cursor:pointer">';
     h+='<div class="tp__leg-times">';
     h+=dep?'<div class="tp__leg-time">'+dep+'</div>':'<div></div>';
     h+=arr?'<div class="tp__leg-time-end">'+arr+'</div>':'<div></div>';
@@ -1515,36 +1559,25 @@ function vShort(t){return{BUS:'Bus',INTERCITY_BUS:'Coach',RAIL:'Train',HEAVY_RAI
 function abbr(s){return s&&s.length>35?s.substring(0,33)+'…':s||''}
 function esc(s){return(s||'').replace(/'/g,"\\'").replace(/"/g,'&quot;')}
 
-// ── URL state sync ──
+// ── URL state sync (single flow; legacy mode=manual links restore via home/away/ko) ──
 var _urlSuppressed=false; // suppress syncURL during readURL restoration
 function syncURL(){
   if(_urlSuppressed)return;
   var p=new URLSearchParams();
-  // Which mode?
-  var mode=document.getElementById('manualMode').style.display==='none'?'fixture':'manual';
-  p.set('mode',mode);
-
-  if(mode==='fixture'){
-    if(fixClub)p.set('club',fixClub.code);
-    if(fixMatch&&fixMatch.id)p.set('fix',fixMatch.id);
-    p.set('dir',fixDir);
-    p.set('tm',fixTM);
-    p.set('preset',fixPreset);
-    if(fixPreset==='custom'){var cv=document.getElementById('fixCustomAddr').value.trim();if(cv)p.set('addr',cv)}
-    if(fixDir==='to'){p.set('arr',document.getElementById('arrBefore').value)}
-    else{p.set('post',document.getElementById('extraAfter').value)}
-  }else{
-    if(manHomeClub)p.set('home',manHomeClub.code);
-    if(manAwayClub)p.set('away',manAwayClub.code);
-    var koVal=document.getElementById('manKO').value;
+  if(sel&&sel.custom){
+    if(sel.home)p.set('home',sel.home.code);
+    if(sel.away)p.set('away',sel.away.code);
+    var koVal=document.getElementById('cfKO').value;
     if(koVal)p.set('ko',koVal);
-    p.set('dir',manDir);
-    p.set('tm',manTM);
-    p.set('preset',manPreset);
-    if(manPreset==='custom'){var mv=document.getElementById('manCustomAddr').value.trim();if(mv)p.set('addr',mv)}
-    if(manDir==='to'){p.set('arr',document.getElementById('manArrBefore').value)}
-    else{p.set('post',document.getElementById('manExtraAfter').value)}
+  }else{
+    if(fixClub)p.set('club',fixClub.code);
+    if(sel&&sel.matchID)p.set('fix',sel.matchID);
   }
+  p.set('dir',fixDir);
+  p.set('tm',fixTM);
+  p.set('preset',fixPreset);
+  if(fixPreset==='custom'){var cv=custAddrVal();if(cv)p.set('addr',cv)}
+  if(fixDir==='from')p.set('post',document.getElementById('extraAfter').value);
   var qs=p.toString();
   var newURL=window.location.pathname+(qs?'?'+qs:'');
   history.replaceState(null,'',newURL);
@@ -1552,90 +1585,80 @@ function syncURL(){
 
 function readURL(){
   var p=new URLSearchParams(window.location.search);
-  if(!p.has('mode'))return; // no URL state to restore
+  if(!p.has('mode')&&!p.has('club')&&!p.has('home'))return; // no URL state to restore
   _urlSuppressed=true;
 
-  var mode=p.get('mode')||'fixture';
-  // Switch tab (without triggering syncURL)
-  document.querySelectorAll('.tp__mode-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-mode')===mode)});
-  document.getElementById('fixtureMode').style.display=mode==='fixture'?'block':'none';
-  document.getElementById('manualMode').style.display=mode==='manual'?'block':'none';
+  // Direction
+  var dir=p.get('dir')||'to';
+  fixDir=dir;
+  document.querySelectorAll('#fixtureMode .tp__dir-btn').forEach(function(b){var on=b.getAttribute('data-dir')===dir;b.classList.toggle('active',on);b.setAttribute('aria-pressed',on?'true':'false')});
+  document.getElementById('postSlider').style.display=dir==='from'?'block':'none';
 
-  if(mode==='fixture'){
-    // Direction
-    var dir=p.get('dir')||'to';
-    fixDir=dir;
-    document.querySelectorAll('#fixtureMode .tp__dir-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-dir')===dir)});
-    document.getElementById('preSlider').style.display=dir==='to'?'block':'none';
-    document.getElementById('postSlider').style.display=dir==='from'?'block':'none';
-
-    // Preset
-    var preset=p.get('preset')||'station';
-    fixPreset=preset;
-    document.querySelectorAll('#fixPresets .tp__preset').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-p')===preset)});
-    document.getElementById('fixCustomAddrWrap').style.display=preset==='custom'?'block':'none';
-    if(preset==='custom'&&p.has('addr'))document.getElementById('fixCustomAddr').value=p.get('addr');
-
-    // Transport mode
-    var tm=p.get('tm')||'transit';
-    fixTM=tm;
-    document.querySelectorAll('#fixModeToggle .tp__mode-pill').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-tm')===tm)});
-
-    // Sliders
-    if(p.has('arr')){document.getElementById('arrBefore').value=p.get('arr');document.getElementById('arrBeforeV').textContent=p.get('arr')+' min'}
-    if(p.has('post')){document.getElementById('extraAfter').value=p.get('post');upPostLbl()}
-
-    // Club — triggers loadFix, which is async. Match selection happens in callback.
-    var clubCode=p.get('club');
-    var matchID=p.get('fix');
-    if(clubCode){
-      var c=clubs.find(function(cl){return cl.code===clubCode});
-      if(c){
-        _pendingMatchID=matchID||null;
-        selFC(c);
-        if(fixClubPicker)fixClubPicker.setValue(c.name);
-      }
+  // Preset
+  var preset=p.get('preset')||'station';
+  fixPreset=preset;
+  document.querySelectorAll('#fixPresets .tp__preset').forEach(function(b){var on=b.getAttribute('data-p')===preset;b.classList.toggle('active',on);b.setAttribute('aria-pressed',on?'true':'false')});
+  document.getElementById('fixCustomAddrWrap').style.display=preset==='custom'?'block':'none';
+  if(preset==='custom'){
+    if(!_acMounted)showAddrFallback();
+    if(p.has('addr')){
+      document.getElementById('fixCustomAddr').value=p.get('addr');
+      var t=document.getElementById('fixCustomAddrText');if(t)t.value=p.get('addr');
     }
-  }else{
-    // Manual mode
-    var dir=p.get('dir')||'to';
-    manDir=dir;
-    document.querySelectorAll('#manualMode .tp__dir-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-dir')===dir)});
-    document.getElementById('manPreSlider').style.display=dir==='to'?'block':'none';
-    document.getElementById('manPostSlider').style.display=dir==='from'?'block':'none';
-
-    var preset=p.get('preset')||'station';
-    manPreset=preset;
-    document.querySelectorAll('#manPresets .tp__preset').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-p')===preset)});
-    document.getElementById('manCustomAddrWrap').style.display=preset==='custom'?'block':'none';
-    if(preset==='custom'&&p.has('addr'))document.getElementById('manCustomAddr').value=p.get('addr');
-
-    // Transport mode
-    var manTmVal=p.get('tm')||'transit';
-    manTM=manTmVal;
-    document.querySelectorAll('#manModeToggle .tp__mode-pill').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-tm')===manTmVal)});
-    updateManPresetLabels();
-
-    if(p.has('ko'))document.getElementById('manKO').value=p.get('ko');
-
-    if(p.has('arr')){document.getElementById('manArrBefore').value=p.get('arr');document.getElementById('manArrBeforeV').textContent=p.get('arr')+' min'}
-    if(p.has('post')){document.getElementById('manExtraAfter').value=p.get('post');upManPostLbl()}
-
-    var homeCode=p.get('home'),awayCode=p.get('away');
-    if(homeCode){var hc=clubs.find(function(cl){return cl.code===homeCode});if(hc){selManHome(hc);if(manHomePicker)manHomePicker.setValue(hc.name)}}
-    if(awayCode){var ac=clubs.find(function(cl){return cl.code===awayCode});if(ac){selManAway(ac);if(manAwayPicker)manAwayPicker.setValue(ac.name)}}
   }
-  updateDirText();
+
+  // Transport mode
+  var tm=p.get('tm')||'transit';
+  fixTM=tm;
+  document.querySelectorAll('#fixModeToggle .tp__mode-pill').forEach(function(b){var on=b.getAttribute('data-tm')===tm;b.classList.toggle('active',on);b.setAttribute('aria-pressed',on?'true':'false')});
+
+  if(p.has('post')){document.getElementById('extraAfter').value=p.get('post');upPostLbl()}
+  // Legacy `arr` (pre-KO slider) is ignored — the KO buffer replaced it
+
+  // Custom fixture (also catches legacy mode=manual links)
+  if(p.has('home')&&p.has('away')&&p.has('ko')){
+    var hc=clubs.find(function(cl){return cl.code===p.get('home')});
+    var ac=clubs.find(function(cl){return cl.code===p.get('away')});
+    if(hc&&ac){
+      cfHome=hc;cfAway=ac;
+      document.getElementById('cfKO').value=p.get('ko');
+      if(cfHomePicker)cfHomePicker.setValue(hc.name);
+      if(cfAwayPicker)cfAwayPicker.setValue(ac.name);
+      var body=document.getElementById('cfBody');
+      if(body&&body.style.display==='none')toggleCF();
+      cfSel();
+    }
+  }
+
+  // Club + fixture — loadFix is async; match selection happens in its callback
+  var clubCode=p.get('club');
+  var matchID=p.get('fix');
+  if(clubCode){
+    var c=clubs.find(function(cl){return cl.code===clubCode});
+    if(c){
+      _pendingMatchID=(sel&&sel.custom)?null:(matchID||null);
+      selFC(c);
+      if(fixClubPicker)fixClubPicker.setValue(c.name);
+    }
+  }
+  updateDirText();updateBanner();
   _urlSuppressed=false;
 }
 
 // Pending match ID for fixture restore — set by readURL, consumed by loadFix
 var _pendingMatchID=null;
 
+// ── Keyboard: Enter/Space activates any role="button" element (fixtures, chips, legs, drive cards) ──
+document.addEventListener('keydown',function(e){
+  if(e.key!=='Enter'&&e.key!==' ')return;
+  var t=e.target;
+  if(t&&t.getAttribute&&t.getAttribute('role')==='button'&&t.tagName!=='BUTTON'){e.preventDefault();t.click()}
+});
+
 // ── Init ──
 window.nlAuthReady=function(){
   loadClubs();loadCRS();initMap();
-  // Set default KO: today, 15:00 weekend or 19:45 weekday
+  // Custom-fixture default KO: today, 15:00 weekend or 19:45 weekday
   var now=new Date();
   var day=now.getDay();
   var isWeekend=(day===0||day===6);
@@ -1644,33 +1667,35 @@ window.nlAuthReady=function(){
   var yyyy=now.getFullYear();
   var mo=String(now.getMonth()+1).padStart(2,'0');
   var dd=String(now.getDate()).padStart(2,'0');
-  document.getElementById('manKO').value=yyyy+'-'+mo+'-'+dd+'T'+hh+':'+mm;
-  setTimeout(function(){
-    // Hook sliders and inputs for URL sync
-    ['arrBefore','extraAfter','manArrBefore','manExtraAfter'].forEach(function(id){
-      var el=document.getElementById(id);
-      if(el)el.addEventListener('change',syncURL);
-    });
-    ['fixCustomAddr','manCustomAddr','manKO'].forEach(function(id){
-      var el=document.getElementById(id);
-      if(el)el.addEventListener('change',syncURL);
-    });
-    // Wait for the local `clubs` array (needed to resolve full club objects with
-    // postcode/station/optaID from a picked name), then mount the shared pickers
-    // and restore URL / localStorage.
-    var waitForClubs=setInterval(function(){
-      if(clubs.length>0){
-        clearInterval(waitForClubs);
-        fixClubPicker=NL.clubPicker('#fixClubWrap',{season:'all',freetext:false,placeholder:'Start typing a club name…',onSelect:function(sel){selFC(clubs.find(function(c){return c.name===sel.name})||null)}});
-        manHomePicker=NL.clubPicker('#manHomeW',{season:'all',freetext:false,placeholder:'Home club…',onSelect:function(sel){selManHome(clubs.find(function(c){return c.name===sel.name})||null)}});
-        manAwayPicker=NL.clubPicker('#manAwayW',{season:'all',freetext:false,placeholder:'Away club…',onSelect:function(sel){selManAway(clubs.find(function(c){return c.name===sel.name})||null)}});
-        // The component's clear (×) doesn't fire onSelect, so also reset downstream state on clear.
-        [['#fixClubWrap',function(){selFC(null)}],['#manHomeW',function(){selManHome(null)}],['#manAwayW',function(){selManAway(null)}]].forEach(function(pr){var b=document.querySelector(pr[0]+' .club-picker__clear');if(b)b.addEventListener('click',pr[1])});
-        if(window.location.search){readURL()}
-        else{restoreLastClub()}
-      }
-    },100);
-  },1500);
+  document.getElementById('cfKO').value=yyyy+'-'+mo+'-'+dd+'T'+hh+':'+mm;
+
+  // Hook inputs for URL sync + selection updates
+  var ea=document.getElementById('extraAfter');
+  if(ea)ea.addEventListener('change',syncURL);
+  var ca=document.getElementById('fixCustomAddr');
+  if(ca)ca.addEventListener('change',function(){updateBanner();syncURL()});
+  var cat=document.getElementById('fixCustomAddrText');
+  if(cat)cat.addEventListener('change',function(){document.getElementById('fixCustomAddr').value=cat.value.trim();updateBanner();syncURL()});
+  var ck=document.getElementById('cfKO');
+  if(ck)ck.addEventListener('change',function(){cfSel();syncURL()});
+
+  // Wait for the local `clubs` array (needed to resolve full club objects with
+  // postcode/station/optaID from a picked name), then mount the shared pickers
+  // and restore URL / localStorage. No artificial boot delay — poll from now.
+  var waitForClubs=setInterval(function(){
+    if(clubs.length>0){
+      clearInterval(waitForClubs);
+      fixClubPicker=NL.clubPicker('#fixClubWrap',{season:'all',freetext:false,placeholder:'Start typing a club name…',onSelect:function(pick){selFC(clubs.find(function(c){return c.name===pick.name})||null)}});
+      cfHomePicker=NL.clubPicker('#cfHomeW',{season:'all',freetext:false,placeholder:'Home club…',onSelect:function(pick){cfHome=clubs.find(function(c){return c.name===pick.name})||null;cfSel();syncURL()}});
+      cfAwayPicker=NL.clubPicker('#cfAwayW',{season:'all',freetext:false,placeholder:'Away club…',onSelect:function(pick){cfAway=clubs.find(function(c){return c.name===pick.name})||null;cfSel();syncURL()}});
+      // The component's clear (×) doesn't fire onSelect, so also reset downstream state on clear.
+      [['#fixClubWrap',function(){selFC(null)}],
+       ['#cfHomeW',function(){cfHome=null;syncURL()}],
+       ['#cfAwayW',function(){cfAway=null;syncURL()}]].forEach(function(pr){var b=document.querySelector(pr[0]+' .club-picker__clear');if(b)b.addEventListener('click',pr[1])});
+      if(window.location.search){readURL()}
+      else{restoreLastClub()}
+    }
+  },100);
 };
 
 // Remember last selected club
