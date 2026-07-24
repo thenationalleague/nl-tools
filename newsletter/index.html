@@ -149,7 +149,7 @@
   <title>Newsletter — NL Tools</title>
 
   <!-- Brand stylesheet (lint canonical: ?v=19) -->
-  <link rel="stylesheet" href="/tools/system/nl-brand.css?v=24">
+  <link rel="stylesheet" href="/tools/system/nl-brand.css?v=25">
 
   <!-- Firebase 10.12.0 SDK (compat) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -268,7 +268,7 @@
   </script>
 
   <!-- NL system scripts (lint canonical: ?v=9 / ?v=7 / ?v=8) -->
-  <script src="/tools/system/nl-utils.js?v=24"></script>
+  <script src="/tools/system/nl-utils.js?v=25"></script>
   <script src="/tools/system/nl-topbar.js?v=7"></script>
   <script src="/tools/system/auth-guard.js?v=9"></script>
 
@@ -305,7 +305,7 @@
     /* Narrow screens: wrap button rows rather than spilling sideways */
     .page-header, .page-header__actions { flex-wrap: wrap; }
     .page-header__actions { row-gap: 8px; }
-    .nlx-art__head-row, .nlx-body-toolbar, .nlx-img-row { flex-wrap: wrap; }
+    .nlx-art__head-row, .nlx-img-row { flex-wrap: wrap; }
     .nlx-art__head-row { row-gap: 6px; }
   }
 
@@ -392,19 +392,8 @@
   }
   .nlx-art__head-row .btn--sm { flex-shrink: 0; }
 
-  /* Body editor (contenteditable) */
-  .nlx-body-toolbar { display: flex; gap: 4px; margin-bottom: 6px; }
-  .nlx-body-edit {
-    min-height: 110px; background: var(--white); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 10px 12px;
-    font-family: var(--font); font-size: var(--text-sm); line-height: 1.55; color: var(--text);
-  }
-  .nlx-body-edit:focus { outline: 2px solid var(--navy-300); outline-offset: -1px; }
-  .nlx-body-edit:empty::before { content: attr(data-placeholder); color: var(--text-muted); }
-  .nlx-body-edit p { margin: 0 0 0.6em; }
-  .nlx-body-edit p:last-child { margin-bottom: 0; }
-  .nlx-body-edit ul { margin: 0 0 0.6em; padding-left: 1.3em; }
-  .nlx-body-edit a { color: var(--blue); }
+  /* Body editor: canon .fmt-toolbar--compact + .fmt-edit via NL.richText —
+     no local editor CSS (promoted to nl-brand v2.27 / nl-utils v1.24) */
 
   /* Article photo row + library picker */
   .nlx-img-row { display: flex; align-items: center; gap: 10px; }
@@ -739,42 +728,9 @@
     return _pxmm || 3.7795;
   }
 
-  /* ── HTML sanitiser — whitelist only, run on save and before render ───── */
-  var ALLOWED_TAGS = { P:'p', BR:'br', B:'b', STRONG:'strong', I:'i', EM:'em', UL:'ul', LI:'li', A:'a' };
-  function sanitiseHtml(html) {
-    var src = el('div');
-    src.innerHTML = html || '';
-    var out = el('div');
-    (function walk(from, to) {
-      var node = from.firstChild;
-      while (node) {
-        if (node.nodeType === 3) {
-          to.appendChild(document.createTextNode(node.nodeValue));
-        } else if (node.nodeType === 1) {
-          var tag = node.tagName;
-          if (tag === 'DIV') tag = 'P';   /* contenteditable emits divs */
-          if (tag === 'SCRIPT' || tag === 'STYLE') { node = node.nextSibling; continue; }
-          if (ALLOWED_TAGS[tag]) {
-            var clean = el(ALLOWED_TAGS[tag]);
-            if (tag === 'A') {
-              var href = node.getAttribute('href') || '';
-              if (/^(https?:|mailto:)/i.test(href)) clean.setAttribute('href', href);
-            }
-            to.appendChild(clean);
-            walk(node, clean);
-          } else {
-            walk(node, to);               /* unwrap unknown tags, keep children */
-          }
-        }
-        node = node.nextSibling;
-      }
-    })(src, out);
-    return out.innerHTML;
-  }
-  function bodyIsEmpty(html) {
-    var d = el('div'); d.innerHTML = html || '';
-    return !(d.textContent || '').trim();
-  }
+  /* HTML sanitising is canon — NL.sanitiseHtml (nl-utils v1.24). Local
+     alias kept for the renderer's sanitise-again-on-render calls. */
+  function sanitiseHtml(html) { return NL.sanitiseHtml(html); }
 
   /* ══════════════════════════════════════════════════════════════════════
      Data layer — debounced autosave with multi-path updates
@@ -2115,62 +2071,21 @@
     standInput.placeholder = 'Optional one-line intro';
     body.appendChild(fieldGroup('Standfirst', standInput));
 
-    /* Body editor */
+    /* Body editor — canon rich text (NL.richText: forced plain-text paste,
+       whitelist sanitiser, Enter = paragraph / Shift+Enter = line break) */
     var bodyGroup = el('div', 'form-group');
     bodyGroup.appendChild(el('label', null, 'Body'));
-    var toolbar = el('div', 'nlx-body-toolbar');
-    var edit = el('div', 'nlx-body-edit');
-    edit.contentEditable = 'true';
-    edit.setAttribute('data-placeholder', 'Write the article…');
-    edit.innerHTML = sanitiseHtml(art.body || '');
-
-    function tbBtn(label, title, fn) {
-      var b = el('button', 'btn btn--ghost btn--sm', label);
-      b.type = 'button';
-      b.title = title;
-      /* mousedown + preventDefault keeps the text selection alive */
-      b.addEventListener('mousedown', function (e) { e.preventDefault(); });
-      b.addEventListener('click', function () { fn(); edit.focus(); commitBody(); });
-      return b;
-    }
-    toolbar.appendChild(tbBtn('B', 'Bold', function () { document.execCommand('bold'); }));
-    toolbar.appendChild(tbBtn('I', 'Italic', function () { document.execCommand('italic'); }));
-    toolbar.appendChild(tbBtn('• List', 'Bulleted list', function () { document.execCommand('insertUnorderedList'); }));
-    toolbar.appendChild(tbBtn('Link', 'Insert link', function () {
-      var sel = window.getSelection();
-      var range = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
-      NL.prompt('Link address', { title: 'Insert link', placeholder: 'https://…' })
-        .then(function (url) {
-          if (!url) return;
-          if (!/^(https?:|mailto:)/i.test(url)) url = 'https://' + url;
-          if (range) {
-            var s = window.getSelection();
-            s.removeAllRanges();
-            s.addRange(range);
-          }
-          edit.focus();
-          document.execCommand('createLink', false, url);
-          commitBody();
-        });
-    }));
-    bodyGroup.appendChild(toolbar);
-
-    function commitBody() {
-      var clean = sanitiseHtml(edit.innerHTML);
-      if (bodyIsEmpty(clean)) clean = '';
-      art.body = clean;
-      queueSave('articles/' + id + '/body', clean);
-      schedulePreview();
-    }
-    edit.addEventListener('input', commitBody);
-    /* Forced plain text on paste, always (handover §2) */
-    edit.addEventListener('paste', function (e) {
-      e.preventDefault();
-      var text = (e.clipboardData || window.clipboardData).getData('text/plain');
-      document.execCommand('insertText', false, text);
+    NL.richText(bodyGroup, {
+      value: art.body || '',
+      placeholder: 'Write the article…',
+      compact: true,
+      onChange: function (clean) {
+        art.body = clean;
+        queueSave('articles/' + id + '/body', clean);
+        schedulePreview();
+      }
     });
-    bodyGroup.appendChild(edit);
-    var hint = el('div', 'form-hint', 'Paste always arrives as plain text. Choose an image layout above to add a photo.');
+    var hint = el('div', 'form-hint', 'Paste always arrives as plain text. Enter starts a new paragraph; Shift+Enter a line break.');
     bodyGroup.appendChild(hint);
     body.appendChild(bodyGroup);
 
