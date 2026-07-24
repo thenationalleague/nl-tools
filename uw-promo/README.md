@@ -8,9 +8,9 @@ direct links, NO auth-guard/portal login), with a full audit trail.
 
 | Page | Who | Gets in via | Can do |
 |---|---|---|---|
-| `/tools/uw-promo/` | **Utility Warehouse** (one shared login) | shared passcode or `?u=<token>` direct link | Add codes to the pool (generate 8-character `XXXX-XXXX`, or paste their own list; optional batch label; ≤500/batch), revoke **unredeemed** codes, release a redeemed code back to the pool (required reason), see every code + which club redeemed it and when, redemptions-by-club breakdown, filters, search, CSV export |
-| `/tools/uw-promo/club/` | **Each of the 72 clubs** | own `?c=<token>` direct link (the QR-code target for the point of sale) **plus their passcode on every visit**; passcode alone also works without the link | **Till page**: big code entry → a valid unredeemed code locks to this club (RTDB transaction — two tills can't claim the same code) and joins the club's redeemed list on the same page. Already-redeemed entry shows **which club and the exact date/time**. Revoked → "no longer valid". Clubs cannot undo — the page points them at NL |
-| `/tools/uw-promo/admin/` | **NL master (Richard)** | master passcode only (no direct link, deliberately; first-run bootstrap sets it) | Everything UW can do, plus: redeem on behalf of a club (club picker, same race-safe transaction), revoke **redeemed** codes (typed `REVOKE`), seed/sync the roster from clubs-meta, the **list of all 72 club URLs + passcodes** (copy per club, regenerate, export access CSV), **Print till cards** (one A4 card per club: crest, QR of the club link, passcode + the four till steps — print-to-PDF gives the 72-page hand-out pack), audit viewer + export, sandbox reset (test mode) |
+| `/uw-promo/` | **Utility Warehouse** (one shared login) | shared passcode or `?u=<token>` direct link | Add codes to the pool (generate 8-character `XXXX-XXXX`, or paste their own list; optional batch label; ≤500/batch), revoke **unredeemed** codes, release a redeemed code back to the pool (required reason), see every code + which club redeemed it and when, redemptions-by-club breakdown, filters, search, CSV export |
+| `/uw-promo/club/` | **Each of the 72 clubs** | own `?c=<token>` direct link (the QR-code target for the point of sale) **plus their passcode on every visit**; passcode alone also works without the link | **Till page**: big code entry → a valid unredeemed code locks to this club (RTDB transaction — two tills can't claim the same code) and joins the club's redeemed list on the same page. Already-redeemed entry shows **which club and the exact date/time**. Revoked → "no longer valid". Clubs cannot undo — the page points them at NL |
+| `/uw-promo/admin/` | **NL master (Richard)** | master passcode only (no direct link, deliberately; first-run bootstrap sets it) | Everything UW can do, plus: redeem on behalf of a club (club picker, same race-safe transaction), revoke **redeemed** codes (typed `REVOKE`), seed/sync the roster from clubs-meta, the **list of all 72 club URLs + passcodes** (copy per club, regenerate, export access CSV), **Print till cards** (one A4 card per club: crest, QR of the club link, passcode + the four till steps — print-to-PDF gives the 72-page hand-out pack), audit viewer + export, sandbox reset (test mode) |
 
 ## Status model
 
@@ -53,7 +53,7 @@ leaves its audit entry.
 
 ## Access / auth model
 
-Identical to `/tools/footage/club/`: a **named Firebase app** (`nlUwPromo`,
+Identical to `/footage/club/`: a **named Firebase app** (`nlUwPromo`,
 in `_shared.js`) signs in **anonymously** for reads/writes so it can't clobber
 a portal (superadmin) login open in another tab. Passcodes/tokens are
 generated with an unambiguous alphabet (no 0/O/1/I/L) and checked client-side
@@ -97,7 +97,7 @@ Two layers:
 2. **Anonymous auth** must be enabled (Authentication → Sign-in method).
    The footage pages use it too, so it may already be on — verify, don't assume.
 3. Dry-run the whole flow in **sandbox mode** (above).
-4. Open `/tools/uw-promo/admin/` → first-run screen → set the master passcode.
+4. Open `/uw-promo/admin/` → first-run screen → set the master passcode.
 5. Clubs & access tab → **Seed clubs from roster** → **Create UW access**.
 6. Send Utility Warehouse their link/passcode; generate club QR codes from
    the **Export access CSV** links (treat the CSV as a password list).

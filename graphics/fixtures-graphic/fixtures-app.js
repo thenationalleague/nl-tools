@@ -10,14 +10,14 @@
   var MAX_ROWS = 12;
 
   var DIVISION_LOGO = {
-    National: "/tools/assets/divisions/National.png",
-    North:    "/tools/assets/divisions/North.png",
-    South:    "/tools/assets/divisions/South.png",
-    Cup:      "/tools/assets/divisions/Cup.png"
+    National: "/assets/divisions/National.png",
+    North:    "/assets/divisions/North.png",
+    South:    "/assets/divisions/South.png",
+    Cup:      "/assets/divisions/Cup.png"
   };
-  var LOGO_FALLBACK = (window.__resources && window.__resources.logoFallback) || "/tools/assets/divisions/The%20National%20League.png";
-  var SPONSOR_URL = "/tools/assets/partners/TIC%20Health.png";
-  var ROSE_WHITE = (window.__resources && window.__resources.roseWhite) || "/tools/assets/crests/National%20League%20rose%20white.png";
+  var LOGO_FALLBACK = (window.__resources && window.__resources.logoFallback) || "/assets/divisions/The%20National%20League.png";
+  var SPONSOR_URL = "/assets/partners/TIC%20Health.png";
+  var ROSE_WHITE = (window.__resources && window.__resources.roseWhite) || "/assets/crests/National%20League%20rose%20white.png";
 
   var DIV_NAME = {
     National: "Enterprise National League",

@@ -6,13 +6,13 @@
            default), added normCode() + the stored/indexed `norm` field so a
            till entry matches however it's typed.
   Version: v1.0 (23/07/2026) — initial build.
-  File: /tools/uw-promo/_shared.js
+  File: /uw-promo/_shared.js
 
-  Loaded by /tools/uw-promo/ (UW view), /tools/uw-promo/club/ (club view) and
-  /tools/uw-promo/admin/ (NL master view), AFTER the Firebase compat SDKs and
+  Loaded by /uw-promo/ (UW view), /uw-promo/club/ (club view) and
+  /uw-promo/admin/ (NL master view), AFTER the Firebase compat SDKs and
   BEFORE nl-utils.js. Initialises the NAMED Firebase app ('nlUwPromo') so this
   family's anonymous sign-in can't clobber a portal login open in another tab
-  (same isolation pattern as /tools/footage/club/), and exposes window.UWP:
+  (same isolation pattern as /footage/club/), and exposes window.UWP:
 
     UWP.app / UWP.db()          named app + its database
     UWP.ref(path)               ref under app-data/uw-promo
@@ -27,7 +27,7 @@
     UWP.clubLink(token) / UWP.uwLink(token)  absolute direct-link URLs
 
   Data lives at RTDB app-data/uw-promo/{config,codes,audit} — shape documented
-  in /tools/uw-promo/README.md. Rules: system/rtdb/rules.snapshot.json.
+  in /uw-promo/README.md. Rules: system/rtdb/rules.snapshot.json.
 */
 (function () {
   'use strict';
@@ -151,8 +151,8 @@
   }
 
   function pageBase() {
-    // .../tools/uw-promo/(club|admin)/... → .../tools/uw-promo/
-    return location.origin + '/tools/uw-promo/';
+    // .../uw-promo/(club|admin)/... → .../uw-promo/
+    return location.origin + '/uw-promo/';
   }
   function envTail() { return IS_TEST ? '&env=test' : ''; }
 

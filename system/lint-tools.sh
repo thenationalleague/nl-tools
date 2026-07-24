@@ -2,7 +2,7 @@
 # system/lint-tools.sh — drift checker for NL Tools wiring.
 #
 # Walks every top-level tool directory that has an index.html using
-# /tools/system/auth-guard.js, and verifies its head structure matches
+# /system/auth-guard.js, and verifies its head structure matches
 # the canonical template at system/_template/index.html. Reports
 # anything out of sync — cache-bust versions, missing globals, scripts
 # at body-bottom, etc.
@@ -56,14 +56,14 @@ fi
 check_asset() {
   local file="$1" slug="$2" index="$3" canon="$4"
   local loaded versioned actual
-  loaded=$(grep -oE "/tools/system/$file" "$index" | head -1 || true)
+  loaded=$(grep -oE "/system/$file" "$index" | head -1 || true)
   if [[ -z "$loaded" ]]; then
     echo "  $slug: missing $file"
     return
   fi
-  # Anchor to the /tools/system/ path so a version mentioned in a changelog
+  # Anchor to the /system/ path so a version mentioned in a changelog
   # comment (e.g. "nl-utils.js?v=15") isn't mistaken for the live script tag.
-  versioned=$(grep -oE "/tools/system/$file\?v=[0-9]+" "$index" | head -1 || true)
+  versioned=$(grep -oE "/system/$file\?v=[0-9]+" "$index" | head -1 || true)
   if [[ -z "$versioned" ]]; then
     echo "  $slug: $file loaded without ?v= cache-bust (canonical ?v=$canon)"
     return
@@ -87,7 +87,7 @@ for dir in */; do
   [[ "$slug" == _* ]] && continue
   index="$slug/index.html"
   [[ ! -f "$index" ]] && continue
-  grep -q '/tools/system/auth-guard\.js' "$index" || continue
+  grep -q '/system/auth-guard\.js' "$index" || continue
   [[ -n "${SKIP[$slug]:-}" ]] && continue
 
   drift=()

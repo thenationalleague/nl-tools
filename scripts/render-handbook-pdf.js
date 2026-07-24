@@ -22,7 +22,7 @@
 
   Env:
     CHROME_PATH  path to a Chrome/Chromium binary (required)
-    BASE_URL     origin serving the repo under /tools/ (default http://127.0.0.1:8899)
+    BASE_URL     origin serving the repo under / (default http://127.0.0.1:8899)
     FORCE        "1" to re-render even if pdf-meta matches
 */
 'use strict';
@@ -287,7 +287,7 @@ async function main() {
     const { PDFDocument } = require('pdf-lib');
     const areaParts = [];
     for (const id of present) {
-      await page.goto(BASE_URL + '/tools/handbook/print.html?part=' + id, { waitUntil: 'networkidle0', timeout: 120000 });
+      await page.goto(BASE_URL + '/handbook/print.html?part=' + id, { waitUntil: 'networkidle0', timeout: 120000 });
       await page.waitForSelector('.pg--sec', { timeout: 60000 });
       await settle(page);
       const buf = await page.pdf(pdfOpts());
@@ -296,13 +296,13 @@ async function main() {
     }
 
     // Pass 2 — front matter with real page numbers (front page count first).
-    await page.goto(BASE_URL + '/tools/handbook/print.html?part=front', { waitUntil: 'networkidle0', timeout: 120000 });
+    await page.goto(BASE_URL + '/handbook/print.html?part=front', { waitUntil: 'networkidle0', timeout: 120000 });
     await page.waitForSelector('.pg--toc', { timeout: 60000 });
     await settle(page);
     const frontCount = (await PDFDocument.load(await page.pdf(pdfOpts()))).getPageCount();
     let cursor = frontCount + 1;
     const pagesParam = areaParts.map(p => { const s = p.id + ':' + cursor; cursor += p.pages; return s; }).join(',');
-    await page.goto(BASE_URL + '/tools/handbook/print.html?part=front&pages=' + encodeURIComponent(pagesParam), { waitUntil: 'networkidle0', timeout: 120000 });
+    await page.goto(BASE_URL + '/handbook/print.html?part=front&pages=' + encodeURIComponent(pagesParam), { waitUntil: 'networkidle0', timeout: 120000 });
     await page.waitForSelector('.pg--toc', { timeout: 60000 });
     await settle(page);
     const frontBuf = await page.pdf(pdfOpts());

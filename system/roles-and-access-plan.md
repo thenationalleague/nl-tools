@@ -51,7 +51,7 @@ so roster-gating is UI-level; rules stay club-name-scoped — not a hole.)
   for any user with a club value, regardless of role tier.
 - **No `?v=` bump**: the helpers are additive and unused until Phase 2, the
   auth-guard change is backward-compatible, and `_headers` no-caches
-  `/tools/system/*`. The lockstep bump lands in Phase 2 with the first
+  `/system/*`. The lockstep bump lands in Phase 2 with the first
   consumers, so it happens once, not twice.
 
 ### Phase 2 — Club tool sweep, UI-gated tools — **DONE**

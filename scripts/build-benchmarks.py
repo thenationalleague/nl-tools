@@ -25,7 +25,7 @@ SRC = sys.argv[1] if len(sys.argv) > 1 else 'Commercial_Benchmarking_Cleaned_v5.
 OUT = sys.argv[2] if len(sys.argv) > 2 else 'commercial-benchmarking-rtdb-import.json'
 LINKS = sys.argv[3] if len(sys.argv) > 3 else 'commercial-benchmarking-links.csv'
 PATCH = sys.argv[4] if len(sys.argv) > 4 else 'commercial-benchmarking-sector-patch.json'
-BASE_URL = 'https://thenationalleague.github.io/tools/commercial-benchmarking/link.html?t='
+BASE_URL = 'https://nl.tools/commercial-benchmarking/link.html?t='
 DIVS = ['National', 'North', 'South']
 
 # Capability tokens are derived deterministically from the club name + a secret

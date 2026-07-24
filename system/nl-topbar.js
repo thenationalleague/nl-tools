@@ -1,11 +1,11 @@
 /* =========================================================================
    NL Tools — Topbar renderer
-   File: /tools/system/nl-topbar.js
+   File: /system/nl-topbar.js
    Version: v1.5 (25/04/2026)
 
    Renders the standardised NL Tools topbar into #nlTopbar slot. Reads
    session from window.NL_SESSION (set by auth-guard) and tool catalogue
-   from /tools/{key} in RTDB.
+   from /{key} in RTDB.
 
    Usage on every tool page:
    ----
@@ -14,7 +14,7 @@
    <script>
      window.NL_TOOL = {
        title: 'Vacancies',           // required — tool name shown in topbar
-       toolKey: 'ops-vacancies',     // required — matches /tools/{key} in RTDB
+       toolKey: 'ops-vacancies',     // required — matches /{key} in RTDB
        kicker: 'NL Tools',           // optional — defaults to 'NL Tools'. Use '' on portal
        isPortal: false,              // optional — hides Portal button if true
        extras: {                     // optional — tool-specific topbar elements
@@ -39,7 +39,7 @@
        Pairs with _headers file (repo root) for no-cache on system files.
 
    v1.4 (25/04/2026)
-     - Logo now a link to /tools/portal/ on all pages (acts as home button).
+     - Logo now a link to /portal/ on all pages (acts as home button).
      - Removed arrow (←) from Portal button — just shows "Portal" text.
 
    v1.3 (21/04/2026)
@@ -170,7 +170,7 @@
     /* Manifest */
     if (!document.querySelector('link[rel="manifest"]')) {
       var m = document.createElement('link');
-      m.rel = 'manifest'; m.href = '/tools/manifest.json';
+      m.rel = 'manifest'; m.href = '/manifest.json';
       head.appendChild(m);
     }
 
@@ -186,21 +186,21 @@
       var f32 = document.createElement('link');
       f32.rel = 'icon'; f32.type = 'image/png';
       f32.setAttribute('sizes', '32x32');
-      f32.href = '/tools/assets/icons/favicon-32x32.png';
+      f32.href = '/assets/icons/favicon-32x32.png';
       head.appendChild(f32);
     }
     if (!hasLink('icon', '16x16')) {
       var f16 = document.createElement('link');
       f16.rel = 'icon'; f16.type = 'image/png';
       f16.setAttribute('sizes', '16x16');
-      f16.href = '/tools/assets/icons/favicon-16x16.png';
+      f16.href = '/assets/icons/favicon-16x16.png';
       head.appendChild(f16);
     }
     if (!hasLink('apple-touch-icon')) {
       var atc = document.createElement('link');
       atc.rel = 'apple-touch-icon';
       atc.setAttribute('sizes', '180x180');
-      atc.href = '/tools/assets/icons/apple-touch-icon.png';
+      atc.href = '/assets/icons/apple-touch-icon.png';
       head.appendChild(atc);
     }
 
@@ -232,7 +232,7 @@
     /* Logo — links to portal (home) on all pages */
     var logoLink = el('a', {
       class: 'topbar__logo-link',
-      href: '/tools/portal/',
+      href: '/portal/',
       'aria-label': 'NL Tools home',
       title: 'Go to portal'
     });
@@ -298,7 +298,7 @@
     if (!opts.isPortal) {
       var portalBtn = el('a', {
         class: 'topbar__btn topbar__btn--portal',
-        href: '/tools/portal/',
+        href: '/portal/',
         'aria-label': 'Back to portal'
       });
       portalBtn.textContent = 'Portal';
@@ -404,7 +404,7 @@
       dd.appendChild(el('div', { class: 'topbar__dd-divider' }));
       var adminBtn = el('a', {
         class: 'topbar__dd-item',
-        href: '/tools/portal/?tab=users'
+        href: '/portal/?tab=users'
       });
       adminBtn.innerHTML =
         '<span class="topbar__dd-item-icon">\ud83d\udee1\ufe0f</span>' +
@@ -456,10 +456,10 @@
       setTimeout(function() {
         if (window.firebase && firebase.auth) {
           firebase.auth().signOut().then(function() {
-            window.location.replace('/tools/');
+            window.location.replace('/');
           });
         } else {
-          window.location.replace('/tools/');
+          window.location.replace('/');
         }
       }, 50);
     });
@@ -568,7 +568,7 @@
       if (isCurrent) {
         a.classList.add('topbar__dd-item--active');
       } else {
-        a.href = t.url || ('/tools/' + item.key + '/');
+        a.href = t.url || ('/' + item.key + '/');
       }
 
       var icon = document.createElement('span');

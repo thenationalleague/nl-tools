@@ -11,7 +11,7 @@ and what's left.
   download-only. Deployed, working.
 - **Delete-sync:** `onFootageDeleted` Cloud Function — deleting a file in Storage
   (console/gsutil/master ✕) removes its RTDB record + its proxy. Self-healing.
-- **Portal tool (`/tools/footage/`):** gated, role-aware. `toolKey =
+- **Portal tool (`/footage/`):** gated, role-aware. `toolKey =
   media-footage`. Club users see only their club's games (home OR away, matched on
   `users/<uid>/club` full name); staff see all read-only; admin/superadmin get the
   **full catalogue editor inline** (the former `/master/`, merged in v0.4 — Clubs +
@@ -65,7 +65,7 @@ changes (the current audience is all authenticated + known).
 ## Other remaining work
 
 - **Canon re-skin (option B, agreed):** the admin editor is now a gated portal
-  surface (merged inline into `/tools/footage/`, v0.4 — `/master/` retired).
+  surface (merged inline into `/footage/`, v0.4 — `/master/` retired).
   `/producer/` re-skinned (13/07) + mapping-row layout fixed (14/07). Still to do:
   a house-style once-over of `/club/`.
 - ~~**Producer reads published fixtures.**~~ **Done (14/07).** `/producer/` now
