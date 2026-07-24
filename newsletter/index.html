@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Newsletter
-  Version: v1.16 (24/07/2026)
+  Version: v1.17 (24/07/2026)
   File: /tools/newsletter/index.html
 
   Monthly staff newsletter builder. Editors write a title, month and a handful
@@ -11,6 +11,13 @@
   paginated by the same code (renderDocument), so they cannot drift.
 
   Technical changelog:
+    v1.17 (24/07/2026)
+      - Draft/Published moved into the top bar; the "Edition details"
+        panel head removed (Title/Subtitle/Month explain themselves).
+      - Exported PDF is named from the edition: document.title is set to
+        "title – subtitle" for the duration of printing (Chrome names
+        Save-as-PDF files after the tab title) and restored on afterprint.
+        Covers both Export PDF and Ctrl+P.
     v1.16 (24/07/2026)
       - Packing generalised from same-width masonry to column TRACKS: a
         fractional run opens tracks across the page in order (third +
@@ -275,6 +282,14 @@
     var NL_TOOL_KEY = 'staff-newsletter';
 
     window.NL_CHANGELOG = [
+      {
+        date: '24 July 2026',
+        version: 'v1.17',
+        items: [
+          'The exported PDF is now named after your edition — e.g. "National League Board Update – July 2026.pdf" — instead of the tool’s name.',
+          'Draft/Published now sits in the top bar, and the redundant "Edition details" header is gone.'
+        ]
+      },
       {
         date: '24 July 2026',
         version: 'v1.16',
@@ -1860,10 +1875,18 @@
     root.innerHTML = '';
     _lastDoc.sheets.forEach(function (s) { root.appendChild(s.cloneNode(true)); });
   }
+  var PAGE_TITLE = document.title;
+  function exportDocTitle() {
+    if (!S.ed) return PAGE_TITLE;
+    return (S.ed.meta.title || CONFIG.defaultTitle) +
+      (S.ed.meta.subtitle ? ' – ' + S.ed.meta.subtitle : '');
+  }
   function doPrint() {
     populatePrintRoot();
-    NL.writeAudit('newsletter_export', 'Exported "' + ((S.ed && S.ed.meta.title) || '') +
-      (S.ed && S.ed.meta.subtitle ? ' – ' + S.ed.meta.subtitle : '') + '"');
+    /* Chrome names Save-as-PDF files after document.title — use the
+       edition's own title/subtitle, restored on afterprint */
+    document.title = exportDocTitle();
+    NL.writeAudit('newsletter_export', 'Exported "' + exportDocTitle() + '"');
     window.print();
   }
   function exportPdf() {
@@ -1885,9 +1908,13 @@
     if (seen) doPrint(); else showPreflight(true);
   }
   /* Ctrl+P / browser menu print should also produce the document, not the UI */
-  window.addEventListener('beforeprint', populatePrintRoot);
+  window.addEventListener('beforeprint', function () {
+    populatePrintRoot();
+    document.title = exportDocTitle();
+  });
   window.addEventListener('afterprint', function () {
     document.getElementById('nlxPrintRoot').innerHTML = '';
+    document.title = PAGE_TITLE;
   });
 
   /* ══════════════════════════════════════════════════════════════════════
@@ -2006,6 +2033,11 @@
     head.appendChild(el('div', 'nlx-bar__title',
       (meta.title || CONFIG.defaultTitle) + (meta.subtitle ? ' – ' + meta.subtitle : '')));
 
+    /* Draft/Published lives in the bar, not buried in a panel head */
+    var statusWrap = el('span');
+    renderStatusControl(statusWrap);
+    head.appendChild(statusWrap);
+
     var gauge = el('div', 'nlx-gauge');
     gauge.id = 'nlxGauge';
     gauge.appendChild(el('div', 'nlx-gauge__pages'));
@@ -2102,14 +2134,8 @@
     artnav.appendChild(artnavInner);
     editor.appendChild(artnav);
 
-    /* Edition details panel */
+    /* Edition fields — no panel head needed, the fields explain themselves */
     var edPanel = el('div', 'form-panel');
-    var edHead = el('div', 'form-panel__head');
-    edHead.appendChild(el('span', null, 'Edition details'));
-    var statusWrap = el('span');
-    renderStatusControl(statusWrap);
-    edHead.appendChild(statusWrap);
-    edPanel.appendChild(edHead);
     var edBody = el('div', 'form-panel__body');
 
     edBody.appendChild(fieldGroup('Title', textInput(meta.title || '', function (v) {
