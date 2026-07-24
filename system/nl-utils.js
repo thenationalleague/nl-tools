@@ -1,9 +1,24 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /tools/system/nl-utils.js
-   Version: v1.23 (14/07/2026)
+   Version: v1.24 (24/07/2026)
 
    Changelog
+   v1.24 (24/07/2026)
+     - Added NL.sanitiseHtml(html) — whitelist HTML sanitiser for
+       user-entered rich text (p/br/b/strong/i/em/ul/li/a[http(s)/mailto];
+       unknown tags unwrapped, attributes stripped, script/style dropped,
+       contenteditable <div> blocks become <p>). Run it before writing rich
+       text to RTDB and again before rendering.
+     - Added NL.richText(mount, opts) — minimal rich-text editor pairing
+       the .fmt-toolbar widget (Bold/Italic/bullets/link) with a sanitised
+       contenteditable .fmt-edit area. Plain-text paste always; Enter =
+       paragraph, Shift+Enter = line break; onChange receives sanitised
+       HTML. Promoted from the newsletter tool — the second consumer of
+       rich-text entry after graphics/article-composer. Paired with
+       .fmt-toolbar--compact / .fmt-edit in nl-brand v2.27.
+       Cache-bust nl-utils ?v=24 -> ?v=25, nl-brand ?v=24 -> ?v=25.
+
    v1.23 (14/07/2026)
      - installAuditHook() now no-ops when there is no DEFAULT Firebase app
        (try firebase.app()). Lets pages that run only a NAMED app — the
@@ -682,6 +697,124 @@
         ]
       });
     });
+  };
+
+  /* ── Rich text ───────────────────────────────────────────────────────── */
+  /* NL.sanitiseHtml(html) → clean HTML string. Whitelist: p, br, b, strong,
+     i, em, ul, li, a[href http(s)/mailto]. Unknown tags are unwrapped
+     (children kept), all other attributes stripped, script/style dropped
+     entirely, contenteditable <div> blocks become <p>. Use before writing
+     any user-entered rich text to RTDB and again before rendering it. */
+  window.NL.sanitiseHtml = function(html) {
+    var ALLOWED = { P:'p', BR:'br', B:'b', STRONG:'strong', I:'i', EM:'em', UL:'ul', LI:'li', A:'a' };
+    var src = document.createElement('div');
+    src.innerHTML = html || '';
+    var out = document.createElement('div');
+    (function walk(from, to) {
+      var node = from.firstChild;
+      while (node) {
+        if (node.nodeType === 3) {
+          to.appendChild(document.createTextNode(node.nodeValue));
+        } else if (node.nodeType === 1) {
+          var tag = node.tagName;
+          if (tag === 'DIV') tag = 'P';
+          if (tag === 'SCRIPT' || tag === 'STYLE') { node = node.nextSibling; continue; }
+          if (ALLOWED[tag]) {
+            var clean = document.createElement(ALLOWED[tag]);
+            if (tag === 'A') {
+              var href = node.getAttribute('href') || '';
+              if (/^(https?:|mailto:)/i.test(href)) clean.setAttribute('href', href);
+            }
+            to.appendChild(clean);
+            walk(node, clean);
+          } else {
+            walk(node, to);
+          }
+        }
+        node = node.nextSibling;
+      }
+    })(src, out);
+    return out.innerHTML;
+  };
+
+  /* NL.richText(mount, opts) → controller. Minimal rich-text editor: the
+     .fmt-toolbar widget (Bold / Italic / bulleted list / link) above a
+     sanitised contenteditable .fmt-edit area. Paste is forced to plain
+     text; Enter makes a paragraph, Shift+Enter a line break; every change
+     passes through NL.sanitiseHtml before it reaches the caller.
+       opts.value               initial HTML (sanitised on the way in)
+       opts.placeholder         ghost text shown while empty
+       opts.compact             true → .fmt-toolbar--compact (inline cards)
+       opts.onChange(cleanHtml) fires on every edit with sanitised output
+     Returns { editor, toolbar, getValue, setValue, focus }. */
+  window.NL.richText = function(mount, opts) {
+    opts = opts || {};
+    try { document.execCommand('defaultParagraphSeparator', false, 'p'); } catch (e) {}
+
+    var bar = document.createElement('div');
+    bar.className = 'fmt-toolbar' + (opts.compact ? ' fmt-toolbar--compact' : '');
+    bar.setAttribute('aria-label', 'Formatting toolbar');
+    var edit = document.createElement('div');
+    edit.className = 'fmt-edit';
+    edit.contentEditable = 'true';
+    if (opts.placeholder) edit.setAttribute('data-placeholder', opts.placeholder);
+    edit.innerHTML = window.NL.sanitiseHtml(opts.value || '');
+
+    function currentValue() {
+      var clean = window.NL.sanitiseHtml(edit.innerHTML);
+      var probe = document.createElement('div');
+      probe.innerHTML = clean;
+      return (probe.textContent || '').trim() ? clean : '';
+    }
+    function changed() { if (opts.onChange) opts.onChange(currentValue()); }
+
+    function tbBtn(labelHtml, title, fn) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'fmt-icon';
+      b.title = title;
+      b.innerHTML = labelHtml;
+      /* mousedown + preventDefault keeps the text selection alive */
+      b.addEventListener('mousedown', function(e) { e.preventDefault(); });
+      b.addEventListener('click', function() { fn(); edit.focus(); changed(); });
+      return b;
+    }
+    bar.appendChild(tbBtn('<strong>B</strong>', 'Bold', function() { document.execCommand('bold'); }));
+    bar.appendChild(tbBtn('<em>I</em>', 'Italic', function() { document.execCommand('italic'); }));
+    bar.appendChild(tbBtn('• List', 'Bulleted list', function() { document.execCommand('insertUnorderedList'); }));
+    bar.appendChild(tbBtn('Link', 'Insert link', function() {
+      var sel = window.getSelection();
+      var range = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+      window.NL.prompt('Link address', { title: 'Insert link', placeholder: 'https://…' })
+        .then(function(url) {
+          if (!url) return;
+          if (!/^(https?:|mailto:)/i.test(url)) url = 'https://' + url;
+          if (range) {
+            var s = window.getSelection();
+            s.removeAllRanges();
+            s.addRange(range);
+          }
+          edit.focus();
+          document.execCommand('createLink', false, url);
+          changed();
+        });
+    }));
+
+    edit.addEventListener('input', changed);
+    edit.addEventListener('paste', function(e) {
+      e.preventDefault();
+      var text = (e.clipboardData || window.clipboardData).getData('text/plain');
+      document.execCommand('insertText', false, text);
+    });
+
+    if (mount) { mount.appendChild(bar); mount.appendChild(edit); }
+    return {
+      editor: edit,
+      toolbar: bar,
+      getValue: currentValue,
+      setValue: function(html) { edit.innerHTML = window.NL.sanitiseHtml(html || ''); },
+      focus: function() { edit.focus(); }
+    };
   };
 
   /* ── Session helper ──────────────────────────────────────────────────── */
