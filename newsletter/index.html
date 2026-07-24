@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Newsletter
-  Version: v1.14 (24/07/2026)
+  Version: v1.15 (24/07/2026)
   File: /tools/newsletter/index.html
 
   Monthly staff newsletter builder. Editors write a title, month and a handful
@@ -11,6 +11,13 @@
   paginated by the same code (renderDocument), so they cannot drift.
 
   Technical changelog:
+    v1.15 (24/07/2026)
+      - Page ceiling removed: CONFIG.pageLimit = 0 means no limit — the
+        newsletter runs to as many pages as required, and the gauge simply
+        reports "N pages · page N is X% full". Warnings remain only for
+        real faults (article taller than a page, empty page 1). Setting
+        pageLimit to a number restores the over-length warning and export
+        confirm at that count.
     v1.14 (24/07/2026)
       - Masonry packing for same-width runs: when consecutive articles
         share a fractional width and outnumber the columns (3+ halves,
@@ -254,6 +261,13 @@
     var NL_TOOL_KEY = 'staff-newsletter';
 
     window.NL_CHANGELOG = [
+      {
+        date: '24 July 2026',
+        version: 'v1.15',
+        items: [
+          'No more warnings for going past two pages — the newsletter can run to as many pages as it needs. The gauge simply shows the page count and how full the last page is.'
+        ]
+      },
       {
         date: '24 July 2026',
         version: 'v1.14',
@@ -796,7 +810,9 @@
     defaultTitle:   'The National League Newsletter',
     roseUrl:        '/tools/assets/crests/' + encodeURIComponent('National League rose.png'),
     roseWhiteUrl:   '/tools/assets/crests/' + encodeURIComponent('National League rose white.png'),
-    pageLimit:      2,          /* warn the moment a page beyond this appears */
+    pageLimit:      0,          /* 0 = no page ceiling — as many pages as
+                                   required. Set a number to restore the
+                                   over-length warning at that page count. */
     bleedMM:        0,          /* 0 for office print; config var per handover */
     page: { wMM: 210, hMM: 297, topMM: 14, sideMM: 16, bottomMM: 16, gapMM: 5 }
   };
@@ -1733,13 +1749,14 @@
   function updateGauge(doc) {
     var g = document.getElementById('nlxGauge');
     if (!g) return;
-    var over = doc.pages > CONFIG.pageLimit || doc.overflowArticles.length > 0 || !!doc.movedOffFirst;
+    var limit = CONFIG.pageLimit || 0;
+    var over = (limit && doc.pages > limit) || doc.overflowArticles.length > 0 || !!doc.movedOffFirst;
     g.className = 'nlx-gauge' + (over ? ' nlx-gauge--warn' : '');
     var pagesWrap = g.querySelector('.nlx-gauge__pages');
     pagesWrap.innerHTML = '';
-    var slots = Math.max(CONFIG.pageLimit, doc.pages);
+    var slots = Math.max(limit || 1, doc.pages);
     for (var i = 0; i < slots; i++) {
-      var pg = el('div', 'nlx-gauge__page' + (i >= CONFIG.pageLimit ? ' nlx-gauge__page--over' : ''));
+      var pg = el('div', 'nlx-gauge__page' + (limit && i >= limit ? ' nlx-gauge__page--over' : ''));
       var fill = el('div', 'nlx-gauge__page-fill');
       var pct = i < doc.pages - 1 ? 100 : (i === doc.pages - 1 ? Math.round(doc.lastPageFill * 100) : 0);
       fill.style.height = pct + '%';
@@ -1757,16 +1774,12 @@
       detail.textContent = '“' + doc.movedOffFirst +
         '” is too tall to fit beneath the banner, so it has moved to page 2. ' +
         'Shorten it, or put a shorter article first.';
-    } else if (doc.pages > CONFIG.pageLimit) {
-      headline.textContent = doc.pages + ' pages – the newsletter has spilled past page ' + CONFIG.pageLimit;
+    } else if (limit && doc.pages > limit) {
+      headline.textContent = doc.pages + ' pages – past the ' + limit + '-page target';
       detail.textContent = 'About ' + Math.round(doc.lastPageFill * 100) +
-        '% of a page too much. Trim the longest article until the third page disappears.';
-    } else if (doc.pages === CONFIG.pageLimit) {
-      headline.textContent = doc.pages + ' pages – on target';
-      detail.textContent = 'Page ' + doc.pages + ' is ' + Math.round(doc.lastPageFill * 100) +
-        '% full. Room for roughly ' + Math.round((1 - doc.lastPageFill) * 100) + '% of a page more.';
+        '% of a page over. Trim until page ' + (limit + 1) + ' disappears.';
     } else {
-      headline.textContent = doc.pages + ' page' + (doc.pages === 1 ? '' : 's') + ' – room to spare';
+      headline.textContent = doc.pages + ' page' + (doc.pages === 1 ? '' : 's');
       detail.textContent = 'Page ' + doc.pages + ' is ' + Math.round(doc.lastPageFill * 100) + '% full.';
     }
     /* Compact bar: full detail lives in the warning strip (warn states
@@ -1825,7 +1838,11 @@
     window.print();
   }
   function exportPdf() {
-    if (_lastDoc && (_lastDoc.pages > CONFIG.pageLimit || _lastDoc.overflowArticles.length)) {
+    if (_lastDoc && _lastDoc.overflowArticles.length) {
+      NL.confirm('An article is too long for a single page and will be cut off. Export anyway?',
+        { title: 'Content will be cut off', confirmText: 'Export anyway', variant: 'danger' })
+        .then(function (ok) { if (ok) startExport(); });
+    } else if (_lastDoc && CONFIG.pageLimit && _lastDoc.pages > CONFIG.pageLimit) {
       NL.confirm('The newsletter is currently over its ' + CONFIG.pageLimit +
         '-page target. Export anyway?', { title: 'Over length', confirmText: 'Export anyway', variant: 'danger' })
         .then(function (ok) { if (ok) startExport(); });
