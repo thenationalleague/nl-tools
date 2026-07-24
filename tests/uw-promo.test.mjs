@@ -121,8 +121,8 @@ test('redeemTxn: passes a local-cache null through so the SDK retries', () => {
 });
 
 test('links: club/UW direct links point at the family pages', () => {
-  assert.equal(UWP.clubLink('abc123'), 'https://thenationalleague.github.io/tools/uw-promo/club/?c=abc123');
-  assert.equal(UWP.uwLink('xyz789'), 'https://thenationalleague.github.io/tools/uw-promo/?u=xyz789');
+  assert.equal(UWP.clubLink('abc123'), 'https://nl.tools/uw-promo/club/?c=abc123');
+  assert.equal(UWP.uwLink('xyz789'), 'https://nl.tools/uw-promo/?u=xyz789');
 });
 
 test('status metadata covers the full lifecycle', () => {

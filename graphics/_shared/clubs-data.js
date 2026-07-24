@@ -85,7 +85,7 @@ window.NL_CLUBS = [
 ];
 
 /* Crest URL — exact club name, URL-encoded, from the repo */
-window.NL_CREST_BASE = "/tools/assets/crests/";
+window.NL_CREST_BASE = "/assets/crests/";
 window.crestUrl = function (name) {
   if (!name) return null;
   return encodeURI(window.NL_CREST_BASE + name + ".png");
@@ -109,7 +109,7 @@ window.clubByName = function (name) {
    replace NL_CLUBS and fire "nl-clubs-updated" so the tools refresh
    their team list + re-render with the current clubs / short names.
    ------------------------------------------------------------------ */
-window.NL_META_URL = "/tools/assets/data/clubs-meta.json";
+window.NL_META_URL = "/assets/data/clubs-meta.json";
 (function () {
   /* division for the current season = the highest season key in the club's
      seasons map (auto-advances as new seasons are added), else `division` */

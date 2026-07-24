@@ -286,7 +286,7 @@ window.FOOTAGE_DATA = {
 
 
 /* ---- club identity hydration (see header) ------------------------------------ */
-window.FOOTAGE_META_URL   = '/tools/assets/data/clubs-meta.json';
+window.FOOTAGE_META_URL   = '/assets/data/clubs-meta.json';
 window.FOOTAGE_CREST_BASE = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
 
 /* Fill NL clubs' identity (name/short/crest) from the master registry, in place.

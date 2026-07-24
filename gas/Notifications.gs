@@ -33,7 +33,7 @@ function notifyAdmin(body) {
 
   var toolList  = Object.keys(tools).filter(function(k) { return tools[k] === 'access' || tools[k] === 'admin'; });
   /* Append tab param so portal auto-opens Pending Requests tab */
-  var baseLink  = portalUrl || 'https://thenationalleague.github.io/tools/portal/';
+  var baseLink  = portalUrl || 'https://nl.tools/portal/';
   var link      = baseLink.replace(/\/?$/, '/') + '?tab=requests';
   var subject   = '[NL Tools] New access request — ' + name + (club ? ' (' + club + ')' : '');
   var htmlBody  = buildAdminNotifyEmail(name, email, club, clubRole, toolList, link);
@@ -100,7 +100,7 @@ function sendApproval(body) {
 
   var config     = getConfig();
   var firstName  = name ? name.split(' ')[0] : 'there';
-  var portalLink = config.continueUrl || 'https://thenationalleague.github.io/tools/';
+  var portalLink = config.continueUrl || 'https://nl.tools/';
 
   MailApp.sendEmail({
     to:       email,

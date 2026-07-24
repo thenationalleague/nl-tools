@@ -103,7 +103,7 @@ Not just the scale numbers — the pass is the moment to align the whole
 separate and NOT in scope here):
 
 1. **The scale** — the token/control/grid recalibration above.
-2. **The living brand guide** — the Style Guide tool (`/tools/style-guide/`,
+2. **The living brand guide** — the Style Guide tool (`/style-guide/`,
    superadmin) is the canonical visual reference; update it in lockstep so it
    *shows* the v3 scale and stays the source of truth.
 3. **Spacing & density tokens** — review the spacing ramp and default paddings
