@@ -1,0 +1,1222 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Newsletter
+  Version: v1.0 (24/07/2026)
+  File: /tools/newsletter/index.html
+
+  Monthly staff newsletter builder. Editors write a title, month and a handful
+  of articles; the tool renders a live A4 preview and exports a PDF via the
+  browser print dialog (window.print + print stylesheet — "Path A" from the
+  build handover). The preview and the printed document are THE SAME DOM,
+  paginated by the same code (renderDocument), so they cannot drift.
+
+  Technical changelog:
+    v1.0 (24/07/2026)
+      - Initial build to handover spec (steps 1-5 + 7 of the build order).
+      - RTDB data layer: editions as keyed records, articles as child nodes
+        (per-article writes, integer `order` field), debounced 1s autosave
+        with a visible saving/saved indicator.
+      - Editor: edition meta, article add/delete/reorder (up/down buttons),
+        layout picker, contenteditable body with bold/italic/link/bullets
+        toolbar, forced plain-text paste, whitelist sanitiser on save.
+      - Preview: manual pagination into fixed A4 sheets, visible page
+        boundaries, live fill gauge with a hard warning when page 3 appears
+        and per-article too-long-for-one-page warnings.
+      - Export: window.print() over a dedicated print root (clone of the
+        preview sheets, unscaled), one-time pre-flight modal covering the
+        Chrome print settings (A4 / margins None / background graphics).
+      - Image pipeline (Firebase Storage) NOT yet built — image layouts are
+        present in the data model but disabled in the picker. See handover §5:
+        Storage must be confirmed enabled + rules deployed first.
+
+  Storage (RTDB):
+    app-data/staff-newsletter/editions/{id}/meta/...       edition metadata
+    app-data/staff-newsletter/editions/{id}/articles/{id}  article child nodes
+    app-data/staff-newsletter/library/...                  image library (future)
+    tools/staff-newsletter                                 tool registration
+
+  Access (auth-guard registry — see system/auth-guard.js):
+    staff access/admin → full editor. Club roles default off.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Newsletter — NL Tools</title>
+
+  <!-- Brand stylesheet (lint canonical: ?v=19) -->
+  <link rel="stylesheet" href="/tools/system/nl-brand.css?v=24">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Newsletter',
+      toolKey: 'staff-newsletter'
+    };
+    var NL_TOOL_KEY = 'staff-newsletter';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '24 July 2026',
+        version: 'v1.0',
+        items: [
+          'First release — write the monthly staff newsletter and export it as an A4 PDF.',
+          'Live page preview shows exactly what the PDF will look like, including where the pages break.',
+          'A fill gauge warns you the moment the newsletter spills onto a third page.',
+          'Everything autosaves as you type — look for the "Saved" tick at the top.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=9 / ?v=7 / ?v=8) -->
+  <script src="/tools/system/nl-utils.js?v=24"></script>
+  <script src="/tools/system/nl-topbar.js?v=7"></script>
+  <script src="/tools/system/auth-guard.js?v=9"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+
+  /* ── Editor shell ─────────────────────────────────────────────────────── */
+  .nlx-shell {
+    display: grid;
+    grid-template-columns: minmax(400px, 5fr) minmax(340px, 6fr);
+    gap: clamp(16px, 2vw, 28px);
+    align-items: start;
+  }
+  .nlx-pane--editor { min-width: 0; }
+  .nlx-pane--preview { min-width: 0; position: sticky; top: 12px; }
+  .nlx-preview-toggle { display: none; }
+  @media (max-width: 1100px) {
+    .nlx-shell { grid-template-columns: 1fr; }
+    .nlx-pane--preview { position: static; }
+    .nlx-preview-toggle { display: inline-flex; }
+    .nlx-shell.nlx-shell--preview-hidden .nlx-pane--preview { display: none; }
+  }
+
+  /* ── Editions list ────────────────────────────────────────────────────── */
+  .nlx-ed-list { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+  .nlx-ed-card {
+    background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; box-shadow: var(--shadow);
+  }
+  .nlx-ed-card__title { font-size: var(--text-base, 1em); font-variation-settings: 'wght' 800; color: var(--navy); }
+  .nlx-ed-card__meta { font-size: var(--text-sm); color: var(--text-muted); }
+  .nlx-ed-card__row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .nlx-ed-card__row .btn:first-child { margin-right: auto; }
+
+  /* ── Save indicator ───────────────────────────────────────────────────── */
+  .nlx-save {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: var(--text-sm); color: var(--text-muted); white-space: nowrap;
+  }
+  .nlx-save--saving { color: var(--amber); }
+  .nlx-save--saved  { color: var(--green); }
+  .nlx-save--error  { color: var(--red); }
+
+  /* ── Fill gauge — the tool's core guard rail ─────────────────────────── */
+  .nlx-gauge {
+    position: sticky; top: 0; z-index: 5;
+    background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px 16px; margin-bottom: 14px; box-shadow: var(--shadow);
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  .nlx-gauge__pages { display: flex; gap: 6px; }
+  .nlx-gauge__page {
+    width: 34px; height: 46px; border: 1.5px solid var(--border); border-radius: 3px;
+    position: relative; overflow: hidden; background: var(--off-white);
+  }
+  .nlx-gauge__page-fill {
+    position: absolute; left: 0; right: 0; top: 0;
+    background: var(--navy-100); border-bottom: 1.5px solid var(--navy-300);
+  }
+  .nlx-gauge__page--over { border-color: var(--red); background: var(--red-light); }
+  .nlx-gauge__page--over .nlx-gauge__page-fill { background: var(--red-light); border-bottom-color: var(--red); }
+  .nlx-gauge__text { flex: 1; min-width: 200px; }
+  .nlx-gauge__headline { font-variation-settings: 'wght' 800; font-size: var(--text-sm); color: var(--text); }
+  .nlx-gauge--warn .nlx-gauge__headline { color: var(--red); }
+  .nlx-gauge__detail { font-size: var(--text-sm); color: var(--text-muted); }
+
+  /* ── Article cards ────────────────────────────────────────────────────── */
+  .nlx-art { margin-bottom: 14px; }
+  .nlx-art__head-row { display: flex; align-items: center; gap: 8px; width: 100%; }
+  .nlx-art__num {
+    font-variation-settings: 'wght' 900; color: var(--primary);
+    font-size: var(--text-sm); min-width: 20px;
+  }
+  .nlx-art__head-title {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-variation-settings: 'wght' 800; font-size: var(--text-sm); color: var(--navy);
+  }
+  .nlx-art__head-row .btn--sm { flex-shrink: 0; }
+
+  /* Body editor (contenteditable) */
+  .nlx-body-toolbar { display: flex; gap: 4px; margin-bottom: 6px; }
+  .nlx-body-edit {
+    min-height: 110px; background: var(--white); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 10px 12px;
+    font-family: var(--font); font-size: var(--text-sm); line-height: 1.55; color: var(--text);
+  }
+  .nlx-body-edit:focus { outline: 2px solid var(--navy-300); outline-offset: -1px; }
+  .nlx-body-edit:empty::before { content: attr(data-placeholder); color: var(--text-muted); }
+  .nlx-body-edit p { margin: 0 0 0.6em; }
+  .nlx-body-edit p:last-child { margin-bottom: 0; }
+  .nlx-body-edit ul { margin: 0 0 0.6em; padding-left: 1.3em; }
+  .nlx-body-edit a { color: var(--blue); }
+
+  /* ── Preview pane ─────────────────────────────────────────────────────── */
+  .nlx-preview-frame {
+    background: var(--navy-100); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: clamp(10px, 1.5vw, 22px); overflow: hidden;
+  }
+  #nlxDocScale { transform-origin: 0 0; }
+
+  /* ════════════════════════════════════════════════════════════════════════
+     DOCUMENT STYLES — the printed page. This block is the ONE place in the
+     tool where physical units (mm/pt) and fixed values are correct and
+     unavoidable (print stylesheet exception, handover §6). Colours still
+     come from brand tokens. Design rule: no load-bearing solid fills —
+     rules, borders and weight instead — so output survives Chrome's
+     "Background graphics: off" default.
+     ════════════════════════════════════════════════════════════════════════ */
+  .nlx-sheet {
+    width: 210mm; height: 297mm;
+    background: var(--white);
+    position: relative; overflow: hidden;
+    font-family: var(--font); color: var(--text);
+    print-color-adjust: exact; -webkit-print-color-adjust: exact;
+  }
+  @media screen {
+    .nlx-sheet { margin: 0 0 18px; box-shadow: var(--shadow); }
+    .nlx-sheet:last-child { margin-bottom: 0; }
+  }
+  .nlx-sheet__inner {
+    position: absolute; top: 14mm; left: 16mm; right: 16mm; bottom: 16mm;
+    overflow: hidden;
+  }
+  .nlx-sheet__foot {
+    position: absolute; left: 0; right: 0; bottom: 6mm;
+    text-align: center; font-size: 7.5pt; font-style: italic; color: var(--text-muted);
+  }
+  .nlx-sheet--overflow .nlx-sheet__inner { outline: 1.5px dashed var(--red); }
+
+  /* Masthead — text, rules and weight only; prints with backgrounds off */
+  .nlx-mast { position: relative; padding: 2mm 0 5mm; margin-bottom: 6mm; border-bottom: 1.1mm solid var(--primary); }
+  .nlx-mast__kicker { font-size: 9pt; letter-spacing: 0.28em; color: var(--primary); font-variation-settings: 'wght' 800; text-transform: uppercase; }
+  .nlx-mast__title { margin: 1.5mm 0 0; font-size: 27pt; line-height: 1.05; color: var(--navy); font-variation-settings: 'wght' 900; text-transform: uppercase; }
+  .nlx-mast__sub { margin-top: 2mm; font-size: 12.5pt; color: var(--text-muted); font-variation-settings: 'wght' 600; }
+  .nlx-mast__rose { position: absolute; right: 0; top: 1mm; width: 15mm; height: auto; }
+
+  /* Article blocks */
+  .nlx-blk-art { padding-top: 4.5mm; border-top: 0.3mm solid var(--border); }
+  .nlx-blk-art--hero { border-top: none; padding-top: 0; }
+  .nlx-blk-art__head { margin: 0 0 1.6mm; font-size: 13.5pt; line-height: 1.15; color: var(--navy); font-variation-settings: 'wght' 800; }
+  .nlx-blk-art--hero .nlx-blk-art__head { font-size: 19pt; }
+  .nlx-blk-art--hero .nlx-blk-art__rule { width: 22mm; height: 0.9mm; background: var(--primary); border-radius: 0.5mm; margin: 0 0 2.5mm; }
+  .nlx-blk-art__stand { margin: 0 0 2mm; font-size: 10.5pt; line-height: 1.35; color: var(--text-muted); font-variation-settings: 'wght' 600; }
+  .nlx-blk-art__body { font-size: 9.5pt; line-height: 1.5; }
+  .nlx-blk-art__body p { margin: 0 0 2mm; }
+  .nlx-blk-art__body p:last-child { margin-bottom: 0; }
+  .nlx-blk-art__body ul { margin: 0 0 2mm; padding-left: 5mm; }
+  .nlx-blk-art__body a { color: var(--blue); text-decoration: underline; }
+
+  /* Measuring container — off-canvas, same content width as a sheet inner */
+  #nlxMeasure {
+    position: absolute; left: -10000px; top: 0; width: 178mm;
+    font-family: var(--font); color: var(--text);
+  }
+
+  /* Print root — hidden on screen, the only thing visible in print */
+  #nlxPrintRoot { display: none; }
+
+  @media print {
+    @page { size: A4; margin: 0; }
+    #nlTopbar, #pageWrap, #nlxMeasure, .modal-backdrop, .toast { display: none !important; }
+    #nlxPrintRoot { display: block !important; }
+    /* Fractionally under 297mm so rounding can never push a blank page */
+    #nlxPrintRoot .nlx-sheet { width: 210mm; height: 296.6mm; margin: 0; box-shadow: none; page-break-after: always; }
+    #nlxPrintRoot .nlx-sheet:last-child { page-break-after: auto; }
+    #nlxPrintRoot .nlx-sheet--overflow .nlx-sheet__inner { outline: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Topbar — auto-rendered by /tools/system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+    <div id="mainContent"><!-- rendered by JS via nlAuthReady --></div>
+  </div>
+</div>
+
+<!-- Off-canvas measuring container for pagination (outside pageWrap so it is
+     measurable regardless of the auth reveal) -->
+<div id="nlxMeasure" aria-hidden="true"></div>
+
+<!-- Print root — populated with a clone of the current sheets on export -->
+<div id="nlxPrintRoot" aria-hidden="true"></div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  /* ══════════════════════════════════════════════════════════════════════
+     CONFIG — masthead text, page geometry and limits live here, not
+     scattered through the CSS (handover §2). Bleed is a variable so a bled
+     variant is a one-line change later.
+     ══════════════════════════════════════════════════════════════════════ */
+  var CONFIG = {
+    mastheadKicker: 'The National League',
+    defaultTitle:   'The National League Newsletter',
+    footerText:     'The National League – internal staff newsletter',
+    roseUrl:        '/tools/assets/crests/' + encodeURIComponent('National League rose.png'),
+    pageLimit:      2,          /* warn the moment a page beyond this appears */
+    bleedMM:        0,          /* 0 for office print; config var per handover */
+    page: { wMM: 210, hMM: 297, topMM: 14, sideMM: 16, bottomMM: 16, gapMM: 5 }
+  };
+
+  var ROOT = 'app-data/staff-newsletter';
+  var LAYOUTS = [
+    { key: 'text-only',   label: 'Text only',                 enabled: true  },
+    { key: 'hero',        label: 'Hero (lead item)',          enabled: true  },
+    { key: 'image-above', label: 'Image above (coming soon)', enabled: false },
+    { key: 'image-left',  label: 'Image left (coming soon)',  enabled: false },
+    { key: 'image-right', label: 'Image right (coming soon)', enabled: false }
+  ];
+
+  /* ── State ─────────────────────────────────────────────────────────────── */
+  var S = {
+    session: null,
+    editions: {},        /* id -> meta (list view) */
+    ed: null             /* { id, meta:{}, articles:{} } while editing */
+  };
+
+  var main = null;       /* #mainContent, resolved at boot */
+
+  /* ══════════════════════════════════════════════════════════════════════
+     Helpers
+     ══════════════════════════════════════════════════════════════════════ */
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function subtitleFromMonth(month) {
+    /* 'YYYY-MM' -> 'July 2026' */
+    var m = /^(\d{4})-(\d{2})$/.exec(month || '');
+    if (!m) return '';
+    var names = ['January','February','March','April','May','June','July',
+                 'August','September','October','November','December'];
+    var idx = parseInt(m[2], 10) - 1;
+    return (names[idx] || '') + ' ' + m[1];
+  }
+  function currentMonth() {
+    var d = new Date();
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2);
+  }
+  function sortedArticles() {
+    if (!S.ed) return [];
+    var arr = Object.keys(S.ed.articles || {}).map(function (id) {
+      var a = S.ed.articles[id]; a._id = id; return a;
+    });
+    arr.sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+    return arr;
+  }
+
+  var _pxmm = 0;
+  function pxPerMM() {
+    if (_pxmm) return _pxmm;
+    var probe = el('div');
+    probe.style.cssText = 'position:absolute;left:-10000px;height:100mm;width:1px;';
+    document.body.appendChild(probe);
+    _pxmm = probe.getBoundingClientRect().height / 100;
+    probe.parentNode.removeChild(probe);
+    return _pxmm || 3.7795;
+  }
+
+  /* ── HTML sanitiser — whitelist only, run on save and before render ───── */
+  var ALLOWED_TAGS = { P:'p', BR:'br', B:'b', STRONG:'strong', I:'i', EM:'em', UL:'ul', LI:'li', A:'a' };
+  function sanitiseHtml(html) {
+    var src = el('div');
+    src.innerHTML = html || '';
+    var out = el('div');
+    (function walk(from, to) {
+      var node = from.firstChild;
+      while (node) {
+        if (node.nodeType === 3) {
+          to.appendChild(document.createTextNode(node.nodeValue));
+        } else if (node.nodeType === 1) {
+          var tag = node.tagName;
+          if (tag === 'DIV') tag = 'P';   /* contenteditable emits divs */
+          if (tag === 'SCRIPT' || tag === 'STYLE') { node = node.nextSibling; continue; }
+          if (ALLOWED_TAGS[tag]) {
+            var clean = el(ALLOWED_TAGS[tag]);
+            if (tag === 'A') {
+              var href = node.getAttribute('href') || '';
+              if (/^(https?:|mailto:)/i.test(href)) clean.setAttribute('href', href);
+            }
+            to.appendChild(clean);
+            walk(node, clean);
+          } else {
+            walk(node, to);               /* unwrap unknown tags, keep children */
+          }
+        }
+        node = node.nextSibling;
+      }
+    })(src, out);
+    return out.innerHTML;
+  }
+  function bodyIsEmpty(html) {
+    var d = el('div'); d.innerHTML = html || '';
+    return !(d.textContent || '').trim();
+  }
+
+  /* ══════════════════════════════════════════════════════════════════════
+     Data layer — debounced autosave with multi-path updates
+     ══════════════════════════════════════════════════════════════════════ */
+  var _pending = {};
+  var _saveTimer = null;
+  var _saveEl = null;
+
+  function setSaveState(state, text) {
+    if (!_saveEl) return;
+    _saveEl.className = 'nlx-save nlx-save--' + state;
+    _saveEl.textContent = text;
+  }
+  function queueSave(path, value) {
+    if (!S.ed) return;
+    _pending[path] = value;
+    setSaveState('saving', 'Saving…');
+    clearTimeout(_saveTimer);
+    _saveTimer = setTimeout(flushSaves, 1000);
+  }
+  function dropPending(prefix) {
+    Object.keys(_pending).forEach(function (k) {
+      if (k.indexOf(prefix) === 0) delete _pending[k];
+    });
+  }
+  function flushSaves() {
+    if (!S.ed) { _pending = {}; return; }
+    var keys = Object.keys(_pending);
+    if (!keys.length) return;
+    var batch = _pending; _pending = {};
+    batch['meta/updatedAt'] = firebase.database.ServerValue.TIMESTAMP;
+    var edId = S.ed.id;
+    NL.ensureAuth()
+      .then(function () { return db.ref(ROOT + '/editions/' + edId).update(batch); })
+      .then(function () {
+        var t = new Date();
+        setSaveState('saved', 'Saved ' + ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2));
+      })
+      .catch(function (err) {
+        setSaveState('error', 'Not saved – ' + err.message);
+        NL.toast('Autosave failed: ' + err.message, 'error');
+      });
+  }
+
+  function loadEditions() {
+    return NL.ensureAuth()
+      .then(function () { return db.ref(ROOT + '/editions').once('value'); })
+      .then(function (snap) {
+        var val = snap.val() || {};
+        S.editions = {};
+        Object.keys(val).forEach(function (id) {
+          S.editions[id] = (val[id] && val[id].meta) || {};
+          S.editions[id]._articleCount = val[id] && val[id].articles
+            ? Object.keys(val[id].articles).length : 0;
+        });
+      });
+  }
+
+  function createEdition(month) {
+    var meta = {
+      title: CONFIG.defaultTitle,
+      subtitle: subtitleFromMonth(month),
+      month: month,
+      status: 'draft',
+      createdBy: S.session && S.session.uid || null,
+      createdAt: firebase.database.ServerValue.TIMESTAMP,
+      updatedAt: firebase.database.ServerValue.TIMESTAMP
+    };
+    return NL.ensureAuth().then(function () {
+      var ref = db.ref(ROOT + '/editions').push();
+      return ref.child('meta').set(meta).then(function () { return ref.key; });
+    });
+  }
+
+  function openEdition(id) {
+    return NL.ensureAuth()
+      .then(function () { return db.ref(ROOT + '/editions/' + id).once('value'); })
+      .then(function (snap) {
+        var val = snap.val();
+        if (!val) { NL.toast('That edition no longer exists.', 'error'); return null; }
+        S.ed = { id: id, meta: val.meta || {}, articles: val.articles || {} };
+        return S.ed;
+      });
+  }
+
+  function addArticle() {
+    var arts = sortedArticles();
+    var order = arts.length ? (arts[arts.length - 1].order || 0) + 1 : 0;
+    var art = { order: order, layout: 'text-only', headline: '', standfirst: '', body: '', imageId: null, imageCaption: '' };
+    return NL.ensureAuth().then(function () {
+      var ref = db.ref(ROOT + '/editions/' + S.ed.id + '/articles').push();
+      return ref.set(art).then(function () {
+        S.ed.articles[ref.key] = art;
+        return ref.key;
+      });
+    });
+  }
+
+  function deleteArticle(id) {
+    dropPending('articles/' + id);
+    delete S.ed.articles[id];
+    return NL.ensureAuth().then(function () {
+      return db.ref(ROOT + '/editions/' + S.ed.id + '/articles/' + id).remove();
+    });
+  }
+
+  function moveArticle(id, dir) {
+    var arts = sortedArticles();
+    var idx = -1;
+    arts.forEach(function (a, i) { if (a._id === id) idx = i; });
+    var swapIdx = idx + dir;
+    if (idx < 0 || swapIdx < 0 || swapIdx >= arts.length) return;
+    var a = arts[idx], b = arts[swapIdx];
+    var tmp = a.order; a.order = b.order; b.order = tmp;
+    queueSave('articles/' + a._id + '/order', a.order);
+    queueSave('articles/' + b._id + '/order', b.order);
+  }
+
+  /* ══════════════════════════════════════════════════════════════════════
+     renderDocument(edition) — the single render boundary (handover §3).
+     Builds article blocks, measures them off-canvas, paginates greedily
+     into fixed A4 sheets. The preview shows these sheets scaled; print
+     shows a clone of the very same sheets unscaled. Nothing else in the
+     tool knows how the document is produced.
+     ══════════════════════════════════════════════════════════════════════ */
+  function buildMasthead(meta) {
+    var m = el('div', 'nlx-mast');
+    var rose = el('img', 'nlx-mast__rose');
+    rose.src = CONFIG.roseUrl;
+    rose.alt = '';
+    rose.onerror = function () { this.onerror = null; this.style.display = 'none'; };
+    m.appendChild(rose);
+    m.appendChild(el('div', 'nlx-mast__kicker', CONFIG.mastheadKicker));
+    m.appendChild(el('h1', 'nlx-mast__title', meta.title || CONFIG.defaultTitle));
+    if (meta.subtitle) m.appendChild(el('div', 'nlx-mast__sub', meta.subtitle));
+    return m;
+  }
+
+  function buildArticleBlock(art) {
+    var isHero = art.layout === 'hero';
+    var b = el('div', 'nlx-blk-art' + (isHero ? ' nlx-blk-art--hero' : ''));
+    b.appendChild(el('h2', 'nlx-blk-art__head', art.headline || 'Untitled article'));
+    if (isHero) b.appendChild(el('div', 'nlx-blk-art__rule'));
+    if ((art.standfirst || '').trim()) b.appendChild(el('p', 'nlx-blk-art__stand', art.standfirst));
+    var body = el('div', 'nlx-blk-art__body');
+    body.innerHTML = sanitiseHtml(art.body);   /* stored sanitised; sanitise again on render */
+    b.appendChild(body);
+    return b;
+  }
+
+  function renderDocument(edition) {
+    var mm = pxPerMM();
+    var P = CONFIG.page;
+    var contentH = (P.hMM - P.topMM - P.bottomMM) * mm;
+    var gap = P.gapMM * mm;
+
+    /* Build + measure blocks off-canvas */
+    var measure = document.getElementById('nlxMeasure');
+    measure.innerHTML = '';
+    var blocks = [{ node: buildMasthead(edition.meta), art: null }];
+    var arts = [];
+    Object.keys(edition.articles || {}).forEach(function (id) {
+      var a = edition.articles[id]; a._id = id; arts.push(a);
+    });
+    arts.sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+    arts.forEach(function (a) { blocks.push({ node: buildArticleBlock(a), art: a }); });
+    blocks.forEach(function (b) { measure.appendChild(b.node); });
+
+    var heights = blocks.map(function (b) { return b.node.getBoundingClientRect().height; });
+
+    /* Greedy pagination */
+    var sheets = [];
+    var used = 0;
+    var current = null;
+    var overflowArticles = [];
+
+    function newSheet() {
+      var s = el('div', 'nlx-sheet');
+      var inner = el('div', 'nlx-sheet__inner');
+      s.appendChild(inner);
+      var foot = el('div', 'nlx-sheet__foot',
+        CONFIG.footerText + (edition.meta.subtitle ? ' – ' + edition.meta.subtitle : ''));
+      s.appendChild(foot);
+      sheets.push(s);
+      current = inner;
+      used = 0;
+      return s;
+    }
+    newSheet();
+
+    blocks.forEach(function (b, i) {
+      var h = heights[i];
+      var need = used > 0 ? h + gap : h;
+      if (used > 0 && used + need > contentH) {
+        newSheet();
+        need = h;
+      }
+      if (need > contentH && b.art) {
+        /* Single article taller than a whole page: place alone, flag loudly.
+           Never let break-inside logic produce a silent blank page. */
+        if (used > 0) newSheet();
+        overflowArticles.push(b.art.headline || 'Untitled article');
+        sheets[sheets.length - 1].classList.add('nlx-sheet--overflow');
+      }
+      if (used > 0) b.node.style.marginTop = CONFIG.page.gapMM + 'mm';
+      current.appendChild(b.node);
+      used += need;
+    });
+
+    measure.innerHTML = '';
+    return {
+      sheets: sheets,
+      pages: sheets.length,
+      lastPageFill: Math.min(1, used / contentH),
+      overflowArticles: overflowArticles
+    };
+  }
+
+  /* ── Preview + gauge ──────────────────────────────────────────────────── */
+  var _previewTimer = null;
+  function schedulePreview() {
+    clearTimeout(_previewTimer);
+    _previewTimer = setTimeout(refreshPreview, 300);
+  }
+  var _lastDoc = null;
+
+  function refreshPreview() {
+    if (!S.ed) return;
+    var scale = document.getElementById('nlxDocScale');
+    if (!scale) return;
+    _lastDoc = renderDocument(S.ed);
+    scale.innerHTML = '';
+    _lastDoc.sheets.forEach(function (s) { scale.appendChild(s); });
+    applyPreviewScale();
+    updateGauge(_lastDoc);
+  }
+
+  function applyPreviewScale() {
+    var frame = document.getElementById('nlxPreviewFrame');
+    var scale = document.getElementById('nlxDocScale');
+    if (!frame || !scale || !_lastDoc) return;
+    var mm = pxPerMM();
+    var cs = getComputedStyle(frame);
+    var padX = parseFloat(cs.paddingLeft || '0') + parseFloat(cs.paddingRight || '0');
+    var padY = parseFloat(cs.paddingTop || '0') + parseFloat(cs.paddingBottom || '0');
+    var sheetW = CONFIG.page.wMM * mm;
+    var avail = frame.clientWidth - padX;
+    if (avail <= 0) return;
+    var s = Math.min(1, avail / sheetW);
+    scale.style.transform = 'scale(' + s + ')';
+    var fullH = scale.scrollHeight;
+    frame.style.height = Math.ceil(fullH * s + padY) + 'px';
+  }
+  window.addEventListener('resize', function () { applyPreviewScale(); });
+
+  function updateGauge(doc) {
+    var g = document.getElementById('nlxGauge');
+    if (!g) return;
+    var over = doc.pages > CONFIG.pageLimit || doc.overflowArticles.length > 0;
+    g.className = 'nlx-gauge' + (over ? ' nlx-gauge--warn' : '');
+    var pagesWrap = g.querySelector('.nlx-gauge__pages');
+    pagesWrap.innerHTML = '';
+    var slots = Math.max(CONFIG.pageLimit, doc.pages);
+    for (var i = 0; i < slots; i++) {
+      var pg = el('div', 'nlx-gauge__page' + (i >= CONFIG.pageLimit ? ' nlx-gauge__page--over' : ''));
+      var fill = el('div', 'nlx-gauge__page-fill');
+      var pct = i < doc.pages - 1 ? 100 : (i === doc.pages - 1 ? Math.round(doc.lastPageFill * 100) : 0);
+      fill.style.height = pct + '%';
+      pg.appendChild(fill);
+      pagesWrap.appendChild(pg);
+    }
+    var headline = g.querySelector('.nlx-gauge__headline');
+    var detail = g.querySelector('.nlx-gauge__detail');
+    if (doc.overflowArticles.length) {
+      headline.textContent = 'An article is too long for a single page';
+      detail.textContent = '“' + doc.overflowArticles.join('”, “') +
+        '” will be cut off in the PDF – shorten it before exporting.';
+    } else if (doc.pages > CONFIG.pageLimit) {
+      headline.textContent = doc.pages + ' pages – the newsletter has spilled past page ' + CONFIG.pageLimit;
+      detail.textContent = 'About ' + Math.round(doc.lastPageFill * 100) +
+        '% of a page too much. Trim the longest article until the third page disappears.';
+    } else if (doc.pages === CONFIG.pageLimit) {
+      headline.textContent = doc.pages + ' pages – on target';
+      detail.textContent = 'Page ' + doc.pages + ' is ' + Math.round(doc.lastPageFill * 100) +
+        '% full. Room for roughly ' + Math.round((1 - doc.lastPageFill) * 100) + '% of a page more.';
+    } else {
+      headline.textContent = doc.pages + ' page' + (doc.pages === 1 ? '' : 's') + ' – room to spare';
+      detail.textContent = 'Page ' + doc.pages + ' is ' + Math.round(doc.lastPageFill * 100) + '% full.';
+    }
+  }
+
+  /* ── Export (Path A — browser print) ──────────────────────────────────── */
+  var PREFLIGHT_KEY = 'nl-newsletter-preflight-seen';
+
+  function preflightHtml() {
+    return '' +
+      '<p class="confirm-text">The PDF is produced through your browser’s print dialog. ' +
+      'Check these three settings the first time – they are remembered afterwards:</p>' +
+      '<ul style="margin:10px 0 0;padding-left:20px;font-size:var(--text-sm);line-height:1.7;">' +
+      '<li><strong>Destination</strong> – “Save as PDF”</li>' +
+      '<li><strong>Paper size</strong> – A4, <strong>Margins</strong> – None (or Default)</li>' +
+      '<li><strong>Options → Background graphics</strong> – ticked on. Chrome leaves this ' +
+      'off by default and solid colours print white without it.</li>' +
+      '</ul>';
+  }
+
+  function showPreflight(thenPrint) {
+    NL.modal({
+      title: 'Before you export',
+      body: preflightHtml(),
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Open print dialog', className: 'btn--primary', autofocus: true,
+          onClick: function (c) {
+            try { localStorage.setItem(PREFLIGHT_KEY, '1'); } catch (e) {}
+            c.close();
+            if (thenPrint) setTimeout(doPrint, 150);
+          } }
+      ]
+    });
+  }
+
+  function populatePrintRoot() {
+    if (!S.ed) return;
+    if (!_lastDoc) _lastDoc = renderDocument(S.ed);
+    var root = document.getElementById('nlxPrintRoot');
+    root.innerHTML = '';
+    _lastDoc.sheets.forEach(function (s) { root.appendChild(s.cloneNode(true)); });
+  }
+  function doPrint() {
+    populatePrintRoot();
+    NL.writeAudit('newsletter_export', 'Exported "' + ((S.ed && S.ed.meta.title) || '') +
+      (S.ed && S.ed.meta.subtitle ? ' – ' + S.ed.meta.subtitle : '') + '"');
+    window.print();
+  }
+  function exportPdf() {
+    if (_lastDoc && (_lastDoc.pages > CONFIG.pageLimit || _lastDoc.overflowArticles.length)) {
+      NL.confirm('The newsletter is currently over its ' + CONFIG.pageLimit +
+        '-page target. Export anyway?', { title: 'Over length', confirmText: 'Export anyway', variant: 'danger' })
+        .then(function (ok) { if (ok) startExport(); });
+    } else {
+      startExport();
+    }
+  }
+  function startExport() {
+    var seen = false;
+    try { seen = localStorage.getItem(PREFLIGHT_KEY) === '1'; } catch (e) {}
+    if (seen) doPrint(); else showPreflight(true);
+  }
+  /* Ctrl+P / browser menu print should also produce the document, not the UI */
+  window.addEventListener('beforeprint', populatePrintRoot);
+  window.addEventListener('afterprint', function () {
+    document.getElementById('nlxPrintRoot').innerHTML = '';
+  });
+
+  /* ══════════════════════════════════════════════════════════════════════
+     Views
+     ══════════════════════════════════════════════════════════════════════ */
+  function renderList() {
+    S.ed = null;
+    _pending = {};
+    main.innerHTML = '';
+
+    var head = el('div', 'page-header');
+    var titles = el('div', 'page-header__titles');
+    titles.appendChild(el('h1', 'page-header__title', 'Newsletter'));
+    titles.appendChild(el('p', 'page-header__sub', 'Monthly staff newsletter – write, preview and export as an A4 PDF.'));
+    head.appendChild(titles);
+    var actions = el('div', 'page-header__actions');
+    var newBtn = el('button', 'btn btn--primary', 'New edition');
+    newBtn.type = 'button';
+    newBtn.addEventListener('click', promptNewEdition);
+    actions.appendChild(newBtn);
+    head.appendChild(actions);
+    main.appendChild(head);
+
+    var ids = Object.keys(S.editions);
+    if (!ids.length) {
+      var empty = el('div', 'empty-state');
+      empty.appendChild(el('div', 'empty-state__icon', '📰'));
+      empty.appendChild(el('div', 'empty-state__title', 'No editions yet'));
+      empty.appendChild(el('div', 'empty-state__text', 'Create the first monthly edition to get started.'));
+      main.appendChild(empty);
+      return;
+    }
+
+    ids.sort(function (a, b) {
+      return (S.editions[b].month || '').localeCompare(S.editions[a].month || '');
+    });
+    var grid = el('div', 'nlx-ed-list');
+    ids.forEach(function (id) {
+      var meta = S.editions[id];
+      var card = el('div', 'nlx-ed-card');
+      card.appendChild(el('div', 'nlx-ed-card__title', (meta.title || CONFIG.defaultTitle) +
+        (meta.subtitle ? ' – ' + meta.subtitle : '')));
+      var count = meta._articleCount || 0;
+      card.appendChild(el('div', 'nlx-ed-card__meta',
+        count + ' article' + (count === 1 ? '' : 's') +
+        (meta.updatedAt ? ' · updated ' + NL.timeAgo(meta.updatedAt) : '')));
+      var row = el('div', 'nlx-ed-card__row');
+      var pill = el('span', 'pill ' + (meta.status === 'published' ? 'pill--approved' : 'pill--pending'),
+        meta.status === 'published' ? 'Published' : 'Draft');
+      var open = el('button', 'btn btn--navy btn--sm', 'Open');
+      open.type = 'button';
+      open.addEventListener('click', function () { gotoEdition(id); });
+      var del = el('button', 'btn btn--ghost btn--sm', 'Delete');
+      del.type = 'button';
+      del.addEventListener('click', function () {
+        NL.confirm('Delete "' + (meta.title || '') + (meta.subtitle ? ' – ' + meta.subtitle : '') +
+          '"?\nThis removes the edition and all its articles.', { title: 'Delete edition', confirmText: 'Delete', variant: 'danger' })
+          .then(function (ok) {
+            if (!ok) return;
+            NL.ensureAuth()
+              .then(function () { return db.ref(ROOT + '/editions/' + id).remove(); })
+              .then(function () {
+                delete S.editions[id];
+                NL.toast('Edition deleted', 'success');
+                renderList();
+              })
+              .catch(function (err) { NL.toast(err.message, 'error'); });
+          });
+      });
+      row.appendChild(open);
+      row.appendChild(pill);
+      row.appendChild(del);
+      card.appendChild(row);
+      grid.appendChild(card);
+    });
+    main.appendChild(grid);
+  }
+
+  function promptNewEdition() {
+    var wrap = el('div');
+    var p = el('p', 'confirm-text', 'Which month is this edition for?');
+    wrap.appendChild(p);
+    var input = el('input', 'modal__input');
+    input.type = 'month';
+    input.value = currentMonth();
+    wrap.appendChild(input);
+    NL.modal({
+      title: 'New edition',
+      size: 'sm',
+      body: wrap,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Create', className: 'btn--primary', onClick: function (c) {
+            var month = input.value || currentMonth();
+            c.close();
+            createEdition(month)
+              .then(function (id) { NL.toast('Edition created', 'success'); gotoEdition(id); })
+              .catch(function (err) { NL.toast(err.message, 'error'); });
+          } }
+      ]
+    });
+  }
+
+  function gotoEdition(id) { location.hash = '#edition/' + id; route(); }
+  function gotoList() { location.hash = ''; route(); }
+
+  /* ── Editor view ──────────────────────────────────────────────────────── */
+  function renderEditor() {
+    main.innerHTML = '';
+    var meta = S.ed.meta;
+
+    /* Header */
+    var head = el('div', 'page-header');
+    var titles = el('div', 'page-header__titles');
+    titles.appendChild(el('h1', 'page-header__title',
+      (meta.title || CONFIG.defaultTitle) + (meta.subtitle ? ' – ' + meta.subtitle : '')));
+    head.appendChild(titles);
+    var actions = el('div', 'page-header__actions');
+    _saveEl = el('span', 'nlx-save', 'All changes saved');
+    actions.appendChild(_saveEl);
+    var back = el('button', 'btn btn--ghost', 'All editions');
+    back.type = 'button';
+    back.addEventListener('click', function () { flushSaves(); gotoList(); });
+    actions.appendChild(back);
+    var tips = el('button', 'btn btn--ghost', 'Print tips');
+    tips.type = 'button';
+    tips.addEventListener('click', function () { showPreflight(false); });
+    actions.appendChild(tips);
+    var exp = el('button', 'btn btn--primary', 'Export PDF');
+    exp.type = 'button';
+    exp.addEventListener('click', exportPdf);
+    actions.appendChild(exp);
+    head.appendChild(actions);
+    main.appendChild(head);
+
+    /* Fill gauge — persistent, sticky */
+    var gauge = el('div', 'nlx-gauge');
+    gauge.id = 'nlxGauge';
+    gauge.appendChild(el('div', 'nlx-gauge__pages'));
+    var gtext = el('div', 'nlx-gauge__text');
+    gtext.appendChild(el('div', 'nlx-gauge__headline', 'Measuring…'));
+    gtext.appendChild(el('div', 'nlx-gauge__detail', ''));
+    gauge.appendChild(gtext);
+    main.appendChild(gauge);
+
+    /* Two-pane shell */
+    var shell = el('div', 'nlx-shell');
+    shell.id = 'nlxShell';
+    var editor = el('div', 'nlx-pane--editor');
+    var preview = el('div', 'nlx-pane--preview');
+    shell.appendChild(editor);
+    shell.appendChild(preview);
+    main.appendChild(shell);
+
+    /* Edition details panel */
+    var edPanel = el('div', 'form-panel');
+    var edHead = el('div', 'form-panel__head');
+    edHead.appendChild(el('span', null, 'Edition details'));
+    var statusWrap = el('span');
+    renderStatusControl(statusWrap);
+    edHead.appendChild(statusWrap);
+    edPanel.appendChild(edHead);
+    var edBody = el('div', 'form-panel__body');
+
+    edBody.appendChild(fieldGroup('Title', textInput(meta.title || '', function (v) {
+      meta.title = v; queueSave('meta/title', v); schedulePreview();
+    })));
+    edBody.appendChild(fieldGroup('Subtitle', textInput(meta.subtitle || '', function (v) {
+      meta.subtitle = v; queueSave('meta/subtitle', v); schedulePreview();
+    })));
+    var monthInput = textInput(meta.month || '', function (v) {
+      meta.month = v; queueSave('meta/month', v);
+      var sub = subtitleFromMonth(v);
+      if (sub) {
+        meta.subtitle = sub; queueSave('meta/subtitle', sub);
+        var subField = edBody.querySelectorAll('input')[1];
+        if (subField) subField.value = sub;
+      }
+      schedulePreview();
+    });
+    monthInput.type = 'month';
+    edBody.appendChild(fieldGroup('Month', monthInput));
+    edPanel.appendChild(edBody);
+    editor.appendChild(edPanel);
+
+    /* Articles */
+    var artsWrap = el('div');
+    artsWrap.id = 'nlxArticles';
+    editor.appendChild(artsWrap);
+    renderArticles(artsWrap);
+
+    var addBtn = el('button', 'btn btn--navy', 'Add article');
+    addBtn.type = 'button';
+    addBtn.addEventListener('click', function () {
+      addArticle()
+        .then(function () { renderArticles(artsWrap); schedulePreview(); })
+        .catch(function (err) { NL.toast(err.message, 'error'); });
+    });
+    editor.appendChild(addBtn);
+
+    /* Preview pane */
+    var ptools = el('div', 'toolbar');
+    var pleft = el('div', 'toolbar__left');
+    pleft.appendChild(el('span', 'text-label', 'Preview'));
+    ptools.appendChild(pleft);
+    var pright = el('div', 'toolbar__right');
+    var ptoggle = el('button', 'btn btn--ghost btn--sm nlx-preview-toggle', 'Hide preview');
+    ptoggle.type = 'button';
+    ptoggle.addEventListener('click', function () {
+      var hidden = shell.classList.toggle('nlx-shell--preview-hidden');
+      ptoggle.textContent = hidden ? 'Show preview' : 'Hide preview';
+      if (!hidden) applyPreviewScale();
+    });
+    pright.appendChild(ptoggle);
+    ptools.appendChild(pright);
+    preview.appendChild(ptools);
+
+    var frame = el('div', 'nlx-preview-frame');
+    frame.id = 'nlxPreviewFrame';
+    var scale = el('div');
+    scale.id = 'nlxDocScale';
+    frame.appendChild(scale);
+    preview.appendChild(frame);
+
+    refreshPreview();
+  }
+
+  function renderStatusControl(wrap) {
+    wrap.innerHTML = '';
+    var meta = S.ed.meta;
+    var published = meta.status === 'published';
+    var pill = el('span', 'pill ' + (published ? 'pill--approved' : 'pill--pending'),
+      published ? 'Published' : 'Draft');
+    wrap.appendChild(pill);
+    var btn = el('button', 'btn btn--ghost btn--sm', published ? 'Back to draft' : 'Mark published');
+    btn.type = 'button';
+    btn.style.marginLeft = '8px';
+    btn.addEventListener('click', function () {
+      meta.status = published ? 'draft' : 'published';
+      queueSave('meta/status', meta.status);
+      renderStatusControl(wrap);
+    });
+    wrap.appendChild(btn);
+  }
+
+  function fieldGroup(label, input) {
+    var g = el('div', 'form-group');
+    var l = el('label', null, label);
+    g.appendChild(l);
+    g.appendChild(input);
+    return g;
+  }
+  function textInput(value, onChange) {
+    var i = el('input');
+    i.type = 'text';
+    i.value = value;
+    i.addEventListener('input', function () { onChange(i.value); });
+    return i;
+  }
+
+  function renderArticles(wrap) {
+    wrap.innerHTML = '';
+    var arts = sortedArticles();
+    if (!arts.length) {
+      var empty = el('div', 'empty-state');
+      empty.appendChild(el('div', 'empty-state__title', 'No articles yet'));
+      empty.appendChild(el('div', 'empty-state__text', 'Add the first article – four to six is about right for two pages.'));
+      wrap.appendChild(empty);
+      return;
+    }
+    arts.forEach(function (art, idx) {
+      wrap.appendChild(buildArticleCard(art, idx, arts.length, wrap));
+    });
+  }
+
+  function buildArticleCard(art, idx, total, listWrap) {
+    var id = art._id;
+    var panel = el('div', 'form-panel nlx-art');
+
+    var head = el('div', 'form-panel__head');
+    var row = el('div', 'nlx-art__head-row');
+    row.appendChild(el('span', 'nlx-art__num', String(idx + 1)));
+    var headTitle = el('span', 'nlx-art__head-title', art.headline || 'Untitled article');
+    row.appendChild(headTitle);
+
+    var up = el('button', 'btn btn--ghost btn--sm', '↑');
+    up.type = 'button';
+    up.title = 'Move up';
+    up.disabled = idx === 0;
+    up.addEventListener('click', function () { moveArticle(id, -1); renderArticles(listWrap); schedulePreview(); });
+    var down = el('button', 'btn btn--ghost btn--sm', '↓');
+    down.type = 'button';
+    down.title = 'Move down';
+    down.disabled = idx === total - 1;
+    down.addEventListener('click', function () { moveArticle(id, 1); renderArticles(listWrap); schedulePreview(); });
+    var del = el('button', 'btn btn--danger btn--sm', 'Delete');
+    del.type = 'button';
+    del.addEventListener('click', function () {
+      NL.confirm('Delete "' + (art.headline || 'Untitled article') + '"?',
+        { title: 'Delete article', confirmText: 'Delete', variant: 'danger' })
+        .then(function (ok) {
+          if (!ok) return;
+          deleteArticle(id)
+            .then(function () { renderArticles(listWrap); schedulePreview(); })
+            .catch(function (err) { NL.toast(err.message, 'error'); });
+        });
+    });
+    row.appendChild(up);
+    row.appendChild(down);
+    row.appendChild(del);
+    head.appendChild(row);
+    panel.appendChild(head);
+
+    var body = el('div', 'form-panel__body');
+
+    /* Layout picker */
+    var layoutSel = el('select');
+    LAYOUTS.forEach(function (l) {
+      var o = el('option', null, l.label);
+      o.value = l.key;
+      if (!l.enabled) {
+        o.disabled = true;
+        o.title = 'Photo layouts arrive with the image library in a later version';
+      }
+      if ((art.layout || 'text-only') === l.key) o.selected = true;
+      layoutSel.appendChild(o);
+    });
+    layoutSel.addEventListener('change', function () {
+      art.layout = layoutSel.value;
+      queueSave('articles/' + id + '/layout', art.layout);
+      schedulePreview();
+    });
+    body.appendChild(fieldGroup('Layout', layoutSel));
+
+    /* Headline */
+    var headlineInput = textInput(art.headline || '', function (v) {
+      art.headline = v;
+      headTitle.textContent = v || 'Untitled article';
+      queueSave('articles/' + id + '/headline', v);
+      schedulePreview();
+    });
+    headlineInput.placeholder = 'Headline';
+    body.appendChild(fieldGroup('Headline', headlineInput));
+
+    /* Standfirst */
+    var standInput = textInput(art.standfirst || '', function (v) {
+      art.standfirst = v;
+      queueSave('articles/' + id + '/standfirst', v);
+      schedulePreview();
+    });
+    standInput.placeholder = 'Optional one-line intro';
+    body.appendChild(fieldGroup('Standfirst', standInput));
+
+    /* Body editor */
+    var bodyGroup = el('div', 'form-group');
+    bodyGroup.appendChild(el('label', null, 'Body'));
+    var toolbar = el('div', 'nlx-body-toolbar');
+    var edit = el('div', 'nlx-body-edit');
+    edit.contentEditable = 'true';
+    edit.setAttribute('data-placeholder', 'Write the article…');
+    edit.innerHTML = sanitiseHtml(art.body || '');
+
+    function tbBtn(label, title, fn) {
+      var b = el('button', 'btn btn--ghost btn--sm', label);
+      b.type = 'button';
+      b.title = title;
+      /* mousedown + preventDefault keeps the text selection alive */
+      b.addEventListener('mousedown', function (e) { e.preventDefault(); });
+      b.addEventListener('click', function () { fn(); edit.focus(); commitBody(); });
+      return b;
+    }
+    toolbar.appendChild(tbBtn('B', 'Bold', function () { document.execCommand('bold'); }));
+    toolbar.appendChild(tbBtn('I', 'Italic', function () { document.execCommand('italic'); }));
+    toolbar.appendChild(tbBtn('• List', 'Bulleted list', function () { document.execCommand('insertUnorderedList'); }));
+    toolbar.appendChild(tbBtn('Link', 'Insert link', function () {
+      var sel = window.getSelection();
+      var range = sel && sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+      NL.prompt('Link address', { title: 'Insert link', placeholder: 'https://…' })
+        .then(function (url) {
+          if (!url) return;
+          if (!/^(https?:|mailto:)/i.test(url)) url = 'https://' + url;
+          if (range) {
+            var s = window.getSelection();
+            s.removeAllRanges();
+            s.addRange(range);
+          }
+          edit.focus();
+          document.execCommand('createLink', false, url);
+          commitBody();
+        });
+    }));
+    bodyGroup.appendChild(toolbar);
+
+    function commitBody() {
+      var clean = sanitiseHtml(edit.innerHTML);
+      if (bodyIsEmpty(clean)) clean = '';
+      art.body = clean;
+      queueSave('articles/' + id + '/body', clean);
+      schedulePreview();
+    }
+    edit.addEventListener('input', commitBody);
+    /* Forced plain text on paste, always (handover §2) */
+    edit.addEventListener('paste', function (e) {
+      e.preventDefault();
+      var text = (e.clipboardData || window.clipboardData).getData('text/plain');
+      document.execCommand('insertText', false, text);
+    });
+    bodyGroup.appendChild(edit);
+    var hint = el('div', 'form-hint', 'Paste always arrives as plain text. Photos and captions arrive in a later version.');
+    bodyGroup.appendChild(hint);
+    body.appendChild(bodyGroup);
+
+    panel.appendChild(body);
+    return panel;
+  }
+
+  /* ── Routing ──────────────────────────────────────────────────────────── */
+  function route() {
+    var m = /^#edition\/([\w-]+)$/.exec(location.hash || '');
+    if (m) {
+      openEdition(m[1]).then(function (ed) {
+        if (ed) renderEditor(); else { location.hash = ''; renderList(); }
+      }).catch(function (err) {
+        NL.toast(err.message, 'error');
+        location.hash = '';
+        renderList();
+      });
+    } else {
+      loadEditions()
+        .then(renderList)
+        .catch(function (err) { NL.toast(err.message, 'error'); });
+    }
+  }
+  window.addEventListener('hashchange', route);
+
+  /* Flush any pending autosave before the tab goes away */
+  window.addEventListener('beforeunload', function () {
+    if (Object.keys(_pending).length) flushSaves();
+  });
+
+  /* ── Boot ─────────────────────────────────────────────────────────────── */
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function (session) {
+    S.session = session;
+    main = document.getElementById('mainContent');
+    route();
+  };
+
+  /* If auth-guard fired before this script loaded, replay the session. */
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+
+</body>
+</html>
