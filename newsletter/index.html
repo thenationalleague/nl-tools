@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Newsletter
-  Version: v1.1 (24/07/2026)
+  Version: v1.2 (24/07/2026)
   File: /tools/newsletter/index.html
 
   Monthly staff newsletter builder. Editors write a title, month and a handful
@@ -11,6 +11,23 @@
   paginated by the same code (renderDocument), so they cannot drift.
 
   Technical changelog:
+    v1.2 (24/07/2026)
+      - Image pipeline (handover step 6). Firebase Storage confirmed in use
+        (footage tool precedent) — compat SDK added to the head. Device
+        upload and URL paste are both INGEST routes into one shared library:
+        whatever arrives is downscaled client-side (canvas, 1,600px long
+        edge, JPEG 0.85), written once to Storage at
+        newsletter/library/{libraryId}.jpg, recorded in RTDB library/, and
+        selected from the library thereafter. URL ingest COPIES the image —
+        never hot-links — and fails loudly on CORS with save-and-upload
+        advice. Non-raster files rejected; upload progress shown.
+      - Image layouts (above/left/right) enabled in the picker; article
+        cards gain a photo row (choose/remove + caption) when an image
+        layout is selected. Rendering uses stored width/height so pagination
+        measurement is correct before the image loads.
+      - Library records are never deleted by the tool (past editions may
+        reference them).
+      - Storage rules snapshot added at system/storage/rules.snapshot.rules.
     v1.1 (24/07/2026)
       - Per-article presentation controls: `columns` (1|2 — CSS multicol on
         the body, headline/standfirst stay full width) and `style`
@@ -59,6 +76,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
 
   <!-- Firebase init -->
   <script>
@@ -84,6 +102,15 @@
     var NL_TOOL_KEY = 'staff-newsletter';
 
     window.NL_CHANGELOG = [
+      {
+        date: '24 July 2026',
+        version: 'v1.2',
+        items: [
+          'Photos have arrived — upload from your device or paste an image address, and it joins a shared photo library.',
+          'Big photos are automatically shrunk to a print-friendly size before upload.',
+          'The image layouts (photo above, left or right of the text) are now available in the layout picker, with captions.'
+        ]
+      },
       {
         date: '24 July 2026',
         version: 'v1.1',
@@ -216,6 +243,29 @@
   .nlx-body-edit ul { margin: 0 0 0.6em; padding-left: 1.3em; }
   .nlx-body-edit a { color: var(--blue); }
 
+  /* Article photo row + library picker */
+  .nlx-img-row { display: flex; align-items: center; gap: 10px; }
+  .nlx-img-thumb {
+    width: 64px; height: 48px; object-fit: cover; border-radius: 4px;
+    border: 1px solid var(--border); background: var(--off-white); flex-shrink: 0;
+  }
+  .nlx-lib-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 10px; max-height: 50vh; overflow: auto; margin-top: 12px;
+  }
+  .nlx-lib-item {
+    border: 2px solid transparent; border-radius: var(--radius);
+    padding: 0; background: none; cursor: pointer; text-align: left;
+  }
+  .nlx-lib-item:hover, .nlx-lib-item:focus { border-color: var(--navy-300); }
+  .nlx-lib-item img { width: 100%; height: 90px; object-fit: cover; border-radius: 4px; display: block; }
+  .nlx-lib-item__name {
+    font-size: var(--text-xs); color: var(--text-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 2px 0;
+  }
+  .nlx-progress { height: 6px; background: var(--off-white); border-radius: 3px; overflow: hidden; margin-top: 10px; }
+  .nlx-progress__bar { height: 100%; width: 0; background: var(--green); transition: width 0.15s; }
+
   /* ── Preview pane ─────────────────────────────────────────────────────── */
   .nlx-preview-frame {
     background: var(--navy-100); border: 1px solid var(--border); border-radius: var(--radius);
@@ -275,6 +325,17 @@
 
   /* Two-column body text — headline and standfirst stay full width */
   .nlx-blk-art--cols2 .nlx-blk-art__body { column-count: 2; column-gap: 6mm; }
+
+  /* Article images. width/height attrs are set from the library record so
+     the box height is known before the image loads — pagination measurement
+     stays correct. Floated figures are cleared by the body's ::after so
+     measured block height always includes them. */
+  .nlx-blk-art__fig { margin: 0 0 2.5mm; }
+  .nlx-blk-art__img { width: 100%; height: auto; display: block; border-radius: 1.5mm; }
+  .nlx-blk-art__cap { margin-top: 1.2mm; font-size: 7.5pt; font-style: italic; color: var(--text-muted); }
+  .nlx-blk-art__fig--left  { float: left;  width: 45%; margin: 1mm 4.5mm 2mm 0; }
+  .nlx-blk-art__fig--right { float: right; width: 45%; margin: 1mm 0 2mm 4.5mm; }
+  .nlx-blk-art__body::after { content: ''; display: block; clear: both; }
   .nlx-blk-art__head { margin: 0 0 1.6mm; font-size: 13.5pt; line-height: 1.15; color: var(--navy); font-variation-settings: 'wght' 800; }
   .nlx-blk-art--hero .nlx-blk-art__head { font-size: 19pt; }
   .nlx-blk-art--hero .nlx-blk-art__rule { width: 22mm; height: 0.9mm; background: var(--primary); border-radius: 0.5mm; margin: 0 0 2.5mm; }
@@ -351,18 +412,22 @@
     { key: 'accent-bar', label: 'Red accent bar' }
   ];
   var LAYOUTS = [
-    { key: 'text-only',   label: 'Text only',                 enabled: true  },
-    { key: 'hero',        label: 'Hero (lead item)',          enabled: true  },
-    { key: 'image-above', label: 'Image above (coming soon)', enabled: false },
-    { key: 'image-left',  label: 'Image left (coming soon)',  enabled: false },
-    { key: 'image-right', label: 'Image right (coming soon)', enabled: false }
+    { key: 'text-only',   label: 'Text only',        enabled: true },
+    { key: 'hero',        label: 'Hero (lead item)', enabled: true },
+    { key: 'image-above', label: 'Image above',      enabled: true },
+    { key: 'image-left',  label: 'Image left',       enabled: true },
+    { key: 'image-right', label: 'Image right',      enabled: true }
   ];
+  var IMAGE_LAYOUTS = { 'image-above': 'above', 'image-left': 'left', 'image-right': 'right' };
+  var MAX_EDGE_PX = 1600;   /* long-edge cap before upload (handover §5) */
 
   /* ── State ─────────────────────────────────────────────────────────────── */
   var S = {
     session: null,
     editions: {},        /* id -> meta (list view) */
-    ed: null             /* { id, meta:{}, articles:{} } while editing */
+    ed: null,            /* { id, meta:{}, articles:{} } while editing */
+    library: null        /* id -> record; loaded with the edition so the
+                            renderer can resolve images synchronously */
   };
 
   var main = null;       /* #mainContent, resolved at boot */
@@ -521,13 +586,216 @@
 
   function openEdition(id) {
     return NL.ensureAuth()
-      .then(function () { return db.ref(ROOT + '/editions/' + id).once('value'); })
-      .then(function (snap) {
-        var val = snap.val();
+      .then(function () {
+        return Promise.all([
+          db.ref(ROOT + '/editions/' + id).once('value'),
+          db.ref(ROOT + '/library').once('value')
+        ]);
+      })
+      .then(function (snaps) {
+        var val = snaps[0].val();
         if (!val) { NL.toast('That edition no longer exists.', 'error'); return null; }
+        S.library = snaps[1].val() || {};
         S.ed = { id: id, meta: val.meta || {}, articles: val.articles || {} };
         return S.ed;
       });
+  }
+
+  /* ══════════════════════════════════════════════════════════════════════
+     Image pipeline — device upload and URL paste are both INGEST routes
+     into one shared library (handover §2/§5). Everything is downscaled
+     client-side and written to Storage once; URL ingest copies the image,
+     never hot-links it, and fails loudly on CORS. Library records are
+     never deleted by the tool — past editions may reference them.
+     ══════════════════════════════════════════════════════════════════════ */
+  function ingestBlob(blob, filename) {
+    return new Promise(function (resolve, reject) {
+      if (!blob.type || blob.type.indexOf('image/') !== 0 || blob.type === 'image/svg+xml') {
+        reject(new Error('That file is not a photo — please choose a JPEG or PNG image.'));
+        return;
+      }
+      var url = URL.createObjectURL(blob);
+      var img = new Image();
+      img.onload = function () {
+        URL.revokeObjectURL(url);
+        var w = img.naturalWidth, h = img.naturalHeight;
+        if (!w || !h) { reject(new Error('Could not read that image.')); return; }
+        var scale = Math.min(1, MAX_EDGE_PX / Math.max(w, h));
+        var cw = Math.round(w * scale), ch = Math.round(h * scale);
+        var canvas = document.createElement('canvas');
+        canvas.width = cw; canvas.height = ch;
+        canvas.getContext('2d').drawImage(img, 0, 0, cw, ch);
+        canvas.toBlob(function (out) {
+          if (!out) { reject(new Error('Could not process that image.')); return; }
+          resolve({ blob: out, width: cw, height: ch, filename: filename || '' });
+        }, 'image/jpeg', 0.85);
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error('Could not read that image.'));
+      };
+      img.src = url;
+    });
+  }
+
+  function ingestFromUrl(url) {
+    return fetch(url)
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.blob();
+      })
+      .catch(function () {
+        /* Fail loudly per the handover — a silent empty box in the PDF is
+           the failure mode this copy-on-ingest rule exists to prevent. */
+        throw new Error('Could not fetch that image — the site may block cross-site requests (CORS). ' +
+          'Save the image to your device and upload it instead.');
+      })
+      .then(function (blob) {
+        var name = (url.split('/').pop() || 'image').split('?')[0];
+        return ingestBlob(blob, name);
+      });
+  }
+
+  function uploadToLibrary(processed, source, sourceUrl, onProgress) {
+    return NL.ensureAuth().then(function () {
+      var libRef = db.ref(ROOT + '/library').push();
+      var path = 'newsletter/library/' + libRef.key + '.jpg';
+      var task = firebase.storage().ref(path).put(processed.blob, { contentType: 'image/jpeg' });
+      return new Promise(function (resolve, reject) {
+        task.on('state_changed',
+          function (snap) {
+            if (onProgress && snap.totalBytes) onProgress(snap.bytesTransferred / snap.totalBytes);
+          },
+          reject,
+          function () {
+            task.snapshot.ref.getDownloadURL().then(function (dl) {
+              var rec = {
+                storagePath: path,
+                downloadUrl: dl,
+                width: processed.width,
+                height: processed.height,
+                filename: processed.filename,
+                source: source,
+                sourceUrl: sourceUrl || null,
+                uploadedBy: (S.session && S.session.uid) || null,
+                uploadedAt: firebase.database.ServerValue.TIMESTAMP
+              };
+              return libRef.set(rec).then(function () {
+                if (S.library) {
+                  var cached = {};
+                  Object.keys(rec).forEach(function (k) { cached[k] = rec[k]; });
+                  cached.uploadedAt = Date.now();
+                  S.library[libRef.key] = cached;
+                }
+                resolve(libRef.key);
+              });
+            }).catch(reject);
+          });
+      });
+    });
+  }
+
+  /* Library picker modal — grid of existing images plus the two ingest
+     routes. onPicked(libraryId) fires when an image is chosen or a new
+     ingest completes. */
+  function openImagePicker(onPicked) {
+    var wrap = el('div');
+
+    var bar = el('div', 'toolbar');
+    var left = el('div', 'toolbar__left');
+    var upBtn = el('button', 'btn btn--navy btn--sm', 'Upload a photo');
+    upBtn.type = 'button';
+    var urlBtn = el('button', 'btn btn--ghost btn--sm', 'From a web address');
+    urlBtn.type = 'button';
+    left.appendChild(upBtn);
+    left.appendChild(urlBtn);
+    bar.appendChild(left);
+    wrap.appendChild(bar);
+
+    var file = el('input');
+    file.type = 'file';
+    file.accept = 'image/*';
+    file.style.display = 'none';
+    wrap.appendChild(file);
+
+    var progress = el('div', 'nlx-progress');
+    progress.style.display = 'none';
+    var progressBar = el('div', 'nlx-progress__bar');
+    progress.appendChild(progressBar);
+    wrap.appendChild(progress);
+
+    var grid = el('div', 'nlx-lib-grid');
+    wrap.appendChild(grid);
+
+    var ctrl = NL.modal({
+      title: 'Photo library',
+      width: 'wide',
+      body: wrap,
+      buttons: [{ label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } }]
+    });
+
+    function renderGrid() {
+      grid.innerHTML = '';
+      var ids = Object.keys(S.library || {});
+      if (!ids.length) {
+        var empty = el('div', 'empty-state');
+        empty.appendChild(el('div', 'empty-state__title', 'The library is empty'));
+        empty.appendChild(el('div', 'empty-state__text', 'Upload a photo or bring one in from a web address.'));
+        grid.appendChild(empty);
+        return;
+      }
+      ids.sort(function (a, b) { return (S.library[b].uploadedAt || 0) - (S.library[a].uploadedAt || 0); });
+      ids.forEach(function (lid) {
+        var rec = S.library[lid];
+        var item = el('button', 'nlx-lib-item');
+        item.type = 'button';
+        var im = el('img');
+        im.src = rec.downloadUrl;
+        im.alt = rec.filename || '';
+        im.onerror = function () { this.onerror = null; this.style.display = 'none'; };
+        item.appendChild(im);
+        item.appendChild(el('div', 'nlx-lib-item__name', rec.filename || 'Photo'));
+        item.addEventListener('click', function () { ctrl.close(); onPicked(lid); });
+        grid.appendChild(item);
+      });
+    }
+    renderGrid();
+
+    function runIngest(promise, source, sourceUrl) {
+      progress.style.display = 'block';
+      progressBar.style.width = '0%';
+      upBtn.disabled = true; urlBtn.disabled = true;
+      promise
+        .then(function (processed) {
+          return uploadToLibrary(processed, source, sourceUrl, function (p) {
+            progressBar.style.width = Math.round(p * 100) + '%';
+          });
+        })
+        .then(function (lid) {
+          NL.toast('Photo added to the library', 'success');
+          ctrl.close();
+          onPicked(lid);
+        })
+        .catch(function (err) {
+          progress.style.display = 'none';
+          upBtn.disabled = false; urlBtn.disabled = false;
+          NL.alert(err.message, { title: 'Could not add that photo' });
+        });
+    }
+
+    upBtn.addEventListener('click', function () { file.click(); });
+    file.addEventListener('change', function () {
+      if (!file.files || !file.files[0]) return;
+      var f = file.files[0];
+      runIngest(ingestBlob(f, f.name), 'upload', null);
+    });
+    urlBtn.addEventListener('click', function () {
+      NL.prompt('Paste the image address', { title: 'Photo from a web address', placeholder: 'https://…' })
+        .then(function (url) {
+          if (!url) return;
+          runIngest(ingestFromUrl(url), 'url', url);
+        });
+    });
   }
 
   function addArticle() {
@@ -591,11 +859,31 @@
     if (styleOk && art.style !== 'plain') cls += ' nlx-blk-art--' + art.style;
     if (art.columns === 2) cls += ' nlx-blk-art--cols2';
     var b = el('div', cls);
+
+    /* Resolve the article image from the library cache — synchronous, so
+       pagination measurement works before the image file has loaded. */
+    var pos = IMAGE_LAYOUTS[art.layout];
+    var rec = pos && art.imageId && S.library ? S.library[art.imageId] : null;
+    var fig = null;
+    if (rec && rec.downloadUrl) {
+      fig = el('div', 'nlx-blk-art__fig' + (pos !== 'above' ? ' nlx-blk-art__fig--' + pos : ''));
+      var im = el('img', 'nlx-blk-art__img');
+      im.src = rec.downloadUrl;
+      if (rec.width) im.width = rec.width;
+      if (rec.height) im.height = rec.height;
+      im.alt = '';
+      im.onerror = function () { this.onerror = null; this.style.display = 'none'; };
+      fig.appendChild(im);
+      if ((art.imageCaption || '').trim()) fig.appendChild(el('div', 'nlx-blk-art__cap', art.imageCaption));
+    }
+
+    if (fig && pos === 'above') b.appendChild(fig);
     b.appendChild(el('h2', 'nlx-blk-art__head', art.headline || 'Untitled article'));
     if (isHero) b.appendChild(el('div', 'nlx-blk-art__rule'));
     if ((art.standfirst || '').trim()) b.appendChild(el('p', 'nlx-blk-art__stand', art.standfirst));
     var body = el('div', 'nlx-blk-art__body');
     body.innerHTML = sanitiseHtml(art.body);   /* stored sanitised; sanitise again on render */
+    if (fig && pos !== 'above') body.insertBefore(fig, body.firstChild);
     b.appendChild(body);
     return b;
   }
@@ -1133,9 +1421,55 @@
     layoutSel.addEventListener('change', function () {
       art.layout = layoutSel.value;
       queueSave('articles/' + id + '/layout', art.layout);
+      renderArticles(listWrap);   /* photo row appears/disappears with layout */
       schedulePreview();
     });
     body.appendChild(fieldGroup('Layout', layoutSel));
+
+    /* Photo row — only for image layouts */
+    if (IMAGE_LAYOUTS[art.layout]) {
+      var imgGroup = el('div', 'form-group');
+      imgGroup.appendChild(el('label', null, 'Photo'));
+      var imgRow = el('div', 'nlx-img-row');
+      var thumb = el('img', 'nlx-img-thumb');
+      var recNow = art.imageId && S.library ? S.library[art.imageId] : null;
+      if (recNow && recNow.downloadUrl) thumb.src = recNow.downloadUrl;
+      thumb.alt = '';
+      thumb.onerror = function () { this.onerror = null; this.removeAttribute('src'); };
+      imgRow.appendChild(thumb);
+      var choose = el('button', 'btn btn--ghost btn--sm', art.imageId ? 'Change photo' : 'Choose photo');
+      choose.type = 'button';
+      choose.addEventListener('click', function () {
+        openImagePicker(function (lid) {
+          art.imageId = lid;
+          queueSave('articles/' + id + '/imageId', lid);
+          renderArticles(listWrap);
+          schedulePreview();
+        });
+      });
+      imgRow.appendChild(choose);
+      if (art.imageId) {
+        var removeImg = el('button', 'btn btn--ghost btn--sm', 'Remove');
+        removeImg.type = 'button';
+        removeImg.addEventListener('click', function () {
+          art.imageId = null;
+          queueSave('articles/' + id + '/imageId', null);
+          renderArticles(listWrap);
+          schedulePreview();
+        });
+        imgRow.appendChild(removeImg);
+      }
+      imgGroup.appendChild(imgRow);
+      var capInput = textInput(art.imageCaption || '', function (v) {
+        art.imageCaption = v;
+        queueSave('articles/' + id + '/imageCaption', v);
+        schedulePreview();
+      });
+      capInput.placeholder = 'Optional caption';
+      capInput.style.marginTop = '8px';
+      imgGroup.appendChild(capInput);
+      body.appendChild(imgGroup);
+    }
 
     /* Style picker — print-safe tints and accents */
     var styleSel = el('select');
@@ -1241,7 +1575,7 @@
       document.execCommand('insertText', false, text);
     });
     bodyGroup.appendChild(edit);
-    var hint = el('div', 'form-hint', 'Paste always arrives as plain text. Photos and captions arrive in a later version.');
+    var hint = el('div', 'form-hint', 'Paste always arrives as plain text. Choose an image layout above to add a photo.');
     bodyGroup.appendChild(hint);
     body.appendChild(bodyGroup);
 
