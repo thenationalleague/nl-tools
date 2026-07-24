@@ -5,8 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Travel Planner — NL Tools</title>
 <!--
-  NL Travel Planner v39.5
+  NL Travel Planner v39.6
   Changelog:
+  v39.6| 24/07/2026 | Fixture-list venue fix + direction-wording pass:
+       |            | - Fixture preview meta showed the OPPONENT's stadium on
+       |            |   home games (always oc.stadium). Now venue club =
+       |            |   isH?club:oc, so home fixtures show your own ground.
+       |            | - Direction toggle relabelled "Travel to match" /
+       |            |   "Return from match" (was Travel TO/FROM).
+       |            | - "Start / end point" label + Find button now follow the
+       |            |   direction (Start/End point, Find journey/Find return
+       |            |   journey) via updateDirText(); loading .finally resets
+       |            |   through it too.
+       |            | - setDir() scoped to #fixtureMode (was flipping the
+       |            |   Manual-mode direction toggle's visual state too).
+       |            | - cU()/cUf() now delegate to NL.clubs.crestUrl (canon);
+       |            |   map info-window font sans-serif → var(--font).
   v39.5| 13/07/2026 | clubs-meta now sourced from NL.clubs.load() (canon,
        |            | session-memoised) instead of a local fetch(CMU). The
        |            | local flattened clubs array + journey math are unchanged;
@@ -75,6 +89,7 @@
   window.NL_TOOL={title:'Travel Planner',toolKey:'staff-travel-planner'};
   var NL_TOOL_KEY='staff-travel-planner';
   window.NL_CHANGELOG=[
+    {date:'24 Jul 2026',version:'v3.8',items:['Fixed: the fixture list showed the opponent\'s stadium against home games — home fixtures now show your own ground as the venue.','Clearer direction controls: the toggle now reads "Travel to match" / "Return from match", and the start-point label and search button follow suit (End point, Find return journey).','Fixed: changing direction in Match Day mode no longer visually flipped the Manual Journey direction toggle as well.']},
     {date:'13 Jul 2026',version:'v3.7',items:['Club data now loads through the shared National League club store, so it is fetched once per visit and reused across the tools instead of being downloaded separately here.']},
     {date:'12 Jul 2026',version:'v3.6',items:['Fixture-list club crests now load faster — they use small thumbnail images, with the full crest as an automatic fallback.']},
     {date:'12 Jul 2026',version:'v3.5',items:['Fixed: stadium names show on fixtures and journeys again (the tool was reading a data field that had been renamed, so they came out blank).']},
@@ -297,14 +312,14 @@
               <button class="tp__mode-pill" data-tm="drive" onclick="setFixTM('drive')">🚗 Drive</button>
             </div>
             <div class="tp__dir-toggle">
-              <button class="tp__dir-btn active" data-dir="to" onclick="setDir('to')">➡️ Travel TO</button>
-              <button class="tp__dir-btn" data-dir="from" onclick="setDir('from')">⬅️ Travel FROM</button>
+              <button class="tp__dir-btn active" data-dir="to" onclick="setDir('to')">➡️ Travel to match</button>
+              <button class="tp__dir-btn" data-dir="from" onclick="setDir('from')">⬅️ Return from match</button>
             </div>
           </div>
         </div>
 
         <div class="tp__field" id="fixPresetField">
-          <label class="tp__label">Start / end point</label>
+          <label class="tp__label" id="fixPresetLabel">Start point</label>
           <div class="tp__presets" id="fixPresets">
             <button class="tp__preset active" data-p="station" onclick="setPreset('station')">🚉 Railway Station</button>
             <button class="tp__preset" data-p="custom" onclick="setPreset('custom')">📍 Custom</button>
@@ -361,13 +376,13 @@
             <button class="tp__mode-pill" data-tm="drive" onclick="setManTM('drive')">🚗 Drive</button>
           </div>
           <div class="tp__dir-toggle">
-            <button class="tp__dir-btn active" data-dir="to" onclick="setManDir('to')">➡️ Travel TO</button>
-            <button class="tp__dir-btn" data-dir="from" onclick="setManDir('from')">⬅️ Travel FROM</button>
+            <button class="tp__dir-btn active" data-dir="to" onclick="setManDir('to')">➡️ Travel to match</button>
+            <button class="tp__dir-btn" data-dir="from" onclick="setManDir('from')">⬅️ Return from match</button>
           </div>
         </div>
       </div>
       <div class="tp__field" id="manPresetField">
-        <label class="tp__label">Start / end point</label>
+        <label class="tp__label" id="manPresetLabel">Start point</label>
         <div class="tp__presets" id="manPresets">
           <button class="tp__preset active" data-p="station" onclick="setManPreset('station')">🚉 Station</button>
           <button class="tp__preset" data-p="custom" onclick="setManPreset('custom')">📍 Custom</button>
@@ -449,8 +464,8 @@ function getCRS(n){if(!n)return'';var k=n.toLowerCase().replace(/ railway statio
 if(k.length>=5){var keys=Object.keys(crsLookup),matches=[];for(var i=0;i<keys.length;i++){if(keys[i].length>k.length&&keys[i].indexOf(' '+k)===keys[i].length-k.length-1)matches.push(crsLookup[keys[i]])}if(matches.length===1)return matches[0]}
 return''}
 function addCRS(n){var c=getCRS(n);return c?n+' ('+c+')':n}
-function cU(n){return CB+'thumbs/'+encodeURIComponent(n)+'.png'}   // 96px thumbnail (assets/crests/thumbs/) for small list crests
-function cUf(n){return CB+encodeURIComponent(n)+'.png'}            // full-res crest — thumb onerror fallback
+function cU(n){return NL.clubs.crestUrl(n,'thumb')}   // 96px thumbnail for small list crests (canon helper)
+function cUf(n){return NL.clubs.crestUrl(n)}          // full-res crest — thumb onerror fallback (canon helper)
 function addr(c){
   // Postcode alone geocodes reliably to the ground's area without stadium name confusion
   if(c.postcode)return c.postcode+', UK';
@@ -478,11 +493,18 @@ function stationLabel(c){
 
 // ── Fix club → fixtures ──
 function selFC(c){fixClub=c;fixMatch=null;document.getElementById('fixConfig').style.display='none';if(c){updatePresetLabels();loadFix(c);saveLastClub(c.code)}else{document.getElementById('fixFixtureArea').innerHTML=''}syncURL()}
-function loadFix(club){var a=document.getElementById('fixFixtureArea');a.innerHTML='<div class="tp__loading"><div class="tp__spinner"></div>Loading fixtures…</div>';if(!club.optaID){a.innerHTML='<div class="tp__error">No Opta ID.</div>';return}function pg(cid,n,acc){return fetch(NLS+'/matches/?seasonID='+SID+'&competitionID='+cid+'&sort=kickOffDateUTC&page.size=100&page.number='+n).then(function(r){return r.json()}).then(function(r){var d=(r&&r.data)||[];acc=acc.concat(d);return(d.length>=100&&n<12)?pg(cid,n+1,acc):acc}).catch(function(){return acc})}Promise.all(CIDS.map(function(cid){return pg(cid,1,[])})).then(function(res){var all=[];res.forEach(function(r){all=all.concat(r)});var tid=club.optaID;var up=all.filter(function(m){var x=m.attributes,p=(x.matchPeriod||'').toLowerCase();return(p==='prematch'||!p||p==='fixture')&&((x.homeTeam&&x.homeTeam.teamID===tid)||(x.awayTeam&&x.awayTeam.teamID===tid))}).sort(function(a,b){return new Date(nd(a.attributes.kickOffDateUTC))-new Date(nd(b.attributes.kickOffDateUTC))});if(!up.length){a.innerHTML='<div class="tp__error">No upcoming fixtures.</div>';return}var h='<div class="tp__panel"><div class="tp__panel-title">Upcoming Fixtures</div><div class="tp__fix-list">';up.forEach(function(m,i){var x=m.attributes,isH=x.homeTeam&&x.homeTeam.teamID===tid,opp=isH?x.awayTeam:x.homeTeam,oc=clubs.find(function(c){return c.optaID===(opp?opp.teamID:'')}),ko=new Date(nd(x.kickOffDateUTC)),oppNm=opp?opp.name:(oc?oc.name:'');h+='<div class="tp__fix-item" onclick="selFix('+i+')"><img src="'+cU(oppNm)+'" alt="" onerror="this.onerror=function(){this.onerror=null;this.src=\''+FC+'\'};this.src=\''+cUf(oppNm)+'\'"><div class="info"><div class="teams">'+(isH?club.name+' v '+(opp?opp.name:'TBC'):(opp?opp.name:'TBC')+' v '+club.name)+'</div><div class="meta">'+fd(ko)+' '+ft(ko)+(oc?' · '+oc.stadium:'')+'</div></div><span class="badge badge--'+(isH?'home':'away')+'">'+(isH?'H':'A')+'</span></div>'});h+='</div></div>';a.innerHTML=h;a._m=up;if(_pendingMatchID){var pi=a._m.findIndex(function(m){return m.id===_pendingMatchID});if(pi!==-1)selFix(pi);_pendingMatchID=null}}).catch(function(){a.innerHTML='<div class="tp__error">Failed to load fixtures.</div>'})}
+function loadFix(club){var a=document.getElementById('fixFixtureArea');a.innerHTML='<div class="tp__loading"><div class="tp__spinner"></div>Loading fixtures…</div>';if(!club.optaID){a.innerHTML='<div class="tp__error">No Opta ID.</div>';return}function pg(cid,n,acc){return fetch(NLS+'/matches/?seasonID='+SID+'&competitionID='+cid+'&sort=kickOffDateUTC&page.size=100&page.number='+n).then(function(r){return r.json()}).then(function(r){var d=(r&&r.data)||[];acc=acc.concat(d);return(d.length>=100&&n<12)?pg(cid,n+1,acc):acc}).catch(function(){return acc})}Promise.all(CIDS.map(function(cid){return pg(cid,1,[])})).then(function(res){var all=[];res.forEach(function(r){all=all.concat(r)});var tid=club.optaID;var up=all.filter(function(m){var x=m.attributes,p=(x.matchPeriod||'').toLowerCase();return(p==='prematch'||!p||p==='fixture')&&((x.homeTeam&&x.homeTeam.teamID===tid)||(x.awayTeam&&x.awayTeam.teamID===tid))}).sort(function(a,b){return new Date(nd(a.attributes.kickOffDateUTC))-new Date(nd(b.attributes.kickOffDateUTC))});if(!up.length){a.innerHTML='<div class="tp__error">No upcoming fixtures.</div>';return}var h='<div class="tp__panel"><div class="tp__panel-title">Upcoming Fixtures</div><div class="tp__fix-list">';up.forEach(function(m,i){var x=m.attributes,isH=x.homeTeam&&x.homeTeam.teamID===tid,opp=isH?x.awayTeam:x.homeTeam,oc=clubs.find(function(c){return c.optaID===(opp?opp.teamID:'')}),ko=new Date(nd(x.kickOffDateUTC)),oppNm=opp?opp.name:(oc?oc.name:''),vc=isH?club:oc;h+='<div class="tp__fix-item" onclick="selFix('+i+')"><img src="'+cU(oppNm)+'" alt="" onerror="this.onerror=function(){this.onerror=null;this.src=\''+FC+'\'};this.src=\''+cUf(oppNm)+'\'"><div class="info"><div class="teams">'+(isH?club.name+' v '+(opp?opp.name:'TBC'):(opp?opp.name:'TBC')+' v '+club.name)+'</div><div class="meta">'+fd(ko)+' '+ft(ko)+(vc&&vc.stadium?' · '+vc.stadium:'')+'</div></div><span class="badge badge--'+(isH?'home':'away')+'">'+(isH?'H':'A')+'</span></div>'});h+='</div></div>';a.innerHTML=h;a._m=up;if(_pendingMatchID){var pi=a._m.findIndex(function(m){return m.id===_pendingMatchID});if(pi!==-1)selFix(pi);_pendingMatchID=null}}).catch(function(){a.innerHTML='<div class="tp__error">Failed to load fixtures.</div>'})}
 function selFix(i){var a=document.getElementById('fixFixtureArea');if(!a._m||!a._m[i])return;fixMatch=a._m[i];a.querySelectorAll('.tp__fix-item').forEach(function(el,j){el.classList.toggle('selected',j===i)});document.getElementById('fixConfig').style.display='block';updatePresetLabels();upPostNote();syncURL();document.getElementById('fixConfig').scrollIntoView({behavior:'smooth'})}
 
 // ── Controls ──
-function setDir(d){fixDir=d;document.querySelectorAll('.tp__dir-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-dir')===d)});document.getElementById('preSlider').style.display=d==='to'?'block':'none';document.getElementById('postSlider').style.display=d==='from'?'block':'none';if(d==='from')upPostNote();syncURL()}
+function setDir(d){fixDir=d;document.querySelectorAll('#fixtureMode .tp__dir-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-dir')===d)});document.getElementById('preSlider').style.display=d==='to'?'block':'none';document.getElementById('postSlider').style.display=d==='from'?'block':'none';if(d==='from')upPostNote();updateDirText();syncURL()}
+// Direction-aware wording: preset label + search button follow the selected direction
+function updateDirText(){
+  var l1=document.getElementById('fixPresetLabel');if(l1)l1.textContent=fixDir==='to'?'Start point':'End point';
+  var l2=document.getElementById('manPresetLabel');if(l2)l2.textContent=manDir==='to'?'Start point':'End point';
+  var b1=document.getElementById('fixBtn');if(b1&&!b1.classList.contains('btn--loading'))b1.textContent=fixDir==='to'?'Find journey':'Find return journey';
+  var b2=document.getElementById('manBtn');if(b2&&!b2.classList.contains('btn--loading'))b2.textContent=manDir==='to'?'Find journey':'Find return journey';
+}
 function upPostLbl(){var v=+document.getElementById('extraAfter').value;document.getElementById('extraAfterV').textContent=v===0?'Depart at FT':'~'+v+'m after FT'}
 function upPostNote(){if(!fixMatch)return;var ko=new Date(nd(fixMatch.attributes.kickOffDateUTC));document.getElementById('postNote').textContent='Assumes 2h match. Estimated FT: '+ft(new Date(ko.getTime()+72e5))}
 function setPreset(p){
@@ -564,6 +586,7 @@ function setManDir(d){
   document.getElementById('manPreSlider').style.display=d==='to'?'block':'none';
   document.getElementById('manPostSlider').style.display=d==='from'?'block':'none';
   if(d==='from')upManPostNote();
+  updateDirText();
   syncURL();
 }
 function setManPreset(p){
@@ -659,7 +682,7 @@ function doFixSearch(){
     var dDL='🏟 '+homeStadiumLabel;
     if(fixDir==='from'){dOrigin=homeGroundAddr;dDest=awayPoint;dOL='🏟 '+homeStadiumLabel;dDL=awayIconCh+' '+awayLabelTxt}
     lastOL=dOL;lastDL=dDL;
-    doDriveSearch(dOrigin,dDest,opts,dOL,dDL).finally(function(){btn.classList.remove('btn--loading');btn.textContent='Find journey'});
+    doDriveSearch(dOrigin,dDest,opts,dOL,dDL).finally(function(){btn.classList.remove('btn--loading');updateDirText()});
     return;
   }
 
@@ -688,7 +711,7 @@ function doFixSearch(){
   lastSearch={o:pairs[0].o,d:pairs[0].d,oL:oL,dL:dL,opts:opts};
   lastOL=oL;lastDL=dL;
 
-  doMultiRoute(pairs,'TRANSIT',opts,oL,dL,getEnabledModes(),sw2).finally(function(){btn.classList.remove('btn--loading');btn.textContent='Find journey'});
+  doMultiRoute(pairs,'TRANSIT',opts,oL,dL,getEnabledModes(),sw2).finally(function(){btn.classList.remove('btn--loading');updateDirText()});
 }
 
 function doManSearch(){
@@ -729,7 +752,7 @@ function doManSearch(){
     var dDL='🏟 '+homeStadium;
     if(manDir==='from'){dOrigin=homeA;dDest=awayPoint;dOL='🏟 '+homeStadium;dDL=awayIconCh+' '+awayLabelTxt}
     lastOL=dOL;lastDL=dDL;
-    doDriveSearch(dOrigin,dDest,opts,dOL,dDL).finally(function(){btn.classList.remove('btn--loading');btn.textContent='Find journey'});
+    doDriveSearch(dOrigin,dDest,opts,dOL,dDL).finally(function(){btn.classList.remove('btn--loading');updateDirText()});
     return;
   }
 
@@ -757,7 +780,7 @@ function doManSearch(){
 
   var msw=null;
   if(manPreset!=='custom'){msw=manDir==='to'?'first':'last'}
-  doMultiRoute(pairs,'TRANSIT',opts,oL,dL,getManModes(),msw).finally(function(){btn.classList.remove('btn--loading');btn.textContent='Find journey'});
+  doMultiRoute(pairs,'TRANSIT',opts,oL,dL,getManModes(),msw).finally(function(){btn.classList.remove('btn--loading');updateDirText()});
 }
 
 // ── Driving search ──
@@ -1449,7 +1472,7 @@ function drawMap(r){
             map:gMap,title:sd.departureStop.name,
             content:circlePin(col,10)
           });
-          dm.addListener('click',function(){gInfoWindow.setContent('<div style="font-family:sans-serif;font-size:13px;font-weight:600;padding:2px">'+sd.departureStop.name+(lnName?' · '+lnName:'')+'</div>');gInfoWindow.open(gMap,dm)});
+          dm.addListener('click',function(){gInfoWindow.setContent('<div style="font-family:var(--font);font-size:13px;font-weight:600;padding:2px">'+sd.departureStop.name+(lnName?' · '+lnName:'')+'</div>');gInfoWindow.open(gMap,dm)});
         }
         if(sd.arrivalStop&&sd.arrivalStop.location&&sd.arrivalStop.location.latLng){
           var aLoc=sd.arrivalStop.location.latLng;
@@ -1458,7 +1481,7 @@ function drawMap(r){
             map:gMap,title:sd.arrivalStop.name,
             content:circlePin(col,10)
           });
-          am.addListener('click',function(){gInfoWindow.setContent('<div style="font-family:sans-serif;font-size:13px;font-weight:600;padding:2px">'+sd.arrivalStop.name+(lnName?' · '+lnName:'')+'</div>');gInfoWindow.open(gMap,am)});
+          am.addListener('click',function(){gInfoWindow.setContent('<div style="font-family:var(--font);font-size:13px;font-weight:600;padding:2px">'+sd.arrivalStop.name+(lnName?' · '+lnName:'')+'</div>');gInfoWindow.open(gMap,am)});
         }
       }
     });
@@ -1602,6 +1625,7 @@ function readURL(){
     if(homeCode){var hc=clubs.find(function(cl){return cl.code===homeCode});if(hc){selManHome(hc);if(manHomePicker)manHomePicker.setValue(hc.name)}}
     if(awayCode){var ac=clubs.find(function(cl){return cl.code===awayCode});if(ac){selManAway(ac);if(manAwayPicker)manAwayPicker.setValue(ac.name)}}
   }
+  updateDirText();
   _urlSuppressed=false;
 }
 
