@@ -2,6 +2,23 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Data handling — non-negotiable
+
+This repository is PUBLIC. Everything committed here is world-readable,
+permanently, including in git history after deletion.
+
+- Never commit a file containing a person's name, email address, phone
+  number, address, or any other personal data. No exceptions for "seed"
+  files, "export" files, test fixtures, or temporary data.
+- Personal and club-confidential data lives in Firebase RTDB and reaches the
+  browser at runtime behind auth-guard, gated by rules. The repo holds code
+  and assets only.
+- If a task involves a data file — a CSV, a JSON export, a spreadsheet dump —
+  stop and ask where it should live before writing it anywhere. Do not infer
+  that being handed a file means it should be committed.
+- If a tool needs a flat data file at runtime, generate it at deploy time from
+  RTDB via an Action. Do not commit the generated output.
+
 ## Reuse-first (read this before writing any code)
 
 Every tool in this repo is built on a **shared canon**: `window.NL.*` helpers in
