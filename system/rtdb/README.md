@@ -8,6 +8,7 @@ in-repo answer to "what's deployed right now?".
 | File | Mirrors | Live home |
 |---|---|---|
 | `rules.snapshot.json` | The full database security rules | Firebase console → Realtime Database → Rules |
+| `storage.rules.snapshot` | The full Storage security rules. Key idiom: `request.auth.token.email != null` distinguishes real portal accounts from the anonymous-auth capability pages (footage, uw-promo) — anonymous tokens carry no email claim. | Firebase console → Storage → Rules |
 | `tools-registry.snapshot.json` | The `tools/` node (tool registry: labels, urls, role defaults) | RTDB `tools/` (drives the portal cards **and** auth-guard access defaults) |
 | `tools-registry.parked.json` | Holding pen for tools pulled off the portal (back in planning). **NOT deployed** — records live here instead of in `tools/`, so those tools are superadmin-only + invisible while their code stays in the repo. See `system/tool-status-and-access.md`. | — (never pasted) |
 
