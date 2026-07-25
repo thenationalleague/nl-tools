@@ -68,8 +68,14 @@ exports.consumeInvite = onCall(CALL_OPTS, async (request) => {
   // Atomically claim the invite — guards double-use races. usedBy lets a retry
   // by the SAME user complete idempotently (e.g. network drop after the claim
   // but before the user record write landed on their screen).
+  logger.info("consumeInvite: start", { uid: caller.uid });
+
+  // RTDB transaction quirk: the callback first runs against the LOCAL cache,
+  // which is null on a cold function. Returning the null unchanged commits a
+  // no-op and forces a re-run against real server data — returning undefined
+  // there would abort the claim before ever seeing the invite.
   const tx = await invRef.transaction((cur) => {
-    if (!cur) return; // abort — not found
+    if (cur === null) return cur; // cache miss — force server round-trip
     if (cur.used === true) return; // abort — already used
     if (String(cur.email || "").toLowerCase() !== caller.email) return; // abort — wrong email
     if (cur.expiresAt && Date.now() > new Date(cur.expiresAt).getTime()) return; // abort — expired
@@ -78,10 +84,15 @@ exports.consumeInvite = onCall(CALL_OPTS, async (request) => {
     cur.usedAt = Date.now();
     return cur;
   });
+  logger.info("consumeInvite: claim done", { committed: tx.committed, exists: tx.snapshot.exists() });
 
   let invite;
   if (tx.committed) {
     invite = tx.snapshot.val();
+    if (!invite) {
+      // The no-op path committed against a genuinely absent node.
+      throw new HttpsError("not-found", "Invite not found. Please use the link from your invite email.");
+    }
   } else {
     // Claim failed — work out why, allowing the idempotent-retry case through.
     const snap = await invRef.once("value");
