@@ -38,7 +38,10 @@ Tightening them to `auth != null` would break a live feature. Leave them:
 |---|---|
 | `ops-judgements/records` | An **external widget on thenationalleague.org.uk** reads published disciplinary decisions anonymously. |
 | `ops-commercial-benchmarking/aggregates` + `.../links/$token` | `commercial-benchmarking/link.html` — a no-login capability page for clubs without an account (anonymised data, unguessable token). |
-| `media-footage/data` + `.../uploads` | `footage/club` (`?c=` token + passcode) and `footage/producer` (`?p=` token) — external capability pages, no NL account. (Footage's per-club scoping is being reworked; handle there.) |
+| `media-footage/data` + `.../uploads` | `footage/club` (`?c=` token + passcode) and `footage/producer` (`?p=` token) — external capability pages, no NL account. (Footage's per-club scoping is being reworked; handle there.) Accepted by Richard 25/07/2026 (footage-only data). |
+| `uw-promo` (whole node) | UW partner page, club till page and master console are standalone (no auth-guard), gated by client-side passcodes over **anonymous Firebase auth** — reads public + writes `auth != null` is the working model. No personal data. Known accepted trade-off (25/07/2026): writes are spoofable by anonymous users; proper hardening (server-side passcode check via a callable, App Check) only if UW abuse ever matters. |
+| `ops-handbook/editions` + `publishedEditionId` | Published handbook is **public by intent** (confirmed by Richard 25/07/2026). Drafts and audit stay gated. |
+| `ops-vacancies/listings` + `analytics` | Jobs-board widget embedded on thenationalleague.org.uk reads listings and writes click analytics anonymously. |
 | `ops-club-data/*/submissions/$token`, `ops-club-contacts/*/submissions/$token` | Invite-token submission flows — access is gated by *token existence*, not login. |
 | `ops-vacancies/analytics` | Public **write** for anonymous click tracking (by design). |
 
