@@ -103,6 +103,17 @@ Migrate to callables with native auth:
 - Retire the invite-consumption self-write trust: the Function mints the
   `users/<uid>/role`, so the portal no longer writes its own role on first login.
 
+> **Phase 2a SHIPPED (25/07/2026):** the role-write portion is done, ahead of
+> the email portion. `functions/account.js` adds `consumeInvite`,
+> `submitAccessRequest` and `withdrawAccessRequest` as callables (deployed by
+> the existing `deploy-footage-proxy.yml` workflow); the login page (v5.0)
+> calls them over the callable HTTPS protocol and no longer writes
+> `users/<uid>` at all; `rules.snapshot.json` forbids client self-creates.
+> See `system/rtdb/SECURITY-role-self-grant.md` for the deploy order.
+> Still on GAS from this phase: `sendInvite` (email), `validateInvite`,
+> `notifyAdmin` / `confirmRequest` / `sendApproval` / `sendRejection`,
+> `vacancies_*` — they follow with the Phase 1 email shim.
+
 ### Phase 3 — AI proxies
 - `claudio` (Claudio) and `generateMeetingMinutes` (Meeting Notes) → callables,
   keys from Secret Manager, gated by native auth. Kills the cost-abuse vector.

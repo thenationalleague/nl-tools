@@ -1,6 +1,42 @@
 # RTDB authz — self-granted role escalation (critical)
 
-**Status:** interim rule fix landed in `rules.snapshot.json` (this PR).
+**Status: DURABLE FIX SHIPPED (25/07/2026).** Roles are now minted
+**server-side by Cloud Functions** (`functions/account.js`: `consumeInvite`,
+`submitAccessRequest`, `withdrawAccessRequest`) and the login page (v5.0) no
+longer writes `users/<uid>` at all. `rules.snapshot.json` drops client
+self-creates entirely — a self-signer cannot obtain **any** role, closing the
+residual self-signup-as-`staff` gap left by the v4.7 GAS revert. This is the
+Cloud-Function fix this document called for (the "path of record" below),
+shipped as part of the July 2026 data-exposure remediation.
+
+**Deploy order for the durable fix** (rules paste is LAST):
+1. Merge the PR — Pages deploys the v5.0 login page, and the
+   `deploy-footage-proxy` workflow auto-deploys the new callables (it runs on
+   any `functions/**` change).
+2. Verify the flows in production: accept a fresh **staff** invite, submit and
+   withdraw a **club** access request.
+3. **Playground-test, then paste** the updated `rules.snapshot.json` into the
+   console (Realtime Database → Rules). Until the paste, the old rules (self-
+   create allowed) remain live — the new client just no longer uses that path.
+
+**Playground tests for the durable rules** (console → Rules → Playground):
+1. Write `/users/NEWUID` authenticated as `NEWUID` (no existing record), data
+   `{ "role": "staff", "email": "x@y.com" }` → **denied** (self-create is gone;
+   repeat with `"role": "club"` → also **denied**).
+2. Write `/users/SOMEONE` as an existing **admin** uid → **allowed**.
+3. Read `/users` as a **club** uid → **denied**; as a **staff** uid →
+   **allowed**; read `/users/SELF` as that club uid → **allowed**.
+4. Read `/app-data/ops-club-directory/clubs` as a club uid → **denied**; read
+   `/app-data/ops-club-directory/clubs/THEIR_CLUB` → **allowed**.
+5. Write (overwrite) `/admin/audit` as a **staff** uid → **denied**; create
+   `/admin/audit/new-entry` → **allowed**.
+
+The history below is kept as the record of how this hole was found, interim-
+patched, and why the GAS attempt failed.
+
+---
+
+**Original status:** interim rule fix landed in `rules.snapshot.json` (this PR).
 **You must paste the updated rules into the Firebase console** (Realtime
 Database → Rules) and **test in the Rules Playground first** (steps below) for
 the fix to take effect. Sessions cannot reach the live rules; this file + the

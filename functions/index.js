@@ -1,7 +1,10 @@
 /**
- * NL Cup Footage — Cloud Functions.
+ * NL Tools — Cloud Functions.
  *   makeProxy         — makes the 360p preview proxy on upload (below).
  *   onFootageDeleted  — mirrors Storage deletes back to the catalogue (bottom).
+ *   consumeInvite / submitAccessRequest / withdrawAccessRequest
+ *                     — account-lifecycle callables (server-minted roles).
+ *                       See account.js and system/rtdb/SECURITY-role-self-grant.md.
  *
  * Trigger: a file finalised under `footage/national-league-cup/` in the nl-tools bucket.
  * For any file up to MAX_PROXY_BYTES (full matches are much larger → download-only),
@@ -108,6 +111,11 @@ exports.makeProxy = onObjectFinalized(
  * leaves no orphan record or orphan proxy. Deletes of a proxy itself are ignored
  * (no record points at a proxy, and it stops any delete loop).
  */
+// Account-lifecycle callables (invite acceptance, access requests) — the
+// server-side role writes that closed the self-grant hole. Kept in their own
+// module; exported from here so `firebase deploy --only functions` sees them.
+Object.assign(exports, require("./account"));
+
 exports.onFootageDeleted = onObjectDeleted(
   { bucket: BUCKET, memory: "256MiB" },
   async (event) => {
