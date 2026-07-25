@@ -28,7 +28,13 @@ const os = require("os");
 const path = require("path");
 const fs = require("fs");
 
-admin.initializeApp();
+/* Explicit databaseURL: the RTDB lives in europe-west1, and the SDK's guessed
+   default (<project>.firebaseio.com) only serves US instances — connecting to
+   it hangs forever. Symptom when missing: any function touching RTDB stalls
+   to its timeout (seen live 25/07/2026 on consumeInvite). */
+admin.initializeApp({
+  databaseURL: "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+});
 ffmpeg.setFfmpegPath(ffmpegPath);
 setGlobalOptions({ region: "europe-west2" });
 
