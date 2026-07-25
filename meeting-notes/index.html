@@ -1,0 +1,1933 @@
+<!DOCTYPE html>
+<html lang="en">
+<!--
+  Meeting Notes — NL Tools Portal
+  Tool key: staff-meeting-notes
+  RTDB path: /app-data/staff-meeting-notes/
+  ============================================================
+  v1.0  23/04/2026  Initial build
+  v1.1  23/04/2026  Real Firebase config, SDK 10.7.1, correct system file paths,
+                    robust nlAuthReady with getIdToken force refresh + _initDone guard,
+                    RTDB listener error handlers that warn but don't wipe state
+  v1.2  23/04/2026  Fixed script load order
+  v1.3  23/04/2026  Fixed system file paths, nlTopbar inside pageWrap, removed duplicate nl-topbar.js
+  v1.4  23/04/2026  Fixed .main layout conflict, mnDataReady guard, inline contact creation
+  v1.5  23/04/2026  Fixed nlAuthReady token refresh pattern
+  v1.6  23/04/2026  Fixed PERMISSION_DENIED — MN_PATH leading slash removed
+  v1.7  23/04/2026  Fixed modal open class, calendar overflow, projects sidebar text
+  v1.8  23/04/2026  Built real edit meeting form — pre-populated with title, date,
+                    project, general note, and agenda items
+  v1.9  03/05/2026  Brand sweep:
+                    - Added local --live-green token (#4ade80) for the bright
+                      "live now" pulse dot used on dark/coloured backgrounds.
+                      Centralises 3 duplicate hex usages.
+                    - Replaced remaining hardcoded hexes with brand tokens:
+                        #fff (×7)        → var(--white) (badges, modal title, chip text, mrow numbers)
+                        #b0b8cc (×3)     → color-mix --text-muted 35% white (card hover borders)
+                        #dcfce7 / #166534 → var(--green-light) / var(--green) (pill--live)
+                        #f0e8e8          → color-mix --primary 8% white (pill--owner)
+                        #eceef3          → var(--off-white) (modal row hover)
+                        #888 (JS ×4)     → var(--text-muted) (project-dot fallback colour)
+                        #166534 (JS)     → var(--green) (live-now pulse on light bg)
+                    - PROJ_COLOURS palette retained as hex literals (DB-stored
+                      project-identity palette; documented exception).
+                    - Scratchpad "yellow legal pad" palette retained as hex
+                      literals (deliberate widget aesthetic; documented
+                      exception). 8 single-use values centralising into local
+                      tokens would be over-engineering.
+-->
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Meeting Notes — NL Tools</title>
+
+<link rel="stylesheet" href="/system/nl-brand.css?v=26">
+
+<style>
+/* ── MEETING NOTES — tool-specific CSS ─────────────────────────────── */
+
+/* --live-green promoted to nl-brand.css v2.16 as --accent-live, with
+   .indicator--live widget. */
+
+/* Override nl-brand .main padding for this tool — we handle layout ourselves */
+.main { padding: 0 !important; max-width: none !important; }
+
+/* App shell */
+.mn-shell { display: flex; height: calc(100vh - 54px); overflow: hidden; }
+
+.mn-sidebar {
+  width: 220px; min-width: 220px;
+  background: var(--white); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow-y: auto;
+  flex-shrink: 0;
+}
+.mn-main-area { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.mn-page-header {
+  background: var(--white); border-bottom: 1px solid var(--border);
+  padding: 13px 22px; display: flex; align-items: center;
+  justify-content: space-between; flex-shrink: 0;
+}
+.mn-page-header h1 { font-size: 17px; font-variation-settings: 'wght' 800; margin: 0; }
+.mn-page-body { flex: 1; overflow-y: auto; padding: 18px 22px; min-height: 0; }
+
+/* Sidebar items */
+.mn-sb-label {
+  font-size: 10px; font-variation-settings: 'wght' 800;
+  color: var(--text-muted); letter-spacing: .08em; text-transform: uppercase;
+  padding: 14px 16px 5px;
+}
+.mn-sb-item {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 16px; font-size: 13px; color: var(--text-muted);
+  cursor: pointer; border-left: 3px solid transparent; transition: background .1s;
+}
+.mn-sb-item:hover { background: var(--off-white); color: var(--text); }
+.mn-sb-item.active {
+  color: var(--text); background: var(--off-white);
+  border-left-color: var(--primary); font-variation-settings: 'wght' 600;
+}
+.mn-proj-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
+/* Live banner */
+.mn-live-banner {
+  display: none; background: var(--navy); padding: 0 22px;
+  height: 38px; align-items: center; gap: 12px;
+  cursor: pointer; transition: background .15s; flex-shrink: 0;
+}
+.mn-live-banner:hover { background: var(--navy-600); }
+.mn-live-banner.visible { display: flex; }
+.mn-live-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent-live); flex-shrink: 0;
+  animation: mn-pulse 1.4s infinite;
+}
+@keyframes mn-pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+.mn-live-text { font-size: 13px; font-variation-settings: 'wght' 700; color: var(--white); flex: 1; }
+.mn-live-cta {
+  font-size: 12px; font-variation-settings: 'wght' 700;
+  color: rgba(255,255,255,.8); padding: 3px 12px;
+  border: 1px solid rgba(255,255,255,.3); border-radius: 20px;
+}
+
+/* Meeting cards */
+.mn-card {
+  background: var(--white); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 13px 16px; margin-bottom: 8px;
+  display: flex; align-items: flex-start; gap: 12px;
+  cursor: pointer; transition: border-color .12s, box-shadow .12s;
+}
+.mn-card:hover { border-color: color-mix(in srgb, var(--text-muted) 35%, white); box-shadow: var(--shadow); }
+.mn-card__dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+.mn-card__body { flex: 1; min-width: 0; }
+.mn-card__title { font-size: 14px; font-variation-settings: 'wght' 700; }
+.mn-card__meta { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+.mn-card__right { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex-shrink: 0; }
+
+/* Meeting detail */
+.mn-detail-title {
+  font-size: 20px; font-variation-settings: 'wght' 900;
+  display: flex; align-items: center; gap: 10px; margin-bottom: 6px;
+}
+.mn-detail-meta {
+  font-size: 13px; color: var(--text-muted);
+  display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px;
+}
+.mn-detail-acts { display: flex; gap: 8px; align-items: center; margin-bottom: 22px; }
+
+/* Section blocks */
+.mn-section {
+  background: var(--white); border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: 14px; overflow: hidden;
+}
+.mn-section__hdr {
+  padding: 10px 16px; background: var(--off-white);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.mn-section__label {
+  font-size: 10px; font-variation-settings: 'wght' 800;
+  color: var(--text-muted); letter-spacing: .07em; text-transform: uppercase;
+}
+.mn-section__body { padding: 14px 16px; }
+
+/* Agenda items */
+.mn-ag-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 9px 0; border-bottom: 1px solid var(--border);
+}
+.mn-ag-item:last-child { border-bottom: none; }
+.mn-ag-num {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--border); color: var(--text-muted);
+  font-size: 11px; font-variation-settings: 'wght' 800;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; margin-top: 1px;
+}
+.mn-ag-title { flex: 1; font-size: 13px; font-variation-settings: 'wght' 600; }
+.mn-ag-time { font-size: 12px; color: var(--text-muted); }
+
+/* Scratchpad — deliberate "yellow legal pad" aesthetic. Widget-internal
+   palette of warm-cream literals (paper bg, dashed border, pencilled
+   ruling lines). Exempt from brand tokens because the visual identity
+   is the whole point of the widget. */
+.mn-scratchpad {
+  width: 100%;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 13px; line-height: 1.95; color: var(--text);
+  background: #faf8f0;
+  border: 1px dashed #c8c4b0; border-radius: var(--radius);
+  padding: 12px 14px; resize: vertical; outline: none; min-height: 160px;
+  background-image: repeating-linear-gradient(
+    transparent, transparent 28px, #e4e0d0 28px, #e4e0d0 29px
+  );
+  transition: border-color .12s;
+}
+.mn-scratchpad:focus { border-color: #a0987a; background: #fffdf5; }
+.mn-scratchpad::placeholder { color: #b0a880; font-style: italic; }
+
+/* Share opt-in bar */
+.mn-share-bar {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 12px; background: #fffbf0;
+  border: 1px solid #e0d8b0; border-top: none;
+  border-radius: 0 0 var(--radius) var(--radius);
+  font-size: 12px; color: var(--text-muted);
+}
+.mn-share-bar label { cursor: pointer; flex: 1; }
+.mn-share-note {
+  font-size: 11px; font-variation-settings: 'wght' 700;
+  color: var(--amber); opacity: 0; transition: opacity .2s; white-space: nowrap;
+}
+
+/* General note textarea */
+.mn-gen-note {
+  width: 100%;
+  font-family: var(--font); font-size: 13px; font-variation-settings: 'wght' 400;
+  line-height: 1.7; color: var(--text); background: var(--white);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 12px; resize: vertical; outline: none; min-height: 80px;
+}
+.mn-gen-note:focus { border-color: var(--navy); }
+.mn-gen-note::placeholder { color: var(--text-muted); }
+
+/* Minutes */
+.mn-minutes-body { font-size: 14px; line-height: 1.75; color: var(--text); }
+.mn-minutes-body p { margin-bottom: 10px; }
+.mn-minutes-body p:last-child { margin-bottom: 0; }
+.mn-minutes-textarea {
+  width: 100%; font-family: var(--font); font-size: 14px;
+  font-variation-settings: 'wght' 400; line-height: 1.75;
+  color: var(--text); background: var(--white);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px 14px; resize: vertical; outline: none; min-height: 140px;
+}
+.mn-minutes-textarea:focus { border-color: var(--navy); }
+
+/* Action rows (within minutes) */
+.mn-arow {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 9px 12px; background: var(--white);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  margin-bottom: 6px;
+}
+.mn-acheck {
+  width: 16px; height: 16px; border-radius: 3px;
+  border: 1.5px solid var(--border); flex-shrink: 0; margin-top: 2px;
+  cursor: pointer; display: flex; align-items: center;
+  justify-content: center; font-size: 10px; color: var(--white); transition: background .1s;
+}
+.mn-acheck.done { background: var(--green); border-color: var(--green); }
+.mn-acheck.waiting { background: var(--amber); border-color: var(--amber); }
+.mn-arow__body { flex: 1; min-width: 0; }
+.mn-arow__title { font-size: 13px; }
+.mn-arow__title.done { text-decoration: line-through; color: var(--text-muted); }
+.mn-arow__meta { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+.mn-arow__right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+
+/* Calendar */
+.mn-cal { display: grid; grid-template-columns: repeat(7,1fr); gap: 3px; }
+.mn-cal-lbl { font-size: 11px; font-variation-settings: 'wght' 700; color: var(--text-muted); text-align: center; padding: 4px 0; }
+.mn-cal-cell {
+  font-size: 12px; text-align: center; padding: 5px 2px;
+  border-radius: 4px; cursor: pointer; color: var(--text-muted);
+  position: relative; min-height: 30px;
+}
+.mn-cal-cell:hover { background: var(--off-white); }
+.mn-cal-cell.today { font-variation-settings: 'wght' 800; color: var(--text); background: var(--off-white); }
+.mn-cal-cell.has-mtg::after {
+  content: ''; position: absolute; bottom: 3px; left: 50%;
+  transform: translateX(-50%); width: 5px; height: 5px;
+  border-radius: 50%; background: var(--primary);
+}
+
+/* Contacts */
+.mn-cgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px,1fr)); gap: 10px; }
+.mn-ccard {
+  background: var(--white); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px 14px;
+  display: flex; align-items: flex-start; gap: 10px;
+  cursor: pointer; transition: border-color .12s;
+}
+.mn-ccard:hover { border-color: color-mix(in srgb, var(--text-muted) 35%, white); }
+.mn-cav {
+  width: 36px; height: 36px; border-radius: 50%;
+  background: var(--blue-light); color: var(--blue);
+  font-size: 12px; font-variation-settings: 'wght' 800;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.mn-cname { font-size: 13px; font-variation-settings: 'wght' 700; }
+.mn-corg { font-size: 12px; color: var(--text-muted); }
+.mn-cemail { font-size: 11px; color: var(--text-muted); margin-top: 2px; word-break: break-all; }
+
+/* Filter chips */
+.mn-frow { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+.mn-chip {
+  font-size: 12px; font-variation-settings: 'wght' 600;
+  padding: 4px 12px; border-radius: 20px;
+  border: 1px solid var(--border); background: var(--white);
+  color: var(--text-muted); cursor: pointer; transition: all .12s;
+}
+.mn-chip:hover { border-color: color-mix(in srgb, var(--text-muted) 35%, white); color: var(--text); }
+.mn-chip.active { background: var(--primary); border-color: var(--primary); color: var(--white); }
+
+/* Pills */
+.mn-pill { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 11px; font-variation-settings: 'wght' 700; }
+.mn-pill--upcoming { background: var(--blue-light); color: var(--blue); }
+.mn-pill--live { background: var(--green-light); color: var(--green); }
+.mn-pill--done { background: var(--green-light); color: var(--green); }
+.mn-pill--owner { background: color-mix(in srgb, var(--primary) 8%, white); color: var(--primary); }
+.mn-pill--part { background: var(--off-white); color: var(--text-muted); }
+.mn-pill--open { background: var(--blue-light); color: var(--blue); }
+.mn-pill--waiting { background: var(--amber-light); color: var(--amber); }
+
+/* LIVE MODAL */
+.mn-backdrop {
+  display: none; position: fixed; inset: 0;
+  background: rgba(10,20,40,.6); z-index: 500;
+  align-items: stretch; justify-content: center;
+}
+.mn-backdrop.open { display: flex; }
+.mn-modal {
+  display: flex; flex-direction: column;
+  width: 100%; max-width: 1040px; margin: 14px;
+  background: var(--white); border-radius: 10px;
+  overflow: hidden; box-shadow: var(--shadow-lg);
+}
+.mn-modal-hdr {
+  background: var(--navy); padding: 12px 18px;
+  display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+}
+.mn-modal-hdr__dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.mn-modal-hdr__title { font-size: 15px; font-variation-settings: 'wght' 800; color: var(--white); flex: 1; }
+.mn-modal-hdr__meta { font-size: 12px; color: rgba(255,255,255,.6); }
+.mn-modal-live-pill {
+  display: flex; align-items: center; gap: 5px;
+  background: rgba(255,255,255,.12); border-radius: 20px;
+  padding: 3px 10px; font-size: 11px; font-variation-settings: 'wght' 700; color: var(--white);
+}
+.mn-modal-live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-live); animation: mn-pulse 1.4s infinite; }
+.mn-modal-body { display: flex; flex: 1; overflow: hidden; min-height: 0; }
+
+/* Modal agenda panel */
+.mn-modal-agenda {
+  width: 240px; min-width: 240px;
+  border-right: 1px solid var(--border);
+  background: var(--off-white); display: flex;
+  flex-direction: column; overflow-y: auto;
+}
+.mn-modal-agenda__label {
+  font-size: 10px; font-variation-settings: 'wght' 800;
+  color: var(--text-muted); letter-spacing: .08em; text-transform: uppercase;
+  padding: 13px 15px 5px;
+}
+.mn-mrow {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 9px 15px; cursor: pointer; border-left: 3px solid transparent; transition: background .1s;
+}
+.mn-mrow:hover { background: var(--off-white); }
+.mn-mrow.active { background: var(--white); border-left-color: var(--primary); }
+.mn-mrow__num {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--border); color: var(--text-muted);
+  font-size: 10px; font-variation-settings: 'wght' 800;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; margin-top: 1px;
+}
+.mn-mrow.active .mn-mrow__num { background: var(--primary); color: var(--white); }
+.mn-mrow.done-item .mn-mrow__num { background: var(--green); color: var(--white); }
+.mn-mrow.done-item .mn-mrow__title { text-decoration: line-through; color: var(--text-muted); }
+.mn-mrow__title { font-size: 13px; font-variation-settings: 'wght' 600; color: var(--text); }
+.mn-mrow__sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.mn-modal-agenda__footer {
+  padding: 11px 15px; border-top: 1px solid var(--border);
+  margin-top: auto; flex-shrink: 0;
+}
+
+/* Modal right — scratchpad */
+.mn-modal-right { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.mn-modal-right__hdr { padding: 13px 18px 11px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.mn-modal-right__title { font-size: 15px; font-variation-settings: 'wght' 800; margin-bottom: 3px; }
+.mn-modal-right__meta { font-size: 12px; color: var(--text-muted); }
+.mn-modal-right__body { flex: 1; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.mn-modal-right__footer {
+  padding: 11px 18px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  flex-shrink: 0; background: var(--white);
+}
+.mn-prog { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); }
+.mn-prog-bar { width: 90px; height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.mn-prog-fill { height: 100%; background: var(--primary); border-radius: 3px; transition: width .3s; }
+
+/* Spinner overlay */
+.mn-ai-overlay {
+  display: none; position: absolute; inset: 0;
+  background: rgba(244,246,249,.85); z-index: 10;
+  align-items: center; justify-content: center;
+  flex-direction: column; gap: 12px;
+  font-size: 14px; font-variation-settings: 'wght' 600; color: var(--text-muted);
+}
+.mn-ai-overlay.visible { display: flex; }
+</style>
+
+<!-- Firebase 10.12.0 SDK (compat) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+<script>
+var fbCfg = {
+  apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+  authDomain:        "nl-tools.firebaseapp.com",
+  databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId:         "nl-tools",
+  storageBucket:     "nl-tools.firebasestorage.app",
+  messagingSenderId: "801354670005",
+  appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+};
+firebase.initializeApp(fbCfg);
+
+var NL_TOOL_KEY = 'staff-meeting-notes';
+
+window.NL_TOOL = {
+  title:   'Meeting Notes',
+  toolKey: 'staff-meeting-notes',
+  kicker:  'NL Tools'
+};
+window.NL_CHANGELOG = [
+  {
+    date: '3 May 2026',
+    version: 'v1.9',
+    items: [
+      'Tidied a few stray colours so the tool now pulls everything from the central NL palette — future tweaks flow through automatically.'
+    ]
+  },
+  {
+    date: '23 April 2026',
+    version: 'v1.8',
+    items: [
+      'Meeting Notes launched — create and manage meetings end-to-end.',
+      'Projects organise your meetings by relationship or workstream.',
+      'Live meeting modal with private scratchpad and agenda tracking.',
+      'AI minutes generation from your notes (coming soon).',
+      'Action points tracked across all meetings in one view.',
+      'Personal contacts directory.'
+    ]
+  }
+];
+</script>
+
+<script src="/system/nl-utils.js?v=27"></script>
+<script src="/system/nl-topbar.js?v=8"></script>
+<script src="/system/auth-guard.js?v=10"></script>
+</head>
+<body>
+<div id="pageWrap" style="display:none">
+  <div id="nlTopbar"></div>
+
+  <!-- Live meeting banner -->
+  <div class="mn-live-banner" id="mnLiveBanner" onclick="mnReopenModal()">
+    <div class="mn-live-dot"></div>
+    <div class="mn-live-text" id="mnLiveBannerText"></div>
+    <div class="mn-live-cta">Return to meeting →</div>
+  </div>
+
+  <div class="main">
+  <div class="mn-shell">
+    <!-- Sidebar -->
+    <nav class="mn-sidebar">
+      <div class="mn-sb-label">Views</div>
+      <div class="mn-sb-item active" id="sb-meetings" onclick="mnSwitchView('meetings',this)">☰&nbsp; All meetings</div>
+      <div class="mn-sb-item" id="sb-actions" onclick="mnSwitchView('actions',this)">◎&nbsp; My actions</div>
+      <div class="mn-sb-item" id="sb-calendar" onclick="mnSwitchView('calendar',this)">▦&nbsp; Calendar</div>
+      <div class="mn-sb-item" id="sb-contacts" onclick="mnSwitchView('contacts',this)">✉&nbsp; Contacts</div>
+      <div class="mn-sb-label">Projects</div>
+      <div class="mn-sb-item active-proj" id="proj-all" onclick="mnFilterProj('all',this)" style="color:var(--text)">
+        <span class="mn-proj-dot" style="background:var(--text-muted)"></span> All projects
+      </div>
+      <div id="mnProjList"></div>
+    </nav>
+
+    <!-- Main content -->
+    <div class="mn-main-area">
+      <div class="mn-page-header">
+        <h1 id="mnPageTitle">All meetings</h1>
+        <button class="btn btn--primary btn--sm" onclick="mnNewMeeting()">+ New meeting</button>
+      </div>
+      <div class="mn-page-body" id="mnPageBody">
+        <div style="padding:40px;text-align:center"><div class="spinner"></div></div>
+      </div>
+    </div>
+  </div>
+  </div>
+
+</div>
+
+<!-- Live meeting modal -->
+<div class="mn-backdrop" id="mnBackdrop">
+  <div class="mn-modal">
+    <div class="mn-modal-hdr">
+      <div class="mn-modal-hdr__dot" id="mnModalDot"></div>
+      <div class="mn-modal-hdr__title" id="mnModalTitle"></div>
+      <div class="mn-modal-hdr__meta" id="mnModalMeta"></div>
+      <div class="mn-modal-live-pill"><div class="mn-modal-live-dot"></div> Live</div>
+      <button class="btn btn--sm" id="mnModalEndBtn"
+        style="background:rgba(255,255,255,.12);color:var(--white);border-color:rgba(255,255,255,.2);margin-left:8px"
+        onclick="mnEndMeeting()">✕ End</button>
+    </div>
+    <div class="mn-modal-body">
+      <div class="mn-modal-agenda">
+        <div class="mn-modal-agenda__label">Agenda</div>
+        <div id="mnModalAgendaList"></div>
+        <div class="mn-modal-agenda__footer" id="mnModalAgendaFooter"></div>
+      </div>
+      <div class="mn-modal-right">
+        <div class="mn-modal-right__hdr">
+          <div class="mn-modal-right__title">Scratchpad</div>
+          <div class="mn-modal-right__meta">Private to you · not visible to anyone else</div>
+        </div>
+        <div class="mn-modal-right__body" id="mnModalRightBody"></div>
+        <div class="mn-modal-right__footer">
+          <div class="mn-prog">
+            <span id="mnProgText">0 of 0 items</span>
+            <div class="mn-prog-bar"><div class="mn-prog-fill" id="mnProgFill" style="width:0%"></div></div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn--sm btn--ghost" onclick="mnModalPrev()">← Prev</button>
+            <button class="btn btn--sm btn--navy" onclick="mnModalNext()">Next →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- NL Tool config + system scripts moved to <head> for canonical bootstrap order. -->
+
+<script>
+var db         = firebase.database();
+var NL_GAS_URL = NL.endpoints.gas;
+var MN_PATH    = 'app-data/staff-meeting-notes';
+
+/* ── APP STATE ─────────────────────────────────────────────────────── */
+var mnSession    = null;
+var mnView       = 'meetings';
+var mnCurProj    = 'all';
+var mnCurMeeting = null;
+var mnProjects   = {};       // loaded from RTDB
+var mnMeetings   = {};       // loaded from RTDB
+var mnContacts   = {};       // loaded from RTDB
+var mnActions    = {};       // loaded from RTDB
+
+// Live modal state
+var mnLiveMtg    = null;
+var mnLiveIdx    = null;
+var mnLiveDone   = {};
+
+// Filters
+var mnActionFilter = 'all';
+var mnOrgFilter    = 'all';
+
+/* Project-identity palette — 6 darker/saturated stops chosen for the
+   meeting-notes look (different from tasks' NL.projColours wheel, which
+   is a lighter / more vivid 8-stop set). Stored per-project in the DB so
+   any change here needs a migration. Kept tool-local in v2.19 sweep
+   because the palette doesn't match tasks; promote to canon only if a
+   third tool wants the same shades. */
+var PROJ_COLOURS = ['#185FA5','#3B6D11','#9e0000','#854F0B','#5B2D8E','#0E7490'];
+var mnDataReady  = false; // guard against rendering before session is set
+
+/* ── AUTH READY ────────────────────────────────────────────────────── */
+window.nlAuthReady = function(userData) {
+  mnSession = userData;
+
+  function startApp(uid) {
+    if (startApp._done) return;
+    startApp._done = true;
+    mnSession.uid = uid;
+    mnDataReady = true;
+    mnLoadData();
+  }
+
+  /* Always wait for onAuthStateChanged to confirm a live auth token.
+     Do not trust currentUser directly — it may be set from cache without
+     a valid token, causing PERMISSION_DENIED on all RTDB reads. */
+  var cu = firebase.auth().currentUser;
+  if (cu) {
+    /* Token refresh forces Firebase to obtain a fresh token before reads */
+    cu.getIdToken(true)
+      .then(function() { startApp(cu.uid); })
+      .catch(function() {
+        /* If refresh fails, fall back to onAuthStateChanged */
+        firebase.auth().onAuthStateChanged(function(user) {
+          if (user) { startApp(user.uid); }
+          else { window.location.replace('/'); }
+        });
+      });
+  } else {
+    /* No currentUser yet — wait for Firebase Auth to restore the session */
+    var unsub = firebase.auth().onAuthStateChanged(function(user) {
+      unsub();
+      if (user) {
+        user.getIdToken(true)
+          .then(function() { startApp(user.uid); })
+          .catch(function() { startApp(user.uid); });
+      } else {
+        window.location.replace('/');
+      }
+    });
+  }
+};
+
+/* ── DATA LOADING ──────────────────────────────────────────────────── */
+function mnLoadData() {
+  var uid = mnSession.uid;
+
+  // Load projects
+  db.ref(MN_PATH + '/projects').on('value', function(snap) {
+    mnProjects = snap.val() || {};
+    mnRenderProjSidebar();
+    mnRefreshView();
+  }, function(err) { console.warn('projects listener error:', err.code); });
+
+  // Load meetings (only ones owned by or attended by this user)
+  db.ref(MN_PATH + '/meetings').on('value', function(snap) {
+    if (snap.exists()) mnMeetings = snap.val() || {};
+    mnRefreshView();
+  }, function(err) { console.warn('meetings listener error:', err.code); });
+
+  // Load actions for this user
+  db.ref(MN_PATH + '/actions').orderByChild('ownerUid').equalTo(uid).on('value', function(snap) {
+    if (snap.exists()) mnActions = snap.val() || {};
+    // Also load actions assigned to this user
+    db.ref(MN_PATH + '/actions').orderByChild('assigneeUid').equalTo(uid).on('value', function(snap2) {
+      var assigned = snap2.val() || {};
+      Object.keys(assigned).forEach(function(k) { mnActions[k] = assigned[k]; });
+      if (mnView === 'actions') mnRefreshView();
+    }, function(err) { console.warn('assigned actions listener error:', err.code); });
+    if (mnView === 'actions') mnRefreshView();
+  }, function(err) { console.warn('actions listener error:', err.code); });
+
+  // Load contacts for this user
+  db.ref(MN_PATH + '/contacts/' + uid).on('value', function(snap) {
+    if (snap.exists()) mnContacts = snap.val() || {};
+    if (mnView === 'contacts') mnRefreshView();
+  }, function(err) { console.warn('contacts listener error:', err.code); });
+}
+
+/* ── SIDEBAR PROJECTS ──────────────────────────────────────────────── */
+function mnRenderProjSidebar() {
+  var list = document.getElementById('mnProjList');
+  list.innerHTML = '';
+  var colIdx = 0;
+  Object.keys(mnProjects).forEach(function(key) {
+    var p = mnProjects[key];
+    var colour = p.colour || PROJ_COLOURS[colIdx % PROJ_COLOURS.length];
+    colIdx++;
+    var item = document.createElement('div');
+    item.className = 'mn-sb-item';
+    item.id = 'proj-' + key;
+    var dot = document.createElement('span');
+    dot.className = 'mn-proj-dot';
+    dot.style.background = colour;
+    var nameSpan = document.createElement('span');
+    nameSpan.textContent = p.name || key;
+    item.appendChild(dot);
+    item.appendChild(nameSpan);
+    item.onclick = (function(k) { return function() { mnFilterProj(k, item); }; })(key);
+    list.appendChild(item);
+  });
+}
+
+/* ── VIEW ROUTING ──────────────────────────────────────────────────── */
+function mnSwitchView(view, el) {
+  mnView = view;
+  mnCurMeeting = null;
+  var titles = { meetings: 'All meetings', actions: 'My actions', calendar: 'Calendar', contacts: 'Contacts' };
+  document.getElementById('mnPageTitle').textContent = titles[view];
+  document.querySelectorAll('.mn-sb-item[id^="sb-"]').forEach(function(n) { n.classList.remove('active'); });
+  if (el) el.classList.add('active');
+  mnRefreshView();
+}
+
+function mnFilterProj(p, el) {
+  mnCurProj = p;
+  mnCurMeeting = null;
+  document.querySelectorAll('.active-proj').forEach(function(n) { n.classList.remove('active-proj'); });
+  if (el) el.classList.add('active-proj');
+  document.getElementById('mnPageTitle').textContent = p === 'all' ? 'All meetings' : (mnProjects[p] ? mnProjects[p].name : p);
+  mnView = 'meetings';
+  document.querySelectorAll('.mn-sb-item[id^="sb-"]').forEach(function(n) { n.classList.remove('active'); });
+  document.getElementById('sb-meetings').classList.add('active');
+  mnRefreshView();
+}
+
+function mnRefreshView() {
+  if (!mnDataReady) return;
+  if (mnCurMeeting) { mnRenderDetail(mnCurMeeting); return; }
+  var body = document.getElementById('mnPageBody');
+  body.innerHTML = '';
+  if (mnView === 'meetings') mnRenderList(body);
+  if (mnView === 'actions')  mnRenderActions(body);
+  if (mnView === 'calendar') mnRenderCalendar(body);
+  if (mnView === 'contacts') mnRenderContacts(body);
+}
+
+/* ── MEETINGS LIST ─────────────────────────────────────────────────── */
+function mnRenderList(container) {
+  var uid = mnSession.uid;
+  var keys = Object.keys(mnMeetings).filter(function(k) {
+    var m = mnMeetings[k];
+    if (m.ownerUid !== uid && (!m.attendeeUids || !m.attendeeUids[uid])) return false;
+    if (mnCurProj !== 'all' && m.projectKey !== mnCurProj) return false;
+    return true;
+  });
+
+  // Sort by date descending
+  keys.sort(function(a, b) {
+    return (mnMeetings[b].dateIso || '') > (mnMeetings[a].dateIso || '') ? 1 : -1;
+  });
+
+  if (!keys.length) {
+    var e = document.createElement('div');
+    e.className = 'empty-row';
+    e.innerHTML = '<td colspan="5">No meetings yet. <a href="#" onclick="mnNewMeeting();return false">Create your first meeting →</a></td>';
+    container.innerHTML = '<table class="table"><tbody></tbody></table>';
+    container.querySelector('tbody').appendChild(e);
+    return;
+  }
+
+  keys.forEach(function(key) {
+    var m = mnMeetings[key];
+    var isOwner = m.ownerUid === uid;
+    var isLive  = mnLiveMtg && mnLiveMtg.key === key;
+    var proj    = mnProjects[m.projectKey] || {};
+    var colour  = proj.colour || 'var(--text-muted)';
+    var card    = document.createElement('div');
+    card.className = 'mn-card';
+
+    var dot = document.createElement('div');
+    dot.className = 'mn-card__dot';
+    dot.style.background = colour;
+    card.appendChild(dot);
+
+    var body = document.createElement('div');
+    body.className = 'mn-card__body';
+    var title = document.createElement('div');
+    title.className = 'mn-card__title';
+    title.textContent = m.title || 'Untitled meeting';
+    var meta = document.createElement('div');
+    meta.className = 'mn-card__meta';
+    meta.textContent = (m.dateDisplay || '') + (proj.name ? ' · ' + proj.name : '') +
+      ' · ' + (isOwner ? 'You (owner)' : (m.ownerName || 'Unknown') + ' (owner)');
+    body.appendChild(title);
+    body.appendChild(meta);
+    card.appendChild(body);
+
+    var right = document.createElement('div');
+    right.className = 'mn-card__right';
+    var pp = document.createElement('span');
+    if (isLive) {
+      pp.className = 'mn-pill mn-pill--live';
+      pp.innerHTML = '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);margin-right:4px;animation:mn-pulse 1.4s infinite"></span>Live now';
+    } else if (m.phase === 'upcoming') {
+      pp.className = 'mn-pill mn-pill--upcoming'; pp.textContent = 'Upcoming';
+    } else if (m.phase === 'during') {
+      pp.className = 'mn-pill mn-pill--upcoming'; pp.textContent = 'In progress';
+    } else {
+      pp.className = 'mn-pill mn-pill--done'; pp.textContent = 'Complete';
+    }
+    var rp = document.createElement('span');
+    rp.className = 'mn-pill ' + (isOwner ? 'mn-pill--owner' : 'mn-pill--part');
+    rp.textContent = isOwner ? 'Owner' : 'Participant';
+    right.appendChild(pp);
+    right.appendChild(rp);
+    card.appendChild(right);
+
+    card.onclick = (function(k) { return function() { mnOpenDetail(k); }; })(key);
+    container.appendChild(card);
+  });
+}
+
+/* ── MEETING DETAIL ────────────────────────────────────────────────── */
+function mnOpenDetail(key) {
+  mnCurMeeting = key;
+  mnRenderDetail(key);
+}
+
+function mnRenderDetail(key) {
+  var m       = mnMeetings[key];
+  if (!m) return;
+  var uid     = mnSession.uid;
+  var isOwner = m.ownerUid === uid;
+  var isLive  = mnLiveMtg && mnLiveMtg.key === key;
+  var proj    = mnProjects[m.projectKey] || {};
+  var colour  = proj.colour || 'var(--text-muted)';
+  var body    = document.getElementById('mnPageBody');
+  body.innerHTML = '';
+  document.getElementById('mnPageTitle').textContent = m.title || 'Meeting';
+
+  // Back button
+  var back = document.createElement('button');
+  back.className = 'btn btn--ghost btn--sm';
+  back.style.marginBottom = '14px';
+  back.textContent = '← All meetings';
+  back.onclick = function() { mnCurMeeting = null; document.getElementById('mnPageTitle').textContent = 'All meetings'; mnRefreshView(); };
+  body.appendChild(back);
+
+  // Title
+  var titleRow = document.createElement('div');
+  titleRow.className = 'mn-detail-title';
+  var tdot = document.createElement('span');
+  tdot.className = 'mn-proj-dot';
+  tdot.style.cssText = 'width:12px;height:12px;background:' + colour;
+  titleRow.appendChild(tdot);
+  var ttxt = document.createElement('span');
+  ttxt.textContent = m.title || 'Untitled meeting';
+  titleRow.appendChild(ttxt);
+  body.appendChild(titleRow);
+
+  // Meta
+  var meta = document.createElement('div');
+  meta.className = 'mn-detail-meta';
+  var attendeeNames = Object.values(m.attendeeNames || {}).join(', ');
+  meta.innerHTML = '<span>📅 ' + NL.escHtml(m.dateDisplay || '') + '</span>' +
+    (proj.name ? '<span>🏷 ' + NL.escHtml(proj.name) + '</span>' : '') +
+    '<span>👥 ' + NL.escHtml(isOwner ? 'You & ' + attendeeNames : (m.ownerName || '') + (attendeeNames ? ', ' + attendeeNames : '')) + '</span>';
+  body.appendChild(meta);
+
+  // Action buttons
+  var acts = document.createElement('div');
+  acts.className = 'mn-detail-acts';
+  if (isLive) {
+    var rejoin = document.createElement('button');
+    rejoin.className = 'btn btn--primary btn--sm';
+    rejoin.innerHTML = '● Return to live meeting';
+    rejoin.onclick = function() { mnOpenModal(key, false); };
+    acts.appendChild(rejoin);
+  } else if (m.phase !== 'after') {
+    var startBtn = document.createElement('button');
+    startBtn.className = 'btn btn--primary btn--sm';
+    startBtn.innerHTML = '▶ Start meeting';
+    startBtn.onclick = function() { mnOpenModal(key, true); };
+    acts.appendChild(startBtn);
+  }
+  if (isOwner && m.phase !== 'after') {
+    var editBtn = document.createElement('button');
+    editBtn.className = 'btn btn--sm';
+    editBtn.textContent = 'Edit meeting';
+    editBtn.onclick = function() { mnEditMeeting(key); };
+    acts.appendChild(editBtn);
+  }
+  body.appendChild(acts);
+
+  // ── SECTION: Agenda ──
+  var agSec = document.createElement('div');
+  agSec.className = 'mn-section';
+  var agHdr = document.createElement('div');
+  agHdr.className = 'mn-section__hdr';
+  var agLbl = document.createElement('div');
+  agLbl.className = 'mn-section__label';
+  agLbl.textContent = 'Agenda';
+  agHdr.appendChild(agLbl);
+  agSec.appendChild(agHdr);
+  var agBody = document.createElement('div');
+  agBody.className = 'mn-section__body';
+
+  // General note
+  var gnWrap = document.createElement('div');
+  gnWrap.style.marginBottom = '14px';
+  var gnLbl = document.createElement('div');
+  gnLbl.style.cssText = 'font-size:10px;font-variation-settings:"wght" 800;color:var(--text-muted);letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px';
+  gnLbl.textContent = 'General note';
+  gnWrap.appendChild(gnLbl);
+  if (isOwner) {
+    var gnTa = document.createElement('textarea');
+    gnTa.className = 'mn-gen-note';
+    gnTa.placeholder = 'Add context, standing notes, or an intro for this meeting…';
+    gnTa.value = m.generalNote || '';
+    gnTa.onblur = function() {
+      NL.ensureAuth().then(function() {
+        db.ref(MN_PATH + '/meetings/' + key + '/generalNote').set(gnTa.value);
+        NL.writeAudit('meeting_note_saved', 'General note saved: ' + (m.title || key));
+      });
+    };
+    gnWrap.appendChild(gnTa);
+  } else {
+    var gnTxt = document.createElement('div');
+    gnTxt.style.cssText = 'font-size:13px;color:var(--text);line-height:1.65;padding:4px 0';
+    gnTxt.textContent = m.generalNote || 'No general note.';
+    gnWrap.appendChild(gnTxt);
+  }
+  agBody.appendChild(gnWrap);
+
+  var divider = document.createElement('div');
+  divider.style.cssText = 'border-top:1px solid var(--border);margin-bottom:12px';
+  agBody.appendChild(divider);
+
+  // Agenda items
+  var agenda = m.agenda || [];
+  if (!agenda.length) {
+    var noAg = document.createElement('div');
+    noAg.style.cssText = 'font-size:13px;color:var(--text-muted);font-style:italic';
+    noAg.textContent = isOwner ? 'No agenda items yet — edit this meeting to add some.' : 'No agenda items added.';
+    agBody.appendChild(noAg);
+  } else {
+    agenda.forEach(function(a, i) {
+      var item = document.createElement('div');
+      item.className = 'mn-ag-item';
+      var num = document.createElement('div');
+      num.className = 'mn-ag-num';
+      num.textContent = i + 1;
+      var title = document.createElement('div');
+      title.className = 'mn-ag-title';
+      title.textContent = a.title || '';
+      var time = document.createElement('div');
+      time.className = 'mn-ag-time';
+      time.textContent = a.time || '';
+      item.appendChild(num); item.appendChild(title); item.appendChild(time);
+      agBody.appendChild(item);
+    });
+  }
+  agSec.appendChild(agBody);
+  body.appendChild(agSec);
+
+  // ── SECTION: Scratchpad (live or after only) ──
+  if (m.phase === 'during' || m.phase === 'after' || isLive) {
+    var spSec = document.createElement('div');
+    spSec.className = 'mn-section';
+    var spHdr = document.createElement('div');
+    spHdr.className = 'mn-section__hdr';
+    var spLbl = document.createElement('div');
+    spLbl.className = 'mn-section__label';
+    spLbl.textContent = 'Scratchpad — private';
+    spHdr.appendChild(spLbl);
+    if (isLive) {
+      var lp = document.createElement('span');
+      lp.className = 'mn-pill mn-pill--live';
+      lp.style.fontSize = '10px';
+      lp.textContent = 'Live';
+      spHdr.appendChild(lp);
+    }
+    spSec.appendChild(spHdr);
+    var spBody = document.createElement('div');
+    spBody.className = 'mn-section__body';
+    spBody.style.padding = '0';
+
+    var spTa = document.createElement('textarea');
+    spTa.className = 'mn-scratchpad';
+    spTa.style.cssText = 'border-radius:0;border-left:none;border-right:none;' + (m.phase === 'after' ? 'border-top:none;border-bottom:none' : 'border-bottom:none');
+    spTa.placeholder = 'Your private notes for this meeting — nobody else can see these unless you choose to share.';
+    var spKey = MN_PATH + '/scratchpads/' + key + '/' + uid;
+    db.ref(spKey).once('value').then(function(snap) { spTa.value = snap.val() || ''; });
+    spTa.onblur = function() {
+      NL.ensureAuth().then(function() {
+        db.ref(spKey).set(spTa.value);
+      });
+    };
+    spBody.appendChild(spTa);
+
+    // Share opt-in for participants
+    if (!isOwner && (m.phase === 'during' || m.phase === 'after')) {
+      var sbBar = document.createElement('div');
+      sbBar.className = 'mn-share-bar';
+      var sbChk = document.createElement('input');
+      sbChk.type = 'checkbox'; sbChk.id = 'mnShareChk';
+      sbChk.style.cursor = 'pointer';
+      // Load existing share state
+      db.ref(MN_PATH + '/share-flags/' + key + '/' + uid).once('value').then(function(snap) {
+        sbChk.checked = !!snap.val();
+        sbNote.style.opacity = sbChk.checked ? '1' : '0';
+      });
+      var sbLbl = document.createElement('label');
+      sbLbl.htmlFor = 'mnShareChk';
+      sbLbl.style.cssText = 'cursor:pointer;flex:1;font-size:12px;color:var(--text-muted)';
+      sbLbl.textContent = 'Share my notes with ' + (m.ownerName || 'the owner') + ' to include in the AI-generated minutes';
+      var sbNote = document.createElement('span');
+      sbNote.className = 'mn-share-note';
+      sbNote.textContent = 'Owner will see these';
+      sbChk.onchange = function() {
+        sbNote.style.opacity = sbChk.checked ? '1' : '0';
+        NL.ensureAuth().then(function() {
+          db.ref(MN_PATH + '/share-flags/' + key + '/' + uid).set(sbChk.checked ? true : null);
+          if (sbChk.checked) NL.toast('Notes will be shared with ' + (m.ownerName || 'the owner'), 'info');
+        });
+      };
+      sbBar.appendChild(sbChk); sbBar.appendChild(sbLbl); sbBar.appendChild(sbNote);
+      spBody.appendChild(sbBar);
+    }
+    spSec.appendChild(spBody);
+    body.appendChild(spSec);
+  }
+
+  // ── SECTION: Minutes (after only) ──
+  if (m.phase === 'after') {
+    var minSec = document.createElement('div');
+    minSec.className = 'mn-section';
+    minSec.style.position = 'relative';
+    var minHdr = document.createElement('div');
+    minHdr.className = 'mn-section__hdr';
+    var minLbl = document.createElement('div');
+    minLbl.className = 'mn-section__label';
+    minLbl.textContent = 'Minutes';
+    minHdr.appendChild(minLbl);
+
+    if (isOwner) {
+      var minBtns = document.createElement('div');
+      minBtns.style.display = 'flex'; minBtns.style.gap = '8px';
+
+      if (!m.minutes) {
+        // Generate button
+        var genBtn = document.createElement('button');
+        genBtn.className = 'btn btn--navy btn--sm';
+        genBtn.textContent = 'Generate with AI';
+        genBtn.onclick = function() { mnGenerateMinutes(key, minSec); };
+        minBtns.appendChild(genBtn);
+      } else {
+        // Publish button
+        var pubBtn = document.createElement('button');
+        pubBtn.className = 'btn btn--primary btn--sm';
+        pubBtn.textContent = m.published ? '✓ Published' : 'Publish to attendees';
+        pubBtn.onclick = function() { mnPublishMinutes(key, pubBtn); };
+        minBtns.appendChild(pubBtn);
+        // Regenerate
+        var regenBtn = document.createElement('button');
+        regenBtn.className = 'btn btn--sm';
+        regenBtn.textContent = 'Regenerate';
+        regenBtn.onclick = function() { mnGenerateMinutes(key, minSec); };
+        minBtns.appendChild(regenBtn);
+      }
+      minHdr.appendChild(minBtns);
+    }
+    minSec.appendChild(minHdr);
+
+    // AI spinner overlay
+    var overlay = document.createElement('div');
+    overlay.className = 'mn-ai-overlay';
+    overlay.id = 'mnAiOverlay-' + key;
+    overlay.innerHTML = '<div class="spinner"></div><div>Generating minutes…</div>';
+    minSec.appendChild(overlay);
+
+    var minBody = document.createElement('div');
+    minBody.className = 'mn-section__body';
+    minBody.id = 'mnMinutesBody-' + key;
+
+    if (!m.minutes) {
+      var noMin = document.createElement('div');
+      noMin.style.cssText = 'font-size:13px;color:var(--text-muted);font-style:italic';
+      noMin.textContent = isOwner
+        ? 'No minutes yet. Click "Generate with AI" to produce minutes from your notes.'
+        : 'Minutes have not been generated yet.';
+      minBody.appendChild(noMin);
+    } else {
+      mnRenderMinutesBody(minBody, key, m, isOwner);
+    }
+    minSec.appendChild(minBody);
+    body.appendChild(minSec);
+  }
+}
+
+function mnRenderMinutesBody(container, key, m, isOwner) {
+  container.innerHTML = '';
+  if (isOwner) {
+    // Editable textarea for owner to review/edit before publish
+    var ta = document.createElement('textarea');
+    ta.className = 'mn-minutes-textarea';
+    ta.value = m.minutes || '';
+    ta.onblur = function() {
+      NL.ensureAuth().then(function() {
+        db.ref(MN_PATH + '/meetings/' + key + '/minutes').set(ta.value);
+      });
+    };
+    container.appendChild(ta);
+  } else {
+    // Read-only for participants
+    var div = document.createElement('div');
+    div.className = 'mn-minutes-body';
+    var paras = (m.minutes || '').split('\n\n');
+    paras.forEach(function(p) {
+      if (!p.trim()) return;
+      var el = document.createElement('p');
+      el.textContent = p.trim();
+      div.appendChild(el);
+    });
+    container.appendChild(div);
+  }
+
+  // Action points from minutes
+  var actions = m.minutesActions || [];
+  if (actions.length) {
+    var apHead = document.createElement('div');
+    apHead.style.cssText = 'margin-top:18px;margin-bottom:10px;font-size:13px;font-variation-settings:"wght" 800;color:var(--text)';
+    apHead.textContent = 'Action points';
+    container.appendChild(apHead);
+    actions.forEach(function(a) {
+      var row = document.createElement('div');
+      row.className = 'mn-arow';
+      var chk = document.createElement('div');
+      chk.className = 'mn-acheck ' + (a.status === 'done' ? 'done' : a.status === 'waiting' ? 'waiting' : '');
+      chk.textContent = a.status === 'done' ? '✓' : a.status === 'waiting' ? '~' : '';
+      var b = document.createElement('div'); b.className = 'mn-arow__body';
+      var t = document.createElement('div');
+      t.className = 'mn-arow__title' + (a.status === 'done' ? ' done' : '');
+      t.textContent = a.title || '';
+      b.appendChild(t);
+      if (a.due || a.assignee) {
+        var mt = document.createElement('div'); mt.className = 'mn-arow__meta';
+        mt.textContent = (a.due ? 'Due ' + a.due : '') + (a.assignee ? ' · ' + a.assignee : '');
+        b.appendChild(mt);
+      }
+      var r = document.createElement('div'); r.className = 'mn-arow__right';
+      var pp = document.createElement('span');
+      pp.className = 'mn-pill mn-pill--' + (a.status || 'open');
+      pp.textContent = a.status || 'open';
+      r.appendChild(pp);
+      row.appendChild(chk); row.appendChild(b); row.appendChild(r);
+      container.appendChild(row);
+    });
+  }
+}
+
+/* ── AI MINUTES GENERATION ─────────────────────────────────────────── */
+function mnGenerateMinutes(key, section) {
+  var overlay = document.getElementById('mnAiOverlay-' + key);
+  if (overlay) overlay.classList.add('visible');
+
+  var m = mnMeetings[key];
+  var uid = mnSession.uid;
+
+  // Gather: owner scratchpad + any shared participant scratchpads
+  var scratchpadRef = db.ref(MN_PATH + '/scratchpads/' + key);
+  var shareFlagsRef = db.ref(MN_PATH + '/share-flags/' + key);
+
+  Promise.all([
+    scratchpadRef.once('value'),
+    shareFlagsRef.once('value')
+  ]).then(function(results) {
+    var scratchpads = results[0].val() || {};
+    var shareFlags  = results[1].val() || {};
+    var ownerNotes  = scratchpads[uid] || '';
+    var sharedNotes = [];
+    Object.keys(shareFlags).forEach(function(participantUid) {
+      if (shareFlags[participantUid] && scratchpads[participantUid]) {
+        sharedNotes.push(scratchpads[participantUid]);
+      }
+    });
+
+    var agenda = (m.agenda || []).map(function(a, i) {
+      return (i + 1) + '. ' + a.title + (a.time ? ' (' + a.time + ')' : '');
+    }).join('\n');
+
+    var prompt = 'You are producing formal meeting minutes for ' + (m.title || 'a meeting') + ' held on ' + (m.dateDisplay || 'an unspecified date') + '.\n\n' +
+      'Meeting agenda:\n' + agenda + '\n\n' +
+      'Primary notes (from the meeting owner):\n' + (ownerNotes || '(no notes provided)') + '\n\n' +
+      (sharedNotes.length ? 'Additional notes from participants:\n' + sharedNotes.join('\n\n---\n\n') + '\n\n' : '') +
+      'Produce concise, professional meeting minutes in plain prose. Include:\n' +
+      '1. A short summary paragraph of what was discussed and decided.\n' +
+      '2. Key decisions made (if any).\n' +
+      '3. A list of action points in the format: "Action: [description] — [owner if mentioned] — due [date if mentioned]"\n\n' +
+      'Write in third person. Keep it factual. Do not invent details not present in the notes. If notes are sparse, produce a minimal but professional record.';
+
+    // GAS proxy call to Anthropic API
+    fetch(NL_GAS_URL + '?cb=' + Date.now(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({
+        action: 'generateMeetingMinutes',
+        prompt: prompt,
+        meetingId: key,
+        meetingTitle: m.title || 'Meeting'
+      })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(result) {
+      if (overlay) overlay.classList.remove('visible');
+      if (!result.success) {
+        NL.toast('Could not generate minutes: ' + (result.error || 'unknown error'), 'error');
+        return;
+      }
+      var minutes = result.minutes || '';
+      var actions = result.actions || [];
+
+      NL.ensureAuth().then(function() {
+        db.ref(MN_PATH + '/meetings/' + key + '/minutes').set(minutes);
+        db.ref(MN_PATH + '/meetings/' + key + '/minutesActions').set(actions.length ? actions : null);
+        NL.writeAudit('minutes_generated', 'Minutes generated for: ' + (m.title || key));
+        NL.toast('Minutes generated — review and publish when ready', 'success');
+        mnRenderDetail(key);
+
+        // Save extracted actions to /actions node
+        actions.forEach(function(a) {
+          var aRef = db.ref(MN_PATH + '/actions').push();
+          aRef.set({
+            title:      a.title || '',
+            meetingKey: key,
+            meetingTitle: m.title || '',
+            projectKey: m.projectKey || '',
+            ownerUid:   uid,
+            status:     'open',
+            due:        a.due || '',
+            createdAt:  Date.now()
+          });
+        });
+      });
+    })
+    .catch(function(err) {
+      if (overlay) overlay.classList.remove('visible');
+      NL.toast('Error generating minutes — the AI integration will be available once GAS is updated.', 'error');
+      console.error('Minutes generation error:', err);
+    });
+  });
+}
+
+function mnPublishMinutes(key, btn) {
+  NL.ensureAuth().then(function() {
+    db.ref(MN_PATH + '/meetings/' + key + '/published').set(true);
+    NL.writeAudit('minutes_published', 'Minutes published for: ' + (mnMeetings[key] ? mnMeetings[key].title : key));
+    NL.toast('Minutes published to attendees', 'success');
+    btn.textContent = '✓ Published';
+  });
+}
+
+/* ── LIVE MODAL ────────────────────────────────────────────────────── */
+function mnOpenModal(key, isNew) {
+  var m = mnMeetings[key];
+  if (!m) return;
+  var uid = mnSession.uid;
+  var isOwner = m.ownerUid === uid;
+
+  if (isNew) {
+    mnLiveMtg  = { key: key };
+    mnLiveIdx  = null;
+    mnLiveDone = {};
+    NL.ensureAuth().then(function() {
+      db.ref(MN_PATH + '/meetings/' + key + '/phase').set('during');
+      NL.writeAudit('meeting_started', 'Meeting started: ' + (m.title || key));
+    });
+    mnUpdateBanner();
+  }
+
+  document.getElementById('mnModalDot').style.background  = (mnProjects[m.projectKey] || {}).colour || 'var(--text-muted)';
+  document.getElementById('mnModalTitle').textContent     = m.title || 'Meeting';
+  document.getElementById('mnModalMeta').textContent      = (m.dateDisplay || '') + ' · ' + ((mnProjects[m.projectKey] || {}).name || '') + ' · ' + (isOwner ? 'You are the owner' : 'You are a participant');
+  document.getElementById('mnModalEndBtn').textContent    = isOwner ? '✕ End meeting' : '✕ Leave';
+
+  mnRenderModalAgenda(key);
+  mnUpdateProgress();
+  mnRenderModalScratchpad(key);
+
+  document.getElementById('mnBackdrop').classList.add('open');
+}
+
+function mnRenderModalScratchpad(key) {
+  var uid     = mnSession.uid;
+  var m       = mnMeetings[key];
+  var isOwner = m.ownerUid === uid;
+  var body    = document.getElementById('mnModalRightBody');
+  body.innerHTML = '';
+
+  var lbl = document.createElement('div');
+  lbl.style.cssText = 'font-size:10px;font-variation-settings:"wght" 800;color:var(--text-muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px';
+  lbl.textContent = 'Your notes — private';
+  body.appendChild(lbl);
+
+  var ta = document.createElement('textarea');
+  ta.className = 'mn-scratchpad';
+  ta.style.flex = '1';
+  ta.placeholder = 'Free-form notes for this meeting…\nNobody else sees these unless you choose to share.';
+  var spKey = MN_PATH + '/scratchpads/' + key + '/' + uid;
+  db.ref(spKey).once('value').then(function(snap) { ta.value = snap.val() || ''; });
+  ta.onblur = function() {
+    NL.ensureAuth().then(function() { db.ref(spKey).set(ta.value); });
+  };
+  body.appendChild(ta);
+
+  if (!isOwner) {
+    var sb = document.createElement('div');
+    sb.className = 'mn-share-bar';
+    var chk = document.createElement('input');
+    chk.type = 'checkbox'; chk.id = 'mnModalShareChk'; chk.style.cursor = 'pointer';
+    db.ref(MN_PATH + '/share-flags/' + key + '/' + uid).once('value').then(function(snap) {
+      chk.checked = !!snap.val();
+      sn.style.opacity = chk.checked ? '1' : '0';
+    });
+    var lbl2 = document.createElement('label');
+    lbl2.htmlFor = 'mnModalShareChk';
+    lbl2.style.cssText = 'cursor:pointer;flex:1;font-size:12px;color:var(--text-muted)';
+    lbl2.textContent = 'Share with ' + (m.ownerName || 'the owner') + ' for AI minutes';
+    var sn = document.createElement('span');
+    sn.className = 'mn-share-note';
+    sn.textContent = 'Owner will see these';
+    chk.onchange = function() {
+      sn.style.opacity = chk.checked ? '1' : '0';
+      NL.ensureAuth().then(function() {
+        db.ref(MN_PATH + '/share-flags/' + key + '/' + uid).set(chk.checked ? true : null);
+        if (chk.checked) NL.toast('Notes shared with ' + (m.ownerName || 'owner'), 'info');
+      });
+    };
+    sb.appendChild(chk); sb.appendChild(lbl2); sb.appendChild(sn);
+    body.appendChild(sb);
+  }
+
+  setTimeout(function() { if (ta) ta.focus(); }, 80);
+}
+
+function mnRenderModalAgenda(key) {
+  var m    = mnMeetings[key];
+  var list = document.getElementById('mnModalAgendaList');
+  var foot = document.getElementById('mnModalAgendaFooter');
+  if (!list) return;
+  list.innerHTML = '';
+  foot.innerHTML = '';
+  var agenda = m.agenda || [];
+
+  agenda.forEach(function(a, i) {
+    var item = document.createElement('div');
+    item.className = 'mn-mrow' + (mnLiveIdx === i ? ' active' : '') + (mnLiveDone[i] ? ' done-item' : '');
+    var num = document.createElement('div'); num.className = 'mn-mrow__num';
+    num.textContent = mnLiveDone[i] ? '✓' : (i + 1);
+    var bd = document.createElement('div');
+    var title = document.createElement('div'); title.className = 'mn-mrow__title'; title.textContent = a.title || '';
+    var sub   = document.createElement('div'); sub.className = 'mn-mrow__sub'; sub.textContent = a.time || '';
+    bd.appendChild(title); bd.appendChild(sub);
+    item.appendChild(num); item.appendChild(bd);
+    item.onclick = (function(idx) { return function() { mnLiveIdx = idx; mnRenderModalAgenda(key); mnUpdateProgress(); }; })(i);
+    list.appendChild(item);
+  });
+
+  // Mark done for current item
+  if (mnLiveIdx !== null && agenda[mnLiveIdx]) {
+    var doneBtn = document.createElement('button');
+    doneBtn.className = 'btn btn--sm' + (mnLiveDone[mnLiveIdx] ? ' btn--primary' : ' btn--ghost');
+    doneBtn.style.width = '100%';
+    doneBtn.textContent = mnLiveDone[mnLiveIdx] ? '✓ Item done' : 'Mark item done';
+    doneBtn.onclick = function() {
+      mnLiveDone[mnLiveIdx] = !mnLiveDone[mnLiveIdx];
+      mnRenderModalAgenda(key);
+      mnUpdateProgress();
+      if (mnLiveDone[mnLiveIdx]) NL.toast('Item done', 'success');
+    };
+    foot.appendChild(doneBtn);
+  }
+}
+
+function mnUpdateProgress() {
+  var key = mnLiveMtg ? mnLiveMtg.key : null;
+  if (!key || !mnMeetings[key]) return;
+  var total = (mnMeetings[key].agenda || []).length;
+  var done  = Object.keys(mnLiveDone).filter(function(k) { return mnLiveDone[k]; }).length;
+  document.getElementById('mnProgText').textContent = done + ' of ' + total + ' items';
+  document.getElementById('mnProgFill').style.width = (total ? Math.round(done / total * 100) : 0) + '%';
+}
+
+function mnModalNext() {
+  var key = mnLiveMtg ? mnLiveMtg.key : null;
+  if (!key) return;
+  var len = (mnMeetings[key].agenda || []).length;
+  mnLiveIdx = mnLiveIdx === null ? 0 : Math.min(mnLiveIdx + 1, len - 1);
+  mnRenderModalAgenda(key);
+  mnUpdateProgress();
+}
+
+function mnModalPrev() {
+  var key = mnLiveMtg ? mnLiveMtg.key : null;
+  if (!key || mnLiveIdx === null || mnLiveIdx === 0) return;
+  mnLiveIdx--;
+  mnRenderModalAgenda(key);
+  mnUpdateProgress();
+}
+
+function mnEndMeeting() {
+  var key     = mnLiveMtg ? mnLiveMtg.key : null;
+  var m       = key ? mnMeetings[key] : null;
+  var isOwner = m && m.ownerUid === mnSession.uid;
+  document.getElementById('mnBackdrop').classList.remove('open');
+  if (isOwner) {
+    NL.toast('Meeting ended — open the meeting and generate minutes when ready', 'success');
+  } else {
+    NL.toast('Left meeting', 'info');
+  }
+  mnLiveMtg = null;
+  mnUpdateBanner();
+  if (mnCurMeeting) mnRenderDetail(mnCurMeeting);
+}
+
+function mnUpdateBanner() {
+  var b  = document.getElementById('mnLiveBanner');
+  var bt = document.getElementById('mnLiveBannerText');
+  if (mnLiveMtg && mnMeetings[mnLiveMtg.key]) {
+    b.classList.add('visible');
+    bt.textContent = '● ' + (mnMeetings[mnLiveMtg.key].title || 'Meeting') + ' is in progress';
+  } else {
+    b.classList.remove('visible');
+  }
+}
+
+function mnReopenModal() {
+  if (mnLiveMtg) mnOpenModal(mnLiveMtg.key, false);
+}
+
+document.getElementById('mnBackdrop').addEventListener('click', function(e) {
+  if (e.target === this) document.getElementById('mnBackdrop').classList.remove('open');
+});
+
+/* ── NEW MEETING ───────────────────────────────────────────────────── */
+function mnNewMeeting() {
+  // Modal form for creating a new meeting
+  var backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'mnNewMtgBackdrop';
+
+  var modal = document.createElement('div');
+  modal.className = 'modal';
+
+  var head = document.createElement('div'); head.className = 'modal__head';
+  var headTitle = document.createElement('h2'); headTitle.textContent = 'New meeting';
+  var closeBtn = document.createElement('button'); closeBtn.className = 'modal__close'; closeBtn.textContent = '×';
+  closeBtn.onclick = function() { backdrop.remove(); };
+  head.appendChild(headTitle); head.appendChild(closeBtn);
+
+  var body = document.createElement('div'); body.className = 'modal__body';
+
+  // Title
+  var tg = document.createElement('div'); tg.className = 'form-group';
+  var tl = document.createElement('label'); tl.textContent = 'Meeting title'; tl.htmlFor = 'mnNewTitle';
+  var ti = document.createElement('input'); ti.type = 'text'; ti.id = 'mnNewTitle'; ti.placeholder = 'e.g. Q2 Strategy Review';
+  tg.appendChild(tl); tg.appendChild(ti); body.appendChild(tg);
+
+  // Date
+  var dg = document.createElement('div'); dg.className = 'form-group';
+  var dl = document.createElement('label'); dl.textContent = 'Date'; dl.htmlFor = 'mnNewDate';
+  var di = document.createElement('input'); di.type = 'date'; di.id = 'mnNewDate';
+  var today = new Date(); di.value = today.toISOString().split('T')[0];
+  dg.appendChild(dl); dg.appendChild(di); body.appendChild(dg);
+
+  // Project
+  var pg = document.createElement('div'); pg.className = 'form-group';
+  var pl = document.createElement('label'); pl.textContent = 'Project'; pl.htmlFor = 'mnNewProj';
+  var ps = document.createElement('select'); ps.id = 'mnNewProj';
+  var noneOpt = document.createElement('option'); noneOpt.value = ''; noneOpt.textContent = '— No project —';
+  ps.appendChild(noneOpt);
+  Object.keys(mnProjects).forEach(function(k) {
+    var opt = document.createElement('option'); opt.value = k; opt.textContent = mnProjects[k].name || k;
+    ps.appendChild(opt);
+  });
+  var newProjOpt = document.createElement('option'); newProjOpt.value = '__new__'; newProjOpt.textContent = '+ New project…';
+  ps.appendChild(newProjOpt);
+  pg.appendChild(pl); pg.appendChild(ps); body.appendChild(pg);
+
+  // New project name (hidden unless __new__ selected)
+  var npg = document.createElement('div'); npg.className = 'form-group'; npg.style.display = 'none'; npg.id = 'mnNewProjWrap';
+  var npl = document.createElement('label'); npl.textContent = 'New project name'; npl.htmlFor = 'mnNewProjName';
+  var npi = document.createElement('input'); npi.type = 'text'; npi.id = 'mnNewProjName'; npi.placeholder = 'e.g. Two Circles';
+  npg.appendChild(npl); npg.appendChild(npi); body.appendChild(npg);
+  ps.onchange = function() {
+    npg.style.display = ps.value === '__new__' ? 'block' : 'none';
+  };
+
+  // Agenda items
+  var ag = document.createElement('div'); ag.className = 'form-group';
+  var al = document.createElement('label'); al.textContent = 'Agenda items (one per line, optional time after a dash)';
+  var ah = document.createElement('div'); ah.className = 'form-hint'; ah.textContent = 'e.g. Campaign review — 15 min';
+  var ata = document.createElement('textarea'); ata.style.cssText = 'width:100%;min-height:100px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);font-family:var(--font);font-size:13px;resize:vertical';
+  ata.placeholder = 'Campaign performance review — 15 min\nSeason 25/26 planning — 20 min\nAOB — 5 min';
+  ag.appendChild(al); ag.appendChild(ah); ag.appendChild(ata); body.appendChild(ag);
+
+  // Attendees
+  var atg = document.createElement('div'); atg.className = 'form-group';
+  var atl = document.createElement('label'); atl.textContent = 'Attendees';
+  var ath = document.createElement('div'); ath.className = 'form-hint'; ath.textContent = 'Select from your contacts or add someone new';
+  atg.appendChild(atl); atg.appendChild(ath);
+
+  // Selected attendees list
+  var selectedAttendees = []; // [{name, email, org, isNew}]
+  var atSelected = document.createElement('div');
+  atSelected.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:0';
+  atg.appendChild(atSelected);
+
+  function renderSelectedAttendees() {
+    atSelected.innerHTML = '';
+    selectedAttendees.forEach(function(a, i) {
+      var tag = document.createElement('div');
+      tag.style.cssText = 'display:flex;align-items:center;gap:5px;padding:3px 8px;background:var(--blue-light);color:var(--blue);border-radius:20px;font-size:12px;font-variation-settings:"wght" 600';
+      tag.innerHTML = NL.escHtml(a.name) + (a.isNew ? ' <span style="font-size:10px;opacity:.7">new</span>' : '');
+      var rm = document.createElement('span');
+      rm.style.cssText = 'cursor:pointer;margin-left:2px;font-size:14px;line-height:1;color:var(--blue);opacity:.7';
+      rm.textContent = '×';
+      rm.onclick = function() { selectedAttendees.splice(i,1); renderSelectedAttendees(); };
+      tag.appendChild(rm);
+      atSelected.appendChild(tag);
+    });
+  }
+
+  // Contact picker row
+  var atRow = document.createElement('div');
+  atRow.style.cssText = 'display:flex;gap:6px';
+  var atSel = document.createElement('select');
+  atSel.style.cssText = 'flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius);font-family:var(--font);font-size:13px';
+  var atDefault = document.createElement('option'); atDefault.value = ''; atDefault.textContent = '— Add from contacts —';
+  atSel.appendChild(atDefault);
+  // Portal users
+  var atNewLabel = document.createElement('optgroup'); atNewLabel.label = 'NL Staff';
+  // We don't have users loaded here, so just show contacts
+  var atContactsLabel = document.createElement('optgroup'); atContactsLabel.label = 'Contacts';
+  Object.keys(mnContacts).forEach(function(k) {
+    var c = mnContacts[k];
+    var opt = document.createElement('option'); opt.value = 'contact:' + k; opt.textContent = c.name + (c.org ? ' (' + c.org + ')' : '');
+    atContactsLabel.appendChild(opt);
+  });
+  atSel.appendChild(atContactsLabel);
+  var addAtBtn = document.createElement('button'); addAtBtn.className = 'btn btn--sm'; addAtBtn.type = 'button'; addAtBtn.textContent = 'Add';
+  addAtBtn.onclick = function() {
+    if (!atSel.value) return;
+    var parts = atSel.value.split(':');
+    var c = mnContacts[parts[1]];
+    if (c && !selectedAttendees.find(function(a){return a.email===c.email;})) {
+      selectedAttendees.push({name:c.name, email:c.email, org:c.org||'', isNew:false});
+      renderSelectedAttendees();
+    }
+    atSel.value = '';
+  };
+  atRow.appendChild(atSel); atRow.appendChild(addAtBtn);
+  atg.appendChild(atRow);
+
+  // New contact inline
+  var newAtToggle = document.createElement('button');
+  newAtToggle.className = 'btn btn--ghost btn--sm'; newAtToggle.type = 'button';
+  newAtToggle.style.cssText = 'margin-top:6px;font-size:12px';
+  newAtToggle.textContent = '+ Add new contact';
+  var newAtForm = document.createElement('div');
+  newAtForm.style.cssText = 'display:none;margin-top:8px;padding:10px 12px;background:var(--off-white);border-radius:var(--radius);border:1px solid var(--border)';
+  newAtForm.innerHTML = '<div style="font-size:11px;font-variation-settings:\'wght\' 800;color:var(--text-muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px">New contact</div>';
+  var nafGrid = document.createElement('div'); nafGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px';
+  var nafName = document.createElement('input'); nafName.type='text'; nafName.placeholder='Name'; nafName.style.cssText='padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius);font-family:var(--font);font-size:13px';
+  var nafOrg  = document.createElement('input'); nafOrg.type='text';  nafOrg.placeholder='Organisation'; nafOrg.style.cssText='padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius);font-family:var(--font);font-size:13px';
+  var nafEmail= document.createElement('input'); nafEmail.type='email'; nafEmail.placeholder='Email'; nafEmail.style.cssText='padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius);font-family:var(--font);font-size:13px;grid-column:1/-1';
+  nafGrid.appendChild(nafName); nafGrid.appendChild(nafOrg); nafGrid.appendChild(nafEmail);
+  newAtForm.appendChild(nafGrid);
+  var nafAdd = document.createElement('button'); nafAdd.className = 'btn btn--primary btn--sm'; nafAdd.type='button'; nafAdd.textContent = 'Add to meeting';
+  nafAdd.onclick = function() {
+    var n = nafName.value.trim(); var e = nafEmail.value.trim(); var o = nafOrg.value.trim();
+    if (!n) { NL.toast('Please enter a name', 'error'); return; }
+    selectedAttendees.push({name:n, email:e, org:o, isNew:true});
+    renderSelectedAttendees();
+    nafName.value=''; nafOrg.value=''; nafEmail.value='';
+    newAtForm.style.display='none'; newAtToggle.textContent='+ Add new contact';
+    // Also save to contacts
+    if (mnSession && mnSession.uid) {
+      NL.ensureAuth().then(function() {
+        db.ref(MN_PATH+'/contacts/'+mnSession.uid).push({name:n,org:o,email:e,createdAt:Date.now()});
+      });
+    }
+  };
+  newAtForm.appendChild(nafAdd);
+  newAtToggle.onclick = function() {
+    var open = newAtForm.style.display !== 'none';
+    newAtForm.style.display = open ? 'none' : 'block';
+    newAtToggle.textContent = open ? '+ Add new contact' : '− Cancel';
+  };
+  atg.appendChild(newAtToggle); atg.appendChild(newAtForm);
+  body.appendChild(atg);
+
+  var foot = document.createElement('div'); foot.className = 'modal__footer';
+  var cancelBtn = document.createElement('button'); cancelBtn.className = 'btn btn--ghost'; cancelBtn.textContent = 'Cancel';
+  cancelBtn.onclick = function() { backdrop.remove(); };
+  var saveBtn = document.createElement('button'); saveBtn.className = 'btn btn--primary'; saveBtn.textContent = 'Create meeting';
+  saveBtn.onclick = function() {
+    var title = ti.value.trim();
+    if (!title) { NL.toast('Please add a meeting title', 'error'); return; }
+    var dateVal = di.value;
+    var dateDisp = dateVal ? NL.formatDate(dateVal) : '';
+
+    var projKey = ps.value;
+    var projPromise = Promise.resolve(projKey);
+
+    if (projKey === '__new__') {
+      var newProjName = npi.value.trim();
+      if (!newProjName) { NL.toast('Please enter a project name', 'error'); return; }
+      var colour = PROJ_COLOURS[Object.keys(mnProjects).length % PROJ_COLOURS.length];
+      var newProjRef = db.ref(MN_PATH + '/projects').push();
+      projPromise = newProjRef.set({ name: newProjName, colour: colour, createdAt: Date.now() }).then(function() {
+        return newProjRef.key;
+      });
+    }
+
+    // Parse agenda
+    var agendaLines = ata.value.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
+    var agenda = agendaLines.map(function(line) {
+      var parts = line.split(/\s*[-–]\s*(?=\d)/);
+      return { title: (parts[0] || line).trim(), time: (parts[1] || '').trim() };
+    });
+
+    projPromise.then(function(resolvedProjKey) {
+      NL.ensureAuth().then(function() {
+        var ref = db.ref(MN_PATH + '/meetings').push();
+        var attendeeUids = {}; var attendeeNames = {};
+        selectedAttendees.forEach(function(a) {
+          if (a.uid) { attendeeUids[a.uid]=true; attendeeNames[a.uid]=a.name; }
+        });
+        ref.set({
+          title:         title,
+          dateIso:       dateVal,
+          dateDisplay:   dateDisp,
+          projectKey:    resolvedProjKey || '',
+          ownerUid:      mnSession.uid,
+          ownerName:     mnSession.name || mnSession.email || '',
+          attendeeUids:  attendeeUids,
+          attendeeNames: attendeeNames,
+          phase:         'upcoming',
+          agenda:        agenda.length ? agenda : [],
+          generalNote:   '',
+          createdAt:     Date.now()
+        });
+        NL.writeAudit('meeting_created', 'Meeting created: ' + title);
+        NL.toast('Meeting created', 'success');
+        backdrop.remove();
+      });
+    });
+  };
+  foot.appendChild(cancelBtn); foot.appendChild(saveBtn);
+  modal.appendChild(head); modal.appendChild(body); modal.appendChild(foot);
+  backdrop.appendChild(modal);
+  document.body.appendChild(backdrop);
+  backdrop.classList.add('open');
+  setTimeout(function() { ti.focus(); }, 50);
+}
+
+/* ── EDIT MEETING ──────────────────────────────────────────────────── */
+function mnEditMeeting(key) {
+  var m = mnMeetings[key];
+  if (!m) return;
+
+  var backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+
+  var modal = document.createElement('div');
+  modal.className = 'modal';
+
+  var head = document.createElement('div'); head.className = 'modal__head';
+  var headTitle = document.createElement('h2'); headTitle.textContent = 'Edit meeting';
+  var closeBtn = document.createElement('button'); closeBtn.className = 'modal__close'; closeBtn.textContent = '×';
+  closeBtn.onclick = function() { backdrop.remove(); };
+  head.appendChild(headTitle); head.appendChild(closeBtn);
+
+  var body = document.createElement('div'); body.className = 'modal__body';
+
+  // Title
+  var tg = document.createElement('div'); tg.className = 'form-group';
+  var tl = document.createElement('label'); tl.textContent = 'Meeting title'; tl.htmlFor = 'mnEditTitle';
+  var ti = document.createElement('input'); ti.type = 'text'; ti.id = 'mnEditTitle';
+  ti.value = m.title || '';
+  tg.appendChild(tl); tg.appendChild(ti); body.appendChild(tg);
+
+  // Date
+  var dg = document.createElement('div'); dg.className = 'form-group';
+  var dl = document.createElement('label'); dl.textContent = 'Date'; dl.htmlFor = 'mnEditDate';
+  var di = document.createElement('input'); di.type = 'date'; di.id = 'mnEditDate';
+  di.value = m.dateIso || '';
+  dg.appendChild(dl); dg.appendChild(di); body.appendChild(dg);
+
+  // Project
+  var pg = document.createElement('div'); pg.className = 'form-group';
+  var pl = document.createElement('label'); pl.textContent = 'Project'; pl.htmlFor = 'mnEditProj';
+  var ps = document.createElement('select'); ps.id = 'mnEditProj';
+  var noneOpt = document.createElement('option'); noneOpt.value = ''; noneOpt.textContent = '— No project —';
+  ps.appendChild(noneOpt);
+  Object.keys(mnProjects).forEach(function(k) {
+    var opt = document.createElement('option'); opt.value = k;
+    opt.textContent = mnProjects[k].name || k;
+    if (k === m.projectKey) opt.selected = true;
+    ps.appendChild(opt);
+  });
+  pg.appendChild(pl); pg.appendChild(ps); body.appendChild(pg);
+
+  // General note
+  var gg = document.createElement('div'); gg.className = 'form-group';
+  var gl = document.createElement('label'); gl.textContent = 'General note';
+  var gh = document.createElement('div'); gh.className = 'form-hint'; gh.textContent = 'Context or standing notes shown to all attendees';
+  var gta = document.createElement('textarea');
+  gta.style.cssText = 'width:100%;min-height:70px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);font-family:var(--font);font-size:13px;resize:vertical';
+  gta.value = m.generalNote || '';
+  gg.appendChild(gl); gg.appendChild(gh); gg.appendChild(gta); body.appendChild(gg);
+
+  // Agenda items
+  var ag = document.createElement('div'); ag.className = 'form-group';
+  var al = document.createElement('label'); al.textContent = 'Agenda items (one per line, optional time after a dash)';
+  var ah = document.createElement('div'); ah.className = 'form-hint'; ah.textContent = 'e.g. Campaign review — 15 min';
+  var ata = document.createElement('textarea');
+  ata.style.cssText = 'width:100%;min-height:100px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);font-family:var(--font);font-size:13px;resize:vertical';
+  var currentAgenda = (m.agenda || []).map(function(a) {
+    return a.title + (a.time ? ' — ' + a.time : '');
+  }).join('\n');
+  ata.value = currentAgenda;
+  ag.appendChild(al); ag.appendChild(ah); ag.appendChild(ata); body.appendChild(ag);
+
+  var foot = document.createElement('div'); foot.className = 'modal__footer';
+  var cancelBtn = document.createElement('button'); cancelBtn.className = 'btn btn--ghost'; cancelBtn.textContent = 'Cancel';
+  cancelBtn.onclick = function() { backdrop.remove(); };
+  var saveBtn = document.createElement('button'); saveBtn.className = 'btn btn--primary'; saveBtn.textContent = 'Save changes';
+  saveBtn.onclick = function() {
+    var title = ti.value.trim();
+    if (!title) { NL.toast('Please add a meeting title', 'error'); return; }
+    var dateVal = di.value;
+    var dateDisp = dateVal ? NL.formatDate(dateVal) : '';
+
+    var agendaLines = ata.value.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
+    var agenda = agendaLines.map(function(line) {
+      var parts = line.split(/\s*[-–]\s*(?=\d)/);
+      return { title: (parts[0] || line).trim(), time: (parts[1] || '').trim() };
+    });
+
+    NL.ensureAuth().then(function() {
+      db.ref(MN_PATH + '/meetings/' + key).update({
+        title:       title,
+        dateIso:     dateVal,
+        dateDisplay: dateDisp,
+        projectKey:  ps.value || '',
+        generalNote: gta.value.trim(),
+        agenda:      agenda.length ? agenda : []
+      });
+      NL.writeAudit('meeting_edited', 'Meeting edited: ' + title);
+      NL.toast('Meeting saved', 'success');
+      backdrop.remove();
+    });
+  };
+  foot.appendChild(cancelBtn); foot.appendChild(saveBtn);
+  modal.appendChild(head); modal.appendChild(body); modal.appendChild(foot);
+  backdrop.appendChild(modal);
+  document.body.appendChild(backdrop);
+  backdrop.classList.add('open');
+  setTimeout(function() { ti.focus(); }, 50);
+}
+
+/* ── ACTIONS VIEW ──────────────────────────────────────────────────── */
+function mnRenderActions(container) {
+  var fr = document.createElement('div'); fr.className = 'mn-frow';
+  ['all','open','waiting','done'].forEach(function(f) {
+    var chip = document.createElement('div');
+    chip.className = 'mn-chip' + (mnActionFilter === f ? ' active' : '');
+    chip.textContent = f.charAt(0).toUpperCase() + f.slice(1);
+    chip.onclick = function() { mnActionFilter = f; mnRefreshView(); };
+    fr.appendChild(chip);
+  });
+  container.appendChild(fr);
+
+  var keys = Object.keys(mnActions);
+  var filtered = mnActionFilter === 'all' ? keys : keys.filter(function(k) { return mnActions[k].status === mnActionFilter; });
+
+  var oc = keys.filter(function(k){return mnActions[k].status==='open';}).length;
+  var wc = keys.filter(function(k){return mnActions[k].status==='waiting';}).length;
+  var dc = keys.filter(function(k){return mnActions[k].status==='done';}).length;
+
+  var stats = document.createElement('div'); stats.className = 'stats';
+  stats.innerHTML = '<div class="stat"><div class="stat__num">'+oc+'</div><div class="stat__label">Open</div></div>'+
+    '<div class="stat stat--waiting"><div class="stat__num" style="color:var(--amber)">'+wc+'</div><div class="stat__label">Waiting</div></div>'+
+    '<div class="stat stat--done"><div class="stat__num" style="color:var(--green)">'+dc+'</div><div class="stat__label">Done</div></div>';
+  container.appendChild(stats);
+
+  if (!filtered.length) {
+    var e = document.createElement('div'); e.className = 'empty-row';
+    e.style.cssText = 'padding:32px;text-align:center;color:var(--text-muted);font-size:13px';
+    e.textContent = 'No actions here.';
+    container.appendChild(e); return;
+  }
+
+  filtered.forEach(function(k) {
+    var a = mnActions[k];
+    var row = document.createElement('div'); row.className = 'mn-arow';
+    var chk = document.createElement('div');
+    chk.className = 'mn-acheck ' + (a.status === 'done' ? 'done' : a.status === 'waiting' ? 'waiting' : '');
+    chk.textContent = a.status === 'done' ? '✓' : a.status === 'waiting' ? '~' : '';
+    chk.onclick = function() {
+      var next = a.status === 'open' ? 'waiting' : a.status === 'waiting' ? 'done' : 'open';
+      NL.ensureAuth().then(function() {
+        db.ref(MN_PATH + '/actions/' + k + '/status').set(next);
+        NL.toast('Status updated', 'success');
+      });
+    };
+    var b = document.createElement('div'); b.className = 'mn-arow__body';
+    var t = document.createElement('div');
+    t.className = 'mn-arow__title' + (a.status === 'done' ? ' done' : '');
+    t.textContent = a.title || '';
+    var mt = document.createElement('div'); mt.className = 'mn-arow__meta';
+    mt.textContent = (a.meetingTitle || '') + (a.due ? ' · Due ' + a.due : '') + (a.assignee ? ' · ' + a.assignee : '');
+    b.appendChild(t); b.appendChild(mt);
+    var r = document.createElement('div'); r.className = 'mn-arow__right';
+    var pp = document.createElement('span');
+    pp.className = 'mn-pill mn-pill--' + (a.status || 'open');
+    pp.textContent = a.status || 'open';
+    var projKey = a.projectKey;
+    var proj = mnProjects[projKey];
+    if (proj) {
+      var pj = document.createElement('span');
+      pj.style.cssText = 'font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:4px';
+      var pd = document.createElement('span');
+      pd.style.cssText = 'width:7px;height:7px;border-radius:50%;background:' + (proj.colour || 'var(--text-muted)');
+      pj.appendChild(pd); pj.appendChild(document.createTextNode(proj.name));
+      r.appendChild(pp); r.appendChild(pj);
+    } else {
+      r.appendChild(pp);
+    }
+    row.appendChild(chk); row.appendChild(b); row.appendChild(r);
+    container.appendChild(row);
+  });
+}
+
+/* ── CALENDAR VIEW ─────────────────────────────────────────────────── */
+function mnRenderCalendar(container) {
+  var now = new Date();
+  var yr = now.getFullYear(); var mo = now.getMonth();
+  var monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+  var h = document.createElement('div');
+  h.style.cssText = 'font-size:16px;font-variation-settings:"wght" 800;margin-bottom:12px';
+  h.textContent = monthNames[mo] + ' ' + yr;
+  container.appendChild(h);
+
+  // Gather meeting dates this month
+  var mtgDays = {};
+  Object.keys(mnMeetings).forEach(function(k) {
+    var m = mnMeetings[k];
+    if (!m.dateIso) return;
+    var d = new Date(m.dateIso);
+    if (d.getFullYear() === yr && d.getMonth() === mo) {
+      mtgDays[d.getDate()] = true;
+    }
+  });
+
+  var grid = document.createElement('div'); grid.className = 'mn-cal';
+  ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(function(d) {
+    var l = document.createElement('div'); l.className = 'mn-cal-lbl'; l.textContent = d; grid.appendChild(l);
+  });
+  var firstDay = new Date(yr, mo, 1).getDay(); // 0=Sun
+  var blanks = firstDay === 0 ? 6 : firstDay - 1;
+  for (var b = 0; b < blanks; b++) grid.appendChild(document.createElement('div'));
+  var daysInMonth = new Date(yr, mo + 1, 0).getDate();
+  for (var d = 1; d <= daysInMonth; d++) {
+    var cell = document.createElement('div');
+    cell.className = 'mn-cal-cell' + (d === now.getDate() ? ' today' : '') + (mtgDays[d] ? ' has-mtg' : '');
+    cell.textContent = d; grid.appendChild(cell);
+  }
+  container.appendChild(grid);
+  var leg = document.createElement('div');
+  leg.style.cssText = 'margin-top:12px;font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px';
+  leg.innerHTML = '<span style="width:8px;height:8px;border-radius:50%;background:var(--primary);display:inline-block"></span> Meeting scheduled';
+  container.appendChild(leg);
+}
+
+/* ── CONTACTS VIEW ─────────────────────────────────────────────────── */
+function mnRenderContacts(container) {
+  // Filter chips by org
+  var orgs = ['All'];
+  Object.values(mnContacts).forEach(function(c) { if (c.org && orgs.indexOf(c.org) === -1) orgs.push(c.org); });
+
+  var fr = document.createElement('div'); fr.className = 'mn-frow';
+  orgs.forEach(function(o) {
+    var key = o === 'All' ? 'all' : o;
+    var chip = document.createElement('div');
+    chip.className = 'mn-chip' + (mnOrgFilter === key ? ' active' : '');
+    chip.textContent = o;
+    chip.onclick = function() { mnOrgFilter = key; mnRefreshView(); };
+    fr.appendChild(chip);
+  });
+  container.appendChild(fr);
+
+  // Add contact button
+  var addRow = document.createElement('div');
+  addRow.style.cssText = 'display:flex;justify-content:flex-end;margin-bottom:14px';
+  var addBtn = document.createElement('button');
+  addBtn.className = 'btn btn--sm btn--primary';
+  addBtn.textContent = '+ Add contact';
+  addBtn.onclick = mnAddContact;
+  addRow.appendChild(addBtn);
+  container.appendChild(addRow);
+
+  var keys = Object.keys(mnContacts).filter(function(k) {
+    return mnOrgFilter === 'all' || mnContacts[k].org === mnOrgFilter;
+  });
+
+  if (!keys.length) {
+    var e = document.createElement('div');
+    e.style.cssText = 'text-align:center;padding:48px 20px;color:var(--text-muted);font-size:14px';
+    e.textContent = 'No contacts yet.';
+    container.appendChild(e); return;
+  }
+
+  var grid = document.createElement('div'); grid.className = 'mn-cgrid';
+  keys.forEach(function(k) {
+    var c = mnContacts[k];
+    var card = document.createElement('div'); card.className = 'mn-ccard';
+    var av = document.createElement('div'); av.className = 'mn-cav';
+    var initials = (c.name || '').split(' ').map(function(w){return w[0]||'';}).slice(0,2).join('').toUpperCase();
+    av.textContent = initials || '?';
+    var info = document.createElement('div'); info.style.minWidth = '0';
+    var n = document.createElement('div'); n.className = 'mn-cname'; n.textContent = c.name || '';
+    var o = document.createElement('div'); o.className = 'mn-corg';  o.textContent = c.org || '';
+    var em= document.createElement('div'); em.className = 'mn-cemail';em.textContent = c.email || '';
+    info.appendChild(n); info.appendChild(o); info.appendChild(em);
+    card.appendChild(av); card.appendChild(info);
+    grid.appendChild(card);
+  });
+  container.appendChild(grid);
+}
+
+function mnAddContact() {
+  var backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  var modal = document.createElement('div'); modal.className = 'modal';
+  var head = document.createElement('div'); head.className = 'modal__head';
+  var ht = document.createElement('h2'); ht.textContent = 'Add contact';
+  var hc = document.createElement('button'); hc.className = 'modal__close'; hc.textContent = '×'; hc.onclick = function(){backdrop.remove();};
+  head.appendChild(ht); head.appendChild(hc);
+  var body = document.createElement('div'); body.className = 'modal__body';
+  var fields = [{id:'cName',label:'Name',ph:'Sarah Holt'},{id:'cOrg',label:'Organisation',ph:'Two Circles'},{id:'cEmail',label:'Email',ph:'sarah@twocircles.com'},{id:'cNotes',label:'Notes (optional)',ph:''}];
+  var inputs = {};
+  fields.forEach(function(f){
+    var g = document.createElement('div'); g.className = 'form-group';
+    var l = document.createElement('label'); l.textContent = f.label; l.htmlFor = f.id;
+    var i = document.createElement('input'); i.type = 'text'; i.id = f.id; i.placeholder = f.ph;
+    inputs[f.id] = i; g.appendChild(l); g.appendChild(i); body.appendChild(g);
+  });
+  var foot = document.createElement('div'); foot.className = 'modal__footer';
+  var cancel = document.createElement('button'); cancel.className = 'btn btn--ghost'; cancel.textContent = 'Cancel'; cancel.onclick = function(){backdrop.remove();};
+  var save = document.createElement('button'); save.className = 'btn btn--primary'; save.textContent = 'Save contact';
+  save.onclick = function() {
+    var name = inputs['cName'].value.trim();
+    if (!name) { NL.toast('Please enter a name', 'error'); return; }
+    NL.ensureAuth().then(function() {
+      var ref = db.ref(MN_PATH + '/contacts/' + mnSession.uid).push();
+      ref.set({ name: name, org: inputs['cOrg'].value.trim(), email: inputs['cEmail'].value.trim(), notes: inputs['cNotes'].value.trim(), createdAt: Date.now() });
+      NL.writeAudit('contact_added', 'Contact added: ' + name);
+      NL.toast('Contact saved', 'success');
+      backdrop.remove();
+    });
+  };
+  foot.appendChild(cancel); foot.appendChild(save);
+  modal.appendChild(head); modal.appendChild(body); modal.appendChild(foot);
+  backdrop.appendChild(modal); document.body.appendChild(backdrop);
+  backdrop.classList.add('open');
+  setTimeout(function(){ inputs['cName'].focus(); }, 50);
+}
+</script>
+
+</body>
+</html>
