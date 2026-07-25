@@ -35,6 +35,11 @@ const CALL_OPTS = {
   cors: ["https://nl.tools", "https://thenationalleague.github.io"],
   memory: "256MiB",
   maxInstances: 5,
+  /* Run as the Firebase Admin SDK service account: the gen-2 default (the
+     compute SA) holds no Firebase roles, so RTDB revokes its connection
+     ("Error: disconnect" via onAuthRevoked_, seen live 25/07/2026) and Auth
+     deletes would fail too. This SA carries RTDB + Auth Admin + Storage. */
+  serviceAccount: "firebase-adminsdk-fbsvc@nl-tools.iam.gserviceaccount.com",
 };
 
 // RTDB keys may not contain . # $ / [ ]
