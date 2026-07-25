@@ -631,11 +631,22 @@ function fnCall(name, payload) {
   return tokenP.then(function(idToken) {
     var headers = { 'Content-Type': 'application/json' };
     if (idToken) headers['Authorization'] = 'Bearer ' + idToken;
+    /* 45s guard: a server-side stall must surface as an error, never an
+       infinite spinner (a hung fetch otherwise rejects only at the 60s
+       function timeout, and as an opaque CORS failure). */
+    var controller = ('AbortController' in window) ? new AbortController() : null;
+    var timer = controller ? setTimeout(function() { controller.abort(); }, 45000) : null;
     return fetch(NL_FN_BASE + name, {
       method: 'POST',
       headers: headers,
-      body: JSON.stringify({ data: payload || {} })
-    });
+      body: JSON.stringify({ data: payload || {} }),
+      signal: controller ? controller.signal : undefined
+    }).catch(function(err) {
+      if (err && err.name === 'AbortError') {
+        throw new Error('The server took too long to respond. Please try again.');
+      }
+      throw err;
+    }).finally(function() { if (timer) clearTimeout(timer); });
   }).then(function(res) {
     return res.json().catch(function() { return {}; }).then(function(json) {
       if (!res.ok || json.error) {
