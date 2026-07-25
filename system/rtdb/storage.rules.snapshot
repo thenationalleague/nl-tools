@@ -1,0 +1,29 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    match /footage/{allPaths=**} {
+      // Club + producer capability pages sign in anonymously: any signed-in
+      // user may read, and producers may CREATE new files.
+      allow read:   if request.auth != null;
+      allow create: if request.auth != null;
+      // Overwriting or deleting existing footage needs a real (email) account —
+      // blocks anonymous vandalism; the master console runs on portal logins.
+      allow update, delete: if request.auth != null && request.auth.token.email != null;
+    }
+
+    match /newsletter/library/{file} {
+      // Staff tool — anonymous tokens (which exist in this project for the
+      // footage/UW capability pages) carry no email claim, so require one.
+      allow read:  if request.auth != null && request.auth.token.email != null;
+      allow write: if request.auth != null && request.auth.token.email != null
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    match /{allPaths=**} {
+      allow read:  if request.auth != null && request.auth.token.email != null;
+      allow write: if false;
+    }
+  }
+}
