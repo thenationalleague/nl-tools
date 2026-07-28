@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
-  Version: v0.35 (28/07/2026)
+  Version: v0.36 (28/07/2026)
   File: /handbook/index.html
 
   Structured editor for the League's governing documents — computed clause
@@ -70,6 +70,14 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '28/07/2026',
+        version: 'v0.36',
+        items: [
+          'Import now reads legacy Word 97-2003 .doc files as well as .docx — most of the appendices are still in the old binary format, and converting them by hand was not workable for 15 documents.',
+          'Several documents can be imported at once. The appendices are separate files that share one area, so they are parsed together and each becomes its own top-level entry; importing them one at a time would have meant each replaced the last.'
+        ]
+      },
       {
         date: '28/07/2026',
         version: 'v0.35',
@@ -537,8 +545,8 @@
         </div>
         <span class="ce-mode-note" id="ceModeNote"></span>
         <div class="ce-bar__spacer"></div>
-        <button class="btn btn--ghost" id="ceImportDoc" type="button" hidden>Import document…</button>
-        <input type="file" id="ceDocFile" accept=".docx" hidden>
+        <button class="btn btn--ghost" id="ceImportDoc" type="button" hidden>Import documents…</button>
+        <input type="file" id="ceDocFile" accept=".docx,.doc" multiple hidden>
         <button class="btn btn--ghost" id="ceReimport" type="button" hidden>Re-import</button>
         <button class="btn btn--primary" id="cePublish" type="button" hidden>Publish edition</button>
       </div>
@@ -861,7 +869,7 @@
   function renderEmpty() {
     var title = docTitle(S.docId), hasSeed = !!SEEDS[S.docId], btn = '', msg;
     var upload = canSeed()
-      ? '<button class="btn btn--ghost" id="ceImportDoc2" type="button">Import from a .docx…</button>' : '';
+      ? '<button class="btn btn--ghost" id="ceImportDoc2" type="button">Import from documents…</button>' : '';
     if (canSeed() && hasSeed) {
       msg = 'This area is empty. Import ' + esc(title) + ' to seed the clause tree, then refine it here.';
       btn = '<button class="btn btn--primary" id="ceImport" type="button">Import ' + esc(title) + '</button>' + upload;
@@ -1123,29 +1131,47 @@
   // Import straight from a .docx on the user's machine. Nothing is uploaded
   // anywhere and nothing is committed — the file is parsed in the browser
   // and written to RTDB, which is the only place this content should live.
-  function importUpload(file) {
+  function importUpload(files) {
     var title = docTitle(S.docId), target = S.docId;
-    if (!file) return;
-    if (!/\.docx$/i.test(file.name)) { NL.alert('That is not a .docx file.', { title: 'Wrong file type' }); return; }
+    if (!files || !files.length) return;
+    var bad = files.filter(function (f) { return !/\.docx?$/i.test(f.name); });
+    if (bad.length) {
+      NL.alert('Only Word documents (.doc or .docx) can be imported. Not a Word file: ' +
+        bad.map(function (f) { return f.name; }).join(', '), { title: 'Wrong file type' });
+      return;
+    }
     if (!global_HB_ready()) { NL.alert('The document importer failed to load — try a hard refresh.', { title: 'Importer unavailable' }); return; }
 
+    // Several documents share one area (the appendices are 15 files), so
+    // they must be imported in one go — importing them one at a time would
+    // mean each replaced the last. Sort by filename so Appendix A lands
+    // before B regardless of the order they were picked in.
+    files = files.slice().sort(function (a, b) { return a.name.localeCompare(b.name, 'en', { numeric: true }); });
+
+    var many = files.length > 1;
+    var what = many ? files.length + ' documents' : '“' + files[0].name + '”';
     var hasContent = Object.keys(S.nodes).length > 0;
     NL.confirm(
       (hasContent
-        ? 'Replace everything in the ' + title + ' area with a fresh parse of “' + file.name + '”? Anything currently in this area is discarded. (Other areas are unaffected.)'
-        : 'Import “' + file.name + '” into ' + title + '? This is a best-effort parse — you’ll refine it here.'),
-      { confirmText: hasContent ? 'Replace with this document' : 'Import', title: 'Import ' + title, variant: hasContent ? 'danger' : 'primary' }
+        ? 'Replace everything in the ' + title + ' area with a fresh parse of ' + what + '? Anything currently in this area is discarded. (Other areas are unaffected.)'
+        : 'Import ' + what + ' into ' + title + '? This is a best-effort parse — you’ll refine it here.') +
+      (many ? '\n\nIn order: ' + files.map(function (f) { return f.name; }).join(', ') : ''),
+      { confirmText: hasContent ? 'Replace with these documents' : 'Import', title: 'Import ' + title, variant: hasContent ? 'danger' : 'primary' }
     ).then(function (ok) {
       if (!ok) return;
-      NL.toast && NL.toast('Reading ' + file.name + '…', 'info');
-      return file.arrayBuffer()
-        .then(function (buf) { return window.HB_DOCX.parse(buf); })
-        .then(function (seed) {
-          // The parser names the doc from the source; keep the area's own
-          // title so an import cannot rename the area out from under us.
-          seed.doc = Object.assign({}, seed.doc, { id: target, title: docTitle(target) });
-          return applySeed(seed, target);
-        });
+      NL.toast && NL.toast('Reading ' + (many ? files.length + ' documents' : files[0].name) + '…', 'info');
+      return Promise.all(files.map(function (f) {
+        return f.arrayBuffer()
+          .then(function (buf) { return window.HB_DOCX.parse(buf); })
+          .then(function (seed) { return { name: f.name, seed: seed }; })
+          .catch(function (e) { throw new Error(f.name + ': ' + (e && e.message || e)); });
+      })).then(function (parsed) {
+        var seed = many ? window.HB_DOCX.merge(parsed) : parsed[0].seed;
+        // The parser names the doc from the source; keep the area's own
+        // title so an import cannot rename the area out from under us.
+        seed.doc = Object.assign({}, seed.doc, { id: target, title: docTitle(target) });
+        return applySeed(seed, target);
+      });
     }).catch(function (e) {
       NL.toast && NL.toast('Import failed: ' + (e && e.message || e), 'error');
     });
@@ -1510,9 +1536,9 @@
     $('ceReimport').addEventListener('click', importSeed);
     $('ceImportDoc').addEventListener('click', function () { $('ceDocFile').click(); });
     $('ceDocFile').addEventListener('change', function (e) {
-      var f = e.target.files && e.target.files[0];
-      e.target.value = ''; // so picking the same file twice still fires
-      importUpload(f);
+      var list = Array.prototype.slice.call(e.target.files || []);
+      e.target.value = ''; // so picking the same files twice still fires
+      importUpload(list);
     });
     $('cePublish').addEventListener('click', publish);
     $('ceDocNav').addEventListener('click', function (e) {

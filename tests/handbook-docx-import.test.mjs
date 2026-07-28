@@ -85,13 +85,53 @@ const docx = (bodyXml) => makeZip([['word/document.xml',
 
 /* ----------------------------------------------------------------- markers */
 
-test('splitMarker: top-level rules need their trailing dot', () => {
+test('splitMarker: a dotted number is strong, a bare one is weak', () => {
   assert.equal(HB._splitMarker('1.DEFINITIONS').num, '1');
+  assert.equal(HB._splitMarker('1.DEFINITIONS').weak, undefined);
   assert.equal(HB._splitMarker('6.    REGISTRATION OF PLAYERS').rest, 'REGISTRATION OF PLAYERS');
-  // Bare integers are table cells and prose fragments, not rules.
+
+  // The appendices number their top level without a dot, so a bare integer
+  // has to be offered — but only as a weak candidate the tree builder can
+  // reject against its running sequence.
+  assert.equal(HB._splitMarker('1 Introduction').num, '1');
+  assert.equal(HB._splitMarker('1 Introduction').weak, true);
+
+  // Never markers in any document.
   assert.equal(HB._splitMarker('1 &amp; 2').style, 'none');
-  assert.equal(HB._splitMarker('2 permitted to or from any one Club').style, 'none');
   assert.equal(HB._splitMarker('12').style, 'none');
+});
+
+test('parse: prose opening with a figure is not promoted to a rule', async () => {
+  const seed = await HB.parse(docx(
+    p(r('1.FIRST RULE')) +
+    p(r('2.SECOND RULE')) +
+    // Out of sequence, so it is prose that happens to start with a number.
+    p(r('2 permitted to or from any one Club at any one time')) +
+    p(r('3.THIRD RULE'))
+  ));
+  const top = seed.nodes.filter((n) => !n.parentId);
+  assert.equal(top.map((n) => n.title).join(' | '), 'First Rule | Second Rule | Third Rule');
+  const stray = seed.nodes.find((n) => /permitted to or from/.test(n.body || ''));
+  assert.ok(stray, 'the sentence should survive as prose');
+  assert.equal(stray.numStyle, 'none');
+});
+
+test('parse: appendix-style dotless numbering is accepted in sequence', async () => {
+  const seed = await HB.parse(docx(
+    p(r('APPENDIX D')) +
+    p(r('THE NATIONAL LEAGUE FINANCIAL REPORTING INITIATIVE')) +
+    p(r('1 Introduction')) +
+    p(r('1.1 This document forms the basis of the Initiative.')) +
+    p(r('2 Procedure'))
+  ));
+  const top = seed.nodes.filter((n) => !n.parentId);
+  assert.equal(top.length, 2);
+  assert.equal(seed.doc.coverTitle, 'APPENDIX D');
+  assert.equal(seed.doc.coverSubtitle, 'THE NATIONAL LEAGUE FINANCIAL REPORTING INITIATIVE');
+  // 1.1 nests under 1, and the cover lines are not clauses.
+  const kids = seed.nodes.filter((n) => n.parentId === top[0].id);
+  assert.equal(kids.length, 1);
+  assert.match(kids[0].body, /forms the basis/);
 });
 
 test('splitMarker: dotted sub-numbers need no separator', () => {
@@ -216,4 +256,68 @@ test('parse: rejects a file that is not a docx', async () => {
     () => HB.parse(new TextEncoder().encode('not a zip at all').buffer),
     /Not a \.docx/
   );
+});
+
+/* ------------------------------------------------------- legacy .doc text */
+
+test('splitDocText: line and page breaks end a paragraph', () => {
+  // Several appendices separate every numbered clause with a manual line
+  // break (\x0B) rather than a paragraph mark. Treating those as text
+  // collapsed entire documents into one node.
+  const out = HB._splitDocText('1. First clause\x0B2. Second clause\x0B3. Third clause');
+  assert.equal(out.length, 3);
+  assert.equal(out[0], '1. First clause');
+  assert.equal(out[2], '3. Third clause');
+});
+
+test('splitDocText: paragraph marks, cell marks and blank runs', () => {
+  const out = HB._splitDocText('Intro\rCell A\x07Cell B\r\r  \rTail\x0CAfter page break');
+  assert.equal(out.join(' | '), 'Intro | Cell A | Cell B | Tail | After page break');
+});
+
+test('splitDocText: strips stray control characters but keeps the text', () => {
+  const out = HB._splitDocText('Clause \x01with\x02 embedded\x1F marks');
+  assert.equal(out.length, 1);
+  assert.equal(out[0], 'Clause with embedded marks');
+});
+
+/* ------------------------------------------------------------ multi-import */
+
+test('merge: several documents become one area, ids never collide', async () => {
+  const a = await HB.parse(docx(p(r('APPENDIX A')) + p(r('DISCIPLINARY PROCEDURES')) + p(r('1. First')) + p(r('2. Second'))));
+  const b = await HB.parse(docx(p(r('APPENDIX B')) + p(r('THE PLAY-OFFS')) + p(r('1. Only clause'))));
+  const merged = HB.merge([{ name: 'Appendix_A.docx', seed: a }, { name: 'Appendix_B.docx', seed: b }]);
+
+  const top = merged.nodes.filter((n) => !n.parentId);
+  assert.equal(top.length, 2);
+  assert.equal(top[0].title, 'Appendix A — Disciplinary Procedures');
+  assert.equal(top[1].title, 'Appendix B — The Play-Offs');
+
+  // Both source documents contained an "r1"; ids must be reissued.
+  const ids = merged.nodes.map((n) => n.id);
+  assert.equal(new Set(ids).size, ids.length, 'ids must be unique across documents');
+
+  // Every non-wrapper node hangs off its own document.
+  const under = (w) => merged.nodes.filter((n) => n.parentId === w.id);
+  assert.equal(under(top[0]).length, 2);
+  assert.equal(under(top[1]).length, 1);
+});
+
+test('docLabel: falls back to the filename when a document omits its letter', async () => {
+  // Appendix G opens "NATIONAL LEAGUE SYSTEM REGULATIONS" — it never states
+  // its own letter, so the filename has to supply it.
+  const g = await HB.parse(docx(p(r('NATIONAL LEAGUE SYSTEM REGULATIONS')) + p(r('DEFINITIONS')) + p(r('1. A clause'))));
+  const merged = HB.merge([{ name: 'Appendix_G_26_27.doc', seed: g }]);
+  assert.equal(merged.nodes.filter((n) => !n.parentId)[0].title, 'Appendix G — National League System Regulations');
+});
+
+test('docLabel: a prose second line is not used as a subtitle', async () => {
+  const q = await HB.parse(docx(
+    p(r('APPENDIX Q')) +
+    p(r('This Licensing System has been compiled by the National League and is subject to review.')) +
+    p(r('1. A clause'))
+  ));
+  const merged = HB.merge([{ name: 'Appendix_Q_26_27.doc', seed: q }]);
+  // Just the letter — not the whole sentence.
+  assert.equal(merged.nodes.filter((n) => !n.parentId)[0].title, 'Appendix Q');
 });
