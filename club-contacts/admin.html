@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/admin.html  v1.18 — superadmin console for the club contacts collection.
+  club-contacts/admin.html  v1.19 — superadmin console for the club contacts collection.
   (Renamed from "club-roster" in v1.3 — toolKey/RTDB path now ops-club-contacts.)
   Submissions: { info, inboxes{deptSlug:{dept,email,phone,ext}},
   people[{firstName,lastName,name,roles[{section,title}],hideContact,qualification}],
@@ -13,6 +13,14 @@
   Importing an accepted submission into club-directory is deliberately a manual,
   review-gated step (phase 2) — this console only mints links and shows what
   came back. "Copy as JSON" hands a submission to that future import.
+
+  Three ways out of here, for three different jobs:
+    - Export CSV      — club-per-row across four files, for bulk/spreadsheet work.
+    - View all data   — everything on one scrollable page, for a quick look.
+    - Handbook forms  — pick clubs, get one print-ready A4 entry each (handbook
+                        shape), for sending a club's whole record to a colleague
+                        as a PDF. Screen and print share one layout; body.hb-print
+                        strips the console chrome around it at print time.
 
   Gated: no tools/ registry record on purpose -> superadmin-only via
   auth-guard's default. Tokens live only in RTDB, never in this repo.
@@ -38,7 +46,11 @@
   <script>
     window.NL_TOOL = { title: 'Club Contacts Admin', toolKey: 'ops-club-contacts' };
     var NL_TOOL_KEY = 'ops-club-contacts';
-    window.NL_CHANGELOG = [{ date: '13 Jul 2026', version: 'v1.18', items: [
+    window.NL_CHANGELOG = [{ date: '28 Jul 2026', version: 'v1.19', items: [
+      'New “Handbook forms…” export: tick any clubs that have submitted and get one print-ready page each, laid out like a handbook entry (ground & travel, club contact, sponsors, lead contacts, department inboxes, staff) — print or save straight to PDF, one club per A4 page.',
+      'The picker also lists the clubs still outstanding, so it is obvious who has yet to send their form back.',
+      'Empty fields print as “—” rather than being dropped, so a form doubles as a gap-check on what the League holds.',
+    ] }, { date: '13 Jul 2026', version: 'v1.18', items: [
       'Clipboard copy (Submission JSON, email text) and CSV download now go through the canon NL.copy()/NL.download() helpers instead of inline execCommand/Blob plumbing.',
     ] }, { date: '13 Jul 2026', version: 'v1.17', items: [
       'Clubs list now loads via the canon NL.clubs.load() (session-memoised) instead of a direct clubs-meta.json fetch.',
@@ -96,6 +108,44 @@
   .cra-all__club[open] > summary::before { content:'▾'; }
   .cra-all__club > summary .meta { font-variation-settings:'wght' 400; color:var(--text-muted); font-size:12px; }
   .cra-all__body { padding:4px 16px 16px; border-top:1px solid var(--border); }
+  /* Handbook forms: one club per printed page, laid out like a handbook entry */
+  .hb-out { margin-top:16px; }
+  .hb-bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:14px; padding:10px 14px; border:1px solid var(--border); border-radius:10px; background:var(--navy-50); }
+  .hb-bar__n { font-size:13px; color:var(--text-muted); }
+  .hb-form { border:1px solid var(--border); border-radius:10px; background:var(--white); padding:22px 26px; margin-bottom:16px; }
+  .hb-form__head { display:flex; gap:12px; align-items:center; border-bottom:3px solid var(--primary); padding-bottom:10px; margin-bottom:6px; }
+  .hb-form__head img { width:44px; height:44px; object-fit:contain; flex:0 0 auto; }
+  .hb-form__t { font-variation-settings:'wght' 800; color:var(--navy); font-size:20px; line-height:1.15; }
+  .hb-form__m { font-size:11px; color:var(--text-muted); margin-top:3px; }
+  .hb-grp { font-variation-settings:'wght' 800; color:var(--white); background:var(--navy); font-size:11px; text-transform:uppercase; letter-spacing:.06em; padding:4px 10px; border-radius:4px; margin:16px 0 8px; }
+  .hb-fields { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:0 22px; }
+  .hb-f { display:grid; grid-template-columns:150px minmax(0,1fr); gap:10px; padding:3px 0; border-bottom:1px dotted var(--border); font-size:13px; }
+  .hb-f__k { color:var(--text-muted); }
+  .hb-f__v { color:var(--text); word-break:break-word; min-width:0; }
+  .hb-f__v--none { color:var(--navy-300); }
+  .hb-tbl { width:100%; border-collapse:collapse; font-size:13px; }
+  .hb-tbl th { text-align:left; font-variation-settings:'wght' 800; color:var(--navy); border-bottom:1px solid var(--navy-300); padding:4px 10px 4px 0; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+  .hb-tbl td { padding:5px 10px 5px 0; border-bottom:1px dotted var(--border); vertical-align:top; word-break:break-word; color:var(--text); }
+  .hb-tbl tr:last-child td { border-bottom:none; }
+  .hb-note { font-size:11px; color:var(--amber-deep); margin-top:2px; }
+  .hb-empty { font-size:13px; color:var(--text-muted); margin:0; }
+  /* Picker (inside the shared NL.modal body) */
+  .hb-pick__grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(210px,1fr)); gap:2px 14px; margin-top:10px; }
+  .hb-pick__c { display:flex; gap:8px; align-items:center; font-size:13px; padding:4px 0; }
+  .hb-pick__c input { flex:0 0 auto; }
+  .hb-pick__miss { margin-top:14px; padding:10px 12px; border:1px solid var(--amber); border-radius:8px; background:var(--amber-light); font-size:13px; color:var(--amber-deep); }
+  @media (max-width: 720px) { .hb-fields { grid-template-columns:1fr; } }
+  @media print {
+    @page { size: A4 portrait; margin: 12mm; }
+    body.hb-print #nlTopbar, body.hb-print .cra > *:not(.hb-out), body.hb-print .modal-backdrop, body.hb-print .hb-bar { display:none !important; }
+    body.hb-print .cra { max-width:none; margin:0; padding:0; }
+    body.hb-print .hb-out { display:block !important; margin:0; }
+    body.hb-print .hb-form { border:none; border-radius:0; padding:0; margin:0; break-after:page; page-break-after:always; }
+    body.hb-print .hb-form:last-child { break-after:auto; page-break-after:auto; }
+    body.hb-print .hb-form__head, body.hb-print .hb-grp { break-after:avoid; page-break-after:avoid; }
+    body.hb-print .hb-f, body.hb-print .hb-tbl tr { break-inside:avoid; page-break-inside:avoid; }
+    body.hb-print .hb-form, body.hb-print .hb-form * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  }
 </style>
 </head>
 <body>
@@ -126,8 +176,10 @@
     <div style="display:flex;gap:8px;margin:12px 0 0;flex-wrap:wrap;align-items:center;border-top:1px solid var(--border);padding-top:12px;">
       <span style="font-size:12px;color:var(--text-muted);font-variation-settings:'wght' 800;text-transform:uppercase;letter-spacing:.06em;">View on screen</span>
       <button class="btn btn--navy btn--sm" id="viewAllBtn">View all submitted data</button>
+      <button class="btn btn--navy btn--sm" id="hbBtn">Handbook forms…</button>
     </div>
     <div id="allSubs" class="cra-all" style="display:none;"></div>
+    <div id="hbOut" class="hb-out" style="display:none;"></div>
     <div id="list" style="margin-top:16px;"><p style="color:var(--text-muted);">Loading…</p></div>
   </div>
   <div class="modal-backdrop" id="craModal"><div class="modal" style="max-width:680px;">
@@ -330,6 +382,166 @@
       }).join('');
   }
 
+  /* ---- Handbook forms ------------------------------------------------------
+     A per-club, print-ready entry in the shape the League handbook uses — one
+     club per A4 page, so a club's whole record can be sent to a colleague as a
+     single PDF. The CSVs above are club-per-row across four files; this is the
+     same data assembled the other way round. Screen and print share one layout;
+     @media print (body.hb-print) strips the console chrome around it. ---- */
+  var INFO_LABEL = {}; INFO_LABELS.forEach(function (f) { INFO_LABEL[f[0]] = f[1]; });
+  var HB_GROUPS = [
+    // null = skip a cell, so related fields stay side by side on the 2-col grid
+    // (station/distance, capacity/seated, pitch/type) instead of straddling rows.
+    ['Ground & travel', ['stadium','stadiumSponsor','addr1','addr2','town','county','postcode',null,'station','stationDistance','capacity','seated','pitchDims','pitchType']],
+    ['Club contact',    ['website','mainEmail','phone','countyFA','facebook','x','instagram','tiktok','linkedin','youtube']],
+    ['Sponsors',        ['spClub','spFront','spBack','spSleeve','spShorts','spExtra']]
+  ];
+  // Anything added to INFO_LABELS later lands here rather than being dropped.
+  (function () {
+    var placed = {}; HB_GROUPS.forEach(function (g) { g[1].forEach(function (k) { placed[k] = 1; }); });
+    var rest = INFO_LABELS.map(function (f) { return f[0]; }).filter(function (k) { return !placed[k]; });
+    if (rest.length) HB_GROUPS.push(['Other', rest]);
+  })();
+
+  function hbVal(v) { return (v == null ? '' : String(v)).trim(); }
+  function hbFieldsHtml(info, keys) {
+    return '<div class="hb-fields">' + keys.map(function (k) {
+      if (!k) return '<div class="hb-f hb-f--gap" aria-hidden="true"></div>';
+      var v = hbVal(info[k]);
+      return '<div class="hb-f"><span class="hb-f__k">' + esc(INFO_LABEL[k] || k) + '</span>' +
+        '<span class="hb-f__v' + (v ? '' : ' hb-f__v--none') + '">' + (v ? infoCell(k, v) : '—') + '</span></div>';
+    }).join('') + '</div>';
+  }
+  function hbTable(headers, rows, emptyMsg) {
+    if (!rows.length) return '<p class="hb-empty">' + esc(emptyMsg) + '</p>';
+    return '<table class="hb-tbl"><thead><tr>' + headers.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') +
+      '</tr></thead><tbody>' + rows.map(function (r) {
+        return '<tr>' + r.map(function (c) { return '<td>' + c + '</td>'; }).join('') + '</tr>';
+      }).join('') + '</tbody></table>';
+  }
+  function hbEmailsOf(p) { return (p.emails && p.emails.length) ? p.emails : (p.email ? [p.email] : []); }
+  function hbPhonesOf(p) {
+    return ((p.phones && p.phones.length) ? p.phones : (p.phone ? [{ number: p.phone, ext: p.ext }] : []))
+      .map(function (ph) { return ph.number + (ph.ext ? ' ext ' + ph.ext : ''); });
+  }
+  function hbCell(list) { return list.length ? esc(list.join(', ')) : '<span class="hb-f__v--none">—</span>'; }
+
+  function hbFormHtml(sub) {
+    var info = sub.info || {};
+    var head = '<div class="hb-form__head">' +
+      '<img data-crest="' + esc(sub.club) + '" src="' + esc(NL.clubs.crestUrl(sub.club, 'thumb')) + '" alt="">' +
+      '<div><div class="hb-form__t">' + esc(sub.club) + '</div></div></div>' +
+      '<div class="hb-form__m">Handbook form · submitted ' + esc(NL.formatDate(sub.submittedAt)) +
+      ' by ' + esc(sub.yourName || '—') + (sub.yourEmail ? ' (' + esc(sub.yourEmail) + ')' : '') + '</div>';
+
+    var infoHtml = HB_GROUPS.map(function (g) {
+      return '<div class="hb-grp">' + esc(g[0]) + '</div>' + hbFieldsHtml(info, g[1]);
+    }).join('');
+
+    function leadName(id) { var p = (sub.people || []).filter(function (x) { return x.id === id; })[0]; return p ? pname(p) : ''; }
+    var leadRows = LEAD_LABELS.map(function (a) {
+      var names = ((sub.leads && sub.leads[a[0]]) || []).map(leadName).filter(Boolean);
+      return [esc(a[1]), hbCell(names)];
+    });
+
+    var inboxRows = Object.keys(sub.inboxes || {}).map(function (k) {
+      var ib = sub.inboxes[k];
+      return [esc(ib.dept || ib.label || LIST_LABEL[k] || k), hbCell(ib.email ? [ib.email] : []),
+        hbCell(ib.phone ? [ib.phone + (ib.ext ? ' ext ' + ib.ext : '')] : [])];
+    });
+
+    var peopleRows = (sub.people || []).map(function (p) {
+      var notes = [];
+      if (p.qualification) notes.push('Qualification: ' + p.qualification);
+      if (p.hideContact) notes.push('⚠ Not for the public directory');
+      return [esc(pname(p)) + (notes.length ? '<div class="hb-note">' + esc(notes.join(' · ')) + '</div>' : ''),
+        esc(rolesOf(p)) || '<span class="hb-f__v--none">—</span>',
+        hbCell(hbEmailsOf(p)), hbCell(hbPhonesOf(p))];
+    });
+
+    return '<section class="hb-form">' + head + infoHtml +
+      '<div class="hb-grp">Lead contacts</div>' +
+      hbTable(['League area', 'Nominee(s)'], leadRows, 'None nominated.') +
+      '<div class="hb-grp">Department inboxes</div>' +
+      hbTable(['Department', 'Email', 'Phone'], inboxRows, 'None given.') +
+      '<div class="hb-grp">Staff</div>' +
+      hbTable(['Name', 'Role(s)', 'Email', 'Phone'], peopleRows, 'No people submitted.') +
+      '</section>';
+  }
+
+  // Render the chosen clubs' forms into #hbOut and scroll to them.
+  function renderHbForms(clubs) {
+    var box = document.getElementById('hbOut');
+    var subs = clubs.map(function (c) { var t = tokenFor(c); return t ? S.subs[t] : null; }).filter(Boolean);
+    if (!subs.length) { NL.toast('None of those clubs has submitted yet.', 'info'); return; }
+    box.innerHTML =
+      '<div class="hb-bar"><span class="hb-bar__n">' + subs.length + ' form' + (subs.length === 1 ? '' : 's') +
+        ' · one club per page</span><span style="flex:1;"></span>' +
+        '<button class="btn btn--navy btn--sm" data-hbprint="1">Print / Save as PDF</button>' +
+        '<button class="btn btn--ghost btn--sm" data-hbclose="1">Close</button></div>' +
+      subs.map(hbFormHtml).join('');
+    // src is already in the markup; this only wires the thumb → full → rose fallback.
+    Array.prototype.forEach.call(box.querySelectorAll('img[data-crest]'), function (img) {
+      NL.clubs.wireCrestImg(img, img.getAttribute('data-crest'), true);
+    });
+    box.style.display = '';
+    box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function hbPrint() {
+    document.body.classList.add('hb-print');
+    var done = function () { document.body.classList.remove('hb-print'); window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    window.print();
+    // Safari/iOS never fire afterprint reliably — clear on the next tick too.
+    setTimeout(done, 1500);
+  }
+
+  // Club picker: every club that has submitted, ticked to taste. Clubs still
+  // outstanding are listed (not selectable) so it's obvious who to chase.
+  function openHbPicker() {
+    var submitted = {}; subsList().forEach(function (s) { submitted[s.club] = 1; });
+    var have = S.clubs.filter(function (c) { return submitted[c.name]; });
+    var missing = S.clubs.filter(function (c) { return !submitted[c.name]; });
+    if (!have.length) { NL.toast('No submissions yet — nothing to build a form from.', 'info'); return; }
+
+    var body = document.createElement('div');
+    body.innerHTML =
+      '<p style="font-size:13px;color:var(--text-muted);margin:0;">Tick the clubs you need, then build the forms — one club per printed page, ready to save as a PDF.</p>' +
+      '<div style="display:flex;gap:8px;margin-top:10px;">' +
+        '<button class="btn btn--ghost btn--sm" data-hball="1">Select all</button>' +
+        '<button class="btn btn--ghost btn--sm" data-hball="0">Select none</button></div>' +
+      '<div class="hb-pick__grid">' + have.map(function (c) {
+        return '<label class="hb-pick__c"><input type="checkbox" value="' + esc(c.name) + '"><span>' + esc(c.name) + '</span></label>';
+      }).join('') + '</div>' +
+      (missing.length ? '<div class="hb-pick__miss"><b>Still outstanding (' + missing.length + ')</b> — no submission yet, so there is nothing to print for: ' +
+        esc(missing.map(function (c) { return c.name; }).join(', ')) + '</div>' : '');
+
+    body.addEventListener('click', function (e) {
+      var a = e.target.closest('[data-hball]'); if (!a) return;
+      var on = a.getAttribute('data-hball') === '1';
+      Array.prototype.forEach.call(body.querySelectorAll('input[type=checkbox]'), function (i) { i.checked = on; });
+    });
+
+    NL.modal({
+      title: 'Handbook forms', body: body, width: 'wide',
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (ctrl) { ctrl.close(); } },
+        { label: 'Build forms', className: 'btn--navy', autofocus: true, onClick: function (ctrl) {
+          var picked = Array.prototype.filter.call(body.querySelectorAll('input[type=checkbox]'), function (i) { return i.checked; })
+            .map(function (i) { return i.value; });
+          if (!picked.length) { NL.toast('Pick at least one club.', 'info'); return; }
+          ctrl.close(); renderHbForms(picked);
+        } }
+      ]
+    });
+  }
+
+  document.getElementById('hbOut').addEventListener('click', function (e) {
+    if (e.target.closest('[data-hbprint]')) { hbPrint(); return; }
+    if (e.target.closest('[data-hbclose]')) { this.style.display = 'none'; this.innerHTML = ''; }
+  });
+
   // Copy-as-JSON / Re-open, shared by the modal and the all-submissions view.
   function handleSubAction(e, afterReopen) {
     var cj = e.target.closest('[data-copyjson]');
@@ -404,6 +616,7 @@
       if (t && S.subs[t]) openSub(club, S.subs[t]);
     });
 
+    document.getElementById('hbBtn').addEventListener('click', openHbPicker);
     document.getElementById('csvPeople').addEventListener('click', function () { exportCSV('people'); });
     document.getElementById('csvInfo').addEventListener('click', function () { exportCSV('info'); });
     document.getElementById('csvInbox').addEventListener('click', function () { exportCSV('inbox'); });
