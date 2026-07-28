@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
-  Version: v0.38 (28/07/2026)
+  Version: v0.39 (28/07/2026)
   File: /handbook/index.html
 
   Structured editor for the League's governing documents — computed clause
@@ -70,6 +70,13 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '28/07/2026',
+        version: 'v0.39',
+        items: [
+          'The editor now names a clause exactly as the reader does. Clauses with no title of their own — the whole Memorandum, and the Board Directives — showed as an empty breadcrumb (“1 ·” and nothing else) and were cut off after one line in the contents rail. Both now fall back to the clause text and wrap, matching the reader.'
+        ]
+      },
       {
         date: '28/07/2026',
         version: 'v0.38',
@@ -414,10 +421,12 @@
   .ce-toc__num { color: var(--primary); font-variation-settings: 'wght' 800; flex-shrink: 0; min-width: 20px; }
   .ce-toc__item.is-current .ce-toc__num { color: var(--navy-100); }
   .ce-toc__t { font-variation-settings: 'wght' 600; }
-  /* Headingless clauses (e.g. the Memorandum) show a body preview: secondary
-     weight/colour, truncated to one line with an ellipsis. */
+  /* Headingless clauses (e.g. the Memorandum) show a body preview in a
+     secondary weight/colour. It wraps rather than truncating — the reader
+     rail does the same, and one ellipsised line of "The name of the
+     Company is “The …" identifies nothing. */
   .ce-toc__t--preview {
-    flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    flex: 1; min-width: 0; overflow-wrap: anywhere;
     font-variation-settings: 'wght' 400; color: var(--text-muted);
   }
   .ce-toc__item.is-current .ce-toc__t--preview { color: var(--navy-100); }
@@ -846,7 +855,9 @@
     else { var el = currentSectionEl(); secId = el && el.dataset.id; }
     var node = secId && S.nodes[secId];
     var num = (S.numMap && secId && S.numMap[secId]) || '';
-    var sec = node ? ((num ? esc(num) + ' · ' : '') + esc(node.title || '')) : '';
+    // Untitled clauses fall back to their body text — without this the
+    // crumb read "1 ·" and stopped, while the reader showed the clause.
+    var sec = node ? ((num ? esc(num) + ' · ' : '') + esc(node.title || nodeText(node).slice(0, 60))) : '';
     crumb.innerHTML = '<span class="nl-crumb__area">' + esc(S.doc.title || docTitle(S.docId)) + '</span>' +
       (sec ? '<span class="nl-crumb__sep">›</span><span class="nl-crumb__sec">' + sec + '</span>' : '');
     // reflect the current section in the contents rail (only when showing the outline)
@@ -926,7 +937,7 @@
     host.innerHTML = '<div class="ce-toc">' + roots.map(function (r) {
       var cur = (r.id === S.selectedId) ? ' is-current' : '';
       var hasTitle = !!r.title;
-      var label = hasTitle ? r.title : (r.body || '').replace(/<[^>]+>/g, ' ').trim();
+      var label = hasTitle ? r.title : nodeText(r).slice(0, 70);
       var tcls = 'ce-toc__t' + (hasTitle ? '' : ' ce-toc__t--preview');
       return '<a class="ce-toc__item' + cur + '" data-goto="' + r.id + '"><span class="ce-toc__num">' + esc(numMap[r.id] || '') + '</span><span class="' + tcls + '">' + esc(label) + '</span></a>';
     }).join('') + '</div>';
@@ -978,7 +989,7 @@
       out.push('<div class="ce-toc__group">' + esc(title) + ' · ' + hits.length + '</div>');
       hits.slice(0, 40).forEach(function (n) {
         var hasTitle = !!n.title;
-        var snip = hasTitle ? n.title : ((n.body || '').replace(/<[^>]+>/g, ' ').trim() || (n.kind === 'table' ? '▦ ' + tableText(n).trim() : ''));
+        var snip = hasTitle ? n.title : ((n.kind === 'table' ? '▦ ' : '') + nodeText(n).slice(0, 70));
         var tcls = 'ce-toc__t' + (hasTitle ? '' : ' ce-toc__t--preview');
         out.push('<a class="ce-toc__item" data-goto="' + n.id + '" data-doc="' + d.id + '"><span class="ce-toc__num">' + esc(numMap[n.id] || '') + '</span><span class="' + tcls + '">' + esc(snip) + '</span></a>');
       });
@@ -1402,6 +1413,18 @@
     NL.ensureAuth().then(function () {
       return nodesRef().child(id).update({ table: node.table, updatedAt: Date.now(), updatedBy: (S.session && (S.session.name || S.session.email)) || null });
     }).then(function () { S.index = null; }).catch(function (e) { NL.toast && NL.toast('Save failed: ' + (e && e.message || e), 'error'); });
+  }
+
+  // The label a node is known by when it has no title of its own — the
+  // Memorandum and the Board Directives are body-only throughout. Mirrors
+  // textOf() in reader.html so the editor and the reader name a clause
+  // identically; they showed different things for the same node otherwise.
+  function nodeText(n) {
+    if (!n) return '';
+    if (n.title) return n.title;
+    if (n.body) return n.body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (n.table) return tableText(n).replace(/\s+/g, ' ').trim();
+    return '';
   }
 
   function tableText(n) {
