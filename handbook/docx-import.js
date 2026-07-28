@@ -22,6 +22,13 @@
                      (a), (i), (A), a), bullets), tree building from the
                      dotted numbers, tables, and doc meta inferred from
                      the document's own title block.
+   2026-07-28 v1.1 — legacy Word 97-2003 .doc support (OLE/CFB + piece
+                     table), container chosen by magic bytes, and
+                     multi-document merge for areas made of several files.
+   2026-07-28 v1.2 — Word automatic list numbering (w:numPr + numbering.xml).
+                     Documents numbered by Word carry no markers in their
+                     text at all, so reading only the text flattened them —
+                     the Board Directives lost every a)..e) sub-item.
    ------------------------------------------------------------------ */
 (function (global) {
   'use strict';
@@ -229,12 +236,22 @@
   // Text of one <w:p>, with bold/italic runs preserved as <strong>/<em>.
   // Word splits a styled phrase across many runs, so adjacent runs of the
   // same style are merged rather than emitted as a string of tiny tags.
+  var BR = '\u0001';
+
   function paraHtml(p) {
     var runs = p.match(/<w:r(?:\s[^>]*)?>[\s\S]*?<\/w:r>/g) || [], out = '', openB = false, openI = false;
     runs.forEach(function (r) {
-      var t = (r.match(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g) || [])
-        .map(function (m) { return unesc(m.replace(/<[^>]+>/g, '')); }).join('');
-      if (r.indexOf('<w:tab/>') >= 0 && !t) t = ' ';
+      // Walk the run's children in document order. A run can interleave
+      // text with manual line breaks — <w:t>1. ...</w:t><w:br/><w:t>2. ...
+      // is how a converted .doc carries a numbered list — so collecting all
+      // the text first and appending the breaks afterwards would run every
+      // clause together into one paragraph.
+      var t = '', cm, cRe = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<w:br\b[^>]*>|<w:tab\s*\/>/g;
+      while ((cm = cRe.exec(r))) {
+        if (cm[1] !== undefined) t += unesc(cm[1]);
+        else if (cm[0].indexOf('<w:br') === 0) t += BR;
+        else t += ' ';
+      }
       if (!t) return;
       var pr = (r.match(/<w:rPr>[\s\S]*?<\/w:rPr>/) || [''])[0];
       var b = /<w:b\/>|<w:b\s+w:val="(?:1|true|on)"/.test(pr);
@@ -249,6 +266,51 @@
   }
 
   function plain(htmlStr) { return unesc(htmlStr.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim(); }
+
+  /* --------------------------------------------------- Word auto-numbering */
+
+  // Some documents carry no markers in their text at all and number
+  // themselves with Word's list engine instead — the Board Directives are
+  // numbered 1..n with a)..e) beneath, none of which appears in the run
+  // text. numbering.xml maps a numId and level to a format; the level gives
+  // the nesting and the format gives the style. The numbers themselves are
+  // left to the editor, which computes them.
+  var NUMFMT = {
+    decimal: 'decimal', lowerLetter: 'lower-alpha', upperLetter: 'upper-alpha',
+    lowerRoman: 'lower-roman', upperRoman: 'upper-alpha', bullet: 'bullet',
+    none: 'none', ordinal: 'decimal', decimalZero: 'decimal'
+  };
+
+  function parseNumbering(xml) {
+    if (!xml) return {};
+    var abstracts = {}, m;
+    var absRe = /<w:abstractNum [^>]*w:abstractNumId="(\d+)"[\s\S]*?<\/w:abstractNum>/g;
+    while ((m = absRe.exec(xml))) {
+      var lvls = {}, lm, lvlRe = /<w:lvl [^>]*w:ilvl="(\d+)"[\s\S]*?<\/w:lvl>/g;
+      while ((lm = lvlRe.exec(m[0]))) {
+        var f = lm[0].match(/<w:numFmt w:val="([^"]+)"/);
+        lvls[lm[1]] = f ? f[1] : 'decimal';
+      }
+      abstracts[m[1]] = lvls;
+    }
+    var map = {}, nm, numRe = /<w:num [^>]*w:numId="(\d+)"[\s\S]*?<\/w:num>/g;
+    while ((nm = numRe.exec(xml))) {
+      var a = nm[0].match(/<w:abstractNumId w:val="(\d+)"/);
+      map[nm[1]] = (a && abstracts[a[1]]) || {};
+    }
+    return map;
+  }
+
+  // The numPr of one paragraph, or null. numId 0 means "no numbering".
+  function paraList(chunk, numbering) {
+    var np = chunk.match(/<w:numPr>[\s\S]*?<\/w:numPr>/);
+    if (!np) return null;
+    var ni = np[0].match(/<w:numId w:val="(\d+)"/);
+    if (!ni || ni[1] === '0') return null;
+    var il = np[0].match(/<w:ilvl w:val="(\d+)"/);
+    var lvl = il ? il[1] : '0';
+    return { ilvl: +lvl, numId: ni[1], fmt: (numbering[ni[1]] || {})[lvl] || 'decimal' };
+  }
 
   /* ------------------------------------------------------------- markers */
 
@@ -315,6 +377,13 @@
       });
   }
 
+  // Reads like a title rather than prose: short, and with no lower-case
+  // letters once digits and punctuation are set aside.
+  function isTitleish(t) {
+    if (!t || t.length > 90) return false;
+    return !/[a-z]/.test(t.replace(/\d|\W/g, ''));
+  }
+
   function isHeading(t) {
     if (!t || t.length < 3 || t.length > 90) return false;
     var letters = t.replace(/[^A-Za-z]/g, '');
@@ -349,15 +418,18 @@
       if (!(b[0] === 0x50 && b[1] === 0x4B)) {
         throw new Error('Not a .docx or .doc file (unrecognised format).');
       }
-      return unzip(arrayBuffer, function (n) { return n === 'word/document.xml'; }).then(function (files) {
+      return unzip(arrayBuffer, function (n) {
+        return n === 'word/document.xml' || n === 'word/numbering.xml';
+      }).then(function (files) {
         var xml = files['word/document.xml'];
         if (!xml) throw new Error('No word/document.xml inside that file — is it really a .docx?');
-        return build(xml);
+        return build(xml, files['word/numbering.xml']);
       });
     });
   }
 
-  function build(xml) {
+  function build(xml, numberingXml) {
+    var numbering = parseNumbering(numberingXml);
     var body = (xml.match(/<w:body>([\s\S]*)<\/w:body>/) || [null, xml])[1];
 
     // Walk paragraphs and tables in document order.
@@ -367,7 +439,14 @@
       if (chunk.indexOf('<w:tbl') === 0) { blocks.push({ table: parseTable(chunk) }); continue; }
       var htmlStr = paraHtml(chunk);
       var txt = plain(htmlStr);
-      if (txt) blocks.push({ html: htmlStr, text: txt });
+      // One Word paragraph can hold several logical ones, separated by
+      // manual line breaks. Each piece becomes its own block, all sharing
+      // the paragraph's list properties.
+      var listInfo = paraList(chunk, numbering);
+      htmlStr.split(BR).forEach(function (piece) {
+        var pt = plain(piece);
+        if (pt) blocks.push({ html: piece, text: pt, list: listInfo });
+      });
     }
     return buildFromParagraphs(blocks);
   }
@@ -407,6 +486,9 @@
     var lastBody = null;     // node that loose prose should continue into
     var started = false;     // seen the first numbered rule yet?
     var expectedTop = 1;     // next top-level rule number due
+    var listStack = [];      // Word-numbered ancestors, indexed by list level
+    var listBase = null;     // node enclosing the current Word-numbered list
+    var prevList = false;
 
     // The cover block is the document's own title lines. It feeds doc meta
     // and must not become clauses. It is at most the first two paragraphs —
@@ -418,12 +500,39 @@
       if (blocks[bi].text && splitMarker(blocks[bi].text).style === 'decimal') { firstMarker = bi; break; }
     }
     var coverCount = Math.min(firstMarker < 0 ? 2 : firstMarker, 2);
+    // The second line only belongs to the cover if it reads like a title.
+    // Several documents run straight from their title into prose (the Board
+    // Directives open with directive #1, Appendix Q with a sentence), and
+    // swallowing that line loses real content.
+    if (coverCount > 1 && (!blocks[1] || !isTitleish(blocks[1].text))) coverCount = 1;
     doc.coverTitle = (blocks[0] && blocks[0].text) || '';
     doc.coverSubtitle = coverCount > 1 && blocks[1] ? blocks[1].text : '';
 
     blocks.forEach(function (b, idx) {
       if (idx < coverCount) return;
       if (b.table) { mk(current && current.id, 'table', 'none', null, null, null, b.table); return; }
+      // A Word-numbered paragraph carries its structure in the list level
+      // rather than in the text. Nest by that level and take the style from
+      // numbering.xml; the editor computes the numbers themselves.
+      if (b.list) {
+        if (!prevList) listBase = current;
+        var lvl = b.list.ilvl;
+        var lparent = lvl > 0 ? (listStack[lvl - 1] || listBase) : listBase;
+        var lstyle = NUMFMT[b.list.fmt] || 'decimal';
+        var ln = mk(lparent ? lparent.id : null, lstyle === 'bullet' ? 'bullet' : 'clause',
+          lstyle, null, null, b.text ? '<p>' + b.html + '</p>' : null);
+        listStack[lvl] = ln;
+        listStack.length = lvl + 1;
+        prevList = true;
+        // `current` deliberately does NOT move to the list item. Letting it
+        // follow means the next list bases itself inside the previous list's
+        // last item, and depth compounds without limit (Appendix G reached
+        // 35 levels from a document that only uses three).
+        lastBody = ln;
+        return;
+      }
+      prevList = false;
+
       var mk2 = splitMarker(b.text);
 
       // A dotless bare integer only counts if it is the next number due at
@@ -580,28 +689,48 @@
     return label;
   }
 
-  function merge(parsed) {
-    var nodes = [], seq = 0, doc = null;
+  // Does a document announce itself as the area itself, rather than as one
+  // named section of it? The Board Directives file is titled "THE NATIONAL
+  // LEAGUE BOARD DIRECTIVES 2026/27" and its directives belong at the top
+  // level, whereas Home-Grown Player Development is a named directive that
+  // sits inside the same area — and every appendix is a named section too
+  // ("APPENDIX A" does not name the "Appendices" area).
+  function isWholeArea(coverTitle, areaTitle) {
+    if (!coverTitle || !areaTitle) return false;
+    var cover = coverTitle.toLowerCase();
+    var words = areaTitle.toLowerCase().match(/[a-z]{3,}/g) || [];
+    if (!words.length) return false;
+    return words.every(function (w) { return cover.indexOf(w) >= 0; });
+  }
+
+  function merge(parsed, areaTitle) {
+    var nodes = [], seq = 0, doc = null, order = 0;
     parsed.forEach(function (item, docIndex) {
       var seed = item && item.seed;
       if (!seed || !seed.nodes) return;
       if (!doc) doc = { id: seed.doc.id, title: seed.doc.title, subtitle: seed.doc.subtitle || '', season: seed.doc.season || '' };
       if (!doc.season && seed.doc.season) doc.season = seed.doc.season;
 
-      var label = docLabel(seed.doc, item.name, docIndex);
-
-      var wrapper = {
-        id: 'd' + (docIndex + 1), parentId: null, order: docIndex, kind: 'clause',
-        numStyle: 'upper-alpha', numberOverride: null, title: label, body: null, table: null
-      };
-      nodes.push(wrapper);
+      var whole = isWholeArea(seed.doc.coverTitle, areaTitle);
+      var wrapper = null;
+      if (!whole) {
+        wrapper = {
+          id: 'd' + (docIndex + 1), parentId: null, order: order++, kind: 'clause',
+          numStyle: 'none', numberOverride: null,
+          title: docLabel(seed.doc, item.name, docIndex), body: null, table: null
+        };
+        nodes.push(wrapper);
+      }
 
       var remap = {};
       seed.nodes.forEach(function (n) { remap[n.id] = 'd' + (docIndex + 1) + 'n' + (++seq); });
       seed.nodes.forEach(function (n) {
+        var top = !n.parentId;
         nodes.push({
-          id: remap[n.id], parentId: n.parentId ? remap[n.parentId] : wrapper.id,
-          order: n.order || 0, kind: n.kind, numStyle: n.numStyle,
+          id: remap[n.id],
+          parentId: n.parentId ? remap[n.parentId] : (wrapper ? wrapper.id : null),
+          order: (top && !wrapper) ? order++ : (n.order || 0),
+          kind: n.kind, numStyle: n.numStyle,
           numberOverride: n.numberOverride || null, title: n.title || null,
           body: n.body || null, table: n.table || null
         });
