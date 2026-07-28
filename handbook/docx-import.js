@@ -236,12 +236,22 @@
   // Text of one <w:p>, with bold/italic runs preserved as <strong>/<em>.
   // Word splits a styled phrase across many runs, so adjacent runs of the
   // same style are merged rather than emitted as a string of tiny tags.
+  var BR = '\u0001';
+
   function paraHtml(p) {
     var runs = p.match(/<w:r(?:\s[^>]*)?>[\s\S]*?<\/w:r>/g) || [], out = '', openB = false, openI = false;
     runs.forEach(function (r) {
-      var t = (r.match(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g) || [])
-        .map(function (m) { return unesc(m.replace(/<[^>]+>/g, '')); }).join('');
-      if (r.indexOf('<w:tab/>') >= 0 && !t) t = ' ';
+      // Walk the run's children in document order. A run can interleave
+      // text with manual line breaks — <w:t>1. ...</w:t><w:br/><w:t>2. ...
+      // is how a converted .doc carries a numbered list — so collecting all
+      // the text first and appending the breaks afterwards would run every
+      // clause together into one paragraph.
+      var t = '', cm, cRe = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<w:br\b[^>]*>|<w:tab\s*\/>/g;
+      while ((cm = cRe.exec(r))) {
+        if (cm[1] !== undefined) t += unesc(cm[1]);
+        else if (cm[0].indexOf('<w:br') === 0) t += BR;
+        else t += ' ';
+      }
       if (!t) return;
       var pr = (r.match(/<w:rPr>[\s\S]*?<\/w:rPr>/) || [''])[0];
       var b = /<w:b\/>|<w:b\s+w:val="(?:1|true|on)"/.test(pr);
@@ -429,7 +439,14 @@
       if (chunk.indexOf('<w:tbl') === 0) { blocks.push({ table: parseTable(chunk) }); continue; }
       var htmlStr = paraHtml(chunk);
       var txt = plain(htmlStr);
-      if (txt) blocks.push({ html: htmlStr, text: txt, list: paraList(chunk, numbering) });
+      // One Word paragraph can hold several logical ones, separated by
+      // manual line breaks. Each piece becomes its own block, all sharing
+      // the paragraph's list properties.
+      var listInfo = paraList(chunk, numbering);
+      htmlStr.split(BR).forEach(function (piece) {
+        var pt = plain(piece);
+        if (pt) blocks.push({ html: piece, text: pt, list: listInfo });
+      });
     }
     return buildFromParagraphs(blocks);
   }
@@ -507,7 +524,10 @@
         listStack[lvl] = ln;
         listStack.length = lvl + 1;
         prevList = true;
-        current = ln;
+        // `current` deliberately does NOT move to the list item. Letting it
+        // follow means the next list bases itself inside the previous list's
+        // last item, and depth compounds without limit (Appendix G reached
+        // 35 levels from a document that only uses three).
         lastBody = ln;
         return;
       }

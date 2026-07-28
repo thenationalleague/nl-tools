@@ -422,3 +422,39 @@ test('parse: numId 0 means the paragraph is not numbered', async () => {
   assert.ok(n);
   assert.equal(n.numStyle, 'none');
 });
+
+test('parse: line breaks inside a run split the paragraph, in order', async () => {
+  // A .doc converted to .docx carries a numbered list as ONE paragraph with
+  // <w:br/> between the clauses, interleaved with the text. Collecting the
+  // text first and appending the breaks afterwards ran every clause together.
+  const seed = await HB.parse(docx(
+    p(r('A TITLE')) +
+    '<w:p><w:r><w:t>1. First clause.</w:t><w:br/><w:br/><w:t>2. Second clause.</w:t>' +
+    '<w:br/><w:t>3. Third clause.</w:t></w:r></w:p>'
+  ));
+  const top = seed.nodes.filter((n) => !n.parentId);
+  assert.equal(top.length, 3, 'three clauses, not one run-together paragraph');
+  assert.match(top[0].body, /First clause/);
+  assert.match(top[2].body, /Third clause/);
+  assert.equal(/Second clause/.test(top[0].body), false, 'clauses must not merge');
+});
+
+test('parse: separate Word lists do not nest inside each other', async () => {
+  // `current` must not follow a list item: if it does, each new list bases
+  // itself inside the previous list's last item and depth compounds — a
+  // three-level document reached 35 levels.
+  const seed = await HB.parse(numberedDocx(
+    p(r('A TITLE')) +
+    listP(0, 'First item') + listP(1, 'Nested under first') +
+    p(r('Some prose between the lists.')) +
+    listP(0, 'Second list item') + listP(0, 'Third list item')
+  ));
+  const byId = {};
+  seed.nodes.forEach((n) => { byId[n.id] = n; });
+  const depth = (n) => { let d = 0; while (n.parentId) { n = byId[n.parentId]; d++; } return d; };
+  assert.equal(Math.max(...seed.nodes.map(depth)), 1, 'one level of nesting only');
+  // The three level-0 items stay siblings; the loose prose continues the
+  // item it follows rather than becoming a fourth.
+  assert.equal(seed.nodes.filter((n) => !n.parentId && /item/i.test(n.body || '')).length, 3);
+  assert.match(seed.nodes.find((n) => /Nested under first/.test(n.body || '')).body, /Some prose between/);
+});
