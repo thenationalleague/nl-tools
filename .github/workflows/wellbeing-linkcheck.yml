@@ -56,15 +56,42 @@ jobs:
           echo "Checking ${#urls[@]} links."
           failures=""
 
+          # Some of these services sit behind bot protection and answer 403 or
+          # 405 to anything that does not look like a browser. That is not a
+          # dead link, and raising it weekly would train people to ignore this
+          # check — which on a page like /wellbeing is worse than not having it.
+          # So: try honestly first, retry once as a browser, and only report a
+          # link as broken if it still fails with a status that means broken.
+          UA_HONEST='NL-Tools-linkcheck/1.0 (+https://nl.tools/wellbeing)'
+          UA_BROWSER='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+
+          probe() {
+            curl -sS -o /dev/null -w '%{http_code}' \
+                 -L --retry 2 --retry-delay 5 --max-time 30 \
+                 -A "$2" "$1" 2>/dev/null || echo "000"
+          }
+
           for u in "${urls[@]}"; do
-            code=$(curl -sS -o /dev/null -w '%{http_code}' \
-                        -L --retry 2 --retry-delay 5 --max-time 30 \
-                        -A 'NL-Tools-linkcheck/1.0 (+https://nl.tools/wellbeing)' \
-                        "$u" 2>/dev/null || echo "000")
-            printf '%s  %s\n' "$code" "$u"
+            code=$(probe "$u" "$UA_HONEST")
             if [ "$code" != "200" ]; then
-              failures="${failures}- \`${code}\` ${u}"$'\n'
+              retried=$(probe "$u" "$UA_BROWSER")
+              printf '%s -> %s  %s\n' "$code" "$retried" "$u"
+              code="$retried"
+            else
+              printf '%s  %s\n' "$code" "$u"
             fi
+
+            case "$code" in
+              200)
+                ;;
+              403|405|429)
+                # Reachable, but declining to be checked automatically.
+                echo "    (${code}: bot protection, not treated as broken)"
+                ;;
+              *)
+                failures="${failures}- \`${code}\` ${u}"$'\n'
+                ;;
+            esac
           done
 
           if [ -n "$failures" ]; then
