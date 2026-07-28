@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/admin.html  v1.21 — superadmin console for the club contacts collection.
+  club-contacts/admin.html  v1.22 — superadmin console for the club contacts collection.
   (Renamed from "club-roster" in v1.3 — toolKey/RTDB path now ops-club-contacts.)
   Submissions: { info, inboxes{deptSlug:{dept,email,phone,ext}},
   people[{firstName,lastName,name,roles[{section,title}],hideContact,qualification}],
@@ -14,15 +14,21 @@
   review-gated step (phase 2) — this console only mints links and shows what
   came back. "Copy as JSON" hands a submission to that future import.
 
-  Two ways out of here, for two different jobs:
+  Three ways out of here, for three different jobs:
     - View all data   — everything on one scrollable page, for a quick look.
     - Handbook forms  — pick clubs (one picker column per division), get one
                         print-ready A4 entry each (handbook shape), for sending a
                         club's whole record to a colleague as a PDF. Screen and
                         print share one layout; body.hb-print strips the console
                         chrome around it at print time.
+    - Master JSON     — every submission in one file, for backup or a bulk import.
   The four CSV exports were removed in v1.21 — club-per-row spreadsheets were
   not what anyone actually wanted out of this console.
+
+  EXPORT SAFETY: S.subs is keyed by the CAPABILITY TOKEN, which is the secret
+  granting access to a club's form. Any export must key by club and whitelist
+  fields explicitly (see exportAllJson) — never spread a submission record, or a
+  token rides along into a file that leaves the building.
 
   Gated: no tools/ registry record on purpose -> superadmin-only via
   auth-guard's default. Tokens live only in RTDB, never in this repo.
@@ -48,7 +54,10 @@
   <script>
     window.NL_TOOL = { title: 'Club Contacts Admin', toolKey: 'ops-club-contacts' };
     var NL_TOOL_KEY = 'ops-club-contacts';
-    window.NL_CHANGELOG = [{ date: '28 Jul 2026', version: 'v1.21', items: [
+    window.NL_CHANGELOG = [{ date: '28 Jul 2026', version: 'v1.22', items: [
+      'New “Download all submissions (JSON)” export — every club that has come back, in one file, with club info, department inboxes, lead contacts (ids resolved to names) and the full people list, plus a list of the clubs still outstanding.',
+      'The export is keyed by club and its fields are whitelisted, so a club’s private form token can never end up in a file that gets shared. It carries personal data, so it belongs nowhere near the repo or a shared drive.',
+    ] }, { date: '28 Jul 2026', version: 'v1.21', items: [
       'Handbook forms picker is now one column per division — National, North then South — each showing that division’s full roster with a submitted count, so you can see at a glance who is back and who is not. Clubs still outstanding sit greyed in place rather than in a separate list, and each division has an “all” toggle.',
       'Removed the four CSV exports (People / Club info / Dept inboxes / Lead contacts). Club-per-row spreadsheets across four files were not what anyone needed out of this console — use Handbook forms for a club’s record, or View all submitted data for a quick look.',
     ] }, { date: '28 Jul 2026', version: 'v1.20', items: [
@@ -213,6 +222,11 @@
       <button class="btn btn--ghost" id="emailBtn" disabled>Build email text for all clubs</button>
     </div>
     <textarea id="emails" placeholder="Generated email blurbs appear here…" style="display:none;"></textarea>
+    <div style="display:flex;gap:8px;margin:10px 0 0;flex-wrap:wrap;align-items:center;border-top:1px solid var(--border);padding-top:12px;">
+      <span style="font-size:12px;color:var(--text-muted);font-variation-settings:'wght' 800;text-transform:uppercase;letter-spacing:.06em;">Export</span>
+      <button class="btn btn--ghost btn--sm" id="jsonAll">Download all submissions (JSON)</button>
+      <span style="font-size:11px;color:var(--amber-deep);">Contains personal data — keep it off the repo and out of shared drives.</span>
+    </div>
     <div style="display:flex;gap:8px;margin:12px 0 0;flex-wrap:wrap;align-items:center;border-top:1px solid var(--border);padding-top:12px;">
       <span style="font-size:12px;color:var(--text-muted);font-variation-settings:'wght' 800;text-transform:uppercase;letter-spacing:.06em;">View on screen</span>
       <button class="btn btn--navy btn--sm" id="viewAllBtn">View all submitted data</button>
@@ -277,6 +291,61 @@
 
   /* Every submission currently loaded, newest shape only (must have a club). */
   function subsList() { return Object.keys(S.subs).map(function (t) { return S.subs[t]; }).filter(function (s) { return s && s.club; }); }
+
+  /* ---- Master JSON export -------------------------------------------------
+     One file, every submission, keyed by CLUB — deliberately not by the RTDB
+     key, because S.subs is keyed by the capability token and that token is the
+     secret that grants access to a club's form. Fields are whitelisted rather
+     than spread, so a token (or anything else added to the record later) can
+     never ride along into a file that gets emailed around. ---- */
+  function exportAllJson() {
+    var subs = subsList();
+    if (!subs.length) { NL.toast('No submissions yet — nothing to export.', 'info'); return; }
+
+    var divOf = {}; S.clubs.forEach(function (c) { divOf[c.name] = c.division || ''; });
+    var byClub = {};
+    subs.slice().sort(function (a, b) { return a.club.localeCompare(b.club); }).forEach(function (s) {
+      // Leads are stored as person ids; carry the resolved name alongside so the
+      // file is readable without cross-referencing people[] by hand.
+      var leads = {};
+      LEAD_LABELS.forEach(function (a) {
+        var ids = (s.leads && s.leads[a[0]]) || [];
+        if (!ids.length) return;
+        leads[a[0]] = ids.map(function (id) {
+          var p = (s.people || []).filter(function (x) { return x.id === id; })[0];
+          return { id: id, name: p ? pname(p) : '', area: a[1] };
+        });
+      });
+      byClub[s.club] = {
+        club: s.club,
+        division: divOf[s.club] || '',
+        submittedAt: s.submittedAt || null,
+        submittedAtISO: s.submittedAt ? new Date(s.submittedAt).toISOString() : null,
+        submittedBy: { name: s.yourName || '', email: s.yourEmail || '' },
+        info: s.info || {},
+        inboxes: s.inboxes || {},
+        leads: leads,
+        people: s.people || []
+      };
+    });
+
+    var outstanding = S.clubs.filter(function (c) { return !byClub[c.name]; })
+      .map(function (c) { return { club: c.name, division: c.division || '' }; });
+
+    var doc = {
+      tool: 'ops-club-contacts',
+      rtdbPath: BASE + '/submissions',
+      exportedAt: new Date().toISOString(),
+      clubsOnRoster: S.clubs.length,
+      submitted: Object.keys(byClub).length,
+      outstanding: outstanding,
+      clubs: byClub
+    };
+    var d = new Date().toISOString().slice(0, 10);
+    NL.download('club-contacts-all-' + d + '.json', JSON.stringify(doc, null, 2), 'application/json');
+    if (NL.writeAudit) NL.writeAudit('clubcontacts_export', 'Exported ' + doc.submitted + ' submissions as JSON');
+    NL.toast(doc.submitted + ' submissions exported. Contains personal data — handle accordingly.', 'success');
+  }
 
   function renderList() {
     document.getElementById('list').innerHTML = S.clubs.map(function (c) {
@@ -681,6 +750,7 @@
     });
 
     document.getElementById('hbBtn').addEventListener('click', openHbPicker);
+    document.getElementById('jsonAll').addEventListener('click', exportAllJson);
     document.getElementById('genBtn').addEventListener('click', function () {
       var updates = {}; var n = 0;
       S.clubs.forEach(function (c) { if (!tokenFor(c.name)) { updates[tok()] = { club: c.name, createdAt: Date.now() }; n++; } });
