@@ -88,6 +88,133 @@
     });
   }
 
+  /* ------------------------------------------------- legacy .doc (OLE/CFB) */
+
+  // Word 97-2003 files are not zips at all — they are OLE compound files.
+  // The text sits in the WordDocument stream but is fragmented: the piece
+  // table (CLX) in the 0Table/1Table stream says where each run lives and
+  // whether it is CP1252 or UTF-16. Enough of that format is implemented
+  // here to recover paragraph text, which is all the tree builder needs —
+  // the markers in these documents are literal characters, not Word list
+  // formatting. Inline bold/italic and table structure are NOT recovered.
+  function readCFB(bytes) {
+    var dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    var ssz = 1 << dv.getUint16(30, true), mssz = 1 << dv.getUint16(32, true);
+    var nFat = dv.getUint32(44, true), dirStart = dv.getUint32(48, true);
+    var miniCutoff = dv.getUint32(56, true);
+    var miniStart = dv.getUint32(60, true), nMini = dv.getUint32(64, true);
+    var difatStart = dv.getUint32(68, true), nDifat = dv.getUint32(72, true);
+
+    function sector(n) { var o = 512 + n * ssz; return bytes.subarray(o, o + ssz); }
+    function u32of(buf, i) {
+      return (buf[i] | (buf[i + 1] << 8) | (buf[i + 2] << 16) | (buf[i + 3] << 24)) >>> 0;
+    }
+
+    var difat = [], i;
+    for (i = 0; i < 109; i++) difat.push(dv.getUint32(76 + i * 4, true));
+    var sec = difatStart;
+    for (i = 0; i < nDifat && sec < 0xFFFFFFFA; i++) {
+      var blk = sector(sec);
+      for (var j = 0; j < ssz / 4 - 1; j++) difat.push(u32of(blk, j * 4));
+      sec = u32of(blk, ssz - 4);
+    }
+
+    var fat = [];
+    for (i = 0; i < nFat; i++) {
+      if (difat[i] >= 0xFFFFFFFA) continue;
+      var fb = sector(difat[i]);
+      for (var k = 0; k < ssz / 4; k++) fat.push(u32of(fb, k * 4));
+    }
+
+    var minifat = [];
+    sec = miniStart;
+    for (i = 0; i < nMini && sec < 0xFFFFFFFA; i++) {
+      var mb = sector(sec);
+      for (var q = 0; q < ssz / 4; q++) minifat.push(u32of(mb, q * 4));
+      sec = fat[sec];
+    }
+
+    function chain(start, size, mini, miniStream) {
+      var parts = [], total = 0, s = start, guard = 0;
+      while (s < 0xFFFFFFFA && guard++ < 1000000) {
+        if (mini) parts.push(miniStream.subarray(s * mssz, s * mssz + mssz));
+        else parts.push(sector(s));
+        total += mini ? mssz : ssz;
+        s = (mini ? minifat : fat)[s];
+        if (s === undefined) break;
+      }
+      var out = new Uint8Array(total), p = 0;
+      parts.forEach(function (b) { out.set(b, p); p += b.length; });
+      return out.subarray(0, size);
+    }
+
+    var dirRaw = chain(dirStart, 1 << 28, false, null), entries = [];
+    for (i = 0; i + 128 <= dirRaw.length; i += 128) {
+      var nlen = dirRaw[i + 64] | (dirRaw[i + 65] << 8);
+      var nm = '';
+      for (var c = 0; c < Math.max(0, nlen - 2); c += 2) nm += String.fromCharCode(dirRaw[i + c] | (dirRaw[i + c + 1] << 8));
+      entries.push({ name: nm, type: dirRaw[i + 66], start: u32of(dirRaw, i + 116), size: u32of(dirRaw, i + 120) });
+    }
+    var root = entries[0];
+    var miniStream = root ? chain(root.start, root.size, false, null) : new Uint8Array(0);
+
+    return function stream(name) {
+      for (var n = 0; n < entries.length; n++) {
+        var e = entries[n];
+        if (e.name === name && e.type === 2) return chain(e.start, e.size, e.size < miniCutoff, miniStream);
+      }
+      return null;
+    };
+  }
+
+  var CP1252 = { 128: 8364, 130: 8218, 131: 402, 132: 8222, 133: 8230, 134: 8224, 135: 8225, 136: 710, 137: 8240, 138: 352, 139: 8249, 140: 338, 142: 381, 145: 8216, 146: 8217, 147: 8220, 148: 8221, 149: 8226, 150: 8211, 151: 8212, 152: 732, 153: 8482, 154: 353, 155: 8250, 156: 339, 158: 382, 159: 376 };
+
+  function docParagraphs(bytes) {
+    var stream = readCFB(bytes);
+    var wd = stream('WordDocument');
+    if (!wd) throw new Error('That .doc has no WordDocument stream.');
+    var flags = wd[0x0A] | (wd[0x0B] << 8);
+    var tbl = stream((flags & 0x0200) ? '1Table' : '0Table');
+    if (!tbl) throw new Error('That .doc is missing its table stream.');
+
+    function u32(b, i) { return (b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24)) >>> 0; }
+    var fcClx = u32(wd, 0x01A2), lcbClx = u32(wd, 0x01A6);
+    var clx = tbl.subarray(fcClx, fcClx + lcbClx), i = 0, plc = null;
+    while (i < clx.length) {
+      if (clx[i] === 0x01) { i += 3 + (clx[i + 1] | (clx[i + 2] << 8)); }
+      else if (clx[i] === 0x02) { plc = clx.subarray(i + 5, i + 5 + u32(clx, i + 1)); break; }
+      else break;
+    }
+    if (!plc) throw new Error('That .doc has no piece table.');
+
+    var n = Math.floor((plc.length - 4) / 12), text = '';
+    for (var k = 0; k < n; k++) {
+      var cpStart = u32(plc, k * 4), cpEnd = u32(plc, (k + 1) * 4), len = cpEnd - cpStart;
+      var pcdAt = 4 * (n + 1) + k * 8, fc = u32(plc, pcdAt + 2);
+      var compressed = !!(fc & 0x40000000);
+      fc &= 0x3FFFFFFF;
+      if (compressed) {
+        var at = fc >> 1;
+        for (var a = 0; a < len; a++) { var b = wd[at + a]; text += String.fromCharCode(CP1252[b] || b); }
+      } else {
+        for (var u = 0; u < len; u++) text += String.fromCharCode(wd[fc + u * 2] | (wd[fc + u * 2 + 1] << 8));
+      }
+    }
+    return splitDocText(text);
+  }
+
+  // \r ends a paragraph and \x07 ends a table cell/row. \x0B is a manual
+  // line break and \x0C a page break — some of these documents (Appendix P,
+  // and Appendices F/I/J) separate every numbered clause with a line break
+  // rather than a paragraph mark, so treating those as ordinary text
+  // collapses the whole document into a single node. Table geometry is not
+  // recoverable this way, only the cell text.
+  function splitDocText(text) {
+    return text.replace(/[\x07\x0B\x0C]/g, '\r').split('\r')
+      .map(function (s) { return s.replace(/[\x00-\x08\x0E-\x1F]/g, '').replace(/\s+/g, ' ').trim(); })
+      .filter(Boolean);
+  }
+
   /* ---------------------------------------------------------------- xml */
 
   function unesc(s) {
@@ -147,6 +274,13 @@
     if ((m = text.match(/^(\d+\.\d+(?:\.\d+)*)\.?\s*/)) || (m = text.match(/^(\d+)\.\s*/))) {
       return { style: 'decimal', num: m[1], rest: text.slice(m[0].length).trim() };
     }
+    // A bare integer with no dot ("1 Introduction") is how the appendices
+    // number their top level, but it is also how prose and table cells
+    // start ("2 permitted to or from any one Club"). Offer it as a weak
+    // candidate and let the caller's running sequence decide.
+    if ((m = text.match(/^(\d+)\s+(?=[A-Za-z“"(])/))) {
+      return { style: 'decimal', num: m[1], rest: text.slice(m[0].length).trim(), weak: true };
+    }
     if ((m = text.match(/^[•●▪]\s*/))) {
       return { style: 'bullet', num: null, rest: text.slice(m[0].length).trim() };
     }
@@ -205,11 +339,21 @@
     // Always hand back a promise — a malformed file must surface as a
     // rejection callers can catch, not a synchronous throw.
     return Promise.resolve().then(function () {
-      return unzip(arrayBuffer, function (n) { return n === 'word/document.xml'; });
-    }).then(function (files) {
-      var xml = files['word/document.xml'];
-      if (!xml) throw new Error('No word/document.xml inside that file — is it really a .docx?');
-      return build(xml);
+      var b = new Uint8Array(arrayBuffer);
+      // Dispatch on the container's magic bytes rather than the extension:
+      // the appendices arrive as a mix of .docx (zip) and Word 97-2003
+      // .doc (OLE), and a wrong extension should not decide the parser.
+      if (b[0] === 0xD0 && b[1] === 0xCF && b[2] === 0x11 && b[3] === 0xE0) {
+        return buildFromParagraphs(docParagraphs(b).map(function (t) { return { text: t, html: esc(t) }; }));
+      }
+      if (!(b[0] === 0x50 && b[1] === 0x4B)) {
+        throw new Error('Not a .docx or .doc file (unrecognised format).');
+      }
+      return unzip(arrayBuffer, function (n) { return n === 'word/document.xml'; }).then(function (files) {
+        var xml = files['word/document.xml'];
+        if (!xml) throw new Error('No word/document.xml inside that file — is it really a .docx?');
+        return build(xml);
+      });
     });
   }
 
@@ -225,9 +369,19 @@
       var txt = plain(htmlStr);
       if (txt) blocks.push({ html: htmlStr, text: txt });
     }
+    return buildFromParagraphs(blocks);
+  }
 
-    var nodes = [], seq = 0, byNum = {}, stack = [];
+  // Tree building, shared by both containers. `blocks` are {text, html} or
+  // {table} in document order.
+  function buildFromParagraphs(blocks) {
+    var nodes = [], seq = 0, byNum = {};
     function add(n) { n.id = 'r' + (++seq); nodes.push(n); return n; }
+    // How many numbered children a node already has — i.e. the next number
+    // a dotless sub-item under it would legitimately carry.
+    function nextUnder(p) {
+      return nodes.filter(function (x) { return x.parentId === p.id && x.numStyle === 'decimal'; }).length + 1;
+    }
     function mk(parentId, kind, numStyle, over, title, bodyHtml, table) {
       var siblings = nodes.filter(function (x) { return x.parentId === parentId; });
       return add({
@@ -254,16 +408,34 @@
     var started = false;     // seen the first numbered rule yet?
     var expectedTop = 1;     // next top-level rule number due
 
-    blocks.forEach(function (b) {
-      // Everything above rule 1 is the cover block; it feeds doc meta above
-      // and must not become clauses.
-      if (!started) {
-        var probe = splitMarker(b.text);
-        if (!(probe.style === 'decimal' && probe.num)) return;
-        started = true;
-      }
+    // The cover block is the document's own title lines. It feeds doc meta
+    // and must not become clauses. It is at most the first two paragraphs —
+    // capping it matters because an appendix can run several paragraphs of
+    // real content before its first number, and a document may carry no
+    // numbering at all (Appendix E is headings and defined terms).
+    var firstMarker = -1;
+    for (var bi = 0; bi < blocks.length; bi++) {
+      if (blocks[bi].text && splitMarker(blocks[bi].text).style === 'decimal') { firstMarker = bi; break; }
+    }
+    var coverCount = Math.min(firstMarker < 0 ? 2 : firstMarker, 2);
+    doc.coverTitle = (blocks[0] && blocks[0].text) || '';
+    doc.coverSubtitle = coverCount > 1 && blocks[1] ? blocks[1].text : '';
+
+    blocks.forEach(function (b, idx) {
+      if (idx < coverCount) return;
       if (b.table) { mk(current && current.id, 'table', 'none', null, null, null, b.table); return; }
       var mk2 = splitMarker(b.text);
+
+      // A dotless bare integer only counts if it is the next number due at
+      // some level — otherwise it is prose that happens to open with a
+      // figure. This is what lets the appendices number as "1 Introduction"
+      // while the Rules still reject "2 permitted to or from any one Club".
+      if (mk2.weak) {
+        var wants = +mk2.num;
+        if (wants !== expectedTop && !(current && wants === nextUnder(current))) {
+          mk2 = { style: 'none', num: null, rest: b.text };
+        }
+      }
 
       if (mk2.ambiguous && lastListStyle !== 'lower-roman') mk2.style = 'lower-alpha';
       if (mk2.style === 'lower-roman' || mk2.style === 'lower-alpha' || mk2.style === 'upper-alpha') lastListStyle = mk2.style;
@@ -325,16 +497,28 @@
         current.title = titleCase(b.text);
         return;
       }
-      if (isHeading(b.text)) { lastBody = null; mk(current && current.id, 'heading', 'none', null, titleCase(b.text), null); return; }
+      if (isHeading(b.text)) {
+        lastBody = null;
+        var h = mk(current && current.id, 'heading', 'none', null, titleCase(b.text), null);
+        // In a document with no numbering at all (Appendix E is headings and
+        // defined terms), headings are the only structure there is — so let
+        // them own what follows instead of leaving one flat list.
+        if (firstMarker < 0) current = h;
+        return;
+      }
 
       // A defined term ("X" means ...) is always its own clause. Any other
       // loose paragraph continues whatever body it follows, so a clause
       // spanning three paragraphs stays one node instead of three.
       var para = '<p>' + b.html + '</p>';
-      if (/^[“"']/.test(b.text)) { lastBody = mk(current && current.id, 'clause', 'none', null, null, para); return; }
-      if (lastBody) { lastBody.body = (lastBody.body || '') + para; return; }
-      if (current && !current.title && !current.body) { current.body = para; lastBody = current; return; }
-      lastBody = mk(current && current.id, 'clause', 'none', null, null, para);
+      if (/^[“"']/.test(b.text)) { mk(current && current.id, 'clause', 'none', null, null, para); lastBody = null; return; }
+      // Continue the clause just read — but only once. Appending every loose
+      // paragraph to the same node turns a document with no numbering (most
+      // of the shorter appendices) into one enormous unusable clause.
+      if (lastBody) { lastBody.body = (lastBody.body || '') + para; lastBody = null; return; }
+      if (current && !current.title && !current.body) { current.body = para; lastBody = null; return; }
+      mk(current && current.id, 'clause', 'none', null, null, para);
+      lastBody = null;
     });
 
     return { doc: doc, nodes: nodes };
@@ -363,5 +547,70 @@
     return out.replace(/^\s+/, '');
   }
 
-  global.HB_DOCX = { parse: parse, build: build, unzip: unzip, _splitMarker: splitMarker, _titleCase: titleCase, _stripLeading: stripLeading };
+  // Combine several parsed documents into one area. The appendices are 15
+  // separate files that all live under a single "appendices" area, and the
+  // importer replaces an area wholesale — so they have to be imported
+  // together or each would wipe the last. Every document becomes one
+  // top-level node with its own tree beneath, and ids are reissued so two
+  // documents cannot collide on "r1".
+  // Name the wrapper node for one document. Preference order: the document's
+  // own "APPENDIX X" cover line, else the letter recovered from the filename
+  // (not every source states its own letter — Appendix G opens with
+  // "NATIONAL LEAGUE SYSTEM REGULATIONS"), else the filename itself.
+  function docLabel(doc, fileName, index) {
+    var cover = doc.coverTitle || '';
+    var m = cover.match(/^APPENDIX\s+([A-Z0-9]+)\b/i);
+    var fromFile = (fileName || '').match(/Appendix[_\s-]*([A-Z0-9]+)/i);
+    var label = m ? 'Appendix ' + m[1].toUpperCase()
+      : fromFile ? 'Appendix ' + fromFile[1].toUpperCase()
+        : cover ? titleCase(cover) : (fileName || 'Document ' + (index + 1));
+
+    // Use the second line as a subtitle only when it reads like a title.
+    // Several documents run straight into prose, which makes a useless and
+    // enormous node name.
+    var sub = doc.coverSubtitle || '';
+    // When the letter came from the filename, the cover line is the
+    // document's real title rather than an "APPENDIX X" banner — use it.
+    if (!m && fromFile && cover) sub = cover;
+    if (sub && sub.length < 80 && !/[a-z]/.test(sub.replace(/\d|\W/g, ''))) {
+      label += ' — ' + titleCase(sub);
+    } else if (!m && !fromFile && cover) {
+      label = titleCase(cover);
+    }
+    return label;
+  }
+
+  function merge(parsed) {
+    var nodes = [], seq = 0, doc = null;
+    parsed.forEach(function (item, docIndex) {
+      var seed = item && item.seed;
+      if (!seed || !seed.nodes) return;
+      if (!doc) doc = { id: seed.doc.id, title: seed.doc.title, subtitle: seed.doc.subtitle || '', season: seed.doc.season || '' };
+      if (!doc.season && seed.doc.season) doc.season = seed.doc.season;
+
+      var label = docLabel(seed.doc, item.name, docIndex);
+
+      var wrapper = {
+        id: 'd' + (docIndex + 1), parentId: null, order: docIndex, kind: 'clause',
+        numStyle: 'upper-alpha', numberOverride: null, title: label, body: null, table: null
+      };
+      nodes.push(wrapper);
+
+      var remap = {};
+      seed.nodes.forEach(function (n) { remap[n.id] = 'd' + (docIndex + 1) + 'n' + (++seq); });
+      seed.nodes.forEach(function (n) {
+        nodes.push({
+          id: remap[n.id], parentId: n.parentId ? remap[n.parentId] : wrapper.id,
+          order: n.order || 0, kind: n.kind, numStyle: n.numStyle,
+          numberOverride: n.numberOverride || null, title: n.title || null,
+          body: n.body || null, table: n.table || null
+        });
+      });
+    });
+    return { doc: doc || { title: '', subtitle: '', season: '' }, nodes: nodes };
+  }
+
+  global.HB_DOCX = {
+    merge: merge, parse: parse, build: build, unzip: unzip, _splitMarker: splitMarker, _titleCase: titleCase, _stripLeading: stripLeading,
+    _splitDocText: splitDocText, _docParagraphs: docParagraphs };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
