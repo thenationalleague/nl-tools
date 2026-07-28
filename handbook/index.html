@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
-  Version: v0.34 (23/07/2026)
+  Version: v0.35 (28/07/2026)
   File: /handbook/index.html
 
   Structured editor for the League's governing documents — computed clause
@@ -70,6 +70,13 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '28/07/2026',
+        version: 'v0.35',
+        items: [
+          'Import straight from a .docx. Superadmins can now pick the source document off their own machine and the clause tree is parsed in the browser and written to RTDB — no seed file, and nothing about the document touches the repo. Available for every area, not just the ones with a committed seed.'
+        ]
+      },
       {
         date: '23/07/2026',
         version: 'v0.34',
@@ -337,6 +344,7 @@
   </script>
 
   <!-- NL system scripts (lint canonical: ?v=9 / ?v=7 / ?v=8) -->
+  <script src="docx-import.js?v=1"></script>
   <script src="/system/nl-utils.js?v=27"></script>
   <script src="/system/nl-topbar.js?v=8"></script>
   <script src="/system/auth-guard.js?v=10"></script>
@@ -529,6 +537,8 @@
         </div>
         <span class="ce-mode-note" id="ceModeNote"></span>
         <div class="ce-bar__spacer"></div>
+        <button class="btn btn--ghost" id="ceImportDoc" type="button" hidden>Import document…</button>
+        <input type="file" id="ceDocFile" accept=".docx" hidden>
         <button class="btn btn--ghost" id="ceReimport" type="button" hidden>Re-import</button>
         <button class="btn btn--primary" id="cePublish" type="button" hidden>Publish edition</button>
       </div>
@@ -850,18 +860,23 @@
 
   function renderEmpty() {
     var title = docTitle(S.docId), hasSeed = !!SEEDS[S.docId], btn = '', msg;
+    var upload = canSeed()
+      ? '<button class="btn btn--ghost" id="ceImportDoc2" type="button">Import from a .docx…</button>' : '';
     if (canSeed() && hasSeed) {
       msg = 'This area is empty. Import ' + esc(title) + ' to seed the clause tree, then refine it here.';
-      btn = '<button class="btn btn--primary" id="ceImport" type="button">Import ' + esc(title) + '</button>';
+      btn = '<button class="btn btn--primary" id="ceImport" type="button">Import ' + esc(title) + '</button>' + upload;
+    } else if (canSeed()) {
+      msg = esc(title) + ' is empty. Import the source document to build the clause tree, then refine it here.';
+      btn = upload;
     } else if (canEdit()) {
-      msg = esc(title) + ' is empty. Add the first clause in Edit mode' +
-        (canSeed() ? ', or send the source document and I can seed it automatically.' : '.');
+      msg = esc(title) + ' is empty. Add the first clause in Edit mode.';
     } else {
       msg = 'This area has no content yet.';
     }
     $('ceDoc').innerHTML =
       '<div class="ce-empty"><div class="ce-empty__card"><h2>' + esc(title) + '</h2><p>' + msg + '</p>' + btn + '</div></div>';
-    if (btn) $('ceImport').addEventListener('click', importSeed);
+    if ($('ceImport')) $('ceImport').addEventListener('click', importSeed);
+    if ($('ceImportDoc2')) $('ceImportDoc2').addEventListener('click', function () { $('ceDocFile').click(); });
   }
 
   // Contents rail: shows the current area's outline, or — when searching —
@@ -1005,6 +1020,9 @@
     $('ceEditBtn').hidden = !canEdit() || !S.docId;
     $('cePublish').hidden = !canEdit() || !S.docId || !Object.keys(S.nodes).length;
     $('ceReimport').hidden = !(S.docId && canSeed() && SEEDS[S.docId] && Object.keys(S.nodes).length);
+    // Document import needs no committed seed, so it is offered for every
+    // area — that is the point of it.
+    $('ceImportDoc').hidden = !(S.docId && canSeed());
     $('ceFmt').hidden = !(S.mode === 'edit' && canEdit());
     var note = $('ceModeNote');
     if (!canEdit()) note.textContent = 'Read-only access';
@@ -1067,35 +1085,73 @@
           if (!r.ok) throw new Error(file + ' not found (' + r.status + ')');
           return r.json();
         });
-      }).then(function (seed) {
-        if (seed && target !== S.docId) { NL.toast && NL.toast('Area changed — import cancelled', 'info'); return; }
-        if (!seed) return;
-        var map = {}, now = Date.now();
-        seed.nodes.forEach(function (n) {
-          map[n.id] = {
-            id: n.id, parentId: n.parentId, order: n.order || 0, kind: n.kind || 'clause',
-            numStyle: n.numStyle || 'decimal', numberOverride: n.numberOverride || null,
-            title: n.title || null, body: n.body || null, table: n.table || null,
-            updatedAt: now, updatedBy: 'import'
-          };
-        });
-        return NL.ensureAuth().then(function () {
-          return Promise.all([
-            metaRef().set({ title: seed.doc.title, subtitle: seed.doc.subtitle || '', season: seed.doc.season || '' }),
-            nodesRef().set(map)
-          ]);
-        }).then(function () {
-          S.doc = Object.assign(S.doc, seed.doc);
-          S.nodes = map;
-          S.index = null; // search index is now stale
-          NL.writeAudit && NL.writeAudit('import', 'Imported ' + seed.nodes.length + ' nodes into ' + S.docId);
-          NL.toast && NL.toast('Imported ' + seed.nodes.length + ' clauses', 'success');
-          render();
-        });
-      }).catch(function (e) {
+      }).then(function (seed) { return applySeed(seed, target); })
+      .catch(function (e) {
         NL.toast && NL.toast('Import failed: ' + (e && e.message || e), 'error');
       });
   }
+
+  // Shared writer for both import routes: the committed seed-*.json fetch
+  // above, and the .docx the user picks off their own machine below.
+  function applySeed(seed, target) {
+    if (seed && target !== S.docId) { NL.toast && NL.toast('Area changed — import cancelled', 'info'); return; }
+    if (!seed) return;
+    var map = {}, now = Date.now();
+    seed.nodes.forEach(function (n) {
+      map[n.id] = {
+        id: n.id, parentId: n.parentId, order: n.order || 0, kind: n.kind || 'clause',
+        numStyle: n.numStyle || 'decimal', numberOverride: n.numberOverride || null,
+        title: n.title || null, body: n.body || null, table: n.table || null,
+        updatedAt: now, updatedBy: 'import'
+      };
+    });
+    return NL.ensureAuth().then(function () {
+      return Promise.all([
+        metaRef().set({ title: seed.doc.title, subtitle: seed.doc.subtitle || '', season: seed.doc.season || '' }),
+        nodesRef().set(map)
+      ]);
+    }).then(function () {
+      S.doc = Object.assign(S.doc, seed.doc);
+      S.nodes = map;
+      S.index = null; // search index is now stale
+      NL.writeAudit && NL.writeAudit('import', 'Imported ' + seed.nodes.length + ' nodes into ' + S.docId);
+      NL.toast && NL.toast('Imported ' + seed.nodes.length + ' clauses', 'success');
+      render();
+    });
+  }
+
+  // Import straight from a .docx on the user's machine. Nothing is uploaded
+  // anywhere and nothing is committed — the file is parsed in the browser
+  // and written to RTDB, which is the only place this content should live.
+  function importUpload(file) {
+    var title = docTitle(S.docId), target = S.docId;
+    if (!file) return;
+    if (!/\.docx$/i.test(file.name)) { NL.alert('That is not a .docx file.', { title: 'Wrong file type' }); return; }
+    if (!global_HB_ready()) { NL.alert('The document importer failed to load — try a hard refresh.', { title: 'Importer unavailable' }); return; }
+
+    var hasContent = Object.keys(S.nodes).length > 0;
+    NL.confirm(
+      (hasContent
+        ? 'Replace everything in the ' + title + ' area with a fresh parse of “' + file.name + '”? Anything currently in this area is discarded. (Other areas are unaffected.)'
+        : 'Import “' + file.name + '” into ' + title + '? This is a best-effort parse — you’ll refine it here.'),
+      { confirmText: hasContent ? 'Replace with this document' : 'Import', title: 'Import ' + title, variant: hasContent ? 'danger' : 'primary' }
+    ).then(function (ok) {
+      if (!ok) return;
+      NL.toast && NL.toast('Reading ' + file.name + '…', 'info');
+      return file.arrayBuffer()
+        .then(function (buf) { return window.HB_DOCX.parse(buf); })
+        .then(function (seed) {
+          // The parser names the doc from the source; keep the area's own
+          // title so an import cannot rename the area out from under us.
+          seed.doc = Object.assign({}, seed.doc, { id: target, title: docTitle(target) });
+          return applySeed(seed, target);
+        });
+    }).catch(function (e) {
+      NL.toast && NL.toast('Import failed: ' + (e && e.message || e), 'error');
+    });
+  }
+
+  function global_HB_ready() { return !!(window.HB_DOCX && window.HB_DOCX.parse); }
 
   // Persist a clone as the new draft: diff against S.nodes, write changed + null-out removed.
   function commit(clone, label) {
@@ -1452,6 +1508,12 @@
       S.mode = b.dataset.mode; render();
     });
     $('ceReimport').addEventListener('click', importSeed);
+    $('ceImportDoc').addEventListener('click', function () { $('ceDocFile').click(); });
+    $('ceDocFile').addEventListener('change', function (e) {
+      var f = e.target.files && e.target.files[0];
+      e.target.value = ''; // so picking the same file twice still fires
+      importUpload(f);
+    });
     $('cePublish').addEventListener('click', publish);
     $('ceDocNav').addEventListener('click', function (e) {
       var b = e.target.closest('[data-doc]'); if (b) switchDoc(b.dataset.doc);
