@@ -25,7 +25,7 @@ const sandbox = {
   encodeURIComponent, decodeURIComponent, Uint32Array,
   crypto: webcrypto,
   document: { addEventListener() {}, createElement() { return {}; }, body: { appendChild() {} } },
-  location: { search: '', origin: 'https://thenationalleague.github.io' },
+  location: { search: '', origin: 'https://nl.tools' },
   firebase: {
     initializeApp: () => ({
       auth: () => ({ currentUser: null, signInAnonymously: () => Promise.resolve({ user: {} }) }),
