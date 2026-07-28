@@ -321,3 +321,104 @@ test('docLabel: a prose second line is not used as a subtitle', async () => {
   // Just the letter — not the whole sentence.
   assert.equal(merged.nodes.filter((n) => !n.parentId)[0].title, 'Appendix Q');
 });
+
+test('merge: a document naming the area itself is not wrapped', async () => {
+  // The Board Directives file IS the area — its directives belong at the top
+  // level. Home-Grown Player Development is a named directive inside it, so
+  // that one keeps its wrapper and sits at the end.
+  const directives = await HB.parse(docx(
+    p(r('THE NATIONAL LEAGUE BOARD DIRECTIVES 2026/27')) +
+    p(r('In accordance with FA Kit Regulations, Clubs shall...')) +
+    p(r('The designated logo shall appear on the shirt.'))
+  ));
+  const homegrown = await HB.parse(docx(
+    p(r('HOME-GROWN PLAYER DEVELOPMENT')) +
+    p(r('The National League shall enable its Clubs to develop players.'))
+  ));
+
+  const merged = HB.merge([
+    { name: 'Board_Directives.docx', seed: directives },
+    { name: 'HOME_GROWN.doc', seed: homegrown },
+  ], 'Board Directives');
+
+  const top = merged.nodes.filter((n) => !n.parentId);
+  assert.equal(top.length, 3, 'two directives plus the named section');
+  assert.match(top[0].body, /In accordance with FA Kit/);
+  assert.match(top[1].body, /designated logo/);
+  assert.equal(top[2].title, 'Home-Grown Player Development');
+  // The named section owns its content rather than sitting flat.
+  assert.equal(merged.nodes.filter((n) => n.parentId === top[2].id).length, 1);
+});
+
+test('merge: an appendix does not name the Appendices area, so it is wrapped', async () => {
+  const a = await HB.parse(docx(p(r('APPENDIX A')) + p(r('DISCIPLINARY PROCEDURES')) + p(r('1. First'))));
+  const merged = HB.merge([{ name: 'Appendix_A.docx', seed: a }], 'Appendices');
+  const top = merged.nodes.filter((n) => !n.parentId);
+  assert.equal(top.length, 1);
+  assert.equal(top[0].title, 'Appendix A — Disciplinary Procedures');
+});
+
+test('parse: a title running straight into prose keeps the prose', async () => {
+  // Only the first line is the cover here — taking two would eat directive #1.
+  const seed = await HB.parse(docx(
+    p(r('THE NATIONAL LEAGUE BOARD DIRECTIVES 2026/27')) +
+    p(r('In accordance with FA Kit Regulations, Clubs shall wear...')) +
+    p(r('The designated logo shall appear once on each shirt.'))
+  ));
+  assert.equal(seed.doc.coverSubtitle, '');
+  assert.equal(seed.nodes.filter((n) => !n.parentId).length, 2);
+});
+
+/* --------------------------------------------------- Word auto-numbering */
+
+// A document numbered by Word's list engine: the numbers are in
+// numbering.xml, not in the run text. The Board Directives are built this
+// way — 1..n with a)..e) beneath — so reading only the text sees a flat
+// list and loses every sub-item.
+const numbering = `<?xml version="1.0"?><w:numbering>
+  <w:abstractNum w:abstractNumId="0">
+    <w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/></w:lvl>
+    <w:lvl w:ilvl="1"><w:numFmt w:val="lowerLetter"/></w:lvl>
+  </w:abstractNum>
+  <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
+</w:numbering>`;
+
+const listP = (lvl, text) =>
+  `<w:p><w:pPr><w:numPr><w:ilvl w:val="${lvl}"/><w:numId w:val="1"/></w:numPr></w:pPr>${r(text)}</w:p>`;
+
+const numberedDocx = (bodyXml) => makeZip([
+  ['word/document.xml', `<?xml version="1.0"?><w:document><w:body>${bodyXml}</w:body></w:document>`],
+  ['word/numbering.xml', numbering],
+]);
+
+test('parse: Word-numbered lists nest by level, not by text', async () => {
+  const seed = await HB.parse(numberedDocx(
+    p(r('THE NATIONAL LEAGUE BOARD DIRECTIVES 2026/27')) +
+    listP(0, 'In accordance with FA Kit Regulations, the Board directs as follows:') +
+    listP(1, 'The logo shall appear on the right sleeve.') +
+    listP(1, 'Clubs may place a sponsor on the left sleeve.') +
+    listP(0, 'Further to Rule 8.31, Clubs are to film each match.') +
+    listP(0, 'Clubs are not permitted to show footage.')
+  ));
+
+  const top = seed.nodes.filter((n) => !n.parentId);
+  assert.equal(top.length, 3, 'three directives at the top level');
+  assert.equal(top[0].numStyle, 'decimal');
+
+  // The two sub-items belong to directive 1, not beside directives 2 and 3.
+  const subs = seed.nodes.filter((n) => n.parentId === top[0].id);
+  assert.equal(subs.length, 2);
+  assert.equal(subs[0].numStyle, 'lower-alpha');
+  assert.match(subs[0].body, /right sleeve/);
+  assert.match(top[1].body, /Further to Rule 8\.31/);
+});
+
+test('parse: numId 0 means the paragraph is not numbered', async () => {
+  const seed = await HB.parse(numberedDocx(
+    p(r('A TITLE')) +
+    '<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="0"/></w:numPr></w:pPr>' + r('Plain prose.') + '</w:p>'
+  ));
+  const n = seed.nodes.find((x) => /Plain prose/.test(x.body || ''));
+  assert.ok(n);
+  assert.equal(n.numStyle, 'none');
+});
