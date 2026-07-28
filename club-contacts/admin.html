@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <!--
-  club-contacts/admin.html  v1.20 — superadmin console for the club contacts collection.
+  club-contacts/admin.html  v1.21 — superadmin console for the club contacts collection.
   (Renamed from "club-roster" in v1.3 — toolKey/RTDB path now ops-club-contacts.)
   Submissions: { info, inboxes{deptSlug:{dept,email,phone,ext}},
   people[{firstName,lastName,name,roles[{section,title}],hideContact,qualification}],
-  leads{areaKey:[personId]} }. Review modal + CSV export read this shape.
+  leads{areaKey:[personId]} }. Review modal + handbook forms read this shape.
   Sibling of club-data/admin.html. Generates one capability token per current
   club, writes them to RTDB invites, renders ready-to-paste email blurbs
   with each club's private link, and lists submissions as they arrive with a
@@ -14,13 +14,15 @@
   review-gated step (phase 2) — this console only mints links and shows what
   came back. "Copy as JSON" hands a submission to that future import.
 
-  Three ways out of here, for three different jobs:
-    - Export CSV      — club-per-row across four files, for bulk/spreadsheet work.
+  Two ways out of here, for two different jobs:
     - View all data   — everything on one scrollable page, for a quick look.
-    - Handbook forms  — pick clubs, get one print-ready A4 entry each (handbook
-                        shape), for sending a club's whole record to a colleague
-                        as a PDF. Screen and print share one layout; body.hb-print
-                        strips the console chrome around it at print time.
+    - Handbook forms  — pick clubs (one picker column per division), get one
+                        print-ready A4 entry each (handbook shape), for sending a
+                        club's whole record to a colleague as a PDF. Screen and
+                        print share one layout; body.hb-print strips the console
+                        chrome around it at print time.
+  The four CSV exports were removed in v1.21 — club-per-row spreadsheets were
+  not what anyone actually wanted out of this console.
 
   Gated: no tools/ registry record on purpose -> superadmin-only via
   auth-guard's default. Tokens live only in RTDB, never in this repo.
@@ -46,7 +48,10 @@
   <script>
     window.NL_TOOL = { title: 'Club Contacts Admin', toolKey: 'ops-club-contacts' };
     var NL_TOOL_KEY = 'ops-club-contacts';
-    window.NL_CHANGELOG = [{ date: '28 Jul 2026', version: 'v1.20', items: [
+    window.NL_CHANGELOG = [{ date: '28 Jul 2026', version: 'v1.21', items: [
+      'Handbook forms picker is now one column per division — National, North then South — each showing that division’s full roster with a submitted count, so you can see at a glance who is back and who is not. Clubs still outstanding sit greyed in place rather than in a separate list, and each division has an “all” toggle.',
+      'Removed the four CSV exports (People / Club info / Dept inboxes / Lead contacts). Club-per-row spreadsheets across four files were not what anyone needed out of this console — use Handbook forms for a club’s record, or View all submitted data for a quick look.',
+    ] }, { date: '28 Jul 2026', version: 'v1.20', items: [
       'Club information prints as three side-by-side columns — one per group (Ground & travel / Club contact / Sponsors) — rather than fields flowing across a shared grid, so each block reads as its own list and the whole section fits the top of the page.',
       'Staff table no longer truncates: fixed column widths, emails allowed to wrap and phone numbers never broken mid-number.',
       'The “not for the public directory” warning now sits on the email and phone themselves rather than under the person’s name — it is the contact details that stay private, not the name or the role, and one footnote explains it.',
@@ -157,10 +162,16 @@
   .hb-foot { font-size:11px; color:var(--amber-deep); margin:8px 0 0; }
   .hb-empty { font-size:13px; color:var(--text-muted); margin:0; }
   /* Picker (inside the shared NL.modal body) */
-  .hb-pick__grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(210px,1fr)); gap:2px 14px; margin-top:10px; }
-  .hb-pick__c { display:flex; gap:8px; align-items:center; font-size:13px; padding:4px 0; }
+  .hb-pick__divs { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:0 16px; margin-top:12px; align-items:start; }
+  .hb-pick__div { min-width:0; }
+  .hb-pick__dh { display:flex; align-items:center; gap:8px; font-variation-settings:'wght' 800; color:var(--white); background:var(--navy); font-size:11px; text-transform:uppercase; letter-spacing:.06em; padding:4px 10px; border-radius:4px; }
+  .hb-pick__dh span { flex:1; min-width:0; }
+  .hb-pick__all { background:none; border:0; padding:0; cursor:pointer; color:var(--white); font:inherit; text-decoration:underline; }
+  .hb-pick__dn { font-size:11px; color:var(--text-muted); margin:4px 0 2px; }
+  .hb-pick__c { display:flex; gap:7px; align-items:center; font-size:13px; padding:3px 0; overflow-wrap:anywhere; }
   .hb-pick__c input { flex:0 0 auto; }
-  .hb-pick__miss { margin-top:14px; padding:10px 12px; border:1px solid var(--amber); border-radius:8px; background:var(--amber-light); font-size:13px; color:var(--amber-deep); }
+  .hb-pick__c--out { color:var(--navy-300); }
+  @media screen and (max-width: 640px) { .hb-pick__divs { grid-template-columns:1fr; gap:14px; } }
   /* screen-only: an A4 print viewport is ~794px and must NOT collapse to one
      column, so this breakpoint is scoped and the print block re-pins 3 across. */
   @media screen and (max-width: 760px) { .hb-info { grid-template-columns:1fr; } .hb-col .hb-grp { margin-top:16px; } }
@@ -202,13 +213,6 @@
       <button class="btn btn--ghost" id="emailBtn" disabled>Build email text for all clubs</button>
     </div>
     <textarea id="emails" placeholder="Generated email blurbs appear here…" style="display:none;"></textarea>
-    <div style="display:flex;gap:8px;margin:10px 0 0;flex-wrap:wrap;align-items:center;border-top:1px solid var(--border);padding-top:12px;">
-      <span style="font-size:12px;color:var(--text-muted);font-variation-settings:'wght' 800;text-transform:uppercase;letter-spacing:.06em;">Export CSV</span>
-      <button class="btn btn--ghost btn--sm" id="csvPeople">People</button>
-      <button class="btn btn--ghost btn--sm" id="csvInfo">Club info</button>
-      <button class="btn btn--ghost btn--sm" id="csvInbox">Dept inboxes</button>
-      <button class="btn btn--ghost btn--sm" id="csvLeads">Lead contacts</button>
-    </div>
     <div style="display:flex;gap:8px;margin:12px 0 0;flex-wrap:wrap;align-items:center;border-top:1px solid var(--border);padding-top:12px;">
       <span style="font-size:12px;color:var(--text-muted);font-variation-settings:'wght' 800;text-transform:uppercase;letter-spacing:.06em;">View on screen</span>
       <button class="btn btn--navy btn--sm" id="viewAllBtn">View all submitted data</button>
@@ -271,51 +275,8 @@
   }
 
 
-  /* ---- CSV export (client-side, from the submissions already loaded) ---- */
+  /* Every submission currently loaded, newest shape only (must have a club). */
   function subsList() { return Object.keys(S.subs).map(function (t) { return S.subs[t]; }).filter(function (s) { return s && s.club; }); }
-  function csvCell(v) { v = (v == null ? '' : String(v)); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
-  function toCSV(headers, rows) { return [headers].concat(rows).map(function (r) { return r.map(csvCell).join(','); }).join('\r\n'); }
-  function downloadCSV(name, text) {
-    NL.download(name, '﻿' + text, 'text/csv;charset=utf-8');
-  }
-  function leadAreasFor(sub, pid) { return LEAD_LABELS.filter(function (a) { return ((sub.leads && sub.leads[a[0]]) || []).indexOf(pid) !== -1; }).map(function (a) { return a[1]; }).join('; '); }
-  function peopleCSV() {
-    var rows = [];
-    subsList().forEach(function (s) {
-      (s.people || []).forEach(function (p) {
-        rows.push([s.club, p.title || '', p.firstName || '', p.lastName || '', p.postNominals || '', pname(p),
-          (p.roles || []).map(function (r) { return r.section + (r.title ? ' (' + r.title + ')' : ''); }).join('; '),
-          (p.emails || []).join('; '),
-          (p.phones || []).map(function (ph) { return ph.number + (ph.ext ? ' ext ' + ph.ext : ''); }).join('; '),
-          p.hideContact ? 'Yes' : 'No', p.qualification || '', leadAreasFor(s, p.id)]);
-      });
-    });
-    return toCSV(['Club', 'Title', 'First name', 'Surname', 'Post-nominals', 'Full name', 'Roles', 'Emails', 'Phones', 'Hidden from directory', 'Qualification', 'Lead areas'], rows);
-  }
-  function clubInfoCSV() {
-    var headers = ['Club'].concat(INFO_LABELS.map(function (f) { return f[1]; }));
-    var rows = subsList().map(function (s) { var info = s.info || {}; return [s.club].concat(INFO_LABELS.map(function (f) { var v = info[f[0]]; return v == null ? '' : String(v); })); });
-    return toCSV(headers, rows);
-  }
-  function inboxesCSV() {
-    var rows = [];
-    subsList().forEach(function (s) { Object.keys(s.inboxes || {}).forEach(function (k) { var ib = s.inboxes[k]; rows.push([s.club, ib.dept || ib.label || k, ib.email || '', ib.phone || '', ib.ext || '']); }); });
-    return toCSV(['Club', 'Department', 'Email', 'Phone', 'Ext'], rows);
-  }
-  function leadsCSV() {
-    var rows = [];
-    subsList().forEach(function (s) { LEAD_LABELS.forEach(function (a) {
-      var names = ((s.leads && s.leads[a[0]]) || []).map(function (id) { var p = (s.people || []).filter(function (x) { return x.id === id; })[0]; return p ? pname(p) : ''; }).filter(Boolean).join('; ');
-      rows.push([s.club, a[1], names]);
-    }); });
-    return toCSV(['Club', 'Lead area', 'Nominee(s)'], rows);
-  }
-  function exportCSV(kind) {
-    if (!subsList().length) { NL.toast('No submissions yet.', 'info'); return; }
-    var d = new Date().toISOString().slice(0, 10);
-    var map = { people: ['club-people-', peopleCSV], info: ['club-info-', clubInfoCSV], inbox: ['club-inboxes-', inboxesCSV], leads: ['club-leads-', leadsCSV] };
-    var m = map[kind]; downloadCSV(m[0] + d + '.csv', m[1]());
-  }
 
   function renderList() {
     document.getElementById('list').innerHTML = S.clubs.map(function (c) {
@@ -429,8 +390,8 @@
   /* ---- Handbook forms ------------------------------------------------------
      A per-club, print-ready entry in the shape the League handbook uses — one
      club per A4 page, so a club's whole record can be sent to a colleague as a
-     single PDF. The CSVs above are club-per-row across four files; this is the
-     same data assembled the other way round. Screen and print share one layout;
+     single PDF — the primary way data leaves this console since the CSV exports
+     were dropped in v1.21. Screen and print share one layout;
      @media print (body.hb-print) strips the console chrome around it. ---- */
   var INFO_LABEL = {}; INFO_LABELS.forEach(function (f) { INFO_LABEL[f[0]] = f[1]; });
   var HB_GROUPS = [
@@ -566,27 +527,61 @@
     setTimeout(done, 1500);
   }
 
-  // Club picker: every club that has submitted, ticked to taste. Clubs still
-  // outstanding are listed (not selectable) so it's obvious who to chase.
+  /* Club picker: one column per division, in ladder order, each listing that
+     division's full roster. Clubs that have submitted are tickable; the rest are
+     shown greyed in place, so you read "who's back and who isn't" per division
+     rather than hunting a separate outstanding list. `division` comes off
+     NL.season.clubsFor, which resolves it per season. */
+  var HB_DIVS = ['National', 'North', 'South'];
   function openHbPicker() {
     var submitted = {}; subsList().forEach(function (s) { submitted[s.club] = 1; });
-    var have = S.clubs.filter(function (c) { return submitted[c.name]; });
-    var missing = S.clubs.filter(function (c) { return !submitted[c.name]; });
-    if (!have.length) { NL.toast('No submissions yet — nothing to build a form from.', 'info'); return; }
+    if (!S.clubs.some(function (c) { return submitted[c.name]; })) {
+      NL.toast('No submissions yet — nothing to build a form from.', 'info'); return;
+    }
+    // Known divisions first, in order; anything else keeps its own column
+    // rather than being dropped.
+    var order = HB_DIVS.slice();
+    S.clubs.forEach(function (c) {
+      var d = c.division || 'Other';
+      if (order.indexOf(d) === -1) order.push(d);
+    });
+
+    var cols = order.map(function (d) {
+      var list = S.clubs.filter(function (c) { return (c.division || 'Other') === d; });
+      if (!list.length) return '';
+      var got = list.filter(function (c) { return submitted[c.name]; }).length;
+      return '<div class="hb-pick__div">' +
+        '<div class="hb-pick__dh"><span>' + esc(d) + '</span>' +
+          (got ? '<button type="button" class="hb-pick__all" data-hbdiv="' + esc(d) + '">all</button>' : '') +
+        '</div>' +
+        '<div class="hb-pick__dn">' + got + ' of ' + list.length + ' submitted</div>' +
+        list.map(function (c) {
+          if (!submitted[c.name]) {
+            return '<div class="hb-pick__c hb-pick__c--out" title="No submission yet">' + esc(c.name) + '</div>';
+          }
+          return '<label class="hb-pick__c"><input type="checkbox" value="' + esc(c.name) +
+            '" data-div="' + esc(d) + '"><span>' + esc(c.name) + '</span></label>';
+        }).join('') + '</div>';
+    }).join('');
 
     var body = document.createElement('div');
     body.innerHTML =
-      '<p style="font-size:13px;color:var(--text-muted);margin:0;">Tick the clubs you need, then build the forms — one club per printed page, ready to save as a PDF.</p>' +
+      '<p style="font-size:13px;color:var(--text-muted);margin:0;">Tick the clubs you need, then build the forms — one club per printed page, ready to save as a PDF. Greyed clubs have not sent their form back yet.</p>' +
       '<div style="display:flex;gap:8px;margin-top:10px;">' +
         '<button class="btn btn--ghost btn--sm" data-hball="1">Select all</button>' +
         '<button class="btn btn--ghost btn--sm" data-hball="0">Select none</button></div>' +
-      '<div class="hb-pick__grid">' + have.map(function (c) {
-        return '<label class="hb-pick__c"><input type="checkbox" value="' + esc(c.name) + '"><span>' + esc(c.name) + '</span></label>';
-      }).join('') + '</div>' +
-      (missing.length ? '<div class="hb-pick__miss"><b>Still outstanding (' + missing.length + ')</b> — no submission yet, so there is nothing to print for: ' +
-        esc(missing.map(function (c) { return c.name; }).join(', ')) + '</div>' : '');
+      '<div class="hb-pick__divs">' + cols + '</div>';
 
     body.addEventListener('click', function (e) {
+      var d = e.target.closest('[data-hbdiv]');
+      if (d) {  // per-division "all": toggles that column as a group
+        var key = d.getAttribute('data-hbdiv');
+        var inDiv = Array.prototype.filter.call(body.querySelectorAll('input[type=checkbox]'),
+          function (i) { return i.getAttribute('data-div') === key; });
+        var turnOn = inDiv.some(function (i) { return !i.checked; });
+        inDiv.forEach(function (i) { i.checked = turnOn; });
+        return;
+      }
       var a = e.target.closest('[data-hball]'); if (!a) return;
       var on = a.getAttribute('data-hball') === '1';
       Array.prototype.forEach.call(body.querySelectorAll('input[type=checkbox]'), function (i) { i.checked = on; });
@@ -686,10 +681,6 @@
     });
 
     document.getElementById('hbBtn').addEventListener('click', openHbPicker);
-    document.getElementById('csvPeople').addEventListener('click', function () { exportCSV('people'); });
-    document.getElementById('csvInfo').addEventListener('click', function () { exportCSV('info'); });
-    document.getElementById('csvInbox').addEventListener('click', function () { exportCSV('inbox'); });
-    document.getElementById('csvLeads').addEventListener('click', function () { exportCSV('leads'); });
     document.getElementById('genBtn').addEventListener('click', function () {
       var updates = {}; var n = 0;
       S.clubs.forEach(function (c) { if (!tokenFor(c.name)) { updates[tok()] = { club: c.name, createdAt: Date.now() }; n++; } });
