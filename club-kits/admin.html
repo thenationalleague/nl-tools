@@ -15,7 +15,8 @@
   structure.
 
   KIT SHEETS render the submitted colours + pattern as an actual garment, one
-  club per A4 page, print or save straight to PDF. Note the deliberate contrast
+  club per A4 page, downloaded as a PDF through the browser's own print-to-PDF
+  (document.title is swapped first so the file lands with a sensible name). Note the deliberate contrast
   with the FORM, where the same outlines are never filled: there, colouring
   would imply we capture an exact design. Here the sheet is the output and
   showing the colour is the point. Every sheet says the graphic is indicative.
@@ -71,7 +72,8 @@
       'Review modal shows a club’s kits with colour swatches; the JSON export is keyed by club and field-whitelisted. No submitter name or email is collected, so the export holds no personal data.',
       'Two exports: CSV (one row per kit, colours split into their own columns plus a dominant-family column to pivot on, and every outstanding club listed so all 72 are accounted for) and JSON (full nested structure).',
       'The JSON export also carries a “legacy” free-text rendering of each kit (e.g. "Red/White Stripes") so it can be merged straight into clubs-meta.',
-      'New “Kit sheets…”: pick clubs and get one printable A4 page each with the kits drawn as actual garments — colours and pattern rendered — to print or save as PDF. The picture doubles as a check on the data: if it looks wrong, the submission is wrong.',
+      'New “Kit sheets…”: pick clubs and get one A4 page each with the kits drawn as actual garments — colours and pattern rendered — then Download PDF. The picture doubles as a check on the data: if it looks wrong, the submission is wrong.',
+      'Kit graphics follow how the trade actually uses the terms: trim means the sleeve cuffs and collar on a shirt, the leg hems on shorts and the turnover on socks — not an outline round the whole garment; a shirt panel is the shoulder band, and a shorts panel is a block down each side.',
       'New Excel export: the CSV grid with every colour cell filled with its real colour (text flipped to black or white so it stays readable). Written as SpreadsheetML so it needs no library.'
     ] }];
     window.nlAuthReady = function (userData) {
@@ -324,6 +326,12 @@
 
     if (c2) {
       switch (key) {
+        case 'plain':
+          /* Shouldn't normally reach here — the form drops Plain once a
+             garment has two colours — but an older or corrected record could,
+             and falling through to `default` would invent an arrangement the
+             club never described. Plain means plain: show the base colour. */
+          break;
         case 'stripes':
           for (i = 0; i < 7; i++) inner += '<rect x="' + (i * 9 + 4) + '" y="0" width="4.5" height="64" fill="' + ((i % 2 || !cs[2]) ? c2 : c3) + '"/>';
           break;
@@ -367,20 +375,38 @@
           for (i = 0; i < 26; i++) inner += '<circle cx="' + ((i * 17) % 60 + 2) + '" cy="' + ((i * 29) % 60 + 2) + '" r="2" fill="' + c2 + '"/>';
           break;
         case 'panels':
-          /* Bands inside the body, not the sleeve wedges — otherwise this is
-             indistinguishable from 'sleeves' and from plain. */
-          inner = '<rect x="18.5" y="0" width="6" height="64" fill="' + c2 + '"/>' +
-                  '<rect x="39.5" y="0" width="6" height="64" fill="' + c2 + '"/>';
+          /* Shirt panel = the shoulder band: a yoke running across both
+             shoulders and out along the tops of the sleeves. Stroking the
+             shoulder line and letting the clip trim it gives that shape. */
+          inner = '<path d="M7 16 L22 7 L27.5 5.5 L36.5 5.5 L42 7 L57 16" fill="none" stroke="' +
+                  c2 + '" stroke-width="7.5" stroke-linejoin="round"/>';
           break;
-        case 'stripe':   /* shorts/socks detail — a single side panel */
-          inner = '<rect x="26" y="0" width="8" height="64" fill="' + c2 + '"/>';
+        case 'stripe':
+          /* "Stripe / panel" on SHORTS means a vertical block down each side,
+             so it follows the two outer seams. On socks it reads as a single
+             stripe down the leg. */
+          inner = (kind === 'shorts')
+            ? '<g fill="none" stroke="' + c2 + '" stroke-width="7"><path d="M12 11 L8 51"/><path d="M52 11 L56 51"/></g>'
+            : '<rect x="26" y="0" width="8" height="64" fill="' + c2 + '"/>';
           break;
         case 'trim':
-          /* Drawn INSIDE the clip as a fat stroke, so only its inner half
-             shows — an inset border. Replacing the outline with the trim
-             colour instead would erase the silhouette whenever the trim is
-             white, which is the single most common case. */
-          inner = '<path d="' + path + '" fill="none" stroke="' + c2 + '" stroke-width="7"/>';
+          /* Trim means specific EDGES, not a border round the whole garment:
+             shirt = the sleeve cuffs (and the collar, trimmed with them),
+             shorts = the hem of each leg opening, socks = the turnover at the
+             top. The clip does the shaping — one full-width band across the
+             shorts at hem height becomes two separate leg hems, because the
+             gap between the legs is outside the shape. */
+          if (kind === 'shirt') {
+            inner = '<g fill="none" stroke="' + c2 + '" stroke-linecap="butt">' +
+                      '<path d="M7 16 L14 28" stroke-width="5"/>' +
+                      '<path d="M57 16 L50 28" stroke-width="5"/>' +
+                      '<path d="M27.5 5 a6 5.5 0 0 0 9 0" stroke-width="3.5"/>' +
+                    '</g>';
+          } else if (kind === 'shorts') {
+            inner = '<rect x="0" y="45" width="64" height="6" fill="' + c2 + '"/>';
+          } else {
+            inner = '<rect x="0" y="6" width="64" height="7" fill="' + c2 + '"/>';
+          }
           break;
         default:         /* print / other / unrecognised — show both colours honestly */
           inner = '<path d="M64 26 L64 64 L26 64 Z" fill="' + c2 + '"/>';
@@ -613,21 +639,33 @@
   function renderSheets(names) {
     var out = el('ksOut');
     out.innerHTML =
-      '<div class="ks-bar"><button type="button" class="btn btn--primary btn--sm" id="ksPrint">Print / save as PDF</button>' +
+      '<div class="ks-bar"><button type="button" class="btn btn--primary btn--sm" id="ksPrint">Download PDF</button>' +
       '<button type="button" class="btn btn--ghost btn--sm" id="ksClose">Close</button>' +
       '<span class="ks-bar__n">' + names.length + ' club' + (names.length === 1 ? '' : 's') +
-      ' — one per page. Tick “Background graphics” in the print dialog if the colours come out blank.</span></div>' +
+      ' — one per page. In the dialog set <b>Destination</b> to “Save as PDF”, and turn on ' +
+      '<b>Background graphics</b> if the kit colours come out blank.</span></div>' +
       names.map(sheetFor).join('');
     out.style.display = '';
     [].forEach.call(out.querySelectorAll('[data-crest]'), function (img) {
       NL.clubs.wireCrestImg(img, img.getAttribute('data-crest'));
     });
     el('ksPrint').addEventListener('click', function () {
+      /* Browsers seed the saved-PDF filename from document.title, so without
+         this every download lands as "Club kits admin — NL Tools.pdf".
+         Swapped for the duration of the dialog, then put back. */
+      var prevTitle = document.title;
+      document.title = names.length === 1
+        ? 'Kit colours 2026-27 — ' + names[0]
+        : 'Kit colours 2026-27 — ' + names.length + ' clubs';
       document.body.classList.add('ks-print');
       window.print();
-      /* Class is removed on the next tick rather than in onafterprint, which
-         does not fire consistently across browsers when the dialog is cancelled. */
-      setTimeout(function () { document.body.classList.remove('ks-print'); }, 0);
+      /* Restored on the next tick rather than in onafterprint, which does not
+         fire consistently across browsers when the dialog is cancelled. The
+         print dialog blocks window.print(), so this runs after it closes. */
+      setTimeout(function () {
+        document.body.classList.remove('ks-print');
+        document.title = prevTitle;
+      }, 0);
     });
     el('ksClose').addEventListener('click', function () { out.style.display = 'none'; out.innerHTML = ''; });
     out.scrollIntoView({ behavior: 'smooth', block: 'start' });
