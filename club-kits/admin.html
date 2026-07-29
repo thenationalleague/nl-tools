@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<!--
+  club-kits/admin.html  v1.0 (29/07/2026)
+  Superadmin console for the club KIT COLOUR collection.
+  Sibling of club-contacts/admin.html — same job, different payload.
+
+  Mints one capability token per current-season club, renders ready-to-paste
+  email text carrying each club's private link, lists submissions as they
+  arrive with a review modal, and exports the lot as JSON.
+
+  EXPORT SAFETY: S.subs is keyed by the CAPABILITY TOKEN, which is the secret
+  granting access to a club's form. Every export keys by CLUB and whitelists
+  fields explicitly (see exportJson) — never spread a submission record, or a
+  token rides along into a file that leaves the building.
+
+  The export carries a submitter name + email, so it is personal data: it
+  belongs in RTDB and on someone's machine, never in this repo. (See the data
+  handling rules in CLAUDE.md.)
+
+  Each club's block also carries `legacy` — the structured kit flattened back
+  to the free-text shape clubs-meta `kit` uses today ("Red/White Stripes"), so
+  a merge into clubs-meta is a copy rather than a rewrite.
+
+  Gated: no tools/ registry record on purpose -> superadmin-only via
+  auth-guard's default. Tokens live only in RTDB, never in this repo.
+-->
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Club kits admin — NL Tools</title>
+  <link rel="stylesheet" href="/system/nl-brand.css?v=26">
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script>
+    firebase.initializeApp({
+      apiKey: "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain: "nl-tools.firebaseapp.com",
+      databaseURL: "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId: "nl-tools", storageBucket: "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005", appId: "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+  <script>
+    window.NL_TOOL = { title: 'Club Kits Admin', toolKey: 'ops-club-kits' };
+    var NL_TOOL_KEY = 'ops-club-kits';
+    window.NL_CHANGELOG = [{ date: '29 Jul 2026', version: 'v1.0', items: [
+      'New console for the kit colour collection: mints one private link per current-season club, renders the email text to send them, and tracks who has come back.',
+      'Review modal shows a club’s kits with colour swatches; the JSON export is keyed by club and field-whitelisted so a club’s private link can never leave in a file.',
+      'Export also carries a “legacy” free-text rendering of each kit (e.g. "Red/White Stripes") so it can be merged straight into clubs-meta.'
+    ] }];
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {}; window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) window.TOOL.boot(userData);
+      else window._toolDeferredSession = userData;
+    };
+  </script>
+  <script src="/system/nl-utils.js?v=27"></script>
+  <script src="/system/nl-topbar.js?v=8"></script>
+  <script src="/system/auth-guard.js?v=10"></script>
+<style>
+  .ck-head { display:flex; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-bottom:20px; }
+  .ck-head h1 { margin:0 0 4px; color:var(--navy); }
+  .ck-head p { margin:0; color:var(--text-muted); font-size:14px; }
+  .ck-actions { display:flex; gap:8px; flex-wrap:wrap; margin-left:auto; }
+
+  .ck-stats { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:20px; }
+  .ck-stat { background:var(--white); border:1px solid var(--border); border-radius:10px; padding:12px 16px; min-width:120px; }
+  .ck-stat b { display:block; font-size:26px; color:var(--navy); font-variation-settings:'wght' 900; line-height:1.1; }
+  .ck-stat span { font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--text-muted); font-variation-settings:'wght' 800; }
+
+  .ck-divs { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; align-items:start; }
+  @media (max-width:900px){ .ck-divs { grid-template-columns:1fr; } }
+  .ck-div { background:var(--white); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+  .ck-div h2 { margin:0; padding:12px 14px; font-size:13px; text-transform:uppercase; letter-spacing:.07em;
+               color:var(--white); background:var(--navy); font-variation-settings:'wght' 800;
+               display:flex; justify-content:space-between; gap:8px; }
+  .ck-div h2 span { font-variation-settings:'wght' 600; color:var(--navy-100); }
+  .ck-row { display:flex; align-items:center; gap:9px; padding:8px 12px; border-top:1px solid var(--border); font-size:13px; }
+  .ck-row:first-of-type { border-top:0; }
+  .ck-row img { width:22px; height:22px; object-fit:contain; flex:0 0 auto; }
+  .ck-row .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ck-row .dot { width:8px; height:8px; border-radius:50%; flex:0 0 auto; background:var(--navy-200); }
+  .ck-row.is-in .dot { background:var(--green); }
+  .ck-row.is-in { cursor:pointer; }
+  .ck-row.is-in:hover { background:var(--navy-50); }
+  .ck-row .lnk { border:0; background:none; color:var(--primary); font-family:var(--font); font-size:12px;
+                 cursor:pointer; padding:2px 4px; font-variation-settings:'wght' 700; }
+  .ck-row .lnk:hover { text-decoration:underline; }
+
+  .ck-panel { background:var(--white); border:1px solid var(--border); border-radius:10px; padding:16px 18px; margin-bottom:20px; }
+  .ck-panel h2 { margin:0 0 4px; font-size:15px; color:var(--navy); font-variation-settings:'wght' 800; }
+  .ck-panel p { margin:0 0 12px; font-size:12.5px; color:var(--text-muted); line-height:1.5; }
+  .ck-panel textarea { width:100%; box-sizing:border-box; font-family:var(--font); font-size:13px; line-height:1.6;
+                       padding:11px; border:1px solid var(--border); border-radius:6px; min-height:150px; resize:vertical; }
+  .ck-panel textarea:focus { outline:none; border-color:var(--navy); box-shadow:var(--focus-ring); }
+
+  /* Review — rendered inside the shared NL.modal component, so the backdrop,
+     focus trap, Escape and focus-restore all come from the canon. */
+  .ck-sub { display:flex; align-items:center; gap:10px; margin-bottom:4px; }
+  .ck-sub img { width:34px; height:34px; object-fit:contain; flex:0 0 auto; }
+  .ck-kit { border-top:1px solid var(--border); padding:12px 0; }
+  .ck-kit__n { font-size:11px; text-transform:uppercase; letter-spacing:.06em; font-variation-settings:'wght' 800; color:var(--primary); margin-bottom:5px; }
+  .ck-g { display:flex; align-items:center; gap:7px; padding:3px 0; flex-wrap:wrap; font-size:13.5px; }
+  .ck-g__l { color:var(--text-muted); min-width:52px; }
+  .ck-sw { width:14px; height:14px; border-radius:3px; border:1px solid var(--navy-200); flex:0 0 auto; }
+  .ck-pat { color:var(--navy); font-variation-settings:'wght' 700; }
+  .ck-raw { color:var(--amber); }
+  .ck-meta { font-size:12.5px; color:var(--text-muted); line-height:1.6; }
+</style>
+</head>
+<body>
+
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+
+    <div class="ck-head">
+      <div>
+        <h1>Club kits</h1>
+        <p>One private link per club for the 2026/27 kit colour collection.</p>
+      </div>
+      <div class="ck-actions">
+        <button type="button" id="genBtn" class="btn btn--navy btn--sm">Generate missing links</button>
+        <button type="button" id="emailBtn" class="btn btn--ghost btn--sm">Copy email text</button>
+        <button type="button" id="jsonBtn" class="btn btn--ghost btn--sm">Download JSON</button>
+      </div>
+    </div>
+
+    <div id="stats" class="ck-stats"></div>
+
+    <div class="ck-panel">
+      <h2>Message to clubs</h2>
+      <p>Each club gets this with <code>{club}</code> and <code>{link}</code> swapped for theirs. Saved for next time.</p>
+      <textarea id="tplBody"></textarea>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:10px;">
+        <button type="button" id="tplSave" class="btn btn--primary btn--sm">Save message</button>
+        <span id="tplStatus" style="font-size:12px;color:var(--green);"></span>
+      </div>
+      <textarea id="emails" style="display:none;margin-top:12px;min-height:220px;" readonly></textarea>
+    </div>
+
+    <div id="divs" class="ck-divs"></div>
+
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var BASE = 'app-data/ops-club-kits';
+  var FORM_URL = 'https://nl.tools/club-kits/?t=';
+  var S = { clubs: [], invites: {}, subs: {} };
+
+  var TPL =
+    'Dear {club},\n\n' +
+    'Ahead of the 2026/27 season the League is rebuilding the kit records it holds for every club, so that fixture kit clashes can be checked properly. The details we hold at the moment are patchy and largely free text.\n\n' +
+    'Please complete your club’s kit colours here — the link is unique to {club}, so please don’t forward it:\n\n' +
+    '{link}\n\n' +
+    'It asks for your outfield kits (home, away and a third if you have one) and your goalkeeper kits, and takes about five minutes. Once submitted the form locks; contact us if anything needs changing afterwards.\n\n' +
+    'Many thanks,\nThe National League';
+
+  function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
+    return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]; }); }
+  function el(id) { return document.getElementById(id); }
+
+  /* Token alphabet drops look-alike glyphs (0/O/1/I/l) — these get read off
+     screens and retyped. 24 bytes → ~139 bits, well past guessing. */
+  function tok() {
+    var a = new Uint8Array(24); crypto.getRandomValues(a);
+    return Array.prototype.map.call(a, function (b) {
+      return 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'[b % 57];
+    }).join('');
+  }
+  function tokenFor(club) { for (var t in S.invites) if (S.invites[t].club === club) return t; return null; }
+  function subFor(club) { var t = tokenFor(club); return t ? S.subs[t] : null; }
+
+  var GARMENTS = [['shirt','Shirt',true], ['shorts','Shorts',false], ['socks','Socks',false]];
+
+  /* Records are self-describing (label + hex travel with each colour), so this
+     console needs no copy of the form's taxonomy. */
+  function patLabel(g) {
+    if (!g) return '';
+    /* The form stores the human label alongside the key. Older records (if any
+       predate that) fall back to prettifying the key. */
+    var lab = g.patternLabel || g.detailLabel;
+    if (lab) return lab;
+    var key = g.pattern || g.detail || '';
+    if (!key) return '';
+    if (key === 'other') return String(g.patternOther || g.detailOther || 'Other');
+    return key.charAt(0).toUpperCase() + key.slice(1).replace(/-/g, ' ');
+  }
+
+  /* Flatten one garment back to the free-text shape clubs-meta uses today,
+     e.g. "Red/White Stripes" — so an export can be merged without a rewrite. */
+  function legacyGarment(g) {
+    var cs = (g && g.colours) || [];
+    if (!cs.length) return '';
+    var names = cs.map(function (c) { return c.label || ''; }).filter(Boolean).join('/');
+    var p = patLabel(g);
+    return (p && p.toLowerCase() !== 'plain') ? names + ' ' + p : names;
+  }
+
+  function garmentRow(g, name) {
+    var cs = (g && g.colours) || [];
+    if (!cs.length) return '';
+    var sw = cs.map(function (c) {
+      return '<span class="ck-sw" style="background:' + esc(c.hex || 'transparent') + '"></span>' +
+             '<span' + (c.raw ? ' class="ck-raw"' : '') + '>' + esc(c.label) + (c.raw ? ' *' : '') + '</span>';
+    }).join('<span style="color:var(--text-muted)">+</span> ');
+    var p = patLabel(g);
+    return '<div class="ck-g"><span class="ck-g__l">' + esc(name) + '</span>' + sw +
+           (p ? '<span class="ck-pat">· ' + esc(p) + '</span>' : '') + '</div>';
+  }
+
+  function openSub(club, rec) {
+    var kits = (rec.outfield || []).concat(rec.gk || []);
+    var anyRaw = kits.some(function (k) {
+      return GARMENTS.some(function (g) { return ((k[g[0]] || {}).colours || []).some(function (c) { return c.raw; }); });
+    });
+    var ctrl = NL.modal({
+      title: club,
+      body:
+        '<div class="ck-sub"><img alt="" data-crest="' + esc(club) + '" src="' + esc(NL.clubs.crestUrl(club, 'thumb')) + '">' +
+          '<p class="ck-meta" style="margin:0;">Submitted by <b>' + esc(rec.yourName || '—') + '</b> (' + esc(rec.yourEmail || '—') + ')' +
+          (rec.submittedAt ? '<br>' + esc(NL.formatDateTime(rec.submittedAt)) : '') +
+          (rec.manufacturer ? '<br>Manufacturer: <b>' + esc(rec.manufacturer) + '</b>' : '') + '</p></div>' +
+        kits.map(function (k) {
+          return '<div class="ck-kit"><div class="ck-kit__n">' + esc(k.label || k.slot) + '</div>' +
+            GARMENTS.map(function (g) { return garmentRow(k[g[0]], g[1]); }).join('') + '</div>';
+        }).join('') +
+        (anyRaw ? '<p class="ck-meta" style="margin-top:12px;">* typed in rather than picked from the list — worth a check.</p>' : ''),
+      buttons: [{ label: 'Close', className: 'btn--ghost', autofocus: true, onClick: function (c) { c.close(); } }]
+    });
+    var img = ctrl.body.querySelector('[data-crest]');
+    if (img) NL.clubs.wireCrestImg(img, club);
+  }
+
+  function render() {
+    var withLink = S.clubs.filter(function (c) { return tokenFor(c.name); }).length;
+    var back = S.clubs.filter(function (c) { return subFor(c.name); }).length;
+    el('stats').innerHTML =
+      '<div class="ck-stat"><b>' + S.clubs.length + '</b><span>Clubs</span></div>' +
+      '<div class="ck-stat"><b>' + withLink + '</b><span>Links minted</span></div>' +
+      '<div class="ck-stat"><b>' + back + '</b><span>Submitted</span></div>' +
+      '<div class="ck-stat"><b>' + (S.clubs.length - back) + '</b><span>Outstanding</span></div>';
+
+    var order = ['National', 'North', 'South'];
+    el('divs').innerHTML = order.map(function (d) {
+      var list = S.clubs.filter(function (c) { return c.division === d; });
+      var n = list.filter(function (c) { return subFor(c.name); }).length;
+      return '<div class="ck-div"><h2>' + esc(d) + '<span>' + n + '/' + list.length + '</span></h2>' +
+        list.map(function (c) {
+          var t = tokenFor(c.name), sub = subFor(c.name);
+          return '<div class="ck-row' + (sub ? ' is-in' : '') + '"' + (sub ? ' data-sub="' + esc(c.name) + '"' : '') + '>' +
+            '<span class="dot"></span>' +
+            '<img alt="" data-crest="' + esc(c.name) + '" src="' + esc(NL.clubs.crestUrl(c.name, 'thumb')) + '">' +
+            '<span class="nm">' + esc(c.name) + '</span>' +
+            (t ? '<button type="button" class="lnk" data-copy="' + esc(t) + '">Copy link</button>' : '<span style="font-size:11px;color:var(--text-muted)">no link</span>') +
+            '</div>';
+        }).join('') + '</div>';
+    }).join('');
+
+    /* src is set inline above (so a row never paints as a broken box); this
+       only attaches the thumb→full→rose fallback chain for crests whose thumb
+       tier has not been built yet. */
+    [].forEach.call(document.querySelectorAll('[data-crest]'), function (img) {
+      NL.clubs.wireCrestImg(img, img.getAttribute('data-crest'));
+    });
+    el('emailBtn').disabled = !Object.keys(S.invites).length;
+    el('jsonBtn').disabled = !back;
+  }
+
+  /* EXPORT — keyed by club, fields whitelisted. The token is the secret that
+     grants access to a club's form; it must never appear here. Never spread a
+     submission record into the output. */
+  function exportJson() {
+    var out = { season: '2026', generatedAt: new Date().toISOString(), clubs: {}, outstanding: [] };
+    S.clubs.slice().sort(function (a, b) { return a.name.localeCompare(b.name); }).forEach(function (c) {
+      var rec = subFor(c.name);
+      if (!rec) { out.outstanding.push(c.name); return; }
+      function kit(k) {
+        var o = { slot: k.slot || '', label: k.label || '' };
+        GARMENTS.forEach(function (g) {
+          var src = k[g[0]] || {};
+          var item = { colours: ((src.colours) || []).map(function (col) {
+            return { family: col.family || null, shade: col.shade || null,
+                     label: col.label || '', hex: col.hex || null, raw: !!col.raw };
+          }) };
+          if (g[2]) {
+            if (src.pattern) item.pattern = src.pattern;
+            if (src.patternLabel) item.patternLabel = src.patternLabel;
+            if (src.patternOther) item.patternOther = src.patternOther;
+          } else {
+            if (src.detail) item.detail = src.detail;
+            if (src.detailLabel) item.detailLabel = src.detailLabel;
+            if (src.detailOther) item.detailOther = src.detailOther;
+          }
+          o[g[0]] = item;
+        });
+        o.legacy = { shirts: legacyGarment(k.shirt), shorts: legacyGarment(k.shorts), socks: legacyGarment(k.socks) };
+        return o;
+      }
+      out.clubs[c.name] = {
+        division: c.division || '',
+        submittedBy: { name: rec.yourName || '', email: rec.yourEmail || '' },
+        submittedAt: rec.submittedAt || null,
+        manufacturer: rec.manufacturer || '',
+        outfield: (rec.outfield || []).map(kit),
+        gk: (rec.gk || []).map(kit)
+      };
+    });
+    NL.download('club-kits-2026-27.json', JSON.stringify(out, null, 2), 'application/json');
+    NL.toast(Object.keys(out.clubs).length + ' submissions exported.', 'success');
+  }
+
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function () {
+    Promise.all([
+      NL.clubs.load(),
+      NL.ensureAuth().then(function () { return db.ref(BASE + '/invites').once('value'); }),
+      db.ref(BASE + '/submissions').once('value')
+    ]).then(function (res) {
+      S.clubs = NL.season.clubsFor(res[0]);
+      S.invites = res[1].val() || {};
+      S.subs = res[2].val() || {};
+      render();
+    }).catch(function (e) {
+      el('divs').innerHTML = '<p style="color:var(--red);">' + esc(e.message || e) + '</p>';
+    });
+
+    db.ref(BASE + '/template').once('value').then(function (s) {
+      var t = s.val(); if (t && t.body) TPL = t.body;
+      el('tplBody').value = TPL;
+    }).catch(function () { el('tplBody').value = TPL; });
+
+    el('tplSave').addEventListener('click', function () {
+      TPL = el('tplBody').value;
+      if (NL.writeAudit) NL.writeAudit('clubkits_template', 'Updated club-kits standard message');
+      db.ref(BASE + '/template').set({ body: TPL }).then(function () {
+        el('tplStatus').textContent = 'Saved ✓';
+        setTimeout(function () { el('tplStatus').textContent = ''; }, 2000);
+      }).catch(function (e) { el('tplStatus').textContent = 'Save failed: ' + (e.message || e); });
+    });
+
+    el('genBtn').addEventListener('click', function () {
+      var updates = {}, n = 0;
+      S.clubs.forEach(function (c) { if (!tokenFor(c.name)) { updates[tok()] = { club: c.name, createdAt: Date.now() }; n++; } });
+      if (!n) { NL.toast('Every club already has a link.', 'info'); return; }
+      if (NL.writeAudit) NL.writeAudit('clubkits_invites', 'Generated ' + n + ' club-kits links');
+      db.ref(BASE + '/invites').update(updates).then(function () {
+        for (var t in updates) S.invites[t] = updates[t];
+        NL.toast(n + ' links generated.', 'success'); render();
+      }).catch(function (e) { NL.toast('Could not generate links: ' + (e.message || e), 'error'); });
+    });
+
+    el('emailBtn').addEventListener('click', function () {
+      var body = el('tplBody').value || TPL;
+      var n = 0;
+      var out = S.clubs.map(function (c) {
+        var t = tokenFor(c.name); if (!t) return '';
+        n++;
+        return '=== ' + c.name + ' ===\n' + body.split('{club}').join(c.name).split('{link}').join(FORM_URL + t) + '\n';
+      }).filter(Boolean).join('\n');
+      var ta = el('emails'); ta.style.display = ''; ta.value = out;
+      NL.copy(out, { ok: 'Email text for ' + n + ' clubs copied.' });
+    });
+
+    el('jsonBtn').addEventListener('click', exportJson);
+
+    el('divs').addEventListener('click', function (e) {
+      var copy = e.target.closest('[data-copy]');
+      if (copy) {
+        e.stopPropagation();
+        NL.copy(FORM_URL + copy.getAttribute('data-copy'), { ok: 'Private link copied.' });
+        return;
+      }
+      var row = e.target.closest('[data-sub]'); if (!row) return;
+      var club = row.getAttribute('data-sub'), rec = subFor(club);
+      if (rec) openSub(club, rec);
+    });
+  };
+
+  if (window._toolDeferredSession) { window.TOOL.boot(window._toolDeferredSession); window._toolDeferredSession = null; }
+})();
+</script>
+
+</body>
+</html>
