@@ -23,9 +23,11 @@
   family+shade taxonomy (see COLOURS) so the result aggregates: "how many
   clubs wear green" is a filter, not a string search. Free text is allowed but
   lands as { family:null, raw:true } so it is flagged for review rather than
-  silently polluting the taxonomy. Shirts with >1 colour must declare a
-  pattern; shorts/socks with >1 colour declare a lighter trim/stripe/hoops
-  detail (a two-colour sock is otherwise ambiguous).
+  silently polluting the taxonomy. Shirts always show an arrangement — locked
+  to Plain at one colour, a required choice above that (Plain is dropped from
+  the list once there are two, since a multi-colour shirt cannot be plain).
+  Shorts/socks with >1 colour declare a lighter trim/stripe/hoops detail (a
+  two-colour sock is otherwise ambiguous) and show nothing at one colour.
 
   Storage (RTDB):
     app-data/ops-club-kits/invites/<token>      { club, createdAt }   (minted by admin.html)
@@ -87,6 +89,8 @@ var db = firebase.database();
   label.fl { display:block; font-size:13px; text-transform:uppercase; letter-spacing:.07em; font-variation-settings:'wght' 800; color:var(--text-muted); margin:0 0 4px; }
   .fi { width:100%; box-sizing:border-box; font-family:var(--font); font-size:17px; padding:13px 14px; border:1px solid var(--border); border-radius:6px; background:var(--white); color:var(--text); }
   .fi:focus { outline:none; border-color:var(--navy); box-shadow:var(--focus-ring); }
+  /* Locked arrangement (single-colour shirt): reads as fixed, still legible. */
+  .fi:disabled { background:var(--navy-50); color:var(--navy); font-variation-settings:'wght' 700; cursor:default; }
   /* Segmented count picker */
   .seg { display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--white); }
   .seg button { border:0; background:var(--white); font-family:var(--font); font-size:28px; font-variation-settings:'wght' 800; color:var(--text); padding:18px 36px; min-width:74px; cursor:pointer; border-right:1px solid var(--border); }
@@ -497,7 +501,7 @@ var db = firebase.database();
     var isGk = st.set === 'gk';
     host.innerHTML =
       '<h2 class="step">' + esc(st.label) + ' kit</h2>' +
-      '<p class="sub">Pick the colours for each item, most dominant first. If an item has more than one colour you will be asked how they are arranged.</p>' +
+      '<p class="sub">Pick the colours for each item, most dominant first. Add a second or third colour and you’ll be asked how they are arranged.</p>' +
       '<div class="kc" id="kGarments"></div>' +
       (isGk && st.idx === 0 ? '<div class="note">Goalkeeper kits are often fluorescent — type “neon” to see the neon options, or “volt”.</div>' : '');
 
@@ -528,9 +532,25 @@ var db = firebase.database();
 
       function paintPattern() {
         var multi = garment.colours.length > 1;
-        if (!multi) { pat.innerHTML = ''; return; }
         var isShirt = key === 'shirt';
-        var opts = isShirt ? PATTERNS : DETAILS;
+        /* A single-colour SHIRT keeps the arrangement question on screen,
+           locked to Plain, so the club can see what has been recorded instead
+           of a field that silently disappears. Shorts and socks drop theirs —
+           "how is the second colour applied?" is meaningless with one. */
+        if (!multi) {
+          if (!isShirt) { pat.innerHTML = ''; return; }
+          garment.pattern = 'plain';
+          pat.innerHTML =
+            '<label class="fl">How are those colours arranged?</label>' +
+            '<div class="gm__patrow"><select class="fi" disabled aria-readonly="true">' +
+              '<option>Plain</option></select></div>';
+          return;
+        }
+        /* Plain is dropped from the multi-colour list: a shirt with two or
+           more colours is by definition not plain, and leaving it selectable
+           reintroduces exactly the "Red/White, arrangement unknown" ambiguity
+           this form exists to remove. Trim covers the trimmed-plain case. */
+        var opts = isShirt ? PATTERNS.filter(function (o) { return o[0] !== 'plain'; }) : DETAILS;
         var val = isShirt ? garment.pattern : garment.detail;
         var otherVal = isShirt ? garment.patternOther : garment.detailOther;
         var isOther = val === 'other';
@@ -578,7 +598,12 @@ var db = firebase.database();
         [].forEach.call(seg.children, function (c) { c.classList.toggle('on', c === b); });
         while (garment.colours.length < n) garment.colours.push(null);
         garment.colours.length = n;
-        if (n === 1) { garment.pattern = ''; garment.detail = ''; }
+        /* Going to one colour: paintPattern re-locks a shirt to Plain, and the
+           shorts/socks detail no longer applies. Going the other way, a shirt
+           still carrying that auto 'plain' must be cleared so the club has to
+           choose an arrangement rather than sail past a pre-selected answer. */
+        if (n === 1) garment.detail = '';
+        else if (garment.pattern === 'plain') garment.pattern = '';
         paintCols(); paintPattern(); touch();
       });
 
@@ -620,7 +645,9 @@ var db = firebase.database();
 
   /* ── Review ────────────────────────────────────────────────────────────*/
   function patternLabel(garment, isShirt) {
-    if (garment.colours.length < 2) return '';
+    /* Single-colour shirts are locked to Plain and say so; shorts and socks
+       have no arrangement at one colour. */
+    if (garment.colours.length < 2) return isShirt ? 'Plain' : '';
     var key = isShirt ? garment.pattern : garment.detail;
     if (!key) return '';
     if (key === 'other') return String(isShirt ? garment.patternOther : garment.detailOther).trim() || 'Other';
@@ -688,7 +715,7 @@ var db = firebase.database();
   }
   function cleanGarment(g, isShirt) {
     var o = { colours: usedColours(g).map(cleanColour) };
-    if (g.colours.length > 1) {
+    if (isShirt || g.colours.length > 1) {
       var key = isShirt ? g.pattern : g.detail;
       var other = String((isShirt ? g.patternOther : g.detailOther) || '').trim();
       o[isShirt ? 'pattern' : 'detail'] = key || '';
