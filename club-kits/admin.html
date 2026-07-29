@@ -4,25 +4,31 @@
   Superadmin console for the club KIT COLOUR collection.
   Sibling of club-contacts/admin.html — same job, different payload.
 
-  Mints one capability token per current-season club, renders ready-to-paste
-  email text carrying each club's private link, lists submissions as they
-  arrive with a review modal, and exports the lot as JSON.
+  Tracks the collection: who has come back and who has not, a review modal per
+  submission, a Re-open action, and a JSON export.
 
-  EXPORT SAFETY: S.subs is keyed by the CAPABILITY TOKEN, which is the secret
-  granting access to a club's form. Every export keys by CLUB and whitelists
-  fields explicitly (see exportJson) — never spread a submission record, or a
-  token rides along into a file that leaves the building.
+  There are no per-club links any more. The form is ONE public URL whose front
+  page is a club selector, so this console hands out a single link and the
+  "Copy email text" button produces one message for everyone.
 
-  The form collects no submitter name or email — the token identifies the club
-  — so the export carries no personal data. It still must not be committed:
-  it is club-confidential and the repo is public. (See CLAUDE.md.)
+  RE-OPEN matters more than it used to: with no gate on the form, a club can
+  be filled in by mistake or by the wrong person, and submissions are
+  write-once. Re-open deletes the record so the club can start again.
+
+  The form collects no submitter name or email, so the export carries no
+  personal data. It still must not be committed: it is club-confidential and
+  this repo is public. (See CLAUDE.md.)
+
+  EXPORT SAFETY: exportJson whitelists fields explicitly rather than spreading
+  a record, so anything added to the submission shape later has to be opted in
+  before it can leave in a file.
 
   Each club's block also carries `legacy` — the structured kit flattened back
   to the free-text shape clubs-meta `kit` uses today ("Red/White Stripes"), so
   a merge into clubs-meta is a copy rather than a rewrite.
 
   Gated: no tools/ registry record on purpose -> superadmin-only via
-  auth-guard's default. Tokens live only in RTDB, never in this repo.
+  auth-guard's default.
 -->
 <html lang="en-GB">
 <head>
@@ -46,8 +52,10 @@
     window.NL_TOOL = { title: 'Club Kits Admin', toolKey: 'ops-club-kits' };
     var NL_TOOL_KEY = 'ops-club-kits';
     window.NL_CHANGELOG = [{ date: '29 Jul 2026', version: 'v1.0', items: [
-      'New console for the kit colour collection: mints one private link per current-season club, renders the email text to send them, and tracks who has come back.',
-      'Review modal shows a club’s kits with colour swatches; the JSON export is keyed by club and field-whitelisted so a club’s private link can never leave in a file. No submitter name or email is collected, so the export holds no personal data.',
+      'New console for the kit colour collection: tracks who has come back and who is outstanding, with a review modal per club.',
+      'The form is one public link for every club, so there are no per-club links to mint — “Copy form link” and one shared email message replace that.',
+      'Re-open deletes a club’s submission so they can fill the form in again — the form has no login, so a wrong or mistaken entry is fixed from here.',
+      'Review modal shows a club’s kits with colour swatches; the JSON export is keyed by club and field-whitelisted. No submitter name or email is collected, so the export holds no personal data.',
       'Export also carries a “legacy” free-text rendering of each kit (e.g. "Red/White Stripes") so it can be merged straight into clubs-meta.'
     ] }];
     window.nlAuthReady = function (userData) {
@@ -120,10 +128,10 @@
     <div class="ck-head">
       <div>
         <h1>Club kits</h1>
-        <p>One private link per club for the 2026/27 kit colour collection.</p>
+        <p>2026/27 kit colour collection. One public form link for every club — <code>nl.tools/club-kits/</code>.</p>
       </div>
       <div class="ck-actions">
-        <button type="button" id="genBtn" class="btn btn--navy btn--sm">Generate missing links</button>
+        <button type="button" id="linkBtn" class="btn btn--navy btn--sm">Copy form link</button>
         <button type="button" id="emailBtn" class="btn btn--ghost btn--sm">Copy email text</button>
         <button type="button" id="jsonBtn" class="btn btn--ghost btn--sm">Download JSON</button>
       </div>
@@ -133,7 +141,7 @@
 
     <div class="ck-panel">
       <h2>Message to clubs</h2>
-      <p>Each club gets this with <code>{club}</code> and <code>{link}</code> swapped for theirs. Saved for next time.</p>
+      <p><code>{link}</code> is replaced with the form URL. Leave <code>{club}</code> in place if you are mail-merging club names, or take it out. Saved for next time.</p>
       <textarea id="tplBody"></textarea>
       <div style="display:flex;align-items:center;gap:10px;margin-top:10px;">
         <button type="button" id="tplSave" class="btn btn--primary btn--sm">Save message</button>
@@ -152,31 +160,26 @@
   'use strict';
 
   var BASE = 'app-data/ops-club-kits';
-  var FORM_URL = 'https://nl.tools/club-kits/?t=';
-  var S = { clubs: [], invites: {}, subs: {} };
+  /* One public URL for every club — the form's own front page is the club
+     selector, so there is no per-club link to mint any more. */
+  var FORM_URL = 'https://nl.tools/club-kits/';
+  var S = { clubs: [], subs: {} };
 
   var TPL =
     'Dear {club},\n\n' +
     'Ahead of the 2026/27 season the League is rebuilding the kit records it holds for every club, so that fixture kit clashes can be checked properly. The details we hold at the moment are patchy and largely free text.\n\n' +
-    'Please complete your club’s kit colours here — the link is unique to {club}, so please don’t forward it:\n\n' +
+    'Please complete your club\u2019s kit colours here:\n\n' +
     '{link}\n\n' +
-    'It asks for your outfield kits (home, away and a third if you have one) and your goalkeeper kits, and takes about five minutes. Once submitted the form locks; contact us if anything needs changing afterwards.\n\n' +
+    'Choose your club on the first page, then tell us your outfield kits (home, away and a third if you have one) and your goalkeeper kits. It takes about five minutes. Once submitted the form locks \u2014 contact us if anything needs changing afterwards.\n\n' +
     'Many thanks,\nThe National League';
 
   function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
     return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]; }); }
   function el(id) { return document.getElementById(id); }
 
-  /* Token alphabet drops look-alike glyphs (0/O/1/I/l) — these get read off
-     screens and retyped. 24 bytes → ~139 bits, well past guessing. */
-  function tok() {
-    var a = new Uint8Array(24); crypto.getRandomValues(a);
-    return Array.prototype.map.call(a, function (b) {
-      return 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'[b % 57];
-    }).join('');
-  }
-  function tokenFor(club) { for (var t in S.invites) if (S.invites[t].club === club) return t; return null; }
-  function subFor(club) { var t = tokenFor(club); return t ? S.subs[t] : null; }
+  /* Submissions are keyed by club name directly — all 72 are unique and free
+     of RTDB-illegal characters, so no slug or token indirection is needed. */
+  function subFor(club) { return S.subs[club] || null; }
 
   var GARMENTS = [['shirt','Shirt',true], ['shorts','Shorts',false], ['socks','Socks',false]];
 
@@ -240,11 +243,9 @@
   }
 
   function render() {
-    var withLink = S.clubs.filter(function (c) { return tokenFor(c.name); }).length;
     var back = S.clubs.filter(function (c) { return subFor(c.name); }).length;
     el('stats').innerHTML =
       '<div class="ck-stat"><b>' + S.clubs.length + '</b><span>Clubs</span></div>' +
-      '<div class="ck-stat"><b>' + withLink + '</b><span>Links minted</span></div>' +
       '<div class="ck-stat"><b>' + back + '</b><span>Submitted</span></div>' +
       '<div class="ck-stat"><b>' + (S.clubs.length - back) + '</b><span>Outstanding</span></div>';
 
@@ -254,12 +255,12 @@
       var n = list.filter(function (c) { return subFor(c.name); }).length;
       return '<div class="ck-div"><h2>' + esc(d) + '<span>' + n + '/' + list.length + '</span></h2>' +
         list.map(function (c) {
-          var t = tokenFor(c.name), sub = subFor(c.name);
+          var sub = subFor(c.name);
           return '<div class="ck-row' + (sub ? ' is-in' : '') + '"' + (sub ? ' data-sub="' + esc(c.name) + '"' : '') + '>' +
             '<span class="dot"></span>' +
             '<img alt="" data-crest="' + esc(c.name) + '" src="' + esc(NL.clubs.crestUrl(c.name, 'thumb')) + '">' +
             '<span class="nm">' + esc(c.name) + '</span>' +
-            (t ? '<button type="button" class="lnk" data-copy="' + esc(t) + '">Copy link</button>' : '<span style="font-size:11px;color:var(--text-muted)">no link</span>') +
+            (sub ? '<button type="button" class="lnk" data-reopen="' + esc(c.name) + '">Re-open</button>' : '') +
             '</div>';
         }).join('') + '</div>';
     }).join('');
@@ -270,7 +271,6 @@
     [].forEach.call(document.querySelectorAll('[data-crest]'), function (img) {
       NL.clubs.wireCrestImg(img, img.getAttribute('data-crest'));
     });
-    el('emailBtn').disabled = !Object.keys(S.invites).length;
     el('jsonBtn').disabled = !back;
   }
 
@@ -320,12 +320,10 @@
   window.TOOL.boot = function () {
     Promise.all([
       NL.clubs.load(),
-      NL.ensureAuth().then(function () { return db.ref(BASE + '/invites').once('value'); }),
-      db.ref(BASE + '/submissions').once('value')
+      NL.ensureAuth().then(function () { return db.ref(BASE + '/submissions').once('value'); })
     ]).then(function (res) {
       S.clubs = NL.season.clubsFor(res[0]);
-      S.invites = res[1].val() || {};
-      S.subs = res[2].val() || {};
+      S.subs = res[1].val() || {};
       render();
     }).catch(function (e) {
       el('divs').innerHTML = '<p style="color:var(--red);">' + esc(e.message || e) + '</p>';
@@ -345,36 +343,37 @@
       }).catch(function (e) { el('tplStatus').textContent = 'Save failed: ' + (e.message || e); });
     });
 
-    el('genBtn').addEventListener('click', function () {
-      var updates = {}, n = 0;
-      S.clubs.forEach(function (c) { if (!tokenFor(c.name)) { updates[tok()] = { club: c.name, createdAt: Date.now() }; n++; } });
-      if (!n) { NL.toast('Every club already has a link.', 'info'); return; }
-      if (NL.writeAudit) NL.writeAudit('clubkits_invites', 'Generated ' + n + ' club-kits links');
-      db.ref(BASE + '/invites').update(updates).then(function () {
-        for (var t in updates) S.invites[t] = updates[t];
-        NL.toast(n + ' links generated.', 'success'); render();
-      }).catch(function (e) { NL.toast('Could not generate links: ' + (e.message || e), 'error'); });
+    el('linkBtn').addEventListener('click', function () {
+      NL.copy(FORM_URL, { ok: 'Form link copied — the same link works for every club.' });
     });
 
     el('emailBtn').addEventListener('click', function () {
-      var body = el('tplBody').value || TPL;
-      var n = 0;
-      var out = S.clubs.map(function (c) {
-        var t = tokenFor(c.name); if (!t) return '';
-        n++;
-        return '=== ' + c.name + ' ===\n' + body.split('{club}').join(c.name).split('{link}').join(FORM_URL + t) + '\n';
-      }).filter(Boolean).join('\n');
-      var ta = el('emails'); ta.style.display = ''; ta.value = out;
-      NL.copy(out, { ok: 'Email text for ' + n + ' clubs copied.' });
+      /* One message for everyone now: {club} is left for a mail-merge field,
+         {link} is the single public URL. */
+      var body = (el('tplBody').value || TPL).split('{link}').join(FORM_URL);
+      var ta = el('emails'); ta.style.display = ''; ta.value = body;
+      NL.copy(body, { ok: 'Email text copied.' });
     });
 
     el('jsonBtn').addEventListener('click', exportJson);
 
     el('divs').addEventListener('click', function (e) {
-      var copy = e.target.closest('[data-copy]');
-      if (copy) {
+      /* Re-open deletes the submission so the club can fill the form again.
+         With no login on the form, a mistaken or squatted entry is the likely
+         reason someone is here — hence a first-class button, not console work. */
+      var re = e.target.closest('[data-reopen]');
+      if (re) {
         e.stopPropagation();
-        NL.copy(FORM_URL + copy.getAttribute('data-copy'), { ok: 'Private link copied.' });
+        var name = re.getAttribute('data-reopen');
+        NL.confirm('Delete ' + name + '\u2019s submission so they can fill the form in again? This cannot be undone.',
+          { title: 'Re-open ' + name + '?', confirmText: 'Re-open', variant: 'danger' }).then(function (yes) {
+          if (!yes) return;
+          if (NL.writeAudit) NL.writeAudit('clubkits_reopen', 'Re-opened kit form for ' + name);
+          db.ref(BASE + '/submissions/' + name).remove().then(function () {
+            delete S.subs[name];
+            NL.toast(name + ' re-opened.', 'success'); render();
+          }).catch(function (err) { NL.toast('Could not re-open: ' + (err.message || err), 'error'); });
+        });
         return;
       }
       var row = e.target.closest('[data-sub]'); if (!row) return;

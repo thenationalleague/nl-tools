@@ -1,8 +1,11 @@
 <!DOCTYPE html>
 <!--
   club-kits/index.html  v1.0 (29/07/2026)
-  Public club KIT COLOUR collection — guided wizard (capability-URL pattern).
-  Sibling of club-contacts/index.html; same token model, different payload.
+  Public club KIT COLOUR collection — guided wizard.
+  ONE public URL, no login: the front page is a big club selector, and picking
+  a club there is the only gate. Anyone can therefore submit as any club — the
+  accepted trade for zero friction on a 72-club collection. (This replaced an
+  earlier per-club capability-link model; see git history.)
 
   Why this exists: clubs-meta `kit` is free text and unusable as data — 571
   strings across 82 clubs, 120 distinct, including "White* option blue",
@@ -11,13 +14,13 @@
   actually be queried rather than string-matched.
 
   Flow:
+    0  Pick your club — searchable crest grid, grouped by division
     1  Your kits   — how many outfield (2-3) and GK (1-3), plus manufacturer
     2..n  One step per kit — Home / Away / Third, then GK First / Second / Third
     n+1  Review    — everything on one page, then submit
 
-  No submitter name/email is collected: the token already identifies the club,
-  and leaving it out keeps the whole submission — and every export of it —
-  clear of personal data.
+  No submitter name/email is collected, so the whole submission — and every
+  export of it — is clear of personal data.
 
   Each kit captures shirt / shorts / socks. Colours are picked from a
   family+shade taxonomy (see COLOURS) so the result aggregates: "how many
@@ -30,9 +33,11 @@
   two-colour sock is otherwise ambiguous) and show nothing at one colour.
 
   Storage (RTDB):
-    app-data/ops-club-kits/invites/<token>      { club, createdAt }   (minted by admin.html)
-    app-data/ops-club-kits/submissions/<token>  the record, WRITE-ONCE
-  Draft lives in localStorage until submit, keyed by token.
+    app-data/ops-club-kits/submissions/<club>   the record, WRITE-ONCE
+  Keyed by club NAME — all 72 are unique and free of RTDB-illegal characters
+  (. $ # [ ] /), so the console and every export stay readable. Write-once
+  means a mistaken or squatted entry needs an admin re-open (admin.html).
+  Draft lives in localStorage until submit, keyed by club.
 
   NO nl-utils.js ON PURPOSE. This page is unauthenticated, and nl-utils
   auto-installs the audit hook (writes to admin/audit on every RTDB write),
@@ -161,12 +166,68 @@ var db = firebase.database();
   .kn__status { font-size:15px; font-variation-settings:'wght' 700; color:var(--red); padding:10px 20px 0; }
 
   .note { background:var(--navy-50); border-radius:8px; padding:14px 16px; font-size:15px; color:var(--navy); line-height:1.5; }
+
+  /* ── Club selector ──────────────────────────────────────────────────── */
+  .kh--pick { padding:28px 20px; }
+  .kp { padding:26px 20px 40px; }
+  .kp__h { margin:0 0 6px; font-size:30px; color:var(--navy); font-variation-settings:'wght' 900; }
+  .kp__s { margin:0 0 20px; font-size:16px; color:var(--text-muted); line-height:1.55; max-width:56ch; }
+  .kp__search {
+    width:100%; box-sizing:border-box; font-family:var(--font); font-size:19px; padding:16px 18px;
+    border:2px solid var(--border); border-radius:10px; background:var(--white); color:var(--text); margin-bottom:24px;
+  }
+  .kp__search:focus { outline:none; border-color:var(--navy); box-shadow:var(--focus-ring); }
+  .kp__div { font-size:13px; text-transform:uppercase; letter-spacing:.1em; font-variation-settings:'wght' 800;
+             color:var(--primary); margin:26px 0 12px; padding-bottom:7px; border-bottom:2px solid var(--primary-100); }
+  .kp__div:first-child { margin-top:0; }
+  .kp__grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:12px; }
+  @media (max-width:420px){ .kp__grid { grid-template-columns:repeat(auto-fill, minmax(128px, 1fr)); gap:10px; } }
+  .kp__club {
+    display:flex; flex-direction:column; align-items:center; justify-content:flex-start; gap:10px;
+    background:var(--white); border:2px solid var(--border); border-radius:12px; padding:18px 10px 14px;
+    font-family:var(--font); cursor:pointer; text-align:center; min-height:132px;
+    transition:border-color .12s, transform .12s;
+  }
+  .kp__club:hover { border-color:var(--primary); transform:translateY(-2px); }
+  .kp__club:focus-visible { outline:none; border-color:var(--navy); box-shadow:var(--focus-ring); }
+  .kp__club img { width:54px; height:54px; object-fit:contain; }
+  .kp__club span { font-size:14.5px; line-height:1.3; font-variation-settings:'wght' 800; color:var(--navy); }
+  /* A club already back is still clickable — it lands on the locked view. */
+  .kp__club.is-done { border-color:var(--green); background:var(--green-light, var(--off-white)); }
+  .kp__club.is-done::after { content:'✓ Submitted'; font-size:11.5px; font-variation-settings:'wght' 800;
+                             letter-spacing:.05em; color:var(--green); }
+  .kp__none { font-size:16px; color:var(--text-muted); padding:20px 0; }
+  /* "Change club" affordance on the wizard hero. */
+  .kh__change { margin-left:auto; border:1px solid var(--navy-100); background:none; color:var(--white);
+                font-family:var(--font); font-size:13px; font-variation-settings:'wght' 700;
+                padding:8px 14px; border-radius:7px; cursor:pointer; white-space:nowrap; }
+  .kh__change:hover { background:var(--navy-600); }
 </style>
 </head>
 <body>
 
 <div class="kw">
-  <div id="kGate" class="kw-gate">Checking your link…</div>
+  <div id="kGate" class="kw-gate">Loading clubs…</div>
+
+  <!-- Club selector — the front door. Replaced the per-club capability link,
+       so this is the only gate on the form. -->
+  <div id="kPick" style="display:none;">
+    <div class="kh kh--pick">
+      <img class="kh__crest" alt=""
+           src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png">
+      <div class="kh__t">
+        <div class="kicker">National League — 2026/27</div>
+        <h1>Kit colours</h1>
+      </div>
+    </div>
+    <div class="kp">
+      <h2 class="kp__h">Find your club</h2>
+      <p class="kp__s">The League is rebuilding the kit colours it holds for every club, so fixture clashes can be checked properly. Pick your club to begin — it takes about five minutes.</p>
+      <input id="kSearch" class="kp__search" type="search" autocomplete="off" placeholder="Search for your club…" aria-label="Search for your club">
+      <div id="kGrid"></div>
+      <p id="kNone" class="kp__none" style="display:none;">No club matches that. Try a shorter search.</p>
+    </div>
+  </div>
 
   <div id="kApp" style="display:none;">
     <div class="kh">
@@ -179,6 +240,7 @@ var db = firebase.database();
         <div class="kicker">National League — 2026/27</div>
         <h1 id="kClub">—</h1>
       </div>
+      <button type="button" id="kChange" class="kh__change">Change club</button>
     </div>
 
     <div class="ks">
@@ -295,15 +357,19 @@ var db = firebase.database();
   function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
     return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]; }); }
   function el(id) { return document.getElementById(id); }
-  function gate(msg) { el('kGate').innerHTML = esc(msg); el('kGate').style.display = ''; el('kApp').style.display = 'none'; }
+  function gate(msg) { el('kGate').innerHTML = esc(msg); el('kGate').style.display = '';
+    el('kApp').style.display = 'none'; el('kPick').style.display = 'none'; }
 
   var CREST_BASE = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
   var ROSE = CREST_BASE + 'National%20League%20rose.png';
   var SEASON = '2026';
 
-  var token = new URLSearchParams(location.search).get('t') || '';
-  var LS_KEY = 'nl-club-kits-' + token;
-  var clubName = '';
+  /* Roster + crests come straight from clubs-meta; this page can't use
+     NL.clubs.load() because it deliberately doesn't load nl-utils (see header). */
+  var META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
+
+  var clubName = '';        /* set once a club is picked; also the RTDB key */
+  var LS_KEY = '';          /* draft key, per club */
   var cur = 0;
 
   /* ── Data model ────────────────────────────────────────────────────────
@@ -315,12 +381,17 @@ var db = firebase.database();
   function blankGarment() { return { colours: [null], pattern: '', patternOther: '', detail: '', detailOther: '' }; }
   function blankKit() { return { shirt: blankGarment(), shorts: blankGarment(), socks: blankGarment() }; }
 
-  var data = {
-    manufacturer: '',
-    nOutfield: 2, nGk: 1,
-    outfield: [blankKit(), blankKit(), blankKit()],
-    gk: [blankKit(), blankKit(), blankKit()]
-  };
+  /* A function, not a literal: switching club has to start from a clean
+     slate rather than inherit the previous club's answers. */
+  function freshData() {
+    return {
+      manufacturer: '',
+      nOutfield: 2, nGk: 1,
+      outfield: [blankKit(), blankKit(), blankKit()],
+      gk: [blankKit(), blankKit(), blankKit()]
+    };
+  }
+  var data = freshData();
 
   var OUTFIELD_LABELS = ['Home', 'Away', 'Third'];
   var GK_LABELS = ['Goalkeeper — first', 'Goalkeeper — second', 'Goalkeeper — third'];
@@ -695,6 +766,7 @@ var db = firebase.database();
   /* ── Draft ─────────────────────────────────────────────────────────────*/
   var saveTimer = null;
   function touch() {
+    if (!LS_KEY) return;
     clearTimeout(saveTimer);
     saveTimer = setTimeout(function () {
       try {
@@ -704,7 +776,7 @@ var db = firebase.database();
       } catch (e) {}
     }, 400);
   }
-  function loadDraft() { try { var r = localStorage.getItem(LS_KEY); return r ? JSON.parse(r) : null; } catch (e) { return null; } }
+  function loadDraft() { try { var r = LS_KEY && localStorage.getItem(LS_KEY); return r ? JSON.parse(r) : null; } catch (e) { return null; } }
 
   /* ── Submit ────────────────────────────────────────────────────────────*/
   function cleanColour(c) {
@@ -748,8 +820,11 @@ var db = firebase.database();
     });
 
     var btn = el('kNext'); btn.disabled = true; btn.textContent = 'Submitting…';
-    db.ref('app-data/ops-club-kits/submissions/' + token).set(rec).then(function () {
+    db.ref('app-data/ops-club-kits/submissions/' + clubName).set(rec).then(function () {
       try { localStorage.removeItem(LS_KEY); } catch (e) {}
+      /* Keep the picker's snapshot current, so going back to it shows this
+         club ticked rather than still looking outstanding. */
+      submitted[clubName] = rec;
       renderLocked(rec);
     }).catch(function (e) {
       btn.disabled = false; btn.textContent = 'Submit to the League';
@@ -805,31 +880,36 @@ var db = firebase.database();
     });
   }
 
-  /* ── Boot ──────────────────────────────────────────────────────────────*/
-  if (!/^[A-Za-z0-9_-]{20,}$/.test(token)) {
-    gate('This link isn’t valid. Please use the link the League sent to your club.');
-    return;
-  }
+  /* ── Club selector ─────────────────────────────────────────────────────
+     Replaced the per-club capability link: one public URL, and picking a club
+     here is the only gate. Anyone can therefore submit as any club, which is
+     the accepted trade for zero friction — see the PR that made this change. */
+  var CLUBS = [];        /* [{name, division}] for the current season */
+  var submitted = {};    /* club -> record, so the grid can mark who is back */
 
-  db.ref('app-data/ops-club-kits/invites/' + token).once('value').then(function (snap) {
-    var inv = snap.val();
-    if (!inv || !inv.club) { gate('This link isn’t valid or has expired. Please contact the League.'); return; }
-    clubName = inv.club;
-    return db.ref('app-data/ops-club-kits/submissions/' + token).once('value').then(function (s) {
+  function selectClub(name) {
+    clubName = name;
+    LS_KEY = 'nl-club-kits-' + name;
+    el('kClub').textContent = name;
+    var crest = el('kCrest');
+    crest.onerror = function () { crest.onerror = null; crest.src = ROSE; };
+    crest.src = CREST_BASE + encodeURIComponent(name) + '.png';
+
+    /* Re-read this club rather than trusting the grid's snapshot — someone
+       else may have submitted for it since the page loaded. */
+    db.ref('app-data/ops-club-kits/submissions/' + name).once('value').then(function (s) {
       var prev = s.val();
-      el('kClub').textContent = clubName;
-      var crest = el('kCrest');
-      crest.onerror = function () { crest.onerror = null; crest.src = ROSE; };
-      crest.src = CREST_BASE + encodeURIComponent(clubName) + '.png';
-      el('kGate').style.display = 'none';
+      el('kPick').style.display = 'none';
       el('kApp').style.display = '';
-
+      document.querySelector('.ks').style.display = '';
+      document.querySelector('.kn').style.display = '';
+      window.scrollTo(0, 0);
       if (prev) { renderLocked(prev); return; }
-
+      data = freshData();
       var draft = loadDraft();
       if (draft) {
         data = Object.assign(data, draft);
-        /* Older drafts may predate a field; make sure the shapes are whole. */
+        /* A draft may predate a field; make sure the shapes are whole. */
         ['outfield', 'gk'].forEach(function (set) {
           data[set] = data[set] || [];
           for (var i = 0; i < 3; i++) {
@@ -840,9 +920,72 @@ var db = firebase.database();
           }
         });
       }
-      bindNav(); render();
+      cur = 0; render();
+    }).catch(function (e) {
+      el('kStatus').textContent = 'Could not open the form: ' + (e.message || e);
     });
-  }).catch(function () { gate('Could not check this link — please try again shortly.'); });
+  }
+
+  function renderGrid(q) {
+    q = String(q || '').trim().toLowerCase();
+    var list = q ? CLUBS.filter(function (c) { return c.name.toLowerCase().indexOf(q) > -1; }) : CLUBS;
+    el('kNone').style.display = list.length ? 'none' : '';
+    var html = '';
+    ['National', 'North', 'South'].forEach(function (d) {
+      var inDiv = list.filter(function (c) { return c.division === d; });
+      if (!inDiv.length) return;
+      html += '<div class="kp__div">' + esc(d) + '</div><div class="kp__grid">' +
+        inDiv.map(function (c) {
+          return '<button type="button" class="kp__club' + (submitted[c.name] ? ' is-done' : '') +
+            '" data-club="' + esc(c.name) + '">' +
+            '<img alt="" src="' + esc(CREST_BASE + encodeURIComponent(c.name) + '.png') +
+            '" onerror="this.onerror=null;this.src=&quot;' + ROSE + '&quot;;">' +
+            '<span>' + esc(c.name) + '</span></button>';
+        }).join('') + '</div>';
+    });
+    el('kGrid').innerHTML = html;
+  }
+
+  function showPicker() {
+    el('kApp').style.display = 'none';
+    el('kPick').style.display = '';
+    el('kStatus').textContent = '';
+    el('kSearch').value = '';
+    renderGrid('');
+    window.scrollTo(0, 0);
+  }
+
+  /* ── Boot ──────────────────────────────────────────────────────────────*/
+  Promise.all([
+    fetch(META_URL + '?cb=' + Date.now()).then(function (r) {
+      if (!r.ok) throw new Error('clubs-meta ' + r.status);
+      return r.json();
+    }),
+    /* Best-effort: the grid still works if this read is refused. */
+    db.ref('app-data/ops-club-kits/submissions').once('value')
+      .then(function (s) { return s.val() || {}; }).catch(function () { return {}; })
+  ]).then(function (res) {
+    var meta = res[0], key = (meta.seasons && meta.seasons.current) || SEASON;
+    CLUBS = (meta.clubs || [])
+      .filter(function (c) { return c.seasons && c.seasons[key]; })
+      .map(function (c) { return { name: c.name, division: c.seasons[key] }; })
+      .sort(function (a, b) { return a.name.localeCompare(b.name); });
+    if (!CLUBS.length) throw new Error('no clubs for season ' + key);
+    submitted = res[1];
+
+    el('kGate').style.display = 'none';
+    showPicker();
+    bindNav();
+
+    el('kSearch').addEventListener('input', function () { renderGrid(this.value); });
+    el('kGrid').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-club]'); if (!b) return;
+      selectClub(b.getAttribute('data-club'));
+    });
+    el('kChange').addEventListener('click', showPicker);
+  }).catch(function (e) {
+    gate('Could not load the club list — please try again shortly. (' + (e.message || e) + ')');
+  });
 })();
 </script>
 </body>
