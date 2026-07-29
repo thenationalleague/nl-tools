@@ -5,8 +5,15 @@
   Sibling of club-contacts/admin.html — same job, different payload.
 
   Tracks the collection: who has come back and who has not, a review modal per
-  submission, a Re-open action, per-club printable kit sheets, and CSV / Excel
-  / JSON exports.
+  submission, in-place EDITING of a submitted record, a Re-open action,
+  per-club printable kit sheets, and CSV / Excel / JSON exports.
+
+  EDIT vs RE-OPEN: edit corrects a record here and stamps editedAt/editedBy,
+  so a League correction stays distinguishable from what the club actually
+  submitted; re-open deletes the record so the club fills the form in again.
+  The RTDB rule always allowed an admin to overwrite an existing submission —
+  what was missing was a way to offer the same colour choices, which is why
+  the taxonomy now lives in the shared kit-colours.js.
 
   CSV is one row per KIT (the unit you compare when checking a fixture), with
   each garment's dominant colour FAMILY as its own column so a sheet can pivot
@@ -49,6 +56,7 @@
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Club kits admin — NL Tools</title>
   <link rel="stylesheet" href="/system/nl-brand.css?v=26">
+  <link rel="stylesheet" href="/club-kits/kit-colours.css?v=1">
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
@@ -74,7 +82,8 @@
       'The JSON export also carries a “legacy” free-text rendering of each kit (e.g. "Red/White Stripes") so it can be merged straight into clubs-meta.',
       'New “Kit sheets…”: pick clubs and get one A4 page each with the kits drawn as actual garments — colours and pattern rendered — then Download PDF. The picture doubles as a check on the data: if it looks wrong, the submission is wrong.',
       'Kit graphics follow how the trade actually uses the terms: trim means the sleeve cuffs and collar on a shirt, the leg hems on shorts and the turnover on socks — not an outline round the whole garment; a shirt panel is the shoulder band, and a shorts panel is a block down each side.',
-      'New Excel export: the CSV grid with every colour cell filled with its real colour (text flipped to black or white so it stays readable). Written as SpreadsheetML so it needs no library.'
+      'New Excel export: the CSV grid with every colour cell filled with its real colour (text flipped to black or white so it stays readable). Written as SpreadsheetML so it needs no library.',
+      'A submitted record can now be EDITED here instead of only re-opened: same colour picker the club used, same rules about arrangements. Saving stamps the record as a League edit (who and when), and that shows in the review panel, the kit sheet and both spreadsheet exports.'
     ] }];
     window.nlAuthReady = function (userData) {
       window.NL = window.NL || {}; window.NL.session = userData;
@@ -82,6 +91,9 @@
       else window._toolDeferredSession = userData;
     };
   </script>
+  <!-- Colour taxonomy + picker, shared with the public form so the console
+       offers exactly the same choices when correcting a submission. -->
+  <script src="/club-kits/kit-colours.js?v=1"></script>
   <script src="/system/nl-utils.js?v=27"></script>
   <script src="/system/nl-topbar.js?v=8"></script>
   <script src="/system/auth-guard.js?v=10"></script>
@@ -134,6 +146,36 @@
   .ck-pat { color:var(--navy); font-variation-settings:'wght' 700; }
   .ck-raw { color:var(--amber); }
   .ck-meta { font-size:12.5px; color:var(--text-muted); line-height:1.6; }
+  .ck-edited { color:var(--amber-deep, var(--amber)); font-variation-settings:'wght' 700; }
+
+  /* Edit-in-place (inside the shared NL.modal body) */
+  .ce-kit { border-top:1px solid var(--border); margin-top:14px; padding-top:12px; }
+  .ce-kit__n { font-size:11px; text-transform:uppercase; letter-spacing:.06em;
+               font-variation-settings:'wght' 800; color:var(--primary); margin-bottom:8px; }
+  .ce-gars { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:14px; align-items:start; }
+  @media (max-width:640px){ .ce-gars { grid-template-columns:1fr; } }
+  .ce-g { min-width:0; }
+  .ce-g__h { font-size:11px; text-transform:uppercase; letter-spacing:.06em;
+             font-variation-settings:'wght' 800; color:var(--navy); margin-bottom:6px; }
+  .ce-g__cnt { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .ce-g__cnt span:first-child { font-size:11px; color:var(--text-muted); }
+  .ce-seg { display:inline-flex; border:1px solid var(--border); border-radius:6px; overflow:hidden; background:var(--white); }
+  .ce-seg button { border:0; border-right:1px solid var(--border); background:var(--white); cursor:pointer;
+                   font-family:var(--font); font-size:13px; font-variation-settings:'wght' 700;
+                   color:var(--text); padding:5px 11px; }
+  .ce-seg button:last-child { border-right:0; }
+  .ce-seg button.on { background:var(--primary); color:var(--white); }
+  .ce-col { margin-bottom:8px; }
+  .ce-lbl { display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:.06em;
+            font-variation-settings:'wght' 800; color:var(--text-muted); margin:0 0 3px; }
+  .ce-lbl span { text-transform:none; letter-spacing:0; font-variation-settings:'wght' 600; color:var(--navy-400); }
+  .ce-in { width:100%; box-sizing:border-box; font-family:var(--font); font-size:13.5px; padding:8px 10px;
+           border:1px solid var(--border); border-radius:6px; background:var(--white); color:var(--text); }
+  .ce-in:disabled { background:var(--navy-50); color:var(--navy); font-variation-settings:'wght' 700; }
+  .ce-err { color:var(--red); font-size:13px; min-height:18px; margin:12px 0 0; }
+  /* The shared picker is sized for the big public form; scale it down here. */
+  .ce-col .cb__in { font-size:13.5px; padding:8px 0; }
+  .ce-col .cb__sw { width:20px; height:20px; }
 
   /* ── Kit sheets: one club per printed page ──────────────────────────────
      Same mechanism as club-contacts' handbook forms — screen and print share
@@ -448,13 +490,18 @@
         '<div class="ck-sub"><img alt="" data-crest="' + esc(club) + '" src="' + esc(NL.clubs.crestUrl(club, 'thumb')) + '">' +
           '<p class="ck-meta" style="margin:0;">' +
           (rec.submittedAt ? 'Submitted ' + esc(NL.formatDateTime(rec.submittedAt)) : 'Submitted') +
-          (rec.manufacturer ? '<br>Manufacturer: <b>' + esc(rec.manufacturer) + '</b>' : '') + '</p></div>' +
+          (rec.manufacturer ? '<br>Manufacturer: <b>' + esc(rec.manufacturer) + '</b>' : '') +
+          (rec.editedAt ? '<br><span class="ck-edited">Edited by the League ' + esc(NL.formatDateTime(rec.editedAt)) +
+                          (rec.editedBy ? ' · ' + esc(rec.editedBy) : '') + '</span>' : '') + '</p></div>' +
         kits.map(function (k) {
           return '<div class="ck-kit"><div class="ck-kit__n">' + esc(k.label || k.slot) + '</div>' +
             GARMENTS.map(function (g) { return garmentRow(k[g[0]], g[1]); }).join('') + '</div>';
         }).join('') +
         (anyRaw ? '<p class="ck-meta" style="margin-top:12px;">* typed in rather than picked from the list — worth a check.</p>' : ''),
-      buttons: [{ label: 'Close', className: 'btn--ghost', autofocus: true, onClick: function (c) { c.close(); } }]
+      buttons: [
+        { label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Edit', className: 'btn--primary', autofocus: true, onClick: function (c) { c.close(); editSub(club, rec); } }
+      ]
     });
     var img = ctrl.body.querySelector('[data-crest]');
     if (img) NL.clubs.wireCrestImg(img, club);
@@ -528,6 +575,8 @@
       out.clubs[c.name] = {
         division: c.division || '',
         submittedAt: rec.submittedAt || null,
+        editedAt: rec.editedAt || null,
+        editedBy: rec.editedBy || '',
         manufacturer: rec.manufacturer || '',
         outfield: (rec.outfield || []).map(kit),
         gk: (rec.gk || []).map(kit)
@@ -550,7 +599,7 @@
       'Shirt 1', 'Shirt 2', 'Shirt 3', 'Shirt pattern', 'Shirt family',
       'Shorts 1', 'Shorts 2', 'Shorts detail', 'Shorts family',
       'Socks 1', 'Socks 2', 'Socks detail', 'Socks family',
-      'Manufacturer', 'Submitted', 'Typed in?'
+      'Manufacturer', 'Submitted', 'Edited by League', 'Typed in?'
     ]];
 
     function cols(g, n) {
@@ -586,7 +635,9 @@
           .concat(cols(k.shirt, 3), [patLabel(k.shirt), family(k.shirt)])
           .concat(cols(k.shorts, 2), [patLabel(k.shorts), family(k.shorts)])
           .concat(cols(k.socks, 2), [patLabel(k.socks), family(k.socks)])
-          .concat([rec.manufacturer || '', when, typedIn(k)]));
+          .concat([rec.manufacturer || '', when,
+                   rec.editedAt ? NL.formatDate(rec.editedAt) + (rec.editedBy ? ' (' + rec.editedBy + ')' : '') : '',
+                   typedIn(k)]));
       });
     });
 
@@ -594,6 +645,173 @@
     /* BOM so Excel reads the accented club names correctly. */
     NL.download('club-kits-2026-27.csv', NL.csv(rows, { bom: true }), 'text/csv');
     NL.toast(n + ' kits exported.', 'success');
+  }
+
+  /* ── Edit a submission in place ─────────────────────────────────────────
+     Corrections used to mean Re-open, which deletes the record and makes the
+     club fill the whole form in again. This edits it directly. The RTDB rule
+     already allowed an admin to overwrite an existing submission; what was
+     missing was a way to OFFER the same colour choices, which is why the
+     taxonomy moved into the shared kit-colours.js.
+
+     A save stamps editedAt/editedBy so a League correction stays
+     distinguishable from what the club actually submitted — NL.writeAudit
+     records the write, but the record itself would otherwise look like the
+     club's own answer. */
+  function whoAmI() {
+    var s = (window.NL && NL.session) || {};
+    var u = (firebase.auth && firebase.auth().currentUser) || {};
+    return s.email || s.name || u.email || 'unknown';
+  }
+
+  function garmentEditor(host, garment, kind, max, isShirt) {
+    garment.colours = (garment.colours || []).slice();
+    if (!garment.colours.length) garment.colours = [null];
+
+    host.innerHTML =
+      '<div class="ce-g__h">' + esc(kind) + '</div>' +
+      '<div class="ce-g__cnt"><span>Colours</span><span class="ce-seg"></span></div>' +
+      '<div class="ce-g__cols"></div><div class="ce-g__pat"></div>';
+    var seg = host.querySelector('.ce-seg'),
+        cols = host.querySelector('.ce-g__cols'),
+        pat = host.querySelector('.ce-g__pat');
+
+    function paintSeg() {
+      var h = '';
+      for (var i = 1; i <= max; i++) {
+        h += '<button type="button" data-n="' + i + '"' +
+             (i === garment.colours.length ? ' class="on"' : '') + '>' + i + '</button>';
+      }
+      seg.innerHTML = h;
+    }
+    function paintPat() {
+      var multi = garment.colours.filter(Boolean).length > 1 || garment.colours.length > 1;
+      if (!multi) {
+        /* Mirrors the form: a single-colour shirt is locked to Plain and says
+           so; shorts and socks have no arrangement at one colour. */
+        if (isShirt) { garment.pattern = 'plain'; garment.patternLabel = 'Plain'; }
+        else { delete garment.detail; delete garment.detailLabel; }
+        pat.innerHTML = isShirt
+          ? '<label class="ce-lbl">Arrangement</label><select class="ce-in" disabled><option>Plain</option></select>'
+          : '';
+        return;
+      }
+      var opts = isShirt ? NLKit.PATTERNS.filter(function (o) { return o[0] !== 'plain'; }) : NLKit.DETAILS;
+      var val = isShirt ? (garment.pattern === 'plain' ? '' : garment.pattern) : garment.detail;
+      var other = (isShirt ? garment.patternOther : garment.detailOther) || '';
+      pat.innerHTML = '<label class="ce-lbl">Arrangement</label>' +
+        '<select class="ce-in" data-sel><option value="">Please choose…</option>' +
+        opts.map(function (o) {
+          return '<option value="' + o[0] + '"' + (o[0] === val ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
+        }).join('') + '</select>' +
+        (val === 'other' ? '<input class="ce-in" data-other style="margin-top:8px;" placeholder="Describe it" value="' + esc(other) + '">' : '');
+      pat.querySelector('[data-sel]').addEventListener('change', function () {
+        var k = this.value, lab = '';
+        for (var i = 0; i < opts.length; i++) if (opts[i][0] === k) lab = opts[i][1];
+        if (isShirt) { garment.pattern = k; garment.patternLabel = lab; }
+        else { garment.detail = k; garment.detailLabel = lab; }
+        paintPat();
+      });
+      var oth = pat.querySelector('[data-other]');
+      if (oth) oth.addEventListener('input', function () {
+        if (isShirt) { garment.patternOther = this.value; garment.patternLabel = this.value || 'Other'; }
+        else { garment.detailOther = this.value; garment.detailLabel = this.value || 'Other'; }
+      });
+    }
+    function paintCols() {
+      cols.innerHTML = '';
+      garment.colours.forEach(function (c, i) {
+        var row = document.createElement('div');
+        row.className = 'ce-col';
+        row.innerHTML = '<label class="ce-lbl">Colour ' + (i + 1) +
+          (garment.colours.length > 1 && i === 0 ? ' <span>most dominant</span>' : '') + '</label><div data-cb></div>';
+        cols.appendChild(row);
+        NLKit.colourField(row.querySelector('[data-cb]'), c, function (v) { garment.colours[i] = v; });
+      });
+    }
+    seg.addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-n]'); if (!b) return;
+      var n = +b.getAttribute('data-n');
+      while (garment.colours.length < n) garment.colours.push(null);
+      garment.colours.length = n;
+      /* Same guard as the form: bumping 1 → 2 must clear the auto-'plain' so a
+         real arrangement has to be chosen rather than silently accepted. */
+      if (n > 1 && garment.pattern === 'plain') { garment.pattern = ''; garment.patternLabel = ''; }
+      paintSeg(); paintCols(); paintPat();
+    });
+    paintSeg(); paintCols(); paintPat();
+  }
+
+  function editSub(club, rec) {
+    /* Deep clone — nothing touches S.subs until the save succeeds. */
+    var work = JSON.parse(JSON.stringify(rec));
+    var kits = (work.outfield || []).map(function (k) { return { set: 'outfield', k: k }; })
+      .concat((work.gk || []).map(function (k) { return { set: 'gk', k: k }; }));
+
+    var wrap = document.createElement('div');
+    wrap.innerHTML =
+      '<p class="ck-meta" style="margin:0 0 10px;">Correcting <b>' + esc(club) + '</b>. Saving stamps this as a League edit, ' +
+      'so the record still shows it was changed after the club submitted it.</p>' +
+      '<div><label class="ce-lbl">Kit manufacturer</label>' +
+      '<input class="ce-in" id="ceMan" value="' + esc(work.manufacturer || '') + '"></div>' +
+      kits.map(function (x, i) {
+        return '<div class="ce-kit"><div class="ce-kit__n">' + esc(x.k.label || x.k.slot) + '</div>' +
+          '<div class="ce-gars" data-kit="' + i + '"></div></div>';
+      }).join('') +
+      '<p class="ce-err" id="ceErr"></p>';
+
+    var ctrl = NL.modal({
+      title: 'Edit ' + club, width: 'wide', body: wrap,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Save changes', className: 'btn--primary', onClick: function (c) { save(c); } }
+      ]
+    });
+
+    kits.forEach(function (x, i) {
+      var host = ctrl.body.querySelector('[data-kit="' + i + '"]');
+      GARMENTS.forEach(function (g) {
+        x.k[g[0]] = x.k[g[0]] || { colours: [] };
+        var cell = document.createElement('div');
+        cell.className = 'ce-g';
+        host.appendChild(cell);
+        garmentEditor(cell, x.k[g[0]], g[1], g[0] === 'shirt' ? 3 : 2, g[2]);
+      });
+    });
+
+    function save(c) {
+      var problems = [];
+      kits.forEach(function (x) {
+        GARMENTS.forEach(function (g) {
+          var gar = x.k[g[0]], used = (gar.colours || []).filter(Boolean);
+          var label = (x.k.label || x.k.slot) + ' — ' + g[1].toLowerCase();
+          if (!used.length) { problems.push(label + ': needs at least one colour.'); return; }
+          if (used.length < gar.colours.length) problems.push(label + ': every colour box needs a value.');
+          if (used.length > 1) {
+            var key = g[2] ? gar.pattern : gar.detail;
+            if (!key) problems.push(label + ': choose how the colours are arranged.');
+          }
+          gar.colours = used;   /* drop the empties before saving */
+        });
+      });
+      if (problems.length) {
+        ctrl.body.querySelector('#ceErr').textContent = problems[0] +
+          (problems.length > 1 ? '  (+' + (problems.length - 1) + ' more)' : '');
+        return;
+      }
+
+      work.manufacturer = String(ctrl.body.querySelector('#ceMan').value || '').trim();
+      work.editedAt = Date.now();
+      work.editedBy = whoAmI();
+
+      if (NL.writeAudit) NL.writeAudit('clubkits_edit', 'Edited kit submission for ' + club);
+      db.ref(BASE + '/submissions/' + club).set(work).then(function () {
+        S.subs[club] = work;
+        c.close(); NL.toast(club + ' updated.', 'success'); render();
+      }).catch(function (e) {
+        ctrl.body.querySelector('#ceErr').textContent = 'Save failed: ' + (e.message || e);
+      });
+    }
   }
 
   /* ── Kit sheets (print → PDF) ───────────────────────────────────────────*/
@@ -619,7 +837,8 @@
       return GARMENTS.some(function (g) { return (((k[g[0]] || {}).colours) || []).some(function (x) { return x.raw; }); });
     });
     var meta = [c.division || '', rec.manufacturer ? 'Kit by ' + rec.manufacturer : '',
-                rec.submittedAt ? 'Submitted ' + NL.formatDate(rec.submittedAt) : '']
+                rec.submittedAt ? 'Submitted ' + NL.formatDate(rec.submittedAt) : '',
+                rec.editedAt ? 'Corrected by the League ' + NL.formatDate(rec.editedAt) : '']
                .filter(Boolean).join('  ·  ');
     return '<div class="ks-form">' +
       '<div class="ks-form__head">' +
@@ -735,7 +954,7 @@
       'Shirt 1', 'Shirt 2', 'Shirt 3', 'Shirt pattern', 'Shirt family',
       'Shorts 1', 'Shorts 2', 'Shorts detail', 'Shorts family',
       'Socks 1', 'Socks 2', 'Socks detail', 'Socks family',
-      'Manufacturer', 'Submitted', 'Typed in?'];
+      'Manufacturer', 'Submitted', 'Edited by League', 'Typed in?'];
 
     var styles = {};                       /* hex -> style id */
     function styleFor(hex) {
@@ -780,7 +999,9 @@
           colourCells(k.shirt, 3) + cell(patLabel(k.shirt)) + cell(family(k.shirt)) +
           colourCells(k.shorts, 2) + cell(patLabel(k.shorts)) + cell(family(k.shorts)) +
           colourCells(k.socks, 2) + cell(patLabel(k.socks)) + cell(family(k.socks)) +
-          cell(rec.manufacturer || '') + cell(when) + cell(typedIn(k)) + '</Row>';
+          cell(rec.manufacturer || '') + cell(when) +
+          cell(rec.editedAt ? NL.formatDate(rec.editedAt) + (rec.editedBy ? ' (' + rec.editedBy + ')' : '') : '') +
+          cell(typedIn(k)) + '</Row>';
       });
     });
     if (!n) { NL.toast('No submissions yet — nothing to export.', 'info'); return; }
