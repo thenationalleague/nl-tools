@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<!--
+  club-kits/index.html  v1.0 (29/07/2026)
+  Public club KIT COLOUR collection — guided wizard (capability-URL pattern).
+  Sibling of club-contacts/index.html; same token model, different payload.
+
+  Why this exists: clubs-meta `kit` is free text and unusable as data — 571
+  strings across 82 clubs, 120 distinct, including "White* option blue",
+  "Fluro Green", "Shock red", "butercup" and "Yellow & Orange Splashes". This
+  form collects the same information as a STRUCTURED record so kit clashes can
+  actually be queried rather than string-matched.
+
+  Flow:
+    1  Welcome     — club confirmed from the token, submitter name + email
+    2  Your kits   — how many outfield (2-3) and GK (1-3), plus manufacturer
+    3..n  One step per kit — Home / Away / Third, then GK First / Second / Third
+    n+1  Review    — everything on one page, then submit
+
+  Each kit captures shirt / shorts / socks. Colours are picked from a
+  family+shade taxonomy (see COLOURS) so the result aggregates: "how many
+  clubs wear green" is a filter, not a string search. Free text is allowed but
+  lands as { family:null, raw:true } so it is flagged for review rather than
+  silently polluting the taxonomy. Shirts with >1 colour must declare a
+  pattern; shorts/socks with >1 colour declare a lighter trim/stripe/hoops
+  detail (a two-colour sock is otherwise ambiguous).
+
+  Storage (RTDB):
+    app-data/ops-club-kits/invites/<token>      { club, createdAt }   (minted by admin.html)
+    app-data/ops-club-kits/submissions/<token>  the record, WRITE-ONCE
+  Draft lives in localStorage until submit, keyed by token.
+
+  NO nl-utils.js ON PURPOSE. This page is unauthenticated, and nl-utils
+  auto-installs the audit hook (writes to admin/audit on every RTDB write),
+  which an anonymous visitor cannot do. club-contacts/index.html omits it for
+  the same reason. Keep this page to firebase app+database and nl-brand.css.
+
+  The colour combobox here is a canon candidate — NL.clubPicker is the same
+  control welded to clubs. Deliberately tool-local for now; see the summary on
+  the PR that introduced this file.
+-->
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kit colours — The National League</title>
+<link rel="stylesheet" href="/system/nl-brand.css?v=26">
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script>
+firebase.initializeApp({
+  apiKey: "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+  authDomain: "nl-tools.firebaseapp.com",
+  databaseURL: "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "nl-tools", storageBucket: "nl-tools.firebasestorage.app",
+  messagingSenderId: "801354670005", appId: "1:801354670005:web:05d8ebad3e7e63610d03fc"
+});
+var db = firebase.database();
+</script>
+<style>
+  body { margin:0; background: var(--off-white); color: var(--text); }
+  .kw { max-width: 820px; margin: 0 auto; padding: 0 0 48px; }
+  .kw-gate { text-align:center; padding: 80px 20px; color: var(--text-muted); }
+
+  /* Hero */
+  .kh { background: linear-gradient(135deg, var(--navy) 0%, var(--navy-600) 60%, var(--primary) 160%); color: var(--white); padding: 22px 20px; display:flex; align-items:center; gap:16px; }
+  .kh__crest { width:56px; height:56px; object-fit:contain; background:var(--white); border-radius:8px; padding:5px; flex-shrink:0; }
+  .kh__t h1 { margin:0; font-size:22px; font-variation-settings:'wght' 900; color:var(--white); }
+  .kh__t .kicker { font-size:11px; text-transform:uppercase; letter-spacing:.14em; color:var(--navy-100); }
+
+  /* Stepper */
+  .ks { position:sticky; top:0; z-index:5; background:var(--white); border-bottom:1px solid var(--border); padding:14px 20px 12px; }
+  .ks__bar { height:5px; background:var(--navy-50); border-radius:3px; overflow:hidden; margin-bottom:10px; }
+  .ks__fill { height:100%; background:var(--primary); border-radius:3px; transition:width .25s; }
+  .ks__row { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .ks__count { font-size:11px; text-transform:uppercase; letter-spacing:.06em; font-variation-settings:'wght' 800; color:var(--text-muted); white-space:nowrap; }
+  .ks__now { font-size:13px; font-variation-settings:'wght' 800; color:var(--navy); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  /* Body */
+  .kb { padding:22px 0 0; }
+  .kb h2.step { margin:0 0 4px; padding:0 20px; font-size:20px; color:var(--navy); font-variation-settings:'wght' 900; }
+  .kb p.sub { color:var(--text-muted); font-size:14px; margin:0 0 20px; padding:0 20px; line-height:1.55; }
+  .kc { background:var(--white); border:1px solid var(--border); border-top:3px solid var(--primary); border-radius:10px; padding:18px 20px; margin-bottom:16px; box-shadow:0 1px 3px var(--navy-50); }
+  .kc > h3 { margin:0 0 3px; font-size:15px; color:var(--navy); font-variation-settings:'wght' 800; }
+  .kc__sub { font-size:12.5px; color:var(--text-muted); margin:0 0 14px; line-height:1.5; }
+  label.fl { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.07em; font-variation-settings:'wght' 800; color:var(--text-muted); margin:0 0 4px; }
+  .fi { width:100%; box-sizing:border-box; font-family:var(--font); font-size:14px; padding:9px 11px; border:1px solid var(--border); border-radius:6px; background:var(--white); color:var(--text); }
+  .fi:focus { outline:none; border-color:var(--navy); box-shadow:var(--focus-ring); }
+  .fgrid { display:grid; grid-template-columns:1fr 1fr; gap:12px; align-items:start; }
+  @media (max-width:620px){ .fgrid { grid-template-columns:1fr; } }
+
+  /* Segmented count picker */
+  .seg { display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--white); }
+  .seg button { border:0; background:var(--white); font-family:var(--font); font-size:14px; font-variation-settings:'wght' 700; color:var(--text); padding:9px 18px; cursor:pointer; border-right:1px solid var(--border); }
+  .seg button:last-child { border-right:0; }
+  .seg button:hover:not(.on) { background:var(--navy-50); }
+  .seg button.on { background:var(--primary); color:var(--white); }
+  .seg button:focus-visible { outline:none; box-shadow:inset 0 0 0 2px var(--navy); }
+
+  /* Garment block */
+  .gm { display:grid; grid-template-columns:76px 1fr; gap:16px; align-items:start; padding:16px 0; border-top:1px solid var(--border); }
+  .gm:first-of-type { border-top:0; padding-top:4px; }
+  @media (max-width:520px){ .gm { grid-template-columns:56px 1fr; gap:12px; } }
+  .gm__ico { display:flex; flex-direction:column; align-items:center; gap:6px; }
+  .gm__ico svg { width:100%; height:auto; color:var(--navy-300); }
+  .gm__name { font-size:11px; text-transform:uppercase; letter-spacing:.07em; font-variation-settings:'wght' 800; color:var(--navy); }
+  /* Chosen colours sit BESIDE the outline, never inside it — the outline is
+     indicative only and is deliberately never filled. */
+  .gm__chips { display:flex; gap:3px; flex-wrap:wrap; justify-content:center; }
+  .gm__chip { width:12px; height:12px; border-radius:3px; border:1px solid var(--navy-200); }
+  .gm__rows { min-width:0; }
+  .gm__cnt { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+  .gm__cnt span { font-size:12px; color:var(--text-muted); }
+  .gm__col { margin-bottom:9px; }
+  .gm__col .fl { display:flex; justify-content:space-between; align-items:baseline; }
+  .gm__ord { text-transform:none; letter-spacing:0; font-variation-settings:'wght' 600; color:var(--navy-400); }
+
+  /* Colour combobox */
+  .cb { position:relative; }
+  .cb__wrap { display:flex; align-items:center; gap:8px; border:1px solid var(--border); border-radius:6px; background:var(--white); padding:0 10px 0 8px; }
+  .cb__wrap:focus-within { border-color:var(--navy); box-shadow:var(--focus-ring); }
+  .cb__sw { width:20px; height:20px; border-radius:4px; border:1px solid var(--navy-200); flex:0 0 auto; background:var(--off-white); }
+  .cb__sw--none { background:repeating-linear-gradient(45deg, var(--navy-50) 0 4px, var(--white) 4px 8px); }
+  .cb__in { flex:1; min-width:0; border:0; outline:none; background:none; font-family:var(--font); font-size:14px; padding:9px 0; color:var(--text); }
+  .cb__x { border:0; background:none; cursor:pointer; color:var(--text-muted); font-size:16px; line-height:1; padding:4px; }
+  .cb__x:hover { color:var(--primary); }
+  .cb__list { position:absolute; z-index:20; left:0; right:0; top:calc(100% + 4px); max-height:280px; overflow-y:auto; background:var(--white); border:1px solid var(--border); border-radius:8px; box-shadow:0 6px 18px var(--navy-100); display:none; }
+  .cb__list.open { display:block; }
+  .cb__grp { font-size:10px; text-transform:uppercase; letter-spacing:.08em; font-variation-settings:'wght' 800; color:var(--text-muted); padding:8px 12px 4px; position:sticky; top:0; background:var(--white); }
+  .cb__opt { display:flex; align-items:center; gap:9px; width:100%; box-sizing:border-box; text-align:left; border:0; background:none; font-family:var(--font); font-size:14px; color:var(--text); padding:7px 12px; cursor:pointer; }
+  .cb__opt:hover, .cb__opt.act { background:var(--navy-50); }
+  .cb__opt .cb__sw { width:18px; height:18px; }
+  .cb__opt em { font-style:normal; font-variation-settings:'wght' 800; }
+  .cb__free { color:var(--navy); border-top:1px solid var(--border); }
+
+  /* Review */
+  .rv { font-size:13.5px; }
+  .rv__kit { border-top:1px solid var(--border); padding:12px 0; }
+  .rv__kit:first-child { border-top:0; }
+  .rv__kn { font-size:12px; text-transform:uppercase; letter-spacing:.06em; font-variation-settings:'wght' 800; color:var(--primary); margin-bottom:5px; }
+  .rv__g { display:flex; align-items:center; gap:8px; padding:3px 0; flex-wrap:wrap; }
+  .rv__gl { color:var(--text-muted); min-width:56px; }
+  .rv__sw { width:14px; height:14px; border-radius:3px; border:1px solid var(--navy-200); flex:0 0 auto; }
+  .rv__pat { color:var(--navy); font-variation-settings:'wght' 700; }
+  .flag { color:var(--amber-dark, var(--amber)); }
+
+  /* Nav */
+  .kn { display:flex; align-items:center; gap:12px; padding:4px 20px 0; }
+  .kn__sp { flex:1; }
+  .kn__saved { font-size:12px; color:var(--green); opacity:0; transition:opacity .2s; }
+  .kn__saved.show { opacity:1; }
+  .kn__status { font-size:13px; color:var(--red); padding:10px 20px 0; }
+
+  .note { background:var(--navy-50); border-radius:8px; padding:11px 13px; font-size:12.5px; color:var(--navy); line-height:1.5; }
+</style>
+</head>
+<body>
+
+<div class="kw">
+  <div id="kGate" class="kw-gate">Checking your link…</div>
+
+  <div id="kApp" style="display:none;">
+    <div class="kh">
+      <!-- Starts on the NL rose so it is never a broken box; boot swaps in the
+           club crest, and a missing crest falls back to the rose (same chain
+           as NL.clubs.wireCrestImg, which this page can't load — see header). -->
+      <img id="kCrest" class="kh__crest" alt=""
+           src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png">
+      <div class="kh__t">
+        <div class="kicker">National League — 2026/27</div>
+        <h1 id="kClub">—</h1>
+      </div>
+    </div>
+
+    <div class="ks">
+      <div class="ks__bar"><div id="kFill" class="ks__fill" style="width:0"></div></div>
+      <div class="ks__row">
+        <div id="kNow" class="ks__now">—</div>
+        <div id="kCount" class="ks__count">Step 1</div>
+      </div>
+    </div>
+
+    <div class="kb"><div id="kStep"></div></div>
+
+    <div id="kStatus" class="kn__status"></div>
+    <div class="kn">
+      <button type="button" id="kBack" class="btn btn--ghost">Back</button>
+      <div class="kn__sp"></div>
+      <span id="kSaved" class="kn__saved">Saved</span>
+      <button type="button" id="kNext" class="btn btn--primary">Next</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ── Colour taxonomy ───────────────────────────────────────────────────
+     family → [shade key, shade label, hex]. Shades are grounded in the 120
+     distinct strings already in clubs-meta, not invented: sky/royal/light
+     blue, claret, amber, teal, mint, turquoise, maroon, stone, gold, silver,
+     lilac, lavender and volt all appear there today.
+
+     Neon shades sit INSIDE the five families where they actually occur
+     (yellow/green/orange/pink/purple) rather than behind a "fluorescent"
+     modifier on every row: a type-ahead makes list length nearly free,
+     typing "neon" surfaces all of them at once, and it is one less control
+     on a form clubs fill in on a phone. Every neon string in the existing
+     data sits in a goalkeeper slot.
+
+     Shade labels are STANDALONE-COMPLETE ("Forest green", not "Forest") and
+     are used verbatim as the stored label — the family is carried alongside as
+     its own field for aggregation, and the dropdown's group heading supplies
+     the context on screen. Concatenating the two produced junk like
+     "Yellow — Neon yellow" and "Amber / gold" for plain amber. */
+  var COLOURS = [
+    ['white',  'White', [
+      ['white','White','#FFFFFF'], ['cream','Cream','#F5EFE0'], ['off-white','Off-white','#EFEEE9'] ]],
+    ['black',  'Black', [
+      ['black','Black','#111111'], ['charcoal','Charcoal','#36393D'] ]],
+    ['grey',   'Grey', [
+      ['light-grey','Light grey','#C9CCD1'], ['grey','Grey','#8A8F98'],
+      ['dark-grey','Dark grey','#4A4E55'], ['silver','Silver','#C0C4CC'] ]],
+    ['red',    'Red', [
+      ['red','Red','#D0021B'], ['scarlet','Scarlet','#F5333F'], ['dark-red','Dark red','#8E1420'] ]],
+    ['claret', 'Claret', [
+      ['claret','Claret','#7A263A'], ['burgundy','Burgundy','#5C1A2B'], ['maroon','Maroon','#6B1F2E'] ]],
+    ['pink',   'Pink', [
+      ['pink','Pink','#F49AC2'], ['hot-pink','Hot pink','#E6007E'], ['neon-pink','Neon pink','#FF2D95'] ]],
+    ['orange', 'Orange', [
+      ['orange','Orange','#F5821F'], ['burnt-orange','Burnt orange','#B8500F'], ['neon-orange','Neon orange','#FF6A00'] ]],
+    ['amber',  'Amber / gold', [
+      ['amber','Amber','#FFB300'], ['gold','Gold','#D4AF37'], ['mustard','Mustard','#C9A227'] ]],
+    ['yellow', 'Yellow', [
+      ['yellow','Yellow','#FFE000'], ['lemon','Lemon','#FFF14F'],
+      ['neon-yellow','Neon yellow','#EAFF00'], ['volt','Volt','#CDFF00'] ]],
+    ['green',  'Green', [
+      ['green','Green','#00A650'], ['mint','Mint green','#A8E6CF'], ['lime','Lime green','#B4D000'],
+      ['emerald','Emerald green','#009B63'], ['forest','Forest green','#1B5E33'],
+      ['bottle','Bottle green','#12452A'], ['neon-green','Neon green','#39FF14'] ]],
+    ['teal',   'Teal', [
+      ['teal','Teal','#008080'], ['turquoise','Turquoise','#30D5C8'], ['aqua','Aqua','#5FE0D0'] ]],
+    ['blue',   'Blue', [
+      ['blue','Blue','#0057B8'], ['sky','Sky blue','#6CACE4'], ['light-blue','Light blue','#8FC7E8'],
+      ['royal','Royal blue','#0033A0'], ['electric','Electric blue','#0B7FFF'] ]],
+    ['navy',   'Navy', [
+      ['navy','Navy','#12284C'], ['midnight','Midnight navy','#0B1A33'] ]],
+    ['purple', 'Purple', [
+      ['purple','Purple','#6A2C91'], ['lilac','Lilac','#C8A2C8'], ['lavender','Lavender','#B57EDC'],
+      ['violet','Violet','#7F00FF'], ['neon-purple','Neon purple','#B026FF'] ]],
+    ['brown',  'Brown', [
+      ['brown','Brown','#6B4423'], ['tan','Tan','#B08D57'], ['stone','Stone','#D6CCC2'] ]]
+  ];
+
+  /* Flat option list, built once. */
+  var OPTS = [];
+  COLOURS.forEach(function (f) {
+    f[2].forEach(function (s) {
+      OPTS.push({ family: f[0], familyLabel: f[1], shade: s[0], label: s[1], hex: s[2] });
+    });
+  });
+
+  /* Shirt patterns. "Plain" is explicit so a 2-colour shirt that is really
+     just a trimmed plain shirt has somewhere honest to go. */
+  var PATTERNS = [
+    ['plain','Plain'], ['stripes','Stripes'], ['pinstripes','Pinstripes'], ['hoops','Hoops'],
+    ['halves','Halves'], ['quarters','Quarters'], ['sash','Sash (diagonal)'], ['chevrons','Chevrons'],
+    ['checks','Checks'], ['gradient','Gradient / fade'], ['print','All-over print / graphic'],
+    ['panels','Panels (shoulder / side)'], ['sleeves','Coloured sleeves'], ['trim','Trim only'],
+    ['speckle','Speckle / splash'], ['other','Other']
+  ];
+  /* Lighter equivalent for shorts + socks — a two-colour sock is otherwise
+     ambiguous between a trim and a hoop. */
+  var DETAILS = [ ['trim','Trim'], ['stripe','Stripe / panel'], ['hoops','Hoops'], ['other','Other'] ];
+
+  var GARMENTS = [ ['shirt','Shirt',3], ['shorts','Shorts',2], ['socks','Socks',2] ];
+
+  /* Indicative outlines. Stroke only — never filled. */
+  var SVGS = {
+    shirt: '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" aria-hidden="true"><path d="M21 7 L27 5 a6 5.5 0 0 0 10 0 L43 7 L56 15 L49.5 26 L45 22.5 L45 58 L19 58 L19 22.5 L14.5 26 L8 15 Z"/></svg>',
+    shorts: '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" aria-hidden="true"><path d="M13 12 H51 L55 50 H37 L32 29 L27 50 H9 Z"/></svg>',
+    socks: '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" aria-hidden="true"><path d="M23 6 H41 V33 Q41 42 47 46 L51 53 Q38 60 30 52 Q23 45 23 35 Z"/></svg>'
+  };
+
+  function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
+    return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]; }); }
+  function el(id) { return document.getElementById(id); }
+  function gate(msg) { el('kGate').innerHTML = esc(msg); el('kGate').style.display = ''; el('kApp').style.display = 'none'; }
+  function validEmail(s) { return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(s || '').trim()); }
+
+  var CREST_BASE = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
+  var ROSE = CREST_BASE + 'National%20League%20rose.png';
+  var SEASON = '2026';
+
+  var token = new URLSearchParams(location.search).get('t') || '';
+  var LS_KEY = 'nl-club-kits-' + token;
+  var clubName = '';
+  var cur = 0;
+
+  /* ── Data model ────────────────────────────────────────────────────────
+     kit = { shirt:{colours:[c|null,…], pattern, patternOther},
+             shorts:{colours:[…], detail, detailOther}, socks:{…} }
+     colour = { family, shade, label, hex } | { family:null, label:'<typed>', hex:null, raw:true }
+     Records are self-describing (label + hex travel with the value) so the
+     admin console and any export need no copy of this taxonomy. */
+  function blankGarment() { return { colours: [null], pattern: '', patternOther: '', detail: '', detailOther: '' }; }
+  function blankKit() { return { shirt: blankGarment(), shorts: blankGarment(), socks: blankGarment() }; }
+
+  var data = {
+    yourName: '', yourEmail: '', manufacturer: '',
+    nOutfield: 2, nGk: 1,
+    outfield: [blankKit(), blankKit(), blankKit()],
+    gk: [blankKit(), blankKit(), blankKit()]
+  };
+
+  var OUTFIELD_LABELS = ['Home', 'Away', 'Third'];
+  var GK_LABELS = ['Goalkeeper — first', 'Goalkeeper — second', 'Goalkeeper — third'];
+
+  /* Steps are derived from the counts, so changing 2→3 kits just grows the list. */
+  function steps() {
+    var out = [ { kind: 'welcome', label: 'Welcome' }, { kind: 'counts', label: 'Your kits' } ];
+    for (var i = 0; i < data.nOutfield; i++) out.push({ kind: 'kit', set: 'outfield', idx: i, label: OUTFIELD_LABELS[i] });
+    for (var j = 0; j < data.nGk; j++) out.push({ kind: 'kit', set: 'gk', idx: j, label: GK_LABELS[j] });
+    out.push({ kind: 'review', label: 'Review & submit' });
+    return out;
+  }
+
+  /* ── Colour combobox ───────────────────────────────────────────────────
+     Type-ahead over OPTS, grouped by family, free text allowed. This is the
+     canon candidate noted in the file header: NL.clubPicker is this same
+     control specialised to clubs. */
+  function colourField(host, value, onChange) {
+    var open = false, act = -1, shown = [];
+
+    host.className = 'cb';
+    host.innerHTML =
+      '<div class="cb__wrap">' +
+        '<span class="cb__sw"></span>' +
+        '<input class="cb__in" type="text" autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list" placeholder="Start typing a colour…">' +
+        '<button type="button" class="cb__x" aria-label="Clear" style="display:none;">&times;</button>' +
+      '</div><div class="cb__list" role="listbox"></div>';
+
+    var sw = host.querySelector('.cb__sw'), input = host.querySelector('.cb__in'),
+        clear = host.querySelector('.cb__x'), list = host.querySelector('.cb__list');
+
+    function paint(v) {
+      input.value = v ? v.label : '';
+      clear.style.display = v ? '' : 'none';
+      if (v && v.hex) { sw.style.background = v.hex; sw.classList.remove('cb__sw--none'); }
+      else { sw.style.background = ''; sw.classList.add('cb__sw--none'); }
+    }
+
+    function filtered(q) {
+      q = String(q || '').trim().toLowerCase();
+      if (!q) return OPTS.slice();
+      return OPTS.filter(function (o) {
+        return o.label.toLowerCase().indexOf(q) > -1 ||
+               o.family.indexOf(q) > -1 || o.shade.indexOf(q) > -1;
+      });
+    }
+
+    function render(q) {
+      shown = filtered(q);
+      var typed = String(input.value || '').trim();
+      var exact = shown.some(function (o) { return o.label.toLowerCase() === typed.toLowerCase(); });
+      var html = '', lastFam = null;
+      shown.forEach(function (o, i) {
+        if (o.family !== lastFam) { html += '<div class="cb__grp">' + esc(o.familyLabel) + '</div>'; lastFam = o.family; }
+        html += '<button type="button" class="cb__opt' + (i === act ? ' act' : '') + '" role="option" data-i="' + i + '">' +
+                  '<span class="cb__sw" style="background:' + o.hex + '"></span>' +
+                  '<span>' + esc(o.label) + '</span></button>';
+      });
+      /* Free-text escape hatch — kept, but marked so it can be reviewed. */
+      if (typed && !exact) {
+        html += '<button type="button" class="cb__opt cb__free" role="option" data-free="1">' +
+                  '<span class="cb__sw cb__sw--none"></span><span>Use “<em>' + esc(typed) + '</em>” as entered</span></button>';
+      }
+      if (!html) html = '<div class="cb__grp">No match — keep typing to enter it as free text</div>';
+      list.innerHTML = html;
+      var a = list.querySelector('.cb__opt.act'); if (a) a.scrollIntoView({ block: 'nearest' });
+    }
+
+    function show() { open = true; list.classList.add('open'); input.setAttribute('aria-expanded', 'true'); render(input.value); }
+    function hide() { open = false; act = -1; list.classList.remove('open'); input.setAttribute('aria-expanded', 'false'); }
+
+    function commit(v) { value = v; paint(v); hide(); onChange(v); }
+    function commitFree() {
+      var t = String(input.value || '').trim();
+      if (!t) { commit(null); return; }
+      var hit = OPTS.filter(function (o) { return o.label.toLowerCase() === t.toLowerCase(); })[0];
+      commit(hit ? { family: hit.family, shade: hit.shade, label: hit.label, hex: hit.hex }
+                 : { family: null, shade: null, label: t, hex: null, raw: true });
+    }
+
+    input.addEventListener('focus', show);
+    input.addEventListener('click', show);
+    input.addEventListener('input', function () { if (!open) show(); act = -1; render(input.value); });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); if (!open) { show(); return; } act = Math.min(act + 1, shown.length - 1); render(input.value); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); act = Math.max(act - 1, -1); render(input.value); }
+      else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (open && act > -1 && shown[act]) { var o = shown[act]; commit({ family:o.family, shade:o.shade, label:o.label, hex:o.hex }); }
+        else commitFree();
+      } else if (e.key === 'Escape') { hide(); }
+    });
+    /* Blur commits synchronously — a deferred commit loses the race against
+       any re-render caused by the click that took the focus away. */
+    input.addEventListener('blur', function () { if (input.isConnected) commitFree(); });
+
+    list.addEventListener('mousedown', function (e) {
+      var b = e.target.closest('.cb__opt'); if (!b) return;
+      e.preventDefault();
+      if (b.hasAttribute('data-free')) { commitFree(); return; }
+      var o = shown[+b.getAttribute('data-i')];
+      if (o) commit({ family: o.family, shade: o.shade, label: o.label, hex: o.hex });
+    });
+    clear.addEventListener('mousedown', function (e) { e.preventDefault(); input.value = ''; commit(null); });
+
+    paint(value);
+    return host;
+  }
+
+  /* ── Render ────────────────────────────────────────────────────────────*/
+  function renderChrome() {
+    var S = steps();
+    el('kFill').style.width = Math.round((cur / (S.length - 1)) * 100) + '%';
+    el('kNow').textContent = S[cur].label;
+    el('kCount').textContent = 'Step ' + (cur + 1) + ' of ' + S.length;
+    el('kBack').style.visibility = cur === 0 ? 'hidden' : '';
+    el('kNext').textContent = S[cur].kind === 'review' ? 'Submit to the League' : 'Next';
+    el('kNext').className = 'btn ' + (S[cur].kind === 'review' ? 'btn--primary' : 'btn--navy');
+  }
+
+  function render() {
+    var S = steps(), st = S[cur], host = el('kStep');
+    el('kStatus').textContent = '';
+    if (st.kind === 'welcome') renderWelcome(host);
+    else if (st.kind === 'counts') renderCounts(host);
+    else if (st.kind === 'kit') renderKit(host, st);
+    else renderReview(host);
+    renderChrome();
+  }
+
+  function renderWelcome(host) {
+    host.innerHTML =
+      '<h2 class="step">Your club’s kit colours</h2>' +
+      '<p class="sub">The League is rebuilding the kit records it holds for all 72 clubs, so fixture kit clashes can be checked properly. It should take about five minutes.</p>' +
+      '<div class="kc">' +
+        '<h3>You are submitting for ' + esc(clubName) + '</h3>' +
+        '<p class="kc__sub">If that is not your club, please stop and contact the League — this link is specific to one club.</p>' +
+        '<div class="fgrid">' +
+          '<div><label class="fl" for="wName">Your name</label><input class="fi" id="wName" type="text" value="' + esc(data.yourName) + '"></div>' +
+          '<div><label class="fl" for="wEmail">Your email</label><input class="fi" id="wEmail" type="email" value="' + esc(data.yourEmail) + '"></div>' +
+        '</div>' +
+        '<p class="kc__sub" style="margin:12px 0 0;">So we know who to come back to if anything needs checking.</p>' +
+      '</div>';
+    el('wName').addEventListener('input', function () { data.yourName = this.value; touch(); });
+    el('wEmail').addEventListener('input', function () { data.yourEmail = this.value; touch(); });
+  }
+
+  /* id is optional — the per-garment counters are found by class within their
+     own block, so they pass '' and must not emit an empty id attribute. */
+  function segment(id, from, to, val) {
+    var h = '<div class="seg"' + (id ? ' id="' + id + '"' : '') + '>';
+    for (var i = from; i <= to; i++) h += '<button type="button" data-n="' + i + '"' + (i === val ? ' class="on"' : '') + '>' + i + '</button>';
+    return h + '</div>';
+  }
+
+  function renderCounts(host) {
+    host.innerHTML =
+      '<h2 class="step">How many kits are you submitting?</h2>' +
+      '<p class="sub">Outfield first, then goalkeeper. You can enter up to three of each.</p>' +
+      '<div class="kc">' +
+        '<h3>Outfield kits</h3>' +
+        '<p class="kc__sub">At least two — your home kit and a change kit. Add a third if you have one.</p>' +
+        segment('segOut', 2, 3, data.nOutfield) +
+      '</div>' +
+      '<div class="kc">' +
+        '<h3>Goalkeeper kits</h3>' +
+        '<p class="kc__sub">At least one.</p>' +
+        segment('segGk', 1, 3, data.nGk) +
+      '</div>' +
+      '<div class="kc">' +
+        '<h3>Kit manufacturer</h3>' +
+        '<p class="kc__sub">Who makes your kit this season — for example Macron, Puma, Joma, Errea.</p>' +
+        '<input class="fi" id="wMan" type="text" value="' + esc(data.manufacturer) + '" placeholder="Manufacturer">' +
+      '</div>';
+
+    function wire(id, key) {
+      el(id).addEventListener('click', function (e) {
+        var b = e.target.closest('button[data-n]'); if (!b) return;
+        data[key] = +b.getAttribute('data-n');
+        /* Counts drive the step list, so re-render the whole thing. Kit data
+           for a dropped slot is kept, not wiped — re-adding it restores it. */
+        [].forEach.call(this.children, function (c) { c.classList.toggle('on', c === b); });
+        touch(); renderChrome();
+      });
+    }
+    wire('segOut', 'nOutfield'); wire('segGk', 'nGk');
+    el('wMan').addEventListener('input', function () { data.manufacturer = this.value; touch(); });
+  }
+
+  function usedColours(g) { return (g.colours || []).filter(Boolean); }
+
+  function renderKit(host, st) {
+    var kit = data[st.set][st.idx];
+    var isGk = st.set === 'gk';
+    host.innerHTML =
+      '<h2 class="step">' + esc(st.label) + ' kit</h2>' +
+      '<p class="sub">Pick the colours for each item, most dominant first. If an item has more than one colour you will be asked how they are arranged.</p>' +
+      '<div class="kc" id="kGarments"></div>' +
+      (isGk && st.idx === 0 ? '<div class="note">Goalkeeper kits are often fluorescent — type “neon” to see the neon options, or “volt”.</div>' : '');
+
+    var wrap = el('kGarments');
+    GARMENTS.forEach(function (g) {
+      var key = g[0], name = g[1], max = g[2], garment = kit[key];
+      var block = document.createElement('div');
+      block.className = 'gm';
+      block.innerHTML =
+        '<div class="gm__ico">' + SVGS[key] + '<div class="gm__name">' + esc(name) + '</div>' +
+          '<div class="gm__chips" data-chips></div></div>' +
+        '<div class="gm__rows">' +
+          '<div class="gm__cnt"><span>How many colours?</span>' + segment('', 1, max, garment.colours.length) + '</div>' +
+          '<div data-cols></div><div data-pat></div></div>';
+      wrap.appendChild(block);
+
+      var chips = block.querySelector('[data-chips]'),
+          cols = block.querySelector('[data-cols]'),
+          pat = block.querySelector('[data-pat]'),
+          seg = block.querySelector('.seg');
+
+      function paintChips() {
+        chips.innerHTML = usedColours(garment).map(function (c) {
+          return '<span class="gm__chip" style="background:' + (c.hex || 'transparent') + ';' +
+                 (c.hex ? '' : 'background:repeating-linear-gradient(45deg,var(--navy-50) 0 3px,var(--white) 3px 6px);') + '" title="' + esc(c.label) + '"></span>';
+        }).join('');
+      }
+
+      function paintPattern() {
+        var multi = garment.colours.length > 1;
+        if (!multi) { pat.innerHTML = ''; return; }
+        var isShirt = key === 'shirt';
+        var opts = isShirt ? PATTERNS : DETAILS;
+        var val = isShirt ? garment.pattern : garment.detail;
+        var otherVal = isShirt ? garment.patternOther : garment.detailOther;
+        pat.innerHTML =
+          '<label class="fl">' + (isShirt ? 'How are those colours arranged?' : 'How is the second colour applied?') + '</label>' +
+          '<select class="fi" data-sel><option value="">Please choose…</option>' +
+            opts.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === val ? ' selected' : '') + '>' + esc(o[1]) + '</option>'; }).join('') +
+          '</select>' +
+          (val === 'other' ? '<input class="fi" data-other style="margin-top:8px;" placeholder="Please describe it" value="' + esc(otherVal) + '">' : '');
+
+        pat.querySelector('[data-sel]').addEventListener('change', function () {
+          if (isShirt) garment.pattern = this.value; else garment.detail = this.value;
+          touch(); paintPattern();
+        });
+        var oth = pat.querySelector('[data-other]');
+        if (oth) oth.addEventListener('input', function () {
+          if (isShirt) garment.patternOther = this.value; else garment.detailOther = this.value;
+          touch();
+        });
+      }
+
+      function paintCols() {
+        cols.innerHTML = '';
+        garment.colours.forEach(function (c, i) {
+          var row = document.createElement('div');
+          row.className = 'gm__col';
+          var ord = garment.colours.length === 1 ? '' :
+                    (i === 0 ? 'most dominant' : (i === 1 ? 'second' : 'third'));
+          row.innerHTML = '<label class="fl"><span>Colour ' + (i + 1) + '</span>' +
+                          (ord ? '<span class="gm__ord">' + ord + '</span>' : '') + '</label>' +
+                          '<div data-cb></div>';
+          cols.appendChild(row);
+          colourField(row.querySelector('[data-cb]'), c, function (v) {
+            garment.colours[i] = v; paintChips(); touch();
+          });
+        });
+        paintChips();
+      }
+
+      seg.addEventListener('click', function (e) {
+        var b = e.target.closest('button[data-n]'); if (!b) return;
+        var n = +b.getAttribute('data-n');
+        [].forEach.call(seg.children, function (c) { c.classList.toggle('on', c === b); });
+        while (garment.colours.length < n) garment.colours.push(null);
+        garment.colours.length = n;
+        if (n === 1) { garment.pattern = ''; garment.detail = ''; }
+        paintCols(); paintPattern(); touch();
+      });
+
+      paintCols(); paintPattern();
+    });
+  }
+
+  /* ── Validation ────────────────────────────────────────────────────────*/
+  function kitProblems(kit, label) {
+    var out = [];
+    GARMENTS.forEach(function (g) {
+      var garment = kit[g[0]], used = usedColours(garment);
+      if (used.length < garment.colours.length || !used.length) {
+        out.push(label + ' — ' + g[1].toLowerCase() + ': every colour box needs a value.');
+      }
+      if (garment.colours.length > 1) {
+        var v = g[0] === 'shirt' ? garment.pattern : garment.detail;
+        if (!v) out.push(label + ' — ' + g[1].toLowerCase() + ': choose how the colours are arranged.');
+        else if (v === 'other' && !String(g[0] === 'shirt' ? garment.patternOther : garment.detailOther).trim()) {
+          out.push(label + ' — ' + g[1].toLowerCase() + ': describe the “other” arrangement.');
+        }
+      }
+    });
+    return out;
+  }
+
+  function activeKits() {
+    var out = [];
+    for (var i = 0; i < data.nOutfield; i++) out.push({ set: 'outfield', idx: i, label: OUTFIELD_LABELS[i], kit: data.outfield[i] });
+    for (var j = 0; j < data.nGk; j++) out.push({ set: 'gk', idx: j, label: GK_LABELS[j], kit: data.gk[j] });
+    return out;
+  }
+
+  function allProblems() {
+    var out = [];
+    if (!String(data.yourName).trim()) out.push('Your name is missing.');
+    if (!validEmail(data.yourEmail)) out.push('Your email address does not look right.');
+    activeKits().forEach(function (k) { out = out.concat(kitProblems(k.kit, k.label)); });
+    return out;
+  }
+
+  /* ── Review ────────────────────────────────────────────────────────────*/
+  function patternLabel(garment, isShirt) {
+    if (garment.colours.length < 2) return '';
+    var key = isShirt ? garment.pattern : garment.detail;
+    if (!key) return '';
+    if (key === 'other') return String(isShirt ? garment.patternOther : garment.detailOther).trim() || 'Other';
+    var src = isShirt ? PATTERNS : DETAILS;
+    for (var i = 0; i < src.length; i++) if (src[i][0] === key) return src[i][1];
+    return key;
+  }
+
+  function garmentLine(garment, name, isShirt) {
+    var cs = usedColours(garment);
+    if (!cs.length) return '';
+    var swatches = cs.map(function (c) {
+      return '<span class="rv__sw" style="background:' + (c.hex || 'transparent') + '"></span>' +
+             '<span' + (c.raw ? ' class="flag"' : '') + '>' + esc(c.label) + (c.raw ? ' *' : '') + '</span>';
+    }).join('<span style="color:var(--text-muted)">+</span> ');
+    var p = patternLabel(garment, isShirt);
+    return '<div class="rv__g"><span class="rv__gl">' + esc(name) + '</span>' + swatches +
+           (p ? '<span class="rv__pat">· ' + esc(p) + '</span>' : '') + '</div>';
+  }
+
+  function renderReview(host) {
+    var probs = allProblems();
+    var kitsHtml = activeKits().map(function (k) {
+      return '<div class="rv__kit"><div class="rv__kn">' + esc(k.label) + '</div>' +
+        GARMENTS.map(function (g) { return garmentLine(k.kit[g[0]], g[1], g[0] === 'shirt'); }).join('') + '</div>';
+    }).join('');
+    var anyRaw = activeKits().some(function (k) {
+      return GARMENTS.some(function (g) { return usedColours(k.kit[g[0]]).some(function (c) { return c.raw; }); });
+    });
+
+    host.innerHTML =
+      '<h2 class="step">Check this over</h2>' +
+      '<p class="sub">Once you submit, the form locks. If anything needs changing afterwards, contact the League and we will re-open it.</p>' +
+      (probs.length ?
+        '<div class="kc" style="border-top-color:var(--red);"><h3 style="color:var(--red);">Please fix ' + probs.length + ' ' + (probs.length === 1 ? 'thing' : 'things') + '</h3>' +
+        '<ul style="margin:8px 0 0;padding-left:18px;font-size:13px;line-height:1.7;">' +
+        probs.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('') + '</ul></div>' : '') +
+      '<div class="kc"><h3>Submitted by</h3>' +
+        '<div class="rv"><div class="rv__g"><span class="rv__gl">Name</span>' + esc(data.yourName || '—') + '</div>' +
+        '<div class="rv__g"><span class="rv__gl">Email</span>' + esc(data.yourEmail || '—') + '</div>' +
+        '<div class="rv__g"><span class="rv__gl">Maker</span>' + esc(data.manufacturer || '—') + '</div></div></div>' +
+      '<div class="kc"><h3>Kits</h3><div class="rv">' + kitsHtml + '</div>' +
+        (anyRaw ? '<p class="kc__sub" style="margin-top:12px;">* typed in rather than picked from the list — the League will check these.</p>' : '') +
+      '</div>';
+  }
+
+  /* ── Draft ─────────────────────────────────────────────────────────────*/
+  var saveTimer = null;
+  function touch() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function () {
+      try {
+        localStorage.setItem(LS_KEY, JSON.stringify(data));
+        var s = el('kSaved'); s.classList.add('show');
+        setTimeout(function () { s.classList.remove('show'); }, 900);
+      } catch (e) {}
+    }, 400);
+  }
+  function loadDraft() { try { var r = localStorage.getItem(LS_KEY); return r ? JSON.parse(r) : null; } catch (e) { return null; } }
+
+  /* ── Submit ────────────────────────────────────────────────────────────*/
+  function cleanColour(c) {
+    if (!c) return null;
+    var o = { family: c.family || null, shade: c.shade || null, label: c.label || '', hex: c.hex || null };
+    if (c.raw) o.raw = true;
+    return o;
+  }
+  function cleanGarment(g, isShirt) {
+    var o = { colours: usedColours(g).map(cleanColour) };
+    if (g.colours.length > 1) {
+      var key = isShirt ? g.pattern : g.detail;
+      var other = String((isShirt ? g.patternOther : g.detailOther) || '').trim();
+      o[isShirt ? 'pattern' : 'detail'] = key || '';
+      /* Human label travels with the record, like colour labels do, so the
+         admin console and any export never have to re-derive it from the key
+         (which turned 'print' into "Print" and 'sleeves' into "Sleeves"). */
+      o[isShirt ? 'patternLabel' : 'detailLabel'] = patternLabel(g, isShirt);
+      if (key === 'other' && other) o[isShirt ? 'patternOther' : 'detailOther'] = other;
+    }
+    return o;
+  }
+
+  function submit() {
+    var probs = allProblems();
+    if (probs.length) { render(); el('kStatus').textContent = 'Please fix the highlighted items before submitting.'; window.scrollTo(0, 0); return; }
+
+    var rec = {
+      club: clubName, season: SEASON,
+      yourName: String(data.yourName).trim(), yourEmail: String(data.yourEmail).trim(),
+      manufacturer: String(data.manufacturer || '').trim(),
+      outfield: [], gk: [], submittedAt: Date.now()
+    };
+    activeKits().forEach(function (k) {
+      rec[k.set].push({
+        slot: k.set === 'gk' ? 'gk' + (k.idx + 1) : ['home','away','third'][k.idx],
+        label: k.label,
+        shirt: cleanGarment(k.kit.shirt, true),
+        shorts: cleanGarment(k.kit.shorts, false),
+        socks: cleanGarment(k.kit.socks, false)
+      });
+    });
+
+    var btn = el('kNext'); btn.disabled = true; btn.textContent = 'Submitting…';
+    db.ref('app-data/ops-club-kits/submissions/' + token).set(rec).then(function () {
+      try { localStorage.removeItem(LS_KEY); } catch (e) {}
+      renderLocked(rec);
+    }).catch(function (e) {
+      btn.disabled = false; btn.textContent = 'Submit to the League';
+      el('kStatus').textContent = 'Submission failed: ' + (e.message || e);
+    });
+  }
+
+  function renderLocked(rec) {
+    document.querySelector('.ks').style.display = 'none';
+    document.querySelector('.kn').style.display = 'none';
+    el('kStatus').textContent = '';
+    var when = rec.submittedAt ? new Date(rec.submittedAt).toLocaleString('en-GB',
+      { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+    var kits = (rec.outfield || []).concat(rec.gk || []);
+    el('kStep').innerHTML =
+      '<div class="kc" style="border-top-color:var(--green);">' +
+        '<h3 style="color:var(--green);">✓ Submitted &amp; locked</h3>' +
+        '<p class="kc__sub">Received by the League' + (when ? ' on ' + esc(when) : '') +
+        '. Your submission is shown below for reference. To change anything, please contact the League and we’ll re-open your form.</p></div>' +
+      '<div class="kc"><h3>Kits</h3><div class="rv">' + kits.map(function (k) {
+        return '<div class="rv__kit"><div class="rv__kn">' + esc(k.label) + '</div>' +
+          [['shirt','Shirt',true],['shorts','Shorts',false],['socks','Socks',false]].map(function (g) {
+            var garment = k[g[0]] || {}; var cs = garment.colours || [];
+            if (!cs.length) return '';
+            var sw = cs.map(function (c) {
+              return '<span class="rv__sw" style="background:' + (c.hex || 'transparent') + '"></span><span>' + esc(c.label) + '</span>';
+            }).join('<span style="color:var(--text-muted)">+</span> ');
+            var p = garment.pattern || garment.detail || '';
+            var po = garment.patternOther || garment.detailOther || '';
+            var plabel = p === 'other' ? (po || 'Other') : p;
+            return '<div class="rv__g"><span class="rv__gl">' + g[1] + '</span>' + sw +
+                   (plabel ? '<span class="rv__pat">· ' + esc(plabel) + '</span>' : '') + '</div>';
+          }).join('') + '</div>';
+      }).join('') + '</div>' +
+      (rec.manufacturer ? '<p class="kc__sub" style="margin-top:12px;">Manufacturer: ' + esc(rec.manufacturer) + '</p>' : '') +
+      '</div>';
+    window.scrollTo(0, 0);
+  }
+
+  /* ── Nav ───────────────────────────────────────────────────────────────*/
+  function bindNav() {
+    el('kBack').addEventListener('click', function () {
+      if (cur > 0) { cur--; render(); window.scrollTo(0, 0); }
+    });
+    el('kNext').addEventListener('click', function () {
+      var S = steps();
+      if (S[cur].kind === 'review') { submit(); return; }
+      if (S[cur].kind === 'welcome') {
+        if (!String(data.yourName).trim() || !validEmail(data.yourEmail)) {
+          el('kStatus').textContent = 'Please add your name and a valid email address.'; return;
+        }
+      }
+      if (S[cur].kind === 'kit') {
+        var st = S[cur], probs = kitProblems(data[st.set][st.idx], st.label);
+        if (probs.length) { el('kStatus').textContent = probs[0]; return; }
+      }
+      if (cur < S.length - 1) { cur++; render(); window.scrollTo(0, 0); }
+    });
+  }
+
+  /* ── Boot ──────────────────────────────────────────────────────────────*/
+  if (!/^[A-Za-z0-9_-]{20,}$/.test(token)) {
+    gate('This link isn’t valid. Please use the link the League sent to your club.');
+    return;
+  }
+
+  db.ref('app-data/ops-club-kits/invites/' + token).once('value').then(function (snap) {
+    var inv = snap.val();
+    if (!inv || !inv.club) { gate('This link isn’t valid or has expired. Please contact the League.'); return; }
+    clubName = inv.club;
+    return db.ref('app-data/ops-club-kits/submissions/' + token).once('value').then(function (s) {
+      var prev = s.val();
+      el('kClub').textContent = clubName;
+      var crest = el('kCrest');
+      crest.onerror = function () { crest.onerror = null; crest.src = ROSE; };
+      crest.src = CREST_BASE + encodeURIComponent(clubName) + '.png';
+      el('kGate').style.display = 'none';
+      el('kApp').style.display = '';
+
+      if (prev) { renderLocked(prev); return; }
+
+      var draft = loadDraft();
+      if (draft) {
+        data = Object.assign(data, draft);
+        /* Older drafts may predate a field; make sure the shapes are whole. */
+        ['outfield', 'gk'].forEach(function (set) {
+          data[set] = data[set] || [];
+          for (var i = 0; i < 3; i++) {
+            data[set][i] = Object.assign(blankKit(), data[set][i] || {});
+            GARMENTS.forEach(function (g) {
+              data[set][i][g[0]] = Object.assign(blankGarment(), data[set][i][g[0]] || {});
+            });
+          }
+        });
+      }
+      bindNav(); render();
+    });
+  }).catch(function () { gate('Could not check this link — please try again shortly.'); });
+})();
+</script>
+</body>
+</html>
