@@ -1,10 +1,14 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixtures
-  Version: v0.7 (30/07/2026)
+  Version: v0.8 (30/07/2026)
   File: /fixtures/index.html
 
   CHANGELOG
+    v0.8 (30/07/2026) — Competition is now a REQUIRED column and the
+      dropdown is gone. A control that applies one competition to every
+      row is the mis-selection risk itself; removing it removes the
+      class of error. A hand-typed cup sheet needs the column too.
     v0.7 (30/07/2026) — Competition is a mappable column, so the whole
       programme goes in as one paste instead of one division at a time.
       The dropdown stays as the fallback for a sheet with no such column
@@ -108,6 +112,13 @@
     var NL_TOOL_KEY = 'ops-fixtures';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/07/2026',
+        version: 'v0.8',
+        items: [
+          'Every import must now carry a Competition column — the dropdown has gone. Nothing can be filed under the wrong competition by picking the wrong option, because there is no longer an option to pick.'
+        ]
+      },
       {
         date: '30/07/2026',
         version: 'v0.7',
@@ -1180,17 +1191,19 @@
   }
 
   /* ---- Import ---------------------------------------------------------- */
-  var IMP = { rows: [], head: [], map: {}, comp: 'National' };
+  var IMP = { rows: [], head: [], map: {} };
   var FIELDS = [
     { key: 'date',  label: 'Date',      req: true },
     { key: 'ko',    label: 'Kick-off',  req: true },
     { key: 'home',  label: 'Home club', req: true },
     { key: 'away',  label: 'Away club', req: true },
-    /* Mapping a Competition column is what lets the whole programme go in as
-       one paste. Without it every import is one division at a time and the
-       competition is chosen from a dropdown — which is exactly how 552 South
-       fixtures got filed as North. */
-    { key: 'comp',  label: 'Competition', req: false },
+    /* Required, deliberately. A dropdown applying one competition to every
+       row is what filed 552 South fixtures as North: one wrong selection, no
+       per-row evidence, nothing on screen that could contradict it. Reading
+       it from the sheet makes that class of mistake impossible and lets the
+       whole programme go in as a single paste. A hand-typed cup sheet needs
+       the column too — one word repeated down a column. */
+    { key: 'comp',  label: 'Competition', req: true },
     { key: 'round', label: 'Matchday / Round', req: false },
     { key: 'opta',  label: 'Opta ID',   req: false }
   ];
@@ -1309,10 +1322,6 @@
         '<p class="text-secondary" style="margin:0 0 12px;">' + IMP.rows.length +
         ' rows read. Point each field at the right column.</p>' +
         '<div class="fx-map">' +
-        '<div class="form-group"><label>Competition if not in the sheet</label><select id="fxImpComp">' +
-          COMPS.map(function (x) {
-            return '<option' + (x === IMP.comp ? ' selected' : '') + '>' + x + '</option>';
-          }).join('') + '</select><div class="fx-map__sample" id="fxImpCompNote"></div></div>' +
         FIELDS.map(function (f) {
           return '<div class="form-group"><label>' + esc(f.label) + (f.req ? ' *' : '') + '</label>' +
             '<select data-fxmap="' + f.key + '">' + opts(IMP.map[f.key]) + '</select>' +
@@ -1343,15 +1352,6 @@
         if (f.key === 'ko' && raw) { var g = grabTime(raw); shown = g ? g.t : raw; }
         el.textContent = shown ? 'e.g. ' + shown : '';
       });
-      /* The dropdown only does anything when no Competition column is mapped;
-         say so, rather than leaving two controls that appear to fight. */
-      var mapped = IMP.map.comp != null && IMP.map.comp !== '';
-      var cSel = ctrl.body.querySelector('#fxImpComp');
-      cSel.disabled = mapped;
-      ctrl.body.querySelector('#fxImpCompNote').textContent = mapped
-        ? 'Taken from ' + IMP.head[IMP.map.comp] + ' on each row'
-        : 'Applies to every row';
-
       /* One column feeding both date and kick-off is the split case. */
       var note = ctrl.body.querySelector('#fxImpNote');
       if (IMP.map.date != null && IMP.map.date !== '' && String(IMP.map.date) === String(IMP.map.ko)) {
@@ -1366,7 +1366,6 @@
         refresh();
       });
     });
-    ctrl.body.querySelector('#fxImpComp').addEventListener('change', function (e) { IMP.comp = e.target.value; });
     refresh();
   }
 
@@ -1380,12 +1379,10 @@
          model, and it is already how attendance keys its submissions. Only
          a fixture with no Opta ID at creation gets a minted key. */
       var opta = g(r, 'opta').trim();
-      /* Per row when a Competition column is mapped, otherwise the one the
-         dropdown picked. A mapped value the tool does not recognise is left
-         null so the row fails visibly instead of landing in the wrong
-         competition. */
+      /* Always per row. A value the tool cannot place is left null so the
+         row fails visibly instead of landing in the wrong competition. */
       var rawComp = g(r, 'comp').trim();
-      var comp = rawComp ? normComp(rawComp) : IMP.comp;
+      var comp = normComp(rawComp);
       return {
         date: d, kickoff: tp ? tp.t : '15:00', guessedPm: !!(tp && tp.guessed),
         home: home, away: away, round: g(r, 'round'), opta: opta,
