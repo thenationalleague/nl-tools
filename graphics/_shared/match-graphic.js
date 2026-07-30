@@ -138,6 +138,37 @@
     ctx.fill();
   }
 
+  /* Fill an ordered run of bands moving outward from the seam.
+     Adjacent bands of the same colour are merged into ONE fill. Two abutting
+     paths each antialias their shared edge and the coverage does not sum to
+     1, so a block drawn as two fills lets the panel colour bleed through the
+     join as a visible line — measured at up to (237,195,199) against white
+     over red. 47 of the 72 clubs have secondary === tertiary, so merging is
+     the common path, and it yields a single 50px stripe for them. */
+  function bandRuns(specs) {
+    var runs = [];
+    specs.forEach(function (s) {
+      var last = runs[runs.length - 1];
+      if (last && String(last.colour).toLowerCase() === String(s.colour).toLowerCase()) {
+        last.width += s.width;
+      } else {
+        runs.push({ width: s.width, colour: s.colour });
+      }
+    });
+    return runs;
+  }
+
+  function fillBands(ctx, sign, specs) {
+    var runs = bandRuns(specs);
+    var at = BAND_PRIMARY;
+    runs.forEach(function (r) {
+      var near = at, far = at + r.width;
+      if (sign < 0) fillBand(ctx, -far, -near, r.colour);
+      else fillBand(ctx, near, far, r.colour);
+      at = far;
+    });
+  }
+
   function fillPanel(ctx, side, colour) {
     ctx.fillStyle = colour;
     ctx.beginPath();
@@ -198,14 +229,12 @@
     fillPanel(ctx, 'right', ac.panel);
 
     /* Inset bands. Offsets run outward from the seam, so the primary band
-       sits against the seam and the stripes are set back inside each panel. */
-    var o1 = BAND_PRIMARY;
-    var o2 = o1 + BAND_SECONDARY;
-    var o3 = o2 + BAND_TERTIARY;
-    fillBand(ctx, -o2, -o1, hc.secondary);
-    fillBand(ctx, -o3, -o2, hc.tertiary);
-    fillBand(ctx, o1, o2, ac.secondary);
-    fillBand(ctx, o2, o3, ac.tertiary);
+       sits against the seam and the stripes are set back inside each panel.
+       Same-coloured neighbours merge into one fill — see fillBands(). */
+    fillBands(ctx, -1, [{ width: BAND_SECONDARY, colour: hc.secondary },
+                        { width: BAND_TERTIARY,  colour: hc.tertiary }]);
+    fillBands(ctx, +1, [{ width: BAND_SECONDARY, colour: ac.secondary },
+                        { width: BAND_TERTIARY,  colour: ac.tertiary }]);
 
     drawSide(ctx, SIDE_CENTRE_L, assets.homeCrest, home.code, hc.text);
     drawSide(ctx, SIDE_CENTRE_R, assets.awayCrest, away.code, ac.text);
@@ -229,7 +258,11 @@
     WIDTH: W,
     HEIGHT: H,
     FONT_FAMILY: FONT_FAMILY,
+    BANDS: { primary: BAND_PRIMARY, secondary: BAND_SECONDARY, tertiary: BAND_TERTIARY },
+    MIN_RATIO: MIN_RATIO,
+    DARK_FLOOR: DARK_FLOOR,
     render: render,
+    bandRuns: bandRuns,
     resolveColours: resolveColours,
     readsAsSameField: readsAsSameField,
     contrast: contrast,
