@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Wellbeing map
-  Version: v1.13 (30/07/2026)
+  Version: v1.14 (30/07/2026)
   File: /wellbeing-map/index.html
 
   An editable map of the public Wellbeing section: every page as a box, every
@@ -46,6 +46,13 @@
   native confirm(). No colour here is a raw hex value.
 
   CHANGELOG
+  v1.14 (30/07/2026) — Hovering or clicking one button inside a block lit the
+    whole block: all ten topic arrows at once, when the question being asked was
+    about one of them. Focus is narrowest-wins now — a button beats the block it
+    sits in — so pointing at "Depression and low mood" shows that route and
+    nothing else, and its neighbours in the list step back rather than looking
+    equally live. Selecting an arrow does the same thing: it lights its own two
+    ends instead of leaving the map flat.
   v1.13 (30/07/2026) — Blocks became a proper kind of thing rather than three
     special cases.
 
@@ -433,6 +440,7 @@
   .wm-row:last-child { border-bottom: 0; }
   .wm-row:hover { background: var(--navy-100); }
   .wm-row.is-sel { background: var(--navy-200); }
+  .wm-row.is-hot { background: var(--navy-100); }
   .wm-row__d {
     width: 10px; height: 10px; border-radius: 50%; flex: none;
     margin-top: 4px; background: var(--navy-300);
@@ -453,6 +461,9 @@
      mostly asking "what does THIS connect to", and dimming answers that
      faster than any amount of arrow-tracing. */
   .wm-node.is-dim { opacity: 0.28; }
+  /* When one button is in focus, its neighbours in the same block step back so
+     the block does not read as though all of it is lit. */
+  .wm-node--block.has-one .wm-row:not(.is-hot):not(.is-sel) { opacity: 0.4; }
   .wm-node.is-lit { box-shadow: 0 0 0 4px var(--navy-100), 0 2px 10px var(--navy-200); }
   .wm-edges .is-dim { opacity: 0.12; }
 
@@ -766,10 +777,12 @@
 
   /* On screen next to the title, so it is always possible to tell which
      version is in front of you. Bump both when you change this file. */
-  var VERSION = 'v1.13';
+  var VERSION = 'v1.14';
   var UPDATED = '30 July 2026';
 
   var NL_CHANGELOG = [
+    { v: 'v1.14', d: '30/07/2026', note: 'Pointing at one button in a block shows '
+      + 'that one route, not everything the block reaches.' },
     { v: 'v1.13', d: '30/07/2026', note: 'Blocks are a proper kind of thing: add one '
       + 'anywhere, and put it on or take it off any page.' },
     { v: 'v1.12', d: '30/07/2026', note: 'Sections stay put: the top of the first '
@@ -853,6 +866,7 @@
   var zoom = 1;
   var canvasH = 600;
   var hoverId = null;         /* box under the pointer — drives the dimming */
+  var hoverEdge = null;       /* one button inside a block, if that is narrower */
   var rt = null;              /* the NL.richText controller, mounted once */
   var saveTimer = null;
 
@@ -1221,14 +1235,35 @@
 
   /* Which boxes and arrows the current hover or selection touches. Everything
      else gets dimmed. */
+  /* Just the two ends of one arrow. Used when the pointer or the selection is
+     on a single button rather than on a box as a whole. */
+  function oneEdgeFocus(key, hovering) {
+    var e = S.edges.filter(function (x) { return eKey(x) === key; })[0];
+    if (!e) return null;
+    var nodes = {}, edges = {};
+    nodes[e.from] = 'self';
+    nodes[e.to] = 'to';
+    edges[key] = 1;
+    return { id: e.from, nodes: nodes, edges: edges, hovering: hovering, one: key };
+  }
+
   function focusSet() {
+    /* A block holds a dozen buttons, and pointing at one of them is a question
+       about THAT route — not about everything the block reaches. Narrowest wins:
+       one button beats the block it sits in. */
+    if (hoverEdge) return oneEdgeFocus(hoverEdge, true);
+
     /* Hover AND selection both put a box in focus, but they are not the same
        thing. Hover is a glance: it mutes everything else and runs the flow
        dashes. Selection is work: it holds the box's arrows on screen — including
        the ones a block normally keeps to itself — so they can be clicked and
        edited, without greying out the map you are trying to read while typing. */
     var id = hoverId || (S.sel && S.sel.type === 'node' ? S.sel.id : null);
-    if (!id) return null;
+    if (!id) {
+      /* A selected arrow lights its own two ends and nothing else. */
+      if (S.sel && S.sel.type === 'edge') return oneEdgeFocus(S.sel.id, false);
+      return null;
+    }
     var nodes = {}, edges = {};
     nodes[id] = 'self';
     S.edges.forEach(function (e) {
@@ -1266,7 +1301,9 @@
           (rows.length ? rows.map(function (e) {
             var to = byId(e.to);
             var rSel = S.sel && S.sel.type === 'edge' && S.sel.id === eKey(e);
-            return '<div class="wm-row' + (rSel ? ' is-sel' : '') + '" data-row="' +
+            var rHot = focus && focus.one === eKey(e);
+            return '<div class="wm-row' + (rSel ? ' is-sel' : '') +
+              (rHot ? ' is-hot' : '') + '" data-row="' +
               esc(eKey(e)) + '" title="' + esc((e.label || to.label) + ' → ' + to.label) + '">' +
               '<span class="wm-row__d wm-row__d--' + esc(to.kind) + '"></span>' +
               '<span class="wm-row__t">' + esc(e.label || to.label) + '</span>' +
@@ -1290,8 +1327,10 @@
             '" title="Drag to another box to draw an arrow">&#8599;</span>';
       }
 
+      var oneHere = focus && focus.one && n.locked &&
+        focus.one.indexOf(n.id + '>') === 0;
       return '<div class="wm-node wm-node--' + esc(n.kind) + (n.locked ? ' wm-node--block' : '') +
-        (selected ? ' is-sel' : '') + state + '"' +
+        (oneHere ? ' has-one' : '') + (selected ? ' is-sel' : '') + state + '"' +
         ' data-id="' + esc(n.id) + '" data-zone="' + esc(n.zone) + '" tabindex="0" role="button"' +
         ' aria-label="' + esc(n.label) + ', ' + esc(KIND_LABEL[n.kind] || n.kind) + '"' +
         ' style="left:' + n.x + 'px;top:' + n.y + 'px;width:' + wOf(n) + 'px' +
@@ -2194,15 +2233,23 @@
   el.nodes.addEventListener('pointerover', function (ev) {
     if (drag) return;
     var box = ev.target.closest ? ev.target.closest('.wm-node') : null;
+    var row = ev.target.closest ? ev.target.closest('[data-row]') : null;
     var id = box ? box.getAttribute('data-id') : null;
-    if (id !== hoverId) { hoverId = id; renderNodes(); renderEdges(); }
+    var key = row ? row.getAttribute('data-row') : null;
+    if (id !== hoverId || key !== hoverEdge) {
+      hoverId = id; hoverEdge = key;
+      renderNodes(); renderEdges();
+    }
   });
 
   el.nodes.addEventListener('pointerout', function (ev) {
     if (drag) return;
     if (ev.relatedTarget && ev.relatedTarget.closest &&
         ev.relatedTarget.closest('.wm-node')) return;
-    if (hoverId !== null) { hoverId = null; renderNodes(); renderEdges(); }
+    if (hoverId !== null || hoverEdge !== null) {
+      hoverId = null; hoverEdge = null;
+      renderNodes(); renderEdges();
+    }
   });
 
   function select(sel) {
