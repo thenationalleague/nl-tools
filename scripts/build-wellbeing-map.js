@@ -2,8 +2,14 @@
 /**
  * scripts/build-wellbeing-map.js
  *
- * Reads the live public section at wellbeing/index.html and writes the seed
- * for the map tool at wellbeing-map/seed.json.
+ * Reads the public wellbeing pages and writes the starting maps the map tool
+ * loads: wellbeing-map/map-live.json and wellbeing-map/map-concepts.json.
+ *
+ * They are named map-* rather than seed-* deliberately: .gitignore blocks
+ * seed-*.json because this repo is public and data exports must never be
+ * committed. These files carry no personal data — page structure and the pages'
+ * own published words, with the safeguarding leads named by role only — so the
+ * name keeps that guard absolute rather than carving an exception in it.
  *
  * Why a generator rather than a hand-written map
  * ----------------------------------------------
@@ -53,8 +59,30 @@ const fs = require('fs');
 const path = require('path');
 
 const REPO = path.resolve(__dirname, '..');
-const SRC = path.join(REPO, 'wellbeing', 'index.html');
-const OUT = path.join(REPO, 'wellbeing-map', 'seed.json');
+
+/* Two starting maps, because there are two things worth arguing about: what the
+   section is now, and what the parked concept proposed instead. They are
+   genuinely different shapes, not a re-skin — the live section carries the topic
+   grid on every page as one shared component, while the concept makes it a page
+   you navigate to behind "I am just looking". A map that flattened that
+   difference would be no use for choosing between them.
+
+   `menus` names in-page sections that are really menus, so they are drawn as
+   blocks with their buttons listed rather than firing a dozen arrows. */
+const SOURCES = [
+  {
+    label: 'The live structure',
+    src: path.join(REPO, 'wellbeing', 'index.html'),
+    out: path.join(REPO, 'wellbeing-map', 'map-live.json'),
+    menus: []
+  },
+  {
+    label: 'The concepts version',
+    src: path.join(REPO, 'wellbeing', 'concepts', 'wellbeing-navigation.html'),
+    out: path.join(REPO, 'wellbeing-map', 'map-concepts.json'),
+    menus: ['topics', 'help-with']
+  }
+];
 
 /* ── Zones ───────────────────────────────────────────────────────────────
    Five bands on one canvas, in the order a reader meets them. Every node
@@ -99,7 +127,8 @@ const KIND = {
 
 const ZONE_OF = {
   'wb-menu':   'wayin',
-  'need-help': 'wayin'
+  'need-help': 'wayin',
+  'help-with': 'wayin'   /* concepts only: level two of the way in */
 };
 
 /* Short names for the boxes on the canvas. A page's <h1> is its honest name
@@ -114,26 +143,49 @@ const LABEL = {
   'depression':         'Depression and low mood',
   'helping-a-teammate': 'Helping someone else',
   'alcohol-drugs':      'Alcohol and drugs',
-  'sleep-problems':     'Sleep problems'
+  'sleep-problems':     'Sleep problems',
+  'help-with':          'What do you want help with?',
+  'topics':             'Topics menu'
 };
 
 /* ── Small helpers ──────────────────────────────────────────────────────── */
 
 const collapse = (s) => s.replace(/\s+/g, ' ').trim();
-const textOf = (html) => collapse(html.replace(/<[^>]+>/g, ''));
 
-function read() {
-  if (!fs.existsSync(SRC)) {
-    console.error(`Cannot find ${path.relative(REPO, SRC)} — run this from the repo.`);
+/* Entities have to be decoded before anything reads a label as text. The live
+   section writes its arrow glyphs literally; the concept writes them as
+   &#8594; — so without this, buttons came out named "Drink or drugs &#8594;". */
+const ENTITIES = {
+  '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'",
+  '&nbsp;': ' ', '&rarr;': '\u2192', '&larr;': '\u2190', '&mdash;': '\u2014',
+  '&ndash;': '\u2013', '&hellip;': '\u2026', '&ldquo;': '\u201c', '&rdquo;': '\u201d',
+  '&lsquo;': '\u2018', '&rsquo;': '\u2019'
+};
+const decode = (s) => s
+  .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
+  .replace(/&[a-zA-Z]+;/g, (m) => (ENTITIES[m.toLowerCase()] !== undefined ? ENTITIES[m.toLowerCase()] : m));
+
+const textOf = (html) => collapse(decode(html.replace(/<[^>]+>/g, '')));
+
+function read(src) {
+  if (!fs.existsSync(src)) {
+    console.error(`Cannot find ${path.relative(REPO, src)} — run this from the repo.`);
     process.exit(1);
   }
-  return fs.readFileSync(SRC, 'utf8');
+  return fs.readFileSync(src, 'utf8');
 }
 
 /* ── Copy conversion ─────────────────────────────────────────────────────
    Section markup → the subset NL.richText round-trips without loss. */
 function toEditorHtml(html) {
   let s = html;
+
+  /* A choice button carries three spans: the wording, a longer description and
+     an arrow glyph. Only the wording names the route — leave the other two in
+     and a button ends up called "I am just looking Read anything you like, no
+     need to have a problem →". */
+  s = s.replace(/<span class="wb-choice__go"[^>]*>[\s\S]*?<\/span>/g, '');
+  s = s.replace(/<span class="wb-choice__d"[^>]*>[\s\S]*?<\/span>/g, '');
 
   // Shared blocks are represented as flags on the node, not as copy.
   s = s.replace(/<a class="btn[^"]*wb-back[^"]*"[^>]*>[\s\S]*?<\/a>/g, '');
@@ -177,7 +229,7 @@ function toEditorHtml(html) {
 }
 
 /* Statement and answer labels come from a button that ends in a → glyph. */
-const stripArrow = (s) => collapse(s).replace(/[→↠➜>]+$/, '').trim();
+const stripArrow = (s) => textOf(s).replace(/[\u2192\u21a0\u279c>]+$/, '').trim();
 
 /* ── Section parsing ────────────────────────────────────────────────────── */
 function parseSections(src) {
@@ -213,8 +265,13 @@ function parseSections(src) {
    real markup so their labels are the real words, then locked. */
 function parseShared(src) {
   const header = src.slice(src.indexOf('<header class="wb-top">'), src.indexOf('</header>'));
-  const nav = src.slice(src.indexOf('<nav class="wb-nav"'), src.indexOf('</nav>'));
   const foot = src.slice(src.indexOf('<footer class="wb-foot">'), src.indexOf('</footer>'));
+
+  /* The concept has no persistent nav at all — its topic grid is a page you go
+     to. So this can legitimately be empty, and everything downstream has to
+     cope rather than slicing from -1 and parsing the whole document. */
+  const navAt = src.indexOf('<nav class="wb-nav"');
+  const nav = navAt === -1 ? '' : src.slice(navAt, src.indexOf('</nav>', navAt));
 
   const headerEdges = [];
   const brand = header.match(/<a class="wb-brand" href="(#[a-z-]+)"/);
@@ -246,13 +303,12 @@ function parseShared(src) {
   let l;
   while ((l = leadRe.exec(foot))) leads.push({ name: textOf(l[1]), role: textOf(l[2]) });
 
-  const skip = header ? null : null;
-  return { headerEdges, statements, cards, numbers, leads, skip };
+  return { headerEdges, statements, cards, numbers, leads, hasNav: navAt !== -1 };
 }
 
 /* ── Build ───────────────────────────────────────────────────────────────── */
-function build() {
-  const src = read();
+function build(cfg) {
+  const src = read(cfg.src);
   const version = (src.match(/Version:\s*(v[\d.]+)/) || [])[1] || 'unknown';
   const sections = parseSections(src);
   const shared = parseShared(src);
@@ -263,9 +319,8 @@ function build() {
 
   const push = (n) => { nodes.push(n); return n; };
 
-  /* Locked shared blocks. `locked` means the tool will not let anybody drag
-     or delete them — their content is one block that lives on every page, so
-     moving them around says nothing useful. */
+  /* `locked` means "drawn as a block with its buttons listed inside" — one
+     component rather than a dozen arrows. It no longer means immovable. */
   push({
     id: '_header', zone: 'header', kind: 'shared', locked: true,
     title: 'Header', label: 'Header', hash: null, kicker: 'On every page',
@@ -275,7 +330,7 @@ function build() {
     nextStep: false, showsTopics: false, showsFooter: false
   });
 
-  push({
+  if (shared.hasNav) push({
     id: '_statements', zone: 'wayin', kind: 'shared', locked: true,
     title: 'Four statements', label: 'Four statements', hash: null, kicker: 'On every page',
     body: '<p>The coloured statements. On the front page they are the main content; on '
@@ -284,7 +339,7 @@ function build() {
     nextStep: false, showsTopics: false, showsFooter: false
   });
 
-  push({
+  if (shared.hasNav) push({
     id: '_topics', zone: 'flow', kind: 'shared', locked: true,
     title: 'Topics widget', label: 'Topics widget', hash: null, kicker: 'On every page',
     body: `<p>${shared.cards.length} buttons. Ten topics, then two under "Supporting someone, `
@@ -310,18 +365,21 @@ function build() {
 
   /* Every real page. */
   sections.forEach((sec) => {
+    const isMenu = cfg.menus.indexOf(sec.id) > -1;
     push({
       id: sec.id,
       zone: ZONE_OF[sec.id] || 'flow',
-      kind: KIND[sec.id] || (topicIds.indexOf(sec.id) > -1 ? 'everyday' : 'everyday'),
-      locked: false,
+      kind: isMenu ? 'shared' : (KIND[sec.id] || 'everyday'),
+      locked: isMenu,
       title: sec.title,
       label: LABEL[sec.id] || sec.title,
       hash: '#' + sec.id,
       kicker: sec.kicker,
       body: sec.body,
       nextStep: sec.nextStep,
-      showsTopics: true,
+      /* Only true where a persistent widget actually exists. In the concept it
+         does not — the topic grid is a page you navigate to. */
+      showsTopics: shared.hasNav,
       showsFooter: true
     });
   });
@@ -351,7 +409,8 @@ function build() {
       const key = `${sec.id}>${to}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      const kind = sec.id === 'need-help' ? 'answer' : 'editorial';
+      const kind = cfg.menus.indexOf(sec.id) > -1 ? 'topic'
+        : (sec.id === 'need-help' || sec.id === 'wb-menu') ? 'answer' : 'editorial';
       edges.push({ from: sec.id, to, label: stripArrow(m[2]), kind });
     }
   });
@@ -359,31 +418,40 @@ function build() {
   return {
     format: 'nl-wellbeing-map',
     formatVersion: 1,
+    label: cfg.label,
     generated: new Date().toISOString().slice(0, 10),
-    source: `/wellbeing/index.html ${version}`,
+    source: `/${path.relative(REPO, cfg.src)} ${version}`,
     zones: ZONES,
     nodes,
     edges
   };
 }
 
-function main() {
-  const map = build();
-  fs.mkdirSync(path.dirname(OUT), { recursive: true });
-  fs.writeFileSync(OUT, JSON.stringify(map, null, 2) + '\n', 'utf8');
+function buildOne(cfg) {
+  const map = build(cfg);
+  fs.mkdirSync(path.dirname(cfg.out), { recursive: true });
+  fs.writeFileSync(cfg.out, JSON.stringify(map, null, 2) + '\n', 'utf8');
+  report(cfg, map);
+  return map;
+}
+
+function report(cfg, map) {
 
   const byZone = {};
   map.nodes.forEach((n) => { byZone[n.zone] = (byZone[n.zone] || 0) + 1; });
   const byKind = {};
   map.edges.forEach((e) => { byKind[e.kind] = (byKind[e.kind] || 0) + 1; });
 
-  console.log(`Wrote ${path.relative(REPO, OUT)} from ${map.source}`);
+  console.log(`Wrote ${path.relative(REPO, cfg.out)} — ${map.label}`);
+  console.log(`  from ${map.source}`);
   console.log(`  ${map.nodes.length} nodes:`,
-    ZONES.map((z) => `${z.id} ${byZone[z.id] || 0}`).join(', '));
+    ZONES.map((z) => `${z.id} ${byZone[z.id] || 0}`).join(', '),
+    `| ${map.nodes.filter((n) => n.locked).length} blocks`);
   console.log(`  ${map.edges.length} edges:`,
     Object.keys(byKind).map((k) => `${k} ${byKind[k]}`).join(', '));
   const noBody = map.nodes.filter((n) => !n.body).map((n) => n.id);
   if (noBody.length) console.log(`  WARNING: no copy extracted for ${noBody.join(', ')}`);
+  console.log('');
 }
 
-main();
+SOURCES.forEach(buildOne);
