@@ -1,10 +1,17 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixtures
-  Version: v0.5 (30/07/2026)
+  Version: v0.6 (30/07/2026)
   File: /fixtures/index.html
 
   CHANGELOG
+    v0.6 (30/07/2026) — A result entered by mistake could not be taken
+      off: Save refused unless BOTH boxes had a value, so clearing them
+      did nothing, and the only ways out were Abandoned (a lie) or
+      deleting the fixture. Adds Remove result, logged to the history
+      like any other correction. Saving a result on a future-dated
+      fixture now warns first — warns, not blocks, because that is also
+      how you correct a fixture whose date is wrong.
     v0.5 (30/07/2026) — Re-importing a sheet already in the tool did
       nothing at all, silently. RTDB deletes rather than stores a null,
       so homeScore/awayScore read back UNDEFINED, and undefined in a
@@ -96,6 +103,14 @@
     var NL_TOOL_KEY = 'ops-fixtures';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/07/2026',
+        version: 'v0.6',
+        items: [
+          'A result can now be removed. Enter one by mistake and there was no way back short of deleting the fixture; the removal is kept in the history like any other correction.',
+          'Entering a result for a game that has not been played yet asks you to confirm first.'
+        ]
+      },
       {
         date: '30/07/2026',
         version: 'v0.5',
@@ -315,8 +330,10 @@
   .fx-hist li { border-left: 2px solid var(--navy-200); padding-left: 11px; }
   .fx-hist__t { font-variation-settings: 'wght' 800; font-size: 12.5px; }
   .fx-hist__d { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
-  .fx-choice { display: flex; gap: 8px; }
-  .fx-choice .btn { flex: 1; justify-content: center; }
+  /* Wraps because a scored fixture gets a fourth action; four across squashes
+     the labels in a default-width modal. */
+  .fx-choice { display: flex; gap: 8px; flex-wrap: wrap; }
+  .fx-choice .btn { flex: 1 1 120px; justify-content: center; }
   .fx-ref { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 13px; }
   .fx-ref summary { font-size: 11.5px; font-variation-settings: 'wght' 800; letter-spacing: .05em;
                     text-transform: uppercase; color: var(--text-muted); cursor: pointer; }
@@ -858,7 +875,12 @@
           '<button type="button" class="btn btn--ghost" data-act="reinstate">Reinstate</button>'
         : '<button type="button" class="btn btn--ghost" data-act="postpone">Postpone</button>' +
           '<button type="button" class="btn btn--ghost" data-act="rearrange">Rearrange</button>' +
-          '<button type="button" class="btn btn--ghost" data-act="result">Result</button>') +
+          '<button type="button" class="btn btn--ghost" data-act="result">Result</button>' +
+          /* A score entered by mistake has to come off. Without this the only
+             ways out were Abandoned, which is a lie, or deleting the fixture. */
+          (f.homeScore != null && f.awayScore != null
+            ? '<button type="button" class="btn btn--ghost" data-act="clearresult">Remove result</button>'
+            : '')) +
       '</div>' + historyBlock(f) + refBlock(f);
 
     var buttons = [
@@ -878,6 +900,7 @@
         else if (a === 'rearrange') formRearrange(f, false);
         else if (a === 'date') formRearrange(f, true);
         else if (a === 'result') formResult(f);
+        else if (a === 'clearresult') clearResult(f);
         else if (a === 'reinstate') reinstate(f);
       });
     });
@@ -1000,11 +1023,23 @@
         { label: 'Save', className: 'btn btn--primary', autofocus: true, onClick: function (c) {
             var h = $('fxHS').value, a = $('fxAS').value;
             if (h === '' || a === '') { NL.toast('Enter both scores', 'info'); return; }
-            f.homeScore = +h; f.awayScore = +a; f.status = 'played';
-            saveFixture(f).then(function () {
-              NL.writeAudit('fixture_result', { recordID: f.recordID, score: h + '-' + a });
-              c.close(); render(); NL.toast('Result saved', 'success');
-            });
+            var commit = function () {
+              f.homeScore = +h; f.awayScore = +a; f.status = 'played';
+              saveFixture(f).then(function () {
+                NL.writeAudit('fixture_result', { recordID: f.recordID, score: h + '-' + a });
+                c.close(); render(); NL.toast('Result saved', 'success');
+              });
+            };
+            /* Warn, don't block. A result on a future date is nearly always a
+               slip, but it is also how you'd correct a fixture whose date is
+               wrong — so the way out is a confirmation, not a locked door. */
+            if (toISO(f.date) > todayISO()) {
+              NL.confirm(f.home + ' v ' + f.away + ' is not until ' + whenText(f.date, f.kickoff) + '.', {
+                title: 'That game has not been played yet',
+                detail: 'Check the date is right before saving — a result on the wrong fixture is easy to miss.',
+                confirmText: 'Save anyway', variant: 'danger'
+              }).then(function (ok) { if (ok) commit(); });
+            } else { commit(); }
           } }
       ]
     });
@@ -1022,6 +1057,27 @@
       NL.writeAudit('fixture_reinstated', { recordID: f.recordID, was: was });
       render();
       NL.toast('Reinstated — ' + (was === 'abandoned' ? 'A–A' : 'P–P') + ' removed', 'success');
+    });
+  }
+
+  /* Same shape as reinstate(): the correction is APPENDED to the history
+     rather than erasing anything, so "there was a score here once and it was
+     taken off" stays visible. */
+  function clearResult(f) {
+    var was = f.homeScore + '–' + f.awayScore;
+    NL.confirm(f.home + ' ' + was + ' ' + f.away, {
+      title: 'Remove this result?',
+      detail: 'The fixture goes back to showing its kick-off time. The removal is kept in the history.',
+      confirmText: 'Remove result', variant: 'danger'
+    }).then(function (ok) {
+      if (!ok) return;
+      var entry = { type: 'corrected', from: 'played', to: 'scheduled', effectiveAt: null,
+                    recordedAt: stamp(), by: (S.session && S.session.uid) || null, reasonCode: null };
+      f.status = 'scheduled'; f.homeScore = null; f.awayScore = null;
+      Promise.all([saveFixture(f), appendHistory(f.recordID, entry)]).then(function () {
+        NL.writeAudit('fixture_result_removed', { recordID: f.recordID, was: was });
+        render(); NL.toast('Result removed', 'success');
+      });
     });
   }
 
@@ -1073,7 +1129,8 @@
     REASONS.forEach(function (r) { byCode[r.code] = r; });
     var items = h.map(function (e, i) {
       var r = byCode[e.reasonCode];
-      var line = e.type === 'corrected' ? 'Reinstated (was ' + e.from + ')'
+      var line = e.type === 'corrected'
+          ? (e.from === 'played' ? 'Result removed' : 'Reinstated (was ' + e.from + ')')
         : e.type === 'postponed' ? 'Postponed from ' + e.from
         : (e.from ? 'Moved from ' + e.from + ' to ' + e.to : 'Date set: ' + e.to);
       return '<li><div class="fx-hist__t">' + (i + 1) + '. ' + esc(line) + '</div>' +
