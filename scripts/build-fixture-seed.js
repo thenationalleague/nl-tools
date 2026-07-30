@@ -256,6 +256,80 @@ function nlsKickoffToISO(raw) {
   return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+/* ---- Matchday derivation ---------------------------------------------
+   The seed carries no matchday, so it is derived from the published
+   schedule. In a double round-robin of 24 clubs there are exactly 46
+   rounds of 12, each club appearing once per round.
+
+   Pass 1 sweeps the fixtures in kickoff order and closes a round as soon
+   as a club would repeat. That alone is enough for National and North,
+   where each round sits inside one date span.
+
+   Pass 2 repairs South. Four fixtures there were displaced at fixture
+   release (clubs with known conflicts got their round-3 and round-8 games
+   put back to a midweek in September/October), so the sweep strands them
+   as tiny pseudo-rounds. A short round is merged with the earliest later
+   group that is BOTH exactly the missing size AND club-disjoint from it —
+   with 12-a-round and 24 clubs that leaves only one candidate, so the
+   merge is forced by the constraint rather than guessed.
+
+   Derived, not authoritative: matchday is permanent once seeded, so the
+   report lists any repair for eyeballing before import. */
+function deriveMatchdays(fixtures) {
+  const sorted = fixtures.slice().sort((a, b) =>
+    String(a.kickoffUTC || '').localeCompare(String(b.kickoffUTC || '')));
+
+  const rounds = [];
+  let cur = [], seen = new Set();
+  for (const f of sorted) {
+    if (seen.has(f.home) || seen.has(f.away)) { rounds.push(cur); cur = []; seen = new Set(); }
+    cur.push(f); seen.add(f.home); seen.add(f.away);
+  }
+  if (cur.length) rounds.push(cur);
+
+  const clubsOf = r => new Set(r.flatMap(x => [x.home, x.away]));
+  const perRound = Math.max(...rounds.map(r => r.length));
+  const repairs = [];
+
+  for (let i = 0; i < rounds.length; i++) {
+    if (!rounds[i].length || rounds[i].length === perRound) continue;
+    const need = perRound - rounds[i].length;
+    const have = clubsOf(rounds[i]);
+    for (let j = i + 1; j < rounds.length; j++) {
+      if (rounds[j].length !== need) continue;
+      if ([...clubsOf(rounds[j])].some(c => have.has(c))) continue;
+      repairs.push({
+        round: i + 1,
+        moved: rounds[j].map(x => ({ fixture: `${x.home} v ${x.away}`, date: x.date, kickoff: x.kickoff })),
+        note: 'displaced at fixture release; merged back into its round by the disjoint-complement rule'
+      });
+      rounds[i] = rounds[i].concat(rounds[j]);
+      rounds[j] = [];
+      break;
+    }
+  }
+
+  const final = rounds.filter(r => r.length);
+  const byPair = new Map();
+  final.forEach((r, idx) => r.forEach(f => byPair.set(`${f.home} v ${f.away}`, String(idx + 1))));
+
+  /* Integrity: every club must hold each matchday exactly once. */
+  const perClub = {};
+  final.forEach((r, idx) => r.forEach(f => {
+    for (const c of [f.home, f.away]) (perClub[c] = perClub[c] || []).push(idx + 1);
+  }));
+  const problems = [];
+  for (const club of Object.keys(perClub)) {
+    const mds = perClub[club].slice().sort((a, b) => a - b);
+    const dupes = mds.filter((m, i) => i && m === mds[i - 1]);
+    if (mds.length !== final.length || dupes.length) {
+      problems.push({ club, count: mds.length, expected: final.length, duplicateMatchdays: [...new Set(dupes)] });
+    }
+  }
+
+  return { byPair, roundCount: final.length, repairs, problems };
+}
+
 /* ---- NLS fetch -------------------------------------------------------- */
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -322,6 +396,7 @@ function extractMatches(payload) {
 function pairKey(homeKey, awayKey) { return `${homeKey} ${awayKey}`; }
 
 function build(seedFixtures, nlsMatches, clubIdx, opts) {
+  const md = deriveMatchdays(seedFixtures);
   /* Assert the join key is safe before relying on it. */
   const seen = new Set();
   const dupes = [];
@@ -445,6 +520,8 @@ function build(seedFixtures, nlsMatches, clubIdx, opts) {
       division: seedFx.division,
       seasonID: String(opts.season),
 
+      matchday: md.byPair.get(`${seedFx.home} v ${seedFx.away}`) || null,
+
       original: { date: seedFx.date, kickoff: seedFx.kickoff, kickoffUTC: seedFx.kickoffUTC },
       current: { kickoffUTC: currentUTC, ...splitUK(currentUTC) },
       rescheduled: moved,
@@ -490,7 +567,7 @@ function build(seedFixtures, nlsMatches, clubIdx, opts) {
   merged.sort((x, y) => String(x.current.kickoffUTC || x.original.kickoffUTC || '')
     .localeCompare(String(y.current.kickoffUTC || y.original.kickoffUTC || '')));
 
-  return { merged, rescheduled, unmatchedSeed, unmatchedNls, unresolvedSeed };
+  return { merged, rescheduled, unmatchedSeed, unmatchedNls, unresolvedSeed, matchdays: md };
 }
 
 /* ISO UTC -> { date: DD/MM/YYYY, kickoff: HH:MM } in UK local time. */
@@ -562,6 +639,11 @@ async function main() {
       unmatchedNls: result.unmatchedNls.length,
       unresolvedSeedNames: result.unresolvedSeed.length
     },
+    matchdays: {
+      rounds: result.matchdays.roundCount,
+      repairs: result.matchdays.repairs,
+      integrityProblems: result.matchdays.problems
+    },
     rescheduled: result.rescheduled,
     unmatchedSeed: result.unmatchedSeed,
     unmatchedNls: result.unmatchedNls,
@@ -575,12 +657,12 @@ async function main() {
      inferred. currentDate/currentKickoff are reference columns only --
      they exist to tell you WHICH fixtures need that manual step. */
   const csvRows = [[
-    'matchID', 'division', 'home', 'away', 'lookupKey',
+    'matchID', 'division', 'matchday', 'home', 'away', 'lookupKey',
     'seedDate', 'seedKickoff', 'changedSinceSeed', 'currentDate', 'currentKickoff'
   ]];
   for (const f of result.merged) {
     csvRows.push([
-      f.matchID, f.division, f.homeTeam.name, f.awayTeam.name,
+      f.matchID, f.division, f.matchday || '', f.homeTeam.name, f.awayTeam.name,
       `${f.homeTeam.name} v ${f.awayTeam.name}`,
       f.original.date || '', f.original.kickoff || '',
       f.rescheduled ? 'YES' : '',
@@ -601,6 +683,9 @@ async function main() {
   console.error('  rescheduled      ' + c.rescheduled.length + '  (kickoff differs from the seed)');
   console.error('  unmatched seed   ' + c.unmatchedSeed.length);
   console.error('  unmatched NLS    ' + c.unmatchedNls.length + '  (new fixtures, or teams outside this division)');
+  console.error('  matchdays        ' + c.matchdays.roundCount + ' rounds' +
+    (c.matchdays.repairs.length ? '  (' + c.matchdays.repairs.length + ' repaired \u2014 see report)' : '') +
+    (c.matchdays.problems.length ? '  <- INTEGRITY PROBLEM' : ''));
   if (c.unresolvedSeed.length) console.error('  unresolved names ' + c.unresolvedSeed.length + '  <- needs a clubs-meta fix');
   console.error('');
   if (c.rescheduled.length) {
