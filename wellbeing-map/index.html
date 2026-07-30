@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Wellbeing map
-  Version: v1.12 (30/07/2026)
+  Version: v1.13 (30/07/2026)
   File: /wellbeing-map/index.html
 
   An editable map of the public Wellbeing section: every page as a box, every
@@ -46,6 +46,27 @@
   native confirm(). No colour here is a raw hex value.
 
   CHANGELOG
+  v1.13 (30/07/2026) — Blocks became a proper kind of thing rather than three
+    special cases.
+
+    A page used to carry three fixed booleans — showsTopics, nextStep,
+    showsFooter — which could only ever describe the three blocks that existed
+    when they were written. A new block could not be put on a page at all, and on
+    a blank canvas there was no way to make anything but pages. A page now carries
+    a list of the blocks it shows, and there is an "+ Add a block" button and a
+    right-click entry to match "+ Add a page". A page's panel ticks any block on
+    or off; a block's panel says which pages carry it, with the same tick boxes
+    from the other direction plus put-it-on-every-page and take-it-off-every-page.
+    Old maps translate their booleans on import.
+
+    The seed changed to match, because the live page was being flattened. What
+    was one "Topics widget" block of twelve buttons is now two, since the page
+    renders them under two headings as two components: the ten topics, and the
+    two under "Supporting someone, or looking for a service". And "Your next
+    step" — the same box at the foot of ten pages — was a tick box, which meant
+    its words could not be read or edited anywhere. It is a block now, with the
+    support-directory link as its button. Six blocks on the live map, five on the
+    concepts one.
   v1.12 (30/07/2026) — Bands crept. Their geometry was derived from whatever
     their highest box happened to be, through a Math.min that could only move a
     band UP and a Math.max that could only make it taller. So every drag ratcheted
@@ -249,6 +270,10 @@
      has not been told the gesture exists. */
   .wm-btn--go { background: var(--primary); border-color: var(--primary-300); }
   .wm-btn--go:hover { background: var(--primary-600); }
+  /* A block is a different sort of thing from a page, so its button looks
+     different from the page one rather than sitting next to it as a twin. */
+  .wm-btn--blk { background: var(--navy-800); border-color: var(--navy-200); }
+  .wm-btn--blk:hover { background: var(--navy-900); }
   .wm-btn[aria-pressed="true"] {
     background: var(--white); color: var(--navy); border-color: var(--white);
   }
@@ -495,6 +520,15 @@
   .wm-f .fmt-edit { min-height: 210px; max-height: 460px; overflow-y: auto; }
 
   .wm-out { display: flex; flex-wrap: wrap; gap: 6px; }
+  .wm-outs { display: flex; gap: 6px; margin-bottom: 8px; }
+  /* Scoped to .wm-outs so it beats .wm-mini's fixed 32px square, which is
+     defined further down the stylesheet and was winning on source order. */
+  .wm-outs .wm-mini {
+    width: auto; flex: 1; padding: 8px 6px; font-size: var(--text-xs);
+    white-space: nowrap;
+  }
+  /* A long list of pages should not push the copy editor off the bottom. */
+  .wm-checks { max-height: 260px; overflow-y: auto; padding-right: 4px; }
   .wm-out__x {
     display: inline-flex; align-items: center; gap: 6px;
     font-family: inherit; font-size: var(--text-xs); font-weight: 700;
@@ -673,6 +707,7 @@
       <button class="wm-btn" id="zIn" type="button" title="Zoom in" aria-label="Zoom in">+</button>
     </span>
     <button class="wm-btn wm-btn--go" id="bAdd" type="button">+ Add a page</button>
+    <button class="wm-btn wm-btn--blk" id="bAddBlock" type="button">+ Add a block</button>
     <button class="wm-btn" id="bAll" type="button" aria-pressed="false">All arrows</button>
     <button class="wm-btn" id="bTidy" type="button">Tidy up</button>
     <button class="wm-btn" id="bExport" type="button">Export</button>
@@ -731,10 +766,12 @@
 
   /* On screen next to the title, so it is always possible to tell which
      version is in front of you. Bump both when you change this file. */
-  var VERSION = 'v1.12';
+  var VERSION = 'v1.13';
   var UPDATED = '30 July 2026';
 
   var NL_CHANGELOG = [
+    { v: 'v1.13', d: '30/07/2026', note: 'Blocks are a proper kind of thing: add one '
+      + 'anywhere, and put it on or take it off any page.' },
     { v: 'v1.12', d: '30/07/2026', note: 'Sections stay put: the top of the first '
       + 'is fixed, and each can be made taller or shorter a block at a time.' },
     { v: 'v1.11', d: '30/07/2026', note: 'Switch between the live and concepts maps '
@@ -916,6 +953,15 @@
   /* Everything arriving from outside — the seed, localStorage, an imported
      file — comes through here. Copy is sanitised, geometry is made sane, and
      edges pointing at boxes that do not exist are dropped. */
+  function legacyShows(n) {
+    if (n.locked) return [];
+    var on = ['_header'];
+    if (n.showsTopics !== false) on.push('_statements', '_topics', '_support');
+    if (n.nextStep) on.push('_nextstep');
+    if (n.showsFooter !== false) on.push('_footer');
+    return on;
+  }
+
   function adopt(data, opts) {
     opts = opts || {};
     var zones = (Array.isArray(data.zones) && data.zones.length ? data.zones : S.zones)
@@ -935,15 +981,23 @@
         hash: n.hash || null,
         kicker: n.kicker || '',
         body: window.NL.sanitiseHtml(n.body || ''),
-        nextStep: !!n.nextStep,
-        showsTopics: n.showsTopics !== false,
-        showsFooter: n.showsFooter !== false,
+        /* Which shared blocks this page shows. Older maps carried three fixed
+           booleans instead, which could only ever describe the three blocks
+           that existed when they were written — so a new block could not be put
+           on a page at all. Those are translated here. */
+        shows: Array.isArray(n.shows) ? n.shows.slice() : legacyShows(n),
         x: typeof n.x === 'number' ? n.x : null,
         y: typeof n.y === 'number' ? n.y : null
       };
     });
     var have = {};
     nodes.forEach(function (n) { have[n.id] = 1; });
+    nodes.forEach(function (n) {
+      n.shows = (n.shows || []).filter(function (id) {
+        var b = nodes.filter(function (o) { return o.id === id; })[0];
+        return b && b.locked && id !== n.id;
+      });
+    });
 
     var seen = {};
     var edges = (data.edges || []).filter(function (e) {
@@ -1227,7 +1281,10 @@
           '<div class="wm-node__f">' +
             '<span class="wm-chip ' + (words ? 'wm-chip--words' : 'wm-chip--empty') + '">' +
               (words ? words + ' words' : 'No words yet') + '</span>' +
-            (n.showsTopics ? '<span class="wm-chip">Topics</span>' : '') +
+            (n.shows.length
+              ? '<span class="wm-chip">+' + n.shows.length +
+                (n.shows.length === 1 ? ' block' : ' blocks') + '</span>'
+              : '') +
           '</div>' +
           '<span class="wm-port" data-port="' + esc(n.id) +
             '" title="Drag to another box to draw an arrow">&#8599;</span>';
@@ -1534,6 +1591,7 @@
 
     var outs = out(n.id);
     var inn = S.edges.filter(function (e) { return e.to === n.id; });
+    var blocks = S.nodes.filter(function (o) { return o.locked && o.id !== n.id; });
 
     if (n.locked) {
       /* Twelve topic buttons was never meant to be a ceiling — this is the
@@ -1543,6 +1601,9 @@
       var spare = S.nodes.filter(function (o) {
         return o.id !== n.id && !outs.some(function (e) { return e.to === o.id; });
       }).sort(function (a, b) { return a.label.localeCompare(b.label); });
+      var pages = S.nodes.filter(function (o) { return !o.locked; })
+        .sort(function (a, b) { return a.label.localeCompare(b.label); });
+      var carriers = pages.filter(function (o) { return o.shows.indexOf(n.id) > -1; });
 
       el.side.innerHTML =
         '<h2>' + esc(n.label) + '</h2>' +
@@ -1583,6 +1644,26 @@
               '<p class="wm-hint" style="margin-top:6px">Not listed? Add the page first with ' +
               '<b>+ Add a page</b>, then come back.</p>'
             : '<p class="wm-hint">Every page is already in this block.</p>') +
+        '</div>' +
+
+        /* The other half of the relationship. A block's buttons say where it
+           leads; this says which pages carry it, which is the thing that was
+           impossible to see or change before. */
+        '<div class="wm-f">' +
+          '<label>On which pages — ' + carriers.length + ' of ' + pages.length + '</label>' +
+          (pages.length
+            ? '<div class="wm-outs">' +
+                '<button class="wm-mini wm-mini--w" type="button" id="nAllPages">' +
+                  'On every page</button>' +
+                '<button class="wm-mini wm-mini--w" type="button" id="nNoPages">' +
+                  'Off every page</button>' +
+              '</div>' +
+              '<div class="wm-checks">' + pages.map(function (o) {
+                return '<label class="wm-check"><input type="checkbox" data-carry="' +
+                  esc(o.id) + '"' + (o.shows.indexOf(n.id) > -1 ? ' checked' : '') +
+                  '><span>' + esc(o.label) + '</span></label>';
+              }).join('') + '</div>'
+            : '<p class="wm-hint">No pages yet.</p>') +
         '</div>' +
 
         '<div class="wm-f">' +
@@ -1626,6 +1707,33 @@
         S.sel = { type: 'node', id: n.id };
         render(); save();
         window.NL.toast('Button added', 'success');
+      });
+      Array.prototype.forEach.call(el.side.querySelectorAll('[data-carry]'), function (b) {
+        b.addEventListener('change', function () {
+          var page = byId(b.getAttribute('data-carry'));
+          if (!page) return;
+          var at = page.shows.indexOf(n.id);
+          if (this.checked && at === -1) page.shows.push(n.id);
+          if (!this.checked && at > -1) page.shows.splice(at, 1);
+          render(); save();
+        });
+      });
+      var allP = document.getElementById('nAllPages');
+      if (allP) allP.addEventListener('click', function () {
+        pages.forEach(function (o) {
+          if (o.shows.indexOf(n.id) === -1) o.shows.push(n.id);
+        });
+        render(); save();
+        window.NL.toast('On every page', 'success');
+      });
+      var noP = document.getElementById('nNoPages');
+      if (noP) noP.addEventListener('click', function () {
+        pages.forEach(function (o) {
+          var at = o.shows.indexOf(n.id);
+          if (at > -1) o.shows.splice(at, 1);
+        });
+        render(); save();
+        window.NL.toast('Taken off every page', 'success');
       });
       document.getElementById('nBlock').addEventListener('change', function () {
         n.locked = false; n._h = 0; render(); save();
@@ -1711,13 +1819,14 @@
         'selected.</p>' +
 
       '<div class="wm-f">' +
-        '<label>Shared blocks on this page</label>' +
-        '<label class="wm-check"><input type="checkbox" id="nTopics"' +
-          (n.showsTopics ? ' checked' : '') + '><span>Shows the topic buttons</span></label>' +
-        '<label class="wm-check"><input type="checkbox" id="nNext"' +
-          (n.nextStep ? ' checked' : '') + '><span>Shows the &ldquo;Your next step&rdquo; box</span></label>' +
-        '<label class="wm-check"><input type="checkbox" id="nFoot"' +
-          (n.showsFooter ? ' checked' : '') + '><span>Shows the footer numbers</span></label>' +
+        '<label>Blocks on this page</label>' +
+        (blocks.length ? blocks.map(function (b) {
+          return '<label class="wm-check"><input type="checkbox" data-shows="' +
+            esc(b.id) + '"' + (n.shows.indexOf(b.id) > -1 ? ' checked' : '') +
+            '><span>' + esc(b.label) + '</span></label>';
+        }).join('')
+          : '<p class="wm-hint">There are no blocks in this map yet. Press ' +
+            '<b>+ Add a block</b> to make one.</p>') +
       '</div>' +
 
       '<div class="wm-f">' +
@@ -1751,10 +1860,13 @@
     document.getElementById('nZone').addEventListener('change', function () {
       n.zone = this.value; tidy(); render(); save();
     });
-    ['nTopics:showsTopics', 'nNext:nextStep', 'nFoot:showsFooter'].forEach(function (pair) {
-      var bits = pair.split(':');
-      document.getElementById(bits[0]).addEventListener('change', function () {
-        n[bits[1]] = this.checked; renderNodes(); save();
+    Array.prototype.forEach.call(el.side.querySelectorAll('[data-shows]'), function (b) {
+      b.addEventListener('change', function () {
+        var id = b.getAttribute('data-shows');
+        var at = n.shows.indexOf(id);
+        if (this.checked && at === -1) n.shows.push(id);
+        if (!this.checked && at > -1) n.shows.splice(at, 1);
+        render(); save();
       });
     });
     Array.prototype.forEach.call(el.side.querySelectorAll('[data-pick]'), function (b) {
@@ -1821,13 +1933,45 @@
     return { x: snap(x0), y: snap(top) };
   }
 
+  /* The blocks that every existing page shows. A new page inherits those. */
+  function commonBlocks() {
+    var pages = S.nodes.filter(function (n) { return !n.locked; });
+    if (!pages.length) {
+      return S.nodes.filter(function (n) { return n.locked; })
+        .map(function (n) { return n.id; });
+    }
+    return S.nodes.filter(function (b) {
+      return b.locked && pages.every(function (p) { return p.shows.indexOf(b.id) > -1; });
+    }).map(function (b) { return b.id; });
+  }
+
+  function addBlock(cx, cy) {
+    var z = zoneAt(cy);
+    var b = {
+      id: freshId('new-block'), zone: z.id, kind: 'shared', locked: true,
+      title: 'New block', label: 'New block', hash: null, kicker: 'A shared block',
+      body: '', shows: [],
+      x: Math.max(8, Math.min(snap(cx - BLOCK_W / 2), CANVAS_W - BLOCK_W - 8)),
+      y: Math.max(8, snap(cy - 60))
+    };
+    S.nodes.push(b);
+    S.sel = { type: 'node', id: b.id };
+    render(); save();
+    var f = document.getElementById('nLab');
+    if (f) { f.focus(); f.select(); }
+    window.NL.toast('New block added — name it, then add its buttons', 'success');
+  }
+
   function addNode(cx, cy) {
     var z = zoneAt(cy);
     var n = {
       id: freshId('new-page'), zone: z.id,
       kind: z.id === 'flow' ? 'everyday' : 'wayin',
       locked: false, title: 'New page', label: 'New page', hash: null, kicker: '',
-      body: '', nextStep: true, showsTopics: true, showsFooter: true,
+      body: '',
+      /* A new page starts with whatever every other page already carries, so it
+         arrives dressed like its neighbours rather than bare. */
+      shows: commonBlocks(),
       x: Math.max(8, Math.min(snap(cx - NODE_W / 2), CANVAS_W - NODE_W - 8)),
       y: Math.max(8, snap(cy - NODE_H / 2))
     };
@@ -1872,6 +2016,13 @@
       if (!ok) return;
       S.nodes = S.nodes.filter(function (x) { return x.id !== id; });
       S.edges = S.edges.filter(function (e) { return e.from !== id && e.to !== id; });
+      /* A deleted block has to come off the pages that carried it, or they keep
+         a reference to something that no longer exists — invisible until the
+         next load quietly dropped it. */
+      S.nodes.forEach(function (x) {
+        var at = x.shows.indexOf(id);
+        if (at > -1) x.shows.splice(at, 1);
+      });
       S.sel = null; render(); save();
       window.NL.toast('Page deleted', 'success');
     });
@@ -2084,6 +2235,7 @@
         danger: true, fn: function () { removeNode(n.id); } });
     } else {
       items.push({ label: 'Add a page here', fn: function () { addNode(p.x, p.y); } });
+      items.push({ label: 'Add a block here', fn: function () { addBlock(p.x, p.y); } });
       items.push({ sep: true });
       items.push({ label: 'Tidy everything up', fn: doTidy });
     }
@@ -2189,6 +2341,10 @@
   document.getElementById('bAdd').addEventListener('click', function () {
     var spot = freeSpot('flow');
     addNode(spot.x + NODE_W / 2, spot.y + NODE_H / 2);
+  });
+  document.getElementById('bAddBlock').addEventListener('click', function () {
+    var spot = freeSpot('flow');
+    addBlock(spot.x + BLOCK_W / 2, spot.y + 60);
   });
   document.getElementById('bTidy').addEventListener('click', doTidy);
   document.getElementById('zFit').addEventListener('click', fit);
@@ -2408,6 +2564,12 @@
         '<li><b>Nothing is fixed.</b> Any box can be dragged or deleted, blocks included, ' +
         'and any page can be turned into a shared block — or back — with the tick box at ' +
         'the bottom of its panel. Start again puts it all back.</li>' +
+        '<li><b>Blocks go on and come off pages.</b> The four statements, the topic ' +
+        'buttons and the &ldquo;Supporting someone&rdquo; buttons are all the same kind ' +
+        'of thing: a component that sits on some pages and not others. A page&rsquo;s ' +
+        'panel ticks any block on or off; a block&rsquo;s panel shows which pages carry ' +
+        'it, and can put it on or take it off all of them at once. Press <b>+ Add a ' +
+        'block</b> to make a new one.</li>' +
         '<li>Each page box says how many words it holds, so it is easy to see what is ' +
         'thin.</li>' +
         '</ul>' +
