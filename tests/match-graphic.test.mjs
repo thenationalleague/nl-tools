@@ -44,18 +44,30 @@ test('bands are 50 primary / 25 secondary / 25 tertiary', () => {
   assert.deepEqual(MG.BANDS, { primary: 50, secondary: 25, tertiary: 25 });
 });
 
-test('the three delivery formats exist with the right dimensions', () => {
-  assert.deepEqual(Object.keys(MG.FORMATS).sort(), ['16x9', '1x1', '9x16']);
+test('the four delivery formats exist with the right dimensions', () => {
+  assert.deepEqual(Object.keys(MG.FORMATS).sort(),
+                   ['16x9', '1x1', '4x5', '9x16']);
   assert.deepEqual([MG.FORMATS['16x9'].w, MG.FORMATS['16x9'].h], [1920, 1080]);
   assert.deepEqual([MG.FORMATS['1x1'].w, MG.FORMATS['1x1'].h], [1080, 1080]);
+  assert.deepEqual([MG.FORMATS['4x5'].w, MG.FORMATS['4x5'].h], [1080, 1350]);
   assert.deepEqual([MG.FORMATS['9x16'].w, MG.FORMATS['9x16'].h], [1080, 1920]);
   assert.equal(MG.DEFAULT_FORMAT, '16x9');
 });
 
-test('portrait splits horizontally, the others vertically', () => {
-  /* A near-vertical seam in a 9:16 frame would leave two 540px slivers. */
+test('every format matches the aspect ratio its name claims', () => {
+  for (const [name, f] of Object.entries(MG.FORMATS)) {
+    const [a, b] = name.split('x').map(Number);
+    assert.ok(Math.abs(f.w / f.h - a / b) < 0.001,
+              `${name} is ${f.w}x${f.h}, which is not ${a}:${b}`);
+  }
+});
+
+test('only the tall portrait splits horizontally', () => {
+  /* 4:5 is still wide enough for a vertical seam; 9:16 would leave two
+     540px slivers with nowhere for a crest. */
   assert.equal(MG.FORMATS['16x9'].split, 'x');
   assert.equal(MG.FORMATS['1x1'].split, 'x');
+  assert.equal(MG.FORMATS['4x5'].split, 'x');
   assert.equal(MG.FORMATS['9x16'].split, 'y');
 });
 
@@ -73,7 +85,8 @@ test('every format carries a complete geometry set', () => {
 });
 
 test('an unknown format throws rather than silently rendering 16:9', () => {
-  assert.throws(() => MG.format('4x5'), /unknown match-graphic format/);
+  assert.ok(!('3x2' in MG.FORMATS), 'pick a name that really is not a format');
+  assert.throws(() => MG.format('3x2'), /unknown match-graphic format/);
 });
 
 test('seamPos leans across the cross axis in both orientations', () => {

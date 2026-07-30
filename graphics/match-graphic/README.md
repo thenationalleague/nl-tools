@@ -28,13 +28,13 @@ node scripts/build-match-graphics.js --clubs "Chester"
 node scripts/build-match-graphics.js --split division --zip
 
 # extra sizes alongside the standard 16:9
-node scripts/build-match-graphics.js --clubs "Woking" --format 16x9,1x1,9x16
+node scripts/build-match-graphics.js --clubs "Woking" --format 16x9,1x1,4x5,9x16
 ```
 
 | Flag | Default | What it does |
 |---|---|---|
 | `--clubs` | all 72 | Comma-separated club names, exactly as in `clubs-meta.json`. Only fixtures involving these clubs are built. |
-| `--format` | `16x9` | Comma-separated: `16x9`, `1x1`, `9x16`. |
+| `--format` | `16x9` | Comma-separated: `16x9`, `1x1`, `4x5`, `9x16`. |
 | `--split` | `club` | How `--zip` groups the output: `club`, `division` or `none`. |
 | `--zip` | off | Also produce zips under `build/.../zips/`. |
 | `--out` | `build/match-graphics` | Output directory. |
@@ -70,12 +70,20 @@ for f in glob.glob('build/match-graphics/_renders/*.png'):
 |---|---|---|---|
 | `16x9` | 1920×1080 | leans off vertical | home left, away right |
 | `1x1` | 1080×1080 | leans off vertical | home left, away right |
+| `4x5` | 1080×1350 | leans off vertical | home left, away right |
 | `9x16` | 1080×1920 | leans off **horizontal** | home **top**, away bottom |
 
-Portrait splits the other way on purpose: a near-vertical seam in a 9:16 frame
-would leave two 540px slivers with nowhere for a crest to sit. Colours, band
-order and the badge-on-the-seam all stay the same, so the three read as one
-family.
+The tall portrait splits the other way on purpose: a near-vertical seam in a
+9:16 frame would leave two 540px slivers with nowhere for a crest to sit. 4:5 is
+still wide enough for a vertical seam, so it keeps the side-by-side layout.
+Colours, band order and the badge-on-the-seam all stay the same, so all four
+read as one family.
+
+`1x1` and `4x5` share the 1080 width, so both have far less room either side of
+the seam than 16:9 does. Their lanes are pushed out and their badges held small;
+the code clears the badge plate by 31px and 26px respectively. If you change
+`codeSize` or `laneA` for either, re-check that clearance — a three-letter code
+runs under the plate very easily at this width.
 
 **16:9 keeps the bare filename** (`WOK-SUT.png`); other formats get a suffix
 (`WOK-SUT-1x1.png`). That way re-running with extra formats never invalidates
@@ -85,7 +93,8 @@ To add a format, add an entry to `FORMATS` in
 `graphics/_shared/match-graphic.js`. Each one carries its own explicit geometry
 rather than being scaled from 16:9 — a single scale factor cannot serve both a
 wider and a taller frame, and type sizes need judgement rather than arithmetic.
-`tests/match-graphic.test.mjs` will check the new entry is complete.
+`tests/match-graphic.test.mjs` will check the new entry is complete and that
+its pixel dimensions actually match the aspect ratio its name claims.
 
 ## Design rules
 

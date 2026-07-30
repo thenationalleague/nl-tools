@@ -36,12 +36,14 @@
    FORMATS
      16x9  1920x1080  landscape, seam leans off vertical, home left
      1x1   1080x1080  square, same vertical seam, tighter type
-     9x16  1080x1920  portrait, seam leans off HORIZONTAL, home top
+     4x5   1080x1350  portrait-ish, still a vertical seam, home left
+     9x16  1080x1920  tall portrait, seam leans off HORIZONTAL, home top
 
-     A near-vertical seam in a 9:16 frame would leave two 540px slivers, so
-     portrait splits the other way and stacks the clubs. Everything else —
-     colours, band order, badge on the seam — is identical, so the three
-     formats read as one family.
+     4:5 is still wide enough for a vertical seam. 9:16 is not — it would
+     leave two 540px slivers with nowhere for a crest — so the tall portrait
+     splits the other way and stacks the clubs. Everything else — colours,
+     band order, badge on the seam — is identical, so all four formats read
+     as one family.
 
    VERSION
      Bump RENDER_VERSION on any change that alters output pixels. The batch
@@ -88,6 +90,17 @@
          values leave about 30px of clear panel either side of it. */
       laneA: 230, laneB: 850,
       badgeLandscape: 160, badgePortrait: 202
+    },
+    '4x5': {
+      /* Same 1080 width as the square, so the same tight clearance applies:
+         the code sits 26px clear of the badge plate. The extra height goes
+         into the crest rather than the type. */
+      w: 1080, h: 1350, split: 'x',
+      seamA: 610, seamB: 470,
+      bands: [30, 15, 15],
+      crestH: 250, codeSize: 138, codeGap: 36,
+      laneA: 225, laneB: 855,
+      badgeLandscape: 165, badgePortrait: 208
     },
     '9x16': {
       w: 1080, h: 1920, split: 'y',
