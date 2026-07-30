@@ -1,10 +1,17 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixtures
-  Version: v0.4 (30/07/2026)
+  Version: v0.5 (30/07/2026)
   File: /fixtures/index.html
 
   CHANGELOG
+    v0.5 (30/07/2026) — Re-importing a sheet already in the tool did
+      nothing at all, silently. RTDB deletes rather than stores a null,
+      so homeScore/awayScore read back UNDEFINED, and undefined in a
+      payload makes Firebase throw synchronously — before any promise
+      exists to reject, so the .catch never ran and the button looked
+      dead. Carried-over fields are now normalised, and a throwing write
+      surfaces as an error toast instead of nothing.
     v0.4 (30/07/2026) — Away club sat 2px above the home club on every
       row. .fx-team was inline-flex, whose baseline comes from the FIRST
       flex item, and the two cells are deliberately mirrored: home is
@@ -89,6 +96,14 @@
     var NL_TOOL_KEY = 'ops-fixtures';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/07/2026',
+        version: 'v0.5',
+        items: [
+          'Re-importing a sheet that is already in the tool now works. It was failing silently: you could click Import and nothing at all happened. Use it to correct a whole division imported under the wrong competition — the fixtures are matched on Opta ID and updated in place, keeping any scores, postponements and history.',
+          'An import that fails now says so, instead of leaving the button looking dead.'
+        ]
+      },
       {
         date: '30/07/2026',
         version: 'v0.4',
@@ -1312,6 +1327,23 @@
               var id = p.recordID ||
                 ('nlf-' + S.season + '-' + String(Date.now()).slice(-8) + '-' + (minted++));
               var prev = S.fixtures[id];
+
+              /* Carry a field over from the existing record, falling back when
+                 it is not there.
+
+                 `prev ? prev.x : fallback` is NOT good enough, and this is the
+                 whole bug behind the silent re-import failure: RTDB does not
+                 store null, it deletes the key. A fixture first written with
+                 homeScore:null reads back with no homeScore AT ALL, so
+                 prev.homeScore is `undefined` — and `undefined` anywhere in a
+                 payload makes Firebase throw SYNCHRONOUSLY, before any promise
+                 exists to reject. The click handler died where it stood.
+                 Never let undefined out of here. */
+              var keep = function (field, fallback) {
+                var v = prev ? prev[field] : undefined;
+                return v === undefined ? (fallback === undefined ? null : fallback) : v;
+              };
+
               updates[id] = {
                 recordID: id, optaID: p.opta || null,
                 competition: IMP.comp, matchday: p.round || '',
@@ -1320,14 +1352,14 @@
                    set once, on first sight; the current date follows the
                    sheet. A fixture already moved in the tool keeps its status
                    and score. */
-                originalDate: prev ? prev.originalDate : p.date,
-                originalKickoff: prev ? prev.originalKickoff : p.kickoff,
+                originalDate: keep('originalDate', p.date),
+                originalKickoff: keep('originalKickoff', p.kickoff),
                 date: p.date, kickoff: p.kickoff,
-                status: prev ? prev.status : 'scheduled',
-                homeScore: prev ? prev.homeScore : null,
-                awayScore: prev ? prev.awayScore : null,
-                createdAt: prev ? prev.createdAt : stamp(),
-                createdBy: prev ? prev.createdBy : (S.session && S.session.uid || null)
+                status: keep('status', 'scheduled'),
+                homeScore: keep('homeScore', null),
+                awayScore: keep('awayScore', null),
+                createdAt: keep('createdAt', stamp()),
+                createdBy: keep('createdBy', (S.session && S.session.uid) || null)
               };
             });
 
@@ -1340,6 +1372,14 @@
               jobs.push(slice);
             }
             var done = 0;
+            /* Firebase can fail two different ways here and only one of them
+               is a rejection: a bad payload THROWS on the spot. Catching just
+               the promise left the button looking dead — you clicked, nothing
+               happened, nothing said why. Both routes now surface. */
+            function failed(e) {
+              NL.toast('Import stopped after ' + done + ' — ' + ((e && e.message) || e), 'error');
+              if (window.console) console.error('fixture import failed', e);
+            }
             (function next() {
               if (!jobs.length) {
                 keys.forEach(function (k) { S.fixtures[k] = updates[k]; });
@@ -1349,12 +1389,11 @@
                 return;
               }
               var batch = jobs.shift();
-              firebase.database().ref(seasonPath('fixtures')).update(batch).then(function () {
-                done += Object.keys(batch).length;
-                next();
-              }).catch(function (e) {
-                NL.toast('Import stopped after ' + done + ': ' + (e.message || e), 'error');
-              });
+              try {
+                firebase.database().ref(seasonPath('fixtures')).update(batch)
+                  .then(function () { done += Object.keys(batch).length; next(); })
+                  .catch(failed);
+              } catch (e) { failed(e); }
             }());
           } }
       ]
