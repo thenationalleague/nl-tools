@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Wellbeing map
-  Version: v1.3 (30/07/2026)
+  Version: v1.4 (30/07/2026)
   File: /wellbeing-map/index.html
 
   An editable map of the public Wellbeing section: every page as a box, every
@@ -41,6 +41,14 @@
   native confirm(). No colour here is a raw hex value.
 
   CHANGELOG
+  v1.4 (30/07/2026) — Adding a page has a button. It was only on the right-click
+    menu, which is no way to reach a primary action, and the right-click itself
+    was bound to the canvas — so below 100% zoom, where the canvas does not fill
+    the window, right-clicking the grey beyond its edge fell through to the
+    browser's own menu and looked like the tool was broken. It is bound to the
+    whole scrolling area now, with the point clamped back inside. The button
+    drops the new page in the first free slot rather than tidying, so nothing
+    anybody positioned by hand gets thrown away.
   v1.3 (30/07/2026) — Box heights are measured rather than assumed. A two-line
     name made a box taller than the 72px the layout assumed, so tall boxes hung
     out of their band and their arrows joined at the wrong point; every box now
@@ -128,6 +136,11 @@
   .wm-btn:hover { background: var(--navy-700); }
   .wm-btn:focus-visible { outline: 2px solid var(--white); outline-offset: 1px; }
   .wm-btn--i { font-weight: 900; width: 34px; padding: 0; }
+  /* Adding a page was only on the right-click menu, which is no way to reach a
+     primary action — especially on a trackpad, and especially for somebody who
+     has not been told the gesture exists. */
+  .wm-btn--go { background: var(--primary); border-color: var(--primary-300); }
+  .wm-btn--go:hover { background: var(--primary-600); }
   .wm-zoom { display: flex; gap: 4px; align-items: center; }
   .wm-zoom .wm-btn { width: 30px; padding: 0; font-size: var(--text-sm); }
 
@@ -439,6 +452,7 @@
       <button class="wm-btn" id="zFit" type="button" title="Fit to window">Fit</button>
       <button class="wm-btn" id="zIn" type="button" title="Zoom in" aria-label="Zoom in">+</button>
     </span>
+    <button class="wm-btn wm-btn--go" id="bAdd" type="button">+ Add a page</button>
     <button class="wm-btn" id="bTidy" type="button">Tidy up</button>
     <button class="wm-btn" id="bExport" type="button">Export</button>
     <button class="wm-btn" id="bImport" type="button">Import</button>
@@ -496,10 +510,12 @@
 
   /* On screen next to the title, so it is always possible to tell which
      version is in front of you. Bump both when you change this file. */
-  var VERSION = 'v1.3';
+  var VERSION = 'v1.4';
   var UPDATED = '30 July 2026';
 
   var NL_CHANGELOG = [
+    { v: 'v1.4', d: '30/07/2026', note: 'There is an "Add a page" button. Right-click '
+      + 'now works anywhere in the window, not only over the canvas.' },
     { v: 'v1.3', d: '30/07/2026', note: 'Boxes no longer spill out of their band, '
       + 'the topics widget sits beside the pages it feeds, and bullets stay inside '
       + 'the grey panel.' },
@@ -808,7 +824,7 @@
   /* Which boxes and arrows the current hover or selection touches. Everything
      else gets dimmed. */
   function focusSet() {
-    var id = hoverId || (S.sel && S.sel.type === 'node' ? S.sel.id : null);
+    var id = hoverId;
     if (!id) return null;
     var nodes = {}, edges = {};
     nodes[id] = 'self';
@@ -1024,7 +1040,9 @@
         'band and it changes band.</p>' +
         '<p style="margin:0 0 8px"><b>Drawing an arrow.</b> Press the small circle at the ' +
         'bottom-right of a box and drag onto another box.</p>' +
-        '<p style="margin:0 0 8px"><b>Adding or removing.</b> Right-click anywhere.</p>' +
+        '<p style="margin:0 0 8px"><b>Adding a page.</b> Press <b>+ Add a page</b> at the ' +
+        'top, or right-click where you want it.</p>' +
+        '<p style="margin:0 0 8px"><b>Removing one.</b> Click it, then Delete this page.</p>' +
         '<p style="margin:0"><b>Grey boxes are locked.</b> The header, footer and topic ' +
         'buttons appear on every page, so they are drawn once and cannot be moved.</p>' +
       '</div>';
@@ -1208,11 +1226,39 @@
     return id;
   }
 
+  /* First grid slot in a band that nothing already occupies. Used by the
+     toolbar button, which — unlike a right-click — carries no opinion about
+     where the page should go. Tidying instead would throw away any positions
+     somebody had arranged by hand. */
+  function freeSpot(zoneId) {
+    var z = S.zones.filter(function (x) { return x.id === zoneId; })[0] || S.zones[0];
+    var mine = S.nodes.filter(function (n) { return n.zone === zoneId; });
+    var blockW = 0;
+    mine.filter(function (n) { return n.locked; }).forEach(function (n) {
+      blockW = Math.max(blockW, wOf(n));
+    });
+    var x0 = blockW ? X0 + blockW + GAP_X : X0;
+    var clash = function (x, y) {
+      return S.nodes.some(function (n) {
+        return x < n.x + wOf(n) + 8 && n.x < x + NODE_W + 8 &&
+               y < n.y + hOf(n) + 8 && n.y < y + NODE_H + 8;
+      });
+    };
+    var top = (z._top || 14) + BAND_TOP;
+    for (var row = 0; row < 40; row++) {
+      var y = top + row * (NODE_H + GAP_Y);
+      for (var x = x0; x + NODE_W <= CANVAS_W - 8; x += NODE_W + GAP_X) {
+        if (!clash(x, y)) return { x: snap(x), y: snap(y) };
+      }
+    }
+    return { x: snap(x0), y: snap(top) };
+  }
+
   function addNode(cx, cy) {
     var z = zoneAt(cy);
     var n = {
       id: freshId('new-page'), zone: z.id,
-      kind: z.id === 'flow' ? 'topic' : 'guide',
+      kind: z.id === 'flow' ? 'everyday' : 'wayin',
       locked: false, title: 'New page', label: 'New page', hash: null, kicker: '',
       body: '', nextStep: true, showsTopics: true, showsFooter: true,
       x: Math.max(8, Math.min(snap(cx - NODE_W / 2), CANVAS_W - NODE_W - 8)),
@@ -1428,10 +1474,16 @@
   /* ── Right-click ──────────────────────────────────────────────────────── */
   function closeCtx() { el.ctx.classList.remove('is-open'); }
 
-  el.canvas.addEventListener('contextmenu', function (ev) {
+  /* Bound to the scroll area rather than the canvas: at anything below 100%
+     the canvas does not fill the window, and a right-click in the grey beyond
+     its edge fell through to the browser's own menu — which looks exactly like
+     the tool being broken. The point is clamped back inside instead. */
+  el.wrap.addEventListener('contextmenu', function (ev) {
     ev.preventDefault();
     var box = ev.target.closest ? ev.target.closest('.wm-node') : null;
     var p = canvasPoint(ev);
+    p.x = Math.max(8, Math.min(p.x, CANVAS_W - NODE_W - 8));
+    p.y = Math.max(8, Math.min(p.y, canvasH - NODE_H - 8));
     var items = [];
 
     if (box) {
@@ -1552,6 +1604,10 @@
     applyZoom();
   }
 
+  document.getElementById('bAdd').addEventListener('click', function () {
+    var spot = freeSpot('flow');
+    addNode(spot.x + NODE_W / 2, spot.y + NODE_H / 2);
+  });
   document.getElementById('bTidy').addEventListener('click', doTidy);
   document.getElementById('zFit').addEventListener('click', fit);
   document.getElementById('zIn').addEventListener('click', function () { nudgeZoom(1); });
@@ -1654,7 +1710,10 @@
         '<li><b>Draw an arrow</b> — press the small circle at the bottom-right of a box ' +
         'and drag onto another box.</li>' +
         '<li><b>Remove an arrow</b> — click the arrow, then Delete this arrow.</li>' +
-        '<li><b>Add or delete a page</b> — right-click.</li>' +
+        '<li><b>Add a page</b> — press <b>+ Add a page</b> at the top. It appears in the ' +
+        'first free space. Or right-click exactly where you want it.</li>' +
+        '<li><b>Delete a page</b> — click it, then <b>Delete this page</b> at the bottom of ' +
+        'the panel. Or right-click it.</li>' +
         '<li><b>Tidy up</b> — puts every box back on the grid if it has got messy.</li>' +
         '</ul>' +
 
