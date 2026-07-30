@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Wellbeing map
-  Version: v1.4 (30/07/2026)
+  Version: v1.5 (30/07/2026)
   File: /wellbeing-map/index.html
 
   An editable map of the public Wellbeing section: every page as a box, every
@@ -41,6 +41,16 @@
   native confirm(). No colour here is a raw hex value.
 
   CHANGELOG
+  v1.5 (30/07/2026) — Two things the tool could not do. The topics widget was
+    effectively fixed at twelve buttons: rows could be deleted but nothing could
+    be added, because a block had no port and its panel was read-only. The panel
+    is now an editable list — add a button from a dropdown or by dragging the
+    block's port onto a page, move buttons up and down the list, take them out —
+    and this is the section most likely to grow. Second, nothing is locked any
+    more. Every box can be dragged and deleted, blocks included, and any page can
+    be turned into a shared block or back with a tick box. Start again (was
+    Reset) now offers a completely empty canvas as well as the live structure, so
+    the section can be designed from nothing rather than only argued with.
   v1.4 (30/07/2026) — Adding a page has a button. It was only on the right-click
     menu, which is no way to reach a primary action, and the right-click itself
     was bound to the canvas — so below 100% zoom, where the canvas does not fill
@@ -256,8 +266,7 @@
   .wm-node--other    { border-color: var(--blue); }
   .wm-node--wayin    { border-color: var(--navy); }
   .wm-node--services { border-color: var(--navy-300); }
-  .wm-node--shared   { border-color: var(--navy-400); background: var(--navy-50); cursor: default; }
-  .wm-node--shared.is-drag { cursor: default; }
+  .wm-node--shared   { border-color: var(--navy-400); background: var(--navy-50); }
 
   /* A shared block lists its own buttons instead of firing arrows across the
      canvas at each destination. Twelve topic arrows WAS the tangled web — the
@@ -344,6 +353,29 @@
   }
   .wm-out__x:hover { background: var(--red-light); border-color: var(--red); color: var(--red-deep); }
   .wm-out__x b { font-weight: 900; }
+
+  .wm-btns { display: flex; flex-direction: column; gap: 4px; }
+  .wm-btnrow { display: flex; gap: 4px; align-items: stretch; }
+  .wm-btnrow__t {
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px;
+    font-family: inherit; font-size: var(--text-sm); text-align: left;
+    background: var(--white); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 7px 10px; cursor: pointer; min-height: 36px;
+  }
+  .wm-btnrow__t:hover { border-color: var(--navy); background: var(--navy-50); }
+  .wm-btnrow__t span:last-child {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .wm-mini {
+    flex: none; width: 32px; font-family: inherit; font-size: var(--text-sm);
+    font-weight: 700; background: var(--white); color: var(--navy);
+    border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer;
+  }
+  .wm-mini:hover:not(:disabled) { background: var(--navy-50); border-color: var(--navy); }
+  .wm-mini:disabled { opacity: 0.35; cursor: default; }
+  .wm-mini--x { color: var(--red-deep); }
+  .wm-mini--x:hover { background: var(--red-light); border-color: var(--red); }
 
   .wm-live {
     display: inline-block; font-size: var(--text-xs); font-weight: 700;
@@ -456,7 +488,7 @@
     <button class="wm-btn" id="bTidy" type="button">Tidy up</button>
     <button class="wm-btn" id="bExport" type="button">Export</button>
     <button class="wm-btn" id="bImport" type="button">Import</button>
-    <button class="wm-btn" id="bReset" type="button">Reset</button>
+    <button class="wm-btn" id="bReset" type="button">Start again</button>
     <button class="wm-btn wm-btn--i" id="bHelp" type="button" title="How this works" aria-label="How this works">i</button>
   </span>
 
@@ -510,10 +542,13 @@
 
   /* On screen next to the title, so it is always possible to tell which
      version is in front of you. Bump both when you change this file. */
-  var VERSION = 'v1.4';
+  var VERSION = 'v1.5';
   var UPDATED = '30 July 2026';
 
   var NL_CHANGELOG = [
+    { v: 'v1.5', d: '30/07/2026', note: 'The twelve topic buttons are no longer a '
+      + 'ceiling: add, reorder and remove them. Nothing is fixed any more, and '
+      + 'Start again offers an empty canvas.' },
     { v: 'v1.4', d: '30/07/2026', note: 'There is an "Add a page" button. Right-click '
       + 'now works anywhere in the window, not only over the canvas.' },
     { v: 'v1.3', d: '30/07/2026', note: 'Boxes no longer spill out of their band, '
@@ -853,6 +888,8 @@
           '<div class="wm-node__n">' + esc(n.label) + '</div>' +
           '<div class="wm-node__k">On every page · ' + rows.length +
             (rows.length === 1 ? ' button' : ' buttons') + '</div>' +
+          '<span class="wm-port" data-port="' + esc(n.id) +
+            '" title="Drag onto a page to add a button">&#8599;</span>' +
           '<div class="wm-rows' + (colsOf(n) === 2 ? ' wm-rows--two' : '') + '">' +
           (rows.length ? rows.map(function (e) {
             var to = byId(e.to);
@@ -1043,8 +1080,9 @@
         '<p style="margin:0 0 8px"><b>Adding a page.</b> Press <b>+ Add a page</b> at the ' +
         'top, or right-click where you want it.</p>' +
         '<p style="margin:0 0 8px"><b>Removing one.</b> Click it, then Delete this page.</p>' +
-        '<p style="margin:0"><b>Grey boxes are locked.</b> The header, footer and topic ' +
-        'buttons appear on every page, so they are drawn once and cannot be moved.</p>' +
+        '<p style="margin:0"><b>Grey boxes are shared blocks.</b> The header, footer and ' +
+        'topic buttons appear on every page, so they are drawn once with their buttons ' +
+        'listed inside. They can still be moved, edited and deleted.</p>' +
       '</div>';
     rt = null;
   }
@@ -1085,20 +1123,108 @@
     var inn = S.edges.filter(function (e) { return e.to === n.id; });
 
     if (n.locked) {
+      /* Twelve topic buttons was never meant to be a ceiling — this is the
+         section most likely to grow. So the list is editable: add a button,
+         move one up or down (order is what somebody reads down the widget),
+         or take one out. Click a row to change its wording. */
+      var spare = S.nodes.filter(function (o) {
+        return o.id !== n.id && !outs.some(function (e) { return e.to === o.id; });
+      }).sort(function (a, b) { return a.label.localeCompare(b.label); });
+
       el.side.innerHTML =
         '<h2>' + esc(n.label) + '</h2>' +
-        '<p class="wm-hint">A shared block. Locked.</p>' +
-        '<div class="wm-locked">' + n.body + '</div>' +
-        '<div class="wm-f" style="margin-top:14px">' +
-          '<label>Goes to</label>' +
-          '<div class="wm-out">' + (outs.length ? outs.map(function (e) {
-            return '<span class="wm-out__x" style="cursor:default"><b>' +
-              esc(byId(e.to).label) + '</b></span>';
-          }).join('') : '<span class="wm-hint">Nowhere</span>') + '</div>' +
+        '<p class="wm-hint">A shared block: one component that appears on every page.</p>' +
+
+        '<div class="wm-f">' +
+          '<label for="nLab">Name on the block</label>' +
+          '<input type="text" id="nLab" value="' + esc(n.label) + '">' +
         '</div>' +
-        '<p class="wm-hint">This block is on every page, so it is drawn once. To change ' +
-          'which pages show it, click a page box and use its tick boxes.</p>';
-      rt = null;
+
+        '<div class="wm-f">' +
+          '<label>Buttons in this block — ' + outs.length + '</label>' +
+          (outs.length ? '<div class="wm-btns">' + outs.map(function (e, i) {
+            return '<div class="wm-btnrow">' +
+              '<button type="button" class="wm-btnrow__t" data-pick="' + esc(eKey(e)) + '">' +
+                '<span class="wm-row__d wm-row__d--' + esc(byId(e.to).kind) + '"></span>' +
+                '<span>' + esc(e.label || byId(e.to).label) + '</span>' +
+              '</button>' +
+              '<button type="button" class="wm-mini" data-up="' + esc(eKey(e)) + '"' +
+                (i === 0 ? ' disabled' : '') + ' title="Move up" aria-label="Move up">&uarr;</button>' +
+              '<button type="button" class="wm-mini" data-down="' + esc(eKey(e)) + '"' +
+                (i === outs.length - 1 ? ' disabled' : '') + ' title="Move down" aria-label="Move down">&darr;</button>' +
+              '<button type="button" class="wm-mini wm-mini--x" data-drop="' + esc(eKey(e)) + '"' +
+                ' title="Remove this button" aria-label="Remove this button">&times;</button>' +
+              '</div>';
+          }).join('') + '</div>'
+            : '<p class="wm-hint">No buttons yet.</p>') +
+        '</div>' +
+
+        '<div class="wm-f">' +
+          '<label for="nAddBtn">Add a button</label>' +
+          (spare.length
+            ? '<select id="nAddBtn">' +
+                '<option value="">Choose a page…</option>' +
+                spare.map(function (o) {
+                  return '<option value="' + esc(o.id) + '">' + esc(o.label) + '</option>';
+                }).join('') + '</select>' +
+              '<p class="wm-hint" style="margin-top:6px">Not listed? Add the page first with ' +
+              '<b>+ Add a page</b>, then come back.</p>'
+            : '<p class="wm-hint">Every page is already in this block.</p>') +
+        '</div>' +
+
+        '<div class="wm-f">' +
+          '<label>What this block is</label>' +
+          '<div id="rtMount"></div>' +
+        '</div>' +
+
+        '<div class="wm-f">' +
+          '<label class="wm-check"><input type="checkbox" id="nBlock" checked>' +
+          '<span>Treat this as a shared block. Untick it to turn it into an ordinary ' +
+          'page you can point arrows at.</span></label>' +
+        '</div>' +
+
+        '<button class="wm-danger" id="nDel" type="button">Delete this block</button>';
+
+      document.getElementById('nLab').addEventListener('input', function () {
+        n.label = this.value; renderNodes(); save();
+      });
+      Array.prototype.forEach.call(el.side.querySelectorAll('[data-pick]'), function (b) {
+        b.addEventListener('click', function () {
+          select({ type: 'edge', id: b.getAttribute('data-pick') });
+        });
+      });
+      Array.prototype.forEach.call(el.side.querySelectorAll('[data-up],[data-down]'), function (b) {
+        b.addEventListener('click', function () {
+          moveButton(b.getAttribute('data-up') || b.getAttribute('data-down'),
+            b.hasAttribute('data-up') ? -1 : 1);
+        });
+      });
+      Array.prototype.forEach.call(el.side.querySelectorAll('[data-drop]'), function (b) {
+        b.addEventListener('click', function () {
+          var k = b.getAttribute('data-drop');
+          S.edges = S.edges.filter(function (x) { return eKey(x) !== k; });
+          render(); save();
+        });
+      });
+      var add = document.getElementById('nAddBtn');
+      if (add) add.addEventListener('change', function () {
+        if (!this.value) return;
+        connect(n.id, this.value);
+        S.sel = { type: 'node', id: n.id };
+        render(); save();
+        window.NL.toast('Button added', 'success');
+      });
+      document.getElementById('nBlock').addEventListener('change', function () {
+        n.locked = false; n._h = 0; render(); save();
+        window.NL.toast('Now an ordinary page', 'success');
+      });
+      document.getElementById('nDel').addEventListener('click', function () { removeNode(n.id); });
+
+      rt = window.NL.richText(document.getElementById('rtMount'), {
+        value: n.body, compact: true,
+        placeholder: 'What this block is, and where it sits…',
+        onChange: function (clean) { n.body = clean; save(); }
+      });
       return;
     }
 
@@ -1176,6 +1302,14 @@
         '<div id="rtMount"></div>' +
       '</div>' +
 
+      /* Blue-sky work needs to be able to say "what if this were the menu" —
+         and to take the header or footer out entirely. Nothing here is fixed. */
+      '<div class="wm-f">' +
+        '<label class="wm-check"><input type="checkbox" id="nBlock">' +
+        '<span>Treat this as a shared block — one component on every page, ' +
+        'drawn with its buttons listed inside it.</span></label>' +
+      '</div>' +
+
       '<button class="wm-danger" id="nDel" type="button">Delete this page</button>';
 
     /* Wiring. Text fields update as you type; the box on the canvas keeps up. */
@@ -1206,6 +1340,10 @@
         S.edges = S.edges.filter(function (x) { return eKey(x) !== k; });
         render(); save();
       });
+    });
+    document.getElementById('nBlock').addEventListener('change', function () {
+      n.locked = true; n._h = 0; render(); save();
+      window.NL.toast('Now a shared block', 'success');
     });
     document.getElementById('nDel').addEventListener('click', function () { removeNode(n.id); });
 
@@ -1244,7 +1382,7 @@
                y < n.y + hOf(n) + 8 && n.y < y + NODE_H + 8;
       });
     };
-    var top = (z._top || 14) + BAND_TOP;
+    var top = (z._top || 14) + BAND_TOP;   /* bands may be unmeasured on an empty canvas */
     for (var row = 0; row < 40; row++) {
       var y = top + row * (NODE_H + GAP_Y);
       for (var x = x0; x + NODE_W <= CANVAS_W - 8; x += NODE_W + GAP_X) {
@@ -1274,7 +1412,7 @@
 
   function duplicateNode(id) {
     var src = byId(id);
-    if (!src || src.locked) return;
+    if (!src) return;
     var copy = JSON.parse(JSON.stringify(src));
     copy.id = freshId(src.label + ' copy');
     copy.label = src.label + ' (copy)';
@@ -1289,20 +1427,18 @@
   function removeNode(id) {
     var n = byId(id);
     if (!n) return;
-    if (n.locked) {
-      window.NL.toast('Shared blocks cannot be deleted', 'error');
-      return;
-    }
     var links = S.edges.filter(function (e) { return e.from === id || e.to === id; }).length;
+    var detail = links
+      ? links + (links === 1 ? ' arrow' : ' arrows') + ' will go with it.'
+      : 'It has no arrows attached.';
+    /* Shared blocks used to refuse. Blue-sky work needs to be able to take the
+       header or the footer out and see what is left, and Reset puts it back. */
+    if (n.locked) detail = 'This is a shared block on every page. ' + detail;
+
     window.NL.confirm(
       'Delete "' + n.label + '"?',
-      {
-        title: 'Delete page',
-        detail: links
-          ? links + (links === 1 ? ' arrow' : ' arrows') + ' will go with it.'
-          : 'It has no arrows attached.',
-        confirmText: 'Delete'
-      }
+      { title: n.locked ? 'Delete shared block' : 'Delete page', detail: detail,
+        confirmText: 'Delete' }
     ).then(function (ok) {
       if (!ok) return;
       S.nodes = S.nodes.filter(function (x) { return x.id !== id; });
@@ -1310,6 +1446,27 @@
       S.sel = null; render(); save();
       window.NL.toast('Page deleted', 'success');
     });
+  }
+
+  /* Reorder a block's buttons. Order is what somebody reads down the widget,
+     so it is part of the design, not an implementation detail. Swaps with the
+     neighbouring button of the SAME block, leaving other arrows alone. */
+  function moveButton(key, dir) {
+    var idx = -1;
+    for (var i = 0; i < S.edges.length; i++) if (eKey(S.edges[i]) === key) { idx = i; break; }
+    if (idx === -1) return;
+    var from = S.edges[idx].from;
+    var swap = -1;
+    if (dir < 0) {
+      for (var a = idx - 1; a >= 0; a--) if (S.edges[a].from === from) { swap = a; break; }
+    } else {
+      for (var b = idx + 1; b < S.edges.length; b++) if (S.edges[b].from === from) { swap = b; break; }
+    }
+    if (swap === -1) return;
+    var tmp = S.edges[idx];
+    S.edges[idx] = S.edges[swap];
+    S.edges[swap] = tmp;
+    render(); save();
   }
 
   function connect(from, to) {
@@ -1353,7 +1510,6 @@
     }
 
     select({ type: 'node', id: n.id });
-    if (n.locked) return;
 
     var p = canvasPoint(ev);
     drag = { mode: 'move', id: n.id, dx: p.x - n.x, dy: p.y - n.y, moved: false };
@@ -1489,17 +1645,11 @@
     if (box) {
       var n = byId(box.getAttribute('data-id'));
       select({ type: 'node', id: n.id });
-      if (n.locked) {
-        items.push({ note: 'This is a shared block. It is on every page, so it cannot be ' +
-          'moved or deleted here.' });
-      } else {
-        items.push({ label: 'Edit the words', fn: function () {
-          if (rt) rt.focus();
-        } });
-        items.push({ label: 'Make a copy', fn: function () { duplicateNode(n.id); } });
-        items.push({ sep: true });
-        items.push({ label: 'Delete this page', danger: true, fn: function () { removeNode(n.id); } });
-      }
+      items.push({ label: 'Edit the words', fn: function () { if (rt) rt.focus(); } });
+      items.push({ label: 'Make a copy', fn: function () { duplicateNode(n.id); } });
+      items.push({ sep: true });
+      items.push({ label: n.locked ? 'Delete this block' : 'Delete this page',
+        danger: true, fn: function () { removeNode(n.id); } });
     } else {
       items.push({ label: 'Add a page here', fn: function () { addNode(p.x, p.y); } });
       items.push({ sep: true });
@@ -1654,20 +1804,34 @@
     el.file.value = '';
   });
 
+  /* Two ways to start over, and they are different exercises. "Back to the live
+     structure" is for arguing with what exists. "Empty canvas" is for designing
+     the section you would build if it did not, which is a conversation the tool
+     could not host while the live structure was the only starting point. */
   document.getElementById('bReset').addEventListener('click', function () {
-    window.NL.confirm(
-      'Put everything back to how the live site is today?',
-      {
-        title: 'Reset',
-        detail: 'Every change you have made here is thrown away. Export first if you ' +
-          'want to keep it.',
-        confirmText: 'Reset'
-      }
-    ).then(function (ok) {
-      if (!ok || !seed) return;
-      adopt(JSON.parse(JSON.stringify(seed)), { tidy: true });
-      layOut(); save();
-      window.NL.toast('Back to the live structure', 'success');
+    window.NL.modal({
+      title: 'Start again',
+      size: 'md',
+      body: '<p class="confirm-text">Both of these throw away every change on screen. ' +
+        'If you want to keep it, press Cancel and <b>Export</b> first.</p>',
+      buttons: [
+        { label: 'The live structure', className: 'btn--primary', autofocus: true,
+          onClick: function (c) {
+            c.close();
+            if (!seed) return;
+            adopt(JSON.parse(JSON.stringify(seed)), { tidy: true });
+            layOut(); save();
+            window.NL.toast('Back to the live structure', 'success');
+          } },
+        { label: 'Empty canvas', onClick: function (c) {
+            c.close();
+            adopt({ zones: (seed && seed.zones) || S.zones, nodes: [], edges: [] },
+              { tidy: true });
+            layOut(); save();
+            window.NL.toast('Empty canvas — press + Add a page to begin', 'success');
+          } },
+        { label: 'Cancel', onClick: function (c) { c.close(); } }
+      ]
     });
   });
 
@@ -1699,7 +1863,8 @@
         'Downloads folder. Email it to Richard.</li>' +
         '<li><b>Import</b> loads a file back in. It replaces what is on screen, so export ' +
         'first if you want to keep it.</li>' +
-        '<li><b>Reset</b> puts everything back to how the live site is today.</li>' +
+        '<li><b>Start again</b> offers two things: back to how the live site is today, ' +
+        'or a completely empty canvas to design from scratch.</li>' +
         '</ul>' +
 
         '<h3>Doing things</h3>' +
@@ -1739,8 +1904,14 @@
         '<li><b>Grey blocks list their own buttons.</b> The header, the footer and the ' +
         'topic buttons appear on every page, so instead of firing twelve arrows across ' +
         'the diagram they list where each button goes. Hover the block to see all of them ' +
-        'at once, or hover one row for just that one. Click a row to reword or remove ' +
-        'that button.</li>' +
+        'at once, or hover one row for just that one.</li>' +
+        '<li><b>The twelve topic buttons are not a limit.</b> Click the block and use ' +
+        '<b>Add a button</b>, or drag from the circle on the block onto a page. The ' +
+        'arrows beside each button move it up or down the list, and &times; takes it out. ' +
+        'Click a button to change its wording.</li>' +
+        '<li><b>Nothing is fixed.</b> Any box can be dragged or deleted, blocks included, ' +
+        'and any page can be turned into a shared block — or back — with the tick box at ' +
+        'the bottom of its panel. Start again puts it all back.</li>' +
         '<li>Each page box says how many words it holds, so it is easy to see what is ' +
         'thin.</li>' +
         '</ul>' +
