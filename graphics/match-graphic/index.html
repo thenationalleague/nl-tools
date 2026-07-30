@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Match Graphic
+  Version: v1.0 (30/07/2026)
+  File: /graphics/match-graphic/index.html
+
+  Builds a single match graphic for any two clubs, in the four delivery
+  formats, and downloads it. The bulk season set is produced by
+  scripts/build-match-graphics.js; this page is for one-offs — a rearranged
+  fixture, a cup tie not yet in the data, a friendly.
+
+  Artwork comes from /graphics/_shared/match-graphic.js, the same module the
+  batch build calls, so a graphic made here is pixel-identical to one in a
+  delivered folder. Design rules and the reasoning behind them live in
+  /graphics/match-graphic/README.md — they were set with the brand owner and
+  are decisions, not defaults.
+
+  Storage (RTDB): none. This tool reads clubs-meta / competitions-meta over
+  HTTP and writes nothing.
+
+  Access (auth-guard registry): shares toolKey 'staff-graphics' with the other
+  Graphics & Media sub-tools, so anyone who can reach /graphics/ gets this.
+
+  CHANGELOG
+  v1.0 (30/07/2026) — Initial build
+    - Two NL.clubPicker selects (home/away) with a swap control between them
+    - Competition select from competitions-meta.json
+    - Four formats: 16x9, 1x1, 4x5, 9x16
+    - Live canvas preview; NL.download for single and all-four export
+    - Colour readout showing the resolved code colour, its basis and the
+      contrast ratio, so the tertiary fallbacks explain themselves
+    - Per-club colour override behind an explicit unlock; session-only,
+      never written back to clubs-meta
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Match Graphic — NL Tools</title>
+
+  <!-- Brand stylesheet -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=26">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Match Graphic',
+      toolKey: 'staff-graphics'
+    };
+    var NL_TOOL_KEY = 'staff-graphics';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '30/07/2026',
+        version: 'v1.0',
+        items: [
+          'Initial build — four formats, live preview, single or all-four download.',
+          'Colour readout explains why a club code uses its secondary or tertiary.',
+          'Per-club colour override behind an unlock; session-only, never saved.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the app from here. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts -->
+  <script src="/system/nl-utils.js?v=27"></script>
+  <script src="/system/nl-topbar.js?v=8"></script>
+  <script src="/system/auth-guard.js?v=10"></script>
+
+  <!-- Artwork renderer, shared with scripts/build-match-graphics.js -->
+  <script src="/graphics/_shared/match-graphic.js"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+
+  /* The canvas needs the LOCAL Carbona ExtraBold, not the carbona-variable
+     face nl-brand.css loads from Typekit. Typekit is domain-licensed, so a
+     canvas drawn with it can fall back to sans-serif silently — and the batch
+     build uses this same OTF, so sharing it is what keeps browser and batch
+     output identical. font-display:block so nothing draws un-styled. */
+  @font-face {
+    font-family: 'NLCarbonaExtraBold';
+    src: url('/graphics/_shared/fonts/Carbona-ExtraBold.otf') format('opentype');
+    font-weight: 800;
+    font-display: block;
+  }
+
+  .mg-fixture {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 12px;
+    align-items: end;
+  }
+  .mg-swap {
+    width: 38px; height: 38px; margin-bottom: 1px;
+    display: grid; place-items: center;
+    background: var(--navy-50);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .mg-swap:hover { border-color: var(--navy-200); }
+
+  .mg-row2 {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 12px;
+    margin-top: 14px;
+  }
+
+  .mg-formats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .mg-fmt {
+    display: flex; flex-direction: column; gap: 1px;
+    padding: 8px 9px; text-align: left; cursor: pointer;
+    font: inherit; color: var(--text);
+    background: var(--off-white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .mg-fmt:hover { border-color: var(--navy-200); }
+  .mg-fmt[aria-pressed="true"] {
+    border-color: var(--primary);
+    background: var(--primary-50);
+    box-shadow: inset 0 0 0 1px var(--primary);
+  }
+  .mg-fmt b { font-size: var(--text-sm); }
+  .mg-fmt span, .mg-fmt em {
+    font-size: var(--text-xs); color: var(--text-muted); font-style: normal;
+  }
+  .mg-fmt span { font-variant-numeric: tabular-nums; }
+
+  .mg-stage { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; align-items: start; }
+  .mg-canvasbox {
+    background: var(--navy-100);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    display: grid; place-items: center;
+  }
+  #mgCanvas {
+    max-width: 100%; max-height: min(56vh, 620px);
+    width: auto; height: auto; display: block;
+    box-shadow: var(--shadow);
+  }
+  .mg-previewhead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .mg-previewhead h2 { margin: 0; font-size: var(--text-base); }
+  .mg-dims { font-size: var(--text-sm); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+  .mg-club + .mg-club {
+    margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);
+  }
+  .mg-club h3 { margin: 0 0 9px; font-size: var(--text-sm); display: flex; align-items: center; gap: 8px; }
+  .mg-club h3 img { width: 22px; height: 22px; object-fit: contain; }
+  .mg-club h3 span { color: var(--text-muted); font-weight: 400; }
+
+  .mg-crow {
+    display: grid; grid-template-columns: 74px 30px minmax(0, 1fr);
+    gap: 8px; align-items: center; margin-bottom: 6px;
+  }
+  .mg-crow > span:first-child {
+    font-size: var(--text-xs); color: var(--text-muted);
+    text-transform: uppercase; letter-spacing: .05em;
+  }
+  .mg-sw {
+    display: inline-block; width: 26px; height: 20px;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+  }
+  .mg-sw--sm { width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; }
+  .mg-hexval { font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+  .mg-crow input[type="color"] {
+    width: 30px; height: 26px; padding: 0; cursor: pointer;
+    background: none; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  }
+  .mg-crow input[type="text"] {
+    width: 100%; padding: 4px 7px; font: inherit; font-size: var(--text-sm);
+    font-variant-numeric: tabular-nums; text-transform: uppercase;
+    color: var(--text); background: var(--white);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+  }
+  .mg-crow input[type="text"][aria-invalid="true"] { border-color: var(--primary); }
+
+  .mg-derived {
+    display: flex; gap: 7px; align-items: center; flex-wrap: wrap;
+    margin: 9px 0 0; font-size: var(--text-sm); color: var(--text-muted);
+  }
+  .mg-derived b { color: var(--text); font-variant-numeric: tabular-nums; }
+
+  .mg-strip {
+    display: flex; gap: 9px; padding: 10px 16px;
+    font-size: var(--text-sm); border-top: 1px solid var(--border);
+  }
+  /* [hidden] is only a UA display:none, so any rule setting display beats it.
+     Every display-setting class here needs its own [hidden] guard. */
+  .mg-strip[hidden] { display: none; }
+  .mg-strip--warn  { background: var(--amber-light); color: var(--amber); }
+  .mg-strip--info  { background: var(--blue-light);  color: var(--blue); }
+  .btn[hidden] { display: none; }
+
+  .mg-note { margin: 0; font-size: var(--text-sm); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .mg-note b { color: var(--text); }
+  #mgExplain { margin-top: 14px; }
+
+  @media (max-width: 960px) { .mg-stage { grid-template-columns: 1fr; } }
+  @media (max-width: 720px) {
+    .mg-fixture { grid-template-columns: 1fr; align-items: stretch; }
+    .mg-swap { justify-self: center; }
+    .mg-row2 { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 560px) { .mg-formats { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+
+<!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="main">
+
+    <header style="margin-bottom:20px;">
+      <h1 style="color:var(--navy);">Match Graphic</h1>
+      <p style="color:var(--text-muted);">
+        One-off match graphics in the four delivery sizes. The full season set
+        is produced by the batch build.
+      </p>
+    </header>
+
+    <section class="form-panel" style="margin-bottom:18px;">
+      <div class="form-panel__head">Fixture</div>
+      <div class="form-panel__body">
+        <div class="mg-fixture">
+          <div>
+            <span class="text-label" id="mgHomeLabel">Home</span>
+            <div id="mgHomePicker"></div>
+          </div>
+          <button class="mg-swap" id="mgSwap" type="button"
+                  title="Swap home and away" aria-label="Swap home and away">&#8646;</button>
+          <div>
+            <span class="text-label" id="mgAwayLabel">Away</span>
+            <div id="mgAwayPicker"></div>
+          </div>
+        </div>
+        <div class="mg-row2">
+          <div class="form-group">
+            <label for="mgComp">Competition</label>
+            <select id="mgComp"></select>
+          </div>
+          <div>
+            <span class="text-label">Size</span>
+            <div class="mg-formats" id="mgFormats"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="mg-stage" style="margin-bottom:18px;">
+      <div>
+        <div class="mg-previewhead">
+          <h2 id="mgMatchup">&nbsp;</h2>
+          <span class="mg-dims" id="mgDims"></span>
+        </div>
+        <div class="mg-canvasbox">
+          <canvas id="mgCanvas" width="1920" height="1080"></canvas>
+        </div>
+      </div>
+
+      <section class="form-panel">
+        <div class="form-panel__head">Colours</div>
+        <div class="form-panel__body">
+          <div class="mg-club" id="mgHomeCol"></div>
+          <div class="mg-club" id="mgAwayCol"></div>
+          <p class="mg-note" id="mgExplain"></p>
+        </div>
+        <div class="mg-strip mg-strip--warn" id="mgWarn" hidden></div>
+        <div class="mg-strip mg-strip--info" id="mgOvNote" hidden>
+          <span><b>Not saved.</b> Overrides apply to this download only and are
+          forgotten on reload. To change a club permanently, edit
+          <code>clubs-meta.json</code>.</span>
+        </div>
+        <div class="form-panel__foot">
+          <button class="btn btn--ghost btn--sm" id="mgUnlock" type="button">Override colours</button>
+          <button class="btn btn--ghost btn--sm" id="mgReset" type="button" hidden>Reset</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="toolbar">
+      <div class="toolbar__left">
+        <button class="btn btn--primary" id="mgDownload" type="button">Download PNG</button>
+        <button class="btn btn--ghost" id="mgDownloadAll" type="button">Download all four sizes</button>
+      </div>
+      <div class="toolbar__right">
+        <p class="mg-note">Saves as <b id="mgFname">&nbsp;</b></p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  var MG = window.NL_MATCH_GRAPHIC;
+  var FMT_ORDER = ['16x9', '1x1', '4x5', '9x16'];
+  var FMT_META = {
+    '16x9': { label: 'Landscape', note: 'side by side' },
+    '1x1':  { label: 'Square',    note: 'side by side' },
+    '4x5':  { label: 'Portrait',  note: 'stacked' },
+    '9x16': { label: 'Story',     note: 'stacked' }
+  };
+  var KEYS = ['primary', 'secondary', 'tertiary'];
+
+  var el = function (id) { return document.getElementById(id); };
+
+  var state = { home: null, away: null, comp: 'National', format: '16x9' };
+  var badges = {};              /* competition -> logo path */
+  var overrides = {};           /* club name -> partial colours (session only) */
+  var unlocked = false;
+  var images = {};              /* url -> Promise<Image|null> */
+  var homePicker, awayPicker;
+
+  /* ---------- assets ---------- */
+
+  function loadImage(src) {
+    if (!images[src]) {
+      images[src] = new Promise(function (res) {
+        var i = new Image();
+        i.onload = function () { res(i); };
+        i.onerror = function () { res(null); };
+        i.src = src;
+      });
+    }
+    return images[src];
+  }
+
+  /* ---------- colours ---------- */
+
+  function colorsFor(name) {
+    var club = NL.clubs.byName(name);
+    var base = club && club.colors ? club.colors : {};
+    var ov = overrides[name];
+    if (!ov) return base;
+    var out = {};
+    KEYS.forEach(function (k) { out[k] = ov[k] || base[k]; });
+    return out;
+  }
+
+  function isOverridden(name) {
+    var ov = overrides[name];
+    if (!ov) return false;
+    var club = NL.clubs.byName(name);
+    var base = (club && club.colors) || {};
+    return KEYS.some(function (k) {
+      return ov[k] && base[k] && ov[k].toLowerCase() !== base[k].toLowerCase();
+    });
+  }
+
+  /* Canon .pill state variants — green for the normal path, blue for the
+     tertiary fallback, amber for a club with no legible option. */
+  function pillClass(basis) {
+    return basis === 'secondary' ? 'pill--approved'
+         : basis === 'tertiary'  ? 'pill--info'
+         : 'pill--soon';
+  }
+
+  /* ---------- colour panel: readout, editable only once unlocked ---------- */
+
+  function buildClubCol(mount, name, side) {
+    var cols = colorsFor(name);
+    var r = MG.resolveColours(cols);
+    var ratio = MG.contrast(r.panel, r.text);
+    var rows = KEYS.map(function (k) {
+      if (unlocked) {
+        return '<div class="mg-crow">' +
+          '<span>' + k + '</span>' +
+          '<input type="color" data-k="' + k + '" value="' + cols[k] + '" ' +
+            'aria-label="' + NL.escHtml(name) + ' ' + k + ' colour">' +
+          '<input type="text" data-k="' + k + '" value="' + cols[k] + '" ' +
+            'maxlength="7" spellcheck="false" ' +
+            'aria-label="' + NL.escHtml(name) + ' ' + k + ' hex">' +
+        '</div>';
+      }
+      return '<div class="mg-crow">' +
+        '<span>' + k + '</span>' +
+        '<span class="mg-sw" style="background:' + cols[k] + '"></span>' +
+        '<span class="mg-hexval">' + String(cols[k]).toUpperCase() + '</span>' +
+      '</div>';
+    }).join('');
+
+    mount.innerHTML =
+      '<h3><img src="' + NL.clubs.crestUrl(name, 'thumb') + '" alt="">' +
+        NL.escHtml(name) + ' <span>' + side + '</span></h3>' +
+      rows +
+      '<p class="mg-derived">Code <span class="mg-sw mg-sw--sm" style="background:' +
+        r.text + '"></span><b>' + r.text.toUpperCase() + '</b>' +
+        '<span class="pill ' + pillClass(r.textBasis) + '">' + r.textBasis + '</span>' +
+        '<b>' + ratio.toFixed(2) + ':1</b></p>';
+
+    NL.clubs.wireCrestImg(mount.querySelector('h3 img'), name);
+    if (!unlocked) return;
+
+    mount.querySelectorAll('input[type="color"]').forEach(function (inp) {
+      inp.addEventListener('input', function () {
+        applyOverride(name, inp.dataset.k, inp.value);
+      });
+    });
+    mount.querySelectorAll('input[type="text"]').forEach(function (inp) {
+      inp.addEventListener('change', function () {
+        var v = inp.value.trim();
+        if (v && v.charAt(0) !== '#') v = '#' + v;
+        if (/^#[0-9a-f]{6}$/i.test(v)) {
+          inp.removeAttribute('aria-invalid');
+          applyOverride(name, inp.dataset.k, v);
+        } else {
+          /* Say what is wrong rather than silently reverting. */
+          inp.setAttribute('aria-invalid', 'true');
+          NL.toast('Enter a six-digit hex colour, e.g. #9E0000', 'error');
+          inp.value = colorsFor(name)[inp.dataset.k];
+          setTimeout(function () { inp.removeAttribute('aria-invalid'); }, 1200);
+        }
+      });
+    });
+  }
+
+  function applyOverride(name, key, hex) {
+    overrides[name] = overrides[name] || {};
+    overrides[name][key] = hex;
+    draw();
+  }
+
+  /* ---------- naming: mirrors scripts/build-match-graphics.js ---------- */
+
+  function filename(homeName, awayName, fmt) {
+    var h = NL.clubs.byName(homeName), a = NL.clubs.byName(awayName);
+    return (h ? h.code : '???') + '-' + (a ? a.code : '???') + '-' + fmt + '.png';
+  }
+
+  /* ---------- draw ---------- */
+
+  function draw() {
+    if (!state.home || !state.away) return Promise.resolve();
+
+    var homeClub = NL.clubs.byName(state.home);
+    var awayClub = NL.clubs.byName(state.away);
+    var home = { name: state.home, code: homeClub.code, colors: colorsFor(state.home) };
+    var away = { name: state.away, code: awayClub.code, colors: colorsFor(state.away) };
+
+    el('mgMatchup').textContent = state.home + ' v ' + state.away;
+    Array.prototype.forEach.call(el('mgFormats').children, function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset.fmt === state.format));
+    });
+
+    var fmt = MG.FORMATS[state.format];
+    el('mgDims').textContent = fmt.w + ' × ' + fmt.h;
+    el('mgFname').textContent = filename(state.home, state.away, state.format);
+
+    var canvas = el('mgCanvas');
+    canvas.width = fmt.w;
+    canvas.height = fmt.h;
+    /* alpha:false — the artwork is full-bleed and opaque, so an alpha channel
+       is about 27% of the file for nothing. Take the context AFTER sizing;
+       resizing resets it. */
+    var ctx = canvas.getContext('2d', { alpha: false });
+
+    return Promise.all([
+      loadImage(NL.clubs.crestUrl(state.home)),
+      loadImage(NL.clubs.crestUrl(state.away)),
+      loadImage(badges[state.comp])
+    ]).then(function (a) {
+      if (!a[0] || !a[1]) NL.toast('A crest failed to load', 'error');
+      if (!a[2]) NL.toast('The competition logo failed to load', 'error');
+
+      MG.render(ctx, { home: home, away: away, competition: state.comp },
+                { homeCrest: a[0], awayCrest: a[1], badge: a[2] },
+                { format: state.format });
+
+      buildClubCol(el('mgHomeCol'), state.home, 'home');
+      buildClubCol(el('mgAwayCol'), state.away, 'away');
+
+      var hc = MG.resolveColours(home.colors), ac = MG.resolveColours(away.colors);
+      var notes = [];
+      [[state.home, hc], [state.away, ac]].forEach(function (pair) {
+        if (pair[1].textBasis === 'tertiary') {
+          notes.push(pair[0] + ' uses its tertiary because the secondary is not ' +
+            'legible on the panel — either under 2.5:1, or both colours are dark.');
+        } else if (pair[1].textBasis === 'best-effort') {
+          notes.push(pair[0] + ' has no legible option, so the better of the two is used.');
+        }
+      });
+      el('mgExplain').textContent = notes.length ? notes.join(' ')
+        : 'Both clubs use their secondary colour for the code, which is the usual case.';
+
+      var warn = el('mgWarn');
+      if (MG.readsAsSameField(hc.panel, ac.panel)) {
+        warn.hidden = false;
+        warn.innerHTML = '<span><b>Similar primaries.</b> These panels read as ' +
+          'close to one flat field; the seam bands do the separating.</span>';
+      } else {
+        warn.hidden = true;
+      }
+
+      var anyEdit = isOverridden(state.home) || isOverridden(state.away);
+      el('mgUnlock').hidden = unlocked;
+      el('mgReset').hidden = !unlocked;
+      el('mgOvNote').hidden = !unlocked;
+      if (anyEdit) el('mgOvNote').hidden = false;
+    });
+  }
+
+  /* ---------- export ---------- */
+
+  function save(fmt) {
+    var name = filename(state.home, state.away, fmt);
+    el('mgCanvas').toBlob(function (blob) {
+      NL.download(name, blob, 'image/png');
+    }, 'image/png');
+  }
+
+  function downloadAll() {
+    var keep = state.format;
+    var chain = Promise.resolve();
+    FMT_ORDER.forEach(function (f) {
+      chain = chain.then(function () {
+        state.format = f;
+        return draw();
+      }).then(function () {
+        save(f);
+        /* Browsers drop rapid successive downloads, so space them out. */
+        return new Promise(function (r) { setTimeout(r, 400); });
+      });
+    });
+    return chain.then(function () {
+      state.format = keep;
+      return draw();
+    });
+  }
+
+  /* ---------- wiring ---------- */
+
+  function buildFormatButtons() {
+    FMT_ORDER.forEach(function (f) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'mg-fmt';
+      b.dataset.fmt = f;
+      b.innerHTML = '<b>' + FMT_META[f].label + '</b>' +
+        '<span>' + MG.FORMATS[f].w + ' × ' + MG.FORMATS[f].h + '</span>' +
+        '<em>' + FMT_META[f].note + '</em>';
+      b.addEventListener('click', function () { state.format = f; draw(); });
+      el('mgFormats').appendChild(b);
+    });
+  }
+
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function () {
+    if (!MG) {
+      NL.toast('The graphic renderer failed to load', 'error');
+      return;
+    }
+    buildFormatButtons();
+
+    /* The canvas must not draw a glyph before Carbona resolves — a silent
+       fallback to sans-serif is the worst failure mode available here, so the
+       font is awaited before the first render rather than alongside it. */
+    var fontReady = document.fonts && document.fonts.load
+      ? document.fonts.load('800 202px "NLCarbonaExtraBold"')
+          .then(function () { return document.fonts.ready; })
+          .catch(function () { /* draw anyway rather than showing nothing */ })
+      : Promise.resolve();
+
+    Promise.all([
+      NL.clubs.forSeason('current'),
+      fetch('/assets/data/competitions-meta.json').then(function (r) {
+        if (!r.ok) throw new Error('competitions-meta ' + r.status);
+        return r.json();
+      }),
+      fontReady
+    ]).then(function (res) {
+      var clubs = res[0].filter(function (c) { return c.code && c.colors; });
+      if (!clubs.length) throw new Error('no clubs with a code and colours');
+
+      (res[1].competitions || []).forEach(function (c) {
+        if (c.logo) badges[c.competition] = c.logo;
+      });
+      Object.keys(badges).forEach(function (k) {
+        var o = document.createElement('option');
+        o.value = k;
+        o.textContent = (res[1].competitions.filter(function (c) {
+          return c.competition === k;
+        })[0] || {}).shortName || k;
+        el('mgComp').appendChild(o);
+      });
+      if (!badges[state.comp]) state.comp = Object.keys(badges)[0];
+      el('mgComp').value = state.comp;
+
+      state.home = clubs[0].name;
+      state.away = clubs.length > 1 ? clubs[1].name : clubs[0].name;
+
+      homePicker = NL.clubPicker('#mgHomePicker', {
+        mode: 'select', season: 'current', value: state.home,
+        onSelect: function (sel) { state.home = sel.name; draw(); }
+      });
+      awayPicker = NL.clubPicker('#mgAwayPicker', {
+        mode: 'select', season: 'current', value: state.away,
+        onSelect: function (sel) { state.away = sel.name; draw(); }
+      });
+
+      el('mgComp').addEventListener('change', function (e) {
+        state.comp = e.target.value;
+        draw();
+      });
+      el('mgSwap').addEventListener('click', function () {
+        var h = state.home;
+        state.home = state.away;
+        state.away = h;
+        homePicker.setValue(state.home);
+        awayPicker.setValue(state.away);
+        draw();
+      });
+      el('mgUnlock').addEventListener('click', function () { unlocked = true; draw(); });
+      el('mgReset').addEventListener('click', function () {
+        overrides = {};
+        unlocked = false;
+        draw();
+      });
+      el('mgDownload').addEventListener('click', function () { save(state.format); });
+      el('mgDownloadAll').addEventListener('click', downloadAll);
+
+      return draw();
+    }).catch(function (err) {
+      console.error('[match-graphic]', err);
+      NL.toast('Could not load club data — try reloading', 'error');
+    });
+  };
+
+  /* auth-guard may have fired before this script parsed. */
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+  }
+})();
+</script>
+
+</body>
+</html>
