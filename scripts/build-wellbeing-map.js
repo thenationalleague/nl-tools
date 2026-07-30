@@ -65,10 +65,11 @@ const ZONES = [
     hint: 'On every page. Locked — change it here and it changes everywhere.' },
   { id: 'wayin', label: 'The way in',
     hint: 'What somebody meets first, and the threat-to-life question behind the red pill.' },
-  { id: 'topicsnav', label: 'Topics widget',
-    hint: 'The grid of topic buttons. It sits on every page, so it is drawn once.' },
-  { id: 'flow', label: 'The pages',
-    hint: 'Every page in the section. Arrows here are links an editor chose to write.' },
+  /* The widget and the pages it reaches are one section, not two. A band of
+     its own left the widget marooned in an almost-empty strip; sitting it at
+     the left of the pages it feeds is both tidier and truer. */
+  { id: 'flow', label: 'Topics widget and the pages',
+    hint: 'The widget on the left, the pages on the right. Arrows are links an editor chose to write.' },
   { id: 'footer', label: 'Shared footer',
     hint: 'Emergency numbers and the safeguarding leads. On every page. Locked.' }
 ];
@@ -284,7 +285,7 @@ function build() {
   });
 
   push({
-    id: '_topics', zone: 'topicsnav', kind: 'shared', locked: true,
+    id: '_topics', zone: 'flow', kind: 'shared', locked: true,
     title: 'Topics widget', label: 'Topics widget', hash: null, kicker: 'On every page',
     body: `<p>${shared.cards.length} buttons. Ten topics, then two under "Supporting someone, `
         + 'or looking for a service". Because it is on every page, it is drawn once here '
