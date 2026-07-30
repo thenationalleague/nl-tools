@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Wellbeing map
-  Version: v1.10 (30/07/2026)
+  Version: v1.11 (30/07/2026)
   File: /wellbeing-map/index.html
 
   An editable map of the public Wellbeing section: every page as a box, every
@@ -46,6 +46,17 @@
   native confirm(). No colour here is a raw hex value.
 
   CHANGELOG
+  v1.11 (30/07/2026) — The concepts version has been loadable since v1.6, but only
+    through "Start again" — which is not a button anybody presses when they want
+    to compare two things, because it sounds like it throws their work away. The
+    chip in the top-left that names the current map is now the switch, and says
+    so. Start again opens the same choice.
+
+    Added "All arrows": draws everything at once, including the arrows a block
+    normally keeps inside itself. Off by default, because a block holding its own
+    arrows is the whole reason the map is readable — but demonstrating a journey
+    end to end needs the complete picture on screen, not one that answers when
+    asked. The setting is remembered.
   v1.10 (30/07/2026) — The two halves of a two-way pair were nudged apart along
     an axis — sideways for a mostly-vertical run, up and down for a horizontal
     one. That only gives the full separation when the line happens to be
@@ -221,6 +232,9 @@
      has not been told the gesture exists. */
   .wm-btn--go { background: var(--primary); border-color: var(--primary-300); }
   .wm-btn--go:hover { background: var(--primary-600); }
+  .wm-btn[aria-pressed="true"] {
+    background: var(--white); color: var(--navy); border-color: var(--white);
+  }
   .wm-zoom { display: flex; gap: 4px; align-items: center; }
   .wm-zoom .wm-btn { width: 30px; padding: 0; font-size: var(--text-sm); }
 
@@ -569,11 +583,20 @@
 
   /* Its own chip, not part of the save status: the save status rewrites itself
      every few seconds, so anything sharing that slot vanished on the next save. */
+  /* A button, not a caption. Switching between the live structure and the
+     concepts version was only reachable through "Start again" — a button nobody
+     presses when they want to compare two things, because it sounds like it
+     throws work away. */
   .wm-from {
-    flex: none; font-size: var(--text-xs); font-weight: 700;
-    color: var(--navy-100); white-space: nowrap;
+    flex: none; font-family: inherit; font-size: var(--text-xs); font-weight: 700;
+    color: var(--navy-100); white-space: nowrap; cursor: pointer;
+    background: none; border: 1px solid var(--navy-400);
+    border-radius: var(--radius-pill); padding: 5px 11px; min-height: 30px;
   }
+  .wm-from:hover { background: var(--navy-700); color: var(--white); }
+  .wm-from:focus-visible { outline: 2px solid var(--white); outline-offset: 1px; }
   .wm-from b { color: var(--white); font-weight: 900; }
+  .wm-from span { opacity: 0.75; }
 
   .wm-noscript {
     margin: 40px auto; max-width: 560px; padding: 20px;
@@ -614,7 +637,8 @@
   </span>
 
   <span class="wm-ver" id="ver" title="Which version you are looking at"></span>
-  <span class="wm-from" id="from" title="Which starting map this began from"></span>
+  <button class="wm-from" id="from" type="button"
+    title="Switch between the live structure and the concepts version"></button>
 
   <span class="wm-acts">
     <span class="wm-zoom">
@@ -623,6 +647,7 @@
       <button class="wm-btn" id="zIn" type="button" title="Zoom in" aria-label="Zoom in">+</button>
     </span>
     <button class="wm-btn wm-btn--go" id="bAdd" type="button">+ Add a page</button>
+    <button class="wm-btn" id="bAll" type="button" aria-pressed="false">All arrows</button>
     <button class="wm-btn" id="bTidy" type="button">Tidy up</button>
     <button class="wm-btn" id="bExport" type="button">Export</button>
     <button class="wm-btn" id="bImport" type="button">Import</button>
@@ -680,10 +705,12 @@
 
   /* On screen next to the title, so it is always possible to tell which
      version is in front of you. Bump both when you change this file. */
-  var VERSION = 'v1.10';
+  var VERSION = 'v1.11';
   var UPDATED = '30 July 2026';
 
   var NL_CHANGELOG = [
+    { v: 'v1.11', d: '30/07/2026', note: 'Switch between the live and concepts maps '
+      + 'from the top-left, and "All arrows" draws the complete journey.' },
     { v: 'v1.10', d: '30/07/2026', note: 'Two-way pairs keep the same gap at any '
       + 'angle, so neither line hides under the other.' },
     { v: 'v1.9', d: '30/07/2026', note: 'Clicking a box holds its arrows on screen '
@@ -744,7 +771,7 @@
   var KIND_ALIAS = { topic: 'everyday', guide: 'everyday', triage: 'wayin' };
 
   /* ── State ────────────────────────────────────────────────────────────── */
-  var S = { zones: [], nodes: [], edges: [], sel: null, label: '' };
+  var S = { zones: [], nodes: [], edges: [], sel: null, label: '', showAll: false };
   var seed = null;              /* the live structure, loaded at boot */
   var seeds = {};               /* every starting map fetched so far */
 
@@ -825,7 +852,9 @@
 
   /* Which starting map this began from. Persisted, so a reload still says. */
   function setFrom() {
-    el.from.innerHTML = S.label ? 'From <b>' + esc(S.label) + '</b>' : '';
+    el.from.innerHTML = S.label
+      ? 'From <b>' + esc(S.label) + '</b> <span>&middot; switch</span>'
+      : 'Choose a starting map';
   }
 
   function save() {
@@ -848,6 +877,7 @@
       format: 'nl-wellbeing-map',
       formatVersion: 1,
       label: S.label || '',
+      showAll: !!S.showAll,
       savedAt: new Date().toISOString(),
       zones: S.zones,
       nodes: S.nodes,
@@ -904,6 +934,7 @@
 
     S.zones = zones; S.nodes = nodes; S.edges = edges; S.sel = null;
     if (data.label) S.label = data.label;
+    S.showAll = !!data.showAll;
     if (opts.tidy || migrated || nodes.some(function (n) { return n.x === null; })) {
       nodes.forEach(function (n) { n._h = 0; });
       tidy();
@@ -1235,8 +1266,12 @@
       /* An arrow out of a shared block is not drawn. Twelve of them fanning
          out of the topics widget was the hairball. The block lists them
          instead, and they are drawn only while that block — or the row, or the
-         destination — is under the pointer. Ask, and you see them. */
-      if (a.locked && !inFocus && !selected) return;
+         destination — is under the pointer. Ask, and you see them.
+
+         Unless "All arrows" is on: walking somebody through the whole journey
+         needs the complete picture on screen at once, hairball and all, and
+         that is a different job from designing it. */
+      if (a.locked && !inFocus && !selected && !S.showAll) return;
 
       /* Each half of a two-way pair keeps to its own right. The offset runs
          along the line's own perpendicular, and the reverse edge points the
@@ -2120,9 +2155,9 @@
       });
   }
 
-  document.getElementById('bReset').addEventListener('click', function () {
+  function pickStartingMap() {
     var ctrl = window.NL.modal({
-      title: 'Start again',
+      title: 'Starting map',
       size: 'md',
       body:
         '<p class="confirm-text">' +
@@ -2156,6 +2191,21 @@
       layOut(); fit(); setFrom(); save();
       window.NL.toast('Empty canvas — press + Add a page to begin', 'success');
     });
+  }
+
+  document.getElementById('bReset').addEventListener('click', pickStartingMap);
+  document.getElementById('from').addEventListener('click', pickStartingMap);
+
+  /* Everything at once. Off by default — the whole reason the map is readable is
+     that a block's arrows stay in the block — but a walkthrough needs the full
+     picture on screen rather than one that answers when asked. */
+  document.getElementById('bAll').addEventListener('click', function () {
+    S.showAll = !S.showAll;
+    this.setAttribute('aria-pressed', S.showAll ? 'true' : 'false');
+    render(); save();
+    window.NL.toast(S.showAll
+      ? 'Every arrow is drawn, including the ones inside blocks'
+      : 'Block arrows tucked back into their blocks', 'success');
   });
 
   /* ── The explainer ────────────────────────────────────────────────────── */
@@ -2186,9 +2236,15 @@
         'Downloads folder. Email it to Richard.</li>' +
         '<li><b>Import</b> loads a file back in. It replaces what is on screen, so export ' +
         'first if you want to keep it.</li>' +
-        '<li><b>Start again</b> offers three starting points: the live structure as it ' +
-        'is today, the parked <b>concepts version</b> so the two can be compared, or a ' +
-        'completely empty canvas to design from scratch.</li>' +
+        '<li><b>The button in the top-left says which map you are on</b> — press it to ' +
+        'switch. There are three: the live structure as it is today, the parked ' +
+        '<b>concepts version</b> so the two ways of triaging can be compared side by ' +
+        'side, and a completely empty canvas to design from scratch. <b>Start again</b> ' +
+        'opens the same choice.</li>' +
+        '<li><b>All arrows</b> draws everything at once, including the arrows a block ' +
+        'normally keeps inside itself. Useful for walking somebody through a whole ' +
+        'journey without leaving anything out; messy for designing, which is why it is ' +
+        'off to begin with.</li>' +
         '</ul>' +
 
         '<h3>Doing things</h3>' +
@@ -2312,6 +2368,8 @@
           stamp('Started from the live structure');
         }
         setFrom();
+        document.getElementById('bAll')
+          .setAttribute('aria-pressed', S.showAll ? 'true' : 'false');
 
         layOut();
         fit();
