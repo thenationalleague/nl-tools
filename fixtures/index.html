@@ -125,6 +125,7 @@
         version: 'v0.9',
         items: [
           'Broadcast, Production, AMI and \u201cMoved by DAZN\u201d can be imported alongside the fixtures, and edited on any fixture.',
+          'The AMI and DAZN columns are read the way the sheet writes them \u2014 a cell containing \u201cAMI\u201d or \u201cDAZN\u201d counts as ticked, as do Yes, TRUE, 1 and x. \u201cBasic\u201d in Production stays unticked.',
           'A blank Broadcast cell comes in as TBC; blank Production, AMI and DAZN come in unticked. A broadcast value the tool does not recognise is named on screen and the fixture still imports, as TBC.',
           'Production and AMI only apply to a game that is actually being shown, and clear if it stops being. \u201cMoved by DAZN\u201d is separate \u2014 DAZN can move a game it is not showing.',
           'None of this is visible to clubs. It is held in a staff-only part of the database, not merely hidden on screen.'
@@ -1362,15 +1363,25 @@
     return null;                          /* unrecognised — reported, not guessed */
   }
   /* Spreadsheet truthiness. A blank cell is false, which is what a tick-box
-     column looks like when it is not ticked. */
-  function normTick(v) {
+     column looks like when it is not ticked.
+
+     `self` is the column's own HEADER. The NL sheet marks a tick by
+     repeating the column name in the cell — the AMI column contains "AMI",
+     the DAZN column contains "DAZN" — so a cell equal to its own header is
+     a tick. Without this the real sheet imports as all-unticked, silently,
+     because every value looks like a stray label. */
+  function normTick(v, self) {
     var s = String(v == null ? '' : v).trim().toLowerCase();
+    if (!s) return false;
+    if (self && s === String(self).trim().toLowerCase()) return true;
     return s === 'y' || s === 'yes' || s === 'true' || s === '1' || s === 'x' || s === '✓';
   }
-  /* Production is Basic unless elevated, so the stored value is the tick. */
-  function normEnhanced(v) {
+  /* Production is Basic unless elevated, so the stored value is the tick.
+     "Basic" is stated explicitly in some rows and must stay false. */
+  function normEnhanced(v, self) {
     var s = String(v == null ? '' : v).trim().toLowerCase();
-    return s === 'enhanced' || normTick(v);
+    if (s === 'basic') return false;
+    return s === 'enhanced' || normTick(v, self);
   }
   function bcastOf(id) { return S.bcast[id] || null; }
 
@@ -1523,6 +1534,7 @@
 
   function parseImport() {
     var g = function (r, k) { var i = IMP.map[k]; return (i == null || i === '') ? '' : (r[i] || ''); };
+    var headOf = function (k) { var i = IMP.map[k]; return (i == null || i === '') ? '' : (IMP.head[i] || ''); };
     return IMP.rows.map(function (r) {
       var d = grabDate(g(r, 'date'));
       var tp = grabTime(g(r, 'ko'));
@@ -1542,9 +1554,9 @@
         home: home, away: away, round: g(r, 'round'), opta: opta,
         comp: comp, rawComp: rawComp,
         bcast: bcast, rawBcast: rawB,
-        enhanced: normEnhanced(g(r, 'prod')),
-        ami: normTick(g(r, 'ami')),
-        daznMoved: normTick(g(r, 'dazn')),
+        enhanced: normEnhanced(g(r, 'prod'), headOf('prod')),
+        ami: normTick(g(r, 'ami'), headOf('ami')),
+        daznMoved: normTick(g(r, 'dazn'), headOf('dazn')),
         recordID: opta || null,
         exists: !!(opta && S.fixtures[opta]),
         ok: !!(d && home && away && comp),
