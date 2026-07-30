@@ -62,7 +62,7 @@ const OUT = path.join(REPO, 'wellbeing-map', 'seed.json');
    keeping it to a single canvas. */
 const ZONES = [
   { id: 'header', label: 'Shared header',
-    hint: 'On every page. Locked — change it here and it changes everywhere.' },
+    hint: 'One block on every page. Edit it once and it changes everywhere.' },
   { id: 'wayin', label: 'The way in',
     hint: 'What somebody meets first, and the threat-to-life question behind the red pill.' },
   /* The widget and the pages it reaches are one section, not two. A band of
@@ -71,7 +71,7 @@ const ZONES = [
   { id: 'flow', label: 'Topics widget and the pages',
     hint: 'The widget on the left, the pages on the right. Arrows are links an editor chose to write.' },
   { id: 'footer', label: 'Shared footer',
-    hint: 'Emergency numbers and the safeguarding leads. On every page. Locked.' }
+    hint: 'Emergency numbers and the safeguarding leads. One block, on every page.' }
 ];
 
 /* Node kind is the ONE thing colour encodes on the canvas, and it is a rung on
