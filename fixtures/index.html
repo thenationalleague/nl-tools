@@ -1,0 +1,1254 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Fixtures
+  Version: v0.1 (30/07/2026)
+  File: /fixtures/index.html
+
+  Every fixture in every National League competition, with the scheduling
+  history behind it.
+
+  WHY THE DATA IS SHAPED THIS WAY
+    A postponement and a rearrangement are separate events. A game called
+    off with no new date is `postponed` (from-date, no to-date); a game
+    moved straight to a new date is `rescheduled` (both). Modelling them as
+    one event makes "postponed, awaiting rearrangement" unrepresentable —
+    which is the state the League is in for most of the winter — and makes
+    "how long did the club wait" uncomputable.
+
+    Storage (RTDB), split so the rules can enforce the visibility tiers:
+      app-data/ops-fixtures/seasons/<season>/fixtures/<recordID>
+      app-data/ops-fixtures/seasons/<season>/history/<recordID>
+      app-data/ops-fixtures/seasons/<season>/notes/<recordID>
+      app-data/ops-fixtures/seasons/<season>/metrics/<recordID>
+      tools/ops-fixtures                    tool registration
+
+    recordID is assigned once and never changes. League fixtures use the
+    Opta ID (already how attendance keys its submissions); cup ties mint
+    one, because Opta issues nothing at creation. optaID is a separate
+    nullable attribute so filling it in later never orphans the history.
+
+  Access (auth-guard registry — see system/auth-guard.js):
+    superadmin / admin / staff  → read everything, edit
+    club-admin / club-viewer    → own fixtures only, read-only, no reasons
+                                  and no history (enforced by RTDB rules,
+                                  not just by the UI)
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fixtures — NL Tools</title>
+
+  <!-- Brand stylesheet -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=27">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Fixtures',
+      toolKey: 'ops-fixtures'
+    };
+    var NL_TOOL_KEY = 'ops-fixtures';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '30/07/2026',
+        version: 'v0.1',
+        items: [
+          'First build. Every fixture in every NL competition, in one list.',
+          'Postponing and rearranging are separate actions: a postponed game has no new date and shows P\u2013P; a rearranged one moves straight to its new date. The gap between the two is how long a club waited.',
+          'Every change is kept. A fixture postponed five times keeps all five, each with the date it was decided as well as the date it was entered.',
+          'Reasons and staff notes are never shown to clubs. Clubs see their own fixtures, current dates, and nothing else.',
+          'Cup ties import from a spreadsheet \u2014 paste, match the columns, check, import. Opponents outside the League are kept as typed.',
+          'Opta match IDs are reference only. Cup ties have none until Opta issues one; the record is keyed separately so filling it in later never breaks anything.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts -->
+  <script src="/system/nl-utils.js?v=28"></script>
+  <script src="/system/nl-topbar.js?v=8"></script>
+  <script src="/system/auth-guard.js?v=10"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page.
+
+     Only what canon does not already provide lives here. The filter bar,
+     pills, chips, table, tabs, pills, buttons, modals and club picker are
+     all nl-brand.css v2.28 / NL.* — see the Style Guide. */
+
+  /* Competition identity — pastel row washes. Deliberately barely-there:
+     enough to block competitions apart at a glance without competing with
+     the text. Tool-local for now; attendance's --competition-* tokens are
+     solid badge colours, a different job. A canon candidate the moment a
+     second tool wants row tinting. */
+  #pageWrap {
+    --comp-national: #fdf4ec;
+    --comp-north:    #fdfbea;
+    --comp-south:    #eff4fc;
+    --comp-nlcup:    #f6f0fa;
+    --comp-facup:    #fdeff1;
+    --comp-fatrophy: #f3f4f6;
+  }
+  tr.fx-national  td { background-color: var(--comp-national); }
+  tr.fx-north     td { background-color: var(--comp-north); }
+  tr.fx-south     td { background-color: var(--comp-south); }
+  tr.fx-nlcup     td { background-color: var(--comp-nlcup); }
+  tr.fx-facup     td { background-color: var(--comp-facup); }
+  tr.fx-fatrophy  td { background-color: var(--comp-fatrophy); }
+
+  /* Break hierarchy. MUST stay scoped under .table tbody: `tr.fx-datebreak td`
+     alone ties with `.table tbody td` on specificity and loses on source
+     order, which silently erases every break.
+       new date                     thick solid
+       new competition, same date   thin solid
+       new kick-off, same comp      long dash */
+  .table tbody td { border-top: 1px solid var(--border); border-bottom: none; }
+  .table tbody tr.fx-kobreak td {
+    border-top-color: transparent;
+    /* A CSS dashed border gives tiny dashes with no way to tune them, so
+       the dash is painted: 10px on, 7px off. */
+    background-image: repeating-linear-gradient(to right,
+      var(--navy-300) 0 10px, transparent 10px 17px);
+    background-repeat: no-repeat;
+    background-size: 100% 1px;
+    background-position: left top;
+  }
+  .table tbody tr.fx-compbreak td { border-top: 1px solid var(--navy-300); }
+  .table tbody tr.fx-datebreak td { border-top: 2px solid var(--navy-400); }
+  .table tbody tr:first-child td { border-top: none; }
+  .table tbody tr:hover td { background-color: var(--off-white); }
+  .table tbody td { padding: 5px 12px; }
+
+  /* Home reads inward, away reads outward, so the crests meet either side
+     of the middle and the eye lands on the fixture. */
+  .fx-team { display: inline-flex; align-items: center; gap: 7px;
+             font-variation-settings: 'wght' 700; white-space: nowrap; }
+  .fx-team img { width: 18px; height: 18px; object-fit: contain; flex: none; }
+  .fx-c-home { text-align: right; }
+  .fx-c-away { text-align: left; }
+  .table thead th.fx-c-home { text-align: right; }
+
+  /* The middle cell is the whole status system: kick-off before the game,
+     the score after it, P–P or A–A when it did not happen. No prose. */
+  .fx-state { text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums;
+              font-variation-settings: 'wght' 700; font-size: 12.5px; color: var(--text-muted); }
+  .fx-state--score { font-variation-settings: 'wght' 900; font-size: 14px; color: var(--text); }
+  .fx-state--pp    { font-variation-settings: 'wght' 900; color: var(--purple); letter-spacing: .04em; }
+  .fx-state--aa    { font-variation-settings: 'wght' 900; color: var(--amber);  letter-spacing: .04em; }
+
+  .fx-c-md { width: 46px; font-variation-settings: 'wght' 900; color: var(--text-muted);
+             font-variant-numeric: tabular-nums; }
+  .fx-c-date { width: 118px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .fx-c-state { width: 64px; }
+  .fx-c-comp { width: 54px; font-size: 11px; font-variation-settings: 'wght' 900;
+               letter-spacing: .06em; color: var(--text-muted); }
+  .fx-c-act { width: 84px; }
+  .fx-dow { color: var(--text-muted); font-variation-settings: 'wght' 700; }
+
+  /* One control row. .filter-bar / .filter-pill / .chip-group are canon. */
+  .fx-bar { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-bottom: 12px; }
+  .fx-bar__sep { width: 1px; height: 22px; background: var(--border); }
+  .fx-bar .club-picker { min-width: 210px; }
+  .fx-bar select { width: auto; flex: 0 0 auto; }
+  .fx-clear { margin-left: auto; }
+
+  .fx-tally { font-size: 12px; color: var(--text-muted); margin: 10px 2px 0; }
+
+  /* Rearrangements pane */
+  .fx-mv-head { font-size: 11.5px; font-variation-settings: 'wght' 800; letter-spacing: .05em;
+                text-transform: uppercase; color: var(--text-muted); margin: 0 0 9px; }
+  .fx-mv { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius-lg);
+           padding: 12px 15px; margin-bottom: 8px; display: flex; align-items: center;
+           gap: 14px; flex-wrap: wrap; }
+  .fx-mv__fx { font-variation-settings: 'wght' 800; flex: 1; min-width: 190px; }
+  .fx-mv__meta { font-size: 12.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .fx-mv__wait { font-size: 12.5px; font-variation-settings: 'wght' 800; color: var(--purple); }
+  .fx-tab-n { display: inline-block; min-width: 17px; padding: 0 5px; margin-left: 5px;
+              border-radius: var(--radius-pill); background: var(--navy-100); color: var(--navy);
+              font-size: 11px; font-variation-settings: 'wght' 800;
+              font-variant-numeric: tabular-nums; text-align: center; }
+
+  /* Detail + history */
+  .fx-hist { list-style: none; margin: 11px 0 0; padding: 0; display: flex;
+             flex-direction: column; gap: 9px; }
+  .fx-hist li { border-left: 2px solid var(--navy-200); padding-left: 11px; }
+  .fx-hist__t { font-variation-settings: 'wght' 800; font-size: 12.5px; }
+  .fx-hist__d { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .fx-choice { display: flex; gap: 8px; }
+  .fx-choice .btn { flex: 1; justify-content: center; }
+  .fx-ref { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 13px; }
+  .fx-ref summary { font-size: 11.5px; font-variation-settings: 'wght' 800; letter-spacing: .05em;
+                    text-transform: uppercase; color: var(--text-muted); cursor: pointer; }
+  .fx-ref dl { display: grid; grid-template-columns: auto 1fr; gap: 5px 14px;
+               margin: 11px 0 0; font-size: 12.5px; }
+  .fx-ref dt { color: var(--text-muted); font-variation-settings: 'wght' 700; }
+  .fx-ref dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .fx-await { color: var(--amber); font-variation-settings: 'wght' 800; }
+  .fx-none { color: var(--text-muted); font-style: italic; }
+  .fx-link { border: none; background: none; color: var(--navy); font-family: var(--font);
+             font-size: 12px; font-variation-settings: 'wght' 800; cursor: pointer;
+             text-decoration: underline; padding: 0 2px; }
+
+  /* Score entry */
+  .fx-score { display: flex; align-items: flex-end; gap: 12px; justify-content: center; margin: 4px 0 2px; }
+  .fx-score label { flex: 1; max-width: 190px; display: flex; flex-direction: column; gap: 5px; }
+  .fx-score span { font-size: 12px; font-variation-settings: 'wght' 700;
+                   color: var(--text-muted); text-align: center; }
+  .fx-score input { text-align: center; font-size: 22px; font-variation-settings: 'wght' 900;
+                    padding: 8px; font-variant-numeric: tabular-nums; }
+  .fx-score__dash { font-size: 20px; font-variation-settings: 'wght' 900;
+                    color: var(--text-muted); padding-bottom: 9px; }
+
+  /* Import wizard */
+  .fx-steps { display: flex; gap: 6px; margin: 0 0 16px; font-size: 11px;
+              font-variation-settings: 'wght' 800; letter-spacing: .05em;
+              text-transform: uppercase; color: var(--text-muted); }
+  .fx-steps span { padding: 3px 9px; border-radius: var(--radius-pill); background: var(--off-white); }
+  .fx-steps span.is-on { background: var(--navy); color: var(--white); }
+  .fx-needs { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 14px;
+              font-size: 12px; color: var(--text-muted); align-items: center; }
+  .fx-needs code { background: var(--off-white); border: 1px solid var(--border);
+                   border-radius: var(--radius-sm); padding: 2px 7px; font-size: 11.5px;
+                   font-variation-settings: 'wght' 700; color: var(--text); }
+  .fx-map { display: grid; grid-template-columns: repeat(auto-fit, minmax(214px, 1fr)); gap: 10px; }
+  .fx-map__sample { font-size: 11.5px; color: var(--text-muted); margin-top: 4px;
+                    min-height: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fx-map__note { background: var(--blue-light); border: 1px solid var(--border);
+                  border-radius: var(--radius); padding: 9px 12px; font-size: 12.5px; margin: 10px 0 0; }
+  .fx-prev { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .fx-prev th { text-align: left; font-size: 10px; font-variation-settings: 'wght' 800;
+                letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted);
+                padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  .fx-prev td { padding: 5px 8px; border-bottom: 1px solid var(--border); }
+  .fx-prev tr:last-child td { border-bottom: none; }
+  .fx-prev .is-bad { color: var(--primary); font-variation-settings: 'wght' 800; }
+  .fx-prev .is-new { color: var(--text-muted); font-style: italic; }
+  .fx-scroll { max-height: 280px; overflow-y: auto; border: 1px solid var(--border);
+               border-radius: var(--radius); }
+
+  @media (max-width: 680px) {
+    .fx-c-comp { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+
+    <div class="section-head">
+      <h1 id="fxTitle" style="margin:0;">Fixtures</h1>
+      <div style="display:flex;gap:8px;">
+        <button type="button" class="btn btn--ghost btn--sm" id="fxExport">Export</button>
+        <button type="button" class="btn btn--primary btn--sm" id="fxImport">Add cup fixtures</button>
+      </div>
+    </div>
+
+    <div class="tabs" role="tablist" aria-label="View">
+      <button type="button" class="tab active" role="tab" aria-selected="true" data-fxtab="all">All fixtures</button>
+      <button type="button" class="tab" role="tab" aria-selected="false" data-fxtab="moves">Rearrangements <span class="fx-tab-n" id="fxMoveCount">0</span></button>
+    </div>
+
+    <div id="fxPaneAll">
+      <div class="fx-bar">
+        <div class="filter-pill-row" id="fxCompPills"></div>
+        <div class="fx-bar__sep" id="fxBarSep" aria-hidden="true"></div>
+        <div id="fxClubPicker"></div>
+        <div class="chip-group" id="fxVenue" hidden>
+          <button type="button" class="chip active" data-fxvenue="all">All</button>
+          <button type="button" class="chip" data-fxvenue="home">Home</button>
+          <button type="button" class="chip" data-fxvenue="away">Away</button>
+        </div>
+        <select id="fxMd" aria-label="Matchday"><option value="">Matchday</option></select>
+        <button type="button" class="btn btn--ghost btn--sm fx-clear" id="fxClear" hidden>Clear</button>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="fx-c-md">MD</th>
+              <th class="fx-c-date">Date</th>
+              <th class="fx-c-home">Home</th>
+              <th class="fx-c-state"></th>
+              <th class="fx-c-away">Away</th>
+              <th class="fx-c-comp">Comp</th>
+              <th class="fx-c-act"></th>
+            </tr>
+          </thead>
+          <tbody id="fxRows"></tbody>
+        </table>
+        <div class="empty-state" id="fxEmpty" hidden>
+          <p style="font-variation-settings:'wght' 800;margin:0 0 5px;">Nothing matches those filters</p>
+          <p style="margin:0;color:var(--text-muted);">Try removing a competition or club.</p>
+        </div>
+        <div class="loading-row" id="fxLoading">Loading fixtures…</div>
+      </div>
+      <p class="fx-tally" id="fxTally"></p>
+    </div>
+
+    <div id="fxPaneMoves" hidden></div>
+
+  </div>
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  /* =====================================================================
+     DATA MODEL
+
+     seasons/<season>/fixtures/<recordID>   the fixture
+     seasons/<season>/history/<recordID>    append-only scheduling log
+     seasons/<season>/notes/<recordID>      staff-only free text
+     seasons/<season>/metrics/<recordID>    attendance, DAZN, later additions
+
+     Split into separate nodes so the RTDB rules can enforce the visibility
+     tiers: fixtures readable by any signed-in user, history auth-gated,
+     notes staff-only. One object could not be separated later without a
+     migration.
+
+     recordID is assigned once and NEVER changes. For league fixtures it is
+     the Opta ID (which already keys attendance submissions). For cup ties
+     Opta issues nothing at creation, so one is minted. optaID is a separate
+     nullable attribute — filling it in later must not rename the record,
+     or the history and metrics would be orphaned.
+     ===================================================================== */
+
+  var BASE = 'app-data/ops-fixtures';
+  var S = {
+    season: null, session: null, role: null, isClub: false, club: null,
+    fixtures: {}, history: {}, notes: {},
+    tab: 'all', comps: {}, venue: 'all', md: '', club1: null,
+    picker: null, booted: false
+  };
+
+  var COMPS = ['National', 'North', 'South', 'NL Cup', 'FA Cup', 'FA Trophy'];
+  var COMP_ORDER = { National: 1, North: 2, South: 3, 'NL Cup': 4, 'FA Cup': 5, 'FA Trophy': 6 };
+  var COMP_SHORT = { National: 'NL', North: 'NLN', South: 'NLS',
+                     'NL Cup': 'NLC', 'FA Cup': 'FAC', 'FA Trophy': 'FAT' };
+  var COMP_CLASS = { National: 'fx-national', North: 'fx-north', South: 'fx-south',
+                     'NL Cup': 'fx-nlcup', 'FA Cup': 'fx-facup', 'FA Trophy': 'fx-fatrophy' };
+  /* Whether Opta issues an ID for this competition at all. A fact about the
+     competition, not the tie — which is why it is not a placeholder value
+     sitting in the fixture's optaID field. */
+  var OPTA_EXPECTED = { National: true, North: true, South: true,
+                        'NL Cup': true, 'FA Cup': false, 'FA Trophy': false };
+
+  var REASONS = [];   /* loaded from assets/data/postponement-reasons.json */
+
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return NL.escHtml(s); };
+
+  /* ---- Dates + times --------------------------------------------------
+     Stored as DD/MM/YYYY + HH:MM (24h). Display is UK match-listing style:
+     "Sat 8 Aug 26", "3pm", "7.45pm". */
+  var MO = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  var MONTHS = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
+  var MONTH_RE = '(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*';
+
+  function sortKey(d) { var p = String(d).split('/'); return p[2] + p[1] + p[0]; }
+  function prettyDate(d) { var p = String(d).split('/'); return (+p[0]) + ' ' + MO[+p[1] - 1] + ' ' + p[2].slice(2); }
+  function dow(d) { var p = String(d).split('/'); return DOW[new Date(Date.UTC(+p[2], +p[1] - 1, +p[0])).getUTCDay()]; }
+  function clock(t) {
+    var p = String(t).split(':'), h = +p[0], m = +p[1];
+    var hh = h % 12; if (hh === 0) hh = 12;
+    return hh + (m ? '.' + String(m).padStart(2, '0') : '') + (h >= 12 ? 'pm' : 'am');
+  }
+  function dateStr(d) { return '<span class="fx-dow">' + dow(d) + '</span> ' + esc(prettyDate(d)); }
+  function whenStr(d, t) { return dateStr(d) + ' &middot; ' + clock(t); }
+  function toISO(d) { var p = String(d).split('/'); return p[2] + '-' + p[1] + '-' + p[0]; }
+  function fromISO(v) { var p = String(v).split('-'); return p[2] + '/' + p[1] + '/' + p[0]; }
+  function todayISO() { return new Date().toISOString().slice(0, 10); }
+  function stamp() {
+    var d = new Date(), p = function (n) { return String(n).padStart(2, '0'); };
+    return p(d.getDate()) + '/' + p(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+  function parseStamp(s) {
+    var m = /^(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2})$/.exec(s || '');
+    return m ? Date.UTC(+m[3], +m[2] - 1, +m[1], +m[4], +m[5]) : null;
+  }
+
+  /* Accepts what spreadsheets actually produce: 13/10/2026, 13-10-2026,
+     "Tue, 13 Oct 2026", "13 October 2026", "Oct 13, 2026", 2026-10-13.
+     A leading weekday is discarded — it adds nothing and must not be
+     mistaken for the day number. */
+  function grabDate(v) {
+    var str = String(v || '').trim();
+    if (!str) return null;
+    var pad = function (n) { return String(n).padStart(2, '0'); };
+    var yr = function (y) { return String(y).length === 2 ? '20' + y : String(y); };
+    var m;
+    /* ISO first, so 2026-10-13 is never read as 26/10/13. */
+    m = /(\d{4})-(\d{1,2})-(\d{1,2})/.exec(str);
+    if (m) return pad(m[3]) + '/' + pad(m[2]) + '/' + m[1];
+    m = new RegExp('(\\d{1,2})\\s*(?:st|nd|rd|th)?[\\s,.-]+' + MONTH_RE + '[\\s,.-]+(\\d{2,4})', 'i').exec(str);
+    if (m) return pad(m[1]) + '/' + pad(MONTHS[m[2].slice(0, 3).toLowerCase()]) + '/' + yr(m[3]);
+    m = new RegExp(MONTH_RE + '[\\s,.-]+(\\d{1,2})\\s*(?:st|nd|rd|th)?[\\s,.-]+(\\d{2,4})', 'i').exec(str);
+    if (m) return pad(m[2]) + '/' + pad(MONTHS[m[1].slice(0, 3).toLowerCase()]) + '/' + yr(m[3]);
+    m = /(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/.exec(str);
+    if (m) return pad(m[1]) + '/' + pad(m[2]) + '/' + yr(m[3]);
+    return null;
+  }
+  /* Reads 24-hour and 12-hour times. Dropping the am/pm marker turns
+     "7:45 PM" into 07:45, so it is read explicitly. Returns {t, guessed};
+     guessed flags a bare 1-10 o'clock, read as afternoon because no NL
+     fixture kicks off at 3am — surfaced in the import preview, never
+     applied silently. */
+  function grabTime(v) {
+    var str = String(v || '')
+      .replace(/\d{4}-\d{1,2}-\d{1,2}/, '')
+      .replace(/\d{1,2}[\/.-]\d{1,2}[\/.-]\d{2,4}/, '')
+      .replace(new RegExp('\\d{1,2}\\s*(?:st|nd|rd|th)?[\\s,.-]+' + MONTH_RE + '[\\s,.-]+\\d{2,4}', 'i'), '');
+    var m = /(\d{1,2})[:.](\d{2})/.exec(str);
+    if (!m) return null;
+    var h = +m[1], mm = m[2], guessed = false;
+    var mer = /^\s*([ap])\.?\s*m\.?/i.exec(str.slice(m.index + m[0].length));
+    if (mer) {
+      var pm = mer[1].toLowerCase() === 'p';
+      if (pm && h < 12) h += 12;
+      if (!pm && h === 12) h = 0;
+    } else if (h >= 1 && h <= 10) { h += 12; guessed = true; }
+    return { t: String(h).padStart(2, '0') + ':' + mm, guessed: guessed };
+  }
+  function looksDate(v) { return grabDate(v) != null; }
+  function looksTime(v) { return /\d{1,2}[:.]\d{2}/.test(v || ''); }
+
+  /* ---- RTDB paths ------------------------------------------------------ */
+  function seasonPath(node) { return BASE + '/seasons/' + S.season + '/' + node; }
+  function canEdit() { return S.role === 'staff' || S.role === 'admin' || S.role === 'superadmin'; }
+
+  /* ---- Boot ------------------------------------------------------------ */
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function (session) {
+    if (S.booted) { S.session = session; return; }
+    S.booted = true;
+    S.session = session;
+    S.role = NL.roles.norm(session && session.role);
+    S.isClub = NL.isClubUser(session);
+    S.club = session && session.club || null;
+
+    NL.ensureAuth().then(function () {
+      return Promise.all([NL.clubs.load(), loadReasons()]);
+    }).then(function (res) {
+      S.season = NL.season.current(res[0]);
+      COMPS.forEach(function (c) { S.comps[c] = true; });
+      return loadSeason();
+    }).then(function () {
+      wire();
+      render();
+      $('fxLoading').style.display = 'none';
+    }).catch(function (err) {
+      $('fxLoading').innerHTML = '<span style="color:var(--red);">Could not load fixtures: ' +
+        esc(err && err.message || String(err)) + '</span>';
+      console.error('[fixtures]', err);
+    });
+  };
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+
+  function loadReasons() {
+    return fetch('/assets/data/postponement-reasons.json', { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : { reasons: [] }; })
+      .then(function (j) { REASONS = j.reasons || []; })
+      .catch(function () { REASONS = []; });
+  }
+
+  /* History and notes are separate nodes with their own rules — a club
+     user's read of either is expected to fail, so a denial is normal and
+     must not break the page. */
+  function loadSeason() {
+    var db = firebase.database();
+    var jobs = [db.ref(seasonPath('fixtures')).once('value').then(function (s) { S.fixtures = s.val() || {}; })];
+    if (!S.isClub) {
+      jobs.push(db.ref(seasonPath('history')).once('value')
+        .then(function (s) { S.history = s.val() || {}; })
+        .catch(function () { S.history = {}; }));
+      jobs.push(db.ref(seasonPath('notes')).once('value')
+        .then(function (s) { S.notes = s.val() || {}; })
+        .catch(function () { S.notes = {}; }));
+    }
+    return Promise.all(jobs);
+  }
+
+  function histOf(id) { var h = S.history[id]; return h ? (Array.isArray(h) ? h : Object.keys(h).sort().map(function (k) { return h[k]; })) : []; }
+
+  function saveFixture(f) {
+    return firebase.database().ref(seasonPath('fixtures') + '/' + f.recordID).set(f);
+  }
+  function appendHistory(id, entry) {
+    var list = histOf(id).concat([entry]);
+    S.history[id] = list;
+    return firebase.database().ref(seasonPath('history') + '/' + id).set(list);
+  }
+  function saveNote(id, text) {
+    if (!text) return Promise.resolve();
+    var list = (S.notes[id] || []).concat([{ text: text, at: stamp(), by: S.session && S.session.uid || null }]);
+    S.notes[id] = list;
+    return firebase.database().ref(seasonPath('notes') + '/' + id).set(list);
+  }
+
+  /* ---- Selection ------------------------------------------------------- */
+  function all() { return Object.keys(S.fixtures).map(function (k) { return S.fixtures[k]; }); }
+  function visible() {
+    return S.isClub
+      ? all().filter(function (f) { return f.home === S.club || f.away === S.club; })
+      : all();
+  }
+  function focusClub() { return S.isClub ? S.club : S.club1; }
+
+  function filtered() {
+    var c = focusClub();
+    var out = visible().filter(function (f) {
+      if (S.comps[f.competition] === false) return false;
+      if (S.md && String(f.matchday) !== S.md) return false;
+      if (c) {
+        if (S.venue === 'home') return f.home === c;
+        if (S.venue === 'away') return f.away === c;
+        return f.home === c || f.away === c;
+      }
+      return true;
+    });
+    /* Date, then competition, then kick-off — so a date reads as a block
+       and the tints group cleanly inside it. A postponed fixture keeps its
+       original slot rather than dropping out of the run of play. */
+    out.sort(function (a, b) {
+      return sortKey(a.date).localeCompare(sortKey(b.date)) ||
+        ((COMP_ORDER[a.competition] || 9) - (COMP_ORDER[b.competition] || 9)) ||
+        String(a.kickoff).localeCompare(String(b.kickoff)) ||
+        String(a.home).localeCompare(String(b.home));
+    });
+    return out;
+  }
+
+  /* ---- Render ---------------------------------------------------------- */
+  function crestImg(name) {
+    var img = document.createElement('img');
+    img.alt = ''; img.loading = 'lazy';
+    img.src = NL.clubs.crestUrl(name, 'thumb');
+    NL.clubs.wireCrestImg(img, name);
+    return img.outerHTML;
+  }
+
+  /* Kick-off before the game, score after it, P–P or A–A when it did not
+     happen. Nothing at all for a fixture that is simply on. */
+  function stateCell(f) {
+    if (f.status === 'postponed') return '<td class="fx-c-state fx-state fx-state--pp">P&ndash;P</td>';
+    if (f.status === 'abandoned') return '<td class="fx-c-state fx-state fx-state--aa">A&ndash;A</td>';
+    if (f.homeScore != null && f.awayScore != null) {
+      return '<td class="fx-c-state fx-state fx-state--score">' + f.homeScore + '&ndash;' + f.awayScore + '</td>';
+    }
+    return '<td class="fx-c-state fx-state">' + clock(f.kickoff) + '</td>';
+  }
+
+  function render() {
+    $('fxTitle').textContent = S.isClub ? (S.club || 'Fixtures') : 'Fixtures';
+    $('fxVenue').hidden = !focusClub();
+    if (!focusClub() && S.venue !== 'all') S.venue = 'all';
+    /* In club view the club is the whole page, and a club sits in one
+       competition band — neither control has anything left to offer. */
+    $('fxClubPicker').hidden = S.isClub;
+    $('fxCompPills').hidden = S.isClub;
+    $('fxBarSep').hidden = S.isClub;
+    $('fxClear').hidden = !(S.club1 || S.md || S.venue !== 'all' ||
+      COMPS.some(function (c) { return !S.comps[c]; }));
+
+    var moves = visible().filter(function (f) {
+      return f.status === 'postponed' || f.status === 'rearranged';
+    });
+    $('fxMoveCount').textContent = moves.length;
+    if (S.tab === 'moves') { renderMoves(moves); return; }
+
+    var rows = filtered(), prev = null;
+    $('fxRows').innerHTML = rows.map(function (f) {
+      var cls = COMP_CLASS[f.competition] || '';
+      if (!prev || f.date !== prev.date) cls += ' fx-datebreak';
+      else if (f.competition !== prev.competition) cls += ' fx-compbreak';
+      else if (f.kickoff !== prev.kickoff) cls += ' fx-kobreak';
+      prev = f;
+      return '<tr class="' + cls + '">' +
+        '<td class="fx-c-md">' + esc(f.matchday || '—') + '</td>' +
+        '<td class="fx-c-date">' + dateStr(f.date) + '</td>' +
+        '<td class="fx-c-home"><span class="fx-team">' + esc(f.home) + crestImg(f.home) + '</span></td>' +
+        stateCell(f) +
+        '<td class="fx-c-away"><span class="fx-team">' + crestImg(f.away) + esc(f.away) + '</span></td>' +
+        '<td class="fx-c-comp">' + esc(COMP_SHORT[f.competition] || f.competition) + '</td>' +
+        '<td class="fx-c-act"><button type="button" class="btn btn--ghost btn--sm" data-fxopen="' +
+          esc(f.recordID) + '">' + (canEdit() ? 'Change' : 'View') + '</button></td>' +
+        '</tr>';
+    }).join('');
+    $('fxEmpty').hidden = rows.length > 0;
+    $('fxTally').textContent = rows.length === visible().length
+      ? rows.length + ' fixtures'
+      : rows.length + ' of ' + visible().length + ' fixtures';
+  }
+
+  function renderMoves(moves) {
+    var pane = $('fxPaneMoves');
+    if (!moves.length) {
+      pane.innerHTML = '<div class="empty-state"><p style="font-variation-settings:\'wght\' 800;margin:0 0 5px;">' +
+        'Nothing has moved yet</p><p style="margin:0;color:var(--text-muted);">' +
+        'Postponed and rearranged fixtures collect here.</p></div>';
+      return;
+    }
+    var waiting = moves.filter(function (f) { return f.status === 'postponed'; });
+    var done = moves.filter(function (f) { return f.status === 'rearranged'; });
+    pane.innerHTML = mvGroup('Awaiting a new date', waiting, true) + mvGroup('Rearranged', done, false);
+  }
+
+  function mvGroup(title, list, waiting) {
+    if (!list.length) return '';
+    return '<div style="margin-bottom:22px;"><p class="fx-mv-head">' + esc(title) + ' (' + list.length + ')</p>' +
+      list.map(function (f) {
+        var h = histOf(f.recordID);
+        var last = h[h.length - 1] || {};
+        var waits = waitDays(f);
+        return '<div class="fx-mv">' +
+          '<span class="fx-mv__fx">' + esc(f.home) + ' v ' + esc(f.away) + '</span>' +
+          '<span class="fx-mv__meta">' + esc(COMP_SHORT[f.competition] || '') +
+            (f.matchday ? ' &middot; MD' + esc(f.matchday) : '') + '</span>' +
+          '<span class="fx-mv__meta">' + (waiting
+            ? 'Called off ' + esc(last.effectiveAt || '')
+            : whenStr(f.date, f.kickoff)) + '</span>' +
+          (waiting ? '<span class="fx-mv__wait">' + daysSince(last.effectiveAt) + '</span>'
+                   : (waits.length ? '<span class="fx-mv__wait">' + waits[waits.length - 1] + ' to rearrange</span>' : '')) +
+          '<button type="button" class="btn btn--ghost btn--sm" data-fxopen="' + esc(f.recordID) + '">Open</button>' +
+          '</div>';
+      }).join('') + '</div>';
+  }
+
+  function daysSince(s) {
+    var t = parseStamp(s);
+    if (!t) return '';
+    var d = Math.max(0, Math.round((Date.now() - t) / 864e5));
+    return d === 0 ? 'today' : d + ' day' + (d === 1 ? '' : 's') + ' waiting';
+  }
+  /* Each postponement pairs with the next rescheduling. A fixture moved
+     straight to a new date never enters the waiting state, so it
+     contributes nothing here rather than a misleading zero. A correction
+     cancels an open postponement so a mistake never counts as a wait. */
+  function waitDays(f) {
+    var out = [], open = null;
+    histOf(f.recordID).forEach(function (h) {
+      if (h.type === 'postponed') open = h;
+      else if (h.type === 'corrected') open = null;
+      else if (h.type === 'rescheduled' && open) {
+        var a = parseStamp(open.effectiveAt), b = parseStamp(h.effectiveAt);
+        if (a && b) out.push(Math.max(0, Math.round((b - a) / 864e5)) + ' days');
+        open = null;
+      }
+    });
+    return out;
+  }
+
+  /* ---- Detail ---------------------------------------------------------- */
+  function open(id) {
+    var f = S.fixtures[id];
+    if (!f) return;
+    if (!canEdit()) return openRead(f);
+    openEdit(f);
+  }
+
+  /* Club view: current date, a marker, no reasons, no history. */
+  function openRead(f) {
+    NL.modal({
+      title: f.home + ' v ' + f.away,
+      size: 'sm',
+      body: '<p style="margin:0 0 14px;color:var(--text-muted);font-size:13px;">' +
+        esc(f.competition) + (f.matchday ? ' &middot; Matchday ' + esc(f.matchday) : '') + '</p>' +
+        '<div class="form-group"><label>When</label><div>' +
+        (f.status === 'postponed'
+          ? '<strong>Postponed</strong> &mdash; a new date has not been set yet.'
+          : whenStr(f.date, f.kickoff)) + '</div></div>',
+      buttons: [{ label: 'Close', className: 'btn btn--ghost', onClick: function (c) { c.close(); } }]
+    });
+  }
+
+  function openEdit(f) {
+    var body = '<p style="margin:0 0 14px;color:var(--text-muted);font-size:13px;">' +
+      esc(f.competition) + (f.matchday ? ' &middot; Matchday ' + esc(f.matchday) : '') + ' &middot; ' +
+      (f.status === 'postponed' ? 'awaiting a new date' : whenStr(f.date, f.kickoff)) + '</p>' +
+      '<div class="fx-choice">' +
+      (f.status === 'postponed' || f.status === 'abandoned'
+        ? (f.status === 'postponed' ? '<button type="button" class="btn btn--ghost" data-act="date">Set new date</button>' : '') +
+          '<button type="button" class="btn btn--ghost" data-act="reinstate">Reinstate</button>'
+        : '<button type="button" class="btn btn--ghost" data-act="postpone">Postpone</button>' +
+          '<button type="button" class="btn btn--ghost" data-act="rearrange">Rearrange</button>' +
+          '<button type="button" class="btn btn--ghost" data-act="result">Result</button>') +
+      '</div>' + historyBlock(f) + refBlock(f);
+
+    var buttons = [];
+    if (f.manual) buttons.push({ label: 'Delete fixture', className: 'btn btn--danger',
+      onClick: function (c) { c.close(); confirmDelete(f); } });
+    buttons.push({ label: 'Close', className: 'btn btn--ghost', onClick: function (c) { c.close(); } });
+
+    var ctrl = NL.modal({
+      title: f.home + ' v ' + f.away, body: body, buttons: buttons, footerSplit: !!f.manual
+    });
+    ctrl.body.querySelectorAll('[data-act]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var a = b.getAttribute('data-act');
+        ctrl.close();
+        if (a === 'postpone') formPostpone(f);
+        else if (a === 'rearrange') formRearrange(f, false);
+        else if (a === 'date') formRearrange(f, true);
+        else if (a === 'result') formResult(f);
+        else if (a === 'reinstate') reinstate(f);
+      });
+    });
+    ctrl.body.querySelectorAll('[data-fxopta]').forEach(function (b) {
+      b.addEventListener('click', function () { ctrl.close(); askOpta(f); });
+    });
+  }
+
+  function reasonField(typical) {
+    if (!REASONS.length) return '';
+    var opts = REASONS.slice().sort(function (a, b) {
+      var am = a.typical === typical || a.typical === 'either';
+      var bm = b.typical === typical || b.typical === 'either';
+      return (bm - am) || a.label.localeCompare(b.label);
+    });
+    return '<div class="form-group"><label>Reason</label><select id="fxReason">' +
+      opts.map(function (r) { return '<option value="' + esc(r.code) + '">' + esc(r.label) + '</option>'; }).join('') +
+      '</select></div>';
+  }
+
+  /* Postponed: an effective date, but NO new fixture date. */
+  function formPostpone(f) {
+    var ctrl = NL.modal({
+      title: 'Postpone',
+      body: '<p style="margin:0 0 14px;color:var(--text-muted);font-size:13px;">' +
+        esc(f.home) + ' v ' + esc(f.away) + ' &middot; ' + whenStr(f.date, f.kickoff) + '</p>' +
+        '<div class="form-group"><label>Called off</label><div class="datetime-row">' +
+        '<input type="date" id="fxEffD" value="' + todayISO() + '">' +
+        '<input type="time" id="fxEffT" value="12:00"></div></div>' +
+        reasonField('postponed') +
+        '<div class="form-group"><label>Note &mdash; staff only</label>' +
+        '<textarea id="fxNote" rows="2"></textarea></div>',
+      buttons: [
+        { label: 'Cancel', className: 'btn btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Mark postponed', className: 'btn btn--primary', autofocus: true, onClick: function (c) {
+            var entry = {
+              type: 'postponed', from: f.date + ' ' + f.kickoff, to: null,
+              effectiveAt: fromISO($('fxEffD').value) + ' ' + $('fxEffT').value,
+              recordedAt: stamp(), by: S.session && S.session.uid || null,
+              reasonCode: $('fxReason') ? $('fxReason').value : null
+            };
+            f.status = 'postponed';
+            Promise.all([saveFixture(f), appendHistory(f.recordID, entry),
+                         saveNote(f.recordID, $('fxNote').value.trim())])
+              .then(function () {
+                NL.writeAudit('fixture_postponed', { recordID: f.recordID, reason: entry.reasonCode });
+                c.close(); render(); NL.toast('Marked postponed', 'success');
+              })
+              .catch(function (e) { NL.toast('Could not save: ' + (e.message || e), 'error'); });
+          } }
+      ]
+    });
+    return ctrl;
+  }
+
+  /* Rearranged: both an effective date AND the new fixture date. */
+  function formRearrange(f, fromPostponed) {
+    NL.modal({
+      title: fromPostponed ? 'Set new date' : 'Rearrange',
+      body: '<p style="margin:0 0 14px;color:var(--text-muted);font-size:13px;">' +
+        esc(f.home) + ' v ' + esc(f.away) +
+        (fromPostponed ? ' &middot; awaiting a date' : ' &middot; currently ' + whenStr(f.date, f.kickoff)) + '</p>' +
+        '<div class="form-group"><label>New date</label><div class="datetime-row">' +
+        '<input type="date" id="fxNewD" value="' + toISO(f.date) + '">' +
+        '<input type="time" id="fxNewT" value="' + esc(f.kickoff) + '"></div></div>' +
+        '<div class="form-group"><label>Agreed</label><div class="datetime-row">' +
+        '<input type="date" id="fxEffD" value="' + todayISO() + '">' +
+        '<input type="time" id="fxEffT" value="12:00"></div></div>' +
+        reasonField(fromPostponed ? 'either' : 'rescheduled') +
+        '<div class="form-group"><label>Note &mdash; staff only</label>' +
+        '<textarea id="fxNote" rows="2"></textarea></div>',
+      buttons: [
+        { label: 'Cancel', className: 'btn btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Save new date', className: 'btn btn--primary', autofocus: true, onClick: function (c) {
+            if (!$('fxNewD').value) { NL.toast('Pick a new date first', 'info'); return; }
+            var nd = fromISO($('fxNewD').value), nk = $('fxNewT').value || '15:00';
+            var entry = {
+              type: 'rescheduled',
+              from: fromPostponed ? null : f.date + ' ' + f.kickoff,
+              to: nd + ' ' + nk,
+              effectiveAt: fromISO($('fxEffD').value) + ' ' + $('fxEffT').value,
+              recordedAt: stamp(), by: S.session && S.session.uid || null,
+              reasonCode: $('fxReason') ? $('fxReason').value : null
+            };
+            f.date = nd; f.kickoff = nk; f.status = 'rearranged';
+            Promise.all([saveFixture(f), appendHistory(f.recordID, entry),
+                         saveNote(f.recordID, $('fxNote').value.trim())])
+              .then(function () {
+                NL.writeAudit('fixture_rearranged', { recordID: f.recordID, to: entry.to });
+                c.close(); render();
+                NL.toast('Moved to ' + dow(nd) + ' ' + prettyDate(nd) + ' · ' + clock(nk), 'success');
+              })
+              .catch(function (e) { NL.toast('Could not save: ' + (e.message || e), 'error'); });
+          } }
+      ]
+    });
+  }
+
+  function formResult(f) {
+    NL.modal({
+      title: 'Result',
+      body: '<p style="margin:0 0 14px;color:var(--text-muted);font-size:13px;">' +
+        esc(f.home) + ' v ' + esc(f.away) + ' &middot; ' + whenStr(f.date, f.kickoff) + '</p>' +
+        '<div class="fx-score">' +
+        '<label><span>' + esc(f.home) + '</span><input type="number" id="fxHS" min="0" max="99" value="' +
+          (f.homeScore == null ? '' : f.homeScore) + '"></label>' +
+        '<span class="fx-score__dash">&ndash;</span>' +
+        '<label><span>' + esc(f.away) + '</span><input type="number" id="fxAS" min="0" max="99" value="' +
+          (f.awayScore == null ? '' : f.awayScore) + '"></label></div>',
+      footerSplit: true,
+      buttons: [
+        { label: 'Abandoned', className: 'btn btn--ghost', onClick: function (c) {
+            f.status = 'abandoned'; f.homeScore = null; f.awayScore = null;
+            saveFixture(f).then(function () {
+              NL.writeAudit('fixture_abandoned', { recordID: f.recordID });
+              c.close(); render(); NL.toast('Marked abandoned', 'success');
+            });
+          } },
+        { label: 'Cancel', className: 'btn btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Save', className: 'btn btn--primary', autofocus: true, onClick: function (c) {
+            var h = $('fxHS').value, a = $('fxAS').value;
+            if (h === '' || a === '') { NL.toast('Enter both scores', 'info'); return; }
+            f.homeScore = +h; f.awayScore = +a; f.status = 'played';
+            saveFixture(f).then(function () {
+              NL.writeAudit('fixture_result', { recordID: f.recordID, score: h + '-' + a });
+              c.close(); render(); NL.toast('Result saved', 'success');
+            });
+          } }
+      ]
+    });
+  }
+
+  /* Undo a P–P or A–A entered by mistake. The log keeps a `corrected`
+     entry rather than deleting history — if a postponement could be
+     silently erased the audit trail would stop being trustworthy. */
+  function reinstate(f) {
+    var was = f.status;
+    var entry = { type: 'corrected', from: was, to: 'scheduled', effectiveAt: null,
+                  recordedAt: stamp(), by: S.session && S.session.uid || null, reasonCode: null };
+    f.status = 'scheduled'; f.homeScore = null; f.awayScore = null;
+    Promise.all([saveFixture(f), appendHistory(f.recordID, entry)]).then(function () {
+      NL.writeAudit('fixture_reinstated', { recordID: f.recordID, was: was });
+      render();
+      NL.toast('Reinstated — ' + (was === 'abandoned' ? 'A–A' : 'P–P') + ' removed', 'success');
+    });
+  }
+
+  /* Only manually-added fixtures can be deleted. A league fixture is part
+     of the published programme; removing one would leave a hole. */
+  function confirmDelete(f) {
+    NL.confirm('Delete ' + f.home + ' v ' + f.away + '?', {
+      title: 'Delete this fixture?',
+      detail: 'Its scheduling history goes with it. This cannot be undone.',
+      confirmText: 'Delete', variant: 'danger'
+    }).then(function (ok) {
+      if (!ok) return;
+      var db = firebase.database();
+      Promise.all([
+        db.ref(seasonPath('fixtures') + '/' + f.recordID).remove(),
+        db.ref(seasonPath('history') + '/' + f.recordID).remove(),
+        db.ref(seasonPath('notes') + '/' + f.recordID).remove()
+      ]).then(function () {
+        delete S.fixtures[f.recordID]; delete S.history[f.recordID]; delete S.notes[f.recordID];
+        NL.writeAudit('fixture_deleted', { recordID: f.recordID, fixture: f.home + ' v ' + f.away });
+        render(); NL.toast('Fixture deleted', 'success');
+      });
+    });
+  }
+
+  function askOpta(f) {
+    NL.prompt('Opta match ID', { default: f.optaID || '', placeholder: 'g2660046' }).then(function (v) {
+      if (v == null) return;
+      f.optaID = v.trim() || null;
+      saveFixture(f).then(function () {
+        NL.writeAudit('fixture_opta_id', { recordID: f.recordID, optaID: f.optaID });
+        render(); NL.toast(f.optaID ? 'Opta ID saved' : 'Opta ID cleared', 'success');
+      });
+    });
+  }
+
+  function historyBlock(f) {
+    var h = histOf(f.recordID);
+    if (!h.length) return '';
+    var byCode = {};
+    REASONS.forEach(function (r) { byCode[r.code] = r; });
+    var items = h.map(function (e, i) {
+      var r = byCode[e.reasonCode];
+      var line = e.type === 'corrected' ? 'Reinstated (was ' + e.from + ')'
+        : e.type === 'postponed' ? 'Postponed from ' + e.from
+        : (e.from ? 'Moved from ' + e.from + ' to ' + e.to : 'Date set: ' + e.to);
+      return '<li><div class="fx-hist__t">' + (i + 1) + '. ' + esc(line) + '</div>' +
+        '<div class="fx-hist__d">' + (e.effectiveAt ? 'Decided ' + esc(e.effectiveAt) + ' &middot; ' : '') +
+        'recorded ' + esc(e.recordedAt) + (r ? ' &middot; ' + esc(r.label) : '') + '</div></li>';
+    }).join('');
+    var waits = waitDays(f);
+    var notes = (S.notes[f.recordID] || []).map(function (n) {
+      return '<div class="fx-hist__d">&ldquo;' + esc(n.text) + '&rdquo; &middot; ' + esc(n.at) + '</div>';
+    }).join('');
+    return '<div class="fx-ref"><div class="fx-mv-head">Scheduling history</div><ul class="fx-hist">' + items + '</ul>' +
+      (waits.length ? '<p class="form-hint">Time to rearrange: ' + esc(waits.join(', ')) + '</p>' : '') +
+      (notes ? '<div style="margin-top:9px;">' + notes + '</div>' : '') + '</div>';
+  }
+
+  /* Three honest states, never a placeholder: a real ID, awaiting one, or
+     none is ever issued. Editable throughout — if an ID turns up for a
+     competition Opta does not normally cover, the field should take it. */
+  function optaCell(f) {
+    var btn = '<button type="button" class="fx-link" data-fxopta="1">' + (f.optaID ? 'edit' : 'add') + '</button>';
+    if (f.optaID) return esc(f.optaID) + ' ' + btn;
+    if (OPTA_EXPECTED[f.competition]) return '<span class="fx-await">Awaiting</span> ' + btn;
+    return '<span class="fx-none">Not issued</span> ' + btn;
+  }
+
+  function refBlock(f) {
+    return '<details class="fx-ref"><summary>Reference</summary><dl>' +
+      '<dt>Opta match ID</dt><dd>' + optaCell(f) + '</dd>' +
+      (f.optaID === f.recordID ? '' : '<dt>Record ID</dt><dd>' + esc(f.recordID) + '</dd>') +
+      (f.matchday ? '<dt>Matchday</dt><dd>' + esc(f.matchday) + '</dd>' : '') +
+      '<dt>Originally</dt><dd>' + whenStr(f.originalDate || f.date, f.originalKickoff || f.kickoff) + '</dd>' +
+      '<dt>Season</dt><dd>' + esc(NL.season.label(NL.clubs.meta(), S.season) || S.season) + '</dd>' +
+      '</dl></details>';
+  }
+
+  /* ---- Import ---------------------------------------------------------- */
+  var IMP = { rows: [], head: [], map: {}, comp: 'FA Cup' };
+  var FIELDS = [
+    { key: 'date',  label: 'Date',      req: true },
+    { key: 'ko',    label: 'Kick-off',  req: true },
+    { key: 'home',  label: 'Home club', req: true },
+    { key: 'away',  label: 'Away club', req: true },
+    { key: 'round', label: 'Round',     req: false },
+    { key: 'opta',  label: 'Opta ID',   req: false }
+  ];
+
+  /* Excel pastes are tab-separated; a saved file is CSV. Pick whichever the
+     first line has more of, then hand CSV to the canon parser. */
+  function splitRows(text) {
+    var lines = String(text).replace(/\r\n/g, '\n').split('\n').filter(function (l) { return l.trim(); });
+    if (!lines.length) return [];
+    var tabs = (lines[0].match(/\t/g) || []).length;
+    var commas = (lines[0].match(/,/g) || []).length;
+    if (tabs >= commas && tabs > 0) {
+      return lines.map(function (l) { return l.split('\t').map(function (c) { return c.trim(); }); });
+    }
+    return NL.csvParse(lines.join('\r\n')).map(function (r) {
+      return r.map(function (c) { return String(c).trim(); });
+    });
+  }
+
+  /* Guess from header names, falling back to what the data looks like, so a
+     sheet with no header row still maps sensibly. */
+  function guessMap(head, rows) {
+    var m = {}, used = {};
+    var want = { date: /date|day/i, ko: /kick|time|ko\b/i, home: /home/i,
+                 away: /away|opponent|visitor/i, round: /round|stage|md|matchday/i,
+                 opta: /opta|match ?id|id\b/i };
+    head.forEach(function (h, i) {
+      Object.keys(want).forEach(function (k) {
+        if (!used[i] && m[k] == null && want[k].test(h)) { m[k] = i; used[i] = 1; }
+      });
+    });
+    var sample = rows[0] || [];
+    if (m.date == null) {
+      for (var i = 0; i < sample.length; i++) if (!used[i] && looksDate(sample[i])) { m.date = i; used[i] = 1; break; }
+    }
+    if (m.ko == null) {
+      /* A combined "13/10/2026 19:45" cell should feed BOTH date and time. */
+      if (m.date != null && looksTime(sample[m.date])) m.ko = m.date;
+      else for (var j = 0; j < sample.length; j++) if (!used[j] && looksTime(sample[j])) { m.ko = j; used[j] = 1; break; }
+    }
+    return m;
+  }
+
+  function impStep1() {
+    NL.modal({
+      title: 'Add cup fixtures', width: 'wide',
+      body: '<div class="fx-steps"><span class="is-on">1 Paste</span><span>2 Match columns</span><span>3 Check</span></div>' +
+        '<p style="font-size:13px;line-height:1.5;margin:0 0 12px;">Paste rows straight from a spreadsheet, or a CSV. ' +
+        '<strong>Column order does not matter</strong> &mdash; you match them up on the next step. ' +
+        'Include a header row if you have one.</p>' +
+        '<div class="fx-needs"><span>Needs:</span><code>Date</code><code>Kick-off</code>' +
+        '<code>Home</code><code>Away</code><span>optional:</span><code>Round</code><code>Opta ID</code></div>' +
+        '<div class="form-group"><textarea id="fxImpText" rows="7" ' +
+        'placeholder="Round&#9;Date&#9;Kick Off&#9;Home&#9;Away&#10;R3&#9;Tue, 13 Oct 2026&#9;7:45 PM&#9;Morecambe&#9;Tottenham Hotspur"></textarea></div>',
+      buttons: [
+        { label: 'Cancel', className: 'btn btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Next', className: 'btn btn--primary', onClick: function (c) {
+            var rows = splitRows($('fxImpText').value);
+            if (!rows.length) { NL.toast('Nothing to read', 'info'); return; }
+            /* Row 1 is a header only if it holds no date. */
+            var hasHead = !rows[0].some(looksDate);
+            IMP.head = hasHead ? rows[0] : rows[0].map(function (_, i) { return 'Column ' + (i + 1); });
+            IMP.rows = hasHead ? rows.slice(1) : rows;
+            if (!IMP.rows.length) { NL.toast('No fixture rows found', 'info'); return; }
+            IMP.map = guessMap(IMP.head, IMP.rows);
+            c.close(); impStep2();
+          } }
+      ]
+    });
+  }
+
+  function impStep2() {
+    var opts = function (sel) {
+      return '<option value="">&mdash; not in my data &mdash;</option>' +
+        IMP.head.map(function (h, i) {
+          return '<option value="' + i + '"' + (String(sel) === String(i) ? ' selected' : '') + '>' + esc(h) + '</option>';
+        }).join('');
+    };
+    var ctrl = NL.modal({
+      title: 'Match columns', width: 'wide',
+      body: '<div class="fx-steps"><span>1 Paste</span><span class="is-on">2 Match columns</span><span>3 Check</span></div>' +
+        '<p style="font-size:13px;margin:0 0 12px;">' + IMP.rows.length +
+        ' rows read. Point each field at the right column.</p>' +
+        '<div class="fx-map">' +
+        '<div class="form-group"><label>Competition</label><select id="fxImpComp">' +
+          ['FA Cup', 'FA Trophy', 'NL Cup'].map(function (x) {
+            return '<option' + (x === IMP.comp ? ' selected' : '') + '>' + x + '</option>';
+          }).join('') + '</select><div class="fx-map__sample">Applies to every row</div></div>' +
+        FIELDS.map(function (f) {
+          return '<div class="form-group"><label>' + esc(f.label) + (f.req ? ' *' : '') + '</label>' +
+            '<select data-fxmap="' + f.key + '">' + opts(IMP.map[f.key]) + '</select>' +
+            '<div class="fx-map__sample" data-fxsample="' + f.key + '"></div></div>';
+        }).join('') + '</div>' +
+        '<div class="fx-map__note" id="fxImpNote" hidden></div>',
+      buttons: [
+        { label: 'Back', className: 'btn btn--ghost', onClick: function (c) { c.close(); impStep1(); } },
+        { label: 'Cancel', className: 'btn btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Next', className: 'btn btn--primary', onClick: function (c) {
+            var missing = FIELDS.filter(function (f) { return f.req && (IMP.map[f.key] == null || IMP.map[f.key] === ''); });
+            if (missing.length) {
+              NL.toast('Still need: ' + missing.map(function (f) { return f.label; }).join(', '), 'info');
+              return;
+            }
+            c.close(); impStep3();
+          } }
+      ]
+    });
+
+    function refresh() {
+      FIELDS.forEach(function (f) {
+        var i = IMP.map[f.key];
+        var el = ctrl.body.querySelector('[data-fxsample="' + f.key + '"]');
+        var raw = (i === '' || i == null) ? '' : (IMP.rows[0] || [])[i];
+        var shown = raw;
+        if (f.key === 'date' && raw) shown = grabDate(raw) || raw;
+        if (f.key === 'ko' && raw) { var g = grabTime(raw); shown = g ? g.t : raw; }
+        el.textContent = shown ? 'e.g. ' + shown : '';
+      });
+      /* One column feeding both date and kick-off is the split case. */
+      var note = ctrl.body.querySelector('#fxImpNote');
+      if (IMP.map.date != null && IMP.map.date !== '' && String(IMP.map.date) === String(IMP.map.ko)) {
+        note.hidden = false;
+        note.innerHTML = '<strong>' + esc(IMP.head[IMP.map.date]) +
+          '</strong> holds the date and the time together. It will be split automatically.';
+      } else { note.hidden = true; }
+    }
+    ctrl.body.querySelectorAll('[data-fxmap]').forEach(function (sel) {
+      sel.addEventListener('change', function () {
+        IMP.map[sel.getAttribute('data-fxmap')] = sel.value === '' ? null : +sel.value;
+        refresh();
+      });
+    });
+    ctrl.body.querySelector('#fxImpComp').addEventListener('change', function (e) { IMP.comp = e.target.value; });
+    refresh();
+  }
+
+  function parseImport() {
+    var g = function (r, k) { var i = IMP.map[k]; return (i == null || i === '') ? '' : (r[i] || ''); };
+    return IMP.rows.map(function (r) {
+      var d = grabDate(g(r, 'date'));
+      var tp = grabTime(g(r, 'ko'));
+      var home = g(r, 'home'), away = g(r, 'away');
+      return {
+        date: d, kickoff: tp ? tp.t : '15:00', guessedPm: !!(tp && tp.guessed),
+        home: home, away: away, round: g(r, 'round'), opta: g(r, 'opta'),
+        ok: !!(d && home && away),
+        homeNL: !!NL.clubs.byName(home), awayNL: !!NL.clubs.byName(away)
+      };
+    });
+  }
+
+  function impStep3() {
+    var parsed = parseImport();
+    var good = parsed.filter(function (p) { return p.ok; });
+    var bad = parsed.length - good.length;
+    var freetext = good.filter(function (p) { return !p.homeNL || !p.awayNL; }).length;
+    var guessed = good.filter(function (p) { return p.guessedPm; }).length;
+
+    NL.modal({
+      title: 'Check', width: 'wide',
+      body: '<div class="fx-steps"><span>1 Paste</span><span>2 Match columns</span><span class="is-on">3 Check</span></div>' +
+        '<p style="font-size:13px;margin:0 0 10px;">' + good.length + ' ready to import as <strong>' +
+        esc(IMP.comp) + '</strong>' + (bad ? ' &middot; <span style="color:var(--primary);">' + bad + ' unreadable</span>' : '') +
+        (freetext ? ' &middot; ' + freetext + ' with a non-League club' : '') + '</p>' +
+        (guessed ? '<div class="fx-map__note">' + guessed + ' row' + (guessed === 1 ? ' has a time' : 's have times') +
+          ' with no am/pm, read as afternoon. Check the Kick-off column below.</div>' : '') +
+        '<div class="fx-scroll"><table class="fx-prev"><thead><tr><th>Round</th><th>Date</th><th>KO</th>' +
+        '<th>Home</th><th>Away</th><th>Opta ID</th></tr></thead><tbody>' +
+        parsed.map(function (p) {
+          return '<tr><td>' + (p.round ? esc(p.round) : '&mdash;') + '</td>' +
+            '<td' + (p.date ? '' : ' class="is-bad"') + '>' + esc(p.date || 'unreadable') + '</td>' +
+            '<td>' + esc(p.kickoff) + '</td>' +
+            '<td' + (p.homeNL ? '' : ' class="is-new"') + '>' + (p.home ? esc(p.home) : '&mdash;') + '</td>' +
+            '<td' + (p.awayNL ? '' : ' class="is-new"') + '>' + (p.away ? esc(p.away) : '&mdash;') + '</td>' +
+            '<td' + (p.opta ? '' : ' class="is-new"') + '>' +
+              esc(p.opta || (OPTA_EXPECTED[IMP.comp] ? 'awaiting' : 'not issued')) + '</td></tr>';
+        }).join('') + '</tbody></table></div>' +
+        '<p class="form-hint">Italic clubs are not in the League &mdash; kept as typed. ' +
+        (OPTA_EXPECTED[IMP.comp]
+          ? 'Opta IDs for ' + esc(IMP.comp) + ' can be added later from each fixture.'
+          : 'Opta issues no IDs for ' + esc(IMP.comp) + '.') + '</p>',
+      buttons: [
+        { label: 'Back', className: 'btn btn--ghost', onClick: function (c) { c.close(); impStep2(); } },
+        { label: 'Cancel', className: 'btn btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Import ' + good.length, className: 'btn btn--primary', onClick: function (c) {
+            var updates = {}, n = 0;
+            good.forEach(function (p) {
+              /* The record needs a key, but that key is NOT an Opta ID.
+                 Minting an Opta-looking value would make a fabricated ID
+                 indistinguishable from a real one. */
+              var id = 'nlf-' + S.season + '-' + String(Date.now()).slice(-8) + '-' + (n++);
+              updates[id] = {
+                recordID: id, optaID: p.opta || null, manual: true,
+                competition: IMP.comp, matchday: p.round || '',
+                home: p.home, away: p.away,
+                originalDate: p.date, originalKickoff: p.kickoff,
+                date: p.date, kickoff: p.kickoff,
+                status: 'scheduled', homeScore: null, awayScore: null,
+                createdAt: stamp(), createdBy: S.session && S.session.uid || null
+              };
+            });
+            firebase.database().ref(seasonPath('fixtures')).update(updates).then(function () {
+              Object.keys(updates).forEach(function (k) { S.fixtures[k] = updates[k]; });
+              NL.writeAudit('fixture_import', { competition: IMP.comp, count: n });
+              c.close(); render();
+              NL.toast(n + ' fixture' + (n === 1 ? '' : 's') + ' imported', 'success');
+            }).catch(function (e) { NL.toast('Import failed: ' + (e.message || e), 'error'); });
+          } }
+      ]
+    });
+  }
+
+  /* ---- Wiring ---------------------------------------------------------- */
+  function wire() {
+    $('fxCompPills').innerHTML = COMPS.map(function (c) {
+      return '<button type="button" class="filter-pill active" data-fxcomp="' + esc(c) + '">' +
+        esc(COMP_SHORT[c]) + '</button>';
+    }).join('');
+
+    var md = $('fxMd');
+    for (var i = 1; i <= 46; i++) md.insertAdjacentHTML('beforeend', '<option value="' + i + '">MD ' + i + '</option>');
+    md.addEventListener('change', function () { S.md = md.value; render(); });
+
+    if (!S.isClub) {
+      S.picker = NL.clubPicker('#fxClubPicker', {
+        mode: 'search', season: S.season, clearable: true,
+        placeholder: 'Search club',
+        onSelect: function (sel) { S.club1 = sel && sel.name || null; render(); }
+      });
+    }
+
+    $('fxClear').addEventListener('click', function () {
+      S.club1 = null; S.venue = 'all'; S.md = ''; md.value = '';
+      COMPS.forEach(function (c) { S.comps[c] = true; });
+      document.querySelectorAll('[data-fxcomp]').forEach(function (b) { b.classList.add('active'); });
+      $('fxVenue').querySelectorAll('.chip').forEach(function (ch) {
+        ch.classList.toggle('active', ch.getAttribute('data-fxvenue') === 'all');
+      });
+      if (S.picker) S.picker.clear();
+      render();
+    });
+
+    document.addEventListener('click', function (e) {
+      var t = e.target.closest('[data-fxcomp],[data-fxvenue],[data-fxtab],[data-fxopen]');
+      if (!t) return;
+      if (t.hasAttribute('data-fxcomp')) {
+        var c = t.getAttribute('data-fxcomp');
+        S.comps[c] = !S.comps[c]; t.classList.toggle('active'); render();
+      } else if (t.hasAttribute('data-fxvenue')) {
+        S.venue = t.getAttribute('data-fxvenue');
+        $('fxVenue').querySelectorAll('.chip').forEach(function (ch) { ch.classList.toggle('active', ch === t); });
+        render();
+      } else if (t.hasAttribute('data-fxtab')) {
+        S.tab = t.getAttribute('data-fxtab');
+        document.querySelectorAll('[data-fxtab]').forEach(function (b) {
+          var on = b === t; b.classList.toggle('active', on); b.setAttribute('aria-selected', on);
+        });
+        $('fxPaneAll').hidden = S.tab !== 'all';
+        $('fxPaneMoves').hidden = S.tab !== 'moves';
+        render();
+      } else { open(t.getAttribute('data-fxopen')); }
+    });
+
+    $('fxExport').addEventListener('click', function () {
+      var rows = [['recordID', 'optaID', 'competition', 'matchday', 'home', 'away',
+                   'date', 'kickoff', 'status', 'homeScore', 'awayScore', 'originalDate']];
+      filtered().forEach(function (f) {
+        rows.push([f.recordID, f.optaID || '', f.competition, f.matchday, f.home, f.away,
+          f.status === 'postponed' ? '' : f.date, f.status === 'postponed' ? '' : f.kickoff,
+          f.status, f.homeScore == null ? '' : f.homeScore, f.awayScore == null ? '' : f.awayScore,
+          f.originalDate || '']);
+      });
+      NL.download('nl-fixtures-' + S.season + '.csv', NL.csv(rows, { bom: true }), 'text/csv');
+      NL.toast('Exported ' + (rows.length - 1) + ' fixtures', 'success');
+    });
+
+    var imp = $('fxImport');
+    if (canEdit()) imp.addEventListener('click', impStep1); else imp.hidden = true;
+  }
+}());
+</script>
+
+</body>
+</html>

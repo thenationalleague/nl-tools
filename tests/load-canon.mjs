@@ -35,7 +35,14 @@ const stubEl = () => ({
 });
 
 /* Inject the outer realm's intrinsics so any Date/Object the helpers return is
-   the same realm the tests assert against (keeps `instanceof` honest). */
+   the same realm the tests assert against (keeps `instanceof` honest).
+
+   CAVEAT: this only covers values built via these injected globals (Object.keys,
+   new Date, …). An array or object LITERAL evaluated inside the sandbox still
+   gets the sandbox realm's prototype, so assert/strict's deepEqual reports
+   "same structure but not reference-equal". When a helper returns literals
+   (e.g. NL.csvParse), normalise with JSON.parse(JSON.stringify(v)) in the test
+   rather than loosening the assertion. */
 const sandbox = {
   console, setTimeout, clearTimeout, setInterval, clearInterval,
   Date, Math, JSON, Object, Array, String, Number, Boolean, RegExp, Error,

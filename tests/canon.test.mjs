@@ -202,3 +202,55 @@ test('season.clubsFor resolves division to that season and drops departed clubs'
     }
   }
 });
+
+/* ── NL.csvParse — the reverse of NL.csv (v1.26) ────────────────────────
+   The cases below are exactly the ones a split(',') implementation gets
+   wrong, which is why this helper exists rather than each tool rolling
+   its own.
+
+   plain() works around a vm-harness artifact, not a behaviour difference:
+   load-canon injects the outer realm's intrinsics, but an array LITERAL
+   evaluated inside the sandbox still gets the sandbox's Array prototype,
+   so assert/strict's deepEqual rejects it as "same structure, not
+   reference-equal". Normalising through JSON is lossless for the
+   string-array shapes csvParse returns. */
+const plain = (v) => JSON.parse(JSON.stringify(v));
+
+test('csvParse handles plain rows, both line endings, and no phantom trailing row', () => {
+  assert.deepEqual(plain(NL.csvParse('a,b\r\n1,2')), [['a', 'b'], ['1', '2']]);
+  assert.deepEqual(plain(NL.csvParse('a,b\n1,2')), [['a', 'b'], ['1', '2']], 'bare LF');
+  assert.deepEqual(plain(NL.csvParse('a,b\r\n1,2\r\n')), [['a', 'b'], ['1', '2']], 'trailing newline');
+  assert.deepEqual(plain(NL.csvParse('')), [], 'empty input');
+  assert.deepEqual(plain(NL.csvParse('a,,c')), [['a', '', 'c']], 'empty cells preserved');
+});
+
+test('csvParse honours quoting: commas, escaped quotes and newlines inside cells', () => {
+  assert.deepEqual(plain(NL.csvParse('a,b\r\n1,"x,y"')), [['a', 'b'], ['1', 'x,y']]);
+  assert.deepEqual(plain(NL.csvParse('a\r\n"say ""hi"""')), [['a'], ['say "hi"']]);
+  assert.deepEqual(plain(NL.csvParse('a,b\r\n"line1\nline2",z')),
+    [['a', 'b'], ['line1\nline2', 'z']], 'LF inside quotes is not a row break');
+  assert.deepEqual(plain(NL.csvParse('a\r\n"x\r\ny"')), [['a'], ['x\r\ny']], 'CRLF inside quotes');
+});
+
+test('csvParse strips the UTF-8 BOM Excel writes', () => {
+  assert.deepEqual(plain(NL.csvParse('﻿matchID,home')), [['matchID', 'home']],
+    'BOM must not glue itself to the first header name');
+});
+
+test('csvParse header mode keys rows, trims names and pads short rows', () => {
+  assert.deepEqual(plain(NL.csvParse('a,b\r\n1,"x,y"', { header: true })), [{ a: '1', b: 'x,y' }]);
+  assert.deepEqual(plain(NL.csvParse(' a , b \r\n1,2', { header: true })), [{ a: '1', b: '2' }]);
+  assert.deepEqual(plain(NL.csvParse('a,b,c\r\n1,2', { header: true })), [{ a: '1', b: '2', c: '' }]);
+  assert.deepEqual(plain(NL.csvParse('a,b', { header: true })), [], 'header only → no rows');
+});
+
+test('csvParse round-trips NL.csv output, including real club names', () => {
+  const rows = [
+    ['matchID', 'home', 'away'],
+    ['g2660046', 'Braintree Town', 'Dagenham & Redbridge'],
+    ['g2660047', 'Truro City', 'Dog and Duck FC, Reserves'],
+    ['g2660048', 'Hampton & Richmond Borough', 'he said "hi"']
+  ];
+  assert.deepEqual(plain(NL.csvParse(NL.csv(rows))), rows);
+  assert.deepEqual(plain(NL.csvParse(NL.csv(rows, { bom: true }))), rows, 'BOM variant round-trips too');
+});
