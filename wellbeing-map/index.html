@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Wellbeing map
-  Version: v1.8 (30/07/2026)
+  Version: v1.9 (30/07/2026)
   File: /wellbeing-map/index.html
 
   An editable map of the public Wellbeing section: every page as a box, every
@@ -46,6 +46,20 @@
   native confirm(). No colour here is a raw hex value.
 
   CHANGELOG
+  v1.9 (30/07/2026) — Arrows you could not get hold of. An arrow out of a block
+    is not drawn until something is focused, so the only way to reach one was to
+    catch it mid-hover; an arrow pointing IN could not be reached at all, because
+    the panel listed inbound arrows as dead text. Selecting a box now holds all
+    its arrows on the canvas — blocks included — and the panel lists every one in
+    both directions as a row you can click to reword or × to remove. Hover and
+    selection are now different things on purpose: hover mutes the rest of the
+    map and runs the flow dashes, selection just holds the arrows, so the canvas
+    does not grey out or keep moving while you are reading and typing.
+
+    And the lines were too thin to carry the pulse. Every width is up — a focused
+    arrow more so — and a block's pale grey arrow darkens to navy when focused,
+    which was the worst case for white dashes and is exactly the arrow you are
+    looking at after clicking a block. The dashes are longer and a little faster.
   v1.8 (30/07/2026) — Direction of travel. Hovering a box now sends white dashes
     riding along its arrows towards the end each one points at, so a route reads
     as flowing rather than merely being coloured in. Hover only, deliberately:
@@ -371,8 +385,8 @@
      A pair that goes both ways is drawn as two lines a few pixels apart, each
      flowing its own way — which is the bit that was invisible before. */
   .wm-flow {
-    stroke: var(--white); stroke-dasharray: 8 16; stroke-linecap: round;
-    animation: wmFlow 1.3s linear infinite;
+    stroke: var(--white); stroke-dasharray: 11 13; stroke-linecap: round;
+    animation: wmFlow 1.05s linear infinite;
   }
   @keyframes wmFlow {
     from { stroke-dashoffset: 0; }
@@ -447,8 +461,9 @@
     padding: 7px 10px; cursor: pointer; min-height: 36px;
   }
   .wm-btnrow__t:hover { border-color: var(--navy); background: var(--navy-50); }
-  .wm-btnrow__t span:last-child {
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  .wm-btnrow__t span:last-child { min-width: 0; overflow-wrap: break-word; }
+  .wm-btnrow__t em {
+    font-style: normal; color: var(--text-muted); font-size: var(--text-sm);
   }
   .wm-mini {
     flex: none; width: 32px; font-family: inherit; font-size: var(--text-sm);
@@ -651,10 +666,13 @@
 
   /* On screen next to the title, so it is always possible to tell which
      version is in front of you. Bump both when you change this file. */
-  var VERSION = 'v1.8';
+  var VERSION = 'v1.9';
   var UPDATED = '30 July 2026';
 
   var NL_CHANGELOG = [
+    { v: 'v1.9', d: '30/07/2026', note: 'Clicking a box holds its arrows on screen '
+      + 'and lists every one in and out, both clickable. Heavier lines and a '
+      + 'stronger pulse.' },
     { v: 'v1.8', d: '30/07/2026', note: 'Hovered arrows pulse in the direction they '
       + 'lead, and a route that goes both ways is drawn as two lines pulsing '
       + 'opposite ways.' },
@@ -997,7 +1015,12 @@
   /* Which boxes and arrows the current hover or selection touches. Everything
      else gets dimmed. */
   function focusSet() {
-    var id = hoverId;
+    /* Hover AND selection both put a box in focus, but they are not the same
+       thing. Hover is a glance: it mutes everything else and runs the flow
+       dashes. Selection is work: it holds the box's arrows on screen — including
+       the ones a block normally keeps to itself — so they can be clicked and
+       edited, without greying out the map you are trying to read while typing. */
+    var id = hoverId || (S.sel && S.sel.type === 'node' ? S.sel.id : null);
     if (!id) return null;
     var nodes = {}, edges = {};
     nodes[id] = 'self';
@@ -1005,7 +1028,7 @@
       if (e.from === id) { edges[eKey(e)] = 1; nodes[e.to] = nodes[e.to] || 'to'; }
       if (e.to === id) { edges[eKey(e)] = 1; nodes[e.from] = nodes[e.from] || 'from'; }
     });
-    return { id: id, nodes: nodes, edges: edges };
+    return { id: id, nodes: nodes, edges: edges, hovering: !!hoverId };
   }
 
   function renderNodes() {
@@ -1015,7 +1038,11 @@
       var selected = S.sel && S.sel.type === 'node' && S.sel.id === n.id;
       var words = textLen(n.body);
       var state = '';
-      if (focus) state = focus.nodes[n.id] ? (focus.nodes[n.id] === 'self' ? '' : ' is-lit') : ' is-dim';
+      if (focus) {
+        state = focus.nodes[n.id]
+          ? (focus.nodes[n.id] === 'self' ? '' : ' is-lit')
+          : (focus.hovering ? ' is-dim' : '');
+      }
 
       var body;
       if (n.locked) {
@@ -1121,18 +1148,26 @@
 
   /* Arrow colour follows the DESTINATION, not the source: what matters when
      you look at this map is whether a route ends somewhere urgent. */
-  function edgeTone(e) {
+  /* Widths went up across the board: at the zoom the map sits at, the old ones
+     rendered barely more than a hairline, which is also why the flow dashes were
+     too subtle to read. A focused arrow gets thicker again, and a block's grey
+     arrow darkens to navy when focused — white dashes on pale grey were the
+     worst case of all, and those are exactly the arrows you look at after
+     clicking a block. */
+  function edgeTone(e, focused) {
     var to = byId(e.to);
     if (to && to.kind === 'crisis') {
-      return { c: 'var(--red)', halo: 'var(--red-light)', w: 2.6, m: 'aRed' };
+      return { c: 'var(--red)', halo: 'var(--red-light)', w: 3.6, m: 'aRed' };
     }
     if (to && to.kind === 'urgent') {
-      return { c: 'var(--amber)', halo: 'var(--amber-light)', w: 2.4, m: 'aAmber' };
+      return { c: 'var(--amber)', halo: 'var(--amber-light)', w: 3.4, m: 'aAmber' };
     }
     if (e.kind === 'topic' || e.kind === 'shared') {
-      return { c: 'var(--navy-300)', halo: 'var(--navy-100)', w: 1.5, m: 'aGrey' };
+      return focused
+        ? { c: 'var(--navy-600)', halo: 'var(--navy-100)', w: 2.8, m: 'aNavy' }
+        : { c: 'var(--navy-300)', halo: 'var(--navy-100)', w: 2.2, m: 'aGrey' };
     }
-    return { c: 'var(--navy-600)', halo: 'var(--navy-100)', w: 2, m: 'aNavy' };
+    return { c: 'var(--navy-600)', halo: 'var(--navy-100)', w: 3, m: 'aNavy' };
   }
 
   function marker(id, colour) {
@@ -1176,8 +1211,8 @@
          the two never choose the same one. */
       var two = isTwoWay(e);
       var p = anchors(a, b, two ? (e.from < e.to ? -7 : 7) : 0);
-      var d = curve(p), t = edgeTone(e);
-      var dim = focus && !inFocus ? ' class="is-dim"' : '';
+      var d = curve(p), t = edgeTone(e, inFocus || selected);
+      var dim = focus && focus.hovering && !inFocus ? ' class="is-dim"' : '';
 
       parts.push('<path class="wm-hit" d="' + d + '" data-edge="' + esc(eKey(e)) + '"></path>');
       /* Connected arrows get a soft under-stroke rather than an rgba glow —
@@ -1185,16 +1220,17 @@
          the job. */
       if (inFocus || selected) {
         parts.push('<path d="' + d + '" stroke="' + t.halo + '" stroke-width="' +
-          (t.w + 6) + '" stroke-linecap="round"></path>');
+          (t.w + 8) + '" stroke-linecap="round"></path>');
       }
       parts.push('<path' + dim + ' d="' + d + '" stroke="' + t.c + '" stroke-width="' +
-        (selected || inFocus ? t.w + 1 : t.w) + '" marker-end="url(#' + t.m + ')"' +
+        (selected || inFocus ? t.w + 1.4 : t.w) + '" marker-end="url(#' + t.m + ')"' +
         (selected ? ' stroke-dasharray="7 4"' : '') + '></path>');
 
-      /* The travelling dashes, on the focused arrows only. */
-      if (inFocus && !selected) {
+      /* The travelling dashes, on hover only — holding a selection should not
+         leave the canvas moving while somebody is reading or typing. */
+      if (inFocus && !selected && focus.hovering) {
         parts.push('<path class="wm-flow" d="' + d + '" stroke-width="' +
-          (t.w - 0.4).toFixed(1) + '"></path>');
+          (t.w + 0.6).toFixed(1) + '"></path>');
       }
 
       /* Labels only where the wording is the point — the statements and the
@@ -1301,6 +1337,20 @@
       window.NL.toast('Arrow deleted', 'success');
     });
     rt = null;
+  }
+
+  /* One row for an arrow in either direction: the name is the button that
+     selects it, the × removes it. */
+  function arrowRow(e, other, dir) {
+    return '<div class="wm-btnrow">' +
+      '<button type="button" class="wm-btnrow__t" data-pick="' + esc(eKey(e)) + '">' +
+        '<span class="wm-row__d wm-row__d--' + esc(other.kind) + '"></span>' +
+        '<span>' + (dir === 'from' ? '&larr; ' : '') + esc(other.label) +
+          (e.label ? ' <em>' + esc(e.label) + '</em>' : '') + '</span>' +
+      '</button>' +
+      '<button type="button" class="wm-mini wm-mini--x" data-drop="' + esc(eKey(e)) + '"' +
+        ' title="Remove this arrow" aria-label="Remove this arrow">&times;</button>' +
+      '</div>';
   }
 
   function sideNode() {
@@ -1458,22 +1508,32 @@
       /* Where it goes sits above the words. Structure is what these two are
          here to argue about; the copy is long, and scrolling past it to find
          the connections buried the point. */
+      /* Both directions, both clickable. Arrows out of a block are not drawn on
+         the canvas until something is focused, so before this the only way to
+         reach one was to catch it mid-hover — and an arrow pointing IN could not
+         be reached at all. Selecting the box now holds its arrows on the canvas
+         AND lists every one of them here. */
       '<div class="wm-f">' +
         '<label>Goes to</label>' +
-        '<div class="wm-out" id="outs">' + (outs.length ? outs.map(function (e) {
-          return '<button class="wm-out__x" type="button" data-drop="' + esc(eKey(e)) + '">' +
-            '<b>' + esc(byId(e.to).label) + '</b> &times;</button>';
-        }).join('') : '<span class="wm-hint">Nowhere yet. Drag from the circle on the box.</span>') +
-        '</div>' +
+        (outs.length
+          ? '<div class="wm-btns">' + outs.map(function (e) {
+              return arrowRow(e, byId(e.to), 'to');
+            }).join('') + '</div>'
+          : '<p class="wm-hint">Nowhere yet. Drag from the circle on the box.</p>') +
       '</div>' +
 
       '<div class="wm-f">' +
         '<label>Arrives from</label>' +
-        '<div class="wm-out">' + (inn.length ? inn.map(function (e) {
-          return '<span class="wm-out__x" style="cursor:default"><b>' +
-            esc(byId(e.from).label) + '</b></span>';
-        }).join('') : '<span class="wm-hint">Nothing points here</span>') + '</div>' +
+        (inn.length
+          ? '<div class="wm-btns">' + inn.map(function (e) {
+              return arrowRow(e, byId(e.from), 'from');
+            }).join('') + '</div>'
+          : '<p class="wm-hint">Nothing points here</p>') +
       '</div>' +
+
+      '<p class="wm-hint" style="margin-top:-6px">Click one to change its wording, ' +
+        '&times; to remove it. They stay drawn on the canvas while this box is ' +
+        'selected.</p>' +
 
       '<div class="wm-f">' +
         '<label>Shared blocks on this page</label>' +
@@ -1522,11 +1582,17 @@
         n[bits[1]] = this.checked; renderNodes(); save();
       });
     });
+    Array.prototype.forEach.call(el.side.querySelectorAll('[data-pick]'), function (b) {
+      b.addEventListener('click', function () {
+        select({ type: 'edge', id: b.getAttribute('data-pick') });
+      });
+    });
     Array.prototype.forEach.call(el.side.querySelectorAll('[data-drop]'), function (b) {
       b.addEventListener('click', function () {
         var k = b.getAttribute('data-drop');
         S.edges = S.edges.filter(function (x) { return eKey(x) !== k; });
         render(); save();
+        window.NL.toast('Arrow removed', 'success');
       });
     });
     document.getElementById('nBlock').addEventListener('change', function () {
@@ -2126,6 +2192,9 @@
         '<li><b>Hover over a box</b> and everything it does not touch fades. What it ' +
         'points at, and what points at it, light up — and the arrows pulse in the ' +
         'direction they lead, so you can see which way round a route goes.</li>' +
+        '<li><b>Click a box</b> and its arrows stay drawn, including the ones a block ' +
+        'normally keeps to itself. The panel lists every arrow in and out: click one to ' +
+        'change its wording, &times; to remove it.</li>' +
         '<li><b>Two pages pointing at each other</b> are drawn as two lines side by ' +
         'side, pulsing opposite ways. That is how you spot a route that goes both ' +
         'ways rather than one that only looks like it.</li>' +
