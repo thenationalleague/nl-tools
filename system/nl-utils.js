@@ -1,9 +1,21 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.25 (24/07/2026)
+   Version: v1.26 (30/07/2026)
 
    Changelog
+   v1.26 (30/07/2026)
+     - NL.csvParse(text, {header}) — the symmetric half of NL.csv, which
+       has only ever gone rows -> string. Full RFC-4180 state machine, so
+       it handles the cases a split(',') cannot: quoted cells containing
+       commas, escaped "" quotes, and CRLF or bare-LF inside a quoted
+       cell. Strips a UTF-8 BOM (Excel writes one, and it would otherwise
+       corrupt the first header name). Returns rows as arrays, or with
+       {header:true} an array of objects keyed by a trimmed header row.
+       Added for the fixtures cup-fixture importer; any tool taking a
+       spreadsheet upload wants this rather than its own split.
+       Cache-bust ?v=27 -> ?v=28 in lockstep.
+
    v1.25 (24/07/2026)
      - NL.sanitiseHtml now normalises block structure at the top level:
        loose inline runs are wrapped in <p>, and double-<br> sequences
@@ -490,6 +502,58 @@
       return (r || []).map(cell).join(',');
     }).join('\r\n');
     return (opts.bom ? '\ufeff' : '') + body;
+  };
+
+  /* Parse a CSV string into rows \u2014 the reverse of NL.csv. Full RFC-4180,
+     because the cases a split(',') gets wrong are the ones real
+     spreadsheets produce: a quoted cell containing a comma, "" as an
+     escaped quote, and CRLF or bare LF *inside* a quoted cell.
+
+     Leading UTF-8 BOM is stripped (Excel writes one, and it would
+     otherwise end up glued to the first header name). A trailing newline
+     produces no phantom row. Rows are NOT padded to equal length \u2014
+     callers that care should check.
+
+       NL.csvParse('a,b\r\n1,"x,y"')            \u2192 [['a','b'], ['1','x,y']]
+       NL.csvParse(txt, {header:true})           \u2192 [{a:'1', b:'x,y'}]
+
+     With {header:true} the first row becomes keys (trimmed); duplicate
+     header names keep the last column, and a row longer than the header
+     drops the surplus. */
+  window.NL.csvParse = function(text, opts) {
+    opts = opts || {};
+    var src = String(text == null ? '' : text);
+    if (src.charCodeAt(0) === 0xfeff) src = src.slice(1);
+
+    var rows = [], row = [], cell = '', inQuotes = false, i = 0;
+    while (i < src.length) {
+      var ch = src[i];
+      if (inQuotes) {
+        if (ch === '"') {
+          if (src[i + 1] === '"') { cell += '"'; i += 2; continue; }
+          inQuotes = false; i++; continue;
+        }
+        cell += ch; i++; continue;
+      }
+      if (ch === '"') { inQuotes = true; i++; continue; }
+      if (ch === ',') { row.push(cell); cell = ''; i++; continue; }
+      if (ch === '\r' || ch === '\n') {
+        if (ch === '\r' && src[i + 1] === '\n') i++;
+        row.push(cell); rows.push(row); row = []; cell = ''; i++; continue;
+      }
+      cell += ch; i++;
+    }
+    /* Flush the final cell unless the input ended on a clean row break. */
+    if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+
+    if (!opts.header) return rows;
+    if (!rows.length) return [];
+    var keys = rows[0].map(function (k) { return String(k || '').trim(); });
+    return rows.slice(1).map(function (r) {
+      var o = {};
+      for (var k = 0; k < keys.length; k++) o[keys[k]] = r[k] != null ? r[k] : '';
+      return o;
+    });
   };
 
   /* ── Modal / confirm / prompt / alert ────────────────────────────────── */
