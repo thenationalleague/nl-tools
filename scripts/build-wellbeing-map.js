@@ -73,15 +73,26 @@ const ZONES = [
     hint: 'Emergency numbers and the safeguarding leads. On every page. Locked.' }
 ];
 
-/* Node kinds drive colour on the canvas. Urgent routes are meant to look
-   urgent — that is half the reason for drawing this at all. */
+/* Node kind is the ONE thing colour encodes on the canvas, and it is a rung on
+   the same ladder the live site already shows a visitor: red (not safe now),
+   amber (needs to talk today), yellow (not feeling like myself), blue (worried
+   about someone else). Two structural kinds sit outside the ladder — the way
+   in, and services — and they are deliberately neutral.
+
+   Earlier this mixed urgency and category in one palette, so blue meant
+   "guide" while red meant "urgent" and the colours could not be read as a
+   scale. They can now.
+
+   These are starting positions, not clinical judgements: every page's rung is
+   editable in the tool, and re-rating them is exactly the argument the tool
+   exists to host. */
 const KIND = {
   'wb-menu':            'wayin',
-  'need-help':          'triage',
+  'need-help':          'wayin',
   'crisis':             'crisis',
   'urgent-support':     'urgent',
-  'understanding':      'guide',
-  'helping-a-teammate': 'guide',
+  'understanding':      'everyday',
+  'helping-a-teammate': 'other',
   'support-directory':  'services'
 };
 
@@ -301,7 +312,7 @@ function build() {
     push({
       id: sec.id,
       zone: ZONE_OF[sec.id] || 'flow',
-      kind: KIND[sec.id] || (topicIds.indexOf(sec.id) > -1 ? 'topic' : 'guide'),
+      kind: KIND[sec.id] || (topicIds.indexOf(sec.id) > -1 ? 'everyday' : 'everyday'),
       locked: false,
       title: sec.title,
       label: LABEL[sec.id] || sec.title,

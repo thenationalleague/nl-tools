@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Wellbeing map
-  Version: v1.0 (30/07/2026)
+  Version: v1.1 (30/07/2026)
   File: /wellbeing-map/index.html
 
   An editable map of the public Wellbeing section: every page as a box, every
@@ -41,6 +41,15 @@
   native confirm(). No colour here is a raw hex value.
 
   CHANGELOG
+  v1.1 (30/07/2026) — Colour now encodes one thing: urgency, on the same
+    red/amber/yellow/blue ladder the live site shows a visitor. It previously
+    mixed urgency with category, so the palette could not be read as a scale.
+    Shared blocks list their own buttons instead of firing arrows at every
+    destination — twelve topic arrows was the tangled web this was meant to
+    replace — and those arrows are drawn only while the block, a row, or a
+    destination is under the pointer. Hovering any box now mutes everything it
+    does not touch. In the panel, "Goes to" and "Arrives from" moved above the
+    copy. Fit fits both dimensions rather than just the width.
   v1.0 (30/07/2026) — Initial build. Five zones on one canvas, drag with grid
     snap, right-click to add and delete, port-to-port arrows, per-node copy
     editor, tidy, export/import, reset to seed, and an explainer behind (i).
@@ -195,15 +204,54 @@
   .wm-chip--words { background: var(--green-light); color: var(--green); }
   .wm-chip--empty { background: var(--amber-light); color: var(--amber-deep); }
 
+  /* One ladder, one meaning. These are the same four colours the live site
+     already shows a visitor on its statements, in the same order, plus two
+     deliberately neutral structural kinds. --wm-yellow is a local token for
+     the same reason /wellbeing/ declares one: canon has no yellow between
+     --amber and --green. Fair canon candidate. */
+  :root { --wm-yellow: #efb700; }
+
   .wm-node--crisis   { border-color: var(--red); }
   .wm-node--urgent   { border-color: var(--amber); }
-  .wm-node--triage   { border-color: var(--red-deep); }
+  .wm-node--everyday { border-color: var(--wm-yellow); }
+  .wm-node--other    { border-color: var(--blue); }
   .wm-node--wayin    { border-color: var(--navy); }
-  .wm-node--topic    { border-color: var(--navy-300); }
-  .wm-node--guide    { border-color: var(--blue); }
-  .wm-node--services { border-color: var(--purple); }
+  .wm-node--services { border-color: var(--navy-300); }
   .wm-node--shared   { border-color: var(--navy-400); background: var(--navy-50); cursor: default; }
   .wm-node--shared.is-drag { cursor: default; }
+
+  /* A shared block lists its own buttons instead of firing arrows across the
+     canvas at each destination. Twelve topic arrows WAS the tangled web — the
+     block is the honest picture, because on the real site it is one component
+     with a list of buttons in it. Hover the block, or a row, to see where it
+     reaches. */
+  .wm-node--block { padding-bottom: 8px; }
+  .wm-rows { margin-top: 7px; border-top: 1px solid var(--navy-200); }
+  .wm-rows--two { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; }
+  .wm-node__note { margin: 7px 0 0; font-size: 11px; color: var(--text-muted); line-height: 1.3; }
+  .wm-row {
+    display: flex; align-items: center; gap: 6px;
+    padding: 3px 2px; border-bottom: 1px solid var(--navy-100);
+    font-size: 11px; line-height: 1.25; cursor: pointer;
+  }
+  .wm-row:last-child { border-bottom: 0; }
+  .wm-row:hover { background: var(--navy-100); }
+  .wm-row.is-sel { background: var(--navy-200); }
+  .wm-row__d { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--navy-300); }
+  .wm-row__d--crisis   { background: var(--red); }
+  .wm-row__d--urgent   { background: var(--amber); }
+  .wm-row__d--everyday { background: var(--wm-yellow); }
+  .wm-row__d--other    { background: var(--blue); }
+  .wm-row__d--wayin    { background: var(--navy); }
+  .wm-row__t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wm-row__g { margin-left: auto; color: var(--text-muted); font-weight: 700; }
+
+  /* Hovering a box mutes everything it does not touch. Reading a diagram is
+     mostly asking "what does THIS connect to", and dimming answers that
+     faster than any amount of arrow-tracing. */
+  .wm-node.is-dim { opacity: 0.28; }
+  .wm-node.is-lit { box-shadow: 0 0 0 4px var(--navy-100), 0 2px 10px var(--navy-200); }
+  .wm-edges .is-dim { opacity: 0.12; }
 
   /* The port: press it and drag to another box to draw an arrow. */
   .wm-port {
@@ -392,34 +440,50 @@
 
   /* ── Geometry ─────────────────────────────────────────────────────────── */
   var NODE_W = 180, NODE_H = 72;
+  var BLOCK_W = 256, BLOCK_W2 = 310, ROW_H = 18;  /* shared blocks list their buttons */
   var GAP_X = 22, GAP_Y = 20;
-  var X0 = 36, BAND_TOP = 40, BAND_BOT = 16, BAND_GAP = 16;
+  var X0 = 36, BAND_TOP = 34, BAND_BOT = 12, BAND_GAP = 12;
   var PER_ROW = 6, GRID = 20;
   var CANVAS_W = X0 + PER_ROW * (NODE_W + GAP_X);
 
   var STORE = 'nl-wellbeing-map-v1';
   var SEEN = 'nl-wellbeing-map-seen';
-  var ZOOMS = [0.5, 0.6, 0.75, 0.9, 1];
+  var ZOOMS = [0.5, 0.6, 0.7, 0.8, 0.9, 1];
 
   /* Boxes are laid out grouped by kind, in this order, so the urgent routes
-     always end up at the top-left of their band. */
-  var KIND_ORDER = ['shared', 'wayin', 'triage', 'crisis', 'urgent', 'guide', 'topic', 'services'];
+     always end up at the top-left of their band.
+
+     Kind is the only thing colour encodes, and it reads as a ladder: not safe
+     now, urgent today, everyday support, about someone else. Way in and
+     services sit outside the ladder and are neutral on purpose. */
+  var KIND_ORDER = ['shared', 'wayin', 'crisis', 'urgent', 'everyday', 'other', 'services'];
   var KIND_LABEL = {
     shared:   'Shared block',
     wayin:    'Way in',
-    triage:   'Threat-to-life question',
-    crisis:   'Crisis',
-    urgent:   'Urgent',
-    guide:    'Guide',
-    topic:    'Topic',
+    crisis:   'Not safe now',
+    urgent:   'Urgent today',
+    everyday: 'Everyday support',
+    other:    'About someone else',
     services: 'Services'
   };
+  var KIND_OPTION = {
+    wayin:    'Way in — navy',
+    crisis:   'Not safe now — red',
+    urgent:   'Urgent today — amber',
+    everyday: 'Everyday support — yellow',
+    other:    'About someone else — blue',
+    services: 'Services — grey'
+  };
+  /* Legacy kinds from a map exported before the colours were put on one
+     ladder. Without this an old file loses its colours silently. */
+  var KIND_ALIAS = { topic: 'everyday', guide: 'everyday', triage: 'wayin' };
 
   /* ── State ────────────────────────────────────────────────────────────── */
   var S = { zones: [], nodes: [], edges: [], sel: null };
   var seed = null;
   var zoom = 1;
   var canvasH = 600;
+  var hoverId = null;         /* box under the pointer — drives the dimming */
   var rt = null;              /* the NL.richText controller, mounted once */
   var saveTimer = null;
 
@@ -443,6 +507,23 @@
   };
   var eKey = function (e) { return e.from + '>' + e.to; };
   var snap = function (n) { return Math.round(n / GRID) * GRID; };
+  var out = function (id) {
+    return S.edges.filter(function (e) { return e.from === id; });
+  };
+
+  /* Shared blocks are wider and as tall as their list of buttons, so every
+     bit of geometry has to ask rather than assume.
+
+     Past six buttons the list goes to two columns. That halves the height of
+     the topics block — and it is the more faithful picture anyway, because the
+     thing it stands for is a grid of cards on the real page, not a list. */
+  function colsOf(n) { return n.locked && out(n.id).length > 6 ? 2 : 1; }
+  function wOf(n) { return n.locked ? (colsOf(n) === 2 ? BLOCK_W2 : BLOCK_W) : NODE_W; }
+  function hOf(n) {
+    if (!n.locked) return NODE_H;
+    var rows = Math.ceil(Math.max(out(n.id).length, 1) / colsOf(n));
+    return 52 + rows * ROW_H + 8;
+  }
 
   /* ── Persistence ──────────────────────────────────────────────────────── */
   function stamp(text) { el.status.innerHTML = text; }
@@ -547,15 +628,19 @@
     S.zones.forEach(function (z) {
       var rows = rowsFor(S.nodes.filter(function (n) { return n.zone === z.id; }));
 
-      rows.forEach(function (row, ri) {
-        row.forEach(function (n, ci) {
-          n.x = X0 + ci * (NODE_W + GAP_X);
-          n.y = y + BAND_TOP + ri * (NODE_H + GAP_Y);
+      var rowY = y + BAND_TOP;
+      rows.forEach(function (row) {
+        var x = X0, tallest = 0;
+        row.forEach(function (n) {
+          n.x = x; n.y = rowY;
+          x += wOf(n) + GAP_X;
+          tallest = Math.max(tallest, hOf(n));
         });
+        rowY += tallest + GAP_Y;
       });
 
       z._top = y;
-      z._h = BAND_TOP + Math.max(rows.length, 1) * (NODE_H + GAP_Y) - GAP_Y + BAND_BOT;
+      z._h = Math.max(rowY - GAP_Y, y + BAND_TOP + NODE_H) - y + BAND_BOT;
       y += z._h + BAND_GAP;
     });
     canvasH = y + 14;
@@ -568,7 +653,7 @@
     S.zones.forEach(function (z) {
       var mine = S.nodes.filter(function (n) { return n.zone === z.id; });
       var top = mine.length ? Math.min.apply(null, mine.map(function (n) { return n.y; })) : y + BAND_TOP;
-      var bot = mine.length ? Math.max.apply(null, mine.map(function (n) { return n.y + NODE_H; })) : top;
+      var bot = mine.length ? Math.max.apply(null, mine.map(function (n) { return n.y + hOf(n); })) : top;
       z._top = Math.min(z._top == null ? top - BAND_TOP : z._top, top - BAND_TOP);
       z._h = Math.max(z._h || 0, bot - z._top + BAND_BOT);
       y = z._top + z._h + BAND_GAP;
@@ -615,25 +700,70 @@
     }).join('');
   }
 
+  /* Which boxes and arrows the current hover or selection touches. Everything
+     else gets dimmed. */
+  function focusSet() {
+    var id = hoverId || (S.sel && S.sel.type === 'node' ? S.sel.id : null);
+    if (!id) return null;
+    var nodes = {}, edges = {};
+    nodes[id] = 'self';
+    S.edges.forEach(function (e) {
+      if (e.from === id) { edges[eKey(e)] = 1; nodes[e.to] = nodes[e.to] || 'to'; }
+      if (e.to === id) { edges[eKey(e)] = 1; nodes[e.from] = nodes[e.from] || 'from'; }
+    });
+    return { id: id, nodes: nodes, edges: edges };
+  }
+
   function renderNodes() {
+    var focus = focusSet();
+
     el.nodes.innerHTML = S.nodes.map(function (n) {
       var selected = S.sel && S.sel.type === 'node' && S.sel.id === n.id;
       var words = textLen(n.body);
-      return '<div class="wm-node wm-node--' + esc(n.kind) + (selected ? ' is-sel' : '') + '"' +
-        ' data-id="' + esc(n.id) + '" tabindex="0" role="button"' +
-        ' aria-label="' + esc(n.label) + ', ' + esc(KIND_LABEL[n.kind] || n.kind) + '"' +
-        ' style="left:' + n.x + 'px;top:' + n.y + 'px">' +
+      var state = '';
+      if (focus) state = focus.nodes[n.id] ? (focus.nodes[n.id] === 'self' ? '' : ' is-lit') : ' is-dim';
+
+      var body;
+      if (n.locked) {
+        /* A block lists its buttons. Each row is the arrow, so it is clickable
+           and deletable exactly like an arrow on the canvas. */
+        var rows = out(n.id);
+        body =
+          '<div class="wm-node__n">' + esc(n.label) + '</div>' +
+          '<div class="wm-node__k">On every page · ' + rows.length +
+            (rows.length === 1 ? ' button' : ' buttons') + '</div>' +
+          '<div class="wm-rows' + (colsOf(n) === 2 ? ' wm-rows--two' : '') + '">' +
+          (rows.length ? rows.map(function (e) {
+            var to = byId(e.to);
+            var rSel = S.sel && S.sel.type === 'edge' && S.sel.id === eKey(e);
+            return '<div class="wm-row' + (rSel ? ' is-sel' : '') + '" data-row="' +
+              esc(eKey(e)) + '" title="' + esc((e.label || to.label) + ' → ' + to.label) + '">' +
+              '<span class="wm-row__d wm-row__d--' + esc(to.kind) + '"></span>' +
+              '<span class="wm-row__t">' + esc(e.label || to.label) + '</span>' +
+              '<span class="wm-row__g">&rarr;</span>' +
+              '</div>';
+          }).join('') : '<p class="wm-node__note">Nothing links out of this block</p>') +
+          '</div>';
+      } else {
+        body =
           '<div class="wm-node__n">' + esc(n.label) + '</div>' +
           '<div class="wm-node__k">' + esc(KIND_LABEL[n.kind] || n.kind) + '</div>' +
           '<div class="wm-node__f">' +
-            (n.locked
-              ? '<span class="wm-chip">Locked</span>'
-              : '<span class="wm-chip ' + (words ? 'wm-chip--words' : 'wm-chip--empty') + '">' +
-                  (words ? words + ' words' : 'No words yet') + '</span>' +
-                (n.showsTopics ? '<span class="wm-chip">Topics</span>' : '')) +
+            '<span class="wm-chip ' + (words ? 'wm-chip--words' : 'wm-chip--empty') + '">' +
+              (words ? words + ' words' : 'No words yet') + '</span>' +
+            (n.showsTopics ? '<span class="wm-chip">Topics</span>' : '') +
           '</div>' +
-          (n.locked ? '' : '<span class="wm-port" data-port="' + esc(n.id) + '" title="Drag to another box to draw an arrow">&#8599;</span>') +
-        '</div>';
+          '<span class="wm-port" data-port="' + esc(n.id) +
+            '" title="Drag to another box to draw an arrow">&#8599;</span>';
+      }
+
+      return '<div class="wm-node wm-node--' + esc(n.kind) + (n.locked ? ' wm-node--block' : '') +
+        (selected ? ' is-sel' : '') + state + '"' +
+        ' data-id="' + esc(n.id) + '" tabindex="0" role="button"' +
+        ' aria-label="' + esc(n.label) + ', ' + esc(KIND_LABEL[n.kind] || n.kind) + '"' +
+        ' style="left:' + n.x + 'px;top:' + n.y + 'px;width:' + wOf(n) + 'px' +
+        (n.locked ? '' : ';min-height:' + NODE_H + 'px') + '">' +
+        body + '</div>';
     }).join('');
   }
 
@@ -645,17 +775,18 @@
   }
 
   function anchors(a, b) {
-    var acx = a.x + NODE_W / 2, acy = a.y + NODE_H / 2;
-    var bcx = b.x + NODE_W / 2, bcy = b.y + NODE_H / 2;
+    var aw = wOf(a), ah = hOf(a), bw = wOf(b), bh = hOf(b);
+    var acx = a.x + aw / 2, acy = a.y + ah / 2;
+    var bcx = b.x + bw / 2, bcy = b.y + bh / 2;
     var dx = bcx - acx, dy = bcy - acy;
     if (Math.abs(dy) >= Math.abs(dx)) {
       return dy > 0
-        ? { x1: acx, y1: a.y + NODE_H, x2: bcx, y2: b.y, v: true }
-        : { x1: acx, y1: a.y, x2: bcx, y2: b.y + NODE_H, v: true };
+        ? { x1: acx, y1: a.y + ah, x2: bcx, y2: b.y, v: true }
+        : { x1: acx, y1: a.y, x2: bcx, y2: b.y + bh, v: true };
     }
     return dx > 0
-      ? { x1: a.x + NODE_W, y1: acy, x2: b.x, y2: bcy, v: false }
-      : { x1: a.x, y1: acy, x2: b.x + NODE_W, y2: bcy, v: false };
+      ? { x1: a.x + aw, y1: acy, x2: b.x, y2: bcy, v: false }
+      : { x1: a.x, y1: acy, x2: b.x + bw, y2: bcy, v: false };
   }
 
   /* Control points for the arrow, kept as data so a label can be positioned
@@ -689,10 +820,16 @@
      you look at this map is whether a route ends somewhere urgent. */
   function edgeTone(e) {
     var to = byId(e.to);
-    if (to && to.kind === 'crisis') return { c: 'var(--red)', w: 2.6, m: 'aRed' };
-    if (to && to.kind === 'urgent') return { c: 'var(--amber)', w: 2.4, m: 'aAmber' };
-    if (e.kind === 'topic' || e.kind === 'shared') return { c: 'var(--navy-300)', w: 1.5, m: 'aGrey' };
-    return { c: 'var(--navy-600)', w: 2, m: 'aNavy' };
+    if (to && to.kind === 'crisis') {
+      return { c: 'var(--red)', halo: 'var(--red-light)', w: 2.6, m: 'aRed' };
+    }
+    if (to && to.kind === 'urgent') {
+      return { c: 'var(--amber)', halo: 'var(--amber-light)', w: 2.4, m: 'aAmber' };
+    }
+    if (e.kind === 'topic' || e.kind === 'shared') {
+      return { c: 'var(--navy-300)', halo: 'var(--navy-100)', w: 1.5, m: 'aGrey' };
+    }
+    return { c: 'var(--navy-600)', halo: 'var(--navy-100)', w: 2, m: 'aNavy' };
   }
 
   function marker(id, colour) {
@@ -710,16 +847,33 @@
     var parts = [];
     var labels = [];
     var fanned = {};   /* how many labelled arrows already leave this box */
+    var focus = focusSet();
 
     S.edges.forEach(function (e) {
       var a = byId(e.from), b = byId(e.to);
       if (!a || !b) return;
-      var p = anchors(a, b), d = curve(p), t = edgeTone(e);
       var selected = S.sel && S.sel.type === 'edge' && S.sel.id === eKey(e);
+      var inFocus = focus && focus.edges[eKey(e)];
+
+      /* An arrow out of a shared block is not drawn. Twelve of them fanning
+         out of the topics widget was the hairball. The block lists them
+         instead, and they are drawn only while that block — or the row, or the
+         destination — is under the pointer. Ask, and you see them. */
+      if (a.locked && !inFocus && !selected) return;
+
+      var p = anchors(a, b), d = curve(p), t = edgeTone(e);
+      var dim = focus && !inFocus ? ' class="is-dim"' : '';
 
       parts.push('<path class="wm-hit" d="' + d + '" data-edge="' + esc(eKey(e)) + '"></path>');
-      parts.push('<path d="' + d + '" stroke="' + t.c + '" stroke-width="' +
-        (selected ? t.w + 2 : t.w) + '" marker-end="url(#' + t.m + ')"' +
+      /* Connected arrows get a soft under-stroke rather than an rgba glow —
+         the brand has no overlay tokens, so the light end of the ladder does
+         the job. */
+      if (inFocus || selected) {
+        parts.push('<path d="' + d + '" stroke="' + t.halo + '" stroke-width="' +
+          (t.w + 6) + '" stroke-linecap="round"></path>');
+      }
+      parts.push('<path' + dim + ' d="' + d + '" stroke="' + t.c + '" stroke-width="' +
+        (selected || inFocus ? t.w + 1 : t.w) + '" marker-end="url(#' + t.m + ')"' +
         (selected ? ' stroke-dasharray="7 4"' : '') + '></path>');
 
       /* Labels only where the wording is the point — the statements and the
@@ -730,7 +884,10 @@
          the same place, so each one is pushed further along its own curve than
          the last. That fans them out down the bundle instead of stacking them.
          Labels are collected and drawn last so no arrow can cross one. */
-      var show = e.kind === 'statement' || e.kind === 'answer' || selected;
+      /* No label on an arrow out of a block unless it is the selected one: the
+         row already names the destination, and so does the box it lands on, so
+         a label there is the same words three times. */
+      var show = selected || e.kind === 'answer' || (inFocus && !a.locked);
       if (show && e.label) {
         var i = fanned[e.from] || 0;
         fanned[e.from] = i + 1;
@@ -801,7 +958,7 @@
     var n = byId(S.sel.id);
     if (!n) { S.sel = null; return sideEmpty(); }
 
-    var out = S.edges.filter(function (e) { return e.from === n.id; });
+    var outs = out(n.id);
     var inn = S.edges.filter(function (e) { return e.to === n.id; });
 
     if (n.locked) {
@@ -811,7 +968,7 @@
         '<div class="wm-locked">' + n.body + '</div>' +
         '<div class="wm-f" style="margin-top:14px">' +
           '<label>Goes to</label>' +
-          '<div class="wm-out">' + (out.length ? out.map(function (e) {
+          '<div class="wm-out">' + (outs.length ? outs.map(function (e) {
             return '<span class="wm-out__x" style="cursor:default"><b>' +
               esc(byId(e.to).label) + '</b></span>';
           }).join('') : '<span class="wm-hint">Nowhere</span>') + '</div>' +
@@ -845,11 +1002,11 @@
       '</div>' +
 
       '<div class="wm-f">' +
-        '<label for="nKind">What kind of page</label>' +
+        '<label for="nKind">How urgent is this page</label>' +
         '<select id="nKind">' + KIND_ORDER.filter(function (k) { return k !== 'shared'; })
           .map(function (k) {
             return '<option value="' + k + '"' + (n.kind === k ? ' selected' : '') + '>' +
-              esc(KIND_LABEL[k]) + '</option>';
+              esc(KIND_OPTION[k] || KIND_LABEL[k]) + '</option>';
           }).join('') + '</select>' +
       '</div>' +
 
@@ -859,6 +1016,26 @@
           return '<option value="' + esc(z.id) + '"' + (n.zone === z.id ? ' selected' : '') + '>' +
             esc(z.label) + '</option>';
         }).join('') + '</select>' +
+      '</div>' +
+
+      /* Where it goes sits above the words. Structure is what these two are
+         here to argue about; the copy is long, and scrolling past it to find
+         the connections buried the point. */
+      '<div class="wm-f">' +
+        '<label>Goes to</label>' +
+        '<div class="wm-out" id="outs">' + (outs.length ? outs.map(function (e) {
+          return '<button class="wm-out__x" type="button" data-drop="' + esc(eKey(e)) + '">' +
+            '<b>' + esc(byId(e.to).label) + '</b> &times;</button>';
+        }).join('') : '<span class="wm-hint">Nowhere yet. Drag from the circle on the box.</span>') +
+        '</div>' +
+      '</div>' +
+
+      '<div class="wm-f">' +
+        '<label>Arrives from</label>' +
+        '<div class="wm-out">' + (inn.length ? inn.map(function (e) {
+          return '<span class="wm-out__x" style="cursor:default"><b>' +
+            esc(byId(e.from).label) + '</b></span>';
+        }).join('') : '<span class="wm-hint">Nothing points here</span>') + '</div>' +
       '</div>' +
 
       '<div class="wm-f">' +
@@ -874,23 +1051,6 @@
       '<div class="wm-f">' +
         '<label>The words on this page</label>' +
         '<div id="rtMount"></div>' +
-      '</div>' +
-
-      '<div class="wm-f">' +
-        '<label>Goes to</label>' +
-        '<div class="wm-out" id="outs">' + (out.length ? out.map(function (e) {
-          return '<button class="wm-out__x" type="button" data-drop="' + esc(eKey(e)) + '">' +
-            '<b>' + esc(byId(e.to).label) + '</b> &times;</button>';
-        }).join('') : '<span class="wm-hint">Nowhere yet. Drag from the circle on the box.</span>') +
-        '</div>' +
-      '</div>' +
-
-      '<div class="wm-f">' +
-        '<label>Arrives from</label>' +
-        '<div class="wm-out">' + (inn.length ? inn.map(function (e) {
-          return '<span class="wm-out__x" style="cursor:default"><b>' +
-            esc(byId(e.from).label) + '</b></span>';
-        }).join('') : '<span class="wm-hint">Nothing points here</span>') + '</div>' +
       '</div>' +
 
       '<button class="wm-danger" id="nDel" type="button">Delete this page</button>';
@@ -1032,6 +1192,7 @@
     if (!n) return;
 
     closeCtx();
+    if (ev.target.closest('[data-row]')) return;   /* handled as an arrow click */
 
     if (port) {
       ev.preventDefault();
@@ -1083,7 +1244,7 @@
     var a = byId(d.from);
     if (!a) return;
     var ghost = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    ghost.setAttribute('d', 'M' + (a.x + NODE_W) + ' ' + (a.y + NODE_H) +
+    ghost.setAttribute('d', 'M' + (a.x + wOf(a)) + ' ' + (a.y + hOf(a)) +
       'L' + d.at.x + ' ' + d.at.y);
     ghost.setAttribute('stroke', 'var(--primary)');
     ghost.setAttribute('stroke-width', '2');
@@ -1126,6 +1287,32 @@
   el.edges.addEventListener('click', function (ev) {
     var hit = ev.target.getAttribute && ev.target.getAttribute('data-edge');
     if (hit) select({ type: 'edge', id: hit });
+  });
+
+  /* A row inside a shared block IS an arrow, so clicking it selects that
+     arrow — same panel, same delete button. */
+  el.nodes.addEventListener('click', function (ev) {
+    var row = ev.target.closest ? ev.target.closest('[data-row]') : null;
+    if (row) {
+      ev.stopPropagation();
+      select({ type: 'edge', id: row.getAttribute('data-row') });
+    }
+  });
+
+  /* Hover to answer "where does this go". Rows narrow it to one destination;
+     the block as a whole shows all of them at once. */
+  el.nodes.addEventListener('pointerover', function (ev) {
+    if (drag) return;
+    var box = ev.target.closest ? ev.target.closest('.wm-node') : null;
+    var id = box ? box.getAttribute('data-id') : null;
+    if (id !== hoverId) { hoverId = id; renderNodes(); renderEdges(); }
+  });
+
+  el.nodes.addEventListener('pointerout', function (ev) {
+    if (drag) return;
+    if (ev.relatedTarget && ev.relatedTarget.closest &&
+        ev.relatedTarget.closest('.wm-node')) return;
+    if (hoverId !== null) { hoverId = null; renderNodes(); renderEdges(); }
   });
 
   function select(sel) {
@@ -1232,9 +1419,12 @@
     window.NL.toast('Tidied up', 'success');
   }
 
+  /* Fit means the whole map is on screen, both ways. Fitting only the width
+     left the bottom band below the fold, which is the one thing "Fit" is
+     supposed to rule out. */
   function fit() {
-    var avail = el.wrap.clientWidth - 24;
-    var want = avail / CANVAS_W;
+    var want = Math.min((el.wrap.clientWidth - 24) / CANVAS_W,
+                        (el.wrap.clientHeight - 24) / canvasH);
     zoom = ZOOMS.reduce(function (best, z) {
       return z <= want && z > best ? z : best;
     }, ZOOMS[0]);
@@ -1351,13 +1541,29 @@
         '</ul>' +
 
         '<h3>Reading the colours</h3>' +
+        '<p>Colour means one thing only: <b>how urgent the page is</b>. It is the same ' +
+        'ladder a visitor already sees on the statements on the live site.</p>' +
         '<ul>' +
-        '<li><b>Red</b> is where somebody may not be safe. <b>Amber</b> is urgent but not ' +
-        'a threat to life. An arrow takes the colour of where it ends up, so a red arrow ' +
-        'means that route ends somewhere urgent.</li>' +
-        '<li><b>Grey locked boxes</b> are the header, the footer and the topic buttons. ' +
-        'They appear on every page, so they are drawn once instead of fifteen times. ' +
-        'That is why the diagram is readable.</li>' +
+        '<li><b>Red</b> — somebody may not be safe right now.</li>' +
+        '<li><b>Amber</b> — urgent, needs to talk today, but not a threat to life.</li>' +
+        '<li><b>Yellow</b> — everyday support. Most topics start here.</li>' +
+        '<li><b>Blue</b> — about somebody else rather than yourself.</li>' +
+        '<li><b>Navy</b> is a way in and <b>grey</b> is a service directory. Neither is a ' +
+        'rung on the ladder.</li>' +
+        '</ul>' +
+        '<p>An arrow takes the colour of where it <i>ends up</i>, so a red arrow means that ' +
+        'route finishes somewhere urgent. If you disagree with a page’s colour, change ' +
+        'it — that is the argument this is for.</p>' +
+
+        '<h3>Following the arrows</h3>' +
+        '<ul>' +
+        '<li><b>Hover over a box</b> and everything it does not touch fades. What it ' +
+        'points at, and what points at it, light up.</li>' +
+        '<li><b>Grey blocks list their own buttons.</b> The header, the footer and the ' +
+        'topic buttons appear on every page, so instead of firing twelve arrows across ' +
+        'the diagram they list where each button goes. Hover the block to see all of them ' +
+        'at once, or hover one row for just that one. Click a row to reword or remove ' +
+        'that button.</li>' +
         '<li>Each page box says how many words it holds, so it is easy to see what is ' +
         'thin.</li>' +
         '</ul>' +
