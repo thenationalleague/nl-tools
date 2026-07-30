@@ -535,6 +535,7 @@ async function main() {
   const stem = `fixture-seed-${opts.season}-${opts.competition}`;
   const seedOut = path.join(opts.out, `${stem}.json`);
   const reportOut = path.join(opts.out, `${stem}.report.json`);
+  const csvOut = path.join(opts.out, `${stem}.csv`);
 
   fs.writeFileSync(seedOut, JSON.stringify({
     seasonID: String(opts.season),
@@ -567,6 +568,32 @@ async function main() {
     unresolvedSeedNames: result.unresolvedSeed
   }, null, 2));
 
+  /* ---- Opta ID extract (CSV, for marrying into a spreadsheet) ----
+     Deliberately carries the ORIGINAL seeded date, not the NLS one: the
+     seed is what gets imported, and any move since then is entered by
+     hand through the tool so the history entry is genuine rather than
+     inferred. currentDate/currentKickoff are reference columns only --
+     they exist to tell you WHICH fixtures need that manual step. */
+  const csvRows = [[
+    'matchID', 'division', 'home', 'away', 'lookupKey',
+    'seedDate', 'seedKickoff', 'changedSinceSeed', 'currentDate', 'currentKickoff'
+  ]];
+  for (const f of result.merged) {
+    csvRows.push([
+      f.matchID, f.division, f.homeTeam.name, f.awayTeam.name,
+      `${f.homeTeam.name} v ${f.awayTeam.name}`,
+      f.original.date || '', f.original.kickoff || '',
+      f.rescheduled ? 'YES' : '',
+      f.rescheduled ? (f.current.date || '') : '',
+      f.rescheduled ? (f.current.kickoff || '') : ''
+    ]);
+  }
+  const csvCell = v => {
+    const t = String(v == null ? '' : v);
+    return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+  };
+  fs.writeFileSync(csvOut, csvRows.map(r => r.map(csvCell).join(',')).join('\r\n') + '\r\n');
+
   /* ---- Console summary ---- */
   const c = result;
   console.error('');
@@ -586,6 +613,7 @@ async function main() {
   }
   console.error(`  seed   -> ${path.relative(process.cwd(), seedOut)}`);
   console.error(`  report -> ${path.relative(process.cwd(), reportOut)}`);
+  console.error(`  csv    -> ${path.relative(process.cwd(), csvOut)}`);
 
   if (opts.expect != null && c.merged.length !== opts.expect) {
     console.error(`\nFAIL: expected ${opts.expect} matched fixtures, got ${c.merged.length}`);
