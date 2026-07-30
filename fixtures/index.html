@@ -1,10 +1,15 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixtures
-  Version: v0.6 (30/07/2026)
+  Version: v0.7 (30/07/2026)
   File: /fixtures/index.html
 
   CHANGELOG
+    v0.7 (30/07/2026) — Competition is a mappable column, so the whole
+      programme goes in as one paste instead of one division at a time.
+      The dropdown stays as the fallback for a sheet with no such column
+      and disables itself when one is mapped. Removes the mis-selection
+      that filed 552 South fixtures as North.
     v0.6 (30/07/2026) — A result entered by mistake could not be taken
       off: Save refused unless BOTH boxes had a value, so clearing them
       did nothing, and the only ways out were Abandoned (a lie) or
@@ -103,6 +108,14 @@
     var NL_TOOL_KEY = 'ops-fixtures';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/07/2026',
+        version: 'v0.7',
+        items: [
+          'Import reads the competition from a column, so every division and cup can go in as a single paste. Common spellings are understood (NLS, National League South); anything it cannot read is named on screen and left out rather than filed in the wrong competition.',
+          'The competition dropdown is now only the fallback for a sheet that has no competition column, and says so.'
+        ]
+      },
       {
         date: '30/07/2026',
         version: 'v0.6',
@@ -1173,9 +1186,32 @@
     { key: 'ko',    label: 'Kick-off',  req: true },
     { key: 'home',  label: 'Home club', req: true },
     { key: 'away',  label: 'Away club', req: true },
+    /* Mapping a Competition column is what lets the whole programme go in as
+       one paste. Without it every import is one division at a time and the
+       competition is chosen from a dropdown — which is exactly how 552 South
+       fixtures got filed as North. */
+    { key: 'comp',  label: 'Competition', req: false },
     { key: 'round', label: 'Matchday / Round', req: false },
     { key: 'opta',  label: 'Opta ID',   req: false }
   ];
+
+  /* Sheet spellings the tool should accept for a competition, so a paste does
+     not fail on "NLS" or "National League South". Anything unrecognised is
+     reported per row rather than quietly filed somewhere wrong. */
+  var COMP_ALIAS = (function () {
+    var a = {};
+    COMPS.forEach(function (c) { a[c.toLowerCase()] = c; });
+    a['nl'] = a['national league'] = 'National';
+    a['nln'] = a['national league north'] = 'North';
+    a['nls'] = a['national league south'] = 'South';
+    a['nlc'] = a['national league cup'] = 'NL Cup';
+    a['fac'] = 'FA Cup';
+    a['fat'] = a['fa trophy'] = 'FA Trophy';
+    return a;
+  }());
+  function normComp(v) {
+    return COMP_ALIAS[String(v == null ? '' : v).trim().toLowerCase()] || null;
+  }
 
   /* Excel pastes are tab-separated; a saved file is CSV. Pick whichever the
      first line has more of, then hand CSV to the canon parser. */
@@ -1201,9 +1237,14 @@
        back unreadable because the date column was the matchday number. */
     var want = [
       ['opta',  /opta|match ?id/i],
+      ['comp',  /competition|division|^\s*comp\b/i],
       ['round', /matchday|round|stage|^\s*md\s*$/i],
-      ['ko',    /kick.?off|\btime\b|^\s*ko\s*$/i],
+      /* date BEFORE ko. A single "Date & Time" column matches both, and if ko
+         claims it first the column is consumed and Date maps to nothing —
+         which is exactly what a whole-programme paste looks like. Date wins
+         it, and the ko fallback below then shares the same column. */
       ['date',  /date/i],
+      ['ko',    /kick.?off|\btime\b|^\s*ko\s*$/i],
       ['home',  /home/i],
       ['away',  /away|opponent|visitor/i]
     ];
@@ -1215,6 +1256,9 @@
     var sample = rows[0] || [];
     if (m.date == null) {
       for (var i = 0; i < sample.length; i++) if (!used[i] && looksDate(sample[i])) { m.date = i; used[i] = 1; break; }
+      /* Mirror of the ko fallback: if the only date-bearing column was taken
+         by kick-off, the two share it rather than one going unmapped. */
+      if (m.date == null && m.ko != null && looksDate(sample[m.ko])) m.date = m.ko;
     }
     if (m.ko == null) {
       /* A combined "13/10/2026 19:45" cell should feed BOTH date and time. */
@@ -1265,10 +1309,10 @@
         '<p class="text-secondary" style="margin:0 0 12px;">' + IMP.rows.length +
         ' rows read. Point each field at the right column.</p>' +
         '<div class="fx-map">' +
-        '<div class="form-group"><label>Competition</label><select id="fxImpComp">' +
+        '<div class="form-group"><label>Competition if not in the sheet</label><select id="fxImpComp">' +
           COMPS.map(function (x) {
             return '<option' + (x === IMP.comp ? ' selected' : '') + '>' + x + '</option>';
-          }).join('') + '</select><div class="fx-map__sample">Applies to every row</div></div>' +
+          }).join('') + '</select><div class="fx-map__sample" id="fxImpCompNote"></div></div>' +
         FIELDS.map(function (f) {
           return '<div class="form-group"><label>' + esc(f.label) + (f.req ? ' *' : '') + '</label>' +
             '<select data-fxmap="' + f.key + '">' + opts(IMP.map[f.key]) + '</select>' +
@@ -1299,6 +1343,15 @@
         if (f.key === 'ko' && raw) { var g = grabTime(raw); shown = g ? g.t : raw; }
         el.textContent = shown ? 'e.g. ' + shown : '';
       });
+      /* The dropdown only does anything when no Competition column is mapped;
+         say so, rather than leaving two controls that appear to fight. */
+      var mapped = IMP.map.comp != null && IMP.map.comp !== '';
+      var cSel = ctrl.body.querySelector('#fxImpComp');
+      cSel.disabled = mapped;
+      ctrl.body.querySelector('#fxImpCompNote').textContent = mapped
+        ? 'Taken from ' + IMP.head[IMP.map.comp] + ' on each row'
+        : 'Applies to every row';
+
       /* One column feeding both date and kick-off is the split case. */
       var note = ctrl.body.querySelector('#fxImpNote');
       if (IMP.map.date != null && IMP.map.date !== '' && String(IMP.map.date) === String(IMP.map.ko)) {
@@ -1327,12 +1380,19 @@
          model, and it is already how attendance keys its submissions. Only
          a fixture with no Opta ID at creation gets a minted key. */
       var opta = g(r, 'opta').trim();
+      /* Per row when a Competition column is mapped, otherwise the one the
+         dropdown picked. A mapped value the tool does not recognise is left
+         null so the row fails visibly instead of landing in the wrong
+         competition. */
+      var rawComp = g(r, 'comp').trim();
+      var comp = rawComp ? normComp(rawComp) : IMP.comp;
       return {
         date: d, kickoff: tp ? tp.t : '15:00', guessedPm: !!(tp && tp.guessed),
         home: home, away: away, round: g(r, 'round'), opta: opta,
+        comp: comp, rawComp: rawComp,
         recordID: opta || null,
         exists: !!(opta && S.fixtures[opta]),
-        ok: !!(d && home && away),
+        ok: !!(d && home && away && comp),
         homeNL: !!NL.clubs.byName(home), awayNL: !!NL.clubs.byName(away)
       };
     });
@@ -1346,33 +1406,54 @@
     var guessed = good.filter(function (p) { return p.guessedPm; }).length;
     var dupes = good.filter(function (p) { return p.exists; }).length;
     var fresh = good.length - dupes;
+    /* A whole-programme paste spans six competitions, so the headline counts
+       per competition rather than naming one. */
+    var tally = {};
+    good.forEach(function (p) { tally[p.comp] = (tally[p.comp] || 0) + 1; });
+    var compList = COMPS.filter(function (c) { return tally[c]; })
+      .map(function (c) { return tally[c] + ' ' + c; }).join(' &middot; ');
+    /* Rows whose competition cell the tool could not read. Named explicitly:
+       "3 unreadable" tells you nothing about which word to fix. */
+    var badComp = {};
+    parsed.forEach(function (p) {
+      if (p.rawComp && !p.comp) badComp[p.rawComp] = (badComp[p.rawComp] || 0) + 1;
+    });
+    var badCompNames = Object.keys(badComp);
 
     NL.modal({
       title: 'Check', width: 'wide',
       body: '<div class="fx-steps"><span>1 Paste</span><span>2 Match columns</span><span class="is-on">3 Check</span></div>' +
-        '<p class="text-secondary" style="margin:0 0 10px;">' + fresh + ' to import as <strong>' +
-        esc(IMP.comp) + '</strong>' +
+        '<p class="text-secondary" style="margin:0 0 10px;">' + fresh + ' to import' +
+        (compList ? ' &middot; ' + compList : '') +
         (dupes ? ' &middot; <strong>' + dupes + ' already here</strong>, which will be updated' : '') +
         (bad ? ' &middot; <span style="color:var(--primary);">' + bad + ' unreadable</span>' : '') +
         (freetext ? ' &middot; ' + freetext + ' with a non-League club' : '') + '</p>' +
+        (badCompNames.length
+          ? '<div class="fx-map__note"><strong>Competition not recognised</strong> on ' +
+            badCompNames.map(function (n) {
+              return badComp[n] + ' row' + (badComp[n] === 1 ? '' : 's') + ' reading &ldquo;' + esc(n) + '&rdquo;';
+            }).join(', ') + '. Those rows will not import.</div>'
+          : '') +
         (guessed ? '<div class="fx-map__note">' + guessed + ' row' + (guessed === 1 ? ' has a time' : 's have times') +
           ' with no am/pm, read as afternoon. Check the Kick-off column below.</div>' : '') +
-        '<div class="fx-scroll"><table class="fx-prev"><thead><tr><th>Round</th><th>Date</th><th>KO</th>' +
+        '<div class="fx-scroll"><table class="fx-prev"><thead><tr><th>Comp</th><th>Round</th><th>Date</th><th>KO</th>' +
         '<th>Home</th><th>Away</th><th>Opta ID</th></tr></thead><tbody>' +
         parsed.map(function (p) {
-          return '<tr><td>' + (p.round ? esc(p.round) : '&mdash;') + '</td>' +
+          return '<tr>' +
+            '<td' + (p.comp ? '' : ' class="is-bad"') + '>' +
+              esc(p.comp ? (COMP_SHORT[p.comp] || p.comp) : (p.rawComp || 'missing')) + '</td>' +
+            '<td>' + (p.round ? esc(p.round) : '&mdash;') + '</td>' +
             '<td' + (p.date ? '' : ' class="is-bad"') + '>' + esc(p.date || 'unreadable') + '</td>' +
             '<td>' + esc(p.kickoff) + '</td>' +
             '<td' + (p.homeNL ? '' : ' class="is-new"') + '>' + (p.home ? esc(p.home) : '&mdash;') + '</td>' +
             '<td' + (p.awayNL ? '' : ' class="is-new"') + '>' + (p.away ? esc(p.away) : '&mdash;') + '</td>' +
             '<td' + (p.opta ? '' : ' class="is-new"') + '>' +
-              esc(p.opta || (OPTA_EXPECTED[IMP.comp] ? 'awaiting' : 'not issued')) +
+              esc(p.opta || (OPTA_EXPECTED[p.comp] ? 'awaiting' : 'not issued')) +
               (p.exists ? ' <span class="fx-dupe">already here</span>' : '') + '</td></tr>';
         }).join('') + '</tbody></table></div>' +
         '<p class="form-hint">Italic clubs are not in the League &mdash; kept as typed. ' +
-        (OPTA_EXPECTED[IMP.comp]
-          ? 'Opta IDs for ' + esc(IMP.comp) + ' can be added later from each fixture.'
-          : 'Opta issues no IDs for ' + esc(IMP.comp) + '.') + '</p>',
+        'Opta issues no IDs for the FA Cup or FA Trophy; elsewhere they can be added later '
+        + 'from each fixture.</p>',
       buttons: [
         { label: 'Back', className: 'btn btn--ghost', onClick: function (c) { c.close(); impStep2(); } },
         { label: 'Cancel', className: 'btn btn--ghost', onClick: function (c) { c.close(); } },
@@ -1403,7 +1484,7 @@
 
               updates[id] = {
                 recordID: id, optaID: p.opta || null,
-                competition: IMP.comp, matchday: p.round || '',
+                competition: p.comp, matchday: p.round || '',
                 home: p.home, away: p.away,
                 /* Re-importing must not rewrite history. The ORIGINAL date is
                    set once, on first sight; the current date follows the
@@ -1440,7 +1521,7 @@
             (function next() {
               if (!jobs.length) {
                 keys.forEach(function (k) { S.fixtures[k] = updates[k]; });
-                NL.writeAudit('fixture_import', { competition: IMP.comp, count: done });
+                NL.writeAudit('fixture_import', { competitions: compList.replace(/ &middot; /g, ', '), count: done });
                 c.close(); render();
                 NL.toast(done + ' fixture' + (done === 1 ? '' : 's') + ' imported', 'success');
                 return;
