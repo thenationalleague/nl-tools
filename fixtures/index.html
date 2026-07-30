@@ -1,8 +1,15 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixtures
-  Version: v0.1 (30/07/2026)
+  Version: v0.2 (30/07/2026)
   File: /fixtures/index.html
+
+  CHANGELOG
+    v0.2 (30/07/2026) — The league programme imports through the same wizard
+      as cup ties. Re-import is idempotent: rows keyed by Opta ID are updated
+      in place and originalDate/status/score survive. Deletion is available on
+      every fixture, with a warning that names what is lost.
+    v0.1 (30/07/2026) — First build.
 
   Every fixture in every National League competition, with the scheduling
   history behind it.
@@ -71,6 +78,15 @@
     var NL_TOOL_KEY = 'ops-fixtures';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/07/2026',
+        version: 'v0.2',
+        items: [
+          'The whole league programme imports the same way cup ties do — same button, same paste-and-map wizard, with National, North and South added to the competition list.',
+          'Re-importing a sheet is safe. Rows already here are counted up front and updated in place; a fixture you have already postponed, rearranged or scored keeps all of it.',
+          'Any fixture can now be deleted, not just hand-added ones. The confirmation says what it costs: how much history goes, and whether a re-import brings the fixture back.'
+        ]
+      },
       {
         date: '30/07/2026',
         version: 'v0.1',
@@ -412,6 +428,9 @@
   }
   function dateStr(d) { return '<span class="fx-dow">' + dow(d) + '</span> ' + esc(prettyDate(d)); }
   function whenStr(d, t) { return dateStr(d) + ' &middot; ' + clock(t); }
+  /* Same thing without markup, for anywhere the string is escaped on the way
+     in (NL.confirm/prompt messages) rather than inserted as HTML. */
+  function whenText(d, t) { return dow(d) + ' ' + prettyDate(d) + ' · ' + clock(t); }
   function toISO(d) { var p = String(d).split('/'); return p[2] + '-' + p[1] + '-' + p[0]; }
   function fromISO(v) { var p = String(v).split('-'); return p[2] + '/' + p[1] + '/' + p[0]; }
   function todayISO() { return new Date().toISOString().slice(0, 10); }
@@ -734,13 +753,14 @@
           '<button type="button" class="btn btn--ghost" data-act="result">Result</button>') +
       '</div>' + historyBlock(f) + refBlock(f);
 
-    var buttons = [];
-    if (f.manual) buttons.push({ label: 'Delete fixture', className: 'btn btn--danger',
-      onClick: function (c) { c.close(); confirmDelete(f); } });
-    buttons.push({ label: 'Close', className: 'btn btn--ghost', onClick: function (c) { c.close(); } });
+    var buttons = [
+      { label: 'Delete fixture', className: 'btn btn--danger',
+        onClick: function (c) { c.close(); confirmDelete(f); } },
+      { label: 'Close', className: 'btn btn--ghost', onClick: function (c) { c.close(); } }
+    ];
 
     var ctrl = NL.modal({
-      title: f.home + ' v ' + f.away, body: body, buttons: buttons, footerSplit: !!f.manual
+      title: f.home + ' v ' + f.away, body: body, buttons: buttons, footerSplit: true
     });
     ctrl.body.querySelectorAll('[data-act]').forEach(function (b) {
       b.addEventListener('click', function () {
@@ -897,12 +917,20 @@
     });
   }
 
-  /* Only manually-added fixtures can be deleted. A league fixture is part
-     of the published programme; removing one would leave a hole. */
+  /* Any fixture can be deleted — a mis-added row has to be removable. What
+     differs is the cost, so the warning names it: an Opta-keyed fixture comes
+     back on the next import of the sheet (same key), a hand-added one does
+     not, and neither brings its history back. */
   function confirmDelete(f) {
-    NL.confirm('Delete ' + f.home + ' v ' + f.away + '?', {
+    var n = histOf(f.recordID).length;
+    var lost = n ? n + (n === 1 ? ' history entry goes' : ' history entries go') + ' with it. ' : '';
+    NL.confirm(
+      f.home + ' v ' + f.away + '\n' + f.competition + ' · ' +
+        (f.status === 'postponed' ? 'awaiting a new date' : whenText(f.date, f.kickoff)), {
       title: 'Delete this fixture?',
-      detail: 'Its scheduling history goes with it. This cannot be undone.',
+      detail: lost + (f.optaID
+        ? 'Re-importing the sheet restores the fixture' + (n ? ', but not its history.' : '.')
+        : 'Nothing re-creates it — this one was added by hand.'),
       confirmText: 'Delete', variant: 'danger'
     }).then(function (ok) {
       if (!ok) return;
@@ -1193,9 +1221,6 @@
               var prev = S.fixtures[id];
               updates[id] = {
                 recordID: id, optaID: p.opta || null,
-                /* Only a fixture with no Opta ID is deletable — you do not
-                   remove a row from the published league programme. */
-                manual: !p.opta,
                 competition: IMP.comp, matchday: p.round || '',
                 home: p.home, away: p.away,
                 /* Re-importing must not rewrite history. The ORIGINAL date is
