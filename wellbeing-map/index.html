@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Wellbeing map
-  Version: v1.11 (30/07/2026)
+  Version: v1.12 (30/07/2026)
   File: /wellbeing-map/index.html
 
   An editable map of the public Wellbeing section: every page as a box, every
@@ -46,6 +46,23 @@
   native confirm(). No colour here is a raw hex value.
 
   CHANGELOG
+  v1.12 (30/07/2026) — Bands crept. Their geometry was derived from whatever
+    their highest box happened to be, through a Math.min that could only move a
+    band UP and a Math.max that could only make it taller. So every drag ratcheted
+    a band a little higher and it never came back — on an empty canvas the header
+    eventually climbed off the top of the page, and the sections appeared to pull
+    up around the boxes as you moved between them.
+
+    Bands own their geometry now. The first starts at a fixed 14px and each one
+    stacks under the last; a band is as tall as its contents need or as tall as
+    somebody has made it, whichever is greater; and when a band moves, its boxes
+    move with it. A box dropped near the top of a band lands under the band's
+    heading rather than on it.
+
+    Added a control on each section heading to make it taller or shorter by a
+    row-block at a time. Everything below shifts by the same amount, the order is
+    kept, and the top of the first section does not move. A section will not go
+    shorter than the things inside it. The chosen height is saved and exported.
   v1.11 (30/07/2026) — The concepts version has been loadable since v1.6, but only
     through "Start again" — which is not a button anybody presses when they want
     to compare two things, because it sounds like it throws their work away. The
@@ -174,7 +191,7 @@
   <meta name="description" content="Internal sketchpad for the structure and copy of the Wellbeing section.">
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
 
-  <link rel="stylesheet" href="/system/nl-brand.css?v=27">
+  <link rel="stylesheet" href="/system/nl-brand.css?v=29">
   <script src="/system/nl-utils.js?v=28"></script>
 
   <style>
@@ -280,6 +297,15 @@
     flex: 1; min-width: 0; font-size: var(--text-xs); color: var(--text-muted);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  /* Grow a section by a whole row-block at a time; everything below moves down
+     by the same amount and the top of the first band never shifts. */
+  .wm-band__z { flex: none; display: flex; gap: 4px; }
+  .wm-band__z button {
+    width: 26px; height: 26px; font-family: inherit; font-size: 15px; font-weight: 900;
+    line-height: 1; background: var(--white); color: var(--navy);
+    border: 1px solid var(--navy-200); border-radius: var(--radius-sm); cursor: pointer;
+  }
+  .wm-band__z button:hover { background: var(--navy-100); border-color: var(--navy); }
   .wm-band--locked { background: var(--navy-100); border-style: solid; }
 
   /* Pointer handling here needed two fixes, both of them long-standing.
@@ -705,10 +731,12 @@
 
   /* On screen next to the title, so it is always possible to tell which
      version is in front of you. Bump both when you change this file. */
-  var VERSION = 'v1.11';
+  var VERSION = 'v1.12';
   var UPDATED = '30 July 2026';
 
   var NL_CHANGELOG = [
+    { v: 'v1.12', d: '30/07/2026', note: 'Sections stay put: the top of the first '
+      + 'is fixed, and each can be made taller or shorter a block at a time.' },
     { v: 'v1.11', d: '30/07/2026', note: 'Switch between the live and concepts maps '
       + 'from the top-left, and "All arrows" draws the complete journey.' },
     { v: 'v1.10', d: '30/07/2026', note: 'Two-way pairs keep the same gap at any '
@@ -890,7 +918,12 @@
      edges pointing at boxes that do not exist are dropped. */
   function adopt(data, opts) {
     opts = opts || {};
-    var zones = Array.isArray(data.zones) && data.zones.length ? data.zones : S.zones;
+    var zones = (Array.isArray(data.zones) && data.zones.length ? data.zones : S.zones)
+      .map(function (z) {
+        /* h is a deliberate height somebody set with the section controls; the
+           underscored fields are working geometry and are recomputed. */
+        return { id: z.id, label: z.label, hint: z.hint, h: z.h || 0 };
+      });
     var nodes = (data.nodes || []).map(function (n) {
       return {
         id: String(n.id),
@@ -960,14 +993,71 @@
   /* Shared blocks stack down the left of their band; the pages fill the space
      to their right. In the pages band that reads as the topics widget beside
      the pages it feeds, which is what it is. */
-  function tidy() {
+  /* Bands own their geometry; boxes live inside them. It used to be the other
+     way round — a band's top was derived from whatever its highest box happened
+     to be, through a Math.min that could only ever move UP. So every drag
+     ratcheted the band a little higher, it never came back down, and on an empty
+     canvas the header eventually climbed off the top of the page. Its height had
+     the same one-way problem in reverse: Math.max meant it could only grow.
+
+     Now the first band starts at a fixed 14px and each one stacks under the
+     last. A band is as tall as it needs to be for its contents, or as tall as
+     somebody has explicitly made it, whichever is greater. When a band moves,
+     its boxes move with it, so nothing drifts out of the band it belongs to. */
+  var BAND_STEP = NODE_H + GAP_Y;   /* one row-block: the unit bands grow by */
+
+  function bandContentHeight(mine, top) {
+    var deepest = 0;
+    mine.forEach(function (n) {
+      deepest = Math.max(deepest, (n.y - top) + hOf(n));
+    });
+    return Math.max(BAND_TOP + NODE_H, deepest) + BAND_BOT;
+  }
+
+  function layoutBands() {
     var y = 14;
+    S.zones.forEach(function (z) {
+      var mine = S.nodes.filter(function (n) { return n.zone === z.id; });
+      var oldTop = z._top == null ? y : z._top;
+
+      /* Take the boxes with it, so a band moving never leaves them behind. */
+      var delta = y - oldTop;
+      if (delta) mine.forEach(function (n) { n.y = Math.round(n.y + delta); });
+
+      z._top = y;
+      z._h = Math.max(z.h || 0, bandContentHeight(mine, y));
+      y += z._h + BAND_GAP;
+    });
+    canvasH = y + 14;
+  }
+
+  /* Make a band a row-block taller or shorter. Everything below shifts by the
+     same amount, which is the point: the sections keep their order and the top
+     of the first one never moves. */
+  function resizeBand(id, dir) {
+    var z = S.zones.filter(function (x) { return x.id === id; })[0];
+    if (!z) return;
+    var mine = S.nodes.filter(function (n) { return n.zone === z.id; });
+    var floor = bandContentHeight(mine, z._top);
+    var was = Math.max(z.h || 0, floor);
+    z.h = Math.max(floor, was + dir * BAND_STEP);
+    render(); save();
+    if (dir < 0 && z.h === was) {
+      window.NL.toast('That is as short as it goes with what is in it', 'error');
+    }
+  }
+
+  function tidy() {
+    /* Stack the bands first so every band has a top, lay the boxes out inside
+       them, then stack again now the contents are known. */
+    layoutBands();
+
     S.zones.forEach(function (z) {
       var mine = S.nodes.filter(function (n) { return n.zone === z.id; });
       var blocks = mine.filter(function (n) { return n.locked; }).sort(byKindThenLabel);
       var pages = mine.filter(function (n) { return !n.locked; }).sort(byKindThenLabel);
 
-      var top = y + BAND_TOP;
+      var top = z._top + BAND_TOP;
       var blockY = top, colW = 0;
       blocks.forEach(function (b) {
         b.x = X0; b.y = Math.round(blockY);
@@ -992,27 +1082,9 @@
         rowY += tallest + GAP_Y;
         i += perRow;
       }
-
-      z._top = y;
-      z._h = Math.max(blockY, rowY, top + NODE_H + GAP_Y) - GAP_Y - y + BAND_BOT;
-      y += z._h + BAND_GAP;
     });
-    canvasH = y + 14;
-  }
 
-  /* Bands are only recomputed on tidy; dragging a box into another band
-     changes which zone it belongs to but must not shuffle everything else. */
-  function measureBands() {
-    var y = 14;
-    S.zones.forEach(function (z) {
-      var mine = S.nodes.filter(function (n) { return n.zone === z.id; });
-      var top = mine.length ? Math.min.apply(null, mine.map(function (n) { return n.y; })) : y + BAND_TOP;
-      var bot = mine.length ? Math.max.apply(null, mine.map(function (n) { return n.y + hOf(n); })) : top;
-      z._top = Math.min(z._top == null ? top - BAND_TOP : z._top, top - BAND_TOP);
-      z._h = Math.max(z._h || 0, bot - z._top + BAND_BOT);
-      y = z._top + z._h + BAND_GAP;
-    });
-    canvasH = Math.max(canvasH, y + 14);
+    layoutBands();
   }
 
   function zoneAt(cy) {
@@ -1035,25 +1107,59 @@
   }
 
   function render() {
+    /* Order matters and is easy to get wrong. Boxes are drawn first because
+       that is the only way to learn how tall they turned out; the bands are
+       stacked from those heights; and stacking can MOVE boxes, since a band
+       carries its contents with it. So the boxes have to be repositioned
+       afterwards — without that step the bands moved and the boxes stayed put,
+       which left them floating above their own section. */
     renderNodes();
-    /* Boxes first, then measure them, then everything whose geometry depends
-       on how tall they turned out. */
-    if (measureNodes()) { /* heights settled — bands and arrows use them below */ }
-    measureBands();
+    measureNodes();
+    layoutBands();
+    placeNodes();
     renderBands();
     renderEdges();
     applyZoom();
     renderSide();
   }
 
+  /* Push current positions back onto boxes already in the DOM. Cheaper than a
+     second full render, and it cannot disturb focus or a text cursor. */
+  function placeNodes() {
+    Array.prototype.forEach.call(el.nodes.children, function (box) {
+      var n = byId(box.getAttribute('data-id'));
+      if (!n) return;
+      if (box.style.left !== n.x + 'px') box.style.left = n.x + 'px';
+      if (box.style.top !== n.y + 'px') box.style.top = n.y + 'px';
+    });
+  }
+
   function renderBands() {
-    el.bands.innerHTML = S.zones.map(function (z) {
+    el.bands.innerHTML = bandsHtml();
+    Array.prototype.forEach.call(el.bands.querySelectorAll('[data-taller],[data-shorter]'),
+      function (b) {
+        b.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          resizeBand(b.getAttribute('data-taller') || b.getAttribute('data-shorter'),
+            b.hasAttribute('data-taller') ? 1 : -1);
+        });
+      });
+  }
+
+  function bandsHtml() {
+    return S.zones.map(function (z) {
       var locked = z.id === 'header' || z.id === 'footer' || z.id === 'topicsnav';
       return '<div class="wm-band' + (locked ? ' wm-band--locked' : '') + '"' +
         ' style="top:' + z._top + 'px;height:' + z._h + 'px">' +
         '<span class="wm-band__hd">' +
           '<span class="wm-band__t">' + esc(z.label) + '</span>' +
           '<span class="wm-band__h">' + esc(z.hint || '') + '</span>' +
+          '<span class="wm-band__z">' +
+            '<button type="button" data-shorter="' + esc(z.id) + '" title="Make this ' +
+              'section shorter" aria-label="Make ' + esc(z.label) + ' shorter">&minus;</button>' +
+            '<button type="button" data-taller="' + esc(z.id) + '" title="Make this ' +
+              'section taller" aria-label="Make ' + esc(z.label) + ' taller">+</button>' +
+          '</span>' +
         '</span>' +
         '</div>';
     }).join('');
@@ -1129,7 +1235,7 @@
 
       return '<div class="wm-node wm-node--' + esc(n.kind) + (n.locked ? ' wm-node--block' : '') +
         (selected ? ' is-sel' : '') + state + '"' +
-        ' data-id="' + esc(n.id) + '" tabindex="0" role="button"' +
+        ' data-id="' + esc(n.id) + '" data-zone="' + esc(n.zone) + '" tabindex="0" role="button"' +
         ' aria-label="' + esc(n.label) + ', ' + esc(KIND_LABEL[n.kind] || n.kind) + '"' +
         ' style="left:' + n.x + 'px;top:' + n.y + 'px;width:' + wOf(n) + 'px' +
         (n.locked ? '' : ';min-height:' + NODE_H + 'px') + '">' +
@@ -1898,11 +2004,14 @@
     if (d.moved) {
       var n = byId(d.id);
       /* Dropped in a different band? Then it belongs to that band now. */
-      var z = zoneAt(n.y + NODE_H / 2);
+      var z = zoneAt(n.y + hOf(n) / 2);
       if (z && z.id !== n.zone) {
         n.zone = z.id;
         window.NL.toast('Moved to "' + z.label + '"', 'success');
       }
+      /* And it lands inside that band rather than on top of its heading. The
+         band grows downwards to take it if it needs to. */
+      if (z) n.y = Math.max(n.y, z._top + BAND_TOP);
       render(); save();
     }
     void ev;
