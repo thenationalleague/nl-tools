@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Wellbeing map
-  Version: v1.1 (30/07/2026)
+  Version: v1.3 (30/07/2026)
   File: /wellbeing-map/index.html
 
   An editable map of the public Wellbeing section: every page as a box, every
@@ -41,6 +41,18 @@
   native confirm(). No colour here is a raw hex value.
 
   CHANGELOG
+  v1.3 (30/07/2026) — Box heights are measured rather than assumed. A two-line
+    name made a box taller than the 72px the layout assumed, so tall boxes hung
+    out of their band and their arrows joined at the wrong point; every box now
+    reports its real height and the bands, rows and arrows use it. The topics
+    widget has moved into the pages band, sitting at the left of the pages it
+    feeds — a band of its own left it marooned in an almost-empty strip. Shared
+    blocks generally now stack down the left of their band. Bullets in a
+    block's description in the panel no longer hang outside the grey box.
+  v1.2 (30/07/2026) — The version and its date are on screen, next to the
+    title and again in the explainer. GitHub Pages ignores the repo's _headers
+    file, so an updated page can sit behind a cached copy for a few minutes
+    with nothing to tell you which one you are looking at. Now there is.
   v1.1 (30/07/2026) — Colour now encodes one thing: urgency, on the same
     red/amber/yellow/blue ladder the live site shows a visitor. It previously
     mixed urgency with category, so the palette could not be read as a scale.
@@ -89,8 +101,18 @@
   .wm-brand span {
     display: block; font-size: var(--text-xs); font-weight: 700;
     text-transform: uppercase; letter-spacing: var(--tracking-wide);
-    color: var(--navy-200);
+    color: var(--navy-200); white-space: nowrap;
   }
+  /* Its own chip rather than a clause in the caps kicker: a version number is
+     the one thing on this page somebody needs to read at a glance to know
+     whether they are looking at a cached copy. */
+  .wm-ver {
+    flex: none; font-size: var(--text-xs); font-weight: 900;
+    background: var(--navy-700); color: var(--white);
+    border: 1px solid var(--navy-400); border-radius: var(--radius-pill);
+    padding: 4px 10px; white-space: nowrap;
+  }
+
   .wm-status {
     font-size: var(--text-xs); color: var(--navy-200); margin-left: auto;
     white-space: nowrap;
@@ -137,14 +159,18 @@
     border: 1px dashed var(--navy-200); border-radius: var(--radius-lg);
     background: var(--navy-50);
   }
+  /* One flex row rather than two absolutely-positioned labels: the hint used
+     to start at a fixed 190px, so a longer band title ran straight through it. */
+  .wm-band__hd {
+    position: absolute; top: 9px; left: 16px; right: 16px;
+    display: flex; align-items: baseline; gap: 14px; min-width: 0;
+  }
   .wm-band__t {
-    position: absolute; top: 10px; left: 16px;
-    font-size: var(--text-xs); font-weight: 900; text-transform: uppercase;
-    letter-spacing: var(--tracking-wide); color: var(--navy-600);
+    flex: none; font-size: var(--text-xs); font-weight: 900; text-transform: uppercase;
+    letter-spacing: var(--tracking-wide); color: var(--navy-600); white-space: nowrap;
   }
   .wm-band__h {
-    position: absolute; top: 10px; left: 190px; right: 16px;
-    font-size: var(--text-xs); color: var(--text-muted);
+    flex: 1; min-width: 0; font-size: var(--text-xs); color: var(--text-muted);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .wm-band--locked { background: var(--navy-100); border-style: solid; }
@@ -324,6 +350,12 @@
     border-radius: var(--radius); padding: 11px 13px;
     font-size: var(--text-sm); color: var(--text); line-height: 1.4;
   }
+  /* A block's description is authored HTML, so it arrives with real lists in
+     it. Without these the markers sat outside the panel. */
+  .wm-locked p { margin: 0 0 8px; }
+  .wm-locked p:last-child { margin-bottom: 0; }
+  .wm-locked ul { margin: 6px 0 8px; padding-left: 19px; }
+  .wm-locked li { margin-bottom: 3px; }
 
   /* ── Right-click menu ─────────────────────────────────────────────────── */
   .wm-ctx {
@@ -347,6 +379,19 @@
     color: var(--text-muted); line-height: 1.4;
   }
   .wm-ctx hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
+
+  .wm-stale {
+    flex: none; margin: 0; padding: 10px 18px;
+    background: var(--red-light); border-bottom: 2px solid var(--red);
+    color: var(--red-deep); font-size: var(--text-sm);
+  }
+  .wm-stale b { font-weight: 900; }
+  .wm-stale button {
+    font-family: inherit; font-size: var(--text-xs); font-weight: 900;
+    background: var(--red-deep); color: var(--white); border: 0;
+    border-radius: var(--radius); padding: 6px 12px; margin-left: 6px;
+    cursor: pointer; min-height: 32px;
+  }
 
   .wm-noscript {
     margin: 40px auto; max-width: 560px; padding: 20px;
@@ -385,6 +430,8 @@
       <span>Internal sketchpad</span>
     </span>
   </span>
+
+  <span class="wm-ver" id="ver" title="Which version you are looking at"></span>
 
   <span class="wm-acts">
     <span class="wm-zoom">
@@ -443,8 +490,25 @@
   var BLOCK_W = 256, BLOCK_W2 = 310, ROW_H = 18;  /* shared blocks list their buttons */
   var GAP_X = 22, GAP_Y = 20;
   var X0 = 36, BAND_TOP = 34, BAND_BOT = 12, BAND_GAP = 12;
-  var PER_ROW = 6, GRID = 20;
-  var CANVAS_W = X0 + PER_ROW * (NODE_W + GAP_X);
+  var PER_ROW = 5, GRID = 20;
+  /* Room for the widest block down the left, plus PER_ROW pages beside it. */
+  var CANVAS_W = X0 + BLOCK_W2 + GAP_X + PER_ROW * (NODE_W + GAP_X);
+
+  /* On screen next to the title, so it is always possible to tell which
+     version is in front of you. Bump both when you change this file. */
+  var VERSION = 'v1.3';
+  var UPDATED = '30 July 2026';
+
+  var NL_CHANGELOG = [
+    { v: 'v1.3', d: '30/07/2026', note: 'Boxes no longer spill out of their band, '
+      + 'the topics widget sits beside the pages it feeds, and bullets stay inside '
+      + 'the grey panel.' },
+    { v: 'v1.2', d: '30/07/2026', note: 'Version and date shown on screen.' },
+    { v: 'v1.1', d: '30/07/2026', note: 'Colour means urgency only. Shared blocks '
+      + 'list their buttons instead of fanning arrows. Hover to focus. Connections '
+      + 'above the copy in the panel.' },
+    { v: 'v1.0', d: '30/07/2026', note: 'Initial build.' }
+  ];
 
   var STORE = 'nl-wellbeing-map-v1';
   var SEEN = 'nl-wellbeing-map-seen';
@@ -519,10 +583,27 @@
      thing it stands for is a grid of cards on the real page, not a list. */
   function colsOf(n) { return n.locked && out(n.id).length > 6 ? 2 : 1; }
   function wOf(n) { return n.locked ? (colsOf(n) === 2 ? BLOCK_W2 : BLOCK_W) : NODE_W; }
+
+  /* Measured, not assumed. A two-line name makes a box taller than NODE_H, and
+     when the geometry assumed 72px everywhere the taller boxes hung out of
+     their band and their arrows joined at the wrong place. Every box reports
+     its real height after each render, and layout uses that. */
   function hOf(n) {
+    if (n._h) return n._h;
     if (!n.locked) return NODE_H;
     var rows = Math.ceil(Math.max(out(n.id).length, 1) / colsOf(n));
     return 52 + rows * ROW_H + 8;
+  }
+
+  function measureNodes() {
+    var changed = false;
+    Array.prototype.forEach.call(el.nodes.children, function (box) {
+      var n = byId(box.getAttribute('data-id'));
+      if (!n) return;
+      var h = box.offsetHeight;
+      if (h && Math.abs((n._h || 0) - h) > 0.5) { n._h = h; changed = true; }
+    });
+    return changed;
   }
 
   /* ── Persistence ──────────────────────────────────────────────────────── */
@@ -592,8 +673,20 @@
       return { from: e.from, to: e.to, label: e.label || '', kind: e.kind || 'editorial' };
     });
 
+    /* A map saved before the widget moved in with the pages still names the
+       band it used to live in. Move it across and drop the empty band, or the
+       old layout would persist for anybody who had already opened this. */
+    var migrated = false;
+    nodes.forEach(function (n) {
+      if (n.zone === 'topicsnav') { n.zone = 'flow'; migrated = true; }
+    });
+    if (migrated) zones = zones.filter(function (z) { return z.id !== 'topicsnav'; });
+
     S.zones = zones; S.nodes = nodes; S.edges = edges; S.sel = null;
-    if (opts.tidy || nodes.some(function (n) { return n.x === null; })) tidy();
+    if (opts.tidy || migrated || nodes.some(function (n) { return n.x === null; })) {
+      nodes.forEach(function (n) { n._h = 0; });
+      tidy();
+    }
   }
 
   /* ── Layout ───────────────────────────────────────────────────────────── */
@@ -604,43 +697,50 @@
      scroll to see, which defeats the object of drawing it. The one forced
      break is before the topics, so the ten of them read as a block rather
      than trailing off the end of the crisis pages. */
-  function rowsFor(nodes) {
-    var byKind = function (n) {
+  function byKindThenLabel(a, b) {
+    var rank = function (n) {
       var i = KIND_ORDER.indexOf(n.kind);
       return i === -1 ? KIND_ORDER.length : i;
     };
-    var sorted = nodes.slice().sort(function (a, b) {
-      return byKind(a) - byKind(b) || a.label.localeCompare(b.label);
-    });
-    var lead = sorted.filter(function (n) { return n.kind !== 'topic'; });
-    var topics = sorted.filter(function (n) { return n.kind === 'topic'; });
-
-    var rows = [];
-    [lead, topics].forEach(function (group) {
-      var rest = group.slice();
-      while (rest.length) rows.push(rest.splice(0, PER_ROW));
-    });
-    return rows;
+    return rank(a) - rank(b) || a.label.localeCompare(b.label);
   }
 
+  /* Shared blocks stack down the left of their band; the pages fill the space
+     to their right. In the pages band that reads as the topics widget beside
+     the pages it feeds, which is what it is. */
   function tidy() {
     var y = 14;
     S.zones.forEach(function (z) {
-      var rows = rowsFor(S.nodes.filter(function (n) { return n.zone === z.id; }));
+      var mine = S.nodes.filter(function (n) { return n.zone === z.id; });
+      var blocks = mine.filter(function (n) { return n.locked; }).sort(byKindThenLabel);
+      var pages = mine.filter(function (n) { return !n.locked; }).sort(byKindThenLabel);
 
-      var rowY = y + BAND_TOP;
-      rows.forEach(function (row) {
-        var x = X0, tallest = 0;
-        row.forEach(function (n) {
-          n.x = x; n.y = rowY;
-          x += wOf(n) + GAP_X;
+      var top = y + BAND_TOP;
+      var blockY = top, colW = 0;
+      blocks.forEach(function (b) {
+        b.x = X0; b.y = blockY;
+        blockY += hOf(b) + GAP_Y;
+        colW = Math.max(colW, wOf(b));
+      });
+
+      var px = blocks.length ? X0 + colW + GAP_X : X0;
+      var perRow = Math.max(1,
+        Math.floor((CANVAS_W - px - 8 + GAP_X) / (NODE_W + GAP_X)));
+
+      var rowY = top, i = 0;
+      while (i < pages.length) {
+        var row = pages.slice(i, i + perRow), tallest = 0;
+        row.forEach(function (n, ci) {
+          n.x = px + ci * (NODE_W + GAP_X);
+          n.y = rowY;
           tallest = Math.max(tallest, hOf(n));
         });
         rowY += tallest + GAP_Y;
-      });
+        i += perRow;
+      }
 
       z._top = y;
-      z._h = Math.max(rowY - GAP_Y, y + BAND_TOP + NODE_H) - y + BAND_BOT;
+      z._h = Math.max(blockY, rowY, top + NODE_H + GAP_Y) - GAP_Y - y + BAND_BOT;
       y += z._h + BAND_GAP;
     });
     canvasH = y + 14;
@@ -681,9 +781,12 @@
   }
 
   function render() {
+    renderNodes();
+    /* Boxes first, then measure them, then everything whose geometry depends
+       on how tall they turned out. */
+    if (measureNodes()) { /* heights settled — bands and arrows use them below */ }
     measureBands();
     renderBands();
-    renderNodes();
     renderEdges();
     applyZoom();
     renderSide();
@@ -694,8 +797,10 @@
       var locked = z.id === 'header' || z.id === 'footer' || z.id === 'topicsnav';
       return '<div class="wm-band' + (locked ? ' wm-band--locked' : '') + '"' +
         ' style="top:' + z._top + 'px;height:' + z._h + 'px">' +
-        '<span class="wm-band__t">' + esc(z.label) + '</span>' +
-        '<span class="wm-band__h">' + esc(z.hint || '') + '</span>' +
+        '<span class="wm-band__hd">' +
+          '<span class="wm-band__t">' + esc(z.label) + '</span>' +
+          '<span class="wm-band__h">' + esc(z.hint || '') + '</span>' +
+        '</span>' +
         '</div>';
     }).join('');
   }
@@ -1414,8 +1519,16 @@
   });
 
   /* ── Toolbar ──────────────────────────────────────────────────────────── */
+  /* Two passes: the first render is what tells us how tall each box actually
+     is, and only then can tidy space the rows correctly. */
+  function layOut() {
+    render();
+    tidy();
+    render();
+  }
+
   function doTidy() {
-    tidy(); render(); save();
+    layOut(); save();
     window.NL.toast('Tidied up', 'success');
   }
 
@@ -1477,7 +1590,7 @@
         return;
       }
       adopt(data);
-      render(); save();
+      layOut(); save();
       window.NL.toast('Loaded ' + data.nodes.length + ' pages from ' + f.name, 'success');
     };
     reader.onerror = function () { window.NL.toast('Could not read that file', 'error'); };
@@ -1497,7 +1610,7 @@
     ).then(function (ok) {
       if (!ok || !seed) return;
       adopt(JSON.parse(JSON.stringify(seed)), { tidy: true });
-      render(); save();
+      layOut(); save();
       window.NL.toast('Back to the live structure', 'success');
     });
   });
@@ -1509,6 +1622,11 @@
       size: 'md',
       body:
         '<div class="wm-help">' +
+        '<p class="wm-hint" style="margin:0 0 14px"><b>' + VERSION + '</b>, updated ' +
+        UPDATED + '. ' + esc(NL_CHANGELOG[0].note) + ' If the version in the top-left ' +
+        'does not match this, you are looking at a cached copy — hold Shift and press ' +
+        'reload.</p>' +
+
         '<h3>What this is</h3>' +
         '<p>A sketchpad for the Wellbeing section. Every box is a page, every arrow is a ' +
         'route from one page to another, and inside each box are the words that page ' +
@@ -1573,6 +1691,39 @@
     });
   }
   document.getElementById('bHelp').addEventListener('click', help);
+  document.getElementById('ver').textContent = VERSION;
+  document.title = 'Wellbeing map ' + VERSION + ' — The National League';
+
+  /* ── Am I stale? ──────────────────────────────────────────────────────────
+     GitHub Pages ignores the repo's _headers file, so this page can sit in a
+     cache for a few minutes after a deploy with nothing on screen to say so —
+     which is exactly the confusion the version chip is there to end.
+
+     So the page asks. It refetches its own HTML, bypassing the cache, and
+     reads the VERSION out of it. If that is not the version running, it says
+     so and offers a reload. No second file to keep in step: the page is its
+     own manifest, so this cannot drift. */
+  function checkFresh() {
+    fetch(location.pathname + '?fresh=' + VERSION, { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.text() : null; })
+      .then(function (html) {
+        if (!html) return;
+        var m = html.match(/var VERSION = '(v[0-9.]+)'/);
+        if (!m || m[1] === VERSION) return;
+
+        var bar = document.createElement('p');
+        bar.className = 'wm-stale';
+        bar.innerHTML = '<b>You are looking at an old copy.</b> This is ' +
+          esc(VERSION) + '; ' + esc(m[1]) + ' has been published. Your work is ' +
+          'saved and will still be here afterwards.' +
+          ' <button type="button" id="bFresh">Load ' + esc(m[1]) + '</button>';
+        document.body.insertBefore(bar, document.querySelector('.wm-say'));
+        document.getElementById('bFresh').addEventListener('click', function () {
+          location.replace(location.pathname + '?v=' + m[1]);
+        });
+      })
+      .catch(function () { /* offline, or opened from a file — nothing to say */ });
+  }
 
   /* ── Boot ─────────────────────────────────────────────────────────────── */
   function boot() {
@@ -1597,7 +1748,7 @@
           stamp('Started from the live structure');
         }
 
-        render();
+        layOut();
         fit();
 
         /* First visit gets the explainer without having to find the (i). */
@@ -1619,6 +1770,7 @@
   });
 
   boot();
+  checkFresh();
 }());
 </script>
 
