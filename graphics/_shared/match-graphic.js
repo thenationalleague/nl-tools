@@ -92,15 +92,16 @@
       badgeLandscape: 160, badgePortrait: 202
     },
     '4x5': {
-      /* Same 1080 width as the square, so the same tight clearance applies:
-         the code sits 26px clear of the badge plate. The extra height goes
-         into the crest rather than the type. */
-      w: 1080, h: 1350, split: 'x',
-      seamA: 610, seamB: 470,
-      bands: [30, 15, 15],
-      crestH: 250, codeSize: 138, codeGap: 36,
-      laneA: 225, laneB: 855,
-      badgeLandscape: 165, badgePortrait: 208
+      /* Stacked, like 9:16. At 1080 wide a vertical seam leaves only ~500px
+         per side, which forces the code down to 138px and puts it within
+         26px of the badge plate. Splitting horizontally gives each club the
+         full width, so the type can be half again as large. */
+      w: 1080, h: 1350, split: 'y',
+      seamA: 740, seamB: 610,
+      bands: [40, 20, 20],
+      crestH: 250, codeSize: 170, codeGap: 40,
+      laneA: 330, laneB: 1020,
+      badgeLandscape: 200, badgePortrait: 252
     },
     '9x16': {
       w: 1080, h: 1920, split: 'y',

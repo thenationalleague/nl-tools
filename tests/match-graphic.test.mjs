@@ -62,13 +62,20 @@ test('every format matches the aspect ratio its name claims', () => {
   }
 });
 
-test('only the tall portrait splits horizontally', () => {
-  /* 4:5 is still wide enough for a vertical seam; 9:16 would leave two
-     540px slivers with nowhere for a crest. */
+test('portrait formats stack, landscape and square sit side by side', () => {
+  /* Both portrait frames are only 1080 wide. A vertical seam there leaves
+     ~500px per club, which squeezes the code badly, so they split
+     horizontally and each club gets the full width. */
   assert.equal(MG.FORMATS['16x9'].split, 'x');
   assert.equal(MG.FORMATS['1x1'].split, 'x');
-  assert.equal(MG.FORMATS['4x5'].split, 'x');
+  assert.equal(MG.FORMATS['4x5'].split, 'y');
   assert.equal(MG.FORMATS['9x16'].split, 'y');
+});
+
+test('a stacked format gives its code more room than the square', () => {
+  /* The whole reason 4:5 stacks: side by side it needed a 138px code. */
+  assert.ok(MG.FORMATS['4x5'].codeSize > MG.FORMATS['1x1'].codeSize,
+            'stacking should buy larger type, not smaller');
 });
 
 test('every format carries a complete geometry set', () => {
