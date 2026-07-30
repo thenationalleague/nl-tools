@@ -110,6 +110,8 @@ Every gated tool's `index.html` has a near-identical `<head>`. The source of tru
 
 `_headers` (at repo root) sends `Cache-Control: no-cache, must-revalidate` for `/system/*` so a new deploy of these files takes effect immediately — but the `?v=N` query is the **belt-and-braces** mechanism. The canonical versions live in `system/_template/index.html`; `lint-tools.sh` reads them from there and reports any tool whose head drifts (stale `?v=`, missing script, script below `</head>`, missing `window.NL_TOOL`/`NL_TOOL_KEY`/`#pageWrap`/`nlAuthReady`, or missing Firebase compat SDK when `firebase.initializeApp` is called).
 
+`lint-tools.sh` covers tool pages at **both depths** — top-level (`vacancies/`) and one level down (`graphics/totw/`). It runs plain for the SessionStart hook (always exit 0) and `--strict` in CI (exit 1 on drift). Known, accepted drift lives in `system/_template/.lint-waivers` as `<slug>|<message substring> # why`; entries are printed on every run so they can't be quietly forgotten. A waiver is a promise to come back, not a fix.
+
 **Do not bump a `?v=` in one tool only.** Bumping means "I changed the canonical file" — bump the template + every tool in lockstep, in one commit. Lint will catch a partial bump.
 
 ## The auth + RTDB contract every gated tool follows
@@ -150,7 +152,7 @@ The new tool's `index.html` must keep the canonical `?v=N` values from the templ
 
 ## Two families of frontend, do not confuse them
 
-- **Gated staff/club tools** — top-level dirs with `index.html` referencing `/system/auth-guard.js`. Behind Firebase Auth, use the shared canon. Listed by `lint-tools.sh`.
+- **Gated staff/club tools** — dirs with `index.html` referencing `/system/auth-guard.js`, either top-level (`vacancies/`) or one level down (`graphics/totw/`). Behind Firebase Auth, use the shared canon. Listed by `lint-tools.sh`.
 - **Fan-facing embeds** — `embeds/*.html` (score-predictor, MOTM, vidiprinter, transfer-centre, live-blog, results-ticker, match-centre). Pasted into the Urban Zoo CMS. The CMS strips `<script src=...>` tags, so Firebase has to be loaded dynamically via `document.createElement('script')` with `.onload` chaining. Inline `<style>`, `<link>`, inline `<script>` survive. See `embeds/widget-handover.md` for the invariants — copy `score-predictor.html` as the starting point for any new embed. These do **not** use `auth-guard.js` and are out of scope for `lint-tools.sh`.
 
 `widgets/*.js` are a third bucket: standalone JS widgets (news ticker, club-news feed, transfers ticker, results ticker) embedded on the public site.
@@ -166,6 +168,7 @@ Both index-rebuild and club-news jobs handle concurrent runs by `git fetch origi
 ## Conventions worth knowing
 
 - **Brand tokens, not hex.** `var(--primary)` (`#9e0000`), `var(--navy)`, `var(--red)`/`--green`/`--amber`/`--blue`/`--purple`, `var(--text-muted)`. Solid shade ladders `--primary-50/100/.../900` and `--navy-50/.../900` for hover states, idle borders, and anywhere you would have reached for an rgba() overlay — **the brand intentionally has no rgba-overlay tokens**, use the ladder. (As of v2.21 the retired aliases `--info`, `--info-light`, `--primary-dim`, `--navy-mid`, `--navy-light` no longer resolve — use `--blue` / `--blue-light` / `--primary-600` / `--navy-600` / `--navy-300` directly.) Identity palettes that a second tool might plausibly want now live in canon too: `--proj-1…--proj-8` (project identity — 1–6 alias `--navy`/`--primary`/`--green`/`--amber`/`--purple`/`--blue` directly, 7–8 are distinct slate shades; mirrored as `NL.projColours`), `--cal-*` (calendar event types), `--road-sign-*` (UK road signs), `--pos-*` (NL competition position bands, mirrored as `NL.positionBands` for canvas exports). The Style Guide tool (`/style-guide/`, superadmin only) is the canonical visual reference — open it when wondering "is X already a token?". Genuine one-off identity palettes still stay tool-local (claudio personas, attendance comp tiers, meeting-notes scratchpad, GA channel palette, club crest LUT) — see the policy block at the top of `nl-brand.css`.
+- **Never repeat the tool title in the page.** `nl-topbar.js` already renders `window.NL_TOOL.title`, so a page-level `<h1>` of the tool's own name duplicates it — and a description paragraph under it describes something the user is already looking at. The template shipped both until 30/07/2026, which is why it spread to several tools; lint now fails any `<h1>` whose text equals the tool title. A heading above a group of controls belongs in `.section-head` as an `<h2>`.
 - **Scripts in `<head>`.** `auth-guard.js` must sit above `</head>`. Body-bottom placement breaks the gate timing and lint flags it.
 - **`#pageWrap` is hidden by default** (rule in `nl-brand.css`). Auth-guard sets `style.display = 'block'` to reveal — never clear with `''`, that re-triggers the brand rule.
 - **`window.NL_TOOL` and `var NL_TOOL_KEY` must stay in sync.** Topbar reads the former, auth-guard reads the latter.
