@@ -8,9 +8,13 @@
      node scripts/build-match-graphics.js --out ./build/match-graphics
      node scripts/build-match-graphics.js --clubs "Woking,Forest Green Rovers"
      node scripts/build-match-graphics.js --split division --zip
+     node scripts/build-match-graphics.js --clubs "Chester" --format 16x9,1x1,9x16
 
-   Output is NEVER committed. ~205KB per graphic, 1,656 unique renders,
-   3,312 placed copies, about 646MB in total.
+   Full documentation, including how to add the NL Cup and extra formats:
+   graphics/match-graphic/README.md
+
+   Output is NEVER committed. ~205KB per graphic at 16:9, 1,656 unique
+   renders, 3,312 placed copies, about 632MB in total.
 
    HOW IT WORKS
      A graphic is rendered once and placed into the folder of every side
@@ -42,11 +46,13 @@ const REPO = path.resolve(__dirname, '..');
 
 function parseArgs(argv) {
   const a = { out: path.join(REPO, 'build', 'match-graphics'), clubs: null,
-              split: 'club', zip: false, chrome: null, season: '2026-27' };
+              split: 'club', zip: false, chrome: null, season: '2026-27',
+              formats: ['16x9'] };
   for (let i = 2; i < argv.length; i++) {
     const k = argv[i];
     if (k === '--out') a.out = path.resolve(argv[++i]);
     else if (k === '--clubs') a.clubs = argv[++i].split(',').map(s => s.trim()).filter(Boolean);
+    else if (k === '--format') a.formats = argv[++i].split(',').map(s => s.trim()).filter(Boolean);
     else if (k === '--split') a.split = argv[++i];
     else if (k === '--zip') a.zip = true;
     else if (k === '--chrome') a.chrome = argv[++i];
@@ -57,7 +63,23 @@ function parseArgs(argv) {
   if (!['club', 'division', 'none'].includes(a.split)) {
     throw new Error(`--split must be club, division or none (got ${a.split})`);
   }
+  const known = knownFormats();
+  for (const f of a.formats) {
+    if (!known.includes(f)) {
+      throw new Error(`unknown --format "${f}" (have ${known.join(', ')})`);
+    }
+  }
   return a;
+}
+
+/* Read the format table straight out of the renderer so the script can never
+   drift from it. */
+function knownFormats() {
+  const src = fs.readFileSync(
+    path.join(REPO, 'graphics/_shared/match-graphic.js'), 'utf8');
+  const scope = {};
+  new Function('window', 'globalThis', src).call(scope, scope, scope);
+  return Object.keys(scope.NL_MATCH_GRAPHIC.FORMATS);
 }
 
 function findChrome(explicit) {
@@ -128,8 +150,11 @@ function safeName(s) {
   return String(s).replace(/[\/\\:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim();
 }
 
-function graphicFile(homeClub, awayClub) {
-  return `${homeClub.code}-${awayClub.code}.png`;
+/* 16:9 keeps the bare name, so a re-run does not invalidate folders already
+   uploaded to Drive. Other formats carry a suffix. */
+function graphicFile(homeClub, awayClub, fmt) {
+  const base = `${homeClub.code}-${awayClub.code}`;
+  return fmt === '16x9' ? `${base}.png` : `${base}-${fmt}.png`;
 }
 
 function fixtureFolder(iso, opponentName, isHome) {
@@ -138,7 +163,7 @@ function fixtureFolder(iso, opponentName, isHome) {
 
 /* ---------- work list ---------- */
 
-function buildWorkList(data, clubFilter) {
+function buildWorkList(data, clubFilter, formats) {
   const { members, guests, badges, fixtures } = data;
   const jobs = [];
   const skipped = [];
@@ -181,7 +206,7 @@ function buildWorkList(data, clubFilter) {
     jobs.push({
       iso: isoDate(date), date, competition,
       home: homeName, away: awayName,
-      file: graphicFile(home, away),
+      files: formats.map(f => ({ format: f, file: graphicFile(home, away, f) })),
       badge: badges.get(competition),
       placements: clubFilter ? placements.filter(p => clubFilter.includes(p.club))
                              : placements,
@@ -239,6 +264,9 @@ function load(src){return new Promise(function(res){
     var canvas = document.getElementById('c');
     var ctx = canvas.getContext('2d', { alpha: false });
 
+    var MG = window.NL_MATCH_GRAPHIC;
+    var done = 0, totalOut = work.reduce(function(n,j){ return n + j.files.length; }, 0);
+
     for(var i=0;i<work.length;i++){
       var j = work[i];
       var home = byName[j.home], away = byName[j.away];
@@ -248,19 +276,32 @@ function load(src){return new Promise(function(res){
         badge:     await asset(j.badge.split('/').map(encodeURIComponent).join('/'))
       };
       if(!assets.homeCrest || !assets.awayCrest || !assets.badge){
-        await log('MISSING_ASSET '+j.file); continue;
+        await log('MISSING_ASSET '+j.files[0].file); continue;
       }
-      var info = window.NL_MATCH_GRAPHIC.render(ctx, {
-        home: home, away: away, competition: j.competition
-      }, assets);
 
-      var blob = await new Promise(function(r){ canvas.toBlob(r, 'image/png'); });
-      var buf = await blob.arrayBuffer();
-      await fetch('/__png?file='+encodeURIComponent(j.file)+
-                  '&homeText='+info.homeText+'&awayText='+info.awayText+
-                  '&merge='+(info.panelsMerge?1:0),
-                  { method:'POST', body: buf });
-      if(i % 50 === 0) await log('progress '+(i+1)+'/'+work.length);
+      for(var k=0;k<j.files.length;k++){
+        var spec = j.files[k];
+        var fmt = MG.FORMATS[spec.format];
+        /* Resizing clears the canvas and resets the context, so the context
+           must be taken after setting the dimensions, not before. */
+        canvas.width = fmt.w; canvas.height = fmt.h;
+        var ctx = canvas.getContext('2d', { alpha: false });
+
+        var info = MG.render(ctx, {
+          home: home, away: away, competition: j.competition
+        }, assets, { format: spec.format });
+
+        var blob = await new Promise(function(r){ canvas.toBlob(r, 'image/png'); });
+        var buf = await blob.arrayBuffer();
+        await fetch('/__png?file='+encodeURIComponent(spec.file)+
+                    '&format='+encodeURIComponent(spec.format)+
+                    '&version='+encodeURIComponent(info.version)+
+                    '&homeText='+info.homeText+'&awayText='+info.awayText+
+                    '&merge='+(info.panelsMerge?1:0),
+                    { method:'POST', body: buf });
+        done++;
+        if(done % 50 === 1) await log('progress '+done+'/'+totalOut);
+      }
     }
     await fetch('/__done',{method:'POST',body:'ok'});
   }catch(err){
@@ -289,7 +330,7 @@ function startServer(jobs, renderDir, state) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify(jobs.map(j => ({
         home: j.home, away: j.away, competition: j.competition,
-        file: j.file, badge: j.badge
+        files: j.files, badge: j.badge
       }))));
     }
     if (p === '/__png' && req.method === 'POST') {
@@ -298,7 +339,9 @@ function startServer(jobs, renderDir, state) {
       req.on('data', c => chunks.push(c));
       req.on('end', () => {
         fs.writeFileSync(path.join(renderDir, file), Buffer.concat(chunks));
+        state.renderVersion = u.searchParams.get('version') || state.renderVersion;
         state.rendered.push({ file,
+          format: u.searchParams.get('format'),
           homeText: u.searchParams.get('homeText'),
           awayText: u.searchParams.get('awayText'),
           merge: u.searchParams.get('merge') === '1' });
@@ -344,7 +387,7 @@ async function main() {
   const args = parseArgs(process.argv);
   const chrome = findChrome(args.chrome);
   const data = loadData(args.season);
-  const { jobs, skipped } = buildWorkList(data, args.clubs);
+  const { jobs, skipped } = buildWorkList(data, args.clubs, args.formats);
 
   console.log(`Match graphics build`);
   console.log(`  season      ${args.season}`);
@@ -365,9 +408,12 @@ async function main() {
   /* de-duplicate: one render per unique output file */
   const unique = [];
   const seen = new Set();
-  for (const j of jobs) { if (!seen.has(j.file)) { seen.add(j.file); unique.push(j); } }
+  for (const j of jobs) {
+    const key = j.files.map(f => f.file).join('|');
+    if (!seen.has(key)) { seen.add(key); unique.push(j); }
+  }
 
-  const state = { rendered: [], assetErrors: [], done: null };
+  const state = { rendered: [], assetErrors: [], done: null, renderVersion: null };
   const server = startServer(unique, renderDir, state);
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   const port = server.address().port;
@@ -379,7 +425,8 @@ async function main() {
     `http://127.0.0.1:${port}/__render`], { stdio: 'ignore' });
 
   const started = Date.now();
-  const timeoutMs = Math.max(120000, unique.length * 3000);
+  const expected = unique.reduce((n, j) => n + j.files.length, 0);
+  const timeoutMs = Math.max(120000, expected * 3000);
   while (state.done === null && Date.now() - started < timeoutMs) {
     await new Promise(r => setTimeout(r, 250));
   }
@@ -389,15 +436,15 @@ async function main() {
 
   if (state.done === null) {
     console.error(`  TIMED OUT after ${Math.round((Date.now()-started)/1000)}s ` +
-                  `with ${state.rendered.length}/${unique.length} rendered`);
+                  `with ${state.rendered.length}/${expected} rendered`);
     process.exit(1);
   }
   if (state.done.startsWith('ERROR')) {
     console.error(`  render failed: ${state.done}`);
     process.exit(1);
   }
-  if (state.rendered.length !== unique.length) {
-    console.error(`  INCOMPLETE: ${state.rendered.length}/${unique.length} rendered`);
+  if (state.rendered.length !== expected) {
+    console.error(`  INCOMPLETE: ${state.rendered.length}/${expected} rendered`);
     state.assetErrors.slice(0, 10).forEach(e => console.error(`    ${e}`));
     process.exit(1);
   }
@@ -410,30 +457,38 @@ async function main() {
     for (const pl of j.placements) {
       const dir = path.join(treeDir, safeName(pl.club), pl.folder);
       fs.mkdirSync(dir, { recursive: true });
-      fs.copyFileSync(path.join(renderDir, j.file), path.join(dir, j.file));
-      placed++;
+      for (const f of j.files) {
+        fs.copyFileSync(path.join(renderDir, f.file), path.join(dir, f.file));
+        placed++;
+      }
     }
   }
   console.log(`  placed ${placed} copies across ` +
               `${fs.readdirSync(treeDir).length} club folders`);
 
   /* ---- manifest ---- */
-  const byText = state.rendered.reduce((acc, r) => {
-    acc[r.homeText] = (acc[r.homeText] || 0) + 1;
-    acc[r.awayText] = (acc[r.awayText] || 0) + 1;
-    return acc;
-  }, {});
+  const byText = state.rendered
+    .filter(r => r.format === args.formats[0])
+    .reduce((acc, r) => {
+      acc[r.homeText] = (acc[r.homeText] || 0) + 1;
+      acc[r.awayText] = (acc[r.awayText] || 0) + 1;
+      return acc;
+    }, {});
   const manifest = {
     generated: new Date().toISOString(),
     season: args.season,
-    uniqueGraphics: unique.length,
+    renderVersion: state.renderVersion,
+    formats: args.formats,
+    uniqueFixtures: unique.length,
+    uniqueGraphics: expected,
     placements: placed,
     clubFilter: args.clubs || null,
     textColourBasis: byText,
-    panelsMerge: state.rendered.filter(r => r.merge).map(r => r.file),
+    panelsMerge: state.rendered.filter(r => r.merge && r.format === args.formats[0])
+                              .map(r => r.file),
     skipped,
     graphics: jobs.map(j => ({
-      file: j.file, date: j.iso, competition: j.competition,
+      files: j.files.map(f => f.file), date: j.iso, competition: j.competition,
       home: j.home, away: j.away,
       placedIn: j.placements.map(p => `${p.club}/${p.folder}`)
     }))

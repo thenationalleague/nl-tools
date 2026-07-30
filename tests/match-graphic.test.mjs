@@ -44,6 +44,51 @@ test('bands are 50 primary / 25 secondary / 25 tertiary', () => {
   assert.deepEqual(MG.BANDS, { primary: 50, secondary: 25, tertiary: 25 });
 });
 
+test('the three delivery formats exist with the right dimensions', () => {
+  assert.deepEqual(Object.keys(MG.FORMATS).sort(), ['16x9', '1x1', '9x16']);
+  assert.deepEqual([MG.FORMATS['16x9'].w, MG.FORMATS['16x9'].h], [1920, 1080]);
+  assert.deepEqual([MG.FORMATS['1x1'].w, MG.FORMATS['1x1'].h], [1080, 1080]);
+  assert.deepEqual([MG.FORMATS['9x16'].w, MG.FORMATS['9x16'].h], [1080, 1920]);
+  assert.equal(MG.DEFAULT_FORMAT, '16x9');
+});
+
+test('portrait splits horizontally, the others vertically', () => {
+  /* A near-vertical seam in a 9:16 frame would leave two 540px slivers. */
+  assert.equal(MG.FORMATS['16x9'].split, 'x');
+  assert.equal(MG.FORMATS['1x1'].split, 'x');
+  assert.equal(MG.FORMATS['9x16'].split, 'y');
+});
+
+test('every format carries a complete geometry set', () => {
+  const need = ['w', 'h', 'split', 'seamA', 'seamB', 'bands', 'crestH',
+                'codeSize', 'codeGap', 'laneA', 'laneB',
+                'badgeLandscape', 'badgePortrait'];
+  for (const [name, f] of Object.entries(MG.FORMATS)) {
+    for (const k of need) {
+      assert.ok(f[k] !== undefined, `${name} is missing ${k}`);
+    }
+    assert.equal(f.bands.length, 3, `${name} needs three band widths`);
+    assert.ok(f.laneA < f.laneB, `${name} lanes must be ordered`);
+  }
+});
+
+test('an unknown format throws rather than silently rendering 16:9', () => {
+  assert.throws(() => MG.format('4x5'), /unknown match-graphic format/);
+});
+
+test('seamPos leans across the cross axis in both orientations', () => {
+  const l = MG.FORMATS['16x9'];
+  assert.equal(MG.seamPos(l, 0), l.seamA);
+  assert.equal(MG.seamPos(l, l.h), l.seamB);
+  const p = MG.FORMATS['9x16'];
+  assert.equal(MG.seamPos(p, 0), p.seamA);
+  assert.equal(MG.seamPos(p, p.w), p.seamB);
+});
+
+test('render version is a semver string', () => {
+  assert.match(MG.VERSION, /^\d+\.\d+\.\d+$/);
+});
+
 test('same-coloured neighbouring bands merge into one 50px run', () => {
   /* Two abutting fills antialias their shared edge and let the panel colour
      bleed through the join, so identical neighbours must become one fill. */
