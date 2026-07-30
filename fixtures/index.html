@@ -1,8 +1,15 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixtures
-  Version: v0.1 (30/07/2026)
+  Version: v0.2 (30/07/2026)
   File: /fixtures/index.html
+
+  CHANGELOG
+    v0.2 (30/07/2026) — The league programme imports through the same wizard
+      as cup ties. Re-import is idempotent: rows keyed by Opta ID are updated
+      in place and originalDate/status/score survive. Deletion is available on
+      every fixture, with a warning that names what is lost.
+    v0.1 (30/07/2026) — First build.
 
   Every fixture in every National League competition, with the scheduling
   history behind it.
@@ -71,6 +78,15 @@
     var NL_TOOL_KEY = 'ops-fixtures';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/07/2026',
+        version: 'v0.2',
+        items: [
+          'The whole league programme imports the same way cup ties do — same button, same paste-and-map wizard, with National, North and South added to the competition list.',
+          'Re-importing a sheet is safe. Rows already here are counted up front and updated in place; a fixture you have already postponed, rearranged or scored keeps all of it.',
+          'Any fixture can now be deleted, not just hand-added ones. The confirmation says what it costs: how much history goes, and whether a re-import brings the fixture back.'
+        ]
+      },
       {
         date: '30/07/2026',
         version: 'v0.1',
@@ -265,6 +281,7 @@
   .fx-prev tr:last-child td { border-bottom: none; }
   .fx-prev .is-bad { color: var(--primary); font-variation-settings: 'wght' 800; }
   .fx-prev .is-new { color: var(--text-muted); font-style: italic; }
+  .fx-dupe { color: var(--amber); font-variation-settings: 'wght' 800; font-size: 11px; }
   .fx-scroll { max-height: 280px; overflow-y: auto; border: 1px solid var(--border);
                border-radius: var(--radius); }
 
@@ -291,7 +308,7 @@
       </div>
       <div class="page-header__actions">
         <button type="button" class="btn btn--ghost btn--sm" id="fxExport">Export</button>
-        <button type="button" class="btn btn--primary btn--sm" id="fxImport">Add cup fixtures</button>
+        <button type="button" class="btn btn--primary btn--sm" id="fxImport">Import fixtures</button>
       </div>
     </div>
 
@@ -414,6 +431,9 @@
   }
   function dateStr(d) { return '<span class="fx-dow">' + dow(d) + '</span> ' + esc(prettyDate(d)); }
   function whenStr(d, t) { return dateStr(d) + ' &middot; ' + clock(t); }
+  /* Same thing without markup, for anywhere the string is escaped on the way
+     in (NL.confirm/prompt messages) rather than inserted as HTML. */
+  function whenText(d, t) { return dow(d) + ' ' + prettyDate(d) + ' · ' + clock(t); }
   function toISO(d) { var p = String(d).split('/'); return p[2] + '-' + p[1] + '-' + p[0]; }
   function fromISO(v) { var p = String(v).split('-'); return p[2] + '/' + p[1] + '/' + p[0]; }
   function todayISO() { return new Date().toISOString().slice(0, 10); }
@@ -739,13 +759,14 @@
           '<button type="button" class="btn btn--ghost" data-act="result">Result</button>') +
       '</div>' + historyBlock(f) + refBlock(f);
 
-    var buttons = [];
-    if (f.manual) buttons.push({ label: 'Delete fixture', className: 'btn btn--danger',
-      onClick: function (c) { c.close(); confirmDelete(f); } });
-    buttons.push({ label: 'Close', className: 'btn btn--ghost', onClick: function (c) { c.close(); } });
+    var buttons = [
+      { label: 'Delete fixture', className: 'btn btn--danger',
+        onClick: function (c) { c.close(); confirmDelete(f); } },
+      { label: 'Close', className: 'btn btn--ghost', onClick: function (c) { c.close(); } }
+    ];
 
     var ctrl = NL.modal({
-      title: f.home + ' v ' + f.away, body: body, buttons: buttons, footerSplit: !!f.manual
+      title: f.home + ' v ' + f.away, body: body, buttons: buttons, footerSplit: true
     });
     ctrl.body.querySelectorAll('[data-act]').forEach(function (b) {
       b.addEventListener('click', function () {
@@ -902,12 +923,20 @@
     });
   }
 
-  /* Only manually-added fixtures can be deleted. A league fixture is part
-     of the published programme; removing one would leave a hole. */
+  /* Any fixture can be deleted — a mis-added row has to be removable. What
+     differs is the cost, so the warning names it: an Opta-keyed fixture comes
+     back on the next import of the sheet (same key), a hand-added one does
+     not, and neither brings its history back. */
   function confirmDelete(f) {
-    NL.confirm('Delete ' + f.home + ' v ' + f.away + '?', {
+    var n = histOf(f.recordID).length;
+    var lost = n ? n + (n === 1 ? ' history entry goes' : ' history entries go') + ' with it. ' : '';
+    NL.confirm(
+      f.home + ' v ' + f.away + '\n' + f.competition + ' · ' +
+        (f.status === 'postponed' ? 'awaiting a new date' : whenText(f.date, f.kickoff)), {
       title: 'Delete this fixture?',
-      detail: 'Its scheduling history goes with it. This cannot be undone.',
+      detail: lost + (f.optaID
+        ? 'Re-importing the sheet restores the fixture' + (n ? ', but not its history.' : '.')
+        : 'Nothing re-creates it — this one was added by hand.'),
       confirmText: 'Delete', variant: 'danger'
     }).then(function (ok) {
       if (!ok) return;
@@ -979,13 +1008,13 @@
   }
 
   /* ---- Import ---------------------------------------------------------- */
-  var IMP = { rows: [], head: [], map: {}, comp: 'FA Cup' };
+  var IMP = { rows: [], head: [], map: {}, comp: 'National' };
   var FIELDS = [
     { key: 'date',  label: 'Date',      req: true },
     { key: 'ko',    label: 'Kick-off',  req: true },
     { key: 'home',  label: 'Home club', req: true },
     { key: 'away',  label: 'Away club', req: true },
-    { key: 'round', label: 'Round',     req: false },
+    { key: 'round', label: 'Matchday / Round', req: false },
     { key: 'opta',  label: 'Opta ID',   req: false }
   ];
 
@@ -1008,12 +1037,20 @@
      sheet with no header row still maps sensibly. */
   function guessMap(head, rows) {
     var m = {}, used = {};
-    var want = { date: /date|day/i, ko: /kick|time|ko\b/i, home: /home/i,
-                 away: /away|opponent|visitor/i, round: /round|stage|md|matchday/i,
-                 opta: /opta|match ?id|id\b/i };
-    head.forEach(function (h, i) {
-      Object.keys(want).forEach(function (k) {
-        if (!used[i] && m[k] == null && want[k].test(h)) { m[k] = i; used[i] = 1; }
+    /* Order matters: the most specific pattern must claim a column first.
+       `date: /date|day/i` used to swallow "Matchday" — every row then came
+       back unreadable because the date column was the matchday number. */
+    var want = [
+      ['opta',  /opta|match ?id/i],
+      ['round', /matchday|round|stage|^\s*md\s*$/i],
+      ['ko',    /kick.?off|\btime\b|^\s*ko\s*$/i],
+      ['date',  /date/i],
+      ['home',  /home/i],
+      ['away',  /away|opponent|visitor/i]
+    ];
+    want.forEach(function (pair) {
+      head.forEach(function (h, i) {
+        if (!used[i] && m[pair[0]] == null && pair[1].test(h)) { m[pair[0]] = i; used[i] = 1; }
       });
     });
     var sample = rows[0] || [];
@@ -1030,15 +1067,15 @@
 
   function impStep1() {
     NL.modal({
-      title: 'Add cup fixtures', width: 'wide',
+      title: 'Import fixtures', width: 'wide',
       body: '<div class="fx-steps"><span class="is-on">1 Paste</span><span>2 Match columns</span><span>3 Check</span></div>' +
         '<p class="text-body" style="margin:0 0 12px;">Paste rows straight from a spreadsheet, or a CSV. ' +
         '<strong>Column order does not matter</strong> &mdash; you match them up on the next step. ' +
         'Include a header row if you have one.</p>' +
         '<div class="fx-needs"><span>Needs:</span><code>Date</code><code>Kick-off</code>' +
-        '<code>Home</code><code>Away</code><span>optional:</span><code>Round</code><code>Opta ID</code></div>' +
+        '<code>Home</code><code>Away</code><span>optional:</span><code>Matchday</code><code>Opta ID</code></div>' +
         '<div class="form-group"><textarea id="fxImpText" rows="7" ' +
-        'placeholder="Round&#9;Date&#9;Kick Off&#9;Home&#9;Away&#10;R3&#9;Tue, 13 Oct 2026&#9;7:45 PM&#9;Morecambe&#9;Tottenham Hotspur"></textarea></div>',
+        'placeholder="Matchday&#9;Date&#9;Kick Off&#9;Home&#9;Away&#9;Opta ID&#10;1&#9;Sat, 8 Aug 2026&#9;3:00 PM&#9;AFC Fylde&#9;Wealdstone&#9;g2660046"></textarea></div>',
       buttons: [
         { label: 'Cancel', className: 'btn btn--ghost', onClick: function (c) { c.close(); } },
         { label: 'Next', className: 'btn btn--primary', onClick: function (c) {
@@ -1070,7 +1107,7 @@
         ' rows read. Point each field at the right column.</p>' +
         '<div class="fx-map">' +
         '<div class="form-group"><label>Competition</label><select id="fxImpComp">' +
-          ['FA Cup', 'FA Trophy', 'NL Cup'].map(function (x) {
+          COMPS.map(function (x) {
             return '<option' + (x === IMP.comp ? ' selected' : '') + '>' + x + '</option>';
           }).join('') + '</select><div class="fx-map__sample">Applies to every row</div></div>' +
         FIELDS.map(function (f) {
@@ -1127,9 +1164,15 @@
       var d = grabDate(g(r, 'date'));
       var tp = grabTime(g(r, 'ko'));
       var home = g(r, 'home'), away = g(r, 'away');
+      /* The record key is the Opta ID when one is supplied — that is the
+         model, and it is already how attendance keys its submissions. Only
+         a fixture with no Opta ID at creation gets a minted key. */
+      var opta = g(r, 'opta').trim();
       return {
         date: d, kickoff: tp ? tp.t : '15:00', guessedPm: !!(tp && tp.guessed),
-        home: home, away: away, round: g(r, 'round'), opta: g(r, 'opta'),
+        home: home, away: away, round: g(r, 'round'), opta: opta,
+        recordID: opta || null,
+        exists: !!(opta && S.fixtures[opta]),
         ok: !!(d && home && away),
         homeNL: !!NL.clubs.byName(home), awayNL: !!NL.clubs.byName(away)
       };
@@ -1142,12 +1185,16 @@
     var bad = parsed.length - good.length;
     var freetext = good.filter(function (p) { return !p.homeNL || !p.awayNL; }).length;
     var guessed = good.filter(function (p) { return p.guessedPm; }).length;
+    var dupes = good.filter(function (p) { return p.exists; }).length;
+    var fresh = good.length - dupes;
 
     NL.modal({
       title: 'Check', width: 'wide',
       body: '<div class="fx-steps"><span>1 Paste</span><span>2 Match columns</span><span class="is-on">3 Check</span></div>' +
-        '<p class="text-secondary" style="margin:0 0 10px;">' + good.length + ' ready to import as <strong>' +
-        esc(IMP.comp) + '</strong>' + (bad ? ' &middot; <span style="color:var(--primary);">' + bad + ' unreadable</span>' : '') +
+        '<p class="text-secondary" style="margin:0 0 10px;">' + fresh + ' to import as <strong>' +
+        esc(IMP.comp) + '</strong>' +
+        (dupes ? ' &middot; <strong>' + dupes + ' already here</strong>, which will be updated' : '') +
+        (bad ? ' &middot; <span style="color:var(--primary);">' + bad + ' unreadable</span>' : '') +
         (freetext ? ' &middot; ' + freetext + ' with a non-League club' : '') + '</p>' +
         (guessed ? '<div class="fx-map__note">' + guessed + ' row' + (guessed === 1 ? ' has a time' : 's have times') +
           ' with no am/pm, read as afternoon. Check the Kick-off column below.</div>' : '') +
@@ -1160,7 +1207,8 @@
             '<td' + (p.homeNL ? '' : ' class="is-new"') + '>' + (p.home ? esc(p.home) : '&mdash;') + '</td>' +
             '<td' + (p.awayNL ? '' : ' class="is-new"') + '>' + (p.away ? esc(p.away) : '&mdash;') + '</td>' +
             '<td' + (p.opta ? '' : ' class="is-new"') + '>' +
-              esc(p.opta || (OPTA_EXPECTED[IMP.comp] ? 'awaiting' : 'not issued')) + '</td></tr>';
+              esc(p.opta || (OPTA_EXPECTED[IMP.comp] ? 'awaiting' : 'not issued')) +
+              (p.exists ? ' <span class="fx-dupe">already here</span>' : '') + '</td></tr>';
         }).join('') + '</tbody></table></div>' +
         '<p class="form-hint">Italic clubs are not in the League &mdash; kept as typed. ' +
         (OPTA_EXPECTED[IMP.comp]
@@ -1170,28 +1218,57 @@
         { label: 'Back', className: 'btn btn--ghost', onClick: function (c) { c.close(); impStep2(); } },
         { label: 'Cancel', className: 'btn btn--ghost', onClick: function (c) { c.close(); } },
         { label: 'Import ' + good.length, className: 'btn btn--primary', onClick: function (c) {
-            var updates = {}, n = 0;
+            var updates = {}, minted = 0;
             good.forEach(function (p) {
-              /* The record needs a key, but that key is NOT an Opta ID.
-                 Minting an Opta-looking value would make a fabricated ID
-                 indistinguishable from a real one. */
-              var id = 'nlf-' + S.season + '-' + String(Date.now()).slice(-8) + '-' + (n++);
+              /* Minted keys are NOT Opta-shaped: a fabricated ID must stay
+                 distinguishable from a real one. */
+              var id = p.recordID ||
+                ('nlf-' + S.season + '-' + String(Date.now()).slice(-8) + '-' + (minted++));
+              var prev = S.fixtures[id];
               updates[id] = {
-                recordID: id, optaID: p.opta || null, manual: true,
+                recordID: id, optaID: p.opta || null,
                 competition: IMP.comp, matchday: p.round || '',
                 home: p.home, away: p.away,
-                originalDate: p.date, originalKickoff: p.kickoff,
+                /* Re-importing must not rewrite history. The ORIGINAL date is
+                   set once, on first sight; the current date follows the
+                   sheet. A fixture already moved in the tool keeps its status
+                   and score. */
+                originalDate: prev ? prev.originalDate : p.date,
+                originalKickoff: prev ? prev.originalKickoff : p.kickoff,
                 date: p.date, kickoff: p.kickoff,
-                status: 'scheduled', homeScore: null, awayScore: null,
-                createdAt: stamp(), createdBy: S.session && S.session.uid || null
+                status: prev ? prev.status : 'scheduled',
+                homeScore: prev ? prev.homeScore : null,
+                awayScore: prev ? prev.awayScore : null,
+                createdAt: prev ? prev.createdAt : stamp(),
+                createdBy: prev ? prev.createdBy : (S.session && S.session.uid || null)
               };
             });
-            firebase.database().ref(seasonPath('fixtures')).update(updates).then(function () {
-              Object.keys(updates).forEach(function (k) { S.fixtures[k] = updates[k]; });
-              NL.writeAudit('fixture_import', { competition: IMP.comp, count: n });
-              c.close(); render();
-              NL.toast(n + ' fixture' + (n === 1 ? '' : 's') + ' imported', 'success');
-            }).catch(function (e) { NL.toast('Import failed: ' + (e.message || e), 'error'); });
+
+            /* 1,656 records in one write is a large payload; chunk it so a
+               single failure does not lose the lot. */
+            var keys = Object.keys(updates), CHUNK = 400, jobs = [];
+            for (var i = 0; i < keys.length; i += CHUNK) {
+              var slice = {};
+              keys.slice(i, i + CHUNK).forEach(function (k) { slice[k] = updates[k]; });
+              jobs.push(slice);
+            }
+            var done = 0;
+            (function next() {
+              if (!jobs.length) {
+                keys.forEach(function (k) { S.fixtures[k] = updates[k]; });
+                NL.writeAudit('fixture_import', { competition: IMP.comp, count: done });
+                c.close(); render();
+                NL.toast(done + ' fixture' + (done === 1 ? '' : 's') + ' imported', 'success');
+                return;
+              }
+              var batch = jobs.shift();
+              firebase.database().ref(seasonPath('fixtures')).update(batch).then(function () {
+                done += Object.keys(batch).length;
+                next();
+              }).catch(function (e) {
+                NL.toast('Import stopped after ' + done + ': ' + (e.message || e), 'error');
+              });
+            }());
           } }
       ]
     });
