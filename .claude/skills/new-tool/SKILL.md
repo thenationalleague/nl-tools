@@ -20,7 +20,10 @@ canonical template at `system/_template/index.html`.
    - `title` — Human-readable. e.g. `DAZN VIP`.
    - `key category` — One of `staff`, `ops`, `media`. The toolKey
      becomes `<category>-<slug>` (e.g. `media-dazn-vip`).
-   - `description` — One-line summary shown in the header. Keep tight.
+   - `description` — One-line summary for the file's header COMMENT and the
+     portal card. It is not rendered on the page: the topbar already shows
+     the tool title, so don't add an <h1> or a description paragraph to the
+     body. Lint fails an <h1> that repeats the tool title.
 
 2. **Refuse if the slug directory already exists.** Use `Read` or
    `Bash ls` to check `<slug>/`. If it exists, stop and tell the user.
