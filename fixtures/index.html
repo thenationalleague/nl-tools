@@ -1,10 +1,18 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixtures
-  Version: v0.8 (30/07/2026)
+  Version: v0.9 (30/07/2026)
   File: /fixtures/index.html
 
   CHANGELOG
+    v0.9 (30/07/2026) — Broadcast block: Broadcast, Production, AMI and
+      DAZN-moved, importable and editable. Stored in its own staff-only
+      RTDB node because fixtures are readable by any signed-in user and
+      none of this is for clubs. Broadcast is a stored CODE with a
+      display label, so renaming Worldwide costs one line, not 1,656
+      records. Production and AMI are gated on the game being shown and
+      clear when it stops being; DAZN-moved is not, because it records
+      that DAZN moved the fixture, not that DAZN is showing it.
     v0.8 (30/07/2026) — Competition is now a REQUIRED column and the
       dropdown is gone. A control that applies one competition to every
       row is the mis-selection risk itself; removing it removes the
@@ -112,6 +120,16 @@
     var NL_TOOL_KEY = 'ops-fixtures';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/07/2026',
+        version: 'v0.9',
+        items: [
+          'Broadcast, Production, AMI and \u201cMoved by DAZN\u201d can be imported alongside the fixtures, and edited on any fixture.',
+          'A blank Broadcast cell comes in as TBC; blank Production, AMI and DAZN come in unticked. A broadcast value the tool does not recognise is named on screen and the fixture still imports, as TBC.',
+          'Production and AMI only apply to a game that is actually being shown, and clear if it stops being. \u201cMoved by DAZN\u201d is separate \u2014 DAZN can move a game it is not showing.',
+          'None of this is visible to clubs. It is held in a staff-only part of the database, not merely hidden on screen.'
+        ]
+      },
       {
         date: '30/07/2026',
         version: 'v0.8',
@@ -358,6 +376,19 @@
      the labels in a default-width modal. */
   .fx-choice { display: flex; gap: 8px; flex-wrap: wrap; }
   .fx-choice .btn { flex: 1 1 120px; justify-content: center; }
+  /* Broadcast block in the fixture dialog */
+  .fx-bcast { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 13px; }
+  .fx-bcast .form-group { margin-bottom: 10px; }
+  .fx-ticks { display: flex; flex-direction: column; gap: 7px; }
+  .fx-tick { display: flex; align-items: center; gap: 8px; font-size: 13px;
+             font-variation-settings: 'wght' 700; cursor: pointer; }
+  .fx-tick input { margin: 0; }
+  /* Greyed rather than hidden: "not applicable because the game is not being
+     shown" is information, where a vanishing control is just confusing. */
+  .fx-tick.is-off { color: var(--text-muted); cursor: default; }
+  .fx-tick__hint { font-size: 11.5px; font-variation-settings: 'wght' 400;
+                   color: var(--text-muted); }
+
   .fx-ref { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 13px; }
   .fx-ref summary { font-size: 11.5px; font-variation-settings: 'wght' 800; letter-spacing: .05em;
                     text-transform: uppercase; color: var(--text-muted); cursor: pointer; }
@@ -520,7 +551,7 @@
   var BASE = 'app-data/ops-fixtures';
   var S = {
     season: null, session: null, role: null, isClub: false, club: null,
-    fixtures: {}, history: {}, notes: {},
+    fixtures: {}, history: {}, notes: {}, bcast: {},
     tab: 'all', comps: {}, venue: 'all', md: '', club1: null,
     picker: null, booted: false
   };
@@ -675,6 +706,9 @@
       jobs.push(db.ref(seasonPath('notes')).once('value')
         .then(function (s) { S.notes = s.val() || {}; })
         .catch(function () { S.notes = {}; }));
+      jobs.push(db.ref(seasonPath('broadcast')).once('value')
+        .then(function (s) { S.bcast = s.val() || {}; })
+        .catch(function () { S.bcast = {}; }));
     }
     return Promise.all(jobs);
   }
@@ -905,7 +939,7 @@
           (f.homeScore != null && f.awayScore != null
             ? '<button type="button" class="btn btn--ghost" data-act="clearresult">Remove result</button>'
             : '')) +
-      '</div>' + historyBlock(f) + refBlock(f);
+      '</div>' + bcastBlock(f) + historyBlock(f) + refBlock(f);
 
     var buttons = [
       { label: 'Delete fixture', className: 'btn btn--danger',
@@ -931,6 +965,7 @@
     ctrl.body.querySelectorAll('[data-fxopta]').forEach(function (b) {
       b.addEventListener('click', function () { ctrl.close(); askOpta(f); });
     });
+    wireBcast(ctrl, f);
   }
 
   function reasonField(typical) {
@@ -1180,6 +1215,67 @@
     return '<span class="fx-none">Not issued</span> ' + btn;
   }
 
+  /* Broadcast, production, AMI, DAZN-moved. Staff only — the club view never
+     reaches openEdit. Production and AMI are gated on the game actually being
+     shown: DAZN's camera call means nothing on a game nobody is covering.
+     DAZN-moved is NOT gated, because it records that DAZN moved the fixture,
+     which says nothing about whether the game ends up on DAZN. */
+  function bcastBlock(f) {
+    var b = bcastOf(f.recordID) || {};
+    var code = b.status || 'tbc';
+    var shown = isShown(code);
+    return '<div class="fx-bcast">' +
+      '<div class="form-group"><label for="fxBcast">Broadcast</label>' +
+      '<select id="fxBcast">' + BCAST.map(function (o) {
+        return '<option value="' + o.code + '"' + (o.code === code ? ' selected' : '') +
+          '>' + esc(o.label) + '</option>';
+      }).join('') + '</select></div>' +
+      '<div class="fx-ticks" id="fxTicks">' +
+      '<label class="fx-tick' + (shown ? '' : ' is-off') + '">' +
+        '<input type="checkbox" id="fxEnh"' + (b.enhanced ? ' checked' : '') +
+        (shown ? '' : ' disabled') + '> Enhanced production' +
+        '<span class="fx-tick__hint">' + (shown ? 'Basic unless ticked' : 'Not being shown') + '</span></label>' +
+      '<label class="fx-tick' + (shown ? '' : ' is-off') + '">' +
+        '<input type="checkbox" id="fxAmi"' + (b.ami ? ' checked' : '') +
+        (shown ? '' : ' disabled') + '> Sent to AMI</label>' +
+      '<label class="fx-tick">' +
+        '<input type="checkbox" id="fxDazn"' + (b.daznMoved ? ' checked' : '') +
+        '> Moved by DAZN<span class="fx-tick__hint">Whether or not it is shown</span></label>' +
+      '</div></div>';
+  }
+
+  function wireBcast(ctrl, f) {
+    var sel = ctrl.body.querySelector('#fxBcast');
+    if (!sel) return;
+    function save() {
+      var code = sel.value, shown = isShown(code);
+      var rec = {
+        status: code,
+        /* Leaving a state where the game is shown clears the settings that
+           only make sense there, rather than leaving stale production detail
+           attached to a game nobody is covering. */
+        enhanced: shown && ctrl.body.querySelector('#fxEnh').checked,
+        ami: shown && ctrl.body.querySelector('#fxAmi').checked,
+        daznMoved: ctrl.body.querySelector('#fxDazn').checked
+      };
+      S.bcast[f.recordID] = rec;
+      firebase.database().ref(seasonPath('broadcast') + '/' + f.recordID).set(rec)
+        .then(function () {
+          NL.writeAudit('fixture_broadcast', { recordID: f.recordID, status: code });
+          render();
+        })
+        .catch(function (e) { NL.toast('Could not save — ' + ((e && e.message) || e), 'error'); });
+      /* Re-render so the gating follows the selection immediately. */
+      var holder = ctrl.body.querySelector('.fx-bcast');
+      if (holder) { holder.outerHTML = bcastBlock(f); wireBcast(ctrl, f); }
+    }
+    sel.addEventListener('change', save);
+    ['#fxEnh', '#fxAmi', '#fxDazn'].forEach(function (id) {
+      var el = ctrl.body.querySelector(id);
+      if (el) el.addEventListener('change', save);
+    });
+  }
+
   function refBlock(f) {
     return '<details class="fx-ref"><summary>Reference</summary><dl>' +
       '<dt>Opta match ID</dt><dd>' + optaCell(f) + '</dd>' +
@@ -1205,7 +1301,14 @@
        the column too — one word repeated down a column. */
     { key: 'comp',  label: 'Competition', req: true },
     { key: 'round', label: 'Matchday / Round', req: false },
-    { key: 'opta',  label: 'Opta ID',   req: false }
+    { key: 'opta',  label: 'Opta ID',   req: false },
+    /* Broadcast block. All optional: a fixture sheet without them is still a
+       valid fixture sheet, and a blank cell is a real state (not ticked /
+       not decided), not missing data. */
+    { key: 'bcast', label: 'Broadcast',  req: false },
+    { key: 'prod',  label: 'Production', req: false },
+    { key: 'ami',   label: 'AMI',        req: false },
+    { key: 'dazn',  label: 'DAZN moved', req: false }
   ];
 
   /* Sheet spellings the tool should accept for a competition, so a paste does
@@ -1225,6 +1328,51 @@
   function normComp(v) {
     return COMP_ALIAS[String(v == null ? '' : v).trim().toLowerCase()] || null;
   }
+
+  /* ---- Broadcast -------------------------------------------------------
+     Stored as a CODE, displayed as a LABEL. The label is the part that gets
+     renamed — "Worldwide" was very nearly "UK" — and a rename must not mean
+     rewriting every fixture. Same split the postponement reasons already
+     use. Codes here are permanent; edit the labels freely.
+
+     Lives in its own RTDB node, NOT on the fixture: fixtures are readable by
+     any signed-in user so clubs can see their own games, and none of this is
+     for them. Rules put it alongside history and notes. */
+  var BCAST = [
+    { code: 'tbc',          label: 'TBC' },
+    { code: 'not-selected', label: 'Not selected' },
+    { code: 'unavailable',  label: 'Unavailable' },
+    { code: 'overseas',     label: 'Overseas' },
+    { code: 'worldwide',    label: 'Worldwide' }
+  ];
+  var BCAST_LABEL = {};
+  BCAST.forEach(function (b) { BCAST_LABEL[b.code] = b.label; });
+  /* Only Overseas and Worldwide mean the game is actually being shown, which
+     is what gates production, AMI and the derived "Televised". */
+  function isShown(code) { return code === 'overseas' || code === 'worldwide'; }
+
+  function normBcast(v) {
+    var s = String(v == null ? '' : v).trim().toLowerCase();
+    if (!s) return 'tbc';                 /* blank on import reads as TBC */
+    var hit = null;
+    BCAST.forEach(function (b) { if (b.code === s || b.label.toLowerCase() === s) hit = b.code; });
+    if (hit) return hit;
+    if (s === 'uk') return 'worldwide';   /* the rename that was considered */
+    if (s === 'none' || s === 'no') return 'not-selected';
+    return null;                          /* unrecognised — reported, not guessed */
+  }
+  /* Spreadsheet truthiness. A blank cell is false, which is what a tick-box
+     column looks like when it is not ticked. */
+  function normTick(v) {
+    var s = String(v == null ? '' : v).trim().toLowerCase();
+    return s === 'y' || s === 'yes' || s === 'true' || s === '1' || s === 'x' || s === '✓';
+  }
+  /* Production is Basic unless elevated, so the stored value is the tick. */
+  function normEnhanced(v) {
+    var s = String(v == null ? '' : v).trim().toLowerCase();
+    return s === 'enhanced' || normTick(v);
+  }
+  function bcastOf(id) { return S.bcast[id] || null; }
 
   /* Excel pastes are tab-separated; a saved file is CSV. Pick whichever the
      first line has more of, then hand CSV to the canon parser. */
@@ -1251,6 +1399,10 @@
     var want = [
       ['opta',  /opta|match ?id/i],
       ['comp',  /competition|division|^\s*comp\b/i],
+      ['bcast', /broadcast|availability/i],
+      ['prod',  /production/i],
+      ['ami',   /^\s*ami\s*$/i],
+      ['dazn',  /^\s*dazn\s*$/i],
       ['round', /matchday|round|stage|^\s*md\s*$/i],
       /* date BEFORE ko. A single "Date & Time" column matches both, and if ko
          claims it first the column is consumed and Date maps to nothing —
@@ -1383,10 +1535,16 @@
          row fails visibly instead of landing in the wrong competition. */
       var rawComp = g(r, 'comp').trim();
       var comp = normComp(rawComp);
+      var rawB = g(r, 'bcast').trim();
+      var bcast = normBcast(rawB);
       return {
         date: d, kickoff: tp ? tp.t : '15:00', guessedPm: !!(tp && tp.guessed),
         home: home, away: away, round: g(r, 'round'), opta: opta,
         comp: comp, rawComp: rawComp,
+        bcast: bcast, rawBcast: rawB,
+        enhanced: normEnhanced(g(r, 'prod')),
+        ami: normTick(g(r, 'ami')),
+        daznMoved: normTick(g(r, 'dazn')),
         recordID: opta || null,
         exists: !!(opta && S.fixtures[opta]),
         ok: !!(d && home && away && comp),
@@ -1416,6 +1574,15 @@
       if (p.rawComp && !p.comp) badComp[p.rawComp] = (badComp[p.rawComp] || 0) + 1;
     });
     var badCompNames = Object.keys(badComp);
+    /* Same treatment for a broadcast value we cannot place. It does NOT fail
+       the row — the fixture is still a fixture — but it is named rather than
+       silently becoming TBC. */
+    var badB = {};
+    parsed.forEach(function (p) {
+      if (p.rawBcast && !p.bcast) badB[p.rawBcast] = (badB[p.rawBcast] || 0) + 1;
+    });
+    var badBNames = Object.keys(badB);
+    var bcastMapped = IMP.map.bcast != null && IMP.map.bcast !== '';
 
     NL.modal({
       title: 'Check', width: 'wide',
@@ -1425,6 +1592,12 @@
         (dupes ? ' &middot; <strong>' + dupes + ' already here</strong>, which will be updated' : '') +
         (bad ? ' &middot; <span style="color:var(--primary);">' + bad + ' unreadable</span>' : '') +
         (freetext ? ' &middot; ' + freetext + ' with a non-League club' : '') + '</p>' +
+        (badBNames.length
+          ? '<div class="fx-map__note"><strong>Broadcast not recognised</strong> on ' +
+            badBNames.map(function (n) {
+              return badB[n] + ' row' + (badB[n] === 1 ? '' : 's') + ' reading &ldquo;' + esc(n) + '&rdquo;';
+            }).join(', ') + '. Those fixtures import, but come in as TBC.</div>'
+          : '') +
         (badCompNames.length
           ? '<div class="fx-map__note"><strong>Competition not recognised</strong> on ' +
             badCompNames.map(function (n) {
@@ -1498,6 +1671,28 @@
               };
             });
 
+            /* The broadcast block is written separately because it lives in
+               a staff-only node — fixtures are readable by any signed-in
+               user so a club can see its own games, and none of this is for
+               them. Only written when the paste actually carried the
+               columns, so a plain fixture sheet cannot wipe it. */
+            var bUpdates = null;
+            if (bcastMapped || ['prod', 'ami', 'dazn'].some(function (k) {
+              return IMP.map[k] != null && IMP.map[k] !== '';
+            })) {
+              bUpdates = {};
+              good.forEach(function (p) {
+                var id = p.recordID || null;
+                if (!id) return;   /* minted ids are assigned below */
+                bUpdates[id] = {
+                  status: p.bcast || 'tbc',
+                  enhanced: !!p.enhanced,
+                  ami: !!p.ami,
+                  daznMoved: !!p.daznMoved
+                };
+              });
+            }
+
             /* 1,656 records in one write is a large payload; chunk it so a
                single failure does not lose the lot. */
             var keys = Object.keys(updates), CHUNK = 400, jobs = [];
@@ -1518,6 +1713,11 @@
             (function next() {
               if (!jobs.length) {
                 keys.forEach(function (k) { S.fixtures[k] = updates[k]; });
+                if (bUpdates && Object.keys(bUpdates).length) {
+                  Object.keys(bUpdates).forEach(function (k) { S.bcast[k] = bUpdates[k]; });
+                  firebase.database().ref(seasonPath('broadcast')).update(bUpdates)
+                    .catch(function (e) { failed(e); });
+                }
                 NL.writeAudit('fixture_import', { competitions: compList.replace(/ &middot; /g, ', '), count: done });
                 c.close(); render();
                 NL.toast(done + ' fixture' + (done === 1 ? '' : 's') + ' imported', 'success');
