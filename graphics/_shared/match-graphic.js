@@ -34,16 +34,18 @@
      Crests    drawn untreated. No outline, box or shadow.
 
    FORMATS
-     16x9  1920x1080  landscape, seam leans off vertical, home left
-     1x1   1080x1080  square, same vertical seam, tighter type
-     4x5   1080x1350  portrait-ish, still a vertical seam, home left
-     9x16  1080x1920  tall portrait, seam leans off HORIZONTAL, home top
+     16x9  1920x1080  landscape, seam leans off vertical,   home left
+     1x1   1080x1080  square,    same vertical seam,        home left
+     4x5   1080x1350  portrait,  seam leans off HORIZONTAL, home top
+     9x16  1080x1920  portrait,  seam leans off HORIZONTAL, home top
 
-     4:5 is still wide enough for a vertical seam. 9:16 is not — it would
-     leave two 540px slivers with nowhere for a crest — so the tall portrait
-     splits the other way and stacks the clubs. Everything else — colours,
-     band order, badge on the seam — is identical, so all four formats read
-     as one family.
+     Both portrait frames stack. They are only 1080 wide, so a vertical seam
+     leaves about 500px per club — enough for a crest, but it squeezes the
+     code badly (4:5 needed 138px side by side against 170px stacked).
+     Splitting horizontally gives each club the full width. 1:1 keeps the
+     vertical seam because a square has no better axis to split on.
+     Everything else — colours, band order, badge on the seam — is identical,
+     so all four formats read as one family.
 
    VERSION
      Bump RENDER_VERSION on any change that alters output pixels. The batch
@@ -69,7 +71,13 @@
        seamA/B  seam position at each end of the cross axis
        bands    [primary, secondary, tertiary] outward from the seam
        laneA/B  centre of the home / away crest-and-code block, on the
-                split axis (x for 'x', y for 'y') */
+                split axis (x for 'x', y for 'y')
+       badgeBox [maxW, maxH] the competition mark is fitted inside. Both
+                dimensions are bounded, so the portrait NL Cup mark gets
+                narrower rather than taller than a division mark. Bounding
+                height alone let the Cup badge grow well past the landscape
+                marks and crowd the clubs, badly so in the stacked formats
+                where it sits between them rather than beside them. */
   var FORMATS = {
     '16x9': {
       w: 1920, h: 1080, split: 'x',
@@ -77,7 +85,7 @@
       bands: [50, 25, 25],
       crestH: 292, codeSize: 202, codeGap: 44,
       laneA: 440, laneB: 1480,
-      badgeLandscape: 270, badgePortrait: 340
+      badgeBox: [400, 300]
     },
     '1x1': {
       w: 1080, h: 1080, split: 'x',
@@ -89,7 +97,7 @@
          code at this size otherwise runs right up to the badge plate. These
          values leave about 30px of clear panel either side of it. */
       laneA: 230, laneB: 850,
-      badgeLandscape: 160, badgePortrait: 202
+      badgeBox: [240, 190]
     },
     '4x5': {
       /* Stacked, like 9:16. At 1080 wide a vertical seam leaves only ~500px
@@ -101,7 +109,7 @@
       bands: [40, 20, 20],
       crestH: 250, codeSize: 170, codeGap: 40,
       laneA: 330, laneB: 1020,
-      badgeLandscape: 200, badgePortrait: 252
+      badgeBox: [330, 215]
     },
     '9x16': {
       w: 1080, h: 1920, split: 'y',
@@ -109,7 +117,7 @@
       bands: [44, 22, 22],
       crestH: 336, codeSize: 224, codeGap: 48,
       laneA: 470, laneB: 1450,
-      badgeLandscape: 268, badgePortrait: 336
+      badgeBox: [420, 290]
     }
   };
 
@@ -292,10 +300,14 @@
 
   /* ---------- drawing ---------- */
 
-  function drawContain(ctx, img, cx, cy, maxH) {
+  /* Fit inside maxH, and inside maxW too when one is given. Without a width
+     bound a portrait image scales up until its height matches, which is what
+     let the Cup badge overwhelm the layout. */
+  function drawContain(ctx, img, cx, cy, maxH, maxW) {
     if (!img || !img.width) return 0;
     var scale = maxH / img.height;
-    var w = img.width * scale, h = maxH;
+    if (maxW) scale = Math.min(scale, maxW / img.width);
+    var w = img.width * scale, h = img.height * scale;
     ctx.drawImage(img, cx - w / 2, cy - h / 2, w, h);
     return w;
   }
@@ -355,9 +367,8 @@
     /* Competition badge, centred on the seam. It carries its own white
        plate and black border, so it needs no light/dark variant. */
     if (assets.badge) {
-      var portrait = assets.badge.height > assets.badge.width;
       drawContain(ctx, assets.badge, fmt.w / 2, fmt.h / 2,
-                  portrait ? fmt.badgePortrait : fmt.badgeLandscape);
+                  fmt.badgeBox[1], fmt.badgeBox[0]);
     }
 
     return {

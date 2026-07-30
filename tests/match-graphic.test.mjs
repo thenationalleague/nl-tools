@@ -80,14 +80,39 @@ test('a stacked format gives its code more room than the square', () => {
 
 test('every format carries a complete geometry set', () => {
   const need = ['w', 'h', 'split', 'seamA', 'seamB', 'bands', 'crestH',
-                'codeSize', 'codeGap', 'laneA', 'laneB',
-                'badgeLandscape', 'badgePortrait'];
+                'codeSize', 'codeGap', 'laneA', 'laneB', 'badgeBox'];
   for (const [name, f] of Object.entries(MG.FORMATS)) {
     for (const k of need) {
       assert.ok(f[k] !== undefined, `${name} is missing ${k}`);
     }
     assert.equal(f.bands.length, 3, `${name} needs three band widths`);
     assert.ok(f.laneA < f.laneB, `${name} lanes must be ordered`);
+    assert.equal(f.badgeBox.length, 2, `${name} badgeBox needs [maxW, maxH]`);
+  }
+});
+
+test('the badge box bounds width as well as height', () => {
+  /* The portrait NL Cup mark is 2400x3303. Bounding only its height let it
+     grow far past the landscape division marks and crowd the clubs — worst in
+     the stacked formats, where it sits between them rather than beside them.
+     Every box must therefore keep the Cup mark no taller than the box. */
+  const CUP = 2400 / 3303;
+  for (const [name, f] of Object.entries(MG.FORMATS)) {
+    const [maxW, maxH] = f.badgeBox;
+    const scale = Math.min(maxH / 3303, maxW / 2400);
+    const h = 3303 * scale, w = 2400 * scale;
+    assert.ok(h <= maxH + 0.001, `${name}: cup badge ${h} exceeds maxH ${maxH}`);
+    assert.ok(w <= maxW + 0.001, `${name}: cup badge ${w} exceeds maxW ${maxW}`);
+    assert.ok(Math.abs(w / h - CUP) < 0.001, `${name}: aspect not preserved`);
+  }
+});
+
+test('the badge never occupies more than a third of the frame height', () => {
+  /* Stacked formats put the badge between the two clubs, so an oversized
+     badge steals room from both. */
+  for (const [name, f] of Object.entries(MG.FORMATS)) {
+    assert.ok(f.badgeBox[1] / f.h <= 0.34,
+              `${name}: badge box is ${(100 * f.badgeBox[1] / f.h).toFixed(0)}% of frame height`);
   }
 });
 
