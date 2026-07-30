@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Wellbeing map
-  Version: v1.6 (30/07/2026)
+  Version: v1.8 (30/07/2026)
   File: /wellbeing-map/index.html
 
   An editable map of the public Wellbeing section: every page as a box, every
@@ -46,6 +46,31 @@
   native confirm(). No colour here is a raw hex value.
 
   CHANGELOG
+  v1.8 (30/07/2026) — Direction of travel. Hovering a box now sends white dashes
+    riding along its arrows towards the end each one points at, so a route reads
+    as flowing rather than merely being coloured in. Hover only, deliberately:
+    twelve arrows pulsing permanently would be horrible to sit in front of, and
+    this is a wellbeing tool. It also honours prefers-reduced-motion by dropping
+    the flow line entirely rather than leaving a static dashed overlay, which
+    would just read as a broken arrow.
+
+    The thing this makes visible: two pages that point at each other used to draw
+    one line on top of another, so a two-way route looked exactly like a one-way
+    one. Each half of a pair now takes its own side, a few pixels apart, with its
+    own arrowhead and its own flow direction. The panel says "and back again"
+    when an arrow has a twin.
+  v1.7 (30/07/2026) — Everything about a third bigger: boxes, type on the canvas,
+    gaps, band padding, and the labels in the panel. The catch was that growing
+    the boxes also grew the canvas, so fit-to-width shrank it all straight back
+    and the increase cancelled itself out; the pages now sit three across rather
+    than five, which keeps the canvas narrow enough that Fit lands near 90%. The
+    map is taller as a result, which is the trade that was asked for.
+
+    Also a real bug rather than a size: a button inside a block is a flex item
+    with no min-width, so it refused to shrink below its own text and burst out
+    through the right-hand edge of the block — "Depression and low mood" hung
+    outside the box. It now shrinks, and wraps rather than truncating, because
+    these are a few words each and the point of them is to be read.
   v1.6 (30/07/2026) — Everything has more room: taller boxes, more space between
     rows, deeper bands. Fit is fit-to-width again, because fitting the height too
     meant a taller map shrank to stay on one screen — small text in exchange for
@@ -215,11 +240,24 @@
   }
   .wm-band--locked { background: var(--navy-100); border-style: solid; }
 
-  .wm-edges { position: absolute; inset: 0; overflow: visible; }
+  /* Pointer handling here needed two fixes, both of them long-standing.
+
+     The SVG spans the whole canvas, and an <svg> captures pointer events across
+     its whole box — so every click on empty canvas was landing on it rather than
+     on the band underneath, which is why clicking blank space to deselect did
+     nothing. It is transparent to the pointer now.
+
+     And within it, only the invisible wide path should be clickable. The drawn
+     paths — line, halo, flow dashes — sit above it, and an SVG stroke captures
+     pointer events, so the topmost decoration swallowed the click and the
+     generous 16px hit band only worked where you MISSED the line. */
+  .wm-edges { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
   .wm-edges path { fill: none; }
-  .wm-hit { stroke: transparent; stroke-width: 16; cursor: pointer; }
+  .wm-edges .wm-hit {
+    stroke: transparent; stroke-width: 16; cursor: pointer; pointer-events: stroke;
+  }
   .wm-lab {
-    font-family: var(--font); font-size: 11px; font-weight: 700;
+    font-family: var(--font); font-size: 14px; font-weight: 700;
     fill: var(--navy-700); paint-order: stroke;
     stroke: var(--white); stroke-width: 4px; stroke-linejoin: round;
     pointer-events: none;
@@ -242,29 +280,29 @@
        tokens as normal. */
   .wm-node {
     position: absolute; box-sizing: border-box;
-    width: 180px; min-height: 72px;
+    width: 234px; min-height: 114px;
     background: var(--white); border: 2px solid var(--navy-300);
     border-left-width: 6px; border-radius: var(--radius);
-    padding: 8px 10px 22px; cursor: grab; user-select: none;
+    padding: 11px 13px 28px; cursor: grab; user-select: none;
     box-shadow: 0 1px 3px var(--navy-100);
   }
   .wm-node:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
   .wm-node.is-drag { cursor: grabbing; box-shadow: var(--shadow); z-index: 30; }
   .wm-node.is-sel { border-color: var(--navy); box-shadow: 0 0 0 3px var(--navy-200); z-index: 20; }
   .wm-node__n {
-    font-size: 13px; font-weight: 900; line-height: 1.22; overflow-wrap: break-word;
+    font-size: 17px; font-weight: 900; line-height: 1.22; overflow-wrap: break-word;
   }
   .wm-node__k {
-    font-size: 10px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: var(--tracking-wide); color: var(--text-muted); margin-top: 3px;
+    font-size: 13px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: var(--tracking-wide); color: var(--text-muted); margin-top: 4px;
   }
   .wm-node__f {
-    position: absolute; left: 10px; bottom: 5px;
-    display: flex; gap: 5px; align-items: center;
+    position: absolute; left: 13px; bottom: 7px;
+    display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
   }
   .wm-chip {
-    font-size: 9px; font-weight: 900; line-height: 1;
-    padding: 3px 5px; border-radius: var(--radius-sm);
+    font-size: 12px; font-weight: 900; line-height: 1;
+    padding: 4px 7px; border-radius: var(--radius-sm);
     background: var(--navy-100); color: var(--navy-700);
   }
   .wm-chip--words { background: var(--green-light); color: var(--green); }
@@ -291,25 +329,32 @@
      with a list of buttons in it. Hover the block, or a row, to see where it
      reaches. */
   .wm-node--block { padding-bottom: 8px; }
-  .wm-rows { margin-top: 7px; border-top: 1px solid var(--navy-200); }
-  .wm-rows--two { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; }
-  .wm-node__note { margin: 7px 0 0; font-size: 11px; color: var(--text-muted); line-height: 1.3; }
+  .wm-rows { margin-top: 9px; border-top: 1px solid var(--navy-200); }
+  .wm-rows--two { display: grid; grid-template-columns: 1fr 1fr; column-gap: 18px; }
+  .wm-node__note { margin: 9px 0 0; font-size: 14px; color: var(--text-muted); line-height: 1.35; }
   .wm-row {
-    display: flex; align-items: center; gap: 6px;
-    padding: 3px 2px; border-bottom: 1px solid var(--navy-100);
-    font-size: 11px; line-height: 1.25; cursor: pointer;
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 5px 3px; border-bottom: 1px solid var(--navy-100);
+    font-size: 14px; line-height: 1.3; cursor: pointer;
   }
   .wm-row:last-child { border-bottom: 0; }
   .wm-row:hover { background: var(--navy-100); }
   .wm-row.is-sel { background: var(--navy-200); }
-  .wm-row__d { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--navy-300); }
+  .wm-row__d {
+    width: 10px; height: 10px; border-radius: 50%; flex: none;
+    margin-top: 4px; background: var(--navy-300);
+  }
   .wm-row__d--crisis   { background: var(--red); }
   .wm-row__d--urgent   { background: var(--amber); }
   .wm-row__d--everyday { background: var(--wm-yellow); }
   .wm-row__d--other    { background: var(--blue); }
   .wm-row__d--wayin    { background: var(--navy); }
-  .wm-row__t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .wm-row__g { margin-left: auto; color: var(--text-muted); font-weight: 700; }
+  /* min-width:0 is the fix. Without it the label is a flex item that refuses to
+     shrink below its content, so a button called "Depression and low mood" broke
+     out of the right-hand edge of the block. And it wraps rather than truncating:
+     these are a few words each and the point is to read them. */
+  .wm-row__t { min-width: 0; flex: 1; overflow-wrap: break-word; }
+  .wm-row__g { flex: none; color: var(--text-muted); font-weight: 700; }
 
   /* Hovering a box mutes everything it does not touch. Reading a diagram is
      mostly asking "what does THIS connect to", and dimming answers that
@@ -318,13 +363,34 @@
   .wm-node.is-lit { box-shadow: 0 0 0 4px var(--navy-100), 0 2px 10px var(--navy-200); }
   .wm-edges .is-dim { opacity: 0.12; }
 
+  /* Direction of travel. White dashes ride along the top of the line towards
+     the end it points at, so a hovered route reads as flowing rather than just
+     being coloured in. Only ever on hover: this is a wellbeing tool and
+     permanent motion on twelve arrows would be horrible to sit in front of.
+
+     A pair that goes both ways is drawn as two lines a few pixels apart, each
+     flowing its own way — which is the bit that was invisible before. */
+  .wm-flow {
+    stroke: var(--white); stroke-dasharray: 8 16; stroke-linecap: round;
+    animation: wmFlow 1.3s linear infinite;
+  }
+  @keyframes wmFlow {
+    from { stroke-dashoffset: 0; }
+    to   { stroke-dashoffset: -24; }
+  }
+  /* No motion means no flow line at all — a static dashed overlay would just
+     look like a broken arrow. The arrowhead still shows the direction. */
+  @media (prefers-reduced-motion: reduce) {
+    .wm-flow { display: none; }
+  }
+
   /* The port: press it and drag to another box to draw an arrow. */
   .wm-port {
-    position: absolute; right: -9px; bottom: -9px;
-    width: 20px; height: 20px; border-radius: 50%;
+    position: absolute; right: -12px; bottom: -12px;
+    width: 26px; height: 26px; border-radius: 50%;
     background: var(--navy); border: 2px solid var(--white);
     cursor: crosshair; display: grid; place-items: center;
-    color: var(--white); font-size: 11px; font-weight: 900; line-height: 1;
+    color: var(--white); font-size: 14px; font-weight: 900; line-height: 1;
   }
   .wm-port:hover { background: var(--primary); }
   .wm-node--drop { border-color: var(--green); box-shadow: 0 0 0 3px var(--green-light); }
@@ -337,18 +403,18 @@
   .wm-side h2 {
     margin: 0 0 3px; font-size: var(--text-base); font-weight: 900;
   }
-  .wm-side .wm-hint { margin: 0 0 16px; font-size: var(--text-xs); color: var(--text-muted); }
+  .wm-side .wm-hint { margin: 0 0 16px; font-size: var(--text-sm); color: var(--text-muted); }
   .wm-f { margin-bottom: 13px; }
   /* :not(.wm-check) — a tick box's own <label> is a direct child of .wm-f too,
      and it is a sentence to read, not a field name to scan. */
   .wm-f > label:not(.wm-check) {
-    display: block; font-size: var(--text-xs); font-weight: 900;
+    display: block; font-size: var(--text-sm); font-weight: 900;
     text-transform: uppercase; letter-spacing: var(--tracking-wide);
     color: var(--text-muted); margin-bottom: 4px;
   }
   .wm-f input[type=text], .wm-f select {
     width: 100%; box-sizing: border-box; font-family: inherit;
-    font-size: var(--text-sm); padding: 8px 10px; color: var(--text);
+    font-size: var(--text-base); padding: 9px 11px; color: var(--text);
     border: 1px solid var(--border); border-radius: var(--radius);
     background: var(--white); min-height: 38px;
   }
@@ -357,7 +423,7 @@
   }
   .wm-check { display: flex; gap: 9px; align-items: flex-start; margin-bottom: 9px; }
   .wm-check input { margin: 2px 0 0; width: 17px; height: 17px; flex: none; }
-  .wm-check span { font-size: var(--text-sm); line-height: 1.35; }
+  .wm-check span { font-size: var(--text-base); line-height: 1.4; }
   .wm-f .fmt-edit { min-height: 210px; max-height: 460px; overflow-y: auto; }
 
   .wm-out { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -575,20 +641,25 @@
   'use strict';
 
   /* ── Geometry ─────────────────────────────────────────────────────────── */
-  var NODE_W = 180, NODE_H = 88;
-  var BLOCK_W = 256, BLOCK_W2 = 310, ROW_H = 18;  /* shared blocks list their buttons */
-  var GAP_X = 22, GAP_Y = 38;
-  var X0 = 36, BAND_TOP = 54, BAND_BOT = 28, BAND_GAP = 26;
-  var PER_ROW = 5, GRID = 20;
+  var NODE_W = 234, NODE_H = 114;
+  var BLOCK_W = 360, BLOCK_W2 = 430, ROW_H = 24;  /* shared blocks list their buttons */
+  var GAP_X = 28, GAP_Y = 50;
+  var X0 = 48, BAND_TOP = 70, BAND_BOT = 36, BAND_GAP = 34;
+  var PER_ROW = 3, GRID = 20;
   /* Room for the widest block down the left, plus PER_ROW pages beside it. */
   var CANVAS_W = X0 + BLOCK_W2 + GAP_X + PER_ROW * (NODE_W + GAP_X);
 
   /* On screen next to the title, so it is always possible to tell which
      version is in front of you. Bump both when you change this file. */
-  var VERSION = 'v1.6';
+  var VERSION = 'v1.8';
   var UPDATED = '30 July 2026';
 
   var NL_CHANGELOG = [
+    { v: 'v1.8', d: '30/07/2026', note: 'Hovered arrows pulse in the direction they '
+      + 'lead, and a route that goes both ways is drawn as two lines pulsing '
+      + 'opposite ways.' },
+    { v: 'v1.7', d: '30/07/2026', note: 'Everything about a third bigger, and a '
+      + 'block\u2019s buttons stay inside the block instead of bursting out of it.' },
     { v: 'v1.6', d: '30/07/2026', note: 'Roomier bands, and Start again offers the '
       + 'concepts version as a starting map alongside the live one.' },
     { v: 'v1.5', d: '30/07/2026', note: 'The twelve topic buttons are no longer a '
@@ -834,7 +905,7 @@
       var top = y + BAND_TOP;
       var blockY = top, colW = 0;
       blocks.forEach(function (b) {
-        b.x = X0; b.y = blockY;
+        b.x = X0; b.y = Math.round(blockY);
         blockY += hOf(b) + GAP_Y;
         colW = Math.max(colW, wOf(b));
       });
@@ -847,8 +918,10 @@
       while (i < pages.length) {
         var row = pages.slice(i, i + perRow), tallest = 0;
         row.forEach(function (n, ci) {
-          n.x = px + ci * (NODE_W + GAP_X);
-          n.y = rowY;
+          /* Rounded: band heights come from measured box heights, which are not
+             whole numbers, and a box on a half pixel renders soft. */
+          n.x = Math.round(px + ci * (NODE_W + GAP_X));
+          n.y = Math.round(rowY);
           tallest = Math.max(tallest, hOf(n));
         });
         rowY += tallest + GAP_Y;
@@ -997,19 +1070,26 @@
     return t ? t.split(/\s+/).length : 0;
   }
 
-  function anchors(a, b) {
+  /* Does the opposite arrow exist too? */
+  function isTwoWay(e) {
+    return S.edges.some(function (o) { return o.from === e.to && o.to === e.from; });
+  }
+
+  function anchors(a, b, nudge) {
     var aw = wOf(a), ah = hOf(a), bw = wOf(b), bh = hOf(b);
     var acx = a.x + aw / 2, acy = a.y + ah / 2;
     var bcx = b.x + bw / 2, bcy = b.y + bh / 2;
     var dx = bcx - acx, dy = bcy - acy;
+    var n = nudge || 0;
     if (Math.abs(dy) >= Math.abs(dx)) {
+      /* Perpendicular to a mostly-vertical run is sideways. */
       return dy > 0
-        ? { x1: acx, y1: a.y + ah, x2: bcx, y2: b.y, v: true }
-        : { x1: acx, y1: a.y, x2: bcx, y2: b.y + bh, v: true };
+        ? { x1: acx + n, y1: a.y + ah, x2: bcx + n, y2: b.y, v: true }
+        : { x1: acx + n, y1: a.y, x2: bcx + n, y2: b.y + bh, v: true };
     }
     return dx > 0
-      ? { x1: a.x + aw, y1: acy, x2: b.x, y2: bcy, v: false }
-      : { x1: a.x, y1: acy, x2: b.x + bw, y2: bcy, v: false };
+      ? { x1: a.x + aw, y1: acy + n, x2: b.x, y2: bcy + n, v: false }
+      : { x1: a.x, y1: acy + n, x2: b.x + bw, y2: bcy + n, v: false };
   }
 
   /* Control points for the arrow, kept as data so a label can be positioned
@@ -1092,7 +1172,11 @@
          destination — is under the pointer. Ask, and you see them. */
       if (a.locked && !inFocus && !selected) return;
 
-      var p = anchors(a, b), d = curve(p), t = edgeTone(e);
+      /* Each half of a two-way pair takes its own side, picked from the ids so
+         the two never choose the same one. */
+      var two = isTwoWay(e);
+      var p = anchors(a, b, two ? (e.from < e.to ? -7 : 7) : 0);
+      var d = curve(p), t = edgeTone(e);
       var dim = focus && !inFocus ? ' class="is-dim"' : '';
 
       parts.push('<path class="wm-hit" d="' + d + '" data-edge="' + esc(eKey(e)) + '"></path>');
@@ -1106,6 +1190,12 @@
       parts.push('<path' + dim + ' d="' + d + '" stroke="' + t.c + '" stroke-width="' +
         (selected || inFocus ? t.w + 1 : t.w) + '" marker-end="url(#' + t.m + ')"' +
         (selected ? ' stroke-dasharray="7 4"' : '') + '></path>');
+
+      /* The travelling dashes, on the focused arrows only. */
+      if (inFocus && !selected) {
+        parts.push('<path class="wm-flow" d="' + d + '" stroke-width="' +
+          (t.w - 0.4).toFixed(1) + '"></path>');
+      }
 
       /* Labels only where the wording is the point — the statements and the
          threat-to-life answers — plus whatever is selected. Every arrow
@@ -1127,7 +1217,12 @@
            which reads as a glitch. Try a few points along the curve and give up
            rather than draw half a word; the wording is in the panel regardless. */
         var c = control(p), at = null;
-        var tries = [0.34 + i * 0.14, 0.22, 0.5, 0.78, 0.9];
+        /* A two-way pair has one edge each way, so both labels get index 0 and
+           landed on top of each other. Send each along a different part of the
+           curve, matching the side its line took. */
+        var base = 0.34 + i * 0.14;
+        if (two) base = e.from < e.to ? 0.3 : 0.66;
+        var tries = [base, 0.22, 0.5, 0.78, 0.9];
         for (var ti = 0; ti < tries.length; ti++) {
           var cand = atT(c, Math.min(0.92, tries[ti]));
           if (!overBox(cand.x, cand.y)) { at = cand; break; }
@@ -1180,9 +1275,14 @@
     if (!e) { S.sel = null; return sideEmpty(); }
     var a = byId(e.from), b = byId(e.to);
 
+    var twoWay = isTwoWay(e);
     el.side.innerHTML =
       '<h2>Arrow</h2>' +
-      '<p class="wm-hint">' + esc(a.label) + ' &rarr; ' + esc(b.label) + '</p>' +
+      '<p class="wm-hint">' + esc(a.label) + ' &rarr; ' + esc(b.label) +
+        (twoWay ? ' <b>&mdash; and back again</b>' : '') + '</p>' +
+      (twoWay ? '<p class="wm-hint">These two pages point at each other. On the canvas ' +
+        'that is drawn as two lines side by side; hover either page and they pulse in ' +
+        'opposite directions.</p>' : '') +
       '<div class="wm-f">' +
         '<label for="eLab">Words on the arrow</label>' +
         '<input type="text" id="eLab" value="' + esc(e.label) + '" ' +
@@ -2024,7 +2124,11 @@
         '<h3>Following the arrows</h3>' +
         '<ul>' +
         '<li><b>Hover over a box</b> and everything it does not touch fades. What it ' +
-        'points at, and what points at it, light up.</li>' +
+        'points at, and what points at it, light up — and the arrows pulse in the ' +
+        'direction they lead, so you can see which way round a route goes.</li>' +
+        '<li><b>Two pages pointing at each other</b> are drawn as two lines side by ' +
+        'side, pulsing opposite ways. That is how you spot a route that goes both ' +
+        'ways rather than one that only looks like it.</li>' +
         '<li><b>Grey blocks list their own buttons.</b> The header, the footer and the ' +
         'topic buttons appear on every page, so instead of firing twelve arrows across ' +
         'the diagram they list where each button goes. Hover the block to see all of them ' +
