@@ -150,11 +150,12 @@ function safeName(s) {
   return String(s).replace(/[\/\\:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim();
 }
 
-/* 16:9 keeps the bare name, so a re-run does not invalidate folders already
-   uploaded to Drive. Other formats carry a suffix. */
+/* Every filename carries its aspect ratio, including 16:9. NOTE: the first
+   delivered set used a bare `WOK-SUT.png` for 16:9, so a re-run now produces
+   `WOK-SUT-16x9.png` alongside rather than replacing it. Clear a folder before
+   re-running into it if you do not want both. */
 function graphicFile(homeClub, awayClub, fmt) {
-  const base = `${homeClub.code}-${awayClub.code}`;
-  return fmt === '16x9' ? `${base}.png` : `${base}-${fmt}.png`;
+  return `${homeClub.code}-${awayClub.code}-${fmt}.png`;
 }
 
 function fixtureFolder(iso, opponentName, isHome) {

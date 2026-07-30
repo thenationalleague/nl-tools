@@ -6,14 +6,14 @@ upload to Google Drive. One graphic per fixture, delivered to both clubs.
 ```
 Woking/
 ├── 2026-08-08 Sutton United (H)/
-│   └── WOK-SUT.png
+│   └── WOK-SUT-16x9.png
 ├── 2026-11-14 Forest Green Rovers (H)/
-│   └── WOK-FGR.png
+│   └── WOK-FGR-16x9.png
 └── ...                              46 folders per club
 ```
 
-Home club's code first, always — so `WOK-FGR.png` is the same file in Woking's
-folder and in Forest Green's, byte for byte.
+Home club's code first, always — so `WOK-FGR-16x9.png` is the same file in
+Woking's folder and in Forest Green's, byte for byte.
 
 ## Re-running it
 
@@ -70,24 +70,27 @@ for f in glob.glob('build/match-graphics/_renders/*.png'):
 |---|---|---|---|
 | `16x9` | 1920×1080 | leans off vertical | home left, away right |
 | `1x1` | 1080×1080 | leans off vertical | home left, away right |
-| `4x5` | 1080×1350 | leans off vertical | home left, away right |
+| `4x5` | 1080×1350 | leans off **horizontal** | home **top**, away bottom |
 | `9x16` | 1080×1920 | leans off **horizontal** | home **top**, away bottom |
 
-The tall portrait splits the other way on purpose: a near-vertical seam in a
-9:16 frame would leave two 540px slivers with nowhere for a crest to sit. 4:5 is
-still wide enough for a vertical seam, so it keeps the side-by-side layout.
-Colours, band order and the badge-on-the-seam all stay the same, so all four
-read as one family.
+Both portrait frames stack. They are only 1080 wide, so a vertical seam leaves
+about 500px per club — enough to fit a crest, but it squeezes the code badly
+(4:5 needed a 138px code side by side, against 170px stacked). Splitting
+horizontally gives each club the full width. Colours, band order and the
+badge-on-the-seam all stay the same, so all four read as one family.
 
-`1x1` and `4x5` share the 1080 width, so both have far less room either side of
-the seam than 16:9 does. Their lanes are pushed out and their badges held small;
-the code clears the badge plate by 31px and 26px respectively. If you change
-`codeSize` or `laneA` for either, re-check that clearance — a three-letter code
-runs under the plate very easily at this width.
+`1x1` is the one narrow format that still sits side by side, because a square
+has no better axis to split on. Its lanes are pushed out and its badge held
+small so the code clears the plate by 31px. If you change `codeSize` or `laneA`
+there, re-check that clearance — a three-letter code runs under the plate very
+easily at 1080 wide.
 
-**16:9 keeps the bare filename** (`WOK-SUT.png`); other formats get a suffix
-(`WOK-SUT-1x1.png`). That way re-running with extra formats never invalidates
-folders already uploaded to Drive.
+**Every filename carries its aspect ratio**, 16:9 included —
+`WOK-SUT-16x9.png`, `WOK-SUT-4x5.png`.
+
+⚠️ The **first delivered set** (July 2026) used a bare `WOK-SUT.png` for 16:9.
+A re-run now writes `WOK-SUT-16x9.png` *alongside* that file rather than
+replacing it. Clear a folder before re-running into it if you do not want both.
 
 To add a format, add an entry to `FORMATS` in
 `graphics/_shared/match-graphic.js`. Each one carries its own explicit geometry
@@ -142,6 +145,20 @@ Both were real, visible bugs. If you refactor the drawing code, keep them fixed.
 
 Take the canvas context with `{ alpha: false }`. The artwork is full-bleed and
 opaque, so an alpha channel is ~27% of every file for nothing.
+
+### The badge is fitted to a box, not a height
+
+Each format carries `badgeBox: [maxW, maxH]` and the competition mark is scaled
+to fit inside both. This matters because the NL Cup mark is **portrait**
+(2400×3303) while the three division marks are **landscape** (2400×1662).
+
+Bounding height alone — the original approach — let the Cup badge grow well past
+the division marks and crowd the clubs. It was worst in the stacked formats,
+where the badge sits *between* the two clubs and so steals room from both.
+Bounding width too means a portrait mark gets narrower rather than taller.
+
+Two tests guard this: one checks the Cup mark fits inside every box with its
+aspect preserved, the other that no box exceeds a third of its frame height.
 
 ## Data
 
