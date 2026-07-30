@@ -238,6 +238,24 @@ function ukOffsetMs(tsUTC) {
   return (tsUTC >= start && tsUTC < end) ? 3600000 : 0;
 }
 
+/* NLS returns kickOffDateUTC as "YYYY-MM-DD HH:MM:SS" — a space, no T, no
+   Z — despite the value genuinely being UTC. Passing that straight to
+   new Date() makes the runtime parse it as LOCAL time, so the same file
+   would import correctly on a UTC box and an hour out on a London laptop
+   in summer. Always normalise before parsing; never hand the raw string
+   to the Date constructor. Real ISO strings pass through untouched. */
+function nlsKickoffToISO(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(s);
+  if (m) {
+    const ts = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+    return new Date(ts).toISOString();
+  }
+  const d = new Date(s);                 /* already carries a T and an offset */
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 /* ---- NLS fetch -------------------------------------------------------- */
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -360,7 +378,7 @@ function build(seedFixtures, nlsMatches, clubIdx, opts) {
         matchID: raw.id,
         home: nlsHome.name || nlsHome.teamID || null,
         away: nlsAway.name || nlsAway.teamID || null,
-        kickoffUTC: attrs.kickOffDateUTC || null,
+        kickoffUTC: nlsKickoffToISO(attrs.kickOffDateUTC),
         reason: 'team not resolvable against clubs-meta'
       });
       continue;
@@ -371,7 +389,7 @@ function build(seedFixtures, nlsMatches, clubIdx, opts) {
       unmatchedNls.push({
         matchID: raw.id,
         home: h.name, away: a.name,
-        kickoffUTC: attrs.kickOffDateUTC || null,
+        kickoffUTC: nlsKickoffToISO(attrs.kickOffDateUTC),
         reason: 'no seeded fixture for this pair (new fixture — playoff, replay or extra)'
       });
       continue;
@@ -395,7 +413,8 @@ function build(seedFixtures, nlsMatches, clubIdx, opts) {
     if (list.length > 1) {
       const seedTs = seedFx.kickoffUTC ? new Date(seedFx.kickoffUTC).getTime() : null;
       const distance = c => {
-        const ko = c.attrs.kickOffDateUTC ? new Date(c.attrs.kickOffDateUTC).getTime() : null;
+        const iso = nlsKickoffToISO(c.attrs.kickOffDateUTC);
+        const ko = iso ? new Date(iso).getTime() : null;
         return (seedTs == null || ko == null) ? Number.MAX_SAFE_INTEGER : Math.abs(ko - seedTs);
       };
       chosen = list.reduce((best, c) => (distance(c) < distance(best) ? c : best), list[0]);
@@ -404,7 +423,7 @@ function build(seedFixtures, nlsMatches, clubIdx, opts) {
         unmatchedNls.push({
           matchID: loser.raw.id,
           home: loser.h.name, away: loser.a.name,
-          kickoffUTC: loser.attrs.kickOffDateUTC || null,
+          kickoffUTC: nlsKickoffToISO(loser.attrs.kickOffDateUTC),
           reason: `duplicate pair — ${chosen.raw.id} matched the seeded fixture more closely ` +
                   '(likely a playoff, replay or abandoned-game rematch; needs its own ID)'
         });
@@ -416,7 +435,7 @@ function build(seedFixtures, nlsMatches, clubIdx, opts) {
     const nlsHome = chosen.nlsHome;
     const nlsAway = chosen.nlsAway;
     matchedPairs.add(key);
-    const currentUTC = attrs.kickOffDateUTC || null;
+    const currentUTC = nlsKickoffToISO(attrs.kickOffDateUTC);
     const moved = !!(currentUTC && seedFx.kickoffUTC) &&
                   new Date(currentUTC).getTime() !== new Date(seedFx.kickoffUTC).getTime();
 
