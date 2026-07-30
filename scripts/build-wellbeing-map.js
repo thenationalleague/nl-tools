@@ -287,11 +287,22 @@ function parseShared(src) {
     statements.push({ to: s[2], label: stripArrow(s[3]), tone: s[1] });
   }
 
-  // The topic grid, plus the two utility cards beneath it.
-  const cards = [];
-  const cardsRe = /<a href="#([a-z-]+)">([^<]+)<\/a>/g;
-  let c;
-  while ((c = cardsRe.exec(nav))) cards.push({ to: c[1], label: textOf(c[2]) });
+  /* The nav holds two separate card groups under their own headings: the topic
+     grid, then "Supporting someone, or looking for a service". They are two
+     components on the page and they are two blocks here, so either can be put on
+     a page or taken off it without the other. */
+  const groups = [];
+  const groupRe = /<div class="wb-cards([^"]*)">([\s\S]*?)<\/div>/g;
+  let g;
+  while ((g = groupRe.exec(nav))) {
+    const items = [];
+    const cardRe = /<a href="#([a-z-]+)">([^<]+)<\/a>/g;
+    let c;
+    while ((c = cardRe.exec(g[2]))) items.push({ to: c[1], label: textOf(c[2]) });
+    if (items.length) groups.push(items);
+  }
+  const cards = groups.length ? groups[0] : [];
+  const support = groups.length > 1 ? groups[1] : [];
 
   const numbers = [];
   const numRe = /<a href="tel:([0-9]+)">([^<]+)<\/a>\s*<span>([^<]*)<\/span>/g;
@@ -303,7 +314,7 @@ function parseShared(src) {
   let l;
   while ((l = leadRe.exec(foot))) leads.push({ name: textOf(l[1]), role: textOf(l[2]) });
 
-  return { headerEdges, statements, cards, numbers, leads, hasNav: navAt !== -1 };
+  return { headerEdges, statements, cards, support, numbers, leads, hasNav: navAt !== -1 };
 }
 
 /* ── Build ───────────────────────────────────────────────────────────────── */
@@ -327,7 +338,7 @@ function build(cfg) {
     body: '<p>The rose and the word <strong>Wellbeing</strong> on the left, and the red '
         + '<strong>Need help now?</strong> pill on the right. There is also a hidden '
         + '"Skip to urgent help" link for keyboard and screen-reader users.</p>',
-    nextStep: false, showsTopics: false, showsFooter: false
+    shows: []
   });
 
   if (shared.hasNav) push({
@@ -336,16 +347,39 @@ function build(cfg) {
     body: '<p>The coloured statements. On the front page they are the main content; on '
         + 'every other page they sit underneath it, so the whole section stays one tap away.</p>'
         + '<ul>' + shared.statements.map((st) => `<li>${st.label}</li>`).join('') + '</ul>',
-    nextStep: false, showsTopics: false, showsFooter: false
+    shows: []
   });
 
   if (shared.hasNav) push({
     id: '_topics', zone: 'flow', kind: 'shared', locked: true,
     title: 'Topics widget', label: 'Topics widget', hash: null, kicker: 'On every page',
-    body: `<p>${shared.cards.length} buttons. Ten topics, then two under "Supporting someone, `
-        + 'or looking for a service". Because it is on every page, it is drawn once here '
-        + 'rather than fifteen times.</p>',
-    nextStep: false, showsTopics: false, showsFooter: false
+    body: `<p>The grid of ${shared.cards.length} topic buttons. Because it is on every `
+        + 'page it is drawn once here rather than fifteen times. Take it off a page with '
+        + "the page's own list of blocks.</p>",
+    shows: []
+  });
+
+  if (shared.hasNav && shared.support.length) push({
+    id: '_support', zone: 'flow', kind: 'shared', locked: true,
+    title: 'Supporting someone, or looking for a service',
+    label: 'Supporting someone', hash: null, kicker: 'On every page',
+    body: `<p>The ${shared.support.length} buttons under "Supporting someone, or looking `
+        + 'for a service", which sit below the topic grid. A separate component from the '
+        + 'topics, so it can go on a page without them or the other way round.</p>',
+    shows: []
+  });
+
+  /* "Your next step" is a shared block too — the same paragraph at the foot of
+     ten pages, ending in a link to the support directory. It was a tick box
+     called nextStep, which meant it could not be edited, moved or reused. */
+  const hasNext = sections.some((sec) => sec.nextStep);
+  if (hasNext) push({
+    id: '_nextstep', zone: 'flow', kind: 'shared', locked: true,
+    title: 'Your next step', label: 'Your next step', hash: null, kicker: 'On many pages',
+    body: '<p>The box that ends a topic page: <strong>Your next step</strong>, then '
+        + '"Choose one action: tell someone you trust, contact your Club Welfare Officer, '
+        + 'speak to your GP, or open the support directory."</p>',
+    shows: []
   });
 
   push({
@@ -360,7 +394,7 @@ function build(cfg) {
         // and somebody would end up arguing from a stale map.
         + shared.leads.map((x) => `<li>${x.role}</li>`).join('')
         + '</ul><p>Then what these pages are, that nothing is recorded, and the review date.</p>',
-    nextStep: false, showsTopics: false, showsFooter: false
+    shows: []
   });
 
   /* Every real page. */
@@ -376,13 +410,27 @@ function build(cfg) {
       hash: '#' + sec.id,
       kicker: sec.kicker,
       body: sec.body,
-      nextStep: sec.nextStep,
-      /* Only true where a persistent widget actually exists. In the concept it
-         does not — the topic grid is a page you navigate to. */
-      showsTopics: shared.hasNav,
-      showsFooter: true
+      /* Which shared blocks appear on this page. A list, not a handful of
+         booleans: the booleans could only ever describe the three blocks that
+         happened to exist when they were written, so a new block could not be
+         put on a page at all. */
+      shows: pageBlocks(sec, shared, hasNext, isMenu)
     });
   });
+
+  /* Blocks are only listed against a page if they exist in this map. The
+     concept has no persistent nav, so its pages show the header and footer
+     only — which is the truthful difference between the two structures. */
+  function pageBlocks(sec, sh, next, isMenu) {
+    const on = ['_header'];
+    if (sh.hasNav && !isMenu) {
+      on.push('_statements', '_topics');
+      if (sh.support.length) on.push('_support');
+    }
+    if (next && sec.nextStep) on.push('_nextstep');
+    on.push('_footer');
+    return on.filter((id) => nodes.some((n) => n.id === id));
+  }
 
   const known = new Set(nodes.map((n) => n.id));
 
@@ -396,6 +444,15 @@ function build(cfg) {
   shared.cards.forEach((e) => {
     if (known.has(e.to)) edges.push({ from: '_topics', to: e.to, label: e.label, kind: 'topic' });
   });
+  shared.support.forEach((e) => {
+    if (known.has(e.to) && known.has('_support')) {
+      edges.push({ from: '_support', to: e.to, label: e.label, kind: 'topic' });
+    }
+  });
+  if (known.has('_nextstep') && known.has('support-directory')) {
+    edges.push({ from: '_nextstep', to: 'support-directory',
+      label: 'open the support directory', kind: 'topic' });
+  }
 
   /* Editorial links: whatever survives in the body of a page after the shared
      blocks have been taken out. These are the arrows somebody chose to write. */
