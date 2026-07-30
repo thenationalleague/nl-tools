@@ -233,8 +233,11 @@ function load(src){return new Promise(function(res){
       return cache[url];
     }
 
-    var ctx = document.getElementById('c').getContext('2d');
+    /* alpha:false — the graphic is full-bleed and opaque, so an alpha channel
+       is dead weight in every PNG (about 27% of the file). It also removes any
+       chance of a partly transparent seam. */
     var canvas = document.getElementById('c');
+    var ctx = canvas.getContext('2d', { alpha: false });
 
     for(var i=0;i<work.length;i++){
       var j = work[i];

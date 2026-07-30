@@ -169,22 +169,33 @@
     });
   }
 
-  function fillPanel(ctx, side, colour) {
-    ctx.fillStyle = colour;
+  /* Lay the two panels down as a solid ground plus one clipped wedge on top,
+     rather than two shapes meeting along the seam.
+
+     Two abutting fills each antialias their shared edge and the coverage does
+     not sum to 1, so the seam came out as a 1px run of partly transparent
+     pixels (alpha as low as 192). Against white — a document, a light web page
+     — that reads as a pale line down the diagonal. Painting the away colour
+     across the whole canvas first and clipping the home wedge over it leaves
+     no shared edge, so every pixel is fully opaque and the seam antialiases
+     cleanly between the two colours.
+
+     Same reasoning as bandRuns(); the bands themselves are safe because they
+     are drawn over already-opaque ground. */
+  function fillPanels(ctx, homeColour, awayColour) {
+    ctx.fillStyle = awayColour;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.save();
     ctx.beginPath();
-    if (side === 'left') {
-      ctx.moveTo(0, 0);
-      ctx.lineTo(SEAM_TOP_X, 0);
-      ctx.lineTo(SEAM_BOT_X, H);
-      ctx.lineTo(0, H);
-    } else {
-      ctx.moveTo(SEAM_TOP_X, 0);
-      ctx.lineTo(W, 0);
-      ctx.lineTo(W, H);
-      ctx.lineTo(SEAM_BOT_X, H);
-    }
+    ctx.moveTo(0, 0);
+    ctx.lineTo(SEAM_TOP_X, 0);
+    ctx.lineTo(SEAM_BOT_X, H);
+    ctx.lineTo(0, H);
     ctx.closePath();
+    ctx.fillStyle = homeColour;
     ctx.fill();
+    ctx.restore();
   }
 
   /* ---------- drawing ---------- */
@@ -225,8 +236,7 @@
     ctx.clearRect(0, 0, W, H);
 
     /* Panels first — primary meets primary at the seam. */
-    fillPanel(ctx, 'left', hc.panel);
-    fillPanel(ctx, 'right', ac.panel);
+    fillPanels(ctx, hc.panel, ac.panel);
 
     /* Inset bands. Offsets run outward from the seam, so the primary band
        sits against the seam and the stripes are set back inside each panel.
