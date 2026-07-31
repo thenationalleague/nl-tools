@@ -1,10 +1,16 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixtures
-  Version: v0.10 (30/07/2026)
+  Version: v0.11 (30/07/2026)
   File: /fixtures/index.html
 
   CHANGELOG
+    v0.11 (30/07/2026) — "#N/A" in the Opta ID column took down the whole
+      import: RTDB keys cannot contain # or /, and the ID becomes the
+      record key. Excel error values and other non-IDs are now treated as
+      no ID, reported per value, and the fixture imports anyway. Minted
+      keys are also stable now — they were built from the clock, so every
+      re-paste of a cup sheet would have added the ties again.
     v0.10 (30/07/2026) — Travel table (distance + drive time, keyed on
       the club pair, pasted as its own lookup). Extra time and penalties
       behind a disclosure in the Result dialog, with penalties usable
@@ -125,6 +131,14 @@
     var NL_TOOL_KEY = 'ops-fixtures';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/07/2026',
+        version: 'v0.11',
+        items: [
+          '\u201c#N/A\u201d in an Opta ID column no longer stops the import dead. Spreadsheet error values are treated as \u201cno Opta ID\u201d, listed on the check screen, and the fixture imports without one \u2014 you can add the real ID later.',
+          'Cup ties without an Opta ID no longer duplicate when you re-paste the sheet. Their record is now worked out from the fixture rather than the clock, so a second import updates them.'
+        ]
+      },
       {
         date: '30/07/2026',
         version: 'v0.10',
@@ -1439,6 +1453,23 @@
     a['fat'] = a['fa trophy'] = 'FA Trophy';
     return a;
   }());
+  /* An Opta ID becomes the RTDB record key, so it has to BE a usable key.
+     RTDB forbids . # $ / [ ] — and a failed spreadsheet lookup puts "#N/A"
+     in the cell, which contains two of them. Left alone it took down the
+     whole import with "invalid key (#N) in path /#N/A".
+
+     Anything unusable is treated as "no Opta ID" rather than guessed at or
+     mangled into something that looks like one: the fixture still imports,
+     it just gets a minted key and the real ID can be filled in later. */
+  var EXCEL_ERR = /^#(N\/A|VALUE!|REF!|NAME\?|DIV\/0!|NUM!|NULL!|SPILL!|CALC!)$/i;
+  var NOT_AN_ID = /^(n\/a|na|none|null|-|\u2013|\u2014|tbc|tbd|\?)$/i;
+  function cleanOpta(v) {
+    var t = String(v == null ? '' : v).trim();
+    if (!t || EXCEL_ERR.test(t) || NOT_AN_ID.test(t)) return '';
+    if (/[.#$/\[\]]/.test(t)) return '';
+    return t;
+  }
+
   function normComp(v) {
     return COMP_ALIAS[String(v == null ? '' : v).trim().toLowerCase()] || null;
   }
@@ -1679,7 +1710,8 @@
       /* The record key is the Opta ID when one is supplied — that is the
          model, and it is already how attendance keys its submissions. Only
          a fixture with no Opta ID at creation gets a minted key. */
-      var opta = g(r, 'opta').trim();
+      var rawOpta = g(r, 'opta').trim();
+      var opta = cleanOpta(rawOpta);
       /* Always per row. A value the tool cannot place is left null so the
          row fails visibly instead of landing in the wrong competition. */
       var rawComp = g(r, 'comp').trim();
@@ -1695,6 +1727,7 @@
         ami: normTick(g(r, 'ami'), headOf('ami')),
         daznMoved: normTick(g(r, 'dazn'), headOf('dazn')),
         recordID: opta || null,
+        rawOpta: rawOpta,
         exists: !!(opta && S.fixtures[opta]),
         ok: !!(d && home && away && comp),
         homeNL: !!NL.clubs.byName(home), awayNL: !!NL.clubs.byName(away)
@@ -1731,6 +1764,14 @@
       if (p.rawBcast && !p.bcast) badB[p.rawBcast] = (badB[p.rawBcast] || 0) + 1;
     });
     var badBNames = Object.keys(badB);
+    /* Rows whose Opta cell held something the tool refused. Counted, because
+       silently minting a key for a row you believed had an Opta ID is how
+       you end up with two records for one fixture. */
+    var badOpta = {};
+    parsed.forEach(function (p) {
+      if (p.rawOpta && !p.opta) badOpta[p.rawOpta] = (badOpta[p.rawOpta] || 0) + 1;
+    });
+    var badOptaNames = Object.keys(badOpta);
     var bcastMapped = IMP.map.bcast != null && IMP.map.bcast !== '';
 
     NL.modal({
@@ -1741,6 +1782,12 @@
         (dupes ? ' &middot; <strong>' + dupes + ' already here</strong>, which will be updated' : '') +
         (bad ? ' &middot; <span style="color:var(--primary);">' + bad + ' unreadable</span>' : '') +
         (freetext ? ' &middot; ' + freetext + ' with a non-League club' : '') + '</p>' +
+        (badOptaNames.length
+          ? '<div class="fx-map__note"><strong>Not a usable Opta ID</strong> on ' +
+            badOptaNames.map(function (n) {
+              return badOpta[n] + ' row' + (badOpta[n] === 1 ? '' : 's') + ' reading &ldquo;' + esc(n) + '&rdquo;';
+            }).join(', ') + '. Those fixtures import without one, and can have it added later.</div>'
+          : '') +
         (badBNames.length
           ? '<div class="fx-map__note"><strong>Broadcast not recognised</strong> on ' +
             badBNames.map(function (n) {
@@ -1777,12 +1824,20 @@
         { label: 'Back', className: 'btn btn--ghost', onClick: function (c) { c.close(); impStep2(); } },
         { label: 'Cancel', className: 'btn btn--ghost', onClick: function (c) { c.close(); } },
         { label: 'Import ' + good.length, className: 'btn btn--primary', onClick: function (c) {
-            var updates = {}, minted = 0;
+            var updates = {};
             good.forEach(function (p) {
               /* Minted keys are NOT Opta-shaped: a fabricated ID must stay
                  distinguishable from a real one. */
+              /* Minted keys are NOT Opta-shaped (a fabricated ID must stay
+                 distinguishable from a real one) and are STABLE: derived
+                 from the fixture rather than the clock, so re-pasting a cup
+                 sheet updates those ties instead of adding them again. The
+                 date is deliberately not in the key — a tie that gets
+                 rearranged in the tool must still match its own row on the
+                 next import. */
               var id = p.recordID ||
-                ('nlf-' + S.season + '-' + String(Date.now()).slice(-8) + '-' + (minted++));
+                ('nlf-' + S.season + '-' + COMP_SHORT[p.comp] + '-' +
+                 clubKey(p.home) + '-' + clubKey(p.away)).toLowerCase();
               var prev = S.fixtures[id];
 
               /* Carry a field over from the existing record, falling back when
