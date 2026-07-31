@@ -75,7 +75,10 @@ body { background: var(--navy-50); }
 
 /* The per-club note. Written by us, one or two sentences, says what this
    particular club needs to do. Not a generic preamble. */
-.note { margin: 20px 0 0; padding: 15px 18px 17px; background: #fff;
+.preamble { margin: 22px 0 0; font-size: var(--text-sm); color: var(--text-muted);
+  max-width: 62ch; }
+
+.note { margin: 14px 0 0; padding: 15px 18px 17px; background: #fff;
   border: 1px solid var(--navy-200); }
 .note__label { display: block; margin-bottom: 6px; font-size: 10px; font-weight: 700;
   letter-spacing: .12em; text-transform: uppercase; color: var(--navy); }
@@ -129,6 +132,33 @@ body { background: var(--navy-50); }
   text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin-top: 2px; }
 
 .people { list-style: none; margin: 0; padding: 0; }
+
+/* Person-first. The unit of correction is the person: their address, their
+   phone, their not-for-publication flag. Roles hang off them as lines, so a
+   title with no job and a title on another role sit next to each other. */
+.pcard { padding: 15px 0; }
+.pcard + .pcard { border-top: 1px solid var(--navy-100); }
+.pcard--editing { background: #fff; box-shadow: 0 0 0 14px #fff; position: relative; }
+.pcard__top { display: flex; align-items: baseline; gap: 12px; }
+.pcard__name { font-size: var(--text-md); font-weight: 700; color: var(--navy); }
+.pcard__pen { margin-left: auto; }
+.pcard__body { display: grid; grid-template-columns: 1fr 300px; gap: 4px 28px;
+  margin-top: 7px; align-items: start; }
+.roles { list-style: none; margin: 0; padding: 0; }
+.rle { display: grid; grid-template-columns: 190px 1fr; gap: 4px 14px;
+  padding: 4px 0; align-items: baseline; }
+.rle__dept { font-size: var(--text-xs); letter-spacing: .07em; text-transform: uppercase;
+  color: var(--navy-400); font-weight: 700; }
+.rle__title { font-size: var(--text-sm); }
+.rle__title--none { color: var(--amber-deep); font-style: italic; }
+.rle__flag { grid-column: 1/-1; }
+.pcard__ct { font-size: var(--text-sm); color: var(--text-muted); text-align: right; }
+.pcard__ct .fld { text-align: left; margin-top: 4px; }
+@media (max-width: 700px) {
+  .pcard__body { grid-template-columns: 1fr; }
+  .pcard__ct { text-align: left; }
+  .rle { grid-template-columns: 1fr; gap: 0; }
+}
 .person { display: grid; grid-template-columns: 1fr auto; gap: 3px 24px;
   padding: 11px 0; align-items: start; }
 .person + .person { border-top: 1px solid var(--navy-100); }
@@ -227,6 +257,12 @@ body { background: var(--navy-50); }
     </div>
   </div>
 
+  <p class="preamble">Thanks for bearing with us on this. We&rsquo;re straightening 72 very
+    different clubs into one format, and we know that&rsquo;s never a perfect fit for any
+    of them &mdash; so if some of what follows looks heavy-handed, that&rsquo;s why, rather
+    than us second-guessing how you run things. Anything we could sort out at our
+    end, we have.</p>
+
   <div id="note" class="note" style="display:none;"><span class="note__label">From the League</span><p></p></div>
   <div id="tally" class="tally"></div>
 
@@ -311,7 +347,7 @@ body { background: var(--navy-50); }
   var club = '', sub = null, cfg = {}, answers = {}, listPicks = {};
   /* editing: which blocks are open. edits: corrections the club has typed,
      keyed by field for club info and by person + section for role titles. */
-  var editing = {}, edits = {}, wired = false;
+  var editing = {}, edits = {}, wired = false, mergedNames = [];
 
   function $(id) { return document.getElementById(id); }
   var esc = NL.escHtml;
@@ -390,6 +426,11 @@ body { background: var(--navy-50); }
     return '<select data-list="' + listKey + '" data-slot="' + i + '">' + opts + '</select>';
   }
 
+  function listNames(a) {
+    if (a.length === 1) { return esc(a[0]); }
+    return a.slice(0, -1).map(esc).join(', ') + ' and ' + esc(a[a.length - 1]);
+  }
+
   function num(v) {
     v = String(v == null ? '' : v).trim();
     return /^\d+$/.test(v) ? Number(v).toLocaleString('en-GB') : esc(v);
@@ -422,6 +463,7 @@ body { background: var(--navy-50); }
      patch silently does nothing rather than hitting the wrong record. */
   function applyFixes(rec, apply) {
     if (!apply) { return rec; }
+    if (apply.merge) { mergedNames = mergeByName(rec); }
     var people = rec.people || [];
     function findPerson(name) {
       for (var i = 0; i < people.length; i++) {
@@ -452,6 +494,32 @@ body { background: var(--navy-50); }
     return rec;
   }
 
+  /* One person, one record: union their roles, addresses and numbers, and keep
+     the record hidden if any of its halves was. The form let a club add the
+     same person twice, which is user error rather than anything they need to
+     explain to us — so it is fixed quietly and never flagged. */
+  function mergeByName(rec) {
+    var seen = {}, out = [], merged = [];
+    (rec.people || []).forEach(function (p) {
+      var k = fullName(p).toLowerCase();
+      if (!k) { out.push(p); return; }
+      if (!seen[k]) { seen[k] = p; out.push(p); return; }
+      var t = seen[k];
+      t.roles = (t.roles || []).concat(p.roles || []);
+      (p.emails || []).forEach(function (em) {
+        if (em && (t.emails || []).indexOf(em) < 0) { t.emails = (t.emails || []).concat(em); }
+      });
+      (p.phones || []).forEach(function (ph) {
+        var have = (t.phones || []).some(function (x) { return x.number === ph.number; });
+        if (!have) { t.phones = (t.phones || []).concat(ph); }
+      });
+      if (p.hideContact) { t.hideContact = true; }
+      if (merged.indexOf(fullName(t)) < 0) { merged.push(fullName(t)); }
+    });
+    rec.people = out;
+    return merged;
+  }
+
   function fullName(p) {
     return (p.name || [p.firstName, p.lastName].filter(Boolean).join(' ') || '').trim();
   }
@@ -473,8 +541,16 @@ body { background: var(--navy-50); }
       $('note').querySelector('p').innerHTML = cfg.note;
     }
 
+    var fixedList = (cfg.fixed || []).slice();
+    if (mergedNames.length) {
+      fixedList.unshift('<b>' + listNames(mergedNames) + '</b> ' +
+        (mergedNames.length === 1 ? 'was' : 'were') + ' added to the form more than once, ' +
+        'which is easily done on something this long. We&rsquo;ve merged ' +
+        (mergedNames.length === 1 ? 'the entries' : 'each of them') +
+        ' so every person appears once, with all of their roles and contact details together.');
+    }
     var nCheck = Object.keys(cfg.check || {}).length;
-    var nFixed = (cfg.fixed || []).length;
+    var nFixed = fixedList.length;
     var tally = '';
     if (nCheck) {
       tally += '<div class="tally__item tally--check"><span class="tally__n">' + nCheck +
@@ -488,7 +564,7 @@ body { background: var(--navy-50); }
 
     if (nFixed) {
       $('fixedBlock').style.display = '';
-      $('fixedList').innerHTML = cfg.fixed.map(function (f) {
+      $('fixedList').innerHTML = fixedList.map(function (f) {
         return '<li>' + f + '</li>';
       }).join('');
     }
@@ -597,21 +673,49 @@ body { background: var(--navy-50); }
       });
     });
 
-    $('sections').innerHTML = ORDER.filter(function (s) { return bySec[s]; }).map(function (sec) {
-      var open = !!editing[sec];
-      var items = bySec[sec].map(function (pair) {
-        var p = pair[0], r = pair[1], name = fullName(p);
-        /* Anchor the query to the role, not the person — someone holding two
-           roles must not carry a media question under their commercial entry. */
-        var key = 'people:' + name + ':' + sec;
-        var title = (r.title || '').trim();
+    /* One card per person, roles listed inside. Sorted by the department of
+       their first role so the club still reads top-down in a familiar order,
+       rather than as an alphabetical staff list. */
+    var seq = people.slice().sort(function (a, b) {
+      var ai = ORDER.indexOf(((a.roles || [])[0] || {}).section);
+      var bi = ORDER.indexOf(((b.roles || [])[0] || {}).section);
+      if (ai < 0) { ai = 99; } if (bi < 0) { bi = 99; }
+      return ai - bi || fullName(a).localeCompare(fullName(b));
+    });
+
+    $('sections').innerHTML = '<section class="block"><h2>People</h2>' +
+      '<p class="block__lede">Everyone you sent us, with the roles they hold. ' +
+      'Use the pen to correct anyone &mdash; a change to an address applies ' +
+      'wherever that person appears.</p><ul class="people">' +
+      seq.map(function (p) {
+        var name = fullName(p);
+        var open = !!editing['p:' + name];
+        var roleFlags = [];
+        var grouped = [];
+        (p.roles || []).forEach(function (r) {
+          var t = (r.title || '').trim();
+          var hit = t && grouped.filter(function (g) { return g.title === t; })[0];
+          if (hit) { hit.sections.push(r.section || 'Other'); }
+          else { grouped.push({ title: t, sections: [r.section || 'Other'] }); }
+        });
+        var roles = grouped.map(function (r) {
+          var sec = r.sections[0];
+          var key = 'people:' + name + ':' + sec;
+          var title = r.title;
+          var deptLabel = r.sections.map(esc).join(' &middot; ');
+          var roleField = 'role:' + name + ':' + sec;
+          var titleHtml = open
+            ? '<input class="fld fld--role" data-field="' + esc(roleField) +
+              '" placeholder="Job title" value="' +
+              esc(edits[roleField] !== undefined ? edits[roleField] : title) + '">'
+            : (title ? '<span class="rle__title">' + esc(title) + '</span>'
+                     : '<span class="rle__title rle__title--none">No title held</span>');
+          roleFlags.push(flagFor(key));
+          return '<li class="rle"><span class="rle__dept">' + deptLabel + '</span>' +
+            titleHtml + '</li>';
+        }).join('') + '';
+
         var cts = contactsOf(p, emailCount);
-        var roleField = 'role:' + name + ':' + sec;
-        var roleHtml = open
-          ? '<input class="fld fld--role" data-field="' + esc(roleField) + '" placeholder="Job title" value="' +
-            esc(edits[roleField] !== undefined ? edits[roleField] : title) + '">'
-          : (title ? '<span class="person__role">' + esc(title) + '</span>'
-                   : '<span class="person__role person__role--none">No title held</span>');
         var ctField = 'contact:' + name;
         var ctHtml = open
           ? '<input class="fld" data-field="' + esc(ctField) + '" placeholder="Email or phone" value="' +
@@ -620,27 +724,29 @@ body { background: var(--navy-50); }
                     .filter(Boolean).join(', ')) + '">'
           : (cts.length ? cts.join('<br>') : '<span class="empty">No contact details</span>') +
             (p.hideContact ? '<br><span class="chip">Not for publication</span>' : '');
+
+        /* One warning per person now, not one per role they happen to hold. */
         var dupes = (p.emails || []).filter(function (em) {
           return emailCount[(em || '').trim().toLowerCase()] > 1;
         });
         var others = dupes.length ? emailCount[dupes[0].trim().toLowerCase()] - 1 : 0;
         var dupWarn = dupes.length && !open
-          ? '<div class="auto auto--warn"><b>' +
-            '<span class="bang" aria-hidden="true">!</span>Not ' + esc(name) +
-            '&rsquo;s own address?</b> Remove it &mdash; ' + others + ' other ' +
-            (others === 1 ? 'person lists' : 'people list') + ' it too.</div>'
+          ? '<div class="auto auto--warn"><b><span class="bang" aria-hidden="true">!</span>Not ' +
+            esc(name) + '&rsquo;s own address?</b> ' + others + ' other ' +
+            (others === 1 ? 'person lists' : 'people list') + ' it too. ' +
+            'If it&rsquo;s a shared inbox, put it under Departmental inboxes instead and ' +
+            'give us an individual address where you have one.</div>'
           : '';
-        return '<li class="person">' +
-          '<div><span class="person__name">' + esc(name) + '</span>' + roleHtml + '</div>' +
-          '<div class="person__ct">' + ctHtml + '</div>' + dupWarn + flagFor(key) + '</li>';
-      }).join('');
-      return '<section class="block' + (open ? ' block--editing' : '') + '"><h2>' + esc(sec) +
-        ' <button class="edit" data-edit="' + esc(sec) + '" type="button">' +
-        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/></svg>' +
-        (open ? 'Done' : 'Edit') + '</button></h2>' +
-        (open ? '<p class="editnote">Correct anything that&rsquo;s wrong. Changes save with your reply.</p>' : '') +
-        '<ul class="people">' + items + '</ul></section>';
-    }).join('');
+
+        return '<li class="pcard' + (open ? ' pcard--editing' : '') + '">' +
+          '<div class="pcard__top"><span class="pcard__name">' + esc(name) + '</span>' +
+          '<button class="edit pcard__pen" type="button" data-edit="p:' + esc(name) + '">' +
+          '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/></svg>' +
+          (open ? 'Done' : 'Edit') + '</button></div>' +
+          '<div class="pcard__body"><ul class="roles">' + roles + '</ul>' +
+          '<div class="pcard__ct">' + ctHtml + '</div></div>' +
+          roleFlags.join('') + dupWarn + '</li>';
+      }).join('') + '</ul></section>';
 
     $('foot').textContent = 'Submitted ' +
       (sub.submittedAt ? new Date(sub.submittedAt).toLocaleDateString('en-GB') : '') +
