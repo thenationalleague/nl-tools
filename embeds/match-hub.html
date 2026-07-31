@@ -245,6 +245,22 @@
                           a heavy border. Scorer chip marks pens. (3) The
                           commentary console grows to clamp(92px,13vh,156px)
                           so a full preview fits without scrolling.
+    v0.18.1 (2026-07-31) — LIVE league table. The sheet previously always
+                          rendered the END-OF-DAY table (a spoiler mid-replay,
+                          and it never moved). Now it shows standings AS THEY
+                          STAND at the current moment — in-play scores count
+                          as provisional results and the table re-sorts with
+                          every goal (refreshed twice a second while open).
+                          Title reads "as it stands · 63'" (or the time of
+                          day in stagger mode) until the day completes, then
+                          "after Matchday N". Arrows = movement vs the START
+                          OF DAY only; source-table movement markers (e.g.
+                          NLS startDayPosition, which refers to the previous
+                          matchday) are deliberately ignored. Footer link
+                          renamed "League table". NOTE for live mode later:
+                          seed D.prior from the official NLS table — it
+                          carries points deductions a result-replay can't
+                          know about.
   ============================================================================
 -->
 
@@ -416,7 +432,7 @@ window.__DATA__ = {
   <div class="nlh__sheet" id="nlhSheet" hidden>
     <div class="nlh__sheetcard">
       <div class="nlh__sheethead">
-        <span>National League — after Round <span id="nlhSheetRound"></span></span>
+        <span id="nlhSheetTitle">League table</span>
         <button class="nlh__sheetclose" id="nlhSheetClose" aria-label="Close table">&times;</button>
       </div>
       <div class="nlh__tablewrap"><table class="nlh__table"><tbody id="nlhTableBody"></tbody></table></div>
@@ -475,7 +491,7 @@ window.__DATA__ = {
   </div>
 
   <div class="nlh__foot">
-    <span id="nlhFootTable" class="nlh__footlink">Final table</span>
+    <span id="nlhFootTable" class="nlh__footlink">League table</span>
     <span class="nlh__footnote">Replay · <span id="nlhFootDate">Sat 21 Mar 2026</span> <span class="nlh__ver" id="nlhVer"></span></span>
   </div>
 </div>
@@ -750,7 +766,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "24";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "25";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -1622,31 +1638,25 @@ body{overflow:hidden}
     return !!story;                    // storyline present → linger a bit longer
   }
 
-  // ---- FT league table (prior + this matchday, FLIP re-sort) ---------------
-  function computeTable(T){
-    var rows={};
-    Object.keys(D.prior).forEach(function(k){ var p=D.prior[k]; rows[k]={k:k,P:p.P,W:p.W,D:p.D,L:p.L,GF:p.GF,GA:p.GA,Pts:p.Pts}; });
-    D.fixtures.forEach(function(fx){
-      if (stateOf(fx,T).phase!=="ft") return;
-      var sc=scoreAt(fx,T);
-      [[fx.home,sc.h,sc.a],[fx.away,sc.a,sc.h]].forEach(function(x){
-        var r=rows[x[0]]; if(!r) return;
-        r.P++; r.GF+=x[1]; r.GA+=x[2];
-        if (x[1]>x[2]){ r.W++; r.Pts+=3; } else if (x[1]===x[2]){ r.D++; r.Pts+=1; } else r.L++;
-      });
-    });
-    return Object.keys(rows).map(function(k){var r=rows[k];r.GD=r.GF-r.GA;return r;})
-      .sort(function(a,b){ return b.Pts-a.Pts || b.GD-a.GD || b.GF-a.GF || club(a.k).name.localeCompare(club(b.k).name); });
-  }
+  // ---- LIVE league table ----------------------------------------------------
+  // Standings AS THEY STAND at the current moment: D.prior is the start-of-day
+  // table; in-play scores count as provisional results (P ticks up, points
+  // move with every goal — liveTable). Arrows show movement vs the START OF
+  // DAY only. Any movement markers a source table carries (e.g. the NLS
+  // table's startDayPosition arrows, which refer to the PREVIOUS matchday)
+  // are deliberately ignored — they're wrong for a day in progress. When a
+  // live-mode data source lands, seed D.prior from the official NLS table
+  // (it carries points deductions a result-replay can't know about).
   function priorRank(){
     var arr=Object.keys(D.prior).map(function(k){var p=D.prior[k];return{k:k,Pts:p.Pts,GD:p.GF-p.GA,GF:p.GF};})
       .sort(function(a,b){return b.Pts-a.Pts||b.GD-a.GD||b.GF-a.GF;});
     var m={}; arr.forEach(function(r,i){m[r.k]=i;}); return m;
   }
   function renderTable(){
-    var final=computeTable(maxT()), was=priorRank(), n=final.length;
-    $("nlhSheetRound").textContent = D.round;
-    $("nlhTableBody").innerHTML = final.map(function(r,i){
+    var rows=liveTable(st.T).arr, n=rows.length, was=priorRank();
+    var live = st.T < maxT()-0.5;
+    $("nlhSheetTitle").textContent = D.competition+" — "+(live ? "as it stands · "+clockLabel(st.T) : "after Matchday "+D.round);
+    $("nlhTableBody").innerHTML = rows.map(function(r,i){
       var cls = i===0?"champ":(i>=1&&i<=4?"po":(i>=n-3?"releg":""));
       var moved = was[r.k]!==undefined && was[r.k]!==i;
       var dir = moved && was[r.k]<i ? "down":"";
@@ -1657,13 +1667,15 @@ body{overflow:hidden}
         '<td class="pts">'+r.Pts+'</td></tr>';
     }).join("");
   }
-  function showSheet(){ renderTable(); $("nlhSheet").hidden=false; }
+  function showSheet(){ renderTable(); st._tblAt=Date.now(); $("nlhSheet").hidden=false; }
   function hideSheet(){ $("nlhSheet").hidden=true; }
 
   // ---- render dispatch -----------------------------------------------------
   function paint(){
     $("nlhClock").textContent = clockLabel(st.T);
     $("nlhScrubFill").style.width = (st.T/maxT()*100)+"%";
+    // the table sheet is LIVE — refresh it while open (throttled)
+    if (!$("nlhSheet").hidden && Date.now()-(st._tblAt||0)>500){ st._tblAt=Date.now(); renderTable(); }
     if (isDesk()){ paintPins(); paintCards(); paintFeed(); return; }  // all three live
     if (st.view==="map")    paintPins();
     else if (st.view==="cards")  paintCards();
@@ -1996,7 +2008,7 @@ body{overflow:hidden}
     scrub.addEventListener("click", function(e){
       var r=scrub.getBoundingClientRect(); seek((e.clientX-r.left)/r.width);
     });
-    $("nlhFootTable").addEventListener("click", function(){ renderTable(); $("nlhSheet").hidden=false; });
+    $("nlhFootTable").addEventListener("click", showSheet);
     $("nlhSheetClose").addEventListener("click", hideSheet);
     $("nlhSheet").addEventListener("click", function(e){ if(e.target===$("nlhSheet")) hideSheet(); });
 
