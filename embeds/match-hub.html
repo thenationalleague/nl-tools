@@ -305,6 +305,16 @@
                           it and the new one is standing there as the colour
                           clears. Honours prefers-reduced-motion (straight to
                           the lower third). Scorer chip retired. Lab deleted.
+    v0.20.1 (2026-07-31) — Placement solver replaced: the force-based passes
+                          could catapult boards across the map (unbounded
+                          push) while still leaving overlaps. Now CANDIDATE-
+                          RING placement: each board may only sit on a small
+                          ring of positions around its own dot (north
+                          preferred, three modest radii, ~30-70px max) and
+                          greedily picks the spot that avoids card overlap,
+                          never covers a dot, and keeps stems clear of cards.
+                          Displacement is bounded by construction — markers
+                          stay near their grounds with breathing room.
   ============================================================================
 -->
 
@@ -842,7 +852,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "28";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "29";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -1031,52 +1041,51 @@ body{overflow:hidden}
       var ay=Math.max(10,Math.min(H-10, oy+q.ny*mh));
       return { el:el, ax:ax, ay:ay, w:(board&&board.offsetWidth)||96, h:((board&&board.offsetHeight)||24)+2 };
     }).filter(function(n){ return n; });
-    var gap=8, margin=12;
-    nodes.forEach(function(n){ n.sx=n.ax; n.sy=n.ay-(n.h/2+18); n.x=n.sx; n.y=n.sy; });
-    function sepPass(){
-      for (var i=0;i<nodes.length;i++) for (var j=i+1;j<nodes.length;j++){
-        var a=nodes[i], b=nodes[j], dx=b.x-a.x, dy=b.y-a.y;
-        var needX=(a.w+b.w)/2+gap-Math.abs(dx), needY=(a.h+b.h)/2+gap-Math.abs(dy);
-        if (needX>0 && needY>0){
-          if (needX<needY){ var sx=(dx<0?-1:1)*needX/2; a.x-=sx; b.x+=sx; }
-          else            { var sy=(dy<0?-1:1)*needY/2; a.y-=sy; b.y+=sy; }
-        }
+    // CANDIDATE-RING placement — displacement is BOUNDED by construction.
+    // Each board may only sit on a small ring of positions around its own
+    // dot (due-north preferred, three modest radii, ~30-70px max) and
+    // greedily picks the spot that best avoids: overlapping another card,
+    // covering anyone's dot, or touching a stem. Markers stay NEAR their
+    // grounds — less distance, less to touch — so a bad interaction can
+    // nudge a board around its dot but never fling it across the map.
+    var DIRS=[[0,-1],[0.72,-0.72],[-0.72,-0.72],[1,0],[-1,0],[0.72,0.72],[-0.72,0.72],[0,1]];
+    var DIRPEN=[0,4,4,9,9,15,15,20];
+    nodes.forEach(function(n){ n.r1=n.h/2+16; n.x=n.ax; n.y=n.ay-n.r1; });
+    function segHits(x1,y1,x2,y2,rx,ry,rw,rh){ // sampled segment vs inflated rect
+      for(var t=0.08;t<=0.92;t+=0.14){
+        var px=x1+(x2-x1)*t, py=y1+(y2-y1)*t;
+        if(Math.abs(px-rx)<rw/2 && Math.abs(py-ry)<rh/2) return true;
       }
+      return false;
     }
-    function stemPass(){ // no card may sit over another pin's stem
-      for (var i=0;i<nodes.length;i++) for (var j=0;j<nodes.length;j++){
-        if(i===j) continue;
-        var s=nodes[i], b=nodes[j];
-        var vx=s.x-s.ax, vy=s.y-s.ay, L2=vx*vx+vy*vy;
-        if(L2<4) continue;
-        var t=Math.max(0,Math.min(1,((b.x-s.ax)*vx+(b.y-s.ay)*vy)/L2));
-        var cx=s.ax+vx*t, cy=s.ay+vy*t;
-        var dx=b.x-cx, dy=b.y-cy;
-        var bw=b.w/2+margin, bh=b.h/2+margin;
-        var exn=dx/bw, eyn=dy/bh, d2=exn*exn+eyn*eyn;
-        if(d2>=1) continue;
-        var d=Math.sqrt(d2);
-        if(d<0.05){ var Ln=Math.sqrt(L2); b.x+=(-vy/Ln)*bw; b.y+=(vx/Ln)*bh; }
-        else { var push=(1-d)/d; b.x+=dx*push*0.85; b.y+=dy*push*0.85; }
-        s.x-=dx*0.15; s.y-=dy*0.15;   // and the stem's own board eases the other way
+    function placeCost(n,cx,cy){
+      var c=0;
+      for(var i=0;i<nodes.length;i++){
+        var o=nodes[i]; if(o===n) continue;
+        var ox=Math.min(cx+n.w/2,o.x+o.w/2)-Math.max(cx-n.w/2,o.x-o.w/2);
+        var oy=Math.min(cy+n.h/2,o.y+o.h/2)-Math.max(cy-n.h/2,o.y-o.h/2);
+        if(ox>-8&&oy>-8) c+=Math.max(0.5,ox+8)*Math.max(0.5,oy+8)*0.06;      // overlap + breathing room
+        if(Math.abs(o.ax-cx)<n.w/2+7&&Math.abs(o.ay-cy)<n.h/2+7) c+=900;     // never cover a dot
+        if(segHits(n.ax,n.ay,cx,cy, o.x,o.y,o.w+14,o.h+14)) c+=350;          // my stem under their card
+        if(segHits(o.ax,o.ay,o.x,o.y, cx,cy,n.w+14,n.h+14)) c+=350;          // their stem under my card
       }
+      return c;
     }
-    function standoffClamp(){
+    for(var sweep=0; sweep<5; sweep++){
       nodes.forEach(function(n){
-        var dx=n.x-n.ax, dy=n.y-n.ay, d=Math.sqrt(dx*dx+dy*dy), min=n.h/2+14;
-        if(d<min){ if(d<0.5){ n.y=n.ay-min; } else { n.x=n.ax+dx/d*min; n.y=n.ay+dy/d*min; } }
-        n.x=Math.max(n.w/2+4,Math.min(W-n.w/2-4,n.x));
-        n.y=Math.max(n.h/2+4,Math.min(H-n.h/2-4,n.y));
+        var best=null;
+        for(var ri=0; ri<3; ri++){
+          var R=n.r1+ri*22;
+          for(var di=0; di<DIRS.length; di++){
+            var cx=Math.max(n.w/2+4,Math.min(W-n.w/2-4, n.ax+DIRS[di][0]*R));
+            var cy=Math.max(n.h/2+4,Math.min(H-n.h/2-4, n.ay+DIRS[di][1]*R));
+            var cc=placeCost(n,cx,cy)+ri*10+DIRPEN[di];
+            if(!best||cc<best.c) best={c:cc,x:cx,y:cy};
+          }
+        }
+        n.x=best.x; n.y=best.y;
       });
     }
-    var pass;
-    for (pass=0; pass<140; pass++){
-      sepPass(); stemPass();
-      nodes.forEach(function(n){ n.x+=(n.sx-n.x)*0.03; n.y+=(n.sy-n.y)*0.03; });
-      standoffClamp();
-    }
-    // settle WITHOUT the spring so it can't drag cards back onto stems
-    for (pass=0; pass<30; pass++){ sepPass(); stemPass(); standoffClamp(); }
     nodes.forEach(function(n){
       n.el.style.left=(n.ax/W*100).toFixed(3)+"%";
       n.el.style.top =(n.ay/H*100).toFixed(3)+"%";
