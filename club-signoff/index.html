@@ -393,7 +393,7 @@ body { background: var(--navy-50); }
   var club = '', sub = null, cfg = {}, answers = {}, listPicks = {};
   /* editing: which blocks are open. edits: corrections the club has typed,
      keyed by field for club info and by person + section for role titles. */
-  var editing = {}, edits = {}, wired = false, mergedNames = [];
+  var editing = {}, edits = {}, wired = false, mergedNames = [], found = {};
 
   function $(id) { return document.getElementById(id); }
   var esc = NL.escHtml;
@@ -483,10 +483,25 @@ body { background: var(--navy-50); }
       '" placeholder="' + esc(placeholder || '') + '">';
   }
 
+  /* A UK number is 11 digits starting 0 once a menu option or extension is out
+     of the way and +44 is normalised. Anything else we cannot repair ourselves,
+     because we do not know which digit is missing or surplus. */
+  function phoneTrouble(raw) {
+    var v = String(raw == null ? '' : raw).trim();
+    if (!v) { return null; }
+    v = v.replace(/\b(?:opt(?:ion)?|ext(?:ension)?|x)\b\.?\s*\d+/i, '');
+    v = v.replace(/^\+?44\s*\(?0?\)?\s*/, '0');
+    var d = v.replace(/\D/g, '');
+    if (!d) { return null; }
+    if (d.length === 11 && d.charAt(0) === '0') { return null; }
+    return d.length;
+  }
+
   function possessive(n) { return n + (/s$/i.test(n) ? '\u2019' : '\u2019s'); }
 
   function personCard(p, shared, inboxOf) {
     var name = fullName(p);
+    if (/^(tbc|tba|tbd|vacant|n\/a)\b/i.test(name)) { found.placeholders++; }
 
     /* Roles carrying the same title collapse onto one line: "Finance Director"
        three times over Directors, Executive and Finance is noise, not detail. */
@@ -504,6 +519,7 @@ body { background: var(--navy-50); }
       var rmKey = 'rolerm:' + name + ':' + sec;
       if (edits[rmKey]) { return ''; }
       flags.push(flagFor('people:' + name + ':' + sec));
+      if (!g.title) { found.titles++; }
       return '<li class="rle">' +
         '<span class="rle__dept">' + g.sections.map(esc).join(' &middot; ') + '</span>' +
         field('role:' + name + ':' + sec, g.title,
@@ -525,9 +541,11 @@ body { background: var(--navy-50); }
         '<button class="rm" type="button" data-blank="' + esc(k) + '" ' +
         'aria-label="Remove this address">&times;</button></div>');
     });
+    var badPhone = null;
     (p.phones || []).forEach(function (ph, i) {
       var k = 'phone:' + name + ':' + i;
       if (edits[k] === '') { return; }
+      if (edits[k] === undefined && phoneTrouble(ph.number)) { badPhone = phoneTrouble(ph.number); }
       cts.push('<div class="ct">' + field(k, ph.number, 'Phone number') +
         '<button class="rm" type="button" data-blank="' + esc(k) + '" ' +
         'aria-label="Remove this number">&times;</button></div>');
@@ -544,6 +562,7 @@ body { background: var(--navy-50); }
     });
     var dupWarn = '';
     if (dupes.length) {
+      found.shared++;
       var lc0 = dupes[0].trim().toLowerCase();
       dupWarn = '<div class="auto auto--warn"><b><span class="bang" aria-hidden="true">!</span>' +
         (inboxOf[lc0]
@@ -553,18 +572,86 @@ body { background: var(--navy-50); }
             'address, and we will reach them through the club secretary. We already hold ' +
             'the inbox itself, so nothing is lost.'
           : 'Not ' + esc(possessive(name)) + ' own address?</b> ' +
-            (shared[lc0] - 1) + ' other ' + (shared[lc0] - 1 === 1 ? 'person lists' : 'people list') +
+            word(shared[lc0] - 1) + ' other ' + (shared[lc0] - 1 === 1 ? 'person lists' : 'people list') +
             ' it too. Leave it blank if ' + esc(name) + ' has no address of their own, and we ' +
             'will reach them through the club secretary. If it belongs to a whole department, ' +
             'add it under Departmental inboxes instead.') + '</div>';
     }
+
+    if (badPhone) { found.phones++; }
+    var phoneWarn = badPhone
+      ? '<div class="auto"><b>Check this telephone number.</b> It has ' + word(badPhone) +
+        ' digits, and a UK number has eleven. We cannot tell which one is missing or ' +
+        'spare, so we have left it exactly as you sent it.</div>'
+      : '';
 
     return '<li class="pcard">' +
       '<div class="pcard__top"><span class="pcard__name">' + esc(name) + '</span>' +
       (p.hideContact ? '<span class="chip">Not for publication</span>' : '') + '</div>' +
       '<div class="pcard__body"><ul class="roles">' + roles + '</ul>' +
       '<div class="pcard__ct">' + cts.join('') + '</div></div>' +
-      flags.join('') + dupWarn + '</li>';
+      flags.join('') + dupWarn + phoneWarn + '</li>';
+  }
+
+  /* The club's own summary, composed from what the page actually found rather
+     than written per club. Naming the kinds of thing up front means a secretary
+     knows what they are in for before scrolling, and it can never describe
+     something that is not on the page. */
+  function quantity(n) {
+    if (n === 1) { return 'one thing'; }
+    if (n === 2) { return 'a couple of things'; }
+    if (n <= 4)  { return 'a few things'; }
+    if (n <= 7)  { return 'half a dozen or so things'; }
+    if (n <= 12) { return 'around a dozen things'; }
+    return 'a fair few things';
+  }
+
+  var WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven',
+               'eight', 'nine', 'ten', 'eleven', 'twelve'];
+  function word(n) { return WORDS[n] || String(n); }
+
+  function joinPhrases(a) {
+    if (a.length === 1) { return a[0]; }
+    if (a.length === 2) { return a[0] + ' and ' + a[1]; }
+    return a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1];
+  }
+
+  function summarise(f) {
+    var total = f.titles + f.shared + f.emptyPost + f.emptyList + f.phones +
+                f.placeholders + f.authored;
+    if (!total) {
+      return 'Everything came through clearly at your end, so there is nothing for you ' +
+        'to do here beyond a read through. If it all looks right, confirm it at the bottom.';
+    }
+    var bits = [];
+    if (f.shared) {
+      bits.push(f.shared === 1
+        ? 'an email address that is doing duty for more than one person'
+        : 'email addresses doing duty for more than one person');
+    }
+    if (f.emptyPost) {
+      bits.push(f.emptyPost === 1
+        ? 'one required post with nobody down for it'
+        : word(f.emptyPost) + ' required posts with nobody down for them');
+    }
+    if (f.phones) {
+      bits.push(f.phones === 1
+        ? 'a telephone number that looks to have the wrong number of digits'
+        : 'telephone numbers that look to have the wrong number of digits');
+    }
+    if (f.titles) {
+      bits.push(f.titles === 1 ? 'a role that came through without a job title'
+                               : 'roles that came through without a job title');
+    }
+    if (f.placeholders) { bits.push('an entry still marked TBC'); }
+    if (f.emptyList) {
+      bits.push(f.emptyList === 1 ? 'a mailing list with nobody on it'
+                                  : 'mailing lists with nobody on them');
+    }
+    var lead = 'There ' + (total === 1 ? 'is ' : 'are ') + quantity(total) + ' flagged below';
+    /* Three is as many as reads naturally; the rest are visible on the page. */
+    return lead + (bits.length ? ', in particular ' + joinPhrases(bits.slice(0, 3)) : '') +
+      '. Everything not marked, we believe to be right.';
   }
 
   function listNames(a) {
@@ -685,7 +772,6 @@ body { background: var(--navy-50); }
     crest.src = NL.clubs.crestUrl(club);
 
     $('noteLabel').textContent = 'Info for ' + club;
-    $('noteBespoke').innerHTML = cfg.note || '';
 
     var fixedList = (cfg.fixed || []).slice();
     if (mergedNames.length) {
@@ -764,6 +850,12 @@ body { background: var(--navy-50); }
         null, 'website', info.website) +
       row('Social', soc, 'info:social');
 
+    /* Findings are tallied as the page renders and read by summarise() at the
+       end, so the note can only ever describe what is actually on the page.
+       Reset before the first thing that counts. */
+    found = { titles: 0, shared: 0, emptyPost: 0, emptyList: 0, phones: 0,
+              placeholders: 0, authored: Object.keys(cfg.check || {}).length };
+
     /* ---- mailing lists ---- */
     var names = people.map(fullName).filter(Boolean);
     names.sort(function (a, b) { return a.localeCompare(b); });
@@ -785,6 +877,7 @@ body { background: var(--navy-50); }
          for a club because nobody remembered to write a flag for it. */
       var auto = '';
       if (!picks.length) {
+        found[L.post ? 'emptyPost' : 'emptyList']++;
         auto = L.post
           ? '<div class="auto"><b>Add a ' + esc(L.label.toLowerCase()) + '.</b> ' +
             'Every club needs this post filled, and we have nobody down for it.</div>'
@@ -874,6 +967,8 @@ body { background: var(--navy-50); }
       (sub.submittedAt ? new Date(sub.submittedAt).toLocaleDateString('en-GB') : '') +
       (sub.yourName ? ' by ' + sub.yourName : '') + '.';
 
+    $('noteBespoke').innerHTML = summarise(found) + (cfg.note ? ' ' + cfg.note : '');
+
     var n = Object.keys(edits).length + Object.keys(answers).length;
     $('changebar').hidden = n === 0;
     $('changeN').textContent = n;
@@ -894,7 +989,9 @@ body { background: var(--navy-50); }
       if (t.hasAttribute && t.hasAttribute('data-field')) {
         edits[t.getAttribute('data-field')] = t.value;
         t.classList.add('inl--changed');
-        var n = Object.keys(edits).length + Object.keys(answers).length;
+        $('noteBespoke').innerHTML = summarise(found) + (cfg.note ? ' ' + cfg.note : '');
+
+    var n = Object.keys(edits).length + Object.keys(answers).length;
         $('changebar').hidden = false;
         $('changeN').textContent = n;
         $('changeWord').textContent = n === 1 ? 'change' : 'changes';
