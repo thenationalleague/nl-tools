@@ -372,7 +372,7 @@ const seasonStartYear = s => Number(String(s).slice(0, 4)); // "2003-04" → 200
     if (patched === hubSrc) throw new Error("BEGIN/END __DATA__ markers not found — not patched.");
     const dt = new Date(DATE + "T12:00:00Z");
     const nice = dt.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).replace(/,/g, "");
-    const patched2 = patched.replace(/Replay · [^<]+(<span class="nlh__ver")/, `Replay · ${nice} $1`);
+    const patched2 = patched.replace(/(<span id="nlhFootDate">)[^<]*(<\/span>)/, `$1${nice}$2`);
     fs.writeFileSync(HUB, patched2);
     console.error(`Patched ${path.relative(REPO, HUB)} — round ${roundNo}, ${fixtures.length} fixtures. Bump NL_CHANGELOG/BUILD before shipping.`);
   } else if (typeof args.out === "string") {
