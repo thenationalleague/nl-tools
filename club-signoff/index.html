@@ -390,7 +390,8 @@
   var club = '', sub = null, cfg = {}, answers = {}, listPicks = {};
   /* editing: which blocks are open. edits: corrections the club has typed,
      keyed by field for club info and by person + section for role titles. */
-  var editing = {}, edits = {}, wired = false, mergedNames = [], found = {};
+  var editing = {}, edits = {}, wired = false, mergedNames = [], found = {},
+      tidied = { names: 0, titles: 0, emails: 0 };
 
   function $(id) { return document.getElementById(id); }
   var esc = NL.escHtml;
@@ -696,6 +697,7 @@
      narrowly (person + section, or person + exact original value) so a stale
      patch silently does nothing rather than hitting the wrong record. */
   function applyFixes(rec, apply) {
+    tidied = tidyCase(rec);
     mergedNames = mergeByName(rec);
     if (!apply) { return rec; }
     var people = rec.people || [];
@@ -726,6 +728,149 @@
       if (rec.info) { rec.info[f.field] = f.to; }
     });
     return rec;
+  }
+
+
+  /* ------------------------------------------------------------ house style
+     Clubs type into a plain form, so a third of them arrive shouting, or in
+     lower case, or with the address in caps. This is the same rule set the
+     data pass uses, applied at render: deterministic, safe, and it needs no
+     per-club seeding. The submission itself is untouched — this is a view of
+     it, and the club sees what we changed in the green list.
+
+     The governing principle throughout: only recase a value that is uniformly
+     cased. Anything already carrying internal capitals is somebody's
+     deliberate choice (McGrath, Co-ordinator, CEO/Director) and is left. */
+  var PARTICLES = ['de','van','von','der','den','du','da','di','la','le','ter'];
+  var PLACEHOLDER = ['tbc','tba','tbd','n/a','na','none','vacant','unknown','-'];
+  var ACRONYM = ['CEO','CFO','COO','CTO','MD','GM','PA','EA','DLO','PLO','SLO','CSLO',
+    'DSL','DSO','CWO','FA','EFL','HR','IT','PR','FC','AFC','F&B','NVQ','FSOA','SIA',
+    'DBS','EFAA','GK','U18','U21','U23','TBC','TBA','TBD','N/A'];
+  var MINOR = ['a','an','the','and','or','nor','but','of','for','in','on','at','to',
+    'by','with','from','into','over','per','via','including','inc','incl','plus','as','is'];
+
+  function isPlaceholder(v) {
+    return PLACEHOLDER.indexOf(String(v == null ? '' : v).trim().toLowerCase()) > -1;
+  }
+  /* Uniformly cased means safe to recase. Mixed case is deliberate. */
+  function uniform(v) {
+    var letters = v.replace(/[^A-Za-z]/g, '');
+    return !letters || letters === letters.toUpperCase() || letters === letters.toLowerCase();
+  }
+  function cap(core) {
+    if (!core || !uniform(core)) { return core; }
+    return core.charAt(0).toUpperCase() + core.slice(1).toLowerCase();
+  }
+
+  function caseWord(w) {
+    if (!w) { return w; }
+    if (w.indexOf('-') > -1) { return w.split('-').map(caseWord).join('-'); }
+    var low = w.toLowerCase();
+    if (PARTICLES.indexOf(low) > -1) { return low; }
+    var apo = low.match(/^([a-z])'([a-z].*)$/);          /* O'Connor, D'Arcy */
+    if (apo) { return apo[1].toUpperCase() + "'" + cap(apo[2]); }
+    /* Mc only. Mac is unsafe — Macey and Mackay are not MacKay. */
+    if (low.indexOf('mc') === 0 && low.length > 3) { return 'Mc' + cap(low.slice(2)); }
+    if (/^([a-z]\.)+$/.test(low)) { return low.toUpperCase(); }   /* J.R. */
+    return cap(low);
+  }
+  function recase(v) {
+    return v.split(' ').filter(function (w) { return w !== ''; }).map(caseWord).join(' ');
+  }
+
+  /* A record typed in caps, as opposed to a genuine acronym. Both name fields
+     in caps, or any single token too long to be an initialism. A lone all-caps
+     token with no surname (SMSA, a supporters' association entered as the SLO)
+     is not shouting and is left alone. */
+  function shouting(p) {
+    var f = (p.firstName || '').trim(), l = (p.lastName || '').trim();
+    if (f && l && f === f.toUpperCase() && l === l.toUpperCase() &&
+        /[A-Z]/.test(f) && /[A-Z]/.test(l)) { return true; }
+    return [f, l].some(function (v) {
+      return v.replace(/-/g, ' ').split(' ').some(function (w) {
+        return w.length > 5 && w === w.toUpperCase() && /[A-Z]/.test(w) && !isPlaceholder(w);
+      });
+    });
+  }
+
+  function needsRecase(v, loud) {
+    v = (v || '').trim();
+    if (!v || isPlaceholder(v)) { return false; }
+    if (!/[a-z]/.test(v) && /[A-Z]/.test(v)) { return v.length > 5 || loud; }
+    if (!/[A-Z]/.test(v) && /[a-z]/.test(v)) { return true; }   /* nothing capitalised */
+    var words = v.split(' ').filter(Boolean);                   /* sentence case */
+    return words.length > 1 && /[A-Z]/.test(words[0]) &&
+      words.slice(1).every(function (w) { return !/[A-Z]/.test(w); }) &&
+      words.slice(1).some(function (w) { return /[a-z]/.test(w); });
+  }
+
+  function atom(a, first, last, loud) {
+    var lead = (a.match(/^[^0-9A-Za-z&]*/) || [''])[0];
+    var trail = (a.match(/[^0-9A-Za-z&]*$/) || [''])[0];
+    var core = a.slice(lead.length, trail ? a.length - trail.length : undefined);
+    if (!core) { return a; }
+    if (ACRONYM.indexOf(core.toUpperCase()) > -1) { return lead + core.toUpperCase() + trail; }
+    /* A short all-caps token in a title that is not otherwise shouting is a
+       deliberate initialism (KHFC, DSO). Keeping it avoids enumerating every
+       club's initials. */
+    if (!loud && core === core.toUpperCase() && /[A-Z]/.test(core) &&
+        core.length >= 2 && core.length <= 5) { return lead + core + trail; }
+    if (MINOR.indexOf(core.toLowerCase()) > -1 && !first && !last) {
+      return lead + core.toLowerCase() + trail;
+    }
+    return lead + cap(core) + trail;
+  }
+
+  function titleCase(t) {
+    /* Clubs sometimes paste an address into the job-title box. Casing it would
+       disguise the mistake and break the address. */
+    if (t.indexOf('@') > -1 || /https?:\/\/|www\./i.test(t)) { return t; }
+    var words = t.split(' ').filter(function (w) { return w !== ''; });
+    var loud = t === t.toUpperCase() && /[A-Z]/.test(t);
+    return words.map(function (w, i) {
+      var first = i === 0, last = i === words.length - 1;
+      var bare = w.replace(/^[.,()\/&-]+|[.,()\/&-]+$/g, '');
+      if (ACRONYM.indexOf(bare.toUpperCase()) > -1) {
+        return w.replace(bare, bare.toUpperCase());
+      }
+      if (MINOR.indexOf(bare.toLowerCase()) > -1 && !first && !last) { return w.toLowerCase(); }
+      if (!uniform(w)) { return w; }
+      return w.split(/([\/\-])/).map(function (part) {
+        return (part === '/' || part === '-') ? part : atom(part, first, last, loud);
+      }).join('');
+    }).join(' ');
+  }
+
+  /* Returns what was changed, so the green list describes the truth. */
+  function tidyCase(rec) {
+    var n = { names: 0, titles: 0, emails: 0 };
+    (rec.people || []).forEach(function (p) {
+      var loud = shouting(p), touched = false;
+      ['firstName', 'lastName'].forEach(function (f) {
+        var v = (p[f] || '').trim();
+        if (needsRecase(v, loud)) {
+          var out = recase(v);
+          if (out !== v) { p[f] = out; touched = true; }
+        }
+      });
+      if (touched) {
+        n.names++;
+        p.name = [p.title, p.firstName, p.lastName, p.postNominals]
+          .map(function (x) { return (x || '').trim(); })
+          .filter(Boolean).join(' ');
+      }
+      (p.roles || []).forEach(function (r) {
+        var t = (r.title || '').trim();
+        if (!t || !needsRecase(t, loud)) { return; }
+        var out = titleCase(t);
+        if (out !== t) { r.title = out; n.titles++; }
+      });
+      p.emails = (p.emails || []).map(function (em) {
+        if (em && /[A-Z]/.test(em)) { n.emails++; return em.toLowerCase(); }
+        return em;
+      });
+    });
+    return n;
   }
 
   /* One person, one record: union their roles, addresses and numbers, and keep
@@ -773,6 +918,15 @@
     $('noteLabel').textContent = 'Info for ' + club;
 
     var fixedList = (cfg.fixed || []).slice();
+    var bits = [];
+    if (tidied.names)  { bits.push(word(tidied.names) + (tidied.names === 1 ? ' name' : ' names')); }
+    if (tidied.titles) { bits.push(word(tidied.titles) + (tidied.titles === 1 ? ' job title' : ' job titles')); }
+    if (tidied.emails) { bits.push(word(tidied.emails) + (tidied.emails === 1 ? ' email address' : ' email addresses')); }
+    if (bits.length) {
+      fixedList.unshift('We\u2019ve put ' + joinPhrases(bits) + ' into normal capitalisation. ' +
+        'Forms encourage caps lock and it is nobody\u2019s fault, but the directory reads ' +
+        'better without it. Tell us if we have changed something that was right as it was.');
+    }
     if (mergedNames.length) {
       fixedList.unshift('<b>' + listNames(mergedNames) + '</b> ' +
         (mergedNames.length === 1 ? 'was' : 'were') + ' added to the form more than once, ' +
