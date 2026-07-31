@@ -206,6 +206,45 @@
                           keeper at Yeovil), five were pens, three were
                           sub cameos. Companion: scripts/build-match-hub-round.js
                           regenerates __DATA__ for ANY matchday from NLS.
+    v0.17.0 (2026-07-31) — IN-PAGE MATCHDAY LOADER + real-time simulation.
+                          "Choose matchday" (topbar) opens a setup dialog:
+                          any completed date, any of the three divisions —
+                          fetched client-side from the public NLS API (season
+                          list + the day's match details), clubs-meta for
+                          identity, and the all-time results master for h2h
+                          (lazy, cached for the session, skipped if slow).
+                          Prior table, form + home/away split streaks and
+                          clean-sheet droughts are computed in-browser from
+                          the season's scores; postponed games show as P-P
+                          pins. SIMULATION: "real kick-off times" staggers
+                          matches through the day on the model's existing KO
+                          offsets (a 12:30 game is mid-2nd-half when the
+                          15:00s start); the clock becomes the time of day
+                          ("15:07"); join from the build-up OR at any chosen
+                          clock time (e.g. 14:55); pace control sets how long
+                          a match minute takes (0.5s / 1s / 2s / real-time
+                          60s), with the speed button multiplying on top.
+                          Lull-skip only applies in the classic synchronised
+                          replay — a simulated afternoon keeps an honest
+                          clock. Generator --patch updated for the new
+                          footnote markup.
+    v0.18.0 (2026-07-31) — Map truthfulness + scoreboard redesign + console.
+                          (1) ANCHOR + LEADER pins: every pin is now a fixed
+                          anchor at the ground's true geography; the de-overlap
+                          pass displaces only the BOARD, which is tied back to
+                          a dot at the true spot by a thin stem (shown only
+                          when displaced >12px). Zooming glides boards home
+                          along their stems — no more scores sitting nowhere
+                          near their ground, no more snap on zoom, and the
+                          camera now centres on the true location. (2) BOARD
+                          REDESIGN: one compact broadcast strip — crest,
+                          score – score, crest, then the minute as an
+                          integrated state-coloured end segment (idle navy /
+                          live green / FT green) instead of the floating pill;
+                          half the vertical footprint, subtle ring instead of
+                          a heavy border. Scorer chip marks pens. (3) The
+                          commentary console grows to clamp(92px,13vh,156px)
+                          so a full preview fits without scrolling.
   ============================================================================
 -->
 
@@ -341,6 +380,7 @@ window.__DATA__ = {
     <div class="nlh__brandrow">
       <span class="nlh__wordmark">MATCH&nbsp;HUB</span>
       <span class="nlh__round" id="nlhRound"></span>
+      <button class="nlh__loadbtn" id="nlhLoadBtn">Choose matchday</button>
     </div>
     <div class="nlh__switch" role="tablist" aria-label="View">
       <button class="nlh__seg is-active" data-view="map"    role="tab">Map</button>
@@ -383,6 +423,39 @@ window.__DATA__ = {
     </div>
   </div>
 
+  <!-- Matchday setup — pick any completed date, join at any time, set the pace -->
+  <div class="nlh__setup" id="nlhSetup" hidden>
+    <div class="nlh__setupcard">
+      <div class="nlh__setuphead"><span>Choose a matchday</span><button class="nlh__sheetclose" id="nlhSetupClose" aria-label="Close">&times;</button></div>
+      <div class="nlh__fieldrow">
+        <label class="nlh__field">Date<input type="date" id="nlhSetDate"></label>
+        <label class="nlh__field">Competition<select id="nlhSetComp">
+          <option value="nl">National League</option>
+          <option value="north">National North</option>
+          <option value="south">National South</option>
+        </select></label>
+      </div>
+      <div class="nlh__fieldrow">
+        <label class="nlh__field">Join the day<select id="nlhSetStart">
+          <option value="">From the build-up</option>
+          <option value="clock">At a time on the clock</option>
+        </select></label>
+        <label class="nlh__field" id="nlhSetTimeWrap" hidden>Clock time<input type="time" id="nlhSetTime" value="14:55"></label>
+      </div>
+      <label class="nlh__field">Pace — one match minute takes<select id="nlhSetPace">
+        <option value="0.5">Half a second</option>
+        <option value="1" selected>One second</option>
+        <option value="2">Two seconds</option>
+        <option value="60">Real time (a full minute)</option>
+      </select></label>
+      <label class="nlh__check"><input type="checkbox" id="nlhSetReal" checked> Real kick-off times — matches stagger through the day</label>
+      <div class="nlh__setupfoot">
+        <span class="nlh__setupstatus" id="nlhSetStatus"></span>
+        <button class="nlh__setupgo" id="nlhSetGo">Load</button>
+      </div>
+    </div>
+  </div>
+
   <div class="nlh__comm" id="nlhComm" aria-live="polite">
     <span class="nlh__commdot"></span>
     <span class="nlh__commtext" id="nlhCommText"></span>
@@ -403,7 +476,7 @@ window.__DATA__ = {
 
   <div class="nlh__foot">
     <span id="nlhFootTable" class="nlh__footlink">Final table</span>
-    <span class="nlh__footnote">Replay · Sat 21 Mar 2026 <span class="nlh__ver" id="nlhVer"></span></span>
+    <span class="nlh__footnote">Replay · <span id="nlhFootDate">Sat 21 Mar 2026</span> <span class="nlh__ver" id="nlhVer"></span></span>
   </div>
 </div>
 
@@ -464,6 +537,8 @@ body{overflow:hidden}
 #nlHub .nlh__brandrow{display:flex;align-items:baseline;gap:12px}
 #nlHub .nlh__wordmark{font-variation-settings:"wght" 900;font-weight:900;letter-spacing:.10em;font-size:var(--fs-lg);color:var(--navy)}
 #nlHub .nlh__round{font-variation-settings:"wght" 700;font-weight:700;color:var(--muted);font-size:var(--fs-xs);letter-spacing:.07em;text-transform:uppercase}
+#nlHub .nlh__loadbtn{margin-left:auto;align-self:center;font-size:var(--fs-xs);font-variation-settings:"wght" 800;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--navy);border:1px solid var(--line);border-radius:999px;padding:6px 13px;background:var(--surface);transition:background .15s}
+#nlHub .nlh__loadbtn:hover{background:var(--navy-100)}
 #nlHub .nlh__switch{display:flex;gap:4px;background:var(--navy-100);padding:4px;border-radius:999px}
 #nlHub .nlh__seg{flex:1;padding:9px 0;border-radius:999px;font-size:var(--fs-sm);font-variation-settings:"wght" 800;font-weight:800;letter-spacing:.04em;color:var(--muted);transition:.18s}
 #nlHub .nlh__seg.is-active{background:var(--primary);color:#fff}
@@ -482,22 +557,35 @@ body{overflow:hidden}
 #nlHub .nlh__mapsvg{position:absolute;inset:0;width:100%;height:100%}
 #nlHub .nlh__mapsvg path{fill:#0e1a33;stroke:#2b3d63;stroke-width:2.2;stroke-linejoin:round;transition:fill .5s ease,stroke .5s ease}
 #nlHub .nlh__pins{position:absolute;inset:0}
-#nlHub .nlh__pin{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:3px;transition:top .9s cubic-bezier(.3,0,.15,1),left .9s cubic-bezier(.3,0,.15,1),transform .9s cubic-bezier(.3,0,.15,1),opacity .5s ease,filter .5s ease}
-/* FOCUS MODE — the camera is in on one ground; the rest of the island recedes.
-   Pins counter-scale against the 2.4x zoom (hero ~1.7x, others ~1.3x effective)
-   and stand on TRUE geography (layoutPins swaps relaxed → geo positions). */
+/* The pin is an ANCHOR: a 0x0 point fixed at the ground's TRUE geography.
+   The dot marks it; the board (wrap) floats by only the offset the
+   de-overlap pass needs (--ox/--oy), tied back by a stem. Zooming glides
+   boards home along their stems — the anchor itself never moves. */
+#nlHub .nlh__pin{position:absolute;width:0;height:0;transition:opacity .5s ease,filter .5s ease}
+#nlHub .nlh__pindot{position:absolute;left:-3.5px;top:-3.5px;width:7px;height:7px;border-radius:50%;background:var(--ink-text);box-shadow:0 0 0 2px #0a1428;opacity:0;transition:opacity .5s ease}
+#nlHub .nlh__pinstem{position:absolute;left:-1px;top:0;width:2px;background:#3a4a70;transform-origin:0 0;opacity:0;transition:opacity .5s ease,height .9s cubic-bezier(.3,0,.15,1),transform .9s cubic-bezier(.3,0,.15,1)}
+#nlHub .nlh__pin.is-off .nlh__pindot{opacity:.9}
+#nlHub .nlh__pin.is-off .nlh__pinstem{opacity:.75}
+#nlHub .nlh__pinwrap{position:absolute;left:0;top:0;display:flex;flex-direction:column;align-items:center;gap:3px;transform:translate(calc(-50% + var(--ox,0px)),calc(-50% + var(--oy,0px))) scale(var(--pin-scale,1));transition:transform .9s cubic-bezier(.3,0,.15,1)}
+/* FOCUS MODE — the camera is in on one ground; the rest of the island
+   recedes. Boards counter-scale against the 2.4x zoom (hero ~1.7x, others
+   ~1.3x effective) and sit ON their anchors (offsets are zeroed by JS). */
 #nlHub .nlh__stage.is-focus .nlh__mapsvg path{fill:#0b1226;stroke:#22304f}
-#nlHub .nlh__stage.is-focus .nlh__pin{opacity:.32;filter:grayscale(1) brightness(.75);transform:translate(-50%,-50%) scale(.55)}
-#nlHub .nlh__stage.is-focus .nlh__pin.is-hero{opacity:1;filter:none;transform:translate(-50%,-50%) scale(.7);z-index:3}
-#nlHub .nlh__pinboard{display:flex;align-items:center;gap:0;background:var(--ink-2);border:1px solid var(--ink-line);border-radius:8px;box-shadow:0 3px 10px rgba(0,0,0,.5);overflow:hidden}
-#nlHub .nlh__pinside{display:flex;align-items:center;gap:4px;padding:3px 6px}
-#nlHub .nlh__pinside img,#nlHub .nlh__crestfb{width:19px;height:19px;object-fit:contain;border-radius:2px;flex:0 0 auto}
-#nlHub .nlh__crestfb{display:flex;align-items:center;justify-content:center;font-size:8px;font-variation-settings:"wght" 900;font-weight:900;color:#fff}
-#nlHub .nlh__pinsc{font-variation-settings:"wght" 900;font-weight:900;font-size:15px;min-width:11px;text-align:center;font-variant-numeric:tabular-nums}
-#nlHub .nlh__pindiv{width:1px;align-self:stretch;background:var(--ink-line)}
-#nlHub .nlh__pinmin{font-variation-settings:"wght" 800;font-weight:800;font-size:10.5px;padding:2px 7px;border-radius:999px;background:#0a1428;color:var(--ink-muted);border:1px solid var(--ink-line);letter-spacing:.03em;white-space:nowrap}
-#nlHub .nlh__pinmin.is-live{color:#031;background:var(--live);border-color:var(--live)}
-#nlHub .nlh__pinmin.is-ft{color:#eafff0;background:var(--green);border-color:var(--green)}
+#nlHub .nlh__stage.is-focus .nlh__pin{opacity:.32;filter:grayscale(1) brightness(.75)}
+#nlHub .nlh__stage.is-focus .nlh__pin .nlh__pinwrap{--pin-scale:.55}
+#nlHub .nlh__stage.is-focus .nlh__pin.is-hero{opacity:1;filter:none;z-index:3}
+#nlHub .nlh__stage.is-focus .nlh__pin.is-hero .nlh__pinwrap{--pin-scale:.7}
+#nlHub .nlh__stage.is-focus .nlh__pindot,#nlHub .nlh__stage.is-focus .nlh__pinstem{opacity:0}
+/* the board: one compact broadcast strip — crest score – score crest │ min */
+#nlHub .nlh__pinboard{display:flex;align-items:stretch;background:var(--ink-2);border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.5),0 0 0 1px var(--ink-line);overflow:hidden}
+#nlHub .nlh__pinside{display:flex;align-items:center;gap:4px;padding:4px 6px}
+#nlHub .nlh__pinside img,#nlHub .nlh__crestfb{width:16px;height:16px;object-fit:contain;border-radius:2px;flex:0 0 auto}
+#nlHub .nlh__crestfb{display:flex;align-items:center;justify-content:center;font-size:7px;font-variation-settings:"wght" 900;font-weight:900;color:#fff}
+#nlHub .nlh__pinsc{font-variation-settings:"wght" 900;font-weight:900;font-size:13px;min-width:10px;text-align:center;font-variant-numeric:tabular-nums;color:#fff}
+#nlHub .nlh__pindash{align-self:center;color:var(--ink-muted);font-size:11px;font-variation-settings:"wght" 800;font-weight:800;margin:0 -3px}
+#nlHub .nlh__pinmin{display:flex;align-items:center;padding:0 7px;font-size:10px;font-variation-settings:"wght" 800;font-weight:800;letter-spacing:.02em;color:var(--ink-muted);background:#0a1428;border-left:1px solid var(--ink-line);white-space:nowrap}
+#nlHub .nlh__pinmin.is-live{color:#04310f;background:var(--live);border-left-color:var(--live)}
+#nlHub .nlh__pinmin.is-ft{color:#eafff0;background:var(--green);border-left-color:var(--green)}
 #nlHub .nlh__pin.is-goal .nlh__pinboard{animation:nlhPulse .7s ease}
 @keyframes nlhPulse{0%{transform:scale(1)}35%{transform:scale(1.34);box-shadow:0 0 0 3px var(--hero-col,var(--live))}100%{transform:scale(1)}}
 /* hero reveal — team-colour ring + glow blooms at the ground, then settles */
@@ -587,10 +675,28 @@ body{overflow:hidden}
 #nlHub .nlh__table tr.moved .nm::after{content:"▲";color:var(--green);font-size:10px;margin-left:6px}
 #nlHub .nlh__table tr.moved.down .nm::after{content:"▼";color:var(--red)}
 
+/* ===== Matchday setup dialog ===== */
+#nlHub .nlh__setup{position:absolute;inset:0;z-index:9;display:flex;align-items:center;justify-content:center;background:rgba(3,8,27,.45);padding:18px}
+#nlHub .nlh__setupcard{width:100%;max-width:480px;background:var(--surface);border-radius:var(--radius-lg);padding:18px;display:flex;flex-direction:column;gap:14px;box-shadow:0 12px 40px rgba(10,22,40,.3)}
+#nlHub .nlh__setuphead{display:flex;justify-content:space-between;align-items:center;font-size:var(--fs-md);font-variation-settings:"wght" 900;font-weight:900;color:var(--navy)}
+#nlHub .nlh__fieldrow{display:flex;gap:12px}
+#nlHub .nlh__fieldrow .nlh__field{flex:1;min-width:0}
+#nlHub .nlh__field{display:flex;flex-direction:column;gap:6px;font-size:var(--fs-xs);font-variation-settings:"wght" 800;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+#nlHub .nlh__field input,#nlHub .nlh__field select{font-family:"carbona-variable","carbona",system-ui,sans-serif;font-size:var(--fs-sm) !important;font-variation-settings:"wght" 600;padding:9px 10px;border:1px solid var(--line);border-radius:var(--radius);color:var(--text);background:var(--surface);text-transform:none;letter-spacing:0;width:100%}
+#nlHub .nlh__check{display:flex;align-items:center;gap:9px;font-size:var(--fs-sm);font-variation-settings:"wght" 600;font-weight:600;color:var(--text);cursor:pointer}
+#nlHub .nlh__setupfoot{display:flex;justify-content:space-between;align-items:center;gap:12px}
+#nlHub .nlh__setupstatus{flex:1;font-size:var(--fs-xs);color:var(--muted)}
+#nlHub .nlh__setupstatus.is-error{color:var(--red)}
+#nlHub .nlh__setupgo{background:var(--primary);color:#fff;font-variation-settings:"wght" 800;font-weight:800;font-size:var(--fs-sm);padding:10px 20px;border-radius:999px;transition:background .15s}
+#nlHub .nlh__setupgo:hover{background:var(--primary-600)}
+#nlHub .nlh__setupgo[disabled]{opacity:.5;cursor:default}
+
 /* ===== Commentary (radio-style live caption) ===== */
 /* FIXED height so the growing caption never resizes the stage (no map jump);
    long lines scroll inside the text box instead */
-#nlHub .nlh__comm{flex:0 0 auto;display:flex;align-items:center;gap:12px;height:clamp(76px,9vh,96px);padding:10px 18px;background:var(--surface);border-top:1px solid var(--line);overflow:hidden}
+/* taller console — a full preview (venue + form + extra clause) fits without
+   scrolling on most screens; very long lines still scroll inside the box */
+#nlHub .nlh__comm{flex:0 0 auto;display:flex;align-items:center;gap:12px;height:clamp(92px,13vh,156px);padding:10px 18px;background:var(--surface);border-top:1px solid var(--line);overflow:hidden}
 #nlHub .nlh__commdot{width:10px;height:10px;border-radius:50%;background:var(--primary);flex:0 0 auto;box-shadow:0 0 0 0 var(--primary);animation:nlhCommDot 1.6s ease-out infinite}
 @keyframes nlhCommDot{0%{box-shadow:0 0 0 0 rgba(158,0,0,.55)}70%{box-shadow:0 0 0 7px rgba(158,0,0,0)}100%{box-shadow:0 0 0 0 rgba(158,0,0,0)}}
 #nlHub .nlh__comm.is-goal .nlh__commdot{background:var(--green)}
@@ -644,7 +750,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "22";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "24";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -669,7 +775,7 @@ body{overflow:hidden}
 
   // ---- timeline model ------------------------------------------------------
   // real-minute of an event, HT break folded in, plus its slot's KO offset
-  function koOffset(fx){ return fx._ko || 0; } // all 0 (synchronised replay)
+  function koOffset(fx){ return fx._ko || 0; } // 0 in sync mode; real slot offsets in stagger mode
   // real-minute of an event (15-min HT break folded in); a 45' goal sits at the
   // end of the first half (not in the HT window)
   function evRmin(ev, fx){ var m=ev.min; return koOffset(fx) + (m < HALF ? m : (m===HALF ? HALF-0.08 : m + BREAK)); }
@@ -680,13 +786,24 @@ body{overflow:hidden}
   }
   // goal-minute label for scorers/tickers/sting — stoppage shown as "90+8", not "98"
   function minLabel(m){ return m>90 ? "90+"+(m-90) : (""+m); }
-  // per-fixture full-time rmin sits AFTER its last event, so stoppage-time goals
-  // (min up to 108') play out before that match reads "FT"
-  D.fixtures.forEach(function(fx){
-    var last=0; fx.events.forEach(function(ev){ last=Math.max(last, evRmin(ev,fx)); });
-    fx._ft = Math.max(koOffset(fx)+FT_RMIN, last+2);
-  });
-  var maxFt = D.fixtures.reduce(function(m,fx){ return Math.max(m, fx._ft); }, FT_RMIN);
+  // per-fixture KO offset + full-time rmin (sits AFTER the last event, so
+  // stoppage goals play out before "FT"). Recomputed by computeDerived()
+  // whenever a matchday loads or the timing mode changes.
+  var maxFt = FT_RMIN;
+  function computeTimeline(){
+    var base=Infinity;
+    D.fixtures.forEach(function(fx){ fx._koms=Date.parse(fx.date)||0; if(fx._koms<base) base=fx._koms; });
+    st.baseKOms = base===Infinity ? 0 : base;
+    // sync: every match kicks off together (the original replay treatment).
+    // stagger: real KO slots — a 12:30 game is deep into its second half
+    // by the time the 15:00s kick off, exactly like a real afternoon.
+    D.fixtures.forEach(function(fx){ fx._ko = st.stagger ? Math.round((fx._koms-st.baseKOms)/60000) : 0; });
+    D.fixtures.forEach(function(fx){
+      var last=0; fx.events.forEach(function(ev){ last=Math.max(last, evRmin(ev,fx)); });
+      fx._ft = Math.max(koOffset(fx)+FT_RMIN, last+2);
+    });
+    maxFt = D.fixtures.reduce(function(m,fx){ return fx.pp?m:Math.max(m, fx._ft); }, FT_RMIN);
+  }
 
   // per-fixture derived state at global time T (real-minutes since first KO)
   function stateOf(fx, T){
@@ -717,8 +834,14 @@ body{overflow:hidden}
     }).map(function(ev){ return {name:ev.name,min:ev.min,og:ev.og,pen:ev.pen}; });
   }
   function maxT(){ return maxFt + 4; }
-  // shared matchday wall clock (stoppage-aware)
+  // shared matchday wall clock. Sync mode: one match-minute clock for all.
+  // Stagger mode: the real time of day ("15:07"), since matches are on
+  // their own clocks — the HT fold means T tracks true wall minutes.
   function clockLabel(T){
+    if (st.stagger){
+      if (T >= maxFt) return "FT";
+      return new Date(st.baseKOms + T*60000).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:"Europe/London"});
+    }
     if (T <= 0) return "0'";
     if (T < HALF) return Math.floor(T)+"'";
     if (T < HALF+BREAK) return "HT";
@@ -728,12 +851,17 @@ body{overflow:hidden}
 
   // sorted list of every timeline "moment" (events + phase beats) for lull-skip
   var MOMENTS = [];
-  D.fixtures.forEach(function(fx){
-    fx.events.forEach(function(ev){ MOMENTS.push(evRmin(ev,fx)); });
-  });
-  D.fixtures.forEach(function(fx){ MOMENTS.push(fx._ft); });
-  [0,HALF,HALF+BREAK,maxFt].forEach(function(m){ MOMENTS.push(m); });
-  MOMENTS = MOMENTS.filter(function(v,i,a){return a.indexOf(v)===i;}).sort(function(x,y){return x-y;});
+  function computeMoments(){
+    MOMENTS = [];
+    D.fixtures.forEach(function(fx){
+      if (fx.pp) return;
+      fx.events.forEach(function(ev){ MOMENTS.push(evRmin(ev,fx)); });
+      MOMENTS.push(fx._ft);
+      if (st.stagger) MOMENTS.push(koOffset(fx));
+    });
+    (st.stagger ? [0,maxFt] : [0,HALF,HALF+BREAK,maxFt]).forEach(function(m){ MOMENTS.push(m); });
+    MOMENTS = MOMENTS.filter(function(v,i,a){return a.indexOf(v)===i;}).sort(function(x,y){return x-y;});
+  }
   function nextMoment(T){
     for (var i=0;i<MOMENTS.length;i++){ if (MOMENTS[i] > T+0.001) return MOMENTS[i]; }
     return maxT();
@@ -758,7 +886,10 @@ body{overflow:hidden}
   // ---- state ---------------------------------------------------------------
   var st = { T:0, playing:false, rate:1, view:"map", raf:0, last:0,
              fired:{}, ftShown:false, feedBuilt:{}, beatShown:{},
-             suspend:null, kickoff:null, koShown:false, _pick:{}, _typeIv:0 };
+             suspend:null, kickoff:null, koShown:false, _pick:{}, _typeIv:0,
+             // timing mode: secPerMin = seconds one match-minute takes (the
+             // speed button still multiplies on top); stagger = real KO slots
+             secPerMin:1, stagger:false, baseKOms:0 };
   function evId(fx,ev){ return fx.gc+"_"+ev.type+"_"+ev.min+"_"+(ev.name||""); }
   // desktop = three panels live at once (cards | map | ticker); the map is
   // always on screen there, so stings/beats/zooms fire regardless of st.view
@@ -770,21 +901,29 @@ body{overflow:hidden}
   function buildMap(){
     var d = D.gb.map(function(p,i){ var q=proj(p[0],p[1]); return (i?"L":"M")+(q.nx*1000).toFixed(1)+" "+(q.ny*1333).toFixed(1); }).join(" ")+" Z";
     $("nlhMapSvg").innerHTML = '<path d="'+d+'"/>';
+    // each pin = an ANCHOR at the ground's true position (dot), plus a
+    // scoreboard that may float away to avoid overlaps, tied back by a stem
     var pins = D.fixtures.map(function(fx){
       return '<div class="nlh__pin" id="pin_'+fx.gc+'">'+
-               '<div class="nlh__pinboard">'+
-                 '<div class="nlh__pinside">'+crestHTML(fx.home)+'<span class="nlh__pinsc" data-h></span></div>'+
-                 '<div class="nlh__pindiv"></div>'+
-                 '<div class="nlh__pinside"><span class="nlh__pinsc" data-a></span>'+crestHTML(fx.away)+'</div>'+
+               '<span class="nlh__pinstem"></span>'+
+               '<span class="nlh__pindot"></span>'+
+               '<div class="nlh__pinwrap">'+
+                 '<div class="nlh__pinboard">'+
+                   '<div class="nlh__pinside">'+crestHTML(fx.home)+'<span class="nlh__pinsc" data-h></span></div>'+
+                   '<span class="nlh__pindash">–</span>'+
+                   '<div class="nlh__pinside"><span class="nlh__pinsc" data-a></span>'+crestHTML(fx.away)+'</div>'+
+                   '<span class="nlh__pinmin" data-min></span>'+
+                 '</div>'+
                '</div>'+
-               '<div class="nlh__pinmin" data-min></div>'+
              '</div>';
     }).join("");
     $("nlhPins").innerHTML = pins;
     layoutPins();
   }
-  // Position pins to match the SVG outline's contain-fit ("meet"), so they
-  // stay aligned to the coastline at ANY stage aspect (full-bleed, any device).
+  // Anchor every pin at the ground's TRUE position (contain-fit to the SVG
+  // outline, any stage aspect), then relax only the BOARDS apart. The board's
+  // displacement is stored as an offset (--ox/--oy) from its anchor; a stem +
+  // dot appear whenever a board has had to give way, so geography never lies.
   function layoutPins(){
     var stage=$("nlhStage"); if(!stage) return;
     var W=stage.clientWidth, H=stage.clientHeight;
@@ -792,33 +931,54 @@ body{overflow:hidden}
     var mapAspect=3/4, mw,mh,ox,oy;
     if (W/H > mapAspect){ mh=H; mw=H*mapAspect; ox=(W-mw)/2; oy=0; }
     else { mw=W; mh=W/mapAspect; ox=0; oy=(H-mh)/2; }
-    // true geographic positions, then relax so overlapping boards give each other space
     var nodes = D.fixtures.map(function(fx){
-      var el=$("pin_"+fx.gc), c=club(fx.home), q=proj(c.lng,c.lat);
-      var X=ox+q.nx*mw, Y=oy+q.ny*mh;
-      return { el:el, x:X, y:Y, tx:X, ty:Y, w:(el&&el.offsetWidth)||74, h:(el&&el.offsetHeight)||38 };
-    }).filter(function(n){return n.el;});
-    var gap=7;
-    for (var pass=0; pass<80; pass++){
+      var el=$("pin_"+fx.gc); if(!el) return null;
+      var c=club(fx.home), q=proj(c.lng,c.lat);
+      var board=el.querySelector(".nlh__pinboard");
+      var ax=Math.max(10,Math.min(W-10, ox+q.nx*mw));
+      var ay=Math.max(10,Math.min(H-10, oy+q.ny*mh));
+      return { el:el, ax:ax, ay:ay, x:ax, y:ay,
+               w:(board&&board.offsetWidth)||96, h:((board&&board.offsetHeight)||24)+4 };
+    }).filter(function(n){ return n; });
+    var gap=6;
+    for (var pass=0; pass<60; pass++){
       for (var i=0;i<nodes.length;i++) for (var j=i+1;j<nodes.length;j++){
         var a=nodes[i], b=nodes[j], dx=b.x-a.x, dy=b.y-a.y;
         var needX=(a.w+b.w)/2+gap-Math.abs(dx), needY=(a.h+b.h)/2+gap-Math.abs(dy);
-        if (needX>0 && needY>0){ // boxes overlap — push apart along the shallower axis
+        if (needX>0 && needY>0){ // boards overlap — push apart along the shallower axis
           if (needX<needY){ var sx=(dx<0?-1:1)*needX/2; a.x-=sx; b.x+=sx; }
           else            { var sy=(dy<0?-1:1)*needY/2; a.y-=sy; b.y+=sy; }
         }
       }
       nodes.forEach(function(n){ n.x=Math.max(n.w/2+2,Math.min(W-n.w/2-2,n.x)); n.y=Math.max(n.h/2+2,Math.min(H-n.h/2-2,n.y)); });
     }
-    // store BOTH layouts on each pin — relaxed (full-map) and true-geo (zoomed);
-    // focus mode stands pins on true geography, where the zoom gives them room
     var focused = $("nlhStage").classList.contains("is-focus");
     nodes.forEach(function(n){
-      var tx=Math.max(n.w/2+2,Math.min(W-n.w/2-2,n.tx)), ty=Math.max(n.h/2+2,Math.min(H-n.h/2-2,n.ty));
-      n.el.dataset.rx=(n.x/W*100).toFixed(3); n.el.dataset.ry=(n.y/H*100).toFixed(3);
-      n.el.dataset.tx=(tx/W*100).toFixed(3);  n.el.dataset.ty=(ty/H*100).toFixed(3);
-      n.el.style.left=(focused?n.el.dataset.tx:n.el.dataset.rx)+"%";
-      n.el.style.top =(focused?n.el.dataset.ty:n.el.dataset.ry)+"%";
+      n.el.style.left=(n.ax/W*100).toFixed(3)+"%";
+      n.el.style.top =(n.ay/H*100).toFixed(3)+"%";
+      n.el.dataset.dx=(n.x-n.ax).toFixed(1);
+      n.el.dataset.dy=(n.y-n.ay).toFixed(1);
+      applyPinOffset(n.el, focused?0:(n.x-n.ax), focused?0:(n.y-n.ay));
+    });
+  }
+  function applyPinOffset(el, dx, dy){
+    var wrap=el.querySelector(".nlh__pinwrap"), stem=el.querySelector(".nlh__pinstem");
+    if(!wrap) return;
+    wrap.style.setProperty("--ox", dx.toFixed(1)+"px");
+    wrap.style.setProperty("--oy", dy.toFixed(1)+"px");
+    var L=Math.sqrt(dx*dx+dy*dy);
+    el.classList.toggle("is-off", L>12);   // stem + dot only when displaced
+    if(stem){
+      stem.style.height=L.toFixed(1)+"px";
+      stem.style.transform="rotate("+(Math.atan2(dy,dx)*180/Math.PI-90).toFixed(1)+"deg)";
+    }
+  }
+  // focus ⇄ full-map: boards glide home to (or back out from) their anchors
+  function applyPinMode(){
+    var focused=$("nlhStage").classList.contains("is-focus");
+    D.fixtures.forEach(function(fx){
+      var el=$("pin_"+fx.gc); if(!el || el.dataset.dx==null) return;
+      applyPinOffset(el, focused?0:+el.dataset.dx, focused?0:+el.dataset.dy);
     });
   }
   // set text; play the tick-over animation only on an increment (i.e. a goal)
@@ -835,8 +995,9 @@ body{overflow:hidden}
     D.fixtures.forEach(function(fx){
       var pin=$("pin_"+fx.gc); if(!pin) return;
       var sc=scoreAt(fx,st.T), s=stateOf(fx,st.T);
-      tickText(pin.querySelector("[data-h]"), s.phase==="pre" ? "" : sc.h);
-      tickText(pin.querySelector("[data-a]"), s.phase==="pre" ? "" : sc.a);
+      var blank = s.phase==="pre"||s.phase==="pp";
+      tickText(pin.querySelector("[data-h]"), blank ? "" : sc.h);
+      tickText(pin.querySelector("[data-a]"), blank ? "" : sc.a);
       var min=pin.querySelector("[data-min]");
       min.textContent = s.label;
       min.className = "nlh__pinmin"+(s.phase==="ft"?" is-ft":s.live?" is-live":"");
@@ -866,9 +1027,10 @@ body{overflow:hidden}
       min.className="nlh__cardmin"+(s.phase==="ft"?" is-ft":s.live?" is-live":"");
       card.querySelectorAll(".nlh__cardteam").forEach(function(t){
         var side=t.getAttribute("data-side"), v=side==="h"?sc.h:sc.a, ov=side==="h"?sc.a:sc.h;
-        tickText(t.querySelector("[data-sc]"), s.phase==="pre"?"":v);
-        t.classList.toggle("win",  s.phase!=="pre" && v>ov);
-        t.classList.toggle("lose", s.phase!=="pre" && v<ov);
+        var blank = s.phase==="pre"||s.phase==="pp";
+        tickText(t.querySelector("[data-sc]"), blank?"":v);
+        t.classList.toggle("win",  !blank && v>ov);
+        t.classList.toggle("lose", !blank && v<ov);
       });
       var box=card.querySelector("[data-scorers]");
       var hs=scorersAt(fx,"h",st.T), as=scorersAt(fx,"a",st.T);
@@ -882,21 +1044,27 @@ body{overflow:hidden}
   }
 
   // ---- TICKER --------------------------------------------------------------
-  // ordered feed items: KO/HT/FT dividers + each event, all in rmin order
-  var FEED = (function(){
+  // ordered feed items: KO/HT/FT dividers + each event, all in rmin order.
+  // In stagger mode the global HT/2nd-half dividers make no sense (each match
+  // has its own break), so only Kick-off and Full-time frame the feed.
+  var FEED = [];
+  function computeFeed(){
     var items = [];
     items.push({rmin:0, kind:"divider", text:"Kick-off"});
     D.fixtures.forEach(function(fx){
+      if (fx.pp) return;
       fx.events.forEach(function(ev){
         items.push({rmin:evRmin(ev,fx), kind:ev.type, ev:ev, fx:fx});
       });
       items.push({rmin:fx._ft-0.02, kind:"ft", fx:fx});   // per-match full-time result
     });
-    items.push({rmin:HALF+0.5, kind:"divider", text:"Half-time"});
-    items.push({rmin:HALF+BREAK+0.01, kind:"divider", text:"Second half"});
+    if (!st.stagger){
+      items.push({rmin:HALF+0.5, kind:"divider", text:"Half-time"});
+      items.push({rmin:HALF+BREAK+0.01, kind:"divider", text:"Second half"});
+    }
     items.push({rmin:maxFt, kind:"divider", text:"Full-time"});
-    return items.map(function(it,i){it._id="f"+i;return it;}).sort(function(a,b){return a.rmin-b.rmin;});
-  })();
+    FEED = items.map(function(it,i){it._id="f"+i;return it;}).sort(function(a,b){return a.rmin-b.rmin;});
+  }
   function lineHTML(it){
     if (it.kind==="divider") return '<li class="nlh__line divider" data-id="'+it._id+'">'+esc(it.text)+'</li>';
     var fx=it.fx, h=club(fx.home), a=club(fx.away);
@@ -1044,7 +1212,11 @@ body{overflow:hidden}
   var C_IDLE="Team news is in — we're moments from kick-off across the National League.";
   var C_OUTRO=["And that's your lot — here's how the table looks.","Full-time everywhere. Let's see the standings.","That's all she wrote — the final table.","The dust settles — this is how it finished."];
   // KICKOFF previews — one fixture at a time, ordered by KO time then alphabetically
-  var KO_ORDER = D.fixtures.slice().sort(function(a,b){ return (a.slot||"").localeCompare(b.slot||"") || club(a.home).name.localeCompare(club(b.home).name); });
+  var KO_ORDER = [];
+  function computeKOOrder(){
+    KO_ORDER = D.fixtures.filter(function(fx){ return !fx.pp; })
+      .sort(function(a,b){ return (a.slot||"").localeCompare(b.slot||"") || club(a.home).name.localeCompare(club(b.home).name); });
+  }
   var KO_TMPL=[
     "At {venue}, {home} host {away} — {homeNick} are {hp}, the visitors are {ap}.",
     "{home} welcome {away} to {venue}: the hosts are {hp}, {awayNick} are {ap}.",
@@ -1363,17 +1535,11 @@ body{overflow:hidden}
   // ---- goal focus (in-situ) & beats ---------------------------------------
   // No overlay: the camera moves INTO the ground, the rest of the island
   // recedes (grey + dim), and the pin's own scoreboard tells the story.
-  function pinsTrue(on){   // zoomed in there's room to stand on true geography
-    D.fixtures.forEach(function(fx){ var p=$("pin_"+fx.gc); if(!p||!p.dataset.rx) return;
-      p.style.left=(on?p.dataset.tx:p.dataset.rx)+"%";
-      p.style.top =(on?p.dataset.ty:p.dataset.ry)+"%";
-    });
-  }
   // enter (or retarget) focus — TEASE: the camera commits, the score doesn't
   function setFocus(fx, ev){
     if (!mapVisible()) return;
     $("nlhStage").classList.add("is-focus");
-    pinsTrue(true);
+    applyPinMode();
     D.fixtures.forEach(function(f){ var p=$("pin_"+f.gc); if(p) p.classList.toggle("is-hero", f===fx); });
     var pin=$("pin_"+fx.gc);
     if (pin) pin.style.setProperty("--hero-col", washCol(club(ev?ev.team:fx.home).col));
@@ -1388,8 +1554,8 @@ body{overflow:hidden}
     clearChips();
     var chip=document.createElement("div");
     chip.className="nlh__pinchip";
-    chip.innerHTML='<span class="m">'+minLabel(ev.min)+"'"+'</span>'+esc(ev.name)+(ev.og?" (OG)":"");
-    pin.appendChild(chip);
+    chip.innerHTML='<span class="m">'+minLabel(ev.min)+"'"+'</span>'+esc(ev.name)+(ev.og?" (OG)":ev.pen?" (pen)":"");
+    (pin.querySelector(".nlh__pinwrap")||pin).appendChild(chip);
   }
   function pulsePin(fx){
     var pin=$("pin_"+fx.gc); if(!pin) return;
@@ -1400,7 +1566,7 @@ body{overflow:hidden}
   function focusReset(){
     var stage=$("nlhStage"); if(stage) stage.classList.remove("is-focus");
     document.querySelectorAll("#nlHub .nlh__pin.is-hero").forEach(function(p){ p.classList.remove("is-hero"); });
-    clearChips(); pinsTrue(false); zoomReset();
+    clearChips(); applyPinMode(); zoomReset();
   }
   function fireBeat(text){
     if (!mapVisible()) return;
@@ -1409,7 +1575,14 @@ body{overflow:hidden}
     st._beatT=setTimeout(function(){ el.hidden=true; }, st.playing? Math.max(700,1500/st.rate) : 1600);
   }
 
-  var BEATS = [{r:0,t:"Kick-off",c:"ko"},{r:HALF,t:"Half-time",c:"ht"},{r:HALF+BREAK,t:"Second half",c:"2h"},{r:maxFt,t:"Full-time",c:"ft"}];
+  var BEATS = [];
+  function computeBeats(){
+    BEATS = st.stagger
+      ? [{r:0,t:"Kick-off",c:"ko"},{r:maxFt,t:"Full-time",c:"ft"}]
+      : [{r:0,t:"Kick-off",c:"ko"},{r:HALF,t:"Half-time",c:"ht"},{r:HALF+BREAK,t:"Second half",c:"2h"},{r:maxFt,t:"Full-time",c:"ft"}];
+  }
+  // everything derived from D + the timing mode, rebuilt in one go
+  function computeDerived(){ computeTimeline(); computeMoments(); computeFeed(); computeKOOrder(); computeBeats(); }
   // earliest not-yet-fired GOAL with rmin in (a,b]
   function nextGoalAt(a,b){
     var best=null;
@@ -1553,8 +1726,10 @@ body{overflow:hidden}
     }
     var dt=(ts-st.last)/1000; st.last=ts;
     var prevT=st.T;
-    // ~1 match-min/sec × rate; accelerate through goalless lulls
-    var gap=nextMoment(st.T)-st.T, eff=st.rate*(gap>4?6:1);
+    // pace: 1 match-min per secPerMin seconds, × the speed button; lull
+    // acceleration only in sync mode — a simulated real afternoon keeps
+    // its honest clock
+    var gap=nextMoment(st.T)-st.T, eff=(1/(st.secPerMin||1))*st.rate*((!st.stagger && gap>4)?6:1);
     var target=Math.min(prevT + dt*eff, maxT());
     // <4×: stop just before the next goal so the tease can hide the score
     if (st.rate<4){
@@ -1612,10 +1787,198 @@ body{overflow:hidden}
     paint();
   }
 
+  // ---- MATCHDAY LOADER ------------------------------------------------------
+  // Client-side, no build step: the same public NLS feed the site's widgets
+  // already consume from the browser, plus clubs-meta (identity) and the
+  // all-time results master (h2h — big file, fetched lazily, cached for the
+  // session, skipped gracefully if unreachable). Mirrors the field mapping in
+  // scripts/build-match-hub-round.js (which adds the heavyweight extras —
+  // tallies, streaks, ref card rates — that need ~450 history fetches).
+  var NLS_API="https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2";
+  var META_URL="https://raw.githubusercontent.com/thenationalleague/tools/main/assets/data/clubs-meta.json";
+  var ALLTIME_URL="https://raw.githubusercontent.com/thenationalleague/site/main/results.json";
+  var COMPS={nl:{id:89,name:"National League"},north:{id:373,name:"National League North"},south:{id:372,name:"National League South"}};
+  var _meta=null,_alltime=null,_alltimeFailed=false;
+  function fetchJSON(u){ return fetch(u).then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); }); }
+  function evMinOf(w){ var m=/^(\d+)'(?:\+(\d+))?/.exec(String(w.formattedEventTime||"")); return m?Number(m[1])+(m[2]?Number(m[2]):0):Number(w.eventMinute||w.eventTime||0); }
+  function pnameOf(p){ var n=(p&&p.playerName)||{}; return n.knownName||n.customKnownName||((n.firstName?n.firstName+" ":"")+(n.lastName||"")).trim()||"Unknown"; }
+  function trailStreaks(g){ // trailing streaks over [{gf,ga}]
+    var w=0,l=0,wl=0,ub=0,i;
+    for(i=g.length-1;i>=0;i--){ if(g[i].gf>g[i].ga)w++; else break; }
+    for(i=g.length-1;i>=0;i--){ if(g[i].gf<g[i].ga)l++; else break; }
+    for(i=g.length-1;i>=0;i--){ if(g[i].gf<=g[i].ga)wl++; else break; }
+    for(i=g.length-1;i>=0;i--){ if(g[i].gf>=g[i].ga)ub++; else break; }
+    return {wins:w,losses:l,winless:wl,unbeaten:ub};
+  }
+  function h2hFromAll(homeName,awayName,homeID,awayID,dateStr,seasonYr,hist){
+    var p=0,hw=0,aw=0,d=0,f=null,l=null,lr=null,lastDate="",seen={};
+    function add(fwd,hg,ag,yr,dte){
+      p++; f=f==null?yr:Math.min(f,yr); l=l==null?yr:Math.max(l,yr);
+      var drew=hg===ag, thw=drew?null:(fwd?hg>ag:hg<ag);
+      if(drew)d++; else if(thw)hw++; else aw++;
+      if(dte>=lastDate){ lastDate=dte; lr=drew?"D":(thw?"H":"A"); }
+    }
+    if(_alltime)(_alltime.seasons||[]).forEach(function(s){
+      var yr=Number(String(s.season).slice(0,4));
+      Object.keys(s.divisions||{}).forEach(function(k){
+        ((s.divisions[k]||{}).matches||[]).forEach(function(m){
+          var he=m.home_entity||m.home, ae=m.away_entity||m.away;
+          var fwd=he===homeName&&ae===awayName, rev=he===awayName&&ae===homeName;
+          if((!fwd&&!rev)||!m.date||m.date>=dateStr) return;
+          seen[m.date]=1; add(fwd,m.home_goals,m.away_goals,yr,m.date);
+        });
+      });
+    });
+    hist.forEach(function(m){ // this season's meetings NLS knows but the file may not
+      var a=m.attributes,hID=a.homeTeam.teamID,aID=a.awayTeam.teamID;
+      var fwd=hID===homeID&&aID===awayID, rev=hID===awayID&&aID===homeID;
+      if(!fwd&&!rev) return;
+      var dte=(a.kickOffDateUTC||"").slice(0,10);
+      if(seen[dte]||a.homeTeam.score==null) return;
+      add(fwd,a.homeTeam.score,a.awayTeam.score,seasonYr,dte);
+    });
+    return p?{p:p,hw:hw,aw:aw,d:d,f:f,l:l,lr:lr}:(_alltime?{p:0}:null);
+  }
+  async function loadMatchday(o){
+    var C=COMPS[o.comp||"nl"];
+    var y=+o.date.slice(0,4), season=(+o.date.slice(5,7))<=6?y-1:y;
+    o.status("Fetching the season's matches…");
+    var list=[], url=NLS_API+"/matches/?competitionID="+C.id+"&seasonID="+season+"&sort=-kickOffDateUTC&page.number=1&page.size=100";
+    while(url){ var j=await fetchJSON(url); list=list.concat(j.data||[]); url=j.links&&j.links.next; }
+    var dOf=function(m){return (m.attributes.kickOffDateUTC||"").slice(0,10);};
+    var per=function(m){return (m.attributes.matchPeriod||"").toLowerCase();};
+    var done=["fulltime","postmatch"];
+    var roundL=list.filter(function(m){return dOf(m)===o.date&&done.indexOf(per(m))>=0;});
+    var ppL=list.filter(function(m){return dOf(m)===o.date&&per(m)==="postponed";});
+    if(!roundL.length) throw new Error("No completed "+C.name+" matches on "+o.date+".");
+    var hist=list.filter(function(m){return dOf(m)<o.date&&done.indexOf(per(m))>=0;})
+      .sort(function(a,b){return (a.attributes.kickOffDateUTC||"")<(b.attributes.kickOffDateUTC||"")?-1:1;});
+    // prior table + form/split streaks + clean-sheet drought (score-derived)
+    var rows={},seq={};
+    hist.forEach(function(m){
+      var a=m.attributes,h=a.homeTeam.teamID,w=a.awayTeam.teamID,hs=a.homeTeam.score,as=a.awayTeam.score;
+      if(hs==null||as==null) return;
+      [[h,hs,as,"h"],[w,as,hs,"a"]].forEach(function(x){
+        var r=rows[x[0]]=rows[x[0]]||{P:0,W:0,D:0,L:0,GF:0,GA:0,Pts:0};
+        r.P++;r.GF+=x[1];r.GA+=x[2];
+        if(x[1]>x[2]){r.W++;r.Pts+=3;}else if(x[1]===x[2]){r.D++;r.Pts++;}else r.L++;
+        (seq[x[0]]=seq[x[0]]||[]).push({ha:x[3],gf:x[1],ga:x[2]});
+      });
+    });
+    o.status("Fetching club identity…");
+    _meta=_meta||await fetchJSON(META_URL);
+    var byOpta={}; _meta.clubs.forEach(function(c){ if(c.optaID) byOpta[c.optaID]=c; });
+    var table=Object.keys(rows).map(function(k){var r=rows[k];return {k:k,Pts:r.Pts,GD:r.GF-r.GA,GF:r.GF};})
+      .sort(function(a,b){return b.Pts-a.Pts||b.GD-a.GD||b.GF-a.GF||((byOpta[a.k]||{}).name||a.k).localeCompare((byOpta[b.k]||{}).name||b.k);});
+    var posMap={}; table.forEach(function(r,i){posMap[r.k]=i+1;});
+    var nDone=0;
+    o.status("Fetching match detail… (0/"+roundL.length+")");
+    var details=await Promise.all(roundL.map(function(m){
+      return fetchJSON(NLS_API+"/matches/"+m.id).then(function(d){ o.status("Fetching match detail… ("+(++nDone)+"/"+roundL.length+")"); return d; });
+    }));
+    if(!_alltime&&!_alltimeFailed){
+      try{ o.status("Fetching head-to-head history… (one-off, ~2MB)"); _alltime=await fetchJSON(ALLTIME_URL); }
+      catch(e){ _alltimeFailed=true; }
+    }
+    o.status("Building the matchday…");
+    var usedTeams={};
+    var fixtures=details.map(function(d){
+      var at=d.data.attributes,teams=at.matchTeams||[];
+      var homeID=at.homeTeamID,awayID=at.awayTeamID;
+      var home=null,away=null;
+      teams.forEach(function(t){ if(t.teamID===homeID)home=t; if(t.teamID===awayID)away=t; });
+      if(!home||!away) throw new Error("Bad match data for "+at.matchID);
+      usedTeams[homeID]=1; usedTeams[awayID]=1;
+      var events=[];
+      teams.forEach(function(t){
+        var other=(t===home)?away:home, subOnAt={};
+        ((t.events&&t.events.subs)||[]).forEach(function(w){ var s=w.substitutionEvents; if(s&&s.subOnID) subOnAt[s.subOnID]=evMinOf(w); });
+        ((t.events&&t.events.goals)||[]).forEach(function(w){
+          var g=w.goalEvents; if(!g) return;
+          var type=String(g.goalType||"").toLowerCase(), own=type.indexOf("own")>=0, pen=type.indexOf("pen")>=0;
+          var ev={min:evMinOf(w),type:"goal",team:own?other.teamID:t.teamID,name:pnameOf(g.player)};
+          if(own) ev.og=true;
+          if(pen) ev.pen=true;
+          if(!own&&g.playerID!=null){ var on=subOnAt[g.playerID]; if(on!=null&&on<=ev.min) ev.cameo=on; }
+          events.push(ev);
+        });
+        ((t.events&&t.events.bookings)||[]).forEach(function(w){
+          var b=w.bookingEvents; if(!b) return;
+          var card=String(b.cardType||b.card||"").toLowerCase();
+          if(card.indexOf("red")<0&&card!=="secondyellow") return;
+          var ev={min:evMinOf(w),type:"red",team:t.teamID,name:pnameOf(b.player)};
+          if(card==="secondyellow") ev.sec=true;
+          events.push(ev);
+        });
+      });
+      events.sort(function(a,b){return a.min-b.min;});
+      var ko=(at.kickOffUTC||"").replace(" ","T")+"Z";
+      var hM=byOpta[homeID]||{},aM=byOpta[awayID]||{};
+      return {
+        gc:at.matchID, home:homeID, away:awayID, hs:home.score, as:away.score,
+        date:ko, slot:new Date(ko).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:"Europe/London"}),
+        pp:false, att:(at.matchDetails&&at.matchDetails.attendance)||null,
+        ref:(at.matchDetails&&at.matchDetails.refereeName)||at.refereeName||null,
+        h2h:h2hFromAll(hM.name||"",aM.name||"",homeID,awayID,o.date,season,hist),
+        events:events
+      };
+    });
+    ppL.forEach(function(m){
+      var a=m.attributes,ko=(a.kickOffDateUTC||"").replace(" ","T")+"Z";
+      usedTeams[a.homeTeam.teamID]=1; usedTeams[a.awayTeam.teamID]=1;
+      fixtures.push({gc:m.id,home:a.homeTeam.teamID,away:a.awayTeam.teamID,hs:null,as:null,date:ko,
+        slot:new Date(ko).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:"Europe/London"}),pp:true,events:[]});
+    });
+    fixtures.sort(function(a,b){return a.date.localeCompare(b.date)||((byOpta[a.home]||{}).name||"").localeCompare((byOpta[b.home]||{}).name||"");});
+    Object.keys(rows).forEach(function(k){usedTeams[k]=1;});
+    var clubs={};
+    Object.keys(usedTeams).forEach(function(k){
+      var c=byOpta[k], s=seq[k]||[], all=trailStreaks(s);
+      var hS=trailStreaks(s.filter(function(g){return g.ha==="h";})), aS=trailStreaks(s.filter(function(g){return g.ha==="a";}));
+      var cs=0; for(var i=s.length-1;i>=0;i--){ if(s[i].ga>0)cs++; else break; }
+      clubs[k]={ name:c?c.name:k, short:c?(c.short||c.name):k, nick:c?(c.nickname||c.short||c.name):k,
+        lat:c?c.lat:53, lng:c?c.lng:-2,
+        venue:c?(c.stadium_sponsor_name||c.stadium_name||c.short):k,
+        col:{p:(c&&c.colors&&c.colors.primary)||"#666", s:(c&&c.colors&&c.colors.secondary)||"#fff", t:(c&&c.colors&&c.colors.tertiary)||"#fff"},
+        pos:posMap[k]||null,
+        winless:all.winless, unbeaten:all.unbeaten, wins:all.wins, losses:all.losses,
+        split:{hWinless:hS.winless,hUnbeaten:hS.unbeaten,aWinless:aS.winless,aUnbeaten:aS.unbeaten},
+        ident:{cs:cs} };
+    });
+    var priorOut={}; Object.keys(rows).forEach(function(k){ var r=rows[k]; priorOut[k]={P:r.P,W:r.W,D:r.D,L:r.L,GF:r.GF,GA:r.GA,Pts:r.Pts}; });
+    var played=Object.keys(rows).map(function(k){return rows[k].P;}).sort(function(a,b){return a-b;});
+    var roundNo=played.length?played[Math.floor(played.length/2)]+1:1;
+    var label=(_meta.seasons&&_meta.seasons.list&&_meta.seasons.list[String(season)]&&_meta.seasons.list[String(season)].label)||(season+"-"+String(season+1).slice(2));
+    // ---- swap in and restart the day ----
+    D.round=roundNo; D.season=label; D.competition=C.name; D.clubs=clubs; D.prior=priorOut; D.fixtures=fixtures;
+    pause(); hideSheet();
+    st.stagger=!!o.stagger||!!o.startTime;   // a clock-time start implies real KO slots
+    st.secPerMin=o.secPerMin||1;
+    computeDerived();
+    buildMap(); buildCards();
+    setRoundLabel();
+    $("nlhFootDate").textContent=new Date(o.date+"T12:00:00Z")
+      .toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short",year:"numeric",timeZone:"UTC"}).replace(/,/g,"");
+    if(o.startTime){
+      // wall-clock start: minutes from the first KO of the day, TZ-safe via
+      // the London-local label of the base kick-off
+      var baseLbl=new Date(st.baseKOms).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:"Europe/London"});
+      var toM=function(s){return (+s.slice(0,2))*60+(+s.slice(3,5));};
+      var T=Math.max(0,toM(o.startTime)-toM(baseLbl));
+      seek(Math.min(1,T/maxT())); play();
+    } else {
+      restart();
+    }
+  }
+
   // ---- wiring --------------------------------------------------------------
-  function boot(){
+  function setRoundLabel(){
     $("nlhRound").textContent = D.competition+" · MD"+D.round+" · "+D.season;
+  }
+  function boot(){
+    setRoundLabel();
     try{ $("nlhVer").textContent = "v"+((new URLSearchParams(location.search).get("v"))||BUILD); }catch(e){ $("nlhVer").textContent="v"+BUILD; }
+    computeDerived();
     buildMap(); buildCards();
     setView("map"); paint();
     commStatic(C_IDLE);
@@ -1636,6 +1999,33 @@ body{overflow:hidden}
     $("nlhFootTable").addEventListener("click", function(){ renderTable(); $("nlhSheet").hidden=false; });
     $("nlhSheetClose").addEventListener("click", hideSheet);
     $("nlhSheet").addEventListener("click", function(e){ if(e.target===$("nlhSheet")) hideSheet(); });
+
+    // matchday setup dialog
+    var setup=$("nlhSetup");
+    $("nlhLoadBtn").addEventListener("click", function(){
+      var di=$("nlhSetDate");
+      if(!di.value) di.value=((D.fixtures[0]&&D.fixtures[0].date)||"").slice(0,10);
+      di.max=new Date().toISOString().slice(0,10);
+      var stat=$("nlhSetStatus"); stat.textContent=""; stat.className="nlh__setupstatus";
+      setup.hidden=false;
+    });
+    $("nlhSetupClose").addEventListener("click", function(){ setup.hidden=true; });
+    setup.addEventListener("click", function(e){ if(e.target===setup) setup.hidden=true; });
+    $("nlhSetStart").addEventListener("change", function(){ $("nlhSetTimeWrap").hidden = this.value!=="clock"; });
+    $("nlhSetGo").addEventListener("click", function(){
+      var btn=$("nlhSetGo"), stat=$("nlhSetStatus");
+      var dateV=$("nlhSetDate").value;
+      if(!dateV){ stat.textContent="Pick a date first."; stat.className="nlh__setupstatus is-error"; return; }
+      btn.disabled=true; stat.className="nlh__setupstatus";
+      loadMatchday({
+        date:dateV, comp:$("nlhSetComp").value,
+        startTime: $("nlhSetStart").value==="clock" ? $("nlhSetTime").value : null,
+        secPerMin: parseFloat($("nlhSetPace").value)||1,
+        stagger: $("nlhSetReal").checked,
+        status: function(m){ stat.textContent=m; }
+      }).then(function(){ btn.disabled=false; setup.hidden=true; })
+        .catch(function(e){ btn.disabled=false; stat.textContent=(e&&e.message)||"Couldn't load that matchday."; stat.className="nlh__setupstatus is-error"; });
+    });
 
     var rt; window.addEventListener("resize", function(){ clearTimeout(rt); rt=setTimeout(layoutPins,120); });
     window.addEventListener("orientationchange", function(){ setTimeout(layoutPins,300); });
