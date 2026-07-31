@@ -1,10 +1,15 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixtures
-  Version: v0.12 (30/07/2026)
+  Version: v0.13 (30/07/2026)
   File: /fixtures/index.html
 
   CHANGELOG
+    v0.13 (30/07/2026) — Broadcast written out in full as proper pills
+      (DAZN white-on-black, AMI white-on-NL-red, BASIC/ENHANCED), each
+      of the four independently hideable and remembered. Adds a bulk
+      delete of the filtered view, guarded by typing the count — the
+      answer to a mis-import that produced hundreds of rows to undo.
     v0.12 (30/07/2026) — Broadcast surfaces on the row (a TV column: the
       state as a pill, then E/A/D for Enhanced, AMI and moved-by-DAZN).
       Importing four columns and seeing nothing change is
@@ -136,6 +141,15 @@
     var NL_TOOL_KEY = 'ops-fixtures';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/07/2026',
+        version: 'v0.13',
+        items: [
+          'Broadcast is written out in full \u2014 WORLDWIDE, OVERSEAS, NOT SELECTED \u2014 with DAZN, AMI and BASIC/ENHANCED as their own pills.',
+          'Each of the four can be switched off from the TV row above the list, and the tool remembers which you hid. Turn all four off and the column disappears.',
+          'New: Delete shown. Removes every fixture currently in view, so filtering to one competition and clearing it is one action rather than hundreds. You have to type the number to confirm, and it says how many carry history you would lose.'
+        ]
+      },
       {
         date: '30/07/2026',
         version: 'v0.12',
@@ -374,16 +388,22 @@
   .fx-c-state { width: 62px; }
   .fx-c-comp { width: 50px; font-size: 11px; font-variation-settings: 'wght' 900;
                letter-spacing: .06em; color: var(--text-muted); }
-  .fx-c-tv { width: 86px; white-space: nowrap; }
-  .fx-tv { display: inline-block; padding: 1px 6px; border-radius: var(--radius-pill);
-           font-size: 10px; font-variation-settings: 'wght' 900; letter-spacing: .05em;
-           vertical-align: 1px; }
-  .fx-tv--ww  { background: var(--green); color: var(--white); }
-  .fx-tv--os  { background: var(--green-light); color: var(--green); }
-  .fx-tv--tbc { background: var(--off-white); color: var(--text-muted); border: 1px solid var(--border); }
-  .fx-tv--off { color: var(--text-muted); }
-  .fx-tv__m b { font-size: 9.5px; font-variation-settings: 'wght' 900;
-                color: var(--navy); margin-left: 3px; cursor: help; }
+  /* No fixed width: the pills are full words and the action column absorbs
+     whatever is left, so the column takes what it needs and gives it back
+     when parts are toggled off. */
+  .fx-c-tv { white-space: nowrap; }
+  .fx-tv { display: inline-block; padding: 1px 7px; border-radius: var(--radius-pill);
+           font-size: 9.5px; font-variation-settings: 'wght' 900; letter-spacing: .06em;
+           vertical-align: 1px; margin-right: 4px; }
+  .fx-tv--ww    { background: var(--green); color: var(--white); }
+  .fx-tv--os    { background: var(--green-light); color: var(--green); }
+  .fx-tv--tbc   { background: var(--off-white); color: var(--text-muted); border: 1px solid var(--border); }
+  .fx-tv--off   { color: var(--text-muted); }
+  .fx-tv--basic { background: var(--navy-100); color: var(--navy-600); }
+  .fx-tv--enh   { background: var(--navy); color: var(--white); }
+  .fx-tv--ami   { background: var(--primary); color: var(--white); }
+  /* DAZN's own livery, which is why this one is not a brand token. */
+  .fx-tv--dazn  { background: #000000; color: var(--white); }
   .fx-dow { color: var(--text-muted); font-variation-settings: 'wght' 700; }
 
   /* Row action. Canon .btn--sm is 33px tall — on 552 rows that button, not
@@ -571,9 +591,13 @@
             <button type="button" class="chip" data-fxvenue="away">Away</button>
           </div>
           <select class="toolbar__filter" id="fxMd" aria-label="Matchday"><option value="">All matchdays</option></select>
+          <div class="filter-pill-row" id="fxTvPills" hidden>
+            <span class="filter-pill-row__label">TV</span>
+          </div>
         </div>
         <div class="toolbar__right">
           <button type="button" class="btn btn--ghost btn--sm" id="fxClear" hidden>Clear</button>
+          <button type="button" class="btn btn--danger btn--sm" id="fxBulk">Delete shown&hellip;</button>
         </div>
       </div>
 
@@ -587,7 +611,7 @@
               <th class="fx-c-state ta-center">KO</th>
               <th class="fx-c-away">Away</th>
               <th class="fx-c-comp">Comp</th>
-              <th class="fx-c-tv">TV</th>
+              <th class="fx-c-tv" id="fxThTv">TV</th>
               <th class="fx-c-act"></th>
             </tr>
           </thead>
@@ -636,7 +660,7 @@
   var S = {
     season: null, session: null, role: null, isClub: false, club: null,
     fixtures: {}, history: {}, notes: {}, bcast: {}, pairs: {},
-    tab: 'all', comps: {}, venue: 'all', md: '', club1: null,
+    tab: 'all', comps: {}, venue: 'all', md: '', club1: null, tv: {},
     picker: null, booted: false
   };
 
@@ -747,6 +771,7 @@
     S.session = session;
     S.role = NL.roles.norm(session && session.role);
     S.isClub = NL.isClubUser(session);
+    try { S.tv = JSON.parse(localStorage.getItem('fx-tv') || '{}') || {}; } catch (e) { S.tv = {}; }
     S.club = session && session.club || null;
 
     NL.ensureAuth().then(function () {
@@ -896,6 +921,22 @@
     $('fxTitle').textContent = heading;
     $('fxHeader').hidden = !heading;
     $('fxSub').textContent = NL.season.label(NL.clubs.meta(), S.season) || S.season;
+    /* Only offer the toggles once there is broadcast data to toggle. */
+    var hasTv = Object.keys(S.bcast).length > 0;
+    $('fxTvPills').hidden = !hasTv || S.isClub;
+    if (hasTv) {
+      var row = $('fxTvPills');
+      if (!row.querySelector('[data-fxtv]')) {
+        row.insertAdjacentHTML('beforeend', TV_PARTS.map(function (p) {
+          return '<button type="button" class="filter-pill" data-fxtv="' + p.key + '">' +
+            esc(p.label) + '</button>';
+        }).join(''));
+      }
+      row.querySelectorAll('[data-fxtv]').forEach(function (b) {
+        b.classList.toggle('active', tvOn(b.getAttribute('data-fxtv')));
+      });
+    }
+    $('fxThTv').hidden = !anyTv();
     $('fxVenue').hidden = !focusClub();
     if (!focusClub() && S.venue !== 'all') S.venue = 'all';
     /* In club view the club is the whole page, and a club sits in one
@@ -1248,6 +1289,74 @@
     });
   }
 
+  /* Bulk delete of whatever the filters are currently showing.
+
+     Exists because a mis-import is not a one-fixture mistake: get the
+     competition wrong, or import the same cup sheet under two different key
+     schemes, and you have hundreds of rows to undo one dialog at a time.
+     Scoping it to the filtered view means the destructive thing is the thing
+     you can already see, and the competition pills give you the surgical
+     version — filter to NLC, delete those, re-import — without going near
+     the league programme.
+
+     Guarded by typing the count rather than clicking OK: the number is the
+     one fact you must not get wrong, so you have to read it. */
+  function bulkDelete() {
+    var rows = filtered();
+    if (!rows.length) { NL.toast('Nothing shown to delete', 'info'); return; }
+    var comps = {};
+    rows.forEach(function (f) { comps[f.competition] = (comps[f.competition] || 0) + 1; });
+    var desc = COMPS.filter(function (c) { return comps[c]; })
+      .map(function (c) { return comps[c] + ' ' + c; }).join(', ');
+    var hist = rows.filter(function (f) { return histOf(f.recordID).length; }).length;
+
+    NL.prompt('Everything currently shown: ' + desc + '.' +
+      (hist ? '\n\n' + hist + (hist === 1 ? ' of them carries' : ' of them carry') +
+        ' scheduling history, which cannot be recovered.' : '') +
+      '\n\nType ' + rows.length + ' to confirm.', {
+      title: 'Delete ' + rows.length + ' fixture' + (rows.length === 1 ? '' : 's') + '?',
+      confirmText: 'Delete'
+    }).then(function (v) {
+      if (v == null) return;
+      if (String(v).trim() !== String(rows.length)) { NL.toast('Not deleted \u2014 the number did not match', 'info'); return; }
+
+      var ids = rows.map(function (f) { return f.recordID; });
+      var db = firebase.database(), CH = 400, jobs = [];
+      for (var i = 0; i < ids.length; i += CH) jobs.push(ids.slice(i, i + CH));
+      var done = 0;
+      function failed(e) {
+        NL.toast('Stopped after ' + done + ' \u2014 ' + ((e && e.message) || e), 'error');
+        render();
+      }
+      (function next() {
+        if (!jobs.length) {
+          NL.writeAudit('fixture_bulk_delete', { count: done, of: desc });
+          render();
+          NL.toast(done + ' fixture' + (done === 1 ? '' : 's') + ' deleted', 'success');
+          return;
+        }
+        var batch = jobs.shift(), nulls = {};
+        batch.forEach(function (id) { nulls[id] = null; });
+        try {
+          /* null at a child path deletes it, so one update() clears a whole
+             batch from each node. */
+          Promise.all([
+            db.ref(seasonPath('fixtures')).update(nulls),
+            db.ref(seasonPath('history')).update(nulls),
+            db.ref(seasonPath('notes')).update(nulls),
+            db.ref(seasonPath('broadcast')).update(nulls)
+          ]).then(function () {
+            batch.forEach(function (id) {
+              delete S.fixtures[id]; delete S.history[id];
+              delete S.notes[id]; delete S.bcast[id];
+            });
+            done += batch.length; next();
+          }).catch(failed);
+        } catch (e) { failed(e); }
+      }());
+    });
+  }
+
   /* Same shape as reinstate(): the correction is APPENDED to the history
      rather than erasing anything, so "there was a score here once and it was
      taken off" stays visible. */
@@ -1566,21 +1675,43 @@
      Green follows the sheet's own <tr> generator — filled for Worldwide,
      pale for Overseas — so the tool and the published table agree, but takes
      the brand's --green instead of the hard-coded hex. */
-  var BCAST_SHORT = { worldwide: 'WW', overseas: 'OS', tbc: 'TBC',
-                      'not-selected': 'NS', unavailable: 'N/A' };
+  /* Written out in full. Abbreviations save width nobody needed: the column
+     sizes itself and the four toggles below let you drop whatever you are
+     not looking at, which is a better answer than making everything cryptic
+     all of the time.
+
+     DAZN is white on black and AMI white on NL red, matching how they are
+     already presented; brand tokens rather than the sheet's hard-coded hex. */
+  var TV_PARTS = [
+    { key: 'bcast', label: 'Broadcast' },
+    { key: 'prod',  label: 'Production' },
+    { key: 'ami',   label: 'AMI' },
+    { key: 'dazn',  label: 'DAZN' }
+  ];
+  function tvOn(k) { return S.tv[k] !== false; }
+  function anyTv() { return TV_PARTS.some(function (p) { return tvOn(p.key); }); }
+
   function bcastCell(f) {
+    if (!anyTv()) return '';
     var b = bcastOf(f.recordID);
     if (!b || !b.status) return '<td class="fx-c-tv"></td>';
-    var cls = b.status === 'worldwide' ? ' fx-tv--ww'
-            : b.status === 'overseas'  ? ' fx-tv--os'
-            : b.status === 'tbc'       ? ' fx-tv--tbc' : ' fx-tv--off';
-    var marks = (b.enhanced ? '<b title="Enhanced production">E</b>' : '') +
-                (b.ami ? '<b title="Sent to AMI">A</b>' : '') +
-                (b.daznMoved ? '<b title="Moved by DAZN">D</b>' : '');
-    return '<td class="fx-c-tv"><span class="fx-tv' + cls + '" title="' +
-      esc(BCAST_LABEL[b.status] || b.status) + '">' +
-      esc(BCAST_SHORT[b.status] || b.status) + '</span>' +
-      (marks ? '<span class="fx-tv__m">' + marks + '</span>' : '') + '</td>';
+    var out = '';
+    if (tvOn('bcast')) {
+      var cls = b.status === 'worldwide' ? ' fx-tv--ww'
+              : b.status === 'overseas'  ? ' fx-tv--os'
+              : b.status === 'tbc'       ? ' fx-tv--tbc' : ' fx-tv--off';
+      out += '<span class="fx-tv' + cls + '">' +
+        esc((BCAST_LABEL[b.status] || b.status).toUpperCase()) + '</span>';
+    }
+    /* Production only reads as information on a game being shown — BASIC on
+       a game nobody is covering is noise. */
+    if (tvOn('prod') && isShown(b.status)) {
+      out += '<span class="fx-tv ' + (b.enhanced ? 'fx-tv--enh' : 'fx-tv--basic') + '">' +
+        (b.enhanced ? 'ENHANCED' : 'BASIC') + '</span>';
+    }
+    if (tvOn('ami') && b.ami) out += '<span class="fx-tv fx-tv--ami">AMI</span>';
+    if (tvOn('dazn') && b.daznMoved) out += '<span class="fx-tv fx-tv--dazn">DAZN</span>';
+    return '<td class="fx-c-tv">' + out + '</td>';
   }
 
   /* ---- Pairings --------------------------------------------------------
@@ -2135,7 +2266,7 @@
     });
 
     document.addEventListener('click', function (e) {
-      var t = e.target.closest('[data-fxcomp],[data-fxvenue],[data-fxtab],[data-fxopen]');
+      var t = e.target.closest('[data-fxcomp],[data-fxvenue],[data-fxtab],[data-fxopen],[data-fxtv]');
       if (!t) return;
       if (t.hasAttribute('data-fxcomp')) {
         var c = t.getAttribute('data-fxcomp');
@@ -2151,6 +2282,13 @@
         });
         $('fxPaneAll').hidden = S.tab !== 'all';
         $('fxPaneMoves').hidden = S.tab !== 'moves';
+        render();
+      } else if (t.hasAttribute('data-fxtv')) {
+        var k = t.getAttribute('data-fxtv');
+        S.tv[k] = !tvOn(k);
+        /* Remembered, because re-hiding the same three columns on every visit
+           is exactly the kind of chore a preference exists to remove. */
+        try { localStorage.setItem('fx-tv', JSON.stringify(S.tv)); } catch (err) {}
         render();
       } else { open(t.getAttribute('data-fxopen')); }
     });
@@ -2172,6 +2310,8 @@
     if (canEdit()) imp.addEventListener('click', impStep1); else imp.hidden = true;
     var prs = $('fxPairs');
     if (canEdit()) prs.addEventListener('click', importPairs); else prs.hidden = true;
+    var blk = $('fxBulk');
+    if (canEdit()) blk.addEventListener('click', bulkDelete); else blk.hidden = true;
   }
 }());
 </script>
