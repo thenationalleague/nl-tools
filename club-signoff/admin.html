@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!--
+  NL Tools — Club Sign-off admin
+  Version: v0.1 (31/07/2026)
+  File: /club-signoff/admin.html
+
+  League-side view of the sign-off round: which clubs have a page ready to
+  send, which have replied, and what they said. Reuses the per-club tokens
+  already issued by /club-contacts/ — no new links to distribute.
+
+  Gated: no tools/ registry record on purpose -> superadmin-only via
+  auth-guard's default, same as club-contacts/admin.html. This tool is
+  temporary and folds into club-directory, so it stays out of the registry.
+
+  RTDB:
+    app-data/ops-club-contacts/invites       token -> club
+    app-data/ops-club-contacts/submissions   token -> what the club sent
+    app-data/ops-club-signoff/responses      token -> their sign-off answers
+
+  CHANGELOG
+  31/07/2026 v0.1 — Initial build. Status table across all clubs, copyable
+                    sign-off links, and replies inline.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Club sign-off admin — NL Tools</title>
+
+<link rel="stylesheet" href="/system/nl-brand.css?v=29">
+
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script>
+  firebase.initializeApp({
+    apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+    authDomain:        "nl-tools.firebaseapp.com",
+    databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId:         "nl-tools",
+    storageBucket:     "nl-tools.firebasestorage.app",
+    messagingSenderId: "801354670005",
+    appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+  });
+  var db = firebase.database();
+</script>
+
+<script>
+  window.NL_TOOL = { title: 'Club Sign-off', toolKey: 'ops-club-signoff' };
+  var NL_TOOL_KEY = 'ops-club-signoff';
+
+  window.NL_CHANGELOG = [{
+    date: '31/07/2026', version: 'v0.1',
+    items: ['Initial build — status across all clubs, copyable sign-off links, replies inline.']
+  }];
+
+  window.nlAuthReady = function (userData) {
+    window.NL = window.NL || {};
+    window.NL.session = userData;
+    if (window.TOOL && window.TOOL.boot) { window.TOOL.boot(userData); }
+    else { window._toolDeferredSession = userData; }
+  };
+</script>
+
+<script src="/system/nl-utils.js?v=28"></script>
+<script src="/system/nl-topbar.js?v=8"></script>
+<script src="/system/auth-guard.js?v=10"></script>
+
+<style>
+  .stat-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 22px; }
+  .stat { flex: 1 1 150px; padding: 13px 16px; border: 1px solid var(--navy-100);
+    background: #fff; }
+  .stat b { display: block; font-size: var(--text-2xl); line-height: 1.1;
+    font-variant-numeric: tabular-nums; color: var(--navy); }
+  .stat span { font-size: var(--text-xs); color: var(--text-muted); }
+
+  table.signoff { width: 100%; border-collapse: collapse; }
+  table.signoff th { text-align: left; font-size: var(--text-xs); letter-spacing: .08em;
+    text-transform: uppercase; color: var(--text-muted); font-weight: 700;
+    padding: 8px 10px; border-bottom: 2px solid var(--navy-200); }
+  table.signoff td { padding: 9px 10px; border-bottom: 1px solid var(--navy-100);
+    vertical-align: top; font-size: var(--text-sm); }
+  table.signoff tr:hover td { background: var(--navy-50); }
+  .club { font-weight: 650; }
+  .pill { display: inline-block; padding: 1px 8px; font-size: 11px; font-weight: 650;
+    letter-spacing: .03em; border: 1px solid; }
+  .pill--waiting { color: var(--text-muted); border-color: var(--navy-200); }
+  .pill--ready   { color: var(--blue);  border-color: var(--blue);  background: var(--blue-light); }
+  .pill--changes { color: var(--amber-deep); border-color: var(--amber); background: var(--amber-light); }
+  .pill--done    { color: var(--green); border-color: var(--green); background: var(--green-light); }
+  .answers { margin: 6px 0 0; padding-left: 16px; color: var(--text-muted);
+    font-size: var(--text-sm); }
+  .num { font-variant-numeric: tabular-nums; text-align: right; }
+  .scroll { overflow-x: auto; }
+</style>
+</head>
+<body>
+
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+
+    <header style="margin-bottom:20px;">
+      <h1 style="color:var(--navy);">Club sign-off</h1>
+      <p style="color:var(--text-muted);">Every club&rsquo;s directory entry, the queries we&rsquo;ve
+        raised against it, and what they&rsquo;ve come back with. Links are the same
+        per-club tokens issued for the contacts form.</p>
+    </header>
+
+    <div id="stats" class="stat-row"></div>
+
+    <div class="scroll">
+      <table class="signoff">
+        <thead><tr>
+          <th>Club</th><th>Status</th><th class="num">To check</th>
+          <th class="num">Fixed</th><th>Reply</th><th>Link</th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var NOTES = '/club-signoff/notes.json';
+
+  window.TOOL = window.TOOL || {};
+  window.TOOL.boot = function () {
+    NL.ensureAuth().then(function () {
+      return Promise.all([
+        db.ref('app-data/ops-club-contacts/invites').once('value'),
+        db.ref('app-data/ops-club-contacts/submissions').once('value'),
+        db.ref('app-data/ops-club-signoff/responses').once('value'),
+        fetch(NOTES + '?cb=' + Date.now()).then(function (r) { return r.json(); })
+          .catch(function () { return {}; })
+      ]);
+    }).then(function (res) {
+      render(res[0].val() || {}, res[1].val() || {}, res[2].val() || {}, res[3] || {});
+    }).catch(function (err) {
+      NL.toast('Could not load sign-off data.', 'error');
+      console.error('[club-signoff admin]', err);
+    });
+  };
+
+  function render(invites, subs, responses, notes) {
+    var rows = Object.keys(invites).map(function (token) {
+      var club = invites[token].club;
+      var cfg = notes[club] || {};
+      var resp = responses[token];
+      var status = !subs[token] ? 'waiting'
+        : resp ? (resp.status === 'confirmed' ? 'done' : 'changes')
+        : 'ready';
+      return {
+        token: token, club: club, status: status,
+        check: Object.keys(cfg.check || {}).length,
+        fixed: (cfg.fixed || []).length,
+        answers: resp && resp.answers ? resp.answers : null
+      };
+    }).sort(function (a, b) { return a.club.localeCompare(b.club); });
+
+    var LABEL = { waiting: 'No submission', ready: 'Ready to send',
+                  changes: 'Changes asked for', done: 'Confirmed' };
+    var count = function (s) { return rows.filter(function (r) { return r.status === s; }).length; };
+
+    document.getElementById('stats').innerHTML =
+      [['done', 'Confirmed'], ['changes', 'Changes asked for'],
+       ['ready', 'Awaiting reply'], ['waiting', 'No submission']]
+      .map(function (s) {
+        return '<div class="stat"><b>' + count(s[0]) + '</b><span>' + s[1] + '</span></div>';
+      }).join('') +
+      '<div class="stat"><b>' + rows.reduce(function (n, r) { return n + r.check; }, 0) +
+      '</b><span>Open queries</span></div>';
+
+    document.getElementById('rows').innerHTML = rows.map(function (r) {
+      var link = location.origin + '/club-signoff/?t=' + r.token;
+      var replies = r.answers
+        ? '<ul class="answers">' + Object.keys(r.answers).map(function (k) {
+            var v = r.answers[k];
+            return '<li>' + NL.escHtml(k) + ' &mdash; ' +
+              NL.escHtml(Array.isArray(v) ? v.join(' &amp; ') : v) + '</li>';
+          }).join('') + '</ul>'
+        : '<span style="color:var(--text-muted);">&mdash;</span>';
+      return '<tr>' +
+        '<td class="club">' + NL.escHtml(r.club) + '</td>' +
+        '<td><span class="pill pill--' + r.status + '">' + LABEL[r.status] + '</span></td>' +
+        '<td class="num">' + (r.check || '&mdash;') + '</td>' +
+        '<td class="num">' + (r.fixed || '&mdash;') + '</td>' +
+        '<td>' + replies + '</td>' +
+        '<td><button class="btn btn--sm" data-copy="' + NL.escHtml(link) + '">Copy link</button></td>' +
+        '</tr>';
+    }).join('');
+
+    document.getElementById('rows').addEventListener('click', function (ev) {
+      var b = ev.target.closest('[data-copy]');
+      if (b) { NL.copy(b.getAttribute('data-copy'), { ok: 'Sign-off link copied' }); }
+    });
+  }
+
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+</body>
+</html>
