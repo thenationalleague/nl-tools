@@ -1,10 +1,16 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixtures
-  Version: v0.13 (30/07/2026)
+  Version: v0.14 (30/07/2026)
   File: /fixtures/index.html
 
   CHANGELOG
+    v0.14 (30/07/2026) — Rearrangements is the same table as the main
+      list (crests, tints, break lines) rather than a card stack; two
+      visual languages for one set of fixtures was the problem. History
+      entries can be corrected or removed: a mis-keyed reason is not an
+      event, so it is edited in place and stamped reasonWas rather than
+      appending a timeline entry for a typo.
     v0.13 (30/07/2026) — Broadcast written out in full as proper pills
       (DAZN white-on-black, AMI white-on-NL-red, BASIC/ENHANCED), each
       of the four independently hideable and remembered. Adds a bulk
@@ -141,6 +147,16 @@
     var NL_TOOL_KEY = 'ops-fixtures';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/07/2026',
+        version: 'v0.14',
+        items: [
+          'Rearrangements now looks like the fixture list \u2014 same table, crests, competition colours and date breaks \u2014 with columns for the reason and how long each one has been waiting.',
+          'A reason picked in error can be corrected. Open the fixture, hover the history entry and click Edit. The entry keeps a note that it was corrected rather than pretending it always said the new thing.',
+          'The date a postponement was decided can be corrected the same way, which matters because the waiting time is measured from it.',
+          'An entry that should never have been recorded can be removed outright.'
+        ]
+      },
       {
         date: '30/07/2026',
         version: 'v0.13',
@@ -392,6 +408,10 @@
      whatever is left, so the column takes what it needs and gives it back
      when parts are toggled off. */
   .fx-c-tv { white-space: nowrap; }
+  .fx-c-why { width: 180px; font-size: 12.5px; color: var(--text-muted); }
+  .fx-c-wait { width: 92px; font-variant-numeric: tabular-nums;
+               font-variation-settings: 'wght' 800; color: var(--purple); }
+  .fx-mv-block { margin-bottom: 26px; }
   .fx-tv { display: inline-block; padding: 1px 7px; border-radius: var(--radius-pill);
            font-size: 9.5px; font-variation-settings: 'wght' 900; letter-spacing: .06em;
            vertical-align: 1px; margin-right: 4px; }
@@ -464,6 +484,13 @@
   .fx-hist li { border-left: 2px solid var(--navy-200); padding-left: 11px; }
   .fx-hist__t { font-variation-settings: 'wght' 800; font-size: 12.5px; }
   .fx-hist__d { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .fx-hist__t { display: flex; align-items: baseline; gap: 8px; }
+  .fx-hist__edit { border: none; background: none; padding: 0; cursor: pointer;
+                   font-family: var(--font); font-size: 11px; color: var(--navy);
+                   font-variation-settings: 'wght' 800; text-decoration: underline;
+                   opacity: 0; transition: opacity .12s; }
+  .fx-hist li:hover .fx-hist__edit, .fx-hist__edit:focus-visible { opacity: 1; }
+  .fx-hist__amend { font-style: italic; }
   /* Wraps because a scored fixture gets a fourth action; four across squashes
      the labels in a default-width modal. */
   .fx-choice { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -697,7 +724,14 @@
     var hh = h % 12; if (hh === 0) hh = 12;
     return hh + (m ? '.' + String(m).padStart(2, '0') : '') + (h >= 12 ? 'pm' : 'am');
   }
-  function dateStr(d) { return '<span class="fx-dow">' + dow(d) + '</span> ' + esc(prettyDate(d)); }
+  /* History stores a stamp (dd/mm/yyyy HH:MM), the fixture stores a bare
+     date. Anything rendered as a date has to be trimmed to the date part or
+     dow() splits on the wrong thing and yields "undefined". */
+  function dateOnly(v) { return String(v || '').slice(0, 10); }
+  function dateStr(d) {
+    d = dateOnly(d);
+    return '<span class="fx-dow">' + dow(d) + '</span> ' + esc(prettyDate(d));
+  }
   function whenStr(d, t) { return dateStr(d) + ' &middot; ' + clock(t); }
   /* Same thing without markup, for anywhere the string is escaped on the way
      in (NL.confirm/prompt messages) rather than inserted as HTML. */
@@ -798,7 +832,11 @@
   function loadReasons() {
     return fetch('/assets/data/postponement-reasons.json', { cache: 'no-store' })
       .then(function (r) { return r.ok ? r.json() : { reasons: [] }; })
-      .then(function (j) { REASONS = j.reasons || []; })
+      .then(function (j) {
+        REASONS = j.reasons || [];
+        REASON_BY_CODE = {};
+        REASONS.forEach(function (r) { REASON_BY_CODE[r.code] = r; });
+      })
       .catch(function () { REASONS = []; });
   }
 
@@ -976,6 +1014,10 @@
       : rows.length + ' of ' + visible().length + ' fixtures';
   }
 
+  /* Rebuilt whenever the reasons file lands; one lookup shared by the history
+     block and the rearrangements table. */
+  var REASON_BY_CODE = {};
+
   function renderMoves(moves) {
     var pane = $('fxPaneMoves');
     if (!moves.length) {
@@ -989,26 +1031,53 @@
     pane.innerHTML = mvGroup('Awaiting a new date', waiting, true) + mvGroup('Rearranged', done, false);
   }
 
+  /* The same table as the main list, not a card stack. It is the same data
+     read the same way — crests, competition tint, break lines — and having
+     two visual languages for one set of fixtures was the whole complaint.
+     What changes is the columns: when it was called off, and how long it has
+     been waiting, in place of kick-off. */
   function mvGroup(title, list, waiting) {
     if (!list.length) return '';
-    return '<div style="margin-bottom:22px;"><p class="fx-mv-head">' + esc(title) + ' (' + list.length + ')</p>' +
+    var prev = null;
+    return '<div class="fx-mv-block"><p class="fx-mv-head">' + esc(title) + ' (' + list.length + ')</p>' +
+      '<div class="table-wrap"><table class="table table--compact"><thead><tr>' +
+      '<th class="fx-c-md">MD</th>' +
+      '<th class="fx-c-date">' + (waiting ? 'Was' : 'Now') + '</th>' +
+      '<th class="fx-c-home ta-right">Home</th>' +
+      '<th class="fx-c-state ta-center">' + (waiting ? 'P&ndash;P' : 'KO') + '</th>' +
+      '<th class="fx-c-away">Away</th>' +
+      '<th class="fx-c-comp">Comp</th>' +
+      '<th class="fx-c-why">Reason</th>' +
+      '<th class="fx-c-wait ta-right">' + (waiting ? 'Waiting' : 'Took') + '</th>' +
+      '<th class="fx-c-act"></th></tr></thead><tbody>' +
       list.map(function (f) {
         var h = histOf(f.recordID);
         var last = h[h.length - 1] || {};
         var waits = waitDays(f);
-        return '<div class="fx-mv">' +
-          '<span class="fx-mv__fx">' + esc(f.home) + ' v ' + esc(f.away) + '</span>' +
-          '<span class="fx-mv__meta">' + esc(COMP_SHORT[f.competition] || '') +
-            (f.matchday ? ' &middot; MD' + esc(f.matchday) : '') + '</span>' +
-          '<span class="fx-mv__meta">' + (waiting
-            ? 'Called off ' + esc(last.effectiveAt || '')
-            : whenStr(f.date, f.kickoff)) + '</span>' +
-          (waiting ? '<span class="fx-mv__wait">' + daysSince(last.effectiveAt) + '</span>'
-                   : (waits.length ? '<span class="fx-mv__wait">' + waits[waits.length - 1] + ' to rearrange</span>' : '')) +
-          '<button type="button" class="btn btn--ghost btn--sm" data-fxopen="' + esc(f.recordID) + '">Open</button>' +
-          '</div>';
-      }).join('') + '</div>';
+        var cls = COMP_CLASS[f.competition] || '';
+        /* Grouped by date like the main list, so a weekend of call-offs reads
+           as one block rather than a run of unrelated rows. */
+        var key = waiting ? (last.from || f.date) : f.date;
+        if (!prev || key !== prev) cls += ' fx-datebreak';
+        prev = key;
+        var r = REASON_BY_CODE[last.reasonCode];
+        return '<tr class="' + cls + '">' +
+          '<td class="fx-c-md">' + esc(f.matchday || '\u2014') + '</td>' +
+          '<td class="fx-c-date">' + dateStr(waiting ? (last.from || f.date) : f.date) + '</td>' +
+          '<td class="fx-c-home ta-right"><span class="fx-team">' + esc(f.home) + crestImg(f.home) + '</span></td>' +
+          (waiting
+            ? '<td class="fx-c-state ta-center fx-state fx-state--pp">P&ndash;P</td>'
+            : '<td class="fx-c-state ta-center fx-state">' + clock(f.kickoff) + '</td>') +
+          '<td class="fx-c-away"><span class="fx-team">' + crestImg(f.away) + esc(f.away) + '</span></td>' +
+          '<td class="fx-c-comp">' + esc(COMP_SHORT[f.competition] || f.competition) + '</td>' +
+          '<td class="fx-c-why">' + (r ? esc(r.label) : '<span class="fx-none">not given</span>') + '</td>' +
+          '<td class="fx-c-wait ta-right">' + esc(waiting ? daysSince(last.effectiveAt)
+            : (waits.length ? waits[waits.length - 1] : '\u2014')) + '</td>' +
+          '<td class="fx-c-act ta-right">' + actBtn(f) + '</td>' +
+          '</tr>';
+      }).join('') + '</tbody></table></div></div>';
   }
+
 
   function daysSince(s) {
     var t = parseStamp(s);
@@ -1098,6 +1167,12 @@
     });
     ctrl.body.querySelectorAll('[data-fxopta]').forEach(function (b) {
       b.addEventListener('click', function () { ctrl.close(); askOpta(f); });
+    });
+    ctrl.body.querySelectorAll('[data-fxhist]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        ctrl.close();
+        editHistory(f, +btn.getAttribute('data-fxhist'));
+      });
     });
     wireBcast(ctrl, f);
   }
@@ -1289,6 +1364,101 @@
     });
   }
 
+  /* Correcting a history entry.
+
+     The log is append-only for a reason: "it was postponed, then rearranged"
+     is a record you have to be able to trust. But a MIS-KEYED reason is not
+     an event — nothing happened when Police was picked instead of Weather,
+     the finger slipped. Appending "reason changed" for that would be
+     recording the typo as though it were history.
+
+     So the reason is edited in place and the entry keeps reasonWas, marked
+     "(reason corrected)" underneath, which preserves the audit trail without
+     inventing a timeline event.
+
+     Deleting the entry outright is the harder escape hatch, for the case
+     where the entry should never have existed at all. It is a genuine loss,
+     so it is confirmed separately and says what it costs: the wait-time
+     figures are computed from these entries. */
+  function editHistory(f, idx) {
+    var list = histOf(f.recordID).slice();
+    var e = list[idx];
+    if (!e) return;
+    var when = e.type === 'postponed' ? 'Postponed from ' + e.from
+             : e.type === 'rescheduled' ? (e.from ? 'Moved from ' + e.from + ' to ' + e.to : 'Date set: ' + e.to)
+             : 'Correction';
+    var opts = REASONS.slice().sort(function (a, b) { return a.label.localeCompare(b.label); });
+    var ctrl = NL.modal({
+      title: 'Correct this entry',
+      body: '<p class="text-secondary fx-modal-sub">' + esc(f.home) + ' v ' + esc(f.away) +
+        ' &middot; ' + esc(when) + ' &middot; recorded ' + esc(e.recordedAt) + '</p>' +
+        '<div class="form-group"><label for="fxHrsn">Reason</label><select id="fxHrsn">' +
+        '<option value="">&mdash; none &mdash;</option>' +
+        opts.map(function (r) {
+          return '<option value="' + esc(r.code) + '"' +
+            (r.code === e.reasonCode ? ' selected' : '') + '>' + esc(r.label) + '</option>';
+        }).join('') + '</select></div>' +
+        (e.effectiveAt
+          ? '<div class="form-group"><label for="fxHeff">Decided on</label>' +
+            '<input type="date" id="fxHeff" value="' + esc(toISO(e.effectiveAt.slice(0, 10))) + '">' +
+            '<p class="form-hint">The date the decision was taken, which is what the waiting time is measured from.</p></div>'
+          : ''),
+      footerSplit: true,
+      buttons: [
+        { label: 'Remove entry', className: 'btn btn--danger', onClick: function (c) {
+            c.close(); removeHistory(f, idx);
+          } },
+        { label: 'Cancel', className: 'btn btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Save', className: 'btn btn--primary', autofocus: true, onClick: function (c) {
+            var code = ctrl.body.querySelector('#fxHrsn').value || null;
+            var effEl = ctrl.body.querySelector('#fxHeff');
+            var eff = effEl && effEl.value ? fromISO(effEl.value) + (e.effectiveAt.slice(10) || '') : e.effectiveAt;
+            if (code === e.reasonCode && eff === e.effectiveAt) { c.close(); return; }
+            var next = {};
+            Object.keys(e).forEach(function (k) { next[k] = e[k]; });
+            if (code !== e.reasonCode) {
+              /* Only stamp the first correction: reasonWas should say what it
+                 was originally, not what it was one edit ago. */
+              if (next.reasonWas === undefined) next.reasonWas = e.reasonCode || null;
+              next.reasonCode = code;
+            }
+            next.effectiveAt = eff;
+            next.amendedAt = stamp();
+            next.amendedBy = (S.session && S.session.uid) || null;
+            list[idx] = next;
+            S.history[f.recordID] = list;
+            firebase.database().ref(seasonPath('history') + '/' + f.recordID).set(list)
+              .then(function () {
+                NL.writeAudit('fixture_history_amended', { recordID: f.recordID, entry: idx + 1, reason: code });
+                c.close(); render(); NL.toast('Entry corrected', 'success');
+              })
+              .catch(function (err) { NL.toast('Could not save \u2014 ' + ((err && err.message) || err), 'error'); });
+          } }
+      ]
+    });
+  }
+
+  function removeHistory(f, idx) {
+    var list = histOf(f.recordID).slice();
+    var e = list[idx];
+    if (!e) return;
+    NL.confirm(f.home + ' v ' + f.away, {
+      title: 'Remove this history entry?',
+      detail: 'The entry goes for good, and the waiting-time figures are worked out from these entries, so they will change. ' +
+        'The fixture itself and its current date are not affected.',
+      confirmText: 'Remove', variant: 'danger'
+    }).then(function (ok) {
+      if (!ok) return;
+      list.splice(idx, 1);
+      S.history[f.recordID] = list;
+      var ref = firebase.database().ref(seasonPath('history') + '/' + f.recordID);
+      (list.length ? ref.set(list) : ref.remove()).then(function () {
+        NL.writeAudit('fixture_history_removed', { recordID: f.recordID, entry: idx + 1, type: e.type });
+        render(); NL.toast('Entry removed', 'success');
+      }).catch(function (err) { NL.toast('Could not save \u2014 ' + ((err && err.message) || err), 'error'); });
+    });
+  }
+
   /* Bulk delete of whatever the filters are currently showing.
 
      Exists because a mis-import is not a one-fixture mistake: get the
@@ -1439,17 +1609,19 @@
   function historyBlock(f) {
     var h = histOf(f.recordID);
     if (!h.length) return '';
-    var byCode = {};
-    REASONS.forEach(function (r) { byCode[r.code] = r; });
+    var byCode = REASON_BY_CODE;
     var items = h.map(function (e, i) {
       var r = byCode[e.reasonCode];
       var line = e.type === 'corrected'
           ? (e.from === 'played' ? 'Result removed' : 'Reinstated (was ' + e.from + ')')
         : e.type === 'postponed' ? 'Postponed from ' + e.from
         : (e.from ? 'Moved from ' + e.from + ' to ' + e.to : 'Date set: ' + e.to);
-      return '<li><div class="fx-hist__t">' + (i + 1) + '. ' + esc(line) + '</div>' +
+      return '<li><div class="fx-hist__t">' + (i + 1) + '. ' + esc(line) +
+        (canEdit() ? '<button type="button" class="fx-hist__edit" data-fxhist="' + i +
+          '" title="Correct or remove this entry">Edit</button>' : '') + '</div>' +
         '<div class="fx-hist__d">' + (e.effectiveAt ? 'Decided ' + esc(e.effectiveAt) + ' &middot; ' : '') +
-        'recorded ' + esc(e.recordedAt) + (r ? ' &middot; ' + esc(r.label) : '') + '</div></li>';
+        'recorded ' + esc(e.recordedAt) + (r ? ' &middot; ' + esc(r.label) : '') +
+        (e.reasonWas ? ' <span class="fx-hist__amend">(reason corrected)</span>' : '') + '</div></li>';
     }).join('');
     var waits = waitDays(f);
     var notes = (S.notes[f.recordID] || []).map(function (n) {
