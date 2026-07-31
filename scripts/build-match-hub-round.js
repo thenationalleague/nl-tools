@@ -140,6 +140,23 @@ const seasonStartYear = s => Number(String(s).slice(0, 4)); // "2003-04" → 200
       ((byOpta[x.k] || {}).name || x.k).localeCompare((byOpta[y.k] || {}).name || y.k));
   const pos = {}; table.forEach((r, i) => { pos[r.k] = i + 1; });
 
+  // OFFICIAL baseline preferred: if the nightly archive holds this exact date,
+  // its table wins (deductions included); derived stands for older dates.
+  let official = null;
+  const blFile = path.join(REPO, "assets", "data", "table-baselines.json");
+  if (fs.existsSync(blFile)) {
+    try {
+      const bl = JSON.parse(fs.readFileSync(blFile, "utf8"));
+      const bd = bl.days && bl.days[DATE];
+      const bc = bd && String(bd.season) === String(SEASON) && bd.competitions && bd.competitions[args.comp || "nl"];
+      if (bc && bc.rows && bc.rows.length >= 20) {
+        official = bc.rows;
+        official.forEach(r => { pos[r.teamID] = r.pos; });
+        console.error(`Using OFFICIAL baseline table for ${DATE} (table-baselines.json)`);
+      }
+    } catch (e) { console.error("WARN: baseline archive unreadable — derived table stands"); }
+  }
+
   function streaks(games) {   // trailing streak counts over a result sequence
     let wins = 0, losses = 0, winless = 0, unbeaten = 0;
     for (let i = games.length - 1; i >= 0; i--) { if (games[i].gf > games[i].ga) wins++; else break; }
@@ -356,7 +373,9 @@ const seasonStartYear = s => Number(String(s).slice(0, 4)); // "2003-04" → 200
 
   // ---- emit ---------------------------------------------------------------
   const jf = o => JSON.stringify(o);
-  const priorOut = {}; table.forEach(r => { priorOut[r.k] = { P: r.P, W: r.W, D: r.D, L: r.L, GF: r.GF, GA: r.GA, Pts: r.Pts }; });
+  const priorOut = {};
+  if (official) official.forEach(r => { priorOut[r.teamID] = { P: r.P, W: r.W, D: r.D, L: r.L, GF: r.GF, GA: r.GA, Pts: r.Pts }; });
+  else table.forEach(r => { priorOut[r.k] = { P: r.P, W: r.W, D: r.D, L: r.L, GF: r.GF, GA: r.GA, Pts: r.Pts }; });
   let out = "";
   out += `window.__DATA__ = {\n`;
   out += `  round: ${roundNo},\n  season: ${jf(seasonLabel)},\n  competition: ${jf(COMP.name)},\n\n`;
