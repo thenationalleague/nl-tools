@@ -54,7 +54,12 @@ async function getJSON(url) {
 }
 
 function mapRows(data) {
-  return (data || []).map(r => {
+  return (data || []).filter(r => {
+    // an uninitialised table comes back as a single all-null stub row
+    // (seen on North/South pre-season) — treat that as "no table yet"
+    const a = (r && r.attributes) || {};
+    return r && r.id && (a.teamName || a.teamShortName) && a.position != null;
+  }).map(r => {
     const a = r.attributes || {};
     return {
       teamID: r.id, team: a.teamName || a.teamShortName || r.id,
