@@ -274,6 +274,16 @@
                           cap the prior-table computation at 46 games so
                           play-off results never pollute the baseline or form
                           streaks.
+    v0.19.0 (2026-07-31) — OFFICIAL baseline preferred. When the chosen date
+                          exists in the nightly archive
+                          (assets/data/table-baselines.json, 2026-27 onwards)
+                          the loader seeds the start-of-day table from the
+                          OFFICIAL rows — points deductions included — with
+                          derived-from-results as the fallback for all older
+                          dates (NB 2025-26 had no deductions, so derived is
+                          exact for last season anyway). Form streaks and
+                          splits stay result-derived either way. Generator
+                          gains the same preference from the local file.
   ============================================================================
 -->
 
@@ -779,7 +789,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "26";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "27";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -1827,8 +1837,9 @@ body{overflow:hidden}
   var NLS_API="https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2";
   var META_URL="https://raw.githubusercontent.com/thenationalleague/tools/main/assets/data/clubs-meta.json";
   var ALLTIME_URL="https://raw.githubusercontent.com/thenationalleague/site/main/results.json";
+  var BASELINE_URL="https://raw.githubusercontent.com/thenationalleague/tools/main/assets/data/table-baselines.json";
   var COMPS={nl:{id:89,name:"National League"},north:{id:373,name:"National League North"},south:{id:372,name:"National League South"}};
-  var _meta=null,_alltime=null,_alltimeFailed=false;
+  var _meta=null,_alltime=null,_alltimeFailed=false,_baselines=null;
   function fetchJSON(u){ return fetch(u).then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); }); }
   function evMinOf(w){ var m=/^(\d+)'(?:\+(\d+))?/.exec(String(w.formattedEventTime||"")); return m?Number(m[1])+(m[2]?Number(m[2]):0):Number(w.eventMinute||w.eventTime||0); }
   function pnameOf(p){ var n=(p&&p.playerName)||{}; return n.knownName||n.customKnownName||((n.firstName?n.firstName+" ":"")+(n.lastName||"")).trim()||"Unknown"; }
@@ -1905,6 +1916,21 @@ body{overflow:hidden}
     var table=Object.keys(rows).map(function(k){var r=rows[k];return {k:k,Pts:r.Pts,GD:r.GF-r.GA,GF:r.GF};})
       .sort(function(a,b){return b.Pts-a.Pts||b.GD-a.GD||b.GF-a.GF||((byOpta[a.k]||{}).name||a.k).localeCompare((byOpta[b.k]||{}).name||b.k);});
     var posMap={}; table.forEach(function(r,i){posMap[r.k]=i+1;});
+    // OFFICIAL baseline preferred: if the nightly archive holds this exact
+    // date (2026-27 onwards), its table wins — points deductions included.
+    // Derived-from-results remains the source for older dates (NB 2025-26
+    // had no deductions, so derived is exact there anyway).
+    var officialRows=null;
+    try{
+      o.status("Checking the official baseline archive…");
+      if(!_baselines) _baselines=await fetchJSON(BASELINE_URL);
+      var bd=_baselines.days&&_baselines.days[o.date];
+      var bc=bd&&String(bd.season)===String(season)&&bd.competitions&&bd.competitions[o.comp||"nl"];
+      if(bc&&bc.rows&&bc.rows.length>=20){
+        officialRows=bc.rows;
+        officialRows.forEach(function(r){ posMap[r.teamID]=r.pos; });
+      }
+    }catch(e){ /* archive unreachable — derived table stands */ }
     var nDone=0;
     o.status("Fetching match detail… (0/"+roundL.length+")");
     var details=await Promise.all(roundL.map(function(m){
@@ -1969,6 +1995,7 @@ body{overflow:hidden}
     });
     fixtures.sort(function(a,b){return a.date.localeCompare(b.date)||((byOpta[a.home]||{}).name||"").localeCompare((byOpta[b.home]||{}).name||"");});
     Object.keys(rows).forEach(function(k){usedTeams[k]=1;});
+    if(officialRows) officialRows.forEach(function(r){usedTeams[r.teamID]=1;});
     var clubs={};
     Object.keys(usedTeams).forEach(function(k){
       var c=byOpta[k], s=seq[k]||[], all=trailStreaks(s);
@@ -1983,8 +2010,13 @@ body{overflow:hidden}
         split:{hWinless:hS.winless,hUnbeaten:hS.unbeaten,aWinless:aS.winless,aUnbeaten:aS.unbeaten},
         ident:{cs:cs} };
     });
-    var priorOut={}; Object.keys(rows).forEach(function(k){ var r=rows[k]; priorOut[k]={P:r.P,W:r.W,D:r.D,L:r.L,GF:r.GF,GA:r.GA,Pts:r.Pts}; });
-    var played=Object.keys(rows).map(function(k){return rows[k].P;}).sort(function(a,b){return a-b;});
+    var priorOut={};
+    if(officialRows){
+      officialRows.forEach(function(r){ priorOut[r.teamID]={P:r.P,W:r.W,D:r.D,L:r.L,GF:r.GF,GA:r.GA,Pts:r.Pts}; });
+    } else {
+      Object.keys(rows).forEach(function(k){ var r=rows[k]; priorOut[k]={P:r.P,W:r.W,D:r.D,L:r.L,GF:r.GF,GA:r.GA,Pts:r.Pts}; });
+    }
+    var played=(officialRows?officialRows.map(function(r){return r.P;}):Object.keys(rows).map(function(k){return rows[k].P;})).sort(function(a,b){return a-b;});
     var roundNo=played.length?played[Math.floor(played.length/2)]+1:1;
     var label=(_meta.seasons&&_meta.seasons.list&&_meta.seasons.list[String(season)]&&_meta.seasons.list[String(season)].label)||(season+"-"+String(season+1).slice(2));
     // ---- swap in and restart the day ----
