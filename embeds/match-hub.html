@@ -261,6 +261,19 @@
                           seed D.prior from the official NLS table — it
                           carries points deductions a result-replay can't
                           know about.
+    v0.18.2 (2026-07-31) — KNOCKOUT awareness. Fixtures flagged ko:true
+                          (play-offs — served under the league competitionID
+                          with matchType "Cup" — and any knockout tie) play
+                          out fully on the map/commentary but contribute
+                          NOTHING to the table: no points, no P, no arrows,
+                          no movement. The table stays in place on a knockout
+                          matchday. Stakes maths and table/race storylines
+                          (go-top, leapfrog, six-pointer, title/play-off/drop
+                          lines) are suppressed for ko fixtures. Loader +
+                          generator set the flag from NLS matchType, and both
+                          cap the prior-table computation at 46 games so
+                          play-off results never pollute the baseline or form
+                          streaks.
   ============================================================================
 -->
 
@@ -766,7 +779,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "25";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "26";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -1268,6 +1281,7 @@ body{overflow:hidden}
   // of the season (P >= 23), and always caveated: others play today too
   function stakesClause(fx){
     var pr=D.prior, n=Object.keys(pr||{}).length;
+    if(fx.ko) return null;   // knockout games move nothing in the table
     if(!pr || !pr[fx.home] || pr[fx.home].P<23) return null;
     function rows(boost){
       return Object.keys(pr).map(function(q){var p=pr[q];return {k:q,Pts:p.Pts+(q===boost?3:0),GD:p.GF-p.GA,GF:p.GF};})
@@ -1419,10 +1433,13 @@ body{overflow:hidden}
   }
   function revealSegs(fx,ev){ return baseRevealSegs(goalCtx(fx,ev)); }  // 4× instant path
   function ordinal(n){ var s=["th","st","nd","rd"], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
-  // live (provisional) league table at time T — current scores count as results
+  // live (provisional) league table at time T — current scores count as results.
+  // KNOCKOUT fixtures (fx.ko: play-offs, cup knockout rounds) contribute
+  // NOTHING — no points, no P, no movement. The table stays in place on a
+  // knockout matchday; only its games play out on the map.
   function liveTable(T){
     var rows={}; Object.keys(D.prior).forEach(function(k){var p=D.prior[k];rows[k]={k:k,P:p.P,W:p.W,D:p.D,L:p.L,GF:p.GF,GA:p.GA,Pts:p.Pts};});
-    D.fixtures.forEach(function(fx){ var s=stateOf(fx,T); if(s.phase==="pre"||s.phase==="pp") return; var sc=scoreAt(fx,T);
+    D.fixtures.forEach(function(fx){ if(fx.ko) return; var s=stateOf(fx,T); if(s.phase==="pre"||s.phase==="pp") return; var sc=scoreAt(fx,T);
       [[fx.home,sc.h,sc.a],[fx.away,sc.a,sc.h]].forEach(function(x){var r=rows[x[0]];if(!r)return;r.P++;r.GF+=x[1];r.GA+=x[2];
         if(x[1]>x[2]){r.W++;r.Pts+=3;}else if(x[1]===x[2]){r.D++;r.Pts++;}else r.L++;});});
     var arr=Object.keys(rows).map(function(k){var r=rows[k];r.GD=r.GF-r.GA;return r;})
@@ -1456,8 +1473,9 @@ body{overflow:hidden}
     if(Math.random()>0.55) return null;
     var fx=c._fx, ev=c._ev, k=c._teamK, r=evRmin(ev,fx), cl=club(k);
     var posB=liveTable(r-0.003).pos[k], after=liveTable(r+0.003), posA=after.pos[k];
+    var tbl=!fx.ko;   // knockout fixtures get no table/race storylines
     var opts=[];
-    if(posA<posB){
+    if(tbl && posA<posB){
       if(posA===1) opts.push({w:5,s:"That would put "+cl.name+" top of the pile."});
       else{ var passed=after.arr[posA]?after.arr[posA].k:null;
         if(passed) opts.push({w:4,s:"That lifts "+cl.name+" above "+club(passed).name+", up to "+ordinal(posA)+"."});
@@ -1512,12 +1530,12 @@ body{overflow:hidden}
     else if(braceN>=4) opts.push({w:6,s:braceN+" goals for "+ev.name+" today — take a bow."});
     // #5 race implications for the scoring side (after this goal)
     var leadOrLevel=(c.sig!=="consolation");
-    if(leadOrLevel && posA<=2) opts.push({w:2,s:"Massive at the top — "+cl.name+" keeping the title race alight."});
-    else if(leadOrLevel && posA<=7) opts.push({w:2,s:"Big points in the play-off hunt for "+cl.name+"."});
-    else if(leadOrLevel && posA>=21) opts.push({w:2,s:"Precious points in the drop fight for "+cl.name+"."});
+    if(tbl && leadOrLevel && posA<=2) opts.push({w:2,s:"Massive at the top — "+cl.name+" keeping the title race alight."});
+    else if(tbl && leadOrLevel && posA<=7) opts.push({w:2,s:"Big points in the play-off hunt for "+cl.name+"."});
+    else if(tbl && leadOrLevel && posA>=21) opts.push({w:2,s:"Precious points in the drop fight for "+cl.name+"."});
     // #4 six-pointer — the two clubs close together in the same zone
     var oppK=(k===fx.home)?fx.away:fx.home, po=after.pos[oppK], hi=Math.max(posA,po), lo=Math.min(posA,po);
-    if(Math.abs(posA-po)<=3){
+    if(tbl && Math.abs(posA-po)<=3){
       if(lo>=2 && hi<=7) opts.push({w:3,s:"A real six-pointer in the play-off race, these two."});
       else if(lo>=20) opts.push({w:3,s:"A six-pointer at the wrong end for both of these."});
     }
@@ -1870,6 +1888,10 @@ body{overflow:hidden}
     hist.forEach(function(m){
       var a=m.attributes,h=a.homeTeam.teamID,w=a.awayTeam.teamID,hs=a.homeTeam.score,as=a.awayTeam.score;
       if(hs==null||as==null) return;
+      // beyond 46 games = play-offs (NLS serves them under the league
+      // competitionID) — the league table is done, they contribute nothing
+      var hr=rows[h],wr=rows[w];
+      if((hr&&hr.P>=46)||(wr&&wr.P>=46)) return;
       [[h,hs,as,"h"],[w,as,hs,"a"]].forEach(function(x){
         var r=rows[x[0]]=rows[x[0]]||{P:0,W:0,D:0,L:0,GF:0,GA:0,Pts:0};
         r.P++;r.GF+=x[1];r.GA+=x[2];
@@ -1926,7 +1948,7 @@ body{overflow:hidden}
       events.sort(function(a,b){return a.min-b.min;});
       var ko=(at.kickOffUTC||"").replace(" ","T")+"Z";
       var hM=byOpta[homeID]||{},aM=byOpta[awayID]||{};
-      return {
+      var fxOut={
         gc:at.matchID, home:homeID, away:awayID, hs:home.score, as:away.score,
         date:ko, slot:new Date(ko).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:"Europe/London"}),
         pp:false, att:(at.matchDetails&&at.matchDetails.attendance)||null,
@@ -1934,6 +1956,10 @@ body{overflow:hidden}
         h2h:h2hFromAll(hM.name||"",aM.name||"",homeID,awayID,o.date,season,hist),
         events:events
       };
+      // play-offs (and any knockout tie) are matchType "Cup" — mark them so
+      // the live table, arrows and stakes/race storylines leave them alone
+      if(String(at.matchType||"").toLowerCase().indexOf("cup")>=0) fxOut.ko=true;
+      return fxOut;
     });
     ppL.forEach(function(m){
       var a=m.attributes,ko=(a.kickOffDateUTC||"").replace(" ","T")+"Z";
