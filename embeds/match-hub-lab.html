@@ -166,6 +166,11 @@ window.__DATA__ = {
       <button class="lab__btn" data-hero="b">B · Centre card</button>
       <button class="lab__btn" data-hero="c">C · Pure type</button>
     </div>
+    <div class="lab__group"><span class="lab__lbl">Goal FX</span>
+      <button class="lab__btn is-on" data-fx="wipe">Wipe takeover</button>
+      <button class="lab__btn" data-fx="flood">Full-colour flood</button>
+      <button class="lab__btn" data-fx="none">None</button>
+    </div>
     <button class="lab__btn lab__btn--go" id="labReplay">Replay the goal</button>
   </div>
 
@@ -175,6 +180,8 @@ window.__DATA__ = {
       <div class="lab__pins" id="labPins"></div>
     </div>
     <div class="lab__hero" id="labHero" hidden></div>
+    <!-- goal takeover — the marquee beat that runs BEFORE the lockup lands -->
+    <div class="labfx" id="labFx"></div>
   </div>
   <div class="lab__note" id="labNote">Full map — dots mark every ground's true location; each scoreboard floats beside its dot on a short stem, and no stem ever runs beneath another card.</div>
 </div>
@@ -290,6 +297,30 @@ html,body{margin:0;padding:0;background:#f4f6f9}
 .hc__dash{font-size:26px;color:var(--ink-muted)}
 .hc__sub{font-size:15px;color:var(--ink-text);opacity:.9}
 .hc__sub b{font-variation-settings:"wght" 900}
+
+/* GOAL TAKEOVER — the marquee beat. Two flavours:
+   flood — the stage slams to the scoring team's colour, giant GOAL +
+           scoreline hold for a breath, then the colour recedes and the
+           hero lockup is standing there.
+   wipe  — a skewed team-colour band sweeps the stage carrying the word
+           through, then exits the far side. */
+.labfx{position:absolute;inset:0;z-index:7;pointer-events:none;display:none;overflow:hidden}
+.labfx.run{display:block}
+.labfx__flood{position:absolute;inset:0;background:var(--hero-col,#9e0000)}
+.labfx.fx-flood .labfx__flood{animation:fxFlood 2.3s ease both}
+@keyframes fxFlood{0%{opacity:0}10%{opacity:1}68%{opacity:1}100%{opacity:0}}
+.labfx__band{position:absolute;top:-12%;bottom:-12%;left:-45%;width:190%;background:var(--hero-col,#9e0000);
+  transform:translateX(-135%) skewX(-12deg)}
+.labfx.fx-wipe .labfx__band{animation:fxBand 2.3s cubic-bezier(.6,0,.2,1) both}
+@keyframes fxBand{0%{transform:translateX(-135%) skewX(-12deg)}24%{transform:translateX(0) skewX(-12deg)}66%{transform:translateX(0) skewX(-12deg)}100%{transform:translateX(135%) skewX(-12deg)}}
+.labfx__wm{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(58vh,420px);opacity:0}
+.labfx.run .labfx__wm{animation:fxWm 2.3s ease both}
+@keyframes fxWm{0%{opacity:0}18%{opacity:.16}62%{opacity:.16}88%{opacity:0}100%{opacity:0}}
+.labfx__word{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;opacity:0}
+.labfx.run .labfx__word{animation:fxWord 2.3s ease both}
+@keyframes fxWord{0%{opacity:0;transform:scale(.86)}16%{opacity:1;transform:scale(1)}64%{opacity:1;transform:scale(1)}86%{opacity:0;transform:scale(1.05)}100%{opacity:0}}
+.labfx__goal{font-size:clamp(72px,15vw,160px);line-height:.95;font-variation-settings:"wght" 900;letter-spacing:.05em;text-transform:uppercase}
+.labfx__line{font-size:clamp(17px,2.6vw,24px);font-variation-settings:"wght" 800;letter-spacing:.14em;text-transform:uppercase}
 @media (prefers-reduced-motion:reduce){ #lab *{animation-duration:.01ms!important;transition-duration:.01ms!important} }
 </style>
 
@@ -493,6 +524,25 @@ function heroShow(reveal){
   }
 }
 function heroHide(){$("labHero").hidden=true;}
+// the takeover: FX first, lockup lands as the colour recedes
+var FX="wipe",_fxT1=0,_fxT2=0;
+function runReveal(){
+  clearTimeout(_fxT1); clearTimeout(_fxT2);
+  if(FX==="none"){ heroShow(true); return; }
+  var h=club(FEAT.home),a=club(FEAT.away);
+  var col=washCol(club(FEAT_GOAL.team).col),fg=ideal(col);
+  var fx=$("labFx");
+  fx.style.setProperty("--hero-col",col);
+  fx.innerHTML=(FX==="flood"?'<div class="labfx__flood"></div>':'<div class="labfx__band"></div>')+
+    '<img class="labfx__wm" src="'+CREST+encodeURIComponent(club(FEAT_GOAL.team).name)+'.png" alt="" onerror="this.remove()">'+
+    '<div class="labfx__word" style="color:'+fg+'">'+
+      '<span class="labfx__goal">Goal</span>'+
+      '<span class="labfx__line">'+esc(h.short)+' 1–0 '+esc(a.short)+' · Joseph Gbode 12&#39;</span>'+
+    '</div>';
+  fx.className="labfx run fx-"+FX;
+  _fxT1=setTimeout(function(){ heroShow(true); },1450);   // lockup lands under the receding colour
+  _fxT2=setTimeout(function(){ fx.className="labfx"; fx.innerHTML=""; },2400);
+}
 
 var NOTES={
   map:"Full map — dots mark every ground's true location; each scoreboard floats beside its dot on a short stem, and no stem ever runs beneath another card.",
@@ -509,7 +559,7 @@ function setState(s){
   pin.classList.add("is-hero");
   pin.style.setProperty("--hero-col",washCol(club(FEAT_GOAL.team).col));
   zoomTo(FEAT);
-  heroShow(s==="reveal");
+  if(s==="reveal") runReveal(); else heroShow(false);
 }
 document.querySelectorAll("[data-state]").forEach(function(b){
   b.addEventListener("click",function(){setState(b.getAttribute("data-state"));});
@@ -526,6 +576,13 @@ document.querySelectorAll("[data-hero]").forEach(function(b){
     HERO=b.getAttribute("data-hero");
     document.querySelectorAll("[data-hero]").forEach(function(x){x.classList.toggle("is-on",x===b);});
     if(CUR!=="map") heroShow(CUR==="reveal");
+  });
+});
+document.querySelectorAll("[data-fx]").forEach(function(b){
+  b.addEventListener("click",function(){
+    FX=b.getAttribute("data-fx");
+    document.querySelectorAll("[data-fx]").forEach(function(x){x.classList.toggle("is-on",x===b);});
+    if(CUR==="reveal") runReveal();
   });
 });
 $("labReplay").addEventListener("click",function(){setState("reveal");});
