@@ -1,10 +1,14 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixtures
-  Version: v0.15 (30/07/2026)
+  Version: v0.16 (30/07/2026)
   File: /fixtures/index.html
 
   CHANGELOG
+    v0.16 (30/07/2026) — One line per move in Rearrangements, each date
+      PAIRED with the reason it came off that date, kick-offs in 12-hour
+      form. Replaces the arrow chain and the deduplicated reason list,
+      which could not be lined up against each other.
     v0.15 (30/07/2026) — Rearrangements obeys the same filters as the
       fixture list (the toolbar sat inside the fixtures pane, so it was
       hidden on the other tab) and adds a reason filter. Drops 'Took'.
@@ -152,6 +156,14 @@
     var NL_TOOL_KEY = 'ops-fixtures';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/07/2026',
+        version: 'v0.16',
+        items: [
+          'Rearrangements shows one line per move, with each date paired against the reason it came off it \u2014 Sat, 8 Aug 2026 (3pm) / Weather: Waterlogged, then Tue, 13 Oct 2026 (7.45pm) / Police, and so on down the row.',
+          'Kick-off times read as 3pm and 7.45pm rather than 15:00 and 19:45.'
+        ]
+      },
       {
         date: '30/07/2026',
         version: 'v0.15',
@@ -426,6 +438,16 @@
   .fx-c-why { width: 190px; font-size: 12.5px; color: var(--text-muted); }
   .fx-c-prev { font-size: 12px; color: var(--text-muted); white-space: nowrap;
                font-variant-numeric: tabular-nums; }
+  /* Matching line boxes in both columns, so the date and the reason it moved
+     for sit on the same line as each other. */
+  /* ABSOLUTE, not a multiplier: the two columns are 12px and 12.5px, so a
+     relative line-height gives them different line boxes and the pairs drift
+     apart by a pixel per row. */
+  .fx-stack div { line-height: 19px; }
+  .fx-stack div + div { margin-top: 1px; }
+  /* Cells stay top-aligned once a row carries several moves, otherwise the
+     stacks centre against each other and stop lining up. */
+  .table--compact td.fx-stack { vertical-align: top !important; }
   .fx-c-wait { width: 92px; font-variant-numeric: tabular-nums;
                font-variation-settings: 'wght' 800; color: var(--purple); }
   .fx-mv-block { margin-bottom: 26px; }
@@ -1096,44 +1118,28 @@
      two visual languages for one set of fixtures was the whole complaint.
      What changes is the columns: when it was called off, and how long it has
      been waiting, in place of kick-off. */
-  /* ddd, d mmm yyyy hh:mm — Richard's format, for the dates a fixture has
-     already been given. */
+  /* Sat, 15 Aug 2026 (3pm) — the kick-off in the same 12-hour form the rest
+     of the tool uses, rather than the 19:45 the data is stored in. */
   function whenLong(d, t) {
     d = dateOnly(d);
     var q = String(d).split('/');
-    return dow(d) + ', ' + (+q[0]) + ' ' + MO[+q[1] - 1] + ' ' + q[2] + ' ' + t;
+    return dow(d) + ', ' + (+q[0]) + ' ' + MO[+q[1] - 1] + ' ' + q[2] + ' (' + clock(t) + ')';
   }
 
-  /* Every kick-off this fixture has previously carried, oldest first.
-
-     Taken from the history rather than the fixture, because the fixture only
-     remembers where it is now and where it started. A game moved three times
-     has three previous slots and they are all interesting.
-
-     Joined with arrows, not commas, despite the ask: the date format has a
-     comma in it ("Sat, 8 Aug 2026"), so comma-separating them gives
-     "Sat, 8 Aug 2026 15:00, Tue, 13 Oct 2026 19:45" and you cannot tell
-     where one ends. Arrows also read as the sequence it actually is. */
-  function priorKOs(f) {
-    var out = [], h = histOf(f.recordID);
-    h.forEach(function (e) {
-      if (e.type !== 'postponed' && e.type !== 'rescheduled') return;
-      if (!e.from) return;
-      var d = dateOnly(e.from), t = (e.from.slice(11) || f.originalKickoff || f.kickoff);
-      var txt = whenLong(d, t);
-      if (out.indexOf(txt) === -1) out.push(txt);
-    });
-    return out;
-  }
-
-  /* One reason per move, in order, comma-separated. A fixture called off for
-     weather and then moved again for television has two, and showing only
-     the latest loses the story. */
-  function reasonsOf(f) {
+  /* One line per move: the slot the fixture held, and the reason it came off
+     it. Paired rather than listed as two separate collections, because a
+     deduplicated list of reasons cannot be lined up against a list of dates —
+     you could see "waterlogged, police" and three dates and not know which
+     was which. Read from the history, since the fixture only remembers where
+     it is now and where it started. */
+  function moveLines(f) {
     var out = [];
     histOf(f.recordID).forEach(function (e) {
+      if (e.type !== 'postponed' && e.type !== 'rescheduled') return;
+      if (!e.from) return;
+      var t = e.from.slice(11) || f.originalKickoff || f.kickoff;
       var r = REASON_BY_CODE[e.reasonCode];
-      if (r && out.indexOf(r.label) === -1) out.push(r.label);
+      out.push({ when: whenLong(dateOnly(e.from), t), why: r ? r.label : null });
     });
     return out;
   }
@@ -1162,7 +1168,7 @@
         var key = waiting ? (dateOnly(last.from) || f.date) : f.date;
         if (!prev || key !== prev) cls += ' fx-datebreak';
         prev = key;
-        var kos = priorKOs(f), why = reasonsOf(f);
+        var lines = moveLines(f);
         return '<tr class="' + cls + '">' +
           '<td class="fx-c-md">' + esc(f.matchday || '\u2014') + '</td>' +
           (waiting ? '' : '<td class="fx-c-date">' + dateStr(f.date) + '</td>') +
@@ -1172,10 +1178,16 @@
             : '<td class="fx-c-state ta-center fx-state">' + clock(f.kickoff) + '</td>') +
           '<td class="fx-c-away"><span class="fx-team">' + crestImg(f.away) + esc(f.away) + '</span></td>' +
           '<td class="fx-c-comp">' + esc(COMP_SHORT[f.competition] || f.competition) + '</td>' +
-          '<td class="fx-c-prev">' + (kos.length
-            ? esc(kos.join(' \u2192 ')) : '<span class="fx-none">\u2014</span>') + '</td>' +
-          '<td class="fx-c-why">' + (why.length
-            ? esc(why.join(', ')) : '<span class="fx-none">not given</span>') + '</td>' +
+          /* Both columns stack one line per move, so they read across as
+             pairs and the row grows with the number of moves. */
+          '<td class="fx-c-prev fx-stack">' + (lines.length
+            ? lines.map(function (l) { return '<div>' + esc(l.when) + '</div>'; }).join('')
+            : '<span class="fx-none">\u2014</span>') + '</td>' +
+          '<td class="fx-c-why fx-stack">' + (lines.length
+            ? lines.map(function (l) {
+                return '<div>' + (l.why ? esc(l.why) : '<span class="fx-none">not given</span>') + '</div>';
+              }).join('')
+            : '<span class="fx-none">not given</span>') + '</td>' +
           (waiting ? '<td class="fx-c-wait ta-right">' + esc(daysSince(last.effectiveAt)) + '</td>' : '') +
           '<td class="fx-c-act ta-right">' + actBtn(f) + '</td>' +
           '</tr>';
