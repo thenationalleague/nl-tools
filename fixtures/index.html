@@ -1,10 +1,15 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixtures
-  Version: v0.11 (30/07/2026)
+  Version: v0.12 (30/07/2026)
   File: /fixtures/index.html
 
   CHANGELOG
+    v0.12 (30/07/2026) — Broadcast surfaces on the row (a TV column: the
+      state as a pill, then E/A/D for Enhanced, AMI and moved-by-DAZN).
+      Importing four columns and seeing nothing change is
+      indistinguishable from the import failing. Travel-table writes are
+      chunked and its preview debounced, for a full 82-club matrix.
     v0.11 (30/07/2026) — "#N/A" in the Opta ID column took down the whole
       import: RTDB keys cannot contain # or /, and the ID becomes the
       record key. Excel error values and other non-IDs are now treated as
@@ -131,6 +136,14 @@
     var NL_TOOL_KEY = 'ops-fixtures';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/07/2026',
+        version: 'v0.12',
+        items: [
+          'Broadcast now shows in the list, in a TV column \u2014 WW, OS, TBC and so on, with E, A and D beside it for Enhanced production, sent to AMI, and moved by DAZN. Hover any of them for the full wording.',
+          'The travel table handles a full club-to-club matrix: 6,642 rows import in about three seconds, written in batches so a failure part-way says how far it got.'
+        ]
+      },
       {
         date: '30/07/2026',
         version: 'v0.11',
@@ -361,6 +374,16 @@
   .fx-c-state { width: 62px; }
   .fx-c-comp { width: 50px; font-size: 11px; font-variation-settings: 'wght' 900;
                letter-spacing: .06em; color: var(--text-muted); }
+  .fx-c-tv { width: 86px; white-space: nowrap; }
+  .fx-tv { display: inline-block; padding: 1px 6px; border-radius: var(--radius-pill);
+           font-size: 10px; font-variation-settings: 'wght' 900; letter-spacing: .05em;
+           vertical-align: 1px; }
+  .fx-tv--ww  { background: var(--green); color: var(--white); }
+  .fx-tv--os  { background: var(--green-light); color: var(--green); }
+  .fx-tv--tbc { background: var(--off-white); color: var(--text-muted); border: 1px solid var(--border); }
+  .fx-tv--off { color: var(--text-muted); }
+  .fx-tv__m b { font-size: 9.5px; font-variation-settings: 'wght' 900;
+                color: var(--navy); margin-left: 3px; cursor: help; }
   .fx-dow { color: var(--text-muted); font-variation-settings: 'wght' 700; }
 
   /* Row action. Canon .btn--sm is 33px tall — on 552 rows that button, not
@@ -500,7 +523,7 @@
                border-radius: var(--radius); }
 
   @media (max-width: 680px) {
-    .fx-c-comp { display: none; }
+    .fx-c-comp, .fx-c-tv { display: none; }
   }
 </style>
 </head>
@@ -564,6 +587,7 @@
               <th class="fx-c-state ta-center">KO</th>
               <th class="fx-c-away">Away</th>
               <th class="fx-c-comp">Comp</th>
+              <th class="fx-c-tv">TV</th>
               <th class="fx-c-act"></th>
             </tr>
           </thead>
@@ -901,6 +925,7 @@
         stateCell(f) +
         '<td class="fx-c-away"><span class="fx-team">' + crestImg(f.away) + esc(f.away) + '</span></td>' +
         '<td class="fx-c-comp">' + esc(COMP_SHORT[f.competition] || f.competition) + '</td>' +
+        bcastCell(f) +
         '<td class="fx-c-act ta-right">' + actBtn(f) + '</td>' +
         '</tr>';
     }).join('');
@@ -1529,6 +1554,35 @@
   }
   function bcastOf(id) { return S.bcast[id] || null; }
 
+  /* Broadcast on the row itself. Importing the columns and seeing nothing
+     change in the list is indistinguishable from the import not working —
+     the same complaint as every other silent failure here.
+
+     Deliberately terse: the state as a pill, then single-letter markers for
+     Enhanced / AMI / moved-by-DAZN. Spelling any of it out costs more width
+     than a 33px row has, and these get scanned down a column rather than
+     read as sentences; the full wording is on hover.
+
+     Green follows the sheet's own <tr> generator — filled for Worldwide,
+     pale for Overseas — so the tool and the published table agree, but takes
+     the brand's --green instead of the hard-coded hex. */
+  var BCAST_SHORT = { worldwide: 'WW', overseas: 'OS', tbc: 'TBC',
+                      'not-selected': 'NS', unavailable: 'N/A' };
+  function bcastCell(f) {
+    var b = bcastOf(f.recordID);
+    if (!b || !b.status) return '<td class="fx-c-tv"></td>';
+    var cls = b.status === 'worldwide' ? ' fx-tv--ww'
+            : b.status === 'overseas'  ? ' fx-tv--os'
+            : b.status === 'tbc'       ? ' fx-tv--tbc' : ' fx-tv--off';
+    var marks = (b.enhanced ? '<b title="Enhanced production">E</b>' : '') +
+                (b.ami ? '<b title="Sent to AMI">A</b>' : '') +
+                (b.daznMoved ? '<b title="Moved by DAZN">D</b>' : '');
+    return '<td class="fx-c-tv"><span class="fx-tv' + cls + '" title="' +
+      esc(BCAST_LABEL[b.status] || b.status) + '">' +
+      esc(BCAST_SHORT[b.status] || b.status) + '</span>' +
+      (marks ? '<span class="fx-tv__m">' + marks + '</span>' : '') + '</td>';
+  }
+
   /* ---- Pairings --------------------------------------------------------
      Distance and drive time belong to the PAIR of clubs, not the fixture:
      the same Billericay-to-Dover trip is the same trip whether the game is
@@ -1978,12 +2032,27 @@
             });
             var n = Object.keys(updates).length;
             if (!n) { NL.toast('No usable rows \u2014 check the column order', 'error'); return; }
-            try {
-              firebase.database().ref(seasonPath('pairings')).update(updates).then(function () {
-                Object.keys(updates).forEach(function (k) { S.pairs[k] = updates[k]; });
-                NL.writeAudit('fixture_pairings_import', { count: n });
+            /* A full club-to-club matrix is 82 x 81 = 6,642 rows. Chunked for
+               the same reason the fixture import is: one write that large is
+               a single point of failure, and a partial failure should say how
+               far it got rather than losing the lot. */
+            var pk = Object.keys(updates), CH = 400, jobs = [];
+            for (var i = 0; i < pk.length; i += CH) {
+              var slice = {};
+              pk.slice(i, i + CH).forEach(function (k) { slice[k] = updates[k]; });
+              jobs.push(slice);
+            }
+            var done = 0;
+            function failed(e) {
+              NL.toast('Stopped after ' + done + ' \u2014 ' + ((e && e.message) || e), 'error');
+              if (window.console) console.error('pairings import failed', e);
+            }
+            (function next() {
+              if (!jobs.length) {
+                pk.forEach(function (k) { S.pairs[k] = updates[k]; });
+                NL.writeAudit('fixture_pairings_import', { count: done });
                 c.close(); render();
-                NL.toast(n + ' pairing' + (n === 1 ? '' : 's') + ' saved' +
+                NL.toast(done + ' pairing' + (done === 1 ? '' : 's') + ' saved' +
                   (bad ? ' \u00b7 ' + bad + ' row' + (bad === 1 ? '' : 's') + ' skipped' : ''), 'success');
                 var u = Object.keys(unknown);
                 if (u.length) {
@@ -1991,15 +2060,28 @@
                     ' not in the League list, kept as typed: ' + u.slice(0, 3).join(', ') +
                     (u.length > 3 ? '\u2026' : ''), 'info');
                 }
-              }).catch(function (e) { NL.toast('Could not save \u2014 ' + ((e && e.message) || e), 'error'); });
-            } catch (e) { NL.toast('Could not save \u2014 ' + ((e && e.message) || e), 'error'); }
+                return;
+              }
+              var batch = jobs.shift();
+              try {
+                firebase.database().ref(seasonPath('pairings')).update(batch)
+                  .then(function () { done += Object.keys(batch).length; next(); })
+                  .catch(failed);
+              } catch (e) { failed(e); }
+            }());
           } }
       ]
     });
     /* Live count while pasting, so a wrong column order shows up before the
        import rather than after it. */
-    var ta = ctrl.body.querySelector('#fxPairText');
+    var ta = ctrl.body.querySelector('#fxPairText'), tick = null;
     ta.addEventListener('input', function () {
+      /* Re-parsing 6,000 rows on every keystroke makes the box feel broken.
+         One pass shortly after typing stops is enough for a row count. */
+      clearTimeout(tick);
+      tick = setTimeout(preview, 120);
+    });
+    function preview() {
       var rows = pairRows(ta.value), r0 = rows[0];
       var ok = rows.filter(function (r) {
         return (r[0] || '').trim() && (r[1] || '').trim() && (isNum(r[2]) || isNum(r[3]));
@@ -2012,7 +2094,7 @@
             esc(isNum(r0[2]) ? +String(r0[2]).replace(/[^0-9.]/g, '') : '?') + ' miles, ' +
             esc(driveText(r0[3]) || '?') : '') + '</p>'
         : '';
-    });
+    }
   }
   /* Shares the fixture importer's tab-or-CSV sniffing, then drops a header
      row — detected as "the number columns are not numbers". */
