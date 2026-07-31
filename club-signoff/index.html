@@ -144,6 +144,7 @@ body { background: var(--navy-50); }
 .inl:focus { outline: none; border-color: var(--navy); background: #fff; }
 .inl--empty { font-style: italic; }
 .inl--empty::placeholder { color: var(--amber-deep); opacity: 1; }
+.inl--opt::placeholder { color: var(--text-muted); opacity: 1; font-style: normal; }
 .inl--changed { background: var(--green-light); border-color: var(--green); }
 .inl--role { font-size: var(--text-sm); }
 
@@ -333,6 +334,14 @@ body { background: var(--navy-50); }
     <div id="lists"></div>
   </section>
 
+  <section class="block">
+    <h2>Departmental inboxes</h2>
+    <p class="block__lede">Addresses that belong to a department rather than a person,
+      for anything that should not land in one inbox. Add any you use. These sit
+      alongside named people, they do not replace them.</p>
+    <div id="inboxes"></div>
+  </section>
+
   <p class="fallback">Nobody goes missing by leaving a box empty. Where we don&rsquo;t hold
     details for an individual, we&rsquo;ll come to them through the club secretary.</p>
 
@@ -465,17 +474,18 @@ body { background: var(--navy-50); }
 
   /* An editable value that reads as text until you touch it. Missing values
      carry an instruction in the placeholder rather than a separate flag block. */
-  function field(key, value, placeholder, cls) {
+  function field(key, value, placeholder, cls, optional) {
     var v = edits[key] !== undefined ? edits[key] : (value || '');
     var changed = edits[key] !== undefined && edits[key] !== (value || '');
     return '<input class="inl ' + (cls || '') + (changed ? ' inl--changed' : '') +
-      (!v ? ' inl--empty' : '') + '" data-field="' + esc(key) + '" value="' + esc(v) +
+      (!v ? (optional ? ' inl--empty inl--opt' : ' inl--empty') : '') +
+      '" data-field="' + esc(key) + '" value="' + esc(v) +
       '" placeholder="' + esc(placeholder || '') + '">';
   }
 
   function possessive(n) { return n + (/s$/i.test(n) ? '\u2019' : '\u2019s'); }
 
-  function personCard(p, shared) {
+  function personCard(p, shared, inboxOf) {
     var name = fullName(p);
 
     /* Roles carrying the same title collapse onto one line: "Finance Director"
@@ -508,7 +518,8 @@ body { background: var(--navy-50); }
     (p.emails || []).forEach(function (em, i) {
       var k = 'email:' + name + ':' + i;
       if (edits[k] === '') { return; }
-      var dup = shared[(em || '').trim().toLowerCase()] > 1;
+      var lc = (em || '').trim().toLowerCase();
+      var dup = shared[lc] > 1 || inboxOf[lc];
       cts.push('<div class="ct">' + (dup ? '<span class="bang" aria-hidden="true">!</span>' : '') +
         field(k, em, 'Email address') +
         '<button class="rm" type="button" data-blank="' + esc(k) + '" ' +
@@ -522,21 +533,31 @@ body { background: var(--navy-50); }
         'aria-label="Remove this number">&times;</button></div>');
     });
     var addK = 'email:' + name + ':new';
-    cts.push('<div class="ct">' + field(addK, '', 'Add an address or number') + '</div>');
+    cts.push('<div class="ct">' + field(addK, '', 'Add an address or number', '', true) + '</div>');
 
     var dupes = (p.emails || []).filter(function (em, i) {
-      return edits['email:' + name + ':' + i] === undefined &&
-             shared[(em || '').trim().toLowerCase()] > 1;
+      var lc = (em || '').trim().toLowerCase();
+      return edits['email:' + name + ':' + i] === undefined && (shared[lc] > 1 || inboxOf[lc]);
     });
-    var others = dupes.length ? shared[dupes[0].trim().toLowerCase()] - 1 : 0;
-    var dupWarn = dupes.length
-      ? '<div class="auto auto--warn"><b><span class="bang" aria-hidden="true">!</span>Not ' +
-        esc(possessive(name)) + ' own address?</b> ' + others + ' other ' +
-        (others === 1 ? 'person lists' : 'people list') + ' it too. Leave it blank if ' +
-        esc(name) + ' has no address of their own, and we will reach them through the ' +
-        'club secretary. If it is a shared inbox for the whole department, add it under ' +
-        'Departmental inboxes instead.</div>'
-      : '';
+    dupes.sort(function (a, b) {
+      return (inboxOf[b.trim().toLowerCase()] ? 1 : 0) - (inboxOf[a.trim().toLowerCase()] ? 1 : 0);
+    });
+    var dupWarn = '';
+    if (dupes.length) {
+      var lc0 = dupes[0].trim().toLowerCase();
+      dupWarn = '<div class="auto auto--warn"><b><span class="bang" aria-hidden="true">!</span>' +
+        (inboxOf[lc0]
+          /* Already declared as a departmental inbox, so this is not a question. */
+          ? 'This is your ' + esc(inboxOf[lc0]) + ' inbox, not ' + esc(possessive(name)) +
+            ' own address.</b> Leave it blank if ' + esc(name) + ' has no individual ' +
+            'address, and we will reach them through the club secretary. We already hold ' +
+            'the inbox itself, so nothing is lost.'
+          : 'Not ' + esc(possessive(name)) + ' own address?</b> ' +
+            (shared[lc0] - 1) + ' other ' + (shared[lc0] - 1 === 1 ? 'person lists' : 'people list') +
+            ' it too. Leave it blank if ' + esc(name) + ' has no address of their own, and we ' +
+            'will reach them through the club secretary. If it belongs to a whole department, ' +
+            'add it under Departmental inboxes instead.') + '</div>';
+    }
 
     return '<li class="pcard">' +
       '<div class="pcard__top"><span class="pcard__name">' + esc(name) + '</span>' +
@@ -789,6 +810,39 @@ body { background: var(--navy-50); }
       });
     });
 
+    /* An address declared as a departmental inbox and also sitting on a person
+       is not that person's address, and we can say so rather than ask. 64 of
+       these across the 72 clubs. */
+    var inboxOf = {};
+    Object.keys(sub.inboxes || {}).forEach(function (k) {
+      var em = ((sub.inboxes[k] || {}).email || '').trim().toLowerCase();
+      if (em) { inboxOf[em] = (sub.inboxes[k] || {}).dept || k; }
+    });
+
+    var INBOX_DEPTS = ['Club secretary', 'Commercial', 'Ticketing', 'Media & marketing',
+      'Programme', 'Finance', 'Community', 'Safeguarding & welfare', 'Matchday & safety',
+      'Medical', 'Team operations', 'Executive'];
+    var have = Object.keys(sub.inboxes || {});
+    $('inboxes').innerHTML = (have.length
+      ? have.map(function (k) {
+          var b = sub.inboxes[k] || {};
+          return '<div class="row"><dt>' + esc(b.dept || k) + '</dt><dd>' +
+            '<div class="ct">' + field('inbox:' + k + ':email', b.email, 'Email address') +
+            '<button class="rm" type="button" data-blank="inbox:' + esc(k) + ':email" ' +
+            'aria-label="Remove this inbox">&times;</button></div>' +
+            '<div class="ct">' + field('inbox:' + k + ':phone', b.phone, 'Phone number (optional)', '', true) +
+            '</div></dd></div>';
+        }).join('')
+      : '<p class="empty" style="margin:0 0 12px;">None held. Add any you use below.</p>') +
+      '<div class="row"><dt>Add an inbox</dt><dd><div class="ct">' +
+      '<select class="inl" id="newInboxDept" aria-label="Department for the new inbox">' +
+      '<option value="">Choose a department</option>' +
+      INBOX_DEPTS.filter(function (d) {
+        return !have.some(function (k) { return (sub.inboxes[k] || {}).dept === d; });
+      }).map(function (d) { return '<option>' + esc(d) + '</option>'; }).join('') +
+      '</select></div><div class="ct">' +
+      field('inbox:new:email', '', 'Email address', '', true) + '</div></dd></div>';
+
     /* ---- people, by department ---- */
     var bySec = {};
     people.forEach(function (p) {
@@ -813,7 +867,7 @@ body { background: var(--navy-50); }
       '<p class="block__lede">Everyone you sent us, with the roles they hold. ' +
       'Type over anything that is wrong. Where we have no job title, tell us what ' +
       'to show, or remove the role if they do not hold it.</p><ul class="people">' +
-      seq.map(function (p) { return personCard(p, emailCount); }).join('') +
+      seq.map(function (p) { return personCard(p, emailCount, inboxOf); }).join('') +
       '</ul></section>';
 
     $('foot').textContent = 'Submitted ' +
