@@ -157,12 +157,39 @@ body { background: var(--navy-50); }
   color: var(--green); font-weight: 700; }
 .fixed b { font-weight: 650; }
 
-/* Mailing-list picker. Two slots, and you choose from people already in the
-   entry — which is what stops prose, stray names and four-deep nominations. */
-.pick { display: flex; gap: 8px; flex-wrap: wrap; }
-.pick select { flex: 1 1 190px; padding: 5px 8px; font: inherit;
+/* Mailing-list recipients. Names are picked from people already in the entry,
+   which is what keeps prose, stray names and people who don't exist out of it.
+   The list itself is unbounded — it is a distribution list, not a hierarchy. */
+.rcpt { display: flex; flex-direction: column; gap: 6px; }
+.rcpt__row { display: flex; gap: 8px; align-items: center; }
+.rcpt__row select { flex: 1 1 auto; min-width: 0; padding: 5px 8px; font: inherit;
   font-size: var(--text-sm); border: 1px solid var(--navy-200); background: #fff; }
-.pick select:focus-visible { outline: 2px solid var(--navy); outline-offset: 1px; }
+.rcpt__row select:focus-visible { outline: 2px solid var(--navy); outline-offset: 1px; }
+.rcpt__drop { flex: none; padding: 4px 9px; font: inherit; font-size: 15px; line-height: 1;
+  cursor: pointer; color: var(--text-muted); background: transparent;
+  border: 1px solid var(--navy-200); }
+.rcpt__drop:hover { color: var(--red); border-color: var(--red); }
+.rcpt__add { align-self: flex-start; padding: 4px 10px; font: inherit; font-size: 12px;
+  font-weight: 650; cursor: pointer; color: var(--navy); background: transparent;
+  border: 1px dashed var(--navy-300); }
+.rcpt__add:hover { background: var(--navy-50); border-style: solid; }
+.rcpt__drop:focus-visible, .rcpt__add:focus-visible { outline: 2px solid var(--navy);
+  outline-offset: 2px; }
+
+/* Auto-flags. Raised by the page from the data itself rather than authored in
+   notes.json, so they cannot go stale or be forgotten for a club. */
+.auto { margin: 8px 0 2px; padding: 9px 12px; font-size: var(--text-sm);
+  background: var(--amber-light); border: 1px solid var(--amber); }
+.auto--warn { background: var(--red-light); border-color: var(--red); }
+.auto b { color: var(--amber-deep); }
+.auto--warn b { color: var(--red-deep); }
+.bang { display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; margin-right: 5px; font-size: 11px; font-weight: 800;
+  color: #fff; background: var(--red); border-radius: 50%; }
+.shared { color: var(--red-deep); }
+
+.fallback { margin: 22px 0 0; padding: 13px 16px; font-size: var(--text-sm);
+  color: var(--text-muted); background: #fff; border: 1px solid var(--navy-100); }
 
 .finish { margin-top: 28px; padding: 22px; background: #fff;
   border: 1px solid var(--navy-200); }
@@ -224,14 +251,17 @@ body { background: var(--navy-50); }
   </section>
 
   <section class="block">
-    <h2>Who we write to</h2>
-    <p class="block__lede">Always editable &mdash; change a name and it saves with your reply.
-      These are the people who receive our mailing list on each subject.
-      A list of recipients, not a statement of who runs what. One name is fine, two
-      is the most we&rsquo;ll hold. The five marked as required posts are positions every
-      club needs filled.</p>
+    <h2>Mailing lists</h2>
+    <p class="block__lede">Who receives our email on each subject. Add as many people
+      as you need, remove anyone who shouldn&rsquo;t be on a list, and it saves with your
+      reply. This is a list of recipients, not a statement of who runs what &mdash; the
+      five marked as required posts are the only ones that are positions in their
+      own right.</p>
     <div id="lists"></div>
   </section>
+
+  <p class="fallback">Nobody goes missing by leaving a box empty. Where we don&rsquo;t hold
+    details for an individual, we&rsquo;ll come to them through the club secretary.</p>
 
   <div id="sections"></div>
 
@@ -351,6 +381,15 @@ body { background: var(--navy-50); }
   }
 
   /* Which block a field belongs to, so opening one pen doesn't open them all. */
+  function nameSelect(listKey, i, chosen, names) {
+    var opts = ['<option value="">&mdash; choose a name &mdash;</option>'].concat(
+      names.map(function (n) {
+        return '<option value="' + esc(n) + '"' + (chosen === n ? ' selected' : '') + '>' +
+          esc(n) + '</option>';
+      })).join('');
+    return '<select data-list="' + listKey + '" data-slot="' + i + '">' + opts + '</select>';
+  }
+
   function num(v) {
     v = String(v == null ? '' : v).trim();
     return /^\d+$/.test(v) ? Number(v).toLocaleString('en-GB') : esc(v);
@@ -360,11 +399,14 @@ body { background: var(--navy-50); }
     return ['phone', 'mainEmail', 'website'].indexOf(field) > -1 ? 'contact' : 'ground';
   }
 
-  function contactsOf(p) {
+  function contactsOf(p, shared) {
     var out = [];
     (p.emails || []).forEach(function (em) {
       if (em && em.trim()) {
-        out.push('<a href="mailto:' + esc(em) + '">' + esc(em) + '</a>');
+        var dup = shared && shared[em.trim().toLowerCase()] > 1;
+        out.push((dup ? '<span class="bang" aria-hidden="true">!</span>' : '') +
+          '<a href="mailto:' + esc(em) + '"' + (dup ? ' class="shared"' : '') + '>' +
+          esc(em) + '</a>');
       }
     });
     (p.phones || []).forEach(function (ph) {
@@ -503,30 +545,48 @@ body { background: var(--navy-50); }
     /* ---- mailing lists ---- */
     var names = people.map(fullName).filter(Boolean);
     names.sort(function (a, b) { return a.localeCompare(b); });
+    LISTS.forEach(function (L) {
+      if (listPicks[L.k]) { return; }
+      listPicks[L.k] = (answers['list:' + L.k] ||
+        ((sub.leads || {})[L.k] || []).map(function (n) { return (n.name || '').trim(); })
+      ).filter(Boolean);
+    });
 
     $('lists').innerHTML = LISTS.map(function (L) {
-      var noms = ((sub.leads || {})[L.k] || []).map(function (n) { return (n.name || '').trim(); })
-        .filter(Boolean);
-      listPicks[L.k] = (answers['list:' + L.k] || noms).slice(0, 2);
-      var picks = listPicks[L.k];
-      var slots = [0, 1].map(function (i) {
-        var opts = ['<option value="">' + (i === 0 ? '— nobody —' : '— no second name —') + '</option>']
-          .concat(names.map(function (n) {
-            return '<option value="' + esc(n) + '"' + (picks[i] === n ? ' selected' : '') + '>' +
-              esc(n) + '</option>';
-          })).join('');
-        return '<select data-list="' + L.k + '" data-slot="' + i + '" aria-label="' +
-          esc(L.label) + (i === 0 ? ' — first recipient' : ' — second recipient') + '">' +
-          opts + '</select>';
+      var picks = listPicks[L.k] || [];
+      var rows = picks.map(function (n, i) {
+        return '<div class="rcpt__row">' + nameSelect(L.k, i, n, names) +
+          '<button class="rcpt__drop" type="button" data-drop="' + L.k + '" data-i="' + i +
+          '" aria-label="Remove ' + esc(n || 'recipient') + ' from ' + esc(L.label) + '">&times;</button></div>';
       }).join('');
-      var warn = (!picks.length && L.post)
-        ? '<p class="empty--post" style="margin:6px 0 0;font-size:var(--text-sm);">' +
-          'Nobody nominated — this is a post every club needs filled.</p>' : '';
+      /* Raised from the data, not authored — an empty list can never be missed
+         for a club because nobody remembered to write a flag for it. */
+      var auto = '';
+      if (!picks.length) {
+        auto = L.post
+          ? '<div class="auto"><b>Add a ' + esc(L.label.toLowerCase()) + '.</b> ' +
+            'Every club needs this post filled, and we have nobody down for it.</div>'
+          : '<div class="auto"><b>Add someone to this list.</b> ' +
+            'We have nobody to write to about ' + esc(L.label.toLowerCase()) + '.</div>';
+      }
       return '<div class="row"><dt>' + esc(L.label) +
         (L.post ? '<span class="post-tag">Required post</span>' : '') +
-        '</dt><dd><div class="pick">' + slots + '</div>' + warn +
-        flagFor('list:' + L.k) + '</dd></div>';
+        '</dt><dd><div class="rcpt">' + rows +
+        '<button class="rcpt__add" type="button" data-add="' + L.k + '">' +
+        (picks.length ? '+ Add another' : '+ Add someone') + '</button></div>' +
+        auto + flagFor('list:' + L.k) + '</dd></div>';
     }).join('');
+
+    /* An address on more than one person is almost always a departmental inbox
+       standing in for someone's own, which is what stops us reaching individuals.
+       Raised from the data so it cannot be missed. */
+    var emailCount = {};
+    people.forEach(function (p) {
+      (p.emails || []).forEach(function (em) {
+        em = (em || '').trim().toLowerCase();
+        if (em) { emailCount[em] = (emailCount[em] || 0) + 1; }
+      });
+    });
 
     /* ---- people, by department ---- */
     var bySec = {};
@@ -545,7 +605,7 @@ body { background: var(--navy-50); }
            roles must not carry a media question under their commercial entry. */
         var key = 'people:' + name + ':' + sec;
         var title = (r.title || '').trim();
-        var cts = contactsOf(p);
+        var cts = contactsOf(p, emailCount);
         var roleField = 'role:' + name + ':' + sec;
         var roleHtml = open
           ? '<input class="fld fld--role" data-field="' + esc(roleField) + '" placeholder="Job title" value="' +
@@ -560,9 +620,19 @@ body { background: var(--navy-50); }
                     .filter(Boolean).join(', ')) + '">'
           : (cts.length ? cts.join('<br>') : '<span class="empty">No contact details</span>') +
             (p.hideContact ? '<br><span class="chip">Not for publication</span>' : '');
+        var dupes = (p.emails || []).filter(function (em) {
+          return emailCount[(em || '').trim().toLowerCase()] > 1;
+        });
+        var others = dupes.length ? emailCount[dupes[0].trim().toLowerCase()] - 1 : 0;
+        var dupWarn = dupes.length && !open
+          ? '<div class="auto auto--warn"><b>' +
+            '<span class="bang" aria-hidden="true">!</span>Not ' + esc(name) +
+            '&rsquo;s own address?</b> Remove it &mdash; ' + others + ' other ' +
+            (others === 1 ? 'person lists' : 'people list') + ' it too.</div>'
+          : '';
         return '<li class="person">' +
           '<div><span class="person__name">' + esc(name) + '</span>' + roleHtml + '</div>' +
-          '<div class="person__ct">' + ctHtml + '</div>' + flagFor(key) + '</li>';
+          '<div class="person__ct">' + ctHtml + '</div>' + dupWarn + flagFor(key) + '</li>';
       }).join('');
       return '<section class="block' + (open ? ' block--editing' : '') + '"><h2>' + esc(sec) +
         ' <button class="edit" data-edit="' + esc(sec) + '" type="button">' +
@@ -598,12 +668,28 @@ body { background: var(--navy-50); }
       var k = t.getAttribute('data-list'), slot = +t.getAttribute('data-slot');
       var picks = listPicks[k] || [];
       picks[slot] = t.value;
-      listPicks[k] = picks.filter(Boolean);
-      answers['list:' + k] = listPicks[k];
+      listPicks[k] = picks;
+      answers['list:' + k] = picks.filter(Boolean);
     });
     $('app').addEventListener('click', function (ev) {
-      var b = ev.target.closest ? ev.target.closest('[data-edit]') : null;
-      if (!b) { return; }
+      if (!ev.target.closest) { return; }
+      var b = ev.target.closest('[data-edit]');
+      if (!b && !ev.target.closest('[data-add]') && !ev.target.closest('[data-drop]')) { return; }
+      var add = ev.target.closest('[data-add]');
+      if (add) {
+        var ak = add.getAttribute('data-add');
+        listPicks[ak] = (listPicks[ak] || []).concat('');
+        var ay = window.scrollY; render(); window.scrollTo(0, ay);
+        return;
+      }
+      var drop = ev.target.closest('[data-drop]');
+      if (drop) {
+        var dk = drop.getAttribute('data-drop');
+        listPicks[dk].splice(+drop.getAttribute('data-i'), 1);
+        answers['list:' + dk] = listPicks[dk];
+        var dy = window.scrollY; render(); window.scrollTo(0, dy);
+        return;
+      }
       var which = b.getAttribute('data-edit');
       editing[which] = !editing[which];
       var y = window.scrollY;
