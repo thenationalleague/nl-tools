@@ -94,7 +94,27 @@ body { background: var(--navy-50); }
 
 .block { padding: 24px 0; border-bottom: 1px solid var(--navy-100); }
 .block > h2 { margin: 0 0 14px; font-size: var(--text-xs); letter-spacing: .12em;
-  text-transform: uppercase; font-weight: 700; color: var(--navy); }
+  text-transform: uppercase; font-weight: 700; color: var(--navy);
+  display: flex; align-items: center; gap: 10px; }
+
+/* Edit affordance. Anything on the page can be wrong, not just what we
+   flagged — the pen opens a block for correction rather than making the club
+   describe the fix in prose. */
+.edit { margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 9px; font: inherit; font-size: 11px; font-weight: 650;
+  letter-spacing: .06em; text-transform: uppercase; cursor: pointer;
+  color: var(--navy); background: transparent; border: 1px solid var(--navy-200); }
+.edit:hover { background: var(--navy-50); border-color: var(--navy-400); }
+.edit:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
+.edit svg { width: 12px; height: 12px; fill: none; stroke: currentColor;
+  stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.block--editing { background: #fff; box-shadow: 0 0 0 16px #fff; }
+.block--editing .edit { color: var(--primary); border-color: var(--primary-200); }
+.fld { width: 100%; padding: 5px 8px; font: inherit; font-size: var(--text-sm);
+  background: #fff; border: 1px solid var(--navy-200); }
+.fld:focus-visible { outline: 2px solid var(--navy); outline-offset: 1px; }
+.fld--role { font-size: var(--text-sm); }
+.editnote { margin: 0 0 12px; font-size: var(--text-sm); color: var(--text-muted); }
 .block__lede { margin: -6px 0 14px; font-size: var(--text-sm); color: var(--text-muted); }
 
 .row { display: grid; grid-template-columns: 200px 1fr; gap: 4px 20px;
@@ -124,9 +144,8 @@ body { background: var(--navy-50); }
    can catch us if we got it wrong. */
 .q { grid-column: 1/-1; margin: 9px 0 2px; padding: 10px 13px; text-align: left;
   background: var(--amber-light); border: 1px solid var(--amber); }
-.q__tag { display: inline-block; margin-right: 9px; font-size: 10px; font-weight: 700;
-  letter-spacing: .1em; text-transform: uppercase; color: var(--amber-deep); }
-.q__body { font-size: var(--text-sm); }
+.q__ask { margin: 0; font-size: var(--text-sm); font-weight: 650; color: var(--amber-deep); }
+.q__why { margin: 3px 0 0; font-size: var(--text-sm); color: var(--text-muted); }
 .q textarea { display: block; width: 100%; margin-top: 9px; padding: 7px 9px;
   font: inherit; font-size: var(--text-sm); background: #fff;
   border: 1px solid var(--amber); resize: vertical; min-height: 42px; }
@@ -191,15 +210,26 @@ body { background: var(--navy-50); }
     <ul id="fixedList" class="fixed"></ul>
   </section>
 
-  <section class="block"><h2>Ground</h2><div id="ground"></div></section>
-  <section class="block"><h2>Contacting the club</h2><div id="contact"></div></section>
+  <section class="block" data-block="ground">
+    <h2>Ground <button class="edit" data-edit="ground" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/></svg>
+      Edit</button></h2>
+    <div id="ground"></div>
+  </section>
+  <section class="block" data-block="contact">
+    <h2>Contacting the club <button class="edit" data-edit="contact" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/></svg>
+      Edit</button></h2>
+    <div id="contact"></div>
+  </section>
 
   <section class="block">
     <h2>Who we write to</h2>
-    <p class="block__lede">The people who receive our mailing list on each subject.
-      This is a list of recipients, not a statement of who runs what &mdash; one name is
-      fine, two is the most we&rsquo;ll hold. The five marked as required posts are
-      positions every club needs to have filled.</p>
+    <p class="block__lede">Always editable &mdash; change a name and it saves with your reply.
+      These are the people who receive our mailing list on each subject.
+      A list of recipients, not a statement of who runs what. One name is fine, two
+      is the most we&rsquo;ll hold. The five marked as required posts are positions every
+      club needs filled.</p>
     <div id="lists"></div>
   </section>
 
@@ -249,6 +279,9 @@ body { background: var(--navy-50); }
 
   var token = new URLSearchParams(location.search).get('t') || '';
   var club = '', sub = null, cfg = {}, answers = {}, listPicks = {};
+  /* editing: which blocks are open. edits: corrections the club has typed,
+     keyed by field for club info and by person + section for role titles. */
+  var editing = {}, edits = {}, wired = false;
 
   function $(id) { return document.getElementById(id); }
   var esc = NL.escHtml;
@@ -282,6 +315,7 @@ body { background: var(--navy-50); }
       return;
     }
     if (prior && prior.answers) { answers = prior.answers; }
+    if (prior && prior.edits) { edits = prior.edits; }
     sub = applyFixes(sub, cfg.apply);
     render();
   }).catch(function (err) {
@@ -290,19 +324,40 @@ body { background: var(--navy-50); }
   });
 
   /* ------------------------------------------------------------ helpers */
+  /* A flag leads with the instruction and puts the reason underneath, so it
+     scans as a to-do rather than a paragraph to read. Accepts either the
+     { ask, why } form or a bare string for anything not yet rewritten. */
   function flagFor(key) {
     var q = (cfg.check || {})[key];
     if (!q) { return ''; }
-    return '<div class="q"><span class="q__tag">Check</span>' +
-      '<span class="q__body">' + q + '</span>' +
-      '<textarea data-answer="' + esc(key) + '" placeholder="Your answer">' +
+    var ask = typeof q === 'string' ? q : (q.ask || '');
+    var why = typeof q === 'string' ? '' : (q.why || '');
+    return '<div class="q"><p class="q__ask">' + ask + '</p>' +
+      (why ? '<p class="q__why">' + why + '</p>' : '') +
+      '<textarea data-answer="' + esc(key) + '" placeholder="Your reply">' +
       esc(answers[key] || '') + '</textarea></div>';
   }
 
-  function row(label, value, key) {
-    return '<div class="row"><dt>' + esc(label) + '</dt><dd>' +
-      (value || '<span class="empty">Not held</span>') +
+  function row(label, value, key, field, raw) {
+    var body;
+    if (field && editing[fieldBlock(field)]) {
+      body = '<input class="fld" data-field="' + esc(field) + '" value="' +
+        esc(edits[field] !== undefined ? edits[field] : (raw || '')) + '">';
+    } else {
+      body = value || '<span class="empty">Not held</span>';
+    }
+    return '<div class="row"><dt>' + esc(label) + '</dt><dd>' + body +
       (key ? flagFor(key) : '') + '</dd></div>';
+  }
+
+  /* Which block a field belongs to, so opening one pen doesn't open them all. */
+  function num(v) {
+    v = String(v == null ? '' : v).trim();
+    return /^\d+$/.test(v) ? Number(v).toLocaleString('en-GB') : esc(v);
+  }
+
+  function fieldBlock(field) {
+    return ['phone', 'mainEmail', 'website'].indexOf(field) > -1 ? 'contact' : 'ground';
   }
 
   function contactsOf(p) {
@@ -401,24 +456,31 @@ body { background: var(--navy-50); }
     var ground = (info.stadium || '').trim();
     var addr = [info.addr1, info.addr2, info.town, info.county, info.postcode]
       .filter(function (x) { return (x || '').trim(); }).map(esc).join(', ');
-    function num(v) {
-      v = String(v == null ? '' : v).trim();
-      return /^\d+$/.test(v) ? Number(v).toLocaleString('en-GB') : esc(v);
-    }
     var cap = (info.capacity || '').trim(), seat = (info.seated || '').trim();
     var capHtml = cap ? num(cap) : '';
-    if (capHtml && seat) { capHtml += ' <span class="muted">of which ' + num(seat) + ' seated</span>'; }
+    if (capHtml && seat && !editing.ground) {
+      capHtml += ' <span class="muted">of which ' + num(seat) + ' seated</span>';
+    }
+
+    document.querySelector('[data-block="ground"]').classList.toggle('block--editing', !!editing.ground);
+    document.querySelector('[data-block="contact"]').classList.toggle('block--editing', !!editing.contact);
+    document.querySelector('[data-edit="ground"]').lastChild.textContent = editing.ground ? 'Done' : 'Edit';
+    document.querySelector('[data-edit="contact"]').lastChild.textContent = editing.contact ? 'Done' : 'Edit';
 
     $('ground').innerHTML =
       row('Ground', spons ? '<b>' + esc(spons) + '</b><br><span class="muted">' + esc(ground) + '</span>'
-                          : esc(ground), 'info:stadium') +
-      row('Address', addr, 'info:address') +
-      row('Capacity', capHtml, 'info:capacity') +
-      row('Pitch', [info.pitchDims, info.pitchType].filter(Boolean).map(esc).join(' · '), 'info:pitch') +
+                          : esc(ground), 'info:stadium', 'stadium', ground) +
+      row('Address', addr, 'info:address', 'addr1', info.addr1) +
+      (editing.ground ? row('Postcode', '', null, 'postcode', info.postcode) : '') +
+      row('Capacity', capHtml, 'info:capacity', 'capacity', info.capacity) +
+      (editing.ground ? row('Seated', '', null, 'seated', info.seated) : '') +
+      row('Pitch', [info.pitchDims, info.pitchType].filter(Boolean).map(esc).join(' · '),
+        'info:pitch', 'pitchDims', info.pitchDims) +
       row('Nearest station', esc(info.station || '') +
-        (info.stationDistance ? ' <span class="muted">' + esc(info.stationDistance) + ' miles</span>' : '')) +
-      row('County FA', esc(info.countyFA || ''), 'info:countyFA') +
-      row('Main club sponsor', esc(info.spClub || ''), 'info:spClub');
+        (info.stationDistance ? ' <span class="muted">' + esc(info.stationDistance) + ' miles</span>' : ''),
+        null, 'station', info.station) +
+      row('County FA', esc(info.countyFA || ''), 'info:countyFA', 'countyFA', info.countyFA) +
+      row('Main club sponsor', esc(info.spClub || ''), 'info:spClub', 'spClub', info.spClub);
 
     /* ---- contacting ---- */
     var SOC = [['x', 'X'], ['facebook', 'Facebook'], ['instagram', 'Instagram'],
@@ -430,11 +492,12 @@ body { background: var(--navy-50); }
     var site = (info.website || '').replace(/^https?:\/\//, '');
 
     $('contact').innerHTML =
-      row('Switchboard', esc(info.phone || ''), 'info:phone') +
+      row('Switchboard', esc(info.phone || ''), 'info:phone', 'phone', info.phone) +
       row('Main email', info.mainEmail
         ? '<a href="mailto:' + esc(info.mainEmail) + '">' + esc(info.mainEmail) + '</a>' : '',
-        'info:mainEmail') +
-      row('Website', site ? '<a href="https://' + esc(site) + '">' + esc(site) + '</a>' : '') +
+        'info:mainEmail', 'mainEmail', info.mainEmail) +
+      row('Website', site ? '<a href="https://' + esc(site) + '">' + esc(site) + '</a>' : '',
+        null, 'website', info.website) +
       row('Social', soc, 'info:social');
 
     /* ---- mailing lists ---- */
@@ -475,6 +538,7 @@ body { background: var(--navy-50); }
     });
 
     $('sections').innerHTML = ORDER.filter(function (s) { return bySec[s]; }).map(function (sec) {
+      var open = !!editing[sec];
       var items = bySec[sec].map(function (pair) {
         var p = pair[0], r = pair[1], name = fullName(p);
         /* Anchor the query to the role, not the person — someone holding two
@@ -482,16 +546,29 @@ body { background: var(--navy-50); }
         var key = 'people:' + name + ':' + sec;
         var title = (r.title || '').trim();
         var cts = contactsOf(p);
+        var roleField = 'role:' + name + ':' + sec;
+        var roleHtml = open
+          ? '<input class="fld fld--role" data-field="' + esc(roleField) + '" placeholder="Job title" value="' +
+            esc(edits[roleField] !== undefined ? edits[roleField] : title) + '">'
+          : (title ? '<span class="person__role">' + esc(title) + '</span>'
+                   : '<span class="person__role person__role--none">No title held</span>');
+        var ctField = 'contact:' + name;
+        var ctHtml = open
+          ? '<input class="fld" data-field="' + esc(ctField) + '" placeholder="Email or phone" value="' +
+            esc(edits[ctField] !== undefined ? edits[ctField]
+                : (p.emails || []).concat((p.phones || []).map(function (x) { return x.number; }))
+                    .filter(Boolean).join(', ')) + '">'
+          : (cts.length ? cts.join('<br>') : '<span class="empty">No contact details</span>') +
+            (p.hideContact ? '<br><span class="chip">Not for publication</span>' : '');
         return '<li class="person">' +
-          '<div><span class="person__name">' + esc(name) + '</span>' +
-          (title ? '<span class="person__role">' + esc(title) + '</span>'
-                 : '<span class="person__role person__role--none">No title held</span>') +
-          '</div><div class="person__ct">' +
-          (cts.length ? cts.join('<br>') : '<span class="empty">No contact details</span>') +
-          (p.hideContact ? '<br><span class="chip">Not for publication</span>' : '') +
-          '</div>' + flagFor(key) + '</li>';
+          '<div><span class="person__name">' + esc(name) + '</span>' + roleHtml + '</div>' +
+          '<div class="person__ct">' + ctHtml + '</div>' + flagFor(key) + '</li>';
       }).join('');
-      return '<section class="block"><h2>' + esc(sec) + '</h2>' +
+      return '<section class="block' + (open ? ' block--editing' : '') + '"><h2>' + esc(sec) +
+        ' <button class="edit" data-edit="' + esc(sec) + '" type="button">' +
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/></svg>' +
+        (open ? 'Done' : 'Edit') + '</button></h2>' +
+        (open ? '<p class="editnote">Correct anything that&rsquo;s wrong. Changes save with your reply.</p>' : '') +
         '<ul class="people">' + items + '</ul></section>';
     }).join('');
 
@@ -501,7 +578,7 @@ body { background: var(--navy-50); }
 
     $('gate').style.display = 'none';
     $('app').style.display = '';
-    wire();
+    if (!wired) { wire(); wired = true; }
   }
 
   /* ------------------------------------------------------------ input */
@@ -510,6 +587,9 @@ body { background: var(--navy-50); }
       var t = ev.target;
       if (t.hasAttribute && t.hasAttribute('data-answer')) {
         answers[t.getAttribute('data-answer')] = t.value;
+      }
+      if (t.hasAttribute && t.hasAttribute('data-field')) {
+        edits[t.getAttribute('data-field')] = t.value;
       }
     });
     $('app').addEventListener('change', function (ev) {
@@ -520,6 +600,15 @@ body { background: var(--navy-50); }
       picks[slot] = t.value;
       listPicks[k] = picks.filter(Boolean);
       answers['list:' + k] = listPicks[k];
+    });
+    $('app').addEventListener('click', function (ev) {
+      var b = ev.target.closest ? ev.target.closest('[data-edit]') : null;
+      if (!b) { return; }
+      var which = b.getAttribute('data-edit');
+      editing[which] = !editing[which];
+      var y = window.scrollY;
+      render();
+      window.scrollTo(0, y);
     });
     $('confirmBtn').addEventListener('click', function () { save('confirmed'); });
     $('changeBtn').addEventListener('click', function () { save('changes'); });
@@ -532,6 +621,7 @@ body { background: var(--navy-50); }
       club: club,
       status: status,
       answers: answers,
+      edits: edits,
       respondedAt: firebase.database.ServerValue.TIMESTAMP
     }).then(function () {
       $('finishMsg').textContent = status === 'confirmed'
