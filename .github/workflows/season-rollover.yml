@@ -1,0 +1,44 @@
+name: Season rollover
+
+# Flips seasons.current in clubs-meta.json to the new season each summer.
+# The file stays the single source of truth; widgets and skills derive the
+# season from it, so nothing else needs a manual edit when the season turns.
+
+on:
+  schedule:
+    # 02:00 UTC on 1 July every year — dead centre of the off-season.
+    - cron: "0 2 1 7 *"
+  workflow_dispatch:
+    inputs:
+      year:
+        description: "Season first-year to set (blank = current UTC year)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  bump-season:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Bump seasons.current
+        id: bump
+        run: |
+          if [ -n "${{ github.event.inputs.year }}" ]; then
+            python3 scripts/bump-season.py --year "${{ github.event.inputs.year }}"
+          else
+            python3 scripts/bump-season.py
+          fi
+
+      - name: Commit and push if changed
+        if: steps.bump.outputs.changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/data/clubs-meta.json
+          git commit -m "chore: roll season to ${{ steps.bump.outputs.current }} [automated]"
+          git push
