@@ -1,10 +1,15 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixtures
-  Version: v0.9 (30/07/2026)
+  Version: v0.10 (30/07/2026)
   File: /fixtures/index.html
 
   CHANGELOG
+    v0.10 (30/07/2026) — Travel table (distance + drive time, keyed on
+      the club pair, pasted as its own lookup). Extra time and penalties
+      behind a disclosure in the Result dialog, with penalties usable
+      WITHOUT extra time because the NL Cup goes straight to a shootout.
+      Hover no longer turns every row the same blue as NL South.
     v0.9 (30/07/2026) — Broadcast block: Broadcast, Production, AMI and
       DAZN-moved, importable and editable. Stored in its own staff-only
       RTDB node because fixtures are readable by any signed-in user and
@@ -120,6 +125,15 @@
     var NL_TOOL_KEY = 'ops-fixtures';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/07/2026',
+        version: 'v0.10',
+        items: [
+          'Travel table: paste the distance and drive-time lookup once and every fixture between those clubs shows it, including rearranged ones and cup ties. Under Travel table, next to Export.',
+          'Extra time and penalties can be recorded, folded away in the Result dialog unless the tie went that far. Penalties can be entered without extra time \u2014 the NL Cup goes straight to a shootout.',
+          'Hovering a row no longer turns it the same blue as a National League South game. Each competition now darkens its own shade.'
+        ]
+      },
       {
         date: '30/07/2026',
         version: 'v0.9',
@@ -242,6 +256,17 @@
     --comp-nlcup:    #f6f0fa;
     --comp-facup:    #fdeff1;
     --comp-fatrophy: #f3f4f6;
+    /* Hover darkens a row's OWN tint by ~6%. Canon's hover is a flat
+       --off-white (#f4f6f9), which is within a hair of --comp-south
+       (#eff4fc) — so hovering any row made it look like a National League
+       South game. Keeping the hue and dropping the value says "this row"
+       instead of "a different competition". */
+    --comp-national-hover: #eee5de;
+    --comp-north-hover:    #eeecdc;
+    --comp-south-hover:    #e1e5ed;
+    --comp-nlcup-hover:    #e7e2eb;
+    --comp-facup-hover:    #eee1e3;
+    --comp-fatrophy-hover: #e4e5e7;
   }
   tr.fx-national  td { background-color: var(--comp-national); }
   tr.fx-north     td { background-color: var(--comp-north); }
@@ -274,7 +299,16 @@
   .table tbody tr.fx-compbreak td { border-top: 1px solid var(--navy-300); }
   .table tbody tr.fx-datebreak td { border-top: 2px solid var(--navy-400); }
   .table tbody tr:first-child td { border-top: none; }
-  .table tbody tr:hover td { background-color: var(--off-white); }
+  /* !important is required, not decorative: canon sets `.table tr:hover td`
+     with !important, so an ordinary rule here loses however specific it is.
+     Equal specificity plus !important resolves on source order, and this
+     sheet loads after the brand. */
+  .table tbody tr.fx-national:hover  td { background-color: var(--comp-national-hover) !important; }
+  .table tbody tr.fx-north:hover     td { background-color: var(--comp-north-hover) !important; }
+  .table tbody tr.fx-south:hover     td { background-color: var(--comp-south-hover) !important; }
+  .table tbody tr.fx-nlcup:hover     td { background-color: var(--comp-nlcup-hover) !important; }
+  .table tbody tr.fx-facup:hover     td { background-color: var(--comp-facup-hover) !important; }
+  .table tbody tr.fx-fatrophy:hover  td { background-color: var(--comp-fatrophy-hover) !important; }
 
   /* Home reads inward, away reads outward, so the crests meet either side
      of the middle and the eye lands on the fixture.
@@ -412,6 +446,16 @@
                     padding: 8px; font-variant-numeric: tabular-nums; }
   .fx-score__dash { font-size: 20px; font-variation-settings: 'wght' 900;
                     color: var(--text-muted); padding-bottom: 9px; }
+  .fx-score--sm input { font-size: 16px; padding: 6px; }
+  .fx-score--sm .fx-score__dash { font-size: 15px; padding-bottom: 7px; }
+  .fx-xtra { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 11px; }
+  .fx-xtra summary { font-size: 11.5px; font-variation-settings: 'wght' 800; letter-spacing: .05em;
+                     text-transform: uppercase; color: var(--text-muted); cursor: pointer; }
+  .fx-xtra .fx-score { margin: 10px 0 0; }
+  /* Marks a score that was not settled in 90 minutes, without spending the
+     width a full "(1-1 aet, 4-3 p)" would cost in a 62px column. */
+  .fx-xt { font-size: 9.5px; font-variation-settings: 'wght' 800; letter-spacing: .04em;
+           color: var(--text-muted); margin-left: 3px; vertical-align: 2px; }
 
   /* Import wizard */
   .fx-steps { display: flex; gap: 6px; margin: 0 0 16px; font-size: 11px;
@@ -473,6 +517,7 @@
       </div>
       <div class="fx-bar__right">
         <span class="fx-season" id="fxSub"></span>
+        <button type="button" class="btn btn--ghost btn--sm" id="fxPairs">Travel table</button>
         <button type="button" class="btn btn--ghost btn--sm" id="fxExport">Export</button>
         <button type="button" class="btn btn--primary btn--sm" id="fxImport">Import fixtures</button>
       </div>
@@ -552,7 +597,7 @@
   var BASE = 'app-data/ops-fixtures';
   var S = {
     season: null, session: null, role: null, isClub: false, club: null,
-    fixtures: {}, history: {}, notes: {}, bcast: {},
+    fixtures: {}, history: {}, notes: {}, bcast: {}, pairs: {},
     tab: 'all', comps: {}, venue: 'all', md: '', club1: null,
     picker: null, booted: false
   };
@@ -710,6 +755,9 @@
       jobs.push(db.ref(seasonPath('broadcast')).once('value')
         .then(function (s) { S.bcast = s.val() || {}; })
         .catch(function () { S.bcast = {}; }));
+      jobs.push(db.ref(seasonPath('pairings')).once('value')
+        .then(function (s) { S.pairs = s.val() || {}; })
+        .catch(function () { S.pairs = {}; }));
     }
     return Promise.all(jobs);
   }
@@ -779,7 +827,12 @@
     if (f.status === 'postponed') return '<td class="fx-c-state ta-center fx-state fx-state--pp">P&ndash;P</td>';
     if (f.status === 'abandoned') return '<td class="fx-c-state ta-center fx-state fx-state--aa">A&ndash;A</td>';
     if (f.homeScore != null && f.awayScore != null) {
-      return '<td class="fx-c-state ta-center fx-state fx-state--score">' + f.homeScore + '&ndash;' + f.awayScore + '</td>';
+      return '<td class="fx-c-state ta-center fx-state fx-state--score">' + f.homeScore + '&ndash;' + f.awayScore +
+        /* Both markers when both apply. Penalties do NOT imply extra time:
+           the NL Cup goes straight to a shootout for the bonus point, so
+           "p" on its own is a real and common state. */
+        (f.aetHome != null ? '<span class="fx-xt">aet</span>' : '') +
+        (f.penHome != null ? '<span class="fx-xt">p</span>' : '') + '</td>';
     }
     return '<td class="fx-c-state ta-center fx-state">' + clock(f.kickoff) + '</td>';
   }
@@ -1069,11 +1122,33 @@
           (f.homeScore == null ? '' : f.homeScore) + '"></label>' +
         '<span class="fx-score__dash">&ndash;</span>' +
         '<label><span>' + esc(f.away) + '</span><input type="number" id="fxAS" min="0" max="99" value="' +
-          (f.awayScore == null ? '' : f.awayScore) + '"></label></div>',
+          (f.awayScore == null ? '' : f.awayScore) + '"></label></div>' +
+        /* Folded away: extra time and penalties apply to a handful of cup ties
+           a season, and a league result should not have to walk past four
+           empty boxes. Opens itself only when there is already something in
+           them. */
+        '<details class="fx-xtra"' + (f.aetHome != null || f.penHome != null ? ' open' : '') + '>' +
+        '<summary>Extra time / penalties</summary>' +
+        '<div class="fx-score fx-score--sm">' +
+        '<label><span>AET ' + esc(f.home) + '</span><input type="number" id="fxAetH" min="0" max="99" value="' +
+          (f.aetHome == null ? '' : f.aetHome) + '"></label>' +
+        '<span class="fx-score__dash">&ndash;</span>' +
+        '<label><span>AET ' + esc(f.away) + '</span><input type="number" id="fxAetA" min="0" max="99" value="' +
+          (f.aetAway == null ? '' : f.aetAway) + '"></label></div>' +
+        '<div class="fx-score fx-score--sm">' +
+        '<label><span>Pens ' + esc(f.home) + '</span><input type="number" id="fxPenH" min="0" max="99" value="' +
+          (f.penHome == null ? '' : f.penHome) + '"></label>' +
+        '<span class="fx-score__dash">&ndash;</span>' +
+        '<label><span>Pens ' + esc(f.away) + '</span><input type="number" id="fxPenA" min="0" max="99" value="' +
+          (f.penAway == null ? '' : f.penAway) + '"></label></div>' +
+        '<p class="form-hint">Leave blank unless the tie went that far. The score above stays the ' +
+        '90-minute score. Penalties can be filled in without extra time &mdash; the NL Cup goes ' +
+        'straight to a shootout.</p>' +
+        '</details>',
       footerSplit: true,
       buttons: [
         { label: 'Abandoned', className: 'btn btn--ghost', onClick: function (c) {
-            f.status = 'abandoned'; f.homeScore = null; f.awayScore = null;
+            f.status = 'abandoned'; clearScores(f);
             saveFixture(f).then(function () {
               NL.writeAudit('fixture_abandoned', { recordID: f.recordID });
               c.close(); render(); NL.toast('Marked abandoned', 'success');
@@ -1083,10 +1158,24 @@
         { label: 'Save', className: 'btn btn--primary', autofocus: true, onClick: function (c) {
             var h = $('fxHS').value, a = $('fxAS').value;
             if (h === '' || a === '') { NL.toast('Enter both scores', 'info'); return; }
+            /* A half-entered pair is worse than none: it would render as
+               "3-null aet". Both or neither. */
+            var pair = function (hi, ai, label) {
+              var x = $(hi).value, y = $(ai).value;
+              if (x === '' && y === '') return [null, null];
+              if (x === '' || y === '') { NL.toast('Enter both ' + label + ' scores, or neither', 'info'); return null; }
+              return [+x, +y];
+            };
+            var aet = pair('fxAetH', 'fxAetA', 'extra-time');
+            if (!aet) return;
+            var pen = pair('fxPenH', 'fxPenA', 'penalty');
+            if (!pen) return;
             var commit = function () {
               f.homeScore = +h; f.awayScore = +a; f.status = 'played';
+              f.aetHome = aet[0]; f.aetAway = aet[1];
+              f.penHome = pen[0]; f.penAway = pen[1];
               saveFixture(f).then(function () {
-                NL.writeAudit('fixture_result', { recordID: f.recordID, score: h + '-' + a });
+                NL.writeAudit('fixture_result', { recordID: f.recordID, score: scoreText(f) });
                 c.close(); render(); NL.toast('Result saved', 'success');
               });
             };
@@ -1112,7 +1201,7 @@
     var was = f.status;
     var entry = { type: 'corrected', from: was, to: 'scheduled', effectiveAt: null,
                   recordedAt: stamp(), by: S.session && S.session.uid || null, reasonCode: null };
-    f.status = 'scheduled'; f.homeScore = null; f.awayScore = null;
+    f.status = 'scheduled'; clearScores(f);
     Promise.all([saveFixture(f), appendHistory(f.recordID, entry)]).then(function () {
       NL.writeAudit('fixture_reinstated', { recordID: f.recordID, was: was });
       render();
@@ -1124,7 +1213,7 @@
      rather than erasing anything, so "there was a score here once and it was
      taken off" stays visible. */
   function clearResult(f) {
-    var was = f.homeScore + '–' + f.awayScore;
+    var was = scoreText(f);
     NL.confirm(f.home + ' ' + was + ' ' + f.away, {
       title: 'Remove this result?',
       detail: 'The fixture goes back to showing its kick-off time. The removal is kept in the history.',
@@ -1133,7 +1222,7 @@
       if (!ok) return;
       var entry = { type: 'corrected', from: 'played', to: 'scheduled', effectiveAt: null,
                     recordedAt: stamp(), by: (S.session && S.session.uid) || null, reasonCode: null };
-      f.status = 'scheduled'; f.homeScore = null; f.awayScore = null;
+      f.status = 'scheduled'; clearScores(f);
       Promise.all([saveFixture(f), appendHistory(f.recordID, entry)]).then(function () {
         NL.writeAudit('fixture_result_removed', { recordID: f.recordID, was: was });
         render(); NL.toast('Result removed', 'success');
@@ -1180,6 +1269,23 @@
         render(); NL.toast(f.optaID ? 'Opta ID saved' : 'Opta ID cleared', 'success');
       });
     });
+  }
+
+  /* The sheet's own convention: 2-1 (1-1 aet, 4-3 p). Reproduced rather than
+     invented so anything exported lines up with what Richard already writes. */
+  function scoreText(f) {
+    if (f.homeScore == null || f.awayScore == null) return '';
+    var s = f.homeScore + '\u2013' + f.awayScore, extra = [];
+    if (f.aetHome != null) extra.push(f.aetHome + '\u2013' + f.aetAway + ' aet');
+    if (f.penHome != null) extra.push(f.penHome + '\u2013' + f.penAway + ' p');
+    return s + (extra.length ? ' (' + extra.join(', ') + ')' : '');
+  }
+
+  /* One place that knows a result is six numbers, not two. */
+  function clearScores(f) {
+    f.homeScore = null; f.awayScore = null;
+    f.aetHome = null; f.aetAway = null;
+    f.penHome = null; f.penAway = null;
   }
 
   function historyBlock(f) {
@@ -1282,6 +1388,13 @@
       '<dt>Opta match ID</dt><dd>' + optaCell(f) + '</dd>' +
       (f.optaID === f.recordID ? '' : '<dt>Record ID</dt><dd>' + esc(f.recordID) + '</dd>') +
       (f.matchday ? '<dt>Matchday</dt><dd>' + esc(f.matchday) + '</dd>' : '') +
+      (function () {
+        var pr = pairOf(f);
+        if (!pr) return '';
+        return '<dt>Away travel</dt><dd>' +
+          (pr.miles ? esc(pr.miles) + ' miles' : '') +
+          (pr.miles && pr.mins ? ' &middot; ' : '') + esc(driveText(pr.mins)) + '</dd>';
+      }()) +
       '<dt>Originally</dt><dd>' + whenStr(f.originalDate || f.date, f.originalKickoff || f.kickoff) + '</dd>' +
       '<dt>Season</dt><dd>' + esc(NL.season.label(NL.clubs.meta(), S.season) || S.season) + '</dd>' +
       '</dl></details>';
@@ -1384,6 +1497,30 @@
     return s === 'enhanced' || normTick(v, self);
   }
   function bcastOf(id) { return S.bcast[id] || null; }
+
+  /* ---- Pairings --------------------------------------------------------
+     Distance and drive time belong to the PAIR of clubs, not the fixture:
+     the same Billericay-to-Dover trip is the same trip whether the game is
+     played in August or moved to March, and whether it is a league fixture
+     or a cup tie. Stored once per ordered pair and looked up at render
+     time, so a rearrangement never needs it re-imported.
+
+     Keyed on 3-letter club codes where clubs-meta knows them, which are
+     guaranteed safe as RTDB keys; anything else falls back to a sanitised
+     name so a non-League opponent still works. */
+  function clubKey(name) {
+    var c = NL.clubs.byName(name);
+    if (c && c.code) return c.code;
+    return String(name || '').replace(/[.$#\[\]\/]/g, '').replace(/\s+/g, '-').toUpperCase().slice(0, 24);
+  }
+  function pairKey(home, away) { return clubKey(home) + '_' + clubKey(away); }
+  function pairOf(f) { return S.pairs[pairKey(f.home, f.away)] || null; }
+  /* 81 -> "1h 21m". Minutes alone stop being readable somewhere around 90. */
+  function driveText(mins) {
+    var m = Math.round(+mins || 0);
+    if (!m) return '';
+    return m < 60 ? m + ' mins' : Math.floor(m / 60) + 'h ' + (m % 60 ? (m % 60) + 'm' : '00m');
+  }
 
   /* Excel pastes are tab-separated; a saved file is CSV. Pick whichever the
      first line has more of, then hand CSV to the canon parser. */
@@ -1747,6 +1884,89 @@
     });
   }
 
+  function isNum(v) {
+    var t = String(v == null ? '' : v).replace(/[^0-9.]/g, '');
+    return t !== '' && isFinite(+t);
+  }
+
+  /* Paste the travel lookup: one row per ordered club pair. Its own dialog
+     rather than a mode of the fixture importer — different shape, different
+     lifetime. It changes when a club moves ground, not when a game moves,
+     which is exactly why it is a lookup and not a fixture field. */
+  function importPairs() {
+    var ctrl = NL.modal({
+      title: 'Travel table', width: 'wide',
+      body: '<p class="text-secondary" style="margin:0 0 10px;">One row per pairing: ' +
+        '<strong>home club, away club, miles, minutes</strong>. Paste straight from Excel ' +
+        'or as CSV; a header row is detected and skipped.</p>' +
+        '<div class="fx-needs"><code>Home team</code><code>Away team</code>' +
+        '<code>Distance (miles)</code><code>Distance (minutes)</code></div>' +
+        '<div class="form-group"><textarea id="fxPairText" rows="9" spellcheck="false" ' +
+        'placeholder="Home team&#9;Away team&#9;Distance (miles)&#9;Distance (minutes)&#10;' +
+        'Billericay Town&#9;Dover Athletic&#9;76.10&#9;81"></textarea></div>' +
+        '<div id="fxPairOut"></div>',
+      buttons: [
+        { label: 'Cancel', className: 'btn btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Import', className: 'btn btn--primary', onClick: function (c) {
+            var rows = pairRows(ctrl.body.querySelector('#fxPairText').value);
+            var updates = {}, bad = 0, unknown = {};
+            rows.forEach(function (r) {
+              var home = (r[0] || '').trim(), away = (r[1] || '').trim();
+              if (!home || !away || (!isNum(r[2]) && !isNum(r[3]))) { bad++; return; }
+              if (!NL.clubs.byName(home)) unknown[home] = 1;
+              if (!NL.clubs.byName(away)) unknown[away] = 1;
+              updates[pairKey(home, away)] = {
+                home: home, away: away,
+                miles: isNum(r[2]) ? +String(r[2]).replace(/[^0-9.]/g, '') : null,
+                mins:  isNum(r[3]) ? Math.round(+String(r[3]).replace(/[^0-9.]/g, '')) : null
+              };
+            });
+            var n = Object.keys(updates).length;
+            if (!n) { NL.toast('No usable rows \u2014 check the column order', 'error'); return; }
+            try {
+              firebase.database().ref(seasonPath('pairings')).update(updates).then(function () {
+                Object.keys(updates).forEach(function (k) { S.pairs[k] = updates[k]; });
+                NL.writeAudit('fixture_pairings_import', { count: n });
+                c.close(); render();
+                NL.toast(n + ' pairing' + (n === 1 ? '' : 's') + ' saved' +
+                  (bad ? ' \u00b7 ' + bad + ' row' + (bad === 1 ? '' : 's') + ' skipped' : ''), 'success');
+                var u = Object.keys(unknown);
+                if (u.length) {
+                  NL.toast(u.length + ' club name' + (u.length === 1 ? '' : 's') +
+                    ' not in the League list, kept as typed: ' + u.slice(0, 3).join(', ') +
+                    (u.length > 3 ? '\u2026' : ''), 'info');
+                }
+              }).catch(function (e) { NL.toast('Could not save \u2014 ' + ((e && e.message) || e), 'error'); });
+            } catch (e) { NL.toast('Could not save \u2014 ' + ((e && e.message) || e), 'error'); }
+          } }
+      ]
+    });
+    /* Live count while pasting, so a wrong column order shows up before the
+       import rather than after it. */
+    var ta = ctrl.body.querySelector('#fxPairText');
+    ta.addEventListener('input', function () {
+      var rows = pairRows(ta.value), r0 = rows[0];
+      var ok = rows.filter(function (r) {
+        return (r[0] || '').trim() && (r[1] || '').trim() && (isNum(r[2]) || isNum(r[3]));
+      }).length;
+      ctrl.body.querySelector('#fxPairOut').innerHTML = rows.length
+        ? '<p class="form-hint">' + ok + ' of ' + rows.length + ' rows readable' +
+          (r0 ? ' &middot; first: <strong>' + esc((r0[0] || '?') + ' \u2192 ' + (r0[1] || '?')) + '</strong>, ' +
+            /* Parse before showing: the cell often reads "76.10 miles", and
+               echoing it raw gives "76.10 miles miles". */
+            esc(isNum(r0[2]) ? +String(r0[2]).replace(/[^0-9.]/g, '') : '?') + ' miles, ' +
+            esc(driveText(r0[3]) || '?') : '') + '</p>'
+        : '';
+    });
+  }
+  /* Shares the fixture importer's tab-or-CSV sniffing, then drops a header
+     row — detected as "the number columns are not numbers". */
+  function pairRows(raw) {
+    var rows = splitRows(raw);
+    if (rows.length && !(isNum(rows[0][2]) && isNum(rows[0][3]))) rows = rows.slice(1);
+    return rows;
+  }
+
   /* ---- Wiring ---------------------------------------------------------- */
   function wire() {
     $('fxCompPills').innerHTML = COMPS.map(function (c) {
@@ -1813,6 +2033,8 @@
 
     var imp = $('fxImport');
     if (canEdit()) imp.addEventListener('click', impStep1); else imp.hidden = true;
+    var prs = $('fxPairs');
+    if (canEdit()) prs.addEventListener('click', importPairs); else prs.hidden = true;
   }
 }());
 </script>
