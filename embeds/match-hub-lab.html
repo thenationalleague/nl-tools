@@ -157,9 +157,9 @@ window.__DATA__ = {
       <button class="lab__btn" data-state="tease">Focus · tease</button>
       <button class="lab__btn" data-state="reveal">Focus · reveal</button>
     </div>
-    <div class="lab__group"><span class="lab__lbl">Variant</span>
-      <button class="lab__btn is-on" data-variant="stems">Rails + stems</button>
-      <button class="lab__btn" data-variant="nostems">Rails, dots only</button>
+    <div class="lab__group"><span class="lab__lbl">Layout</span>
+      <button class="lab__btn is-on" data-layout="onmap">On map + stems</button>
+      <button class="lab__btn" data-layout="rails">Rails (previous)</button>
     </div>
     <div class="lab__group"><span class="lab__lbl">Hero</span>
       <button class="lab__btn is-on" data-hero="a">A · Lower third</button>
@@ -176,7 +176,7 @@ window.__DATA__ = {
     </div>
     <div class="lab__hero" id="labHero" hidden></div>
   </div>
-  <div class="lab__note" id="labNote">Full map — dots mark every ground's true location; scoreboards dock in the side rails, north to south.</div>
+  <div class="lab__note" id="labNote">Full map — dots mark every ground's true location; each scoreboard floats beside its dot on a short stem, and no stem ever runs beneath another card.</div>
 </div>
 
 <style>
@@ -337,7 +337,13 @@ function buildMap(){
   layout();
 }
 
-// RAILS: anchors at true geography; boards dock left/right, ordered N→S
+// Two layout modes. Both anchor a dot at TRUE geography.
+//   onmap — boards float on the map near their dots; the solver keeps
+//           boards apart AND keeps every stem clear of foreign boards
+//           (stems never underlap a card), with a spring holding each
+//           board tight to its dot so stems stay short.
+//   rails — the earlier docked-columns treatment, kept for comparison.
+var LAYOUT="onmap";
 function layout(){
   var stage=$("labStage"),W=stage.clientWidth,H=stage.clientHeight;
   if(!W||!H){requestAnimationFrame(layout);return;}
@@ -349,9 +355,68 @@ function layout(){
     var board=el.querySelector(".lab__board");
     return {el:el,ax:ox+q.nx*mw,ay:oy+q.ny*mh,w:(board&&board.offsetWidth)||96,h:((board&&board.offsetHeight)||26)};
   }).filter(Boolean);
+  if(LAYOUT==="onmap") placeOnMap(nodes,W,H); else placeRails(nodes,W,H);
+  nodes.forEach(function(n){
+    n.el.style.left=(n.ax/W*100).toFixed(3)+"%";
+    n.el.style.top=(n.ay/H*100).toFixed(3)+"%";
+    var wrap=n.el.querySelector(".lab__wrap");
+    var dx=n.x-n.ax,dy=n.y-n.ay;
+    wrap.style.setProperty("--ox",dx.toFixed(1)+"px");
+    wrap.style.setProperty("--oy",dy.toFixed(1)+"px");
+    // stem stops at the board's own edge (never drawn beneath its card)
+    var adx=Math.abs(dx),ady=Math.abs(dy);
+    var cut=Math.min(adx>0.01?(n.w/2)/adx:1, ady>0.01?(n.h/2)/ady:1, 1);
+    var ex=dx*(1-cut), ey=dy*(1-cut);
+    var stem=n.el.querySelector(".lab__stem"),L=Math.sqrt(ex*ex+ey*ey);
+    stem.style.height=L.toFixed(1)+"px";
+    stem.style.transform="rotate("+(Math.atan2(dy,dx)*180/Math.PI-90).toFixed(1)+"deg)";
+  });
+}
+function placeOnMap(nodes,W,H){
+  var gap=8, margin=9;
+  // every board stands OFF its dot (map-callout style: label above the
+  // node, short visible stem) — the dot must never hide under its card
+  nodes.forEach(function(n){ n.sx=n.ax; n.sy=n.ay-(n.h/2+18); n.x=n.sx; n.y=n.sy; });
+  for(var pass=0;pass<160;pass++){
+    var i,j;
+    // boards repel boards
+    for(i=0;i<nodes.length;i++) for(j=i+1;j<nodes.length;j++){
+      var a=nodes[i],b=nodes[j],dx=b.x-a.x,dy=b.y-a.y;
+      var needX=(a.w+b.w)/2+gap-Math.abs(dx), needY=(a.h+b.h)/2+gap-Math.abs(dy);
+      if(needX>0&&needY>0){
+        if(needX<needY){var sx=(dx<0?-1:1)*needX/2;a.x-=sx;b.x+=sx;}
+        else{var sy=(dy<0?-1:1)*needY/2;a.y-=sy;b.y+=sy;}
+      }
+    }
+    // stems repel FOREIGN boards — no card may sit over another's stem
+    for(i=0;i<nodes.length;i++) for(j=0;j<nodes.length;j++){
+      if(i===j) continue;
+      var s=nodes[i],b2=nodes[j];
+      var vx=s.x-s.ax,vy=s.y-s.ay,L2=vx*vx+vy*vy;
+      if(L2<1) continue;
+      var t=Math.max(0,Math.min(1,((b2.x-s.ax)*vx+(b2.y-s.ay)*vy)/L2));
+      var cx=s.ax+vx*t,cy=s.ay+vy*t;
+      var ddx=b2.x-cx,ddy=b2.y-cy;
+      var bw=b2.w/2+margin,bh=b2.h/2+margin;
+      var exn=ddx/bw,eyn=ddy/bh,d2=exn*exn+eyn*eyn;
+      if(d2>=1) continue;
+      var d=Math.sqrt(d2);
+      if(d<0.03){ var Ln=Math.sqrt(L2); b2.x+=(-vy/Ln)*bw*0.5; b2.y+=(vx/Ln)*bh*0.5; }
+      else{ var push=(1-d)/d*0.5; b2.x+=ddx*push; b2.y+=ddy*push; }
+    }
+    // spring toward the stand-off seat — keeps stems short but present
+    nodes.forEach(function(n){ n.x+=(n.sx-n.x)*0.03; n.y+=(n.sy-n.y)*0.03; });
+    // never closer to the dot than the stand-off radius
+    nodes.forEach(function(n){
+      var dx=n.x-n.ax,dy=n.y-n.ay,d=Math.sqrt(dx*dx+dy*dy),min=n.h/2+14;
+      if(d<min){ if(d<0.5){ n.y=n.ay-min; } else { n.x=n.ax+dx/d*min; n.y=n.ay+dy/d*min; } }
+    });
+    nodes.forEach(function(n){ n.x=Math.max(n.w/2+4,Math.min(W-n.w/2-4,n.x)); n.y=Math.max(n.h/2+4,Math.min(H-n.h/2-4,n.y)); });
+  }
+}
+function placeRails(nodes,W,H){
   var pad=10,gapY=8;
   var left=nodes.filter(function(n){return n.ax<W/2;}),right=nodes.filter(function(n){return n.ax>=W/2;});
-  // capacity guard — shift centre-most overflow to the other rail
   var space=Math.max.apply(0,nodes.map(function(n){return n.h;}))+gapY;
   var cap=Math.floor((H-2*pad)/space);
   function shift(from,to,side){
@@ -362,8 +427,7 @@ function layout(){
   [[left,"L"],[right,"R"]].forEach(function(pair){
     var rail=pair[0],side=pair[1];
     rail.sort(function(a,b){return a.ay-b.ay;});
-    var y=rail.map(function(n){return n.ay;});
-    var i;
+    var y=rail.map(function(n){return n.ay;}),i;
     for(i=1;i<y.length;i++) y[i]=Math.max(y[i],y[i-1]+space);
     if(y.length){ y[y.length-1]=Math.min(y[y.length-1],H-pad-rail[y.length-1].h/2);
       for(i=y.length-2;i>=0;i--) y[i]=Math.min(y[i],y[i+1]-space);
@@ -371,18 +435,8 @@ function layout(){
       for(i=1;i<y.length;i++) y[i]=Math.max(y[i],y[i-1]+space);
     }
     rail.forEach(function(n,idx){
-      var bx=side==="L"?pad+n.w/2:W-pad-n.w/2;
-      n.el.style.left=(n.ax/W*100).toFixed(3)+"%";
-      n.el.style.top=(n.ay/H*100).toFixed(3)+"%";
-      var wrap=n.el.querySelector(".lab__wrap");
-      var dx=bx-n.ax,dy=y[idx]-n.ay;
-      wrap.style.setProperty("--ox",dx.toFixed(1)+"px");
-      wrap.style.setProperty("--oy",dy.toFixed(1)+"px");
-      // stem: dot → board inner edge
-      var ex=(side==="L"?bx+n.w/2:bx-n.w/2)-n.ax, ey=dy;
-      var stem=n.el.querySelector(".lab__stem"),L=Math.sqrt(ex*ex+ey*ey);
-      stem.style.height=L.toFixed(1)+"px";
-      stem.style.transform="rotate("+(Math.atan2(ey,ex)*180/Math.PI-90).toFixed(1)+"deg)";
+      n.x=side==="L"?pad+n.w/2:W-pad-n.w/2;
+      n.y=y[idx];
     });
   });
 }
@@ -441,7 +495,7 @@ function heroShow(reveal){
 function heroHide(){$("labHero").hidden=true;}
 
 var NOTES={
-  map:"Full map — dots mark every ground's true location; scoreboards dock in the side rails, north to south.",
+  map:"Full map — dots mark every ground's true location; each scoreboard floats beside its dot on a short stem, and no stem ever runs beneath another card.",
   tease:"Focus · tease — camera into the ground, rails fade, dots stay. Score unchanged: the suspense holds.",
   reveal:"Focus · reveal — the hero updater: team names in type, rolling digit, team colour used surgically. The dot pulses at the ground."
 };
@@ -460,10 +514,11 @@ function setState(s){
 document.querySelectorAll("[data-state]").forEach(function(b){
   b.addEventListener("click",function(){setState(b.getAttribute("data-state"));});
 });
-document.querySelectorAll("[data-variant]").forEach(function(b){
+document.querySelectorAll("[data-layout]").forEach(function(b){
   b.addEventListener("click",function(){
-    document.querySelectorAll("[data-variant]").forEach(function(x){x.classList.toggle("is-on",x===b);});
-    document.getElementById("lab").classList.toggle("v-nostems",b.getAttribute("data-variant")==="nostems");
+    LAYOUT=b.getAttribute("data-layout");
+    document.querySelectorAll("[data-layout]").forEach(function(x){x.classList.toggle("is-on",x===b);});
+    layout();   // boards glide between layouts on their transforms
   });
 });
 document.querySelectorAll("[data-hero]").forEach(function(b){
