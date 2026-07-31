@@ -14,7 +14,7 @@
   One matchday, three lenses sharing ONE timeline model — side by side on
   desktop (cards | map | ticker), switched one-at-a-time on mobile:
     • MAP    — full-bleed England+Wales map, pins are mini-scoreboards,
-               goals erupt as full-screen stings.
+               goals pull the camera into the ground and update in situ.
     • CARDS  — responsive grid of match cards (crests · live score · scorers).
     • TICKER — vidiprinter strip, events typed in real-minute order.
 
@@ -169,6 +169,18 @@
                           (--fs-xs…--fs-lg, one register above the portal
                           scale). FT table sheet now overlays the whole hub
                           and restyles light with NL position-band cells.
+    v0.15.0 (2026-07-31) — In-situ goal choreography; the full-screen sting is
+                          GONE. On a goal the camera eases into the ground with
+                          the old score still on the pin (suspense kept), the
+                          rest of the island greys out and dims, then the pin's
+                          own scoreboard pops the digit with a team-colour
+                          ring/glow and a scorer chip ("67' H. Beautyman")
+                          appears beneath it. While zoomed, pins relax back to
+                          TRUE geography (clusters separate) and counter-scale
+                          (hero ~1.7x, rest ~1.3x) so nothing balloons.
+                          Back-to-back goals pan ground-to-ground without
+                          zooming out. Kickoff previews use the same focus
+                          treatment. Beat cards unchanged.
   ============================================================================
 -->
 
@@ -322,7 +334,6 @@ window.__DATA__ = {
         <svg class="nlh__mapsvg" id="nlhMapSvg" viewBox="0 0 1000 1333" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
         <div class="nlh__pins" id="nlhPins"></div>
       </div>
-      <div class="nlh__sting" id="nlhSting" hidden></div>
       <div class="nlh__beat" id="nlhBeat" hidden></div>
     </section>
     <!-- TICKER -->
@@ -438,11 +449,17 @@ body{overflow:hidden}
 #nlHub .nlh__stage{position:relative;flex:1 1 auto;min-height:0;color:var(--ink-text);background:radial-gradient(120% 90% at 50% 8%,#101a30 0%,var(--ink) 70%);overflow:hidden}
 
 /* ===== Map ===== */
-#nlHub .nlh__mapzoom{position:absolute;inset:0;transform-origin:0 0;transition:transform .9s cubic-bezier(.35,0,.15,1);will-change:transform}
+#nlHub .nlh__mapzoom{position:absolute;inset:0;transform-origin:0 0;transition:transform 1.05s cubic-bezier(.3,0,.15,1);will-change:transform}
 #nlHub .nlh__mapsvg{position:absolute;inset:0;width:100%;height:100%}
-#nlHub .nlh__mapsvg path{fill:#0e1a33;stroke:#2b3d63;stroke-width:2.2;stroke-linejoin:round}
+#nlHub .nlh__mapsvg path{fill:#0e1a33;stroke:#2b3d63;stroke-width:2.2;stroke-linejoin:round;transition:fill .5s ease,stroke .5s ease}
 #nlHub .nlh__pins{position:absolute;inset:0}
-#nlHub .nlh__pin{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:3px;transition:top .3s,left .3s}
+#nlHub .nlh__pin{position:absolute;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:3px;transition:top .9s cubic-bezier(.3,0,.15,1),left .9s cubic-bezier(.3,0,.15,1),transform .9s cubic-bezier(.3,0,.15,1),opacity .5s ease,filter .5s ease}
+/* FOCUS MODE — the camera is in on one ground; the rest of the island recedes.
+   Pins counter-scale against the 2.4x zoom (hero ~1.7x, others ~1.3x effective)
+   and stand on TRUE geography (layoutPins swaps relaxed → geo positions). */
+#nlHub .nlh__stage.is-focus .nlh__mapsvg path{fill:#0b1226;stroke:#22304f}
+#nlHub .nlh__stage.is-focus .nlh__pin{opacity:.32;filter:grayscale(1) brightness(.75);transform:translate(-50%,-50%) scale(.55)}
+#nlHub .nlh__stage.is-focus .nlh__pin.is-hero{opacity:1;filter:none;transform:translate(-50%,-50%) scale(.7);z-index:3}
 #nlHub .nlh__pinboard{display:flex;align-items:center;gap:0;background:var(--ink-2);border:1px solid var(--ink-line);border-radius:8px;box-shadow:0 3px 10px rgba(0,0,0,.5);overflow:hidden}
 #nlHub .nlh__pinside{display:flex;align-items:center;gap:4px;padding:3px 6px}
 #nlHub .nlh__pinside img,#nlHub .nlh__crestfb{width:19px;height:19px;object-fit:contain;border-radius:2px;flex:0 0 auto}
@@ -453,45 +470,25 @@ body{overflow:hidden}
 #nlHub .nlh__pinmin.is-live{color:#031;background:var(--live);border-color:var(--live)}
 #nlHub .nlh__pinmin.is-ft{color:#eafff0;background:var(--green);border-color:var(--green)}
 #nlHub .nlh__pin.is-goal .nlh__pinboard{animation:nlhPulse .7s ease}
-@keyframes nlhPulse{0%{transform:scale(1)}35%{transform:scale(1.34);box-shadow:0 0 0 3px var(--live)}100%{transform:scale(1)}}
+@keyframes nlhPulse{0%{transform:scale(1)}35%{transform:scale(1.34);box-shadow:0 0 0 3px var(--hero-col,var(--live))}100%{transform:scale(1)}}
+/* hero reveal — team-colour ring + glow blooms at the ground, then settles */
+#nlHub .nlh__stage.is-focus .nlh__pin.is-hero.is-goal .nlh__pinboard{animation:nlhHeroGlow 1.4s ease}
+@keyframes nlhHeroGlow{
+  0%{box-shadow:0 3px 10px rgba(0,0,0,.5)}
+  30%{transform:scale(1.12);box-shadow:0 0 0 4px var(--hero-col,#fff),0 0 34px 8px var(--hero-col,#fff)}
+  100%{transform:scale(1);box-shadow:0 3px 10px rgba(0,0,0,.5)}
+}
+/* scorer chip beneath the hero pin ("90+3' J. Bloggs") */
+#nlHub .nlh__pinchip{margin-top:3px;font-size:11px;font-variation-settings:"wght" 800;font-weight:800;padding:3px 9px;border-radius:999px;background:#f4f6f9;color:#0a1020;box-shadow:0 3px 10px rgba(0,0,0,.5);white-space:nowrap;animation:nlhChipIn .35s cubic-bezier(.2,0,.1,1) both}
+#nlHub .nlh__pinchip .m{opacity:.6;margin-right:5px}
+@keyframes nlhChipIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 /* score tick-over — digits roll/pop when they change (pins + cards) */
 #nlHub .nlh__pinsc.is-tick,#nlHub .nlh__cardteam .sc.is-tick{animation:nlhTick .5s cubic-bezier(.2,.9,.2,1)}
 @keyframes nlhTick{0%{transform:translateY(-.66em) scale(.5);opacity:.15;color:var(--live)}55%{transform:translateY(.05em) scale(1.35);color:var(--live)}100%{transform:none}}
 
-/* Goal sting (full-stage, dramatic — crests fly in, score slams) */
-#nlHub .nlh__sting{position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:clamp(10px,1.5vh,16px);text-align:center;padding:clamp(24px,3vw,40px);overflow:hidden;transition:background .55s ease}
-#nlHub .nlh__sting::before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 50% 44%,rgba(255,255,255,.30),transparent 46%);opacity:0}
-#nlHub .nlh__sting.revealing::before{animation:nlhFlash .6s ease-out both}
-#nlHub .nlh__sting.revealing{box-shadow:inset 0 0 120px 10px rgba(255,255,255,.10)}
-@keyframes nlhFlash{0%{opacity:0;transform:scale(.2)}28%{opacity:1}100%{opacity:0;transform:scale(1.7)}}
-/* "GOAL" is empty during the tease; it only appears (and pops) on the reveal */
-#nlHub .nlh__sting-goal{position:relative;font-variation-settings:"wght" 900;font-weight:900;letter-spacing:.2em;font-size:clamp(34px,4.5vw,54px);color:#fff;min-height:1.1em}
-#nlHub .nlh__sting.revealing .nlh__sting-goal{animation:nlhGoalPop .5s cubic-bezier(.2,1.35,.3,1) both}
-@keyframes nlhGoalPop{0%{transform:scale(.3) rotate(-7deg);opacity:0}60%{transform:scale(1.16) rotate(1deg)}100%{transform:none;opacity:1}}
-#nlHub .nlh__sting-crests{position:relative;display:flex;align-items:center;gap:clamp(22px,3vw,34px)}
-#nlHub .nlh__sting-crests img,#nlHub .nlh__sting-crests .nlh__crestfb{width:clamp(52px,6vw,84px);height:clamp(52px,6vw,84px);object-fit:contain;filter:drop-shadow(0 4px 10px rgba(0,0,0,.6))}
-#nlHub .nlh__sting-crests .home{animation:nlhFlyL .55s cubic-bezier(.2,.9,.25,1) both}
-#nlHub .nlh__sting-crests .away{animation:nlhFlyR .55s cubic-bezier(.2,.9,.25,1) both}
-@keyframes nlhFlyL{0%{transform:translateX(-130px) rotate(-28deg);opacity:0}100%{transform:none;opacity:1}}
-@keyframes nlhFlyR{0%{transform:translateX(130px) rotate(28deg);opacity:0}100%{transform:none;opacity:1}}
-#nlHub .nlh__sting-score{position:relative;font-variation-settings:"wght" 900;font-weight:900;font-size:clamp(60px,7.5vw,100px);line-height:1;font-variant-numeric:tabular-nums;display:flex;gap:14px;align-items:center}
-#nlHub .nlh__sting-score .sdash{color:#fff;opacity:.85}
-/* each score sits in its own BOX; the scoring box rolls its digit and its
-   background goes white → gold (held), so the change is clear and lasts */
-#nlHub .nlh__scorebox{display:inline-block;vertical-align:middle;min-width:1.05em;height:1.32em;padding:0 .14em;background:#f4f6f9;color:#0a1020;border-radius:.12em;overflow:hidden;box-shadow:0 4px 14px rgba(0,0,0,.45)}
-#nlHub .nlh__scorebox .reel{display:block}   /* reel sits flush at the top of the box */
-#nlHub .nlh__scorebox i{display:flex;align-items:center;justify-content:center;height:1.32em;font-style:normal}  /* each digit centred in its cell */
-#nlHub .nlh__scorebox.rolling .reel{animation:nlhOdo .8s cubic-bezier(.3,1,.25,1) .3s both}
-#nlHub .nlh__scorebox.rolling{animation:nlhBoxGold 1.5s ease .3s both}
-@keyframes nlhOdo{0%{transform:translateY(0)}100%{transform:translateY(-1.32em)}}
-@keyframes nlhBoxGold{0%{background:#f4f6f9}22%{background:#f5c400}100%{background:#f5c400}}
-#nlHub .nlh__sting-scorer{position:relative;font-variation-settings:"wght" 800;font-weight:800;font-size:var(--fs-md);animation:nlhRise .5s ease .2s both}
-@keyframes nlhRise{from{transform:translateY(14px);opacity:0}to{transform:none;opacity:1}}
-#nlHub .nlh__sting-scorer .m{color:#fff;opacity:.8;margin-right:6px}
-#nlHub .nlh__sting-tag{position:relative;font-size:var(--fs-xs);letter-spacing:.14em;text-transform:uppercase;font-variation-settings:"wght" 800;font-weight:800;opacity:.75;animation:nlhRise .5s ease .28s both}
-
 /* Beat cards (KO/HT/2nd half/FT) */
-#nlHub .nlh__beat{position:absolute;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;animation:nlhStingIn .3s ease;background:rgba(3,8,27,.35)}
+#nlHub .nlh__beat{position:absolute;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;animation:nlhBeatIn .3s ease;background:rgba(3,8,27,.35)}
+@keyframes nlhBeatIn{from{opacity:0}to{opacity:1}}
 #nlHub .nlh__beat span{font-variation-settings:"wght" 900;font-weight:900;letter-spacing:.16em;font-size:clamp(30px,3.5vw,44px);text-transform:uppercase;padding:16px 30px;border:2px solid rgba(255,255,255,.25);border-radius:12px;background:rgba(10,20,40,.6)}
 
 /* ===== Cards ===== */
@@ -618,7 +615,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "20";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "21";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -769,7 +766,8 @@ body{overflow:hidden}
     // true geographic positions, then relax so overlapping boards give each other space
     var nodes = D.fixtures.map(function(fx){
       var el=$("pin_"+fx.gc), c=club(fx.home), q=proj(c.lng,c.lat);
-      return { el:el, x:ox+q.nx*mw, y:oy+q.ny*mh, w:(el&&el.offsetWidth)||74, h:(el&&el.offsetHeight)||38 };
+      var X=ox+q.nx*mw, Y=oy+q.ny*mh;
+      return { el:el, x:X, y:Y, tx:X, ty:Y, w:(el&&el.offsetWidth)||74, h:(el&&el.offsetHeight)||38 };
     }).filter(function(n){return n.el;});
     var gap=7;
     for (var pass=0; pass<80; pass++){
@@ -783,7 +781,16 @@ body{overflow:hidden}
       }
       nodes.forEach(function(n){ n.x=Math.max(n.w/2+2,Math.min(W-n.w/2-2,n.x)); n.y=Math.max(n.h/2+2,Math.min(H-n.h/2-2,n.y)); });
     }
-    nodes.forEach(function(n){ n.el.style.left=(n.x/W*100).toFixed(3)+"%"; n.el.style.top=(n.y/H*100).toFixed(3)+"%"; });
+    // store BOTH layouts on each pin — relaxed (full-map) and true-geo (zoomed);
+    // focus mode stands pins on true geography, where the zoom gives them room
+    var focused = $("nlhStage").classList.contains("is-focus");
+    nodes.forEach(function(n){
+      var tx=Math.max(n.w/2+2,Math.min(W-n.w/2-2,n.tx)), ty=Math.max(n.h/2+2,Math.min(H-n.h/2-2,n.ty));
+      n.el.dataset.rx=(n.x/W*100).toFixed(3); n.el.dataset.ry=(n.y/H*100).toFixed(3);
+      n.el.dataset.tx=(tx/W*100).toFixed(3);  n.el.dataset.ty=(ty/H*100).toFixed(3);
+      n.el.style.left=(focused?n.el.dataset.tx:n.el.dataset.rx)+"%";
+      n.el.style.top =(focused?n.el.dataset.ty:n.el.dataset.ry)+"%";
+    });
   }
   // set text; play the tick-over animation only on an increment (i.e. a goal)
   function tickText(el, val){
@@ -1238,38 +1245,48 @@ body{overflow:hidden}
   }
   function commStatic(str){ clearInterval(st._typeIv); $("nlhComm").className="nlh__comm"; $("nlhCommText").textContent=str; }
 
-  // ---- stings & beats (map view) ------------------------------------------
-  function scoreBox(o,n,roll){ return '<span class="nlh__scorebox'+(roll?" rolling":"")+'"><span class="reel"><i>'+o+'</i>'+(roll?'<i>'+n+'</i>':'')+'</span></span>'; }
-  // TEASE: full-screen fires EARLY as we float in — neutral colour, current score
-  // in white boxes, NO "GOAL" word yet (that only lands on the reveal)
-  function stingTease(fx){
-    if (!mapVisible()) return;
-    var h=club(fx.home), a=club(fx.away), sc=scoreAt(fx, st.T);
-    var el=$("nlhSting"); el.classList.remove("revealing");
-    el.style.background = "radial-gradient(120% 90% at 50% 42%, #223052 0%, rgba(6,10,22,.94) 72%)";  // neutral
-    el.innerHTML =
-      '<div class="nlh__sting-goal" id="nlhStingGoal"></div>'+
-      '<div class="nlh__sting-crests">'+crestHTML(fx.home,"home")+crestHTML(fx.away,"away")+'</div>'+
-      '<div class="nlh__sting-score" id="nlhStingScore">'+scoreBox(sc.h,sc.h,false)+'<span class="sdash">–</span>'+scoreBox(sc.a,sc.a,false)+'</div>'+
-      '<div class="nlh__sting-scorer" id="nlhStingScorer" style="visibility:hidden">·</div>'+
-      '<div class="nlh__sting-tag">'+esc(h.short)+' v '+esc(a.short)+'</div>';
-    el.hidden=false;
+  // ---- goal focus (in-situ) & beats ---------------------------------------
+  // No overlay: the camera moves INTO the ground, the rest of the island
+  // recedes (grey + dim), and the pin's own scoreboard tells the story.
+  function pinsTrue(on){   // zoomed in there's room to stand on true geography
+    D.fixtures.forEach(function(fx){ var p=$("pin_"+fx.gc); if(!p||!p.dataset.rx) return;
+      p.style.left=(on?p.dataset.tx:p.dataset.rx)+"%";
+      p.style.top =(on?p.dataset.ty:p.dataset.ry)+"%";
+    });
   }
-  // REVEAL: "GOAL" appears, card washes to the scoring team's colour, the scoring
-  // box rolls its digit and turns gold, and the scorer (with 90+n minute) lands
-  function stingReveal(fx, ev){
+  // enter (or retarget) focus — TEASE: the camera commits, the score doesn't
+  function setFocus(fx, ev){
     if (!mapVisible()) return;
-    var el=$("nlhSting"); if(el.hidden) stingTease(fx);
-    var sc=scoreAt(fx, evRmin(ev,fx)), forHome=(ev.team===fx.home)!==!!ev.og;
-    var oldH=sc.h-(forHome?1:0), oldA=sc.a-(forHome?0:1);
-    el.classList.add("revealing");
-    el.style.background = "radial-gradient(120% 90% at 50% 40%,"+washCol(club(ev.team).col)+" 0%, rgba(6,10,22,.92) 72%)";
-    var gl=$("nlhStingGoal"); if(gl) gl.innerHTML="G&nbsp;O&nbsp;A&nbsp;L";
-    var se=$("nlhStingScore"); if(se) se.innerHTML = scoreBox(oldH,sc.h,forHome)+'<span class="sdash">–</span>'+scoreBox(oldA,sc.a,!forHome);
-    var scr=$("nlhStingScorer"); if(scr){ scr.style.visibility="visible"; scr.innerHTML='<span class="m">'+minLabel(ev.min)+"'"+'</span>'+esc(ev.name)+(ev.og?" (OG)":""); }
-    var pin=$("pin_"+fx.gc); if(pin){ pin.classList.add("is-goal"); setTimeout(function(){pin.classList.remove("is-goal");},700); }
+    $("nlhStage").classList.add("is-focus");
+    pinsTrue(true);
+    D.fixtures.forEach(function(f){ var p=$("pin_"+f.gc); if(p) p.classList.toggle("is-hero", f===fx); });
+    var pin=$("pin_"+fx.gc);
+    if (pin) pin.style.setProperty("--hero-col", washCol(club(ev?ev.team:fx.home).col));
+    zoomTo(fx);
   }
-  function stingHide(){ var el=$("nlhSting"); el.hidden=true; el.classList.remove("revealing"); }
+  // REVEAL: the pin's digit has just ticked over (paint) — add the team-colour
+  // ring/glow and the scorer chip beneath the board
+  function focusReveal(fx, ev){
+    if (!mapVisible()) return;
+    var pin=$("pin_"+fx.gc); if(!pin) return;
+    pulsePin(fx);
+    clearChips();
+    var chip=document.createElement("div");
+    chip.className="nlh__pinchip";
+    chip.innerHTML='<span class="m">'+minLabel(ev.min)+"'"+'</span>'+esc(ev.name)+(ev.og?" (OG)":"");
+    pin.appendChild(chip);
+  }
+  function pulsePin(fx){
+    var pin=$("pin_"+fx.gc); if(!pin) return;
+    pin.classList.remove("is-goal"); void pin.offsetWidth; pin.classList.add("is-goal");
+    setTimeout(function(){ pin.classList.remove("is-goal"); }, 900);
+  }
+  function clearChips(){ document.querySelectorAll("#nlHub .nlh__pinchip").forEach(function(c){ c.remove(); }); }
+  function focusReset(){
+    var stage=$("nlhStage"); if(stage) stage.classList.remove("is-focus");
+    document.querySelectorAll("#nlHub .nlh__pin.is-hero").forEach(function(p){ p.classList.remove("is-hero"); });
+    clearChips(); pinsTrue(false); zoomReset();
+  }
   function fireBeat(text){
     if (!mapVisible()) return;
     var el=$("nlhBeat"); el.innerHTML="<span>"+esc(text)+"</span>"; el.hidden=false;
@@ -1294,7 +1311,7 @@ body{overflow:hidden}
       var r=evRmin(ev,fx), id=evId(fx,ev);
       if(r<=prevT || r>T || st.fired[id]) return;
       if(ev.type==="red"){ st.fired[id]=1; if(st.playing) typeSegs(redSegs(fx,ev),"red"); }
-      else if(ev.type==="goal" && instantGoals){ st.fired[id]=1; stingReveal(fx,ev); clearTimeout(st._stingT); st._stingT=setTimeout(stingHide, Math.max(1400,2600/st.rate)); if(st.playing) typeSegs(revealSegs(fx,ev),"reveal-goal"); }
+      else if(ev.type==="goal" && instantGoals){ st.fired[id]=1; if(mapVisible()) pulsePin(fx); if(st.playing) typeSegs(revealSegs(fx,ev),"reveal-goal"); }
     }); });
     BEATS.forEach(function(b){
       if(b.r>=prevT && b.r<=T && !st.beatShown[b.r]){ st.beatShown[b.r]=1; fireBeat(b.t); if(st.playing) typeSegs(buildSegs(pick(C_BEAT[b.c],"bc"+b.c),{},[]),"beat"); }
@@ -1304,13 +1321,13 @@ body{overflow:hidden}
   function beginSuspense(g, ts){
     st.fired[g.id]=1;
     st.suspend={ g:g, phase:"tease", until: ts + (st.rate===2?1800:2900) };
-    if (mapVisible()){ zoomTo(g.fx); stingTease(g.fx); }  // float in + neutral full-screen, ready
+    setFocus(g.fx, g.ev);            // camera in; the score stays as-is on the pin
     typeSegs(teaseSegs(g.fx,g.ev),"tease");
   }
   function revealGoal(g){
     st.T = g.rmin + 0.0015;          // the score now includes this goal
     paint();                          // pins/cards tick over on the reveal
-    stingReveal(g.fx, g.ev);          // neutral card washes to team colour + score rolls
+    focusReveal(g.fx, g.ev);          // ring + glow + scorer chip, in place
     var c=goalCtx(g.fx,g.ev), segs=baseRevealSegs(c), story=storylineSegs(c);
     if(story) segs=segs.concat([{t:"  "}]).concat(story);   // occasional context line
     typeSegs(segs, "reveal-goal");
@@ -1376,10 +1393,10 @@ body{overflow:hidden}
   function zoomReset(){ var z=$("nlhMapZoom"); if(z) z.style.transform="none"; }
   function setView(v){
     st.view=v;
-    zoomReset();
+    focusReset();
     document.querySelectorAll("#nlHub .nlh__view").forEach(function(el){ el.classList.toggle("is-active", el.getAttribute("data-view")===v); });
     document.querySelectorAll("#nlHub .nlh__seg").forEach(function(b){ b.classList.toggle("is-active", b.getAttribute("data-view")===v); });
-    stingHide(); $("nlhBeat").hidden=true;
+    $("nlhBeat").hidden=true;
     if (v==="map") layoutPins();
     paint();
   }
@@ -1392,10 +1409,10 @@ body{overflow:hidden}
     if (st.kickoff){
       if (ts>=st.kickoff.until){
         var ki=st.kickoff.i;
-        if (ki>=KO_ORDER.length){ st.kickoff=null; zoomReset(); st.last=ts; }   // done — action begins
+        if (ki>=KO_ORDER.length){ st.kickoff=null; focusReset(); st.last=ts; }   // done — action begins
         else {
           var kfx=KO_ORDER[ki], kseg=kickoffSegs(kfx);
-          if (mapVisible()) zoomTo(kfx);
+          setFocus(kfx);   // same focus treatment as goals — grey out, glide in
           typeSegs(kseg,"beat");
           var kchars=kseg.reduce(function(n,s){return n+s.t.length;},0);
           var kdur = st.rate>=2 ? 1500 : Math.min(6800, 2600 + kchars*15);   // scale to reading length
@@ -1411,7 +1428,9 @@ body{overflow:hidden}
           var story=revealGoal(st.suspend.g);
           st.suspend={ g:st.suspend.g, phase:"hold", until: ts + (st.rate===2?2400:4000) + (story?2000:0) };
         } else {
-          st.suspend=null; zoomReset(); stingHide();   // dwell over — zoom back out, drop the card, resume
+          st.suspend=null; clearChips();
+          // another goal imminent → hold the camera and pan straight there
+          if (!nextGoalAt(st.T, st.T+3)) focusReset();
         }
         st.last=ts;
       }
@@ -1463,12 +1482,12 @@ body{overflow:hidden}
   }
   function restart(){
     pause(); st.T=0; st.fired={}; st.feedBuilt={}; st.beatShown={}; st.ftShown=false; st.suspend=null; st.kickoff=null; st.koShown=false;
-    $("nlhFeed").innerHTML=""; hideSheet(); stingHide(); $("nlhBeat").hidden=true; zoomReset();
+    $("nlhFeed").innerHTML=""; hideSheet(); focusReset(); $("nlhBeat").hidden=true;
     commStatic(C_IDLE);
     paint(); play();
   }
   function seek(frac){
-    pause(); st.suspend=null; st.kickoff=null; st.koShown=true; zoomReset(); stingHide(); st.T=Math.max(0,Math.min(frac,1))*maxT();
+    pause(); st.suspend=null; st.kickoff=null; st.koShown=true; focusReset(); st.T=Math.max(0,Math.min(frac,1))*maxT();
     // rebuild derived-once state so nothing double-fires on resume
     st.fired={}; st.beatShown={}; st.feedBuilt={}; $("nlhFeed").innerHTML="";
     D.fixtures.forEach(function(fx){ fx.events.forEach(function(ev){ if(evRmin(ev,fx)<=st.T) st.fired[evId(fx,ev)]=1; }); });
