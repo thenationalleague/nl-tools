@@ -126,6 +126,9 @@ const seasonStartYear = s => Number(String(s).slice(0, 4)); // "2003-04" → 200
     const hs = a.homeTeam.score, as = a.awayTeam.score;
     if (hs == null || as == null) return;
     touch(h); touch(w);
+    // beyond 46 games = play-offs (served under the league competitionID) —
+    // the league table is done; knockouts contribute nothing to it or form
+    if (rows[h].P >= 46 || rows[w].P >= 46) return;
     [[h, hs, as, "h"], [w, as, hs, "a"]].forEach(([k, gf, ga, ha]) => {
       const r = rows[k]; r.P++; r.GF += gf; r.GA += ga;
       if (gf > ga) { r.W++; r.Pts += 3; } else if (gf === ga) { r.D++; r.Pts++; } else r.L++;
@@ -310,6 +313,9 @@ const seasonStartYear = s => Number(String(s).slice(0, 4)); // "2003-04" → 200
       h2h: h2hFor(hMeta.name || "", aMeta.name || "", homeID, awayID)
     };
     if (rc && rc.games >= 5) fx.refY = Math.round(rc.y / rc.games * 10) / 10;
+    // play-offs / knockout ties are matchType "Cup" — the hub's live table,
+    // arrows and stakes/race storylines leave ko fixtures alone
+    if (String(at.matchType || "").toLowerCase().includes("cup")) fx.ko = true;
     fx.events = events;
     return fx;
   }).sort((a, b) => a.date.localeCompare(b.date) ||
