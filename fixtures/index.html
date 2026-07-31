@@ -1,10 +1,15 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixtures
-  Version: v0.14 (30/07/2026)
+  Version: v0.15 (30/07/2026)
   File: /fixtures/index.html
 
   CHANGELOG
+    v0.15 (30/07/2026) — Rearrangements obeys the same filters as the
+      fixture list (the toolbar sat inside the fixtures pane, so it was
+      hidden on the other tab) and adds a reason filter. Drops 'Took'.
+      Adds a Previously column: every kick-off the fixture has already
+      carried, and every reason it has moved for.
     v0.14 (30/07/2026) — Rearrangements is the same table as the main
       list (crests, tints, break lines) rather than a card stack; two
       visual languages for one set of fixtures was the problem. History
@@ -147,6 +152,16 @@
     var NL_TOOL_KEY = 'ops-fixtures';
 
     window.NL_CHANGELOG = [
+      {
+        date: '30/07/2026',
+        version: 'v0.15',
+        items: [
+          'Rearrangements can be filtered by club, competition and reason. The club and competition filters were there all along but sat inside the fixtures tab, so they vanished when you switched.',
+          'New Previously column: every kick-off a fixture has already been given, oldest first \u2014 Sat, 8 Aug 2026 15:00 \u2192 Tue, 13 Oct 2026 19:45 \u2192 Sat, 5 Dec 2026 15:00.',
+          'A fixture moved more than once lists every reason it moved for, comma-separated, rather than only the latest.',
+          'Removed the Took column.'
+        ]
+      },
       {
         date: '30/07/2026',
         version: 'v0.14',
@@ -408,7 +423,9 @@
      whatever is left, so the column takes what it needs and gives it back
      when parts are toggled off. */
   .fx-c-tv { white-space: nowrap; }
-  .fx-c-why { width: 180px; font-size: 12.5px; color: var(--text-muted); }
+  .fx-c-why { width: 190px; font-size: 12.5px; color: var(--text-muted); }
+  .fx-c-prev { font-size: 12px; color: var(--text-muted); white-space: nowrap;
+               font-variant-numeric: tabular-nums; }
   .fx-c-wait { width: 92px; font-variant-numeric: tabular-nums;
                font-variation-settings: 'wght' 800; color: var(--purple); }
   .fx-mv-block { margin-bottom: 26px; }
@@ -607,7 +624,6 @@
       </div>
     </div>
 
-    <div id="fxPaneAll">
       <div class="toolbar">
         <div class="toolbar__left">
           <div class="filter-pill-row" id="fxCompPills"></div>
@@ -618,6 +634,7 @@
             <button type="button" class="chip" data-fxvenue="away">Away</button>
           </div>
           <select class="toolbar__filter" id="fxMd" aria-label="Matchday"><option value="">All matchdays</option></select>
+          <select class="toolbar__filter" id="fxWhy" aria-label="Reason" hidden><option value="">Any reason</option></select>
           <div class="filter-pill-row" id="fxTvPills" hidden>
             <span class="filter-pill-row__label">TV</span>
           </div>
@@ -627,6 +644,8 @@
           <button type="button" class="btn btn--danger btn--sm" id="fxBulk">Delete shown&hellip;</button>
         </div>
       </div>
+
+    <div id="fxPaneAll">
 
       <div class="table-wrap">
         <table class="table table--compact">
@@ -687,7 +706,7 @@
   var S = {
     season: null, session: null, role: null, isClub: false, club: null,
     fixtures: {}, history: {}, notes: {}, bcast: {}, pairs: {},
-    tab: 'all', comps: {}, venue: 'all', md: '', club1: null, tv: {},
+    tab: 'all', comps: {}, venue: 'all', md: '', club1: null, why: '', tv: {},
     picker: null, booted: false
   };
 
@@ -981,13 +1000,19 @@
        competition band — neither control has anything left to offer. */
     $('fxClubPicker').hidden = S.isClub;
     $('fxCompPills').hidden = S.isClub;
-    $('fxClear').hidden = !(S.club1 || S.md || S.venue !== 'all' ||
+    $('fxClear').hidden = !(S.club1 || S.md || S.why || S.venue !== 'all' ||
       COMPS.some(function (c) { return !S.comps[c]; }));
 
-    var moves = visible().filter(function (f) {
-      return f.status === 'postponed' || f.status === 'rearranged';
-    });
-    $('fxMoveCount').textContent = moves.length;
+    /* The rearrangements list obeys the same filters as the fixture list —
+       it is the same fixtures, so "show me Morecambe" should mean the same
+       thing on both tabs. The toolbar now sits above both panes rather than
+       inside the fixtures one, which is why it could not before. */
+    var moves = movesSet();
+    /* Reason only means anything here, and only once something has moved. */
+    $('fxWhy').hidden = !(S.tab === 'moves' && moves.length);
+    $('fxTvPills').hidden = $('fxTvPills').hidden || S.tab === 'moves';
+    if (S.tab === 'moves' && moves.length) fillReasons(moves);
+    $('fxMoveCount').textContent = movesSet(true).length;
     if (S.tab === 'moves') { renderMoves(moves); return; }
 
     var rows = filtered(), prev = null;
@@ -1018,6 +1043,41 @@
      block and the rearrangements table. */
   var REASON_BY_CODE = {};
 
+  /* Everything that has moved, through the ordinary filters. `ignoreWhy`
+     is for the tab badge, which should count what has moved rather than
+     what survives a reason filter the user may have left set. */
+  function movesSet(ignoreWhy) {
+    return filtered().filter(function (f) {
+      if (f.status !== 'postponed' && f.status !== 'rearranged') return false;
+      if (!ignoreWhy && S.why) {
+        return histOf(f.recordID).some(function (e) { return e.reasonCode === S.why; });
+      }
+      return true;
+    });
+  }
+
+  /* Only offer reasons that actually occur in what is showing. A dropdown of
+     19 options where 16 match nothing is a worse control than no dropdown. */
+  function fillReasons(moves) {
+    var seen = {};
+    moves.forEach(function (f) {
+      histOf(f.recordID).forEach(function (e) { if (e.reasonCode) seen[e.reasonCode] = 1; });
+    });
+    var sel = $('fxWhy');
+    var codes = Object.keys(seen).sort(function (a, b) {
+      return (REASON_BY_CODE[a] ? REASON_BY_CODE[a].label : a)
+        .localeCompare(REASON_BY_CODE[b] ? REASON_BY_CODE[b].label : b);
+    });
+    var want = 'Any reason|' + codes.join('|');
+    if (sel.getAttribute('data-built') === want) { sel.value = S.why; return; }
+    sel.setAttribute('data-built', want);
+    sel.innerHTML = '<option value="">Any reason</option>' + codes.map(function (c) {
+      return '<option value="' + esc(c) + '">' +
+        esc(REASON_BY_CODE[c] ? REASON_BY_CODE[c].label : c) + '</option>';
+    }).join('');
+    sel.value = S.why;
+  }
+
   function renderMoves(moves) {
     var pane = $('fxPaneMoves');
     if (!moves.length) {
@@ -1036,47 +1096,92 @@
      two visual languages for one set of fixtures was the whole complaint.
      What changes is the columns: when it was called off, and how long it has
      been waiting, in place of kick-off. */
+  /* ddd, d mmm yyyy hh:mm — Richard's format, for the dates a fixture has
+     already been given. */
+  function whenLong(d, t) {
+    d = dateOnly(d);
+    var q = String(d).split('/');
+    return dow(d) + ', ' + (+q[0]) + ' ' + MO[+q[1] - 1] + ' ' + q[2] + ' ' + t;
+  }
+
+  /* Every kick-off this fixture has previously carried, oldest first.
+
+     Taken from the history rather than the fixture, because the fixture only
+     remembers where it is now and where it started. A game moved three times
+     has three previous slots and they are all interesting.
+
+     Joined with arrows, not commas, despite the ask: the date format has a
+     comma in it ("Sat, 8 Aug 2026"), so comma-separating them gives
+     "Sat, 8 Aug 2026 15:00, Tue, 13 Oct 2026 19:45" and you cannot tell
+     where one ends. Arrows also read as the sequence it actually is. */
+  function priorKOs(f) {
+    var out = [], h = histOf(f.recordID);
+    h.forEach(function (e) {
+      if (e.type !== 'postponed' && e.type !== 'rescheduled') return;
+      if (!e.from) return;
+      var d = dateOnly(e.from), t = (e.from.slice(11) || f.originalKickoff || f.kickoff);
+      var txt = whenLong(d, t);
+      if (out.indexOf(txt) === -1) out.push(txt);
+    });
+    return out;
+  }
+
+  /* One reason per move, in order, comma-separated. A fixture called off for
+     weather and then moved again for television has two, and showing only
+     the latest loses the story. */
+  function reasonsOf(f) {
+    var out = [];
+    histOf(f.recordID).forEach(function (e) {
+      var r = REASON_BY_CODE[e.reasonCode];
+      if (r && out.indexOf(r.label) === -1) out.push(r.label);
+    });
+    return out;
+  }
+
+  /* The same table as the main list, not a card stack: same crests, tints and
+     break lines. What changes is what the columns answer. */
   function mvGroup(title, list, waiting) {
     if (!list.length) return '';
     var prev = null;
     return '<div class="fx-mv-block"><p class="fx-mv-head">' + esc(title) + ' (' + list.length + ')</p>' +
       '<div class="table-wrap"><table class="table table--compact"><thead><tr>' +
       '<th class="fx-c-md">MD</th>' +
-      '<th class="fx-c-date">' + (waiting ? 'Was' : 'Now') + '</th>' +
+      (waiting ? '' : '<th class="fx-c-date">Now</th>') +
       '<th class="fx-c-home ta-right">Home</th>' +
       '<th class="fx-c-state ta-center">' + (waiting ? 'P&ndash;P' : 'KO') + '</th>' +
       '<th class="fx-c-away">Away</th>' +
       '<th class="fx-c-comp">Comp</th>' +
+      '<th class="fx-c-prev">Previously</th>' +
       '<th class="fx-c-why">Reason</th>' +
-      '<th class="fx-c-wait ta-right">' + (waiting ? 'Waiting' : 'Took') + '</th>' +
+      (waiting ? '<th class="fx-c-wait ta-right">Waiting</th>' : '') +
       '<th class="fx-c-act"></th></tr></thead><tbody>' +
       list.map(function (f) {
         var h = histOf(f.recordID);
         var last = h[h.length - 1] || {};
-        var waits = waitDays(f);
         var cls = COMP_CLASS[f.competition] || '';
-        /* Grouped by date like the main list, so a weekend of call-offs reads
-           as one block rather than a run of unrelated rows. */
-        var key = waiting ? (last.from || f.date) : f.date;
+        var key = waiting ? (dateOnly(last.from) || f.date) : f.date;
         if (!prev || key !== prev) cls += ' fx-datebreak';
         prev = key;
-        var r = REASON_BY_CODE[last.reasonCode];
+        var kos = priorKOs(f), why = reasonsOf(f);
         return '<tr class="' + cls + '">' +
           '<td class="fx-c-md">' + esc(f.matchday || '\u2014') + '</td>' +
-          '<td class="fx-c-date">' + dateStr(waiting ? (last.from || f.date) : f.date) + '</td>' +
+          (waiting ? '' : '<td class="fx-c-date">' + dateStr(f.date) + '</td>') +
           '<td class="fx-c-home ta-right"><span class="fx-team">' + esc(f.home) + crestImg(f.home) + '</span></td>' +
           (waiting
             ? '<td class="fx-c-state ta-center fx-state fx-state--pp">P&ndash;P</td>'
             : '<td class="fx-c-state ta-center fx-state">' + clock(f.kickoff) + '</td>') +
           '<td class="fx-c-away"><span class="fx-team">' + crestImg(f.away) + esc(f.away) + '</span></td>' +
           '<td class="fx-c-comp">' + esc(COMP_SHORT[f.competition] || f.competition) + '</td>' +
-          '<td class="fx-c-why">' + (r ? esc(r.label) : '<span class="fx-none">not given</span>') + '</td>' +
-          '<td class="fx-c-wait ta-right">' + esc(waiting ? daysSince(last.effectiveAt)
-            : (waits.length ? waits[waits.length - 1] : '\u2014')) + '</td>' +
+          '<td class="fx-c-prev">' + (kos.length
+            ? esc(kos.join(' \u2192 ')) : '<span class="fx-none">\u2014</span>') + '</td>' +
+          '<td class="fx-c-why">' + (why.length
+            ? esc(why.join(', ')) : '<span class="fx-none">not given</span>') + '</td>' +
+          (waiting ? '<td class="fx-c-wait ta-right">' + esc(daysSince(last.effectiveAt)) + '</td>' : '') +
           '<td class="fx-c-act ta-right">' + actBtn(f) + '</td>' +
           '</tr>';
       }).join('') + '</tbody></table></div></div>';
   }
+
 
 
   function daysSince(s) {
@@ -2417,6 +2522,7 @@
     var md = $('fxMd');
     for (var i = 1; i <= 46; i++) md.insertAdjacentHTML('beforeend', '<option value="' + i + '">MD ' + i + '</option>');
     md.addEventListener('change', function () { S.md = md.value; render(); });
+    $('fxWhy').addEventListener('change', function () { S.why = this.value; render(); });
 
     if (!S.isClub) {
       S.picker = NL.clubPicker('#fxClubPicker', {
@@ -2427,7 +2533,7 @@
     }
 
     $('fxClear').addEventListener('click', function () {
-      S.club1 = null; S.venue = 'all'; S.md = ''; md.value = '';
+      S.club1 = null; S.venue = 'all'; S.md = ''; md.value = ''; S.why = ''; $('fxWhy').value = '';
       COMPS.forEach(function (c) { S.comps[c] = true; });
       document.querySelectorAll('[data-fxcomp]').forEach(function (b) { b.classList.add('active'); });
       $('fxVenue').querySelectorAll('.chip').forEach(function (ch) {
