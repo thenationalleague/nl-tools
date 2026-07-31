@@ -1,0 +1,63 @@
+name: Daily table baseline
+
+# Locks the official NLS league tables as the start-of-day baseline,
+# date-stamped, holding full history in assets/data/table-baselines.json.
+# 01:00 UTC = 1am UK in winter, 2am UK in summer — always after midnight
+# UK and always hours before the earliest kick-off, so the captured table
+# is the matchday's frozen "00:01" truth (deductions included).
+
+on:
+  schedule:
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: table-baseline
+  cancel-in-progress: true
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Fetch official tables
+        run: node scripts/fetch-table-baseline.js
+
+      - name: Commit changes if any
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/data/table-baselines.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "chore: daily table baseline snapshot"
+
+          # Push with up to 3 retries; rebase our single data commit on top
+          # of any remote movement (conflicts essentially impossible).
+          for i in 1 2 3; do
+            if git push; then
+              echo "Push succeeded on attempt $i"
+              exit 0
+            fi
+            echo "Push attempt $i failed - fetching and rebasing"
+            git fetch origin main
+            git rebase origin/main || {
+              echo "Rebase failed - bailing"
+              exit 1
+            }
+          done
+          echo "All 3 push attempts failed"
+          exit 1
