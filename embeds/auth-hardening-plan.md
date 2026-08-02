@@ -377,6 +377,34 @@ Sequenced so nothing breaks in production at any step.
    step 5 is worth doing.
 3. **Enable App Check** on the `nl-widgets` project, in monitor-only mode
    first so you can see what would be blocked before enforcing.
+   *Client side done (predictor v3.4, Team of the Week v2.14).* Both widgets
+   load `firebase-app-check-compat` and activate a reCAPTCHA v3 provider
+   before signing in — but only once `APPCHECK_SITE_KEY` in each HTML file
+   holds a key. Until then the constant is empty and the widgets behave
+   exactly as before, which is why this can ship ahead of the console work.
+
+   The remaining half is console-side and cannot be done from the repo:
+
+   1. Firebase console → App Check → register the web app with the
+      **reCAPTCHA v3** provider. It issues a site key and a secret; the
+      secret stays in the console.
+   2. Google reCAPTCHA admin → add every domain the widgets are pasted
+      into: `thenationalleague.org.uk`, `www.thenationalleague.org.uk` and
+      `beta.thenationalleague.org.uk`. A domain that is missing here fails
+      attestation, which is invisible in monitor mode and fatal after step 6.
+   3. Paste the **site key** into `APPCHECK_SITE_KEY` in both
+      `score-predictor.html` and `motm.html` and let CI rebuild the bundles.
+      The site key is public by design; the secret must never enter this
+      repository.
+   4. Leave enforcement OFF. Watch App Check → Metrics for a week or two:
+      it reports verified vs unverified requests per service, so you learn
+      what enforcing would break before it breaks.
+
+   For a preview URL that reCAPTCHA cannot verify, load the page with
+   `?appcheck=debug`, take the token the console prints, and register it
+   under App Check → Manage debug tokens. Debug tokens bypass attestation
+   entirely — register only the ones you are actively using, and delete them
+   afterwards.
 4. **Build and schedule leaderboard aggregation** (§4), writing to a
    read-only `leaderboard/` node.
 5. **Point the Score Predictor at `leaderboard/`** instead of the raw trees.
