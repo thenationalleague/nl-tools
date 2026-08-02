@@ -242,6 +242,54 @@ rather than describing the widgets as secured.
 
 ---
 
+## 3b. Risk assessment — how bad is it really
+
+Written so the decision to launch on Plan B can be made on evidence rather
+than on how alarming the words sound.
+
+### What is actually at stake
+
+First name, surname initial, supported club, football predictions, and a
+free-text note about a player. **No** email addresses, **no** full names
+(closed in v2.5), **no** credentials, nothing financial. It is personal data
+under GDPR — identifiable when combined — but the harm to an individual fan
+from disclosure is close to nil.
+
+The realistic worst case for confidentiality is reputational: a technically
+curious fan noticing and posting about it. Embarrassing on a sponsored
+product; not a notifiable breach in any meaningful sense.
+
+### The integrity risk is the underrated one
+
+Every path is writable by any client for any `jwtId`. Someone could overwrite a
+population of nominations toward one player, or corrupt predictions. If
+nominations inform the Team of the Week article, that is a **manipulable
+editorial input**, and detecting it after the fact would be difficult.
+
+This is a more plausible real-world nuisance than data theft, and it is the
+reason step 5 of Plan B (write-fronting function, rate limits, server-side
+window enforcement) is worth more than its position in the list suggests.
+
+### What is NOT at risk
+
+- NL+ accounts. Firebase data is separate from SSO identity; nothing here
+  grants access to a fan's actual account.
+- Credentials of any kind. None are stored.
+- The `motm-names` attribution names — no client can read them.
+
+### Residual risk after Plan B
+
+An attacker would need a specific fan's `jwtId` **and** a real browser session
+on the site to read or alter that one record, for negligible payoff. Mass
+harvesting and scripted tampering are closed.
+
+That is proportionate for fan-engagement data on a public page. What cannot be
+claimed is that records are **private** — they are not, and no amount of Plan B
+makes them so. Say "casual access is closed and tampering is rate-limited",
+not "the widgets are secure".
+
+---
+
 ## 4. The leaderboard problem
 
 This is the part that makes it more than a day's work, and it is easy to miss.
