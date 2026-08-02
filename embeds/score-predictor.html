@@ -5,20 +5,32 @@
      - JWT identity from _gc_sa_sso_access (sso.sportsalliance.com)
      - One-time team registration (immutable team lock)
      - RTDB (shared nl-widgets project, named Firebase app):
-         users/{jwtId}
+         users/{jwtId}   — teamId/teamName/crestUrl/forename/surnameInitial only
          predictions/{jwtId}/{matchday}/{matchId}
-     - Auto-save on blur; per-row KO lock harden inputs into numbers
-     - Own-team match scores ×3 (no joker)
-     - League table: forename + surname initial + crest + total
+     - Per-row KO lock hardens inputs into numbers
+     - No points, no multipliers, no prizes. Counting model:
+         primary   = correct results (W/D/L)
+         tiebreak  = exact scorelines
+     - Own club's fixture renders as a hero card at the top (soft —
+       other fixtures always available below)
+     - Leaderboard: cumulative, filterable by month + supported club;
+       names shown as forename + surname initial
+     - Club v club table: accuracy % (correct results ÷ settled
+       predictions), min 20 settled predictions to rank
 
-     Sim controls (visible by default during dev):
-       (no param) → show the sim bar with 4 time snapshots
-       ?sim=1     → show the sim bar (explicit form, same as default)
-       ?sim=pre   → freeze sim at 12:00 BST (pre-KO), bar hidden
-       ?sim=live  → freeze sim at 16:00 BST (in-play), bar hidden
-       ?sim=post  → freeze sim at 18:00 BST (post-FT), bar hidden
-       ?sim=demo  → tick from 14:59:50 BST in real time, bar hidden
-       ?sim=off   → real clock, bar hidden (production)
+     Sim controls:
+       (no param)        → real clock, sim bar hidden (production)
+       ?sim=bar          → sim bar visible, live clock
+       ?sim=<datetime>   → sim bar visible, frozen at that moment
+       ?sim=off          → real clock, bar hidden (explicit form)
+
+     Changelog:
+       02/08/2026  v2.0  Rollout model — counting leaderboard (results
+                         first, exacts tiebreak), month + club filters,
+                         club accuracy table, hero own-club card,
+                         removed ×3 multiplier + joker remnants,
+                         stopped writing email to RTDB, sim bar now
+                         opt-in via ?sim.
 
      Scoped under #nlPredictor; BEM .nlsp__ prefix; Carbona inline;
      no external <script src> tags (CMS strips them).
@@ -36,6 +48,7 @@
     <div id="nlsp-submitbar"></div>
     <div id="nlsp-reset"></div>
     <div id="nlsp-table"></div>
+    <div id="nlsp-clubtable"></div>
   </div>
   <div class="nlsp__gate" id="nlsp-gate"></div>
   <div class="nlsp__footer" id="nlsp-footer"></div>
@@ -267,7 +280,38 @@
     display:grid; row-gap:2px;
   }
   #nlPredictor .nlsp__row:first-child { border-top:1px solid var(--border); }
-  #nlPredictor .nlsp__row.is-mult { border-left-color:var(--gold); }
+
+  /* Hero card — the fan's own club's fixture, scaled up and set apart at the
+     top of the matchday. Soft emphasis only: every other fixture stays
+     available below it. Reuses the standard row DOM via the is-hero mod. */
+  #nlPredictor .nlsp__row.is-hero {
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow);
+    padding:14px 16px 12px;
+    margin-bottom:14px;
+    row-gap:4px;
+  }
+  #nlPredictor .nlsp__row.is-hero:first-child { border-top:1px solid var(--border); }
+  #nlPredictor .nlsp__herotag {
+    font-size:10px; text-transform:uppercase; letter-spacing:1.5px;
+    color:var(--gold);
+    font-weight:900; font-variation-settings:'wght' 900;
+    margin-bottom:2px;
+  }
+  #nlPredictor .nlsp__row.is-hero .nlsp__teamline { font-size:17px; min-height:38px; gap:12px; }
+  #nlPredictor .nlsp__row.is-hero .nlsp__teamline img { width:34px; height:34px; }
+  #nlPredictor .nlsp__row.is-hero .nlsp__teamscore { font-size:24px; min-width:44px; }
+  #nlPredictor .nlsp__row.is-hero .nlsp__teamscore input {
+    width:56px; height:40px; font-size:21px;
+  }
+  @media (max-width:520px) {
+    #nlPredictor .nlsp__row.is-hero .nlsp__teamline { font-size:15px; }
+    #nlPredictor .nlsp__row.is-hero .nlsp__teamline img { width:28px; height:28px; }
+    #nlPredictor .nlsp__row.is-hero .nlsp__teamscore { font-size:20px; }
+    #nlPredictor .nlsp__row.is-hero .nlsp__teamscore input { width:48px; height:36px; font-size:18px; }
+  }
+
   /* No row background tint for live — just the pulse on the meta strip */
   #nlPredictor .nlsp__row.is-exact { background:color-mix(in srgb, var(--gold) 10%, var(--white)); }
   #nlPredictor .nlsp__row.is-right { background:color-mix(in srgb, var(--green) 6%, var(--white)); }
@@ -536,11 +580,49 @@
     font-size:14px;
     font-weight:700; font-variation-settings:'wght' 700;
   }
+  /* Leaderboard rows carry an extra exact-scorelines cell */
+  #nlPredictor #nlsp-table .nlsp__trow { grid-template-columns:24px 24px 1fr auto auto; }
   #nlPredictor .nlsp__trow.is-you { background:color-mix(in srgb, var(--primary) 4%, var(--white)); }
   #nlPredictor .nlsp__trow .nlsp__rank { color:var(--text-muted); font-weight:900; font-variation-settings:'wght' 900; }
   #nlPredictor .nlsp__trow img { width:22px; height:22px; border-radius:3px; background:var(--white); object-fit:contain; }
   #nlPredictor .nlsp__trow .nlsp__pts { font-size:14px; font-weight:900; font-variation-settings:'wght' 900; color:var(--text); padding:0; background:none; }
   #nlPredictor .nlsp__trow .nlsp__youlbl { color:var(--text-muted); font-weight:600; font-variation-settings:'wght' 600; }
+  /* Secondary stat (exact scorelines) sits right of the results count */
+  #nlPredictor .nlsp__trow .nlsp__exacts {
+    font-size:12px; color:var(--gold);
+    font-weight:800; font-variation-settings:'wght' 800;
+    min-width:34px; text-align:right;
+  }
+  #nlPredictor .nlsp__trow .nlsp__exacts::before { content:'\2605\00a0'; font-size:10px; }
+
+  /* Leaderboard scope filters — month + club selects in the table head */
+  #nlPredictor .nlsp__tablefilters {
+    display:flex; gap:8px; margin-top:8px;
+  }
+  #nlPredictor .nlsp__tablefilters select {
+    flex:1; min-width:0;
+    font-family:inherit; font-size:12px;
+    padding:6px 8px; border-radius:var(--radius);
+    border:1px solid var(--border); background:var(--white); color:var(--text);
+    font-weight:700; font-variation-settings:'wght' 700;
+  }
+  #nlPredictor .nlsp__tablefilters select:focus {
+    outline:none; border-color:var(--primary);
+    box-shadow:0 0 0 2px color-mix(in srgb, var(--primary) 25%, transparent);
+  }
+
+  /* Club v club table — accuracy % rows + below-floor footnote */
+  #nlPredictor .nlsp__clubrow-fans {
+    font-size:11px; color:var(--text-muted);
+    font-weight:600; font-variation-settings:'wght' 600;
+    white-space:nowrap;
+  }
+  #nlPredictor .nlsp__clubfoot {
+    padding:8px 14px 0;
+    font-size:11px; color:var(--text-muted);
+    font-weight:600; font-variation-settings:'wght' 600;
+    border-top:1px solid var(--border); margin-top:6px;
+  }
 
   /* Sim bar (foot) */
   #nlPredictor .nlsp__simbar {
@@ -625,7 +707,7 @@
   var MAX_PAGES  = 10;
   var IN_PLAY_MIN = 105;
   var EDIT_WINDOW_HOURS = 168; // predictions open 7 days before KO
-  var OWN_TEAM_MULT = 3;
+  var CLUB_TABLE_MIN_SETTLED = 20; // settled predictions a club needs before it ranks
 
   // ---------- DOM refs ----------
   var banner    = document.getElementById('nlsp-banner');
@@ -637,6 +719,7 @@
   var submitb   = document.getElementById('nlsp-submitbar');
   var resetEl   = document.getElementById('nlsp-reset');
   var tableEl   = document.getElementById('nlsp-table');
+  var clubTableEl = document.getElementById('nlsp-clubtable');
   var simEl     = document.getElementById('nlsp-sim');
   var sponsorEl = document.getElementById('nlsp-sponsor');
   var footerEl  = document.getElementById('nlsp-footer');
@@ -745,17 +828,17 @@
   }
 
   // ---------- sim mode (URL-driven) ----------
-  // Returns a Date to use as the simulated 'now', or null for the real clock.
-  // ?sim=2025-08-09T14:00:00Z (or any value parseable by new Date()) freezes
-  // the sim at that moment. ?sim=off explicitly disables. No param => null.
+  // Production default (no ?sim param) is the real clock with the sim bar
+  // hidden. ?sim=bar shows the bar on the live clock; ?sim=<datetime>
+  // (anything new Date() can parse) shows the bar frozen at that moment.
   function parseSimMode() {
     var p = new URLSearchParams(window.location.search).get('sim');
-    if (p == null) return null;
+    if (p == null) return { now: null, bar: false };
     var l = p.toLowerCase();
-    if (l === 'off' || l === 'none' || l === '0' || l === 'false') return null;
+    if (l === 'off' || l === 'none' || l === '0' || l === 'false') return { now: null, bar: false };
     var d = new Date(p);
-    if (!isNaN(d.getTime())) return d;
-    return null;
+    if (!isNaN(d.getTime())) return { now: d, bar: true };
+    return { now: null, bar: true };
   }
 
   // ---------- state ----------
@@ -767,12 +850,13 @@
     registration: null,
     allPredsRaw: {},    // full RTDB predictions tree { jwtId: { matchday: { matchId: ... } } }
     predictions: {},    // current user, current matchday
-    allPreds: {},       // every user, current matchday only (used by leaderboard)
     drafts: {},
     editing: {},
     allUsers: {},
     selectedMatchday: null, // explicit override from the date selector; null = derive
-    sim: { fixed: null }     // explicit sim 'now' time; null = real clock
+    lbMonth: null,          // leaderboard month filter ('YYYY-MM'); null = whole season
+    lbClub: null,           // leaderboard club filter (teamId); null = all clubs
+    sim: { fixed: null, barEnabled: false } // explicit sim 'now'; bar shown only when ?sim present
   };
 
   // ---------- sim clock ----------
@@ -787,7 +871,7 @@
   function clearSimFixed() { setSimFixed(null); }
   function renderAll() {
     renderDatebar(); renderSimBar(); renderHero();
-    renderFixtures(); renderSubmitbar(); renderReset(); renderTable();
+    renderFixtures(); renderSubmitbar(); renderReset(); renderTable(); renderClubTable();
   }
 
   // ---------- matchday derivation ----------
@@ -854,10 +938,6 @@
     if (!state.user) return;
     var key = currentMatchdayKey();
     state.predictions = (state.allPredsRaw[state.user.id] && state.allPredsRaw[state.user.id][key]) || {};
-    state.allPreds = {};
-    Object.keys(state.allPredsRaw).forEach(function (jwtId) {
-      state.allPreds[jwtId] = (state.allPredsRaw[jwtId] && state.allPredsRaw[jwtId][key]) || {};
-    });
   }
 
   // ---------- match state ----------
@@ -881,30 +961,36 @@
     return 'post';
   }
   function outcome(h, a) { return h > a ? 'H' : (h < a ? 'A' : 'D'); }
-  function basePoints(predH, predA, realH, realA) {
+  // Counting model — no points. 'exact' implies a correct result too.
+  function verdictOf(predH, predA, realH, realA) {
     if (predH == null || predA == null || realH == null || realA == null) return null;
-    if (predH === realH && predA === realA) return 3;
-    if (outcome(predH, predA) === outcome(realH, realA)) return 1;
-    return 0;
+    if (predH === realH && predA === realA) return 'exact';
+    if (outcome(predH, predA) === outcome(realH, realA)) return 'result';
+    return 'wrong';
   }
   function isOwnTeamMatch(m, reg) {
     return reg && (m.attributes.homeTeam.teamID === reg.teamId || m.attributes.awayTeam.teamID === reg.teamId);
   }
-  function multiplierFor(m, reg) { return isOwnTeamMatch(m, reg) ? OWN_TEAM_MULT : 1; }
-  function totalForUser(jwtId, now) {
-    var preds = (jwtId === state.user.id) ? state.predictions : (state.allPreds[jwtId] || {});
-    var reg   = (jwtId === state.user.id) ? state.registration : state.allUsers[jwtId];
-    var total = 0, settled = 0;
-    for (var i = 0; i < state.matches.length; i++) {
-      var m = state.matches[i];
+  function monthOfMatchday(mdKey) { return String(mdKey || '').slice(0, 7); } // 'YYYY-MM'
+  // Cumulative tally for one user across the whole season (or one month).
+  // results = correct W/D/L (includes exacts); exacts = exact scorelines.
+  function tallyForUser(jwtId, monthFilter, now) {
+    var byDay = state.allPredsRaw[jwtId] || {};
+    var t = { results: 0, exacts: 0, settled: 0 };
+    for (var i = 0; i < state.allMatches.length; i++) {
+      var m = state.allMatches[i];
+      var md = matchMatchdayKey(m);
+      if (monthFilter && monthOfMatchday(md) !== monthFilter) continue;
+      var p = byDay[md] && byDay[md][m.id];
+      if (!p) continue;
       if (stateOf(m, now) !== 'post') continue;
-      var p = preds[m.id]; if (!p) continue;
-      var base = basePoints(p.home, p.away, m.attributes.homeTeam.score, m.attributes.awayTeam.score);
-      if (base == null) continue;
-      total += base * multiplierFor(m, reg);
-      settled += 1;
+      var v = verdictOf(p.home, p.away, m.attributes.homeTeam.score, m.attributes.awayTeam.score);
+      if (v == null) continue;
+      t.settled += 1;
+      if (v === 'exact') { t.exacts += 1; t.results += 1; }
+      else if (v === 'result') { t.results += 1; }
     }
-    return { total: total, settled: settled };
+    return t;
   }
 
   // ---------- fetch fixtures ----------
@@ -1016,7 +1102,8 @@
           '<h1>Welcome, ' + $h(state.user.forename) + '</h1>' +
         '</div>' +
         '<p style="color:var(--text-muted);font-size:14px;margin:6px 0 0;">' +
-          'Pick your team from the National, North or South division. Your team\'s match each week scores <b style="color:var(--gold);">×3</b>.' +
+          'Pick your club from the National, North or South division. Their match leads your predictions each matchday, and you\'ll appear on the leaderboard as ' +
+          $h(state.user.forename) + ' ' + $h(state.user.surnameInitial || '') + '.' +
         '</p>' +
         '<label for="nlsp-team-select">Your team</label>' +
         '<select id="nlsp-team-select">' +
@@ -1035,10 +1122,11 @@
       var team = flat.filter(function (o) { return o.id === teamId; })[0];
       if (!team) return;
       btn.disabled = true; btn.textContent = 'Saving…';
+      // Deliberately minimal: forename + surname initial only — the record is
+      // readable by every widget client, so no email / full surname here.
       var payload = {
         teamId: team.id, teamName: team.name, crestUrl: team.crest || '',
         forename: state.user.forename, surnameInitial: state.user.surnameInitial,
-        email: state.user.email || '',
         registeredAt: firebase.database.ServerValue.TIMESTAMP
       };
       fbDb.ref('users/' + state.user.id).set(payload).catch(function (err) {
@@ -1180,16 +1268,24 @@
       return;
     }
     var now = simNow();
-    fixtures.innerHTML = state.matches.map(function (m) { return rowHTML(m, now); }).join('');
+    // Soft hero: the fan's own club's fixture leads the matchday as a large
+    // card; everything else renders below it, always available.
+    var reg = state.registration;
+    var own = null, rest = [];
+    state.matches.forEach(function (m) {
+      if (!own && isOwnTeamMatch(m, reg)) own = m;
+      else rest.push(m);
+    });
+    fixtures.innerHTML =
+      (own ? rowHTML(own, now, true) : '') +
+      rest.map(function (m) { return rowHTML(m, now, false); }).join('');
     wireRow();
   }
 
-  function rowHTML(m, now) {
+  function rowHTML(m, now, hero) {
     var a = m.attributes;
     var s = stateOf(m, now);
     var ko = koOf(m);
-    var reg = state.registration;
-    var isOwn = isOwnTeamMatch(m, reg);
     var p = state.predictions[m.id];
     var d = state.drafts[m.id];
 
@@ -1216,20 +1312,18 @@
       meta = '<span class="nlsp__livedot" aria-hidden="true"></span><span class="nlsp__livelbl">Live</span>' + pickLive;
     } else if (s === 'post') {
       var realH = a.homeTeam.score, realA = a.awayTeam.score;
-      if (p && p.home != null) {
-        var b = basePoints(p.home, p.away, realH, realA);
-        var mult = multiplierFor(m, reg);
-        var pts = (b == null) ? null : b * mult;
-        var verdictWord = b === 3 ? 'Exact' : b === 1 ? 'Right result' : 'Wrong';
-        var ptsCls, modCls;
-        if (b === 3) { ptsCls = 'is-exact'; modCls = 'is-exact'; }
-        else if (b === 1) { ptsCls = 'is-right'; modCls = 'is-right'; }
-        else { ptsCls = 'is-wrong'; modCls = 'is-wrong'; }
-        rowMod = ' ' + modCls;
+      var v = (p && p.home != null) ? verdictOf(p.home, p.away, realH, realA) : null;
+      if (v != null) {
+        rowMod = v === 'exact' ? ' is-exact' : v === 'result' ? ' is-right' : ' is-wrong';
+        // No points any more — the pill names the verdict. Wrong gets no
+        // pill; the muted row tint says enough.
+        var pill = v === 'exact'  ? '<span class="nlsp__pts is-exact">Exact score</span>'
+                 : v === 'result' ? '<span class="nlsp__pts is-right">Right result</span>'
+                 : '';
         meta =
           '<span class="nlsp__ftlabel">FT</span>' +
-          '<span class="nlsp__pickline">Your pick <b>' + p.home + '–' + p.away + '</b> · ' + verdictWord + '</span>' +
-          '<span class="nlsp__pts ' + ptsCls + '">+' + (pts != null ? pts : 0) + '</span>';
+          '<span class="nlsp__pickline">Your pick <b>' + p.home + '–' + p.away + '</b>' + (v === 'wrong' ? ' · Wrong' : '') + '</span>' +
+          pill;
       } else {
         meta = '<span class="nlsp__ftlabel">FT</span><span class="nlsp__pickline" style="opacity:.7;">No prediction</span>';
       }
@@ -1294,15 +1388,13 @@
     }
 
     var rowCls = 'nlsp__row';
-    if (isOwn) rowCls += ' is-mult';
+    if (hero) rowCls += ' is-hero';
     if (s === 'live') rowCls += ' is-live';
     if (preState === 'editing') rowCls += ' is-editing';
     rowCls += rowMod;
-    var rowTitle = isOwn && reg
-      ? ' title="Your ' + (reg.teamName || 'team') + ' predictions score triple."'
-      : '';
 
-    return '<div class="' + rowCls + '"' + rowTitle + '>' +
+    return '<div class="' + rowCls + '">' +
+      (hero ? '<div class="nlsp__herotag">Your club</div>' : '') +
       '<div class="nlsp__meta">' + meta + '</div>' +
       teamLine(a.homeTeam, 'home') +
       teamLine(a.awayTeam, 'away') +
@@ -1382,7 +1474,7 @@
       return;
     }
     var payload = {
-      home: d.home, away: d.away, joker: false,
+      home: d.home, away: d.away,
       submittedAt: firebase.database.ServerValue.TIMESTAMP
     };
     fbDb.ref('predictions/' + state.user.id + '/' + currentMatchdayKey() + '/' + mid).update(payload)
@@ -1443,7 +1535,7 @@
     ids.forEach(function (mid) {
       var d = state.drafts[mid];
       if (!d || d.home == null || d.away == null) return;
-      updates[mid] = { home: d.home, away: d.away, joker: false, submittedAt: ts };
+      updates[mid] = { home: d.home, away: d.away, submittedAt: ts };
     });
     if (Object.keys(updates).length === 0) return;
     var btn = document.getElementById('nlsp-submit');
@@ -1540,35 +1632,93 @@
   }
 
   // ---------- league table ----------
-  function renderTable() {
-    if (!state.matches.length) { tableEl.innerHTML = ''; return; }
-    var now = simNow();
-    var myComp = userCompId();
+  // Every month that has at least one fixture, in season order.
+  function seasonMonths() {
+    var seen = {};
+    (state.allMatches || []).forEach(function (m) {
+      var mo = monthOfMatchday(matchMatchdayKey(m));
+      if (mo) seen[mo] = true;
+    });
+    return Object.keys(seen).sort();
+  }
+  function monthLabel(mo) {
+    return new Date(mo + '-15T12:00:00Z').toLocaleDateString('en-GB', { month:'long', timeZone:'Europe/London' });
+  }
+  // All registered users' tallies for the current month scope, with their
+  // registration record attached. Shared by the leaderboard + club table.
+  function allTallies(now) {
     var userIds = Object.keys(state.allUsers);
-    if (state.user && userIds.indexOf(state.user.id) === -1 && state.registration) userIds.push(state.user.id);
-
-    var rows = userIds.map(function (uid) {
+    if (state.user && state.registration && userIds.indexOf(state.user.id) === -1) userIds.push(state.user.id);
+    return userIds.map(function (uid) {
       var reg = (uid === state.user.id) ? state.registration : state.allUsers[uid];
-      var t = totalForUser(uid, now);
-      return { uid: uid, reg: reg, total: t.total, settled: t.settled };
-    }).filter(function (r) {
-      if (!r.reg) return false;
-      // Per-division leaderboard — only fans whose team is in your competition
-      if (!myComp) return true;
-      var theirComp = teamCompId(r.reg.teamId);
-      return !theirComp || theirComp === myComp;
-    }).sort(function (a, b) { return b.total - a.total; });
+      if (!reg) return null;
+      var t = tallyForUser(uid, state.lbMonth, now);
+      return { uid: uid, reg: reg, results: t.results, exacts: t.exacts, settled: t.settled };
+    }).filter(Boolean);
+  }
+  function filterControlsHTML() {
+    var months = seasonMonths();
+    var clubs = {};
+    Object.keys(state.allUsers).forEach(function (uid) {
+      var reg = state.allUsers[uid];
+      if (reg && reg.teamId && !clubs[reg.teamId]) clubs[reg.teamId] = reg.teamName || reg.teamId;
+    });
+    if (state.registration && !clubs[state.registration.teamId]) clubs[state.registration.teamId] = state.registration.teamName;
+    var clubIds = Object.keys(clubs).sort(function (a, b) { return clubs[a].localeCompare(clubs[b]); });
+    return '<div class="nlsp__tablefilters">' +
+      '<select id="nlsp-lb-month" aria-label="Filter by month">' +
+        '<option value="">Whole season</option>' +
+        months.map(function (mo) {
+          return '<option value="' + $h(mo) + '"' + (state.lbMonth === mo ? ' selected' : '') + '>' + $h(monthLabel(mo)) + '</option>';
+        }).join('') +
+      '</select>' +
+      '<select id="nlsp-lb-club" aria-label="Filter by club">' +
+        '<option value="">All clubs</option>' +
+        clubIds.map(function (id) {
+          return '<option value="' + $h(id) + '"' + (state.lbClub === id ? ' selected' : '') + '>' + $h(clubs[id]) + '</option>';
+        }).join('') +
+      '</select>' +
+    '</div>';
+  }
+  function wireFilters() {
+    var mSel = document.getElementById('nlsp-lb-month');
+    var cSel = document.getElementById('nlsp-lb-club');
+    if (mSel) mSel.addEventListener('change', function () {
+      state.lbMonth = mSel.value || null;
+      renderTable(); renderClubTable();
+    });
+    if (cSel) cSel.addEventListener('change', function () {
+      state.lbClub = cSel.value || null;
+      renderTable();
+    });
+  }
+  function renderTable() {
+    if (!(state.allMatches || []).length) { tableEl.innerHTML = ''; return; }
+    var now = simNow();
 
-    if (!rows.length) { tableEl.innerHTML = ''; return; }
+    var rows = allTallies(now).filter(function (r) {
+      if (state.lbClub && r.reg.teamId !== state.lbClub) return false;
+      // Hide zero-settled players from a filtered view (a late joiner never
+      // looks "punished" in a month they sat out) — but always show yourself.
+      return r.settled > 0 || r.uid === state.user.id;
+    }).sort(function (a, b) {
+      if (b.results !== a.results) return b.results - a.results;
+      if (b.exacts !== a.exacts) return b.exacts - a.exacts;
+      return (a.reg.forename || '').localeCompare(b.reg.forename || '');
+    });
 
+    var scope = state.lbMonth ? monthLabel(state.lbMonth) : 'Whole season';
     var inner =
       '<div class="nlsp__tablehead">' +
         '<div class="nlsp__kicker">Leaderboard</div>' +
-        '<div class="nlsp__tsub">' +
-          (rows[0].settled ? rows[0].settled + ' settled · ' : '') +
+        '<div class="nlsp__tsub">' + $h(scope) + ' · correct results, exact scores break ties · ' +
           rows.length + ' player' + (rows.length === 1 ? '' : 's') +
         '</div>' +
+        filterControlsHTML() +
       '</div>' +
+      (rows.length === 0
+        ? '<div class="nlsp__clubfoot">No players in this view yet — try a different month or club.</div>'
+        : '') +
       rows.map(function (r, i) {
         var name = $h(r.reg.forename) + ' ' + $h(r.reg.surnameInitial || '');
         var cls = 'nlsp__trow' + (r.uid === state.user.id ? ' is-you' : '');
@@ -1576,12 +1726,72 @@
           '<span class="nlsp__rank">' + (i + 1) + '</span>' +
           crestImg(r.reg.crestUrl, r.reg.teamName, 22) +
           '<span>' + name + (r.uid === state.user.id ? ' <span class="nlsp__youlbl">(you)</span>' : '') + '</span>' +
-          '<span class="nlsp__pts">' + r.total + '</span>' +
+          '<span class="nlsp__exacts" title="Exact scorelines">' + r.exacts + '</span>' +
+          '<span class="nlsp__pts" title="Correct results">' + r.results + '</span>' +
         '</div>';
       }).join('');
 
     tableEl.className = 'nlsp__table';
     tableEl.innerHTML = inner;
+    wireFilters();
+  }
+
+  // ---------- club v club table ----------
+  // Accuracy percentage (correct results ÷ settled predictions across the
+  // club's fans) so Torquay's fanbase size doesn't drown out Farnham's.
+  // Clubs need CLUB_TABLE_MIN_SETTLED settled predictions to rank.
+  function renderClubTable() {
+    if (!(state.allMatches || []).length) { clubTableEl.innerHTML = ''; return; }
+    var now = simNow();
+    var byClub = {};
+    allTallies(now).forEach(function (r) {
+      if (!r.reg.teamId || !r.settled) return;
+      var c = byClub[r.reg.teamId] || (byClub[r.reg.teamId] = {
+        teamId: r.reg.teamId, teamName: r.reg.teamName, crestUrl: r.reg.crestUrl,
+        fans: 0, results: 0, exacts: 0, settled: 0
+      });
+      c.fans += 1; c.results += r.results; c.exacts += r.exacts; c.settled += r.settled;
+    });
+    var clubs = Object.keys(byClub).map(function (id) { return byClub[id]; });
+    if (!clubs.length) { clubTableEl.innerHTML = ''; return; }
+
+    var ranked = clubs.filter(function (c) { return c.settled >= CLUB_TABLE_MIN_SETTLED; })
+      .sort(function (a, b) {
+        var acc = (b.results / b.settled) - (a.results / a.settled);
+        if (acc) return acc;
+        var ex = (b.exacts / b.settled) - (a.exacts / a.settled);
+        if (ex) return ex;
+        return (a.teamName || '').localeCompare(b.teamName || '');
+      });
+    var below = clubs.length - ranked.length;
+
+    var inner =
+      '<div class="nlsp__tablehead">' +
+        '<div class="nlsp__kicker">Club v club</div>' +
+        '<div class="nlsp__tsub">' +
+          $h(state.lbMonth ? monthLabel(state.lbMonth) : 'Whole season') +
+          ' · share of correct results across each club’s fans' +
+        '</div>' +
+      '</div>' +
+      ranked.map(function (c, i) {
+        var pct = Math.round(100 * c.results / c.settled);
+        return '<div class="nlsp__trow">' +
+          '<span class="nlsp__rank">' + (i + 1) + '</span>' +
+          crestImg(c.crestUrl, c.teamName, 22) +
+          '<span>' + $h(c.teamName) +
+            ' <span class="nlsp__clubrow-fans">' + c.fans + ' fan' + (c.fans === 1 ? '' : 's') + ' · ' + c.settled + ' settled</span>' +
+          '</span>' +
+          '<span class="nlsp__pts">' + pct + '%</span>' +
+        '</div>';
+      }).join('') +
+      (ranked.length === 0
+        ? '<div class="nlsp__clubfoot">No club has ' + CLUB_TABLE_MIN_SETTLED + ' settled predictions in this period yet.</div>'
+        : (below > 0
+            ? '<div class="nlsp__clubfoot">' + below + ' club' + (below === 1 ? ' needs' : 's need') + ' ' + CLUB_TABLE_MIN_SETTLED + '+ settled predictions to rank.</div>'
+            : ''));
+
+    clubTableEl.className = 'nlsp__table';
+    clubTableEl.innerHTML = inner;
   }
 
   // ---------- sim bar (dev) ----------
@@ -1599,6 +1809,7 @@
     return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
   }
   function renderSimBar() {
+    if (!state.sim.barEnabled) { simEl.className = ''; simEl.innerHTML = ''; return; }
     var d = simNow();
     var live = state.sim.fixed
       ? 'Sim · ' + d.toLocaleString('en-GB', { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit', timeZone:'Europe/London' }) + ' BST'
@@ -1644,14 +1855,14 @@
         // matchday view before rendering.
         renderSponsor();
         recomputeMatchday();
-        renderDatebar(); renderHero(); renderFixtures(); renderSubmitbar(); renderReset(); renderTable(); renderSimBar();
+        renderDatebar(); renderHero(); renderFixtures(); renderSubmitbar(); renderReset(); renderTable(); renderClubTable(); renderSimBar();
       }
     });
     fbDb.ref('predictions').on('value', function (snap) {
       state.allPredsRaw = snap.val() || {};
       recomputePredictionsFromRaw();
       if (!main.hidden) {
-        renderFixtures(); renderSubmitbar(); renderReset(); renderTable();
+        renderFixtures(); renderSubmitbar(); renderReset(); renderTable(); renderClubTable();
       }
     });
   }
@@ -1684,7 +1895,7 @@
         '<img class="nlsp__gate-mark" src="' + NLPLUS_LOGO_URL + '" alt="NL+" ' +
           'onerror="this.onerror=null;this.style.display=\'none\';">' +
         '<h2>Sign in with NL+ to play for free</h2>' +
-        '<p>Pick scores for every match. Your team’s game is worth triple. Climb the leaderboard.</p>' +
+        '<p>Predict every National League scoreline. Most correct results tops the table — exact scores break the ties.</p>' +
         '<a class="nlsp__btn" href="' + $h(signInHref()) + '">Sign in with NL+</a>' +
       '</div>';
   }
@@ -1751,15 +1962,12 @@
       forename: claims.forename || 'there',
       surname:  claims.surname  || '',
       surnameInitial: (claims.surname || '').charAt(0).toUpperCase(),
-      email:    claims.email    || '',
       favTeamName: claims.favourite_team || null
     };
 
-    state.sim.mode = parseSimMode();
-    if (state.sim.mode) {
-      state.sim.index = state.sim.mode.index;
-      if (state.sim.mode.autoDemo) startDemo();
-    }
+    var sim = parseSimMode();
+    state.sim.barEnabled = sim.bar;
+    if (sim.now) state.sim.fixed = sim.now;
 
     Promise.all([
       loadFirebase().then(function () {
@@ -1775,9 +1983,6 @@
       })
     ]).then(function () {
       hideBanner();
-      // If a sim datetime came from the URL, apply it before first render
-      var simParam = parseSimMode();
-      if (simParam) state.sim.fixed = simParam;
       recomputeMatchday();
       listenAll();
     }).catch(function (err) {
