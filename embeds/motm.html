@@ -42,6 +42,14 @@
      own (a date in May 2026 loads 2025/26), refetching fixtures.
 
      Changelog:
+       02/08/2026  v2.7  Squad numbers become pills in the club's
+                         colours, the substitutes divider becomes a
+                         club-coloured strip reading "Substitutes"
+                         rather than "Came on", and team columns use the
+                         readable-secondary helper. Near-white club
+                         colours (Boreham Wood) get an edge so the
+                         strips and pills don't vanish into the card.
+                         "My team:" dropped from the hero.
        02/08/2026  v2.6  Teamsheets now use NLS's own lineup order
                          (formationPlace — keeper first, then out from
                          the back) instead of shirt number, which put #6
@@ -326,16 +334,10 @@
     letter-spacing:-.4px;
     overflow-wrap:anywhere;
   }
-  #nlMotm .nlsm__clubnamelbl {
-    font-size:15px; letter-spacing:0;
-    font-weight:600; font-variation-settings:'wght' 600;
-    opacity:.8;
-  }
   @media (max-width:520px) {
     #nlMotm .nlsm__clubhero { gap:12px; padding:13px 15px; }
     #nlMotm .nlsm__clubcrest { width:48px; height:48px; }
     #nlMotm .nlsm__clubname { font-size:20px; }
-    #nlMotm .nlsm__clubnamelbl { font-size:13px; }
     #nlMotm .nlsm__clubfan { font-size:11px; }
   }
   /* Supported club is not locked — this is the way out of it. */
@@ -456,14 +458,17 @@
     flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
   #nlMotm .nlsm__plist { display:flex; flex-direction:column; }
+  /* Substitutes strip — the team's own colours, so it reads as part of that
+     club's sheet rather than as a neutral divider. */
   #nlMotm .nlsm__subdiv {
-    padding:6px 10px 3px;
+    padding:5px 10px;
     font-size:11px; text-transform:uppercase; letter-spacing:1px;
-    color:var(--text-muted);
+    background:var(--team-primary,var(--off-white));
+    color:var(--team-secondary,var(--text-muted));
     font-weight:800; font-variation-settings:'wght' 800;
-    border-top:1px dashed var(--border);
-    margin-top:2px;
+    opacity:.92;
   }
+  #nlMotm .nlsm__teamcol.is-home .nlsm__subdiv { text-align:right; }
   #nlMotm .nlsm__player {
     -webkit-appearance:none; appearance:none;
     text-align:left; font:inherit;
@@ -479,12 +484,17 @@
     border-top:none;
   }
   #nlMotm .nlsm__player:hover { background:var(--off-white); }
+  /* Squad number as a pill in the club's colours, matching the header strip
+     and the rest of the widget's colourways. */
   #nlMotm .nlsm__pshirt {
-    flex:none; display:inline-block;
-    min-width:24px; text-align:center;
-    font-size:13px;
+    flex:none; display:inline-flex;
+    align-items:center; justify-content:center;
+    min-width:26px; height:22px; padding:0 6px;
+    border-radius:999px;
+    background:var(--team-primary,var(--off-white));
+    color:var(--team-secondary,var(--text-muted));
+    font-size:12px; line-height:1;
     font-weight:900; font-variation-settings:'wght' 900;
-    color:var(--text-muted);
   }
   #nlMotm .nlsm__pname {
     flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
@@ -519,6 +529,14 @@
   #nlMotm .nlsm__teamcol.is-home .nlsm__player.is-selected {
     box-shadow:inset -3px 0 0 var(--primary);
   }
+
+  /* Boreham Wood's primary is #FFFFFF. Without an edge the header strip,
+     substitutes strip and number pills disappear into the card. */
+  #nlMotm .nlsm__teamcol.is-pale .nlsm__teamhead { box-shadow:inset 0 -1px 0 var(--border); }
+  #nlMotm .nlsm__teamcol.is-pale .nlsm__subdiv {
+    box-shadow:inset 0 1px 0 var(--border), inset 0 -1px 0 var(--border);
+  }
+  #nlMotm .nlsm__teamcol.is-pale .nlsm__pshirt { box-shadow:inset 0 0 0 1px var(--border); }
 
   /* Optional note */
   #nlMotm .nlsm__note {
@@ -1444,9 +1462,7 @@
           : '') +
         '<span class="nlsm__clubwho">' +
           (who ? '<span class="nlsm__clubfan">' + $h(who) + '</span>' : '') +
-          '<span class="nlsm__clubname">' +
-            '<span class="nlsm__clubnamelbl">My team:</span> ' + $h(r.teamName) +
-          '</span>' +
+          '<span class="nlsm__clubname">' + $h(r.teamName) + '</span>' +
         '</span>' +
       '</div>' +
       '<div class="nlsm__swapline">Not a ' + $h(clubShort(r.teamId, r.teamName)) + ' fan? ' +
@@ -1687,8 +1703,10 @@
       var rows = ps.map(function (p) {
         var isSub = p.status !== 'Start';
         var divider = '';
-        if (isSub && !seenSub) { seenSub = true; divider = '<div class="nlsm__subdiv">Came on</div>'; }
-        var shirt = p.shirt != null ? '#' + p.shirt : '';
+        if (isSub && !seenSub) { seenSub = true; divider = '<div class="nlsm__subdiv">Substitutes</div>'; }
+        // No '#': the number sits in a squad-colour pill, which reads as a
+        // shirt number on its own.
+        var shirt = p.shirt != null ? String(p.shirt) : '';
         var cls = 'nlsm__player' + (isSub ? ' is-sub' : '') + (p.playerId === selectedPid ? ' is-selected' : '');
         return divider +
           '<button type="button" class="' + cls + '" ' +
@@ -1702,7 +1720,13 @@
           '</button>';
       }).join('');
       var teamLabel = team.shortName || team.name || '';
-      return '<div class="nlsm__teamcol' + (isHome ? ' is-home' : '') + '" style="--team-primary:' + $h(palette.primary) + ';--team-secondary:' + $h(palette.secondary) + ';">' +
+      // Same treatment as the hero: use the club's declared secondary, but
+      // fall back where the pair would be illegible, and flag a near-white
+      // primary so the header strip and number pills keep an edge.
+      var onColour = onClubColour(palette.primary, palette.secondary);
+      var paleCol  = luminanceOf(palette.primary) > 0.85 ? ' is-pale' : '';
+      return '<div class="nlsm__teamcol' + (isHome ? ' is-home' : '') + paleCol +
+             '" style="--team-primary:' + $h(palette.primary) + ';--team-secondary:' + $h(onColour) + ';">' +
         '<div class="nlsm__teamhead">' +
           (team.crest ? '<img src="' + $h(team.crest) + '" alt="" onerror="this.style.display=\'none\';">' : '') +
           '<span class="nlsm__thname">' + $h(teamLabel) + '</span>' +
