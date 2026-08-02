@@ -1,9 +1,21 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.26 (30/07/2026)
+   Version: v1.27 (02/08/2026)
 
    Changelog
+   v1.27 (02/08/2026)
+     - NL.icon() reaches the match-event icons. The sprite sheet gains 14
+       filled icons (ball, goal, card, sub-on, sub-off, corner, free-kick,
+       offside, save, miss, block, lineup, whistle-start, whistle-stop),
+       so a tool no longer has to inline its own copy of a football. No
+       code change here — the helper already builds a <use> from any name
+       — but the documented list was the only place to find out what
+       exists, so leaving it stale would have hidden the new half.
+       Colour is the caller's: card takes --card-yellow/--card-red,
+       sub-on takes --green and sub-off --red.
+       Cache-bust ?v=28 -> ?v=29 in lockstep.
+
    v1.26 (30/07/2026)
      - NL.csvParse(text, {header}) — the symmetric half of NL.csv, which
        has only ever gone rows -> string. Full RFC-4180 state machine, so
@@ -1181,9 +1193,19 @@
             NL.icon('add', 'md')     → <svg class="icon icon--md">...</svg>
             NL.icon('delete', 'sm')  → <svg class="icon icon--sm">...</svg>
      Available sizes: 'sm' (16px), 'md' (20px, default), 'lg' (24px)
-     Available icons: add, close, back, forward, up, down, download, upload,
-       tick, refresh, settings, edit, search, eye, filter, calendar, user,
-       warning, info, link, star, star-filled, send, delete             */
+
+     UI icons (stroked): add, close, back, forward, up, down, download,
+       upload, tick, refresh, settings, edit, search, eye, filter,
+       calendar, user, warning, info, link, star, star-filled, send, delete
+
+     Match events (filled): ball, goal, card, sub-on, sub-off, corner,
+       free-kick, offside, save, miss, block, lineup, whistle-start,
+       whistle-stop
+
+     Both kinds take their colour from the parent's `color`. The match-event
+     set carries no semantic colour of its own — a card is drawn once and
+     coloured var(--card-yellow) or var(--card-red) by the caller, sub-on
+     var(--green) and sub-off var(--red).                              */
   window.NL.icon = function(name, size) {
     var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     var cls = 'icon';
