@@ -42,6 +42,17 @@
      own (a date in May 2026 loads 2025/26), refetching fixtures.
 
      Changelog:
+       02/08/2026  v2.8  Lineup order corrected: v2.6 sorted by
+                         formationPlace on the assumption it ran 1-11
+                         from the back. It does not — it is a pitch-slot
+                         code, so sorting on it scrambled the positions
+                         (GK, DF, DF, MF, DF...). NLS already returns
+                         players.Start[] in teamsheet order, so that
+                         order is now preserved as-is. Teams stack
+                         vertically below 520px: two columns cannot hold
+                         a full name on a phone, and truncating the
+                         thing being chosen is not a saving worth
+                         making.
        02/08/2026  v2.7  Squad numbers become pills in the club's
                          colours, the substitutes divider becomes a
                          club-coloured strip reading "Substitutes"
@@ -867,6 +878,21 @@
   }
 
   @media (max-width:520px) {
+    /* Two columns cannot hold a full name on a phone — 'Finn Cousin-Dawson'
+       and 'Delano McCoy-Splatt' are ordinary football names, and truncating
+       the thing the fan is being asked to choose is the one thing not worth
+       saving space on. Stack the teams and give each name the full width. */
+    #nlMotm .nlsm__teampick { grid-template-columns:1fr; gap:12px; }
+    /* Stacked, both sheets read left-to-right: the mirrored home column only
+       makes sense when the two are side by side facing each other. */
+    #nlMotm .nlsm__teamcol.is-home .nlsm__teamhead { flex-direction:row; }
+    #nlMotm .nlsm__teamcol.is-home .nlsm__teamhead .nlsm__thname { text-align:left; }
+    #nlMotm .nlsm__teamcol.is-home .nlsm__player { flex-direction:row; }
+    #nlMotm .nlsm__teamcol.is-home .nlsm__pname { text-align:left; }
+    #nlMotm .nlsm__teamcol.is-home .nlsm__subdiv { text-align:left; }
+    #nlMotm .nlsm__teamcol.is-home .nlsm__player.is-selected {
+      box-shadow:inset 3px 0 0 var(--primary);
+    }
     #nlMotm .nlsm__row { padding:10px; }
     #nlMotm .nlsm__rowsplit { margin-left:-10px; margin-right:-10px; }
     #nlMotm .nlsm__teamline { font-size:13px; grid-template-columns:22px 1fr 32px; gap:10px; }
@@ -1305,9 +1331,6 @@
               playerId:  p.playerID,
               name:      name,
               shirt:     p.shirtNumber,
-              // NLS orders the XI by formationPlace (1 = keeper, then out
-              // from the back), which is how a teamsheet actually reads.
-              place:     (typeof p.formationPlace === 'number') ? p.formationPlace : 99,
               position:  (p.playerPosition === 'Substitute' && p.playerSubPosition) ? p.playerSubPosition : p.playerPosition,
               status:    p.playerStatus,
               onMinute:  onMinute[p.playerID] || '',
@@ -1687,17 +1710,19 @@
     function teamCol(team, isHome) {
       var palette = getTeamPalette(team.teamID);
       var ps = list.filter(function (p) { return p.teamId === team.teamID; });
-      // Starters first, in NLS's own teamsheet order (formationPlace: keeper,
-      // defence, midfield, attack) rather than by shirt number, which mixes
-      // positions up. Substitutes follow, ordered by shirt.
+      // Keep NLS's own array order — players.Start[] already arrives as a
+      // teamsheet reads (keeper, defence, midfield, attack), and subs after.
+      // Do NOT sort by formationPlace: it is a pitch-slot code, not a running
+      // 1-11, so sorting on it scrambles the positions. Do not sort by shirt
+      // either, which puts whoever wears 2 above the keeper. The only thing
+      // enforced here is that starters precede substitutes.
+      var order = {};
+      ps.forEach(function (p, i) { order[p.playerId] = i; });
       ps.sort(function (x, y) {
         var sx = x.status === 'Start' ? 0 : 1;
         var sy = y.status === 'Start' ? 0 : 1;
         if (sx !== sy) return sx - sy;
-        if (sx === 0 && x.place !== y.place) return x.place - y.place;
-        var nx = x.shirt == null ? 999 : x.shirt;
-        var ny = y.shirt == null ? 999 : y.shirt;
-        return nx - ny;
+        return order[x.playerId] - order[y.playerId];
       });
       var seenSub = false;
       var rows = ps.map(function (p) {
