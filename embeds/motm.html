@@ -42,6 +42,22 @@
      own (a date in May 2026 loads 2025/26), refetching fixtures.
 
      Changelog:
+       02/08/2026  v2.9  Teamsheet rows carry what happened in the
+                         match: goals (own goals muted and labelled
+                         separately), yellow and red cards, and
+                         substitutions both on and off. Every event is
+                         attached to the PLAYER rather than to a
+                         section, so a substitute who came on and was
+                         later withdrawn shows both arrows with no
+                         special case. Icons are inline SVG — no emoji,
+                         which render differently per platform, cannot
+                         take a brand colour and turn to mush at 11px.
+                         Minutes are in the tooltip for goals and cards
+                         but visible for substitutions, where the minute
+                         tells you how long a player was actually on.
+                         Own goals are collected across both teams'
+                         event arrays, since NLS files them under the
+                         team that benefits rather than the scorer's.
        02/08/2026  v2.8  Lineup order corrected: v2.6 sorted by
                          formationPlace on the assumption it ran 1-11
                          from the back. It does not — it is a pitch-slot
@@ -521,6 +537,35 @@
     outline:2px solid var(--primary); outline-offset:-2px;
   }
 
+  /* Match events on a teamsheet row — goals, cards, substitutions. Sits
+     between the name and the position badge, so the name still flexes and
+     the badges stay in their column. */
+  #nlMotm .nlsm__evs {
+    flex:none; display:inline-flex; align-items:center; gap:5px;
+  }
+  #nlMotm .nlsm__ev {
+    display:inline-flex; align-items:center; gap:2px; line-height:0;
+  }
+  #nlMotm .nlsm__ev.is-goal   { color:var(--text); }
+  /* An own goal is not a credit — mute it and let the tooltip say so. */
+  #nlMotm .nlsm__ev.is-own    { color:var(--text-muted); opacity:.75; }
+  #nlMotm .nlsm__ev.is-yellow { color:var(--amber); }
+  #nlMotm .nlsm__ev.is-red    { color:var(--red); }
+  #nlMotm .nlsm__ev.is-on     { color:var(--green); }
+  #nlMotm .nlsm__ev.is-off    { color:var(--text-muted); }
+  #nlMotm .nlsm__evmin, #nlMotm .nlsm__evx {
+    font-size:10px; line-height:1;
+    font-weight:800; font-variation-settings:'wght' 800;
+    font-variant-numeric:tabular-nums;
+  }
+  /* Mirrored home column: the strip reverses with the row, so put it back. */
+  #nlMotm .nlsm__teamcol.is-home .nlsm__evs { flex-direction:row-reverse; }
+  #nlMotm .nlsm__teamcol.is-home .nlsm__ev  { flex-direction:row-reverse; }
+  @media (max-width:520px) {
+    #nlMotm .nlsm__teamcol.is-home .nlsm__evs,
+    #nlMotm .nlsm__teamcol.is-home .nlsm__ev { flex-direction:row; }
+  }
+
   /* Position badge on a teamsheet row. Blank rather than guessed when NLS
      gives a position we do not recognise. */
   #nlMotm .nlsm__ppos {
@@ -752,11 +797,6 @@
   }
   #nlMotm .nlsm__noteexample em { color:var(--text); font-style:italic; }
 
-  /* Minute a substitute came on. */
-  #nlMotm .nlsm__pon {
-    flex:none; font-size:11px; color:var(--text-muted);
-    font-weight:700; font-variation-settings:'wght' 700;
-  }
 
   /* Not-your-match notice (for non-own-team rows, if any are surfaced) */
   #nlMotm .nlsm__lockcard {
@@ -1303,6 +1343,53 @@
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function (json) {
         var teams = (json && json.data && json.data.attributes && json.data.attributes.matchTeams) || [];
+
+        // Build a per-player event record across BOTH teams first. Own goals
+        // are filed under the team that BENEFITS, not the team the scorer
+        // plays for, so scanning per-team would attach them to the wrong
+        // player — hence one pass over everything, keyed by playerID.
+        // Events are deduped by eventID: NLS sometimes logs a correction as a
+        // second copy of the same event (seen on substitutions).
+        var evOf = {};
+        function evFor(pid) {
+          return evOf[pid] || (evOf[pid] = { goals: [], cards: [], on: '', off: '', seen: {} });
+        }
+        function minuteOf(ev) {
+          return ev.formattedEventTime || (ev.eventMinute != null ? ev.eventMinute + "'" : '');
+        }
+        teams.forEach(function (team) {
+          var evs = team.events || {};
+          (evs.goals || []).forEach(function (ev) {
+            var g = ev && ev.goalEvents; if (!g || !g.playerID) return;
+            var rec = evFor(g.playerID), k = 'g' + (g.eventID || ev.eventID || minuteOf(ev));
+            if (rec.seen[k]) return; rec.seen[k] = true;
+            var t = String(g.goalType || '').toLowerCase();
+            rec.goals.push({
+              kind: t.indexOf('own') !== -1 ? 'own' : (t.indexOf('pen') !== -1 ? 'pen' : 'goal'),
+              minute: minuteOf(ev)
+            });
+          });
+          (evs.bookings || []).forEach(function (ev) {
+            var b = ev && ev.bookingEvents; if (!b || !b.playerID) return;
+            var rec = evFor(b.playerID), k = 'b' + (b.eventID || ev.eventID || minuteOf(ev));
+            if (rec.seen[k]) return; rec.seen[k] = true;
+            var ct = String(b.cardType || b.card || '').toLowerCase();
+            // A second yellow IS a sending off, so record both cards — that is
+            // what happened, and it reads correctly on the row.
+            if (ct.indexOf('second') !== -1) {
+              rec.cards.push({ card: 'yellow', minute: minuteOf(ev) });
+              rec.cards.push({ card: 'red',    minute: minuteOf(ev) });
+            } else {
+              rec.cards.push({ card: ct.indexOf('red') !== -1 ? 'red' : 'yellow', minute: minuteOf(ev) });
+            }
+          });
+          (evs.subs || []).forEach(function (ev) {
+            var s = ev && ev.substitutionEvents; if (!s) return;
+            if (s.subOnID)  evFor(s.subOnID).on   = minuteOf(ev);
+            if (s.subOffID) evFor(s.subOffID).off = minuteOf(ev);
+          });
+        });
+
         var list = [];
         teams.forEach(function (team) {
           var teamID = team.teamID;
@@ -1311,16 +1398,9 @@
           // got on. The only source for that is the substitution events, so
           // build the set of players who actually came on and drop the rest:
           // an unused sub is not a candidate for man of the match.
-          var cameOn = {}, onMinute = {};
-          ((team.events && team.events.subs) || []).forEach(function (ev) {
-            var se = ev && ev.substitutionEvents;
-            if (!se || !se.subOnID) return;
-            cameOn[se.subOnID] = true;
-            onMinute[se.subOnID] = ev.formattedEventTime || (ev.eventMinute != null ? ev.eventMinute + "'" : '');
-          });
           var starters = (team.players && team.players.Start) || [];
           var subsUsed = ((team.players && team.players.Sub) || []).filter(function (p) {
-            return cameOn[p.playerID];
+            return evOf[p.playerID] && evOf[p.playerID].on;
           });
           var all = starters.concat(subsUsed);
           all.forEach(function (p) {
@@ -1333,7 +1413,7 @@
               shirt:     p.shirtNumber,
               position:  (p.playerPosition === 'Substitute' && p.playerSubPosition) ? p.playerSubPosition : p.playerPosition,
               status:    p.playerStatus,
-              onMinute:  onMinute[p.playerID] || '',
+              events:    evOf[p.playerID] || { goals: [], cards: [], on: '', off: '' },
               teamId:    teamID,
               teamName:  teamName
             });
@@ -1347,6 +1427,73 @@
         renderFixtures();
       });
   }
+  // ---------- match event icons ----------
+  // Inline SVG, no emoji: emoji render differently on every platform, cannot
+  // take a brand colour, and at 11px turn to mush. currentColor lets each
+  // icon inherit the semantic colour set on its wrapper.
+  var ICON = {
+    // Football: white ball, dark pentagon. Reads as a ball at 11px where a
+    // full panel pattern would just look like a grey blob.
+    goal: '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">' +
+            '<circle cx="8" cy="8" r="7" fill="var(--white)" stroke="currentColor" stroke-width="1.3"/>' +
+            '<path d="M8 2.9 12.1 5.9 10.5 10.7h-5L3.9 5.9z" fill="currentColor"/>' +
+            '<path d="M8 2.9V1M12.1 5.9l1.8-.6M10.5 10.7l1.1 1.5M5.5 10.7l-1.1 1.5M3.9 5.9l-1.8-.6" ' +
+              'stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>' +
+          '</svg>',
+    card: '<svg viewBox="0 0 12 16" width="8" height="11" aria-hidden="true">' +
+            '<rect x="1" y="1" width="10" height="14" rx="1.5" fill="currentColor"/>' +
+          '</svg>',
+    on:   '<svg viewBox="0 0 12 12" width="9" height="9" aria-hidden="true">' +
+            '<path d="M6 1.5 11 8.5H1z" fill="currentColor"/></svg>',
+    off:  '<svg viewBox="0 0 12 12" width="9" height="9" aria-hidden="true">' +
+            '<path d="M6 10.5 1 3.5h10z" fill="currentColor"/></svg>'
+  };
+
+  // The strip of what happened to a player. Minutes are in the tooltip for
+  // goals and cards — showing every one turns the row into a timeline — but
+  // visible for substitutions, where the minute tells you how long they
+  // actually played, which is the thing you are judging.
+  function eventStripHTML(ev) {
+    if (!ev) return '';
+    var out = '';
+
+    var real = ev.goals.filter(function (g) { return g.kind !== 'own'; });
+    var own  = ev.goals.filter(function (g) { return g.kind === 'own'; });
+    function balls(list, cls, label) {
+      if (!list.length) return '';
+      var mins = list.map(function (g) {
+        return (g.kind === 'pen' ? 'Penalty ' : '') + (g.minute || '');
+      }).join(', ');
+      var t = ' title="' + $h(label + (mins ? ' — ' + mins : '')) + '"';
+      // Repeat the ball up to three, then collapse to a count so a hat-trick
+      // reads at a glance but a five-goal haul does not wrap the row.
+      if (list.length <= 3) {
+        return '<span class="nlsm__ev ' + cls + '"' + t + '>' +
+          new Array(list.length + 1).join(ICON.goal) + '</span>';
+      }
+      return '<span class="nlsm__ev ' + cls + '"' + t + '>' + ICON.goal +
+             '<span class="nlsm__evx">&times;' + list.length + '</span></span>';
+    }
+    out += balls(real, 'is-goal', real.length === 1 ? 'Goal' : real.length + ' goals');
+    out += balls(own, 'is-own', own.length === 1 ? 'Own goal' : own.length + ' own goals');
+
+    ev.cards.forEach(function (c) {
+      out += '<span class="nlsm__ev is-' + c.card + '" title="' +
+        $h((c.card === 'red' ? 'Red card' : 'Yellow card') + (c.minute ? ' — ' + c.minute : '')) +
+        '">' + ICON.card + '</span>';
+    });
+
+    if (ev.on) {
+      out += '<span class="nlsm__ev is-on" title="' + $h('On ' + ev.on) + '">' +
+        ICON.on + '<span class="nlsm__evmin">' + $h(ev.on) + '</span></span>';
+    }
+    if (ev.off) {
+      out += '<span class="nlsm__ev is-off" title="' + $h('Off ' + ev.off) + '">' +
+        ICON.off + '<span class="nlsm__evmin">' + $h(ev.off) + '</span></span>';
+    }
+    return out ? '<span class="nlsm__evs">' + out + '</span>' : '';
+  }
+
   // GK / DF / MF / FW from the NLS position string. Anything unrecognised
   // returns '' rather than a guess — a wrong position badge is worse than none.
   function posAbbr(position) {
@@ -1642,7 +1789,7 @@
     if (p) {
       role = (p.status === 'Start')
         ? (p.position || 'Started')
-        : ('Substitute' + (p.onMinute ? ' &middot; on ' + $h(p.onMinute) : ''));
+        : ('Substitute' + (p.events && p.events.on ? ' &middot; on ' + $h(p.events.on) : ''));
     }
     return '<div class="nlsm__pickhero" style="--hero-bg:' + $h(pal.primary) + ';--hero-tx:' + $h(txt) + ';">' +
       '<div class="nlsm__pickhero-top">' +
@@ -1739,9 +1886,8 @@
               'aria-pressed="' + (p.playerId === selectedPid ? 'true' : 'false') + '">' +
             '<span class="nlsm__pshirt">' + $h(shirt) + '</span>' +
             '<span class="nlsm__pname">' + $h(p.name) + '</span>' +
-            (isSub && p.onMinute
-              ? '<span class="nlsm__pon">' + $h(p.onMinute) + '</span>'
-              : '<span class="nlsm__ppos">' + $h(posAbbr(p.position)) + '</span>') +
+            eventStripHTML(p.events) +
+            '<span class="nlsm__ppos">' + $h(posAbbr(p.position)) + '</span>' +
           '</button>';
       }).join('');
       var teamLabel = team.shortName || team.name || '';
