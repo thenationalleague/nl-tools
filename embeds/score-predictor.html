@@ -38,6 +38,14 @@
        ?sim=off          → real clock, bar hidden (explicit form)
 
      Changelog:
+       02/08/2026  v2.6  "Your club" tag dropped from the hero (the
+                         colours say it); live rows now show the REAL
+                         live score bold (from the 2-min NLS refetch)
+                         with minute, your pick small in the meta, and
+                         an "Exact so far" / "On track" pill while the
+                         pick is holding; W/D/L boxes hidden during
+                         live so they can't misread against the real
+                         score.
        02/08/2026  v2.5  Submitted rows reserve right-edge space for the
                          EDIT pill (vertically centred) — it no longer
                          overlaps the home score now that pre-KO rows
@@ -336,12 +344,6 @@
     display:flex; align-items:center; gap:10px;
     background:var(--navy); color:var(--white);
     padding:10px 14px;
-  }
-  #nlPredictor .nlsp__herotag {
-    font-size:10px; text-transform:uppercase; letter-spacing:1.5px;
-    color:inherit;
-    font-weight:900; font-variation-settings:'wght' 900;
-    white-space:nowrap;
   }
   #nlPredictor .nlsp__hero-top .nlsp__meta {
     flex:1; padding-right:0; color:inherit; opacity:.92; min-height:0;
@@ -1608,9 +1610,22 @@
         : '<span class="nlsp__pickline" style="opacity:.7;">No prediction</span>';
       meta = (hero ? '<span class="nlsp__lock">Predictions locked</span>' : '') + pickLocked;
     } else if (s === 'live') {
-      // Pulse dot + LIVE label + your prediction inline
-      var pickLive = (p && p.home != null) ? '<span class="nlsp__pickline">Prediction <b>' + p.home + '–' + p.away + '</b></span>' : '';
-      meta = '<span class="nlsp__livedot" aria-hidden="true"></span><span class="nlsp__livelbl">Live</span>' + pickLive;
+      // The 2-min NLS refetch gives us the actual live score, so the score
+      // cells show it for real. The meta carries the pulse dot, the match
+      // minute, your pick small, and an on-track pill while it's holding.
+      var liveMin = (a.formattedMatchTime && a.formattedMatchTime !== "0'") ? a.formattedMatchTime : '';
+      var pickLive = (p && p.home != null)
+        ? '<span class="nlsp__pickline">You said <b>' + p.home + '–' + p.away + '</b></span>'
+        : '<span class="nlsp__pickline" style="opacity:.7;">No prediction</span>';
+      var track = '';
+      if (p && p.home != null && a.homeTeam.score != null && a.awayTeam.score != null) {
+        var lv = verdictOf(p.home, p.away, a.homeTeam.score, a.awayTeam.score);
+        if (lv === 'exact')       track = '<span class="nlsp__pts is-exact">Exact so far</span>';
+        else if (lv === 'result') track = '<span class="nlsp__pts is-right">On track</span>';
+      }
+      meta = '<span class="nlsp__livedot" aria-hidden="true"></span>' +
+        '<span class="nlsp__livelbl">Live' + (liveMin ? ' ' + $h(liveMin) : '') + '</span>' +
+        pickLive + track;
     } else if (s === 'post') {
       var realH = a.homeTeam.score, realA = a.awayTeam.score;
       var v = (p && p.home != null) ? verdictOf(p.home, p.away, realH, realA) : null;
@@ -1654,9 +1669,14 @@
       if (s === 'pre' && preState === 'submitted') {
         return '<div class="' + cls + ' is-pred">' + (p && p[side] != null ? p[side] : '–') + '</div>';
       }
-      // locked / live: show user's prediction (muted) — no live scores here
-      if (s === 'locked' || s === 'live') {
+      // locked: show the user's prediction (muted) until KO
+      if (s === 'locked') {
         return '<div class="' + cls + ' is-pred">' + (p && p[side] != null ? p[side] : '–') + '</div>';
+      }
+      // live: the ACTUAL live score, bold — the pick lives in the meta strip
+      if (s === 'live') {
+        real = (side === 'home' ? a.homeTeam : a.awayTeam).score;
+        return '<div class="' + cls + '">' + (real != null ? real : '–') + '</div>';
       }
       if (s === 'future' || s === 'postponed' || s === 'abandoned') {
         return '<div class="' + cls + ' is-pred">–</div>';
@@ -1676,7 +1696,8 @@
         v = (d && d.home != null && d.away != null) ? d
           : (p && p.home != null) ? p
           : { home: 0, away: 0 };
-      } else if ((s === 'locked' || s === 'live') && p && p.home != null) {
+      } else if (s === 'locked' && p && p.home != null) {
+        // live rows show the real score, so pick-boxes would mislead there
         v = p;
       }
       if (!v) return '';
@@ -1736,7 +1757,6 @@
       };
       return '<div class="nlsp__hero-card' + rowMod + '">' +
         '<div class="nlsp__hero-top">' +
-          '<span class="nlsp__herotag">Your club</span>' +
           '<div class="nlsp__meta">' + meta + '</div>' +
         '</div>' +
         '<div class="nlsp__heromatch">' +
