@@ -319,6 +319,39 @@ Written by a scheduled Cloud Function (admin access bypasses rules), read by
 the widget with `".read": "auth != null"` — it contains only what the table
 already displays publicly, so a permissive read there is fine.
 
+### The aggregate must carry NO jwtIds
+
+This is the part that makes it worth doing, and the easy thing to get wrong.
+A row is a rendered result, not a pointer:
+
+```json
+{ "name": "Richard H", "crest": "…", "results": 29, "exacts": 8, "settled": 42 }
+```
+
+Put `jwtId` on a row "just for the you-highlight" and you have republished the
+id list in a public node, which undoes step 2 of Plan B entirely. Everything
+else can be locked down and it will not matter.
+
+**Why this is genuinely safe rather than the same data moved sideways:** the
+leaderboard is *already* a public display. Anyone loading the page sees those
+names and numbers. A public node holding exactly that adds no exposure. What
+it removes is the raw `predictions` tree — every individual scoreline for
+every match, keyed to a person, none of which is ever displayed.
+
+### Highlighting the fan's own row without an id
+
+Include a truncated salted hash of the `jwtId` per row; the client hashes its
+own the same way and matches. It does not reverse, and it does not help
+enumeration — testing a hash requires already holding the `jwtId`.
+
+Do not solve this by putting the real id back.
+
+### Second benefit: it stops the table getting slower
+
+Every client currently downloads the whole predictions tree to compute the
+standings in the browser. That grows with every fan who registers. The
+aggregate is a small fixed-size read that does not.
+
 Consequences to accept:
 - Standings become **periodic**, not live. Every 10–15 minutes is ample; they
   only change when matches finish.
