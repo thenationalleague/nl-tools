@@ -396,8 +396,9 @@ KO time appears — `"15:00 kick-offs"` (singular when the box holds one match;
 the hero doesn't count, it sits outside the groups) — plus ONE status chip:
 `Predictions lock in 3h 12m` (ticked every 30s via `[data-cutoff]` text
 updates), then Predictions locked / Live / Full time. Per-row KO eyebrows are
-gone; a pre-KO row's meta strip appears only once a pick is set, carrying the
-W/D/L chip. The hero card sits above the groups with its own countdown chip.
+gone — pre-KO rows have no meta strip at all; the backed result shows as
+per-side W/D/L letter boxes on the team lines. The hero card sits above the
+groups with its own countdown chip.
 
 ## 15. Matchday navigator (the datebar)
 
@@ -450,10 +451,10 @@ Each fixture row goes through these states. The pattern is reusable for MOTM (ju
 | State | Meaning | UI |
 |---|---|---|
 | `empty` | No prediction made yet, pre-KO, within edit window | − / + steppers per side, start at 0, cap 9 |
-| `submitted` | Prediction saved, pre-KO | Locked display + W/D/L chip + hover "EDIT" pill |
+| `submitted` | Prediction saved, pre-KO | Locked display + W/D/L boxes + hover "EDIT" pill |
 | `editing` | User re-opened row | Steppers + inline SAVE / CANCEL controls under the row |
 | `future` | More than 7 days from KO | **Hidden** (whole-matchday "opens on" card if nothing is open) |
-| `locked` | Final 60 min before KO | The user's pick + W/D/L chip ("Predictions locked" lives in the group head) |
+| `locked` | Final 60 min before KO | The user's pick + W/D/L boxes ("Predictions locked" lives in the group head) |
 | `live` | Match in progress | Locked, pulse dot + "Live", show user's prediction |
 | `post` | Match finished | Final score, verdict pill (Exact score / Right result; wrong = muted tint only) |
 | `postponed` / `abandoned` | API matchPeriod | Greyed, "Prediction voided" |
@@ -463,9 +464,11 @@ per matchday on a phone. `−` disables at 0, `+` disables at 9. The first tap
 on a row initialises the draft with both sides at their displayed values and
 marks the row "set".
 
-**W/D/L chip** (`.nlsp__wdl`) — once a pick is set, a small chip names the
-result it backs: "Fylde win" / "Draw". Makes the primary scoring metric
-visible at the point of choice.
+**W/D/L boxes** (`.nlsp__wdlbox`) — a fixed-width letter chip beside each
+side's score: grey **D** at the default 0–0, flipping to green **W** / red
+**L** as the scoreline moves. Fixed size so rows never widen (an earlier
+"Hartlepool win" text pill did). Shown on pre/locked/live rows and on the
+hero panels; makes the primary scoring metric visible at the point of choice.
 
 **Hover EDIT pill** sits absolutely on the right edge of the row, opacity 0 → 1 on row hover (always slightly visible on touch). Click → enters `editing` state. SAVE / CANCEL appear inline under the row, never as floating buttons.
 
