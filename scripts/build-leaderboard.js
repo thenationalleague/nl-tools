@@ -34,12 +34,10 @@
  *   node scripts/build-leaderboard.js            # compute and write
  *   node scripts/build-leaderboard.js --dry-run  # compute and print, no write
  *
- * Auth: Workload Identity Federation by default — the Action swaps its GitHub
- * OIDC token for a short-lived Google credential, so no key exists to leak.
- * The NL Google org blocks service-account key creation, which is the right
- * policy; this works with it. NL_WIDGETS_SA_KEY (a pasted service-account
- * JSON) is still honoured where federation is unavailable, and if used it is a
- * credential — Actions secret only, never the repo.
+ * Auth: GOOGLE_ACCESS_TOKEN, a short-lived OAuth token minted by the Action's
+ * Workload Identity Federation step. The NL Google org blocks service-account
+ * key creation — the right policy — so nothing long-lived exists to leak, and
+ * there is no key in this repo to find.
  */
 
 'use strict';
@@ -264,6 +262,39 @@ async function fetchFixtures(seasonId) {
   return [].concat(...results).sort((a, b) => dateOf(a).localeCompare(dateOf(b)));
 }
 
+/* The database over its REST API with an OAuth access token, rather than the
+   firebase-admin SDK.
+
+   Not a stylistic choice: the NL Google org blocks service-account keys, so
+   this authenticates by Workload Identity Federation, and the credential that
+   produces is an "external account" file. firebase-admin only parses
+   service-account and authorized-user files and rejects it outright — "Invalid
+   contents in the credentials file". The REST API takes a plain bearer token,
+   which federation is perfectly able to mint.
+
+   Side benefit: no dependency to install, so the job is a checkout and a node
+   run. The token comes from the auth step and expires within the hour. */
+async function dbFetch(path, token, init) {
+  const res = await fetch(DB_URL + '/' + path + '.json', Object.assign({
+    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+  }, init || {}));
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error('RTDB ' + (init && init.method || 'GET') + ' ' + path + ': HTTP ' +
+                    res.status + ' ' + body.slice(0, 300));
+  }
+  return res;
+}
+
+async function dbGet(path, token) {
+  const res = await dbFetch(path, token);
+  return (await res.json()) || {};
+}
+
+async function dbPut(path, value, token) {
+  await dbFetch(path, token, { method: 'PUT', body: JSON.stringify(value) });
+}
+
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
   const now = new Date();
@@ -272,34 +303,13 @@ async function main() {
   const matches = await fetchFixtures(seasonId);
   console.log('fixtures: ' + matches.length + ' (season ' + seasonId + ')');
 
-  /* Two ways in, and the keyless one is the default because the NL Google org
-     blocks service-account key creation — which is the right policy, so this
-     works with it rather than asking for an exception.
+  const token = process.env.GOOGLE_ACCESS_TOKEN;
+  if (!token) throw new Error('GOOGLE_ACCESS_TOKEN is not set — the auth step did not mint one');
 
-     Workload Identity Federation: the Action exchanges its GitHub OIDC token
-     for a short-lived Google credential, and firebase-admin picks it up as
-     Application Default Credentials. Nothing long-lived exists to leak.
-
-     A pasted service-account JSON is still honoured if NL_WIDGETS_SA_KEY is
-     set, for an environment where federation is not available. */
-  const admin = require('firebase-admin');
-  const raw = process.env.NL_WIDGETS_SA_KEY;
-  admin.initializeApp({
-    credential: raw
-      ? admin.credential.cert(JSON.parse(raw))
-      : admin.credential.applicationDefault(),
-    databaseURL: DB_URL,
-    projectId: 'nl-widgets',
-  });
-  console.log('auth: ' + (raw ? 'service-account key' : 'workload identity federation'));
-  const db = admin.database();
-
-  const [usersSnap, predsSnap] = await Promise.all([
-    db.ref('users').once('value'),
-    db.ref('predictions').once('value'),
+  const [users, predictions] = await Promise.all([
+    dbGet('users', token),
+    dbGet('predictions', token),
   ]);
-  const users = usersSnap.val() || {};
-  const predictions = predsSnap.val() || {};
   console.log('users: ' + Object.keys(users).length +
               ', fans with predictions: ' + Object.keys(predictions).length);
 
@@ -322,9 +332,8 @@ async function main() {
     return;
   }
 
-  await db.ref('leaderboard').set(payload);
+  await dbPut('leaderboard', payload, token);
   console.log('wrote leaderboard/ at ' + new Date(payload.updatedAt).toISOString());
-  await admin.app().delete();
 }
 
 module.exports = {

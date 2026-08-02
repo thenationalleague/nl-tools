@@ -49,16 +49,19 @@ jobs:
         with:
           node-version: '22'
 
-      # --no-save, matching render-handbook-pdf: the aggregator is the only
-      # thing in this repo that needs the admin SDK, and it is a large tree.
-      - name: Install the Firebase admin SDK
-        run: npm install --no-save firebase-admin@^12
-
-      # No key. The NL Google org blocks service-account key creation, so this
-      # reuses the same federation the GA pipeline already uses: GitHub's OIDC
-      # token is exchanged for a short-lived Google credential. The service
-      # account behind it needs Firebase Realtime Database Admin on nl-widgets,
-      # granted in that project's IAM — a cross-project grant, no new pool.
+      # No key, and no SDK. The NL Google org blocks service-account key
+      # creation, so this reuses the federation the GA pipeline already uses:
+      # GitHub's OIDC token is exchanged for a short-lived Google credential.
+      #
+      # token_format: access_token matters. The default writes an "external
+      # account" credentials file, which firebase-admin refuses to parse — it
+      # only understands service-account and authorized-user files. A bearer
+      # token works against the database's REST API, which is what the script
+      # uses, so no admin SDK is installed at all.
+      #
+      # The service account behind this needs Firebase Realtime Database Admin
+      # on nl-widgets, granted in that project's IAM. A cross-project grant, no
+      # new pool.
       - name: Authenticate to Google Cloud
         id: auth
         continue-on-error: true
@@ -66,19 +69,18 @@ jobs:
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/firebase.database,https://www.googleapis.com/auth/userinfo.email
 
       - name: Build and write the leaderboard
         env:
-          # Optional fallback for an environment without federation. If set it
-          # wins; it is a credential, so repository secret only, never
-          # committed. Either way the credential has admin access, which
-          # bypasses the security rules — that is how it writes a node no
-          # client is allowed to write.
-          NL_WIDGETS_SA_KEY: ${{ secrets.NL_WIDGETS_SA_KEY }}
+          # Expires within the hour. Admin-level access, which bypasses the
+          # security rules — that is how it writes a node no client may write.
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
         run: |
-          if [ -z "$NL_WIDGETS_SA_KEY" ] && [ "${{ steps.auth.outcome }}" != "success" ]; then
-            # Skip rather than fail on the schedule: until the IAM grant is in
-            # place this would go red every 15 minutes and train everyone to
+          if [ "${{ steps.auth.outcome }}" != "success" ]; then
+            # Skip rather than fail on the schedule: while the IAM grant is
+            # missing this would go red every 15 minutes and train everyone to
             # ignore a red cross on this repo. A manual run still fails loudly,
             # which is when someone is actually looking.
             echo "::warning::No Google credential — grant the CI service account Firebase Realtime Database Admin on nl-widgets. Skipping."
