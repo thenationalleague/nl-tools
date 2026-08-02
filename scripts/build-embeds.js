@@ -42,7 +42,7 @@ const EMBEDS = [
     out: 'embeds/motm.js',
     mountAttr: 'data-nl-motm',
     globalFlag: '__nlMotmMounted',
-    name: 'Man of the Match',
+    name: 'Team of the Week',
   },
 ];
 
