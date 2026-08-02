@@ -148,14 +148,16 @@ Two distinct identity layers:
 
 ```json
 {
-  "id":             "Urj5sV0gKEC1RIh20Tt2dg",   // canonical user ID (use this as RTDB key)
-  "forename":       "Richard",
-  "surname":        "Dorman",
-  "email":          "rckdorman@gmail.com",
+  "id":             "xxxxxxxxxxxxxxxxxxxxxx",   // canonical 22-char user ID (use this as RTDB key)
+  "forename":       "Jane",
+  "surname":        "Doe",
+  "email":          "fan@example.com",
   "favourite_team": "Solihull Moors",            // used as registration default
   "tenant_id":      "EBLzD6derkq3NH7m9Rp2mQ"    // NL tenant — see sign-in URL below
 }
 ```
+
+(Values anonymised — this repo is public. The `email` claim exists on the JWT but is **never written to RTDB**; the widget stores forename + surname initial only.)
 
 We can't *verify* the signature (HS256 needs the shared secret) — we just decode and trust. Acceptable threat model because the `id` claim is a 22-char opaque random string (not enumerable).
 
@@ -247,15 +249,15 @@ users/{jwtId}
   ├─ crestUrl        string
   ├─ forename        string
   ├─ surnameInitial  string
-  ├─ email           string
   └─ registeredAt    number (server timestamp)
 
 predictions/{jwtId}/{matchday}/{matchId}
   ├─ home            number (0..20)
   ├─ away            number (0..20)
-  ├─ joker           boolean (legacy field — always false now)
   └─ submittedAt     number (server timestamp)
 ```
+
+The whole `users/` tree is readable by any authed (i.e. anonymous) client, so it must never hold anything beyond the display identity above. `email` and `joker` were removed from the schema at rollout (v2.0); records/predictions written before then may still carry them — ignore on read.
 
 **For MOTM**, replace `predictions/` with whatever shape MOTM needs (e.g. `motm/{jwtId}/{matchId}` → `{ playerId, submittedAt }`). Keep `users/` identical — same registration model.
 
@@ -278,8 +280,8 @@ Anyone authed can read all data (leaderboards). Writes are scoped per-`$matchId`
         "crestUrl":       { ".validate": "newData.isString() && newData.val().length <= 400" },
         "forename":       { ".validate": "newData.isString() && newData.val().length <= 50" },
         "surnameInitial": { ".validate": "newData.isString() && newData.val().length <= 2" },
-        "email":          { ".validate": "newData.isString() && newData.val().length <= 200" },
-        "registeredAt":   { ".validate": "newData.isNumber()" }
+        "registeredAt":   { ".validate": "newData.isNumber()" },
+        "$other":         { ".validate": false }
       }
     }
     /* …per-feature subtree(s) here… */
@@ -320,10 +322,11 @@ function teamCompId(teamId) { /* walks state.allMatches to find any match with t
 function userCompId() { return state.registration ? teamCompId(state.registration.teamId) : null; }
 ```
 
-Filters apply at three points:
+Filters apply at two points:
 - `recomputeMatchday()` — only matches in user's comp
 - `uniqueMatchdayKeys()` (drives the datebar) — only matchdays in user's comp
-- `renderTable()` — leaderboard scoped to fellow-division players
+
+(The leaderboard is deliberately **not** division-scoped any more — it's league-wide with its own month + club filters; see §21.)
 
 ## 14. Fixture API
 
@@ -383,7 +386,7 @@ Horizontally scrollable strip of every matchday in the season (in the user's div
 
 Two separate `<input type="date">` + `<input type="time">` (NOT `datetime-local` — it has a typing quirk where minute "4" auto-commits to "04"). Plus a "Now" button to clear back to the real clock.
 
-URL flag: `?sim=<ISO>` (e.g. `?sim=2025-08-09T14:00:00Z`). `?sim=off` explicitly disables. No param = real clock. Default is visible during dev.
+URL flag: `?sim=<ISO>` (e.g. `?sim=2025-08-09T14:00:00Z`) freezes "now" and shows the bar; `?sim=bar` shows the bar on the live clock. **No param = real clock, bar hidden — production is the default**; `?sim=off` is the explicit form of the same.
 
 Sim drives:
 - `simNow()` — what time is "now" for state computation
@@ -391,7 +394,6 @@ Sim drives:
 
 Decoupling between `state.selectedMatchday` (explicit user choice from the navigator) and `state.sim.fixed` (what time is "now") means you can browse a Saturday's fixtures while simulating from a Tuesday in a different month, to test future-locked states.
 
-In production you can hide the sim controls entirely via `?sim=off`.
 
 ## 17. Load order (critical!)
 
@@ -426,7 +428,7 @@ Each fixture row goes through these states. The pattern is reusable for MOTM (ju
 | `editing` | User re-opened row | Editable inputs + inline SAVE / CANCEL controls under the row |
 | `future` | More than 7 days from KO | Locked, "Opens Sat 16 Aug" |
 | `live` | Match in progress | Locked, pulse dot + "Live", show user's prediction |
-| `post` | Match finished | Final score, verdict, points pill |
+| `post` | Match finished | Final score, verdict pill (Exact score / Right result; wrong = muted tint only) |
 | `postponed` / `abandoned` | API matchPeriod | Greyed, "Prediction voided" |
 
 **Hover EDIT pill** sits absolutely on the right edge of the row, opacity 0 → 1 on row hover (always slightly visible on touch). Click → enters `editing` state. SAVE / CANCEL appear inline under the row, never as floating buttons.
@@ -447,9 +449,12 @@ When `state.matches` is empty, `seasonBoundary()` picks one of three messages:
 
 Rendered as a centred white card consistent with the rest of the widget.
 
-## 21. Leaderboard
+## 21. Leaderboard + club table (counting model, no points)
 
-Per-division (filtered to fellow-comp players via `teamCompId`), cumulative all-time. Will be expanding to two filter dimensions (Group × Period) — see the leaderboard design discussion in the chat history. The leaderboard subscribes to the same `state.allUsers` and `state.allPreds*` data already loaded; no extra RTDB reads.
+No points, no multipliers, no prizes. Two cumulative tables, both driven by `tallyForUser()` walking `state.allMatches` × `state.allPredsRaw` (no extra RTDB reads):
+
+- **Leaderboard** — league-wide, ranked by **correct results (W/D/L)**, tiebroken by **exact scorelines**, then forename. Filterable by **month** (a late joiner can win September without being punished for missing August) and by **supported club**. Players with nothing settled in the filtered view are hidden (except yourself), so zero-rows never read as punishment. Names render as forename + surname initial — that's all the DB holds.
+- **Club v club** — ranked by **accuracy %** (correct results ÷ settled predictions across the club's fans), tiebroken by exact-score rate. Clubs need `CLUB_TABLE_MIN_SETTLED` (20) settled predictions to rank, so a one-fan club on a hot streak can't sit at 100% and big fanbases aren't advantaged. Shares the leaderboard's month filter; the club filter doesn't apply.
 
 ## 22. Asset paths
 
@@ -466,7 +471,7 @@ Always include an `onerror="this.onerror=null;…"` fallback on every `<img>` to
 
 - ✅ Carbona Variable, system fallback only
 - ✅ Brand red `#9e0000` only as accent
-- ✅ Gold `#b8860b` only for multiplier signals
+- ✅ Gold `#b8860b` only for exact-score / own-club hero signals
 - ✅ Enterprise green `#34ab56` only on the sponsor hairline
 - ❌ No gold/amber Vanarama-era branding
 - ❌ No dark text on `#9e0000` — always white
@@ -489,8 +494,8 @@ Going widget-by-widget, here's what likely needs to differ — everything else s
 | Data shape | `predictions/{jwtId}/{matchday}/{matchId}` → `{home, away, …}` | `motm/{jwtId}/{matchId}` → `{playerId, playerName, submittedAt}` |
 | Per-row UI | two score inputs | dropdown / radio of players for that fixture |
 | Per-row save | `home`+`away` required | `playerId` required |
-| Scoring | 3 pts exact / 1 pt right outcome / multipliers | TBD (most votes win, or per-fixture leaderboard) |
-| Leaderboard | per-fan total points | possibly per-player vote counts |
+| Scoring | counting — correct results, exact-score tiebreak | TBD (most votes win, or per-fixture leaderboard) |
+| Leaderboard | correct-results table + club accuracy % table | possibly per-player vote counts |
 | Player data | n/a | TBD — separate MD coming for the player endpoint |
 
 Everything else — auth, gate, sponsor, datebar, sim, registration, comp filtering, empty states, footer, modal, click-drag — copy verbatim.
