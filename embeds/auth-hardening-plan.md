@@ -139,13 +139,17 @@ value, and a `SECRET` held behind a one-time share link **which has expired**.
 
 Next steps, in order:
 
-1. Test whether the `KEY` is itself the HS256 MAC key, against a real token.
-   This can be done entirely client-side with Web Crypto — nothing needs to
-   leave the machine, and no server is required to answer it.
-2. If it is not, ask Sports Alliance to **re-send the client secret** for this
-   integration. Note this is a different request to the one already declined:
-   re-sending a credential they have already issued is routine, where
-   publishing a JWKS endpoint would be new infrastructure.
+1. ~~Test whether the `KEY` is itself the HS256 MAC key.~~ **Done — it is
+   not.** Verified client-side with Web Crypto against a live token, trying
+   the value both as UTF-8 octets (the interpretation OIDC Core 10.1
+   specifies) and as hex-decoded bytes. Both fail. The `KEY` is a client
+   identifier or API key, not a signing secret. Do not re-test it.
+2. Ask Sports Alliance to **re-send the client secret** for this integration,
+   since the share link expired. Note this is a different request to the one
+   already declined: re-sending a credential they have already issued is
+   routine, where publishing a JWKS endpoint would be new infrastructure.
+   Run the re-sent value through the same client-side test before building
+   anything on it.
 3. Store whatever is recovered in the password manager rather than relying on
    a share link, and record it in the integration handover.
 
@@ -157,7 +161,9 @@ Two caveats:
 
 - **It may not verify.** Some providers sign with an internal key and use the
   client secret only for token exchange. Test against a real token before
-  building anything on the assumption.
+  building anything on the assumption. If the re-sent secret also fails, that
+  is the answer: verification is not available to us and Plan B (3a) is the
+  plan, permanently.
 - **Symmetric keys mint as well as verify.** Anyone holding that secret can
   forge a token for any fan. It must live in Cloud Function config only —
   never in a widget bundle, never in this repo — and be treated as a
