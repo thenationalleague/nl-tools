@@ -455,7 +455,7 @@ Each fixture row goes through these states. The pattern is reusable for MOTM (ju
 | `editing` | User re-opened row | Steppers + inline SAVE / CANCEL controls under the row |
 | `future` | More than 7 days from KO | **Hidden** (whole-matchday "opens on" card if nothing is open) |
 | `locked` | Final 60 min before KO | The user's pick + W/D/L boxes ("Predictions locked" lives in the group head) |
-| `live` | Match in progress | REAL live score bold (2-min NLS refetch) + minute; tinted verdict footer closes the row: "Your pick 1–2 · On track / Exact so far / Off target" (same strip on the hero) |
+| `live` | Match in progress | REAL live score bold (2-min NLS refetch) + minute; neutral footer strip closes the row: "Your prediction: 1–2" (no verdict wording — misleading mid-match; same strip on the hero) |
 | `post` | Match finished | Final score, verdict pill (Exact score / Right result; wrong = muted tint only) |
 | `postponed` / `abandoned` | API matchPeriod | Greyed, "Prediction voided" |
 
@@ -508,7 +508,7 @@ Rendered as a centred white card consistent with the rest of the widget.
 
 No points, no multipliers, no prizes. Two cumulative tables, both driven by `tallyForUser()` walking `state.allMatches` × `state.allPredsRaw` (no extra RTDB reads):
 
-- **Leaderboard** — league-wide, ranked by **correct results (W/D/L)**, tiebroken by **exact scorelines**, then forename. Three labelled numeric columns — **Results / Exact / Games** (settled matches predicted), full meanings in `title` tooltips — no explainer sentence. Filterable by **month** (a late joiner can win September without being punished for missing August) and by **supported club**. Players with nothing settled in the filtered view are hidden (except yourself), so zero-rows never read as punishment. Names render as forename + surname initial — that's all the DB holds.
+- **Leaderboard** — league-wide, ranked by **correct results (W/D/L)**, tiebroken by **exact scorelines**, then forename. Three labelled numeric columns — **Results / Exact / Games** (settled matches predicted), full meanings in `title` tooltips — no explainer sentence. Time scope via segmented chips — **Season / Month / Matchday** — with a contextual select for the last two (a late joiner can win September without being punished for missing August; a single matchday gives bragging rights for one Saturday). Club scope is a **two-state toggle**: all clubs or **your own club's fans** (crest on the chip) — deliberately not a browse-any-club list. Tied ranks display as `1, =, =, 4` (ties on results + exacts). Players with nothing settled in the filtered view are hidden (except yourself), so zero-rows never read as punishment. Names render as forename + surname initial — that's all the DB holds.
 - **Club v club** — ranked by **accuracy %** (correct results ÷ settled predictions across the club's fans), tiebroken by exact-score rate. Clubs need `CLUB_TABLE_MIN_SETTLED` (20) settled predictions to rank, so a one-fan club on a hot streak can't sit at 100% and big fanbases aren't advantaged. Shares the leaderboard's month filter; the club filter doesn't apply.
 
 ## 22. Asset paths
