@@ -26,19 +26,19 @@ Read that file alongside this doc. This document explains the *why* and the *inv
 ```
 <!-- header comment block: what the widget is, sim params, scope note -->
 <div id="nlPredictor">     <!-- rename per widget, e.g. #nlMotm -->
-  <div class="nlsp__sponsor"></div>     <!-- sponsor header        -->
+  <div class="nlsp__sponsor"></div>     <!-- navy header bar       -->
   <div class="nlsp__banner" hidden></div><!-- top error/info banner -->
   <div class="nlsp__screen" hidden></div><!-- registration screen   -->
   <div class="nlsp__screen" hidden>      <!-- main screen           -->
     <div id="…datebar"></div>            <!-- matchday navigator    -->
     <div id="…hero"></div>               <!-- greeting + date       -->
-    <div id="…fixtures"></div>           <!-- THE WIDGET CONTENT    -->
+    <div id="…fixtures"></div>           <!-- hero card + KO groups -->
     <div id="…submitbar"></div>          <!-- save / submit         -->
     <div id="…reset"></div>              <!-- reset all link        -->
     <div id="…table"></div>              <!-- leaderboard           -->
+    <div id="…clubtable"></div>          <!-- club v club           -->
   </div>
   <div class="nlsp__gate"></div>         <!-- loading + sign-in card -->
-  <div class="nlsp__footer"></div>       <!-- enterprise mini-logo  -->
   <div id="…sim"></div>                  <!-- dev sim controls      -->
   <div class="nlsp__modal" hidden></div> <!-- confirm dialog        -->
 </div>
@@ -85,15 +85,19 @@ Body base size **15px** fixed (not fluid `clamp()` — embeds don't own the view
 
 Declared as CSS variables on the root:
 
+The palette **mirrors NL canon (`system/nl-brand.css`) verbatim** — embeds
+can't load the portal stylesheet, so the token values are inlined. If canon
+changes, re-copy the values; never invent shades locally.
+
 ```css
 #nlPredictor {
-  --primary:#9e0000;            /* NL red — CTAs, focus rings, active states */
-  --navy:#223b7c;               /* table headers, dark surfaces (sparingly)  */
-  --red:#d4380d;  --red-light:#fff1ec;      /* error                         */
-  --green:#1a7030; --green-light:#edf7ee;   /* success / FT                  */
-  --amber:#c96f15; --amber-light:#fef6ec;   /* warning                       */
-  --info:#3b82f6;  --info-light:#eef2ff;    /* informational                 */
-  --gold:#b8860b;  --gold-light:#fff5d4;    /* own-team / exact pill         */
+  --primary:#9e0000; --primary-50:#fcf4f2; --primary-300:#dfa197;
+  --primary-600:#7e0000; --primary-700:#600000;   /* ladder = hover/active   */
+  --navy:#223b7c; --navy-600:#192e63;             /* header surface          */
+  --red:#d4380d;  --red-light:#fff1ec;            /* error                   */
+  --green:#1a7030; --green-light:#edf7ee;         /* success / FT            */
+  --amber:#c96f15; --amber-light:#fef6ec;         /* exact-score / own-club  */
+  --accent-live:#4ade80;                          /* live pulse dots only    */
 
   --white:#ffffff; --off-white:#f4f6f9;
   --text:#1a2a44; --text-muted:#5a6a82;
@@ -101,6 +105,7 @@ Declared as CSS variables on the root:
 
   --radius:6px;
   --shadow:0 2px 12px rgba(10,22,40,.10);
+  --focus-ring:0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
 
   font-family:'carbona-variable','carbona',sans-serif;
   font-size:15px; line-height:1.5;
@@ -112,28 +117,33 @@ Declared as CSS variables on the root:
 
 **Brand notes:**
 - Red `#9e0000` is the only red used as a brand accent. Reserve `--red` for *error* signalling (different shade).
-- Navy `#223b7c` is reserved for "secondary surfaces" — use sparingly, not as bulk row background.
-- Gold `--gold` signals multipliers (own-team boost, exact-score "champion" pill).
-- **Sponsor accent** is Enterprise green `#34ab56` — used only as the 2px hairline under the sponsor strip.
+- Hover/active on solid brand buttons = ladder stops (`--primary-600` / `--primary-700`), never `color-mix(…, black)`.
+- **No gold.** Gold was retired from the brand; `--amber` carries the exact-score / own-club signals.
+- Live pulse dots use `--accent-live`; the "Live" label text uses `--green`.
+- The hero card's background comes from **club colours** (clubs-meta.json), not brand tokens — navy fallback.
 
-## 6. Sponsor header (the black bar)
+## 6. Header (the navy bar)
 
-Three-column grid: Enterprise left, "WIDGET TITLE" centred, NL division logo + user team crest right.
+Three-column grid on `--navy` with a 2px `--primary` hairline: division wide
+lockup left, "WIDGET TITLE" centred, user's club crest right. No separate
+sponsor logo — the wide lockup (`assets/divisions/National-wide.png` /
+`North-wide.png` / `South-wide.png`, its own white rounded card with the
+sponsor inside it) carries sponsorship.
 
 ```
-[Enterprise]              SCORE PREDICTOR              [NL] [team]
+[division wide lockup]        SCORE PREDICTOR              [club crest]
 ```
 
 - **Always visible**, including during loading and signed-out states.
-- The team crest only appears once the user has registered.
-- The NL division logo changes based on the user's team (`assets/divisions/National.png` / `North.png` / `South.png` — derived from the team's `competitionID`).
+- The club crest only appears once the user has registered.
+- The wide lockup switches with the user's division (derived from the team's `competitionID`; National fallback).
 - For a new widget: swap the centre title (e.g. `MAN OF THE MATCH`).
 
 Render is called from `boot()` *after* `state` and the comp-lookup helpers are defined (this matters — see §17).
 
 ## 7. Footer
 
-Single muted Enterprise logo, centred at the bottom, divided from the leaderboard by a thin border. Always visible. Brand-respectful — no large lockups.
+None. The old Enterprise-logo footer was removed in v2.1 — the header lockup carries the sponsor.
 
 ## 8. Authentication: SSO + Firebase Anonymous Auth
 
@@ -366,11 +376,25 @@ Match object shape:
 
 ### Computed state per match (`stateOf(m, now)`)
 
-- `postponed` / `abandoned` — taken straight from `matchPeriod`.
-- `future` — KO is >168h (7 days) from now. Predictions not yet open.
-- `pre` — within 7 days of KO. Editable.
-- `live` — KO has happened, KO + 105 min hasn't.
-- `post` — KO + 105 min has passed.
+`matchPeriod` from NLS is **authoritative when present**: `FullTime`/`PostMatch`
+→ `post` (score is final), the live periods (`FirstHalf`…`Penalties`) → `live`,
+`Postponed`/`Abandoned` → void. The clock logic is the fallback for `PreMatch`
+and stale snapshots (the widget refetches NLS every 2 min while any visible
+match is `locked`/`live`, so staleness is bounded):
+
+- `future` — KO is >168h (7 days) from now. Predictions not open; **rows hidden** (an "opens on" card shows if the whole matchday is future).
+- `pre` — within 7 days of KO, more than 60 min before KO. Editable.
+- `locked` — final 60 min before KO. Prediction shown, no edits.
+- `live` — KO to KO + 105 min (clock fallback).
+- `post` — KO + 105 min passed (clock fallback).
+
+### KO groups + countdown
+
+Fixtures on the matchday are boxed by kick-off time (`.nlsp__kogroup`) — a
+12:30 / 15:00 / 17:30 day = three boxes. Each box head carries ONE status
+chip: a countdown to the 60-min cutoff (`Locks in 3h 12m`, ticked every 30s
+via `[data-cutoff]` text updates), then Locked / Live / Full time. The hero
+card sits above the groups and carries its own countdown chip.
 
 ## 15. Matchday navigator (the datebar)
 
@@ -399,14 +423,13 @@ Decoupling between `state.selectedMatchday` (explicit user choice from the navig
 
 The IIFE order matters. `var` declarations hoist but stay `undefined` until their line executes; function declarations hoist completely.
 
-**Rule**: don't call `renderSponsor()` / `renderFooter()` at script-load time — they read `state.registration` and call `userCompId()`, both of which need their declarations to have run.
+**Rule**: don't call `renderSponsor()` at script-load time — it reads `state.registration` and calls `userCompId()`, both of which need their declarations to have run.
 
-Always call them from inside `boot()`, which runs at the *end* of the IIFE:
+Always call it from inside `boot()`, which runs at the *end* of the IIFE:
 
 ```js
 (function boot() {
   renderSponsor();
-  renderFooter();
   renderGateLoading();
   waitForJwt(4000).then(function (claims) {
     if (!claims || !claims.id) { renderGateSignIn(); return; }
@@ -423,19 +446,36 @@ Each fixture row goes through these states. The pattern is reusable for MOTM (ju
 
 | State | Meaning | UI |
 |---|---|---|
-| `empty` | No prediction made yet, pre-KO, within edit window | Editable inputs / picker |
+| `empty` | No prediction made yet, pre-KO, within edit window | − / + steppers per side, start at 0, cap 9 |
 | `submitted` | Prediction saved, pre-KO | Locked display + hover "EDIT" pill on right edge |
-| `editing` | User re-opened row | Editable inputs + inline SAVE / CANCEL controls under the row |
-| `future` | More than 7 days from KO | Locked, "Opens Sat 16 Aug" |
+| `editing` | User re-opened row | Steppers + inline SAVE / CANCEL controls under the row |
+| `future` | More than 7 days from KO | **Hidden** (whole-matchday "opens on" card if nothing is open) |
+| `locked` | Final 60 min before KO | "Locked · 15:00 kick-off" + the user's pick |
 | `live` | Match in progress | Locked, pulse dot + "Live", show user's prediction |
 | `post` | Match finished | Final score, verdict pill (Exact score / Right result; wrong = muted tint only) |
 | `postponed` / `abandoned` | API matchPeriod | Greyed, "Prediction voided" |
 
+**Steppers, not free text** — two text inputs per row was 24 keyboard focuses
+per matchday on a phone. `−` disables at 0, `+` disables at 9. The first tap
+on a row initialises the draft with both sides at their displayed values, so
+one tap marks the whole row "set" (a genuine 0-0 pick = tap + then −).
+
 **Hover EDIT pill** sits absolutely on the right edge of the row, opacity 0 → 1 on row hover (always slightly visible on touch). Click → enters `editing` state. SAVE / CANCEL appear inline under the row, never as floating buttons.
+
+### The hero card (`.nlsp__hero-card`)
+
+The fan's own club's fixture renders as a showcase card above the KO groups:
+solid **club-primary background** with the club's secondary as a 4px base
+accent (colours from clubs-meta.json keyed by `optaID` = NLS teamID, navy/red
+canon fallback), 72px boxed crests, stacked sides, text colour flipped
+dark/light off the background luminance (`pickTextColor`, threshold 0.68).
+Deliberately **not** a `.nlsp__row`, so verdict tints never fight the club
+colours — but it shares `scoreCell` + the `data-*` wiring, so steppers and
+edit work unchanged. Soft emphasis: every other fixture stays available below.
 
 ## 19. Submit / save / reset
 
-- **Bulk submit** (`#…submitbar`) — disabled until every awaiting row has full input. One RTDB `.update()` writes all rows in one batch.
+- **Bulk submit** (`#…submitbar`) — disabled until every awaiting row has been tapped at least once ("X/12 set"). One RTDB `.update()` writes all rows in one batch.
 - **Per-row save** — when re-opening a submitted row, SAVE / CANCEL controls. Save is explicit (not blur-to-save), because blur was too implicit and the user wanted a clear confirm.
 - **Reset all** — small underlined "Reset all predictions" link between fixtures and leaderboard. Only shown when every match is still pre-KO. Custom in-widget confirm modal (not `window.confirm()`). Reset via per-child `null` update, not parent `.remove()`.
 
@@ -461,8 +501,8 @@ No points, no multipliers, no prizes. Two cumulative tables, both driven by `tal
 All assets in this repo, served via `https://raw.githubusercontent.com/thenationalleague/tools/main/…`. URL-encode `+` and spaces (`%2B`, `%20`) when constructing URLs from filenames.
 
 - **NL+ logos** — `assets/logos/NL+ red lozenge.png`, `NL+ red square.png`, `NL+ white lozenge.png`, `NL+ white square.png`
-- **Enterprise sponsor** — `assets/partners/Enterprise.png`
-- **Division logos** — `assets/divisions/National.png`, `North.png`, `South.png`
+- **Division wide lockups** (header) — `assets/divisions/National-wide.png`, `North-wide.png`, `South-wide.png` (sponsor is inside the lockup; the standalone `Enterprise.png` is no longer used)
+- **Division logos (square)** — `assets/divisions/National.png`, `North.png`, `South.png`
 - **Club crests** — `assets/crests/{Full Club Name}.png` (fallback to API's `homeTeam.crest` first — that's a CDN URL)
 
 Always include an `onerror="this.onerror=null;…"` fallback on every `<img>` to prevent retry loops if an asset moves.
@@ -470,10 +510,11 @@ Always include an `onerror="this.onerror=null;…"` fallback on every `<img>` to
 ## 23. Brand do's and don'ts
 
 - ✅ Carbona Variable, system fallback only
-- ✅ Brand red `#9e0000` only as accent
-- ✅ Gold `#b8860b` only for exact-score / own-club hero signals
-- ✅ Enterprise green `#34ab56` only on the sponsor hairline
-- ❌ No gold/amber Vanarama-era branding
+- ✅ Brand red `#9e0000` only as accent; header surface is `--navy`
+- ✅ `--amber` for exact-score / own-club signals; `--accent-live` for live dots
+- ✅ Club colours (clubs-meta.json) only on the hero card, luminance-checked
+- ❌ No gold — retired from the brand entirely
+- ❌ No Enterprise green `#34ab56` / black bar — the wide lockup carries the sponsor
 - ❌ No dark text on `#9e0000` — always white
 - ❌ Don't `position: fixed` inside the embed — fights the host page's sticky nav
 - ❌ Don't load `nl-brand.css` / `nl-topbar.js` / `auth-guard.js` — these are portal-only
@@ -492,13 +533,13 @@ Going widget-by-widget, here's what likely needs to differ — everything else s
 | RTDB project | `nl-score-predictor` | new `nl-motm` project |
 | `APP_NAME` | `nlPredictor` | `nlMotm` |
 | Data shape | `predictions/{jwtId}/{matchday}/{matchId}` → `{home, away, …}` | `motm/{jwtId}/{matchId}` → `{playerId, playerName, submittedAt}` |
-| Per-row UI | two score inputs | dropdown / radio of players for that fixture |
+| Per-row UI | two − / + score steppers (0–9) | dropdown / radio of players for that fixture |
 | Per-row save | `home`+`away` required | `playerId` required |
 | Scoring | counting — correct results, exact-score tiebreak | TBD (most votes win, or per-fixture leaderboard) |
 | Leaderboard | correct-results table + club accuracy % table | possibly per-player vote counts |
 | Player data | n/a | TBD — separate MD coming for the player endpoint |
 
-Everything else — auth, gate, sponsor, datebar, sim, registration, comp filtering, empty states, footer, modal, click-drag — copy verbatim.
+Everything else — auth, gate, header, datebar, sim, registration, comp filtering, empty states, modal, click-drag — copy verbatim.
 
 ---
 
