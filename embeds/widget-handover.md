@@ -19,7 +19,47 @@ Read that file alongside this doc. This document explains the *why* and the *inv
 - One single HTML file, copy-pasted into the CMS's "custom HTML" block on a page on `thenationalleague.org.uk` (Urban Zoo CMS).
 - **The CMS strips external `<script src="…">` tags.** Inline `<script>` works. Any third-party JS (Firebase SDK) must be loaded dynamically via `document.createElement('script')` with `.onload` chaining.
 - **The CMS does NOT strip `<style>`, `<link>`, or inline `<script>`.** Carbona is loaded via `@font-face` declared inline.
-- Source of truth = the file in this repo. The CMS copy is a snapshot — re-paste on every change. No build pipeline.
+- Source of truth = the file in this repo.
+
+### Hosted delivery (score-predictor) — no more re-pasting
+
+The score-predictor is additionally published as a **hosted bundle** at
+`https://nl.tools/embeds/score-predictor.js`, generated from the HTML by
+`scripts/build-embeds.js` and rebuilt on every push to `main` by
+`.github/workflows/build-embeds.yml`. The CMS carries a permanent snippet
+instead of a pasted copy, so **merging to main is the release**:
+
+```html
+<div data-nl-score-predictor></div>
+<script src="https://nl.tools/embeds/score-predictor.js" defer></script>
+```
+
+If a given CMS block strips `<script src>` (see the note above — the
+`widgets/*.js` tickers embed fine with a plain tag, so it is not universal),
+the same bundle loads through an inline loader, which the CMS does allow:
+
+```html
+<div data-nl-score-predictor></div>
+<script>
+  (function(){var s=document.createElement('script');
+   s.src='https://nl.tools/embeds/score-predictor.js';document.body.appendChild(s);})();
+</script>
+```
+
+The bundle inlines its own CSS and markup as strings — it does **not** fetch
+the HTML at runtime, so no CORS dependency. It mounts into the marker div
+(falling back to `<body>` with a console warning), refuses to mount twice,
+and logs its version on mount. `_headers` serves `/embeds/*` as
+`no-cache, must-revalidate`, because a cached bundle would pin the public
+site to an old widget with nothing to bust from the CMS side.
+
+**Do not hand-edit `embeds/score-predictor.js`.** Edit the HTML; CI
+regenerates. PRs run `build-embeds.js --check` and fail on drift.
+
+An iframe is deliberately *not* used: the widget reads the SSO cookie via
+`document.cookie` for `favourite_team`, and a cross-origin iframe on
+`nl.tools` cannot see `thenationalleague.org.uk` cookies, which would break
+club personalisation entirely.
 
 ## 2. File structure (single file)
 

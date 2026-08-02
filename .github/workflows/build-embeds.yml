@@ -1,0 +1,92 @@
+name: Build embed bundles
+
+# embeds/*.js are generated from embeds/*.html by scripts/build-embeds.js and
+# served from nl.tools, so the CMS carries a permanent <script src> snippet
+# instead of a pasted copy of the widget. Regenerating on every push to main
+# keeps the hosted bundle in lockstep with its source HTML — without this the
+# public site would silently keep serving the previous build.
+#
+# Pull requests run the same script with --check, which fails if a PR edits an
+# embed's HTML without the bundle being rebuilt, so drift is caught at review
+# time rather than after merge.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'embeds/**.html'
+      - 'scripts/build-embeds.js'
+      - '.github/workflows/build-embeds.yml'
+  pull_request:
+    paths:
+      - 'embeds/**.html'
+      - 'embeds/**.js'
+      - 'scripts/build-embeds.js'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-embeds-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # No npm install — the generator is dependency-free by design so this
+      # job stays fast and can't be broken by an unrelated dependency bump.
+      - name: Verify bundles are in sync (PRs)
+        if: github.event_name == 'pull_request'
+        run: node scripts/build-embeds.js --check
+
+      - name: Rebuild bundles
+        if: github.event_name != 'pull_request'
+        run: node scripts/build-embeds.js
+
+      - name: Syntax-check generated bundles
+        if: github.event_name != 'pull_request'
+        run: |
+          for f in embeds/*.js; do
+            echo "checking $f"
+            node --check "$f"
+          done
+
+      - name: Commit and push if changed
+        if: github.event_name != 'pull_request'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add embeds/*.js 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "Bundles already up to date"
+            exit 0
+          fi
+          git commit -m "chore: rebuild embed bundles from source HTML"
+
+          # Push with up to 3 retries. If main moved while we were building,
+          # rebase our single commit on top of the new HEAD and try again —
+          # this commit only touches generated embeds/*.js, so a conflict
+          # against ordinary tool changes is effectively impossible.
+          for i in 1 2 3; do
+            if git push; then
+              echo "Push succeeded on attempt $i"
+              exit 0
+            fi
+            echo "Push attempt $i failed - fetching and rebasing"
+            git fetch origin main
+            git rebase origin/main || exit 1
+          done
+          echo "Push failed after 3 attempts"
+          exit 1
