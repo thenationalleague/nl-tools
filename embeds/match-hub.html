@@ -360,6 +360,30 @@
                           vidiprinter flattens from a stack of bordered
                           cards to a quiet list — colour edge + hairline
                           separators.
+    v0.23.0 (2026-08-02) — COMMENTARY DEPTH + PACING pass.
+                          (1) TRAJECTORY registers: go-ahead splits into
+                          "regain" (back in front) vs "turnaround" (comeback
+                          complete); "pullback" (one behind — game on) splits
+                          from "consolation" (two-plus adrift). Fixes the
+                          72nd-minute-2-1-called-consolation register error.
+                          (2) SHUFFLE-BAG phrase draw: every pool is a deck
+                          drawn without replacement — no repeats until the
+                          pool is exhausted. (3) Pools deepened to matchday
+                          demand (~45 new lines: openers 3→10, equalisers
+                          3→8, extends 3→8, new regain/turnaround/pullback
+                          pools, busy timing windows widened, variant sets
+                          for top-weighted storylines). (4) TRUTH-GATES:
+                          away-form claim now requires a real away drought;
+                          lead1 tease no longer assumes 1-0; OGs get timing
+                          drama; afternoon/evening decided by KO slot.
+                          (5) DWELL pacing: every comm line earns a minimum
+                          on-screen time scaled to its length; beats/reds
+                          queue behind the current read (reds > goals >
+                          beats) instead of overwriting it; kickoff previews
+                          pace at reading speed. (6) Console bar GROWS with
+                          the line (capped ~26vh) instead of scrolling long
+                          sentences under the fold. Dead pools C_LATE/
+                          C_EARLY removed.
   ============================================================================
 -->
 
@@ -856,13 +880,15 @@ body{overflow:hidden}
 /* taller console — a full preview (venue + form + extra clause) fits without
    scrolling on most screens; very long lines still scroll inside the box */
 /* the console is a dark broadcast strip — inverted against the light page */
-#nlHub .nlh__comm{flex:0 0 auto;display:flex;align-items:center;gap:12px;height:clamp(92px,13vh,156px);padding:10px 18px;background:#0d1730;border-top:1px solid var(--ink-line);overflow:hidden}
+/* v0.23: the bar GROWS with the line (up to a cap) instead of scrolling the
+   start of a long sentence out of view — the map row above absorbs the give */
+#nlHub .nlh__comm{flex:0 0 auto;display:flex;align-items:center;gap:12px;min-height:clamp(92px,13vh,156px);max-height:clamp(170px,26vh,300px);padding:10px 18px;background:#0d1730;border-top:1px solid var(--ink-line);overflow:hidden}
 #nlHub .nlh__commdot{width:10px;height:10px;border-radius:50%;background:var(--primary);flex:0 0 auto;box-shadow:0 0 0 0 var(--primary);animation:nlhCommDot 1.6s ease-out infinite}
 @keyframes nlhCommDot{0%{box-shadow:0 0 0 0 rgba(158,0,0,.55)}70%{box-shadow:0 0 0 7px rgba(158,0,0,0)}100%{box-shadow:0 0 0 0 rgba(158,0,0,0)}}
 #nlHub .nlh__comm.is-goal .nlh__commdot{background:var(--live)}
 #nlHub .nlh__comm.is-goal{animation:nlhCommFlash .5s ease}
 @keyframes nlhCommFlash{0%{background:#14432a}100%{}}
-#nlHub .nlh__commtext{flex:1;max-height:100%;overflow-y:auto;font-size:var(--fs-md);line-height:1.35;font-variation-settings:"wght" 600;font-weight:600;color:var(--ink-text)}
+#nlHub .nlh__commtext{flex:1;max-height:calc(clamp(170px,26vh,300px) - 20px);overflow-y:auto;font-size:var(--fs-md);line-height:1.35;font-variation-settings:"wght" 600;font-weight:600;color:var(--ink-text)}
 #nlHub .nlh__commtext .cbold{font-variation-settings:"wght" 900;font-weight:900;color:#fff}
 #nlHub .nlh__commtext .ccar{display:inline-block;width:2px;height:1.05em;background:var(--live);vertical-align:-2px;margin-left:1px;animation:nlhCaret .7s steps(1) infinite}
 
@@ -929,7 +955,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "33";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "34";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -1075,7 +1101,8 @@ body{overflow:hidden}
   // ---- state ---------------------------------------------------------------
   var st = { T:0, playing:false, rate:1, view:"map", raf:0, last:0,
              fired:{}, ftShown:false, feedBuilt:{}, beatShown:{},
-             suspend:null, kickoff:null, koShown:false, _pick:{}, _typeIv:0,
+             suspend:null, kickoff:null, koShown:false, _bag:{}, _lastPick:{}, _typeIv:0,
+             _commUntil:0, _commQ:null, _commDrT:0,
              // timing mode: secPerMin = seconds one match-minute takes (the
              // speed button still multiplies on top); stagger = real KO slots
              secPerMin:1, stagger:false, baseKOms:0 };
@@ -1337,7 +1364,7 @@ body{overflow:hidden}
     deadlock:[
       " — the deadlock's broken! But who's got the opener, {home} or {away}?",
       " — and someone's in front! Is it {home}, or {away}?",
-      " — the first goal of the afternoon! But which side?",
+      " — the first goal of the {dp}! But which side?",
       " — we're off the mark! {home}… or {away}?",
       " — someone's drawn first blood! But who?"
     ],
@@ -1348,48 +1375,93 @@ body{overflow:hidden}
       " — we've got a new leader! But which one?"
     ],
     lead1:[
-      " — but is it a second for {leader}, or an equaliser for {trailer}?",
-      " — have {leader} doubled up, or {trailer} pulled level?",
-      " — {leader} out of sight, or {trailer} right back in it?",
-      " — two for {leader}, or a lifeline for {trailer}?"
+      " — but is it more daylight for {leader}, or an equaliser for {trailer}?",
+      " — have {leader} stretched it, or {trailer} pulled level?",
+      " — {leader} further ahead, or {trailer} right back in it?",
+      " — more for {leader}, or a lifeline for {trailer}?"
     ],
     lead2:[
       " — are {leader} running riot, or {trailer} pulling one back?",
-      " — another for {leader}, or a consolation for {trailer}?",
+      " — another for {leader}, or have {trailer} hit back?",
       " — {leader} piling it on, or {trailer} with a reply?"
     ]
   };
   // name the team ONCE, then collective "they/them"; the crest + pins carry the
   // scoreline, so reveals use numbers ({scoreNum}) rather than repeating the club
+  // v0.23 register map — significance is score-meaning × TRAJECTORY:
+  //   regain     = was level, had led earlier (back in front)
+  //   turnaround = was level, had trailed earlier (comeback complete)
+  //   pullback   = still behind but only by one (game on — never "consolation")
+  //   consolation= still two or more adrift after scoring
+  // Pool depth follows matchday demand: openers fire ~12× an afternoon.
   var C_REVEAL={
     opener:[
       "…and it's {team}! {scorer} breaks the deadlock — they lead {scoreNum}.",
       "It's {team}! {scorer} with the opener.",
-      "{scorer}! They're in front, {scoreNum}."
+      "{scorer}! They're in front, {scoreNum}.",
+      "…{team}! {scorer} gets the first goal of the game.",
+      "It's {team} — {scorer} strikes first.",
+      "First blood to {team}! {scorer} the man.",
+      "{scorer} opens the scoring for {team} — advantage theirs.",
+      "…and the breakthrough belongs to {team}. {scorer} with it.",
+      "It's {team}! {scorer} settles the nerves — {scoreNum}.",
+      "The opener goes to {team} — {scorer} on the scoresheet."
     ],
     equaliser:[
       "…and it's {team}! {scorer} levels it up.",
       "It's {team}! {scorer} with the equaliser — game on!",
-      "{scorer} hauls them level at {scoreNum}."
+      "{scorer} hauls them level at {scoreNum}.",
+      "…{team}! {scorer} brings them back level — all square again.",
+      "It's {team} — {scorer} draws them level. As you were.",
+      "{scorer} squares it up for {team}! {scoreNum}.",
+      "…and {team} have their leveller — {scorer} the man.",
+      "All square! {scorer} pulls {team} level at {scoreNum}."
     ],
-    goahead:[
-      "…and it's {team}! {scorer} puts them ahead, {scoreNum}.",
-      "It's {team}! {scorer} turns it around.",
-      "{scorer}! They lead it now, {scoreNum}."
+    regain:[
+      "…and it's {team}! {scorer} puts them back in front, {scoreNum}.",
+      "It's {team} — {scorer} restores the lead. Their noses back in front.",
+      "{scorer}! {team} lead again, {scoreNum}.",
+      "…{team} have retaken the lead — {scorer} with it.",
+      "Back ahead! {scorer} does it for {team} — {scoreNum}.",
+      "It's {team}! Pegged back once, but {scorer} has them in front again."
+    ],
+    turnaround:[
+      "…and it's {team}! {scorer} completes the turnaround — {scoreNum}!",
+      "It's {team} — {scorer} turns this game on its head!",
+      "{scorer}! From behind to in front — {team} lead {scoreNum}.",
+      "…{team} have come right back — {scorer} puts them ahead!",
+      "The comeback is complete! {scorer} for {team}, {scoreNum}.",
+      "It's {team}! {scorer} caps the fightback — they lead it now."
     ],
     extend:[
       "…and it's {team} again! {scorer} makes it {scoreNum}.",
-      "It's {team}! {scorer} adds {another} — they're pulling clear.",
-      "{scorer} with {another} — they're cruising, {scoreNum}."
+      "It's {team}! {scorer} adds {another} — daylight now.",
+      "{scorer} with {another} — breathing space at {scoreNum}.",
+      "…{team} again. {scorer} strengthens their grip, {scoreNum}.",
+      "It's {team}! {scorer} — and this one's looking safer by the minute.",
+      "{scorer} makes it {scoreNum} — {team} pulling away.",
+      "…more for {team}! {scorer} this time.",
+      "Another one! {scorer} extends it for {team}, {scoreNum}."
+    ],
+    pullback:[
+      "…and it's {team}! {scorer} pulls one back — game on at {scoreNum}!",
+      "It's {team} — {scorer} has them right back in this one.",
+      "{scorer} makes it {scoreNum} — one more and it's all square.",
+      "…{team} hit back! {scorer} halves the deficit — {scoreNum}.",
+      "It's {team}! {scorer} gives them a lifeline here.",
+      "{scorer} drags {team} back into it at {scoreNum}.",
+      "…and suddenly this is interesting — {scorer} makes it {scoreNum} for {team}."
     ],
     consolation:[
       "…and it's {team} — {scorer} pulls one back.",
-      "It's {team}! {scorer} with a consolation, {scoreNum}.",
-      "{scorer} gets one back for them — {scoreNum}."
+      "It's {team}. {scorer} with a consolation, {scoreNum}.",
+      "{scorer} gets one back — {scoreNum}, but a mountain still to climb.",
+      "…{team} have a goal back through {scorer} — a long way back from here, mind.",
+      "It's {team} — {scorer} reduces the arrears at {scoreNum}."
     ],
     og:[
       "…oh no — an own goal! {scorer} turns into his own net, and {team} benefit.",
-      "Disaster! {scorer}'s own goal hands it to {team} — {scoreNum}.",
+      "Disaster! {scorer}'s own goal — {team} gratefully accept, {scoreNum}.",
       "Into his own net! {scorer} gifts it to {team}."
     ]
   };
@@ -1401,8 +1473,6 @@ body{overflow:hidden}
     "{scorer} steps up… and buries the penalty. {scoreNum}.",
     "From the spot — {scorer} makes no mistake for {team}."
   ];
-  var C_LATE=["What a time to score!","Surely decisive, this late on!","Right at the death!","You sense that's a big one."];
-  var C_EARLY=["Barely a minute gone!","Inside the opening exchanges!","Straight from the off!"];
   var C_BEAT={
     ko:["We're underway across the National League!","And they're off around the grounds.","Here we go — kick-off across the division!"],
     ht:["It's half-time.","The whistle goes for the break.","That's the first half done and dusted."],
@@ -1417,7 +1487,7 @@ body{overflow:hidden}
   ];
   // second yellow → red (ev.sec)
   var C_RED2=[
-    "A second yellow at {venue} — and that's the end of {scorer}'s afternoon. {team} down to ten.",
+    "A second yellow at {venue} — and that's the end of {scorer}'s {dp}. {team} down to ten.",
     "He's walking! A second booking for {scorer} — {team} must see this out a man light.",
     "{scorer} goes for two bookable offences at {venue}. Ten men for {team}."
   ];
@@ -1550,11 +1620,21 @@ body{overflow:hidden}
     return segs;
   }
 
+  // SHUFFLE-BAG draw: every pool is a deck, drawn without replacement and
+  // reshuffled only when exhausted — no phrase repeats until the whole pool
+  // has been heard. (v0.23: replaces the old avoid-immediate-repeat pick.)
   function pick(arr,key){
     if(!arr||!arr.length) return "";
     if(arr.length<2) return arr[0];
-    var i,guard=0; do{ i=Math.floor(Math.random()*arr.length); } while(i===st._pick[key] && guard++<6);
-    st._pick[key]=i; return arr[i];
+    var bag=st._bag[key];
+    if(!bag||!bag.length){
+      bag=arr.map(function(_,i){return i;});
+      for(var i=bag.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)), t=bag[i]; bag[i]=bag[j]; bag[j]=t; }
+      // don't let a fresh shuffle serve the same variant twice in a row
+      if(bag[bag.length-1]===st._lastPick[key]){ var s=bag[bag.length-1]; bag[bag.length-1]=bag[0]; bag[0]=s; }
+      st._bag[key]=bag;
+    }
+    var idx=bag.pop(); st._lastPick[key]=idx; return arr[idx];
   }
   function nth(n){ return n===2?"a second":n===3?"a third":n===4?"a fourth":"another"; }
   // segments for the typewriter, with {tokens}; boldKeys get bolded
@@ -1571,19 +1651,24 @@ body{overflow:hidden}
   }
   // teams are referred to by FULL name and as a collective ("Woking have levelled")
   function goalCtx(fx,ev){
-    var before=scoreAt(fx, evRmin(ev,fx)-0.002);
+    var r=evRmin(ev,fx), before=scoreAt(fx, r-0.002);
     var forHome=(ev.team===fx.home)!==!!ev.og;
     var h=club(fx.home), a=club(fx.away), team=forHome?h:a;
     var myB=forHome?before.h:before.a, opB=forHome?before.a:before.h, myA=myB+1;
     var hA=before.h+(forHome?1:0), aA=before.a+(forHome?0:1);
+    // trajectory-aware significance (v0.23): the same after-score reads
+    // differently depending on the path — back in front vs comeback complete,
+    // game-on pullback vs genuine consolation
     var sig = ev.og?"og" : (before.h===0&&before.a===0)?"opener"
             : (myB<opB && myA===opB)?"equaliser"
-            : (myB===opB)?"goahead" : (myB>opB)?"extend":"consolation";
+            : (myB===opB)?(maxLead(fx,forHome,r)>0?"regain":"turnaround")
+            : (myB>opB)?"extend"
+            : (opB-myA===1)?"pullback":"consolation";
     var leader = before.h>before.a?h:(before.a>before.h?a:null);
     var trailer= leader?(leader===h?a:h):null;
     return { venue:h.venue||h.name, home:h.name, away:a.name,
       leader:leader&&leader.name, trailer:trailer&&trailer.name,
-      team:team.name, scorer:ev.name, another:nth(myA),
+      team:team.name, scorer:ev.name, another:nth(myA), dp:DAYPART,
       score:h.short+" "+hA+"–"+aA+" "+a.short, scoreNum:hA+"–"+aA,
       state: before.h===before.a?(before.h===0?"deadlock":"level"):(Math.abs(before.h-before.a)===1?"lead1":"lead2"),
       sig:sig, _fx:fx, _ev:ev, _forHome:forHome, _teamK:forHome?fx.home:fx.away };
@@ -1596,14 +1681,14 @@ body{overflow:hidden}
   // fine-grained timing windows across the game
   function timingTag(m){
     if(m<=5)          return pick(["Inside the opening five minutes!","Early doors!","We're barely settled and there's a goal!"],"tE");
-    if(m>=6&&m<=15)   return Math.random()<0.4?"Early in the piece.":"";
-    if(m>=40&&m<=43)  return Math.random()<0.5?"As half-time approaches.":"";
-    if(m>=44&&m<=45)  return "Right on the stroke of half-time!";
-    if(m>=46&&m<=50)  return pick(["Straight after the restart!","Early in the second half!"],"tR");
-    if(m>=58&&m<=63)  return "Right around the hour mark.";
-    if(m>=70&&m<=79)  return Math.random()<0.45?pick(["Into the final quarter.","The closing stages approaching."],"tQ"):"";
-    if(m>=80&&m<=84)  return pick(["Time ebbing away now.","Into the closing stages.","The clock ticking down."],"tC");
-    if(m>=85&&m<=90)  return pick(["Late on!","Deep into the half!"],"tL");
+    if(m>=6&&m<=15)   return Math.random()<0.4?pick(["Early in the piece.","Still early days.","Inside the opening quarter of an hour."],"tP"):"";
+    if(m>=40&&m<=43)  return Math.random()<0.5?pick(["As half-time approaches.","With the interval in sight."],"tH"):"";
+    if(m>=44&&m<=45)  return pick(["Right on the stroke of half-time!","Moments before the break!"],"tS");
+    if(m>=46&&m<=50)  return pick(["Straight after the restart!","Early in the second half!","Barely minutes into the second period!"],"tR");
+    if(m>=58&&m<=63)  return pick(["Right around the hour mark.","Just past the hour.","On the hour, near enough."],"tO");
+    if(m>=70&&m<=79)  return Math.random()<0.45?pick(["Into the final quarter.","The closing stages approaching.","The business end of the game now.","Time starting to become a factor."],"tQ"):"";
+    if(m>=80&&m<=84)  return pick(["Time ebbing away now.","Into the closing stages.","The clock ticking down.","Not long left in this one."],"tC");
+    if(m>=85&&m<=90)  return pick(["Late on!","Deep into the second half!","The final minutes!","Precious little time left!"],"tL");
     if(m>=91&&m<=92)  return "Into stoppage time — 90+"+(m-90)+"!";
     if(m>=93&&m<=95)  return "Deep into stoppage time — 90+"+(m-90)+"!";
     if(m>=96)         return "With virtually the last kick — 90+"+(m-90)+"!";
@@ -1611,7 +1696,7 @@ body{overflow:hidden}
   }
   function baseRevealSegs(c){
     var s=(c._ev.pen && c.sig!=="og") ? pick(C_REVEAL_PEN,"rvpen") : pick(C_REVEAL[c.sig],"rv"+c.sig);
-    var m=c._ev.min, t=(c.sig!=="og")?timingTag(m):"";
+    var m=c._ev.min, t=timingTag(m);   // OGs get timing drama too (a 94' OG winner earns it)
     if(t && (m>90 || m<=5 || m>=85 || Math.random()<0.55)) s+=" "+t;
     return buildSegs(s, c, BOLD);
   }
@@ -1665,15 +1750,16 @@ body{overflow:hidden}
         if(passed) opts.push({w:4,s:"That lifts "+cl.name+" above "+club(passed).name+", up to "+ordinal(posA)+"."});
         else opts.push({w:3,s:cl.name+" climb to "+ordinal(posA)+" with that."}); }
     }
-    if(c._forHome===false && (c.sig==="goahead"||c.sig==="opener"||c.sig==="extend") && ev.min>=55)
+    var wentAhead=(c.sig==="regain"||c.sig==="turnaround"||c.sig==="opener");
+    // away-form claim is GATED on a genuine away drought — never asserted blind
+    if(c._forHome===false && (wentAhead||c.sig==="extend") && ev.min>=55 && cl.split && cl.split.aWinless>=5)
       opts.push({w:3,s:cl.name+" don’t win on the road often — they’d snap this one up."});
     if(c.sig==="equaliser"){ var ts=trailingSince(fx,c._forHome,r);
       if(ts!=null) opts.push({w:4,s:cl.name+" are level — they’d been trailing since the "+ordinal(ts)+" minute."}); }
-    if(c.sig==="goahead" && wasBehind(fx,c._forHome,r))
-      opts.push({w:5,s:cl.name+" have turned this right around — from behind to in front."});
-    if(c.sig==="consolation" && ev.min>=68) opts.push({w:2,s:cl.name+" have pulled one back — could they yet rescue a point?"});
-    if((c.sig==="goahead"||c.sig==="opener") && cl.winless>=5) opts.push({w:3,s:cl.name+", without a win in "+cl.winless+", can smell three points here."});
-    var leadNow=(c.sig==="goahead"||c.sig==="opener"||c.sig==="extend");
+    if(c.sig==="pullback" && ev.min>=80) opts.push({w:6,s:"That sets up a grandstand finish here."});
+    else if(c.sig==="pullback" && ev.min>=60) opts.push({w:3,s:cl.name+" have pulled one back — could they yet rescue something?"});
+    if(wentAhead && cl.winless>=5) opts.push({w:3,s:cl.name+", without a win in "+cl.winless+", can smell three points here."});
+    var leadNow=(wentAhead||c.sig==="extend");
     if(leadNow && cl.wins>=2) opts.push({w:4,s:cl.name+" are eyeing a "+ordinal(cl.wins+1)+" win on the spin."});
     if((leadNow||c.sig==="equaliser") && cl.losses>=3) opts.push({w:4,s:"Could this end "+cl.name+"'s "+cl.losses+"-game losing run?"});
     if(leadNow && cl.wins<2 && cl.unbeaten>=6) opts.push({w:2,s:cl.name+", unbeaten in "+cl.unbeaten+", look good for it here."});
@@ -1681,8 +1767,13 @@ body{overflow:hidden}
     // super-sub — scorer came off the bench (cameo = the minute he came on)
     if(ev.cameo!=null && !ev.og){
       var onFor=ev.min-ev.cameo;
-      if(onFor<=10) opts.push({w:8,s:"Off the bench and straight into the action — "+ev.name+" has been on barely "+onFor+" minutes."});
-      else opts.push({w:4,s:"A change that's paid off — "+ev.name+" came off the bench, and he's delivered."});
+      if(onFor<=10) opts.push({w:8,s:pick([
+        "Off the bench and straight into the action — "+ev.name+" has been on barely "+onFor+" minutes.",
+        "What an introduction — "+ev.name+" only came on "+onFor+" minutes ago.",
+        "The substitute delivers instantly — "+ev.name+", on for barely "+onFor+" minutes."],"stSub")});
+      else opts.push({w:4,s:pick([
+        "A change that's paid off — "+ev.name+" came off the bench, and he's delivered.",
+        "The bench comes good — "+ev.name+" with the telling contribution."],"stSub2")});
     }
     // personal season tally (generator-fed)
     if(ev.tally) opts.push({w:3,s:"That's "+ev.name+"'s "+ordinal(ev.tally)+" of the season."+(ev.tally>=20?" Prolific.":"")});
@@ -1694,10 +1785,16 @@ body{overflow:hidden}
     // late-goal identity (generator-fed share of their goals arriving late)
     if(ev.min>=80 && cl.ident && cl.ident.late>=0.4) opts.push({w:2,s:"Classic "+cl.name+" — so much of what they do comes late in games."});
     // GOAL TIMING — late/stoppage strikes from a level score are the big moments
-    var mn=ev.min, breaksLevel=(c.sig==="goahead"||c.sig==="opener");
-    if(breaksLevel && mn>90)       opts.push({w:9,s:"What a time to strike — this could be the winner for "+cl.name+"."});
-    else if(breaksLevel && mn>=80) opts.push({w:6,s:"A late blow — this could prove decisive for "+cl.name+"."});
-    if(c.sig==="equaliser" && mn>90)       opts.push({w:9,s:"A priceless point for "+cl.name+", pinched at the very last!"});
+    var mn=ev.min;
+    if(wentAhead && mn>90)       opts.push({w:9,s:pick([
+      "What a time to strike — this could be the winner for "+cl.name+".",
+      "Surely that's the winner for "+cl.name+" — there's barely time to respond.",
+      "Talk about leaving it late — "+cl.name+" may just have won it."],"stW90")});
+    else if(wentAhead && mn>=80) opts.push({w:6,s:"A late blow — this could prove decisive for "+cl.name+"."});
+    if(c.sig==="equaliser" && mn>90)       opts.push({w:9,s:pick([
+      "A priceless point for "+cl.name+", pinched at the very last!",
+      cl.name+" have stolen a point at the death!",
+      "Right at the end — "+cl.name+" grab what might be a precious point!"],"stE90")});
     else if(c.sig==="equaliser" && mn>=80) opts.push({w:5,s:"A late leveller — "+cl.name+" snatch a share right at the end."});
     if(mn<=2) opts.push({w:3,s:cl.name+" are up and running inside the opening minute!"});
     // #3 smarter margins on an extend goal — restore vs stretch vs rout
@@ -1709,11 +1806,11 @@ body{overflow:hidden}
     }
     // #2 brace / hat-trick (match by scorer name within the fixture)
     var braceN=fx.events.filter(function(e){return e.type==="goal"&&!e.og&&e.team===ev.team&&e.name===ev.name&&evRmin(e,fx)<=r;}).length;
-    if(braceN===2) opts.push({w:3,s:"That's "+ev.name+"'s second of the afternoon."});
+    if(braceN===2) opts.push({w:3,s:"That's "+ev.name+"'s second of the "+DAYPART+"."});
     else if(braceN===3) opts.push({w:6,s:"A hat-trick for "+ev.name+"!"});
     else if(braceN>=4) opts.push({w:6,s:braceN+" goals for "+ev.name+" today — take a bow."});
     // #5 race implications for the scoring side (after this goal)
-    var leadOrLevel=(c.sig!=="consolation");
+    var leadOrLevel=(c.sig!=="consolation" && c.sig!=="pullback");
     if(tbl && leadOrLevel && posA<=2) opts.push({w:2,s:"Massive at the top — "+cl.name+" keeping the title race alight."});
     else if(tbl && leadOrLevel && posA<=7) opts.push({w:2,s:"Big points in the play-off hunt for "+cl.name+"."});
     else if(tbl && leadOrLevel && posA>=21) opts.push({w:2,s:"Precious points in the drop fight for "+cl.name+"."});
@@ -1730,25 +1827,51 @@ body{overflow:hidden}
   }
   function redSegs(fx,ev){
     var t=club(ev.team), h=club(fx.home);
-    return buildSegs(pick(ev.sec?C_RED2:C_RED,"red"), {venue:h.venue||h.name,team:t.short,scorer:ev.name}, ["venue","team","scorer"]);
+    return buildSegs(pick(ev.sec?C_RED2:C_RED,"red"), {venue:h.venue||h.name,team:t.short,scorer:ev.name,dp:DAYPART}, ["venue","team","scorer"]);
+  }
+  // DWELL — every line earns a minimum on-screen time scaled to its length
+  // (typing time + a reading allowance), so commentary never rattles past
+  // unread. Faster sim speeds compress the allowance but never remove it.
+  function commHoldFor(segs){
+    var n=segs.reduce(function(a,s){return a+s.t.length;},0);
+    var typeMs=n*(Math.max(8,24/(st.rate||1))/2);
+    var read=Math.max(1600, 500+n*24)/(st.rate>=2?1.7:1);
+    return typeMs+read;
   }
   function typeSegs(segs,cls){
     var box=$("nlhCommText"), bar=$("nlhComm");
     clearInterval(st._typeIv);
     bar.className="nlh__comm"+(cls&&/goal|red/.test(cls)?" is-goal":"");
+    st._commUntil=Date.now()+commHoldFor(segs);
     var total=segs.reduce(function(n,s){return n+s.t.length;},0), shown=0;
     function render(){
       var out="", left=shown;
       for(var i=0;i<segs.length;i++){ var s=segs[i], take=Math.max(0,Math.min(s.t.length,left)); left-=s.t.length;
         var txt=esc(s.t.slice(0,take)); if(!txt) continue; out+= s.b?'<span class="cbold">'+txt+'</span>':txt; }
       box.innerHTML=out+(shown<total?'<span class="ccar"></span>':'');
-      box.scrollTop=box.scrollHeight;   // keep the caret in view within the fixed bar
+      if (box.scrollHeight>box.clientHeight) box.scrollTop=box.scrollHeight;   // only if genuinely overflowing
     }
     render();
     var speed=Math.max(8, 24/(st.rate||1));
     st._typeIv=setInterval(function(){ shown+=2; if(shown>=total){shown=total;clearInterval(st._typeIv);} render(); }, speed);
   }
-  function commStatic(str){ clearInterval(st._typeIv); $("nlhComm").className="nlh__comm"; $("nlhCommText").textContent=str; }
+  // gate for lines that DON'T own the clock (beats, reds, 4× instant goals,
+  // the outro): if something is still being read, hold the newest highest-
+  // priority line back and show it once the dwell expires. reds > goals > beats.
+  function commSay(segs,cls,prio){
+    var now=Date.now();
+    if(now>=st._commUntil){ st._commQ=null; clearTimeout(st._commDrT); typeSegs(segs,cls); return; }
+    if(!st._commQ || (prio||0)>=st._commQ.p) st._commQ={s:segs,c:cls,p:(prio||0)};
+    clearTimeout(st._commDrT);
+    st._commDrT=setTimeout(function(){
+      var q=st._commQ; st._commQ=null;
+      if(q) typeSegs(q.s,q.c);   // pause/seek cancel via commStatic, so this is safe
+    }, Math.max(60, st._commUntil-now+40));
+  }
+  function commStatic(str){
+    clearInterval(st._typeIv); clearTimeout(st._commDrT); st._commQ=null; st._commUntil=0;
+    $("nlhComm").className="nlh__comm"; $("nlhCommText").textContent=str;
+  }
 
   // ---- goal focus (in-situ) & beats ---------------------------------------
   // No overlay: the camera moves INTO the ground, the rest of the island
@@ -1836,6 +1959,14 @@ body{overflow:hidden}
     st._beatT=setTimeout(function(){ el.hidden=true; }, st.playing? Math.max(700,1500/st.rate) : 1600);
   }
 
+  // "afternoon" vs "evening" — decided by the day's earliest kick-off slot
+  // so midweek matchdays don't talk about "the afternoon" at 7:45pm
+  var DAYPART = "afternoon";
+  function computeDaypart(){
+    var hrs = D.fixtures.map(function(fx){ return parseInt(fx.slot||"15",10); }).filter(function(n){ return !isNaN(n); });
+    DAYPART = (hrs.length && Math.min.apply(null,hrs)>=17) ? "evening" : "afternoon";
+  }
+
   var BEATS = [];
   function computeBeats(){
     BEATS = st.stagger
@@ -1843,7 +1974,7 @@ body{overflow:hidden}
       : [{r:0,t:"Kick-off",c:"ko"},{r:HALF,t:"Half-time",c:"ht"},{r:HALF+BREAK,t:"Second half",c:"2h"},{r:maxFt,t:"Full-time",c:"ft"}];
   }
   // everything derived from D + the timing mode, rebuilt in one go
-  function computeDerived(){ computeTimeline(); computeMoments(); computeFeed(); computeKOOrder(); computeBeats(); }
+  function computeDerived(){ computeTimeline(); computeMoments(); computeFeed(); computeKOOrder(); computeBeats(); computeDaypart(); }
   // earliest not-yet-fired GOAL with rmin in (a,b]
   function nextGoalAt(a,b){
     var best=null;
@@ -1859,19 +1990,21 @@ body{overflow:hidden}
     D.fixtures.forEach(function(fx){ fx.events.forEach(function(ev){
       var r=evRmin(ev,fx), id=evId(fx,ev);
       if(r<=prevT || r>T || st.fired[id]) return;
-      if(ev.type==="red"){ st.fired[id]=1; if(st.playing) typeSegs(redSegs(fx,ev),"red"); }
-      else if(ev.type==="goal" && instantGoals){ st.fired[id]=1; if(mapVisible()) pulsePin(fx); if(st.playing) typeSegs(revealSegs(fx,ev),"reveal-goal"); }
+      if(ev.type==="red"){ st.fired[id]=1; if(st.playing) commSay(redSegs(fx,ev),"red",3); }
+      else if(ev.type==="goal" && instantGoals){ st.fired[id]=1; if(mapVisible()) pulsePin(fx); if(st.playing) commSay(revealSegs(fx,ev),"reveal-goal",2); }
     }); });
     BEATS.forEach(function(b){
-      if(b.r>=prevT && b.r<=T && !st.beatShown[b.r]){ st.beatShown[b.r]=1; fireBeat(b.t); if(st.playing) typeSegs(buildSegs(pick(C_BEAT[b.c],"bc"+b.c),{},[]),"beat"); }
+      if(b.r>=prevT && b.r<=T && !st.beatShown[b.r]){ st.beatShown[b.r]=1; fireBeat(b.t); if(st.playing) commSay(buildSegs(pick(C_BEAT[b.c],"bc"+b.c),{},[]),"beat",1); }
     });
   }
   // goal suspense: hold the score, TEASE it, REVEAL, then DWELL so it can be read
   function beginSuspense(g, ts){
     st.fired[g.id]=1;
-    st.suspend={ g:g, phase:"tease", until: ts + (st.rate===2?1800:2900) };
+    var tsegs=teaseSegs(g.fx,g.ev);
+    // tease dwell scales to its own length — the question must be readable
+    st.suspend={ g:g, phase:"tease", until: ts + Math.max(st.rate===2?2000:3000, commHoldFor(tsegs)) };
     setFocus(g.fx, g.ev);            // camera in; the score stays as-is on the pin
-    typeSegs(teaseSegs(g.fx,g.ev),"tease");
+    typeSegs(tsegs,"tease");
   }
   function revealGoal(g){
     st.T = g.rmin + 0.0015;          // the score now includes this goal
@@ -1880,7 +2013,7 @@ body{overflow:hidden}
     var c=goalCtx(g.fx,g.ev), segs=baseRevealSegs(c), story=storylineSegs(c);
     if(story) segs=segs.concat([{t:"  "}]).concat(story);   // occasional context line
     typeSegs(segs, "reveal-goal");
-    return !!story;                    // storyline present → linger a bit longer
+    return commHoldFor(segs);          // dwell = full read time for reveal + storyline
   }
 
   // ---- LIVE league table ----------------------------------------------------
@@ -2010,7 +2143,7 @@ body{overflow:hidden}
           setFocus(kfx);   // same focus treatment as goals — grey out, glide in
           typeSegs(kseg,"beat");
           var kchars=kseg.reduce(function(n,s){return n+s.t.length;},0);
-          var kdur = st.rate>=2 ? 1500 : Math.min(6800, 2600 + kchars*15);   // scale to reading length
+          var kdur = st.rate>=2 ? 2200 : Math.min(9000, 2400 + kchars*24);   // real reading pace, not a skim
           st.kickoff={ i:ki+1, until: ts + kdur };
         }
       }
@@ -2020,8 +2153,9 @@ body{overflow:hidden}
     if (st.suspend){
       if (ts>=st.suspend.until){
         if (st.suspend.phase==="tease"){
-          var story=revealGoal(st.suspend.g);
-          st.suspend={ g:st.suspend.g, phase:"hold", until: ts + (st.rate===2?2400:4000) + (story?2000:0) };
+          var hold=revealGoal(st.suspend.g);
+          // dwell = the full read of reveal (+storyline), plus camera-settle padding
+          st.suspend={ g:st.suspend.g, phase:"hold", until: ts + hold + (st.rate===2?500:1100) };
         } else {
           st.suspend=null;
           // another goal imminent → hold the camera and pan straight there
@@ -2055,7 +2189,7 @@ body{overflow:hidden}
     if (st.T>=maxT()){
       pause();
       if(!st.ftShown){ st.ftShown=true;
-        typeSegs(buildSegs(pick(C_OUTRO,"out"),{},[]),"beat");   // wind-down line, not a hard stop
+        commSay(buildSegs(pick(C_OUTRO,"out"),{},[]),"beat",1);   // wind-down line, not a hard stop
         setTimeout(showFinalTable, 2600);                         // let it breathe, then surface the table
       }
       return;
