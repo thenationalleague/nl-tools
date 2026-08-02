@@ -24,7 +24,8 @@
        is a first-class pick
      - Per-side W/D/L letter boxes on every open pick: grey D at 0–0,
        green W / red L as the scoreline moves
-     - Leaderboard: cumulative, filterable by month + supported club;
+     - Leaderboard: cumulative, scoped to season / month / single matchday
+       + all clubs or your own club's fans; tied ranks show '=';
        names shown as forename + surname initial
      - Club v club table: accuracy % (correct results ÷ settled
        predictions), min 20 settled predictions to rank
@@ -38,6 +39,14 @@
        ?sim=off          → real clock, bar hidden (explicit form)
 
      Changelog:
+       02/08/2026  v2.9  Leaderboard filters rebuilt: Season / Month /
+                         Matchday scope chips (canon chip-group, navy
+                         active) with a contextual select for the last
+                         two; club scope is a two-state toggle — all
+                         clubs / your club's fans (crest on the chip),
+                         the browse-any-club list is gone. Tied ranks
+                         show '=' (1, =, =, 4) on both tables; club
+                         table sub-line names the active window.
        02/08/2026  v2.8  Live footer goes vanilla: "Your prediction: 2–1",
                          no verdict word (misleads mid-match), single
                          neutral tint. Canon sweep: datebar active pill
@@ -791,12 +800,28 @@
   #nlPredictor .nlsp__hero-card .nlsp__wdlbox.is-w { background:var(--green); border-color:var(--green); color:var(--white); }
   #nlPredictor .nlsp__hero-card .nlsp__wdlbox.is-l { background:var(--red);   border-color:var(--red);   color:var(--white); }
 
-  /* Leaderboard scope filters — month + club selects in the table head */
+  /* Leaderboard scope filters — canon .chip-group pattern (segmented,
+     single-choice, navy active) + contextual select, stacked in the head */
   #nlPredictor .nlsp__tablefilters {
-    display:flex; gap:8px; margin-top:8px;
+    display:flex; flex-direction:column; gap:8px; margin-top:8px;
   }
+  #nlPredictor .nlsp__chipgroup {
+    display:flex; gap:2px;
+    background:var(--off-white); border-radius:var(--radius); padding:3px;
+  }
+  #nlPredictor .nlsp__chip {
+    flex:1; display:inline-flex; align-items:center; justify-content:center; gap:6px;
+    padding:7px 10px;
+    font-family:inherit; font-size:12px;
+    color:var(--text-muted); background:transparent;
+    border:none; border-radius:4px; cursor:pointer;
+    font-weight:700; font-variation-settings:'wght' 700;
+    transition:background .12s ease, color .12s ease;
+  }
+  #nlPredictor .nlsp__chip.is-on { background:var(--navy); color:var(--white); }
+  #nlPredictor .nlsp__chip img { width:16px; height:16px; object-fit:contain; flex:none; }
+  #nlPredictor .nlsp__chip:focus-visible { outline:none; box-shadow:var(--focus-ring); }
   #nlPredictor .nlsp__tablefilters select {
-    flex:1; min-width:0;
     font-family:inherit; font-size:12px;
     padding:6px 8px; border-radius:var(--radius);
     border:1px solid var(--border); background:var(--white); color:var(--text);
@@ -1045,8 +1070,10 @@
     clubColours: {},        // NLS teamID (optaID) -> {primary, secondary, tertiary} from clubs-meta.json
     seasonId: null,         // current season from clubs-meta.json (fallback: SEASON_ID)
     selectedMatchday: null, // explicit override from the date selector; null = derive
-    lbMonth: null,          // leaderboard month filter ('YYYY-MM'); null = whole season
-    lbClub: null,           // leaderboard club filter (teamId); null = all clubs
+    lbScope: 'season',      // leaderboard time scope: 'season' | 'month' | 'day'
+    lbMonth: null,          // selected month ('YYYY-MM') when scope is 'month'
+    lbDay: null,            // selected matchday key ('YYYY-MM-DD') when scope is 'day'
+    lbMine: false,          // true = only fans of the user's own club
     sim: { fixed: null, barEnabled: false } // explicit sim 'now'; bar shown only when ?sim present
   };
 
@@ -1181,15 +1208,17 @@
     return reg && (m.attributes.homeTeam.teamID === reg.teamId || m.attributes.awayTeam.teamID === reg.teamId);
   }
   function monthOfMatchday(mdKey) { return String(mdKey || '').slice(0, 7); } // 'YYYY-MM'
-  // Cumulative tally for one user across the whole season (or one month).
+  // Cumulative tally for one user across the whole season, one month, or a
+  // single matchday (the leaderboard's lbScope/lbMonth/lbDay state).
   // results = correct W/D/L (includes exacts); exacts = exact scorelines.
-  function tallyForUser(jwtId, monthFilter, now) {
+  function tallyForUser(jwtId, now) {
     var byDay = state.allPredsRaw[jwtId] || {};
     var t = { results: 0, exacts: 0, settled: 0 };
     for (var i = 0; i < state.allMatches.length; i++) {
       var m = state.allMatches[i];
       var md = matchMatchdayKey(m);
-      if (monthFilter && monthOfMatchday(md) !== monthFilter) continue;
+      if (state.lbScope === 'month' && monthOfMatchday(md) !== state.lbMonth) continue;
+      if (state.lbScope === 'day' && md !== state.lbDay) continue;
       var p = byDay[md] && byDay[md][m.id];
       if (!p) continue;
       if (stateOf(m, now) !== 'post') continue;
@@ -2084,6 +2113,47 @@
   function monthLabel(mo) {
     return new Date(mo + '-15T12:00:00Z').toLocaleDateString('en-GB', { month:'long', timeZone:'Europe/London' });
   }
+  // Every matchday key across ALL competitions (the leaderboard spans fans of
+  // every division, unlike the datebar which is scoped to the user's comp).
+  function lbMatchdayKeys() {
+    var seen = {};
+    (state.allMatches || []).forEach(function (m) {
+      var k = matchMatchdayKey(m); if (k) seen[k] = true;
+    });
+    return Object.keys(seen).sort();
+  }
+  function lbDayLabel(k) {
+    return new Date(k + 'T12:00:00Z').toLocaleDateString('en-GB',
+      { weekday:'short', day:'numeric', month:'short', timeZone:'Europe/London' });
+  }
+  // Human label for the leaderboard's active time window.
+  function lbScopeLabel() {
+    if (state.lbScope === 'month' && state.lbMonth) return monthLabel(state.lbMonth);
+    if (state.lbScope === 'day' && state.lbDay) return lbDayLabel(state.lbDay);
+    return 'Whole season';
+  }
+  // Sensible starting selection when a scope is first opened: the window
+  // containing the matchday currently in view.
+  function lbDefaultMonth() {
+    var months = seasonMonths();
+    var cur = monthOfMatchday(currentMatchdayKey());
+    return months.indexOf(cur) !== -1 ? cur : (months[0] || null);
+  }
+  function lbDefaultDay() {
+    var keys = lbMatchdayKeys();
+    var cur = currentMatchdayKey();
+    return keys.indexOf(cur) !== -1 ? cur : (keys[0] || null);
+  }
+  // Competition-style rank labels: first row of a tie group shows the
+  // position, the rest show '='; the next distinct group resumes at its
+  // true position (1, =, =, 4).
+  function rankLabels(rows, sameFn) {
+    var labels = [];
+    for (var i = 0; i < rows.length; i++) {
+      labels.push(i > 0 && sameFn(rows[i - 1], rows[i]) ? '=' : String(i + 1));
+    }
+    return labels;
+  }
   // All registered users' tallies for the current month scope, with their
   // registration record attached. Shared by the leaderboard + club table.
   function allTallies(now) {
@@ -2092,44 +2162,70 @@
     return userIds.map(function (uid) {
       var reg = (uid === state.user.id) ? state.registration : state.allUsers[uid];
       if (!reg) return null;
-      var t = tallyForUser(uid, state.lbMonth, now);
+      var t = tallyForUser(uid, now);
       return { uid: uid, reg: reg, results: t.results, exacts: t.exacts, settled: t.settled };
     }).filter(Boolean);
   }
+  // Scope chips (Season / Month / Matchday) + contextual select, then the
+  // two-state club toggle (all clubs / fans of YOUR club — never a browse-
+  // any-club list).
   function filterControlsHTML() {
-    var months = seasonMonths();
-    var clubs = {};
-    Object.keys(state.allUsers).forEach(function (uid) {
-      var reg = state.allUsers[uid];
-      if (reg && reg.teamId && !clubs[reg.teamId]) clubs[reg.teamId] = reg.teamName || reg.teamId;
-    });
-    if (state.registration && !clubs[state.registration.teamId]) clubs[state.registration.teamId] = state.registration.teamName;
-    var clubIds = Object.keys(clubs).sort(function (a, b) { return clubs[a].localeCompare(clubs[b]); });
-    return '<div class="nlsp__tablefilters">' +
-      '<select id="nlsp-lb-month" aria-label="Filter by month">' +
-        '<option value="">Whole season</option>' +
-        months.map(function (mo) {
+    var chip = function (label, attrs, on) {
+      return '<button type="button" class="nlsp__chip' + (on ? ' is-on' : '') + '" ' + attrs + '>' + label + '</button>';
+    };
+    var html = '<div class="nlsp__tablefilters">' +
+      '<div class="nlsp__chipgroup" id="nlsp-lb-scope" role="group" aria-label="Time period">' +
+        chip('Season', 'data-s="season"', state.lbScope === 'season') +
+        chip('Month', 'data-s="month"', state.lbScope === 'month') +
+        chip('Matchday', 'data-s="day"', state.lbScope === 'day') +
+      '</div>';
+    if (state.lbScope === 'month') {
+      html += '<select id="nlsp-lb-month" aria-label="Month">' +
+        seasonMonths().map(function (mo) {
           return '<option value="' + $h(mo) + '"' + (state.lbMonth === mo ? ' selected' : '') + '>' + $h(monthLabel(mo)) + '</option>';
-        }).join('') +
-      '</select>' +
-      '<select id="nlsp-lb-club" aria-label="Filter by club">' +
-        '<option value="">All clubs</option>' +
-        clubIds.map(function (id) {
-          return '<option value="' + $h(id) + '"' + (state.lbClub === id ? ' selected' : '') + '>' + $h(clubs[id]) + '</option>';
-        }).join('') +
-      '</select>' +
-    '</div>';
+        }).join('') + '</select>';
+    }
+    if (state.lbScope === 'day') {
+      html += '<select id="nlsp-lb-day" aria-label="Matchday">' +
+        lbMatchdayKeys().map(function (k) {
+          return '<option value="' + $h(k) + '"' + (state.lbDay === k ? ' selected' : '') + '>' + $h(lbDayLabel(k)) + '</option>';
+        }).join('') + '</select>';
+    }
+    if (state.registration) {
+      html += '<div class="nlsp__chipgroup" id="nlsp-lb-club" role="group" aria-label="Club scope">' +
+        chip('All clubs', 'data-mine="0"', !state.lbMine) +
+        chip(crestImg(state.registration.crestUrl, state.registration.teamName, 16) +
+             $h(state.registration.teamName) + ' fans', 'data-mine="1"', state.lbMine) +
+      '</div>';
+    }
+    return html + '</div>';
   }
   function wireFilters() {
+    var scopeEl = document.getElementById('nlsp-lb-scope');
+    var clubEl  = document.getElementById('nlsp-lb-club');
     var mSel = document.getElementById('nlsp-lb-month');
-    var cSel = document.getElementById('nlsp-lb-club');
-    if (mSel) mSel.addEventListener('change', function () {
-      state.lbMonth = mSel.value || null;
+    var dSel = document.getElementById('nlsp-lb-day');
+    if (scopeEl) scopeEl.addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('button') : null;
+      if (!b) return;
+      var s = b.getAttribute('data-s');
+      if (s === state.lbScope) return;
+      state.lbScope = s;
+      if (s === 'month' && !state.lbMonth) state.lbMonth = lbDefaultMonth();
+      if (s === 'day' && !state.lbDay) state.lbDay = lbDefaultDay();
       renderTable(); renderClubTable();
     });
-    if (cSel) cSel.addEventListener('change', function () {
-      state.lbClub = cSel.value || null;
+    if (clubEl) clubEl.addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('button') : null;
+      if (!b) return;
+      state.lbMine = b.getAttribute('data-mine') === '1';
       renderTable();
+    });
+    if (mSel) mSel.addEventListener('change', function () {
+      state.lbMonth = mSel.value; renderTable(); renderClubTable();
+    });
+    if (dSel) dSel.addEventListener('change', function () {
+      state.lbDay = dSel.value; renderTable(); renderClubTable();
     });
   }
   function renderTable() {
@@ -2137,7 +2233,7 @@
     var now = simNow();
 
     var rows = allTallies(now).filter(function (r) {
-      if (state.lbClub && r.reg.teamId !== state.lbClub) return false;
+      if (state.lbMine && state.registration && r.reg.teamId !== state.registration.teamId) return false;
       // Hide zero-settled players from a filtered view (a late joiner never
       // looks "punished" in a month they sat out) — but always show yourself.
       return r.settled > 0 || r.uid === state.user.id;
@@ -2145,6 +2241,9 @@
       if (b.results !== a.results) return b.results - a.results;
       if (b.exacts !== a.exacts) return b.exacts - a.exacts;
       return (a.reg.forename || '').localeCompare(b.reg.forename || '');
+    });
+    var ranks = rankLabels(rows, function (a, b) {
+      return a.results === b.results && a.exacts === b.exacts;
     });
 
     var inner =
@@ -2159,13 +2258,13 @@
         '<span title="Finished matches predicted">Games</span>' +
       '</div>' +
       (rows.length === 0
-        ? '<div class="nlsp__clubfoot">No players in this view yet — try a different month or club.</div>'
+        ? '<div class="nlsp__clubfoot">No players in this view yet — try a different period or scope.</div>'
         : '') +
       rows.map(function (r, i) {
         var name = $h(r.reg.forename) + ' ' + $h(r.reg.surnameInitial || '');
         var cls = 'nlsp__trow' + (r.uid === state.user.id ? ' is-you' : '');
         return '<div class="' + cls + '">' +
-          '<span class="nlsp__rank">' + (i + 1) + '</span>' +
+          '<span class="nlsp__rank">' + ranks[i] + '</span>' +
           crestImg(r.reg.crestUrl, r.reg.teamName, 22) +
           '<span>' + name + (r.uid === state.user.id ? ' <span class="nlsp__youlbl">(you)</span>' : '') + '</span>' +
           '<span class="nlsp__pts">' + r.results + '</span>' +
@@ -2207,19 +2306,23 @@
         return (a.teamName || '').localeCompare(b.teamName || '');
       });
     var below = clubs.length - ranked.length;
+    var clubRanks = rankLabels(ranked, function (a, b) {
+      return (a.results / a.settled) === (b.results / b.settled) &&
+             (a.exacts / a.settled) === (b.exacts / b.settled);
+    });
 
     var inner =
       '<div class="nlsp__tablehead">' +
         '<div class="nlsp__kicker">Club v club</div>' +
         '<div class="nlsp__tsub">' +
-          $h(state.lbMonth ? monthLabel(state.lbMonth) : 'Whole season') +
+          $h(lbScopeLabel()) +
           ' · % of predictions with the right result' +
         '</div>' +
       '</div>' +
       ranked.map(function (c, i) {
         var pct = Math.round(100 * c.results / c.settled);
         return '<div class="nlsp__trow">' +
-          '<span class="nlsp__rank">' + (i + 1) + '</span>' +
+          '<span class="nlsp__rank">' + clubRanks[i] + '</span>' +
           crestImg(c.crestUrl, c.teamName, 22) +
           '<span>' + $h(c.teamName) +
             ' <span class="nlsp__clubrow-fans">' + c.fans + ' fan' + (c.fans === 1 ? '' : 's') + ' · ' + c.settled + ' settled</span>' +
