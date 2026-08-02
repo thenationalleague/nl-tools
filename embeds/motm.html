@@ -1,38 +1,94 @@
 <!-- ============================================================
-     MAN OF THE MATCH — embeddable widget for thenationalleague.org.uk
+     TEAM OF THE WEEK — fan nominations, embeddable widget for
+     thenationalleague.org.uk. Sponsored by Enterprise.
      Source of truth. Copy/paste into the CMS custom HTML block.
 
      - JWT identity from _gc_sa_sso_access (sso.sportsalliance.com)
-     - One-time team registration (immutable team lock — shared shape
-       with the Score Predictor so a fan only registers once across the
-       NL widget family if they share a Firebase project; this widget
-       keeps data isolated in its own project though).
-     - RTDB (dedicated nl-motm project, named Firebase app):
+     - Supported club is read from the NL+ favourite_team claim on EVERY
+       load — no confirm step, no season lock. Change it in the NL+
+       profile, sign back in, and the widget follows. users/{jwtId} is
+       kept only so a Team of the Week quote has a name against it.
+     - RTDB (shared nl-widgets project, named Firebase app):
          users/{jwtId}
-         motm/{jwtId}/{matchId}  -> { playerId, playerName, teamId, submittedAt }
-     - Voting window: opens KO+2.5h, closes KO+24h
-     - Only the user's supported team's matches are votable; user can
-       pick from either side (own team or opposition player).
+         motm/{jwtId}/{matchId}  -> { playerId, playerName, teamId, note, submittedAt }
+     - Voting window: opens at FULL TIME (NLS matchPeriod), closes KO+24h.
+       A match that never reaches full time never opens for voting.
+     - Only the user's supported team's match is nominatable; the fan can
+       pick from either side (own team or opposition player), but ONLY
+       players who actually appeared — starters plus substitutes who came
+       on, derived from events.subs[].substitutionEvents.subOnID, since
+       playerStatus alone never says whether a sub got on.
+     - No date picker and no standings table: at most one match is open at
+       a time, and a public tally could contradict the club's own Team of
+       the Week selection.
      - Player lists are lazy-fetched from /v2/matches/{matchId}.
+     - Season comes from clubs-meta seasons.current, falling back to the
+       date on a Jul-Jun cadence ("2026" = 1 Jul 2026 to 30 Jun 2027).
 
-     Sim controls (visible by default during dev):
-       (no param) -> show the sim bar
-       ?sim=<ISO> -> freeze sim at that datetime, bar still shown
-       ?sim=off   -> real clock, bar hidden (production)
+     URL params:
+       ?sim=true|bar   -> show the sim clock bar (live clock)
+       ?sim=<ISO>      -> freeze the clock at that datetime, bar shown
+       (no param)      -> real clock, bar hidden (production)
+       ?season=2025    -> force an older season, for testing
+
+     Changelog:
+       02/08/2026  v2.2  Empty state carries the club's next three
+                         fixtures — crest, opponent, home/away marker,
+                         date and kick-off. Degrades to one row, and at
+                         the end of the season drops the list and
+                         changes the copy rather than showing an empty
+                         box. Postponed ties excluded (their listed date
+                         is the one that didn't happen).
+       02/08/2026  v2.1  Framed as TEAM OF THE WEEK (sponsored by
+                         Enterprise, whose black/green identity the
+                         header keeps); fans "nominate" rather than
+                         vote. Date picker removed — at most one match
+                         is ever open, so the widget finds it and
+                         otherwise explains the window and names the
+                         next fixture. Unused substitutes are no longer
+                         selectable: only starters plus subs who
+                         actually came on (from substitution events,
+                         with the minute). The selection gets full hero
+                         treatment on the player's club colours, with
+                         the fan's note shown back as the quote it could
+                         become. Quotation ask rewritten with a worked
+                         example. Player/label/disclaimer type sizes
+                         raised throughout. Per-match standings removed
+                         — it risked contradicting the club's own
+                         selection.
+       02/08/2026  v2.0  Supported club now read from the NL+ SSO claim on
+                         every load — the confirm-and-lock registration and
+                         its dropdown fallback are gone, with a "Not a X
+                         fan? Update your details here" link in the hero.
+                         Voting is gated on FULL TIME (NLS matchPeriod)
+                         rather than KO+2.5h, and a match that never
+                         finishes never opens for voting ('unresolved',
+                         4h guard). Season comes from clubs-meta
+                         seasons.current instead of a hardcoded constant,
+                         with a date-derived fallback and ?season= for
+                         testing. Sim bar is opt-in via ?sim, matching the
+                         Score Predictor. Brand tokens replaced with the
+                         canon block (no --gold/--info, no colour-mix
+                         overlays, navy active chip, canon scrim/focus).
+                         Published as a hosted bundle.
+       31/07/2026  v1.0  Initial widget.
 
      Scoped under #nlMotm; BEM .nlsm__ prefix; Carbona inline;
-     no external <script src> tags (CMS strips them).
+     no external <script src> tags (CMS strips them). Brand tokens mirror
+     system/nl-brand.css verbatim — same block as the Score Predictor.
+
+     Published as a hosted bundle at nl.tools/embeds/motm.js by
+     scripts/build-embeds.js, so the CMS carries a two-line snippet and a
+     merge to main is the release. Do not hand-edit embeds/motm.js.
      ============================================================ -->
 
 <div id="nlMotm">
   <div class="nlsm__sponsor" id="nlsm-sponsor"></div>
-  <div class="nlsm__banner" id="nlsm-banner" hidden>Loading MOTM...</div>
+  <div class="nlsm__banner" id="nlsm-banner" hidden>Loading Team of the Week&hellip;</div>
   <div class="nlsm__screen" id="nlsm-register" hidden></div>
   <div class="nlsm__screen" id="nlsm-main" hidden>
-    <div id="nlsm-datebar"></div>
     <div id="nlsm-hero"></div>
     <div id="nlsm-fixtures"></div>
-    <div id="nlsm-tally"></div>
   </div>
   <div class="nlsm__gate" id="nlsm-gate"></div>
   <div class="nlsm__footer" id="nlsm-footer"></div>
@@ -50,17 +106,24 @@
   }
 
   #nlMotm {
-    --primary:#9e0000; --navy:#223b7c;
+    /* Values mirror the NL canon (system/nl-brand.css) — embeds can't load
+       the portal stylesheet, so the tokens are inlined verbatim. Ladder
+       stops are the canonical "lighter/darker"; no gold, no rgba overlays.
+       Kept identical to the Score Predictor's block so the two widgets
+       cannot drift apart. */
+    --primary:#9e0000; --primary-50:#fcf4f2; --primary-300:#dfa197;
+    --primary-600:#7e0000; --primary-700:#600000;
+    --navy:#223b7c; --navy-600:#192e63;
     --red:#d4380d; --red-light:#fff1ec;
     --green:#1a7030; --green-light:#edf7ee;
     --amber:#c96f15; --amber-light:#fef6ec;
-    --info:#3b82f6; --info-light:#eef2ff;
-    --gold:#b8860b; --gold-light:#fff5d4;
+    --accent-live:#4ade80;
     --white:#ffffff; --off-white:#f4f6f9;
     --text:#1a2a44; --text-muted:#5a6a82;
     --border:#dde3ed;
     --radius:6px;
     --shadow:0 2px 12px rgba(10,22,40,.10);
+    --focus-ring:0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
 
     font-family:'carbona-variable','carbona',sans-serif;
     font-size:15px; line-height:1.45;
@@ -113,11 +176,20 @@
   @keyframes nlsm-spin { to { transform:rotate(360deg); } }
 
   /* Sponsor header */
+  /* Sponsor bar carries ENTERPRISE's identity, not NL brand tokens — this is
+     sponsored content and the black/green is the sponsor's, so it is a
+     deliberate one-off in the same way club colours are (see the identity
+     palette policy atop nl-brand.css). Everything else in the widget uses
+     the canon. */
+  #nlMotm {
+    --enterprise-bg:#000000;
+    --enterprise-accent:#34ab56;
+  }
   #nlMotm .nlsm__sponsor {
     display:grid; grid-template-columns:1fr auto 1fr; align-items:center;
-    background:#000; color:#fff;
+    background:var(--enterprise-bg); color:var(--white);
     padding:12px 16px; border-radius:var(--radius) var(--radius) 0 0;
-    border-bottom:2px solid #34ab56;
+    border-bottom:2px solid var(--enterprise-accent);
     gap:12px; min-height:54px;
   }
   #nlMotm .nlsm__sponsor-left  { display:flex; align-items:center; gap:10px; justify-self:start; }
@@ -130,10 +202,10 @@
   }
   #nlMotm .nlsm__sponsor img.nlsm__sponsor-team {
     height:30px; width:30px; display:block; object-fit:contain;
-    background:#fff; border-radius:4px; padding:1px;
+    background:var(--white); border-radius:4px; padding:1px;
   }
   #nlMotm .nlsm__sponsor .nlsm__sponsor-title {
-    font-size:15px; color:#fff;
+    font-size:15px; color:var(--white);
     text-transform:uppercase; letter-spacing:1.5px;
     font-weight:900; font-variation-settings:'wght' 900;
     line-height:1; text-align:center; justify-self:center;
@@ -159,31 +231,7 @@
   #nlMotm .nlsm__footer img { height:22px; width:auto; display:block; opacity:.65; }
 
   /* Datebar */
-  #nlMotm .nlsm__datebar {
-    display:flex; gap:6px;
-    padding:14px 2px 8px;
-    overflow-x:auto; overflow-y:hidden;
-    -webkit-overflow-scrolling:touch;
-    scrollbar-width:none;
-    cursor:grab; user-select:none;
-  }
-  #nlMotm .nlsm__datebar.is-dragging { cursor:grabbing; }
-  #nlMotm .nlsm__datebar.is-dragging button { pointer-events:none; }
-  #nlMotm .nlsm__datebar::-webkit-scrollbar { display:none; }
-  #nlMotm .nlsm__datebar button {
-    flex:none;
-    font-family:inherit; font-size:11px;
-    text-transform:uppercase; letter-spacing:1px;
-    padding:7px 12px; border-radius:999px; cursor:pointer;
-    background:var(--white); color:var(--text-muted);
-    border:1px solid var(--border);
-    font-weight:800; font-variation-settings:'wght' 800;
-    white-space:nowrap;
-    transition:all .15s ease;
-  }
-  #nlMotm .nlsm__datebar button:hover { color:var(--primary); border-color:var(--primary); }
-  #nlMotm .nlsm__datebar button.is-active { background:var(--text); color:var(--white); border-color:var(--text); }
-  #nlMotm .nlsm__datebar button.is-today { border-color:var(--primary); }
+  /* Canon single-choice active state (.chip.active in nl-brand.css): navy */
 
   /* Hero */
   #nlMotm .nlsm__hero { padding:10px 0 8px; }
@@ -197,6 +245,17 @@
     font-size:24px; line-height:1.15; margin:0;
     font-weight:900; font-variation-settings:'wght' 900;
   }
+  /* Supported club is not locked — this is the way out of it. */
+  #nlMotm .nlsm__swapline {
+    margin-top:6px;
+    font-size:12px; color:var(--text-muted);
+    font-weight:600; font-variation-settings:'wght' 600;
+  }
+  #nlMotm .nlsm__swapline a {
+    color:var(--primary); text-decoration:underline; text-underline-offset:2px;
+    font-weight:700; font-variation-settings:'wght' 700;
+  }
+  #nlMotm .nlsm__swapline a:hover { color:var(--primary-600); }
 
   /* Fixture row */
   #nlMotm .nlsm__row {
@@ -209,7 +268,7 @@
     display:grid; row-gap:6px;
   }
   #nlMotm .nlsm__row.is-voting { border-color:var(--primary); }
-  #nlMotm .nlsm__row.is-voted  { background:color-mix(in srgb, var(--green) 4%, var(--white)); }
+  #nlMotm .nlsm__row.is-voted  { background:var(--green-light); }
   #nlMotm .nlsm__row.is-void   { opacity:.7; }
 
   #nlMotm .nlsm__meta {
@@ -220,19 +279,19 @@
     min-height:16px;
   }
   #nlMotm .nlsm__meta .nlsm__livedot {
-    width:7px; height:7px; border-radius:50%; background:var(--red);
+    width:7px; height:7px; border-radius:50%; background:var(--accent-live);
     animation:nlsm-pulse 1.4s infinite;
   }
-  #nlMotm .nlsm__meta .nlsm__livelbl { color:var(--red); }
+  #nlMotm .nlsm__meta .nlsm__livelbl { color:var(--green); }
   #nlMotm .nlsm__meta .nlsm__ftlabel { color:var(--green); }
   #nlMotm .nlsm__meta .nlsm__votelbl { color:var(--primary); }
   #nlMotm .nlsm__meta .nlsm__voidlbl { color:var(--text-muted); }
   #nlMotm .nlsm__meta .nlsm__lock    { color:var(--text-muted); }
   #nlMotm .nlsm__meta .nlsm__countdown { color:var(--text); }
   @keyframes nlsm-pulse {
-    0%   { box-shadow:0 0 0 0 color-mix(in srgb, var(--red) 50%, transparent); }
-    70%  { box-shadow:0 0 0 6px color-mix(in srgb, var(--red) 0%, transparent); }
-    100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--red) 0%, transparent); }
+    0%   { box-shadow:0 0 0 0 color-mix(in srgb, var(--accent-live) 60%, transparent); }
+    70%  { box-shadow:0 0 0 6px color-mix(in srgb, var(--accent-live) 0%, transparent); }
+    100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--accent-live) 0%, transparent); }
   }
 
   /* Team line */
@@ -262,12 +321,6 @@
     font-weight:900; font-variation-settings:'wght' 900;
     color:var(--text);
   }
-  #nlMotm .nlsm__vs {
-    text-align:center; font-size:10px; color:var(--text-muted);
-    font-weight:800; font-variation-settings:'wght' 800;
-    letter-spacing:1px;
-    padding:2px 0;
-  }
 
   /* Voting picker */
   #nlMotm .nlsm__picker {
@@ -275,7 +328,7 @@
     display:grid; row-gap:10px;
   }
   #nlMotm .nlsm__picker > label {
-    font-size:11px; text-transform:uppercase; letter-spacing:1.2px;
+    font-size:13px; text-transform:uppercase; letter-spacing:1.2px;
     color:var(--text-muted);
     font-weight:800; font-variation-settings:'wght' 800;
   }
@@ -289,25 +342,25 @@
   }
   #nlMotm .nlsm__teamhead {
     display:flex; align-items:center; gap:6px;
-    padding:6px 8px;
-    background:var(--team-primary,#223b7c);
-    color:var(--team-secondary,#fff);
-    font-size:11px; line-height:1.2;
+    padding:8px 10px;
+    background:var(--team-primary,var(--navy));
+    color:var(--team-secondary,var(--white));
+    font-size:12px; line-height:1.2;
     font-weight:900; font-variation-settings:'wght' 900;
     text-transform:uppercase; letter-spacing:.8px;
-    min-height:28px;
+    min-height:32px;
   }
   #nlMotm .nlsm__teamhead img {
     width:18px; height:18px; object-fit:contain; flex:none;
-    background:rgba(255,255,255,.15); border-radius:3px; padding:1px;
+    background:var(--white); border-radius:3px; padding:1px;
   }
   #nlMotm .nlsm__teamhead .nlsm__thname {
     flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
   #nlMotm .nlsm__plist { display:flex; flex-direction:column; }
   #nlMotm .nlsm__subdiv {
-    padding:4px 8px 2px;
-    font-size:9px; text-transform:uppercase; letter-spacing:1px;
+    padding:6px 10px 3px;
+    font-size:11px; text-transform:uppercase; letter-spacing:1px;
     color:var(--text-muted);
     font-weight:800; font-variation-settings:'wght' 800;
     border-top:1px dashed var(--border);
@@ -316,11 +369,11 @@
   #nlMotm .nlsm__player {
     -webkit-appearance:none; appearance:none;
     text-align:left; font:inherit;
-    display:flex; align-items:center; gap:6px;
-    padding:8px 8px; min-height:36px;
+    display:flex; align-items:center; gap:8px;
+    padding:10px 10px; min-height:44px;
     background:transparent; border:none; border-top:1px solid var(--border);
     color:var(--text); cursor:pointer;
-    font-size:12px; line-height:1.2;
+    font-size:14px; line-height:1.25;
     font-weight:700; font-variation-settings:'wght' 700;
   }
   #nlMotm .nlsm__plist > .nlsm__player:first-child,
@@ -330,8 +383,8 @@
   #nlMotm .nlsm__player:hover { background:var(--off-white); }
   #nlMotm .nlsm__pshirt {
     flex:none; display:inline-block;
-    min-width:22px; text-align:center;
-    font-size:11px;
+    min-width:24px; text-align:center;
+    font-size:13px;
     font-weight:900; font-variation-settings:'wght' 900;
     color:var(--text-muted);
   }
@@ -340,7 +393,7 @@
   }
   #nlMotm .nlsm__player.is-sub .nlsm__pname { color:var(--text-muted); font-weight:600; font-variation-settings:'wght' 600; }
   #nlMotm .nlsm__player.is-selected {
-    background:color-mix(in srgb, var(--primary) 8%, var(--white));
+    background:var(--primary-50);
     box-shadow:inset 3px 0 0 var(--primary);
   }
   #nlMotm .nlsm__player.is-selected .nlsm__pname,
@@ -363,32 +416,24 @@
   }
   #nlMotm .nlsm__note textarea:focus {
     outline:none; border-color:var(--primary);
-    box-shadow:0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent);
+    box-shadow:var(--focus-ring);
   }
   #nlMotm .nlsm__notefoot {
-    display:flex; justify-content:space-between; align-items:center;
-    font-size:10px; color:var(--text-muted);
+    display:flex; justify-content:space-between; align-items:center; gap:10px;
+    font-size:12px; color:var(--text-muted);
     font-weight:600; font-variation-settings:'wght' 600;
   }
   #nlMotm .nlsm__notedisc { flex:1 1 auto; padding-right:8px; }
   #nlMotm .nlsm__notecount.is-max { color:var(--red); }
 
   /* Your-pick note recall (below summary) */
-  #nlMotm .nlsm__yournote {
-    margin-top:6px;
-    padding:6px 10px;
-    border-left:2px solid var(--border);
-    font-size:12px; line-height:1.45; color:var(--text-muted);
-    font-weight:500; font-variation-settings:'wght' 500;
-    font-style:italic;
-  }
 
   #nlMotm .nlsm__pickactions {
     display:flex; gap:8px; justify-content:flex-end;
     align-items:center;
   }
   #nlMotm .nlsm__pickactions .nlsm__pickhint {
-    margin-right:auto; font-size:12px; color:var(--text-muted);
+    margin-right:auto; font-size:13px; color:var(--text-muted);
     font-weight:600; font-variation-settings:'wght' 600;
   }
   #nlMotm .nlsm__pickactions button {
@@ -400,36 +445,168 @@
   #nlMotm .nlsm__btn-save {
     background:var(--primary); color:var(--white); border:1px solid var(--primary);
   }
-  #nlMotm .nlsm__btn-save:hover  { background:color-mix(in srgb, var(--primary) 80%, black); }
-  #nlMotm .nlsm__btn-save:disabled { background:#cccccc; color:#888888; border-color:#cccccc; cursor:not-allowed; }
+  #nlMotm .nlsm__btn-save:hover  { background:var(--primary-600); }
+  #nlMotm .nlsm__btn-save:disabled { background:var(--border); color:var(--text-muted); border-color:var(--border); cursor:not-allowed; }
   #nlMotm .nlsm__btn-cancel {
     background:var(--white); color:var(--text-muted); border:1px solid var(--border);
   }
   #nlMotm .nlsm__btn-cancel:hover { color:var(--text); border-color:var(--text-muted); }
 
   /* Voted summary */
-  #nlMotm .nlsm__voted {
-    display:flex; align-items:center; gap:10px;
-    padding:8px 10px;
-    background:var(--green-light); border:1px solid color-mix(in srgb, var(--green) 30%, var(--border));
-    border-radius:var(--radius);
-    font-size:13px; color:var(--text);
-    font-weight:700; font-variation-settings:'wght' 700;
+
+  /* Selection hero — the pick, carried on the player's club colours. This is
+     the payoff of the whole widget, so it gets the weight. --hero-bg is the
+     club's own primary from clubs-meta; --hero-tx is the readable text token
+     chosen for it. */
+  #nlMotm .nlsm__pickhero {
+    background:var(--hero-bg,var(--navy)); color:var(--hero-tx,var(--white));
+    border-radius:var(--radius); overflow:hidden;
+    margin-top:4px;
   }
-  #nlMotm .nlsm__voted .nlsm__vname { color:var(--text); font-weight:900; font-variation-settings:'wght' 900; }
-  #nlMotm .nlsm__voted .nlsm__vlbl  { color:var(--green); }
-  #nlMotm .nlsm__voted .nlsm__editmini {
+  #nlMotm .nlsm__pickhero-top {
+    display:flex; align-items:center; gap:10px;
+    padding:9px 14px 0;
+    font-size:11px; text-transform:uppercase; letter-spacing:1.4px;
+    font-weight:800; font-variation-settings:'wght' 800;
+    opacity:.85;
+  }
+  #nlMotm .nlsm__pickhero-top .nlsm__editmini {
     margin-left:auto;
     font:inherit; font-size:11px;
-    font-weight:700; font-variation-settings:'wght' 700;
     text-transform:uppercase; letter-spacing:1px;
     background:transparent; border:none; padding:0;
-    color:var(--text-muted); cursor:pointer;
+    color:inherit; cursor:pointer; opacity:.9;
     text-decoration:underline; text-underline-offset:3px;
   }
-  #nlMotm .nlsm__voted .nlsm__editmini:hover { color:var(--primary); }
-  #nlMotm .nlsm__voted.is-locked { background:var(--off-white); border-color:var(--border); }
-  #nlMotm .nlsm__voted.is-locked .nlsm__vlbl { color:var(--text-muted); }
+  #nlMotm .nlsm__pickhero-top .nlsm__editmini:hover { opacity:1; }
+  #nlMotm .nlsm__pickhero-body {
+    display:flex; align-items:center; gap:14px;
+    padding:10px 14px 14px;
+  }
+  #nlMotm .nlsm__pickhero-body img {
+    width:52px; height:52px; flex:none; object-fit:contain;
+  }
+  #nlMotm .nlsm__pickhero-who { min-width:0; }
+  #nlMotm .nlsm__pickhero-name {
+    font-size:26px; line-height:1.1;
+    font-weight:900; font-variation-settings:'wght' 900;
+    letter-spacing:-.3px;
+    overflow-wrap:anywhere;
+  }
+  #nlMotm .nlsm__pickhero-sub {
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+    margin-top:4px;
+    font-size:12px; text-transform:uppercase; letter-spacing:1px;
+    font-weight:700; font-variation-settings:'wght' 700;
+    opacity:.85;
+  }
+  #nlMotm .nlsm__pickhero-shirt {
+    padding:1px 7px; border-radius:999px;
+    background:var(--white); color:var(--text);
+    font-weight:900; font-variation-settings:'wght' 900;
+  }
+  /* The fan's words shown back as the quote they could become. */
+  #nlMotm .nlsm__pickhero-quote {
+    margin:0; padding:12px 14px 14px;
+    background:var(--white); color:var(--text);
+    font-size:15px; line-height:1.5;
+    font-weight:500; font-variation-settings:'wght' 500;
+    font-style:italic;
+    border-top:1px solid var(--border);
+  }
+  #nlMotm .nlsm__pickhero-quote::before { content:'\201C'; }
+  #nlMotm .nlsm__pickhero-quote::after  { content:'\201D'; }
+
+  /* Out-of-window explainer — replaces the date picker entirely. */
+  #nlMotm .nlsm__windowcard {
+    background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
+    box-shadow:var(--shadow);
+    padding:28px 22px; text-align:center;
+  }
+  #nlMotm .nlsm__windowcard h2 {
+    margin:0 0 8px;
+    font-size:19px; font-weight:900; font-variation-settings:'wght' 900;
+    color:var(--text);
+  }
+  #nlMotm .nlsm__windowcard p {
+    margin:0 auto; max-width:38ch;
+    font-size:14px; line-height:1.55; color:var(--text-muted);
+    font-weight:500; font-variation-settings:'wght' 500;
+  }
+  /* Next fixtures inside the empty state. Left-aligned inside the centred
+     card: a list of dates reads badly centred. Up to three rows; none at
+     the end of the season, when the copy changes instead. */
+  #nlMotm .nlsm__fixtures {
+    margin:20px auto 0; max-width:340px;
+    text-align:left;
+    border-top:1px solid var(--border);
+  }
+  #nlMotm .nlsm__fixtureshead {
+    padding:12px 2px 6px;
+    font-size:10px; text-transform:uppercase; letter-spacing:1.4px;
+    color:var(--text-muted);
+    font-weight:800; font-variation-settings:'wght' 800;
+  }
+  #nlMotm .nlsm__fixture {
+    display:grid; grid-template-columns:24px 1fr auto auto;
+    align-items:center; gap:10px;
+    padding:9px 2px;
+  }
+  #nlMotm .nlsm__fixture + .nlsm__fixture { border-top:1px solid var(--off-white); }
+  #nlMotm .nlsm__fixture img { width:24px; height:24px; object-fit:contain; }
+  #nlMotm .nlsm__fixtureopp {
+    min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    font-size:14px; color:var(--text);
+    font-weight:800; font-variation-settings:'wght' 800;
+  }
+  /* Home/away marker — away is the quieter of the two, since most of a
+     fan's questions are about the home games. */
+  #nlMotm .nlsm__fixtureha {
+    flex:none; width:20px; text-align:center;
+    padding:2px 0; border-radius:4px;
+    font-size:11px; line-height:1.3;
+    font-weight:900; font-variation-settings:'wght' 900;
+    background:var(--off-white); color:var(--text-muted);
+    border:1px solid var(--border);
+  }
+  #nlMotm .nlsm__fixtureha.is-home {
+    background:var(--navy); color:var(--white); border-color:var(--navy);
+  }
+  #nlMotm .nlsm__fixturewhen {
+    display:flex; flex-direction:column; align-items:flex-end; gap:1px;
+    font-variant-numeric:tabular-nums;
+  }
+  #nlMotm .nlsm__fixturedate {
+    font-size:12px; color:var(--text);
+    font-weight:700; font-variation-settings:'wght' 700;
+  }
+  #nlMotm .nlsm__fixtureko {
+    font-size:11px; color:var(--text-muted);
+    font-weight:600; font-variation-settings:'wght' 600;
+  }
+
+  /* Quotation prompt — the ask, and a worked example of what lands. */
+  #nlMotm .nlsm__notelbl {
+    font-size:13px; text-transform:uppercase; letter-spacing:1.2px;
+    color:var(--text-muted);
+    font-weight:800; font-variation-settings:'wght' 800;
+  }
+  #nlMotm .nlsm__notelbl span {
+    text-transform:none; letter-spacing:0;
+    font-weight:600; font-variation-settings:'wght' 600;
+    opacity:.75;
+  }
+  #nlMotm .nlsm__noteexample {
+    margin:0; font-size:13px; line-height:1.5; color:var(--text-muted);
+    font-weight:500; font-variation-settings:'wght' 500;
+  }
+  #nlMotm .nlsm__noteexample em { color:var(--text); font-style:italic; }
+
+  /* Minute a substitute came on. */
+  #nlMotm .nlsm__pon {
+    flex:none; font-size:11px; color:var(--text-muted);
+    font-weight:700; font-variation-settings:'wght' 700;
+  }
 
   /* Not-your-match notice (for non-own-team rows, if any are surfaced) */
   #nlMotm .nlsm__lockcard {
@@ -447,7 +624,7 @@
     position:fixed; inset:0; z-index:1000;
     display:flex; align-items:center; justify-content:center;
     padding:20px;
-    background:rgba(10,22,40,.45);
+    background:rgba(10,22,40,.65); /* canon .modal-backdrop scrim */
   }
   #nlMotm .nlsm__modal-card {
     background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
@@ -481,32 +658,12 @@
   #nlMotm .nlsm__modal-confirm {
     background:var(--primary); color:var(--white); border:1px solid var(--primary);
   }
-  #nlMotm .nlsm__modal-confirm:hover { background:color-mix(in srgb, var(--primary) 80%, black); }
+  #nlMotm .nlsm__modal-confirm:hover { background:var(--primary-600); }
 
   /* Registration */
   #nlMotm .nlsm__register-card {
     background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
     padding:24px; box-shadow:var(--shadow);
-  }
-  #nlMotm .nlsm__register-card label {
-    display:block; font-size:13px; margin:18px 0 6px;
-    font-weight:800; font-variation-settings:'wght' 800;
-  }
-  #nlMotm .nlsm__register-card select {
-    width:100%; padding:10px 12px; font-size:15px; font-family:inherit;
-    color:var(--text); background:var(--white);
-    border:1px solid var(--border); border-radius:var(--radius);
-    font-weight:600; font-variation-settings:'wght' 600;
-  }
-  #nlMotm .nlsm__register-card select:focus {
-    outline:none; border-color:var(--primary);
-    box-shadow:0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent);
-  }
-  #nlMotm .nlsm__lockwarn {
-    margin:18px 0; padding:10px 12px;
-    background:var(--amber-light); border:1px solid var(--amber); color:var(--amber);
-    font-size:13px; border-radius:var(--radius);
-    font-weight:700; font-variation-settings:'wght' 700;
   }
   #nlMotm .nlsm__btn {
     font-family:inherit; font-size:15px;
@@ -515,76 +672,15 @@
     cursor:pointer; background:var(--primary); color:var(--white);
     transition:background .15s ease;
   }
-  #nlMotm .nlsm__btn:hover  { background:color-mix(in srgb, var(--primary) 80%, black); }
-  #nlMotm .nlsm__btn:active { background:color-mix(in srgb, var(--primary) 70%, black); }
+  #nlMotm .nlsm__btn:hover  { background:var(--primary-600); }
+  #nlMotm .nlsm__btn:active { background:var(--primary-700); }
   #nlMotm .nlsm__btn:focus-visible {
-    outline:3px solid color-mix(in srgb, var(--primary) 35%, transparent); outline-offset:2px;
+    outline:3px solid var(--primary-300); outline-offset:2px;
   }
-  #nlMotm .nlsm__btn:disabled { background:#cccccc; color:#888888; cursor:not-allowed; }
+  #nlMotm .nlsm__btn:disabled { background:var(--border); color:var(--text-muted); cursor:not-allowed; }
 
   /* Tally */
-  #nlMotm .nlsm__tally {
-    background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
-    padding:12px 0; margin:18px 0; box-shadow:var(--shadow);
-  }
-  #nlMotm .nlsm__tallyhead { padding:0 14px 8px; border-bottom:1px solid var(--border); }
-  #nlMotm .nlsm__tallyhead .nlsm__kicker {
-    font-size:11px; text-transform:uppercase; letter-spacing:1.5px;
-    color:var(--text-muted);
-    font-weight:800; font-variation-settings:'wght' 800;
-  }
-  #nlMotm .nlsm__tallyhead .nlsm__tsub { font-size:12px; color:var(--text-muted); margin-top:2px; }
-  #nlMotm .nlsm__trow {
-    display:flex; align-items:center; gap:10px;
-    padding:9px 14px;
-    font-size:14px;
-    font-weight:700; font-variation-settings:'wght' 700;
-    border-bottom:1px solid color-mix(in srgb, var(--border) 50%, transparent);
-  }
-  #nlMotm .nlsm__trow:last-child { border-bottom:none; }
-  #nlMotm .nlsm__trow.is-leader { background:color-mix(in srgb, var(--gold) 10%, var(--white)); }
-  #nlMotm .nlsm__trow.is-you-pick { background:color-mix(in srgb, var(--primary) 5%, var(--white)); }
-  #nlMotm .nlsm__trow.is-leader.is-you-pick {
-    background:linear-gradient(90deg,
-      color-mix(in srgb, var(--gold) 10%, var(--white)) 0%,
-      color-mix(in srgb, var(--primary) 5%, var(--white)) 100%);
-  }
-  #nlMotm .nlsm__trow .nlsm__rank {
-    flex:none; width:18px; color:var(--text-muted);
-    font-weight:900; font-variation-settings:'wght' 900;
-  }
-  #nlMotm .nlsm__trow .nlsm__pname {
-    flex:1; min-width:0;
-    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  }
-  #nlMotm .nlsm__trow .nlsm__ptag {
-    flex:none;
-    font-size:10px; color:var(--text-muted);
-    text-transform:uppercase; letter-spacing:1px;
-    font-weight:700; font-variation-settings:'wght' 700;
-    padding:2px 6px; border:1px solid var(--border); border-radius:999px;
-    max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-  }
-  #nlMotm .nlsm__trow .nlsm__leadpill {
-    flex:none;
-    font-size:10px;
-    text-transform:uppercase; letter-spacing:1px;
-    font-weight:800; font-variation-settings:'wght' 800;
-    padding:2px 8px; border-radius:999px;
-    background:var(--gold); color:var(--white);
-  }
-  #nlMotm .nlsm__trow .nlsm__youpill {
-    flex:none;
-    font-size:10px;
-    text-transform:uppercase; letter-spacing:1px;
-    font-weight:800; font-variation-settings:'wght' 800;
-    padding:2px 8px; border-radius:999px;
-    background:var(--white); color:var(--primary);
-    border:1px solid var(--primary);
-  }
   @media (max-width:520px) {
-    #nlMotm .nlsm__trow { gap:8px; padding:9px 12px; }
-    #nlMotm .nlsm__trow .nlsm__ptag { display:none; }
   }
 
   /* Sim bar */
@@ -607,7 +703,7 @@
   #nlMotm .nlsm__simbar input[type="date"]:focus,
   #nlMotm .nlsm__simbar input[type="time"]:focus {
     outline:none; border-color:var(--primary);
-    box-shadow:0 0 0 2px color-mix(in srgb, var(--primary) 25%, transparent);
+    box-shadow:var(--focus-ring);
   }
   #nlMotm .nlsm__simbar .nlsm__sim-now-btn {
     font-family:inherit; font-size:11px;
@@ -668,16 +764,31 @@
   };
   var COMP_IDS = Object.keys(COMPS).map(Number);
   var DEFAULT_COMP_ID = 89;
-  var SEASON_ID  = 2026;
   var API_BASE   = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
   var CLUBS_META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/data/clubs-meta.json';
   var MAX_PAGES  = 10;
   var NOTE_MAX   = 280;
 
-  // Voting window: opens KO + 2.5h, closes KO + 24h.
-  var VOTE_OPEN_MIN  = 150;     // 2.5h after KO
-  var VOTE_CLOSE_MIN = 24 * 60; // 24h after KO
-  var IN_PLAY_MIN    = 105;     // KO + 105m = effective FT cutoff for "live"
+  // A season is named for the calendar year it STARTS in and runs 1 Jul to
+  // 30 Jun, so "2026" is the 2026-27 campaign. The live value comes from
+  // clubs-meta (seasons.current) rather than being hardcoded; deriving it
+  // from the date is the fallback if that fetch fails, and ?season=2025
+  // forces an older one for testing.
+  function deriveSeasonId(d) {
+    var y = d.getFullYear();
+    return (d.getMonth() + 1) >= 7 ? y : y - 1;
+  }
+  function seasonOverride() {
+    var v = new URLSearchParams(window.location.search).get('season');
+    return /^\d{4}$/.test(v || '') ? Number(v) : null;
+  }
+
+  // Voting opens at FULL TIME and closes 24h after kick-off. A match that
+  // never reaches full time never opens for voting at all.
+  var VOTE_CLOSE_MIN = 24 * 60;
+  // Past this, an in-play matchPeriod is not believed — an abandoned match
+  // or a stalled feed would otherwise sit at "Live" forever.
+  var STALE_LIVE_MIN = 240;
 
   // ---------- DOM refs ----------
   var banner    = document.getElementById('nlsm-banner');
@@ -685,11 +796,9 @@
   var main      = document.getElementById('nlsm-main');
   var hero      = document.getElementById('nlsm-hero');
   var fixtures  = document.getElementById('nlsm-fixtures');
-  var tallyEl   = document.getElementById('nlsm-tally');
   var simEl     = document.getElementById('nlsm-sim');
   var sponsorEl = document.getElementById('nlsm-sponsor');
   var footerEl  = document.getElementById('nlsm-footer');
-  var datebarEl = document.getElementById('nlsm-datebar');
 
   // ---------- sponsor + footer ----------
   var ENTERPRISE_LOGO_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/partners/Enterprise.png';
@@ -711,7 +820,7 @@
         '<img class="nlsm__sponsor-logo" src="' + ENTERPRISE_LOGO_URL + '" alt="Enterprise" ' +
           'onerror="this.onerror=null;this.style.display=\'none\';">' +
       '</div>' +
-      '<span class="nlsm__sponsor-title">Man of the Match</span>' +
+      '<span class="nlsm__sponsor-title">Team of the Week</span>' +
       '<div class="nlsm__sponsor-right">' +
         compCrest +
         teamCrest +
@@ -797,19 +906,19 @@
     return 'in ' + days + 'd';
   }
 
-  // ---------- sim mode ----------
+  // ---------- sim mode (URL-driven, same contract as the Score Predictor) ----------
+  //   (no param)      -> real clock, bar hidden (production)
+  //   ?sim=true|bar   -> bar visible, live clock
+  //   ?sim=<datetime> -> bar visible, clock frozen at that moment
+  //   ?sim=off        -> real clock, bar hidden (explicit form)
   function parseSimMode() {
     var p = new URLSearchParams(window.location.search).get('sim');
-    if (p == null) return null;
+    if (p == null) return { fixed: null, barEnabled: false };
     var l = p.toLowerCase();
-    if (l === 'off' || l === 'none' || l === '0' || l === 'false') return null;
+    if (l === 'off' || l === 'none' || l === '0' || l === 'false') return { fixed: null, barEnabled: false };
+    if (l === 'true' || l === 'bar' || l === '1' || l === 'on') return { fixed: null, barEnabled: true };
     var d = new Date(p);
-    if (!isNaN(d.getTime())) return d;
-    return null;
-  }
-  function simBarHidden() {
-    var p = new URLSearchParams(window.location.search).get('sim');
-    return p && p.toLowerCase() === 'off';
+    return { fixed: isNaN(d.getTime()) ? null : d, barEnabled: true };
   }
 
   // ---------- state ----------
@@ -825,10 +934,10 @@
     editing: {},        // { matchId: true } — re-open submitted vote
     pendingMid: null,   // matchId we're writing right now
     players: {},        // matchId -> { loading, error, list: [{playerId, name, teamId, teamName, shirt, position, status}] }
-    allUsers: {},
     clubsByOpta: {},    // teamID (e.g. 't434') -> { name, code, colors:{primary,secondary,tertiary}, ... }
     selectedMatchday: null,
-    sim: { fixed: null }
+    seasonId: null,     // from clubs-meta seasons.current (or derived / ?season)
+    sim: { fixed: null, barEnabled: false }
   };
 
   // Team palette from clubs-meta, with brand-safe fallback.
@@ -836,9 +945,9 @@
     var c = state.clubsByOpta[teamId];
     var cols = c && c.colors;
     return {
-      primary:   (cols && cols.primary)   || '#223b7c',
-      secondary: (cols && cols.secondary) || '#ffffff',
-      tertiary:  (cols && cols.tertiary)  || '#9e0000'
+      primary:   (cols && cols.primary)   || 'var(--navy)',
+      secondary: (cols && cols.secondary) || 'var(--white)',
+      tertiary:  (cols && cols.tertiary)  || 'var(--primary)'
     };
   }
   function fetchClubsMeta() {
@@ -849,6 +958,8 @@
         var map = {};
         clubs.forEach(function (c) { if (c && c.optaID) map[c.optaID] = c; });
         state.clubsByOpta = map;
+        var cur = json && json.seasons && json.seasons.current;
+        if (cur && /^\d{4}$/.test(String(cur))) state.seasonId = Number(cur);
       })
       .catch(function () { state.clubsByOpta = {}; });
   }
@@ -856,79 +967,50 @@
   function simNow() {
     return state.sim.fixed ? new Date(state.sim.fixed.getTime()) : new Date();
   }
-  function setSimFixed(d) { state.sim.fixed = d; recomputeMatchday(); renderAll(); }
+  function setSimFixed(d) { state.sim.fixed = d; recomputeMatch(); renderAll(); }
   function clearSimFixed() { setSimFixed(null); }
   function renderAll() {
-    renderDatebar(); renderSimBar(); renderHero();
-    renderFixtures(); renderTally();
+    renderSimBar(); renderHero(); renderFixtures();
   }
 
-  // ---------- matchday derivation (own-team only) ----------
+  // ---------- which match are we voting on? ----------
+  // There is no date picker. At most one of your club's matches can be open
+  // for voting at a time (full time, within 24h of kick-off), so the widget
+  // simply finds it. Outside that window there is nothing to choose between,
+  // so the UI explains the window instead of offering navigation.
   function bstDateOf(d) {
     if (!d) return '';
     return d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
   }
-  function matchMatchdayKey(m) { return bstDateOf(koOf(m)); }
-  // Only matchdays where the user's own team plays
-  function uniqueMatchdayKeys() {
+  function votableMatch() {
+    var now = simNow();
+    var reg = state.registration;
+    if (!reg) return null;
+    var open = (state.allMatches || []).filter(function (m) {
+      return isOwnTeamMatch(m, reg) && stateOf(m, now) === 'voting';
+    }).sort(function (a, b) { return dateOf(b).localeCompare(dateOf(a)); });
+    return open[0] || null;
+  }
+  // The club's next fixtures, so "come back soon" can say when. Postponed
+  // ties are excluded — their listed date is the one that didn't happen.
+  // Returns [] at the end of the season, which the card handles.
+  function nextFixtures(limit) {
+    var now = simNow();
     var reg = state.registration;
     if (!reg) return [];
-    var seen = {};
-    (state.allMatches || []).forEach(function (m) {
-      if (!isOwnTeamMatch(m, reg)) return;
-      var k = matchMatchdayKey(m); if (k) seen[k] = true;
-    });
-    return Object.keys(seen).sort();
+    return (state.allMatches || []).filter(function (m) {
+      var ko = koOf(m);
+      if (!isOwnTeamMatch(m, reg) || !ko || ko.getTime() <= now.getTime()) return false;
+      return periodOf(m) !== 'postponed';
+    }).sort(function (a, b) {
+      return dateOf(a).localeCompare(dateOf(b));
+    }).slice(0, limit || 3);
   }
-  // Default to the most recently kicked-off match (likely in the voting window
-  // or just closed). Fall back to the next upcoming match.
-  function defaultMatchdayKey() {
-    var keys = uniqueMatchdayKeys();
-    if (!keys.length) return '';
-    var now = simNow();
-    var today = bstDateOf(now);
-    // Prefer a matchday whose match is currently in the voting window
-    for (var i = 0; i < keys.length; i++) {
-      var k = keys[i];
-      var matches = (state.allMatches || []).filter(function (m) {
-        return isOwnTeamMatch(m, state.registration) && matchMatchdayKey(m) === k;
-      });
-      for (var j = 0; j < matches.length; j++) {
-        if (stateOf(matches[j], now) === 'voting') return k;
-      }
-    }
-    // Else: today if it's in the set
-    if (keys.indexOf(today) !== -1) return today;
-    // Else: next upcoming
-    for (var p = 0; p < keys.length; p++) {
-      if (keys[p] >= today) return keys[p];
-    }
-    return keys[keys.length - 1];
-  }
-  function currentMatchdayKey() {
-    return state.selectedMatchday || defaultMatchdayKey();
-  }
-  function setSelectedMatchday(key) {
-    state.selectedMatchday = key;
-    recomputeMatchday();
-    renderAll();
-  }
-  function recomputeMatchday() {
-    var key = currentMatchdayKey();
-    var reg = state.registration;
-    state.matches = (state.allMatches || []).filter(function (m) {
-      if (!reg || !isOwnTeamMatch(m, reg)) return false;
-      return matchMatchdayKey(m) === key;
-    }).sort(function (a, b) { return dateOf(a).localeCompare(dateOf(b)); });
+  function recomputeMatch() {
+    var m = votableMatch();
+    state.matches = m ? [m] : [];
     recomputeMyVotes();
-    // Lazy-fetch players for any match in voting/closed state (or imminent)
-    var now = simNow();
-    state.matches.forEach(function (m) {
-      var s = stateOf(m, now);
-      if (s === 'voting' || s === 'closed' || s === 'live') {
-        ensurePlayers(m.id);
-      }
-    });
+    if (m) ensurePlayers(m.id);
   }
   function recomputeMyVotes() {
     if (!state.user) return;
@@ -942,16 +1024,29 @@
   }
   function koOf(m) { return normaliseUtc(dateOf(m)); }
   function periodOf(m) { return ((m && m.attributes && m.attributes.matchPeriod) || '').toLowerCase(); }
+  // Voting is gated on the match actually being FINISHED, not on the clock:
+  // NLS must report FullTime/PostMatch. A game that is abandoned, or whose
+  // feed never publishes a final period, therefore never opens for voting —
+  // there is no man of the match for a match that did not finish.
   function stateOf(m, now) {
     var p = periodOf(m);
     if (p === 'postponed') return 'postponed';
     if (p === 'abandoned') return 'abandoned';
     var ko = koOf(m); if (!ko) return 'unknown';
     var diffMin = (now - ko) / 60000;
-    if (diffMin < 0)              return 'pre';      // before KO
-    if (diffMin < VOTE_OPEN_MIN)  return 'live';     // KO -> KO+2.5h
-    if (diffMin < VOTE_CLOSE_MIN) return 'voting';   // KO+2.5h -> KO+24h
-    return 'closed';                                  // > 24h after KO
+    if (diffMin < 0) return 'pre';
+    var isFT = (p === 'fulltime' || p === 'postmatch');
+    if (!isFT) {
+      // Kicked off but no final period yet: in play, or a stalled/abandoned
+      // feed once we are well past any plausible finish.
+      return diffMin > STALE_LIVE_MIN ? 'unresolved' : 'live';
+    }
+    if (diffMin < VOTE_CLOSE_MIN) return 'voting';   // full time -> KO+24h
+    return 'closed';
+  }
+  // Season actually in force: ?season override, else clubs-meta, else derived.
+  function activeSeasonId() {
+    return seasonOverride() || state.seasonId || deriveSeasonId(simNow());
   }
   function isOwnTeamMatch(m, reg) {
     return reg && (m.attributes.homeTeam.teamID === reg.teamId || m.attributes.awayTeam.teamID === reg.teamId);
@@ -995,7 +1090,7 @@
   function fetchCompetition(compId) {
     var all = [];
     function page(n) {
-      var url = API_BASE + '/matches/?competitionID=' + compId + '&seasonID=' + SEASON_ID +
+      var url = API_BASE + '/matches/?competitionID=' + compId + '&seasonID=' + activeSeasonId() +
                 '&sort=kickOffDateUTC&page.number=' + n + '&page.size=100';
       return fetch(url, { credentials:'omit' })
         .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status + ' (comp ' + compId + ')'); return r.json(); })
@@ -1022,7 +1117,22 @@
         teams.forEach(function (team) {
           var teamID = team.teamID;
           var teamName = (team.team && team.team.teamName) || '';
-          var all = (team.players && team.players.Start || []).concat((team.players && team.players.Sub) || []);
+          // playerStatus only says Start|Sub — it does NOT say whether a sub
+          // got on. The only source for that is the substitution events, so
+          // build the set of players who actually came on and drop the rest:
+          // an unused sub is not a candidate for man of the match.
+          var cameOn = {}, onMinute = {};
+          ((team.events && team.events.subs) || []).forEach(function (ev) {
+            var se = ev && ev.substitutionEvents;
+            if (!se || !se.subOnID) return;
+            cameOn[se.subOnID] = true;
+            onMinute[se.subOnID] = ev.formattedEventTime || (ev.eventMinute != null ? ev.eventMinute + "'" : '');
+          });
+          var starters = (team.players && team.players.Start) || [];
+          var subsUsed = ((team.players && team.players.Sub) || []).filter(function (p) {
+            return cameOn[p.playerID];
+          });
+          var all = starters.concat(subsUsed);
           all.forEach(function (p) {
             var pn = p.playerName || {};
             var name = pn.knownName || pn.customKnownName || ((pn.firstName || '') + ' ' + (pn.lastName || '')).trim();
@@ -1033,15 +1143,14 @@
               shirt:     p.shirtNumber,
               position:  (p.playerPosition === 'Substitute' && p.playerSubPosition) ? p.playerSubPosition : p.playerPosition,
               status:    p.playerStatus,
+              onMinute:  onMinute[p.playerID] || '',
               teamId:    teamID,
               teamName:  teamName
             });
           });
         });
         state.players[matchId] = { list: list };
-        // Re-render the matching row + tally now that names are in
         renderFixtures();
-        renderTally();
       })
       .catch(function (err) {
         state.players[matchId] = { error: err.message || String(err) };
@@ -1089,204 +1198,164 @@
   // favourite_team JWT claim to reach this widget.
   var NLPLUS_PORTAL_URL = 'https://signin.thenationalleague.org.uk/';
 
-  function renderRegistration() {
-    main.hidden = true; register.hidden = false;
-    var flat    = allTeamsFlat();
-    // Try to match JWT favourite_team against an NL team (case-insensitive).
-    // If it matches, we lock the UI to confirm-only — no dropdown, no
-    // alternative. If it doesn't, we fall back to the full dropdown.
-    var favMatch = null;
-    if (state.user.favTeamName) {
-      favMatch = flat.filter(function (o) {
-        return o.name.toLowerCase() === state.user.favTeamName.toLowerCase();
-      })[0] || null;
-    }
-    if (favMatch) renderRegistrationConfirm(favMatch);
-    else          renderRegistrationPicker();
+  // The supported club is NOT locked for the season and is not stored as a
+  // registration the fan has to confirm. It is read from the NL+ SSO
+  // favourite_team claim on every load, so changing it in the NL+ profile
+  // (then signing back in) is all it takes to follow a different club. The
+  // widget keeps a users/{jwtId} record for the name/email a Team of the
+  // Week quote needs, but nothing gates on it.
+  function normClubName(s) {
+    return String(s || '').toLowerCase()
+      .replace(/&/g, 'and')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
   }
-
-  // Confirm-only path: favourite_team is a current NL team. Just one button.
-  function renderRegistrationConfirm(team) {
-    var crest = team.crest
-      ? '<img src="' + $h(team.crest) + '" alt="' + $h(team.name) + '" ' +
-          'style="width:48px;height:48px;object-fit:contain;display:block;margin:0 auto 10px;" ' +
-          'onerror="this.onerror=null;this.style.display=\'none\';">'
-      : '';
-    register.innerHTML =
-      '<div class="nlsm__register-card">' +
-        '<div class="nlsm__hero" style="padding:0;">' +
-          '<div class="nlsm__greetline">Man of the Match</div>' +
-          '<h1>Welcome, ' + $h(state.user.forename) + '</h1>' +
-        '</div>' +
-        '<p style="color:var(--text-muted);font-size:14px;margin:6px 0 18px;">' +
-          'Your NL+ profile is set to support the team below. Confirm to lock it for the season — you\'ll vote for the Man of the Match after each of their games.' +
-        '</p>' +
-        '<div style="text-align:center;padding:18px 12px;background:var(--off-white);border:1px solid var(--border);border-radius:var(--radius);">' +
-          crest +
-          '<div style="font-size:18px;font-weight:900;font-variation-settings:\'wght\' 900;color:var(--text);">' + $h(team.name) + '</div>' +
-        '</div>' +
-        '<div class="nlsm__lockwarn">This locks for the season. Confirm carefully — you can\'t change your team later.</div>' +
-        '<button class="nlsm__btn" id="nlsm-register-btn" style="width:100%;">Confirm and lock my team</button>' +
-        '<p style="color:var(--text-muted);font-size:12px;margin:14px 0 0;text-align:center;">' +
-          'Not your team? <a href="' + $h(NLPLUS_PORTAL_URL) + '" style="color:var(--primary);font-weight:700;font-variation-settings:\'wght\' 700;">Update your favourite team in NL+</a>' +
-          ', then sign out and back in.' +
-        '</p>' +
-      '</div>';
-
-    var btn = document.getElementById('nlsm-register-btn');
-    btn.addEventListener('click', function () { saveRegistration(team, btn); });
+  // clubs-meta short name for a teamID ('Forest Green'), used in the
+  // "not a X fan?" prompt so it reads the way a fan would say it.
+  function clubShort(teamId, fallback) {
+    var c = state.clubsByOpta[teamId];
+    return (c && (c.short || c.name)) || fallback || '';
   }
-
-  // Fallback path: no favourite_team claim, or it doesn't match an NL club.
-  // Show the full dropdown so the fan can still play this season.
-  function renderRegistrationPicker() {
-    var grouped = teamOptionsByComp();
-    var flat    = allTeamsFlat();
-    var optgroupHTML = grouped.map(function (g) {
-      return '<optgroup label="' + $h(g.name) + '">' +
-        g.teams.map(function (o) {
-          return '<option value="' + $h(o.id) + '">' + $h(o.name) + '</option>';
-        }).join('') +
-      '</optgroup>';
-    }).join('');
-    var hasFav = !!state.user.favTeamName;
-    var subline = hasFav
-      ? 'Your NL+ favourite team (<b>' + $h(state.user.favTeamName) + '</b>) isn\'t in the National, North or South divisions this season. Pick one to play.'
-      : 'Pick your team from the National, North or South division. You\'ll vote for the Man of the Match after each of your team\'s games.';
-    register.innerHTML =
-      '<div class="nlsm__register-card">' +
-        '<div class="nlsm__hero" style="padding:0;">' +
-          '<div class="nlsm__greetline">Man of the Match</div>' +
-          '<h1>Welcome, ' + $h(state.user.forename) + '</h1>' +
-        '</div>' +
-        '<p style="color:var(--text-muted);font-size:14px;margin:6px 0 0;">' + subline + '</p>' +
-        '<label for="nlsm-team-select">Your team</label>' +
-        '<select id="nlsm-team-select">' +
-          '<option value="">— choose a team —</option>' +
-          optgroupHTML +
-        '</select>' +
-        '<div class="nlsm__lockwarn">This locks for the season. Pick carefully — you can\'t change your team later.</div>' +
-        '<button class="nlsm__btn" id="nlsm-register-btn" disabled>Confirm and lock my team</button>' +
-      '</div>';
-
-    var sel = document.getElementById('nlsm-team-select');
-    var btn = document.getElementById('nlsm-register-btn');
-    sel.addEventListener('change', function () { btn.disabled = !sel.value; });
-    btn.addEventListener('click', function () {
-      var teamId = sel.value; if (!teamId) return;
-      var team = flat.filter(function (o) { return o.id === teamId; })[0];
-      if (!team) return;
-      saveRegistration(team, btn);
-    });
-  }
-
-  function saveRegistration(team, btn) {
-    btn.disabled = true; btn.textContent = 'Saving...';
-    var payload = {
-      teamId: team.id, teamName: team.name, crestUrl: team.crest || '',
-      forename: state.user.forename, surnameInitial: state.user.surnameInitial,
-      email: state.user.email || '',
-      registeredAt: firebase.database.ServerValue.TIMESTAMP
-    };
-    fbDb.ref('users/' + state.user.id).set(payload).catch(function (err) {
-      btn.disabled = false; btn.textContent = 'Confirm and lock my team';
-      showBanner('Could not save registration: ' + err.message, 'err');
-    });
-  }
-
-  // ---------- datebar ----------
-  function renderDatebar() {
-    var keys = uniqueMatchdayKeys();
-    if (!keys.length) { datebarEl.innerHTML = ''; return; }
-    var active = currentMatchdayKey();
-    var today  = bstDateOf(new Date());
-    datebarEl.className = 'nlsm__datebar';
-    datebarEl.innerHTML = keys.map(function (k) {
-      var d = new Date(k + 'T12:00:00Z');
-      var label = d.toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short', timeZone:'Europe/London' });
-      var cls = '';
-      if (k === active) cls += ' is-active';
-      if (k === today)  cls += ' is-today';
-      return '<button data-md="' + $h(k) + '" class="' + cls.trim() + '">' + $h(label) + '</button>';
-    }).join('');
-    Array.prototype.forEach.call(datebarEl.querySelectorAll('button'), function (b) {
-      b.addEventListener('click', function () {
-        setSelectedMatchday(b.getAttribute('data-md'));
-      });
-    });
-    enableDragScroll(datebarEl);
-    var activeBtn = datebarEl.querySelector('button.is-active');
-    if (activeBtn && activeBtn.scrollIntoView) {
-      try { activeBtn.scrollIntoView({ behavior:'auto', inline:'center', block:'nearest' }); } catch (e) {}
-    }
-  }
-  function enableDragScroll(el) {
-    if (el.__nlsmDragWired) return;
-    el.__nlsmDragWired = true;
-    var down = false, startX = 0, startScroll = 0, scrolledBy = 0;
-    el.addEventListener('mousedown', function (e) {
-      if (e.button !== 0) return;
-      down = true; scrolledBy = 0;
-      startX = e.pageX;
-      startScroll = el.scrollLeft;
-      el.classList.add('is-dragging');
-    });
-    document.addEventListener('mousemove', function (e) {
-      if (!down) return;
-      var dx = e.pageX - startX;
-      if (Math.abs(dx) > 12) {
-        e.preventDefault();
-        var newScroll = startScroll - dx;
-        if (newScroll !== el.scrollLeft) {
-          el.scrollLeft = newScroll;
-          scrolledBy = Math.abs(el.scrollLeft - startScroll);
+  // Match the JWT's favourite_team against this season's teams. Tries the
+  // NLS name, then the clubs-meta name/short, all normalised — the claim is
+  // free text set in another system, so exact equality is too brittle.
+  function resolveTeamFromSso() {
+    var fav = state.user && state.user.favTeamName;
+    if (!fav) return null;
+    var want = normClubName(fav);
+    if (!want) return null;
+    var flat = allTeamsFlat();
+    for (var i = 0; i < flat.length; i++) {
+      var t = flat[i];
+      var meta = state.clubsByOpta[t.id] || {};
+      var candidates = [t.name, t.shortName, meta.name, meta.short];
+      for (var k = 0; k < candidates.length; k++) {
+        if (candidates[k] && normClubName(candidates[k]) === want) {
+          return { teamId: t.id, teamName: t.name, crestUrl: t.crest || '' };
         }
       }
-    });
-    document.addEventListener('mouseup', function () {
-      if (!down) return;
-      down = false;
-      el.classList.remove('is-dragging');
-    });
-    el.addEventListener('click', function (e) {
-      if (scrolledBy > 4) { e.stopPropagation(); e.preventDefault(); }
-      scrolledBy = 0;
-    }, true);
+    }
+    return null;
+  }
+  // Keep a lightweight record of who voted — the Team of the Week article
+  // quotes notes, which needs a name against them. Fire-and-forget: a
+  // failure here must never block voting.
+  function upsertUserRecord() {
+    var r = state.registration;
+    if (!r || !fbDb || !state.user) return;
+    fbDb.ref('users/' + state.user.id).update({
+      teamId: r.teamId, teamName: r.teamName, crestUrl: r.crestUrl,
+      forename: state.user.forename, surnameInitial: state.user.surnameInitial,
+      email: state.user.email || '',
+      lastSeenAt: firebase.database.ServerValue.TIMESTAMP
+    }).catch(function () {});
+  }
+
+  // Shown when favourite_team is missing, or names a club outside the
+  // National, North and South divisions this season. There is no dropdown
+  // fallback by design: the club has to come from NL+ so it stays in sync
+  // with the rest of the fan's profile.
+  function renderNoTeamCard() {
+    main.hidden = true; register.hidden = false;
+    var fav = state.user && state.user.favTeamName;
+    var lead = fav
+      ? 'Your NL+ favourite team (<b>' + $h(fav) + '</b>) isn\'t in the National, North or South divisions this season.'
+      : 'Your NL+ profile doesn\'t have a favourite team set yet.';
+    register.innerHTML =
+      '<div class="nlsm__register-card">' +
+        '<div class="nlsm__hero" style="padding:0;">' +
+          '<div class="nlsm__greetline">Team of the Week</div>' +
+          '<h1>Welcome, ' + $h(state.user.forename) + '</h1>' +
+        '</div>' +
+        '<p style="color:var(--text-muted);font-size:14px;margin:6px 0 18px;">' + lead +
+          ' Set a National League club in your NL+ details, then sign out and back in to vote.</p>' +
+        '<a class="nlsm__btn" style="display:block;text-align:center;text-decoration:none;" ' +
+           'href="' + $h(NLPLUS_PORTAL_URL) + '">Update your details</a>' +
+      '</div>';
   }
 
   // ---------- hero ----------
   function renderHero() {
-    var key = currentMatchdayKey();
-    if (!key) { hero.innerHTML = ''; return; }
-    var midday = new Date(key + 'T12:00:00Z');
-    var dateLabel = midday.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', timeZone:'Europe/London' });
+    var m = state.matches[0];
+    var ko = m ? koOf(m) : null;
+    var dateLabel = ko
+      ? ko.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', timeZone:'Europe/London' })
+      : 'Team of the Week';
+    var r = state.registration;
+    // The club is not locked — say so, and give them the way to change it.
+    var swap = r
+      ? '<div class="nlsm__swapline">Not a ' + $h(clubShort(r.teamId, r.teamName)) + ' fan? ' +
+          '<a href="' + $h(NLPLUS_PORTAL_URL) + '">Update your details here</a></div>'
+      : '';
     hero.className = 'nlsm__hero';
     hero.innerHTML =
       '<div class="nlsm__greetline">' + $h((state.user.forename || '').toUpperCase()) + '</div>' +
-      '<h1>' + $h(dateLabel) + '</h1>';
+      '<h1>' + $h(dateLabel) + '</h1>' +
+      swap;
   }
 
   // ---------- fixture rendering ----------
   function renderFixtures() {
-    if (!state.matches.length) {
-      // No own-team match on the selected matchday — either no fixtures
-      // selected yet, or sim/navigation has wandered off-piste.
-      fixtures.innerHTML =
-        '<div class="nlsm__lockcard">' +
-          'No ' + $h(state.registration ? state.registration.teamName : 'team') + ' match on this date.' +
-        '</div>';
-      return;
-    }
+    if (!state.matches.length) { fixtures.innerHTML = windowCardHTML(); return; }
     var now = simNow();
     fixtures.innerHTML = state.matches.map(function (m) { return rowHTML(m, now); }).join('');
     wireRow();
+  }
+
+  // Shown whenever nothing is open for voting. Explains the window rather
+  // than offering navigation — there is nothing else to look at — and
+  // carries the club's next few fixtures so "come back" has a date on it.
+  function windowCardHTML() {
+    var reg = state.registration;
+    var club = reg ? clubShort(reg.teamId, reg.teamName) : 'your club';
+    var upcoming = nextFixtures(3);
+
+    var tail = upcoming.length
+      ? 'Come back after the next game.'
+      : 'That\'s the last of your fixtures for now — nominations reopen when the new season does.';
+
+    var list = '';
+    if (upcoming.length) {
+      list =
+        '<div class="nlsm__fixtures">' +
+          '<div class="nlsm__fixtureshead">Next ' +
+            (upcoming.length === 1 ? 'fixture' : upcoming.length + ' fixtures') +
+          '</div>' +
+          upcoming.map(function (m) {
+            var a = m.attributes;
+            var ko = koOf(m);
+            var isHome = a.homeTeam.teamID === reg.teamId;
+            var opp = isHome ? a.awayTeam : a.homeTeam;
+            return '<div class="nlsm__fixture">' +
+              crestImg(opp.crest, opp.name || opp.shortName || '', 24) +
+              '<span class="nlsm__fixtureopp">' +
+                $h(clubShort(opp.teamID, opp.shortName || opp.name)) +
+              '</span>' +
+              '<span class="nlsm__fixtureha' + (isHome ? ' is-home' : '') + '">' +
+                (isHome ? 'H' : 'A') +
+              '</span>' +
+              '<span class="nlsm__fixturewhen">' +
+                '<span class="nlsm__fixturedate">' + $h(fmtBSTDateShort(ko)) + '</span>' +
+                '<span class="nlsm__fixtureko">' + $h(fmtBST(ko)) + '</span>' +
+              '</span>' +
+            '</div>';
+          }).join('') +
+        '</div>';
+    }
+
+    return '<div class="nlsm__windowcard">' +
+      '<h2>Nominations aren\'t open right now</h2>' +
+      '<p>Pick a ' + $h(club) + ' player for Team of the Week once the final ' +
+        'whistle goes — nominations stay open for a full day after kick-off. ' +
+        tail + '</p>' +
+      list +
+    '</div>';
   }
 
   function rowHTML(m, now) {
     var a = m.attributes;
     var s = stateOf(m, now);
     var ko = koOf(m);
-    var voteOpen  = ko ? new Date(ko.getTime() + VOTE_OPEN_MIN  * 60000) : null;
     var voteClose = ko ? new Date(ko.getTime() + VOTE_CLOSE_MIN * 60000) : null;
     var existing = state.myVotes[m.id];
     var draft    = state.drafts[m.id];
@@ -1297,30 +1366,35 @@
     var rowMod = '';
     if (s === 'pre') {
       meta = '<span>' + $h(fmtBST(ko)) + '</span>' +
-             '<span class="nlsm__lock">Voting opens ' + $h(fmtBST(voteOpen)) + '</span>';
+             '<span class="nlsm__lock">Nominations open at full time</span>';
     } else if (s === 'live') {
-      var opensIn = relSoon(voteOpen - now);
       meta = '<span class="nlsm__livedot" aria-hidden="true"></span><span class="nlsm__livelbl">Live</span>' +
-             '<span class="nlsm__lock">Voting opens ' + $h(opensIn) + '</span>';
+             '<span class="nlsm__lock">Nominations open at full time</span>';
+    } else if (s === 'unresolved') {
+      // Kicked off long ago with no final period published — abandoned, or a
+      // stalled feed. Never opens for voting; heals itself if NLS catches up.
+      meta = '<span class="nlsm__voidlbl">Awaiting result</span>' +
+             '<span class="nlsm__lock">Opens at full time</span>';
+      rowMod = ' is-void';
     } else if (s === 'voting') {
       var closesIn = relSoon(voteClose - now);
-      meta = '<span class="nlsm__votelbl">Vote open</span>' +
+      meta = '<span class="nlsm__votelbl">Nominations open</span>' +
              '<span class="nlsm__countdown">Closes ' + $h(closesIn) + '</span>';
       rowMod = ' is-voting';
     } else if (s === 'closed') {
-      meta = '<span class="nlsm__ftlabel">Vote closed</span>' +
-             '<span class="nlsm__lock">' + $h(fmtBSTDateShort(voteClose)) + '</span>';
+      meta = '<span class="nlsm__ftlabel">Nominations closed</span>' +
+             '<span class="nlsm__lock">Closed ' + $h(fmtBSTDateShort(voteClose)) + '</span>';
     } else if (s === 'postponed') {
-      meta = '<span class="nlsm__voidlbl">Postponed</span><span style="opacity:.7;">No vote</span>';
+      meta = '<span class="nlsm__voidlbl">Postponed</span><span style="opacity:.7;">No nomination</span>';
       rowMod = ' is-void';
     } else if (s === 'abandoned') {
-      meta = '<span class="nlsm__voidlbl">Abandoned</span><span style="opacity:.7;">No vote</span>';
+      meta = '<span class="nlsm__voidlbl">Abandoned</span><span style="opacity:.7;">No nomination</span>';
       rowMod = ' is-void';
     }
 
     function scoreCell(side) {
       var real = (side === 'home' ? a.homeTeam : a.awayTeam).score;
-      if (s === 'pre') return '<div class="nlsm__teamscore" style="color:var(--text-muted);">—</div>';
+      if (s === 'pre' || s === 'unresolved') return '<div class="nlsm__teamscore" style="color:var(--text-muted);">—</div>';
       return '<div class="nlsm__teamscore">' + (real != null ? real : '?') + '</div>';
     }
     function teamLine(t, side) {
@@ -1340,34 +1414,17 @@
     var action = '';
     if (s === 'voting') {
       if (existing && !editing) {
-        var p = findPlayer(m.id, existing.playerId);
-        var displayName = (p && p.name) || existing.playerName || existing.playerId;
-        action =
-          '<div class="nlsm__voted">' +
-            '<span class="nlsm__vlbl">Your pick</span>' +
-            '<span class="nlsm__vname">' + $h(displayName) + '</span>' +
-            '<button type="button" class="nlsm__editmini" data-edit="' + $h(m.id) + '">Change</button>' +
-          '</div>' +
-          (existing.note ? '<div class="nlsm__yournote">"' + $h(existing.note) + '"</div>' : '');
+        action = pickHeroHTML(m, existing, true);
       } else {
         var draftForPicker = draft || (existing ? { playerId: existing.playerId, note: existing.note || '' } : null);
         action = pickerHTML(m, draftForPicker, !!existing);
       }
     } else if (s === 'closed') {
-      if (existing) {
-        var p2 = findPlayer(m.id, existing.playerId);
-        var displayName2 = (p2 && p2.name) || existing.playerName || existing.playerId;
-        action =
-          '<div class="nlsm__voted is-locked">' +
-            '<span class="nlsm__vlbl">Your pick</span>' +
-            '<span class="nlsm__vname">' + $h(displayName2) + '</span>' +
-          '</div>' +
-          (existing.note ? '<div class="nlsm__yournote">"' + $h(existing.note) + '"</div>' : '');
-      } else {
-        action = '<div class="nlsm__lockcard">No vote submitted — window closed.</div>';
-      }
-    } else if (s === 'pre' || s === 'live') {
-      // No action — meta strip already explains when voting opens.
+      action = existing
+        ? pickHeroHTML(m, existing, false)
+        : '<div class="nlsm__lockcard">No nomination submitted — the window has closed.</div>';
+    } else if (s === 'pre' || s === 'live' || s === 'unresolved') {
+      // No action — the meta strip already says voting waits for full time.
     }
 
     var rowCls = 'nlsm__row';
@@ -1380,6 +1437,54 @@
       teamLine(a.awayTeam, 'away') +
       action +
     '</div>';
+  }
+
+  // The selection, given real hero treatment: the chosen player carried on
+  // their club's colours, with the shirt number, how they featured, and the
+  // fan's own words shown back as the quote they will be.
+  function pickHeroHTML(m, vote, canChange) {
+    var p = findPlayer(m.id, vote.playerId);
+    var name = (p && p.name) || vote.playerName || vote.playerId;
+    var teamId = (p && p.teamId) || vote.teamId;
+    var a = m.attributes;
+    var team = (a.homeTeam.teamID === teamId) ? a.homeTeam : a.awayTeam;
+    var pal = getTeamPalette(teamId);
+    var txt = pickTextColor(pal.primary);
+    var shirt = (p && p.shirt != null) ? '#' + p.shirt : '';
+    var role = '';
+    if (p) {
+      role = (p.status === 'Start')
+        ? (p.position || 'Started')
+        : ('Substitute' + (p.onMinute ? ' &middot; on ' + $h(p.onMinute) : ''));
+    }
+    return '<div class="nlsm__pickhero" style="--hero-bg:' + $h(pal.primary) + ';--hero-tx:' + $h(txt) + ';">' +
+      '<div class="nlsm__pickhero-top">' +
+        '<span class="nlsm__pickhero-lbl">' + (canChange ? 'Your nomination' : 'Your nomination') + '</span>' +
+        (canChange ? '<button type="button" class="nlsm__editmini" data-edit="' + $h(m.id) + '">Change</button>' : '') +
+      '</div>' +
+      '<div class="nlsm__pickhero-body">' +
+        (team.crest ? '<img src="' + $h(team.crest) + '" alt="" onerror="this.style.display=\'none\';">' : '') +
+        '<div class="nlsm__pickhero-who">' +
+          '<div class="nlsm__pickhero-name">' + $h(name) + '</div>' +
+          '<div class="nlsm__pickhero-sub">' +
+            (shirt ? '<span class="nlsm__pickhero-shirt">' + $h(shirt) + '</span>' : '') +
+            '<span>' + (role || $h(team.shortName || team.name || '')) + '</span>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      (vote.note
+        ? '<blockquote class="nlsm__pickhero-quote">' + $h(vote.note) + '</blockquote>'
+        : '') +
+    '</div>';
+  }
+
+  // Text colour that reads on an arbitrary club colour (canon-safe: only
+  // ever returns a token, never a computed hex).
+  function pickTextColor(hex) {
+    var c = String(hex || '').replace('#', '');
+    if (!/^[0-9a-fA-F]{6}$/.test(c)) return 'var(--white)';
+    var r = parseInt(c.slice(0, 2), 16), g = parseInt(c.slice(2, 4), 16), b = parseInt(c.slice(4, 6), 16);
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.68 ? 'var(--text)' : 'var(--white)';
   }
 
   function pickerHTML(m, draft, hadVote) {
@@ -1414,7 +1519,7 @@
       var rows = ps.map(function (p) {
         var isSub = p.status !== 'Start';
         var divider = '';
-        if (isSub && !seenSub) { seenSub = true; divider = '<div class="nlsm__subdiv">Subs</div>'; }
+        if (isSub && !seenSub) { seenSub = true; divider = '<div class="nlsm__subdiv">Came on</div>'; }
         var shirt = p.shirt != null ? '#' + p.shirt : '';
         var cls = 'nlsm__player' + (isSub ? ' is-sub' : '') + (p.playerId === selectedPid ? ' is-selected' : '');
         return divider +
@@ -1423,6 +1528,7 @@
               'aria-pressed="' + (p.playerId === selectedPid ? 'true' : 'false') + '">' +
             '<span class="nlsm__pshirt">' + $h(shirt) + '</span>' +
             '<span class="nlsm__pname">' + $h(p.name) + '</span>' +
+            (isSub && p.onMinute ? '<span class="nlsm__pon">' + $h(p.onMinute) + '</span>' : '') +
           '</button>';
       }).join('');
       var teamLabel = team.shortName || team.name || '';
@@ -1435,30 +1541,34 @@
       '</div>';
     }
 
-    var hint = hadVote ? 'Tap a player to update' : 'Tap a player from either side';
+    var hint = hadVote ? 'Tap a player to change your pick' : 'Anyone who played, either side';
     var noteLen = noteVal.length;
     var notedID = 'nlsm-note-' + m.id;
     return '<div class="nlsm__picker">' +
-      '<label>Man of the Match</label>' +
+      '<label>Pick your nomination</label>' +
       '<div class="nlsm__teampick">' +
         teamCol(a.homeTeam) +
         teamCol(a.awayTeam) +
       '</div>' +
       '<div class="nlsm__note">' +
+        '<label class="nlsm__notelbl" for="' + notedID + '">Why them? <span>Optional</span></label>' +
+        '<p class="nlsm__noteexample">We pick the best lines for our Team of the Week article — ' +
+          'yours could run alongside the player. For example:<br>' +
+          '<em>&ldquo;Ran the midfield on his own and that block at 1&ndash;1 was worth a goal.&rdquo;</em></p>' +
         '<textarea id="' + notedID + '" data-note="' + $h(m.id) + '" ' +
-          'maxlength="' + NOTE_MAX + '" rows="2" ' +
-          'placeholder="Add a note (optional) — may be quoted in our Team of the Week article">' +
+          'maxlength="' + NOTE_MAX + '" rows="3" ' +
+          'placeholder="What did they do that won it for you?">' +
           $h(noteVal) +
         '</textarea>' +
         '<div class="nlsm__notefoot">' +
-          '<span class="nlsm__notedisc">Optional — your note may be quoted in our Team of the Week article.</span>' +
+          '<span class="nlsm__notedisc">Published with your first name and initial.</span>' +
           '<span class="nlsm__notecount' + (noteLen >= NOTE_MAX ? ' is-max' : '') + '" data-count="' + $h(m.id) + '">' + noteLen + '/' + NOTE_MAX + '</span>' +
         '</div>' +
       '</div>' +
       '<div class="nlsm__pickactions">' +
         '<span class="nlsm__pickhint">' + $h(hint) + '</span>' +
         (hadVote ? '<button type="button" class="nlsm__btn-cancel" data-cancel="' + $h(m.id) + '">Cancel</button>' : '') +
-        '<button type="button" class="nlsm__btn-save" data-save="' + $h(m.id) + '"' + (selectedPid ? '' : ' disabled') + '>Save vote</button>' +
+        '<button type="button" class="nlsm__btn-save" data-save="' + $h(m.id) + '"' + (selectedPid ? '' : ' disabled') + '>Save nomination</button>' +
       '</div>' +
     '</div>';
   }
@@ -1534,7 +1644,7 @@
     var m = state.matches.filter(function (x) { return x.id === mid; })[0];
     if (!m) return;
     if (stateOf(m, simNow()) !== 'voting') {
-      showBanner('Voting window has closed.', 'err');
+      showBanner('Nominations have closed for this match.', 'err');
       return;
     }
     var p = findPlayer(mid, pid);
@@ -1559,103 +1669,15 @@
       .then(function () {
         delete state.drafts[mid];
         state.pendingMid = null;
-        setBannerOK('Vote saved');
+        setBannerOK('Nomination saved');
         renderFixtures();
-        renderTally();
       })
       .catch(function (err) {
         state.editing[mid] = true;
         state.pendingMid = null;
         renderFixtures();
-        showBanner('Vote failed: ' + err.message, 'err');
+        showBanner('Nomination failed: ' + err.message, 'err');
       });
-  }
-
-  // ---------- per-match standings ----------
-  // Deliberately hides absolute vote counts to avoid the "2 votes" sad-face
-  // when turnout is low. Shows the top 5 names ranked by votes (sorted then
-  // ordered) and a "Leading" pill on #1 only when there's a clear leader
-  // (strictly more votes than #2). Ties at the top get no leader badge —
-  // it would just shout "no clear leader" if e.g. 3 fans each picked a
-  // different player.
-  var TALLY_TOP_N = 5;
-  function renderTally() {
-    if (!state.matches.length) { tallyEl.innerHTML = ''; return; }
-    var now = simNow();
-    var target = null;
-    for (var i = 0; i < state.matches.length; i++) {
-      var st = stateOf(state.matches[i], now);
-      if (st === 'voting' || st === 'closed') { target = state.matches[i]; break; }
-    }
-    if (!target) { tallyEl.innerHTML = ''; return; }
-    var entry = state.players[target.id];
-    if (!entry || !entry.list) { tallyEl.innerHTML = ''; return; }
-
-    var counts = {};
-    var totalVotes = 0;
-    Object.keys(state.allVotesRaw).forEach(function (jwtId) {
-      var v = state.allVotesRaw[jwtId] && state.allVotesRaw[jwtId][target.id];
-      if (!v || !v.playerId) return;
-      counts[v.playerId] = (counts[v.playerId] || 0) + 1;
-      totalVotes += 1;
-    });
-    var s = stateOf(target, now);
-    var statusLabel = s === 'voting' ? 'Man of the Match — Live' : 'Man of the Match — Final';
-    var matchLabel  = $h(target.attributes.homeTeam.name) + ' v ' + $h(target.attributes.awayTeam.name);
-
-    if (!totalVotes) {
-      tallyEl.className = 'nlsm__tally';
-      tallyEl.innerHTML =
-        '<div class="nlsm__tallyhead">' +
-          '<div class="nlsm__kicker">' + $h(statusLabel) + '</div>' +
-          '<div class="nlsm__tsub">' + matchLabel + '</div>' +
-        '</div>';
-      return;
-    }
-
-    var rows = Object.keys(counts).map(function (pid) {
-      var p = findPlayer(target.id, pid);
-      return {
-        playerId: pid,
-        name:     (p && p.name) || pid,
-        teamId:   p && p.teamId,
-        teamName: p && p.teamName,
-        votes:    counts[pid]  // used to sort; never rendered
-      };
-    }).sort(function (a, b) {
-      if (b.votes !== a.votes) return b.votes - a.votes;
-      return a.name.localeCompare(b.name);
-    }).slice(0, TALLY_TOP_N);
-
-    var topVotes    = rows[0].votes;
-    var secondVotes = rows[1] ? rows[1].votes : 0;
-    var hasClearLeader = (rows.length === 1) || (topVotes > secondVotes);
-    var youPick = state.myVotes[target.id] && state.myVotes[target.id].playerId;
-
-    var inner =
-      '<div class="nlsm__tallyhead">' +
-        '<div class="nlsm__kicker">' + $h(statusLabel) + '</div>' +
-        '<div class="nlsm__tsub">' + matchLabel + '</div>' +
-      '</div>' +
-      rows.map(function (r, i) {
-        var isLeader = hasClearLeader && i === 0;
-        var isYou    = r.playerId === youPick;
-        var cls = 'nlsm__trow';
-        if (isLeader) cls += ' is-leader';
-        if (isYou)    cls += ' is-you-pick';
-        var pills = '';
-        if (isLeader) pills += '<span class="nlsm__leadpill">Leading</span>';
-        if (isYou)    pills += '<span class="nlsm__youpill">Your pick</span>';
-        return '<div class="' + cls + '">' +
-          '<span class="nlsm__rank">' + (i + 1) + '</span>' +
-          '<span class="nlsm__pname">' + $h(r.name) + '</span>' +
-          '<span class="nlsm__ptag">' + $h(r.teamName || '') + '</span>' +
-          pills +
-        '</div>';
-      }).join('');
-
-    tallyEl.className = 'nlsm__tally';
-    tallyEl.innerHTML = inner;
   }
 
   // ---------- sim bar ----------
@@ -1669,7 +1691,7 @@
     return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
   }
   function renderSimBar() {
-    if (simBarHidden()) { simEl.innerHTML = ''; return; }
+    if (!state.sim.barEnabled) { simEl.className = ''; simEl.innerHTML = ''; return; }
     var d = simNow();
     var live = state.sim.fixed
       ? 'Sim &middot; ' + d.toLocaleString('en-GB', { weekday:'short', day:'numeric', month:'short', hour:'2-digit', minute:'2-digit', timeZone:'Europe/London' }) + ' BST'
@@ -1697,21 +1719,10 @@
   }
 
   // ---------- RTDB listeners ----------
+  // Only votes are listened to. The supported club comes from SSO on every
+  // load, so there is no users/ subscription and nothing to wait for before
+  // the UI can render.
   function listenAll() {
-    fbDb.ref('users').on('value', function (snap) {
-      state.allUsers = snap.val() || {};
-      state.registration = state.allUsers[state.user.id] || null;
-      if (!state.registration) {
-        hideGate();
-        renderRegistration();
-      } else {
-        hideGate();
-        register.hidden = true; main.hidden = false;
-        renderSponsor();
-        recomputeMatchday();
-        renderAll();
-      }
-    });
     fbDb.ref('motm').on('value', function (snap) {
       state.allVotesRaw = snap.val() || {};
       recomputeMyVotes();
@@ -1720,7 +1731,6 @@
         // Their own save path re-renders explicitly when the write returns.
         var midEdit = fixtures.contains(document.activeElement);
         if (!midEdit) renderFixtures();
-        renderTally();
       }
     });
   }
@@ -1737,7 +1747,7 @@
         '<img class="nlsm__gate-mark" src="' + NLPLUS_LOGO_URL + '" alt="NL+" ' +
           'onerror="this.onerror=null;this.style.display=\'none\';">' +
         '<div class="nlsm__gate-spinner" aria-hidden="true"></div>' +
-        '<h2>Man of the Match</h2>' +
+        '<h2>Team of the Week</h2>' +
         '<p>Loading...</p>' +
       '</div>';
   }
@@ -1750,8 +1760,8 @@
       '<div class="nlsm__gate-card">' +
         '<img class="nlsm__gate-mark" src="' + NLPLUS_LOGO_URL + '" alt="NL+" ' +
           'onerror="this.onerror=null;this.style.display=\'none\';">' +
-        '<h2>Sign in with NL+ to vote</h2>' +
-        '<p>Pick the Man of the Match after every one of your team\'s games. Voting opens 2.5 hours after kick-off.</p>' +
+        '<h2>Sign in with NL+ to nominate</h2>' +
+        '<p>Nominate a player for Team of the Week after every one of your team\'s games. Nominations open at full time.</p>' +
         '<a class="nlsm__btn" href="' + $h(signInHref()) + '">Sign in with NL+</a>' +
       '</div>';
   }
@@ -1798,6 +1808,9 @@
   })();
 
   function startSignedIn(claims) {
+    // Parse sim up front: the season fallback derives from the sim clock, so
+    // a frozen date must be in place before fixtures are requested.
+    state.sim = parseSimMode();
     state.user = {
       id: claims.id,
       forename: claims.forename || 'there',
@@ -1815,16 +1828,25 @@
         fbDb   = firebase.database(fbApp);
         return fbAuth.signInAnonymously();
       }).then(function () { state.fbAuthed = true; }),
-      fetchFixtures().then(function (ms) {
+      // clubs-meta first: it carries seasons.current, which the fixtures
+      // request needs, and the club colours/short names the UI reads.
+      fetchClubsMeta().then(function () {
+        return fetchFixtures();
+      }).then(function (ms) {
         state.allMatches = ms;
         teamCompCache = null;
-      }),
-      fetchClubsMeta()
+      })
     ]).then(function () {
       hideBanner();
-      var simParam = parseSimMode();
-      if (simParam) state.sim.fixed = simParam;
-      recomputeMatchday();
+      // Club comes from the SSO claim, resolved against this season's teams.
+      state.registration = resolveTeamFromSso();
+      hideGate();
+      if (!state.registration) { renderNoTeamCard(); return; }
+      register.hidden = true; main.hidden = false;
+      upsertUserRecord();
+      renderSponsor();
+      recomputeMatch();
+      renderAll();
       listenAll();
       // Keep "voting opens / closes in Xm" labels fresh
       setInterval(function () {
@@ -1833,7 +1855,7 @@
         }
       }, 60000);
     }).catch(function (err) {
-      showBanner('Could not start MOTM: ' + (err && err.message ? err.message : err), 'err');
+      showBanner('Could not start Team of the Week: ' + (err && err.message ? err.message : err), 'err');
     });
   }
 })();
