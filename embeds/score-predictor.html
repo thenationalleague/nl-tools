@@ -39,6 +39,15 @@
        ?sim=off          → real clock, bar hidden (explicit form)
 
      Changelog:
+       02/08/2026  v3.1  Submit is now review-then-confirm: the "x/y set"
+                         counter is gone (it counted TAPPED rows, so a
+                         deliberate 0–0 read as 11/12 and then submitted
+                         12) and the confirm modal lists every fixture at
+                         the exact scoreline it will be saved at, with
+                         never-tapped rows flagged "not set". Fixed: the
+                         hero kept a stale prediction after Reset all —
+                         the predictions listener re-rendered everything
+                         except the hero.
        02/08/2026  v3.0  Live row collapses to one strip: the meta line is
                          gone and the footer carries dot + "Live 67'" +
                          "Prediction: ALD 1–0 FGR" (three-letter codes
@@ -645,11 +654,41 @@
     background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
     box-shadow:var(--shadow);
   }
-  #nlPredictor .nlsp__submitbar .nlsp__submitmsg {
-    font-size:13px; color:var(--text-muted);
-    font-weight:700; font-variation-settings:'wght' 700;
+  #nlPredictor .nlsp__submitbar .nlsp__btn { flex:1; }
+
+  /* Review list inside the submit confirm — what will actually be saved.
+     Scrolls inside the modal so a 12-match card never runs off a phone. */
+  #nlPredictor .nlsp__review {
+    max-height:46vh; overflow-y:auto;
+    margin:12px 0 4px;
+    border-top:1px solid var(--border); border-bottom:1px solid var(--border);
   }
-  #nlPredictor .nlsp__submitbar .nlsp__submitmsg b { color:var(--text); font-weight:900; font-variation-settings:'wght' 900; }
+  #nlPredictor .nlsp__reviewrow {
+    display:grid; grid-template-columns:1fr auto 1fr 56px;
+    align-items:center; gap:8px;
+    padding:7px 2px;
+    font-size:13px;
+    font-weight:800; font-variation-settings:'wght' 800;
+    font-variant-numeric:tabular-nums;
+  }
+  #nlPredictor .nlsp__reviewrow + .nlsp__reviewrow { border-top:1px solid var(--off-white); }
+  /* Both codes sit left in their column, so the code/score/code trio reads
+     as one tight unit rather than being stretched apart by the grid. */
+  #nlPredictor .nlsp__reviewrow .nlsp__reviewcode { color:var(--text); }
+  #nlPredictor .nlsp__reviewrow .nlsp__reviewscore {
+    min-width:52px; text-align:center;
+    padding:2px 8px; border-radius:4px;
+    background:var(--off-white); color:var(--text);
+    font-weight:900; font-variation-settings:'wght' 900;
+  }
+  #nlPredictor .nlsp__reviewrow .nlsp__reviewnote {
+    text-align:right;
+    font-size:10px; text-transform:uppercase; letter-spacing:.6px;
+    color:var(--amber);
+    font-weight:800; font-variation-settings:'wght' 800;
+  }
+  #nlPredictor .nlsp__reviewrow.is-untouched .nlsp__reviewcode,
+  #nlPredictor .nlsp__reviewrow.is-untouched .nlsp__reviewscore { color:var(--text-muted); }
 
   /* Custom confirm modal */
   #nlPredictor .nlsp__modal[hidden] { display:none; }
@@ -2022,25 +2061,45 @@
     });
     return ids;
   }
-  // Of those awaiting, count how many have a complete (home + away) draft
-  function awaitingReadyCount() {
-    return awaitingIds().reduce(function (n, mid) {
-      var d = state.drafts[mid];
-      return n + ((d && d.home != null && d.away != null) ? 1 : 0);
-    }, 0);
-  }
-
+  // No "x/y set" counter. It counted rows the fan had TAPPED, but submit
+  // sends every open fixture at its displayed value — so leaving a genuine
+  // 0–0 pick alone read as "11/12 set" and then submitted 12. The review
+  // modal replaces it: it shows exactly what will be saved, which is the
+  // question the counter was badly answering.
   function renderSubmitbar() {
     var await_ids = awaitingIds();
     if (!await_ids.length) { submitb.innerHTML = ''; return; }
-    var ready = awaitingReadyCount();
     submitb.innerHTML =
       '<div class="nlsp__submitbar">' +
-        '<div class="nlsp__submitmsg"><b>' + ready + '/' + await_ids.length + '</b> set</div>' +
-        '<button class="nlsp__btn" id="nlsp-submit" style="margin-left:auto;">Submit predictions</button>' +
+        '<button class="nlsp__btn" id="nlsp-submit">Review &amp; submit ' +
+          await_ids.length + ' prediction' + (await_ids.length === 1 ? '' : 's') +
+        '</button>' +
       '</div>';
     var btn = document.getElementById('nlsp-submit');
     if (btn) btn.addEventListener('click', submitAllAwaiting);
+  }
+
+  // The review list — every fixture going in, at the value it will be saved
+  // at. Untouched rows are shown and flagged rather than hidden: they submit
+  // as 0–0, so that is exactly what the fan needs to see before confirming.
+  function submitReviewHTML(ids) {
+    var byId = {};
+    state.matches.forEach(function (m) { byId[m.id] = m; });
+    var rows = ids.map(function (mid) {
+      var m = byId[mid];
+      if (!m) return '';
+      var a = m.attributes;
+      var d = state.drafts[mid];
+      var set = !!(d && d.home != null && d.away != null);
+      var hs = set ? d.home : 0, as = set ? d.away : 0;
+      return '<div class="nlsp__reviewrow' + (set ? '' : ' is-untouched') + '">' +
+        '<span class="nlsp__reviewcode">' + $h(clubCode(a.homeTeam.teamID, a.homeTeam.shortName || a.homeTeam.name)) + '</span>' +
+        '<span class="nlsp__reviewscore">' + hs + '–' + as + '</span>' +
+        '<span class="nlsp__reviewcode">' + $h(clubCode(a.awayTeam.teamID, a.awayTeam.shortName || a.awayTeam.name)) + '</span>' +
+        '<span class="nlsp__reviewnote">' + (set ? '' : 'not set') + '</span>' +
+      '</div>';
+    }).join('');
+    return '<div class="nlsp__review">' + rows + '</div>';
   }
 
   // Submit is WYSIWYG: every open match goes in at its displayed value, so a
@@ -2073,21 +2132,19 @@
           if (btn) { btn.disabled = false; btn.textContent = 'Submit predictions'; }
         });
     }
-    // 0–0 is a legitimate pick, so partial submits go through silently even
-    // with untouched rows (they stay editable until their own cutoffs). The
-    // confirm only fires when EVERY fixture going in is an untouched 0–0
-    // (and there's more than one) — the "tapped Submit without doing
-    // anything" case.
-    if (untouched === ids.length && ids.length > 1) {
-      showConfirm({
-        title:   'Submit as shown?',
-        message: 'All ' + ids.length + ' matches are at 0–0 and will be submitted that way.',
-        confirm: 'Submit',
-        cancel:  'Go back'
-      }).then(function (ok) { if (ok) doWrite(); });
-    } else {
-      doWrite();
-    }
+    // Always review before writing. Every submit is WYSIWYG — untouched rows
+    // go in at 0–0 — so the fan sees the full list exactly as it will be
+    // saved, with the never-tapped rows flagged, and confirms that.
+    showConfirm({
+      title:    'Confirm your predictions',
+      message:  untouched > 0
+        ? untouched + ' of ' + ids.length + ' ' + (untouched === 1 ? 'match has' : 'matches have') +
+          ' not been set and will be submitted as 0–0.'
+        : 'These will be saved for this matchday. You can still edit them until each match locks.',
+      bodyHtml: submitReviewHTML(ids),
+      confirm:  'Confirm & submit',
+      cancel:   'Go back'
+    }).then(function (ok) { if (ok) doWrite(); });
   }
 
   // ---------- custom confirm modal ----------
@@ -2099,6 +2156,9 @@
         '<div class="nlsp__modal-card" role="dialog" aria-modal="true">' +
           '<h3>' + $h(opts.title || 'Are you sure?') + '</h3>' +
           (opts.message ? '<p>' + $h(opts.message) + '</p>' : '') +
+          // bodyHtml is built internally (submitReviewHTML) from already-
+          // escaped parts — never from user input.
+          (opts.bodyHtml || '') +
           '<div class="nlsp__modal-actions">' +
             '<button class="nlsp__modal-cancel"  type="button">' + $h(opts.cancel || 'Cancel') + '</button>' +
             '<button class="nlsp__modal-confirm" type="button">' + $h(opts.confirm || 'Confirm') + '</button>' +
@@ -2479,7 +2539,11 @@
       state.allPredsRaw = snap.val() || {};
       recomputePredictionsFromRaw();
       if (!main.hidden) {
-        renderFixtures(); renderSubmitbar(); renderReset(); renderTable(); renderClubTable();
+        // renderHero() belongs here too — the hero card shows the user's own
+        // club's fixture WITH their prediction on it, so leaving it out left
+        // a reset (or any change) showing a stale scoreline in the hero while
+        // the grid below updated correctly.
+        renderHero(); renderFixtures(); renderSubmitbar(); renderReset(); renderTable(); renderClubTable();
       }
     });
   }
