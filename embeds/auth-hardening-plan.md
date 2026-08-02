@@ -1,8 +1,9 @@
 # Fan widget auth hardening — plan
 
 **Status:** proposed, not started. Written 02/08/2026; revised the same day
-after Sports Alliance confirmed no verification material is available, so the
-live plan is **§3a (Plan B)**, not §2.
+after Sports Alliance confirmed no verification material is available. The
+live plan is **§3a (Plan B)** — unless the client-secret lead in §3 pans out,
+in which case §2 is buildable after all.
 **Applies to:** `embeds/score-predictor.html`, `embeds/motm.html` (both on the
 shared `nl-widgets` Firebase project).
 **Do this before the widgets are public.** It is not urgent for a preview site.
@@ -88,7 +89,8 @@ doing properly rather than patching around.
 ## 3. Verified identity is not available
 
 **Sports Alliance will not be providing signature verification material**
-(JWKS, shared secret or introspection). Confirmed 02/08/2026.
+(JWKS, shared secret or introspection). Confirmed 02/08/2026. The tokens are
+HS256, so there is no public key to publish even in principle — see below.
 
 Without it, §2 cannot be built safely. A mint endpoint that accepts an
 unverified token is *worse than doing nothing*: anyone could present a forged
@@ -96,20 +98,49 @@ unverified token is *worse than doing nothing*: anyone could present a forged
 exposure into full impersonation. **Do not build the mint endpoint on an
 unverified token.** That is the single most important line in this document.
 
-### One check worth doing before accepting this
+### What the token actually says (checked 02/08/2026)
 
-Discovery endpoints are a convention, not a favour — they are frequently
-already public without the provider being asked. Costs ten seconds:
+Decoded from a live `_gc_sa_sso_access` cookie on thenationalleague.org.uk:
 
 ```
-https://sso.sportsalliance.com/.well-known/openid-configuration
+alg  HS256
+kid  (absent)
+iss  https://sso.sportsalliance.com
+aud  DWaw_FEDJEyQu6ZY4H-cyg
 ```
 
-If that returns JSON containing a `jwks_uri`, everything in §2 is back on the
-table and no cooperation is needed. Also worth a look: the `iss` claim inside
-a real token points at whichever host actually issues it, and
-`signin.thenationalleague.org.uk` is an NL-controlled domain — whoever
-administers it may have more room than "ask Sports Alliance" implies.
+**`HS256` is symmetric.** The token is signed with a shared secret, not a key
+pair, so there is no public half and a JWKS endpoint cannot exist. That
+settles it: no amount of looking for `.well-known/openid-configuration` will
+help, and the splash page returned by `sso.sportsalliance.com` is consistent
+with that.
+
+### The remaining lead — worth chasing before accepting Plan B
+
+`aud` is a **client identifier**, and client identifiers are issued in pairs
+with a client secret. OpenID Connect Core §10.1 specifies that for an ID token
+signed with HS256, **the client secret is the MAC key** — the octets of the
+secret are the signing key.
+
+So the question to ask is not the one that already got a no. It is not "please
+publish a JWKS"; it is:
+
+> Do we already hold a client secret for `DWaw_FEDJEyQu6ZY4H-cyg`, from
+> whenever the NL+ integration was set up?
+
+Check the password manager and the original integration handover before asking
+anyone. If that secret exists and does verify these tokens, **§2 is buildable
+with nothing new from Sports Alliance**.
+
+Two caveats:
+
+- **It may not verify.** Some providers sign with an internal key and use the
+  client secret only for token exchange. Test against a real token before
+  building anything on the assumption.
+- **Symmetric keys mint as well as verify.** Anyone holding that secret can
+  forge a token for any fan. It must live in Cloud Function config only —
+  never in a widget bundle, never in this repo — and be treated as a
+  credential of the same weight as a database password.
 
 **Until one of those turns something up, proceed with §3a instead.**
 
