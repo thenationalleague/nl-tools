@@ -42,6 +42,21 @@
      own (a date in May 2026 loads 2025/26), refetching fixtures.
 
      Changelog:
+       02/08/2026  v2.14 Firebase App Check wired in, inert until a
+                         reCAPTCHA v3 site key is set in
+                         APPCHECK_SITE_KEY. With a key it loads
+                         firebase-app-check-compat second, straight after
+                         app-compat, and activates before anything signs
+                         in so every request carries an attestation.
+                         Activation failures are swallowed: in monitor
+                         mode an unattested request still succeeds, so a
+                         reCAPTCHA blocked by a privacy extension must
+                         not stop a fan using the widget. Monitor vs
+                         enforce is a console toggle, so this one build
+                         serves both. ?appcheck=debug prints a debug
+                         token for registering a preview domain.
+                         App Check attests the app, not the fan — it
+                         does not make anything private.
        02/08/2026  v2.13 The icons this widget inlines are now canon:
                          assets/icons/sprites.svg carries the whole
                          match-event set, and nl-brand.css carries
@@ -1005,7 +1020,28 @@
   };
   var APP_NAME   = 'nlMotm';
   var FB_SDK_URL = 'https://www.gstatic.com/firebasejs/10.12.0/';
+  // App Check loads second so it can be activated the moment the app exists,
+  // before anything signs in. It is only fetched when a site key is set —
+  // without one there is nothing to activate and the request would be waste.
   var FB_SDK     = ['firebase-app-compat.js','firebase-auth-compat.js','firebase-database-compat.js'];
+
+  /* Firebase App Check — reCAPTCHA v3 site key for the nl-widgets project.
+     PUBLIC by design: reCAPTCHA site keys are meant to ship in the page, and
+     the paired secret lives in the Firebase console, never here.
+
+     App Check attests that a request comes from this app on a registered
+     domain, rather than from anything holding the Firebase config — which,
+     being in this file, is everything. It raises the cost of scripting the
+     REST API directly. It is NOT identity: it says nothing about which fan
+     is asking, so it must never be described as making the widgets private.
+
+     Empty string = off, and every path below degrades to today's behaviour.
+     Enforcement is a console toggle, not a code change, so this same build
+     runs in monitor mode and in enforcement.
+
+     Add ?appcheck=debug to the page URL to get a debug token printed to the
+     console, for registering a preview domain that reCAPTCHA cannot verify. */
+  var APPCHECK_SITE_KEY = '';
   var NLPLUS_LOGO_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/logos/NL%2B%20red%20lozenge.png';
   var SSO_TENANT_ID = 'EBLzD6derkq3NH7m9Rp2mQ';
 
@@ -1112,9 +1148,35 @@
     });
   }
   function loadFirebase() {
-    return FB_SDK.reduce(function (p, name) {
+    var files = APPCHECK_SITE_KEY
+      ? [FB_SDK[0], 'firebase-app-check-compat.js'].concat(FB_SDK.slice(1))
+      : FB_SDK;
+    return files.reduce(function (p, name) {
       return p.then(function () { return loadScript(FB_SDK_URL + name); });
     }, Promise.resolve());
+  }
+  /* Activate App Check on a freshly initialised app. Deliberately swallows
+     every failure: in monitor mode an unattested request still succeeds, so a
+     blocked reCAPTCHA (privacy extension, corporate proxy, offline preview)
+     must not stop a fan using the widget. Once enforcement is on, the same
+     failure denies at the database instead — which is the intended behaviour,
+     and still not something this function should try to paper over. */
+  function activateAppCheck(app) {
+    if (!APPCHECK_SITE_KEY) return;
+    try {
+      if (/[?&]appcheck=debug\b/.test(location.search)) {
+        self.FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+      }
+      var ac = firebase.appCheck(app);
+      var provider = firebase.appCheck.ReCaptchaV3Provider
+        ? new firebase.appCheck.ReCaptchaV3Provider(APPCHECK_SITE_KEY)
+        : APPCHECK_SITE_KEY;
+      ac.activate(provider, true);
+    } catch (e) {
+      if (window.console && console.warn) {
+        console.warn('[NL] App Check not activated:', e && e.message ? e.message : e);
+      }
+    }
   }
   function normaliseUtc(s) {
     if (!s) return null;
@@ -2332,6 +2394,7 @@
       loadFirebase().then(function () {
         var exists = firebase.apps && firebase.apps.some(function (a) { return a.name === APP_NAME; });
         fbApp  = exists ? firebase.app(APP_NAME) : firebase.initializeApp(FIREBASE_CONFIG, APP_NAME);
+        if (!exists) activateAppCheck(fbApp);
         fbAuth = firebase.auth(fbApp);
         fbDb   = firebase.database(fbApp);
         return fbAuth.signInAnonymously();

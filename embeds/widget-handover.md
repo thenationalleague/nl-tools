@@ -291,9 +291,42 @@ Init with a **named app** so multiple NL widgets on the same page don't conflict
 
 ```js
 fbApp  = firebase.initializeApp(FIREBASE_CONFIG, APP_NAME);
+if (!exists) activateAppCheck(fbApp);   // before sign-in, see below
 fbAuth = firebase.auth(fbApp);
 fbDb   = firebase.database(fbApp);
 ```
+
+### App Check
+
+Both widgets carry an `APPCHECK_SITE_KEY` constant. Empty means off and the
+widget behaves exactly as it did before; set to a reCAPTCHA v3 site key, it
+pulls `firebase-app-check-compat.js` in second — right after `app-compat` —
+and activates before anything signs in, so every request carries an
+attestation.
+
+Three invariants for anyone touching this:
+
+- **Activation failures are swallowed on purpose.** In monitor mode an
+  unattested request still succeeds, so a reCAPTCHA blocked by a privacy
+  extension or a corporate proxy must not stop a fan using the widget. After
+  enforcement the same failure denies at the database, which is the intended
+  behaviour and still not something the widget should paper over.
+- **Monitor vs enforce is a console toggle, not a code change.** One build
+  serves both. Do not add a second code path for it.
+- **The site key is public, the secret is not.** reCAPTCHA site keys are meant
+  to ship in the page. The paired secret lives in the Firebase console and
+  must never enter this repository — it is public and permanent.
+
+Every domain the widget is pasted into has to be registered against the
+reCAPTCHA key. A missing domain fails attestation silently in monitor mode
+and fatally after enforcement. For a preview URL reCAPTCHA cannot verify,
+load with `?appcheck=debug`, register the printed token under App Check →
+Manage debug tokens, and delete it when finished — a debug token bypasses
+attestation completely.
+
+**App Check attests the app, not the fan.** It raises the cost of scripting
+the REST API with a lifted config. It says nothing about who is asking, so it
+must never be reported as making the widgets private.
 
 ## 11. RTDB schema (Score Predictor — model for the new widget)
 
