@@ -455,7 +455,7 @@ Each fixture row goes through these states. The pattern is reusable for MOTM (ju
 | `editing` | User re-opened row | Steppers + inline SAVE / CANCEL controls under the row |
 | `future` | More than 7 days from KO | **Hidden** (whole-matchday "opens on" card if nothing is open) |
 | `locked` | Final 60 min before KO | The user's pick + W/D/L boxes ("Predictions locked" lives in the group head) |
-| `live` | Match in progress | REAL live score bold (2-min NLS refetch) + minute; pick small in meta + "Exact so far"/"On track" pill |
+| `live` | Match in progress | REAL live score bold (2-min NLS refetch) + minute; tinted verdict footer closes the row: "Your pick 1–2 · On track / Exact so far / Off target" (same strip on the hero) |
 | `post` | Match finished | Final score, verdict pill (Exact score / Right result; wrong = muted tint only) |
 | `postponed` / `abandoned` | API matchPeriod | Greyed, "Prediction voided" |
 

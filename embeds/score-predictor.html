@@ -38,6 +38,11 @@
        ?sim=off          → real clock, bar hidden (explicit form)
 
      Changelog:
+       02/08/2026  v2.7  Live verdict footer: pick + status move out of
+                         the meta into a tinted strip closing each live
+                         row ("Your pick 1–2 · On track") — same strip
+                         on the hero card; live meta is just the pulse
+                         dot + minute; "You said"/pills removed.
        02/08/2026  v2.6  "Your club" tag dropped from the hero (the
                          colours say it); live rows now show the REAL
                          live score bold (from the 2-min NLS refetch)
@@ -747,6 +752,19 @@
     font-size:13px; color:var(--amber);
     font-weight:800; font-variation-settings:'wght' 800;
   }
+
+  /* Live verdict footer — tinted strip closing a live row with the pick +
+     its current status. Full-bleed against the row/card edges. */
+  #nlPredictor .nlsp__row.has-foot { padding-bottom:0; }
+  #nlPredictor .nlsp__rowfoot {
+    margin:6px -10px 0; padding:5px 10px;
+    font-size:11px; text-transform:uppercase; letter-spacing:.8px;
+    font-weight:700; font-variation-settings:'wght' 700;
+  }
+  #nlPredictor .nlsp__rowfoot.is-exact { background:var(--amber-light); color:var(--amber); }
+  #nlPredictor .nlsp__rowfoot.is-ok    { background:var(--green-light); color:var(--green); }
+  #nlPredictor .nlsp__rowfoot.is-off   { background:var(--off-white);   color:var(--text-muted); }
+  #nlPredictor .nlsp__hero-card .nlsp__rowfoot { margin:0; padding:6px 14px; }
 
   /* W/D/L box — fixed-width letter chip per side. Grey D at 0–0, green W /
      red L as the scoreline moves. Fixed size so rows never widen. */
@@ -1611,21 +1629,11 @@
       meta = (hero ? '<span class="nlsp__lock">Predictions locked</span>' : '') + pickLocked;
     } else if (s === 'live') {
       // The 2-min NLS refetch gives us the actual live score, so the score
-      // cells show it for real. The meta carries the pulse dot, the match
-      // minute, your pick small, and an on-track pill while it's holding.
+      // cells show it for real. The meta is just the pulse dot + minute —
+      // the pick and its status live in the verdict footer strip below.
       var liveMin = (a.formattedMatchTime && a.formattedMatchTime !== "0'") ? a.formattedMatchTime : '';
-      var pickLive = (p && p.home != null)
-        ? '<span class="nlsp__pickline">You said <b>' + p.home + '–' + p.away + '</b></span>'
-        : '<span class="nlsp__pickline" style="opacity:.7;">No prediction</span>';
-      var track = '';
-      if (p && p.home != null && a.homeTeam.score != null && a.awayTeam.score != null) {
-        var lv = verdictOf(p.home, p.away, a.homeTeam.score, a.awayTeam.score);
-        if (lv === 'exact')       track = '<span class="nlsp__pts is-exact">Exact so far</span>';
-        else if (lv === 'result') track = '<span class="nlsp__pts is-right">On track</span>';
-      }
       meta = '<span class="nlsp__livedot" aria-hidden="true"></span>' +
-        '<span class="nlsp__livelbl">Live' + (liveMin ? ' ' + $h(liveMin) : '') + '</span>' +
-        pickLive + track;
+        '<span class="nlsp__livelbl">Live' + (liveMin ? ' ' + $h(liveMin) : '') + '</span>';
     } else if (s === 'post') {
       var realH = a.homeTeam.score, realA = a.awayTeam.score;
       var v = (p && p.home != null) ? verdictOf(p.home, p.away, realH, realA) : null;
@@ -1764,12 +1772,13 @@
           '<span class="nlsp__herov">v</span>' +
           heroSide(a.awayTeam, 'away') +
         '</div>' +
+        (s === 'live' ? liveVerdictFooter(p, a) : '') +
         rowAffordance +
       '</div>';
     }
 
     var rowCls = 'nlsp__row';
-    if (s === 'live') rowCls += ' is-live';
+    if (s === 'live') rowCls += ' is-live has-foot';
     if (preState === 'editing') rowCls += ' is-editing';
     if (preState === 'submitted') rowCls += ' has-edit';
     rowCls += rowMod;
@@ -1778,10 +1787,23 @@
       (meta ? '<div class="nlsp__meta">' + meta + '</div>' : '') +
       teamLine(a.homeTeam, 'home') +
       teamLine(a.awayTeam, 'away') +
+      (s === 'live' ? liveVerdictFooter(p, a) : '') +
       rowAffordance +
     '</div>';
   }
 
+
+  // Tinted strip closing a live row: your pick + how it's doing right now.
+  function liveVerdictFooter(p, a) {
+    if (!p || p.home == null) {
+      return '<div class="nlsp__rowfoot is-off">No prediction</div>';
+    }
+    var rh = a.homeTeam.score, ra = a.awayTeam.score;
+    var v = (rh != null && ra != null) ? verdictOf(p.home, p.away, rh, ra) : null;
+    var word = v === 'exact' ? 'Exact so far' : v === 'result' ? 'On track' : v === 'wrong' ? 'Off target' : '';
+    var cls  = v === 'exact' ? ' is-exact' : v === 'result' ? ' is-ok' : ' is-off';
+    return '<div class="nlsp__rowfoot' + cls + '">Your pick ' + p.home + '–' + p.away + (word ? ' · ' + word : '') + '</div>';
+  }
 
   // A club's panel colours for the hero card, from clubs-meta.json keyed by
   // the NLS teamID (optaID). Values are validated hex; navy canon fallback.
