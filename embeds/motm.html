@@ -13,6 +13,9 @@
          motm/{jwtId}/{matchId}  -> { playerId, playerName, teamId, note, submittedAt }
      - Voting window: opens at FULL TIME (NLS matchPeriod), closes KO+24h.
        A match that never reaches full time never opens for voting.
+     - One nomination per fan per match: motm/{jwtId}/{matchId} is written
+       with .set(), so changing a pick REPLACES the previous one rather
+       than accumulating.
      - Only the user's supported team's match is nominatable; the fan can
        pick from either side (own team or opposition player), but ONLY
        players who actually appeared — starters plus substitutes who came
@@ -34,6 +37,15 @@
      own (a date in May 2026 loads 2025/26), refetching fixtures.
 
      Changelog:
+       02/08/2026  v2.4  Match rows re-laid out: full club name
+                         right-aligned into the crest, crest against the
+                         score, fixed columns so both rows share one
+                         right edge. A rule now separates the result
+                         from the nomination controls. Note field
+                         carries an explicit consent line naming the
+                         fan, replacing the "first name and initial"
+                         disclaimer, and the full name is stored so an
+                         article can use it.
        02/08/2026  v2.3  Hero rebuilt as a club-branded band — large
                          crest on the club's own colour, no greeting and
                          no restatement of "Team of the Week" (the
@@ -323,32 +335,38 @@
     100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--accent-live) 0%, transparent); }
   }
 
-  /* Team line */
+  /* Team line — name right-aligned into the crest, crest against the score,
+     so the two rows share one hard right edge and read as a single block.
+     Fixed columns keep the crests and scores in line with each other. */
   #nlMotm .nlsm__teamline {
-    display:flex; align-items:center; gap:10px;
-    font-size:14px; color:var(--text);
+    display:grid; grid-template-columns:1fr 26px 40px;
+    align-items:center; gap:12px;
+    font-size:15px; color:var(--text);
     font-weight:800; font-variation-settings:'wght' 800;
     text-transform:uppercase; letter-spacing:.5px;
-    min-height:30px;
+    min-height:34px;
   }
   #nlMotm .nlsm__teamline img {
-    width:24px; height:24px; flex:none; border-radius:3px;
-    background:var(--white); object-fit:contain;
+    width:26px; height:26px; justify-self:center;
+    border-radius:3px; background:var(--white); object-fit:contain;
   }
   #nlMotm .nlsm__teamline .nlsm__tname {
-    flex:1; min-width:0;
+    min-width:0; text-align:right;
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
-  #nlMotm .nlsm__tname-short { display:none; }
-  @media (max-width:520px) {
-    #nlMotm .nlsm__tname-full  { display:none; }
-    #nlMotm .nlsm__tname-short { display:inline; }
-  }
   #nlMotm .nlsm__teamscore {
-    flex:none; min-width:36px; text-align:right;
-    font-size:20px;
+    text-align:right;
+    font-size:22px;
     font-weight:900; font-variation-settings:'wght' 900;
     color:var(--text);
+    font-variant-numeric:tabular-nums;
+  }
+
+  /* Break between the result and what you do about it. Full-bleed to the
+     row's padding so it reads as a division, not an underline. */
+  #nlMotm .nlsm__rowsplit {
+    margin:8px -12px 4px;
+    border-top:1px solid var(--border);
   }
 
   /* Voting picker */
@@ -761,10 +779,10 @@
 
   @media (max-width:520px) {
     #nlMotm .nlsm__row { padding:10px; }
+    #nlMotm .nlsm__rowsplit { margin-left:-10px; margin-right:-10px; }
+    #nlMotm .nlsm__teamline { font-size:13px; grid-template-columns:1fr 22px 32px; gap:10px; }
     #nlMotm .nlsm__teamline img { width:22px; height:22px; }
-    #nlMotm .nlsm__teamline { font-size:13px; }
-    #nlMotm .nlsm__teamscore { font-size:18px; min-width:30px; }
-    #nlMotm .nlsm__hero h1 { font-size:22px; }
+    #nlMotm .nlsm__teamscore { font-size:19px; }
   }
 </style>
 
@@ -1307,7 +1325,10 @@
     if (!r || !fbDb || !state.user) return;
     fbDb.ref('users/' + state.user.id).update({
       teamId: r.teamId, teamName: r.teamName, crestUrl: r.crestUrl,
-      forename: state.user.forename, surnameInitial: state.user.surnameInitial,
+      forename: state.user.forename,
+      surname: state.user.surname || '',
+      surnameInitial: state.user.surnameInitial,
+      fullName: state.user.fullName || '',
       email: state.user.email || '',
       lastSeenAt: firebase.database.ServerValue.TIMESTAMP
     }).catch(function () {});
@@ -1455,15 +1476,14 @@
       if (s === 'pre' || s === 'unresolved') return '<div class="nlsm__teamscore" style="color:var(--text-muted);">—</div>';
       return '<div class="nlsm__teamscore">' + (real != null ? real : '?') + '</div>';
     }
+    // Name right-aligned into the crest, crest against the score: the two
+    // rows then read as one block with a hard right edge, and the full club
+    // name is always used rather than switching to a short one on mobile.
     function teamLine(t, side) {
-      var full  = t.name || t.shortName || '';
-      var short = t.shortName || t.name || '';
+      var full = t.name || t.shortName || '';
       return '<div class="nlsm__teamline">' +
+        '<span class="nlsm__tname">' + $h(full) + '</span>' +
         crestImg(t.crest, full) +
-        '<span class="nlsm__tname">' +
-          '<span class="nlsm__tname-full">'  + $h(full)  + '</span>' +
-          '<span class="nlsm__tname-short">' + $h(short) + '</span>' +
-        '</span>' +
         scoreCell(side) +
       '</div>';
     }
@@ -1493,7 +1513,7 @@
       '<div class="nlsm__meta">' + meta + '</div>' +
       teamLine(a.homeTeam, 'home') +
       teamLine(a.awayTeam, 'away') +
-      action +
+      (action ? '<div class="nlsm__rowsplit"></div>' + action : '') +
     '</div>';
   }
 
@@ -1617,15 +1637,15 @@
       '<div class="nlsm__note">' +
         '<label class="nlsm__notelbl" for="' + notedID + '">Why them? <span>Optional</span></label>' +
         '<p class="nlsm__noteexample">We pick the best lines for our Team of the Week article — ' +
-          'yours could run alongside the player. For example:<br>' +
-          '<em>&ldquo;Ran the midfield on his own and that block at 1&ndash;1 was worth a goal.&rdquo;</em></p>' +
+          'yours could run alongside the player. By filling in this section you consent to ' +
+          'being quoted in our Team of the Week article using your name' +
+          (state.user && state.user.fullName ? ' (' + $h(state.user.fullName) + ')' : '') + '.</p>' +
         '<textarea id="' + notedID + '" data-note="' + $h(m.id) + '" ' +
           'maxlength="' + NOTE_MAX + '" rows="3" ' +
           'placeholder="What did they do that won it for you?">' +
           $h(noteVal) +
         '</textarea>' +
         '<div class="nlsm__notefoot">' +
-          '<span class="nlsm__notedisc">Published with your first name and initial.</span>' +
           '<span class="nlsm__notecount' + (noteLen >= NOTE_MAX ? ' is-max' : '') + '" data-count="' + $h(m.id) + '">' + noteLen + '/' + NOTE_MAX + '</span>' +
         '</div>' +
       '</div>' +
@@ -1880,6 +1900,9 @@
       forename: claims.forename || 'there',
       surname:  claims.surname  || '',
       surnameInitial: (claims.surname || '').charAt(0).toUpperCase(),
+      // Quotes now run under the fan's full name (they consent to that at
+      // the point of writing one), so it is shown back to them and stored.
+      fullName: ((claims.forename || '') + ' ' + (claims.surname || '')).trim(),
       email:    claims.email    || '',
       favTeamName: claims.favourite_team || null
     };
