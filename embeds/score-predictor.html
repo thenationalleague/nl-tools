@@ -22,7 +22,8 @@
        Submit is WYSIWYG: every open match goes in at its displayed
        value (untouched 0–0s called out in a confirm first), so 0–0
        is a first-class pick
-     - Set picks show a W/D/L chip ("Fylde win" / "Draw")
+     - Per-side W/D/L letter boxes on every open pick: grey D at 0–0,
+       green W / red L as the scoreline moves
      - Leaderboard: cumulative, filterable by month + supported club;
        names shown as forename + surname initial
      - Club v club table: accuracy % (correct results ÷ settled
@@ -37,6 +38,14 @@
        ?sim=off          → real clock, bar hidden (explicit form)
 
      Changelog:
+       02/08/2026  v2.4  W/D/L text pill replaced with fixed-width
+                         per-side letter boxes (grey D → green W /
+                         red L) on team lines + hero panels — rows no
+                         longer widen when a pick is set.
+       02/08/2026  v2.3  0–0 confirm softened: fires only when EVERY
+                         submitted fixture is an untouched 0–0 (and
+                         there's more than one) — partial submits with
+                         some deliberate 0–0s go through silently.
        02/08/2026  v2.2  Hero split into home/away club-colour panels
                          under a canon navy strip; scores in white
                          drop-shadowed windows; W/D/L chips on set
@@ -728,17 +737,25 @@
     font-weight:800; font-variation-settings:'wght' 800;
   }
 
-  /* W/D/L chip — names the result a set scoreline backs ("Fylde win") */
-  #nlPredictor .nlsp__wdl {
-    display:inline-flex; align-items:center;
-    padding:2px 8px; border-radius:999px;
-    border:1px solid currentColor;
-    color:var(--navy);
-    font-size:10px; letter-spacing:.8px; text-transform:uppercase;
-    font-weight:800; font-variation-settings:'wght' 800;
-    white-space:nowrap;
+  /* W/D/L box — fixed-width letter chip per side. Grey D at 0–0, green W /
+     red L as the scoreline moves. Fixed size so rows never widen. */
+  #nlPredictor .nlsp__wdlbox {
+    flex:none; width:20px; height:20px;
+    display:inline-flex; align-items:center; justify-content:center;
+    border-radius:4px;
+    font-size:11px; line-height:1;
+    font-weight:900; font-variation-settings:'wght' 900;
+    background:var(--off-white); color:var(--text-muted);
+    border:1px solid var(--border);
   }
-  #nlPredictor .nlsp__hero-card .nlsp__wdl { color:inherit; }
+  #nlPredictor .nlsp__wdlbox.is-w { background:var(--green); border-color:var(--green); color:var(--white); }
+  #nlPredictor .nlsp__wdlbox.is-l { background:var(--red);   border-color:var(--red);   color:var(--white); }
+  /* On hero panels the grey D needs to read on club colours — solid white chip */
+  #nlPredictor .nlsp__hero-card .nlsp__wdlbox {
+    background:var(--white); color:var(--text-muted); border-color:var(--white);
+  }
+  #nlPredictor .nlsp__hero-card .nlsp__wdlbox.is-w { background:var(--green); border-color:var(--green); color:var(--white); }
+  #nlPredictor .nlsp__hero-card .nlsp__wdlbox.is-l { background:var(--red);   border-color:var(--red);   color:var(--white); }
 
   /* Leaderboard scope filters — month + club selects in the table head */
   #nlPredictor .nlsp__tablefilters {
@@ -1566,21 +1583,19 @@
       meta = '<span class="nlsp__lock">Opens ' + $h(dayLabel) + '</span>';
     } else if (s === 'pre') {
       // KO time lives in the group head now (or the hero top strip), not on
-      // every row. The row's meta carries only the W/D/L chip once a pick is
-      // set — it makes the primary metric (the result you're backing) visible.
-      var shown = (d && d.home != null && d.away != null) ? d : (p && p.home != null ? p : null);
-      var chip = shown ? wdlChip(a, shown.home, shown.away) : '';
+      // every row — pre rows carry no meta strip. The backed result shows as
+      // per-side W/D/L boxes on the team lines instead.
       if (hero) {
         var cut = cutoffOf(m);
-        meta = '<span>' + $h(fmtBST(ko)) + '</span>' + chip +
+        meta = '<span>' + $h(fmtBST(ko)) + '</span>' +
           '<span class="nlsp__countdown" data-cutoff="' + (cut ? cut.toISOString() : '') + '" style="margin-left:auto;">' +
             'Predictions lock in ' + countdownLabel(cut ? cut - now : null) + '</span>';
       } else {
-        meta = chip;
+        meta = '';
       }
     } else if (s === 'locked') {
       var pickLocked = (p && p.home != null)
-        ? '<span class="nlsp__pickline">Your pick <b>' + p.home + '–' + p.away + '</b></span>' + wdlChip(a, p.home, p.away)
+        ? '<span class="nlsp__pickline">Your pick <b>' + p.home + '–' + p.away + '</b></span>'
         : '<span class="nlsp__pickline" style="opacity:.7;">No prediction</span>';
       meta = (hero ? '<span class="nlsp__lock">Predictions locked</span>' : '') + pickLocked;
     } else if (s === 'live') {
@@ -1642,6 +1657,27 @@
       return '<div class="' + cls + '">' + (real != null ? real : '?') + '</div>';
     }
 
+    // -------- W/D/L box (per side) --------
+    // Fixed-width letter chip next to each score: grey D by default (rows
+    // start 0–0), flipping to green W / red L as the scoreline moves. No
+    // text pills — the row never widens.
+    function wdlBox(side) {
+      var v = null;
+      if (s === 'pre') {
+        v = (d && d.home != null && d.away != null) ? d
+          : (p && p.home != null) ? p
+          : { home: 0, away: 0 };
+      } else if ((s === 'locked' || s === 'live') && p && p.home != null) {
+        v = p;
+      }
+      if (!v) return '';
+      var o = outcome(v.home, v.away);
+      var letter = o === 'D' ? 'D' : ((o === 'H') === (side === 'home') ? 'W' : 'L');
+      var cls = letter === 'W' ? ' is-w' : letter === 'L' ? ' is-l' : '';
+      var word = letter === 'W' ? 'Win' : letter === 'L' ? 'Loss' : 'Draw';
+      return '<span class="nlsp__wdlbox' + cls + '" title="' + word + '" aria-label="' + word + '">' + letter + '</span>';
+    }
+
     // -------- Team line --------
     function teamLine(t, side) {
       var full  = t.name || t.shortName || '';
@@ -1652,6 +1688,7 @@
           '<span class="nlsp__tname-full">'  + $h(full)  + '</span>' +
           '<span class="nlsp__tname-short">' + $h(short) + '</span>' +
         '</span>' +
+        wdlBox(side) +
         scoreCell(side) +
       '</div>';
     }
@@ -1685,6 +1722,7 @@
             '<span class="nlsp__tname-short">' + $h(t.shortName || t.name || '') + '</span>' +
           '</span>' +
           scoreCell(side) +
+          wdlBox(side) +
         '</div>';
       };
       return '<div class="nlsp__hero-card' + rowMod + '">' +
@@ -1714,13 +1752,6 @@
     '</div>';
   }
 
-  // Small chip naming the result a scoreline backs: "Fylde win" / "Draw".
-  function wdlChip(attrs, h, aw) {
-    if (h == null || aw == null) return '';
-    var o = outcome(h, aw);
-    var label = o === 'D' ? 'Draw' : teamLabel(o === 'H' ? attrs.homeTeam : attrs.awayTeam) + ' win';
-    return '<span class="nlsp__wdl">' + $h(label) + '</span>';
-  }
 
   // A club's panel colours for the hero card, from clubs-meta.json keyed by
   // the NLS teamID (optaID). Values are validated hex; navy canon fallback.
@@ -1889,10 +1920,15 @@
           if (btn) { btn.disabled = false; btn.textContent = 'Submit predictions'; }
         });
     }
-    if (untouched > 0) {
+    // 0–0 is a legitimate pick, so partial submits go through silently even
+    // with untouched rows (they stay editable until their own cutoffs). The
+    // confirm only fires when EVERY fixture going in is an untouched 0–0
+    // (and there's more than one) — the "tapped Submit without doing
+    // anything" case.
+    if (untouched === ids.length && ids.length > 1) {
       showConfirm({
         title:   'Submit as shown?',
-        message: untouched + (untouched === 1 ? ' match is' : ' matches are') + ' still at 0–0 and will be submitted that way.',
+        message: 'All ' + ids.length + ' matches are at 0–0 and will be submitted that way.',
         confirm: 'Submit',
         cancel:  'Go back'
       }).then(function (ok) { if (ok) doWrite(); });
