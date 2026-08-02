@@ -391,10 +391,13 @@ match is `locked`/`live`, so staleness is bounded):
 ### KO groups + countdown
 
 Fixtures on the matchday are boxed by kick-off time (`.nlsp__kogroup`) — a
-12:30 / 15:00 / 17:30 day = three boxes. Each box head carries ONE status
-chip: a countdown to the 60-min cutoff (`Locks in 3h 12m`, ticked every 30s
-via `[data-cutoff]` text updates), then Locked / Live / Full time. The hero
-card sits above the groups and carries its own countdown chip.
+12:30 / 15:00 / 17:30 day = three boxes. The box head is the ONLY place the
+KO time appears — `"15:00 kick-offs"` (singular when the box holds one match;
+the hero doesn't count, it sits outside the groups) — plus ONE status chip:
+`Predictions lock in 3h 12m` (ticked every 30s via `[data-cutoff]` text
+updates), then Predictions locked / Live / Full time. Per-row KO eyebrows are
+gone; a pre-KO row's meta strip appears only once a pick is set, carrying the
+W/D/L chip. The hero card sits above the groups with its own countdown chip.
 
 ## 15. Matchday navigator (the datebar)
 
@@ -447,35 +450,42 @@ Each fixture row goes through these states. The pattern is reusable for MOTM (ju
 | State | Meaning | UI |
 |---|---|---|
 | `empty` | No prediction made yet, pre-KO, within edit window | − / + steppers per side, start at 0, cap 9 |
-| `submitted` | Prediction saved, pre-KO | Locked display + hover "EDIT" pill on right edge |
+| `submitted` | Prediction saved, pre-KO | Locked display + W/D/L chip + hover "EDIT" pill |
 | `editing` | User re-opened row | Steppers + inline SAVE / CANCEL controls under the row |
 | `future` | More than 7 days from KO | **Hidden** (whole-matchday "opens on" card if nothing is open) |
-| `locked` | Final 60 min before KO | "Locked · 15:00 kick-off" + the user's pick |
+| `locked` | Final 60 min before KO | The user's pick + W/D/L chip ("Predictions locked" lives in the group head) |
 | `live` | Match in progress | Locked, pulse dot + "Live", show user's prediction |
 | `post` | Match finished | Final score, verdict pill (Exact score / Right result; wrong = muted tint only) |
 | `postponed` / `abandoned` | API matchPeriod | Greyed, "Prediction voided" |
 
 **Steppers, not free text** — two text inputs per row was 24 keyboard focuses
 per matchday on a phone. `−` disables at 0, `+` disables at 9. The first tap
-on a row initialises the draft with both sides at their displayed values, so
-one tap marks the whole row "set" (a genuine 0-0 pick = tap + then −).
+on a row initialises the draft with both sides at their displayed values and
+marks the row "set".
+
+**W/D/L chip** (`.nlsp__wdl`) — once a pick is set, a small chip names the
+result it backs: "Fylde win" / "Draw". Makes the primary scoring metric
+visible at the point of choice.
 
 **Hover EDIT pill** sits absolutely on the right edge of the row, opacity 0 → 1 on row hover (always slightly visible on touch). Click → enters `editing` state. SAVE / CANCEL appear inline under the row, never as floating buttons.
 
 ### The hero card (`.nlsp__hero-card`)
 
 The fan's own club's fixture renders as a showcase card above the KO groups:
-solid **club-primary background** with the club's secondary as a 4px base
-accent (colours from clubs-meta.json keyed by `optaID` = NLS teamID, navy/red
-canon fallback), 72px boxed crests, stacked sides, text colour flipped
-dark/light off the background luminance (`pickTextColor`, threshold 0.68).
-Deliberately **not** a `.nlsp__row`, so verdict tints never fight the club
-colours — but it shares `scoreCell` + the `data-*` wiring, so steppers and
-edit work unchanged. Soft emphasis: every other fixture stays available below.
+a **canon navy top strip** (Your club · KO time · countdown chip), then the
+matchup split into **two panels in each club's own colours** — home club's
+primary left, away club's right (clubs-meta.json keyed by `optaID` = NLS
+teamID, navy fallback) — so the opponent's colours always share the card.
+72px boxed crests; scores/steppers sit in **white drop-shadowed windows**;
+panel text flips dark/light off each background's luminance (`pickTextColor`,
+threshold 0.68). Deliberately **not** a `.nlsp__row`, so verdict tints never
+fight the club colours — but it shares `scoreCell` + the `data-*` wiring, so
+steppers and edit work unchanged. Soft emphasis: every other fixture stays
+available below.
 
 ## 19. Submit / save / reset
 
-- **Bulk submit** (`#…submitbar`) — disabled until every awaiting row has been tapped at least once ("X/12 set"). One RTDB `.update()` writes all rows in one batch.
+- **Bulk submit is WYSIWYG** (`#…submitbar`, "X/12 set") — always enabled; every open match is written at its displayed value, which makes 0–0 a first-class pick (just leave the row alone). If any rows are untouched, a confirm modal says how many are going in as 0–0 before writing. One RTDB `.update()` writes all rows in one batch.
 - **Per-row save** — when re-opening a submitted row, SAVE / CANCEL controls. Save is explicit (not blur-to-save), because blur was too implicit and the user wanted a clear confirm.
 - **Reset all** — small underlined "Reset all predictions" link between fixtures and leaderboard. Only shown when every match is still pre-KO. Custom in-widget confirm modal (not `window.confirm()`). Reset via per-child `null` update, not parent `.remove()`.
 
@@ -493,7 +503,7 @@ Rendered as a centred white card consistent with the rest of the widget.
 
 No points, no multipliers, no prizes. Two cumulative tables, both driven by `tallyForUser()` walking `state.allMatches` × `state.allPredsRaw` (no extra RTDB reads):
 
-- **Leaderboard** — league-wide, ranked by **correct results (W/D/L)**, tiebroken by **exact scorelines**, then forename. Filterable by **month** (a late joiner can win September without being punished for missing August) and by **supported club**. Players with nothing settled in the filtered view are hidden (except yourself), so zero-rows never read as punishment. Names render as forename + surname initial — that's all the DB holds.
+- **Leaderboard** — league-wide, ranked by **correct results (W/D/L)**, tiebroken by **exact scorelines**, then forename. Three labelled numeric columns — **Results / Exact / Games** (settled matches predicted), full meanings in `title` tooltips — no explainer sentence. Filterable by **month** (a late joiner can win September without being punished for missing August) and by **supported club**. Players with nothing settled in the filtered view are hidden (except yourself), so zero-rows never read as punishment. Names render as forename + surname initial — that's all the DB holds.
 - **Club v club** — ranked by **accuracy %** (correct results ÷ settled predictions across the club's fans), tiebroken by exact-score rate. Clubs need `CLUB_TABLE_MIN_SETTLED` (20) settled predictions to rank, so a one-fan club on a hot streak can't sit at 100% and big fanbases aren't advantaged. Shares the leaderboard's month filter; the club filter doesn't apply.
 
 ## 22. Asset paths
