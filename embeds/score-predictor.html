@@ -11,12 +11,18 @@
      - No points, no multipliers, no prizes. Counting model:
          primary   = correct results (W/D/L)
          tiebreak  = exact scorelines
-     - Own club's fixture renders as a hero card at the top (soft —
-       other fixtures always available below)
+     - Own club's fixture renders as a showcase hero card at the top,
+       club colours from clubs-meta.json (soft — other fixtures always
+       available below, boxed by kick-off time with a countdown each)
+     - Predictions open 168h before KO, lock 60min before KO; KOs
+       beyond the window are hidden ("opens on" card instead)
+     - Scores set with − / + steppers only (0–9), no free text
      - Leaderboard: cumulative, filterable by month + supported club;
        names shown as forename + surname initial
      - Club v club table: accuracy % (correct results ÷ settled
        predictions), min 20 settled predictions to rank
+     - All colours mirror NL canon (nl-brand.css values inlined);
+       header is navy with the division wide lockup + club crest
 
      Sim controls:
        (no param)        → real clock, sim bar hidden (production)
@@ -25,6 +31,18 @@
        ?sim=off          → real clock, bar hidden (explicit form)
 
      Changelog:
+       02/08/2026  v2.1  NL canon sweep (no gold, ladder hovers, canon
+                         focus ring, accent-live pulse); navy header with
+                         division wide lockup + club crest (Enterprise
+                         logo/green removed — the lockup carries the
+                         sponsor); club-colour hero showcase card;
+                         KO-time group boxes with per-KO countdown;
+                         60min pre-KO lock; steppers replace free-text
+                         inputs (0–9); future KOs hidden; matchPeriod
+                         now authoritative for post/live; NLS refetch
+                         every 2min while play is in flight; seasonID
+                         derived from clubs-meta; registration eyebrow
+                         removed, display name bolded.
        02/08/2026  v2.0  Rollout model — counting leaderboard (results
                          first, exacts tiebreak), month + club filters,
                          club accuracy table, hero own-club card,
@@ -51,7 +69,6 @@
     <div id="nlsp-clubtable"></div>
   </div>
   <div class="nlsp__gate" id="nlsp-gate"></div>
-  <div class="nlsp__footer" id="nlsp-footer"></div>
   <div id="nlsp-sim"></div>
   <div class="nlsp__modal" id="nlsp-modal" hidden></div>
 </div>
@@ -66,17 +83,22 @@
   }
 
   #nlPredictor {
-    --primary:#9e0000; --navy:#223b7c;
+    /* Values mirror the NL canon (system/nl-brand.css) — embeds can't load
+       the portal stylesheet, so the tokens are inlined verbatim. Ladder
+       stops are the canonical "lighter/darker"; no gold, no rgba overlays. */
+    --primary:#9e0000; --primary-50:#fcf4f2; --primary-300:#dfa197;
+    --primary-600:#7e0000; --primary-700:#600000;
+    --navy:#223b7c; --navy-600:#192e63;
     --red:#d4380d; --red-light:#fff1ec;
     --green:#1a7030; --green-light:#edf7ee;
     --amber:#c96f15; --amber-light:#fef6ec;
-    --info:#3b82f6; --info-light:#eef2ff;
-    --gold:#b8860b; --gold-light:#fff5d4;
+    --accent-live:#4ade80;
     --white:#ffffff; --off-white:#f4f6f9;
     --text:#1a2a44; --text-muted:#5a6a82;
     --border:#dde3ed;
     --radius:6px;
     --shadow:0 2px 12px rgba(10,22,40,.10);
+    --focus-ring:0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
 
     font-family:'carbona-variable','carbona',sans-serif;
     font-size:15px; line-height:1.45;
@@ -85,11 +107,6 @@
     max-width:680px; margin:24px auto; padding:0 12px;
   }
   #nlPredictor, #nlPredictor *, #nlPredictor *::before, #nlPredictor *::after { box-sizing:border-box; }
-
-  /* Hide native number-input spinners just in case */
-  #nlPredictor input[type="number"]::-webkit-outer-spin-button,
-  #nlPredictor input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
-  #nlPredictor input[type="number"] { -moz-appearance:textfield; appearance:textfield; }
 
   /* Banner */
   #nlPredictor .nlsp__banner {
@@ -135,28 +152,27 @@
   }
   @keyframes nlsp-spin { to { transform:rotate(360deg); } }
 
-  /* Sponsor header — Enterprise (left), title (centred), comp + team crests (right) */
+  /* Header — division wide lockup (left), title (centred), club crest (right).
+     NL canon: navy surface, white text, brand-red hairline. The wide lockup
+     carries its own white rounded card, so it sits straight on the navy. */
   #nlPredictor .nlsp__sponsor {
     display:grid; grid-template-columns:1fr auto 1fr; align-items:center;
-    background:#000; color:#fff;
+    background:var(--navy); color:var(--white);
     padding:12px 16px; border-radius:var(--radius) var(--radius) 0 0;
-    border-bottom:2px solid #34ab56;
+    border-bottom:2px solid var(--primary);
     gap:12px; min-height:54px;
   }
   #nlPredictor .nlsp__sponsor-left  { display:flex; align-items:center; gap:10px; justify-self:start; }
   #nlPredictor .nlsp__sponsor-right { display:flex; align-items:center; gap:8px;  justify-self:end; }
-  #nlPredictor .nlsp__sponsor img.nlsp__sponsor-logo {
-    height:26px; width:auto; display:block; object-fit:contain;
-  }
-  #nlPredictor .nlsp__sponsor img.nlsp__sponsor-comp {
-    height:30px; width:auto; display:block; object-fit:contain;
+  #nlPredictor .nlsp__sponsor img.nlsp__sponsor-wide {
+    height:34px; width:auto; display:block; object-fit:contain;
   }
   #nlPredictor .nlsp__sponsor img.nlsp__sponsor-team {
     height:30px; width:30px; display:block; object-fit:contain;
-    background:#fff; border-radius:4px; padding:1px;
+    background:var(--white); border-radius:4px; padding:1px;
   }
   #nlPredictor .nlsp__sponsor .nlsp__sponsor-title {
-    font-size:15px; color:#fff;
+    font-size:15px; color:var(--white);
     text-transform:uppercase; letter-spacing:1.5px;
     font-weight:900; font-variation-settings:'wght' 900;
     line-height:1;
@@ -169,21 +185,9 @@
       grid-template-columns:1fr auto 1fr;
       gap:8px;
     }
-    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-logo { height:20px; }
-    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-comp,
-    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-team { height:24px; }
-    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-team { width:24px; }
+    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-wide { height:26px; }
+    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-team { height:24px; width:24px; }
     #nlPredictor .nlsp__sponsor .nlsp__sponsor-title { font-size:11px; letter-spacing:1px; }
-  }
-
-  /* Footer — small Enterprise logo only */
-  #nlPredictor .nlsp__footer {
-    display:flex; align-items:center; justify-content:center;
-    padding:16px 0 4px; margin-top:12px;
-    border-top:1px solid var(--border);
-  }
-  #nlPredictor .nlsp__footer img {
-    height:22px; width:auto; display:block; opacity:.65;
   }
 
   /* Date selector — horizontally scrollable strip of matchday pills.
@@ -281,43 +285,113 @@
   }
   #nlPredictor .nlsp__row:first-child { border-top:1px solid var(--border); }
 
-  /* Hero card — the fan's own club's fixture, scaled up and set apart at the
-     top of the matchday. Soft emphasis only: every other fixture stays
-     available below it. Reuses the standard row DOM via the is-hero mod. */
-  #nlPredictor .nlsp__row.is-hero {
-    border:1px solid var(--border);
+  /* Hero card — the fan's own club's fixture as a proper showcase: solid
+     club-primary background (from clubs-meta.json, navy fallback), the
+     club's secondary colour as a base accent, oversized boxed crests, and
+     text that flips dark/light off the background's luminance. Soft
+     emphasis only: every other fixture stays available below it. Deliberately
+     NOT a .nlsp__row, so row verdict tints never fight the club colours. */
+  #nlPredictor .nlsp__hero-card {
+    position:relative;
+    --heroc1:var(--navy); --heroc2:var(--primary); --herotx:#ffffff;
+    background:var(--heroc1);
+    color:var(--herotx);
     border-radius:var(--radius);
+    border-bottom:4px solid var(--heroc2);
     box-shadow:var(--shadow);
-    padding:14px 16px 12px;
+    padding:14px 16px 18px;
     margin-bottom:14px;
-    row-gap:4px;
   }
-  #nlPredictor .nlsp__row.is-hero:first-child { border-top:1px solid var(--border); }
+  #nlPredictor .nlsp__hero-card.is-void { opacity:.8; }
+  #nlPredictor .nlsp__hero-top {
+    display:flex; align-items:center; gap:10px;
+    margin-bottom:12px;
+  }
   #nlPredictor .nlsp__herotag {
     font-size:10px; text-transform:uppercase; letter-spacing:1.5px;
-    color:var(--gold);
+    color:inherit;
     font-weight:900; font-variation-settings:'wght' 900;
-    margin-bottom:2px;
+    white-space:nowrap;
   }
-  #nlPredictor .nlsp__row.is-hero .nlsp__teamline { font-size:17px; min-height:38px; gap:12px; }
-  #nlPredictor .nlsp__row.is-hero .nlsp__teamline img { width:34px; height:34px; }
-  #nlPredictor .nlsp__row.is-hero .nlsp__teamscore { font-size:24px; min-width:44px; }
-  #nlPredictor .nlsp__row.is-hero .nlsp__teamscore input {
-    width:56px; height:40px; font-size:21px;
+  #nlPredictor .nlsp__hero-top .nlsp__meta {
+    flex:1; padding-right:0; color:inherit; opacity:.92;
+  }
+  #nlPredictor .nlsp__hero-card .nlsp__meta .nlsp__pickline,
+  #nlPredictor .nlsp__hero-card .nlsp__meta .nlsp__pickline b,
+  #nlPredictor .nlsp__hero-card .nlsp__meta .nlsp__lock,
+  #nlPredictor .nlsp__hero-card .nlsp__meta .nlsp__ftlabel,
+  #nlPredictor .nlsp__hero-card .nlsp__meta .nlsp__livelbl,
+  #nlPredictor .nlsp__hero-card .nlsp__meta .nlsp__voidlbl,
+  #nlPredictor .nlsp__hero-card .nlsp__countdown { color:inherit; }
+  #nlPredictor .nlsp__heromatch {
+    display:grid; grid-template-columns:1fr auto 1fr;
+    align-items:start; gap:10px;
+  }
+  #nlPredictor .nlsp__heroside {
+    display:flex; flex-direction:column; align-items:center; gap:10px;
+    text-align:center; min-width:0;
+  }
+  #nlPredictor .nlsp__heroside img {
+    width:72px; height:72px; object-fit:contain;
+    background:var(--white); border-radius:10px; padding:7px;
+    box-shadow:var(--shadow);
+  }
+  #nlPredictor .nlsp__heroname {
+    font-size:14px; line-height:1.2;
+    text-transform:uppercase; letter-spacing:.5px;
+    font-weight:900; font-variation-settings:'wght' 900;
+    color:inherit;
+  }
+  #nlPredictor .nlsp__herov {
+    align-self:center; padding-top:26px;
+    font-size:13px; opacity:.65;
+    font-weight:900; font-variation-settings:'wght' 900;
+    text-transform:lowercase;
+  }
+  #nlPredictor .nlsp__hero-card .nlsp__stepval,
+  #nlPredictor .nlsp__hero-card .nlsp__teamscore { color:inherit; }
+  #nlPredictor .nlsp__hero-card .nlsp__teamscore { font-size:26px; min-width:0; text-align:center; }
+  #nlPredictor .nlsp__hero-card .nlsp__teamscore.is-pred { color:inherit; opacity:.75; }
+  #nlPredictor .nlsp__hero-card .nlsp__step button { width:36px; height:36px; font-size:18px; }
+  #nlPredictor .nlsp__hero-card .nlsp__step .nlsp__stepval { font-size:24px; min-width:30px; }
+  #nlPredictor .nlsp__hero-card .nlsp__editcontrols { margin-top:12px; justify-content:center; }
+  /* On the hero the EDIT affordance is a visible inline button under the
+     matchup (the absolute pill would collide with the countdown chip). */
+  #nlPredictor .nlsp__hero-card .nlsp__rowedit {
+    position:static; display:block; margin:12px auto 0; opacity:1;
   }
   @media (max-width:520px) {
-    #nlPredictor .nlsp__row.is-hero .nlsp__teamline { font-size:15px; }
-    #nlPredictor .nlsp__row.is-hero .nlsp__teamline img { width:28px; height:28px; }
-    #nlPredictor .nlsp__row.is-hero .nlsp__teamscore { font-size:20px; }
-    #nlPredictor .nlsp__row.is-hero .nlsp__teamscore input { width:48px; height:36px; font-size:18px; }
+    #nlPredictor .nlsp__heroside img { width:56px; height:56px; padding:5px; }
+    #nlPredictor .nlsp__heroname { font-size:12px; }
+    #nlPredictor .nlsp__hero-card .nlsp__step button { width:32px; height:32px; }
   }
 
+  /* KO group boxes — fixtures sharing a kick-off time, one countdown each */
+  #nlPredictor .nlsp__kogroup {
+    background:var(--white);
+    border:1px solid var(--border); border-radius:var(--radius);
+    margin-bottom:12px;
+    overflow:hidden;
+  }
+  #nlPredictor .nlsp__kohead {
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:8px 12px;
+    background:var(--off-white);
+    border-bottom:1px solid var(--border);
+    font-size:11px; color:var(--text-muted);
+    text-transform:uppercase; letter-spacing:1px;
+    font-weight:800; font-variation-settings:'wght' 800;
+  }
+  #nlPredictor .nlsp__countdown { color:var(--primary); white-space:nowrap; }
+  #nlPredictor .nlsp__kostatus { color:var(--text-muted); white-space:nowrap; }
+  #nlPredictor .nlsp__kostatus.is-live { color:var(--green); }
+  #nlPredictor .nlsp__kogroup .nlsp__row:last-child { border-bottom:none; }
+
   /* No row background tint for live — just the pulse on the meta strip */
-  #nlPredictor .nlsp__row.is-exact { background:color-mix(in srgb, var(--gold) 10%, var(--white)); }
-  #nlPredictor .nlsp__row.is-right { background:color-mix(in srgb, var(--green) 6%, var(--white)); }
-  #nlPredictor .nlsp__row.is-wrong { background:color-mix(in srgb, var(--text-muted) 4%, var(--white)); }
+  #nlPredictor .nlsp__row.is-exact { background:var(--amber-light); }
+  #nlPredictor .nlsp__row.is-right { background:var(--green-light); }
+  #nlPredictor .nlsp__row.is-wrong { background:var(--off-white); }
   #nlPredictor .nlsp__row.is-editing { border-left-color:var(--primary); }
-  #nlPredictor .nlsp__row.is-editing input { border-color:var(--primary); }
 
   /* Meta strip (KO time / live dot / FT verdict) on top */
   #nlPredictor .nlsp__meta {
@@ -329,10 +403,10 @@
     min-height:16px;
   }
   #nlPredictor .nlsp__meta .nlsp__livedot {
-    width:7px; height:7px; border-radius:50%; background:var(--red);
+    width:7px; height:7px; border-radius:50%; background:var(--accent-live);
     animation:nlsp-pulse 1.4s infinite;
   }
-  #nlPredictor .nlsp__meta .nlsp__livelbl { color:var(--red); }
+  #nlPredictor .nlsp__meta .nlsp__livelbl { color:var(--green); }
   #nlPredictor .nlsp__meta .nlsp__ftlabel { color:var(--green); }
   #nlPredictor .nlsp__meta .nlsp__voidlbl { color:var(--text-muted); }
   #nlPredictor .nlsp__meta .nlsp__lock    { color:var(--text-muted); }
@@ -340,13 +414,13 @@
   #nlPredictor .nlsp__meta .nlsp__pickline { color:var(--text-muted); }
   #nlPredictor .nlsp__meta .nlsp__pickline b { color:var(--text); font-weight:900; font-variation-settings:'wght' 900; }
   @keyframes nlsp-pulse {
-    0%   { box-shadow:0 0 0 0 color-mix(in srgb, var(--red) 50%, transparent); }
-    70%  { box-shadow:0 0 0 6px color-mix(in srgb, var(--red) 0%, transparent); }
-    100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--red) 0%, transparent); }
+    0%   { box-shadow:0 0 0 0 color-mix(in srgb, var(--accent-live) 60%, transparent); }
+    70%  { box-shadow:0 0 0 6px color-mix(in srgb, var(--accent-live) 0%, transparent); }
+    100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--accent-live) 0%, transparent); }
   }
-  /* Points pill — solid bg, white text. Exact = gold "champion" treatment
+  /* Verdict pill — solid bg, white text. Exact = amber "champion" treatment
      with a slight bump in size + a tiny star prefix. Right result = green.
-     Wrong = quiet muted chip. Always right-aligned in the meta strip. */
+     Wrong gets no pill. Always right-aligned in the meta strip. */
   #nlPredictor .nlsp__pts {
     margin-left:auto; padding:3px 12px; border-radius:999px;
     font-size:14px; letter-spacing:.6px;
@@ -356,12 +430,12 @@
     white-space:nowrap;
   }
   #nlPredictor .nlsp__pts.is-exact {
-    background:var(--gold); color:var(--white);
+    background:var(--amber); color:var(--white);
     font-size:15px; padding:4px 14px;
-    box-shadow:0 1px 4px color-mix(in srgb, var(--gold) 35%, transparent);
+    box-shadow:0 1px 4px color-mix(in srgb, var(--amber) 35%, transparent);
   }
   #nlPredictor .nlsp__pts.is-exact::before { content:'\2605'; font-size:13px; line-height:1; }
-  #nlPredictor .nlsp__pts.is-right { background:#0f5022; color:var(--white); }
+  #nlPredictor .nlsp__pts.is-right { background:var(--green); color:var(--white); }
   #nlPredictor .nlsp__pts.is-wrong {
     background:var(--white); color:var(--text-muted);
     border:1px solid var(--border);
@@ -397,18 +471,29 @@
     color:var(--text);
   }
   #nlPredictor .nlsp__teamscore.is-pred { color:var(--text-muted); }
-  #nlPredictor .nlsp__teamscore input {
-    width:48px; height:34px; padding:0 6px;
-    text-align:center; font-family:inherit;
-    font-size:18px; font-weight:900; font-variation-settings:'wght' 900;
-    color:var(--text); background:var(--off-white);
+
+  /* Score stepper — buttons only, no free text. − greys at 0, + greys at 9. */
+  #nlPredictor .nlsp__step { display:flex; align-items:center; gap:6px; flex:none; }
+  #nlPredictor .nlsp__step button {
+    width:32px; height:32px; flex:none; padding:0;
+    display:flex; align-items:center; justify-content:center;
+    font-family:inherit; font-size:17px; line-height:1;
+    font-weight:900; font-variation-settings:'wght' 900;
+    color:var(--text); background:var(--white);
     border:1px solid var(--border); border-radius:var(--radius);
+    cursor:pointer;
+    transition:color .15s ease, border-color .15s ease;
   }
-  #nlPredictor .nlsp__teamscore input:focus {
-    outline:none; background:var(--white); border-color:var(--primary);
-    box-shadow:0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent);
+  #nlPredictor .nlsp__step button:hover:not(:disabled) { color:var(--primary); border-color:var(--primary); }
+  #nlPredictor .nlsp__step button:focus-visible { outline:none; box-shadow:var(--focus-ring); }
+  #nlPredictor .nlsp__step button:disabled {
+    color:var(--border); background:var(--off-white); cursor:default;
   }
-  #nlPredictor .nlsp__teamscore input::placeholder { color:var(--text-muted); opacity:.4; }
+  #nlPredictor .nlsp__step .nlsp__stepval {
+    min-width:26px; text-align:center;
+    font-size:20px; font-weight:900; font-variation-settings:'wght' 900;
+    color:var(--text);
+  }
 
   /* Hover-revealed EDIT pill — top-right of the row */
   #nlPredictor .nlsp__rowedit {
@@ -443,9 +528,9 @@
   #nlPredictor .nlsp__editcontrols .nlsp__btn-save {
     background:var(--primary); color:var(--white); border:1px solid var(--primary);
   }
-  #nlPredictor .nlsp__editcontrols .nlsp__btn-save:hover  { background:color-mix(in srgb, var(--primary) 80%, black); }
+  #nlPredictor .nlsp__editcontrols .nlsp__btn-save:hover  { background:var(--primary-600); }
   #nlPredictor .nlsp__editcontrols .nlsp__btn-save:disabled {
-    background:#cccccc; color:#888888; border-color:#cccccc; cursor:not-allowed;
+    background:var(--border); color:var(--text-muted); border-color:var(--border); cursor:not-allowed;
   }
   #nlPredictor .nlsp__editcontrols .nlsp__btn-cancel {
     background:var(--white); color:var(--text-muted); border:1px solid var(--border);
@@ -521,7 +606,7 @@
   #nlPredictor .nlsp__modal-confirm {
     background:var(--primary); color:var(--white); border:1px solid var(--primary);
   }
-  #nlPredictor .nlsp__modal-confirm:hover { background:color-mix(in srgb, var(--primary) 80%, black); }
+  #nlPredictor .nlsp__modal-confirm:hover { background:var(--primary-600); }
 
   /* Registration */
   #nlPredictor .nlsp__register-card {
@@ -540,7 +625,7 @@
   }
   #nlPredictor .nlsp__register-card select:focus {
     outline:none; border-color:var(--primary);
-    box-shadow:0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent);
+    box-shadow:var(--focus-ring);
   }
   #nlPredictor .nlsp__lockwarn {
     margin:18px 0; padding:10px 12px;
@@ -555,12 +640,12 @@
     cursor:pointer; background:var(--primary); color:var(--white);
     transition:background .15s ease;
   }
-  #nlPredictor .nlsp__btn:hover  { background:color-mix(in srgb, var(--primary) 80%, black); }
-  #nlPredictor .nlsp__btn:active { background:color-mix(in srgb, var(--primary) 70%, black); }
+  #nlPredictor .nlsp__btn:hover  { background:var(--primary-600); }
+  #nlPredictor .nlsp__btn:active { background:var(--primary-700); }
   #nlPredictor .nlsp__btn:focus-visible {
-    outline:3px solid color-mix(in srgb, var(--primary) 35%, transparent); outline-offset:2px;
+    outline:3px solid var(--primary-300); outline-offset:2px;
   }
-  #nlPredictor .nlsp__btn:disabled { background:#cccccc; color:#888888; cursor:not-allowed; }
+  #nlPredictor .nlsp__btn:disabled { background:var(--border); color:var(--text-muted); cursor:not-allowed; }
 
   /* Leaderboard */
   #nlPredictor .nlsp__table {
@@ -582,14 +667,14 @@
   }
   /* Leaderboard rows carry an extra exact-scorelines cell */
   #nlPredictor #nlsp-table .nlsp__trow { grid-template-columns:24px 24px 1fr auto auto; }
-  #nlPredictor .nlsp__trow.is-you { background:color-mix(in srgb, var(--primary) 4%, var(--white)); }
+  #nlPredictor .nlsp__trow.is-you { background:var(--primary-50); }
   #nlPredictor .nlsp__trow .nlsp__rank { color:var(--text-muted); font-weight:900; font-variation-settings:'wght' 900; }
   #nlPredictor .nlsp__trow img { width:22px; height:22px; border-radius:3px; background:var(--white); object-fit:contain; }
   #nlPredictor .nlsp__trow .nlsp__pts { font-size:14px; font-weight:900; font-variation-settings:'wght' 900; color:var(--text); padding:0; background:none; }
   #nlPredictor .nlsp__trow .nlsp__youlbl { color:var(--text-muted); font-weight:600; font-variation-settings:'wght' 600; }
   /* Secondary stat (exact scorelines) sits right of the results count */
   #nlPredictor .nlsp__trow .nlsp__exacts {
-    font-size:12px; color:var(--gold);
+    font-size:12px; color:var(--amber);
     font-weight:800; font-variation-settings:'wght' 800;
     min-width:34px; text-align:right;
   }
@@ -608,7 +693,7 @@
   }
   #nlPredictor .nlsp__tablefilters select:focus {
     outline:none; border-color:var(--primary);
-    box-shadow:0 0 0 2px color-mix(in srgb, var(--primary) 25%, transparent);
+    box-shadow:var(--focus-ring);
   }
 
   /* Club v club table — accuracy % rows + below-floor footnote */
@@ -644,7 +729,7 @@
   #nlPredictor .nlsp__simbar input[type="date"]:focus,
   #nlPredictor .nlsp__simbar input[type="time"]:focus {
     outline:none; border-color:var(--primary);
-    box-shadow:0 0 0 2px color-mix(in srgb, var(--primary) 25%, transparent);
+    box-shadow:var(--focus-ring);
   }
   #nlPredictor .nlsp__simbar .nlsp__sim-now-btn {
     font-family:inherit; font-size:11px;
@@ -696,17 +781,20 @@
 
   // Three NL divisions wired in. Add/change here to extend coverage.
   var COMPS = {
-    89:  { id: 89,  name: 'National Division',     shortName: 'National', logoFile: 'National.png' },
-    373: { id: 373, name: 'National League North', shortName: 'North',    logoFile: 'North.png'    },
-    372: { id: 372, name: 'National League South', shortName: 'South',    logoFile: 'South.png'    }
+    89:  { id: 89,  name: 'National Division',     shortName: 'National' },
+    373: { id: 373, name: 'National League North', shortName: 'North'    },
+    372: { id: 372, name: 'National League South', shortName: 'South'    }
   };
   var COMP_IDS = Object.keys(COMPS).map(Number); // [89, 373, 372]
   var DEFAULT_COMP_ID = 89; // National — fallback when team→comp lookup fails
-  var SEASON_ID  = 2026;
+  var SEASON_ID  = 2026; // fallback only — the live value is derived from clubs-meta.json
+  var CLUBS_META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
   var API_BASE   = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
   var MAX_PAGES  = 10;
   var IN_PLAY_MIN = 105;
   var EDIT_WINDOW_HOURS = 168; // predictions open 7 days before KO
+  var CUTOFF_MIN = 60;         // predictions lock 1h before KO
+  var MAX_GOALS = 9;           // stepper cap per side
   var CLUB_TABLE_MIN_SETTLED = 20; // settled predictions a club needs before it ranks
 
   // ---------- DOM refs ----------
@@ -722,19 +810,14 @@
   var clubTableEl = document.getElementById('nlsp-clubtable');
   var simEl     = document.getElementById('nlsp-sim');
   var sponsorEl = document.getElementById('nlsp-sponsor');
-  var footerEl  = document.getElementById('nlsp-footer');
   var datebarEl = document.getElementById('nlsp-datebar');
 
-  // ---------- sponsor + footer (always visible) ----------
-  var ENTERPRISE_LOGO_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/partners/Enterprise.png';
+  // ---------- header (always visible) ----------
   function renderSponsor() {
     var r = state.registration;
     var compId = userCompId() || DEFAULT_COMP_ID;
     var compName_ = compName(compId);
     var teamName  = (r && r.teamName) || '';
-    var compCrest = '<img class="nlsp__sponsor-comp" src="' + compLogoUrl(compId) + '" alt="' + $h(compName_) + '" ' +
-                      'title="' + $h(compName_) + '" ' +
-                      'onerror="this.onerror=null;this.style.display=\'none\';">';
     var teamCrest = (r && r.crestUrl)
       ? '<img class="nlsp__sponsor-team" src="' + $h(r.crestUrl) + '" alt="' + $h(teamName || 'My team') + '" ' +
           'title="' + $h(teamName) + ' · ' + $h(compName_) + '" ' +
@@ -742,23 +825,18 @@
       : '';
     sponsorEl.innerHTML =
       '<div class="nlsp__sponsor-left">' +
-        '<img class="nlsp__sponsor-logo" src="' + ENTERPRISE_LOGO_URL + '" alt="Enterprise" ' +
+        '<img class="nlsp__sponsor-wide" src="' + compWideLogoUrl(compId) + '" alt="' + $h(compName_) + '" ' +
+          'title="' + $h(compName_) + '" ' +
           'onerror="this.onerror=null;this.style.display=\'none\';">' +
       '</div>' +
       '<span class="nlsp__sponsor-title">Score Predictor</span>' +
       '<div class="nlsp__sponsor-right">' +
-        compCrest +
         teamCrest +
       '</div>';
   }
-  function renderFooter() {
-    footerEl.innerHTML =
-      '<img src="' + ENTERPRISE_LOGO_URL + '" alt="Enterprise" ' +
-        'onerror="this.onerror=null;this.style.display=\'none\';">';
-  }
-  // NOTE: renderSponsor() / renderFooter() can't run here at script-load
-  // because they read state.registration + call userCompId() / compLogoUrl(),
-  // and `var state = {...}` plus those helpers are defined further down.
+  // NOTE: renderSponsor() can't run here at script-load because it reads
+  // state.registration + calls userCompId() / compWideLogoUrl(), and
+  // `var state = {...}` plus those helpers are defined further down.
   // Hoisting makes `state` available as `undefined`, which throws on read.
   // Initial paint happens from boot() instead, after all helpers are defined.
 
@@ -853,6 +931,8 @@
     drafts: {},
     editing: {},
     allUsers: {},
+    clubColours: {},        // NLS teamID (optaID) -> {primary, secondary, tertiary} from clubs-meta.json
+    seasonId: null,         // current season from clubs-meta.json (fallback: SEASON_ID)
     selectedMatchday: null, // explicit override from the date selector; null = derive
     lbMonth: null,          // leaderboard month filter ('YYYY-MM'); null = whole season
     lbClub: null,           // leaderboard club filter (teamId); null = all clubs
@@ -948,17 +1028,35 @@
   function koOf(m) { return normaliseUtc(dateOf(m)); }
   function periodOf(m) { return ((m && m.attributes && m.attributes.matchPeriod) || '').toLowerCase(); }
   function stateOf(m, now) {
-    // matchPeriod from the API takes priority for postponed / abandoned
+    // matchPeriod from NLS is authoritative when present: FullTime/PostMatch
+    // means the score is final, the live periods mean in-play. The clock
+    // logic below is the fallback for PreMatch and for a snapshot that has
+    // gone stale between fetches.
     var p = periodOf(m);
     if (p === 'postponed') return 'postponed';
     if (p === 'abandoned') return 'abandoned';
+    if (p === 'fulltime' || p === 'postmatch') return 'post';
+    if (p === 'firsthalf' || p === 'halftime' || p === 'secondhalf' || p === 'extratime' || p === 'penalties') return 'live';
     var ko = koOf(m); if (!ko) return 'unknown';
     var diffMin = (now - ko) / 60000;
     var hoursUntil = -diffMin / 60;
     if (diffMin < 0 && hoursUntil > EDIT_WINDOW_HOURS) return 'future'; // > 7 days away
-    if (diffMin < 0) return 'pre';                                       // editable window
+    if (diffMin < -CUTOFF_MIN) return 'pre';                             // editable window
+    if (diffMin < 0) return 'locked';                                    // final hour before KO
     if (diffMin < IN_PLAY_MIN) return 'live';
     return 'post';
+  }
+  function cutoffOf(m) {
+    var ko = koOf(m);
+    return ko ? new Date(ko.getTime() - CUTOFF_MIN * 60000) : null;
+  }
+  function countdownLabel(ms) {
+    if (ms == null || ms <= 0) return 'Locked';
+    var mins = Math.ceil(ms / 60000);
+    var d = Math.floor(mins / 1440), h = Math.floor((mins % 1440) / 60), mm = mins % 60;
+    if (d > 0) return d + 'd ' + h + 'h';
+    if (h > 0) return h + 'h ' + mm + 'm';
+    return mm + 'm';
   }
   function outcome(h, a) { return h > a ? 'H' : (h < a ? 'A' : 'D'); }
   // Counting model — no points. 'exact' implies a correct result too.
@@ -1013,13 +1111,28 @@
     if (!state.registration) return null;
     return teamCompId(state.registration.teamId) || DEFAULT_COMP_ID;
   }
-  function compLogoUrl(compId) {
+  function compWideLogoUrl(compId) {
     var c = COMPS[compId] || COMPS[DEFAULT_COMP_ID];
-    return 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/divisions/' + c.logoFile;
+    return 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/divisions/' + c.shortName + '-wide.png';
   }
   function compName(compId) {
     var c = COMPS[compId] || COMPS[DEFAULT_COMP_ID];
     return c.name;
+  }
+
+  // ---------- clubs-meta (season + club colours) ----------
+  function loadClubsMeta() {
+    return fetch(CLUBS_META_URL)
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (meta) {
+        state.seasonId = (meta && meta.seasons && meta.seasons.current) || null;
+        var map = {};
+        ((meta && meta.clubs) || []).forEach(function (c) {
+          if (c && c.optaID && c.colors) map[c.optaID] = c.colors;
+        });
+        state.clubColours = map;
+      })
+      .catch(function () { /* soft-fail: SEASON_ID fallback, navy hero */ });
   }
 
   // ---------- fetch fixtures (all 3 competitions in parallel) ----------
@@ -1034,7 +1147,7 @@
   function fetchCompetition(compId) {
     var all = [];
     function page(n) {
-      var url = API_BASE + '/matches/?competitionID=' + compId + '&seasonID=' + SEASON_ID +
+      var url = API_BASE + '/matches/?competitionID=' + compId + '&seasonID=' + (state.seasonId || SEASON_ID) +
                 '&sort=kickOffDateUTC&page.number=' + n + '&page.size=100';
       return fetch(url, { credentials:'omit' })
         .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status + ' (comp ' + compId + ')'); return r.json(); })
@@ -1098,12 +1211,11 @@
     register.innerHTML =
       '<div class="nlsp__register-card">' +
         '<div class="nlsp__hero" style="padding:0;">' +
-          '<div class="nlsp__kicker">National League Predictor</div>' +
           '<h1>Welcome, ' + $h(state.user.forename) + '</h1>' +
         '</div>' +
         '<p style="color:var(--text-muted);font-size:14px;margin:6px 0 0;">' +
           'Pick your club from the National, North or South division. Their match leads your predictions each matchday, and you\'ll appear on the leaderboard as ' +
-          $h(state.user.forename) + ' ' + $h(state.user.surnameInitial || '') + '.' +
+          '<b>' + $h(state.user.forename) + ' ' + $h(state.user.surnameInitial || '') + '</b>.' +
         '</p>' +
         '<label for="nlsp-team-select">Your team</label>' +
         '<select id="nlsp-team-select">' +
@@ -1212,10 +1324,9 @@
     }, true);
   }
 
-  // ---------- hero ----------
-  // Greeting ribbon (small caps) + matchday date. The ×3 boost is no longer
-  // surfaced here — it's surfaced via the gold left-edge on the own-team
-  // fixture row plus a tooltip on that row.
+  // ---------- greeting ----------
+  // Greeting ribbon (small caps) + matchday date. The own-club emphasis
+  // lives in the club-coloured hero card at the top of the fixtures.
   function renderHero() {
     var key = currentMatchdayKey();
     var midday = new Date(key + 'T12:00:00Z');
@@ -1268,18 +1379,107 @@
       return;
     }
     var now = simNow();
+    // KOs beyond the 7-day window are hidden outright (no wall of locked
+    // rows to go nuts on). A matchday that hasn't opened at all shows a
+    // single "opens on" card instead.
+    var visible = state.matches.filter(function (m) { return stateOf(m, now) !== 'future'; });
+    if (!visible.length) {
+      var firstKo = koOf(state.matches[0]);
+      var opens = firstKo ? new Date(firstKo.getTime() - EDIT_WINDOW_HOURS * 3600000) : null;
+      var opensLabel = opens
+        ? opens.toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', timeZone:'Europe/London' })
+        : 'one week before kick-off';
+      fixtures.innerHTML = emptyStateHTML(
+        'Predictions not open yet',
+        'This matchday opens on ' + opensLabel + ' — one week before kick-off.'
+      );
+      renderedStateSig = stateSig(now);
+      return;
+    }
     // Soft hero: the fan's own club's fixture leads the matchday as a large
-    // card; everything else renders below it, always available.
+    // card; the rest are boxed together by kick-off time, one countdown per
+    // KO group (e.g. 12:30 / 15:00 / 17:30 on the same day = 3 boxes).
     var reg = state.registration;
     var own = null, rest = [];
-    state.matches.forEach(function (m) {
+    visible.forEach(function (m) {
       if (!own && isOwnTeamMatch(m, reg)) own = m;
       else rest.push(m);
     });
+    var groups = [], byKo = {};
+    rest.forEach(function (m) {
+      var k = fmtBST(koOf(m)) || 'TBC';
+      if (!byKo[k]) { byKo[k] = []; groups.push(k); }
+      byKo[k].push(m);
+    });
     fixtures.innerHTML =
       (own ? rowHTML(own, now, true) : '') +
-      rest.map(function (m) { return rowHTML(m, now, false); }).join('');
+      groups.map(function (k) {
+        return '<div class="nlsp__kogroup">' +
+          '<div class="nlsp__kohead">' +
+            '<span>' + $h(k) + ' kick-off</span>' +
+            koGroupStatusHTML(byKo[k], now) +
+          '</div>' +
+          byKo[k].map(function (m) { return rowHTML(m, now, false); }).join('') +
+        '</div>';
+      }).join('');
+    renderedStateSig = stateSig(now);
     wireRow();
+  }
+
+  // One status chip per KO group: countdown to the cutoff while editable,
+  // then Locked / Live / Full time. Postponed/abandoned members don't drive
+  // the group state unless the whole group is void.
+  function koGroupStatusHTML(list, now) {
+    var rep = null;
+    for (var i = 0; i < list.length; i++) {
+      var s = stateOf(list[i], now);
+      if (s !== 'postponed' && s !== 'abandoned') { rep = s; break; }
+    }
+    if (rep === 'pre') {
+      var cut = cutoffOf(list[0]);
+      return '<span class="nlsp__countdown" data-cutoff="' + (cut ? cut.toISOString() : '') + '">' +
+        'Locks in ' + countdownLabel(cut ? cut - now : null) + '</span>';
+    }
+    if (rep === 'locked') return '<span class="nlsp__kostatus">Locked</span>';
+    if (rep === 'live')   return '<span class="nlsp__kostatus is-live">Live</span>';
+    if (rep === 'post')   return '<span class="nlsp__kostatus">Full time</span>';
+    return '<span class="nlsp__kostatus">Postponed</span>';
+  }
+
+  // Signature of every match's state at 'now' — the ticker re-renders when
+  // this changes (a cutoff or KO crossed) and only refreshes countdown text
+  // otherwise.
+  var renderedStateSig = '';
+  function stateSig(now) {
+    return state.matches.map(function (m) { return stateOf(m, now); }).join(',');
+  }
+  var tickN = 0;
+  function startTicker() {
+    setInterval(function () {
+      if (main.hidden) return;
+      tickN++;
+      var now = simNow();
+      // While play is in flight on the visible matchday, refetch from NLS
+      // every 2 minutes so matchPeriod/scores settle without a reload.
+      var inFlight = state.matches.some(function (m) {
+        var s = stateOf(m, now);
+        return s === 'live' || s === 'locked';
+      });
+      if (inFlight && tickN % 4 === 0) {
+        fetchFixtures().then(function (ms) {
+          state.allMatches = ms;
+          teamCompCache = null;
+          recomputeMatchday();
+          renderAll();
+        }).catch(function () {});
+        return;
+      }
+      if (stateSig(now) !== renderedStateSig) { recomputeMatchday(); renderAll(); return; }
+      Array.prototype.forEach.call(fixtures.querySelectorAll('[data-cutoff]'), function (el) {
+        var iso = el.getAttribute('data-cutoff');
+        if (iso) el.textContent = 'Locks in ' + countdownLabel(new Date(iso) - now);
+      });
+    }, 30000);
   }
 
   function rowHTML(m, now, hero) {
@@ -1306,6 +1506,18 @@
       meta = '<span class="nlsp__lock">Opens ' + $h(dayLabel) + '</span>';
     } else if (s === 'pre') {
       meta = '<span>' + $h(fmtBST(ko)) + '</span>';
+      // The hero sits outside the KO group boxes, so it carries its own
+      // countdown chip; grouped rows get one shared chip in the group head.
+      if (hero) {
+        var cut = cutoffOf(m);
+        meta += '<span class="nlsp__countdown" data-cutoff="' + (cut ? cut.toISOString() : '') + '" style="margin-left:auto;">' +
+          'Locks in ' + countdownLabel(cut ? cut - now : null) + '</span>';
+      }
+    } else if (s === 'locked') {
+      var pickLocked = (p && p.home != null)
+        ? '<span class="nlsp__pickline">Your pick <b>' + p.home + '–' + p.away + '</b></span>'
+        : '<span class="nlsp__pickline" style="opacity:.7;">No prediction</span>';
+      meta = '<span class="nlsp__lock">Locked</span><span>' + $h(fmtBST(ko)) + ' kick-off</span>' + pickLocked;
     } else if (s === 'live') {
       // Pulse dot + LIVE label + your prediction inline
       var pickLive = (p && p.home != null) ? '<span class="nlsp__pickline">Prediction <b>' + p.home + '–' + p.away + '</b></span>' : '';
@@ -1339,16 +1551,22 @@
     function scoreCell(side) {
       var real, cls = 'nlsp__teamscore';
       if (s === 'pre' && (preState === 'empty' || preState === 'editing')) {
-        var fromDraft = (d && d[side] != null) ? d[side] : (p && p[side] != null ? p[side] : '');
-        return '<div class="' + cls + '">' +
-          '<input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="off" placeholder="–" data-side="' + side + '" data-m="' + $h(m.id) + '" value="' + $h(fromDraft) + '" aria-label="' + $h((side === 'home' ? a.homeTeam : a.awayTeam).name + ' score') + '">' +
+        // Stepper, buttons only — no free text (24 keyboards per matchday is
+        // a faff on a phone). Starts at 0; − greys at 0, + greys at 9. A row
+        // only counts as set once the fan has tapped it (see wireRow).
+        var val = (d && d[side] != null) ? d[side] : (p && p[side] != null ? p[side] : 0);
+        var teamName_ = (side === 'home' ? a.homeTeam : a.awayTeam).name;
+        return '<div class="nlsp__step" data-side="' + side + '" data-m="' + $h(m.id) + '">' +
+          '<button type="button" data-step="-1" aria-label="' + $h(teamName_ + ' score down') + '"' + (val <= 0 ? ' disabled' : '') + '>&minus;</button>' +
+          '<span class="nlsp__stepval">' + val + '</span>' +
+          '<button type="button" data-step="1" aria-label="' + $h(teamName_ + ' score up') + '"' + (val >= MAX_GOALS ? ' disabled' : '') + '>+</button>' +
         '</div>';
       }
       if (s === 'pre' && preState === 'submitted') {
         return '<div class="' + cls + ' is-pred">' + (p && p[side] != null ? p[side] : '–') + '</div>';
       }
-      // live: show user's prediction (muted) since we don't have live scores
-      if (s === 'live') {
+      // locked / live: show user's prediction (muted) — no live scores here
+      if (s === 'locked' || s === 'live') {
         return '<div class="' + cls + ' is-pred">' + (p && p[side] != null ? p[side] : '–') + '</div>';
       }
       if (s === 'future' || s === 'postponed' || s === 'abandoned') {
@@ -1387,14 +1605,41 @@
         '</div>';
     }
 
+    if (hero) {
+      // Showcase card in the fan's club colours — its own component, not a
+      // .nlsp__row, so verdict tints never fight the club background. Shares
+      // scoreCell + the data-* wiring, so steppers/edit work unchanged.
+      var hc = heroColours();
+      var heroSide = function (t, side) {
+        return '<div class="nlsp__heroside">' +
+          crestImg(t.crest, t.name || t.shortName || '') +
+          '<span class="nlsp__heroname">' +
+            '<span class="nlsp__tname-full">'  + $h(t.name || t.shortName || '')  + '</span>' +
+            '<span class="nlsp__tname-short">' + $h(t.shortName || t.name || '') + '</span>' +
+          '</span>' +
+          scoreCell(side) +
+        '</div>';
+      };
+      return '<div class="nlsp__hero-card' + rowMod + '" style="--heroc1:' + hc.c1 + ';--heroc2:' + hc.c2 + ';--herotx:' + hc.tx + ';">' +
+        '<div class="nlsp__hero-top">' +
+          '<span class="nlsp__herotag">Your club</span>' +
+          '<div class="nlsp__meta">' + meta + '</div>' +
+        '</div>' +
+        '<div class="nlsp__heromatch">' +
+          heroSide(a.homeTeam, 'home') +
+          '<span class="nlsp__herov">v</span>' +
+          heroSide(a.awayTeam, 'away') +
+        '</div>' +
+        rowAffordance +
+      '</div>';
+    }
+
     var rowCls = 'nlsp__row';
-    if (hero) rowCls += ' is-hero';
     if (s === 'live') rowCls += ' is-live';
     if (preState === 'editing') rowCls += ' is-editing';
     rowCls += rowMod;
 
     return '<div class="' + rowCls + '">' +
-      (hero ? '<div class="nlsp__herotag">Your club</div>' : '') +
       '<div class="nlsp__meta">' + meta + '</div>' +
       teamLine(a.homeTeam, 'home') +
       teamLine(a.awayTeam, 'away') +
@@ -1402,24 +1647,43 @@
     '</div>';
   }
 
+  // Club colours for the hero card, from clubs-meta.json keyed by the NLS
+  // teamID (optaID). Values are validated hex; navy canon fallback.
+  function heroColours() {
+    var fallback = { c1: 'var(--navy)', c2: 'var(--primary)', tx: '#ffffff' };
+    var reg = state.registration;
+    var cols = reg && state.clubColours[reg.teamId];
+    var ok = function (v) { return (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v.trim())) ? v.trim() : null; };
+    var c1 = cols && ok(cols.primary);
+    if (!c1) return fallback;
+    var c2 = (cols && ok(cols.secondary)) || 'var(--navy)';
+    return { c1: c1, c2: c2, tx: pickTextColor(c1) };
+  }
+  function pickTextColor(hex) {
+    var c = String(hex || '').replace('#', '');
+    if (!/^[0-9a-fA-F]{6}$/.test(c)) return '#ffffff';
+    var r = parseInt(c.slice(0, 2), 16), g = parseInt(c.slice(2, 4), 16), b = parseInt(c.slice(4, 6), 16);
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.68 ? 'var(--text)' : '#ffffff';
+  }
+
   function wireRow() {
-    Array.prototype.forEach.call(fixtures.querySelectorAll('input[data-m]'), function (inp) {
-      inp.addEventListener('input', function () {
-        var cleaned = inp.value.replace(/[^0-9]/g, '').slice(0, 2);
-        if (cleaned !== inp.value) inp.value = cleaned;
-        var mid = inp.getAttribute('data-m');
-        var side = inp.getAttribute('data-side');
-        state.drafts[mid] = state.drafts[mid] || {};
-        state.drafts[mid][side] = (cleaned === '' ? null : Math.max(0, Math.min(20, parseInt(cleaned, 10))));
-        renderSubmitbar(); renderStatus();
-      });
-      inp.addEventListener('keydown', function (e) {
-        // Enter on a row in edit mode triggers Save (explicit confirm).
-        if (e.key === 'Enter') {
-          var mid = inp.getAttribute('data-m');
-          if (state.editing[mid]) saveEdited(mid);
-          else inp.blur();
-        }
+    // Stepper buttons. First tap on a row initialises the draft with BOTH
+    // sides at their displayed values, so one tap marks the whole row as
+    // set (the untouched side commits at its shown 0).
+    Array.prototype.forEach.call(fixtures.querySelectorAll('.nlsp__step button[data-step]'), function (b) {
+      b.addEventListener('click', function () {
+        var wrap = b.parentNode;
+        var mid  = wrap.getAttribute('data-m');
+        var side = wrap.getAttribute('data-side');
+        var p = state.predictions[mid];
+        var d = state.drafts[mid] || {};
+        var cur = {
+          home: d.home != null ? d.home : (p && p.home != null ? p.home : 0),
+          away: d.away != null ? d.away : (p && p.away != null ? p.away : 0)
+        };
+        cur[side] = Math.max(0, Math.min(MAX_GOALS, cur[side] + parseInt(b.getAttribute('data-step'), 10)));
+        state.drafts[mid] = cur;
+        renderFixtures(); renderSubmitbar(); renderStatus();
       });
     });
 
@@ -1518,8 +1782,8 @@
     submitb.innerHTML =
       '<div class="nlsp__submitbar">' +
         '<div class="nlsp__submitmsg">' +
-          '<b>' + ready + '/' + await_ids.length + '</b> filled — ' +
-          (canSubmit ? 'ready to submit' : 'fill in every match to submit') +
+          '<b>' + ready + '/' + await_ids.length + '</b> set — ' +
+          (canSubmit ? 'ready to submit' : 'tap + / − on every match to submit') +
         '</div>' +
         '<button class="nlsp__btn" id="nlsp-submit"' + (canSubmit ? '' : ' disabled') +
           ' style="margin-left:auto;">Submit predictions</button>' +
@@ -1942,11 +2206,10 @@
   }
 
   (function boot() {
-    // Paint sponsor + footer immediately — brand frame visible during loading
+    // Paint the header immediately — brand frame visible during loading
     // and signed-out states. Safe to call here because all helpers are now
     // defined.
     renderSponsor();
-    renderFooter();
     renderGateLoading();
     waitForJwt(4000).then(function (claims) {
       if (!claims || !claims.id) { renderGateSignIn(); return; }
@@ -1977,7 +2240,12 @@
         fbDb   = firebase.database(fbApp);
         return fbAuth.signInAnonymously();
       }).then(function () { state.fbAuthed = true; }),
-      fetchFixtures().then(function (ms) {
+      // clubs-meta first: it supplies the current seasonID for the fixtures
+      // query plus the club colours for the hero card. Failure is soft —
+      // SEASON_ID fallback and navy hero.
+      loadClubsMeta().then(function () {
+        return fetchFixtures();
+      }).then(function (ms) {
         state.allMatches = ms;
         teamCompCache = null; // invalidate so it rebuilds from fresh data
       })
@@ -1985,6 +2253,7 @@
       hideBanner();
       recomputeMatchday();
       listenAll();
+      startTicker();
     }).catch(function (err) {
       showBanner('Could not start the predictor: ' + (err && err.message ? err.message : err), 'err');
     });
