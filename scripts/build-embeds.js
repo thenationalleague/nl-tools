@@ -37,6 +37,13 @@ const EMBEDS = [
     globalFlag: '__nlScorePredictorMounted',
     name: 'Score Predictor',
   },
+  {
+    src: 'embeds/motm.html',
+    out: 'embeds/motm.js',
+    mountAttr: 'data-nl-motm',
+    globalFlag: '__nlMotmMounted',
+    name: 'Man of the Match',
+  },
 ];
 
 // Pull the three parts out of the embed. The embeds follow a fixed shape —
