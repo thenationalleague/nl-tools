@@ -28,6 +28,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write   # exchange the GitHub OIDC token for a Google credential
 
 # A run that overlaps its predecessor would write the same node twice. The
 # newer run has fresher results, so let it cancel the older one.
@@ -53,19 +54,34 @@ jobs:
       - name: Install the Firebase admin SDK
         run: npm install --no-save firebase-admin@^12
 
+      # No key. The NL Google org blocks service-account key creation, so this
+      # reuses the same federation the GA pipeline already uses: GitHub's OIDC
+      # token is exchanged for a short-lived Google credential. The service
+      # account behind it needs Firebase Realtime Database Admin on nl-widgets,
+      # granted in that project's IAM — a cross-project grant, no new pool.
+      - name: Authenticate to Google Cloud
+        id: auth
+        continue-on-error: true
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
       - name: Build and write the leaderboard
         env:
-          # Service-account JSON for the nl-widgets project. A credential:
-          # repository secret only, never committed. Admin access bypasses the
-          # security rules, which is how it writes a node no client may write.
+          # Optional fallback for an environment without federation. If set it
+          # wins; it is a credential, so repository secret only, never
+          # committed. Either way the credential has admin access, which
+          # bypasses the security rules — that is how it writes a node no
+          # client is allowed to write.
           NL_WIDGETS_SA_KEY: ${{ secrets.NL_WIDGETS_SA_KEY }}
         run: |
-          if [ -z "$NL_WIDGETS_SA_KEY" ]; then
-            # Skip rather than fail on the schedule: until the secret is added
-            # this would go red every 15 minutes and train everyone to ignore
-            # a red cross on this repo. A manual run still fails loudly, which
-            # is when someone is actually looking.
-            echo "::warning::NL_WIDGETS_SA_KEY is not set — add the nl-widgets service-account JSON as a repository secret. Skipping."
+          if [ -z "$NL_WIDGETS_SA_KEY" ] && [ "${{ steps.auth.outcome }}" != "success" ]; then
+            # Skip rather than fail on the schedule: until the IAM grant is in
+            # place this would go red every 15 minutes and train everyone to
+            # ignore a red cross on this repo. A manual run still fails loudly,
+            # which is when someone is actually looking.
+            echo "::warning::No Google credential — grant the CI service account Firebase Realtime Database Admin on nl-widgets. Skipping."
             [ "${{ github.event_name }}" = "workflow_dispatch" ] && exit 1
             exit 0
           fi
