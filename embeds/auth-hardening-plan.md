@@ -1,8 +1,9 @@
 # Fan widget auth hardening — plan
 
 **Status:** proposed, not started. Written 02/08/2026; revised the same day
-after Sports Alliance confirmed no verification material is available, so the
-live plan is **§3a (Plan B)**, not §2.
+after Sports Alliance confirmed no verification material is available. The
+live plan is **§3a (Plan B)** — unless the client-secret lead in §3 pans out,
+in which case §2 is buildable after all.
 **Applies to:** `embeds/score-predictor.html`, `embeds/motm.html` (both on the
 shared `nl-widgets` Firebase project).
 **Do this before the widgets are public.** It is not urgent for a preview site.
@@ -88,7 +89,8 @@ doing properly rather than patching around.
 ## 3. Verified identity is not available
 
 **Sports Alliance will not be providing signature verification material**
-(JWKS, shared secret or introspection). Confirmed 02/08/2026.
+(JWKS, shared secret or introspection). Confirmed 02/08/2026. The tokens are
+HS256, so there is no public key to publish even in principle — see below.
 
 Without it, §2 cannot be built safely. A mint endpoint that accepts an
 unverified token is *worse than doing nothing*: anyone could present a forged
@@ -96,20 +98,76 @@ unverified token is *worse than doing nothing*: anyone could present a forged
 exposure into full impersonation. **Do not build the mint endpoint on an
 unverified token.** That is the single most important line in this document.
 
-### One check worth doing before accepting this
+### What the token actually says (checked 02/08/2026)
 
-Discovery endpoints are a convention, not a favour — they are frequently
-already public without the provider being asked. Costs ten seconds:
+Decoded from a live `_gc_sa_sso_access` cookie on thenationalleague.org.uk:
 
 ```
-https://sso.sportsalliance.com/.well-known/openid-configuration
+alg  HS256
+kid  (absent)
+iss  https://sso.sportsalliance.com
+aud  DWaw_FEDJEyQu6ZY4H-cyg
 ```
 
-If that returns JSON containing a `jwks_uri`, everything in §2 is back on the
-table and no cooperation is needed. Also worth a look: the `iss` claim inside
-a real token points at whichever host actually issues it, and
-`signin.thenationalleague.org.uk` is an NL-controlled domain — whoever
-administers it may have more room than "ask Sports Alliance" implies.
+**`HS256` is symmetric.** The token is signed with a shared secret, not a key
+pair, so there is no public half and a JWKS endpoint cannot exist. That
+settles it: no amount of looking for `.well-known/openid-configuration` will
+help, and the splash page returned by `sso.sportsalliance.com` is consistent
+with that.
+
+### The remaining lead — worth chasing before accepting Plan B
+
+`aud` is a **client identifier**, and client identifiers are issued in pairs
+with a client secret. OpenID Connect Core §10.1 specifies that for an ID token
+signed with HS256, **the client secret is the MAC key** — the octets of the
+secret are the signing key.
+
+So the question to ask is not the one that already got a no. It is not "please
+publish a JWKS"; it is:
+
+> Do we already hold a client secret for `DWaw_FEDJEyQu6ZY4H-cyg`, from
+> whenever the NL+ integration was set up?
+
+Check the password manager and the original integration handover before asking
+anyone. If that secret exists and does verify these tokens, **§2 is buildable
+with nothing new from Sports Alliance**.
+
+**Status 02/08/2026:** the Urban Zoo production integration record has been
+located. Its audience matches the token's `aud` and its id matches the tenant
+the widgets already use, so it is the right integration. It carries a `KEY`
+value, and a `SECRET` held behind a one-time share link **which has expired**.
+
+Next steps, in order:
+
+1. ~~Test whether the `KEY` is itself the HS256 MAC key.~~ **Done — it is
+   not.** Verified client-side with Web Crypto against a live token, trying
+   the value both as UTF-8 octets (the interpretation OIDC Core 10.1
+   specifies) and as hex-decoded bytes. Both fail. The `KEY` is a client
+   identifier or API key, not a signing secret. Do not re-test it.
+2. Ask Sports Alliance to **re-send the client secret** for this integration,
+   since the share link expired. Note this is a different request to the one
+   already declined: re-sending a credential they have already issued is
+   routine, where publishing a JWKS endpoint would be new infrastructure.
+   Run the re-sent value through the same client-side test before building
+   anything on it.
+3. Store whatever is recovered in the password manager rather than relying on
+   a share link, and record it in the integration handover.
+
+Do not commit either value to this repository under any circumstances — it is
+public, and for an HS256 token the signing key forges identities as readily as
+it verifies them.
+
+Two caveats:
+
+- **It may not verify.** Some providers sign with an internal key and use the
+  client secret only for token exchange. Test against a real token before
+  building anything on the assumption. If the re-sent secret also fails, that
+  is the answer: verification is not available to us and Plan B (3a) is the
+  plan, permanently.
+- **Symmetric keys mint as well as verify.** Anyone holding that secret can
+  forge a token for any fan. It must live in Cloud Function config only —
+  never in a widget bundle, never in this repo — and be treated as a
+  credential of the same weight as a database password.
 
 **Until one of those turns something up, proceed with §3a instead.**
 
@@ -184,6 +242,54 @@ rather than describing the widgets as secured.
 
 ---
 
+## 3b. Risk assessment — how bad is it really
+
+Written so the decision to launch on Plan B can be made on evidence rather
+than on how alarming the words sound.
+
+### What is actually at stake
+
+First name, surname initial, supported club, football predictions, and a
+free-text note about a player. **No** email addresses, **no** full names
+(closed in v2.5), **no** credentials, nothing financial. It is personal data
+under GDPR — identifiable when combined — but the harm to an individual fan
+from disclosure is close to nil.
+
+The realistic worst case for confidentiality is reputational: a technically
+curious fan noticing and posting about it. Embarrassing on a sponsored
+product; not a notifiable breach in any meaningful sense.
+
+### The integrity risk is the underrated one
+
+Every path is writable by any client for any `jwtId`. Someone could overwrite a
+population of nominations toward one player, or corrupt predictions. If
+nominations inform the Team of the Week article, that is a **manipulable
+editorial input**, and detecting it after the fact would be difficult.
+
+This is a more plausible real-world nuisance than data theft, and it is the
+reason step 5 of Plan B (write-fronting function, rate limits, server-side
+window enforcement) is worth more than its position in the list suggests.
+
+### What is NOT at risk
+
+- NL+ accounts. Firebase data is separate from SSO identity; nothing here
+  grants access to a fan's actual account.
+- Credentials of any kind. None are stored.
+- The `motm-names` attribution names — no client can read them.
+
+### Residual risk after Plan B
+
+An attacker would need a specific fan's `jwtId` **and** a real browser session
+on the site to read or alter that one record, for negligible payoff. Mass
+harvesting and scripted tampering are closed.
+
+That is proportionate for fan-engagement data on a public page. What cannot be
+claimed is that records are **private** — they are not, and no amount of Plan B
+makes them so. Say "casual access is closed and tampering is rate-limited",
+not "the widgets are secure".
+
+---
+
 ## 4. The leaderboard problem
 
 This is the part that makes it more than a day's work, and it is easy to miss.
@@ -212,6 +318,39 @@ leaderboard/
 Written by a scheduled Cloud Function (admin access bypasses rules), read by
 the widget with `".read": "auth != null"` — it contains only what the table
 already displays publicly, so a permissive read there is fine.
+
+### The aggregate must carry NO jwtIds
+
+This is the part that makes it worth doing, and the easy thing to get wrong.
+A row is a rendered result, not a pointer:
+
+```json
+{ "name": "Richard H", "crest": "…", "results": 29, "exacts": 8, "settled": 42 }
+```
+
+Put `jwtId` on a row "just for the you-highlight" and you have republished the
+id list in a public node, which undoes step 2 of Plan B entirely. Everything
+else can be locked down and it will not matter.
+
+**Why this is genuinely safe rather than the same data moved sideways:** the
+leaderboard is *already* a public display. Anyone loading the page sees those
+names and numbers. A public node holding exactly that adds no exposure. What
+it removes is the raw `predictions` tree — every individual scoreline for
+every match, keyed to a person, none of which is ever displayed.
+
+### Highlighting the fan's own row without an id
+
+Include a truncated salted hash of the `jwtId` per row; the client hashes its
+own the same way and matches. It does not reverse, and it does not help
+enumeration — testing a hash requires already holding the `jwtId`.
+
+Do not solve this by putting the real id back.
+
+### Second benefit: it stops the table getting slower
+
+Every client currently downloads the whole predictions tree to compute the
+standings in the browser. That grows with every fan who registers. The
+aggregate is a small fixed-size read that does not.
 
 Consequences to accept:
 - Standings become **periodic**, not live. Every 10–15 minutes is ample; they
