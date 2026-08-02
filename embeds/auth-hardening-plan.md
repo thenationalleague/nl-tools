@@ -1,6 +1,8 @@
 # Fan widget auth hardening — plan
 
-**Status:** proposed, not started. Written 02/08/2026.
+**Status:** proposed, not started. Written 02/08/2026; revised the same day
+after Sports Alliance confirmed no verification material is available, so the
+live plan is **§3a (Plan B)**, not §2.
 **Applies to:** `embeds/score-predictor.html`, `embeds/motm.html` (both on the
 shared `nl-widgets` Firebase project).
 **Do this before the widgets are public.** It is not urgent for a preview site.
@@ -83,31 +85,102 @@ doing properly rather than patching around.
 
 ---
 
-## 3. The question that gates the whole thing
+## 3. Verified identity is not available
 
-**Can we verify the Sports Alliance JWT's signature server-side?**
+**Sports Alliance will not be providing signature verification material**
+(JWKS, shared secret or introspection). Confirmed 02/08/2026.
 
-Everything above depends on it. If the mint endpoint accepts an unverified
-token it is *worse than today*: anyone could forge a `jwtId` and be handed a
-Firebase identity for it, converting a read-exposure into full impersonation.
+Without it, §2 cannot be built safely. A mint endpoint that accepts an
+unverified token is *worse than doing nothing*: anyone could present a forged
+`jwtId` and be handed a Firebase identity for it, turning today's read
+exposure into full impersonation. **Do not build the mint endpoint on an
+unverified token.** That is the single most important line in this document.
 
-What we need from Sports Alliance, in order of preference:
+### One check worth doing before accepting this
 
-1. A **JWKS endpoint** (public keys) plus the expected `iss` and `aud` values.
-   Standard, no shared secrets, keys rotate cleanly. This is the normal answer
-   and almost certainly exists.
-2. A **shared secret** if the tokens are HMAC-signed (`HS256`). Workable, but
-   the secret must live only in function config, never in a widget.
-3. A **token introspection / userinfo endpoint** we can call server-to-server
-   to validate a token and get the claims back. Slower (a network hop per
-   sign-in) but acceptable.
+Discovery endpoints are a convention, not a favour — they are frequently
+already public without the provider being asked. Costs ten seconds:
 
-If none of these are available, the fallback is for NL to run its own exchange
-at `signin.thenationalleague.org.uk` — which is a conversation with whoever
-owns that, not something the widgets can solve.
+```
+https://sso.sportsalliance.com/.well-known/openid-configuration
+```
 
-**Action: ask Sports Alliance for the JWKS URL, issuer and audience before any
-code is written.** The rest of the plan is straightforward; this is the risk.
+If that returns JSON containing a `jwks_uri`, everything in §2 is back on the
+table and no cooperation is needed. Also worth a look: the `iss` claim inside
+a real token points at whichever host actually issues it, and
+`signin.thenationalleague.org.uk` is an NL-controlled domain — whoever
+administers it may have more room than "ask Sports Alliance" implies.
+
+**Until one of those turns something up, proceed with §3a instead.**
+
+---
+
+## 3a. Plan B — mitigation without verified identity
+
+Be clear about what this is: **mitigation, not a fix.** While identity is
+asserted by the client and cannot be checked, no rule can express "this fan's
+own record". These measures reduce what an attacker can reach and how easily,
+they do not make records private in the way §2 would.
+
+Ordered by value for effort:
+
+### 1. Firebase App Check — the biggest single win
+
+Attests that requests come from *your registered app* rather than any client
+holding the (necessarily public) Firebase config. Available today, no Sports
+Alliance involvement, and the project is already on Blaze.
+
+This closes the easiest attack: lifting the config out of the bundle and
+hitting the REST API with a script. It does not stop a determined party
+driving a real browser on the real page, so treat it as raising the cost, not
+as a wall.
+
+### 2. Make the trees non-enumerable
+
+Move `.read` down to `$jwtId` for `users` and `predictions`, exactly as
+already done for `motm`:
+
+```json
+"predictions": { "$jwtId": { ".read": "auth != null", ... } }
+```
+
+You then have to *know* an id to read a record, rather than listing everyone.
+Today `users` and `predictions` hand out the complete set of ids, which is
+what makes the rest trivial.
+
+**Worth establishing first: how guessable is a `jwtId`?** If it is a GUID or
+similar, non-enumerability is a real barrier. If it is short or sequential,
+this step is close to worthless and the effort belongs elsewhere. Decode a
+token and look before building on this.
+
+**Blocked by:** the leaderboard, below.
+
+### 3. Server-computed leaderboard (§4)
+
+Needed for step 2 to be possible at all, and independently valuable: once
+standings are pre-aggregated, nothing needs to read raw predictions, so the
+most detailed personal data in the system stops being publicly readable.
+
+### 4. Store less
+
+The aggregate carries the display names the table needs. Raw records can then
+hold less than they do now. Every field not stored is a field that cannot
+leak.
+
+### 5. Route writes through a function
+
+A Cloud Function fronting writes can enforce the prediction cutoff and the
+nomination window server-side, rate-limit, and reject implausible bulk
+activity. It **cannot** prove identity — a caller can still present someone
+else's `jwtId` — so this is about integrity and business rules, not
+confidentiality. Worth doing after 1–3, not before.
+
+### Residual risk after all of the above
+
+Anyone who obtains a fan's `jwtId` can still read and overwrite that fan's
+records. That is inherent to client-asserted identity and does not go away
+until §2 becomes possible. Say so plainly to whoever needs to sign this off,
+rather than describing the widgets as secured.
 
 ---
 
@@ -155,45 +228,43 @@ behaves. It could be locked down first, independently, as a smaller proof.
 
 ---
 
-## 5. Rollout order
+## 5. Rollout order (Plan B)
 
 Sequenced so nothing breaks in production at any step.
 
-1. **Discovery** — obtain JWKS/issuer/audience from Sports Alliance (§3).
-2. **Enable billing.** Cloud Functions need the Blaze plan to make outbound
-   requests (fetching JWKS is outbound). Cost at this traffic is pennies, but
-   it is a plan change someone has to approve.
-3. **Build the mint endpoint.** Verify signature, expiry, issuer, audience.
-   Mint with `uid = jwtId`. Rate-limit per IP. Log failures without logging
-   token contents.
-4. **Widgets sign in with the custom token**, falling back to anonymous if the
-   endpoint fails, while rules are still permissive. Nothing changes for fans;
-   this proves the token path in production.
-5. **Verify** `auth.uid === jwtId` for real sessions before touching rules.
-6. **Lock Team of the Week first** — `motm` and `motm-names` to ownership
-   rules. Smallest blast radius, no aggregation needed.
-7. **Build and schedule leaderboard aggregation**, and point the Score
-   Predictor at `leaderboard/` instead of the raw trees. Confirm the tables
-   match what they show today.
-8. **Lock `predictions` and `users`** to ownership rules.
-9. **Remove the anonymous fallback** from step 4, so a mint failure is a hard
-   failure rather than a silent downgrade to the weak path.
+1. **Check the discovery endpoint** (§3). If it resolves, stop and build §2
+   instead — it is strictly better than everything below.
+2. **Establish the `jwtId` format.** Decode a live token. This decides whether
+   step 5 is worth doing.
+3. **Enable App Check** on the `nl-widgets` project, in monitor-only mode
+   first so you can see what would be blocked before enforcing.
+4. **Build and schedule leaderboard aggregation** (§4), writing to a
+   read-only `leaderboard/` node.
+5. **Point the Score Predictor at `leaderboard/`** instead of the raw trees.
+   Confirm the tables match what they show today before proceeding.
+6. **Enforce App Check.**
+7. **Move `.read` down a level** on `users` and `predictions`, making the
+   trees non-enumerable. Reversible by reverting the rules document.
+8. **Optionally**, route writes through a function to enforce windows and
+   cutoffs server-side.
 
-Steps 6 and 8 are the only ones that can break a fan's experience, and both
-are reversible by reverting the rules document.
-
----
+Team of the Week needs none of steps 4–5: since v2.5 it reads only
+`motm/{own jwtId}`, so it is already compatible with step 7.
 
 ## 6. Effort and risks
 
-Realistically **several days**, not an afternoon — and dependent on §3
-resolving quickly. Roughly: half a day for the function, half for the widget
-sign-in changes, one to two days for leaderboard aggregation and matching the
-existing table behaviour, plus rules and testing.
+**Plan B is roughly two to three days**: App Check is hours, leaderboard
+aggregation and matching the existing table behaviour is the bulk of it, rules
+and testing the rest. Plan A (§2), if the discovery check ever unblocks it,
+adds about another day on top for the mint endpoint and the widget sign-in
+change.
 
 Risks worth naming up front:
 
-- **Unverifiable SSO tokens** (§3). Blocks everything. Ask first.
+- **Unverifiable SSO tokens** (§3). Already realised — this is why Plan B
+  exists. The residual risk it leaves is permanent until that changes.
+- **App Check is not identity.** It attests the app, not the fan. Do not let
+  it be reported as "the widgets are now secure".
 - **A new runtime dependency.** Today the widgets need only Firebase and NLS.
   After this they also need the mint endpoint; if it is down, nobody can sign
   in. Hence the staged fallback in step 4 and its removal only at step 9.
@@ -211,7 +282,7 @@ Risks worth naming up front:
 ## 7. What not to do
 
 - **Do not** mint tokens without verifying the signature. It turns a read
-  exposure into impersonation.
+  exposure into impersonation. This is the whole reason Plan A is parked.
 - **Do not** put the widgets behind ownership rules before the leaderboard
   aggregation exists — the Score Predictor's tables will silently empty.
 - **Do not** try to fix this with obscurity (hashing ids, renaming paths).
