@@ -455,7 +455,7 @@ Each fixture row goes through these states. The pattern is reusable for MOTM (ju
 | `editing` | User re-opened row | Steppers + inline SAVE / CANCEL controls under the row |
 | `future` | More than 7 days from KO | **Hidden** (whole-matchday "opens on" card if nothing is open) |
 | `locked` | Final 60 min before KO | The user's pick + W/D/L boxes ("Predictions locked" lives in the group head) |
-| `live` | Match in progress | Locked, pulse dot + "Live", show user's prediction |
+| `live` | Match in progress | REAL live score bold (2-min NLS refetch) + minute; tinted verdict footer closes the row: "Your pick 1–2 · On track / Exact so far / Off target" (same strip on the hero) |
 | `post` | Match finished | Final score, verdict pill (Exact score / Right result; wrong = muted tint only) |
 | `postponed` / `abandoned` | API matchPeriod | Greyed, "Prediction voided" |
 
@@ -467,15 +467,17 @@ marks the row "set".
 **W/D/L boxes** (`.nlsp__wdlbox`) — a fixed-width letter chip beside each
 side's score: grey **D** at the default 0–0, flipping to green **W** / red
 **L** as the scoreline moves. Fixed size so rows never widen (an earlier
-"Hartlepool win" text pill did). Shown on pre/locked/live rows and on the
-hero panels; makes the primary scoring metric visible at the point of choice.
+"Hartlepool win" text pill did). Shown on pre/locked rows and the hero panels
+(hidden during live, where the real score would make them misread); makes the
+primary scoring metric visible at the point of choice.
 
 **Hover EDIT pill** sits absolutely on the right edge of the row, opacity 0 → 1 on row hover (always slightly visible on touch). Click → enters `editing` state. SAVE / CANCEL appear inline under the row, never as floating buttons.
 
 ### The hero card (`.nlsp__hero-card`)
 
 The fan's own club's fixture renders as a showcase card above the KO groups:
-a **canon navy top strip** (Your club · KO time · countdown chip), then the
+a **canon navy top strip** (KO time · countdown chip — no "Your club" label,
+the club colours say it), then the
 matchup split into **two panels in each club's own colours** — home club's
 primary left, away club's right (clubs-meta.json keyed by `optaID` = NLS
 teamID, navy fallback) — so the opponent's colours always share the card.
