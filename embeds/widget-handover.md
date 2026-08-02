@@ -14,6 +14,11 @@ Read that file alongside this doc. This document explains the *why* and the *inv
 
 ---
 
+> **Auth hardening is outstanding.** Both widgets sign in to Firebase
+> anonymously, so security rules cannot assert record ownership — see
+> [`auth-hardening-plan.md`](auth-hardening-plan.md) for what is exposed and
+> the plan to fix it. Do it before the widgets go public.
+
 ## 1. Embed delivery model
 
 - One single HTML file, copy-pasted into the CMS's "custom HTML" block on a page on `thenationalleague.org.uk` (Urban Zoo CMS).
