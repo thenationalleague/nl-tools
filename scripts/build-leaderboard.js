@@ -34,8 +34,12 @@
  *   node scripts/build-leaderboard.js            # compute and write
  *   node scripts/build-leaderboard.js --dry-run  # compute and print, no write
  *
- * Auth: NL_WIDGETS_SA_KEY holds a service-account JSON for the nl-widgets
- * project. It is a credential — GitHub Actions secret only, never the repo.
+ * Auth: Workload Identity Federation by default — the Action swaps its GitHub
+ * OIDC token for a short-lived Google credential, so no key exists to leak.
+ * The NL Google org blocks service-account key creation, which is the right
+ * policy; this works with it. NL_WIDGETS_SA_KEY (a pasted service-account
+ * JSON) is still honoured where federation is unavailable, and if used it is a
+ * credential — Actions secret only, never the repo.
  */
 
 'use strict';
@@ -268,13 +272,26 @@ async function main() {
   const matches = await fetchFixtures(seasonId);
   console.log('fixtures: ' + matches.length + ' (season ' + seasonId + ')');
 
+  /* Two ways in, and the keyless one is the default because the NL Google org
+     blocks service-account key creation — which is the right policy, so this
+     works with it rather than asking for an exception.
+
+     Workload Identity Federation: the Action exchanges its GitHub OIDC token
+     for a short-lived Google credential, and firebase-admin picks it up as
+     Application Default Credentials. Nothing long-lived exists to leak.
+
+     A pasted service-account JSON is still honoured if NL_WIDGETS_SA_KEY is
+     set, for an environment where federation is not available. */
   const admin = require('firebase-admin');
   const raw = process.env.NL_WIDGETS_SA_KEY;
-  if (!raw) throw new Error('NL_WIDGETS_SA_KEY is not set — cannot reach the nl-widgets database');
   admin.initializeApp({
-    credential: admin.credential.cert(JSON.parse(raw)),
+    credential: raw
+      ? admin.credential.cert(JSON.parse(raw))
+      : admin.credential.applicationDefault(),
     databaseURL: DB_URL,
+    projectId: 'nl-widgets',
   });
+  console.log('auth: ' + (raw ? 'service-account key' : 'workload identity federation'));
   const db = admin.database();
 
   const [usersSnap, predsSnap] = await Promise.all([
