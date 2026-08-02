@@ -14,8 +14,10 @@
      - Voting window: opens at FULL TIME (NLS matchPeriod), closes KO+24h.
        A match that never reaches full time never opens for voting.
      - Nothing is written to users/{jwtId}: that node is SHARED with the
-       Score Predictor, which locks a club there for the season. The
-       nomination carries fanName instead.
+       Score Predictor, which locks a club there for the season.
+     - A quote's attribution name goes to motm-names/{jwtId}, which grants
+       clients NO read. It is not put on the nomination, because motm is
+       client-readable and jwtIds are harvestable from users/predictions.
      - One nomination per fan per match: motm/{jwtId}/{matchId} is written
        with .set(), so changing a pick REPLACES the previous one rather
        than accumulating.
@@ -49,9 +51,13 @@
                          loosened — capable of overwriting the
                          predictor's locked club. The fan's name now
                          rides on the nomination as fanName, which is
-                         where an article needs it anyway — and ONLY
-                         when a note is given, since writing a note is
-                         the act of consent. The widget now subscribes
+                         a client-unreadable path (motm-names/{jwtId}),
+                         and ONLY when a note is given, since writing a
+                         note is the act of consent. It is deliberately
+                         NOT on the nomination: motm is client-readable
+                         and jwtIds are harvestable from the users and
+                         predictions trees, so a name there could be
+                         collected by anyone signed in. The widget now subscribes
                          to motm/{jwtId} rather than the whole motm
                          tree (nothing needs it since the standings
                          went), so rules move .read down a level and
@@ -1753,15 +1759,29 @@
     // either be denied by that lock or, if the rules were loosened, silently
     // overwrite the predictor's locked club.
     //
-    // The name is stored ONLY alongside a note. Writing a note is the point
-    // at which the fan consents to being named, so a nomination with no note
-    // carries no identity beyond the jwtId that keys it.
-    if (note) {
-      payload.note = note;
-      if (state.user.fullName) payload.fanName = state.user.fullName;
-    }
+    // The name is NOT stored on the nomination. motm/$jwtId is readable by
+    // any signed-in client, and jwtIds are harvestable from the users and
+    // predictions trees, so a name here would be a name anyone could
+    // collect. It goes to motm-names/{jwtId} instead, which grants no read
+    // to clients at all — only the console/admin SDK, which is who needs it.
+    // Written only alongside a note, since writing a note is the act of
+    // consenting to be named.
+    if (note) payload.note = note;
     fbDb.ref('motm/' + state.user.id + '/' + mid).set(payload)
       .then(function () {
+        // Best-effort, and deliberately after the nomination: a failure here
+        // costs the article an attribution, not the fan their nomination.
+        // Logged rather than swallowed so a rules mismatch is diagnosable.
+        if (note && state.user.fullName) {
+          fbDb.ref('motm-names/' + state.user.id).set({
+            fanName:   state.user.fullName,
+            updatedAt: firebase.database.ServerValue.TIMESTAMP
+          }).catch(function (err) {
+            if (window.console && console.warn) {
+              console.warn('[Team of the Week] could not store attribution name:', err && err.message);
+            }
+          });
+        }
         delete state.drafts[mid];
         state.pendingMid = null;
         setBannerOK('Nomination saved');

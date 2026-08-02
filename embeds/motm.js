@@ -1005,15 +1005,29 @@
         // either be denied by that lock or, if the rules were loosened, silently
         // overwrite the predictor's locked club.
         //
-        // The name is stored ONLY alongside a note. Writing a note is the point
-        // at which the fan consents to being named, so a nomination with no note
-        // carries no identity beyond the jwtId that keys it.
-        if (note) {
-          payload.note = note;
-          if (state.user.fullName) payload.fanName = state.user.fullName;
-        }
+        // The name is NOT stored on the nomination. motm/$jwtId is readable by
+        // any signed-in client, and jwtIds are harvestable from the users and
+        // predictions trees, so a name here would be a name anyone could
+        // collect. It goes to motm-names/{jwtId} instead, which grants no read
+        // to clients at all — only the console/admin SDK, which is who needs it.
+        // Written only alongside a note, since writing a note is the act of
+        // consenting to be named.
+        if (note) payload.note = note;
         fbDb.ref('motm/' + state.user.id + '/' + mid).set(payload)
           .then(function () {
+            // Best-effort, and deliberately after the nomination: a failure here
+            // costs the article an attribution, not the fan their nomination.
+            // Logged rather than swallowed so a rules mismatch is diagnosable.
+            if (note && state.user.fullName) {
+              fbDb.ref('motm-names/' + state.user.id).set({
+                fanName:   state.user.fullName,
+                updatedAt: firebase.database.ServerValue.TIMESTAMP
+              }).catch(function (err) {
+                if (window.console && console.warn) {
+                  console.warn('[Team of the Week] could not store attribution name:', err && err.message);
+                }
+              });
+            }
             delete state.drafts[mid];
             state.pendingMid = null;
             setBannerOK('Nomination saved');
