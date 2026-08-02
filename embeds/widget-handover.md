@@ -536,7 +536,9 @@ available below.
 
 ## 19. Submit / save / reset
 
-- **Bulk submit is WYSIWYG** (`#…submitbar`, "X/12 set") — always enabled; every open match is written at its displayed value, which makes 0–0 a first-class pick (just leave the row alone). A confirm modal fires only when EVERY submitted fixture is an untouched 0–0 and there's more than one — partial submits go through silently, and untouched rows stay editable per-row until each match's own 60-min cutoff. One RTDB `.update()` writes all rows in one batch.
+- **Bulk submit is WYSIWYG** (`#…submitbar`, "Submit N predictions") — always enabled; every open match is written at its displayed value, which makes 0–0 a first-class pick (just leave the row alone). Untouched rows stay editable per-row until each match's own 60-min cutoff. One RTDB `.update()` writes all rows in one batch.
+- **Submit has no confirm step.** It writes straight through. Predictions stay editable until each match's own 60-min cutoff, so submitting is a lock-in rather than a commitment, and a modal in front of a reversible action is ceremony you'd hit every matchday. A confirm-with-review-list was built and removed (v3.2 → v3.3) — don't rebuild it without a reason that survives "but they can just edit it".
+- There is deliberately **no "X/12 set" counter** either: it counted rows the fan had *tapped*, so a deliberate 0–0 read as "11/12 set" and then submitted 12. Don't reinstate it.
 - **Per-row save** — when re-opening a submitted row, SAVE / CANCEL controls. Save is explicit (not blur-to-save), because blur was too implicit and the user wanted a clear confirm.
 - **Reset all** — small underlined "Reset all predictions" link between fixtures and leaderboard. Only shown when every match is still pre-KO. Custom in-widget confirm modal (not `window.confirm()`). Reset via per-child `null` update, not parent `.remove()`.
 
