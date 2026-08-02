@@ -132,6 +132,27 @@ Check the password manager and the original integration handover before asking
 anyone. If that secret exists and does verify these tokens, **§2 is buildable
 with nothing new from Sports Alliance**.
 
+**Status 02/08/2026:** the Urban Zoo production integration record has been
+located. Its audience matches the token's `aud` and its id matches the tenant
+the widgets already use, so it is the right integration. It carries a `KEY`
+value, and a `SECRET` held behind a one-time share link **which has expired**.
+
+Next steps, in order:
+
+1. Test whether the `KEY` is itself the HS256 MAC key, against a real token.
+   This can be done entirely client-side with Web Crypto — nothing needs to
+   leave the machine, and no server is required to answer it.
+2. If it is not, ask Sports Alliance to **re-send the client secret** for this
+   integration. Note this is a different request to the one already declined:
+   re-sending a credential they have already issued is routine, where
+   publishing a JWKS endpoint would be new infrastructure.
+3. Store whatever is recovered in the password manager rather than relying on
+   a share link, and record it in the integration handover.
+
+Do not commit either value to this repository under any circumstances — it is
+public, and for an HS256 token the signing key forges identities as readily as
+it verifies them.
+
 Two caveats:
 
 - **It may not verify.** Some providers sign with an internal key and use the
