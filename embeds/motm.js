@@ -250,7 +250,6 @@
         allMatches: [],
         matches: [],        // user-team-only matches for selected matchday (usually 1)
         registration: null,
-        allVotesRaw: {},    // { jwtId: { matchId: { playerId, ... } } }
         myVotes: {},        // { matchId: vote }
         drafts: {},         // { matchId: playerId } — pending unsaved pick
         editing: {},        // { matchId: true } — re-open submitted vote
@@ -353,13 +352,9 @@
       function recomputeMatch() {
         var m = votableMatch();
         state.matches = m ? [m] : [];
-        recomputeMyVotes();
         if (m) ensurePlayers(m.id);
       }
-      function recomputeMyVotes() {
-        if (!state.user) return;
-        state.myVotes = state.allVotesRaw[state.user.id] || {};
-      }
+
 
       // ---------- match state ----------
       function dateOf(m) {
@@ -1003,14 +998,20 @@
           teamId:      p.teamId,
           submittedAt: firebase.database.ServerValue.TIMESTAMP
         };
-        // The fan's name rides on the nomination rather than on a users/ record.
-        // Two reasons: a quote and its attribution belong together for whoever
-        // writes the article, and users/{jwtId} is SHARED with the Score
-        // Predictor, which locks a club there for the season — writing to it
-        // from here would either be denied by that lock or, if the rules were
-        // loosened, silently overwrite the predictor's locked club.
-        if (state.user.fullName) payload.fanName = state.user.fullName;
-        if (note) payload.note = note;
+        // The fan's name rides on the nomination rather than on a users/ record:
+        // a quote and its attribution belong together for whoever writes the
+        // article, and users/{jwtId} is SHARED with the Score Predictor, which
+        // locks a club there for the season — writing to it from here would
+        // either be denied by that lock or, if the rules were loosened, silently
+        // overwrite the predictor's locked club.
+        //
+        // The name is stored ONLY alongside a note. Writing a note is the point
+        // at which the fan consents to being named, so a nomination with no note
+        // carries no identity beyond the jwtId that keys it.
+        if (note) {
+          payload.note = note;
+          if (state.user.fullName) payload.fanName = state.user.fullName;
+        }
         fbDb.ref('motm/' + state.user.id + '/' + mid).set(payload)
           .then(function () {
             delete state.drafts[mid];
@@ -1069,9 +1070,8 @@
       // load, so there is no users/ subscription and nothing to wait for before
       // the UI can render.
       function listenAll() {
-        fbDb.ref('motm').on('value', function (snap) {
-          state.allVotesRaw = snap.val() || {};
-          recomputeMyVotes();
+        fbDb.ref('motm/' + state.user.id).on('value', function (snap) {
+          state.myVotes = snap.val() || {};
           if (!main.hidden) {
             // Don't yank focus from a user mid-vote (textarea / player tap).
             // Their own save path re-renders explicitly when the write returns.
