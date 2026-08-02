@@ -39,6 +39,13 @@
        ?sim=off          → real clock, bar hidden (explicit form)
 
      Changelog:
+       02/08/2026  v3.2  Review list reads like a results list: club
+                         crests + clubs-meta short names ("Fylde", not
+                         "FYL"), home side right-aligned into the
+                         scoreline, away side left-aligned out of it,
+                         and a matchday + division header above the
+                         list. Untouched rows tint their score chip
+                         amber with the "not set" flag under it.
        02/08/2026  v3.1  Submit is now review-then-confirm: the "x/y set"
                          counter is gone (it counted TAPPED rows, so a
                          deliberate 0–0 read as 11/12 and then submitted
@@ -658,37 +665,68 @@
 
   /* Review list inside the submit confirm — what will actually be saved.
      Scrolls inside the modal so a 12-match card never runs off a phone. */
+  #nlPredictor .nlsp__reviewhead {
+    margin:10px 0 0;
+    font-size:11px; text-transform:uppercase; letter-spacing:1px;
+    color:var(--text-muted);
+    font-weight:800; font-variation-settings:'wght' 800;
+  }
   #nlPredictor .nlsp__review {
     max-height:46vh; overflow-y:auto;
-    margin:12px 0 4px;
+    margin:6px 0 4px;
     border-top:1px solid var(--border); border-bottom:1px solid var(--border);
   }
+  /* Results-list layout: home side right-aligned into the scoreline, away
+     side left-aligned out of it, so the scores form a clean centre column. */
   #nlPredictor .nlsp__reviewrow {
-    display:grid; grid-template-columns:1fr auto 1fr 56px;
-    align-items:center; gap:8px;
-    padding:7px 2px;
+    display:grid; grid-template-columns:1fr auto 1fr;
+    align-items:center; gap:6px;
+    padding:7px 0;
     font-size:13px;
-    font-weight:800; font-variation-settings:'wght' 800;
+    font-weight:700; font-variation-settings:'wght' 700;
     font-variant-numeric:tabular-nums;
   }
   #nlPredictor .nlsp__reviewrow + .nlsp__reviewrow { border-top:1px solid var(--off-white); }
-  /* Both codes sit left in their column, so the code/score/code trio reads
-     as one tight unit rather than being stretched apart by the grid. */
-  #nlPredictor .nlsp__reviewrow .nlsp__reviewcode { color:var(--text); }
-  #nlPredictor .nlsp__reviewrow .nlsp__reviewscore {
-    min-width:52px; text-align:center;
-    padding:2px 8px; border-radius:4px;
+  /* Sized so the longest names in the league ("Walton & Hersham",
+     "Hemel Hempstead") still fit on a 360px phone rather than ellipsing. */
+  #nlPredictor .nlsp__reviewteam {
+    display:flex; align-items:center; gap:5px; min-width:0;
+    color:var(--text);
+  }
+  #nlPredictor .nlsp__reviewteam.is-home { justify-content:flex-end; text-align:right; }
+  #nlPredictor .nlsp__reviewteam.is-away { justify-content:flex-start; }
+  #nlPredictor .nlsp__reviewteam img {
+    width:18px; height:18px; flex:none; object-fit:contain;
+  }
+  #nlPredictor .nlsp__reviewname {
+    font-size:12px;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  #nlPredictor .nlsp__reviewmid {
+    display:flex; flex-direction:column; align-items:center; gap:2px;
+  }
+  #nlPredictor .nlsp__reviewscore {
+    min-width:44px; text-align:center;
+    padding:2px 6px; border-radius:4px;
     background:var(--off-white); color:var(--text);
     font-weight:900; font-variation-settings:'wght' 900;
   }
-  #nlPredictor .nlsp__reviewrow .nlsp__reviewnote {
-    text-align:right;
-    font-size:10px; text-transform:uppercase; letter-spacing:.6px;
+  #nlPredictor .nlsp__reviewnote {
+    font-size:9px; text-transform:uppercase; letter-spacing:.6px;
     color:var(--amber);
     font-weight:800; font-variation-settings:'wght' 800;
   }
-  #nlPredictor .nlsp__reviewrow.is-untouched .nlsp__reviewcode,
+  #nlPredictor .nlsp__reviewrow.is-untouched .nlsp__reviewteam,
   #nlPredictor .nlsp__reviewrow.is-untouched .nlsp__reviewscore { color:var(--text-muted); }
+  #nlPredictor .nlsp__reviewrow.is-untouched .nlsp__reviewscore { background:var(--amber-light); }
+  /* Small phones: tighten enough that even a Walton & Hersham v Hemel
+     Hempstead tie shows both names in full rather than ellipsing. */
+  @media (max-width:380px) {
+    #nlPredictor .nlsp__reviewname { font-size:11px; }
+    #nlPredictor .nlsp__reviewteam img { width:16px; height:16px; }
+    #nlPredictor .nlsp__reviewteam { gap:4px; }
+    #nlPredictor .nlsp__reviewscore { min-width:40px; padding:2px 5px; }
+  }
 
   /* Custom confirm modal */
   #nlPredictor .nlsp__modal[hidden] { display:none; }
@@ -701,7 +739,7 @@
   #nlPredictor .nlsp__modal-card {
     background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
     box-shadow:0 12px 36px rgba(10,22,40,.25);
-    padding:22px 24px; max-width:380px; width:100%;
+    padding:22px 18px; max-width:400px; width:100%;
     font-family:'carbona-variable','carbona',sans-serif;
   }
   #nlPredictor .nlsp__modal-card h3 {
@@ -2082,9 +2120,21 @@
   // The review list — every fixture going in, at the value it will be saved
   // at. Untouched rows are shown and flagged rather than hidden: they submit
   // as 0–0, so that is exactly what the fan needs to see before confirming.
+  // Laid out like a results list: home name right-aligned into the score,
+  // away name left-aligned out of it, crests flanking the scoreline.
   function submitReviewHTML(ids) {
     var byId = {};
     state.matches.forEach(function (m) { byId[m.id] = m; });
+
+    var side = function (t, isHome) {
+      var name = $h(clubShort(t.teamID, t.shortName || t.name));
+      var crest = crestImg(t.crest, t.name || t.shortName || '', 20);
+      return '<span class="nlsp__reviewteam is-' + (isHome ? 'home' : 'away') + '">' +
+        (isHome ? '<span class="nlsp__reviewname">' + name + '</span>' + crest
+                : crest + '<span class="nlsp__reviewname">' + name + '</span>') +
+      '</span>';
+    };
+
     var rows = ids.map(function (mid) {
       var m = byId[mid];
       if (!m) return '';
@@ -2093,13 +2143,27 @@
       var set = !!(d && d.home != null && d.away != null);
       var hs = set ? d.home : 0, as = set ? d.away : 0;
       return '<div class="nlsp__reviewrow' + (set ? '' : ' is-untouched') + '">' +
-        '<span class="nlsp__reviewcode">' + $h(clubCode(a.homeTeam.teamID, a.homeTeam.shortName || a.homeTeam.name)) + '</span>' +
-        '<span class="nlsp__reviewscore">' + hs + '–' + as + '</span>' +
-        '<span class="nlsp__reviewcode">' + $h(clubCode(a.awayTeam.teamID, a.awayTeam.shortName || a.awayTeam.name)) + '</span>' +
-        '<span class="nlsp__reviewnote">' + (set ? '' : 'not set') + '</span>' +
+        side(a.homeTeam, true) +
+        '<span class="nlsp__reviewmid">' +
+          '<span class="nlsp__reviewscore">' + hs + '–' + as + '</span>' +
+          (set ? '' : '<span class="nlsp__reviewnote">not set</span>') +
+        '</span>' +
+        side(a.awayTeam, false) +
       '</div>';
     }).join('');
-    return '<div class="nlsp__review">' + rows + '</div>';
+
+    // Matchday + division header. Every fixture in the view is in the user's
+    // own division (recomputeMatchday filters by comp), so one line covers
+    // the whole list.
+    var key = currentMatchdayKey();
+    var dateLabel = key
+      ? new Date(key + 'T12:00:00Z').toLocaleDateString('en-GB',
+          { weekday:'long', day:'numeric', month:'long', timeZone:'Europe/London' })
+      : '';
+    var head = '<div class="nlsp__reviewhead">' + $h(dateLabel) +
+      (dateLabel ? ' · ' : '') + $h(compName(userCompId())) + '</div>';
+
+    return head + '<div class="nlsp__review">' + rows + '</div>';
   }
 
   // Submit is WYSIWYG: every open match goes in at its displayed value, so a
