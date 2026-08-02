@@ -369,7 +369,7 @@ Match object shape:
 | Value | Meaning | State |
 |---|---|---|
 | `PreMatch` | Not started | `pre` (or `future` if >7 days) |
-| `FirstHalf` / `HalfTime` / `SecondHalf` / `ExtraTime` / `Penalties` | In progress | `live` |
+| `FirstHalf` / `HalfTime` / `SecondHalf` / `ExtraTime` / `Penalties` | In progress | `live` — but only until KO + `STALE_LIVE_MIN` (240 min), then `unresolved` |
 | `FullTime` / `PostMatch` | Finished | `post` |
 | `Postponed` | Postponed | `postponed` — render void, no scoring |
 | `Abandoned` | Abandoned | `abandoned` — render void, no scoring |
@@ -378,9 +378,14 @@ Match object shape:
 
 `matchPeriod` from NLS is **authoritative when present**: `FullTime`/`PostMatch`
 → `post` (score is final), the live periods (`FirstHalf`…`Penalties`) → `live`,
-`Postponed`/`Abandoned` → void. The clock logic is the fallback for `PreMatch`
-and stale snapshots (the widget refetches NLS every 2 min while any visible
-match is `locked`/`live`, so staleness is bounded):
+`Postponed`/`Abandoned` → void. **One exception**: an in-play period is not
+believed indefinitely. A match abandoned mid-game — or a feed that simply stops
+updating — would otherwise sit at "Live" forever and never settle, so past
+`STALE_LIVE_MIN` (240 min after KO, comfortably beyond ET + penalties) the state
+becomes `unresolved`. The clock logic is the fallback for `PreMatch` and stale
+snapshots (the widget refetches NLS every 2 min while any visible match is
+`locked`/`live`/`unresolved`, so staleness is bounded and an `unresolved` match
+heals itself the moment NLS publishes a real final period):
 
 - `future` — KO is >168h (7 days) from now. Predictions not open; **rows hidden** (an "opens on" card shows if the whole matchday is future).
 - `pre` — within 7 days of KO, more than 60 min before KO. Editable.
@@ -455,9 +460,10 @@ Each fixture row goes through these states. The pattern is reusable for MOTM (ju
 | `editing` | User re-opened row | Steppers + inline SAVE / CANCEL controls under the row |
 | `future` | More than 7 days from KO | **Hidden** (whole-matchday "opens on" card if nothing is open) |
 | `locked` | Final 60 min before KO | The user's pick + W/D/L boxes ("Predictions locked" lives in the group head) |
-| `live` | Match in progress | REAL live score bold (2-min NLS refetch) + minute; neutral footer strip closes the row: "Your prediction: 1–2" (no verdict wording — misleading mid-match; same strip on the hero) |
+| `live` | Match in progress | REAL live score bold (2-min NLS refetch). **No meta line** — one footer strip closes the row carrying pulse dot + "Live 67'" + "Prediction: ALD 1–0 FGR" (three-letter codes from clubs-meta). No verdict wording: "on track" misleads when you're 1–0 down having predicted 2–1. Same strip on the hero, which drops its navy header while live. |
 | `post` | Match finished | Final score, verdict pill (Exact score / Right result; wrong = muted tint only) |
 | `postponed` / `abandoned` | API matchPeriod | Greyed, "Prediction voided" |
+| `unresolved` | In-play period still set 240 min after KO | Greyed, "Awaiting result" / "Not counted", scores dashed (an abandoned match's last score is not a result). Keeps polling; becomes `post`/`abandoned`/`postponed` when NLS catches up. |
 
 **Steppers, not free text** — two text inputs per row was 24 keyboard focuses
 per matchday on a phone. `−` disables at 0, `+` disables at 9. The first tap

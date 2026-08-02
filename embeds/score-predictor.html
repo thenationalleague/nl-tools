@@ -39,6 +39,17 @@
        ?sim=off          → real clock, bar hidden (explicit form)
 
      Changelog:
+       02/08/2026  v3.0  Live row collapses to one strip: the meta line is
+                         gone and the footer carries dot + "Live 67'" +
+                         "Prediction: ALD 1–0 FGR" (three-letter codes
+                         from clubs-meta). Club chip uses the clubs-meta
+                         short name ("Forest Green fans"). New
+                         'unresolved' state — an in-play matchPeriod is
+                         no longer believed forever (STALE_LIVE_MIN, 4h
+                         after KO), so an abandoned or stalled match
+                         stops showing as Live, shows "Awaiting result",
+                         scores nothing, and self-heals when NLS
+                         publishes a real final period.
        02/08/2026  v2.9  Leaderboard filters rebuilt: Season / Month /
                          Matchday scope chips (canon chip-group, navy
                          active) with a contextual select for the last
@@ -769,14 +780,26 @@
     font-weight:800; font-variation-settings:'wght' 800;
   }
 
-  /* Live pick footer — neutral strip closing a live row with the
-     prediction. Full-bleed against the row/card edges. */
+  /* Live footer — one strip carrying the live badge, the match minute and
+     the prediction, so a live row needs no meta line above the teams.
+     Full-bleed against the row/card edges. */
   #nlPredictor .nlsp__row.has-foot { padding-bottom:0; }
   #nlPredictor .nlsp__rowfoot {
+    display:flex; align-items:center; gap:6px;
     margin:6px -10px 0; padding:5px 10px;
     font-size:11px; text-transform:uppercase; letter-spacing:.8px;
     font-weight:700; font-variation-settings:'wght' 700;
     background:var(--off-white); color:var(--text-muted);
+  }
+  #nlPredictor .nlsp__rowfoot .nlsp__livedot {
+    flex:none; width:7px; height:7px; border-radius:50%;
+    background:var(--accent-live);
+    animation:nlsp-pulse 1.4s infinite;
+  }
+  #nlPredictor .nlsp__rowfoot .nlsp__footlive { color:var(--green); }
+  /* Separator between the live badge and the prediction */
+  #nlPredictor .nlsp__rowfoot .nlsp__footpick::before {
+    content:'\00b7'; margin-right:6px; color:var(--border);
   }
   #nlPredictor .nlsp__hero-card .nlsp__rowfoot { margin:0; padding:6px 14px; }
 
@@ -928,6 +951,7 @@
   var API_BASE   = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
   var MAX_PAGES  = 10;
   var IN_PLAY_MIN = 105;
+  var STALE_LIVE_MIN = 240;    // past this, an in-play matchPeriod is not believed
   var EDIT_WINDOW_HOURS = 168; // predictions open 7 days before KO
   var CUTOFF_MIN = 60;         // predictions lock 1h before KO
   var MAX_GOALS = 9;           // stepper cap per side
@@ -1018,6 +1042,19 @@
     return d.toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', timeZone:'Europe/London' });
   }
   function teamLabel(t) { return t.shortName || t.name || ''; }
+  // clubs-meta short name ('Forest Green') for a teamID, falling back to the
+  // NLS shortName then the full name.
+  function clubShort(teamId, fallback) {
+    var n = teamId && state.clubNames[teamId];
+    return (n && n.short) || fallback || '';
+  }
+  // clubs-meta three-letter code ('ALD'). Falls back to the first three
+  // letters of whatever name we have so a missing entry still renders.
+  function clubCode(teamId, fallback) {
+    var n = teamId && state.clubNames[teamId];
+    if (n && n.code) return n.code;
+    return String(fallback || '').replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase();
+  }
   function showBanner(msg, kind) {
     banner.className = 'nlsp__banner' + (kind === 'err' ? ' is-err' : kind === 'ok' ? ' is-ok' : '');
     banner.textContent = msg; banner.hidden = false;
@@ -1068,6 +1105,7 @@
     editing: {},
     allUsers: {},
     clubColours: {},        // NLS teamID (optaID) -> {primary, secondary, tertiary} from clubs-meta.json
+    clubNames: {},          // NLS teamID (optaID) -> {short, code} from clubs-meta.json
     seasonId: null,         // current season from clubs-meta.json (fallback: SEASON_ID)
     selectedMatchday: null, // explicit override from the date selector; null = derive
     lbScope: 'season',      // leaderboard time scope: 'season' | 'month' | 'day'
@@ -1174,7 +1212,17 @@
     if (p === 'postponed') return 'postponed';
     if (p === 'abandoned') return 'abandoned';
     if (p === 'fulltime' || p === 'postmatch') return 'post';
-    if (p === 'firsthalf' || p === 'halftime' || p === 'secondhalf' || p === 'extratime' || p === 'penalties') return 'live';
+    if (p === 'firsthalf' || p === 'halftime' || p === 'secondhalf' || p === 'extratime' || p === 'penalties') {
+      // Don't believe an in-play period forever. A match abandoned mid-game
+      // (or a feed that simply stops updating) would otherwise sit at "Live"
+      // indefinitely and never settle. Nothing is still in play STALE_LIVE_MIN
+      // after kick-off, so past that we treat the match as unresolved: shown
+      // as awaiting a result, excluded from scoring, and self-healing the
+      // moment NLS moves it to FullTime, Abandoned or Postponed.
+      var koLive = koOf(m);
+      if (koLive && (now - koLive) / 60000 > STALE_LIVE_MIN) return 'unresolved';
+      return 'live';
+    }
     var ko = koOf(m); if (!ko) return 'unknown';
     var diffMin = (now - ko) / 60000;
     var hoursUntil = -diffMin / 60;
@@ -1266,11 +1314,14 @@
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(function (meta) {
         state.seasonId = (meta && meta.seasons && meta.seasons.current) || null;
-        var map = {};
+        var map = {}, names = {};
         ((meta && meta.clubs) || []).forEach(function (c) {
-          if (c && c.optaID && c.colors) map[c.optaID] = c.colors;
+          if (!c || !c.optaID) return;
+          if (c.colors) map[c.optaID] = c.colors;
+          names[c.optaID] = { short: c.short || c.name || '', code: c.code || '' };
         });
         state.clubColours = map;
+        state.clubNames = names;
       })
       .catch(function () { /* soft-fail: SEASON_ID fallback, navy hero */ });
   }
@@ -1583,6 +1634,7 @@
     if (rep === 'locked') return '<span class="nlsp__kostatus">Predictions locked</span>';
     if (rep === 'live')   return '<span class="nlsp__kostatus is-live">Live</span>';
     if (rep === 'post')   return '<span class="nlsp__kostatus">Full time</span>';
+    if (rep === 'unresolved') return '<span class="nlsp__kostatus">Awaiting results</span>';
     return '<span class="nlsp__kostatus">Postponed</span>';
   }
 
@@ -1601,9 +1653,11 @@
       var now = simNow();
       // While play is in flight on the visible matchday, refetch from NLS
       // every 2 minutes so matchPeriod/scores settle without a reload.
+      // 'unresolved' keeps polling too — that's how a stalled or abandoned
+      // match heals itself once NLS publishes a real final period.
       var inFlight = state.matches.some(function (m) {
         var s = stateOf(m, now);
-        return s === 'live' || s === 'locked';
+        return s === 'live' || s === 'locked' || s === 'unresolved';
       });
       if (inFlight && tickN % 4 === 0) {
         fetchFixtures().then(function (ms) {
@@ -1662,12 +1716,10 @@
         : '<span class="nlsp__pickline" style="opacity:.7;">No prediction</span>';
       meta = (hero ? '<span class="nlsp__lock">Predictions locked</span>' : '') + pickLocked;
     } else if (s === 'live') {
-      // The 2-min NLS refetch gives us the actual live score, so the score
-      // cells show it for real. The meta is just the pulse dot + minute —
-      // the pick and its status live in the verdict footer strip below.
-      var liveMin = (a.formattedMatchTime && a.formattedMatchTime !== "0'") ? a.formattedMatchTime : '';
-      meta = '<span class="nlsp__livedot" aria-hidden="true"></span>' +
-        '<span class="nlsp__livelbl">Live' + (liveMin ? ' ' + $h(liveMin) : '') + '</span>';
+      // No meta row at all — the live badge, the minute and the prediction
+      // all share the one footer strip below, so a live row costs no more
+      // vertical space than a pre-KO one.
+      meta = '';
     } else if (s === 'post') {
       var realH = a.homeTeam.score, realA = a.awayTeam.score;
       var v = (p && p.home != null) ? verdictOf(p.home, p.away, realH, realA) : null;
@@ -1690,6 +1742,12 @@
       rowMod = ' is-void';
     } else if (s === 'abandoned') {
       meta = '<span class="nlsp__voidlbl">Abandoned</span><span class="nlsp__pickline" style="opacity:.7;">Prediction voided</span>';
+      rowMod = ' is-void';
+    } else if (s === 'unresolved') {
+      // In-play period that never moved on — abandoned, or a stalled feed.
+      // Not scored while it sits here; resolves itself on the next fetch
+      // that carries a real final period.
+      meta = '<span class="nlsp__voidlbl">Awaiting result</span><span class="nlsp__pickline" style="opacity:.7;">Not counted</span>';
       rowMod = ' is-void';
     }
 
@@ -1720,7 +1778,9 @@
         real = (side === 'home' ? a.homeTeam : a.awayTeam).score;
         return '<div class="' + cls + '">' + (real != null ? real : '–') + '</div>';
       }
-      if (s === 'future' || s === 'postponed' || s === 'abandoned') {
+      if (s === 'future' || s === 'postponed' || s === 'abandoned' || s === 'unresolved') {
+        // No trustworthy scoreline — an abandoned match's last score is not
+        // a result, so don't assert one.
         return '<div class="' + cls + ' is-pred">–</div>';
       }
       // post: show the real final score
@@ -1798,15 +1858,13 @@
         '</div>';
       };
       return '<div class="nlsp__hero-card' + rowMod + '">' +
-        '<div class="nlsp__hero-top">' +
-          '<div class="nlsp__meta">' + meta + '</div>' +
-        '</div>' +
+        (meta ? '<div class="nlsp__hero-top"><div class="nlsp__meta">' + meta + '</div></div>' : '') +
         '<div class="nlsp__heromatch">' +
           heroSide(a.homeTeam, 'home') +
           '<span class="nlsp__herov">v</span>' +
           heroSide(a.awayTeam, 'away') +
         '</div>' +
-        (s === 'live' ? livePickFooter(p) : '') +
+        (s === 'live' ? livePickFooter(p, a) : '') +
         rowAffordance +
       '</div>';
     }
@@ -1821,19 +1879,31 @@
       (meta ? '<div class="nlsp__meta">' + meta + '</div>' : '') +
       teamLine(a.homeTeam, 'home') +
       teamLine(a.awayTeam, 'away') +
-      (s === 'live' ? livePickFooter(p) : '') +
+      (s === 'live' ? livePickFooter(p, a) : '') +
       rowAffordance +
     '</div>';
   }
 
 
-  // Neutral strip closing a live row: just the prediction, no verdict —
-  // "on track" reads wrong when you're 1-0 down having predicted 2-1.
-  function livePickFooter(p) {
+  // Neutral strip closing a live row — carries the live badge, the match
+  // minute and the prediction on one line ("LIVE 67' · PREDICTION: ALD 1–0
+  // FGR"). No verdict word: "on track" reads wrong when you're 1-0 down
+  // having predicted 2-1. Team codes make the scoreline readable without
+  // repeating the row above.
+  function livePickFooter(p, a) {
+    var mins = (a.formattedMatchTime && a.formattedMatchTime !== "0'") ? a.formattedMatchTime : '';
+    var live = '<span class="nlsp__livedot" aria-hidden="true"></span>' +
+               '<span class="nlsp__footlive">Live' + (mins ? ' ' + $h(mins) : '') + '</span>';
+    var pick;
     if (!p || p.home == null) {
-      return '<div class="nlsp__rowfoot">No prediction</div>';
+      pick = '<span class="nlsp__footpick">No prediction</span>';
+    } else {
+      var hc = clubCode(a.homeTeam.teamID, a.homeTeam.shortName || a.homeTeam.name);
+      var ac = clubCode(a.awayTeam.teamID, a.awayTeam.shortName || a.awayTeam.name);
+      pick = '<span class="nlsp__footpick">Prediction: ' +
+        $h(hc) + ' ' + p.home + '–' + p.away + ' ' + $h(ac) + '</span>';
     }
-    return '<div class="nlsp__rowfoot">Your prediction: ' + p.home + '–' + p.away + '</div>';
+    return '<div class="nlsp__rowfoot">' + live + pick + '</div>';
   }
 
   // A club's panel colours for the hero card, from clubs-meta.json keyed by
@@ -2195,7 +2265,8 @@
       html += '<div class="nlsp__chipgroup" id="nlsp-lb-club" role="group" aria-label="Club scope">' +
         chip('All clubs', 'data-mine="0"', !state.lbMine) +
         chip(crestImg(state.registration.crestUrl, state.registration.teamName, 16) +
-             $h(state.registration.teamName) + ' fans', 'data-mine="1"', state.lbMine) +
+             $h(clubShort(state.registration.teamId, state.registration.teamName)) + ' fans',
+             'data-mine="1"', state.lbMine) +
       '</div>';
     }
     return html + '</div>';
