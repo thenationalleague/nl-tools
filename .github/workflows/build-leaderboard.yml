@@ -1,0 +1,67 @@
+name: Build predictor leaderboard
+
+# Pre-computes the Score Predictor's leaderboard into the nl-widgets database.
+#
+# The widget currently builds its standings in the browser from `users` and
+# `predictions` read at tree root, and that root read is what makes every fan's
+# id listable. Until a pre-aggregated table exists, the security rules cannot be
+# tightened without both tables going blank — see embeds/auth-hardening-plan.md
+# §4. This job is that table.
+#
+# It writes only what the leaderboard already displays in public: a name, a
+# crest, three numbers. No jwtIds — the script refuses to write if one appears.
+#
+# Standings become periodic rather than live. They only change when matches
+# finish, so a quarter of an hour is well inside the resolution anyone notices.
+# GitHub's scheduler is best-effort and runs late under load; that is acceptable
+# here and would not be for anything a fan is waiting on.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Compute and print without writing to the database'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# A run that overlaps its predecessor would write the same node twice. The
+# newer run has fresher results, so let it cancel the older one.
+concurrency:
+  group: build-leaderboard
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # --no-save, matching render-handbook-pdf: the aggregator is the only
+      # thing in this repo that needs the admin SDK, and it is a large tree.
+      - name: Install the Firebase admin SDK
+        run: npm install --no-save firebase-admin@^12
+
+      - name: Build and write the leaderboard
+        env:
+          # Service-account JSON for the nl-widgets project. A credential:
+          # repository secret only, never committed. Admin access bypasses the
+          # security rules, which is how it writes a node no client may write.
+          NL_WIDGETS_SA_KEY: ${{ secrets.NL_WIDGETS_SA_KEY }}
+        run: |
+          if [ -z "$NL_WIDGETS_SA_KEY" ]; then
+            echo "::error::NL_WIDGETS_SA_KEY is not set — add the nl-widgets service-account JSON as a repository secret."
+            exit 1
+          fi
+          node scripts/build-leaderboard.js ${{ inputs.dry_run && '--dry-run' || '' }}
