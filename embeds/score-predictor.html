@@ -39,6 +39,12 @@
        ?sim=off          → real clock, bar hidden (explicit form)
 
      Changelog:
+       02/08/2026  v3.3  Submit no longer confirms when every row is
+                         set — predictions stay editable to each match's
+                         cutoff, so that was ceremony. The review list
+                         now appears only when rows are unset (they
+                         submit as 0–0 and are indistinguishable from a
+                         deliberate 0–0 afterwards).
        02/08/2026  v3.2  Review list reads like a results list: club
                          crests + clubs-meta short names ("Fylde", not
                          "FYL"), home side right-aligned into the
@@ -2101,15 +2107,15 @@
   }
   // No "x/y set" counter. It counted rows the fan had TAPPED, but submit
   // sends every open fixture at its displayed value — so leaving a genuine
-  // 0–0 pick alone read as "11/12 set" and then submitted 12. The review
-  // modal replaces it: it shows exactly what will be saved, which is the
-  // question the counter was badly answering.
+  // 0–0 pick alone read as "11/12 set" and then submitted 12. The unset-rows
+  // review (see submitAllAwaiting) answers that question properly, and only
+  // when it actually needs asking.
   function renderSubmitbar() {
     var await_ids = awaitingIds();
     if (!await_ids.length) { submitb.innerHTML = ''; return; }
     submitb.innerHTML =
       '<div class="nlsp__submitbar">' +
-        '<button class="nlsp__btn" id="nlsp-submit">Review &amp; submit ' +
+        '<button class="nlsp__btn" id="nlsp-submit">Submit ' +
           await_ids.length + ' prediction' + (await_ids.length === 1 ? '' : 's') +
         '</button>' +
       '</div>';
@@ -2196,17 +2202,19 @@
           if (btn) { btn.disabled = false; btn.textContent = 'Submit predictions'; }
         });
     }
-    // Always review before writing. Every submit is WYSIWYG — untouched rows
-    // go in at 0–0 — so the fan sees the full list exactly as it will be
-    // saved, with the never-tapped rows flagged, and confirms that.
+    // Only interrupt when there's something to warn about. Predictions stay
+    // editable until each match's own cutoff, so confirming a submit where
+    // every row was deliberately set is pure ceremony — it just writes.
+    // Untouched rows are the exception: they go in at 0–0 and afterwards look
+    // identical to a deliberate 0–0, so those get the review list first.
+    if (untouched === 0) { doWrite(); return; }
+
     showConfirm({
-      title:    'Confirm your predictions',
-      message:  untouched > 0
-        ? untouched + ' of ' + ids.length + ' ' + (untouched === 1 ? 'match has' : 'matches have') +
-          ' not been set and will be submitted as 0–0.'
-        : 'These will be saved for this matchday. You can still edit them until each match locks.',
+      title:    'Some matches not set',
+      message:  untouched + ' of ' + ids.length + ' ' + (untouched === 1 ? 'match has' : 'matches have') +
+                ' not been set and will be submitted as 0–0.',
       bodyHtml: submitReviewHTML(ids),
-      confirm:  'Confirm & submit',
+      confirm:  'Submit all',
       cancel:   'Go back'
     }).then(function (ok) { if (ok) doWrite(); });
   }
