@@ -30,6 +30,7 @@
   Storage (RTDB app-data/media-programme/):
     folders/<CODE>/<folderId>  { name, parentId?, createdAt }   parentId = subfolder
     files/<CODE>/<fileId>      { name, folderId, size, contentType, storagePath,
+                                 folderId '_root' = loose at the top of the club,
                                  url, uploadedAt, usedFrom?, usedUntil? }
     trash/<CODE>/<fileId>      { ...file, deletedAt }
     audit/<pushId>             append-only
@@ -376,7 +377,9 @@
     var obj = FILES[code] || {};
     return Object.keys(obj).map(function (id) {
       var f = obj[id]; f = Object.assign({}, f); f.id = id; return f;
-    }).filter(function (f) { return !folderId || f.folderId === folderId; })
+    }).filter(function (f) {
+        return (f.folderId || PP.ROOT_FOLDER) === (folderId || PP.ROOT_FOLDER);
+      })
       .sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
   }
 
@@ -563,7 +566,8 @@
            One quiet line rather than a bordered callout. */
         html += '<div class="drop" id="drop" tabindex="0" role="button">' +
           '<strong>Drop files here</strong> or click to choose' +
-          '<div class="drop__hint">Visible to all 72 clubs \u00b7 nothing confidential</div></div>' +
+          '<div class="drop__hint">' + (here ? esc(here.name) + ' \u00b7 ' : '') +
+          'visible to all 72 clubs \u00b7 nothing confidential</div></div>' +
           '<input type="file" id="fileInput" multiple style="display:none">' +
           '<div id="uploads"></div>';
       }
@@ -766,7 +770,10 @@
   function moveSelected(code) {
     var picked = pickedFiles(code);
     if (!picked.length) return;
-    var options = foldersFor(code).filter(function (f) { return f.id !== view.folderId; });
+    var here = view.folderId || PP.ROOT_FOLDER;
+    var options = [{ id: PP.ROOT_FOLDER, name: 'Top level', depth: 0 }]
+      .concat(foldersFor(code))
+      .filter(function (f) { return f.id !== here; });
     if (!options.length) { NL.toast('There is nowhere else to move them yet', 'info'); return; }
 
     NL.modal({
@@ -982,8 +989,8 @@
   /* ── Upload ───────────────────────────────────────────────────────────── */
 
   function uploadAll(code, fileList) {
-    if (!view.folderId) { NL.toast('Pick a folder first', 'error'); return; }
-    Array.prototype.forEach.call(fileList, function (file) { uploadOne(code, view.folderId, file); });
+    var target = view.folderId || PP.ROOT_FOLDER;
+    Array.prototype.forEach.call(fileList, function (file) { uploadOne(code, target, file); });
   }
 
   function uploadOne(code, folderId, file) {
