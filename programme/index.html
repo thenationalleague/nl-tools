@@ -335,6 +335,19 @@
      nothing in its folder should be visibly, quietly empty. That is the whole
      social mechanism of the page, and it stops working the moment you filter
      them out. Muted, not alarmed: an acknowledgement, not a telling-off. */
+  /* Club colours come from clubs-meta. Validate before they go anywhere near an
+     inline style — the data is ours, but a colour field is one bad edit away
+     from being an attribute-escape, and the cost of checking is nil. */
+  function hex(v, fallback) {
+    return /^#[0-9a-fA-F]{3,8}$/.test(String(v || '')) ? v : fallback;
+  }
+  function bandsHtml(club, cls) {
+    var c = (club && club.colors) || {};
+    return '<span class="' + cls + '">' +
+      '<i style="background:' + hex(c.primary, 'var(--navy)') + '"></i>' +
+      '<i style="background:' + hex(c.secondary, 'var(--primary)') + '"></i></span>';
+  }
+
   function renderDirectory() {
     el('viewClub').style.display = 'none';
     el('viewDir').style.display = 'block';
@@ -343,15 +356,24 @@
     var own = !s.isAdmin && !s.isNL ? BY_CODE[s.code] : null;
     var html = '';
 
+    /* Your own club is the one card you act on rather than browse, so it gets
+       the room and the only primary button on the page. */
     if (own) {
-      var n = fileCount(s.code);
+      var n = fileCount(s.code), last = lastUpload(s.code);
       html += '<div class="sec-head">Your folder' +
         '<span class="sec-head__note">Only your club can upload here. Every other club can see it.</span></div>' +
-        '<div class="dir"><button class="dir__card' + (n ? '' : ' is-empty') + '" data-club="' + esc(s.code) + '">' +
-          PP.crestImgHtml(own.name, 34).replace('<img ', '<img class="dir__crest" ') +
-          '<span class="dir__id"><span class="dir__name">' + esc(own.name) + '</span>' +
-          '<span class="dir__meta">' + (n ? esc(String(n)) + ' file' + (n === 1 ? '' : 's') : 'Nothing uploaded yet') + '</span></span>' +
-          '<span class="dir__dot"></span></button></div>';
+        '<div class="own">' +
+          PP.crestImgHtml(own.name, 68).replace('<img ', '<img class="own__crest" ') +
+          '<div class="own__id">' +
+            '<div class="own__name">' + esc(own.name) + '</div>' +
+            '<div class="own__meta">' +
+              (n ? esc(String(n)) + ' file' + (n === 1 ? '' : 's') + ' · last added ' + esc(PP.ago(last))
+                 : 'Nothing uploaded yet — other clubs see your folder as empty') +
+            '</div>' +
+          '</div>' +
+          '<button class="btn btn--primary" data-club="' + esc(s.code) + '">Manage my files</button>' +
+          bandsHtml(own, 'own__bands') +
+        '</div>';
     }
 
     var withFiles = ROSTER.filter(function (c) { return fileCount(c.code) > 0; }).length;
@@ -361,12 +383,15 @@
     html += '<div class="dir">' + ROSTER.map(function (c) {
       var n = fileCount(c.code), last = lastUpload(c.code);
       return '<button class="dir__card' + (n ? '' : ' is-empty') + '" data-club="' + esc(c.code) + '">' +
-        PP.crestImgHtml(c.name, 34).replace('<img ', '<img class="dir__crest" ') +
-        '<span class="dir__id"><span class="dir__name">' + esc(c.name) + '</span>' +
-        '<span class="dir__meta">' +
-          (n ? esc(String(n)) + ' file' + (n === 1 ? '' : 's') + ' · ' + esc(PP.ago(last)) : 'Empty') +
-        '</span></span>' +
-        '<span class="dir__dot"></span></button>';
+        PP.crestImgHtml(c.name, 44).replace('<img ', '<img class="dir__crest" ') +
+        '<span class="dir__id">' +
+          '<span class="dir__name">' + esc(c.name) + '</span>' +
+          '<span class="dir__meta">' +
+            (n ? esc(String(n)) + ' file' + (n === 1 ? '' : 's') + ' · ' + esc(PP.ago(last)) : 'Empty') +
+          '</span>' +
+        '</span>' +
+        bandsHtml(c, 'dir__bands') +
+        '</button>';
     }).join('') + '</div>';
 
     el('viewDir').innerHTML = html;

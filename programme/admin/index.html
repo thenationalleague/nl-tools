@@ -123,7 +123,7 @@
   /* Boot/loading state. A pane must never sit empty with no explanation: every
      RTDB listener below has an error callback that writes into it. */
   .boot { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 22px; text-align: center; color: var(--text-muted); font-size: 13px; }
+    padding: 22px; text-align: center; color: var(--text-muted); font-size: var(--text-sm); }
 </style>
 </head>
 <body>
@@ -272,6 +272,7 @@
       '<div class="acc-tools">' +
         '<button class="btn btn--ghost" id="btnSeedSync">Sync roster' + (missing ? ' (' + missing + ' missing)' : '') + '</button>' +
         '<button class="btn btn--ghost" id="btnExport">Export access CSV</button>' +
+        '<button class="btn btn--ghost" id="btnMerge">Export mail-merge CSV</button>' +
         '<span class="acc-tools__spacer"></span>' +
         '<span class="text-label">' + esc(String(seeded)) + ' clubs + National League</span>' +
       '</div>' +
@@ -281,6 +282,11 @@
 
     el('btnSeedSync').onclick = seedRoster;
     el('btnExport').onclick = exportCsv;
+    el('btnMerge').onclick = exportMergeCsv;
+
+    Array.prototype.forEach.call(el('paneAccess').querySelectorAll('[data-email]'), function (b) {
+      b.onclick = function () { showEmail(b.getAttribute('data-email')); };
+    });
 
     Array.prototype.forEach.call(el('paneAccess').querySelectorAll('[data-copy]'), function (b) {
       b.onclick = function () {
@@ -304,6 +310,7 @@
       '<td><span class="code-mono">' + esc(rec.passcode || '—') + '</span></td>' +
       '<td>' + (n ? esc(String(n)) : '<span class="text-label">Empty</span>') + '</td>' +
       '<td><span class="row-acts">' +
+        '<button class="btn btn--ghost btn--sm" data-email="' + esc(code) + '">Email</button>' +
         '<button class="btn btn--ghost btn--sm" data-copy="' + esc(PP.clubLink(rec.token)) + '">Copy link</button>' +
         '<button class="btn btn--ghost btn--sm" data-regen="' + esc(code) + '">Regenerate</button>' +
       '</span></td></tr>';
@@ -354,6 +361,110 @@
             NL.toast('New passcode and link issued', 'success');
           });
       }).catch(function (e) { NL.toast('Could not regenerate: ' + e.message, 'error'); });
+  }
+
+  /* ── Club emails ──────────────────────────────────────────────────────
+     There is no mail infrastructure in this project and no club addresses in
+     RTDB, so this composes the message and hands it over — copy it, or open it
+     in your mail client with the body pre-filled and the recipient blank.
+     Nothing is sent from here, which also means nothing can be sent by
+     accident to 72 clubs. */
+
+  function recFor(code) {
+    return code === 'NL' ? CONFIG.nl : CONFIG.clubs[code];
+  }
+  function nameFor(code) {
+    if (code === 'NL') return 'National League';
+    return (BY_CODE[code] || {}).name || code;
+  }
+
+  function emailFor(code) {
+    var rec = recFor(code);
+    if (!rec) return null;
+    var name = nameFor(code);
+    var link = PP.clubLink(rec.token);
+    var isNL = code === 'NL';
+
+    var subject = isNL
+      ? 'Programme Packs — National League folder access'
+      : 'Programme Packs — ' + name + ' access';
+
+    var body = [
+      'Hi,',
+      '',
+      'Programme Packs is the National League\u2019s shared library for match-day programme assets \u2014 crests, squad photos, club information and league adverts.',
+      '',
+      'YOUR LINK',
+      link,
+      '',
+      'YOUR PASSCODE',
+      rec.passcode,
+      '',
+      'HOW TO USE IT',
+      '1. Open the link above. Bookmark it \u2014 it is yours and does not change.',
+      '2. Enter the passcode. Your device remembers it for 30 days.',
+      '3. Your own folder is at the top. Upload your crest, squad and manager photos, and club information there.',
+      '4. Everything from every other club is listed below yours. Open any club to download what you need for a fixture.',
+      '5. The National League folder is pinned at the top of every page. League adverts appear there, marked with the dates they should run.',
+      '',
+      'PLEASE NOTE',
+      '\u2022 Anything you upload can be seen and downloaded by all 72 clubs and by the National League. Do not upload contracts, personal details or anything confidential.',
+      '\u2022 You can only add or remove files in your own folder.',
+      '\u2022 Share the passcode only with people at your club who need it. If it gets out, tell us and we will issue a new one immediately.',
+      '',
+      'Any problems, just reply to this email.',
+      '',
+      'Thanks,',
+      'The National League'
+    ].join('\n');
+
+    return { subject: subject, body: body, name: name, link: link, passcode: rec.passcode };
+  }
+
+  function showEmail(code) {
+    var m = emailFor(code);
+    if (!m) return;
+    NL.modal({
+      title: 'Email ' + m.name,
+      width: 'wide',
+      body: '<div class="form-group"><label for="emSubj">Subject</label>' +
+              '<input id="emSubj" type="text" readonly value="' + esc(m.subject) + '"></div>' +
+            '<div class="form-group"><label for="emBody">Message</label>' +
+              '<textarea id="emBody" rows="16" readonly>' + esc(m.body) + '</textarea></div>' +
+            '<p class="form-hint">Nothing is sent from here. Copy it into your mail client, or use ' +
+            '<strong>Open in mail app</strong> to start a draft with the body filled in and the recipient blank.</p>',
+      buttons: [
+        { label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Copy message', className: 'btn--ghost', onClick: function () {
+            NL.copy(m.body); NL.toast('Message copied', 'success');
+            PP.audit('email-copy', { club: code, clubName: m.name });
+          } },
+        { label: 'Open in mail app', className: 'btn--primary', autofocus: true, onClick: function () {
+            /* mailto: has a practical URL length limit around 2000 chars in some
+               clients; this body sits well inside it. Copy is the fallback. */
+            window.location.href = 'mailto:?subject=' + encodeURIComponent(m.subject) +
+              '&body=' + encodeURIComponent(m.body);
+            PP.audit('email-open', { club: code, clubName: m.name });
+          } }
+      ]
+    });
+  }
+
+  /* One row per club with the message pre-composed — for a mail merge, so 73
+     emails go out in one pass rather than 73 modals. */
+  function exportMergeCsv() {
+    var rows = [['Club', 'Division', 'Passcode', 'Link', 'Subject', 'Body']];
+    function push(code) {
+      var m = emailFor(code);
+      if (!m) return;
+      var div = code === 'NL' ? 'League' : ((BY_CODE[code] || {}).division || '');
+      rows.push([m.name, div, m.passcode, m.link, m.subject, m.body]);
+    }
+    if (CONFIG.nl) push('NL');
+    ROSTER.forEach(function (c) { push(c.code); });
+    NL.download('programme-packs-emails.csv', NL.csv(rows), 'text/csv');
+    PP.audit('export-emails', { count: rows.length - 1 });
+    NL.toast('Mail-merge CSV downloaded', 'success');
   }
 
   function exportCsv() {
