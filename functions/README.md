@@ -1,6 +1,6 @@
 # NL Tools — Cloud Functions
 
-Five functions:
+Six functions:
 - **`makeProxy`** — generates the 360p preview proxy for NL Cup Footage on upload.
 - **`onFootageDeleted`** — when a footage file is deleted in Storage (console, gsutil,
   or the master ✕), it removes the file's RTDB record(s) and its proxy, so a
@@ -10,6 +10,10 @@ Five functions:
   record **server-side** so a client can never write its own role — the durable
   fix for the self-grant hole in `system/rtdb/SECURITY-role-self-grant.md`.
   Called by the login page (`/index.html`) via the callable HTTPS protocol.
+- **`programmeAuth`** (`programme.js`) — Programme Packs passcode → scoped
+  `pClub` claim. An **RTDB trigger**, not a callable, and in **europe-west1**:
+  the org policy blocks granting public invoker to new Cloud Run services, and
+  Programme Packs clubs have no Google account. See the file header.
 
 See the headers of `index.js` / `account.js` for details.
 
@@ -39,7 +43,29 @@ allowed to deploy:
    - Service Account User (`roles/iam.serviceAccountUser`)
    - Firebase Admin (`roles/firebase.admin`)
    _(If that's fiddly, `roles/editor` + Service Account User gets it working; tighten later.)_
-3. **Run it** — Actions tab → *Deploy footage proxy function* → **Run workflow**.
+3. **Eventarc event receiver** — needed once, for `programmeAuth` (the first
+   **RTDB-triggered** function in the project). Gen-2 RTDB triggers are delivered
+   through Eventarc, and the trigger's *runtime* service account must be allowed
+   to receive events. Without it the deploy fails with:
+
+   > `403 Validation failed for trigger .../programmeauth-…: Permission
+   > 'eventarc.events.receiveEvent' denied on resource`
+
+   Console → *IAM* → `firebase-adminsdk-fbsvc@nl-tools.iam.gserviceaccount.com`
+   → **Edit** → add **Eventarc Event Receiver** (`roles/eventarc.eventReceiver`).
+   Or in Cloud Shell:
+
+   ```bash
+   gcloud projects add-iam-policy-binding nl-tools \
+     --member="serviceAccount:firebase-adminsdk-fbsvc@nl-tools.iam.gserviceaccount.com" \
+     --role="roles/eventarc.eventReceiver"
+   ```
+
+   That SA is pinned deliberately (see `account.js`): the gen-2 default compute
+   SA holds no Firebase roles, so RTDB drops its connection and `createCustomToken`
+   would fail. Note the function runs in **europe-west1** — an RTDB trigger must
+   sit in the database's region, not the `europe-west2` default the rest use.
+4. **Run it** — Actions tab → *Deploy footage proxy function* → **Run workflow**.
 
 `ffmpeg` ships with the function via `ffmpeg-static`, so there's nothing else to
 install. Logs: `firebase functions:log` — or the **Functions** page in the console.
