@@ -103,8 +103,34 @@
   /* Selection is per-folder and never survives navigation. Carrying ticks
      between folders is how people end up moving or deleting something they
      forgot was selected two screens ago. */
-  function goFolder(id) { view.folderId = id || null; sel = {}; render(); }
-  function selected() { return Object.keys(sel); }
+
+  /* Location is the hash — #/FYL/-Nabc — so browser back and forward move
+     through the library, links to a folder can be pasted to someone, and a
+     refresh lands where you were. Every navigation goes through here; nothing
+     sets view.* directly, or the two would drift apart. */
+  function readHash() {
+    var raw = (location.hash || '').replace(/^#\/?/, '');
+    var bits = raw.split('/').filter(Boolean).map(decodeURIComponent);
+    return { club: bits[0] || null, folderId: bits[1] || null };
+  }
+  function hashFor(club, folderId) {
+    if (!club) return '#/';
+    return '#/' + encodeURIComponent(club) + (folderId ? '/' + encodeURIComponent(folderId) : '');
+  }
+  function navigate(club, folderId) {
+    var next = hashFor(club, folderId);
+    if (location.hash === next) { applyHash(); return; }
+    location.hash = next;                 // hashchange applies it
+  }
+  function applyHash() {
+    var h = readHash();
+    if (h.club !== view.club || h.folderId !== view.folderId) sel = {};
+    view.club = h.club;
+    view.folderId = h.folderId;
+    render();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  window.addEventListener('hashchange', applyHash);
 
   var esc = function (s) { return NL.escHtml(s); };
   function el(id) { return document.getElementById(id); }
@@ -238,26 +264,12 @@
       FILES = s.val() || {}; loaded.files = true; render();
     }, function (e) { readFail('files', e); });
 
-    seedOwnFolders(session);
+    applyHash();
   }
 
-  /* A club's folders are seeded on its own first visit — only the owner can
-     write them (rules), so this can't run on anyone else's behalf. These are
-     DEFAULTS, not a schema: rename, delete or add whatever you like. */
-  function seedOwnFolders(session) {
-    if (session.isAdmin) return;
-    var code = session.code;
-    PP.ref('folders/' + code).once('value').then(function (s) {
-      if (s.exists() && Object.keys(s.val() || {}).length) return;
-      var defaults = session.isNL ? PP.NL_FOLDERS : PP.DEFAULT_FOLDERS;
-      var updates = {};
-      defaults.forEach(function (f) {
-        var id = PP.ref('folders/' + code).push().key;
-        updates[id] = { name: f.name, createdAt: PP.TS() };
-      });
-      return PP.ref('folders/' + code).update(updates);
-    }).catch(function () { /* read-only visitor — nothing to seed */ });
-  }
+  /* Nothing is pre-created. Seeding three folders into 72 clubs meant most of
+     the library was empty folders nobody asked for, and an empty folder reads
+     as neglect rather than as a blank page. Clubs make what they need. */
 
   /* ── Data helpers ─────────────────────────────────────────────────────── */
 
@@ -375,57 +387,15 @@
      adverts (inside their used-from/used-until window) are listed first and
      stated plainly; undated NL assets are evergreen and just get a count. */
   function renderNLPanel() {
-    var NLK = PP.NL_KEY;
-    var tops = childrenOf(NLK, null);
-    var total = collectFiles(NLK, null, '').length;
-
-    /* The folders themselves, not a sentence about them. This is the panel
-       people come to first, so its contents should be one click away rather
-       than behind an "open folder" step. */
-    var body;
-    if (!tops.length) {
-      body = '<div class="empty-state"><div class="empty-state__text">' +
-        'Nothing here yet. League adverts, templates and assets will appear here.</div></div>';
-    } else {
-      body = '<div class="folders">' + tops.map(function (f) {
-        var inside = collectFiles(NLK, f.id, '');
-        return '<div class="folder' + (inside.length ? '' : ' is-empty') + '" tabindex="0" role="button"' +
-          ' data-nlopen="' + esc(f.id) + '" aria-label="' + esc(f.name + ' — ' +
-            (inside.length ? inside.length + ' file' + (inside.length === 1 ? '' : 's') : 'empty')) + '">' +
-          '<span class="folder__icon" aria-hidden="true">' + (inside.length ? '\ud83d\udcc1' : '\ud83d\uddc2\ufe0f') + '</span>' +
-          '<span class="folder__id"><span class="folder__name">' + esc(f.name) + '</span>' +
-          '<span class="folder__meta">' + (inside.length
-            ? inside.length + ' file' + (inside.length === 1 ? '' : 's') + ' · ' + PP.humanSize(totalBytes(inside))
-            : 'Empty') + '</span></span></div>';
-      }).join('') + '</div>';
-    }
-
     el('nlPanel').innerHTML =
-      '<div class="nl-panel">' +
-        '<div class="nl-panel__head">' +
-          '<img class="nl-panel__rose" src="' + PP.ROSE + '" alt="">' +
-          '<div class="nl-panel__id">' +
-            '<div class="nl-panel__title">National League</div>' +
-            '<div class="nl-panel__sub">' + (total ? esc(String(total)) + ' file' + (total === 1 ? '' : 's')
-                                                   : 'Nothing here yet') + '</div>' +
-          '</div>' +
-          '<button class="btn btn--ghost" id="nlOpen">Open National League</button>' +
-        '</div>' +
-        '<div class="nl-panel__body">' + body + '</div>' +
+      '<div class="nl-card">' +
+        '<img class="nl-card__rose" src="' + PP.ROSE + '" alt="">' +
+        '<div class="nl-card__id"><div class="nl-card__title">National League<br>assets</div></div>' +
+        '<button class="btn nl-card__btn" id="nlOpen">Open</button>' +
       '</div>';
-
-    el('nlOpen').onclick = function () { openClub(NLK); };
-    Array.prototype.forEach.call(el('nlPanel').querySelectorAll('[data-nlopen]'), function (b) {
-      function go() { openClub(NLK); goFolder(b.getAttribute('data-nlopen')); }
-      b.onclick = go;
-      b.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
-    });
+    el('nlOpen').onclick = function () { navigate(PP.NL_KEY, null); };
   }
 
-  /* The 72-club directory. Empty clubs are listed, never hidden — a club with
-     nothing in its folder should be visibly, quietly empty. That is the whole
-     social mechanism of the page, and it stops working the moment you filter
-     them out. Muted, not alarmed: an acknowledgement, not a telling-off. */
   /* Club colours come from clubs-meta. Validate before they go anywhere near an
      inline style — the data is ours, but a colour field is one bad edit away
      from being an attribute-escape, and the cost of checking is nil. */
@@ -450,26 +420,17 @@
     /* Your own club is the one card you act on rather than browse, so it gets
        the room and the only primary button on the page. */
     if (own) {
-      var n = fileCount(s.code), last = lastUpload(s.code);
       html += '<div class="sec-head">Your folder' +
         '<span class="sec-head__note">Only your club can upload here \u00b7 every other club can see it</span></div>' +
         '<div class="own">' +
           PP.crestImgHtml(own.name, 68).replace('<img ', '<img class="own__crest" ') +
-          '<div class="own__id">' +
-            '<div class="own__name">' + esc(own.name) + '</div>' +
-            '<div class="own__meta">' +
-              (n ? esc(String(n)) + ' file' + (n === 1 ? '' : 's') + ' · last added ' + esc(PP.ago(last))
-                 : 'Nothing uploaded yet — other clubs see your folder as empty') +
-            '</div>' +
-          '</div>' +
+          '<div class="own__id"><div class="own__name">' + esc(own.name) + '</div></div>' +
           '<button class="btn btn--primary" data-club="' + esc(s.code) + '">Manage my files</button>' +
           bandsHtml(own, 'own__bands') +
         '</div>';
     }
 
-    var withFiles = ROSTER.filter(function (c) { return fileCount(c.code) > 0; }).length;
-    html += '<div class="sec-head">All clubs' +
-      '<span class="sec-head__note">' + esc(String(withFiles)) + ' of ' + esc(String(ROSTER.length)) + ' have uploaded</span></div>';
+    html += '<div class="sec-head">All clubs</div>';
 
     /* An empty club can't be opened — there is nothing behind it, and letting
        someone click into a blank folder is a worse answer than not letting them
@@ -488,9 +449,7 @@
         PP.crestImgHtml(c.name, 44).replace('<img ', '<img class="dir__crest" ') +
         '<span class="dir__id">' +
           '<span class="dir__name">' + esc(c.name) + '</span>' +
-          (n ? '<span class="dir__meta">' + esc(String(n)) + ' file' + (n === 1 ? '' : 's') +
-               ' · ' + esc(PP.ago(last)) + '</span>'
-             : (mine ? '<span class="dir__meta">Add your files</span>' : '')) +
+          (!n && mine ? '<span class="dir__meta">Add your files</span>' : '') +
         '</span>' +
         bandsHtml(c, 'dir__bands') +
         '</button>';
@@ -498,19 +457,11 @@
 
     el('viewDir').innerHTML = html;
     Array.prototype.forEach.call(el('viewDir').querySelectorAll('[data-club]'), function (b) {
-      b.onclick = function () { openClub(b.getAttribute('data-club')); };
+      b.onclick = function () { navigate(b.getAttribute('data-club'), null); };
     });
   }
 
-  function openClub(code) {
-    view.club = code;
-    view.folderId = null;
-    sel = {};
-    render();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
-  function backToDir() { view.club = null; view.folderId = null; sel = {}; render(); }
+  function openClub(code) { navigate(code, null); }
 
   function renderClub(code) {
     el('viewDir').style.display = 'none';
@@ -521,13 +472,12 @@
     var name = isNL ? 'National League' : (meta ? meta.name : code);
     var writable = canWrite(code);
     var here = view.folderId ? folderById(code, view.folderId) : null;
-    if (view.folderId && !here) view.folderId = null;          // folder deleted under us
     var path = trail(code, view.folderId);
     var subs = childrenOf(code, view.folderId);
     var files = view.folderId ? filesFor(code, view.folderId) : [];
+    var picked = files.filter(function (f) { return sel[f.id]; });
     var packCount = collectFiles(code, null, '').length;
 
-    /* Breadcrumb — All clubs › Club › Folder › Subfolder */
     var html = '<div class="crumb">' +
       '<button class="btn btn--ghost btn--sm" data-go="dir">All clubs</button>' +
       '<span class="crumb__sep">/</span>' +
@@ -537,35 +487,25 @@
       html += '<span class="crumb__sep">/</span>' +
         (i === path.length - 1
           ? '<span class="crumb__here">' + esc(f.name) + '</span>'
-          : '<button class="crumb__link" data-open="' + esc(f.id) + '">' + esc(f.name) + '</button>');
+          : '<button class="crumb__link" data-crumb="' + esc(f.id) + '">' + esc(f.name) + '</button>');
     });
     html += '</div>';
 
-    /* The whole-pack download, front and centre and present at every level —
-       taking one opponent's entire pack is the main reason a visiting club
-       opens this page at all. */
     if (packCount) {
-      var packAll = collectFiles(code, null, '');
       html += '<div class="pack">' +
         (isNL ? '<img class="pack__crest" src="' + PP.ROSE + '" alt="">'
               : PP.crestImgHtml(name, 52).replace('<img ', '<img class="pack__crest" ')) +
-        '<div class="pack__id">' +
-          '<div class="pack__title">' + esc(isNL ? 'National League assets' : name + '\u2019s programme pack') + '</div>' +
-          '<div class="pack__meta">' + packCount + ' file' + (packCount === 1 ? '' : 's') +
-            ' \u00b7 ' + esc(PP.humanSize(totalBytes(packAll))) + ' \u00b7 everything below, as one zip</div>' +
-        '</div>' +
+        '<div class="pack__id"><div class="pack__title">' +
+          esc(isNL ? 'National League assets' : name + '\u2019s programme pack') + '</div></div>' +
         '<button class="btn btn--primary pack__btn" data-zip="__club">' +
-          esc(isNL ? 'Download all NL assets' : 'Download ' + name + '\u2019s pack') + '</button>' +
+          esc(isNL ? 'Download all' : 'Download pack') + '</button>' +
       '</div>';
     }
 
-    /* Managing the folder sits on the left; taking things out of it sits on
-       the right, in the brand red. Housekeeping and the actual job shouldn't
-       read as one undifferentiated row of grey buttons. */
     var leftBtns = '', rightBtns = '';
     if (writable) {
-      leftBtns += '<button class="btn btn--ghost btn--sm" id="addFolder">' +
-        (here ? '+ Add subfolder' : '+ Add folder') + '</button>';
+      leftBtns += '<button class="btn btn--ghost btn--sm" id="addFolder" title="' +
+        (here ? 'Add a folder inside ' + esc(here.name) : 'Add a folder') + '">+ Folder</button>';
       if (here) {
         leftBtns += '<button class="btn btn--ghost btn--sm" id="renameFolder">Rename</button>';
         if (!files.length && !subs.length) {
@@ -574,106 +514,90 @@
       }
     }
     if (view.folderId && collectFiles(code, view.folderId, '').length) {
-      rightBtns += '<button class="btn btn--primary" data-zip="' + esc(view.folderId) + '">' +
-        'Download ' + esc(here.name) + '</button>';
+      rightBtns += '<button class="btn btn--primary" data-zip="' + esc(view.folderId) + '">Download folder</button>';
     }
     if (leftBtns || rightBtns) {
-      html += '<div class="bar">' +
-        '<div class="bar__left">' + leftBtns + '</div>' +
+      html += '<div class="bar"><div class="bar__left">' + leftBtns + '</div>' +
         '<div class="bar__right">' + rightBtns + '</div></div>';
     }
 
-    if (!writable) {
-      html += '<div class="ro-note"><span>You\u2019re viewing ' + esc(name) +
-        '\u2019s folder. Download anything you need \u2014 only ' + esc(name) +
-        ' can add or remove files here.</span></div>';
-    }
-
-    /* Folder tiles for this level. */
     if (subs.length) {
       html += '<div class="folders">' + subs.map(function (f) {
-        var inside = collectFiles(code, f.id, '');
-        return '<div class="folder' + (inside.length ? '' : ' is-empty') + '" tabindex="0" role="button"' +
-          ' data-open="' + esc(f.id) + '" aria-label="' + esc(f.name + ' — ' +
-            (inside.length ? inside.length + ' file' + (inside.length === 1 ? '' : 's') : 'empty')) + '">' +
-          '<span class="folder__icon" aria-hidden="true">' + (inside.length ? '\ud83d\udcc1' : '\ud83d\uddc2\ufe0f') + '</span>' +
-          '<span class="folder__id"><span class="folder__name">' + esc(f.name) + '</span>' +
-          '<span class="folder__meta">' + (inside.length
-            ? inside.length + ' file' + (inside.length === 1 ? '' : 's') + ' · ' + PP.humanSize(totalBytes(inside))
-            : 'Empty') + '</span></span>' +
+        var inside = collectFiles(code, f.id, '').length;
+        return '<div class="folder' + (inside ? '' : ' is-empty') + '" tabindex="0" role="button"' +
+          ' data-open="' + esc(f.id) + '" aria-label="' + esc(f.name) + '">' +
+          '<span class="folder__icon" aria-hidden="true">' + (inside ? '\ud83d\udcc1' : '\ud83d\uddc2\ufe0f') + '</span>' +
+          '<span class="folder__id"><span class="folder__name">' + esc(f.name) + '</span></span>' +
           '<button class="folder__more" data-menu="' + esc(f.id) + '" aria-label="Folder actions">\u22ef</button>' +
           '</div>';
       }).join('') + '</div>';
     }
 
-    /* Files at this level. Files always live in a folder, so the club root
-       shows folders only. */
     if (view.folderId) {
       if (writable) {
-        html += '<div class="vis-note"><span><strong>Everything you upload here is visible to all 72 clubs</strong> ' +
-          'and to the National League. Don\u2019t put contracts, personal details or anything confidential in this folder.</span></div>' +
-          '<div class="drop" id="drop" tabindex="0" role="button">' +
+        /* Kept deliberately, unlike the other notices that went: a club has to
+           know at the point of upload that this folder is readable by all 72.
+           One quiet line rather than a bordered callout. */
+        html += '<div class="drop" id="drop" tabindex="0" role="button">' +
           '<strong>Drop files here</strong> or click to choose' +
-          '<div class="drop__hint">Up to ' + PP.humanSize(PP.MAX_BYTES) + ' per file · into ' + esc(here.name) + '</div>' +
-          '</div><input type="file" id="fileInput" multiple style="display:none">' +
+          '<div class="drop__hint">Visible to all 72 clubs \u00b7 nothing confidential</div></div>' +
+          '<input type="file" id="fileInput" multiple style="display:none">' +
           '<div id="uploads"></div>';
       }
-      if (!files.length) {
-        html += '<div class="empty-state"><div class="empty-state__title">' +
-          (subs.length ? 'No files at this level' : 'This folder is empty') + '</div>' +
-          '<div class="empty-state__text">' +
-          (writable ? 'Nothing here yet — add the files other clubs will need.' : 'Nothing here yet.') +
-          '</div></div>';
-      } else {
-        var picked = files.filter(function (f) { return sel[f.id]; });
-        if (picked.length) {
-          html += '<div class="sel-bar">' +
-            '<span class="sel-bar__count">' + picked.length + ' selected</span>' +
-            '<button class="btn btn--primary btn--sm" id="selZip">Download selected</button>' +
-            (writable ? '<button class="btn btn--ghost btn--sm" id="selMove">Move to…</button>' +
-                        '<button class="btn btn--danger btn--sm" id="selRemove">Remove</button>' : '') +
-            '<span class="sel-bar__spacer"></span>' +
-            '<button class="btn btn--ghost btn--sm" id="selClear">Clear</button>' +
-          '</div>';
-        }
-        html += '<div class="file-head">' +
-          '<input type="checkbox" class="file-check" id="selAll" aria-label="Select all files in this folder"' +
-            (picked.length === files.length ? ' checked' : '') + '>' +
-          '<span>' + files.length + ' file' + (files.length === 1 ? '' : 's') + ' in ' + esc(here.name) + '</span></div>';
-        html += files.map(function (f) { return fileRow(f, code, writable, isNL); }).join('');
+
+      if (files.length) {
+        /* The selection bar carries every bulk action, so nothing is offered
+           that cannot be done. It appears only once something is ticked. */
+        html += '<div class="sel-bar">' +
+          '<label class="sel-bar__all"><input type="checkbox" class="tile__check" id="selAll"' +
+            (picked.length === files.length ? ' checked' : '') +
+            ' style="position:static"> Select all</label>' +
+          (picked.length
+            ? '<span class="sel-bar__count">' + picked.length + ' selected</span>' +
+              '<button class="btn btn--primary btn--sm" id="selZip">Download</button>' +
+              (writable ? '<button class="btn btn--ghost btn--sm" id="selMove">Move\u2026</button>' +
+                          '<button class="btn btn--danger btn--sm" id="selRemove">Remove</button>' : '') +
+              '<span class="sel-bar__spacer"></span>' +
+              '<button class="btn btn--ghost btn--sm" id="selClear">Clear</button>'
+            : '') +
+        '</div>';
+        html += '<div class="tiles">' + files.map(function (f) { return fileTile(f, code, writable, isNL); }).join('') + '</div>';
+      } else if (!subs.length) {
+        html += '<div class="empty-state"><div class="empty-state__title">Empty</div></div>';
       }
     } else if (!subs.length) {
-      html += '<div class="empty-state"><div class="empty-state__title">Nothing here yet</div>' +
-        '<div class="empty-state__text">' +
-        (writable ? 'Add a folder to get started.' : esc(name) + ' hasn\u2019t added any files yet.') +
-        '</div></div>';
+      html += '<div class="empty-state"><div class="empty-state__title">' +
+        (writable ? 'Add a folder to get started' : 'Nothing here yet') + '</div></div>';
     }
 
     el('viewClub').innerHTML = html;
     wireClub(code, writable);
   }
 
-  function fileRow(f, code, writable, isNL) {
+  /* A picture library shown as pictures. Clicking a tile selects it — the file
+     manager convention — and downloading is an explicit button, so a stray
+     click never starts one. */
+  function fileTile(f, code, writable, isNL) {
     var kind = PP.fileKind(f.contentType, f.name);
-    var thumb = (kind === 'image' && f.url)
-      ? '<img class="file-row__thumb" src="' + esc(f.url) + '" alt="" loading="lazy">'
-      : '<div class="file-row__thumb file-row__icon">' + PP.kindIcon(kind) + '</div>';
+    var art = (kind === 'image' && f.url)
+      ? '<img src="' + esc(f.url) + '" alt="" loading="lazy">'
+      : '<span class="tile__icon" aria-hidden="true">' + PP.kindIcon(kind) + '</span>';
     var state = PP.adState(f, Date.now());
     var pill = state === 'live' ? '<span class="pill pill--live">Live</span>'
-      : state === 'upcoming' ? '<span class="pill pill--soon">From ' + esc(PP.fmtDate(f.usedFrom)) + '</span>'
       : state === 'expired' ? '<span class="pill pill--expired">Ended</span>' : '';
 
-    return '<div class="file-row' + (sel[f.id] ? ' is-picked' : '') + '">' +
-      '<input type="checkbox" class="file-check" data-pick="' + esc(f.id) + '"' +
-        (sel[f.id] ? ' checked' : '') + ' aria-label="Select ' + esc(f.name) + '">' + thumb +
-      '<div class="file-row__main">' +
-        '<div class="file-row__name">' + esc(f.name) + ' ' + pill + '</div>' +
-        '<div class="file-row__meta">' + esc(PP.humanSize(f.size)) + ' · added ' + esc(PP.ago(f.uploadedAt)) + '</div>' +
-      '</div>' +
-      '<div class="file-row__acts">' +
-        '<a class="btn btn--ghost" href="' + esc(f.url || '#') + '" download target="_blank" rel="noopener">Download</a>' +
-        (writable && isNL ? '<button class="btn btn--ghost" data-date="' + esc(f.id) + '">Dates</button>' : '') +
-        (writable ? '<button class="btn btn--ghost" data-del="' + esc(f.id) + '">Remove</button>' : '') +
+    return '<div class="tile' + (sel[f.id] ? ' is-picked' : '') + '" tabindex="0" role="button"' +
+      ' data-pick="' + esc(f.id) + '" aria-pressed="' + (sel[f.id] ? 'true' : 'false') + '"' +
+      ' title="' + esc(f.name + ' \u00b7 ' + PP.humanSize(f.size)) + '">' +
+      '<input type="checkbox" class="tile__check" tabindex="-1" aria-hidden="true"' +
+        (sel[f.id] ? ' checked' : '') + '>' +
+      '<div class="tile__art">' + art + '</div>' +
+      '<div class="tile__body">' +
+        '<div class="tile__name">' + esc(f.name) + ' ' + pill + '</div>' +
+        '<div class="tile__acts">' +
+          '<a class="btn btn--ghost btn--sm" href="' + esc(f.url || '#') + '" download target="_blank" rel="noopener">Download</a>' +
+          (writable && isNL ? '<button class="btn btn--ghost btn--sm" data-date="' + esc(f.id) + '">Dates</button>' : '') +
+        '</div>' +
       '</div></div>';
   }
 
@@ -684,14 +608,17 @@
 
     Array.prototype.forEach.call(root.querySelectorAll('[data-go]'), function (b) {
       b.onclick = function () {
-        if (b.getAttribute('data-go') === 'dir') backToDir();
-        else goFolder(null);
+        if (b.getAttribute('data-go') === 'dir') navigate(null, null);
+        else navigate(code, null);
       };
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-crumb]'), function (b) {
+      b.onclick = function () { navigate(code, b.getAttribute('data-crumb')); };
     });
     Array.prototype.forEach.call(root.querySelectorAll('[data-open]'), function (b) {
       b.onclick = function (e) {
         if (e.target.closest('[data-menu]')) return;     // the ⋯ button handles itself
-        goFolder(b.getAttribute('data-open'));
+        navigate(code, b.getAttribute('data-open'));
       };
       if (b.classList.contains('folder')) {
         b.onkeydown = function (e) {
@@ -730,16 +657,24 @@
        bar, the row highlight and the select-all state derived from one source
        rather than three that can disagree. */
     Array.prototype.forEach.call(root.querySelectorAll('[data-pick]'), function (b) {
-      b.onchange = function () {
+      function toggle(e) {
+        /* The Download link and the Dates button live inside the tile — a click
+           on either must not also flip the selection. */
+        if (e.target.closest('a, button')) return;
         var id = b.getAttribute('data-pick');
-        if (b.checked) sel[id] = true; else delete sel[id];
+        if (sel[id]) delete sel[id]; else sel[id] = true;
         render();
+      }
+      b.onclick = toggle;
+      b.onkeydown = function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(e); }
       };
     });
     var all = el('selAll');
     if (all) all.onchange = function () {
+      var want = all.checked;
       sel = {};
-      if (all.checked) filesFor(code, view.folderId).forEach(function (f) { sel[f.id] = true; });
+      if (want) filesFor(code, view.folderId).forEach(function (f) { sel[f.id] = true; });
       render();
     };
     var clear = el('selClear'); if (clear) clear.onclick = function () { sel = {}; render(); };
@@ -878,7 +813,7 @@
 
     menuEl.addEventListener('click', function (e) { e.stopPropagation(); });
     menuEl.querySelector('[data-act="open"]').onclick = function () {
-      closeMenu(); goFolder(folderId);
+      closeMenu(); navigate(code, folderId);
     };
     var zip = menuEl.querySelector('[data-act="zip"]');
     if (inside.length) zip.onclick = function () { closeMenu(); downloadZip(code, folderId); };
