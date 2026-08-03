@@ -36,6 +36,7 @@ Worst real-world page loads (audit estimates, cold cache):
 
 ## Data
 - `clubs-meta.json`: 82 clubs, **72 in current (2026) roster**, 0 validator errors/warnings.
+  All 72 carry both `optaID` and `fasID`; the 10 departed clubs keep `optaID` only.
 
 ## Duplication counts to drive to zero (from the audit)
 | Thing | Copies today | Step |

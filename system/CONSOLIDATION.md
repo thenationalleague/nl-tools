@@ -111,7 +111,8 @@ This distinction matters: each is kept honest a different way, so calling them
 all "schemas" hides how you actually protect each one.
 - **A data schema** — `assets/data/clubs-meta.json`. A schema is a formal
   description of the *shape and rules of data*: required fields, types, unique
-  Opta IDs, valid season keys, `stadium_name`/`optaID`/address/station present.
+  Opta + FAS IDs, valid season keys,
+  `stadium_name`/`optaID`/`fasID`/address/station present.
   This is the only one of the three you can **machine-validate** (see Safety
   Rails). Tools must read it via `NL.clubs`/`NL.season`, never guess at fields —
   the travel-planner stadium bug is what happens when a tool reads it by hand.
