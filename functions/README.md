@@ -43,29 +43,23 @@ allowed to deploy:
    - Service Account User (`roles/iam.serviceAccountUser`)
    - Firebase Admin (`roles/firebase.admin`)
    _(If that's fiddly, `roles/editor` + Service Account User gets it working; tighten later.)_
-3. **Eventarc event receiver** — needed once, for `programmeAuth` (the first
-   **RTDB-triggered** function in the project). Gen-2 RTDB triggers are delivered
-   through Eventarc, and the trigger's *runtime* service account must be allowed
-   to receive events. Without it the deploy fails with:
+3. **Run it** — Actions tab → *Deploy footage proxy function* → **Run workflow**.
 
-   > `403 Validation failed for trigger .../programmeauth-…: Permission
-   > 'eventarc.events.receiveEvent' denied on resource`
+### Required roles, by function
 
-   Console → *IAM* → `firebase-adminsdk-fbsvc@nl-tools.iam.gserviceaccount.com`
-   → **Edit** → add **Eventarc Event Receiver** (`roles/eventarc.eventReceiver`).
-   Or in Cloud Shell:
+Facts the deploy depends on — not a walkthrough. If a deploy fails on
+permissions, this is the list to check it against.
 
-   ```bash
-   gcloud projects add-iam-policy-binding nl-tools \
-     --member="serviceAccount:firebase-adminsdk-fbsvc@nl-tools.iam.gserviceaccount.com" \
-     --role="roles/eventarc.eventReceiver"
-   ```
+| Identity | Needs | Why |
+|---|---|---|
+| `GCP_SERVICE_ACCOUNT` (deploy) | the roles in step 2 | deploys everything |
+| `firebase-adminsdk-fbsvc@` (runtime) | `roles/eventarc.eventReceiver` | `programmeAuth` is the project's only **RTDB-triggered** function; gen-2 RTDB triggers deliver via Eventarc and the runtime identity must be allowed to receive events. Without it: `403 … Permission 'eventarc.events.receiveEvent' denied`. |
 
-   That SA is pinned deliberately (see `account.js`): the gen-2 default compute
-   SA holds no Firebase roles, so RTDB drops its connection and `createCustomToken`
-   would fail. Note the function runs in **europe-west1** — an RTDB trigger must
-   sit in the database's region, not the `europe-west2` default the rest use.
-4. **Run it** — Actions tab → *Deploy footage proxy function* → **Run workflow**.
+`programmeAuth` pins that service account deliberately (see `account.js`): the
+gen-2 default compute SA holds no Firebase roles, so RTDB drops its connection
+and `createCustomToken` fails. It also runs in **europe-west1**, not the
+`europe-west2` the others use — an RTDB trigger must sit in the database's
+region.
 
 `ffmpeg` ships with the function via `ffmpeg-static`, so there's nothing else to
 install. Logs: `firebase functions:log` — or the **Functions** page in the console.
