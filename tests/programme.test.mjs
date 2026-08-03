@@ -8,7 +8,6 @@
      · safeName      — a filename becomes part of a Storage object path.
      · storagePath   — the <CODE> segment is what Storage rules match on for
                        write-own, and is the key the portal migration depends on.
-     · adState       — decides what a club sees as "this weekend's advert".
      · humanSize / fileKind — display only, but cheap to pin down.
 
    Firebase-dependent behaviour (the passcode → custom token exchange, rules
@@ -137,40 +136,6 @@ test('storagePath sanitises the filename it embeds', () => {
   assert.equal(p.split('/').length, 4, 'a crafted name cannot add path segments');
 });
 
-/* ── adState ──────────────────────────────────────────────────────────── */
-
-const DAY = 864e5;
-const NOW = Date.UTC(2026, 7, 3, 12, 0, 0);   // fixed clock — no Date.now() in assertions
-
-test('adState returns null for an undated file', () => {
-  assert.equal(PP.adState({ name: 'crest.png' }, NOW), null);
-  assert.equal(PP.adState({ usedFrom: null, usedUntil: null }, NOW), null);
-});
-
-test('adState is null for a missing file rather than throwing', () => {
-  assert.equal(PP.adState(null, NOW), null);
-  assert.equal(PP.adState(undefined, NOW), null);
-});
-
-test('adState: live inside the window', () => {
-  assert.equal(PP.adState({ usedFrom: NOW - DAY, usedUntil: NOW + DAY }, NOW), 'live');
-});
-
-test('adState: upcoming before the window, expired after it', () => {
-  assert.equal(PP.adState({ usedFrom: NOW + DAY }, NOW), 'upcoming');
-  assert.equal(PP.adState({ usedUntil: NOW - DAY }, NOW), 'expired');
-});
-
-test('adState boundaries are inclusive — an advert "until Saturday" is live on Saturday', () => {
-  assert.equal(PP.adState({ usedFrom: NOW, usedUntil: NOW + DAY }, NOW), 'live');
-  assert.equal(PP.adState({ usedFrom: NOW - DAY, usedUntil: NOW }, NOW), 'live');
-});
-
-test('adState: an open-ended window is live once it has started', () => {
-  assert.equal(PP.adState({ usedFrom: NOW - DAY }, NOW), 'live');
-  assert.equal(PP.adState({ usedUntil: NOW + DAY }, NOW), 'live');
-});
-
 /* ── humanSize ────────────────────────────────────────────────────────── */
 
 test('humanSize formats bytes through to GB', () => {
@@ -266,6 +231,26 @@ test('build emits the ZIP magic numbers and one central entry per file', () => {
   assert.equal(count([0x50, 0x4b, 0x03, 0x04]), 2, 'one local header per entry');
   assert.equal(count([0x50, 0x4b, 0x01, 0x02]), 2, 'one central directory entry per file');
   assert.equal(count([0x50, 0x4b, 0x05, 0x06]), 1, 'exactly one end-of-central-directory');
+});
+
+test('dosStamp packs a real date — zero renders as 30 Nov 1979 and looks corrupt', () => {
+  const stamp = Zip.dosStamp(Date.UTC(2026, 7, 3, 14, 30, 20));
+  /* Read the packed fields back out. Local time, because that is what the
+     format stores and what an unzip tool will show. */
+  const d = new Date(Date.UTC(2026, 7, 3, 14, 30, 20));
+  assert.equal(stamp.date >> 9, d.getFullYear() - 1980);
+  assert.equal((stamp.date >> 5) & 0x0F, d.getMonth() + 1);
+  assert.equal(stamp.date & 0x1F, d.getDate());
+  assert.equal(stamp.time >> 11, d.getHours());
+  assert.equal((stamp.time >> 5) & 0x3F, d.getMinutes());
+});
+
+test('dosStamp clamps anything before the DOS epoch rather than wrapping', () => {
+  const early = Zip.dosStamp(Date.UTC(1970, 0, 1));
+  assert.equal(early.date >> 9, 0, 'year 1980');
+  assert.equal((early.date >> 5) & 0x0F, 1);
+  assert.equal(early.date & 0x1F, 1);
+  assert.ok(Zip.dosStamp(NaN).date > 0, 'a junk date still yields a valid field');
 });
 
 test('build marks names UTF-8 so accented club names survive', () => {

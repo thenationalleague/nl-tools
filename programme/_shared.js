@@ -46,7 +46,6 @@
     PP.normCode(s)                    passcode normalisation
     PP.safeName(s)                    filename → storage-path-safe
     PP.storagePath(club, folder, id, name)
-    PP.adState(file, nowMs)           'live' | 'upcoming' | 'expired' | null
     PP.humanSize(bytes)
     PP.fileKind(contentType, name)    'image' | 'pdf' | 'doc' | 'sheet' | 'file'
 
@@ -117,21 +116,6 @@
      changing system/rtdb/storage.rules.snapshot. */
   function storagePath(club, folderId, fileId, name) {
     return STORAGE_ROOT + '/' + club + '/' + folderId + '/' + fileId + '-' + safeName(name);
-  }
-
-  /* NL adverts carry an optional usedFrom/usedUntil window (epoch ms) so a
-     club can see which advert belongs in THIS weekend's programme rather than
-     scrolling a pile of PNGs. Returns null for anything undated — club files
-     are always undated, and an undated NL asset (a spec sheet, the league
-     wordmark) is evergreen rather than out of date. Boundaries are inclusive. */
-  function adState(file, nowMs) {
-    if (!file) return null;
-    var from = file.usedFrom || null, until = file.usedUntil || null;
-    if (!from && !until) return null;
-    var now = nowMs == null ? Date.now() : nowMs;
-    if (from && now < from) return 'upcoming';
-    if (until && now > until) return 'expired';
-    return 'live';
   }
 
   function humanSize(bytes) {
@@ -460,7 +444,6 @@
     normCode: normCode,
     safeName: safeName,
     storagePath: storagePath,
-    adState: adState,
     humanSize: humanSize,
     fileKind: fileKind,
     kindIcon: function (kind) { return KIND_ICON[kind] || KIND_ICON.file; },

@@ -7,7 +7,8 @@
   the repo's whole posture. Exposes window.PPZip:
 
     PPZip.crc32(bytes)            → unsigned 32-bit CRC (pure, tested)
-    PPZip.build(entries)          → Blob   entries: [{ name, data: Uint8Array }]
+    PPZip.build(entries)          → Blob   entries: [{ name, data, date? }]
+                                    date = epoch ms for the entry's timestamp
     PPZip.uniqueName(name, taken) → a non-colliding entry name (pure, tested)
 
   Stored, not deflated
@@ -73,6 +74,22 @@
     return name + '-' + Date.now();
   }
 
+  /* MS-DOS date/time, the only timestamp a ZIP local header carries. Zeroing
+     these fields is legal but every reader renders it as 30 Nov 1979 — the
+     instant before the DOS epoch (1 Jan 1980) — which looks like corruption.
+     Packed as: time = h<<11 | m<<5 | s/2, date = (y-1980)<<9 | m<<5 | d.
+     Two-second resolution is the format's, not a rounding choice. */
+  function dosStamp(ms) {
+    /* `== null`, not a falsy check: epoch 0 is a real timestamp and was being
+       read as "no date given", silently stamping the file with now instead. */
+    var d = ms == null ? new Date() : new Date(ms);
+    if (isNaN(d.getTime()) || d.getFullYear() < 1980) d = new Date(1980, 0, 1);
+    return {
+      time: ((d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) & 0xFFFF,
+      date: (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xFFFF
+    };
+  }
+
   function u16(v) { return [v & 0xFF, (v >>> 8) & 0xFF]; }
   function u32(v) { return [v & 0xFF, (v >>> 8) & 0xFF, (v >>> 16) & 0xFF, (v >>> 24) & 0xFF]; }
 
@@ -85,14 +102,11 @@
       var nameBytes = utf8(e.name);
       var data = e.data instanceof Uint8Array ? e.data : new Uint8Array(e.data || 0);
       var crc = crc32(data);
+      var when = dosStamp(e.date);
 
-      /* DOS timestamp fields are left at zero. Unzip tools show an epoch date
-         rather than refusing the archive, and the real timestamps live in the
-         library anyway — carrying them would mean a date conversion for
-         cosmetics. */
       var local = [].concat(
         u32(0x04034b50), u16(20), u16(FLAG_UTF8), u16(0),
-        u16(0), u16(0),
+        u16(when.time), u16(when.date),
         u32(crc), u32(data.length), u32(data.length),
         u16(nameBytes.length), u16(0)
       );
@@ -100,7 +114,7 @@
 
       central.push([].concat(
         u32(0x02014b50), u16(20), u16(20), u16(FLAG_UTF8), u16(0),
-        u16(0), u16(0),
+        u16(when.time), u16(when.date),
         u32(crc), u32(data.length), u32(data.length),
         u16(nameBytes.length), u16(0), u16(0), u16(0), u16(0),
         u32(0), u32(offset)
@@ -126,5 +140,6 @@
     return new Blob(parts.concat(centralParts, [eocd]), { type: 'application/zip' });
   }
 
-  window.PPZip = { crc32: crc32, build: build, uniqueName: uniqueName, utf8: utf8 };
+  window.PPZip = { crc32: crc32, build: build, uniqueName: uniqueName, utf8: utf8,
+                   dosStamp: dosStamp };
 })();

@@ -19,9 +19,9 @@
   write-own: any club can browse and download every other club's assets
   (the home editor needs the AWAY club's crest on Tuesday), but can only
   upload into its own folder. The National League's own folder is pinned above
-  everything in every view — that is where club adverts land, and adverts carry
-  a used-from/used-until window so an editor can see what belongs in THIS
-  weekend's programme.
+  everything in every view. Expiry of league adverts is managed by hand — a
+  used-from/used-until field existed and was removed as more bookkeeping than
+  it saved.
 
   Write-own is enforced by Storage + RTDB rules against the `pClub` claim that
   the programmeAuth trigger puts in the token — not by this file. Nothing here
@@ -30,8 +30,8 @@
   Storage (RTDB app-data/media-programme/):
     folders/<CODE>/<folderId>  { name, parentId?, createdAt }   parentId = subfolder
     files/<CODE>/<fileId>      { name, folderId, size, contentType, storagePath,
-                                 folderId '_root' = loose at the top of the club,
-                                 url, uploadedAt, usedFrom?, usedUntil? }
+                                 url, uploadedAt }
+                               folderId '_root' = loose at the top of the club
     trash/<CODE>/<fileId>      { ...file, deletedAt }
     audit/<pushId>             append-only
   Bytes: Storage programme/<CODE>/<folderId>/<fileId>-<name>
@@ -575,18 +575,21 @@
       if (files.length) {
         /* The selection bar carries every bulk action, so nothing is offered
            that cannot be done. It appears only once something is ticked. */
+        /* The bar is always here once a folder has files, with its buttons
+           disabled until something is ticked. Rendering it only on selection
+           meant ticking one box shoved the whole grid down the page. */
+        var none = !picked.length;
+        var dis = none ? ' disabled' : '';
         html += '<div class="sel-bar">' +
           '<label class="sel-bar__all"><input type="checkbox" class="tile__check" id="selAll"' +
-            (picked.length === files.length ? ' checked' : '') +
+            (!none && picked.length === files.length ? ' checked' : '') +
             ' style="position:static"> Select all</label>' +
-          (picked.length
-            ? '<span class="sel-bar__count">' + picked.length + ' selected</span>' +
-              '<button class="btn btn--primary btn--sm" id="selZip">Download</button>' +
-              (writable ? '<button class="btn btn--ghost btn--sm" id="selMove">Move\u2026</button>' +
-                          '<button class="btn btn--danger btn--sm" id="selRemove">Remove</button>' : '') +
-              '<span class="sel-bar__spacer"></span>' +
-              '<button class="btn btn--ghost btn--sm" id="selClear">Clear</button>'
-            : '') +
+          '<span class="sel-bar__count">' + (none ? '' : picked.length + ' selected') + '</span>' +
+          '<button class="btn btn--primary btn--sm" id="selZip"' + dis + '>Download</button>' +
+          (writable ? '<button class="btn btn--ghost btn--sm" id="selMove"' + dis + '>Move\u2026</button>' +
+                      '<button class="btn btn--danger btn--sm" id="selRemove"' + dis + '>Remove</button>' : '') +
+          '<span class="sel-bar__spacer"></span>' +
+          '<button class="btn btn--ghost btn--sm" id="selClear"' + dis + '>Clear</button>' +
         '</div>';
         html += '<div class="tiles">' + files.map(function (f) { return fileTile(f, code, writable, isNL); }).join('') + '</div>';
       } else if (!subs.length) {
@@ -601,6 +604,44 @@
     wireClub(code, writable);
   }
 
+  /* What a browser can actually render on its own. Images and PDFs, and
+     nothing else — a .docx cannot be previewed without shipping the file to a
+     third-party viewer (Microsoft's or Google's), which would mean sending a
+     club's material to someone else to look at. Not worth it for a convenience;
+     those download instead. */
+  function canPreview(f) {
+    var kind = PP.fileKind(f.contentType, f.name);
+    return !!f.url && (kind === 'image' || kind === 'pdf');
+  }
+
+  function preview(code, fileId) {
+    var f = (FILES[code] || {})[fileId];
+    if (!f || !canPreview(f)) return;
+    var kind = PP.fileKind(f.contentType, f.name);
+    var body = kind === 'image'
+      ? '<img src="' + esc(f.url) + '" alt="' + esc(f.name) + '" class="prev__img">'
+      /* An <iframe> hands the PDF to the browser's own viewer. Some mobile
+         browsers have none and will offer a download instead — which is the
+         same thing the Download button does, so the fallback is harmless. */
+      : '<iframe src="' + esc(f.url) + '" class="prev__frame" title="' + esc(f.name) + '"></iframe>';
+
+    NL.modal({
+      title: f.name,
+      width: 'wide',
+      body: '<div class="prev">' + body + '</div>',
+      buttons: [
+        { label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Download', className: 'btn--primary', autofocus: true, onClick: function () {
+            /* The file already lives at a URL, so this opens it rather than
+               rebuilding it as a Blob — and it is audited like any other
+               download, because it is one. */
+            PP.audit('download', { club: code, detail: f.name });
+            window.open(f.url, '_blank');
+          } }
+      ]
+    });
+  }
+
   /* A picture library shown as pictures. Clicking a tile selects it — the file
      manager convention — and downloading is an explicit button, so a stray
      click never starts one. */
@@ -609,10 +650,6 @@
     var art = (kind === 'image' && f.url)
       ? '<img src="' + esc(f.url) + '" alt="" loading="lazy">'
       : '<span class="tile__icon" aria-hidden="true">' + PP.kindIcon(kind) + '</span>';
-    var state = PP.adState(f, Date.now());
-    var pill = state === 'live' ? '<span class="pill pill--live">Live</span>'
-      : state === 'expired' ? '<span class="pill pill--expired">Ended</span>' : '';
-
     return '<div class="tile' + (sel[f.id] ? ' is-picked' : '') + '" tabindex="0" role="button"' +
       ' data-pick="' + esc(f.id) + '" aria-pressed="' + (sel[f.id] ? 'true' : 'false') + '"' +
       ' title="' + esc(f.name + ' \u00b7 ' + PP.humanSize(f.size)) + '">' +
@@ -620,11 +657,12 @@
         (sel[f.id] ? ' checked' : '') + '>' +
       '<div class="tile__art">' + art + '</div>' +
       '<div class="tile__body">' +
-        '<div class="tile__name">' + esc(f.name) + ' ' + pill + '</div>' +
+        '<div class="tile__name">' + esc(f.name) + '</div>' +
         '<div class="tile__acts">' +
+          (canPreview(f) ? '<button class="btn btn--ghost btn--sm" data-prev="' + esc(f.id) + '">Preview</button>' : '') +
           '<a class="btn btn--ghost btn--sm" href="' + esc(f.url || '#') + '" download target="_blank" rel="noopener"' +
             ' data-dl="' + esc(f.id) + '">Download</a>' +
-          (writable && isNL ? '<button class="btn btn--ghost btn--sm" data-date="' + esc(f.id) + '">Dates</button>' : '') +
+
         '</div>' +
       '</div></div>';
   }
@@ -708,6 +746,9 @@
        the tool was the one action nobody could see. The link still does the
        downloading; this only records it, and deliberately does not
        preventDefault so a failed write can never block the download. */
+    Array.prototype.forEach.call(root.querySelectorAll('[data-prev]'), function (b) {
+      b.onclick = function (e) { e.stopPropagation(); preview(code, b.getAttribute('data-prev')); };
+    });
     Array.prototype.forEach.call(root.querySelectorAll('[data-dl]'), function (a) {
       a.addEventListener('click', function () {
         var f = (FILES[code] || {})[a.getAttribute('data-dl')];
@@ -728,9 +769,6 @@
 
     Array.prototype.forEach.call(root.querySelectorAll('[data-del]'), function (b) {
       b.onclick = function () { removeFile(code, b.getAttribute('data-del')); };
-    });
-    Array.prototype.forEach.call(root.querySelectorAll('[data-date]'), function (b) {
-      b.onclick = function () { editDates(code, b.getAttribute('data-date')); };
     });
 
     var drop = el('drop'), input = el('fileInput');
@@ -911,7 +949,8 @@
           }).then(function (buf) {
             entries.push({
               name: PPZip.uniqueName(item.path + PP.safeName(item.file.name), taken),
-              data: new Uint8Array(buf)
+              data: new Uint8Array(buf),
+              date: item.file.uploadedAt
             });
           });
         });
@@ -1066,49 +1105,6 @@
       }).catch(function (e) { NL.toast('Could not remove: ' + e.message, 'error'); });
   }
 
-  /* ── Advert dates (NL folder only) ────────────────────────────────────── */
-
-  function editDates(code, fileId) {
-    var rec = (FILES[code] || {})[fileId];
-    if (!rec) return;
-    function toInput(ms) {
-      if (!ms) return '';
-      var d = new Date(ms);
-      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-    }
-    NL.modal({
-      title: 'When is this used?',
-      size: 'sm',
-      body: '<p class="confirm-text">Clubs see a “Live” advert on the front panel for these dates. ' +
-            'Leave both blank for an evergreen asset.</p>' +
-            '<div class="form-group"><label for="dFrom">Used from</label>' +
-            '<input type="date" id="dFrom" value="' + esc(toInput(rec.usedFrom)) + '"></div>' +
-            '<div class="form-group"><label for="dUntil">Used until</label>' +
-            '<input type="date" id="dUntil" value="' + esc(toInput(rec.usedUntil)) + '"></div>',
-      buttons: [
-        { label: 'Cancel', onClick: function (c) { c.close(); } },
-        { label: 'Save', className: 'btn--primary', autofocus: true, onClick: function (c) {
-            var fromV = document.getElementById('dFrom').value;
-            var untilV = document.getElementById('dUntil').value;
-            /* Store the window as inclusive whole days in local time: from
-               00:00 on the start date to 23:59:59 on the end date. An advert
-               "until Saturday" must still be live on Saturday. */
-            var from = fromV ? new Date(fromV + 'T00:00:00').getTime() : null;
-            var until = untilV ? new Date(untilV + 'T23:59:59').getTime() : null;
-            if (from && until && until < from) {
-              NL.toast('“Used until” is before “used from”', 'error');
-              return;
-            }
-            PP.ref('files/' + code + '/' + fileId).update({ usedFrom: from, usedUntil: until })
-              .then(function () {
-                PP.audit('advert-dates', { club: code, detail: rec.name });
-                NL.toast('Dates saved', 'success');
-                c.close();
-              }).catch(function (e) { NL.toast('Could not save: ' + e.message, 'error'); });
-          } }
-      ]
-    });
-  }
 })();
 </script>
 </body>
