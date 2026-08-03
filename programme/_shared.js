@@ -213,50 +213,60 @@
         var reqRef = db.ref(ROOT + '/authRequests/' + uid);
         var grantRef = db.ref(ROOT + '/authGrants/' + uid);
 
-        return new Promise(function (resolve, reject) {
-          var done = false;
-          var timer = setTimeout(function () {
-            if (done) return;
-            done = true;
-            grantRef.off();
-            reject(new Error('That took too long. Please try again.'));
-          }, AUTH_TIMEOUT_MS);
+        /* Clear anything left by a previous attempt before listening. A stale
+           authGrants/<uid> would be delivered to the listener below the instant
+           it attaches and accepted as this attempt's answer — with a custom
+           token that expires after an hour. Clearing the request too means the
+           write that follows is always a fresh value for the trigger. */
+        return Promise.all([
+          grantRef.remove().catch(function () {}),
+          reqRef.remove().catch(function () {})
+        ]).then(function () {
+          return new Promise(function (resolve, reject) {
+            var done = false;
+            var timer = setTimeout(function () {
+              if (done) return;
+              done = true;
+              grantRef.off();
+              reject(new Error('That took too long. Please try again.'));
+            }, AUTH_TIMEOUT_MS);
 
-          function finish(fn) {
-            if (done) return true;
-            done = true;
-            clearTimeout(timer);
-            grantRef.off();
-            fn();
-            return false;
-          }
+            function finish(fn) {
+              if (done) return true;
+              done = true;
+              clearTimeout(timer);
+              grantRef.off();
+              fn();
+              return false;
+            }
 
-          grantRef.on('value', function (snap) {
-            var g = snap.val();
-            if (!g) return;
-            /* Clear both nodes while we still own this uid — after
-               signInWithCustomToken the uid changes and the rules would stop
-               us touching them, leaving litter behind. */
-            var cleanup = Promise.all([
-              grantRef.remove().catch(function () {}),
-              reqRef.remove().catch(function () {})
-            ]);
-            finish(function () {
-              cleanup.then(function () {
-                if (g.ok) resolve(g);
-                else reject(new Error(g.error || 'Passcode not recognised.'));
+            grantRef.on('value', function (snap) {
+              var g = snap.val();
+              if (!g) return;
+              /* Clear both nodes while we still own this uid — after
+                 signInWithCustomToken the uid changes and the rules would stop
+                 us touching them, leaving litter behind. */
+              var cleanup = Promise.all([
+                grantRef.remove().catch(function () {}),
+                reqRef.remove().catch(function () {})
+              ]);
+              finish(function () {
+                cleanup.then(function () {
+                  if (g.ok) resolve(g);
+                  else reject(new Error(g.error || 'Passcode not recognised.'));
+                });
               });
+            }, function (err) {
+              finish(function () { reject(err); });
             });
-          }, function (err) {
-            finish(function () { reject(err); });
-          });
 
-          var body = { at: firebase.database.ServerValue.TIMESTAMP };
-          Object.keys(payload).forEach(function (k) {
-            if (payload[k] != null && payload[k] !== '') body[k] = payload[k];
-          });
-          reqRef.set(body).catch(function (err) {
-            finish(function () { reject(err); });
+            var body = { at: firebase.database.ServerValue.TIMESTAMP };
+            Object.keys(payload).forEach(function (k) {
+              if (payload[k] != null && payload[k] !== '') body[k] = payload[k];
+            });
+            reqRef.set(body).catch(function (err) {
+              finish(function () { reject(err); });
+            });
           });
         });
       });
