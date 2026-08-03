@@ -27,7 +27,7 @@
   }
   window.__nlScorePredictorMounted = true;
 
-  var VERSION = "v3.5";
+  var VERSION = "v3.6";
   var CSS = "\n  /* Carbona Variable */\n  @font-face {\n    font-family: \"carbona-variable\";\n    src: url(\"https://use.typekit.net/af/184cf2/0000000000000000774c3175/31/l?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n4&v=3\") format(\"woff2\"),\n         url(\"https://use.typekit.net/af/184cf2/0000000000000000774c3175/31/d?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n4&v=3\") format(\"woff\");\n    font-display: swap; font-style: normal; font-weight: 200 900; font-stretch: normal;\n  }\n\n  #nlPredictor {\n    /* Values mirror the NL canon (system/nl-brand.css) — embeds can't load\n       the portal stylesheet, so the tokens are inlined verbatim. Ladder\n       stops are the canonical \"lighter/darker\"; no gold, no rgba overlays. */\n    --primary:#9e0000; --primary-50:#fcf4f2; --primary-300:#dfa197;\n    --primary-600:#7e0000; --primary-700:#600000;\n    --navy:#223b7c; --navy-600:#192e63;\n    --red:#d4380d; --red-light:#fff1ec;\n    --green:#1a7030; --green-light:#edf7ee;\n    --amber:#c96f15; --amber-light:#fef6ec;\n    --accent-live:#4ade80;\n    --white:#ffffff; --off-white:#f4f6f9;\n    --text:#1a2a44; --text-muted:#5a6a82;\n    --border:#dde3ed;\n    --radius:6px;\n    --shadow:0 2px 12px rgba(10,22,40,.10);\n    --focus-ring:0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);\n\n    font-family:'carbona-variable','carbona',sans-serif;\n    font-size:15px; line-height:1.45;\n    font-variation-settings:'wght' 400;\n    color:var(--text); -webkit-font-smoothing:antialiased;\n    max-width:680px; margin:24px auto; padding:0 12px;\n  }\n  #nlPredictor, #nlPredictor *, #nlPredictor *::before, #nlPredictor *::after { box-sizing:border-box; }\n\n  /* Banner */\n  #nlPredictor .nlsp__banner {\n    background:var(--amber-light); border:1px solid var(--amber); color:var(--amber);\n    padding:8px 12px; border-radius:var(--radius); font-size:13px; margin-bottom:14px;\n    font-variation-settings:'wght' 600;\n  }\n  #nlPredictor .nlsp__banner.is-err { background:var(--red-light);   border-color:var(--red);   color:var(--red); }\n  #nlPredictor .nlsp__banner.is-ok  { background:var(--green-light); border-color:var(--green); color:var(--green); }\n\n  /* Gate card — covers loading + signed-out, replaces the previous overlay/blur approach */\n  #nlPredictor .nlsp__gate {\n    padding:48px 16px;\n    display:flex; justify-content:center;\n  }\n  #nlPredictor .nlsp__gate-card {\n    background:var(--white); border:1px solid var(--border); border-radius:var(--radius);\n    box-shadow:var(--shadow);\n    padding:28px 28px 24px;\n    max-width:380px; width:100%;\n    text-align:center;\n  }\n  #nlPredictor .nlsp__gate-card img.nlsp__gate-mark {\n    height:56px; width:auto; display:block; margin:0 auto 18px;\n    max-width:200px; object-fit:contain;\n  }\n  #nlPredictor .nlsp__gate-card h2 {\n    margin:0 0 6px;\n    font-size:20px; font-weight:900; font-variation-settings:'wght' 900;\n    color:var(--text);\n  }\n  #nlPredictor .nlsp__gate-card p {\n    margin:0 0 18px;\n    color:var(--text-muted); font-size:14px;\n    font-weight:500; font-variation-settings:'wght' 500;\n  }\n  #nlPredictor .nlsp__gate-card .nlsp__btn { width:100%; padding:12px 22px; }\n  #nlPredictor .nlsp__gate-spinner {\n    width:22px; height:22px; margin:0 auto 12px;\n    border:2px solid var(--border); border-top-color:var(--primary);\n    border-radius:50%;\n    animation:nlsp-spin .8s linear infinite;\n  }\n  @keyframes nlsp-spin { to { transform:rotate(360deg); } }\n\n  /* Header — division wide lockup (left), title (centred), club crest (right).\n     NL canon: navy surface, white text, brand-red hairline. The wide lockup\n     carries its own white rounded card, so it sits straight on the navy. */\n  #nlPredictor .nlsp__sponsor {\n    display:grid; grid-template-columns:1fr auto 1fr; align-items:center;\n    background:var(--navy); color:var(--white);\n    padding:12px 16px; border-radius:var(--radius) var(--radius) 0 0;\n    border-bottom:2px solid var(--primary);\n    gap:12px; min-height:54px;\n  }\n  #nlPredictor .nlsp__sponsor-left  { display:flex; align-items:center; gap:10px; justify-self:start; }\n  #nlPredictor .nlsp__sponsor-right { display:flex; align-items:center; gap:8px;  justify-self:end; }\n  #nlPredictor .nlsp__sponsor img.nlsp__sponsor-wide {\n    height:34px; width:auto; display:block; object-fit:contain;\n  }\n  #nlPredictor .nlsp__sponsor img.nlsp__sponsor-team {\n    height:30px; width:30px; display:block; object-fit:contain;\n    background:var(--white); border-radius:4px; padding:1px;\n  }\n  #nlPredictor .nlsp__sponsor .nlsp__sponsor-title {\n    font-size:15px; color:var(--white);\n    text-transform:uppercase; letter-spacing:1.5px;\n    font-weight:900; font-variation-settings:'wght' 900;\n    line-height:1;\n    text-align:center;\n    justify-self:center;\n  }\n  @media (max-width:520px) {\n    #nlPredictor .nlsp__sponsor {\n      padding:10px 12px; min-height:48px;\n      grid-template-columns:1fr auto 1fr;\n      gap:8px;\n    }\n    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-wide { height:26px; }\n    #nlPredictor .nlsp__sponsor img.nlsp__sponsor-team { height:24px; width:24px; }\n    #nlPredictor .nlsp__sponsor .nlsp__sponsor-title { font-size:11px; letter-spacing:1px; }\n  }\n\n  /* Date selector — horizontally scrollable strip of matchday pills.\n     Click-drag enabled on desktop via JS (enableDragScroll). */\n  #nlPredictor .nlsp__datebar {\n    display:flex; gap:6px;\n    padding:14px 2px 8px;\n    overflow-x:auto; overflow-y:hidden;\n    -webkit-overflow-scrolling:touch;\n    scrollbar-width:none;\n    cursor:grab;\n    user-select:none;\n  }\n  #nlPredictor .nlsp__datebar.is-dragging { cursor:grabbing; }\n  #nlPredictor .nlsp__datebar.is-dragging button { pointer-events:none; }\n  #nlPredictor .nlsp__datebar::-webkit-scrollbar { display:none; }\n  #nlPredictor .nlsp__datebar button {\n    flex:none;\n    font-family:inherit; font-size:11px;\n    text-transform:uppercase; letter-spacing:1px;\n    padding:7px 12px; border-radius:999px; cursor:pointer;\n    background:var(--white); color:var(--text-muted);\n    border:1px solid var(--border);\n    font-weight:800; font-variation-settings:'wght' 800;\n    white-space:nowrap;\n    transition:all .15s ease;\n  }\n  #nlPredictor .nlsp__datebar button:hover {\n    color:var(--primary); border-color:var(--primary);\n  }\n  /* Canon single-choice active state (.chip.active in nl-brand.css): navy */\n  #nlPredictor .nlsp__datebar button.is-active {\n    background:var(--navy); color:var(--white); border-color:var(--navy);\n  }\n  #nlPredictor .nlsp__datebar button.is-today {\n    border-color:var(--primary);\n  }\n\n  /* Hero — compressed: greeting ribbon + date */\n  #nlPredictor .nlsp__hero { padding:10px 0 8px; }\n  #nlPredictor .nlsp__hero .nlsp__greetline {\n    font-size:11px; text-transform:uppercase; letter-spacing:1.5px;\n    color:var(--text-muted);\n    font-weight:800; font-variation-settings:'wght' 800;\n    margin-bottom:6px;\n  }\n  #nlPredictor .nlsp__hero h1 {\n    font-size:24px; line-height:1.15; margin:0;\n    font-weight:900; font-variation-settings:'wght' 900;\n  }\n\n  /* Status bar — single thin line above fixtures */\n  #nlPredictor .nlsp__status {\n    display:flex; justify-content:space-between; align-items:baseline;\n    padding:6px 2px; margin-bottom:8px;\n    font-size:12px; color:var(--text-muted);\n    font-weight:700; font-variation-settings:'wght' 700;\n    text-transform:uppercase; letter-spacing:1px;\n    border-bottom:1px solid var(--border);\n  }\n  #nlPredictor .nlsp__status .nlsp__count b { color:var(--text); font-weight:900; font-variation-settings:'wght' 900; }\n  #nlPredictor .nlsp__status .nlsp__savetick {\n    color:var(--green); opacity:0; transition:opacity .25s ease;\n    font-weight:800; font-variation-settings:'wght' 800;\n  }\n  #nlPredictor .nlsp__status .nlsp__savetick.is-on { opacity:1; }\n\n  /* Empty state (no matches on selected date / pre-season / post-season) */\n  #nlPredictor .nlsp__empty {\n    padding:32px 24px;\n    text-align:center;\n    background:var(--white);\n    border:1px solid var(--border);\n    border-radius:var(--radius);\n    box-shadow:var(--shadow);\n    margin:8px 0 12px;\n  }\n  #nlPredictor .nlsp__empty-title {\n    font-size:16px; color:var(--text);\n    font-weight:900; font-variation-settings:'wght' 900;\n    margin-bottom:6px;\n  }\n  #nlPredictor .nlsp__empty-body {\n    font-size:13px; color:var(--text-muted);\n    font-weight:500; font-variation-settings:'wght' 500;\n  }\n\n  /* Fixture rows — stacked layout: meta strip, then home team line, away team line */\n  #nlPredictor .nlsp__row {\n    position:relative;\n    padding:8px 10px;\n    border-bottom:1px solid var(--border);\n    background:var(--white);\n    border-left:3px solid transparent;\n    display:grid; row-gap:2px;\n  }\n  #nlPredictor .nlsp__row:first-child { border-top:1px solid var(--border); }\n\n  /* Hero card — the fan's own club's fixture as a proper showcase. Canon\n     navy top strip (Your club · KO · lock countdown), then the matchup split\n     into TWO club-colour panels — home club's primary left, away club's\n     right (from clubs-meta.json, navy fallback) — so the opponent's colours\n     always share the card. Oversized boxed crests; scores sit in white\n     drop-shadowed windows; text flips dark/light off each panel's luminance.\n     Deliberately NOT a .nlsp__row, so verdict tints never fight the club\n     colours. Soft emphasis only: every other fixture stays available below. */\n  #nlPredictor .nlsp__hero-card {\n    position:relative;\n    background:var(--white);\n    border:1px solid var(--border); border-radius:var(--radius);\n    box-shadow:var(--shadow);\n    overflow:hidden;\n    margin-bottom:14px;\n  }\n  #nlPredictor .nlsp__hero-card.is-void { opacity:.8; }\n  #nlPredictor .nlsp__hero-top {\n    display:flex; align-items:center; gap:10px;\n    background:var(--navy); color:var(--white);\n    padding:10px 14px;\n  }\n  #nlPredictor .nlsp__hero-top .nlsp__meta {\n    flex:1; padding-right:0; color:inherit; opacity:.92; min-height:0;\n  }\n  #nlPredictor .nlsp__hero-card .nlsp__meta .nlsp__pickline,\n  #nlPredictor .nlsp__hero-card .nlsp__meta .nlsp__pickline b,\n  #nlPredictor .nlsp__hero-card .nlsp__meta .nlsp__lock,\n  #nlPredictor .nlsp__hero-card .nlsp__meta .nlsp__ftlabel,\n  #nlPredictor .nlsp__hero-card .nlsp__meta .nlsp__livelbl,\n  #nlPredictor .nlsp__hero-card .nlsp__meta .nlsp__voidlbl,\n  #nlPredictor .nlsp__hero-card .nlsp__countdown { color:inherit; }\n  #nlPredictor .nlsp__heromatch {\n    position:relative;\n    display:grid; grid-template-columns:1fr 1fr;\n  }\n  #nlPredictor .nlsp__heroside {\n    display:flex; flex-direction:column; align-items:center; gap:10px;\n    text-align:center; min-width:0;\n    padding:16px 12px 18px;\n  }\n  #nlPredictor .nlsp__heroside img {\n    width:72px; height:72px; object-fit:contain;\n    background:var(--white); border-radius:10px; padding:7px;\n    box-shadow:var(--shadow);\n  }\n  #nlPredictor .nlsp__heroname {\n    font-size:14px; line-height:1.2;\n    text-transform:uppercase; letter-spacing:.5px;\n    font-weight:900; font-variation-settings:'wght' 900;\n    color:inherit;\n  }\n  #nlPredictor .nlsp__herov {\n    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);\n    width:28px; height:28px;\n    display:flex; align-items:center; justify-content:center;\n    background:var(--white); color:var(--text-muted);\n    border-radius:50%; box-shadow:var(--shadow);\n    font-size:12px;\n    font-weight:900; font-variation-settings:'wght' 900;\n    text-transform:lowercase;\n    z-index:1;\n  }\n  /* Scores in white windows — bigger, unmissable on any club colour */\n  #nlPredictor .nlsp__hero-card .nlsp__step .nlsp__stepval,\n  #nlPredictor .nlsp__hero-card .nlsp__teamscore {\n    background:var(--white); color:var(--text);\n    min-width:48px; padding:3px 8px;\n    font-size:26px; text-align:center;\n    border-radius:8px;\n    box-shadow:0 3px 10px rgba(10,22,40,.25);\n  }\n  #nlPredictor .nlsp__hero-card .nlsp__teamscore.is-pred { color:var(--text-muted); }\n  #nlPredictor .nlsp__hero-card .nlsp__step { gap:8px; }\n  #nlPredictor .nlsp__hero-card .nlsp__step button { width:36px; height:36px; font-size:18px; }\n  #nlPredictor .nlsp__hero-card .nlsp__editcontrols {\n    margin:0; padding:12px; justify-content:center;\n  }\n  /* On the hero the EDIT affordance is a visible inline button under the\n     matchup (the absolute pill would collide with the countdown chip). */\n  #nlPredictor .nlsp__hero-card .nlsp__rowedit {\n    position:static; display:block; margin:10px auto 12px; opacity:1;\n  }\n  @media (max-width:520px) {\n    #nlPredictor .nlsp__heroside img { width:56px; height:56px; padding:5px; }\n    #nlPredictor .nlsp__heroname { font-size:12px; }\n    #nlPredictor .nlsp__hero-card .nlsp__step button { width:32px; height:32px; }\n    #nlPredictor .nlsp__hero-card .nlsp__step .nlsp__stepval,\n    #nlPredictor .nlsp__hero-card .nlsp__teamscore { font-size:22px; min-width:42px; }\n  }\n\n  /* KO group boxes — fixtures sharing a kick-off time, one countdown each */\n  #nlPredictor .nlsp__kogroup {\n    background:var(--white);\n    border:1px solid var(--border); border-radius:var(--radius);\n    margin-bottom:12px;\n    overflow:hidden;\n  }\n  #nlPredictor .nlsp__kohead {\n    display:flex; align-items:center; justify-content:space-between; gap:10px;\n    padding:8px 12px;\n    background:var(--off-white);\n    border-bottom:1px solid var(--border);\n    font-size:11px; color:var(--text-muted);\n    text-transform:uppercase; letter-spacing:1px;\n    font-weight:800; font-variation-settings:'wght' 800;\n  }\n  #nlPredictor .nlsp__countdown { color:var(--primary); white-space:nowrap; }\n  #nlPredictor .nlsp__kostatus { color:var(--text-muted); white-space:nowrap; }\n  #nlPredictor .nlsp__kostatus.is-live { color:var(--green); }\n  #nlPredictor .nlsp__kogroup .nlsp__row:last-child { border-bottom:none; }\n\n  /* No row background tint for live — just the pulse on the meta strip */\n  #nlPredictor .nlsp__row.is-exact { background:var(--amber-light); }\n  #nlPredictor .nlsp__row.is-right { background:var(--green-light); }\n  #nlPredictor .nlsp__row.is-wrong { background:var(--off-white); }\n  #nlPredictor .nlsp__row.is-editing { border-left-color:var(--primary); }\n\n  /* Meta strip (KO time / live dot / FT verdict) on top */\n  #nlPredictor .nlsp__meta {\n    display:flex; align-items:center; gap:8px;\n    font-size:11px; color:var(--text-muted);\n    text-transform:uppercase; letter-spacing:1px;\n    font-weight:800; font-variation-settings:'wght' 800;\n    padding-right:60px; /* leave room for the hover EDIT pill */\n    min-height:16px;\n  }\n  #nlPredictor .nlsp__meta .nlsp__livedot {\n    width:7px; height:7px; border-radius:50%; background:var(--accent-live);\n    animation:nlsp-pulse 1.4s infinite;\n  }\n  #nlPredictor .nlsp__meta .nlsp__livelbl { color:var(--green); }\n  #nlPredictor .nlsp__meta .nlsp__ftlabel { color:var(--green); }\n  #nlPredictor .nlsp__meta .nlsp__voidlbl { color:var(--text-muted); }\n  #nlPredictor .nlsp__meta .nlsp__lock    { color:var(--text-muted); }\n  #nlPredictor .nlsp__row.is-void { opacity:.7; }\n  #nlPredictor .nlsp__meta .nlsp__pickline { color:var(--text-muted); }\n  #nlPredictor .nlsp__meta .nlsp__pickline b { color:var(--text); font-weight:900; font-variation-settings:'wght' 900; }\n  @keyframes nlsp-pulse {\n    0%   { box-shadow:0 0 0 0 color-mix(in srgb, var(--accent-live) 60%, transparent); }\n    70%  { box-shadow:0 0 0 6px color-mix(in srgb, var(--accent-live) 0%, transparent); }\n    100% { box-shadow:0 0 0 0 color-mix(in srgb, var(--accent-live) 0%, transparent); }\n  }\n  /* Verdict pill — solid bg, white text. Exact = amber \"champion\" treatment\n     with a slight bump in size + a tiny star prefix. Right result = green.\n     Wrong gets no pill. Always right-aligned in the meta strip. */\n  #nlPredictor .nlsp__pts {\n    margin-left:auto; padding:3px 12px; border-radius:999px;\n    font-size:14px; letter-spacing:.6px;\n    color:var(--white);\n    font-weight:900; font-variation-settings:'wght' 900;\n    display:inline-flex; align-items:center; gap:5px;\n    white-space:nowrap;\n  }\n  #nlPredictor .nlsp__pts.is-exact {\n    background:var(--amber); color:var(--white);\n    font-size:15px; padding:4px 14px;\n    box-shadow:0 1px 4px color-mix(in srgb, var(--amber) 35%, transparent);\n  }\n  #nlPredictor .nlsp__pts.is-exact::before { content:'\\2605'; font-size:13px; line-height:1; }\n  #nlPredictor .nlsp__pts.is-right { background:var(--green); color:var(--white); }\n  #nlPredictor .nlsp__pts.is-wrong {\n    background:var(--white); color:var(--text-muted);\n    border:1px solid var(--border);\n  }\n\n  /* Team line — full row width with score on the right */\n  #nlPredictor .nlsp__teamline {\n    display:flex; align-items:center; gap:10px;\n    font-size:14px; color:var(--text);\n    font-weight:800; font-variation-settings:'wght' 800;\n    text-transform:uppercase; letter-spacing:.5px;\n    min-height:30px;\n  }\n  #nlPredictor .nlsp__teamline img {\n    width:24px; height:24px; flex:none; border-radius:3px;\n    background:var(--white); object-fit:contain;\n  }\n  #nlPredictor .nlsp__teamline .nlsp__tname {\n    flex:1; min-width:0;\n    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;\n  }\n  #nlPredictor .nlsp__tname-short { display:none; }\n  @media (max-width:520px) {\n    #nlPredictor .nlsp__tname-full  { display:none; }\n    #nlPredictor .nlsp__tname-short { display:inline; }\n  }\n  /* Score cell on the right of each team line */\n  #nlPredictor .nlsp__teamscore {\n    flex:none; min-width:36px;\n    text-align:right;\n    font-size:20px;\n    font-weight:900; font-variation-settings:'wght' 900;\n    color:var(--text);\n  }\n  #nlPredictor .nlsp__teamscore.is-pred { color:var(--text-muted); }\n\n  /* Score stepper — buttons only, no free text. − greys at 0, + greys at 9. */\n  #nlPredictor .nlsp__step { display:flex; align-items:center; gap:6px; flex:none; }\n  #nlPredictor .nlsp__step button {\n    width:32px; height:32px; flex:none; padding:0;\n    display:flex; align-items:center; justify-content:center;\n    font-family:inherit; font-size:17px; line-height:1;\n    font-weight:900; font-variation-settings:'wght' 900;\n    color:var(--text); background:var(--white);\n    border:1px solid var(--border); border-radius:var(--radius);\n    cursor:pointer;\n    transition:color .15s ease, border-color .15s ease;\n  }\n  #nlPredictor .nlsp__step button:hover:not(:disabled) { color:var(--primary); border-color:var(--primary); }\n  #nlPredictor .nlsp__step button:focus-visible { outline:none; box-shadow:var(--focus-ring); }\n  #nlPredictor .nlsp__step button:disabled {\n    color:var(--border); background:var(--off-white); cursor:default;\n  }\n  #nlPredictor .nlsp__step .nlsp__stepval {\n    min-width:26px; text-align:center;\n    font-size:20px; font-weight:900; font-variation-settings:'wght' 900;\n    color:var(--text);\n  }\n\n  /* Hover-revealed EDIT pill — top-right of the row */\n  #nlPredictor .nlsp__rowedit {\n    position:absolute; right:10px; top:6px;\n    font:inherit; font-size:10px;\n    font-weight:700; font-variation-settings:'wght' 700;\n    text-transform:uppercase; letter-spacing:1px;\n    background:var(--white); color:var(--text-muted);\n    border:1px solid var(--border); border-radius:4px;\n    padding:3px 7px; cursor:pointer;\n    opacity:0; transition:opacity .15s ease, color .15s ease, border-color .15s ease;\n  }\n  #nlPredictor .nlsp__row:hover .nlsp__rowedit,\n  #nlPredictor .nlsp__rowedit:focus-visible { opacity:1; }\n  /* Submitted rows have no meta strip (v2.2), so reserve right-edge space\n     for the pill and centre it vertically — otherwise it overlaps the home\n     score. */\n  #nlPredictor .nlsp__row.has-edit { padding-right:64px; }\n  #nlPredictor .nlsp__row.has-edit .nlsp__rowedit { top:50%; transform:translateY(-50%); }\n  #nlPredictor .nlsp__rowedit:hover { color:var(--primary); border-color:var(--primary); }\n  @media (hover:none) {\n    #nlPredictor .nlsp__rowedit { opacity:.55; }\n  }\n\n  /* Per-row SAVE / CANCEL controls */\n  #nlPredictor .nlsp__editcontrols {\n    display:flex; gap:8px; justify-content:flex-end;\n    margin-top:6px;\n  }\n  #nlPredictor .nlsp__editcontrols button {\n    font:inherit; font-size:11px;\n    font-weight:800; font-variation-settings:'wght' 800;\n    text-transform:uppercase; letter-spacing:1px;\n    padding:6px 14px; border-radius:var(--radius); cursor:pointer;\n    transition:background .15s ease, color .15s ease, border-color .15s ease;\n  }\n  #nlPredictor .nlsp__editcontrols .nlsp__btn-save {\n    background:var(--primary); color:var(--white); border:1px solid var(--primary);\n  }\n  #nlPredictor .nlsp__editcontrols .nlsp__btn-save:hover  { background:var(--primary-600); }\n  #nlPredictor .nlsp__editcontrols .nlsp__btn-save:disabled {\n    background:var(--border); color:var(--text-muted); border-color:var(--border); cursor:not-allowed;\n  }\n  #nlPredictor .nlsp__editcontrols .nlsp__btn-cancel {\n    background:var(--white); color:var(--text-muted); border:1px solid var(--border);\n  }\n  #nlPredictor .nlsp__editcontrols .nlsp__btn-cancel:hover { color:var(--text); border-color:var(--text-muted); }\n\n  /* Reset all predictions — subtle text link between fixtures and leaderboard */\n  #nlPredictor .nlsp__reset {\n    display:flex; justify-content:flex-end;\n    padding:8px 4px 14px;\n  }\n  #nlPredictor .nlsp__resetbtn {\n    font:inherit; font-size:11px;\n    font-weight:700; font-variation-settings:'wght' 700;\n    text-transform:uppercase; letter-spacing:1px;\n    background:transparent; border:none; padding:4px 0;\n    color:var(--text-muted); cursor:pointer;\n    text-decoration:underline; text-underline-offset:3px;\n    transition:color .15s ease;\n  }\n  #nlPredictor .nlsp__resetbtn:hover { color:var(--red); }\n\n  /* Submit bar — shown when there are awaiting rows ready to commit */\n  #nlPredictor .nlsp__submitbar {\n    display:flex; gap:12px; align-items:center;\n    padding:12px 14px; margin:14px 0 18px;\n    background:var(--white); border:1px solid var(--border); border-radius:var(--radius);\n    box-shadow:var(--shadow);\n  }\n  #nlPredictor .nlsp__submitbar .nlsp__btn { flex:1; }\n\n  /* Custom confirm modal */\n  #nlPredictor .nlsp__modal[hidden] { display:none; }\n  #nlPredictor .nlsp__modal {\n    position:fixed; inset:0; z-index:1000;\n    display:flex; align-items:center; justify-content:center;\n    padding:20px;\n    background:rgba(10,22,40,.65); /* canon .modal-backdrop scrim */\n  }\n  #nlPredictor .nlsp__modal-card {\n    background:var(--white); border:1px solid var(--border); border-radius:var(--radius);\n    box-shadow:0 12px 36px rgba(10,22,40,.25);\n    padding:22px 24px; max-width:380px; width:100%;\n    font-family:'carbona-variable','carbona',sans-serif;\n  }\n  #nlPredictor .nlsp__modal-card h3 {\n    margin:0 0 6px;\n    font-size:18px; font-weight:900; font-variation-settings:'wght' 900;\n    color:var(--text);\n  }\n  #nlPredictor .nlsp__modal-card p {\n    margin:0 0 18px;\n    font-size:14px; color:var(--text-muted);\n    font-weight:500; font-variation-settings:'wght' 500;\n  }\n  #nlPredictor .nlsp__modal-actions {\n    display:flex; justify-content:flex-end; gap:8px;\n  }\n  #nlPredictor .nlsp__modal-actions button {\n    font:inherit; font-size:13px;\n    font-weight:800; font-variation-settings:'wght' 800;\n    text-transform:uppercase; letter-spacing:1px;\n    padding:8px 16px; border-radius:var(--radius); cursor:pointer;\n  }\n  #nlPredictor .nlsp__modal-cancel {\n    background:var(--white); color:var(--text-muted); border:1px solid var(--border);\n  }\n  #nlPredictor .nlsp__modal-cancel:hover { color:var(--text); border-color:var(--text-muted); }\n  #nlPredictor .nlsp__modal-confirm {\n    background:var(--primary); color:var(--white); border:1px solid var(--primary);\n  }\n  #nlPredictor .nlsp__modal-confirm:hover { background:var(--primary-600); }\n\n  /* Registration */\n  #nlPredictor .nlsp__register-card {\n    background:var(--white); border:1px solid var(--border); border-radius:var(--radius);\n    padding:24px; box-shadow:var(--shadow);\n  }\n  #nlPredictor .nlsp__register-card label {\n    display:block; font-size:13px; margin:18px 0 6px;\n    font-weight:800; font-variation-settings:'wght' 800;\n  }\n  #nlPredictor .nlsp__register-card select {\n    width:100%; padding:10px 12px; font-size:15px; font-family:inherit;\n    color:var(--text); background:var(--white);\n    border:1px solid var(--border); border-radius:var(--radius);\n    font-weight:600; font-variation-settings:'wght' 600;\n  }\n  #nlPredictor .nlsp__register-card select:focus {\n    outline:none; border-color:var(--primary);\n    box-shadow:var(--focus-ring);\n  }\n  #nlPredictor .nlsp__lockwarn {\n    margin:18px 0; padding:10px 12px;\n    background:var(--amber-light); border:1px solid var(--amber); color:var(--amber);\n    font-size:13px; border-radius:var(--radius);\n    font-weight:700; font-variation-settings:'wght' 700;\n  }\n  #nlPredictor .nlsp__btn {\n    font-family:inherit; font-size:15px;\n    font-weight:900; font-variation-settings:'wght' 900;\n    padding:10px 22px; border:none; border-radius:var(--radius);\n    cursor:pointer; background:var(--primary); color:var(--white);\n    transition:background .15s ease;\n  }\n  #nlPredictor .nlsp__btn:hover  { background:var(--primary-600); }\n  #nlPredictor .nlsp__btn:active { background:var(--primary-700); }\n  #nlPredictor .nlsp__btn:focus-visible {\n    outline:3px solid var(--primary-300); outline-offset:2px;\n  }\n  #nlPredictor .nlsp__btn:disabled { background:var(--border); color:var(--text-muted); cursor:not-allowed; }\n\n  /* Leaderboard */\n  #nlPredictor .nlsp__table {\n    background:var(--white); border:1px solid var(--border); border-radius:var(--radius);\n    padding:12px 0; margin:18px 0; box-shadow:var(--shadow);\n  }\n  #nlPredictor .nlsp__tablehead { padding:0 14px 8px; border-bottom:1px solid var(--border); }\n  #nlPredictor .nlsp__tablehead .nlsp__kicker {\n    font-size:11px; text-transform:uppercase; letter-spacing:1.5px;\n    color:var(--text-muted);\n    font-weight:800; font-variation-settings:'wght' 800;\n  }\n  #nlPredictor .nlsp__tablehead .nlsp__tsub { font-size:12px; color:var(--text-muted); margin-top:2px; }\n  #nlPredictor .nlsp__trow {\n    display:grid; grid-template-columns:24px 24px 1fr auto;\n    align-items:center; gap:10px; padding:6px 14px;\n    font-size:14px;\n    font-weight:700; font-variation-settings:'wght' 700;\n  }\n  /* Leaderboard: three labelled numeric columns (results / exact / games).\n     Fixed widths so the header row and data rows align across grids. */\n  #nlPredictor #nlsp-table .nlsp__trow,\n  #nlPredictor #nlsp-table .nlsp__thead { grid-template-columns:24px 24px 1fr 48px 42px 42px; }\n  #nlPredictor .nlsp__thead {\n    display:grid; gap:10px; align-items:end;\n    padding:8px 14px 3px;\n    font-size:9px; color:var(--text-muted);\n    text-transform:uppercase; letter-spacing:.8px;\n    font-weight:800; font-variation-settings:'wght' 800;\n  }\n  #nlPredictor .nlsp__thead span { text-align:right; }\n  #nlPredictor #nlsp-table .nlsp__trow .nlsp__pts,\n  #nlPredictor #nlsp-table .nlsp__trow .nlsp__exacts,\n  #nlPredictor #nlsp-table .nlsp__trow .nlsp__games { text-align:right; }\n  #nlPredictor .nlsp__trow .nlsp__games {\n    font-size:12px; color:var(--text-muted);\n    font-weight:600; font-variation-settings:'wght' 600;\n  }\n  #nlPredictor .nlsp__trow.is-you { background:var(--primary-50); }\n  #nlPredictor .nlsp__trow .nlsp__rank { color:var(--text-muted); font-weight:900; font-variation-settings:'wght' 900; }\n  #nlPredictor .nlsp__trow img { width:22px; height:22px; border-radius:3px; background:var(--white); object-fit:contain; }\n  #nlPredictor .nlsp__trow .nlsp__pts { font-size:14px; font-weight:900; font-variation-settings:'wght' 900; color:var(--text); padding:0; background:none; }\n  #nlPredictor .nlsp__trow .nlsp__youlbl { color:var(--text-muted); font-weight:600; font-variation-settings:'wght' 600; }\n  /* Secondary stat (exact scorelines) — labelled column, no star needed */\n  #nlPredictor .nlsp__trow .nlsp__exacts {\n    font-size:13px; color:var(--amber);\n    font-weight:800; font-variation-settings:'wght' 800;\n  }\n\n  /* Live footer — one strip carrying the live badge, the match minute and\n     the prediction, so a live row needs no meta line above the teams.\n     Full-bleed against the row/card edges. */\n  #nlPredictor .nlsp__row.has-foot { padding-bottom:0; }\n  #nlPredictor .nlsp__rowfoot {\n    display:flex; align-items:center; gap:6px;\n    margin:6px -10px 0; padding:5px 10px;\n    font-size:11px; text-transform:uppercase; letter-spacing:.8px;\n    font-weight:700; font-variation-settings:'wght' 700;\n    background:var(--off-white); color:var(--text-muted);\n  }\n  #nlPredictor .nlsp__rowfoot .nlsp__livedot {\n    flex:none; width:7px; height:7px; border-radius:50%;\n    background:var(--accent-live);\n    animation:nlsp-pulse 1.4s infinite;\n  }\n  #nlPredictor .nlsp__rowfoot .nlsp__footlive { color:var(--green); }\n  /* Separator between the live badge and the prediction */\n  #nlPredictor .nlsp__rowfoot .nlsp__footpick::before {\n    content:'\\00b7'; margin-right:6px; color:var(--border);\n  }\n  #nlPredictor .nlsp__hero-card .nlsp__rowfoot { margin:0; padding:6px 14px; }\n\n  /* W/D/L box — fixed-width letter chip per side. Grey D at 0–0, green W /\n     red L as the scoreline moves. Fixed size so rows never widen. */\n  #nlPredictor .nlsp__wdlbox {\n    flex:none; width:20px; height:20px;\n    display:inline-flex; align-items:center; justify-content:center;\n    border-radius:4px;\n    font-size:11px; line-height:1;\n    font-weight:900; font-variation-settings:'wght' 900;\n    background:var(--off-white); color:var(--text-muted);\n    border:1px solid var(--border);\n  }\n  #nlPredictor .nlsp__wdlbox.is-w { background:var(--green); border-color:var(--green); color:var(--white); }\n  #nlPredictor .nlsp__wdlbox.is-l { background:var(--red);   border-color:var(--red);   color:var(--white); }\n  /* On hero panels the grey D needs to read on club colours — solid white chip */\n  #nlPredictor .nlsp__hero-card .nlsp__wdlbox {\n    background:var(--white); color:var(--text-muted); border-color:var(--white);\n  }\n  #nlPredictor .nlsp__hero-card .nlsp__wdlbox.is-w { background:var(--green); border-color:var(--green); color:var(--white); }\n  #nlPredictor .nlsp__hero-card .nlsp__wdlbox.is-l { background:var(--red);   border-color:var(--red);   color:var(--white); }\n\n  /* Leaderboard scope filters — canon .chip-group pattern (segmented,\n     single-choice, navy active) + contextual select, stacked in the head */\n  #nlPredictor .nlsp__tablefilters {\n    display:flex; flex-direction:column; gap:8px; margin-top:8px;\n  }\n  #nlPredictor .nlsp__chipgroup {\n    display:flex; gap:2px;\n    background:var(--off-white); border-radius:var(--radius); padding:3px;\n  }\n  #nlPredictor .nlsp__chip {\n    flex:1; display:inline-flex; align-items:center; justify-content:center; gap:6px;\n    padding:7px 10px;\n    font-family:inherit; font-size:12px;\n    color:var(--text-muted); background:transparent;\n    border:none; border-radius:4px; cursor:pointer;\n    font-weight:700; font-variation-settings:'wght' 700;\n    transition:background .12s ease, color .12s ease;\n  }\n  #nlPredictor .nlsp__chip.is-on { background:var(--navy); color:var(--white); }\n  #nlPredictor .nlsp__chip img { width:16px; height:16px; object-fit:contain; flex:none; }\n  #nlPredictor .nlsp__chip:focus-visible { outline:none; box-shadow:var(--focus-ring); }\n  #nlPredictor .nlsp__tablefilters select {\n    font-family:inherit; font-size:12px;\n    padding:6px 8px; border-radius:var(--radius);\n    border:1px solid var(--border); background:var(--white); color:var(--text);\n    font-weight:700; font-variation-settings:'wght' 700;\n  }\n  #nlPredictor .nlsp__tablefilters select:focus {\n    outline:none; border-color:var(--primary);\n    box-shadow:var(--focus-ring);\n  }\n\n  /* Club v club table — accuracy % rows + below-floor footnote */\n  #nlPredictor .nlsp__clubrow-fans {\n    font-size:11px; color:var(--text-muted);\n    font-weight:600; font-variation-settings:'wght' 600;\n    white-space:nowrap;\n  }\n  #nlPredictor .nlsp__clubfoot {\n    padding:8px 14px 0;\n    font-size:11px; color:var(--text-muted);\n    font-weight:600; font-variation-settings:'wght' 600;\n    border-top:1px solid var(--border); margin-top:6px;\n  }\n\n  /* Sim bar (foot) */\n  #nlPredictor .nlsp__simbar {\n    margin-top:18px; padding-top:10px; border-top:1px dashed var(--border);\n    display:flex; flex-wrap:wrap; gap:8px; align-items:center;\n    font-size:11px; color:var(--text-muted);\n  }\n  #nlPredictor .nlsp__simbar .nlsp__simlbl {\n    text-transform:uppercase; letter-spacing:1.2px;\n    font-weight:800; font-variation-settings:'wght' 800;\n  }\n  #nlPredictor .nlsp__simbar input[type=\"date\"],\n  #nlPredictor .nlsp__simbar input[type=\"time\"] {\n    font-family:inherit; font-size:12px;\n    padding:4px 8px; border-radius:var(--radius);\n    border:1px solid var(--border); background:var(--white); color:var(--text);\n    font-weight:600; font-variation-settings:'wght' 600;\n  }\n  #nlPredictor .nlsp__simbar input[type=\"date\"]:focus,\n  #nlPredictor .nlsp__simbar input[type=\"time\"]:focus {\n    outline:none; border-color:var(--primary);\n    box-shadow:var(--focus-ring);\n  }\n  #nlPredictor .nlsp__simbar .nlsp__sim-now-btn {\n    font-family:inherit; font-size:11px;\n    font-weight:700; font-variation-settings:'wght' 700;\n    text-transform:uppercase; letter-spacing:1px;\n    padding:4px 10px; border-radius:999px; cursor:pointer;\n    background:var(--white); color:var(--text-muted); border:1px solid var(--border);\n  }\n  #nlPredictor .nlsp__simbar .nlsp__sim-now-btn:hover {\n    color:var(--primary); border-color:var(--primary);\n  }\n  #nlPredictor .nlsp__simbar .nlsp__clock {\n    font-family:ui-monospace,Menlo,Consolas,monospace; font-size:11px;\n    color:var(--text-muted); margin-left:auto;\n  }\n\n  @media (max-width:520px) {\n    /* Mobile tweaks for the stacked row layout — DO NOT re-introduce\n       grid-template-columns here or it'll force the old horizontal\n       layout and break stacking below 520px. */\n    #nlPredictor .nlsp__row { padding:8px; }\n    #nlPredictor .nlsp__teamline img { width:22px; height:22px; }\n    #nlPredictor .nlsp__teamline { font-size:13px; }\n    #nlPredictor .nlsp__teamscore { font-size:18px; min-width:30px; }\n    #nlPredictor .nlsp__teamscore input { width:42px; height:32px; font-size:16px; }\n    #nlPredictor .nlsp__hero h1 { font-size:22px; }\n  }\n";
   var HTML = "<div id=\"nlPredictor\">\n  <div class=\"nlsp__sponsor\" id=\"nlsp-sponsor\"></div>\n  <div class=\"nlsp__banner\" id=\"nlsp-banner\" hidden>Loading predictor…</div>\n  <div class=\"nlsp__screen\" id=\"nlsp-register\" hidden></div>\n  <div class=\"nlsp__screen\" id=\"nlsp-main\" hidden>\n    <div id=\"nlsp-datebar\"></div>\n    <div id=\"nlsp-hero\"></div>\n    <div id=\"nlsp-statusbar\"></div>\n    <div id=\"nlsp-fixtures\"></div>\n    <div id=\"nlsp-submitbar\"></div>\n    <div id=\"nlsp-reset\"></div>\n    <div id=\"nlsp-table\"></div>\n    <div id=\"nlsp-clubtable\"></div>\n  </div>\n  <div class=\"nlsp__gate\" id=\"nlsp-gate\"></div>\n  <div id=\"nlsp-sim\"></div>\n  <div class=\"nlsp__modal\" id=\"nlsp-modal\" hidden></div>\n</div>";
 
@@ -286,11 +286,21 @@
         allMatches: [],     // every fixture for the season (paginated full fetch)
         matches: [],        // filtered subset for the currently-active matchday
         registration: null,
-        allPredsRaw: {},    // full RTDB predictions tree { jwtId: { matchday: { matchId: ... } } }
+        myPreds: {},        // THIS user's predictions only { matchday: { matchId: ... } }
         predictions: {},    // current user, current matchday
         drafts: {},
         editing: {},
-        allUsers: {},
+        /* Standings come pre-computed from leaderboard/, not from reading every
+           fan's records. The widget used to pull the whole users and predictions
+           trees to build its tables, which is what forced those trees to be
+           readable at root — and a root read hands any client the full list of
+           fan ids. See embeds/auth-hardening-plan.md §4. */
+        lbRows: null,       // rows for the current scope, or null while loading
+        lbLoading: false,
+        lbError: false,
+        lbCache: {},        // scope path -> rows, so flipping filters is instant
+        lbUpdatedAt: null,
+        myHash: null,       // salted hash of our own jwtId, to find our own row
         clubColours: {},        // NLS teamID (optaID) -> {primary, secondary, tertiary} from clubs-meta.json
         clubNames: {},          // NLS teamID (optaID) -> {short, code} from clubs-meta.json
         seasonId: null,         // current season from clubs-meta.json (fallback: SEASON_ID)
@@ -380,7 +390,7 @@
       function recomputePredictionsFromRaw() {
         if (!state.user) return;
         var key = currentMatchdayKey();
-        state.predictions = (state.allPredsRaw[state.user.id] && state.allPredsRaw[state.user.id][key]) || {};
+        state.predictions = state.myPreds[key] || {};
       }
 
       // ---------- match state ----------
@@ -443,11 +453,16 @@
         return reg && (m.attributes.homeTeam.teamID === reg.teamId || m.attributes.awayTeam.teamID === reg.teamId);
       }
       function monthOfMatchday(mdKey) { return String(mdKey || '').slice(0, 7); } // 'YYYY-MM'
-      // Cumulative tally for one user across the whole season, one month, or a
-      // single matchday (the leaderboard's lbScope/lbMonth/lbDay state).
+      // Our OWN cumulative tally across the whole season, one month, or a single
+      // matchday (the leaderboard's lbScope/lbMonth/lbDay state).
       // results = correct W/D/L (includes exacts); exacts = exact scorelines.
-      function tallyForUser(jwtId, now) {
-        var byDay = state.allPredsRaw[jwtId] || {};
+      //
+      // This used to run for every fan, to build the leaderboard in the browser.
+      // It now runs for one — the signed-in fan — because everyone else's numbers
+      // arrive pre-computed. It is kept because a fan with nothing settled yet is
+      // absent from the aggregate and still deserves to see their own row.
+      function myTally(now) {
+        var byDay = state.myPreds || {};
         var t = { results: 0, exacts: 0, settled: 0 };
         for (var i = 0; i < state.allMatches.length; i++) {
           var m = state.allMatches[i];
@@ -854,6 +869,14 @@
               renderAll();
             }).catch(function () {});
             return;
+          }
+          // Re-read the aggregate every few minutes. It is rebuilt every 15, so
+          // this is not a live feed and does not need to behave like one — but a
+          // fan who leaves the page open through a Saturday should still see the
+          // table move. Cache-busting on purpose: the cached copy is the stale one.
+          if (tickN % 10 === 0 && state.fbAuthed) {
+            state.lbCache = {};
+            loadLeaderboard(true);
           }
           if (stateSig(now) !== renderedStateSig) { recomputeMatchday(); renderAll(); return; }
           Array.prototype.forEach.call(fixtures.querySelectorAll('[data-cutoff]'), function (el) {
@@ -1394,17 +1417,114 @@
         }
         return labels;
       }
-      // All registered users' tallies for the current month scope, with their
-      // registration record attached. Shared by the leaderboard + club table.
-      function allTallies(now) {
-        var userIds = Object.keys(state.allUsers);
-        if (state.user && state.registration && userIds.indexOf(state.user.id) === -1) userIds.push(state.user.id);
-        return userIds.map(function (uid) {
-          var reg = (uid === state.user.id) ? state.registration : state.allUsers[uid];
-          if (!reg) return null;
-          var t = tallyForUser(uid, now);
-          return { uid: uid, reg: reg, results: t.results, exacts: t.exacts, settled: t.settled };
-        }).filter(Boolean);
+      /* ---------- the pre-computed leaderboard ----------
+         Standings arrive from leaderboard/, written every 15 minutes by
+         scripts/build-leaderboard.js. The widget no longer reads anyone else's
+         records to build them: it used to pull the whole users and predictions
+         trees, and that root read is what handed every client the full list of
+         fan ids. See embeds/auth-hardening-plan.md §4.
+
+         A row carries no id. To find our own we hash our jwtId with the same salt
+         the builder used and match on that — it does not reverse, and testing it
+         requires already holding the id. */
+      var LB_SALT = 'nl-predictor-leaderboard-v1';
+      var LB_HASH_LEN = 12;
+
+      function computeMyHash() {
+        if (!state.user || !window.crypto || !crypto.subtle) return Promise.resolve(null);
+        var bytes = new TextEncoder().encode(LB_SALT + state.user.id);
+        return crypto.subtle.digest('SHA-256', bytes).then(function (buf) {
+          var hex = Array.prototype.map.call(new Uint8Array(buf), function (b) {
+            return ('0' + b.toString(16)).slice(-2);
+          }).join('');
+          state.myHash = hex.slice(0, LB_HASH_LEN);
+          return state.myHash;
+        }).catch(function () { return null; });
+      }
+
+      // Which node the current scope needs. One small read per scope rather than
+      // the whole tree, so a season with 40-odd matchdays does not arrive on every
+      // page load.
+      function lbPath() {
+        if (state.lbScope === 'month' && state.lbMonth) return 'leaderboard/month/' + state.lbMonth;
+        if (state.lbScope === 'day' && state.lbDay) return 'leaderboard/day/' + state.lbDay;
+        return 'leaderboard/season';
+      }
+
+      /* Fetch once per scope and cache. once() rather than on(): the aggregate
+         changes every 15 minutes at most, so a live subscription per scope would
+         be a socket held open for nothing. The ticker re-reads periodically. */
+      function loadLeaderboard(force) {
+        if (!state.fbAuthed) return;
+        var path = lbPath();
+        if (!force && state.lbCache[path]) {
+          state.lbRows = state.lbCache[path];
+          state.lbError = false;
+          renderTable(); renderClubTable();
+          return;
+        }
+        state.lbLoading = true;
+        if (!force) { state.lbRows = null; renderTable(); }
+        whenAuthed(function () {
+          return fbDb.ref(path).once('value').then(function (snap) {
+            var val = snap.val() || {};
+            var rows = val.rows || [];
+            state.lbCache[path] = rows;
+            state.lbRows = rows;
+            state.lbError = false;
+          }).catch(function () {
+            // A denied or failed read must not blank the rest of the widget —
+            // predicting still works without a leaderboard.
+            state.lbRows = [];
+            state.lbError = true;
+          }).then(function () {
+            state.lbLoading = false;
+            renderTable(); renderClubTable();
+          });
+        });
+      }
+      // The aggregate is only ever read after auth is confirmed; anything earlier
+      // is denied by the rules and would show as an empty table on first paint.
+      function whenAuthed(fn) {
+        if (fbAuth && fbAuth.currentUser) { fn(); return; }
+        var off = fbAuth.onAuthStateChanged(function (u) { if (u) { off(); fn(); } });
+      }
+
+      /* Rows for the current view: the aggregate, filtered to our own club if the
+         fan asked for that, plus our own row when we are not in it yet. Everyone
+         in the aggregate has at least one settled prediction — the builder drops
+         the rest — so the "hide zero-settled" rule the widget used to apply is
+         already applied upstream. */
+      function visibleRows() {
+        var all = state.lbRows || [];
+        var mine = state.registration;
+        var rows = (state.lbMine && mine)
+          ? all.filter(function (r) { return r.t === mine.teamId; })
+          : all.slice();
+
+        /* Add our own row when the aggregate does not have us yet — a fan with
+           nothing settled, or one who predicted in the last quarter of an hour.
+           Tested against the FULL aggregate, not the filtered rows: checking the
+           filtered set would add a duplicate the moment the my-club filter hid us
+           from a view we are in fact in. */
+        var inAggregate = state.myHash && all.some(function (r) { return r.h === state.myHash; });
+        if (mine && !inAggregate) {
+          var t = myTally(simNow());
+          rows.push({
+            n: ((mine.forename || '') + ' ' + (mine.surnameInitial || '')).trim(),
+            c: mine.crestUrl || '', t: mine.teamId || '', tn: mine.teamName || '',
+            r: t.results, e: t.exacts, s: t.settled, h: state.myHash || '__me__',
+          });
+        }
+        rows.sort(function (a, b) {
+          if (b.r !== a.r) return b.r - a.r;
+          if (b.e !== a.e) return b.e - a.e;
+          return String(a.n).localeCompare(String(b.n));
+        });
+        return rows;
+      }
+      function isMyRow(r) {
+        return !!(state.myHash && r.h === state.myHash) || r.h === '__me__';
       }
       // Scope chips (Season / Month / Matchday) + contextual select, then the
       // two-state club toggle (all clubs / fans of YOUR club — never a browse-
@@ -1454,7 +1574,9 @@
           state.lbScope = s;
           if (s === 'month' && !state.lbMonth) state.lbMonth = lbDefaultMonth();
           if (s === 'day' && !state.lbDay) state.lbDay = lbDefaultDay();
-          renderTable(); renderClubTable();
+          // A scope change points at a different aggregate node, so it needs a
+          // fetch; the club toggle below only filters rows we already hold.
+          loadLeaderboard();
         });
         if (clubEl) clubEl.addEventListener('click', function (e) {
           var b = e.target.closest ? e.target.closest('button') : null;
@@ -1463,29 +1585,27 @@
           renderTable();
         });
         if (mSel) mSel.addEventListener('change', function () {
-          state.lbMonth = mSel.value; renderTable(); renderClubTable();
+          state.lbMonth = mSel.value; loadLeaderboard();
         });
         if (dSel) dSel.addEventListener('change', function () {
-          state.lbDay = dSel.value; renderTable(); renderClubTable();
+          state.lbDay = dSel.value; loadLeaderboard();
         });
       }
       function renderTable() {
         if (!(state.allMatches || []).length) { tableEl.innerHTML = ''; return; }
         var now = simNow();
 
-        var rows = allTallies(now).filter(function (r) {
-          if (state.lbMine && state.registration && r.reg.teamId !== state.registration.teamId) return false;
-          // Hide zero-settled players from a filtered view (a late joiner never
-          // looks "punished" in a month they sat out) — but always show yourself.
-          return r.settled > 0 || r.uid === state.user.id;
-        }).sort(function (a, b) {
-          if (b.results !== a.results) return b.results - a.results;
-          if (b.exacts !== a.exacts) return b.exacts - a.exacts;
-          return (a.reg.forename || '').localeCompare(b.reg.forename || '');
-        });
+        var rows = visibleRows();
         var ranks = rankLabels(rows, function (a, b) {
-          return a.results === b.results && a.exacts === b.exacts;
+          return a.r === b.r && a.e === b.e;
         });
+
+        // Three distinct empty states, because they mean different things: still
+        // fetching, could not fetch, and genuinely nobody here yet.
+        var empty = '';
+        if (state.lbRows === null) empty = 'Loading the leaderboard…';
+        else if (state.lbError) empty = 'The leaderboard is briefly unavailable — your predictions are safe.';
+        else if (rows.length === 0) empty = 'No players in this view yet — try a different period or scope.';
 
         var inner =
           '<div class="nlsp__tablehead">' +
@@ -1498,19 +1618,16 @@
             '<span title="Correct scoreline predictions">Exact</span>' +
             '<span title="Finished matches predicted">Games</span>' +
           '</div>' +
-          (rows.length === 0
-            ? '<div class="nlsp__clubfoot">No players in this view yet — try a different period or scope.</div>'
-            : '') +
+          (empty ? '<div class="nlsp__clubfoot">' + $h(empty) + '</div>' : '') +
           rows.map(function (r, i) {
-            var name = $h(r.reg.forename) + ' ' + $h(r.reg.surnameInitial || '');
-            var cls = 'nlsp__trow' + (r.uid === state.user.id ? ' is-you' : '');
-            return '<div class="' + cls + '">' +
+            var me = isMyRow(r);
+            return '<div class="nlsp__trow' + (me ? ' is-you' : '') + '">' +
               '<span class="nlsp__rank">' + ranks[i] + '</span>' +
-              crestImg(r.reg.crestUrl, r.reg.teamName, 22) +
-              '<span>' + name + (r.uid === state.user.id ? ' <span class="nlsp__youlbl">(you)</span>' : '') + '</span>' +
-              '<span class="nlsp__pts">' + r.results + '</span>' +
-              '<span class="nlsp__exacts">' + r.exacts + '</span>' +
-              '<span class="nlsp__games">' + r.settled + '</span>' +
+              crestImg(r.c, r.tn, 22) +
+              '<span>' + $h(r.n) + (me ? ' <span class="nlsp__youlbl">(you)</span>' : '') + '</span>' +
+              '<span class="nlsp__pts">' + r.r + '</span>' +
+              '<span class="nlsp__exacts">' + r.e + '</span>' +
+              '<span class="nlsp__games">' + r.s + '</span>' +
             '</div>';
           }).join('');
 
@@ -1523,17 +1640,21 @@
       // Accuracy percentage (correct results ÷ settled predictions across the
       // club's fans) so Torquay's fanbase size doesn't drown out Farnham's.
       // Clubs need CLUB_TABLE_MIN_SETTLED settled predictions to rank.
+      //
+      // Derived from the same rows the leaderboard draws, rather than precomputed
+      // separately — two aggregates of the same numbers would eventually disagree,
+      // and the version fans noticed would be whichever was wrong. Ignores the
+      // my-club filter deliberately: a club table of one club is not a table.
       function renderClubTable() {
         if (!(state.allMatches || []).length) { clubTableEl.innerHTML = ''; return; }
-        var now = simNow();
         var byClub = {};
-        allTallies(now).forEach(function (r) {
-          if (!r.reg.teamId || !r.settled) return;
-          var c = byClub[r.reg.teamId] || (byClub[r.reg.teamId] = {
-            teamId: r.reg.teamId, teamName: r.reg.teamName, crestUrl: r.reg.crestUrl,
+        (state.lbRows || []).forEach(function (r) {
+          if (!r.t || !r.s) return;
+          var c = byClub[r.t] || (byClub[r.t] = {
+            teamId: r.t, teamName: r.tn, crestUrl: r.c,
             fans: 0, results: 0, exacts: 0, settled: 0
           });
-          c.fans += 1; c.results += r.results; c.exacts += r.exacts; c.settled += r.settled;
+          c.fans += 1; c.results += r.r; c.exacts += r.e; c.settled += r.s;
         });
         var clubs = Object.keys(byClub).map(function (id) { return byClub[id]; });
         if (!clubs.length) { clubTableEl.innerHTML = ''; return; }
@@ -1627,10 +1748,15 @@
       }
 
       // ---------- RTDB listeners ----------
+      /* Own records only. These were `users` and `predictions` at tree root, which
+         is what forced both trees to be readable by anyone signed in — and a root
+         read hands out the complete list of fan ids, which is what made everything
+         else enumerable. Standings now come from the pre-computed leaderboard, so
+         nothing here needs to see another fan's data. */
       function listenAll() {
-        fbDb.ref('users').on('value', function (snap) {
-          state.allUsers = snap.val() || {};
-          state.registration = state.allUsers[state.user.id] || null;
+        computeMyHash().then(function () { loadLeaderboard(); });
+        fbDb.ref('users/' + state.user.id).on('value', function (snap) {
+          state.registration = snap.val() || null;
           if (!state.registration) {
             hideGate();
             renderRegistration();
@@ -1645,8 +1771,8 @@
             renderDatebar(); renderHero(); renderFixtures(); renderSubmitbar(); renderReset(); renderTable(); renderClubTable(); renderSimBar();
           }
         });
-        fbDb.ref('predictions').on('value', function (snap) {
-          state.allPredsRaw = snap.val() || {};
+        fbDb.ref('predictions/' + state.user.id).on('value', function (snap) {
+          state.myPreds = snap.val() || {};
           recomputePredictionsFromRaw();
           if (!main.hidden) {
             // renderHero() belongs here too — the hero card shows the user's own
