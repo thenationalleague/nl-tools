@@ -367,6 +367,35 @@ behaves. It could be locked down first, independently, as a smaller proof.
 
 ---
 
+## 4b. What each node's rule is doing, and why
+
+`embeds/nl-widgets.rules.json` carries no comments, and must not. The Firebase
+console parses the document as strict JSON: a `"//"` key is read as a database
+path whose value has to be an object, so a string there fails to publish with
+`Expected '{'`. The annotations therefore live here.
+
+- **`users` — `.read` sits at `$jwtId`, not at the node.** A read at the node
+  returns every registration, and therefore every `jwtId`, which is what made
+  the rest of the data enumerable. You now have to know an id to read its
+  record. Writes stay write-once (`!data.exists()`), so a club cannot be
+  changed after registration.
+
+- **`predictions` — same, for the same reason.** Every fan's individual
+  scorelines sat behind one root read, none of which is ever displayed
+  anywhere.
+
+- **`leaderboard` — readable by anyone signed in, writable by nobody.** The
+  scheduled aggregator writes it with admin access, which bypasses these rules
+  entirely. A permissive read is safe here because the node holds exactly what
+  the leaderboard already shows in public: a name, a crest, three numbers. It
+  must never carry a `jwtId` — that would republish the id list this whole
+  exercise removes — and `scripts/build-leaderboard.js` refuses to write if one
+  appears anywhere in the payload.
+
+- **`motm` and `motm-names`** were already at `$jwtId`, and `motm-names` has no
+  read rule at all: the widget writes a fan's display name there and never
+  reads anyone's back.
+
 ## 5. Rollout order (Plan B)
 
 Sequenced so nothing breaks in production at any step.
