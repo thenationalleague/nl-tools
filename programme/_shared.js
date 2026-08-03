@@ -14,10 +14,14 @@
   Access model (the bit that matters)
   -----------------------------------
   A club types a 6-character passcode. It is NOT checked here — it goes to the
-  `programmeEnter` Cloud Function, which validates it with the Admin SDK and
-  returns a custom token carrying a `pClub` claim (the club's clubs-meta code,
-  or 'NL'). We sign in with that token, so every subsequent read and write is
+  `programmeAuth` RTDB trigger, which validates it with the Admin SDK and writes
+  back a custom token carrying a `pClub` claim (the club's clubs-meta code, or
+  'NL'). We sign in with that token, so every subsequent read and write is
   authorised by Storage/RTDB rules against a claim the browser cannot forge.
+
+  A trigger rather than a callable because the project's org policy blocks
+  granting public invoker to new Cloud Run services, and clubs have no Google
+  account — see functions/programme.js for the full reasoning.
 
   This is the one deliberate difference from /uw-promo/, where passcodes are
   world-readable and compared client-side. Here no client ever reads a passcode:
@@ -55,7 +59,6 @@
 
   var ROOT = 'app-data/media-programme';
   var STORAGE_ROOT = 'programme';
-  var REGION = 'europe-west2';           // must match setGlobalOptions in functions/index.js
   var REMEMBER_KEY = 'nl-programme-access';
   var REMEMBER_DAYS = 30;
 
@@ -177,8 +180,86 @@
 
   var session = null;
 
-  function callable(name) {
-    return app.functions(REGION).httpsCallable(name);
+  /* Passcode validation goes through RTDB, not a callable.
+     The project carries an org policy that blocks granting `allUsers` invoker
+     to new Cloud Run services, so an onCall function is unreachable for clubs
+     (who have no Google account) — see functions/programme.js. Instead we sign
+     in anonymously (Identity Toolkit, not Cloud Run, so the policy doesn't
+     apply), drop a request node, and wait for the programmeAuth trigger to
+     write back a custom token.
+
+     Eventarc delivery is slow — allow well past footage's measured ~15-20s
+     before giving up, and let the UI say so rather than looking hung. */
+  var AUTH_TIMEOUT_MS = 60000;
+
+  function requestGrant(payload) {
+    /* The request is written by whichever app owns the waiting session: the
+       named app for a club (anonymous), the DEFAULT app for an admin (their
+       portal login). The rules key both nodes on auth.uid, so each caller can
+       only ever see its own grant. */
+    var useDefault = payload.admin === true;
+    var authApp = useDefault ? firebase.app() : app;
+
+    return Promise.resolve()
+      .then(function () {
+        var u = authApp.auth().currentUser;
+        if (u) return u;
+        if (useDefault) throw new Error('You need to be signed in.');
+        return authApp.auth().signInAnonymously().then(function (c) { return c.user; });
+      })
+      .then(function (user) {
+        var uid = user.uid;
+        var db = authApp.database();
+        var reqRef = db.ref(ROOT + '/authRequests/' + uid);
+        var grantRef = db.ref(ROOT + '/authGrants/' + uid);
+
+        return new Promise(function (resolve, reject) {
+          var done = false;
+          var timer = setTimeout(function () {
+            if (done) return;
+            done = true;
+            grantRef.off();
+            reject(new Error('That took too long. Please try again.'));
+          }, AUTH_TIMEOUT_MS);
+
+          function finish(fn) {
+            if (done) return true;
+            done = true;
+            clearTimeout(timer);
+            grantRef.off();
+            fn();
+            return false;
+          }
+
+          grantRef.on('value', function (snap) {
+            var g = snap.val();
+            if (!g) return;
+            /* Clear both nodes while we still own this uid — after
+               signInWithCustomToken the uid changes and the rules would stop
+               us touching them, leaving litter behind. */
+            var cleanup = Promise.all([
+              grantRef.remove().catch(function () {}),
+              reqRef.remove().catch(function () {})
+            ]);
+            finish(function () {
+              cleanup.then(function () {
+                if (g.ok) resolve(g);
+                else reject(new Error(g.error || 'Passcode not recognised.'));
+              });
+            });
+          }, function (err) {
+            finish(function () { reject(err); });
+          });
+
+          var body = { at: firebase.database.ServerValue.TIMESTAMP };
+          Object.keys(payload).forEach(function (k) {
+            if (payload[k] != null && payload[k] !== '') body[k] = payload[k];
+          });
+          reqRef.set(body).catch(function (err) {
+            finish(function () { reject(err); });
+          });
+        });
+      });
   }
 
   function remember(code, token) {
@@ -206,9 +287,8 @@
      when the club arrived by their own link — it only narrows the search
      server-side; the passcode is always required. */
   function enter(code, token) {
-    return callable('programmeEnter')({ code: normCode(code), token: token || '' })
-      .then(function (res) {
-        var d = res.data || {};
+    return requestGrant({ code: normCode(code), token: token || '' })
+      .then(function (d) {
         return app.auth().signInWithCustomToken(d.customToken).then(function () {
           session = {
             code: d.club.code, name: d.club.name, division: d.club.division || '',
@@ -226,13 +306,12 @@
      a '*' token for the NAMED app, so the portal session is never modified and
      no custom claims are written onto real user accounts. */
   function enterAsAdmin() {
-    /* Region goes on the APP in the compat SDK — firebase.functions(x) takes an
-       App, not a region string, so calling it with 'europe-west2' would target
-       us-central1 and 404. The DEFAULT app is deliberate here: programmeClaim
-       authenticates the caller's portal session, which lives on that app. */
-    return firebase.app().functions(REGION).httpsCallable('programmeClaim')({})
-      .then(function (res) {
-        return app.auth().signInWithCustomToken((res.data || {}).customToken);
+    /* The request is written from the DEFAULT app, so programmeAuth sees the
+       real portal uid and can check users/<uid>/role. The token it returns is
+       used to sign into the NAMED app, leaving the portal session untouched. */
+    return requestGrant({ admin: true })
+      .then(function (d) {
+        return app.auth().signInWithCustomToken(d.customToken);
       })
       .then(function () {
         session = { code: '*', name: 'National League', division: '', isNL: true, isAdmin: true };

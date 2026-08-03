@@ -41,11 +41,29 @@ folders are named the same thing.
 
 This is the part worth reading before changing anything.
 
-A club types a passcode. It is **not** checked in the browser. It goes to the
-`programmeEnter` callable (`functions/programme.js`), which validates it with
-the Admin SDK and returns a **custom token carrying a `pClub` claim** — the
-club's clubs-meta code, or `NL`. Storage and RTDB rules then enforce write-own
-against a claim the browser cannot forge.
+A club types a passcode. It is **not** checked in the browser. The client signs
+in anonymously, writes the passcode to `authRequests/<uid>`, and waits on
+`authGrants/<uid>`; the `programmeAuth` RTDB trigger
+(`functions/programme.js`) validates it with the Admin SDK and writes back a
+**custom token carrying a `pClub` claim** — the club's clubs-meta code, or `NL`.
+Storage and RTDB rules then enforce write-own against a claim the browser cannot
+forge. The trigger deletes the request immediately, so a passcode never lingers
+in the database.
+
+**Why a trigger and not a callable.** It was a callable first. It deployed, but
+Firebase could not grant it a public invoker — the project carries an org policy
+blocking `allUsers` on new Cloud Run services (`Failed to set the IAM Policy on
+the Service .../programmeenter`, 03/08/2026). Clubs have no Google account, so
+an un-invokable callable is a dead end. `footage/NEXT.md` hit the same wall on
+13/07/2026 and records the RTDB-triggered path as the org-policy-proof
+alternative; this is that path. Anonymous sign-in goes through Identity Toolkit,
+not Cloud Run, so it is unaffected.
+
+**The cost is latency.** Eventarc delivery is seconds, not milliseconds —
+footage measured ~15-20s and found it structural rather than cold-start. That
+killed it for video previews, which happen constantly. Here it runs on a gate a
+device hits once every 30 days, behind a spinner that says so after 3s. The
+client gives up at 60s.
 
 This is the one deliberate difference from `/uw-promo/`, where passcodes are
 world-readable and compared client-side. With anonymous auth the token carries
@@ -62,11 +80,16 @@ client ever reads a passcode: `config` is closed to everything except a
   nothing is attributable to a named person.
 - **The admin console runs two Firebase apps.** The default app holds the
   portal session (auth-guard); the named app `nlProgramme` holds a `pClub: '*'`
-  token minted by `programmeClaim` after it checks the caller's portal role
-  server-side. The portal session is never modified and no custom claims are
+  token minted by `programmeAuth` after it checks the caller's portal role
+  server-side (the admin request is written from the default app, so the
+  trigger sees the real portal uid). The portal session is never modified and no custom claims are
   written onto real user accounts.
-- **Brute force** is capped at 20 failed attempts per IP per hour, counted in a
-  node no client can read or write.
+- **Brute force** is throttled at 10 failures per uid and 120 per 10 minutes
+  globally, in a node no client can read or write. A trigger sees no source IP
+  and anonymous uids are free to mint, so the global ceiling is what actually
+  bounds a distributed guess: at that rate a 31^6 space takes ~140 years, and
+  every attempt still costs an anonymous signup (IP-throttled by Identity
+  Toolkit) plus an invocation.
 - A leaked passcode or link is fixed by regenerating it in the console, which
   kills the old one instantly — including on any device that remembered it.
 
@@ -82,12 +105,14 @@ RTDB `app-data/media-programme/`:
 config/
   clubs/<CODE>   { name, division, passcode, token, addedAt }   # pClub '*' only
   nl             { name, passcode, token, addedAt }             # the 73rd code
+authRequests/<uid>         { code, token?, admin?, at }   # own uid only; deleted by the trigger
+authGrants/<uid>           { ok, customToken?, club?, error? }   # own uid only
 folders/<CODE>/<folderId>  { name, sortOrder, createdAt }
 files/<CODE>/<fileId>      { name, folderId, size, contentType, storagePath,
                              url, uploadedAt, usedFrom?, usedUntil? }
 trash/<CODE>/<fileId>      { ...file, deletedAt }
 audit/<pushId>             { ts, actor, actorLabel, action, club?, detail? }
-rate/<ip>                  brute-force counters (Admin SDK only)
+rate/{uid/<uid>,global}    throttle counters (Admin SDK only)
 ```
 
 Bytes: Storage `programme/<CODE>/<folderId>/<fileId>-<name>`.
@@ -105,9 +130,9 @@ Rules: `system/rtdb/rules.snapshot.json` (`app-data/media-programme`) and
 
 ## Deploying
 
-Nothing here auto-deploys. Four steps, all owner-run:
-
-1. **Functions** — `firebase deploy --only functions:programmeEnter,functions:programmeClaim`
+1. **Functions** — automatic. `.github/workflows/deploy-footage-proxy.yml` runs
+   on any push to `main` touching `functions/**` and deploys the whole codebase,
+   not just the footage proxy. Confirm the run is green.
 2. **Storage rules** — paste `system/rtdb/storage.rules.snapshot` into
    Firebase console → Storage → Rules
 3. **RTDB rules** — paste `system/rtdb/rules.snapshot.json` into
@@ -120,15 +145,11 @@ and link for each of the current 72 clubs plus the National League, and is
 additive and idempotent — re-running after promotion/relegation picks up new
 clubs without touching an existing passcode.
 
-> **One deploy-time risk.** `programmeEnter` is invoked by callers with no
-> Firebase account at all, so its Cloud Run service must accept unauthenticated
-> invocation. `footage/NEXT.md` records a `getFootageUrl` callable being blocked
-> by the org's Domain Restricted Sharing policy for exactly this reason
-> (13/07/2026). The `account.js` callables have worked from the browser since
-> (`consumeInvite`, live 25/07/2026), which is the same invocation path, so this
-> should be fine — but if `programmeEnter` returns 403 on first call, that
-> policy is the cause. Fallback: move validation to an RTDB-triggered signer, or
-> grant this one service `allUsers` invoker.
+> **Leftovers from the first attempt.** The callable version deployed two
+> services, `programmeEnter` and `programmeClaim`, before failing on the invoker
+> grant. They are no longer in the source, so the next deploy removes them
+> (`--force` lets it delete non-interactively). If they linger, they are inert —
+> nothing can invoke them — but delete them by hand to keep the console honest.
 
 ## Testing
 
@@ -141,7 +162,8 @@ and a check that `PP.MAX_BYTES` still equals the limit in the Storage rules.
 Rules enforcement and the token exchange need a live run. Worth doing by hand
 once after deploy:
 
-1. Enter with club A's passcode; confirm you can browse club B and download.
+1. Enter with club A's passcode; confirm the gate resolves (allow a few
+   seconds), and that you can browse club B and download.
 2. In devtools, try `PP.ref('files/<B>/x').set({...})` → must fail
    `PERMISSION_DENIED`.
 3. Try `PP.storageRef('programme/<B>/x').put(...)` → must fail unauthorised.
