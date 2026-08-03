@@ -39,6 +39,24 @@
        ?sim=off          → real clock, bar hidden (explicit form)
 
      Changelog:
+       02/08/2026  v3.6  Leaderboard reads a pre-computed table instead of
+                         every fan's records. The widget used to pull the
+                         whole users and predictions trees to build its
+                         standings in the browser, which is what forced
+                         both to be readable at root — and a root read
+                         hands any client the complete list of fan ids,
+                         which is what made everything else enumerable.
+                         Standings now come from leaderboard/, written
+                         every 15 minutes by a scheduled job; this page
+                         reads only its OWN registration and predictions.
+                         Rows carry no id at all: a fan is matched to
+                         their own row by a salted hash of their id, which
+                         does not reverse. Club v club is derived from the
+                         same rows rather than aggregated separately, so
+                         the two tables cannot disagree. The trade is that
+                         standings are periodic rather than live — they
+                         only move when matches finish, so 15 minutes sits
+                         inside what anyone notices.
        02/08/2026  v3.5  App Check site key set, so attestation is
                          live. Monitor mode only — enforcement is
                          still off in the console, so an unattested
@@ -1186,11 +1204,21 @@
     allMatches: [],     // every fixture for the season (paginated full fetch)
     matches: [],        // filtered subset for the currently-active matchday
     registration: null,
-    allPredsRaw: {},    // full RTDB predictions tree { jwtId: { matchday: { matchId: ... } } }
+    myPreds: {},        // THIS user's predictions only { matchday: { matchId: ... } }
     predictions: {},    // current user, current matchday
     drafts: {},
     editing: {},
-    allUsers: {},
+    /* Standings come pre-computed from leaderboard/, not from reading every
+       fan's records. The widget used to pull the whole users and predictions
+       trees to build its tables, which is what forced those trees to be
+       readable at root — and a root read hands any client the full list of
+       fan ids. See embeds/auth-hardening-plan.md §4. */
+    lbRows: null,       // rows for the current scope, or null while loading
+    lbLoading: false,
+    lbError: false,
+    lbCache: {},        // scope path -> rows, so flipping filters is instant
+    lbUpdatedAt: null,
+    myHash: null,       // salted hash of our own jwtId, to find our own row
     clubColours: {},        // NLS teamID (optaID) -> {primary, secondary, tertiary} from clubs-meta.json
     clubNames: {},          // NLS teamID (optaID) -> {short, code} from clubs-meta.json
     seasonId: null,         // current season from clubs-meta.json (fallback: SEASON_ID)
@@ -1280,7 +1308,7 @@
   function recomputePredictionsFromRaw() {
     if (!state.user) return;
     var key = currentMatchdayKey();
-    state.predictions = (state.allPredsRaw[state.user.id] && state.allPredsRaw[state.user.id][key]) || {};
+    state.predictions = state.myPreds[key] || {};
   }
 
   // ---------- match state ----------
@@ -1343,11 +1371,16 @@
     return reg && (m.attributes.homeTeam.teamID === reg.teamId || m.attributes.awayTeam.teamID === reg.teamId);
   }
   function monthOfMatchday(mdKey) { return String(mdKey || '').slice(0, 7); } // 'YYYY-MM'
-  // Cumulative tally for one user across the whole season, one month, or a
-  // single matchday (the leaderboard's lbScope/lbMonth/lbDay state).
+  // Our OWN cumulative tally across the whole season, one month, or a single
+  // matchday (the leaderboard's lbScope/lbMonth/lbDay state).
   // results = correct W/D/L (includes exacts); exacts = exact scorelines.
-  function tallyForUser(jwtId, now) {
-    var byDay = state.allPredsRaw[jwtId] || {};
+  //
+  // This used to run for every fan, to build the leaderboard in the browser.
+  // It now runs for one — the signed-in fan — because everyone else's numbers
+  // arrive pre-computed. It is kept because a fan with nothing settled yet is
+  // absent from the aggregate and still deserves to see their own row.
+  function myTally(now) {
+    var byDay = state.myPreds || {};
     var t = { results: 0, exacts: 0, settled: 0 };
     for (var i = 0; i < state.allMatches.length; i++) {
       var m = state.allMatches[i];
@@ -1754,6 +1787,14 @@
           renderAll();
         }).catch(function () {});
         return;
+      }
+      // Re-read the aggregate every few minutes. It is rebuilt every 15, so
+      // this is not a live feed and does not need to behave like one — but a
+      // fan who leaves the page open through a Saturday should still see the
+      // table move. Cache-busting on purpose: the cached copy is the stale one.
+      if (tickN % 10 === 0 && state.fbAuthed) {
+        state.lbCache = {};
+        loadLeaderboard(true);
       }
       if (stateSig(now) !== renderedStateSig) { recomputeMatchday(); renderAll(); return; }
       Array.prototype.forEach.call(fixtures.querySelectorAll('[data-cutoff]'), function (el) {
@@ -2294,17 +2335,114 @@
     }
     return labels;
   }
-  // All registered users' tallies for the current month scope, with their
-  // registration record attached. Shared by the leaderboard + club table.
-  function allTallies(now) {
-    var userIds = Object.keys(state.allUsers);
-    if (state.user && state.registration && userIds.indexOf(state.user.id) === -1) userIds.push(state.user.id);
-    return userIds.map(function (uid) {
-      var reg = (uid === state.user.id) ? state.registration : state.allUsers[uid];
-      if (!reg) return null;
-      var t = tallyForUser(uid, now);
-      return { uid: uid, reg: reg, results: t.results, exacts: t.exacts, settled: t.settled };
-    }).filter(Boolean);
+  /* ---------- the pre-computed leaderboard ----------
+     Standings arrive from leaderboard/, written every 15 minutes by
+     scripts/build-leaderboard.js. The widget no longer reads anyone else's
+     records to build them: it used to pull the whole users and predictions
+     trees, and that root read is what handed every client the full list of
+     fan ids. See embeds/auth-hardening-plan.md §4.
+
+     A row carries no id. To find our own we hash our jwtId with the same salt
+     the builder used and match on that — it does not reverse, and testing it
+     requires already holding the id. */
+  var LB_SALT = 'nl-predictor-leaderboard-v1';
+  var LB_HASH_LEN = 12;
+
+  function computeMyHash() {
+    if (!state.user || !window.crypto || !crypto.subtle) return Promise.resolve(null);
+    var bytes = new TextEncoder().encode(LB_SALT + state.user.id);
+    return crypto.subtle.digest('SHA-256', bytes).then(function (buf) {
+      var hex = Array.prototype.map.call(new Uint8Array(buf), function (b) {
+        return ('0' + b.toString(16)).slice(-2);
+      }).join('');
+      state.myHash = hex.slice(0, LB_HASH_LEN);
+      return state.myHash;
+    }).catch(function () { return null; });
+  }
+
+  // Which node the current scope needs. One small read per scope rather than
+  // the whole tree, so a season with 40-odd matchdays does not arrive on every
+  // page load.
+  function lbPath() {
+    if (state.lbScope === 'month' && state.lbMonth) return 'leaderboard/month/' + state.lbMonth;
+    if (state.lbScope === 'day' && state.lbDay) return 'leaderboard/day/' + state.lbDay;
+    return 'leaderboard/season';
+  }
+
+  /* Fetch once per scope and cache. once() rather than on(): the aggregate
+     changes every 15 minutes at most, so a live subscription per scope would
+     be a socket held open for nothing. The ticker re-reads periodically. */
+  function loadLeaderboard(force) {
+    if (!state.fbAuthed) return;
+    var path = lbPath();
+    if (!force && state.lbCache[path]) {
+      state.lbRows = state.lbCache[path];
+      state.lbError = false;
+      renderTable(); renderClubTable();
+      return;
+    }
+    state.lbLoading = true;
+    if (!force) { state.lbRows = null; renderTable(); }
+    whenAuthed(function () {
+      return fbDb.ref(path).once('value').then(function (snap) {
+        var val = snap.val() || {};
+        var rows = val.rows || [];
+        state.lbCache[path] = rows;
+        state.lbRows = rows;
+        state.lbError = false;
+      }).catch(function () {
+        // A denied or failed read must not blank the rest of the widget —
+        // predicting still works without a leaderboard.
+        state.lbRows = [];
+        state.lbError = true;
+      }).then(function () {
+        state.lbLoading = false;
+        renderTable(); renderClubTable();
+      });
+    });
+  }
+  // The aggregate is only ever read after auth is confirmed; anything earlier
+  // is denied by the rules and would show as an empty table on first paint.
+  function whenAuthed(fn) {
+    if (fbAuth && fbAuth.currentUser) { fn(); return; }
+    var off = fbAuth.onAuthStateChanged(function (u) { if (u) { off(); fn(); } });
+  }
+
+  /* Rows for the current view: the aggregate, filtered to our own club if the
+     fan asked for that, plus our own row when we are not in it yet. Everyone
+     in the aggregate has at least one settled prediction — the builder drops
+     the rest — so the "hide zero-settled" rule the widget used to apply is
+     already applied upstream. */
+  function visibleRows() {
+    var all = state.lbRows || [];
+    var mine = state.registration;
+    var rows = (state.lbMine && mine)
+      ? all.filter(function (r) { return r.t === mine.teamId; })
+      : all.slice();
+
+    /* Add our own row when the aggregate does not have us yet — a fan with
+       nothing settled, or one who predicted in the last quarter of an hour.
+       Tested against the FULL aggregate, not the filtered rows: checking the
+       filtered set would add a duplicate the moment the my-club filter hid us
+       from a view we are in fact in. */
+    var inAggregate = state.myHash && all.some(function (r) { return r.h === state.myHash; });
+    if (mine && !inAggregate) {
+      var t = myTally(simNow());
+      rows.push({
+        n: ((mine.forename || '') + ' ' + (mine.surnameInitial || '')).trim(),
+        c: mine.crestUrl || '', t: mine.teamId || '', tn: mine.teamName || '',
+        r: t.results, e: t.exacts, s: t.settled, h: state.myHash || '__me__',
+      });
+    }
+    rows.sort(function (a, b) {
+      if (b.r !== a.r) return b.r - a.r;
+      if (b.e !== a.e) return b.e - a.e;
+      return String(a.n).localeCompare(String(b.n));
+    });
+    return rows;
+  }
+  function isMyRow(r) {
+    return !!(state.myHash && r.h === state.myHash) || r.h === '__me__';
   }
   // Scope chips (Season / Month / Matchday) + contextual select, then the
   // two-state club toggle (all clubs / fans of YOUR club — never a browse-
@@ -2354,7 +2492,9 @@
       state.lbScope = s;
       if (s === 'month' && !state.lbMonth) state.lbMonth = lbDefaultMonth();
       if (s === 'day' && !state.lbDay) state.lbDay = lbDefaultDay();
-      renderTable(); renderClubTable();
+      // A scope change points at a different aggregate node, so it needs a
+      // fetch; the club toggle below only filters rows we already hold.
+      loadLeaderboard();
     });
     if (clubEl) clubEl.addEventListener('click', function (e) {
       var b = e.target.closest ? e.target.closest('button') : null;
@@ -2363,29 +2503,27 @@
       renderTable();
     });
     if (mSel) mSel.addEventListener('change', function () {
-      state.lbMonth = mSel.value; renderTable(); renderClubTable();
+      state.lbMonth = mSel.value; loadLeaderboard();
     });
     if (dSel) dSel.addEventListener('change', function () {
-      state.lbDay = dSel.value; renderTable(); renderClubTable();
+      state.lbDay = dSel.value; loadLeaderboard();
     });
   }
   function renderTable() {
     if (!(state.allMatches || []).length) { tableEl.innerHTML = ''; return; }
     var now = simNow();
 
-    var rows = allTallies(now).filter(function (r) {
-      if (state.lbMine && state.registration && r.reg.teamId !== state.registration.teamId) return false;
-      // Hide zero-settled players from a filtered view (a late joiner never
-      // looks "punished" in a month they sat out) — but always show yourself.
-      return r.settled > 0 || r.uid === state.user.id;
-    }).sort(function (a, b) {
-      if (b.results !== a.results) return b.results - a.results;
-      if (b.exacts !== a.exacts) return b.exacts - a.exacts;
-      return (a.reg.forename || '').localeCompare(b.reg.forename || '');
-    });
+    var rows = visibleRows();
     var ranks = rankLabels(rows, function (a, b) {
-      return a.results === b.results && a.exacts === b.exacts;
+      return a.r === b.r && a.e === b.e;
     });
+
+    // Three distinct empty states, because they mean different things: still
+    // fetching, could not fetch, and genuinely nobody here yet.
+    var empty = '';
+    if (state.lbRows === null) empty = 'Loading the leaderboard…';
+    else if (state.lbError) empty = 'The leaderboard is briefly unavailable — your predictions are safe.';
+    else if (rows.length === 0) empty = 'No players in this view yet — try a different period or scope.';
 
     var inner =
       '<div class="nlsp__tablehead">' +
@@ -2398,19 +2536,16 @@
         '<span title="Correct scoreline predictions">Exact</span>' +
         '<span title="Finished matches predicted">Games</span>' +
       '</div>' +
-      (rows.length === 0
-        ? '<div class="nlsp__clubfoot">No players in this view yet — try a different period or scope.</div>'
-        : '') +
+      (empty ? '<div class="nlsp__clubfoot">' + $h(empty) + '</div>' : '') +
       rows.map(function (r, i) {
-        var name = $h(r.reg.forename) + ' ' + $h(r.reg.surnameInitial || '');
-        var cls = 'nlsp__trow' + (r.uid === state.user.id ? ' is-you' : '');
-        return '<div class="' + cls + '">' +
+        var me = isMyRow(r);
+        return '<div class="nlsp__trow' + (me ? ' is-you' : '') + '">' +
           '<span class="nlsp__rank">' + ranks[i] + '</span>' +
-          crestImg(r.reg.crestUrl, r.reg.teamName, 22) +
-          '<span>' + name + (r.uid === state.user.id ? ' <span class="nlsp__youlbl">(you)</span>' : '') + '</span>' +
-          '<span class="nlsp__pts">' + r.results + '</span>' +
-          '<span class="nlsp__exacts">' + r.exacts + '</span>' +
-          '<span class="nlsp__games">' + r.settled + '</span>' +
+          crestImg(r.c, r.tn, 22) +
+          '<span>' + $h(r.n) + (me ? ' <span class="nlsp__youlbl">(you)</span>' : '') + '</span>' +
+          '<span class="nlsp__pts">' + r.r + '</span>' +
+          '<span class="nlsp__exacts">' + r.e + '</span>' +
+          '<span class="nlsp__games">' + r.s + '</span>' +
         '</div>';
       }).join('');
 
@@ -2423,17 +2558,21 @@
   // Accuracy percentage (correct results ÷ settled predictions across the
   // club's fans) so Torquay's fanbase size doesn't drown out Farnham's.
   // Clubs need CLUB_TABLE_MIN_SETTLED settled predictions to rank.
+  //
+  // Derived from the same rows the leaderboard draws, rather than precomputed
+  // separately — two aggregates of the same numbers would eventually disagree,
+  // and the version fans noticed would be whichever was wrong. Ignores the
+  // my-club filter deliberately: a club table of one club is not a table.
   function renderClubTable() {
     if (!(state.allMatches || []).length) { clubTableEl.innerHTML = ''; return; }
-    var now = simNow();
     var byClub = {};
-    allTallies(now).forEach(function (r) {
-      if (!r.reg.teamId || !r.settled) return;
-      var c = byClub[r.reg.teamId] || (byClub[r.reg.teamId] = {
-        teamId: r.reg.teamId, teamName: r.reg.teamName, crestUrl: r.reg.crestUrl,
+    (state.lbRows || []).forEach(function (r) {
+      if (!r.t || !r.s) return;
+      var c = byClub[r.t] || (byClub[r.t] = {
+        teamId: r.t, teamName: r.tn, crestUrl: r.c,
         fans: 0, results: 0, exacts: 0, settled: 0
       });
-      c.fans += 1; c.results += r.results; c.exacts += r.exacts; c.settled += r.settled;
+      c.fans += 1; c.results += r.r; c.exacts += r.e; c.settled += r.s;
     });
     var clubs = Object.keys(byClub).map(function (id) { return byClub[id]; });
     if (!clubs.length) { clubTableEl.innerHTML = ''; return; }
@@ -2527,10 +2666,15 @@
   }
 
   // ---------- RTDB listeners ----------
+  /* Own records only. These were `users` and `predictions` at tree root, which
+     is what forced both trees to be readable by anyone signed in — and a root
+     read hands out the complete list of fan ids, which is what made everything
+     else enumerable. Standings now come from the pre-computed leaderboard, so
+     nothing here needs to see another fan's data. */
   function listenAll() {
-    fbDb.ref('users').on('value', function (snap) {
-      state.allUsers = snap.val() || {};
-      state.registration = state.allUsers[state.user.id] || null;
+    computeMyHash().then(function () { loadLeaderboard(); });
+    fbDb.ref('users/' + state.user.id).on('value', function (snap) {
+      state.registration = snap.val() || null;
       if (!state.registration) {
         hideGate();
         renderRegistration();
@@ -2545,8 +2689,8 @@
         renderDatebar(); renderHero(); renderFixtures(); renderSubmitbar(); renderReset(); renderTable(); renderClubTable(); renderSimBar();
       }
     });
-    fbDb.ref('predictions').on('value', function (snap) {
-      state.allPredsRaw = snap.val() || {};
+    fbDb.ref('predictions/' + state.user.id).on('value', function (snap) {
+      state.myPreds = snap.val() || {};
       recomputePredictionsFromRaw();
       if (!main.hidden) {
         // renderHero() belongs here too — the hero card shows the user's own
