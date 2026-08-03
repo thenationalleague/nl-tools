@@ -24,8 +24,8 @@
   weekend's programme.
 
   Write-own is enforced by Storage + RTDB rules against the `pClub` claim that
-  the programmeEnter callable puts in the token — not by this file. Nothing
-  here is load-bearing for access control.
+  the programmeAuth trigger puts in the token — not by this file. Nothing here
+  is load-bearing for access control.
 
   Storage (RTDB app-data/media-programme/):
     folders/<CODE>/<folderId>  { name, sortOrder, createdAt }
@@ -44,7 +44,6 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-functions-compat.js"></script>
 <script src="/programme/_shared.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
 <link rel="stylesheet" href="/programme/_shared.css">
@@ -130,12 +129,23 @@
       if (code.length < 4) { err.textContent = 'Enter your full passcode.'; return; }
       err.textContent = '';
       btn.disabled = true; btn.textContent = 'Checking…';
+      /* The check is an RTDB round-trip to the programmeAuth trigger, and
+         Eventarc delivery is measured in seconds, not milliseconds. Say so
+         rather than letting a slow gate read as a broken one. */
+      var slow = setTimeout(function () {
+        el('gateSub').textContent = 'Still checking — this can take a few seconds.';
+      }, 3000);
       PP.enter(code, linkToken).then(function (s) {
+        clearTimeout(slow);
         enter(s);
       }).catch(function (e) {
+        clearTimeout(slow);
+        el('gateSub').textContent = linkToken
+          ? 'Enter your club passcode to open the library.'
+          : 'Enter your club passcode.';
         btn.disabled = false; btn.textContent = 'Open';
-        /* The callable returns a plain message for both "wrong passcode" and
-           "rate limited" — surface it as-is rather than inventing wording. */
+        /* programmeAuth returns a plain message for wrong passcode, throttling
+           and timeout alike — surface it as-is rather than inventing wording. */
         err.textContent = (e && e.message) || 'Passcode not recognised.';
         inp.select();
       });
