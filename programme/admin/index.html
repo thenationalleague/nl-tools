@@ -116,14 +116,14 @@
   tr.is-nl td { background: var(--primary-50); }
   tr.is-nl .club-cell__name { font-variation-settings: 'wght' 800; font-weight: 800; }
 
-  .tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--border); margin-bottom: 20px; }
-  .tabs__btn { background: none; border: none; border-bottom: 3px solid transparent; margin-bottom: -2px;
-    padding: 10px 16px; cursor: pointer; font-family: var(--font); font-size: 13px; font-weight: 700;
-    color: var(--text-muted); }
-  .tabs__btn:hover { color: var(--navy); }
-  .tabs__btn.on { color: var(--navy); border-bottom-color: var(--primary);
-    font-weight: 900; font-variation-settings: 'wght' 900; }
-  .tabs__btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  /* Tabs are the canon component (.tabs / .tab / .tab.active in nl-brand.css) —
+     nothing to add here. An earlier build hand-rolled .tabs__btn AND redefined
+     .tabs, which silently broke the shared component on this page. */
+
+  /* Boot/loading state. A pane must never sit empty with no explanation: every
+     RTDB listener below has an error callback that writes into it. */
+  .boot { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 22px; text-align: center; color: var(--text-muted); font-size: 13px; }
 </style>
 </head>
 <body>
@@ -135,9 +135,9 @@
   <div class="page">
 
     <div class="tabs" id="tabs">
-      <button class="tabs__btn on" data-tab="access">Access</button>
-      <button class="tabs__btn" data-tab="trash">Removed files</button>
-      <button class="tabs__btn" data-tab="audit">Audit</button>
+      <button class="tab active" data-tab="access">Access</button>
+      <button class="tab" data-tab="trash">Removed files</button>
+      <button class="tab" data-tab="audit">Audit</button>
     </div>
 
     <div id="paneAccess"></div>
@@ -162,31 +162,53 @@
   var esc = function (s) { return NL.escHtml(s); };
   function el(id) { return document.getElementById(id); }
 
+  /* Nothing here may fail silently. An earlier build attached the RTDB
+     listeners with no error callback and rendered only once data arrived, so a
+     denied read — or a passcode exchange that never came back — left the panes
+     blank forever with nothing in the console. Every path below ends in either
+     content or a visible message. */
+  function status(title, detail) {
+    el('paneAccess').innerHTML = '<div class="boot"><strong>' + esc(title) + '</strong>' +
+      (detail ? '<div style="margin-top:6px">' + esc(detail) + '</div>' : '') + '</div>';
+  }
+
+  function fail(where, e) {
+    var msg = (e && (e.message || e.code)) || String(e);
+    console.error('[programme-admin] ' + where, e);
+    el('paneAccess').innerHTML =
+      '<div class="empty-state"><div class="empty-state__title">Couldn’t open the console</div>' +
+      '<div class="empty-state__text">' + esc(where) + ' — ' + esc(msg) + '</div></div>';
+  }
+
   window.TOOL.boot = function (session) {
+    status('Connecting…', 'Verifying your access with the National League.');
+
     /* Exchange the portal session for a pClub:'*' token on the NAMED app.
        Everything below reads/writes through that — the rules never see the
        portal session, so an admin's powers here come from a server-minted
-       claim rather than from this page trusting session.role. */
+       claim rather than from this page trusting session.role. The exchange is
+       an RTDB round-trip to the programmeAuth trigger, so it takes seconds. */
     PP.enterAsAdmin().then(function () {
       ready = true;
+      status('Loading…', 'Access confirmed. Fetching the club roster.');
       return NL.clubs.forSeason();
     }).then(function (clubs) {
       ROSTER = clubs;
       BY_CODE = {};
       clubs.forEach(function (c) { BY_CODE[c.code] = c; });
 
-      PP.ref('config').on('value', function (s) {
-        var v = s.val() || {};
-        CONFIG = { clubs: v.clubs || {}, nl: v.nl || null };
-        render();
-      });
-      PP.ref('files').on('value', function (s) { FILES = s.val() || {}; render(); });
-      PP.ref('trash').on('value', function (s) { TRASH = s.val() || {}; render(); });
-      PP.ref('audit').limitToLast(200).on('value', function (s) { AUDIT = s.val() || {}; render(); });
-    }).catch(function (e) {
-      el('paneAccess').innerHTML = '<div class="empty-state"><div class="empty-state__title">Couldn’t open the console</div>' +
-        '<div class="empty-state__text">' + esc(e.message || String(e)) + '</div></div>';
-    });
+      function watch(path, apply, ref) {
+        (ref || PP.ref(path)).on('value', function (s) {
+          apply(s.val() || {});
+          render();
+        }, function (err) { fail('reading ' + path, err); });
+      }
+
+      watch('config', function (v) { CONFIG = { clubs: v.clubs || {}, nl: v.nl || null }; });
+      watch('files', function (v) { FILES = v; });
+      watch('trash', function (v) { TRASH = v; });
+      watch('audit', function (v) { AUDIT = v; }, PP.ref('audit').limitToLast(200));
+    }).catch(function (e) { fail('signing in', e); });
   };
 
   if (window._toolDeferredSession) {
@@ -199,7 +221,7 @@
     b.onclick = function () {
       tab = b.getAttribute('data-tab');
       Array.prototype.forEach.call(el('tabs').querySelectorAll('[data-tab]'), function (x) {
-        x.classList.toggle('on', x === b);
+        x.classList.toggle('active', x === b);
       });
       el('paneAccess').style.display = tab === 'access' ? 'block' : 'none';
       el('paneTrash').style.display = tab === 'trash' ? 'block' : 'none';
