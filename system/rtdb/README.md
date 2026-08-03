@@ -9,6 +9,7 @@ in-repo answer to "what's deployed right now?".
 |---|---|---|
 | `rules.snapshot.json` | The full database security rules | Firebase console → Realtime Database → Rules |
 | `storage.rules.snapshot` | The full Storage security rules. Key idiom: `request.auth.token.email != null` distinguishes real portal accounts from the anonymous-auth capability pages (footage, uw-promo) — anonymous tokens carry no email claim. | Firebase console → Storage → Rules |
+| `storage.cors.json` | Bucket CORS. Needed **only** for bulk (zip) download, which reads file bytes into the page — a browser will not do that cross-origin unless the bucket allows the origin. Single-file downloads are unaffected: the browser saves those directly and the page never sees the bytes. | Not settable in any console UI — Cloud Shell: `gcloud storage buckets update gs://nl-tools.firebasestorage.app --cors-file=system/rtdb/storage.cors.json` |
 | `tools-registry.snapshot.json` | The `tools/` node (tool registry: labels, urls, role defaults) | RTDB `tools/` (drives the portal cards **and** auth-guard access defaults) |
 | `tools-registry.parked.json` | Holding pen for tools pulled off the portal (back in planning). **NOT deployed** — records live here instead of in `tools/`, so those tools are superadmin-only + invisible while their code stays in the repo. See `system/tool-status-and-access.md`. | — (never pasted) |
 

@@ -48,11 +48,14 @@ is PNG, JPEG and PDF, all already compressed, so deflate would spend CPU for a
 percent or two. Right-click a folder (or use its ⋯ button) for that folder and
 everything under it; the club root offers the whole pack.
 
-> Bulk download reads file bytes into the tab, which a browser will only do
-> cross-origin if the **Storage bucket's CORS** config allows `nl.tools`.
-> Single-file downloads never touch this — the browser saves those directly and
-> the page never sees the bytes — so if bulk fails and single works, CORS is
-> why, and the UI says so rather than reporting a generic network error.
+> **Bulk download needs bucket CORS.** It reads file bytes into the tab, which
+> a browser will only do cross-origin if the bucket allows the origin —
+> confirmed live on 03/08/2026, where the first attempt failed exactly as the
+> UI predicted. The config is `system/rtdb/storage.cors.json`; there is no
+> console UI for bucket CORS, so it is applied from Cloud Shell.
+> Single-file downloads never touch this: the browser saves those directly and
+> the page never sees the bytes. So "bulk fails, single works" has one cause,
+> and the UI names it rather than reporting a generic network error.
 
 ## Access — how write-own is actually enforced
 
