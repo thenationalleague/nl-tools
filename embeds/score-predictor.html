@@ -39,6 +39,17 @@
        ?sim=off          → real clock, bar hidden (explicit form)
 
      Changelog:
+       03/08/2026  v3.7  Leaderboard periods only offer windows that have
+                         actually produced a result. The month and matchday
+                         dropdowns listed every date in the season, so
+                         before a ball was kicked they were a list of
+                         futures showing everyone on nought — which reads
+                         as "you scored nothing in March" rather than
+                         "March has not happened". Both now derive from
+                         finished matches, and the Month and Matchday chips
+                         do not appear at all until there is something to
+                         slice: a chip that opens an empty dropdown is
+                         worse than no chip.
        02/08/2026  v3.6  Leaderboard reads a pre-computed table instead of
                          every fan's records. The widget used to pull the
                          whole users and predictions trees to build its
@@ -2283,10 +2294,12 @@
 
   // ---------- league table ----------
   // Every month that has at least one fixture, in season order.
+  // Months with at least one finished match — same reasoning as
+  // lbMatchdayKeys() below.
   function seasonMonths() {
     var seen = {};
-    (state.allMatches || []).forEach(function (m) {
-      var mo = monthOfMatchday(matchMatchdayKey(m));
+    lbMatchdayKeys().forEach(function (k) {
+      var mo = monthOfMatchday(k);
       if (mo) seen[mo] = true;
     });
     return Object.keys(seen).sort();
@@ -2294,11 +2307,20 @@
   function monthLabel(mo) {
     return new Date(mo + '-15T12:00:00Z').toLocaleDateString('en-GB', { month:'long', timeZone:'Europe/London' });
   }
-  // Every matchday key across ALL competitions (the leaderboard spans fans of
-  // every division, unlike the datebar which is scoped to the user's comp).
+  /* Matchday keys the leaderboard can offer, across ALL competitions (it spans
+     fans of every division, unlike the datebar, which is scoped to the user's
+     own comp).
+
+     Only periods that have actually produced a result. Offering every date in
+     the season made the dropdown a list of futures, each showing everyone on
+     nought — which reads as "you scored nothing in March" rather than "March
+     has not happened". A period nobody could have scored in is not a period
+     worth ranking. */
   function lbMatchdayKeys() {
+    var now = simNow();
     var seen = {};
     (state.allMatches || []).forEach(function (m) {
+      if (stateOf(m, now) !== 'post') return;
       var k = matchMatchdayKey(m); if (k) seen[k] = true;
     });
     return Object.keys(seen).sort();
@@ -2451,21 +2473,30 @@
     var chip = function (label, attrs, on) {
       return '<button type="button" class="nlsp__chip' + (on ? ' is-on' : '') + '" ' + attrs + '>' + label + '</button>';
     };
+    /* Before the first result there is nothing to slice, so the narrower
+       scopes are not offered at all — a Month chip that opens an empty
+       dropdown is worse than no chip. They appear on their own once a match
+       has been played. */
+    var months = seasonMonths();
+    var days = lbMatchdayKeys();
+    if (state.lbScope === 'month' && !months.length) state.lbScope = 'season';
+    if (state.lbScope === 'day' && !days.length) state.lbScope = 'season';
+
     var html = '<div class="nlsp__tablefilters">' +
       '<div class="nlsp__chipgroup" id="nlsp-lb-scope" role="group" aria-label="Time period">' +
         chip('Season', 'data-s="season"', state.lbScope === 'season') +
-        chip('Month', 'data-s="month"', state.lbScope === 'month') +
-        chip('Matchday', 'data-s="day"', state.lbScope === 'day') +
+        (months.length ? chip('Month', 'data-s="month"', state.lbScope === 'month') : '') +
+        (days.length ? chip('Matchday', 'data-s="day"', state.lbScope === 'day') : '') +
       '</div>';
     if (state.lbScope === 'month') {
       html += '<select id="nlsp-lb-month" aria-label="Month">' +
-        seasonMonths().map(function (mo) {
+        months.map(function (mo) {
           return '<option value="' + $h(mo) + '"' + (state.lbMonth === mo ? ' selected' : '') + '>' + $h(monthLabel(mo)) + '</option>';
         }).join('') + '</select>';
     }
     if (state.lbScope === 'day') {
       html += '<select id="nlsp-lb-day" aria-label="Matchday">' +
-        lbMatchdayKeys().map(function (k) {
+        days.map(function (k) {
           return '<option value="' + $h(k) + '"' + (state.lbDay === k ? ' selected' : '') + '>' + $h(lbDayLabel(k)) + '</option>';
         }).join('') + '</select>';
     }
