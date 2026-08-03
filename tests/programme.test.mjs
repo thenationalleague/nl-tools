@@ -218,6 +218,17 @@ test('clubLink points at the library with the club token', () => {
   assert.equal(PP.clubLink('abc123'), 'https://nl.tools/programme/?c=abc123');
 });
 
+test('clubLink carries the club code so the gate can show a crest', () => {
+  assert.equal(PP.clubLink('abc123', 'YEO'), 'https://nl.tools/programme/?c=abc123&club=YEO');
+  assert.equal(PP.clubLink('abc123', 'NL'), 'https://nl.tools/programme/?c=abc123&club=NL');
+});
+
+test('clubLink encodes both parameters', () => {
+  /* The code is cosmetic and never trusted, but it still lands in a URL and
+     then in an href — so it gets encoded like anything else. */
+  assert.equal(PP.clubLink('a b&c', 'X&Y'), 'https://nl.tools/programme/?c=a%20b%26c&club=X%26Y');
+});
+
 /* ── Defaults ─────────────────────────────────────────────────────────── */
 
 test('seeded club folders are defaults, and exclude Miscellaneous', () => {

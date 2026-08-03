@@ -399,8 +399,14 @@
 
     newPasscode: function () { return randFrom(CODE_ALPHA, 6); },
     newToken: function () { return randFrom(TOKEN_ALPHA, 14); },
-    clubLink: function (token) {
-      return location.origin + '/programme/?c=' + encodeURIComponent(token);
+    /* ?club= is cosmetic only — it lets the gate show the club's crest before
+       anyone has proved who they are. It is never trusted: the passcode and the
+       token are what the trigger validates, so tampering with it changes the
+       badge on the gate and nothing else. The alternative, a public token→club
+       lookup, would mean publishing a node just to decorate a login. */
+    clubLink: function (token, code) {
+      return location.origin + '/programme/?c=' + encodeURIComponent(token) +
+        (code ? '&club=' + encodeURIComponent(code) : '');
     },
 
     DEFAULT_FOLDERS: DEFAULT_FOLDERS,
