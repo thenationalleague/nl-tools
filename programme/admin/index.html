@@ -170,6 +170,10 @@
 
   /* Selected filter in the audit toolbar. */
   .btn.is-on { background: var(--navy); color: var(--white); border-color: var(--navy); }
+  .audit-actor { font-family: var(--font); font-size: var(--text-xs); padding: 7px 10px;
+    border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);
+    background: var(--white); max-width: 220px; }
+  .audit-actor:focus { outline: none; border-color: var(--primary); box-shadow: var(--focus-ring); }
 
   /* Boot/loading state. A pane must never sit empty with no explanation: every
      RTDB listener below has an error callback that writes into it. */
@@ -267,7 +271,7 @@
       });
       watch('files', function (v) { FILES = v; });
       watch('trash', function (v) { TRASH = v; });
-      watch('audit', function (v) { AUDIT = v; }, PP.ref('audit').limitToLast(1000));
+      subscribeAudit();
     }).catch(function (e) { fail('signing in', e); });
   };
 
@@ -715,10 +719,34 @@
 
   /* ── Audit ────────────────────────────────────────────────────────────── */
 
+  /* The audit is fetched lazily: the query itself grows, rather than pulling
+     everything and paging in the browser. An append-only trail that records
+     every sign-in and every download gets long, and there is no reason for a
+     page that shows fifty rows to have downloaded ten thousand. */
+  var AUDIT_PAGE = 50;
+  var auditWant = AUDIT_PAGE;
+  var auditQuery = null;
+
+  function subscribeAudit() {
+    if (auditQuery) auditQuery.off();
+    /* One extra row tells us whether there is more without a second query. */
+    auditQuery = PP.ref('audit').limitToLast(auditWant + 1);
+    auditQuery.on('value', function (snap) {
+      AUDIT = snap.val() || {};
+      render();
+    }, function (err) { fail('reading audit', err); });
+  }
+
+  function loadMoreAudit() {
+    auditWant += AUDIT_PAGE;
+    subscribeAudit();
+  }
+
   /* The audit answers one question above the others: who is taking other
      clubs' material. So cross-club rows are marked, and a filter isolates
      them, rather than leaving you to eyeball 500 lines. */
   var auditFilter = 'all';
+  var auditActor = 'all';   // filters on WHO ACTED, not on whose files were touched
 
   function renderAudit() {
     var rows = Object.keys(AUDIT).map(function (k) {
@@ -732,11 +760,23 @@
     }
 
     var shown = rows.filter(function (r) {
+      if (auditActor !== 'all' && r.actor !== auditActor) return false;
       if (auditFilter === 'cross') return r.crossClub;
       if (auditFilter === 'downloads') return r.action === 'download' || r.action === 'download-zip';
       if (auditFilter === 'signins') return r.action === 'sign-in';
       return true;
     });
+
+    /* Actors present in what has been fetched. Listing all 73 clubs would
+       offer 60 filters that return nothing — this is about who is using the
+       tool, so only those who have. */
+    var actors = {};
+    rows.forEach(function (r) { if (r.actor) actors[r.actor] = r.actorLabel || r.actor; });
+    var actorOpts = Object.keys(actors).sort(function (a, b) {
+      return String(actors[a]).localeCompare(String(actors[b]));
+    });
+
+    var more = rows.length > auditWant;
 
     function tab(id, label) {
       return '<button class="btn btn--ghost btn--sm' + (auditFilter === id ? ' is-on' : '') +
@@ -746,6 +786,13 @@
     el('paneAudit').innerHTML =
       '<div class="acc-tools">' + tab('all', 'Everything') + tab('signins', 'Sign-ins') +
         tab('downloads', 'Downloads') + tab('cross', 'Other clubs\u2019 files') +
+        '<select id="auditActor" class="audit-actor" aria-label="Filter by who acted">' +
+          '<option value="all">Anyone</option>' +
+          actorOpts.map(function (a) {
+            return '<option value="' + esc(a) + '"' + (auditActor === a ? ' selected' : '') + '>' +
+              esc(actors[a]) + '</option>';
+          }).join('') +
+        '</select>' +
         '<span class="acc-tools__spacer"></span>' +
         '<button class="btn btn--ghost btn--sm" id="auditCsv">Export CSV</button></div>' +
       '<div class="table-wrap"><table class="table"><thead><tr>' +
@@ -762,11 +809,21 @@
           '<td>' + esc(target) +
             (r.crossClub ? ' <span class="pill pill--soon">another club</span>' : '') + '</td>' +
           '<td>' + esc(r.detail || '') + '</td></tr>';
-      }).join('') + '</tbody></table></div>';
+      }).join('') + '</tbody></table></div>' +
+      (more ? '<div style="text-align:center;margin-top:14px">' +
+        '<button class="btn btn--ghost" id="auditMore">Load 50 more</button></div>'
+        : '<div class="form-hint" style="text-align:center;margin-top:14px">' +
+          'That\u2019s everything recorded.</div>');
 
     Array.prototype.forEach.call(el('paneAudit').querySelectorAll('[data-af]'), function (b) {
       b.onclick = function () { auditFilter = b.getAttribute('data-af'); render(); };
     });
+    el('auditActor').onchange = function () { auditActor = this.value; render(); };
+    var moreBtn = el('auditMore');
+    if (moreBtn) moreBtn.onclick = function () {
+      moreBtn.disabled = true; moreBtn.textContent = 'Loading\u2026';
+      loadMoreAudit();
+    };
     el('auditCsv').onclick = function () {
       var out = [['When', 'Who', 'Action', 'Club', 'Cross-club', 'Detail']];
       shown.forEach(function (r) {
