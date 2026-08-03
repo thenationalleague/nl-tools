@@ -252,10 +252,13 @@
       BY_CODE = {};
       clubs.forEach(function (c) { BY_CODE[c.code] = c; });
 
-      function watch(path, apply, ref) {
+      /* Re-render only the tab a change can affect. An audit write used to
+         redraw the access table, which threw away its horizontal scroll
+         position mid-click — the "nav pops back to the left". */
+      function watch(path, apply, tabs, ref) {
         (ref || PP.ref(path)).on('value', function (s) {
           apply(s.val() || {});
-          render();
+          if (tabs.indexOf(tab) !== -1) render();
         }, function (err) { fail('reading ' + path, err); });
       }
 
@@ -268,9 +271,9 @@
           var box = el('tplBody');
           if (!box || box.value === TPL || !box.value) TPL = v.emailTemplate.body;
         }
-      });
-      watch('files', function (v) { FILES = v; });
-      watch('trash', function (v) { TRASH = v; });
+      }, ['access']);
+      watch('files', function (v) { FILES = v; }, ['access']);
+      watch('trash', function (v) { TRASH = v; }, ['access', 'trash']);
       subscribeAudit();
     }).catch(function (e) { fail('signing in', e); });
   };
@@ -442,7 +445,7 @@
       b.onclick = function () { copyOne(b.getAttribute('data-email')); };
     });
     Array.prototype.forEach.call(el('paneAccess').querySelectorAll('[data-open]'), function (b) {
-      b.onclick = function () { openAs(b.getAttribute('data-open')); };
+      b.addEventListener('click', function () { openAs(b.getAttribute('data-open')); });
     });
 
     Array.prototype.forEach.call(el('paneAccess').querySelectorAll('[data-copy]'), function (b) {
@@ -470,7 +473,9 @@
         (trashBytes(code) ? ' <span class="text-label">+' + esc(PP.humanSize(trashBytes(code))) + ' removed</span>' : '') +
       '</td>' +
       '<td><span class="row-acts">' +
-        '<button class="btn btn--navy btn--sm" data-open="' + esc(code) + '">Open</button>' +
+        '<a class="btn btn--navy btn--sm" data-open="' + esc(code) + '"' +
+          ' href="' + esc(PP.clubLink(rec.token, code) + '&as=1') + '"' +
+          ' target="_blank" rel="noopener">Open</a>' +
         '<button class="btn btn--ghost btn--sm" data-email="' + esc(code) + '">Copy email</button>' +
         '<button class="btn btn--ghost btn--sm" data-copy="' + esc(PP.clubLink(rec.token, code)) + '">Copy link</button>' +
         '<button class="btn btn--ghost btn--sm" data-regen="' + esc(code) + '">Regenerate</button>' +
@@ -611,12 +616,18 @@
      It does leave the club's passcode in this browser's remembered-device
      slot for 30 days, exactly as if you had signed in as them — "Not you?" on
      that page clears it. */
+  /* A real anchor rather than window.open(). Passing a features string to
+     window.open makes Chrome treat it as a popup and blockers stop it, which
+     is why the first version silently did nothing. An <a target="_blank">
+     also gets middle-click and cmd-click for free.
+
+     The handler runs before the browser follows the link and never calls
+     preventDefault, so a failed audit write cannot stop the tab opening. */
   function openAs(code) {
     var rec = recFor(code);
     if (!rec) return;
-    PP.audit('open-as', { club: code, clubName: nameFor(code) });
     PP.handOff(rec.passcode, rec.token);
-    window.open(PP.clubLink(rec.token, code) + '&as=1', '_blank', 'noopener');
+    PP.audit('open-as', { club: code, clubName: nameFor(code) });
   }
 
   function copyOne(code) {
@@ -757,7 +768,7 @@
     auditQuery = PP.ref('audit').limitToLast(auditWant + 1);
     auditQuery.on('value', function (snap) {
       AUDIT = snap.val() || {};
-      render();
+      if (tab === 'audit') render();
     }, function (err) { fail('reading audit', err); });
   }
 
