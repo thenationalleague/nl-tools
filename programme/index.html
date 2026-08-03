@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--
+  Programme Packs — club library (standalone, passcode)
+  Version: v1.0 (03/08/2026) — initial build. Replaces /programme-packs/
+           (Google Drive via Apps Script), which is retired: the Drive proxy
+           was the source of the ghost-file drift, the manual redeploy dance
+           and the GAS quota ceilings. Bytes now live in Firebase Storage.
+  File: /programme/index.html
+
+  Standalone (NO auth-guard) — named Firebase app + a passcode-minted custom
+  token, via _shared.js. Per-club direct link (?c=<token>) plus the club's
+  6-character passcode. NL console: /programme/admin/.
+
+  What this page is
+  -----------------
+  A 73-folder asset library for match-day programme production. Read-all,
+  write-own: any club can browse and download every other club's assets
+  (the home editor needs the AWAY club's crest on Tuesday), but can only
+  upload into its own folder. The National League's own folder is pinned above
+  everything in every view — that is where club adverts land, and adverts carry
+  a used-from/used-until window so an editor can see what belongs in THIS
+  weekend's programme.
+
+  Write-own is enforced by Storage + RTDB rules against the `pClub` claim that
+  the programmeEnter callable puts in the token — not by this file. Nothing
+  here is load-bearing for access control.
+
+  Storage (RTDB app-data/media-programme/):
+    folders/<CODE>/<folderId>  { name, sortOrder, createdAt }
+    files/<CODE>/<fileId>      { name, folderId, size, contentType, storagePath,
+                                 url, uploadedAt, usedFrom?, usedUntil? }
+    trash/<CODE>/<fileId>      { ...file, deletedAt }
+    audit/<pushId>             append-only
+  Bytes: Storage programme/<CODE>/<folderId>/<fileId>-<name>
+  <CODE> = clubs-meta 3-letter code, or NL. Same key the portal will use.
+-->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Programme Packs — National League</title>
+<link rel="stylesheet" href="/system/nl-brand.css?v=30">
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-functions-compat.js"></script>
+<script src="/programme/_shared.js"></script>
+<script src="/system/nl-utils.js?v=29"></script>
+<link rel="stylesheet" href="/programme/_shared.css">
+</head>
+<body>
+
+<!-- Passcode gate -->
+<div class="gate" id="gate">
+  <div class="gate__card">
+    <img class="gate__logo" id="gateLogo" src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png" alt="National League">
+    <div class="gate__title" id="gateTitle">Programme Packs</div>
+    <div class="gate__sub" id="gateSub">Loading…</div>
+    <div id="gateForm" style="display:none">
+      <input class="gate__input" id="gateInput" maxlength="8" placeholder="••••••" autocomplete="off"
+             autocapitalize="characters" spellcheck="false" aria-label="Club passcode">
+      <div class="gate__err" id="gateErr" role="alert"></div>
+      <button class="btn btn--primary" id="gateBtn" style="width:100%;justify-content:center;">Open</button>
+    </div>
+  </div>
+</div>
+
+<!-- Library -->
+<div id="app" style="display:none">
+  <div class="hbar">
+    <span id="hbarCrest"></span>
+    <div class="hbar__id">
+      <div class="hbar__title" id="hbarClub"></div>
+      <div class="hbar__sub">Programme Packs</div>
+    </div>
+    <button class="hbar__signout" id="signout">Not you?</button>
+  </div>
+
+  <div class="wrap">
+    <!-- The National League panel. Rendered above every view, always. -->
+    <div id="nlPanel"></div>
+
+    <div id="viewDir"></div>
+    <div id="viewClub" style="display:none"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  var FOLDERS = {};      // <CODE> → { <folderId>: {name, sortOrder, createdAt} }
+  var FILES = {};        // <CODE> → { <fileId>:  {...} }
+  var ROSTER = [];       // current-season clubs from clubs-meta
+  var BY_CODE = {};      // <CODE> → roster entry
+  var loaded = { folders: false, files: false, roster: false };
+  var view = { club: null, folderId: null };   // club === null → directory
+
+  var esc = function (s) { return NL.escHtml(s); };
+  function el(id) { return document.getElementById(id); }
+
+  /* ── Gate ─────────────────────────────────────────────────────────────── */
+
+  var linkToken = (function () {
+    try { return new URLSearchParams(location.search).get('c') || ''; }
+    catch (e) { return ''; }
+  })();
+
+  /* Try a remembered device first, so a weekly user isn't retyping a card
+     every Tuesday. PP.resume() resolves null (never rejects) if nothing is
+     stored or the passcode has since been regenerated in the console. */
+  PP.resume().then(function (s) {
+    if (s) { enter(s); return; }
+    showGate();
+  }).catch(showGate);
+
+  function showGate() {
+    el('gateSub').textContent = linkToken
+      ? 'Enter your club passcode to open the library.'
+      : 'Enter your club passcode.';
+    el('gateForm').style.display = 'block';
+    var inp = el('gateInput'), err = el('gateErr'), btn = el('gateBtn');
+    inp.focus();
+
+    function submit() {
+      var code = PP.normCode(inp.value);
+      if (code.length < 4) { err.textContent = 'Enter your full passcode.'; return; }
+      err.textContent = '';
+      btn.disabled = true; btn.textContent = 'Checking…';
+      PP.enter(code, linkToken).then(function (s) {
+        enter(s);
+      }).catch(function (e) {
+        btn.disabled = false; btn.textContent = 'Open';
+        /* The callable returns a plain message for both "wrong passcode" and
+           "rate limited" — surface it as-is rather than inventing wording. */
+        err.textContent = (e && e.message) || 'Passcode not recognised.';
+        inp.select();
+      });
+    }
+    btn.onclick = submit;
+    inp.onkeydown = function (e) { if (e.key === 'Enter') submit(); };
+  }
+
+  el('signout').addEventListener('click', function () {
+    PP.forget();
+    location.href = location.pathname;
+  });
+
+  /* ── Enter ────────────────────────────────────────────────────────────── */
+
+  function enter(session) {
+    el('gate').style.display = 'none';
+    el('app').style.display = 'block';
+
+    var crest = document.createElement('img');
+    crest.className = 'hbar__crest';
+    crest.alt = '';
+    if (session.isNL) {
+      crest.src = PP.ROSE;
+    } else {
+      crest.src = NL.clubs.crestUrl(session.name, 'medium');
+      NL.clubs.wireCrestImg(crest, session.name);
+    }
+    el('hbarCrest').replaceChildren(crest);
+    el('hbarClub').textContent = session.name;
+
+    NL.clubs.forSeason().then(function (clubs) {
+      ROSTER = clubs;
+      BY_CODE = {};
+      clubs.forEach(function (c) { BY_CODE[c.code] = c; });
+      loaded.roster = true;
+      render();
+    }).catch(function () {
+      loaded.roster = true;
+      render();
+    });
+
+    PP.ref('folders').on('value', function (s) {
+      FOLDERS = s.val() || {}; loaded.folders = true; render();
+    });
+    PP.ref('files').on('value', function (s) {
+      FILES = s.val() || {}; loaded.files = true; render();
+    });
+
+    seedOwnFolders(session);
+  }
+
+  /* A club's folders are seeded on its own first visit — only the owner can
+     write them (rules), so this can't run on anyone else's behalf. These are
+     DEFAULTS, not a schema: rename, delete or add whatever you like. */
+  function seedOwnFolders(session) {
+    if (session.isAdmin) return;
+    var code = session.code;
+    PP.ref('folders/' + code).once('value').then(function (s) {
+      if (s.exists() && Object.keys(s.val() || {}).length) return;
+      var defaults = session.isNL ? PP.NL_FOLDERS : PP.DEFAULT_FOLDERS;
+      var updates = {};
+      defaults.forEach(function (f) {
+        var id = PP.ref('folders/' + code).push().key;
+        updates[id] = { name: f.name, sortOrder: f.sortOrder, createdAt: PP.TS() };
+      });
+      return PP.ref('folders/' + code).update(updates);
+    }).catch(function () { /* read-only visitor — nothing to seed */ });
+  }
+
+  /* ── Data helpers ─────────────────────────────────────────────────────── */
+
+  function foldersFor(code) {
+    var obj = FOLDERS[code] || {};
+    return Object.keys(obj).map(function (id) {
+      var f = obj[id]; return { id: id, name: f.name || 'Untitled', sortOrder: f.sortOrder || 99, createdAt: f.createdAt };
+    }).sort(function (a, b) { return (a.sortOrder - b.sortOrder) || a.name.localeCompare(b.name); });
+  }
+
+  function filesFor(code, folderId) {
+    var obj = FILES[code] || {};
+    return Object.keys(obj).map(function (id) {
+      var f = obj[id]; f = Object.assign({}, f); f.id = id; return f;
+    }).filter(function (f) { return !folderId || f.folderId === folderId; })
+      .sort(function (a, b) { return (b.uploadedAt || 0) - (a.uploadedAt || 0); });
+  }
+
+  function fileCount(code) { return Object.keys(FILES[code] || {}).length; }
+
+  function lastUpload(code) {
+    var obj = FILES[code] || {}, max = 0;
+    Object.keys(obj).forEach(function (k) { if ((obj[k].uploadedAt || 0) > max) max = obj[k].uploadedAt; });
+    return max;
+  }
+
+  function canWrite(code) {
+    var s = PP.session || {};
+    return s.isAdmin || s.code === code;
+  }
+
+  /* ── Render ───────────────────────────────────────────────────────────── */
+
+  function render() {
+    if (!loaded.folders || !loaded.files || !loaded.roster) return;
+    renderNLPanel();
+    if (view.club) { renderClub(view.club); }
+    else { renderDirectory(); }
+  }
+
+  /* The NL panel. Pinned above every view — it is the reason most clubs open
+     the tool, so it never scrolls away behind a directory of 72 crests. Live
+     adverts (inside their used-from/used-until window) are listed first and
+     stated plainly; undated NL assets are evergreen and just get a count. */
+  function renderNLPanel() {
+    var NL_KEY = PP.NL_KEY;
+    var all = filesFor(NL_KEY);
+    var now = Date.now();
+    var live = all.filter(function (f) { return PP.adState(f, now) === 'live'; });
+    var upcoming = all.filter(function (f) { return PP.adState(f, now) === 'upcoming'; });
+    var evergreen = all.filter(function (f) { return PP.adState(f, now) === null; });
+
+    var body;
+    if (!all.length) {
+      body = '<div class="empty-state"><div class="empty-state__text">' +
+        'Nothing here yet. League adverts and programme templates will appear here.' +
+        '</div></div>';
+    } else {
+      var rows = live.map(function (f) { return adRow(f, 'In this weekend’s programme'); });
+      upcoming.slice(0, 3).forEach(function (f) {
+        rows.push(adRow(f, 'From ' + esc(PP.fmtDate(f.usedFrom))));
+      });
+      if (!rows.length) {
+        rows.push('<div class="ad-row"><div class="ad-row__main">' +
+          '<div class="ad-row__name">No advert scheduled for this week</div>' +
+          '<div class="ad-row__when">Open the folder for templates, specs and league assets.</div>' +
+          '</div></div>');
+      }
+      body = rows.join('');
+    }
+
+    el('nlPanel').innerHTML =
+      '<div class="nl-panel">' +
+        '<div class="nl-panel__head">' +
+          '<img class="nl-panel__rose" src="' + PP.ROSE + '" alt="">' +
+          '<div class="nl-panel__id">' +
+            '<div class="nl-panel__title">National League</div>' +
+            '<div class="nl-panel__sub">Adverts, templates and league assets — ' +
+              esc(String(all.length)) + ' file' + (all.length === 1 ? '' : 's') +
+              (evergreen.length ? ' · ' + esc(String(evergreen.length)) + ' evergreen' : '') +
+            '</div>' +
+          '</div>' +
+          '<button class="btn btn--ghost" id="nlOpen">Open folder</button>' +
+        '</div>' +
+        '<div class="nl-panel__body">' + body + '</div>' +
+      '</div>';
+
+    el('nlOpen').onclick = function () { openClub(PP.NL_KEY); };
+  }
+
+  function adRow(f, when) {
+    var kind = PP.fileKind(f.contentType, f.name);
+    var thumb = (kind === 'image' && f.url)
+      ? '<img class="ad-row__thumb" src="' + esc(f.url) + '" alt="" loading="lazy">'
+      : '<div class="ad-row__thumb file-row__icon">' + PP.kindIcon(kind) + '</div>';
+    return '<div class="ad-row">' + thumb +
+      '<div class="ad-row__main">' +
+        '<div class="ad-row__name">' + esc(f.name) + '</div>' +
+        '<div class="ad-row__when">' + when +
+          (f.usedUntil ? ' · until ' + esc(PP.fmtDate(f.usedUntil)) : '') + '</div>' +
+      '</div>' +
+      '<a class="btn btn--ghost" href="' + esc(f.url || '#') + '" download target="_blank" rel="noopener">Download</a>' +
+      '</div>';
+  }
+
+  /* The 72-club directory. Empty clubs are listed, never hidden — a club with
+     nothing in its folder should be visibly, quietly empty. That is the whole
+     social mechanism of the page, and it stops working the moment you filter
+     them out. Muted, not alarmed: an acknowledgement, not a telling-off. */
+  function renderDirectory() {
+    el('viewClub').style.display = 'none';
+    el('viewDir').style.display = 'block';
+
+    var s = PP.session || {};
+    var own = !s.isAdmin && !s.isNL ? BY_CODE[s.code] : null;
+    var html = '';
+
+    if (own) {
+      var n = fileCount(s.code);
+      html += '<div class="sec-head">Your folder' +
+        '<span class="sec-head__note">Only your club can upload here. Every other club can see it.</span></div>' +
+        '<div class="dir"><button class="dir__card' + (n ? '' : ' is-empty') + '" data-club="' + esc(s.code) + '">' +
+          PP.crestImgHtml(own.name, 34).replace('<img ', '<img class="dir__crest" ') +
+          '<span class="dir__id"><span class="dir__name">' + esc(own.name) + '</span>' +
+          '<span class="dir__meta">' + (n ? esc(String(n)) + ' file' + (n === 1 ? '' : 's') : 'Nothing uploaded yet') + '</span></span>' +
+          '<span class="dir__dot"></span></button></div>';
+    }
+
+    var withFiles = ROSTER.filter(function (c) { return fileCount(c.code) > 0; }).length;
+    html += '<div class="sec-head">All clubs' +
+      '<span class="sec-head__note">' + esc(String(withFiles)) + ' of ' + esc(String(ROSTER.length)) + ' have uploaded</span></div>';
+
+    html += '<div class="dir">' + ROSTER.map(function (c) {
+      var n = fileCount(c.code), last = lastUpload(c.code);
+      return '<button class="dir__card' + (n ? '' : ' is-empty') + '" data-club="' + esc(c.code) + '">' +
+        PP.crestImgHtml(c.name, 34).replace('<img ', '<img class="dir__crest" ') +
+        '<span class="dir__id"><span class="dir__name">' + esc(c.name) + '</span>' +
+        '<span class="dir__meta">' +
+          (n ? esc(String(n)) + ' file' + (n === 1 ? '' : 's') + ' · ' + esc(PP.ago(last)) : 'Empty') +
+        '</span></span>' +
+        '<span class="dir__dot"></span></button>';
+    }).join('') + '</div>';
+
+    el('viewDir').innerHTML = html;
+    Array.prototype.forEach.call(el('viewDir').querySelectorAll('[data-club]'), function (b) {
+      b.onclick = function () { openClub(b.getAttribute('data-club')); };
+    });
+  }
+
+  function openClub(code) {
+    view.club = code;
+    view.folderId = null;
+    render();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function backToDir() { view.club = null; view.folderId = null; render(); }
+
+  function renderClub(code) {
+    el('viewDir').style.display = 'none';
+    el('viewClub').style.display = 'block';
+
+    var isNL = code === PP.NL_KEY;
+    var meta = BY_CODE[code];
+    var name = isNL ? 'National League' : (meta ? meta.name : code);
+    var folders = foldersFor(code);
+    var writable = canWrite(code);
+
+    if (!view.folderId && folders.length) view.folderId = folders[0].id;
+
+    var html = '<div class="sec-head">' +
+      '<button class="btn btn--ghost" id="backBtn">← All clubs</button>' +
+      '<span style="margin-left:6px">' + esc(name) + '</span>' +
+      (isNL ? '' : '<span class="sec-head__note">' + esc(meta ? meta.division : '') + '</span>') +
+      '</div>';
+
+    if (!folders.length) {
+      html += '<div class="empty-state"><div class="empty-state__title">Nothing here yet</div>' +
+        '<div class="empty-state__text">' +
+        (writable ? 'Add a folder to get started.' : esc(name) + ' hasn’t added any files yet.') +
+        '</div></div>';
+      if (writable) html += '<div style="margin-top:12px"><button class="btn btn--primary" id="addFolder">New folder</button></div>';
+      el('viewClub').innerHTML = html;
+      wireClub(code, writable);
+      return;
+    }
+
+    /* Folder rail. A folder holding nothing is flagged amber; any file in it
+       and it reads as active. Both states stay visible. */
+    var rail = folders.map(function (f) {
+      var n = filesFor(code, f.id).length;
+      return '<button class="rail__item' + (f.id === view.folderId ? ' on' : '') + '" data-folder="' + esc(f.id) + '">' +
+        '<span class="rail__label">' + esc(f.name) + '</span>' +
+        '<span class="rail__count' + (n ? '' : ' is-zero') + '">' + (n || '0') + '</span></button>';
+    }).join('');
+    if (writable) rail += '<button class="rail__item rail__add" id="addFolder">+ New folder</button>';
+
+    var current = folders.filter(function (f) { return f.id === view.folderId; })[0] || folders[0];
+    var files = filesFor(code, current.id);
+
+    var pane = '';
+    if (!writable) {
+      pane += '<div class="ro-note">' +
+        '<span>You’re viewing ' + esc(name) + '’s folder. Download anything you need — only ' +
+        esc(name) + ' can add or remove files here.</span></div>';
+    } else {
+      pane += '<div class="vis-note">' +
+        '<span><strong>Everything you upload here is visible to all 72 clubs</strong> and to the ' +
+        'National League. Don’t put contracts, personal details or anything confidential in this folder.</span></div>';
+      pane += '<div class="drop" id="drop" tabindex="0" role="button">' +
+        '<strong>Drop files here</strong> or click to choose' +
+        '<div class="drop__hint">Up to ' + PP.humanSize(PP.MAX_BYTES) + ' per file · into ' + esc(current.name) + '</div>' +
+        '</div><input type="file" id="fileInput" multiple style="display:none">' +
+        '<div id="uploads"></div>';
+      if (folders.length) {
+        pane += '<div style="display:flex;gap:8px;margin-bottom:14px">' +
+          '<button class="btn btn--ghost" id="renameFolder">Rename folder</button>' +
+          (files.length ? '' : '<button class="btn btn--ghost" id="deleteFolder">Delete folder</button>') +
+          '</div>';
+      }
+    }
+
+    if (!files.length) {
+      pane += '<div class="empty-state"><div class="empty-state__title">This folder is empty</div>' +
+        '<div class="empty-state__text">' +
+        (writable ? 'Nothing in here yet — add the files other clubs will need.'
+                  : 'Nothing in here yet.') + '</div></div>';
+    } else {
+      pane += files.map(function (f) { return fileRow(f, code, writable, isNL); }).join('');
+    }
+
+    html += '<div class="lib"><div class="rail">' + rail + '</div><div>' + pane + '</div></div>';
+    el('viewClub').innerHTML = html;
+    wireClub(code, writable);
+  }
+
+  function fileRow(f, code, writable, isNL) {
+    var kind = PP.fileKind(f.contentType, f.name);
+    var thumb = (kind === 'image' && f.url)
+      ? '<img class="file-row__thumb" src="' + esc(f.url) + '" alt="" loading="lazy">'
+      : '<div class="file-row__thumb file-row__icon">' + PP.kindIcon(kind) + '</div>';
+    var state = PP.adState(f, Date.now());
+    var pill = state === 'live' ? '<span class="pill pill--live">Live</span>'
+      : state === 'upcoming' ? '<span class="pill pill--soon">From ' + esc(PP.fmtDate(f.usedFrom)) + '</span>'
+      : state === 'expired' ? '<span class="pill pill--expired">Ended</span>' : '';
+
+    return '<div class="file-row">' + thumb +
+      '<div class="file-row__main">' +
+        '<div class="file-row__name">' + esc(f.name) + ' ' + pill + '</div>' +
+        '<div class="file-row__meta">' + esc(PP.humanSize(f.size)) + ' · added ' + esc(PP.ago(f.uploadedAt)) + '</div>' +
+      '</div>' +
+      '<div class="file-row__acts">' +
+        '<a class="btn btn--ghost" href="' + esc(f.url || '#') + '" download target="_blank" rel="noopener">Download</a>' +
+        (writable && isNL ? '<button class="btn btn--ghost" data-date="' + esc(f.id) + '">Dates</button>' : '') +
+        (writable ? '<button class="btn btn--ghost" data-del="' + esc(f.id) + '">Remove</button>' : '') +
+      '</div></div>';
+  }
+
+  /* ── Wiring ───────────────────────────────────────────────────────────── */
+
+  function wireClub(code, writable) {
+    var root = el('viewClub');
+    var back = el('backBtn'); if (back) back.onclick = backToDir;
+
+    Array.prototype.forEach.call(root.querySelectorAll('[data-folder]'), function (b) {
+      b.onclick = function () { view.folderId = b.getAttribute('data-folder'); render(); };
+    });
+
+    var add = el('addFolder');
+    if (add) add.onclick = function () { newFolder(code); };
+    if (!writable) return;
+
+    var ren = el('renameFolder'); if (ren) ren.onclick = function () { renameFolder(code); };
+    var del = el('deleteFolder'); if (del) del.onclick = function () { deleteFolder(code); };
+
+    Array.prototype.forEach.call(root.querySelectorAll('[data-del]'), function (b) {
+      b.onclick = function () { removeFile(code, b.getAttribute('data-del')); };
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-date]'), function (b) {
+      b.onclick = function () { editDates(code, b.getAttribute('data-date')); };
+    });
+
+    var drop = el('drop'), input = el('fileInput');
+    if (!drop) return;
+    drop.onclick = function () { input.click(); };
+    drop.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } };
+    input.onchange = function () { uploadAll(code, input.files); input.value = ''; };
+    ['dragenter', 'dragover'].forEach(function (ev) {
+      drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add('is-over'); });
+    });
+    ['dragleave', 'drop'].forEach(function (ev) {
+      drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove('is-over'); });
+    });
+    drop.addEventListener('drop', function (e) {
+      if (e.dataTransfer && e.dataTransfer.files) uploadAll(code, e.dataTransfer.files);
+    });
+  }
+
+  /* ── Folder actions ───────────────────────────────────────────────────── */
+
+  function newFolder(code) {
+    NL.prompt('Folder name', { title: 'New folder', placeholder: 'e.g. Action Images' }).then(function (name) {
+      if (!name) return;
+      var folders = foldersFor(code);
+      var next = folders.length ? folders[folders.length - 1].sortOrder + 1 : 1;
+      var id = PP.ref('folders/' + code).push().key;
+      return PP.ref('folders/' + code + '/' + id)
+        .set({ name: String(name).slice(0, 60), sortOrder: next, createdAt: PP.TS() })
+        .then(function () {
+          view.folderId = id;
+          PP.audit('folder-create', { club: code, detail: String(name).slice(0, 60) });
+          NL.toast('Folder added', 'success');
+        });
+    }).catch(function (e) { NL.toast('Could not add folder: ' + e.message, 'error'); });
+  }
+
+  function renameFolder(code) {
+    var f = foldersFor(code).filter(function (x) { return x.id === view.folderId; })[0];
+    if (!f) return;
+    NL.prompt('Folder name', { title: 'Rename folder', default: f.name }).then(function (name) {
+      if (!name || name === f.name) return;
+      return PP.ref('folders/' + code + '/' + f.id + '/name').set(String(name).slice(0, 60))
+        .then(function () {
+          PP.audit('folder-rename', { club: code, detail: f.name + ' → ' + name });
+          NL.toast('Folder renamed', 'success');
+        });
+    }).catch(function (e) { NL.toast('Could not rename: ' + e.message, 'error'); });
+  }
+
+  function deleteFolder(code) {
+    var f = foldersFor(code).filter(function (x) { return x.id === view.folderId; })[0];
+    if (!f) return;
+    if (filesFor(code, f.id).length) { NL.toast('Empty the folder first', 'error'); return; }
+    NL.confirm('Delete the folder “' + esc(f.name) + '”?', { title: 'Delete folder', html: true, confirmText: 'Delete', variant: 'danger' })
+      .then(function (ok) {
+        if (!ok) return;
+        return PP.ref('folders/' + code + '/' + f.id).remove().then(function () {
+          view.folderId = null;
+          PP.audit('folder-delete', { club: code, detail: f.name });
+          NL.toast('Folder deleted', 'success');
+        });
+      }).catch(function (e) { NL.toast('Could not delete: ' + e.message, 'error'); });
+  }
+
+  /* ── Upload ───────────────────────────────────────────────────────────── */
+
+  function uploadAll(code, fileList) {
+    if (!view.folderId) { NL.toast('Pick a folder first', 'error'); return; }
+    Array.prototype.forEach.call(fileList, function (file) { uploadOne(code, view.folderId, file); });
+  }
+
+  function uploadOne(code, folderId, file) {
+    if (file.size > PP.MAX_BYTES) {
+      NL.toast(file.name + ' is over ' + PP.humanSize(PP.MAX_BYTES), 'error');
+      return;
+    }
+    var fileId = PP.ref('files/' + code).push().key;
+    var path = PP.storagePath(code, folderId, fileId, file.name);
+
+    var row = document.createElement('div');
+    row.className = 'up-row';
+    row.innerHTML = '<span class="up-row__name">' + esc(file.name) + '</span>' +
+      '<span class="up-row__bar"><span class="up-row__fill"></span></span>';
+    var uploads = el('uploads');
+    if (uploads) uploads.appendChild(row);
+    var fill = row.querySelector('.up-row__fill');
+
+    var task = PP.storageRef(path).put(file, {
+      contentType: file.type || 'application/octet-stream',
+      cacheControl: 'public,max-age=3600'
+    });
+
+    task.on('state_changed', function (snap) {
+      var pct = snap.totalBytes ? snap.bytesTransferred / snap.totalBytes : 0;
+      fill.style.transform = 'scaleX(' + pct + ')';
+    }, function (err) {
+      row.remove();
+      NL.toast('Upload failed: ' + err.message, 'error');
+    }, function () {
+      /* Store the download URL on the record at upload time. Rendering a
+         folder otherwise means one getDownloadURL round-trip per file, which
+         is what makes a 60-file folder feel broken. */
+      task.snapshot.ref.getDownloadURL().then(function (url) {
+        return PP.ref('files/' + code + '/' + fileId).set({
+          name: file.name.slice(0, 160),
+          folderId: folderId,
+          size: file.size,
+          contentType: file.type || 'application/octet-stream',
+          storagePath: path,
+          url: url,
+          uploadedAt: PP.TS()
+        });
+      }).then(function () {
+        row.remove();
+        PP.audit('upload', { club: code, detail: file.name });
+      }).catch(function (err) {
+        row.remove();
+        NL.toast('Could not save ' + file.name + ': ' + err.message, 'error');
+      });
+    });
+  }
+
+  /* ── Remove (soft) ────────────────────────────────────────────────────
+     Clubs cannot delete bytes — Storage rules deny delete to anything but a
+     '*' session. Removing moves the RTDB record into trash/<CODE>/, so the
+     file leaves every view immediately and the NL console can restore it.
+     That matters most in exactly this pre-portal window, where a passcode is
+     shared and nothing is attributable to a named person. */
+  function removeFile(code, fileId) {
+    var rec = (FILES[code] || {})[fileId];
+    if (!rec) return;
+    NL.confirm('Remove “' + esc(rec.name) + '”? Other clubs will no longer see it.',
+      { title: 'Remove file', html: true, confirmText: 'Remove', variant: 'danger' }).then(function (ok) {
+        if (!ok) return;
+        var copy = Object.assign({}, rec, { deletedAt: PP.TS() });
+        return PP.ref('trash/' + code + '/' + fileId).set(copy)
+          .then(function () { return PP.ref('files/' + code + '/' + fileId).remove(); })
+          .then(function () {
+            PP.audit('remove', { club: code, detail: rec.name });
+            NL.toast('File removed', 'success');
+          });
+      }).catch(function (e) { NL.toast('Could not remove: ' + e.message, 'error'); });
+  }
+
+  /* ── Advert dates (NL folder only) ────────────────────────────────────── */
+
+  function editDates(code, fileId) {
+    var rec = (FILES[code] || {})[fileId];
+    if (!rec) return;
+    function toInput(ms) {
+      if (!ms) return '';
+      var d = new Date(ms);
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+    NL.modal({
+      title: 'When is this used?',
+      size: 'sm',
+      body: '<p class="confirm-text">Clubs see a “Live” advert on the front panel for these dates. ' +
+            'Leave both blank for an evergreen asset.</p>' +
+            '<div class="form-group"><label for="dFrom">Used from</label>' +
+            '<input type="date" id="dFrom" value="' + esc(toInput(rec.usedFrom)) + '"></div>' +
+            '<div class="form-group"><label for="dUntil">Used until</label>' +
+            '<input type="date" id="dUntil" value="' + esc(toInput(rec.usedUntil)) + '"></div>',
+      buttons: [
+        { label: 'Cancel', onClick: function (c) { c.close(); } },
+        { label: 'Save', className: 'btn--primary', autofocus: true, onClick: function (c) {
+            var fromV = document.getElementById('dFrom').value;
+            var untilV = document.getElementById('dUntil').value;
+            /* Store the window as inclusive whole days in local time: from
+               00:00 on the start date to 23:59:59 on the end date. An advert
+               "until Saturday" must still be live on Saturday. */
+            var from = fromV ? new Date(fromV + 'T00:00:00').getTime() : null;
+            var until = untilV ? new Date(untilV + 'T23:59:59').getTime() : null;
+            if (from && until && until < from) {
+              NL.toast('“Used until” is before “used from”', 'error');
+              return;
+            }
+            PP.ref('files/' + code + '/' + fileId).update({ usedFrom: from, usedUntil: until })
+              .then(function () {
+                PP.audit('advert-dates', { club: code, detail: rec.name });
+                NL.toast('Dates saved', 'success');
+                c.close();
+              }).catch(function (e) { NL.toast('Could not save: ' + e.message, 'error'); });
+          } }
+      ]
+    });
+  }
+})();
+</script>
+</body>
+</html>

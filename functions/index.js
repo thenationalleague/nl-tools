@@ -5,6 +5,10 @@
  *   consumeInvite / submitAccessRequest / withdrawAccessRequest
  *                     — account-lifecycle callables (server-minted roles).
  *                       See account.js and system/rtdb/SECURITY-role-self-grant.md.
+ *   programmeEnter / programmeClaim
+ *                     — Programme Packs passcode → scoped `pClub` claim, so
+ *                       Storage/RTDB rules can enforce write-own for passcode
+ *                       (non-portal) clubs. See programme.js.
  *
  * Trigger: a file finalised under `footage/national-league-cup/` in the nl-tools bucket.
  * For any file up to MAX_PROXY_BYTES (full matches are much larger → download-only),
@@ -121,6 +125,11 @@ exports.makeProxy = onObjectFinalized(
 // server-side role writes that closed the self-grant hole. Kept in their own
 // module; exported from here so `firebase deploy --only functions` sees them.
 Object.assign(exports, require("./account"));
+
+// Programme Packs passcode → scoped-claim callables (programmeEnter /
+// programmeClaim). Same reason as above: exported here so a plain
+// `firebase deploy --only functions` picks them up. See functions/programme.js.
+Object.assign(exports, require("./programme"));
 
 exports.onFootageDeleted = onObjectDeleted(
   { bucket: BUCKET, memory: "256MiB" },

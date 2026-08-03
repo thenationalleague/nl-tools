@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Programme Packs (admin)
+  Version: v1.0 (03/08/2026)
+  File: /programme/admin/index.html
+  v1.0 (03/08/2026): initial build. NL console for the passcode-era
+    Programme Packs library at /programme/ — roster seed/sync, per-club
+    passcodes and direct links, trash restore/empty, audit trail.
+
+  Gated by auth-guard (admin/superadmin) rather than a master passcode: this
+  is the one surface that can regenerate all 72 codes and destroy files, and a
+  printable 6-character string is the wrong lock on that. Same posture as
+  /footage/ (portal login for NL people, passcode for outside).
+
+  Two Firebase apps run on this page, deliberately:
+    · DEFAULT app  — auth-guard, the portal session (who you are).
+    · NAMED app    — 'nlProgramme' (via _shared.js), signed in with a custom
+                     token carrying pClub:'*' that the programmeClaim callable
+                     mints after checking your portal role server-side.
+  The named app is what the Storage/RTDB rules see, so admin writes are
+  authorised by a claim rather than by this page asserting a role. The portal
+  session is never modified and no custom claims are written to real accounts.
+
+  Storage (RTDB):
+    app-data/media-programme/config   passcodes + link tokens (pClub '*' only)
+    app-data/media-programme/{folders,files,trash,audit}
+    tools/media-programme             tool registration (label, defaults)
+
+  Access (auth-guard registry — see system/auth-guard.js):
+    superadmin/admin + admin → full console. Everyone else → no access.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Programme Packs — NL Tools</title>
+
+  <!-- Brand stylesheet (lint canonical: ?v=19) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=30">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-functions-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Programme Packs',
+      toolKey: 'media-programme'
+    };
+    var NL_TOOL_KEY = 'media-programme';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '03/08/2026',
+        version: 'v1.0',
+        items: [
+          'NL console for the passcode-era library at /programme/.',
+          'Seed/sync the 72-club roster; per-club passcode + direct link.',
+          'Restore or permanently delete removed files; audit trail.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- Programme Packs runtime (named app 'nlProgramme') — must load before
+       nl-utils.js, same order as the club page. -->
+  <script src="/programme/_shared.js"></script>
+
+  <!-- NL system scripts (lint canonical: ?v=9 / ?v=7 / ?v=8) -->
+  <script src="/system/nl-utils.js?v=29"></script>
+  <script src="/system/nl-topbar.js?v=8"></script>
+  <script src="/system/auth-guard.js?v=10"></script>
+
+  <link rel="stylesheet" href="/programme/_shared.css">
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+  .page { max-width: 1240px; margin: 0 auto; padding: clamp(20px,3vw,40px) clamp(16px,2.5vw,44px) 80px; }
+
+  /* Access table — one row per club, passcode + link side by side. */
+  .acc-tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+  .acc-tools__spacer { margin-left: auto; }
+  td .row-acts { display: flex; gap: 6px; justify-content: flex-end; }
+  tr.is-nl td { background: var(--primary-50); }
+  tr.is-nl .club-cell__name { font-variation-settings: 'wght' 800; font-weight: 800; }
+
+  .tabs { display: flex; gap: 4px; border-bottom: 2px solid var(--border); margin-bottom: 20px; }
+  .tabs__btn { background: none; border: none; border-bottom: 3px solid transparent; margin-bottom: -2px;
+    padding: 10px 16px; cursor: pointer; font-family: var(--font); font-size: 13px; font-weight: 700;
+    color: var(--text-muted); }
+  .tabs__btn:hover { color: var(--navy); }
+  .tabs__btn.on { color: var(--navy); border-bottom-color: var(--primary);
+    font-weight: 900; font-variation-settings: 'wght' 900; }
+  .tabs__btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+</style>
+</head>
+<body>
+
+<!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+
+    <div class="tabs" id="tabs">
+      <button class="tabs__btn on" data-tab="access">Access</button>
+      <button class="tabs__btn" data-tab="trash">Removed files</button>
+      <button class="tabs__btn" data-tab="audit">Audit</button>
+    </div>
+
+    <div id="paneAccess"></div>
+    <div id="paneTrash" style="display:none"></div>
+    <div id="paneAudit" style="display:none"></div>
+
+  </div>
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  window.TOOL = window.TOOL || {};
+
+  var CONFIG = { clubs: {}, nl: null };
+  var FILES = {}, TRASH = {}, AUDIT = {}, ROSTER = [], BY_CODE = {};
+  var ready = false;
+  var tab = 'access';
+
+  var esc = function (s) { return NL.escHtml(s); };
+  function el(id) { return document.getElementById(id); }
+
+  window.TOOL.boot = function (session) {
+    /* Exchange the portal session for a pClub:'*' token on the NAMED app.
+       Everything below reads/writes through that — the rules never see the
+       portal session, so an admin's powers here come from a server-minted
+       claim rather than from this page trusting session.role. */
+    PP.enterAsAdmin().then(function () {
+      ready = true;
+      return NL.clubs.forSeason();
+    }).then(function (clubs) {
+      ROSTER = clubs;
+      BY_CODE = {};
+      clubs.forEach(function (c) { BY_CODE[c.code] = c; });
+
+      PP.ref('config').on('value', function (s) {
+        var v = s.val() || {};
+        CONFIG = { clubs: v.clubs || {}, nl: v.nl || null };
+        render();
+      });
+      PP.ref('files').on('value', function (s) { FILES = s.val() || {}; render(); });
+      PP.ref('trash').on('value', function (s) { TRASH = s.val() || {}; render(); });
+      PP.ref('audit').limitToLast(200).on('value', function (s) { AUDIT = s.val() || {}; render(); });
+    }).catch(function (e) {
+      el('paneAccess').innerHTML = '<div class="empty-state"><div class="empty-state__title">Couldn’t open the console</div>' +
+        '<div class="empty-state__text">' + esc(e.message || String(e)) + '</div></div>';
+    });
+  };
+
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+
+  /* ── Tabs ─────────────────────────────────────────────────────────────── */
+  Array.prototype.forEach.call(el('tabs').querySelectorAll('[data-tab]'), function (b) {
+    b.onclick = function () {
+      tab = b.getAttribute('data-tab');
+      Array.prototype.forEach.call(el('tabs').querySelectorAll('[data-tab]'), function (x) {
+        x.classList.toggle('on', x === b);
+      });
+      el('paneAccess').style.display = tab === 'access' ? 'block' : 'none';
+      el('paneTrash').style.display = tab === 'trash' ? 'block' : 'none';
+      el('paneAudit').style.display = tab === 'audit' ? 'block' : 'none';
+      render();
+    };
+  });
+
+  function render() {
+    if (!ready) return;
+    if (tab === 'access') renderAccess();
+    else if (tab === 'trash') renderTrash();
+    else renderAudit();
+  }
+
+  /* ── Access ───────────────────────────────────────────────────────────── */
+
+  function fileCount(code) { return Object.keys(FILES[code] || {}).length; }
+
+  function renderAccess() {
+    var seeded = Object.keys(CONFIG.clubs || {}).length;
+
+    if (!seeded && !CONFIG.nl) {
+      el('paneAccess').innerHTML =
+        '<div class="empty-state">' +
+          '<div class="empty-state__title">Not switched on yet</div>' +
+          '<div class="empty-state__text">Seed the current National League roster. Each club gets its own ' +
+          'passcode and direct link, plus one shared National League code for uploading adverts.</div>' +
+          '<div style="margin-top:14px"><button class="btn btn--primary" id="btnSeed">Seed roster</button></div>' +
+        '</div>';
+      el('btnSeed').onclick = seedRoster;
+      return;
+    }
+
+    var rows = [];
+
+    if (CONFIG.nl) {
+      rows.push(accessRow('NL', 'National League', '', CONFIG.nl, true));
+    }
+    ROSTER.forEach(function (c) {
+      var rec = CONFIG.clubs[c.code];
+      if (rec) rows.push(accessRow(c.code, c.name, c.division || '', rec, false));
+    });
+
+    var missing = ROSTER.filter(function (c) { return !CONFIG.clubs[c.code]; }).length;
+
+    el('paneAccess').innerHTML =
+      '<div class="acc-tools">' +
+        '<button class="btn btn--ghost" id="btnSeedSync">Sync roster' + (missing ? ' (' + missing + ' missing)' : '') + '</button>' +
+        '<button class="btn btn--ghost" id="btnExport">Export access CSV</button>' +
+        '<span class="acc-tools__spacer"></span>' +
+        '<span class="text-label">' + esc(String(seeded)) + ' clubs + National League</span>' +
+      '</div>' +
+      '<div class="table-wrap"><table class="table"><thead><tr>' +
+        '<th>Club</th><th>Division</th><th>Passcode</th><th>Files</th><th></th>' +
+      '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>';
+
+    el('btnSeedSync').onclick = seedRoster;
+    el('btnExport').onclick = exportCsv;
+
+    Array.prototype.forEach.call(el('paneAccess').querySelectorAll('[data-copy]'), function (b) {
+      b.onclick = function () {
+        NL.copy(b.getAttribute('data-copy'));
+        NL.toast('Link copied', 'success');
+      };
+    });
+    Array.prototype.forEach.call(el('paneAccess').querySelectorAll('[data-regen]'), function (b) {
+      b.onclick = function () { regen(b.getAttribute('data-regen')); };
+    });
+  }
+
+  function accessRow(code, name, division, rec, isNL) {
+    var n = fileCount(code);
+    return '<tr class="' + (isNL ? 'is-nl' : '') + '">' +
+      '<td><span class="club-cell">' +
+        (isNL ? '<img src="' + PP.ROSE + '" alt="" style="width:22px;height:22px;object-fit:contain">'
+              : PP.crestImgHtml(name, 22)) +
+        '<span class="club-cell__name">' + esc(name) + '</span></span></td>' +
+      '<td>' + esc(division || (isNL ? 'League' : '')) + '</td>' +
+      '<td><span class="code-mono">' + esc(rec.passcode || '—') + '</span></td>' +
+      '<td>' + (n ? esc(String(n)) : '<span class="text-label">Empty</span>') + '</td>' +
+      '<td><span class="row-acts">' +
+        '<button class="btn btn--ghost btn--sm" data-copy="' + esc(PP.clubLink(rec.token)) + '">Copy link</button>' +
+        '<button class="btn btn--ghost btn--sm" data-regen="' + esc(code) + '">Regenerate</button>' +
+      '</span></td></tr>';
+  }
+
+  /* Seed is additive and idempotent: it only creates entries for clubs that
+     don't have one. Re-running after promotion/relegation picks up the new
+     clubs without touching any existing passcode. */
+  function seedRoster() {
+    var updates = {}, added = 0;
+    ROSTER.forEach(function (c) {
+      if (CONFIG.clubs[c.code]) return;
+      updates['clubs/' + c.code] = {
+        name: c.name, division: c.division || '',
+        passcode: PP.newPasscode(), token: PP.newToken(), addedAt: PP.TS()
+      };
+      added++;
+    });
+    if (!CONFIG.nl) {
+      updates.nl = {
+        name: 'National League', division: '',
+        passcode: PP.newPasscode(), token: PP.newToken(), addedAt: PP.TS()
+      };
+      added++;
+    }
+    if (!added) { NL.toast('Every club already has access', 'info'); return; }
+
+    PP.ref('config').update(updates).then(function () {
+      PP.audit('seed', { count: added, detail: 'Seeded from clubs-meta roster' });
+      NL.toast(added + ' added', 'success');
+    }).catch(function (e) { NL.toast('Seed failed: ' + e.message, 'error'); });
+  }
+
+  function regen(code) {
+    var isNL = code === 'NL';
+    var rec = isNL ? CONFIG.nl : CONFIG.clubs[code];
+    if (!rec) return;
+    NL.confirm('Regenerate the passcode and link for <strong>' + esc(rec.name) + '</strong>? ' +
+      'The current ones stop working immediately, including on any device that remembered them — ' +
+      'you’ll need to send the new ones out.',
+      { title: 'Regenerate access', html: true, confirmText: 'Regenerate', variant: 'danger' })
+      .then(function (ok) {
+        if (!ok) return;
+        var path = isNL ? 'config/nl' : 'config/clubs/' + code;
+        return PP.ref(path).update({ passcode: PP.newPasscode(), token: PP.newToken() })
+          .then(function () {
+            PP.audit('regen-access', { club: code, clubName: rec.name });
+            NL.toast('New passcode and link issued', 'success');
+          });
+      }).catch(function (e) { NL.toast('Could not regenerate: ' + e.message, 'error'); });
+  }
+
+  function exportCsv() {
+    var rows = [['Club', 'Division', 'Passcode', 'Link']];
+    if (CONFIG.nl) rows.push(['National League', 'League', CONFIG.nl.passcode, PP.clubLink(CONFIG.nl.token)]);
+    ROSTER.forEach(function (c) {
+      var rec = CONFIG.clubs[c.code];
+      if (rec) rows.push([c.name, c.division || '', rec.passcode, PP.clubLink(rec.token)]);
+    });
+    NL.download('programme-packs-access.csv', NL.csv(rows), 'text/csv');
+    PP.audit('export-access', { count: rows.length - 1 });
+  }
+
+  /* ── Removed files ────────────────────────────────────────────────────
+     Clubs can't delete bytes (Storage rules deny delete to anything but a '*'
+     session), so a club "removing" a file only moves its record here. This is
+     the only place a file is destroyed, and the only place one comes back. */
+
+  function trashRows() {
+    var out = [];
+    Object.keys(TRASH).forEach(function (code) {
+      Object.keys(TRASH[code] || {}).forEach(function (id) {
+        var r = Object.assign({}, TRASH[code][id]);
+        r.id = id; r.club = code;
+        r.clubName = code === 'NL' ? 'National League' : ((BY_CODE[code] || {}).name || code);
+        out.push(r);
+      });
+    });
+    return out.sort(function (a, b) { return (b.deletedAt || 0) - (a.deletedAt || 0); });
+  }
+
+  function renderTrash() {
+    var rows = trashRows();
+    if (!rows.length) {
+      el('paneTrash').innerHTML = '<div class="empty-state"><div class="empty-state__title">Nothing removed</div>' +
+        '<div class="empty-state__text">Files a club removes land here so they can be put back.</div></div>';
+      return;
+    }
+    el('paneTrash').innerHTML =
+      '<div class="table-wrap"><table class="table"><thead><tr><th>File</th><th>Club</th><th>Removed</th><th></th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        return '<tr>' +
+          '<td>' + esc(r.name) + ' <span class="text-label">' + esc(PP.humanSize(r.size)) + '</span></td>' +
+          '<td>' + esc(r.clubName) + '</td>' +
+          '<td>' + esc(PP.fmt(r.deletedAt)) + '</td>' +
+          '<td><span class="row-acts">' +
+            '<button class="btn btn--restore btn--sm" data-restore="' + esc(r.club + '|' + r.id) + '">Restore</button>' +
+            '<button class="btn btn--danger btn--sm" data-purge="' + esc(r.club + '|' + r.id) + '">Delete for good</button>' +
+          '</span></td></tr>';
+      }).join('') + '</tbody></table></div>';
+
+    Array.prototype.forEach.call(el('paneTrash').querySelectorAll('[data-restore]'), function (b) {
+      b.onclick = function () { restore(b.getAttribute('data-restore').split('|')); };
+    });
+    Array.prototype.forEach.call(el('paneTrash').querySelectorAll('[data-purge]'), function (b) {
+      b.onclick = function () { purge(b.getAttribute('data-purge').split('|')); };
+    });
+  }
+
+  function restore(pair) {
+    var code = pair[0], id = pair[1];
+    var rec = (TRASH[code] || {})[id];
+    if (!rec) return;
+    var copy = Object.assign({}, rec);
+    delete copy.deletedAt;
+    PP.ref('files/' + code + '/' + id).set(copy)
+      .then(function () { return PP.ref('trash/' + code + '/' + id).remove(); })
+      .then(function () {
+        PP.audit('restore', { club: code, detail: rec.name });
+        NL.toast('File restored', 'success');
+      }).catch(function (e) { NL.toast('Could not restore: ' + e.message, 'error'); });
+  }
+
+  function purge(pair) {
+    var code = pair[0], id = pair[1];
+    var rec = (TRASH[code] || {})[id];
+    if (!rec) return;
+    NL.confirm('Permanently delete “' + esc(rec.name) + '”? The file itself is deleted and cannot be recovered.',
+      { title: 'Delete for good', html: true, confirmText: 'Delete', variant: 'danger' })
+      .then(function (ok) {
+        if (!ok) return;
+        /* Delete the bytes first. If that fails we keep the trash record, so a
+           failure leaves a recoverable file rather than an orphaned object
+           nobody can see or reach. */
+        return PP.storageRef(rec.storagePath).delete()
+          .catch(function (e) {
+            // Already gone in Storage is fine — carry on and clear the record.
+            if (e && e.code === 'storage/object-not-found') return;
+            throw e;
+          })
+          .then(function () { return PP.ref('trash/' + code + '/' + id).remove(); })
+          .then(function () {
+            PP.audit('purge', { club: code, detail: rec.name });
+            NL.toast('Deleted', 'success');
+          });
+      }).catch(function (e) { NL.toast('Could not delete: ' + e.message, 'error'); });
+  }
+
+  /* ── Audit ────────────────────────────────────────────────────────────── */
+
+  function renderAudit() {
+    var rows = Object.keys(AUDIT).map(function (k) {
+      var r = Object.assign({}, AUDIT[k]); r.id = k; return r;
+    }).sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
+
+    if (!rows.length) {
+      el('paneAudit').innerHTML = '<div class="empty-state"><div class="empty-state__title">Nothing logged yet</div>' +
+        '<div class="empty-state__text">Uploads, removals and access changes appear here.</div></div>';
+      return;
+    }
+    el('paneAudit').innerHTML =
+      '<div class="table-wrap"><table class="table"><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Detail</th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        return '<tr><td>' + esc(PP.fmt(r.ts)) + '</td>' +
+          '<td>' + esc(r.actorLabel || r.actor || '—') + '</td>' +
+          '<td>' + esc(r.action || '') + '</td>' +
+          '<td>' + esc(r.detail || r.clubName || '') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+})();
+</script>
+
+</body>
+</html>
