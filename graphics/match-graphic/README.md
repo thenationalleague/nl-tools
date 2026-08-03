@@ -181,28 +181,44 @@ it and are affected.
 
 The renderer and the build already handle it. Two things are needed:
 
-1. **`assets/data/cup-clubs-meta.json`** — the Premier League and Championship
-   representative sides. Same record shape as `clubs-meta.json`:
+1. **`assets/data/cup-clubs-meta.json`** — the PL2 representative sides. **This
+   file now exists**, carrying all 21 sides that entered in 2025-26 or 2026-27:
 
    ```json
    {
      "version": "v1.0",
      "clubs": [
-       { "name": "Birmingham City", "code": "BIR",
-         "colors": { "primary": "#0000FF", "secondary": "#FFFFFF",
-                     "tertiary": "#FFFFFF" } }
+       { "name": "Fulham PL2", "short": "Fulham PL2", "code": "FUL",
+         "nickname": "The Cottagers", "crestName": "Fulham",
+         "colors": { "primary": "#FFFFFF", "secondary": "#000000",
+                     "tertiary": "#CC0000" } }
      ]
    }
    ```
 
-   Crests already exist for the whole EFL and Premier League — 93 of them —
-   keyed by exact club name, so only `code` and `colors` are missing. The file
-   is kept separate from `clubs-meta.json` on purpose: at least six graphics
-   tools read that file and filter on `division`, and `division: null` there
-   already means "former NL club" (Rochdale, York and eight others). Adding
-   non-members with no division would make them indistinguishable.
+   `name` carries the competition-correct `… PL2` suffix, so **fixtures must use
+   that exact name**. `crestName` points at the shared badge file
+   (`assets/crests/Fulham.png`) so no crest needs duplicating under the
+   suffixed name — the build honours it in preference to `name`.
 
-2. **NL Cup fixtures in the fixtures file**, with `competition` set to
+   The file is kept separate from `clubs-meta.json` on purpose: at least six
+   graphics tools read that file and filter on `division`, and `division: null`
+   there already means "former NL club" (Rochdale, York and eight others).
+   Adding non-members with no division would make them indistinguishable.
+
+   Colours are currently marked **DRAFT** (`colorsStatus`) — they were drawn
+   from standard home kits, not club brand guidelines, so verify before any
+   graphic ships.
+
+2. **Entrants** — who entered, per season, lives on the `NL Cup` record in
+   `competitions-meta.json`. Entry is *not* a division: a club keeps its real
+   league division and appears here as well (Braintree and Truro are National
+   League South in 2026 but entered). `members` are codes in `clubs-meta.json`,
+   `guests` are codes in `cup-clubs-meta.json`; `null` means not recorded, `[]`
+   would mean none entered. The 2025-26 member side is `null` — the PL2 entrants
+   are on record but the NL 16 were never captured.
+
+3. **NL Cup fixtures in the fixtures file**, with `competition` set to
    `NL Cup` — the string must match `competitions-meta.json`.
 
 Placement needs no change. The rule is *"one copy per side that is an NL member

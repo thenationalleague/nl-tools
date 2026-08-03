@@ -271,9 +271,13 @@ function load(src){return new Promise(function(res){
     for(var i=0;i<work.length;i++){
       var j = work[i];
       var home = byName[j.home], away = byName[j.away];
+      /* Guest sides carry a competition-correct name ("Fulham PL2") but share
+         the member crest file ("Fulham.png"), so crestName wins over name. */
+      var homeKey = (home && home.crestName) || j.home;
+      var awayKey = (away && away.crestName) || j.away;
       var assets = {
-        homeCrest: await asset('/assets/crests/'+encodeURIComponent(j.home)+'.png'),
-        awayCrest: await asset('/assets/crests/'+encodeURIComponent(j.away)+'.png'),
+        homeCrest: await asset('/assets/crests/'+encodeURIComponent(homeKey)+'.png'),
+        awayCrest: await asset('/assets/crests/'+encodeURIComponent(awayKey)+'.png'),
         badge:     await asset(j.badge.split('/').map(encodeURIComponent).join('/'))
       };
       if(!assets.homeCrest || !assets.awayCrest || !assets.badge){
