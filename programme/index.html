@@ -98,6 +98,13 @@
   var BY_CODE = {};      // <CODE> → roster entry
   var loaded = { folders: false, files: false, roster: false };
   var view = { club: null, folderId: null };   // club === null → directory
+  var sel = {};                                // fileId → true, current folder only
+
+  /* Selection is per-folder and never survives navigation. Carrying ticks
+     between folders is how people end up moving or deleting something they
+     forgot was selected two screens ago. */
+  function goFolder(id) { view.folderId = id || null; sel = {}; render(); }
+  function selected() { return Object.keys(sel); }
 
   var esc = function (s) { return NL.escHtml(s); };
   function el(id) { return document.getElementById(id); }
@@ -409,7 +416,7 @@
 
     el('nlOpen').onclick = function () { openClub(NLK); };
     Array.prototype.forEach.call(el('nlPanel').querySelectorAll('[data-nlopen]'), function (b) {
-      function go() { openClub(NLK); view.folderId = b.getAttribute('data-nlopen'); render(); }
+      function go() { openClub(NLK); goFolder(b.getAttribute('data-nlopen')); }
       b.onclick = go;
       b.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } };
     });
@@ -498,11 +505,12 @@
   function openClub(code) {
     view.club = code;
     view.folderId = null;
+    sel = {};
     render();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  function backToDir() { view.club = null; view.folderId = null; render(); }
+  function backToDir() { view.club = null; view.folderId = null; sel = {}; render(); }
 
   function renderClub(code) {
     el('viewDir').style.display = 'none';
@@ -617,6 +625,21 @@
           (writable ? 'Nothing here yet — add the files other clubs will need.' : 'Nothing here yet.') +
           '</div></div>';
       } else {
+        var picked = files.filter(function (f) { return sel[f.id]; });
+        if (picked.length) {
+          html += '<div class="sel-bar">' +
+            '<span class="sel-bar__count">' + picked.length + ' selected</span>' +
+            '<button class="btn btn--primary btn--sm" id="selZip">Download selected</button>' +
+            (writable ? '<button class="btn btn--ghost btn--sm" id="selMove">Move to…</button>' +
+                        '<button class="btn btn--danger btn--sm" id="selRemove">Remove</button>' : '') +
+            '<span class="sel-bar__spacer"></span>' +
+            '<button class="btn btn--ghost btn--sm" id="selClear">Clear</button>' +
+          '</div>';
+        }
+        html += '<div class="file-head">' +
+          '<input type="checkbox" class="file-check" id="selAll" aria-label="Select all files in this folder"' +
+            (picked.length === files.length ? ' checked' : '') + '>' +
+          '<span>' + files.length + ' file' + (files.length === 1 ? '' : 's') + ' in ' + esc(here.name) + '</span></div>';
         html += files.map(function (f) { return fileRow(f, code, writable, isNL); }).join('');
       }
     } else if (!subs.length) {
@@ -640,7 +663,9 @@
       : state === 'upcoming' ? '<span class="pill pill--soon">From ' + esc(PP.fmtDate(f.usedFrom)) + '</span>'
       : state === 'expired' ? '<span class="pill pill--expired">Ended</span>' : '';
 
-    return '<div class="file-row">' + thumb +
+    return '<div class="file-row' + (sel[f.id] ? ' is-picked' : '') + '">' +
+      '<input type="checkbox" class="file-check" data-pick="' + esc(f.id) + '"' +
+        (sel[f.id] ? ' checked' : '') + ' aria-label="Select ' + esc(f.name) + '">' + thumb +
       '<div class="file-row__main">' +
         '<div class="file-row__name">' + esc(f.name) + ' ' + pill + '</div>' +
         '<div class="file-row__meta">' + esc(PP.humanSize(f.size)) + ' · added ' + esc(PP.ago(f.uploadedAt)) + '</div>' +
@@ -660,13 +685,13 @@
     Array.prototype.forEach.call(root.querySelectorAll('[data-go]'), function (b) {
       b.onclick = function () {
         if (b.getAttribute('data-go') === 'dir') backToDir();
-        else { view.folderId = null; render(); }
+        else goFolder(null);
       };
     });
     Array.prototype.forEach.call(root.querySelectorAll('[data-open]'), function (b) {
       b.onclick = function (e) {
         if (e.target.closest('[data-menu]')) return;     // the ⋯ button handles itself
-        view.folderId = b.getAttribute('data-open'); render();
+        goFolder(b.getAttribute('data-open'));
       };
       if (b.classList.contains('folder')) {
         b.onkeydown = function (e) {
@@ -701,6 +726,27 @@
     var ren = el('renameFolder'); if (ren) ren.onclick = function () { renameFolder(code); };
     var del = el('deleteFolder'); if (del) del.onclick = function () { deleteFolder(code); };
 
+    /* Ticking a box re-renders, which is cheap here and keeps the selection
+       bar, the row highlight and the select-all state derived from one source
+       rather than three that can disagree. */
+    Array.prototype.forEach.call(root.querySelectorAll('[data-pick]'), function (b) {
+      b.onchange = function () {
+        var id = b.getAttribute('data-pick');
+        if (b.checked) sel[id] = true; else delete sel[id];
+        render();
+      };
+    });
+    var all = el('selAll');
+    if (all) all.onchange = function () {
+      sel = {};
+      if (all.checked) filesFor(code, view.folderId).forEach(function (f) { sel[f.id] = true; });
+      render();
+    };
+    var clear = el('selClear'); if (clear) clear.onclick = function () { sel = {}; render(); };
+    var zipSel = el('selZip'); if (zipSel) zipSel.onclick = function () { downloadSelected(code); };
+    var moveSel = el('selMove'); if (moveSel) moveSel.onclick = function () { moveSelected(code); };
+    var rmSel = el('selRemove'); if (rmSel) rmSel.onclick = function () { removeSelected(code); };
+
     Array.prototype.forEach.call(root.querySelectorAll('[data-del]'), function (b) {
       b.onclick = function () { removeFile(code, b.getAttribute('data-del')); };
     });
@@ -722,6 +768,83 @@
     drop.addEventListener('drop', function (e) {
       if (e.dataTransfer && e.dataTransfer.files) uploadAll(code, e.dataTransfer.files);
     });
+  }
+
+  /* ── Bulk actions on a selection ──────────────────────────────────────── */
+
+  function pickedFiles(code) {
+    return filesFor(code, view.folderId).filter(function (f) { return sel[f.id]; });
+  }
+
+  function downloadSelected(code) {
+    var list = pickedFiles(code).map(function (f) { return { file: f, path: '' }; });
+    if (!list.length) return;
+    var here = folderById(code, view.folderId);
+    zipFrom(list, (here ? here.name : code) + ' selection');
+  }
+
+  /* Moving is a metadata change only — the file record's folderId. The bytes
+     stay exactly where they are, because the Storage path is keyed on the
+     folder the file was uploaded to and re-pathing would mean a copy, a delete
+     and a window where the file is in neither place. Nothing in the UI reads
+     the folder out of the storage path, so they are free to disagree. */
+  function moveSelected(code) {
+    var picked = pickedFiles(code);
+    if (!picked.length) return;
+    var options = foldersFor(code).filter(function (f) { return f.id !== view.folderId; });
+    if (!options.length) { NL.toast('There is nowhere else to move them yet', 'info'); return; }
+
+    NL.modal({
+      title: 'Move ' + picked.length + ' file' + (picked.length === 1 ? '' : 's'),
+      size: 'sm',
+      body: '<div class="form-group"><label for="mvTo">Move to</label><select id="mvTo">' +
+        options.map(function (f) {
+          /* Non-breaking spaces so the tree shape survives inside <option>. */
+          var pad = new Array(f.depth + 1).join('\u00a0\u00a0\u00a0');
+          return '<option value="' + esc(f.id) + '">' + pad + esc(f.name) + '</option>';
+        }).join('') + '</select></div>',
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Move', className: 'btn--primary', autofocus: true, onClick: function (c) {
+            var to = document.getElementById('mvTo').value;
+            var updates = {};
+            picked.forEach(function (f) { updates[f.id + '/folderId'] = to; });
+            PP.ref('files/' + code).update(updates).then(function () {
+              PP.audit('move', { club: code, detail: picked.length + ' file(s) → ' +
+                ((folderById(code, to) || {}).name || to) });
+              NL.toast('Moved ' + picked.length + ' file' + (picked.length === 1 ? '' : 's'), 'success');
+              sel = {};
+              c.close();
+            }).catch(function (e) { NL.toast('Could not move: ' + e.message, 'error'); });
+          } }
+      ]
+    });
+  }
+
+  function removeSelected(code) {
+    var picked = pickedFiles(code);
+    if (!picked.length) return;
+    NL.confirm('Remove ' + picked.length + ' file' + (picked.length === 1 ? '' : 's') +
+      '? Other clubs will no longer see ' + (picked.length === 1 ? 'it' : 'them') + '.',
+      { title: 'Remove files', confirmText: 'Remove', variant: 'danger' }).then(function (ok) {
+        if (!ok) return;
+        /* Trash first, then drop the live records — a failure part-way leaves a
+           recoverable copy rather than nothing. */
+        var trash = {}, live = {};
+        picked.forEach(function (f) {
+          var rec = {}; for (var k in f) if (k !== 'id') rec[k] = f[k];
+          rec.deletedAt = PP.TS();
+          trash[f.id] = rec;
+          live[f.id] = null;
+        });
+        return PP.ref('trash/' + code).update(trash)
+          .then(function () { return PP.ref('files/' + code).update(live); })
+          .then(function () {
+            PP.audit('remove', { club: code, detail: picked.length + ' file(s)' });
+            NL.toast('Removed ' + picked.length + ' file' + (picked.length === 1 ? '' : 's'), 'success');
+            sel = {};
+          });
+      }).catch(function (e) { NL.toast('Could not remove: ' + e.message, 'error'); });
   }
 
   /* ── Folder context menu ──────────────────────────────────────────────── */
@@ -755,7 +878,7 @@
 
     menuEl.addEventListener('click', function (e) { e.stopPropagation(); });
     menuEl.querySelector('[data-act="open"]').onclick = function () {
-      closeMenu(); view.folderId = folderId; render();
+      closeMenu(); goFolder(folderId);
     };
     var zip = menuEl.querySelector('[data-act="zip"]');
     if (inside.length) zip.onclick = function () { closeMenu(); downloadZip(code, folderId); };
@@ -775,10 +898,14 @@
 
   function downloadZip(code, folderId) {
     var list = collectFiles(code, folderId, '');
-    if (!list.length) { NL.toast('Nothing to download', 'info'); return; }
-
     var label = folderId ? (folderById(code, folderId) || {}).name
                          : (code === PP.NL_KEY ? 'National League' : (BY_CODE[code] || {}).name || code);
+    zipFrom(list, label);
+  }
+
+  /* list: [{ file, path }] — path is the folder prefix inside the archive. */
+  function zipFrom(list, label) {
+    if (!list.length) { NL.toast('Nothing to download', 'info'); return; }
     var bytes = totalBytes(list);
 
     var go = bytes < ZIP_WARN_BYTES ? Promise.resolve(true) : NL.confirm(
@@ -788,13 +915,12 @@
 
     go.then(function (ok) {
       if (!ok) return;
-      var t = NL.toast('Preparing ' + list.length + ' files\u2026', 'info');
-      var taken = {};
+      NL.toast('Preparing ' + list.length + ' file' + (list.length === 1 ? '' : 's') + '\u2026', 'info');
+      var taken = {}, entries = [];
 
-      /* Sequential rather than parallel: 60 concurrent range requests to
-         Storage is a good way to get throttled, and the wait is dominated by
-         bytes rather than round trips. */
-      var entries = [];
+      /* Sequential rather than parallel: sixty concurrent requests to Storage
+         is a good way to get throttled, and the wait is dominated by bytes
+         rather than round trips. */
       var chain = list.reduce(function (p, item) {
         return p.then(function () {
           return fetch(item.file.url).then(function (r) {
@@ -811,8 +937,8 @@
 
       return chain.then(function () {
         NL.download(PP.safeName(label) + '.zip', PPZip.build(entries), 'application/zip');
-        NL.toast('Downloaded ' + entries.length + ' files', 'success');
-        PP.audit('download-zip', { club: code, detail: label + ' (' + entries.length + ' files)' });
+        NL.toast('Downloaded ' + entries.length + ' file' + (entries.length === 1 ? '' : 's'), 'success');
+        PP.audit('download-zip', { club: view.club, detail: label + ' (' + entries.length + ' files)' });
       });
     }).catch(function (e) {
       console.error('[programme] zip', e);
