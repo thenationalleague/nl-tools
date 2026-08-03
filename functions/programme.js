@@ -48,7 +48,7 @@
  * because the Storage paths are keyed on the same clubs-meta code the portal
  * uses. See programme/README.md.
  */
-const { onValueCreated } = require("firebase-functions/v2/database");
+const { onValueWritten } = require("firebase-functions/v2/database");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
 
@@ -131,9 +131,19 @@ async function noteFailure(uid) {
 }
 
 /* ---- The trigger --------------------------------------------------------- */
-exports.programmeAuth = onValueCreated(TRIGGER_OPTS, async (event) => {
+/* onValueWritten, not onValueCreated. The request path is keyed on a stable
+   uid, so it is only ever a *create* the first time that user signs in. If a
+   request is ever left behind — the function was down, errored, or the trigger
+   was not yet delivering — every later attempt by that user is an UPDATE, and
+   an onValueCreated trigger would ignore it forever. That is a permanent
+   lockout for exactly the user unlucky enough to hit a blip, so it must be
+   onValueWritten. Deletions (including this function's own) are ignored, which
+   also keeps it loop-safe. */
+exports.programmeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
   const uid = event.params.uid;
-  const req = (event.data && event.data.val()) || {};
+  const after = event.data && event.data.after;
+  if (!after || !after.exists()) return;   // our own delete, or a clear — nothing to do
+  const req = after.val() || {};
   const db = admin.database();
 
   /* Delete the request first, whatever happens next: it carries a passcode in
