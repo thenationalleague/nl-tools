@@ -39,6 +39,18 @@
        ?sim=off          → real clock, bar hidden (explicit form)
 
      Changelog:
+       03/08/2026  v3.8  The save confirmation moves into the submit bar.
+                         A green "Saved" banner at the top of the page
+                         reported a change the fan made at the bottom of
+                         it, so the answer to "did that save?" was nowhere
+                         near the button they pressed — and the bar itself
+                         simply vanished. It now becomes "N predictions in
+                         — editable until each match kicks off", in place,
+                         with the reset link directly beneath. The reset
+                         banner goes for the same reason: the bar turning
+                         back into Submit is the confirmation. "Nothing to
+                         reset" keeps its banner, since nothing on screen
+                         changes to say it.
        03/08/2026  v3.7  Leaderboard periods only offer windows that have
                          actually produced a result. The month and matchday
                          dropdowns listed every date in the season, so
@@ -711,7 +723,10 @@
   }
   #nlPredictor .nlsp__resetbtn:hover { color:var(--red); }
 
-  /* Submit bar — shown when there are awaiting rows ready to commit */
+  /* Submit bar — the button when there is something to commit, and the
+     confirmation in the same place once there is not. Feedback belongs where
+     the action was: a banner at the top of the page reports a change the fan
+     made at the bottom of it. */
   #nlPredictor .nlsp__submitbar {
     display:flex; gap:12px; align-items:center;
     padding:12px 14px; margin:14px 0 18px;
@@ -719,6 +734,19 @@
     box-shadow:var(--shadow);
   }
   #nlPredictor .nlsp__submitbar .nlsp__btn { flex:1; }
+  #nlPredictor .nlsp__submitbar.is-saved {
+    background:var(--green-light); border-color:var(--green);
+  }
+  #nlPredictor .nlsp__savedpill {
+    flex:1; display:flex; align-items:center; gap:8px;
+    color:var(--green); font-size:14px;
+    font-weight:800; font-variation-settings:'wght' 800;
+  }
+  #nlPredictor .nlsp__savedpill svg { flex:none; }
+  #nlPredictor .nlsp__savedsub {
+    display:block; font-size:12px; color:var(--text-muted);
+    font-weight:400; font-variation-settings:'wght' 400;
+  }
 
   /* Custom confirm modal */
   #nlPredictor .nlsp__modal[hidden] { display:none; }
@@ -1186,7 +1214,6 @@
   }
   // Brief "Saved" toast at the top of the widget (replaces the old savetick
   // pinned to the now-removed status bar).
-  function flashSaveTick() { setBannerOK('Saved'); }
   function crestImg(url, alt, size) {
     var s = size || 26;
     if (!url) return '<span style="display:inline-block;width:' + s + 'px;height:' + s + 'px;flex:none;"></span>';
@@ -2139,7 +2166,6 @@
     fbDb.ref('predictions/' + state.user.id + '/' + currentMatchdayKey() + '/' + mid).update(payload)
       .then(function () {
         delete state.drafts[mid];
-        flashSaveTick();
         renderFixtures(); renderSubmitbar(); renderReset();
       })
       .catch(function (err) {
@@ -2167,15 +2193,35 @@
   // is gone rather than corrected.
   function renderSubmitbar() {
     var await_ids = awaitingIds();
-    if (!await_ids.length) { submitb.innerHTML = ''; return; }
+    if (await_ids.length) {
+      submitb.innerHTML =
+        '<div class="nlsp__submitbar">' +
+          '<button class="nlsp__btn" id="nlsp-submit">Submit ' +
+            await_ids.length + ' prediction' + (await_ids.length === 1 ? '' : 's') +
+          '</button>' +
+        '</div>';
+      var btn = document.getElementById('nlsp-submit');
+      if (btn) btn.addEventListener('click', submitAllAwaiting);
+      return;
+    }
+    /* Nothing left to submit. If the fan has predictions in for this matchday
+       and it has not kicked off, say so here rather than flashing a banner at
+       the top of the page — the answer to "did that save?" should be where
+       the button they pressed used to be. The reset link sits just below,
+       which is the next thing they might want and nothing sooner. */
+    var n = Object.keys(state.predictions).length;
+    if (!n || !allMatchesPreKO()) { submitb.innerHTML = ''; return; }
     submitb.innerHTML =
-      '<div class="nlsp__submitbar">' +
-        '<button class="nlsp__btn" id="nlsp-submit">Submit ' +
-          await_ids.length + ' prediction' + (await_ids.length === 1 ? '' : 's') +
-        '</button>' +
+      '<div class="nlsp__submitbar is-saved">' +
+        '<span class="nlsp__savedpill">' +
+          '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" ' +
+            'stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+            '<polyline points="20 6 9 17 4 12"/></svg>' +
+          '<span>' + n + ' prediction' + (n === 1 ? '' : 's') + ' in' +
+            '<span class="nlsp__savedsub">Editable until each match kicks off</span>' +
+          '</span>' +
+        '</span>' +
       '</div>';
-    var btn = document.getElementById('nlsp-submit');
-    if (btn) btn.addEventListener('click', submitAllAwaiting);
   }
 
   // Submit is WYSIWYG: every open match goes in at its displayed value, so a
@@ -2202,7 +2248,6 @@
       fbDb.ref('predictions/' + state.user.id + '/' + currentMatchdayKey()).update(updates)
         .then(function () {
           Object.keys(updates).forEach(function (mid) { delete state.drafts[mid]; });
-          flashSaveTick();
         })
         .catch(function (err) {
           showBanner('Submit failed: ' + err.message, 'err');
@@ -2282,7 +2327,6 @@
         fbDb.ref('predictions/' + state.user.id + '/' + currentMatchdayKey()).update(nulls)
           .then(function () {
             state.drafts = {}; state.editing = {};
-            setBannerOK('All predictions reset.');
           })
           .catch(function (err) {
             showBanner('Reset failed: ' + err.message, 'err');
