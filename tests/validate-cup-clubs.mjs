@@ -120,14 +120,13 @@ export function validateCupClubs(repo = REPO) {
         else if (!HEX.test(col[slot])) E(`${at}: colors.${slot} must be #RRGGBB, got ${JSON.stringify(col[slot])}`);
       }
     }
+    // Per-record, so a verified club stops warning the moment it is verified,
+    // rather than the whole file staying flagged until the last one lands.
+    if (c.colorsDraft) W(`${at}: colours are DRAFT (home-kit guess, not a club source)`);
   });
 
   for (const [code, n] of codeSeen) if (n > 1) E(`cup-clubs-meta: duplicate code "${code}" on ${n} records`);
   for (const [nm, n] of nameSeen) if (n > 1) E(`cup-clubs-meta: duplicate name "${nm}" on ${n} records`);
-
-  if (cup.colorsStatus && /draft/i.test(cup.colorsStatus)) {
-    W('cup-clubs-meta: colours are still marked DRAFT — verify before publishing graphics');
-  }
 
   // ── entrants ─────────────────────────────────────────────────────────────
   // Entry is not a division: a club keeps its real league division and appears
