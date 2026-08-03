@@ -48,6 +48,7 @@ export function validateClubsMeta(repo = REPO) {
 
   // ── per-club ─────────────────────────────────────────────────────────────
   const optaSeen = new Map();
+  const fasSeen = new Map();
   const nameSeen = new Map();
   let currentRoster = 0;
 
@@ -58,6 +59,16 @@ export function validateClubsMeta(repo = REPO) {
     if (!c.name || typeof c.name !== 'string') E(`${at}: missing/invalid "name"`);
     if (!c.code || typeof c.code !== 'string') E(`${at}: missing/invalid "code"`);
     if (!c.optaID) W(`${at}: missing "optaID"`);
+
+    // fasID — sister identifier to optaID. Only expected for clubs on the
+    // current roster; departed clubs keep their optaID but carry no fasID.
+    const onCurrentRoster = !!(seasons && seasons.current && c.seasons &&
+                               typeof c.seasons === 'object' && c.seasons[seasons.current] != null);
+    if (c.fasID == null) {
+      if (onCurrentRoster) W(`${at}: missing "fasID"`);
+    } else if (typeof c.fasID !== 'string' || !/^\d+$/.test(c.fasID)) {
+      E(`${at}: "fasID" must be a string of digits, got ${JSON.stringify(c.fasID)}`);
+    }
 
     if (c.name) {
       nameSeen.set(c.name, (nameSeen.get(c.name) || 0) + 1);
@@ -73,6 +84,7 @@ export function validateClubsMeta(repo = REPO) {
       }
     }
     if (c.optaID) optaSeen.set(c.optaID, (optaSeen.get(c.optaID) || 0) + 1);
+    if (c.fasID) fasSeen.set(c.fasID, (fasSeen.get(c.fasID) || 0) + 1);
 
     if (c.seasons && typeof c.seasons === 'object') {
       for (const k of Object.keys(c.seasons)) {
@@ -88,6 +100,7 @@ export function validateClubsMeta(repo = REPO) {
 
   // ── uniqueness ───────────────────────────────────────────────────────────
   for (const [id, n] of optaSeen) if (n > 1) E(`duplicate optaID "${id}" on ${n} clubs`);
+  for (const [id, n] of fasSeen) if (n > 1) E(`duplicate fasID "${id}" on ${n} clubs`);
   for (const [nm, n] of nameSeen) if (n > 1) E(`duplicate club name "${nm}" on ${n} records`);
 
   // ── roster sanity ────────────────────────────────────────────────────────
@@ -95,13 +108,13 @@ export function validateClubsMeta(repo = REPO) {
     E(`current season "${seasons.current}" has an empty roster`);
   }
 
-  return { errors, warnings, stats: { clubs: meta.clubs.length, currentRoster } };
+  return { errors, warnings, stats: { clubs: meta.clubs.length, currentRoster, fasIDs: fasSeen.size } };
 }
 
 // CLI entry
 if (import.meta.url === `file://${process.argv[1]}`) {
   const { errors, warnings, stats } = validateClubsMeta();
-  if (stats) console.log(`clubs-meta: ${stats.clubs} clubs, ${stats.currentRoster} in current roster`);
+  if (stats) console.log(`clubs-meta: ${stats.clubs} clubs, ${stats.currentRoster} in current roster, ${stats.fasIDs} with fasID`);
   warnings.forEach((w) => console.warn('  ⚠ ' + w));
   if (errors.length) {
     errors.forEach((e) => console.error('  ✗ ' + e));

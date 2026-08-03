@@ -18,7 +18,7 @@ npm run validate:clubs # full clubs-meta report incl. warnings (missing crests e
 |---|---|
 | `load-canon.mjs` | Loads `system/nl-utils.js` (a browser IIFE) in a VM sandbox with light window/document stubs, exposes `NL`. Covers the pure string/date/club helpers; DOM/Firebase-bound helpers are out of scope (they're covered by each PR's layperson smoke test). |
 | `canon.test.mjs` | Asserts the shared helpers return the **right answer** — escaping, date parsing/formatting, crest URLs, season lookups, and that `season.clubsFor` drops departed clubs (the dazn-vip bug class). |
-| `validate-clubs-meta.mjs` | Enforces the clubs-meta **data schema**: required fields, unique Opta IDs + names, valid season keys, crest-file existence, non-empty current roster. Errors fail CI; warnings don't. |
+| `validate-clubs-meta.mjs` | Enforces the clubs-meta **data schema**: required fields, unique Opta + FAS IDs + names, `fasID` present on every current-roster club and shaped as a digit-string, valid season keys, crest-file existence, non-empty current roster. Errors fail CI; warnings don't. |
 | `clubs-meta.test.mjs` | Fails `npm test` if the validator reports any structural error. |
 | `BASELINE.md` | Pre-consolidation measurements, so each step can show its effect. |
 
