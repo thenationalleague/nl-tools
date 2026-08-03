@@ -448,6 +448,13 @@
     DEFAULT_FOLDERS: DEFAULT_FOLDERS,
     NL_FOLDERS: NL_FOLDERS,
     NL_KEY: 'NL',
+    /* Files may sit loose at the top of a club's folder, not only inside one.
+       They carry this as their folderId so a root file is an ordinary record
+       with an ordinary storage path — the alternative, a null folderId, needs
+       a special case at every read and produced exactly one: filesFor(code,
+       null) matched everything, so whole-pack zips counted and packed every
+       file twice. */
+    ROOT_FOLDER: '_root',
     MAX_BYTES: 100 * 1024 * 1024,   // must match storage.rules.snapshot
 
     normCode: normCode,

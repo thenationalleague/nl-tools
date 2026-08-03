@@ -322,6 +322,21 @@ test('seeded club folders are defaults, and exclude Miscellaneous', () => {
     'a read-all library must not seed a folder that invites confidential files');
 });
 
+test('root files carry a real folder id, not a null one', () => {
+  /* A null folderId needed a special case at every read, and produced exactly
+     one bug: a "match everything when no folder given" filter meant whole-pack
+     zips counted and packed every file twice. */
+  assert.equal(PP.ROOT_FOLDER, '_root');
+  assert.ok(PP.ROOT_FOLDER && typeof PP.ROOT_FOLDER === 'string');
+});
+
+test('a root file gets an ordinary four-segment storage path', () => {
+  const p = PP.storagePath('FYL', PP.ROOT_FOLDER, 'file1', 'crest.png');
+  assert.equal(p, 'programme/FYL/_root/file1-crest.png');
+  assert.equal(p.split('/').length, 4, 'same shape as a foldered file');
+  assert.equal(p.split('/')[1], 'FYL', 'club code stays in the segment the rules match');
+});
+
 test('the NL folder has its own defaults, led by Adverts', () => {
   assert.equal(PP.NL_FOLDERS[0].name, 'Adverts');
   assert.equal(PP.NL_KEY, 'NL');

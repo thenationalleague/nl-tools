@@ -31,11 +31,11 @@ directory and inside any club's folder. Adverts carry an optional
 weekend's programme rather than a pile of thirty PNGs by October. Undated NL
 assets (spec sheets, the league wordmark) are evergreen, not out of date.
 
-**Folders are owned by the club, not mandated.** Three are seeded on a club's
-first visit (Crest & Logos, Photos, Club Info) and can be renamed, deleted or
-added to freely, and nested up to three deep. They exist so 72 clubs converge
-on a common shape by inertia — there is no cross-club search, so the reader's
-only navigation aid is that most folders are named the same thing.
+**Folders are owned by the club, and optional.** Nothing is pre-created; a club
+makes what it needs, nested up to three deep, or none at all. **Files can sit
+loose at the top of a club's folder** — they carry `folderId: '_root'`, so a
+root file is an ordinary record with an ordinary storage path rather than a
+null that every read has to special-case.
 
 **Ordering is alphabetical and not editable**, for folders and files alike. A
 manual sort order is hidden state nobody maintains, and across 72 clubs it
@@ -48,11 +48,14 @@ is PNG, JPEG and PDF, all already compressed, so deflate would spend CPU for a
 percent or two. Right-click a folder (or use its ⋯ button) for that folder and
 everything under it; the club root offers the whole pack.
 
-> Bulk download reads file bytes into the tab, which a browser will only do
-> cross-origin if the **Storage bucket's CORS** config allows `nl.tools`.
-> Single-file downloads never touch this — the browser saves those directly and
-> the page never sees the bytes — so if bulk fails and single works, CORS is
-> why, and the UI says so rather than reporting a generic network error.
+> **Bulk download needs bucket CORS.** It reads file bytes into the tab, which
+> a browser will only do cross-origin if the bucket allows the origin —
+> confirmed live on 03/08/2026, where the first attempt failed exactly as the
+> UI predicted. The config is `system/rtdb/storage.cors.json`; there is no
+> console UI for bucket CORS, so it is applied from Cloud Shell.
+> Single-file downloads never touch this: the browser saves those directly and
+> the page never sees the bytes. So "bulk fails, single works" has one cause,
+> and the UI names it rather than reporting a generic network error.
 
 ## Access — how write-own is actually enforced
 
@@ -124,7 +127,7 @@ config/
   nl             { name, passcode, token, addedAt }             # the 73rd code
 authRequests/<uid>         { code, token?, admin?, at }   # own uid only; deleted by the trigger
 authGrants/<uid>           { ok, customToken?, club?, error? }   # own uid only
-folders/<CODE>/<folderId>  { name, sortOrder, createdAt }
+folders/<CODE>/<folderId>  { name, parentId?, createdAt }   parentId = subfolder
 files/<CODE>/<fileId>      { name, folderId, size, contentType, storagePath,
                              url, uploadedAt, usedFrom?, usedUntil? }
 trash/<CODE>/<fileId>      { ...file, deletedAt }
