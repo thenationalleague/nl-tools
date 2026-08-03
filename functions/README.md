@@ -67,6 +67,22 @@ allowed to deploy:
    sit in the database's region, not the `europe-west2` default the rest use.
 4. **Run it** — Actions tab → *Deploy footage proxy function* → **Run workflow**.
 
+### Required roles, by function
+
+Facts the deploy depends on — not a walkthrough. If a deploy fails on
+permissions, this is the list to check it against.
+
+| Identity | Needs | Why |
+|---|---|---|
+| `GCP_SERVICE_ACCOUNT` (deploy) | the roles in step 2 | deploys everything |
+| `firebase-adminsdk-fbsvc@` (runtime) | `roles/eventarc.eventReceiver` | `programmeAuth` is the project's only **RTDB-triggered** function; gen-2 RTDB triggers deliver via Eventarc and the runtime identity must be allowed to receive events. Without it: `403 … Permission 'eventarc.events.receiveEvent' denied`. |
+
+`programmeAuth` pins that service account deliberately (see `account.js`): the
+gen-2 default compute SA holds no Firebase roles, so RTDB drops its connection
+and `createCustomToken` fails. It also runs in **europe-west1**, not the
+`europe-west2` the others use — an RTDB trigger must sit in the database's
+region.
+
 `ffmpeg` ships with the function via `ffmpeg-static`, so there's nothing else to
 install. Logs: `firebase functions:log` — or the **Functions** page in the console.
 
