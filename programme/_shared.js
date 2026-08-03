@@ -310,6 +310,11 @@
           };
           remember(code, token);
           PP.session = session;
+          /* Logged after the session exists, so the entry is attributed to the
+             club rather than to nobody. Failures are not logged here — the
+             trigger already records a rejected passcode server-side, where it
+             cannot be skipped by closing the tab. */
+          audit('sign-in', {});
           return session;
         });
       });
@@ -351,14 +356,21 @@
   /* ── Audit ─────────────────────────────────────────────────────────────
      Append-only by rule (see rules.snapshot.json) — nothing in this family,
      admin console included, can edit or prune an entry. */
+  /* Every entry records who did it and, where relevant, whose folder it was
+     done to. `crossClub` is derived rather than left to each caller to
+     remember: it is the question the audit exists to answer — who is taking
+     other clubs' material — and a flag computed in one place cannot be
+     forgotten at a call site. */
   function audit(action, fields) {
     var s = session || {};
+    fields = fields || {};
     var entry = {
       ts: firebase.database.ServerValue.TIMESTAMP,
       actor: s.isAdmin ? 'master' : ('club:' + s.code),
       actorLabel: s.name || s.code || 'unknown',
       action: action
     };
+    if (fields.club && !s.isAdmin && fields.club !== s.code) entry.crossClub = true;
     Object.keys(fields || {}).forEach(function (k) {
       if (fields[k] != null && fields[k] !== '') entry[k] = fields[k];
     });

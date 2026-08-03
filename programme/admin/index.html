@@ -131,6 +131,46 @@
   .tpl textarea:focus { outline: none; border-color: var(--primary); box-shadow: var(--focus-ring); }
   .tpl code { background: var(--off-white); padding: 1px 5px; border-radius: var(--radius-sm); }
 
+  /* ── Storage hero + ranked bars ──────────────────────────────────────
+     Form follows the job (see the dataviz method). The total is a single
+     headline number, so it is a hero stat, not a chart. The per-club split is
+     *magnitude across many categories*, which is a ranked bar chart — a pie
+     with 73 slices is unreadable and would need 73 categorical hues nobody can
+     tell apart. One hue, light to dark, because the variable is magnitude:
+     colour is carrying "how much", not "which club". */
+  .hero { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 14px; margin-bottom: 22px; }
+  .hero__cell { background: var(--white); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 22px 24px; }
+  .hero__cell--lead { background: var(--navy); border-color: var(--navy); color: var(--white); }
+  .hero__num { font-size: var(--text-display); font-weight: 900;
+    font-variation-settings: 'wght' 900; line-height: 1; letter-spacing: -0.01em;
+    color: var(--navy); }
+  .hero__cell--lead .hero__num { color: var(--white); }
+  .hero__label { font-size: var(--text-xs); font-weight: 700;
+    font-variation-settings: 'wght' 700; text-transform: uppercase;
+    letter-spacing: 0.1em; color: var(--text-muted); margin-top: 8px; }
+  .hero__cell--lead .hero__label { color: var(--navy-200); }
+
+  .rank { background: var(--white); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: 20px 22px; margin-bottom: 22px; }
+  .rank__title { font-size: var(--text-xs); font-weight: 800;
+    font-variation-settings: 'wght' 800; text-transform: uppercase;
+    letter-spacing: 0.1em; color: var(--navy); margin-bottom: 14px; }
+  .rank__row { display: grid; grid-template-columns: 160px 1fr 74px;
+    gap: 12px; align-items: center; margin-bottom: 7px; }
+  .rank__name { font-size: var(--text-sm); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  /* Thin mark, rounded data-end, anchored to a common baseline. */
+  .rank__track { height: 14px; background: var(--off-white);
+    border-radius: var(--radius-sm); overflow: hidden; }
+  .rank__fill { height: 100%; border-radius: 0 4px 4px 0; min-width: 3px; }
+  .rank__val { font-size: var(--text-xs); color: var(--text-muted); text-align: right;
+    font-variation-settings: 'wght' 600; }
+
+  /* Selected filter in the audit toolbar. */
+  .btn.is-on { background: var(--navy); color: var(--white); border-color: var(--navy); }
+
   /* Boot/loading state. A pane must never sit empty with no explanation: every
      RTDB listener below has an error callback that writes into it. */
   .boot { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
@@ -227,7 +267,7 @@
       });
       watch('files', function (v) { FILES = v; });
       watch('trash', function (v) { TRASH = v; });
-      watch('audit', function (v) { AUDIT = v; }, PP.ref('audit').limitToLast(200));
+      watch('audit', function (v) { AUDIT = v; }, PP.ref('audit').limitToLast(1000));
     }).catch(function (e) { fail('signing in', e); });
   };
 
@@ -281,6 +321,60 @@
     return t;
   }
 
+  /* Sequential ramp, light → dark, from the brand navy ladder. One hue: the
+     bars encode magnitude, not identity, so a categorical palette (and its CVD
+     validation) is the wrong tool. Deepest for the biggest. */
+  var RAMP = ['var(--navy-300)', 'var(--navy-400)', 'var(--navy-500)',
+              'var(--navy-600)', 'var(--navy-700)', 'var(--navy-800)'];
+
+  function storageHero() {
+    var live = totalBytes(FILES), removed = totalBytes(TRASH);
+    var nlBytes = liveBytes('NL');
+    var clubsWithFiles = ROSTER.filter(function (c) { return fileCount(c.code) > 0; }).length;
+
+    return '<div class="hero">' +
+      '<div class="hero__cell hero__cell--lead">' +
+        '<div class="hero__num">' + esc(PP.humanSize(live)) + '</div>' +
+        '<div class="hero__label">Stored</div></div>' +
+      '<div class="hero__cell"><div class="hero__num">' + esc(PP.humanSize(nlBytes)) + '</div>' +
+        '<div class="hero__label">National League</div></div>' +
+      '<div class="hero__cell"><div class="hero__num">' + clubsWithFiles + '</div>' +
+        '<div class="hero__label">Clubs uploading</div></div>' +
+      '<div class="hero__cell"><div class="hero__num">' + esc(PP.humanSize(removed)) + '</div>' +
+        '<div class="hero__label">Removed, recoverable</div></div>' +
+    '</div>';
+  }
+
+  function storageRanks() {
+    var rows = [];
+    if (liveBytes('NL')) rows.push({ name: 'National League', bytes: liveBytes('NL') });
+    ROSTER.forEach(function (c) {
+      var b = liveBytes(c.code);
+      if (b) rows.push({ name: c.name, bytes: b });
+    });
+    if (!rows.length) return '';
+    rows.sort(function (a, b) { return b.bytes - a.bytes; });
+
+    var top = rows.slice(0, 12);
+    var rest = rows.slice(12);
+    if (rest.length) {
+      rows = top.concat([{ name: rest.length + ' others', bytes:
+        rest.reduce(function (t, r) { return t + r.bytes; }, 0), muted: true }]);
+    } else { rows = top; }
+
+    var max = rows[0].bytes || 1;
+    return '<div class="rank"><div class="rank__title">Storage by folder</div>' +
+      rows.map(function (r, i) {
+        var pct = Math.max(1, Math.round((r.bytes / max) * 100));
+        var shade = r.muted ? 'var(--navy-200)'
+                            : RAMP[Math.min(RAMP.length - 1, RAMP.length - 1 - Math.floor(i / 2))];
+        return '<div class="rank__row" title="' + esc(r.name + ' — ' + PP.humanSize(r.bytes)) + '">' +
+          '<div class="rank__name">' + esc(r.name) + '</div>' +
+          '<div class="rank__track"><div class="rank__fill" style="width:' + pct + '%;background:' + shade + '"></div></div>' +
+          '<div class="rank__val">' + esc(PP.humanSize(r.bytes)) + '</div></div>';
+      }).join('') + '</div>';
+  }
+
   function renderAccess() {
     var seeded = Object.keys(CONFIG.clubs || {}).length;
 
@@ -309,6 +403,7 @@
     var missing = ROSTER.filter(function (c) { return !CONFIG.clubs[c.code]; }).length;
 
     el('paneAccess').innerHTML =
+      storageHero() + storageRanks() +
       '<div class="tpl">' +
         '<div class="tpl__head">Standard message</div>' +
         '<p class="form-hint" style="margin:0 0 8px">Placeholders: <code>{club}</code> <code>{link}</code> <code>{passcode}</code></p>' +
@@ -325,10 +420,7 @@
         '<button class="btn btn--ghost" id="btnExport">Export access CSV</button>' +
         '<button class="btn btn--ghost" id="btnMerge">Export mail-merge CSV</button>' +
         '<span class="acc-tools__spacer"></span>' +
-        '<span class="text-label">' + esc(String(seeded)) + ' clubs + National League · ' +
-          esc(PP.humanSize(totalBytes(FILES))) + ' stored' +
-          (totalBytes(TRASH) ? ' · ' + esc(PP.humanSize(totalBytes(TRASH))) + ' removed but not deleted' : '') +
-        '</span>' +
+        '<span class="text-label">' + esc(String(seeded)) + ' clubs + National League</span>' +
       '</div>' +
       '<div class="table-wrap"><table class="table"><thead><tr>' +
         '<th>Club</th><th>Division</th><th>Passcode</th><th>Files</th><th>Storage</th><th></th>' +
@@ -623,6 +715,11 @@
 
   /* ── Audit ────────────────────────────────────────────────────────────── */
 
+  /* The audit answers one question above the others: who is taking other
+     clubs' material. So cross-club rows are marked, and a filter isolates
+     them, rather than leaving you to eyeball 500 lines. */
+  var auditFilter = 'all';
+
   function renderAudit() {
     var rows = Object.keys(AUDIT).map(function (k) {
       var r = Object.assign({}, AUDIT[k]); r.id = k; return r;
@@ -630,18 +727,77 @@
 
     if (!rows.length) {
       el('paneAudit').innerHTML = '<div class="empty-state"><div class="empty-state__title">Nothing logged yet</div>' +
-        '<div class="empty-state__text">Uploads, removals and access changes appear here.</div></div>';
+        '<div class="empty-state__text">Sign-ins, uploads, downloads and removals appear here.</div></div>';
       return;
     }
+
+    var shown = rows.filter(function (r) {
+      if (auditFilter === 'cross') return r.crossClub;
+      if (auditFilter === 'downloads') return r.action === 'download' || r.action === 'download-zip';
+      if (auditFilter === 'signins') return r.action === 'sign-in';
+      return true;
+    });
+
+    function tab(id, label) {
+      return '<button class="btn btn--ghost btn--sm' + (auditFilter === id ? ' is-on' : '') +
+        '" data-af="' + id + '">' + label + '</button>';
+    }
+
     el('paneAudit').innerHTML =
-      '<div class="table-wrap"><table class="table"><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Detail</th></tr></thead><tbody>' +
-      rows.map(function (r) {
-        return '<tr><td>' + esc(PP.fmt(r.ts)) + '</td>' +
+      '<div class="acc-tools">' + tab('all', 'Everything') + tab('signins', 'Sign-ins') +
+        tab('downloads', 'Downloads') + tab('cross', 'Other clubs\u2019 files') +
+        '<span class="acc-tools__spacer"></span>' +
+        '<button class="btn btn--ghost btn--sm" id="auditCsv">Export CSV</button></div>' +
+      '<div class="table-wrap"><table class="table"><thead><tr>' +
+        '<th>When</th><th>Who</th><th>Did what</th><th>To</th><th>Detail</th>' +
+      '</tr></thead><tbody>' +
+      shown.map(function (r) {
+        var target = r.club
+          ? (r.club === 'NL' ? 'National League' : ((BY_CODE[r.club] || {}).name || r.club))
+          : '';
+        return '<tr>' +
+          '<td>' + esc(PP.fmt(r.ts)) + '</td>' +
           '<td>' + esc(r.actorLabel || r.actor || '—') + '</td>' +
-          '<td>' + esc(r.action || '') + '</td>' +
-          '<td>' + esc(r.detail || r.clubName || '') + '</td></tr>';
+          '<td>' + esc(ACTION_LABEL[r.action] || r.action || '') + '</td>' +
+          '<td>' + esc(target) +
+            (r.crossClub ? ' <span class="pill pill--soon">another club</span>' : '') + '</td>' +
+          '<td>' + esc(r.detail || '') + '</td></tr>';
       }).join('') + '</tbody></table></div>';
+
+    Array.prototype.forEach.call(el('paneAudit').querySelectorAll('[data-af]'), function (b) {
+      b.onclick = function () { auditFilter = b.getAttribute('data-af'); render(); };
+    });
+    el('auditCsv').onclick = function () {
+      var out = [['When', 'Who', 'Action', 'Club', 'Cross-club', 'Detail']];
+      shown.forEach(function (r) {
+        out.push([PP.fmt(r.ts), r.actorLabel || r.actor || '', r.action || '',
+                  r.club || '', r.crossClub ? 'yes' : '', r.detail || '']);
+      });
+      NL.download('programme-packs-audit.csv', NL.csv(out), 'text/csv');
+    };
   }
+
+  var ACTION_LABEL = {
+    'sign-in': 'Signed in',
+    'view-club': 'Opened a folder',
+    'download': 'Downloaded a file',
+    'download-zip': 'Downloaded a zip',
+    'upload': 'Uploaded',
+    'remove': 'Removed',
+    'restore': 'Restored',
+    'purge': 'Deleted for good',
+    'move': 'Moved files',
+    'folder-create': 'Created a folder',
+    'folder-rename': 'Renamed a folder',
+    'folder-delete': 'Deleted a folder',
+    'regen-access': 'Reissued access',
+    'seed': 'Seeded the roster',
+    'email-template': 'Edited the standard message',
+    'build-emails': 'Built club emails',
+    'export-access': 'Exported access CSV',
+    'export-emails': 'Exported mail-merge CSV'
+  };
+
 })();
 </script>
 

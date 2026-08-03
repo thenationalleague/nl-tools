@@ -122,11 +122,20 @@
     if (location.hash === next) { applyHash(); return; }
     location.hash = next;                 // hashchange applies it
   }
+  var visited = {};
   function applyHash() {
     var h = readHash();
     if (h.club !== view.club || h.folderId !== view.folderId) sel = {};
+    var entering = h.club && h.club !== view.club;
     view.club = h.club;
     view.folderId = h.folderId;
+    /* Once per club per session. Logging every hash change would bury the
+       audit in navigation noise and tell you nothing you did not already know
+       from the first entry. */
+    if (entering && !visited[h.club] && PP.session) {
+      visited[h.club] = true;
+      PP.audit('view-club', { club: h.club });
+    }
     render();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -595,7 +604,8 @@
       '<div class="tile__body">' +
         '<div class="tile__name">' + esc(f.name) + ' ' + pill + '</div>' +
         '<div class="tile__acts">' +
-          '<a class="btn btn--ghost btn--sm" href="' + esc(f.url || '#') + '" download target="_blank" rel="noopener">Download</a>' +
+          '<a class="btn btn--ghost btn--sm" href="' + esc(f.url || '#') + '" download target="_blank" rel="noopener"' +
+            ' data-dl="' + esc(f.id) + '">Download</a>' +
           (writable && isNL ? '<button class="btn btn--ghost btn--sm" data-date="' + esc(f.id) + '">Dates</button>' : '') +
         '</div>' +
       '</div></div>';
@@ -685,6 +695,18 @@
     Array.prototype.forEach.call(root.querySelectorAll('[data-del]'), function (b) {
       b.onclick = function () { removeFile(code, b.getAttribute('data-del')); };
     });
+    /* A single-file download is a plain <a download>, so it never passed
+       through JS and never appeared in the audit — the most common action in
+       the tool was the one action nobody could see. The link still does the
+       downloading; this only records it, and deliberately does not preventDefault
+       so a failed write can never block the download. */
+    Array.prototype.forEach.call(root.querySelectorAll('[data-dl]'), function (a) {
+      a.addEventListener('click', function () {
+        var f = (FILES[code] || {})[a.getAttribute('data-dl')];
+        if (f) PP.audit('download', { club: code, detail: f.name });
+      });
+    });
+
     Array.prototype.forEach.call(root.querySelectorAll('[data-date]'), function (b) {
       b.onclick = function () { editDates(code, b.getAttribute('data-date')); };
     });
