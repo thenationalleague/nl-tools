@@ -33,9 +33,26 @@ assets (spec sheets, the league wordmark) are evergreen, not out of date.
 
 **Folders are owned by the club, not mandated.** Three are seeded on a club's
 first visit (Crest & Logos, Photos, Club Info) and can be renamed, deleted or
-added to freely. They exist so 72 clubs converge on a common shape by inertia —
-there is no cross-club search, so the reader's only navigation aid is that most
-folders are named the same thing.
+added to freely, and nested up to three deep. They exist so 72 clubs converge
+on a common shape by inertia — there is no cross-club search, so the reader's
+only navigation aid is that most folders are named the same thing.
+
+**Ordering is alphabetical and not editable**, for folders and files alike. A
+manual sort order is hidden state nobody maintains, and across 72 clubs it
+would mean 72 arrangements of the same three folders — the opposite of what
+someone hunting through another club's library needs.
+
+**Bulk download** is a stored (uncompressed) zip built in the browser —
+`programme/_zip.js`, no dependency and no build step. What goes in these packs
+is PNG, JPEG and PDF, all already compressed, so deflate would spend CPU for a
+percent or two. Right-click a folder (or use its ⋯ button) for that folder and
+everything under it; the club root offers the whole pack.
+
+> Bulk download reads file bytes into the tab, which a browser will only do
+> cross-origin if the **Storage bucket's CORS** config allows `nl.tools`.
+> Single-file downloads never touch this — the browser saves those directly and
+> the page never sees the bytes — so if bulk fails and single works, CORS is
+> why, and the UI says so rather than reporting a generic network error.
 
 ## Access — how write-own is actually enforced
 

@@ -44,6 +44,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
+<script src="/programme/_zip.js"></script>
 <script src="/programme/_shared.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
 <link rel="stylesheet" href="/programme/_shared.css">
@@ -300,7 +301,36 @@
   }
 
   function childrenOf(code, folderId) {
-    return foldersFor(code).filter(function (f) { return f.parentId === folderId; });
+    return foldersFor(code).filter(function (f) { return (f.parentId || null) === (folderId || null); });
+  }
+
+  function folderById(code, id) {
+    return foldersFor(code).filter(function (f) { return f.id === id; })[0] || null;
+  }
+
+  /* Chain from the club root down to `id`, for the breadcrumb and for the
+     folder paths written into a zip. */
+  function trail(code, id) {
+    var out = [], guard = 0, f = id ? folderById(code, id) : null;
+    while (f && guard++ < 10) { out.unshift(f); f = f.parentId ? folderById(code, f.parentId) : null; }
+    return out;
+  }
+
+  /* Every file at or below `folderId` (null = the whole club), each paired with
+     the folder path it should occupy inside the archive. */
+  function collectFiles(code, folderId, prefix) {
+    var out = [];
+    filesFor(code, folderId).forEach(function (f) {
+      out.push({ file: f, path: prefix });
+    });
+    childrenOf(code, folderId).forEach(function (child) {
+      out = out.concat(collectFiles(code, child.id, prefix + PP.safeName(child.name) + '/'));
+    });
+    return out;
+  }
+
+  function totalBytes(list) {
+    return list.reduce(function (t, e) { return t + (Number(e.file.size) || 0); }, 0);
   }
 
   function filesFor(code, folderId) {
@@ -338,64 +368,29 @@
      adverts (inside their used-from/used-until window) are listed first and
      stated plainly; undated NL assets are evergreen and just get a count. */
   function renderNLPanel() {
-    var NL_KEY = PP.NL_KEY;
-    var all = filesFor(NL_KEY);
-    var now = Date.now();
-    var live = all.filter(function (f) { return PP.adState(f, now) === 'live'; });
-    var upcoming = all.filter(function (f) { return PP.adState(f, now) === 'upcoming'; });
-    var evergreen = all.filter(function (f) { return PP.adState(f, now) === null; });
+    var all = filesFor(PP.NL_KEY);
+    var n = all.length;
 
-    var body;
-    if (!all.length) {
-      body = '<div class="empty-state"><div class="empty-state__text">' +
-        'Nothing here yet. League adverts and programme templates will appear here.' +
-        '</div></div>';
-    } else {
-      var rows = live.map(function (f) { return adRow(f, 'In this weekend’s programme'); });
-      upcoming.slice(0, 3).forEach(function (f) {
-        rows.push(adRow(f, 'From ' + esc(PP.fmtDate(f.usedFrom))));
-      });
-      if (!rows.length) {
-        rows.push('<div class="ad-row"><div class="ad-row__main">' +
-          '<div class="ad-row__name">No advert scheduled for this week</div>' +
-          '<div class="ad-row__when">Open the folder for templates, specs and league assets.</div>' +
-          '</div></div>');
-      }
-      body = rows.join('');
-    }
-
+    /* Header only. This used to carry an "advert this week" strip driven by the
+       used-from/used-until dates, but adverts change rarely enough that it was
+       usually showing "no advert scheduled" — a whole panel row saying nothing.
+       The dates still mark a file Live or Ended inside the folder, where that
+       is the useful place for them. */
     el('nlPanel').innerHTML =
       '<div class="nl-panel">' +
         '<div class="nl-panel__head">' +
           '<img class="nl-panel__rose" src="' + PP.ROSE + '" alt="">' +
           '<div class="nl-panel__id">' +
             '<div class="nl-panel__title">National League</div>' +
-            '<div class="nl-panel__sub">Adverts, templates and league assets — ' +
-              esc(String(all.length)) + ' file' + (all.length === 1 ? '' : 's') +
-              (evergreen.length ? ' · ' + esc(String(evergreen.length)) + ' evergreen' : '') +
-            '</div>' +
+            '<div class="nl-panel__sub">Adverts, templates and league assets' +
+              (n ? ' — ' + esc(String(n)) + ' file' + (n === 1 ? '' : 's')
+                 : ' — nothing here yet') + '</div>' +
           '</div>' +
           '<button class="btn btn--ghost" id="nlOpen">Open folder</button>' +
         '</div>' +
-        '<div class="nl-panel__body">' + body + '</div>' +
       '</div>';
 
     el('nlOpen').onclick = function () { openClub(PP.NL_KEY); };
-  }
-
-  function adRow(f, when) {
-    var kind = PP.fileKind(f.contentType, f.name);
-    var thumb = (kind === 'image' && f.url)
-      ? '<img class="ad-row__thumb" src="' + esc(f.url) + '" alt="" loading="lazy">'
-      : '<div class="ad-row__thumb file-row__icon">' + PP.kindIcon(kind) + '</div>';
-    return '<div class="ad-row">' + thumb +
-      '<div class="ad-row__main">' +
-        '<div class="ad-row__name">' + esc(f.name) + '</div>' +
-        '<div class="ad-row__when">' + when +
-          (f.usedUntil ? ' · until ' + esc(PP.fmtDate(f.usedUntil)) : '') + '</div>' +
-      '</div>' +
-      '<a class="btn btn--ghost" href="' + esc(f.url || '#') + '" download target="_blank" rel="noopener">Download</a>' +
-      '</div>';
   }
 
   /* The 72-club directory. Empty clubs are listed, never hidden — a club with
@@ -428,7 +423,7 @@
     if (own) {
       var n = fileCount(s.code), last = lastUpload(s.code);
       html += '<div class="sec-head">Your folder' +
-        '<span class="sec-head__note">Only your club can upload here. Every other club can see it.</span></div>' +
+        '<span class="sec-head__note">Only your club can upload here \u00b7 every other club can see it</span></div>' +
         '<div class="own">' +
           PP.crestImgHtml(own.name, 68).replace('<img ', '<img class="own__crest" ') +
           '<div class="own__id">' +
@@ -486,78 +481,98 @@
     var isNL = code === PP.NL_KEY;
     var meta = BY_CODE[code];
     var name = isNL ? 'National League' : (meta ? meta.name : code);
-    var folders = foldersFor(code);
     var writable = canWrite(code);
+    var here = view.folderId ? folderById(code, view.folderId) : null;
+    if (view.folderId && !here) view.folderId = null;          // folder deleted under us
+    var path = trail(code, view.folderId);
+    var subs = childrenOf(code, view.folderId);
+    var files = view.folderId ? filesFor(code, view.folderId) : [];
+    var packCount = collectFiles(code, null, '').length;
 
-    if (!view.folderId && folders.length) view.folderId = folders[0].id;
+    /* Breadcrumb — All clubs › Club › Folder › Subfolder */
+    var html = '<div class="crumb">' +
+      '<button class="crumb__link" data-go="dir">← All clubs</button><span class="crumb__sep">/</span>' +
+      (view.folderId ? '<button class="crumb__link" data-go="root">' + esc(name) + '</button>'
+                     : '<span class="crumb__here">' + esc(name) + '</span>');
+    path.forEach(function (f, i) {
+      html += '<span class="crumb__sep">/</span>' +
+        (i === path.length - 1
+          ? '<span class="crumb__here">' + esc(f.name) + '</span>'
+          : '<button class="crumb__link" data-open="' + esc(f.id) + '">' + esc(f.name) + '</button>');
+    });
+    html += '</div>';
 
-    var html = '<div class="sec-head">' +
-      '<button class="btn btn--ghost" id="backBtn">← All clubs</button>' +
-      '<span style="margin-left:6px">' + esc(name) + '</span>' +
-      (isNL ? '' : '<span class="sec-head__note">' + esc(meta ? meta.division : '') + '</span>') +
-      '</div>';
-
-    if (!folders.length) {
-      html += '<div class="empty-state"><div class="empty-state__title">Nothing here yet</div>' +
-        '<div class="empty-state__text">' +
-        (writable ? 'Add a folder to get started.' : esc(name) + ' hasn’t added any files yet.') +
-        '</div></div>';
-      if (writable) html += '<div style="margin-top:12px"><button class="btn btn--primary" id="addFolder">New folder</button></div>';
-      el('viewClub').innerHTML = html;
-      wireClub(code, writable);
-      return;
+    /* Actions for wherever we are: download this level, and upload/new folder
+       for the club that owns it. */
+    html += '<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">';
+    if (view.folderId) {
+      html += '<button class="btn btn--ghost" data-zip="' + esc(view.folderId) + '">Download this folder</button>';
+    } else if (packCount) {
+      html += '<button class="btn btn--ghost" data-zip="__all">Download entire pack (' + packCount + ' files)</button>';
     }
-
-    /* Folder rail. A folder holding nothing is flagged amber; any file in it
-       and it reads as active. Both states stay visible. */
-    var rail = folders.map(function (f) {
-      var n = filesFor(code, f.id).length;
-      return '<button class="rail__item' + (f.id === view.folderId ? ' on' : '') + '"' +
-        ' style="padding-left:' + (10 + f.depth * 14) + 'px" data-folder="' + esc(f.id) + '">' +
-        (f.depth ? '<span class="rail__tick" aria-hidden="true">└</span>' : '') +
-        '<span class="rail__label">' + esc(f.name) + '</span>' +
-        '<span class="rail__count' + (n ? '' : ' is-zero') + '">' + (n || '0') + '</span></button>';
-    }).join('');
-    if (writable) rail += '<button class="rail__item rail__add" id="addFolder">+ New folder</button>';
-
-    var current = folders.filter(function (f) { return f.id === view.folderId; })[0] || folders[0];
-    var files = filesFor(code, current.id);
-
-    var pane = '';
-    if (!writable) {
-      pane += '<div class="ro-note">' +
-        '<span>You’re viewing ' + esc(name) + '’s folder. Download anything you need — only ' +
-        esc(name) + ' can add or remove files here.</span></div>';
-    } else {
-      pane += '<div class="vis-note">' +
-        '<span><strong>Everything you upload here is visible to all 72 clubs</strong> and to the ' +
-        'National League. Don’t put contracts, personal details or anything confidential in this folder.</span></div>';
-      pane += '<div class="drop" id="drop" tabindex="0" role="button">' +
-        '<strong>Drop files here</strong> or click to choose' +
-        '<div class="drop__hint">Up to ' + PP.humanSize(PP.MAX_BYTES) + ' per file · into ' + esc(current.name) + '</div>' +
-        '</div><input type="file" id="fileInput" multiple style="display:none">' +
-        '<div id="uploads"></div>';
-      if (folders.length) {
-        var canNest = current.depth < MAX_DEPTH - 1;
-        var canDelete = !files.length && !childrenOf(code, current.id).length;
-        pane += '<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">' +
-          (canNest ? '<button class="btn btn--ghost" id="addSub">New folder inside ' + esc(current.name) + '</button>' : '') +
-          '<button class="btn btn--ghost" id="renameFolder">Rename folder</button>' +
-          (canDelete ? '<button class="btn btn--ghost" id="deleteFolder">Delete folder</button>' : '') +
-          '</div>';
+    if (writable) {
+      html += '<button class="btn btn--ghost" id="addFolder">New folder' +
+        (here ? ' inside ' + esc(here.name) : '') + '</button>';
+      if (here) {
+        html += '<button class="btn btn--ghost" id="renameFolder">Rename</button>';
+        if (!files.length && !subs.length) {
+          html += '<button class="btn btn--ghost" id="deleteFolder">Delete folder</button>';
+        }
       }
     }
+    html += '</div>';
 
-    if (!files.length) {
-      pane += '<div class="empty-state"><div class="empty-state__title">This folder is empty</div>' +
-        '<div class="empty-state__text">' +
-        (writable ? 'Nothing in here yet — add the files other clubs will need.'
-                  : 'Nothing in here yet.') + '</div></div>';
-    } else {
-      pane += files.map(function (f) { return fileRow(f, code, writable, isNL); }).join('');
+    if (!writable) {
+      html += '<div class="ro-note"><span>You\u2019re viewing ' + esc(name) +
+        '\u2019s folder. Download anything you need \u2014 only ' + esc(name) +
+        ' can add or remove files here.</span></div>';
     }
 
-    html += '<div class="lib"><div class="rail">' + rail + '</div><div>' + pane + '</div></div>';
+    /* Folder tiles for this level. */
+    if (subs.length) {
+      html += '<div class="folders">' + subs.map(function (f) {
+        var inside = collectFiles(code, f.id, '');
+        return '<div class="folder' + (inside.length ? '' : ' is-empty') + '" tabindex="0" role="button"' +
+          ' data-open="' + esc(f.id) + '" aria-label="' + esc(f.name + ' — ' +
+            (inside.length ? inside.length + ' file' + (inside.length === 1 ? '' : 's') : 'empty')) + '">' +
+          '<span class="folder__icon" aria-hidden="true">' + (inside.length ? '\ud83d\udcc1' : '\ud83d\uddc2\ufe0f') + '</span>' +
+          '<span class="folder__id"><span class="folder__name">' + esc(f.name) + '</span>' +
+          '<span class="folder__meta">' + (inside.length
+            ? inside.length + ' file' + (inside.length === 1 ? '' : 's') + ' · ' + PP.humanSize(totalBytes(inside))
+            : 'Empty') + '</span></span>' +
+          '<button class="folder__more" data-menu="' + esc(f.id) + '" aria-label="Folder actions">\u22ef</button>' +
+          '</div>';
+      }).join('') + '</div>';
+    }
+
+    /* Files at this level. Files always live in a folder, so the club root
+       shows folders only. */
+    if (view.folderId) {
+      if (writable) {
+        html += '<div class="vis-note"><span><strong>Everything you upload here is visible to all 72 clubs</strong> ' +
+          'and to the National League. Don\u2019t put contracts, personal details or anything confidential in this folder.</span></div>' +
+          '<div class="drop" id="drop" tabindex="0" role="button">' +
+          '<strong>Drop files here</strong> or click to choose' +
+          '<div class="drop__hint">Up to ' + PP.humanSize(PP.MAX_BYTES) + ' per file · into ' + esc(here.name) + '</div>' +
+          '</div><input type="file" id="fileInput" multiple style="display:none">' +
+          '<div id="uploads"></div>';
+      }
+      if (!files.length) {
+        html += '<div class="empty-state"><div class="empty-state__title">' +
+          (subs.length ? 'No files at this level' : 'This folder is empty') + '</div>' +
+          '<div class="empty-state__text">' +
+          (writable ? 'Nothing here yet — add the files other clubs will need.' : 'Nothing here yet.') +
+          '</div></div>';
+      } else {
+        html += files.map(function (f) { return fileRow(f, code, writable, isNL); }).join('');
+      }
+    } else if (!subs.length) {
+      html += '<div class="empty-state"><div class="empty-state__title">Nothing here yet</div>' +
+        '<div class="empty-state__text">' +
+        (writable ? 'Add a folder to get started.' : esc(name) + ' hasn\u2019t added any files yet.') +
+        '</div></div>';
+    }
+
     el('viewClub').innerHTML = html;
     wireClub(code, writable);
   }
@@ -588,18 +603,45 @@
 
   function wireClub(code, writable) {
     var root = el('viewClub');
-    var back = el('backBtn'); if (back) back.onclick = backToDir;
 
-    Array.prototype.forEach.call(root.querySelectorAll('[data-folder]'), function (b) {
-      b.onclick = function () { view.folderId = b.getAttribute('data-folder'); render(); };
+    Array.prototype.forEach.call(root.querySelectorAll('[data-go]'), function (b) {
+      b.onclick = function () {
+        if (b.getAttribute('data-go') === 'dir') backToDir();
+        else { view.folderId = null; render(); }
+      };
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-open]'), function (b) {
+      b.onclick = function (e) {
+        if (e.target.closest('[data-menu]')) return;     // the ⋯ button handles itself
+        view.folderId = b.getAttribute('data-open'); render();
+      };
+      if (b.classList.contains('folder')) {
+        b.onkeydown = function (e) {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); b.onclick(e); }
+        };
+        b.oncontextmenu = function (e) {
+          e.preventDefault();
+          openMenu(code, b.getAttribute('data-open'), e.clientX, e.clientY);
+        };
+      }
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-menu]'), function (b) {
+      b.onclick = function (e) {
+        e.stopPropagation();
+        var r = b.getBoundingClientRect();
+        openMenu(code, b.getAttribute('data-menu'), r.left, r.bottom + 4);
+      };
+    });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-zip]'), function (b) {
+      b.onclick = function () {
+        var id = b.getAttribute('data-zip');
+        downloadZip(code, id === '__all' ? null : id);
+      };
     });
 
     var add = el('addFolder');
-    if (add) add.onclick = function () { newFolder(code, null); };
+    if (add) add.onclick = function () { newFolder(code, view.folderId); };
     if (!writable) return;
-
-    var sub = el('addSub');
-    if (sub) sub.onclick = function () { newFolder(code, view.folderId); };
 
     var ren = el('renameFolder'); if (ren) ren.onclick = function () { renameFolder(code); };
     var del = el('deleteFolder'); if (del) del.onclick = function () { deleteFolder(code); };
@@ -624,6 +666,108 @@
     });
     drop.addEventListener('drop', function (e) {
       if (e.dataTransfer && e.dataTransfer.files) uploadAll(code, e.dataTransfer.files);
+    });
+  }
+
+  /* ── Folder context menu ──────────────────────────────────────────────── */
+
+  var menuEl = null;
+  function closeMenu() { if (menuEl) { menuEl.remove(); menuEl = null; } }
+  document.addEventListener('click', closeMenu);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeMenu(); });
+  window.addEventListener('resize', closeMenu);
+
+  function openMenu(code, folderId, x, y) {
+    closeMenu();
+    var f = folderById(code, folderId);
+    if (!f) return;
+    var inside = collectFiles(code, folderId, '');
+
+    menuEl = document.createElement('div');
+    menuEl.className = 'ctx';
+    menuEl.innerHTML =
+      '<button class="ctx__item" data-act="open">Open</button>' +
+      '<button class="ctx__item" data-act="zip"' + (inside.length ? '' : ' disabled') + '>' +
+        (inside.length ? 'Download folder (' + inside.length + ' file' + (inside.length === 1 ? '' : 's') +
+                         ', ' + PP.humanSize(totalBytes(inside)) + ')'
+                       : 'Download folder — it\u2019s empty') + '</button>';
+    document.body.appendChild(menuEl);
+
+    /* Keep it on screen when the click lands near an edge. */
+    var r = menuEl.getBoundingClientRect();
+    menuEl.style.left = Math.min(x, window.innerWidth - r.width - 8) + 'px';
+    menuEl.style.top = Math.min(y, window.innerHeight - r.height - 8) + 'px';
+
+    menuEl.addEventListener('click', function (e) { e.stopPropagation(); });
+    menuEl.querySelector('[data-act="open"]').onclick = function () {
+      closeMenu(); view.folderId = folderId; render();
+    };
+    var zip = menuEl.querySelector('[data-act="zip"]');
+    if (inside.length) zip.onclick = function () { closeMenu(); downloadZip(code, folderId); };
+  }
+
+  /* ── Zip download ─────────────────────────────────────────────────────
+     Everything at or below a folder, or the whole club pack. Files are fetched
+     from their Storage download URLs and assembled in the tab — see _zip.js for
+     why the archive is stored rather than deflated.
+
+     The one thing that can stop this is CORS: a browser may only read bytes
+     cross-origin if the bucket allows it. Downloading a single file never hits
+     that (the browser saves it directly, the page never sees it), so the
+     failure is specific to bulk download and the message says so rather than
+     reporting a generic network error. */
+  var ZIP_WARN_BYTES = 300 * 1024 * 1024;
+
+  function downloadZip(code, folderId) {
+    var list = collectFiles(code, folderId, '');
+    if (!list.length) { NL.toast('Nothing to download', 'info'); return; }
+
+    var label = folderId ? (folderById(code, folderId) || {}).name
+                         : (code === PP.NL_KEY ? 'National League' : (BY_CODE[code] || {}).name || code);
+    var bytes = totalBytes(list);
+
+    var go = bytes < ZIP_WARN_BYTES ? Promise.resolve(true) : NL.confirm(
+      'That\u2019s ' + PP.humanSize(bytes) + ' across ' + list.length + ' files. It has to download ' +
+      'to this tab before the zip is built, which will take a while and use that much memory. Carry on?',
+      { title: 'Large download', confirmText: 'Download' });
+
+    go.then(function (ok) {
+      if (!ok) return;
+      var t = NL.toast('Preparing ' + list.length + ' files\u2026', 'info');
+      var taken = {};
+
+      /* Sequential rather than parallel: 60 concurrent range requests to
+         Storage is a good way to get throttled, and the wait is dominated by
+         bytes rather than round trips. */
+      var entries = [];
+      var chain = list.reduce(function (p, item) {
+        return p.then(function () {
+          return fetch(item.file.url).then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status + ' fetching ' + item.file.name);
+            return r.arrayBuffer();
+          }).then(function (buf) {
+            entries.push({
+              name: PPZip.uniqueName(item.path + PP.safeName(item.file.name), taken),
+              data: new Uint8Array(buf)
+            });
+          });
+        });
+      }, Promise.resolve());
+
+      return chain.then(function () {
+        NL.download(PP.safeName(label) + '.zip', PPZip.build(entries), 'application/zip');
+        NL.toast('Downloaded ' + entries.length + ' files', 'success');
+        PP.audit('download-zip', { club: code, detail: label + ' (' + entries.length + ' files)' });
+      });
+    }).catch(function (e) {
+      console.error('[programme] zip', e);
+      var cors = e instanceof TypeError;   // fetch rejects with TypeError on a CORS block
+      NL.alert(cors
+        ? 'Bulk download is blocked by the storage bucket\u2019s CORS settings, which have to allow ' +
+          'nl.tools to read files. Downloading files one at a time still works. Please tell the ' +
+          'National League \u2014 it is a one-off setting, not a problem with your club\u2019s files.'
+        : 'Could not build the download: ' + (e.message || e),
+        { title: 'Download failed' });
     });
   }
 
@@ -670,7 +814,9 @@
       .then(function (ok) {
         if (!ok) return;
         return PP.ref('folders/' + code + '/' + f.id).remove().then(function () {
-          view.folderId = null;
+          /* Land on the parent, not the club root — deleting a subfolder
+             shouldn't throw you back to the top of the tree. */
+          view.folderId = f.parentId || null;
           PP.audit('folder-delete', { club: code, detail: f.name });
           NL.toast('Folder deleted', 'success');
         });
