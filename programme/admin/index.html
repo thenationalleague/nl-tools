@@ -120,10 +120,21 @@
      nothing to add here. An earlier build hand-rolled .tabs__btn AND redefined
      .tabs, which silently broke the shared component on this page. */
 
+  /* Standard-message editor — same shape as /club-contacts/admin.html. */
+  .tpl { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px; margin-bottom: 18px; }
+  .tpl__head { font-size: var(--text-xs); font-weight: 800; font-variation-settings: 'wght' 800;
+    color: var(--navy); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
+  .tpl textarea { width: 100%; font-family: var(--font); font-size: var(--text-sm);
+    line-height: 1.5; padding: 10px 12px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); color: var(--text); resize: vertical; }
+  .tpl textarea:focus { outline: none; border-color: var(--primary); box-shadow: var(--focus-ring); }
+  .tpl code { background: var(--off-white); padding: 1px 5px; border-radius: var(--radius-sm); }
+
   /* Boot/loading state. A pane must never sit empty with no explanation: every
      RTDB listener below has an error callback that writes into it. */
   .boot { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 22px; text-align: center; color: var(--text-muted); font-size: 13px; }
+    padding: 22px; text-align: center; color: var(--text-muted); font-size: var(--text-sm); }
 </style>
 </head>
 <body>
@@ -204,7 +215,16 @@
         }, function (err) { fail('reading ' + path, err); });
       }
 
-      watch('config', function (v) { CONFIG = { clubs: v.clubs || {}, nl: v.nl || null }; });
+      watch('config', function (v) {
+        CONFIG = { clubs: v.clubs || {}, nl: v.nl || null };
+        /* Keep an edit in progress — only adopt the stored template when the
+           box hasn't been touched, or a save from another tab would wipe what
+           you are typing. */
+        if (v.emailTemplate && v.emailTemplate.body) {
+          var box = el('tplBody');
+          if (!box || box.value === TPL || !box.value) TPL = v.emailTemplate.body;
+        }
+      });
       watch('files', function (v) { FILES = v; });
       watch('trash', function (v) { TRASH = v; });
       watch('audit', function (v) { AUDIT = v; }, PP.ref('audit').limitToLast(200));
@@ -269,9 +289,21 @@
     var missing = ROSTER.filter(function (c) { return !CONFIG.clubs[c.code]; }).length;
 
     el('paneAccess').innerHTML =
+      '<div class="tpl">' +
+        '<div class="tpl__head">Standard message</div>' +
+        '<p class="form-hint" style="margin:0 0 8px">Placeholders: <code>{club}</code> <code>{link}</code> <code>{passcode}</code></p>' +
+        '<textarea id="tplBody" rows="10"></textarea>' +
+        '<div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">' +
+          '<button class="btn btn--ghost btn--sm" id="tplSave">Save standard message</button>' +
+          '<button class="btn btn--navy btn--sm" id="tplBuild">Build email text for all clubs</button>' +
+          '<span id="tplStatus" class="form-hint"></span>' +
+        '</div>' +
+        '<textarea id="emailsOut" rows="12" readonly placeholder="Generated email text appears here…" style="display:none;margin-top:10px"></textarea>' +
+      '</div>' +
       '<div class="acc-tools">' +
         '<button class="btn btn--ghost" id="btnSeedSync">Sync roster' + (missing ? ' (' + missing + ' missing)' : '') + '</button>' +
         '<button class="btn btn--ghost" id="btnExport">Export access CSV</button>' +
+        '<button class="btn btn--ghost" id="btnMerge">Export mail-merge CSV</button>' +
         '<span class="acc-tools__spacer"></span>' +
         '<span class="text-label">' + esc(String(seeded)) + ' clubs + National League</span>' +
       '</div>' +
@@ -281,6 +313,15 @@
 
     el('btnSeedSync').onclick = seedRoster;
     el('btnExport').onclick = exportCsv;
+    el('btnMerge').onclick = exportMergeCsv;
+
+    el('tplBody').value = TPL;
+    el('tplSave').onclick = saveTpl;
+    el('tplBuild').onclick = buildAllEmails;
+
+    Array.prototype.forEach.call(el('paneAccess').querySelectorAll('[data-email]'), function (b) {
+      b.onclick = function () { copyOne(b.getAttribute('data-email')); };
+    });
 
     Array.prototype.forEach.call(el('paneAccess').querySelectorAll('[data-copy]'), function (b) {
       b.onclick = function () {
@@ -304,6 +345,7 @@
       '<td><span class="code-mono">' + esc(rec.passcode || '—') + '</span></td>' +
       '<td>' + (n ? esc(String(n)) : '<span class="text-label">Empty</span>') + '</td>' +
       '<td><span class="row-acts">' +
+        '<button class="btn btn--ghost btn--sm" data-email="' + esc(code) + '">Copy email</button>' +
         '<button class="btn btn--ghost btn--sm" data-copy="' + esc(PP.clubLink(rec.token)) + '">Copy link</button>' +
         '<button class="btn btn--ghost btn--sm" data-regen="' + esc(code) + '">Regenerate</button>' +
       '</span></td></tr>';
@@ -354,6 +396,104 @@
             NL.toast('New passcode and link issued', 'success');
           });
       }).catch(function (e) { NL.toast('Could not regenerate: ' + e.message, 'error'); });
+  }
+
+  /* ── Club emails ──────────────────────────────────────────────────────
+     Same pattern as /club-contacts/admin.html: an editable standard message
+     held in RTDB with placeholders, and one button that renders it for every
+     club into a block you copy in a single go. Nothing is sent from here —
+     there is no mail infrastructure in this project and no club addresses in
+     RTDB, and a page that cannot send is a page that cannot mis-send to 72
+     clubs. */
+
+  var DEFAULT_TPL =
+    'Subject: {club} — your Programme Packs access\n\n' +
+    'Dear {club},\n\n' +
+    'Programme Packs is the National League\u2019s shared library for match-day programme assets — crests, squad photos, club information and league adverts. It replaces emailing files back and forth ahead of each fixture.\n\n' +
+    '{club}\u2019s private link (please don\u2019t share it outside your club):\n{link}\n\n' +
+    'Passcode: {passcode}\n\n' +
+    'How to use it:\n' +
+    '1. Open the link and bookmark it — it is yours and does not change.\n' +
+    '2. Enter the passcode. Your device will remember it for 30 days.\n' +
+    '3. Your own folder is at the top. Upload your crest, squad and manager photos, and club information there.\n' +
+    '4. Every other club is listed below yours — open any of them to download what you need for a fixture.\n' +
+    '5. The National League folder is pinned to the top of every page. League adverts appear there, marked with the dates they should run.\n\n' +
+    'Please note: anything you upload can be seen and downloaded by all 72 clubs and by the National League. Please don\u2019t upload contracts, personal details or anything confidential. You can only add or remove files in your own folder.\n\n' +
+    'If the passcode gets out, tell us and we will issue a new one straight away.\n\n' +
+    'Kind regards,\nThe National League';
+
+  var TPL = DEFAULT_TPL;
+
+  function recFor(code) { return code === 'NL' ? CONFIG.nl : CONFIG.clubs[code]; }
+  function nameFor(code) {
+    return code === 'NL' ? 'National League' : ((BY_CODE[code] || {}).name || code);
+  }
+
+  /* Render the template for one club. Split/join rather than replace() so a
+     passcode or club name containing $& can't be read as a replacement
+     pattern — the same reason club-contacts does it this way. */
+  function renderTpl(code, body) {
+    var rec = recFor(code);
+    if (!rec) return '';
+    return (body || TPL)
+      .split('{club}').join(nameFor(code))
+      .split('{link}').join(PP.clubLink(rec.token))
+      .split('{passcode}').join(rec.passcode || '');
+  }
+
+  function emailCodes() {
+    var out = [];
+    if (CONFIG.nl) out.push('NL');
+    ROSTER.forEach(function (c) { if (CONFIG.clubs[c.code]) out.push(c.code); });
+    return out;
+  }
+
+  function buildAllEmails() {
+    var body = el('tplBody').value || TPL;
+    var codes = emailCodes();
+    var out = codes.map(function (code) {
+      return '=== ' + nameFor(code) + ' ===\n' + renderTpl(code, body) + '\n';
+    }).join('\n');
+    var ta = el('emailsOut');
+    ta.style.display = '';
+    ta.value = out;
+    ta.select();
+    NL.copy(out, { ok: 'Email text for ' + codes.length + ' clubs copied.' });
+    PP.audit('build-emails', { count: codes.length });
+  }
+
+  function saveTpl() {
+    TPL = el('tplBody').value;
+    PP.ref('config/emailTemplate').set({ body: TPL, updatedAt: PP.TS() }).then(function () {
+      el('tplStatus').textContent = 'Saved ✓';
+      setTimeout(function () { el('tplStatus').textContent = ''; }, 2000);
+      PP.audit('email-template', { detail: 'Updated the standard message' });
+    }).catch(function (e) {
+      el('tplStatus').textContent = 'Save failed: ' + (e.message || e);
+    });
+  }
+
+  function copyOne(code) {
+    NL.copy(renderTpl(code, el('tplBody').value), { ok: nameFor(code) + ' email copied.' });
+    PP.audit('email-copy', { club: code, clubName: nameFor(code) });
+  }
+
+  /* One row per club with the message pre-rendered — for a mail merge, so the
+     73 emails go out individually rather than as one copied block. */
+  function exportMergeCsv() {
+    var body = el('tplBody').value || TPL;
+    var rows = [['Club', 'Division', 'Passcode', 'Link', 'Message']];
+    emailCodes().forEach(function (code) {
+      var rec = recFor(code);
+      rows.push([
+        nameFor(code),
+        code === 'NL' ? 'League' : ((BY_CODE[code] || {}).division || ''),
+        rec.passcode, PP.clubLink(rec.token), renderTpl(code, body)
+      ]);
+    });
+    NL.download('programme-packs-emails.csv', NL.csv(rows), 'text/csv');
+    PP.audit('export-emails', { count: rows.length - 1 });
+    NL.toast('Mail-merge CSV downloaded', 'success');
   }
 
   function exportCsv() {
