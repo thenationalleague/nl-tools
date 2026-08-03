@@ -57,6 +57,17 @@
 (function () {
   'use strict';
 
+  /* ?as=1 marks a session that an NL admin opened on a club's behalf from the
+     console. The session really is the club's — it carries that club's pClub
+     claim and can do exactly what the club can — so the audit would otherwise
+     record the admin's actions as the club's own. This flag keeps the trail
+     honest without weakening anything. It is not a permission: setting it by
+     hand grants nothing, because the claim is what the rules read. */
+  var VIA_ADMIN = (function () {
+    try { return new URLSearchParams(location.search).get('as') === '1'; }
+    catch (e) { return false; }
+  })();
+
   var ROOT = 'app-data/media-programme';
   var STORAGE_ROOT = 'programme';
   var REMEMBER_KEY = 'nl-programme-access';
@@ -306,7 +317,7 @@
         return app.auth().signInWithCustomToken(d.customToken).then(function () {
           session = {
             code: d.club.code, name: d.club.name, division: d.club.division || '',
-            isNL: !!d.isNL, isAdmin: false
+            isNL: !!d.isNL, isAdmin: false, viaAdmin: VIA_ADMIN
           };
           remember(code, token);
           PP.session = session;
@@ -371,6 +382,10 @@
       action: action
     };
     if (fields.club && !s.isAdmin && fields.club !== s.code) entry.crossClub = true;
+    if (VIA_ADMIN && !s.isAdmin) {
+      entry.viaAdmin = true;
+      entry.actorLabel = (s.name || s.code) + ' (opened by NL)';
+    }
     Object.keys(fields || {}).forEach(function (k) {
       if (fields[k] != null && fields[k] !== '') entry[k] = fields[k];
     });
@@ -404,6 +419,11 @@
     storageRef: function (path) { return app.storage().ref(path); },
 
     session: null,
+    viaAdmin: VIA_ADMIN,
+    /* Seeds the remembered-device slot so the club page signs itself in. Used
+       by the console's "Open as" — the passcode is one the admin already
+       holds, so this discloses nothing they could not read on that screen. */
+    handOff: function (code, token) { remember(code, token); },
     enter: enter,
     enterAsAdmin: enterAsAdmin,
     resume: resume,
