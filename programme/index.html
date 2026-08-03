@@ -28,7 +28,7 @@
   is load-bearing for access control.
 
   Storage (RTDB app-data/media-programme/):
-    folders/<CODE>/<folderId>  { name, sortOrder, createdAt }
+    folders/<CODE>/<folderId>  { name, parentId?, createdAt }   parentId = subfolder
     files/<CODE>/<fileId>      { name, folderId, size, contentType, storagePath,
                                  url, uploadedAt, usedFrom?, usedUntil? }
     trash/<CODE>/<fileId>      { ...file, deletedAt }
@@ -91,7 +91,7 @@
 (function () {
   'use strict';
 
-  var FOLDERS = {};      // <CODE> → { <folderId>: {name, sortOrder, createdAt} }
+  var FOLDERS = {};      // <CODE> → { <folderId>: {name, parentId?, createdAt} }
   var FILES = {};        // <CODE> → { <fileId>:  {...} }
   var ROSTER = [];       // current-season clubs from clubs-meta
   var BY_CODE = {};      // <CODE> → roster entry
@@ -245,7 +245,7 @@
       var updates = {};
       defaults.forEach(function (f) {
         var id = PP.ref('folders/' + code).push().key;
-        updates[id] = { name: f.name, sortOrder: f.sortOrder, createdAt: PP.TS() };
+        updates[id] = { name: f.name, createdAt: PP.TS() };
       });
       return PP.ref('folders/' + code).update(updates);
     }).catch(function () { /* read-only visitor — nothing to seed */ });
@@ -253,11 +253,54 @@
 
   /* ── Data helpers ─────────────────────────────────────────────────────── */
 
+  var MAX_DEPTH = 3;   // deep enough for Photos › 2026-27 › Away; not a filesystem
+
+  /* Folders are a tree via parentId (absent = top level) and always render
+     alphabetically within their parent. Ordering is deliberately not editable:
+     a manual sortOrder is hidden state that nobody maintains, and across 72
+     clubs it would mean 72 different arrangements of the same three folders.
+     Alphabetical is predictable from the outside, which is what matters when
+     71 other clubs have to find something in here.
+
+     Cycle-guarded: a corrupt parentId that points at a descendant would
+     otherwise recurse until the stack gives out. */
   function foldersFor(code) {
     var obj = FOLDERS[code] || {};
-    return Object.keys(obj).map(function (id) {
-      var f = obj[id]; return { id: id, name: f.name || 'Untitled', sortOrder: f.sortOrder || 99, createdAt: f.createdAt };
-    }).sort(function (a, b) { return (a.sortOrder - b.sortOrder) || a.name.localeCompare(b.name); });
+    var all = Object.keys(obj).map(function (id) {
+      var f = obj[id];
+      return { id: id, name: f.name || 'Untitled', parentId: f.parentId || null, createdAt: f.createdAt };
+    });
+
+    var byParent = {};
+    all.forEach(function (f) {
+      var key = f.parentId || '';
+      (byParent[key] = byParent[key] || []).push(f);
+    });
+    Object.keys(byParent).forEach(function (k) {
+      byParent[k].sort(function (a, b) { return a.name.localeCompare(b.name); });
+    });
+
+    var out = [], seen = {};
+    (function walk(parent, depth) {
+      (byParent[parent] || []).forEach(function (f) {
+        if (seen[f.id]) return;        // cycle or duplicate parent — drop it
+        seen[f.id] = true;
+        f.depth = depth;
+        out.push(f);
+        if (depth < MAX_DEPTH - 1) walk(f.id, depth + 1);
+      });
+    })('', 0);
+
+    /* Anything orphaned (its parent was deleted) still has to appear, or a
+       club's files would vanish from the UI while remaining in the bucket. */
+    all.forEach(function (f) {
+      if (!seen[f.id]) { f.depth = 0; seen[f.id] = true; out.push(f); }
+    });
+    return out;
+  }
+
+  function childrenOf(code, folderId) {
+    return foldersFor(code).filter(function (f) { return f.parentId === folderId; });
   }
 
   function filesFor(code, folderId) {
@@ -265,7 +308,7 @@
     return Object.keys(obj).map(function (id) {
       var f = obj[id]; f = Object.assign({}, f); f.id = id; return f;
     }).filter(function (f) { return !folderId || f.folderId === folderId; })
-      .sort(function (a, b) { return (b.uploadedAt || 0) - (a.uploadedAt || 0); });
+      .sort(function (a, b) { return String(a.name).localeCompare(String(b.name)); });
   }
 
   function fileCount(code) { return Object.keys(FILES[code] || {}).length; }
@@ -469,7 +512,9 @@
        and it reads as active. Both states stay visible. */
     var rail = folders.map(function (f) {
       var n = filesFor(code, f.id).length;
-      return '<button class="rail__item' + (f.id === view.folderId ? ' on' : '') + '" data-folder="' + esc(f.id) + '">' +
+      return '<button class="rail__item' + (f.id === view.folderId ? ' on' : '') + '"' +
+        ' style="padding-left:' + (10 + f.depth * 14) + 'px" data-folder="' + esc(f.id) + '">' +
+        (f.depth ? '<span class="rail__tick" aria-hidden="true">└</span>' : '') +
         '<span class="rail__label">' + esc(f.name) + '</span>' +
         '<span class="rail__count' + (n ? '' : ' is-zero') + '">' + (n || '0') + '</span></button>';
     }).join('');
@@ -493,9 +538,12 @@
         '</div><input type="file" id="fileInput" multiple style="display:none">' +
         '<div id="uploads"></div>';
       if (folders.length) {
-        pane += '<div style="display:flex;gap:8px;margin-bottom:14px">' +
+        var canNest = current.depth < MAX_DEPTH - 1;
+        var canDelete = !files.length && !childrenOf(code, current.id).length;
+        pane += '<div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">' +
+          (canNest ? '<button class="btn btn--ghost" id="addSub">New folder inside ' + esc(current.name) + '</button>' : '') +
           '<button class="btn btn--ghost" id="renameFolder">Rename folder</button>' +
-          (files.length ? '' : '<button class="btn btn--ghost" id="deleteFolder">Delete folder</button>') +
+          (canDelete ? '<button class="btn btn--ghost" id="deleteFolder">Delete folder</button>' : '') +
           '</div>';
       }
     }
@@ -547,8 +595,11 @@
     });
 
     var add = el('addFolder');
-    if (add) add.onclick = function () { newFolder(code); };
+    if (add) add.onclick = function () { newFolder(code, null); };
     if (!writable) return;
+
+    var sub = el('addSub');
+    if (sub) sub.onclick = function () { newFolder(code, view.folderId); };
 
     var ren = el('renameFolder'); if (ren) ren.onclick = function () { renameFolder(code); };
     var del = el('deleteFolder'); if (del) del.onclick = function () { deleteFolder(code); };
@@ -578,19 +629,22 @@
 
   /* ── Folder actions ───────────────────────────────────────────────────── */
 
-  function newFolder(code) {
-    NL.prompt('Folder name', { title: 'New folder', placeholder: 'e.g. Action Images' }).then(function (name) {
+  function newFolder(code, parentId) {
+    var inside = parentId ? (foldersFor(code).filter(function (f) { return f.id === parentId; })[0] || {}).name : '';
+    NL.prompt('Folder name', {
+      title: inside ? 'New folder inside ' + inside : 'New folder',
+      placeholder: 'e.g. Action Images'
+    }).then(function (name) {
+      name = (name || '').trim();
       if (!name) return;
-      var folders = foldersFor(code);
-      var next = folders.length ? folders[folders.length - 1].sortOrder + 1 : 1;
+      var rec = { name: name.slice(0, 60), createdAt: PP.TS() };
+      if (parentId) rec.parentId = parentId;
       var id = PP.ref('folders/' + code).push().key;
-      return PP.ref('folders/' + code + '/' + id)
-        .set({ name: String(name).slice(0, 60), sortOrder: next, createdAt: PP.TS() })
-        .then(function () {
-          view.folderId = id;
-          PP.audit('folder-create', { club: code, detail: String(name).slice(0, 60) });
-          NL.toast('Folder added', 'success');
-        });
+      return PP.ref('folders/' + code + '/' + id).set(rec).then(function () {
+        view.folderId = id;
+        PP.audit('folder-create', { club: code, detail: (inside ? inside + ' › ' : '') + rec.name });
+        NL.toast('Folder added', 'success');
+      });
     }).catch(function (e) { NL.toast('Could not add folder: ' + e.message, 'error'); });
   }
 
@@ -611,6 +665,7 @@
     var f = foldersFor(code).filter(function (x) { return x.id === view.folderId; })[0];
     if (!f) return;
     if (filesFor(code, f.id).length) { NL.toast('Empty the folder first', 'error'); return; }
+    if (childrenOf(code, f.id).length) { NL.toast('Delete the folders inside it first', 'error'); return; }
     NL.confirm('Delete the folder “' + esc(f.name) + '”?', { title: 'Delete folder', html: true, confirmText: 'Delete', variant: 'danger' })
       .then(function (ok) {
         if (!ok) return;

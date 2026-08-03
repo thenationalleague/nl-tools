@@ -164,16 +164,20 @@
      named the same thing. 'Miscellaneous' is deliberately NOT seeded: with a
      read-all library, a folder called Miscellaneous is where a sponsor
      contract ends up. */
+  /* No sortOrder: folders render alphabetically, always. Manual ordering is
+     hidden state nobody maintains, and across 72 clubs it would mean 72
+     arrangements of the same three folders — the opposite of what a reader
+     needs when hunting through someone else's library. */
   var DEFAULT_FOLDERS = [
-    { name: 'Crest & Logos', sortOrder: 1 },
-    { name: 'Photos', sortOrder: 2 },
-    { name: 'Club Info', sortOrder: 3 }
+    { name: 'Crest & Logos' },
+    { name: 'Photos' },
+    { name: 'Club Info' }
   ];
 
   var NL_FOLDERS = [
-    { name: 'Adverts', sortOrder: 1 },
-    { name: 'Templates & Specs', sortOrder: 2 },
-    { name: 'League Assets', sortOrder: 3 }
+    { name: 'Adverts' },
+    { name: 'Templates & Specs' },
+    { name: 'League Assets' }
   ];
 
   /* ── Session ───────────────────────────────────────────────────────────── */

@@ -231,6 +231,14 @@ test('clubLink encodes both parameters', () => {
 
 /* ── Defaults ─────────────────────────────────────────────────────────── */
 
+test('seeded folders carry no sortOrder — ordering is alphabetical and locked', () => {
+  [...PP.DEFAULT_FOLDERS, ...PP.NL_FOLDERS].forEach((f) => {
+    assert.ok(!('sortOrder' in f),
+      `${f.name} still carries sortOrder; manual ordering was removed on purpose`);
+    assert.ok(f.name && f.name.length, 'a seeded folder needs a name');
+  });
+});
+
 test('seeded club folders are defaults, and exclude Miscellaneous', () => {
   const names = [...PP.DEFAULT_FOLDERS].map((f) => f.name);
   assert.deepEqual(names, ['Crest & Logos', 'Photos', 'Club Info']);
