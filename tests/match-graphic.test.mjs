@@ -205,10 +205,13 @@ test('every member club resolves to a usable text colour', () => {
 });
 
 test('the text rule holds its agreed distribution across the 72', () => {
+  /* best-effort is 0: Aldershot was the last club needing it, and giving them
+     a white tertiary (03/08/2026) let the rule resolve them properly. Every
+     member club now gets its text from a real brand colour. */
   const tally = { secondary: 0, tertiary: 0, 'best-effort': 0 };
   for (const c of members) tally[MG.resolveColours(c.colors).textBasis]++;
   assert.equal(members.length, 72);
-  assert.deepEqual(tally, { secondary: 66, tertiary: 5, 'best-effort': 1 });
+  assert.deepEqual(tally, { secondary: 66, tertiary: 6, 'best-effort': 0 });
 });
 
 test('panels never use secondary — resolveColours reports primary as the panel', () => {
