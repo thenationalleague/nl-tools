@@ -7,7 +7,7 @@ retired — see [Cutover](#cutover).
 | Page | Who | Gets in via | Can do |
 |---|---|---|---|
 | `/programme/` | **The 72 clubs** | own `?c=<token>` link **plus** their 6-character passcode, or the passcode alone | Browse and download **every** club's folder. Upload, organise into folders, and remove files **in their own folder only** |
-| `/programme/` | **NL commercial** | the 73rd (National League) passcode | Everything a club can do, in the **National League** folder — plus set the used-from/used-until window on an advert |
+| `/programme/` | **NL commercial** | the 73rd (National League) passcode | Everything a club can do, in the **National League** folder |
 | `/programme/admin/` | **NL admin/superadmin** | **portal login** (auth-guard, `media-programme`) | Seed/sync the roster, see and regenerate every passcode + link, export the access CSV, restore or permanently delete removed files, read the audit trail |
 
 ## The model
@@ -25,11 +25,10 @@ Two consequences, both deliberate:
 - Empty clubs stay **listed and visibly empty** in the directory. That quiet
   acknowledgement is the point, and it stops working if you hide them.
 
-**The National League folder is pinned above every view**, in both the
-directory and inside any club's folder. Adverts carry an optional
-`usedFrom`/`usedUntil` window so an editor sees what belongs in *this*
-weekend's programme rather than a pile of thirty PNGs by October. Undated NL
-assets (spec sheets, the league wordmark) are evergreen, not out of date.
+**The National League sits at the top of the directory**, in brand crimson —
+a 73rd entry rather than a different kind of thing. Advert expiry is managed by
+hand: a `usedFrom`/`usedUntil` window existed briefly and was removed, because
+adverts change rarely enough that maintaining dates cost more than it saved.
 
 **Folders are owned by the club, and optional.** Nothing is pre-created; a club
 makes what it needs, nested up to three deep, or none at all. **Files can sit
@@ -129,7 +128,7 @@ authRequests/<uid>         { code, token?, admin?, at }   # own uid only; delete
 authGrants/<uid>           { ok, customToken?, club?, error? }   # own uid only
 folders/<CODE>/<folderId>  { name, parentId?, createdAt }   parentId = subfolder
 files/<CODE>/<fileId>      { name, folderId, size, contentType, storagePath,
-                             url, uploadedAt, usedFrom?, usedUntil? }
+                             url, uploadedAt }   folderId '_root' = top level
 trash/<CODE>/<fileId>      { ...file, deletedAt }
 audit/<pushId>             { ts, actor, actorLabel, action, club?, detail? }
 rate/{uid/<uid>,global}    throttle counters (Admin SDK only)
