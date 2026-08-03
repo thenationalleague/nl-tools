@@ -261,6 +261,26 @@
 
   function fileCount(code) { return Object.keys(FILES[code] || {}).length; }
 
+  /* Storage is billed on what is in the bucket, and a club "removing" a file
+     only moves its RTDB record to trash — the bytes stay until the console
+     purges them. So live and removed are counted separately and both shown:
+     a big removed figure is reclaimable space, not noise. Sizes come from the
+     records rather than the bucket, which is exact for anything uploaded
+     through the tool and the only figure available to a client. */
+  function bytesIn(node, code) {
+    var obj = (node[code] || {}), total = 0;
+    Object.keys(obj).forEach(function (k) { total += Number(obj[k].size) || 0; });
+    return total;
+  }
+  function liveBytes(code)  { return bytesIn(FILES, code); }
+  function trashBytes(code) { return bytesIn(TRASH, code); }
+
+  function totalBytes(node) {
+    var t = 0;
+    Object.keys(node).forEach(function (code) { t += bytesIn(node, code); });
+    return t;
+  }
+
   function renderAccess() {
     var seeded = Object.keys(CONFIG.clubs || {}).length;
 
@@ -305,10 +325,13 @@
         '<button class="btn btn--ghost" id="btnExport">Export access CSV</button>' +
         '<button class="btn btn--ghost" id="btnMerge">Export mail-merge CSV</button>' +
         '<span class="acc-tools__spacer"></span>' +
-        '<span class="text-label">' + esc(String(seeded)) + ' clubs + National League</span>' +
+        '<span class="text-label">' + esc(String(seeded)) + ' clubs + National League · ' +
+          esc(PP.humanSize(totalBytes(FILES))) + ' stored' +
+          (totalBytes(TRASH) ? ' · ' + esc(PP.humanSize(totalBytes(TRASH))) + ' removed but not deleted' : '') +
+        '</span>' +
       '</div>' +
       '<div class="table-wrap"><table class="table"><thead><tr>' +
-        '<th>Club</th><th>Division</th><th>Passcode</th><th>Files</th><th></th>' +
+        '<th>Club</th><th>Division</th><th>Passcode</th><th>Files</th><th>Storage</th><th></th>' +
       '</tr></thead><tbody>' + rows.join('') + '</tbody></table></div>';
 
     el('btnSeedSync').onclick = seedRoster;
@@ -344,6 +367,9 @@
       '<td>' + esc(division || (isNL ? 'League' : '')) + '</td>' +
       '<td><span class="code-mono">' + esc(rec.passcode || '—') + '</span></td>' +
       '<td>' + (n ? esc(String(n)) : '<span class="text-label">Empty</span>') + '</td>' +
+      '<td>' + (n ? esc(PP.humanSize(liveBytes(code))) : '<span class="text-label">—</span>') +
+        (trashBytes(code) ? ' <span class="text-label">+' + esc(PP.humanSize(trashBytes(code))) + ' removed</span>' : '') +
+      '</td>' +
       '<td><span class="row-acts">' +
         '<button class="btn btn--ghost btn--sm" data-email="' + esc(code) + '">Copy email</button>' +
         '<button class="btn btn--ghost btn--sm" data-copy="' + esc(PP.clubLink(rec.token)) + '">Copy link</button>' +
@@ -533,6 +559,9 @@
       return;
     }
     el('paneTrash').innerHTML =
+      '<div class="acc-tools"><span class="text-label">' + esc(String(rows.length)) + ' removed file' +
+        (rows.length === 1 ? '' : 's') + ' · ' + esc(PP.humanSize(totalBytes(TRASH))) +
+        ' still in storage until deleted for good</span></div>' +
       '<div class="table-wrap"><table class="table"><thead><tr><th>File</th><th>Club</th><th>Removed</th><th></th></tr></thead><tbody>' +
       rows.map(function (r) {
         return '<tr>' +
