@@ -96,7 +96,17 @@ function pickHolder(cfg, code) {
     return e && !e.revoked && safeEqual(normCode(e.code), code);
   });
   if (hit) {
-    return { role: "editor", key: hit, name: editors[hit].name || hit };
+    /* `master: true` on an editor record is the only route to the one-shot
+       build and to writing the clubs node whole. It has to live in config,
+       which no client can read or write, because the alternative was the
+       portal admin path — and the people holding these codes have no portal
+       account, which is the entire reason this gate exists. As shipped there
+       was no way to reach the build at all. */
+    return {
+      role: editors[hit].master === true ? "admin" : "editor",
+      key: hit,
+      name: editors[hit].name || hit
+    };
   }
   if (cfg && cfg.reader && safeEqual(normCode(cfg.reader.code), code)) {
     return { role: "reader", key: "reader", name: "Reader" };
@@ -217,8 +227,10 @@ exports.clubDirectoryAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
     /* One uid per editor, not per device — that is the point of per-person
        codes. The reader shares a single uid, where attribution would be
        meaningless anyway. */
+    /* uid stays keyed on the editor, not the granted role, so a master's
+       edits still attribute to them by name rather than to a shared admin. */
     const customToken = await admin.auth()
-      .createCustomToken("cd-" + (hit.role === "reader" ? "reader" : "ed-" + hit.key),
+      .createCustomToken("cd-" + (hit.key === "reader" ? "reader" : "ed-" + hit.key),
         { dir: hit.role, dirName: hit.name });
 
     logger.info("clubDirectoryAuth: granted", { role: hit.role, key: hit.key });
