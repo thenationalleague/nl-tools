@@ -57,19 +57,35 @@
     return '<svg aria-hidden="true" focusable="false" fill="currentColor" stroke="none"><use href="' +
       SPRITE + '#icon-' + name + '"></use></svg>';
   }
+  /* RTDB returns a JSON array only when the keys are a contiguous 0..n. One
+     gap — a person removed from the middle of a submission, a phone deleted —
+     and the same field comes back as {"0":…,"2":…}. That object is truthy, so
+     `x || []` does not catch it and .filter throws with "is not a function".
+     This code was written against the JSON export, where they are real arrays;
+     everything read out of the live database goes through here instead. */
+  function arr(v) {
+    if (Array.isArray(v)) { return v; }
+    if (!v || typeof v !== 'object') { return []; }
+    var keys = Object.keys(v);
+    if (keys.every(function (k) { return /^\d+$/.test(k); })) {
+      keys.sort(function (a, b) { return (+a) - (+b); });
+    }
+    return keys.map(function (k) { return v[k]; }).filter(function (x) { return x != null; });
+  }
+
   function fullName(p) {
     return (p && (p.name || [p.firstName, p.lastName].filter(Boolean).join(' ') || '')).trim();
   }
   function emailsOf(p) {
-    return ((p && p.emails) || []).filter(function (e) { return e && e.trim(); });
+    return arr(p && p.emails).filter(function (e) { return e && e.trim(); });
   }
   function phonesOf(p) {
-    return ((p && p.phones) || []).filter(function (x) { return x && (x.number || '').trim(); });
+    return arr(p && p.phones).filter(function (x) { return x && (x.number || '').trim(); });
   }
   function reachable(p) { return emailsOf(p).length > 0 || phonesOf(p).length > 0; }
   function sectionPeople(rec, section) {
-    return (rec.people || []).filter(function (p) {
-      return (p.roles || []).some(function (r) { return r.section === section; });
+    return arr(rec.people).filter(function (p) {
+      return arr(p.roles).some(function (r) { return r.section === section; });
     });
   }
   /* Banner colours. A club's own palette is the fastest "right page" signal
@@ -115,7 +131,7 @@
   /* ---------------------------------------------------------------- row */
   function personRow(p, section, opts) {
     var hidden = p.hideContact && !(opts && opts.showHidden);
-    var here = (p.roles || []).filter(function (r) { return r.section === section; });
+    var here = arr(p.roles).filter(function (r) { return r.section === section; });
     var titles = here.map(function (r) { return (r.title || '').trim(); }).filter(Boolean);
     var mail = hidden ? '' : emailsOf(p).map(function (e) {
       return '<a href="mailto:' + esc(e) + '">' + esc(e) + '</a>';
@@ -213,9 +229,9 @@
     var terms = q.split(/\s+/), out = [];
     Object.keys(all).forEach(function (club) {
       var rec = all[club] || {};
-      (rec.people || []).forEach(function (p) {
+      arr(rec.people).forEach(function (p) {
         var hay = (club + ' ' + fullName(p) + ' ' +
-          (p.roles || []).map(function (r) {
+          arr(p.roles).map(function (r) {
             return (r.title || '') + ' ' + (r.section || '');
           }).join(' ')).toLowerCase();
         if (terms.every(function (t) { return hay.indexOf(t) > -1; })) {
