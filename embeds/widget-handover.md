@@ -61,6 +61,34 @@ site to an old widget with nothing to bust from the CMS side.
 **Do not hand-edit `embeds/score-predictor.js`.** Edit the HTML; CI
 regenerates. PRs run `build-embeds.js --check` and fail on drift.
 
+The same mechanism now carries `embeds/motm.js` and
+`embeds/club-directory.js` — add an entry to the `EMBEDS` array in
+`scripts/build-embeds.js` and the bundle builds itself.
+
+### The club directory is the static outlier
+
+`embeds/club-directory.html` is a crest grid of one division's clubs, each
+card linking out to that club's own website. It is the one embed in this
+family with **no Firebase, no SSO and no auth** — nothing on it is
+personalised, so most of this document (§8–§12, §19, §21) simply does not
+apply to it. What it does share: the single-file shape, the inlined canon
+tokens, Carbona, the crest-tier asset paths, and `pickTextColor`.
+
+Two things about it are worth copying elsewhere. Its club list is **seeded
+inline and then upgraded from `clubs-meta.json`**, so it paints on the first
+frame, survives a failed fetch, and picks up promotion/relegation each summer
+without the CMS block being re-pasted. And its columns step on **container
+width, not viewport width** (`container-type: inline-size` + `@container`) —
+an embed never owns the viewport, and the same block has to work full-bleed
+and inside a narrow article column.
+
+Division comes from the host page, so one bundle serves all three:
+
+```html
+<div data-nl-clubs="National"></div>   <!-- or North / South -->
+<script src="https://nl.tools/embeds/club-directory.js" defer></script>
+```
+
 An iframe is deliberately *not* used: the widget reads the SSO cookie via
 `document.cookie` for `favourite_team`, and a cross-origin iframe on
 `nl.tools` cannot see `thenationalleague.org.uk` cookies, which would break
