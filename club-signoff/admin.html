@@ -20,6 +20,11 @@
     app-data/ops-club-signoff/responses      token -> their sign-off answers
 
   CHANGELOG
+  31/07/2026 v0.2 — Raw view at ?club=<CODE> (e.g. ?club=SAL). Shows a club's
+                    submission exactly as it sits in RTDB, with nothing tidied,
+                    merged or interpreted. Gated like the rest of this page: the
+                    records hold personal mobile numbers, personal addresses and
+                    people marked not for publication, so they are not public.
   31/07/2026 v0.1 — Initial build. Status table across all clubs, copyable
                     sign-off links, and replies inline.
 -->
@@ -92,6 +97,12 @@
     font-size: var(--text-sm); }
   .num { font-variant-numeric: tabular-nums; text-align: right; }
   .scroll { overflow-x: auto; }
+
+  .raw { margin: 0; padding: 16px 18px; background: var(--white);
+    border: 1px solid var(--border); border-radius: var(--radius-lg);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px; line-height: 1.5; white-space: pre-wrap;
+    overflow-wrap: anywhere; }
 </style>
 </head>
 <body>
@@ -128,9 +139,12 @@
   'use strict';
 
   var NOTES = '/club-signoff/notes.json';
+  var META  = '/assets/data/clubs-meta.json';
+  var rawCode = (new URLSearchParams(location.search).get('club') || '').trim().toUpperCase();
 
   window.TOOL = window.TOOL || {};
   window.TOOL.boot = function () {
+    if (rawCode) { return bootRaw(); }
     NL.ensureAuth().then(function () {
       return Promise.all([
         db.ref('app-data/ops-club-contacts/invites').once('value'),
@@ -146,6 +160,54 @@
       console.error('[club-signoff admin]', err);
     });
   };
+
+  /* Raw view. Deliberately does nothing to the record: no casing, no merging,
+     no defaults. This is the answer to "what did the club actually send us",
+     so interpreting it would defeat the point. */
+  function bootRaw() {
+    NL.ensureAuth().then(function () {
+      return Promise.all([
+        db.ref('app-data/ops-club-contacts/invites').once('value'),
+        db.ref('app-data/ops-club-contacts/submissions').once('value'),
+        fetch(META + '?cb=' + Date.now()).then(function (r) { return r.json(); })
+      ]);
+    }).then(function (res) {
+      var invites = res[0].val() || {}, subs = res[1].val() || {}, meta = res[2];
+      var list = (meta.clubs || meta) || [];
+      if (!Array.isArray(list)) {
+        list = Object.keys(list).map(function (k) {
+          var o = list[k]; o.name = o.name || k; return o;
+        });
+      }
+      var hit = list.filter(function (c) {
+        return String(c.code || '').toUpperCase() === rawCode;
+      })[0];
+      if (!hit) { return fail('No club with the code ' + rawCode + '.'); }
+
+      var token = Object.keys(invites).filter(function (t) {
+        return invites[t].club === hit.name;
+      })[0];
+      var rec = token && subs[token];
+      if (!rec) { return fail('No submission held for ' + hit.name + '.'); }
+
+      document.querySelector('.page').innerHTML =
+        '<header class="page-header"><div class="page-header__titles">' +
+        '<div class="page-header__title">' + NL.escHtml(hit.name) + '</div>' +
+        '<div class="page-header__sub">Submission exactly as it sits in RTDB. ' +
+        'Nothing tidied, merged or interpreted. Submitted ' +
+        (rec.submittedAt ? NL.formatDate(rec.submittedAt) : 'unknown') +
+        (rec.yourName ? ' by ' + NL.escHtml(rec.yourName) : '') + '.</div></div></header>' +
+        '<pre class="raw">' + NL.escHtml(JSON.stringify(rec, null, 2)) + '</pre>';
+    }).catch(function (err) {
+      fail('Could not load that club.');
+      console.error('[club-signoff raw]', err);
+    });
+  }
+
+  function fail(msg) {
+    document.querySelector('.page').innerHTML =
+      '<p style="color:var(--text-muted);">' + NL.escHtml(msg) + '</p>';
+  }
 
   function render(invites, subs, responses, notes) {
     var rows = Object.keys(invites).map(function (token) {

@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<!--
+  NL Tools — Club submission, raw public view
+  Version: v0.1 (04/08/2026)
+  File: /club-signoff/view.html
+
+  A club's contacts submission exactly as it sits in RTDB, at
+  /club-signoff/view.html?club=SAL. Nothing tidied, merged, defaulted or
+  interpreted — the point is answering "what did the club actually send us".
+
+  PUBLIC, deliberately and on request. No auth-guard, no token. Be aware of
+  what that means: these records carry personal mobile numbers, personal
+  email addresses, and people the club marked not for publication. The page
+  carries noindex so it stays out of search results, but anyone with the URL
+  can read it.
+
+  It reads submissions and nothing else. Invite tokens are NOT exposed: the
+  club is found by matching the `club` field inside each record, so
+  app-data/ops-club-contacts/invites can stay admin-only.
+
+  RTDB:
+    app-data/ops-club-contacts/submissions   read (public)
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Club submission — NL Tools</title>
+
+<link rel="stylesheet" href="/system/nl-brand.css?v=29">
+
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="/system/nl-utils.js?v=28"></script>
+<script>
+  firebase.initializeApp({
+    apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+    authDomain:        "nl-tools.firebaseapp.com",
+    databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId:         "nl-tools",
+    storageBucket:     "nl-tools.firebasestorage.app",
+    messagingSenderId: "801354670005",
+    appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+  });
+  var db = firebase.database();
+</script>
+
+<style>
+  .wrap { max-width: 1000px; margin: 0 auto; padding: clamp(20px, 3vw, 40px) 20px 60px; }
+  .head { margin-bottom: 18px; }
+  .head h1 { margin: 0; font-size: clamp(22px, 2vw, 30px); color: var(--navy);
+    font-variation-settings: 'wght' 900; line-height: 1.1; }
+  .head p { margin: 5px 0 0; font-size: var(--text-sm); color: var(--text-muted); }
+  .raw { margin: 0; padding: 16px 18px; background: var(--white);
+    border: 1px solid var(--border); border-radius: var(--radius-lg);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px; line-height: 1.5; white-space: pre-wrap;
+    overflow-wrap: anywhere; }
+  .picker { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
+  .picker a { padding: 4px 9px; font-size: 12px; font-variation-settings: 'wght' 700;
+    color: var(--navy); background: var(--white); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); text-decoration: none; }
+  .picker a:hover { border-color: var(--primary); color: var(--primary); }
+  .msg { color: var(--text-muted); }
+</style>
+</head>
+<body>
+
+<div class="wrap" id="wrap"><p class="msg">Loading&hellip;</p></div>
+
+<script>
+(function () {
+  'use strict';
+
+  var META = '/assets/data/clubs-meta.json';
+  var code = (new URLSearchParams(location.search).get('club') || '').trim().toUpperCase();
+  var wrap = document.getElementById('wrap');
+  var esc  = NL.escHtml;
+
+  function msg(t) { wrap.innerHTML = '<p class="msg">' + esc(t) + '</p>'; }
+
+  Promise.all([
+    db.ref('app-data/ops-club-contacts/submissions').once('value'),
+    fetch(META + '?cb=' + Date.now()).then(function (r) { return r.json(); })
+  ]).then(function (res) {
+    var subs = res[0].val() || {}, meta = res[1];
+    var list = meta.clubs || meta;
+    if (!Array.isArray(list)) {
+      list = Object.keys(list).map(function (k) {
+        var o = list[k]; o.name = o.name || k; return o;
+      });
+    }
+
+    /* Index by the club name inside each record, so invite tokens never have
+       to be readable for this to work. */
+    var byClub = {};
+    Object.keys(subs).forEach(function (t) {
+      var c = subs[t] && subs[t].club;
+      if (c) { byClub[c] = subs[t]; }
+    });
+
+    if (!code) { return index(list, byClub); }
+
+    var hit = list.filter(function (c) {
+      return String(c.code || '').toUpperCase() === code;
+    })[0];
+    if (!hit) { return msg('No club with the code ' + code + '.'); }
+    var rec = byClub[hit.name];
+    if (!rec) { return msg('No submission held for ' + hit.name + '.'); }
+
+    wrap.innerHTML =
+      '<div class="head"><h1>' + esc(hit.name) + '</h1>' +
+      '<p>Submission exactly as it sits in the database. Nothing tidied, merged ' +
+      'or interpreted. Submitted ' +
+      (rec.submittedAt ? esc(NL.formatDate(rec.submittedAt)) : 'unknown') +
+      (rec.submittedBy && rec.submittedBy.name ? ' by ' + esc(rec.submittedBy.name) : '') +
+      '.</p></div>' +
+      '<pre class="raw">' + esc(JSON.stringify(rec, null, 2)) + '</pre>';
+  }).catch(function (err) {
+    msg('Could not load that club.');
+    console.error('[club-view]', err);
+  });
+
+  /* No code given: list what is there, so the page is usable without one. */
+  function index(list, byClub) {
+    var have = list.filter(function (c) { return byClub[c.name]; })
+      .sort(function (a, b) { return a.name.localeCompare(b.name); });
+    wrap.innerHTML =
+      '<div class="head"><h1>Club submissions</h1>' +
+      '<p>' + have.length + ' held. Pick a club, or add ?club=CODE to the address.</p></div>' +
+      '<div class="picker">' + have.map(function (c) {
+        return '<a href="?club=' + esc(c.code) + '">' + esc(c.code) + ' ' + esc(c.name) + '</a>';
+      }).join('') + '</div>';
+  }
+})();
+</script>
+</body>
+</html>
