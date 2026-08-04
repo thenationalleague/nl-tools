@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Programme Packs (admin)
-  Version: v1.0 (03/08/2026)
+  Version: v1.1 (04/08/2026) — links are branding only (no ?c= token), so
+           regenerating rotates the passcode alone; passcodes are minted
+           unique across the 73.
+           v1.0 (03/08/2026)
   File: /programme/admin/index.html
   v1.0 (03/08/2026): initial build. NL console for the passcode-era
     Programme Packs library at /programme/ — roster seed/sync, per-club
@@ -22,7 +25,7 @@
   session is never modified and no custom claims are written to real accounts.
 
   Storage (RTDB):
-    app-data/media-programme/config   passcodes + link tokens (pClub '*' only)
+    app-data/media-programme/config   club passcodes (pClub '*' only)
     app-data/media-programme/{folders,files,trash,audit}
     tools/media-programme             tool registration (label, defaults)
 
@@ -68,6 +71,15 @@
     var NL_TOOL_KEY = 'media-programme';
 
     window.NL_CHANGELOG = [
+      {
+        date: '04/08/2026',
+        version: 'v1.1',
+        items: [
+          'Club links no longer carry a token, so they never go stale — ' +
+            'regenerating changes the passcode alone.',
+          'Passcodes are checked for uniqueness when minted.'
+        ]
+      },
       {
         date: '03/08/2026',
         version: 'v1.0',
@@ -475,31 +487,58 @@
       '</td>' +
       '<td><span class="row-acts">' +
         '<a class="btn btn--navy btn--sm" data-open="' + esc(code) + '"' +
-          ' href="' + esc(PP.clubLink(rec.token, code) + '&as=1') + '"' +
+          ' href="' + esc(PP.clubLink(code) + '&as=1') + '"' +
           ' target="_blank" rel="noopener">Open</a>' +
         '<button class="btn btn--ghost btn--sm" data-email="' + esc(code) + '">Copy email</button>' +
-        '<button class="btn btn--ghost btn--sm" data-copy="' + esc(PP.clubLink(rec.token, code)) + '">Copy link</button>' +
+        '<button class="btn btn--ghost btn--sm" data-copy="' + esc(PP.clubLink(code)) + '">Copy link</button>' +
         '<button class="btn btn--ghost btn--sm" data-regen="' + esc(code) + '">Regenerate</button>' +
       '</span></td></tr>';
+  }
+
+  /* Two clubs drawing the same six characters is roughly a 1-in-340,000 event
+     across 73 codes, and it used to be handled after the fact: the ?c= link
+     token narrowed the server's passcode search to one club. That token is gone
+     — it went stale on every regenerate, see PP.clubLink — so uniqueness is
+     enforced where it belongs, at the point of minting. That is a guarantee
+     rather than a tiebreak, and a collision here costs a retry instead of a
+     phone call. */
+  function takenCodes() {
+    var out = {};
+    Object.keys(CONFIG.clubs || {}).forEach(function (k) {
+      var p = (CONFIG.clubs[k] || {}).passcode;
+      if (p) out[PP.normCode(p)] = true;
+    });
+    if (CONFIG.nl && CONFIG.nl.passcode) out[PP.normCode(CONFIG.nl.passcode)] = true;
+    return out;
+  }
+
+  /* Mutates `taken`, so one seed run cannot hand the same code to two clubs —
+     the config it was built from holds neither of them yet. */
+  function freshPasscode(taken) {
+    for (var i = 0; i < 50; i++) {
+      var code = PP.newPasscode(), norm = PP.normCode(code);
+      if (!taken[norm]) { taken[norm] = true; return code; }
+    }
+    return PP.newPasscode();   // fifty consecutive collisions is not this world
   }
 
   /* Seed is additive and idempotent: it only creates entries for clubs that
      don't have one. Re-running after promotion/relegation picks up the new
      clubs without touching any existing passcode. */
   function seedRoster() {
-    var updates = {}, added = 0;
+    var updates = {}, added = 0, taken = takenCodes();
     ROSTER.forEach(function (c) {
       if (CONFIG.clubs[c.code]) return;
       updates['clubs/' + c.code] = {
         name: c.name, division: c.division || '',
-        passcode: PP.newPasscode(), token: PP.newToken(), addedAt: PP.TS()
+        passcode: freshPasscode(taken), addedAt: PP.TS()
       };
       added++;
     });
     if (!CONFIG.nl) {
       updates.nl = {
         name: 'National League', division: '',
-        passcode: PP.newPasscode(), token: PP.newToken(), addedAt: PP.TS()
+        passcode: freshPasscode(taken), addedAt: PP.TS()
       };
       added++;
     }
@@ -515,17 +554,17 @@
     var isNL = code === 'NL';
     var rec = isNL ? CONFIG.nl : CONFIG.clubs[code];
     if (!rec) return;
-    NL.confirm('Regenerate the passcode and link for <strong>' + esc(rec.name) + '</strong>? ' +
-      'The current ones stop working immediately, including on any device that remembered them — ' +
-      'you’ll need to send the new ones out.',
+    NL.confirm('Regenerate the passcode for <strong>' + esc(rec.name) + '</strong>? ' +
+      'The current one stops working immediately, including on any device that remembered it — ' +
+      'you’ll need to send the new one out. Their link is unaffected.',
       { title: 'Regenerate access', html: true, confirmText: 'Regenerate', variant: 'danger' })
       .then(function (ok) {
         if (!ok) return;
         var path = isNL ? 'config/nl' : 'config/clubs/' + code;
-        return PP.ref(path).update({ passcode: PP.newPasscode(), token: PP.newToken() })
+        return PP.ref(path).update({ passcode: freshPasscode(takenCodes()) })
           .then(function () {
             PP.audit('regen-access', { club: code, clubName: rec.name });
-            NL.toast('New passcode and link issued', 'success');
+            NL.toast('New passcode issued', 'success');
           });
       }).catch(function (e) { NL.toast('Could not regenerate: ' + e.message, 'error'); });
   }
@@ -569,7 +608,7 @@
     if (!rec) return '';
     return (body || TPL)
       .split('{club}').join(nameFor(code))
-      .split('{link}').join(PP.clubLink(rec.token, code))
+      .split('{link}').join(PP.clubLink(code))
       .split('{passcode}').join(rec.passcode || '');
   }
 
@@ -627,7 +666,7 @@
   function openAs(code) {
     var rec = recFor(code);
     if (!rec) return;
-    PP.handOff(rec.passcode, rec.token);
+    PP.handOff(rec.passcode);
     PP.audit('open-as', { club: code, clubName: nameFor(code) });
   }
 
@@ -646,7 +685,7 @@
       rows.push([
         nameFor(code),
         code === 'NL' ? 'League' : ((BY_CODE[code] || {}).division || ''),
-        rec.passcode, PP.clubLink(rec.token, code), renderTpl(code, body)
+        rec.passcode, PP.clubLink(code), renderTpl(code, body)
       ]);
     });
     NL.download('programme-packs-emails.csv', NL.csv(rows), 'text/csv');
@@ -659,7 +698,7 @@
     if (CONFIG.nl) rows.push(['National League', 'League', CONFIG.nl.passcode, PP.clubLink(CONFIG.nl.token, 'NL')]);
     ROSTER.forEach(function (c) {
       var rec = CONFIG.clubs[c.code];
-      if (rec) rows.push([c.name, c.division || '', rec.passcode, PP.clubLink(rec.token, c.code)]);
+      if (rec) rows.push([c.name, c.division || '', rec.passcode, PP.clubLink(c.code)]);
     });
     NL.download('programme-packs-access.csv', NL.csv(rows), 'text/csv');
     PP.audit('export-access', { count: rows.length - 1 });

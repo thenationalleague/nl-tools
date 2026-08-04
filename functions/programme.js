@@ -33,7 +33,7 @@
  * Flow
  * ----
  *   1. Client signs in anonymously (Identity Toolkit — no Cloud Run, so the org
- *      policy does not apply) and writes { code, token? } to authRequests/<uid>.
+ *      policy does not apply) and writes { code } to authRequests/<uid>.
  *   2. This trigger validates, deletes the request (the passcode never lingers),
  *      and writes authGrants/<uid> = { ok, customToken, club } — or { ok:false }.
  *   3. Client reads the grant, deletes both nodes while it still owns that uid,
@@ -87,32 +87,24 @@ function safeEqual(a, b) {
 
 /* Which club does this passcode open?
  *
- * A link token narrows the search to the entry it belongs to, so a passcode
- * cannot open a different club's folder even if two codes ever collided. But a
- * token that matches NOTHING must not veto a correct passcode: regenerating a
- * club's access rotates the passcode AND the link, so the moment the console
- * reissues, every bookmark and every emailed URL in that club carries a dead
- * ?c=. Filtering on it and stopping there turned a valid new passcode into
- * "Passcode not recognised" (Sutton, 04/08/2026) — the one error message that
- * sends someone back to the console convinced the regeneration failed.
+ * The passcode alone, because it is the whole credential. A per-club ?c= link
+ * token used to narrow this search to one entry, guarding against two clubs
+ * ever drawing the same six characters. It granted nothing — the bare
+ * /programme/ URL has always accepted a passcode on its own — but regenerating
+ * rotated it alongside the passcode, so every bookmark and emailed URL in that
+ * club went stale and a correct new passcode came back "Passcode not
+ * recognised" (Sutton, 04/08/2026): the one message that sends someone to the
+ * console convinced the regeneration itself had failed.
  *
- * So a stale token degrades to passcode-only, which is exactly what the bare
- * URL already offers every visitor. Nothing is given away: the token narrows
- * when it is real and is ignored when it is not.
+ * The collision it guarded is now prevented instead of arbitrated — the console
+ * refuses to mint a passcode another club already holds. A `token` field may
+ * still sit on old config records; nothing reads it.
  */
-function pickClub(cfg, code, linkToken) {
+function pickClub(cfg, code) {
   const clubs = (cfg && cfg.clubs) || {};
   const all = Object.keys(clubs).map((k) => ({ key: k, rec: clubs[k] }));
   if (cfg && cfg.nl) all.push({ key: "NL", rec: cfg.nl });
-
-  const match = (list) =>
-    list.find((c) => c.rec && safeEqual(normCode(c.rec.passcode), code)) || null;
-
-  if (linkToken) {
-    const scoped = all.filter((c) => c.rec && c.rec.token === linkToken);
-    if (scoped.length) return match(scoped);   // live link — it decides
-  }
-  return match(all);
+  return all.find((c) => c.rec && safeEqual(normCode(c.rec.passcode), code)) || null;
 }
 
 /* ---- Throttle ------------------------------------------------------------
@@ -215,12 +207,11 @@ exports.programmeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
     if (code.length < 4) return grant({ ok: false, error: "Enter your passcode." });
 
     const cfg = (await db.ref(ROOT + "/config").once("value")).val() || {};
-    const linkToken = String(req.token || "").trim().slice(0, 40);
-    const hit = pickClub(cfg, code, linkToken);
+    const hit = pickClub(cfg, code);
 
     if (!hit) {
       await noteFailure(uid);
-      logger.info("programmeAuth: passcode rejected", { uid, viaLink: !!linkToken });
+      logger.info("programmeAuth: passcode rejected", { uid });
       return grant({ ok: false, error: "Passcode not recognised." });
     }
 
@@ -233,7 +224,7 @@ exports.programmeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
     const customToken = await admin.auth()
       .createCustomToken("pp-" + hit.key, { pClub: hit.key });
 
-    logger.info("programmeAuth: club granted", { club: hit.key, viaLink: !!linkToken });
+    logger.info("programmeAuth: club granted", { club: hit.key });
     return grant({
       ok: true,
       customToken,

@@ -95,9 +95,9 @@ test('normCode matches the server implementation in functions/programme.js', () 
 });
 
 /* ── pickClub (server) ────────────────────────────────────────────────────
-   Which club a passcode opens, and what a link token does to that decision.
-   Same extraction trick as the parity test above: pull the functions out of
-   the module text so the real implementation is under test, not a copy. */
+   Which club a passcode opens. Same extraction trick as the parity test
+   above: pull the functions out of the module text so the real
+   implementation is under test, not a copy. */
 function serverPickClub() {
   const src = readFileSync(join(REPO, 'functions/programme.js'), 'utf8');
   const parts = ['normCode', 'safeEqual', 'pickClub'].map((name) => {
@@ -111,42 +111,35 @@ function serverPickClub() {
 
 const CFG = {
   clubs: {
-    SUT: { name: 'Sutton United', passcode: '4K2M9P', token: 'tok-sut' },
-    FGR: { name: 'Forest Green Rovers', passcode: 'H7RQ3D', token: 'tok-fgr' }
+    SUT: { name: 'Sutton United', passcode: '4K2M9P' },
+    FGR: { name: 'Forest Green Rovers', passcode: 'H7RQ3D' }
   },
-  nl: { name: 'National League', passcode: 'X9WT4B', token: 'tok-nl' }
+  nl: { name: 'National League', passcode: 'X9WT4B' }
 };
 
-test('pickClub: passcode alone identifies the club', () => {
+test('pickClub: the passcode alone identifies the club', () => {
   const pick = serverPickClub();
-  assert.equal(pick(CFG, '4K2M9P', '')?.key, 'SUT');
-  assert.equal(pick(CFG, 'X9WT4B', '')?.key, 'NL');
-  assert.equal(pick(CFG, 'NOPE00', ''), null);
+  assert.equal(pick(CFG, '4K2M9P')?.key, 'SUT');
+  assert.equal(pick(CFG, 'H7RQ3D')?.key, 'FGR');
+  assert.equal(pick(CFG, 'X9WT4B')?.key, 'NL');
+  assert.equal(pick(CFG, 'NOPE00'), null);
 });
 
-test('pickClub: a live link token pins the answer to its own club', () => {
-  const pick = serverPickClub();
-  assert.equal(pick(CFG, '4K2M9P', 'tok-sut')?.key, 'SUT');
-  /* FGR's passcode on Sutton's live link must not open FGR — that narrowing
-     is the whole reason the token is passed. */
-  assert.equal(pick(CFG, 'H7RQ3D', 'tok-sut'), null);
-});
-
-test('pickClub: a stale link token does not veto a correct passcode', () => {
-  /* Regenerating rotates the passcode AND the link, so every bookmark in the
-     club still carries the dead ?c=. Before this, the new passcode was
-     rejected on the old URL. */
-  const pick = serverPickClub();
-  assert.equal(pick(CFG, '4K2M9P', 'tok-sut-OLD')?.key, 'SUT');
-  assert.equal(pick(CFG, 'X9WT4B', 'tok-nl-OLD')?.key, 'NL');
-  assert.equal(pick(CFG, 'NOPE00', 'tok-sut-OLD'), null);
+test('pickClub: ignores anything else on the record', () => {
+  /* A `token` field sits on config records seeded before 04/08/2026, when
+     the per-club ?c= link token was dropped. It must not affect the match —
+     that staleness is exactly what broke Sutton. */
+  const legacy = {
+    clubs: { SUT: { name: 'Sutton United', passcode: '4K2M9P', token: 'dead-token' } }
+  };
+  assert.equal(serverPickClub()(legacy, '4K2M9P')?.key, 'SUT');
 });
 
 test('pickClub: survives an empty or half-built config', () => {
   const pick = serverPickClub();
-  assert.equal(pick({}, '4K2M9P', ''), null);
-  assert.equal(pick({ clubs: { SUT: null } }, '4K2M9P', ''), null);
-  assert.equal(pick({ nl: CFG.nl }, 'X9WT4B', '')?.key, 'NL');
+  assert.equal(pick({}, '4K2M9P'), null);
+  assert.equal(pick({ clubs: { SUT: null } }, '4K2M9P'), null);
+  assert.equal(pick({ nl: CFG.nl }, 'X9WT4B')?.key, 'NL');
 });
 
 /* ── safeName ─────────────────────────────────────────────────────────── */
@@ -318,31 +311,33 @@ test('build marks names UTF-8 so accented club names survive', () => {
 
 /* ── Credentials ──────────────────────────────────────────────────────── */
 
-test('passcodes and tokens use the unambiguous alphabet', () => {
+test('passcodes use the unambiguous alphabet', () => {
   for (let i = 0; i < 200; i++) {
     const pass = PP.newPasscode();
     assert.equal(pass.length, 6);
     assert.match(pass, /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{6}$/,
       'no 0/O/1/I/L — these get retyped off a printed card');
-    const tok = PP.newToken();
-    assert.equal(tok.length, 14);
-    assert.match(tok, /^[abcdefghjkmnpqrstuvwxyz23456789]{14}$/);
   }
 });
 
-test('clubLink points at the library with the club token', () => {
-  assert.equal(PP.clubLink('abc123'), 'https://nl.tools/programme/?c=abc123');
+test('clubLink carries the club code and nothing else', () => {
+  /* Branding only. The ?c= token that used to sit alongside it went on
+     04/08/2026: it granted nothing, and rotating it on every regenerate made
+     every bookmark in the club reject a correct new passcode. A link with no
+     credential in it cannot go stale. */
+  assert.equal(PP.clubLink('YEO'), 'https://nl.tools/programme/?club=YEO');
+  assert.equal(PP.clubLink('NL'), 'https://nl.tools/programme/?club=NL');
 });
 
-test('clubLink carries the club code so the gate can show a crest', () => {
-  assert.equal(PP.clubLink('abc123', 'YEO'), 'https://nl.tools/programme/?c=abc123&club=YEO');
-  assert.equal(PP.clubLink('abc123', 'NL'), 'https://nl.tools/programme/?c=abc123&club=NL');
+test('clubLink encodes the club code', () => {
+  /* Cosmetic and never trusted, but it still lands in a URL and then in an
+     href — so it gets encoded like anything else. */
+  assert.equal(PP.clubLink('X&Y'), 'https://nl.tools/programme/?club=X%26Y');
 });
 
-test('clubLink encodes both parameters', () => {
-  /* The code is cosmetic and never trusted, but it still lands in a URL and
-     then in an href — so it gets encoded like anything else. */
-  assert.equal(PP.clubLink('a b&c', 'X&Y'), 'https://nl.tools/programme/?c=a%20b%26c&club=X%26Y');
+test('newToken is gone with the link token it minted', () => {
+  assert.equal(typeof PP.newToken, 'undefined',
+    'a leftover minter is how a dead field creeps back onto new records');
 });
 
 /* ── Defaults ─────────────────────────────────────────────────────────── */
