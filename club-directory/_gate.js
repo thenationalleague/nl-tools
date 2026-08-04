@@ -159,6 +159,32 @@
     });
   }
 
+  /* A custom-token session survives a reload — Firebase persists it locally
+     and refreshes the ID token by itself — so asking for the code again on
+     every load is the page failing to look, not the session expiring.
+
+     Resolves with the session if one is already in place, or null. An
+     anonymous user left behind by an abandoned attempt carries no `dir`
+     claim and counts as nobody, which also stops a half-finished handshake
+     looking like a valid sign-in. */
+  function resume() {
+    return new Promise(function (resolve) {
+      var off = firebase.auth().onAuthStateChanged(function (user) {
+        off();
+        if (!user || user.isAnonymous) { resolve(null); return; }
+        user.getIdTokenResult()
+          .then(function (t) {
+            var c = (t && t.claims) || {};
+            resolve(c.dir ? { role: c.dir, name: c.dirName || '' } : null);
+          })
+          .catch(function () { resolve(null); });
+      });
+    });
+  }
+
+  /* Drop the session and show the gate again. */
+  function signOut() { return firebase.auth().signOut(); }
+
   /* The portal route, for whoever holds the master key. Uses the caller's
      existing auth-guard session instead of a code, and the trigger checks the
      role server-side. */
@@ -166,5 +192,11 @@
     return exchange({ admin: true });
   }
 
-  window.NLGate = { open: open, openAsAdmin: openAsAdmin, ROOT: ROOT };
+    /* Resume if we can, gate if we cannot. What every caller actually wants. */
+  function ensure(opts) {
+    return resume().then(function (s) { return s || open(opts); });
+  }
+
+  window.NLGate = { open: open, ensure: ensure, resume: resume,
+                    signOut: signOut, openAsAdmin: openAsAdmin, ROOT: ROOT };
 }());
