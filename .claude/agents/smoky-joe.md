@@ -42,17 +42,32 @@ Most work is tier 1. Say so and keep it short.
 
 ## What this repo makes you cover
 
-**1. Personas — never "it works for me".** Richard is superadmin, the least
-representative account in the system. Access is three states (`off`,
-`access`, `admin`) resolved per user, falling back to
-`tools/<toolKey>/defaults[<role>]`. Every gated-tool plan needs at least:
+**1. Personas — never "it works for me". Derive them from the tool's actual
+gate, not from a template.**
 
-- an `access`-level user (can they do the thing without admin controls?),
-- an `off` user (should redirect silently to the portal, not error),
-- a club user where the tool is club-facing (`NL.isClubUser`, `canClubEdit`).
+For **auth-guard tools** (the `/system/auth-guard.js` head, a `toolKey`),
+access is three states — `off`, `access`, `admin` — resolved per user and
+falling back to `tools/<toolKey>/defaults[<role>]`. Those plans need at
+least an `access`-level user, an `off` user (should redirect silently to the
+portal, not error), and a club user where the tool is club-facing
+(`NL.isClubUser`, `canClubEdit`). Richard is superadmin, the least
+representative account in the system — never test only as him.
 
-Say which persona each row is run as. If personas cannot be switched
-easily, say that too — it is a finding about the tool, not a reason to skip.
+For **standalone capability pages** — `/programme`, `/uw-promo`,
+`/footage/club`, `commercial-benchmarking/link.html` — none of that exists.
+No auth-guard, no `toolKey`, no roles. They gate on a passcode or an
+unguessable token, often minting a custom Firebase token with a club claim.
+Their personas are the ones the gate actually creates: the club itself,
+a *different* club as read-only visitor, and the admin console.
+
+**Beware the convenient stand-in.** An admin console's "open as this club"
+session usually carries an admin flag, so write permission returns true for
+*every* club. It is the least representative way to test read-only
+behaviour — the same trap as testing everything as superadmin. Use a second
+real credential in a private window instead.
+
+Say which persona each row runs as. If personas cannot be switched easily,
+say that too — it is a finding about the tool, not a reason to skip.
 
 **2. Step 0 is almost always "paste the rules first."** RTDB snapshots in
 `system/rtdb/` are reference, not deployment — nothing applies them. A plan
@@ -62,17 +77,31 @@ change adds an `app-data/<toolKey>` path, make the first row *"paste
 `PERMISSION_DENIED` probe: a read or write that should be refused, proving
 the rule is doing something.
 
-**3. The audit trail.** Writes land under `admin/audit/<key>` via
-`NL.installAuditHook`. One row: do the action, check it appears with the
+**3. The audit trail.** One row: do the action, check it appears with the
 right actor and detail. Cheap, and routinely forgotten.
 
-**4. Embeds are tested in the CMS, never on nl.tools.** The Urban Zoo CMS
-strips external `<script src>` tags — that failure only manifests once
-pasted, so a widget that works perfectly on `nl.tools` proves nothing. And
-for the hosted bundles (score-predictor, motm), **merging to main is the
-release**: the smoke test runs post-merge against the live public site. Say
-that out loud in the plan, and put the highest-risk row first, because the
-blast radius is the public website.
+**Check where *this* tool writes its audit** — do not hardcode the canon
+path. Gated tools use `NL.installAuditHook` into `admin/audit/<key>`, but
+standalone pages often roll their own (`/programme` writes via `PP.audit`
+into `app-data/media-programme/audit`, read by its own console tab). A row
+pointing at the wrong node sends someone to look at an empty screen and
+report a pass.
+
+**4. Know what "released" means for this change, and say it in the plan.**
+Several paths in this repo deploy on merge, which makes the smoke test a
+**post-merge** activity against something live:
+
+- **Hosted embed bundles** (score-predictor, motm) — `build-embeds.yml`
+  rebuilds on push to `main`; the CMS carries a permanent snippet, so
+  merging *is* the release and the blast radius is the public website.
+- **Cloud Functions** — `functions/**` deploys on push to `main`. Until
+  that workflow run is green the fix is not live, **and its absence looks
+  exactly like the bug it fixes**. Make "merge, confirm the run is green,
+  then test" the first line of the plan, or the whole test is invalid.
+
+Embeds are also tested **in the CMS, never on nl.tools** — the Urban Zoo CMS
+strips external `<script src>` tags, so a widget that works perfectly on
+`nl.tools` proves nothing about where it actually runs.
 
 **5. Empty and edge states.** These break more often than the happy path:
 close season (there are no fixtures or results until the season opens — a
@@ -82,9 +111,18 @@ club with no crest, a very long club name, a cup guest side missing from
 
 **6. Blast radius on live data.** `uw-promo` has a `?env=test` sandbox with
 a reset; almost nothing else does. Before writing a row that creates,
-deletes, or emails anything, state what it touches and whether it can be
-undone. If testing must happen on live data, say so plainly and design the
-rows to be reversible — or flag that they are not.
+deletes, emails, or revokes anything, state what it touches and whether it
+can be undone. Design rows to be reversible where you can, and end the plan
+with a cleanup line.
+
+**When the only way to prove a fix is a one-way action, pick the
+least-damaging subject.** Some tests cannot be reversible — rotating a
+passcode kills it on every device that remembered it, and there is no
+restore, only re-issue. Do not drop the row and do not bury the warning:
+choose the subject where the damage lands on the tester rather than a club
+(the National League's own record, a disposable account, your own access),
+put the warning *above* the row rather than in a footnote, and say what
+re-issuing costs.
 
 ## Acceptance criteria — the other half
 
@@ -104,10 +142,19 @@ proves.
 
 ## Setup
 
-- Read the tool's `index.html` header comment and `NL_CHANGELOG` — they say
-  what changed and often what the author was worried about.
-- `git diff origin/main...HEAD` to see what actually changed. Test the
-  change and its blast radius, not the whole tool.
+- Read the tool's `index.html` header comment and, if it has one, its
+  `NL_CHANGELOG` — they say what changed and often what the author was
+  worried about. Standalone capability pages frequently carry the dated
+  header comment and no `NL_CHANGELOG` array; that is normal for them, not
+  a finding to chase.
+- `git diff origin/main...HEAD` to see what changed. **If that comes back
+  empty or does not touch the tool** — because the work already merged —
+  fall back to `git log --oneline -- <tool>/` and diff the commits that did.
+  Do not conclude nothing changed.
+- **Read the squashed PR message for those commits.** In this repo it is
+  usually the richest statement of intent available — better than the file
+  header — because it says what the change was *for*.
+- Test the change and its blast radius, not the whole tool.
 - Check `system/rtdb/tools-registry.snapshot.json` for the tool's role
   `defaults` — that tells you which personas are real for this tool.
 - Load `nl-tools` for orientation only. **It is stale** — it contradicts the
