@@ -82,22 +82,29 @@
   function phonesOf(p) {
     return arr(p && p.phones).filter(function (x) { return x && (x.number || '').trim(); });
   }
+  /* A person's roles, always as an array. Exported because both pages need it
+     and the reader does not load _tidy.js — a page should not have to pull in
+     the whole tidier to read a field safely. */
+  function rolesOf(p) { return arr(p && p.roles); }
   function reachable(p) { return emailsOf(p).length > 0 || phonesOf(p).length > 0; }
   function sectionPeople(rec, section) {
     return arr(rec.people).filter(function (p) {
       return arr(p.roles).some(function (r) { return r.section === section; });
     });
   }
-  /* Banner colours. A club's own palette is the fastest "right page" signal
-     and the one thing a shared canon cannot provide, but the data is raw: AFC
-     Fylde's primary is #FFFFFF, and printing white on white is worse than
-     using none of it. So take the first colour dark enough to carry white
-     text, and fall back to the brand navy when none is.
+  /* Banner colours: the club's primary as the background, their secondary as
+     the type. That is the pairing the clubs use themselves, so Forest Green
+     read as lime on black rather than the white-on-black a contrast-first
+     rule picks.
 
-     Duplicated logic warning: club-kits/admin.html carries its own luminance
-     test. Second use, so this belongs in NL.clubs as a colours(name) helper
-     returning a ready pair — flagged rather than done here to keep a design
-     iteration out of a canon bump. */
+     It needs a floor, though. Twenty of the eighty-two pairs fall below 4.5:1
+     against each other — Carlisle's blue on red is 1.17:1, which is unreadable
+     rather than merely bold. Where the club's own pair fails, the background
+     is kept and the type falls to whichever of white or near-black actually
+     reads on it, so the club identity survives and the name stays legible.
+
+     Duplicated logic warning: club-kits/admin.html has its own luminance test.
+     Second use, so this belongs in NL.clubs as colours(name). Flagged. */
   function lum(hex) {
     var h = String(hex || '').replace('#', '');
     if (h.length === 3) { h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2]; }
@@ -108,17 +115,20 @@
     });
     return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
   }
-  function bannerColour(clubName) {
+  function contrast(a, b) {
+    var la = lum(a), lb = lum(b);
+    if (la === null || lb === null) { return 0; }
+    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+  }
+  function bannerColours(clubName) {
     var meta = (window.NL && NL.clubs && NL.clubs.byName) ? NL.clubs.byName(clubName) : null;
     var cols = (meta && meta.colors) || {};
-    var order = [cols.primary, cols.secondary, cols.tertiary];
-    for (var i = 0; i < order.length; i++) {
-      var L = lum(order[i]);
-      /* 0.4 keeps white text at roughly 4.5:1 or better, which is the AA
-         threshold for the body sizes this banner uses. */
-      if (L !== null && L < 0.4) { return order[i]; }
+    var bg = cols.primary, fg = cols.secondary;
+    if (lum(bg) === null) { return null; }              /* no usable primary */
+    if (lum(fg) === null || contrast(bg, fg) < 4.5) {
+      fg = contrast(bg, '#FFFFFF') >= contrast(bg, '#0A1628') ? '#FFFFFF' : '#0A1628';
     }
-    return null;   /* caller leaves --cd-bg unset and the brand navy applies */
+    return { bg: bg, fg: fg };
   }
 
   function tel(n) { return String(n || '').replace(/\s+/g, ''); }
@@ -184,10 +194,11 @@
         '</ul></div>';
     }).filter(Boolean).join('');
 
-    var bg = bannerColour(rec.club);
+    var pal = bannerColours(rec.club);
 
     return '' +
-      '<div class="cd-banner"' + (bg ? ' style="--cd-bg:' + esc(bg) + '"' : '') + '>' +
+      '<div class="cd-banner"' + (pal ? ' style="--cd-bg:' + esc(pal.bg) +
+        ';--cd-fg:' + esc(pal.fg) + '"' : '') + '>' +
         '<img class="cd-banner__crest" id="cdCrest" alt="" hidden>' +
         '<h1 class="cd-banner__name">' + esc(rec.club || '') + '</h1>' +
       '</div>' +
@@ -243,6 +254,8 @@
   }
 
   window.NLDirectory = {
+    arr: arr,
+    rolesOf: rolesOf,
     renderClub: renderClub,
     personRow: personRow,
     search: search,
