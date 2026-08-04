@@ -1,0 +1,76 @@
+name: Deploy RTDB rules
+
+# Publishes system/rtdb/rules.snapshot.json to the nl-tools Realtime Database.
+#
+# Why this exists
+# ---------------
+# Rules were deployed by pasting the whole document into the Firebase console.
+# That has two problems. It needs a person at a keyboard with console access,
+# and it makes the console the source of truth while the repo holds a snapshot
+# that is only as current as the last person who remembered to update it. A
+# console edit that never came back to the repo is invisible until the next
+# paste silently reverts it.
+#
+# Deploying from the repo inverts that: the file in git IS the rules, reviewed
+# in a diff like everything else, and drift becomes impossible rather than
+# merely unlikely.
+#
+# Deliberately manual
+# -------------------
+# workflow_dispatch only, never on push. Rules govern every tool in the
+# project, and a bad merge should not be able to lock 72 clubs out of their
+# own data as a side effect of landing something unrelated. Someone presses
+# the button, having read the diff.
+#
+# Run it from the Actions tab: "Deploy RTDB rules" then "Run workflow".
+# No terminal required.
+#
+# Auth reuses the same Workload Identity Federation secrets as the functions
+# and GA pipelines.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "publish" to confirm you have read the diff'
+        required: true
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Refuse unless confirmed
+        if: ${{ github.event.inputs.confirm != 'publish' }}
+        run: |
+          echo "::error::Type 'publish' in the confirm box to run this."
+          exit 1
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # A malformed rules file is rejected by the API anyway, but failing here
+      # gives a readable error instead of a deploy log full of JSON.
+      - name: Check the rules parse
+        run: |
+          python3 -c "
+          import json, sys
+          d = json.load(open('system/rtdb/rules.snapshot.json'))
+          assert 'rules' in d, 'no top-level rules key'
+          n = len(d['rules']['app-data'])
+          print('rules parse OK —', n, 'app-data nodes')
+          "
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Deploy rules
+        run: npx --yes firebase-tools@latest deploy --only database --project nl-tools --non-interactive --force
