@@ -3,7 +3,9 @@
 <head>
 <!--
   Programme Packs — club library (standalone, passcode)
-  Version: v1.6 (04/08/2026) — the ?c= link token is gone; the passcode is the
+  Version: v1.7 (04/08/2026) - aimed drag-and-drop: the folder surface takes a
+           drop, and a subfolder tile takes one straight into itself.
+           v1.6 (04/08/2026) — the ?c= link token is gone; the passcode is the
            whole credential and a club link never goes stale.
            v1.5 (04/08/2026) — the top of a club's library is named after the
            club, not "Top level"; one clubName() behind head, Move and zips.
@@ -644,7 +646,8 @@
          One quiet line rather than a bordered callout. */
       html += '<div class="drop" id="drop" tabindex="0" role="button">' +
         '<strong>Drop files here</strong> or click to choose' +
-        '<div class="drop__hint">visible to all 72 clubs \u00b7 nothing confidential</div></div>' +
+        '<div class="drop__hint">' + (subs.length ? 'or drop onto a folder above \u00b7 ' : '') +
+        'visible to all 72 clubs \u00b7 nothing confidential</div></div>' +
         '<input type="file" id="fileInput" multiple style="display:none">' +
         '<div id="uploads"></div>';
     }
@@ -850,18 +853,70 @@
     });
 
     var drop = el('drop'), input = el('fileInput');
-    if (!drop) return;
-    drop.onclick = function () { input.click(); };
-    drop.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } };
-    input.onchange = function () { uploadAll(code, input.files); input.value = ''; };
-    ['dragenter', 'dragover'].forEach(function (ev) {
-      drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add('is-over'); });
+    if (drop) {
+      drop.onclick = function () { input.click(); };
+      drop.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } };
+      input.onchange = function () { uploadAll(code, input.files); input.value = ''; };
+    }
+    wireDrag(root, code);
+  }
+
+  /* Drag-and-drop, aimed. The whole folder surface takes a drop, and every
+     subfolder tile on it takes one more precisely - so a batch of stills goes
+     straight into Squad Photos without opening it first, the way a desktop
+     file manager behaves. Whichever target the pointer is over is the one
+     highlighted, so there is never a question of where the files will land.
+
+     One listener on the surface rather than one per tile: dragleave fires
+     again for every child element the pointer crosses, and per-tile listeners
+     turn that into a counter nobody can keep balanced. Here the target is read
+     off the event, and the surface has genuinely been left only when the
+     pointer's destination is outside it. */
+  function wireDrag(root, code) {
+    var body = root.querySelector('.fold__body');
+    if (!body || !canWrite(code)) return;   // a club you can only read takes no drops
+    var over = null;
+
+    /* Ignore drags carrying no files - a text selection, an image dragged from
+       another tab - so the surface never lights up for something it cannot
+       accept. */
+    function hasFiles(e) {
+      var t = (e.dataTransfer || {}).types || [];
+      return Array.prototype.indexOf.call(t, 'Files') !== -1;
+    }
+    function tileFor(e) {
+      return e.target && e.target.closest ? e.target.closest('[data-open]') : null;
+    }
+    function mark(e) {
+      var tile = tileFor(e);
+      if (tile === over) return;
+      if (over) over.classList.remove('is-over');
+      over = tile;
+      if (over) over.classList.add('is-over');
+      body.classList.toggle('is-over', !over);
+    }
+    function clear() {
+      if (over) over.classList.remove('is-over');
+      over = null;
+      body.classList.remove('is-over');
+    }
+
+    body.addEventListener('dragover', function (e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();                       // without this the drop never fires
+      e.dataTransfer.dropEffect = 'copy';
+      mark(e);
     });
-    ['dragleave', 'drop'].forEach(function (ev) {
-      drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove('is-over'); });
+    body.addEventListener('dragleave', function (e) {
+      if (!body.contains(e.relatedTarget)) clear();   // null when leaving the window
     });
-    drop.addEventListener('drop', function (e) {
-      if (e.dataTransfer && e.dataTransfer.files) uploadAll(code, e.dataTransfer.files);
+    body.addEventListener('drop', function (e) {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      var tile = tileFor(e);
+      clear();
+      uploadAll(code, e.dataTransfer.files,
+        tile ? tile.getAttribute('data-open') : (view.folderId || PP.ROOT_FOLDER));
     });
   }
 
@@ -1149,9 +1204,16 @@
 
   /* ── Upload ───────────────────────────────────────────────────────────── */
 
-  function uploadAll(code, fileList) {
-    var target = view.folderId || PP.ROOT_FOLDER;
+  /* folderId is explicit because a drop can be aimed at a subfolder the club is
+     only looking at rather than standing in. Absent, it means here. */
+  function uploadAll(code, fileList, folderId) {
+    var target = folderId || view.folderId || PP.ROOT_FOLDER;
+    var elsewhere = target !== (view.folderId || PP.ROOT_FOLDER)
+      ? (folderById(code, target) || {}).name : null;
     Array.prototype.forEach.call(fileList, function (file) { uploadOne(code, target, file); });
+    /* Progress rows appear under the drop zone, not inside the folder the files
+       are heading for, so say where they are going. */
+    if (elsewhere) NL.toast('Uploading to ' + elsewhere, 'info');
   }
 
   function uploadOne(code, folderId, file) {
