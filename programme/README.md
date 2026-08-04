@@ -38,11 +38,26 @@ removed there without inventing a folder to hold them. They carry
 storage path rather than a null that every read has to special-case, and the
 view treats a missing folder id as that key rather than as "no folder".
 
-**Drag-and-drop is aimed.** The whole folder surface takes a drop, and every
-subfolder tile on it takes one more precisely — files go straight into
-*Squad Photos* without opening it first. Exactly one target is highlighted at a
-time, so where the files will land is never a guess. A club that can only read
-a folder takes no drops at all.
+**Drag-and-drop is aimed, and takes folders.** The whole folder surface takes a
+drop, and every subfolder tile on it takes one more precisely — files go
+straight into *Squad Photos* without opening it first. Exactly one target is
+highlighted at a time, so where the files will land is never a guess. A club
+that can only read a folder takes no drops at all.
+
+Dropping a **folder** recreates the tree rather than uploading the folder
+itself. `dataTransfer.files` reports a directory as a zero-byte `File` with no
+type, so the obvious code stores a useless 0-byte asset named after the folder
+and discards its contents; the entry API (`webkitGetAsEntry`) is the only way to
+see that an item is a directory and walk into it. A name that already exists at
+that level is **reused, not duplicated** — the way copying into a folder on a
+desktop merges. Anything deeper than the three-level ceiling is flattened into
+the deepest folder that fits, and the toast says so, because refusing the drop
+would mean the club reorganising on their own machine and trying again.
+
+Uploads run **four at a time**. A dropped folder can be two hundred stills, and
+firing two hundred simultaneous Storage puts makes every one of them slower
+while the browser's connection limit turns the progress list into a wall of
+stalled bars.
 
 **Folders and files select and move together.** Tick either, then Move, and
 folders re-parent (`parentId`) while files re-file (`folderId`) in one go. The
