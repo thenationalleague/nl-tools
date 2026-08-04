@@ -3,7 +3,10 @@
 <head>
 <!--
   Programme Packs — club library (standalone, passcode)
-  Version: v1.8 (04/08/2026) - a folder you can only read says so, and names
+  Version: v1.9 (04/08/2026) - a dropped folder arrives as a folder: the tree
+           is walked and recreated, not uploaded as a 0-byte asset. Uploads
+           queue four at a time.
+           v1.8 (04/08/2026) - a folder you can only read says so, and names
            the session, instead of silently dropping every write control.
            v1.7 (04/08/2026) - aimed drag-and-drop: the folder surface takes a
            drop, and a subfolder tile takes one straight into itself.
@@ -658,7 +661,7 @@
          know at the point of upload that this folder is readable by all 72.
          One quiet line rather than a bordered callout. */
       html += '<div class="drop" id="drop" tabindex="0" role="button">' +
-        '<strong>Drop files here</strong> or click to choose' +
+        '<strong>Drop files or a folder here</strong> or click to choose' +
         '<div class="drop__hint">' + (subs.length ? 'or drop onto a folder above \u00b7 ' : '') +
         'visible to all 72 clubs \u00b7 nothing confidential</div></div>' +
         '<input type="file" id="fileInput" multiple style="display:none">' +
@@ -928,9 +931,124 @@
       e.preventDefault();
       var tile = tileFor(e);
       clear();
-      uploadAll(code, e.dataTransfer.files,
-        tile ? tile.getAttribute('data-open') : (view.folderId || PP.ROOT_FOLDER));
+      var into = tile ? tile.getAttribute('data-open') : (view.folderId || PP.ROOT_FOLDER);
+      /* webkitGetAsEntry has to be called while the drop event is still live —
+         dataTransfer.items are emptied the moment it returns — so the entries
+         are collected here, synchronously, and walked afterwards. */
+      var entries = entriesFrom(e.dataTransfer);
+      if (!entries.length) { uploadAll(code, e.dataTransfer.files, into); return; }
+      /* The level a folder created by this drop would occupy. trail() is empty
+         at the club root, so that is level 0; dropping onto a subfolder tile is
+         one deeper than the folder being looked at. */
+      var base = trail(code, view.folderId).length;
+      ingestDrop(code, entries, into, tile ? base + 1 : base);
     });
+  }
+
+  /* ── Dropping a folder ────────────────────────────────────────────────
+     dataTransfer.files reports a dropped directory as a zero-byte File with no
+     type, so the obvious code uploads a useless 0-byte "asset" named after the
+     folder and throws its contents away. The entry API is the only way to see
+     that an item is a directory and walk into it, so a dropped tree arrives as
+     a tree: folders created, files filed inside them.
+
+     A folder whose name already exists at that level is reused rather than
+     duplicated, the way copying into a folder on a desktop merges. */
+  function entriesFrom(dt) {
+    var items = dt && dt.items ? Array.prototype.slice.call(dt.items) : [];
+    var out = [];
+    items.forEach(function (it) {
+      var entry = it.webkitGetAsEntry ? it.webkitGetAsEntry() : null;
+      if (entry) out.push(entry);
+    });
+    /* No entry API (or nothing resolved): the caller falls back to .files,
+       which is right for loose files and is the best available for a folder. */
+    return out.some(function (e) { return e.isDirectory; }) ? out : [];
+  }
+
+  /* readEntries returns at most 100 at a time and signals the end with an
+     empty batch. Calling it once silently truncates a folder of 150 stills. */
+  function readAll(reader) {
+    return new Promise(function (resolve, reject) {
+      var all = [];
+      (function next() {
+        reader.readEntries(function (batch) {
+          if (!batch.length) return resolve(all);
+          all = all.concat(Array.prototype.slice.call(batch));
+          next();
+        }, reject);
+      })();
+    });
+  }
+
+  function fileOf(entry) {
+    return new Promise(function (resolve, reject) { entry.file(resolve, reject); });
+  }
+
+  function ingestDrop(code, entries, into, level) {
+    /* Folders created during this walk are not in FOLDERS yet — the RTDB
+       listener has not fired — so the run keeps its own index, or two
+       subfolders of the same name would each create a folder. */
+    var made = {}, counts = { files: 0, folders: 0, flattened: 0 };
+
+    function folderFor(parentId, name) {
+      name = String(name || 'Folder').slice(0, 60);
+      var key = parentId + '/' + name.toLowerCase();
+      if (made[key]) return Promise.resolve(made[key]);
+
+      var existing = childrenOf(code, parentId === PP.ROOT_FOLDER ? null : parentId)
+        .filter(function (f) { return f.name.toLowerCase() === name.toLowerCase(); })[0];
+      if (existing) { made[key] = existing.id; return Promise.resolve(existing.id); }
+
+      var rec = { name: name, createdAt: PP.TS() };
+      if (parentId !== PP.ROOT_FOLDER) rec.parentId = parentId;
+      var id = PP.ref('folders/' + code).push().key;
+      made[key] = id;
+      counts.folders++;
+      return PP.ref('folders/' + code + '/' + id).set(rec).then(function () { return id; });
+    }
+
+    /* `level` is the depth index a folder created here would occupy, and the
+       library allows 0..MAX_DEPTH-1. Past that the tree is flattened into the
+       deepest folder that fits rather than the drop being refused — the club
+       would otherwise have to reorganise on their own machine and try again —
+       and the toast admits it happened. */
+    function walk(list, parentId, level) {
+      return list.reduce(function (chain, entry) {
+        return chain.then(function () {
+          if (entry.isFile) {
+            return fileOf(entry).then(function (f) {
+              counts.files++;
+              enqueueUpload(code, parentId, f);
+            }).catch(function () { /* unreadable entry — skip it, not the batch */ });
+          }
+          if (!entry.isDirectory) return null;
+          if (level >= MAX_DEPTH) {
+            counts.flattened++;
+            return readAll(entry.createReader()).then(function (kids) {
+              return walk(kids, parentId, level);      // same place, no new folder
+            });
+          }
+          return folderFor(parentId, entry.name).then(function (id) {
+            return readAll(entry.createReader()).then(function (kids) {
+              return walk(kids, id, level + 1);
+            });
+          });
+        });
+      }, Promise.resolve());
+    }
+
+    NL.toast('Reading folder\u2026', 'info');
+    walk(entries, into, level)
+      .then(function () {
+        if (!counts.files && !counts.folders) { NL.toast('Nothing to upload in there', 'info'); return; }
+        NL.toast(counts.files + ' file' + (counts.files === 1 ? '' : 's') +
+          (counts.folders ? ' into ' + counts.folders + ' folder' + (counts.folders === 1 ? '' : 's') : '') +
+          (counts.flattened ? ' \u00b7 deeper folders flattened to fit' : ''), 'success');
+        PP.audit('upload-folder', { club: code,
+          detail: counts.files + ' file(s), ' + counts.folders + ' folder(s)' });
+      })
+      .catch(function (e) { NL.toast('Could not read that folder: ' + e.message, 'error'); });
   }
 
   /* ── Bulk actions on a selection ──────────────────────────────────────── */
@@ -1223,7 +1341,7 @@
     var target = folderId || view.folderId || PP.ROOT_FOLDER;
     var elsewhere = target !== (view.folderId || PP.ROOT_FOLDER)
       ? (folderById(code, target) || {}).name : null;
-    Array.prototype.forEach.call(fileList, function (file) { uploadOne(code, target, file); });
+    Array.prototype.forEach.call(fileList, function (file) { enqueueUpload(code, target, file); });
     /* Progress rows appear under the drop zone, not inside the folder the files
        are heading for, so say where they are going. */
     if (elsewhere) NL.toast('Uploading to ' + elsewhere, 'info');
@@ -1232,8 +1350,10 @@
   function uploadOne(code, folderId, file) {
     if (file.size > PP.MAX_BYTES) {
       NL.toast(file.name + ' is over ' + PP.humanSize(PP.MAX_BYTES), 'error');
-      return;
+      return Promise.resolve();
     }
+    var settle;
+    var done = new Promise(function (r) { settle = r; });
     var fileId = PP.ref('files/' + code).push().key;
     var path = PP.storagePath(code, folderId, fileId, file.name);
 
@@ -1256,6 +1376,7 @@
     }, function (err) {
       row.remove();
       NL.toast('Upload failed: ' + err.message, 'error');
+      settle();
     }, function () {
       /* Store the download URL on the record at upload time. Rendering a
          folder otherwise means one getDownloadURL round-trip per file, which
@@ -1273,11 +1394,34 @@
       }).then(function () {
         row.remove();
         PP.audit('upload', { club: code, detail: file.name });
+        settle();
       }).catch(function (err) {
         row.remove();
         NL.toast('Could not save ' + file.name + ': ' + err.message, 'error');
+        settle();
       });
     });
+    return done;
+  }
+
+  /* ── Upload queue ─────────────────────────────────────────────────────
+     A dropped folder can be two hundred stills. Firing two hundred
+     simultaneous Storage puts gets every one of them slower and the browser's
+     own connection limit turns the progress list into a wall of stalled bars.
+     Four at a time finishes sooner and looks like it is working. */
+  var UP_MAX = 4;
+  var upQueue = [], upActive = 0;
+
+  function upPump() {
+    while (upActive < UP_MAX && upQueue.length) {
+      upActive++;
+      upQueue.shift()().then(upNext, upNext);
+    }
+  }
+  function upNext() { upActive--; upPump(); }
+  function enqueueUpload(code, folderId, file) {
+    upQueue.push(function () { return uploadOne(code, folderId, file); });
+    upPump();
   }
 
   /* ── Remove (soft) ────────────────────────────────────────────────────
