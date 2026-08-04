@@ -1,7 +1,7 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.1 (04/08/2026)
+   Version: v1.2 (04/08/2026)
 
    Renders one club. Shared by the staff directory, the editor and the reader,
    so the presentation is written once and the three doors differ only in what
@@ -72,6 +72,39 @@
       return (p.roles || []).some(function (r) { return r.section === section; });
     });
   }
+  /* Banner colours. A club's own palette is the fastest "right page" signal
+     and the one thing a shared canon cannot provide, but the data is raw: AFC
+     Fylde's primary is #FFFFFF, and printing white on white is worse than
+     using none of it. So take the first colour dark enough to carry white
+     text, and fall back to the brand navy when none is.
+
+     Duplicated logic warning: club-kits/admin.html carries its own luminance
+     test. Second use, so this belongs in NL.clubs as a colours(name) helper
+     returning a ready pair — flagged rather than done here to keep a design
+     iteration out of a canon bump. */
+  function lum(hex) {
+    var h = String(hex || '').replace('#', '');
+    if (h.length === 3) { h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2]; }
+    if (!/^[0-9a-f]{6}$/i.test(h)) { return null; }
+    var c = [0, 2, 4].map(function (i) {
+      var v = parseInt(h.substr(i, 2), 16) / 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  }
+  function bannerColour(clubName) {
+    var meta = (window.NL && NL.clubs && NL.clubs.byName) ? NL.clubs.byName(clubName) : null;
+    var cols = (meta && meta.colors) || {};
+    var order = [cols.primary, cols.secondary, cols.tertiary];
+    for (var i = 0; i < order.length; i++) {
+      var L = lum(order[i]);
+      /* 0.4 keeps white text at roughly 4.5:1 or better, which is the AA
+         threshold for the body sizes this banner uses. */
+      if (L !== null && L < 0.4) { return order[i]; }
+    }
+    return null;   /* caller leaves --cd-bg unset and the brand navy applies */
+  }
+
   function tel(n) { return String(n || '').replace(/\s+/g, ''); }
   function url(u) { return /^https?:\/\//i.test(u) ? u : 'https://' + u; }
   function num(v) {
@@ -84,11 +117,6 @@
     var hidden = p.hideContact && !(opts && opts.showHidden);
     var here = (p.roles || []).filter(function (r) { return r.section === section; });
     var titles = here.map(function (r) { return (r.title || '').trim(); }).filter(Boolean);
-    var elsewhere = [];
-    (p.roles || []).forEach(function (r) {
-      if (r.section !== section && elsewhere.indexOf(r.section) < 0) { elsewhere.push(r.section); }
-    });
-
     var mail = hidden ? '' : emailsOf(p).map(function (e) {
       return '<a href="mailto:' + esc(e) + '">' + esc(e) + '</a>';
     }).join('<br>');
@@ -103,8 +131,6 @@
       '<div class="cd-row__name">' + esc(fullName(p) || 'Name not given') + '</div>' +
       '<div class="cd-row__role">' +
         (titles.length ? esc(titles.join(' &middot; ')) : '<em>No job title</em>') +
-        (elsewhere.length
-          ? '<span class="cd-row__also">Also in ' + esc(elsewhere.join(', ')) + '</span>' : '') +
       '</div>' +
       '<div>' + (mail || '<span class="cd-row__quiet">' + quiet + '</span>') + '</div>' +
       '<div>' + (ph || (mail ? '' : '')) + '</div>' +
@@ -133,51 +159,44 @@
         esc(s[1]) + '" aria-label="' + esc(s[1]) + '">' + glyph(s[0]) + '</a>';
     }).filter(Boolean).join('');
 
-    var total = (rec.people || []).length;
-    var reach = (rec.people || []).filter(reachable).length;
-
     var depts = ORDER.map(function (s) {
       var who = sectionPeople(rec, s);
       if (!who.length) { return ''; }
-      return '<div class="cd-dept"><h3 class="cd-dept__h">' + esc(s) +
-        '<span class="cd-dept__n">' + who.length + '</span></h3>' +
+      return '<div class="cd-dept"><h3 class="cd-dept__h">' + esc(s) + '</h3>' +
         '<ul class="cd-rows">' +
         who.map(function (p) { return personRow(p, s, opts); }).join('') +
         '</ul></div>';
     }).filter(Boolean).join('');
 
+    var bg = bannerColour(rec.club);
+
     return '' +
-      '<div class="cd-id">' +
-        '<img class="cd-id__crest" id="cdCrest" alt="" hidden>' +
-        '<div class="cd-id__t">' +
-          '<h1 class="cd-id__name">' + esc(rec.club || '') + '</h1>' +
-          '<p class="cd-id__sub">' +
-            (info.stadium ? '<b>' + esc(info.stadium) + '</b>' : '') +
-            (info.town ? ', ' + esc(info.town) : '') +
-            (rec.division ? ' &middot; ' + esc(rec.division) : '') +
-            ' &middot; ' + total + ' people, ' + reach + ' contactable' +
-          '</p>' +
-        '</div>' +
-        '<div class="cd-id__facts">' +
-          facts([
-            ['Address', addr],
-            ['Capacity', info.capacity ? num(info.capacity) +
-              (info.seated ? ' <span class="cd-f__sub">' + num(info.seated) + ' seated</span>' : '') : ''],
-            ['Pitch', [info.pitchDims, info.pitchType].filter(Boolean).map(esc).join(' &middot; ')],
-            ['Nearest station', esc(info.station || '') +
-              (info.stationDistance ? ' <span class="cd-f__sub">' + esc(info.stationDistance) +
-                ' miles</span>' : '')],
-            ['County FA', esc(info.countyFA || '')],
-            ['Switchboard', info.phone
-              ? '<a href="tel:' + esc(tel(info.phone)) + '">' + esc(info.phone) + '</a>' : ''],
-            ['Main email', info.mainEmail
-              ? '<a href="mailto:' + esc(info.mainEmail) + '">' + esc(info.mainEmail) + '</a>' : ''],
-            ['Club sponsor', esc(info.spClub || '')],
-            ['Shirt front', esc(info.spFront || '')],
-            ['Sleeve', esc(info.spSleeve || '')],
-            ['Online', social ? '<div class="cd-social">' + social + '</div>' : '', true]
-          ]) +
-        '</div>' +
+      '<div class="cd-banner"' + (bg ? ' style="--cd-bg:' + esc(bg) + '"' : '') + '>' +
+        '<img class="cd-banner__crest" id="cdCrest" alt="" hidden>' +
+        '<h1 class="cd-banner__name">' + esc(rec.club || '') + '</h1>' +
+      '</div>' +
+
+      '<div class="cd-facts">' +
+        facts([
+          ['Stadium', esc(info.stadium || '') +
+            (info.stadiumSponsor ? ' <span class="cd-f__sub">(' + esc(info.stadiumSponsor) + ')</span>' : '')],
+          ['Address', addr],
+          ['Capacity', info.capacity ? num(info.capacity) +
+            (info.seated ? ' <span class="cd-f__sub">' + num(info.seated) + ' seated</span>' : '') : ''],
+          ['Pitch', [info.pitchDims, info.pitchType].filter(Boolean).map(esc).join(' &middot; ')],
+          ['Nearest station', esc(info.station || '') +
+            (info.stationDistance ? ' <span class="cd-f__sub">' + esc(info.stationDistance) +
+              ' miles</span>' : '')],
+          ['County FA', esc(info.countyFA || '')],
+          ['Switchboard', info.phone
+            ? '<a href="tel:' + esc(tel(info.phone)) + '">' + esc(info.phone) + '</a>' : ''],
+          ['Main email', info.mainEmail
+            ? '<a href="mailto:' + esc(info.mainEmail) + '">' + esc(info.mainEmail) + '</a>' : ''],
+          ['Club sponsor', esc(info.spClub || '')],
+          ['Shirt front', esc(info.spFront || '')],
+          ['Sleeve', esc(info.spSleeve || '')],
+          ['Website & social', social ? '<div class="cd-social">' + social + '</div>' : '', true]
+        ]) +
       '</div>' +
 
       '<section class="cd-sec">' +
