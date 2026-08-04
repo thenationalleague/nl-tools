@@ -6,9 +6,9 @@ retired — see [Cutover](#cutover).
 
 | Page | Who | Gets in via | Can do |
 |---|---|---|---|
-| `/programme/` | **The 72 clubs** | own `?c=<token>` link **plus** their 6-character passcode, or the passcode alone | Browse and download **every** club's folder. Upload, organise into folders, and remove files **in their own folder only** |
+| `/programme/` | **The 72 clubs** | their 6-character passcode | Browse and download **every** club's folder. Upload, organise into folders, and remove files **in their own folder only** |
 | `/programme/` | **NL commercial** | the 73rd (National League) passcode | Everything a club can do, in the **National League** folder |
-| `/programme/admin/` | **NL admin/superadmin** | **portal login** (auth-guard, `media-programme`) | Seed/sync the roster, see and regenerate every passcode + link, export the access CSV, restore or permanently delete removed files, read the audit trail |
+| `/programme/admin/` | **NL admin/superadmin** | **portal login** (auth-guard, `media-programme`) | Seed/sync the roster, see and regenerate every passcode, export the access CSV, restore or permanently delete removed files, read the audit trail |
 
 ## The model
 
@@ -119,14 +119,21 @@ client ever reads a passcode: `config` is closed to everything except a
   bounds a distributed guess: at that rate a 31^6 space takes ~140 years, and
   every attempt still costs an anonymous signup (IP-throttled by Identity
   Toolkit) plus an invocation.
-- A leaked passcode or link is fixed by regenerating it in the console, which
-  kills the old one instantly — including on any device that remembered it.
-  Regenerating rotates **both** the passcode and the `?c=` link, so the club's
-  bookmarks and old emails all carry a dead token afterwards. A **live** token
-  pins the answer to its own club (a passcode cannot open a different folder
-  even if two ever collided); a **stale** one is ignored and the passcode alone
-  decides, which is what the bare URL already offers anyone. Filtering on a
-  dead token instead rejected a correct new passcode — Sutton, 04/08/2026.
+- A leaked passcode is fixed by regenerating it in the console, which kills the
+  old one instantly — including on any device that remembered it. **The club's
+  link is unaffected**, because it carries no credential: it is
+  `/programme/?club=<CODE>` and all it does is put the club's crest on the gate.
+
+  A second random string, `?c=<token>`, sat in that link until 04/08/2026. It
+  granted nothing — the bare URL has always accepted a passcode on its own — and
+  existed only to narrow the server's search in case two clubs ever drew the
+  same six characters. But regenerating rotated it too, so every bookmark and
+  emailed URL in the club went stale and a correct new passcode came back
+  *"Passcode not recognised"*: the one message that sends someone to the console
+  convinced the regeneration itself had failed (Sutton, 04/08/2026). The
+  collision it arbitrated is now **prevented** — the console will not mint a
+  passcode another club already holds. A `token` field may linger on records
+  seeded before then; nothing reads it.
 
 Passcodes use the unambiguous alphabet (no `0`/`O`/`1`/`I`/`L`), same as
 `/uw-promo/`, so a printed NL access card reads consistently whichever tool
@@ -138,9 +145,9 @@ RTDB `app-data/media-programme/`:
 
 ```
 config/
-  clubs/<CODE>   { name, division, passcode, token, addedAt }   # pClub '*' only
-  nl             { name, passcode, token, addedAt }             # the 73rd code
-authRequests/<uid>         { code, token?, admin?, at }   # own uid only; deleted by the trigger
+  clubs/<CODE>   { name, division, passcode, addedAt }   # pClub '*' only
+  nl             { name, passcode, addedAt }             # the 73rd code
+authRequests/<uid>         { code, admin?, at }   # own uid only; deleted by the trigger
 authGrants/<uid>           { ok, customToken?, club?, error? }   # own uid only
 folders/<CODE>/<folderId>  { name, parentId?, createdAt }   parentId = subfolder
 files/<CODE>/<fileId>      { name, folderId, size, contentType, storagePath,
@@ -176,7 +183,7 @@ Rules: `system/rtdb/rules.snapshot.json` (`app-data/media-programme`) and
    `system/rtdb/tools-registry.snapshot.json` into RTDB `tools/`
 
 Then open `/programme/admin/` and press **Seed roster**. That mints a passcode
-and link for each of the current 72 clubs plus the National League, and is
+for each of the current 72 clubs plus the National League, and is
 additive and idempotent — re-running after promotion/relegation picks up new
 clubs without touching an existing passcode.
 
@@ -188,11 +195,12 @@ clubs without touching an existing passcode.
 
 ## Testing
 
-`tests/programme.test.mjs` (`npm test`) covers the pure logic in `_shared.js`:
-passcode normalisation (**including a check that it still matches the server
-copy in `functions/programme.js`** — two implementations that must not drift),
-filename sanitising, the storage path shape, the advert-window state machine,
-and a check that `PP.MAX_BYTES` still equals the limit in the Storage rules.
+`tests/programme.test.mjs` (`npm test`) covers the pure logic in `_shared.js`,
+plus the server's `pickClub` and `normCode` pulled straight out of
+`functions/programme.js` — two implementations of normalisation that must not
+drift, and a match rule that must ignore a legacy `token` field. Also filename
+sanitising, the storage path shape, the shape of a club link, and a check that
+`PP.MAX_BYTES` still equals the limit in the Storage rules.
 
 Rules enforcement and the token exchange need a live run. Worth doing by hand
 once after deploy:
@@ -205,7 +213,8 @@ once after deploy:
 4. Remove a file as club A; confirm it vanishes and appears under **Removed
    files** in the console; restore it.
 5. Regenerate club A's passcode in the console; confirm A's remembered device
-   is bounced back to the gate on reload.
+   is bounced back to the gate on reload, and that A's **existing link** still
+   works with the new passcode — that is the Sutton case.
 
 ## Cutover
 

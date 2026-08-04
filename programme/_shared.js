@@ -31,14 +31,14 @@
   Exposes window.PP:
     PP.app / PP.db() / PP.storage()   named app + its database/storage
     PP.ref(path)                      ref under app-data/media-programme
-    PP.enter(code, token)             → Promise<session>  (club/NL passcode)
+    PP.enter(code)                    → Promise<session>  (club/NL passcode)
     PP.enterAsAdmin()                 → Promise<session>  (portal admin → '*')
     PP.resume()                       → Promise<session|null> (remembered device)
     PP.forget()                       clear the remembered passcode
     PP.session                        { code, name, division, isNL, isAdmin }
     PP.audit(action, fields)          append audit entry (server ts)
-    PP.newPasscode() / PP.newToken()  admin: mint access credentials
-    PP.clubLink(token)                absolute per-club direct link
+    PP.newPasscode()                  admin: mint a club passcode
+    PP.clubLink(code)                 absolute per-club link (branding only)
     PP.fmt(ms) / PP.ago(ms)           date-time / relative (canon-backed)
     PP.crestImgHtml(name, px)         crest <img> string (thumb → full → rose)
 
@@ -142,7 +142,6 @@
      Same alphabet as uw-promo, so a printed NL access card reads consistently
      whichever tool issued it. */
   var CODE_ALPHA = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
-  var TOKEN_ALPHA = 'abcdefghjkmnpqrstuvwxyz23456789';
 
   function randFrom(alpha, len) {
     var buf = new Uint32Array(len), out = '';
@@ -271,9 +270,9 @@
       });
   }
 
-  function remember(code, token) {
+  function remember(code) {
     try {
-      localStorage.setItem(REMEMBER_KEY, JSON.stringify({ code: code, token: token || '', at: Date.now() }));
+      localStorage.setItem(REMEMBER_KEY, JSON.stringify({ code: code, at: Date.now() }));
     } catch (e) { /* private browsing — the club just retypes next visit */ }
   }
 
@@ -292,18 +291,19 @@
     try { localStorage.removeItem(REMEMBER_KEY); } catch (e) {}
   }
 
-  /* Exchange a passcode for a scoped session. `token` is the ?c= link token
-     when the club arrived by their own link — it only narrows the search
-     server-side; the passcode is always required. */
-  function enter(code, token) {
-    return requestGrant({ code: normCode(code), token: token || '' })
+  /* Exchange a passcode for a scoped session. The passcode is the whole
+     credential — there is nothing in the URL to combine it with. A per-club
+     ?c= token existed until 04/08/2026 and only narrowed the server-side
+     search; see clubLink below for why it went. */
+  function enter(code) {
+    return requestGrant({ code: normCode(code) })
       .then(function (d) {
         return app.auth().signInWithCustomToken(d.customToken).then(function () {
           session = {
             code: d.club.code, name: d.club.name, division: d.club.division || '',
             isNL: !!d.isNL, isAdmin: false, viaAdmin: VIA_ADMIN
           };
-          remember(code, token);
+          remember(code);
           PP.session = session;
           /* Logged after the session exists, so the entry is attributed to the
              club rather than to nobody. Failures are not logged here — the
@@ -340,7 +340,7 @@
   function resume() {
     var rec = recall();
     if (!rec) return Promise.resolve(null);
-    return enter(rec.code, rec.token).catch(function () { forget(); return null; });
+    return enter(rec.code).catch(function () { forget(); return null; });
   }
 
   function requireSession() {
@@ -407,7 +407,7 @@
     /* Seeds the remembered-device slot so the club page signs itself in. Used
        by the console's "Open as" — the passcode is one the admin already
        holds, so this discloses nothing they could not read on that screen. */
-    handOff: function (code, token) { remember(code, token); },
+    handOff: function (code) { remember(code); },
     enter: enter,
     enterAsAdmin: enterAsAdmin,
     resume: resume,
@@ -418,15 +418,23 @@
     audit: audit,
 
     newPasscode: function () { return randFrom(CODE_ALPHA, 6); },
-    newToken: function () { return randFrom(TOKEN_ALPHA, 14); },
     /* ?club= is cosmetic only — it lets the gate show the club's crest before
-       anyone has proved who they are. It is never trusted: the passcode and the
-       token are what the trigger validates, so tampering with it changes the
-       badge on the gate and nothing else. The alternative, a public token→club
-       lookup, would mean publishing a node just to decorate a login. */
-    clubLink: function (token, code) {
-      return location.origin + '/programme/?c=' + encodeURIComponent(token) +
-        (code ? '&club=' + encodeURIComponent(code) : '');
+       anyone has proved who they are. It is never trusted: the passcode is what
+       the trigger validates, so tampering with it changes the badge on the gate
+       and nothing else.
+
+       There used to be a ?c= token beside it, a second random string that
+       narrowed the server's passcode search to one club. It granted nothing —
+       /programme/ with no query has always worked — but regenerating rotated it
+       along with the passcode, so every bookmark and old email in the club went
+       stale and a correct new passcode came back "not recognised" (Sutton,
+       04/08/2026). It was guarding against two clubs drawing the same 6
+       characters out of 31^6; the console now simply refuses to mint a passcode
+       another club already holds, which is a guarantee rather than a tiebreak.
+       So the link is branding, it never expires, and regenerating touches the
+       passcode alone. */
+    clubLink: function (code) {
+      return location.origin + '/programme/?club=' + encodeURIComponent(code);
     },
 
     DEFAULT_FOLDERS: DEFAULT_FOLDERS,
