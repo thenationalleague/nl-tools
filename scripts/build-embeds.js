@@ -44,6 +44,13 @@ const EMBEDS = [
     globalFlag: '__nlMotmMounted',
     name: 'Team of the Week',
   },
+  {
+    src: 'embeds/club-directory.html',
+    out: 'embeds/club-directory.js',
+    mountAttr: 'data-nl-clubs',
+    globalFlag: '__nlClubDirectoryMounted',
+    name: 'Club Directory',
+  },
 ];
 
 // Pull the three parts out of the embed. The embeds follow a fixed shape —
