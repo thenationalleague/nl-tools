@@ -35,15 +35,15 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=31">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=3">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=5">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
-<script src="/club-directory/_tidy.js?v=3"></script>
-<script src="/club-directory/_gate.js?v=3"></script>
-<script src="/club-directory/_directory.js?v=3"></script>
+<script src="/club-directory/_tidy.js?v=5"></script>
+<script src="/club-directory/_gate.js?v=5"></script>
+<script src="/club-directory/_directory.js?v=5"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -125,6 +125,17 @@
     margin: 26px 0 0; padding: 14px 16px; border: 1px solid var(--border);
     border-radius: var(--radius); background: var(--white);
   }
+  /* Master-only strip under the banner. "Where is the club data" could not be
+     answered from the outside, because an empty facts grid renders as a rule
+     and a gap rather than as nothing. This says what the record actually
+     holds, so a missing field is visible instead of inferred. */
+  .ed-diag {
+    margin: 0 0 18px; padding: 8px 12px; border-radius: var(--radius-sm);
+    background: var(--navy-50); color: var(--text-muted);
+    font-size: var(--text-xs); line-height: 1.5;
+  }
+  .ed-diag b { color: var(--navy); font-weight: 800; font-variation-settings: 'wght' 800; }
+  .ed-diag .bad { color: var(--red); font-weight: 800; font-variation-settings: 'wght' 800; }
   .ed-merges h3 {
     margin: 0 0 6px; font-size: var(--text-xs); text-transform: uppercase;
     letter-spacing: var(--tracking-wide);
@@ -286,6 +297,32 @@
     wireEditing(name);
     markProvenance(name);
     showMerges(name);
+    if (session.role === 'admin') { diagnose(name, rec); }
+  }
+
+  /* What this record actually contains. Master only — it is a maintenance
+     readout, not something an editor needs. */
+  function diagnose(name, rec) {
+    var people = NLDirectory.arr(rec.people);
+    var info = rec.info || {};
+    var infoFilled = Object.keys(info).filter(function (k) {
+      return String(info[k] == null ? '' : info[k]).trim() !== '';
+    }).length;
+    var withEmail = people.filter(function (p) { return NLDirectory.arr(p.emails).length; }).length;
+    var withPhone = people.filter(function (p) { return NLDirectory.arr(p.phones).length; }).length;
+    var prov = (PROV[name] || {});
+    var n = function (v, label) {
+      return '<b class="' + (v ? '' : 'bad') + '">' + v + '</b> ' + label;
+    };
+    var el = document.createElement('div');
+    el.className = 'ed-diag';
+    el.innerHTML = 'This record holds ' + n(people.length, 'people') + ', ' +
+      n(infoFilled, 'club detail fields') + ', ' + n(withEmail, 'with an email') +
+      ', ' + n(withPhone, 'with a phone') + ', ' +
+      n(NLDirectory.arr(prov.changes).length, 'recorded changes') + ', ' +
+      n(NLDirectory.arr(prov.merges).length, 'merges') + '.';
+    var banner = $('out').querySelector('.cd-facts') || $('out').querySelector('.cd-banner');
+    if (banner) { banner.parentNode.insertBefore(el, banner.nextSibling); }
   }
 
   /* Rows render from the shared module, so editability is attached afterwards
@@ -293,20 +330,20 @@
   function wireEditing(club) {
     var rec = ALL[club];
     var rows = $('out').querySelectorAll('.cd-row');
-    var people = rec.people || [];
+    var people = NLDirectory.arr(rec.people);
     var seen = {};
     rows.forEach(function (row) {
       var dept = row.closest('.cd-dept').querySelector('.cd-dept__h').textContent.trim();
       var idx = (seen[dept] = (seen[dept] || 0));
       seen[dept]++;
       var inDept = people.filter(function (p) {
-        return (p.roles || []).some(function (r) { return r.section === dept; });
+        return NLDirectory.rolesOf(p).some(function (r) { return r.section === dept; });
       });
       var person = inDept[idx];
       if (!person) { return; }
       row.dataset.pid = person.id || '';
       editable(row.children[0], person, 'name', club);
-      var roleIdx = (person.roles || []).map(function (r, i) {
+      var roleIdx = NLDirectory.rolesOf(person).map(function (r, i) {
         return r.section === dept ? i : -1;
       }).filter(function (i) { return i > -1; })[0];
       if (roleIdx != null) { editable(row.children[1], person, 'roles/' + roleIdx + '/title', club); }
@@ -377,7 +414,7 @@
                merge: 'a duplicate entry' };
 
   function markProvenance(club) {
-    var changes = ((PROV[club] || {}).changes) || [];
+    var changes = NLDirectory.arr((PROV[club] || {}).changes);
     if (!changes.length) { return; }
     var byPerson = {};
     changes.forEach(function (c) {
@@ -430,14 +467,14 @@
      single change a person cannot see by looking at the page, because the
      evidence for it was deleted. */
   function showMerges(club) {
-    var merges = ((PROV[club] || {}).merges) || [];
+    var merges = NLDirectory.arr((PROV[club] || {}).merges);
     $('extra').innerHTML = !merges.length ? '' :
       '<div class="ed-merges"><h3>Entries we combined</h3>' +
       '<p>The form let a club add the same person once per job, so some people ' +
       'arrived several times. These were combined into one entry carrying all ' +
       'their roles. Nothing was discarded.</p><ul>' +
       merges.map(function (m) {
-        var n = (m.absorbed || []).length;
+        var n = NLDirectory.arr(m.absorbed).length;
         return '<li><b>' + esc(m.kept) + '</b> — ' + n +
           (n === 1 ? ' duplicate entry' : ' duplicate entries') + ' merged in</li>';
       }).join('') + '</ul></div>';
@@ -453,7 +490,7 @@
     $('out').innerHTML = Object.keys(byClub).sort().map(function (c) {
       return '<div class="cd-dept"><h3 class="cd-dept__h">' + esc(c) + '</h3><ul class="cd-rows">' +
         byClub[c].map(function (p) {
-          return NLDirectory.personRow(p, ((p.roles || [])[0] || {}).section, { showHidden: true });
+          return NLDirectory.personRow(p, (NLDirectory.rolesOf(p)[0] || {}).section, { showHidden: true });
         }).join('') + '</ul></div>';
     }).join('');
   }
