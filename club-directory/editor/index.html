@@ -35,15 +35,15 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=31">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=6">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=7">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
-<script src="/club-directory/_tidy.js?v=6"></script>
-<script src="/club-directory/_gate.js?v=6"></script>
-<script src="/club-directory/_directory.js?v=6"></script>
+<script src="/club-directory/_tidy.js?v=7"></script>
+<script src="/club-directory/_gate.js?v=7"></script>
+<script src="/club-directory/_directory.js?v=7"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -86,39 +86,48 @@
   }
   .cd-search { top: 44px; }
 
-  /* Editable fields. A dotted underline rather than a box: 1,400 boxes on a
-     page is a form, and this is a directory you can correct. */
-  [data-edit] { cursor: text; border-bottom: 1px dashed var(--navy-200); }
-  [data-edit]:hover { background: var(--amber-light); }
-  [data-edit]:focus { outline: none; background: var(--white);
-    box-shadow: var(--focus-ring); border-bottom-color: var(--primary); }
-  [data-edit][data-empty]::before { content: attr(data-empty); color: var(--text-muted); font-style: italic; }
+  /* Nothing is editable until a pen is pressed. Making every field live on
+     tap meant a scroll on a phone could land in a name and change it, and it
+     gave no sign that editing was possible at all. */
+  .cd-row { position: relative; padding-right: 42px; }
+  .ed-pen {
+    position: absolute; top: 7px; right: 8px;
+    width: 30px; height: 30px; padding: 0; border-radius: var(--radius-sm);
+    border: 1px solid var(--border); background: var(--white); color: var(--navy);
+    cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  }
+  .ed-pen svg { width: 15px; height: 15px; }
+  .ed-pen:hover { border-color: var(--primary); color: var(--primary); }
+  .cd-row.is-editing .ed-pen { background: var(--primary); border-color: var(--primary); color: var(--white); }
 
-  /* The margin marker. Sits in the gutter of the row it belongs to, so it
-     reads as an annotation on that field and not as page furniture. */
-  .ed-mark {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 15px; height: 15px; margin-left: 5px; vertical-align: 1px;
-    border-radius: var(--radius-pill); border: 0; cursor: pointer; padding: 0;
-    background: var(--amber); color: var(--white);
-    font-family: var(--font); font-size: 9px; line-height: 1;
-    font-weight: 900; font-variation-settings: 'wght' 900;
+  .cd-row.is-editing [data-edit] {
+    background: var(--white); border-bottom: 1px dashed var(--navy-300); cursor: text;
   }
-  .ed-mark:hover { background: var(--primary); }
+  .cd-row.is-editing [data-edit]:focus {
+    outline: none; box-shadow: var(--focus-ring); border-bottom-color: var(--primary);
+  }
+
+  /* Provenance reads as a note, not a badge. It sits under the field it
+     describes on a phone, and in the spare right-hand column on a wide
+     screen, so it annotates rather than interrupts. Always visible: a change
+     nobody clicks is a change nobody knows about. */
   .ed-note {
-    margin: 5px 0 0; padding: 8px 10px; background: var(--amber-light);
-    border-radius: var(--radius-sm); font-size: var(--text-xs); line-height: 1.5;
-    color: var(--text); grid-column: 1 / -1;
+    grid-column: 1 / -1; margin: 4px 0 0;
+    font-size: var(--text-xs); line-height: 1.5; color: var(--text-muted);
+    border-left: 2px solid var(--amber); padding: 2px 0 2px 9px;
   }
-  .ed-note b { font-weight: 800; font-variation-settings: 'wght' 800; }
+  .ed-note b { color: var(--text); font-weight: 700; font-variation-settings: 'wght' 700; }
   .ed-note button {
-    margin-left: 8px; font-family: var(--font); font-size: var(--text-xs);
+    margin-left: 8px; padding: 0; border: 0; background: none; cursor: pointer;
+    font-family: var(--font); font-size: var(--text-xs);
     font-weight: 700; font-variation-settings: 'wght' 700;
-    padding: 3px 9px; border-radius: var(--radius-sm);
-    border: 1px solid var(--amber); background: var(--white); color: var(--amber);
-    cursor: pointer;
+    color: var(--primary); text-decoration: underline;
   }
-  .ed-note button:hover { background: var(--amber); color: var(--white); }
+  @media (min-width: 861px) {
+    /* Fourth column is the phone, which is short; the note tucks under it
+       rather than pushing the row apart. */
+    .ed-note { grid-column: 3 / -1; margin-top: 2px; }
+  }
 
   /* Merge note, foot of the club. Context rather than alarm, so it is quiet. */
   .ed-merges {
@@ -347,7 +356,36 @@
         return r.section === dept ? i : -1;
       }).filter(function (i) { return i > -1; })[0];
       if (roleIdx != null) { editable(row.children[1], person, 'roles/' + roleIdx + '/title', club); }
+      addPen(row);
     });
+  }
+
+  /* One pen per person. Pressing it turns that row's fields on and puts the
+     cursor in the name; pressing it again, or clicking away, turns them off.
+     Editing stays off until asked for, so a scroll on a phone cannot land in
+     somebody's name and change it. */
+  function addPen(row) {
+    var b = document.createElement('button');
+    b.className = 'ed-pen';
+    b.type = 'button';
+    b.title = 'Edit this entry';
+    b.setAttribute('aria-label', 'Edit this entry');
+    b.innerHTML = NLDirectory.strokeGlyph('edit');
+    b.addEventListener('click', function (e) {
+      e.stopPropagation();
+      setEditing(row, !row.classList.contains('is-editing'));
+    });
+    row.appendChild(b);
+  }
+
+  function setEditing(row, on) {
+    row.classList.toggle('is-editing', on);
+    var cells = row.querySelectorAll('[data-edit]');
+    cells.forEach(function (c) {
+      if (on) { c.setAttribute('contenteditable', 'plaintext-only'); }
+      else { c.removeAttribute('contenteditable'); }
+    });
+    if (on && cells[0]) { cells[0].focus(); }
   }
 
   function valueAt(person, path) {
@@ -377,7 +415,6 @@
 
   function editable(cell, person, path, club) {
     if (!cell) { return; }
-    cell.setAttribute('contenteditable', 'plaintext-only');
     cell.setAttribute('data-edit', path);
     cell.setAttribute('spellcheck', 'false');
     var before = valueAt(person, path);
@@ -386,14 +423,19 @@
       if (e.key === 'Enter') { e.preventDefault(); cell.blur(); }
       if (e.key === 'Escape') { cell.textContent = before; cell.blur(); }
     });
-    cell.addEventListener('blur', function () {
+    cell.addEventListener('blur', function () { commit(cell); });
+    /* Stored on the node so the put-back button can commit the same way the
+       blur handler does, rather than faking a blur event at it. */
+    cell._commit = function () {
       var now = cell.textContent.trim();
       if (now === before) { return; }
       setAt(person, path, now);
       save(club, person, path, before, now);
       before = now;
-    });
+    };
   }
+
+  function commit(cell) { if (cell && cell._commit) { cell._commit(); } }
 
   /* Straight to the database, as agreed. NL.writeAudit first so the entry
      names the editor and the field rather than just the path that changed. */
@@ -423,44 +465,32 @@
       (byPerson[m[1]] = byPerson[m[1]] || []).push({ tail: m[2] || '', c: c });
     });
     $('out').querySelectorAll('.cd-row').forEach(function (row) {
-      var pid = row.dataset.pid;
-      var list = pid && byPerson[pid];
+      var list = row.dataset.pid && byPerson[row.dataset.pid];
       if (!list) { return; }
       list.forEach(function (item) {
         var cell = null;
         if (item.tail === 'firstName' || item.tail === 'lastName') { cell = row.children[0]; }
         else if (/^roles\/\d+\/title$/.test(item.tail)) { cell = row.children[1]; }
-        if (!cell || cell.querySelector('.ed-mark')) { return; }
-        addMark(cell, row, item.c, club);
+        if (!cell) { return; }
+        addNote(row, cell, item.c);
       });
     });
   }
 
-  function addMark(cell, row, change, club) {
-    var b = document.createElement('button');
-    b.className = 'ed-mark';
-    b.type = 'button';
-    b.textContent = '!';
-    b.title = 'We changed this';
-    b.setAttribute('aria-label', 'We changed this. Show what the club sent.');
-    b.addEventListener('click', function (e) {
-      e.stopPropagation();
-      var open = row.querySelector('.ed-note');
-      if (open) { open.remove(); return; }
-      var note = document.createElement('div');
-      note.className = 'ed-note';
-      note.innerHTML = 'We corrected ' + esc(KIND[change.kind] || change.kind) +
-        '. The club sent <b>' + esc(change.from || '(blank)') + '</b>.' +
-        '<button type="button">Put it back</button>';
-      note.querySelector('button').addEventListener('click', function () {
-        cell.textContent = change.from || '';
-        cell.dispatchEvent(new Event('blur'));
-        note.remove();
-        b.remove();
-      });
-      row.appendChild(note);
+  /* The note says what the club sent and offers to put it back. No badge to
+     press first: a change nobody clicks is a change nobody knows about. */
+  function addNote(row, cell, change) {
+    var note = document.createElement('div');
+    note.className = 'ed-note';
+    note.innerHTML = 'We corrected ' + esc(KIND[change.kind] || change.kind) +
+      '. The club sent <b>' + esc(change.from || '(blank)') + '</b>.' +
+      '<button type="button">Put back</button>';
+    note.querySelector('button').addEventListener('click', function () {
+      cell.textContent = change.from || '';
+      commit(cell);
+      note.remove();
     });
-    cell.appendChild(b);
+    row.appendChild(note);
   }
 
   /* The merge note, at the foot of the club. Two entries becoming one is the

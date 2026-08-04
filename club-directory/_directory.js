@@ -57,6 +57,15 @@
     return '<svg aria-hidden="true" focusable="false" fill="currentColor" stroke="none"><use href="' +
       SPRITE + '#icon-' + name + '"></use></svg>';
   }
+  /* The sprite holds two kinds of symbol. The brand marks are filled; the UI
+     set is stroked with no fill. Handing a stroked icon to glyph() sets
+     stroke="none" on the wrapper and draws nothing at all, which is what the
+     edit pen did — a visible button with an invisible icon. */
+  function strokeGlyph(name) {
+    return '<svg aria-hidden="true" focusable="false" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="' +
+      SPRITE + '#icon-' + name + '"></use></svg>';
+  }
   /* RTDB returns a JSON array only when the keys are a contiguous 0..n. One
      gap — a person removed from the middle of a submission, a phone deleted —
      and the same field comes back as {"0":…,"2":…}. That object is truthy, so
@@ -265,6 +274,7 @@
     fullName: fullName,
     reachable: reachable,
     glyph: glyph,
+    strokeGlyph: strokeGlyph,
     ORDER: ORDER
   };
 }());
