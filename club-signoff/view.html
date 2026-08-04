@@ -305,6 +305,23 @@
     return '<div class="row"><dt>' + esc(label) + '</dt><dd>' +
       (value || '<span class="empty">(blank)</span>') + '</dd></div>';
   }
+  /* Live RTDB stores leads as {areaKey: [personId]} — bare id strings. The
+     export tool expands them to {id, name}, which is what this page was written
+     against, so against the real database every list rendered blank. Accept
+     both shapes and resolve an id back to the person. */
+  function leadNames(rec, key) {
+    var raw = (rec.leads || {})[key] || [];
+    var byId = {};
+    (rec.people || []).forEach(function (p) { if (p.id) { byId[p.id] = p; } });
+    return raw.map(function (n) {
+      if (typeof n === 'string') {
+        var p = byId[n];
+        return p ? fullName(p) : '';
+      }
+      return (n && (n.name || (byId[n.id] ? fullName(byId[n.id]) : ''))) || '';
+    }).filter(Boolean);
+  }
+
   function fullName(p) {
     return (p.name || [p.firstName, p.lastName].filter(Boolean).join(' ') || '').trim();
   }
@@ -425,9 +442,7 @@
 
       '<section class="block"><h2>Mailing lists</h2>' +
         LISTS.map(function (L) {
-          var noms = ((rec.leads || {})[L[0]] || [])
-            .map(function (n) { return esc((n.name || '').trim()); }).filter(Boolean);
-          return row(L[1], noms.join(' &middot; '));
+          return row(L[1], leadNames(rec, L[0]).map(esc).join(' &middot; '));
         }).join('') +
       '</section>' +
 
