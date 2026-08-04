@@ -111,6 +111,12 @@ client ever reads a passcode: `config` is closed to everything except a
   Toolkit) plus an invocation.
 - A leaked passcode or link is fixed by regenerating it in the console, which
   kills the old one instantly — including on any device that remembered it.
+  Regenerating rotates **both** the passcode and the `?c=` link, so the club's
+  bookmarks and old emails all carry a dead token afterwards. A **live** token
+  pins the answer to its own club (a passcode cannot open a different folder
+  even if two ever collided); a **stale** one is ignored and the passcode alone
+  decides, which is what the bare URL already offers anyone. Filtering on a
+  dead token instead rejected a correct new passcode — Sutton, 04/08/2026.
 
 Passcodes use the unambiguous alphabet (no `0`/`O`/`1`/`I`/`L`), same as
 `/uw-promo/`, so a printed NL access card reads consistently whichever tool
