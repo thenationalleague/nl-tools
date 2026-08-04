@@ -82,7 +82,8 @@ width, not viewport width** (`container-type: inline-size` + `@container`) —
 an embed never owns the viewport, and the same block has to work full-bleed
 and inside a narrow article column.
 
-Division comes from the host page, so one bundle serves all three:
+Division comes from the host page, so one bundle serves all three — all
+three are seeded, so each paints its own 24 immediately:
 
 ```html
 <div data-nl-clubs="National"></div>   <!-- or North / South -->
