@@ -94,6 +94,61 @@ test('normCode matches the server implementation in functions/programme.js', () 
   }
 });
 
+/* ── pickClub (server) ────────────────────────────────────────────────────
+   Which club a passcode opens, and what a link token does to that decision.
+   Same extraction trick as the parity test above: pull the functions out of
+   the module text so the real implementation is under test, not a copy. */
+function serverPickClub() {
+  const src = readFileSync(join(REPO, 'functions/programme.js'), 'utf8');
+  const parts = ['normCode', 'safeEqual', 'pickClub'].map((name) => {
+    const m = src.match(new RegExp(`function ${name}\\([\\s\\S]*?\\n\\}`));
+    assert.ok(m, `could not find ${name} in functions/programme.js`);
+    return m[0];
+  });
+  // eslint-disable-next-line no-new-func
+  return new Function(`${parts.join('\n')}; return pickClub;`)();
+}
+
+const CFG = {
+  clubs: {
+    SUT: { name: 'Sutton United', passcode: '4K2M9P', token: 'tok-sut' },
+    FGR: { name: 'Forest Green Rovers', passcode: 'H7RQ3D', token: 'tok-fgr' }
+  },
+  nl: { name: 'National League', passcode: 'X9WT4B', token: 'tok-nl' }
+};
+
+test('pickClub: passcode alone identifies the club', () => {
+  const pick = serverPickClub();
+  assert.equal(pick(CFG, '4K2M9P', '')?.key, 'SUT');
+  assert.equal(pick(CFG, 'X9WT4B', '')?.key, 'NL');
+  assert.equal(pick(CFG, 'NOPE00', ''), null);
+});
+
+test('pickClub: a live link token pins the answer to its own club', () => {
+  const pick = serverPickClub();
+  assert.equal(pick(CFG, '4K2M9P', 'tok-sut')?.key, 'SUT');
+  /* FGR's passcode on Sutton's live link must not open FGR — that narrowing
+     is the whole reason the token is passed. */
+  assert.equal(pick(CFG, 'H7RQ3D', 'tok-sut'), null);
+});
+
+test('pickClub: a stale link token does not veto a correct passcode', () => {
+  /* Regenerating rotates the passcode AND the link, so every bookmark in the
+     club still carries the dead ?c=. Before this, the new passcode was
+     rejected on the old URL. */
+  const pick = serverPickClub();
+  assert.equal(pick(CFG, '4K2M9P', 'tok-sut-OLD')?.key, 'SUT');
+  assert.equal(pick(CFG, 'X9WT4B', 'tok-nl-OLD')?.key, 'NL');
+  assert.equal(pick(CFG, 'NOPE00', 'tok-sut-OLD'), null);
+});
+
+test('pickClub: survives an empty or half-built config', () => {
+  const pick = serverPickClub();
+  assert.equal(pick({}, '4K2M9P', ''), null);
+  assert.equal(pick({ clubs: { SUT: null } }, '4K2M9P', ''), null);
+  assert.equal(pick({ nl: CFG.nl }, 'X9WT4B', '')?.key, 'NL');
+});
+
 /* ── safeName ─────────────────────────────────────────────────────────── */
 
 test('safeName strips path separators and traversal', () => {

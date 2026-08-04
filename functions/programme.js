@@ -85,6 +85,36 @@ function safeEqual(a, b) {
   return diff === 0;
 }
 
+/* Which club does this passcode open?
+ *
+ * A link token narrows the search to the entry it belongs to, so a passcode
+ * cannot open a different club's folder even if two codes ever collided. But a
+ * token that matches NOTHING must not veto a correct passcode: regenerating a
+ * club's access rotates the passcode AND the link, so the moment the console
+ * reissues, every bookmark and every emailed URL in that club carries a dead
+ * ?c=. Filtering on it and stopping there turned a valid new passcode into
+ * "Passcode not recognised" (Sutton, 04/08/2026) — the one error message that
+ * sends someone back to the console convinced the regeneration failed.
+ *
+ * So a stale token degrades to passcode-only, which is exactly what the bare
+ * URL already offers every visitor. Nothing is given away: the token narrows
+ * when it is real and is ignored when it is not.
+ */
+function pickClub(cfg, code, linkToken) {
+  const clubs = (cfg && cfg.clubs) || {};
+  const all = Object.keys(clubs).map((k) => ({ key: k, rec: clubs[k] }));
+  if (cfg && cfg.nl) all.push({ key: "NL", rec: cfg.nl });
+
+  const match = (list) =>
+    list.find((c) => c.rec && safeEqual(normCode(c.rec.passcode), code)) || null;
+
+  if (linkToken) {
+    const scoped = all.filter((c) => c.rec && c.rec.token === linkToken);
+    if (scoped.length) return match(scoped);   // live link — it decides
+  }
+  return match(all);
+}
+
 /* ---- Throttle ------------------------------------------------------------
    A trigger sees no source IP, so unlike the callable version this cannot rate
    limit per caller. An attacker can also mint anonymous uids freely, making a
@@ -185,24 +215,8 @@ exports.programmeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
     if (code.length < 4) return grant({ ok: false, error: "Enter your passcode." });
 
     const cfg = (await db.ref(ROOT + "/config").once("value")).val() || {};
-    const clubs = cfg.clubs || {};
     const linkToken = String(req.token || "").trim().slice(0, 40);
-
-    /* With a link token we compare against that entry only, so a club's
-       passcode cannot open a different club's folder even if two codes ever
-       collided. Without one, the passcode alone identifies the club. */
-    let candidates;
-    if (linkToken) {
-      candidates = Object.keys(clubs)
-        .filter((k) => clubs[k] && clubs[k].token === linkToken)
-        .map((k) => ({ key: k, rec: clubs[k] }));
-      if (cfg.nl && cfg.nl.token === linkToken) candidates.push({ key: "NL", rec: cfg.nl });
-    } else {
-      candidates = Object.keys(clubs).map((k) => ({ key: k, rec: clubs[k] }));
-      if (cfg.nl) candidates.push({ key: "NL", rec: cfg.nl });
-    }
-
-    const hit = candidates.find((c) => c.rec && safeEqual(normCode(c.rec.passcode), code));
+    const hit = pickClub(cfg, code, linkToken);
 
     if (!hit) {
       await noteFailure(uid);

@@ -3,7 +3,13 @@
 <head>
 <!--
   Programme Packs — club library (standalone, passcode)
-  Version: v1.1 (04/08/2026) — stop auditing folder opens: in a read-all
+  Version: v1.4 (04/08/2026) — folders can be multi-selected and moved, same
+           as files. Cycle- and depth-guarded in the picker.
+           v1.3 (04/08/2026) — the folder you are in is a surface, not a run
+           of loose sections; its name and actions sit in the head.
+           v1.2 (04/08/2026) — the club root is a folder: files can be dropped
+           and listed there, not only inside one you made first.
+           v1.1 (04/08/2026) — stop auditing folder opens: in a read-all
            library, browsing is the intended behaviour, so the entries only
            buried the ones that answer a real question.
            v1.0 (03/08/2026) — initial build. Replaces /programme-packs/
@@ -107,6 +113,7 @@
   var loaded = { folders: false, files: false, roster: false };
   var view = { club: null, folderId: null };   // club === null → directory
   var sel = {};                                // fileId → true, current folder only
+  var selDir = {};                             // folderId → true, ditto
 
   /* Selection is per-folder and never survives navigation. Carrying ticks
      between folders is how people end up moving or deleting something they
@@ -132,7 +139,7 @@
   }
   function applyHash() {
     var h = readHash();
-    if (h.club !== view.club || h.folderId !== view.folderId) sel = {};
+    if (h.club !== view.club || h.folderId !== view.folderId) { sel = {}; selDir = {}; }
     view.club = h.club;
     view.folderId = h.folderId;
     /* Opening a folder is deliberately NOT audited. The whole library is
@@ -368,6 +375,25 @@
     return out;
   }
 
+  /* Every folder at or below `id`, itself included. A folder cannot be moved
+     into its own subtree: that detaches the whole branch from the root, and
+     foldersFor's cycle guard would then drop it from the UI while its files
+     sat on in the bucket. */
+  function subtree(code, id) {
+    var out = [id];
+    childrenOf(code, id).forEach(function (c) { out = out.concat(subtree(code, c.id)); });
+    return out;
+  }
+
+  /* How many levels a folder carries below itself — 0 for a leaf. A move has
+     to leave room for all of them inside MAX_DEPTH, or the deepest ones fall
+     off the walk and reappear as orphans at the top. */
+  function subtreeHeight(code, id) {
+    var kids = childrenOf(code, id);
+    if (!kids.length) return 0;
+    return 1 + Math.max.apply(null, kids.map(function (c) { return subtreeHeight(code, c.id); }));
+  }
+
   function totalBytes(list) {
     return list.reduce(function (t, e) { return t + (Number(e.file.size) || 0); }, 0);
   }
@@ -496,8 +522,11 @@
     var here = view.folderId ? folderById(code, view.folderId) : null;
     var path = trail(code, view.folderId);
     var subs = childrenOf(code, view.folderId);
-    var files = view.folderId ? filesFor(code, view.folderId) : [];
+    /* No ternary on view.folderId: the club root is a folder like any other,
+       it just has no id. filesFor() reads null as PP.ROOT_FOLDER. */
+    var files = filesFor(code, view.folderId);
     var picked = files.filter(function (f) { return sel[f.id]; });
+    var pickedSubs = subs.filter(function (f) { return selDir[f.id]; });
     var packCount = collectFiles(code, null, '').length;
 
     var html = '<div class="crumb">' +
@@ -527,6 +556,10 @@
       '</div>';
     }
 
+    /* One surface for whatever folder you are in, root included, so its
+       contents are visibly inside something. "Top level" is the same word the
+       Move dialog uses for the root — one name for one place. No file count
+       in the head: the grid below is the count. */
     var leftBtns = '', rightBtns = '';
     if (writable) {
       leftBtns += '<button class="btn btn--ghost btn--sm" id="addFolder" title="' +
@@ -539,18 +572,52 @@
       }
     }
     if (view.folderId && collectFiles(code, view.folderId, '').length) {
-      rightBtns += '<button class="btn btn--primary" data-zip="' + esc(view.folderId) + '">Download folder</button>';
+      rightBtns += '<button class="btn btn--primary btn--sm" data-zip="' + esc(view.folderId) + '">Download folder</button>';
     }
-    if (leftBtns || rightBtns) {
-      html += '<div class="bar"><div class="bar__left">' + leftBtns + '</div>' +
-        '<div class="bar__right">' + rightBtns + '</div></div>';
+
+    html += '<div class="fold"><div class="fold__head">' +
+      '<span class="fold__icon" aria-hidden="true">📂</span>' +
+      '<span class="fold__name">' + esc(here ? here.name : 'Top level') + '</span>' +
+      (leftBtns ? '<span class="fold__acts">' + leftBtns + '</span>' : '') +
+      (rightBtns ? '<span class="fold__acts fold__acts--end">' + rightBtns + '</span>' : '') +
+      '</div><div class="fold__body">';
+
+    /* Above both grids, because it governs both. It is always here once the
+       folder holds anything, with its buttons disabled until something is
+       ticked — rendering it only on selection meant ticking one box shoved
+       the whole grid down the page. It carries every bulk action, so nothing
+       is offered that cannot be done: Remove greys out on a folders-only
+       selection, because a folder is deleted from its own ⋯ menu and only
+       when it is empty. */
+    if (files.length || subs.length) {
+      var n = picked.length + pickedSubs.length;
+      var dis = n ? '' : ' disabled';
+      html += '<div class="sel-bar">' +
+        '<label class="sel-bar__all"><input type="checkbox" class="tile__check" id="selAll"' +
+          (n && n === files.length + subs.length ? ' checked' : '') +
+          ' style="position:static"> Select all</label>' +
+        '<span class="sel-bar__count">' + (n ? n + ' selected' : '') + '</span>' +
+        '<button class="btn btn--primary btn--sm" id="selZip"' + dis + '>Download</button>' +
+        (writable ? '<button class="btn btn--ghost btn--sm" id="selMove"' + dis + '>Move…</button>' +
+                    '<button class="btn btn--danger btn--sm" id="selRemove"' +
+                      (picked.length ? '' : ' disabled') + '>Remove</button>' : '') +
+        '<span class="sel-bar__spacer"></span>' +
+        '<button class="btn btn--ghost btn--sm" id="selClear"' + dis + '>Clear</button>' +
+      '</div>';
     }
 
     if (subs.length) {
       html += '<div class="folders">' + subs.map(function (f) {
         var inside = collectFiles(code, f.id, '').length;
-        return '<div class="folder' + (inside ? '' : ' is-empty') + '" tabindex="0" role="button"' +
+        /* The tick is its own control rather than the tile: clicking a folder
+           opens it, which is what a folder is for. Files are the other way
+           round \u2014 clicking a file tile picks it, because opening one is what
+           the Download and Preview buttons are there for. */
+        return '<div class="folder' + (inside ? '' : ' is-empty') +
+          (selDir[f.id] ? ' is-picked' : '') + '" tabindex="0" role="button"' +
           ' data-open="' + esc(f.id) + '" aria-label="' + esc(f.name) + '">' +
+          '<input type="checkbox" class="tile__check folder__check" data-pickdir="' + esc(f.id) + '"' +
+            (selDir[f.id] ? ' checked' : '') + ' aria-label="Select ' + esc(f.name) + '">' +
           '<span class="folder__icon" aria-hidden="true">' + (inside ? '\ud83d\udcc1' : '\ud83d\uddc2\ufe0f') + '</span>' +
           '<span class="folder__id"><span class="folder__name">' + esc(f.name) + '</span></span>' +
           '<button class="folder__more" data-menu="' + esc(f.id) + '" aria-label="Folder actions">\u22ef</button>' +
@@ -558,46 +625,30 @@
       }).join('') + '</div>';
     }
 
-    if (view.folderId) {
-      if (writable) {
-        /* Kept deliberately, unlike the other notices that went: a club has to
-           know at the point of upload that this folder is readable by all 72.
-           One quiet line rather than a bordered callout. */
-        html += '<div class="drop" id="drop" tabindex="0" role="button">' +
-          '<strong>Drop files here</strong> or click to choose' +
-          '<div class="drop__hint">' + (here ? esc(here.name) + ' \u00b7 ' : '') +
-          'visible to all 72 clubs \u00b7 nothing confidential</div></div>' +
-          '<input type="file" id="fileInput" multiple style="display:none">' +
-          '<div id="uploads"></div>';
-      }
-
-      if (files.length) {
-        /* The selection bar carries every bulk action, so nothing is offered
-           that cannot be done. It appears only once something is ticked. */
-        /* The bar is always here once a folder has files, with its buttons
-           disabled until something is ticked. Rendering it only on selection
-           meant ticking one box shoved the whole grid down the page. */
-        var none = !picked.length;
-        var dis = none ? ' disabled' : '';
-        html += '<div class="sel-bar">' +
-          '<label class="sel-bar__all"><input type="checkbox" class="tile__check" id="selAll"' +
-            (!none && picked.length === files.length ? ' checked' : '') +
-            ' style="position:static"> Select all</label>' +
-          '<span class="sel-bar__count">' + (none ? '' : picked.length + ' selected') + '</span>' +
-          '<button class="btn btn--primary btn--sm" id="selZip"' + dis + '>Download</button>' +
-          (writable ? '<button class="btn btn--ghost btn--sm" id="selMove"' + dis + '>Move\u2026</button>' +
-                      '<button class="btn btn--danger btn--sm" id="selRemove"' + dis + '>Remove</button>' : '') +
-          '<span class="sel-bar__spacer"></span>' +
-          '<button class="btn btn--ghost btn--sm" id="selClear"' + dis + '>Clear</button>' +
-        '</div>';
-        html += '<div class="tiles">' + files.map(function (f) { return fileTile(f, code, writable, isNL); }).join('') + '</div>';
-      } else if (!subs.length) {
-        html += '<div class="empty-state"><div class="empty-state__title">Empty</div></div>';
-      }
-    } else if (!subs.length) {
-      html += '<div class="empty-state"><div class="empty-state__title">' +
-        (writable ? 'Add a folder to get started' : 'Nothing here yet') + '</div></div>';
+    /* Everything below is folder-agnostic. The club root used to render only
+       its subfolders, so a club could not drop a file at the top of its own
+       pack without inventing a folder to put it in \u2014 and the root files the
+       data model already allowed had nowhere to appear. */
+    if (writable) {
+      /* Kept deliberately, unlike the other notices that went: a club has to
+         know at the point of upload that this folder is readable by all 72.
+         One quiet line rather than a bordered callout. */
+      html += '<div class="drop" id="drop" tabindex="0" role="button">' +
+        '<strong>Drop files here</strong> or click to choose' +
+        '<div class="drop__hint">visible to all 72 clubs \u00b7 nothing confidential</div></div>' +
+        '<input type="file" id="fileInput" multiple style="display:none">' +
+        '<div id="uploads"></div>';
     }
+
+    if (files.length) {
+      html += '<div class="tiles">' + files.map(function (f) { return fileTile(f, code, writable, isNL); }).join('') + '</div>';
+    } else if (!subs.length && !writable) {
+      /* Only for a visitor. For the club itself the drop zone above already
+         says the place is empty, and says what to do about it. */
+      html += '<div class="empty-state"><div class="empty-state__title">Nothing here yet</div></div>';
+    }
+
+    html += '</div></div>';   // .fold__body, .fold
 
     el('viewClub').innerHTML = html;
     wireClub(code, writable);
@@ -682,11 +733,15 @@
     });
     Array.prototype.forEach.call(root.querySelectorAll('[data-open]'), function (b) {
       b.onclick = function (e) {
-        if (e.target.closest('[data-menu]')) return;     // the ⋯ button handles itself
+        /* The ⋯ button and the select tick both live inside the folder and
+           both handle themselves — opening on top of either would make the
+           folder impossible to tick without leaving the page you ticked from. */
+        if (e.target.closest('[data-menu], [data-pickdir]')) return;
         navigate(code, b.getAttribute('data-open'));
       };
       if (b.classList.contains('folder')) {
         b.onkeydown = function (e) {
+          if (e.target.closest('[data-menu], [data-pickdir]')) return;
           if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); b.onclick(e); }
         };
         b.oncontextmenu = function (e) {
@@ -730,14 +785,29 @@
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(e); }
       };
     });
+    Array.prototype.forEach.call(root.querySelectorAll('[data-pickdir]'), function (b) {
+      /* stopPropagation, not just a guard on the tile handler: the checkbox
+         sits inside the folder, and without this a tick would also open it. */
+      b.onclick = function (e) { e.stopPropagation(); };
+      b.onchange = function (e) {
+        e.stopPropagation();
+        var id = b.getAttribute('data-pickdir');
+        if (selDir[id]) delete selDir[id]; else selDir[id] = true;
+        render();
+      };
+    });
     var all = el('selAll');
     if (all) all.onchange = function () {
       var want = all.checked;
-      sel = {};
-      if (want) filesFor(code, view.folderId).forEach(function (f) { sel[f.id] = true; });
+      sel = {}; selDir = {};
+      if (want) {
+        filesFor(code, view.folderId).forEach(function (f) { sel[f.id] = true; });
+        childrenOf(code, view.folderId).forEach(function (f) { selDir[f.id] = true; });
+      }
       render();
     };
-    var clear = el('selClear'); if (clear) clear.onclick = function () { sel = {}; render(); };
+    var clear = el('selClear');
+    if (clear) clear.onclick = function () { sel = {}; selDir = {}; render(); };
     var zipSel = el('selZip'); if (zipSel) zipSel.onclick = function () { downloadSelected(code); };
 
     /* A single-file download is a plain <a download>, so it never passed
@@ -792,8 +862,18 @@
     return filesFor(code, view.folderId).filter(function (f) { return sel[f.id]; });
   }
 
+  function pickedDirs(code) {
+    return childrenOf(code, view.folderId).filter(function (f) { return selDir[f.id]; });
+  }
+
+  /* A picked folder brings everything under it, filed under its own name, the
+     way dragging a folder onto a desktop does. Picked loose files sit at the
+     top of the archive. */
   function downloadSelected(code) {
     var list = pickedFiles(code).map(function (f) { return { file: f, path: '' }; });
+    pickedDirs(code).forEach(function (d) {
+      list = list.concat(collectFiles(code, d.id, PP.safeName(d.name) + '/'));
+    });
     if (!list.length) return;
     var here = folderById(code, view.folderId);
     zipFrom(list, (here ? here.name : code) + ' selection');
@@ -806,33 +886,68 @@
      the folder out of the storage path, so they are free to disagree. */
   function moveSelected(code) {
     var picked = pickedFiles(code);
-    if (!picked.length) return;
+    var dirs = pickedDirs(code);
+    if (!picked.length && !dirs.length) return;
     var here = view.folderId || PP.ROOT_FOLDER;
-    var options = [{ id: PP.ROOT_FOLDER, name: 'Top level', depth: 0 }]
+
+    /* A folder cannot land inside itself or anything under it, and whatever it
+       carries has to still fit inside MAX_DEPTH — a branch pushed past the
+       limit falls off foldersFor's walk and resurfaces as an orphan at the top,
+       which reads to the club as "my folder moved somewhere random". Both are
+       settled by removing those targets from the list, so the dialog cannot
+       offer a move it would then have to refuse. */
+    var barred = {}, headroom = 0;
+    dirs.forEach(function (d) {
+      subtree(code, d.id).forEach(function (id) { barred[id] = true; });
+      headroom = Math.max(headroom, subtreeHeight(code, d.id));
+    });
+
+    var options = [{ id: PP.ROOT_FOLDER, name: 'Top level', depth: -1 }]
       .concat(foldersFor(code))
-      .filter(function (f) { return f.id !== here; });
+      .filter(function (f) {
+        if (f.id === here || barred[f.id]) return false;
+        return !dirs.length || f.depth + 1 + headroom <= MAX_DEPTH - 1;
+      });
     if (!options.length) { NL.toast('There is nowhere else to move them yet', 'info'); return; }
 
+    var what = [
+      dirs.length ? dirs.length + ' folder' + (dirs.length === 1 ? '' : 's') : '',
+      picked.length ? picked.length + ' file' + (picked.length === 1 ? '' : 's') : ''
+    ].filter(Boolean).join(' and ');
+
     NL.modal({
-      title: 'Move ' + picked.length + ' file' + (picked.length === 1 ? '' : 's'),
+      title: 'Move ' + what,
       size: 'sm',
       body: '<div class="form-group"><label for="mvTo">Move to</label><select id="mvTo">' +
         options.map(function (f) {
           /* Non-breaking spaces so the tree shape survives inside <option>. */
-          var pad = new Array(f.depth + 1).join('\u00a0\u00a0\u00a0');
+          var pad = new Array(f.depth + 2).join('\u00a0\u00a0\u00a0');
           return '<option value="' + esc(f.id) + '">' + pad + esc(f.name) + '</option>';
         }).join('') + '</select></div>',
       buttons: [
         { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
         { label: 'Move', className: 'btn--primary', autofocus: true, onClick: function (c) {
             var to = document.getElementById('mvTo').value;
-            var updates = {};
-            picked.forEach(function (f) { updates[f.id + '/folderId'] = to; });
-            PP.ref('files/' + code).update(updates).then(function () {
-              PP.audit('move', { club: code, detail: picked.length + ' file(s) → ' +
-                ((folderById(code, to) || {}).name || to) });
-              NL.toast('Moved ' + picked.length + ' file' + (picked.length === 1 ? '' : 's'), 'success');
-              sel = {};
+            var where = to === PP.ROOT_FOLDER ? 'Top level'
+                                              : ((folderById(code, to) || {}).name || to);
+            /* Files carry folderId, folders carry parentId — and a folder at
+               the top has no parentId at all rather than the '_root' sentinel.
+               That key belongs to files, whose records would otherwise need a
+               null that every read has to special-case. */
+            var fileUpdates = {}, dirUpdates = {};
+            picked.forEach(function (f) { fileUpdates[f.id + '/folderId'] = to; });
+            dirs.forEach(function (d) {
+              dirUpdates[d.id + '/parentId'] = to === PP.ROOT_FOLDER ? null : to;
+            });
+
+            var jobs = [];
+            if (picked.length) jobs.push(PP.ref('files/' + code).update(fileUpdates));
+            if (dirs.length) jobs.push(PP.ref('folders/' + code).update(dirUpdates));
+
+            Promise.all(jobs).then(function () {
+              PP.audit('move', { club: code, detail: what + ' → ' + where });
+              NL.toast('Moved ' + what, 'success');
+              sel = {}; selDir = {};
               c.close();
             }).catch(function (e) { NL.toast('Could not move: ' + e.message, 'error'); });
           } }
@@ -861,7 +976,7 @@
           .then(function () {
             PP.audit('remove', { club: code, detail: picked.length + ' file(s)' });
             NL.toast('Removed ' + picked.length + ' file' + (picked.length === 1 ? '' : 's'), 'success');
-            sel = {};
+            sel = {}; selDir = {};
           });
       }).catch(function (e) { NL.toast('Could not remove: ' + e.message, 'error'); });
   }

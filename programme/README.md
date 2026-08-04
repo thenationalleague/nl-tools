@@ -31,10 +31,20 @@ hand: a `usedFrom`/`usedUntil` window existed briefly and was removed, because
 adverts change rarely enough that maintaining dates cost more than it saved.
 
 **Folders are owned by the club, and optional.** Nothing is pre-created; a club
-makes what it needs, nested up to three deep, or none at all. **Files can sit
-loose at the top of a club's folder** — they carry `folderId: '_root'`, so a
-root file is an ordinary record with an ordinary storage path rather than a
-null that every read has to special-case.
+makes what it needs, nested up to three deep, or none at all. **The club root is
+a folder like any other** — files can be dropped, listed, selected, moved and
+removed there without inventing a folder to hold them. They carry
+`folderId: '_root'`, so a root file is an ordinary record with an ordinary
+storage path rather than a null that every read has to special-case, and the
+view treats a missing folder id as that key rather than as "no folder".
+
+**Folders and files select and move together.** Tick either, then Move, and
+folders re-parent (`parentId`) while files re-file (`folderId`) in one go. The
+picker will not offer a folder its own subtree, or a target that would push the
+branch past the three-level ceiling — a folder beyond it falls off the tree walk
+and reappears as an orphan at the top, which reads as "my folder moved somewhere
+random". Remove stays files-only: a folder is deleted from its own ⋯ menu, and
+only when it is empty.
 
 **Ordering is alphabetical and not editable**, for folders and files alike. A
 manual sort order is hidden state nobody maintains, and across 72 clubs it
@@ -111,6 +121,12 @@ client ever reads a passcode: `config` is closed to everything except a
   Toolkit) plus an invocation.
 - A leaked passcode or link is fixed by regenerating it in the console, which
   kills the old one instantly — including on any device that remembered it.
+  Regenerating rotates **both** the passcode and the `?c=` link, so the club's
+  bookmarks and old emails all carry a dead token afterwards. A **live** token
+  pins the answer to its own club (a passcode cannot open a different folder
+  even if two ever collided); a **stale** one is ignored and the passcode alone
+  decides, which is what the bare URL already offers anyone. Filtering on a
+  dead token instead rejected a correct new passcode — Sutton, 04/08/2026.
 
 Passcodes use the unambiguous alphabet (no `0`/`O`/`1`/`I`/`L`), same as
 `/uw-promo/`, so a printed NL access card reads consistently whichever tool
