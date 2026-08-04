@@ -310,9 +310,9 @@
      against, so against the real database every list rendered blank. Accept
      both shapes and resolve an id back to the person. */
   function leadNames(rec, key) {
-    var raw = (rec.leads || {})[key] || [];
+    var raw = arr((rec.leads || {})[key]);
     var byId = {};
-    (rec.people || []).forEach(function (p) { if (p.id) { byId[p.id] = p; } });
+    arr(rec.people).forEach(function (p) { if (p.id) { byId[p.id] = p; } });
     return raw.map(function (n) {
       if (typeof n === 'string') {
         var p = byId[n];
@@ -320,6 +320,19 @@
       }
       return (n && (n.name || (byId[n.id] ? fullName(byId[n.id]) : ''))) || '';
     }).filter(Boolean);
+  }
+
+  /* RTDB returns a JSON array only when the keys run 0..n with no gaps. One
+     removal from the middle and the field comes back as an object, which is
+     truthy, so `x || []` does not catch it and .filter throws. */
+  function arr(v) {
+    if (Array.isArray(v)) { return v; }
+    if (!v || typeof v !== 'object') { return []; }
+    var keys = Object.keys(v);
+    if (keys.every(function (k) { return /^\d+$/.test(k); })) {
+      keys.sort(function (a, b) { return (+a) - (+b); });
+    }
+    return keys.map(function (k) { return v[k]; }).filter(function (x) { return x != null; });
   }
 
   function fullName(p) {
@@ -383,8 +396,8 @@
 
     /* People stay in submission order, and anyone entered twice appears twice. */
     var seq = people.slice().sort(function (a, b) {
-      var ai = ORDER.indexOf(((a.roles || [])[0] || {}).section);
-      var bi = ORDER.indexOf(((b.roles || [])[0] || {}).section);
+      var ai = ORDER.indexOf((arr(a.roles)[0] || {}).section);
+      var bi = ORDER.indexOf((arr(b.roles)[0] || {}).section);
       if (ai < 0) { ai = 99; } if (bi < 0) { bi = 99; }
       return ai - bi;
     });
@@ -481,16 +494,16 @@
   }
 
   function personCard(p) {
-    var roles = (p.roles || []).map(function (r) {
+    var roles = arr(p.roles).map(function (r) {
       return '<li class="rle"><span class="rle__dept">' + esc(r.section || 'Other') + '</span>' +
         ((r.title || '').trim()
           ? '<span class="rle__title">' + esc(r.title) + '</span>'
           : '<span class="rle__title rle__title--none">(no job title)</span>') + '</li>';
     }).join('');
 
-    var cts = (p.emails || []).filter(Boolean).map(function (em) {
+    var cts = arr(p.emails).filter(Boolean).map(function (em) {
       return '<div class="ct"><a href="mailto:' + esc(em) + '">' + esc(em) + '</a></div>';
-    }).concat((p.phones || []).filter(function (ph) { return (ph.number || '').trim(); })
+    }).concat(arr(p.phones).filter(function (ph) { return (ph.number || '').trim(); })
       .map(function (ph) {
         return '<div class="ct">' + esc(ph.number) +
           (ph.ext ? ' ext ' + esc(ph.ext) : '') + '</div>';

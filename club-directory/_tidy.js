@@ -184,6 +184,22 @@
     }
     return /^[A-Z]/.test(word) ? to.charAt(0).toUpperCase() + to.slice(1) : to;
   }
+  /* RTDB returns a JSON array only when the keys are a contiguous 0..n. One
+     gap — a person removed from the middle of a submission, a phone deleted —
+     and the same field comes back as {"0":…,"2":…}. That object is truthy, so
+     `x || []` does not catch it and .filter throws with "is not a function".
+     This code was written against the JSON export, where they are real arrays;
+     everything read out of the live database goes through here instead. */
+  function arr(v) {
+    if (Array.isArray(v)) { return v; }
+    if (!v || typeof v !== 'object') { return []; }
+    var keys = Object.keys(v);
+    if (keys.every(function (k) { return /^\d+$/.test(k); })) {
+      keys.sort(function (a, b) { return (+a) - (+b); });
+    }
+    return keys.map(function (k) { return v[k]; }).filter(function (x) { return x != null; });
+  }
+
   /* A person's address inside the record. Provenance is written against the
      id rather than the array index, because the merge pass reorders people and
      an index-keyed marker would end up pointing at somebody else. */
@@ -194,8 +210,8 @@
 
   function fixTypos(rec, log) {
     var n = 0; log = log || noop;
-    (rec.people || []).forEach(function (p, pi) {
-      (p.roles || []).forEach(function (r, ri) {
+    arr(rec.people).forEach(function (p, pi) {
+      arr(p.roles).forEach(function (r, ri) {
         var t = (r.title || '').trim();
         /* An address pasted into the title box, or a plain TBC, is a different
            problem and gets asked about rather than silently rewritten. */
@@ -284,8 +300,8 @@
      green list can say precisely what we are doing rather than gesturing. */
   function splitCompound(rec, log) {
     var done = []; log = log || noop;
-    (rec.people || []).forEach(function (p, pi) {
-      var rs = p.roles || [];
+    arr(rec.people).forEach(function (p, pi) {
+      var rs = arr(p.roles);
       var held = [];
       rs.forEach(function (r) { if (held.indexOf(r.section) < 0) { held.push(r.section); } });
       rs.forEach(function (r) {
@@ -330,7 +346,7 @@
   /* Returns what was changed, so the green list describes the truth. */
   function tidyCase(rec, log) {
     var n = { names: 0, titles: 0, emails: 0 }; log = log || noop;
-    (rec.people || []).forEach(function (p, pi) {
+    arr(rec.people).forEach(function (p, pi) {
       var loud = shouting(p), touched = false;
       ['firstName', 'lastName'].forEach(function (f) {
         var v = (p[f] || '').trim();
@@ -348,7 +364,7 @@
           .map(function (x) { return (x || '').trim(); })
           .filter(Boolean).join(' ');
       }
-      (p.roles || []).forEach(function (r, ri) {
+      arr(p.roles).forEach(function (r, ri) {
         var t = (r.title || '').trim();
         if (!t || !needsRecase(t, loud)) { return; }
         var out = titleCase(t);
@@ -357,7 +373,7 @@
           log(pathFor(p, pi, 'roles/' + ri + '/title'), t, out, 'case');
         }
       });
-      p.emails = (p.emails || []).map(function (em, ei) {
+      p.emails = arr(p.emails).map(function (em, ei) {
         if (em && /[A-Z]/.test(em)) {
           n.emails++;
           log(pathFor(p, pi, 'emails/' + ei), em, em.toLowerCase(), 'case');
@@ -379,22 +395,22 @@
      re-import pointing at the losing id resolves to nobody, silently. */
   function mergeByName(rec, log) {
     var seen = {}, out = [], merged = []; log = log || noop;
-    (rec.people || []).forEach(function (p, pi) {
+    arr(rec.people).forEach(function (p, pi) {
       var k = fullName(p).toLowerCase();
       if (!k) { out.push(p); return; }
       if (!seen[k]) { seen[k] = p; out.push(p); return; }
       var t = seen[k];
-      var gained = (p.roles || []).map(function (r) { return r.section; });
-      t.roles = (t.roles || []).concat(p.roles || []);
-      (p.emails || []).forEach(function (em) {
-        if (em && (t.emails || []).indexOf(em) < 0) { t.emails = (t.emails || []).concat(em); }
+      var gained = arr(p.roles).map(function (r) { return r.section; });
+      t.roles = arr(t.roles).concat(arr(p.roles));
+      arr(p.emails).forEach(function (em) {
+        if (em && arr(t.emails).indexOf(em) < 0) { t.emails = arr(t.emails).concat(em); }
       });
-      (p.phones || []).forEach(function (ph) {
-        var have = (t.phones || []).some(function (x) { return x.number === ph.number; });
-        if (!have) { t.phones = (t.phones || []).concat(ph); }
+      arr(p.phones).forEach(function (ph) {
+        var have = arr(t.phones).some(function (x) { return x.number === ph.number; });
+        if (!have) { t.phones = arr(t.phones).concat(ph); }
       });
       if (p.hideContact) { t.hideContact = true; }
-      if (p.id) { t.mergedIds = (t.mergedIds || []).concat(p.id); }
+      if (p.id) { t.mergedIds = arr(t.mergedIds).concat(p.id); }
 
       var entry = null;
       for (var i = 0; i < merged.length; i++) {
@@ -417,9 +433,9 @@
      against, so against the real database every list rendered blank. Accept
      both shapes and resolve an id back to the person. */
   function leadNames(rec, key) {
-    var raw = (rec.leads || {})[key] || [];
+    var raw = arr((rec.leads || {})[key]);
     var byId = {};
-    (rec.people || []).forEach(function (p) { if (p.id) { byId[p.id] = p; } });
+    arr(rec.people).forEach(function (p) { if (p.id) { byId[p.id] = p; } });
     return raw.map(function (n) {
       if (typeof n === 'string') {
         var p = byId[n];
@@ -457,7 +473,7 @@
   }
 
   window.NLTidy = {
-    run: run,
+    arr: arr,    run: run,
     fixTypos: fixTypos,
     splitCompound: splitCompound,
     tidyCase: tidyCase,
