@@ -38,6 +38,12 @@ removed there without inventing a folder to hold them. They carry
 storage path rather than a null that every read has to special-case, and the
 view treats a missing folder id as that key rather than as "no folder".
 
+**Drag-and-drop is aimed.** The whole folder surface takes a drop, and every
+subfolder tile on it takes one more precisely — files go straight into
+*Squad Photos* without opening it first. Exactly one target is highlighted at a
+time, so where the files will land is never a guess. A club that can only read
+a folder takes no drops at all.
+
 **Folders and files select and move together.** Tick either, then Move, and
 folders re-parent (`parentId`) while files re-file (`folderId`) in one go. The
 picker will not offer a folder its own subtree, or a target that would push the
