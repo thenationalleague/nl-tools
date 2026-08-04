@@ -114,7 +114,6 @@
 .edit:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .edit svg { width: 12px; height: 12px; fill: none; stroke: currentColor;
   stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.block--editing { box-shadow: 0 1px 3px var(--navy-50), 0 0 0 2px var(--primary-100); }
 
 .row { display: grid; grid-template-columns: 190px 1fr; gap: 4px 20px;
   padding: 8px 0; align-items: baseline; }
@@ -277,12 +276,6 @@
     </div>
   </div>
 
-  <div id="changebar" class="changebar" hidden>
-    <span><b id="changeN">0</b> <span id="changeWord">changes</span> so far, saved when
-      you confirm below.</span>
-    <button id="resetAll" type="button">Reset everything</button>
-  </div>
-
   <div class="note">
     <div>
       <span class="note__label" id="noteLabel">Info for your club</span>
@@ -306,35 +299,28 @@
     </section>
 
     <section class="block" data-block="ground">
-      <h2>Ground <button class="edit" data-edit="ground" type="button">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/></svg>
-        Edit</button></h2>
+      <h2>Ground</h2>
       <div id="ground"></div>
     </section>
 
     <section class="block" data-block="contact">
-      <h2>Contacting the club <button class="edit" data-edit="contact" type="button">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/></svg>
-        Edit</button></h2>
+      <h2>Contacting the club</h2>
       <div id="contact"></div>
     </section>
 
     <section class="block">
       <h2>Mailing lists</h2>
-      <p class="block__lede">Who receives our email on each subject. Add as many people
-        as you need, remove anyone who shouldn&rsquo;t be on a list, and it saves with your
-        reply. Most of these are simply routing, so one name is plenty. Five are
-        different: safety, safeguarding and the three liaison officers are roles we
-        need a named individual against. That&rsquo;s a name rather than a job, and it is
-        very often someone already listed here who covers it alongside their own role.</p>
+      <p class="block__lede">Who receives our email on each subject. Most of these are
+        simply routing. Five are different: safety, safeguarding and the three liaison
+        officers are roles we need a named individual against, which is a name rather
+        than a job, and very often someone already listed here.</p>
       <div id="lists"></div>
     </section>
 
     <section class="block">
       <h2>Departmental inboxes</h2>
-      <p class="block__lede">Addresses that belong to a department rather than a person,
-        for anything that should not land in one inbox. Add any you use. These sit
-        alongside named people, they do not replace them.</p>
+      <p class="block__lede">Addresses that belong to a department rather than a person.
+        These sit alongside named people, they do not replace them.</p>
       <div id="inboxes"></div>
     </section>
 
@@ -344,15 +330,11 @@
     <div id="sections"></div>
 
     <div class="finish">
-    <h2>Is this right?</h2>
-    <p>If everything above is correct, confirm it and we&rsquo;ll publish it as it stands.
-       If anything needs changing, tell us what and we&rsquo;ll fix it before it goes live.</p>
-    <div class="finish__btns">
-      <button id="confirmBtn" class="btn btn--primary">Confirm this entry</button>
-      <button id="changeBtn" class="btn">Something needs changing</button>
+      <h2>Anything wrong?</h2>
+      <p>We&rsquo;ve emailed the club secretary with the things we still need from you.
+         Reply to that email with anything on this page that isn&rsquo;t right and we&rsquo;ll
+         put it straight before the directory goes out.</p>
     </div>
-    <p id="finishMsg" class="muted" style="margin-top:12px;"></p>
-  </div>
 
     <p class="foot" id="foot"></p>
   </div>
@@ -387,10 +369,8 @@
   ];
 
   var token = new URLSearchParams(location.search).get('t') || '';
-  var club = '', sub = null, cfg = {}, answers = {}, listPicks = {};
-  /* editing: which blocks are open. edits: corrections the club has typed,
-     keyed by field for club info and by person + section for role titles. */
-  var editing = {}, edits = {}, wired = false, mergedNames = [], found = {},
+  var club = '', sub = null, cfg = {};
+  var listPicks = {}, mergedNames = [], found = {},
       tidied = { names: 0, titles: 0, emails: 0 };
 
   function $(id) { return document.getElementById(id); }
@@ -411,21 +391,17 @@
     club = inv.club;
     return Promise.all([
       db.ref('app-data/ops-club-contacts/submissions/' + token).once('value'),
-      db.ref('app-data/ops-club-signoff/responses/' + token).once('value'),
       fetch(NOTES + '?cb=' + Date.now()).then(function (r) { return r.json(); })
         .catch(function () { return {}; })
     ]);
   }).then(function (res) {
     if (!res) { return; }
     sub = res[0].val();
-    var prior = res[1].val();
-    cfg = (res[2] && res[2][club]) || {};
+    cfg = (res[1] && res[1][club]) || {};
     if (!sub) {
       gate('We don’t have a submission for ' + club + ' yet. Please contact the League.');
       return;
     }
-    if (prior && prior.answers) { answers = prior.answers; }
-    if (prior && prior.edits) { edits = prior.edits; }
     sub = applyFixes(sub, cfg.apply || {});
     render();
   }).catch(function (err) {
@@ -434,33 +410,11 @@
   });
 
   /* ------------------------------------------------------------ helpers */
-  /* A flag leads with the instruction and puts the reason underneath, so it
-     scans as a to-do rather than a paragraph to read. Accepts either the
-     { ask, why } form or a bare string for anything not yet rewritten. */
-  function flagFor(key) {
-    var q = (cfg.check || {})[key];
-    if (!q) { return ''; }
-    var ask = typeof q === 'string' ? q : (q.ask || '');
-    var why = typeof q === 'string' ? '' : (q.why || '');
-    return '<div class="q"><p class="q__ask">' + ask + '</p>' +
-      (why ? '<p class="q__why">' + why + '</p>' : '') +
-      '<textarea data-answer="' + esc(key) + '" placeholder="Your reply">' +
-      esc(answers[key] || '') + '</textarea></div>';
+  function row(label, value) {
+    return '<div class="row"><dt>' + esc(label) + '</dt><dd>' +
+      (value || '<span class="empty">Not held</span>') + '</dd></div>';
   }
 
-  function row(label, value, key, field, raw) {
-    var body;
-    if (field && editing[fieldBlock(field)]) {
-      body = '<input class="fld" data-field="' + esc(field) + '" value="' +
-        esc(edits[field] !== undefined ? edits[field] : (raw || '')) + '">';
-    } else {
-      body = value || '<span class="empty">Not held</span>';
-    }
-    return '<div class="row"><dt>' + esc(label) + '</dt><dd>' + body +
-      (key ? flagFor(key) : '') + '</dd></div>';
-  }
-
-  /* Which block a field belongs to, so opening one pen doesn't open them all. */
   function nameSelect(listKey, i, chosen, names) {
     var opts = ['<option value=""> choose a name </option>'].concat(
       names.map(function (n) {
@@ -470,15 +424,13 @@
     return '<select data-list="' + listKey + '" data-slot="' + i + '">' + opts + '</select>';
   }
 
-  /* An editable value that reads as text until you touch it. Missing values
-     carry an instruction in the placeholder rather than a separate flag block. */
+  /* Read-only. The club checks this against what they know and replies to the
+     email; nothing here writes anywhere. A missing value says so plainly rather
+     than inviting a correction the page could not accept. */
   function field(key, value, placeholder, cls, optional) {
-    var v = edits[key] !== undefined ? edits[key] : (value || '');
-    var changed = edits[key] !== undefined && edits[key] !== (value || '');
-    return '<input class="inl ' + (cls || '') + (changed ? ' inl--changed' : '') +
-      (!v ? (optional ? ' inl--empty inl--opt' : ' inl--empty') : '') +
-      '" data-field="' + esc(key) + '" value="' + esc(v) +
-      '" placeholder="' + esc(placeholder || '') + '">';
+    var v = value || '';
+    if (v) { return '<span class="' + (cls || '') + '">' + esc(v) + '</span>'; }
+    return optional ? '' : '<span class="empty">Not held</span>';
   }
 
   /* A UK number is 11 digits starting 0 once a menu option or extension is out
@@ -511,86 +463,44 @@
       else { grouped.push({ title: t, sections: [r.section || 'Other'] }); }
     });
 
-    var flags = [];
     var roles = grouped.map(function (g) {
       var sec = g.sections[0];
-      var rmKey = 'rolerm:' + name + ':' + sec;
-      if (edits[rmKey]) { return ''; }
-      flags.push(flagFor('people:' + name + ':' + sec));
       if (!g.title) { found.titles++; }
       return '<li class="rle">' +
         '<span class="rle__dept">' + g.sections.map(esc).join(' &middot; ') + '</span>' +
-        field('role:' + name + ':' + sec, g.title,
-              'Please add ' + possessive(name) + ' title here', 'inl--role') +
-        '<button class="rm" type="button" data-rm="' + esc(rmKey) + '" title="Remove this role" ' +
-        'aria-label="Remove ' + esc(sec) + ' role">&times;</button></li>';
+        (g.title ? '<span class="rle__title">' + esc(g.title) + '</span>'
+                 : '<span class="rle__title rle__title--none">No job title held</span>') +
+        '</li>';
     }).join('');
 
-    /* Contact details, one editable line each. Blanking one removes it, which is
-       why the fallback line above the list matters: nobody becomes unreachable. */
     var cts = [];
-    (p.emails || []).forEach(function (em, i) {
-      var k = 'email:' + name + ':' + i;
-      if (edits[k] === '') { return; }
-      var lc = (em || '').trim().toLowerCase();
-      var dup = shared[lc] > 1 || inboxOf[lc];
-      cts.push('<div class="ct">' + (dup ? '<span class="bang" aria-hidden="true">!</span>' : '') +
-        field(k, em, 'Email address') +
-        '<button class="rm" type="button" data-blank="' + esc(k) + '" ' +
-        'aria-label="Remove this address">&times;</button></div>');
+    (p.emails || []).forEach(function (em) {
+      cts.push('<div class="ct"><a href="mailto:' + esc(em) + '">' + esc(em) + '</a></div>');
     });
     var badPhone = null;
-    (p.phones || []).forEach(function (ph, i) {
-      var k = 'phone:' + name + ':' + i;
-      if (edits[k] === '') { return; }
-      if (edits[k] === undefined && phoneTrouble(ph.number)) { badPhone = phoneTrouble(ph.number); }
-      cts.push('<div class="ct">' + field(k, ph.number, 'Phone number') +
-        '<button class="rm" type="button" data-blank="' + esc(k) + '" ' +
-        'aria-label="Remove this number">&times;</button></div>');
+    (p.phones || []).forEach(function (ph) {
+      if (phoneTrouble(ph.number)) { badPhone = phoneTrouble(ph.number); }
+      cts.push('<div class="ct">' + esc(ph.number) +
+        (ph.ext ? ' ext ' + esc(ph.ext) : '') + '</div>');
     });
-    var addK = 'email:' + name + ':new';
-    cts.push('<div class="ct">' + field(addK, '', 'Add an address or number', '', true) + '</div>');
     if (p.hideContact) {
       cts.push('<p class="hidden-note"><span class="pill pill--info">Not for publication</span></p>');
     }
 
-    var dupes = (p.emails || []).filter(function (em, i) {
+    var dupes = (p.emails || []).filter(function (em) {
       var lc = (em || '').trim().toLowerCase();
-      return edits['email:' + name + ':' + i] === undefined && (shared[lc] > 1 || inboxOf[lc]);
+      return shared[lc] > 1 || inboxOf[lc];
     });
     dupes.sort(function (a, b) {
       return (inboxOf[b.trim().toLowerCase()] ? 1 : 0) - (inboxOf[a.trim().toLowerCase()] ? 1 : 0);
     });
-    var dupWarn = '';
-    if (dupes.length) {
-      found.shared++;
-      var lc0 = dupes[0].trim().toLowerCase();
-      dupWarn = '<div class="auto auto--warn"><b><span class="bang" aria-hidden="true">!</span>' +
-        (inboxOf[lc0]
-          /* Already declared as a departmental inbox, so this is not a question. */
-          ? 'This is your ' + esc(inboxOf[lc0]) + ' inbox, not ' + esc(possessive(name)) +
-            ' own address.</b> Leave it blank if ' + esc(name) + ' has no individual ' +
-            'address, and we will reach them through the club secretary. We already hold ' +
-            'the inbox itself, so nothing is lost.'
-          : 'Not ' + esc(possessive(name)) + ' own address?</b> ' +
-            word(shared[lc0] - 1) + ' other ' + (shared[lc0] - 1 === 1 ? 'person lists' : 'people list') +
-            ' it too. Leave it blank if ' + esc(name) + ' has no address of their own, and we ' +
-            'will reach them through the club secretary. If it belongs to a whole department, ' +
-            'add it under Departmental inboxes instead.') + '</div>';
-    }
-
-    if (badPhone) { found.phones++; }
-    var phoneWarn = badPhone
-      ? '<div class="auto"><b>Check this telephone number.</b> It has ' + word(badPhone) +
-        ' digits, and a UK number has eleven. We cannot tell which one is missing or ' +
-        'spare, so we have left it exactly as you sent it.</div>'
-      : '';
+    if (dupes.length) { found.shared++; }
 
     return '<li class="pcard">' +
       '<div class="pcard__top"><span class="pcard__name">' + esc(name) + '</span></div>' +
       '<div class="pcard__body"><ul class="roles">' + roles + '</ul>' +
       '<div class="pcard__ct">' + cts.join('') + '</div></div>' +
-      flags.join('') + dupWarn + phoneWarn + '</li>';
+      '</li>';
   }
 
   /* The club's own summary, composed from what the page actually found rather
@@ -620,8 +530,8 @@
     var total = f.titles + f.shared + f.emptyPost + f.emptyList + f.phones +
                 f.placeholders + f.authored;
     if (!total) {
-      return 'Everything came through clearly at your end, so there is nothing for you ' +
-        'to do here beyond a read through. If it all looks right, confirm it at the bottom.';
+      return 'Everything came through clearly at your end, so we have nothing to ask. ' +
+        'Please read it over and tell us if anything is wrong.';
     }
     var bits = [];
     if (f.shared) {
@@ -648,22 +558,15 @@
       bits.push(f.emptyList === 1 ? 'a mailing list with nobody on it'
                                   : 'mailing lists with nobody on them');
     }
-    var lead = 'There ' + (total === 1 ? 'is ' : 'are ') + quantity(total) + ' flagged below';
-    /* Three is as many as reads naturally; the rest are visible on the page. */
-    return lead + (bits.length ? ', in particular ' + joinPhrases(bits.slice(0, 3)) : '') +
-      '. Everything not marked, we believe to be right.';
+    var lead = 'We have ' + quantity(total).replace(/^one thing$/, 'one query') +
+      ' to put to you, and they are in the email that brought you here';
+    return lead + (bits.length ? ', chiefly ' + joinPhrases(bits.slice(0, 3)) : '') +
+      '. Everything else on this page we believe to be right, so do tell us if it isn\u2019t.';
   }
 
   function listNames(a) {
     if (a.length === 1) { return esc(a[0]); }
     return a.slice(0, -1).map(esc).join(', ') + ' and ' + esc(a[a.length - 1]);
-  }
-
-  /* Every rebuild goes through here so the reader never loses their place. */
-  function redraw() {
-    var y = window.scrollY;
-    render();
-    window.scrollTo(0, y);
   }
 
   function num(v) {
@@ -961,29 +864,22 @@
       .filter(function (x) { return (x || '').trim(); }).map(esc).join(', ');
     var cap = (info.capacity || '').trim(), seat = (info.seated || '').trim();
     var capHtml = cap ? num(cap) : '';
-    if (capHtml && seat && !editing.ground) {
+    if (capHtml && seat) {
       capHtml += ' <span class="muted">of which ' + num(seat) + ' seated</span>';
     }
-
-    document.querySelector('[data-block="ground"]').classList.toggle('block--editing', !!editing.ground);
-    document.querySelector('[data-block="contact"]').classList.toggle('block--editing', !!editing.contact);
-    document.querySelector('[data-edit="ground"]').lastChild.textContent = editing.ground ? 'Done' : 'Edit';
-    document.querySelector('[data-edit="contact"]').lastChild.textContent = editing.contact ? 'Done' : 'Edit';
 
     $('ground').innerHTML =
       row('Ground', spons ? '<b>' + esc(spons) + '</b><br><span class="muted">' + esc(ground) + '</span>'
                           : esc(ground), 'info:stadium', 'stadium', ground) +
-      row('Address', addr, 'info:address', 'addr1', info.addr1) +
-      (editing.ground ? row('Postcode', '', null, 'postcode', info.postcode) : '') +
-      row('Capacity', capHtml, 'info:capacity', 'capacity', info.capacity) +
-      (editing.ground ? row('Seated', '', null, 'seated', info.seated) : '') +
+      row('Address', addr) +
+      row('Capacity', capHtml) +
       row('Pitch', [info.pitchDims, info.pitchType].filter(Boolean).map(esc).join(' · '),
         'info:pitch', 'pitchDims', info.pitchDims) +
       row('Nearest station', esc(info.station || '') +
         (info.stationDistance ? ' <span class="muted">' + esc(info.stationDistance) + ' miles</span>' : ''),
         null, 'station', info.station) +
-      row('County FA', esc(info.countyFA || ''), 'info:countyFA', 'countyFA', info.countyFA) +
-      row('Main club sponsor', esc(info.spClub || ''), 'info:spClub', 'spClub', info.spClub);
+      row('County FA', esc(info.countyFA || '')) +
+      row('Main club sponsor', esc(info.spClub || ''));
 
     /* ---- contacting ---- */
     var SOC = [['x', 'X'], ['facebook', 'Facebook'], ['instagram', 'Instagram'],
@@ -996,13 +892,13 @@
     var site = (info.website || '').replace(/^https?:\/\//, '');
 
     $('contact').innerHTML =
-      row('Switchboard', esc(info.phone || ''), 'info:phone', 'phone', info.phone) +
+      row('Switchboard', esc(info.phone || '')) +
       row('Main email', info.mainEmail
         ? '<a href="mailto:' + esc(info.mainEmail) + '">' + esc(info.mainEmail) + '</a>' : '',
         'info:mainEmail', 'mainEmail', info.mainEmail) +
       row('Website', site ? '<a href="https://' + esc(site) + '">' + esc(site) + '</a>' : '',
         null, 'website', info.website) +
-      row('Social', soc, 'info:social');
+      row('Social', soc);
 
     /* Findings are tallied as the page renders and read by summarise() at the
        end, so the note can only ever describe what is actually on the page.
@@ -1015,48 +911,19 @@
     names.sort(function (a, b) { return a.localeCompare(b); });
     LISTS.forEach(function (L) {
       if (listPicks[L.k]) { return; }
-      listPicks[L.k] = (answers['list:' + L.k] ||
-        ((sub.leads || {})[L.k] || []).map(function (n) { return (n.name || '').trim(); })
-      ).filter(Boolean);
+      listPicks[L.k] = ((sub.leads || {})[L.k] || [])
+        .map(function (n) { return (n.name || '').trim(); }).filter(Boolean);
     });
 
     $('lists').innerHTML = LISTS.map(function (L) {
-      var picks = listPicks[L.k] || [];
-      var rows = picks.map(function (n, i) {
-        return '<div class="rcpt__row">' + nameSelect(L.k, i, n, names) +
-          '<button class="rcpt__drop" type="button" data-drop="' + L.k + '" data-i="' + i +
-          '" aria-label="Remove ' + esc(n || 'recipient') + ' from ' + esc(L.label) + '">&times;</button></div>';
-      }).join('');
-      /* Raised from the data, not authored , an empty list can never be missed
-         for a club because nobody remembered to write a flag for it. */
-      var auto = '';
-      if (!picks.length) {
-        found[L.post ? 'emptyPost' : 'emptyList']++;
-        auto = L.post
-          ? '<div class="auto"><b>We need a named ' + esc(L.label.toLowerCase()) + '.</b> ' +
-            'This can be someone already listed here who covers it alongside their own ' +
-            'role, it does not have to be anyone new.</div>'
-          : '<div class="auto"><b>Add someone to this list.</b> ' +
-            'We have nobody to write to about ' + esc(L.label.toLowerCase()) + '.</div>';
-      }
+      var picks = (listPicks[L.k] || []).filter(Boolean);
+      if (!picks.length) { found[L.post ? 'emptyPost' : 'emptyList']++; }
       return '<div class="row"><dt>' + esc(L.label) +
         (L.post ? '<span class="post-tag">Named individual</span>' : '') +
-        '</dt><dd><div class="rcpt">' + rows +
-        '<button class="rcpt__add" type="button" data-add="' + L.k + '">' +
-        (picks.length ? '+ Add another' : '+ Add someone') + '</button></div>' +
-        auto + flagFor('list:' + L.k) + '</dd></div>';
+        '</dt><dd>' + (picks.length ? picks.map(esc).join(' &middot; ')
+          : '<span class="' + (L.post ? 'empty--post' : 'empty') + '">Nobody nominated</span>') +
+        '</dd></div>';
     }).join('');
-
-    /* An address on more than one person is almost always a departmental inbox
-       standing in for someone's own, which is what stops us reaching individuals.
-       Raised from the data so it cannot be missed. */
-    var emailCount = {};
-    people.forEach(function (p) {
-      (p.emails || []).forEach(function (em) {
-        em = (em || '').trim().toLowerCase();
-        if (em) { emailCount[em] = (emailCount[em] || 0) + 1; }
-      });
-    });
 
     /* An address declared as a departmental inbox and also sitting on a person
        is not that person's address, and we can say so rather than ask. 64 of
@@ -1071,25 +938,24 @@
       'Programme', 'Finance', 'Community', 'Safeguarding & welfare', 'Matchday & safety',
       'Medical', 'Team operations', 'Executive'];
     var have = Object.keys(sub.inboxes || {});
-    $('inboxes').innerHTML = (have.length
+    $('inboxes').innerHTML = have.length
       ? have.map(function (k) {
-          var b = sub.inboxes[k] || {};
-          return '<div class="row"><dt>' + esc(b.dept || k) + '</dt><dd>' +
-            '<div class="ct">' + field('inbox:' + k + ':email', b.email, 'Email address') +
-            '<button class="rm" type="button" data-blank="inbox:' + esc(k) + ':email" ' +
-            'aria-label="Remove this inbox">&times;</button></div>' +
-            '<div class="ct">' + field('inbox:' + k + ':phone', b.phone, 'Phone number (optional)', '', true) +
-            '</div></dd></div>';
+          var bx = sub.inboxes[k] || {};
+          return row(bx.dept || k, (bx.email ? '<a href="mailto:' + esc(bx.email) + '">' +
+            esc(bx.email) + '</a>' : '') +
+            (bx.phone ? '<div class="muted">' + esc(bx.phone) + '</div>' : ''));
         }).join('')
-      : '<p class="empty" style="margin:0 0 12px;">None held. Add any you use below.</p>') +
-      '<div class="row"><dt>Add an inbox</dt><dd><div class="ct">' +
-      '<select class="inl" id="newInboxDept" aria-label="Department for the new inbox">' +
-      '<option value="">Choose a department</option>' +
-      INBOX_DEPTS.filter(function (d) {
-        return !have.some(function (k) { return (sub.inboxes[k] || {}).dept === d; });
-      }).map(function (d) { return '<option>' + esc(d) + '</option>'; }).join('') +
-      '</select></div><div class="ct">' +
-      field('inbox:new:email', '', 'Email address', '', true) + '</div></dd></div>';
+      : '<p class="empty" style="margin:0;">None held.</p>';
+
+    /* An address on more than one person is almost always a departmental inbox
+       standing in for someone's own, which is what stops us reaching individuals. */
+    var emailCount = {};
+    (sub.people || []).forEach(function (p) {
+      (p.emails || []).forEach(function (em) {
+        em = (em || '').trim().toLowerCase();
+        if (em) { emailCount[em] = (emailCount[em] || 0) + 1; }
+      });
+    });
 
     /* ---- people, by department ---- */
     var bySec = {};
@@ -1112,9 +978,8 @@
     });
 
     $('sections').innerHTML = '<section class="block"><h2>People</h2>' +
-      '<p class="block__lede">Everyone you sent us, with the roles they hold. ' +
-      'Type over anything that is wrong. Where we have no job title, tell us what ' +
-      'to show, or remove the role if they do not hold it.</p><ul class="people">' +
+      '<p class="block__lede">Everyone you sent us, with the roles they hold.</p>' +
+      '<ul class="people">' +
       seq.map(function (p) { return personCard(p, emailCount, inboxOf); }).join('') +
       '</ul></section>';
 
@@ -1124,103 +989,10 @@
 
     $('noteBespoke').innerHTML = summarise(found) + (cfg.note ? ' ' + cfg.note : '');
 
-    var n = Object.keys(edits).length + Object.keys(answers).length;
-    $('changebar').hidden = n === 0;
-    $('changeN').textContent = n;
-    $('changeWord').textContent = n === 1 ? 'change' : 'changes';
-
     $('gate').style.display = 'none';
     $('app').style.display = '';
-    if (!wired) { wire(); wired = true; }
   }
 
-  /* ------------------------------------------------------------ input */
-  function wire() {
-    $('app').addEventListener('input', function (ev) {
-      var t = ev.target;
-      if (t.hasAttribute && t.hasAttribute('data-answer')) {
-        answers[t.getAttribute('data-answer')] = t.value;
-      }
-      if (t.hasAttribute && t.hasAttribute('data-field')) {
-        edits[t.getAttribute('data-field')] = t.value;
-        t.classList.add('inl--changed');
-        $('noteBespoke').innerHTML = summarise(found) + (cfg.note ? ' ' + cfg.note : '');
-
-    var n = Object.keys(edits).length + Object.keys(answers).length;
-        $('changebar').hidden = false;
-        $('changeN').textContent = n;
-        $('changeWord').textContent = n === 1 ? 'change' : 'changes';
-      }
-    });
-    $('app').addEventListener('change', function (ev) {
-      var t = ev.target;
-      if (t.tagName !== 'SELECT' || !t.hasAttribute('data-list')) { return; }
-      var k = t.getAttribute('data-list'), slot = +t.getAttribute('data-slot');
-      var picks = listPicks[k] || [];
-      picks[slot] = t.value;
-      listPicks[k] = picks;
-      answers['list:' + k] = picks.filter(Boolean);
-    });
-    $('app').addEventListener('click', function (ev) {
-      if (!ev.target.closest) { return; }
-      var b = ev.target.closest('[data-edit]');
-      if (!b && !ev.target.closest('[data-add]') && !ev.target.closest('[data-drop]') &&
-          !ev.target.closest('[data-rm]') && !ev.target.closest('[data-blank]')) { return; }
-      var add = ev.target.closest('[data-add]');
-      if (add) {
-        var ak = add.getAttribute('data-add');
-        listPicks[ak] = (listPicks[ak] || []).concat('');
-        redraw();
-        return;
-      }
-      var drop = ev.target.closest('[data-drop]');
-      if (drop) {
-        var dk = drop.getAttribute('data-drop');
-        listPicks[dk].splice(+drop.getAttribute('data-i'), 1);
-        answers['list:' + dk] = listPicks[dk];
-        redraw();
-        return;
-      }
-      var rm = ev.target.closest('[data-rm]');
-      if (rm) { edits[rm.getAttribute('data-rm')] = true; return redraw(); }
-      var bl = ev.target.closest('[data-blank]');
-      if (bl) { edits[bl.getAttribute('data-blank')] = ''; return redraw(); }
-      var which = b.getAttribute('data-edit');
-      editing[which] = !editing[which];
-      redraw();
-    });
-    $('resetAll').addEventListener('click', function () {
-      NL.confirm('Undo every change you have made and go back to what you sent us?',
-        { title: 'Reset everything', confirmText: 'Reset', variant: 'danger' }).then(function (ok) {
-        if (!ok) { return; }
-        edits = {}; answers = {}; listPicks = {};
-        window.scrollTo(0, 0);
-        render();
-      });
-    });
-    $('confirmBtn').addEventListener('click', function () { save('confirmed'); });
-    $('changeBtn').addEventListener('click', function () { save('changes'); });
-  }
-
-  function save(status) {
-    var btns = [$('confirmBtn'), $('changeBtn')];
-    btns.forEach(function (b) { b.disabled = true; });
-    db.ref('app-data/ops-club-signoff/responses/' + token).set({
-      club: club,
-      status: status,
-      answers: answers,
-      edits: edits,
-      respondedAt: firebase.database.ServerValue.TIMESTAMP
-    }).then(function () {
-      $('finishMsg').textContent = status === 'confirmed'
-        ? 'Thank you , your entry is confirmed. We’ll be in touch if anything else comes up.'
-        : 'Thank you , we’ve got your notes and we’ll come back to you.';
-    }).catch(function (err) {
-      btns.forEach(function (b) { b.disabled = false; });
-      $('finishMsg').textContent = 'Sorry, that didn’t save. Please try again, or reply to the email we sent.';
-      console.error('[club-signoff]', err);
-    });
-  }
 })();
 </script>
 </body>
