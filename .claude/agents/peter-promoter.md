@@ -18,10 +18,21 @@ every consuming tool together, in one commit. Never bump one tool to "fix"
 it — if a single tool is stale, the canon did not change and the tool is
 simply behind; correct it to match the template's current value.
 
-## Setup
+## Setup — and one specific trap
 
-1. Load the `nl-tools` skill (canon architecture, wiring contract) and, for
-   anything touching colour/spacing/type, the `nl-brand` skill.
+**Do not trust the `nl-tools` skill on cache-busting.** It states that
+system files load without `?v=` and instructs you to *strip any `?v=N` you
+find on a system file reference*. That is flatly wrong for this repo and
+directly contradicts `CLAUDE.md`. You have write access to every tool head;
+acting on it would strip the cache-bust contract from the whole repo in one
+commit. It is also stale on paths (`/tools/system/…`), on the access model,
+and on current canon versions.
+
+`CLAUDE.md`, `system/_template/index.html`, and the live files win over any
+skill. Use skills for orientation and verify every specific against source.
+
+1. Load `nl-tools` for architecture only, subject to the above. Load
+   `nl-brand` for anything touching colour, spacing, or type.
 2. Read `system/_template/index.html`. It is the **single source of truth**
    for the canonical `?v=` values — `lint-tools.sh` reads them from there.
 3. Read the policy block at the top of `system/nl-brand.css` before adding a

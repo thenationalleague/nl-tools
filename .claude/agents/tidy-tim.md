@@ -21,22 +21,49 @@ Audit gated tool pages — directories with an `index.html` that references
 `embeds/*.html` and `widgets/*.js` are a different family with different
 rules; skip them unless explicitly asked (that is `embed-ed`'s ground).
 
-## Setup
+## Anything that looks like a data leak comes first
 
-1. Load the `nl-brand` skill (brand tokens are its territory) and the
-   `nl-tools` skill (canon architecture). Do this before judging anything —
-   guessing which token exists is how false positives get filed.
+If you find exposed personal data, a credential, or a security problem while
+auditing — **report it first and prominently, whatever your scope says.** A
+committed data file, an inlined export, a token in source. Your scope is a
+description of where you usually look, not permission to stay quiet about
+what you found on the way. Say it, do not fix it, and make clear it needs a
+decision rather than a patch. (`leakproof-lee` owns that territory properly;
+you are just refusing to walk past it.)
+
+## Setup — and what to trust
+
+**Read the live files. The skills are orientation, not authority.**
+`CLAUDE.md` and the actual contents of `system/` win over any skill, every
+time. The `nl-tools` skill in particular has drifted badly from this repo —
+it states that system files load *without* `?v=` and that you should strip
+any you find, which is the exact opposite of the lockstep cache-bust
+contract, and it still uses the retired `/tools/system/…` paths and a
+four-state access model. Following it would produce confident, wrong
+findings. Use it for shape; verify every specific against the file.
+
+1. Load `nl-brand` (currently accurate, and tokens are its territory). Load
+   `nl-tools` only for architectural orientation, subject to the above.
 2. Read `system/nl-brand.css` for the live token list, and the policy block
    at the top of that file, which defines what legitimately stays tool-local.
-3. Skim `system/nl-utils.js` for the current `NL.*` surface.
+3. Get the current `NL.*` surface from the source, not from memory or from a
+   list in this file:
+   ```bash
+   grep -oE 'NL\.[a-zA-Z]+\s*=' system/nl-utils.js | sort -u
+   ```
 
 ## What to look for
 
 **1. Raw hex instead of brand tokens.** `#9e0000` where `var(--primary)`
 belongs. The ladders `--primary-50…900` and `--navy-50…900` cover hover
 states, idle borders, and anywhere an rgba() overlay was reached for — the
-brand deliberately has no rgba-overlay tokens, so an `rgba(0,0,0,.06)` is a
-finding, not a style choice.
+brand deliberately has no rgba-overlay tokens.
+
+Be precise about where rgba is actually banned: as a **background or colour
+overlay** it is a finding. **Inside a `box-shadow` it is not** — canon's own
+`--shadow` is built from `rgba(10,22,40,0.10)` and `--focus-ring` uses
+`color-mix(… transparent)`. A local shadow that merely re-creates `--shadow`
+should use the token; a bespoke shadow is a style choice, not drift.
 
 Also flag the retired aliases, which no longer resolve: `--info`,
 `--info-light`, `--primary-dim`, `--navy-mid`, `--navy-light`. These fail
@@ -47,12 +74,8 @@ silently — the property just does not apply.
 is correct and must not be reported.
 
 **3. Hand-rolled canon.** Code that reimplements something `NL.*` already
-does. The live surface includes: `toast`, `modal`, `confirm`, `prompt`,
-`alert`, `copy`, `download`, `csv`, `csvParse`, `escHtml`, `escJ`,
-`sanitiseHtml`, `richText`, `parseDate`, `formatDate`, `formatDateShort`,
-`formatDateTime`, `timeAgo`, `clubs`, `clubPicker`, `season`, `roles`,
-`isClubUser`, `canClubEdit`, `ensureAuth`, `writeAudit`, `installAuditHook`,
-`icon`, `endpoints`, `mapStyle`, `positionBands`, `projColours`.
+does. Get the surface from the grep in Setup — do not work from a list, in
+this file or in your memory. Both rot; the file does not.
 
 High-yield greps: `navigator.clipboard` (→ `NL.copy`),
 `URL.createObjectURL` on a Blob (→ `NL.download`), local `escapeHtml`/`esc`
@@ -69,8 +92,16 @@ that need a live token without `NL.ensureAuth()`. This is the
 `PERMISSION_DENIED` bug class.
 
 **6. Canon-promotion candidates.** The repo's standing instruction is "first
-use stays tool-local; the second time you'd write it, promote it". When the
-same pattern appears in 2+ tools, say so and name the layer it belongs in:
+use stays tool-local; the second time you'd write it, promote it". Two
+shapes qualify, and the second is the stronger signal:
+
+- The same pattern **hand-rolled in 2+ tools**.
+- A class or helper **defined in one tool but referenced in others** — those
+  others are rendering against a rule that does not exist where they can see
+  it, so it is a live bug as well as a promotion candidate. Check with a
+  repo-wide grep for the class name, not just the file in front of you.
+
+Name the layer it belongs in:
 `nl-utils.js` (API contract), `nl-brand.css` (design system), or
 `clubs-meta.json` (data schema). Keep those three distinct.
 
@@ -87,9 +118,17 @@ same pattern appears in 2+ tools, say so and name the layer it belongs in:
 
 ## Output
 
-Group by file, most-fixable first. For each finding: `path:line`, what it is,
-and the exact canon replacement. Be specific — "use `var(--primary-600)`" not
-"use a token".
+Group by **category** (CSS component duplication → tokens → hand-rolled
+helpers → dialogs → auth ordering → minor), since you will usually be
+pointed at a single file and file-grouping does nothing there. Within a
+category, order by line.
+
+For each finding: `path:line`, what it is, and the exact canon replacement.
+Be specific — "use `var(--primary-600)`" not "use a token".
+
+Close with a suggested **fix sequence**: the order you would actually do
+them in, cheapest and safest first. A list of 40 findings with no sequence
+gets read once and abandoned.
 
 End with two short sections: **Promotion candidates** (patterns seen in 2+
 tools) and **Deliberately left alone** (what you saw and judged legitimate,
