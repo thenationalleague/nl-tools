@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Club Directory — The National League</title>
+<!--
+  club-directory / reader / index.html
+  v1.0 — (04/08/2026) The directory, read-only, behind a shared six-digit code.
+
+  What this is
+  ------------
+  The replacement for the printed handbook's club pages. Anyone the League
+  gives the code to can read every club; nobody can change anything.
+
+  Why a code and not auth-guard
+  -----------------------------
+  The people who need this mostly have no portal account, and issuing 300
+  accounts to solve a reading problem is the wrong trade. The code is a real
+  boundary, not a screen: it is checked server-side by functions/club-directory
+  .js and exchanged for a token the RTDB rules enforce, so this page cannot
+  read a single record until that has happened. See _gate.js.
+
+  It is noindex because the directory carries people's work contact details.
+  That is a curtain rather than a door, and the code is the door.
+
+  Not lint-covered: no auth-guard, by design.
+-->
+<link rel="stylesheet" href="/system/nl-brand.css?v=31">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=1">
+
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="/system/nl-utils.js?v=29"></script>
+<script src="/club-directory/_gate.js?v=1"></script>
+<script src="/club-directory/_directory.js?v=1"></script>
+<script>
+  firebase.initializeApp({
+    apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+    authDomain:        "nl-tools.firebaseapp.com",
+    databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId:         "nl-tools",
+    storageBucket:     "nl-tools.firebasestorage.app",
+    messagingSenderId: "801354670005",
+    appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+  });
+</script>
+<style>
+  .rd-top {
+    position: sticky; top: 0; z-index: 50; background: var(--primary); color: var(--white);
+    padding: 11px clamp(14px, 3vw, 28px);
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  .rd-top__t {
+    font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-wide);
+    font-weight: 800; font-variation-settings: 'wght' 800;
+  }
+  .rd-pick {
+    font-family: var(--font); font-size: var(--text-sm);
+    font-weight: 600; font-variation-settings: 'wght' 600;
+    padding: 6px 10px; border: 0; border-radius: var(--radius);
+    background: var(--white); color: var(--text); max-width: 260px;
+  }
+  /* The search bar clears the sticky bar above it rather than the 72px topbar
+     this page does not have. */
+  .cd-search { top: 46px; }
+  .rd-hits { margin: 0 0 30px; }
+  .rd-hit__club {
+    font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-tight);
+    font-weight: 700; font-variation-settings: 'wght' 700; color: var(--primary);
+  }
+  @media (max-width: 560px) { .cd-search { top: 0; position: static; } }
+</style>
+</head>
+<body>
+
+<div id="gateWrap"></div>
+
+<div id="app" hidden>
+  <div class="rd-top">
+    <span class="rd-top__t">Club Directory</span>
+    <select class="rd-pick" id="pick" aria-label="Choose a club"></select>
+  </div>
+  <div class="cd-wrap">
+    <div class="cd-search"><div class="cd-search__box">
+      <svg class="cd-search__icon" width="17" height="17" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
+      <input class="cd-search__in" id="q" placeholder="Search clubs, people and job titles"
+        aria-label="Search">
+    </div></div>
+    <div id="out"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = NL.escHtml;
+  var ALL = {}, names = [];
+
+  NLGate.open({
+    title: 'Club Directory',
+    sub: 'Enter the six-digit code from the National League.',
+    mount: $('gateWrap')
+  }).then(function () {
+    $('gateWrap').hidden = true;
+    return Promise.all([
+      NL.clubs.load(),
+      firebase.database().ref(NLGate.ROOT + '/clubs').once('value')
+    ]);
+  }).then(function (res) {
+    ALL = res[1].val() || {};
+    names = Object.keys(ALL).sort();
+    if (!names.length) {
+      $('out').innerHTML = '<p class="cd-empty">The directory has not been built yet.</p>';
+      $('app').hidden = false;
+      return;
+    }
+    $('pick').innerHTML = names.map(function (n) {
+      return '<option value="' + esc(n) + '">' + esc(n) + '</option>';
+    }).join('');
+    $('pick').addEventListener('change', function () { draw(this.value); });
+    $('q').addEventListener('input', onSearch);
+    $('app').hidden = false;
+    draw(fromHash() || names[0]);
+    window.addEventListener('hashchange', function () {
+      var n = fromHash();
+      if (n) { $('pick').value = n; draw(n); }
+    });
+  }).catch(function (err) {
+    $('out').innerHTML = '<p class="cd-empty">' + esc((err && err.message) || String(err)) + '</p>';
+    $('app').hidden = false;
+  });
+
+  /* A club per URL, so a link to one club is a link to that club. */
+  function fromHash() {
+    var h = decodeURIComponent((location.hash || '').replace(/^#/, ''));
+    return names.indexOf(h) > -1 ? h : '';
+  }
+
+  function draw(name) {
+    var rec = ALL[name];
+    if (!rec) { return; }
+    rec.club = rec.club || name;
+    if (location.hash !== '#' + encodeURIComponent(name)) {
+      history.replaceState(null, '', '#' + encodeURIComponent(name));
+    }
+    $('out').innerHTML = NLDirectory.renderClub(rec, {});
+    var crest = document.getElementById('cdCrest');
+    if (crest) {
+      crest.alt = name + ' crest';
+      crest.hidden = false;
+      NL.clubs.wireCrestImg(crest, name, true);
+      crest.src = NL.clubs.crestUrl(name, 'medium');
+    }
+  }
+
+  function onSearch(e) {
+    var hits = NLDirectory.search(ALL, e.target.value);
+    if (!hits) { draw($('pick').value); return; }
+    if (!hits.length) {
+      $('out').innerHTML = '<p class="cd-empty">Nothing matched that.</p>';
+      return;
+    }
+    /* Grouped by club, because "which club is this person at" is half of what
+       anyone types into this box. */
+    var byClub = {};
+    hits.forEach(function (h) { (byClub[h.club] = byClub[h.club] || []).push(h.person); });
+    $('out').innerHTML = '<div class="rd-hits">' + Object.keys(byClub).sort().map(function (c) {
+      return '<div class="cd-dept"><h3 class="cd-dept__h">' + esc(c) + '</h3><ul class="cd-rows">' +
+        byClub[c].map(function (p) {
+          var sec = ((p.roles || [])[0] || {}).section;
+          return NLDirectory.personRow(p, sec, {});
+        }).join('') + '</ul></div>';
+    }).join('') + '</div>';
+  }
+}());
+</script>
+</body>
+</html>
