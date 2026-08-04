@@ -1,10 +1,20 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixtures
-  Version: v0.16 (30/07/2026)
+  Version: v0.17 (31/07/2026)
   File: /fixtures/index.html
 
   CHANGELOG
+    v0.17 (31/07/2026) — The seeded date is canon: a fixture sits at its
+      original slot with every recorded change applied in order. So a
+      rearrangement can be CORRECTED (a mistyped 19:45 is a typo, not a
+      second move) and removing one puts the fixture back where it would
+      have been. Before this the only way to undo a typo was to rearrange
+      again, which inflated the very wait-time figures the tool exists to
+      produce. Bulk delete demoted from a red button in the toolbar to a
+      link under the table. Clear now appears for text typed into the club
+      search that was never turned into a selection — it looked like an
+      active filter, could not be cleared, and followed you between tabs.
     v0.16 (30/07/2026) — One line per move in Rearrangements, each date
       PAIRED with the reason it came off that date, kick-offs in 12-hour
       form. Replaces the arrow chain and the deduplicated reason list,
@@ -156,6 +166,16 @@
     var NL_TOOL_KEY = 'ops-fixtures';
 
     window.NL_CHANGELOG = [
+      {
+        date: '31/07/2026',
+        version: 'v0.17',
+        items: [
+          'A rearrangement can now be corrected. Open the fixture, hover the history entry, edit — the date and kick-off are there alongside the reason. Typing 19:45 when you meant 15:00 is a typo, not a second move, and correcting it moves the fixture rather than recording another change.',
+          'Removing a history entry puts the fixture back where it would have been had that change never happened. Remove the only change and it returns to its original date.',
+          'Delete is no longer a red button beside the everyday filters. It sits under the table as a link, reading "552 fixtures … Delete these", and still asks you to type the count.',
+          'Clear now shows up for a club name typed into the search box but never picked from the list — it filtered nothing, could not be cleared, and stayed put when you switched tabs.'
+        ]
+      },
       {
         date: '30/07/2026',
         version: 'v0.16',
@@ -493,7 +513,19 @@
      is a sensible width for the picker inside the strip. */
   .toolbar .club-picker { min-width: 210px; }
 
-  .fx-tally { font-size: 12px; color: var(--text-muted); margin: 10px 2px 0; }
+  /* A word you can click rather than a button — used for the Opta ID in the
+     detail dialog and for the bulk delete under the table. A .btn--link canon
+     candidate; flagged rather than promoted while it is still two callers. */
+  .fx-link { border: none; background: none; color: var(--navy); font-family: var(--font);
+             font-size: 12px; font-variation-settings: 'wght' 800; cursor: pointer;
+             text-decoration: underline; padding: 0 2px; }
+  .fx-danger-link { color: var(--primary); margin-left: auto; }
+
+  .fx-tally { font-size: 12px; color: var(--text-muted); margin: 0; }
+  /* Under the table beside the count, not in the toolbar. It reads as "these
+     1,656 — delete them", which is what it does, and it is no longer a red
+     button sitting next to the everyday filters waiting to be misclicked. */
+  .fx-foot { display: flex; align-items: baseline; gap: 14px; margin: 10px 2px 0; }
 
   /* Rearrangements pane */
   .fx-mv-head { font-size: 11.5px; font-variation-settings: 'wght' 800; letter-spacing: .05em;
@@ -556,9 +588,6 @@
   .fx-ref dd { margin: 0; font-variant-numeric: tabular-nums; }
   .fx-await { color: var(--amber); font-variation-settings: 'wght' 800; }
   .fx-none { color: var(--text-muted); font-style: italic; }
-  .fx-link { border: none; background: none; color: var(--navy); font-family: var(--font);
-             font-size: 12px; font-variation-settings: 'wght' 800; cursor: pointer;
-             text-decoration: underline; padding: 0 2px; }
 
   /* Score entry */
   .fx-score { display: flex; align-items: flex-end; gap: 12px; justify-content: center; margin: 4px 0 2px; }
@@ -663,7 +692,6 @@
         </div>
         <div class="toolbar__right">
           <button type="button" class="btn btn--ghost btn--sm" id="fxClear" hidden>Clear</button>
-          <button type="button" class="btn btn--danger btn--sm" id="fxBulk">Delete shown&hellip;</button>
         </div>
       </div>
 
@@ -691,7 +719,10 @@
         </div>
         <div class="loading-row" id="fxLoading">Loading fixtures…</div>
       </div>
-      <p class="fx-tally" id="fxTally"></p>
+      <div class="fx-foot">
+        <p class="fx-tally" id="fxTally"></p>
+        <button type="button" class="fx-link fx-danger-link" id="fxBulk">Delete these&hellip;</button>
+      </div>
     </div>
 
     <div id="fxPaneMoves" hidden></div>
@@ -929,6 +960,10 @@
       : all();
   }
   function focusClub() { return S.isClub ? S.club : S.club1; }
+  function pickerText() {
+    var i = document.querySelector('#fxClubPicker input');
+    return i ? i.value.trim() : '';
+  }
 
   function filtered() {
     var c = focusClub();
@@ -1022,7 +1057,11 @@
        competition band — neither control has anything left to offer. */
     $('fxClubPicker').hidden = S.isClub;
     $('fxCompPills').hidden = S.isClub;
-    $('fxClear').hidden = !(S.club1 || S.md || S.why || S.venue !== 'all' ||
+    /* Text typed into the club search that was never turned into a selection
+       still LOOKS like an active filter, and left the Clear button hidden —
+       so there was no way to get rid of it, and it followed you between
+       tabs. Treat a non-empty box as something to clear. */
+    $('fxClear').hidden = !(S.club1 || S.md || S.why || pickerText() || S.venue !== 'all' ||
       COMPS.some(function (c) { return !S.comps[c]; }));
 
     /* The rearrangements list obeys the same filters as the fixture list —
@@ -1497,6 +1536,45 @@
      where the entry should never have existed at all. It is a genuine loss,
      so it is confirmed separately and says what it costs: the wait-time
      figures are computed from these entries. */
+  /* The seeded date is canon: the fixture's current slot is its ORIGINAL slot
+     with every recorded change applied in order. So correcting a change
+     corrects where the fixture ends up, and removing one puts it back where
+     it would have been had that change never happened — rather than leaving
+     the fixture stranded on a date nothing in its history accounts for.
+
+     Before this, a mistyped 19:45 could only be undone by rearranging AGAIN,
+     which recorded a second move that never really happened and inflated the
+     very wait-time figures the tool exists to produce.
+
+     CAVEAT: a re-import that changes a date does not write a history entry,
+     so recomputing after an edit will fall back to the seeded date rather
+     than the sheet's. Only relevant if a sheet is re-pasted with new dates
+     AND the history is then edited. */
+  function applyHistory(f, list) {
+    var out = { date: f.originalDate || f.date,
+                kickoff: f.originalKickoff || f.kickoff,
+                status: 'scheduled' };
+    list.forEach(function (e) {
+      if (e.type === 'postponed') { out.status = 'postponed'; }
+      else if (e.type === 'rescheduled' && e.to) {
+        out.date = dateOnly(e.to);
+        out.kickoff = e.to.slice(11) || out.kickoff;
+        out.status = 'rearranged';
+      } else if (e.type === 'corrected') { out.status = 'scheduled'; }
+    });
+    return out;
+  }
+
+  /* Write the recomputed slot back onto the fixture, leaving the result
+     alone — a score belongs to the game, not to where it was scheduled. */
+  function reapply(f, list) {
+    var a = applyHistory(f, list);
+    var moved = f.date !== a.date || f.kickoff !== a.kickoff || f.status !== a.status;
+    f.date = a.date; f.kickoff = a.kickoff;
+    if (f.homeScore == null) f.status = a.status;
+    return moved;
+  }
+
   function editHistory(f, idx) {
     var list = histOf(f.recordID).slice();
     var e = list[idx];
@@ -1515,6 +1593,13 @@
           return '<option value="' + esc(r.code) + '"' +
             (r.code === e.reasonCode ? ' selected' : '') + '>' + esc(r.label) + '</option>';
         }).join('') + '</select></div>' +
+        (e.type === 'rescheduled' && e.to
+          ? '<div class="form-group"><label>Moved to</label>' +
+            '<div class="datetime-row"><input type="date" id="fxHto" value="' + esc(toISO(dateOnly(e.to))) + '">' +
+            '<input type="time" id="fxHtoT" value="' + esc(e.to.slice(11) || f.kickoff) + '"></div>' +
+            '<p class="form-hint">Correcting this corrects the fixture. A mistyped kick-off is a typo, ' +
+            'not a second rearrangement.</p></div>'
+          : '') +
         (e.effectiveAt
           ? '<div class="form-group"><label for="fxHeff">Decided on</label>' +
             '<input type="date" id="fxHeff" value="' + esc(toISO(e.effectiveAt.slice(0, 10))) + '">' +
@@ -1530,7 +1615,10 @@
             var code = ctrl.body.querySelector('#fxHrsn').value || null;
             var effEl = ctrl.body.querySelector('#fxHeff');
             var eff = effEl && effEl.value ? fromISO(effEl.value) + (e.effectiveAt.slice(10) || '') : e.effectiveAt;
-            if (code === e.reasonCode && eff === e.effectiveAt) { c.close(); return; }
+            var toEl = ctrl.body.querySelector('#fxHto'), toT = ctrl.body.querySelector('#fxHtoT');
+            var to = (toEl && toEl.value)
+              ? fromISO(toEl.value) + ' ' + (toT ? toT.value : '') : e.to;
+            if (code === e.reasonCode && eff === e.effectiveAt && to === e.to) { c.close(); return; }
             var next = {};
             Object.keys(e).forEach(function (k) { next[k] = e[k]; });
             if (code !== e.reasonCode) {
@@ -1540,14 +1628,20 @@
               next.reasonCode = code;
             }
             next.effectiveAt = eff;
+            next.to = to;
             next.amendedAt = stamp();
             next.amendedBy = (S.session && S.session.uid) || null;
             list[idx] = next;
             S.history[f.recordID] = list;
-            firebase.database().ref(seasonPath('history') + '/' + f.recordID).set(list)
+            var moved = reapply(f, list);
+            Promise.all([
+              firebase.database().ref(seasonPath('history') + '/' + f.recordID).set(list),
+              moved ? saveFixture(f) : Promise.resolve()
+            ])
               .then(function () {
                 NL.writeAudit('fixture_history_amended', { recordID: f.recordID, entry: idx + 1, reason: code });
-                c.close(); render(); NL.toast('Entry corrected', 'success');
+                c.close(); render();
+                NL.toast(moved ? 'Corrected \u2014 now ' + whenText(f.date, f.kickoff) : 'Entry corrected', 'success');
               })
               .catch(function (err) { NL.toast('Could not save \u2014 ' + ((err && err.message) || err), 'error'); });
           } }
@@ -1561,17 +1655,23 @@
     if (!e) return;
     NL.confirm(f.home + ' v ' + f.away, {
       title: 'Remove this history entry?',
-      detail: 'The entry goes for good, and the waiting-time figures are worked out from these entries, so they will change. ' +
-        'The fixture itself and its current date are not affected.',
+      detail: 'The fixture goes back to where it would be had this never happened' +
+        (list.length === 1 ? ', which is its original date' : '') +
+        '. The waiting-time figures are worked out from these entries, so they will change too.',
       confirmText: 'Remove', variant: 'danger'
     }).then(function (ok) {
       if (!ok) return;
       list.splice(idx, 1);
       S.history[f.recordID] = list;
+      var moved = reapply(f, list);
       var ref = firebase.database().ref(seasonPath('history') + '/' + f.recordID);
-      (list.length ? ref.set(list) : ref.remove()).then(function () {
+      Promise.all([
+        list.length ? ref.set(list) : ref.remove(),
+        moved ? saveFixture(f) : Promise.resolve()
+      ]).then(function () {
         NL.writeAudit('fixture_history_removed', { recordID: f.recordID, entry: idx + 1, type: e.type });
-        render(); NL.toast('Entry removed', 'success');
+        render();
+        NL.toast(moved ? 'Removed \u2014 back to ' + whenText(f.date, f.kickoff) : 'Entry removed', 'success');
       }).catch(function (err) { NL.toast('Could not save \u2014 ' + ((err && err.message) || err), 'error'); });
     });
   }
@@ -2534,6 +2634,11 @@
     var md = $('fxMd');
     for (var i = 1; i <= 46; i++) md.insertAdjacentHTML('beforeend', '<option value="' + i + '">MD ' + i + '</option>');
     md.addEventListener('change', function () { S.md = md.value; render(); });
+    /* Typing alone should reveal Clear; without this the button only appears
+       once a club has actually been picked. */
+    $('fxClubPicker').addEventListener('input', function () {
+      $('fxClear').hidden = false;
+    });
     $('fxWhy').addEventListener('change', function () { S.why = this.value; render(); });
 
     if (!S.isClub) {
@@ -2552,6 +2657,8 @@
         ch.classList.toggle('active', ch.getAttribute('data-fxvenue') === 'all');
       });
       if (S.picker) S.picker.clear();
+      var pi = document.querySelector('#fxClubPicker input');
+      if (pi) pi.value = '';
       render();
     });
 
