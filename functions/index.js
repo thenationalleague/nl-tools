@@ -131,6 +131,10 @@ Object.assign(exports, require("./account"));
 // `firebase deploy --only functions` picks them up. See functions/programme.js.
 Object.assign(exports, require("./programme"));
 
+// Club Directory passcode → scoped-claim trigger (clubDirectoryAuth). Same
+// shape and the same org-policy reason as programme.js above.
+Object.assign(exports, require("./club-directory"));
+
 exports.onFootageDeleted = onObjectDeleted(
   { bucket: BUCKET, memory: "256MiB" },
   async (event) => {
