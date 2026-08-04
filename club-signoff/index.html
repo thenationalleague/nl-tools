@@ -356,7 +356,7 @@
 
   var token = new URLSearchParams(location.search).get('t') || '';
   var club = '', sub = null, cfg = {};
-  var listPicks = {}, mergedNames = [], found = {},
+  var listPicks = {}, mergedNames = [], found = {}, typos = 0,
       tidied = { names: 0, titles: 0, emails: 0 };
 
   function $(id) { return document.getElementById(id); }
@@ -565,6 +565,7 @@
      club gets the chance to say it would be wrong. */
   function applyFixes(rec, apply) {
     var probe = JSON.parse(JSON.stringify(rec));
+    typos = fixTypos(probe);
     tidied = tidyCase(probe);
     mergedNames = mergeByName(probe);
     if (!apply) { return rec; }
@@ -709,6 +710,73 @@
     }).join(' ');
   }
 
+  /* ---------------------------------------------------------------- typos
+     Misspellings we have actually seen come through the form, plus the
+     obvious near-misses of the same words. Deliberately a closed list rather
+     than a spell checker: a dictionary would happily "correct" club names,
+     initialisms and surnames, and a job-title box is full of all three.
+
+     Whole words only, matched case-insensitively; the replacement takes the
+     shape of the word it replaces, so a shouted title stays shouted until
+     titleCase gets to it. Scope is job titles — a surname is never a typo. */
+  var TYPOS = {
+    wellfare: 'welfare', wefare: 'welfare', welfar: 'welfare', wellfar: 'welfare',
+    safegaurding: 'safeguarding', safegarding: 'safeguarding',
+    secetary: 'secretary', secretay: 'secretary', secretery: 'secretary',
+    secratary: 'secretary', secertary: 'secretary',
+    exectutive: 'executive', exective: 'executive', excutive: 'executive',
+    mangerss: 'managers', manger: 'manager', mangaer: 'manager', mananger: 'manager',
+    liason: 'liaison', liasion: 'liaison',
+    comercial: 'commercial', commerical: 'commercial',
+    managment: 'management', developement: 'development',
+    edical: 'medical', physo: 'physio', pyhsio: 'physio',
+    operatons: 'operations', opertions: 'operations',
+    cheif: 'chief', diector: 'director', drector: 'director',
+    markting: 'marketing', marketting: 'marketing',
+    comunity: 'community', comunications: 'communications',
+  };
+  /* One word the form regularly arrives split in two. */
+  var TYPO_SPLIT = [[/\bsafe\s+guarding\b/ig, 'safeguarding']];
+
+  /* Case comes from the title around the word, not the word itself: a
+     misspelling is not evidence of anything, and "Head of Sports Science and
+     edical" wants Medical, not medical. */
+  function titleShape(t) {
+    var words = t.match(/[A-Za-z]+/g) || [];
+    if (!words.length) { return 'lower'; }
+    if (words.every(function (w) { return w === w.toUpperCase(); })) { return 'upper'; }
+    var caps = words.filter(function (w) { return /^[A-Z]/.test(w); }).length;
+    return caps * 2 >= words.length ? 'title' : 'lower';
+  }
+  function likeCase(word, to, shape) {
+    if (shape === 'upper') { return to.toUpperCase(); }
+    if (shape === 'title' && MINOR.indexOf(to.split(' ')[0]) === -1) {
+      return to.charAt(0).toUpperCase() + to.slice(1);
+    }
+    return /^[A-Z]/.test(word) ? to.charAt(0).toUpperCase() + to.slice(1) : to;
+  }
+  function fixTypos(rec) {
+    var n = 0;
+    (rec.people || []).forEach(function (p) {
+      (p.roles || []).forEach(function (r) {
+        var t = (r.title || '').trim();
+        /* An address pasted into the title box, or a plain TBC, is a different
+           problem and gets asked about rather than silently rewritten. */
+        if (!t || isPlaceholder(t) || t.indexOf('@') > -1) { return; }
+        var out = t, shape = titleShape(t);
+        TYPO_SPLIT.forEach(function (s) {
+          out = out.replace(s[0], function (m) { return likeCase(m, s[1], shape); });
+        });
+        out = out.replace(/[A-Za-z]+/g, function (w) {
+          var fix = TYPOS[w.toLowerCase()];
+          return fix ? likeCase(w, fix, shape) : w;
+        });
+        if (out !== t) { r.title = out; n++; }
+      });
+    });
+    return n;
+  }
+
   /* Returns what was changed, so the green list describes the truth. */
   function tidyCase(rec) {
     var n = { names: 0, titles: 0, emails: 0 };
@@ -812,9 +880,11 @@
       fixedList.unshift('Tidy the capitalisation (eg. John Smith, rather than ' +
         'JOHN SMITH or john smith)');
     }
-    /* Spelling only. We do not claim to be restyling job titles — "Head Of Media"
-       is left alone, because correcting that reads as fussing over someone's work. */
-    if ((cfg.apply || {}).roleTitle && cfg.apply.roleTitle.length) {
+    /* Spelling only, and driven by what the record actually contains rather than
+       by anything hand-authored per club. We do not claim to be restyling job
+       titles — "Head Of Media" is left alone, because correcting that reads as
+       fussing over someone's work. */
+    if (typos) {
       fixedList.push('Correct typos in job roles (eg. Wellfare Officer &rarr; ' +
         'Welfare Officer)');
     }
