@@ -38,6 +38,14 @@ removed there without inventing a folder to hold them. They carry
 storage path rather than a null that every read has to special-case, and the
 view treats a missing folder id as that key rather than as "no folder".
 
+**Folders and files select and move together.** Tick either, then Move, and
+folders re-parent (`parentId`) while files re-file (`folderId`) in one go. The
+picker will not offer a folder its own subtree, or a target that would push the
+branch past the three-level ceiling — a folder beyond it falls off the tree walk
+and reappears as an orphan at the top, which reads as "my folder moved somewhere
+random". Remove stays files-only: a folder is deleted from its own ⋯ menu, and
+only when it is empty.
+
 **Ordering is alphabetical and not editable**, for folders and files alike. A
 manual sort order is hidden state nobody maintains, and across 72 clubs it
 would mean 72 arrangements of the same three folders — the opposite of what
