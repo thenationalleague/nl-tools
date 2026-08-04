@@ -40,6 +40,15 @@
      block sits in a full-bleed page and a narrow content column.
 
      Changelog:
+       04/08/2026  v1.2  The "24 clubs · 2026-27 season" strip goes — the
+                         page it sits on already says which division and
+                         which season this is, and a count of what is
+                         directly below it is not information. Every card
+                         now reserves two lines for the club name whether
+                         it needs them or not: a two-line name made its
+                         card taller, which the grid absorbed by squeezing
+                         that card's crest well, so badges in the same row
+                         sat at different heights.
        04/08/2026  v1.1  North and South seeded too, so all three divisions
                          paint on the first frame rather than only National.
        04/08/2026  v1.0  First build. 24 National clubs, crest grid,
@@ -47,10 +56,6 @@
      ============================================================ -->
 
 <div id="nlClubs" data-division="National">
-  <div class="nlcd__head">
-    <span class="nlcd__count" id="nlcd-count"></span>
-    <span class="nlcd__hint">Every card links to the club's own website</span>
-  </div>
   <ul class="nlcd__grid" id="nlcd-grid"></ul>
 </div>
 
@@ -84,26 +89,6 @@
     container-type:inline-size;
   }
   #nlClubs, #nlClubs *, #nlClubs *::before, #nlClubs *::after { box-sizing:border-box; }
-
-  /* Meta strip ------------------------------------------------------- */
-  #nlClubs .nlcd__head {
-    display:flex; align-items:baseline; justify-content:space-between; gap:16px;
-    padding-bottom:10px; margin-bottom:16px;
-    border-bottom:1px solid var(--border);
-  }
-  #nlClubs .nlcd__count {
-    font-size:12px; letter-spacing:.08em; text-transform:uppercase;
-    font-weight:700; font-variation-settings:'wght' 700;
-    color:var(--text-muted);
-  }
-  #nlClubs .nlcd__count b {
-    color:var(--primary);
-    font-weight:800; font-variation-settings:'wght' 800;
-  }
-  #nlClubs .nlcd__hint {
-    font-size:12px; color:var(--text-muted);
-    font-weight:500; font-variation-settings:'wght' 500;
-  }
 
   /* Grid ------------------------------------------------------------- */
   /* Two columns is the floor and the no-container-query fallback; 24 clubs
@@ -142,17 +127,24 @@
 
   /* Crest well — a whisper of the club's colour behind the badge so a card
      reads as that club before the name is even legible. */
+  /* flex:none + min-height:0 are what actually hold the square. Without them
+     a flex item's automatic minimum is its content's min-content height, and
+     for a portrait crest (Barrow is 207x256) that is taller than the width —
+     so the well quietly grew past 1:1, took the row's slack that margin-top:
+     auto was supposed to absorb, and left badges in the same row sitting at
+     different heights. */
   #nlClubs .nlcd__crest {
-    position:relative;
+    position:relative; flex:none; min-height:0;
     display:flex; align-items:center; justify-content:center;
     aspect-ratio:1 / 1; padding:16%;
     background:radial-gradient(circle at 50% 46%,
       color-mix(in srgb, var(--club) 10%, var(--white)) 0%,
       var(--white) 74%);
   }
+  /* Fills the well and letterboxes inside it, so a portrait crest and a
+     round one occupy the same box and land on the same centre line. */
   #nlClubs .nlcd__crest img {
-    max-width:100%; max-height:100%;
-    width:auto; height:auto;
+    width:100%; height:100%; min-height:0;
     object-fit:contain; display:block;
     transition:transform .16s ease;
   }
@@ -180,9 +172,18 @@
   #nlClubs .nlcd__card:focus-visible .nlcd__foot {
     background:var(--club); color:var(--club-ink);
   }
-  #nlClubs .nlcd__names { min-width:0; flex:1; }
+  /* The two reserved name lines are held here rather than on the name
+     itself, so a one-line club banks the spare line UNDER its nickname
+     instead of opening a gap between name and nickname. Two name lines
+     (17.5px each) + the nickname (16px) + its 2px offset. */
+  #nlClubs .nlcd__names { min-width:0; flex:1; min-height:53px; }
+  /* Two lines is the ceiling as well as the reserve — a third line would
+     make one card taller than the rest of its row all over again, so a long
+     name clamps instead of growing. Nothing in the three divisions actually
+     reaches it at any width. */
   #nlClubs .nlcd__name {
-    display:block;
+    display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2;
+    overflow:hidden;
     font-size:14px; line-height:1.25;
     font-weight:800; font-variation-settings:'wght' 800;
     overflow-wrap:break-word;
@@ -229,9 +230,14 @@
   }
 
   @container (max-width: 460px) {
-    #nlClubs .nlcd__hint { display:none; }
     #nlClubs .nlcd__crest { padding:13%; }
     #nlClubs .nlcd__name { font-size:13px; }
+    #nlClubs .nlcd__names { min-height:50px; }   /* 13px name lines */
+    /* The arrow is a hover affordance and there is no hover on a phone, so
+       at this width it is only costing the name 23px — which is the
+       difference between "Hampton & Richmond Borough" fitting on two lines
+       and being clipped on the third. */
+    #nlClubs .nlcd__arrow { display:none; }
   }
 </style>
 
@@ -252,7 +258,6 @@
   // clubs-meta.json; the live file overwrites it the moment it lands.
   // [ name, code, nickname, domain, primary, secondary, tertiary ]
   var SEED_SEASON = '2026';
-  var SEED_LABEL  = '2026-27';
   var SEED = {
     National: [
       ["AFC Fylde","FYL","The Coasters","afcfylde.co.uk","#FFFFFF","#003C7F","#000000"],
@@ -342,8 +347,7 @@
     || root.getAttribute('data-division') || 'National';
   division = String(division).trim() || 'National';
 
-  var grid  = document.getElementById('nlcd-grid');
-  var count = document.getElementById('nlcd-count');
+  var grid = document.getElementById('nlcd-grid');
 
   /* ---------- helpers ---------- */
 
@@ -438,13 +442,11 @@
     });
   }
 
-  function render(clubs, seasonLabel) {
+  function render(clubs) {
     if (!clubs.length) return;
     clubs = clubs.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
     grid.innerHTML = clubs.map(cardHTML).join('');
     wireCrests();
-    count.innerHTML = '<b>' + clubs.length + '</b> clubs &middot; ' +
-      escHtml(seasonLabel) + ' season';
   }
 
   // An unrecognised division seeds nothing and waits for clubs-meta, rather
@@ -461,7 +463,7 @@
 
   /* ---------- boot ---------- */
 
-  render(fromSeed(), SEED_LABEL);
+  render(fromSeed());
 
   // Upgrade from the canonical file. Promotion and relegation land here on
   // their own — the CMS block is never re-pasted for a season rollover.
@@ -471,13 +473,11 @@
       return r.json();
     })
     .then(function (meta) {
-      var seasons = (meta.seasons || {});
-      var season  = seasons.current || SEED_SEASON;
-      var label   = (seasons.list && seasons.list[season] && seasons.list[season].label) || SEED_LABEL;
+      var season = (meta.seasons && meta.seasons.current) || SEED_SEASON;
       var live = (meta.clubs || []).filter(function (c) {
         return c && c.seasons && c.seasons[season] === division;
       });
-      if (live.length) render(live, label);
+      if (live.length) render(live);
     })
     .catch(function (e) {
       if (window.console && console.warn) {
