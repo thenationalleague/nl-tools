@@ -31,10 +31,12 @@ hand: a `usedFrom`/`usedUntil` window existed briefly and was removed, because
 adverts change rarely enough that maintaining dates cost more than it saved.
 
 **Folders are owned by the club, and optional.** Nothing is pre-created; a club
-makes what it needs, nested up to three deep, or none at all. **Files can sit
-loose at the top of a club's folder** — they carry `folderId: '_root'`, so a
-root file is an ordinary record with an ordinary storage path rather than a
-null that every read has to special-case.
+makes what it needs, nested up to three deep, or none at all. **The club root is
+a folder like any other** — files can be dropped, listed, selected, moved and
+removed there without inventing a folder to hold them. They carry
+`folderId: '_root'`, so a root file is an ordinary record with an ordinary
+storage path rather than a null that every read has to special-case, and the
+view treats a missing folder id as that key rather than as "no folder".
 
 **Ordering is alphabetical and not editable**, for folders and files alike. A
 manual sort order is hidden state nobody maintains, and across 72 clubs it

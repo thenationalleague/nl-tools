@@ -3,7 +3,9 @@
 <head>
 <!--
   Programme Packs — club library (standalone, passcode)
-  Version: v1.1 (04/08/2026) — stop auditing folder opens: in a read-all
+  Version: v1.2 (04/08/2026) — the club root is a folder: files can be dropped
+           and listed there, not only inside one you made first.
+           v1.1 (04/08/2026) — stop auditing folder opens: in a read-all
            library, browsing is the intended behaviour, so the entries only
            buried the ones that answer a real question.
            v1.0 (03/08/2026) — initial build. Replaces /programme-packs/
@@ -496,7 +498,9 @@
     var here = view.folderId ? folderById(code, view.folderId) : null;
     var path = trail(code, view.folderId);
     var subs = childrenOf(code, view.folderId);
-    var files = view.folderId ? filesFor(code, view.folderId) : [];
+    /* No ternary on view.folderId: the club root is a folder like any other,
+       it just has no id. filesFor() reads null as PP.ROOT_FOLDER. */
+    var files = filesFor(code, view.folderId);
     var picked = files.filter(function (f) { return sel[f.id]; });
     var packCount = collectFiles(code, null, '').length;
 
@@ -558,45 +562,45 @@
       }).join('') + '</div>';
     }
 
-    if (view.folderId) {
-      if (writable) {
-        /* Kept deliberately, unlike the other notices that went: a club has to
-           know at the point of upload that this folder is readable by all 72.
-           One quiet line rather than a bordered callout. */
-        html += '<div class="drop" id="drop" tabindex="0" role="button">' +
-          '<strong>Drop files here</strong> or click to choose' +
-          '<div class="drop__hint">' + (here ? esc(here.name) + ' \u00b7 ' : '') +
-          'visible to all 72 clubs \u00b7 nothing confidential</div></div>' +
-          '<input type="file" id="fileInput" multiple style="display:none">' +
-          '<div id="uploads"></div>';
-      }
+    /* Everything below is folder-agnostic. The club root used to render only
+       its subfolders, so a club could not drop a file at the top of its own
+       pack without inventing a folder to put it in \u2014 and the root files the
+       data model already allowed had nowhere to appear. */
+    if (writable) {
+      /* Kept deliberately, unlike the other notices that went: a club has to
+         know at the point of upload that this folder is readable by all 72.
+         One quiet line rather than a bordered callout. */
+      html += '<div class="drop" id="drop" tabindex="0" role="button">' +
+        '<strong>Drop files here</strong> or click to choose' +
+        '<div class="drop__hint">' + esc(here ? here.name : name) + ' \u00b7 ' +
+        'visible to all 72 clubs \u00b7 nothing confidential</div></div>' +
+        '<input type="file" id="fileInput" multiple style="display:none">' +
+        '<div id="uploads"></div>';
+    }
 
-      if (files.length) {
-        /* The selection bar carries every bulk action, so nothing is offered
-           that cannot be done. It appears only once something is ticked. */
-        /* The bar is always here once a folder has files, with its buttons
-           disabled until something is ticked. Rendering it only on selection
-           meant ticking one box shoved the whole grid down the page. */
-        var none = !picked.length;
-        var dis = none ? ' disabled' : '';
-        html += '<div class="sel-bar">' +
-          '<label class="sel-bar__all"><input type="checkbox" class="tile__check" id="selAll"' +
-            (!none && picked.length === files.length ? ' checked' : '') +
-            ' style="position:static"> Select all</label>' +
-          '<span class="sel-bar__count">' + (none ? '' : picked.length + ' selected') + '</span>' +
-          '<button class="btn btn--primary btn--sm" id="selZip"' + dis + '>Download</button>' +
-          (writable ? '<button class="btn btn--ghost btn--sm" id="selMove"' + dis + '>Move\u2026</button>' +
-                      '<button class="btn btn--danger btn--sm" id="selRemove"' + dis + '>Remove</button>' : '') +
-          '<span class="sel-bar__spacer"></span>' +
-          '<button class="btn btn--ghost btn--sm" id="selClear"' + dis + '>Clear</button>' +
-        '</div>';
-        html += '<div class="tiles">' + files.map(function (f) { return fileTile(f, code, writable, isNL); }).join('') + '</div>';
-      } else if (!subs.length) {
-        html += '<div class="empty-state"><div class="empty-state__title">Empty</div></div>';
-      }
-    } else if (!subs.length) {
-      html += '<div class="empty-state"><div class="empty-state__title">' +
-        (writable ? 'Add a folder to get started' : 'Nothing here yet') + '</div></div>';
+    if (files.length) {
+      /* The bar is always here once a folder has files, with its buttons
+         disabled until something is ticked. Rendering it only on selection
+         meant ticking one box shoved the whole grid down the page. It carries
+         every bulk action, so nothing is offered that cannot be done. */
+      var none = !picked.length;
+      var dis = none ? ' disabled' : '';
+      html += '<div class="sel-bar">' +
+        '<label class="sel-bar__all"><input type="checkbox" class="tile__check" id="selAll"' +
+          (!none && picked.length === files.length ? ' checked' : '') +
+          ' style="position:static"> Select all</label>' +
+        '<span class="sel-bar__count">' + (none ? '' : picked.length + ' selected') + '</span>' +
+        '<button class="btn btn--primary btn--sm" id="selZip"' + dis + '>Download</button>' +
+        (writable ? '<button class="btn btn--ghost btn--sm" id="selMove"' + dis + '>Move\u2026</button>' +
+                    '<button class="btn btn--danger btn--sm" id="selRemove"' + dis + '>Remove</button>' : '') +
+        '<span class="sel-bar__spacer"></span>' +
+        '<button class="btn btn--ghost btn--sm" id="selClear"' + dis + '>Clear</button>' +
+      '</div>';
+      html += '<div class="tiles">' + files.map(function (f) { return fileTile(f, code, writable, isNL); }).join('') + '</div>';
+    } else if (!subs.length && !writable) {
+      /* Only for a visitor. For the club itself the drop zone above already
+         says the place is empty, and says what to do about it. */
+      html += '<div class="empty-state"><div class="empty-state__title">Nothing here yet</div></div>';
     }
 
     el('viewClub').innerHTML = html;
