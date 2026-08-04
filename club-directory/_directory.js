@@ -156,7 +156,10 @@
     return '<li class="cd-row">' +
       '<div class="cd-row__name">' + esc(fullName(p) || 'Name not given') + '</div>' +
       '<div class="cd-row__role">' +
-        (titles.length ? esc(titles.join(' &middot; ')) : '<em>No job title</em>') +
+        /* Escape each title, then join with the entity. Escaping the joined
+           string turns the separator's own ampersand into &amp;middot; and
+           prints it as text. */
+        (titles.length ? titles.map(esc).join(' &middot; ') : '<em>No job title</em>') +
       '</div>' +
       '<div>' + (mail || '<span class="cd-row__quiet">' + quiet + '</span>') + '</div>' +
       '<div>' + (ph || (mail ? '' : '')) + '</div>' +
