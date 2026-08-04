@@ -141,12 +141,12 @@ For async flows that need a live auth token mid-flight, use `NL.ensureAuth().the
 
 ## When you add a new tool
 
-Use the `/new-tool <slug>` skill. It copies `system/_template/`, swaps the five placeholders, and runs the lint. The skill **does not** wire the tool into the system — two follow-ups remain, both RTDB config (the user deploys via the Firebase console; the repo carries snapshots):
+Use the `/new-tool <slug>` skill. It copies `system/_template/`, swaps the five placeholders, and runs the lint. The skill **does not** wire the tool into the system — two follow-ups remain, both RTDB config:
 
 1. **RTDB `tools/<toolKey>` record** (label, url, icon, department, `defaults` per role). One record = portal card + auth-guard access. Without it the page is superadmin-only and invisible on the portal. **Check `system/rtdb/tools-registry.snapshot.json` first — the record may already exist.** When adding one, update that snapshot in the same PR and tell the user to paste it into RTDB `tools/`.
-2. **RTDB rules** for `app-data/<toolKey>/...`. Edit the full document at `system/rtdb/rules.snapshot.json` in the PR and tell the user to paste the whole thing into the Firebase console. Do not extend the historical partial file `dazn-vip/dazn-vip.rules.json`.
+2. **RTDB rules** for `app-data/<toolKey>/...`. Edit the full document at `system/rtdb/rules.snapshot.json` in the PR. That file **is** the deployed rules — see Deployment below; it ships when someone runs the workflow, so say so in the PR body. Do not extend the historical partial file `dazn-vip/dazn-vip.rules.json`.
 
-**Never assert that live RTDB config is missing or wrong based only on repo code — sessions cannot read the live database. Check the `system/rtdb/` snapshots, and if the answer matters, ask the user to verify in the console.** (See `system/rtdb/README.md` for the snapshot contract.)
+**Never assert that live RTDB *data* or the tools registry is missing or wrong based only on repo code — sessions cannot read the live database. Check the `system/rtdb/` snapshots, and if the answer matters, ask the user to verify in the console.** Rules are the exception: `rules.snapshot.json` is deployed from this repo, so it is authoritative rather than a guess. (See `system/rtdb/README.md` for the contract.)
 
 The new tool's `index.html` must keep the canonical `?v=N` values from the template — don't invent new ones.
 
@@ -156,6 +156,35 @@ The new tool's `index.html` must keep the canonical `?v=N` values from the templ
 - **Fan-facing embeds** — `embeds/*.html` (score-predictor, MOTM, vidiprinter, transfer-centre, live-blog, results-ticker, match-centre). Pasted into the Urban Zoo CMS. The CMS strips `<script src=...>` tags, so Firebase has to be loaded dynamically via `document.createElement('script')` with `.onload` chaining. Inline `<style>`, `<link>`, inline `<script>` survive. See `embeds/widget-handover.md` for the invariants — copy `score-predictor.html` as the starting point for any new embed. These do **not** use `auth-guard.js` and are out of scope for `lint-tools.sh`.
 
 `widgets/*.js` are a third bucket: standalone JS widgets (news ticker, club-news feed, transfers ticker, results ticker) embedded on the public site.
+
+## Deployment — nothing needs a terminal
+
+**Richard has no CLI access.** Any plan that ends "then run `firebase deploy`"
+is undeliverable, and this was nearly a blocker for the Club Directory
+passcode gate before anyone checked. Everything ships through GitHub Actions,
+which he can run from a browser:
+
+| What | Workflow | Trigger |
+|---|---|---|
+| **Static site** (HTML/CSS/JS) | none — GitHub Pages | merge to `main`. There is no build step. |
+| **Cloud Functions** | `deploy-functions.yml` | **automatic** on any push to `main` touching `functions/**`, or Run workflow |
+| **RTDB rules** | `deploy-rtdb-rules.yml` | **manual only.** Actions → Run workflow → type `publish` |
+
+Two things worth knowing, because both have already caught someone out:
+
+- `deploy-functions.yml` runs `firebase deploy --only functions`, which deploys
+  **every** function in the directory, not the one the workflow is named after.
+  It was called `deploy-footage-proxy.yml` until 04/08/2026 and had been
+  deploying all four functions the whole time.
+- The rules workflow is deliberately **not** on push. Rules govern every tool,
+  and landing an unrelated PR must not be able to lock 72 clubs out of their
+  own data as a side effect of a merge.
+
+So: a PR that adds a function needs no follow-up, a PR that changes rules needs
+one button press, and neither needs a machine. Say which in the PR body.
+
+RTDB *data* (the `tools/` registry, seed records) still has no deploy path and
+is pasted into the console by hand.
 
 ## Data pipelines (GitHub Actions)
 
