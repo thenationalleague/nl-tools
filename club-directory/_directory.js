@@ -149,7 +149,18 @@
 
   /* ---------------------------------------------------------------- row */
   function personRow(p, section, opts) {
-    var hidden = p.hideContact && !(opts && opts.showHidden);
+    /* Two different things, and conflating them cost the editor its most
+       useful signal. `unlisted` is the club's decision — keep this person's
+       details out of the published directory. `hidden` is whether THIS view
+       acts on it. The reader acts on it; the editor and the staff view do
+       not, because their job is to see everything the League holds.
+
+       But "does not act on it" was being rendered as "does not mention it",
+       so an editor looked at an email address with no way of knowing it will
+       never appear in the reader — across 290 of 1,070 people, in 65 of the
+       72 clubs. The state is now stated wherever the details are shown. */
+    var unlisted = !!p.hideContact;
+    var hidden = unlisted && !(opts && opts.showHidden);
     var here = arr(p.roles).filter(function (r) { return r.section === section; });
     var titles = here.map(function (r) { return (r.title || '').trim(); }).filter(Boolean);
     var mail = hidden ? '' : emailsOf(p).map(function (e) {
@@ -162,7 +173,15 @@
     }).join('<br>');
 
     var quiet = hidden ? 'Not published' : 'None held';
-    return '<li class="cd-row">' +
+    /* Shown only where the details themselves are shown. In the reader the
+       contact cell already says "Not published" instead of an address, so a
+       tag next to it would be saying the same thing twice. */
+    var tag = (unlisted && !hidden)
+      ? '<span class="cd-row__unlisted" title="The club asked us to keep these ' +
+        'details out of the published directory. The reader shows &quot;Not ' +
+        'published&quot; here.">Not published</span>'
+      : '';
+    return '<li class="cd-row' + (unlisted ? ' cd-row--unlisted' : '') + '">' +
       '<div class="cd-row__name">' + esc(fullName(p) || 'Name not given') + '</div>' +
       '<div class="cd-row__role">' +
         /* Escape each title, then join with the entity. Escaping the joined
@@ -170,7 +189,7 @@
            prints it as text. */
         (titles.length ? titles.map(esc).join(' &middot; ') : '<em>No job title</em>') +
       '</div>' +
-      '<div>' + (mail || '<span class="cd-row__quiet">' + quiet + '</span>') + '</div>' +
+      '<div>' + tag + (mail || '<span class="cd-row__quiet">' + quiet + '</span>') + '</div>' +
       '<div>' + (ph || (mail ? '' : '')) + '</div>' +
       '</li>';
   }

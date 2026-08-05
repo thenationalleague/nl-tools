@@ -7,6 +7,17 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.5 — (05/08/2026) Not-for-publication was invisible and unchangeable.
+         290 of 1,070 people across 65 of the 72 clubs are marked to keep
+         their details off the published directory. The editor shows those
+         details — that is its job — but said nothing about the state, so an
+         editor read an address with no way of knowing it will never reach a
+         reader, and no way to change it if the club said it could.
+         Every row that carries the mark now says "Not published" beside the
+         details, in _directory.js so the staff view and search get it too,
+         and there is a publish / unpublish toggle in the row actions. It
+         confirms in both directions: the club asked for this, and overriding
+         it across three departments is not something to do on one click.
   v1.4 — (05/08/2026) Add, remove and move — the three things the editor
          could not do, plus the trap that fell out of adding them.
          · Add someone: a button at the foot of the club, because a department
@@ -102,15 +113,15 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=32">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=11">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=12">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
-<script src="/club-directory/_tidy.js?v=11"></script>
-<script src="/club-directory/_gate.js?v=11"></script>
-<script src="/club-directory/_directory.js?v=11"></script>
+<script src="/club-directory/_tidy.js?v=12"></script>
+<script src="/club-directory/_gate.js?v=12"></script>
+<script src="/club-directory/_directory.js?v=12"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -670,6 +681,23 @@
       saveStructure(club, NLDirectory.fullName(person) + ' moved from ' + from + ' to ' + to);
     });
 
+    /* Publication is a property of the person, not of one of their roles, so
+       this toggle changes every row they appear in. That is why it confirms
+       even when switching publication ON: the club asked for it off, and
+       overriding that quietly across three departments is not the League's
+       call to make silently. */
+    var pub = document.createElement('button');
+    pub.className = 'btn btn--sm btn--ghost ed-pub';
+    pub.type = 'button';
+    pub.textContent = person.hideContact ? 'Publish details' : 'Unpublish details';
+    pub.title = person.hideContact
+      ? 'Currently kept out of the published directory'
+      : 'Currently published in the directory';
+    pub.addEventListener('click', function (e) {
+      e.stopPropagation();
+      togglePublish(club, person);
+    });
+
     var del = document.createElement('button');
     del.className = 'btn btn--icon btn--ghost ed-del';
     del.type = 'button';
@@ -682,8 +710,34 @@
     });
 
     wrap.appendChild(move);
+    wrap.appendChild(pub);
     wrap.appendChild(del);
     row.appendChild(wrap);
+  }
+
+  /* The follow-up emails tell 65 clubs "we'll include those details unless
+     there's any issue — just let us know". This is the control that honours
+     the reply. Without it the promise had no mechanism behind it. */
+  function togglePublish(club, person) {
+    var name = NLDirectory.fullName(person) || 'this person';
+    var roles = NLDirectory.rolesOf(person).map(function (r) { return r.section; });
+    var where = roles.length > 1 ? ' They appear under ' + roles.join(' and ') +
+      ', and this covers all of them.' : '';
+    var on = !!person.hideContact;          /* currently hidden -> we are publishing */
+    NL.confirm(on
+      ? 'Publish ' + name + '\u2019s contact details in the directory?' + where +
+        ' The club asked for these to be kept off, so only do this if they have ' +
+        'since said otherwise.'
+      : 'Keep ' + name + '\u2019s contact details out of the published directory?' +
+        where + ' The League still holds them; the reader will show ' +
+        '\u201cNot published\u201d.',
+      { title: on ? 'Publish details' : 'Unpublish details',
+        confirmText: on ? 'Publish' : 'Keep unpublished' }
+    ).then(function (ok) {
+      if (!ok) { return; }
+      person.hideContact = !on;
+      saveStructure(club, name + (on ? ' published' : ' marked not for publication'));
+    });
   }
 
   /* One button for both of the things Richard asked for. Removing somebody's
