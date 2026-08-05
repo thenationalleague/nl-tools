@@ -64,8 +64,20 @@ folders re-parent (`parentId`) while files re-file (`folderId`) in one go. The
 picker will not offer a folder its own subtree, or a target that would push the
 branch past the three-level ceiling — a folder beyond it falls off the tree walk
 and reappears as an orphan at the top, which reads as "my folder moved somewhere
-random". Remove stays files-only: a folder is deleted from its own ⋯ menu, and
-only when it is empty.
+random". Remove stays files-only: a folder is deleted from its own ⋯ menu or its head,
+and only when nothing would be lost with it.
+
+**Deleting a folder** is blocked by files, not by folders. Empty subfolders are
+deleted along with it — "delete the folders inside it first" is a chore the tool
+can do itself, and it left folders undeletable for a reason the page never
+showed. Anything holding files is refused with the count, because *"empty the
+folder first"* does not say where to look when the files are two levels down.
+
+**Making a folder does not open it.** `newFolder` used to assign `view.folderId`
+directly, which is the one thing the page forbids: `navigate()` owns the view,
+and writing behind its back left the hash and breadcrumb reading *root* while
+`view.folderId` was the new folder. The next New folder then landed inside the
+last one.
 
 **Ordering is alphabetical and not editable**, for folders and files alike. A
 manual sort order is hidden state nobody maintains, and across 72 clubs it

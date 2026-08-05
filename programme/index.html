@@ -3,7 +3,10 @@
 <head>
 <!--
   Programme Packs — club library (standalone, passcode)
-  Version: v1.9 (04/08/2026) - a dropped folder arrives as a folder: the tree
+  Version: v1.10 (04/08/2026) - making a folder no longer moves you into it,
+           which was silently nesting the next one; a folder holding no files
+           can be deleted, from its own menu, taking empty subfolders with it.
+           v1.9 (04/08/2026) - a dropped folder arrives as a folder: the tree
            is walked and recreated, not uploaded as a 0-byte asset. Uploads
            queue four at a time.
            v1.8 (04/08/2026) - a folder you can only read says so, and names
@@ -582,7 +585,8 @@
         (here ? 'Add a folder inside ' + esc(here.name) : 'Add a folder') + '">+ Folder</button>';
       if (here) {
         leftBtns += '<button class="btn btn--ghost btn--sm" id="renameFolder">Rename</button>';
-        if (!files.length && !subs.length) {
+        /* Empty subfolders no longer hide this - they are deleted with it. */
+        if (!collectFiles(code, here.id, '').length) {
           leftBtns += '<button class="btn btn--ghost btn--sm" id="deleteFolder">Delete</button>';
         }
       }
@@ -860,7 +864,7 @@
     if (!writable) return;
 
     var ren = el('renameFolder'); if (ren) ren.onclick = function () { renameFolder(code); };
-    var del = el('deleteFolder'); if (del) del.onclick = function () { deleteFolder(code); };
+    var del = el('deleteFolder'); if (del) del.onclick = function () { deleteFolder(code, view.folderId); };
     var moveSel = el('selMove'); if (moveSel) moveSel.onclick = function () { moveSelected(code); };
     var rmSel = el('selRemove'); if (rmSel) rmSel.onclick = function () { removeSelected(code); };
 
@@ -1192,12 +1196,20 @@
 
     menuEl = document.createElement('div');
     menuEl.className = 'ctx';
+    /* Delete lives here as well as in the folder's own head. Requiring someone
+       to open a folder before they can remove it is a step for no reason, and
+       it was the only route in — which is half of why folders felt
+       undeletable. */
     menuEl.innerHTML =
       '<button class="ctx__item" data-act="open">Open</button>' +
       '<button class="ctx__item" data-act="zip"' + (inside.length ? '' : ' disabled') + '>' +
         (inside.length ? 'Download folder (' + inside.length + ' file' + (inside.length === 1 ? '' : 's') +
                          ', ' + PP.humanSize(totalBytes(inside)) + ')'
-                       : 'Download folder — it\u2019s empty') + '</button>';
+                       : 'Download folder — it\u2019s empty') + '</button>' +
+      (canWrite(code)
+        ? '<button class="ctx__item" data-act="del"' + (inside.length ? ' disabled' : '') + '>' +
+            (inside.length ? 'Delete — empty it first' : 'Delete folder') + '</button>'
+        : '');
     document.body.appendChild(menuEl);
 
     /* Keep it on screen when the click lands near an edge. */
@@ -1211,6 +1223,8 @@
     };
     var zip = menuEl.querySelector('[data-act="zip"]');
     if (inside.length) zip.onclick = function () { closeMenu(); downloadZip(code, folderId); };
+    var del = menuEl.querySelector('[data-act="del"]');
+    if (del && !inside.length) del.onclick = function () { closeMenu(); deleteFolder(code, folderId); };
   }
 
   /* ── Zip download ─────────────────────────────────────────────────────
@@ -1295,7 +1309,13 @@
       if (parentId) rec.parentId = parentId;
       var id = PP.ref('folders/' + code).push().key;
       return PP.ref('folders/' + code + '/' + id).set(rec).then(function () {
-        view.folderId = id;
+        /* Deliberately does NOT move you into the new folder. It used to set
+           view.folderId directly, which is the one thing this file says nothing
+           may do: navigate() owns the view, and assigning behind its back left
+           the hash and the breadcrumb still reading "root" while view.folderId
+           had become the new folder. The next New folder then landed inside the
+           last one - Adverts, then Crests, and Crests came out inside Adverts.
+           Making a folder is not the same as opening it, here or on a desktop. */
         PP.audit('folder-create', { club: code, detail: (inside ? inside + ' › ' : '') + rec.name });
         NL.toast('Folder added', 'success');
       });
@@ -1315,19 +1335,40 @@
     }).catch(function (e) { NL.toast('Could not rename: ' + e.message, 'error'); });
   }
 
-  function deleteFolder(code) {
-    var f = foldersFor(code).filter(function (x) { return x.id === view.folderId; })[0];
+  /* A folder can go when nothing would be lost with it - no files anywhere at
+     or below it. Empty subfolders go too, rather than "delete the folders
+     inside it first", a chore the tool can perfectly well do itself and which
+     left folders undeletable for a reason the page never showed. Only files
+     block a delete, because only files are something to lose. */
+  function blockedBy(code, id) {
+    var n = collectFiles(code, id, '').length;
+    return n ? n + ' file' + (n === 1 ? '' : 's') + ' inside' : null;
+  }
+
+  function deleteFolder(code, folderId) {
+    var f = folderById(code, folderId);
     if (!f) return;
-    if (filesFor(code, f.id).length) { NL.toast('Empty the folder first', 'error'); return; }
-    if (childrenOf(code, f.id).length) { NL.toast('Delete the folders inside it first', 'error'); return; }
-    NL.confirm('Delete the folder “' + esc(f.name) + '”?', { title: 'Delete folder', html: true, confirmText: 'Delete', variant: 'danger' })
+    var why = blockedBy(code, folderId);
+    /* Name the obstacle: "Empty the folder first" does not say where to look
+       when the files are two folders further down. */
+    if (why) { NL.toast('“' + f.name + '” still has ' + why, 'error'); return; }
+
+    var tree = subtree(code, folderId);          // itself, plus every folder under it
+    var extra = tree.length - 1;
+    NL.confirm('Delete the folder “' + esc(f.name) + '”' +
+      (extra ? ' and ' + extra + ' empty folder' + (extra === 1 ? '' : 's') + ' inside it' : '') + '?',
+      { title: 'Delete folder', html: true, confirmText: 'Delete', variant: 'danger' })
       .then(function (ok) {
         if (!ok) return;
-        return PP.ref('folders/' + code + '/' + f.id).remove().then(function () {
-          /* Land on the parent, not the club root — deleting a subfolder
-             shouldn't throw you back to the top of the tree. */
-          view.folderId = f.parentId || null;
-          PP.audit('folder-delete', { club: code, detail: f.name });
+        var updates = {};
+        tree.forEach(function (id) { updates[id] = null; });
+        return PP.ref('folders/' + code).update(updates).then(function () {
+          /* Move only if the folder you were standing in has just gone, and
+             then to its parent rather than the club root. Deleting a subfolder
+             from its menu while standing above it should not move you at all. */
+          if (tree.indexOf(view.folderId) !== -1) navigate(code, f.parentId || null);
+          PP.audit('folder-delete', { club: code,
+            detail: f.name + (extra ? ' (+' + extra + ' empty)' : '') });
           NL.toast('Folder deleted', 'success');
         });
       }).catch(function (e) { NL.toast('Could not delete: ' + e.message, 'error'); });
