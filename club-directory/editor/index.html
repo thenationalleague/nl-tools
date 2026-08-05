@@ -7,6 +7,19 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.14 — (05/08/2026) Two things the consolidation got wrong.
+         · Publishing somebody the club asked us to keep off is the one thing
+           in this form that reaches outside the League, and it had become a
+           silent tick. The old publish toggle confirmed; folding it into the
+           form lost that. It asks again — and only in that direction, because
+           a confirm on the safe half is noise that teaches people to click
+           through the dangerous one.
+         · The modal claimed to be everything about a person and showed one of
+           their roles, merely naming the others. Every role is now a card in
+           it, each with its own title, department and remove, so fixing two
+           job titles is one visit rather than two. The row you came in from is
+           marked. Remove at the foot became "Remove this person…", since
+           removing one role is now a button on that role.
   v1.13 — (05/08/2026) One button per row, one screen behind it. The pen now
          opens "Update details", carrying everything about the person: name,
          job title, department, published or not, email addresses and phone
@@ -216,15 +229,15 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=32">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=21">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=22">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
-<script src="/club-directory/_tidy.js?v=21"></script>
-<script src="/club-directory/_gate.js?v=21"></script>
-<script src="/club-directory/_directory.js?v=21"></script>
+<script src="/club-directory/_tidy.js?v=22"></script>
+<script src="/club-directory/_gate.js?v=22"></script>
+<script src="/club-directory/_directory.js?v=22"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -357,6 +370,17 @@
      carries the layout the row used to. One line per address or number: the
      value, who it is for, and a way to take it off. */
   .ed-morebtns { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+
+  /* One boxed card per job, so two roles cannot be misread as one long form.
+     The row you came in from is marked, because on somebody with four roles
+     "which one was I looking at" is a real question. */
+  .ed-roles { display: flex; flex-direction: column; gap: 10px; }
+  .ed-role {
+    border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px 13px 13px; position: relative;
+  }
+  .ed-role.is-here { border-color: var(--navy-300); background: var(--navy-50); }
+  .ed-roledel { margin-top: 10px; }
   .ed-clist { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
   .ed-crow { display: flex; align-items: center; gap: 8px; }
   .ed-cval {
@@ -1034,15 +1058,50 @@
     });
     wrap.appendChild(addPhone);
 
-    /* ---- the job this row is ---- */
-    group('This entry — ' + here, '');
-    var grid2 = document.createElement('div');
-    grid2.className = 'form-grid';
-    var titleIn = textbox(role.title || '', 'Programme Editor');
-    var deptIn = deptSelect(here, 'ed-dept');
-    grid2.appendChild(field('Job title', titleIn));
-    grid2.appendChild(field('Department', deptIn));
-    wrap.appendChild(grid2);
+    /* ---- every job they do ---- */
+    /* All of them, not just the row you came in from. The modal claims to be
+       everything about this person, and showing one role while merely naming
+       the others made a liar of it — an editor fixing two job titles had to
+       close it, find the other row, and open it again. */
+    group(roles.length > 1 ? 'Roles' : 'Role', roles.length > 1
+      ? 'One entry per department. The row you opened is marked.' : '');
+    var roleBox = document.createElement('div');
+    roleBox.className = 'ed-roles';
+    wrap.appendChild(roleBox);
+
+    var roleRows = [];
+    roles.forEach(function (r, i) {
+      var card = document.createElement('div');
+      card.className = 'ed-role' + (i === ridx ? ' is-here' : '');
+      var grid = document.createElement('div');
+      grid.className = 'form-grid';
+      var t = textbox(r.title || '', 'Programme Editor');
+      var d = deptSelect(r.section, 'ed-dept');
+      grid.appendChild(field('Job title', t));
+      grid.appendChild(field('Department', d));
+      card.appendChild(grid);
+
+      var drop = document.createElement('button');
+      drop.className = 'btn btn--sm btn--ghost ed-del ed-roledel';
+      drop.type = 'button';
+      drop.textContent = 'Remove this role';
+      drop.addEventListener('click', function () {
+        /* Their only role is the whole person, so that question gets asked
+           rather than answered by a button labelled something smaller. */
+        if (roleRows.filter(function (x) { return !x.gone; }).length < 2) {
+          ctrl.close();
+          removeRole(club, person, i);
+          return;
+        }
+        entry.gone = true;
+        card.remove();
+      });
+      card.appendChild(drop);
+      roleBox.appendChild(card);
+
+      var entry = { i: i, title: t, dept: d, gone: false };
+      roleRows.push(entry);
+    });
 
     var extra = document.createElement('div');
     extra.className = 'ed-morebtns';
@@ -1053,7 +1112,7 @@
     var removeBtn = document.createElement('button');
     removeBtn.className = 'btn btn--sm btn--ghost ed-del';
     removeBtn.type = 'button';
-    removeBtn.textContent = 'Remove…';
+    removeBtn.textContent = 'Remove this person…';
     extra.appendChild(addRole);
     extra.appendChild(removeBtn);
     wrap.appendChild(extra);
@@ -1075,8 +1134,9 @@
         { label: 'Save', className: 'btn--primary', onClick: function (c) {
           commitDetails(club, person, ridx, {
             name: nameIn.value.trim(),
-            title: titleIn.value.trim(),
-            section: deptIn.value,
+            roles: roleRows.filter(function (x) { return !x.gone; }).map(function (x) {
+              return { i: x.i, title: x.title.value.trim(), section: x.dept.value };
+            }),
             hide: !!pubBox.checked,
             emails: read(emailBox),
             phones: read(phoneBox)
@@ -1086,20 +1146,44 @@
     });
 
     addRole.addEventListener('click', function () { ctrl.close(); addRoleTo(club, person); });
-    removeBtn.addEventListener('click', function () { ctrl.close(); removeRole(club, person, ridx); });
+    removeBtn.addEventListener('click', function () { ctrl.close(); removeWholePerson(club, person); });
     setTimeout(function () { nameIn.focus(); }, 30);
   }
 
   /* Everything the form changed, in one write. The rename question is asked
      last and only when it is genuinely ambiguous, so an editor correcting a
      job title is never made to answer a question about identity. */
+  /* Publishing somebody the club asked us to keep off is the one thing in this
+     form that reaches outside the League. It puts a real person's work email
+     and mobile in front of everyone who holds the reader code, and there is no
+     taking that back — so it asks, and it asks in the direction that matters.
+
+     Only that direction. Ticking the box hides somebody, which exposes nothing
+     and needs no ceremony; a confirm on the safe half would just be noise that
+     teaches people to click through the dangerous one.
+
+     This existed before the form absorbed the publish toggle and was lost in
+     the process — a regression, not an oversight of the original design. */
+  function confirmPublish(person, hiding, sections) {
+    if (hiding) { return Promise.resolve(true); }
+    var name = NLDirectory.fullName(person) || 'this person';
+    var where = sections.length > 1
+      ? ' They appear under ' + sections.join(', ') + ', and this covers all of them.'
+      : '';
+    return NL.confirm(
+      'Publish ' + name + '\u2019s contact details in the directory?' + where +
+      '\n\nThe club asked for these to be kept off. Only do this if they have since ' +
+      'said otherwise — everyone holding the reader code will be able to see them, ' +
+      'and it cannot be taken back once it is out.',
+      { title: 'Publish contact details', variant: 'danger', confirmText: 'Yes, publish them' }
+    );
+  }
+
   function commitDetails(club, person, ridx, next, ctrl) {
     var roles = NLDirectory.rolesOf(person);
     var role = roles[ridx] || {};
     var was = {
       name: NLDirectory.fullName(person),
-      title: role.title || '',
-      section: role.section || '',
       hide: !!person.hideContact,
       emails: NLDirectory.emailsOf(person).join(', '),
       phones: NLDirectory.phonesOf(person).map(function (x) { return x.number; }).join(', ')
@@ -1107,11 +1191,24 @@
     var pid = 'people/' + (person.id || '');
 
     var applyRest = function () {
-      if (next.title !== was.title) {
-        role.title = next.title;
-        logEdit(club, pid + '/roles/' + ridx + '/title', was.title, next.title);
-      }
-      if (next.section !== was.section) { role.section = next.section; }
+      /* Rebuilt from the form rather than patched in place: a role can have
+         been retitled, moved, or taken off, and reading the survivors in order
+         is the only version of that which cannot leave a stale one behind.
+         Anything else on a role object is carried over untouched. */
+      var rolesChanged = next.roles.length !== roles.length;
+      person.roles = next.roles.map(function (r) {
+        var orig = roles[r.i] || {};
+        if (r.title !== (orig.title || '')) {
+          logEdit(club, pid + '/roles/' + r.i + '/title', orig.title || '', r.title);
+          rolesChanged = true;
+        }
+        if (r.section !== orig.section) { rolesChanged = true; }
+        var out = {};
+        for (var k in orig) { if (Object.prototype.hasOwnProperty.call(orig, k)) { out[k] = orig[k]; } }
+        out.title = r.title;
+        out.section = r.section;
+        return out;
+      });
       if (next.hide !== was.hide) { person.hideContact = next.hide; }
       /* A plain string when it applies everywhere, an object only when it does
          not — so a record that gains nothing keeps the shape it had. */
@@ -1128,8 +1225,8 @@
       if (nowEm !== was.emails) { logEdit(club, pid + '/emails', was.emails, nowEm); }
       if (nowPh !== was.phones) { logEdit(club, pid + '/phones', was.phones, nowPh); }
 
-      var changed = next.title !== was.title || next.section !== was.section ||
-        next.hide !== was.hide || nowEm !== was.emails || nowPh !== was.phones ||
+      var changed = rolesChanged || next.hide !== was.hide ||
+        nowEm !== was.emails || nowPh !== was.phones ||
         NLDirectory.fullName(person) !== was.name;
       ctrl.close();
       if (!changed) { return; }
@@ -1137,28 +1234,66 @@
         (NLDirectory.fullName(person) || 'a person'));
     };
 
-    if (!next.name || next.name === was.name) { applyRest(); return; }
+    /* The gate runs before anything is written, so answering No leaves the
+       record exactly as it was and the form still open on the tick. */
+    var proceed = function () {
+      if (!next.name || next.name === was.name) { applyRest(); return; }
+      renameThen();
+    };
 
-    /* Renaming somebody who holds more than one role is genuinely ambiguous,
-       and getting it wrong is the worst thing this tool can do. See the note
-       on resolveRename. */
-    if (roles.length > 1) {
-      resolveRename(club, person, ridx, was.name, next.name).then(function (how) {
-        if (!how) { return; }                       /* cancelled: change nothing */
-        if (how === 'same') {
-          setAt(person, 'name', next.name);
-          logEdit(club, pid + '/name', was.name, next.name);
-          applyRest();
-        } else {
-          ctrl.close();
-          replaceInRole(club, person, ridx, next.name, next);
-        }
+    if (next.hide !== was.hide) {
+      var sections = roles.map(function (r) { return r.section; })
+        .filter(function (sec, i, a) { return a.indexOf(sec) === i; });
+      confirmPublish(person, next.hide, sections).then(function (ok) {
+        if (!ok) { next.hide = was.hide; return; }   /* stay open, nothing written */
+        proceed();
       });
       return;
     }
-    setAt(person, 'name', next.name);
-    logEdit(club, pid + '/name', was.name, next.name);
-    applyRest();
+    proceed();
+
+    /* Renaming somebody who holds more than one role is genuinely ambiguous,
+       and getting it wrong is the worst thing this tool can do. See the note
+       on resolveRename. Hoisted, so proceed() above can call it. */
+    function renameThen() {
+      if (roles.length > 1) {
+        resolveRename(club, person, ridx, was.name, next.name).then(function (how) {
+          if (!how) { return; }                     /* cancelled: change nothing */
+          if (how === 'same') {
+            setAt(person, 'name', next.name);
+            logEdit(club, pid + '/name', was.name, next.name);
+            applyRest();
+          } else {
+            ctrl.close();
+            var mine = next.roles.filter(function (r) { return r.i === ridx; })[0];
+            replaceInRole(club, person, ridx, next.name, mine);
+          }
+        });
+        return;
+      }
+      setAt(person, 'name', next.name);
+      logEdit(club, pid + '/name', was.name, next.name);
+      applyRest();
+    }
+  }
+
+  /* The whole entry, from the foot of the update form. Removing one role is
+     now a button on that role, so this no longer has to ask which was meant —
+     pressing this one IS the answer. */
+  function removeWholePerson(club, person) {
+    var name = NLDirectory.fullName(person) || 'this person';
+    var sections = NLDirectory.rolesOf(person).map(function (r) { return r.section; });
+    NL.confirm('Remove ' + name + ' from the directory entirely?' +
+      (sections.length > 1 ? ' That is all ' + sections.length + ' of their entries — ' +
+        sections.join(', ') + '.' : '') +
+      '\n\nName, contact details and all. There is no undo on this one.',
+      { title: 'Remove person', variant: 'danger', confirmText: 'Remove person' }
+    ).then(function (ok) {
+      if (!ok) { return; }
+      ALL[club].people = NLDirectory.arr(ALL[club].people)
+        .filter(function (p) { return p !== person; });
+      saveStructure(club, name + ' removed from the directory');
+    });
   }
 
   /* Somebody already in the directory who also does something else. Distinct
