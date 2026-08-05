@@ -340,6 +340,37 @@ test('newToken is gone with the link token it minted', () => {
     'a leftover minter is how a dead field creeps back onto new records');
 });
 
+/* ── uploadType ───────────────────────────────────────────────────────────
+   The Storage rule reads the content type, so what this returns decides
+   whether an upload is accepted. */
+
+test('uploadType canonicalises the Windows zip type', () => {
+  /* File.type for a .zip on Windows is application/x-zip-compressed, which the
+     Storage rule refused outright — a 51MB zip failed with a permission
+     error. Extension wins over the browser for exactly this reason. */
+  assert.equal(PP.uploadType({ name: 'pack.zip', type: 'application/x-zip-compressed' }),
+    'application/zip');
+  assert.equal(PP.uploadType({ name: 'PACK.ZIP', type: '' }), 'application/zip');
+});
+
+test('uploadType never returns empty, so a download cannot be left to a guess', () => {
+  assert.equal(PP.uploadType({ name: 'mystery.qqq', type: '' }), 'application/octet-stream');
+  assert.equal(PP.uploadType({ name: 'noextension', type: '' }), 'application/octet-stream');
+  assert.equal(PP.uploadType({}), 'application/octet-stream');
+});
+
+test('uploadType keeps a type the browser got right', () => {
+  assert.equal(PP.uploadType({ name: 'crest.png', type: 'image/png' }), 'image/png');
+  assert.equal(PP.uploadType({ name: 'odd.qqq', type: 'application/vnd.custom' }),
+    'application/vnd.custom');
+});
+
+test('uploadType does not disguise something the rule must still refuse', () => {
+  /* text/html executes from the bucket origin and stays blocked. Canonicalising
+     must never be a way round that. */
+  assert.equal(PP.uploadType({ name: 'evil.html', type: 'text/html' }), 'text/html');
+});
+
 /* ── Defaults ─────────────────────────────────────────────────────────── */
 
 test('seeded folders carry no sortOrder — ordering is alphabetical and locked', () => {

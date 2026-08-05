@@ -48,6 +48,7 @@
     PP.storagePath(club, folder, id, name)
     PP.humanSize(bytes)
     PP.fileKind(contentType, name)    'image' | 'pdf' | 'doc' | 'sheet' | 'file'
+    PP.uploadType(file)               canonical content type for an upload
 
   Data lives at RTDB app-data/media-programme/{config,folders,files,trash,audit}
   and Storage programme/<CODE>/… — shapes documented in /programme/README.md.
@@ -124,6 +125,38 @@
     var units = ['KB', 'MB', 'GB'], i = -1, v = b;
     do { v = v / 1024; i++; } while (v >= 1024 && i < units.length - 1);
     return (v >= 10 ? Math.round(v) : Math.round(v * 10) / 10) + ' ' + units[i];
+  }
+
+  /* What to store as the file's content type.
+     Extension first, browser second. The browser's own File.type is derived
+     from the OS registry on Windows and reports a .zip as
+     application/x-zip-compressed — which the Storage rule used to refuse
+     outright, so a perfectly ordinary 51MB zip failed to upload with a
+     permission error (04/08/2026). Plenty of files also arrive with no type at
+     all, and an empty type makes a browser guess when the file is downloaded
+     later. A canonical type here fixes both ends. */
+  var EXT_TYPE = {
+    zip: 'application/zip', pdf: 'application/pdf',
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+    webp: 'image/webp', svg: 'image/svg+xml', tif: 'image/tiff', tiff: 'image/tiff',
+    psd: 'image/vnd.adobe.photoshop',
+    eps: 'application/postscript', ai: 'application/postscript',
+    doc: 'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls: 'application/vnd.ms-excel',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ppt: 'application/vnd.ms-powerpoint',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    csv: 'text/csv', txt: 'text/plain', rtf: 'application/rtf',
+    mp4: 'video/mp4', mov: 'video/quicktime', mp3: 'audio/mpeg'
+  };
+
+  function uploadType(file) {
+    var name = String((file && file.name) || '');
+    var dot = name.lastIndexOf('.');
+    var ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+    if (EXT_TYPE[ext]) return EXT_TYPE[ext];
+    return (file && file.type) || 'application/octet-stream';
   }
 
   function fileKind(contentType, name) {
@@ -454,6 +487,7 @@
     storagePath: storagePath,
     humanSize: humanSize,
     fileKind: fileKind,
+    uploadType: uploadType,
     kindIcon: function (kind) { return KIND_ICON[kind] || KIND_ICON.file; },
 
     fmt: function (ms) { return ms ? NL.formatDateTime(ms) : '—'; },
