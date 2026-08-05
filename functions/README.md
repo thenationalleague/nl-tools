@@ -1,6 +1,6 @@
 # NL Tools — Cloud Functions
 
-Six functions:
+Eight functions:
 - **`makeProxy`** — generates the 360p preview proxy for NL Cup Footage on upload.
 - **`onFootageDeleted`** — when a footage file is deleted in Storage (console, gsutil,
   or the master ✕), it removes the file's RTDB record(s) and its proxy, so a
@@ -14,6 +14,12 @@ Six functions:
   `pClub` claim. An **RTDB trigger**, not a callable, and in **europe-west1**:
   the org policy blocks granting public invoker to new Cloud Run services, and
   Programme Packs clubs have no Google account. See the file header.
+- **`clubDirectoryAuth`** (`club-directory.js`) — the same shape and the same
+  org-policy reason, for the Club Directory's per-person editor codes.
+- **`handbookRenderOnPublish`** (`handbook.js`) — publishing a handbook edition
+  dispatches `render-handbook-pdf.yml`, so the PDF renders in about two minutes
+  instead of whenever the hourly poll next came round. **This is the only
+  function holding a non-Google credential** — see *The GitHub token* below.
 
 See the headers of `index.js` / `account.js` for details.
 
@@ -22,10 +28,12 @@ site. It runs in the `nl-tools` Firebase project (Blaze), region `europe-west2`.
 
 ## Deploy — via GitHub Actions (no terminal)
 
-Deployment is automated by `.github/workflows/deploy-footage-proxy.yml`, which
+Deployment is automated by `.github/workflows/deploy-functions.yml`, which
 reuses the same Workload Identity Federation auth as the GA pipeline. It runs on
-any push that changes `functions/**`, or on demand (**Actions → Deploy footage
-proxy function → Run workflow**).
+any push that changes `functions/**`, or on demand (**Actions → Deploy Cloud
+Functions → Run workflow**). Note that it deploys **every** function in this
+directory, not the one it is named after — it was called `deploy-footage-proxy.yml`
+until 04/08/2026 and had been doing that the whole time.
 
 **One-time setup** (Google Cloud console, no terminal), so the deploy identity is
 allowed to deploy:
@@ -65,7 +73,7 @@ allowed to deploy:
    SA holds no Firebase roles, so RTDB drops its connection and `createCustomToken`
    would fail. Note the function runs in **europe-west1** — an RTDB trigger must
    sit in the database's region, not the `europe-west2` default the rest use.
-4. **Run it** — Actions tab → *Deploy footage proxy function* → **Run workflow**.
+4. **Run it** — Actions tab → *Deploy Cloud Functions* → **Run workflow**.
 
 ### Required roles, by function
 
@@ -75,7 +83,8 @@ permissions, this is the list to check it against.
 | Identity | Needs | Why |
 |---|---|---|
 | `GCP_SERVICE_ACCOUNT` (deploy) | the roles in step 2 | deploys everything |
-| `firebase-adminsdk-fbsvc@` (runtime) | `roles/eventarc.eventReceiver` | `programmeAuth` is the project's only **RTDB-triggered** function; gen-2 RTDB triggers deliver via Eventarc and the runtime identity must be allowed to receive events. Without it: `403 … Permission 'eventarc.events.receiveEvent' denied`. |
+| `firebase-adminsdk-fbsvc@` (runtime) | `roles/eventarc.eventReceiver` | The **RTDB-triggered** functions (`programmeAuth`, `clubDirectoryAuth`, `handbookRenderOnPublish`) deliver via Eventarc, and the runtime identity must be allowed to receive events. Without it: `403 … Permission 'eventarc.events.receiveEvent' denied`. |
+| `firebase-adminsdk-fbsvc@` (runtime) | `roles/secretmanager.secretAccessor` on `GITHUB_DISPATCH_TOKEN` | `handbookRenderOnPublish` reads that secret at run time. Granted on the secret itself, not project-wide — see *The GitHub token* below. |
 
 `programmeAuth` pins that service account deliberately (see `account.js`): the
 gen-2 default compute SA holds no Firebase roles, so RTDB drops its connection
@@ -90,6 +99,49 @@ install. Logs: `firebase functions:log` — or the **Functions** page in the con
 If you'd rather do a one-off: open **Cloud Shell** in the Firebase console (you're
 already authed as owner), then `git clone` the repo and
 `firebase deploy --only functions --project nl-tools` from the repo root.
+
+## The GitHub token (`handbookRenderOnPublish` only)
+
+Every other automation in this project authenticates to Google keylessly, through
+Workload Identity Federation. Dispatching a GitHub workflow cannot work that way,
+so this one function needs a stored credential — the only one in the project.
+
+**Create it before the function first deploys.** `defineSecret` fails the deploy
+when the secret is missing, which is the right way round, but it does mean
+*Deploy Cloud Functions* will fail until this is done.
+
+Both steps are browser-only. No terminal.
+
+1. **Mint the token** — GitHub → *Settings* → *Developer settings* → **Fine-grained
+   personal access tokens** → *Generate new token*.
+   - Repository access: **Only select repositories** → `thenationalleague/tools`
+   - Permissions → Repository permissions → **Actions: Read and write**. Nothing else.
+   - Set an expiry you will actually notice. When it lapses the dispatch starts
+     failing and the hourly poll silently takes over — the PDF still arrives, so
+     nothing looks broken from the outside. The function logs
+     `Handbook render dispatch failed: 401` when this happens, and that log line
+     is the only symptom you get.
+2. **Store it** — Google Cloud console → *Security* → **Secret Manager** (project
+   `nl-tools`) → *Create secret*.
+   - Name: **`GITHUB_DISPATCH_TOKEN`** (exact — `handbook.js` looks it up by name)
+   - Secret value: paste the token
+   - Then open the secret → *Permissions* → grant
+     `firebase-adminsdk-fbsvc@nl-tools.iam.gserviceaccount.com` the
+     **Secret Manager Secret Accessor** role, so the running function can read it.
+
+To rotate: add a **new version** to the same secret, then re-run *Deploy Cloud
+Functions* so the function picks it up.
+
+### Checking the doorbell works
+
+Publish a handbook edition, then watch **Actions → Render handbook PDF**. A run
+should appear within seconds, and its trigger should read `workflow_dispatch`
+rather than `schedule`. If none appears, the function's logs say why — Firebase
+console → *Functions* → `handbookRenderOnPublish`.
+
+Until that has been seen to work at least once, the hourly schedule in
+`render-handbook-pdf.yml` is what is actually keeping the PDF current. Leave it
+alone until then; dropping it to daily is the follow-up, not part of this.
 
 ## What it does once live
 

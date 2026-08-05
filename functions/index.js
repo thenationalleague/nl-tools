@@ -9,6 +9,10 @@
  *                     — Programme Packs passcode → scoped `pClub` claim, so
  *                       Storage/RTDB rules can enforce write-own for passcode
  *                       (non-portal) clubs. See programme.js.
+ *   handbookRenderOnPublish
+ *                     — publishing a handbook edition dispatches the PDF render
+ *                       workflow, replacing an hourly poll that found nothing to
+ *                       do 23 times out of 24. See handbook.js.
  *
  * Trigger: a file finalised under `footage/national-league-cup/` in the nl-tools bucket.
  * For any file up to MAX_PROXY_BYTES (full matches are much larger → download-only),
@@ -134,6 +138,11 @@ Object.assign(exports, require("./programme"));
 // Club Directory passcode → scoped-claim trigger (clubDirectoryAuth). Same
 // shape and the same org-policy reason as programme.js above.
 Object.assign(exports, require("./club-directory"));
+
+// Handbook publish → GitHub workflow dispatch (handbookRenderOnPublish), so the
+// PDF renders when an edition is actually published instead of being polled for
+// hourly. The only function holding a non-Google credential; see handbook.js.
+Object.assign(exports, require("./handbook"));
 
 exports.onFootageDeleted = onObjectDeleted(
   { bucket: BUCKET, memory: "256MiB" },
