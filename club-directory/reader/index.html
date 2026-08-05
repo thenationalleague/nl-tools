@@ -27,15 +27,15 @@
 
   Not lint-covered: no auth-guard, by design.
 -->
-<link rel="stylesheet" href="/system/nl-brand.css?v=31">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=6">
+<link rel="stylesheet" href="/system/nl-brand.css?v=32">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=9">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
-<script src="/club-directory/_gate.js?v=6"></script>
-<script src="/club-directory/_directory.js?v=6"></script>
+<script src="/club-directory/_gate.js?v=9"></script>
+<script src="/club-directory/_directory.js?v=9"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -130,13 +130,26 @@
       $('app').hidden = false;
       return;
     }
+    /* Every club is listed, because a club missing from the list looks like a
+       club that does not exist. The ones nobody has checked yet are disabled:
+       visibly there, greyed, and unselectable — which says "not ready" rather
+       than "not a club". */
     $('pick').innerHTML = names.map(function (n) {
-      return '<option value="' + esc(n) + '">' + esc(n) + '</option>';
+      var ok = ready(n);
+      return '<option value="' + esc(n) + '"' + (ok ? '' : ' disabled') + '>' +
+        esc(n) + (ok ? '' : ' — not yet checked') + '</option>';
     }).join('');
     $('pick').addEventListener('change', function () { draw(this.value); });
     $('q').addEventListener('input', onSearch);
     $('app').hidden = false;
-    draw(fromHash() || names[0]);
+    var first = fromHash() || names.filter(ready)[0];
+    if (!first) {
+      $('out').innerHTML = '<p class="cd-empty">No club has been checked yet. ' +
+        'They appear here once the National League has been through them.</p>';
+      return;
+    }
+    $('pick').value = first;
+    draw(first);
     window.addEventListener('hashchange', function () {
       var n = fromHash();
       if (n) { $('pick').value = n; draw(n); }
@@ -146,15 +159,24 @@
     $('app').hidden = false;
   });
 
-  /* A club per URL, so a link to one club is a link to that club. */
+  /* Complete means an editor has been through it and said so. Until then the
+     record exists but is not what the League is standing behind, so the reader
+     will not show it. */
+  function ready(n) {
+    var s = (ALL[n] || {}).signedOff;
+    return !!(s && s.at);
+  }
+
+  /* A club per URL, so a link to one club is a link to that club. A link to an
+     unchecked club is not honoured — otherwise the grey-out is decoration. */
   function fromHash() {
     var h = decodeURIComponent((location.hash || '').replace(/^#/, ''));
-    return names.indexOf(h) > -1 ? h : '';
+    return (names.indexOf(h) > -1 && ready(h)) ? h : '';
   }
 
   function draw(name) {
     var rec = ALL[name];
-    if (!rec) { return; }
+    if (!rec || !ready(name)) { return; }
     rec.club = rec.club || name;
     if (location.hash !== '#' + encodeURIComponent(name)) {
       history.replaceState(null, '', '#' + encodeURIComponent(name));
@@ -170,7 +192,12 @@
   }
 
   function onSearch(e) {
-    var hits = NLDirectory.search(ALL, e.target.value);
+    /* Search over the checked clubs only. Returning a person from an unchecked
+       club would publish through the back door what the dropdown is holding
+       back at the front. */
+    var open = {};
+    names.filter(ready).forEach(function (n) { open[n] = ALL[n]; });
+    var hits = NLDirectory.search(open, e.target.value);
     if (!hits) { draw($('pick').value); return; }
     if (!hits.length) {
       $('out').innerHTML = '<p class="cd-empty">Nothing matched that.</p>';

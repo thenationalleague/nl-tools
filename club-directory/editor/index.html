@@ -7,6 +7,12 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.1 — (05/08/2026) The row pen is canon. .ed-pen was the third hand-rolled
+         icon-only button in the repo and the reason .btn--icon was promoted
+         into nl-brand.css v2.33; the local box/colour/size CSS is deleted and
+         only its position survives. The glyph now comes from NL.icon() rather
+         than the tool-local strokeGlyph(), which hardcodes fill/stroke onto
+         the svg and so only ever renders the stroked half of the sprite.
   v1.0 — (04/08/2026) The directory, editable, behind per-person six-digit codes.
 
   What this is
@@ -34,16 +40,16 @@
 
   Not lint-covered: no auth-guard, by design.
 -->
-<link rel="stylesheet" href="/system/nl-brand.css?v=31">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=6">
+<link rel="stylesheet" href="/system/nl-brand.css?v=32">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=9">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
-<script src="/club-directory/_tidy.js?v=6"></script>
-<script src="/club-directory/_gate.js?v=6"></script>
-<script src="/club-directory/_directory.js?v=6"></script>
+<script src="/club-directory/_tidy.js?v=9"></script>
+<script src="/club-directory/_gate.js?v=9"></script>
+<script src="/club-directory/_directory.js?v=9"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -86,39 +92,91 @@
   }
   .cd-search { top: 44px; }
 
-  /* Editable fields. A dotted underline rather than a box: 1,400 boxes on a
-     page is a form, and this is a directory you can correct. */
-  [data-edit] { cursor: text; border-bottom: 1px dashed var(--navy-200); }
-  [data-edit]:hover { background: var(--amber-light); }
-  [data-edit]:focus { outline: none; background: var(--white);
-    box-shadow: var(--focus-ring); border-bottom-color: var(--primary); }
-  [data-edit][data-empty]::before { content: attr(data-empty); color: var(--text-muted); font-style: italic; }
+  /* Nothing is editable until a pen is pressed. Making every field live on
+     tap meant a scroll on a phone could land in a name and change it, and it
+     gave no sign that editing was possible at all. */
+  .cd-row { position: relative; padding-right: 42px; }
+  /* The pen is canon .btn--icon (brand v2.33) — box, colours, hover and the
+     centred glyph all come from there, and the editing state is a swap from
+     .btn--ghost to .btn--primary in addPen/setEditing. All that is this
+     tool's business is where it sits. */
+  .ed-pen { position: absolute; top: 7px; right: 8px; }
 
-  /* The margin marker. Sits in the gutter of the row it belongs to, so it
-     reads as an annotation on that field and not as page furniture. */
-  .ed-mark {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 15px; height: 15px; margin-left: 5px; vertical-align: 1px;
-    border-radius: var(--radius-pill); border: 0; cursor: pointer; padding: 0;
-    background: var(--amber); color: var(--white);
-    font-family: var(--font); font-size: 9px; line-height: 1;
-    font-weight: 900; font-variation-settings: 'wght' 900;
+  .cd-row.is-editing [data-edit] {
+    background: var(--white); border-bottom: 1px dashed var(--navy-300); cursor: text;
   }
-  .ed-mark:hover { background: var(--primary); }
-  .ed-note {
-    margin: 5px 0 0; padding: 8px 10px; background: var(--amber-light);
-    border-radius: var(--radius-sm); font-size: var(--text-xs); line-height: 1.5;
-    color: var(--text); grid-column: 1 / -1;
+  .cd-row.is-editing [data-edit]:focus {
+    outline: none; box-shadow: var(--focus-ring); border-bottom-color: var(--primary);
   }
-  .ed-note b { font-weight: 800; font-variation-settings: 'wght' 800; }
-  .ed-note button {
-    margin-left: 8px; font-family: var(--font); font-size: var(--text-xs);
+
+  /* Provenance sits in the margin, not in the row. A sentence under the field
+     pushed every person apart and read as prose when all it needs to say is
+     what the club sent. These are chips: two or three words, the original
+     value, stacked in the order of the fields they refer to.
+
+     Amber is a correction we made and can undo. Red is a gap the club left,
+     which is not ours to undo and wants chasing instead. Both use the light
+     tokens rather than solid fills — 21% of role entries have no job title
+     and Chester alone has sixteen, so a saturated red would wall the page
+     rather than flag anything. */
+  .ed-pills { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+  .ed-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 2px 9px; border-radius: var(--radius-pill);
+    font-size: var(--text-xs); line-height: 1.5;
     font-weight: 700; font-variation-settings: 'wght' 700;
-    padding: 3px 9px; border-radius: var(--radius-sm);
-    border: 1px solid var(--amber); background: var(--white); color: var(--amber);
-    cursor: pointer;
+    max-width: 100%; overflow-wrap: anywhere;
   }
-  .ed-note button:hover { background: var(--amber); color: var(--white); }
+  .ed-pill--was { background: var(--amber-light); color: var(--amber-deep); }
+  .ed-pill--gap { background: var(--red-light);   color: var(--red); }
+  .ed-pill button {
+    padding: 0; border: 0; background: none; cursor: pointer; color: inherit;
+    font: inherit; text-decoration: underline; opacity: 0.75;
+    /* The chip wraps on the value, which can be long. The action must not:
+       overflow-wrap:anywhere broke "undo" across two lines as "und / o". */
+    white-space: nowrap; flex: 0 0 auto;
+  }
+  .ed-pill button:hover { opacity: 1; }
+
+  /* Wide: a fifth column in the gutter, so the chips annotate the row from
+     outside it. Editor-only — the reader has nothing to put there. */
+  @media (min-width: 861px) {
+    .cd-row {
+      grid-template-columns:
+        minmax(140px, 1.05fr) minmax(120px, 1.05fr) minmax(180px, 1.5fr)
+        minmax(105px, 0.65fr) minmax(150px, 1fr);
+    }
+    .ed-pills { grid-column: 5; grid-row: 1; padding-left: 4px; }
+  }
+  /* Narrow: beneath the whole entry rather than beside any one field. */
+  @media (max-width: 860px) {
+    .ed-pills { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap;
+      align-items: center; margin-top: 6px; }
+  }
+
+  /* Sign-off, foot of the club. The whole point of the tool is that somebody
+     has actually looked at a club, so the state has to be visible before you
+     reach the button and honest about who and when. */
+  .ed-signoff {
+    margin: 26px 0 0; padding: 16px 18px; border-radius: var(--radius);
+    border: 1px solid var(--border); background: var(--white);
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  .ed-signoff.is-done { border-color: var(--green); background: var(--green-light); }
+  .ed-signoff__t { min-width: 0; flex: 1 1 260px; }
+  .ed-signoff__t h3 {
+    margin: 0 0 3px; font-size: var(--text-base);
+    font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy);
+  }
+  .ed-signoff.is-done .ed-signoff__t h3 { color: var(--green); }
+  .ed-signoff__t p { margin: 0; font-size: var(--text-sm); color: var(--text-muted);
+    line-height: 1.5; max-width: 62ch; }
+
+  /* A locked club still reads normally; it just cannot be changed. Hiding the
+     pens rather than disabling them, because a disabled control invites the
+     question "why" and the banner above has already answered it. */
+  .is-locked .ed-pen { display: none; }
+  .is-locked .ed-pill button { display: none; }
 
   /* Merge note, foot of the club. Context rather than alarm, so it is quiet. */
   .ed-merges {
@@ -296,7 +354,9 @@
     }
     wireEditing(name);
     markProvenance(name);
+    markGaps(name, rec);
     showMerges(name);
+    showSignoff(name, rec);
     if (session.role === 'admin') { diagnose(name, rec); }
   }
 
@@ -347,7 +407,46 @@
         return r.section === dept ? i : -1;
       }).filter(function (i) { return i > -1; })[0];
       if (roleIdx != null) { editable(row.children[1], person, 'roles/' + roleIdx + '/title', club); }
+      addPen(row);
     });
+  }
+
+  /* One pen per person. Pressing it turns that row's fields on and puts the
+     cursor in the name; pressing it again, or clicking away, turns them off.
+     Editing stays off until asked for, so a scroll on a phone cannot land in
+     somebody's name and change it. */
+  function addPen(row) {
+    var b = document.createElement('button');
+    /* Canon icon button. aria-label is load-bearing, not decoration: there is
+       no text node in here, so without it the row announces "button". */
+    b.className = 'btn btn--icon btn--ghost ed-pen';
+    b.type = 'button';
+    b.title = 'Edit this entry';
+    b.setAttribute('aria-label', 'Edit this entry');
+    b.appendChild(NL.icon('edit'));
+    b.addEventListener('click', function (e) {
+      e.stopPropagation();
+      setEditing(row, !row.classList.contains('is-editing'));
+    });
+    row.appendChild(b);
+  }
+
+  function setEditing(row, on) {
+    row.classList.toggle('is-editing', on);
+    /* The pen fills in while the row is live. Swapping the canon colour
+       variant rather than restating the colours locally — that restatement
+       is what .btn--icon exists to stop. */
+    var pen = row.querySelector('.ed-pen');
+    if (pen) {
+      pen.classList.toggle('btn--primary', on);
+      pen.classList.toggle('btn--ghost', !on);
+    }
+    var cells = row.querySelectorAll('[data-edit]');
+    cells.forEach(function (c) {
+      if (on) { c.setAttribute('contenteditable', 'plaintext-only'); }
+      else { c.removeAttribute('contenteditable'); }
+    });
+    if (on && cells[0]) { cells[0].focus(); }
   }
 
   function valueAt(person, path) {
@@ -377,7 +476,6 @@
 
   function editable(cell, person, path, club) {
     if (!cell) { return; }
-    cell.setAttribute('contenteditable', 'plaintext-only');
     cell.setAttribute('data-edit', path);
     cell.setAttribute('spellcheck', 'false');
     var before = valueAt(person, path);
@@ -386,14 +484,19 @@
       if (e.key === 'Enter') { e.preventDefault(); cell.blur(); }
       if (e.key === 'Escape') { cell.textContent = before; cell.blur(); }
     });
-    cell.addEventListener('blur', function () {
+    cell.addEventListener('blur', function () { commit(cell); });
+    /* Stored on the node so the put-back button can commit the same way the
+       blur handler does, rather than faking a blur event at it. */
+    cell._commit = function () {
       var now = cell.textContent.trim();
       if (now === before) { return; }
       setAt(person, path, now);
       save(club, person, path, before, now);
       before = now;
-    });
+    };
   }
+
+  function commit(cell) { if (cell && cell._commit) { cell._commit(); } }
 
   /* Straight to the database, as agreed. NL.writeAudit first so the entry
      names the editor and the field rather than just the path that changed. */
@@ -423,44 +526,138 @@
       (byPerson[m[1]] = byPerson[m[1]] || []).push({ tail: m[2] || '', c: c });
     });
     $('out').querySelectorAll('.cd-row').forEach(function (row) {
-      var pid = row.dataset.pid;
-      var list = pid && byPerson[pid];
+      var list = row.dataset.pid && byPerson[row.dataset.pid];
       if (!list) { return; }
       list.forEach(function (item) {
         var cell = null;
         if (item.tail === 'firstName' || item.tail === 'lastName') { cell = row.children[0]; }
         else if (/^roles\/\d+\/title$/.test(item.tail)) { cell = row.children[1]; }
-        if (!cell || cell.querySelector('.ed-mark')) { return; }
-        addMark(cell, row, item.c, club);
+        if (!cell) { return; }
+        addNote(row, cell, item.c);
       });
     });
   }
 
-  function addMark(cell, row, change, club) {
-    var b = document.createElement('button');
-    b.className = 'ed-mark';
-    b.type = 'button';
-    b.textContent = '!';
-    b.title = 'We changed this';
-    b.setAttribute('aria-label', 'We changed this. Show what the club sent.');
-    b.addEventListener('click', function (e) {
-      e.stopPropagation();
-      var open = row.querySelector('.ed-note');
-      if (open) { open.remove(); return; }
-      var note = document.createElement('div');
-      note.className = 'ed-note';
-      note.innerHTML = 'We corrected ' + esc(KIND[change.kind] || change.kind) +
-        '. The club sent <b>' + esc(change.from || '(blank)') + '</b>.' +
-        '<button type="button">Put it back</button>';
-      note.querySelector('button').addEventListener('click', function () {
-        cell.textContent = change.from || '';
-        cell.dispatchEvent(new Event('blur'));
-        note.remove();
-        b.remove();
-      });
-      row.appendChild(note);
+  /* Two or three words. The original value is the explanation, so there is no
+     sentence around it: "Was: dale vince" says everything "We corrected the
+     capitalisation, the club sent dale vince" said, in a third of the room. */
+  function pillsFor(row) {
+    var box = row.querySelector('.ed-pills');
+    if (!box) {
+      box = document.createElement('div');
+      box.className = 'ed-pills';
+      row.appendChild(box);
+    }
+    return box;
+  }
+
+  function addNote(row, cell, change) {
+    var pill = document.createElement('span');
+    pill.className = 'ed-pill ed-pill--was';
+    pill.innerHTML = 'Was: ' + esc(change.from || '(blank)') +
+      ' <button type="button" title="Restore what the club sent">undo</button>';
+    pill.querySelector('button').addEventListener('click', function () {
+      cell.textContent = change.from || '';
+      commit(cell);
+      pill.remove();
     });
-    cell.appendChild(b);
+    pillsFor(row).appendChild(pill);
+  }
+
+  /* Every role entry with no job title. 307 of 1,478 across the 72 clubs, so
+     this is the most common thing the admin team has to chase. Read from the
+     rendered row rather than the record, so it stays true after an edit. */
+  function markGaps(name, rec) {
+    $('out').querySelectorAll('.cd-row').forEach(function (row) {
+      var role = row.children[1];
+      if (role && role.querySelector('em')) { addGap(row, 'No role submitted'); }
+    });
+  }
+
+  /* A gap the club left. Not ours to undo, so no action on it — it is there to
+     be chased, which is what the admin team is for. */
+  function addGap(row, text) {
+    var pill = document.createElement('span');
+    pill.className = 'ed-pill ed-pill--gap';
+    pill.textContent = text;
+    pillsFor(row).appendChild(pill);
+  }
+
+  /* ---------------------------------------------------------- sign-off
+     Completion lives on the club record itself rather than in a node of its
+     own. Editors can already write clubs/$clubName and the reader can already
+     read clubs, so this needs no rules change and no deploy — which matters
+     more than tidiness tonight.
+
+     Both directions confirm. Marking complete is a claim that somebody looked
+     at the whole club, and reopening undoes that claim; neither should happen
+     because a thumb landed on a button. NL.confirm, never the native one. */
+  function signedOffBy(rec) {
+    var s = rec && rec.signedOff;
+    return s && s.at ? s : null;
+  }
+
+  function showSignoff(club, rec) {
+    var done = signedOffBy(rec);
+    var wrap = document.createElement('div');
+    wrap.className = 'ed-signoff' + (done ? ' is-done' : '');
+    wrap.innerHTML =
+      '<div class="ed-signoff__t">' +
+        '<h3>' + (done ? 'Marked complete' : 'Not yet checked') + '</h3>' +
+        '<p>' + (done
+          ? esc((done.by || 'Someone') + ' marked this complete on ' +
+              NL.formatDate(done.at) + '. Editing is locked until it is reopened.')
+          : 'When this club has been looked over and the edits are right, mark it ' +
+            'complete. That locks it, and it is the only thing the reader will show.') +
+        '</p>' +
+      '</div>' +
+      '<button class="btn ' + (done ? 'btn--ghost' : 'btn--primary') + '" id="signoffBtn" ' +
+        'type="button">' + (done ? 'Reopen for editing' : 'Mark complete') + '</button>';
+    $('extra').appendChild(wrap);
+    $('out').classList.toggle('is-locked', !!done);
+    wrap.querySelector('#signoffBtn').addEventListener('click', function () {
+      done ? reopen(club, rec) : markComplete(club, rec);
+    });
+  }
+
+  function markComplete(club, rec) {
+    NL.confirm('Mark ' + club + ' as complete?', {
+      title: 'Mark complete',
+      detail: 'Editing will be locked, and this club becomes visible in the reader. ' +
+              'You can reopen it at any time.',
+      confirmText: 'Mark complete'
+    }).then(function (ok) {
+      if (!ok) { return; }
+      rec.signedOff = { at: Date.now(), by: session.name || 'editor' };
+      NL.writeAudit('directory_signoff', club + ' marked complete by ' +
+        (session.name || 'editor'));
+      persist(club, 'Marked complete');
+    });
+  }
+
+  function reopen(club, rec) {
+    NL.confirm('Reopen ' + club + ' for editing?', {
+      title: 'Reopen',
+      variant: 'danger',
+      detail: 'It will no longer count as checked, and the reader will stop showing it ' +
+              'until it is marked complete again.',
+      confirmText: 'Reopen'
+    }).then(function (ok) {
+      if (!ok) { return; }
+      /* null, not delete: an update() with undefined throws, and null is how
+         RTDB removes a key. */
+      rec.signedOff = null;
+      NL.writeAudit('directory_signoff', club + ' reopened by ' + (session.name || 'editor'));
+      persist(club, 'Reopened');
+    });
+  }
+
+  function persist(club, what) {
+    firebase.database().ref(ROOT + '/clubs/' + club).set(ALL[club])
+      .then(function () { NL.toast(what, 'success'); draw(club); })
+      .catch(function (err) {
+        NL.toast('Could not save: ' + ((err && err.message) || err), 'error');
+      });
   }
 
   /* The merge note, at the foot of the club. Two entries becoming one is the
@@ -468,6 +665,7 @@
      evidence for it was deleted. */
   function showMerges(club) {
     var merges = NLDirectory.arr((PROV[club] || {}).merges);
+    /* Clears the pane, so this must run before showSignoff appends to it. */
     $('extra').innerHTML = !merges.length ? '' :
       '<div class="ed-merges"><h3>Entries we combined</h3>' +
       '<p>The form let a club add the same person once per job, so some people ' +
