@@ -7,6 +7,20 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.12 — (05/08/2026) Email addresses and phone numbers are editable, which
+         for a contacts directory was the wrong thing to be missing. A modal
+         rather than a cell, because they are lists: 9 people hold more than
+         one address and 17 more than one number, so it needs adding to and
+         removing from as well as typing in.
+         Each entry can optionally name the role it is for. Off by default and
+         off for almost everybody — untagged means "wherever this person
+         appears", which is how every existing record already behaves. It is
+         there for clubs like Truro, whose safeguarding lead holds cblack@,
+         commercial@ AND safeguarding@ against exactly those two roles. Nine
+         cases did not justify moving contact details onto the role and
+         restructuring 1,070 records.
+         Also: an (i) on every red chip. The reason is the useful half of a
+         flag and it sat behind a hover with nothing to advertise it.
   v1.11 — (05/08/2026) The club picker says which clubs are done — "Farnham
          Town — COMPLETE". Working through 72 of them, "have I already been
          through this one" comes up before the club is even open, and the
@@ -187,15 +201,15 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=32">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=19">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=20">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
-<script src="/club-directory/_tidy.js?v=19"></script>
-<script src="/club-directory/_gate.js?v=19"></script>
-<script src="/club-directory/_directory.js?v=19"></script>
+<script src="/club-directory/_tidy.js?v=20"></script>
+<script src="/club-directory/_gate.js?v=20"></script>
+<script src="/club-directory/_directory.js?v=20"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -372,6 +386,36 @@
     font-weight: 800; font-variation-settings: 'wght' 800; color: var(--primary);
   }
   .ed-fgroup:first-child { margin-top: 0; }
+
+  /* One line per address or number: the value, who it is for, and a way to
+     take it off. */
+  .ed-clist { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+  .ed-crow { display: flex; align-items: center; gap: 8px; }
+  .ed-cval {
+    flex: 1 1 auto; min-width: 0;
+    font-family: var(--font); font-size: var(--text-sm);
+    padding: 8px 11px; border: 1px solid var(--border);
+    border-radius: var(--radius); background: var(--white); color: var(--text);
+  }
+  .ed-cval:focus { outline: none; box-shadow: var(--focus-ring); border-color: var(--primary); }
+  .ed-cfor {
+    flex: 0 1 190px; min-width: 0;
+    font-family: var(--font); font-size: var(--text-xs);
+    font-weight: 600; font-variation-settings: 'wght' 600;
+    padding: 8px 9px; border: 1px solid var(--border);
+    border-radius: var(--radius); background: var(--white); color: var(--text-muted);
+  }
+  .ed-crow .ed-del { flex: 0 0 auto; }
+
+  /* The reason is the useful half of a red flag, and it sat behind a hover
+     with nothing to say it was there. */
+  .ed-i {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 13px; height: 13px; margin-left: 5px; border-radius: 50%;
+    background: var(--red); color: var(--white);
+    font-size: 9px; font-weight: 800; font-variation-settings: 'wght' 800;
+    font-style: italic; line-height: 1; flex: 0 0 auto;
+  }
 
   .ed-add { margin: 6px 0 26px; }
   .ed-check label { display: flex; align-items: center; gap: 8px; font-weight: 600;
@@ -898,6 +942,15 @@
        even when switching publication ON: the club asked for it off, and
        overriding that quietly across three departments is not the League's
        call to make silently. */
+    var contacts = document.createElement('button');
+    contacts.className = 'btn btn--sm btn--ghost';
+    contacts.type = 'button';
+    contacts.textContent = 'Contact details';
+    contacts.addEventListener('click', function (e) {
+      e.stopPropagation();
+      editContacts(club, person, NLDirectory.rolesOf(person)[ridx].section);
+    });
+
     var pub = document.createElement('button');
     pub.className = 'btn btn--sm btn--ghost ed-pub';
     pub.type = 'button';
@@ -942,6 +995,7 @@
     wrap.appendChild(moveLab);
     wrap.appendChild(move);
     wrap.appendChild(addRole);
+    wrap.appendChild(contacts);
     wrap.appendChild(pub);
     wrap.appendChild(del);
     row.appendChild(wrap);
@@ -1067,6 +1121,153 @@
       if (!ok) { return; }
       person.hideContact = !on;
       saveStructure(club, name + (on ? ' published' : ' marked not for publication'));
+    });
+  }
+
+  /* ------------------------------------------------------ contact details
+     Addresses and numbers were the one thing on a person that could not be
+     corrected, which for a contacts directory is the wrong thing to be
+     missing. A list rather than a cell: 9 people hold more than one address
+     and 17 more than one number, and a list needs adding to and removing from.
+
+     Each entry can name the role it is for. That is off by default and stays
+     off for almost everybody — untagged means "wherever this person appears",
+     which is how every existing record already behaves. It exists for the
+     handful of clubs, Truro chief among them, who give a person a separate
+     address per job. */
+  function contactRow(kind, value, section, roles, ext) {
+    var row = document.createElement('div');
+    row.className = 'ed-crow';
+    /* Every phone record carries an ext field. All 563 are empty today and
+       there is no box to type one into, but rebuilding the list from the form
+       would drop it the moment somebody set one — so it rides along on the
+       row rather than being quietly discarded. */
+    if (ext) { row.dataset.ext = ext; }
+    var input = document.createElement('input');
+    input.className = 'ed-cval';
+    input.value = value || '';
+    input.setAttribute('autocomplete', 'off');
+    input.placeholder = kind === 'email' ? 'name@club.co.uk' : '01234 567890';
+    if (kind === 'email') { input.type = 'email'; }
+
+    var pick = document.createElement('select');
+    pick.className = 'ed-cfor';
+    var all = document.createElement('option');
+    all.value = ''; all.textContent = 'All roles';
+    pick.appendChild(all);
+    roles.forEach(function (sec) {
+      var o = document.createElement('option');
+      o.value = sec; o.textContent = sec;
+      if (sec === section) { o.selected = true; }
+      pick.appendChild(o);
+    });
+
+    var del = document.createElement('button');
+    del.className = 'btn btn--icon btn--ghost ed-del';
+    del.type = 'button';
+    del.title = 'Remove this ' + kind;
+    del.setAttribute('aria-label', 'Remove this ' + kind);
+    del.appendChild(NL.icon('delete'));
+    del.addEventListener('click', function () { row.remove(); });
+
+    row.appendChild(input);
+    row.appendChild(pick);
+    row.appendChild(del);
+    return row;
+  }
+
+  function editContacts(club, person, here) {
+    var name = NLDirectory.fullName(person) || 'this person';
+    var roles = NLDirectory.rolesOf(person).map(function (r) { return r.section; })
+      .filter(function (sec, i, a) { return a.indexOf(sec) === i; });
+
+    var wrap = document.createElement('div');
+    var mkGroup = function (title, hint) {
+      var h = document.createElement('h4');
+      h.className = 'ed-fgroup';
+      h.textContent = title;
+      wrap.appendChild(h);
+      if (hint) {
+        var p2 = document.createElement('p');
+        p2.className = 'form-hint';
+        p2.textContent = hint;
+        wrap.appendChild(p2);
+      }
+      var box = document.createElement('div');
+      box.className = 'ed-clist';
+      wrap.appendChild(box);
+      return box;
+    };
+
+    var emailBox = mkGroup('Email addresses', roles.length > 1
+      ? 'Leave "All roles" unless this address is only for one of their jobs.'
+      : '');
+    NLDirectory.arr(person.emails).forEach(function (e) {
+      var addr = NLDirectory.addrOf(e);
+      if (!addr) { return; }
+      emailBox.appendChild(contactRow('email', addr,
+        (typeof e === 'string') ? '' : (e.section || ''), roles));
+    });
+    var addEmail = document.createElement('button');
+    addEmail.className = 'btn btn--sm btn--ghost';
+    addEmail.type = 'button';
+    addEmail.textContent = 'Add an email address';
+    addEmail.addEventListener('click', function () {
+      emailBox.appendChild(contactRow('email', '', '', roles));
+    });
+    wrap.appendChild(addEmail);
+
+    var phoneBox = mkGroup('Telephone numbers', '');
+    NLDirectory.arr(person.phones).forEach(function (x) {
+      if (!x || !(x.number || '').trim()) { return; }
+      phoneBox.appendChild(contactRow('phone', x.number, x.section || '', roles, x.ext || ''));
+    });
+    var addPhone = document.createElement('button');
+    addPhone.className = 'btn btn--sm btn--ghost';
+    addPhone.type = 'button';
+    addPhone.textContent = 'Add a telephone number';
+    addPhone.addEventListener('click', function () {
+      phoneBox.appendChild(contactRow('phone', '', '', roles));
+    });
+    wrap.appendChild(addPhone);
+
+    var read = function (box) {
+      return [].slice.call(box.querySelectorAll('.ed-crow')).map(function (r) {
+        return { value: r.querySelector('.ed-cval').value.trim(),
+                 section: r.querySelector('.ed-cfor').value,
+                 ext: r.dataset.ext || '' };
+      }).filter(function (x) { return x.value; });
+    };
+
+    NL.modal({
+      title: 'Contact details \u2014 ' + name,
+      body: wrap,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Save contact details', className: 'btn--primary', onClick: function (c) {
+          var em = read(emailBox), ph = read(phoneBox);
+          var wasEm = NLDirectory.emailsOf(person).join(', ');
+          var wasPh = NLDirectory.phonesOf(person).map(function (x) { return x.number; }).join(', ');
+          /* A plain string when it applies everywhere, an object only when it
+             does not — so a record that gains nothing keeps the shape it had
+             and the diff stays readable. */
+          person.emails = em.map(function (x) {
+            return x.section ? { address: x.value, section: x.section } : x.value;
+          });
+          person.phones = ph.map(function (x) {
+            var out = { number: x.value, ext: x.ext || '' };
+            if (x.section) { out.section = x.section; }
+            return out;
+          });
+          var nowEm = NLDirectory.emailsOf(person).join(', ');
+          var nowPh = NLDirectory.phonesOf(person).map(function (x) { return x.number; }).join(', ');
+          c.close();
+          if (nowEm === wasEm && nowPh === wasPh) { return; }
+          if (nowEm !== wasEm) { logEdit(club, 'people/' + (person.id || '') + '/emails', wasEm, nowEm); }
+          if (nowPh !== wasPh) { logEdit(club, 'people/' + (person.id || '') + '/phones', wasPh, nowPh); }
+          saveStructure(club, 'Contact details updated for ' + name);
+        } }
+      ]
     });
   }
 
@@ -1613,7 +1814,9 @@
         var isRole = /^roles\//.test(item.tail);
         if (isRole && roleTail(item.tail) !== row.dataset.ridx) { return; }
         row.classList.add('is-edited');
-        addEditChip(row, item.e, isRole ? 'Job title' : 'Name');
+        addEditChip(row, item.e, item.tail === 'emails' ? 'Email'
+          : item.tail === 'phones' ? 'Phone'
+          : isRole ? 'Job title' : 'Name');
       });
     });
 
@@ -1738,8 +1941,8 @@
     var ul = document.createElement('ul');
     flags.forEach(function (f) {
       var li = document.createElement('li');
-      li.innerHTML = '<span class="ed-pill ed-pill--gap">' + esc(f.label) + '</span> ' +
-        esc(f.why);
+      li.innerHTML = '<span class="ed-pill ed-pill--gap">' + esc(f.label) +
+        '<span class="ed-i" aria-hidden="true">i</span></span> ' + esc(f.why);
       ul.appendChild(li);
     });
     box.appendChild(ul);
@@ -1820,6 +2023,15 @@
     var pill = document.createElement('span');
     pill.className = 'ed-pill ed-pill--gap';
     pill.textContent = text;
+    /* An (i) so the tooltip is discoverable. The reason is the useful half of
+       a red flag and it was hidden behind a hover nothing advertised. */
+    if (why) {
+      var i = document.createElement('span');
+      i.className = 'ed-i';
+      i.textContent = 'i';
+      i.setAttribute('aria-hidden', 'true');
+      pill.appendChild(i);
+    }
     /* The reason goes in the tooltip rather than the chip. "Check spelling"
        is what an editor needs to see at a glance across a whole club; why we
        think so is a sentence, and a sentence in the margin of every row is
