@@ -259,17 +259,24 @@
             ? esc(info.stadiumSponsor)
             : '<span class="cd-f__sub">None</span>'],
           ['Address', addr],
+          /* Bracketed. "3,500 669 seated" read as two numbers run together —
+             the muted colour was carrying the whole distinction, and at a
+             glance it did not. Same for the station distance below. */
           ['Capacity', info.capacity ? num(info.capacity) +
-            (info.seated ? ' <span class="cd-f__sub">' + num(info.seated) + ' seated</span>' : '') : ''],
+            (info.seated ? ' <span class="cd-f__sub">(' + num(info.seated) + ' seated)</span>' : '') : ''],
           ['Pitch', [info.pitchDims, info.pitchType].filter(Boolean).map(esc).join(' &middot; ')],
           ['Nearest station', esc(info.station || '') +
-            (info.stationDistance ? ' <span class="cd-f__sub">' + esc(info.stationDistance) +
-              ' miles</span>' : '')],
-          ['County FA', esc(info.countyFA || '')],
-          ['Switchboard', info.phone
-            ? '<a href="tel:' + esc(tel(info.phone)) + '">' + esc(info.phone) + '</a>' : ''],
+            (info.stationDistance ? ' <span class="cd-f__sub">(' + esc(info.stationDistance) +
+              ' miles)</span>' : '')],
+          /* Main email sits beside the switchboard rather than County FA
+             sitting between them. Two ways of phoning or writing to the club
+             are one thought; which county FA it belongs to is another, and it
+             was splitting the pair across a row break in the grid. */
           ['Main email', info.mainEmail
             ? '<a href="mailto:' + esc(info.mainEmail) + '">' + esc(info.mainEmail) + '</a>' : ''],
+          ['Switchboard', info.phone
+            ? '<a href="tel:' + esc(tel(info.phone)) + '">' + esc(info.phone) + '</a>' : ''],
+          ['County FA', esc(info.countyFA || '')],
           ['Club sponsor', esc(info.spClub || '')],
           ['Shirt front', esc(info.spFront || '')],
           ['Sleeve', esc(info.spSleeve || '')],
