@@ -7,8 +7,17 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
-  v1.2 — (05/08/2026) Four fixes, all of them things that made the tool
-         harder to use than the job it does.
+  v1.2 — (05/08/2026) Four fixes and a second door, all of them things that
+         made the tool harder to use than the job it does.
+         · Re-check all (master only). The bake is one-shot, correctly, which
+           also means a fix to the tidier can never reach a directory that has
+           already been built — and _tidy.js v1.1 turned out to have been
+           missing "Director Of Football" all along. This runs only the two
+           passes that are safe against edited data: minor-word casing, which
+           is idempotent, and the attention scan, which writes nothing. The
+           typo list, the compound split, the merge and the full recase all
+           stay behind the bake, because against a record an editor has since
+           corrected they would be judgements about the editor's work.
          · Hash routing. A club per URL, so an editor can send one to a
            colleague, reopen where they left off, and not lose their place on
            every refresh. The reader and the staff view already had it.
@@ -232,6 +241,7 @@
     <span class="ed-top__t">Directory Editor</span>
     <select class="ed-pick" id="pick" aria-label="Choose a club"></select>
     <span class="ed-top__who" id="who"></span>
+    <button class="ed-out" id="recheck" type="button" hidden>Re-check all</button>
     <button class="ed-out" id="signOut" type="button">Sign out</button>
   </div>
   <div class="cd-wrap">
@@ -280,6 +290,7 @@
     names = Object.keys(ALL).sort();
     NL.installAuditHook();
     if (!names.length) { offerBake(); $('app').hidden = false; return; }
+    offerRecheck();
     $('pick').innerHTML = names.map(function (n) {
       return '<option value="' + esc(n) + '">' + esc(n) + '</option>';
     }).join('');
@@ -301,6 +312,84 @@
     $('out').innerHTML = '<p class="cd-empty">' + esc((err && err.message) || String(err)) + '</p>';
     $('app').hidden = false;
   });
+
+  /* --------------------------------------------------------- the re-check
+     The bake is one-shot by design: re-running it would overwrite whatever
+     the editors have since put right. That is correct, and it also means a
+     fix to the tidier can never reach a directory that has already been
+     built — which is exactly what happened when _tidy.js v1.1 turned out to
+     have been missing "Director Of Football" all along.
+
+     So there is a second, much smaller door. It runs only the two passes
+     that are safe to run against edited data:
+
+       · minorCase, which lowercases interior minor words in a job title.
+         Idempotent, and it cannot touch anything but the case of and/of/for.
+       · flagAttention, which writes no data at all — it only reports.
+
+     It does NOT re-run the typo list, the compound split, the merge or the
+     full recase. Those make judgements about what the club originally sent,
+     and against a record an editor has since corrected they would be
+     judgements about the editor's work instead.
+
+     Master key only, and it says what it did rather than reloading silently. */
+  function offerRecheck() {
+    if (session.role !== 'admin') { return; }
+    $('recheck').hidden = false;
+    $('recheck').addEventListener('click', runRecheck);
+  }
+
+  function runRecheck() {
+    NL.confirm(
+      'Re-check every club for minor-word capitalisation ("Director Of Football"), ' +
+      'and re-scan for anything that needs an editor to look at it — a mailbox that ' +
+      'does not match the name, a phone number the wrong length, one job title used ' +
+      'in two departments.\n\n' +
+      'Nothing else is touched. Corrections editors have already made stay exactly ' +
+      'as they are.',
+      { title: 'Re-check all clubs', confirmText: 'Re-check' }
+    ).then(function (ok) {
+      if (!ok) { return; }
+      var btn = $('recheck');
+      btn.disabled = true; btn.textContent = 'Checking…';
+      var db = firebase.database(), updates = {}, cased = 0, flagged = 0, clubs = 0;
+      Object.keys(ALL).forEach(function (club) {
+        var rec = ALL[club], touched = false;
+        var extra = [];
+        NLTidy.arr(rec.people).forEach(function (p, pi) {
+          NLTidy.arr(p.roles).forEach(function (r, ri) {
+            var t = (r.title || '').trim();
+            if (!t) { return; }
+            var out = NLTidy.minorCase(t);
+            if (out === t) { return; }
+            r.title = out; touched = true; cased++;
+            extra.push({ path: 'people/' + (p.id || ('i' + pi)) + '/roles/' + ri + '/title',
+                         from: t, to: out, kind: 'case' });
+          });
+        });
+        var att = NLTidy.flagAttention(rec);
+        flagged += att.length;
+        var prov = PROV[club] || {};
+        var changes = NLTidy.arr(prov.changes).concat(extra);
+        if (touched) { updates['clubs/' + club] = rec; clubs++; }
+        updates['provenance/' + club] = { changes: changes,
+          merges: NLTidy.arr(prov.merges), attention: att };
+        PROV[club] = updates['provenance/' + club];
+      });
+      NL.writeAudit('directory_recheck',
+        cased + ' title(s) recased across ' + clubs + ' club(s), ' +
+        flagged + ' flagged for attention (' + (session.name || 'master') + ')');
+      db.ref(ROOT).update(updates).then(function () {
+        NL.toast(cased + ' title(s) corrected, ' + flagged + ' flagged for attention',
+          'success');
+        btn.disabled = false; btn.textContent = 'Re-check all';
+        if (current) { draw(current); }
+      }).catch(function (err) {
+        NL.toast('Could not save: ' + ((err && err.message) || err), 'error');
+        btn.disabled = false; btn.textContent = 'Re-check all';
+      });
+    });
+  }
 
   /* ------------------------------------------------------------ the bake
      Only offered when the node is empty, only to the master key, and it
