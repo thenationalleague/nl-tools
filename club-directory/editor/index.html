@@ -41,15 +41,15 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=32">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=7">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=8">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
-<script src="/club-directory/_tidy.js?v=7"></script>
-<script src="/club-directory/_gate.js?v=7"></script>
-<script src="/club-directory/_directory.js?v=7"></script>
+<script src="/club-directory/_tidy.js?v=8"></script>
+<script src="/club-directory/_gate.js?v=8"></script>
+<script src="/club-directory/_directory.js?v=8"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -109,26 +109,49 @@
     outline: none; box-shadow: var(--focus-ring); border-bottom-color: var(--primary);
   }
 
-  /* Provenance reads as a note, not a badge. It sits under the field it
-     describes on a phone, and in the spare right-hand column on a wide
-     screen, so it annotates rather than interrupts. Always visible: a change
-     nobody clicks is a change nobody knows about. */
-  .ed-note {
-    grid-column: 1 / -1; margin: 4px 0 0;
-    font-size: var(--text-xs); line-height: 1.5; color: var(--text-muted);
-    border-left: 2px solid var(--amber); padding: 2px 0 2px 9px;
-  }
-  .ed-note b { color: var(--text); font-weight: 700; font-variation-settings: 'wght' 700; }
-  .ed-note button {
-    margin-left: 8px; padding: 0; border: 0; background: none; cursor: pointer;
-    font-family: var(--font); font-size: var(--text-xs);
+  /* Provenance sits in the margin, not in the row. A sentence under the field
+     pushed every person apart and read as prose when all it needs to say is
+     what the club sent. These are chips: two or three words, the original
+     value, stacked in the order of the fields they refer to.
+
+     Amber is a correction we made and can undo. Red is a gap the club left,
+     which is not ours to undo and wants chasing instead. Both use the light
+     tokens rather than solid fills — 21% of role entries have no job title
+     and Chester alone has sixteen, so a saturated red would wall the page
+     rather than flag anything. */
+  .ed-pills { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+  .ed-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 2px 9px; border-radius: var(--radius-pill);
+    font-size: var(--text-xs); line-height: 1.5;
     font-weight: 700; font-variation-settings: 'wght' 700;
-    color: var(--primary); text-decoration: underline;
+    max-width: 100%; overflow-wrap: anywhere;
   }
+  .ed-pill--was { background: var(--amber-light); color: var(--amber-deep); }
+  .ed-pill--gap { background: var(--red-light);   color: var(--red); }
+  .ed-pill button {
+    padding: 0; border: 0; background: none; cursor: pointer; color: inherit;
+    font: inherit; text-decoration: underline; opacity: 0.75;
+    /* The chip wraps on the value, which can be long. The action must not:
+       overflow-wrap:anywhere broke "undo" across two lines as "und / o". */
+    white-space: nowrap; flex: 0 0 auto;
+  }
+  .ed-pill button:hover { opacity: 1; }
+
+  /* Wide: a fifth column in the gutter, so the chips annotate the row from
+     outside it. Editor-only — the reader has nothing to put there. */
   @media (min-width: 861px) {
-    /* Fourth column is the phone, which is short; the note tucks under it
-       rather than pushing the row apart. */
-    .ed-note { grid-column: 3 / -1; margin-top: 2px; }
+    .cd-row {
+      grid-template-columns:
+        minmax(140px, 1.05fr) minmax(120px, 1.05fr) minmax(180px, 1.5fr)
+        minmax(105px, 0.65fr) minmax(150px, 1fr);
+    }
+    .ed-pills { grid-column: 5; grid-row: 1; padding-left: 4px; }
+  }
+  /* Narrow: beneath the whole entry rather than beside any one field. */
+  @media (max-width: 860px) {
+    .ed-pills { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap;
+      align-items: center; margin-top: 6px; }
   }
 
   /* Merge note, foot of the club. Context rather than alarm, so it is quiet. */
@@ -307,6 +330,7 @@
     }
     wireEditing(name);
     markProvenance(name);
+    markGaps(name, rec);
     showMerges(name);
     if (session.role === 'admin') { diagnose(name, rec); }
   }
@@ -489,20 +513,49 @@
     });
   }
 
-  /* The note says what the club sent and offers to put it back. No badge to
-     press first: a change nobody clicks is a change nobody knows about. */
+  /* Two or three words. The original value is the explanation, so there is no
+     sentence around it: "Was: dale vince" says everything "We corrected the
+     capitalisation, the club sent dale vince" said, in a third of the room. */
+  function pillsFor(row) {
+    var box = row.querySelector('.ed-pills');
+    if (!box) {
+      box = document.createElement('div');
+      box.className = 'ed-pills';
+      row.appendChild(box);
+    }
+    return box;
+  }
+
   function addNote(row, cell, change) {
-    var note = document.createElement('div');
-    note.className = 'ed-note';
-    note.innerHTML = 'We corrected ' + esc(KIND[change.kind] || change.kind) +
-      '. The club sent <b>' + esc(change.from || '(blank)') + '</b>.' +
-      '<button type="button">Put back</button>';
-    note.querySelector('button').addEventListener('click', function () {
+    var pill = document.createElement('span');
+    pill.className = 'ed-pill ed-pill--was';
+    pill.innerHTML = 'Was: ' + esc(change.from || '(blank)') +
+      ' <button type="button" title="Restore what the club sent">undo</button>';
+    pill.querySelector('button').addEventListener('click', function () {
       cell.textContent = change.from || '';
       commit(cell);
-      note.remove();
+      pill.remove();
     });
-    row.appendChild(note);
+    pillsFor(row).appendChild(pill);
+  }
+
+  /* Every role entry with no job title. 307 of 1,478 across the 72 clubs, so
+     this is the most common thing the admin team has to chase. Read from the
+     rendered row rather than the record, so it stays true after an edit. */
+  function markGaps(name, rec) {
+    $('out').querySelectorAll('.cd-row').forEach(function (row) {
+      var role = row.children[1];
+      if (role && role.querySelector('em')) { addGap(row, 'No role submitted'); }
+    });
+  }
+
+  /* A gap the club left. Not ours to undo, so no action on it — it is there to
+     be chased, which is what the admin team is for. */
+  function addGap(row, text) {
+    var pill = document.createElement('span');
+    pill.className = 'ed-pill ed-pill--gap';
+    pill.textContent = text;
+    pillsFor(row).appendChild(pill);
   }
 
   /* The merge note, at the foot of the club. Two entries becoming one is the
