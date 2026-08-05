@@ -39,7 +39,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
 <!-- The tidier, shared with the directory bake so the two cannot drift. -->
-<script src="/club-directory/_tidy.js?v=15"></script>
+<script src="/club-directory/_tidy.js?v=16"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -359,7 +359,7 @@
   var token = new URLSearchParams(location.search).get('t') || '';
   var club = '', sub = null, cfg = {};
   var listPicks = {}, mergedNames = [], found = {}, typos = 0, splits = [],
-      tidied = { names: 0, titles: 0, emails: 0 };
+      tidied = { names: 0, titles: 0, emails: 0 }, infoFixes = [];
 
   function $(id) { return document.getElementById(id); }
   var esc = NL.escHtml;
@@ -570,6 +570,13 @@
     typos = fixTypos(probe);
     splits = splitCompound(probe);
     tidied = tidyCase(probe);
+    /* The club's own details go through the tidier too now, so they have to be
+       stated here as well. A page that promises 72 clubs what we intend to
+       change is only worth anything while it lists everything we change. */
+    infoFixes = [];
+    tidyInfo(probe, function (path, from, to) {
+      infoFixes.push({ key: path.replace(/^info\//, ''), from: from, to: to });
+    });
     mergedNames = mergeByName(probe);
     if (!apply) { return rec; }
     var people = rec.people || [];
@@ -610,6 +617,7 @@
   var arr = NLTidy.arr;   /* RTDB hands arrays back as objects; see _tidy.js */
   var fixTypos = NLTidy.fixTypos, splitCompound = NLTidy.splitCompound,
       tidyCase = NLTidy.tidyCase, mergeByName = NLTidy.mergeByName,
+      tidyInfo = NLTidy.tidyInfo,
       leadNames = NLTidy.leadNames, fullName = NLTidy.fullName;
 
   /* ------------------------------------------------------------ render */
@@ -650,6 +658,16 @@
       fixedList.push('Split job titles that cover two roles, so each department ' +
         'shows the one that fits (eg. ' + esc(splits[0].who) + '’s ' +
         '<b>' + esc(splits[0].from) + '</b>)');
+    }
+    /* Named by what actually changed on this club's record, with their own
+       value as the example — a generic "tidy your details" tells a club
+       nothing they can check. */
+    if (infoFixes.length) {
+      var eg = infoFixes[0];
+      fixedList.push('Tidy the club’s own details where the format is off ' +
+        '(eg. <b>' + esc(eg.from) + '</b> → <b>' + esc(eg.to) + '</b>)' +
+        (infoFixes.length > 1 ? ', and ' + (infoFixes.length - 1) +
+          (infoFixes.length === 2 ? ' other like it' : ' others like it') : ''));
     }
     if (fixedList.length) {
       $('fixedBlock').style.display = '';
