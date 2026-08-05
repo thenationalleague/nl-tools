@@ -155,7 +155,7 @@ The new tool's `index.html` must keep the canonical `?v=N` values from the templ
 - **Gated staff/club tools** — dirs with `index.html` referencing `/system/auth-guard.js`, either top-level (`vacancies/`) or one level down (`graphics/totw/`). Behind Firebase Auth, use the shared canon. Listed by `lint-tools.sh`.
 - **Fan-facing embeds** — `embeds/*.html` (score-predictor, MOTM, vidiprinter, transfer-centre, live-blog, results-ticker, match-centre). Pasted into the Urban Zoo CMS. The CMS strips `<script src=...>` tags, so Firebase has to be loaded dynamically via `document.createElement('script')` with `.onload` chaining. Inline `<style>`, `<link>`, inline `<script>` survive. See `embeds/widget-handover.md` for the invariants — copy `score-predictor.html` as the starting point for any new embed. These do **not** use `auth-guard.js` and are out of scope for `lint-tools.sh`.
 
-`widgets/*.js` are a third bucket: standalone JS widgets (news ticker, club-news feed, transfers ticker, results ticker) embedded on the public site.
+`widgets/*.js` are a third bucket: standalone JS widgets (news ticker, transfers ticker, results ticker) embedded on the public site.
 
 ## Deployment — nothing needs a terminal
 
@@ -189,10 +189,17 @@ is pasted into the console by hand.
 ## Data pipelines (GitHub Actions)
 
 - `.github/workflows/rebuild-index.yml` — daily 03:00 UTC. Runs `fetch-ga-metrics.js` + `fetch-ga-hourly.js` + `rebuild-index.js`. Commits to `assets/data/articles-index.json`, `ga-metrics.json`, `ga-hourly.json`, `ga-hourly-archive.json`. Authenticates to GCP via Workload Identity Federation (no JSON key).
-- `.github/workflows/build-club-news.yml` — every :15 and :45 of the hour. Python script (`build-club-news.py`) scrapes club news; commits `assets/data/club-news.json` and `club-news-failures.json`. Concurrency-guarded with `cancel-in-progress`.
-- `.github/workflows/backfill-ga-archive.yml` — one-shot/manual backfill into `ga-hourly-archive.json`.
 
-Both index-rebuild and club-news jobs handle concurrent runs by `git fetch origin main` + rebase before retrying push (up to 3 attempts).
+The index-rebuild job handles concurrent runs by `git fetch origin main` + rebase before retrying push (up to 3 attempts).
+
+The club-news pipeline (`build-club-news.yml`, its debug twin, the two
+`widgets/club-news-*.js` consumers and `assets/data/club-news.json`) was
+removed on 05/08/2026. The workflow had been disabled since 20/04/2026, so the
+committed JSON — and therefore anything embedding those widgets — had been
+serving April's headlines ever since. Deleted rather than revived: nothing was
+asking for it back in three and a half months. Same date, `backfill-ga-archive.yml`
+and `scripts/backfill-ga-hourly-archive.js` went too, having run once in May
+2026 to seed the archive. Recover either from git history if a need reappears.
 
 ## Conventions worth knowing
 

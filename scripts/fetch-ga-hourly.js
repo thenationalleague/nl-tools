@@ -15,8 +15,11 @@
    The archive is read on demand when the user picks "All time" — it
    accumulates forward from the first run that has v2.0 of this script.
 
-   For historical data prior to the first v2.0 run, run
-   scripts/backfill-ga-hourly-archive.js with a start date.
+   Historical data prior to the first v2.0 run was seeded once, on
+   03/05/2026, by scripts/backfill-ga-hourly-archive.js. That script and
+   its backfill-ga-archive.yml workflow were removed on 05/08/2026 having
+   done the job; recover them from git history if a range ever needs
+   re-pulling (e.g. GA4 backdates events).
 
    AUTH
      Same WIF setup as fetch-ga-metrics.js. No JSON keys needed.
