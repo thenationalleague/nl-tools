@@ -7,6 +7,12 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.11 — (05/08/2026) The club picker says which clubs are done — "Farnham
+         Town — COMPLETE". Working through 72 of them, "have I already been
+         through this one" comes up before the club is even open, and the
+         answer was two clicks away on the club itself. Rebuilt after every
+         sign-off and reopen rather than only at boot: a label that is right
+         when the page loads and stale by the third club is worse than none.
   v1.10 — (05/08/2026) Two bugs in the green markers.
          · Enter committed the value and left the row open — contenteditable
            still on, the action strip still showing — so the edit had happened
@@ -181,15 +187,15 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=32">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=18">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=19">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
-<script src="/club-directory/_tidy.js?v=18"></script>
-<script src="/club-directory/_gate.js?v=18"></script>
-<script src="/club-directory/_directory.js?v=18"></script>
+<script src="/club-directory/_tidy.js?v=19"></script>
+<script src="/club-directory/_gate.js?v=19"></script>
+<script src="/club-directory/_directory.js?v=19"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -542,9 +548,7 @@
     NL.installAuditHook();
     if (!names.length) { offerBake(); $('app').hidden = false; return; }
     offerRecheck();
-    $('pick').innerHTML = names.map(function (n) {
-      return '<option value="' + esc(n) + '">' + esc(n) + '</option>';
-    }).join('');
+    fillPicker();
     $('pick').addEventListener('change', function () { draw(this.value); });
     $('q').addEventListener('input', onSearch);
     $('app').hidden = false;
@@ -718,6 +722,25 @@
   }
 
   /* ------------------------------------------------------------ render */
+  /* Which clubs are done, in the list you pick from. Working through 72 of
+     them, the question "have I already been through this one" comes up before
+     the club is even open — and the answer was two clicks away on the club
+     itself.
+
+     Rebuilt rather than patched, and called again after every sign-off and
+     reopen: a label that is right at boot and stale by the third club is
+     worse than no label. The selection is put back afterwards because
+     replacing the options clears it. */
+  function fillPicker() {
+    var was = $('pick').value;
+    $('pick').innerHTML = names.map(function (n) {
+      var done = signedOffBy(ALL[n]);
+      return '<option value="' + esc(n) + '">' + esc(n) +
+        (done ? ' \u2014 COMPLETE' : '') + '</option>';
+    }).join('');
+    if (was) { $('pick').value = was; }
+  }
+
   function fromHash() {
     var h = decodeURIComponent((location.hash || '').replace(/^#/, ''));
     return names.indexOf(h) > -1 ? h : '';
@@ -1876,7 +1899,7 @@
 
   function persist(club, what) {
     firebase.database().ref(ROOT + '/clubs/' + club).set(ALL[club])
-      .then(function () { NL.toast(what, 'success'); draw(club); })
+      .then(function () { NL.toast(what, 'success'); fillPicker(); draw(club); })
       .catch(function (err) {
         NL.toast('Could not save: ' + ((err && err.message) || err), 'error');
       });
