@@ -3,7 +3,10 @@
 <head>
 <!--
   Programme Packs — club library (standalone, passcode)
-  Version: v1.10 (04/08/2026) - making a folder no longer moves you into it,
+  Version: v1.11 (04/08/2026) - a dropped tree keeps its shape (six levels, not
+           three) and a .zip uploads: the content type is canonicalised rather
+           than taken from a Windows registry lookup.
+           v1.10 (04/08/2026) - making a folder no longer moves you into it,
            which was silently nesting the next one; a folder holding no files
            can be deleted, from its own menu, taking empty subfolders with it.
            v1.9 (04/08/2026) - a dropped folder arrives as a folder: the tree
@@ -310,7 +313,16 @@
 
   /* ── Data helpers ─────────────────────────────────────────────────────── */
 
-  var MAX_DEPTH = 3;   // deep enough for Photos › 2026-27 › Away; not a filesystem
+  /* Six, not three. Three was "deep enough for Photos › 2026-27 › Away", which
+     is true of a folder someone builds here by hand and quite wrong for one
+     dragged in off a desktop — a real working folder is routinely four or five
+     deep, and everything past the ceiling gets flattened into one heap. That
+     happened on a drop of four folders and some loose files on 04/08/2026: the
+     structure the club had was exactly the structure they wanted, and the tool
+     threw it away. A cap still exists, because the breadcrumb and the Move
+     picker both have to stay readable, but it is now past where real folders
+     live rather than under it. */
+  var MAX_DEPTH = 6;
 
   /* Folders are a tree via parentId (absent = top level) and always render
      alphabetically within their parent. Ordering is deliberately not editable:
@@ -1047,8 +1059,15 @@
       .then(function () {
         if (!counts.files && !counts.folders) { NL.toast('Nothing to upload in there', 'info'); return; }
         NL.toast(counts.files + ' file' + (counts.files === 1 ? '' : 's') +
-          (counts.folders ? ' into ' + counts.folders + ' folder' + (counts.folders === 1 ? '' : 's') : '') +
-          (counts.flattened ? ' \u00b7 deeper folders flattened to fit' : ''), 'success');
+          (counts.folders ? ' into ' + counts.folders + ' folder' + (counts.folders === 1 ? '' : 's') : ''),
+          'success');
+        /* Its own toast, and not a success one. Flattening loses the structure
+           the club built, so it cannot ride along as a clause at the end of a
+           green message nobody reads to the end. */
+        if (counts.flattened) {
+          NL.toast(counts.flattened + ' folder' + (counts.flattened === 1 ? ' was' : 's were') +
+            ' deeper than ' + MAX_DEPTH + ' levels \u2014 their files came in flat', 'error');
+        }
         PP.audit('upload-folder', { club: code,
           detail: counts.files + ' file(s), ' + counts.folders + ' folder(s)' });
       })
@@ -1406,8 +1425,12 @@
     if (uploads) uploads.appendChild(row);
     var fill = row.querySelector('.up-row__fill');
 
+    /* Not file.type: on Windows a .zip arrives as application/x-zip-compressed,
+       which the Storage rule refused. PP.uploadType canonicalises by extension
+       so the rule sees application/zip and the download behaves later. */
+    var type = PP.uploadType(file);
     var task = PP.storageRef(path).put(file, {
-      contentType: file.type || 'application/octet-stream',
+      contentType: type,
       cacheControl: 'public,max-age=3600'
     });
 
@@ -1416,7 +1439,12 @@
       fill.style.transform = 'scaleX(' + pct + ')';
     }, function (err) {
       row.remove();
-      NL.toast('Upload failed: ' + err.message, 'error');
+      /* storage/unauthorized is almost never "you are not signed in" here — the
+         session got this far. It is the rule refusing the file, and the caller
+         deserves to know which of its terms it fell foul of. */
+      NL.toast(err && err.code === 'storage/unauthorized'
+        ? file.name + ' was refused (' + type + ', ' + PP.humanSize(file.size) + ')'
+        : 'Upload failed: ' + err.message, 'error');
       settle();
     }, function () {
       /* Store the download URL on the record at upload time. Rendering a
@@ -1427,7 +1455,7 @@
           name: file.name.slice(0, 160),
           folderId: folderId,
           size: file.size,
-          contentType: file.type || 'application/octet-stream',
+          contentType: type,
           storagePath: path,
           url: url,
           uploadedAt: PP.TS()

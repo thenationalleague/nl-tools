@@ -31,7 +31,7 @@ hand: a `usedFrom`/`usedUntil` window existed briefly and was removed, because
 adverts change rarely enough that maintaining dates cost more than it saved.
 
 **Folders are owned by the club, and optional.** Nothing is pre-created; a club
-makes what it needs, nested up to three deep, or none at all. **The club root is
+makes what it needs, nested up to six deep, or none at all. **The club root is
 a folder like any other** — files can be dropped, listed, selected, moved and
 removed there without inventing a folder to hold them. They carry
 `folderId: '_root'`, so a root file is an ordinary record with an ordinary
@@ -50,9 +50,25 @@ type, so the obvious code stores a useless 0-byte asset named after the folder
 and discards its contents; the entry API (`webkitGetAsEntry`) is the only way to
 see that an item is a directory and walk into it. A name that already exists at
 that level is **reused, not duplicated** — the way copying into a folder on a
-desktop merges. Anything deeper than the three-level ceiling is flattened into
-the deepest folder that fits, and the toast says so, because refusing the drop
-would mean the club reorganising on their own machine and trying again.
+desktop merges. Anything deeper than the **six**-level ceiling is flattened into
+the deepest folder that fits, and says so in a toast of its own — refusing the
+drop would mean the club reorganising on their own machine and trying again, but
+flattening loses the structure they built, so it cannot ride along as a clause
+on a green message.
+
+The ceiling was three until 04/08/2026, which was right for a folder built here
+by hand and wrong for one dragged off a desktop: a real working folder is
+routinely four or five deep, and a drop of four folders came in as one flat
+heap. A cap still exists so the breadcrumb and the Move picker stay readable.
+
+**Content type is canonicalised on upload**, extension first, browser second.
+`File.type` comes from the OS registry on Windows and reports a `.zip` as
+`application/x-zip-compressed`; the Storage rule refused `application/x-*`
+outright, so an ordinary 51MB zip failed with a permission error. The rule now
+blocks only what *executes* when a browser opens the download URL inline —
+HTML, XHTML, JavaScript — because content type is client-supplied anyway, so a
+prefix ban stopped nobody determined and only ever caught honest uploads. What
+bounds that path is write-own.
 
 Uploads run **four at a time**. A dropped folder can be two hundred stills, and
 firing two hundred simultaneous Storage puts makes every one of them slower
@@ -62,7 +78,7 @@ stalled bars.
 **Folders and files select and move together.** Tick either, then Move, and
 folders re-parent (`parentId`) while files re-file (`folderId`) in one go. The
 picker will not offer a folder its own subtree, or a target that would push the
-branch past the three-level ceiling — a folder beyond it falls off the tree walk
+branch past the depth ceiling — a folder beyond it falls off the tree walk
 and reappears as an orphan at the top, which reads as "my folder moved somewhere
 random". Remove stays files-only: a folder is deleted from its own ⋯ menu or its head,
 and only when nothing would be lost with it.
