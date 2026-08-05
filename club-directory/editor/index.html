@@ -7,6 +7,30 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.4 — (05/08/2026) Add, remove and move — the three things the editor
+         could not do, plus the trap that fell out of adding them.
+         · Add someone: a button at the foot of the club, because a department
+           with nobody in it is not rendered, so "add to Ticketing" cannot
+           hang off a Ticketing heading that does not exist.
+         · Remove: one button covering both of Richard's asks. Removing
+           somebody's only role removes them; removing one of several leaves
+           them where they still belong, and the confirm says which.
+         · Move: a department picker on the row, live only while editing.
+         · The rename trap. Josh Knowles is Head of Media AND programme
+           editor. A new hire takes the programme, an editor types over the
+           name in that row, and Josh becomes Jane in the media department
+           too — carrying Josh's email into Jane's entry. That was always the
+           behaviour; syncing sibling rows in v1.3 only made it visible.
+           Renaming somebody with more than one role now asks which was meant.
+           The replacement takes the job title and none of the contact
+           details, because a new person wearing the old person's email looks
+           correct and is wrong.
+         · Anyone the League adds is stamped and carries an "Added by us"
+           chip. The sign-off page shows clubs their own submission; quietly
+           adding to it would be putting words in their mouth.
+         All three are blocked on a signed-off club, and all three confirm,
+         because nothing here has an undo — the amber chips can put a
+         correction back, a removed person is gone.
   v1.3 — (05/08/2026) Editing the name of somebody who appears in two
          departments. The record was always right — one person, both roles,
          saved once — but the other row on screen kept the old name until a
@@ -138,6 +162,33 @@
      .btn--ghost to .btn--primary in addPen/setEditing. All that is this
      tool's business is where it sits. */
   .ed-pen { position: absolute; top: 7px; right: 8px; }
+
+  /* Move and remove appear only on the row being edited. Off the pen they
+     would be three controls on every row of a hundred-row club, and the whole
+     reason the pen exists is that a page where everything is live is a page
+     where a scroll on a phone changes somebody's name. */
+  .ed-acts { display: none; }
+  .cd-row.is-editing .ed-acts {
+    display: flex; align-items: center; gap: 6px;
+    grid-column: 1 / -1; margin-top: 8px;
+  }
+  .ed-dept {
+    font-family: var(--font); font-size: var(--text-xs);
+    font-weight: 600; font-variation-settings: 'wght' 600;
+    padding: 4px 8px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); background: var(--white); color: var(--text);
+    max-width: 200px;
+  }
+  .ed-dept:focus { outline: none; box-shadow: var(--focus-ring); border-color: var(--primary); }
+  /* Removing is the one act here with no undo, so it reads as the danger it
+     is rather than sitting quietly next to the department picker. */
+  .ed-del { color: var(--red); }
+  .ed-del:hover { background: var(--red-light); }
+
+  .ed-add { margin: 6px 0 26px; }
+  .ed-check label { display: flex; align-items: center; gap: 8px; font-weight: 600;
+    font-variation-settings: 'wght' 600; }
+  .ed-check input { width: auto; }
 
   .cd-row.is-editing [data-edit] {
     background: var(--white); border-bottom: 1px dashed var(--navy-300); cursor: text;
@@ -494,7 +545,9 @@
     wireEditing(name);
     markProvenance(name);
     markAttention(name);
+    markAdded(name);
     markGaps(name, rec);
+    showAdd(name, rec);
     showMerges(name);
     showSignoff(name, rec);
     if (session.role === 'admin') { diagnose(name, rec); }
@@ -556,7 +609,174 @@
         editable(row.children[1], person, 'roles/' + roleIdx + '/title', club);
       }
       addPen(row, !!signedOffBy(rec));
+      if (!signedOffBy(rec) && roleIdx != null) { addRowActions(row, club, person, roleIdx); }
     });
+  }
+
+  /* ------------------------------------------------- structural changes
+     Correcting a field and changing the shape of a club are different acts.
+     A field edit rewrites one value in place and the row stays where it is;
+     adding, removing or moving someone changes which rows exist and which
+     department they sit under, so the club has to be redrawn afterwards.
+
+     All three are blocked on a signed-off club, and all three confirm before
+     they do anything — not because a misclick is catastrophic, but because
+     nothing here has an undo. The amber chips can put a correction back; a
+     removed person is gone. */
+  function saveStructure(club, what) {
+    NL.writeAudit('directory_structure',
+      club + ' — ' + what + ' (' + (session.name || 'editor') + ')');
+    return firebase.database().ref(ROOT + '/clubs/' + club).set(ALL[club])
+      .then(function () { NL.toast(what, 'success'); draw(club); })
+      .catch(function (err) {
+        NL.toast('Could not save: ' + ((err && err.message) || err), 'error');
+      });
+  }
+
+  /* Ids look like the ones the submission form mints — 'p' plus base-36 — so
+     a person added here is indistinguishable from one that came through the
+     form, which is what provenance and the sign-off links both key on. */
+  function newId() {
+    return 'p' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 5);
+  }
+
+  function deptSelect(value) {
+    var s = document.createElement('select');
+    s.className = 'ed-dept';
+    NLDirectory.ORDER.forEach(function (name) {
+      var o = document.createElement('option');
+      o.value = name; o.textContent = name;
+      if (name === value) { o.selected = true; }
+      s.appendChild(o);
+    });
+    return s;
+  }
+
+  /* Move and remove, both live only while the row is being edited. Off the
+     pen they would be five controls per row across a hundred rows, and the
+     whole reason the pen exists is that a page where everything is live is a
+     page where a scroll changes somebody's name. */
+  function addRowActions(row, club, person, ridx) {
+    var wrap = document.createElement('div');
+    wrap.className = 'ed-acts';
+
+    var move = deptSelect(NLDirectory.rolesOf(person)[ridx].section);
+    move.title = 'Move this role to another department';
+    move.setAttribute('aria-label', 'Department for this role');
+    move.addEventListener('change', function () {
+      var from = NLDirectory.rolesOf(person)[ridx].section, to = move.value;
+      if (from === to) { return; }
+      NLDirectory.rolesOf(person)[ridx].section = to;
+      saveStructure(club, NLDirectory.fullName(person) + ' moved from ' + from + ' to ' + to);
+    });
+
+    var del = document.createElement('button');
+    del.className = 'btn btn--icon btn--ghost ed-del';
+    del.type = 'button';
+    del.title = 'Remove this entry';
+    del.setAttribute('aria-label', 'Remove this entry');
+    del.appendChild(NL.icon('delete'));
+    del.addEventListener('click', function (e) {
+      e.stopPropagation();
+      removeRole(club, person, ridx);
+    });
+
+    wrap.appendChild(move);
+    wrap.appendChild(del);
+    row.appendChild(wrap);
+  }
+
+  /* One button for both of the things Richard asked for. Removing somebody's
+     only role removes them; removing one of several leaves them where they
+     still belong. The message says which, so the difference is visible before
+     the click rather than discovered after it. */
+  function removeRole(club, person, ridx) {
+    var roles = NLDirectory.rolesOf(person);
+    var name = NLDirectory.fullName(person) || 'this person';
+    var here = roles[ridx].section;
+    var rest = roles.filter(function (r, i) { return i !== ridx; })
+      .map(function (r) { return r.section; });
+    var last = !rest.length;
+    var msg = last
+      ? 'Remove ' + name + ' from the directory entirely? This is their only role, so ' +
+        'the whole entry goes — name, contact details and all.'
+      : 'Remove ' + name + ' from ' + here + '? They stay in the directory under ' +
+        rest.join(' and ') + '.';
+    NL.confirm(msg + '\n\nThere is no undo on this one.', {
+      title: last ? 'Remove person' : 'Remove role',
+      variant: 'danger',
+      confirmText: last ? 'Remove person' : 'Remove role'
+    }).then(function (ok) {
+      if (!ok) { return; }
+      var people = NLDirectory.arr(ALL[club].people);
+      if (last) {
+        ALL[club].people = people.filter(function (p) { return p !== person; });
+        saveStructure(club, name + ' removed from the directory');
+      } else {
+        person.roles = roles.filter(function (r, i) { return i !== ridx; });
+        ALL[club].people = people;
+        saveStructure(club, name + ' removed from ' + here);
+      }
+    });
+  }
+
+  /* Adding is the one action with no row to hang off, and the department it
+     belongs to may not be on screen at all — renderClub skips a department
+     with nobody in it, so "add to Ticketing" cannot be a button under a
+     Ticketing heading that does not exist. Hence one button at the foot and a
+     department picker in the form. */
+  function addPerson(club) {
+    var form = document.createElement('div');
+    form.className = 'form-grid';
+    form.innerHTML =
+      '<div class="form-group span2"><label>Name <span class="req">*</span></label>' +
+        '<input id="apName" autocomplete="off" placeholder="Jane Smith"></div>' +
+      '<div class="form-group"><label>Department</label><span id="apDept"></span></div>' +
+      '<div class="form-group"><label>Job title</label>' +
+        '<input id="apTitle" autocomplete="off" placeholder="Ticketing Manager"></div>' +
+      '<div class="form-group"><label>Email</label>' +
+        '<input id="apEmail" type="email" autocomplete="off"></div>' +
+      '<div class="form-group"><label>Phone</label>' +
+        '<input id="apPhone" autocomplete="off"></div>' +
+      '<div class="form-group span2 ed-check">' +
+        '<label><input type="checkbox" id="apHide"> Keep their contact details out of the ' +
+        'published directory</label>' +
+        '<p class="form-hint">We still hold them; the reader shows "Not published".</p></div>';
+    var sel = deptSelect('Other');
+    sel.id = 'apDeptSel';
+    form.querySelector('#apDept').appendChild(sel);
+
+    var ctrl = NL.modal({
+      title: 'Add someone to ' + club,
+      body: form,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Add', className: 'btn--primary', onClick: function (c) {
+          var name = form.querySelector('#apName').value.trim();
+          if (!name) { NL.toast('A name is needed', 'error'); return; }
+          var email = form.querySelector('#apEmail').value.trim();
+          var phone = form.querySelector('#apPhone').value.trim();
+          var person = { id: newId(), title: '', postNominals: '',
+            firstName: '', lastName: '', name: name,
+            emails: email ? [email] : [], phones: phone ? [{ number: phone }] : [],
+            hideContact: !!form.querySelector('#apHide').checked,
+            /* Stamped, because a person the League typed in is not a person
+               the club submitted, and the difference has to survive. The
+               sign-off page shows clubs what we hold; attributing our own
+               addition to them would be putting words in their mouth. */
+            added: { at: Date.now(), by: session.name || 'editor' },
+            roles: [{ section: sel.value, title: form.querySelector('#apTitle').value.trim() }] };
+          /* Through the same splitter the row edit uses, so an added "Dr Jane
+             Smith" lands in the same fields as an edited one. */
+          setAt(person, 'name', name);
+          ALL[club].people = NLDirectory.arr(ALL[club].people).concat(person);
+          c.close();
+          saveStructure(club, name + ' added to ' + sel.value);
+        } }
+      ]
+    });
+    setTimeout(function () { form.querySelector('#apName').focus(); }, 30);
+    return ctrl;
   }
 
   /* One pen per person. Pressing it turns that row's fields on and puts the
@@ -686,11 +906,102 @@
     cell._commit = function () {
       var now = cell.textContent.trim();
       if (now === before) { return; }
+      /* Renaming somebody who holds more than one role is genuinely
+         ambiguous, and getting it wrong is the worst thing this tool can do.
+         See resolveRename. */
+      if (path === 'name' && NLDirectory.rolesOf(person).length > 1) {
+        var was = before;
+        resolveRename(cell, club, person, was, now).then(function (kept) {
+          if (kept) { before = now; } else { cell.textContent = was; }
+        });
+        return;
+      }
       setAt(person, path, now);
       if (path === 'name') { syncName(cell, now); }
       save(club, person, path, before, now);
       before = now;
     };
+  }
+
+  /* ------------------------------------------------------ the rename trap
+     Josh Knowles is Head of Media and also the programme editor: one record,
+     two rows. A new hire takes over the programme, an editor opens that row
+     and types "Jane Smith" over the name — and Josh becomes Jane in the media
+     department too, carrying Josh's email address into Jane's entry.
+
+     That was always the behaviour. What changed is that syncing sibling rows
+     made it visible; before, the record was corrupted exactly the same way
+     and the other row went on displaying the old name until a redraw, so it
+     looked like it had worked.
+
+     The fix is not to pick a side. Both readings are ordinary:
+       · same human, spelling corrected  -> rename everywhere
+       · different human in this job     -> the name belongs to this role only
+
+     So ask, once, at the moment it becomes ambiguous — which is only ever a
+     name, only ever on somebody with more than one role. A single-role person
+     has no other entry to damage and is left alone.
+
+     The replacement deliberately does NOT inherit the contact details. A new
+     person wearing the old person's email is worse than the rename it was
+     meant to fix: it looks correct and it is wrong. They arrive with nothing
+     held, which the existing red chips already flag for chasing. */
+  function resolveRename(cell, club, person, from, to) {
+    var row = cell.closest('.cd-row');
+    var ridx = row && row.dataset.ridx ? Number(row.dataset.ridx) : 0;
+    var roles = NLDirectory.rolesOf(person);
+    var here = (roles[ridx] || {}).section || '';
+    var others = roles.filter(function (r, i) { return i !== ridx; })
+      .map(function (r) { return r.section; });
+
+    return new Promise(function (resolve) {
+      var settled = false;
+      var done = function (v) { if (!settled) { settled = true; resolve(v); } };
+
+      NL.modal({
+        title: 'Which did you mean?',
+        size: 'sm',
+        body: '<p class="confirm-text">' + esc(from) + ' is listed under ' +
+          esc(here) + ' and ' + esc(others.join(' and ')) + '.</p>' +
+          '<p class="confirm-text">Is <b>' + esc(to) + '</b> the same person under a ' +
+          'corrected name, or somebody new who has taken over ' + esc(here) + '?</p>' +
+          '<p class="form-hint">Somebody new takes the job title but none of the contact ' +
+          'details — those belong to ' + esc(from) + '. Worth checking the title still ' +
+          'fits once they are in.</p>',
+        onClose: function () { done(false); },
+        buttons: [
+          { label: 'Cancel', className: 'btn--ghost',
+            onClick: function (c) { done(false); c.close(); } },
+          { label: 'Same person', className: 'btn--ghost', onClick: function (c) {
+            setAt(person, 'name', to);
+            syncName(cell, to);
+            save(club, person, 'name', from, to);
+            done(true); c.close();
+          } },
+          { label: 'New in ' + here, className: 'btn--primary', onClick: function (c) {
+            replaceInRole(club, person, ridx, to);
+            done(true); c.close();
+          } }
+        ]
+      });
+    });
+  }
+
+  /* The new person takes the job — the role and its title — and nothing else.
+     The old person keeps every other role and their own contact details. */
+  function replaceInRole(club, person, ridx, name) {
+    var roles = NLDirectory.rolesOf(person);
+    var role = roles[ridx];
+    var fresh = { id: newId(), title: '', postNominals: '', firstName: '', lastName: '',
+      name: name, emails: [], phones: [], hideContact: !!person.hideContact,
+      added: { at: Date.now(), by: session.name || 'editor',
+               replacing: NLDirectory.fullName(person) },
+      roles: [{ section: role.section, title: role.title || '' }] };
+    setAt(fresh, 'name', name);
+    person.roles = roles.filter(function (r, i) { return i !== ridx; });
+    ALL[club].people = NLDirectory.arr(ALL[club].people).concat(fresh);
+    saveStructure(club, name + ' replaces ' + NLDirectory.fullName(person) +
+      ' in ' + role.section);
   }
 
   /* Somebody in two departments is one record and two rows. The record is
@@ -819,6 +1130,31 @@
     });
   }
 
+  /* A person the League added, as opposed to one the club submitted. Amber,
+     with the rest of "we did this" — but no undo button, because the way back
+     is the delete button on the row, not a one-click revert that would leave
+     an editor wondering where somebody went.
+
+     This is the only marker whose absence means something: everyone without
+     it came from the club's own submission, which is what the sign-off page
+     is showing them and what the League should not quietly add to. */
+  function markAdded(club) {
+    var people = {};
+    NLDirectory.arr((ALL[club] || {}).people).forEach(function (p) {
+      if (p.id && p.added && p.added.at) { people[p.id] = p.added; }
+    });
+    $('out').querySelectorAll('.cd-row').forEach(function (row) {
+      var a = row.dataset.pid && people[row.dataset.pid];
+      if (!a) { return; }
+      var pill = document.createElement('span');
+      pill.className = 'ed-pill ed-pill--was';
+      pill.textContent = 'Added by us';
+      pill.title = 'Not in the club\u2019s submission. Added by ' + (a.by || 'an editor') +
+        ' on ' + NL.formatDate(a.at) + (a.replacing ? ', replacing ' + a.replacing : '') + '.';
+      pillsFor(row).appendChild(pill);
+    });
+  }
+
   /* Every role entry with no job title. 307 of 1,478 across the 72 clubs, so
      this is the most common thing the admin team has to chase. Read from the
      rendered row rather than the record, so it stays true after an edit. */
@@ -923,6 +1259,23 @@
   /* The merge note, at the foot of the club. Two entries becoming one is the
      single change a person cannot see by looking at the page, because the
      evidence for it was deleted. */
+  /* Sits directly under the last department, where "and one more person"
+     belongs, rather than in the topbar with the club picker — that bar is
+     about which club you are looking at, not what you are doing to it. */
+  function showAdd(club, rec) {
+    if (signedOffBy(rec)) { return; }
+    var wrap = document.createElement('div');
+    wrap.className = 'ed-add';
+    var b = document.createElement('button');
+    b.className = 'btn btn--ghost btn--sm';
+    b.type = 'button';
+    b.appendChild(NL.icon('add'));
+    b.appendChild(document.createTextNode('Add someone'));
+    b.addEventListener('click', function () { addPerson(club); });
+    wrap.appendChild(b);
+    $('out').appendChild(wrap);
+  }
+
   function showMerges(club) {
     var merges = NLDirectory.arr((PROV[club] || {}).merges);
     /* Clears the pane, so this must run before showSignoff appends to it. */
