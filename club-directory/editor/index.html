@@ -7,6 +7,20 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.9 — (05/08/2026) An editor's own changes now show as their own colour.
+         Three things can be true of a field and only two of them were
+         visible: the tidier changed it (amber, undoable), something is wrong
+         with it (red, needs a person), or somebody typed over it — which is
+         the one that matters most when two editors work the same club, and it
+         left no mark at all.
+         Green, because it is the only one of the three that is a person doing
+         their job rather than a machine or a problem. The row carries a tint
+         as well as a chip: reading down a club you want to see WHERE the work
+         has been done, and one chip at a time does not give you that. "Added
+         by us" moves to green with them, being the same kind of act.
+         Marked live on commit rather than on the next redraw — a field edit
+         deliberately does not re-render, so waiting for draw() meant the one
+         moment you most want confirmation was the one moment nothing happened.
   v1.8 — (05/08/2026) Two things the last release got wrong.
          · A correction to a club detail was logged and never shown. The whole
            promise of this tool is that anything the League changed carries a
@@ -156,15 +170,15 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=32">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=16">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=17">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
-<script src="/club-directory/_tidy.js?v=16"></script>
-<script src="/club-directory/_gate.js?v=16"></script>
-<script src="/club-directory/_directory.js?v=16"></script>
+<script src="/club-directory/_tidy.js?v=17"></script>
+<script src="/club-directory/_gate.js?v=17"></script>
+<script src="/club-directory/_directory.js?v=17"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -269,6 +283,12 @@
   /* The same person's other rows, while one of them is open. Quiet — it is
      orientation, not an alert. */
   .cd-row.is-sibling { background: var(--navy-50); }
+  /* The tint, not just the chip. Reading down a club you want to see where
+     the work has already been done, and one chip at a time does not give you
+     that. Kept faint — 20-odd edited rows should read as progress, not as an
+     alarm. The left edge carries the weight. */
+  .cd-row.is-edited { background: var(--green-light); box-shadow: inset 3px 0 0 var(--green); }
+  .cd-row.is-edited.is-sibling { background: var(--green-light); }
   /* Jumped to from the strip. Fades out on its own, because a highlight that
      stays becomes part of the furniture. */
   @keyframes edFound {
@@ -311,6 +331,19 @@
   .ed-infochanges li { display: flex; align-items: baseline; gap: 8px;
     flex-wrap: wrap; line-height: 1.45; }
   .ed-infochanges .ed-pill { flex: 0 0 auto; }
+  /* Hand edits to the club's own details, same green. */
+  .ed-infoedits {
+    margin: 0 0 16px; padding: 11px 14px;
+    background: var(--green-light); border-radius: var(--radius);
+    font-size: var(--text-sm); color: var(--text);
+  }
+  .ed-infoedits b { font-variation-settings: 'wght' 800; color: var(--green); }
+  .ed-infoedits ul { margin: 7px 0 0; padding: 0; list-style: none;
+    display: flex; flex-direction: column; gap: 5px; }
+  .ed-infoedits li { display: flex; align-items: baseline; gap: 8px;
+    flex-wrap: wrap; line-height: 1.45; }
+  .ed-infoedits .ed-pill { flex: 0 0 auto; }
+
   .ed-undo {
     padding: 0; border: 0; background: none; cursor: pointer; color: var(--amber-deep);
     font: inherit; text-decoration: underline; opacity: 0.8; white-space: nowrap;
@@ -353,8 +386,12 @@
     font-weight: 700; font-variation-settings: 'wght' 700;
     max-width: 100%; overflow-wrap: anywhere;
   }
-  .ed-pill--was { background: var(--amber-light); color: var(--amber-deep); }
-  .ed-pill--gap { background: var(--red-light);   color: var(--red); }
+  .ed-pill--was  { background: var(--amber-light); color: var(--amber-deep); }
+  .ed-pill--gap  { background: var(--red-light);   color: var(--red); }
+  /* Green is the third state and the only one that is a person doing their
+     job: the admin team typed over this. Amber is the tidier's automatic
+     correction, red is a problem waiting for somebody. */
+  .ed-pill--edit { background: var(--green-light); color: var(--green); }
   .ed-pill button {
     padding: 0; border: 0; background: none; cursor: pointer; color: inherit;
     font: inherit; text-decoration: underline; opacity: 0.75;
@@ -584,7 +621,8 @@
         var changes = NLTidy.arr(prov.changes).concat(extra);
         if (touched) { updates['clubs/' + club] = rec; clubs++; }
         updates['provenance/' + club] = { changes: changes,
-          merges: NLTidy.arr(prov.merges), attention: att };
+          merges: NLTidy.arr(prov.merges), attention: att,
+          edits: NLTidy.arr(prov.edits) };
         PROV[club] = updates['provenance/' + club];
       });
       NL.writeAudit('directory_recheck',
@@ -694,6 +732,7 @@
     markAttention(name);
     markInfoFlags(name, rec);
     markInfoChanges(name, rec);
+    markEdits(name);
     markAdded(name);
     markGaps(name, rec);
     showClubEdit(name, rec);
@@ -1252,6 +1291,11 @@
       setAt(person, path, now);
       if (path === 'name') { syncName(cell, now); }
       save(club, person, path, before, now);
+      /* Mark it now, not on the next redraw. A field edit deliberately does
+         not re-render — you are still in the row — so waiting for draw() meant
+         the one moment you most want confirmation was the one moment nothing
+         happened. */
+      markCellEdited(cell, path, before, now);
       before = now;
     };
   }
@@ -1309,6 +1353,7 @@
             setAt(person, 'name', to);
             syncName(cell, to);
             save(club, person, 'name', from, to);
+            markCellEdited(cell, 'name', from, to);
             done(true); c.close();
           } },
           { label: 'New in ' + here, className: 'btn--primary', onClick: function (c) {
@@ -1358,6 +1403,29 @@
 
   function commit(cell) { if (cell && cell._commit) { cell._commit(); } }
 
+  /* The live half of markEdits: same tint, same chip, applied to the row in
+     front of you the instant the value is committed. Replaces any chip already
+     there for that field, so editing the same cell twice does not stack. */
+  function markCellEdited(cell, path, from, to) {
+    var row = cell.closest('.cd-row');
+    if (!row) { return; }
+    var what = /^roles\//.test(path) ? 'Job title' : 'Name';
+    var e = { from: from, to: to, by: session.name || 'editor', at: Date.now() };
+    var rows = (path === 'name' && row.dataset.pid)
+      ? [].slice.call($('out').querySelectorAll('.cd-row')).filter(function (r) {
+          return r.dataset.pid === row.dataset.pid;
+        })
+      : [row];
+    rows.forEach(function (r) {
+      r.classList.add('is-edited');
+      var box = pillsFor(r);
+      [].slice.call(box.querySelectorAll('.ed-pill--edit')).forEach(function (old) {
+        if (old.textContent === what + ' edited') { old.remove(); }
+      });
+      addEditChip(r, e, what);
+    });
+  }
+
   /* Straight to the database, as agreed. NL.writeAudit first so the entry
      names the editor and the field rather than just the path that changed. */
   function save(club, person, path, from, to) {
@@ -1365,11 +1433,40 @@
     NL.writeAudit('directory_edit',
       club + ' — ' + (NLDirectory.fullName(person) || person.id) + ' ' + path +
       ': "' + from + '" → "' + to + '" (' + (session.name || 'editor') + ')');
+    logEdit(club, 'people/' + (person.id || '') + '/' + path, from, to);
     db.ref(ROOT + '/clubs/' + club).set(ALL[club])
       .then(function () { NL.toast('Saved', 'success'); })
       .catch(function (err) {
         NL.toast('Could not save: ' + ((err && err.message) || err), 'error');
       });
+  }
+
+  /* ------------------------------------------------------------- hand edits
+     Three things can be true of a field, and until now only two of them were
+     visible. The tidier changed it (amber, undoable). Something is wrong with
+     it (red, needs a person). Or somebody on the admin team typed over it —
+     which is the one that matters most when two editors are working the same
+     club, and it left no mark at all.
+
+     Green, because it is the only one of the three that is a person doing
+     their job rather than a machine or a problem. The row carries a tint as
+     well as a chip: at a glance down a club you want to see WHERE the work
+     has been done, and reading chips one at a time does not give you that.
+
+     Kept alongside the bake's own log rather than inside it. The bake's
+     entries can be put back; these are the deliberate ones and there is
+     nothing to revert to. */
+  function editList(club) {
+    return NLDirectory.arr((PROV[club] || {}).edits);
+  }
+
+  function logEdit(club, path, from, to) {
+    var prov = PROV[club] || (PROV[club] = {});
+    var edits = editList(club).filter(function (e) { return e.path !== path; });
+    edits.push({ path: path, from: from, to: to,
+      by: session.name || 'editor', at: Date.now() });
+    prov.edits = edits;
+    firebase.database().ref(ROOT + '/provenance/' + club + '/edits').set(edits);
   }
 
   /* ------------------------------------------------------- provenance */
@@ -1430,6 +1527,65 @@
       pill.remove();
     });
     pillsFor(row).appendChild(pill);
+  }
+
+  /* Green markers for what a person changed by hand — on the rows, and on the
+     card for the club's own details. The row tint is the part that answers
+     "how far have I got with this club", which a chip cannot. */
+  function markEdits(club) {
+    var edits = editList(club);
+    if (!edits.length) { return; }
+    var byPerson = {}, info = [];
+    edits.forEach(function (e) {
+      var m = /^people\/([^/]+)\/(.*)$/.exec(e.path || '');
+      if (m) { (byPerson[m[1]] = byPerson[m[1]] || []).push({ tail: m[2], e: e }); }
+      else if (/^info\//.test(e.path || '')) { info.push(e); }
+    });
+
+    $('out').querySelectorAll('.cd-row').forEach(function (row) {
+      var list = row.dataset.pid && byPerson[row.dataset.pid];
+      if (!list) { return; }
+      list.forEach(function (item) {
+        /* A name belongs to the person and so to every row they appear in; a
+           role title belongs to one row. Same split as the amber markers. */
+        var isRole = /^roles\//.test(item.tail);
+        if (isRole && roleTail(item.tail) !== row.dataset.ridx) { return; }
+        row.classList.add('is-edited');
+        addEditChip(row, item.e, isRole ? 'Job title' : 'Name');
+      });
+    });
+
+    if (info.length) { markInfoEdits(club, info); }
+  }
+
+  function addEditChip(row, e, what) {
+    var pill = document.createElement('span');
+    pill.className = 'ed-pill ed-pill--edit';
+    pill.textContent = what + ' edited';
+    pill.title = (String(e.from || '').trim() ? 'Was "' + e.from + '". ' : 'Was blank. ') +
+      'Changed by ' + (e.by || 'an editor') + ' on ' + NL.formatDate(e.at) + '.';
+    pillsFor(row).appendChild(pill);
+  }
+
+  function markInfoEdits(club, info) {
+    var card = document.getElementById('cdCard');
+    if (!card) { return; }
+    var box = document.createElement('div');
+    box.className = 'ed-infoedits';
+    box.innerHTML = '<b>' + info.length +
+      (info.length === 1 ? ' detail' : ' details') + ' edited by hand</b>';
+    var ul = document.createElement('ul');
+    info.forEach(function (e) {
+      var key = e.path.replace(/^info\//, '');
+      var li = document.createElement('li');
+      li.innerHTML = '<span class="ed-pill ed-pill--edit">' + esc(infoLabel(key)) +
+        '</span> ' + (String(e.from || '').trim()
+          ? 'was <b>' + esc(e.from) + '</b>' : 'was <i>blank</i>') +
+        ' &mdash; ' + esc(e.by || 'an editor') + ', ' + esc(NL.formatDate(e.at));
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
+    card.insertBefore(box, card.firstChild);
   }
 
   /* A correction to a club detail was being logged and never shown. The tool's
@@ -1497,7 +1653,8 @@
     PROV[club] = {
       changes: NLDirectory.arr(prov.changes).filter(function (c) { return c !== change; }),
       merges: NLDirectory.arr(prov.merges),
-      attention: NLDirectory.arr(prov.attention)
+      attention: NLDirectory.arr(prov.attention),
+      edits: NLDirectory.arr(prov.edits)
     };
     firebase.database().ref(ROOT + '/provenance/' + club).set(PROV[club]);
     saveStructure(club, infoLabel(key) + ' put back to what the club sent');
@@ -1576,8 +1733,9 @@
       var a = row.dataset.pid && people[row.dataset.pid];
       if (!a) { return; }
       var pill = document.createElement('span');
-      pill.className = 'ed-pill ed-pill--was';
+      pill.className = 'ed-pill ed-pill--edit';
       pill.textContent = 'Added by us';
+      row.classList.add('is-edited');
       pill.title = 'Not in the club\u2019s submission. Added by ' + (a.by || 'an editor') +
         ' on ' + NL.formatDate(a.at) + (a.replacing ? ', replacing ' + a.replacing : '') + '.';
       pillsFor(row).appendChild(pill);
@@ -1794,6 +1952,7 @@
             if (now === was) { return; }
             next[key] = now;
             changed.push(key);
+            logEdit(club, 'info/' + key, was, now);
           });
           /* One flag, one meaning. The submissions carry a noSponsor boolean
              that disagrees with the sponsored name on five clubs, so it is
