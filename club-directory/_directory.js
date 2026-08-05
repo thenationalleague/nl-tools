@@ -209,11 +209,18 @@
     var addr = [info.addr1, info.addr2, info.town, info.county, info.postcode]
       .filter(function (x) { return (x || '').trim(); }).map(esc).join(', ');
 
+    /* A row of seven identical-sized glyphs told you the club had seven
+       accounts and nothing else — not which handle, not whether the URL we
+       hold is the right one, which is the whole question when a club sends
+       "@hebburntownfc" and we have a different account on file. Stacked, with
+       the address next to the mark, and the whole line is the link. */
     var social = SOCIALS.map(function (s) {
       var u = (info[s[0]] || '').trim();
       if (!u) { return ''; }
-      return '<a href="' + esc(url(u)) + '" target="_blank" rel="noopener" title="' +
-        esc(s[1]) + '" aria-label="' + esc(s[1]) + '">' + glyph(s[0]) + '</a>';
+      return '<a class="cd-social__row" href="' + esc(url(u)) + '" target="_blank" ' +
+        'rel="noopener" aria-label="' + esc(s[1]) + '">' +
+        '<span class="cd-social__mark" title="' + esc(s[1]) + '">' + glyph(s[0]) + '</span>' +
+        '<span class="cd-social__url">' + esc(u.replace(/^https?:\/\//i, '')) + '</span></a>';
     }).filter(Boolean).join('');
 
     var depts = ORDER.map(function (s) {
@@ -234,10 +241,23 @@
         '<h1 class="cd-banner__name">' + esc(rec.club || '') + '</h1>' +
       '</div>' +
 
+      '<div class="cd-card" id="cdCard">' +
       '<div class="cd-facts">' +
         facts([
-          ['Stadium', esc(info.stadium || '') +
-            (info.stadiumSponsor ? ' <span class="cd-f__sub">(' + esc(info.stadiumSponsor) + ')</span>' : '')],
+          /* Two fields, not one with a parenthesis. Half the clubs play at a
+             ground with a sponsor's name on it and the other half do not, and
+             a blank told you nothing about which — "no sponsor" and "we never
+             asked" looked identical. Stating None is an answer.
+
+             The presence of a name is what decides it. There is a noSponsor
+             flag in the submissions too, but it disagrees with the name on
+             five clubs (Billericay, Forest Green, Maidstone, Scarborough,
+             Sutton — the last reading "available"), so one source of truth
+             wins and it is the one someone typed. */
+          ['Stadium (official)', esc(info.stadium || '')],
+          ['Stadium (sponsored)', (info.stadiumSponsor || '').trim()
+            ? esc(info.stadiumSponsor)
+            : '<span class="cd-f__sub">None</span>'],
           ['Address', addr],
           ['Capacity', info.capacity ? num(info.capacity) +
             (info.seated ? ' <span class="cd-f__sub">' + num(info.seated) + ' seated</span>' : '') : ''],
@@ -255,6 +275,7 @@
           ['Sleeve', esc(info.spSleeve || '')],
           ['Website & social', social ? '<div class="cd-social">' + social + '</div>' : '', true]
         ]) +
+      '</div>' +
       '</div>' +
 
       '<section class="cd-sec">' +
