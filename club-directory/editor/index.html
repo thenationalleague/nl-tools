@@ -7,6 +7,22 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.6 — (05/08/2026) The club's own details were read-only, and the row
+         actions did not say what they were for.
+         · A pen on the club card opens every info field in one form —
+           ground, address, contact, sponsors, socials. A modal rather than
+           contenteditable cells, because half these facts are composites: the
+           address is five fields, capacity is two, the station is two, and
+           editing a rendered sentence is worse than editing a form.
+         · "Move role to:" labels the department dropdown. Unlabelled it read
+           as a filter, or as a statement of where the person already was.
+         · "Add another role" hangs a second department on the person whose
+           row is open — distinct from "Add someone", which mints a new one.
+         · Editing somebody names their other departments under the row, each
+           a button that scrolls to and flashes that entry, and marks those
+           rows while the row is open. On a club the size of Merthyr the other
+           rows are a screen away, so a highlight alone would have been a
+           highlight on something nobody can see.
   v1.5 — (05/08/2026) Not-for-publication was invisible and unchangeable.
          290 of 1,070 people across 65 of the 72 clubs are marked to keep
          their details off the published directory. The editor shows those
@@ -113,15 +129,15 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=32">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=12">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=13">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
-<script src="/club-directory/_tidy.js?v=12"></script>
-<script src="/club-directory/_gate.js?v=12"></script>
-<script src="/club-directory/_directory.js?v=12"></script>
+<script src="/club-directory/_tidy.js?v=13"></script>
+<script src="/club-directory/_gate.js?v=13"></script>
+<script src="/club-directory/_directory.js?v=13"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -195,6 +211,57 @@
      is rather than sitting quietly next to the department picker. */
   .ed-del { color: var(--red); }
   .ed-del:hover { background: var(--red-light); }
+
+  .ed-lab {
+    font-size: var(--text-xs); color: var(--text-muted);
+    font-weight: 700; font-variation-settings: 'wght' 700;
+    text-transform: uppercase; letter-spacing: var(--tracking-tight);
+  }
+
+  /* The other departments this person is in, named under the row being
+     edited. On a club the size of Merthyr the other rows are a screen or two
+     away, so the answer to "what else does this change touch" has to be here,
+     not somewhere off the bottom of the page. */
+  .ed-sibs {
+    display: none; grid-column: 1 / -1; margin-top: 6px;
+    align-items: center; gap: 7px; flex-wrap: wrap;
+    font-size: var(--text-xs); color: var(--text-muted);
+    font-weight: 600; font-variation-settings: 'wght' 600;
+  }
+  .cd-row.is-editing .ed-sibs { display: flex; }
+  .ed-sib {
+    font-family: var(--font); font-size: var(--text-xs);
+    font-weight: 700; font-variation-settings: 'wght' 700;
+    padding: 2px 9px; border-radius: var(--radius-pill); cursor: pointer;
+    border: 1px solid var(--navy-200); background: var(--navy-50); color: var(--navy-600);
+  }
+  .ed-sib:hover { background: var(--navy); color: var(--white); border-color: var(--navy); }
+  .ed-sib:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .ed-sibs__note { font-weight: 500; font-variation-settings: 'wght' 500; }
+
+  /* The same person's other rows, while one of them is open. Quiet — it is
+     orientation, not an alert. */
+  .cd-row.is-sibling { background: var(--navy-50); }
+  /* Jumped to from the strip. Fades out on its own, because a highlight that
+     stays becomes part of the furniture. */
+  @keyframes edFound {
+    from { background: var(--amber-light); }
+    to   { background: transparent; }
+  }
+  .cd-row.is-found { animation: edFound 2.2s ease-out; }
+  @media (prefers-reduced-motion: reduce) {
+    .cd-row.is-found { animation: none; background: var(--amber-light); }
+  }
+
+  /* The club's own details are a card now, so the pen goes in its corner —
+     same affordance as a person row, same canon button. */
+  .ed-cardpen { position: absolute; top: 10px; right: 10px; }
+  .ed-fgroup {
+    margin: 18px 0 8px; font-size: var(--text-xs);
+    text-transform: uppercase; letter-spacing: var(--tracking-wide);
+    font-weight: 800; font-variation-settings: 'wght' 800; color: var(--primary);
+  }
+  .ed-fgroup:first-child { margin-top: 0; }
 
   .ed-add { margin: 6px 0 26px; }
   .ed-check label { display: flex; align-items: center; gap: 8px; font-weight: 600;
@@ -558,6 +625,7 @@
     markAttention(name);
     markAdded(name);
     markGaps(name, rec);
+    showClubEdit(name, rec);
     showAdd(name, rec);
     showMerges(name);
     showSignoff(name, rec);
@@ -709,10 +777,126 @@
       removeRole(club, person, ridx);
     });
 
+    /* "Move role to:" rather than a bare dropdown showing the current
+       department. Unlabelled, it read as a filter or as a display of where
+       the person already is — nothing about it said it was an action. */
+    var moveLab = document.createElement('span');
+    moveLab.className = 'ed-lab';
+    moveLab.textContent = 'Move role to:';
+
+    var addRole = document.createElement('button');
+    addRole.className = 'btn btn--sm btn--ghost';
+    addRole.type = 'button';
+    addRole.textContent = 'Add another role';
+    addRole.addEventListener('click', function (e) {
+      e.stopPropagation();
+      addRoleTo(club, person);
+    });
+
+    wrap.appendChild(moveLab);
     wrap.appendChild(move);
+    wrap.appendChild(addRole);
     wrap.appendChild(pub);
     wrap.appendChild(del);
     row.appendChild(wrap);
+    addSiblings(row, person, ridx);
+  }
+
+  /* Somebody already in the directory who also does something else. Distinct
+     from "Add someone" at the foot, which mints a new person — this hangs a
+     second role on the person whose row you are already editing. */
+  function addRoleTo(club, person) {
+    var name = NLDirectory.fullName(person) || 'this person';
+    var held = NLDirectory.rolesOf(person).map(function (r) { return r.section; });
+    var form = document.createElement('div');
+    form.className = 'form-grid';
+    form.innerHTML =
+      '<div class="form-group"><label>Department</label><span id="arDept"></span></div>' +
+      '<div class="form-group"><label>Job title</label>' +
+        '<input id="arTitle" autocomplete="off" placeholder="Programme Editor"></div>' +
+      '<div class="form-group span2"><p class="form-hint">' +
+        esc(name) + ' is already listed under ' + esc(held.join(', ')) +
+        '. Their contact details carry across — this is one person, not a copy.</p></div>';
+    var sel = deptSelect(NLDirectory.ORDER.filter(function (d) {
+      return held.indexOf(d) < 0;
+    })[0] || 'Other');
+    sel.id = 'arDeptSel';
+    form.querySelector('#arDept').appendChild(sel);
+
+    NL.modal({
+      title: 'Add a role for ' + name,
+      body: form,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Add role', className: 'btn--primary', onClick: function (c) {
+          var dept = sel.value;
+          person.roles = NLDirectory.rolesOf(person).concat(
+            { section: dept, title: form.querySelector('#arTitle').value.trim() });
+          c.close();
+          saveStructure(club, name + ' added to ' + dept);
+        } }
+      ]
+    });
+  }
+
+  /* The other departments this person sits in, named under the row being
+     edited. A rename or a publish toggle reaches all of them, and on a club
+     the size of Merthyr the other rows are a long way down the page — so
+     showing them where the edit is happening beats highlighting something
+     off screen. Each is a button: press it and that row is scrolled to and
+     flashed, so "where is the other one" takes one click rather than a hunt.
+
+     Rows that ARE on screen get marked at the same time, because a highlight
+     you can see is better than a label about it. */
+  function addSiblings(row, person, ridx) {
+    var roles = NLDirectory.rolesOf(person);
+    if (roles.length < 2) { return; }
+    var strip = document.createElement('div');
+    strip.className = 'ed-sibs';
+    strip.appendChild(document.createTextNode('Also listed under:'));
+    roles.forEach(function (r, i) {
+      if (i === ridx) { return; }
+      var b = document.createElement('button');
+      b.className = 'ed-sib';
+      b.type = 'button';
+      b.textContent = r.section;
+      b.title = 'Go to this person\u2019s ' + r.section + ' entry';
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        gotoRole(row.dataset.pid, i);
+      });
+      strip.appendChild(b);
+    });
+    var note = document.createElement('span');
+    note.className = 'ed-sibs__note';
+    note.textContent = 'the name and contact details are shared';
+    strip.appendChild(note);
+    row.appendChild(strip);
+    /* No marking here. addRowActions runs for every row on the club as it is
+       wired, so highlighting from inside it lit up every multi-role person at
+       once — three rows marked before anybody had pressed anything. The mark
+       belongs to the act of opening a row, which is setEditing. */
+  }
+
+  function markSiblings(row, on) {
+    if (!row.dataset.pid) { return; }
+    $('out').querySelectorAll('.cd-row').forEach(function (other) {
+      if (other === row || other.dataset.pid !== row.dataset.pid) { return; }
+      other.classList.toggle('is-sibling', on);
+    });
+  }
+
+  function gotoRole(pid, ridx) {
+    var target = null;
+    $('out').querySelectorAll('.cd-row').forEach(function (r) {
+      if (r.dataset.pid === pid && Number(r.dataset.ridx) === ridx) { target = r; }
+    });
+    if (!target) { return; }
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.classList.remove('is-found');
+    void target.offsetWidth;                  /* restart the animation */
+    target.classList.add('is-found');
+    setTimeout(function () { target.classList.remove('is-found'); }, 2200);
   }
 
   /* The follow-up emails tell 65 clubs "we'll include those details unless
@@ -874,6 +1058,7 @@
       if (on) { c.setAttribute('contenteditable', 'plaintext-only'); unplaceholder(c); }
       else { c.removeAttribute('contenteditable'); replaceholder(c); }
     });
+    markSiblings(row, on);
     if (on && cells[0]) { cells[0].focus(); }
   }
 
@@ -1313,6 +1498,127 @@
   /* The merge note, at the foot of the club. Two entries becoming one is the
      single change a person cannot see by looking at the page, because the
      evidence for it was deleted. */
+  /* ----------------------------------------------------- the club's details
+     The half of the record that is not people, and until now the half nobody
+     could correct: a wrong capacity, a stadium under its old name, a social
+     account we hold at the wrong URL — all of it read-only, in a tool whose
+     entire job is putting the record right.
+
+     A modal rather than the contenteditable cells the rows use. Half these
+     facts are composites — the address is five fields, capacity is two, the
+     station is two — so editing them in place means either editing a rendered
+     sentence or splitting the display, and both are worse than a form. */
+  var INFO_FIELDS = [
+    ['Ground', [
+      ['stadium', 'Stadium (official)', 'St. James Park'],
+      ['stadiumSponsor', 'Stadium (sponsored)', 'Leave blank if there is no sponsor'],
+      ['capacity', 'Capacity', '3500'],
+      ['seated', 'Of which seated', '669'],
+      ['pitchDims', 'Pitch dimensions', '101m x 70m'],
+      ['pitchType', 'Pitch type', 'Grass']
+    ]],
+    ['Address', [
+      ['addr1', 'Address line 1', 'Churchill Way'],
+      ['addr2', 'Address line 2', ''],
+      ['town', 'Town', 'Brackley'],
+      ['county', 'County', 'Northamptonshire'],
+      ['postcode', 'Postcode', 'NN13 7EJ'],
+      ['countyFA', 'County FA', 'Northamptonshire FA'],
+      ['station', 'Nearest station', 'Banbury'],
+      ['stationDistance', 'Distance (miles)', '10.5']
+    ]],
+    ['Contact', [
+      ['phone', 'Switchboard', '01280 704077'],
+      ['mainEmail', 'Main email', 'secretary@example.co.uk']
+    ]],
+    ['Sponsors', [
+      ['spClub', 'Club sponsor', ''],
+      ['spFront', 'Shirt front', ''],
+      ['spBack', 'Shirt back', ''],
+      ['spSleeve', 'Sleeve', ''],
+      ['spShorts', 'Shorts', ''],
+      ['spExtra', 'Other', '']
+    ]],
+    ['Website and social', [
+      ['website', 'Website', 'www.example.co.uk'],
+      ['x', 'X', 'https://x.com/...'],
+      ['facebook', 'Facebook', 'https://www.facebook.com/...'],
+      ['instagram', 'Instagram', 'https://www.instagram.com/...'],
+      ['tiktok', 'TikTok', 'https://www.tiktok.com/@...'],
+      ['linkedin', 'LinkedIn', 'https://uk.linkedin.com/company/...'],
+      ['youtube', 'YouTube', 'https://www.youtube.com/@...']
+    ]]
+  ];
+
+  function showClubEdit(club, rec) {
+    var card = document.getElementById('cdCard');
+    if (!card || signedOffBy(rec)) { return; }
+    var b = document.createElement('button');
+    b.className = 'btn btn--icon btn--ghost ed-cardpen';
+    b.type = 'button';
+    b.title = 'Edit the club\u2019s details';
+    b.setAttribute('aria-label', 'Edit the club\u2019s details');
+    b.appendChild(NL.icon('edit'));
+    b.addEventListener('click', function () { editClubInfo(club, rec); });
+    card.appendChild(b);
+  }
+
+  function editClubInfo(club, rec) {
+    var info = rec.info || {};
+    var wrap = document.createElement('div');
+    INFO_FIELDS.forEach(function (group) {
+      var h = document.createElement('h4');
+      h.className = 'ed-fgroup';
+      h.textContent = group[0];
+      wrap.appendChild(h);
+      var grid = document.createElement('div');
+      grid.className = 'form-grid';
+      group[1].forEach(function (f) {
+        var g = document.createElement('div');
+        g.className = 'form-group';
+        var lab = document.createElement('label');
+        lab.textContent = f[1];
+        var inp = document.createElement('input');
+        inp.value = info[f[0]] == null ? '' : String(info[f[0]]);
+        inp.setAttribute('data-info', f[0]);
+        inp.setAttribute('autocomplete', 'off');
+        if (f[2]) { inp.placeholder = f[2]; }
+        g.appendChild(lab); g.appendChild(inp); grid.appendChild(g);
+      });
+      wrap.appendChild(grid);
+    });
+
+    NL.modal({
+      title: club + ' \u2014 club details',
+      width: 'wide',
+      body: wrap,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Save details', className: 'btn--primary', onClick: function (c) {
+          var next = {}, changed = [];
+          for (var k in info) { if (Object.prototype.hasOwnProperty.call(info, k)) { next[k] = info[k]; } }
+          wrap.querySelectorAll('[data-info]').forEach(function (inp) {
+            var key = inp.getAttribute('data-info');
+            var was = info[key] == null ? '' : String(info[key]);
+            var now = inp.value.trim();
+            if (now === was) { return; }
+            next[key] = now;
+            changed.push(key);
+          });
+          /* One flag, one meaning. The submissions carry a noSponsor boolean
+             that disagrees with the sponsored name on five clubs, so it is
+             derived from the name here rather than edited alongside it. */
+          next.noSponsor = !((next.stadiumSponsor || '').trim());
+          if (!changed.length) { c.close(); return; }
+          rec.info = next;
+          c.close();
+          saveStructure(club, changed.length + ' club detail' +
+            (changed.length === 1 ? '' : 's') + ' updated (' + changed.join(', ') + ')');
+        } }
+      ]
+    });
+  }
+
   /* Sits directly under the last department, where "and one more person"
      belongs, rather than in the topbar with the club picker — that bar is
      about which club you are looking at, not what you are doing to it. */
