@@ -7,6 +7,26 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.8 — (05/08/2026) Two things the last release got wrong.
+         · A correction to a club detail was logged and never shown. The whole
+           promise of this tool is that anything the League changed carries a
+           marker saying what the club actually sent, and markProvenance only
+           matches people/<id>/... paths — so Telford's main email was
+           lower-cased and nobody was told. Info corrections now show on the
+           card, amber, each with a put-it-back that restores the value AND
+           drops the marker, so the record and what it says about itself stay
+           in step.
+         · Removing. The bin was the only icon-only control in a row of
+           labelled buttons and read as decoration — the first report was that
+           removing was not possible at all. It says "Remove…" now. And a
+           person with several roles gets both outcomes rather than one: they
+           have stopped doing this job, or they have left the club. Deciding
+           from the role count meant deleting somebody with three roles took
+           three separate removals, each asking a question that was not the
+           one being answered.
+         Found while testing: INFO_LABEL was computed at its own source
+         position from an array declared further down the file, so it read a
+         hoisted-but-unassigned var and threw mid-draw. Built on first use now.
   v1.7 — (05/08/2026) The club's own block goes through the tidier too (see
          _tidy.js v1.2). What it fixes shows as amber markers like any other
          correction; what it cannot fix shows as a red list at the head of the
@@ -136,15 +156,15 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=32">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=15">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=16">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
-<script src="/club-directory/_tidy.js?v=15"></script>
-<script src="/club-directory/_gate.js?v=15"></script>
-<script src="/club-directory/_directory.js?v=15"></script>
+<script src="/club-directory/_tidy.js?v=16"></script>
+<script src="/club-directory/_gate.js?v=16"></script>
+<script src="/club-directory/_directory.js?v=16"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -216,7 +236,7 @@
   .ed-dept:focus { outline: none; box-shadow: var(--focus-ring); border-color: var(--primary); }
   /* Removing is the one act here with no undo, so it reads as the danger it
      is rather than sitting quietly next to the department picker. */
-  .ed-del { color: var(--red); }
+  .ed-del { color: var(--red); border-color: var(--red-light); }
   .ed-del:hover { background: var(--red-light); }
 
   .ed-lab {
@@ -277,6 +297,25 @@
     display: flex; flex-direction: column; gap: 5px; }
   .ed-infoflags li { display: flex; align-items: baseline; gap: 8px; line-height: 1.45; }
   .ed-infoflags .ed-pill { flex: 0 0 auto; }
+
+  /* Corrections we made to the club's details. Amber with the rest of "we did
+     this", and each one can be put back. */
+  .ed-infochanges {
+    margin: 0 0 16px; padding: 11px 14px;
+    background: var(--amber-light); border-radius: var(--radius);
+    font-size: var(--text-sm); color: var(--text);
+  }
+  .ed-infochanges b { font-variation-settings: 'wght' 800; color: var(--amber-deep); }
+  .ed-infochanges ul { margin: 7px 0 0; padding: 0; list-style: none;
+    display: flex; flex-direction: column; gap: 5px; }
+  .ed-infochanges li { display: flex; align-items: baseline; gap: 8px;
+    flex-wrap: wrap; line-height: 1.45; }
+  .ed-infochanges .ed-pill { flex: 0 0 auto; }
+  .ed-undo {
+    padding: 0; border: 0; background: none; cursor: pointer; color: var(--amber-deep);
+    font: inherit; text-decoration: underline; opacity: 0.8; white-space: nowrap;
+  }
+  .ed-undo:hover { opacity: 1; }
   .ed-fgroup {
     margin: 18px 0 8px; font-size: var(--text-xs);
     text-transform: uppercase; letter-spacing: var(--tracking-wide);
@@ -654,6 +693,7 @@
     markProvenance(name);
     markAttention(name);
     markInfoFlags(name, rec);
+    markInfoChanges(name, rec);
     markAdded(name);
     markGaps(name, rec);
     showClubEdit(name, rec);
@@ -797,12 +837,14 @@
       togglePublish(club, person);
     });
 
+    /* Labelled, not a bare bin. Sat among "Add another role" and "Unpublish
+       details" as the only icon-only control, it read as decoration — the
+       first report of this feature was that removing was not possible at all. */
     var del = document.createElement('button');
-    del.className = 'btn btn--icon btn--ghost ed-del';
+    del.className = 'btn btn--sm btn--ghost ed-del';
     del.type = 'button';
-    del.title = 'Remove this entry';
-    del.setAttribute('aria-label', 'Remove this entry');
-    del.appendChild(NL.icon('delete'));
+    del.textContent = 'Remove\u2026';
+    del.title = 'Remove this role, or the person';
     del.addEventListener('click', function (e) {
       e.stopPropagation();
       removeRole(club, person, ridx);
@@ -965,27 +1007,48 @@
     var here = roles[ridx].section;
     var rest = roles.filter(function (r, i) { return i !== ridx; })
       .map(function (r) { return r.section; });
-    var last = !rest.length;
-    var msg = last
-      ? 'Remove ' + name + ' from the directory entirely? This is their only role, so ' +
-        'the whole entry goes — name, contact details and all.'
-      : 'Remove ' + name + ' from ' + here + '? They stay in the directory under ' +
-        rest.join(' and ') + '.';
-    NL.confirm(msg + '\n\nThere is no undo on this one.', {
-      title: last ? 'Remove person' : 'Remove role',
-      variant: 'danger',
-      confirmText: last ? 'Remove person' : 'Remove role'
-    }).then(function (ok) {
-      if (!ok) { return; }
-      var people = NLDirectory.arr(ALL[club].people);
-      if (last) {
-        ALL[club].people = people.filter(function (p) { return p !== person; });
-        saveStructure(club, name + ' removed from the directory');
-      } else {
-        person.roles = roles.filter(function (r, i) { return i !== ridx; });
-        ALL[club].people = people;
-        saveStructure(club, name + ' removed from ' + here);
-      }
+
+    var dropRole = function () {
+      person.roles = roles.filter(function (r, i) { return i !== ridx; });
+      ALL[club].people = NLDirectory.arr(ALL[club].people);
+      saveStructure(club, name + ' removed from ' + here);
+    };
+    var dropPerson = function () {
+      ALL[club].people = NLDirectory.arr(ALL[club].people)
+        .filter(function (p) { return p !== person; });
+      saveStructure(club, name + ' removed from the directory');
+    };
+
+    /* One role: one outcome, and it is the whole entry. */
+    if (!rest.length) {
+      NL.confirm('Remove ' + name + ' from the directory entirely? This is their only ' +
+        'role, so the whole entry goes — name, contact details and all.' +
+        '\n\nThere is no undo on this one.',
+        { title: 'Remove person', variant: 'danger', confirmText: 'Remove person' }
+      ).then(function (ok) { if (ok) { dropPerson(); } });
+      return;
+    }
+
+    /* More than one, and the two outcomes are genuinely different: they have
+       stopped doing this job, or they have left the club. Deciding on their
+       behalf from the role count was wrong — it meant deleting somebody with
+       three roles took three separate removals, each one asking a question
+       that was not the one being answered. */
+    NL.modal({
+      title: 'Remove ' + name,
+      size: 'sm',
+      body: '<p class="confirm-text">' + esc(name) + ' is listed under ' +
+        esc([here].concat(rest).join(', ')) + '.</p>' +
+        '<p class="confirm-text">Have they stopped doing the ' + esc(here) +
+        ' job, or have they left the club altogether?</p>' +
+        '<p class="form-hint">Either way there is no undo.</p>',
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Remove from ' + here, className: 'btn--ghost',
+          onClick: function (c) { c.close(); dropRole(); } },
+        { label: 'Delete entirely', className: 'btn--danger',
+          onClick: function (c) { c.close(); dropPerson(); } }
+      ]
     });
   }
 
@@ -1367,6 +1430,77 @@
       pill.remove();
     });
     pillsFor(row).appendChild(pill);
+  }
+
+  /* A correction to a club detail was being logged and never shown. The tool's
+     whole promise is that anything the League changed carries a marker saying
+     what the club actually sent — markProvenance delivers that for people, but
+     it matches people/<id>/... paths, so every info/<key> change went into the
+     record invisibly. Telford's main email was lower-cased and nobody was told.
+
+     Same amber as the row markers, same undo. It sits on the card because a
+     club detail has no row, and it names the field because "Was:
+     ENQUIRIES@AFCTU.CO.UK" on its own does not say which box it came out of. */
+  /* Built on first use, not at load. INFO_FIELDS is declared further down the
+     file, so computing this at its own source position read a hoisted but
+     unassigned var and threw — which killed the whole boot and, from the
+     outside, looked exactly like "the corrections list does not work". */
+  var _infoLabel = null;
+  function infoLabel(key) {
+    if (!_infoLabel) {
+      _infoLabel = { seated: 'Of which seated' };
+      INFO_FIELDS.forEach(function (g) {
+        g[1].forEach(function (f) { _infoLabel[f[0]] = f[1]; });
+      });
+    }
+    return _infoLabel[key] || key;
+  }
+
+  function markInfoChanges(club, rec) {
+    var changes = NLDirectory.arr((PROV[club] || {}).changes)
+      .filter(function (c) { return /^info\//.test(c.path || ''); });
+    var card = document.getElementById('cdCard');
+    if (!changes.length || !card) { return; }
+    var box = document.createElement('div');
+    box.className = 'ed-infochanges';
+    box.innerHTML = '<b>' + changes.length +
+      (changes.length === 1 ? ' correction' : ' corrections') + ' to these details</b>';
+    var ul = document.createElement('ul');
+    changes.forEach(function (c) {
+      var key = c.path.replace(/^info\//, '');
+      var li = document.createElement('li');
+      li.innerHTML = '<span class="ed-pill ed-pill--was">' +
+        esc(infoLabel(key)) + '</span> was ' +
+        (String(c.from || '').trim() ? '<b>' + esc(c.from) + '</b>' : '<i>blank</i>');
+      if (!signedOffBy(rec)) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'ed-undo';
+        b.textContent = 'put it back';
+        b.addEventListener('click', function () { undoInfo(club, rec, c); });
+        li.appendChild(b);
+      }
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
+    card.insertBefore(box, card.firstChild);
+  }
+
+  /* Restores the value AND drops the marker, so the record and what it says
+     about itself stay in step. Leaving the marker behind would have the card
+     claiming a correction that is no longer there. */
+  function undoInfo(club, rec, change) {
+    var key = change.path.replace(/^info\//, '');
+    rec.info = rec.info || {};
+    rec.info[key] = change.from;
+    var prov = PROV[club] || {};
+    PROV[club] = {
+      changes: NLDirectory.arr(prov.changes).filter(function (c) { return c !== change; }),
+      merges: NLDirectory.arr(prov.merges),
+      attention: NLDirectory.arr(prov.attention)
+    };
+    firebase.database().ref(ROOT + '/provenance/' + club).set(PROV[club]);
+    saveStructure(club, infoLabel(key) + ' put back to what the club sent');
   }
 
   /* The club's own block has no row to hang a chip on, and a flagged social
