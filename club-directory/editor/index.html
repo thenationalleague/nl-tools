@@ -7,6 +7,20 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.2 — (05/08/2026) Four fixes, all of them things that made the tool
+         harder to use than the job it does.
+         · Hash routing. A club per URL, so an editor can send one to a
+           colleague, reopen where they left off, and not lose their place on
+           every refresh. The reader and the staff view already had it.
+         · An empty job title renders "No job title" in italics, and editing
+           it meant deleting those words first. The placeholder now clears on
+           the way in and comes back if the cell is still empty on the way out.
+         · Red chips for what _tidy.js v1.1 flags but will not fix: a mailbox
+           that does not match the name, a phone number the wrong length, one
+           title carried across two departments. The reason sits in the
+           tooltip, not the chip.
+         · The bake stores that flag list alongside the change log, and counts
+           it in the audit entry and the master diagnostic line.
   v1.1 — (05/08/2026) The row pen is canon. .ed-pen was the third hand-rolled
          icon-only button in the repo and the reason .btn--icon was promoted
          into nl-brand.css v2.33; the local box/colour/size CSS is deleted and
@@ -41,15 +55,15 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=32">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=10">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=11">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
-<script src="/club-directory/_tidy.js?v=10"></script>
-<script src="/club-directory/_gate.js?v=10"></script>
-<script src="/club-directory/_directory.js?v=10"></script>
+<script src="/club-directory/_tidy.js?v=11"></script>
+<script src="/club-directory/_gate.js?v=11"></script>
+<script src="/club-directory/_directory.js?v=11"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -272,7 +286,17 @@
     $('pick').addEventListener('change', function () { draw(this.value); });
     $('q').addEventListener('input', onSearch);
     $('app').hidden = false;
-    draw(names[0]);
+    /* A club per URL, same as the reader and the staff view. Without it an
+       editor cannot send "look at this one" to a colleague, cannot reopen
+       where they left off, and loses their place on every refresh — which on
+       a 72-club job is the difference between a tool and a chore. */
+    var first = fromHash() || names[0];
+    $('pick').value = first;
+    draw(first);
+    window.addEventListener('hashchange', function () {
+      var n = fromHash();
+      if (n && n !== current) { $('pick').value = n; draw(n); }
+    });
   }).catch(function (err) {
     $('out').innerHTML = '<p class="cd-empty">' + esc((err && err.message) || String(err)) + '</p>';
     $('app').hidden = false;
@@ -310,25 +334,28 @@
       return db.ref('app-data/ops-club-contacts/submissions').once('value');
     }).then(function (snap) {
       var subs = snap.val() || {};
-      var clubs = {}, prov = {}, changed = 0;
+      var clubs = {}, prov = {}, changed = 0, flagged = 0;
       Object.keys(subs).forEach(function (token) {
         var rec = subs[token];
         if (!rec || !rec.club) { return; }
         var out = NLTidy.run(rec);
         out.rec.club = rec.club;
         clubs[rec.club] = out.rec;
-        prov[rec.club] = { changes: out.changes, merges: out.merges };
+        prov[rec.club] = { changes: out.changes, merges: out.merges,
+                           attention: out.attention };
         changed += out.changes.length;
+        flagged += (out.attention || []).length;
       });
       if (!Object.keys(clubs).length) { throw new Error('No submissions found to build from.'); }
       NL.writeAudit('directory_bake',
         'Built the directory from ' + Object.keys(clubs).length + ' submissions, ' +
-        changed + ' changes recorded');
+        changed + ' changes recorded, ' + flagged + ' flagged for attention');
       return db.ref(ROOT).update({
         clubs: clubs,
         provenance: prov,
         bake: { at: firebase.database.ServerValue.TIMESTAMP,
-                by: session.name || '', clubs: Object.keys(clubs).length, changes: changed }
+                by: session.name || '', clubs: Object.keys(clubs).length,
+                changes: changed, attention: flagged }
       });
     }).then(function () {
       NL.toast('Directory built. Reloading…', 'success');
@@ -341,11 +368,19 @@
   }
 
   /* ------------------------------------------------------------ render */
+  function fromHash() {
+    var h = decodeURIComponent((location.hash || '').replace(/^#/, ''));
+    return names.indexOf(h) > -1 ? h : '';
+  }
+
   function draw(name) {
     current = name;
     var rec = ALL[name];
     if (!rec) { return; }
     rec.club = rec.club || name;
+    if (location.hash !== '#' + encodeURIComponent(name)) {
+      history.replaceState(null, '', '#' + encodeURIComponent(name));
+    }
     $('out').innerHTML = NLDirectory.renderClub(rec, { showHidden: true });
     var crest = document.getElementById('cdCrest');
     if (crest) {
@@ -355,6 +390,7 @@
     }
     wireEditing(name);
     markProvenance(name);
+    markAttention(name);
     markGaps(name, rec);
     showMerges(name);
     showSignoff(name, rec);
@@ -381,7 +417,8 @@
       n(infoFilled, 'club detail fields') + ', ' + n(withEmail, 'with an email') +
       ', ' + n(withPhone, 'with a phone') + ', ' +
       n(NLDirectory.arr(prov.changes).length, 'recorded changes') + ', ' +
-      n(NLDirectory.arr(prov.merges).length, 'merges') + '.';
+      n(NLDirectory.arr(prov.merges).length, 'merges') + ', ' +
+      n(NLDirectory.arr(prov.attention).length, 'flagged for attention') + '.';
     var banner = $('out').querySelector('.cd-facts') || $('out').querySelector('.cd-banner');
     if (banner) { banner.parentNode.insertBefore(el, banner.nextSibling); }
   }
@@ -407,7 +444,14 @@
       var roleIdx = NLDirectory.rolesOf(person).map(function (r, i) {
         return r.section === dept ? i : -1;
       }).filter(function (i) { return i > -1; })[0];
-      if (roleIdx != null) { editable(row.children[1], person, 'roles/' + roleIdx + '/title', club); }
+      /* Which of this person's roles this row is. Without it a marker for one
+         role lands on every row the person appears in, so a title flagged in
+         Programme also shows against their Media entry — twice the chips, half
+         of them pointing at the wrong department. */
+      if (roleIdx != null) {
+        row.dataset.ridx = roleIdx;
+        editable(row.children[1], person, 'roles/' + roleIdx + '/title', club);
+      }
       addPen(row, !!signedOffBy(rec));
     });
   }
@@ -450,10 +494,30 @@
     }
     var cells = row.querySelectorAll('[data-edit]');
     cells.forEach(function (c) {
-      if (on) { c.setAttribute('contenteditable', 'plaintext-only'); }
-      else { c.removeAttribute('contenteditable'); }
+      if (on) { c.setAttribute('contenteditable', 'plaintext-only'); unplaceholder(c); }
+      else { c.removeAttribute('contenteditable'); replaceholder(c); }
     });
     if (on && cells[0]) { cells[0].focus(); }
+  }
+
+  /* An empty title renders as "No job title" in italics, which is right for
+     reading and wrong for editing: the words are ours, not the club's, and
+     having to delete them before you can type is nonsense. So the placeholder
+     comes out when the row goes live and back in if the cell is still empty
+     when it closes. The record is unaffected either way — an empty cell is an
+     empty title, not the string "No job title". */
+  function placeholderText(cell) {
+    var em = cell.querySelector('em');
+    return (em && cell.textContent.trim() === em.textContent.trim()) ? em.textContent : '';
+  }
+  function unplaceholder(cell) {
+    var t = placeholderText(cell);
+    if (t) { cell.dataset.empty = t; cell.textContent = ''; }
+  }
+  function replaceholder(cell) {
+    if (!cell.textContent.trim() && cell.dataset.empty) {
+      cell.innerHTML = '<em>' + esc(cell.dataset.empty) + '</em>';
+    }
   }
 
   function valueAt(person, path) {
@@ -520,6 +584,14 @@
   }
 
   /* ------------------------------------------------------- provenance */
+  /* "roles/2/title" -> "2", so a marker can be matched against the row's own
+     role index. Anything that is not a role path returns null and falls
+     through to the person-level branch. */
+  function roleTail(tail) {
+    var m = /^roles\/(\d+)(?:\/|$)/.exec(tail || '');
+    return m ? m[1] : null;
+  }
+
   var KIND = { case: 'capitalisation', typo: 'a typo', split: 'a title covering two jobs',
                merge: 'a duplicate entry' };
 
@@ -538,7 +610,7 @@
       list.forEach(function (item) {
         var cell = null;
         if (item.tail === 'firstName' || item.tail === 'lastName') { cell = row.children[0]; }
-        else if (/^roles\/\d+\/title$/.test(item.tail)) { cell = row.children[1]; }
+        else if (roleTail(item.tail) === row.dataset.ridx) { cell = row.children[1]; }
         if (!cell) { return; }
         addNote(row, cell, item.c);
       });
@@ -571,6 +643,37 @@
     pillsFor(row).appendChild(pill);
   }
 
+  /* Things the tidier could see were wrong and deliberately did not touch — a
+     mailbox that does not match the name on the record, a phone number that
+     is the wrong length, one job title carried across two departments. Red,
+     alongside the gaps, because both mean somebody has to do something; the
+     amber "Was:" chips are the opposite, a record of something already done.
+
+     No undo button: there is nothing to put back. The chip says what looks
+     wrong and the row above it is already editable. */
+  function markAttention(club) {
+    var flags = NLDirectory.arr((PROV[club] || {}).attention);
+    if (!flags.length) { return; }
+    var byPerson = {};
+    flags.forEach(function (f) {
+      var m = /^people\/([^/]+)(?:\/(.*))?$/.exec(f.path || '');
+      if (!m) { return; }
+      (byPerson[m[1]] = byPerson[m[1]] || []).push(f);
+    });
+    $('out').querySelectorAll('.cd-row').forEach(function (row) {
+      var list = row.dataset.pid && byPerson[row.dataset.pid];
+      if (!list) { return; }
+      list.forEach(function (f) {
+        var m = /^people\/[^/]+\/(.*)$/.exec(f.path || '');
+        var tail = m ? m[1] : '';
+        /* A role-level flag belongs to one row; anything else (an address, a
+           number) is about the person and belongs on all of them. */
+        if (/^roles\//.test(tail) && roleTail(tail) !== row.dataset.ridx) { return; }
+        addGap(row, f.label, f.why);
+      });
+    });
+  }
+
   /* Every role entry with no job title. 307 of 1,478 across the 72 clubs, so
      this is the most common thing the admin team has to chase. Read from the
      rendered row rather than the record, so it stays true after an edit. */
@@ -583,10 +686,15 @@
 
   /* A gap the club left. Not ours to undo, so no action on it — it is there to
      be chased, which is what the admin team is for. */
-  function addGap(row, text) {
+  function addGap(row, text, why) {
     var pill = document.createElement('span');
     pill.className = 'ed-pill ed-pill--gap';
     pill.textContent = text;
+    /* The reason goes in the tooltip rather than the chip. "Check spelling"
+       is what an editor needs to see at a glance across a whole club; why we
+       think so is a sentence, and a sentence in the margin of every row is
+       the wall of text the chips replaced. */
+    if (why) { pill.title = why; }
     pillsFor(row).appendChild(pill);
   }
 
