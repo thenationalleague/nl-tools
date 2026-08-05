@@ -7,6 +7,13 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.7 — (05/08/2026) The club's own block goes through the tidier too (see
+         _tidy.js v1.2). What it fixes shows as amber markers like any other
+         correction; what it cannot fix shows as a red list at the head of the
+         card, because a club detail has no row to hang a chip on and a broken
+         social value is precisely the one that will not render as a link.
+         Re-check all runs the info pass as well — verified idempotent across
+         all 72 — and now counts job titles and club details separately.
   v1.6 — (05/08/2026) The club's own details were read-only, and the row
          actions did not say what they were for.
          · A pen on the club card opens every info field in one form —
@@ -129,15 +136,15 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=32">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=14">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=15">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
-<script src="/club-directory/_tidy.js?v=14"></script>
-<script src="/club-directory/_gate.js?v=14"></script>
-<script src="/club-directory/_directory.js?v=14"></script>
+<script src="/club-directory/_tidy.js?v=15"></script>
+<script src="/club-directory/_gate.js?v=15"></script>
+<script src="/club-directory/_directory.js?v=15"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -256,6 +263,20 @@
   /* The club's own details are a card now, so the pen goes in its corner —
      same affordance as a person row, same canon button. */
   .ed-cardpen { position: absolute; top: 10px; right: 10px; }
+
+  /* The club's own block has no row to hang a chip on, so its flags sit at
+     the head of the card as a short list. Same red as the row chips: both
+     mean somebody has to do something. */
+  .ed-infoflags {
+    margin: 0 0 16px; padding: 11px 14px;
+    background: var(--red-light); border-radius: var(--radius);
+    font-size: var(--text-sm); color: var(--text);
+  }
+  .ed-infoflags b { font-variation-settings: 'wght' 800; color: var(--red); }
+  .ed-infoflags ul { margin: 7px 0 0; padding: 0; list-style: none;
+    display: flex; flex-direction: column; gap: 5px; }
+  .ed-infoflags li { display: flex; align-items: baseline; gap: 8px; line-height: 1.45; }
+  .ed-infoflags .ed-pill { flex: 0 0 auto; }
   .ed-fgroup {
     margin: 18px 0 8px; font-size: var(--text-xs);
     text-transform: uppercase; letter-spacing: var(--tracking-wide);
@@ -495,7 +516,8 @@
       if (!ok) { return; }
       var btn = $('recheck');
       btn.disabled = true; btn.textContent = 'Checking…';
-      var db = firebase.database(), updates = {}, cased = 0, flagged = 0, clubs = 0;
+      var db = firebase.database(), updates = {};
+      var cased = 0, infoFixed = 0, flagged = 0, clubs = 0;
       Object.keys(ALL).forEach(function (club) {
         var rec = ALL[club], touched = false;
         var extra = [];
@@ -510,6 +532,13 @@
                          from: t, to: out, kind: 'case' });
           });
         });
+        /* Idempotent, and verified so across all 72: a second pass makes no
+           further info changes. Safe to run against edited data. */
+        var infoLog = [];
+        var hits = NLTidy.tidyInfo(rec, function (path, from, to, kind) {
+          infoLog.push({ path: path, from: from, to: to, kind: kind });
+        });
+        if (hits) { touched = true; infoFixed += hits; extra = extra.concat(infoLog); }
         var att = NLTidy.flagAttention(rec);
         flagged += att.length;
         var prov = PROV[club] || {};
@@ -520,11 +549,12 @@
         PROV[club] = updates['provenance/' + club];
       });
       NL.writeAudit('directory_recheck',
-        cased + ' title(s) recased across ' + clubs + ' club(s), ' +
-        flagged + ' flagged for attention (' + (session.name || 'master') + ')');
+        cased + ' title(s) recased and ' + infoFixed + ' club detail(s) corrected across ' +
+        clubs + ' club(s), ' + flagged + ' flagged for attention (' +
+        (session.name || 'master') + ')');
       db.ref(ROOT).update(updates).then(function () {
-        NL.toast(cased + ' title(s) corrected, ' + flagged + ' flagged for attention',
-          'success');
+        NL.toast(cased + ' job title(s) and ' + infoFixed + ' club detail(s) corrected, ' +
+          flagged + ' flagged for attention', 'success');
         btn.disabled = false; btn.textContent = 'Re-check all';
         if (current) { draw(current); }
       }).catch(function (err) {
@@ -623,6 +653,7 @@
     wireEditing(name);
     markProvenance(name);
     markAttention(name);
+    markInfoFlags(name, rec);
     markAdded(name);
     markGaps(name, rec);
     showClubEdit(name, rec);
@@ -1338,6 +1369,30 @@
     pillsFor(row).appendChild(pill);
   }
 
+  /* The club's own block has no row to hang a chip on, and a flagged social
+     is precisely the one that will not render as a link, so these go at the
+     head of the card as a short list. The pen underneath opens the form where
+     each one is fixed. */
+  function markInfoFlags(club, rec) {
+    var flags = NLDirectory.arr((PROV[club] || {}).attention)
+      .filter(function (f) { return f.field === 'info'; });
+    var card = document.getElementById('cdCard');
+    if (!flags.length || !card) { return; }
+    var box = document.createElement('div');
+    box.className = 'ed-infoflags';
+    box.innerHTML = '<b>' + flags.length +
+      (flags.length === 1 ? ' thing' : ' things') + ' to check in these details</b>';
+    var ul = document.createElement('ul');
+    flags.forEach(function (f) {
+      var li = document.createElement('li');
+      li.innerHTML = '<span class="ed-pill ed-pill--gap">' + esc(f.label) + '</span> ' +
+        esc(f.why);
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
+    card.insertBefore(box, card.firstChild);
+  }
+
   /* Things the tidier could see were wrong and deliberately did not touch — a
      mailbox that does not match the name on the record, a phone number that
      is the wrong length, one job title carried across two departments. Red,
@@ -1351,6 +1406,7 @@
     if (!flags.length) { return; }
     var byPerson = {};
     flags.forEach(function (f) {
+      if (f.field === 'info') { return; }        /* the card's, not a row's */
       var m = /^people\/([^/]+)(?:\/(.*))?$/.exec(f.path || '');
       if (!m) { return; }
       (byPerson[m[1]] = byPerson[m[1]] || []).push(f);

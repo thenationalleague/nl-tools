@@ -1,7 +1,24 @@
 /* =========================================================================
    NL Tools — club directory tidier
    File: /club-directory/_tidy.js
-   Version: v1.1 (05/08/2026)
+   Version: v1.2 (05/08/2026)
+
+   v1.2 — The club's own block goes through the same mill as its people.
+     Everything before this worked on names and job titles; the ground, the
+     switchboard, the main email and the socials had never been touched, so a
+     county FA arrived SHOUTING and a social account arrived as "@hebburntown"
+     and both stayed that way.
+     Derived: main email lower-cased, uniformly-cased text fields recased,
+     "Member of Essex County FA" trimmed to the body's name, a bare county
+     given its missing FA, a clean handle turned into that platform's URL, and
+     a sponsor field reading None or N/A emptied — which is what the follow-up
+     emails promise clubs we will do.
+     Flagged: a switchboard the wrong length, a main email that is not an
+     address, a county FA naming two bodies or reading 78709, and a social
+     value that is neither a link nor a handle we can resolve.
+     One hard prohibition: never touch the case of a social URL. Six clubs
+     hold a YouTube channel id like UCiCcSfIROUzS3V6shmZTpAA and 150 URLs
+     across the 72 carry capitals in a path. Only the scheme is added.
 
    v1.1 — Three things the baseline was getting wrong, and one new idea.
      · "Director Of Football". needsRecase only fires on a title whose shape
@@ -467,6 +484,107 @@
     return merged;
   }
 
+  /* ------------------------------------------------------ the club's own info
+     Everything above this point works on people. The club's own block — the
+     ground, the switchboard, the main email, the socials — had never been
+     through any of it, so a submission that shouted its county FA or gave a
+     social account as a bare handle stayed exactly as typed.
+
+     Same rule as everywhere else: derive what can be derived, flag what
+     cannot. The one hard prohibition is case in a social URL. Six clubs hold
+     a YouTube channel id like UCiCcSfIROUzS3V6shmZTpAA, and 150 social URLs
+     across the 72 carry capitals in a path segment. Lowercasing a URL to make
+     it look tidy would break every one of them, so the only thing touched
+     there is the scheme. */
+  var SOCIAL_KEYS = ['website', 'x', 'facebook', 'instagram', 'tiktok', 'youtube', 'linkedin'];
+  var SPONSOR_KEYS = ['spClub', 'spFront', 'spBack', 'spSleeve', 'spShorts', 'spExtra',
+    'stadiumSponsor'];
+  var TEXT_KEYS = ['stadium', 'town', 'county', 'countyFA', 'station', 'addr1', 'addr2'];
+
+  /* A handle becomes a URL only where the platform's shape is unambiguous.
+     LinkedIn is absent on purpose: /company/ and /in/ are different things and
+     "Hebburn Town FC" does not say which. */
+  var SOCIAL_URL = {
+    x:         function (h) { return 'https://x.com/' + h; },
+    facebook:  function (h) { return 'https://www.facebook.com/' + h; },
+    instagram: function (h) { return 'https://www.instagram.com/' + h; },
+    tiktok:    function (h) { return 'https://www.tiktok.com/@' + h; },
+    youtube:   function (h) { return 'https://www.youtube.com/@' + h; }
+  };
+  var CLEAN_HANDLE = /^@?[A-Za-z0-9._-]{2,}$/;
+  var EMAIL_OK = /^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$/;
+  /* "Member of Essex County FA" is a sentence about a fact, not the fact. */
+  var FA_PREFIX = /^(?:full\s+|associate\s+)?member\s+of\s+(?:the\s+)?/i;
+
+  /* A bare domain is a URL. The first cut required a path after it, which
+     made www.afcfylde.co.uk fail the test and flagged all 72 clubs' websites
+     as unresolvable handles — a flag on every club is a flag on none. */
+  function isUrl(v) { return /^https?:\/\//i.test(v) || /^[\w-]+(\.[\w-]+){1,}(\/|$)/.test(v); }
+
+  function tidyInfo(rec, log) {
+    var info = rec.info;
+    if (!info || typeof info !== 'object') { return 0; }
+    var n = 0; log = log || noop;
+    var put = function (key, was, now, kind) {
+      if (now === was) { return; }
+      info[key] = now; n++;
+      log('info/' + key, was, now, kind || 'case');
+    };
+
+    var mail = (info.mainEmail || '').trim();
+    if (mail && /[A-Z]/.test(mail)) { put('mainEmail', info.mainEmail, mail.toLowerCase()); }
+
+    TEXT_KEYS.forEach(function (k) {
+      var v = (info[k] || '').trim();
+      if (!v || isPlaceholder(v) || !needsRecase(v, false)) { return; }
+      put(k, info[k], titleCase(v));
+    });
+
+    /* The field is called County FA, so a bare county name is missing one
+       word and we know which. Prose and anything numeric are left for the
+       flag pass — "Associate member of the FA and member of the Lincolnshire
+       FA" names two bodies and picking one is a guess. */
+    var fa = (info.countyFA || '').trim();
+    if (fa) {
+      var trimmed = fa.replace(FA_PREFIX, '').trim();
+      if (trimmed && trimmed !== fa && !/\bFA\b.*\bFA\b/i.test(trimmed)) {
+        put('countyFA', fa, trimmed, 'typo');
+        fa = trimmed;
+      }
+      if (fa && /[A-Za-z]/.test(fa) && !/\bFA\b/i.test(fa) && !/association/i.test(fa) &&
+          !/\band\b.*\bFA\b/i.test(fa) && fa.split(/\s+/).length <= 4) {
+        put('countyFA', fa, fa + ' FA', 'typo');
+      }
+    }
+
+    SOCIAL_KEYS.forEach(function (k) {
+      var v = (info[k] || '').trim();
+      if (!v) { return; }
+      if (isUrl(v)) {
+        /* Scheme only, and only where there is a path — "www.club.co.uk" is a
+           perfectly ordinary way to write a website and the renderer already
+           prepends the scheme when it builds the link. Rewriting all 72 would
+           be 72 amber markers saying nothing happened. */
+        if (!/^https?:\/\//i.test(v) && v.indexOf('/') > -1) {
+          put(k, info[k], 'https://' + v, 'typo');
+        }
+        return;
+      }
+      if (!CLEAN_HANDLE.test(v) || !SOCIAL_URL[k]) { return; }   /* flagged instead */
+      put(k, info[k], SOCIAL_URL[k](v.replace(/^@/, '')), 'typo');
+    });
+
+    /* The follow-up emails promise clubs "we'll leave those blank rather than
+       print the word", so a sponsor field reading None or N/A is emptied
+       rather than published. 18 of them across the 72. */
+    SPONSOR_KEYS.forEach(function (k) {
+      var v = (info[k] || '').trim();
+      if (v && isPlaceholder(v)) { put(k, info[k], '', 'typo'); }
+    });
+
+    return n;
+  }
+
   /* ------------------------------------------------------------- attention
      Things we can see are wrong but must not fix.
 
@@ -600,8 +718,43 @@
     });
   }
 
+  /* The club's own block, same test as a person's: visible but not fixable.
+     These carry no person id, so they address info/<key> and the editor hangs
+     them on the club card rather than a row. */
+  function flagInfo(info, out) {
+    if (!info || typeof info !== 'object') { return; }
+    var add = function (key, label, why) {
+      out.push({ path: 'info/' + key, field: 'info', key: key, label: label, why: why });
+    };
+
+    var mail = (info.mainEmail || '').trim();
+    if (mail && !EMAIL_OK.test(mail)) {
+      add('mainEmail', 'Check the address', 'does not read as an email address');
+    }
+
+    var bad = badPhone(info.phone);
+    if (bad) { add('phone', 'Check the number', 'switchboard is ' + bad); }
+
+    var fa = (info.countyFA || '').trim();
+    if (fa && !/[A-Za-z]/.test(fa)) {
+      add('countyFA', 'Check the county FA', 'reads "' + fa + '", which is not a name');
+    } else if (fa && (/\bFA\b.*\bFA\b/i.test(fa) || fa.split(/\s+/).length > 5)) {
+      add('countyFA', 'Check the county FA',
+        'names more than one body, so which to keep is not ours to pick: "' + fa + '"');
+    }
+
+    SOCIAL_KEYS.forEach(function (k) {
+      var v = (info[k] || '').trim();
+      if (!v || isUrl(v)) { return; }
+      add(k, 'Check the ' + k + ' link', CLEAN_HANDLE.test(v)
+        ? 'reads "' + v + '" — a handle we cannot turn into a ' + k + ' address on its own'
+        : 'reads "' + v + '", which is neither a link nor a handle');
+    });
+  }
+
   function flagAttention(rec) {
     var out = [];
+    flagInfo(rec.info, out);
     arr(rec.people).forEach(function (p, pi) {
       arr(p.emails).forEach(function (em, ei) {
         var near = emailMismatch(p, em);
@@ -660,6 +813,7 @@
     var typos  = fixTypos(out, log);
     var splits = splitCompound(out, log);
     var cased  = tidyCase(out, log);
+    var info   = tidyInfo(out, log);
     var merges = mergeByName(out, log);
     /* Last, and against the tidied record: a title we have just split is not
        a repeat, and an address we have just lower-cased is the one to check
@@ -670,7 +824,7 @@
       rec: out,
       changes: changes,
       attention: attention,
-      counts: { typos: typos, cased: cased, splits: splits.length,
+      counts: { typos: typos, cased: cased, splits: splits.length, info: info,
                 merges: merges.length, attention: attention.length },
       splits: splits,
       merges: merges
@@ -684,6 +838,7 @@
     tidyCase: tidyCase,
     mergeByName: mergeByName,
     flagAttention: flagAttention,
+    tidyInfo: tidyInfo,
     minorCase: minorCase,
     leadNames: leadNames,
     fullName: fullName,
