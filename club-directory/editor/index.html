@@ -7,6 +7,27 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.18 — (05/08/2026) Undo is isolated, and nothing expires.
+         Undo used to put the whole club back to how it was before the change,
+         which meant reaching for a mistake made at ten quietly threw away the
+         six job titles fixed at eleven. It now reverses only what its own act
+         touched — the people it changed, the club-detail fields it changed —
+         and leaves the rest of the club exactly where it is. The unit is the
+         person rather than the field, because the acts here are person-shaped;
+         the one case it cannot isolate is two changes to the SAME person, and
+         the confirm now names who made the later one before you press.
+         With that, the body behind an entry is a few hundred bytes rather than
+         a whole club, so the twenty-per-club cap has gone. Nothing is pruned.
+         The list carries club crests, since it runs across all 72 and a crest
+         finds the club faster than reading the name.
+  v1.17 — (05/08/2026) The paired chip says "Changed", not "Sorted", and the
+         card says "1 flagged detail has since been changed" rather than
+         "1 flag sorted". All the tool can observe is that the flag stopped
+         firing, and a value typed wrong silences a check exactly as well as a
+         value typed right — so "Sorted" was the page vouching for work it had
+         not seen, which on a flag that exists precisely because nobody should
+         guess is the wrong claim to make. Who changed it and what it used to
+         say stay in the tooltip, which is the part a reviewer can judge.
   v1.16 — (05/08/2026) "My changes", and an undo behind it. Deleting somebody
          was final, which for a job where the point is being unsure about the
          data was the wrong thing to be certain about. Every save now leaves a
@@ -21,8 +42,7 @@
          Undo restores the people, the club's own details, the sign-off state,
          and the amber and green markers with them — a reverted edit that left
          a green chip behind would have the row claiming a change that is no
-         longer there. Snapshots are kept for the last 20 acts per club; past
-         that the journal line survives and the entry says it is too old.
+         longer there.
          Also fixed: three places rewrote the whole provenance node from a
          fixed list of keys, which would have deleted the journal on the first
          amber undo, on the first club-detail undo, and on every re-check.
@@ -312,6 +332,8 @@
     padding: 9px 0; border-bottom: 1px solid var(--border);
   }
   .ed-jrnl__row:last-child { border-bottom: 0; }
+  .ed-jrnl__crest { width: 26px; height: 26px; object-fit: contain; flex: 0 0 auto; }
+  .ed-jrnl__row.is-undone .ed-jrnl__crest { opacity: 0.45; }
   .ed-jrnl__main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
   .ed-jrnl__what {
     font-size: var(--text-sm); font-weight: 700; font-variation-settings: 'wght' 700;
@@ -356,8 +378,8 @@
   .ed-dept:focus { outline: none; box-shadow: var(--focus-ring); border-color: var(--primary); }
   /* Removing is the one act whose cost is on screen in front of you, so it
      reads as the danger it is rather than sitting quietly next to the
-     department picker. It is recoverable from "My changes" now, but only by
-     somebody who realises they need to. */
+     department picker. It is recoverable from "My changes" now, and only that
+     person comes back \u2014 not the club as it was. */
   .ed-del { color: var(--red); border-color: var(--red-light); }
   .ed-del:hover { background: var(--red-light); }
 
@@ -521,7 +543,7 @@
   .ed-was { background: var(--red-light); color: var(--red); }
   /* Solid green rather than green-light: the row this chip sits on has already
      gone green-light, because fixing the flag is itself a hand edit, and a
-     green-light half on a green-light row is an invisible half. "Sorted" must
+     green-light half on a green-light row is an invisible half. The word must
      not wrap either — the chips live in a narrow gutter column, and it broke
      as "Sorte / d". */
   .ed-now {
@@ -976,19 +998,34 @@
      out. An undone change is not work you did; it is work you did and then
      un-did, and a to-do list that keeps showing it is lying to you.
 
-     The body — what the club looked like immediately before the act — lives
-     at a separate path, .../undo/<club>/<id>, and is fetched only when
-     somebody actually presses Undo. It is a whole-club snapshot rather than a
-     targeted diff, which is crude but exactly reversible for every act
-     including the ones nobody has written yet; the reason it is not in the
-     journal itself is that the editor loads every club's provenance at boot,
-     and 72 clubs' worth of snapshots would make that load tens of megabytes.
-     The journal entry is a line of text and a timestamp. */
+     The body at .../undo/<club>/<id> is a PATCH, not a snapshot, and that
+     distinction is the whole design. The first cut stored the club as it was
+     and put the whole thing back, which meant undoing a mistake made at ten
+     silently threw away the six job titles fixed at eleven. Undo now reverses
+     only what its own act touched — the people it changed, the club-detail
+     fields it changed — and leaves everything else exactly where it is.
+
+     The unit of isolation is the person, not the field, because the acts this
+     tool performs are person-shaped: "update details for X" changes a name, a
+     title, three addresses and a publish flag as one decision, and unpicking
+     it field by field would let you land halfway through somebody's move to a
+     new job. The one case it does not isolate is two acts on the SAME person —
+     undoing the earlier one takes the later one with it, for that person only.
+     The journal entry carries the ids it touched so the confirm can say so
+     before you press it.
+
+     It lives at a separate path rather than in the journal because the editor
+     loads every club's provenance at boot; the journal entry is a line of
+     text, a timestamp and a short list of ids.
+     Nothing is pruned. The first cut kept twenty per club, which was sized
+     for whole-club snapshots at twenty-odd kilobytes each; a patch is a few
+     hundred bytes and lives in a node the editor never loads at boot, so a
+     cap would be throwing away the one thing this exists to keep. */
   var BEFORE = {};
-  var UNDO_KEEP = 20;   /* snapshots retained per club — beyond this, the
-                           journal line survives and the body does not */
 
   function clone(v) { return v == null ? null : JSON.parse(JSON.stringify(v)); }
+  function same(a, b) { return JSON.stringify(a === undefined ? null : a) ===
+                               JSON.stringify(b === undefined ? null : b); }
 
   function snapshot(club) {
     var rec = ALL[club] || {}, prov = PROV[club] || {};
@@ -1001,21 +1038,113 @@
     };
   }
 
-  /* Puts the club back exactly, including what it said about itself: the
-     green hand-edit markers and the amber tidier markers are part of the
-     state being restored, or an undone edit would leave a chip behind
-     claiming a change that is no longer there. */
-  function restore(club, snap) {
+  function byId(list) {
+    var m = {};
+    (list || []).forEach(function (p, i) { m[(p && p.id) || ('#' + i)] = { p: p, i: i }; });
+    return m;
+  }
+  function byPath(list) {
+    var m = {};
+    (list || []).forEach(function (e) { if (e && e.path) { m[e.path] = e; } });
+    return m;
+  }
+  function keysOf() {
+    var out = {};
+    for (var i = 0; i < arguments.length; i++) {
+      Object.keys(arguments[i] || {}).forEach(function (k) { out[k] = 1; });
+    }
+    return Object.keys(out);
+  }
+
+  /* before -> after, as the smallest thing that can put before back. */
+  function diffClub(a, b) {
+    var A = byId(a.people), B = byId(b.people), out = {}, people = {};
+    keysOf(A, B).forEach(function (id) {
+      var x = A[id] || null, y = B[id] || null;
+      if (same(x && x.p, y && y.p)) { return; }
+      people[id] = { before: x ? clone(x.p) : null, after: y ? clone(y.p) : null };
+      if (x) { people[id].at = x.i; }        /* so a restored person lands back
+                                                 where they were, not at the end */
+    });
+    if (keysOf(people).length) { out.people = people; }
+
+    var info = {};
+    keysOf(a.info, b.info).forEach(function (k) {
+      if (same((a.info || {})[k], (b.info || {})[k])) { return; }
+      info[k] = { before: (a.info || {})[k] == null ? null : (a.info || {})[k],
+                  after:  (b.info || {})[k] == null ? null : (b.info || {})[k] };
+    });
+    if (keysOf(info).length) { out.info = info; }
+
+    if (!same(a.signedOff, b.signedOff)) {
+      out.signedOff = { before: a.signedOff || null, after: b.signedOff || null };
+    }
+    /* The markers move with the thing they describe, or an undone edit leaves
+       a green chip behind claiming a change that is no longer there. Keyed by
+       path so one row's marker can go back without disturbing another's. */
+    ['edits', 'changes'].forEach(function (kind) {
+      var X = byPath(a[kind]), Y = byPath(b[kind]), d = {};
+      keysOf(X, Y).forEach(function (path) {
+        if (same(X[path], Y[path])) { return; }
+        d[path] = { before: X[path] || null, after: Y[path] || null };
+      });
+      if (keysOf(d).length) { out[kind] = d; }
+    });
+    return out;
+  }
+
+  /* Applies the `before` side, and only where this act actually changed
+     something. Everything the act did not name is left alone. */
+  function applyPatch(club, patch) {
     var rec = ALL[club] || (ALL[club] = {});
-    rec.people = clone(snap.people) || [];
-    rec.info = clone(snap.info) || {};
-    rec.signedOff = snap.signedOff || null;
+    var list = NLDirectory.arr(rec.people).slice();
+    Object.keys(patch.people || {}).forEach(function (id) {
+      var d = patch.people[id], i = -1;
+      for (var k = 0; k < list.length; k++) {
+        if (list[k] && list[k].id === id) { i = k; break; }
+      }
+      if (d.before == null) { if (i > -1) { list.splice(i, 1); } return; }
+      if (i > -1) { list[i] = clone(d.before); return; }
+      var at = typeof d.at === 'number' ? Math.min(d.at, list.length) : list.length;
+      list.splice(at, 0, clone(d.before));
+    });
+    rec.people = list;
+
+    if (patch.info) {
+      rec.info = rec.info || {};
+      Object.keys(patch.info).forEach(function (k) {
+        var v = patch.info[k].before;
+        if (v == null) { delete rec.info[k]; } else { rec.info[k] = clone(v); }
+      });
+    }
+    if (patch.signedOff) { rec.signedOff = clone(patch.signedOff.before); }
+
     var prov = PROV[club] || (PROV[club] = {});
-    prov.edits = clone(snap.edits) || [];
-    prov.changes = clone(snap.changes) || [];
     var db = firebase.database();
-    db.ref(ROOT + '/provenance/' + club + '/edits').set(prov.edits);
-    db.ref(ROOT + '/provenance/' + club + '/changes').set(prov.changes);
+    ['edits', 'changes'].forEach(function (kind) {
+      if (!patch[kind]) { return; }
+      var cur = NLDirectory.arr(prov[kind]).slice();
+      Object.keys(patch[kind]).forEach(function (path) {
+        var d = patch[kind][path];
+        cur = cur.filter(function (e) { return e.path !== path; });
+        if (d.before) { cur.push(clone(d.before)); }
+      });
+      prov[kind] = cur;
+      db.ref(ROOT + '/provenance/' + club + '/' + kind).set(cur);
+    });
+  }
+
+  /* A short, human list of what this act touched, for the confirm and for
+     spotting the one case undo cannot isolate: two acts on one person. */
+  function touchedBy(club, patch) {
+    var names = [];
+    Object.keys(patch.people || {}).forEach(function (id) {
+      var d = patch.people[id];
+      var p = d.before || d.after;
+      names.push(NLDirectory.fullName(p) || 'someone');
+    });
+    return { ids: keysOf(patch.people), names: names,
+             info: !!patch.info, signedOff: !!patch.signedOff };
   }
 
   /* undoOf turns this into the second half of a pair rather than a new act of
@@ -1023,41 +1152,26 @@
      leaving it in the record. */
   function logJournal(club, what, undoOf) {
     var db = firebase.database();
+    var now = snapshot(club);
+    var patch = BEFORE[club] ? diffClub(BEFORE[club], now) : null;
     var ref = db.ref(ROOT + '/provenance/' + club + '/journal').push();
     var e = { id: ref.key, at: Date.now(), by: session.name || 'editor', what: what };
     if (undoOf) { e.undoOf = undoOf; }
     var prov = PROV[club] || (PROV[club] = {});
     prov.journal = prov.journal || {};
     prov.journal[ref.key] = e;
-    ref.set(e);
-    /* The snapshot goes to the separate path, and only for acts that could be
-       undone — an undo of an undo is a thing somebody can do by pressing Undo
-       on the original again, not by stacking them. */
-    if (!undoOf && BEFORE[club]) {
+    /* Only for acts that could be undone. An undo of an undo is done by
+       pressing Undo on the original again, not by stacking them. And an act
+       that changed nothing measurable gets a journal line but no button —
+       there would be nothing for it to put back. */
+    if (!undoOf && patch && keysOf(patch).length) {
       e.undoable = true;
-      ref.child('undoable').set(true);
-      db.ref(ROOT + '/undo/' + club + '/' + ref.key).set(BEFORE[club]);
-      pruneUndo(club);
+      e.touched = touchedBy(club, patch);
+      db.ref(ROOT + '/undo/' + club + '/' + ref.key).set(patch);
     }
-    BEFORE[club] = snapshot(club);
+    ref.set(e);
+    BEFORE[club] = now;
     return e;
-  }
-
-  /* Snapshots are the expensive half and the least valuable one once a club
-     has moved on. The journal line — who, when, what — is kept forever; the
-     body behind the oldest ones is dropped, and the entry says so by losing
-     its undoable flag. */
-  function pruneUndo(club) {
-    var j = (PROV[club] || {}).journal || {};
-    var mine = Object.keys(j).map(function (k) { return j[k]; })
-      .filter(function (e) { return e && e.undoable; })
-      .sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
-    var db = firebase.database();
-    mine.slice(UNDO_KEEP).forEach(function (e) {
-      delete e.undoable;
-      db.ref(ROOT + '/provenance/' + club + '/journal/' + e.id + '/undoable').remove();
-      db.ref(ROOT + '/undo/' + club + '/' + e.id).remove();
-    });
   }
 
   /* Every club's journal, newest first, with each entry told whether it has
@@ -1096,20 +1210,27 @@
       var head = everyone
         ? '<p class="form-hint">Everything every editor has done, including undos. ' +
           'Nothing is ever removed from this list.</p>'
-        : '<p class="form-hint">What you have changed, most recent first. Undoing ' +
-          'something puts the club back as it was and takes it off this list — the ' +
-          'record of both still stands.</p>';
+        : '<p class="form-hint">What you have changed, most recent first, across ' +
+          'every club. Undoing one puts back only what that change touched and takes ' +
+          'it off this list — the record of both still stands.</p>';
       if (!list.length) {
         body.innerHTML = head + '<p class="cd-empty">' +
           (everyone ? 'Nothing has been changed yet.'
                     : 'You have not changed anything yet.') + '</p>';
         return void mountToggle();
       }
-      body.innerHTML = head + '<ul class="ed-jrnl__list">' + list.slice(0, 60).map(function (x) {
+      /* The list runs across every club, so the club is the thing the eye
+         needs first — and a crest finds it faster than reading 72 names. */
+      /* Nothing is deleted, so a master's view across 72 clubs can run long.
+         The list is capped for rendering only, and says what it is not
+         showing rather than trailing off. */
+      var SHOW = 100, hidden = Math.max(0, list.length - SHOW);
+      body.innerHTML = head + '<ul class="ed-jrnl__list">' + list.slice(0, SHOW).map(function (x) {
         var e = x.e;
         var when = NL.formatDateTime ? NL.formatDateTime(e.at) : NL.formatDate(e.at);
         return '<li class="ed-jrnl__row' + (x.undone ? ' is-undone' : '') +
             (e.undoOf ? ' is-undo' : '') + '">' +
+          '<img class="ed-jrnl__crest" alt="" data-crest="' + esc(x.club) + '">' +
           '<div class="ed-jrnl__main">' +
             '<span class="ed-jrnl__what">' + esc(e.what || 'Changed') + '</span>' +
             '<span class="ed-jrnl__meta">' + esc(x.club) + ' · ' + esc(when) +
@@ -1121,9 +1242,20 @@
             ? '<button class="btn btn--sm btn--ghost" type="button" data-club="' +
               esc(x.club) + '" data-id="' + esc(e.id) + '">Undo</button>'
             : '<span class="ed-jrnl__no">' +
-              (x.undone ? 'Undone' : e.undoOf ? 'Reversal' : 'Too old to undo') + '</span>') +
+              (x.undone ? 'Undone' : e.undoOf ? 'Reversal' : 'Nothing to put back') +
+              '</span>') +
           '</li>';
-      }).join('') + '</ul>';
+      }).join('') + '</ul>' + (hidden
+        ? '<p class="form-hint">' + hidden + ' older ' +
+          (hidden === 1 ? 'change is' : 'changes are') + ' not shown here. ' +
+          'Nothing has been deleted \u2014 they are still on the record.</p>'
+        : '');
+      body.querySelectorAll('img[data-crest]').forEach(function (img) {
+        var n = img.dataset.crest;
+        img.alt = n + ' crest';
+        NL.clubs.wireCrestImg(img, n, true);
+        img.src = NL.clubs.crestUrl(n, 'thumb');
+      });
       body.querySelectorAll('button[data-id]').forEach(function (b) {
         b.addEventListener('click', function () {
           undoJournal(b.dataset.club, b.dataset.id, ctrl);
@@ -1162,30 +1294,60 @@
     return ctrl;
   }
 
-  /* The snapshot is fetched now rather than held in memory, because it is the
-     expensive half and almost none of them are ever wanted. If it has been
-     pruned the entry should not have offered a button, but say so rather than
-     failing silently. */
+  /* Somebody else may have touched the same person since. That is the one
+     thing undo cannot isolate, so it is named before you press rather than
+     discovered afterwards. */
+  function laterOn(club, entry) {
+    var mine = (entry.touched || {}).ids || [];
+    if (!mine.length) { return []; }
+    var j = (PROV[club] || {}).journal || {};
+    var undone = {};
+    Object.keys(j).forEach(function (k) { if (j[k].undoOf) { undone[j[k].undoOf] = 1; } });
+    return Object.keys(j).map(function (k) { return j[k]; })
+      .filter(function (e) {
+        if (e.id === entry.id || e.undoOf || undone[e.id]) { return false; }
+        if ((e.at || 0) <= (entry.at || 0)) { return false; }
+        return ((e.touched || {}).ids || []).some(function (id) {
+          return mine.indexOf(id) > -1;
+        });
+      }).sort(function (a, b) { return (a.at || 0) - (b.at || 0); });
+  }
+
+  /* The patch is fetched now rather than held in memory: almost none of them
+     are ever wanted, and the editor already loads all 72 clubs' provenance at
+     boot without them. */
   function undoJournal(club, id, ctrl) {
     var j = ((PROV[club] || {}).journal || {})[id];
     if (!j) { return; }
+    var who = (j.touched || {}).names || [];
+    var scope = who.length ? (who.length === 1 ? who[0] : who.length + ' people')
+      : ((j.touched || {}).signedOff ? 'the sign-off' : 'the club\u2019s own details');
+    var clash = laterOn(club, j);
+    var detail = '\u201c' + (j.what || 'Change') + '\u201d. This puts ' + scope +
+      ' back as they were before it, at ' + club + '. Nothing else on the club is ' +
+      'touched \u2014 anything you have changed since, anywhere else, stays as it is.';
+    if (clash.length) {
+      detail += '\n\nBut ' + (who.length === 1 ? who[0] : 'somebody here') +
+        ' has been changed again since, by ' + (clash[0].by || 'an editor') +
+        ' \u2014 \u201c' + (clash[0].what || 'a change') + '\u201d. That will go back too.';
+    }
     NL.confirm('Undo this change to ' + club + '?', {
       title: 'Undo',
-      detail: '"' + (j.what || 'Change') + '" — ' + club + ' goes back to exactly how ' +
-              'it was immediately before. Anything changed since, on this club, goes with it.',
+      variant: clash.length ? 'danger' : undefined,
+      detail: detail,
       confirmText: 'Undo it'
     }).then(function (ok) {
       if (!ok) { return; }
       return firebase.database().ref(ROOT + '/undo/' + club + '/' + id).once('value')
         .then(function (snap) {
-          var body = snap.val();
-          if (!body) {
-            NL.toast('That change is too old to undo — the record of it stands, but ' +
-              'what the club looked like beforehand is no longer held.', 'error');
+          var patch = snap.val();
+          if (!patch) {
+            NL.toast('There is nothing held for that change, so it cannot be put ' +
+              'back. The record of it stands.', 'error');
             return;
           }
           if (ctrl && ctrl.close) { ctrl.close(); }
-          restore(club, body);
+          applyPatch(club, patch);
           if ($('pick')) { $('pick').value = club; }
           return saveStructure(club, 'Undid: ' + (j.what || 'a change'), id);
         });
@@ -1622,8 +1784,8 @@
     NL.confirm('Remove ' + name + ' from the directory entirely?' +
       (sections.length > 1 ? ' That is all ' + sections.length + ' of their entries — ' +
         sections.join(', ') + '.' : '') +
-      '\n\nName, contact details and all. It can be put back from "My changes" ' +
-      'at the top of the page, but nobody will know to do that unless you tell them.',
+      '\n\nName, contact details and all. \u201cMy changes\u201d at the top of ' +
+      'the page will put just this person back, whenever you need it.',
       { title: 'Remove person', variant: 'danger', confirmText: 'Remove person' }
     ).then(function (ok) {
       if (!ok) { return; }
@@ -1692,7 +1854,7 @@
     if (!rest.length) {
       NL.confirm('Remove ' + name + ' from the directory entirely? This is their only ' +
         'role, so the whole entry goes — name, contact details and all.' +
-        '\n\nIt can be put back from "My changes" at the top of the page.',
+        '\n\n\u201cMy changes\u201d at the top of the page will put it back.',
         { title: 'Remove person', variant: 'danger', confirmText: 'Remove person' }
       ).then(function (ok) { if (ok) { dropPerson(); } });
       return;
@@ -1710,8 +1872,8 @@
         esc([here].concat(rest).join(', ')) + '.</p>' +
         '<p class="confirm-text">Have they stopped doing the ' + esc(here) +
         ' job, or have they left the club altogether?</p>' +
-        '<p class="form-hint">Either way it can be put back from “My changes” ' +
-        'at the top of the page.</p>',
+        '<p class="form-hint">Either way, “My changes” at the top of the page ' +
+        'will put it back.</p>',
       buttons: [
         { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
         { label: 'Remove from ' + here, className: 'btn--ghost',
@@ -2210,15 +2372,20 @@
     if (!card) { return; }
     var box = document.createElement('div');
     box.className = 'ed-infosettled';
+    /* "Changed", not "sorted". All the tool knows is that the flag has
+       stopped firing, which a wrong value can do as easily as a right one —
+       claiming it is solved would be the page asserting something it cannot
+       see. The editor's name is next to it; they are the judgement. */
     box.innerHTML = '<b>' + settled.length +
-      (settled.length === 1 ? ' flag' : ' flags') + ' sorted in these details</b>';
+      (settled.length === 1 ? ' flagged detail has' : ' flagged details have') +
+      ' since been changed</b>';
     var ul = document.createElement('ul');
     settled.forEach(function (item) {
       var edit = whoFixed(club, item.f.path);
       var li = document.createElement('li');
       li.innerHTML = '<span class="ed-pill ed-pill--fixed">' +
         '<span class="ed-was">' + esc(item.f.label) + '</span>' +
-        '<span class="ed-now">Sorted</span></span> ' + esc(item.f.why || '') +
+        '<span class="ed-now">Changed</span></span> ' + esc(item.f.why || '') +
 
         (edit ? ' &mdash; ' + esc(edit.by || 'an editor') + ', ' +
           esc(NL.formatDate(edit.at)) : '');
@@ -2312,22 +2479,30 @@
     });
   }
 
-  /* One chip, two halves: what was wrong, and that it is not any more. Kept
-     as a pair rather than simply dropping the flag, because "there was an
-     issue here and it was dealt with" is worth more to somebody reviewing a
-     club than a row that looks like it never had one. */
+  /* One chip, two halves: what was flagged, and that somebody has since
+     changed it. Kept as a pair rather than simply dropping the flag, because
+     "there was an issue here and somebody touched it" is worth more to a
+     reviewer than a row that looks like it never had one.
+
+     The second half says "Changed" and not "Sorted" on purpose. All this can
+     observe is that the flag no longer fires, and a value typed wrong will
+     silence a flag exactly as well as a value typed right — a chip claiming
+     the problem is solved would be asserting something nobody checked. Who
+     changed it and what it used to say are in the tooltip, which is the part
+     a reviewer can actually judge. */
   function addSettled(row, f, edit) {
     var pill = document.createElement('span');
     pill.className = 'ed-pill ed-pill--fixed';
     pill.innerHTML = '<span class="ed-was">' + esc(f.label) +
       '<span class="ed-i" aria-hidden="true">i</span></span>' +
-      '<span class="ed-now">Sorted</span>';
+      '<span class="ed-now">Changed</span>';
     pill.title = f.why
       ? 'Was flagged: ' + f.why + '.' + (edit
           ? ' Changed by ' + (edit.by || 'an editor') + ' on ' + NL.formatDate(edit.at) +
             (String(edit.from || '').trim() ? ' — was "' + edit.from + '".' : '.')
-          : ' No longer flagged.')
-      : 'No longer flagged.';
+          : ' It no longer trips the check \u2014 but nothing here says who ' +
+            'looked at it.')
+      : 'This no longer trips the check.';
     pillsFor(row).appendChild(pill);
   }
 
