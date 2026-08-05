@@ -41,15 +41,15 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=32">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=8">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=9">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
-<script src="/club-directory/_tidy.js?v=8"></script>
-<script src="/club-directory/_gate.js?v=8"></script>
-<script src="/club-directory/_directory.js?v=8"></script>
+<script src="/club-directory/_tidy.js?v=9"></script>
+<script src="/club-directory/_gate.js?v=9"></script>
+<script src="/club-directory/_directory.js?v=9"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -153,6 +153,30 @@
     .ed-pills { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap;
       align-items: center; margin-top: 6px; }
   }
+
+  /* Sign-off, foot of the club. The whole point of the tool is that somebody
+     has actually looked at a club, so the state has to be visible before you
+     reach the button and honest about who and when. */
+  .ed-signoff {
+    margin: 26px 0 0; padding: 16px 18px; border-radius: var(--radius);
+    border: 1px solid var(--border); background: var(--white);
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  .ed-signoff.is-done { border-color: var(--green); background: var(--green-light); }
+  .ed-signoff__t { min-width: 0; flex: 1 1 260px; }
+  .ed-signoff__t h3 {
+    margin: 0 0 3px; font-size: var(--text-base);
+    font-weight: 800; font-variation-settings: 'wght' 800; color: var(--navy);
+  }
+  .ed-signoff.is-done .ed-signoff__t h3 { color: var(--green); }
+  .ed-signoff__t p { margin: 0; font-size: var(--text-sm); color: var(--text-muted);
+    line-height: 1.5; max-width: 62ch; }
+
+  /* A locked club still reads normally; it just cannot be changed. Hiding the
+     pens rather than disabling them, because a disabled control invites the
+     question "why" and the banner above has already answered it. */
+  .is-locked .ed-pen { display: none; }
+  .is-locked .ed-pill button { display: none; }
 
   /* Merge note, foot of the club. Context rather than alarm, so it is quiet. */
   .ed-merges {
@@ -332,6 +356,7 @@
     markProvenance(name);
     markGaps(name, rec);
     showMerges(name);
+    showSignoff(name, rec);
     if (session.role === 'admin') { diagnose(name, rec); }
   }
 
@@ -558,11 +583,89 @@
     pillsFor(row).appendChild(pill);
   }
 
+  /* ---------------------------------------------------------- sign-off
+     Completion lives on the club record itself rather than in a node of its
+     own. Editors can already write clubs/$clubName and the reader can already
+     read clubs, so this needs no rules change and no deploy — which matters
+     more than tidiness tonight.
+
+     Both directions confirm. Marking complete is a claim that somebody looked
+     at the whole club, and reopening undoes that claim; neither should happen
+     because a thumb landed on a button. NL.confirm, never the native one. */
+  function signedOffBy(rec) {
+    var s = rec && rec.signedOff;
+    return s && s.at ? s : null;
+  }
+
+  function showSignoff(club, rec) {
+    var done = signedOffBy(rec);
+    var wrap = document.createElement('div');
+    wrap.className = 'ed-signoff' + (done ? ' is-done' : '');
+    wrap.innerHTML =
+      '<div class="ed-signoff__t">' +
+        '<h3>' + (done ? 'Marked complete' : 'Not yet checked') + '</h3>' +
+        '<p>' + (done
+          ? esc((done.by || 'Someone') + ' marked this complete on ' +
+              NL.formatDate(done.at) + '. Editing is locked until it is reopened.')
+          : 'When this club has been looked over and the edits are right, mark it ' +
+            'complete. That locks it, and it is the only thing the reader will show.') +
+        '</p>' +
+      '</div>' +
+      '<button class="btn ' + (done ? 'btn--ghost' : 'btn--primary') + '" id="signoffBtn" ' +
+        'type="button">' + (done ? 'Reopen for editing' : 'Mark complete') + '</button>';
+    $('extra').appendChild(wrap);
+    $('out').classList.toggle('is-locked', !!done);
+    wrap.querySelector('#signoffBtn').addEventListener('click', function () {
+      done ? reopen(club, rec) : markComplete(club, rec);
+    });
+  }
+
+  function markComplete(club, rec) {
+    NL.confirm('Mark ' + club + ' as complete?', {
+      title: 'Mark complete',
+      detail: 'Editing will be locked, and this club becomes visible in the reader. ' +
+              'You can reopen it at any time.',
+      confirmText: 'Mark complete'
+    }).then(function (ok) {
+      if (!ok) { return; }
+      rec.signedOff = { at: Date.now(), by: session.name || 'editor' };
+      NL.writeAudit('directory_signoff', club + ' marked complete by ' +
+        (session.name || 'editor'));
+      persist(club, 'Marked complete');
+    });
+  }
+
+  function reopen(club, rec) {
+    NL.confirm('Reopen ' + club + ' for editing?', {
+      title: 'Reopen',
+      variant: 'danger',
+      detail: 'It will no longer count as checked, and the reader will stop showing it ' +
+              'until it is marked complete again.',
+      confirmText: 'Reopen'
+    }).then(function (ok) {
+      if (!ok) { return; }
+      /* null, not delete: an update() with undefined throws, and null is how
+         RTDB removes a key. */
+      rec.signedOff = null;
+      NL.writeAudit('directory_signoff', club + ' reopened by ' + (session.name || 'editor'));
+      persist(club, 'Reopened');
+    });
+  }
+
+  function persist(club, what) {
+    firebase.database().ref(ROOT + '/clubs/' + club).set(ALL[club])
+      .then(function () { NL.toast(what, 'success'); draw(club); })
+      .catch(function (err) {
+        NL.toast('Could not save: ' + ((err && err.message) || err), 'error');
+      });
+  }
+
   /* The merge note, at the foot of the club. Two entries becoming one is the
      single change a person cannot see by looking at the page, because the
      evidence for it was deleted. */
   function showMerges(club) {
     var merges = NLDirectory.arr((PROV[club] || {}).merges);
+    /* Clears the pane, so this must run before showSignoff appends to it. */
     $('extra').innerHTML = !merges.length ? '' :
       '<div class="ed-merges"><h3>Entries we combined</h3>' +
       '<p>The form let a club add the same person once per job, so some people ' +
