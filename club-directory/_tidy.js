@@ -1,7 +1,21 @@
 /* =========================================================================
    NL Tools — club directory tidier
    File: /club-directory/_tidy.js
-   Version: v1.0 (04/08/2026)
+   Version: v1.1 (05/08/2026)
+
+   v1.1 — Three things the baseline was getting wrong, and one new idea.
+     · "Director Of Football". needsRecase only fires on a title whose shape
+       says it was mistyped, and that one is correctly capitalised everywhere
+       else, so nothing ever looked at it. minorCase now runs on every title.
+     · A misspelt mailbox and a nine-digit phone number are visible but not
+       fixable — we cannot know which digit is missing, and a guessed address
+       goes out under the League's name. They are flagged instead.
+     · One title repeated across two departments is exactly what the follow-up
+       emails promise not to do. Also flagged: which title belongs where is a
+       judgement about that club, not a rule.
+   The general shape: a pass that can derive the right answer changes the
+   value and logs it; a pass that can only see something is wrong raises a
+   flag. `attention` is the second kind, and the editor renders it in red.
 
    The single implementation of every change the League makes to a club's
    submission on its way into the directory. Two callers, and they must not
@@ -117,6 +131,28 @@
       return lead + core.toLowerCase() + trail;
     }
     return lead + cap(core) + trail;
+  }
+
+  /* Interior minor words go lower even in a title we would otherwise leave
+     alone. "Director Of Football" is not a casing accident needsRecase can
+     see — the title is correctly capitalised everywhere else, so nothing
+     about its shape says "retype this" — but it is still wrong, and it came
+     through that way on a lot of submissions. Never the first or last word
+     (a title can legitimately end "Head of"), never an address, and never a
+     title still shouting, which titleCase deals with first. */
+  function minorCase(t) {
+    if (t.indexOf('@') > -1 || /https?:\/\/|www\./i.test(t)) { return t; }
+    if (!/[a-z]/.test(t)) { return t; }
+    var words = t.split(' ');
+    var first = -1, last = -1;
+    for (var i = 0; i < words.length; i++) { if (words[i] !== '') { if (first < 0) { first = i; } last = i; } }
+    return words.map(function (w, i) {
+      if (i === first || i === last) { return w; }
+      var bare = w.replace(/^[.,()\/&-]+|[.,()\/&-]+$/g, '');
+      if (!bare || bare === bare.toLowerCase()) { return w; }
+      if (MINOR.indexOf(bare.toLowerCase()) === -1) { return w; }
+      return w.replace(bare, bare.toLowerCase());
+    }).join(' ');
   }
 
   function titleCase(t) {
@@ -366,8 +402,11 @@
       }
       arr(p.roles).forEach(function (r, ri) {
         var t = (r.title || '').trim();
-        if (!t || !needsRecase(t, loud)) { return; }
-        var out = titleCase(t);
+        if (!t || isPlaceholder(t)) { return; }
+        /* Two steps, not one. titleCase only runs on a title whose shape says
+           it was mistyped; minorCase runs on every title, because a correctly
+           shaped one can still say "Director Of Football". */
+        var out = minorCase(needsRecase(t, loud) ? titleCase(t) : t);
         if (out !== t) {
           r.title = out; n.titles++;
           log(pathFor(p, pi, 'roles/' + ri + '/title'), t, out, 'case');
@@ -428,6 +467,165 @@
     return merged;
   }
 
+  /* ------------------------------------------------------------- attention
+     Things we can see are wrong but must not fix.
+
+     The tidier's other passes all share a property: the right answer is
+     derivable from the value itself. Casing, a closed typo list, a compound
+     title split across departments the club already filled in — each of those
+     we can do and show our working for. These cannot be. A misspelt mailbox
+     might be the mailbox; a nine-digit phone number is missing a digit but
+     not one we know. Guessing would put a wrong address in front of 72 clubs
+     under the League's name, which is worse than leaving it visibly unresolved.
+
+     So they are flagged rather than changed, and the editor renders one red
+     chip per flag. A flag is a job for a person, which is what the admin team
+     is for.  */
+  function editDistance(a, b) {
+    if (a === b) { return 0; }
+    var prev = [], cur = [], i, j;
+    for (j = 0; j <= b.length; j++) { prev[j] = j; }
+    for (i = 1; i <= a.length; i++) {
+      cur[0] = i;
+      for (j = 1; j <= b.length; j++) {
+        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1,
+          prev[j - 1] + (a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1));
+      }
+      for (j = 0; j <= b.length; j++) { prev[j] = cur[j]; }
+    }
+    return prev[b.length];
+  }
+
+  /* "+44 (0)1228 526237" is one number written two ways at once. Folding the
+     country code in without dropping the bracketed trunk zero leaves twelve
+     digits and reads as broken when it is perfectly fine. */
+  function digitsOf(v) {
+    var d = String(v == null ? '' : v).replace(/[^\d+]/g, '');
+    if (d.indexOf('+44') === 0) { d = '0' + d.slice(3).replace(/^0+/, ''); }
+    else if (d.indexOf('0044') === 0) { d = '0' + d.slice(4).replace(/^0+/, ''); }
+    return d.replace(/\D/g, '');
+  }
+
+  /* A UK number is 10 or 11 digits once the country code is folded in. Nine
+     is the case Richard raised: plainly short, but which digit is missing is
+     not ours to decide.
+
+     "0330 0945930 Opt 1" is eleven digits and a menu instruction. Counting
+     the 1 makes a correct number look broken, which is the fastest way to
+     teach an editor to ignore the flags. */
+  var PHONE_TAIL = /\s*\b(?:opt(?:ion)?|ext(?:ension)?|x)\b\.?\s*\d+\s*$/i;
+
+  function badPhone(v) {
+    var d = digitsOf(String(v == null ? '' : v).replace(PHONE_TAIL, ''));
+    if (!d) { return ''; }
+    if (d.length === 10 || d.length === 11) { return ''; }
+    return d.length + ' digits';
+  }
+
+  /* The local part of an address, split into words, compared against the name
+     on the record. An exact appearance of the surname clears it immediately —
+     most addresses are fine and should cost nothing. What is left is the near
+     miss: thronhill against Thornhill, pepler against Peplar, clark against
+     Clarke. One or two characters out on a word long enough for that to mean
+     something, which is a typo in one of the two fields and we cannot tell
+     which. */
+  function emailMismatch(p, em) {
+    var at = String(em || '').indexOf('@');
+    if (at < 1) { return ''; }
+    var local = em.slice(0, at).toLowerCase();
+    var last = (p.lastName || '').trim().toLowerCase().replace(/[^a-z]/g, '');
+    if (last.length < 5) { return ''; }
+    if (local.indexOf(last) > -1) { return ''; }
+    var parts = local.split(/[._\-+0-9]+/).filter(function (x) { return x.length >= 5; });
+    for (var i = 0; i < parts.length; i++) {
+      var d = editDistance(parts[i], last);
+      /* Absolute distance alone is not enough: amar against Zaman is two
+         edits and two different people. Proportion is what separates a typo
+         from a coincidence — two characters out of nine is thronhill for
+         Thornhill, two out of five is nothing at all. */
+      if (d > 0 && d <= 2 && d / Math.max(parts[i].length, last.length) <= 0.25) {
+        return parts[i];
+      }
+    }
+    return '';
+  }
+
+  /* One title repeated across two departments is the thing the follow-up
+     emails promise not to do: "we'd rather show the title that fits each role
+     than repeat the same one across the board".
+
+     But most repeats are correct, and a flag on every one is noise that makes
+     the real ones invisible — the first cut of this raised 124 across the 72
+     clubs, nearly all of them a chairman appearing under both Leadership and
+     Directors. Two rules cut it to the ones that matter:
+
+       · The board sections overlap by design. A chairman IS in Leadership and
+         in Directors; a finance director IS on the board. Repeats confined to
+         Leadership / Directors / Executive are never flagged.
+       · A title that names the department it sits in belongs there. "Finance
+         Director" under Finance is right; "Head of Media" under Programme is
+         the carry, because nothing in it says programme.
+
+     What survives is a functional department showing a title that does not
+     name it — which is either wrong or needs a second title, and both are a
+     judgement about that club rather than a rule. So it is flagged, not
+     written. */
+  var BOARD = ['Leadership', 'Directors', 'Executive'];
+
+  function repeatedTitles(p, flag) {
+    var rs = arr(p.roles), by = {};
+    rs.forEach(function (r, ri) {
+      var t = (r.title || '').trim();
+      if (!t || isPlaceholder(t)) { return; }
+      (by[t.toLowerCase()] = by[t.toLowerCase()] || []).push({ r: r, i: ri, title: t });
+    });
+    Object.keys(by).forEach(function (k) {
+      var hits = by[k];
+      if (hits.length < 2) { return; }
+      var sections = {};
+      hits.forEach(function (h) { sections[h.r.section] = 1; });
+      if (Object.keys(sections).length < 2) { return; }   /* same dept twice is a merge artefact */
+      var live = hits.filter(function (h) { return BOARD.indexOf(h.r.section) < 0; });
+      if (live.length < 2) { return; }                    /* board overlap, or one real dept */
+      var loose = live.filter(function (h) {
+        return sectionsFor(h.title, [h.r.section]).length === 0;
+      });
+      if (!loose.length) { return; }                      /* every title names its own dept */
+      loose.forEach(function (h) {
+        var others = Object.keys(sections).filter(function (s) { return s !== h.r.section; });
+        flag(h.i, 'Repeated title',
+          '"' + h.title + '" is also this person\'s title under ' +
+          others.join(' and ').toLowerCase());
+      });
+    });
+  }
+
+  function flagAttention(rec) {
+    var out = [];
+    arr(rec.people).forEach(function (p, pi) {
+      arr(p.emails).forEach(function (em, ei) {
+        var near = emailMismatch(p, em);
+        if (near) {
+          out.push({ path: pathFor(p, pi, 'emails/' + ei), field: 'email',
+            label: 'Check spelling',
+            why: 'address reads "' + near + '", name reads "' + (p.lastName || '').trim() + '"' });
+        }
+      });
+      arr(p.phones).forEach(function (ph, phi) {
+        var bad = badPhone(ph && ph.number);
+        if (bad) {
+          out.push({ path: pathFor(p, pi, 'phones/' + phi + '/number'), field: 'phone',
+            label: 'Check number', why: bad });
+        }
+      });
+      repeatedTitles(p, function (ri, label, why) {
+        out.push({ path: pathFor(p, pi, 'roles/' + ri + '/title'), field: 'title',
+          label: label, why: why });
+      });
+    });
+    return out;
+  }
+
   /* Live RTDB stores leads as {areaKey: [personId]} — bare id strings. The
      export tool expands them to {id, name}, which is what this page was written
      against, so against the real database every list rendered blank. Accept
@@ -463,10 +661,17 @@
     var splits = splitCompound(out, log);
     var cased  = tidyCase(out, log);
     var merges = mergeByName(out, log);
+    /* Last, and against the tidied record: a title we have just split is not
+       a repeat, and an address we have just lower-cased is the one to check
+       the spelling of. Running this first would flag work we were about to
+       do ourselves. */
+    var attention = flagAttention(out);
     return {
       rec: out,
       changes: changes,
-      counts: { typos: typos, cased: cased, splits: splits.length, merges: merges.length },
+      attention: attention,
+      counts: { typos: typos, cased: cased, splits: splits.length,
+                merges: merges.length, attention: attention.length },
       splits: splits,
       merges: merges
     };
@@ -478,6 +683,8 @@
     splitCompound: splitCompound,
     tidyCase: tidyCase,
     mergeByName: mergeByName,
+    flagAttention: flagAttention,
+    minorCase: minorCase,
     leadNames: leadNames,
     fullName: fullName,
     isPlaceholder: isPlaceholder
