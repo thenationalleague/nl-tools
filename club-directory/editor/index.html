@@ -7,6 +7,17 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.10 — (05/08/2026) Two bugs in the green markers.
+         · Enter committed the value and left the row open — contenteditable
+           still on, the action strip still showing — so the edit had happened
+           and nothing said so. Enter now finishes with the row. Escape puts
+           the value back and closes for the same reason.
+         · Typing a value back to what it was left it green. logEdit kept the
+           latest `from` rather than the first, so the record said the field
+           had changed from the wrong thing to the right thing and the row
+           stayed marked forever. `from` is now the value before ANY hand
+           edit, and returning a field to it removes the entry — with the tint
+           going only if that was the row's last remaining marker.
   v1.9 — (05/08/2026) An editor's own changes now show as their own colour.
          Three things can be true of a field and only two of them were
          visible: the tidier changed it (amber, undoable), something is wrong
@@ -170,15 +181,15 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=32">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=17">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=18">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
-<script src="/club-directory/_tidy.js?v=17"></script>
-<script src="/club-directory/_gate.js?v=17"></script>
-<script src="/club-directory/_directory.js?v=17"></script>
+<script src="/club-directory/_tidy.js?v=18"></script>
+<script src="/club-directory/_gate.js?v=18"></script>
+<script src="/club-directory/_directory.js?v=18"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -1269,8 +1280,17 @@
     var before = valueAt(person, path);
     cell.addEventListener('focus', function () { before = cell.textContent.trim(); });
     cell.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); cell.blur(); }
-      if (e.key === 'Escape') { cell.textContent = before; cell.blur(); }
+      /* Enter finishes with the row, not just with the field. Blurring alone
+         committed the value and left the row open — contenteditable still on,
+         the action strip still showing — so the edit had happened and nothing
+         said so. Escape puts the value back and closes for the same reason. */
+      if (e.key === 'Enter' || e.key === 'Escape') {
+        if (e.key === 'Escape') { cell.textContent = before; }
+        e.preventDefault();
+        cell.blur();
+        var row = cell.closest('.cd-row');
+        if (row) { setEditing(row, false); }
+      }
     });
     cell.addEventListener('blur', function () { commit(cell); });
     /* Stored on the node so the put-back button can commit the same way the
@@ -1295,7 +1315,7 @@
          not re-render — you are still in the row — so waiting for draw() meant
          the one moment you most want confirmation was the one moment nothing
          happened. */
-      markCellEdited(cell, path, before, now);
+      markCellEdited(club, person, cell, path);
       before = now;
     };
   }
@@ -1353,7 +1373,7 @@
             setAt(person, 'name', to);
             syncName(cell, to);
             save(club, person, 'name', from, to);
-            markCellEdited(cell, 'name', from, to);
+            markCellEdited(club, person, cell, 'name');
             done(true); c.close();
           } },
           { label: 'New in ' + here, className: 'btn--primary', onClick: function (c) {
@@ -1406,23 +1426,31 @@
   /* The live half of markEdits: same tint, same chip, applied to the row in
      front of you the instant the value is committed. Replaces any chip already
      there for that field, so editing the same cell twice does not stack. */
-  function markCellEdited(cell, path, from, to) {
+  /* Driven by the record rather than by the fact that a commit happened. If
+     logEdit decided this is no longer an edit — the value is back where it
+     started — the chip comes off and, if it was the row's only one, so does
+     the tint. */
+  function markCellEdited(club, person, cell, path) {
     var row = cell.closest('.cd-row');
     if (!row) { return; }
+    var full = 'people/' + (person.id || '') + '/' + path;
+    var rec = editList(club).filter(function (e) { return e.path === full; })[0];
     var what = /^roles\//.test(path) ? 'Job title' : 'Name';
-    var e = { from: from, to: to, by: session.name || 'editor', at: Date.now() };
     var rows = (path === 'name' && row.dataset.pid)
       ? [].slice.call($('out').querySelectorAll('.cd-row')).filter(function (r) {
           return r.dataset.pid === row.dataset.pid;
         })
       : [row];
     rows.forEach(function (r) {
-      r.classList.add('is-edited');
       var box = pillsFor(r);
       [].slice.call(box.querySelectorAll('.ed-pill--edit')).forEach(function (old) {
         if (old.textContent === what + ' edited') { old.remove(); }
       });
-      addEditChip(r, e, what);
+      if (rec) { addEditChip(r, rec, what); }
+      /* Another field on the same row may still be edited, and an added
+         person is marked whether or not any field has been touched since. */
+      var stillGreen = box.querySelector('.ed-pill--edit');
+      r.classList.toggle('is-edited', !!stillGreen);
     });
   }
 
@@ -1460,11 +1488,22 @@
     return NLDirectory.arr((PROV[club] || {}).edits);
   }
 
+  /* One entry per field, and `from` is the value before ANY hand edit — not
+     before the latest one. Keeping the latest meant typing something and then
+     typing it back left a record saying the field had changed from the wrong
+     thing to the right thing, and the row stayed green forever. Returning a
+     field to where it started now removes the entry, because nothing has
+     changed and the marker should say so. */
   function logEdit(club, path, from, to) {
     var prov = PROV[club] || (PROV[club] = {});
-    var edits = editList(club).filter(function (e) { return e.path !== path; });
-    edits.push({ path: path, from: from, to: to,
-      by: session.name || 'editor', at: Date.now() });
+    var all = editList(club);
+    var had = all.filter(function (e) { return e.path === path; })[0];
+    var base = had ? had.from : from;
+    var edits = all.filter(function (e) { return e.path !== path; });
+    if (String(to).trim() !== String(base == null ? '' : base).trim()) {
+      edits.push({ path: path, from: base, to: to,
+        by: session.name || 'editor', at: Date.now() });
+    }
     prov.edits = edits;
     firebase.database().ref(ROOT + '/provenance/' + club + '/edits').set(edits);
   }
