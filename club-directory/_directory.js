@@ -85,11 +85,33 @@
   function fullName(p) {
     return (p && (p.name || [p.firstName, p.lastName].filter(Boolean).join(' ') || '')).trim();
   }
-  function emailsOf(p) {
-    return arr(p && p.emails).filter(function (e) { return e && e.trim(); });
+  /* Contact details belong to the person, not the role — but a handful of
+     people genuinely hold one address per job. Truro City's safeguarding lead
+     has cblack@, commercial@ AND safeguarding@, and holds exactly those two
+     roles; nine people across the 72 are in that position.
+
+     So an address may optionally name the role it is for. Nine cases do not
+     justify moving contact details onto the role and restructuring 1,070
+     records — and 130 people hold a functional address like media@ as their
+     ONLY one, where there is nothing to choose between anyway.
+
+     An entry is a plain string (everything today) or {address, section}. No
+     section means "wherever this person appears", which is exactly the
+     current behaviour, so nothing already stored changes meaning. */
+  function addrOf(e) { return (typeof e === 'string') ? e : ((e && e.address) || ''); }
+  function forHere(e, section) {
+    var s = (typeof e === 'string') ? '' : ((e && e.section) || '');
+    return !s || !section || s === section;
   }
-  function phonesOf(p) {
-    return arr(p && p.phones).filter(function (x) { return x && (x.number || '').trim(); });
+  function emailsOf(p, section) {
+    return arr(p && p.emails).filter(function (e) {
+      return addrOf(e).trim() && forHere(e, section);
+    }).map(addrOf);
+  }
+  function phonesOf(p, section) {
+    return arr(p && p.phones).filter(function (x) {
+      return x && (x.number || '').trim() && forHere(x, section);
+    });
   }
   /* A person's roles, always as an array. Exported because both pages need it
      and the reader does not load _tidy.js — a page should not have to pull in
@@ -163,10 +185,10 @@
     var hidden = unlisted && !(opts && opts.showHidden);
     var here = arr(p.roles).filter(function (r) { return r.section === section; });
     var titles = here.map(function (r) { return (r.title || '').trim(); }).filter(Boolean);
-    var mail = hidden ? '' : emailsOf(p).map(function (e) {
+    var mail = hidden ? '' : emailsOf(p, section).map(function (e) {
       return '<a href="mailto:' + esc(e) + '">' + esc(e) + '</a>';
     }).join('<br>');
-    var ph = hidden ? '' : phonesOf(p).map(function (x) {
+    var ph = hidden ? '' : phonesOf(p, section).map(function (x) {
       var n = (x.number || '').trim(), ext = (x.ext || '').trim();
       return '<a href="tel:' + esc(tel(n)) + '">' + esc(n) + '</a>' +
         (ext ? ' <span class="cd-row__ext">ext ' + esc(ext) + '</span>' : '');
@@ -320,6 +342,9 @@
     search: search,
     fullName: fullName,
     reachable: reachable,
+    emailsOf: emailsOf,
+    phonesOf: phonesOf,
+    addrOf: addrOf,
     glyph: glyph,
     strokeGlyph: strokeGlyph,
     ORDER: ORDER
