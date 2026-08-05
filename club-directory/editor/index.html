@@ -7,6 +7,23 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.19 — (05/08/2026) A Publish button, and a published copy behind it.
+         The reader read the directory itself and decided in the browser what
+         not to show — unsigned clubs greyed out, a not-for-publication
+         person's address replaced with "Not published". Both decisions were
+         right and both were made after the record had already been sent.
+         Behind a six-digit code that was survivable; it is not something to
+         carry into a public page, and a public page is where this is going.
+         Publish now builds a second copy at published/: signed-off clubs
+         only, and for anyone the club asked us to keep back the contact
+         details are absent rather than blanked. The person stays listed,
+         because a directory that silently omits the safeguarding officer
+         reads as a club without one — but there is nothing in the file to
+         hide, so no rule has to be clever about that node and no page built
+         against it later can leak by asking for too much.
+         Complete and published are now two facts, and the sign-off box says
+         which is which. Reopening a club drops it at the next publish rather
+         than instantly, so readers keep a coherent version in the meantime.
   v1.18 — (05/08/2026) Undo is isolated, and nothing expires.
          Undo used to put the whole club back to how it was before the change,
          which meant reaching for a mistake made at ten quietly threw away the
@@ -320,6 +337,10 @@
     cursor: pointer;
   }
   .ed-out:hover { background: var(--navy-600); }
+  /* Publishing is the one button here that reaches outside the League, so it
+     is the one button here that looks like it. */
+  .ed-out--go { background: var(--primary); border-color: var(--primary); }
+  .ed-out--go:hover { background: var(--primary-600); border-color: var(--primary-600); }
   .ed-top__who { margin-left: auto; font-size: var(--text-xs); color: var(--navy-200);
     font-weight: 600; font-variation-settings: 'wght' 600; }
 
@@ -639,6 +660,7 @@
     <span class="ed-top__t">Directory Editor</span>
     <select class="ed-pick" id="pick" aria-label="Choose a club"></select>
     <span class="ed-top__who" id="who"></span>
+    <button class="ed-out ed-out--go" id="publish" type="button">Publish</button>
     <button class="ed-out" id="changes" type="button">My changes</button>
     <button class="ed-out" id="recheck" type="button" hidden>Re-check all</button>
     <button class="ed-out" id="signOut" type="button">Sign out</button>
@@ -663,6 +685,7 @@
   var esc = NL.escHtml;
   var ROOT = NLGate.ROOT;
   var ALL = {}, PROV = {}, names = [], session = null, current = '';
+  var PUBLISHED_AT = 0;
 
   NLGate.ensure({
     title: 'Directory Editor',
@@ -681,16 +704,21 @@
     return Promise.all([
       NL.clubs.load(),
       firebase.database().ref(ROOT + '/clubs').once('value'),
-      firebase.database().ref(ROOT + '/provenance').once('value')
+      firebase.database().ref(ROOT + '/provenance').once('value'),
+      /* Only the stamp, not the payload — the editor never needs the published
+         copy, it needs to know when it was last made. */
+      firebase.database().ref(ROOT + '/published/at').once('value')
     ]);
   }).then(function (res) {
     ALL = res[1].val() || {};
     PROV = res[2].val() || {};
+    PUBLISHED_AT = res[3].val() || 0;
     names = Object.keys(ALL).sort();
     NL.installAuditHook();
     if (!names.length) { offerBake(); $('app').hidden = false; return; }
     offerRecheck();
     $('changes').addEventListener('click', showChanges);
+    $('publish').addEventListener('click', publishNow);
     fillPicker();
     $('pick').addEventListener('change', function () { draw(this.value); });
     $('q').addEventListener('input', onSearch);
@@ -980,6 +1008,107 @@
       }).filter(function (i) { return i > -1; })[0];
       if (roleIdx != null) { row.dataset.ridx = roleIdx; }
       addPen(row, locked, club, person, roleIdx);
+    });
+  }
+
+  /* --------------------------------------------------------------- publish
+     The reader used to read the directory itself and decide, in the browser,
+     what not to show: unsigned clubs greyed out, a not-for-publication
+     person's address replaced with "Not published". Both decisions were
+     correct and both were made far too late — the record had already been
+     sent. Behind a six-digit code that was survivable. It is not a thing to
+     carry into a public page, and a public page is where this is going.
+
+     So publishing builds a SECOND copy that is already safe to hand over.
+     Signed-off clubs only, and for anyone the club asked us to keep back the
+     contact details are absent rather than flagged: the person is still
+     listed, because a directory that silently omits the safeguarding officer
+     reads as a club without one, but there is nothing in the file to hide.
+
+     The point is that no rule has to be clever about this node, and no page
+     built against it later can leak something by asking for too much. There
+     is nothing in it that is not meant to be read.
+
+     It is a button and not a trigger on sign-off because publishing is when
+     the League stands behind the whole thing at once, and somebody should
+     have chosen the moment. Who and when are recorded with it. */
+  var PUB_PERSON = ['id', 'title', 'firstName', 'lastName', 'postNominals',
+                    'name', 'roles', 'hideContact'];
+
+  function publishablePerson(p) {
+    var out = {};
+    PUB_PERSON.forEach(function (k) {
+      if (p[k] !== undefined && p[k] !== null) { out[k] = clone(p[k]); }
+    });
+    /* The whole point. Not blanked, not flagged — not there. `added` goes too:
+       whether the League typed somebody in or the club did is our business. */
+    if (!p.hideContact) {
+      out.emails = clone(NLDirectory.arr(p.emails)) || [];
+      out.phones = clone(NLDirectory.arr(p.phones)) || [];
+    }
+    return out;
+  }
+
+  function buildPublished() {
+    var clubs = {}, pending = [], people = 0, held = 0;
+    Object.keys(ALL).sort().forEach(function (name) {
+      var rec = ALL[name] || {};
+      if (!signedOffBy(rec)) { pending.push(name); return; }
+      var list = NLDirectory.arr(rec.people);
+      list.forEach(function (p) { people++; if (p.hideContact) { held++; } });
+      clubs[name] = {
+        club: name,
+        info: clone(rec.info || {}),
+        people: list.map(publishablePerson)
+      };
+    });
+    return { clubs: clubs, pending: pending,
+             count: Object.keys(clubs).length, people: people, held: held };
+  }
+
+  function publishNow() {
+    var built = buildPublished();
+    if (!built.count) {
+      NL.alert('No club has been marked complete yet, so there is nothing to ' +
+        'publish. Mark a club complete and it becomes publishable.',
+        { title: 'Nothing to publish' });
+      return;
+    }
+    var prev = PUBLISHED_AT;
+    NL.confirm('Publish ' + built.count + ' club' + (built.count === 1 ? '' : 's') +
+      ' to the directory?', {
+      title: 'Publish',
+      detail: 'This replaces what readers see with the ' + built.count +
+        ' club' + (built.count === 1 ? '' : 's') + ' marked complete right now — ' +
+        built.people + ' people, of whom ' + built.held + ' asked us to keep their ' +
+        'contact details back. Those details are left out of the published copy ' +
+        'entirely; the person is still listed.\n\n' +
+        (built.pending.length
+          ? built.pending.length + ' club' + (built.pending.length === 1 ? '' : 's') +
+            ' not yet marked complete will not appear.\n\n'
+          : '') +
+        (prev ? 'Last published ' + NL.formatDateTime(prev) + '.'
+              : 'Nothing has been published before.'),
+      confirmText: 'Publish'
+    }).then(function (ok) {
+      if (!ok) { return; }
+      var btn = $('publish');
+      btn.disabled = true; btn.textContent = 'Publishing\u2026';
+      var payload = { at: Date.now(), by: session.name || 'editor',
+        count: built.count, people: built.people,
+        clubs: built.clubs, pending: built.pending };
+      NL.writeAudit('directory_publish', built.count + ' club(s), ' + built.people +
+        ' people published by ' + (session.name || 'editor'));
+      firebase.database().ref(ROOT + '/published').set(payload).then(function () {
+        PUBLISHED_AT = payload.at;
+        btn.disabled = false; btn.textContent = 'Publish';
+        NL.toast(built.count + ' club' + (built.count === 1 ? '' : 's') +
+          ' published', 'success');
+        if (current) { draw(current); }
+      }).catch(function (err) {
+        btn.disabled = false; btn.textContent = 'Publish';
+        NL.toast('Could not publish: ' + ((err && err.message) || err), 'error');
+      });
     });
   }
 
@@ -2588,9 +2717,17 @@
         '<h3>' + (done ? 'Marked complete' : 'Not yet checked') + '</h3>' +
         '<p>' + (done
           ? esc((done.by || 'Someone') + ' marked this complete on ' +
-              NL.formatDate(done.at) + '. Editing is locked until it is reopened.')
+              NL.formatDate(done.at) + '. Editing is locked until it is reopened.') +
+            /* Complete means publishABLE, not published. Two different facts,
+               and saying only the first left an editor waiting for a change
+               that nobody had released yet. */
+            (PUBLISHED_AT >= done.at
+              ? ' It is in the published directory.'
+              : ' <b>Not published yet</b> \u2014 press Publish at the top when ' +
+                'you are ready for readers to see it.')
           : 'When this club has been looked over and the edits are right, mark it ' +
-            'complete. That locks it, and it is the only thing the reader will show.') +
+            'complete. That makes it publishable; pressing Publish at the top is ' +
+            'what puts it in front of readers.') +
         '</p>' +
       '</div>' +
       '<button class="btn ' + (done ? 'btn--ghost' : 'btn--primary') + '" id="signoffBtn" ' +
@@ -2605,8 +2742,9 @@
   function markComplete(club, rec) {
     NL.confirm('Mark ' + club + ' as complete?', {
       title: 'Mark complete',
-      detail: 'Editing will be locked, and this club becomes visible in the reader. ' +
-              'You can reopen it at any time.',
+      detail: 'Editing will be locked and the club becomes publishable. It does ' +
+              'not reach readers until somebody presses Publish. You can reopen ' +
+              'it at any time.',
       confirmText: 'Mark complete'
     }).then(function (ok) {
       if (!ok) { return; }
@@ -2621,8 +2759,9 @@
     NL.confirm('Reopen ' + club + ' for editing?', {
       title: 'Reopen',
       variant: 'danger',
-      detail: 'It will no longer count as checked, and the reader will stop showing it ' +
-              'until it is marked complete again.',
+      detail: 'It will no longer count as checked, and it drops out of the ' +
+              'directory at the next publish. Readers keep seeing the version ' +
+              'already published until then.',
       confirmText: 'Reopen'
     }).then(function (ok) {
       if (!ok) { return; }

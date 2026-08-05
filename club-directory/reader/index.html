@@ -7,6 +7,16 @@
 <title>Club Directory — The National League</title>
 <!--
   club-directory / reader / index.html
+  v1.2 — (05/08/2026) Reads the published copy, not the directory. This page
+         used to pull every club and decide in the browser what to leave out,
+         which meant the records it decided against had already crossed the
+         wire — including the contact details of the people who asked us not
+         to publish them. The gate made that survivable rather than fine. It
+         now reads app-data/ops-club-directory/published, which the editor
+         builds to be handed over: published clubs only, and no contact fields
+         at all for anyone held back. `pending` carries the names of clubs not
+         yet released, so one can still be listed and greyed rather than
+         looking like a club that does not exist.
   v1.1 — (05/08/2026) A deep link to a club nobody has checked yet is now
          honoured, and the page says so. It used to be refused and fall back
          to the first club in the list — which, with nothing signed off,
@@ -112,7 +122,7 @@
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var esc = NL.escHtml;
-  var ALL = {}, names = [];
+  var ALL = {}, names = [], PENDING = [], PUBLISHED_AT = 0;
 
   NLGate.ensure({
     title: 'Club Directory',
@@ -125,13 +135,24 @@
     });
     return Promise.all([
       NL.clubs.load(),
-      firebase.database().ref(NLGate.ROOT + '/clubs').once('value')
+      /* The published copy, not the directory. This page used to read the
+         directory itself and decide in the browser what not to show — which
+         meant every record it decided against had already been sent. It now
+         reads a copy the editor built to be handed over: signed-off clubs
+         only, and no contact details at all for anyone the club asked us to
+         keep back. There is nothing here to hide, which is the point. */
+      firebase.database().ref(NLGate.ROOT + '/published').once('value')
     ]);
   }).then(function (res) {
-    ALL = res[1].val() || {};
+    var pub = res[1].val() || {};
+    ALL = pub.clubs || {};
+    PENDING = pub.pending || [];
+    PUBLISHED_AT = pub.at || 0;
     names = Object.keys(ALL).sort();
     if (!names.length) {
-      $('out').innerHTML = '<p class="cd-empty">The directory has not been built yet.</p>';
+      $('out').innerHTML = '<p class="cd-empty">The directory has not been published ' +
+        'yet. The National League goes through each club\u2019s details before they ' +
+        'appear here. Please check back.</p>';
       $('app').hidden = false;
       return;
     }
@@ -139,7 +160,7 @@
        club that does not exist. The ones nobody has checked yet are disabled:
        visibly there, greyed, and unselectable — which says "not ready" rather
        than "not a club". */
-    $('pick').innerHTML = names.map(function (n) {
+    $('pick').innerHTML = names.concat(PENDING).sort().map(function (n) {
       var ok = ready(n);
       return '<option value="' + esc(n) + '"' + (ok ? '' : ' disabled') + '>' +
         esc(n) + (ok ? '' : ' — not yet checked') + '</option>';
@@ -164,12 +185,13 @@
     $('app').hidden = false;
   });
 
-  /* Complete means an editor has been through it and said so. Until then the
-     record exists but is not what the League is standing behind, so the reader
-     will not show it. */
+  /* Published means the League has been through it, said so, and released it.
+     There is no half-state to test for any more: a club is either in the file
+     this page was given or it is not, and the ones that are not were never
+     sent. `pending` is a list of names only, so an unfinished club can still
+     be named rather than looking like a club that does not exist. */
   function ready(n) {
-    var s = (ALL[n] || {}).signedOff;
-    return !!(s && s.at);
+    return Object.prototype.hasOwnProperty.call(ALL, n);
   }
 
   /* A club per URL, so a link to one club is a link to that club — including
@@ -180,16 +202,15 @@
      honoured, and draw() says it is not ready rather than rendering it. */
   function fromHash() {
     var h = decodeURIComponent((location.hash || '').replace(/^#/, ''));
-    return names.indexOf(h) > -1 ? h : '';
+    return (names.indexOf(h) > -1 || PENDING.indexOf(h) > -1) ? h : '';
   }
 
   function draw(name) {
-    var rec = ALL[name];
-    if (!rec) { return; }
     if (location.hash !== '#' + encodeURIComponent(name)) {
       history.replaceState(null, '', '#' + encodeURIComponent(name));
     }
-    if (!ready(name)) {
+    var rec = ALL[name];
+    if (!rec) {
       $('out').innerHTML = '<p class="cd-empty"><b>' + esc(name) + '</b> is not in the ' +
         'directory yet. The National League goes through each club\'s details before ' +
         'they appear here, and this one has not been done. Please check back.</p>';
@@ -207,12 +228,11 @@
   }
 
   function onSearch(e) {
-    /* Search over the checked clubs only. Returning a person from an unchecked
-       club would publish through the back door what the dropdown is holding
-       back at the front. */
-    var open = {};
-    names.filter(ready).forEach(function (n) { open[n] = ALL[n]; });
-    var hits = NLDirectory.search(open, e.target.value);
+    /* No filtering needed any more: everything this page holds is published.
+       The old version searched the whole directory and excluded the unchecked
+       clubs by hand, which worked but meant the back door was one forgotten
+       filter away from being open. */
+    var hits = NLDirectory.search(ALL, e.target.value);
     if (!hits) { draw($('pick').value); return; }
     if (!hits.length) {
       $('out').innerHTML = '<p class="cd-empty">Nothing matched that.</p>';
