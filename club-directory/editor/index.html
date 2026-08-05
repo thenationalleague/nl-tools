@@ -7,6 +7,20 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.3 — (05/08/2026) Editing the name of somebody who appears in two
+         departments. The record was always right — one person, both roles,
+         saved once — but the other row on screen kept the old name until a
+         redraw, so an editor who renamed someone under Media scrolled to
+         Programme, saw the name they had just changed, and either thought it
+         had not saved or typed it again. Sibling rows now follow. Job titles
+         deliberately do not: a title belongs to one role and is meant to
+         differ between departments.
+         Also: the name splitter took the first word as the first name, which
+         made "Dr Daniel Palmer" a person whose first name is Dr — breaking
+         the email-name check, sorting, and anything reading lastName. Twelve
+         people across the 72 clubs carry a title or post-nominals. It now
+         peels off what is already on the record plus the handful a club would
+         actually type, and leaves everything else where the editor put it.
   v1.2 — (05/08/2026) Four fixes and a second door, all of them things that
          made the tool harder to use than the job it does.
          · Re-check all (master only). The bake is one-shot, correctly, which
@@ -618,9 +632,31 @@
     }
     return cur == null ? '' : String(cur);
   }
+  /* A record holds title / firstName / lastName / postNominals separately, but
+     the row shows one name and edits one name. Splitting on the first space
+     alone made "Dr Daniel Palmer" a person whose first name is Dr, which then
+     breaks the email-name check, sorting, and anything that reads lastName.
+     Twelve people across the 72 clubs carry one of these.
+
+     Only what is already on the record is peeled off, plus the handful of
+     honorifics and post-nominals a club would actually type. Anything else
+     stays in the name where the editor put it — this should not be a parser. */
+  var HONORIFIC = /^(dr|mr|mrs|ms|miss|mx|sir|dame|prof|professor|rev|reverend|lord|lady|capt|major|col)\.?$/i;
+  var POSTNOM  = /^(mbe|obe|cbe|kbe|dbe|bem|dl|jp|kc|qc|md|phd|frcs|mrcgp|bsc|msc|ba|ma)\.?$/i;
+
   function setAt(person, path, v) {
     if (path === 'name') {
-      var bits = v.trim().split(/\s+/);
+      var bits = v.trim().split(/\s+/).filter(Boolean);
+      var had = function (field, re) {
+        var cur = (person[field] || '').trim();
+        return function (w) { return (cur && w.toLowerCase() === cur.toLowerCase()) || re.test(w); };
+      };
+      var isTitle = had('title', HONORIFIC), isPost = had('postNominals', POSTNOM);
+      var title = [], post = [];
+      while (bits.length > 1 && isTitle(bits[0])) { title.push(bits.shift()); }
+      while (bits.length > 1 && isPost(bits[bits.length - 1])) { post.unshift(bits.pop()); }
+      person.title = title.join(' ');
+      person.postNominals = post.join(' ');
       person.firstName = bits.shift() || '';
       person.lastName = bits.join(' ');
       person.name = v.trim();
@@ -651,9 +687,29 @@
       var now = cell.textContent.trim();
       if (now === before) { return; }
       setAt(person, path, now);
+      if (path === 'name') { syncName(cell, now); }
       save(club, person, path, before, now);
       before = now;
     };
+  }
+
+  /* Somebody in two departments is one record and two rows. The record is
+     updated once and correctly — but the other row keeps showing the old name
+     until the page is redrawn, so an editor who renames someone under Media
+     scrolls down to Programme, sees the name they just changed, and either
+     thinks it did not save or types it again.
+
+     Only the name does this. A job title belongs to one role and is meant to
+     differ between departments — that is the whole point of the split rule. */
+  function syncName(cell, value) {
+    var row = cell.closest('.cd-row');
+    if (!row || !row.dataset.pid) { return; }
+    $('out').querySelectorAll('.cd-row').forEach(function (other) {
+      if (other === row || other.dataset.pid !== row.dataset.pid) { return; }
+      var c = other.children[0];
+      if (!c || c.getAttribute('contenteditable')) { return; }   /* leave a live cell alone */
+      c.textContent = value;
+    });
   }
 
   function commit(cell) { if (cell && cell._commit) { cell._commit(); } }
