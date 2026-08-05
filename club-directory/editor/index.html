@@ -7,6 +7,21 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.13 — (05/08/2026) One button per row, one screen behind it. The pen now
+         opens "Update details", carrying everything about the person: name,
+         job title, department, published or not, email addresses and phone
+         numbers.
+         It replaces four separate ways in — typing into the row itself, a
+         contact-details modal, a publish toggle and a department dropdown —
+         which between them had drawn an arbitrary line, where an address
+         counted as "their details" and their name did not.
+         Typing into the row is gone with them, and with it setEditing, the
+         contenteditable cells, the placeholder dance, the live commit marker
+         and the sibling strip. Two ways to change the same field is worse
+         than one even when both work, and this is the one that can show a job
+         title and the address that goes with it at the same time.
+         The amber undo now writes to the record directly rather than through
+         a cell that no longer exists, and drops its own marker as it goes.
   v1.12 — (05/08/2026) Email addresses and phone numbers are editable, which
          for a contacts directory was the wrong thing to be missing. A modal
          rather than a cell, because they are lists: 9 people hold more than
@@ -201,15 +216,15 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=32">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=20">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=21">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
-<script src="/club-directory/_tidy.js?v=20"></script>
-<script src="/club-directory/_gate.js?v=20"></script>
-<script src="/club-directory/_directory.js?v=20"></script>
+<script src="/club-directory/_tidy.js?v=21"></script>
+<script src="/club-directory/_gate.js?v=21"></script>
+<script src="/club-directory/_directory.js?v=21"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -258,19 +273,11 @@
   .cd-row { position: relative; padding-right: 42px; }
   /* The pen is canon .btn--icon (brand v2.33) — box, colours, hover and the
      centred glyph all come from there, and the editing state is a swap from
-     .btn--ghost to .btn--primary in addPen/setEditing. All that is this
+     .btn--ghost to .btn--primary while a row was live. All that is this
      tool's business is where it sits. */
   .ed-pen { position: absolute; top: 7px; right: 8px; }
 
-  /* Move and remove appear only on the row being edited. Off the pen they
-     would be three controls on every row of a hundred-row club, and the whole
-     reason the pen exists is that a page where everything is live is a page
-     where a scroll on a phone changes somebody's name. */
-  .ed-acts { display: none; }
-  .cd-row.is-editing .ed-acts {
-    display: flex; align-items: center; gap: 6px;
-    grid-column: 1 / -1; margin-top: 8px;
-  }
+  /* The department picker, in the update-details form. */
   .ed-dept {
     font-family: var(--font); font-size: var(--text-xs);
     font-weight: 600; font-variation-settings: 'wght' 600;
@@ -284,52 +291,11 @@
   .ed-del { color: var(--red); border-color: var(--red-light); }
   .ed-del:hover { background: var(--red-light); }
 
-  .ed-lab {
-    font-size: var(--text-xs); color: var(--text-muted);
-    font-weight: 700; font-variation-settings: 'wght' 700;
-    text-transform: uppercase; letter-spacing: var(--tracking-tight);
-  }
-
-  /* The other departments this person is in, named under the row being
-     edited. On a club the size of Merthyr the other rows are a screen or two
-     away, so the answer to "what else does this change touch" has to be here,
-     not somewhere off the bottom of the page. */
-  .ed-sibs {
-    display: none; grid-column: 1 / -1; margin-top: 6px;
-    align-items: center; gap: 7px; flex-wrap: wrap;
-    font-size: var(--text-xs); color: var(--text-muted);
-    font-weight: 600; font-variation-settings: 'wght' 600;
-  }
-  .cd-row.is-editing .ed-sibs { display: flex; }
-  .ed-sib {
-    font-family: var(--font); font-size: var(--text-xs);
-    font-weight: 700; font-variation-settings: 'wght' 700;
-    padding: 2px 9px; border-radius: var(--radius-pill); cursor: pointer;
-    border: 1px solid var(--navy-200); background: var(--navy-50); color: var(--navy-600);
-  }
-  .ed-sib:hover { background: var(--navy); color: var(--white); border-color: var(--navy); }
-  .ed-sib:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-  .ed-sibs__note { font-weight: 500; font-variation-settings: 'wght' 500; }
-
-  /* The same person's other rows, while one of them is open. Quiet — it is
-     orientation, not an alert. */
-  .cd-row.is-sibling { background: var(--navy-50); }
   /* The tint, not just the chip. Reading down a club you want to see where
      the work has already been done, and one chip at a time does not give you
      that. Kept faint — 20-odd edited rows should read as progress, not as an
      alarm. The left edge carries the weight. */
   .cd-row.is-edited { background: var(--green-light); box-shadow: inset 3px 0 0 var(--green); }
-  .cd-row.is-edited.is-sibling { background: var(--green-light); }
-  /* Jumped to from the strip. Fades out on its own, because a highlight that
-     stays becomes part of the furniture. */
-  @keyframes edFound {
-    from { background: var(--amber-light); }
-    to   { background: transparent; }
-  }
-  .cd-row.is-found { animation: edFound 2.2s ease-out; }
-  @media (prefers-reduced-motion: reduce) {
-    .cd-row.is-found { animation: none; background: var(--amber-light); }
-  }
 
   /* The club's own details are a card now, so the pen goes in its corner —
      same affordance as a person row, same canon button. */
@@ -387,8 +353,10 @@
   }
   .ed-fgroup:first-child { margin-top: 0; }
 
-  /* One line per address or number: the value, who it is for, and a way to
-     take it off. */
+  /* Everything about a person now lives behind one button, so the modal
+     carries the layout the row used to. One line per address or number: the
+     value, who it is for, and a way to take it off. */
+  .ed-morebtns { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
   .ed-clist { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
   .ed-crow { display: flex; align-items: center; gap: 8px; }
   .ed-cval {
@@ -421,13 +389,6 @@
   .ed-check label { display: flex; align-items: center; gap: 8px; font-weight: 600;
     font-variation-settings: 'wght' 600; }
   .ed-check input { width: auto; }
-
-  .cd-row.is-editing [data-edit] {
-    background: var(--white); border-bottom: 1px dashed var(--navy-300); cursor: text;
-  }
-  .cd-row.is-editing [data-edit]:focus {
-    outline: none; box-shadow: var(--focus-ring); border-bottom-color: var(--primary);
-  }
 
   /* Provenance sits in the margin, not in the row. A sentence under the field
      pushed every person apart and read as prose when all it needs to say is
@@ -850,10 +811,10 @@
      rather than forking the presentation for one of the three doors. */
   function wireEditing(club) {
     var rec = ALL[club];
-    var rows = $('out').querySelectorAll('.cd-row');
+    var locked = !!signedOffBy(rec);
     var people = NLDirectory.arr(rec.people);
     var seen = {};
-    rows.forEach(function (row) {
+    $('out').querySelectorAll('.cd-row').forEach(function (row) {
       var dept = row.closest('.cd-dept').querySelector('.cd-dept__h').textContent.trim();
       var idx = (seen[dept] = (seen[dept] || 0));
       seen[dept]++;
@@ -863,33 +824,27 @@
       var person = inDept[idx];
       if (!person) { return; }
       row.dataset.pid = person.id || '';
-      editable(row.children[0], person, 'name', club);
+      /* Which of this person's roles this row is. Without it a marker for one
+         role lands on every row the person appears in, so a title flagged in
+         Programme also shows against their Media entry. */
       var roleIdx = NLDirectory.rolesOf(person).map(function (r, i) {
         return r.section === dept ? i : -1;
       }).filter(function (i) { return i > -1; })[0];
-      /* Which of this person's roles this row is. Without it a marker for one
-         role lands on every row the person appears in, so a title flagged in
-         Programme also shows against their Media entry — twice the chips, half
-         of them pointing at the wrong department. */
-      if (roleIdx != null) {
-        row.dataset.ridx = roleIdx;
-        editable(row.children[1], person, 'roles/' + roleIdx + '/title', club);
-      }
-      addPen(row, !!signedOffBy(rec));
-      if (!signedOffBy(rec) && roleIdx != null) { addRowActions(row, club, person, roleIdx); }
+      if (roleIdx != null) { row.dataset.ridx = roleIdx; }
+      addPen(row, locked, club, person, roleIdx);
     });
   }
 
   /* ------------------------------------------------- structural changes
      Correcting a field and changing the shape of a club are different acts.
-     A field edit rewrites one value in place and the row stays where it is;
-     adding, removing or moving someone changes which rows exist and which
-     department they sit under, so the club has to be redrawn afterwards.
+     A field edit rewrites one value in place; adding, removing or moving
+     somebody changes which rows exist and which department they sit under, so
+     the club has to be redrawn afterwards.
 
-     All three are blocked on a signed-off club, and all three confirm before
-     they do anything — not because a misclick is catastrophic, but because
-     nothing here has an undo. The amber chips can put a correction back; a
-     removed person is gone. */
+     Everything here is blocked on a signed-off club, and the destructive parts
+     confirm — not because a misclick is catastrophic, but because nothing here
+     has an undo. The amber chips can put a correction back; a removed person
+     is gone. */
   function saveStructure(club, what) {
     NL.writeAudit('directory_structure',
       club + ' — ' + what + ' (' + (session.name || 'editor') + ')');
@@ -907,9 +862,9 @@
     return 'p' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 5);
   }
 
-  function deptSelect(value) {
+  function deptSelect(value, cls) {
     var s = document.createElement('select');
-    s.className = 'ed-dept';
+    s.className = cls || 'ed-dept';
     NLDirectory.ORDER.forEach(function (name) {
       var o = document.createElement('option');
       o.value = name; o.textContent = name;
@@ -919,92 +874,296 @@
     return s;
   }
 
-  /* Move and remove, both live only while the row is being edited. Off the
-     pen they would be five controls per row across a hundred rows, and the
-     whole reason the pen exists is that a page where everything is live is a
-     page where a scroll changes somebody's name. */
-  function addRowActions(row, club, person, ridx) {
-    var wrap = document.createElement('div');
-    wrap.className = 'ed-acts';
+  /* ------------------------------------------------------- update details
+     One button per row, one screen behind it, everything about the person on
+     it. It replaces four separate ways in — typing into the row itself, a
+     contact-details modal, a publish toggle and a department dropdown — which
+     between them had drawn an arbitrary line: an address counted as "their
+     details" and their name did not.
 
-    var move = deptSelect(NLDirectory.rolesOf(person)[ridx].section);
-    move.title = 'Move this role to another department';
-    move.setAttribute('aria-label', 'Department for this role');
-    move.addEventListener('change', function () {
-      var from = NLDirectory.rolesOf(person)[ridx].section, to = move.value;
-      if (from === to) { return; }
-      NLDirectory.rolesOf(person)[ridx].section = to;
-      saveStructure(club, NLDirectory.fullName(person) + ' moved from ' + from + ' to ' + to);
-    });
+     Typing into the row is gone with them. Two ways to change the same field
+     is worse than one even when both work, and this is the one that can show
+     a job title and the address that goes with it at the same time. */
+  function contactRow(kind, value, section, roles, ext) {
+    var row = document.createElement('div');
+    row.className = 'ed-crow';
+    /* Every phone record carries an ext field. All 563 are empty today and
+       there is no box to type one into, but rebuilding the list from the form
+       would drop it the moment somebody set one. */
+    if (ext) { row.dataset.ext = ext; }
+    var input = document.createElement('input');
+    input.className = 'ed-cval';
+    input.value = value || '';
+    input.setAttribute('autocomplete', 'off');
+    input.placeholder = kind === 'email' ? 'name@club.co.uk' : '01234 567890';
+    if (kind === 'email') { input.type = 'email'; }
 
-    /* Publication is a property of the person, not of one of their roles, so
-       this toggle changes every row they appear in. That is why it confirms
-       even when switching publication ON: the club asked for it off, and
-       overriding that quietly across three departments is not the League's
-       call to make silently. */
-    var contacts = document.createElement('button');
-    contacts.className = 'btn btn--sm btn--ghost';
-    contacts.type = 'button';
-    contacts.textContent = 'Contact details';
-    contacts.addEventListener('click', function (e) {
-      e.stopPropagation();
-      editContacts(club, person, NLDirectory.rolesOf(person)[ridx].section);
-    });
+    var pick = null;
+    /* Only worth asking when there is a choice to make. */
+    if (roles.length > 1) {
+      pick = document.createElement('select');
+      pick.className = 'ed-cfor';
+      var all = document.createElement('option');
+      all.value = ''; all.textContent = 'All roles';
+      pick.appendChild(all);
+      roles.forEach(function (sec) {
+        var o = document.createElement('option');
+        o.value = sec; o.textContent = sec;
+        if (sec === section) { o.selected = true; }
+        pick.appendChild(o);
+      });
+    }
 
-    var pub = document.createElement('button');
-    pub.className = 'btn btn--sm btn--ghost ed-pub';
-    pub.type = 'button';
-    pub.textContent = person.hideContact ? 'Publish details' : 'Unpublish details';
-    pub.title = person.hideContact
-      ? 'Currently kept out of the published directory'
-      : 'Currently published in the directory';
-    pub.addEventListener('click', function (e) {
-      e.stopPropagation();
-      togglePublish(club, person);
-    });
-
-    /* Labelled, not a bare bin. Sat among "Add another role" and "Unpublish
-       details" as the only icon-only control, it read as decoration — the
-       first report of this feature was that removing was not possible at all. */
     var del = document.createElement('button');
-    del.className = 'btn btn--sm btn--ghost ed-del';
+    del.className = 'btn btn--icon btn--ghost ed-del';
     del.type = 'button';
-    del.textContent = 'Remove\u2026';
-    del.title = 'Remove this role, or the person';
-    del.addEventListener('click', function (e) {
-      e.stopPropagation();
-      removeRole(club, person, ridx);
+    del.title = 'Remove this ' + kind;
+    del.setAttribute('aria-label', 'Remove this ' + kind);
+    del.appendChild(NL.icon('delete'));
+    del.addEventListener('click', function () { row.remove(); });
+
+    row.appendChild(input);
+    if (pick) { row.appendChild(pick); }
+    row.appendChild(del);
+    return row;
+  }
+
+  function updateDetails(club, person, ridx) {
+    var rec = ALL[club];
+    var roles = NLDirectory.rolesOf(person);
+    var role = roles[ridx] || {};
+    var here = role.section || '';
+    var sections = roles.map(function (r) { return r.section; })
+      .filter(function (sec, i, a) { return a.indexOf(sec) === i; });
+    var others = roles.filter(function (r, i) { return i !== ridx; })
+      .map(function (r) { return r.section; });
+    var name0 = NLDirectory.fullName(person);
+
+    var wrap = document.createElement('div');
+    var group = function (title, hint) {
+      var h = document.createElement('h4');
+      h.className = 'ed-fgroup';
+      h.textContent = title;
+      wrap.appendChild(h);
+      if (hint) {
+        var p2 = document.createElement('p');
+        p2.className = 'form-hint';
+        p2.innerHTML = hint;
+        wrap.appendChild(p2);
+      }
+    };
+    var field = function (label, node) {
+      var g = document.createElement('div');
+      g.className = 'form-group';
+      var l = document.createElement('label');
+      l.textContent = label;
+      g.appendChild(l); g.appendChild(node);
+      return g;
+    };
+    var textbox = function (value, placeholder) {
+      var i = document.createElement('input');
+      i.value = value || '';
+      i.setAttribute('autocomplete', 'off');
+      if (placeholder) { i.placeholder = placeholder; }
+      return i;
+    };
+
+    /* ---- who they are ---- */
+    group('Person', others.length
+      ? 'Also listed under <b>' + esc(others.join('</b>, <b>')) +
+        '</b>. The name and contact details below are shared with those entries.'
+      : '');
+    var grid1 = document.createElement('div');
+    grid1.className = 'form-grid';
+    var nameIn = textbox(name0, 'Jane Smith');
+    grid1.appendChild(field('Name', nameIn));
+    wrap.appendChild(grid1);
+
+    var pubWrap = document.createElement('div');
+    pubWrap.className = 'form-group span2 ed-check';
+    var pubLab = document.createElement('label');
+    var pubBox = document.createElement('input');
+    pubBox.type = 'checkbox';
+    pubBox.checked = !!person.hideContact;
+    pubLab.appendChild(pubBox);
+    pubLab.appendChild(document.createTextNode(
+      ' Keep their contact details out of the published directory'));
+    pubWrap.appendChild(pubLab);
+    var pubHint = document.createElement('p');
+    pubHint.className = 'form-hint';
+    pubHint.textContent = 'We still hold them; the reader shows "Not published".' +
+      (sections.length > 1 ? ' This covers every department they appear in.' : '');
+    pubWrap.appendChild(pubHint);
+    wrap.appendChild(pubWrap);
+
+    /* ---- how to reach them ---- */
+    group('Email addresses', sections.length > 1
+      ? 'Leave "All roles" unless an address is only for one of their jobs.' : '');
+    var emailBox = document.createElement('div');
+    emailBox.className = 'ed-clist';
+    wrap.appendChild(emailBox);
+    NLDirectory.arr(person.emails).forEach(function (e) {
+      var addr = NLDirectory.addrOf(e);
+      if (!addr) { return; }
+      emailBox.appendChild(contactRow('email', addr,
+        (typeof e === 'string') ? '' : (e.section || ''), sections));
     });
+    var addEmail = document.createElement('button');
+    addEmail.className = 'btn btn--sm btn--ghost';
+    addEmail.type = 'button';
+    addEmail.textContent = 'Add an email address';
+    addEmail.addEventListener('click', function () {
+      emailBox.appendChild(contactRow('email', '', '', sections));
+    });
+    wrap.appendChild(addEmail);
 
-    /* "Move role to:" rather than a bare dropdown showing the current
-       department. Unlabelled, it read as a filter or as a display of where
-       the person already is — nothing about it said it was an action. */
-    var moveLab = document.createElement('span');
-    moveLab.className = 'ed-lab';
-    moveLab.textContent = 'Move role to:';
+    group('Telephone numbers', '');
+    var phoneBox = document.createElement('div');
+    phoneBox.className = 'ed-clist';
+    wrap.appendChild(phoneBox);
+    NLDirectory.arr(person.phones).forEach(function (x) {
+      if (!x || !(x.number || '').trim()) { return; }
+      phoneBox.appendChild(contactRow('phone', x.number, x.section || '', sections, x.ext || ''));
+    });
+    var addPhone = document.createElement('button');
+    addPhone.className = 'btn btn--sm btn--ghost';
+    addPhone.type = 'button';
+    addPhone.textContent = 'Add a telephone number';
+    addPhone.addEventListener('click', function () {
+      phoneBox.appendChild(contactRow('phone', '', '', sections));
+    });
+    wrap.appendChild(addPhone);
 
+    /* ---- the job this row is ---- */
+    group('This entry — ' + here, '');
+    var grid2 = document.createElement('div');
+    grid2.className = 'form-grid';
+    var titleIn = textbox(role.title || '', 'Programme Editor');
+    var deptIn = deptSelect(here, 'ed-dept');
+    grid2.appendChild(field('Job title', titleIn));
+    grid2.appendChild(field('Department', deptIn));
+    wrap.appendChild(grid2);
+
+    var extra = document.createElement('div');
+    extra.className = 'ed-morebtns';
     var addRole = document.createElement('button');
     addRole.className = 'btn btn--sm btn--ghost';
     addRole.type = 'button';
     addRole.textContent = 'Add another role';
-    addRole.addEventListener('click', function (e) {
-      e.stopPropagation();
-      addRoleTo(club, person);
+    var removeBtn = document.createElement('button');
+    removeBtn.className = 'btn btn--sm btn--ghost ed-del';
+    removeBtn.type = 'button';
+    removeBtn.textContent = 'Remove…';
+    extra.appendChild(addRole);
+    extra.appendChild(removeBtn);
+    wrap.appendChild(extra);
+
+    var read = function (box) {
+      return [].slice.call(box.querySelectorAll('.ed-crow')).map(function (r) {
+        var f = r.querySelector('.ed-cfor');
+        return { value: r.querySelector('.ed-cval').value.trim(),
+                 section: f ? f.value : '',
+                 ext: r.dataset.ext || '' };
+      }).filter(function (x) { return x.value; });
+    };
+
+    var ctrl = NL.modal({
+      title: 'Update details — ' + (name0 || 'this person'),
+      body: wrap,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Save', className: 'btn--primary', onClick: function (c) {
+          commitDetails(club, person, ridx, {
+            name: nameIn.value.trim(),
+            title: titleIn.value.trim(),
+            section: deptIn.value,
+            hide: !!pubBox.checked,
+            emails: read(emailBox),
+            phones: read(phoneBox)
+          }, c);
+        } }
+      ]
     });
 
-    wrap.appendChild(moveLab);
-    wrap.appendChild(move);
-    wrap.appendChild(addRole);
-    wrap.appendChild(contacts);
-    wrap.appendChild(pub);
-    wrap.appendChild(del);
-    row.appendChild(wrap);
-    addSiblings(row, person, ridx);
+    addRole.addEventListener('click', function () { ctrl.close(); addRoleTo(club, person); });
+    removeBtn.addEventListener('click', function () { ctrl.close(); removeRole(club, person, ridx); });
+    setTimeout(function () { nameIn.focus(); }, 30);
+  }
+
+  /* Everything the form changed, in one write. The rename question is asked
+     last and only when it is genuinely ambiguous, so an editor correcting a
+     job title is never made to answer a question about identity. */
+  function commitDetails(club, person, ridx, next, ctrl) {
+    var roles = NLDirectory.rolesOf(person);
+    var role = roles[ridx] || {};
+    var was = {
+      name: NLDirectory.fullName(person),
+      title: role.title || '',
+      section: role.section || '',
+      hide: !!person.hideContact,
+      emails: NLDirectory.emailsOf(person).join(', '),
+      phones: NLDirectory.phonesOf(person).map(function (x) { return x.number; }).join(', ')
+    };
+    var pid = 'people/' + (person.id || '');
+
+    var applyRest = function () {
+      if (next.title !== was.title) {
+        role.title = next.title;
+        logEdit(club, pid + '/roles/' + ridx + '/title', was.title, next.title);
+      }
+      if (next.section !== was.section) { role.section = next.section; }
+      if (next.hide !== was.hide) { person.hideContact = next.hide; }
+      /* A plain string when it applies everywhere, an object only when it does
+         not — so a record that gains nothing keeps the shape it had. */
+      person.emails = next.emails.map(function (x) {
+        return x.section ? { address: x.value, section: x.section } : x.value;
+      });
+      person.phones = next.phones.map(function (x) {
+        var out = { number: x.value, ext: x.ext || '' };
+        if (x.section) { out.section = x.section; }
+        return out;
+      });
+      var nowEm = NLDirectory.emailsOf(person).join(', ');
+      var nowPh = NLDirectory.phonesOf(person).map(function (x) { return x.number; }).join(', ');
+      if (nowEm !== was.emails) { logEdit(club, pid + '/emails', was.emails, nowEm); }
+      if (nowPh !== was.phones) { logEdit(club, pid + '/phones', was.phones, nowPh); }
+
+      var changed = next.title !== was.title || next.section !== was.section ||
+        next.hide !== was.hide || nowEm !== was.emails || nowPh !== was.phones ||
+        NLDirectory.fullName(person) !== was.name;
+      ctrl.close();
+      if (!changed) { return; }
+      saveStructure(club, 'Details updated for ' +
+        (NLDirectory.fullName(person) || 'a person'));
+    };
+
+    if (!next.name || next.name === was.name) { applyRest(); return; }
+
+    /* Renaming somebody who holds more than one role is genuinely ambiguous,
+       and getting it wrong is the worst thing this tool can do. See the note
+       on resolveRename. */
+    if (roles.length > 1) {
+      resolveRename(club, person, ridx, was.name, next.name).then(function (how) {
+        if (!how) { return; }                       /* cancelled: change nothing */
+        if (how === 'same') {
+          setAt(person, 'name', next.name);
+          logEdit(club, pid + '/name', was.name, next.name);
+          applyRest();
+        } else {
+          ctrl.close();
+          replaceInRole(club, person, ridx, next.name, next);
+        }
+      });
+      return;
+    }
+    setAt(person, 'name', next.name);
+    logEdit(club, pid + '/name', was.name, next.name);
+    applyRest();
   }
 
   /* Somebody already in the directory who also does something else. Distinct
      from "Add someone" at the foot, which mints a new person — this hangs a
-     second role on the person whose row you are already editing. */
+     second role on the person whose row you are on. */
   function addRoleTo(club, person) {
     var name = NLDirectory.fullName(person) || 'this person';
     var held = NLDirectory.rolesOf(person).map(function (r) { return r.section; });
@@ -1039,242 +1198,6 @@
     });
   }
 
-  /* The other departments this person sits in, named under the row being
-     edited. A rename or a publish toggle reaches all of them, and on a club
-     the size of Merthyr the other rows are a long way down the page — so
-     showing them where the edit is happening beats highlighting something
-     off screen. Each is a button: press it and that row is scrolled to and
-     flashed, so "where is the other one" takes one click rather than a hunt.
-
-     Rows that ARE on screen get marked at the same time, because a highlight
-     you can see is better than a label about it. */
-  function addSiblings(row, person, ridx) {
-    var roles = NLDirectory.rolesOf(person);
-    if (roles.length < 2) { return; }
-    var strip = document.createElement('div');
-    strip.className = 'ed-sibs';
-    strip.appendChild(document.createTextNode('Also listed under:'));
-    roles.forEach(function (r, i) {
-      if (i === ridx) { return; }
-      var b = document.createElement('button');
-      b.className = 'ed-sib';
-      b.type = 'button';
-      b.textContent = r.section;
-      b.title = 'Go to this person\u2019s ' + r.section + ' entry';
-      b.addEventListener('click', function (e) {
-        e.stopPropagation();
-        gotoRole(row.dataset.pid, i);
-      });
-      strip.appendChild(b);
-    });
-    var note = document.createElement('span');
-    note.className = 'ed-sibs__note';
-    note.textContent = 'the name and contact details are shared';
-    strip.appendChild(note);
-    row.appendChild(strip);
-    /* No marking here. addRowActions runs for every row on the club as it is
-       wired, so highlighting from inside it lit up every multi-role person at
-       once — three rows marked before anybody had pressed anything. The mark
-       belongs to the act of opening a row, which is setEditing. */
-  }
-
-  function markSiblings(row, on) {
-    if (!row.dataset.pid) { return; }
-    $('out').querySelectorAll('.cd-row').forEach(function (other) {
-      if (other === row || other.dataset.pid !== row.dataset.pid) { return; }
-      other.classList.toggle('is-sibling', on);
-    });
-  }
-
-  function gotoRole(pid, ridx) {
-    var target = null;
-    $('out').querySelectorAll('.cd-row').forEach(function (r) {
-      if (r.dataset.pid === pid && Number(r.dataset.ridx) === ridx) { target = r; }
-    });
-    if (!target) { return; }
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    target.classList.remove('is-found');
-    void target.offsetWidth;                  /* restart the animation */
-    target.classList.add('is-found');
-    setTimeout(function () { target.classList.remove('is-found'); }, 2200);
-  }
-
-  /* The follow-up emails tell 65 clubs "we'll include those details unless
-     there's any issue — just let us know". This is the control that honours
-     the reply. Without it the promise had no mechanism behind it. */
-  function togglePublish(club, person) {
-    var name = NLDirectory.fullName(person) || 'this person';
-    var roles = NLDirectory.rolesOf(person).map(function (r) { return r.section; });
-    var where = roles.length > 1 ? ' They appear under ' + roles.join(' and ') +
-      ', and this covers all of them.' : '';
-    var on = !!person.hideContact;          /* currently hidden -> we are publishing */
-    NL.confirm(on
-      ? 'Publish ' + name + '\u2019s contact details in the directory?' + where +
-        ' The club asked for these to be kept off, so only do this if they have ' +
-        'since said otherwise.'
-      : 'Keep ' + name + '\u2019s contact details out of the published directory?' +
-        where + ' The League still holds them; the reader will show ' +
-        '\u201cNot published\u201d.',
-      { title: on ? 'Publish details' : 'Unpublish details',
-        confirmText: on ? 'Publish' : 'Keep unpublished' }
-    ).then(function (ok) {
-      if (!ok) { return; }
-      person.hideContact = !on;
-      saveStructure(club, name + (on ? ' published' : ' marked not for publication'));
-    });
-  }
-
-  /* ------------------------------------------------------ contact details
-     Addresses and numbers were the one thing on a person that could not be
-     corrected, which for a contacts directory is the wrong thing to be
-     missing. A list rather than a cell: 9 people hold more than one address
-     and 17 more than one number, and a list needs adding to and removing from.
-
-     Each entry can name the role it is for. That is off by default and stays
-     off for almost everybody — untagged means "wherever this person appears",
-     which is how every existing record already behaves. It exists for the
-     handful of clubs, Truro chief among them, who give a person a separate
-     address per job. */
-  function contactRow(kind, value, section, roles, ext) {
-    var row = document.createElement('div');
-    row.className = 'ed-crow';
-    /* Every phone record carries an ext field. All 563 are empty today and
-       there is no box to type one into, but rebuilding the list from the form
-       would drop it the moment somebody set one — so it rides along on the
-       row rather than being quietly discarded. */
-    if (ext) { row.dataset.ext = ext; }
-    var input = document.createElement('input');
-    input.className = 'ed-cval';
-    input.value = value || '';
-    input.setAttribute('autocomplete', 'off');
-    input.placeholder = kind === 'email' ? 'name@club.co.uk' : '01234 567890';
-    if (kind === 'email') { input.type = 'email'; }
-
-    var pick = document.createElement('select');
-    pick.className = 'ed-cfor';
-    var all = document.createElement('option');
-    all.value = ''; all.textContent = 'All roles';
-    pick.appendChild(all);
-    roles.forEach(function (sec) {
-      var o = document.createElement('option');
-      o.value = sec; o.textContent = sec;
-      if (sec === section) { o.selected = true; }
-      pick.appendChild(o);
-    });
-
-    var del = document.createElement('button');
-    del.className = 'btn btn--icon btn--ghost ed-del';
-    del.type = 'button';
-    del.title = 'Remove this ' + kind;
-    del.setAttribute('aria-label', 'Remove this ' + kind);
-    del.appendChild(NL.icon('delete'));
-    del.addEventListener('click', function () { row.remove(); });
-
-    row.appendChild(input);
-    row.appendChild(pick);
-    row.appendChild(del);
-    return row;
-  }
-
-  function editContacts(club, person, here) {
-    var name = NLDirectory.fullName(person) || 'this person';
-    var roles = NLDirectory.rolesOf(person).map(function (r) { return r.section; })
-      .filter(function (sec, i, a) { return a.indexOf(sec) === i; });
-
-    var wrap = document.createElement('div');
-    var mkGroup = function (title, hint) {
-      var h = document.createElement('h4');
-      h.className = 'ed-fgroup';
-      h.textContent = title;
-      wrap.appendChild(h);
-      if (hint) {
-        var p2 = document.createElement('p');
-        p2.className = 'form-hint';
-        p2.textContent = hint;
-        wrap.appendChild(p2);
-      }
-      var box = document.createElement('div');
-      box.className = 'ed-clist';
-      wrap.appendChild(box);
-      return box;
-    };
-
-    var emailBox = mkGroup('Email addresses', roles.length > 1
-      ? 'Leave "All roles" unless this address is only for one of their jobs.'
-      : '');
-    NLDirectory.arr(person.emails).forEach(function (e) {
-      var addr = NLDirectory.addrOf(e);
-      if (!addr) { return; }
-      emailBox.appendChild(contactRow('email', addr,
-        (typeof e === 'string') ? '' : (e.section || ''), roles));
-    });
-    var addEmail = document.createElement('button');
-    addEmail.className = 'btn btn--sm btn--ghost';
-    addEmail.type = 'button';
-    addEmail.textContent = 'Add an email address';
-    addEmail.addEventListener('click', function () {
-      emailBox.appendChild(contactRow('email', '', '', roles));
-    });
-    wrap.appendChild(addEmail);
-
-    var phoneBox = mkGroup('Telephone numbers', '');
-    NLDirectory.arr(person.phones).forEach(function (x) {
-      if (!x || !(x.number || '').trim()) { return; }
-      phoneBox.appendChild(contactRow('phone', x.number, x.section || '', roles, x.ext || ''));
-    });
-    var addPhone = document.createElement('button');
-    addPhone.className = 'btn btn--sm btn--ghost';
-    addPhone.type = 'button';
-    addPhone.textContent = 'Add a telephone number';
-    addPhone.addEventListener('click', function () {
-      phoneBox.appendChild(contactRow('phone', '', '', roles));
-    });
-    wrap.appendChild(addPhone);
-
-    var read = function (box) {
-      return [].slice.call(box.querySelectorAll('.ed-crow')).map(function (r) {
-        return { value: r.querySelector('.ed-cval').value.trim(),
-                 section: r.querySelector('.ed-cfor').value,
-                 ext: r.dataset.ext || '' };
-      }).filter(function (x) { return x.value; });
-    };
-
-    NL.modal({
-      title: 'Contact details \u2014 ' + name,
-      body: wrap,
-      buttons: [
-        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
-        { label: 'Save contact details', className: 'btn--primary', onClick: function (c) {
-          var em = read(emailBox), ph = read(phoneBox);
-          var wasEm = NLDirectory.emailsOf(person).join(', ');
-          var wasPh = NLDirectory.phonesOf(person).map(function (x) { return x.number; }).join(', ');
-          /* A plain string when it applies everywhere, an object only when it
-             does not — so a record that gains nothing keeps the shape it had
-             and the diff stays readable. */
-          person.emails = em.map(function (x) {
-            return x.section ? { address: x.value, section: x.section } : x.value;
-          });
-          person.phones = ph.map(function (x) {
-            var out = { number: x.value, ext: x.ext || '' };
-            if (x.section) { out.section = x.section; }
-            return out;
-          });
-          var nowEm = NLDirectory.emailsOf(person).join(', ');
-          var nowPh = NLDirectory.phonesOf(person).map(function (x) { return x.number; }).join(', ');
-          c.close();
-          if (nowEm === wasEm && nowPh === wasPh) { return; }
-          if (nowEm !== wasEm) { logEdit(club, 'people/' + (person.id || '') + '/emails', wasEm, nowEm); }
-          if (nowPh !== wasPh) { logEdit(club, 'people/' + (person.id || '') + '/phones', wasPh, nowPh); }
-          saveStructure(club, 'Contact details updated for ' + name);
-        } }
-      ]
-    });
-  }
-
-  /* One button for both of the things Richard asked for. Removing somebody's
-     only role removes them; removing one of several leaves them where they
-     still belong. The message says which, so the difference is visible before
-     the click rather than discovered after it. */
   function removeRole(club, person, ridx) {
     var roles = NLDirectory.rolesOf(person);
     var name = NLDirectory.fullName(person) || 'this person';
@@ -1393,72 +1316,27 @@
      icon carries the permission before you press it — the pattern
      fixtures/index.html has used for a while, and better than a control that
      simply vanishes, which only raises the question. */
-  function addPen(row, locked) {
+  function addPen(row, locked, club, person, ridx) {
     var b = document.createElement('button');
     /* Canon icon button. aria-label is load-bearing, not decoration: there is
        no text node in here, so without it the row announces "button". */
     b.className = 'btn btn--icon btn--ghost ed-pen';
     b.type = 'button';
-    var label = locked ? 'View only \u2014 this club is marked complete' : 'Edit this entry';
+    var label = locked ? 'View only \u2014 this club is marked complete' : 'Update details';
     b.title = label;
-    b.setAttribute('aria-label', label);
+    b.setAttribute('aria-label', label + (person ? ' for ' +
+      (NLDirectory.fullName(person) || 'this person') : ''));
     b.appendChild(NL.icon(locked ? 'eye' : 'edit'));
-    if (locked) { b.disabled = true; row.appendChild(b); return; }
+    if (locked || ridx == null) { b.disabled = true; row.appendChild(b); return; }
     b.addEventListener('click', function (e) {
       e.stopPropagation();
-      setEditing(row, !row.classList.contains('is-editing'));
+      updateDetails(club, person, ridx);
     });
     row.appendChild(b);
   }
 
-  function setEditing(row, on) {
-    row.classList.toggle('is-editing', on);
-    /* The pen fills in while the row is live. Swapping the canon colour
-       variant rather than restating the colours locally — that restatement
-       is what .btn--icon exists to stop. */
-    var pen = row.querySelector('.ed-pen');
-    if (pen) {
-      pen.classList.toggle('btn--primary', on);
-      pen.classList.toggle('btn--ghost', !on);
-    }
-    var cells = row.querySelectorAll('[data-edit]');
-    cells.forEach(function (c) {
-      if (on) { c.setAttribute('contenteditable', 'plaintext-only'); unplaceholder(c); }
-      else { c.removeAttribute('contenteditable'); replaceholder(c); }
-    });
-    markSiblings(row, on);
-    if (on && cells[0]) { cells[0].focus(); }
-  }
 
-  /* An empty title renders as "No job title" in italics, which is right for
-     reading and wrong for editing: the words are ours, not the club's, and
-     having to delete them before you can type is nonsense. So the placeholder
-     comes out when the row goes live and back in if the cell is still empty
-     when it closes. The record is unaffected either way — an empty cell is an
-     empty title, not the string "No job title". */
-  function placeholderText(cell) {
-    var em = cell.querySelector('em');
-    return (em && cell.textContent.trim() === em.textContent.trim()) ? em.textContent : '';
-  }
-  function unplaceholder(cell) {
-    var t = placeholderText(cell);
-    if (t) { cell.dataset.empty = t; cell.textContent = ''; }
-  }
-  function replaceholder(cell) {
-    if (!cell.textContent.trim() && cell.dataset.empty) {
-      cell.innerHTML = '<em>' + esc(cell.dataset.empty) + '</em>';
-    }
-  }
 
-  function valueAt(person, path) {
-    if (path === 'name') { return NLDirectory.fullName(person); }
-    var parts = path.split('/'), cur = person;
-    for (var i = 0; i < parts.length; i++) {
-      if (cur == null) { return ''; }
-      cur = cur[parts[i]];
-    }
-    return cur == null ? '' : String(cur);
-  }
   /* A record holds title / firstName / lastName / postNominals separately, but
      the row shows one name and edits one name. Splitting on the first space
      alone made "Dr Daniel Palmer" a person whose first name is Dr, which then
@@ -1497,52 +1375,6 @@
     cur[parts[parts.length - 1]] = v;
   }
 
-  function editable(cell, person, path, club) {
-    if (!cell) { return; }
-    cell.setAttribute('data-edit', path);
-    cell.setAttribute('spellcheck', 'false');
-    var before = valueAt(person, path);
-    cell.addEventListener('focus', function () { before = cell.textContent.trim(); });
-    cell.addEventListener('keydown', function (e) {
-      /* Enter finishes with the row, not just with the field. Blurring alone
-         committed the value and left the row open — contenteditable still on,
-         the action strip still showing — so the edit had happened and nothing
-         said so. Escape puts the value back and closes for the same reason. */
-      if (e.key === 'Enter' || e.key === 'Escape') {
-        if (e.key === 'Escape') { cell.textContent = before; }
-        e.preventDefault();
-        cell.blur();
-        var row = cell.closest('.cd-row');
-        if (row) { setEditing(row, false); }
-      }
-    });
-    cell.addEventListener('blur', function () { commit(cell); });
-    /* Stored on the node so the put-back button can commit the same way the
-       blur handler does, rather than faking a blur event at it. */
-    cell._commit = function () {
-      var now = cell.textContent.trim();
-      if (now === before) { return; }
-      /* Renaming somebody who holds more than one role is genuinely
-         ambiguous, and getting it wrong is the worst thing this tool can do.
-         See resolveRename. */
-      if (path === 'name' && NLDirectory.rolesOf(person).length > 1) {
-        var was = before;
-        resolveRename(cell, club, person, was, now).then(function (kept) {
-          if (kept) { before = now; } else { cell.textContent = was; }
-        });
-        return;
-      }
-      setAt(person, path, now);
-      if (path === 'name') { syncName(cell, now); }
-      save(club, person, path, before, now);
-      /* Mark it now, not on the next redraw. A field edit deliberately does
-         not re-render — you are still in the row — so waiting for draw() meant
-         the one moment you most want confirmation was the one moment nothing
-         happened. */
-      markCellEdited(club, person, cell, path);
-      before = now;
-    };
-  }
 
   /* ------------------------------------------------------ the rename trap
      Josh Knowles is Head of Media and also the programme editor: one record,
@@ -1567,9 +1399,7 @@
      person wearing the old person's email is worse than the rename it was
      meant to fix: it looks correct and it is wrong. They arrive with nothing
      held, which the existing red chips already flag for chasing. */
-  function resolveRename(cell, club, person, from, to) {
-    var row = cell.closest('.cd-row');
-    var ridx = row && row.dataset.ridx ? Number(row.dataset.ridx) : 0;
+  function resolveRename(club, person, ridx, from, to) {
     var roles = NLDirectory.rolesOf(person);
     var here = (roles[ridx] || {}).section || '';
     var others = roles.filter(function (r, i) { return i !== ridx; })
@@ -1578,7 +1408,6 @@
     return new Promise(function (resolve) {
       var settled = false;
       var done = function (v) { if (!settled) { settled = true; resolve(v); } };
-
       NL.modal({
         title: 'Which did you mean?',
         size: 'sm',
@@ -1593,17 +1422,10 @@
         buttons: [
           { label: 'Cancel', className: 'btn--ghost',
             onClick: function (c) { done(false); c.close(); } },
-          { label: 'Same person', className: 'btn--ghost', onClick: function (c) {
-            setAt(person, 'name', to);
-            syncName(cell, to);
-            save(club, person, 'name', from, to);
-            markCellEdited(club, person, cell, 'name');
-            done(true); c.close();
-          } },
-          { label: 'New in ' + here, className: 'btn--primary', onClick: function (c) {
-            replaceInRole(club, person, ridx, to);
-            done(true); c.close();
-          } }
+          { label: 'Same person', className: 'btn--ghost',
+            onClick: function (c) { done('same'); c.close(); } },
+          { label: 'New in ' + here, className: 'btn--primary',
+            onClick: function (c) { done('new'); c.close(); } }
         ]
       });
     });
@@ -1611,14 +1433,15 @@
 
   /* The new person takes the job — the role and its title — and nothing else.
      The old person keeps every other role and their own contact details. */
-  function replaceInRole(club, person, ridx, name) {
+  function replaceInRole(club, person, ridx, name, next) {
     var roles = NLDirectory.rolesOf(person);
     var role = roles[ridx];
     var fresh = { id: newId(), title: '', postNominals: '', firstName: '', lastName: '',
       name: name, emails: [], phones: [], hideContact: !!person.hideContact,
       added: { at: Date.now(), by: session.name || 'editor',
                replacing: NLDirectory.fullName(person) },
-      roles: [{ section: role.section, title: role.title || '' }] };
+      roles: [{ section: (next && next.section) || role.section,
+                title: (next && next.title) || role.title || '' }] };
     setAt(fresh, 'name', name);
     person.roles = roles.filter(function (r, i) { return i !== ridx; });
     ALL[club].people = NLDirectory.arr(ALL[club].people).concat(fresh);
@@ -1626,72 +1449,8 @@
       ' in ' + role.section);
   }
 
-  /* Somebody in two departments is one record and two rows. The record is
-     updated once and correctly — but the other row keeps showing the old name
-     until the page is redrawn, so an editor who renames someone under Media
-     scrolls down to Programme, sees the name they just changed, and either
-     thinks it did not save or types it again.
 
-     Only the name does this. A job title belongs to one role and is meant to
-     differ between departments — that is the whole point of the split rule. */
-  function syncName(cell, value) {
-    var row = cell.closest('.cd-row');
-    if (!row || !row.dataset.pid) { return; }
-    $('out').querySelectorAll('.cd-row').forEach(function (other) {
-      if (other === row || other.dataset.pid !== row.dataset.pid) { return; }
-      var c = other.children[0];
-      if (!c || c.getAttribute('contenteditable')) { return; }   /* leave a live cell alone */
-      c.textContent = value;
-    });
-  }
 
-  function commit(cell) { if (cell && cell._commit) { cell._commit(); } }
-
-  /* The live half of markEdits: same tint, same chip, applied to the row in
-     front of you the instant the value is committed. Replaces any chip already
-     there for that field, so editing the same cell twice does not stack. */
-  /* Driven by the record rather than by the fact that a commit happened. If
-     logEdit decided this is no longer an edit — the value is back where it
-     started — the chip comes off and, if it was the row's only one, so does
-     the tint. */
-  function markCellEdited(club, person, cell, path) {
-    var row = cell.closest('.cd-row');
-    if (!row) { return; }
-    var full = 'people/' + (person.id || '') + '/' + path;
-    var rec = editList(club).filter(function (e) { return e.path === full; })[0];
-    var what = /^roles\//.test(path) ? 'Job title' : 'Name';
-    var rows = (path === 'name' && row.dataset.pid)
-      ? [].slice.call($('out').querySelectorAll('.cd-row')).filter(function (r) {
-          return r.dataset.pid === row.dataset.pid;
-        })
-      : [row];
-    rows.forEach(function (r) {
-      var box = pillsFor(r);
-      [].slice.call(box.querySelectorAll('.ed-pill--edit')).forEach(function (old) {
-        if (old.textContent === what + ' edited') { old.remove(); }
-      });
-      if (rec) { addEditChip(r, rec, what); }
-      /* Another field on the same row may still be edited, and an added
-         person is marked whether or not any field has been touched since. */
-      var stillGreen = box.querySelector('.ed-pill--edit');
-      r.classList.toggle('is-edited', !!stillGreen);
-    });
-  }
-
-  /* Straight to the database, as agreed. NL.writeAudit first so the entry
-     names the editor and the field rather than just the path that changed. */
-  function save(club, person, path, from, to) {
-    var db = firebase.database();
-    NL.writeAudit('directory_edit',
-      club + ' — ' + (NLDirectory.fullName(person) || person.id) + ' ' + path +
-      ': "' + from + '" → "' + to + '" (' + (session.name || 'editor') + ')');
-    logEdit(club, 'people/' + (person.id || '') + '/' + path, from, to);
-    db.ref(ROOT + '/clubs/' + club).set(ALL[club])
-      .then(function () { NL.toast('Saved', 'success'); })
-      .catch(function (err) {
-        NL.toast('Could not save: ' + ((err && err.message) || err), 'error');
-      });
-  }
 
   /* ------------------------------------------------------------- hand edits
      Three things can be true of a field, and until now only two of them were
@@ -1757,11 +1516,9 @@
       var list = row.dataset.pid && byPerson[row.dataset.pid];
       if (!list) { return; }
       list.forEach(function (item) {
-        var cell = null;
-        if (item.tail === 'firstName' || item.tail === 'lastName') { cell = row.children[0]; }
-        else if (roleTail(item.tail) === row.dataset.ridx) { cell = row.children[1]; }
-        if (!cell) { return; }
-        addNote(row, cell, item.c);
+        var isName = item.tail === 'firstName' || item.tail === 'lastName';
+        if (!isName && roleTail(item.tail) !== row.dataset.ridx) { return; }
+        addNote(row, club, item.c);
       });
     });
   }
@@ -1779,17 +1536,46 @@
     return box;
   }
 
-  function addNote(row, cell, change) {
+  /* Puts back exactly what the club sent. It used to write through the
+     contenteditable cell and let the blur handler save; with typing-in-the-row
+     gone it writes to the record directly, the way the club-detail undo
+     already did — and drops the marker with it, so the row cannot go on
+     claiming a correction that is no longer there. */
+  function addNote(row, club, change) {
     var pill = document.createElement('span');
     pill.className = 'ed-pill ed-pill--was';
     pill.innerHTML = 'Was: ' + esc(change.from || '(blank)') +
       ' <button type="button" title="Restore what the club sent">undo</button>';
-    pill.querySelector('button').addEventListener('click', function () {
-      cell.textContent = change.from || '';
-      commit(cell);
-      pill.remove();
-    });
+    if (signedOffBy(ALL[club])) { pill.querySelector('button').remove(); }
+    else {
+      pill.querySelector('button').addEventListener('click', function () {
+        undoChange(club, change);
+      });
+    }
     pillsFor(row).appendChild(pill);
+  }
+
+  function undoChange(club, change) {
+    var m = /^people\/([^/]+)\/(.*)$/.exec(change.path || '');
+    if (!m) { return; }
+    var person = NLDirectory.arr(ALL[club].people).filter(function (p) {
+      return p.id === m[1];
+    })[0];
+    if (!person) { return; }
+    setAt(person, m[2], change.from);
+    if (m[2] === 'firstName' || m[2] === 'lastName') {
+      person.name = [person.title, person.firstName, person.lastName, person.postNominals]
+        .map(function (x) { return (x || '').trim(); }).filter(Boolean).join(' ');
+    }
+    var prov = PROV[club] || {};
+    PROV[club] = {
+      changes: NLDirectory.arr(prov.changes).filter(function (c) { return c !== change; }),
+      merges: NLDirectory.arr(prov.merges),
+      attention: NLDirectory.arr(prov.attention),
+      edits: NLDirectory.arr(prov.edits)
+    };
+    firebase.database().ref(ROOT + '/provenance/' + club).set(PROV[club]);
+    saveStructure(club, 'Put back what the club sent');
   }
 
   /* Green markers for what a person changed by hand — on the rows, and on the
