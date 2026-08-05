@@ -7,6 +7,17 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.15 — (05/08/2026) A flag and its resolution now sit together. A red chip
+         and a green one side by side stated two facts and left you to join
+         them up; a flag that had been dealt with simply vanished, so a row
+         that had been through something looked like a row that never had.
+         Flags are now re-derived from the tidier on every draw and compared
+         with what the bake stored, which gives three states rather than one:
+         still there (red), no longer there (one chip, red half and green half,
+         with who fixed it and what it used to say in the tooltip), and newly
+         introduced (red, immediately — an editor who types a nine-digit phone
+         number finds out now rather than at the next Re-check). The club's own
+         details get the same treatment as a "sorted" box on the card.
   v1.14 — (05/08/2026) Two things the consolidation got wrong.
          · Publishing somebody the club asked us to keep off is the one thing
            in this form that reaches outside the League, and it had become a
@@ -354,6 +365,22 @@
     flex-wrap: wrap; line-height: 1.45; }
   .ed-infoedits .ed-pill { flex: 0 0 auto; }
 
+  /* Flags that have been dealt with. Green box, because the news is that the
+     work is done — but each line keeps the red half of the chip, so it reads
+     "here is what was wrong, here is what we did about it" rather than losing
+     the problem the moment somebody solves it. */
+  .ed-infosettled {
+    margin: 0 0 16px; padding: 11px 14px;
+    background: var(--green-light); border-radius: var(--radius);
+    font-size: var(--text-sm); color: var(--text);
+  }
+  .ed-infosettled b { font-variation-settings: 'wght' 800; color: var(--green); }
+  .ed-infosettled ul { margin: 7px 0 0; padding: 0; list-style: none;
+    display: flex; flex-direction: column; gap: 5px; }
+  .ed-infosettled li { display: flex; align-items: baseline; gap: 8px;
+    flex-wrap: wrap; line-height: 1.45; }
+  .ed-infosettled .ed-pill { flex: 0 0 auto; }
+
   .ed-undo {
     padding: 0; border: 0; background: none; cursor: pointer; color: var(--amber-deep);
     font: inherit; text-decoration: underline; opacity: 0.8; white-space: nowrap;
@@ -438,6 +465,23 @@
      job: the admin team typed over this. Amber is the tidier's automatic
      correction, red is a problem waiting for somebody. */
   .ed-pill--edit { background: var(--green-light); color: var(--green); }
+  /* Red and green in one chip, for a flag somebody has since fixed. Two
+     segments rather than two chips: "this was wrong" and "this was the
+     resolution" are one fact, and showing them apart leaves the reader to pair
+     them up by eye. The red stays full strength — the point is that you can
+     still see what the problem was. */
+  .ed-pill--fixed { padding: 0; gap: 0; align-items: stretch; overflow: hidden; }
+  .ed-was, .ed-now { display: inline-flex; align-items: center; padding: 2px 9px; }
+  .ed-was { background: var(--red-light); color: var(--red); }
+  /* Solid green rather than green-light: the row this chip sits on has already
+     gone green-light, because fixing the flag is itself a hand edit, and a
+     green-light half on a green-light row is an invisible half. "Sorted" must
+     not wrap either — the chips live in a narrow gutter column, and it broke
+     as "Sorte / d". */
+  .ed-now {
+    background: var(--green); color: var(--white); white-space: nowrap; flex: 0 0 auto;
+  }
+  .ed-now::before { content: '\2192'; margin-right: 5px; opacity: 0.7; }
   .ed-pill button {
     padding: 0; border: 0; background: none; cursor: pointer; color: inherit;
     font: inherit; text-decoration: underline; opacity: 0.75;
@@ -1851,8 +1895,10 @@
      head of the card as a short list. The pen underneath opens the form where
      each one is fixed. */
   function markInfoFlags(club, rec) {
-    var flags = NLDirectory.arr((PROV[club] || {}).attention)
-      .filter(function (f) { return f.field === 'info'; });
+    var state = flagState(club).filter(function (i) { return i.f.field === 'info'; });
+    var settled = state.filter(function (i) { return i.settled; });
+    var flags = state.filter(function (i) { return !i.settled; }).map(function (i) { return i.f; });
+    if (settled.length) { showSettledInfo(club, settled); }
     var card = document.getElementById('cdCard');
     if (!flags.length || !card) { return; }
     var box = document.createElement('div');
@@ -1870,6 +1916,29 @@
     card.insertBefore(box, card.firstChild);
   }
 
+  function showSettledInfo(club, settled) {
+    var card = document.getElementById('cdCard');
+    if (!card) { return; }
+    var box = document.createElement('div');
+    box.className = 'ed-infosettled';
+    box.innerHTML = '<b>' + settled.length +
+      (settled.length === 1 ? ' flag' : ' flags') + ' sorted in these details</b>';
+    var ul = document.createElement('ul');
+    settled.forEach(function (item) {
+      var edit = whoFixed(club, item.f.path);
+      var li = document.createElement('li');
+      li.innerHTML = '<span class="ed-pill ed-pill--fixed">' +
+        '<span class="ed-was">' + esc(item.f.label) + '</span>' +
+        '<span class="ed-now">Sorted</span></span> ' + esc(item.f.why || '') +
+
+        (edit ? ' &mdash; ' + esc(edit.by || 'an editor') + ', ' +
+          esc(NL.formatDate(edit.at)) : '');
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
+    card.insertBefore(box, card.firstChild);
+  }
+
   /* Things the tidier could see were wrong and deliberately did not touch — a
      mailbox that does not match the name on the record, a phone number that
      is the wrong length, one job title carried across two departments. Red,
@@ -1878,28 +1947,99 @@
 
      No undo button: there is nothing to put back. The chip says what looks
      wrong and the row above it is already editable. */
+  /* --------------------------------------------------- flags, and their fate
+     A red flag and a green edit sitting side by side told you two facts and
+     left you to join them. The useful thing is the pairing: here was the
+     problem, and here is what happened to it.
+
+     It is worked out rather than assumed. The tidier is already loaded, so
+     the club is re-scanned on every draw and the answer compared with what
+     the bake stored:
+
+       stored, still found   -> open. Red, as before.
+       stored, no longer     -> settled. Red and green in one chip.
+       not stored, found now -> new. Red, and it appears immediately rather
+                                than waiting for the next Re-check — an editor
+                                who types a nine-digit phone number finds out
+                                now, not in a week.
+
+     That last one is why this is a live scan and not a stored flag with a
+     "resolved" bit set on it: a bit can only ever describe the thing that set
+     it, and an editor's typing is not that thing. */
+  function flagKey(f) { return (f.path || '') + '|' + (f.label || ''); }
+
+  function flagState(club) {
+    var rec = ALL[club];
+    var stored = NLDirectory.arr((PROV[club] || {}).attention);
+    var live = [];
+    try { live = window.NLTidy ? NLTidy.flagAttention(rec) : stored; }
+    catch (e) { live = stored; }
+    var liveKeys = {};
+    live.forEach(function (f) { liveKeys[flagKey(f)] = f; });
+    var storedKeys = {};
+    stored.forEach(function (f) { storedKeys[flagKey(f)] = f; });
+
+    var out = [];
+    stored.forEach(function (f) {
+      out.push({ f: f, settled: !liveKeys[flagKey(f)] });
+    });
+    live.forEach(function (f) {
+      if (!storedKeys[flagKey(f)]) { out.push({ f: f, settled: false, fresh: true }); }
+    });
+    return out;
+  }
+
+  /* Who dealt with it, if anybody did. An edit whose path covers the flagged
+     field is the one that answered it — people/x/emails covers
+     people/x/emails/0. */
+  function whoFixed(club, path) {
+    return editList(club).filter(function (e) {
+      return path === e.path || path.indexOf(e.path + '/') === 0;
+    })[0];
+  }
+
   function markAttention(club) {
-    var flags = NLDirectory.arr((PROV[club] || {}).attention);
-    if (!flags.length) { return; }
+    var all = flagState(club);
+    if (!all.length) { return; }
     var byPerson = {};
-    flags.forEach(function (f) {
-      if (f.field === 'info') { return; }        /* the card's, not a row's */
-      var m = /^people\/([^/]+)(?:\/(.*))?$/.exec(f.path || '');
+    all.forEach(function (item) {
+      if (item.f.field === 'info') { return; }    /* the card's, not a row's */
+      var m = /^people\/([^/]+)(?:\/(.*))?$/.exec(item.f.path || '');
       if (!m) { return; }
-      (byPerson[m[1]] = byPerson[m[1]] || []).push(f);
+      (byPerson[m[1]] = byPerson[m[1]] || []).push(item);
     });
     $('out').querySelectorAll('.cd-row').forEach(function (row) {
       var list = row.dataset.pid && byPerson[row.dataset.pid];
       if (!list) { return; }
-      list.forEach(function (f) {
-        var m = /^people\/[^/]+\/(.*)$/.exec(f.path || '');
+      list.forEach(function (item) {
+        var m = /^people\/[^/]+\/(.*)$/.exec(item.f.path || '');
         var tail = m ? m[1] : '';
         /* A role-level flag belongs to one row; anything else (an address, a
            number) is about the person and belongs on all of them. */
         if (/^roles\//.test(tail) && roleTail(tail) !== row.dataset.ridx) { return; }
-        addGap(row, f.label, f.why);
+        if (item.settled) { addSettled(row, item.f, whoFixed(club, item.f.path)); }
+        else { addGap(row, item.f.label, item.f.why); }
       });
     });
+  }
+
+  /* One chip, two halves: what was wrong, and that it is not any more. Kept
+     as a pair rather than simply dropping the flag, because "there was an
+     issue here and it was dealt with" is worth more to somebody reviewing a
+     club than a row that looks like it never had one. */
+  function addSettled(row, f, edit) {
+    var pill = document.createElement('span');
+    pill.className = 'ed-pill ed-pill--fixed';
+    pill.innerHTML = '<span class="ed-was">' + esc(f.label) +
+      '<span class="ed-i" aria-hidden="true">i</span></span>' +
+      '<span class="ed-now">Sorted</span>';
+    pill.title = f.why
+      ? 'Was flagged: ' + f.why + '.' + (edit
+          ? ' Changed by ' + (edit.by || 'an editor') + ' on ' + NL.formatDate(edit.at) +
+            (String(edit.from || '').trim() ? ' — was "' + edit.from + '".' : '.')
+          : ' No longer flagged.')
+      : 'No longer flagged.';
+    pillsFor(row).appendChild(pill);
   }
 
   /* A person the League added, as opposed to one the club submitted. Amber,
