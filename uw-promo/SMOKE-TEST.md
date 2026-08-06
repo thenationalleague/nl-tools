@@ -9,10 +9,10 @@ demo continues.
 | | |
 |---|---|
 | **Environment** | Sandbox — every URL carries `?env=test` (amber TEST MODE badge). Identical code to live, disposable data. Nothing in this session touches live data or credentials. |
-| **Duration** | ~35 minutes |
+| **Duration** | ~45 minutes |
 | **R** — Richard | NL master. Laptop, screen-sharing. Console: `https://nl.tools/uw-promo/admin/?env=test` |
 | **U** — UW rep | Partner dashboard. Own laptop, screen-shares in Phases B and E. Link/passcode arrive via meeting chat in B1. |
-| **N** — Nick | Club staff, playing **two different clubs**. Needs a **phone** (Club 1) **and** a laptop or second browser tab (Club 2). Credentials arrive via meeting chat in A4. |
+| **N** — Nick | Club staff, playing **two different clubs**. Needs a **phone** (Club 1) **and** a laptop or second browser tab (Club 2). Credentials arrive via meeting chat in A5. |
 
 **Credential handling:** everything is passed in the meeting chat; all sandbox
 credentials are destroyed by the reset in Phase I, so there is no cleanup.
@@ -35,10 +35,11 @@ Stop here — leave clubs unseeded so the call opens with A1.
 
 | # | Action | Expected | Pass |
 |---|--------|----------|------|
-| A1 | Clubs & access → **Seed clubs from roster** → confirm | "72 clubs added"; full table with crests, divisions, passcodes | ☐ |
-| A2 | **Create UW access** | UW passcode chip + Copy direct link / New passcode / New link buttons appear | ☐ |
-| A3 | Tap the UW passcode chip, then **Copy direct link**; paste both into meeting chat | "UW passcode copied" / "UW direct link copied" toasts; both land in chat | ☐ |
-| A4 | For two clubs of Nick's choice: tap passcode chip + **Copy direct link**; paste all four items into chat labelled Club 1 / Club 2 | Both clubs' credentials in chat | ☐ |
+| A1 | Clubs & access → **Seed clubs from roster** → confirm | "72 clubs added"; full table with crests, divisions, and a **4-digit PIN** per club — the PIN column, not a 6-character passcode | ☐ |
+| A2 | Scan the PIN column for duplicates or any PIN starting `0` | Every PIN is different, none starts with a zero | ☐ |
+| A3 | **Create UW access** | UW passcode chip (6 characters — UW is not a till) + Copy direct link / New passcode / New link buttons appear | ☐ |
+| A4 | Tap the UW passcode chip, then **Copy direct link**; paste both into meeting chat | "UW passcode copied" / "UW direct link copied" toasts; both land in chat | ☐ |
+| A5 | For two clubs of Nick's choice: tap PIN chip + **Copy direct link**; paste all four items into chat labelled Club 1 / Club 2 | Both clubs' credentials in chat | ☐ |
 
 ---
 
@@ -49,11 +50,16 @@ Stop here — leave clubs unseeded so the call opens with A1.
 | B1 | Open the UW **direct link** from chat | UW wordmark + passcode gate — link alone does not open the dashboard | ☐ |
 | B2 | Enter a **wrong** passcode | "Passcode not recognised" | ☐ |
 | B3 | Enter the correct passcode | Dashboard opens: stats all zero, empty pool | ☐ |
-| B4 | **Add codes** → generate **25**, batch label `Demo day` → confirm | 25 codes in `XXXX-XXXX` format listed; **Copy all** → paste into meeting chat | ☐ |
-| B5 | **Add codes** → *Paste a list* → three made-up codes (e.g. `SUMMER-01`, `SUMMER-02`, `SUMMER-03`), batch label `UW supplied` | All three accepted into the pool alongside the generated ones | ☐ |
-| B6 | Re-paste one of those same codes as a new batch | Rejected: "Already in the system" | ☐ |
-| B7 | Filter Status → Unredeemed; search for one specific code | Table narrows correctly both times | ☐ |
-| B8 | **Export CSV** | File downloads; codes carry their dashes; Status/Redeemed-at columns present | ☐ |
+| B4 | **Add codes** — look at the dialog before touching it | **Paste a list of codes** is already selected (generating is second), and there's a **required club dropdown** at the top | ☐ |
+| B5 | Leave the club unset, paste three made-up codes, press **Add codes** | Refused: "Choose the club these codes are for" — nothing is added | ☐ |
+| B6 | Pick **Club 1**, paste three made-up codes (e.g. `SUMMER01`, `SUMMER02`, `SUMMER03`), batch label `UW supplied` → confirm | Confirm names Club 1 and says they can only be redeemed there; all three land, Club column = Club 1 | ☐ |
+| B7 | **Add codes** → Club 1 → switch to *Generate codes for me* → **25**, batch label `Demo day` | 25 codes listed, each **6 plain characters, no hyphen**; **Copy all** → paste into meeting chat | ☐ |
+| B8 | **Add codes** → **Club 2** → generate **10**, label `Club 2 batch` | Registered to Club 2, not Club 1 | ☐ |
+| B9 | Look for any way to add one batch to two clubs at once | **There isn't one** — one club per batch, by design | ☐ |
+| B10 | Re-paste one of the `UW supplied` codes as a new batch | Rejected: "Already in the system" | ☐ |
+| B11 | Set the **club filter to Club 2** | The big count cards drop to Club 2's numbers only (10 in pool) and name Club 2; table matches | ☐ |
+| B12 | Club filter back to **All clubs**; filter Status → Unredeemed; search one specific code | Cards return to the full totals; table narrows correctly both times | ☐ |
+| B13 | **Export CSV** | File downloads; the third column is **Club** and is filled in for every row, redeemed or not | ☐ |
 
 ---
 
@@ -62,22 +68,43 @@ Stop here — leave clubs unseeded so the call opens with A1.
 | # | Action | Expected | Pass |
 |---|--------|----------|------|
 | C1 | Open Club 1's direct link on the phone (this simulates scanning the printed QR) | **Crest-branded gate for Club 1** — not a working till | ☐ |
-| C2 | Enter a wrong passcode | Rejected | ☐ |
-| C3 | Enter Club 1's passcode | Till opens: UW wordmark, big entry box, empty "Redeemed at your club" list | ☐ |
-| C4 | Type a `Demo day` code **sloppily** — lowercase, no dash | Input auto-uppercases and inserts the dash as typed | ☐ |
-| C5 | Press **REDEEM** | ✅ dialog naming the code + Club 1, with the "apply the relevant discount on your club system" note; code appears in the club's redeemed list | ☐ |
-| C6 | Enter the **same code** again → REDEEM | ❌ "already redeemed **at** [Club 1] on [today's date/time]" | ☐ |
-| C7 | Everyone checks U's screen (no refresh) | The redemption shows: Redeemed at = Club 1, timestamp; "Redemptions by club" counts 1 | ☐ |
+| C2 | Enter a wrong PIN | Rejected: "PIN not recognised" | ☐ |
+| C3 | Enter Club 1's **4-digit PIN** | Till opens: UW wordmark, big entry box showing `***`, empty "Redeemed at your club" list, and a **Still to be redeemed** count matching Club 1's batches | ☐ |
+| C4 | Check the stats and the page for any list of Club 1's *unredeemed* codes | Only a **count** — the unredeemed codes are never printed on screen | ☐ |
+| C5 | Type a `Demo day` code **sloppily** — lowercase, with a space in the middle | Input uppercases; **no dash is inserted**; it still matches | ☐ |
+| C6 | Press **REDEEM** | ✅ dialog naming the code + Club 1, with the "apply the relevant discount on your club system" note; code appears in the club's redeemed list | ☐ |
+| C7 | Enter the **same code** again → REDEEM | ❌ "already redeemed **at** [Club 1] on [today's date/time]" | ☐ |
+| C8 | Everyone checks U's screen (no refresh) | The redemption shows against Club 1 with a timestamp; "Redeemed by club" reads 1 / [Club 1's total] | ☐ |
 
 ---
 
-## Phase D — the race (N on both devices, ~3 min)
+## Phase D — wrong club, and the race (N on both devices, ~5 min)
+
+**The headline rule for this release:** a code belongs to one club and works
+nowhere else.
 
 | # | Action | Expected | Pass |
 |---|--------|----------|------|
-| D1 | N signs into **Club 2** on the laptop (direct link + passcode from chat) | Second till open under a different crest | ☐ |
-| D2 | R reads out one fresh code; N types it into **both** tills, then presses REDEEM on each as near-simultaneously as possible | **Exactly one** ✅; the other gets ❌ naming the winning club and time | ☐ |
-| D3 | Check U's screen | One redemption recorded, attributed to the winning club only | ☐ |
+| D1 | N signs into **Club 2** on the laptop (direct link + PIN from chat) | Second till open under a different crest | ☐ |
+| D2 | At the **Club 2** till, enter one of Club 1's unused `Demo day` codes → REDEEM | ❌ **"registered to [Club 1], so it can only be redeemed there"** — named, and refused | ☐ |
+| D3 | Check U's screen | That code is **still unredeemed** and still shows Club 1 — the failed attempt changed nothing | ☐ |
+| D4 | At the **Club 1** till, enter one of Club 2's codes → REDEEM | Refused the same way, naming Club 2 — the rule runs both directions | ☐ |
+| D5 | R reads out one fresh **Club 2** code; N types it into **both** tills, then presses REDEEM on each as near-simultaneously as possible | Club 1's till refuses it as Club 2's code; Club 2's till redeems it once. (If both devices are on Club 2, exactly one ✅ and one ❌ naming the winner) | ☐ |
+| D6 | Check U's screen | One redemption recorded, attributed to Club 2 only | ☐ |
+
+---
+
+## Phase J — checking a code (N, ~4 min, on the phone)
+
+| # | Action | Expected | Pass |
+|---|--------|----------|------|
+| J1 | Scroll to the foot of the **Club 1** till page | **Check a code** panel, saying 10 checks an hour and that checks are recorded | ☐ |
+| J2 | Check a Club 1 code that has **not** been redeemed | "Genuine, and not yet redeemed", registered to Club 1 — and it stays unredeemed (nothing is used up by checking) | ☐ |
+| J3 | Check the code redeemed in C6 | "Already redeemed at Club 1", with the date and time | ☐ |
+| J4 | Check a **Club 2** code | "Genuine and unused, but registered to [Club 2]" | ☐ |
+| J5 | Check obvious nonsense, e.g. `ZZZZZZ` | "This is not a Utility Warehouse promo code" | ☐ |
+| J6 | Keep checking until the 10th | Counter under the box counts down; the 11th is refused with a "try again in N minutes" | ☐ |
+| J7 | R opens the master Audit tab, filters action → **Code check** | Every one of Nick's checks is listed, against Club 1, with what each one found | ☐ |
 
 ---
 
@@ -86,10 +113,11 @@ Stop here — leave clubs unseeded so the call opens with A1.
 | # | Action | Expected | Pass |
 |---|--------|----------|------|
 | E1 | **Revoke** an unredeemed code (confirm dialog) | Status → Revoked | ☐ |
-| E2 | N enters the revoked code at a till | ❌ "This code is no longer valid" | ☐ |
-| E3 | **Release** the Phase-D winning code (reason required, e.g. `demo — wrong till`) | Status → Unredeemed; it disappears from the winning club's list | ☐ |
-| E4 | N redeems that released code from the **other** club | ✅ — proves a released code returns to the open pool for anyone | ☐ |
-| E5 | U looks for a Delete button anywhere | **There isn't one** — deletion is NL-only | ☐ |
+| E2 | N enters the revoked code at its own club's till | ❌ "This code is no longer valid" | ☐ |
+| E3 | **Release** the code Club 2 redeemed in D5 (reason required, e.g. `wrong till`) | Status → Unredeemed; it leaves Club 2's redeemed list — but the **Club column still reads Club 2** | ☐ |
+| E4 | N tries that released code at **Club 1** | ❌ refused — releasing rewinds the redemption, not the registration | ☐ |
+| E5 | N redeems that released code at **Club 2** | ✅ — it's usable again, at the club it belongs to | ☐ |
+| E6 | U looks for a Delete button anywhere | **There isn't one** — deletion is NL-only | ☐ |
 
 ---
 
@@ -97,10 +125,11 @@ Stop here — leave clubs unseeded so the call opens with A1.
 
 | # | Action | Expected | Pass |
 |---|--------|----------|------|
-| F1 | **Redeem…** on an unredeemed code, choosing a club (the phone-in scenario) | Code locks to that club; appears on their till page list | ☐ |
-| F2 | **Revoke** a redeemed code | Demands typing `REVOKE`; wrong text refuses | ☐ |
-| F3 | **Delete** a single code | Demands typing `DELETE`; code vanishes from every panel incl. U's screen | ☐ |
-| F4 | **Batches** → `Demo day` row → **Delete unused (N)** | Confirm states how many **redeemed codes will be kept**; after typing `DELETE`, unused ones go, redeemed ones remain | ☐ |
+| F1 | **Redeem…** on an unredeemed Club 1 code (the phone-in scenario) | **No club picker** — it names Club 1, because that's the only club it can be redeemed at. Confirm → appears on Club 1's till page list | ☐ |
+| F2 | Set the club filter to **Club 1** and read the big cards | Cards show Club 1's numbers and say so; clearing the filter restores the totals | ☐ |
+| F3 | **Revoke** a redeemed code | Demands typing `REVOKE`; wrong text refuses | ☐ |
+| F4 | **Delete** a single code | Demands typing `DELETE`; code vanishes from every panel incl. U's screen | ☐ |
+| F5 | **Batches** | Each batch row names its **club**; `Demo day` → **Delete unused (N)** confirm states how many **redeemed codes will be kept**; after typing `DELETE`, unused ones go, redeemed ones remain | ☐ |
 
 ---
 
@@ -110,8 +139,9 @@ Stop here — leave clubs unseeded so the call opens with A1.
 |---|--------|----------|------|
 | G1 | Audit tab | Every action from Phases A–F listed with actor, action, club, detail (incl. release reason) | ☐ |
 | G2 | Filter by actor: Utility Warehouse → Clubs → NL master | Each filter shows only that party's actions | ☐ |
-| G3 | Filter by action: Delete | The F3/F4 deletions are recorded — deletions leave a trace | ☐ |
-| G4 | **Export CSV** | Audit downloads | ☐ |
+| G3 | Filter by action: Delete | The F4/F5 deletions are recorded — deletions leave a trace | ☐ |
+| G4 | Filter by action: **Code check** | Nick’s lookups from Phase J are all there, named to his club | ☐ |
+| G5 | **Export CSV** | Audit downloads | ☐ |
 
 Line to land with UW: *the audit trail is append-only — not even the master
 console can edit or prune it.*
@@ -122,9 +152,10 @@ console can edit or prune it.*
 
 | # | Action | Expected | Pass |
 |---|--------|----------|------|
-| H1 | Clubs & access → **Card** on Nick's Club 1 | Print preview: club crest + UW wordmark side by side, QR, passcode, the four till steps, proper top margin | ☐ |
-| H2 | N scans the on-screen QR with his phone | Lands on Club 1's gate (passcode still required — the QR is safe on public display) | ☐ |
+| H1 | Clubs & access → **Card** on Nick's Club 1 | Print preview: club crest + UW wordmark side by side, QR, the **4-digit PIN**, the till steps (incl. "codes are issued to this club only"), proper top margin | ☐ |
+| H2 | N scans the on-screen QR with his phone | Lands on Club 1's gate (PIN still required — the QR is safe on public display) | ☐ |
 | H3 | (Mention, don't run) **Print till cards** | One click → 72-page print-to-PDF hand-out pack | ☐ |
+| H4 | **Reissue all club PINs** → type `PINS` | Every PIN in the table changes; Nick's open Club 1 till keeps working, but his PIN no longer opens a fresh sign-in — reprint required. Restore his access with the new PIN before continuing | ☐ |
 
 ---
 
@@ -141,14 +172,20 @@ console can edit or prune it.*
 
 | Capability | Tests |
 |---|---|
-| Gates: master / UW / club, wrong-passcode rejection, link ≠ login | P2–P3, B1–B3, C1–C3 |
-| Code creation: generate, paste-own, batch labels, duplicate rejection, 500 cap | B4–B6 |
-| Redemption: sloppy entry, dash formatting, ✅ + discount note, lock-to-club | C4–C5 |
-| Duplicate + race protection ("redeemed **at**") | C6, D1–D3 |
-| Live cross-panel updates | C7, D3, F3 |
-| Revoke / release-to-pool / re-redemption | E1–E4 |
-| NL-only powers: redeem-on-behalf, revoke-redeemed, delete, batch delete (keeps redeemed) | E5, F1–F4 |
-| Audit: completeness, attribution, deletions traced, export | G1–G4 |
-| Filters, search, CSV exports | B7–B8, G2–G4 |
+| Gates: master / UW / club, wrong-credential rejection, link ≠ login | P2–P3, B1–B3, C1–C3 |
+| Club credential is a unique 4-digit PIN; bulk reissue | A1–A2, C3, H1, H4 |
+| **A code belongs to one club, chosen at creation, one club per batch** | B4–B6, B8–B9 |
+| **A code is refused at any other club, both directions, changing nothing** | D2–D5 |
+| Code creation: paste-first default, 6-char no-hyphen generation, batch labels, duplicate rejection | B4, B7, B10 |
+| Redemption: free-text entry, no dash formatting, ✅ + discount note | C5–C6 |
+| Duplicate + race protection ("redeemed **at**") | C7, D5–D6 |
+| **Count cards follow the club filter** | B11–B12, F2 |
+| **Voucher checker: all four verdicts, non-destructive, hourly cap** | J1–J6 |
+| Club's unredeemed codes counted but never displayed | C4 |
+| Live cross-panel updates | C8, D3, D6, F4 |
+| Revoke / release (keeps the registration) / re-redemption at the right club | E1–E5 |
+| NL-only powers: redeem-on-behalf (no picker), revoke-redeemed, delete, batch delete (keeps redeemed) | E6, F1, F3–F5 |
+| Audit: completeness, attribution, checks logged, deletions traced, export | G1–G5, J7 |
+| Filters, search, CSV exports (Club column) | B11–B13, G2–G5 |
 | Print cards + QR round-trip | H1–H3 |
 | Sandbox isolation + reset | P1, I1 |
