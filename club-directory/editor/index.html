@@ -7,6 +7,24 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.23 — (06/08/2026) Fixed the reported symptom: editing the club card wrote
+         its green "edited by hand" line and changed nothing else — no card
+         update, no record change, nothing in My changes. Person edits worked
+         throughout, which is what made it look like a club-card problem.
+         Three faults in a chain, all mine.
+         · restoreFrom REPLACED ALL[club] with a new object. Everything the
+           current render is holding — the card pen's closure among them —
+           then points at an orphan, so an edit mutates an object nothing will
+           ever save. It mutates in place now.
+         · guardInfo fired on restore and rebuild, the two actions entitled to
+           replace the details wholesale and the two brought in to recover
+           from the thing it guards against. They pass a flag now.
+         · When the guard did block, it did not redraw. A block that leaves
+           the page showing what it tried to do is worse than no block: the
+           next edit is made against a record that is not the one on screen.
+           It redraws, always.
+         The club-details form also saves through ALL[club] rather than the
+         record it captured, so the class of fault cannot recur quietly.
   v1.22 — (06/08/2026) Club details can be rebuilt from the club's own
          submission, per club, master only. Not a backup being restored — the
          same three steps run again: what the club sent (which nothing in this
@@ -1173,7 +1191,7 @@
         firebase.database().ref(ROOT + '/provenance/' + club + '/changes')
           .set(prov.changes);
         saveStructure(club, 'Club details rebuilt from the submission (' +
-          heldAfter + ' fields)');
+          heldAfter + ' fields)', null, true);
       });
     }).catch(function (err) {
       NL.toast('Could not read the submissions: ' + ((err && err.message) || err), 'error');
@@ -1307,8 +1325,16 @@
       }).then(function (ok) {
         if (!ok) { return; }
         if (ctrl && ctrl.close) { ctrl.close(); }
-        ALL[club] = clone(was);
-        ALL[club].club = club;
+        /* Mutated, never replaced. Replacing it orphans every closure the
+           current render is holding — the card pen among them — so the page
+           carries on editing an object nothing will ever save. That is what
+           made a club-card edit write its green marker and change nothing
+           else. */
+        var live = ALL[club] || (ALL[club] = {});
+        Object.keys(live).forEach(function (k) { delete live[k]; });
+        var back = clone(was) || {};
+        Object.keys(back).forEach(function (k) { live[k] = back[k]; });
+        live.club = club;
         var prov = clone((ed.provenance || {})[club]) || {};
         var cur = PROV[club] || (PROV[club] = {});
         /* The journal is the one thing a restore must not roll back: it is the
@@ -1321,7 +1347,8 @@
         ['edits', 'changes', 'attention', 'merges'].forEach(function (k) {
           db.ref(ROOT + '/provenance/' + club + '/' + k).set(cur[k]);
         });
-        saveStructure(club, 'Restored to \u201c' + (ed.label || 'a frozen version') + '\u201d');
+        saveStructure(club, 'Restored to \u201c' + (ed.label || 'a frozen version') +
+          '\u201d', null, true);
       });
     }).catch(function (err) {
       NL.toast('Could not restore: ' + ((err && err.message) || err), 'error');
@@ -1820,7 +1847,12 @@
      tried it, which is the thing that was missing while working out what had
      happened. It restores from the pre-change snapshot rather than just
      declining, so the record in memory matches the record on the server. */
-  function guardInfo(club, what) {
+  function guardInfo(club, what, expected) {
+    /* A restore or a rebuild is entitled to replace the details wholesale,
+       including with fewer than there were — that is the point of it, and the
+       confirm has already said so. Blocking those was the guard firing on the
+       one action brought in to recover from the thing it guards against. */
+    if (expected) { return true; }
     var was = (BEFORE[club] || {}).info || {};
     var now = (ALL[club] || {}).info || {};
     /* Counting keys is not enough. Thirty keys all holding an empty string
@@ -1835,6 +1867,10 @@
     };
     if (held(was) < 5 || held(now) > 0) { return true; }
     ALL[club].info = clone(was);
+    /* Redraw, always. A block that leaves the page showing what it tried to
+       do is worse than no block: the next edit is made against a record that
+       is not the one on screen. */
+    draw(club);
     NL.alert('That would have wiped every club detail for ' + club + ' — ' +
       held(was) + ' fields down to none. It has been stopped and ' +
       'nothing was saved.\n\nThe action was: "' + what + '". Please tell Richard ' +
@@ -1844,8 +1880,8 @@
     return false;
   }
 
-  function saveStructure(club, what, undoOf) {
-    if (!guardInfo(club, what)) { return Promise.resolve(); }
+  function saveStructure(club, what, undoOf, expected) {
+    if (!guardInfo(club, what, expected)) { return Promise.resolve(); }
     NL.writeAudit('directory_structure',
       club + ' — ' + what + ' (' + (session.name || 'editor') + ')');
     logJournal(club, what, undoOf);
@@ -3236,6 +3272,10 @@
   }
 
   function editClubInfo(club, rec) {
+    /* Read through ALL[club] at save time rather than through the rec this
+       closure captured. Belt to the braces above: even if something does
+       replace the club object mid-session, the save lands on the record the
+       rest of the tool is using. */
     var info = rec.info || {};
     var wrap = document.createElement('div');
     INFO_FIELDS.forEach(function (group) {
@@ -3288,7 +3328,7 @@
              derived from the name here rather than edited alongside it. */
           next.noSponsor = !((next.stadiumSponsor || '').trim());
           if (!changed.length) { c.close(); return; }
-          rec.info = next;
+          (ALL[club] || rec).info = next;
           c.close();
           saveStructure(club, changed.length + ' club detail' +
             (changed.length === 1 ? '' : 's') + ' updated (' + changed.join(', ') + ')');
