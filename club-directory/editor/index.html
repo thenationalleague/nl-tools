@@ -7,6 +7,25 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.21 — (06/08/2026) Two fixes after Billericay Town's club card came back
+         empty — every ground, address, contact and social field gone, while
+         the people on the same club were untouched.
+         The cause is not yet found, so this makes it loud rather than
+         silent. A save that would take a club from five or more held details
+         to none is refused, the record is restored from the pre-change
+         snapshot, and the message names the action that tried it — which is
+         the thing that was missing while working out what had happened. It
+         counts values rather than keys: thirty fields all holding an empty
+         string renders exactly the same blank card as thirty fields that have
+         gone, and the first cut of this guard waved that straight through.
+         An empty card now says so, instead of rendering nothing underneath
+         correction boxes still describing fields that are no longer there.
+         Separately: the club-details form used Brackley Town's real ground,
+         town, county, postcode, station and switchboard as placeholder text.
+         On an empty form those read as entered data — on a form somebody
+         opens precisely because they are unsure what is held, that is the
+         worst thing to show. Every placeholder now starts "e.g." and none is
+         a real club.
   v1.20 — (06/08/2026) Frozen versions. Undo protects a change; this protects
          the project. A master can freeze the whole directory — every club,
          every person, and the provenance explaining how it got that way — and
@@ -965,6 +984,7 @@
     wireEditing(name);
     markProvenance(name);
     markAttention(name);
+    markInfoMissing(name, rec);
     markInfoFlags(name, rec);
     markInfoChanges(name, rec);
     markEdits(name);
@@ -1663,7 +1683,40 @@
      still confirm — a removal is the one act where the thing you are about to
      lose is on screen in front of you, and a confirm is cheaper than finding
      the undo afterwards. */
+  /* A club that held a stadium, an address and six social accounts does not
+     legitimately end up holding none of them. Nothing in this tool is
+     supposed to be able to do that, and yet Billericay Town's card emptied
+     itself. Until the cause is found this refuses the write and says so,
+     which turns a silent loss into a visible one — and names the action that
+     tried it, which is the thing that was missing while working out what had
+     happened. It restores from the pre-change snapshot rather than just
+     declining, so the record in memory matches the record on the server. */
+  function guardInfo(club, what) {
+    var was = (BEFORE[club] || {}).info || {};
+    var now = (ALL[club] || {}).info || {};
+    /* Counting keys is not enough. Thirty keys all holding an empty string
+       renders exactly the same blank card as thirty keys that have gone, and
+       the first version of this guard waved that straight through. What
+       matters is how much is actually held. noSponsor is excluded because it
+       is a derived boolean and is always present. */
+    var held = function (o) {
+      return Object.keys(o).filter(function (k) {
+        return k !== 'noSponsor' && String(o[k] == null ? '' : o[k]).trim() !== '';
+      }).length;
+    };
+    if (held(was) < 5 || held(now) > 0) { return true; }
+    ALL[club].info = clone(was);
+    NL.alert('That would have wiped every club detail for ' + club + ' — ' +
+      held(was) + ' fields down to none. It has been stopped and ' +
+      'nothing was saved.\n\nThe action was: "' + what + '". Please tell Richard ' +
+      'exactly what you had just done, because this should not be possible.',
+      { title: 'Stopped — that would have emptied the club details' });
+    NL.writeAudit('directory_guard', club + ' — blocked an info wipe during: ' + what);
+    return false;
+  }
+
   function saveStructure(club, what, undoOf) {
+    if (!guardInfo(club, what)) { return Promise.resolve(); }
     NL.writeAudit('directory_structure',
       club + ' — ' + what + ' (' + (session.name || 'editor') + ')');
     logJournal(club, what, undoOf);
@@ -2642,6 +2695,23 @@
      is precisely the one that will not render as a link, so these go at the
      head of the card as a short list. The pen underneath opens the form where
      each one is fixed. */
+  /* An empty card used to render as an empty card — no facts, no explanation,
+     and the flag and correction boxes above it still describing fields that
+     were no longer there. Saying it plainly is the difference between "this
+     club has not sent us much" and "something has gone wrong here". */
+  function markInfoMissing(club, rec) {
+    var card = document.getElementById('cdCard');
+    if (!card || Object.keys((rec && rec.info) || {}).length) { return; }
+    var box = document.createElement('div');
+    box.className = 'ed-infoflags';
+    box.innerHTML = '<b>No club details are held for ' + esc(club) + '</b>' +
+      '<p style="margin:6px 0 0">No ground, address, contact or social accounts \u2014 ' +
+      'the whole card is empty. If this club definitely sent them, do not re-type ' +
+      'them from memory: tell Richard, because they should still be recoverable ' +
+      'from what the club submitted.</p>';
+    card.insertBefore(box, card.firstChild);
+  }
+
   function markInfoFlags(club, rec) {
     var state = flagState(club).filter(function (i) { return i.f.field === 'info'; });
     var settled = state.filter(function (i) { return i.settled; });
@@ -2963,28 +3033,35 @@
      facts are composites — the address is five fields, capacity is two, the
      station is two — so editing them in place means either editing a rendered
      sentence or splitting the display, and both are worse than a form. */
+  /* Placeholders are examples of SHAPE, never of content, and they say so.
+     These used to be Brackley Town's actual ground, town, county, postcode,
+     nearest station and switchboard — a real club's real details sitting in
+     the empty boxes of every other club's form, where they read as entered
+     data rather than as a hint. On a form somebody opens precisely because
+     they are unsure what is held, that is the worst possible thing to show.
+     Every one now starts "e.g." and none of them is a real club. */
   var INFO_FIELDS = [
     ['Ground', [
-      ['stadium', 'Stadium (official)', 'St. James Park'],
+      ['stadium', 'Stadium (official)', 'e.g. Riverside Park'],
       ['stadiumSponsor', 'Stadium (sponsored)', 'Leave blank if there is no sponsor'],
-      ['capacity', 'Capacity', '3500'],
-      ['seated', 'Of which seated', '669'],
-      ['pitchDims', 'Pitch dimensions', '101m x 70m'],
-      ['pitchType', 'Pitch type', 'Grass']
+      ['capacity', 'Capacity', 'e.g. 3500'],
+      ['seated', 'Of which seated', 'e.g. 669'],
+      ['pitchDims', 'Pitch dimensions', 'e.g. 101m x 70m'],
+      ['pitchType', 'Pitch type', 'e.g. Grass']
     ]],
     ['Address', [
-      ['addr1', 'Address line 1', 'Churchill Way'],
+      ['addr1', 'Address line 1', 'e.g. Stadium Way'],
       ['addr2', 'Address line 2', ''],
-      ['town', 'Town', 'Brackley'],
-      ['county', 'County', 'Northamptonshire'],
-      ['postcode', 'Postcode', 'NN13 7EJ'],
-      ['countyFA', 'County FA', 'Northamptonshire FA'],
-      ['station', 'Nearest station', 'Banbury'],
-      ['stationDistance', 'Distance (miles)', '10.5']
+      ['town', 'Town', 'e.g. Anytown'],
+      ['county', 'County', 'e.g. Blankshire'],
+      ['postcode', 'Postcode', 'e.g. AB1 2CD'],
+      ['countyFA', 'County FA', 'e.g. Blankshire FA'],
+      ['station', 'Nearest station', 'e.g. Anytown Central'],
+      ['stationDistance', 'Distance (miles)', 'e.g. 1.5']
     ]],
     ['Contact', [
-      ['phone', 'Switchboard', '01280 704077'],
-      ['mainEmail', 'Main email', 'secretary@example.co.uk']
+      ['phone', 'Switchboard', 'e.g. 01234 567890'],
+      ['mainEmail', 'Main email', 'e.g. secretary@example.co.uk']
     ]],
     ['Sponsors', [
       ['spClub', 'Club sponsor', ''],
@@ -2995,7 +3072,7 @@
       ['spExtra', 'Other', '']
     ]],
     ['Website and social', [
-      ['website', 'Website', 'www.example.co.uk'],
+      ['website', 'Website', 'e.g. www.example.co.uk'],
       ['x', 'X', 'https://x.com/...'],
       ['facebook', 'Facebook', 'https://www.facebook.com/...'],
       ['instagram', 'Instagram', 'https://www.instagram.com/...'],
