@@ -7,6 +7,24 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.25 — (06/08/2026) THE club-card bug, found properly this time.
+         Editing a club-card field produced the green "edited by hand" line and
+         saved nothing: card unchanged, record unchanged, nothing in My
+         changes, no way back. People edits worked throughout.
+         RTDB rejects an undefined value by THROWING, synchronously, not by
+         rejecting a promise. logEdit built its entry from the `from` of any
+         previous edit to the same field, and an entry whose `from` had been
+         dropped on write made that undefined — so the second edit of a field
+         threw, taking the record write, the journal entry and the modal close
+         with it, having already set the marker in memory. Every value is
+         coerced now, and the write reports a failure rather than swallowing
+         it.
+         And the reason this took hours rather than minutes: nothing in a
+         browser tells you a click handler died. Uncaught errors and unhandled
+         rejections now surface as a message naming the fault and pointing at
+         My changes. It cannot make the tool correct; it can stop it being
+         quietly wrong, which is the difference between a bug reported
+         accurately and one reported as "something's broken".
   v1.24 — (06/08/2026) Two things Richard spotted.
          Email addresses were wrapping onto two and three lines, on the one
          column people read character by character. 1180px was a measure for
@@ -770,6 +788,37 @@
   var ROOT = NLGate.ROOT;
   var ALL = {}, PROV = {}, names = [], session = null, current = '';
   var PUBLISHED_AT = 0;
+
+  /* Nothing in a browser tells you a click handler died. Today an exception
+     inside the club-details save took everything after it with it — the
+     record write, the journal entry, the modal closing — and the only sign
+     was a marker for a change that had not happened. The tool looked like it
+     had a data bug for several hours because a fault had no way of reaching
+     the person in front of it.
+
+     So every uncaught error and every unhandled rejection says so. It cannot
+     make the tool correct, but it can stop it being quietly wrong, which is
+     the difference between a bug that gets reported accurately and one that
+     gets reported as "something's broken". */
+  window.addEventListener('error', function (e) {
+    reportFault(e && e.error && e.error.message ? e.error.message : (e && e.message));
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e && e.reason;
+    reportFault(r && r.message ? r.message : String(r));
+  });
+
+  var lastFault = 0;
+  function reportFault(msg) {
+    if (!msg) { return; }
+    var now = Date.now();
+    if (now - lastFault < 4000) { return; }   /* one message, not a cascade */
+    lastFault = now;
+    try {
+      NL.toast('Something went wrong and your last action may not have saved: ' +
+        msg + ' \u2014 check "My changes" before carrying on.', 'error');
+    } catch (x) { /* the reporter must never be the thing that fails */ }
+  }
 
   NLGate.ensure({
     title: 'Directory Editor',
@@ -2648,14 +2697,26 @@
     var prov = PROV[club] || (PROV[club] = {});
     var all = editList(club);
     var had = all.filter(function (e) { return e.path === path; })[0];
-    var base = had ? had.from : from;
+    /* Never undefined. RTDB rejects an undefined value by THROWING, not by
+       rejecting a promise, so one of these in the object took the whole click
+       handler down with it — after the marker had been set in memory and
+       before the save ran. The result was a green "edited by hand" line over a
+       record that had not changed, no journal entry, and no way back. An
+       entry whose `from` was absent (a null dropped by RTDB on write) was
+       enough to trigger it on the NEXT edit of the same field. */
+    var str = function (v) { return String(v == null ? '' : v); };
+    var base = str(had ? had.from : from);
+    from = str(from); to = str(to);
     var edits = all.filter(function (e) { return e.path !== path; });
-    if (String(to).trim() !== String(base == null ? '' : base).trim()) {
+    if (to.trim() !== base.trim()) {
       edits.push({ path: path, from: base, to: to,
         by: session.name || 'editor', at: Date.now() });
     }
     prov.edits = edits;
-    firebase.database().ref(ROOT + '/provenance/' + club + '/edits').set(edits);
+    firebase.database().ref(ROOT + '/provenance/' + club + '/edits').set(edits)
+      .catch(function (err) {
+        NL.toast('Could not record that edit: ' + ((err && err.message) || err), 'error');
+      });
   }
 
   /* ------------------------------------------------------- provenance */
