@@ -7,7 +7,26 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
-  v1.25 — (06/08/2026) THE club-card bug, found properly this time.
+  v1.26 — (06/08/2026) THE club-card bug, actually found. Every explanation
+         before this was wrong.
+         The undo patch keyed its edits and changes diff BY PATH — and a path
+         is "info/stadium" or "people/p3k9/roles/0/title". RTDB refuses a key
+         containing a slash and refuses it by THROWING, synchronously, inside
+         logJournal, which runs before the record is written. logEdit had
+         already fired. So: a green "edited by hand" marker, a record that
+         never changed, no journal entry to undo from, and nothing on screen
+         to say why. It affected every save that touched a marker, which is
+         every save.
+         The diff is a list carrying the path as a field now. A person with no
+         id also fell back to "#" + index, and # is illegal in a key too.
+         The harness stub did not validate keys, which is exactly how a diff
+         keyed on "info/stadium" passed every test here while failing on every
+         save in production. It validates now.
+         And a save that fails is no longer a three-second toast. It is a
+         sticky red banner naming the fault and saying the screen no longer
+         matches the database — because "it didn't save" is not a report
+         anybody can act on.
+  v1.25 — (06/08/2026) An earlier attempt at the same bug.
          Editing a club-card field produced the green "edited by hand" line and
          saved nothing: card unchanged, record unchanged, nothing in My
          changes, no way back. People edits worked throughout.
@@ -447,6 +466,22 @@
 
   /* The journal, in a modal. One line per act: what happened, then the club,
      the time and — for a master looking at everyone's — who did it. */
+  /* Sticky, red, and it does not go away on its own. */
+  .ed-fail {
+    position: sticky; top: 44px; z-index: 60;
+    margin: 0; padding: 14px clamp(14px, 3vw, 28px);
+    background: var(--red-light); border-bottom: 3px solid var(--red);
+    font-size: var(--text-sm); color: var(--text);
+  }
+  .ed-fail b { color: var(--red); font-variation-settings: 'wght' 800; }
+  .ed-fail p { margin: 5px 0 0; }
+  .ed-fail__why {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: var(--text-xs); color: var(--red);
+    overflow-wrap: anywhere;
+  }
+  .ed-fail button { margin-top: 9px; }
+
   .ed-jrnl__tabs { display: flex; gap: 8px; margin: 0 0 12px; }
   .ed-jrnl__list { margin: 10px 0 0; padding: 0; list-style: none; }
   .ed-jrnl__row {
@@ -1579,7 +1614,9 @@
 
   function byId(list) {
     var m = {};
-    (list || []).forEach(function (p, i) { m[(p && p.id) || ('#' + i)] = { p: p, i: i }; });
+    /* 'i' + index, not '#' + index: # is one of the characters RTDB refuses
+       in a key, and these become keys under undo/<club>/<id>/people. */
+    (list || []).forEach(function (p, i) { m[(p && p.id) || ('i' + i)] = { p: p, i: i }; });
     return m;
   }
   function byPath(list) {
@@ -1619,15 +1656,22 @@
       out.signedOff = { before: a.signedOff || null, after: b.signedOff || null };
     }
     /* The markers move with the thing they describe, or an undone edit leaves
-       a green chip behind claiming a change that is no longer there. Keyed by
-       path so one row's marker can go back without disturbing another's. */
+       a green chip behind claiming a change that is no longer there.
+
+       A LIST, carrying the path as a field. The first version used the path
+       as the key — and a path is "info/stadium" or "people/p3k9/roles/0/title",
+       which RTDB refuses outright: a key may not contain a slash. It threw
+       synchronously inside logJournal, before the record was written, having
+       already left the green marker behind. That is the whole of the
+       club-card bug: a marker for a change that never saved, no journal entry
+       to undo it from, and nothing on screen to say why. */
     ['edits', 'changes'].forEach(function (kind) {
-      var X = byPath(a[kind]), Y = byPath(b[kind]), d = {};
+      var X = byPath(a[kind]), Y = byPath(b[kind]), d = [];
       keysOf(X, Y).forEach(function (path) {
         if (same(X[path], Y[path])) { return; }
-        d[path] = { before: X[path] || null, after: Y[path] || null };
+        d.push({ path: path, before: X[path] || null, after: Y[path] || null });
       });
-      if (keysOf(d).length) { out[kind] = d; }
+      if (d.length) { out[kind] = d; }
     });
     return out;
   }
@@ -1663,9 +1707,9 @@
     ['edits', 'changes'].forEach(function (kind) {
       if (!patch[kind]) { return; }
       var cur = NLDirectory.arr(prov[kind]).slice();
-      Object.keys(patch[kind]).forEach(function (path) {
-        var d = patch[kind][path];
-        cur = cur.filter(function (e) { return e.path !== path; });
+      NLDirectory.arr(patch[kind]).forEach(function (d) {
+        if (!d || !d.path) { return; }
+        cur = cur.filter(function (e) { return e.path !== d.path; });
         if (d.before) { cur.push(clone(d.before)); }
       });
       prov[kind] = cur;
@@ -1952,10 +1996,42 @@
       club + ' — ' + what + ' (' + (session.name || 'editor') + ')');
     logJournal(club, what, undoOf);
     return firebase.database().ref(ROOT + '/clubs/' + club).set(ALL[club])
-      .then(function () { NL.toast(what, 'success'); draw(club); })
+      .then(function () { clearFail(); NL.toast(what, 'success'); draw(club); })
       .catch(function (err) {
-        NL.toast('Could not save: ' + ((err && err.message) || err), 'error');
+        /* A save that did not happen is not a three-second toast. It is the
+           single most important thing on the screen: the page is now showing
+           something the database does not hold, and every further edit is
+           being made against a record that is not the one being saved. It
+           stays until it is dismissed, and it names the fault, because "it
+           didn't save" is not a report anybody can act on. */
+        showFail(club, what, (err && err.message) || String(err));
       });
+  }
+
+  function clearFail() {
+    var b = document.getElementById('edFail');
+    if (b) { b.remove(); }
+  }
+
+  function showFail(club, what, msg) {
+    clearFail();
+    var box = document.createElement('div');
+    box.id = 'edFail';
+    box.className = 'ed-fail';
+    box.innerHTML =
+      '<b>That did not save.</b>' +
+      '<p>' + esc(club) + ' \u2014 ' + esc(what) + '</p>' +
+      '<p class="ed-fail__why">' + esc(msg) + '</p>' +
+      '<p>What you see on screen is not what the database holds. Reload the ' +
+      'page before doing anything else, and send this message to Richard.</p>';
+    var btn = document.createElement('button');
+    btn.className = 'btn btn--sm btn--ghost';
+    btn.type = 'button';
+    btn.textContent = 'Reload the page';
+    btn.addEventListener('click', function () { location.reload(); });
+    box.appendChild(btn);
+    document.getElementById('app').insertBefore(box, document.getElementById('app').firstChild);
+    box.scrollIntoView({ block: 'center' });
   }
 
   /* Ids look like the ones the submission form mints — 'p' plus base-36 — so
