@@ -7,6 +7,21 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.20 — (06/08/2026) Frozen versions. Undo protects a change; this protects
+         the project. A master can freeze the whole directory — every club,
+         every person, and the provenance explaining how it got that way — and
+         restore a club from it later.
+         Two guarantees, both in the rules rather than here, because a safety
+         net a page can decide to ignore is not one. Only a master may create
+         one, so an editor cannot touch the thing that exists to survive an
+         editor. And it is write-once: there is no parent write grant, only a
+         per-edition rule requiring the key to be empty, so nobody — master
+         included — can overwrite or delete one. You supersede an edition by
+         taking another.
+         Restoring is per club and loud about what it discards. Putting all 72
+         back with one button is the footgun already removed from undo, and
+         the realistic recovery is one club anyway. A restore goes through
+         saveStructure, so it lands in the journal and can itself be undone.
   v1.19 — (05/08/2026) A Publish button, and a published copy behind it.
          The reader read the directory itself and decided in the browser what
          not to show — unsigned clubs greyed out, a not-for-publication
@@ -660,6 +675,7 @@
     <span class="ed-top__t">Directory Editor</span>
     <select class="ed-pick" id="pick" aria-label="Choose a club"></select>
     <span class="ed-top__who" id="who"></span>
+    <button class="ed-out" id="editions" type="button" hidden>Versions</button>
     <button class="ed-out ed-out--go" id="publish" type="button">Publish</button>
     <button class="ed-out" id="changes" type="button">My changes</button>
     <button class="ed-out" id="recheck" type="button" hidden>Re-check all</button>
@@ -763,6 +779,10 @@
     if (session.role !== 'admin') { return; }
     $('recheck').hidden = false;
     $('recheck').addEventListener('click', runRecheck);
+    /* Master only, and enforced in the rules as well as here — an editor must
+       not be able to touch the thing that exists to survive an editor. */
+    $('editions').hidden = false;
+    $('editions').addEventListener('click', showEditions);
   }
 
   function runRecheck() {
@@ -1008,6 +1028,154 @@
       }).filter(function (i) { return i > -1; })[0];
       if (roleIdx != null) { row.dataset.ridx = roleIdx; }
       addPen(row, locked, club, person, roleIdx);
+    });
+  }
+
+  /* -------------------------------------------------------------- editions
+     Undo protects a change. This protects the project.
+
+     An edition is the whole directory, frozen: every club, every person, and
+     the provenance that explains how it got that way. Taken before handing
+     the tool to somebody new, and again when the League agrees a version is
+     the version. It is the answer to "what did this look like in August",
+     which is a question nobody asks until they very much need to.
+
+     Two rules do the work, and both are in the rules file rather than here,
+     because a safety net a page can decide to ignore is not one:
+
+       · Only a master may create one. An editor must not be able to touch the
+         thing that exists to survive an editor.
+       · Write-once. There is no parent write grant, only a per-edition rule
+         requiring the key to be empty — so nobody, master included, can
+         overwrite or delete an edition. You supersede one by making another.
+
+     Restoring is per club. Putting all 72 back at once is available and loud,
+     but the realistic recovery is "Chester has gone wrong, put Chester back",
+     and a single button that silently discards a fortnight is the footgun we
+     already took out of undo. A restore goes through saveStructure like any
+     other change, so it lands in the journal and can itself be undone. */
+  function editionsList() {
+    return firebase.database().ref(ROOT + '/editions').once('value').then(function (s) {
+      var v = s.val() || {};
+      return Object.keys(v).map(function (k) {
+        var e = v[k] || {};
+        return { id: k, at: e.at || 0, by: e.by || 'unknown', label: e.label || '',
+                 clubs: Object.keys(e.clubs || {}).length };
+      }).sort(function (a, b) { return b.at - a.at; });
+    });
+  }
+
+  function takeEdition() {
+    NL.prompt('Copies all ' + names.length + ' clubs exactly as they stand, with ' +
+      'their history. It cannot be changed or deleted afterwards \u2014 by anyone, ' +
+      'including you. Supersede it by taking another.\n\nGive it a name you will ' +
+      'recognise in six months.', {
+      title: 'Freeze the directory',
+      placeholder: 'e.g. Before the admin team started',
+      confirmText: 'Freeze it'
+    }).then(function (label) {
+      if (label === null) { return; }
+      var ref = firebase.database().ref(ROOT + '/editions').push();
+      var payload = { at: Date.now(), by: session.name || 'editor',
+        label: String(label || '').trim() || 'Untitled',
+        clubs: clone(ALL) || {}, provenance: clone(PROV) || {} };
+      NL.writeAudit('directory_edition', 'Froze ' + names.length + ' clubs as "' +
+        payload.label + '" (' + payload.by + ')');
+      return ref.set(payload).then(function () {
+        NL.toast('Frozen \u2014 ' + names.length + ' clubs', 'success');
+      });
+    }).catch(function (err) {
+      NL.toast('Could not freeze: ' + ((err && err.message) || err), 'error');
+    });
+  }
+
+  function showEditions() {
+    var body = document.createElement('div');
+    body.className = 'ed-jrnl';
+    body.innerHTML = '<p class="form-hint">Loading\u2026</p>';
+    var ctrl = NL.modal({
+      title: 'Frozen versions',
+      size: 'lg',
+      body: body,
+      buttons: [
+        { label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Freeze the directory now', className: 'btn--primary',
+          onClick: function (c) { c.close(); takeEdition(); } }
+      ]
+    });
+    editionsList().then(function (list) {
+      if (!list.length) {
+        body.innerHTML = '<p class="cd-empty">Nothing has been frozen yet. ' +
+          'Freezing takes a copy of all ' + names.length + ' clubs that nobody ' +
+          'can change afterwards \u2014 worth doing before anyone new starts editing.</p>';
+        return;
+      }
+      body.innerHTML = '<p class="form-hint">Each of these is the whole directory as ' +
+        'it stood at that moment. None of them can be altered. Restoring puts one ' +
+        'club back to how it was then, and lands in the journal like any other ' +
+        'change.</p><ul class="ed-jrnl__list">' + list.map(function (e) {
+        return '<li class="ed-jrnl__row">' +
+          '<div class="ed-jrnl__main">' +
+            '<span class="ed-jrnl__what">' + esc(e.label) + '</span>' +
+            '<span class="ed-jrnl__meta">' + esc(NL.formatDateTime(e.at)) + ' \u00b7 ' +
+              esc(e.by) + ' \u00b7 ' + e.clubs + ' clubs</span>' +
+          '</div>' +
+          '<button class="btn btn--sm btn--ghost" type="button" data-ed="' +
+            esc(e.id) + '">Restore\u2026</button>' +
+        '</li>';
+      }).join('') + '</ul>';
+      body.querySelectorAll('button[data-ed]').forEach(function (b) {
+        b.addEventListener('click', function () { restoreFrom(b.dataset.ed, ctrl); });
+      });
+    }).catch(function (err) {
+      body.innerHTML = '<p class="cd-empty">' + esc((err && err.message) || err) + '</p>';
+    });
+  }
+
+  function restoreFrom(id, ctrl) {
+    var club = current;
+    if (!club) { NL.toast('Open a club first', 'error'); return; }
+    firebase.database().ref(ROOT + '/editions/' + id).once('value').then(function (s) {
+      var ed = s.val();
+      if (!ed) { NL.toast('That version could not be read', 'error'); return; }
+      var was = (ed.clubs || {})[club];
+      if (!was) {
+        NL.alert(club + ' was not in that version, so there is nothing to put ' +
+          'back. Pick a club that existed when it was frozen.', { title: 'Not in that version' });
+        return;
+      }
+      var now = NLDirectory.arr((ALL[club] || {}).people).length;
+      var then = NLDirectory.arr(was.people).length;
+      NL.confirm('Put ' + club + ' back to "' + (ed.label || 'that version') + '"?', {
+        title: 'Restore ' + club,
+        variant: 'danger',
+        detail: 'It goes back to exactly how it stood on ' + NL.formatDate(ed.at) +
+          ' \u2014 ' + then + ' people, where it now has ' + now + '. Everything done ' +
+          'to this club since is discarded.\n\nOnly this club. The other ' +
+          (names.length - 1) + ' are untouched, and this lands in the journal so it ' +
+          'can itself be undone.',
+        confirmText: 'Restore ' + club
+      }).then(function (ok) {
+        if (!ok) { return; }
+        if (ctrl && ctrl.close) { ctrl.close(); }
+        ALL[club] = clone(was);
+        ALL[club].club = club;
+        var prov = clone((ed.provenance || {})[club]) || {};
+        var cur = PROV[club] || (PROV[club] = {});
+        /* The journal is the one thing a restore must not roll back: it is the
+           record that the restore happened, and of everything before it. */
+        cur.edits = NLDirectory.arr(prov.edits);
+        cur.changes = NLDirectory.arr(prov.changes);
+        cur.attention = NLDirectory.arr(prov.attention);
+        cur.merges = NLDirectory.arr(prov.merges);
+        var db = firebase.database();
+        ['edits', 'changes', 'attention', 'merges'].forEach(function (k) {
+          db.ref(ROOT + '/provenance/' + club + '/' + k).set(cur[k]);
+        });
+        saveStructure(club, 'Restored to \u201c' + (ed.label || 'a frozen version') + '\u201d');
+      });
+    }).catch(function (err) {
+      NL.toast('Could not restore: ' + ((err && err.message) || err), 'error');
     });
   }
 
