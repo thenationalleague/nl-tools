@@ -209,7 +209,14 @@
         /* Escape each title, then join with the entity. Escaping the joined
            string turns the separator's own ampersand into &amp;middot; and
            prints it as text. */
-        (titles.length ? titles.map(esc).join(' &middot; ') : '<em>No job title</em>') +
+        /* Silent where it is read, loud where it is worked on. To a club
+           looking themselves up, "No job title" is the League announcing a
+           gap in its own records against a named member of their staff — it
+           reads as a slight, and it is 21% of every role we hold. To an
+           editor it is the job. So the reader shows nothing and the editor
+           says it, on the same markup, decided by who is looking. */
+        (titles.length ? titles.map(esc).join(' &middot; ')
+          : (opts && opts.showGaps ? '<em>No job title</em>' : '')) +
       '</div>' +
       '<div>' + tag + (mail || '<span class="cd-row__quiet">' + quiet + '</span>') + '</div>' +
       '<div>' + (ph || (mail ? '' : '')) + '</div>' +

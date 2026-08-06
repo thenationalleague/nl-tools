@@ -7,6 +7,26 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.27 — (06/08/2026) Publish goes out whether or not a club has been read,
+         and the reader stops announcing our gaps.
+         Publishing only what was marked complete is the right rule for a
+         directory built at leisure and the wrong one for getting a usable
+         version in front of 72 clubs now. Everything has been through the
+         tidier, so an unchecked club is not raw — it is simply not yet read
+         by a person. What does not relax is the contact suppression: somebody
+         the club asked us to hold back is held back whether their club has
+         been checked or not, because that is their decision and not a state
+         of our work.
+         "No job title" is now editor-only. To a club looking themselves up it
+         is the League announcing a gap in its own records against a named
+         member of their staff — it reads as a slight, and it is 21% of every
+         role we hold. Silent where it is read, loud where it is worked on.
+         Also: the undo body is written BEFORE the entry is marked undoable,
+         and both writes are caught. The first cut set the flag, fired the
+         write and never looked again, so a failed write left an entry
+         offering a button with nothing behind it — "there is nothing held for
+         that change", which is true and useless. And an unhandled rejection
+         reached the global handler as "Script error.", naming nothing.
   v1.26 — (06/08/2026) THE club-card bug, actually found. Every explanation
          before this was wrong.
          The undo patch keyed its edits and changes diff BY PATH — and a path
@@ -416,15 +436,15 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=32">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=23">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=24">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
-<script src="/club-directory/_tidy.js?v=23"></script>
-<script src="/club-directory/_gate.js?v=23"></script>
-<script src="/club-directory/_directory.js?v=23"></script>
+<script src="/club-directory/_tidy.js?v=24"></script>
+<script src="/club-directory/_gate.js?v=24"></script>
+<script src="/club-directory/_directory.js?v=24"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -1107,7 +1127,7 @@
     if (location.hash !== '#' + encodeURIComponent(name)) {
       history.replaceState(null, '', '#' + encodeURIComponent(name));
     }
-    $('out').innerHTML = NLDirectory.renderClub(rec, { showHidden: true });
+    $('out').innerHTML = NLDirectory.renderClub(rec, { showHidden: true, showGaps: true });
     var crest = document.getElementById('cdCrest');
     if (crest) {
       crest.alt = name + ' crest'; crest.hidden = false;
@@ -1494,11 +1514,20 @@
     return out;
   }
 
+  /* Every club, checked or not. The first cut published only what had been
+     marked complete, which is the right rule for a directory being built at
+     leisure and the wrong one for getting a usable version in front of 72
+     clubs now. Everything has been through the tidier — the capitalisation,
+     the job titles naming two jobs, the club block — so an unchecked club is
+     not raw, it is simply not yet read by a person.
+     What does NOT relax is the contact suppression: somebody the club asked
+     us to hold back is held back whether their club has been checked or not,
+     because that is their decision and not a state of our work. */
   function buildPublished() {
-    var clubs = {}, pending = [], people = 0, held = 0;
+    var clubs = {}, pending = [], people = 0, held = 0, unchecked = 0;
     Object.keys(ALL).sort().forEach(function (name) {
       var rec = ALL[name] || {};
-      if (!signedOffBy(rec)) { pending.push(name); return; }
+      if (!signedOffBy(rec)) { unchecked++; }
       var list = NLDirectory.arr(rec.people);
       list.forEach(function (p) { people++; if (p.hideContact) { held++; } });
       clubs[name] = {
@@ -1507,15 +1536,14 @@
         people: list.map(publishablePerson)
       };
     });
-    return { clubs: clubs, pending: pending,
+    return { clubs: clubs, pending: pending, unchecked: unchecked,
              count: Object.keys(clubs).length, people: people, held: held };
   }
 
   function publishNow() {
     var built = buildPublished();
     if (!built.count) {
-      NL.alert('No club has been marked complete yet, so there is nothing to ' +
-        'publish. Mark a club complete and it becomes publishable.',
+      NL.alert('There are no clubs in the directory to publish.',
         { title: 'Nothing to publish' });
       return;
     }
@@ -1523,14 +1551,15 @@
     NL.confirm('Publish ' + built.count + ' club' + (built.count === 1 ? '' : 's') +
       ' to the directory?', {
       title: 'Publish',
-      detail: 'This replaces what readers see with the ' + built.count +
-        ' club' + (built.count === 1 ? '' : 's') + ' marked complete right now — ' +
+      detail: 'This replaces what readers see with all ' + built.count +
+        ' club' + (built.count === 1 ? '' : 's') + ' as they stand right now — ' +
         built.people + ' people, of whom ' + built.held + ' asked us to keep their ' +
         'contact details back. Those details are left out of the published copy ' +
         'entirely; the person is still listed.\n\n' +
-        (built.pending.length
-          ? built.pending.length + ' club' + (built.pending.length === 1 ? '' : 's') +
-            ' not yet marked complete will not appear.\n\n'
+        (built.unchecked
+          ? built.unchecked + ' of them ' + (built.unchecked === 1 ? 'has' : 'have') +
+            ' not been marked complete yet. They go out tidied but unread, which ' +
+            'is the point of publishing now rather than waiting.\n\n'
           : '') +
         (prev ? 'Last published ' + NL.formatDateTime(prev) + '.'
               : 'Nothing has been published before.'),
@@ -1746,13 +1775,38 @@
     /* Only for acts that could be undone. An undo of an undo is done by
        pressing Undo on the original again, not by stacking them. And an act
        that changed nothing measurable gets a journal line but no button —
-       there would be nothing for it to put back. */
-    if (!undoOf && patch && keysOf(patch).length) {
-      e.undoable = true;
-      e.touched = touchedBy(club, patch);
-      db.ref(ROOT + '/undo/' + club + '/' + ref.key).set(patch);
-    }
-    ref.set(e);
+       there would be nothing for it to put back.
+
+       The body is written FIRST and the flag set only once it has landed. The
+       first cut set undoable, fired the body write, and never looked at it
+       again: when that write failed the entry sat there offering an Undo
+       button with nothing behind it, and pressing it said "there is nothing
+       held for that change" — which is true, and useless. An entry now
+       promises an undo only if there is one.
+
+       Both writes are caught. An unhandled rejection here reached the global
+       handler as "Script error." and named nothing, which is the least
+       useful message a tool can produce. */
+    var body = (!undoOf && patch && keysOf(patch).length)
+      ? db.ref(ROOT + '/undo/' + club + '/' + ref.key).set(patch)
+          .then(function () { return true; })
+          .catch(function (err) {
+            NL.toast('That change was recorded but cannot be undone later: ' +
+              ((err && err.message) || err), 'error');
+            return false;
+          })
+      : Promise.resolve(false);
+
+    body.then(function (ok) {
+      if (ok) {
+        e.undoable = true;
+        e.touched = touchedBy(club, patch);
+      }
+      return ref.set(e);
+    }).catch(function (err) {
+      NL.toast('Could not record that change in the journal: ' +
+        ((err && err.message) || err), 'error');
+    });
     BEFORE[club] = now;
     return e;
   }
@@ -3533,7 +3587,7 @@
     $('out').innerHTML = Object.keys(byClub).sort().map(function (c) {
       return '<div class="cd-dept"><h3 class="cd-dept__h">' + esc(c) + '</h3><ul class="cd-rows">' +
         byClub[c].map(function (p) {
-          return NLDirectory.personRow(p, (NLDirectory.rolesOf(p)[0] || {}).section, { showHidden: true });
+          return NLDirectory.personRow(p, (NLDirectory.rolesOf(p)[0] || {}).section, { showHidden: true, showGaps: true });
         }).join('') + '</ul></div>';
     }).join('');
   }
