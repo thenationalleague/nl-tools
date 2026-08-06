@@ -7,6 +7,55 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.24 — (06/08/2026) Two things Richard spotted.
+         Email addresses were wrapping onto two and three lines, on the one
+         column people read character by character. 1180px was a measure for
+         prose and this is four columns of data; the wrap goes to 1480 on wide
+         screens and the email column takes the width the name and phone
+         columns did not need. The longest address in the directory, 44
+         characters, now sits on one line at 1280.
+         And a "hotnail.com" that nothing had ever flagged. A well-formed
+         address, no mismatch with the name, and mail to it goes nowhere. The
+         tidier now checks the domain against the mailbox providers a person
+         is likely to have and flags anything one or two letters off — paired
+         with a rule that costs nothing and removes the false positives: a
+         domain more than one person at the club uses is that club's domain,
+         and a typo is typed once. Plus endings that are never right at all.
+         Retrospective without a rebuild, because flags are re-derived on
+         every draw. Three across 870 addresses: hotnail.com at Hebburn Town,
+         chorleyfc.ocm at Chorley, email.com at Merthyr Town.
+  v1.23 — (06/08/2026) Fixed the reported symptom: editing the club card wrote
+         its green "edited by hand" line and changed nothing else — no card
+         update, no record change, nothing in My changes. Person edits worked
+         throughout, which is what made it look like a club-card problem.
+         Three faults in a chain, all mine.
+         · restoreFrom REPLACED ALL[club] with a new object. Everything the
+           current render is holding — the card pen's closure among them —
+           then points at an orphan, so an edit mutates an object nothing will
+           ever save. It mutates in place now.
+         · guardInfo fired on restore and rebuild, the two actions entitled to
+           replace the details wholesale and the two brought in to recover
+           from the thing it guards against. They pass a flag now.
+         · When the guard did block, it did not redraw. A block that leaves
+           the page showing what it tried to do is worse than no block: the
+           next edit is made against a record that is not the one on screen.
+           It redraws, always.
+         The club-details form also saves through ALL[club] rather than the
+         record it captured, so the class of fault cannot recur quietly.
+  v1.22 — (06/08/2026) Club details can be rebuilt from the club's own
+         submission, per club, master only. Not a backup being restored — the
+         same three steps run again: what the club sent (which nothing in this
+         tool can write to, so it is still their text whatever has happened
+         since), through the same deterministic tidier the bake used, with
+         every recorded hand edit replayed on top. A backup can be missing;
+         this cannot be, unless the submission is.
+         Only the details. People are never touched — they carry the admin
+         team's work and there is no version of this worth trading that for.
+         Offered in the empty-card notice, where the problem announces itself,
+         and in the details form for a field quietly lost rather than the lot.
+         Master only is enforced by the rules as well as the button: reading
+         the submissions node needs the master claim, so an editor's token
+         would be refused regardless.
   v1.21 — (06/08/2026) Two fixes after Billericay Town's club card came back
          empty — every ground, address, contact and social field gone, while
          the people on the same club were untouched.
@@ -330,15 +379,15 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=32">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=22">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=23">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=29"></script>
-<script src="/club-directory/_tidy.js?v=22"></script>
-<script src="/club-directory/_gate.js?v=22"></script>
-<script src="/club-directory/_directory.js?v=22"></script>
+<script src="/club-directory/_tidy.js?v=23"></script>
+<script src="/club-directory/_gate.js?v=23"></script>
+<script src="/club-directory/_directory.js?v=23"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -619,8 +668,8 @@
   @media (min-width: 861px) {
     .cd-row {
       grid-template-columns:
-        minmax(140px, 1.05fr) minmax(120px, 1.05fr) minmax(180px, 1.5fr)
-        minmax(105px, 0.65fr) minmax(150px, 1fr);
+        minmax(130px, 0.95fr) minmax(115px, 0.95fr) minmax(250px, 2.1fr)
+        minmax(110px, 0.65fr) minmax(140px, 0.9fr);
     }
     .ed-pills { grid-column: 5; grid-row: 1; padding-left: 4px; }
   }
@@ -1051,6 +1100,121 @@
     });
   }
 
+  /* ------------------------------------------------- rebuild from source
+     The club details, reconstructed rather than remembered.
+
+     Every ingredient survives independently of the directory, which is what
+     makes this possible at all:
+
+       · the club's own submission, at ops-club-contacts/submissions. Nothing
+         in this tool can write to it — the rules refuse — so it is the same
+         text the club typed, whatever has happened since.
+       · the tidier, which is deterministic. Running tidyInfo over that
+         submission produces exactly the corrections the original bake made,
+         because it is the same function over the same input.
+       · the hand edits, recorded in provenance with the value each one set.
+         Replaying them puts the League's own corrections back on top.
+
+     So "the original, with the changes applied" is not a backup being
+     restored, it is the same three steps run again. A backup can be missing;
+     this cannot be, unless the submission itself is.
+
+     Only the details. The people are not touched — they carry the admin
+     team's work, and there is no version of this worth trading that for.
+
+     Master only, and not merely by preference: reading the submissions node
+     needs the master claim since #738, so an editor's token would be refused
+     by the rules even if the button were there. */
+  var SUBS = null;
+
+  function loadSubs() {
+    if (SUBS) { return Promise.resolve(SUBS); }
+    return firebase.database().ref('app-data/ops-club-contacts/submissions')
+      .once('value').then(function (s) { SUBS = s.val() || {}; return SUBS; });
+  }
+
+  function submissionFor(club) {
+    var found = null;
+    Object.keys(SUBS || {}).forEach(function (t) {
+      var r = SUBS[t];
+      if (r && r.club === club) { found = r; }
+    });
+    return found;
+  }
+
+  function rebuildInfo(club) {
+    var rec = ALL[club];
+    if (!rec) { return; }
+    loadSubs().then(function () {
+      var sub = submissionFor(club);
+      if (!sub || !sub.info || !Object.keys(sub.info).length) {
+        NL.alert('No submission holding club details could be found for ' + club +
+          '. There is nothing to rebuild from \u2014 the details will have to be ' +
+          'asked for again.', { title: 'Nothing to rebuild from' });
+        return;
+      }
+      /* Step one and two: what they sent, through the same tidier the bake
+         used. The log is kept so the amber markers describe this rebuild
+         rather than the bake that is being replaced. */
+      var shim = { info: clone(sub.info) };
+      var fresh = [];
+      try {
+        NLTidy.tidyInfo(shim, function (path, from, to, kind) {
+          fresh.push({ path: path, from: from, to: to, kind: kind || 'case' });
+        });
+      } catch (e) { /* a tidier fault must not block a recovery */ }
+
+      /* Step three: the League's own corrections, back on top. */
+      var hand = editList(club).filter(function (e) {
+        return /^info\//.test(e.path || '');
+      });
+      hand.forEach(function (e) {
+        shim.info[e.path.replace(/^info\//, '')] = e.to;
+      });
+      shim.info.noSponsor = !((shim.info.stadiumSponsor || '').trim());
+
+      var heldNow = Object.keys(rec.info || {}).filter(function (k) {
+        return k !== 'noSponsor' && String((rec.info || {})[k] || '').trim() !== '';
+      }).length;
+      var heldAfter = Object.keys(shim.info).filter(function (k) {
+        return k !== 'noSponsor' && String(shim.info[k] || '').trim() !== '';
+      }).length;
+
+      NL.confirm('Rebuild the club details for ' + club + '?', {
+        title: 'Rebuild from the submission',
+        variant: heldNow > heldAfter ? 'danger' : undefined,
+        detail: 'Takes what ' + club + ' sent us, applies the same automatic ' +
+          'corrections as the original build, then replays the ' + hand.length +
+          ' hand ' + (hand.length === 1 ? 'edit' : 'edits') + ' recorded against ' +
+          'these details.\n\n' +
+          club + ' currently holds ' + heldNow + ' details. The rebuild holds ' +
+          heldAfter + '.\n\n' +
+          'Only the club\u2019s own details change. Nobody on the club is touched, ' +
+          'and this goes in the journal like any other change, so it can be undone.' +
+          (heldNow > heldAfter
+            ? '\n\nNote this is FEWER than it holds now, so something currently ' +
+              'there is not in the submission. Check before you accept it.'
+            : ''),
+        confirmText: 'Rebuild ' + club
+      }).then(function (ok) {
+        if (!ok) { return; }
+        rec.info = shim.info;
+        /* The amber markers belong to the values on screen, so the info ones
+           are replaced wholesale while every people marker is left alone. */
+        var prov = PROV[club] || (PROV[club] = {});
+        prov.changes = NLDirectory.arr(prov.changes).filter(function (c) {
+          return !/^info\//.test(c.path || '');
+        }).concat(fresh);
+        firebase.database().ref(ROOT + '/provenance/' + club + '/changes')
+          .set(prov.changes);
+        saveStructure(club, 'Club details rebuilt from the submission (' +
+          heldAfter + ' fields)', null, true);
+      });
+    }).catch(function (err) {
+      NL.toast('Could not read the submissions: ' + ((err && err.message) || err), 'error');
+    });
+  }
+
   /* -------------------------------------------------------------- editions
      Undo protects a change. This protects the project.
 
@@ -1178,8 +1342,16 @@
       }).then(function (ok) {
         if (!ok) { return; }
         if (ctrl && ctrl.close) { ctrl.close(); }
-        ALL[club] = clone(was);
-        ALL[club].club = club;
+        /* Mutated, never replaced. Replacing it orphans every closure the
+           current render is holding — the card pen among them — so the page
+           carries on editing an object nothing will ever save. That is what
+           made a club-card edit write its green marker and change nothing
+           else. */
+        var live = ALL[club] || (ALL[club] = {});
+        Object.keys(live).forEach(function (k) { delete live[k]; });
+        var back = clone(was) || {};
+        Object.keys(back).forEach(function (k) { live[k] = back[k]; });
+        live.club = club;
         var prov = clone((ed.provenance || {})[club]) || {};
         var cur = PROV[club] || (PROV[club] = {});
         /* The journal is the one thing a restore must not roll back: it is the
@@ -1192,7 +1364,8 @@
         ['edits', 'changes', 'attention', 'merges'].forEach(function (k) {
           db.ref(ROOT + '/provenance/' + club + '/' + k).set(cur[k]);
         });
-        saveStructure(club, 'Restored to \u201c' + (ed.label || 'a frozen version') + '\u201d');
+        saveStructure(club, 'Restored to \u201c' + (ed.label || 'a frozen version') +
+          '\u201d', null, true);
       });
     }).catch(function (err) {
       NL.toast('Could not restore: ' + ((err && err.message) || err), 'error');
@@ -1691,7 +1864,12 @@
      tried it, which is the thing that was missing while working out what had
      happened. It restores from the pre-change snapshot rather than just
      declining, so the record in memory matches the record on the server. */
-  function guardInfo(club, what) {
+  function guardInfo(club, what, expected) {
+    /* A restore or a rebuild is entitled to replace the details wholesale,
+       including with fewer than there were — that is the point of it, and the
+       confirm has already said so. Blocking those was the guard firing on the
+       one action brought in to recover from the thing it guards against. */
+    if (expected) { return true; }
     var was = (BEFORE[club] || {}).info || {};
     var now = (ALL[club] || {}).info || {};
     /* Counting keys is not enough. Thirty keys all holding an empty string
@@ -1706,6 +1884,10 @@
     };
     if (held(was) < 5 || held(now) > 0) { return true; }
     ALL[club].info = clone(was);
+    /* Redraw, always. A block that leaves the page showing what it tried to
+       do is worse than no block: the next edit is made against a record that
+       is not the one on screen. */
+    draw(club);
     NL.alert('That would have wiped every club detail for ' + club + ' — ' +
       held(was) + ' fields down to none. It has been stopped and ' +
       'nothing was saved.\n\nThe action was: "' + what + '". Please tell Richard ' +
@@ -1715,8 +1897,8 @@
     return false;
   }
 
-  function saveStructure(club, what, undoOf) {
-    if (!guardInfo(club, what)) { return Promise.resolve(); }
+  function saveStructure(club, what, undoOf, expected) {
+    if (!guardInfo(club, what, expected)) { return Promise.resolve(); }
     NL.writeAudit('directory_structure',
       club + ' — ' + what + ' (' + (session.name || 'editor') + ')');
     logJournal(club, what, undoOf);
@@ -2706,9 +2888,20 @@
     box.className = 'ed-infoflags';
     box.innerHTML = '<b>No club details are held for ' + esc(club) + '</b>' +
       '<p style="margin:6px 0 0">No ground, address, contact or social accounts \u2014 ' +
-      'the whole card is empty. If this club definitely sent them, do not re-type ' +
-      'them from memory: tell Richard, because they should still be recoverable ' +
-      'from what the club submitted.</p>';
+      'the whole card is empty. Do not re-type them from memory: what the club ' +
+      'sent is still held separately and can be rebuilt from it.</p>';
+    /* The recovery goes where the problem is announced. An editor seeing this
+       cannot press it — the rules refuse them the submissions node — so they
+       get the explanation and a reason not to start typing. */
+    if (session.role === 'admin' && !signedOffBy(rec)) {
+      var btn = document.createElement('button');
+      btn.className = 'btn btn--sm btn--primary';
+      btn.type = 'button';
+      btn.style.marginTop = '9px';
+      btn.textContent = 'Rebuild from the club\u2019s submission\u2026';
+      btn.addEventListener('click', function () { rebuildInfo(club); });
+      box.appendChild(btn);
+    }
     card.insertBefore(box, card.firstChild);
   }
 
@@ -3096,6 +3289,10 @@
   }
 
   function editClubInfo(club, rec) {
+    /* Read through ALL[club] at save time rather than through the rec this
+       closure captured. Belt to the braces above: even if something does
+       replace the club object mid-session, the save lands on the record the
+       rest of the tool is using. */
     var info = rec.info || {};
     var wrap = document.createElement('div');
     INFO_FIELDS.forEach(function (group) {
@@ -3126,6 +3323,11 @@
       body: wrap,
       buttons: [
         { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        /* Not only for an empty card. A field quietly lost, or a tidier fix
+           that landed after the build, both want the same three steps. */
+        (session.role === 'admin' ? { label: 'Rebuild from submission\u2026',
+          className: 'btn--ghost',
+          onClick: function (c) { c.close(); rebuildInfo(club); } } : null),
         { label: 'Save details', className: 'btn--primary', onClick: function (c) {
           var next = {}, changed = [];
           for (var k in info) { if (Object.prototype.hasOwnProperty.call(info, k)) { next[k] = info[k]; } }
@@ -3143,12 +3345,12 @@
              derived from the name here rather than edited alongside it. */
           next.noSponsor = !((next.stadiumSponsor || '').trim());
           if (!changed.length) { c.close(); return; }
-          rec.info = next;
+          (ALL[club] || rec).info = next;
           c.close();
           saveStructure(club, changed.length + ' club detail' +
             (changed.length === 1 ? '' : 's') + ' updated (' + changed.join(', ') + ')');
         } }
-      ]
+      ].filter(Boolean)
     });
   }
 
