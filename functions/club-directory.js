@@ -108,7 +108,23 @@ function pickHolder(cfg, code) {
       name: editors[hit].name || hit
     };
   }
-  if (cfg && cfg.reader && safeEqual(normCode(cfg.reader.code), code)) {
+  /* One code per club rather than one code for everybody. The directory is
+     going out to 72 clubs, and a single shared code cannot be revoked for one
+     of them, cannot say who has been in, and cannot be rotated without
+     telling all 72. Each entry is keyed by club so an audit line names the
+     club rather than "Reader". */
+  const readers = (cfg && cfg.readers) || {};
+  const rhit = Object.keys(readers).find((k) => {
+    const r = readers[k];
+    return r && !r.revoked && safeEqual(normCode(r.code), code);
+  });
+  if (rhit) {
+    return { role: "reader", key: "rd-" + rhit, name: readers[rhit].name || rhit };
+  }
+  /* The original single code still works, so nothing breaks while the 72 are
+     being issued. */
+  if (cfg && cfg.reader && !cfg.reader.revoked &&
+      safeEqual(normCode(cfg.reader.code), code)) {
     return { role: "reader", key: "reader", name: "Reader" };
   }
   return null;
@@ -229,9 +245,14 @@ exports.clubDirectoryAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
        meaningless anyway. */
     /* uid stays keyed on the editor, not the granted role, so a master's
        edits still attribute to them by name rather than to a shared admin. */
+    /* One uid per holder, so every write and every audit line resolves to a
+       person or a club. Readers used to share one; with a code each they get
+       an identity each. */
+    const uidFor = hit.key === "reader" ? "cd-reader"
+      : hit.role === "reader" ? "cd-" + hit.key
+        : "cd-ed-" + hit.key;
     const customToken = await admin.auth()
-      .createCustomToken("cd-" + (hit.key === "reader" ? "reader" : "ed-" + hit.key),
-        { dir: hit.role, dirName: hit.name });
+      .createCustomToken(uidFor, { dir: hit.role, dirName: hit.name });
 
     logger.info("clubDirectoryAuth: granted", { role: hit.role, key: hit.key });
     return grant({ ok: true, customToken, role: hit.role, name: hit.name });
