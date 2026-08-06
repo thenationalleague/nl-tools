@@ -1,5 +1,12 @@
 /*
   UW Promo Codes — shared runtime for the three standalone pages
+  Version: v3.0 (06/08/2026) — registered-to-a-club model. Every code is
+           assigned to exactly one club when it is created, and redeemTxn now
+           refuses a code presented at any other club. genCodes() drops the
+           XXXX-XXXX grouping (plain 6-char alphanumeric, no hyphen); club
+           credentials are 4-digit numeric PINs (newPin) instead of 6-char
+           alphanumeric passcodes — master/UW passcodes are unchanged. Added
+           rateLimit() for the till-side voucher checker.
   Version: v2.0 (23/07/2026) — pool model: codes are no longer created against
            a club (UW issues them to customers; a club claims one by redeeming
            it at the till). genCodes() prefix now optional (plain 6-char is the
@@ -17,9 +24,13 @@
     UWP.app / UWP.db()          named app + its database
     UWP.ref(path)               ref under app-data/uw-promo
     UWP.ensureAuth()            → Promise<user> (anonymous sign-in)
-    UWP.newPasscode()           6-char passcode (unambiguous alphabet)
+    UWP.newPasscode()           6-char passcode (unambiguous alphabet) — the
+                                master console and the UW partner dashboard
+    UWP.newPin(taken)           4-digit numeric PIN, unique against `taken` —
+                                club till credentials (typed on a phone)
     UWP.newToken()              14-char direct-link token
-    UWP.genCodes(n,prefix,set)  n unique codes "PREFIX-XXXXXX" not in `set`
+    UWP.genCodes(n,prefix,set)  n unique 6-char codes not in `set`
+    UWP.rateLimit(key,n,ms)     per-browser sliding-window gate (voucher check)
     UWP.audit(actor,label,action,fields)  append audit entry (server ts)
     UWP.STATUS / UWP.pillFor()  code status metadata → nl-brand .pill class
     UWP.fmt(ms) / UWP.ago(ms)   date-time / relative formatting (canon-backed)
@@ -64,12 +75,35 @@
   /* Unambiguous alphabet — no 0/O, 1/I/L — for anything a human retypes. */
   var CODE_ALPHA  = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
   var TOKEN_ALPHA = 'abcdefghjkmnpqrstuvwxyz23456789';
+  var PIN_ALPHA   = '0123456789';
 
   function randFrom(alpha, len) {
     var buf = new Uint32Array(len), out = '';
     (window.crypto || window.msCrypto).getRandomValues(buf);
     for (var i = 0; i < len; i++) out += alpha[buf[i] % alpha.length];
     return out;
+  }
+
+  /* Club till credential: a 4-digit numeric PIN, typed on a phone at the
+     point of sale.
+
+     Never starts with 0. A leading zero survives neither the access CSV
+     (Excel reads "0123" as the number 123) nor a hurried retype at the till,
+     and 9,000 PINs is still ample for 72 clubs.
+
+     `taken` is a map of PINs already issued. Uniqueness is enforced, not
+     hoped for: 72 clubs drawn from 9,000 collide about a quarter of the time
+     by the birthday bound, and a club signing in on its PIN alone (no link)
+     is resolved BY that PIN — so a duplicate would open the wrong club's
+     till. Master and UW keep the 6-character alphanumeric passcode; they are
+     typed once, on a laptop, by one person. */
+  function newPin(taken) {
+    taken = taken || {};
+    for (var i = 0; i < 20000; i++) {
+      var p = randFrom(PIN_ALPHA.slice(1), 1) + randFrom(PIN_ALPHA, 3);
+      if (!taken[p]) { taken[p] = true; return p; }
+    }
+    throw new Error('Could not find a free 4-digit PIN');
   }
 
   /* Normalise a code for storage-key matching and POS entry: uppercase,
@@ -79,16 +113,18 @@
     return String(s == null ? '' : s).toUpperCase().replace(/[^A-Z0-9]/g, '');
   }
 
-  /* n unique 8-char codes, grouped "XXXX-XXXX" for till readability
-     (optionally "PREFIX-XXXX-XXXX"), colliding with neither each other nor
-     the caller-supplied set of existing NORMALISED code strings. Matching is
-     on `norm`, so the dash never has to be typed. */
+  /* n unique 6-character codes (optionally "PREFIX-XXXXXX"), colliding with
+     neither each other nor the caller-supplied set of existing NORMALISED
+     code strings. No hyphen grouping: generated codes are 6 plain characters,
+     and codes UW supply themselves are whatever shape they arrive in.
+     Matching everywhere is on `norm`, so punctuation never has to be typed. */
+  var CODE_LEN = 6;
   function genCodes(n, prefix, existingSet) {
     var out = [], guard = 0;
     existingSet = existingSet || {};
     while (out.length < n && guard < n * 50) {
       guard++;
-      var c = (prefix ? prefix + '-' : '') + randFrom(CODE_ALPHA, 4) + '-' + randFrom(CODE_ALPHA, 4);
+      var c = (prefix ? prefix + '-' : '') + randFrom(CODE_ALPHA, CODE_LEN);
       var k = normCode(c);
       if (existingSet[k]) continue;
       existingSet[k] = true;
@@ -104,22 +140,66 @@
     revoked:  { label: 'Revoked',    pill: 'pill--rejected' }
   };
 
-  /* Pure transaction updater for a till redemption — the whole "code locks to
-     the club that redeems it" state machine, factored out so tests/uw-promo
-     can exercise it without Firebase. Transaction semantics: return the
-     record to commit, `undefined` to abort (someone got there first), or the
-     null back unchanged (local cache miss — the SDK retries with server data).
-     `ts` is injectable for tests; live callers omit it and get the server
-     timestamp placeholder. */
+  /* Pure transaction updater for a till redemption, factored out so
+     tests/uw-promo can exercise the state machine without Firebase.
+
+     As of v3.0 a code belongs to exactly one club from the moment it is
+     created, so this is the last line of enforcement for "redeemable only at
+     the club it is registered to": a code registered to Hartlepool that is
+     presented at Sutton aborts here even if the caller's pre-check somehow
+     let it through. Codes created before v3.0 carry no `club` and still lock
+     to whoever redeems them first (the old pool behaviour) — the master
+     console can register those to a club retrospectively.
+
+     Transaction semantics: return the record to commit, `undefined` to abort
+     (wrong club, or someone got there first), or the null back unchanged
+     (local cache miss — the SDK retries with server data). `ts` is injectable
+     for tests; live callers omit it and get the server timestamp
+     placeholder. */
   function redeemTxn(cur, club, actorId, ts) {
     if (cur === null) return cur;
     if (cur.status !== 'active') return;
+    if (cur.club && cur.club !== club.code) return;
     cur.status = 'redeemed';
     cur.club = club.code;
     cur.clubName = club.name;
     cur.redeemedAt = ts || firebase.database.ServerValue.TIMESTAMP;
     cur.redeemedBy = actorId || ('club:' + club.code);
     return cur;
+  }
+
+  /* Sliding-window gate, per browser, for the till-side voucher checker —
+     10 lookups an hour is plenty for "is this thing real?" and makes fishing
+     for live codes by hand tedious. It is deliberately client-side and
+     therefore defeatable (clearing storage resets it); the real deterrent is
+     that every check lands in the audit trail with the club's name on it.
+
+     Returns { ok, remaining, retryAt }. A permitted call is recorded as it is
+     granted, so callers must only invoke this when actually performing a
+     lookup. `now` is injectable for tests. */
+  var MEM_STORE = {};
+  function lsGet(key) {
+    try { if (window.localStorage) return window.localStorage.getItem(key); } catch (e) {}
+    return Object.prototype.hasOwnProperty.call(MEM_STORE, key) ? MEM_STORE[key] : null;
+  }
+  function lsSet(key, val) {
+    try { if (window.localStorage) { window.localStorage.setItem(key, val); return; } } catch (e) {}
+    MEM_STORE[key] = val;
+  }
+  function rateLimit(key, limit, windowMs, now) {
+    now = now || Date.now();
+    var hits = [];
+    try { hits = JSON.parse(lsGet(key) || '[]'); } catch (e) { hits = []; }
+    if (!Array.isArray(hits)) hits = [];
+    hits = hits.filter(function (t) { return typeof t === 'number' && now - t < windowMs; });
+    if (hits.length >= limit) {
+      var oldest = hits[0];
+      hits.forEach(function (t) { if (t < oldest) oldest = t; });
+      return { ok: false, remaining: 0, retryAt: oldest + windowMs };
+    }
+    hits.push(now);
+    lsSet(key, JSON.stringify(hits));
+    return { ok: true, remaining: limit - hits.length, retryAt: 0 };
   }
 
   function audit(actor, actorLabel, action, fields) {
@@ -175,9 +255,12 @@
     ensureAuth: ensureAuth,
     TS: function () { return firebase.database.ServerValue.TIMESTAMP; },
     newPasscode: function () { return randFrom(CODE_ALPHA, 6); },
+    newPin: newPin,
     newToken: function () { return randFrom(TOKEN_ALPHA, 14); },
     genCodes: genCodes,
+    CODE_LEN: CODE_LEN,
     normCode: normCode,
+    rateLimit: rateLimit,
     STATUS: STATUS,
     redeemTxn: redeemTxn,
     pillFor: function (status) {

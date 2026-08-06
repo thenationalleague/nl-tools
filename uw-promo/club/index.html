@@ -3,6 +3,18 @@
 <head>
 <!--
   UW Promo Codes — Club point-of-sale redemption page
+  Version: v3.0 (06/08/2026) — registered-to-a-club model. A code is created
+           against exactly one club, so this till only redeems codes
+           registered to THIS club: one registered elsewhere is refused by
+           name ("registered to Hartlepool United"), and the redeemTxn
+           transaction refuses it a second time server-side. Entry is now free
+           text — placeholder ***, no XXXX-XXXX auto-formatting, 64-character
+           limit — because generated codes are plain 6-character and UW's own
+           codes are whatever shape they arrive in. Club sign-in is a 4-digit
+           PIN. New at the foot of the page: **Check a code**, a read-only
+           lookup that says whether a code is genuine and whether/when it was
+           redeemed, capped at 10 lookups an hour and written to the NL audit
+           trail.
   Version: v2.5 (23/07/2026) — UW wordmark above "Redeem a code"; rejection
            dialog reworded "redeemed at [club]" (the fan redeems, at the club);
            list head now "Redeemed at your club".
@@ -86,6 +98,25 @@
      colour on every modern device, per the owner's preference. */
   .pos-result__icon { display: block; font-size: 46px; line-height: 1; text-align: center; margin-bottom: 10px; }
   .pos-result__note { font-size: 13px; color: var(--text-muted); text-align: center; line-height: 1.5; margin-top: 4px; }
+
+  /* Voucher checker — deliberately quieter than the till card above it. */
+  .checker { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 16px 18px; }
+  .checker__intro { font-size: 12px; color: var(--text-muted); line-height: 1.55; margin: 0 0 14px; }
+  .checker__row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .checker__input { flex: 1; min-width: 180px; font-family: var(--font); font-size: 15px;
+    font-weight: 700; font-variation-settings: 'wght' 700; letter-spacing: 0.12em; text-transform: uppercase;
+    padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); outline: none; }
+  .checker__input:focus { border-color: var(--primary); box-shadow: var(--focus-ring); }
+  .checker__out { margin-top: 14px; font-size: 13px; line-height: 1.55; }
+  .checker__out:empty { margin-top: 0; }
+  /* Outcome carries its meaning in the canon .pill, not a coloured card edge. */
+  .checker__card { border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--off-white); padding: 12px 14px; }
+  .checker__verdict { display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+    font-weight: 800; font-variation-settings: 'wght' 800; margin-bottom: 5px; }
+  .checker__meta { color: var(--text-muted); font-size: 12px; }
+  .checker__quota { margin-top: 10px; font-size: 11px; color: var(--text-muted); }
 </style>
 </head>
 <body>
@@ -97,7 +128,9 @@
     <div class="gate__title" id="gateTitle">Promo Codes</div>
     <div class="gate__sub" id="gateSub">Loading…</div>
     <div id="gateForm" style="display:none">
-      <input class="gate__input" id="gateInput" maxlength="6" placeholder="••••••" autocomplete="off" aria-label="Club passcode">
+      <!-- 4-digit PIN, but maxlength 6 so a club still holding a legacy
+           6-character passcode can sign in until its PIN is reissued. -->
+      <input class="gate__input" id="gateInput" maxlength="6" inputmode="numeric" placeholder="••••" autocomplete="off" aria-label="Club PIN">
       <div class="gate__err" id="gateErr" role="alert"></div>
       <button class="btn btn--primary" id="gateBtn" style="width:100%;justify-content:center;">Open</button>
     </div>
@@ -121,7 +154,7 @@
            onerror="this.onerror=null;this.style.display='none';">
       <div class="pos__title">Redeem a code</div>
       <div class="pos__sub">Enter the customer’s promo code exactly as shown.</div>
-      <input class="pos__input" id="posInput" maxlength="19" placeholder="••••-••••" autocomplete="off"
+      <input class="pos__input" id="posInput" maxlength="64" placeholder="***" autocomplete="off"
              autocapitalize="characters" spellcheck="false" aria-label="Promo code">
       <div><button class="btn btn--primary pos__btn" id="posBtn">Redeem</button></div>
       <div class="pos__msg" id="posMsg" role="alert" aria-live="polite"></div>
@@ -132,6 +165,23 @@
 
     <div class="list-head">Redeemed at your club</div>
     <div id="list"></div>
+
+    <!-- Voucher checker — read-only lookup, rate-limited, audited. Sits at the
+         foot of the page deliberately: redeeming is the job, checking is the
+         occasional "is this thing real?". -->
+    <div class="list-head">Check a code</div>
+    <div class="checker">
+      <p class="checker__intro">Look a code up without redeeming it — whether it’s genuine, which club
+        it’s registered to, and whether it has already been used. Checks are limited to
+        <strong>10 an hour</strong> and are recorded for the National League.</p>
+      <div class="checker__row">
+        <input class="checker__input" id="chkInput" maxlength="64" placeholder="***" autocomplete="off"
+               autocapitalize="characters" spellcheck="false" aria-label="Code to check">
+        <button class="btn btn--ghost" id="chkBtn">Check code</button>
+      </div>
+      <div class="checker__out" id="chkOut" role="status" aria-live="polite"></div>
+      <div class="checker__quota" id="chkQuota"></div>
+    </div>
   </div>
 </div>
 
@@ -165,14 +215,19 @@
     });
     return hit;
   }
+  /* Signing in on the PIN alone (no link) resolves the club BY that PIN, so
+     an ambiguous PIN must open nothing rather than guess: two clubs sharing
+     one would otherwise silently hand the till to whichever came last in the
+     object. The master console issues unique PINs, so this only fires on data
+     that predates that guarantee. */
   function findByPass(p) {
     p = (p || '').toUpperCase().trim();
     if (!p) return null;
-    var hit = null;
+    var hits = [];
     Object.keys(CONFIG || {}).forEach(function (k) {
-      if ((CONFIG[k].passcode || '').toUpperCase() === p) hit = withCode(k);
+      if ((CONFIG[k].passcode || '').toUpperCase() === p) hits.push(withCode(k));
     });
-    return hit;
+    return hits.length === 1 ? hits[0] : null;
   }
   function withCode(k) { var c = CONFIG[k]; return { code: k, name: c.name, division: c.division, passcode: c.passcode, token: c.token }; }
 
@@ -197,9 +252,9 @@
       logo.src = NL.clubs.crestUrl(linkClub.name, 'medium');
       NL.clubs.wireCrestImg(logo, linkClub.name);
       document.getElementById('gateTitle').textContent = linkClub.name;
-      document.getElementById('gateSub').textContent = 'Enter your club passcode to open the till.';
+      document.getElementById('gateSub').textContent = 'Enter your club PIN to open the till.';
     } else {
-      document.getElementById('gateSub').textContent = 'Enter your club passcode.';
+      document.getElementById('gateSub').textContent = 'Enter your club PIN.';
     }
     document.getElementById('gateForm').style.display = 'block';
     var inp = document.getElementById('gateInput'), err = document.getElementById('gateErr');
@@ -212,7 +267,7 @@
       } else {
         club = findByPass(inp.value);
       }
-      if (!club) { err.textContent = 'Passcode not recognised. Check with the NL media team.'; return; }
+      if (!club) { err.textContent = 'PIN not recognised. Check with the NL media team.'; return; }
       err.textContent = '';
       history.replaceState({}, '', location.pathname + '?c=' + encodeURIComponent(club.token) + (UWP.isTest ? '&env=test' : ''));
       enter(club);
@@ -261,21 +316,20 @@
 
   document.getElementById('posBtn').addEventListener('click', redeemEntered);
   posInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') redeemEntered(); });
-  /* Live-format the entry as XXXX-XXXX (dash groups of 4) so what staff see
-     matches the printed code. Purely cosmetic: matching is on normCode, so a
-     typed/omitted/pasted dash never breaks anything, and odd-shaped pasted
-     UW codes still match after regrouping. */
+  /* Free-text entry: generated codes are 6 plain characters and UW's own
+     codes arrive in whatever shape they arrive in, so there is no house
+     format to auto-insert any more. Uppercasing is the only tidy-up —
+     matching is on normCode, so spaces and punctuation never break anything. */
   posInput.addEventListener('input', function () {
-    var raw = UWP.normCode(posInput.value).slice(0, 16);
-    var grouped = raw.replace(/(.{4})(?=.)/g, '$1-');
-    if (posInput.value !== grouped) posInput.value = grouped;
+    var up = (posInput.value || '').toUpperCase();
+    if (posInput.value !== up) posInput.value = up;
     setMsg('');
   });
 
   function redeemEntered() {
     if (busy) return;
     var norm = UWP.normCode(posInput.value);
-    if (norm.length < 4) { setMsg('Enter the full code.', 'err'); return; }
+    if (norm.length < 3) { setMsg('Enter the full code.', 'err'); return; }
     busy = true;
     setMsg('Checking…', 'info');
     UWP.ensureAuth().then(function () {
@@ -290,6 +344,11 @@
         return;
       }
       if (rec.status === 'redeemed') { busy = false; alreadyRedeemed(rec); return; }
+      /* Registered to exactly one club since v3.0 — a code belonging to
+         another club is refused here by name, and refused again inside the
+         transaction if it somehow gets past this. Codes created before v3.0
+         carry no club and stay redeemable anywhere. */
+      if (rec.club && rec.club !== CLUB.code) { busy = false; wrongClub(rec); return; }
       attemptRedeem(id, rec);
     }).catch(function (err) {
       busy = false;
@@ -306,6 +365,16 @@
     });
   }
 
+  function wrongClub(rec) {
+    setMsg('', '');
+    NL.alert('<span class="pos-result__icon">❌</span>' +
+      'Code <span class="code-mono">' + esc(rec.code) + '</span> is registered to <strong>' +
+      esc(rec.clubName || 'another club') + '</strong>, so it can only be redeemed there. ' +
+      'It cannot be redeemed at ' + esc(CLUB.name) + '.', {
+      title: 'Wrong club', html: true
+    });
+  }
+
   /* Transaction so two tills can't claim the same code — whoever commits
      first wins; the loser sees the already-redeemed details. The updater is
      UWP.redeemTxn (pure, unit-tested in tests/uw-promo.test.mjs). */
@@ -317,6 +386,7 @@
       if (!res.committed) {
         var cur = res.snapshot && res.snapshot.val();
         if (cur && cur.status === 'redeemed') { alreadyRedeemed(cur); }
+        else if (cur && cur.club && cur.club !== CLUB.code) { wrongClub(cur); }
         else { setMsg('This code is no longer valid.', 'err'); }
         return;
       }
@@ -340,6 +410,10 @@
   }
 
   /* ── Redeemed list + stats ──────────────────────────────────────────── */
+  /* CODES is every code REGISTERED to this club (the ?club query), not just
+     the redeemed ones. Only redeemed codes are listed: the unredeemed ones
+     are counted but never printed, so nobody can read a live code off the
+     till screen and redeem it without a customer in front of them. */
   function rows() {
     return Object.keys(CODES).map(function (k) { var r = CODES[k]; r._id = k; return r; })
       .filter(function (r) { return r.status === 'redeemed'; })
@@ -348,12 +422,14 @@
 
   function render() {
     var list = rows();
+    var waiting = Object.keys(CODES).filter(function (k) { return CODES[k].status === 'active'; }).length;
     var dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
     var today = list.filter(function (r) { return (r.redeemedAt || 0) >= dayStart.getTime(); }).length;
 
     document.getElementById('stats').innerHTML =
       '<div class="stat stat--approved"><div class="stat__num">' + list.length + '</div><div class="stat__label">Codes redeemed</div></div>' +
-      '<div class="stat stat--info"><div class="stat__num">' + today + '</div><div class="stat__label">Today</div></div>';
+      '<div class="stat stat--info"><div class="stat__num">' + today + '</div><div class="stat__label">Today</div></div>' +
+      '<div class="stat"><div class="stat__num">' + waiting + '</div><div class="stat__label">Still to be redeemed</div></div>';
 
     var el = document.getElementById('list');
     if (!codesLoaded) { el.innerHTML = '<div class="empty-state"><div class="empty-state__text">Loading…</div></div>'; return; }
@@ -368,6 +444,97 @@
         '<div class="code-note">Redeemed ' + esc(UWP.fmt(r.redeemedAt)) + '</div></div>' +
         '<div>' + UWP.pillFor(r.status) + '</div></div>';
     }).join('');
+  }
+
+  /* ── Voucher checker ────────────────────────────────────────────────── */
+  /* A read-only "is this real, and has it been used?" lookup. Two guards:
+     10 lookups an hour per browser (UWP.rateLimit — client-side, so it slows
+     casual fishing rather than preventing it), and an audit entry for every
+     single check, with the club's name on it, which is the guard that
+     actually bites. */
+  var CHECK_LIMIT = 10, CHECK_WINDOW = 60 * 60 * 1000;
+  var chkInput = document.getElementById('chkInput'),
+      chkOut = document.getElementById('chkOut'),
+      chkQuota = document.getElementById('chkQuota'),
+      chkBusy = false;
+
+  function chkKey() { return 'uwPromoChecks:' + (UWP.isTest ? 'test:' : '') + (CLUB ? CLUB.code : '?'); }
+
+  function chkCard(pill, verdict, meta) {
+    chkOut.innerHTML = '<div class="checker__card">' +
+      '<div class="checker__verdict">' + pill + '<span>' + verdict + '</span></div>' +
+      (meta ? '<div class="checker__meta">' + meta + '</div>' : '') + '</div>';
+  }
+  function chkPlain(text) {
+    chkOut.innerHTML = '<div class="checker__card"><div class="checker__verdict"><span>' + text + '</span></div></div>';
+  }
+
+  chkInput.addEventListener('input', function () {
+    var up = (chkInput.value || '').toUpperCase();
+    if (chkInput.value !== up) chkInput.value = up;
+  });
+  chkInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') runCheck(); });
+  document.getElementById('chkBtn').addEventListener('click', runCheck);
+
+  function runCheck() {
+    if (chkBusy) return;
+    var norm = UWP.normCode(chkInput.value);
+    if (norm.length < 3) { chkPlain('Enter a code to check.'); return; }
+
+    var gate = UWP.rateLimit(chkKey(), CHECK_LIMIT, CHECK_WINDOW);
+    if (!gate.ok) {
+      // NL.timeAgo clamps future timestamps to "just now" — count forwards here.
+      var mins = Math.max(1, Math.ceil((gate.retryAt - Date.now()) / 60000));
+      chkPlain('Checking limit reached — ' + CHECK_LIMIT + ' checks an hour. Try again in ' +
+        mins + ' minute' + (mins === 1 ? '' : 's') + ', or redeem the code above to test it properly.');
+      chkQuota.textContent = '';
+      return;
+    }
+    chkQuota.textContent = gate.remaining + ' check' + (gate.remaining === 1 ? '' : 's') + ' left this hour.';
+
+    chkBusy = true;
+    chkPlain('Checking…');
+    UWP.ensureAuth().then(function () {
+      return UWP.ref('codes').orderByChild('norm').equalTo(norm).once('value');
+    }).then(function (s) {
+      chkBusy = false;
+      var val = s.val();
+      var typed = (chkInput.value || '').trim();
+      if (!val) {
+        chkCard('<span class="pill pill--rejected">Not recognised</span>',
+          'This is not a Utility Warehouse promo code.',
+          'Nothing in the system matches ' + esc(typed) + '. Check the customer has read it out correctly.');
+        logCheck(typed, 'not-recognised');
+        return;
+      }
+      var rec = val[Object.keys(val)[0]];
+      var mine = !rec.club || rec.club === CLUB.code;
+      var where = rec.clubName || 'another club';
+
+      if (rec.status === 'revoked') {
+        chkCard(UWP.pillFor('revoked'), 'This code has been cancelled and can no longer be redeemed.',
+          'Registered to ' + esc(where) + '. Contact the National League if that seems wrong.');
+      } else if (rec.status === 'redeemed') {
+        chkCard(UWP.pillFor('redeemed'), 'Already redeemed at ' + esc(where) + '.',
+          'Redeemed ' + esc(UWP.fmt(rec.redeemedAt)) + ' (' + esc(UWP.ago(rec.redeemedAt)) + ').');
+      } else if (mine) {
+        chkCard(UWP.pillFor('active'), 'Genuine, and not yet redeemed.',
+          'Registered to ' + esc(rec.clubName || CLUB.name) + ' — redeem it at the till above.');
+      } else {
+        chkCard(UWP.pillFor('active'), 'Genuine and unused, but registered to ' + esc(where) + '.',
+          'It can only be redeemed at ' + esc(where) + ', not at ' + esc(CLUB.name) + '.');
+      }
+      logCheck(rec.code || typed, rec.status + (mine ? '' : ' · registered to ' + where));
+    }).catch(function (err) {
+      chkBusy = false;
+      chkPlain('Could not check that code: ' + esc(err.message));
+    });
+  }
+
+  function logCheck(code, outcome) {
+    UWP.audit(actor(), CLUB.name, 'check', {
+      club: CLUB.code, clubName: CLUB.name, codes: code, detail: 'Checked → ' + outcome
+    });
   }
 })();
 </script>
