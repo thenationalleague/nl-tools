@@ -58,6 +58,7 @@ const API_BASE = 'https://multi-club-matches.football.web.gc.nationalleagueservi
 const COMP_IDS = [89, 373, 372];        // National, North, South
 const MAX_PAGES = 10;
 const IN_PLAY_MIN = 105;                // past this from KO, an unmarked match has finished
+const CUTOFF_MIN = 60;                  // predictions lock this long before kick-off
 const FALLBACK_SEASON_ID = 2026;
 
 /* Salt for the row hash. Public by necessity — the widget has to compute the
@@ -227,6 +228,30 @@ function buildPayload(users, predictions, matches, now) {
   return out;
 }
 
+/* The cutoff for every fixture, as epoch ms, for the security rules to compare
+   server time against.
+
+   The widget already refuses to submit after this moment, but that is a
+   courtesy: the rule was ".write": "auth != null", so anyone with devtools
+   could post a prediction once a match had kicked off — or once it had
+   finished. A cutoff the client owns is not a cutoff.
+
+   Written by this job because it already holds the fixture list and a
+   credential no browser has. A match with no entry here cannot be predicted at
+   all: the rule compares against a missing value and denies. That is the right
+   way round — a fixture added upstream in the last few minutes is briefly
+   unpredictable, rather than briefly unprotected. */
+function buildLocks(matches) {
+  const out = {};
+  for (const m of matches) {
+    const ko = koOf(m);
+    const md = matchdayKeyOf(m);
+    if (!ko || !md || !m.id) continue;
+    (out[md] || (out[md] = {}))[m.id] = ko.getTime() - CUTOFF_MIN * 60000;
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // IO
 // ---------------------------------------------------------------------------
@@ -328,17 +353,27 @@ async function main() {
 
   if (dryRun) {
     console.log(JSON.stringify(payload.season.rows.slice(0, 5), null, 2));
+    console.log('locks: ' + Object.keys(buildLocks(matches)).length + ' matchdays');
     console.log('dry run — nothing written');
     return;
   }
 
   await dbPut('leaderboard', payload, token);
   console.log('wrote leaderboard/ at ' + new Date(payload.updatedAt).toISOString());
+
+  /* Write the locks every run, not just when they change. A fixture that gets
+     rescheduled moves its cutoff with it, and the rule reads whatever is here
+     — so this table drifting stale is the one way the lock could quietly stop
+     matching the fixture list. */
+  const locks = buildLocks(matches);
+  await dbPut('locks', locks, token);
+  console.log('wrote locks/ for ' + Object.keys(locks).length + ' matchdays');
 }
 
 module.exports = {
   outcome, verdictOf, isSettled, matchdayKeyOf, monthOfMatchday,
   tallyFor, buildRows, scopesFor, buildPayload, rowHash, ROW_SALT,
+  buildLocks, CUTOFF_MIN,
 };
 
 if (require.main === module) {
