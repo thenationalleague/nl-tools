@@ -189,6 +189,27 @@
     font-weight: 800; font-variation-settings: 'wght' 800;
   }
 
+  /* A player and their vote count, with what people actually said beneath —
+     the notes are the reason to open a match at all. */
+  .fw-vote { padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .fw-vote:last-child { border-bottom: 0; }
+  .fw-vote__head { display: flex; align-items: baseline; gap: 10px; }
+  .fw-vote__name { font-weight: 800; font-variation-settings: 'wght' 800; }
+  .fw-vote__count {
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+    font-weight: 900; font-variation-settings: 'wght' 900;
+  }
+  .fw-note {
+    margin: 6px 0 0; padding: 6px 0 6px 12px;
+    border-left: 2px solid var(--border);
+    font-size: var(--text-sm);
+  }
+  .fw-note cite {
+    display: block; margin-top: 2px;
+    color: var(--text-muted); font-style: normal; font-size: var(--text-xs);
+  }
+
   /* Crest + three-letter code, both sides. The raw NLS id told you nothing —
      "g2567178" is not a fixture to anyone reading this page. */
   .fw-fix { display: inline-flex; align-items: center; gap: 6px; }
@@ -399,24 +420,44 @@
 
      Soft failure: without it rows fall back to the raw id, which is what they
      showed before, rather than the page refusing to render. */
+  var COMPS = { 89: 'National', 373: 'North', 372: 'South' };
+
   function loadFixtures() {
     var meta = NL.clubs.meta && NL.clubs.meta();
     var seasonId = (meta && meta.seasons && meta.seasons.current) || 2026;
-    return Promise.all([89, 373, 372].map(function (c) {
-      var url = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2' +
-                '/matches/?competitionID=' + c + '&seasonID=' + seasonId +
-                '&sort=kickOffDateUTC&page.number=1&page.size=100';
-      return fetch(url).then(function (r) { return r.ok ? r.json() : { data: [] }; })
-        .catch(function () { return { data: [] }; });
-    })).then(function (pages) {
-      pages.forEach(function (page) {
-        (page.data || []).forEach(function (m) {
+    return Promise.all(Object.keys(COMPS).map(function (c) {
+      return fetchComp(Number(c), seasonId);
+    }));
+  }
+
+  /* Every page, not just the first. The first cut fetched page 1 of each
+     competition — 300 of about 1,650 fixtures — so most match ids resolved to
+     nothing and rows fell back to showing the raw id, which is exactly what
+     this was meant to remove. */
+  function fetchComp(compId, seasonId, page, acc) {
+    page = page || 1;
+    var url = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2' +
+              '/matches/?competitionID=' + compId + '&seasonID=' + seasonId +
+              '&sort=kickOffDateUTC&page.number=' + page + '&page.size=100';
+    return fetch(url)
+      .then(function (r) { return r.ok ? r.json() : { data: [] }; })
+      .catch(function () { return { data: [] }; })
+      .then(function (json) {
+        var rows = (json && json.data) || [];
+        rows.forEach(function (m) {
           var a = m.attributes || {};
           if (!m.id || !a.homeTeam || !a.awayTeam) return;
-          state.fixtures[m.id] = { home: a.homeTeam, away: a.awayTeam };
+          state.fixtures[m.id] = {
+            home: a.homeTeam, away: a.awayTeam,
+            comp: a.competitionID, ko: a.kickOffDateUTC || a.kickoffDateUTC || ''
+          };
         });
+        var total = json && json.meta && json.meta.totalCount;
+        var seen = (acc || 0) + rows.length;
+        if (rows.length === 100 && page < 10 && (total == null || seen < total)) {
+          return fetchComp(compId, seasonId, page + 1, seen);
+        }
       });
-    });
   }
 
   /* A crest that 404s should disappear rather than leave a broken-image icon
@@ -558,37 +599,118 @@
     }).join('');
   }
 
-  /* Team of the Week: one row per fan who has voted, so the tab answers "who
-     picked whom" rather than listing votes with no owner. */
+  /* ---- Team of the Week -------------------------------------------------
+     Grouped the way the job is actually done: by matchday, then by division,
+     then by fixture, with the votes for each player counted together and the
+     fans' notes underneath.
+
+     One row per fan answered "who voted" — which nobody needs. Picking a Team
+     of the Week means asking "who did people rate in this game, and what did
+     they say", and that requires the votes batched rather than scattered
+     across the fans who cast them. */
+  function totwByMatch() {
+    var byMatch = {};
+    Object.keys(state.motm || {}).forEach(function (jwtId) {
+      var votes = state.motm[jwtId] || {};
+      var u = (state.users && state.users[jwtId]) || {};
+      var fan = (state.motmNames[jwtId] && state.motmNames[jwtId].fanName) ||
+                ((u.forename || '') + ' ' + (u.surnameInitial || '')).trim() ||
+                'Anonymous';
+      Object.keys(votes).forEach(function (mid) {
+        var v = votes[mid] || {};
+        var m = byMatch[mid] || (byMatch[mid] = { id: mid, total: 0, players: {} });
+        var key = v.playerId || v.playerName || 'unknown';
+        var pl = m.players[key] || (m.players[key] = {
+          name: v.playerName || v.playerId || 'Unknown player',
+          teamId: v.teamId || '', votes: 0, notes: []
+        });
+        pl.votes += 1;
+        m.total += 1;
+        if (v.note) pl.notes.push({ fan: fan, note: v.note });
+      });
+    });
+    return byMatch;
+  }
+
+  function matchdayOf(mid) {
+    var f = state.fixtures[mid];
+    if (!f || !f.ko) return '';
+    var iso = f.ko.indexOf('T') >= 0 ? f.ko : f.ko.replace(' ', 'T') + 'Z';
+    var d = new Date(iso);
+    return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  }
+
+  function scoreOf(mid) {
+    var f = state.fixtures[mid];
+    if (!f) return '';
+    var h = f.home && f.home.score, a = f.away && f.away.score;
+    return (h == null || a == null) ? '' : h + '–' + a;
+  }
+
   function renderTotw() {
     if (!state.users) return;
-    var rows = fanRows()
-      .filter(function (r) { return Object.keys(r.motm).length; })
-      .sort(function (a, b) { return (b.u.registeredAt || 0) - (a.u.registeredAt || 0); });
-
-    if (!rows.length) {
+    var byMatch = totwByMatch();
+    var ids = Object.keys(byMatch);
+    if (!ids.length) {
       totwEl.innerHTML = '<div class="empty-state">No Team of the Week votes yet. ' +
         'Nominations open at full time and run for 24 hours.</div>';
       return;
     }
 
-    totwEl.innerHTML = rows.map(function (r) {
-      var ids = Object.keys(r.motm);
-      return '<details class="fw-fan">' +
-        fanSummary(r, ids.length + ' vote' + (ids.length === 1 ? '' : 's')) +
-        '<div class="fw-fan__body">' +
-          (r.motmName
-            ? '<div class="fw-daylabel text-secondary">Submitted as ' + NL.escHtml(r.motmName) + '</div>'
-            : '') +
-          '<div class="fw-preds">' + ids.map(function (mid) {
-            var v = r.motm[mid] || {};
-            return '<div class="fw-pred">' + fixtureHTML(mid) +
-              '<span class="fw-pred__score">' + NL.escHtml(v.playerName || v.playerId || '—') + '</span>' +
-            '</div>';
-          }).join('') + '</div>' +
-        '</div>' +
-      '</details>';
+    /* matchday -> competition -> matches. A fixture whose id is not in the
+       feed still shows, under "Other", rather than vanishing from a tally
+       someone is about to act on. */
+    var days = {};
+    ids.forEach(function (mid) {
+      var day = matchdayOf(mid) || 'unknown';
+      var comp = (state.fixtures[mid] && COMPS[state.fixtures[mid].comp]) || 'Other';
+      var d = days[day] || (days[day] = {});
+      (d[comp] || (d[comp] = [])).push(byMatch[mid]);
+    });
+
+    var dayKeys = Object.keys(days).sort().reverse();
+    totwEl.innerHTML = dayKeys.map(function (day) {
+      var label = day === 'unknown' ? 'Date unknown' : NL.formatDateShort(day);
+      var comps = days[day];
+      return '<div class="section-head"><h2>' + NL.escHtml(label) + '</h2></div>' +
+        ['National', 'North', 'South', 'Other'].filter(function (c) { return comps[c]; })
+          .map(function (comp) {
+            return '<div class="fw-daylabel text-secondary">' + NL.escHtml(comp) + '</div>' +
+              comps[comp].sort(function (a, b) { return b.total - a.total; })
+                .map(matchCardHTML).join('');
+          }).join('');
     }).join('');
+  }
+
+  function matchCardHTML(m) {
+    var players = Object.keys(m.players).map(function (k) { return m.players[k]; })
+      .sort(function (a, b) { return b.votes - a.votes || a.name.localeCompare(b.name); });
+    var score = scoreOf(m.id);
+    var notes = players.reduce(function (n, p) { return n + p.notes.length; }, 0);
+
+    return '<details class="fw-fan">' +
+      '<summary>' +
+        fixtureHTML(m.id) +
+        (score ? '<span class="fw-fan__club">' + NL.escHtml(score) + '</span>' : '') +
+        '<span class="fw-fan__spacer"></span>' +
+        '<span class="pill">' + m.total + ' vote' + (m.total === 1 ? '' : 's') + '</span>' +
+        (notes ? '<span class="pill">' + notes + ' note' + (notes === 1 ? '' : 's') + '</span>' : '') +
+      '</summary>' +
+      '<div class="fw-fan__body">' +
+        players.map(function (p) {
+          return '<div class="fw-vote">' +
+            '<div class="fw-vote__head">' +
+              '<span class="fw-vote__name">' + NL.escHtml(p.name) + '</span>' +
+              '<span class="fw-vote__count">' + p.votes + '</span>' +
+            '</div>' +
+            p.notes.map(function (n) {
+              return '<blockquote class="fw-note">' + NL.escHtml(n.note) +
+                '<cite>' + NL.escHtml(n.fan) + '</cite></blockquote>';
+            }).join('') +
+          '</div>';
+        }).join('') +
+      '</div>' +
+    '</details>';
   }
 
   /* If auth-guard fired before this script loaded, replay the session. */
