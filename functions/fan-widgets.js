@@ -125,7 +125,17 @@ exports.fanWidgetsAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
     /* Most likely the Token Creator grant is missing — see the header. Report
        it as a grant rather than throwing, so the page can say something useful
        instead of hanging on a spinner. */
-    logger.error("fanWidgetsAuth failed", { uid, message: err && err.message });
-    return grant({ ok: false, error: "mint-failed" });
+    /* NEVER pass a field called `message` here. firebase-functions' logger
+       uses that key for the log line itself, so the first attempt at this
+       clobbered the real error with a stack trace of the logger — the console
+       showed "fanWidgetsAuth failed" and nothing about the cause. The reason
+       goes in the line, and any extra fields are named something else.
+
+       An error that hides its reason costs more than the failure does. */
+    const why = (err && (err.message || err.code)) || String(err);
+    logger.error("fanWidgetsAuth failed for " + uid + ": " + why, {
+      uid, reason: why, errCode: (err && err.code) || null,
+    });
+    return grant({ ok: false, error: "mint-failed", detail: String(why).slice(0, 300) });
   }
 });
