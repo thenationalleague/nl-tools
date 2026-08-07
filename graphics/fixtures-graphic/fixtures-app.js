@@ -37,7 +37,8 @@
      through here means the crest and the club record are found whichever
      way the name was pasted. */
   var ALIAS = {
-    "hemel hempstead": "Hemel Hempstead Town"
+    "hemel hempstead": "Hemel Hempstead Town",
+    "hampton & richmond": "Hampton & Richmond Borough"
   };
 
   /* Any pasted spelling → the club's canonical name (used for crest lookup
