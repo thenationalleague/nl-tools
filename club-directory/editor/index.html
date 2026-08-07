@@ -10,13 +10,16 @@
   v1.28 — (06/08/2026) A card view, and the two things clubs sent that nothing
          had ever put on screen.
          Cards alongside the list, remembered per person rather than per club.
-         The list is for reading down a column of addresses looking for the
-         wrong one, which is the job; cards are for one person at a time, and
-         are much better on a phone where four columns have to collapse
-         anyway. Sorted by surname, with the surname set in caps — the
-         handbook has always done that and the reason survives the move to a
-         screen: it says which word the list is sorted on, which for Owen Rhys
-         Jones is otherwise a guess.
+         A card is a business card: ONE per person, with every job they hold
+         listed on it. So the card view is not grouped by department at all —
+         it is a flat alphabetical pile, which is the same shape a search
+         returns, so browsing and searching stop being two things to learn.
+         The list stays grouped, because reading down one department's column
+         of addresses looking for the wrong one is the job.
+         Sorted by surname, with the surname in caps — the handbook has always
+         done that and the reason survives the move to a screen: it says which
+         word the list is sorted on, which for Owen Rhys Jones is otherwise a
+         guess.
          SHARED MAILBOXES (34 clubs sent them) and MAILING LISTS (all 72 did)
          now render, and the lists are editable. The lists are the League's own
          eleven questions — who is your secretary, your safety officer, your
@@ -542,15 +545,39 @@
     font-weight: 700; font-variation-settings: 'wght' 700; color: var(--navy);
   }
   .ed-list__v { overflow-wrap: anywhere; }
-  .ed-listpick {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-    gap: 2px 14px; border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 8px 10px; max-height: 150px; overflow-y: auto; background: var(--white);
+  .ed-list__v.is-none {
+    color: var(--red); font-weight: 700; font-variation-settings: 'wght' 700;
   }
-  .ed-listpick__o {
-    display: flex; align-items: center; gap: 7px;
-    font-size: var(--text-sm); font-weight: 500; font-variation-settings: 'wght' 500;
-    cursor: pointer;
+  /* One block per list, headed the way a department is headed on the page
+     behind it, so the form and the thing it edits look like the same object. */
+  .ed-lg { margin: 0 0 12px; }
+  .ed-lg .cd-dept__h { font-size: 11px; }
+  .ed-lg__b {
+    border: 1px solid var(--border); border-top: 0;
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+    background: var(--white); padding: 9px 12px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 7px;
+  }
+  .ed-lg__who {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: var(--text-sm); font-weight: 700; font-variation-settings: 'wght' 700;
+    padding: 3px 5px 3px 10px; border-radius: var(--radius-pill);
+    background: var(--navy-50); color: var(--navy);
+  }
+  .ed-lg__x {
+    border: 0; background: none; cursor: pointer; color: var(--navy-300);
+    font-size: 15px; line-height: 1; padding: 0 3px;
+  }
+  .ed-lg__x:hover { color: var(--red); }
+  .ed-lg__none {
+    margin: 0; font-size: var(--text-sm); color: var(--red);
+    font-weight: 700; font-variation-settings: 'wght' 700;
+  }
+  .ed-lg__add {
+    font-family: var(--font); font-size: var(--text-xs);
+    padding: 5px 9px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); background: var(--white); color: var(--text-muted);
+    margin-left: auto;
   }
 
   .ed-jrnl__tabs { display: flex; gap: 8px; margin: 0 0 12px; }
@@ -1278,6 +1305,16 @@
     var locked = !!signedOffBy(rec);
     var people = NLDirectory.arr(rec.people);
     var seen = {};
+
+    /* Cards carry the person's id already, so there is no counting to do —
+       and no role index either, because a card is not one role. The update
+       form opens on their first role and shows all of them regardless. */
+    $('out').querySelectorAll('.cd-pc[data-pid]').forEach(function (card) {
+      var person = people.filter(function (p) { return p.id === card.dataset.pid; })[0];
+      if (!person) { return; }
+      addPen(card, locked, club, person, 0);
+    });
+
     $('out').querySelectorAll('.cd-row').forEach(function (row) {
       var dept = row.closest('.cd-dept').querySelector('.cd-dept__h').textContent.trim();
       var idx = (seen[dept] = (seen[dept] || 0));
@@ -1392,9 +1429,12 @@
       var li = document.createElement('li');
       li.className = 'ed-list' + (who.length ? '' : ' is-empty');
       li.innerHTML = '<span class="ed-list__k">' + esc(LIST_LABEL[key] || key) + '</span>' +
-        '<span class="ed-list__v">' + (who.length
+        /* Plain text, not a pill. A pill carries 9px of padding, which put
+           "Nobody assigned" out of line with every name above it — in a
+           two-column list the left edge is what the eye follows. */
+        '<span class="ed-list__v' + (who.length ? '' : ' is-none') + '">' + (who.length
           ? who.map(function (p) { return esc(NLDirectory.fullName(p)); }).join(', ')
-          : '<span class="ed-pill ed-pill--gap">Nobody assigned</span>') + '</span>';
+          : 'Nobody assigned') + '</span>';
       ul.appendChild(li);
     });
     wrap.appendChild(ul);
@@ -1418,50 +1458,92 @@
     $('extra').appendChild(wrap);
   }
 
+  /* Eleven lists times fourteen people was a hundred and fifty tick boxes to
+     answer a question that is usually "one person, and it is that one". So
+     the form shows what each list HAS and lets you take somebody off or put
+     somebody on — the same shape as the page it edits, banner and all, rather
+     than a wall of names repeated eleven times. */
   function editLists(club, rec) {
     var people = NLDirectory.arr(rec.people).filter(function (p) { return p.id; })
       .slice().sort(NLDirectory.bySurname);
-    var form = document.createElement('div');
-    form.className = 'form-grid';
-    LIST_ORDER.forEach(function (key) {
-      var on = {};
-      NLDirectory.arr((rec.leads || {})[key]).forEach(function (id) { on[id] = 1; });
-      var g = document.createElement('div');
-      g.className = 'form-group span2';
-      var lab = document.createElement('label');
-      lab.textContent = LIST_LABEL[key] || key;
-      g.appendChild(lab);
-      var box = document.createElement('div');
-      box.className = 'ed-listpick';
-      people.forEach(function (p) {
-        var id = 'lp-' + key + '-' + p.id;
-        var w = document.createElement('label');
-        w.className = 'ed-listpick__o';
-        w.innerHTML = '<input type="checkbox" id="' + esc(id) + '" data-list="' +
-          esc(key) + '" data-pid="' + esc(p.id) + '"' + (on[p.id] ? ' checked' : '') +
-          '> ' + esc(NLDirectory.fullName(p));
-        box.appendChild(w);
+    var byId = {};
+    people.forEach(function (p) { byId[p.id] = p; });
+
+    var state = {};
+    LIST_ORDER.forEach(function (k) {
+      state[k] = NLDirectory.arr((rec.leads || {})[k]).filter(function (id) {
+        return byId[id];
       });
-      g.appendChild(box);
-      form.appendChild(g);
     });
+
+    var wrap = document.createElement('div');
+    var paint = function () {
+      wrap.innerHTML = '';
+      LIST_ORDER.forEach(function (key) {
+        var box = document.createElement('div');
+        box.className = 'ed-lg';
+        var on = state[key];
+        box.innerHTML = '<h4 class="cd-dept__h">' + esc(LIST_LABEL[key] || key) + '</h4>';
+        var body = document.createElement('div');
+        body.className = 'ed-lg__b';
+        if (!on.length) {
+          body.innerHTML = '<p class="ed-lg__none">Nobody assigned \u2014 ' +
+            'mail on this reaches nobody.</p>';
+        } else {
+          on.forEach(function (id) {
+            var chip = document.createElement('span');
+            chip.className = 'ed-lg__who';
+            chip.innerHTML = esc(NLDirectory.fullName(byId[id]));
+            var x = document.createElement('button');
+            x.type = 'button';
+            x.className = 'ed-lg__x';
+            x.setAttribute('aria-label', 'Take ' + NLDirectory.fullName(byId[id]) +
+              ' off ' + (LIST_LABEL[key] || key));
+            x.textContent = '\u00d7';
+            x.addEventListener('click', function () {
+              state[key] = state[key].filter(function (v) { return v !== id; });
+              paint();
+            });
+            chip.appendChild(x);
+            body.appendChild(chip);
+          });
+        }
+        var left = people.filter(function (p) { return on.indexOf(p.id) < 0; });
+        if (left.length) {
+          var sel = document.createElement('select');
+          sel.className = 'ed-lg__add';
+          sel.innerHTML = '<option value="">Add someone\u2026</option>' +
+            left.map(function (p) {
+              return '<option value="' + esc(p.id) + '">' +
+                esc(NLDirectory.fullName(p)) + '</option>';
+            }).join('');
+          sel.addEventListener('change', function () {
+            if (!sel.value) { return; }
+            state[key] = state[key].concat(sel.value);
+            paint();
+          });
+          body.appendChild(sel);
+        }
+        box.appendChild(body);
+        wrap.appendChild(box);
+      });
+    };
+    paint();
 
     NL.modal({
       title: club + ' \u2014 mailing lists',
       width: 'wide',
-      body: form,
+      body: wrap,
       buttons: [
         { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
         { label: 'Save lists', className: 'btn--primary', onClick: function (c) {
           var next = {}, changed = [];
           LIST_ORDER.forEach(function (key) {
-            var ids = [];
-            form.querySelectorAll('[data-list="' + key + '"]').forEach(function (i) {
-              if (i.checked) { ids.push(i.getAttribute('data-pid')); }
-            });
             var was = NLDirectory.arr((rec.leads || {})[key]);
-            if (ids.join(',') !== was.join(',')) { changed.push(LIST_LABEL[key] || key); }
-            if (ids.length) { next[key] = ids; }
+            if (state[key].join(',') !== was.join(',')) {
+              changed.push(LIST_LABEL[key] || key);
+            }
+            if (state[key].length) { next[key] = state[key].slice(); }
           });
           if (!changed.length) { c.close(); return; }
           (ALL[club] || rec).leads = next;
@@ -3853,12 +3935,13 @@
     var byClub = {};
     hits.forEach(function (h) { (byClub[h.club] = byClub[h.club] || []).push(h.person); });
     $('out').innerHTML = Object.keys(byClub).sort().map(function (c) {
+      var cards = VIEW === 'cards';
       return '<div class="cd-dept"><h3 class="cd-dept__h">' + esc(c) + '</h3>' +
-        '<ul class="' + (VIEW === 'cards' ? 'cd-cards' : 'cd-rows') + '">' +
-        byClub[c].map(function (p) {
-          var sec = (NLDirectory.rolesOf(p)[0] || {}).section;
-          return VIEW === 'cards' ? NLDirectory.personCard(p, sec, viewOpts())
-                                  : NLDirectory.personRow(p, sec, viewOpts());
+        '<ul class="' + (cards ? 'cd-cards' : 'cd-rows') + '">' +
+        byClub[c].sort(NLDirectory.bySurname).map(function (p) {
+          return cards ? NLDirectory.personCard(p, viewOpts())
+                       : NLDirectory.personRow(p, (NLDirectory.rolesOf(p)[0] || {}).section,
+                           viewOpts());
         }).join('') + '</ul></div>';
     }).join('');
   }
