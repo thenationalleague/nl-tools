@@ -173,7 +173,15 @@ function buildRows(users, predictions, matches, scope, now) {
     const reg = users[jwtId];
     if (!reg || !reg.forename) continue;
     const t = tallyFor(predictions[jwtId] || {}, matches, scope, now);
-    if (!t.settled) continue;
+    /* Everyone who has registered appears in the SEASON table, even on nought
+       — the season is the thing you are taking part in, and a fan who has just
+       signed up should be able to find themselves in it.
+
+       A narrower scope drops them. A fan who joined in November has not scored
+       nothing in October; they were not there, and a row of zeroes in a month
+       they sat out reads as a failure rather than an absence. Same reasoning
+       as the widget only offering periods that have actually happened. */
+    if (!t.settled && scope.kind !== 'season') continue;
     rows.push({
       n: (reg.forename + ' ' + (reg.surnameInitial || '')).trim(),
       c: reg.crestUrl || '',
