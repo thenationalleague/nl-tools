@@ -281,3 +281,57 @@ test('month and matchday still drop a fan with nothing settled there', () => {
   assert.equal(day.find((r) => r.n === 'Dan E'), undefined);
   assert.equal(aug.length, 3);
 });
+
+/* ---------------------------------------------------------------------------
+   Scope indexing.
+
+   buildPayload used to hand every scope the entire season's fixtures and let
+   tallyFor filter them, which meant each fan's month scope walked past every
+   fixture of every other month — and called matchdayKeyOf, an Intl date
+   format, on all of them. At ~1,650 fixtures, 96 scopes and 50 fans that is
+   eight million Intl calls: the job took nine minutes to produce nine
+   kilobytes and then began timing out at ten.
+
+   The fix is only safe if a pre-filtered list tallies identically to the full
+   one. tallyFor still filters defensively, so it should — these pin it.
+   --------------------------------------------------------------------------- */
+
+test('index: every fixture is filed under its own matchday and month', () => {
+  const { day, month } = lb.matchIndex(MATCHES);
+  assert.deepEqual([...day.keys()].sort(), ['2026-08-01', '2026-09-05']);
+  assert.deepEqual([...month.keys()].sort(), ['2026-08', '2026-09']);
+  assert.deepEqual(day.get('2026-08-01').map((m) => m.id), ['m1', 'm2']);
+  assert.deepEqual(month.get('2026-09').map((m) => m.id), ['m3', 'm4']);
+});
+
+test('index: a fixture with no kick-off time is filed nowhere, not under ""', () => {
+  const { day, month } = lb.matchIndex([...MATCHES, match('m5', '', 'PreMatch', null, null)]);
+  assert.equal(day.has(''), false);
+  assert.equal(month.has(''), false);
+});
+
+test('a scope tallies the same from its own fixtures as from the whole season', () => {
+  // The equivalence the speed-up rests on. If these ever diverge, the
+  // aggregate silently disagrees with the widget's own arithmetic.
+  const index = lb.matchIndex(MATCHES);
+  for (const s of [{ kind: 'month', key: '2026-08' }, { kind: 'month', key: '2026-09' },
+                   { kind: 'day', key: '2026-08-01' }, { kind: 'day', key: '2026-09-05' }]) {
+    const scoped = s.kind === 'month' ? index.month.get(s.key) : index.day.get(s.key);
+    assert.deepEqual(
+      lb.buildRows(USERS, PREDS, scoped || [], s, NOW),
+      lb.buildRows(USERS, PREDS, MATCHES, s, NOW),
+      `${s.kind} ${s.key} disagrees`,
+    );
+  }
+});
+
+test('matchday keys are cached per match without going stale', () => {
+  // Cached on the match object, so the same object must keep answering
+  // correctly — and a different object with the same kick-off must agree.
+  const m = match('m9', '2026-08-01T20:00:00Z', 'FullTime', 1, 0);
+  assert.equal(lb.matchdayKeyOf(m), '2026-08-01');
+  assert.equal(lb.matchdayKeyOf(m), '2026-08-01');
+  assert.equal(lb.matchdayKeyOf(match('m10', '2026-08-01T20:00:00Z', 'FullTime', 1, 0)), '2026-08-01');
+  // A late kick-off that is the next day in UTC is still this matchday.
+  assert.equal(lb.matchdayKeyOf(match('m11', '2026-06-30T23:30:00Z', 'FullTime', 1, 0)), '2026-07-01');
+});

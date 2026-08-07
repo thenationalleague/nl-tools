@@ -94,8 +94,42 @@ function bstDateOf(d) {
   if (!d) return '';
   return d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
 }
-function matchdayKeyOf(m) { return bstDateOf(koOf(m)); }
+/* A match's matchday key never changes, but tallyFor asked for it once per
+   match, per fan, per scope. A full season is ~1,650 fixtures and the widget
+   offers ~96 scopes, so at fifty fans that was eight million calls to
+   toLocaleDateString — an Intl formatter costing tens of microseconds each.
+   The job took nine minutes to produce nine kilobytes of JSON, and crossed
+   the ten-minute timeout the week registrations reached sixty.
+
+   Derived per match, so cached per match. A WeakMap keyed on the match object
+   holds no reference of its own and keeps every signature intact. */
+const mdKeyCache = new WeakMap();
+function matchdayKeyOf(m) {
+  if (!m || typeof m !== 'object') return bstDateOf(koOf(m));
+  let k = mdKeyCache.get(m);
+  if (k === undefined) mdKeyCache.set(m, (k = bstDateOf(koOf(m))));
+  return k;
+}
 function monthOfMatchday(mdKey) { return String(mdKey || '').slice(0, 7); }
+
+/* Matches grouped by matchday, and by month, so a scope can be handed only
+   the fixtures it covers. tallyFor still filters defensively, so a pre-filtered
+   list produces exactly the same tally as the full one — it just stops every
+   fan's month scope walking past every fixture of every other month. */
+function matchIndex(matches) {
+  const day = new Map();
+  const month = new Map();
+  for (const m of matches) {
+    const md = matchdayKeyOf(m);
+    if (!md) continue;
+    if (!day.has(md)) day.set(md, []);
+    day.get(md).push(m);
+    const mo = monthOfMatchday(md);
+    if (!month.has(mo)) month.set(mo, []);
+    month.get(mo).push(m);
+  }
+  return { day, month };
+}
 
 /* Only 'post' counts towards a tally. An in-play period is not believed
    forever — a match abandoned mid-game, or a feed that simply stops updating,
@@ -240,6 +274,7 @@ function scopesFor(matches) {
 
 function buildPayload(users, predictions, matches, now) {
   const scopes = scopesFor(matches);
+  const index = matchIndex(matches);
   const out = {
     season: { rows: buildRows(users, predictions, matches, scopes.season[0], now) },
     month: {},
@@ -247,8 +282,12 @@ function buildPayload(users, predictions, matches, now) {
     updatedAt: now.getTime(),
     salt: ROW_SALT,   // so a widget built against an older salt can detect the mismatch
   };
-  for (const s of scopes.month) out.month[s.key] = { rows: buildRows(users, predictions, matches, s, now) };
-  for (const s of scopes.day) out.day[s.key] = { rows: buildRows(users, predictions, matches, s, now) };
+  for (const s of scopes.month) {
+    out.month[s.key] = { rows: buildRows(users, predictions, index.month.get(s.key) || [], s, now) };
+  }
+  for (const s of scopes.day) {
+    out.day[s.key] = { rows: buildRows(users, predictions, index.day.get(s.key) || [], s, now) };
+  }
   return out;
 }
 
@@ -397,6 +436,7 @@ async function main() {
 module.exports = {
   outcome, verdictOf, isSettled, matchdayKeyOf, monthOfMatchday,
   tallyFor, buildRows, scopesFor, buildPayload, rowHash, ROW_SALT, lastActivity,
+  matchIndex,
   buildLocks, CUTOFF_MIN,
 };
 
