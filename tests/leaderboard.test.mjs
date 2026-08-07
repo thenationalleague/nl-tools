@@ -106,12 +106,18 @@ const PREDS = {
 
 test('rows: ordered by results, then exacts, then forename', () => {
   const rows = lb.buildRows(USERS, PREDS, MATCHES, { kind: 'season' }, NOW);
-  assert.deepEqual(rows.map((r) => r.n), ['Anna B', 'Cara D', 'Ben C']);
-  assert.deepEqual(rows.map((r) => [r.r, r.e, r.s]), [[2, 2, 2], [2, 0, 2], [1, 1, 2]]);
+  // Dan is last: the season table lists everyone registered, so he is present
+  // on nought rather than absent. See the who-appears block below.
+  assert.deepEqual(rows.map((r) => r.n), ['Anna B', 'Cara D', 'Ben C', 'Dan E']);
+  assert.deepEqual(rows.slice(0, 3).map((r) => [r.r, r.e, r.s]),
+                   [[2, 2, 2], [2, 0, 2], [1, 1, 2]]);
 });
 
-test('rows: a fan with nothing settled is left out', () => {
-  const rows = lb.buildRows(USERS, PREDS, MATCHES, { kind: 'season' }, NOW);
+test('rows: a fan with nothing settled is left out of a NARROW scope', () => {
+  // This used to hold for the season table too. It no longer does, on purpose:
+  // everyone who has entered belongs in the season standings. The narrower
+  // scopes keep the rule — see the who-appears block below for why.
+  const rows = lb.buildRows(USERS, PREDS, MATCHES, { kind: 'month', key: '2026-08' }, NOW);
   assert.equal(rows.find((r) => r.n === 'Dan E'), undefined);
 });
 
@@ -213,4 +219,38 @@ test('locks: a rescheduled fixture moves its cutoff with it', () => {
   const moved = lb.buildLocks([match('m9', '2026-08-03T19:45:00Z', 'PreMatch', null, null)]);
   assert.ok(moved['2026-08-03'].m9 > first['2026-08-01'].m9);
   assert.equal(first['2026-08-03'], undefined);
+});
+
+// ---------------------------------------------------------------------------
+// Who appears in a table
+//
+// The season table is the thing everyone has entered, so everyone is in it
+// from the moment they register. A month or a matchday is not: a fan who
+// joined in November did not score nothing in October, they were absent, and
+// a row of zeroes reads as a failure rather than an absence.
+
+test('season: a registered fan with nothing settled still appears', () => {
+  const rows = lb.buildRows(USERS, PREDS, MATCHES, { kind: 'season' }, NOW);
+  const dan = rows.find((r) => r.n === 'Dan E');
+  assert.ok(dan, 'Dan predicted only an unplayed match and should still be listed');
+  assert.deepEqual([dan.r, dan.e, dan.s], [0, 0, 0]);
+});
+
+test('season: everyone registered is listed, once each', () => {
+  const rows = lb.buildRows(USERS, PREDS, MATCHES, { kind: 'season' }, NOW);
+  assert.equal(rows.length, Object.keys(USERS).length);
+  assert.equal(new Set(rows.map((r) => r.h)).size, rows.length);
+});
+
+test('season: those with something settled still rank above those without', () => {
+  const rows = lb.buildRows(USERS, PREDS, MATCHES, { kind: 'season' }, NOW);
+  assert.deepEqual(rows.map((r) => r.n), ['Anna B', 'Cara D', 'Ben C', 'Dan E']);
+});
+
+test('month and matchday still drop a fan with nothing settled there', () => {
+  const aug = lb.buildRows(USERS, PREDS, MATCHES, { kind: 'month', key: '2026-08' }, NOW);
+  const day = lb.buildRows(USERS, PREDS, MATCHES, { kind: 'day', key: '2026-08-01' }, NOW);
+  assert.equal(aug.find((r) => r.n === 'Dan E'), undefined);
+  assert.equal(day.find((r) => r.n === 'Dan E'), undefined);
+  assert.equal(aug.length, 3);
 });

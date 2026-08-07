@@ -39,6 +39,24 @@
        ?sim=off          → real clock, bar hidden (explicit form)
 
      Changelog:
+       07/08/2026  v3.12 The season table lists everyone who has entered,
+                         ten at a time. It only ever showed fans with a
+                         settled prediction, so before the first result it
+                         was a table of one — you. Everyone registered now
+                         appears in the SEASON scope; month and matchday
+                         still drop a fan with nothing settled there,
+                         because someone who joined in November did not
+                         score nothing in October, they were absent.
+                         Paged with arrows rather than numbers: the field
+                         grows all season and a row of page numbers would
+                         grow with it. Ranks are worked out across the
+                         whole field before slicing, so page two does not
+                         restart at 1. Ties now break to YOU first —
+                         before a ball is kicked everyone is joint first
+                         on nought, and hunting for your own name down an
+                         alphabetical list of every entrant is a poor
+                         greeting. The rank is unchanged; the '=' still
+                         says it is a tie.
        07/08/2026  v3.11 The postponed letter lines up with the scores.
                          v3.10 held the W/D/L column open but missed the
                          other half: a submitted row reserves 64px on the
@@ -967,6 +985,26 @@
   #nlPredictor .nlsp__hero-card .nlsp__wdlbox.is-w { background:var(--green); border-color:var(--green); color:var(--white); }
   #nlPredictor .nlsp__hero-card .nlsp__wdlbox.is-l { background:var(--red);   border-color:var(--red);   color:var(--white); }
 
+  /* Leaderboard pager. Arrows, not numbered pages: the field grows all season
+     and a row of numbers would grow with it. */
+  #nlPredictor .nlsp__pager {
+    display:flex; align-items:center; justify-content:center; gap:14px;
+    padding:10px 12px;
+  }
+  #nlPredictor .nlsp__pagebtn {
+    font:inherit; font-size:16px; line-height:1;
+    width:30px; height:30px; flex:none;
+    background:var(--white); color:var(--text);
+    border:1px solid var(--border); border-radius:var(--radius);
+    cursor:pointer;
+  }
+  #nlPredictor .nlsp__pagebtn:hover:not(:disabled) { border-color:var(--primary); color:var(--primary); }
+  #nlPredictor .nlsp__pagebtn:disabled { opacity:.4; cursor:default; }
+  #nlPredictor .nlsp__pagelbl {
+    font-size:12px; color:var(--text-muted);
+    font-variant-numeric:tabular-nums;
+  }
+
   /* Leaderboard scope filters — canon .chip-group pattern (segmented,
      single-choice, navy active) + contextual select, stacked in the head */
   #nlPredictor .nlsp__tablefilters {
@@ -1120,6 +1158,7 @@
   var EDIT_WINDOW_HOURS = 168; // predictions open 7 days before KO
   var CUTOFF_MIN = 60;         // predictions lock 1h before KO
   var MAX_GOALS = 9;           // stepper cap per side
+  var LB_PAGE_SIZE = 10;       // players per leaderboard page
   var CLUB_TABLE_MIN_SETTLED = 20; // settled predictions a club needs before it ranks
 
   // ---------- DOM refs ----------
@@ -1312,6 +1351,7 @@
     lbMonth: null,          // selected month ('YYYY-MM') when scope is 'month'
     lbDay: null,            // selected matchday key ('YYYY-MM-DD') when scope is 'day'
     lbMine: false,          // true = only fans of the user's own club
+    lbPage: 0,              // leaderboard page (10 rows each)
     sim: { fixed: null, barEnabled: false } // explicit sim 'now'; bar shown only when ?sim present
   };
 
@@ -2569,9 +2609,15 @@
         r: t.results, e: t.exacts, s: t.settled, h: state.myHash || '__me__',
       });
     }
+    /* Ties break to YOU first, then alphabetically. Before a ball is kicked
+       everyone is joint first on nought, and hunting for your own name down an
+       alphabetical list of everyone who has entered is a poor greeting. Your
+       rank is unchanged — the '=' labels still say it is a tie. */
     rows.sort(function (a, b) {
       if (b.r !== a.r) return b.r - a.r;
       if (b.e !== a.e) return b.e - a.e;
+      var am = isMyRow(a), bm = isMyRow(b);
+      if (am !== bm) return am ? -1 : 1;
       return String(a.n).localeCompare(String(b.n));
     });
     return rows;
@@ -2638,19 +2684,21 @@
       if (s === 'day' && !state.lbDay) state.lbDay = lbDefaultDay();
       // A scope change points at a different aggregate node, so it needs a
       // fetch; the club toggle below only filters rows we already hold.
+      state.lbPage = 0;
       loadLeaderboard();
     });
     if (clubEl) clubEl.addEventListener('click', function (e) {
       var b = e.target.closest ? e.target.closest('button') : null;
       if (!b) return;
       state.lbMine = b.getAttribute('data-mine') === '1';
+      state.lbPage = 0;
       renderTable();
     });
     if (mSel) mSel.addEventListener('change', function () {
-      state.lbMonth = mSel.value; loadLeaderboard();
+      state.lbMonth = mSel.value; state.lbPage = 0; loadLeaderboard();
     });
     if (dSel) dSel.addEventListener('change', function () {
-      state.lbDay = dSel.value; loadLeaderboard();
+      state.lbDay = dSel.value; state.lbPage = 0; loadLeaderboard();
     });
   }
   function renderTable() {
@@ -2658,9 +2706,19 @@
     var now = simNow();
 
     var rows = visibleRows();
+    /* Rank the WHOLE field, then show a page of it — a rank is a position in
+       the table, not a position on the screen, so it must be worked out before
+       any slicing or the second page would restart at 1. */
     var ranks = rankLabels(rows, function (a, b) {
       return a.r === b.r && a.e === b.e;
     });
+
+    var pages = Math.max(1, Math.ceil(rows.length / LB_PAGE_SIZE));
+    if (state.lbPage >= pages) state.lbPage = pages - 1;
+    if (state.lbPage < 0) state.lbPage = 0;
+    var from = state.lbPage * LB_PAGE_SIZE;
+    var pageRows = rows.slice(from, from + LB_PAGE_SIZE);
+    var pageRanks = ranks.slice(from, from + LB_PAGE_SIZE);
 
     // Three distinct empty states, because they mean different things: still
     // fetching, could not fetch, and genuinely nobody here yet.
@@ -2681,21 +2739,50 @@
         '<span title="Finished matches predicted">Games</span>' +
       '</div>' +
       (empty ? '<div class="nlsp__clubfoot">' + $h(empty) + '</div>' : '') +
-      rows.map(function (r, i) {
+      pageRows.map(function (r, i) {
         var me = isMyRow(r);
         return '<div class="nlsp__trow' + (me ? ' is-you' : '') + '">' +
-          '<span class="nlsp__rank">' + ranks[i] + '</span>' +
+          '<span class="nlsp__rank">' + pageRanks[i] + '</span>' +
           crestImg(r.c, r.tn, 22) +
           '<span>' + $h(r.n) + (me ? ' <span class="nlsp__youlbl">(you)</span>' : '') + '</span>' +
           '<span class="nlsp__pts">' + r.r + '</span>' +
           '<span class="nlsp__exacts">' + r.e + '</span>' +
           '<span class="nlsp__games">' + r.s + '</span>' +
         '</div>';
-      }).join('');
+      }).join('') +
+      pagerHTML(rows.length, pages, from, pageRows.length);
 
     tableEl.className = 'nlsp__table';
     tableEl.innerHTML = inner;
     wireFilters();
+    wirePager();
+  }
+
+  /* Arrows rather than numbered pages: with everyone who has entered listed,
+     the count grows all season, and a row of page numbers would grow with it.
+     The label says where you are, which is the part anyone actually reads. */
+  function pagerHTML(total, pages, from, shown) {
+    if (pages <= 1) return '';
+    var atStart = state.lbPage === 0;
+    var atEnd = state.lbPage >= pages - 1;
+    return '<div class="nlsp__pager">' +
+      '<button type="button" class="nlsp__pagebtn" data-page="prev"' +
+        (atStart ? ' disabled' : '') + ' aria-label="Previous players">&lsaquo;</button>' +
+      '<span class="nlsp__pagelbl">' + (from + 1) + '&ndash;' + (from + shown) +
+        ' of ' + total + '</span>' +
+      '<button type="button" class="nlsp__pagebtn" data-page="next"' +
+        (atEnd ? ' disabled' : '') + ' aria-label="More players">&rsaquo;</button>' +
+    '</div>';
+  }
+  function wirePager() {
+    var el = tableEl.querySelector('.nlsp__pager');
+    if (!el) return;
+    el.addEventListener('click', function (e) {
+      var b = e.target.closest ? e.target.closest('button[data-page]') : null;
+      if (!b || b.disabled) return;
+      state.lbPage += (b.getAttribute('data-page') === 'next' ? 1 : -1);
+      renderTable();
+    });
   }
 
   // ---------- club v club table ----------
