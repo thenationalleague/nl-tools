@@ -1,55 +1,80 @@
 /**
- * NL Tools — fan-widget staff access.
- *   mintWidgetsToken — issues a superadmin a short-lived sign-in token for the
- *                      SEPARATE nl-widgets project, carrying a `staff` claim.
+ * NL Tools — fan-widget staff access (RTDB-triggered).
+ *
+ *   fanWidgetsAuth — a trigger on app-data/ops-fan-widgets/authRequests/{uid}.
+ *                    Verifies the caller is a superadmin with the Admin SDK and
+ *                    writes back a Firebase custom token for the SEPARATE
+ *                    nl-widgets project, carrying a `staff` claim.
  *
  * Why this exists
  * ---------------
  * The fan data (registrations, predictions, Team of the Week picks) lives in
  * the nl-widgets project, and since the auth hardening a browser cannot list
  * it: `.read` sits at the individual record, so you have to know an id to
- * fetch one. That is deliberate — it is what stops any signed-in fan
+ * fetch one. That is deliberate — it is what stops a signed-in fan
  * enumerating every other fan. See embeds/auth-hardening-plan.md.
  *
- * An admin page must not be the exception that undoes that. Loosening the
- * rules for "staff" is not possible in that project on its own terms: fans
- * sign in anonymously, so there is no property of an anonymous session that
- * distinguishes a member of staff from anybody else.
+ * An admin page must not be the exception that undoes that, and the widgets
+ * rules cannot recognise staff on their own terms: fans sign in anonymously,
+ * so no property of an anonymous session distinguishes staff from anybody
+ * else. So the claim is minted here, in the project where the staff role model
+ * actually exists, and the widgets rules grant tree-wide read on that claim.
  *
- * This closes that gap without duplicating the data. The caller is
- * authenticated in nl-tools, where the staff role model actually exists; this
- * function verifies they are a superadmin THERE, and issues them a token for
- * nl-widgets carrying `staff: true`. The widgets rules grant tree-wide read on
- * that claim alone, so the page can open live listeners and nothing is copied
- * anywhere.
+ * Trust chain: nl-tools Firebase Auth → this trigger → nl-widgets. Verified
+ * server-side at every link. A fan cannot obtain the claim, because minting one
+ * means passing the superadmin check below.
  *
- * The trust chain is: nl-tools Firebase Auth → this function → nl-widgets.
- * Every link is verified server-side. A fan cannot obtain the claim, because
- * minting one requires passing the superadmin check here.
+ * Why a trigger and not a callable
+ * --------------------------------
+ * This started as an onCall. It deployed and then failed at "Unable to set the
+ * invoker for the IAM policy on mintWidgetsToken" (07/08/2026) — the project
+ * carries an org policy that blocks `allUsers` on NEW Cloud Run services, which
+ * is why the existing callables still update fine but a new one cannot be
+ * created. programme.js and club-directory.js hit the same wall and record the
+ * RTDB-triggered path as the org-policy-proof alternative; this is that path.
+ *
+ * Cost of the swap: Eventarc delivery adds a few seconds. This runs once per
+ * page load, behind a spinner, for one person — an easy trade.
+ *
+ * Flow
+ * ----
+ *   1. The page (already signed in via auth-guard) writes {} to
+ *      authRequests/<uid>.
+ *   2. This trigger checks the role, deletes the request, and writes
+ *      authGrants/<uid> = { ok, customToken } — or { ok:false, error }.
+ *   3. The page reads the grant, deletes it, and signs in to nl-widgets with
+ *      the token.
  *
  * Keyless by necessity: the NL Google org blocks service-account key creation.
  * Signing a custom token for another project needs that project's service
  * account identity, so the SDK is pointed at it by NAME and signs through IAM
  * — which requires this function's service account to hold
  * roles/iam.serviceAccountTokenCreator on the nl-widgets Admin SDK account.
- * Without that grant, minting fails with a permission error at signBlob; that
- * is the first thing to check if this stops working.
+ * Without that grant, minting fails at signBlob; that is the first thing to
+ * check if this stops working.
  */
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onValueWritten } = require("firebase-functions/v2/database");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
+
+const ROOT = "app-data/ops-fan-widgets";
 
 const WIDGETS_PROJECT = "nl-widgets";
 const WIDGETS_SA = "firebase-adminsdk-fbsvc@nl-widgets.iam.gserviceaccount.com";
 const WIDGETS_APP = "nl-widgets";
 
-const CALL_OPTS = {
-  cors: ["https://nl.tools", "https://thenationalleague.github.io"],
+const TRIGGER_OPTS = {
+  ref: "/" + ROOT + "/authRequests/{uid}",
+  instance: "nl-tools-default-rtdb",
+  /* RTDB triggers must run in the database's region (europe-west1), which
+     overrides the europe-west2 setGlobalOptions default in index.js. */
+  region: "europe-west1",
   memory: "256MiB",
-  maxInstances: 5,
-  /* Same reason as account.js: the gen-2 default compute SA holds no Firebase
-     roles. This one carries RTDB + Auth Admin, and is the identity that must
-     be granted Token Creator on the nl-widgets service account above. */
+  maxInstances: 10,
+  /* Same service account as account.js, programme.js and club-directory.js:
+     the gen-2 default (compute SA) holds no Firebase roles, so RTDB drops its
+     connection and token minting fails. This is also the identity that must
+     hold Token Creator on the nl-widgets service account above. */
   serviceAccount: "firebase-adminsdk-fbsvc@nl-tools.iam.gserviceaccount.com",
 };
 
@@ -65,29 +90,42 @@ function widgetsApp() {
   }, WIDGETS_APP);
 }
 
-exports.mintWidgetsToken = onCall(CALL_OPTS, async (request) => {
-  if (!request.auth || !request.auth.uid) {
-    throw new HttpsError("unauthenticated", "You must be signed in.");
+/* onValueWritten, not onValueCreated — the request path is keyed on the
+   caller's uid, so a second visit rewrites the same node rather than creating
+   a new one, and onValueCreated would never fire again for that person. */
+exports.fanWidgetsAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
+  const uid = event.params.uid;
+  if (!event.data.after.exists()) return;   // our own delete, below
+
+  const db = admin.database();
+  // Clear the request first: whatever happens next, it must not sit there and
+  // re-trigger.
+  await db.ref(ROOT + "/authRequests/" + uid).remove().catch(() => {});
+  const grant = (payload) => db.ref(ROOT + "/authGrants/" + uid).set(payload);
+
+  try {
+    /* The role is read from the database, not from a token claim. A claim can
+       be stale after a demotion, and this check is the only thing standing
+       between a fan and everyone else's data. */
+    const snap = await db.ref("users/" + uid + "/role").once("value");
+    const role = String(snap.val() || "");
+    if (role !== "superadmin") {
+      logger.warn("fanWidgetsAuth denied", { uid, role: role || "(none)" });
+      return grant({ ok: false, error: "not-superadmin" });
+    }
+
+    /* Distinct uid namespace so a staff session in the widgets project can
+       never collide with a fan's anonymous one, and is obvious in an audit. */
+    const customToken = await widgetsApp().auth()
+      .createCustomToken("nlstaff_" + uid, { staff: true, grantedTo: uid });
+
+    logger.info("fanWidgetsAuth granted", { uid });
+    return grant({ ok: true, customToken });
+  } catch (err) {
+    /* Most likely the Token Creator grant is missing — see the header. Report
+       it as a grant rather than throwing, so the page can say something useful
+       instead of hanging on a spinner. */
+    logger.error("fanWidgetsAuth failed", { uid, message: err && err.message });
+    return grant({ ok: false, error: "mint-failed" });
   }
-  const uid = request.auth.uid;
-
-  /* The role is read from the database, not from the caller's token. A custom
-     claim could be stale after a demotion; the RTDB record is the live answer,
-     and this is the check that stands between a fan and everyone's data. */
-  const snap = await admin.database().ref("users/" + uid + "/role").once("value");
-  const role = String(snap.val() || "");
-  if (role !== "superadmin") {
-    logger.warn("mintWidgetsToken denied", { uid, role: role || "(none)" });
-    throw new HttpsError("permission-denied", "Superadmin only.");
-  }
-
-  /* Distinct uid namespace so a staff session in the widgets project can never
-     collide with a fan's anonymous one, and is obvious in any audit trail. */
-  const token = await widgetsApp().auth().createCustomToken("nlstaff_" + uid, {
-    staff: true,
-    grantedTo: uid,
-  });
-
-  logger.info("mintWidgetsToken issued", { uid });
-  return { token };
 });
