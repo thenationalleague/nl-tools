@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — Fan Widgets
+  Version: v0.1 (07/08/2026)
+  File: /fan-widgets/index.html
+
+  Registrations, predictions and Team of the Week picks from the fan-facing widgets on thenationalleague.org.uk.
+
+  Fan data lives in a SEPARATE Firebase project (nl-widgets) and is read LIVE
+  from it. Nothing is copied anywhere.
+
+  Since the auth hardening a browser cannot list that data — .read sits at the
+  individual record, so you have to know an id to fetch one. That is what stops
+  a signed-in fan enumerating every other fan, and this page does not reopen
+  it: fans sign in anonymously, so no property of an anonymous session could
+  distinguish staff from anybody else.
+
+  Instead the page asks the mintWidgetsToken function (functions/fan-widgets.js)
+  for a sign-in token. That function verifies the caller is a superadmin HERE,
+  in nl-tools, where the staff role model exists, and issues a token for
+  nl-widgets carrying a `staff` claim. The widgets rules grant tree-wide read on
+  that claim alone. Trust chain: nl-tools Firebase Auth → function → nl-widgets,
+  verified server-side at every link.
+
+  So this page holds TWO Firebase apps: the default one for nl-tools (auth-guard,
+  the staff session) and a second named app for nl-widgets (the fan data).
+
+  This shows real people's names, clubs and predictions. Superadmin only, and
+  nothing here is ever written to a file — the repository is public.
+
+  Storage (RTDB, nl-widgets project — read-only from here):
+    users/                 registrations: name, club, crest, joined
+    predictions/           per fan, per matchday, per match
+    motm/                  Team of the Week picks
+    motm-names/            display name a fan submitted with a TOTW pick
+    tools/ops-fan-widgets  tool registration, in nl-tools (label, defaults)
+
+  Access (auth-guard registry — see system/auth-guard.js):
+    superadmin → admin. Every other role is off: this is personal data.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fan Widgets — NL Tools</title>
+
+  <!-- Brand stylesheet (lint canonical: ?v=32) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=32">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-functions-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+    var fns = firebase.functions ? firebase.app().functions('europe-west2') : null;
+
+    /* Second app, pointed at the fan-widget project. Named, because the
+       default app is this tool's own session — two unnamed apps would fight
+       over it and the page would end up signed in as the wrong identity in
+       the wrong project. */
+    var widgetsApp = firebase.initializeApp({
+      apiKey:            "AIzaSyAOePUiyfACJ546b08Z7oGWahAEYzEadMo",
+      authDomain:        "nl-widgets.firebaseapp.com",
+      databaseURL:       "https://nl-widgets-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-widgets",
+      storageBucket:     "nl-widgets.firebasestorage.app",
+      messagingSenderId: "440054238126",
+      appId:             "1:440054238126:web:349a1aeaf3c65ff281563f"
+    }, 'nl-widgets');
+    var widgetsDb = firebase.database(widgetsApp);
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'Fan Widgets',
+      toolKey: 'ops-fan-widgets'
+    };
+    var NL_TOOL_KEY = 'ops-fan-widgets';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '07/08/2026',
+        version: 'v0.1',
+        items: [
+          'Initial build. Live view of the fan widgets — registrations, predictions and Team of the Week picks appear as they happen.',
+          'Reads the nl-widgets project directly rather than a copy: a mintWidgetsToken call proves superadmin here, and returns a token carrying a staff claim there. Nothing is duplicated into this project.',
+          'Superadmin only. This is personal data.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=29 / ?v=8 / ?v=10) -->
+  <script src="/system/nl-utils.js?v=29"></script>
+  <script src="/system/nl-topbar.js?v=8"></script>
+  <script src="/system/auth-guard.js?v=10"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+
+  .fw-sync { margin: 0 0 16px; }
+  /* One label style for the date headings and the "none yet" notes. */
+  .fw-daylabel { margin-top: 10px; }
+
+  /* A fan and their record. The predictions are the point, so they get the
+     room; the summary line above stays scannable. */
+  .fw-fan__head {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .fw-fan__club {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--text-muted); font-size: var(--text-sm);
+  }
+  .fw-fan__club img {
+    width: 20px; height: 20px; object-fit: contain; border-radius: var(--radius-sm);
+  }
+  .fw-preds {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 6px 18px; margin-top: 10px;
+  }
+  .fw-pred {
+    display: flex; justify-content: space-between; gap: 10px;
+    font-size: var(--text-sm); padding: 3px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .fw-pred__score {
+    font-variant-numeric: tabular-nums;
+    font-weight: 800; font-variation-settings: 'wght' 800;
+  }
+  .fw-preds .fw-pred span:last-child { text-align: right; }
+</style>
+</head>
+<body>
+
+<!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+
+    <p class="fw-sync text-secondary" id="fwSync">Loading…</p>
+
+    <div class="stats" id="fwStats"></div>
+
+    <div class="section-head">
+      <h2>Clubs</h2>
+    </div>
+    <div class="table-wrap">
+      <table class="table table--compact" id="fwClubs">
+        <thead>
+          <tr><th>Club</th><th class="ta-right">Fans</th><th class="ta-right">Predictions</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="section-head">
+      <h2>Fans</h2>
+      <input type="search" id="fwSearch" class="toolbar__search" placeholder="Search name or club…" aria-label="Search fans">
+    </div>
+    <div id="fwFans"></div>
+
+  </div>
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  /* Public boot entry point — called by nlAuthReady once the session is
+     verified. Don't read RTDB before this fires. */
+  window.TOOL = window.TOOL || {};
+
+  /* Everything below reads the nl-widgets project, never this one. The four
+     nodes are held in memory and re-rendered on any change, because they are
+     cross-referenced: a fan's row needs their predictions and their Team of
+     the Week picks alongside their registration. */
+  var state = { users: null, preds: {}, motm: {}, motmNames: {}, q: '', live: false };
+
+  var syncEl   = document.getElementById('fwSync');
+  var statsEl  = document.getElementById('fwStats');
+  var clubsEl  = document.querySelector('#fwClubs tbody');
+  var fansEl   = document.getElementById('fwFans');
+  var searchEl = document.getElementById('fwSearch');
+
+  window.TOOL.boot = function () {
+    if (!fns) {
+      fail('The Firebase Functions SDK did not load, so this page cannot get its access token.');
+      return;
+    }
+    /* Prove who we are here, to be let in there. The function checks the
+       superadmin role server-side; a denial arrives as permission-denied. */
+    NL.ensureAuth()
+      .then(function () { return fns.httpsCallable('mintWidgetsToken')(); })
+      .then(function (res) {
+        return firebase.auth(widgetsApp).signInWithCustomToken(res.data.token);
+      })
+      .then(function () {
+        state.live = true;
+        listen();
+      })
+      .catch(function (err) {
+        var code = (err && err.code) || '';
+        fail(code.indexOf('permission-denied') !== -1
+          ? 'This tool is superadmin only.'
+          : 'Could not connect to the fan data: ' + (err && err.message ? err.message : String(err)));
+      });
+  };
+
+  function fail(msg) {
+    syncEl.textContent = '';
+    fansEl.innerHTML = '<div class="empty-state">' + NL.escHtml(msg) + '</div>';
+  }
+
+  /* Live listeners, not one-off reads — the point of the tool is watching
+     registrations and predictions land during a matchday. */
+  function listen() {
+    syncEl.innerHTML = '<span class="pill pill--success">Live</span> Updating as fans register and predict.';
+    widgetsDb.ref('users').on('value', function (snap) {
+      state.users = snap.val() || {};
+      render();
+    }, onDenied);
+    widgetsDb.ref('predictions').on('value', function (snap) {
+      state.preds = snap.val() || {};
+      render();
+    }, onDenied);
+    widgetsDb.ref('motm').on('value', function (snap) {
+      state.motm = snap.val() || {};
+      renderFans();
+    }, onDenied);
+    widgetsDb.ref('motm-names').on('value', function (snap) {
+      state.motmNames = snap.val() || {};
+      renderFans();
+    }, onDenied);
+  }
+
+  function onDenied(err) {
+    /* Almost always means the widgets rules have not been published yet — the
+       staff claim is minted but nothing grants read on it. Worth naming, or
+       the next person debugs the token for an hour. */
+    fail('The fan-widget database refused the read (' + NL.escHtml(err && err.code || 'error') +
+         '). If this is new, the nl-widgets rules granting the staff claim may not be published yet.');
+  }
+
+  searchEl.addEventListener('input', function () {
+    state.q = searchEl.value.trim().toLowerCase();
+    renderFans();
+  });
+
+  function render() {
+    if (!state.users) return;
+    var ids = Object.keys(state.users);
+
+    var byClub = {};
+    var totalPreds = 0;
+    ids.forEach(function (id) {
+      var u = state.users[id] || {};
+      var n = countPreds(state.preds[id]);
+      totalPreds += n;
+      var key = u.teamId || 'unknown';
+      var c = byClub[key] || (byClub[key] = { name: u.teamName || 'Unknown', fans: 0, preds: 0 });
+      c.fans += 1; c.preds += n;
+    });
+
+    statsEl.innerHTML =
+      stat('Fans registered', ids.length) +
+      stat('Have predicted', Object.keys(state.preds).length) +
+      stat('Predictions', totalPreds) +
+      stat('Team of the Week votes', Object.keys(state.motm).length);
+
+    var clubs = Object.keys(byClub).map(function (k) { return byClub[k]; })
+      .sort(function (a, b) { return b.fans - a.fans || a.name.localeCompare(b.name); });
+
+    clubsEl.innerHTML = clubs.length
+      ? clubs.map(function (c) {
+          return '<tr><td>' + NL.escHtml(c.name) + '</td>' +
+            '<td class="ta-right">' + c.fans + '</td>' +
+            '<td class="ta-right">' + c.preds + '</td></tr>';
+        }).join('')
+      : '<tr><td colspan="3">No registrations yet.</td></tr>';
+
+    renderFans();
+  }
+
+  function countPreds(byDay) {
+    return Object.keys(byDay || {}).reduce(function (n, day) {
+      return n + Object.keys(byDay[day] || {}).length;
+    }, 0);
+  }
+
+  function stat(label, n) {
+    return '<div class="stat"><div class="stat__num">' + (n == null ? '—' : n) +
+           '</div><div class="stat__label">' + NL.escHtml(label) + '</div></div>';
+  }
+
+  /* Newest registration first — while this is being launched, "who has just
+     signed up" is the question being asked of it. */
+  function renderFans() {
+    if (!state.users) return;
+    var rows = Object.keys(state.users).map(function (id) {
+      var u = state.users[id] || {};
+      return {
+        u: u,
+        name: ((u.forename || '') + ' ' + (u.surnameInitial || '')).trim(),
+        preds: state.preds[id] || {},
+        motm: state.motm[id] || {},
+        motmName: (state.motmNames[id] && state.motmNames[id].fanName) || ''
+      };
+    }).filter(function (r) {
+      if (!state.q) return true;
+      return (r.name + ' ' + (r.u.teamName || '')).toLowerCase().indexOf(state.q) !== -1;
+    }).sort(function (a, b) {
+      return (b.u.registeredAt || 0) - (a.u.registeredAt || 0);
+    });
+
+    if (!rows.length) {
+      fansEl.innerHTML = '<div class="empty-state">' +
+        (state.q ? 'No fan matches that search.' : 'No registrations yet.') + '</div>';
+      return;
+    }
+
+    fansEl.innerHTML = rows.map(function (r) {
+      var n = countPreds(r.preds);
+      var votes = Object.keys(r.motm).length;
+      return '<div class="form-panel">' +
+        '<div class="fw-fan__head">' +
+          '<b>' + NL.escHtml(r.name || 'Unnamed') + '</b>' +
+          '<span class="fw-fan__club">' +
+            (r.u.crestUrl ? '<img src="' + NL.escHtml(r.u.crestUrl) + '" alt="">' : '') +
+            NL.escHtml(r.u.teamName || 'No club') +
+          '</span>' +
+          '<span class="pill">' + n + ' prediction' + (n === 1 ? '' : 's') + '</span>' +
+          (votes ? '<span class="pill">' + votes + ' TOTW</span>' : '') +
+          (r.u.registeredAt
+            ? '<span class="fw-day">Joined ' + NL.escHtml(NL.formatDate(r.u.registeredAt)) + '</span>'
+            : '') +
+        '</div>' +
+        predictionsHTML(r.preds) +
+        motmHTML(r.motm, r.motmName) +
+      '</div>';
+    }).join('');
+  }
+
+  function predictionsHTML(byDay) {
+    var days = Object.keys(byDay).sort().reverse();
+    if (!days.length) return '<p class="fw-empty-note">No predictions yet.</p>';
+    return days.map(function (day) {
+      var matches = byDay[day] || {};
+      return '<div class="fw-day" style="margin-top:10px;font-size:var(--text-sm);">' +
+          NL.escHtml(NL.formatDateShort(day)) + '</div>' +
+        '<div class="fw-preds">' + Object.keys(matches).map(function (mid) {
+          var p = matches[mid] || {};
+          return '<div class="fw-pred"><span>' + NL.escHtml(mid) + '</span>' +
+            '<span class="fw-pred__score">' + p.home + '–' + p.away + '</span></div>';
+        }).join('') + '</div>';
+    }).join('');
+  }
+
+  function motmHTML(byMatch, fanName) {
+    var ids = Object.keys(byMatch || {});
+    if (!ids.length) return '';
+    return '<div class="fw-day" style="margin-top:10px;font-size:var(--text-sm);">' +
+        'Team of the Week' + (fanName ? ' · submitted as ' + NL.escHtml(fanName) : '') + '</div>' +
+      '<div class="fw-preds">' + ids.map(function (mid) {
+        var v = byMatch[mid] || {};
+        return '<div class="fw-pred"><span>' + NL.escHtml(v.playerName || v.playerId || '—') + '</span>' +
+          '<span class="fw-day">' + NL.escHtml(mid) + '</span></div>';
+      }).join('') + '</div>';
+  }
+
+  /* If auth-guard fired before this script loaded, replay the session. */
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+
+</body>
+</html>
