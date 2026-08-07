@@ -1,6 +1,6 @@
 /* ============================================================
    Fixtures & Results Graphic — app logic.
-   Shares clubs-data.js (crests, club lookup) with the table tool.
+   Club roster, crests and lookups come from the canon (NL.clubs).
    Paste = home, [middle nuked], away. Editor adds scores + KO.
    ============================================================ */
 (function () {
@@ -26,9 +26,28 @@
     Cup: "National League Cup"
   };
 
+  /* Names that always display shortened, in every fit mode. Keyed on the
+     canonical club name, lower-cased. */
   var SHORTEN = {
-    "hampton & richmond borough": "Hampton & Richmond"
+    "hampton & richmond borough": "Hampton & Richmond",
+    "hemel hempstead town": "Hemel Hempstead"
   };
+
+  /* Accepted spellings that aren't the club's canonical name. Resolving
+     through here means the crest and the club record are found whichever
+     way the name was pasted. */
+  var ALIAS = {
+    "hemel hempstead": "Hemel Hempstead Town"
+  };
+
+  /* Any pasted spelling → the club's canonical name (used for crest lookup
+     and club record lookup). Unknown names pass through untouched. */
+  function canonicalName(name) {
+    var k = String(name || "").toLowerCase().trim();
+    if (!k) return String(name || "");
+    if (NL.clubs.byName(k)) return NL.clubs.byName(k).name;
+    return ALIAS[k] || String(name || "").trim();
+  }
 
   var SAMPLE = [
     "Brackley Town\tv\tSolihull Moors",
@@ -71,15 +90,16 @@
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
   function teamDisplay(name) {
+    var canon = canonicalName(name);
     /* short-name mode uses each club's short label from the DB */
     if (state.fit === "short") {
-      var club = window.clubByName(name);
+      var club = NL.clubs.byName(canon);
       if (club && club.short) return club.short.toUpperCase();
     }
-    /* Hampton & Richmond Borough always shortens on arrival, every mode */
-    var k = String(name || "").toLowerCase().trim();
+    /* a few names always shorten on arrival, every mode */
+    var k = canon.toLowerCase();
     if (SHORTEN[k]) return SHORTEN[k].toUpperCase();
-    return String(name || "").toUpperCase();
+    return canon.toUpperCase();
   }
   function save() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {} }
   function load() {
@@ -171,8 +191,9 @@
         body.appendChild(dv);
         return;
       }
-      var homeCrest = window.crestUrl(r.home);
-      var awayCrest = window.crestUrl(r.away);
+      var homeName = canonicalName(r.home), awayName = canonicalName(r.away);
+      var homeCrest = homeName ? NL.clubs.crestUrl(homeName) : "";
+      var awayCrest = awayName ? NL.clubs.crestUrl(awayName) : "";
       var hasScore = state.mode === "results" && r.hs !== "" && r.hs != null && r.as !== "" && r.as != null;
       var mid;
       if (hasScore) {
@@ -362,10 +383,15 @@
   }
 
   /* ---------------- team datalist ---------------- */
+  /* Roster comes from the canon (NL.clubs, one clubs-meta fetch per session),
+     not a local mirror — current season only, which is what a matchday
+     graphic is ever built from. */
   function buildTeamList() {
-    $("teamList").innerHTML = window.NL_CLUBS.map(function (c) {
-      return '<option value="' + escapeHtml(c.name) + '">';
-    }).join("");
+    NL.clubs.forSeason().then(function (clubs) {
+      $("teamList").innerHTML = clubs.map(function (c) {
+        return '<option value="' + escapeHtml(c.name) + '">';
+      }).join("");
+    }).catch(function () { /* datalist stays empty — names are free text anyway */ });
   }
 
   /* ---------------- export ---------------- */
@@ -497,7 +523,9 @@
     });
 
     window.addEventListener("resize", fitStage);
-    window.addEventListener("nl-clubs-updated", function () { buildTeamList(); render(); });
+    /* re-render once clubs-meta lands: short names and canonical-name
+       resolution both read NL.clubs, which is empty until then */
+    NL.clubs.load().then(render).catch(function () {});
     render();
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(render);
     /* re-fit after layout settles (fixes tiny 9x16 on first paint / in an iframe) */
