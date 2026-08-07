@@ -130,6 +130,22 @@ function verdictOf(predH, predA, realH, realA) {
   return 'wrong';
 }
 
+/* The most recent thing a fan did: their latest prediction, or their
+   registration if they have not made one. Used to break a tie, so a table
+   where nobody has scored yet reads newest-first rather than alphabetically —
+   at the start of a season that is the only signal in it, and A-Z buries
+   whoever just signed up at the bottom. */
+function lastActivity(reg, predsByDay) {
+  let last = Number(reg && reg.registeredAt) || 0;
+  for (const day of Object.keys(predsByDay || {})) {
+    for (const mid of Object.keys(predsByDay[day] || {})) {
+      const at = Number(predsByDay[day][mid] && predsByDay[day][mid].submittedAt) || 0;
+      if (at > last) last = at;
+    }
+  }
+  return last;
+}
+
 function rowHash(jwtId) {
   return crypto.createHash('sha256').update(ROW_SALT + String(jwtId)).digest('hex').slice(0, HASH_LEN);
 }
@@ -165,7 +181,7 @@ function tallyFor(predsByDay, matches, scope, now) {
 
    Field names are short because this is read by every client on every load:
    n name, c crest, t teamId, tn teamName, r results, e exacts, s settled,
-   h row hash. `t` is a club id, not a person — it is what lets the widget
+   h row hash, j last activity (epoch ms, tie-break only). `t` is a club id, not a person — it is what lets the widget
    filter to "fans of my club" without another read. */
 function buildRows(users, predictions, matches, scope, now) {
   const rows = [];
@@ -191,15 +207,15 @@ function buildRows(users, predictions, matches, scope, now) {
       e: t.exacts,
       s: t.settled,
       h: rowHash(jwtId),
-      _sort: reg.forename || '',
+      j: lastActivity(reg, predictions[jwtId]),
     });
   }
   rows.sort((a, b) => {
     if (b.r !== a.r) return b.r - a.r;
     if (b.e !== a.e) return b.e - a.e;
-    return a._sort.localeCompare(b._sort);
+    return b.j - a.j;          // most recent activity first
   });
-  return rows.map((r) => { delete r._sort; return r; });
+  return rows;
 }
 
 /* Every scope the widget can ask for: the whole season, each month that has a
@@ -380,7 +396,7 @@ async function main() {
 
 module.exports = {
   outcome, verdictOf, isSettled, matchdayKeyOf, monthOfMatchday,
-  tallyFor, buildRows, scopesFor, buildPayload, rowHash, ROW_SALT,
+  tallyFor, buildRows, scopesFor, buildPayload, rowHash, ROW_SALT, lastActivity,
   buildLocks, CUTOFF_MIN,
 };
 

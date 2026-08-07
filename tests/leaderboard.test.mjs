@@ -121,17 +121,42 @@ test('rows: a fan with nothing settled is left out of a NARROW scope', () => {
   assert.equal(rows.find((r) => r.n === 'Dan E'), undefined);
 });
 
-test('rows: forename breaks a full tie, so ordering is stable run to run', () => {
+test('rows: a full tie breaks to the most recent activity, not the alphabet', () => {
+  // Zoe registered later, so she is above Adam despite the Z. Alphabetical
+  // order buried whoever had just signed up at the bottom of a table where
+  // everybody was on nought — which is every table before the season starts.
   const users = {
-    x: { forename: 'Zoe', surnameInitial: 'Z', teamId: '1', teamName: 'T', crestUrl: '' },
-    y: { forename: 'Adam', surnameInitial: 'A', teamId: '1', teamName: 'T', crestUrl: '' },
+    x: { forename: 'Zoe', surnameInitial: 'Z', teamId: '1', teamName: 'T', crestUrl: '', registeredAt: 2000 },
+    y: { forename: 'Adam', surnameInitial: 'A', teamId: '1', teamName: 'T', crestUrl: '', registeredAt: 1000 },
   };
   const preds = {
     x: { '2026-08-01': { m1: { home: 2, away: 1 } } },
     y: { '2026-08-01': { m1: { home: 2, away: 1 } } },
   };
   const rows = lb.buildRows(users, preds, MATCHES, { kind: 'season' }, NOW);
-  assert.deepEqual(rows.map((r) => r.n), ['Adam A', 'Zoe Z']);
+  assert.deepEqual(rows.map((r) => r.n), ['Zoe Z', 'Adam A']);
+});
+
+test('activity: the latest prediction beats the registration date', () => {
+  // "Most recent thing they did", not "when they joined" — a fan who signed up
+  // in July and predicted this morning is more recently active than one who
+  // registered last night and has done nothing since.
+  const reg = { registeredAt: 1000 };
+  assert.equal(lb.lastActivity(reg, {}), 1000);
+  assert.equal(lb.lastActivity(reg, { '2026-08-01': { m1: { submittedAt: 5000 } } }), 5000);
+  // An older submission does not drag them backwards.
+  assert.equal(lb.lastActivity({ registeredAt: 9000 }, { '2026-08-01': { m1: { submittedAt: 5000 } } }), 9000);
+  assert.equal(lb.lastActivity(null, null), 0);
+});
+
+test('rows: a fan who has just predicted outranks one who only registered', () => {
+  const users = {
+    old: { forename: 'Old', surnameInitial: 'O', teamId: '1', teamName: 'T', crestUrl: '', registeredAt: 8000 },
+    act: { forename: 'Act', surnameInitial: 'A', teamId: '1', teamName: 'T', crestUrl: '', registeredAt: 1000 },
+  };
+  const preds = { act: { '2026-09-05': { m4: { home: 1, away: 0, submittedAt: 9999 } } } };
+  const rows = lb.buildRows(users, preds, MATCHES, { kind: 'season' }, NOW);
+  assert.deepEqual(rows.map((r) => r.n), ['Act A', 'Old O']);
 });
 
 test('scopes: month and day filter the same tallies', () => {
@@ -179,8 +204,10 @@ test('payload: carries the salt so a stale widget can spot a mismatch', () => {
 test('payload: rows carry a club id for the my-club filter, never a person', () => {
   const payload = lb.buildPayload(USERS, PREDS, MATCHES, NOW);
   const row = payload.season.rows[0];
-  assert.deepEqual(Object.keys(row).sort(), ['c', 'e', 'h', 'n', 'r', 's', 't', 'tn']);
+  assert.deepEqual(Object.keys(row).sort(), ['c', 'e', 'h', 'j', 'n', 'r', 's', 't', 'tn']);
   assert.equal(row.t, '10');
+  // `j` is a timestamp used only to break ties. It says when, never who.
+  assert.equal(typeof row.j, 'number');
 });
 
 // ---------------------------------------------------------------------------

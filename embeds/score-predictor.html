@@ -39,6 +39,20 @@
        ?sim=off          → real clock, bar hidden (explicit form)
 
      Changelog:
+       07/08/2026  v3.15 Two fixes to the standings, both visible in the
+                         signed-out teaser. Names no longer wrap: the gate
+                         is a flex container and the teaser was its second
+                         child, so card and table shared the width and
+                         squeezed every name onto two lines. They stack
+                         now, and the name cell truncates rather than
+                         wrapping if it ever runs out of room again.
+                         Level pegging breaks to the most recent activity
+                         — a fan's last prediction, or their registration
+                         if they have not made one — instead of A-Z.
+                         Before a ball is kicked everyone is on nought,
+                         and the alphabet buried whoever had just signed
+                         up at the bottom of the only table they had seen.
+                         You still come first inside your own tie.
        07/08/2026  v3.14 The leaderboard shows to signed-out visitors, as
                          the argument for joining. A sign-in card on its
                          own does not make the case; other people already
@@ -361,7 +375,11 @@
   /* Gate card — covers loading + signed-out, replaces the previous overlay/blur approach */
   #nlPredictor .nlsp__gate {
     padding:48px 16px;
-    display:flex; justify-content:center;
+    /* Column, not row: the teaser is a second child of this flex container,
+       and side by side the two shared the width — which squeezed the table to
+       about 300px and truncated every name. The card is the invitation and
+       the table is the argument for it, so they stack. */
+    display:flex; flex-direction:column; align-items:center; gap:18px;
   }
   #nlPredictor .nlsp__gate-card {
     background:var(--white); border:1px solid var(--border); border-radius:var(--radius);
@@ -967,6 +985,12 @@
     font-weight:800; font-variation-settings:'wght' 800;
   }
   #nlPredictor .nlsp__thead span { text-align:right; }
+  /* One line per player. The teaser column is narrow, and a wrapped "Adam /
+     S" turns a table you scan into a table you read. */
+  #nlPredictor #nlsp-table .nlsp__trow > span:nth-child(3),
+  #nlPredictor #nlsp-teaser .nlsp__trow > span:nth-child(3) {
+    min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
   #nlPredictor #nlsp-table .nlsp__trow .nlsp__pts,
   #nlPredictor #nlsp-table .nlsp__trow .nlsp__exacts,
   #nlPredictor #nlsp-table .nlsp__trow .nlsp__games,
@@ -1033,7 +1057,7 @@
 
   /* The signed-out teaser sits under the sign-in card, so it needs the top
      margin the gate card does not. */
-  #nlPredictor .nlsp__teaser { margin-top:18px; }
+  #nlPredictor .nlsp__teaser { width:100%; max-width:520px; }
 
   /* Your row, pinned when it is not on this page. Dashed edge so it reads as
      "brought here for comparison" rather than as part of the run of ten. */
@@ -2664,17 +2688,28 @@
         n: ((mine.forename || '') + ' ' + (mine.surnameInitial || '')).trim(),
         c: mine.crestUrl || '', t: mine.teamId || '', tn: mine.teamName || '',
         r: t.results, e: t.exacts, s: t.settled, h: state.myHash || '__me__',
+        // Without this our synthetic row sorts as the oldest thing in the
+        // table, which is the opposite of the truth: we are here right now.
+        j: Date.now(),
       });
     }
     /* Ties break to YOU first, then alphabetically. Before a ball is kicked
        everyone is joint first on nought, and hunting for your own name down an
        alphabetical list of everyone who has entered is a poor greeting. Your
        rank is unchanged — the '=' labels still say it is a tie. */
+    /* Level pegging breaks to the most recent activity — a fan's last
+       prediction, or their registration if they have not made one. Before a
+       ball is kicked everyone is on nought, and A-Z buried whoever had just
+       signed up at the bottom of the only table they had seen.
+
+       You still come first inside your own tie: rank unchanged, the '=' still
+       says it is level, but you are not hunting for your own name. */
     rows.sort(function (a, b) {
       if (b.r !== a.r) return b.r - a.r;
       if (b.e !== a.e) return b.e - a.e;
       var am = isMyRow(a), bm = isMyRow(b);
       if (am !== bm) return am ? -1 : 1;
+      if ((b.j || 0) !== (a.j || 0)) return (b.j || 0) - (a.j || 0);
       return String(a.n).localeCompare(String(b.n));
     });
     return rows;
