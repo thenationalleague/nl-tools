@@ -6,6 +6,15 @@
   File: /graphics/totw/index.html
 
   CHANGELOG
+  v7.6 (07/08/2026) — Club roster from the canon
+    - Team dropdowns were built from a baked TEAM_NAMES array still holding
+      the 2025-26 roster (10 clubs wrong for 2026-27). Now read from
+      NL.clubs.forSeason() — current season only, so promotion/relegation
+      needs no edit here.
+    - TEAM_SHORTNAMES (a parallel array that had to stay index-aligned)
+      dropped in favour of the clubs-meta `code` field via NL.clubs.byName.
+    - Options grouped by division (National / North / South).
+
   v7.5 (13/07/2026) — Migrate clipboard + download to shared canon
     - copyExportText / copyExcelTSV now use NL.copy(text, {silent:true})
       instead of raw navigator.clipboard.writeText; existing setStatus
@@ -165,6 +174,15 @@
     var NL_TOOL_KEY = 'staff-graphics';
 
   window.NL_CHANGELOG = [
+    {
+      date: '7 August 2026',
+      version: 'v1.6',
+      items: [
+        'Team dropdowns now list the 2026-27 clubs — the list was still last season\'s and is now read from the shared club data, so it follows promotion and relegation on its own.',
+        'Teams are grouped by division in the dropdown.',
+        'A saved lineup naming a club that has left the league keeps that club rather than silently swapping it.'
+      ]
+    },
     {
       date: '13 July 2026',
       version: 'v1.5',
@@ -710,28 +728,28 @@
       {pos:"LF",x:450,y:240},{pos:"RF",x:630,y:240}
     ]
   };
-  // Teams + crests (same order you supplied)
-  const TEAM_NAMES = [
-    "Aldershot Town","Altrincham","Boreham Wood","Boston United","Brackley Town","Braintree Town","Carlisle United","Eastleigh",
-    "FC Halifax Town","Forest Green Rovers","Gateshead","Hartlepool United","Morecambe","Rochdale","Scunthorpe United","Solihull Moors",
-    "Southend United","Sutton United","Tamworth","Truro City","Wealdstone","Woking","Yeovil Town","York City","AFC Fylde","AFC Telford United",
-    "Alfreton Town","Bedford Town","Buxton","Chester","Chorley","Curzon Ashton","Darlington","Hereford","Kidderminster Harriers","King's Lynn Town",
-    "Leamington","Macclesfield","Marine","Merthyr Town","Oxford City","Peterborough Sports","Radcliffe","Scarborough Athletic","South Shields","Southport",
-    "Spennymoor Town","Worksop Town","AFC Totton","Bath City","Chelmsford City","Chesham United","Chippenham Town","Dagenham & Redbridge","Dorking Wanderers",
-    "Dover Athletic","Eastbourne Borough","Ebbsfleet United","Enfield Town","Farnborough","Hampton & Richmond Borough","Hemel Hempstead Town","Hornchurch",
-    "Horsham","Maidenhead United","Maidstone United","Salisbury","Slough Town","Tonbridge Angels","Torquay United","Weston-super-Mare","Worthing"
-  ];
+  // Teams come from the canon (NL.clubs → clubs-meta), current season only, so
+  // the dropdowns follow promotion and relegation without an edit here. Each
+  // entry is a clubs-meta record: .name, .code (three-letter short) and
+  // .division resolved to this season's tier.
+  const DIV_ORDER = ["National", "North", "South"];
+  let TEAMS = [];
 
-  // Team shortnames aligned to TEAM_NAMES order (DO NOT reorder unless TEAM_NAMES changes)
-  const TEAM_SHORTNAMES = [
-    "ALD","ALT","BHW","BOS","BRK","BRA","CAR","EAS","HAL","FGR","GAT","HAR","MOR","ROC","SCU","SOL","SOU","SUT","TAM","TRU","WEA","WOK","YEO","YOR",
-    "FYL","TEL","ALF","BED","BUX","CHE","CHO","CUR","DAR","HER","KID","KLT","LEA","MAC","MAR","MER","OXC","PBS","RAD","SCA","SSH","SPT","SPE","WRK",
-    "TOT","BAT","CHC","CHU","CHI","DAG","DOR","DOV","EAB","EBB","ENF","FAB","HRB","HHT","HOR","HRS","MHU","MSU","SAL","SLO","TON","TOR","WSM","WOR"
-  ];
+  function defaultTeamName(){
+    return (TEAMS[0] && TEAMS[0].name) || "";
+  }
 
-   const TEAMS = TEAM_NAMES.map((name) => ({
-    name
-  }));
+  // Filled before the first rebuildLineup(); one clubs-meta fetch per session.
+  async function loadTeams(){
+    try{
+      TEAMS = await NL.clubs.forSeason();
+    }catch(e){
+      console.error(e);
+      TEAMS = [];
+      setStatus("Club list unavailable");
+    }
+    return TEAMS;
+  }
 
   /* ================= ELEMENTS ================= */
 
@@ -823,9 +841,8 @@
   }
 
   function getTeamShort(teamName){
-    const idx = TEAM_NAMES.indexOf(teamName);
-    if(idx >= 0 && idx < TEAM_SHORTNAMES.length) return TEAM_SHORTNAMES[idx];
-    return "";
+    const club = NL.clubs.byName(teamName);
+    return (club && club.code) || "";
   }
 
   function buildFilename(){
@@ -835,18 +852,46 @@
   }
 
   function getTeamCrestUrl(teamName){
-    const chosen = TEAM_NAMES.includes(teamName) ? teamName : (TEAMS[0] ? TEAMS[0].name : "");
+    // any club clubs-meta knows about, not just this season's — a saved lineup
+    // naming a since-relegated club still draws that club's crest
+    const chosen = NL.clubs.byName(teamName) ? teamName : defaultTeamName();
     return chosen ? crestUrlForTeam(chosen) : "";
   }
 
   function buildTeamSelect(current){
     const s = document.createElement("select");
+
+    const groups = {};
+    function groupFor(division){
+      const key = division || "Other";
+      if(!groups[key]){
+        groups[key] = document.createElement("optgroup");
+        groups[key].label = key;
+        s.appendChild(groups[key]);
+      }
+      return groups[key];
+    }
+    // National / North / South first and in that order, whatever order the
+    // roster arrives in; anything else falls through to "Other"
+    for(const div of DIV_ORDER){
+      if(TEAMS.some((t) => t.division === div)) groupFor(div);
+    }
     for(const t of TEAMS){
       const o = document.createElement("option");
       o.value = t.name;
       o.textContent = t.name;
-      s.appendChild(o);
+      groupFor(t.division).appendChild(o);
     }
+
+    // a saved lineup may name a club that has since left the league — keep it
+    // selectable rather than silently swapping it for another club
+    if(current && !TEAMS.some((t) => t.name === current)){
+      const o = document.createElement("option");
+      o.value = current;
+      o.textContent = current;
+      s.insertBefore(o, s.firstChild);
+    }
+
     if(current) s.value = current;
     return s;
   }
@@ -1051,7 +1096,7 @@
     for(const slot of slots){
       const posKey = slot.pos;
       const s = stateByPos[posKey] || {};
-      const team = s.team || TEAMS[0].name;
+      const team = s.team || defaultTeamName();
       const crestUrl = getTeamCrestUrl(team);
 
       let crestImg = null;
@@ -1125,7 +1170,7 @@
 
     for(const slot of slots){
       const posKey = slot.pos;
-      const saved = stateByPos[posKey] || { team: TEAMS[0].name, name:"", perf:"" };
+      const saved = stateByPos[posKey] || { team: defaultTeamName(), name:"", perf:"" };
 
       const posCell = document.createElement("div");
       posCell.className = "pos";
@@ -1701,6 +1746,7 @@
 
   async function start(){
     setDefaultDateIfBlank();
+    await loadTeams();          // dropdowns need the roster before the first build
     autoload();
     divisionSel._prevDivision = divisionSel.value;
     rebuildLineup();
