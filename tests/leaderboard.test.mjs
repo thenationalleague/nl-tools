@@ -176,3 +176,41 @@ test('payload: rows carry a club id for the my-club filter, never a person', () 
   assert.deepEqual(Object.keys(row).sort(), ['c', 'e', 'h', 'n', 'r', 's', 't', 'tn']);
   assert.equal(row.t, '10');
 });
+
+// ---------------------------------------------------------------------------
+// The kick-off lock
+//
+// The cutoff used to live only in the browser, which meant it was a courtesy
+// rather than a rule: ".write" was "auth != null", so devtools could post a
+// prediction after a match had kicked off, or after it had finished. These
+// cover the table the security rule now compares server time against.
+
+test('locks: one cutoff per fixture, an hour before kick-off', () => {
+  const locks = lb.buildLocks(MATCHES);
+  const ko = new Date('2026-08-01T14:00:00Z').getTime();
+  assert.equal(locks['2026-08-01'].m1, ko - 60 * 60e3);
+  assert.equal(locks['2026-08-01'].m2, ko - 60 * 60e3);
+  assert.equal(lb.CUTOFF_MIN, 60);
+});
+
+test('locks: keyed by the same matchday string predictions are', () => {
+  // The rule looks up locks/$matchday/$matchId using the path the client
+  // writes to. A different key derivation here would deny every write.
+  const locks = lb.buildLocks(MATCHES);
+  assert.deepEqual(Object.keys(locks).sort(), ['2026-08-01', '2026-09-05']);
+  assert.ok(locks['2026-09-05'].m4, 'an unplayed fixture still gets a lock');
+});
+
+test('locks: a fixture with no kick-off time is omitted, so it stays shut', () => {
+  // Fail closed. The rule denies when the value is missing, so omitting a
+  // fixture we cannot time is safer than guessing one.
+  const broken = [{ id: 'x', attributes: { matchPeriod: 'PreMatch', homeTeam: {}, awayTeam: {} } }];
+  assert.deepEqual(lb.buildLocks(broken), {});
+});
+
+test('locks: a rescheduled fixture moves its cutoff with it', () => {
+  const first = lb.buildLocks([match('m9', '2026-08-01T14:00:00Z', 'PreMatch', null, null)]);
+  const moved = lb.buildLocks([match('m9', '2026-08-03T19:45:00Z', 'PreMatch', null, null)]);
+  assert.ok(moved['2026-08-03'].m9 > first['2026-08-01'].m9);
+  assert.equal(first['2026-08-03'], undefined);
+});
