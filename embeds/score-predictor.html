@@ -39,6 +39,21 @@
        ?sim=off          → real clock, bar hidden (explicit form)
 
      Changelog:
+       07/08/2026  v3.13 Your row follows you through the pages. Off the
+                         page you are looking at, it pins to the edge you
+                         are on the far side of — above the ten when you
+                         rank higher, below when you rank lower — so any
+                         page answers "how am I doing against these ten"
+                         without paging back to find out. On your own page
+                         you are simply in place and nothing is pinned:
+                         ten rows, or eleven when the eleventh is you. A
+                         dashed edge marks the pinned row as brought there
+                         for comparison rather than part of the run. The
+                         table also opens on the page you are on, because
+                         a leaderboard you have to hunt through for your
+                         own name has failed at the only question most
+                         people ask of it; paging by hand takes over from
+                         there, and changing scope or club hands it back.
        07/08/2026  v3.12 The season table lists everyone who has entered,
                          ten at a time. It only ever showed fans with a
                          settled prediction, so before the first result it
@@ -985,6 +1000,12 @@
   #nlPredictor .nlsp__hero-card .nlsp__wdlbox.is-w { background:var(--green); border-color:var(--green); color:var(--white); }
   #nlPredictor .nlsp__hero-card .nlsp__wdlbox.is-l { background:var(--red);   border-color:var(--red);   color:var(--white); }
 
+  /* Your row, pinned when it is not on this page. Dashed edge so it reads as
+     "brought here for comparison" rather than as part of the run of ten. */
+  #nlPredictor .nlsp__trow.is-pinned { position:relative; }
+  #nlPredictor .nlsp__trow.is-pinned-top    { border-bottom:2px dashed var(--border); }
+  #nlPredictor .nlsp__trow.is-pinned-bottom { border-top:2px dashed var(--border); }
+
   /* Leaderboard pager. Arrows, not numbered pages: the field grows all season
      and a row of numbers would grow with it. */
   #nlPredictor .nlsp__pager {
@@ -1351,7 +1372,7 @@
     lbMonth: null,          // selected month ('YYYY-MM') when scope is 'month'
     lbDay: null,            // selected matchday key ('YYYY-MM-DD') when scope is 'day'
     lbMine: false,          // true = only fans of the user's own club
-    lbPage: 0,              // leaderboard page (10 rows each)
+    lbPage: null,           // leaderboard page; null = jump to the one you are on
     sim: { fixed: null, barEnabled: false } // explicit sim 'now'; bar shown only when ?sim present
   };
 
@@ -2684,21 +2705,21 @@
       if (s === 'day' && !state.lbDay) state.lbDay = lbDefaultDay();
       // A scope change points at a different aggregate node, so it needs a
       // fetch; the club toggle below only filters rows we already hold.
-      state.lbPage = 0;
+      state.lbPage = null;
       loadLeaderboard();
     });
     if (clubEl) clubEl.addEventListener('click', function (e) {
       var b = e.target.closest ? e.target.closest('button') : null;
       if (!b) return;
       state.lbMine = b.getAttribute('data-mine') === '1';
-      state.lbPage = 0;
+      state.lbPage = null;
       renderTable();
     });
     if (mSel) mSel.addEventListener('change', function () {
-      state.lbMonth = mSel.value; state.lbPage = 0; loadLeaderboard();
+      state.lbMonth = mSel.value; state.lbPage = null; loadLeaderboard();
     });
     if (dSel) dSel.addEventListener('change', function () {
-      state.lbDay = dSel.value; state.lbPage = 0; loadLeaderboard();
+      state.lbDay = dSel.value; state.lbPage = null; loadLeaderboard();
     });
   }
   function renderTable() {
@@ -2714,11 +2735,26 @@
     });
 
     var pages = Math.max(1, Math.ceil(rows.length / LB_PAGE_SIZE));
+    var myIdx = -1;
+    for (var mi = 0; mi < rows.length; mi++) { if (isMyRow(rows[mi])) { myIdx = mi; break; } }
+
+    /* Open on the page you are on. A leaderboard you have to hunt through for
+       your own name has failed at the only question most people ask of it. */
+    if (state.lbPage == null) state.lbPage = myIdx >= 0 ? Math.floor(myIdx / LB_PAGE_SIZE) : 0;
     if (state.lbPage >= pages) state.lbPage = pages - 1;
     if (state.lbPage < 0) state.lbPage = 0;
+
     var from = state.lbPage * LB_PAGE_SIZE;
     var pageRows = rows.slice(from, from + LB_PAGE_SIZE);
     var pageRanks = ranks.slice(from, from + LB_PAGE_SIZE);
+
+    /* Your row follows you. Off this page, it pins to the edge you are on the
+       far side of — above the ten if you rank higher, below if you rank lower
+       — so the page always answers "how am I doing against these ten" without
+       paging back to find out. On your own page you are simply in place, and
+       nothing is pinned: ten rows, or eleven when the eleventh is you. */
+    var pinAbove = myIdx >= 0 && myIdx < from;
+    var pinBelow = myIdx >= 0 && myIdx >= from + LB_PAGE_SIZE;
 
     // Three distinct empty states, because they mean different things: still
     // fetching, could not fetch, and genuinely nobody here yet.
@@ -2739,23 +2775,29 @@
         '<span title="Finished matches predicted">Games</span>' +
       '</div>' +
       (empty ? '<div class="nlsp__clubfoot">' + $h(empty) + '</div>' : '') +
+      (pinAbove ? trowHTML(rows[myIdx], ranks[myIdx], ' is-pinned is-pinned-top') : '') +
       pageRows.map(function (r, i) {
-        var me = isMyRow(r);
-        return '<div class="nlsp__trow' + (me ? ' is-you' : '') + '">' +
-          '<span class="nlsp__rank">' + pageRanks[i] + '</span>' +
-          crestImg(r.c, r.tn, 22) +
-          '<span>' + $h(r.n) + (me ? ' <span class="nlsp__youlbl">(you)</span>' : '') + '</span>' +
-          '<span class="nlsp__pts">' + r.r + '</span>' +
-          '<span class="nlsp__exacts">' + r.e + '</span>' +
-          '<span class="nlsp__games">' + r.s + '</span>' +
-        '</div>';
+        return trowHTML(r, pageRanks[i], '');
       }).join('') +
+      (pinBelow ? trowHTML(rows[myIdx], ranks[myIdx], ' is-pinned is-pinned-bottom') : '') +
       pagerHTML(rows.length, pages, from, pageRows.length);
 
     tableEl.className = 'nlsp__table';
     tableEl.innerHTML = inner;
     wireFilters();
     wirePager();
+  }
+
+  function trowHTML(r, rank, extraCls) {
+    var me = isMyRow(r);
+    return '<div class="nlsp__trow' + (me ? ' is-you' : '') + (extraCls || '') + '">' +
+      '<span class="nlsp__rank">' + rank + '</span>' +
+      crestImg(r.c, r.tn, 22) +
+      '<span>' + $h(r.n) + (me ? ' <span class="nlsp__youlbl">(you)</span>' : '') + '</span>' +
+      '<span class="nlsp__pts">' + r.r + '</span>' +
+      '<span class="nlsp__exacts">' + r.e + '</span>' +
+      '<span class="nlsp__games">' + r.s + '</span>' +
+    '</div>';
   }
 
   /* Arrows rather than numbered pages: with everyone who has entered listed,
@@ -2780,7 +2822,7 @@
     el.addEventListener('click', function (e) {
       var b = e.target.closest ? e.target.closest('button[data-page]') : null;
       if (!b || b.disabled) return;
-      state.lbPage += (b.getAttribute('data-page') === 'next' ? 1 : -1);
+      state.lbPage = (state.lbPage || 0) + (b.getAttribute('data-page') === 'next' ? 1 : -1);
       renderTable();
     });
   }
