@@ -15,10 +15,13 @@
   it: fans sign in anonymously, so no property of an anonymous session could
   distinguish staff from anybody else.
 
-  Instead the page asks the mintWidgetsToken function (functions/fan-widgets.js)
-  for a sign-in token. That function verifies the caller is a superadmin HERE,
-  in nl-tools, where the staff role model exists, and issues a token for
-  nl-widgets carrying a `staff` claim. The widgets rules grant tree-wide read on
+  Instead the page asks for a sign-in token through an RTDB handshake: it
+  writes app-data/ops-fan-widgets/authRequests/<uid>, and the fanWidgetsAuth
+  trigger (functions/fan-widgets.js) verifies the caller is a superadmin HERE,
+  in nl-tools, where the staff role model exists, then writes back a token for
+  nl-widgets carrying a `staff` claim. A callable would be simpler, but this
+  project's org policy blocks a public invoker on any new Cloud Run service —
+  same reason as programme.js and club-directory.js. The widgets rules grant tree-wide read on
   that claim alone. Trust chain: nl-tools Firebase Auth → function → nl-widgets,
   verified server-side at every link.
 
@@ -51,7 +54,6 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-functions-compat.js"></script>
 
   <!-- Firebase init -->
   <script>
@@ -65,7 +67,6 @@
       appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
     });
     var db = firebase.database();
-    var fns = firebase.functions ? firebase.app().functions('europe-west2') : null;
 
     /* Second app, pointed at the fan-widget project. Named, because the
        default app is this tool's own session — two unnamed apps would fight
@@ -206,7 +207,7 @@
      nodes are held in memory and re-rendered on any change, because they are
      cross-referenced: a fan's row needs their predictions and their Team of
      the Week picks alongside their registration. */
-  var state = { users: null, preds: {}, motm: {}, motmNames: {}, q: '', live: false };
+  var state = { users: null, preds: {}, motm: {}, motmNames: {}, q: '' };
 
   var syncEl   = document.getElementById('fwSync');
   var statsEl  = document.getElementById('fwStats');
@@ -214,29 +215,68 @@
   var fansEl   = document.getElementById('fwFans');
   var searchEl = document.getElementById('fwSearch');
 
-  window.TOOL.boot = function () {
-    if (!fns) {
-      fail('The Firebase Functions SDK did not load, so this page cannot get its access token.');
-      return;
-    }
-    /* Prove who we are here, to be let in there. The function checks the
-       superadmin role server-side; a denial arrives as permission-denied. */
-    NL.ensureAuth()
-      .then(function () { return fns.httpsCallable('mintWidgetsToken')(); })
-      .then(function (res) {
-        return firebase.auth(widgetsApp).signInWithCustomToken(res.data.token);
-      })
-      .then(function () {
-        state.live = true;
-        listen();
-      })
-      .catch(function (err) {
-        var code = (err && err.code) || '';
-        fail(code.indexOf('permission-denied') !== -1
-          ? 'This tool is superadmin only.'
-          : 'Could not connect to the fan data: ' + (err && err.message ? err.message : String(err)));
-      });
+  window.TOOL.boot = function (session) {
+    var uid = session && session.uid;
+    if (!uid) { fail('No session — try reloading.'); return; }
+    handshake(uid).then(function (token) {
+      return firebase.auth(widgetsApp).signInWithCustomToken(token);
+    }).then(function () {
+      listen();
+    }).catch(function (err) {
+      fail(err && err.message ? err.message : String(err));
+    });
   };
+
+  /* Ask the server for a pass into the fan-widget project.
+     Not a callable: this project's org policy blocks a public invoker on any
+     NEW Cloud Run service, so a callable cannot be created here at all — the
+     first attempt failed exactly that way. programme.js and club-directory.js
+     already established the RTDB-triggered handshake as the way round it, and
+     this follows the same three steps: write a request, wait for the grant,
+     clean up after yourself. */
+  function handshake(uid) {
+    var reqRef   = db.ref('app-data/ops-fan-widgets/authRequests/' + uid);
+    var grantRef = db.ref('app-data/ops-fan-widgets/authGrants/' + uid);
+    return NL.ensureAuth().then(function () {
+      // Clear any grant left by an interrupted attempt, so we cannot read a
+      // stale token instead of waiting for our own.
+      return grantRef.remove().catch(function () {});
+    }).then(function () {
+      return new Promise(function (resolve, reject) {
+        var settled = false;
+        var timer = setTimeout(function () {
+          if (settled) return;
+          settled = true; grantRef.off();
+          reject(new Error('The server did not respond. If this is new, the fanWidgetsAuth function may not be deployed yet.'));
+        }, 30000);
+
+        grantRef.on('value', function (snap) {
+          var g = snap.val();
+          if (!g || settled) return;
+          settled = true;
+          clearTimeout(timer);
+          grantRef.off();
+          // Spend it and delete it — a token sitting in the database is a
+          // token someone else could find.
+          grantRef.remove().catch(function () {});
+          if (g.ok && g.customToken) return resolve(g.customToken);
+          reject(new Error(g.error === 'not-superadmin'
+            ? 'This tool is superadmin only.'
+            : 'The server could not issue an access token (' + (g.error || 'unknown') + ').'));
+        }, function (err) {
+          if (settled) return;
+          settled = true; clearTimeout(timer);
+          reject(new Error('Could not read the access grant: ' + (err && err.code || 'error')));
+        });
+
+        reqRef.set({ ts: firebase.database.ServerValue.TIMESTAMP }).catch(function (err) {
+          if (settled) return;
+          settled = true; clearTimeout(timer); grantRef.off();
+          reject(new Error('Could not request access: ' + (err && err.message || 'error')));
+        });
+      });
+    });
+  }
 
   function fail(msg) {
     syncEl.textContent = '';

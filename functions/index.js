@@ -5,7 +5,7 @@
  *   consumeInvite / submitAccessRequest / withdrawAccessRequest
  *                     — account-lifecycle callables (server-minted roles).
  *                       See account.js and system/rtdb/SECURITY-role-self-grant.md.
- *   mintWidgetsToken  — issues a superadmin a staff token for the separate
+ *   fanWidgetsAuth    — issues a superadmin a staff token for the separate
  *                       nl-widgets project, so the Fan Widgets tool can read
  *                       fan data live without mirroring it. See fan-widgets.js.
  *   programmeEnter / programmeClaim
@@ -134,10 +134,11 @@ Object.assign(exports, require("./account"));
 // `firebase deploy --only functions` picks them up. See functions/programme.js.
 Object.assign(exports, require("./programme"));
 
-// Fan-widget staff access (mintWidgetsToken). Exported here for the same
-// reason as the two above: a plain `firebase deploy --only functions` has to
-// pick it up. It is the only route by which a browser can read the fan data
-// live without that data being copied anywhere. See functions/fan-widgets.js.
+// Fan-widget staff access (fanWidgetsAuth) — RTDB-triggered for the same
+// org-policy reason as programme.js and club-directory.js: a NEW callable
+// cannot be granted a public invoker on this project. It is the only route by
+// which a browser can read the fan data live without that data being copied
+// anywhere. See functions/fan-widgets.js.
 Object.assign(exports, require("./fan-widgets"));
 
 // Club Directory passcode → scoped-claim trigger (clubDirectoryAuth). Same
