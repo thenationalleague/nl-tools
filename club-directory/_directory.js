@@ -118,10 +118,40 @@
      the whole tidier to read a field safely. */
   function rolesOf(p) { return arr(p && p.roles); }
   function reachable(p) { return emailsOf(p).length > 0 || phonesOf(p).length > 0; }
+  /* lastName where the club gave one, otherwise the last word of the name.
+     A directory is looked up by surname and nothing else. */
+  function surnameOf(p) {
+    var last = ((p && p.lastName) || '').trim();
+    if (last) { return last; }
+    var whole = fullName(p).trim();
+    var bits = whole.split(/\s+/);
+    return bits.length > 1 ? bits[bits.length - 1] : whole;
+  }
+
+  /* SMITH, not Smith. The handbook has always set surnames this way and the
+     reason survives the move to a screen: at a glance it tells you which word
+     the list is sorted on, which for a Welsh or Irish name — Owen Rhys Jones,
+     Sean Michael O'Brien — is otherwise a guess. */
+  function displayName(p, opts) {
+    var whole = fullName(p);
+    if (!(opts && opts.capsSurname) || !whole) { return esc(whole || 'Name not given'); }
+    var last = surnameOf(p);
+    var at = whole.toLowerCase().lastIndexOf(last.toLowerCase());
+    if (!last || at < 0) { return esc(whole); }
+    return esc(whole.slice(0, at)) +
+      '<span class="cd-sur">' + esc(whole.slice(at, at + last.length)) + '</span>' +
+      esc(whole.slice(at + last.length));
+  }
+
+  function bySurname(a, b) {
+    var d = surnameOf(a).toLowerCase().localeCompare(surnameOf(b).toLowerCase());
+    return d || fullName(a).toLowerCase().localeCompare(fullName(b).toLowerCase());
+  }
+
   function sectionPeople(rec, section) {
     return arr(rec.people).filter(function (p) {
       return arr(p.roles).some(function (r) { return r.section === section; });
-    });
+    }).sort(bySurname);
   }
   /* Banner colours: the club's primary as the background, their secondary as
      the type. That is the pairing the clubs use themselves, so Forest Green
@@ -231,6 +261,51 @@
     }).join('');
   }
 
+  /* One person, one card. Same data and — this is the part that matters —
+     the same suppression: hidden is computed exactly as personRow computes
+     it, from the same flag, and the contact block is never built when it is
+     set. A second renderer that decided for itself who to show would be a
+     second chance to get it wrong, and the reader is where getting it wrong
+     is published. */
+  function personCard(p, section, opts) {
+    var unlisted = !!p.hideContact;
+    var hidden = unlisted && !(opts && opts.showHidden);
+    var here = arr(p.roles).filter(function (r) { return r.section === section; });
+    var titles = here.map(function (r) { return (r.title || '').trim(); }).filter(Boolean);
+    var depts = arr(p.roles).map(function (r) { return r.section; })
+      .filter(function (x, i, a) { return x && a.indexOf(x) === i; });
+
+    /* icon-email and icon-phone were added to the canon sprite for this — it
+       carried seven social platforms and no way to say "email", which for a
+       contacts directory is the wrong gap to have. */
+    var lines = hidden ? '' : emailsOf(p, section).map(function (e) {
+      return '<a class="cd-pc__line" href="mailto:' + esc(e) + '">' +
+        '<span class="cd-pc__ic">' + glyph('email') + '</span>' + esc(e) + '</a>';
+    }).concat(phonesOf(p, section).map(function (x) {
+      var n = (x.number || '').trim(), ext = (x.ext || '').trim();
+      return '<a class="cd-pc__line" href="tel:' + esc(tel(n)) + '">' +
+        '<span class="cd-pc__ic">' + glyph('phone') + '</span>' + esc(n) +
+        (ext ? ' <span class="cd-row__ext">ext ' + esc(ext) + '</span>' : '') + '</a>';
+    })).join('');
+
+    return '<li class="cd-pc' + (unlisted ? ' cd-pc--unlisted' : '') + '">' +
+      '<div class="cd-pc__top"><div class="cd-pc__id">' +
+        '<div class="cd-pc__name">' + displayName(p, opts) + '</div>' +
+        (titles.length
+          ? '<div class="cd-pc__role">' + titles.map(esc).join(' &middot; ') + '</div>'
+          : (opts && opts.showGaps ? '<div class="cd-pc__role"><em>No job title</em></div>' : '')) +
+      '</div></div>' +
+      (depts.length > 1
+        ? '<div class="cd-pc__depts">' + depts.map(function (d) {
+            return '<span class="cd-pc__dept">' + esc(d) + '</span>';
+          }).join('') + '</div>'
+        : '') +
+      '<div class="cd-pc__lines">' + (lines ||
+        '<span class="cd-row__quiet">' + (hidden ? 'Not published' : 'None held') +
+        '</span>') + '</div>' +
+    '</li>';
+  }
+
   /* ---------------------------------------------------------------- render */
   function renderClub(rec, opts) {
     opts = opts || {};
@@ -252,12 +327,15 @@
         '<span class="cd-social__url">' + esc(u.replace(/^https?:\/\//i, '')) + '</span></a>';
     }).filter(Boolean).join('');
 
+    var cards = !!(opts && opts.cards);
     var depts = ORDER.map(function (s) {
       var who = sectionPeople(rec, s);
       if (!who.length) { return ''; }
       return '<div class="cd-dept"><h3 class="cd-dept__h">' + esc(s) + '</h3>' +
-        '<ul class="cd-rows">' +
-        who.map(function (p) { return personRow(p, s, opts); }).join('') +
+        '<ul class="' + (cards ? 'cd-cards' : 'cd-rows') + '">' +
+        who.map(function (p) {
+          return cards ? personCard(p, s, opts) : personRow(p, s, opts);
+        }).join('') +
         '</ul></div>';
     }).filter(Boolean).join('');
 
@@ -346,6 +424,9 @@
     rolesOf: rolesOf,
     renderClub: renderClub,
     personRow: personRow,
+    personCard: personCard,
+    surnameOf: surnameOf,
+    bySurname: bySurname,
     search: search,
     fullName: fullName,
     reachable: reachable,
