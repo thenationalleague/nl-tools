@@ -100,7 +100,8 @@
         items: [
           'Initial build. Live view of the fan widgets — registrations, predictions and Team of the Week picks appear as they happen.',
           'Reads the nl-widgets project directly rather than a copy: a mintWidgetsToken call proves superadmin here, and returns a token carrying a staff claim there. Nothing is duplicated into this project.',
-          'Superadmin only. This is personal data.'
+          'Superadmin only. This is personal data.',
+          'v0.2 — Predictor and Team of the Week split into tabs. Fixtures render as crest + three-letter code rather than the raw NLS match id. Each fan is a disclosure row rather than every prediction on screen at once.'
         ]
       }
     ];
@@ -130,14 +131,36 @@
      brand rule and re-hide the page. */
 
   .fw-sync { margin: 0 0 16px; }
-  /* One label style for the date headings and the "none yet" notes. */
-  .fw-daylabel { margin-top: 10px; }
+  .fw-panel[hidden] { display: none; }
 
-  /* A fan and their record. The predictions are the point, so they get the
-     room; the summary line above stays scannable. */
-  .fw-fan__head {
-    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  /* A fan is a disclosure, not a dump. The summary answers "who, which club,
+     how much" in one line; the predictions are only interesting once you have
+     picked someone, and rendering all of them for everyone was a wall of
+     numbers nobody could scan. */
+  .fw-fan {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 8px;
   }
+  .fw-fan > summary {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px 14px; cursor: pointer; list-style: none;
+  }
+  .fw-fan > summary::-webkit-details-marker { display: none; }
+  /* The arrow is the affordance — it has to turn, or the row reads as inert. */
+  .fw-fan > summary::before {
+    content: '';
+    flex: none; width: 0; height: 0;
+    border-left: 5px solid var(--text-muted);
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    transition: transform .15s ease;
+  }
+  .fw-fan[open] > summary::before { transform: rotate(90deg); }
+  .fw-fan > summary:hover { background: var(--off-white); }
+  .fw-fan > summary:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .fw-fan__name { font-weight: 800; font-variation-settings: 'wght' 800; }
   .fw-fan__club {
     display: inline-flex; align-items: center; gap: 6px;
     color: var(--text-muted); font-size: var(--text-sm);
@@ -145,20 +168,32 @@
   .fw-fan__club img {
     width: 20px; height: 20px; object-fit: contain; border-radius: var(--radius-sm);
   }
+  .fw-fan__spacer { flex: 1; }
+  .fw-fan__body { padding: 0 14px 12px; border-top: 1px solid var(--border); }
+
+  /* One label style for the date headings and the "none yet" notes. */
+  .fw-daylabel { margin-top: 10px; }
+
   .fw-preds {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
     gap: 6px 18px; margin-top: 10px;
   }
   .fw-pred {
-    display: flex; justify-content: space-between; gap: 10px;
+    display: flex; align-items: center; gap: 10px;
     font-size: var(--text-sm); padding: 3px 0;
     border-bottom: 1px solid var(--border);
   }
   .fw-pred__score {
+    margin-left: auto;
     font-variant-numeric: tabular-nums;
     font-weight: 800; font-variation-settings: 'wght' 800;
   }
-  .fw-preds .fw-pred span:last-child { text-align: right; }
+
+  /* Crest + three-letter code, both sides. The raw NLS id told you nothing —
+     "g2567178" is not a fixture to anyone reading this page. */
+  .fw-fix { display: inline-flex; align-items: center; gap: 6px; }
+  .fw-fix img { width: 18px; height: 18px; object-fit: contain; flex: none; }
+  .fw-fix__code { font-weight: 800; font-variation-settings: 'wght' 800; letter-spacing: .5px; }
 </style>
 </head>
 <body>
@@ -173,23 +208,37 @@
 
     <div class="stats" id="fwStats"></div>
 
-    <div class="section-head">
-      <h2>Clubs</h2>
-    </div>
-    <div class="table-wrap">
-      <table class="table table--compact" id="fwClubs">
-        <thead>
-          <tr><th>Club</th><th class="ta-right">Fans</th><th class="ta-right">Predictions</th></tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+    <div class="tabs" id="fwTabs" role="tablist">
+      <button class="tab active" role="tab" data-panel="predictor" aria-selected="true">Score Predictor</button>
+      <button class="tab" role="tab" data-panel="totw" aria-selected="false">Team of the Week</button>
     </div>
 
-    <div class="section-head">
-      <h2>Fans</h2>
-      <input type="search" id="fwSearch" class="toolbar__search" placeholder="Search name or club…" aria-label="Search fans">
+    <div class="fw-panel" id="fwPanel-predictor">
+      <div class="section-head">
+        <h2>Clubs</h2>
+      </div>
+      <div class="table-wrap">
+        <table class="table table--compact" id="fwClubs">
+          <thead>
+            <tr><th>Club</th><th class="ta-right">Fans</th><th class="ta-right">Predictions</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="section-head">
+        <h2>Fans</h2>
+        <input type="search" id="fwSearch" class="toolbar__search" placeholder="Search name or club…" aria-label="Search fans">
+      </div>
+      <div id="fwFans"></div>
     </div>
-    <div id="fwFans"></div>
+
+    <div class="fw-panel" id="fwPanel-totw" hidden>
+      <div class="section-head">
+        <h2>Votes</h2>
+      </div>
+      <div id="fwTotw"></div>
+    </div>
 
   </div>
 </div>
@@ -207,19 +256,25 @@
      nodes are held in memory and re-rendered on any change, because they are
      cross-referenced: a fan's row needs their predictions and their Team of
      the Week picks alongside their registration. */
-  var state = { users: null, preds: {}, motm: {}, motmNames: {}, q: '' };
+  var state = { users: null, preds: {}, motm: {}, motmNames: {}, q: '', fixtures: {} };
 
   var syncEl   = document.getElementById('fwSync');
   var statsEl  = document.getElementById('fwStats');
   var clubsEl  = document.querySelector('#fwClubs tbody');
   var fansEl   = document.getElementById('fwFans');
   var searchEl = document.getElementById('fwSearch');
+  var totwEl   = document.getElementById('fwTotw');
 
   window.TOOL.boot = function (session) {
     var uid = session && session.uid;
     if (!uid) { fail('No session — try reloading.'); return; }
     handshake(uid).then(function (token) {
       return firebase.auth(widgetsApp).signInWithCustomToken(token);
+    }).then(function () {
+      /* Clubs-meta and the fixture list before the first paint, so rows render
+         as crest + code rather than flashing raw match ids and resolving
+         afterwards. Both are soft: a failure falls back to the id. */
+      return Promise.all([NL.clubs.load(), loadFixtures()]).catch(function () {});
     }).then(function () {
       listen();
     }).catch(function (err) {
@@ -319,6 +374,72 @@
     renderFans();
   });
 
+  /* Tabs. The two widgets answer different questions and were competing for
+     one scroll — the predictor's fan list is long, and the Team of the Week
+     votes were buried underneath it. */
+  document.getElementById('fwTabs').addEventListener('click', function (e) {
+    var b = e.target.closest ? e.target.closest('.tab') : null;
+    if (!b) return;
+    var want = b.getAttribute('data-panel');
+    Array.prototype.forEach.call(this.querySelectorAll('.tab'), function (t) {
+      var on = t.getAttribute('data-panel') === want;
+      t.classList.toggle('active', on);
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    document.getElementById('fwPanel-predictor').hidden = (want !== 'predictor');
+    document.getElementById('fwPanel-totw').hidden = (want !== 'totw');
+  });
+
+  /* ---- fixtures ---------------------------------------------------------
+     Predictions and votes are keyed by the NLS match id, which means nothing
+     on screen. This resolves each to its two clubs; clubs-meta then supplies
+     the crest and the three-letter code. Fetched from NLS directly — the same
+     public feed the widgets read — because the fan database stores no fixture
+     data at all.
+
+     Soft failure: without it rows fall back to the raw id, which is what they
+     showed before, rather than the page refusing to render. */
+  function loadFixtures() {
+    var meta = NL.clubs.meta && NL.clubs.meta();
+    var seasonId = (meta && meta.seasons && meta.seasons.current) || 2026;
+    return Promise.all([89, 373, 372].map(function (c) {
+      var url = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2' +
+                '/matches/?competitionID=' + c + '&seasonID=' + seasonId +
+                '&sort=kickOffDateUTC&page.number=1&page.size=100';
+      return fetch(url).then(function (r) { return r.ok ? r.json() : { data: [] }; })
+        .catch(function () { return { data: [] }; });
+    })).then(function (pages) {
+      pages.forEach(function (page) {
+        (page.data || []).forEach(function (m) {
+          var a = m.attributes || {};
+          if (!m.id || !a.homeTeam || !a.awayTeam) return;
+          state.fixtures[m.id] = { home: a.homeTeam, away: a.awayTeam };
+        });
+      });
+    });
+  }
+
+  /* A crest that 404s should disappear rather than leave a broken-image icon
+     sitting in the row — the code beside it already says which club it is. */
+  var CREST_FALLBACK = ' onerror="this.onerror=null;this.style.display=' + "'none'" + ';"';
+
+  function sideHTML(t) {
+    var meta = t && t.teamID ? NL.clubs.byOpta(t.teamID) : null;
+    var name = (meta && meta.name) || (t && (t.name || t.shortName)) || '';
+    var code = (meta && meta.code) ||
+               String(name).replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase();
+    var crest = name ? NL.clubs.crestUrl(name, 'thumb') : '';
+    return (crest ? '<img src="' + NL.escHtml(crest) + '" alt=""' + CREST_FALLBACK + '>' : '') +
+           '<span class="fw-fix__code" title="' + NL.escHtml(name) + '">' + NL.escHtml(code) + '</span>';
+  }
+
+  function fixtureHTML(matchId) {
+    var f = state.fixtures[matchId];
+    if (!f) return '<span class="fw-fix"><span class="fw-fix__code">' + NL.escHtml(matchId) + '</span></span>';
+    return '<span class="fw-fix">' + sideHTML(f.home) +
+           '<span class="text-secondary">v</span>' + sideHTML(f.away) + '</span>';
+  }
+
   function render() {
     if (!state.users) return;
     var ids = Object.keys(state.users);
@@ -352,6 +473,7 @@
       : '<tr><td colspan="3">No registrations yet.</td></tr>';
 
     renderFans();
+    renderTotw();
   }
 
   function countPreds(byDay) {
@@ -365,11 +487,8 @@
            '</div><div class="stat__label">' + NL.escHtml(label) + '</div></div>';
   }
 
-  /* Newest registration first — while this is being launched, "who has just
-     signed up" is the question being asked of it. */
-  function renderFans() {
-    if (!state.users) return;
-    var rows = Object.keys(state.users).map(function (id) {
+  function fanRows() {
+    return Object.keys(state.users || {}).map(function (id) {
       var u = state.users[id] || {};
       return {
         u: u,
@@ -378,7 +497,32 @@
         motm: state.motm[id] || {},
         motmName: (state.motmNames[id] && state.motmNames[id].fanName) || ''
       };
-    }).filter(function (r) {
+    });
+  }
+
+  function clubChip(u) {
+    return '<span class="fw-fan__club">' +
+      (u.crestUrl ? '<img src="' + NL.escHtml(u.crestUrl) + '" alt=""' + CREST_FALLBACK + '>' : '') +
+      NL.escHtml(u.teamName || 'No club') + '</span>';
+  }
+
+  function fanSummary(r, pillText) {
+    return '<summary>' +
+      '<span class="fw-fan__name">' + NL.escHtml(r.name || 'Unnamed') + '</span>' +
+      clubChip(r.u) +
+      '<span class="fw-fan__spacer"></span>' +
+      '<span class="pill">' + pillText + '</span>' +
+      (r.u.registeredAt
+        ? '<span class="fw-fan__club">' + NL.escHtml(NL.formatDateShort(r.u.registeredAt)) + '</span>'
+        : '') +
+    '</summary>';
+  }
+
+  /* Newest registration first — while this is being launched, "who has just
+     signed up" is the question being asked of it. */
+  function renderFans() {
+    if (!state.users) return;
+    var rows = fanRows().filter(function (r) {
       if (!state.q) return true;
       return (r.name + ' ' + (r.u.teamName || '')).toLowerCase().indexOf(state.q) !== -1;
     }).sort(function (a, b) {
@@ -393,51 +537,58 @@
 
     fansEl.innerHTML = rows.map(function (r) {
       var n = countPreds(r.preds);
-      var votes = Object.keys(r.motm).length;
-      return '<div class="form-panel">' +
-        '<div class="fw-fan__head">' +
-          '<b>' + NL.escHtml(r.name || 'Unnamed') + '</b>' +
-          '<span class="fw-fan__club">' +
-            (r.u.crestUrl ? '<img src="' + NL.escHtml(r.u.crestUrl) + '" alt="">' : '') +
-            NL.escHtml(r.u.teamName || 'No club') +
-          '</span>' +
-          '<span class="pill">' + n + ' prediction' + (n === 1 ? '' : 's') + '</span>' +
-          (votes ? '<span class="pill">' + votes + ' TOTW</span>' : '') +
-          (r.u.registeredAt
-            ? '<span class="fw-day">Joined ' + NL.escHtml(NL.formatDate(r.u.registeredAt)) + '</span>'
-            : '') +
-        '</div>' +
-        predictionsHTML(r.preds) +
-        motmHTML(r.motm, r.motmName) +
-      '</div>';
+      return '<details class="fw-fan">' +
+        fanSummary(r, n + ' prediction' + (n === 1 ? '' : 's')) +
+        '<div class="fw-fan__body">' + predictionsHTML(r.preds) + '</div>' +
+      '</details>';
     }).join('');
   }
 
   function predictionsHTML(byDay) {
     var days = Object.keys(byDay).sort().reverse();
-    if (!days.length) return '<p class="fw-empty-note">No predictions yet.</p>';
+    if (!days.length) return '<p class="fw-daylabel text-secondary">No predictions yet.</p>';
     return days.map(function (day) {
       var matches = byDay[day] || {};
-      return '<div class="fw-day" style="margin-top:10px;font-size:var(--text-sm);">' +
-          NL.escHtml(NL.formatDateShort(day)) + '</div>' +
+      return '<div class="fw-daylabel text-secondary">' + NL.escHtml(NL.formatDateShort(day)) + '</div>' +
         '<div class="fw-preds">' + Object.keys(matches).map(function (mid) {
-          var p = matches[mid] || {};
-          return '<div class="fw-pred"><span>' + NL.escHtml(mid) + '</span>' +
-            '<span class="fw-pred__score">' + p.home + '–' + p.away + '</span></div>';
+          var pick = matches[mid] || {};
+          return '<div class="fw-pred">' + fixtureHTML(mid) +
+            '<span class="fw-pred__score">' + pick.home + '–' + pick.away + '</span></div>';
         }).join('') + '</div>';
     }).join('');
   }
 
-  function motmHTML(byMatch, fanName) {
-    var ids = Object.keys(byMatch || {});
-    if (!ids.length) return '';
-    return '<div class="fw-day" style="margin-top:10px;font-size:var(--text-sm);">' +
-        'Team of the Week' + (fanName ? ' · submitted as ' + NL.escHtml(fanName) : '') + '</div>' +
-      '<div class="fw-preds">' + ids.map(function (mid) {
-        var v = byMatch[mid] || {};
-        return '<div class="fw-pred"><span>' + NL.escHtml(v.playerName || v.playerId || '—') + '</span>' +
-          '<span class="fw-day">' + NL.escHtml(mid) + '</span></div>';
-      }).join('') + '</div>';
+  /* Team of the Week: one row per fan who has voted, so the tab answers "who
+     picked whom" rather than listing votes with no owner. */
+  function renderTotw() {
+    if (!state.users) return;
+    var rows = fanRows()
+      .filter(function (r) { return Object.keys(r.motm).length; })
+      .sort(function (a, b) { return (b.u.registeredAt || 0) - (a.u.registeredAt || 0); });
+
+    if (!rows.length) {
+      totwEl.innerHTML = '<div class="empty-state">No Team of the Week votes yet. ' +
+        'Nominations open at full time and run for 24 hours.</div>';
+      return;
+    }
+
+    totwEl.innerHTML = rows.map(function (r) {
+      var ids = Object.keys(r.motm);
+      return '<details class="fw-fan">' +
+        fanSummary(r, ids.length + ' vote' + (ids.length === 1 ? '' : 's')) +
+        '<div class="fw-fan__body">' +
+          (r.motmName
+            ? '<div class="fw-daylabel text-secondary">Submitted as ' + NL.escHtml(r.motmName) + '</div>'
+            : '') +
+          '<div class="fw-preds">' + ids.map(function (mid) {
+            var v = r.motm[mid] || {};
+            return '<div class="fw-pred">' + fixtureHTML(mid) +
+              '<span class="fw-pred__score">' + NL.escHtml(v.playerName || v.playerId || '—') + '</span>' +
+            '</div>';
+          }).join('') + '</div>' +
+        '</div>' +
+      '</details>';
+    }).join('');
   }
 
   /* If auth-guard fired before this script loaded, replay the session. */
