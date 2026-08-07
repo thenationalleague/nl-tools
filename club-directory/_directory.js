@@ -261,49 +261,63 @@
     }).join('');
   }
 
-  /* One person, one card. Same data and — this is the part that matters —
-     the same suppression: hidden is computed exactly as personRow computes
-     it, from the same flag, and the contact block is never built when it is
-     set. A second renderer that decided for itself who to show would be a
-     second chance to get it wrong, and the reader is where getting it wrong
-     is published. */
-  function personCard(p, section, opts) {
+  /* One person, one card — a business card, not a row in a different shape.
+     The list is organised by department, so somebody who does two jobs
+     appears in two places; that is right for a list, because you are reading
+     down a department. A card is the person, so they appear once and their
+     jobs are listed ON it. Spennymoor's four people are four cards.
+
+     Which means the card view is not grouped at all. There is no department
+     heading, because the unit is no longer the department.
+
+     Suppression is not re-decided: hidden is computed from the same flag
+     personRow uses, and the contact block is never built when it is set. A
+     second renderer deciding for itself who to show would be a second chance
+     to get it wrong, and the reader is where getting it wrong is published. */
+  function personCard(p, opts) {
     var unlisted = !!p.hideContact;
     var hidden = unlisted && !(opts && opts.showHidden);
-    var here = arr(p.roles).filter(function (r) { return r.section === section; });
-    var titles = here.map(function (r) { return (r.title || '').trim(); }).filter(Boolean);
-    var depts = arr(p.roles).map(function (r) { return r.section; })
-      .filter(function (x, i, a) { return x && a.indexOf(x) === i; });
+    var roles = arr(p.roles);
 
-    /* icon-email and icon-phone were added to the canon sprite for this — it
-       carried seven social platforms and no way to say "email", which for a
-       contacts directory is the wrong gap to have. */
-    var lines = hidden ? '' : emailsOf(p, section).map(function (e) {
+    var jobs = roles.map(function (r) {
+      var t = (r.title || '').trim();
+      return '<li class="cd-pc__job">' +
+        '<span class="cd-pc__title">' + (t ? esc(t)
+          : (opts && opts.showGaps ? '<em>No job title</em>' : '&mdash;')) + '</span>' +
+        '<span class="cd-pc__dept">' + esc(r.section || '') + '</span></li>';
+    }).join('');
+
+    /* Every address and every number, not a department's share of them. The
+       card is the whole person. */
+    var lines = hidden ? '' : emailsOf(p, '').map(function (e) {
       return '<a class="cd-pc__line" href="mailto:' + esc(e) + '">' +
         '<span class="cd-pc__ic">' + glyph('email') + '</span>' + esc(e) + '</a>';
-    }).concat(phonesOf(p, section).map(function (x) {
+    }).concat(phonesOf(p, '').map(function (x) {
       var n = (x.number || '').trim(), ext = (x.ext || '').trim();
       return '<a class="cd-pc__line" href="tel:' + esc(tel(n)) + '">' +
         '<span class="cd-pc__ic">' + glyph('phone') + '</span>' + esc(n) +
         (ext ? ' <span class="cd-row__ext">ext ' + esc(ext) + '</span>' : '') + '</a>';
     })).join('');
 
-    return '<li class="cd-pc' + (unlisted ? ' cd-pc--unlisted' : '') + '">' +
+    return '<li class="cd-pc' + (unlisted ? ' cd-pc--unlisted' : '') + '"' +
+      (p.id ? ' data-pid="' + esc(p.id) + '"' : '') + '>' +
       '<div class="cd-pc__top"><div class="cd-pc__id">' +
         '<div class="cd-pc__name">' + displayName(p, opts) + '</div>' +
-        (titles.length
-          ? '<div class="cd-pc__role">' + titles.map(esc).join(' &middot; ') + '</div>'
-          : (opts && opts.showGaps ? '<div class="cd-pc__role"><em>No job title</em></div>' : '')) +
       '</div></div>' +
-      (depts.length > 1
-        ? '<div class="cd-pc__depts">' + depts.map(function (d) {
-            return '<span class="cd-pc__dept">' + esc(d) + '</span>';
-          }).join('') + '</div>'
-        : '') +
+      (jobs ? '<ul class="cd-pc__jobs">' + jobs + '</ul>' : '') +
       '<div class="cd-pc__lines">' + (lines ||
         '<span class="cd-row__quiet">' + (hidden ? 'Not published' : 'None held') +
         '</span>') + '</div>' +
     '</li>';
+  }
+
+  /* Everyone at the club, once each, by surname. sectionPeople answers "who
+     is in this department"; this answers "who is here", which is the question
+     a card view is arranged around. */
+  function allPeople(rec) {
+    return arr(rec.people).filter(function (p) {
+      return arr(p.roles).length;
+    }).slice().sort(bySurname);
   }
 
   /* ---------------------------------------------------------------- render */
@@ -327,17 +341,20 @@
         '<span class="cd-social__url">' + esc(u.replace(/^https?:\/\//i, '')) + '</span></a>';
     }).filter(Boolean).join('');
 
-    var cards = !!(opts && opts.cards);
-    var depts = ORDER.map(function (s) {
-      var who = sectionPeople(rec, s);
-      if (!who.length) { return ''; }
-      return '<div class="cd-dept"><h3 class="cd-dept__h">' + esc(s) + '</h3>' +
-        '<ul class="' + (cards ? 'cd-cards' : 'cd-rows') + '">' +
-        who.map(function (p) {
-          return cards ? personCard(p, s, opts) : personRow(p, s, opts);
-        }).join('') +
-        '</ul></div>';
-    }).filter(Boolean).join('');
+    /* Cards are ungrouped by design — see personCard. One flat set of people,
+       by surname, each carrying their own departments. */
+    var depts = (opts && opts.cards)
+      ? '<ul class="cd-cards">' + allPeople(rec).map(function (p) {
+          return personCard(p, opts);
+        }).join('') + '</ul>'
+      : ORDER.map(function (s) {
+          var who = sectionPeople(rec, s);
+          if (!who.length) { return ''; }
+          return '<div class="cd-dept"><h3 class="cd-dept__h">' + esc(s) + '</h3>' +
+            '<ul class="cd-rows">' +
+            who.map(function (p) { return personRow(p, s, opts); }).join('') +
+            '</ul></div>';
+        }).filter(Boolean).join('');
 
     var pal = bannerColours(rec.club);
 
@@ -425,6 +442,7 @@
     renderClub: renderClub,
     personRow: personRow,
     personCard: personCard,
+    allPeople: allPeople,
     surnameOf: surnameOf,
     bySurname: bySurname,
     search: search,
