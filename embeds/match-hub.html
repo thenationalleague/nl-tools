@@ -384,6 +384,27 @@
                           the line (capped ~26vh) instead of scrolling long
                           sentences under the fold. Dead pools C_LATE/
                           C_EARLY removed.
+    v0.24.0 (2026-08-08) — LIVE MODE. The replay engine, wall-anchored:
+                          "● Live today" in the setup dialog (or ?live=1
+                          &comp=nl|north|south) loads today's fixtures and
+                          runs the afternoon in real time. st.T tracks real
+                          minutes since the day's first KO; an NLS poller
+                          (55s in-window, 150s early) folds in scores,
+                          periods and events; late-arriving goals queue
+                          through the full tease/reveal choreography;
+                          match phase/minute chips trust the feed's own
+                          matchPeriod over wall arithmetic. Pre-KO the
+                          previews cycle continuously and a team-news beat
+                          fires when lineups first appear (~2pm). GHOST
+                          goals cover NLS score-before-scorer entry lag
+                          ("scorer details to follow"), silently swapped
+                          when the real event lands. Opening-day handling:
+                          zeroed baseline table seeded for all clubs, form
+                          phrases become "opening their account today"
+                          (no invented form), stakes/race lines already
+                          gated on games played. The day's FULL-TIME beat
+                          and final table hold until NLS marks every match
+                          finished. Replay behaviour is untouched.
   ============================================================================
 -->
 
@@ -599,6 +620,7 @@ window.__DATA__ = {
       <label class="nlh__check"><input type="checkbox" id="nlhSetReal" checked> Real kick-off times — matches stagger through the day</label>
       <div class="nlh__setupfoot">
         <span class="nlh__setupstatus" id="nlhSetStatus"></span>
+        <button class="nlh__setupgo nlh__setuplive" id="nlhSetLive">&#9679; Live today</button>
         <button class="nlh__setupgo" id="nlhSetGo">Load</button>
       </div>
     </div>
@@ -871,6 +893,7 @@ body{overflow:hidden}
 #nlHub .nlh__setupstatus{flex:1;font-size:var(--fs-xs);color:var(--muted)}
 #nlHub .nlh__setupstatus.is-error{color:var(--red)}
 #nlHub .nlh__setupgo{background:var(--primary);color:#fff;font-variation-settings:"wght" 800;font-weight:800;font-size:var(--fs-sm);padding:10px 20px;border-radius:999px;transition:background .15s}
+#nlHub .nlh__setuplive{background:var(--navy)}
 #nlHub .nlh__setupgo:hover{background:var(--primary-600)}
 #nlHub .nlh__setupgo[disabled]{opacity:.5;cursor:default}
 
@@ -955,7 +978,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "34";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "35";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -1024,6 +1047,19 @@ body{overflow:hidden}
   function stateOf(fx, T){
     var local = T - koOffset(fx);
     if (fx.pp) return {phase:"pp", label:"P-P", live:false};
+    // LIVE: the feed's own period beats wall-clock arithmetic (kick-offs run
+    // late, half-times run long — trust what NLS says the match is doing)
+    if (st.liveMode && fx._per){
+      var p=fx._per;
+      if (p==="prematch")  return {phase:"pre", label:fx.slot, live:false};
+      if (p==="halftime")  return {phase:"ht",  label:"HT",   live:true};
+      if (p==="fulltime"||p==="postmatch") return {phase:"ft", label:"FT", live:false};
+      if (p==="firsthalf"||p==="secondhalf"||p==="extratime"||p==="penalties"){
+        var mtot=liveLocalMin(fx), half2=(p!=="firsthalf");
+        var lbl=(!half2&&mtot>45)?"45+"+(mtot-45):(half2&&mtot>90)?"90+"+(mtot-90):String(mtot);
+        return {phase:half2?"2h":"1h", label:lbl+"'", live:true};
+      }
+    }
     if (local < 0)          return {phase:"pre", label:fx.slot, live:false};
     if (local < HALF)       return {phase:"1h", label:dispMin(Math.max(1,Math.floor(local)),1)+"'", live:true};
     if (local < HALF+BREAK) return {phase:"ht", label:"HT", live:true};
@@ -1102,11 +1138,11 @@ body{overflow:hidden}
   var st = { T:0, playing:false, rate:1, view:"map", raf:0, last:0,
              fired:{}, ftShown:false, feedBuilt:{}, beatShown:{},
              suspend:null, kickoff:null, koShown:false, _bag:{}, _lastPick:{}, _typeIv:0,
-             _commUntil:0, _commQ:null, _commDrT:0,
+             _commUntil:0, _commQ:null, _commDrT:0, liveMode:false, liveQ:[],
              // timing mode: secPerMin = seconds one match-minute takes (the
              // speed button still multiplies on top); stagger = real KO slots
              secPerMin:1, stagger:false, baseKOms:0 };
-  function evId(fx,ev){ return fx.gc+"_"+ev.type+"_"+ev.min+"_"+(ev.name||""); }
+  function evId(fx,ev){ return fx.gc+"_"+ev.type+"_"+ev.min+"_"+(ev.name||ev._gk||""); }
   // desktop = three panels live at once (cards | map | ticker); the map is
   // always on screen there, so stings/beats/zooms fire regardless of st.view
   var mqDesk = window.matchMedia("(min-width:1100px)");
@@ -1510,6 +1546,8 @@ body{overflow:hidden}
   // generic phrases; identity (clean-sheet drought) slots in below the streaks
   function formPhrase(cl, side){
     var sp=cl.split||{}, id=cl.ident||{};
+    // opening day — no form exists yet, so don't invent any
+    if(cl.p0) return pick(["opening their account today","starting the new campaign","beginning a fresh season","first up in the new season"],"fp0");
     if(side==="h" && sp.hUnbeaten>=6) return "unbeaten at home in "+sp.hUnbeaten;
     if(side==="a" && sp.aWinless>=8)  return "still hunting a rare away win — "+sp.aWinless+" without one on the road";
     if(cl.wins>=2)     return "chasing a "+ordinal(cl.wins+1)+" straight win";
@@ -1979,7 +2017,7 @@ body{overflow:hidden}
   function nextGoalAt(a,b){
     var best=null;
     D.fixtures.forEach(function(fx){ fx.events.forEach(function(ev){
-      if(ev.type!=="goal") return;
+      if(ev.type!=="goal"||ev.ghost) return;   // ghosts (no scorer yet) skip the suspense treatment
       var r=evRmin(ev,fx);
       if(r>a && r<=b && !st.fired[evId(fx,ev)] && (!best||r<best.rmin)) best={fx:fx,ev:ev,rmin:r,id:evId(fx,ev)};
     }); });
@@ -1991,10 +2029,15 @@ body{overflow:hidden}
       var r=evRmin(ev,fx), id=evId(fx,ev);
       if(r<=prevT || r>T || st.fired[id]) return;
       if(ev.type==="red"){ st.fired[id]=1; if(st.playing) commSay(redSegs(fx,ev),"red",3); }
+      else if(ev.type==="goal" && ev.ghost){ st.fired[id]=1; if(mapVisible()) pulsePin(fx); if(st.playing) commSay(ghostSegs(fx,ev),"reveal-goal",2); }
       else if(ev.type==="goal" && instantGoals){ st.fired[id]=1; if(mapVisible()) pulsePin(fx); if(st.playing) commSay(revealSegs(fx,ev),"reveal-goal",2); }
     }); });
     BEATS.forEach(function(b){
-      if(b.r>=prevT && b.r<=T && !st.beatShown[b.r]){ st.beatShown[b.r]=1; fireBeat(b.t); if(st.playing) commSay(buildSegs(pick(C_BEAT[b.c],"bc"+b.c),{},[]),"beat",1); }
+      if(b.r>=prevT && b.r<=T && !st.beatShown[b.r]){
+        // live: hold the day's FULL-TIME beat until every match has actually finished
+        if(b.c==="ft" && st.liveMode && !LIVE.allFT) return;
+        st.beatShown[b.r]=1; fireBeat(b.t); if(st.playing) commSay(buildSegs(pick(C_BEAT[b.c],"bc"+b.c),{},[]),"beat",1);
+      }
     });
   }
   // goal suspense: hold the score, TEASE it, REVEAL, then DWELL so it can be read
@@ -2137,7 +2180,11 @@ body{overflow:hidden}
     if (st.kickoff){
       if (ts>=st.kickoff.until){
         var ki=st.kickoff.i;
-        if (ki>=KO_ORDER.length){ st.kickoff=null; focusReset(); st.last=ts; }   // done — action begins
+        if (ki>=KO_ORDER.length){
+          // live pre-KO: previews cycle round again until the action starts
+          if (st.liveMode && Date.now() < st.baseKOms - 90000){ st.kickoff={ i:0, until: ts+4000 }; st.raf=requestAnimationFrame(tick); return; }
+          st.kickoff=null; focusReset(); st.last=ts;   // done — action begins
+        }
         else {
           var kfx=KO_ORDER[ki], kseg=kickoffSegs(kfx);
           setFocus(kfx);   // same focus treatment as goals — grey out, glide in
@@ -2165,6 +2212,12 @@ body{overflow:hidden}
       }
       st.raf=requestAnimationFrame(tick); return;
     }
+    // live: a late-arriving goal (feed latency) waits here for its full
+    // choreography — one at a time, oldest first
+    if (st.liveMode && st.liveQ.length){
+      var lq=st.liveQ.shift();
+      if (!st.fired[lq.id]){ beginSuspense(lq, ts); paint(); st.raf=requestAnimationFrame(tick); return; }
+    }
     var dt=(ts-st.last)/1000; st.last=ts;
     var prevT=st.T;
     // pace: 1 match-min per secPerMin seconds, × the speed button; lull
@@ -2172,6 +2225,9 @@ body{overflow:hidden}
     // its honest clock
     var gap=nextMoment(st.T)-st.T, eff=(1/(st.secPerMin||1))*st.rate*((!st.stagger && gap>4)?6:1);
     var target=Math.min(prevT + dt*eff, maxT());
+    // live: the clock is the WALL CLOCK — real minutes since the first KO
+    // (never backwards; goal suspense above briefly holds it)
+    if (st.liveMode) target = LIVE.allFT ? maxT() : Math.max(prevT, Math.min((Date.now()-st.baseKOms)/60000, maxT()));
     // <4×: stop just before the next goal so the tease can hide the score
     if (st.rate<4){
       var g=nextGoalAt(prevT, target);
@@ -2187,6 +2243,10 @@ body{overflow:hidden}
     fireCrossed(prevT, st.T, true);        // 4× (or no goal ahead): goals fire instantly
     paint();
     if (st.T>=maxT()){
+      // live: matches can run past the nominal clock — keep ticking (and
+      // polling) until NLS says every game has finished
+      if (st.liveMode && !LIVE.allFT){ st.raf=requestAnimationFrame(tick); return; }
+      if (st.liveMode){ clearTimeout(LIVE.pollIv); }
       pause();
       if(!st.ftShown){ st.ftShown=true;
         commSay(buildSegs(pick(C_OUTRO,"out"),{},[]),"beat",1);   // wind-down line, not a hard stop
@@ -2214,6 +2274,12 @@ body{overflow:hidden}
     $("nlhPlay").setAttribute("aria-label","Play");
   }
   function restart(){
+    if (st.liveMode){
+      // live: "restart" re-syncs to NOW rather than replaying the day
+      pause(); st.suspend=null; st.kickoff=null; st.liveQ.length=0; focusReset();
+      seek(Math.max(0,Math.min((Date.now()-st.baseKOms)/60000,maxT()))/maxT());
+      play(); return;
+    }
     pause(); st.T=0; st.fired={}; st.feedBuilt={}; st.beatShown={}; st.ftShown=false; st.suspend=null; st.kickoff=null; st.koShown=false;
     $("nlhFeed").innerHTML=""; hideSheet(); focusReset(); $("nlhBeat").hidden=true;
     commStatic(C_IDLE);
@@ -2283,6 +2349,40 @@ body{overflow:hidden}
     });
     return p?{p:p,hw:hw,aw:aw,d:d,f:f,l:l,lr:lr}:(_alltime?{p:0}:null);
   }
+  // map one NLS match-detail response → the hub's event list (+ lineup flag).
+  // Shared by the replay loader and the live poller.
+  function eventsFromDetail(d,homeID,awayID){
+    var at=d.data.attributes,teams=at.matchTeams||[];
+    var home=null,away=null,lineups=false;
+    teams.forEach(function(t){ if(t.teamID===homeID)home=t; if(t.teamID===awayID)away=t; });
+    if(!home||!away) throw new Error("Bad match data for "+at.matchID);
+    var events=[];
+    teams.forEach(function(t){
+      var other=(t===home)?away:home, subOnAt={};
+      if(((t.players&&t.players.Start)||[]).length) lineups=true;
+      ((t.events&&t.events.subs)||[]).forEach(function(w){ var s=w.substitutionEvents; if(s&&s.subOnID) subOnAt[s.subOnID]=evMinOf(w); });
+      ((t.events&&t.events.goals)||[]).forEach(function(w){
+        var g=w.goalEvents; if(!g) return;
+        var type=String(g.goalType||"").toLowerCase(), own=type.indexOf("own")>=0, pen=type.indexOf("pen")>=0;
+        var ev={min:evMinOf(w),type:"goal",team:own?other.teamID:t.teamID,name:pnameOf(g.player)};
+        if(own) ev.og=true;
+        if(pen) ev.pen=true;
+        if(!own&&g.playerID!=null){ var on=subOnAt[g.playerID]; if(on!=null&&on<=ev.min) ev.cameo=on; }
+        events.push(ev);
+      });
+      ((t.events&&t.events.bookings)||[]).forEach(function(w){
+        var b=w.bookingEvents; if(!b) return;
+        var card=String(b.cardType||b.card||"").toLowerCase();
+        if(card.indexOf("red")<0&&card!=="secondyellow") return;
+        var ev={min:evMinOf(w),type:"red",team:t.teamID,name:pnameOf(b.player)};
+        if(card==="secondyellow") ev.sec=true;
+        events.push(ev);
+      });
+    });
+    events.sort(function(a,b){return a.min-b.min;});
+    return {events:events, lineups:lineups, att:(at.matchDetails&&at.matchDetails.attendance)||null,
+            ref:(at.matchDetails&&at.matchDetails.refereeName)||at.refereeName||null};
+  }
   async function loadMatchday(o){
     var C=COMPS[o.comp||"nl"];
     var y=+o.date.slice(0,4), season=(+o.date.slice(5,7))<=6?y-1:y;
@@ -2292,9 +2392,14 @@ body{overflow:hidden}
     var dOf=function(m){return (m.attributes.kickOffDateUTC||"").slice(0,10);};
     var per=function(m){return (m.attributes.matchPeriod||"").toLowerCase();};
     var done=["fulltime","postmatch"];
-    var roundL=list.filter(function(m){return dOf(m)===o.date&&done.indexOf(per(m))>=0;});
+    // replay wants completed matches; LIVE wants everything on the date that
+    // isn't postponed (pre-match, in-play and finished alike)
+    var roundL=list.filter(function(m){
+      if(dOf(m)!==o.date) return false;
+      return o.live ? per(m)!=="postponed" : done.indexOf(per(m))>=0;
+    });
     var ppL=list.filter(function(m){return dOf(m)===o.date&&per(m)==="postponed";});
-    if(!roundL.length) throw new Error("No completed "+C.name+" matches on "+o.date+".");
+    if(!roundL.length) throw new Error(o.live ? "No "+C.name+" matches today." : "No completed "+C.name+" matches on "+o.date+".");
     var hist=list.filter(function(m){return dOf(m)<o.date&&done.indexOf(per(m))>=0;})
       .sort(function(a,b){return (a.attributes.kickOffDateUTC||"")<(b.attributes.kickOffDateUTC||"")?-1:1;});
     // prior table + form/split streaks + clean-sheet drought (score-derived)
@@ -2346,45 +2451,29 @@ body{overflow:hidden}
     o.status("Building the matchday…");
     var usedTeams={};
     var fixtures=details.map(function(d){
-      var at=d.data.attributes,teams=at.matchTeams||[];
+      var at=d.data.attributes;
       var homeID=at.homeTeamID,awayID=at.awayTeamID;
-      var home=null,away=null;
-      teams.forEach(function(t){ if(t.teamID===homeID)home=t; if(t.teamID===awayID)away=t; });
-      if(!home||!away) throw new Error("Bad match data for "+at.matchID);
       usedTeams[homeID]=1; usedTeams[awayID]=1;
-      var events=[];
-      teams.forEach(function(t){
-        var other=(t===home)?away:home, subOnAt={};
-        ((t.events&&t.events.subs)||[]).forEach(function(w){ var s=w.substitutionEvents; if(s&&s.subOnID) subOnAt[s.subOnID]=evMinOf(w); });
-        ((t.events&&t.events.goals)||[]).forEach(function(w){
-          var g=w.goalEvents; if(!g) return;
-          var type=String(g.goalType||"").toLowerCase(), own=type.indexOf("own")>=0, pen=type.indexOf("pen")>=0;
-          var ev={min:evMinOf(w),type:"goal",team:own?other.teamID:t.teamID,name:pnameOf(g.player)};
-          if(own) ev.og=true;
-          if(pen) ev.pen=true;
-          if(!own&&g.playerID!=null){ var on=subOnAt[g.playerID]; if(on!=null&&on<=ev.min) ev.cameo=on; }
-          events.push(ev);
-        });
-        ((t.events&&t.events.bookings)||[]).forEach(function(w){
-          var b=w.bookingEvents; if(!b) return;
-          var card=String(b.cardType||b.card||"").toLowerCase();
-          if(card.indexOf("red")<0&&card!=="secondyellow") return;
-          var ev={min:evMinOf(w),type:"red",team:t.teamID,name:pnameOf(b.player)};
-          if(card==="secondyellow") ev.sec=true;
-          events.push(ev);
-        });
-      });
-      events.sort(function(a,b){return a.min-b.min;});
+      var ex=eventsFromDetail(d,homeID,awayID);
+      var events=ex.events;
       var ko=(at.kickOffUTC||"").replace(" ","T")+"Z";
       var hM=byOpta[homeID]||{},aM=byOpta[awayID]||{};
+      var listRow=roundL.filter(function(m){return m.id===at.matchID;})[0];
+      var la=listRow&&listRow.attributes;
       var fxOut={
-        gc:at.matchID, home:homeID, away:awayID, hs:home.score, as:away.score,
+        gc:at.matchID, home:homeID, away:awayID,
+        hs:la&&la.homeTeam?la.homeTeam.score:null, as:la&&la.awayTeam?la.awayTeam.score:null,
         date:ko, slot:new Date(ko).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:"Europe/London"}),
-        pp:false, att:(at.matchDetails&&at.matchDetails.attendance)||null,
-        ref:(at.matchDetails&&at.matchDetails.refereeName)||at.refereeName||null,
+        pp:false, att:ex.att, ref:ex.ref,
         h2h:h2hFromAll(hM.name||"",aM.name||"",homeID,awayID,o.date,season,hist),
         events:events
       };
+      if(o.live&&la){
+        fxOut._per=(la.matchPeriod||"").toLowerCase();
+        fxOut._fmin=la.formattedMatchTime||null;
+        if(fxOut.hs!=null) fxOut._ls={h:fxOut.hs,a:fxOut.as};
+        if(ex.lineups) fxOut._news=true;
+      }
       // play-offs (and any knockout tie) are matchType "Cup" — mark them so
       // the live table, arrows and stakes/race storylines leave them alone
       if(String(at.matchType||"").toLowerCase().indexOf("cup")>=0) fxOut.ko=true;
@@ -2419,20 +2508,49 @@ body{overflow:hidden}
     } else {
       Object.keys(rows).forEach(function(k){ var r=rows[k]; priorOut[k]={P:r.P,W:r.W,D:r.D,L:r.L,GF:r.GF,GA:r.GA,Pts:r.Pts}; });
     }
+    // OPENING DAY: no results yet → seed a zeroed table for every club on
+    // show, so the live "as it stands" machinery has rows to move
+    if(!Object.keys(priorOut).length){
+      Object.keys(usedTeams).forEach(function(k){ priorOut[k]={P:0,W:0,D:0,L:0,GF:0,GA:0,Pts:0}; });
+      Object.keys(clubs).forEach(function(k){ clubs[k].p0=true; });
+    }
     var played=(officialRows?officialRows.map(function(r){return r.P;}):Object.keys(rows).map(function(k){return rows[k].P;})).sort(function(a,b){return a-b;});
     var roundNo=played.length?played[Math.floor(played.length/2)]+1:1;
     var label=(_meta.seasons&&_meta.seasons.list&&_meta.seasons.list[String(season)]&&_meta.seasons.list[String(season)].label)||(season+"-"+String(season+1).slice(2));
     // ---- swap in and restart the day ----
     D.round=roundNo; D.season=label; D.competition=C.name; D.clubs=clubs; D.prior=priorOut; D.fixtures=fixtures;
     pause(); hideSheet();
-    st.stagger=!!o.stagger||!!o.startTime;   // a clock-time start implies real KO slots
-    st.secPerMin=o.secPerMin||1;
+    st.liveMode=!!o.live;
+    st.stagger=!!o.stagger||!!o.startTime||!!o.live;   // live/clock starts imply real KO slots
+    st.secPerMin=o.live?60:(o.secPerMin||1);
     computeDerived();
     buildMap(); buildCards();
     setRoundLabel(); renderTable();
-    $("nlhFootDate").textContent=new Date(o.date+"T12:00:00Z")
+    $("nlhFootDate").textContent=(o.live?"LIVE · ":"")+new Date(o.date+"T12:00:00Z")
       .toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short",year:"numeric",timeZone:"UTC"}).replace(/,/g,"");
-    if(o.startTime){
+    if(o.live){
+      // wall-anchored: join the afternoon wherever it actually is. Everything
+      // already played is marked fired silently (the feed still shows it) —
+      // commentary picks up from NOW.
+      LIVE.comp=o.comp||"nl"; LIVE.season=season; LIVE.newsSeen=false; LIVE.allFT=false;
+      st.liveQ.length=0; st.rate=1; $("nlhSpeed").textContent="1×";
+      st.fired={}; st.beatShown={}; st.feedBuilt={}; st.ftShown=false; $("nlhFeed").innerHTML="";
+      var wallT=Math.max(0,(Date.now()-st.baseKOms)/60000);
+      st.T=Math.min(wallT,maxT());
+      D.fixtures.forEach(topUpGhosts);   // score-before-scorer gaps covered from the off
+      computeDerived();
+      D.fixtures.forEach(function(fx){ fx.events.forEach(function(ev){
+        if(evRmin(ev,fx)<=st.T+0.001) st.fired[evId(fx,ev)]=1;
+      });});
+      BEATS.forEach(function(b){ if(b.r<=st.T) st.beatShown[b.r]=1; });
+      if(D.fixtures.some(function(fx){return fx._news;})) LIVE.newsSeen=true;
+      st.koShown = st.T>0;   // pre-KO joins still get the preview build-up
+      liveKickPoll();
+      play();
+      commStatic(st.T<=0 ? (LIVE.newsSeen?C_IDLE:"Live from the National League — team news expected shortly.")
+                         : "Live — picking up the afternoon as it stands…");
+    } else if(o.startTime){
+      st.liveMode=false; clearTimeout(LIVE.pollIv);
       // wall-clock start: minutes from the first KO of the day, TZ-safe via
       // the London-local label of the base kick-off
       var baseLbl=new Date(st.baseKOms).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:"Europe/London"});
@@ -2440,8 +2558,129 @@ body{overflow:hidden}
       var T=Math.max(0,toM(o.startTime)-toM(baseLbl));
       seek(Math.min(1,T/maxT())); play();
     } else {
+      st.liveMode=false; clearTimeout(LIVE.pollIv);
       restart();
     }
+  }
+
+  // ---- LIVE MODE -----------------------------------------------------------
+  // The replay engine, wall-anchored: st.T tracks real minutes since the
+  // day's first kick-off, a poller folds fresh NLS data in every ~55s, and
+  // late-arriving events (feed latency) fire through the same choreography.
+  var LIVE={ comp:"nl", season:null, pollIv:0, allFT:false, newsSeen:false, inFlight:false };
+  function liveLocalMin(fx){
+    var m=/^(\d+)'(?:\+(\d+))?/.exec(String(fx._fmin||""));
+    if(m) return Number(m[1])+(m[2]?Number(m[2]):0);
+    var local=st.T-koOffset(fx);
+    return Math.max(1,Math.min(96,Math.round(local>HALF+BREAK?local-BREAK:local)));
+  }
+  // NLS sometimes carries a score before the scorer is entered (a known
+  // early-season data-entry lag). GHOST goals keep the score truthful on the
+  // map and in the table; the scorer line stays blank until NLS fills it in.
+  function topUpGhosts(fx){
+    if(!fx._ls) return;
+    fx._ghosts=fx._ghosts||[]; fx._silent=fx._silent||[];
+    var real=fx.events.filter(function(e){return e.type==="goal"&&!e.ghost;});
+    var keep=[];
+    ["h","a"].forEach(function(side){
+      var teamID=side==="h"?fx.home:fx.away;
+      var want=side==="h"?fx._ls.h:fx._ls.a;
+      var got=real.filter(function(e){return ((e.team===fx.home)!==!!e.og)===(side==="h");}).length;
+      var ghosts=fx._ghosts.filter(function(g){return g._side===side;});
+      // real events arrived → retire ghosts; announced ones silence their replacement
+      while(got+ghosts.length>want && ghosts.length){
+        var g=ghosts.pop();
+        if(st.fired[evId(fx,g)]) fx._silent.push(side);
+      }
+      var n=ghosts.length;
+      // never place a ghost ahead of the play head — the score must show NOW
+      var local=st.T-koOffset(fx), wallMin=Math.max(1,Math.min(96,Math.floor(local>HALF+BREAK?local-BREAK:local)));
+      var mn=Math.min(liveLocalMin(fx), wallMin);
+      while(got+ghosts.length<want){
+        ghosts.push({min:mn,type:"goal",team:teamID,name:"",ghost:true,_side:side,_gk:side+(n++)});
+      }
+      keep=keep.concat(ghosts);
+    });
+    fx._ghosts=keep;
+    fx.events=real.concat(fx.events.filter(function(e){return e.type!=="goal";}).filter(function(e){return !e.ghost;})).concat(keep);
+    fx.events.sort(function(a,b){return a.min-b.min;});
+  }
+  var C_GHOST=[
+    "There's a goal at {venue}! It's {team} — {score}. Scorer details to follow.",
+    "GOAL at {venue} — {team} have struck! {score}.",
+    "A goal at {venue}! {team} — {score}, scorer to be confirmed."
+  ];
+  function ghostSegs(fx,ev){
+    var h=club(fx.home),a=club(fx.away),sc=scoreAt(fx,evRmin(ev,fx)+0.001);
+    var team=club(ev.team);
+    return buildSegs(pick(C_GHOST,"gh"),{venue:h.venue||h.name,team:team.name,score:h.short+" "+sc.h+"–"+sc.a+" "+a.short},["venue","team","score"]);
+  }
+  function liveKickPoll(){
+    clearTimeout(LIVE.pollIv);
+    if(!st.liveMode) return;
+    var pre = Date.now() < st.baseKOms - 95*60000;   // >95min before KO: gentle
+    LIVE.pollIv=setTimeout(function(){
+      liveRefresh().catch(function(){}).then(function(){ liveKickPoll(); });
+    }, pre?150000:55000);
+  }
+  async function liveRefresh(){
+    if(!st.liveMode||LIVE.inFlight) return; LIVE.inFlight=true;
+    try{
+      var C=COMPS[LIVE.comp];
+      var j=await fetchJSON(NLS_API+"/matches/?competitionID="+C.id+"&seasonID="+LIVE.season+"&sort=-kickOffDateUTC&page.number=1&page.size=100");
+      var byID={}; (j.data||[]).forEach(function(m){ byID[m.id]=m; });
+      var needDetail=[];
+      D.fixtures.forEach(function(fx){
+        var m=byID[fx.gc]; if(!m) return;
+        var a=m.attributes, per=(a.matchPeriod||"").toLowerCase();
+        fx._per=per; fx._fmin=a.formattedMatchTime||null;
+        if(per==="postponed") fx.pp=true;
+        if(a.homeTeam&&a.homeTeam.score!=null){ fx.hs=a.homeTeam.score; fx.as=a.awayTeam.score; fx._ls={h:fx.hs,a:fx.as}; }
+        var isLive=["firsthalf","secondhalf","halftime","extratime","penalties"].indexOf(per)>=0;
+        var nearKO=Date.now() > st.baseKOms - 95*60000;
+        if(isLive || per==="fulltime" || per==="postmatch" || (per==="prematch"&&nearKO&&!fx._news)) needDetail.push(fx);
+      });
+      var dets=await Promise.all(needDetail.map(function(fx){
+        return fetchJSON(NLS_API+"/matches/"+fx.gc).then(function(d){return {fx:fx,d:d};},function(){return null;});
+      }));
+      dets.filter(Boolean).forEach(function(x){
+        var ex=eventsFromDetail(x.d, x.fx.home, x.fx.away);
+        x.fx.events=ex.events.concat((x.fx._ghosts||[]));
+        if(ex.att) x.fx.att=ex.att;
+        if(ex.ref) x.fx.ref=ex.ref;
+        if(ex.lineups) x.fx._news=true;
+      });
+      D.fixtures.forEach(topUpGhosts);
+      LIVE.allFT=D.fixtures.every(function(fx){
+        return fx.pp || fx._per==="fulltime" || fx._per==="postmatch";
+      });
+      computeDerived();
+      // feed item ids shift as events land — rebuild it clean
+      st.feedBuilt={}; $("nlhFeed").innerHTML="";
+      if(!LIVE.newsSeen && D.fixtures.some(function(fx){return fx._news;})){
+        LIVE.newsSeen=true;
+        if(st.T<=0) commSay(buildSegs("Team news is dropping across the grounds — kick-off is approaching.",{},[]),"beat",1);
+      }
+      // catch-up: anything the feed delivered BEHIND the play head
+      var behind=[];
+      D.fixtures.forEach(function(fx){ fx.events.forEach(function(ev){
+        var r=evRmin(ev,fx), id=evId(fx,ev);
+        if(r>st.T+0.001 || st.fired[id]) return;
+        if(ev.type==="goal" && !ev.ghost){
+          var si=(fx._silent||[]).indexOf(((ev.team===fx.home)!==!!ev.og)?"h":"a");
+          if(si>=0){ fx._silent.splice(si,1); st.fired[id]=1; return; }   // ghost already announced it
+          behind.push({fx:fx,ev:ev,rmin:r,id:id});
+        } else if(ev.type==="goal"){   // ghost behind the head
+          st.fired[id]=1; if(mapVisible()) pulsePin(fx);
+          if(st.playing) commSay(ghostSegs(fx,ev),"reveal-goal",2);
+        } else if(ev.type==="red"){
+          st.fired[id]=1; if(st.playing) commSay(redSegs(fx,ev),"red",3);
+        }
+      });});
+      behind.sort(function(a,b){return a.rmin-b.rmin;});
+      st.liveQ.push.apply(st.liveQ, behind);
+      paint();
+    } finally { LIVE.inFlight=false; }
   }
 
   // ---- wiring --------------------------------------------------------------
@@ -2500,6 +2739,25 @@ body{overflow:hidden}
       }).then(function(){ btn.disabled=false; setup.hidden=true; })
         .catch(function(e){ btn.disabled=false; stat.textContent=(e&&e.message)||"Couldn't load that matchday."; stat.className="nlh__setupstatus is-error"; });
     });
+    // LIVE — today's games in the chosen division, wall-clock, self-updating
+    function goLive(comp){
+      var stat=$("nlhSetStatus"), btn=$("nlhSetLive");
+      btn.disabled=true; stat.className="nlh__setupstatus";
+      var today=new Date().toLocaleDateString("en-CA",{timeZone:"Europe/London"});
+      loadMatchday({ date:today, comp:comp||$("nlhSetComp").value, live:true,
+        status:function(m){ stat.textContent=m; } })
+        .then(function(){ btn.disabled=false; setup.hidden=true; })
+        .catch(function(e){ btn.disabled=false; stat.textContent=(e&&e.message)||"Couldn't go live."; stat.className="nlh__setupstatus is-error"; });
+    }
+    $("nlhSetLive").addEventListener("click", function(){ goLive(); });
+    // ?live=1 (&comp=nl|north|south) → straight into today, live
+    try{
+      var qs=new URLSearchParams(location.search);
+      if(qs.get("live")){
+        var qc=qs.get("comp"); if(qc&&COMPS[qc]) $("nlhSetComp").value=qc;
+        setup.hidden=false; goLive(qc);
+      }
+    }catch(e){}
 
     var rt; window.addEventListener("resize", function(){ clearTimeout(rt); rt=setTimeout(layoutPins,120); });
     window.addEventListener("orientationchange", function(){ setTimeout(layoutPins,300); });
