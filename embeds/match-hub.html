@@ -405,6 +405,22 @@
                           gated on games played. The day's FULL-TIME beat
                           and final table hold until NLS marks every match
                           finished. Replay behaviour is untouched.
+    v0.25.0 (2026-08-08) — LIVE IS THE PRODUCT. The hub boots straight into
+                          today's games (?comp=north|south picks division;
+                          ?replay=1 keeps the old demo landing). The sim is
+                          gated behind "Replay a matchday". TEAM NEWS
+                          reads: as each lineup drops (~2pm) the XI is
+                          read in the preview cycle, camera on that
+                          ground — surnames in position order, semicolons
+                          between units, commas between names ("Team news
+                          — Woking: Ward; Cassidy, Foster, Mullings; …").
+                          OPENING DAY de-noised: previews use lean
+                          templates (the new season mentioned only
+                          occasionally, never per team), colour clause
+                          always attempted instead of empty form lines.
+                          Mobile: hero lower third clamps long club names
+                          (ellipsis + smaller type under 600px) instead
+                          of spilling off the page.
   ============================================================================
 -->
 
@@ -540,7 +556,7 @@ window.__DATA__ = {
     <div class="nlh__brandrow">
       <span class="nlh__wordmark">MATCH&nbsp;HUB</span>
       <span class="nlh__round" id="nlhRound"></span>
-      <button class="nlh__loadbtn" id="nlhLoadBtn">Choose matchday</button>
+      <button class="nlh__loadbtn" id="nlhLoadBtn">Replay a matchday</button>
     </div>
     <div class="nlh__switch" role="tablist" aria-label="View">
       <button class="nlh__seg is-active" data-view="map"    role="tab">Map</button>
@@ -595,7 +611,7 @@ window.__DATA__ = {
   <!-- Matchday setup — pick any completed date, join at any time, set the pace -->
   <div class="nlh__setup" id="nlhSetup" hidden>
     <div class="nlh__setupcard">
-      <div class="nlh__setuphead"><span>Choose a matchday</span><button class="nlh__sheetclose" id="nlhSetupClose" aria-label="Close">&times;</button></div>
+      <div class="nlh__setuphead"><span>Replay a matchday</span><button class="nlh__sheetclose" id="nlhSetupClose" aria-label="Close">&times;</button></div>
       <div class="nlh__fieldrow">
         <label class="nlh__field">Date<input type="date" id="nlhSetDate"></label>
         <label class="nlh__field">Competition<select id="nlhSetComp">
@@ -766,11 +782,19 @@ body{overflow:hidden}
    (reveal). No current-clock time here — the goal minute is the only
    time shown. Fixed size, never zoom-scaled. ===== */
 #nlHub .nlh__hero{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);z-index:6;pointer-events:none;max-width:94%}
-#nlHub .nlh__ha{min-width:min(460px,92vw);border-radius:10px;overflow:hidden;box-shadow:0 12px 30px rgba(0,0,0,.5)}
+#nlHub .nlh__ha{min-width:min(460px,92vw);max-width:94vw;border-radius:10px;overflow:hidden;box-shadow:0 12px 30px rgba(0,0,0,.5)}
+@media (max-width:600px){
+  /* long club names (Kidderminster, Hampton & Richmond…) must never push
+     the lower third off the phone screen */
+  #nlHub .nlh__hanm{font-size:14px;letter-spacing:.02em}
+  #nlHub .nlh__hasc{font-size:32px;padding:0 4px}
+  #nlHub .nlh__habar{gap:8px;padding:10px 10px}
+  #nlHub .nlh__habar img,#nlHub .nlh__habar .nlh__crestfb{width:26px;height:26px}
+}
 #nlHub .nlh__hakick{display:flex;justify-content:flex-start;padding:6px 14px;background:#16234a;color:#fff;font-size:12px;font-variation-settings:"wght" 800;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
 #nlHub .nlh__habar{display:flex;align-items:center;justify-content:center;gap:13px;background:#0d1730;padding:12px 18px}
 #nlHub .nlh__habar img,#nlHub .nlh__habar .nlh__crestfb{width:34px;height:34px;object-fit:contain}
-#nlHub .nlh__hanm{font-size:19px;font-variation-settings:"wght" 900;font-weight:900;letter-spacing:.04em;color:#fff;text-transform:uppercase}
+#nlHub .nlh__hanm{font-size:19px;font-variation-settings:"wght" 900;font-weight:900;letter-spacing:.04em;color:#fff;text-transform:uppercase;min-width:0;flex:0 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #nlHub .nlh__hasc{display:flex;align-items:center;gap:6px;font-size:42px;line-height:1;font-variation-settings:"wght" 900;font-weight:900;font-variant-numeric:tabular-nums;color:#fff;padding:0 8px}
 #nlHub .nlh__hadash{font-size:24px;color:var(--ink-muted)}
 #nlHub .nlh__hav{font-size:28px;color:var(--ink-muted);font-variation-settings:"wght" 800;font-weight:800}
@@ -978,7 +1002,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "35";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "36";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -1138,7 +1162,7 @@ body{overflow:hidden}
   var st = { T:0, playing:false, rate:1, view:"map", raf:0, last:0,
              fired:{}, ftShown:false, feedBuilt:{}, beatShown:{},
              suspend:null, kickoff:null, koShown:false, _bag:{}, _lastPick:{}, _typeIv:0,
-             _commUntil:0, _commQ:null, _commDrT:0, liveMode:false, liveQ:[],
+             _commUntil:0, _commQ:null, _commDrT:0, liveMode:false, liveQ:[], newsQ:[],
              // timing mode: secPerMin = seconds one match-minute takes (the
              // speed button still multiplies on top); stagger = real KO slots
              secPerMin:1, stagger:false, baseKOms:0 };
@@ -1593,7 +1617,7 @@ body{overflow:hidden}
   }
   // ONE extra colour clause per preview, weighted: h2h, derby extremes,
   // stakes maths, the referee. Keeps previews tight.
-  function previewExtra(fx,h,a){
+  function previewExtra(fx,h,a,force){
     var opts=[];
     var hc=h2hClause(fx); if(hc) opts.push({w:(fx.h2h&&fx.h2h.p<=1)?8:4, s:hc});
     var mi=(h.lat&&a.lat)?haversineMi(h,a):null;
@@ -1601,7 +1625,7 @@ body{overflow:hidden}
     else if(mi!=null && mi>=180) opts.push({w:6,s:"Quite the trek for the visiting fans — the best part of "+Math.round(mi/25)*25+" miles to get here."});
     var stk=stakesClause(fx); if(stk) opts.push({w:4,s:stk});
     if(fx.ref) opts.push({w:2,s:fx.ref+" is the man in the middle"+(fx.refY>=4.5?" — and the cards tend to flow when he officiates":"")+"."});
-    if(!opts.length || Math.random()>0.85) return null;
+    if(!opts.length || (!force && Math.random()>0.85)) return null;
     var tot=opts.reduce(function(nn,o){return nn+o.w;},0), x=Math.random()*tot, ch=opts[0];
     for(var i=0;i<opts.length;i++){ x-=opts[i].w; if(x<=0){ch=opts[i];break;} }
     return ch.s;
@@ -1648,8 +1672,25 @@ body{overflow:hidden}
     return ch.s;
   }
   function lcNick(s){ return s.replace(/^The /, "the "); }   // "the Cards" mid-sentence
+  // OPENING DAY previews — no form exists and it's everyone's first game, so
+  // don't say so per team (or in every preview): lean templates, the season
+  // mentioned only occasionally, colour clause always attempted instead
+  var KO_TMPL0=[
+    "At {venue}, {home} host {away}.",
+    "{home} welcome {away} to {venue}.",
+    "Kick-off at {venue}: {home} against {away}.",
+    "Down at {venue}, {away} are the visitors.",
+    "First up at {venue} — {home} against {away}.",
+    "At {venue}, {home} and {away} get the new season underway."
+  ];
   function kickoffSegs(fx){
     var h=club(fx.home), a=club(fx.away);
+    if(h.p0&&a.p0){
+      var segs0=buildSegs(pick(KO_TMPL0,"kop0"), {venue:h.venue||h.name, home:h.name, away:a.name}, ["venue","home","away"]);
+      var ex0=previewExtra(fx,h,a,true);
+      if(ex0) segs0=segs0.concat([{t:" "}]).concat(buildSegs(ex0,{},[]));
+      return segs0;
+    }
     var hn=lcNick(h.nick||h.short), an=lcNick(a.nick||a.short);
     if(hn===an){ hn=h.short; an=a.short; }   // both "the Iron" etc. — fall back to names
     var segs=buildSegs(pick(KO_TMPL,"kop"), {venue:h.venue||h.name, home:h.name, away:a.name, homeNick:hn, awayNick:an, hp:formPhrase(h,"h"), ap:formPhrase(a,"a")}, ["venue","home","away","homeNick","awayNick"]);
@@ -2186,12 +2227,15 @@ body{overflow:hidden}
           st.kickoff=null; focusReset(); st.last=ts;   // done — action begins
         }
         else {
-          var kfx=KO_ORDER[ki], kseg=kickoffSegs(kfx);
+          // TEAM NEWS reads jump the preview queue as lineups drop in
+          var kfx, kseg, isNews=false;
+          if (st.newsQ.length){ var nq=st.newsQ.shift(); kfx=nq.fx; kseg=nq.segs; isNews=true; }
+          else { kfx=KO_ORDER[ki]; kseg=kickoffSegs(kfx); }
           setFocus(kfx);   // same focus treatment as goals — grey out, glide in
           typeSegs(kseg,"beat");
           var kchars=kseg.reduce(function(n,s){return n+s.t.length;},0);
-          var kdur = st.rate>=2 ? 2200 : Math.min(9000, 2400 + kchars*24);   // real reading pace, not a skim
-          st.kickoff={ i:ki+1, until: ts + kdur };
+          var kdur = st.rate>=2 ? 2200 : Math.min(11000, 2400 + kchars*24);   // real reading pace, not a skim
+          st.kickoff={ i: isNews?ki:ki+1, until: ts + kdur };
         }
       }
       st.raf=requestAnimationFrame(tick); return;
@@ -2349,6 +2393,21 @@ body{overflow:hidden}
     });
     return p?{p:p,hw:hw,aw:aw,d:d,f:f,l:l,lr:lr}:(_alltime?{p:0}:null);
   }
+  // starting XI as a broadcast read: surnames in position order — commas
+  // within a unit, semicolons between units (GK; defence; midfield; attack)
+  function xiOf(t){
+    var GRP={goalkeeper:0,defender:1,midfielder:2,striker:3,forward:3};
+    var xi=(t.players&&t.players.Start)||[]; if(!xi.length) return null;
+    var groups=[[],[],[],[]];
+    xi.slice().sort(function(a,b){return (a.formationPlace||99)-(b.formationPlace||99);}).forEach(function(p){
+      var gi=GRP[String(p.playerPosition||"").toLowerCase()]; if(gi==null) gi=3;
+      var n=p.playerName||{};
+      var nm=n.lastName||String(n.knownName||n.customKnownName||"").split(" ").pop()||"";
+      if(nm) groups[gi].push(nm);
+    });
+    var read=groups.filter(function(g){return g.length;}).map(function(g){return g.join(", ");}).join("; ");
+    return read||null;
+  }
   // map one NLS match-detail response → the hub's event list (+ lineup flag).
   // Shared by the replay loader and the live poller.
   function eventsFromDetail(d,homeID,awayID){
@@ -2380,7 +2439,8 @@ body{overflow:hidden}
       });
     });
     events.sort(function(a,b){return a.min-b.min;});
-    return {events:events, lineups:lineups, att:(at.matchDetails&&at.matchDetails.attendance)||null,
+    return {events:events, lineups:lineups, xi:{h:xiOf(home),a:xiOf(away)},
+            att:(at.matchDetails&&at.matchDetails.attendance)||null,
             ref:(at.matchDetails&&at.matchDetails.refereeName)||at.refereeName||null};
   }
   async function loadMatchday(o){
@@ -2472,7 +2532,7 @@ body{overflow:hidden}
         fxOut._per=(la.matchPeriod||"").toLowerCase();
         fxOut._fmin=la.formattedMatchTime||null;
         if(fxOut.hs!=null) fxOut._ls={h:fxOut.hs,a:fxOut.as};
-        if(ex.lineups) fxOut._news=true;
+        if(ex.lineups){ fxOut._news=true; fxOut._xi=ex.xi; }
       }
       // play-offs (and any knockout tie) are matchType "Cup" — mark them so
       // the live table, arrows and stakes/race storylines leave them alone
@@ -2543,11 +2603,12 @@ body{overflow:hidden}
         if(evRmin(ev,fx)<=st.T+0.001) st.fired[evId(fx,ev)]=1;
       });});
       BEATS.forEach(function(b){ if(b.r<=st.T) st.beatShown[b.r]=1; });
-      if(D.fixtures.some(function(fx){return fx._news;})) LIVE.newsSeen=true;
+      st.newsQ.length=0;
+      if(st.T<=0.5) D.fixtures.forEach(queueNews);   // lineups already in → read them pre-KO
       st.koShown = st.T>0;   // pre-KO joins still get the preview build-up
       liveKickPoll();
       play();
-      commStatic(st.T<=0 ? (LIVE.newsSeen?C_IDLE:"Live from the National League — team news expected shortly.")
+      commStatic(st.T<=0 ? (st.newsQ.length?C_IDLE:"Live from the National League — team news expected shortly.")
                          : "Live — picking up the afternoon as it stands…");
     } else if(o.startTime){
       st.liveMode=false; clearTimeout(LIVE.pollIv);
@@ -2605,6 +2666,19 @@ body{overflow:hidden}
     fx.events=real.concat(fx.events.filter(function(e){return e.type!=="goal";}).filter(function(e){return !e.ghost;})).concat(keep);
     fx.events.sort(function(a,b){return a.min-b.min;});
   }
+  // TEAM NEWS reads — queued as lineups drop (~2pm, in dribs and drabs) and
+  // threaded through the pre-KO preview cycle, camera on the right ground.
+  // Format: surnames in position order, semicolons between units, commas
+  // between names. One line per team.
+  function queueNews(fx){
+    if(fx._newsDone || st.T>0.5 || !fx._xi) return;
+    fx._newsDone=true;
+    [["home","h"],["away","a"]].forEach(function(sd){
+      var xi=fx._xi[sd[1]]; if(!xi) return;
+      var cl=club(fx[sd[0]]);
+      st.newsQ.push({fx:fx, segs:buildSegs("Team news — {club}: "+xi+".", {club:cl.name}, ["club"])});
+    });
+  }
   var C_GHOST=[
     "There's a goal at {venue}! It's {team} — {score}. Scorer details to follow.",
     "GOAL at {venue} — {team} have struck! {score}.",
@@ -2648,7 +2722,7 @@ body{overflow:hidden}
         x.fx.events=ex.events.concat((x.fx._ghosts||[]));
         if(ex.att) x.fx.att=ex.att;
         if(ex.ref) x.fx.ref=ex.ref;
-        if(ex.lineups) x.fx._news=true;
+        if(ex.lineups){ x.fx._news=true; x.fx._xi=ex.xi; queueNews(x.fx); }
       });
       D.fixtures.forEach(topUpGhosts);
       LIVE.allFT=D.fixtures.every(function(fx){
@@ -2657,10 +2731,6 @@ body{overflow:hidden}
       computeDerived();
       // feed item ids shift as events land — rebuild it clean
       st.feedBuilt={}; $("nlhFeed").innerHTML="";
-      if(!LIVE.newsSeen && D.fixtures.some(function(fx){return fx._news;})){
-        LIVE.newsSeen=true;
-        if(st.T<=0) commSay(buildSegs("Team news is dropping across the grounds — kick-off is approaching.",{},[]),"beat",1);
-      }
       // catch-up: anything the feed delivered BEHIND the play head
       var behind=[];
       D.fixtures.forEach(function(fx){ fx.events.forEach(function(ev){
@@ -2750,12 +2820,15 @@ body{overflow:hidden}
         .catch(function(e){ btn.disabled=false; stat.textContent=(e&&e.message)||"Couldn't go live."; stat.className="nlh__setupstatus is-error"; });
     }
     $("nlhSetLive").addEventListener("click", function(){ goLive(); });
-    // ?live=1 (&comp=nl|north|south) → straight into today, live
+    // LIVE IS THE PRODUCT: the hub boots straight into today's games
+    // (?comp=north|south picks the division; ?replay=1 skips auto-live and
+    // leaves the embedded demo + the gated replay dialog)
     try{
       var qs=new URLSearchParams(location.search);
-      if(qs.get("live")){
-        var qc=qs.get("comp"); if(qc&&COMPS[qc]) $("nlhSetComp").value=qc;
-        setup.hidden=false; goLive(qc);
+      var qc=qs.get("comp"); if(qc&&COMPS[qc]) $("nlhSetComp").value=qc;
+      if(!qs.get("replay")){
+        setup.hidden=false;
+        goLive(qc||undefined);
       }
     }catch(e){}
 
