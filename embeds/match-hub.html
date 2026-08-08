@@ -491,6 +491,23 @@
                           button / footer link), full height; the table
                           column modes (show-tablecol / swap-table /
                           mqWide) are deleted.
+    v0.31.0 (2026-08-08) — RAILS map mode + the PULSE. (1) A Grounds/
+                          Rails toggle on the map: rails stacks the score
+                          boards evenly down both edges (west half left,
+                          east half right, north→south) with stems
+                          stretching to the grounds; choice remembered.
+                          (2) Intermittent COLOUR COMMENTARY: roughly
+                          once a minute in quiet spells, one truth-gated
+                          line from six families — clock milestones
+                          (10/30/HT-approach/hour/final-ten/late),
+                          state-of-play sweeps, HOLD-ON stakes ("If X
+                          and Y see these out, first wins since March
+                          and November respectively" — real last-win
+                          dates from the all-time master + this season,
+                          live-only), around-the-grounds colour, table
+                          pulse, staggered-day beats. Milestones fire on
+                          time; the rest probabilistic with per-family
+                          cooldowns; goals/reds/beats always outrank.
     v0.30.1 (2026-08-08) — Scorecard goals read per SIDE: home scorers
                           stack left, away scorers stack right-aligned,
                           one line per goal; red cards join the same
@@ -723,6 +740,10 @@ window.__DATA__ = {
         <div class="nlh__pins" id="nlhPins"></div>
       </div>
       <div class="nlh__beat" id="nlhBeat" hidden></div>
+      <div class="nlh__mapmode" id="nlhMapMode">
+        <button class="nlh__mmbtn is-active" data-mm="near">Grounds</button>
+        <button class="nlh__mmbtn" data-mm="rails">Rails</button>
+      </div>
       <!-- hero lower third — the persistent score updater during focus -->
       <div class="nlh__hero" id="nlhHero" hidden></div>
       <!-- goal takeover — team-colour wipe that runs before the lockup lands -->
@@ -1030,6 +1051,11 @@ body{overflow:hidden}
 #nlHub .nlh__scorer .m{color:var(--text);opacity:.65}
 #nlHub .nlh__scorer.og .m::after{content:" OG"}
 
+/* map layout toggle — boards by their grounds, or stacked on the rails */
+#nlHub .nlh__mapmode{position:absolute;top:10px;right:10px;z-index:6;display:flex;gap:3px;background:rgba(10,20,40,.72);border:1px solid var(--ink-line);border-radius:999px;padding:3px}
+#nlHub .nlh__mmbtn{font-family:inherit;line-height:1.2;max-height:999999px;font-size:10px;font-variation-settings:"wght" 800;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-muted);border:0;border-radius:999px;padding:4px 10px;background:transparent;cursor:pointer}
+#nlHub .nlh__mmbtn.is-active{background:var(--surface);color:var(--navy)}
+
 /* ===== TEAMSHEET in the scorecard (tap to expand) ===== */
 #nlHub .nlh__tsx{grid-area:ts;border-top:1px solid var(--line);margin-top:4px;padding-top:9px;cursor:default}
 #nlHub .nlh__tspend{color:var(--muted);font-size:var(--fs-xs);padding:2px 0 4px}
@@ -1237,7 +1263,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "50";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "51";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -1408,7 +1434,7 @@ body{overflow:hidden}
              _commUntil:0, _commQ:null, _commDrT:0, liveMode:false, liveQ:[], newsQ:[],
              // timing mode: secPerMin = seconds one match-minute takes (the
              // speed button still multiplies on top); stagger = real KO slots
-             secPerMin:1, stagger:false, baseKOms:0 };
+             secPerMin:1, stagger:false, baseKOms:0, mapMode:"near" };
   function evId(fx,ev){ return fx.gc+"_"+ev.type+"_"+ev.min+"_"+(ev.name||ev._gk||""); }
   // desktop = three panels live at once (cards | map | ticker); the map is
   // always on screen there, so stings/beats/zooms fire regardless of st.view
@@ -1488,6 +1514,23 @@ body{overflow:hidden}
       }
       return c;
     }
+    if(st.mapMode==="rails"){
+      // RAILS: boards leave the geography and stack evenly down both edges —
+      // west half left, east half right, each rail north→south, stems
+      // stretching to the grounds. 6/6 a division, 18/18 in All.
+      var srt=nodes.slice().sort(function(a,b){return a.ax-b.ax;});
+      var half=Math.ceil(srt.length/2);
+      var L=srt.slice(0,half).sort(function(a,b){return a.ay-b.ay;});
+      var R=srt.slice(half).sort(function(a,b){return a.ay-b.ay;});
+      [[L,true],[R,false]].forEach(function(pair){
+        var col=pair[0], isL=pair[1], n=col.length;
+        col.forEach(function(nd,i){
+          nd.x = isL ? nd.w/2+8 : W-nd.w/2-8;
+          var padY=nd.h/2+10;
+          nd.y = padY + (i+0.5)*(H-2*padY)/n;
+        });
+      });
+    } else {
     // narrow (phone) stages: boards are compact but the clusters are as
     // dense, so allow one more ring and wider steps — spill into the sea
     var MOB = W<700;
@@ -1505,6 +1548,7 @@ body{overflow:hidden}
         }
         n.x=best.x; n.y=best.y;
       });
+    }
     }
     nodes.forEach(function(n){
       n.el.style.left=(n.ax/W*100).toFixed(3)+"%";
@@ -2259,6 +2303,187 @@ body{overflow:hidden}
     box.hidden=false;
     st._tsOpen=fx.gc;
   }
+  // ---- PULSE — intermittent colour commentary --------------------------
+  // Roughly once a minute, when the console is quiet, no goal choreography
+  // is running and nothing is seconds away, ONE truth-gated line from the
+  // bank below. Milestones fire deterministically; the rest by weighted
+  // lottery with per-family cooldowns. Goals/reds/beats always outrank it.
+  var PULSE={last:0, done:{}, fam:{}, rr:0};
+  var MONTHS=["January","February","March","April","May","June","July","August","September","October","November","December"];
+  var _winDates=null;
+  function buildWinDates(){
+    if(_winDates||!_alltime) return;
+    _winDates={};
+    (_alltime.seasons||[]).forEach(function(sn){ Object.keys(sn.divisions||{}).forEach(function(k){
+      ((sn.divisions[k]||{}).matches||[]).forEach(function(m){
+        if(m.home_goals==null||!m.date) return;
+        var hn=m.home_entity||m.home, an=m.away_entity||m.away;
+        if(m.home_goals>m.away_goals){ var r=_winDates[hn]=_winDates[hn]||{}; if(!r.w||m.date>r.w) r.w=m.date; }
+        else if(m.away_goals>m.home_goals){ var r2=_winDates[an]=_winDates[an]||{}; if(!r2.w||m.date>r2.w) r2.w=m.date; if(!r2.aw||m.date>r2.aw) r2.aw=m.date; }
+      });
+    });});
+  }
+  function sinceLbl(d){
+    if(!d) return null;
+    var days=(Date.now()-Date.parse(d))/86400000;
+    if(days<35) return null;   // a win five weeks back isn't a drought story
+    var mo=MONTHS[+d.slice(5,7)-1], yr=+d.slice(0,4);
+    return "since "+(days>360 ? mo+" "+yr : mo);
+  }
+  function lastWinLbl(k,away){
+    buildWinDates();
+    var cl=club(k), d=null;
+    var r=_winDates&&_winDates[cl.name];
+    if(r) d=away?(r.aw||null):(r.w||null);
+    var rec=(D._recentWins||{})[k];
+    if(!away&&rec&&(!d||rec>d)) d=rec;
+    return sinceLbl(d);
+  }
+  function curMinOf(fx){
+    var sst=stateOf(fx,st.T);
+    if(!sst.live) return null;
+    if(sst.phase==="ht") return 45;
+    if(st.liveMode&&fx._per) return liveLocalMin(fx);
+    var local=st.T-koOffset(fx);
+    return Math.round(local>HALF+BREAK ? local-BREAK : Math.min(local,HALF));
+  }
+  function pulseState(){
+    var inPlay=[], done=0;
+    D.fixtures.forEach(function(fx){
+      if(fx.pp) return;
+      var sst=stateOf(fx,st.T);
+      if(sst.phase==="ft"){ done++; return; }
+      if(!sst.live) return;
+      var sc=scoreAt(fx,st.T), mn=curMinOf(fx)||0;
+      inPlay.push({fx:fx,sc:sc,mn:mn,diff:sc.h-sc.a});
+    });
+    return inPlay;
+  }
+  function pulseCandidates(){
+    var P=pulseState(); if(!P.length) return [];
+    var divWord=(D.competition==="All divisions")?"the divisions":"the division";
+    var opts=[];
+    var leadMin=0, goals=0, g0=0, hw=0, aw=0, level=0, big=null, leaders=[];
+    P.forEach(function(p){
+      if(p.mn>leadMin) leadMin=p.mn;
+      goals+=p.sc.h+p.sc.a;
+      if(p.sc.h+p.sc.a===0) g0++;
+      if(p.diff>0){ hw++; leaders.push({k:p.fx.home,p:p}); }
+      else if(p.diff<0){ aw++; leaders.push({k:p.fx.away,p:p}); }
+      else level++;
+      if(!big||Math.abs(p.diff)>Math.abs(big.diff)) big=p;
+    });
+    function fam(f,cool){ return (Date.now()-(PULSE.fam[f]||0))>cool*1000; }
+    function add(w,f,line,key){ opts.push({w:w,f:f,s:line,key:key}); }
+    // A — clock milestones (deterministic: returned alone when due)
+    var MS=[[10,"m10"],[30,"m30"],[40,"m40"],[63,"m63"],[80,"m80"],[88,"m88"]];
+    for(var i=0;i<MS.length;i++){
+      var th=MS[i][0], id=MS[i][1];
+      if(leadMin>=th && leadMin<th+6 && !PULSE.done[id]){
+        var line=null;
+        if(id==="m10") line="Ten minutes in around the grounds — "+(goals===0?"still goalless everywhere.":goals+" goal"+(goals>1?"s":"")+" already.");
+        if(id==="m30") line="Half an hour played. "+(g0===P.length?"Not a goal anywhere yet.":goals+" goal"+(goals>1?"s":"")+" across "+divWord+" so far.");
+        if(id==="m40") line="Coming up to the break. As it stands: "+hw+" home win"+(hw===1?"":"s")+", "+aw+" away, "+level+" level.";
+        if(id==="m63") line="Past the hour around the grounds. "+(big&&Math.abs(big.diff)>=2?("The big score is at "+(club(big.fx.home).venue||club(big.fx.home).name)+" — "+big.sc.h+"–"+big.sc.a+"."):goals+" goal"+(goals===1?"":"s")+" so far across "+divWord+".");
+        if(id==="m80") line="Into the final ten minutes around the grounds.";
+        if(id==="m88") line="Not long now. As it stands: "+hw+" home win"+(hw===1?"":"s")+", "+aw+" away, "+level+" drawn.";
+        if(line) return [{w:1,f:"ms",s:line,key:id,ms:true}];
+      }
+    }
+    // B — state-of-play sweeps
+    if(fam("sweep",240)){
+      if(g0===P.length&&P.length>=4&&leadMin>=12) add(3,"sweep","Still goalless at every ground.");
+      else if(g0>0&&P.length>=6&&leadMin>=15) add(3,"sweep","Still goalless at "+g0+" of the "+P.length+" grounds.");
+      if(goals>=6) add(3,"sweep",goals+" goals across "+divWord+" so far — quite the afternoon.");
+      if(level===P.length&&P.length>=4&&leadMin>=25) add(3,"sweep","Every game is level right now. Someone blink.");
+      if(leaders.length===1) add(3,"sweep",club(leaders[0].k).name+" are the only side ahead anywhere.");
+      else if(leaders.length===2) add(3,"sweep",club(leaders[0].k).name+" and "+club(leaders[1].k).name+" the only sides ahead anywhere.");
+      if((hw||aw)&&leadMin>=35&&aw>hw) add(3,"sweep","As it stands: "+aw+" away win"+(aw===1?"":"s")+" to "+hw+" home — a day for the travellers.");
+    }
+    // C — hold-on stakes (LIVE only: "first win since" is measured from today)
+    if(st.liveMode&&fam("hold",300)){
+      var holdables=[];
+      leaders.forEach(function(L){
+        if(L.p.mn<60) return;
+        if(PULSE.done["hw_"+L.k]) return;
+        var lbl=lastWinLbl(L.k,false);
+        if(lbl) holdables.push({k:L.k,lbl:lbl});
+      });
+      if(holdables.length>=2) add(6,"hold","If "+club(holdables[0].k).name+" and "+club(holdables[1].k).name+" see these out, they're first wins "+holdables[0].lbl+" and "+holdables[1].lbl+" respectively.","hw2_"+holdables[0].k+"_"+holdables[1].k);
+      else if(holdables.length===1) add(5,"hold","If "+club(holdables[0].k).name+" hold on, it's a first win "+holdables[0].lbl+".","hw_"+holdables[0].k);
+      leaders.forEach(function(L){
+        var cl=club(L.k);
+        if(L.p.mn>=60&&L.p.mn<=78&&cl.winless>=5&&!PULSE.done["wl_"+L.k]) add(5,"hold",cl.name+" are "+(90-L.p.mn)+" minutes from ending a "+cl.winless+"-game winless run.","wl_"+L.k);
+        var isAway=(L.k===L.p.fx.away);
+        if(isAway&&L.p.mn>=62&&(cl.split&&cl.split.aWinless>=6)&&!PULSE.done["aw_"+L.k]){
+          var albl=lastWinLbl(L.k,true);
+          if(albl) add(5,"hold",cl.name+" are heading for a first away win "+albl+".","aw_"+L.k);
+        }
+        var oppSc=(L.k===L.p.fx.home)?L.p.sc.a:L.p.sc.h;
+        if(oppSc===0&&L.p.mn>=68&&cl.ident&&cl.ident.cs>=8&&!PULSE.done["cs_"+L.k]) add(4,"hold","Hold out and "+cl.name+" bank a first clean sheet in "+cl.ident.cs+".","cs_"+L.k);
+      });
+      P.forEach(function(p){
+        [[p.fx.home,p.diff<0],[p.fx.away,p.diff>0]].forEach(function(x){
+          var cl=club(x[0]);
+          if(x[1]&&p.mn>=70&&cl.unbeaten>=6&&!PULSE.done["ub_"+x[0]]) add(4,"hold","As it stands, "+cl.name+"'s "+cl.unbeaten+"-match unbeaten run ends at "+(club(p.fx.home).venue||club(p.fx.home).name)+".","ub_"+x[0]);
+        });
+      });
+    }
+    // D — around the grounds (round-robin)
+    if(fam("ground",200)&&P.length){
+      var p=P[PULSE.rr%P.length]; PULSE.rr++;
+      var h=club(p.fx.home), a=club(p.fx.away), ven=h.venue||h.name;
+      if(p.sc.h+p.sc.a===0&&p.mn>=20) add(2,"ground","At "+ven+" it's still goalless — "+h.short+" and "+a.short+" yet to blink.");
+      else if(Math.abs(p.diff)===1&&p.sc.h+p.sc.a===1){
+        var g=p.fx.events.filter(function(e){return e.type==="goal"&&evRmin(e,p.fx)<=st.T;})[0];
+        if(g&&g.name) add(2,"ground",g.name+"'s goal is still the difference at "+ven+".");
+      }
+      else if(p.diff!==0&&p.mn>=55) add(2,"ground",(p.diff<0?h.name:a.name)+" are chasing it at "+ven+" — "+p.sc.h+"–"+p.sc.a+" with around "+(90-p.mn)+" minutes left.");
+      var red=p.fx.events.filter(function(e){return e.type==="red"&&evRmin(e,p.fx)<=st.T;})[0];
+      if(red){ var mins=p.mn-red.min; if(mins>=10) add(3,"ground",club(red.team).name+" have been a man down for "+mins+" minutes — still "+p.sc.h+"–"+p.sc.a+" at "+ven+"."); }
+    }
+    // E — table pulse (needs a real prior table)
+    if(fam("tbl",300)&&Object.keys(D.prior).length){
+      var lt=liveTable(st.T), was=priorRank();
+      if(lt.arr.length){
+        var topK=lt.arr[0].k, wasTopK=null;
+        Object.keys(was).forEach(function(k){ if(was[k]===0) wasTopK=k; });
+        if(wasTopK&&topK!==wasTopK&&!PULSE.done["top_"+topK]) add(4,"tbl","As it stands, "+club(topK).name+" go top.","top_"+topK);
+        if(!D.zeroDay) lt.arr.forEach(function(r,i){
+          var w=was[r.k]; if(w==null) return;
+          if(w-i>=4&&!PULSE.done["cl_"+r.k]) add(3,"tbl",club(r.k).name+" have climbed "+(w-i)+" places this afternoon, as it stands.","cl_"+r.k);
+        });
+      }
+    }
+    // F — staggered-day beats
+    var offs={}; D.fixtures.forEach(function(fx){ if(!fx.pp) offs[fx._ko||0]=1; });
+    if(Object.keys(offs).length>1){
+      var early=P.filter(function(p){ return (p.fx._ko||0)===0; });
+      if(early.length===1){
+        var e=early[0];
+        if(e.mn>=42&&e.mn<=45&&!PULSE.done["f45"]) add(3,"stag","Coming up to the break in the early game — "+e.sc.h+"–"+e.sc.a+" at "+(club(e.fx.home).venue||club(e.fx.home).name)+".","f45");
+        if(e.mn>=90&&!PULSE.done["f90"]) add(3,"stag","The early game is deep in stoppage time — "+e.sc.h+"–"+e.sc.a+".","f90");
+      }
+    }
+    return opts;
+  }
+  function pulseTick(){
+    if(!st.playing||st.suspend||st.liveQ.length) return;
+    var now=Date.now();
+    if(now<st._commUntil+8000) return;
+    if(now-PULSE.last<55000) return;
+    if(st.T<=0.2||st.T>=maxT()-0.2) return;
+    if(nextMoment(st.T)-st.T<0.15) return;
+    var c=pulseCandidates();
+    if(!c.length){ PULSE.last=now-25000; return; }
+    // milestones speak on time; everything else breathes (~72%)
+    if(!c[0].ms&&Math.random()>0.72){ PULSE.last=now-30000; return; }
+    var tot=c.reduce(function(n,o){return n+o.w;},0), x=Math.random()*tot, ch=c[0];
+    for(var i=0;i<c.length;i++){ x-=c[i].w; if(x<=0){ ch=c[i]; break; } }
+    PULSE.fam[ch.f]=now; PULSE.last=now;
+    if(ch.key) PULSE.done[ch.key]=1;
+    typeSegs(buildSegs(ch.s,{},[]),"beat");
+  }
   function redSegs(fx,ev){
     var t=club(ev.team), h=club(fx.home);
     return buildSegs(pick(ev.sec?C_RED2:C_RED,"red"), {venue:h.venue||h.name,team:t.short,scorer:ev.name,dp:DAYPART}, ["venue","team","scorer"]);
@@ -2659,6 +2884,7 @@ body{overflow:hidden}
     st.T=target;
     fireCrossed(prevT, st.T, true);        // 4× (or no goal ahead): goals fire instantly
     paint();
+    pulseTick();
     if (st.T>=maxT()){
       // live: matches can run past the nominal clock — keep ticking (and
       // polling) until NLS says every game has finished
@@ -2899,6 +3125,14 @@ body{overflow:hidden}
         (seq[x[0]]=seq[x[0]]||[]).push({ha:x[3],gf:x[1],ga:x[2]});
       });
     });
+    var recentWins={};
+    hist.forEach(function(m){
+      var a=m.attributes;
+      if(!a.homeTeam||a.homeTeam.score==null) return;
+      var dte=(a.kickOffDateUTC||"").slice(0,10);
+      if(a.homeTeam.score>a.awayTeam.score){ var kk=a.homeTeam.teamID; if(!recentWins[kk]||dte>recentWins[kk]) recentWins[kk]=dte; }
+      else if(a.awayTeam.score>a.homeTeam.score){ var k2=a.awayTeam.teamID; if(!recentWins[k2]||dte>recentWins[k2]) recentWins[k2]=dte; }
+    });
     o.status("Fetching club identity…");
     _meta=_meta||await fetchJSON(META_URL);
     var byOpta={}; _meta.clubs.forEach(function(c){ if(c.optaID) byOpta[c.optaID]=c; });
@@ -3023,7 +3257,8 @@ body{overflow:hidden}
         });
       });
     }
-    D._date=o.date; CURCOMP=o.comp||"nl";
+    D._date=o.date; CURCOMP=o.comp||"nl"; D._recentWins=recentWins;
+    PULSE.last=0; PULSE.done={}; PULSE.fam={}; PULSE.rr=0;
     $("nlhComps").hidden=false;
     document.querySelectorAll("#nlhComps .nlh__compbtn").forEach(function(b){
       b.classList.toggle("is-active", b.getAttribute("data-comp")===CURCOMP);
@@ -3424,6 +3659,17 @@ body{overflow:hidden}
       }
     }catch(e){}
 
+    try{ var mm0=localStorage.getItem("nlhub-mapmode"); if(mm0==="rails") st.mapMode="rails"; }catch(e){}
+    document.querySelectorAll("#nlhMapMode .nlh__mmbtn").forEach(function(b){
+      b.classList.toggle("is-active", b.getAttribute("data-mm")===(st.mapMode||"near"));
+      b.addEventListener("click", function(ev){
+        ev.stopPropagation();
+        st.mapMode=b.getAttribute("data-mm");
+        try{ localStorage.setItem("nlhub-mapmode", st.mapMode); }catch(e){}
+        document.querySelectorAll("#nlhMapMode .nlh__mmbtn").forEach(function(x){ x.classList.toggle("is-active", x===b); });
+        layoutPins();
+      });
+    });
     var rt; window.addEventListener("resize", function(){ clearTimeout(rt); rt=setTimeout(layoutPins,120); });
     // board widths change when the web font lands — measure again
     if(document.fonts&&document.fonts.ready) document.fonts.ready.then(function(){ layoutPins(); });
