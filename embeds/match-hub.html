@@ -491,6 +491,15 @@
                           button / footer link), full height; the table
                           column modes (show-tablecol / swap-table /
                           mqWide) are deleted.
+    v0.28.5 (2026-08-08) — Desktop table stretches to FILL the column
+                          height (table height:100% distributes the spare
+                          space across rows; fs-sm type, 18px crests).
+                          H2H last-meeting variety: neutral recall ("X
+                          were 2–1 winners when these two last met, last
+                          January"), rotated avenge wordings, and VENUE
+                          memory ("They haven't met here since 2019,
+                          when the visitors won 3–0") from the all-time
+                          master's home-fixture record.
     v0.28.4 (2026-08-08) — Crests load the 96px THUMB tier (~15KB vs the
                           ~1MB full originals; everything in the hub is
                           <=34px), thumb→full→disc fallback chain.
@@ -1128,6 +1137,12 @@ body{overflow:hidden}
    column TOGGLES between scorecards and the table (topbar Table button /
    footer link); the table never gets its own column again. */
 @media (min-width:1100px){
+  /* the table FILLS the column: height 100% lets the 24 rows stretch to
+     share the full panel height instead of huddling compact at the top */
+  #nlHub .nlh__tviewwrap{overflow-y:auto}
+  #nlHub .nlh__tviewwrap .nlh__table{height:100%;font-size:var(--fs-sm)}
+  #nlHub .nlh__tviewwrap .nlh__table td{padding:3px 8px;line-height:1.25}
+  #nlHub .nlh__tviewwrap .nlh__table .cl img,#nlHub .nlh__tviewwrap .nlh__table .nlh__crestfb{width:18px;height:18px}
   #nlHub .nlh__cards{grid-column:1;grid-row:1}
   #nlHub .nlh__stage{grid-column:2;grid-row:1}
   #nlHub .nlh__ticker{grid-column:3;grid-row:1}
@@ -1147,7 +1162,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "43";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "44";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -1824,9 +1839,34 @@ body{overflow:hidden}
     }
     // last meeting — avenge / long gap
     if(x.l>=CUR-1){
-      var whenR=(x.l===CUR)?"in the reverse fixture earlier this season":(x.lm?("last "+x.lm):"last season");
-      if(x.lr==="A") opts.push({w:4,s:H.short+" out to avenge "+defeat+" "+whenR+"."});
-      else if(x.lr==="H") opts.push({w:4,s:A.short+" looking to avenge the "+(x.ls||"")+(x.ls?" ":"")+"loss "+whenR+"."});
+      var whenR=(x.l===CUR)?"earlier this season":(x.lm?("last "+x.lm):"last season");
+      var winner=(x.lr==="H")?H.short:(x.lr==="A"?A.short:null);
+      // neutral recall — same fact, no "avenge" fatigue
+      if(winner && x.ls) opts.push({w:4,s:pick([
+        winner+" were "+x.ls+" winners when these two last met, "+whenR+".",
+        "Last time out it finished "+x.ls+" to "+winner+", "+whenR+"."
+      ],"h2rc")});
+      if(x.lr==="A") opts.push({w:3,s:pick([
+        H.short+" out to avenge "+defeat+" "+whenR+".",
+        H.short+" will want a response after the "+(x.ls?x.ls+" ":"")+"reversal "+whenR+"."
+      ],"h2av")});
+      else if(x.lr==="H") opts.push({w:3,s:pick([
+        A.short+" looking to put right the "+(x.ls?x.ls+" ":"")+"defeat "+whenR+".",
+        A.short+" owe them one after "+whenR+"'s meeting."
+      ],"h2aw")});
+    }
+    // venue memory — the last meeting AT THIS GROUND (fwd fixtures only)
+    if(x.vd){
+      var vy=+x.vd.slice(0,4);
+      var vwhen=(vy>=CUR)?"earlier this season":(vy>=CUR-1&&x.vm)?("last "+x.vm):("back in "+vy);
+      if(vy<=CUR-4){
+        var vres=x.vr==="H"?(H.short+" won "+x.vh+"–"+x.va):(x.vr==="A"?("the visitors won "+x.va+"–"+x.vh):("it finished "+x.vh+"–"+x.va));
+        opts.push({w:4,s:"They haven't met here since "+vy+", when "+vres+"."});
+      } else if(x.vr==="A"){
+        opts.push({w:3,s:A.short+" were "+x.va+"–"+x.vh+" winners on their last visit here, "+vwhen+"."});
+      } else if(x.vr==="H"){
+        opts.push({w:3,s:H.short+" won "+x.vh+"–"+x.va+" when "+A.short+" last came here, "+vwhen+"."});
+      }
     } else if(x.l<=CUR-4){
       opts.push({w:4,s:"Their first meeting in this division since "+x.l+"."});
     }
@@ -2540,12 +2580,13 @@ body{overflow:hidden}
   function h2hFromAll(homeName,awayName,homeID,awayID,dateStr,seasonYr,hist){
     var p=0,hw=0,aw=0,d=0,f=null,l=null,lr=null,lastDate="",seen={};
     function add(fwd,hg,ag,yr,dte){
+      if(fwd && dte>vD){ vD=dte; vH=hg; vA=ag; vR=hg>ag?"H":(hg<ag?"A":"D"); }
       p++; f=f==null?yr:Math.min(f,yr); l=l==null?yr:Math.max(l,yr);
       var drew=hg===ag, thw=drew?null:(fwd?hg>ag:hg<ag);
       if(drew)d++; else if(thw)hw++; else aw++;
       if(dte>=lastDate){ lastDate=dte; lr=drew?"D":(thw?"H":"A"); lsW=Math.max(hg,ag); lsL=Math.min(hg,ag); }
     }
-    var lsW=null,lsL=null;
+    var lsW=null,lsL=null,vD="",vH=null,vA=null,vR=null;
     function monthOf(d){ var m=+String(d||"").slice(5,7); return ["January","February","March","April","May","June","July","August","September","October","November","December"][m-1]||null; }
     if(_alltime)(_alltime.seasons||[]).forEach(function(s){
       var yr=Number(String(s.season).slice(0,4));
@@ -2566,7 +2607,8 @@ body{overflow:hidden}
       if(seen[dte]||a.homeTeam.score==null) return;
       add(fwd,a.homeTeam.score,a.awayTeam.score,seasonYr,dte);
     });
-    return p?{p:p,hw:hw,aw:aw,d:d,f:f,l:l,lr:lr,ld:lastDate||null,ls:(lsW!=null?lsW+"–"+lsL:null),lm:monthOf(lastDate)}:(_alltime?{p:0}:null);
+    return p?{p:p,hw:hw,aw:aw,d:d,f:f,l:l,lr:lr,ld:lastDate||null,ls:(lsW!=null?lsW+"–"+lsL:null),lm:monthOf(lastDate),
+              vd:vD||null,vh:vH,va:vA,vr:vR,vm:monthOf(vD)}:(_alltime?{p:0}:null);
   }
   // starting XI as a broadcast read: surnames in position order — commas
   // within a unit, semicolons between units (GK; defence; midfield; attack)
