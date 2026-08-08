@@ -491,6 +491,13 @@
                           button / footer link), full height; the table
                           column modes (show-tablecol / swap-table /
                           mqWide) are deleted.
+    v0.30.0 (2026-08-08) — ALL DIVISIONS view: the switcher gains "All"
+                          (?comp=all) — every game from the three
+                          leagues on one map/afternoon, live or replay.
+                          No merged table exists across divisions, so
+                          the table panel says pick a division; table/
+                          race/stakes storylines self-gate off. Polls
+                          fetch all three lists per cycle.
     v0.29.3 (2026-08-08) — Teamsheet shirt chips use OUR clubs-meta
                           primary colours, not NLS kit data.
     v0.29.2 (2026-08-08) — LIVE FIXES from the first real afternoon:
@@ -681,6 +688,7 @@ window.__DATA__ = {
         <button class="nlh__compbtn is-active" data-comp="nl">National</button>
         <button class="nlh__compbtn" data-comp="north">North</button>
         <button class="nlh__compbtn" data-comp="south">South</button>
+        <button class="nlh__compbtn" data-comp="all">All</button>
       </div>
       <button class="nlh__datebtn" id="nlhDateBtn"><span class="nlh__livedot"></span>Live<svg class="nlh__chev" viewBox="0 0 10 6" width="10" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     </div>
@@ -1221,7 +1229,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "48";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "49";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -1958,7 +1966,8 @@ body{overflow:hidden}
   function kickoffSegs(fx){
     var h=club(fx.home), a=club(fx.away);
     if(h.p0&&a.p0){
-      var segs0=buildSegs(pick(KO_TMPL0,"kop0"), {venue:h.venue||h.name, home:h.name, away:a.name}, ["venue","home","away"]);
+      var pool0=D.zeroDay?KO_TMPL0:KO_TMPL0.slice(0,5);   // "new season" line only on the real opening day
+      var segs0=buildSegs(pick(pool0,"kop0"), {venue:h.venue||h.name, home:h.name, away:a.name}, ["venue","home","away"]);
       var ex0=previewExtra(fx,h,a,true);
       if(ex0) segs0=segs0.concat([{t:" "}]).concat(buildSegs(ex0,{},[]));
       return segs0;
@@ -2452,6 +2461,14 @@ body{overflow:hidden}
   }
   function renderTable(){
     var rows=liveTable(st.T).arr, n=rows.length, was=priorRank();
+    if(!n){
+      var msg='<tr><td style="padding:14px 10px;color:var(--muted);font-size:var(--fs-sm)">Pick a single division to see its table.</td></tr>';
+      $("nlhTableBody").innerHTML=msg;
+      var t3e=$("nlhTableViewBody"); if(t3e) t3e.innerHTML=msg;
+      var vse=$("nlhTableViewState"); if(vse) vse.textContent="all divisions";
+      $("nlhSheetTitle").textContent="All divisions";
+      return;
+    }
     var live = st.liveMode ? !LIVE.allFT : st.T < maxT()-0.5;
     // opening day: the baseline is a zero table whose "positions" are
     // arbitrary ordering — movement vs that is noise, so no arrows
@@ -2692,7 +2709,7 @@ body{overflow:hidden}
   var META_URL="https://raw.githubusercontent.com/thenationalleague/tools/main/assets/data/clubs-meta.json";
   var ALLTIME_URL="https://raw.githubusercontent.com/thenationalleague/site/main/results.json";
   var BASELINE_URL="https://raw.githubusercontent.com/thenationalleague/tools/main/assets/data/table-baselines.json";
-  var COMPS={nl:{id:89,name:"National League"},north:{id:373,name:"National League North"},south:{id:372,name:"National League South"}};
+  var COMPS={nl:{id:89,name:"National League"},north:{id:373,name:"National League North"},south:{id:372,name:"National League South"},all:{id:0,name:"All divisions"}};
   var _meta=null,_alltime=null,_alltimeFailed=false,_alltimeP=null,_baselines=null;
   function fetchJSON(u){ return fetch(u).then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); }); }
   function evMinOf(w){ var m=/^(\d+)'(?:\+(\d+))?/.exec(String(w.formattedEventTime||"")); return m?Number(m[1])+(m[2]?Number(m[2]):0):Number(w.eventMinute||w.eventTime||0); }
@@ -2826,10 +2843,16 @@ body{overflow:hidden}
   }
   async function loadMatchday(o){
     var C=COMPS[o.comp||"nl"];
+    var isAll=(o.comp==="all");
+    var CIDS=isAll?[COMPS.nl,COMPS.north,COMPS.south]:[C];
     var y=+o.date.slice(0,4), season=(+o.date.slice(5,7))<=6?y-1:y;
     o.status("Fetching the season's matches…");
-    var list=[], url=NLS_API+"/matches/?competitionID="+C.id+"&seasonID="+season+"&sort=-kickOffDateUTC&page.number=1&page.size=100";
-    while(url){ var j=await fetchJSON(url); list=list.concat(j.data||[]); url=j.links&&j.links.next; }
+    var list=[];
+    for(var ci=0;ci<CIDS.length;ci++){
+      var url=NLS_API+"/matches/?competitionID="+CIDS[ci].id+"&seasonID="+season+"&sort=-kickOffDateUTC&page.number=1&page.size=100";
+      while(url){ var j=await fetchJSON(url); list=list.concat(j.data||[]); url=j.links&&j.links.next; }
+      if(isAll) o.status("Fetching the season's matches… ("+(ci+1)+"/3 divisions)");
+    }
     var dOf=function(m){return (m.attributes.kickOffDateUTC||"").slice(0,10);};
     var per=function(m){return (m.attributes.matchPeriod||"").toLowerCase();};
     var done=["fulltime","postmatch"];
@@ -2843,9 +2866,11 @@ body{overflow:hidden}
     if(!roundL.length) throw new Error(o.live ? "No "+C.name+" matches today." : "No completed "+C.name+" matches on "+o.date+".");
     var hist=list.filter(function(m){return dOf(m)<o.date&&done.indexOf(per(m))>=0;})
       .sort(function(a,b){return (a.attributes.kickOffDateUTC||"")<(b.attributes.kickOffDateUTC||"")?-1:1;});
-    // prior table + form/split streaks + clean-sheet drought (score-derived)
+    // prior table + form/split streaks + clean-sheet drought (score-derived).
+    // ALL mode: three divisions share no table — skip entirely (the table
+    // panel tells the user to pick a division; stories/races self-gate)
     var rows={},seq={};
-    hist.forEach(function(m){
+    if(!isAll) hist.forEach(function(m){
       var a=m.attributes,h=a.homeTeam.teamID,w=a.awayTeam.teamID,hs=a.homeTeam.score,as=a.awayTeam.score;
       if(hs==null||as==null) return;
       // beyond 46 games = play-offs (NLS serves them under the league
@@ -3150,9 +3175,12 @@ body{overflow:hidden}
   async function liveRefresh(){
     if(!st.liveMode||LIVE.inFlight) return; LIVE.inFlight=true;
     try{
-      var C=COMPS[LIVE.comp];
-      var j=await fetchJSON(NLS_API+"/matches/?competitionID="+C.id+"&seasonID="+LIVE.season+"&sort=-kickOffDateUTC&page.number=1&page.size=100");
-      var byID={}; (j.data||[]).forEach(function(m){ byID[m.id]=m; });
+      var pcs=(LIVE.comp==="all")?[COMPS.nl,COMPS.north,COMPS.south]:[COMPS[LIVE.comp]];
+      var byID={};
+      for(var pi=0;pi<pcs.length;pi++){
+        var j=await fetchJSON(NLS_API+"/matches/?competitionID="+pcs[pi].id+"&seasonID="+LIVE.season+"&sort=-kickOffDateUTC&page.number=1&page.size=100");
+        (j.data||[]).forEach(function(m){ byID[m.id]=m; });
+      }
       var needDetail=[];
       D.fixtures.forEach(function(fx){
         var m=byID[fx.gc]; if(!m) return;
@@ -3324,7 +3352,7 @@ body{overflow:hidden}
       if(_dates[comp]) return Promise.resolve(_dates[comp]);
       return (async function(){
         if(!_meta) _meta=await fetchJSON(META_URL);
-        var C=COMPS[comp], season=_meta.seasons.current;
+        var C=COMPS[comp==="all"?"nl":comp], season=_meta.seasons.current;
         var list=[], url=NLS_API+"/matches/?competitionID="+C.id+"&seasonID="+season+"&sort=-kickOffDateUTC&page.number=1&page.size=100";
         while(url){ var j=await fetchJSON(url); list=list.concat(j.data||[]); url=j.links&&j.links.next; }
         var today=new Date().toLocaleDateString("en-CA",{timeZone:"Europe/London"});
