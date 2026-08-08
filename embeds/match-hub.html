@@ -491,6 +491,13 @@
                           button / footer link), full height; the table
                           column modes (show-tablecol / swap-table /
                           mqWide) are deleted.
+    v0.31.5 (2026-08-08) — LOAD can no longer freeze at "10/12": every
+                          fetch carries a 12s timeout + one retry; a
+                          detail that still fails builds its fixture
+                          from the list row alone (score/period, no
+                          events yet) and the poller backfills within a
+                          cycle. The same timeout protects the poll's
+                          inFlight latch from hung connections.
     v0.31.4 (2026-08-08) — List sweep walks ASCENDING early season
                           (drop the minus on the sort — today is page 1
                           on opening day instead of a 6-page descent),
@@ -1294,7 +1301,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "55";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "56";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -2995,7 +3002,25 @@ body{overflow:hidden}
   var BASELINE_URL="https://raw.githubusercontent.com/thenationalleague/tools/main/assets/data/table-baselines.json";
   var COMPS={nl:{id:89,name:"National League"},north:{id:373,name:"National League North"},south:{id:372,name:"National League South"},all:{id:0,name:"All divisions"}};
   var _meta=null,_alltime=null,_alltimeFailed=false,_alltimeP=null,_baselines=null;
-  function fetchJSON(u){ return fetch(u).then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json(); }); }
+  // every fetch gets a hard TIMEOUT — one hung NLS connection must never
+  // freeze a load at "10/12" or wedge the poll cycle's inFlight latch
+  function fetchJSON(u,tmo){
+    return new Promise(function(res,rej){
+      var ac=(typeof AbortController!=="undefined")?new AbortController():null;
+      var t=setTimeout(function(){ if(ac) ac.abort(); rej(new Error("timeout")); }, tmo||12000);
+      fetch(u, ac?{signal:ac.signal}:{}).then(function(r){
+        clearTimeout(t);
+        if(!r.ok){ rej(new Error("HTTP "+r.status)); return; }
+        r.json().then(res,rej);
+      }, function(e){ clearTimeout(t); rej(e); });
+    });
+  }
+  function fetchJSONr(u,tries,tmo){
+    return fetchJSON(u,tmo).catch(function(e){
+      if((tries||2)<=1) throw e;
+      return new Promise(function(res){ setTimeout(res,700); }).then(function(){ return fetchJSONr(u,(tries||2)-1,tmo); });
+    });
+  }
   function evMinOf(w){ var m=/^(\d+)'(?:\+(\d+))?/.exec(String(w.formattedEventTime||"")); return m?Number(m[1])+(m[2]?Number(m[2]):0):Number(w.eventMinute||w.eventTime||0); }
   function pnameOf(p){ var n=(p&&p.playerName)||{}; return n.knownName||n.customKnownName||((n.firstName?n.firstName+" ":"")+(n.lastName||"")).trim()||"Unknown"; }
   function trailStreaks(g){ // trailing streaks over [{gf,ga}]
@@ -3200,7 +3225,9 @@ body{overflow:hidden}
     var nDone=0;
     o.status("Fetching match detail… (0/"+roundL.length+")");
     var details=await Promise.all(roundL.map(function(m){
-      return fetchJSON(NLS_API+"/matches/"+m.id).then(function(d){ o.status("Fetching match detail… ("+(++nDone)+"/"+roundL.length+")"); return d; });
+      return fetchJSONr(NLS_API+"/matches/"+m.id,2,12000).then(
+        function(d){ o.status("Fetching match detail… ("+(++nDone)+"/"+roundL.length+")"); return d; },
+        function(){ o.status("Fetching match detail… ("+(++nDone)+"/"+roundL.length+")"); return null; });
     }));
     if(!_alltime&&!_alltimeFailed&&!_alltimeP){
       // the all-time master is the heaviest fetch on the page — load it in the
@@ -3209,7 +3236,28 @@ body{overflow:hidden}
     }
     o.status("Building the matchday…");
     var usedTeams={};
-    var fixtures=details.map(function(d){
+    var fixtures=roundL.map(function(m,mi){
+      var d=details[mi], la=m.attributes;
+      if(!d){
+        // this game's detail wouldn't come — build from the LIST row alone
+        // (score, period, KO). The poller backfills events within a cycle.
+        var hID2=la.homeTeam.teamID, aID2=la.awayTeam.teamID;
+        usedTeams[hID2]=1; usedTeams[aID2]=1;
+        var hM2=byOpta[hID2]||{}, aM2=byOpta[aID2]||{};
+        var ko2=(la.kickOffDateUTC||"").replace(" ","T")+"Z";
+        var fb={ gc:m.id, home:hID2, away:aID2, hs:la.homeTeam.score, as:la.awayTeam.score,
+          date:ko2, slot:new Date(ko2).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:"Europe/London"}),
+          pp:false, att:null, ref:null,
+          h2h:h2hFromAll(hM2.name||"",aM2.name||"",hID2,aID2,o.date,season,hist),
+          events:[] };
+        if(o.live){
+          fb._per=(la.matchPeriod||"").toLowerCase();
+          fb._fmin=la.formattedMatchTime||null;
+          fb._mmin=(la.matchMinutes!=null)?la.matchMinutes:null;
+          if(fb.hs!=null&&fb.as!=null) fb._ls={h:fb.hs,a:fb.as};
+        }
+        return fb;
+      }
       var at=d.data.attributes;
       var homeID=at.homeTeamID,awayID=at.awayTeamID;
       usedTeams[homeID]=1; usedTeams[awayID]=1;
@@ -3217,8 +3265,6 @@ body{overflow:hidden}
       var events=ex.events;
       var ko=(at.kickOffUTC||"").replace(" ","T")+"Z";
       var hM=byOpta[homeID]||{},aM=byOpta[awayID]||{};
-      var listRow=roundL.filter(function(m){return m.id===at.matchID;})[0];
-      var la=listRow&&listRow.attributes;
       var _hasSheet=ex.sheet&&(ex.sheet.h||ex.sheet.a);
       var fxOut={
         gc:at.matchID, home:homeID, away:awayID,
