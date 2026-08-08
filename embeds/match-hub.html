@@ -491,6 +491,16 @@
                           button / footer link), full height; the table
                           column modes (show-tablecol / swap-table /
                           mqWide) are deleted.
+    v0.31.2 (2026-08-08) — LIVE TABLE FIX: polls now use TWO sources —
+                          the list rows for today (paginated until the
+                          walk passes today's date) for live scores/
+                          periods/minutes, plus per-fixture details for
+                          events and lineups. Detail matchTeams scores
+                          can lag until FT, which starved the ghosts and
+                          froze the as-it-stands table when scorer
+                          events also lagged. List scores now feed the
+                          ghosts, so the table moves with the scoreline
+                          even before scorers are entered.
     v0.31.1 (2026-08-08) — URGENT LIVE FIX: the poller never saw today.
                           It fetched page 1 of the season list sorted
                           newest-first — which is NEXT MAY's fixtures,
@@ -1272,7 +1282,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "52";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "53";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -3431,14 +3441,53 @@ body{overflow:hidden}
       liveRefresh().catch(function(){}).then(function(){ liveKickPoll(); });
     }, pre?150000:55000);
   }
+  // the season list sorted newest-first serves NEXT MAY on page 1 — walk
+  // pages until we're past today, keep only today's rows (live scores,
+  // periods and minutes ride this; details carry events and lineups)
+  async function fetchTodayRows(){
+    var comps=(LIVE.comp==="all")?[COMPS.nl,COMPS.north,COMPS.south]:[COMPS[LIVE.comp]];
+    var today=D._date, out={};
+    for(var ci=0;ci<comps.length;ci++){
+      var url=NLS_API+"/matches/?competitionID="+comps[ci].id+"&seasonID="+LIVE.season+"&sort=-kickOffDateUTC&page.number=1&page.size=100";
+      var guard=0;
+      while(url && guard++<12){
+        var j=await fetchJSON(url);
+        var rows=j.data||[], older=false;
+        rows.forEach(function(m){
+          var d=(m.attributes.kickOffDateUTC||"").slice(0,10);
+          if(d===today) out[m.id]=m;
+          if(d<today) older=true;
+        });
+        url=older?null:(j.links&&j.links.next);
+      }
+    }
+    return out;
+  }
   async function liveRefresh(){
     if(!st.liveMode||LIVE.inFlight) return; LIVE.inFlight=true;
     try{
-      // POLL BY FIXTURE, not by list: the season list sorted newest-first
-      // puts NEXT MAY on page 1 — today's games were never in a one-page
-      // refresh (the initial load paginates fully, which masked it). We
-      // already know today's match IDs; each detail response carries
-      // period, scores, events and lineups in one go.
+      // TWO sources per poll, belt and braces:
+      //  1. the LIST rows for today (paginated to today) — live scores,
+      //     matchPeriod, matchMinutes/formattedMatchTime. Feeds the boards,
+      //     the ghosts and the AS-IT-STANDS table even when scorer events
+      //     lag behind the scoreline (a known NLS entry pattern).
+      //  2. per-fixture DETAILS — events, lineups, teamsheets.
+      var byID={};
+      try{ byID=await fetchTodayRows(); }catch(e){ /* details still carry us */ }
+      D.fixtures.forEach(function(fx){
+        var m=byID[fx.gc]; if(!m) return;
+        var a=m.attributes, per=(a.matchPeriod||"").toLowerCase();
+        if(per){
+          if((per==="fulltime"||per==="postmatch") && fx._per!==per && !fx._ftAt) fx._ftAt=Date.now();
+          if(per==="postponed") fx.pp=true;
+          fx._per=per;
+        }
+        fx._fmin=a.formattedMatchTime||null;
+        fx._mmin=(a.matchMinutes!=null)?a.matchMinutes:null;
+        if(a.homeTeam&&a.homeTeam.score!=null&&a.awayTeam&&a.awayTeam.score!=null){
+          fx.hs=a.homeTeam.score; fx.as=a.awayTeam.score; fx._ls={h:fx.hs,a:fx.as};
+        }
+      });
       var nearKO=Date.now() > st.baseKOms - 95*60000;
       var targets=D.fixtures.filter(function(fx){
         if(fx.pp) return false;
@@ -3461,9 +3510,6 @@ body{overflow:hidden}
         var hT=null,aT=null;
         (at.matchTeams||[]).forEach(function(t){ if(t.teamID===fx.home)hT=t; if(t.teamID===fx.away)aT=t; });
         if(hT&&hT.score!=null&&aT&&aT.score!=null){ fx.hs=hT.score; fx.as=aT.score; fx._ls={h:fx.hs,a:fx.as}; }
-        // detail has no live formattedMatchTime — the wall clock carries the
-        // minute (events refine it); never let a stale list value linger
-        fx._fmin=null;
         var ex=eventsFromDetail(x.d, fx.home, fx.away);
         fx.events=ex.events.concat((fx._ghosts||[]));
         if(ex.att) fx.att=ex.att;
