@@ -491,6 +491,10 @@
                           button / footer link), full height; the table
                           column modes (show-tablecol / swap-table /
                           mqWide) are deleted.
+    v0.31.4 (2026-08-08) — List sweep walks ASCENDING early season
+                          (drop the minus on the sort — today is page 1
+                          on opening day instead of a 6-page descent),
+                          descending after game 23. Richard's catch.
     v0.31.3 (2026-08-08) — TRUST THE SCOREBOARD, NOT THE PERIOD FIELD:
                           NLS leaves matches at "PreMatch" while 3-0 up
                           (verified live, Hornchurch). A match is now
@@ -1290,7 +1294,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "54";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "55";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -3467,18 +3471,25 @@ body{overflow:hidden}
   async function fetchTodayRows(){
     var comps=(LIVE.comp==="all")?[COMPS.nl,COMPS.north,COMPS.south]:[COMPS[LIVE.comp]];
     var today=D._date, out={};
+    // WALK DIRECTION is chosen by season progress: ascending early in the
+    // season (today sits near the front — opening day is page 1), descending
+    // late (played games would pad the front instead). Either way the walk
+    // stops as soon as the dates pass today.
+    var Ps=Object.keys(D.prior).map(function(k){return D.prior[k].P||0;}).sort(function(a,b){return a-b;});
+    var played=Ps.length?Ps[Math.floor(Ps.length/2)]:0;
+    var asc = played<23;
     for(var ci=0;ci<comps.length;ci++){
-      var url=NLS_API+"/matches/?competitionID="+comps[ci].id+"&seasonID="+LIVE.season+"&sort=-kickOffDateUTC&page.number=1&page.size=100";
+      var url=NLS_API+"/matches/?competitionID="+comps[ci].id+"&seasonID="+LIVE.season+"&sort="+(asc?"":"-")+"kickOffDateUTC&page.number=1&page.size=100";
       var guard=0;
       while(url && guard++<12){
         var j=await fetchJSON(url);
-        var rows=j.data||[], older=false;
+        var rows=j.data||[], past=false;
         rows.forEach(function(m){
           var d=(m.attributes.kickOffDateUTC||"").slice(0,10);
           if(d===today) out[m.id]=m;
-          if(d<today) older=true;
+          if(asc ? d>today : d<today) past=true;
         });
-        url=older?null:(j.links&&j.links.next);
+        url=past?null:(j.links&&j.links.next);
       }
     }
     return out;
