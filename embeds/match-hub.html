@@ -491,6 +491,14 @@
                           button / footer link), full height; the table
                           column modes (show-tablecol / swap-table /
                           mqWide) are deleted.
+    v0.31.3 (2026-08-08) — TRUST THE SCOREBOARD, NOT THE PERIOD FIELD:
+                          NLS leaves matches at "PreMatch" while 3-0 up
+                          (verified live, Hornchurch). A match is now
+                          STARTED if the feed says any live period, OR
+                          goals are on the board, OR real kick-off has
+                          passed; started-but-"PreMatch" games get wall-
+                          clock phases. The day closes on the clock when
+                          the period field never flips to full-time.
     v0.31.2 (2026-08-08) — LIVE TABLE FIX: polls now use TWO sources —
                           the list rows for today (paginated until the
                           walk passes today's date) for live scores/
@@ -1282,7 +1290,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "53";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "54";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -1357,13 +1365,17 @@ body{overflow:hidden}
   function stateOf(fx, T){
     var local = T - koOffset(fx);
     if (fx.pp) return {phase:"pp", label:"P-P", live:false};
-    // LIVE: the feed's own period beats wall-clock arithmetic (kick-offs run
-    // late, half-times run long — trust what NLS says the match is doing)
-    if (st.liveMode && !fx._per && fx._koms && Date.now() < fx._koms)
-      return {phase:"pre", label:fx.slot, live:false};
-    if (st.liveMode && fx._per){
-      var p=fx._per;
-      if (p==="prematch")  return {phase:"pre", label:fx.slot, live:false};
+    // LIVE: NLS period data is UNRELIABLE (matches sit at "PreMatch" while
+    // 3-0 up — seen on opening day). A match has STARTED if the feed says
+    // any live/finished period, OR the scoreboard shows goals, OR the real
+    // kick-off time has passed. Once started, use the feed period when it
+    // is a live value, else wall-clock phases.
+    if (st.liveMode){
+      var p=fx._per||"";
+      var started = (p && p!=="prematch")
+                 || (fx._ls && (fx._ls.h+fx._ls.a)>0)
+                 || (fx._koms && Date.now() > fx._koms+60000);
+      if (!started) return {phase:"pre", label:fx.slot, live:false};
       if (p==="halftime")  return {phase:"ht",  label:"HT",   live:true};
       if (p==="fulltime"||p==="postmatch") return {phase:"ft", label:"FT", live:false};
       if (p==="firsthalf"||p==="secondhalf"||p==="extratime"||p==="penalties"){
@@ -1371,6 +1383,13 @@ body{overflow:hidden}
         var lbl=(!half2&&mtot>45)?"45+"+(mtot-45):(half2&&mtot>90)?"90+"+(mtot-90):String(mtot);
         return {phase:half2?"2h":"1h", label:lbl+"'", live:true};
       }
+      // started, but the feed still claims pre-match — wall-clock phases
+      var loc=T-koOffset(fx);
+      if (loc>=110)         return {phase:"ft", label:"FT", live:false};
+      if (loc<HALF)         return {phase:"1h", label:Math.max(1,Math.floor(loc))+"'", live:true};
+      if (loc<HALF+BREAK)   return {phase:"ht", label:"HT", live:true};
+      var m2=Math.floor(loc-BREAK);
+      return {phase:"2h", label:(m2>90?"90+"+(m2-90):m2)+"'", live:true};
     }
     if (local <= 0.001)     return {phase:"pre", label:fx.slot, live:false};
     if (local < HALF)       return {phase:"1h", label:dispMin(Math.max(1,Math.floor(local)),1)+"'", live:true};
@@ -2270,9 +2289,10 @@ body{overflow:hidden}
   }
   // current match-minute cutoff for teamsheet markers (honest in replays too)
   function tsCut(fx){
-    if(st.liveMode && fx._per){
-      if(fx._per==="prematch") return 0;
-      if(fx._per==="fulltime"||fx._per==="postmatch") return 200;
+    if(st.liveMode){
+      var ph=stateOf(fx,st.T).phase;
+      if(ph==="pre") return 0;
+      if(ph==="ft") return 200;
       return liveLocalMin(fx)+0.5;
     }
     var local=st.T-koOffset(fx);
@@ -3493,8 +3513,7 @@ body{overflow:hidden}
         if(fx.pp) return false;
         var p=fx._per||"";
         if(p==="fulltime"||p==="postmatch") return !!(fx._ftAt && Date.now()-fx._ftAt<12*60000);  // brief window for late edits
-        if(p==="prematch"||!p) return nearKO;    // KO flip + lineups
-        return true;                              // in play
+        return nearKO || p!=="prematch" || (fx._ls&&(fx._ls.h+fx._ls.a)>0);
       });
       var dets=await Promise.all(targets.map(function(fx){
         return fetchJSON(NLS_API+"/matches/"+fx.gc).then(function(d){return {fx:fx,d:d};},function(){return null;});
@@ -3520,7 +3539,8 @@ body{overflow:hidden}
       });
       D.fixtures.forEach(topUpGhosts);
       LIVE.allFT=D.fixtures.every(function(fx){
-        return fx.pp || fx._per==="fulltime" || fx._per==="postmatch";
+        if(fx.pp || fx._per==="fulltime" || fx._per==="postmatch") return true;
+        return (st.T-koOffset(fx))>=112;   // period stuck — the clock closes the day
       });
       computeDerived();
       // feed item ids shift as events land — rebuild it clean
