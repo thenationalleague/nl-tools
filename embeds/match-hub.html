@@ -453,6 +453,20 @@
                           shows the real wall clock in live. T=0 fixtures
                           read as pre-match (KO slot), never "1'". Switcher
                           hardened against Android font boosting.
+    v0.28.0 (2026-08-08) — DATE PICKER replaces "Replay a matchday": a
+                          topbar control on the switcher line opens a
+                          modal listing the season's completed matchdays
+                          (per division) with LIVE pinned on top; picking
+                          a date replays it with public defaults (real KO
+                          stagger, 1s per match-minute). The division
+                          switcher now works in replay too. Dev dialog
+                          survives at ?replay=1. Mobile map shows
+                          truthful DOTS at rest — a board appears on
+                          tap/goal focus only (12 full boards can't share
+                          a phone-width island). Tap empty map to end a
+                          selection. Buttons carry the max-height
+                          font-boosting suppressor for in-app WebViews
+                          (Gmail preview et al).
   ============================================================================
 -->
 
@@ -587,13 +601,13 @@ window.__DATA__ = {
   <div class="nlh__topbar">
     <div class="nlh__brandrow">
       <span class="nlh__wordmark">MATCH&nbsp;HUB</span>
-      <div class="nlh__comps" id="nlhComps" hidden
+      <div class="nlh__comps" id="nlhComps" hidden>
         <button class="nlh__compbtn is-active" data-comp="nl">National</button>
         <button class="nlh__compbtn" data-comp="north">North</button>
         <button class="nlh__compbtn" data-comp="south">South</button>
       </div>
+      <button class="nlh__datebtn" id="nlhDateBtn">&#9679; Live &#9662;</button>
       <button class="nlh__loadbtn nlh__tablebtn" id="nlhTableBtn">Table</button>
-      <button class="nlh__loadbtn" id="nlhLoadBtn">Replay a matchday</button>
     </div>
     <div class="nlh__switch" role="tablist" aria-label="View">
       <button class="nlh__seg is-active" data-view="map"    role="tab">Map</button>
@@ -684,6 +698,13 @@ window.__DATA__ = {
     </div>
   </div>
 
+  <div class="nlh__setup" id="nlhDates" hidden>
+    <div class="nlh__setupcard">
+      <div class="nlh__setuphead"><span>Choose a day</span><button class="nlh__sheetclose" id="nlhDatesClose" aria-label="Close">&times;</button></div>
+      <div class="nlh__dateslist" id="nlhDatesList"></div>
+    </div>
+  </div>
+
   <div class="nlh__comm" id="nlhComm" aria-live="polite">
     <span class="nlh__commdot"></span>
     <span class="nlh__commtext" id="nlhCommText"></span>
@@ -770,7 +791,7 @@ body{overflow:hidden}
 /* division switcher — live mode only */
 #nlHub .nlh__comps{display:flex;gap:4px;margin-left:14px;align-self:center;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:3px}
 #nlHub .nlh__comps[hidden]{display:none}
-#nlHub .nlh__compbtn{font-family:inherit;line-height:1.3;font-size:var(--fs-xs);font-variation-settings:"wght" 800;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);border:0;border-radius:999px;padding:4px 12px;background:transparent;cursor:pointer;transition:background .15s,color .15s}
+#nlHub .nlh__compbtn{font-family:inherit;line-height:1.3;max-height:999999px;font-size:14px;font-variation-settings:"wght" 800;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);border:0;border-radius:999px;padding:4px 12px;background:transparent;cursor:pointer;transition:background .15s,color .15s}
 #nlHub .nlh__compbtn.is-active{background:var(--navy);color:#fff}
 #nlHub .nlh__loadbtn:hover{background:var(--navy-100)}
 #nlHub .nlh__switch{display:flex;gap:4px;background:var(--navy-100);padding:4px;border-radius:999px}
@@ -798,6 +819,13 @@ body{overflow:hidden}
    card) on a short stem; the solver keeps boards apart AND keeps every
    stem clear of foreign cards. */
 #nlHub .nlh__pin{position:absolute;width:0;height:0}
+/* phones: 12+ full boards cannot share a phone-width island — at rest the
+   map is truthful DOTS; tapping (or a goal) zooms in and shows that board */
+@media (max-width:700px){
+  #nlHub .nlh__pin .nlh__pinwrap,#nlHub .nlh__pin .nlh__pinstem{display:none}
+  #nlHub .nlh__pin.is-hero .nlh__pinwrap,#nlHub .nlh__pin.is-hero .nlh__pinstem{display:block}
+  #nlHub .nlh__pindot{width:14px;height:14px}
+}
 #nlHub .nlh__pindot{position:absolute;left:-4.5px;top:-4.5px;width:9px;height:9px;border-radius:50%;background:var(--navy);box-shadow:0 0 0 2px #fff;opacity:.95;transition:opacity .45s ease,box-shadow .45s ease}
 #nlHub .nlh__pinstem{position:absolute;left:-0.75px;top:0;width:1.5px;background:#56679a;transform-origin:0 0;opacity:.65;transition:opacity .45s ease,height .9s cubic-bezier(.3,0,.15,1),transform .9s cubic-bezier(.3,0,.15,1)}
 #nlHub .nlh__pinwrap{position:absolute;left:0;top:0;display:flex;flex-direction:column;align-items:center;transform:translate(calc(-50% + var(--ox,0px)),calc(-50% + var(--oy,0px)));transition:transform .9s cubic-bezier(.3,0,.15,1),opacity .45s ease}
@@ -1028,6 +1056,14 @@ body{overflow:hidden}
 #nlHub.is-live .nlh__controls{display:none}
 #nlHub.is-live .nlh__foot{display:none}
 #nlHub.is-loading .nlh__main,#nlHub.is-loading .nlh__controls,#nlHub.is-loading .nlh__foot{visibility:hidden}
+#nlHub .nlh__datebtn{font-family:inherit;line-height:1.3;max-height:999999px;align-self:center;font-size:14px;font-variation-settings:"wght" 800;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--navy);border:1px solid var(--line);border-radius:999px;padding:7px 14px;background:var(--surface);cursor:pointer}
+#nlHub .nlh__dateslist{max-height:62vh;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--navy-300) transparent;display:flex;flex-direction:column;gap:6px;padding:2px}
+#nlHub .nlh__dateslist::-webkit-scrollbar{width:4px}
+#nlHub .nlh__dateslist::-webkit-scrollbar-thumb{background:var(--navy-300);border-radius:4px}
+#nlHub .nlh__daterow{font-family:inherit;text-align:left;font-size:var(--fs-sm);font-variation-settings:"wght" 700;font-weight:700;color:var(--text);padding:11px 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface);cursor:pointer}
+#nlHub .nlh__daterow.live{background:var(--navy);color:#fff;border-color:var(--navy)}
+#nlHub .nlh__daterow.live::before{content:"● ";color:var(--live)}
+#nlHub .nlh__datesnote{color:var(--muted);font-size:var(--fs-xs);padding:8px 4px}
 #nlHub .nlh__tablebtn{display:none}
 @media (min-width:1100px) and (max-width:1419.98px){
   #nlHub.is-live .nlh__tablebtn{display:inline-block;margin-left:10px}
@@ -1072,7 +1108,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "38";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "39";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -2684,6 +2720,14 @@ body{overflow:hidden}
     var label=(_meta.seasons&&_meta.seasons.list&&_meta.seasons.list[String(season)]&&_meta.seasons.list[String(season)].label)||(season+"-"+String(season+1).slice(2));
     // ---- swap in and restart the day ----
     D.round=roundNo; D.season=label; D.competition=C.name; D.clubs=clubs; D.prior=priorOut; D.fixtures=fixtures;
+    D._date=o.date; CURCOMP=o.comp||"nl";
+    $("nlhComps").hidden=false;
+    document.querySelectorAll("#nlhComps .nlh__compbtn").forEach(function(b){
+      b.classList.toggle("is-active", b.getAttribute("data-comp")===CURCOMP);
+    });
+    var db=$("nlhDateBtn");
+    if(db) db.innerHTML = o.live ? "&#9679; Live &#9662;"
+      : new Date(o.date+"T12:00:00Z").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short",timeZone:"UTC"}).replace(/,/g,"")+" &#9662;";
     pause(); hideSheet();
     st.liveMode=!!o.live;
     st.stagger=!!o.stagger||!!o.startTime||!!o.live;   // live/clock starts imply real KO slots
@@ -2699,10 +2743,6 @@ body{overflow:hidden}
       // already played is marked fired silently (the feed still shows it) —
       // commentary picks up from NOW.
       LIVE.comp=o.comp||"nl"; LIVE.season=season; LIVE.newsSeen=false; LIVE.allFT=false;
-      $("nlhComps").hidden=false;
-      document.querySelectorAll("#nlhComps .nlh__compbtn").forEach(function(b){
-        b.classList.toggle("is-active", b.getAttribute("data-comp")===LIVE.comp);
-      });
       st.liveQ.length=0; st.rate=1; $("nlhSpeed").textContent="1×";
       st.fired={}; st.beatShown={}; st.feedBuilt={}; st.ftShown=false; $("nlhFeed").innerHTML="";
       var wallT=Math.max(0,(Date.now()-st.baseKOms)/60000);
@@ -2734,7 +2774,7 @@ body{overflow:hidden}
       commStatic(st.T<=0 ? (st.newsQ.length?C_IDLE:"Live from the National League — team news expected shortly.")
                          : "Live — picking up the afternoon as it stands…");
     } else if(o.startTime){
-      st.liveMode=false; clearTimeout(LIVE.pollIv); $("nlhComps").hidden=true; hubEl().classList.remove("is-live");
+      st.liveMode=false; clearTimeout(LIVE.pollIv); hubEl().classList.remove("is-live");
       // wall-clock start: minutes from the first KO of the day, TZ-safe via
       // the London-local label of the base kick-off
       var baseLbl=new Date(st.baseKOms).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:"Europe/London"});
@@ -2742,7 +2782,7 @@ body{overflow:hidden}
       var T=Math.max(0,toM(o.startTime)-toM(baseLbl));
       seek(Math.min(1,T/maxT())); play();
     } else {
-      st.liveMode=false; clearTimeout(LIVE.pollIv); $("nlhComps").hidden=true; hubEl().classList.remove("is-live");
+      st.liveMode=false; clearTimeout(LIVE.pollIv); hubEl().classList.remove("is-live");
       restart();
     }
   }
@@ -2752,6 +2792,7 @@ body{overflow:hidden}
   // day's first kick-off, a poller folds fresh NLS data in every ~55s, and
   // late-arriving events (feed latency) fire through the same choreography.
   var LIVE={ comp:"nl", season:null, pollIv:0, allFT:false, newsSeen:false, inFlight:false };
+  var CURCOMP="nl";
   function liveLocalMin(fx){
     var m=/^(\d+)'(?:\+(\d+))?/.exec(String(fx._fmin||""));
     if(m) return Number(m[1])+(m[2]?Number(m[2]):0);
@@ -2921,9 +2962,18 @@ body{overflow:hidden}
     $("nlhTableBtn").addEventListener("click", toggleTable);
     // pre-match (live): tap a pin or a scorecard for that fixture's preview + XI
     $("nlhStage").addEventListener("click", function(e){
-      if(!st.liveMode || st.T>0.5 || !e.target.closest) return;
+      if(!e.target.closest) return;
       var p=e.target.closest('[id^="pin_"]');
-      if(p){ var fx=D.fixtures.filter(function(f){return "pin_"+f.gc===p.id;})[0]; if(fx) previewFixture(fx); }
+      if(p && st.liveMode && st.T<=0.5){
+        var fx=D.fixtures.filter(function(f){return "pin_"+f.gc===p.id;})[0];
+        if(fx) previewFixture(fx);
+        return;
+      }
+      // tap empty map → end the current selection/zoom
+      if(!p && !st.suspend && $("nlhStage").classList.contains("is-focus")){
+        focusReset();
+        if(st.liveMode && st.T<=0.5){ st._commUntil=0; commStatic(st.newsQ.length?C_IDLE:"Live from the National League — team news expected shortly."); }
+      }
     });
     $("nlhGrid").addEventListener("click", function(e){
       if(!st.liveMode || st.T>0.5 || !e.target.closest) return;
@@ -2934,15 +2984,8 @@ body{overflow:hidden}
     $("nlhSheetClose").addEventListener("click", hideSheet);
     $("nlhSheet").addEventListener("click", function(e){ if(e.target===$("nlhSheet")) hideSheet(); });
 
-    // matchday setup dialog
+    // internal matchday dialog (dev gate — reachable via ?replay=1 only)
     var setup=$("nlhSetup");
-    $("nlhLoadBtn").addEventListener("click", function(){
-      var di=$("nlhSetDate");
-      if(!di.value) di.value=((D.fixtures[0]&&D.fixtures[0].date)||"").slice(0,10);
-      di.max=new Date().toISOString().slice(0,10);
-      var stat=$("nlhSetStatus"); stat.textContent=""; stat.className="nlh__setupstatus";
-      setup.hidden=false;
-    });
     $("nlhSetupClose").addEventListener("click", function(){ setup.hidden=true; });
     setup.addEventListener("click", function(e){ if(e.target===setup) setup.hidden=true; });
     $("nlhSetStart").addEventListener("change", function(){ $("nlhSetTimeWrap").hidden = this.value!=="clock"; });
@@ -2974,19 +3017,74 @@ body{overflow:hidden}
         .catch(function(e){
           btn.disabled=false;
           hubEl().classList.remove("is-loading");
-          if(quiet) setup.hidden=false;   // no live football → offer the replay gate
+          if(quiet){ try{ openDates(); }catch(_e){ setup.hidden=false; } }   // no live football → offer past matchdays
           stat.textContent=(e&&e.message)||"Couldn't go live."; stat.className="nlh__setupstatus is-error";
         });
     }
     $("nlhSetLive").addEventListener("click", function(){ goLive(); });
-    // in-view division switcher (live only)
+    // public replay: load a past matchday with sensible defaults (real KO
+    // stagger, one second per match-minute), narrated through the console
+    function replayDate(date, comp){
+      hubEl().classList.add("is-loading");
+      loadMatchday({ date:date, comp:comp||CURCOMP, stagger:true, secPerMin:1,
+        status:function(m){ commStatic(m); } })
+        .catch(function(e){ hubEl().classList.remove("is-loading"); commStatic((e&&e.message)||"Couldn't load that matchday."); });
+    }
+    // in-view division switcher — live switches live, replay switches replay
     document.querySelectorAll("#nlhComps .nlh__compbtn").forEach(function(b){
       b.addEventListener("click", function(){
         var c=b.getAttribute("data-comp");
-        if(st.liveMode && LIVE.comp===c) return;
+        if(c===CURCOMP) return;
         $("nlhSetComp").value=c;
-        goLive(c, true);
+        if(st.liveMode || !D._date) goLive(c, true);
+        else replayDate(D._date, c);
       });
+    });
+    // DATE PICKER — the season's completed matchdays + LIVE, per division
+    var _dates={};
+    function fetchSeasonDates(comp){
+      if(_dates[comp]) return Promise.resolve(_dates[comp]);
+      return (async function(){
+        if(!_meta) _meta=await fetchJSON(META_URL);
+        var C=COMPS[comp], season=_meta.seasons.current;
+        var list=[], url=NLS_API+"/matches/?competitionID="+C.id+"&seasonID="+season+"&sort=-kickOffDateUTC&page.number=1&page.size=100";
+        while(url){ var j=await fetchJSON(url); list=list.concat(j.data||[]); url=j.links&&j.links.next; }
+        var today=new Date().toLocaleDateString("en-CA",{timeZone:"Europe/London"});
+        var seen={}, out=[];
+        list.forEach(function(m){
+          var d=(m.attributes.kickOffDateUTC||"").slice(0,10);
+          var per=(m.attributes.matchPeriod||"").toLowerCase();
+          if(d && d<today && (per==="fulltime"||per==="postmatch") && !seen[d]){ seen[d]=1; out.push(d); }
+        });
+        out.sort().reverse();
+        _dates[comp]=out; return out;
+      })();
+    }
+    function openDates(){
+      $("nlhDates").hidden=false;
+      var box=$("nlhDatesList");
+      box.innerHTML='<button class="nlh__daterow live" data-live="1">Live — today</button><div class="nlh__datesnote">Fetching this season\u2019s matchdays…</div>';
+      fetchSeasonDates(CURCOMP).then(function(days){
+        var rows='<button class="nlh__daterow live" data-live="1">Live — today</button>';
+        rows+=days.map(function(d){
+          return '<button class="nlh__daterow" data-date="'+d+'">'+
+            new Date(d+"T12:00:00Z").toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric",timeZone:"UTC"}).replace(/,/g,"")+'</button>';
+        }).join("");
+        if(!days.length) rows+='<div class="nlh__datesnote">Completed matchdays will appear here as the season plays out.</div>';
+        box.innerHTML=rows;
+      }, function(){
+        box.querySelector(".nlh__datesnote").textContent="Couldn\u2019t fetch the fixture list — try again shortly.";
+      });
+    }
+    $("nlhDateBtn").addEventListener("click", openDates);
+    $("nlhDatesClose").addEventListener("click", function(){ $("nlhDates").hidden=true; });
+    $("nlhDates").addEventListener("click", function(e){
+      if(e.target===$("nlhDates")){ $("nlhDates").hidden=true; return; }
+      var r=e.target.closest ? e.target.closest(".nlh__daterow") : null;
+      if(!r) return;
+      $("nlhDates").hidden=true;
+      if(r.getAttribute("data-live")) goLive(CURCOMP, true);
+      else replayDate(r.getAttribute("data-date"), CURCOMP);
     });
     // LIVE IS THE PRODUCT: the hub boots straight into today's games —
     // no dialog on entry (?comp=north|south picks the division; ?replay=1
@@ -2994,7 +3092,11 @@ body{overflow:hidden}
     try{
       var qs=new URLSearchParams(location.search);
       var qc=qs.get("comp"); if(qc&&COMPS[qc]) $("nlhSetComp").value=qc;
-      if(!qs.get("replay")){
+      if(qs.get("replay")){
+        var di=$("nlhSetDate");
+        if(!di.value) di.value=((D.fixtures[0]&&D.fixtures[0].date)||"").slice(0,10);
+        setup.hidden=false;
+      } else {
         hubEl().classList.add("is-loading");
         commStatic("Finding today's games…");
         goLive(qc||undefined, true);
