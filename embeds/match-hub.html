@@ -435,6 +435,24 @@
                           pointers need 23+, table-climb lines need 1+.
                           (4) DIVISION SWITCHER in the topbar (live only):
                           National / North / South reload live in-view.
+    v0.27.0 (2026-08-08) — PUBLIC-READY live chrome. Round strapline
+                          removed everywhere. In live: transport bar and
+                          footer (v-badge, replay note) hidden — broadcast,
+                          not a player; a loading veil hides the demo while
+                          today loads. Pre-match previews are CLICK-TO-READ
+                          (tap a pin or scorecard → that fixture's preview
+                          + XI at double dwell); team news still announces
+                          itself as it drops. TABLE becomes the 4th mobile
+                          view state (Map / Scorecards / Ticker / Table) —
+                          sheet retired; thin custom scrollbar; desktop
+                          1100-1419px gets a topbar Table button. Table
+                          fixes: play-off band 2-7 + bottom FOUR relegation
+                          (all divisions), champion pos in white, zero-day
+                          arrows suppressed (baseline "positions" of a
+                          0-games table are arbitrary), "as it stands"
+                          shows the real wall clock in live. T=0 fixtures
+                          read as pre-match (KO slot), never "1'". Switcher
+                          hardened against Android font boosting.
   ============================================================================
 -->
 
@@ -569,18 +587,19 @@ window.__DATA__ = {
   <div class="nlh__topbar">
     <div class="nlh__brandrow">
       <span class="nlh__wordmark">MATCH&nbsp;HUB</span>
-      <span class="nlh__round" id="nlhRound"></span>
       <div class="nlh__comps" id="nlhComps" hidden
         <button class="nlh__compbtn is-active" data-comp="nl">National</button>
         <button class="nlh__compbtn" data-comp="north">North</button>
         <button class="nlh__compbtn" data-comp="south">South</button>
       </div>
+      <button class="nlh__loadbtn nlh__tablebtn" id="nlhTableBtn">Table</button>
       <button class="nlh__loadbtn" id="nlhLoadBtn">Replay a matchday</button>
     </div>
     <div class="nlh__switch" role="tablist" aria-label="View">
       <button class="nlh__seg is-active" data-view="map"    role="tab">Map</button>
-      <button class="nlh__seg"           data-view="cards"  role="tab">Cards</button>
+      <button class="nlh__seg"           data-view="cards"  role="tab">Scorecards</button>
       <button class="nlh__seg"           data-view="ticker" role="tab">Ticker</button>
+      <button class="nlh__seg"           data-view="table"  role="tab">Table</button>
     </div>
   </div>
 
@@ -610,6 +629,10 @@ window.__DATA__ = {
       <ol class="nlh__feed" id="nlhFeed"></ol>
     </section>
     <!-- LIVE TABLE — its own column on wide desktop; narrower screens use the sheet -->
+    <section class="nlh__view nlh__tableview" data-view="table">
+      <div class="nlh__panelhead2">Table · <span id="nlhTableViewState"></span></div>
+      <div class="nlh__tviewwrap"><table class="nlh__table"><tbody id="nlhTableViewBody"></tbody></table></div>
+    </section>
     <section class="nlh__tablecol">
       <div class="nlh__panelhead">Table · <span id="nlhTableColState"></span></div>
       <div class="nlh__tablecolwrap"><table class="nlh__table"><tbody id="nlhTableColBody"></tbody></table></div>
@@ -697,7 +720,7 @@ window.__DATA__ = {
 html,body{margin:0;padding:0;height:100%;background:#f4f6f9}
 body{overflow:hidden}
 
-#nlHub{
+#nlHub{-webkit-text-size-adjust:100%;text-size-adjust:100%;
   /* ==== MATCH HUB CANON — tokens derived from nl-brand.css (inline: this
        page only BORROWS the brand, it is not a gated tool). Light chrome;
        the map keeps its night-navy island look via the --ink-* set. ==== */
@@ -747,11 +770,11 @@ body{overflow:hidden}
 /* division switcher — live mode only */
 #nlHub .nlh__comps{display:flex;gap:4px;margin-left:14px;align-self:center;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:3px}
 #nlHub .nlh__comps[hidden]{display:none}
-#nlHub .nlh__compbtn{font-size:var(--fs-xs);font-variation-settings:"wght" 800;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);border:0;border-radius:999px;padding:4px 12px;background:transparent;cursor:pointer;transition:background .15s,color .15s}
+#nlHub .nlh__compbtn{font-family:inherit;line-height:1.3;font-size:var(--fs-xs);font-variation-settings:"wght" 800;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);border:0;border-radius:999px;padding:4px 12px;background:transparent;cursor:pointer;transition:background .15s,color .15s}
 #nlHub .nlh__compbtn.is-active{background:var(--navy);color:#fff}
 #nlHub .nlh__loadbtn:hover{background:var(--navy-100)}
 #nlHub .nlh__switch{display:flex;gap:4px;background:var(--navy-100);padding:4px;border-radius:999px}
-#nlHub .nlh__seg{flex:1;padding:9px 0;border-radius:999px;font-size:var(--fs-sm);font-variation-settings:"wght" 800;font-weight:800;letter-spacing:.04em;color:var(--muted);transition:.18s}
+#nlHub .nlh__seg{flex:1;padding:9px 2px;border-radius:999px;font-size:var(--fs-xs);font-variation-settings:"wght" 800;font-weight:800;letter-spacing:.04em;color:var(--muted);transition:.18s}
 #nlHub .nlh__seg.is-active{background:var(--primary);color:#fff}
 
 /* ===== Main area: one view at a time on mobile, three panels on desktop ===== */
@@ -807,19 +830,6 @@ body{overflow:hidden}
    time shown. Fixed size, never zoom-scaled. ===== */
 #nlHub .nlh__hero{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);z-index:6;pointer-events:none;max-width:94%}
 #nlHub .nlh__ha{min-width:min(460px,92vw);max-width:94vw;border-radius:10px;overflow:hidden;box-shadow:0 12px 30px rgba(0,0,0,.5)}
-@media (max-width:600px){
-  /* phones: STACK the two teams (crest · full name · score per row) — long
-     club names get a whole row each instead of being truncated */
-  #nlHub .nlh__habar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"crh nmh sc" "cra nma sc";gap:7px 10px;align-items:center;padding:10px 14px}
-  #nlHub .nlh__habar .hcrh{grid-area:crh}
-  #nlHub .nlh__habar .hcra{grid-area:cra}
-  #nlHub .nlh__hanm--h{grid-area:nmh}
-  #nlHub .nlh__hanm--a{grid-area:nma}
-  #nlHub .nlh__hanm{font-size:15px;letter-spacing:.03em;white-space:normal;overflow:visible;text-overflow:clip;text-align:left}
-  #nlHub .nlh__hasc{grid-area:sc;flex-direction:column;gap:2px;font-size:30px;padding:0 2px}
-  #nlHub .nlh__hadash{display:none}
-  #nlHub .nlh__habar img,#nlHub .nlh__habar .nlh__crestfb{width:26px;height:26px}
-}
 #nlHub .nlh__hakick{display:flex;justify-content:flex-start;padding:6px 14px;background:#16234a;color:#fff;font-size:12px;font-variation-settings:"wght" 800;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
 #nlHub .nlh__habar{display:flex;align-items:center;justify-content:center;gap:13px;background:#0d1730;padding:12px 18px}
 #nlHub .nlh__habar img,#nlHub .nlh__habar .nlh__crestfb{width:34px;height:34px;object-fit:contain}
@@ -834,6 +844,19 @@ body{overflow:hidden}
 #nlHub .nlh__digit .reel i{display:block;height:1.12em;font-style:normal}
 #nlHub .nlh__digit .reel.roll{animation:nlhOdo .7s cubic-bezier(.3,1,.25,1) .3s both}
 @keyframes nlhOdo{to{transform:translateY(-1.12em)}}
+@media (max-width:600px){
+  /* phones: STACK the two teams (crest · full name · score per row) — long
+     club names get a whole row each instead of being truncated */
+  #nlHub .nlh__habar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"crh nmh sc" "cra nma sc";gap:7px 10px;align-items:center;padding:10px 14px}
+  #nlHub .nlh__habar .hcrh{grid-area:crh}
+  #nlHub .nlh__habar .hcra{grid-area:cra}
+  #nlHub .nlh__hanm--h{grid-area:nmh}
+  #nlHub .nlh__hanm--a{grid-area:nma}
+  #nlHub .nlh__hanm{font-size:15px;letter-spacing:.03em;white-space:normal;overflow:visible;text-overflow:clip;text-align:left}
+  #nlHub .nlh__hasc{grid-area:sc;flex-direction:column;gap:2px;font-size:30px;padding:0 2px}
+  #nlHub .nlh__hadash{display:none}
+  #nlHub .nlh__habar img,#nlHub .nlh__habar .nlh__crestfb{width:26px;height:26px}
+}
 
 /* ===== GOAL TAKEOVER — the marquee beat. A skewed band in the scoring
    team's colour wipes the stage carrying a giant GOAL wordmark and the
@@ -927,7 +950,7 @@ body{overflow:hidden}
 #nlHub .nlh__table .pts{text-align:right;font-variation-settings:"wght" 900;font-weight:900}
 #nlHub .nlh__table td.num{text-align:center;color:var(--muted)}
 /* NL position bands as filled cells (canon --pos-* pairings) */
-#nlHub .nlh__table tr.champ td.pos{background:var(--pos-champ);color:#000}
+#nlHub .nlh__table tr.champ td.pos{background:var(--pos-champ);color:#fff}
 #nlHub .nlh__table tr.po td.pos{background:var(--pos-po);color:#fff}
 #nlHub .nlh__table tr.releg td.pos{background:var(--pos-releg);color:#fff}
 #nlHub .nlh__table tr.moved .nm::after{content:"▲";color:var(--green);font-size:10px;margin-left:6px}
@@ -991,6 +1014,24 @@ body{overflow:hidden}
 }
 /* ===== Desktop: cards | map | vidiprinter, all live at once ===== */
 #nlHub .nlh__tablecol{display:none}
+/* TABLE is a first-class mobile view state — compact rows, no tray */
+#nlHub .nlh__tableview{flex-direction:column;min-height:0}
+#nlHub .nlh__panelhead2{flex:0 0 auto;font-size:var(--fs-xs);font-variation-settings:"wght" 800;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:4px 6px 8px}
+#nlHub .nlh__tviewwrap{flex:1 1 auto;min-height:0;overflow-y:auto;padding:0 2px 8px;scrollbar-width:thin;scrollbar-color:var(--navy-300) transparent}
+#nlHub .nlh__tviewwrap::-webkit-scrollbar{width:4px}
+#nlHub .nlh__tviewwrap::-webkit-scrollbar-thumb{background:var(--navy-300);border-radius:4px}
+#nlHub .nlh__tviewwrap::-webkit-scrollbar-track{background:transparent}
+#nlHub .nlh__tviewwrap .nlh__table{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;font-size:var(--fs-xs);width:100%}
+#nlHub .nlh__tviewwrap .nlh__table td{padding:3px 5px}
+#nlHub .nlh__tviewwrap .nlh__table .cl img,#nlHub .nlh__tviewwrap .nlh__table .nlh__crestfb{width:16px;height:16px}
+/* LIVE chrome: no transport, no footer, no dev badge — broadcast, not a player */
+#nlHub.is-live .nlh__controls{display:none}
+#nlHub.is-live .nlh__foot{display:none}
+#nlHub.is-loading .nlh__main,#nlHub.is-loading .nlh__controls,#nlHub.is-loading .nlh__foot{visibility:hidden}
+#nlHub .nlh__tablebtn{display:none}
+@media (min-width:1100px) and (max-width:1419.98px){
+  #nlHub.is-live .nlh__tablebtn{display:inline-block;margin-left:10px}
+}
 @media (min-width:1100px){
   #nlHub .nlh__topbar{flex-direction:row;align-items:center;justify-content:space-between}
   #nlHub .nlh__switch{display:none}
@@ -1031,7 +1072,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "37";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "38";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -1102,6 +1143,8 @@ body{overflow:hidden}
     if (fx.pp) return {phase:"pp", label:"P-P", live:false};
     // LIVE: the feed's own period beats wall-clock arithmetic (kick-offs run
     // late, half-times run long — trust what NLS says the match is doing)
+    if (st.liveMode && !fx._per && fx._koms && Date.now() < fx._koms)
+      return {phase:"pre", label:fx.slot, live:false};
     if (st.liveMode && fx._per){
       var p=fx._per;
       if (p==="prematch")  return {phase:"pre", label:fx.slot, live:false};
@@ -1113,7 +1156,7 @@ body{overflow:hidden}
         return {phase:half2?"2h":"1h", label:lbl+"'", live:true};
       }
     }
-    if (local < 0)          return {phase:"pre", label:fx.slot, live:false};
+    if (local <= 0.001)     return {phase:"pre", label:fx.slot, live:false};
     if (local < HALF)       return {phase:"1h", label:dispMin(Math.max(1,Math.floor(local)),1)+"'", live:true};
     if (local < HALF+BREAK) return {phase:"ht", label:"HT", live:true};
     if (local < fx._ft)     return {phase:"2h", label:dispMin(Math.floor(local-BREAK),2)+"'", live:true};
@@ -2153,15 +2196,23 @@ body{overflow:hidden}
   // (it carries points deductions a result-replay can't know about).
   function priorRank(){
     var arr=Object.keys(D.prior).map(function(k){var p=D.prior[k];return{k:k,Pts:p.Pts,GD:p.GF-p.GA,GF:p.GF};})
-      .sort(function(a,b){return b.Pts-a.Pts||b.GD-a.GD||b.GF-a.GF;});
+      .sort(function(a,b){return b.Pts-a.Pts||b.GD-a.GD||b.GF-a.GF||club(a.k).name.localeCompare(club(b.k).name);});
     var m={}; arr.forEach(function(r,i){m[r.k]=i;}); return m;
+  }
+  function nowLbl(){
+    return st.liveMode
+      ? new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:"Europe/London"})
+      : clockLabel(st.T);
   }
   function renderTable(){
     var rows=liveTable(st.T).arr, n=rows.length, was=priorRank();
-    var live = st.T < maxT()-0.5;
+    var live = st.liveMode ? !LIVE.allFT : st.T < maxT()-0.5;
+    // opening day: the baseline is a zero table whose "positions" are
+    // arbitrary ordering — movement vs that is noise, so no arrows
+    var zero = !!D.zeroDay;
     var html = rows.map(function(r,i){
-      var cls = i===0?"champ":(i>=1&&i<=4?"po":(i>=n-3?"releg":""));
-      var moved = was[r.k]!==undefined && was[r.k]!==i;
+      var cls = i===0?"champ":(i<=6?"po":(i>=n-4?"releg":""));
+      var moved = !zero && was[r.k]!==undefined && was[r.k]!==i;
       var dir = moved && was[r.k]<i ? "down":"";
       return '<tr class="'+cls+(moved?" moved "+dir:"")+'">'+
         '<td class="pos">'+(i+1)+'</td>'+
@@ -2169,10 +2220,12 @@ body{overflow:hidden}
         '<td class="num">'+r.P+'</td><td class="num">'+(r.GD>0?"+":"")+r.GD+'</td>'+
         '<td class="pts">'+r.Pts+'</td></tr>';
     }).join("");
-    $("nlhSheetTitle").textContent = D.competition+" — "+(live ? "as it stands · "+clockLabel(st.T) : "after Matchday "+D.round);
+    $("nlhSheetTitle").textContent = D.competition+" — "+(live ? "as it stands · "+nowLbl() : "after Matchday "+D.round);
     $("nlhTableBody").innerHTML = html;
     var t2=$("nlhTableColBody"); if(t2) t2.innerHTML = html;
-    var cs=$("nlhTableColState"); if(cs) cs.textContent = live ? "as it stands · "+clockLabel(st.T) : "final";
+    var cs=$("nlhTableColState"); if(cs) cs.textContent = live ? "as it stands · "+nowLbl() : "final";
+    var t3=$("nlhTableViewBody"); if(t3) t3.innerHTML = html;
+    var vs=$("nlhTableViewState"); if(vs) vs.textContent = live ? "as it stands · "+nowLbl() : "final";
   }
   // the table column is live on desktop (its own column wide, or swapped in
   // for the vidiprinter at mid widths); the tray exists only on mobile
@@ -2184,14 +2237,14 @@ body{overflow:hidden}
                           : hubEl().classList.contains("swap-table");
   }
   function toggleTable(){
-    if (!isDesk()){ showSheet(); return; }
+    if (!isDesk()){ setView("table"); return; }
     var cls = mqWide.matches ? "show-tablecol" : "swap-table";
     var on = hubEl().classList.toggle(cls);
     if (on) renderTable();
     setTimeout(layoutPins, 80);   // column change resizes the stage
   }
   function showFinalTable(){
-    if (!isDesk()){ showSheet(); return; }
+    if (!isDesk()){ setView("table"); renderTable(); return; }
     var cls = mqWide.matches ? "show-tablecol" : "swap-table";
     if (!hubEl().classList.contains(cls)){ hubEl().classList.add(cls); setTimeout(layoutPins, 80); }
     renderTable();
@@ -2204,7 +2257,8 @@ body{overflow:hidden}
     $("nlhClock").textContent = clockLabel(st.T);
     $("nlhScrubFill").style.width = (st.T/maxT()*100)+"%";
     // the table (sheet or wide-desktop column) is LIVE — refresh while visible
-    if ((!$("nlhSheet").hidden || tableColVisible()) && Date.now()-(st._tblAt||0)>500){ st._tblAt=Date.now(); renderTable(); }
+    var tblOnShow = !$("nlhSheet").hidden || tableColVisible() || (!isDesk() && st.view==="table");
+    if (tblOnShow && Date.now()-(st._tblAt||0)>500){ st._tblAt=Date.now(); renderTable(); }
     if (isDesk()){ paintPins(); paintCards(); paintFeed(); return; }  // all three live
     if (st.view==="map")    paintPins();
     else if (st.view==="cards")  paintCards();
@@ -2615,6 +2669,7 @@ body{overflow:hidden}
     if(!Object.keys(priorOut).length){
       Object.keys(usedTeams).forEach(function(k){ priorOut[k]={P:0,W:0,D:0,L:0,GF:0,GA:0,Pts:0}; });
     }
+    D.zeroDay = Object.keys(priorOut).every(function(k){ return !priorOut[k].P; });
     // Per-club games-played context for the phrase truth-gates. NB the
     // official baseline can be a fully-initialised ZERO table (positions
     // alphabetical) — a position from a 0-games table is not a fact worth
@@ -2635,6 +2690,7 @@ body{overflow:hidden}
     st.secPerMin=o.live?60:(o.secPerMin||1);
     computeDerived();
     buildMap(); buildCards();
+    hubEl().classList.remove("is-loading");
     setRoundLabel(); renderTable();
     $("nlhFootDate").textContent=(o.live?"LIVE · ":"")+new Date(o.date+"T12:00:00Z")
       .toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short",year:"numeric",timeZone:"UTC"}).replace(/,/g,"");
@@ -2659,13 +2715,26 @@ body{overflow:hidden}
       BEATS.forEach(function(b){ if(b.r<=st.T) st.beatShown[b.r]=1; });
       st.newsQ.length=0;
       if(st.T<=0.5) D.fixtures.forEach(queueNews);   // lineups already in → read them pre-KO
-      st.koShown = st.T>0;   // pre-KO joins still get the preview build-up
+      st.koShown=true;   // v0.27: no auto preview roll — previews are click-to-read
+      hubEl().classList.add("is-live");
+      // pre-KO reader: team-news lines (and click-previews) play one at a
+      // time at DOUBLE reading dwell, camera on the right ground
+      clearInterval(st._preIv);
+      st._preIv=setInterval(function(){
+        if(!st.liveMode){ clearInterval(st._preIv); return; }
+        if(st.T>0.5){ clearInterval(st._preIv); return; }
+        if(Date.now()<st._commUntil || !st.newsQ.length) return;
+        var q=st.newsQ.shift();
+        if(mapVisible()) setFocus(q.fx);
+        typeSegs(q.segs,"beat");
+        st._commUntil=Date.now()+commHoldFor(q.segs)*2;
+      }, 700);
       liveKickPoll();
       play();
       commStatic(st.T<=0 ? (st.newsQ.length?C_IDLE:"Live from the National League — team news expected shortly.")
                          : "Live — picking up the afternoon as it stands…");
     } else if(o.startTime){
-      st.liveMode=false; clearTimeout(LIVE.pollIv); $("nlhComps").hidden=true;
+      st.liveMode=false; clearTimeout(LIVE.pollIv); $("nlhComps").hidden=true; hubEl().classList.remove("is-live");
       // wall-clock start: minutes from the first KO of the day, TZ-safe via
       // the London-local label of the base kick-off
       var baseLbl=new Date(st.baseKOms).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit",timeZone:"Europe/London"});
@@ -2673,7 +2742,7 @@ body{overflow:hidden}
       var T=Math.max(0,toM(o.startTime)-toM(baseLbl));
       seek(Math.min(1,T/maxT())); play();
     } else {
-      st.liveMode=false; clearTimeout(LIVE.pollIv); $("nlhComps").hidden=true;
+      st.liveMode=false; clearTimeout(LIVE.pollIv); $("nlhComps").hidden=true; hubEl().classList.remove("is-live");
       restart();
     }
   }
@@ -2732,6 +2801,24 @@ body{overflow:hidden}
       var cl=club(fx[sd[0]]);
       st.newsQ.push({fx:fx, segs:buildSegs("Team news — {club}: "+xi+".", {club:cl.name}, ["club"])});
     });
+  }
+  // pre-match, live: tap a pin or scorecard to read that fixture's preview
+  // and team news (auto-rolling previews were retired in v0.27)
+  function previewFixture(fx){
+    if(!st.liveMode || st.T>0.5 || fx.pp) return;
+    var segs=kickoffSegs(fx);
+    if(mapVisible()) setFocus(fx);
+    typeSegs(segs,"beat");
+    st._commUntil=Date.now()+commHoldFor(segs)*2;
+    st.newsQ=st.newsQ.filter(function(q){ return q.fx!==fx; });
+    if(fx._xi){
+      var items=[];
+      [["home","h"],["away","a"]].forEach(function(sd){
+        var xi=fx._xi[sd[1]]; if(!xi) return;
+        items.push({fx:fx, segs:buildSegs("Team news — {club}: "+xi+".", {club:club(fx[sd[0]]).name}, ["club"])});
+      });
+      st.newsQ=items.concat(st.newsQ);
+    }
   }
   var C_GHOST=[
     "There's a goal at {venue}! It's {team} — {score}. Scorer details to follow.",
@@ -2808,9 +2895,7 @@ body{overflow:hidden}
   }
 
   // ---- wiring --------------------------------------------------------------
-  function setRoundLabel(){
-    $("nlhRound").textContent = D.competition+" · MD"+D.round+" · "+D.season;
-  }
+  function setRoundLabel(){ /* the round strapline was retired in v0.27 */ }
   function boot(){
     setRoundLabel();
     try{ $("nlhVer").textContent = "v"+((new URLSearchParams(location.search).get("v"))||BUILD); }catch(e){ $("nlhVer").textContent="v"+BUILD; }
@@ -2833,6 +2918,18 @@ body{overflow:hidden}
       var r=scrub.getBoundingClientRect(); seek((e.clientX-r.left)/r.width);
     });
     $("nlhFootTable").addEventListener("click", toggleTable);
+    $("nlhTableBtn").addEventListener("click", toggleTable);
+    // pre-match (live): tap a pin or a scorecard for that fixture's preview + XI
+    $("nlhStage").addEventListener("click", function(e){
+      if(!st.liveMode || st.T>0.5 || !e.target.closest) return;
+      var p=e.target.closest('[id^="pin_"]');
+      if(p){ var fx=D.fixtures.filter(function(f){return "pin_"+f.gc===p.id;})[0]; if(fx) previewFixture(fx); }
+    });
+    $("nlhGrid").addEventListener("click", function(e){
+      if(!st.liveMode || st.T>0.5 || !e.target.closest) return;
+      var c=e.target.closest('[id^="card_"]');
+      if(c){ var fx=D.fixtures.filter(function(f){return "card_"+f.gc===c.id;})[0]; if(fx) previewFixture(fx); }
+    });
     if (mqWide.matches) hubEl().classList.add("show-tablecol");   // wide desktop: the column IS the table by default
     $("nlhSheetClose").addEventListener("click", hideSheet);
     $("nlhSheet").addEventListener("click", function(e){ if(e.target===$("nlhSheet")) hideSheet(); });
@@ -2876,6 +2973,7 @@ body{overflow:hidden}
         .then(function(){ btn.disabled=false; setup.hidden=true; })
         .catch(function(e){
           btn.disabled=false;
+          hubEl().classList.remove("is-loading");
           if(quiet) setup.hidden=false;   // no live football → offer the replay gate
           stat.textContent=(e&&e.message)||"Couldn't go live."; stat.className="nlh__setupstatus is-error";
         });
@@ -2897,6 +2995,7 @@ body{overflow:hidden}
       var qs=new URLSearchParams(location.search);
       var qc=qs.get("comp"); if(qc&&COMPS[qc]) $("nlhSetComp").value=qc;
       if(!qs.get("replay")){
+        hubEl().classList.add("is-loading");
         commStatic("Finding today's games…");
         goLive(qc||undefined, true);
       }
