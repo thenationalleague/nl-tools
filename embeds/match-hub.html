@@ -491,6 +491,19 @@
                           button / footer link), full height; the table
                           column modes (show-tablecol / swap-table /
                           mqWide) are deleted.
+    v0.31.6 (2026-08-08) — LIVE-DAY LOAD HARDENING — v0.31.5's 12s
+                          blanket timeout broke loading at peak (timers
+                          ran while requests queued behind the browser's
+                          per-host cap; the awaited season sweep had no
+                          retry). Default timeout 30s; retries on every
+                          awaited fetch; detail fetches through a 6-lane
+                          pool so timers start with the request; 3min
+                          allowance for the all-time file; quiet live
+                          boot self-retries every 12s on transient
+                          failure. NLS from/to date-window params
+                          (Richard's find) now bound every list fetch to
+                          the day / played-season — no more walking the
+                          full season card.
     v0.31.5 (2026-08-08) — LOAD can no longer freeze at "10/12": every
                           fetch carries a 12s timeout + one retry; a
                           detail that still fails builds its fixture
@@ -1301,7 +1314,7 @@ body{overflow:hidden}
   if (!D) return;
 
   var CREST_BASE = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/crests/";
-  var BUILD = "56";   // bump on each deploy; the footer shows ?v=… if present, else this
+  var BUILD = "57";   // bump on each deploy; the footer shows ?v=… if present, else this
   var HALF = 45, BREAK = 15, FT_RMIN = HALF + BREAK + HALF; // 105
 
   // ---- helpers -------------------------------------------------------------
@@ -3007,7 +3020,7 @@ body{overflow:hidden}
   function fetchJSON(u,tmo){
     return new Promise(function(res,rej){
       var ac=(typeof AbortController!=="undefined")?new AbortController():null;
-      var t=setTimeout(function(){ if(ac) ac.abort(); rej(new Error("timeout")); }, tmo||12000);
+      var t=setTimeout(function(){ if(ac) ac.abort(); rej(new Error("timeout")); }, tmo||30000);
       fetch(u, ac?{signal:ac.signal}:{}).then(function(r){
         clearTimeout(t);
         if(!r.ok){ rej(new Error("HTTP "+r.status)); return; }
@@ -3020,6 +3033,24 @@ body{overflow:hidden}
       if((tries||2)<=1) throw e;
       return new Promise(function(res){ setTimeout(res,700); }).then(function(){ return fetchJSONr(u,(tries||2)-1,tmo); });
     });
+  }
+  // NLS honours server-side date windows: from/to as space-separated UTC
+  // datetimes ("2026-08-08 00:00:00Z", URL-encoded). One page bracketing the
+  // day beats walking the whole season's card. Client-side date filters stay
+  // as belt-and-braces, so an ignored param degrades to the old behaviour.
+  function dayWin(f,t){ return "&from="+f+"+00%3A00%3A00Z&to="+t+"+23%3A59%3A59Z"; }
+  // run fn over items with at most n in flight — the abort timer must start
+  // when a request STARTS, not while it queues behind the browser's per-host
+  // connection cap (that's what spuriously expired v0.31.5's detail fetches)
+  function poolMap(items,n,fn){
+    var i=0,out=new Array(items.length);
+    function lane(){
+      if(i>=items.length) return Promise.resolve();
+      var idx=i++;
+      return fn(items[idx],idx).then(function(v){ out[idx]=v; },function(){ out[idx]=null; }).then(lane);
+    }
+    var lanes=[]; for(var k=0;k<n&&k<items.length;k++) lanes.push(lane());
+    return Promise.all(lanes).then(function(){ return out; });
   }
   function evMinOf(w){ var m=/^(\d+)'(?:\+(\d+))?/.exec(String(w.formattedEventTime||"")); return m?Number(m[1])+(m[2]?Number(m[2]):0):Number(w.eventMinute||w.eventTime||0); }
   function pnameOf(p){ var n=(p&&p.playerName)||{}; return n.knownName||n.customKnownName||((n.firstName?n.firstName+" ":"")+(n.lastName||"")).trim()||"Unknown"; }
@@ -3158,8 +3189,8 @@ body{overflow:hidden}
     o.status("Fetching the season's matches…");
     var list=[];
     for(var ci=0;ci<CIDS.length;ci++){
-      var url=NLS_API+"/matches/?competitionID="+CIDS[ci].id+"&seasonID="+season+"&sort=-kickOffDateUTC&page.number=1&page.size=100";
-      while(url){ var j=await fetchJSON(url); list=list.concat(j.data||[]); url=j.links&&j.links.next; }
+      var url=NLS_API+"/matches/?competitionID="+CIDS[ci].id+"&seasonID="+season+"&sort=kickOffDateUTC&page.number=1&page.size=100"+dayWin(season+"-07-01",o.date);
+      while(url){ var j=await fetchJSONr(url,3); list=list.concat(j.data||[]); url=j.links&&j.links.next; }
       if(isAll) o.status("Fetching the season's matches… ("+(ci+1)+"/3 divisions)");
     }
     var dOf=function(m){return (m.attributes.kickOffDateUTC||"").slice(0,10);};
@@ -3202,7 +3233,7 @@ body{overflow:hidden}
       else if(a.awayTeam.score>a.homeTeam.score){ var k2=a.awayTeam.teamID; if(!recentWins[k2]||dte>recentWins[k2]) recentWins[k2]=dte; }
     });
     o.status("Fetching club identity…");
-    _meta=_meta||await fetchJSON(META_URL);
+    _meta=_meta||await fetchJSONr(META_URL,3);
     var byOpta={}; _meta.clubs.forEach(function(c){ if(c.optaID) byOpta[c.optaID]=c; });
     var table=Object.keys(rows).map(function(k){var r=rows[k];return {k:k,Pts:r.Pts,GD:r.GF-r.GA,GF:r.GF};})
       .sort(function(a,b){return b.Pts-a.Pts||b.GD-a.GD||b.GF-a.GF||((byOpta[a.k]||{}).name||a.k).localeCompare((byOpta[b.k]||{}).name||b.k);});
@@ -3214,7 +3245,7 @@ body{overflow:hidden}
     var officialRows=null;
     try{
       o.status("Checking the official baseline archive…");
-      if(!_baselines) _baselines=await fetchJSON(BASELINE_URL);
+      if(!_baselines) _baselines=await fetchJSONr(BASELINE_URL,2);
       var bd=_baselines.days&&_baselines.days[o.date];
       var bc=bd&&String(bd.season)===String(season)&&bd.competitions&&bd.competitions[o.comp||"nl"];
       if(bc&&bc.rows&&bc.rows.length>=20){
@@ -3224,15 +3255,15 @@ body{overflow:hidden}
     }catch(e){ /* archive unreachable — derived table stands */ }
     var nDone=0;
     o.status("Fetching match detail… (0/"+roundL.length+")");
-    var details=await Promise.all(roundL.map(function(m){
-      return fetchJSONr(NLS_API+"/matches/"+m.id,2,12000).then(
+    var details=await poolMap(roundL,6,function(m){
+      return fetchJSONr(NLS_API+"/matches/"+m.id,2,20000).then(
         function(d){ o.status("Fetching match detail… ("+(++nDone)+"/"+roundL.length+")"); return d; },
         function(){ o.status("Fetching match detail… ("+(++nDone)+"/"+roundL.length+")"); return null; });
-    }));
+    });
     if(!_alltime&&!_alltimeFailed&&!_alltimeP){
       // the all-time master is the heaviest fetch on the page — load it in the
       // BACKGROUND and enrich h2h when it lands (previews read h2h lazily)
-      _alltimeP=fetchJSON(ALLTIME_URL).then(function(j){ _alltime=j; },function(){ _alltimeFailed=true; });
+      _alltimeP=fetchJSON(ALLTIME_URL,180000).then(function(j){ _alltime=j; },function(){ _alltimeFailed=true; });
     }
     o.status("Building the matchday…");
     var usedTeams={};
@@ -3525,10 +3556,10 @@ body{overflow:hidden}
     var played=Ps.length?Ps[Math.floor(Ps.length/2)]:0;
     var asc = played<23;
     for(var ci=0;ci<comps.length;ci++){
-      var url=NLS_API+"/matches/?competitionID="+comps[ci].id+"&seasonID="+LIVE.season+"&sort="+(asc?"":"-")+"kickOffDateUTC&page.number=1&page.size=100";
+      var url=NLS_API+"/matches/?competitionID="+comps[ci].id+"&seasonID="+LIVE.season+"&sort="+(asc?"":"-")+"kickOffDateUTC&page.number=1&page.size=100"+dayWin(today,today);
       var guard=0;
       while(url && guard++<12){
-        var j=await fetchJSON(url);
+        var j=await fetchJSONr(url,2);
         var rows=j.data||[], past=false;
         rows.forEach(function(m){
           var d=(m.attributes.kickOffDateUTC||"").slice(0,10);
@@ -3572,9 +3603,9 @@ body{overflow:hidden}
         if(p==="fulltime"||p==="postmatch") return !!(fx._ftAt && Date.now()-fx._ftAt<12*60000);  // brief window for late edits
         return nearKO || p!=="prematch" || (fx._ls&&(fx._ls.h+fx._ls.a)>0);
       });
-      var dets=await Promise.all(targets.map(function(fx){
-        return fetchJSON(NLS_API+"/matches/"+fx.gc).then(function(d){return {fx:fx,d:d};},function(){return null;});
-      }));
+      var dets=await poolMap(targets,6,function(fx){
+        return fetchJSON(NLS_API+"/matches/"+fx.gc,20000).then(function(d){return {fx:fx,d:d};},function(){return null;});
+      });
       dets.filter(Boolean).forEach(function(x){
         var fx=x.fx, at=x.d.data.attributes;
         var per=String(at.period||"").toLowerCase();
@@ -3703,6 +3734,7 @@ body{overflow:hidden}
     // quiet=true (boot / division switch): progress narrates through the
     // console, and the replay dialog only appears if live genuinely fails.
     function goLive(comp, quiet){
+      clearTimeout(goLive._rt);
       var stat=$("nlhSetStatus"), btn=$("nlhSetLive");
       btn.disabled=true;
       var report = quiet ? function(m){ commStatic(m); } : function(m){ stat.textContent=m; };
@@ -3712,15 +3744,24 @@ body{overflow:hidden}
         .then(function(){ btn.disabled=false; setup.hidden=true; })
         .catch(function(e){
           btn.disabled=false;
+          var msg=(e&&e.message)||"Couldn't go live.";
+          if(quiet && msg.indexOf("matches today")<0){
+            // transient network/API wobble — a live page SELF-HEALS: keep the
+            // veil up, say so, retry until the feed answers
+            commStatic("Struggling to reach the live feed — retrying…");
+            goLive._rt=setTimeout(function(){ goLive(comp, true); }, 12000);
+            return;
+          }
           hubEl().classList.remove("is-loading");
           if(quiet){ try{ openDates(); }catch(_e){ setup.hidden=false; } }   // no live football → offer past matchdays
-          stat.textContent=(e&&e.message)||"Couldn't go live."; stat.className="nlh__setupstatus is-error";
+          stat.textContent=msg; stat.className="nlh__setupstatus is-error";
         });
     }
     $("nlhSetLive").addEventListener("click", function(){ goLive(); });
     // public replay: load a past matchday with sensible defaults (real KO
     // stagger, one second per match-minute), narrated through the console
     function replayDate(date, comp){
+      clearTimeout(goLive._rt);
       hubEl().classList.add("is-loading");
       loadMatchday({ date:date, comp:comp||CURCOMP, stagger:true, secPerMin:1,
         status:function(m){ commStatic(m); } })
@@ -3741,11 +3782,11 @@ body{overflow:hidden}
     function fetchSeasonDates(comp){
       if(_dates[comp]) return Promise.resolve(_dates[comp]);
       return (async function(){
-        if(!_meta) _meta=await fetchJSON(META_URL);
+        if(!_meta) _meta=await fetchJSONr(META_URL,3);
         var C=COMPS[comp==="all"?"nl":comp], season=_meta.seasons.current;
-        var list=[], url=NLS_API+"/matches/?competitionID="+C.id+"&seasonID="+season+"&sort=-kickOffDateUTC&page.number=1&page.size=100";
-        while(url){ var j=await fetchJSON(url); list=list.concat(j.data||[]); url=j.links&&j.links.next; }
         var today=new Date().toLocaleDateString("en-CA",{timeZone:"Europe/London"});
+        var list=[], url=NLS_API+"/matches/?competitionID="+C.id+"&seasonID="+season+"&sort=-kickOffDateUTC&page.number=1&page.size=100"+dayWin(season+"-07-01",today);
+        while(url){ var j=await fetchJSONr(url,2); list=list.concat(j.data||[]); url=j.links&&j.links.next; }
         var seen={}, out=[];
         list.forEach(function(m){
           var d=(m.attributes.kickOffDateUTC||"").slice(0,10);
