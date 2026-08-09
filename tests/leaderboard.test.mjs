@@ -106,7 +106,7 @@ const PREDS = {
 
 test('rows: ordered by results, then exacts, then forename', () => {
   const rows = lb.buildRows(USERS, PREDS, MATCHES, { kind: 'season' }, NOW);
-  // Dan is last: the season table lists everyone registered, so he is present
+  // Dan is last: he has predicted (only an unplayed match), so he is present
   // on nought rather than absent. See the who-appears block below.
   assert.deepEqual(rows.map((r) => r.n), ['Anna B', 'Cara D', 'Ben C', 'Dan E']);
   assert.deepEqual(rows.slice(0, 3).map((r) => [r.r, r.e, r.s]),
@@ -149,12 +149,42 @@ test('activity: the latest prediction beats the registration date', () => {
   assert.equal(lb.lastActivity(null, null), 0);
 });
 
-test('rows: a fan who has just predicted outranks one who only registered', () => {
+test('rows: a registered fan who has never predicted is not listed at all', () => {
+  // users/ is keyed by jwtId with no season in it, so last season's sign-ups
+  // are still there. Listing them put dormant accounts on the new season's
+  // table on nought forever, and counted them in the widget's "N fans playing
+  // this season" — the recruitment line on the signed-out page.
   const users = {
     old: { forename: 'Old', surnameInitial: 'O', teamId: '1', teamName: 'T', crestUrl: '', registeredAt: 8000 },
     act: { forename: 'Act', surnameInitial: 'A', teamId: '1', teamName: 'T', crestUrl: '', registeredAt: 1000 },
   };
   const preds = { act: { '2026-09-05': { m4: { home: 1, away: 0, submittedAt: 9999 } } } };
+  const rows = lb.buildRows(users, preds, MATCHES, { kind: 'season' }, NOW);
+  assert.deepEqual(rows.map((r) => r.n), ['Act A']);
+});
+
+test('rows: predicting is enough — a result is not required to be listed', () => {
+  // Gating on `settled` instead would empty the table for the whole of
+  // matchday one, when everyone has predictions and nothing has finished.
+  const users = {
+    a: { forename: 'Early', surnameInitial: 'A', teamId: '1', teamName: 'T', crestUrl: '', registeredAt: 1000 },
+  };
+  const preds = { a: { '2026-09-05': { m4: { home: 1, away: 0, submittedAt: 2000 } } } };
+  const rows = lb.buildRows(users, preds, MATCHES, { kind: 'season' }, NOW);
+  assert.deepEqual(rows.map((r) => [r.n, r.r, r.e, r.s]), [['Early A', 0, 0, 0]]);
+});
+
+test('rows: level pegging still breaks to the most recent activity', () => {
+  // Both have predicted, so both are listed; the tiebreak is what is under
+  // test here. Newest activity first, so a table of noughts is not A-Z.
+  const users = {
+    old: { forename: 'Old', surnameInitial: 'O', teamId: '1', teamName: 'T', crestUrl: '', registeredAt: 8000 },
+    act: { forename: 'Act', surnameInitial: 'A', teamId: '1', teamName: 'T', crestUrl: '', registeredAt: 1000 },
+  };
+  const preds = {
+    old: { '2026-09-05': { m4: { home: 2, away: 0, submittedAt: 8500 } } },
+    act: { '2026-09-05': { m4: { home: 1, away: 0, submittedAt: 9999 } } },
+  };
   const rows = lb.buildRows(users, preds, MATCHES, { kind: 'season' }, NOW);
   assert.deepEqual(rows.map((r) => r.n), ['Act A', 'Old O']);
 });
@@ -256,14 +286,15 @@ test('locks: a rescheduled fixture moves its cutoff with it', () => {
 // joined in November did not score nothing in October, they were absent, and
 // a row of zeroes reads as a failure rather than an absence.
 
-test('season: a registered fan with nothing settled still appears', () => {
+test('season: a fan with predictions but nothing settled still appears', () => {
   const rows = lb.buildRows(USERS, PREDS, MATCHES, { kind: 'season' }, NOW);
   const dan = rows.find((r) => r.n === 'Dan E');
   assert.ok(dan, 'Dan predicted only an unplayed match and should still be listed');
   assert.deepEqual([dan.r, dan.e, dan.s], [0, 0, 0]);
 });
 
-test('season: everyone registered is listed, once each', () => {
+test('season: everyone who has predicted is listed, once each', () => {
+  // Every fixture fan here has predicted, so all four are expected.
   const rows = lb.buildRows(USERS, PREDS, MATCHES, { kind: 'season' }, NOW);
   assert.equal(rows.length, Object.keys(USERS).length);
   assert.equal(new Set(rows.map((r) => r.h)).size, rows.length);
