@@ -30,8 +30,17 @@ canonical template at `system/_template/index.html`.
    Don't overwrite.
 
 3. **Copy the template.** Use `Bash cp -r system/_template <slug>` and
-   then remove `<slug>/README.md` and `<slug>/.lint-skip` (they're for
-   the template itself, not per-tool).
+   then remove `<slug>/README.md`, `<slug>/.lint-skip` and
+   `<slug>/.lint-waivers` (they're for the template itself, not per-tool).
+
+   `cp -r` copies dotfiles, so all three come across. `.lint-waivers`
+   matters most: `lint-tools.sh` only ever reads the copy at
+   `system/_template/.lint-waivers`, so a duplicate inside a tool
+   directory is inert — which is exactly what makes it dangerous. It
+   looks like a per-tool waiver list, so someone eventually adds a
+   waiver to it and cannot work out why the lint ignored them.
+   Verify with `git status --untracked-files=all` before you finish;
+   nothing but `index.html` should be new.
 
 4. **Find-replace placeholders** in `<slug>/index.html` using `Edit`
    with `replace_all: true`:
