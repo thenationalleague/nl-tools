@@ -11,7 +11,8 @@
      - RTDB (shared nl-widgets project, named Firebase app):
          users/{jwtId}
          motm/{jwtId}/{matchId}  -> { playerId, playerName, teamId, note, submittedAt }
-     - Voting window: opens at FULL TIME (NLS matchPeriod), closes KO+24h.
+     - Voting window: opens at FULL TIME (NLS matchPeriod), closes 23:59
+       UK on matchday+1 — Saturday's games run until Sunday night.
        A match that never reaches full time never opens for voting.
      - Nothing is written to users/{jwtId}: that node is SHARED with the
        Score Predictor, which locks a club there for the season.
@@ -42,6 +43,25 @@
      own (a date in May 2026 loads 2025/26), refetching fixtures.
 
      Changelog:
+       09/08/2026  v2.16 Nominations now close at 23:59 UK on the day
+                         after the matchday, rather than 24 hours after
+                         kick-off. A matchday has one deadline: a 12:30
+                         Saturday game used to shut at lunchtime on
+                         Sunday and a 17:20 one at twenty past five, so
+                         two games on the same day closed five hours
+                         apart and neither at a time worth announcing.
+                         Saturday's football now runs until Sunday night
+                         whatever time it kicked off.
+                         The row label follows: while the deadline is
+                         more than six hours off it names it ("Closes
+                         Sunday 23:59") and only counts down near the
+                         end, because relSoon rendered most of a
+                         33-hour window as "in 1d".
+                         Deadline arithmetic is covered by
+                         tests/motm-vote-window.test.mjs, both clock
+                         changes included — the DST cases are not
+                         exercised until the clocks go, by which point
+                         the widget is in front of fans.
        02/08/2026  v2.15 App Check site key set, so attestation is
                          live. Monitor mode only — enforcement is
                          still off in the console, so an unattested
@@ -1078,9 +1098,16 @@
     return /^\d{4}$/.test(v || '') ? Number(v) : null;
   }
 
-  // Voting opens at FULL TIME and closes 24h after kick-off. A match that
-  // never reaches full time never opens for voting at all.
-  var VOTE_CLOSE_MIN = 24 * 60;
+  // Voting opens at FULL TIME and closes at 23:59:59 UK time on the day after
+  // the match's own matchday — a Saturday game stays open until Sunday night
+  // whatever time it kicked off. A match that never reaches full time never
+  // opens for voting at all.
+  //
+  // It was KO+24h, which made the deadline a function of kick-off time: a
+  // 12:30 Saturday game shut at lunchtime on Sunday and a 17:20 one at
+  // twenty past five, so two games on the same matchday closed five hours
+  // apart and neither closed at a time anybody could remember. A matchday
+  // has one deadline now.
   // Past this, an in-play matchPeriod is not believed — an abandoned match
   // or a stalled feed would otherwise sit at "Live" forever.
   var STALE_LIVE_MIN = 240;
@@ -1216,6 +1243,9 @@
            'onerror="this.onerror=null;this.style.visibility=\'hidden\';">';
   }
   // Compact "in 1h 23m" / "in 45m" style countdown
+  function fmtBSTWeekday(d) {
+    return d ? d.toLocaleDateString('en-GB', { weekday: 'long', timeZone: 'Europe/London' }) : '';
+  }
   function relSoon(ms) {
     if (ms <= 0) return 'now';
     var mins = Math.round(ms / 60000);
@@ -1317,12 +1347,42 @@
 
   // ---------- which match are we voting on? ----------
   // There is no date picker. At most one of your club's matches can be open
-  // for voting at a time (full time, within 24h of kick-off), so the widget
+  // for voting at a time (full time, until the end of the following day), so the widget
   // simply finds it. Outside that window there is nothing to choose between,
   // so the UI explains the window instead of offering navigation.
   function bstDateOf(d) {
     if (!d) return '';
     return d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+  }
+
+  /* The inverse of bstDateOf: a London wall-clock midnight as an instant.
+     Date.UTC gives the moment that wall time would be if London were UTC;
+     correcting by the offset London actually had then lands on the real one.
+
+     Twice, because the first correction can itself land the other side of a
+     DST boundary — the last Sunday in October, within an hour of 02:00, is
+     the case a single pass gets wrong. Cheap enough to just always do. */
+  function londonOffsetMs(t) {
+    var f = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/London', hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit'
+    }).formatToParts(new Date(t)).reduce(function (a, p) { a[p.type] = p.value; return a; }, {});
+    return Date.UTC(f.year, f.month - 1, f.day, f.hour % 24, f.minute, f.second) - t;
+  }
+  function londonMidnight(y, mo, d) {
+    var guess = Date.UTC(y, mo - 1, d);          // day overflow is handled for us
+    return guess - londonOffsetMs(guess - londonOffsetMs(guess));
+  }
+
+  /* End of the day after the match's matchday: 23:59:59.999 UK, expressed as
+     the millisecond before midnight opening matchday+2. Saturday's games,
+     any kick-off, close just shy of Monday morning. */
+  function voteCloseAt(m) {
+    var md = bstDateOf(koOf(m));
+    if (!md) return null;
+    var p = md.split('-');
+    return new Date(londonMidnight(Number(p[0]), Number(p[1]), Number(p[2]) + 2) - 1);
   }
   function votableMatch() {
     var now = simNow();
@@ -1379,8 +1439,8 @@
       // feed once we are well past any plausible finish.
       return diffMin > STALE_LIVE_MIN ? 'unresolved' : 'live';
     }
-    if (diffMin < VOTE_CLOSE_MIN) return 'voting';   // full time -> KO+24h
-    return 'closed';
+    var close = voteCloseAt(m);
+    return (close && now < close) ? 'voting' : 'closed';
   }
   // Season actually in force, in priority order:
   //   1. ?season=YYYY — explicit, always wins
@@ -1865,7 +1925,7 @@
     }
     return '<div class="nlsm__windowcard">' +
       '<h2>Nominations are closed</h2>' +
-      '<p>Pick your candidates for Team of the Week for 24 hours after a match.</p>' +
+      '<p>Pick your candidates for Team of the Week from full time until the end of the next day.</p>' +
       list +
     '</div>';
   }
@@ -1874,7 +1934,7 @@
     var a = m.attributes;
     var s = stateOf(m, now);
     var ko = koOf(m);
-    var voteClose = ko ? new Date(ko.getTime() + VOTE_CLOSE_MIN * 60000) : null;
+    var voteClose = voteCloseAt(m);
     var existing = state.myVotes[m.id];
     var draft    = state.drafts[m.id];
     var editing  = state.editing[m.id];
@@ -1895,7 +1955,15 @@
              '<span class="nlsm__lock">Opens at full time</span>';
       rowMod = ' is-void';
     } else if (s === 'voting') {
-      var closesIn = relSoon(voteClose - now);
+      /* Name the deadline while it is far off, count down once it is near.
+         The window now runs to a fixed 23:59, so relSoon rendered most of it
+         as "in 1d" — a worse answer than "Sunday 23:59" when the time is
+         knowable. "Sunday 23:59" is the worse answer at twenty past eleven,
+         hence the switch. */
+      var msLeft = voteClose - now;
+      var closesIn = msLeft > 6 * 3600e3
+        ? fmtBSTWeekday(voteClose) + ' 23:59'
+        : relSoon(msLeft);
       meta = '<span class="nlsm__votelbl">Nominations open</span>' +
              '<span class="nlsm__countdown">Closes ' + $h(closesIn) + '</span>';
       rowMod = ' is-voting';

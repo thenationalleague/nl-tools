@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fan Widgets
-  Version: v0.1 (07/08/2026)
+  Version: v0.4 (09/08/2026)
   File: /fan-widgets/index.html
 
   Registrations, predictions and Team of the Week picks from the fan-facing widgets on thenationalleague.org.uk.
@@ -97,6 +97,18 @@
        NL_CHANGELOG[0].version. v0.2 and v0.3 were written as extra items
        inside the v0.1 entry, so the badge said v0.1 however much shipped. */
     window.NL_CHANGELOG = [
+      {
+        date: '09/08/2026',
+        version: 'v0.4',
+        items: [
+          'Team of the Week is one ranked list of players per division, with the club on the line beside them — so "who is being nominated most this weekend" reads straight off the page. Grouping by club buried exactly that: five nominations at one club and four at another sat in separate boxes with no ranking between them.',
+          'Superseded: the first cut of this grouped date → division → club → player. It was grouped by fixture, which answers "who stood out in this game" — a different question, and one that split a player nominated across two fixtures into two tallies. Club is the axis that holds a squad together, and "who do they play for" is half of what the tab is for.',
+          'A player is identified by NLS playerID, which is stable across fixtures — so a player nominated in three games this weekend is one row, not three. Deliberately not the name: motm.html derives that from knownName || customKnownName || firstName + lastName, so the same player can render differently once the feed fills in a field that was empty before.',
+          'Individual votes are the deep dive now: the player line carries the name and the count, and the game plus the fans\' notes sit behind the toggle.',
+          'No raw match ids anywhere. A fixture missing from the feed says "Fixture unavailable" rather than printing g2660046.',
+          'An unmatched fixture is now treated as a fault rather than a category. A fan can only nominate from a fixture the widget surfaced, and this tool fetches the same three competitions for the same season, so every vote should resolve — if one does not, the fixture list here is short and the page says so. The fetch no longer swallows failed pages silently either. The bucket is labelled "Not matched to a fixture" and sorts last, where it used to say "Date unknown" and sort above every real matchday.'
+        ]
+      },
       {
         date: '09/08/2026',
         version: 'v0.3',
@@ -203,17 +215,67 @@
     border-bottom: 1px solid var(--border);
   }
 
-  /* A player and their vote count, with what people actually said beneath —
-     the notes are the reason to open a match at all. */
-  .fw-vote { padding: 8px 0; border-bottom: 1px solid var(--border); }
-  .fw-vote:last-child { border-bottom: 0; }
-  .fw-vote__head { display: flex; align-items: baseline; gap: 10px; }
-  .fw-vote__name { font-weight: 800; font-variation-settings: 'wght' 800; }
-  .fw-vote__count {
-    margin-left: auto;
+  /* CANON CANDIDATE: an amber "something is not right, here is what" banner
+     is hand-rolled in at least four tools already — club-contacts has two
+     identical copies (.ri-dupnote, .ri-softnote), plus travel-planner's
+     .tp__jbanner--warn and attendance. Well past the promote-on-second-use
+     rule, but promoting it means bumping ?v= across the template and every
+     tool head in lockstep, which does not belong in this change. Local for
+     now, flagged so it gets tracked.
+
+     Full border rather than a left stripe: the side-accent-on-a-card is a
+     pattern the design lint flags, and there is no reason to argue with it. */
+  .fw-warn {
+    background: var(--amber-light);
+    border: 1px solid var(--amber);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    color: var(--amber-deep);
+    font-size: var(--text-sm);
+    line-height: 1.45;
+  }
+
+  /* Players ranked across the division, in one card. */
+  .fw-players {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+
+  /* One line per player: name, club, count. Everything needed to answer
+     "who is being nominated, and who for" without opening anything. */
+  .fw-player { border-bottom: 1px solid var(--border); }
+  .fw-player:last-child { border-bottom: 0; }
+  .fw-player > summary {
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 14px; cursor: pointer; list-style: none;
+  }
+  .fw-player > summary::-webkit-details-marker { display: none; }
+  .fw-player > summary::before {
+    content: '';
+    flex: none; width: 0; height: 0;
+    border-left: 5px solid var(--text-muted);
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    transition: transform .15s ease;
+  }
+  .fw-player[open] > summary::before { transform: rotate(90deg); }
+  .fw-player > summary:hover { background: var(--off-white); }
+  .fw-player > summary:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .fw-player__name { font-weight: 800; font-variation-settings: 'wght' 800; }
+  .fw-player__crest { width: 18px; height: 18px; object-fit: contain; flex: none; margin-left: 4px; }
+  .fw-player__club { color: var(--text-muted); font-size: var(--text-sm); }
+  .fw-player__spacer { flex: 1; }
+  .fw-player__count {
     font-variant-numeric: tabular-nums;
     font-weight: 900; font-variation-settings: 'wght' 900;
   }
+  .fw-player__body { padding: 4px 14px 12px 33px; }
+  .fw-player__game { margin-bottom: 6px; }
+
   .fw-note {
     margin: 6px 0 0; padding: 6px 0 6px 12px;
     border-left: 2px solid var(--border);
@@ -297,7 +359,8 @@
      nodes are held in memory and re-rendered on any change, because they are
      cross-referenced: a fan's row needs their predictions and their Team of
      the Week picks alongside their registration. */
-  var state = { users: null, preds: {}, motm: {}, motmNames: {}, q: '', fixtures: {} };
+  var state = { users: null, preds: {}, motm: {}, motmNames: {}, q: '', fixtures: {},
+               fixturesPartial: false };
 
   var syncEl   = document.getElementById('fwSync');
   var statsEl  = document.getElementById('fwStats');
@@ -468,8 +531,11 @@
               '/matches/?competitionID=' + compId + '&seasonID=' + seasonId +
               '&sort=kickOffDateUTC&page.number=' + page + '&page.size=100';
     return fetch(url)
-      .then(function (r) { return r.ok ? r.json() : { data: [] }; })
-      .catch(function () { return { data: [] }; })
+      .then(function (r) {
+        if (!r.ok) { state.fixturesPartial = true; return { data: [] }; }
+        return r.json();
+      })
+      .catch(function () { state.fixturesPartial = true; return { data: [] }; })
       .then(function (json) {
         var rows = (json && json.data) || [];
         rows.forEach(function (m) {
@@ -510,9 +576,12 @@
     var f = state.fixtures[matchId];
     var mid = '<span class="fw-fix__mid' + (middle ? ' is-score' : '') + '">' +
               NL.escHtml(middle || 'v') + '</span>';
+    /* No raw match id, ever. g2660046 tells nobody anything, and it was the
+       fallback here — so any fixture missing from the feed leaked one. If it
+       cannot be resolved the row says so and keeps its shape. */
     if (!f) {
-      return '<span class="fw-fix"><span class="fw-fix__code">' +
-             NL.escHtml(matchId) + '</span>' + mid + '</span>';
+      return '<span class="fw-fix"><span class="fw-fix__code text-secondary">' +
+             'Fixture unavailable</span></span>';
     }
     return '<span class="fw-fix">' + sideHTML(f.home) + mid + sideHTML(f.away) + '</span>';
   }
@@ -636,16 +705,19 @@
   }
 
   /* ---- Team of the Week -------------------------------------------------
-     Grouped the way the job is actually done: by matchday, then by division,
-     then by fixture, with the votes for each player counted together and the
-     fans' notes underneath.
+     Grouped date -> division -> club -> player, because that is the question
+     being asked of it: on this matchday, who is being nominated repeatedly,
+     and who do they play for.
 
-     One row per fan answered "who voted" — which nobody needs. Picking a Team
-     of the Week means asking "who did people rate in this game, and what did
-     they say", and that requires the votes batched rather than scattered
-     across the fans who cast them. */
-  function totwByMatch() {
-    var byMatch = {};
+     It was grouped by fixture, which answers "who stood out in this game" —
+     a different question, and one that splits a player nominated across two
+     fixtures into two separate tallies. Club is the axis that holds a squad
+     together.
+
+     Individual votes are the deep dive rather than the headline: they sit
+     behind the player, with the note and whoever wrote it. */
+  function totwByPlayer() {
+    var days = {};
     Object.keys(state.motm || {}).forEach(function (jwtId) {
       var votes = state.motm[jwtId] || {};
       var u = (state.users && state.users[jwtId]) || {};
@@ -654,18 +726,33 @@
                 'Anonymous';
       Object.keys(votes).forEach(function (mid) {
         var v = votes[mid] || {};
-        var m = byMatch[mid] || (byMatch[mid] = { id: mid, total: 0, players: {} });
-        var key = v.playerId || v.playerName || 'unknown';
-        var pl = m.players[key] || (m.players[key] = {
-          name: v.playerName || v.playerId || 'Unknown player',
-          teamId: v.teamId || '', votes: 0, notes: []
+        var day  = matchdayOf(mid) || 'unknown';
+        var comp = (state.fixtures[mid] && COMPS[state.fixtures[mid].comp]) || 'Other';
+        var d = days[day] || (days[day] = {});
+        var c = d[comp]   || (d[comp] = {});
+        /* Keyed on playerId — NLS's playerID, carried through from the lineup
+           feed unchanged and stable across fixtures, so a player nominated in
+           three games this weekend is one row.
+
+           Explicitly NOT the name: motm.html derives that from knownName ||
+           customKnownName || firstName + lastName, so the same player renders
+           differently the moment NLS fills in a field that was empty before.
+           The name is the volatile half of this record, not the id. */
+        var pk = v.playerId || v.playerName || 'unknown';
+        var pl = c[pk] || (c[pk] = {
+          name: 'Unknown player', teamId: v.teamId || '',
+          votes: 0, notes: [], games: {}
         });
+        /* Last non-empty name wins: same person, same id, but the feed may
+           have filled in a better name since an earlier nomination. */
+        if (v.playerName) pl.name = v.playerName;
+        if (v.teamId) pl.teamId = v.teamId;
         pl.votes += 1;
-        m.total += 1;
+        pl.games[mid] = true;
         if (v.note) pl.notes.push({ fan: fan, note: v.note });
       });
     });
-    return byMatch;
+    return days;
   }
 
   function matchdayOf(mid) {
@@ -680,69 +767,98 @@
     var f = state.fixtures[mid];
     if (!f) return '';
     var h = f.home && f.home.score, a = f.away && f.away.score;
-    return (h == null || a == null) ? '' : h + '–' + a;
+    return (h == null || a == null) ? '' : h + '\u2013' + a;
+  }
+
+  /* Full club name, not the three-letter code. The code is right beside a
+     crest in a fixture line, where the two clubs give each other context;
+     as a standalone heading answering "who do they play for" it is a puzzle. */
+  function clubMeta(teamId) {
+    var meta = teamId ? NL.clubs.byOpta(teamId) : null;
+    var name = (meta && meta.name) || '';
+    return { name: name || 'Club unknown', crest: name ? NL.clubs.crestUrl(name, 'thumb') : '' };
   }
 
   function renderTotw() {
     if (!state.users) return;
-    var byMatch = totwByMatch();
-    var ids = Object.keys(byMatch);
-    if (!ids.length) {
+    var days = totwByPlayer();
+
+    var dayKeys = Object.keys(days).filter(function (d) { return d !== 'unknown'; })
+      .sort().reverse();
+    if (days.unknown) dayKeys.push('unknown');
+
+    if (!dayKeys.length) {
       totwEl.innerHTML = '<div class="empty-state">No Team of the Week votes yet. ' +
-        'Nominations open at full time and run for 24 hours.</div>';
+        'Nominations open at full time and run until 23:59 the next day.</div>';
       return;
     }
 
-    /* matchday -> competition -> matches. A fixture whose id is not in the
-       feed still shows, under "Other", rather than vanishing from a tally
-       someone is about to act on. */
-    var days = {};
-    ids.forEach(function (mid) {
-      var day = matchdayOf(mid) || 'unknown';
-      var comp = (state.fixtures[mid] && COMPS[state.fixtures[mid].comp]) || 'Other';
-      var d = days[day] || (days[day] = {});
-      (d[comp] || (d[comp] = [])).push(byMatch[mid]);
-    });
+    /* A fan can only nominate from a fixture the widget put in front of them,
+       and both sides fetch the same three competitions for the same season —
+       so every vote should resolve. If one does not, the fixture list HERE is
+       incomplete, and that is worth saying rather than filing under a
+       neutral-sounding heading. */
+    var stray = days.unknown
+      ? Object.keys(days.unknown).reduce(function (n, comp) {
+          return n + Object.keys(days.unknown[comp]).reduce(function (t, k) {
+            return t + days.unknown[comp][k].votes;
+          }, 0);
+        }, 0)
+      : 0;
+    var warn = (stray || state.fixturesPartial)
+      ? '<div class="fw-warn">' +
+          (state.fixturesPartial
+            ? 'The fixture list did not load in full, so some nominations cannot be matched to a game. '
+            : '') +
+          (stray
+            ? stray + ' nomination' + (stray === 1 ? '' : 's') + ' could not be matched to a fixture. '
+            : '') +
+          'Reload to refetch; if it persists the fixture feed is short of what the fan widget offered.' +
+        '</div>'
+      : '';
 
-    var dayKeys = Object.keys(days).sort().reverse();
-    totwEl.innerHTML = dayKeys.map(function (day) {
-      var label = day === 'unknown' ? 'Date unknown' : NL.formatDateShort(day);
+    totwEl.innerHTML = warn + dayKeys.map(function (day) {
+      var label = day === 'unknown' ? 'Not matched to a fixture' : NL.formatDateShort(day);
       var comps = days[day];
       return '<div class="section-head"><h2>' + NL.escHtml(label) + '</h2></div>' +
         ['National', 'North', 'South', 'Other'].filter(function (c) { return comps[c]; })
           .map(function (comp) {
+            /* One ranked list across the division, not a block per club.
+               Grouping by club buried the ranking: five nominations at one
+               club and four at another sat in separate boxes, so "who is
+               being nominated most this weekend" could not be read off the
+               page at all. The club travels with the player instead. */
+            var players = Object.keys(comps[comp]).map(function (k) { return comps[comp][k]; })
+              .sort(function (a, b) { return b.votes - a.votes || a.name.localeCompare(b.name); });
             return '<div class="fw-daylabel text-secondary">' + NL.escHtml(comp) + '</div>' +
-              comps[comp].sort(function (a, b) { return b.total - a.total; })
-                .map(matchCardHTML).join('');
+                   '<div class="fw-players">' + players.map(playerHTML).join('') + '</div>';
           }).join('');
     }).join('');
   }
 
-  function matchCardHTML(m) {
-    var players = Object.keys(m.players).map(function (k) { return m.players[k]; })
-      .sort(function (a, b) { return b.votes - a.votes || a.name.localeCompare(b.name); });
-    var score = scoreOf(m.id);
-    var notes = players.reduce(function (n, p) { return n + p.notes.length; }, 0);
-
-    return '<details class="fw-fan">' +
+  /* Name and club on the line itself — "who is this and who do they play for"
+     answered without opening anything. The game and the notes are the evidence
+     behind it. */
+  function playerHTML(p) {
+    var club = clubMeta(p.teamId);
+    return '<details class="fw-player">' +
       '<summary>' +
-        fixtureHTML(m.id, score) +
-        '<span class="fw-fan__spacer"></span>' +
-        '<span class="pill">' + m.total + ' vote' + (m.total === 1 ? '' : 's') + '</span>' +
-        (notes ? '<span class="pill">' + notes + ' note' + (notes === 1 ? '' : 's') + '</span>' : '') +
+        '<span class="fw-player__name">' + NL.escHtml(p.name) + '</span>' +
+        (club.crest ? '<img class="fw-player__crest" src="' + NL.escHtml(club.crest) + '" alt=""' + CREST_FALLBACK + '>' : '') +
+        '<span class="fw-player__club">' + NL.escHtml(club.name) + '</span>' +
+        '<span class="fw-player__spacer"></span>' +
+        (p.notes.length
+          ? '<span class="pill">' + p.notes.length + ' note' + (p.notes.length === 1 ? '' : 's') + '</span>'
+          : '') +
+        '<span class="fw-player__count">' + p.votes + '</span>' +
       '</summary>' +
-      '<div class="fw-fan__body">' +
-        players.map(function (p) {
-          return '<div class="fw-vote">' +
-            '<div class="fw-vote__head">' +
-              '<span class="fw-vote__name">' + NL.escHtml(p.name) + '</span>' +
-              '<span class="fw-vote__count">' + p.votes + '</span>' +
-            '</div>' +
-            p.notes.map(function (n) {
-              return '<blockquote class="fw-note">' + NL.escHtml(n.note) +
-                '<cite>' + NL.escHtml(n.fan) + '</cite></blockquote>';
-            }).join('') +
-          '</div>';
+      '<div class="fw-player__body">' +
+        Object.keys(p.games).map(function (mid) {
+          return '<div class="fw-player__game">' + fixtureHTML(mid, scoreOf(mid)) + '</div>';
+        }).join('') +
+        p.notes.map(function (n) {
+          return '<blockquote class="fw-note">' + NL.escHtml(n.note) +
+            '<cite>' + NL.escHtml(n.fan) + '</cite></blockquote>';
         }).join('') +
       '</div>' +
     '</details>';
