@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fan Widgets
-  Version: v0.4 (09/08/2026)
+  Version: v0.5 (09/08/2026)
   File: /fan-widgets/index.html
 
   Registrations, predictions and Team of the Week picks from the fan-facing widgets on thenationalleague.org.uk.
@@ -99,6 +99,14 @@
     window.NL_CHANGELOG = [
       {
         date: '09/08/2026',
+        version: 'v0.5',
+        items: [
+          'Fixtures are fetched for the current season AND the one before it. motm/ and predictions/ are keyed by matchId with no season in the path, so last season\'s nominations sit in the same tree as this season\'s — and fetching only the current season left every one of them unresolvable. Since v0.4 treats an unresolved fixture as a fault, the tab would have shown a permanent warning blaming an incomplete feed for data that was simply older than the window being fetched.',
+          'The season falls back to the same July boundary the widgets and the leaderboard job use, rather than a hardcoded year.'
+        ]
+      },
+      {
+        date: '09/08/2026',
         version: 'v0.4',
         items: [
           'Team of the Week is one ranked list of players per division, with the club on the line beside them — so "who is being nominated most this weekend" reads straight off the page. Grouping by club buried exactly that: five nominations at one club and four at another sat in separate boxes with no ranking between them.',
@@ -106,7 +114,7 @@
           'A player is identified by NLS playerID, which is stable across fixtures — so a player nominated in three games this weekend is one row, not three. Deliberately not the name: motm.html derives that from knownName || customKnownName || firstName + lastName, so the same player can render differently once the feed fills in a field that was empty before.',
           'Individual votes are the deep dive now: the player line carries the name and the count, and the game plus the fans\' notes sit behind the toggle.',
           'No raw match ids anywhere. A fixture missing from the feed says "Fixture unavailable" rather than printing g2660046.',
-          'An unmatched fixture is now treated as a fault rather than a category. A fan can only nominate from a fixture the widget surfaced, and this tool fetches the same three competitions for the same season, so every vote should resolve — if one does not, the fixture list here is short and the page says so. The fetch no longer swallows failed pages silently either. The bucket is labelled "Not matched to a fixture" and sorts last, where it used to say "Date unknown" and sort above every real matchday.'
+          'An unmatched fixture is now treated as a fault rather than a category. A fan can only nominate from a fixture the widget surfaced, so within the seasons this tool fetches, every vote should resolve — if one does not, the fixture list here is short and the page says so. The fetch no longer swallows failed pages silently either. The bucket is labelled "Not matched to a fixture" and sorts last, where it used to say "Date unknown" and sort above every real matchday.'
         ]
       },
       {
@@ -513,12 +521,40 @@
      showed before, rather than the page refusing to render. */
   var COMPS = { 89: 'National', 373: 'North', 372: 'South' };
 
-  function loadFixtures() {
+  /* Current season AND the one before it.
+
+     motm/ and predictions/ are keyed by matchId with no season anywhere in the
+     path, so last season's nominations sit in the same tree as this season's.
+     Fetching only the current season left every one of them unresolvable —
+     and since an unresolved fixture is now treated as a fault, the tab would
+     have shown a permanent warning blaming an incomplete feed for data that is
+     simply older than the window being fetched.
+
+     Two seasons rather than all of them: it is twice the requests for a
+     superadmin page that loads occasionally, and it covers the case that
+     actually exists. If nominations from three seasons back ever matter, this
+     wants a season picker, not a bigger fetch. */
+  function seasonsToFetch() {
     var meta = NL.clubs.meta && NL.clubs.meta();
-    var seasonId = (meta && meta.seasons && meta.seasons.current) || 2026;
-    return Promise.all(Object.keys(COMPS).map(function (c) {
-      return fetchComp(Number(c), seasonId);
-    }));
+    var cur = Number((meta && meta.seasons && meta.seasons.current) ||
+                     deriveSeasonId(new Date()));
+    return [cur, cur - 1];
+  }
+
+  /* Same July boundary the widgets and the leaderboard job use — a season is
+     named for the calendar year it starts in. */
+  function deriveSeasonId(d) {
+    return (d.getMonth() + 1) >= 7 ? d.getFullYear() : d.getFullYear() - 1;
+  }
+
+  function loadFixtures() {
+    var jobs = [];
+    seasonsToFetch().forEach(function (seasonId) {
+      Object.keys(COMPS).forEach(function (c) {
+        jobs.push(fetchComp(Number(c), seasonId));
+      });
+    });
+    return Promise.all(jobs);
   }
 
   /* Every page, not just the first. The first cut fetched page 1 of each
