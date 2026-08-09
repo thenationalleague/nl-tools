@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fan Widgets
-  Version: v0.5 (09/08/2026)
+  Version: v0.6 (09/08/2026)
   File: /fan-widgets/index.html
 
   Registrations, predictions and Team of the Week picks from the fan-facing widgets on thenationalleague.org.uk.
@@ -97,6 +97,15 @@
        NL_CHANGELOG[0].version. v0.2 and v0.3 were written as extra items
        inside the v0.1 entry, so the badge said v0.1 however much shipped. */
     window.NL_CHANGELOG = [
+      {
+        date: '09/08/2026',
+        version: 'v0.6',
+        items: [
+          'Nominations with no note are visible as well as counted. They always arrived and always counted towards the number on the player line, but the expanded view rendered only the quoted ones — so opening a player showed nothing for them, which reads as "every nomination we have came with a note". The body now accounts for them explicitly.',
+          'They cannot be attributed, and that is deliberate: motm.html writes the fan\'s name to motm-names only alongside a note, because writing a note is the act of consenting to be quoted. Counted, not named.',
+          'The stats tile counted nominatORS while calling them votes — Object.keys(motm).length is the number of fans who voted, so fifty fans casting a hundred and twenty nominations showed as fifty. It counts nominations now.'
+        ]
+      },
       {
         date: '09/08/2026',
         version: 'v0.5',
@@ -283,6 +292,7 @@
   }
   .fw-player__body { padding: 4px 14px 12px 33px; }
   .fw-player__game { margin-bottom: 6px; }
+  .fw-player__silent { margin-top: 6px; font-size: var(--text-xs); }
 
   .fw-note {
     margin: 6px 0 0; padding: 6px 0 6px 12px;
@@ -641,7 +651,7 @@
       stat('Fans registered', ids.length) +
       stat('Have predicted', Object.keys(state.preds).length) +
       stat('Predictions', totalPreds) +
-      stat('Team of the Week votes', Object.keys(state.motm).length);
+      stat('Team of the Week noms', countNoms(state.motm));
 
     var clubs = Object.keys(byClub).map(function (k) { return byClub[k]; })
       .sort(function (a, b) { return b.fans - a.fans || a.name.localeCompare(b.name); });
@@ -656,6 +666,17 @@
 
     renderFans();
     renderTotw();
+  }
+
+  /* Nominations, not nominators. This tile read Object.keys(state.motm).length
+     — the number of FANS who had voted — under the label "votes". Fifty fans
+     casting a hundred and twenty nominations showed as fifty, which is exactly
+     the arithmetic that makes you wonder whether nominations are going
+     missing. */
+  function countNoms(motm) {
+    return Object.keys(motm || {}).reduce(function (n, jwtId) {
+      return n + Object.keys(motm[jwtId] || {}).length;
+    }, 0);
   }
 
   function countPreds(byDay) {
@@ -896,6 +917,23 @@
           return '<blockquote class="fw-note">' + NL.escHtml(n.note) +
             '<cite>' + NL.escHtml(n.fan) + '</cite></blockquote>';
         }).join('') +
+        /* Nominations with no note used to render nothing at all. They counted
+           towards the number on the summary line and then vanished, so opening
+           a player showed only the quoted ones — which reads as "every
+           nomination we have came with a note" when the truth is that the
+           silent ones simply had nowhere to appear.
+
+           They cannot be named: motm.html writes the fan's name to
+           motm-names only alongside a note, because writing a note is the act
+           of consenting to be quoted. So they are counted, not attributed. */
+        (p.votes > p.notes.length
+          ? '<div class="fw-player__silent text-secondary">' +
+              (p.votes - p.notes.length) + ' nomination' +
+              (p.votes - p.notes.length === 1 ? '' : 's') +
+              ' with no note' +
+              (p.notes.length ? '' : ' — nobody wrote anything for this player') +
+            '</div>'
+          : '') +
       '</div>' +
     '</details>';
   }
