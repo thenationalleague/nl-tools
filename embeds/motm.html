@@ -43,6 +43,27 @@
      own (a date in May 2026 loads 2025/26), refetching fixtures.
 
      Changelog:
+       09/08/2026  v2.17 The widget now reads the SAME gate the rules
+                         enforce. v2.16 moved the window server-side,
+                         where an entry in motm-windows/<matchId> is
+                         written by the leaderboard job once a match has
+                         finished — but the widget still opened voting
+                         off the NLS matchPeriod. The job runs every
+                         quarter of an hour on a best-effort scheduler,
+                         so for some minutes after full time the widget
+                         would take a nomination the database then
+                         refused, and the fan saw a raw
+                         PERMISSION_DENIED for something we had told
+                         them was open.
+                         motm-windows is readable now (match ids and
+                         timestamps, nothing about anybody) and the
+                         widget gates on it, so there is no gap left to
+                         get wrong. A finished match with no entry yet
+                         reads "Full time / Nominations open shortly"
+                         and shows no picker, rather than claiming no
+                         match is open and naming the next fixture.
+                         A denied write says nominations are not open
+                         rather than printing the Firebase code.
        09/08/2026  v2.16 Nominations now close at 23:59 UK on the day
                          after the matchday, rather than 24 hours after
                          kick-off. A matchday has one deadline: a 12:30
@@ -1279,6 +1300,7 @@
     allMatches: [],
     matches: [],        // user-team-only matches for selected matchday (usually 1)
     registration: null,
+    windows: null,      // { matchId: closeEpoch } — the server's own gate; null until loaded
     myVotes: {},        // { matchId: vote }
     drafts: {},         // { matchId: playerId } — pending unsaved pick
     editing: {},        // { matchId: true } — re-open submitted vote
@@ -1388,8 +1410,13 @@
     var now = simNow();
     var reg = state.registration;
     if (!reg) return null;
+    /* 'opening' counts as findable, not just 'voting'. A fan whose match has
+       just finished should see it sitting there saying "open shortly" — if
+       only 'voting' qualified, the widget would tell them no match is open
+       and name their NEXT fixture, minutes after the one they watched. */
     var open = (state.allMatches || []).filter(function (m) {
-      return isOwnTeamMatch(m, reg) && stateOf(m, now) === 'voting';
+      var st = stateOf(m, now);
+      return isOwnTeamMatch(m, reg) && (st === 'voting' || st === 'opening');
     }).sort(function (a, b) { return dateOf(b).localeCompare(dateOf(a)); });
     return open[0] || null;
   }
@@ -1439,8 +1466,21 @@
       // feed once we are well past any plausible finish.
       return diffMin > STALE_LIVE_MIN ? 'unresolved' : 'live';
     }
-    var close = voteCloseAt(m);
-    return (close && now < close) ? 'voting' : 'closed';
+
+    /* The server's gate, not ours. motm-windows/<matchId> is written by the
+       leaderboard job once a match has actually finished, and the rules refuse
+       any nomination without it — so full time in the NLS feed is NOT enough
+       to offer voting.
+
+       The job runs every quarter of an hour and GitHub's scheduler is
+       best-effort, so there is a real gap after full time where this widget
+       would happily take a nomination the database then rejects. The fan would
+       see a raw PERMISSION_DENIED for something we told them was open. Read
+       the same node the rule reads and there is no gap to get wrong. */
+    if (state.windows === null) return 'opening';        // not loaded yet
+    var close = state.windows[m.id];
+    if (close == null) return 'opening';                 // finished, job not caught up
+    return (now < close) ? 'voting' : 'closed';
   }
   // Season actually in force, in priority order:
   //   1. ?season=YYYY — explicit, always wins
@@ -1948,6 +1988,12 @@
     } else if (s === 'live') {
       meta = '<span class="nlsm__livedot" aria-hidden="true"></span><span class="nlsm__livelbl">Live</span>' +
              '<span class="nlsm__lock">Nominations open at full time</span>';
+    } else if (s === 'opening') {
+      /* Finished, but the server has not opened the window yet. Says what is
+         happening rather than showing a disabled thing with no explanation —
+         the wait is minutes, not an error. */
+      meta = '<span class="nlsm__ftlabel">Full time</span>' +
+             '<span class="nlsm__lock">Nominations open shortly</span>';
     } else if (s === 'unresolved') {
       // Kicked off long ago with no final period published — abandoned, or a
       // stalled feed. Never opens for voting; heals itself if NLS catches up.
@@ -2259,8 +2305,13 @@
     if (!pid) return;
     var m = state.matches.filter(function (x) { return x.id === mid; })[0];
     if (!m) return;
-    if (stateOf(m, simNow()) !== 'voting') {
-      showBanner('Nominations have closed for this match.', 'err');
+    var st = stateOf(m, simNow());
+    if (st !== 'voting') {
+      /* Not open and closed are different answers, and only one of them means
+         "you have missed it". */
+      showBanner(st === 'opening'
+        ? 'Nominations have not opened for this match yet — try again in a few minutes.'
+        : 'Nominations have closed for this match.', 'err');
       return;
     }
     var p = findPlayer(mid, pid);
@@ -2319,7 +2370,14 @@
         state.editing[mid] = true;
         state.pendingMid = null;
         renderFixtures();
-        showBanner('Nomination failed: ' + err.message, 'err');
+        /* PERMISSION_DENIED here means the window is shut at the server —
+           either the job has not opened it yet, or the deadline has passed.
+           Neither is something a fan can act on by reading a Firebase error
+           code, and both are ordinary rather than broken. */
+        var denied = /permission[_ ]denied/i.test(String(err && (err.code || err.message)));
+        showBanner(denied
+          ? 'Nominations are not open for this match right now. They open just after full time and close at 23:59 the next day.'
+          : 'Nomination failed: ' + err.message, 'err');
       });
   }
 
@@ -2366,6 +2424,20 @@
   // load, so there is no users/ subscription and nothing to wait for before
   // the UI can render.
   function listenAll() {
+    /* Live, not once: the entry for a match that has just finished appears
+       mid-session, and a fan sitting on the page at full time should see it
+       open without reloading. */
+    fbDb.ref('motm-windows').on('value', function (snap) {
+      state.windows = snap.val() || {};
+      renderFixtures();
+    }, function () {
+      /* Denied or offline. Empty rather than null: null means "still loading"
+         and would leave every row saying "opening shortly" forever. Empty means
+         nothing is open, which is what the rule would enforce anyway. */
+      state.windows = {};
+      renderFixtures();
+    });
+
     fbDb.ref('motm/' + state.user.id).on('value', function (snap) {
       state.myVotes = snap.val() || {};
       if (!main.hidden) {
