@@ -145,6 +145,13 @@ Object.assign(exports, require("./fan-widgets"));
 // shape and the same org-policy reason as programme.js above.
 Object.assign(exports, require("./club-directory"));
 
+// NLS → RTDB live ingester (nlsIngestTick / nlsIngestHourly). Scheduled rather
+// than triggered, and it writes to the nl-widgets database rather than this
+// project's — see functions/nls-ingester.js for both reasons. Exported here so
+// `firebase deploy --only functions` creates the two Cloud Scheduler jobs; no
+// terminal and no gcloud, which was the deciding constraint on its shape.
+Object.assign(exports, require("./nls-ingester"));
+
 exports.onFootageDeleted = onObjectDeleted(
   { bucket: BUCKET, memory: "256MiB" },
   async (event) => {
