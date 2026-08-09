@@ -100,19 +100,34 @@ function dayWindow(ymd) {
          '&to=' + encodeURIComponent(ymd + ' 23:59:59Z');
 }
 
+/* `includePopulatedDates=true` returns meta.populatedDates — every date in the
+   SEASON that has fixtures, with a count — regardless of the from/to window.
+   So one narrow request yields both today's card and the whole matchday
+   calendar, at no extra cost.
+
+   That calendar is what makes the data browsable at all. RTDB rules grant
+   reads per day (`fixtures/<comp>/<ymd>`) and never at the parent, deliberately
+   — a consumer must name the day it wants rather than subscribing to the
+   season. Correct for bandwidth and for licensing, but it means nothing can
+   discover WHICH days exist. Without this the only way to find a matchday is
+   to guess at dates. */
 async function fetchDayList(compId, seasonId, ymd) {
   const u = upstreamFor(compId);
   const rows = [];
+  let populatedDates = null;
   for (let page = 1; page <= MAX_PAGES; page++) {
     const url = u.base + '/matches/?seasonID=' + seasonId + '&competitionID=' + compId +
-                '&' + dayWindow(ymd) + '&page.number=' + page + '&page.size=' + PAGE_SIZE;
+                '&includePopulatedDates=true&' + dayWindow(ymd) +
+                '&page.number=' + page + '&page.size=' + PAGE_SIZE;
     const json = await getJson(url, 'list ' + compId);
+    const meta = (json && json.meta) || {};
+    if (page === 1 && meta.populatedDates) populatedDates = meta.populatedDates;
     const data = (json && json.data) || [];
     rows.push(...data);
-    const total = json && json.meta && json.meta.totalCount;
+    const total = meta.totalCount;
     if (data.length < PAGE_SIZE || (total != null && rows.length >= total)) break;
   }
-  return rows;
+  return { rows, populatedDates };
 }
 
 async function fetchSeasonList(compId, seasonId) {

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — NLS Monitor
-  Version: v0.1 (09/08/2026)
+  Version: v0.2 (09/08/2026)
   File: /nls-monitor/index.html
 
   Live view of the NLS → RTDB ingester: run health, today's matches, the event
@@ -42,11 +42,21 @@
   Storage (RTDB):
     nl-tools:    app-data/ops-fan-widgets/authRequests|authGrants/<uid>
                  borrowed handshake, see above
-    nl-widgets:  nls/meta/ingest              run health
-                 nls/live/index/<comp>/<ymd>  today's card
+    nl-widgets:  nls/meta/ingest              run health, incl. failureReasons
+                 nls/meta/calendar/<comp>     which days have fixtures
+                 nls/live/index/<comp>/<ymd>  the ingester's last-run day
+                 nls/fixtures/<comp>/<ymd>    any other day, from the hourly run
                  nls/events/<ymd>             the event stream
                  nls/derived/tables|scorers|coverage/<comp>
                  (nls/seen is never read — internal dedup guard)
+
+  ANY DAY, NOT JUST TODAY
+    The rules grant reads per day and never at the parent, so nothing can
+    discover which days exist — you have to name one. That is correct for
+    bandwidth and licensing and useless for browsing, so the ingester writes
+    meta/calendar/<comp> from the populatedDates NLS returns free on every list
+    request, and the day bar is driven from it. live/index only ever exists for
+    the day the ingester last ran; every other day comes from fixtures/.
 
   Access (auth-guard registry — see system/auth-guard.js):
     superadmin only. The underlying handshake refuses anyone else server-side,
@@ -117,6 +127,15 @@
         ]
       }
     ];
+    window.NL_CHANGELOG.unshift({
+      date: '09/08/2026',
+      version: 'v0.2',
+      items: [
+        'Any matchday, not just today — day bar driven by nls/meta/calendar, merging fixtures/ with live/index.',
+        'The upstream failure reason is shown on the verdict rather than pointing at Cloud Logging.',
+        'A blank day now distinguishes “no fixtures”, “not written yet” and “every fetch failed”.'
+      ]
+    });
 
     /* auth-guard fires this once the session is verified + pageWrap is
        revealed. Boot the main app from here so RTDB reads happen with a
@@ -172,6 +191,16 @@
   .verdict--bad  { background: var(--primary-50); border-color: var(--primary); }
   .verdict--bad  .verdict__dot { background: var(--primary); }
 
+  /* Day navigation. Two controls rather than one because they answer different
+     questions: the dropdown is "take me to a matchday", the date field is
+     "take me to this exact date" — including a date with no fixtures, which is
+     itself an answer worth being able to get. */
+  .daybar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
+    margin-bottom: 1rem;
+  }
+  .daybar select, .daybar input[type=date] { max-width: 16rem; }
+
   .comp-block { margin-bottom: 1.5rem; }
   .comp-block__head {
     display: flex; align-items: baseline; gap: .6rem;
@@ -225,8 +254,16 @@
 
     <div id="nmStats" class="stats" hidden></div>
 
+    <div class="daybar" id="nmDaybar" hidden>
+      <button class="btn btn--ghost btn--sm" id="nmPrev" type="button">&larr; Previous matchday</button>
+      <select id="nmDayPick" aria-label="Matchday"></select>
+      <input type="date" id="nmDayInput" aria-label="Any date">
+      <button class="btn btn--ghost btn--sm" id="nmNext" type="button">Next matchday &rarr;</button>
+      <span class="muted" id="nmDayNote"></span>
+    </div>
+
     <div class="tabs" id="nmTabs" hidden>
-      <button class="tab" data-tab="today" type="button">Today</button>
+      <button class="tab" data-tab="today" type="button">Matches</button>
       <button class="tab" data-tab="events" type="button">Events</button>
       <button class="tab" data-tab="derived" type="button">Tables &amp; scorers</button>
       <button class="tab" data-tab="raw" type="button">Raw</button>
@@ -262,13 +299,27 @@
   function todayYmd() { return new Date().toISOString().slice(0, 10); }
 
   var wdb = null;                       // nl-widgets database handle
-  var state = { ingest: null, index: {}, events: {}, ymd: todayYmd() };
+  var state = {
+    ingest: null,
+    calendar: {},          // compKey -> { ymd: count }, from meta/calendar
+    index: {},             // today's live rows (only ever written for today)
+    fixtures: {},          // the chosen day's rows, from fixtures/<comp>/<ymd>
+    events: {},
+    ymd: todayYmd()
+  };
+  var dayRefs = [];        // live refs for the chosen day, detached on change
   var tab = 'today';
 
   var els = {
     verdict: document.getElementById('nmVerdict'),
     stats:   document.getElementById('nmStats'),
     tabs:    document.getElementById('nmTabs'),
+    daybar:  document.getElementById('nmDaybar'),
+    prev:    document.getElementById('nmPrev'),
+    next:    document.getElementById('nmNext'),
+    pick:    document.getElementById('nmDayPick'),
+    dateIn:  document.getElementById('nmDayInput'),
+    dayNote: document.getElementById('nmDayNote'),
     today:   document.getElementById('nmToday'),
     events:  document.getElementById('nmEvents'),
     derived: document.getElementById('nmDerived'),
@@ -348,30 +399,24 @@
   // -------------------------------------------------------------------------
 
   function listen() {
-    var ymd = state.ymd;
-
     wdb.ref(ROOT + '/meta/ingest').on('value', function (s) {
       state.ingest = s.val();
       renderHealth();
     }, onErr);
 
+    /* The season matchday calendar, written by the ingester from the free
+       `populatedDates` NLS returns on every list request. It is the only way
+       to discover WHICH days have fixtures: the rules grant reads per day and
+       never at the parent, so without this you would be guessing at dates. */
     COMPS.forEach(function (c) {
-      /* Exactly the granted slice — live/index/<comp>/<ymd>, never the parent.
-         The rules only grant reads at this depth, which is deliberate: it
-         forces a consumer to name the day it wants rather than subscribing to
-         the season. */
-      wdb.ref(ROOT + '/live/index/' + c.key + '/' + ymd).on('value', function (s) {
-        state.index[c.key] = s.val() || {};
-        if (tab === 'today') renderToday();
-        renderHealth();
-      }, onErr);
+      wdb.ref(ROOT + '/meta/calendar/' + c.key).on('value', function (s) {
+        var v = s.val();
+        state.calendar[c.key] = (v && v.days) || {};
+        renderDaybar();
+      }, function () { /* absent until the first successful run */ });
     });
 
-    wdb.ref(ROOT + '/events/' + ymd).on('value', function (s) {
-      state.events = s.val() || {};
-      if (tab === 'events') renderEvents();
-      renderHealth();
-    }, onErr);
+    selectDay(state.ymd);
 
     /* Re-check the verdict on a timer as well as on data: "no successful run
        for six minutes" is a state that arrives through the passage of time,
@@ -379,6 +424,114 @@
        looking green while the ingester was dead. */
     setInterval(renderHealth, 15000);
   }
+
+  /* Subscribing to a day means detaching the last one. Without this, moving
+     back through a season would leave a listener attached per day visited,
+     each still billing egress on every write. */
+  function detachDay() {
+    dayRefs.forEach(function (r) { r.off(); });
+    dayRefs = [];
+  }
+
+  function selectDay(ymd) {
+    detachDay();
+    state.ymd = ymd;
+    state.index = {};
+    state.fixtures = {};
+    state.events = {};
+
+    COMPS.forEach(function (c) {
+      /* Exactly the granted slices — <comp>/<ymd>, never the parent. That
+         depth is deliberate: a consumer names the day it wants rather than
+         subscribing to the season.
+
+         Two sources, because they hold different things. live/index is only
+         ever written for the day the ingester last ran, and carries the live
+         minute; fixtures/ is the season, written hourly, and is what any past
+         or future day has. Live wins where both exist. */
+      var idx = wdb.ref(ROOT + '/live/index/' + c.key + '/' + ymd);
+      idx.on('value', function (s) {
+        state.index[c.key] = s.val() || {};
+        if (tab === 'today') renderToday();
+      }, onErr);
+      dayRefs.push(idx);
+
+      var fx = wdb.ref(ROOT + '/fixtures/' + c.key + '/' + ymd);
+      fx.on('value', function (s) {
+        state.fixtures[c.key] = s.val() || {};
+        if (tab === 'today') renderToday();
+      }, onErr);
+      dayRefs.push(fx);
+    });
+
+    var ev = wdb.ref(ROOT + '/events/' + ymd);
+    ev.on('value', function (s) {
+      state.events = s.val() || {};
+      if (tab === 'events') renderEvents();
+      renderHealth();
+    }, onErr);
+    dayRefs.push(ev);
+
+    renderDaybar();
+    renderToday();
+    if (tab === 'events') renderEvents();
+  }
+
+  /* Every date that has fixtures in any competition, ascending. */
+  function allMatchdays() {
+    var set = {};
+    COMPS.forEach(function (c) {
+      Object.keys(state.calendar[c.key] || {}).forEach(function (d) {
+        set[d] = (set[d] || 0) + state.calendar[c.key][d];
+      });
+    });
+    return Object.keys(set).sort().map(function (d) { return { ymd: d, count: set[d] }; });
+  }
+
+  function renderDaybar() {
+    var days = allMatchdays();
+    els.daybar.hidden = false;
+    els.dateIn.value = state.ymd;
+
+    if (!days.length) {
+      els.pick.innerHTML = '<option>No calendar yet</option>';
+      els.pick.disabled = true;
+      els.prev.disabled = els.next.disabled = true;
+      els.dayNote.textContent =
+        'The matchday calendar arrives with the first successful run.';
+      return;
+    }
+
+    els.pick.disabled = false;
+    els.pick.innerHTML = days.map(function (d) {
+      return '<option value="' + d.ymd + '"' + (d.ymd === state.ymd ? ' selected' : '') + '>' +
+        esc(NL.formatDateShort(d.ymd)) + ' — ' + d.count + ' match' + (d.count === 1 ? '' : 'es') +
+        '</option>';
+    }).join('');
+
+    var i = days.findIndex(function (d) { return d.ymd === state.ymd; });
+    var before = days.filter(function (d) { return d.ymd < state.ymd; });
+    var after  = days.filter(function (d) { return d.ymd > state.ymd; });
+    els.prev.disabled = !before.length;
+    els.next.disabled = !after.length;
+    els.prev.dataset.ymd = before.length ? before[before.length - 1].ymd : '';
+    els.next.dataset.ymd = after.length ? after[0].ymd : '';
+
+    els.dayNote.textContent = i === -1
+      ? 'No fixtures on this date — ' + days.length + ' matchdays in the season.'
+      : (days.length + ' matchdays in the season');
+  }
+
+  els.prev.addEventListener('click', function () {
+    if (this.dataset.ymd) selectDay(this.dataset.ymd);
+  });
+  els.next.addEventListener('click', function () {
+    if (this.dataset.ymd) selectDay(this.dataset.ymd);
+  });
+  els.pick.addEventListener('change', function () { selectDay(this.value); });
+  els.dateIn.addEventListener('change', function () {
+    if (this.value) selectDay(this.value);
+  });
 
   function onErr(err) {
     var msg = (err && err.message) ? err.message : String(err);
@@ -412,8 +565,13 @@
     var active = m.mode === 'live' || m.mode === 'prematch' || m.mode === 'cooldown';
 
     if (allFailed) {
+      /* The reason, on screen. It used to say "check Cloud Logging", which was
+         both a worse tool and — until the logger field name was fixed — a
+         pointer to a line that had had its cause clobbered. */
+      var reasons = m.failureReasons || {};
+      var first = Object.keys(reasons).map(function (k) { return reasons[k]; })[0];
       verdict('bad', 'Upstream unreachable',
-        'Every competition fetch failed on the last run. RTDB and scheduling are fine — this is NLS. Check Cloud Logging for NLS_UPSTREAM_UNREACHABLE.');
+        first || 'Every competition fetch failed on the last run. RTDB and scheduling are fine — this is NLS.');
     } else if (active && !m.lastSuccess) {
       verdict('bad', 'Running, but nothing has succeeded', 'No successful ingest recorded.');
     } else if (active && (now - m.lastSuccess) > 5 * 60 * 1000) {
@@ -470,7 +628,12 @@
     var any = false;
 
     COMPS.forEach(function (c) {
-      var rows = Object.values(state.index[c.key] || {});
+      /* Merge the two sources. fixtures/ is the season and is what any day
+         other than the ingester's last run has; live/index carries the live
+         minute and only ever exists for that run's day. Live wins on the
+         matches it has, so a past day still renders and today still ticks. */
+      var merged = Object.assign({}, state.fixtures[c.key] || {}, state.index[c.key] || {});
+      var rows = Object.values(merged);
       if (!rows.length) return;
       any = true;
       rows.sort(function (a, b) { return String(a.ko).localeCompare(String(b.ko)); });
@@ -494,16 +657,26 @@
       html += '</tbody></table></div></div>';
     });
 
-    els.today.innerHTML = any ? html : emptyToday();
+    els.today.innerHTML = any ? html : emptyDay();
   }
 
-  function emptyToday() {
+  /* Three different reasons a day can be blank, and conflating them is how a
+     working ingester gets reported as broken. */
+  function emptyDay() {
     var m = state.ingest;
+    var known = allMatchdays().some(function (d) { return d.ymd === state.ymd; });
+
     if (m && m.errorCount >= COMPS.length) {
-      return '<div class="empty-state">Nothing written for ' + esc(state.ymd) +
-        ' — the last run could not reach NLS, so this is not "no fixtures".</div>';
+      return '<div class="empty-state">Nothing has been written for any day yet — ' +
+        'every fetch on the last run failed, so this is not "no fixtures".</div>';
     }
-    return '<div class="empty-state">No fixtures on ' + esc(state.ymd) + '.</div>';
+    if (known) {
+      return '<div class="empty-state">' + esc(NL.formatDateShort(state.ymd)) +
+        ' has fixtures upstream, but nothing has been written for it. The season ' +
+        'fixture node is filled by the hourly run.</div>';
+    }
+    return '<div class="empty-state">No fixtures on ' + esc(NL.formatDateShort(state.ymd)) +
+      '. Use the matchday dropdown to jump to a day that has some.</div>';
   }
 
   function side(t, after) {
