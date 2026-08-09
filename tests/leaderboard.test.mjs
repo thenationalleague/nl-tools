@@ -335,3 +335,31 @@ test('matchday keys are cached per match without going stale', () => {
   // A late kick-off that is the next day in UTC is still this matchday.
   assert.equal(lb.matchdayKeyOf(match('m11', '2026-06-30T23:30:00Z', 'FullTime', 1, 0)), '2026-07-01');
 });
+
+/* ---------------------------------------------------------------------------
+   Which season the job scores.
+
+   currentSeasonId reads assets/data/clubs-meta.json out of the repo checkout
+   on every run. That file is committed, not live, so nothing detects it going
+   stale — and the failure is quiet: the job still succeeds and still writes a
+   leaderboard, just for the wrong season's fixtures.
+
+   The fallback used to be a hardcoded 2026, correct the day it was written and
+   silently wrong from July 2027. It now derives from the clock, the same way
+   the widgets do, so the two cannot disagree about what season it is.
+   --------------------------------------------------------------------------- */
+
+test('season derives from the July boundary, as the widgets do', () => {
+  const on = (iso) => lb.deriveSeasonId(new Date(iso + 'T12:00:00Z'));
+  assert.equal(on('2026-06-30'), 2025);   // last day of 2025-26
+  assert.equal(on('2026-07-01'), 2026);   // first day of 2026-27
+  assert.equal(on('2027-06-30'), 2026);
+  assert.equal(on('2027-07-01'), 2027);   // the year the hardcoded 2026 broke
+  assert.equal(on('2030-01-15'), 2029);   // mid-season, names the starting year
+});
+
+test('clubs-meta wins when it has a current season', () => {
+  // The committed file is the source of truth while it is readable; the clock
+  // is only the safety net. Pinned so a refactor cannot quietly invert them.
+  assert.equal(lb.currentSeasonId(new Date('2030-01-15T12:00:00Z')), 2026);
+});

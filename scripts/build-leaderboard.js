@@ -59,7 +59,15 @@ const COMP_IDS = [89, 373, 372];        // National, North, South
 const MAX_PAGES = 10;
 const IN_PLAY_MIN = 105;                // past this from KO, an unmarked match has finished
 const CUTOFF_MIN = 60;                  // predictions lock this long before kick-off
-const FALLBACK_SEASON_ID = 2026;
+/* Season derived from the clock, not pinned to a year. The widgets already do
+   this (deriveSeasonId in motm.html and score-predictor.html): a National
+   League season is named for the calendar year it starts in, and it starts in
+   July. A hardcoded 2026 was correct the day it was written and silently wrong
+   from July 2027 — and wrong in the worst way, because the job still succeeds
+   and still writes a leaderboard, just for last season's fixtures. */
+function deriveSeasonId(d) {
+  return (d.getMonth() + 1) >= 7 ? d.getFullYear() : d.getFullYear() - 1;
+}
 
 /* Salt for the row hash. Public by necessity — the widget has to compute the
    same hash from its own jwtId to find its row, so it ships in the bundle.
@@ -371,13 +379,16 @@ function buildLocks(matches) {
 // IO
 // ---------------------------------------------------------------------------
 
-function currentSeasonId() {
+function currentSeasonId(now) {
   try {
     const meta = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets/data/clubs-meta.json'), 'utf8'));
     const s = meta && meta.seasons && meta.seasons.current;
-    return s ? Number(s) : FALLBACK_SEASON_ID;
+    if (s) return Number(s);
+    console.warn('clubs-meta has no seasons.current — falling back to the clock');
+    return deriveSeasonId(now || new Date());
   } catch (e) {
-    return FALLBACK_SEASON_ID;
+    console.warn('clubs-meta unreadable (' + e.message + ') — falling back to the clock');
+    return deriveSeasonId(now || new Date());
   }
 }
 
@@ -438,7 +449,7 @@ async function dbPut(path, value, token) {
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
   const now = new Date();
-  const seasonId = currentSeasonId();
+  const seasonId = currentSeasonId(now);
 
   const matches = await fetchFixtures(seasonId);
   console.log('fixtures: ' + matches.length + ' (season ' + seasonId + ')');
@@ -496,6 +507,7 @@ module.exports = {
   tallyFor, buildRows, scopesFor, buildPayload, rowHash, ROW_SALT, lastActivity,
   matchIndex,
   buildLocks, CUTOFF_MIN, buildMotmWindows, motmCloseAt,
+  currentSeasonId, deriveSeasonId,
 };
 
 if (require.main === module) {
