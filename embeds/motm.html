@@ -43,6 +43,23 @@
      own (a date in May 2026 loads 2025/26), refetching fixtures.
 
      Changelog:
+       09/08/2026  v2.18 Fixes "Nominations open shortly" on a match that
+                         finished yesterday. v2.17 gated on the server's
+                         motm-windows node, but read it in listenAll(),
+                         which runs AFTER renderAll() — so the first paint
+                         always had nothing loaded and said the window had
+                         not opened, on games that had been over for
+                         eighteen hours. It corrected when the socket
+                         answered; it should never have been wrong.
+                         The gate is read once during boot now, before
+                         anything is drawn, with the live listener kept
+                         for a match finishing mid-session.
+                         Also the wrong way round in v2.17: a failed read
+                         set "nothing is open", locking every fan out of a
+                         window the rule would have allowed. It falls back
+                         to full time now. Failing closed is right for the
+                         RULE — which still arbitrates every write — and
+                         wrong for the UI.
        09/08/2026  v2.17 The widget now reads the SAME gate the rules
                          enforce. v2.16 moved the window server-side,
                          where an entry in motm-windows/<matchId> is
@@ -1301,6 +1318,7 @@
     matches: [],        // user-team-only matches for selected matchday (usually 1)
     registration: null,
     windows: null,      // { matchId: closeEpoch } — the server's own gate; null until loaded
+    windowsFailed: false, // could not read it; fall back rather than lock everyone out
     myVotes: {},        // { matchId: vote }
     drafts: {},         // { matchId: playerId } — pending unsaved pick
     editing: {},        // { matchId: true } — re-open submitted vote
@@ -1477,6 +1495,15 @@
        would happily take a nomination the database then rejects. The fan would
        see a raw PERMISSION_DENIED for something we told them was open. Read
        the same node the rule reads and there is no gap to get wrong. */
+    /* Could not read the server's gate at all. Fall back to full time, as
+       this did before v2.17. The rule is still the arbiter — a write it
+       refuses says so in plain words — and locking every fan out because one
+       read failed is a worse trade than offering something the server might
+       refuse. Failing closed is right for the RULE, not for the UI. */
+    if (state.windowsFailed) {
+      var fallbackClose = voteCloseAt(m);
+      return (fallbackClose && now < fallbackClose) ? 'voting' : 'closed';
+    }
     if (state.windows === null) return 'opening';        // not loaded yet
     var close = state.windows[m.id];
     if (close == null) return 'opening';                 // finished, job not caught up
@@ -2431,10 +2458,11 @@
       state.windows = snap.val() || {};
       renderFixtures();
     }, function () {
-      /* Denied or offline. Empty rather than null: null means "still loading"
-         and would leave every row saying "opening shortly" forever. Empty means
-         nothing is open, which is what the rule would enforce anyway. */
-      state.windows = {};
+      /* Denied or offline. NOT an empty object — that reads as "the server
+         says nothing is open" and locks every fan out of a window the rule
+         would have allowed. Flag the failure and let stateOf fall back to
+         full time instead. */
+      state.windowsFailed = true;
       renderFixtures();
     });
 
@@ -2545,7 +2573,19 @@
         fbAuth = firebase.auth(fbApp);
         fbDb   = firebase.database(fbApp);
         return fbAuth.signInAnonymously();
-      }).then(function () { state.fbAuthed = true; }),
+      }).then(function () { state.fbAuthed = true; }).then(function () {
+        /* The server's nomination window, BEFORE the first paint.
+           listenAll() subscribes to this as well, but it runs after
+           renderAll() and only answers after a round trip — so without this
+           read every finished match rendered "Nominations open shortly" until
+           the socket replied, which is exactly what it looked like on the
+           morning after matchday one. */
+        return fbDb.ref('motm-windows').once('value').then(function (snap) {
+          state.windows = snap.val() || {};
+        }).catch(function () {
+          state.windowsFailed = true;
+        });
+      }),
       // clubs-meta first: it carries seasons.current, which the fixtures
       // request needs, and the club colours/short names the UI reads.
       fetchClubsMeta().then(function () {
