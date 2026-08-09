@@ -174,12 +174,23 @@ async function resolveSeason(now, todayYmd) {
 async function fetchIndex(seasonID, todayYmd, now) {
   const results = await Promise.all(T.COMP_IDS.map(async (compId) => {
     try {
-      const raw = await F.fetchDayList(compId, seasonID, todayYmd);
-      const rows = raw.map((m) => T.shapeIndexRow(m, now)).filter(Boolean);
-      return { compId, key: T.compKeyOf(compId), rows, ok: true };
+      const res = await F.fetchDayList(compId, seasonID, todayYmd);
+      const rows = res.rows.map((m) => T.shapeIndexRow(m, now)).filter(Boolean);
+      return { compId, key: T.compKeyOf(compId), rows, ok: true,
+               populatedDates: res.populatedDates };
     } catch (err) {
-      logger.error('list fetch failed', { compId, message: err.message });
-      return { compId, key: T.compKeyOf(compId), rows: [], ok: false };
+      /* The reason goes in the LINE, and the extra field is called anything
+         but `message`. firebase-functions' logger uses that key for the log
+         line itself, so a payload field of that name clobbers the real error
+         and leaves you staring at "list fetch failed" with no cause. This is
+         documented in fan-widgets.js and I wrote it anyway, which is why the
+         better diagnostics added in the previous change never reached anyone.
+
+         An error that hides its reason costs more than the failure does. */
+      const why = (err && err.message) || String(err);
+      logger.error('list fetch failed (' + T.compKeyOf(compId) + '): ' + why,
+        { compId, reason: why });
+      return { compId, key: T.compKeyOf(compId), rows: [], ok: false, reason: why };
     }
   }));
   return results;
@@ -325,7 +336,8 @@ async function writeTables(seasonID, indexResults, now, refreshBase) {
       const r = await writeIfChanged('derived/tables/' + res.key, node, prevHash);
       if (r.written) written.push(res.key);
     } catch (err) {
-      logger.error('table build failed', { compKey: res.key, message: err.message });
+      const why = (err && err.message) || String(err);
+      logger.error('table build failed (' + res.key + '): ' + why, { compKey: res.key, reason: why });
     }
   }
 
@@ -400,7 +412,8 @@ async function writeCoverage(seasonID, now) {
          season of unchanged fixtures writes nothing. */
       await writeFixtures(key, rows, now);
     } catch (err) {
-      logger.error('coverage/fixtures build failed', { compKey: key, message: err.message });
+      const why = (err && err.message) || String(err);
+      logger.error('coverage/fixtures build failed (' + key + '): ' + why, { compKey: key, reason: why });
     }
   }
 }
@@ -422,6 +435,29 @@ async function writeFixtures(compKey, rows, now) {
   for (const [ymd, day] of Object.entries(byDay)) {
     const prevHash = existing[ymd] ? T.contentHash(existing[ymd]) : null;
     await writeIfChanged('fixtures/' + compKey + '/' + ymd, day, prevHash);
+  }
+}
+
+/**
+ * meta/calendar/<compKey> — { '2026-08-08': 12, ... }
+ *
+ * Just the date and the count; the day name upstream supplies is derivable and
+ * would only be a second thing to keep in step.
+ */
+async function writeCalendar(results, seasonID, now) {
+  for (const res of results) {
+    if (!res.populatedDates) continue;
+    const days = {};
+    Object.keys(res.populatedDates).forEach((ymd) => {
+      const v = res.populatedDates[ymd];
+      const n = Number(v && v.count != null ? v.count : v);
+      if (n > 0) days[ymd] = n;
+    });
+    if (!Object.keys(days).length) continue;
+    const node = { compKey: res.key, season: seasonID, days, updatedAt: now, source: 'nls' };
+    const existing = await read('meta/calendar/' + res.key);
+    await writeIfChanged('meta/calendar/' + res.key, node,
+      existing ? T.contentHash(existing) : null);
   }
 }
 
@@ -462,6 +498,17 @@ async function runIngest(now, opts) {
   const indexResults = await fetchIndex(seasonID, todayYmd, now);
   const okResults = indexResults.filter((r) => r.ok);
   const failed = indexResults.filter((r) => !r.ok).map((r) => r.key);
+
+  /* Carry the REASON into RTDB, not just the fact of failure.
+     Cloud Logging is where this belonged in principle and where it was useless
+     in practice: the only person who needs it has console access and a monitor
+     page already open, and making them cross to Logs Explorer to find out why
+     a red box is red is a worse tool than one that just says. Truncated, and
+     never containing a request URL — an outlet key would sit in its path. */
+  const failureReasons = {};
+  indexResults.filter((r) => !r.ok).forEach((r) => {
+    failureReasons[r.key] = String(r.reason || 'unknown').slice(0, 300);
+  });
 
   /* One competition failing is a blip and is handled by leaving that node at
      its last known value. ALL FOUR failing is not four blips — it is the
@@ -519,7 +566,8 @@ async function runIngest(now, opts) {
     try {
       return await ingestDetail(byId.get(t.id), now, serverNow);
     } catch (err) {
-      logger.error('detail ingest failed', { matchID: t.id, message: err.message });
+      const why = (err && err.message) || String(err);
+      logger.error('detail ingest failed (' + t.id + '): ' + why, { matchID: t.id, reason: why });
       return { id: t.id, ok: false };
     }
   });
@@ -555,6 +603,13 @@ async function runIngest(now, opts) {
     if (r.written) indexWrites += 1;
   }
 
+  /* The season matchday calendar, arriving free on the list request. Without
+     it nothing can discover WHICH days have fixtures: the rules grant reads
+     per day and never at the parent, so a consumer has to name its day. The
+     calendar is what turns "name a day" into something browsable rather than
+     something you guess at. Under meta/, which is granted wholesale. */
+  await writeCalendar(okResults, seasonID, now);
+
   const scorerTouches = await writeScorers(createdByComp, now);
   const tableWrites = await writeTables(seasonID, okResults, now, Boolean(options.hourly));
   if (options.hourly) await writeCoverage(seasonID, now);
@@ -579,6 +634,7 @@ async function runIngest(now, opts) {
     scorersTouched: scorerTouches,
     errorCount: failed.length,
     failedCompetitions: failed,
+    failureReasons: failureReasons,
     /* Diagnostic only — the tick paces on intervalSec, not on these. Kept
        because "what did it think today's card was" is the first question
        anyone asks of a run that behaved oddly. */
