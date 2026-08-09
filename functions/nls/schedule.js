@@ -49,12 +49,22 @@ function matchPlan(row, now) {
   if (isLive(period)) return { intervalSec: LIVE, detail: 'onChange' };
 
   if (isFinished(period)) {
-    /* No final-whistle timestamp exists upstream, so the cooldown is measured
-       from kick-off plus a generous match length rather than from the whistle.
-       Erring long is the safe direction: it costs one list request a minute
-       for a few extra minutes and it catches the late data entry. */
-    const assumedEnd = isNaN(ko) ? -Infinity : ko + 115 * MIN;
-    return now - assumedEnd <= COOLDOWN_MIN * MIN
+    /* Measured from when the ingester FIRST SAW the period flip to finished,
+       not from an assumed match length.
+
+       An earlier version used kick-off plus 115 minutes, and it was wrong in
+       the direction that costs you goals. Stoppage times now routinely push a
+       match past two hours: the cooldown shrank as a game ran long, and a
+       match reaching full time beyond KO+135 got no tail at all — dropping to
+       hourly at precisely the moment the late cards and substitutions are
+       entered. `finishedAt` is stamped by the orchestrator on the first run
+       that observes full time, so the twenty minutes are twenty minutes
+       whatever happened on the pitch.
+
+       Absent (a cold start after the whistle) reads as "just now", which
+       grants a full tail rather than none — the safe direction. */
+    const since = row.finishedAt || now;
+    return now - since <= COOLDOWN_MIN * MIN
       ? { intervalSec: LIVE, detail: 'onChange' }
       : { intervalSec: HOURLY, detail: null };
   }
@@ -99,6 +109,7 @@ function derivePlan(rows, now) {
   let liveCount = 0;
   let anyPrematch = false;
   let anyCooldown = false;
+  let nextWindow = Infinity;
 
   list.forEach((row) => {
     const plan = matchPlan(row, now);
@@ -108,8 +119,20 @@ function derivePlan(rows, now) {
       targets.push({ id: row.id, mode: plan.detail, intervalSec: plan.intervalSec });
       if (plan.detail === 'unconditional') anyPrematch = true;
       else if (isFinished(row.period)) anyCooldown = true;
+    } else {
+      /* Lookahead. Without it an hourly run at 13:00 would not look again
+         until 14:00, and a 15:00 kick-off whose pre-match window opens at
+         13:45 would lose its first quarter of an hour of team news. Waking
+         exactly when the window opens costs one extra run per matchday. */
+      const ko = row.ko ? Date.parse(row.ko) : NaN;
+      if (!isNaN(ko) && !isLive(row.period) && !isFinished(row.period)) {
+        const opensIn = (ko - PREMATCH_WINDOW_MIN * MIN - now) / 1000;
+        if (opensIn > 0 && opensIn < nextWindow) nextWindow = opensIn;
+      }
     }
   });
+
+  if (nextWindow < intervalSec) intervalSec = Math.max(LIVE, Math.round(nextWindow));
 
   const mode = liveCount ? 'live'
     : anyPrematch ? 'prematch'
@@ -125,45 +148,33 @@ function derivePlan(rows, now) {
  * Cloud Scheduler fires this every minute all week. Waking the ingester into
  * four NLS requests each time — 40,000 a month, almost all of them at 3am on a
  * Tuesday against a feed that is club officials typing into a portal — would
- * be indefensible. So the tick first reads the kick-off times cached by the
- * last run and, when nothing can possibly have changed, returns without
- * touching the network at all.
+ * be indefensible. So the tick first reads the interval the last run asked
+ * for and, when it is not yet due, returns without touching the network.
  *
- * `snapshot` is meta/ingest: { ymd, kickoffs: [epoch], lastRun, mode }.
+ * `snapshot` is meta/ingest: { ymd, lastRun, intervalSec, mode }.
  * Anything missing or from another day means "run" — a stale cache must never
  * be able to keep the ingester asleep through a matchday.
+ *
+ * THE PREVIOUS RUN'S OWN PLAN IS THE ONLY PACE. There is deliberately no
+ * clock-derived window here any more. There used to be one, bounded at the
+ * last kick-off plus an assumed match length, and it meant a match running
+ * past that bound could fall out of the run window WHILE STILL IN PLAY.
+ * derivePlan already returns 3600 when there is nothing to do and 60 when
+ * there is, including a lookahead to the next pre-match window opening, so
+ * pacing on intervalSec is both simpler and correct at the edges. It is also
+ * self-terminating: each run recomputes the plan from fresh rows, so once the
+ * last cooldown expires the interval returns to hourly on its own.
  */
 function shouldRun(snapshot, now, todayYmd) {
   const s = snapshot || {};
   if (!s.ymd || s.ymd !== todayYmd) return { run: true, reason: 'new-day' };
   if (!s.lastRun) return { run: true, reason: 'no-previous-run' };
 
-  const kickoffs = Array.isArray(s.kickoffs) ? s.kickoffs : [];
-  if (!kickoffs.length) {
-    return now - s.lastRun >= HOURLY * 1000
-      ? { run: true, reason: 'hourly-baseline' }
-      : { run: false, reason: 'no-fixtures-today' };
-  }
-
-  const earliest = Math.min.apply(null, kickoffs);
-  const latest = Math.max.apply(null, kickoffs);
-
-  /* Before the pre-match window opens, and after the last plausible cooldown
-     closes, only the hourly baseline has anything to do. */
-  if (now < earliest - PREMATCH_WINDOW_MIN * MIN ||
-      now > latest + (115 + COOLDOWN_MIN) * MIN) {
-    return now - s.lastRun >= HOURLY * 1000
-      ? { run: true, reason: 'hourly-baseline' }
-      : { run: false, reason: 'outside-match-window' };
-  }
-
-  /* Inside the window the previous run's own plan sets the pace, minus a
-     slack second so a scheduler that fires at 59.8s is not held for a whole
-     further minute. */
+  /* Minus a slack second, so a scheduler firing at 59.8s past is not held for
+     a whole further minute. */
   const due = (s.intervalSec || LIVE) * 1000 - 1000;
-  return now - s.lastRun >= due
-    ? { run: true, reason: s.mode || 'in-window' }
-    : { run: false, reason: 'not-due' };
+  if (now - s.lastRun < due) return { run: false, reason: 'not-due' };
+  return { run: true, reason: s.mode || 'due' };
 }
 
 module.exports = {

@@ -319,11 +319,22 @@ test('no fixtures today means hourly and nothing to fetch', () => {
   assert.deepEqual(plan.targets, []);
 });
 
-test('more than 75 minutes before kick-off is still hourly', () => {
-  const t = Date.parse('2026-08-08T13:30:00Z');   // 90 min out
+test('well before kick-off there is nothing to fetch', () => {
+  const t = Date.parse('2026-08-08T09:00:00Z');   // 6 hours out
   const plan = S.derivePlan([row()], t);
   assert.equal(plan.mode, 'idle');
   assert.equal(plan.intervalSec, 3600);
+  assert.deepEqual(plan.targets, []);
+});
+
+test('the run wakes exactly when the pre-match window opens, not an hour later', () => {
+  // 13:45 is KO minus 75. An hourly run at 13:00 would not look again until
+  // 14:00 and would lose the first quarter hour of team news.
+  const t = Date.parse('2026-08-08T13:00:00Z');
+  const plan = S.derivePlan([row()], t);
+  assert.equal(plan.mode, 'idle');
+  assert.equal(plan.intervalSec, 45 * 60, 'wake at 13:45, not 14:00');
+  assert.deepEqual(plan.targets, []);
 });
 
 test('inside 75 minutes with an incomplete lineup polls detail unconditionally', () => {
@@ -357,48 +368,70 @@ test('a match in play runs at 60s on signature change', () => {
   assert.equal(plan.targets[0].mode, 'onChange');
 });
 
-test('the trailing 20 minutes after the whistle still runs, then stops', () => {
-  const ft = row({ period: 'fulltime' });
-  const inCooldown = S.derivePlan([ft], Date.parse('2026-08-08T16:55:00Z'));
-  assert.equal(inCooldown.intervalSec, 60, 'officials add cards after the whistle');
-  assert.equal(inCooldown.mode, 'cooldown');
+test('the 20-minute tail runs from the observed whistle, then stops', () => {
+  const whistle = Date.parse('2026-08-08T16:52:00Z');
+  const ft = row({ period: 'fulltime', finishedAt: whistle });
 
-  const after = S.derivePlan([ft], Date.parse('2026-08-08T18:30:00Z'));
+  const inCooldown = S.derivePlan([ft], whistle + 19 * MIN);
+  assert.equal(inCooldown.mode, 'cooldown');
+  assert.equal(inCooldown.intervalSec, 60, 'officials add cards after the whistle');
+
+  const after = S.derivePlan([ft], whistle + 21 * MIN);
   assert.equal(after.intervalSec, 3600);
   assert.deepEqual(after.targets, []);
 });
 
-test('the minute tick is a no-op outside the window and never on a stale day', () => {
+test('a two-hour game still gets its full tail', () => {
+  // Stoppage times regularly push a match past 2h. An earlier version measured
+  // the tail from kick-off plus an assumed match length, so a late finish got
+  // a shortened tail — and past KO+135, none at all.
+  const ko = Date.parse('2026-08-08T15:00:00Z');
+  const whistle = ko + 145 * MIN;                       // 17:25, a long one
+  const ft = row({ period: 'fulltime', finishedAt: whistle });
+  assert.equal(S.derivePlan([ft], whistle + 5 * MIN).intervalSec, 60);
+  assert.equal(S.derivePlan([ft], whistle + 19 * MIN).intervalSec, 60);
+  assert.equal(S.derivePlan([ft], whistle + 21 * MIN).intervalSec, 3600);
+});
+
+test('a match still in play is never wound down, however long it has run', () => {
+  const ko = Date.parse('2026-08-08T15:00:00Z');
+  const live = row({ period: 'secondhalf' });
+  [130, 160, 200].forEach((mins) => {
+    const plan = S.derivePlan([live], ko + mins * MIN);
+    assert.equal(plan.intervalSec, 60, 'still live at KO+' + mins);
+    assert.equal(plan.liveCount, 1);
+  });
+});
+
+test('a cold start after the whistle grants a full tail, not none', () => {
+  // finishedAt absent — nothing observed the flip. Erring toward running.
+  const ft = row({ period: 'fulltime' });
+  assert.equal(S.derivePlan([ft], Date.parse('2026-08-08T22:00:00Z')).intervalSec, 60);
+});
+
+test('the minute tick paces on the previous run\'s own plan', () => {
   const ymd = '2026-08-08';
-  const kickoffs = [Date.parse('2026-08-08T15:00:00Z')];
+  const t = Date.parse('2026-08-08T15:30:00Z');
 
-  const quiet = S.shouldRun(
-    { ymd, kickoffs, lastRun: NOW - 5 * MIN, intervalSec: 3600, mode: 'idle' },
-    Date.parse('2026-08-08T09:00:00Z'), ymd);
-  assert.equal(quiet.run, false);
-  assert.equal(quiet.reason, 'outside-match-window');
+  const live = { ymd, mode: 'live', intervalSec: 60 };
+  assert.equal(S.shouldRun(Object.assign({ lastRun: t - 30 * 1000 }, live), t, ymd).run, false);
+  assert.equal(S.shouldRun(Object.assign({ lastRun: t - 61 * 1000 }, live), t, ymd).run, true);
 
-  // Yesterday's cache must never be able to keep the ingester asleep.
-  const rolled = S.shouldRun({ ymd: '2026-08-07', kickoffs, lastRun: NOW }, NOW, ymd);
+  const idle = { ymd, mode: 'idle', intervalSec: 3600 };
+  assert.equal(S.shouldRun(Object.assign({ lastRun: t - 5 * MIN }, idle), t, ymd).run, false);
+  assert.equal(S.shouldRun(Object.assign({ lastRun: t - 61 * MIN }, idle), t, ymd).run, true);
+});
+
+test('a stale snapshot can never keep the ingester asleep', () => {
+  const ymd = '2026-08-08';
+  // Yesterday's cache.
+  const rolled = S.shouldRun({ ymd: '2026-08-07', lastRun: NOW, intervalSec: 3600 }, NOW, ymd);
   assert.equal(rolled.run, true);
   assert.equal(rolled.reason, 'new-day');
 
-  // No snapshot at all is also a run.
+  // No snapshot at all, and a snapshot with no lastRun.
   assert.equal(S.shouldRun(null, NOW, ymd).run, true);
-});
-
-test('inside the window the previous run sets the pace', () => {
-  const ymd = '2026-08-08';
-  const snap = { ymd, kickoffs: [Date.parse('2026-08-08T15:00:00Z')], mode: 'live', intervalSec: 60 };
-  const t = Date.parse('2026-08-08T15:30:00Z');
-  assert.equal(S.shouldRun(Object.assign({ lastRun: t - 30 * 1000 }, snap), t, ymd).run, false);
-  assert.equal(S.shouldRun(Object.assign({ lastRun: t - 61 * 1000 }, snap), t, ymd).run, true);
-});
-
-test('the hourly baseline still fires on a day with no fixtures', () => {
-  const ymd = '2026-08-08';
-  const snap = { ymd, kickoffs: [], lastRun: NOW - 61 * MIN };
-  assert.equal(S.shouldRun(snap, NOW, ymd).reason, 'hourly-baseline');
+  assert.equal(S.shouldRun({ ymd }, NOW, ymd).reason, 'no-previous-run');
 });
 
 // ---------------------------------------------------------------------------

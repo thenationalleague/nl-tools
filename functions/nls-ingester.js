@@ -205,6 +205,21 @@ async function ingestDetail(row, now, serverNow) {
 
   curr.detailFetchedAt = now;
 
+  /* Discovery, not an error. detailAvailability is our assumption about what a
+     competition supplies, and for the National League Cup it is a conservative
+     guess — the Cup is contested across tiers, so National League coverage was
+     not safe to assume. If a pre-match lineup ever turns up for a competition
+     we marked 'scores', that assumption is wrong and worth one line in the log
+     to say so. Deliberately gated on pre-match: tier 7 does publish lineups
+     after the whistle, and logging those would say nothing. */
+  if (curr.detailAvailability !== 'full' && curr.lineupComplete &&
+      !curr.live && !curr.finished) {
+    logger.info('NLS_DETAIL_AVAILABILITY_UNDERSTATED', {
+      compKey: curr.compKey, matchID: curr.id,
+      note: 'pre-match lineup published for a competition marked scores-only',
+    });
+  }
+
   const seenKeys = await readSeenFor(curr);
   const { created, retracted } = E.diffDetail(prev, curr, seenKeys);
 
@@ -463,6 +478,11 @@ async function runIngest(now, opts) {
       row.lineupComplete = Boolean(prevRow.lineupComplete);
       row.detailFetchedAt = prevRow.detailFetchedAt || 0;
       row.prevSignature = T.signatureOf(prevRow);
+      /* Stamped on the first run that observes full time, and carried
+         thereafter. This is what the 20-minute cooldown is measured from —
+         see the finished branch of schedule.matchPlan for why an assumed
+         match length was the wrong thing to measure from. */
+      row.finishedAt = row.finished ? (prevRow.finishedAt || now) : null;
       rows.push(row);
     });
   });
@@ -546,8 +566,9 @@ async function runIngest(now, opts) {
     scorersTouched: scorerTouches,
     errorCount: failed.length,
     failedCompetitions: failed,
-    /* Kick-off times, so the next minute tick can decide whether to do
-       anything at all without an NLS request. */
+    /* Diagnostic only — the tick paces on intervalSec, not on these. Kept
+       because "what did it think today's card was" is the first question
+       anyone asks of a run that behaved oddly. */
     kickoffs: rows.map((r) => Date.parse(r.ko)).filter((n) => !isNaN(n)),
     source: 'nls',
   };
