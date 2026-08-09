@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — NLS Monitor
+  Version: v0.1 (09/08/2026)
+  File: /nls-monitor/index.html
+
+  Live view of the NLS → RTDB ingester: run health, today's matches, the event
+  stream and the derived tables and scorers.
+
+  WHY THIS EXISTS
+    Step 1 of the ingester build order is "the ingester writes, nothing reads —
+    run a full matchday and inspect the nodes". Inspecting them meant exporting
+    JSON out of the Firebase console by hand, which is slow, easy to get wrong,
+    and impossible to do while a matchday is actually happening. This is the
+    inspection tool that step calls for.
+
+    It is deliberately a MONITOR, not a consumer. Nothing here is a step
+    towards a fan-facing widget, nothing depends on it, and deleting it would
+    break nothing. That keeps step 1's property intact: `nls/` still has no
+    consumer, so a mistake in it is invisible to fans.
+
+  WHERE THE DATA IS
+    `nls/` lives in the SEPARATE nl-widgets project, alongside the fan data and
+    the feed/ fixture cache. This page therefore runs two Firebase apps: the
+    default one for the nl-tools staff session, and a second named app for
+    nl-widgets. It reads live over websockets rather than polling — watching a
+    Saturday tick over is the point.
+
+  HOW IT GETS IN
+    Via the fanWidgetsAuth handshake (functions/fan-widgets.js): write a
+    request, the trigger checks superadmin against the database, a custom token
+    carrying a `staff` claim comes back, sign in to nl-widgets with it.
+
+    That handshake lives under app-data/ops-fan-widgets/ because Fan Widgets
+    was the first tool to need it. This is the second, and the mechanism is not
+    really Fan Widgets' — the server gate is "is this uid a superadmin", with
+    the path incidental. CANON CANDIDATE: move the request/grant pair to a
+    neutral path and repoint the trigger, now there are two callers. Not done
+    here because it means redeploying the trigger and editing a working tool,
+    which is not this PR's business.
+
+  Storage (RTDB):
+    nl-tools:    app-data/ops-fan-widgets/authRequests|authGrants/<uid>
+                 borrowed handshake, see above
+    nl-widgets:  nls/meta/ingest              run health
+                 nls/live/index/<comp>/<ymd>  today's card
+                 nls/events/<ymd>             the event stream
+                 nls/derived/tables|scorers|coverage/<comp>
+                 (nls/seen is never read — internal dedup guard)
+
+  Access (auth-guard registry — see system/auth-guard.js):
+    superadmin only. The underlying handshake refuses anyone else server-side,
+    so a lower role would reach the page and then fail at sign-in; the registry
+    entry stops it being visible in the first place.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NLS Monitor — NL Tools</title>
+
+  <!-- Brand stylesheet (lint canonical: ?v=32) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=32">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+
+    /* Second app, pointed at the widgets project — the same config the Fan
+       Widgets tool uses, copied rather than retyped. NAMED, because the
+       default app is this tool's own nl-tools session: two unnamed apps would
+       fight over it and the page would end up signed in as the wrong identity
+       in the wrong project.
+
+       Read-only from here. This page never writes to nl-widgets, and the
+       ingester never reads from it. */
+    var widgetsApp = firebase.initializeApp({
+      apiKey:            "AIzaSyAOePUiyfACJ546b08Z7oGWahAEYzEadMo",
+      authDomain:        "nl-widgets.firebaseapp.com",
+      databaseURL:       "https://nl-widgets-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-widgets",
+      storageBucket:     "nl-widgets.firebasestorage.app",
+      messagingSenderId: "440054238126",
+      appId:             "1:440054238126:web:349a1aeaf3c65ff281563f"
+    }, 'nl-widgets');
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'NLS Monitor',
+      toolKey: 'ops-nls-monitor'
+    };
+    var NL_TOOL_KEY = 'ops-nls-monitor';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '09/08/2026',
+        version: 'v0.1',
+        items: [
+          'Initial build. Ingest health, today’s card, the event stream and derived tables/scorers, read live from nls/ in the nl-widgets project.'
+        ]
+      }
+    ];
+
+    /* auth-guard fires this once the session is verified + pageWrap is
+       revealed. Boot the main app from here so RTDB reads happen with a
+       live auth token. Do NOT read RTDB before this fires. */
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=29 / ?v=8 / ?v=10) -->
+  <script src="/system/nl-utils.js?v=29"></script>
+  <script src="/system/nl-topbar.js?v=8"></script>
+  <script src="/system/auth-guard.js?v=10"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+
+  /* Stat-card state modifiers, per the contract in nl-brand.css: layout comes
+     from canon, colour is the tool's to set. */
+  .stat--ok .stat__num     { color: var(--green); }
+  .stat--warn .stat__num   { color: var(--amber); }
+  .stat--warn              { border-left: 4px solid var(--amber); }
+  .stat--bad .stat__num    { color: var(--red); }
+  .stat--bad               { border-left: 4px solid var(--red); }
+
+  /* The headline verdict. One line, readable from across a desk, because the
+     question this page answers most often is "is it working right now". */
+  .verdict {
+    display: flex; align-items: center; gap: .75rem;
+    padding: 1rem 1.25rem; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--navy-50);
+    margin-bottom: 1.25rem;
+  }
+  .verdict__dot { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto; }
+  /* Deliberately a wide step between these two. The headline is the answer to
+     "is it working", and on a Saturday it wants reading from across a desk;
+     the sub-line is detail you lean in for. A close pair would make them read
+     as one undifferentiated block. */
+  .verdict__text { font-weight: 700; font-size: 1.3rem; line-height: 1.3; }
+  .verdict__sub  { color: var(--text-muted); font-size: .875rem; }
+  .verdict--ok   { background: var(--green-light); border-color: var(--green); }
+  .verdict--ok   .verdict__dot { background: var(--green); }
+  .verdict--warn { background: var(--amber-light); border-color: var(--amber); }
+  .verdict--warn .verdict__dot { background: var(--amber); }
+  .verdict--bad  { background: var(--primary-50); border-color: var(--primary); }
+  .verdict--bad  .verdict__dot { background: var(--primary); }
+
+  .comp-block { margin-bottom: 1.5rem; }
+  .comp-block__head {
+    display: flex; align-items: baseline; gap: .6rem;
+    margin: 0 0 .5rem; font-weight: 700;
+  }
+  .comp-block__count { color: var(--text-muted); font-weight: 400; font-size: .875rem; }
+
+  .score { font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
+  .crest { width: 20px; height: 20px; object-fit: contain; vertical-align: -4px; margin-right: .35rem; }
+  .muted { color: var(--text-muted); }
+  .mono  { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .875em; }
+
+  /* The event feed. Ordered by detectedAt, never by match minute — a goal
+     entered late would otherwise jump into the middle of the feed. */
+  .ev { display: grid; grid-template-columns: 5.5rem 1fr auto; gap: .5rem 1rem;
+        padding: .6rem 0; border-bottom: 1px solid var(--border); align-items: baseline; }
+  .ev:last-child { border-bottom: 0; }
+  /* One secondary size across the page; the label role is carried by weight,
+     caps, tracking and colour rather than by a fourth almost-identical size. */
+  .ev__type { font-weight: 700; font-size: .875rem; text-transform: uppercase; letter-spacing: .04em; }
+  .ev--goal .ev__type         { color: var(--green); }
+  .ev--booking .ev__type      { color: var(--amber-deep); }
+  .ev--substitution .ev__type { color: var(--blue); }
+  .ev--lineup .ev__type       { color: var(--navy-600); }
+  .ev--withdrawal .ev__type   { color: var(--primary); }
+  .ev--retracted { opacity: .55; }
+  .ev--retracted .ev__what { text-decoration: line-through; }
+  .ev__when { color: var(--text-muted); font-size: .875rem; white-space: nowrap; }
+
+  @media (max-width: 640px) {
+    .ev { grid-template-columns: 1fr; gap: .15rem; }
+    .ev__when { grid-column: 1; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="page">
+
+    <div id="nmVerdict" class="verdict">
+      <span class="verdict__dot"></span>
+      <span>
+        <span class="verdict__text">Connecting to nl-widgets…</span><br>
+        <span class="verdict__sub">Requesting a staff token.</span>
+      </span>
+    </div>
+
+    <div id="nmStats" class="stats" hidden></div>
+
+    <div class="tabs" id="nmTabs" hidden>
+      <button class="tab" data-tab="today" type="button">Today</button>
+      <button class="tab" data-tab="events" type="button">Events</button>
+      <button class="tab" data-tab="derived" type="button">Tables &amp; scorers</button>
+      <button class="tab" data-tab="raw" type="button">Raw</button>
+    </div>
+
+    <section id="nmToday"></section>
+    <section id="nmEvents" hidden></section>
+    <section id="nmDerived" hidden></section>
+    <section id="nmRaw" hidden></section>
+
+  </div>
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  window.TOOL = window.TOOL || {};
+
+  var ROOT = 'nls';
+  var COMPS = [
+    { key: 'nl',    label: 'National League' },
+    { key: 'north', label: 'National North' },
+    { key: 'south', label: 'National South' },
+    { key: 'cup',   label: 'National League Cup' }
+  ];
+
+  /* THE SAME UTC DAY THE INGESTER KEYS ON. Node paths use the UTC date because
+     that is what the NLS from/to window filters on. Deriving it from UK local
+     time here would, on any evening after 23:00 BST, ask for tomorrow's node
+     and show an empty page for a matchday that is happening. */
+  function todayYmd() { return new Date().toISOString().slice(0, 10); }
+
+  var wdb = null;                       // nl-widgets database handle
+  var state = { ingest: null, index: {}, events: {}, ymd: todayYmd() };
+  var tab = 'today';
+
+  var els = {
+    verdict: document.getElementById('nmVerdict'),
+    stats:   document.getElementById('nmStats'),
+    tabs:    document.getElementById('nmTabs'),
+    today:   document.getElementById('nmToday'),
+    events:  document.getElementById('nmEvents'),
+    derived: document.getElementById('nmDerived'),
+    raw:     document.getElementById('nmRaw')
+  };
+
+  var esc = function (s) { return (window.NL && NL.escHtml) ? NL.escHtml(s) : String(s == null ? '' : s); };
+
+  // -------------------------------------------------------------------------
+  // Boot
+  // -------------------------------------------------------------------------
+
+  window.TOOL.boot = function (session) {
+    var uid = session && session.uid;
+    if (!uid) { verdict('bad', 'No session', 'Try reloading the page.'); return; }
+
+    handshake(uid).then(function (token) {
+      return firebase.auth(widgetsApp).signInWithCustomToken(token);
+    }).then(function () {
+      wdb = firebase.database(widgetsApp);
+      return NL.clubs.load().catch(function () { /* crests are optional */ });
+    }).then(function () {
+      els.stats.hidden = false;
+      els.tabs.hidden = false;
+      listen();
+    }).catch(function (err) {
+      var msg = (err && err.message) ? err.message : String(err);
+      verdict('bad', 'Could not read nl-widgets', msg);
+      /* PERMISSION_DENIED here is almost always the rules, not the token —
+         the nls/ block has to be pasted into the nl-widgets console by hand,
+         because that project has no rules deploy workflow. */
+      if (/permission_denied/i.test(msg)) {
+        verdict('bad', 'Permission denied on nls/',
+          'The nls/ rules block has probably not been pasted into the nl-widgets console yet — see functions/README.md.');
+      }
+    });
+  };
+
+  /* Borrowed from the Fan Widgets tool — see the file header for why, and for
+     the canon-promotion note. Write a request, wait for the grant, clean up. */
+  function handshake(uid) {
+    var reqRef   = db.ref('app-data/ops-fan-widgets/authRequests/' + uid);
+    var grantRef = db.ref('app-data/ops-fan-widgets/authGrants/' + uid);
+    return NL.ensureAuth().then(function () {
+      return grantRef.remove().catch(function () {});
+    }).then(function () {
+      return new Promise(function (resolve, reject) {
+        var settled = false;
+        var timer = setTimeout(function () {
+          if (settled) return;
+          settled = true; grantRef.off();
+          reject(new Error('The server did not respond within 30s. The fanWidgetsAuth function may not be deployed.'));
+        }, 30000);
+
+        grantRef.on('value', function (snap) {
+          var v = snap.val();
+          if (!v || settled) return;
+          settled = true; clearTimeout(timer); grantRef.off();
+          grantRef.remove().catch(function () {});
+          if (v.ok && v.customToken) resolve(v.customToken);
+          else reject(new Error(v.error === 'not-superadmin'
+            ? 'This tool is superadmin only.'
+            : ('Token request failed: ' + (v.error || 'unknown'))));
+        });
+
+        reqRef.set({ ts: Date.now() }).catch(function (e) {
+          if (settled) return;
+          settled = true; clearTimeout(timer); grantRef.off(); reject(e);
+        });
+      });
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Live subscriptions — websockets, not polling. Watching a Saturday tick
+  // over is the whole point of the ingester, so this page should show it.
+  // -------------------------------------------------------------------------
+
+  function listen() {
+    var ymd = state.ymd;
+
+    wdb.ref(ROOT + '/meta/ingest').on('value', function (s) {
+      state.ingest = s.val();
+      renderHealth();
+    }, onErr);
+
+    COMPS.forEach(function (c) {
+      /* Exactly the granted slice — live/index/<comp>/<ymd>, never the parent.
+         The rules only grant reads at this depth, which is deliberate: it
+         forces a consumer to name the day it wants rather than subscribing to
+         the season. */
+      wdb.ref(ROOT + '/live/index/' + c.key + '/' + ymd).on('value', function (s) {
+        state.index[c.key] = s.val() || {};
+        if (tab === 'today') renderToday();
+        renderHealth();
+      }, onErr);
+    });
+
+    wdb.ref(ROOT + '/events/' + ymd).on('value', function (s) {
+      state.events = s.val() || {};
+      if (tab === 'events') renderEvents();
+      renderHealth();
+    }, onErr);
+
+    /* Re-check the verdict on a timer as well as on data: "no successful run
+       for six minutes" is a state that arrives through the passage of time,
+       not through a write, so a purely event-driven page would sit there
+       looking green while the ingester was dead. */
+    setInterval(renderHealth, 15000);
+  }
+
+  function onErr(err) {
+    var msg = (err && err.message) ? err.message : String(err);
+    verdict('bad', 'Read failed', msg);
+  }
+
+  // -------------------------------------------------------------------------
+  // Health
+  // -------------------------------------------------------------------------
+
+  function verdict(level, text, sub) {
+    els.verdict.className = 'verdict verdict--' + level;
+    els.verdict.innerHTML =
+      '<span class="verdict__dot"></span><span>' +
+      '<span class="verdict__text">' + esc(text) + '</span><br>' +
+      '<span class="verdict__sub">' + esc(sub || '') + '</span></span>';
+  }
+
+  function renderHealth() {
+    var m = state.ingest;
+    if (!m) {
+      verdict('warn', 'No run recorded yet',
+        'nls/meta/ingest is empty. The scheduled functions may not have run since deploying.');
+      els.stats.innerHTML = '';
+      return;
+    }
+
+    var now = Date.now();
+    var sinceRun = now - (m.lastRun || 0);
+    var allFailed = (m.errorCount || 0) >= COMPS.length;
+    var active = m.mode === 'live' || m.mode === 'prematch' || m.mode === 'cooldown';
+
+    if (allFailed) {
+      verdict('bad', 'Upstream unreachable',
+        'Every competition fetch failed on the last run. RTDB and scheduling are fine — this is NLS. Check Cloud Logging for NLS_UPSTREAM_UNREACHABLE.');
+    } else if (active && !m.lastSuccess) {
+      verdict('bad', 'Running, but nothing has succeeded', 'No successful ingest recorded.');
+    } else if (active && (now - m.lastSuccess) > 5 * 60 * 1000) {
+      verdict('bad', 'Stale during a live window',
+        'Last success ' + NL.timeAgo(m.lastSuccess) + '. Anything reading this is showing old data.');
+    } else if (m.errorCount) {
+      verdict('warn', 'Partial failure',
+        (m.failedCompetitions || []).join(', ') + ' failed; the rest were written and the failed one keeps its last known value.');
+    } else if (sinceRun > Math.max(2 * (m.intervalSec || 3600) * 1000, 5 * 60 * 1000)) {
+      verdict('warn', 'Overdue',
+        'Last run ' + NL.timeAgo(m.lastRun) + ', but it asked to run every ' + humanInterval(m.intervalSec) + '.');
+    } else {
+      verdict('ok', modeLabel(m.mode),
+        'Last run ' + NL.timeAgo(m.lastRun) + ' · next in ' + humanInterval(m.intervalSec) +
+        ' · season ' + esc(m.season) + ' · took ' + (m.durationMs || 0) + 'ms');
+    }
+
+    els.stats.innerHTML = [
+      stat(m.matchesToday || 0, 'Matches today'),
+      stat(m.liveCount || 0, 'In play', m.liveCount ? 'ok' : ''),
+      stat(m.detailFetched || 0, 'Detail fetched last run'),
+      stat(m.eventsCreated || 0, 'Events last run', m.eventsCreated ? 'ok' : ''),
+      stat(Object.keys(state.events || {}).length, 'Events today'),
+      stat(m.errorCount || 0, 'Errors', (m.errorCount ? 'bad' : 'ok'))
+    ].join('');
+  }
+
+  function stat(num, label, mod) {
+    return '<div class="stat' + (mod ? ' stat--' + mod : '') + '">' +
+      '<div class="stat__num">' + esc(num) + '</div>' +
+      '<div class="stat__label">' + esc(label) + '</div></div>';
+  }
+
+  function modeLabel(mode) {
+    if (mode === 'live') return 'Live — polling every minute';
+    if (mode === 'prematch') return 'Pre-match — collecting team news';
+    if (mode === 'cooldown') return 'Post-match — catching late entries';
+    return 'Idle — nothing due';
+  }
+
+  function humanInterval(sec) {
+    if (!sec) return 'unknown';
+    if (sec < 60) return sec + 's';
+    if (sec < 3600) return Math.round(sec / 60) + ' min';
+    return Math.round(sec / 3600) + ' hr';
+  }
+
+  // -------------------------------------------------------------------------
+  // Today
+  // -------------------------------------------------------------------------
+
+  function renderToday() {
+    var html = '';
+    var any = false;
+
+    COMPS.forEach(function (c) {
+      var rows = Object.values(state.index[c.key] || {});
+      if (!rows.length) return;
+      any = true;
+      rows.sort(function (a, b) { return String(a.ko).localeCompare(String(b.ko)); });
+
+      html += '<div class="comp-block">' +
+        '<div class="comp-block__head">' + esc(c.label) +
+        '<span class="comp-block__count">' + rows.length + ' match' + (rows.length === 1 ? '' : 'es') + '</span></div>' +
+        '<div class="table-wrap"><table class="table table--compact"><tbody>';
+
+      rows.forEach(function (r) {
+        html += '<tr>' +
+          '<td class="muted mono">' + esc(NL.formatDateTime(r.ko).split(' ').slice(-1)[0] || '') + '</td>' +
+          '<td style="text-align:right">' + side(r.home) + '</td>' +
+          '<td class="score" style="text-align:center">' + scoreOf(r) + '</td>' +
+          '<td>' + side(r.away, true) + '</td>' +
+          '<td>' + periodPill(r) + '</td>' +
+          '<td class="muted mono">' + (r.lineupComplete ? 'XI' : '') + '</td>' +
+          '</tr>';
+      });
+
+      html += '</tbody></table></div></div>';
+    });
+
+    els.today.innerHTML = any ? html : emptyToday();
+  }
+
+  function emptyToday() {
+    var m = state.ingest;
+    if (m && m.errorCount >= COMPS.length) {
+      return '<div class="empty-state">Nothing written for ' + esc(state.ymd) +
+        ' — the last run could not reach NLS, so this is not "no fixtures".</div>';
+    }
+    return '<div class="empty-state">No fixtures on ' + esc(state.ymd) + '.</div>';
+  }
+
+  function side(t, after) {
+    if (!t) return '';
+    var crest = t.crest
+      ? '<img class="crest" src="' + esc(t.crest) + '" alt="" onerror="this.style.display=\'none\'">'
+      : '';
+    return after ? crest + esc(t.name) : esc(t.name) + ' ' + crest;
+  }
+
+  /* En-dash for a match that has not produced a score, matching the display
+     convention the rest of the repo uses. The period is the master switch —
+     a finished match's minute is already null by the time it reaches here,
+     because the ingester stripped it. */
+  function scoreOf(r) {
+    if (r.postponed) return 'P–P';
+    if (r.period === 'abandoned') return 'A–A';
+    var h = r.home && r.home.score, a = r.away && r.away.score;
+    if (h == null || a == null) return '<span class="muted">v</span>';
+    var s = h + '–' + a;
+    if (r.home.penScore != null) s += ' <span class="muted">(' + r.home.penScore + '–' + r.away.penScore + ' pens)</span>';
+    return s;
+  }
+
+  function periodPill(r) {
+    if (r.live) {
+      return '<span class="pill pill--live">' + esc(r.formattedMinute || r.minute + "'") + '</span>';
+    }
+    if (r.postponed) return '<span class="pill pill--postponed">Postponed</span>';
+    if (r.finished) return '<span class="pill">FT</span>';
+    return '<span class="pill pill--pending">' + esc(r.period || 'pre') + '</span>';
+  }
+
+  // -------------------------------------------------------------------------
+  // Events
+  // -------------------------------------------------------------------------
+
+  function renderEvents() {
+    var list = Object.values(state.events || {});
+    if (!list.length) {
+      els.events.innerHTML = '<div class="empty-state">No events detected on ' + esc(state.ymd) + '.</div>';
+      return;
+    }
+
+    /* ORDERED BY detectedAt, NEVER BY MINUTE. A goal scored at 67' can reach
+       the feed at 15:52 because an official was slow entering it; sorting by
+       the match minute would drop it into the middle of the feed as though it
+       had just been missed. detectedAt is when we first saw it, which is the
+       only honest order for a feed. */
+    list.sort(function (a, b) { return (b.detectedAt || 0) - (a.detectedAt || 0); });
+
+    els.events.innerHTML = list.map(function (e) {
+      var who = e.playerName || e.teamName || '';
+      var what = '';
+      if (e.type === 'goal') {
+        what = who + (e.isPenalty ? ' (pen)' : '') + (e.isOwnGoal ? ' (og)' : '') +
+          ' — ' + e.homeTeam + ' ' + e.homeScore + '–' + e.awayScore + ' ' + e.awayTeam;
+      } else if (e.type === 'booking') {
+        what = who + ' — ' + (e.cardType || 'card');
+      } else if (e.type === 'substitution') {
+        what = (e.playerOnName || '?') + ' on for ' + (e.playerOffName || '?');
+      } else if (e.type === 'lineup') {
+        what = (e.teamName || '') + ' team news' + (e.formation ? ' — ' + e.formation : '');
+      } else if (e.type === 'withdrawal') {
+        what = who + ' withdrawn from the XI';
+      }
+      var minute = e.formattedMinute ? ' <span class="muted mono">' + esc(e.formattedMinute) + '</span>' : '';
+      return '<div class="ev ev--' + esc(e.type) + (e.retracted ? ' ev--retracted' : '') + '">' +
+        '<span class="ev__type">' + esc(e.type) + '</span>' +
+        '<span class="ev__what">' + esc(what) + minute +
+          (e.retracted ? ' <span class="muted">(retracted upstream)</span>' : '') + '</span>' +
+        '<span class="ev__when">' + esc(NL.timeAgo(e.detectedAt)) + '</span>' +
+        '</div>';
+    }).join('');
+  }
+
+  // -------------------------------------------------------------------------
+  // Derived
+  // -------------------------------------------------------------------------
+
+  function renderDerived() {
+    els.derived.innerHTML = '<div class="loading-row">Loading tables and scorers…</div>';
+    Promise.all(COMPS.map(function (c) {
+      return Promise.all([
+        wdb.ref(ROOT + '/derived/tables/' + c.key).once('value'),
+        wdb.ref(ROOT + '/derived/scorers/' + c.key).once('value'),
+        wdb.ref(ROOT + '/derived/coverage/' + c.key).once('value')
+      ]).then(function (snaps) {
+        return { comp: c, table: snaps[0].val(), scorers: snaps[1].val(), cov: snaps[2].val() };
+      });
+    })).then(function (all) {
+      var html = all.map(derivedBlock).join('');
+      els.derived.innerHTML = html || '<div class="empty-state">Nothing derived yet.</div>';
+    }).catch(function (e) {
+      els.derived.innerHTML = '<div class="empty-state">Could not read derived nodes: ' + esc(e.message) + '</div>';
+    });
+  }
+
+  function derivedBlock(d) {
+    if (!d.table && !d.scorers && !d.cov) return '';
+    var html = '<div class="comp-block"><div class="comp-block__head">' + esc(d.comp.label);
+
+    /* `basis` is the honest bit: 'official' is a settled table, 'official+live'
+       has in-play matches applied on top and will move again. */
+    if (d.table && d.table.basis) {
+      html += '<span class="comp-block__count">' + esc(d.table.basis) +
+        (d.table.liveMatchesApplied ? ' · ' + d.table.liveMatchesApplied + ' in play' : '') + '</span>';
+    }
+    html += '</div>';
+
+    var rows = (d.table && d.table.rows) || [];
+    if (rows.length) {
+      html += '<div class="table-wrap"><table class="table table--compact"><thead><tr>' +
+        '<th>#</th><th>Team</th><th>P</th><th>GD</th><th>Pts</th></tr></thead><tbody>' +
+        rows.slice(0, 6).map(function (r) {
+          return '<tr><td>' + r.pos + '</td><td>' + esc(r.team) + '</td><td>' + r.played +
+            '</td><td>' + r.goalDifference + '</td><td><strong>' + r.points + '</strong></td></tr>';
+        }).join('') + '</tbody></table></div>';
+    } else if (d.table && d.table.groups) {
+      html += '<div class="muted">' + Object.keys(d.table.groups).length + ' cup group(s) recorded.</div>';
+    }
+
+    var sc = Object.values(d.scorers || {})
+      .sort(function (a, b) { return b.goals - a.goals; }).slice(0, 5);
+    if (sc.length) {
+      html += '<div class="muted" style="margin:.5rem 0 .25rem">Top scorers (from detected events)</div>' +
+        '<div class="table-wrap"><table class="table table--compact"><tbody>' +
+        sc.map(function (s) {
+          return '<tr><td>' + esc(s.scorer) + '</td><td>' + s.goals +
+            (s.penalties ? ' <span class="muted">(' + s.penalties + ' pen)</span>' : '') + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }
+
+    /* The coverage gap, shown rather than hidden. A scorer tally that silently
+       under-reports because clubs never entered goal events is worse than one
+       that says so. */
+    if (d.cov) {
+      var gap = d.cov.goalsUnaccounted || 0;
+      html += '<div class="' + (gap ? 'muted' : 'muted') + '" style="margin-top:.4rem">' +
+        d.cov.goalsAccounted + ' of ' + d.cov.goalsScored + ' goals have a named scorer' +
+        (gap ? ' — <strong>' + gap + ' unaccounted</strong> (no goal event entered upstream)' : '') +
+        '</div>';
+    }
+
+    return html + '</div>';
+  }
+
+  // -------------------------------------------------------------------------
+  // Raw — the escape hatch, so an unexpected shape can be read without going
+  // to the Firebase console.
+  // -------------------------------------------------------------------------
+
+  function renderRaw() {
+    if (els.raw.dataset.built) return;
+    els.raw.dataset.built = '1';
+    els.raw.innerHTML =
+      '<div class="filter-bar">' +
+      '<label class="filter-label" for="nmPath">Path under nls/</label>' +
+      '<input id="nmPath" class="mono" style="min-width:22rem" value="meta/ingest">' +
+      '<button class="btn btn--primary btn--sm" id="nmGo" type="button">Read</button>' +
+      '<button class="btn btn--ghost btn--sm" id="nmCopy" type="button">Copy</button>' +
+      '</div><pre id="nmOut" class="mono" style="white-space:pre-wrap;word-break:break-word"></pre>';
+
+    var out = document.getElementById('nmOut');
+    var path = document.getElementById('nmPath');
+
+    document.getElementById('nmGo').addEventListener('click', function () {
+      var p = String(path.value || '').replace(/^\/+|\/+$/g, '');
+      /* seen/ is the internal dedup guard and is granted to nobody. Saying so
+         is friendlier than letting the read fail with PERMISSION_DENIED. */
+      if (/^seen(\/|$)/.test(p)) {
+        out.textContent = 'nls/seen is an internal dedup guard and is deliberately not readable.';
+        return;
+      }
+      out.textContent = 'Reading nls/' + p + '…';
+      wdb.ref(ROOT + '/' + p).once('value').then(function (s) {
+        out.textContent = JSON.stringify(s.val(), null, 2) || 'null';
+      }).catch(function (e) { out.textContent = e.message; });
+    });
+
+    document.getElementById('nmCopy').addEventListener('click', function () {
+      NL.copy(out.textContent).then(function () { NL.toast('Copied', 'success'); });
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Tabs
+  // -------------------------------------------------------------------------
+
+  els.tabs.addEventListener('click', function (e) {
+    var btn = e.target.closest('.tab');
+    if (!btn) return;
+    tab = btn.dataset.tab;
+    [].forEach.call(els.tabs.querySelectorAll('.tab'), function (t) {
+      t.classList.toggle('active', t === btn);
+    });
+    els.today.hidden = tab !== 'today';
+    els.events.hidden = tab !== 'events';
+    els.derived.hidden = tab !== 'derived';
+    els.raw.hidden = tab !== 'raw';
+    if (tab === 'today') renderToday();
+    if (tab === 'events') renderEvents();
+    if (tab === 'derived') renderDerived();
+    if (tab === 'raw') renderRaw();
+  });
+  els.tabs.querySelector('.tab').classList.add('active');
+
+  /* If auth-guard fired before this script loaded, replay the session. */
+  if (window._toolDeferredSession) {
+    window.TOOL.boot(window._toolDeferredSession);
+    delete window._toolDeferredSession;
+  }
+})();
+</script>
+
+</body>
+</html>
