@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — NLS Monitor
-  Version: v0.2 (09/08/2026)
+  Version: v0.3 (09/08/2026)
   File: /nls-monitor/index.html
 
   Live view of the NLS → RTDB ingester: run health, today's matches, the event
@@ -129,11 +129,14 @@
     ];
     window.NL_CHANGELOG.unshift({
       date: '09/08/2026',
-      version: 'v0.2',
+      version: 'v0.3',
       items: [
         'Any matchday, not just today — day bar driven by nls/meta/calendar, merging fixtures/ with live/index.',
         'The upstream failure reason is shown on the verdict rather than pointing at Cloud Logging.',
-        'A blank day now distinguishes “no fixtures”, “not written yet” and “every fetch failed”.'
+        'A blank day now distinguishes “no fixtures”, “not written yet” and “every fetch failed”.',
+        'One table across all divisions with fixed columns, so the score column lines up.',
+        'Opens on the nearest matchday rather than an empty today.',
+        'Empty Events and Scorers now say why they are empty.'
       ]
     });
 
@@ -200,6 +203,29 @@
     margin-bottom: 1rem;
   }
   .daybar select, .daybar input[type=date] { max-width: 16rem; }
+
+  /* Fixed widths so every division's score column sits in the same place.
+     table-layout: fixed is what makes the colgroup binding rather than
+     advisory — without it the browser still sizes from content. */
+  .matches { table-layout: fixed; width: 100%; }
+  .matches .col-time  { width: 4.5rem; }
+  .matches .col-score { width: 7rem; }
+  .matches .col-state { width: 6rem; }
+  .matches .col-flag  { width: 2.5rem; }
+  .matches .ta-r { text-align: right; }
+  .matches .ta-c { text-align: center; }
+  .matches td { overflow: hidden; text-overflow: ellipsis; }
+  .matches .divrow th {
+    text-align: left; padding-top: 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .matches tr:first-child .divrow th, .matches .divrow:first-child th { padding-top: 0; }
+
+  @media (max-width: 640px) {
+    .matches .col-time, .matches .col-flag { width: 3rem; }
+    .matches .col-score { width: 5rem; }
+    .matches .col-state { width: 4.5rem; }
+  }
 
   .comp-block { margin-bottom: 1.5rem; }
   .comp-block__head {
@@ -305,7 +331,8 @@
     index: {},             // today's live rows (only ever written for today)
     fixtures: {},          // the chosen day's rows, from fixtures/<comp>/<ymd>
     events: {},
-    ymd: todayYmd()
+    ymd: todayYmd(),
+    dayPinned: false   // true once a day is chosen, so the calendar stops moving it
   };
   var dayRefs = [];        // live refs for the chosen day, detached on change
   var tab = 'today';
@@ -412,6 +439,14 @@
       wdb.ref(ROOT + '/meta/calendar/' + c.key).on('value', function (s) {
         var v = s.val();
         state.calendar[c.key] = (v && v.days) || {};
+        /* Land on a day that has games. Opening on an empty today and leaving
+           someone to hunt for a matchday is a date picker pretending to be an
+           answer. Only until the day is pinned by an actual choice — after
+           that, a late-arriving calendar must not yank the page away. */
+        if (!state.dayPinned) {
+          var best = nearestMatchday();
+          if (best && best !== state.ymd) { selectDay(best); return; }
+        }
         renderDaybar();
       }, function () { /* absent until the first successful run */ });
     });
@@ -488,6 +523,19 @@
     return Object.keys(set).sort().map(function (d) { return { ymd: d, count: set[d] }; });
   }
 
+  /* Today if it has games; otherwise the most recent day that did — results
+     are more use than an empty page — and only if there is no past at all,
+     the next day coming. */
+  function nearestMatchday() {
+    var days = allMatchdays();
+    if (!days.length) return null;
+    var t = todayYmd();
+    if (days.some(function (d) { return d.ymd === t; })) return t;
+    var past = days.filter(function (d) { return d.ymd < t; });
+    if (past.length) return past[past.length - 1].ymd;
+    return days[0].ymd;
+  }
+
   function renderDaybar() {
     var days = allMatchdays();
     els.daybar.hidden = false;
@@ -523,14 +571,14 @@
   }
 
   els.prev.addEventListener('click', function () {
-    if (this.dataset.ymd) selectDay(this.dataset.ymd);
+    if (this.dataset.ymd) { state.dayPinned = true; selectDay(this.dataset.ymd); }
   });
   els.next.addEventListener('click', function () {
-    if (this.dataset.ymd) selectDay(this.dataset.ymd);
+    if (this.dataset.ymd) { state.dayPinned = true; selectDay(this.dataset.ymd); }
   });
-  els.pick.addEventListener('change', function () { selectDay(this.value); });
+  els.pick.addEventListener('change', function () { state.dayPinned = true; selectDay(this.value); });
   els.dateIn.addEventListener('change', function () {
-    if (this.value) selectDay(this.value);
+    if (this.value) { state.dayPinned = true; selectDay(this.value); }
   });
 
   function onErr(err) {
@@ -624,8 +672,12 @@
   // -------------------------------------------------------------------------
 
   function renderToday() {
-    var html = '';
-    var any = false;
+    /* ONE TABLE FOR EVERY DIVISION, with fixed column widths.
+       Rendering a table per competition let each one size its own columns
+       from its own content, so the score column landed in a different place
+       in every block and the eye had to re-find it four times. Divisions are
+       header rows inside one table instead. */
+    var blocks = [];
 
     COMPS.forEach(function (c) {
       /* Merge the two sources. fixtures/ is the season and is what any day
@@ -635,29 +687,42 @@
       var merged = Object.assign({}, state.fixtures[c.key] || {}, state.index[c.key] || {});
       var rows = Object.values(merged);
       if (!rows.length) return;
-      any = true;
       rows.sort(function (a, b) { return String(a.ko).localeCompare(String(b.ko)); });
+      blocks.push({ comp: c, rows: rows });
+    });
 
-      html += '<div class="comp-block">' +
-        '<div class="comp-block__head">' + esc(c.label) +
-        '<span class="comp-block__count">' + rows.length + ' match' + (rows.length === 1 ? '' : 'es') + '</span></div>' +
-        '<div class="table-wrap"><table class="table table--compact"><tbody>';
+    if (!blocks.length) { els.today.innerHTML = emptyDay(); return; }
 
-      rows.forEach(function (r) {
+    var html = '<div class="table-wrap"><table class="table table--compact matches">' +
+      '<colgroup>' +
+        '<col class="col-time"><col class="col-team"><col class="col-score">' +
+        '<col class="col-team"><col class="col-state"><col class="col-flag">' +
+      '</colgroup><tbody>';
+
+    blocks.forEach(function (b) {
+      html += '<tr class="divrow"><th colspan="6">' + esc(b.comp.label) +
+        '<span class="comp-block__count">' + b.rows.length + ' match' +
+        (b.rows.length === 1 ? '' : 'es') + '</span></th></tr>';
+
+      b.rows.forEach(function (r) {
         html += '<tr>' +
-          '<td class="muted mono">' + esc(NL.formatDateTime(r.ko).split(' ').slice(-1)[0] || '') + '</td>' +
-          '<td style="text-align:right">' + side(r.home) + '</td>' +
-          '<td class="score" style="text-align:center">' + scoreOf(r) + '</td>' +
+          '<td class="muted mono">' + esc(kickoffTime(r.ko)) + '</td>' +
+          '<td class="ta-r">' + side(r.home) + '</td>' +
+          '<td class="score ta-c">' + scoreOf(r) + '</td>' +
           '<td>' + side(r.away, true) + '</td>' +
           '<td>' + periodPill(r) + '</td>' +
           '<td class="muted mono">' + (r.lineupComplete ? 'XI' : '') + '</td>' +
           '</tr>';
       });
-
-      html += '</tbody></table></div></div>';
     });
 
-    els.today.innerHTML = any ? html : emptyDay();
+    els.today.innerHTML = html + '</tbody></table></div>';
+  }
+
+  function kickoffTime(ko) {
+    var s = NL.formatDateTime(ko) || '';
+    var parts = s.split(' ');
+    return parts.length ? parts[parts.length - 1] : '';
   }
 
   /* Three different reasons a day can be blank, and conflating them is how a
@@ -717,7 +782,15 @@
   function renderEvents() {
     var list = Object.values(state.events || {});
     if (!list.length) {
-      els.events.innerHTML = '<div class="empty-state">No events detected on ' + esc(state.ymd) + '.</div>';
+      /* Empty here is usually correct rather than broken, and saying which is
+         the difference between a tool and a shrug. Events exist only for days
+         the ingester actually watched: they are detected by diffing one poll
+         against the last, so they cannot be backfilled for a day that has
+         already happened. */
+      els.events.innerHTML = '<div class="empty-state">No events for ' +
+        esc(NL.formatDateShort(state.ymd)) + '. Events are detected live by ' +
+        'comparing one poll to the last, so a day the ingester did not watch ' +
+        'has none and cannot be given any retrospectively.</div>';
       return;
     }
 
@@ -769,7 +842,10 @@
       });
     })).then(function (all) {
       var html = all.map(derivedBlock).join('');
-      els.derived.innerHTML = html || '<div class="empty-state">Nothing derived yet.</div>';
+      els.derived.innerHTML = html ||
+        '<div class="empty-state">Nothing derived yet. Tables come from the ' +
+        'hourly run; scorers accumulate from goals detected live, so they stay ' +
+        'empty until the ingester has watched a matchday.</div>';
     }).catch(function (e) {
       els.derived.innerHTML = '<div class="empty-state">Could not read derived nodes: ' + esc(e.message) + '</div>';
     });
@@ -801,6 +877,10 @@
 
     var sc = Object.values(d.scorers || {})
       .sort(function (a, b) { return b.goals - a.goals; }).slice(0, 5);
+    if (!sc.length) {
+      html += '<div class="muted" style="margin-top:.4rem">No scorers yet — ' +
+        'the tally is built from goals detected live, not fetched.</div>';
+    }
     if (sc.length) {
       html += '<div class="muted" style="margin:.5rem 0 .25rem">Top scorers (from detected events)</div>' +
         '<div class="table-wrap"><table class="table table--compact"><tbody>' +

@@ -611,7 +611,13 @@ async function runIngest(now, opts) {
   await writeCalendar(okResults, seasonID, now);
 
   const scorerTouches = await writeScorers(createdByComp, now);
-  const tableWrites = await writeTables(seasonID, okResults, now, Boolean(options.hourly));
+  /* ALL competitions, not just the ones whose day list worked. The official
+     league table is its own request and does not depend on today's card at
+     all — passing only okResults meant a day-list failure silently suppressed
+     every table, so the Tables tab looked broken for a reason that had nothing
+     to do with tables. A competition with no live rows simply gets its
+     official table with no overlay, which is correct. */
+  const tableWrites = await writeTables(seasonID, indexResults, now, Boolean(options.hourly));
   if (options.hourly) await writeCoverage(seasonID, now);
 
   const createdCount = Object.values(createdByComp).reduce((n, a) => n + a.length, 0);

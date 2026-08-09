@@ -96,8 +96,20 @@ async function getJson(url, label) {
    The window is UTC because that is what the endpoint filters on; see the note
    in transform.ymdOf about late kick-offs. */
 function dayWindow(ymd) {
-  return 'from=' + encodeURIComponent(ymd + ' 00:00:00Z') +
-         '&to=' + encodeURIComponent(ymd + ' 23:59:59Z');
+  /* A LITERAL `+` FOR THE SPACE, NOT %20. This is the whole reason every day
+     list failed while the season list — which sends no from/to — worked fine
+     throughout. The endpoint accepts `2026-08-08+00%3A00%3A00Z` and rejects
+     the percent-encoded form, so encodeURIComponent is exactly the wrong tool
+     here despite being the obvious one.
+
+     The reference this was written from contains both: a confirmed-working URL
+     using `+`, and a helper function using encodeURIComponent. I copied the
+     helper. The symptom was four competitions failing with the host plainly
+     reachable, which reads like a WAF or an egress problem and is neither.
+
+     Colons stay percent-encoded — those genuinely do need escaping. */
+  return 'from=' + ymd + '+00%3A00%3A00Z' +
+         '&to=' + ymd + '+23%3A59%3A59Z';
 }
 
 /* `includePopulatedDates=true` returns meta.populatedDates — every date in the
