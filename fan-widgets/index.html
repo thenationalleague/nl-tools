@@ -105,7 +105,7 @@
           'A player is identified by NLS playerID, which is stable across fixtures — so a player nominated in three games this weekend is one row, not three. Deliberately not the name: motm.html derives that from knownName || customKnownName || firstName + lastName, so the same player can render differently once the feed fills in a field that was empty before.',
           'Individual votes are the deep dive now: the player line carries the name and the count, and the game plus the fans\' notes sit behind the toggle.',
           'No raw match ids anywhere. A fixture missing from the feed says "Fixture unavailable" rather than printing g2660046.',
-          '"Date unknown" sorts last. It was sorting above every real matchday, so anything the fixture feed had not caught up with led the page.'
+          'An unmatched fixture is now treated as a fault rather than a category. A fan can only nominate from a fixture the widget surfaced, and this tool fetches the same three competitions for the same season, so every vote should resolve — if one does not, the fixture list here is short and the page says so. The fetch no longer swallows failed pages silently either. The bucket is labelled "Not matched to a fixture" and sorts last, where it used to say "Date unknown" and sort above every real matchday.'
         ]
       },
       {
@@ -212,6 +212,27 @@
     display: flex; align-items: center; gap: 10px;
     font-size: var(--text-sm); padding: 3px 0;
     border-bottom: 1px solid var(--border);
+  }
+
+  /* CANON CANDIDATE: an amber "something is not right, here is what" banner
+     is hand-rolled in at least four tools already — club-contacts has two
+     identical copies (.ri-dupnote, .ri-softnote), plus travel-planner's
+     .tp__jbanner--warn and attendance. Well past the promote-on-second-use
+     rule, but promoting it means bumping ?v= across the template and every
+     tool head in lockstep, which does not belong in this change. Local for
+     now, flagged so it gets tracked.
+
+     Full border rather than a left stripe: the side-accent-on-a-card is a
+     pattern the design lint flags, and there is no reason to argue with it. */
+  .fw-warn {
+    background: var(--amber-light);
+    border: 1px solid var(--amber);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    color: var(--amber-deep);
+    font-size: var(--text-sm);
+    line-height: 1.45;
   }
 
   /* A club and everyone nominated from it. The club is the heading because
@@ -350,7 +371,8 @@
      nodes are held in memory and re-rendered on any change, because they are
      cross-referenced: a fan's row needs their predictions and their Team of
      the Week picks alongside their registration. */
-  var state = { users: null, preds: {}, motm: {}, motmNames: {}, q: '', fixtures: {} };
+  var state = { users: null, preds: {}, motm: {}, motmNames: {}, q: '', fixtures: {},
+               fixturesPartial: false };
 
   var syncEl   = document.getElementById('fwSync');
   var statsEl  = document.getElementById('fwStats');
@@ -521,8 +543,11 @@
               '/matches/?competitionID=' + compId + '&seasonID=' + seasonId +
               '&sort=kickOffDateUTC&page.number=' + page + '&page.size=100';
     return fetch(url)
-      .then(function (r) { return r.ok ? r.json() : { data: [] }; })
-      .catch(function () { return { data: [] }; })
+      .then(function (r) {
+        if (!r.ok) { state.fixturesPartial = true; return { data: [] }; }
+        return r.json();
+      })
+      .catch(function () { state.fixturesPartial = true; return { data: [] }; })
       .then(function (json) {
         var rows = (json && json.data) || [];
         rows.forEach(function (m) {
@@ -783,8 +808,33 @@
       return;
     }
 
-    totwEl.innerHTML = dayKeys.map(function (day) {
-      var label = day === 'unknown' ? 'Date unknown' : NL.formatDateShort(day);
+    /* A fan can only nominate from a fixture the widget put in front of
+       them, and both sides fetch the same three competitions for the same
+       season — so every vote should resolve. If one does not, the fixture
+       list here is incomplete (a failed page, or a vote from a season this
+       tool is not fetching), and that is worth saying rather than filing
+       under a neutral-sounding heading. */
+    var stray = days.unknown
+      ? Object.keys(days.unknown).reduce(function (n, comp) {
+          return n + Object.keys(days.unknown[comp]).reduce(function (t, k) {
+            return t + days.unknown[comp][k].total;
+          }, 0);
+        }, 0)
+      : 0;
+    var warn = (stray || state.fixturesPartial)
+      ? '<div class="fw-warn">' +
+          (state.fixturesPartial
+            ? 'The fixture list did not load in full, so some nominations cannot be matched to a game. '
+            : '') +
+          (stray
+            ? stray + ' nomination' + (stray === 1 ? '' : 's') + ' could not be matched to a fixture. '
+            : '') +
+          'Reload to refetch; if it persists the fixture feed is short of what the fan widget offered.' +
+        '</div>'
+      : '';
+
+    totwEl.innerHTML = warn + dayKeys.map(function (day) {
+      var label = day === 'unknown' ? 'Not matched to a fixture' : NL.formatDateShort(day);
       var comps = days[day];
       return '<div class="section-head"><h2>' + NL.escHtml(label) + '</h2></div>' +
         ['National', 'North', 'South', 'Other'].filter(function (c) { return comps[c]; })
