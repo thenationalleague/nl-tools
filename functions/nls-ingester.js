@@ -404,7 +404,8 @@ async function writeCoverage(seasonID, now) {
       const existing = await read('derived/coverage/' + key);
       await writeIfChanged('derived/coverage/' + key,
         Object.assign({ compKey: key, season: seasonID, updatedAt: now,
-          note: 'goalsUnaccounted are goals in finished matches with no goal event entered upstream. Own goals are not credited to a scorer and count toward the gap.' }, cov),
+          pendingBackfillDays: (await read('meta/backfill/' + key + '/pending')) || 0,
+          note: 'goalsUnaccounted are goals in finished matches for which no goal event exists in the tally. Own goals are never credited to a scorer and always count toward the gap. While pendingBackfillDays is above zero the figure is our catch-up, not a claim about upstream.' }, cov),
         existing ? T.contentHash(existing) : null);
 
       /* The fixture node — slow-changing schedule, grouped per matchday so a
@@ -459,6 +460,93 @@ async function writeCalendar(results, seasonID, now) {
     await writeIfChanged('meta/calendar/' + res.key, node,
       existing ? T.contentHash(existing) : null);
   }
+}
+
+/**
+ * Scorer backfill for matchdays the ingester was not running for.
+ *
+ * WHY THIS IS NOT THE EVENT STREAM
+ * The scorer tally is incremental — it counts goals detected live — which
+ * means a season that started before the ingester did has no named scorers at
+ * all, and the coverage flag then reports OUR gap as if it were upstream's.
+ * "45 goals, 0 with a named scorer, no goal event entered upstream" was an
+ * assertion about NLS that nobody had checked. It was wrong: the detail was
+ * there, we had simply never asked for it.
+ *
+ * So the tally is backfilled from match detail. The EVENT STREAM deliberately
+ * is not. Events carry `detectedAt`, consumers are told to order by it, and
+ * back-dating a season of goals into today would dump sixteen hundred matches
+ * into the top of a live blog. §5a's "cannot be backfilled" stands — what is
+ * being recovered here is a COUNT, which is derivable from state, not a
+ * sequence of moments, which is not.
+ *
+ * Their keys are still written to seen/ so that if one of these matches is
+ * ever fetched live, its goals do not emit as though they had just happened.
+ *
+ * Bounded per run and resumable: each competition records the matchdays it has
+ * finished with, so an interrupted catch-up resumes rather than restarting.
+ */
+const BACKFILL_DAYS_PER_RUN = 5;
+
+async function backfillScorers(seasonID, now, todayYmd) {
+  const summary = [];
+  for (const compId of T.COMP_IDS) {
+    const key = T.compKeyOf(compId);
+    try {
+      const cal = await read('meta/calendar/' + key);
+      if (!cal || !cal.days) continue;
+      const done = (await read('meta/backfill/' + key)) || {};
+      const doneDays = done.days || {};
+
+      /* Past days only. Today is the live path's job, and a future day has
+         nothing to count. */
+      const pending = Object.keys(cal.days).sort()
+        .filter((d) => d < todayYmd && !doneDays[d]);
+      if (!pending.length) continue;
+
+      for (const ymd of pending.slice(0, BACKFILL_DAYS_PER_RUN)) {
+        const listed = await F.fetchDayList(compId, seasonID, ymd);
+        const rows = listed.rows.map((m) => T.shapeIndexRow(m, now)).filter(Boolean);
+        const finished = rows.filter((r) => r.finished);
+
+        const details = await mapPool(finished, 4, async (r) => {
+          try { return T.shapeDetail(await F.fetchDetail(r.id, r.comp), now); }
+          catch (err) { return null; }
+        });
+
+        const goals = [];
+        const seenUpdates = {};
+        details.filter(Boolean).forEach((d) => {
+          E.goalEvents(d, E.contextOf(d)).forEach((g) => {
+            goals.push(g);
+            seenUpdates['seen/' + g.eventKey] = true;
+          });
+        });
+
+        if (goals.length) {
+          const existing = (await read('derived/scorers/' + key)) || {};
+          const merged = D.mergeScorers(existing, goals, now).scorers;
+          const updates = Object.assign({}, seenUpdates);
+          Object.keys(merged).forEach((pid) => {
+            if (T.contentHash(existing[pid]) !== T.contentHash(merged[pid])) {
+              updates['derived/scorers/' + key + '/' + pid] = merged[pid];
+            }
+          });
+          await updateMulti(updates);
+        }
+
+        await db().ref(ROOT + '/meta/backfill/' + key + '/days/' + ymd).set(true);
+        summary.push(key + '/' + ymd + ':' + goals.length);
+      }
+
+      const left = pending.length - Math.min(pending.length, BACKFILL_DAYS_PER_RUN);
+      await db().ref(ROOT + '/meta/backfill/' + key + '/pending').set(left);
+    } catch (err) {
+      const why = (err && err.message) || String(err);
+      logger.error('scorer backfill failed (' + key + '): ' + why, { compKey: key, reason: why });
+    }
+  }
+  return summary;
 }
 
 // ---------------------------------------------------------------------------
@@ -618,7 +706,12 @@ async function runIngest(now, opts) {
      to do with tables. A competition with no live rows simply gets its
      official table with no overlay, which is correct. */
   const tableWrites = await writeTables(seasonID, indexResults, now, Boolean(options.hourly));
-  if (options.hourly) await writeCoverage(seasonID, now);
+  if (options.hourly) {
+    /* Backfill BEFORE coverage, so the gap the coverage flag reports is the
+       real one rather than the catch-up still in progress. */
+    await backfillScorers(seasonID, now, todayYmd);
+    await writeCoverage(seasonID, now);
+  }
 
   const createdCount = Object.values(createdByComp).reduce((n, a) => n + a.length, 0);
 
