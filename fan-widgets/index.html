@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fan Widgets
-  Version: v0.1 (07/08/2026)
+  Version: v0.4 (09/08/2026)
   File: /fan-widgets/index.html
 
   Registrations, predictions and Team of the Week picks from the fan-facing widgets on thenationalleague.org.uk.
@@ -97,6 +97,17 @@
        NL_CHANGELOG[0].version. v0.2 and v0.3 were written as extra items
        inside the v0.1 entry, so the badge said v0.1 however much shipped. */
     window.NL_CHANGELOG = [
+      {
+        date: '09/08/2026',
+        version: 'v0.4',
+        items: [
+          'Team of the Week is grouped date → division → club → player. It was grouped by fixture, which answers "who stood out in this game" — a different question, and one that split a player nominated across two fixtures into two tallies. Club is the axis that holds a squad together, and "who do they play for" is half of what the tab is for.',
+          'A player is identified by NLS playerID, which is stable across fixtures — so a player nominated in three games this weekend is one row, not three. Deliberately not the name: motm.html derives that from knownName || customKnownName || firstName + lastName, so the same player can render differently once the feed fills in a field that was empty before.',
+          'Individual votes are the deep dive now: the player line carries the name and the count, and the game plus the fans\' notes sit behind the toggle.',
+          'No raw match ids anywhere. A fixture missing from the feed says "Fixture unavailable" rather than printing g2660046.',
+          '"Date unknown" sorts last. It was sorting above every real matchday, so anything the fixture feed had not caught up with led the page.'
+        ]
+      },
       {
         date: '09/08/2026',
         version: 'v0.3',
@@ -203,17 +214,59 @@
     border-bottom: 1px solid var(--border);
   }
 
-  /* A player and their vote count, with what people actually said beneath —
-     the notes are the reason to open a match at all. */
-  .fw-vote { padding: 8px 0; border-bottom: 1px solid var(--border); }
-  .fw-vote:last-child { border-bottom: 0; }
-  .fw-vote__head { display: flex; align-items: baseline; gap: 10px; }
-  .fw-vote__name { font-weight: 800; font-variation-settings: 'wght' 800; }
-  .fw-vote__count {
+  /* A club and everyone nominated from it. The club is the heading because
+     "who do they play for" is half the question being asked; the players
+     under it are the answer to the other half, and both have to be readable
+     without clicking anything. */
+  .fw-club {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 8px;
+    overflow: hidden;
+  }
+  .fw-club__head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    background: var(--off-white);
+    border-bottom: 1px solid var(--border);
+  }
+  .fw-club__head img { width: 22px; height: 22px; object-fit: contain; flex: none; }
+  .fw-club__name { font-weight: 900; font-variation-settings: 'wght' 900; }
+  .fw-club__count {
     margin-left: auto;
+    color: var(--text-muted); font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* One line per player, scannable; the evidence is behind the toggle. */
+  .fw-player { border-bottom: 1px solid var(--border); }
+  .fw-player:last-child { border-bottom: 0; }
+  .fw-player > summary {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 14px; cursor: pointer; list-style: none;
+  }
+  .fw-player > summary::-webkit-details-marker { display: none; }
+  .fw-player > summary::before {
+    content: '';
+    flex: none; width: 0; height: 0;
+    border-left: 5px solid var(--text-muted);
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    transition: transform .15s ease;
+  }
+  .fw-player[open] > summary::before { transform: rotate(90deg); }
+  .fw-player > summary:hover { background: var(--off-white); }
+  .fw-player > summary:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  .fw-player__name { font-weight: 800; font-variation-settings: 'wght' 800; }
+  .fw-player__spacer { flex: 1; }
+  .fw-player__count {
     font-variant-numeric: tabular-nums;
     font-weight: 900; font-variation-settings: 'wght' 900;
   }
+  .fw-player__body { padding: 4px 14px 12px 33px; }
+  .fw-player__game { margin-bottom: 6px; }
+
   .fw-note {
     margin: 6px 0 0; padding: 6px 0 6px 12px;
     border-left: 2px solid var(--border);
@@ -510,9 +563,12 @@
     var f = state.fixtures[matchId];
     var mid = '<span class="fw-fix__mid' + (middle ? ' is-score' : '') + '">' +
               NL.escHtml(middle || 'v') + '</span>';
+    /* No raw match id, ever. g2660046 tells nobody anything, and it was the
+       fallback here — so any fixture missing from the feed leaked one. If it
+       cannot be resolved the row says so and keeps its shape. */
     if (!f) {
-      return '<span class="fw-fix"><span class="fw-fix__code">' +
-             NL.escHtml(matchId) + '</span>' + mid + '</span>';
+      return '<span class="fw-fix"><span class="fw-fix__code text-secondary">' +
+             'Fixture unavailable</span></span>';
     }
     return '<span class="fw-fix">' + sideHTML(f.home) + mid + sideHTML(f.away) + '</span>';
   }
@@ -636,16 +692,19 @@
   }
 
   /* ---- Team of the Week -------------------------------------------------
-     Grouped the way the job is actually done: by matchday, then by division,
-     then by fixture, with the votes for each player counted together and the
-     fans' notes underneath.
+     Grouped date -> division -> club -> player, because that is the question
+     being asked of it: on this matchday, who is being nominated repeatedly,
+     and who do they play for.
 
-     One row per fan answered "who voted" — which nobody needs. Picking a Team
-     of the Week means asking "who did people rate in this game, and what did
-     they say", and that requires the votes batched rather than scattered
-     across the fans who cast them. */
-  function totwByMatch() {
-    var byMatch = {};
+     It was grouped by fixture, which answers "who stood out in this game" —
+     a different question, and one that splits a player nominated across two
+     fixtures into two separate tallies. Club is the axis that holds a squad
+     together.
+
+     Individual votes are the deep dive rather than the headline: they sit
+     behind the player, with the note and whoever wrote it. */
+  function totwByClub() {
+    var days = {};
     Object.keys(state.motm || {}).forEach(function (jwtId) {
       var votes = state.motm[jwtId] || {};
       var u = (state.users && state.users[jwtId]) || {};
@@ -654,18 +713,35 @@
                 'Anonymous';
       Object.keys(votes).forEach(function (mid) {
         var v = votes[mid] || {};
-        var m = byMatch[mid] || (byMatch[mid] = { id: mid, total: 0, players: {} });
-        var key = v.playerId || v.playerName || 'unknown';
-        var pl = m.players[key] || (m.players[key] = {
-          name: v.playerName || v.playerId || 'Unknown player',
-          teamId: v.teamId || '', votes: 0, notes: []
+        var day  = matchdayOf(mid) || 'unknown';
+        var comp = (state.fixtures[mid] && COMPS[state.fixtures[mid].comp]) || 'Other';
+        var d = days[day] || (days[day] = {});
+        var c = d[comp]   || (d[comp] = {});
+        var club = c[v.teamId || 'unknown'] ||
+                   (c[v.teamId || 'unknown'] = { teamId: v.teamId || '', total: 0, notes: 0, players: {} });
+        /* Keyed on playerId — NLS's playerID, carried through from the
+           lineup feed unchanged. It is stable across fixtures, which is what
+           makes "nominated in three games this weekend" one row.
+
+           Explicitly NOT keyed on the name: motm.html derives that from
+           knownName || customKnownName || firstName + lastName, so the same
+           player renders differently the moment NLS fills in a field that
+           was empty before. The name is the volatile half of this record,
+           not the id. */
+        var pk = v.playerId || v.playerName || 'unknown';
+        var pl = club.players[pk] || (club.players[pk] = {
+          name: 'Unknown player', votes: 0, notes: [], games: {}
         });
+        /* Last non-empty name wins: same person, same id, but the feed may
+           have filled in a better name since an earlier nomination. */
+        if (v.playerName) pl.name = v.playerName;
         pl.votes += 1;
-        m.total += 1;
-        if (v.note) pl.notes.push({ fan: fan, note: v.note });
+        pl.games[mid] = true;
+        club.total += 1;
+        if (v.note) { pl.notes.push({ fan: fan, note: v.note }); club.notes += 1; }
       });
     });
-    return byMatch;
+    return days;
   }
 
   function matchdayOf(mid) {
@@ -680,69 +756,86 @@
     var f = state.fixtures[mid];
     if (!f) return '';
     var h = f.home && f.home.score, a = f.away && f.away.score;
-    return (h == null || a == null) ? '' : h + '–' + a;
+    return (h == null || a == null) ? '' : h + '\u2013' + a;
+  }
+
+  /* Full club name, not the three-letter code. The code is right beside a
+     crest in a fixture line, where the two clubs give each other context;
+     as a standalone heading answering "who do they play for" it is a puzzle. */
+  function clubMeta(teamId) {
+    var meta = teamId ? NL.clubs.byOpta(teamId) : null;
+    var name = (meta && meta.name) || '';
+    return { name: name || 'Club unknown', crest: name ? NL.clubs.crestUrl(name, 'thumb') : '' };
   }
 
   function renderTotw() {
     if (!state.users) return;
-    var byMatch = totwByMatch();
-    var ids = Object.keys(byMatch);
-    if (!ids.length) {
+    var days = totwByClub();
+    /* Newest first, but 'unknown' is not a date — plain reverse sorted it
+       above every real matchday, so anything the fixture feed had not caught
+       up with led the page. It goes last. */
+    var dayKeys = Object.keys(days).filter(function (d) { return d !== 'unknown'; })
+      .sort().reverse();
+    if (days.unknown) dayKeys.push('unknown');
+    if (!dayKeys.length) {
       totwEl.innerHTML = '<div class="empty-state">No Team of the Week votes yet. ' +
-        'Nominations open at full time and run for 24 hours.</div>';
+        'Nominations open at full time and run until 23:59 the next day.</div>';
       return;
     }
 
-    /* matchday -> competition -> matches. A fixture whose id is not in the
-       feed still shows, under "Other", rather than vanishing from a tally
-       someone is about to act on. */
-    var days = {};
-    ids.forEach(function (mid) {
-      var day = matchdayOf(mid) || 'unknown';
-      var comp = (state.fixtures[mid] && COMPS[state.fixtures[mid].comp]) || 'Other';
-      var d = days[day] || (days[day] = {});
-      (d[comp] || (d[comp] = [])).push(byMatch[mid]);
-    });
-
-    var dayKeys = Object.keys(days).sort().reverse();
     totwEl.innerHTML = dayKeys.map(function (day) {
       var label = day === 'unknown' ? 'Date unknown' : NL.formatDateShort(day);
       var comps = days[day];
       return '<div class="section-head"><h2>' + NL.escHtml(label) + '</h2></div>' +
         ['National', 'North', 'South', 'Other'].filter(function (c) { return comps[c]; })
           .map(function (comp) {
+            var clubs = Object.keys(comps[comp]).map(function (k) { return comps[comp][k]; })
+              .sort(function (a, b) {
+                return b.total - a.total ||
+                       clubMeta(a.teamId).name.localeCompare(clubMeta(b.teamId).name);
+              });
             return '<div class="fw-daylabel text-secondary">' + NL.escHtml(comp) + '</div>' +
-              comps[comp].sort(function (a, b) { return b.total - a.total; })
-                .map(matchCardHTML).join('');
+                   clubs.map(clubCardHTML).join('');
           }).join('');
     }).join('');
   }
 
-  function matchCardHTML(m) {
-    var players = Object.keys(m.players).map(function (k) { return m.players[k]; })
+  function clubCardHTML(club) {
+    var meta = clubMeta(club.teamId);
+    var players = Object.keys(club.players).map(function (k) { return club.players[k]; })
       .sort(function (a, b) { return b.votes - a.votes || a.name.localeCompare(b.name); });
-    var score = scoreOf(m.id);
-    var notes = players.reduce(function (n, p) { return n + p.notes.length; }, 0);
 
-    return '<details class="fw-fan">' +
+    return '<div class="fw-club">' +
+      '<div class="fw-club__head">' +
+        (meta.crest ? '<img src="' + NL.escHtml(meta.crest) + '" alt=""' + CREST_FALLBACK + '>' : '') +
+        '<span class="fw-club__name">' + NL.escHtml(meta.name) + '</span>' +
+        '<span class="fw-club__count">' + club.total +
+          ' nomination' + (club.total === 1 ? '' : 's') + '</span>' +
+      '</div>' +
+      players.map(playerHTML).join('') +
+    '</div>';
+  }
+
+  /* The player is the scannable line — name and count, no clicking. What is
+     behind the toggle is the evidence: which game, and what people said. */
+  function playerHTML(p) {
+    var games = Object.keys(p.games);
+    return '<details class="fw-player">' +
       '<summary>' +
-        fixtureHTML(m.id, score) +
-        '<span class="fw-fan__spacer"></span>' +
-        '<span class="pill">' + m.total + ' vote' + (m.total === 1 ? '' : 's') + '</span>' +
-        (notes ? '<span class="pill">' + notes + ' note' + (notes === 1 ? '' : 's') + '</span>' : '') +
+        '<span class="fw-player__name">' + NL.escHtml(p.name) + '</span>' +
+        '<span class="fw-player__spacer"></span>' +
+        (p.notes.length
+          ? '<span class="pill">' + p.notes.length + ' note' + (p.notes.length === 1 ? '' : 's') + '</span>'
+          : '') +
+        '<span class="fw-player__count">' + p.votes + '</span>' +
       '</summary>' +
-      '<div class="fw-fan__body">' +
-        players.map(function (p) {
-          return '<div class="fw-vote">' +
-            '<div class="fw-vote__head">' +
-              '<span class="fw-vote__name">' + NL.escHtml(p.name) + '</span>' +
-              '<span class="fw-vote__count">' + p.votes + '</span>' +
-            '</div>' +
-            p.notes.map(function (n) {
-              return '<blockquote class="fw-note">' + NL.escHtml(n.note) +
-                '<cite>' + NL.escHtml(n.fan) + '</cite></blockquote>';
-            }).join('') +
-          '</div>';
+      '<div class="fw-player__body">' +
+        games.map(function (mid) {
+          return '<div class="fw-player__game">' + fixtureHTML(mid, scoreOf(mid)) + '</div>';
+        }).join('') +
+        p.notes.map(function (n) {
+          return '<blockquote class="fw-note">' + NL.escHtml(n.note) +
+            '<cite>' + NL.escHtml(n.fan) + '</cite></blockquote>';
         }).join('') +
       '</div>' +
     '</details>';
