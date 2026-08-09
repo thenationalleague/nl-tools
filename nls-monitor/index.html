@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — NLS Monitor
-  Version: v0.3 (09/08/2026)
+  Version: v0.4 (09/08/2026)
   File: /nls-monitor/index.html
 
   Live view of the NLS → RTDB ingester: run health, today's matches, the event
@@ -129,14 +129,16 @@
     ];
     window.NL_CHANGELOG.unshift({
       date: '09/08/2026',
-      version: 'v0.3',
+      version: 'v0.4',
       items: [
         'Any matchday, not just today — day bar driven by nls/meta/calendar, merging fixtures/ with live/index.',
         'The upstream failure reason is shown on the verdict rather than pointing at Cloud Logging.',
         'A blank day now distinguishes “no fixtures”, “not written yet” and “every fetch failed”.',
         'One table across all divisions with fixed columns, so the score column lines up.',
         'Opens on the nearest matchday rather than an empty today.',
-        'Empty Events and Scorers now say why they are empty.'
+        'Empty Events and Scorers now say why they are empty.',
+        'Matchday selector styled; the free date field removed — prev/next plus a list of real matchdays is the question being asked.',
+        'Scorer coverage distinguishes “still backfilling” from “upstream has no scorer”.'
       ]
     });
 
@@ -202,7 +204,27 @@
     display: flex; flex-wrap: wrap; align-items: center; gap: .5rem;
     margin-bottom: 1rem;
   }
-  .daybar select, .daybar input[type=date] { max-width: 16rem; }
+  .daybar select {
+    font: inherit;
+    color: var(--text);
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: .45rem 2rem .45rem .7rem;
+    min-width: 15rem;
+    cursor: pointer;
+    /* Native arrow removed and redrawn, because the platform one sits at a
+       different size and colour on every OS and made the control read as
+       unstyled next to the brand buttons either side of it. */
+    appearance: none; -webkit-appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+                      linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+    background-position: calc(100% - 1.05rem) 55%, calc(100% - .75rem) 55%;
+    background-size: 6px 6px, 6px 6px;
+    background-repeat: no-repeat;
+  }
+  .daybar select:hover  { border-color: var(--navy-300); }
+  .daybar select:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
   /* Fixed widths so every division's score column sits in the same place.
      table-layout: fixed is what makes the colgroup binding rather than
@@ -283,7 +305,6 @@
     <div class="daybar" id="nmDaybar" hidden>
       <button class="btn btn--ghost btn--sm" id="nmPrev" type="button">&larr; Previous matchday</button>
       <select id="nmDayPick" aria-label="Matchday"></select>
-      <input type="date" id="nmDayInput" aria-label="Any date">
       <button class="btn btn--ghost btn--sm" id="nmNext" type="button">Next matchday &rarr;</button>
       <span class="muted" id="nmDayNote"></span>
     </div>
@@ -345,7 +366,6 @@
     prev:    document.getElementById('nmPrev'),
     next:    document.getElementById('nmNext'),
     pick:    document.getElementById('nmDayPick'),
-    dateIn:  document.getElementById('nmDayInput'),
     dayNote: document.getElementById('nmDayNote'),
     today:   document.getElementById('nmToday'),
     events:  document.getElementById('nmEvents'),
@@ -539,7 +559,6 @@
   function renderDaybar() {
     var days = allMatchdays();
     els.daybar.hidden = false;
-    els.dateIn.value = state.ymd;
 
     if (!days.length) {
       els.pick.innerHTML = '<option>No calendar yet</option>';
@@ -577,9 +596,6 @@
     if (this.dataset.ymd) { state.dayPinned = true; selectDay(this.dataset.ymd); }
   });
   els.pick.addEventListener('change', function () { state.dayPinned = true; selectDay(this.value); });
-  els.dateIn.addEventListener('change', function () {
-    if (this.value) { state.dayPinned = true; selectDay(this.value); }
-  });
 
   function onErr(err) {
     var msg = (err && err.message) ? err.message : String(err);
@@ -895,10 +911,16 @@
        that says so. */
     if (d.cov) {
       var gap = d.cov.goalsUnaccounted || 0;
-      html += '<div class="' + (gap ? 'muted' : 'muted') + '" style="margin-top:.4rem">' +
+      var pending = d.cov.pendingBackfillDays || 0;
+      /* Two very different things, and calling both "unaccounted" blamed the
+         upstream for matches we had simply never fetched. */
+      var why = pending
+        ? ' — <strong>' + gap + ' still to load</strong> (' + pending +
+          ' matchday' + (pending === 1 ? '' : 's') + ' left to backfill)'
+        : (gap ? ' — <strong>' + gap + ' with no scorer recorded upstream</strong>' : '');
+      html += '<div class="muted" style="margin-top:.4rem">' +
         d.cov.goalsAccounted + ' of ' + d.cov.goalsScored + ' goals have a named scorer' +
-        (gap ? ' — <strong>' + gap + ' unaccounted</strong> (no goal event entered upstream)' : '') +
-        '</div>';
+        why + '</div>';
     }
 
     return html + '</div>';
