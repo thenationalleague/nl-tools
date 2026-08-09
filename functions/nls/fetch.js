@@ -36,16 +36,54 @@ function upstreamFor(compId) {
   return UPSTREAM[String(compId)] || UPSTREAM.default;
 }
 
+/* Identify ourselves. Every other NLS consumer in this repo is either a browser
+   or a GitHub Actions runner, and both send a real User-Agent; Node's fetch
+   sends a bare `undici`, which is the kind of thing an edge WAF drops without
+   explanation. Naming the client is also simply what a well-behaved API
+   consumer does — if this traffic ever needs discussing with the operator, it
+   should be identifiable in their logs rather than anonymous. */
+const HEADERS = {
+  accept: 'application/json',
+  'user-agent': 'NLTools-Ingester/1.0 (+https://nl.tools)',
+};
+
+/* Failures here get ONE line in Cloud Logging and that line has to be enough
+   to tell three very different problems apart, because the fix for each is
+   unrelated:
+
+     - an HTTP status with a body    → we are being refused (WAF, rate limit)
+     - an abort                      → reachable but slow
+     - a cause code (ENOTFOUND,
+       ECONNREFUSED, UND_ERR_*)      → DNS, egress or TLS
+
+   The first deploy failed all four competitions with none of that captured,
+   which is a diagnostic gap rather than bad luck. The response body is safe to
+   log — it is what the upstream sent us. The request URL still is not, and
+   still is not logged: an outlet key would sit in its path. */
 async function getJson(url, label) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
-    const res = await fetch(url, { headers: { accept: 'application/json' }, signal: ctrl.signal });
-    if (!res.ok) throw new Error('upstream HTTP ' + res.status + ' (' + label + ')');
+    const res = await fetch(url, { headers: HEADERS, signal: ctrl.signal, redirect: 'follow' });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      const snippet = body.replace(/\s+/g, ' ').trim().slice(0, 200);
+      throw new Error('upstream HTTP ' + res.status + ' ' + res.statusText +
+        ' (' + label + ')' + (snippet ? ' — body: ' + snippet : ' — empty body'));
+    }
     return await res.json();
   } catch (err) {
-    if (err.name === 'AbortError') throw new Error('upstream timeout (' + label + ')');
-    throw new Error('upstream failed (' + label + '): ' + err.message);
+    if (err.name === 'AbortError') {
+      throw new Error('upstream timeout after ' + TIMEOUT_MS + 'ms (' + label + ')');
+    }
+    /* undici hides the useful part in `cause`: err.message is a flat
+       "fetch failed" for everything from a bad DNS record to a TLS handshake
+       rejection. The code underneath is the answer. */
+    const cause = err.cause || {};
+    const detail = [cause.code, cause.errno, cause.message]
+      .filter(Boolean).map(String).join(' ');
+    throw new Error('upstream failed (' + label + '): ' + err.message +
+      (detail ? ' — cause: ' + detail : ''));
   } finally {
     clearTimeout(timer);
   }

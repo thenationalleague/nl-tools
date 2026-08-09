@@ -463,6 +463,19 @@ async function runIngest(now, opts) {
   const okResults = indexResults.filter((r) => r.ok);
   const failed = indexResults.filter((r) => !r.ok).map((r) => r.key);
 
+  /* One competition failing is a blip and is handled by leaving that node at
+     its last known value. ALL FOUR failing is not four blips — it is the
+     upstream being unreachable, and it deserves a single loud line rather than
+     four routine ones, because it is the only shape of failure where the
+     ingester is writing nothing at all. This is what to alert on alongside
+     NLS_INGEST_STALE. */
+  if (failed.length === T.COMP_IDS.length) {
+    logger.error('NLS_UPSTREAM_UNREACHABLE', {
+      failed: failed,
+      note: 'every competition list fetch failed — see the preceding "list fetch failed" lines for the cause',
+    });
+  }
+
   /* Previous index rows carry lineupComplete and detailFetchedAt from the last
      detail fetch, which is what the pre-match cadence and the per-match due
      check read. Four small reads. */
