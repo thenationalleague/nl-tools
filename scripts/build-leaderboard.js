@@ -59,7 +59,15 @@ const COMP_IDS = [89, 373, 372];        // National, North, South
 const MAX_PAGES = 10;
 const IN_PLAY_MIN = 105;                // past this from KO, an unmarked match has finished
 const CUTOFF_MIN = 60;                  // predictions lock this long before kick-off
-const FALLBACK_SEASON_ID = 2026;
+/* Season derived from the clock, not pinned to a year. The widgets already do
+   this (deriveSeasonId in motm.html and score-predictor.html): a National
+   League season is named for the calendar year it starts in, and it starts in
+   July. A hardcoded 2026 was correct the day it was written and silently wrong
+   from July 2027 — and wrong in the worst way, because the job still succeeds
+   and still writes a leaderboard, just for last season's fixtures. */
+function deriveSeasonId(d) {
+  return (d.getMonth() + 1) >= 7 ? d.getFullYear() : d.getFullYear() - 1;
+}
 
 /* Salt for the row hash. Public by necessity — the widget has to compute the
    same hash from its own jwtId to find its row, so it ships in the bundle.
@@ -191,13 +199,17 @@ function rowHash(jwtId) {
 /* One user's tally over a scope. `scope` is {kind:'season'} | {kind:'month',
    key:'YYYY-MM'} | {kind:'day', key:'YYYY-MM-DD'}. */
 function tallyFor(predsByDay, matches, scope, now) {
-  const t = { results: 0, exacts: 0, settled: 0 };
+  const t = { results: 0, exacts: 0, settled: 0, predicted: 0 };
   for (const m of matches) {
     const md = matchdayKeyOf(m);
     if (scope.kind === 'month' && monthOfMatchday(md) !== scope.key) continue;
     if (scope.kind === 'day' && md !== scope.key) continue;
     const p = predsByDay[md] && predsByDay[md][m.id];
     if (!p) continue;
+    /* Counted before the settled check: this is "did they take part", which
+       is true the moment they predict and does not wait for a result. Before
+       a ball is kicked every entrant has predictions and nothing settled. */
+    t.predicted += 1;
     if (!isSettled(m, now)) continue;
     const v = verdictOf(p.home, p.away, m.attributes.homeTeam.score, m.attributes.awayTeam.score);
     if (v == null) continue;
@@ -223,15 +235,25 @@ function buildRows(users, predictions, matches, scope, now) {
     const reg = users[jwtId];
     if (!reg || !reg.forename) continue;
     const t = tallyFor(predictions[jwtId] || {}, matches, scope, now);
-    /* Everyone who has registered appears in the SEASON table, even on nought
-       — the season is the thing you are taking part in, and a fan who has just
-       signed up should be able to find themselves in it.
+    /* The season table lists everyone who has PREDICTED, not everyone who has
+       registered.
 
-       A narrower scope drops them. A fan who joined in November has not scored
-       nothing in October; they were not there, and a row of zeroes in a month
-       they sat out reads as a failure rather than an absence. Same reasoning
-       as the widget only offering periods that have actually happened. */
-    if (!t.settled && scope.kind !== 'season') continue;
+       It used to list every registration, so that someone who had just signed
+       up could find themselves. The cost of that only shows up across a season
+       boundary: users/ is keyed by jwtId with no season in it, so a fan who
+       registered last season and never came back sat on the new season's table
+       on nought in perpetuity — and the widget's "N fans playing this season",
+       which is the recruitment line on the signed-out page, counted them.
+
+       Predicted rather than settled, deliberately. Before the first result
+       every entrant has predictions and nothing settled; gating on settled
+       would empty the table for the whole of matchday one.
+
+       A narrower scope still needs something settled. A fan who joined in
+       November has not scored nothing in October; they were not there, and a
+       row of zeroes in a month they sat out reads as a failure rather than an
+       absence. */
+    if (scope.kind === 'season' ? !t.predicted : !t.settled) continue;
     rows.push({
       n: (reg.forename + ' ' + (reg.surnameInitial || '')).trim(),
       c: reg.crestUrl || '',
@@ -371,13 +393,16 @@ function buildLocks(matches) {
 // IO
 // ---------------------------------------------------------------------------
 
-function currentSeasonId() {
+function currentSeasonId(now) {
   try {
     const meta = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets/data/clubs-meta.json'), 'utf8'));
     const s = meta && meta.seasons && meta.seasons.current;
-    return s ? Number(s) : FALLBACK_SEASON_ID;
+    if (s) return Number(s);
+    console.warn('clubs-meta has no seasons.current — falling back to the clock');
+    return deriveSeasonId(now || new Date());
   } catch (e) {
-    return FALLBACK_SEASON_ID;
+    console.warn('clubs-meta unreadable (' + e.message + ') — falling back to the clock');
+    return deriveSeasonId(now || new Date());
   }
 }
 
@@ -438,7 +463,7 @@ async function dbPut(path, value, token) {
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
   const now = new Date();
-  const seasonId = currentSeasonId();
+  const seasonId = currentSeasonId(now);
 
   const matches = await fetchFixtures(seasonId);
   console.log('fixtures: ' + matches.length + ' (season ' + seasonId + ')');
@@ -496,6 +521,7 @@ module.exports = {
   tallyFor, buildRows, scopesFor, buildPayload, rowHash, ROW_SALT, lastActivity,
   matchIndex,
   buildLocks, CUTOFF_MIN, buildMotmWindows, motmCloseAt,
+  currentSeasonId, deriveSeasonId,
 };
 
 if (require.main === module) {

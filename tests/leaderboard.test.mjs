@@ -106,7 +106,7 @@ const PREDS = {
 
 test('rows: ordered by results, then exacts, then forename', () => {
   const rows = lb.buildRows(USERS, PREDS, MATCHES, { kind: 'season' }, NOW);
-  // Dan is last: the season table lists everyone registered, so he is present
+  // Dan is last: he has predicted (only an unplayed match), so he is present
   // on nought rather than absent. See the who-appears block below.
   assert.deepEqual(rows.map((r) => r.n), ['Anna B', 'Cara D', 'Ben C', 'Dan E']);
   assert.deepEqual(rows.slice(0, 3).map((r) => [r.r, r.e, r.s]),
@@ -149,12 +149,42 @@ test('activity: the latest prediction beats the registration date', () => {
   assert.equal(lb.lastActivity(null, null), 0);
 });
 
-test('rows: a fan who has just predicted outranks one who only registered', () => {
+test('rows: a registered fan who has never predicted is not listed at all', () => {
+  // users/ is keyed by jwtId with no season in it, so last season's sign-ups
+  // are still there. Listing them put dormant accounts on the new season's
+  // table on nought forever, and counted them in the widget's "N fans playing
+  // this season" — the recruitment line on the signed-out page.
   const users = {
     old: { forename: 'Old', surnameInitial: 'O', teamId: '1', teamName: 'T', crestUrl: '', registeredAt: 8000 },
     act: { forename: 'Act', surnameInitial: 'A', teamId: '1', teamName: 'T', crestUrl: '', registeredAt: 1000 },
   };
   const preds = { act: { '2026-09-05': { m4: { home: 1, away: 0, submittedAt: 9999 } } } };
+  const rows = lb.buildRows(users, preds, MATCHES, { kind: 'season' }, NOW);
+  assert.deepEqual(rows.map((r) => r.n), ['Act A']);
+});
+
+test('rows: predicting is enough — a result is not required to be listed', () => {
+  // Gating on `settled` instead would empty the table for the whole of
+  // matchday one, when everyone has predictions and nothing has finished.
+  const users = {
+    a: { forename: 'Early', surnameInitial: 'A', teamId: '1', teamName: 'T', crestUrl: '', registeredAt: 1000 },
+  };
+  const preds = { a: { '2026-09-05': { m4: { home: 1, away: 0, submittedAt: 2000 } } } };
+  const rows = lb.buildRows(users, preds, MATCHES, { kind: 'season' }, NOW);
+  assert.deepEqual(rows.map((r) => [r.n, r.r, r.e, r.s]), [['Early A', 0, 0, 0]]);
+});
+
+test('rows: level pegging still breaks to the most recent activity', () => {
+  // Both have predicted, so both are listed; the tiebreak is what is under
+  // test here. Newest activity first, so a table of noughts is not A-Z.
+  const users = {
+    old: { forename: 'Old', surnameInitial: 'O', teamId: '1', teamName: 'T', crestUrl: '', registeredAt: 8000 },
+    act: { forename: 'Act', surnameInitial: 'A', teamId: '1', teamName: 'T', crestUrl: '', registeredAt: 1000 },
+  };
+  const preds = {
+    old: { '2026-09-05': { m4: { home: 2, away: 0, submittedAt: 8500 } } },
+    act: { '2026-09-05': { m4: { home: 1, away: 0, submittedAt: 9999 } } },
+  };
   const rows = lb.buildRows(users, preds, MATCHES, { kind: 'season' }, NOW);
   assert.deepEqual(rows.map((r) => r.n), ['Act A', 'Old O']);
 });
@@ -256,14 +286,15 @@ test('locks: a rescheduled fixture moves its cutoff with it', () => {
 // joined in November did not score nothing in October, they were absent, and
 // a row of zeroes reads as a failure rather than an absence.
 
-test('season: a registered fan with nothing settled still appears', () => {
+test('season: a fan with predictions but nothing settled still appears', () => {
   const rows = lb.buildRows(USERS, PREDS, MATCHES, { kind: 'season' }, NOW);
   const dan = rows.find((r) => r.n === 'Dan E');
   assert.ok(dan, 'Dan predicted only an unplayed match and should still be listed');
   assert.deepEqual([dan.r, dan.e, dan.s], [0, 0, 0]);
 });
 
-test('season: everyone registered is listed, once each', () => {
+test('season: everyone who has predicted is listed, once each', () => {
+  // Every fixture fan here has predicted, so all four are expected.
   const rows = lb.buildRows(USERS, PREDS, MATCHES, { kind: 'season' }, NOW);
   assert.equal(rows.length, Object.keys(USERS).length);
   assert.equal(new Set(rows.map((r) => r.h)).size, rows.length);
@@ -334,4 +365,32 @@ test('matchday keys are cached per match without going stale', () => {
   assert.equal(lb.matchdayKeyOf(match('m10', '2026-08-01T20:00:00Z', 'FullTime', 1, 0)), '2026-08-01');
   // A late kick-off that is the next day in UTC is still this matchday.
   assert.equal(lb.matchdayKeyOf(match('m11', '2026-06-30T23:30:00Z', 'FullTime', 1, 0)), '2026-07-01');
+});
+
+/* ---------------------------------------------------------------------------
+   Which season the job scores.
+
+   currentSeasonId reads assets/data/clubs-meta.json out of the repo checkout
+   on every run. That file is committed, not live, so nothing detects it going
+   stale — and the failure is quiet: the job still succeeds and still writes a
+   leaderboard, just for the wrong season's fixtures.
+
+   The fallback used to be a hardcoded 2026, correct the day it was written and
+   silently wrong from July 2027. It now derives from the clock, the same way
+   the widgets do, so the two cannot disagree about what season it is.
+   --------------------------------------------------------------------------- */
+
+test('season derives from the July boundary, as the widgets do', () => {
+  const on = (iso) => lb.deriveSeasonId(new Date(iso + 'T12:00:00Z'));
+  assert.equal(on('2026-06-30'), 2025);   // last day of 2025-26
+  assert.equal(on('2026-07-01'), 2026);   // first day of 2026-27
+  assert.equal(on('2027-06-30'), 2026);
+  assert.equal(on('2027-07-01'), 2027);   // the year the hardcoded 2026 broke
+  assert.equal(on('2030-01-15'), 2029);   // mid-season, names the starting year
+});
+
+test('clubs-meta wins when it has a current season', () => {
+  // The committed file is the source of truth while it is readable; the clock
+  // is only the safety net. Pinned so a refactor cannot quietly invert them.
+  assert.equal(lb.currentSeasonId(new Date('2030-01-15T12:00:00Z')), 2026);
 });
