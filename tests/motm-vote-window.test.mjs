@@ -88,3 +88,68 @@ test('the deadline rolls over month and year ends', () => {
 test('a fixture with no kick-off time has no deadline, so it never opens', () => {
   assert.equal(voteCloseAt({ ko: null }), null);
 });
+
+/* ---------------------------------------------------------------------------
+   Server-side enforcement.
+
+   The deadline above is the browser's. The rule that actually holds it is
+   ".write": "... motm-windows/<matchId> exists && now < its value", and that
+   node is written by scripts/build-leaderboard.js. Existence encodes the OPEN
+   end — an entry only appears once the match has finished — and the value
+   encodes the close.
+
+   Two implementations of one deadline is the risk this introduces. If they
+   drift, the rule rejects a nomination the widget is still cheerfully
+   offering, and a fan sees a failure with no explanation. So the last test
+   here holds them to the same millisecond.
+   --------------------------------------------------------------------------- */
+
+import { createRequire } from 'node:module';
+const lb = createRequire(import.meta.url)('../scripts/build-leaderboard.js');
+
+const nlsMatch = (id, koIso, period) => ({
+  id,
+  attributes: {
+    kickOffDateUTC: koIso,
+    matchPeriod: period,
+    homeTeam: { teamID: 'H', score: 1 },
+    awayTeam: { teamID: 'A', score: 0 },
+  },
+});
+
+test('the window opens only once a match has actually finished', () => {
+  const now = new Date('2026-08-08T16:00:00Z');
+  const w = lb.buildMotmWindows([
+    nlsMatch('done',   '2026-08-08T14:00:00Z', 'FullTime'),
+    nlsMatch('live',   '2026-08-08T15:00:00Z', 'SecondHalf'),
+    nlsMatch('later',  '2026-08-08T18:00:00Z', 'PreMatch'),
+    nlsMatch('called', '2026-08-08T14:00:00Z', 'Postponed'),
+  ], now);
+  // Existence IS the open gate — a rule demanding the entry exists has
+  // enforced "opens at full time" without a second timestamp.
+  assert.deepEqual(Object.keys(w), ['done']);
+});
+
+test('an abandoned match never opens, so it can never be nominated in', () => {
+  const now = new Date('2026-08-09T12:00:00Z');
+  const w = lb.buildMotmWindows([nlsMatch('gone', '2026-08-08T14:00:00Z', 'Abandoned')], now);
+  assert.deepEqual(w, {});
+});
+
+test('THE INVARIANT: widget and rule agree on the deadline to the millisecond', () => {
+  // Two implementations of one deadline. Drift here means the rule rejects a
+  // nomination the widget is still offering, with nothing on screen to explain
+  // it — so every case the widget is pinned on is checked against the builder.
+  for (const koIso of ['2026-08-08T11:30:00Z', '2026-08-08T14:00:00Z',
+                       '2026-08-08T16:20:00Z', '2026-08-11T18:45:00Z',
+                       '2026-06-30T22:30:00Z', '2026-10-24T14:00:00Z',
+                       '2026-10-25T15:00:00Z', '2027-03-27T15:00:00Z',
+                       '2026-12-26T15:00:00Z', '2026-08-31T14:00:00Z',
+                       '2026-12-31T15:00:00Z']) {
+    assert.equal(
+      lb.motmCloseAt(nlsMatch('m', koIso, 'FullTime')),
+      voteCloseAt({ ko: new Date(koIso) }).getTime(),
+      `builder and widget disagree for a ${koIso} kick-off`,
+    );
+  }
+});
