@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Match Graphic
-  Version: v1.0 (30/07/2026)
+  Version: v1.1 (10/08/2026)
   File: /graphics/match-graphic/index.html
 
   Builds a single match graphic for any two clubs, in the four delivery
@@ -22,6 +22,17 @@
   Graphics & Media sub-tools, so anyone who can reach /graphics/ gets this.
 
   CHANGELOG
+  v1.1 (10/08/2026) — NL Cup guest sides
+    - Selecting the NL Cup adds the 16 PL2 representative sides to both
+      pickers; every other competition shows the NL roster alone, so a PL2
+      side cannot be picked for a National League graphic by accident.
+    - Entrants are read per season from competitions-meta.json rather than
+      hardcoded, so next season's 16 need no code change. Colours and codes
+      come from cup-clubs-meta.json; crests resolve through `crestName` to
+      the parent club's badge, so nothing is duplicated.
+    - Leaving the NL Cup while a guest is selected falls back to the first
+      NL club rather than drawing a graphic for a side not in that comp.
+
   v1.0 (30/07/2026) — Initial build
     - Two NL.clubPicker selects (home/away) with a swap control between them
     - Competition select from competitions-meta.json
@@ -71,6 +82,15 @@
 
     window.NL_CHANGELOG = [
       {
+        date: '10/08/2026',
+        version: 'v1.1',
+        items: [
+          'Pick the NL Cup and the 16 PL2 sides join both club pickers — crests, codes and colours included.',
+          'Entrants come from competitions-meta per season, so next season’s 16 need no code change.',
+          'Switching away from the NL Cup drops a selected PL2 side back to an NL club.'
+        ]
+      },
+      {
         date: '30/07/2026',
         version: 'v1.0',
         items: [
@@ -95,7 +115,7 @@
   </script>
 
   <!-- NL system scripts -->
-  <script src="/system/nl-utils.js?v=29"></script>
+  <script src="/system/nl-utils.js?v=30"></script>
   <script src="/system/nl-topbar.js?v=8"></script>
   <script src="/system/auth-guard.js?v=10"></script>
 
@@ -302,7 +322,8 @@
         <div class="mg-strip mg-strip--info" id="mgOvNote" hidden>
           <span><b>Not saved.</b> Overrides apply to this download only and are
           forgotten on reload. To change a club permanently, edit
-          <code>clubs-meta.json</code>.</span>
+          <code>clubs-meta.json</code> — or <code>cup-clubs-meta.json</code>
+          for a PL2 side.</span>
         </div>
         <div class="form-panel__foot">
           <button class="btn btn--ghost btn--sm" id="mgUnlock" type="button">Override colours</button>
@@ -341,12 +362,38 @@
 
   var el = function (id) { return document.getElementById(id); };
 
+  /* The one competition non-member sides enter. Must match the `competition`
+     string in competitions-meta.json. */
+  var CUP = 'NL Cup';
+
   var state = { home: null, away: null, comp: 'National', format: '16x9' };
   var badges = {};              /* competition -> logo path */
   var overrides = {};           /* club name -> partial colours (session only) */
   var unlocked = false;
   var images = {};              /* url -> Promise<Image|null> */
   var homePicker, awayPicker;
+  var members = [];             /* NL roster for the current season */
+  var guestList = [];           /* THIS season's cup guests, name-sorted */
+  var guestByName = {};         /* name -> guest record, same set */
+
+  /* ---------- club records: members + cup guests ----------
+     Guests are deliberately absent from NL.clubs.byName (they are not and
+     never were NL members — see the note on NL.clubs.guests). Everything
+     downstream of selection treats the two the same, so resolve in one
+     place rather than branching at each call site. */
+
+  function recordFor(name) {
+    return NL.clubs.byName(name) || guestByName[name] || null;
+  }
+
+  /* Guest records point at the parent club's badge ("Fulham PL2" ->
+     Fulham.png) so no crest is duplicated under a suffixed name. */
+  function crestKeyFor(name) {
+    var c = recordFor(name);
+    return (c && c.crestName) || name;
+  }
+
+  function isGuest(name) { return !!guestByName[name]; }
 
   /* ---------- assets ---------- */
 
@@ -365,7 +412,7 @@
   /* ---------- colours ---------- */
 
   function colorsFor(name) {
-    var club = NL.clubs.byName(name);
+    var club = recordFor(name);
     var base = club && club.colors ? club.colors : {};
     var ov = overrides[name];
     if (!ov) return base;
@@ -377,7 +424,7 @@
   function isOverridden(name) {
     var ov = overrides[name];
     if (!ov) return false;
-    var club = NL.clubs.byName(name);
+    var club = recordFor(name);
     var base = (club && club.colors) || {};
     return KEYS.some(function (k) {
       return ov[k] && base[k] && ov[k].toLowerCase() !== base[k].toLowerCase();
@@ -417,7 +464,7 @@
     }).join('');
 
     mount.innerHTML =
-      '<h3><img src="' + NL.clubs.crestUrl(name, 'thumb') + '" alt="">' +
+      '<h3><img src="' + NL.clubs.crestUrl(crestKeyFor(name), 'thumb') + '" alt="">' +
         NL.escHtml(name) + ' <span>' + side + '</span></h3>' +
       rows +
       '<p class="mg-derived">Code <span class="mg-sw mg-sw--sm" style="background:' +
@@ -425,7 +472,7 @@
         '<span class="pill ' + pillClass(r.textBasis) + '">' + r.textBasis + '</span>' +
         '<b>' + ratio.toFixed(2) + ':1</b></p>';
 
-    NL.clubs.wireCrestImg(mount.querySelector('h3 img'), name);
+    NL.clubs.wireCrestImg(mount.querySelector('h3 img'), crestKeyFor(name));
     if (!unlocked) return;
 
     mount.querySelectorAll('input[type="color"]').forEach(function (inp) {
@@ -460,7 +507,7 @@
   /* ---------- naming: mirrors scripts/build-match-graphics.js ---------- */
 
   function filename(homeName, awayName, fmt) {
-    var h = NL.clubs.byName(homeName), a = NL.clubs.byName(awayName);
+    var h = recordFor(homeName), a = recordFor(awayName);
     return (h ? h.code : '???') + '-' + (a ? a.code : '???') + '-' + fmt + '.png';
   }
 
@@ -469,8 +516,9 @@
   function draw() {
     if (!state.home || !state.away) return Promise.resolve();
 
-    var homeClub = NL.clubs.byName(state.home);
-    var awayClub = NL.clubs.byName(state.away);
+    var homeClub = recordFor(state.home);
+    var awayClub = recordFor(state.away);
+    if (!homeClub || !awayClub) return Promise.resolve();
     var home = { name: state.home, code: homeClub.code, colors: colorsFor(state.home) };
     var away = { name: state.away, code: awayClub.code, colors: colorsFor(state.away) };
 
@@ -492,8 +540,8 @@
     var ctx = canvas.getContext('2d', { alpha: false });
 
     return Promise.all([
-      loadImage(NL.clubs.crestUrl(state.home)),
-      loadImage(NL.clubs.crestUrl(state.away)),
+      loadImage(NL.clubs.crestUrl(crestKeyFor(state.home))),
+      loadImage(NL.clubs.crestUrl(crestKeyFor(state.away))),
       loadImage(badges[state.comp])
     ]).then(function (a) {
       if (!a[0] || !a[1]) NL.toast('A crest failed to load', 'error');
@@ -564,6 +612,54 @@
     });
   }
 
+  /* ---------- cup guests ---------- */
+
+  /* WHICH guests entered is a property of the season, not of the club, so it
+     lives on the competition record. Reading it per season means next year's
+     16 arrive with a data edit and no code change. An unrecorded season
+     (null) yields none, which is the honest answer rather than last year's. */
+  function guestsForSeason(comps, all, seasonKey) {
+    var cup = (comps.competitions || []).filter(function (c) {
+      return c.competition === CUP;
+    })[0];
+    var entry = cup && cup.entrants && cup.entrants[seasonKey];
+    var codes = entry && entry.guests;
+    if (!codes || !codes.length) return [];
+    var want = {};
+    codes.forEach(function (c) { want[c] = true; });
+    return all.filter(function (g) { return want[g.code]; });
+  }
+
+  function firstMemberBut(avoid) {
+    for (var i = 0; i < members.length; i++) {
+      if (members[i].name !== avoid) return members[i].name;
+    }
+    return members.length ? members[0].name : null;
+  }
+
+  /* The guests belong to ONE competition, so they are only offered there —
+     otherwise nothing stops a PL2 side being drawn onto a National League
+     graphic. Leaving the cup with one selected falls back to an NL club
+     rather than silently rendering a side that isn't in the competition. */
+  function syncGuests() {
+    var on = state.comp === CUP && guestList.length > 0;
+    if (!on) {
+      if (isGuest(state.home)) {
+        state.home = firstMemberBut(state.away);
+        homePicker.setValue(state.home);
+      }
+      if (isGuest(state.away)) {
+        state.away = firstMemberBut(state.home);
+        awayPicker.setValue(state.away);
+      }
+    }
+    var list = on ? guestList : [];
+    return Promise.all([
+      homePicker.setExtraClubs(list),
+      awayPicker.setExtraClubs(list)
+    ]).then(draw);
+  }
+
   /* ---------- wiring ---------- */
 
   function buildFormatButtons() {
@@ -603,10 +699,24 @@
         if (!r.ok) throw new Error('competitions-meta ' + r.status);
         return r.json();
       }),
+      /* Guests are a bonus, not a dependency — a failure here must not cost
+         the tool its 72 NL clubs, so it resolves to none rather than reject. */
+      NL.clubs.guests().catch(function (err) {
+        console.warn('[match-graphic] cup guests unavailable', err);
+        return [];
+      }),
       fontReady
     ]).then(function (res) {
       var clubs = res[0].filter(function (c) { return c.code && c.colors; });
       if (!clubs.length) throw new Error('no clubs with a code and colours');
+      members = clubs;
+
+      var seasonKey = NL.season.current(NL.clubs.meta());
+      guestList = guestsForSeason(res[1], res[2], seasonKey).filter(function (g) {
+        return g.code && g.colors;
+      });
+      guestByName = {};
+      guestList.forEach(function (g) { guestByName[g.name] = g; });
 
       (res[1].competitions || []).forEach(function (c) {
         if (c.logo) badges[c.competition] = c.logo;
@@ -625,18 +735,25 @@
       state.home = clubs[0].name;
       state.away = clubs.length > 1 ? clubs[1].name : clubs[0].name;
 
+      /* A guest has no division, so the dropdown's secondary line would be
+         blank for the 16. Label them instead — it is also the plainest way
+         to show why they only appear under the cup. */
+      function sideLabel(c) { return c.division || 'PL2 · NL Cup'; }
+
       homePicker = NL.clubPicker('#mgHomePicker', {
         mode: 'select', season: 'current', value: state.home,
+        secondary: sideLabel,
         onSelect: function (sel) { state.home = sel.name; draw(); }
       });
       awayPicker = NL.clubPicker('#mgAwayPicker', {
         mode: 'select', season: 'current', value: state.away,
+        secondary: sideLabel,
         onSelect: function (sel) { state.away = sel.name; draw(); }
       });
 
       el('mgComp').addEventListener('change', function (e) {
         state.comp = e.target.value;
-        draw();
+        syncGuests();
       });
       el('mgSwap').addEventListener('click', function () {
         var h = state.home;
@@ -655,7 +772,9 @@
       el('mgDownload').addEventListener('click', function () { save(state.format); });
       el('mgDownloadAll').addEventListener('click', downloadAll);
 
-      return draw();
+      /* Not draw() — syncGuests settles the pickers' rosters for whatever
+         competition we opened on, then draws. */
+      return syncGuests();
     }).catch(function (err) {
       console.error('[match-graphic]', err);
       NL.toast('Could not load club data — try reloading', 'error');

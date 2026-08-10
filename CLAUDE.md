@@ -103,8 +103,8 @@ Every gated tool's `index.html` has a near-identical `<head>`. The source of tru
 
 | File                 | Current `?v=` | Role                                                              |
 |----------------------|---------------|-------------------------------------------------------------------|
-| `nl-brand.css`       | `?v=26`       | Brand tokens, components, layout. Tools must use tokens not hex.  |
-| `nl-utils.js`        | `?v=27`       | `window.NL.*` helpers: `toast`, `ensureAuth`, `formatDate`/`formatDateShort`/`formatDateTime`/`timeAgo`, `parseDate` (string/Date/epoch), `escHtml`, `writeAudit`, `installAuditHook`, `icon`, `endpoints`, `clubs` (incl. `crestUrl(name[,'thumb'\|'medium'])`, `wireCrestImg`, `byOpta`), `clubPicker`, `roles` (incl. `norm`, `label`, `realm`), `isClubUser`, `canClubEdit`, plus identity-data exports `mapStyle.drive`, `positionBands`, `projColours` (canvas/data callers). |
+| `nl-brand.css`       | `?v=32`       | Brand tokens, components, layout. Tools must use tokens not hex.  |
+| `nl-utils.js`        | `?v=30`       | `window.NL.*` helpers: `toast`, `ensureAuth`, `formatDate`/`formatDateShort`/`formatDateTime`/`timeAgo`, `parseDate` (string/Date/epoch), `escHtml`, `writeAudit`, `installAuditHook`, `icon`, `endpoints`, `clubs` (incl. `crestUrl(name[,'thumb'\|'medium'])`, `wireCrestImg`, `byOpta`, `guests`/`guestByName` for non-member cup sides), `clubPicker` (incl. `extraClubs`/`setExtraClubs`, `crestName`), `roles` (incl. `norm`, `label`, `realm`), `isClubUser`, `canClubEdit`, plus identity-data exports `mapStyle.drive`, `positionBands`, `projColours` (canvas/data callers). |
 | `nl-topbar.js`       | `?v=8`        | Renders `#nlTopbar` from `window.NL_TOOL`. Also injects PWA/favicon tags. |
 | `auth-guard.js`      | `?v=10`       | Gates `#pageWrap`. Verifies live Firebase Auth, re-reads RTDB user + tool registry, then reveals page and fires `nlAuthReady(session)`. |
 
