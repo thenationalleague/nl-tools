@@ -3,6 +3,18 @@
 <head>
 <!--
   UW Promo Codes — Club point-of-sale redemption page
+  Version: v3.1 (06/08/2026) — clubs can upload their own codes, at the foot
+           of the page. Codes register to this club automatically (a club can
+           only upload its own, so there is nothing to choose and nothing to
+           get wrong) and go live immediately. Three undertakings must be
+           ticked first, plus a secondary confirm: the codes work in the
+           club's own till system, they apply the agreed £50 discount, and
+           they stay valid at least 12 months. Expiry is an undertaking, NOT
+           a stored or enforced field — what is kept is the evidence, in the
+           append-only audit trail. New codes are checked against the whole
+           system one indexed lookup at a time rather than by reading every
+           code, so a club never sees another club's codes; hence the 200-per-
+           upload cap.
   Version: v3.0 (06/08/2026) — registered-to-a-club model. A code is created
            against exactly one club, so this till only redeems codes
            registered to THIS club: one registered elsewhere is refused by
@@ -117,6 +129,32 @@
     font-weight: 800; font-variation-settings: 'wght' 800; margin-bottom: 5px; }
   .checker__meta { color: var(--text-muted); font-size: 12px; }
   .checker__quota { margin-top: 10px; font-size: 11px; color: var(--text-muted); }
+
+  /* Club code upload — back-office, not till-side, so it sits last and quiet. */
+  .upload { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 16px 18px; }
+  .upload__intro { font-size: 12px; color: var(--text-muted); line-height: 1.55; margin: 0 0 14px; }
+  .upload__field { margin-bottom: 12px; }
+  .upload__field label { display: block; font-size: 11px; font-weight: 800; text-transform: uppercase;
+    letter-spacing: 0.07em; color: var(--text-muted); margin-bottom: 5px; }
+  .upload__field textarea, .upload__field input { width: 100%; font-family: var(--font); font-size: 14px;
+    padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); }
+  .upload__field textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px; letter-spacing: 0.04em; }
+  .upload__field textarea:focus-visible, .upload__field input:focus-visible {
+    outline: none; box-shadow: var(--focus-ring); border-color: var(--primary); }
+  /* The undertakings. Deliberately not styled down — this is the part of the
+     page that carries an obligation, so it reads at body size, not small print. */
+  .upload__terms { border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--off-white); padding: 13px 15px; margin: 14px 0; }
+  .upload__terms-head { font-size: 11px; font-weight: 900; font-variation-settings: 'wght' 900;
+    text-transform: uppercase; letter-spacing: 0.08em; color: var(--navy); margin-bottom: 10px; }
+  .upload__term { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 9px;
+    font-size: 13px; line-height: 1.5; cursor: pointer; }
+  .upload__term:last-child { margin-bottom: 0; }
+  .upload__term input { margin-top: 2px; width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--primary); }
+  .upload__out { margin-top: 12px; font-size: 13px; line-height: 1.55; }
+  .upload__out:empty { margin-top: 0; }
 </style>
 </head>
 <body>
@@ -181,6 +219,40 @@
       </div>
       <div class="checker__out" id="chkOut" role="status" aria-live="polite"></div>
       <div class="checker__quota" id="chkQuota"></div>
+    </div>
+
+    <!-- Club-supplied codes. Registered to this club automatically — there is
+         no club to choose, because a club can only ever upload its own. -->
+    <div class="list-head">Upload your own codes</div>
+    <div class="upload">
+      <p class="upload__intro">Add your own promo codes whenever suits you. They are registered to
+        <strong id="upClubName"></strong> and can only be redeemed here.</p>
+      <div class="upload__field">
+        <label for="upCodes">Codes — one per line</label>
+        <textarea id="upCodes" rows="6" placeholder="CODEONE&#10;CODETWO&#10;CODETHREE"></textarea>
+      </div>
+      <div class="upload__field">
+        <label for="upLabel">Batch label (optional)</label>
+        <input id="upLabel" maxlength="40" placeholder="e.g. Autumn mailout">
+      </div>
+      <div class="upload__terms">
+        <div class="upload__terms-head">Before you upload, please confirm</div>
+        <label class="upload__term">
+          <input type="checkbox" id="upT1">
+          <span>These codes work in <strong>our own till system</strong>. It is our responsibility to
+            make sure they do — the National League and Utility Warehouse cannot test them for us.</span>
+        </label>
+        <label class="upload__term">
+          <input type="checkbox" id="upT2">
+          <span>Each code applies the <strong>agreed £50 discount</strong>.</span>
+        </label>
+        <label class="upload__term">
+          <input type="checkbox" id="upT3">
+          <span>These codes stay valid for <strong>at least 12 months</strong> from today.</span>
+        </label>
+      </div>
+      <button class="btn btn--primary" id="upBtn">Upload codes</button>
+      <div class="upload__out" id="upOut" role="status" aria-live="polite"></div>
     </div>
   </div>
 </div>
@@ -295,6 +367,7 @@
     NL.clubs.wireCrestImg(crest, club.name);
     document.getElementById('hbarCrest').replaceChildren(crest);
     document.getElementById('hbarClub').textContent = club.name;
+    document.getElementById('upClubName').textContent = club.name;
 
     if (codesQuery) codesQuery.off();
     codesQuery = UWP.ref('codes').orderByChild('club').equalTo(club.code);
@@ -534,6 +607,144 @@
   function logCheck(code, outcome) {
     UWP.audit(actor(), CLUB.name, 'check', {
       club: CLUB.code, clubName: CLUB.name, codes: code, detail: 'Checked → ' + outcome
+    });
+  }
+
+  /* ── Club uploads its own codes ─────────────────────────────────────── */
+  /* Registered to this club automatically — a club can only ever upload its
+     own, so there is no club to choose and no way to get it wrong.
+
+     The three undertakings are the point of the feature: the codes are the
+     club's own, so only the club can vouch that they work in its till system
+     and carry the agreed discount. Expiry is an undertaking too, not a stored
+     field — we don't police a date, the club commits to 12 months. What gets
+     kept is the *evidence*: the audit entry names the club, the batch, the
+     count and each undertaking, and the audit trail is append-only, so not
+     even the master console can quietly alter it later. */
+  var UPLOAD_MAX = 200;      // one indexed lookup per code — see checkExisting
+  var upBusy = false;
+  var upCodes = document.getElementById('upCodes'),
+      upOut = document.getElementById('upOut');
+
+  function upMsg(html) { upOut.innerHTML = '<div class="checker__card">' + html + '</div>'; }
+
+  document.getElementById('upBtn').addEventListener('click', runUpload);
+
+  function parseUploaded() {
+    var seen = {}, out = [];
+    (upCodes.value || '').split(/\r?\n/).forEach(function (line) {
+      var raw = line.trim();
+      if (!raw) return;
+      var norm = UWP.normCode(raw);
+      if (!norm || seen[norm]) return;      // blank or repeated in the paste
+      seen[norm] = true;
+      out.push({ code: raw.toUpperCase(), norm: norm });
+    });
+    return out;
+  }
+
+  /* One indexed lookup per code, ten at a time. The alternative — reading the
+     whole codes node to build a local set — would put every other club's codes
+     in this browser, which is precisely what the club must not have. Slower,
+     but it keeps clubs blind to each other. Hence the 200 cap. */
+  function checkExisting(list) {
+    var clashes = [], i = 0;
+    function next() {
+      if (i >= list.length) return Promise.resolve(clashes);
+      var slice = list.slice(i, i + 10);
+      i += 10;
+      return Promise.all(slice.map(function (c) {
+        return UWP.ref('codes').orderByChild('norm').equalTo(c.norm).once('value')
+          .then(function (s) { if (s.val()) clashes.push(c.code); });
+      })).then(next);
+    }
+    return next();
+  }
+
+  function runUpload() {
+    if (upBusy) return;
+    var t1 = document.getElementById('upT1').checked,
+        t2 = document.getElementById('upT2').checked,
+        t3 = document.getElementById('upT3').checked;
+
+    var list = parseUploaded();
+    if (!list.length) { upMsg('Paste at least one code above.'); return; }
+    if (list.length > UPLOAD_MAX) {
+      upMsg('That’s ' + list.length + ' codes — please upload up to ' + UPLOAD_MAX +
+        ' at a time so each one can be checked properly.');
+      return;
+    }
+    if (!(t1 && t2 && t3)) {
+      upMsg('Please tick all three confirmations before uploading. They record that these ' +
+        'codes are your club’s responsibility.');
+      return;
+    }
+
+    upBusy = true;
+    upMsg('Checking ' + list.length + ' code' + (list.length === 1 ? '' : 's') + '…');
+    UWP.ensureAuth().then(function () {
+      return checkExisting(list);
+    }).then(function (clashes) {
+      upBusy = false;
+      if (clashes.length) {
+        upMsg('<strong>Already in the system:</strong> ' +
+          esc(clashes.slice(0, 5).join(', ')) + (clashes.length > 5 ? ' and ' + (clashes.length - 5) + ' more' : '') +
+          '.<div class="checker__meta" style="margin-top:5px">Remove them and upload the rest — nothing has been added.</div>');
+        return;
+      }
+      confirmUpload(list);
+    }).catch(function (err) {
+      upBusy = false;
+      upMsg('Could not check those codes: ' + esc(err.message));
+    });
+  }
+
+  /* The secondary confirm. The first tick-boxes state the undertakings; this
+     restates what is about to happen and who it binds, so nobody uploads 200
+     codes on a mis-click. */
+  function confirmUpload(list) {
+    NL.confirm('Upload ' + list.length + ' code' + (list.length === 1 ? '' : 's') + ' for ' + CLUB.name + '?', {
+      title: 'Confirm upload',
+      detail: 'You are confirming these codes work in ' + CLUB.name + '’s own till system, apply the ' +
+        'agreed £50 discount, and stay valid for at least 12 months. This is recorded against your club ' +
+        'and cannot be edited afterwards.',
+      confirmText: 'Yes, upload them'
+    }).then(function (ok) {
+      if (!ok) return;
+      var batch = UWP.ref('codes').push().key;
+      var label = (document.getElementById('upLabel').value || '').trim();
+      var updates = {};
+      list.forEach(function (c) {
+        updates[UWP.ref('codes').push().key] = {
+          code: c.code, norm: c.norm, status: 'active',
+          club: CLUB.code, clubName: CLUB.name,
+          batch: batch, batchLabel: label || null,
+          createdAt: UWP.TS(), createdBy: actor()
+        };
+      });
+      upBusy = true;
+      upMsg('Uploading…');
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('codes').update(updates);
+      }).then(function () {
+        upBusy = false;
+        UWP.audit(actor(), CLUB.name, 'add-codes', {
+          club: CLUB.code, clubName: CLUB.name, count: list.length, batch: batch,
+          codes: list.slice(0, 10).map(function (c) { return c.code; }).join(', ') +
+                 (list.length > 10 ? ' …' : ''),
+          detail: 'Club upload' + (label ? ' “' + label + '”' : '') +
+            ' — confirmed: works in club till system; applies agreed £50 discount; valid 12 months+'
+        });
+        upCodes.value = '';
+        document.getElementById('upLabel').value = '';
+        ['upT1', 'upT2', 'upT3'].forEach(function (id) { document.getElementById(id).checked = false; });
+        upMsg('<strong>' + list.length + ' code' + (list.length === 1 ? '' : 's') + ' uploaded.</strong>' +
+          '<div class="checker__meta" style="margin-top:5px">They’re live now and redeemable at ' +
+          esc(CLUB.name) + '. Your confirmations have been recorded with the National League.</div>');
+      }).catch(function (err) {
+        upBusy = false;
+        upMsg('Upload failed: ' + esc(err.message) + ' — nothing was added, please try again.');
+      });
     });
   }
 })();

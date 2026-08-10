@@ -10,7 +10,7 @@ NO auth-guard/portal login), with a full audit trail.
 | Page | Who | Gets in via | Can do |
 |---|---|---|---|
 | `/uw-promo/` | **Utility Warehouse** (one shared login) | shared 6-character passcode or `?u=<token>` direct link | Add codes **for one club at a time** (club dropdown required; paste a list — the default — or generate plain 6-character codes; optional batch label; ≤500/batch), revoke **unredeemed** codes, release a redeemed code (required reason), see every code with the club it belongs to, redeemed-by-club breakdown, filters, search, CSV export. The big count cards follow the club filter |
-| `/uw-promo/club/` | **Each of the 72 clubs** | own `?c=<token>` direct link (the QR-code target for the point of sale) **plus their 4-digit PIN on every visit**; PIN alone also works without the link | **Till page**: big code entry → a valid unredeemed code *registered to this club* is redeemed here (RTDB transaction — two tills can't claim the same code) and joins the club's redeemed list. A code registered elsewhere is refused by name. Already-redeemed entry shows **which club and the exact date/time**. Revoked → "no longer valid". Clubs cannot undo — the page points them at NL. **Check a code** at the foot of the page looks a code up without redeeming it (10 an hour, audited) |
+| `/uw-promo/club/` | **Each of the 72 clubs** | own `?c=<token>` direct link (the QR-code target for the point of sale) **plus their 4-digit PIN on every visit**; PIN alone also works without the link | **Till page**: big code entry → a valid unredeemed code *registered to this club* is redeemed here (RTDB transaction — two tills can't claim the same code) and joins the club's redeemed list. A code registered elsewhere is refused by name. Already-redeemed entry shows **which club and the exact date/time**. Revoked → "no longer valid". Clubs cannot undo — the page points them at NL. Below that: **Check a code** (read-only lookup, 10 an hour, audited) and **Upload your own codes** (club-supplied batches, three undertakings + confirm, ≤200 at a time) |
 | `/uw-promo/admin/` | **NL master (Richard)** | master passcode only (no direct link, deliberately; first-run bootstrap sets it) | Everything UW can do, plus: redeem on behalf of a club (the club it is registered to, same race-safe transaction), **register** a pre-v3.0 code to a club, revoke **redeemed** codes (typed `REVOKE`), seed/sync the roster from clubs-meta, the **list of all 72 club URLs + PINs** (copy per club, regenerate, **Reissue all club PINs**, export access CSV), **Print till cards** (one A4 card per club: crest, QR of the club link, PIN + the till steps — print-to-PDF gives the 72-page hand-out pack), audit viewer + export, sandbox reset (test mode) |
 
 ## Which club a code belongs to
@@ -69,6 +69,38 @@ go — that is the migration from the old 6-character club passcodes. It
 invalidates every club's current credential immediately, so the till cards
 have to be reprinted and resent.
 
+## Clubs uploading their own codes
+
+At the foot of the club till page, behind the PIN. A club pastes its own
+codes, optionally labels the batch, and they go live immediately — registered
+to that club, because a club can only ever upload its own. There is no club
+to choose and therefore nothing to get wrong.
+
+Three undertakings must be ticked, then a second confirm dialog restates them:
+
+1. The codes **work in that club's own till system** — the club is responsible
+   for that; neither NL nor UW can test them.
+2. Each code applies the **agreed £50 discount**.
+3. The codes stay valid for **at least 12 months** from upload.
+
+**Expiry is an undertaking, not a field.** Nothing stores an expiry date and
+nothing enforces one at the till — the club commits to 12 months and that
+commitment is what we keep. The record lives in the audit trail: the entry
+names the club, the batch, the count and each undertaking, and the trail is
+append-only, so not even the master console can alter it afterwards. That is
+deliberately stronger evidence than a flag on the code would be.
+
+Uploaded codes are checked against the **whole** system before anything is
+written — one indexed `norm` lookup per code, ten at a time. The obvious
+alternative (read the `codes` node once, build a local set) would put every
+other club's codes in that club's browser, which is exactly what a club must
+not have. The lookups are the reason for the **200-per-upload cap**; if a
+clash is found, nothing at all is written and the clashing codes are named.
+
+In the NL and UW panels these appear with **Club** in the "By" column
+(`createdBy` is `club:<CODE>`), so a club-supplied batch is always
+distinguishable from a UW or NL one.
+
 ## Checking a code without redeeming it
 
 At the foot of the club till page. Says whether a code is genuine, which club
@@ -102,7 +134,8 @@ codes/<pushId>      { code, norm, status: active|redeemed|revoked,
                       club, clubName,                              # set at CREATION — the one club
                                                                    # this code can be redeemed at.
                                                                    # Absent on pre-v3.0 codes only
-                      batch, batchLabel?, createdAt, createdBy: uw|master,
+                      batch, batchLabel?, createdAt,
+                      createdBy: uw|master|club:<CODE>,            # club = self-upload
                       redeemedAt?, redeemedBy?,                    # redeemedBy: club:<CODE>|master
                       releasedAt?, releasedBy?, releaseReason?, releasedFrom?,
                       revokedAt?, revokedBy? }
