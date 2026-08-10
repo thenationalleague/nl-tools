@@ -3,6 +3,13 @@
 <head>
 <!--
   UW Promo Codes — NL master console
+  Version: v4.1 (10/08/2026) — every Clubs & access action sits on one row; the
+           "Issue missing manager passcodes" button had been tucked inside its
+           explanatory paragraph, which reads as a footnote and lands on its
+           own line. Added "Reissue all manager passcodes" (typed PASSCODES)
+           — the sibling of the PIN reissue, and needed for the same reason:
+           any credential that existed while the node was world-readable has
+           to be treated as burned, and 72 rows one at a time is not a plan.
   Version: v4.0 (10/08/2026) — the master passcode is checked server-side by
            the uwPromoAuth trigger and only a minted master token can read or
            write config. That is the change that stops all 72 till PINs being
@@ -107,6 +114,9 @@
   .pass-chip:hover { border-color: var(--navy); }
   .pass-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   .audit-detail { font-size: 12px; color: var(--text-muted); max-width: 420px; }
+  /* One row for every access action. Wraps only when the window genuinely
+     cannot fit them, rather than because one was parked in a paragraph. */
+  .access-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
   /* Redemptions-by-club breakdown */
   .byclub { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
     box-shadow: var(--shadow); padding: 14px 16px; margin-bottom: 18px; }
@@ -1005,17 +1015,26 @@
     var legacy = clubs.filter(function (c) { return !/^\d{4}$/.test(String(c.passcode || '')); });
     // Clubs seeded before the two-door split have a PIN but no manager passcode.
     var noMgr = clubs.filter(function (c) { return !c.managerPass; });
+    /* Every action on one row — a button tucked into an explanatory paragraph
+       reads as a footnote and lands on its own line, which is how "Issue
+       missing manager passcodes" ended up separated from the rest. The notes
+       sit underneath as prose, where notes belong. */
     body.innerHTML =
-      '<div style="margin-bottom:12px"><button class="btn btn--ghost btn--sm" id="btnSeedSync">Sync clubs from roster</button> ' +
-      '<button class="btn btn--ghost btn--sm" id="btnExportAccess">Export access CSV</button> ' +
-      '<button class="btn btn--navy btn--sm" id="btnPrintCards">Print till cards</button> ' +
-      '<button class="btn btn--danger btn--sm" id="btnReissuePins">Reissue all club PINs</button></div>' +
+      '<div class="access-actions">' +
+        '<button class="btn btn--ghost btn--sm" id="btnSeedSync">Sync clubs from roster</button>' +
+        '<button class="btn btn--ghost btn--sm" id="btnExportAccess">Export access CSV</button>' +
+        '<button class="btn btn--navy btn--sm" id="btnPrintCards">Print till cards</button>' +
+        '<button class="btn btn--danger btn--sm" id="btnReissuePins">Reissue all club PINs</button>' +
+        '<button class="btn btn--danger btn--sm" id="btnReissueMgr">Reissue all manager passcodes</button>' +
+        (noMgr.length
+          ? '<button class="btn btn--navy btn--sm" id="btnIssueMgr">Issue missing manager passcodes</button>'
+          : '') +
+      '</div>' +
       (noMgr.length
         ? '<p class="code-note" style="margin:-4px 0 12px">' + noMgr.length + ' club' +
           (noMgr.length > 1 ? 's have' : ' has') + ' no manager passcode yet — their staff can use the ' +
           'till but nobody can reach the club admin view. <strong>Issue missing manager passcodes</strong> ' +
-          'fixes that without touching anyone’s PIN. ' +
-          '<button class="btn btn--navy btn--sm" id="btnIssueMgr">Issue missing manager passcodes</button></p>'
+          'fixes that without touching anyone’s PIN.</p>'
         : '') +
       (legacy.length
         ? '<p class="code-note" style="margin:-4px 0 12px">' + legacy.length + ' club' +
@@ -1043,6 +1062,7 @@
     document.getElementById('btnExportAccess').onclick = exportAccess;
     document.getElementById('btnPrintCards').onclick = function () { printCards(); };
     document.getElementById('btnReissuePins').onclick = reissueAllPins;
+    document.getElementById('btnReissueMgr').onclick = function () { reissueAllManagerPasses(clubs); };
     if (noMgr.length) document.getElementById('btnIssueMgr').onclick = function () { issueMissingManagerPasses(noMgr); };
   }
 
@@ -1072,6 +1092,38 @@
         });
         toast(missing.length + ' manager passcodes issued', 'success');
       }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
+    });
+  }
+
+  /* Rotate EVERY club's manager passcode. The sibling of "Reissue all club
+     PINs", and needed for the same reason: any credential that existed while
+     app-data/uw-promo was world-readable has to be treated as burned, and
+     doing 72 of them one row at a time is not a plan. Unlike "Issue missing",
+     this replaces passcodes that already exist, so it is a typed confirm. */
+  function reissueAllManagerPasses(clubs) {
+    if (!clubs || !clubs.length) return;
+    NL.prompt('Give all ' + clubs.length + ' clubs a new manager passcode? Every club’s current ' +
+      'manager passcode stops working immediately, and each one has to be sent to its named contact ' +
+      'again. Till PINs are not affected. Type PASSCODES to confirm.', {
+      title: 'Reissue all manager passcodes', placeholder: 'PASSCODES'
+    }).then(function (v) {
+      if (v == null) return;
+      if ((v || '').trim().toUpperCase() !== 'PASSCODES') {
+        toast('Not confirmed — type PASSCODES exactly.', 'error'); return;
+      }
+      var updates = {};
+      clubs.forEach(function (c) {
+        updates[c.code + '/managerPass'] = UWP.newPasscode();
+        updates[c.code + '/updatedAt'] = UWP.TS();
+      });
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('config/clubs').update(updates);
+      }).then(function () {
+        UWP.audit(ACTOR, ACTOR_LABEL, 'regen-passcode', {
+          count: clubs.length, detail: 'Reissued every club manager passcode'
+        });
+        toast(clubs.length + ' manager passcodes reissued', 'success');
+      }).catch(function (err) { toast('Reissue failed: ' + err.message, 'error'); });
     });
   }
 
