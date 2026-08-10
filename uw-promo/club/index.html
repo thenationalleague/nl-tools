@@ -3,6 +3,21 @@
 <head>
 <!--
   UW Promo Codes — Club point-of-sale redemption page
+  Version: v3.2 (10/08/2026) — two doors, one page. The 4-digit PIN is printed
+           on the till card beside a QR at a public kiosk, so it can no longer
+           be the credential that lets someone commit the club to £50 a code.
+           The PIN now opens TILL mode (redeem + check, as before); the club's
+           new manager passcode opens till mode plus a CLUB ADMIN view: upload
+           codes, the club's full code list with status and dates, CSV export,
+           the club's own slice of the audit trail, and till-PIN self-service
+           so a walked card can be rotated without emailing the NL. Same URL,
+           same QR, same link token — only the credential differs, and a badge
+           in the header says which door you came in by. Upload moved out of
+           till mode entirely. NOTE: while the RTDB node stays world-readable,
+           neither credential is a secret against anyone willing to open the
+           database — see README, this is a control against the everyday risk
+           (a PIN on a card, a volunteer wandering into the upload form), not
+           against a determined reader.
   Version: v3.1 (06/08/2026) — clubs can upload their own codes, at the foot
            of the page. Codes register to this club automatically (a club can
            only upload its own, so there is nothing to choose and nothing to
@@ -155,6 +170,23 @@
   .upload__term input { margin-top: 2px; width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--primary); }
   .upload__out { margin-top: 12px; font-size: 13px; line-height: 1.55; }
   .upload__out:empty { margin-top: 0; }
+
+  /* Manager-mode panels (inventory, activity, PIN) */
+  .inv { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 14px 16px; }
+  .inv__bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .inv__bar .toolbar__search { flex: 1; min-width: 150px; }
+  .pin-chip { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 600;
+    font-size: 18px; letter-spacing: 0.28em; background: var(--off-white); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 8px 14px 8px 18px; cursor: pointer; color: var(--text); }
+  .pin-chip:hover { border-color: var(--navy); }
+  .pin-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+  /* Which door you came in by — so a manager can see they're in admin mode,
+     and a till user is never left wondering where the upload form went. */
+  .mode-tag { font-size: 10px; font-weight: 800; font-variation-settings: 'wght' 800;
+    text-transform: uppercase; letter-spacing: 0.09em; padding: 3px 8px; border-radius: var(--radius-pill);
+    background: var(--navy-100); color: var(--navy); white-space: nowrap; }
+  .mode-tag--admin { background: var(--primary-100); color: var(--primary-700); }
 </style>
 </head>
 <body>
@@ -181,7 +213,7 @@
     <span id="hbarCrest"></span>
     <div class="hbar__id">
       <div class="hbar__title" id="hbarClub"></div>
-      <div class="hbar__sub">Utility Warehouse promo codes</div>
+      <div class="hbar__sub"><span id="modeTag" class="mode-tag"></span> Utility Warehouse promo codes</div>
     </div>
     <button class="hbar__signout" id="signout">Not you?</button>
   </div>
@@ -221,6 +253,13 @@
       <div class="checker__quota" id="chkQuota"></div>
     </div>
 
+    <!-- ── Club admin only ──────────────────────────────────────────────
+         Everything below opens on the club's MANAGER passcode, not the
+         4-digit till PIN. The PIN is printed on the till card and sits by a
+         QR at a public kiosk, so it must not be the thing that lets someone
+         commit the club to £50 a code. Same URL, same QR — two doors. -->
+    <div id="managerOnly" hidden>
+
     <!-- Club-supplied codes. Registered to this club automatically — there is
          no club to choose, because a club can only ever upload its own. -->
     <div class="list-head">Upload your own codes</div>
@@ -254,6 +293,57 @@
       <button class="btn btn--primary" id="upBtn">Upload codes</button>
       <div class="upload__out" id="upOut" role="status" aria-live="polite"></div>
     </div>
+
+    <!-- Full inventory. Unlike the till view above, this DOES print unredeemed
+         code strings: it is the club's own stock list, opened on the manager
+         passcode, on a laptop — not a screen facing a queue. -->
+    <div class="list-head">All your codes</div>
+    <div class="inv">
+      <div class="inv__bar">
+        <select class="toolbar__filter" id="invStatus" aria-label="Filter by status">
+          <option value="">All statuses</option>
+          <option value="active">Unredeemed</option>
+          <option value="redeemed">Redeemed</option>
+          <option value="revoked">Revoked</option>
+        </select>
+        <input class="toolbar__search" id="invSearch" type="search" placeholder="Search codes…" aria-label="Search your codes">
+        <button class="btn btn--ghost btn--sm" id="invExport">Export CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>Code</th><th>Status</th><th>Redeemed</th><th>Added</th><th>Batch</th></tr></thead>
+          <tbody id="invRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- The club's own slice of the append-only trail. Same record the NL sees. -->
+    <div class="list-head">Your club’s activity</div>
+    <div class="inv">
+      <p class="checker__meta" style="margin-bottom:10px">Everything done under your club’s name —
+        redemptions, checks and uploads. This is the same record the National League sees, and it
+        cannot be edited by anyone, us included.</p>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>When</th><th>What</th><th>Detail</th></tr></thead>
+          <tbody id="audRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Self-service on the till PIN so a walked card doesn't need an email. -->
+    <div class="list-head">Your till PIN</div>
+    <div class="inv">
+      <p class="checker__meta" style="margin-bottom:10px">The 4-digit PIN your staff type at the till.
+        If a printed card goes missing, change it here — the old one stops working straight away and
+        you’ll need to reprint your card.</p>
+      <div class="checker__row">
+        <button class="pin-chip" id="pinChip" title="Click to copy"></button>
+        <button class="btn btn--ghost btn--sm" id="pinNew">Issue a new PIN</button>
+      </div>
+    </div>
+
+    </div><!-- /#managerOnly -->
   </div>
 </div>
 
@@ -264,6 +354,8 @@
   'use strict';
 
   var CONFIG = null, CLUB = null;      // CLUB = { code, name, division, passcode, token }
+  var MODE = 'till';                   // 'till' (4-digit PIN) | 'manager' (club passcode)
+  var AUDIT = {}, auditQuery = null;
   var CODES = {}, codesLoaded = false, unlocked = false, codesQuery = null;
   var busy = false;
 
@@ -275,6 +367,8 @@
   UWP.ref('config/clubs').on('value', function (s) {
     CONFIG = s.val() || {};
     boot();
+    // The NL can rotate a PIN while a manager has this open — keep it honest.
+    if (unlocked && MODE === 'manager') renderPin();
   }, function () {
     document.getElementById('gateSub').textContent = 'Could not reach the database. Check your connection and refresh.';
   });
@@ -287,19 +381,35 @@
     });
     return hit;
   }
-  /* Signing in on the PIN alone (no link) resolves the club BY that PIN, so
-     an ambiguous PIN must open nothing rather than guess: two clubs sharing
-     one would otherwise silently hand the till to whichever came last in the
-     object. The master console issues unique PINs, so this only fires on data
-     that predates that guarantee. */
+  /* Two doors, one page. The 4-digit PIN opens the till; the club's manager
+     passcode opens the till AND the admin sections below it. Returns
+     { club, mode } or null.
+
+     Signing in without a link resolves the club BY the credential typed, so
+     an ambiguous one must open nothing rather than guess — two clubs sharing
+     a PIN would otherwise silently hand the till to whichever came last in
+     the object. The master console issues unique PINs, so this only bites on
+     data predating that guarantee. */
   function findByPass(p) {
     p = (p || '').toUpperCase().trim();
     if (!p) return null;
     var hits = [];
     Object.keys(CONFIG || {}).forEach(function (k) {
-      if ((CONFIG[k].passcode || '').toUpperCase() === p) hits.push(withCode(k));
+      var c = CONFIG[k];
+      if ((c.passcode || '').toUpperCase() === p) hits.push({ club: withCode(k), mode: 'till' });
+      if ((c.managerPass || '').toUpperCase() === p) hits.push({ club: withCode(k), mode: 'manager' });
     });
     return hits.length === 1 ? hits[0] : null;
+  }
+
+  /* Same test, but against one known club (arrived via its ?c= link). */
+  function matchClub(club, p) {
+    p = (p || '').toUpperCase().trim();
+    if (!p || !club) return null;
+    var raw = CONFIG[club.code] || {};
+    if (p === (raw.passcode || '').toUpperCase()) return { club: club, mode: 'till' };
+    if (raw.managerPass && p === (raw.managerPass || '').toUpperCase()) return { club: club, mode: 'manager' };
+    return null;
   }
   function withCode(k) { var c = CONFIG[k]; return { code: k, name: c.name, division: c.division, passcode: c.passcode, token: c.token }; }
 
@@ -324,25 +434,21 @@
       logo.src = NL.clubs.crestUrl(linkClub.name, 'medium');
       NL.clubs.wireCrestImg(logo, linkClub.name);
       document.getElementById('gateTitle').textContent = linkClub.name;
-      document.getElementById('gateSub').textContent = 'Enter your club PIN to open the till.';
+      document.getElementById('gateSub').textContent =
+        'Enter your 4-digit till PIN — or your club manager passcode for the admin view.';
     } else {
-      document.getElementById('gateSub').textContent = 'Enter your club PIN.';
+      document.getElementById('gateSub').textContent =
+        'Enter your 4-digit till PIN, or your club manager passcode.';
     }
     document.getElementById('gateForm').style.display = 'block';
     var inp = document.getElementById('gateInput'), err = document.getElementById('gateErr');
     inp.focus();
     function submit() {
-      var club = null;
-      if (linkClub) {
-        var p = (inp.value || '').toUpperCase().trim();
-        if (p && p === (linkClub.passcode || '').toUpperCase()) club = linkClub;
-      } else {
-        club = findByPass(inp.value);
-      }
-      if (!club) { err.textContent = 'PIN not recognised. Check with the NL media team.'; return; }
+      var hit = linkClub ? matchClub(linkClub, inp.value) : findByPass(inp.value);
+      if (!hit) { err.textContent = 'Not recognised. Check with the NL media team.'; return; }
       err.textContent = '';
-      history.replaceState({}, '', location.pathname + '?c=' + encodeURIComponent(club.token) + (UWP.isTest ? '&env=test' : ''));
-      enter(club);
+      history.replaceState({}, '', location.pathname + '?c=' + encodeURIComponent(hit.club.token) + (UWP.isTest ? '&env=test' : ''));
+      enter(hit.club, hit.mode);
     }
     document.getElementById('gateBtn').onclick = submit;
     inp.onkeydown = function (e) { if (e.key === 'Enter') submit(); };
@@ -354,11 +460,19 @@
   });
 
   /* ── Enter: crest branding + live list of this club's redemptions ───── */
-  function enter(club) {
+  function enter(club, mode) {
     CLUB = club;
+    MODE = mode === 'manager' ? 'manager' : 'till';
     unlocked = true;
     document.getElementById('gate').style.display = 'none';
     document.getElementById('app').style.display = 'block';
+
+    // Admin sections exist in the markup but stay hidden on a till PIN.
+    document.getElementById('managerOnly').hidden = (MODE !== 'manager');
+    var tag = document.getElementById('modeTag');
+    tag.textContent = MODE === 'manager' ? 'Club admin' : 'Till';
+    tag.classList.toggle('mode-tag--admin', MODE === 'manager');
+    document.getElementById('signout').textContent = MODE === 'manager' ? 'Sign out' : 'Not you?';
 
     var crest = document.createElement('img');
     crest.className = 'hbar__crest';
@@ -376,6 +490,7 @@
       codesLoaded = true;
       render();
     });
+    if (MODE === 'manager') startManager();
     document.getElementById('posInput').focus();
     render();
   }
@@ -517,6 +632,8 @@
         '<div class="code-note">Redeemed ' + esc(UWP.fmt(r.redeemedAt)) + '</div></div>' +
         '<div>' + UWP.pillFor(r.status) + '</div></div>';
     }).join('');
+
+    if (MODE === 'manager') renderInventory();
   }
 
   /* ── Voucher checker ────────────────────────────────────────────────── */
@@ -607,6 +724,134 @@
   function logCheck(code, outcome) {
     UWP.audit(actor(), CLUB.name, 'check', {
       club: CLUB.code, clubName: CLUB.name, codes: code, detail: 'Checked → ' + outcome
+    });
+  }
+
+  /* ── Manager mode ───────────────────────────────────────────────────── */
+  /* Only reached on the club's manager passcode. Subscribes to the club's own
+     slice of the audit trail and wires the panels that a till PIN never sees. */
+  function startManager() {
+    if (auditQuery) auditQuery.off();
+    auditQuery = UWP.ref('audit').orderByChild('club').equalTo(CLUB.code).limitToLast(100);
+    auditQuery.on('value', function (s) { AUDIT = s.val() || {}; renderAudit(); });
+
+    ['invStatus', 'invSearch'].forEach(function (id) {
+      var el = document.getElementById(id);
+      el.addEventListener(id === 'invSearch' ? 'input' : 'change', renderInventory);
+    });
+    document.getElementById('invStatus').value = '';
+    document.getElementById('invSearch').value = '';
+    document.getElementById('invExport').addEventListener('click', exportInventory);
+    document.getElementById('pinNew').addEventListener('click', newPin);
+    renderPin();
+  }
+
+  function invRows() {
+    return Object.keys(CODES).map(function (k) { var r = CODES[k]; r._id = k; return r; })
+      .sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+  }
+  function invFiltered() {
+    var st = document.getElementById('invStatus').value;
+    var q = (document.getElementById('invSearch').value || '').toUpperCase().trim();
+    return invRows().filter(function (r) {
+      if (st && r.status !== st) return false;
+      if (q && (r.code || '').toUpperCase().indexOf(q) === -1) return false;
+      return true;
+    });
+  }
+  function renderInventory() {
+    if (MODE !== 'manager') return;
+    var list = invFiltered(), tb = document.getElementById('invRows');
+    if (!list.length) {
+      tb.innerHTML = '<tr class="empty-row"><td colspan="5">' +
+        (invRows().length ? 'Nothing matches those filters.' : 'No codes registered to your club yet.') +
+        '</td></tr>';
+      return;
+    }
+    tb.innerHTML = list.map(function (r) {
+      return '<tr' + (r.status === 'revoked' ? ' class="is-revoked"' : '') + '>' +
+        '<td><span class="code-mono">' + esc(r.code) + '</span></td>' +
+        '<td>' + UWP.pillFor(r.status) + '</td>' +
+        '<td>' + esc(r.status === 'redeemed' ? UWP.fmt(r.redeemedAt) : '—') + '</td>' +
+        '<td title="' + esc(UWP.fmt(r.createdAt)) + '">' + esc(UWP.ago(r.createdAt)) + '</td>' +
+        '<td>' + esc(r.batchLabel || '—') + '</td></tr>';
+    }).join('');
+  }
+
+  function exportInventory() {
+    var list = invFiltered();
+    if (!list.length) { toast('Nothing to export with those filters.', 'error'); return; }
+    var rows = [['Code', 'Status', 'Redeemed', 'Added', 'Added by', 'Batch']];
+    list.forEach(function (r) {
+      rows.push([r.code, (UWP.STATUS[r.status] || {}).label || r.status,
+        r.redeemedAt ? UWP.fmt(r.redeemedAt) : '', UWP.fmt(r.createdAt),
+        String(r.createdBy || '').indexOf('club:') === 0 ? 'Club' : (r.createdBy === 'uw' ? 'UW' : 'NL'),
+        r.batchLabel || '']);
+    });
+    var d = new Date(), stamp = d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2);
+    NL.download('uw-promo-' + CLUB.code.toLowerCase() + '-' + stamp + '.csv',
+      NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8');
+    toast('CSV exported', 'success');
+  }
+
+  var ACTION_LABEL = {
+    'add-codes': 'Codes uploaded', redeem: 'Code redeemed', check: 'Code checked',
+    release: 'Released by NL', revoke: 'Revoked by NL', register: 'Registered to club',
+    'delete': 'Deleted by NL', 'regen-passcode': 'PIN or passcode changed', 'regen-link': 'Link changed'
+  };
+  function renderAudit() {
+    if (MODE !== 'manager') return;
+    var list = Object.keys(AUDIT).map(function (k) { return AUDIT[k]; })
+      .sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
+    var tb = document.getElementById('audRows');
+    if (!list.length) {
+      tb.innerHTML = '<tr class="empty-row"><td colspan="3">Nothing recorded yet.</td></tr>';
+      return;
+    }
+    tb.innerHTML = list.map(function (r) {
+      var bits = [];
+      if (r.count) bits.push(r.count + ' codes');
+      if (r.codes) bits.push(r.codes);
+      if (r.detail) bits.push(r.detail);
+      return '<tr><td title="' + esc(UWP.fmt(r.ts)) + '" style="white-space:nowrap">' + esc(UWP.ago(r.ts)) + '</td>' +
+        '<td>' + esc(ACTION_LABEL[r.action] || r.action || '') + '</td>' +
+        '<td class="checker__meta">' + esc(bits.join(' · ')) + '</td></tr>';
+    }).join('');
+  }
+
+  /* Till-PIN self-service. Uniqueness is checked against every club's PIN,
+     which this page already holds (it reads config/clubs to resolve the gate),
+     so a club can rotate a walked card without waiting on the NL. */
+  function renderPin() {
+    var chip = document.getElementById('pinChip');
+    var raw = (CONFIG && CONFIG[CLUB.code]) || {};
+    chip.textContent = raw.passcode || '————';
+    chip.onclick = function () { NL.copy(chip.textContent, { ok: 'Till PIN copied' }); };
+  }
+
+  function newPin() {
+    NL.confirm('Issue a new till PIN for ' + CLUB.name + '?', {
+      title: 'New till PIN',
+      detail: 'Your current PIN stops working immediately. Anyone at the till will need the new one, ' +
+        'and your printed till card will have to be reprinted.',
+      variant: 'danger', confirmText: 'Issue a new PIN'
+    }).then(function (ok) {
+      if (!ok) return;
+      var taken = {};
+      Object.keys(CONFIG || {}).forEach(function (k) {
+        if (k !== CLUB.code && CONFIG[k].passcode) taken[String(CONFIG[k].passcode)] = true;
+      });
+      var pin;
+      try { pin = UWP.newPin(taken); }
+      catch (e) { toast(e.message, 'error'); return; }
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('config/clubs/' + CLUB.code).update({ passcode: pin, updatedAt: UWP.TS() });
+      }).then(function () {
+        UWP.audit(actor(), CLUB.name, 'regen-passcode', {
+          club: CLUB.code, clubName: CLUB.name, detail: 'Club issued itself a new till PIN'
+        });
+        toast('New PIN issued — reprint your till card', 'success');
+      }).catch(function (err) { toast('Could not change the PIN: ' + err.message, 'error'); });
     });
   }
 
