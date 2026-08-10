@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Match Graphic
-  Version: v1.1 (10/08/2026)
+  Version: v1.2 (10/08/2026)
   File: /graphics/match-graphic/index.html
 
   Builds a single match graphic for any two clubs, in the four delivery
@@ -22,6 +22,15 @@
   Graphics & Media sub-tools, so anyone who can reach /graphics/ gets this.
 
   CHANGELOG
+  v1.2 (10/08/2026) — FIX: downloads did nothing
+    - Crests are fetched from raw.githubusercontent.com (NL.clubs.crestUrl),
+      and drawing a cross-origin image into a canvas taints it, so every
+      toBlob() threw SecurityError out of the download click handler — no
+      file, no error, nothing. Broken for every club since 07/08/2026, when
+      the canon crest base moved off same-origin (5de3c8a); not related to
+      the NL Cup work in v1.1. Fixed by opting the image request into CORS
+      (crossOrigin before src); the host already sends the header.
+
   v1.1 (10/08/2026) — NL Cup guest sides
     - Selecting the NL Cup adds the 16 PL2 representative sides to both
       pickers; every other competition shows the NL roster alone, so a PL2
@@ -81,6 +90,13 @@
     var NL_TOOL_KEY = 'staff-graphics';
 
     window.NL_CHANGELOG = [
+      {
+        date: '10/08/2026',
+        version: 'v1.2',
+        items: [
+          'Fixed: the download buttons did nothing. Crests load from a different domain, which locked the canvas against export — broken for every club since 7 August, not just the new cup sides.'
+        ]
+      },
       {
         date: '10/08/2026',
         version: 'v1.1',
@@ -397,12 +413,28 @@
 
   /* ---------- assets ---------- */
 
+  /* crossOrigin MUST be set before src, and it is not optional here.
+     NL.clubs.crestUrl points at raw.githubusercontent.com, and drawing a
+     cross-origin image into a canvas TAINTS it — every later toBlob() then
+     throws SecurityError, which is thrown out of the download click handler,
+     so the button silently does nothing. The host sends
+     `access-control-allow-origin: *`, but a plain <img> does not use it; the
+     request has to opt in. With the opt-in the canvas stays clean and exports.
+
+     If the header ever disappears the image fails to load instead, which
+     surfaces as the existing "A crest failed to load" toast — a visible
+     failure rather than a silent one. That trade is deliberate.
+
+     (graphics/fixtures-graphic sidesteps the same problem by using a
+     same-origin /assets/crests/ path. Two tools now, two different
+     workarounds — a shared crest-image loader is a canon candidate.) */
   function loadImage(src) {
     if (!images[src]) {
       images[src] = new Promise(function (res) {
         var i = new Image();
         i.onload = function () { res(i); };
         i.onerror = function () { res(null); };
+        i.crossOrigin = 'anonymous';
         i.src = src;
       });
     }
