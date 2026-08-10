@@ -7,6 +7,20 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.29 — (07/08/2026) Markers and pens landed on the wrong person. Reported
+         as "Check the domain is showing against someone with no email — it
+         belongs to the row below", and that was exactly it: the flag was
+         right, the row was wrong.
+         wireEditing worked out a row's person by COUNTING — the third row
+         under Leadership is the third person in Leadership — which held only
+         while the render order matched the array order. v1.28 added a surname
+         sort to sectionPeople for the card view and broke it without a word.
+         Every marker, every flag and every pen was offset wherever the two
+         orders differed, so the pen opened somebody else's details.
+         Rows carry data-pid and data-ridx now, exactly as cards already did,
+         and nothing is inferred from position anywhere. Verified across three
+         clubs: 49 rows, none without an id, none naming a different person
+         from the record behind it.
   v1.28 — (06/08/2026) A card view, and the two things clubs sent that nothing
          had ever put on screen.
          Cards alongside the list, remembered per person rather than per club.
@@ -456,15 +470,15 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=33">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=25">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=26">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=30"></script>
-<script src="/club-directory/_tidy.js?v=25"></script>
-<script src="/club-directory/_gate.js?v=25"></script>
-<script src="/club-directory/_directory.js?v=25"></script>
+<script src="/club-directory/_tidy.js?v=26"></script>
+<script src="/club-directory/_gate.js?v=26"></script>
+<script src="/club-directory/_directory.js?v=26"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -1304,36 +1318,27 @@
     var rec = ALL[club];
     var locked = !!signedOffBy(rec);
     var people = NLDirectory.arr(rec.people);
-    var seen = {};
+    var byId = {};
+    people.forEach(function (p) { if (p.id) { byId[p.id] = p; } });
 
-    /* Cards carry the person's id already, so there is no counting to do —
-       and no role index either, because a card is not one role. The update
-       form opens on their first role and shows all of them regardless. */
+    /* Cards and rows both carry the person's id, so there is no counting to
+       do. There used to be — the row's person was worked out from its
+       position within its department — and it held only while the render
+       order matched the array order. A surname sort in sectionPeople broke
+       that without a word: pens opened the wrong person's form and every
+       marker landed on the wrong row. Nothing is inferred from position now. */
     $('out').querySelectorAll('.cd-pc[data-pid]').forEach(function (card) {
-      var person = people.filter(function (p) { return p.id === card.dataset.pid; })[0];
-      if (!person) { return; }
-      addPen(card, locked, club, person, 0);
+      var person = byId[card.dataset.pid];
+      if (person) { addPen(card, locked, club, person, 0); }
     });
 
-    $('out').querySelectorAll('.cd-row').forEach(function (row) {
-      var dept = row.closest('.cd-dept').querySelector('.cd-dept__h').textContent.trim();
-      var idx = (seen[dept] = (seen[dept] || 0));
-      seen[dept]++;
-      var inDept = people.filter(function (p) {
-        return NLDirectory.rolesOf(p).some(function (r) { return r.section === dept; });
-      });
-      var person = inDept[idx];
+    $('out').querySelectorAll('.cd-row[data-pid]').forEach(function (row) {
+      var person = byId[row.dataset.pid];
       if (!person) { return; }
-      row.dataset.pid = person.id || '';
-      /* Which of this person's roles this row is. Without it a marker for one
-         role lands on every row the person appears in, so a title flagged in
-         Programme also shows against their Media entry. */
-      var roleIdx = NLDirectory.rolesOf(person).map(function (r, i) {
-        return r.section === dept ? i : -1;
-      }).filter(function (i) { return i > -1; })[0];
-      if (roleIdx != null) { row.dataset.ridx = roleIdx; }
-      addPen(row, locked, club, person, roleIdx);
+      var ridx = row.dataset.ridx;
+      addPen(row, locked, club, person, ridx == null ? 0 : +ridx);
     });
+
   }
 
   /* ------------------------------------------- inboxes and mailing lists
