@@ -7,6 +7,50 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.31 — (07/08/2026) Publishing and versioning are one act, because they
+         were always one fact: this is what the League is standing behind, as
+         of now. Two buttons meant you could publish without a record of what
+         you published, or freeze something nobody would ever see — and it
+         meant remembering to do the second one, which is the sort of
+         discipline that holds for about a fortnight.
+         One press names the version, writes the frozen copy, then writes the
+         published one. The frozen copy goes first: publishing without a record
+         of what was published is the half worth not having. Versions is now
+         the publication history, and restoring means "back to how this club
+         was when we published that".
+         Publish becomes master-only as a consequence. The rules make an
+         edition writable by a master alone — deliberately, since an editor
+         must not be able to touch the thing that exists to survive an editor —
+         so an editor pressing Publish would have been refused by the database,
+         which is a worse way to find out than not seeing the button. It is
+         also right on its own terms: the reader is 72 clubs, and releasing to
+         them is a decision rather than a step.
+  v1.30 — (07/08/2026) Mailing-list changes are green and reversible, which
+         they should have been from the start. diffClub never looked at leads,
+         so changing one produced an empty patch: the journal entry got no
+         Undo button, and there would have been nothing behind it if it had.
+         And logEdit was never called, so no green marker either — changing
+         who receives the League's mail left no trace at all, while changing
+         somebody's job title left two.
+         Leads are now in the snapshot, the diff and the restore, keyed by
+         list — a list key is a plain word and safe as an RTDB key, unlike the
+         paths that broke the undo body last time. The edit is logged in names
+         rather than ids, so the marker reads "was Jack Lappin" and not
+         "was p3k9tz2".
+  v1.29 — (07/08/2026) Markers and pens landed on the wrong person. Reported
+         as "Check the domain is showing against someone with no email — it
+         belongs to the row below", and that was exactly it: the flag was
+         right, the row was wrong.
+         wireEditing worked out a row's person by COUNTING — the third row
+         under Leadership is the third person in Leadership — which held only
+         while the render order matched the array order. v1.28 added a surname
+         sort to sectionPeople for the card view and broke it without a word.
+         Every marker, every flag and every pen was offset wherever the two
+         orders differed, so the pen opened somebody else's details.
+         Rows carry data-pid and data-ridx now, exactly as cards already did,
+         and nothing is inferred from position anywhere. Verified across three
+         clubs: 49 rows, none without an id, none naming a different person
+         from the record behind it.
   v1.28 — (06/08/2026) A card view, and the two things clubs sent that nothing
          had ever put on screen.
          Cards alongside the list, remembered per person rather than per club.
@@ -455,16 +499,16 @@
 
   Not lint-covered: no auth-guard, by design.
 -->
-<link rel="stylesheet" href="/system/nl-brand.css?v=33">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=25">
+<link rel="stylesheet" href="/system/nl-brand.css?v=34">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=26">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=30"></script>
-<script src="/club-directory/_tidy.js?v=25"></script>
-<script src="/club-directory/_gate.js?v=25"></script>
-<script src="/club-directory/_directory.js?v=25"></script>
+<script src="/club-directory/_tidy.js?v=26"></script>
+<script src="/club-directory/_gate.js?v=26"></script>
+<script src="/club-directory/_directory.js?v=26"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -895,7 +939,7 @@
     <select class="ed-pick" id="pick" aria-label="Choose a club"></select>
     <span class="ed-top__who" id="who"></span>
     <button class="ed-out" id="editions" type="button" hidden>Versions</button>
-    <button class="ed-out ed-out--go" id="publish" type="button">Publish</button>
+    <button class="ed-out ed-out--go" id="publish" type="button" hidden>Publish</button>
     <button class="ed-out" id="changes" type="button">My changes</button>
     <button class="ed-out" id="recheck" type="button" hidden>Re-check all</button>
     <button class="ed-out" id="signOut" type="button">Sign out</button>
@@ -1025,7 +1069,15 @@
     if (!names.length) { offerBake(); $('app').hidden = false; return; }
     offerRecheck();
     $('changes').addEventListener('click', showChanges);
-    $('publish').addEventListener('click', publishNow);
+    /* Master only. It writes an edition, and the rules make an edition
+       writable by a master alone — an editor pressing this would be refused by
+       the database, which is a worse way to find out than not seeing the
+       button. It is the right rule on its own terms too: the reader is 72
+       clubs, and releasing to them is a decision rather than a step. */
+    if (session.role === 'admin') {
+      $('publish').hidden = false;
+      $('publish').addEventListener('click', publishNow);
+    }
     wireView();
     fillPicker();
     $('pick').addEventListener('change', function () { draw(this.value); });
@@ -1260,7 +1312,6 @@
     markInfoMissing(name, rec);
     markInfoFlags(name, rec);
     markInfoChanges(name, rec);
-    markEdits(name);
     markAdded(name);
     markGaps(name, rec);
     showClubEdit(name, rec);
@@ -1268,6 +1319,9 @@
     showMerges(name);
     showInboxes(name, rec);
     showLists(name, rec);
+    /* After showLists, which builds the element the mailing-list marks mount
+       into. Markers can only annotate what has already been drawn. */
+    markEdits(name);
     showSignoff(name, rec);
     if (session.role === 'admin') { diagnose(name, rec); }
   }
@@ -1304,36 +1358,27 @@
     var rec = ALL[club];
     var locked = !!signedOffBy(rec);
     var people = NLDirectory.arr(rec.people);
-    var seen = {};
+    var byId = {};
+    people.forEach(function (p) { if (p.id) { byId[p.id] = p; } });
 
-    /* Cards carry the person's id already, so there is no counting to do —
-       and no role index either, because a card is not one role. The update
-       form opens on their first role and shows all of them regardless. */
+    /* Cards and rows both carry the person's id, so there is no counting to
+       do. There used to be — the row's person was worked out from its
+       position within its department — and it held only while the render
+       order matched the array order. A surname sort in sectionPeople broke
+       that without a word: pens opened the wrong person's form and every
+       marker landed on the wrong row. Nothing is inferred from position now. */
     $('out').querySelectorAll('.cd-pc[data-pid]').forEach(function (card) {
-      var person = people.filter(function (p) { return p.id === card.dataset.pid; })[0];
-      if (!person) { return; }
-      addPen(card, locked, club, person, 0);
+      var person = byId[card.dataset.pid];
+      if (person) { addPen(card, locked, club, person, 0); }
     });
 
-    $('out').querySelectorAll('.cd-row').forEach(function (row) {
-      var dept = row.closest('.cd-dept').querySelector('.cd-dept__h').textContent.trim();
-      var idx = (seen[dept] = (seen[dept] || 0));
-      seen[dept]++;
-      var inDept = people.filter(function (p) {
-        return NLDirectory.rolesOf(p).some(function (r) { return r.section === dept; });
-      });
-      var person = inDept[idx];
+    $('out').querySelectorAll('.cd-row[data-pid]').forEach(function (row) {
+      var person = byId[row.dataset.pid];
       if (!person) { return; }
-      row.dataset.pid = person.id || '';
-      /* Which of this person's roles this row is. Without it a marker for one
-         role lands on every row the person appears in, so a title flagged in
-         Programme also shows against their Media entry. */
-      var roleIdx = NLDirectory.rolesOf(person).map(function (r, i) {
-        return r.section === dept ? i : -1;
-      }).filter(function (i) { return i > -1; })[0];
-      if (roleIdx != null) { row.dataset.ridx = roleIdx; }
-      addPen(row, locked, club, person, roleIdx);
+      var ridx = row.dataset.ridx;
+      addPen(row, locked, club, person, ridx == null ? 0 : +ridx);
     });
+
   }
 
   /* ------------------------------------------- inboxes and mailing lists
@@ -1438,6 +1483,9 @@
       ul.appendChild(li);
     });
     wrap.appendChild(ul);
+    var marks = document.createElement('div');
+    marks.id = 'edListEdits';
+    wrap.appendChild(marks);
     if (empty) {
       var n = document.createElement('p');
       n.className = 'form-hint';
@@ -1546,6 +1594,18 @@
             if (state[key].length) { next[key] = state[key].slice(); }
           });
           if (!changed.length) { c.close(); return; }
+          /* Logged per list, in names rather than ids, so the green marker
+             says who was on it before rather than "p3k9tz2 -> pf81qq4". */
+          var nameOf = function (ids) {
+            return NLDirectory.arr(ids).map(function (id) {
+              return byId[id] ? NLDirectory.fullName(byId[id]) : id;
+            }).join(', ');
+          };
+          LIST_ORDER.forEach(function (key) {
+            var was = NLDirectory.arr((rec.leads || {})[key]);
+            if (state[key].join(',') === was.join(',')) { return; }
+            logEdit(club, 'leads/' + key, nameOf(was), nameOf(state[key]));
+          });
           (ALL[club] || rec).leads = next;
           c.close();
           saveStructure(club, 'Mailing lists updated (' + changed.join(', ') + ')');
@@ -1703,55 +1763,30 @@
     });
   }
 
-  function takeEdition() {
-    NL.prompt('Copies all ' + names.length + ' clubs exactly as they stand, with ' +
-      'their history. It cannot be changed or deleted afterwards \u2014 by anyone, ' +
-      'including you. Supersede it by taking another.\n\nGive it a name you will ' +
-      'recognise in six months.', {
-      title: 'Freeze the directory',
-      placeholder: 'e.g. Before the admin team started',
-      confirmText: 'Freeze it'
-    }).then(function (label) {
-      if (label === null) { return; }
-      var ref = firebase.database().ref(ROOT + '/editions').push();
-      var payload = { at: Date.now(), by: session.name || 'editor',
-        label: String(label || '').trim() || 'Untitled',
-        clubs: clone(ALL) || {}, provenance: clone(PROV) || {} };
-      NL.writeAudit('directory_edition', 'Froze ' + names.length + ' clubs as "' +
-        payload.label + '" (' + payload.by + ')');
-      return ref.set(payload).then(function () {
-        NL.toast('Frozen \u2014 ' + names.length + ' clubs', 'success');
-      });
-    }).catch(function (err) {
-      NL.toast('Could not freeze: ' + ((err && err.message) || err), 'error');
-    });
-  }
-
   function showEditions() {
     var body = document.createElement('div');
     body.className = 'ed-jrnl';
     body.innerHTML = '<p class="form-hint">Loading\u2026</p>';
     var ctrl = NL.modal({
-      title: 'Frozen versions',
+      title: 'Published versions',
       size: 'lg',
       body: body,
       buttons: [
-        { label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } },
-        { label: 'Freeze the directory now', className: 'btn--primary',
-          onClick: function (c) { c.close(); takeEdition(); } }
+        { label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } }
       ]
     });
     editionsList().then(function (list) {
       if (!list.length) {
-        body.innerHTML = '<p class="cd-empty">Nothing has been frozen yet. ' +
-          'Freezing takes a copy of all ' + names.length + ' clubs that nobody ' +
-          'can change afterwards \u2014 worth doing before anyone new starts editing.</p>';
+        body.innerHTML = '<p class="cd-empty">Nothing has been published yet. ' +
+          'Publishing freezes a copy of all ' + names.length + ' clubs at the same ' +
+          'time, which nobody can alter afterwards \u2014 so every version readers ' +
+          'have seen stays recoverable.</p>';
         return;
       }
-      body.innerHTML = '<p class="form-hint">Each of these is the whole directory as ' +
-        'it stood at that moment. None of them can be altered. Restoring puts one ' +
-        'club back to how it was then, and lands in the journal like any other ' +
-        'change.</p><ul class="ed-jrnl__list">' + list.map(function (e) {
+      body.innerHTML = '<p class="form-hint">Every publication, newest first. Each is ' +
+        'the whole directory as it stood when it went out, and none can be altered. ' +
+        'Restoring puts one club back to how it was at that publication, and lands ' +
+        'in the journal like any other change.</p><ul class="ed-jrnl__list">' + list.map(function (e) {
         return '<li class="ed-jrnl__row">' +
           '<div class="ed-jrnl__main">' +
             '<span class="ed-jrnl__what">' + esc(e.label) + '</span>' +
@@ -1890,6 +1925,26 @@
              count: Object.keys(clubs).length, people: people, held: held };
   }
 
+  /* Publishing and versioning are one act, because they were always one
+     fact: "this is what the League is standing behind, as of now". Two
+     buttons meant you could publish without a record of what you published,
+     or freeze something nobody would ever see — and it meant remembering to
+     do the second one, which is the kind of discipline that holds for about a
+     fortnight.
+
+     One press writes two things. The PUBLISHED copy is the stripped, handed-
+     over version readers get. The EDITION is the full working state — people,
+     club details, provenance — frozen and immutable, so any club can be put
+     back to how it stood at any publication. The Versions list is therefore
+     the publication history, and restoring means "back to how this club was
+     when we published that".
+
+     Master only, and not by preference: the rules make an edition writable by
+     a master alone, deliberately, because an editor must not be able to touch
+     the thing that exists to survive an editor. Publishing now writes one, so
+     publishing inherits that. It is also the right answer on its own terms —
+     the reader is 72 clubs, and releasing to them is a decision rather than a
+     step. */
   function publishNow() {
     var built = buildPublished();
     if (!built.count) {
@@ -1898,41 +1953,60 @@
       return;
     }
     var prev = PUBLISHED_AT;
-    NL.confirm('Publish ' + built.count + ' club' + (built.count === 1 ? '' : 's') +
-      ' to the directory?', {
+    var when = NL.formatDate(Date.now());
+    NL.prompt('This replaces what readers see with all ' + built.count +
+      ' club' + (built.count === 1 ? '' : 's') + ' as they stand right now \u2014 ' +
+      built.people + ' people, of whom ' + built.held + ' asked us to keep their ' +
+      'contact details back. Those details are left out of the published copy ' +
+      'entirely; the person is still listed.\n\n' +
+      (built.unchecked
+        ? built.unchecked + ' of them ' + (built.unchecked === 1 ? 'has' : 'have') +
+          ' not been marked complete yet. They go out tidied but unread, which ' +
+          'is the point of publishing now rather than waiting.\n\n'
+        : '') +
+      'It also freezes a copy of everything as it stands, which nobody can ' +
+      'alter afterwards \u2014 so any club can be put back to how it is right ' +
+      'now. Give it a name you will recognise in six months.\n\n' +
+      (prev ? 'Last published ' + NL.formatDateTime(prev) + '.'
+            : 'Nothing has been published before.'), {
       title: 'Publish',
-      detail: 'This replaces what readers see with all ' + built.count +
-        ' club' + (built.count === 1 ? '' : 's') + ' as they stand right now — ' +
-        built.people + ' people, of whom ' + built.held + ' asked us to keep their ' +
-        'contact details back. Those details are left out of the published copy ' +
-        'entirely; the person is still listed.\n\n' +
-        (built.unchecked
-          ? built.unchecked + ' of them ' + (built.unchecked === 1 ? 'has' : 'have') +
-            ' not been marked complete yet. They go out tidied but unread, which ' +
-            'is the point of publishing now rather than waiting.\n\n'
-          : '') +
-        (prev ? 'Last published ' + NL.formatDateTime(prev) + '.'
-              : 'Nothing has been published before.'),
+      default: 'Published ' + when,
+      placeholder: 'e.g. Published ' + when,
       confirmText: 'Publish'
-    }).then(function (ok) {
-      if (!ok) { return; }
+    }).then(function (label) {
+      if (label === null) { return; }
       var btn = $('publish');
       btn.disabled = true; btn.textContent = 'Publishing\u2026';
-      var payload = { at: Date.now(), by: session.name || 'editor',
+      var db = firebase.database();
+      var at = Date.now();
+      var by = session.name || 'editor';
+      var name = String(label || '').trim() || ('Published ' + when);
+
+      var edRef = db.ref(ROOT + '/editions').push();
+      var edition = { at: at, by: by, label: name, published: true,
+        clubs: clone(ALL) || {}, provenance: clone(PROV) || {} };
+      var payload = { at: at, by: by, label: name, edition: edRef.key,
         count: built.count, people: built.people,
         clubs: built.clubs, pending: built.pending };
+
       NL.writeAudit('directory_publish', built.count + ' club(s), ' + built.people +
-        ' people published by ' + (session.name || 'editor'));
-      firebase.database().ref(ROOT + '/published').set(payload).then(function () {
-        PUBLISHED_AT = payload.at;
-        btn.disabled = false; btn.textContent = 'Publish';
-        NL.toast(built.count + ' club' + (built.count === 1 ? '' : 's') +
-          ' published', 'success');
-        if (current) { draw(current); }
-      }).catch(function (err) {
-        btn.disabled = false; btn.textContent = 'Publish';
-        NL.toast('Could not publish: ' + ((err && err.message) || err), 'error');
-      });
+        ' people published as "' + name + '" by ' + by);
+
+      /* The frozen copy first. Publishing without a record of what was
+         published is the half of this worth not having. */
+      edRef.set(edition)
+        .then(function () { return db.ref(ROOT + '/published').set(payload); })
+        .then(function () {
+          PUBLISHED_AT = at;
+          btn.disabled = false; btn.textContent = 'Publish';
+          NL.toast(built.count + ' club' + (built.count === 1 ? '' : 's') +
+            ' published and frozen as \u201c' + name + '\u201d', 'success');
+          if (current) { draw(current); }
+        })
+        .catch(function (err) {
+          btn.disabled = false; btn.textContent = 'Publish';
+          showFail('The directory', 'Publish', (err && err.message) || String(err));
+        });
     });
   }
 
@@ -1985,6 +2059,7 @@
     return {
       people:    clone(NLDirectory.arr(rec.people)) || [],
       info:      clone(rec.info || {}),
+      leads:     clone(rec.leads || {}),
       signedOff: rec.signedOff || null,
       edits:     clone(NLDirectory.arr(prov.edits)) || [],
       changes:   clone(NLDirectory.arr(prov.changes)) || []
@@ -2030,6 +2105,18 @@
                   after:  (b.info || {})[k] == null ? null : (b.info || {})[k] };
     });
     if (keysOf(info).length) { out.info = info; }
+
+    /* Mailing lists. Missing from the first cut, so changing one produced an
+       empty patch: no Undo button on the entry, and nothing to put back if
+       there had been. Keyed by list because a list key is a plain word —
+       secretary, slo — and safe as an RTDB key, unlike a path. */
+    var leads = {};
+    keysOf(a.leads, b.leads).forEach(function (k) {
+      if (same((a.leads || {})[k], (b.leads || {})[k])) { return; }
+      leads[k] = { before: clone((a.leads || {})[k]) || null,
+                   after:  clone((b.leads || {})[k]) || null };
+    });
+    if (keysOf(leads).length) { out.leads = leads; }
 
     if (!same(a.signedOff, b.signedOff)) {
       out.signedOff = { before: a.signedOff || null, after: b.signedOff || null };
@@ -2079,6 +2166,13 @@
         if (v == null) { delete rec.info[k]; } else { rec.info[k] = clone(v); }
       });
     }
+    if (patch.leads) {
+      rec.leads = rec.leads || {};
+      Object.keys(patch.leads).forEach(function (k) {
+        var v = patch.leads[k].before;
+        if (v == null) { delete rec.leads[k]; } else { rec.leads[k] = clone(v); }
+      });
+    }
     if (patch.signedOff) { rec.signedOff = clone(patch.signedOff.before); }
 
     var prov = PROV[club] || (PROV[club] = {});
@@ -2100,6 +2194,9 @@
      spotting the one case undo cannot isolate: two acts on one person. */
   function touchedBy(club, patch) {
     var names = [];
+    Object.keys(patch.leads || {}).forEach(function (k) {
+      names.push((LIST_LABEL[k] || k) + ' list');
+    });
     Object.keys(patch.people || {}).forEach(function (id) {
       var d = patch.people[id];
       var p = d.before || d.after;
@@ -2478,7 +2575,7 @@
     input.className = 'ed-cval';
     input.value = value || '';
     input.setAttribute('autocomplete', 'off');
-    input.placeholder = kind === 'email' ? 'name@club.co.uk' : '01234 567890';
+    input.placeholder = kind === 'email' ? 'e.g. name@example.co.uk' : 'e.g. 01234 567890';
     if (kind === 'email') { input.type = 'email'; }
 
     var pick = null;
@@ -2867,7 +2964,7 @@
     form.innerHTML =
       '<div class="form-group"><label>Department</label><span id="arDept"></span></div>' +
       '<div class="form-group"><label>Job title</label>' +
-        '<input id="arTitle" autocomplete="off" placeholder="Programme Editor"></div>' +
+        '<input id="arTitle" autocomplete="off" placeholder="e.g. Programme Editor"></div>' +
       '<div class="form-group span2"><p class="form-hint">' +
         esc(name) + ' is already listed under ' + esc(held.join(', ')) +
         '. Their contact details carry across — this is one person, not a copy.</p></div>';
@@ -2955,10 +3052,10 @@
     form.className = 'form-grid';
     form.innerHTML =
       '<div class="form-group span2"><label>Name <span class="req">*</span></label>' +
-        '<input id="apName" autocomplete="off" placeholder="Jane Smith"></div>' +
+        '<input id="apName" autocomplete="off" placeholder="e.g. Jane Smith"></div>' +
       '<div class="form-group"><label>Department</label><span id="apDept"></span></div>' +
       '<div class="form-group"><label>Job title</label>' +
-        '<input id="apTitle" autocomplete="off" placeholder="Ticketing Manager"></div>' +
+        '<input id="apTitle" autocomplete="off" placeholder="e.g. Ticketing Manager"></div>' +
       '<div class="form-group"><label>Email</label>' +
         '<input id="apEmail" type="email" autocomplete="off"></div>' +
       '<div class="form-group"><label>Phone</label>' +
@@ -3294,11 +3391,12 @@
   function markEdits(club) {
     var edits = editList(club);
     if (!edits.length) { return; }
-    var byPerson = {}, info = [];
+    var byPerson = {}, info = [], lists = [];
     edits.forEach(function (e) {
       var m = /^people\/([^/]+)\/(.*)$/.exec(e.path || '');
       if (m) { (byPerson[m[1]] = byPerson[m[1]] || []).push({ tail: m[2], e: e }); }
       else if (/^info\//.test(e.path || '')) { info.push(e); }
+      else if (/^leads\//.test(e.path || '')) { lists.push(e); }
     });
 
     $('out').querySelectorAll('.cd-row').forEach(function (row) {
@@ -3317,6 +3415,31 @@
     });
 
     if (info.length) { markInfoEdits(club, info); }
+    if (lists.length) { markListEdits(club, lists); }
+  }
+
+  /* Green under the mailing lists, the same as a hand edit anywhere else.
+     Changing who receives the League's mail is as much a decision as changing
+     somebody's job title, and until now it left no trace at all: no marker,
+     and — because the patch never looked at leads — no undo either. */
+  function markListEdits(club, edits) {
+    var box = document.getElementById('edListEdits');
+    if (!box) { return; }
+    box.className = 'ed-infoedits';
+    box.innerHTML = '<b>' + edits.length +
+      (edits.length === 1 ? ' list' : ' lists') + ' changed by hand</b>';
+    var ul = document.createElement('ul');
+    edits.forEach(function (e) {
+      var key = e.path.replace(/^leads\//, '');
+      var li = document.createElement('li');
+      li.innerHTML = '<span class="ed-pill ed-pill--edit">' +
+        esc(LIST_LABEL[key] || key) + '</span> ' +
+        (String(e.from || '').trim() ? 'was <b>' + esc(e.from) + '</b>'
+                                     : 'was <i>nobody</i>') +
+        ' &mdash; ' + esc(e.by || 'an editor') + ', ' + esc(NL.formatDate(e.at));
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
   }
 
   function addEditChip(row, e, what) {
@@ -3807,12 +3930,12 @@
     ]],
     ['Website and social', [
       ['website', 'Website', 'e.g. www.example.co.uk'],
-      ['x', 'X', 'https://x.com/...'],
-      ['facebook', 'Facebook', 'https://www.facebook.com/...'],
-      ['instagram', 'Instagram', 'https://www.instagram.com/...'],
-      ['tiktok', 'TikTok', 'https://www.tiktok.com/@...'],
-      ['linkedin', 'LinkedIn', 'https://uk.linkedin.com/company/...'],
-      ['youtube', 'YouTube', 'https://www.youtube.com/@...']
+      ['x', 'X', 'e.g. https://x.com/...'],
+      ['facebook', 'Facebook', 'e.g. https://www.facebook.com/...'],
+      ['instagram', 'Instagram', 'e.g. https://www.instagram.com/...'],
+      ['tiktok', 'TikTok', 'e.g. https://www.tiktok.com/@...'],
+      ['linkedin', 'LinkedIn', 'e.g. https://uk.linkedin.com/company/...'],
+      ['youtube', 'YouTube', 'e.g. https://www.youtube.com/@...']
     ]]
   ];
 

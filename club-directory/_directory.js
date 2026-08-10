@@ -233,8 +233,19 @@
         'details out of the published directory. The reader shows &quot;Not ' +
         'published&quot; here.">Not published</span>'
       : '';
-    return '<li class="cd-row' + (unlisted ? ' cd-row--unlisted' : '') + '">' +
-      '<div class="cd-row__name">' + esc(fullName(p) || 'Name not given') + '</div>' +
+    /* The row says who it is. The editor used to work this out by counting —
+       "the third row under Leadership is the third person in Leadership" —
+       which held only while the render order matched the array order. Adding
+       a surname sort to sectionPeople broke that silently, and every marker,
+       every pen and every flag landed on the wrong person. Carrying the id is
+       the fix and the whole class of fault goes with it. */
+    var ridx = arr(p.roles).map(function (r, i) {
+      return r.section === section ? i : -1;
+    }).filter(function (i) { return i > -1; })[0];
+    return '<li class="cd-row' + (unlisted ? ' cd-row--unlisted' : '') + '"' +
+      (p.id ? ' data-pid="' + esc(p.id) + '"' : '') +
+      (ridx != null ? ' data-ridx="' + ridx + '"' : '') + '>' +
+      '<div class="cd-row__name">' + displayName(p, opts) + '</div>' +
       '<div class="cd-row__role">' +
         /* Escape each title, then join with the entity. Escaping the joined
            string turns the separator's own ampersand into &amp;middot; and
