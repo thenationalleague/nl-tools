@@ -177,9 +177,22 @@ every white-primary club comes out grey `#444444`. It also lacks
 `code`/`secondary`/`tertiary`. `fixtures-graphic` and `table-graphic` still use
 it and are affected.
 
-### Adding the NL Cup
+### The NL Cup
 
-The renderer and the build already handle it. Two things are needed:
+**In this tool (v1.1+):** pick `NL Cup` in the competition select and the PL2
+sides that entered *the current season* join both club pickers, labelled
+`PL2 · NL Cup` where a member club shows its division. Any other competition
+shows the NL roster alone, so a PL2 side cannot land on a National League
+graphic by accident; switching away with one selected drops back to an NL club.
+
+Entrants are read per season from `competitions-meta.json`, so next season's 16
+arrive with a data edit and no code change. The picker gets them via
+`NL.clubs.guests()` + `NL.clubPicker`'s `extraClubs` option (canon, nl-utils
+v1.28) — guests are deliberately kept out of `NL.clubs.byName()`/`all()`, so
+the other graphics tools that filter `clubs-meta` on division never see them.
+
+**For the batch build**, the renderer and `scripts/build-match-graphics.js`
+already handle it. Three things are needed:
 
 1. **`assets/data/cup-clubs-meta.json`** — the PL2 representative sides. **This
    file now exists**, carrying all 21 sides that entered in 2025-26 or 2026-27:
@@ -206,9 +219,11 @@ The renderer and the build already handle it. Two things are needed:
    there already means "former NL club" (Rochdale, York and eight others).
    Adding non-members with no division would make them indistinguishable.
 
-   Colours are currently marked **DRAFT** (`colorsStatus`) — they were drawn
-   from standard home kits, not club brand guidelines, so verify before any
-   graphic ships.
+   Colours carry a per-club `colorsDraft: true` where they were drawn from a
+   standard home kit rather than a club source. **None of the 16 that entered
+   2026-27 are draft** — those were supplied from club sources. The flag
+   survives on five sides that entered only in 2025-26; `npm run
+   validate:cup-clubs` warns until they are replaced.
 
 2. **Entrants** — who entered, per season, lives on the `NL Cup` record in
    `competitions-meta.json`. Entry is *not* a division: a club keeps its real

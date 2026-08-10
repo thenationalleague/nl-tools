@@ -1,9 +1,28 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.27 (02/08/2026)
+   Version: v1.28 (10/08/2026)
 
    Changelog
+   v1.28 (10/08/2026)
+     - Guest clubs — the non-member sides that enter NL competitions (the
+       PL2 representative teams in the NL Cup) become addressable from the
+       canon rather than each tool re-reading the file. Added
+       NL.clubs.guests() (promise-memoised loader for cup-clubs-meta.json,
+       same shape as clubs.load) and NL.clubs.guestByName(). They are
+       deliberately NOT folded into clubs.all()/byName(): every tool that
+       filters clubs-meta on division would otherwise start offering
+       "Fulham PL2" in a league graphic.
+     - NL.clubPicker gains `extraClubs` (an array of club-like records
+       appended to the roster, exempt from the division filter) and the
+       controller method setExtraClubs(list), so a caller can add or drop
+       guests as its competition selector changes.
+     - NL.clubPicker now honours `crestName` on any club record when
+       resolving a crest. Guest records carry the parent club's badge name
+       ("Fulham PL2" -> Fulham.png), so no crest is duplicated under a
+       suffixed name. Member clubs have no crestName and are unaffected.
+       Cache-bust ?v=29 -> ?v=30 in lockstep.
+
    v1.27 (02/08/2026)
      - NL.icon() reaches the match-event icons. The sprite sheet gains 14
        filled icons (ball, goal, card, sub-on, sub-off, corner, free-kick,
@@ -1380,7 +1399,10 @@
   var _clubsMeta    = null;
   var _clubsCb      = null;  /* per-session cache-buster, stamped once */
   var _optaIndex    = null;  /* lazy optaID → club map, built by byOpta */
+  var _guestsPromise = null;
+  var _guestsMeta    = null;
   var CLUBS_URL     = '/assets/data/clubs-meta.json';
+  var GUESTS_URL    = '/assets/data/cup-clubs-meta.json';
   var CREST_BASE    = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
   var THUMB_BASE    = CREST_BASE + 'thumbs/';
   var MEDIUM_BASE   = CREST_BASE + 'medium/';
@@ -1441,6 +1463,44 @@
         return window.NL.season.clubsFor(meta, (key && key !== 'current') ? key : null);
       });
     },
+    /* ---- guest clubs -------------------------------------------------
+       Non-member sides that enter NL competitions (the PL2 representative
+       teams in the NL Cup). They live in their own file, and are kept OUT
+       of load()/all()/byName() on purpose: those read clubs-meta, where
+       `division: null` already means "former NL member" (Rochdale, York).
+       Folding guests in would make a side that was never a member
+       indistinguishable from one that was — and at least six graphics
+       tools filter that file on division.
+
+       Records are club-LIKE, not clubs: { name, short, code, nickname,
+       crestName, colors }. There is no division and no optaID. `name`
+       carries the competition-correct "… PL2" suffix; `crestName` points
+       at the parent club's badge, so no crest is duplicated.
+
+       Which guests entered WHICH season is not a property of the club —
+       it lives on the competition record in competitions-meta.json. Read
+       that to narrow this list to a given season's entrants. */
+    guests: function() {
+      if (_guestsPromise) return _guestsPromise;
+      if (!_clubsCb) _clubsCb = Date.now();
+      _guestsPromise = fetch(GUESTS_URL + '?cb=' + _clubsCb, { cache: 'no-store' })
+        .then(function(r) { if (!r.ok) throw new Error('cup-clubs-meta ' + r.status); return r.json(); })
+        .then(function(data) {
+          _guestsMeta = data;
+          return (data.clubs || []).slice().sort(function(a, b) { return a.name.localeCompare(b.name); });
+        })
+        .catch(function(err) { _guestsPromise = null; throw err; }); /* soft: allow retry */
+      return _guestsPromise;
+    },
+    /* Sync lookup of a guest by exact name (null before guests() resolves). */
+    guestByName: function(name) {
+      if (!_guestsMeta || !name) return null;
+      var lc = String(name).toLowerCase(), list = _guestsMeta.clubs || [];
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].name && list[i].name.toLowerCase() === lc) return list[i];
+      }
+      return null;
+    },
     /* Sync lookup by exact name (once loaded). */
     byName: function(name) {
       if (!_clubsMeta || !name) return null;
@@ -1464,19 +1524,29 @@
   };
 
   /* ===================================================================
-     NL.clubPicker(mount, options) — shared, accessible club picker (v1.11)
+     NL.clubPicker(mount, options) — shared, accessible club picker (v1.12)
      Renders the canonical .club-picker shell (see nl-brand.css) and wires
      search/select, keyboard (type-ahead + arrows), freetext and crest
      fallback ONCE so every caller inherits it. Returns a controller:
        { setValue, getValue, clear, setDisabled, setSeason, setDivisions,
-         refresh, destroy }
+         setExtraClubs, refresh, destroy }
      Options (all optional except onSelect):
        mode 'search'|'select' · season 'current'|'all'|'<key>' ·
        divisions ['North'] · offRoster 'hide'|'flag'|'allow' ·
        secondary 'division'|'stadium'|fn · crestFallback 'rose'|'hide' ·
-       clearable · value · disabled · placeholder · limit · onSelect(sel)
+       clearable · value · disabled · placeholder · limit ·
+       extraClubs [club-like records] · onSelect(sel)
      onSelect payload: { name, club, division, crestUrl, isFreetext,
                          isOffRoster, seasonKey }
+
+     extraClubs appends records that are not on the clubs-meta roster —
+     the NL Cup guest sides from NL.clubs.guests() are the intended case.
+     They are appended AFTER the division filter, so `divisions` never
+     drops them (a guest has no division to match). Swap the list at any
+     time with controller.setExtraClubs(list); pass [] to remove them.
+
+     Any record — roster or extra — may carry `crestName` to point at a
+     different badge file than its own name ("Fulham PL2" -> Fulham.png).
      =================================================================== */
   var _cpSeq = 0;
   window.NL.clubPicker = function(mount, options) {
@@ -1504,8 +1574,14 @@
       /* Placeholder derives from mode unless the caller overrides. */
       placeholder:   options.placeholder || (_mode === 'select' ? 'Select a club' : 'Search or select a club…'),
       limit:         options.limit || 12,
+      /* Off-roster records appended after the division filter. */
+      extraClubs:    options.extraClubs || [],
       onSelect:      typeof options.onSelect === 'function' ? options.onSelect : function() {}
     };
+
+    /* Which badge file a record resolves to. Falls back to the record's own
+       name, so member clubs (no crestName) behave exactly as before. */
+    function crestKeyOf(c) { return (c && (c.crestName || c.name)) || ''; }
 
     var id = 'nlcp' + (++_cpSeq), listId = id + '-list';
     var clubs = [], rendered = [], activeIdx = -1, selectedName = null, open = false;
@@ -1566,8 +1642,13 @@
           opt.divisions.forEach(function(d) { set[String(d).toLowerCase()] = true; });
           list = list.filter(function(c) { return set[String(c.division).toLowerCase()]; });
         }
+        /* Extras land after the filter — a guest has no division to match. */
+        if (opt.extraClubs.length) list = list.concat(opt.extraClubs);
         clubs = list; return list;
-      }).catch(function() { clubs = []; return []; });
+      }).catch(function() {
+        /* Roster fetch failed: still offer the extras rather than nothing. */
+        clubs = opt.extraClubs.slice(); return clubs;
+      });
     }
     function secondaryText(c) {
       if (typeof opt.secondary === 'function') return opt.secondary(c) || '';
@@ -1592,8 +1673,8 @@
         o.className = 'club-picker__option'; o.id = id + '-opt' + i;
         o.setAttribute('role', 'option'); o.setAttribute('aria-selected', 'false');
         var img = document.createElement('img'); img.alt = '';
-        window.NL.clubs.wireCrestImg(img, c.name, opt.crestFallback === 'hide');
-        img.src = window.NL.clubs.crestUrl(c.name, 'thumb');
+        window.NL.clubs.wireCrestImg(img, crestKeyOf(c), opt.crestFallback === 'hide');
+        img.src = window.NL.clubs.crestUrl(crestKeyOf(c), 'thumb');
         var nm = document.createElement('span'); nm.className = 'club-picker__option-name'; nm.textContent = c.name;
         o.appendChild(img); o.appendChild(nm);
         var sec = secondaryText(c);
@@ -1647,9 +1728,10 @@
       selectedName = sel.name;
       /* Visible crest uses the thumb (thumb→full→rose fallback); the payload's
          sel.crestUrl stays full-res for onSelect callers. */
-      if (sel.name) {
-        window.NL.clubs.wireCrestImg(crest, sel.name, false);
-        crest.src = window.NL.clubs.crestUrl(sel.name, 'thumb');
+      var ck = sel.crestKey || sel.name;
+      if (ck) {
+        window.NL.clubs.wireCrestImg(crest, ck, false);
+        crest.src = window.NL.clubs.crestUrl(ck, 'thumb');
       } else {
         crest.onerror = function() { this.onerror = null; this.src = CLUB_ROSE; };
         crest.src = sel.crestUrl || CLUB_ROSE;
@@ -1666,8 +1748,8 @@
         /* Freetext (e.g. an EFL club not on the NL roster): still resolve the
            crest by the same crests/<name>.png rule, so a repo crest shows if
            present (onerror falls back to the rose). */
-        ? { name: row.typed, club: null, division: '', crestUrl: window.NL.clubs.crestUrl(row.typed), isFreetext: true, isOffRoster: false, seasonKey: seasonKey() }
-        : { name: row.club.name, club: row.club, division: row.club.division || '', crestUrl: window.NL.clubs.crestUrl(row.club.name), isFreetext: false, isOffRoster: false, seasonKey: seasonKey() };
+        ? { name: row.typed, club: null, division: '', crestKey: row.typed, crestUrl: window.NL.clubs.crestUrl(row.typed), isFreetext: true, isOffRoster: false, seasonKey: seasonKey() }
+        : { name: row.club.name, club: row.club, division: row.club.division || '', crestKey: crestKeyOf(row.club), crestUrl: window.NL.clubs.crestUrl(crestKeyOf(row.club)), isFreetext: false, isOffRoster: false, seasonKey: seasonKey() };
       commitSel(sel);
     }
     /* Blur with a typed-but-uncommitted value: land it so nothing dangles. An
@@ -1681,9 +1763,9 @@
       var lc = typed.toLowerCase(), exact = null;
       for (var i = 0; i < clubs.length; i++) { if (clubs[i].name.toLowerCase() === lc) { exact = clubs[i]; break; } }
       if (exact) {
-        commitSel({ name: exact.name, club: exact, division: exact.division || '', crestUrl: window.NL.clubs.crestUrl(exact.name), isFreetext: false, isOffRoster: false, seasonKey: seasonKey() });
+        commitSel({ name: exact.name, club: exact, division: exact.division || '', crestKey: crestKeyOf(exact), crestUrl: window.NL.clubs.crestUrl(crestKeyOf(exact)), isFreetext: false, isOffRoster: false, seasonKey: seasonKey() });
       } else if (opt.freetext) {
-        commitSel({ name: typed, club: null, division: '', crestUrl: window.NL.clubs.crestUrl(typed), isFreetext: true, isOffRoster: false, seasonKey: seasonKey() });
+        commitSel({ name: typed, club: null, division: '', crestKey: typed, crestUrl: window.NL.clubs.crestUrl(typed), isFreetext: true, isOffRoster: false, seasonKey: seasonKey() });
       } else {
         input.value = selectedName || '';
       }
@@ -1744,9 +1826,16 @@
       setValue: function(name) {
         if (!name) return this.clear();
         var apply = function(c) {
-          applySelection({ name: name, club: c || null, division: (c && c.division) || '', crestUrl: window.NL.clubs.crestUrl(name), isFreetext: !c, isOffRoster: false, seasonKey: seasonKey() });
+          var ck = c ? crestKeyOf(c) : name;
+          applySelection({ name: name, club: c || null, division: (c && c.division) || '', crestKey: ck, crestUrl: window.NL.clubs.crestUrl(ck), isFreetext: !c, isOffRoster: false, seasonKey: seasonKey() });
         };
-        var found = window.NL.clubs.byName(name);
+        /* Extras first — a guest is not on the clubs-meta roster, so byName
+           would miss it and the value would render as freetext. */
+        var found = null, lc = String(name).toLowerCase();
+        for (var i = 0; i < opt.extraClubs.length; i++) {
+          if (String(opt.extraClubs[i].name).toLowerCase() === lc) { found = opt.extraClubs[i]; break; }
+        }
+        if (!found) found = window.NL.clubs.byName(name);
         if (found) apply(found);
         else window.NL.clubs.load().then(function() { apply(window.NL.clubs.byName(name)); }).catch(function() { apply(null); });
         return this;
@@ -1767,6 +1856,9 @@
       },
       setSeason:    function(key)  { opt.season = key || 'current'; clubs = []; return this; },
       setDivisions: function(divs) { opt.divisions = divs || null; clubs = []; return this; },
+      /* Swap the off-roster records (pass [] to drop them). The dropdown is
+         rebuilt on next open, so this is safe to call while closed. */
+      setExtraClubs: function(list) { opt.extraClubs = list || []; clubs = []; return loadRoster().then(function() { return controller; }); },
       refresh:      function()     { clubs = []; return loadRoster(); },
       destroy:      function()     { document.removeEventListener('click', onDocClick); el.innerHTML = ''; el.className = el.className.replace(/\bclub-picker\S*/g, '').replace(/\bis-open\b|\bhas-crest\b|\bis-disabled\b/g, '').trim(); }
     };
