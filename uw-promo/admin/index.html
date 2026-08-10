@@ -3,6 +3,13 @@
 <head>
 <!--
   UW Promo Codes — NL master console
+  Version: v3.1 (10/08/2026) — clubs now get TWO credentials: the 4-digit till
+           PIN (printed, kiosk-facing) and a 6-character manager passcode that
+           opens the club admin view on the same page. Seeding issues both;
+           “Issue missing manager passcodes” backfills clubs seeded earlier
+           without touching anyone's PIN; the access table and CSV carry both,
+           each regenerable on its own. The till card still prints ONLY the
+           PIN — the manager passcode must never go on a card at a kiosk.
   Version: v3.0 (06/08/2026) — registered-to-a-club model, plus the club
            credential change:
            · Add codes now demands a club from a dropdown (one club per
@@ -389,7 +396,7 @@
     var clubs = (CONFIG && CONFIG.clubs) || {};
     return Object.keys(clubs).map(function (k) {
       var c = clubs[k];
-      return { code: k, name: c.name, division: c.division || '', passcode: c.passcode, token: c.token };
+      return { code: k, name: c.name, division: c.division || '', passcode: c.passcode, managerPass: c.managerPass, token: c.token };
     }).sort(function (a, b) {
       return (a.division || '').localeCompare(b.division || '') || a.name.localeCompare(b.name);
     });
@@ -986,33 +993,76 @@
     // be converted — flagged so "who is still on the old kind?" is answerable
     // at a glance rather than by squinting at 72 rows.
     var legacy = clubs.filter(function (c) { return !/^\d{4}$/.test(String(c.passcode || '')); });
+    // Clubs seeded before the two-door split have a PIN but no manager passcode.
+    var noMgr = clubs.filter(function (c) { return !c.managerPass; });
     body.innerHTML =
       '<div style="margin-bottom:12px"><button class="btn btn--ghost btn--sm" id="btnSeedSync">Sync clubs from roster</button> ' +
       '<button class="btn btn--ghost btn--sm" id="btnExportAccess">Export access CSV</button> ' +
       '<button class="btn btn--navy btn--sm" id="btnPrintCards">Print till cards</button> ' +
       '<button class="btn btn--danger btn--sm" id="btnReissuePins">Reissue all club PINs</button></div>' +
+      (noMgr.length
+        ? '<p class="code-note" style="margin:-4px 0 12px">' + noMgr.length + ' club' +
+          (noMgr.length > 1 ? 's have' : ' has') + ' no manager passcode yet — their staff can use the ' +
+          'till but nobody can reach the club admin view. <strong>Issue missing manager passcodes</strong> ' +
+          'fixes that without touching anyone’s PIN. ' +
+          '<button class="btn btn--navy btn--sm" id="btnIssueMgr">Issue missing manager passcodes</button></p>'
+        : '') +
       (legacy.length
         ? '<p class="code-note" style="margin:-4px 0 12px">' + legacy.length + ' club' +
           (legacy.length > 1 ? 's are' : ' is') + ' still on an old 6-character passcode. ' +
           '“Reissue all club PINs” converts every club to a 4-digit PIN in one go.</p>'
         : '') +
       '<div class="table-wrap"><table class="table">' +
-      '<thead><tr><th>Club</th><th>Division</th><th>PIN</th><th></th></tr></thead><tbody>' +
+      '<thead><tr><th>Club</th><th>Division</th><th>Till PIN</th><th>Manager passcode</th><th></th></tr></thead><tbody>' +
       clubs.map(function (c) {
         return '<tr><td><span class="club-cell">' + UWP.crestImgHtml(c.name, 22) +
           '<span class="club-cell__name">' + esc(c.name) + '</span></span></td>' +
           '<td>' + esc(c.division) + '</td>' +
           '<td><button class="pass-chip" data-copypass="' + esc(c.code) + '" title="Click to copy">' + esc(c.passcode) + '</button></td>' +
+          '<td>' + (c.managerPass
+            ? '<button class="pass-chip" data-copymgr="' + esc(c.code) + '" title="Click to copy">' + esc(c.managerPass) + '</button>'
+            : '<span class="code-note">none yet</span>') + '</td>' +
           '<td style="text-align:right;white-space:nowrap">' +
             '<button class="btn btn--navy btn--sm" data-printcard="' + esc(c.code) + '">Card</button> ' +
             '<button class="btn btn--ghost btn--sm" data-copylink="' + esc(c.code) + '">Copy direct link</button> ' +
             '<button class="btn btn--ghost btn--sm" data-newpass="' + esc(c.code) + '">New PIN</button> ' +
+            '<button class="btn btn--ghost btn--sm" data-newmgr="' + esc(c.code) + '">New manager passcode</button> ' +
             '<button class="btn btn--ghost btn--sm" data-newlink="' + esc(c.code) + '">New link</button></td></tr>';
       }).join('') + '</tbody></table></div>';
     document.getElementById('btnSeedSync').onclick = seedClubs;
     document.getElementById('btnExportAccess').onclick = exportAccess;
     document.getElementById('btnPrintCards').onclick = function () { printCards(); };
     document.getElementById('btnReissuePins').onclick = reissueAllPins;
+    if (noMgr.length) document.getElementById('btnIssueMgr').onclick = function () { issueMissingManagerPasses(noMgr); };
+  }
+
+  /* Backfill manager passcodes for clubs seeded before the two-door split.
+     Deliberately additive — it never touches an existing manager passcode and
+     never touches a PIN, so it is safe to press twice. */
+  function issueMissingManagerPasses(missing) {
+    if (!missing || !missing.length) return;
+    NL.confirm('Issue a manager passcode to ' + missing.length + ' club' +
+      (missing.length > 1 ? 's' : '') + '?', {
+      title: 'Issue manager passcodes',
+      detail: 'These open the club admin view (upload codes, full history, till-PIN self-service). ' +
+        'Nobody\u2019s till PIN changes. Send each one to a named contact \u2014 it must NOT go on the till card.',
+      confirmText: 'Issue them'
+    }).then(function (ok) {
+      if (!ok) return;
+      var updates = {};
+      missing.forEach(function (c) {
+        updates[c.code + '/managerPass'] = UWP.newPasscode();
+        updates[c.code + '/updatedAt'] = UWP.TS();
+      });
+      UWP.ensureAuth().then(function () {
+        return UWP.ref('config/clubs').update(updates);
+      }).then(function () {
+        UWP.audit(ACTOR, ACTOR_LABEL, 'regen-passcode', {
+          count: missing.length, detail: 'Issued manager passcodes to clubs that had none'
+        });
+        toast(missing.length + ' manager passcodes issued', 'success');
+      }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
+    });
   }
 
   /* Reseed every club with a fresh, unique 4-digit PIN. This is the migration
@@ -1103,6 +1153,11 @@
     } else if ((el = e.target.closest('[data-copypass]'))) {
       var c1 = CONFIG.clubs[el.getAttribute('data-copypass')];
       if (c1) NL.copy(c1.passcode, { ok: c1.name + ' PIN copied' });
+    } else if ((el = e.target.closest('[data-copymgr]'))) {
+      var cm = CONFIG.clubs[el.getAttribute('data-copymgr')];
+      if (cm) NL.copy(cm.managerPass, { ok: cm.name + ' manager passcode copied' });
+    } else if ((el = e.target.closest('[data-newmgr]'))) {
+      regenClub(el.getAttribute('data-newmgr'), 'managerPass');
     } else if ((el = e.target.closest('[data-copylink]'))) {
       var c2 = CONFIG.clubs[el.getAttribute('data-copylink')];
       if (c2) NL.copy(UWP.clubLink(c2.token), { ok: c2.name + ' direct link copied' });
@@ -1116,7 +1171,7 @@
   function regenClub(code, field) {
     var c = CONFIG.clubs && CONFIG.clubs[code];
     if (!c) return;
-    var what = field === 'token' ? 'direct link' : 'PIN';
+    var what = field === 'token' ? 'direct link' : field === 'managerPass' ? 'manager passcode' : 'PIN';
     NL.confirm('Issue a new ' + what + ' for ' + c.name + '?', {
       title: 'Regenerate ' + what,
       detail: 'The current ' + what + ' stops working immediately — you’ll need to send the club the new one' +
@@ -1125,7 +1180,9 @@
     }).then(function (ok) {
       if (!ok) return;
       var upd = { updatedAt: UWP.TS() };
-      upd[field] = field === 'token' ? UWP.newToken() : UWP.newPin(takenPins(code));
+      upd[field] = field === 'token' ? UWP.newToken()
+        : field === 'managerPass' ? UWP.newPasscode()
+        : UWP.newPin(takenPins(code));
       UWP.ensureAuth().then(function () {
         return UWP.ref('config/clubs/' + code).update(upd);
       }).then(function () {
@@ -1187,7 +1244,8 @@
         missing.forEach(function (c) {
           updates[c.code] = {
             name: c.name, division: c.division || '',
-            passcode: UWP.newPin(taken), token: UWP.newToken(), addedAt: UWP.TS()
+            passcode: UWP.newPin(taken), managerPass: UWP.newPasscode(),
+            token: UWP.newToken(), addedAt: UWP.TS()
           };
         });
         UWP.ensureAuth().then(function () {
@@ -1202,9 +1260,9 @@
 
   function exportAccess() {
     var clubs = clubList();
-    var rows = [['Club', 'Division', 'PIN', 'Direct link']];
-    clubs.forEach(function (c) { rows.push([c.name, c.division, c.passcode, UWP.clubLink(c.token)]); });
-    if (CONFIG.uw && CONFIG.uw.passcode) rows.push(['Utility Warehouse', '', CONFIG.uw.passcode, UWP.uwLink(CONFIG.uw.token)]);
+    var rows = [['Club', 'Division', 'Till PIN', 'Manager passcode', 'Direct link']];
+    clubs.forEach(function (c) { rows.push([c.name, c.division, c.passcode, c.managerPass || '', UWP.clubLink(c.token)]); });
+    if (CONFIG.uw && CONFIG.uw.passcode) rows.push(['Utility Warehouse', '', CONFIG.uw.passcode, '', UWP.uwLink(CONFIG.uw.token)]);
     NL.download('uw-promo-access.csv', NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8');
     toast('Access CSV exported — treat it like a password list', 'success');
   }

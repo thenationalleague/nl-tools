@@ -10,8 +10,8 @@ NO auth-guard/portal login), with a full audit trail.
 | Page | Who | Gets in via | Can do |
 |---|---|---|---|
 | `/uw-promo/` | **Utility Warehouse** (one shared login) | shared 6-character passcode or `?u=<token>` direct link | Add codes **for one club at a time** (club dropdown required; paste a list — the default — or generate plain 6-character codes; optional batch label; ≤500/batch), revoke **unredeemed** codes, release a redeemed code (required reason), see every code with the club it belongs to, redeemed-by-club breakdown, filters, search, CSV export. The big count cards follow the club filter |
-| `/uw-promo/club/` | **Each of the 72 clubs** | own `?c=<token>` direct link (the QR-code target for the point of sale) **plus their 4-digit PIN on every visit**; PIN alone also works without the link | **Till page**: big code entry → a valid unredeemed code *registered to this club* is redeemed here (RTDB transaction — two tills can't claim the same code) and joins the club's redeemed list. A code registered elsewhere is refused by name. Already-redeemed entry shows **which club and the exact date/time**. Revoked → "no longer valid". Clubs cannot undo — the page points them at NL. Below that: **Check a code** (read-only lookup, 10 an hour, audited) and **Upload your own codes** (club-supplied batches, three undertakings + confirm, ≤200 at a time) |
-| `/uw-promo/admin/` | **NL master (Richard)** | master passcode only (no direct link, deliberately; first-run bootstrap sets it) | Everything UW can do, plus: redeem on behalf of a club (the club it is registered to, same race-safe transaction), **register** a pre-v3.0 code to a club, revoke **redeemed** codes (typed `REVOKE`), seed/sync the roster from clubs-meta, the **list of all 72 club URLs + PINs** (copy per club, regenerate, **Reissue all club PINs**, export access CSV), **Print till cards** (one A4 card per club: crest, QR of the club link, PIN + the till steps — print-to-PDF gives the 72-page hand-out pack), audit viewer + export, sandbox reset (test mode) |
+| `/uw-promo/club/` | **Each of the 72 clubs** | own `?c=<token>` direct link (the QR-code target for the point of sale) **plus a credential on every visit** — the 4-digit till PIN, or the club's manager passcode for the admin view; either alone also works without the link | **Till page**: big code entry → a valid unredeemed code *registered to this club* is redeemed here (RTDB transaction — two tills can't claim the same code) and joins the club's redeemed list. A code registered elsewhere is refused by name. Already-redeemed entry shows **which club and the exact date/time**. Revoked → "no longer valid". Clubs cannot undo — the page points them at NL. Below that: **Check a code** (read-only lookup, 10 an hour, audited). On the manager passcode only: **upload your own codes**, full code list, CSV export, the club's audit slice, and till-PIN self-service — see *Two doors, one page* |
+| `/uw-promo/admin/` | **NL master (Richard)** | master passcode only (no direct link, deliberately; first-run bootstrap sets it) | Everything UW can do, plus: redeem on behalf of a club (the club it is registered to, same race-safe transaction), **register** a pre-v3.0 code to a club, revoke **redeemed** codes (typed `REVOKE`), seed/sync the roster from clubs-meta, the **list of all 72 club URLs, PINs and manager passcodes** (copy/regenerate each, **Reissue all club PINs**, **Issue missing manager passcodes**, export access CSV), **Print till cards** (one A4 card per club: crest, QR of the club link, PIN + the till steps — print-to-PDF gives the 72-page hand-out pack), audit viewer + export, sandbox reset (test mode) |
 
 ## Which club a code belongs to
 
@@ -55,7 +55,44 @@ codes are 6 plain characters with no hyphen; the till entry box is free text
 |---|---|---|
 | NL master | 6-character alphanumeric passcode | Typed once, on a laptop, by one person |
 | Utility Warehouse | 6-character alphanumeric passcode | Same |
-| Each club | **4-digit numeric PIN** | Typed on a phone, at a till, by whoever is on shift |
+| Each club — till | **4-digit numeric PIN** | Typed on a phone, at a till, by whoever is on shift |
+| Each club — admin | 6-character **manager passcode** | Named contact, on a laptop. Never printed |
+
+## Two doors, one page
+
+`/uw-promo/club/` serves two jobs with two credentials on the same URL and the
+same QR:
+
+| | **Till mode** (4-digit PIN) | **Club admin** (manager passcode) |
+|---|---|---|
+| Redeem a code | ✅ | ✅ |
+| Check a code | ✅ | ✅ |
+| Redeemed list + counts | ✅ | ✅ |
+| Upload own codes | ✗ | ✅ |
+| Full code list, incl. unredeemed strings | ✗ | ✅ |
+| CSV export | ✗ | ✅ |
+| Club's slice of the audit trail | ✗ | ✅ |
+| See / rotate the till PIN | ✗ | ✅ |
+
+The reason is not tidiness. **The PIN is printed on the till card, next to a QR
+code, at a public kiosk** — realistically semi-public. It must not also be the
+credential that lets someone upload codes and tick three undertakings binding
+the club to £50 a code. Redemption and undertaking-giving are different risks
+and now need different secrets. A badge in the header says which door you came
+in by, and the till card still prints **only** the PIN.
+
+Till mode deliberately never prints unredeemed code strings (a screen facing a
+queue); club admin does, because it's the club's own stock list on a laptop.
+
+**What this does and does not protect.** The RTDB node is world-readable by
+design (`".read": true`), and both credentials are validated client-side, so
+neither is a secret against anyone willing to open the database URL directly.
+The split is a control against the *everyday* risk — a PIN on a card, a
+volunteer wandering into the upload form, a shared kiosk — not against a
+determined reader. Making these real secrets means moving `config` behind a
+Cloud Function that exchanges passcode → Firebase custom token, with rules
+keyed off `auth.token.club`. That is a proper piece of work, and deliverable
+without a terminal (`deploy-functions.yml` runs on push), but it is not this.
 
 Club PINs never start with `0` — a leading zero survives neither the access
 CSV (Excel reads `0123` as `123`) nor a hurried retype. They are also unique
@@ -71,7 +108,7 @@ have to be reprinted and resent.
 
 ## Clubs uploading their own codes
 
-At the foot of the club till page, behind the PIN. A club pastes its own
+In the club admin view (manager passcode — **not** the till PIN). A club pastes its own
 codes, optionally labels the batch, and they go live immediately — registered
 to that club, because a club can only ever upload its own. There is no club
 to choose and therefore nothing to get wrong.
@@ -128,7 +165,9 @@ are in the browser, and the RTDB path is world-readable anyway. Treat it as
 config/
   master            { passcode, updatedAt }                        # 6-char alphanumeric
   uw                { label, passcode, token, updatedAt }          # 6-char alphanumeric
-  clubs/<CODE>      { name, division, passcode, token, addedAt }   # passcode = 4-digit PIN
+  clubs/<CODE>      { name, division, passcode, managerPass, token, addedAt }
+                                                                   # passcode   = 4-digit till PIN
+                                                                   # managerPass = club admin view
                                                                    # CODE = clubs-meta 3-letter code
 codes/<pushId>      { code, norm, status: active|redeemed|revoked,
                       club, clubName,                              # set at CREATION — the one club
