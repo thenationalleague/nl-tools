@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fan Widgets
-  Version: v0.6 (09/08/2026)
+  Version: v0.7 (09/08/2026)
   File: /fan-widgets/index.html
 
   Registrations, predictions and Team of the Week picks from the fan-facing widgets on thenationalleague.org.uk.
@@ -97,6 +97,16 @@
        NL_CHANGELOG[0].version. v0.2 and v0.3 were written as extra items
        inside the v0.1 entry, so the badge said v0.1 however much shipped. */
     window.NL_CHANGELOG = [
+      {
+        date: '09/08/2026',
+        version: 'v0.7',
+        items: [
+          'Team of the Week filters by matchday and division, and exports the selection to CSV. It opens on the most recent matchday that has nominations, which is the answer wanted nine times in ten; Clear opens it out to everything.',
+          'The export reads the same filtered result the page draws, so the CSV cannot disagree with what is on screen. One row per player: matchday, division, player, club, nominations, notes, fixture, and the note text with its attribution.',
+          'Uses NL.csv and NL.download from canon rather than hand-rolling escaping or the object-URL dance — a note containing a comma and a quotation mark comes out correctly quoted.',
+          'The unmatched-fixture warning counts the whole dataset, not the current filter: a fault is a fault whether or not you happen to be looking at it, and hiding it behind a filter is how it gets forgotten.'
+        ]
+      },
       {
         date: '09/08/2026',
         version: 'v0.6',
@@ -253,6 +263,25 @@
     line-height: 1.45;
   }
 
+  /* Filter bar. Sits above the list and drives both what is drawn and what
+     the export contains — they read the same filtered result, so the CSV
+     cannot disagree with the screen. */
+  .fw-filters {
+    display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .fw-filter { display: flex; flex-direction: column; gap: 4px; }
+  .fw-filter > span {
+    font-size: var(--text-xs); color: var(--text-muted);
+    font-weight: 800; font-variation-settings: 'wght' 800;
+    text-transform: uppercase; letter-spacing: .6px;
+  }
+  .fw-filters__spacer { flex: 1; }
+  .fw-filters__count {
+    font-size: var(--text-sm); color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
   /* Players ranked across the division, in one card. */
   .fw-players {
     background: var(--white);
@@ -358,6 +387,25 @@
       <div class="section-head">
         <h2>Votes</h2>
       </div>
+      <div class="fw-filters" id="fwTotwFilters">
+        <label class="fw-filter">
+          <span>Matchday</span>
+          <select id="fwTotwDay" aria-label="Filter by matchday"></select>
+        </label>
+        <label class="fw-filter">
+          <span>Division</span>
+          <select id="fwTotwComp" aria-label="Filter by division">
+            <option value="all">All divisions</option>
+            <option value="National">National</option>
+            <option value="North">North</option>
+            <option value="South">South</option>
+          </select>
+        </label>
+        <button type="button" class="btn btn--ghost" id="fwTotwClear">Clear</button>
+        <span class="fw-filters__spacer"></span>
+        <span class="fw-filters__count" id="fwTotwCount"></span>
+        <button type="button" class="btn" id="fwTotwCsv">Export CSV</button>
+      </div>
       <div id="fwTotw"></div>
     </div>
 
@@ -378,7 +426,12 @@
      cross-referenced: a fan's row needs their predictions and their Team of
      the Week picks alongside their registration. */
   var state = { users: null, preds: {}, motm: {}, motmNames: {}, q: '', fixtures: {},
-               fixturesPartial: false };
+               fixturesPartial: false,
+               /* null means "not chosen yet" and resolves to the most recent
+                  matchday with nominations — the answer wanted nine times in
+                  ten. 'all' is the explicit everything, which Clear returns to
+                  only after you have narrowed. */
+               totwDay: null, totwComp: 'all' };
 
   var syncEl   = document.getElementById('fwSync');
   var statsEl  = document.getElementById('fwStats');
@@ -386,6 +439,11 @@
   var fansEl   = document.getElementById('fwFans');
   var searchEl = document.getElementById('fwSearch');
   var totwEl   = document.getElementById('fwTotw');
+  var totwDayEl   = document.getElementById('fwTotwDay');
+  var totwCompEl  = document.getElementById('fwTotwComp');
+  var totwClearEl = document.getElementById('fwTotwClear');
+  var totwCsvEl   = document.getElementById('fwTotwCsv');
+  var totwCountEl = document.getElementById('fwTotwCount');
 
   window.TOOL.boot = function (session) {
     var uid = session && session.uid;
@@ -836,29 +894,96 @@
     return { name: name || 'Club unknown', crest: name ? NL.clubs.crestUrl(name, 'thumb') : '' };
   }
 
-  function renderTotw() {
-    if (!state.users) return;
+  var COMP_ORDER = ['National', 'North', 'South', 'Other'];
+
+  /* THE single filtered result. renderTotw draws it and the CSV exports it,
+     so "the export matches what I selected" holds by construction rather than
+     by two filters being kept in step — which is the drift that has bitten
+     this repo repeatedly today.
+
+     Returns a flat list, one entry per player per division per matchday,
+     already ordered the way the page shows it. */
+  function totwSelection() {
     var days = totwByPlayer();
 
     var dayKeys = Object.keys(days).filter(function (d) { return d !== 'unknown'; })
       .sort().reverse();
     if (days.unknown) dayKeys.push('unknown');
 
-    if (!dayKeys.length) {
+    /* Default to the most recent matchday that actually has nominations, not
+       to today and not to everything. Resolved here rather than at boot
+       because the data arrives after the first render. */
+    var day = state.totwDay;
+    if (day === null) day = dayKeys[0] || 'all';
+
+    var rows = [];
+    dayKeys.forEach(function (d) {
+      if (day !== 'all' && d !== day) return;
+      var comps = days[d];
+      COMP_ORDER.filter(function (c) { return comps[c]; }).forEach(function (comp) {
+        if (state.totwComp !== 'all' && comp !== state.totwComp) return;
+        Object.keys(comps[comp]).map(function (k) { return comps[comp][k]; })
+          .sort(function (a, b) { return b.votes - a.votes || a.name.localeCompare(b.name); })
+          .forEach(function (pl) { rows.push({ day: d, comp: comp, player: pl }); });
+      });
+    });
+
+    return { rows: rows, dayKeys: dayKeys, day: day, allDays: days };
+  }
+
+  function dayLabel(d) {
+    return d === 'unknown' ? 'Not matched to a fixture' : NL.formatDateShort(d);
+  }
+
+  /* Full club names, not three-letter codes: this line ends up in a
+     spreadsheet as well as on screen, and "ALD 3-2 WOK" is a puzzle in a
+     column of its own. */
+  function fixtureText(f) {
+    var home = clubMeta(f.home && f.home.teamID).name;
+    var away = clubMeta(f.away && f.away.teamID).name;
+    var hs = f.home && f.home.score, as = f.away && f.away.score;
+    var mid = (hs == null || as == null) ? ' v ' : ' ' + hs + '\u2013' + as + ' ';
+    return home + mid + away;
+  }
+
+  function renderTotwFilters(sel) {
+    /* Rebuilt from the data every render, because a matchday only exists once
+       somebody has nominated in it. */
+    var opts = ['<option value="all">All matchdays</option>'].concat(
+      sel.dayKeys.map(function (d) {
+        return '<option value="' + NL.escHtml(d) + '"' + (d === sel.day ? ' selected' : '') + '>' +
+               NL.escHtml(dayLabel(d)) + '</option>';
+      }));
+    totwDayEl.innerHTML = opts.join('');
+    totwDayEl.value = sel.day;
+    totwCompEl.value = state.totwComp;
+
+    var noms = sel.rows.reduce(function (n, r) { return n + r.player.votes; }, 0);
+    totwCountEl.textContent = sel.rows.length
+      ? sel.rows.length + ' player' + (sel.rows.length === 1 ? '' : 's') +
+        ', ' + noms + ' nomination' + (noms === 1 ? '' : 's')
+      : '';
+    totwCsvEl.disabled = !sel.rows.length;
+  }
+
+  function renderTotw() {
+    if (!state.users) return;
+    var sel = totwSelection();
+    renderTotwFilters(sel);
+
+    if (!sel.dayKeys.length) {
       totwEl.innerHTML = '<div class="empty-state">No Team of the Week votes yet. ' +
         'Nominations open at full time and run until 23:59 the next day.</div>';
       return;
     }
 
-    /* A fan can only nominate from a fixture the widget put in front of them,
-       and both sides fetch the same three competitions for the same season —
-       so every vote should resolve. If one does not, the fixture list HERE is
-       incomplete, and that is worth saying rather than filing under a
-       neutral-sounding heading. */
-    var stray = days.unknown
-      ? Object.keys(days.unknown).reduce(function (n, comp) {
-          return n + Object.keys(days.unknown[comp]).reduce(function (t, k) {
-            return t + days.unknown[comp][k].votes;
+    /* The warning counts the WHOLE dataset, not the current filter: an
+       unmatched fixture is a fault whether or not you happen to be looking at
+       it, and hiding it behind a filter is how it gets forgotten. */
+    var stray = sel.allDays.unknown
+      ? Object.keys(sel.allDays.unknown).reduce(function (n, comp) {
+          return n + Object.keys(sel.allDays.unknown[comp]).reduce(function (t, k) {
+            return t + sel.allDays.unknown[comp][k].votes;
           }, 0);
         }, 0)
       : 0;
@@ -874,23 +999,33 @@
         '</div>'
       : '';
 
-    totwEl.innerHTML = warn + dayKeys.map(function (day) {
-      var label = day === 'unknown' ? 'Not matched to a fixture' : NL.formatDateShort(day);
-      var comps = days[day];
-      return '<div class="section-head"><h2>' + NL.escHtml(label) + '</h2></div>' +
-        ['National', 'North', 'South', 'Other'].filter(function (c) { return comps[c]; })
-          .map(function (comp) {
-            /* One ranked list across the division, not a block per club.
-               Grouping by club buried the ranking: five nominations at one
-               club and four at another sat in separate boxes, so "who is
-               being nominated most this weekend" could not be read off the
-               page at all. The club travels with the player instead. */
-            var players = Object.keys(comps[comp]).map(function (k) { return comps[comp][k]; })
-              .sort(function (a, b) { return b.votes - a.votes || a.name.localeCompare(b.name); });
-            return '<div class="fw-daylabel text-secondary">' + NL.escHtml(comp) + '</div>' +
-                   '<div class="fw-players">' + players.map(playerHTML).join('') + '</div>';
-          }).join('');
-    }).join('');
+    if (!sel.rows.length) {
+      totwEl.innerHTML = warn +
+        '<div class="empty-state">No nominations for this selection. ' +
+        'Try another matchday or clear the filter.</div>';
+      return;
+    }
+
+    /* Grouped for display out of the same flat list the export uses. */
+    var html = '', lastDay = null, lastComp = null;
+    sel.rows.forEach(function (r) {
+      if (r.day !== lastDay) {
+        if (lastDay !== null) html += '</div>';
+        else if (lastComp !== null) html += '</div>';
+        html += '<div class="section-head"><h2>' + NL.escHtml(dayLabel(r.day)) + '</h2></div>';
+        lastDay = r.day; lastComp = null;
+      }
+      if (r.comp !== lastComp) {
+        if (lastComp !== null) html += '</div>';
+        html += '<div class="fw-daylabel text-secondary">' + NL.escHtml(r.comp) + '</div>' +
+                '<div class="fw-players">';
+        lastComp = r.comp;
+      }
+      html += playerHTML(r.player);
+    });
+    if (lastComp !== null) html += '</div>';
+
+    totwEl.innerHTML = warn + html;
   }
 
   /* Name and club on the line itself — "who is this and who do they play for"
@@ -937,6 +1072,61 @@
       '</div>' +
     '</details>';
   }
+
+  /* ---- CSV -----------------------------------------------------------------
+     Exports exactly the current selection, because it reads the same
+     totwSelection() the page draws. NL.csv and NL.download are canon; this
+     does not hand-roll escaping or the object-URL dance. */
+  function totwCsv() {
+    var sel = totwSelection();
+    var rows = [[
+      'Matchday', 'Division', 'Player', 'Club', 'Nominations', 'Notes',
+      'Fixture', 'Note text'
+    ]];
+    sel.rows.forEach(function (r) {
+      var p = r.player;
+      rows.push([
+        r.day === 'unknown' ? 'Not matched' : r.day,
+        r.comp,
+        p.name,
+        clubMeta(p.teamId).name,
+        p.votes,
+        p.notes.length,
+        Object.keys(p.games).map(function (mid) {
+          var f = state.fixtures[mid];
+          return f ? fixtureText(f) : 'Fixture unavailable';
+        }).join(' | '),
+        /* Quote and attribution together — they are useless apart when the
+           point is writing the piece. A nomination with no note contributes
+           nothing here and is accounted for by Nominations minus Notes. */
+        p.notes.map(function (n) { return n.note + ' — ' + n.fan; }).join(' | ')
+      ]);
+    });
+
+    var scope = (sel.day === 'all' ? 'all-matchdays' : sel.day) +
+                (state.totwComp === 'all' ? '' : '-' + state.totwComp.toLowerCase());
+    NL.download('team-of-the-week-' + scope + '.csv',
+                NL.csv(rows, { bom: true }), 'text/csv;charset=utf-8');
+    NL.toast(sel.rows.length + ' player' + (sel.rows.length === 1 ? '' : 's') + ' exported');
+  }
+
+  totwDayEl.addEventListener('change', function () {
+    state.totwDay = totwDayEl.value;
+    renderTotw();
+  });
+  totwCompEl.addEventListener('change', function () {
+    state.totwComp = totwCompEl.value;
+    renderTotw();
+  });
+  totwClearEl.addEventListener('click', function () {
+    /* Clear means everything, not "back to the default" — the default IS a
+       filter, and a Clear that reapplied it would be indistinguishable from a
+       broken button. */
+    state.totwDay = 'all';
+    state.totwComp = 'all';
+    renderTotw();
+  });
+  totwCsvEl.addEventListener('click', totwCsv);
 
   /* If auth-guard fired before this script loaded, replay the session. */
   if (window._toolDeferredSession) {
