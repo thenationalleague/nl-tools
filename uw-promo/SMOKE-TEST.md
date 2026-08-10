@@ -9,7 +9,7 @@ demo continues.
 | | |
 |---|---|
 | **Environment** | Sandbox — every URL carries `?env=test` (amber TEST MODE badge). Identical code to live, disposable data. Nothing in this session touches live data or credentials. |
-| **Duration** | ~45 minutes |
+| **Duration** | ~50 minutes |
 | **R** — Richard | NL master. Laptop, screen-sharing. Console: `https://nl.tools/uw-promo/admin/?env=test` |
 | **U** — UW rep | Partner dashboard. Own laptop, screen-shares in Phases B and E. Link/passcode arrive via meeting chat in B1. |
 | **N** — Nick | Club staff, playing **two different clubs**. Needs a **phone** (Club 1) **and** a laptop or second browser tab (Club 2). Credentials arrive via meeting chat in A5. |
@@ -108,6 +108,27 @@ nowhere else.
 
 ---
 
+## Phase K — the club uploads its own codes (N, ~5 min)
+
+| # | Action | Expected | Pass |
+|---|--------|----------|------|
+| K1 | At the foot of the **Club 1** till page, find **Upload your own codes** | Intro names Club 1; paste box, optional label, three tick-boxes, Upload button | ☐ |
+| K2 | Paste three made-up codes, leave the tick-boxes **unticked**, press Upload | Refused — all three confirmations required; nothing added | ☐ |
+| K3 | Tick all three, press Upload | Second confirm dialog restating the three undertakings and naming Club 1 | ☐ |
+| K4 | Cancel it | Nothing added; the codes and ticks are still in the form | ☐ |
+| K5 | Upload again and confirm | "3 codes uploaded"; form clears; tick-boxes reset; **Still to be redeemed** rises by 3 | ☐ |
+| K6 | Redeem one of them at the Club 1 till | ✅ — a club's own uploaded code behaves exactly like a UW one | ☐ |
+| K7 | Try another of them at the **Club 2** till | ❌ refused, naming Club 1 — self-uploaded codes obey the same one-club rule | ☐ |
+| K8 | Paste a code that already exists (one of UW's from Phase B) and upload | Refused, naming the clash; **nothing** is added, not even the valid ones alongside it | ☐ |
+| K9 | R checks the master Codes tab | The three codes are there against Club 1, **By = Club** (not UW or NL) | ☐ |
+| K10 | R checks the Audit tab | One `add-codes` entry from Club 1, with the count, the batch, and the three undertakings recorded in the detail | ☐ |
+
+Line to land with the club: *this is your record as much as ours — the audit
+trail is append-only, so what you confirmed can't be edited afterwards by
+anyone, us included.*
+
+---
+
 ## Phase E — UW's controls (U, ~4 min, U screen-shares)
 
 | # | Action | Expected | Pass |
@@ -181,6 +202,8 @@ console can edit or prune it.*
 | Duplicate + race protection ("redeemed **at**") | C7, D5–D6 |
 | **Count cards follow the club filter** | B11–B12, F2 |
 | **Voucher checker: all four verdicts, non-destructive, hourly cap** | J1–J6 |
+| **Club self-upload: undertakings enforced, double confirm, global duplicate check** | K1–K8 |
+| Club-uploaded codes obey the one-club rule and are attributable | K6–K7, K9–K10 |
 | Club's unredeemed codes counted but never displayed | C4 |
 | Live cross-panel updates | C8, D3, D6, F4 |
 | Revoke / release (keeps the registration) / re-redemption at the right club | E1–E5 |
