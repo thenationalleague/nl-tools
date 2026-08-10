@@ -3,6 +3,18 @@
 <head>
 <!--
   UW Promo Codes — Club point-of-sale redemption page
+  Version: v4.0 (10/08/2026) — the credential becomes real. The PIN is no
+           longer compared in this browser: it goes to the uwPromoAuth RTDB
+           trigger, which checks it with the Admin SDK and returns a scoped
+           Firebase token. app-data/uw-promo/config is no longer readable by
+           this page — until now it was world-readable, so every club's PIN
+           could be read by anyone who opened the database URL. The club, its
+           name and (for a manager) its own PIN and link now arrive in the
+           grant. PIN rotation goes back through the trigger, authorised by
+           the caller's minted uid. The gate takes a few seconds now, because
+           Eventarc does; the button says so. ?c= links gain &k=<CODE> so the
+           gate can still show the club crest before sign-in — that code is a
+           clubs-meta key, not a secret, and grants nothing.
   Version: v3.2 (10/08/2026) — two doors, one page. The 4-digit PIN is printed
            on the till card beside a QR at a public kiosk, so it can no longer
            be the credential that lets someone commit the club to £50 a code.
@@ -360,7 +372,7 @@
 (function () {
   'use strict';
 
-  var CONFIG = null, CLUB = null;      // CLUB = { code, name, division, passcode, token }
+  var CLUB = null, CREDS = null;       // CLUB from the grant; CREDS manager-only
   var MODE = 'till';                   // 'till' (4-digit PIN) | 'manager' (club passcode)
   var AUDIT = {}, auditQuery = null;
   var CODES = {}, codesLoaded = false, unlocked = false, codesQuery = null;
@@ -370,94 +382,70 @@
   function toast(m, t) { NL.toast(m, t || 'info'); }
   function actor() { return 'club:' + CLUB.code; }
 
-  /* ── Config + gate ──────────────────────────────────────────────────── */
-  UWP.ref('config/clubs').on('value', function (s) {
-    CONFIG = s.val() || {};
-    boot();
-    // The NL can rotate a PIN while a manager has this open — keep it honest.
-    if (unlocked && MODE === 'manager') renderPin();
-  }, function () {
-    document.getElementById('gateSub').textContent = 'Could not reach the database. Check your connection and refresh.';
-  });
+  /* ── Gate ───────────────────────────────────────────────────────────
+     Nothing about the credential is decided here any more. The PIN goes to
+     the uwPromoAuth trigger, which compares it server-side and hands back a
+     scoped token; `config` is not readable by this page at all. See
+     functions/uw-promo.js. */
 
-  function findByToken(tok) {
-    if (!tok) return null;
-    var hit = null;
-    Object.keys(CONFIG || {}).forEach(function (k) {
-      if (CONFIG[k].token === tok) hit = withCode(k);
-    });
-    return hit;
+  /* The ?c= link carries &k=<CODE> purely so the gate can show the club's
+     crest before anyone signs in. That code is a three-letter clubs-meta key,
+     not a secret, and grants nothing: the PIN is still required and which
+     club it opens is decided server-side from the token. Older links without
+     &k simply get the unbranded gate. */
+  function linkClubName() {
+    try {
+      var k = (new URLSearchParams(location.search).get('k') || '').toUpperCase();
+      if (!k || !NL.clubs || !NL.clubs.byCode) return null;
+      var rec = NL.clubs.byCode(k);
+      return rec && rec.name ? rec.name : null;
+    } catch (e) { return null; }
   }
-  /* Two doors, one page. The 4-digit PIN opens the till; the club's manager
-     passcode opens the till AND the admin sections below it. Returns
-     { club, mode } or null.
-
-     Signing in without a link resolves the club BY the credential typed, so
-     an ambiguous one must open nothing rather than guess — two clubs sharing
-     a PIN would otherwise silently hand the till to whichever came last in
-     the object. The master console issues unique PINs, so this only bites on
-     data predating that guarantee. */
-  function findByPass(p) {
-    p = (p || '').toUpperCase().trim();
-    if (!p) return null;
-    var hits = [];
-    Object.keys(CONFIG || {}).forEach(function (k) {
-      var c = CONFIG[k];
-      if ((c.passcode || '').toUpperCase() === p) hits.push({ club: withCode(k), mode: 'till' });
-      if ((c.managerPass || '').toUpperCase() === p) hits.push({ club: withCode(k), mode: 'manager' });
-    });
-    return hits.length === 1 ? hits[0] : null;
-  }
-
-  /* Same test, but against one known club (arrived via its ?c= link). */
-  function matchClub(club, p) {
-    p = (p || '').toUpperCase().trim();
-    if (!p || !club) return null;
-    var raw = CONFIG[club.code] || {};
-    if (p === (raw.passcode || '').toUpperCase()) return { club: club, mode: 'till' };
-    if (raw.managerPass && p === (raw.managerPass || '').toUpperCase()) return { club: club, mode: 'manager' };
-    return null;
-  }
-  function withCode(k) { var c = CONFIG[k]; return { code: k, name: c.name, division: c.division, passcode: c.passcode, token: c.token }; }
 
   function boot() {
     if (unlocked) return;
-    if (!CONFIG || !Object.keys(CONFIG).length) {
-      document.getElementById('gateSub').textContent =
-        'This page hasn’t been switched on yet. Contact the National League.';
-      return;
-    }
-    /* The ?c= link/QR only IDENTIFIES the club — it never signs in by
-       itself. The club passcode is required on every visit, so a QR on
-       public display at the point of sale doesn't hand the till to anyone
-       who scans it. */
-    var params = new URLSearchParams(location.search);
-    showGateForm(findByToken(params.get('c')));
+    showGateForm(linkClubName());
   }
+  /* clubs-meta only decides the crest, so a failure to load it must still
+     open the gate — hence the same handler on both paths. */
+  if (NL.clubs && NL.clubs.load) NL.clubs.load().then(boot, boot); else boot();
 
-  function showGateForm(linkClub) {
-    if (linkClub) {
+  function showGateForm(clubName) {
+    if (clubName) {
       var logo = document.getElementById('gateLogo');
-      logo.src = NL.clubs.crestUrl(linkClub.name, 'medium');
-      NL.clubs.wireCrestImg(logo, linkClub.name);
-      document.getElementById('gateTitle').textContent = linkClub.name;
-      document.getElementById('gateSub').textContent =
-        'Enter your 4-digit till PIN — or your club manager passcode for the admin view.';
-    } else {
-      document.getElementById('gateSub').textContent =
-        'Enter your 4-digit till PIN, or your club manager passcode.';
+      logo.src = NL.clubs.crestUrl(clubName, 'medium');
+      NL.clubs.wireCrestImg(logo, clubName);
+      document.getElementById('gateTitle').textContent = clubName;
     }
+    document.getElementById('gateSub').textContent =
+      'Enter your 4-digit till PIN — or your club manager passcode for the admin view.';
     document.getElementById('gateForm').style.display = 'block';
-    var inp = document.getElementById('gateInput'), err = document.getElementById('gateErr');
+    var inp = document.getElementById('gateInput'), err = document.getElementById('gateErr'),
+        btn = document.getElementById('gateBtn');
     inp.focus();
+
+    var busyGate = false;
     function submit() {
-      var hit = linkClub ? matchClub(linkClub, inp.value) : findByPass(inp.value);
-      if (!hit) { err.textContent = 'Not recognised. Check with the NL media team.'; return; }
+      if (busyGate) return;
+      var typed = (inp.value || '').trim();
+      if (!typed) { err.textContent = 'Enter your PIN.'; return; }
+      busyGate = true;
       err.textContent = '';
-      history.replaceState({}, '', location.pathname + '?c=' + encodeURIComponent(hit.club.token) + (UWP.isTest ? '&env=test' : ''));
-      enter(hit.club, hit.mode);
+      btn.disabled = true;
+      /* The round trip is Eventarc, so seconds not milliseconds. Say so
+         rather than looking broken. */
+      btn.textContent = 'Checking…';
+      var tok = new URLSearchParams(location.search).get('c');
+      UWP.signIn(typed, tok).then(function (session) {
+        enter(session.club, session.role, session.creds);
+      }).catch(function (e) {
+        busyGate = false;
+        btn.disabled = false;
+        btn.textContent = 'Open';
+        err.textContent = e.message || 'Not recognised.';
+      });
     }
-    document.getElementById('gateBtn').onclick = submit;
+    btn.onclick = submit;
     inp.onkeydown = function (e) { if (e.key === 'Enter') submit(); };
   }
 
@@ -467,8 +455,9 @@
   });
 
   /* ── Enter: crest branding + live list of this club's redemptions ───── */
-  function enter(club, mode) {
+  function enter(club, mode, creds) {
     CLUB = club;
+    CREDS = creds || null;          // manager only: own PIN + link token
     MODE = mode === 'manager' ? 'manager' : 'till';
     unlocked = true;
     document.getElementById('gate').style.display = 'none';
@@ -832,8 +821,7 @@
      so a club can rotate a walked card without waiting on the NL. */
   function renderPin() {
     var chip = document.getElementById('pinChip');
-    var raw = (CONFIG && CONFIG[CLUB.code]) || {};
-    chip.textContent = raw.passcode || '————';
+    chip.textContent = (CREDS && CREDS.passcode) || '————';
     chip.onclick = function () { NL.copy(chip.textContent, { ok: 'Till PIN copied' }); };
   }
 
@@ -841,10 +829,11 @@
      the identical card. Read from the live club record, so printing straight
      after a PIN change gives a card with the new PIN on it. */
   function printOwnCard() {
-    var raw = (CONFIG && CONFIG[CLUB.code]) || {};
-    if (!raw.passcode || !raw.token) { toast('Your card isn’t ready yet — contact the National League.', 'error'); return; }
+    if (!CREDS || !CREDS.passcode || !CREDS.token) {
+      toast('Your card isn’t ready yet — contact the National League.', 'error'); return;
+    }
     try {
-      UWP.printCards([{ code: CLUB.code, name: CLUB.name, passcode: raw.passcode, token: raw.token }]);
+      UWP.printCards([{ code: CLUB.code, name: CLUB.name, passcode: CREDS.passcode, token: CREDS.token }]);
     } catch (e) { toast(e.message, 'error'); }
   }
 
@@ -856,16 +845,13 @@
       variant: 'danger', confirmText: 'Issue a new PIN'
     }).then(function (ok) {
       if (!ok) return;
-      var taken = {};
-      Object.keys(CONFIG || {}).forEach(function (k) {
-        if (k !== CLUB.code && CONFIG[k].passcode) taken[String(CONFIG[k].passcode)] = true;
-      });
-      var pin;
-      try { pin = UWP.newPin(taken); }
-      catch (e) { toast(e.message, 'error'); return; }
-      UWP.ensureAuth().then(function () {
-        return UWP.ref('config/clubs/' + CLUB.code).update({ passcode: pin, updatedAt: UWP.TS() });
-      }).then(function () {
+      /* Config is master-only now, so the club cannot write its own PIN. The
+         rotation goes back through the trigger, which authorises it from the
+         caller's uid alone — see functions/uw-promo.js. */
+      toast('Issuing a new PIN…');
+      UWP.rotateOwnPin().then(function (pin) {
+        if (CREDS) CREDS.passcode = pin;
+        renderPin();
         UWP.audit(actor(), CLUB.name, 'regen-passcode', {
           club: CLUB.code, clubName: CLUB.name, detail: 'Club issued itself a new till PIN'
         });

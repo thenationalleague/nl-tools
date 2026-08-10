@@ -79,6 +79,109 @@
     } catch (e) { return Promise.reject(e); }
   }
 
+  /* ── Credential handshake ────────────────────────────────────────────
+     Exchanges a PIN or passcode for a scoped Firebase session, via the
+     uwPromoAuth RTDB trigger (functions/uw-promo.js). The credential is never
+     compared in the browser and `config` is not client-readable any more —
+     that is the whole point. Same shape as programme/_shared.js.
+
+     A callable would be the obvious thing; it cannot be used, because the
+     project's org policy blocks a public invoker on new Cloud Run services and
+     club staff have no Google account. See the function header. */
+  var AUTH_TIMEOUT_MS = 45000;   // Eventarc delivery is seconds, not instant
+  var SESSION = null;
+
+  function requestGrant(payload) {
+    return ensureAuth().then(function (user) {
+      var uid = user.uid;
+      var reqRef = app.database().ref(ROOT + '/authRequests/' + uid);
+      var grantRef = app.database().ref(ROOT + '/authGrants/' + uid);
+
+      return new Promise(function (resolve, reject) {
+        var done = false;
+        var timer = setTimeout(function () {
+          if (done) return;
+          done = true;
+          grantRef.off();
+          reject(new Error('That took too long. Please try again.'));
+        }, AUTH_TIMEOUT_MS);
+
+        function finish(fn) {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          grantRef.off();
+          fn();
+        }
+
+        grantRef.on('value', function (snap) {
+          var g = snap.val();
+          if (!g) return;
+          /* Clear both nodes while we still own this uid — after
+             signInWithCustomToken the uid changes and the rules would stop us
+             touching them, leaving litter behind. */
+          var cleanup = Promise.all([
+            grantRef.remove().catch(function () {}),
+            reqRef.remove().catch(function () {})
+          ]);
+          finish(function () {
+            cleanup.then(function () {
+              if (g.ok) resolve(g);
+              else reject(new Error(g.error || 'Not recognised.'));
+            });
+          });
+        }, function (err) { finish(function () { reject(err); }); });
+
+        var body = { at: firebase.database.ServerValue.TIMESTAMP };
+        Object.keys(payload || {}).forEach(function (k) {
+          if (payload[k] != null && payload[k] !== '') body[k] = payload[k];
+        });
+        reqRef.set(body).catch(function (err) { finish(function () { reject(err); }); });
+      });
+    });
+  }
+
+  /* Exchange a credential for a session. `token` is the ?c= link token when
+     the page has one — it names the club server-side before anything is
+     compared, which is what lets the function throttle per club instead of
+     only globally, and is why a 4-digit PIN is defensible at all. */
+  function signIn(code, token) {
+    return requestGrant({ code: normCode(code), token: token || null })
+      .then(function (g) {
+        return app.auth().signInWithCustomToken(g.customToken).then(function () {
+          SESSION = {
+            role: g.role, club: g.club || null,
+            creds: g.creds || null, clubs: g.clubs || null
+          };
+          window.UWP.session = SESSION;
+          return SESSION;
+        });
+      });
+  }
+
+  /* A club manager rotating its own till PIN. Carries no credential — the
+     request is keyed on the caller's uid, and `uw-<CODE>-manager` is a uid
+     only the trigger mints, only for a proven manager. Resolves the new PIN. */
+  function rotateOwnPin() {
+    return requestGrant({ rotatePin: true }).then(function (g) {
+      if (SESSION && SESSION.creds) SESSION.creds.passcode = g.passcode;
+      return g.passcode;
+    });
+  }
+
+  /* First-run only: mints a master session while no master passcode exists.
+     The function refuses once one is set, so this closes itself. */
+  function bootstrapMaster() {
+    return requestGrant({ bootstrap: true }).then(function (g) {
+      return app.auth().signInWithCustomToken(g.customToken).then(function () {
+        SESSION = { role: 'master', club: null, creds: null, clubs: null };
+        window.UWP.session = SESSION;
+        return SESSION;
+      });
+    });
+  }
+
+
   /* Unambiguous alphabet — no 0/O, 1/I/L — for anything a human retypes. */
   var CODE_ALPHA  = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
   var TOKEN_ALPHA = 'abcdefghjkmnpqrstuvwxyz23456789';
@@ -346,6 +449,10 @@
     ref: function (path) { return app.database().ref(ROOT + (path ? '/' + path : '')); },
     ensureAuth: ensureAuth,
     TS: function () { return firebase.database.ServerValue.TIMESTAMP; },
+    signIn: signIn,
+    rotateOwnPin: rotateOwnPin,
+    bootstrapMaster: bootstrapMaster,
+    session: null,
     newPasscode: function () { return randFrom(CODE_ALPHA, 6); },
     newPin: newPin,
     newToken: function () { return randFrom(TOKEN_ALPHA, 14); },

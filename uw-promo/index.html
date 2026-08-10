@@ -3,6 +3,12 @@
 <head>
 <!--
   UW Promo Codes — Utility Warehouse partner page
+  Version: v4.0 (10/08/2026) — the partner passcode is checked server-side by
+           the uwPromoAuth trigger, not in this browser, and config is no
+           longer readable here: the club dropdown arrives in the grant with
+           names and divisions only. The ?u= link no longer skips the gate —
+           it never granted anything, and there is nothing left client-side to
+           check it against.
   Version: v3.0 (06/08/2026) — registered-to-a-club model. Every code is now
            created against exactly one club — chosen from a required dropdown,
            one club per batch — and can only ever be redeemed there. "Paste a
@@ -152,87 +158,82 @@
   var ACTOR = 'uw', ACTOR_LABEL = 'Utility Warehouse';
   var SS_KEY = 'uwPromoUwPass' + (UWP.isTest ? ':test' : '');
 
-  var CONFIG = null;          // app-data/uw-promo/config
+  var CLUBS = [];             // from the grant — code/name/division, no credentials
   var CODES = {};             // id -> record
   var codesLoaded = false, unlocked = false;
 
   function esc(s) { return NL.escHtml(s); }
   function toast(m, t) { NL.toast(m, t || 'info'); }
 
-  /* ── Live data ──────────────────────────────────────────────────────── */
-  UWP.ref('config').on('value', function (s) {
-    CONFIG = s.val() || {};
-    boot();
-    if (unlocked) { buildClubFilter(); }
-  }, function () {
-    document.getElementById('gateSub').textContent = 'Could not reach the database. Check your connection and refresh.';
-  });
+  /* ── Gate ───────────────────────────────────────────────────────────
+     The passcode is no longer compared here — it goes to the uwPromoAuth
+     trigger, which checks it server-side and returns a scoped token. `config`
+     is not readable by this page any more, so the club list for the dropdown
+     comes back in the grant (names and divisions only; UW never needs a
+     credential and must not be handed 72 of them).
 
-  UWP.ref('codes').on('value', function (s) {
-    CODES = s.val() || {};
-    codesLoaded = true;
-    if (unlocked) render();
-  });
-
-  /* ── Gate ───────────────────────────────────────────────────────────── */
-  function uwConf() { return (CONFIG && CONFIG.uw) || null; }
-
+     The ?u= link no longer opens the dashboard on its own — it never granted
+     anything, but it used to skip the gate, and there is nothing client-side
+     left to check it against. It still works as a bookmark. */
   function boot() {
-    if (unlocked) return;
-    var uw = uwConf();
-    if (!uw || !uw.passcode) {
-      document.getElementById('gateSub').textContent =
-        'This dashboard hasn’t been switched on yet. Contact the National League.';
-      return;
-    }
-    var params = new URLSearchParams(location.search);
-    var tok = params.get('u');
-    if (tok && uw.token && tok === uw.token) { unlock(); return; }
-    var cached = sessionStorage.getItem(SS_KEY);
-    if (cached && cached === uw.passcode) { unlock(); return; }
-    showGateForm();
-  }
-
-  function showGateForm() {
-    document.getElementById('gateSub').textContent = 'Enter the partner passcode provided by the National League.';
+    document.getElementById('gateSub').textContent =
+      'Enter the partner passcode provided by the National League.';
     document.getElementById('gateForm').style.display = 'block';
-    var inp = document.getElementById('gateInput'), err = document.getElementById('gateErr');
+    var inp = document.getElementById('gateInput'), err = document.getElementById('gateErr'),
+        btn = document.getElementById('gateBtn');
     inp.focus();
+
+    var busyGate = false;
     function submit() {
-      var uw = uwConf();
-      if (uw && (inp.value || '').toUpperCase().trim() === uw.passcode) {
-        err.textContent = '';
-        sessionStorage.setItem(SS_KEY, uw.passcode);
-        if (uw.token) history.replaceState({}, '', location.pathname + '?u=' + encodeURIComponent(uw.token) + (UWP.isTest ? '&env=test' : ''));
+      if (busyGate) return;
+      var typed = (inp.value || '').trim();
+      if (!typed) { err.textContent = 'Enter the passcode.'; return; }
+      busyGate = true;
+      err.textContent = '';
+      btn.disabled = true;
+      btn.textContent = 'Checking…';       // Eventarc — seconds, not instant
+      UWP.signIn(typed).then(function (session) {
+        if (session.role !== 'uw') {
+          busyGate = false; btn.disabled = false; btn.textContent = 'Open dashboard';
+          err.textContent = 'That passcode is not for this dashboard.';
+          return;
+        }
+        CLUBS = session.clubs || [];
         unlock();
-      } else {
-        err.textContent = 'Passcode not recognised. Check with the NL media team.';
-      }
+      }).catch(function (e) {
+        busyGate = false;
+        btn.disabled = false;
+        btn.textContent = 'Open dashboard';
+        err.textContent = e.message || 'Passcode not recognised.';
+      });
     }
-    document.getElementById('gateBtn').onclick = submit;
+    btn.onclick = submit;
     inp.onkeydown = function (e) { if (e.key === 'Enter') submit(); };
   }
+  boot();
 
   function unlock() {
     unlocked = true;
     document.getElementById('gate').style.display = 'none';
     document.getElementById('app').style.display = 'block';
+    /* Codes are only readable once the session exists, so subscribe now
+       rather than at page load. */
+    UWP.ref('codes').on('value', function (s) {
+      CODES = s.val() || {};
+      codesLoaded = true;
+      render();
+    });
     buildClubFilter();
     render();
   }
 
   document.getElementById('signout').addEventListener('click', function () {
-    sessionStorage.removeItem(SS_KEY);
-    history.replaceState({}, '', location.pathname + (UWP.isTest ? '?env=test' : ''));
     location.reload();
   });
 
-  /* ── Clubs helper (config/clubs drives the redeemed-by filter) ──────── */
+  /* ── Clubs helper (the grant's list drives the filter and the dropdown) ─ */
   function clubList() {
-    var clubs = (CONFIG && CONFIG.clubs) || {};
-    return Object.keys(clubs).map(function (k) {
-      var c = clubs[k]; return { code: k, name: c.name, division: c.division || '' };
-    }).sort(function (a, b) {
+    return CLUBS.slice().sort(function (a, b) {
       return (a.division || '').localeCompare(b.division || '') || a.name.localeCompare(b.name);
     });
   }

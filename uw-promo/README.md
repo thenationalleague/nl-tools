@@ -85,15 +85,52 @@ in by, and the till card still prints **only** the PIN.
 Till mode deliberately never prints unredeemed code strings (a screen facing a
 queue); club admin does, because it's the club's own stock list on a laptop.
 
-**What this does and does not protect.** The RTDB node is world-readable by
-design (`".read": true`), and both credentials are validated client-side, so
-neither is a secret against anyone willing to open the database URL directly.
-The split is a control against the *everyday* risk — a PIN on a card, a
-volunteer wandering into the upload form, a shared kiosk — not against a
-determined reader. Making these real secrets means moving `config` behind a
-Cloud Function that exchanges passcode → Firebase custom token, with rules
-keyed off `auth.token.club`. That is a proper piece of work, and deliverable
-without a terminal (`deploy-functions.yml` runs on push), but it is not this.
+## The credentials are real now (v4.0)
+
+Until v4.0 every credential here was compared **in the browser** against
+`app-data/uw-promo/config`, and that node was world-readable. Anyone who
+opened the database URL could read all 72 till PINs. The gate was a courtesy,
+not a control, and the README said so.
+
+That is fixed. `functions/uw-promo.js` (`uwPromoAuth`) validates the PIN or
+passcode with the Admin SDK and returns a Firebase custom token carrying a
+claim; `config` is now readable only by a minted **master** token. Third
+instance of the shape `programme.js` and `club-directory.js` already use.
+
+| Claim | Who |
+|---|---|
+| `uwRole: 'till'`, `uwClub: <CODE>` | club staff — redeem + check |
+| `uwRole: 'manager'`, `uwClub: <CODE>` | club admin |
+| `uwRole: 'uw'` | Utility Warehouse |
+| `uwRole: 'master'` | NL master console |
+
+**It has to be an RTDB trigger, not a callable.** The project carries an org
+policy blocking `allUsers` on new Cloud Run services, so a callable cannot be
+given a public invoker, and club staff have no Google account. `programme.js`
+hit this on 03/08/2026 and footage on 13/07/2026 — both wrote it down, which
+is why this took an afternoon rather than a day.
+
+**Cost:** Eventarc delivery is seconds, not milliseconds, so the gate now
+shows "Checking…" for a beat. Acceptable on a gate; it is why footage rejected
+the same path for video previews.
+
+**Throttling — and the one thing we can do that `programme` cannot.** A
+trigger sees no source IP and anonymous uids are free, so per-uid counting is
+weak and a global ceiling is what really bounds a distributed guess. Both are
+kept. But a 4-digit PIN is a 9,000-wide space where programme's is 31⁶ ≈ 887M,
+and a global-only limit would not hold it. What saves it is that our `?c=`
+token names the club *before* the PIN is compared — programme has no
+equivalent, since its passcode alone identifies the club. So failures are also
+counted **per club**: 10 an hour puts a full sweep of one club's PIN space at
+~900 hours and locks out only that club. That is what lets the PIN stay short
+enough to type at a till.
+
+Remaining honest limits: `codes` and `audit` are readable by *any* minted
+session, because the till has to be able to say "that one is registered to
+Hartlepool", which needs a lookup across all of them. So a club can, with
+effort, read the code list. That is a much smaller exposure than before —
+it now requires a valid credential rather than just the URL — but it is not
+nothing, and closing it properly would mean a server-side lookup endpoint.
 
 Club PINs never start with `0` — a leading zero survives neither the access
 CSV (Excel reads `0123` as `123`) nor a hurried retype. They are also unique

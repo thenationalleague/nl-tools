@@ -201,6 +201,45 @@ test('rateLimit: corrupt stored state fails open rather than locking the till ou
   }
 });
 
+/* ── Client/server agreement ───────────────────────────────────────────────
+   The credential is now compared server-side in functions/uw-promo.js, which
+   carries its own copies of normCode and newPin. If the two ever disagree a
+   club types the right PIN and is refused, so pin them together here — same
+   guard as tests/programme.test.mjs. */
+const SERVER_SRC = readFileSync(join(REPO, 'functions/uw-promo.js'), 'utf8');
+
+function serverFn(name) {
+  const m = SERVER_SRC.match(new RegExp(`function ${name}\\([\\s\\S]*?\\n\\}`));
+  assert.ok(m, `could not find ${name} in functions/uw-promo.js`);
+  return new Function(`${m[0]}; return ${name};`)();
+}
+
+test('normCode matches the server implementation', () => {
+  const serverNorm = serverFn('normCode');
+  for (const input of ['7f3 k9c', ' uw-7F3-K9C ', '', 'abc-123', '••••••', 'Summer 01']) {
+    assert.equal(serverNorm(input), UWP.normCode(input), `normCode(${JSON.stringify(input)})`);
+  }
+});
+
+test('the server mints PINs to the same rule as the client', () => {
+  const serverNewPin = serverFn('newPin');
+  for (let i = 0; i < 200; i++) {
+    assert.match(serverNewPin({}), /^[1-9][0-9]{3}$/, 'four digits, no leading zero');
+  }
+  // And it honours a taken-set the same way, so a rotation can't collide.
+  const taken = {};
+  for (let n = 2000; n < 10000; n++) taken[String(n)] = true;
+  for (let i = 0; i < 50; i++) assert.match(serverNewPin(taken), /^1[0-9]{3}$/);
+});
+
+test('the server refuses a credential of the wrong length before comparing', () => {
+  const safeEqual = serverFn('safeEqual');
+  assert.equal(safeEqual('1234', '1234'), true);
+  assert.equal(safeEqual('1234', '12345'), false);
+  assert.equal(safeEqual('', ''), true);
+  assert.equal(safeEqual(null, undefined), true, 'both normalise to empty');
+});
+
 test('links: club/UW direct links point at the family pages', () => {
   assert.equal(UWP.clubLink('abc123'), 'https://nl.tools/uw-promo/club/?c=abc123');
   assert.equal(UWP.uwLink('xyz789'), 'https://nl.tools/uw-promo/?u=xyz789');

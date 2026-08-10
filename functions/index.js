@@ -145,6 +145,12 @@ Object.assign(exports, require("./fan-widgets"));
 // shape and the same org-policy reason as programme.js above.
 Object.assign(exports, require("./club-directory"));
 
+// UW Promo Codes credential → scoped-claim trigger (uwPromoAuth, plus the
+// sandbox twin uwPromoAuthTest). Third instance of the same shape and the same
+// org-policy reason as programme.js. Note the extra per-club throttle it can
+// afford that the others cannot — see the header there.
+Object.assign(exports, require("./uw-promo"));
+
 // NLS → RTDB live ingester (nlsIngestTick / nlsIngestHourly). Scheduled rather
 // than triggered, and it writes to the nl-widgets database rather than this
 // project's — see functions/nls-ingester.js for both reasons. Exported here so
