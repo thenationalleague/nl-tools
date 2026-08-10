@@ -139,7 +139,10 @@ alone is resolved *by* that PIN, so a duplicate would open the wrong club's
 till. If an ambiguous PIN ever does reach the till page it opens nothing
 rather than guessing.
 
-**Reissue all club PINs** (Clubs & access) converts the whole roster in one
+**Reissue all club PINs** and **Reissue all manager passcodes** (Clubs &
+access) each rotate the whole roster in one go — the second is what you reach
+for when a credential has to be treated as burned rather than merely rotated.
+The PIN one also converts the roster in one
 go — that is the migration from the old 6-character club passcodes. It
 invalidates every club's current credential immediately, so the till cards
 have to be reprinted and resent.
