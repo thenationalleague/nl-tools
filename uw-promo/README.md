@@ -73,6 +73,7 @@ same QR:
 | CSV export | ✗ | ✅ |
 | Club's slice of the audit trail | ✗ | ✅ |
 | See / rotate the till PIN | ✗ | ✅ |
+| Print their own till card | ✗ | ✅ |
 
 The reason is not tidiness. **The PIN is printed on the till card, next to a QR
 code, at a public kiosk** — realistically semi-public. It must not also be the
@@ -137,6 +138,29 @@ clash is found, nothing at all is written and the clashing codes are named.
 In the NL and UW panels these appear with **Club** in the "By" column
 (`createdBy` is `club:<CODE>`), so a club-supplied batch is always
 distinguishable from a UW or NL one.
+
+## Till cards
+
+One A4 card per club: club crest and UW wordmark side by side, a QR of the
+club's direct link, the till PIN and the steps. Print-to-PDF from the master
+console gives the 72-page hand-out pack, or a single club from the per-row
+**Card** button.
+
+**A club can also print its own**, from the club admin view, next to the PIN.
+The card is built at print time from the live club record, so printing right
+after a PIN rotation gives a card carrying the new PIN — which is the whole
+point of pairing the two in one section.
+
+There is exactly one implementation (`UWP.tillCardHtml` / `UWP.printCards`,
+styles in `_shared.css`) precisely because two pages print these now: a
+club-printed card and an NL-printed one must be the same card. QR encoding is
+local (`qrcode.vendor.js`) so club link tokens never reach a third-party QR
+image API.
+
+The "hide everything except the cards" print rule is scoped to a class that
+`printCards` sets for the duration of the dialog. The stylesheet is shared by
+all three pages, so without that scope an ordinary Ctrl+P anywhere in the
+family would print a blank sheet.
 
 ## Checking a code without redeeming it
 
@@ -273,8 +297,9 @@ intentionally outside the gated suite (external users have no portal logins).
 ## Files
 
 - `_shared.js` — named app + anon auth, env/sandbox switch, generators,
-  `redeemTxn`, audit writer, `UWP.*`
-- `_shared.css` — gate card, context header bar, code widgets, test banner (all brand tokens)
+  `redeemTxn`, `rateLimit`, `tillCardHtml`/`printCards`, audit writer, `UWP.*`
+- `_shared.css` — gate card, context header bar, code widgets, till-card print
+  styles, test banner (all brand tokens)
 - `index.html` (UW) / `club/index.html` (till) / `admin/index.html` (master)
 - `qrcode.vendor.js` — vendored QR encoder (MIT, qrcode-generator@1.4.4);
   local so club link tokens are never sent to a third-party QR image API

@@ -1,5 +1,12 @@
 /*
   UW Promo Codes — shared runtime for the three standalone pages
+  Version: v3.1 (10/08/2026) — till cards move into the shared runtime
+           (tillCardHtml/printCards, styles in _shared.css). Two pages print
+           them now — the master console and a club printing its own from the
+           admin view — and a club-printed card must be identical to an
+           NL-printed one, so there is exactly one implementation. The PIN is
+           read at print time, so a card printed right after a rotation
+           carries the new PIN.
   Version: v3.0 (06/08/2026) — registered-to-a-club model. Every code is
            assigned to exactly one club when it is created, and redeemTxn now
            refuses a code presented at any other club. genCodes() drops the
@@ -236,6 +243,91 @@
   }
   function envTail() { return IS_TEST ? '&env=test' : ''; }
 
+  /* ── Till cards ──────────────────────────────────────────────────────
+     One A4 card per club: co-branded header, QR of the club's direct link,
+     the till PIN and the steps. Lives here because two pages print them —
+     the master console (all 72, or one at a time) and a club printing its
+     own from the admin view — and a club-printed card must be identical to
+     an NL-printed one. Styles are in _shared.css for the same reason.
+
+     The PIN is read from the club record at print time, so a card printed
+     straight after a PIN rotation carries the new one.
+
+     QR encoding is local (qrcode.vendor.js) so club link tokens are never
+     sent to a third-party QR image API. Callers must load that script. */
+  function tillCardHtml(club) {
+    var esc = window.NL && NL.escHtml ? NL.escHtml : function (s) { return String(s == null ? '' : s); };
+    var link = clubLinkFor(club.token);
+    var qr = qrcode(0, 'M');
+    qr.addData(link);
+    qr.make();
+    return '<div class="print-card">' +
+      '<div class="print-card__brands">' +
+        '<img src="' + esc(NL.clubs.crestUrl(club.name)) + '" alt="" ' +
+          'onerror="this.onerror=null;this.src=\'' + ROSE + '\';">' +
+        '<img src="' + UW_LOGO + '" alt="Utility Warehouse" ' +
+          'onerror="this.onerror=null;this.style.display=\'none\';">' +
+      '</div>' +
+      '<div class="print-card__club">' + esc(club.name) + '</div>' +
+      '<div class="print-card__kicker">Utility Warehouse promo codes — till card</div>' +
+      '<div class="print-card__qr">' + qr.createSvgTag({ cellSize: 2, margin: 0, scalable: true }) + '</div>' +
+      '<ol class="print-card__steps">' +
+        '<li>Scan the QR code above on your phone.</li>' +
+        '<li>Enter your club PIN: <span class="print-card__pass">' + esc(club.passcode) + '</span></li>' +
+        '<li>Type the customer’s promo code and press <strong>REDEEM</strong>.</li>' +
+        '<li>If successfully redeemed, apply the relevant discount to their items on the club system.</li>' +
+        '<li>Codes are issued to this club only. One from elsewhere will be refused — you can confirm any ' +
+          'code with <strong>Check a code</strong> at the foot of the page.</li>' +
+      '</ol>' +
+      '<div class="print-card__url">' + esc(link) + '</div>' +
+    '</div>';
+  }
+
+  /* Render `clubs` into #printRoot (created on demand) and open the print
+     dialog once the crests have loaded — otherwise the browser snapshots the
+     page mid-fetch and prints cards with missing logos. 4s hard backstop. */
+  function printCards(clubs) {
+    if (!clubs || !clubs.length) throw new Error('No clubs to print');
+    if (typeof qrcode === 'undefined') throw new Error('QR library failed to load — refresh and try again');
+    var root = document.getElementById('printRoot');
+    if (!root) {
+      root = document.createElement('div');
+      root.id = 'printRoot';
+      document.body.appendChild(root);
+    }
+    root.innerHTML = clubs.map(tillCardHtml).join('');
+
+    /* The card stylesheet is shared by all three pages, so the "hide
+       everything but the cards" rule is scoped to this class rather than to
+       @media print alone — otherwise an ordinary Ctrl+P anywhere in the
+       family would print a blank sheet. Cleared once the dialog closes. */
+    document.body.classList.add('is-printing-cards');
+    var cleared = false;
+    function clear() {
+      if (cleared) return;
+      cleared = true;
+      document.body.classList.remove('is-printing-cards');
+    }
+    window.addEventListener('afterprint', clear, { once: true });
+    setTimeout(clear, 60000);   // backstop: some browsers never fire afterprint
+
+    var imgs = root.querySelectorAll('img');
+    var fired = false, done = 0;
+    function go() { if (!fired) { fired = true; window.print(); } }
+    function maybe() { done++; if (done >= imgs.length) go(); }
+    if (!imgs.length) { go(); return clubs.length; }
+    Array.prototype.forEach.call(imgs, function (img) {
+      if (img.complete) { maybe(); }
+      else { img.addEventListener('load', maybe); img.addEventListener('error', maybe); }
+    });
+    setTimeout(go, 4000);
+    return clubs.length;
+  }
+
+  function clubLinkFor(token) {
+    return pageBase() + 'club/?c=' + encodeURIComponent(token) + envTail();
+  }
+
   // TEST MODE banner — auto-injected so every page in the family shows it.
   if (IS_TEST) {
     document.addEventListener('DOMContentLoaded', function () {
@@ -271,9 +363,11 @@
     fmt: function (ms) { return ms ? NL.formatDateTime(ms) : '—'; },
     ago: function (ms) { return ms ? NL.timeAgo(ms) : '—'; },
     crestImgHtml: crestImgHtml,
+    tillCardHtml: tillCardHtml,
+    printCards: printCards,
     ROSE: ROSE,
     UW_LOGO: UW_LOGO,
-    clubLink: function (token) { return pageBase() + 'club/?c=' + encodeURIComponent(token) + envTail(); },
+    clubLink: clubLinkFor,
     uwLink: function (token) { return pageBase() + '?u=' + encodeURIComponent(token) + envTail(); }
   };
 })();

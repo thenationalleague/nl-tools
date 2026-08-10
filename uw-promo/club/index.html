@@ -84,6 +84,10 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/uw-promo/_shared.js"></script>
+<!-- Vendored QR encoder (MIT, qrcode-generator@1.4.4) — local, so a club's
+     link token is never sent to a third-party QR image API. Needed for the
+     club's own till card in the admin view. -->
+<script src="/uw-promo/qrcode.vendor.js"></script>
 <script src="/system/nl-utils.js?v=30"></script>
 <link rel="stylesheet" href="/uw-promo/_shared.css">
 <style>
@@ -339,8 +343,11 @@
         you’ll need to reprint your card.</p>
       <div class="checker__row">
         <button class="pin-chip" id="pinChip" title="Click to copy"></button>
+        <button class="btn btn--navy btn--sm" id="pinCard">Print your till card</button>
         <button class="btn btn--ghost btn--sm" id="pinNew">Issue a new PIN</button>
       </div>
+      <p class="checker__meta" style="margin-top:10px">The card is built fresh each time, so it always
+        carries your current PIN — change the PIN above, then print a new card.</p>
     </div>
 
     </div><!-- /#managerOnly -->
@@ -743,6 +750,7 @@
     document.getElementById('invSearch').value = '';
     document.getElementById('invExport').addEventListener('click', exportInventory);
     document.getElementById('pinNew').addEventListener('click', newPin);
+    document.getElementById('pinCard').addEventListener('click', printOwnCard);
     renderPin();
   }
 
@@ -827,6 +835,17 @@
     var raw = (CONFIG && CONFIG[CLUB.code]) || {};
     chip.textContent = raw.passcode || '————';
     chip.onclick = function () { NL.copy(chip.textContent, { ok: 'Till PIN copied' }); };
+  }
+
+  /* The club's own till card — same builder the master console uses, so it is
+     the identical card. Read from the live club record, so printing straight
+     after a PIN change gives a card with the new PIN on it. */
+  function printOwnCard() {
+    var raw = (CONFIG && CONFIG[CLUB.code]) || {};
+    if (!raw.passcode || !raw.token) { toast('Your card isn’t ready yet — contact the National League.', 'error'); return; }
+    try {
+      UWP.printCards([{ code: CLUB.code, name: CLUB.name, passcode: raw.passcode, token: raw.token }]);
+    } catch (e) { toast(e.message, 'error'); }
   }
 
   function newPin() {

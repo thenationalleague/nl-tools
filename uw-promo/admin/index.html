@@ -113,33 +113,6 @@
   .byclub__of { color: var(--text-muted); font-weight: 700; margin-left: 2px; }
   .byclub__empty { font-size: 12px; color: var(--text-muted); }
 
-  /* Print till cards — one A4 page per club, rendered into #printRoot and
-     shown only for window.print(). @page must sit at top level: nested
-     inside @media print some browsers ignore it (which printed the cards
-     with no top margin). Card padding is the belt-and-braces spacing for
-     browsers that ignore @page margins entirely. */
-  @page { size: A4 portrait; margin: 14mm; }
-  #printRoot { display: none; }
-  @media print {
-    body > *:not(#printRoot) { display: none !important; }
-    #printRoot { display: block; }
-  }
-  .print-card { page-break-after: always; text-align: center; font-family: var(--font); color: var(--text);
-    padding-top: 10mm; }
-  /* Co-brand header: club crest + UW wordmark side by side at matching height. */
-  .print-card__brands { display: flex; align-items: center; justify-content: center; gap: 12mm; margin-bottom: 5mm; }
-  .print-card__brands img { height: 24mm; width: auto; max-width: 70mm; object-fit: contain; }
-  .print-card__club { font-size: 22pt; font-weight: 900; font-variation-settings: 'wght' 900;
-    color: var(--navy); text-transform: uppercase; letter-spacing: 0.02em; }
-  .print-card__kicker { font-size: 10pt; font-weight: 800; font-variation-settings: 'wght' 800;
-    letter-spacing: 0.12em; text-transform: uppercase; color: var(--primary); margin: 1mm 0 8mm; }
-  .print-card__qr { width: 62mm; height: 62mm; margin: 0 auto 8mm; }
-  .print-card__qr svg { width: 100%; height: 100%; }
-  .print-card__steps { text-align: left; max-width: 130mm; margin: 0 auto; font-size: 12pt; line-height: 1.55; }
-  .print-card__steps li { margin-bottom: 4mm; }
-  .print-card__pass { font-weight: 800; font-variation-settings: 'wght' 800; letter-spacing: 0.14em;
-    border: 1.5pt solid var(--navy); border-radius: 3pt; padding: 0.5mm 2.5mm; white-space: nowrap; }
-  .print-card__url { margin-top: 8mm; font-size: 9pt; color: var(--text-muted); word-break: break-all; }
 </style>
 </head>
 <body>
@@ -1093,54 +1066,17 @@
     });
   }
 
-  /* One A4 till card per club — crest, QR of the club's direct link, and the
-     four till steps incl. the club passcode; UW wordmark as the footer
-     lockup. Print-to-PDF gives the 72-page hand-out pack, or a single
-     club's card via the per-row Card button. QR encoding is local
-     (qrcode.vendor.js) so tokens never leave the page. */
+  /* Till cards are built by UWP.printCards (shared with the club admin view,
+     styles in _shared.css) so an NL-printed card and a club-printed one can
+     never drift apart. Print-to-PDF gives the 72-page hand-out pack; the
+     per-row Card button passes a single club. */
   function printCards(subset) {
     var clubs = subset || clubList();
     if (!clubs.length) { toast('Seed the clubs first.', 'error'); return; }
-    if (typeof qrcode === 'undefined') { toast('QR library failed to load — refresh and try again.', 'error'); return; }
-    var root = document.getElementById('printRoot');
-    root.innerHTML = clubs.map(function (c) {
-      var link = UWP.clubLink(c.token);
-      var qr = qrcode(0, 'M');
-      qr.addData(link);
-      qr.make();
-      var svg = qr.createSvgTag({ cellSize: 2, margin: 0, scalable: true });
-      return '<div class="print-card">' +
-        '<div class="print-card__brands">' +
-          '<img src="' + esc(NL.clubs.crestUrl(c.name)) + '" alt="" ' +
-            'onerror="this.onerror=null;this.src=\'' + UWP.ROSE + '\';">' +
-          '<img src="' + UWP.UW_LOGO + '" alt="Utility Warehouse" ' +
-            'onerror="this.onerror=null;this.style.display=\'none\';">' +
-        '</div>' +
-        '<div class="print-card__club">' + esc(c.name) + '</div>' +
-        '<div class="print-card__kicker">Utility Warehouse promo codes — till card</div>' +
-        '<div class="print-card__qr">' + svg + '</div>' +
-        '<ol class="print-card__steps">' +
-          '<li>Scan the QR code above on your phone.</li>' +
-          '<li>Enter your club PIN: <span class="print-card__pass">' + esc(c.passcode) + '</span></li>' +
-          '<li>Type the customer’s promo code and press <strong>REDEEM</strong>.</li>' +
-          '<li>If successfully redeemed, apply the relevant discount to their items on the club system.</li>' +
-          '<li>Codes are issued to this club only. One from elsewhere will be refused — you can confirm any code with <strong>Check a code</strong> at the foot of the page.</li>' +
-        '</ol>' +
-        '<div class="print-card__url">' + esc(link) + '</div>' +
-      '</div>';
-    }).join('');
-    toast('Preparing ' + clubs.length + ' till cards…');
-    // Let the crests load before the print dialog snapshots the page.
-    var imgs = root.querySelectorAll('img');
-    var fired = false, done = 0;
-    function go() { if (!fired) { fired = true; window.print(); } }
-    function maybe() { done++; if (done >= imgs.length) go(); }
-    if (!imgs.length) { go(); return; }
-    Array.prototype.forEach.call(imgs, function (img) {
-      if (img.complete) { maybe(); }
-      else { img.addEventListener('load', maybe); img.addEventListener('error', maybe); }
-    });
-    setTimeout(go, 4000);
+    try {
+      var n = UWP.printCards(clubs);
+      toast('Preparing ' + n + ' till card' + (n === 1 ? '' : 's') + '…');
+    } catch (e) { toast(e.message, 'error'); }
   }
 
   document.getElementById('clubAccessBody').addEventListener('click', function (e) {
