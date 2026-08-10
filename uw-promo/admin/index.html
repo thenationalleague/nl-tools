@@ -3,6 +3,11 @@
 <head>
 <!--
   UW Promo Codes — NL master console
+  Version: v4.0 (10/08/2026) — the master passcode is checked server-side by
+           the uwPromoAuth trigger and only a minted master token can read or
+           write config. That is the change that stops all 72 till PINs being
+           world-readable. First run mints a bootstrap master token while no
+           passcode exists; nothing subscribes to RTDB until the session does.
   Version: v3.1 (10/08/2026) — clubs now get TWO credentials: the 4-digit till
            PIN (printed, kiosk-facing) and a 6-character manager passcode that
            opens the club admin view on the same page. Seeding issues both;
@@ -127,6 +132,8 @@
       <input class="gate__input" id="gateInput" maxlength="6" placeholder="••••••" autocomplete="off" aria-label="Master passcode">
       <div class="gate__err" id="gateErr" role="alert"></div>
       <button class="btn btn--primary" id="gateBtn" style="width:100%;justify-content:center;">Open console</button>
+      <button class="btn btn--ghost btn--sm" id="bsOffer" hidden
+              style="width:100%;justify-content:center;margin-top:10px;">First run — set a master passcode</button>
     </div>
     <div id="bootstrapForm" style="display:none">
       <input class="gate__input" id="bsPass1" maxlength="6" placeholder="••••••" autocomplete="off" aria-label="Choose a master passcode">
@@ -264,7 +271,6 @@
   'use strict';
 
   var ACTOR = 'master', ACTOR_LABEL = 'NL master';
-  var SS_KEY = 'uwPromoMasterPass' + (UWP.isTest ? ':test' : '');
 
   var CONFIG = null, CODES = {}, AUDIT = {};
   var configLoaded = false, codesLoaded = false, auditLoaded = false, unlocked = false;
@@ -272,71 +278,102 @@
   function esc(s) { return NL.escHtml(s); }
   function toast(m, t) { NL.toast(m, t || 'info'); }
 
-  /* ── Live data ──────────────────────────────────────────────────────── */
-  UWP.ref('config').on('value', function (s) {
-    CONFIG = s.val() || {};
-    configLoaded = true;
-    boot();
-    if (unlocked) { buildClubFilter(); renderAccess(); }
-  }, function () {
-    document.getElementById('gateSub').textContent = 'Could not reach the database. Check your connection and refresh.';
-  });
-  UWP.ref('codes').on('value', function (s) {
-    CODES = s.val() || {}; codesLoaded = true;
-    if (unlocked) renderCodes();
-  });
-  UWP.ref('audit').orderByChild('ts').limitToLast(500).on('value', function (s) {
-    AUDIT = s.val() || {}; auditLoaded = true;
-    if (unlocked) renderAudit();
-  });
+  /* ── Gate ───────────────────────────────────────────────────────────
+     The master passcode is no longer compared here — it goes to the
+     uwPromoAuth trigger, which checks it server-side and returns a master
+     token. Only that token can read or write `config`, which is what stops
+     every club PIN being world-readable. See functions/uw-promo.js.
 
-  /* ── Gate + first-run bootstrap ─────────────────────────────────────── */
-  function boot() {
-    if (unlocked) return;
-    if (!CONFIG.master || !CONFIG.master.passcode) { showBootstrap(); return; }
-    var cached = sessionStorage.getItem(SS_KEY);
-    if (cached && cached === CONFIG.master.passcode) { unlock(); return; }
-    showGateForm();
+     Nothing subscribes to RTDB until the session exists, because nothing is
+     readable before it. */
+  function subscribe() {
+    UWP.ref('config').on('value', function (s) {
+      CONFIG = s.val() || {};
+      configLoaded = true;
+      if (unlocked) { buildClubFilter(); renderAccess(); }
+    });
+    UWP.ref('codes').on('value', function (s) {
+      CODES = s.val() || {}; codesLoaded = true;
+      if (unlocked) renderCodes();
+    });
+    UWP.ref('audit').orderByChild('ts').limitToLast(500).on('value', function (s) {
+      AUDIT = s.val() || {}; auditLoaded = true;
+      if (unlocked) renderAudit();
+    });
   }
+
+  /* First run is the one case the console cannot ask the server to verify —
+     there is no passcode yet. The trigger mints a master token for a bootstrap
+     request only while config/master is genuinely absent, so the door closes
+     the moment a passcode is chosen. */
+  function boot() {
+    document.getElementById('gateSub').textContent = 'Enter the master passcode.';
+    document.getElementById('gateForm').style.display = 'block';
+    var inp = document.getElementById('gateInput'), err = document.getElementById('gateErr'),
+        btn = document.getElementById('gateBtn');
+    inp.focus();
+
+    var busyGate = false;
+    function submit() {
+      if (busyGate) return;
+      var typed = (inp.value || '').trim();
+      if (!typed) { err.textContent = 'Enter the master passcode.'; return; }
+      busyGate = true;
+      err.textContent = '';
+      btn.disabled = true;
+      btn.textContent = 'Checking…';       // Eventarc — seconds, not instant
+      UWP.signIn(typed).then(function (session) {
+        if (session.role !== 'master') {
+          busyGate = false; btn.disabled = false; btn.textContent = 'Open console';
+          err.textContent = 'That passcode is not the master passcode.';
+          return;
+        }
+        unlock();
+      }).catch(function (e) {
+        busyGate = false;
+        btn.disabled = false;
+        btn.textContent = 'Open console';
+        err.textContent = e.message || 'Passcode not recognised.';
+        /* No master passcode set yet? Offer the first-run screen instead of
+           leaving someone stuck at a gate nothing opens. */
+        if (/already set up/i.test(e.message || '')) return;
+        document.getElementById('bsOffer').hidden = false;
+      });
+    }
+    btn.onclick = submit;
+    inp.onkeydown = function (e) { if (e.key === 'Enter') submit(); };
+    document.getElementById('bsOffer').onclick = showBootstrap;
+  }
+  boot();
 
   function showBootstrap() {
     document.getElementById('gateForm').style.display = 'none';
+    document.getElementById('bsOffer').hidden = true;
     document.getElementById('gateSub').textContent =
       'First run — choose a master passcode (6 characters). This becomes the only way into this console.';
     document.getElementById('bootstrapForm').style.display = 'block';
     var p1 = document.getElementById('bsPass1'), p2 = document.getElementById('bsPass2'),
-        err = document.getElementById('bsErr');
-    document.getElementById('bsBtn').onclick = function () {
+        err = document.getElementById('bsErr'), btn = document.getElementById('bsBtn');
+    btn.onclick = function () {
       var a = (p1.value || '').toUpperCase().trim(), b = (p2.value || '').toUpperCase().trim();
       if (a.length !== 6) { err.textContent = 'Passcode must be exactly 6 characters.'; return; }
       if (a !== b) { err.textContent = 'Passcodes don’t match.'; return; }
       err.textContent = '';
-      UWP.ensureAuth().then(function () {
+      btn.disabled = true;
+      btn.textContent = 'Setting up…';
+      /* Mint the master session FIRST — writing config now requires it. */
+      UWP.bootstrapMaster().then(function () {
         return UWP.ref('config/master').set({ passcode: a, updatedAt: UWP.TS() });
       }).then(function () {
         UWP.audit(ACTOR, ACTOR_LABEL, 'bootstrap', { detail: 'Master passcode set (first run)' });
-        sessionStorage.setItem(SS_KEY, a);
         document.getElementById('bootstrapForm').style.display = 'none';
         unlock();
-      }).catch(function (e2) { err.textContent = 'Could not save: ' + e2.message; });
+      }).catch(function (e2) {
+        btn.disabled = false;
+        btn.textContent = 'Set master passcode';
+        err.textContent = 'Could not save: ' + e2.message;
+      });
     };
-  }
-
-  function showGateForm() {
-    document.getElementById('bootstrapForm').style.display = 'none';
-    document.getElementById('gateSub').textContent = 'Enter the master passcode.';
-    document.getElementById('gateForm').style.display = 'block';
-    var inp = document.getElementById('gateInput'), err = document.getElementById('gateErr');
-    inp.focus();
-    function submit() {
-      if ((inp.value || '').toUpperCase().trim() === CONFIG.master.passcode) {
-        err.textContent = '';
-        sessionStorage.setItem(SS_KEY, CONFIG.master.passcode);
-        unlock();
-      } else { err.textContent = 'Passcode not recognised.'; }
-    }
-    document.getElementById('gateBtn').onclick = submit;
-    inp.onkeydown = function (e) { if (e.key === 'Enter') submit(); };
   }
 
   function unlock() {
@@ -344,11 +381,11 @@
     document.getElementById('gate').style.display = 'none';
     document.getElementById('app').style.display = 'block';
     if (UWP.isTest) document.getElementById('sandboxCard').style.display = 'block';
+    subscribe();
     buildClubFilter(); renderCodes(); renderAccess(); renderAudit();
   }
 
   document.getElementById('signout').addEventListener('click', function () {
-    sessionStorage.removeItem(SS_KEY);
     location.reload();
   });
 
@@ -1158,7 +1195,6 @@
         return UWP.ref('config/master').update({ passcode: v, updatedAt: UWP.TS() });
       }).then(function () {
         UWP.audit(ACTOR, ACTOR_LABEL, 'regen-passcode', { detail: 'Master passcode changed' });
-        sessionStorage.setItem(SS_KEY, v);
         toast('Master passcode changed', 'success');
       }).catch(function (err) { toast('Failed: ' + err.message, 'error'); });
     });
