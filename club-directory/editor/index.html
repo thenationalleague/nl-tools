@@ -7,6 +7,18 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.30 — (07/08/2026) Mailing-list changes are green and reversible, which
+         they should have been from the start. diffClub never looked at leads,
+         so changing one produced an empty patch: the journal entry got no
+         Undo button, and there would have been nothing behind it if it had.
+         And logEdit was never called, so no green marker either — changing
+         who receives the League's mail left no trace at all, while changing
+         somebody's job title left two.
+         Leads are now in the snapshot, the diff and the restore, keyed by
+         list — a list key is a plain word and safe as an RTDB key, unlike the
+         paths that broke the undo body last time. The edit is logged in names
+         rather than ids, so the marker reads "was Jack Lappin" and not
+         "was p3k9tz2".
   v1.29 — (07/08/2026) Markers and pens landed on the wrong person. Reported
          as "Check the domain is showing against someone with no email — it
          belongs to the row below", and that was exactly it: the flag was
@@ -1274,7 +1286,6 @@
     markInfoMissing(name, rec);
     markInfoFlags(name, rec);
     markInfoChanges(name, rec);
-    markEdits(name);
     markAdded(name);
     markGaps(name, rec);
     showClubEdit(name, rec);
@@ -1282,6 +1293,9 @@
     showMerges(name);
     showInboxes(name, rec);
     showLists(name, rec);
+    /* After showLists, which builds the element the mailing-list marks mount
+       into. Markers can only annotate what has already been drawn. */
+    markEdits(name);
     showSignoff(name, rec);
     if (session.role === 'admin') { diagnose(name, rec); }
   }
@@ -1443,6 +1457,9 @@
       ul.appendChild(li);
     });
     wrap.appendChild(ul);
+    var marks = document.createElement('div');
+    marks.id = 'edListEdits';
+    wrap.appendChild(marks);
     if (empty) {
       var n = document.createElement('p');
       n.className = 'form-hint';
@@ -1551,6 +1568,18 @@
             if (state[key].length) { next[key] = state[key].slice(); }
           });
           if (!changed.length) { c.close(); return; }
+          /* Logged per list, in names rather than ids, so the green marker
+             says who was on it before rather than "p3k9tz2 -> pf81qq4". */
+          var nameOf = function (ids) {
+            return NLDirectory.arr(ids).map(function (id) {
+              return byId[id] ? NLDirectory.fullName(byId[id]) : id;
+            }).join(', ');
+          };
+          LIST_ORDER.forEach(function (key) {
+            var was = NLDirectory.arr((rec.leads || {})[key]);
+            if (state[key].join(',') === was.join(',')) { return; }
+            logEdit(club, 'leads/' + key, nameOf(was), nameOf(state[key]));
+          });
           (ALL[club] || rec).leads = next;
           c.close();
           saveStructure(club, 'Mailing lists updated (' + changed.join(', ') + ')');
@@ -1990,6 +2019,7 @@
     return {
       people:    clone(NLDirectory.arr(rec.people)) || [],
       info:      clone(rec.info || {}),
+      leads:     clone(rec.leads || {}),
       signedOff: rec.signedOff || null,
       edits:     clone(NLDirectory.arr(prov.edits)) || [],
       changes:   clone(NLDirectory.arr(prov.changes)) || []
@@ -2035,6 +2065,18 @@
                   after:  (b.info || {})[k] == null ? null : (b.info || {})[k] };
     });
     if (keysOf(info).length) { out.info = info; }
+
+    /* Mailing lists. Missing from the first cut, so changing one produced an
+       empty patch: no Undo button on the entry, and nothing to put back if
+       there had been. Keyed by list because a list key is a plain word —
+       secretary, slo — and safe as an RTDB key, unlike a path. */
+    var leads = {};
+    keysOf(a.leads, b.leads).forEach(function (k) {
+      if (same((a.leads || {})[k], (b.leads || {})[k])) { return; }
+      leads[k] = { before: clone((a.leads || {})[k]) || null,
+                   after:  clone((b.leads || {})[k]) || null };
+    });
+    if (keysOf(leads).length) { out.leads = leads; }
 
     if (!same(a.signedOff, b.signedOff)) {
       out.signedOff = { before: a.signedOff || null, after: b.signedOff || null };
@@ -2084,6 +2126,13 @@
         if (v == null) { delete rec.info[k]; } else { rec.info[k] = clone(v); }
       });
     }
+    if (patch.leads) {
+      rec.leads = rec.leads || {};
+      Object.keys(patch.leads).forEach(function (k) {
+        var v = patch.leads[k].before;
+        if (v == null) { delete rec.leads[k]; } else { rec.leads[k] = clone(v); }
+      });
+    }
     if (patch.signedOff) { rec.signedOff = clone(patch.signedOff.before); }
 
     var prov = PROV[club] || (PROV[club] = {});
@@ -2105,6 +2154,9 @@
      spotting the one case undo cannot isolate: two acts on one person. */
   function touchedBy(club, patch) {
     var names = [];
+    Object.keys(patch.leads || {}).forEach(function (k) {
+      names.push((LIST_LABEL[k] || k) + ' list');
+    });
     Object.keys(patch.people || {}).forEach(function (id) {
       var d = patch.people[id];
       var p = d.before || d.after;
@@ -3299,11 +3351,12 @@
   function markEdits(club) {
     var edits = editList(club);
     if (!edits.length) { return; }
-    var byPerson = {}, info = [];
+    var byPerson = {}, info = [], lists = [];
     edits.forEach(function (e) {
       var m = /^people\/([^/]+)\/(.*)$/.exec(e.path || '');
       if (m) { (byPerson[m[1]] = byPerson[m[1]] || []).push({ tail: m[2], e: e }); }
       else if (/^info\//.test(e.path || '')) { info.push(e); }
+      else if (/^leads\//.test(e.path || '')) { lists.push(e); }
     });
 
     $('out').querySelectorAll('.cd-row').forEach(function (row) {
@@ -3322,6 +3375,31 @@
     });
 
     if (info.length) { markInfoEdits(club, info); }
+    if (lists.length) { markListEdits(club, lists); }
+  }
+
+  /* Green under the mailing lists, the same as a hand edit anywhere else.
+     Changing who receives the League's mail is as much a decision as changing
+     somebody's job title, and until now it left no trace at all: no marker,
+     and — because the patch never looked at leads — no undo either. */
+  function markListEdits(club, edits) {
+    var box = document.getElementById('edListEdits');
+    if (!box) { return; }
+    box.className = 'ed-infoedits';
+    box.innerHTML = '<b>' + edits.length +
+      (edits.length === 1 ? ' list' : ' lists') + ' changed by hand</b>';
+    var ul = document.createElement('ul');
+    edits.forEach(function (e) {
+      var key = e.path.replace(/^leads\//, '');
+      var li = document.createElement('li');
+      li.innerHTML = '<span class="ed-pill ed-pill--edit">' +
+        esc(LIST_LABEL[key] || key) + '</span> ' +
+        (String(e.from || '').trim() ? 'was <b>' + esc(e.from) + '</b>'
+                                     : 'was <i>nobody</i>') +
+        ' &mdash; ' + esc(e.by || 'an editor') + ', ' + esc(NL.formatDate(e.at));
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
   }
 
   function addEditChip(row, e, what) {
