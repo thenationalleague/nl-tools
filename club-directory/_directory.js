@@ -1,7 +1,12 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.2 (04/08/2026)
+   Version: v1.3 (10/08/2026)
+
+   v1.3 — the mailing-list taxonomy (LIST_LABEL / LIST_ORDER / listMembers)
+   moves here from the editor. Second use: the staff overview builds exports
+   from the same eleven lists, and two copies of a taxonomy is one copy too
+   many the day a list is added.
 
    Renders one club. Shared by the staff directory, the editor and the reader,
    so the presentation is written once and the three doors differ only in what
@@ -425,6 +430,39 @@
       '</section>';
   }
 
+  /* ------------------------------------------------------- mailing lists
+     The League's own eleven questions — who is your secretary, your media
+     contact, your safety officer — answered by all 72 clubs by naming actual
+     people. Stored per club as leads/<key> = [personId].
+
+     This is deliberately NOT the department taxonomy above. A club has one
+     Media & marketing department and several people in it; it has exactly one
+     answer to "who do we write to about media". SLO, DLO and PLO exist here
+     and nowhere else. Conflating the two would lose that.
+
+     Promoted here at the second use: the editor renders and edits these, and
+     the staff overview builds mailing-list exports from them. */
+  var LIST_LABEL = {
+    secretary: 'Club secretary', media: 'Media', programme: 'Programme',
+    commercial: 'Commercial', finance: 'Finance', ticketing: 'Ticketing',
+    medical: 'Medical', slo: 'Supporter liaison (SLO)', safety: 'Safety officer',
+    dlo: 'Disability liaison (DLO)', plo: 'Police liaison (PLO)'
+  };
+  var LIST_ORDER = ['secretary', 'media', 'programme', 'commercial', 'finance',
+                    'ticketing', 'medical', 'safety', 'slo', 'dlo', 'plo'];
+
+  /* Members of one club's list, resolved from ids to people. An id with no
+     person behind it is dropped rather than rendered as a blank row — that
+     happens when someone is deleted and the list still names them. */
+  function listMembers(rec, key) {
+    var ids = arr((rec && rec.leads || {})[key]);
+    var by = {};
+    arr(rec && rec.people).forEach(function (p) { if (p.id) { by[p.id] = p; } });
+    return ids.map(function (id) {
+      return typeof id === 'string' ? by[id] : (id && by[id.id]);
+    }).filter(Boolean);
+  }
+
   /* Search across every club and every person at once, because "who is the
      safety officer at Chester" and "which club is Jack Lappin at" are the same
      question asked from two ends. Matches club, person and job title. */
@@ -464,6 +502,9 @@
     addrOf: addrOf,
     glyph: glyph,
     strokeGlyph: strokeGlyph,
+    listMembers: listMembers,
+    LIST_LABEL: LIST_LABEL,
+    LIST_ORDER: LIST_ORDER,
     ORDER: ORDER
   };
 }());
