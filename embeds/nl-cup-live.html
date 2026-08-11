@@ -16,8 +16,9 @@
      there, purely to pull the fan's own club to the front of the
      rail; there is no gate, no prompt and no account state.
 
-     On every other day it paints nothing at all — the block collapses
-     to zero height and the page reads as if it were never there. That
+     On every other day — and after the last of today's ties has
+     finished — it paints nothing at all. The block collapses to zero
+     height and the page reads as if it were never there. That
      silence is the point: this sits permanently in the CMS and speaks
      only on the ~10 days a season it has something to say. No
      skeleton and no error box either, because a spinner that resolves
@@ -70,6 +71,14 @@
      display, so the tile agrees with the broadcast.
 
      Changelog:
+       11/08/2026  v1.7  The band packs up once the last of today's ties is
+                         over, rather than sitting on the front page showing
+                         full-time scores nobody can go and watch.
+       11/08/2026  v1.6  A tie whose kick-off has passed reads as live even
+                         when NLS has not advanced matchPeriod, which it did
+                         not for the first tie of the season. A tie the feed
+                         never resolves is called finished once its window
+                         has run out, so it cannot hold the band open.
        11/08/2026  v1.5  Full bleed by default — the band spans the window
                          rather than the template's content column. Opt back
                          in with <div data-nl-cup-live="contained">.
@@ -521,6 +530,33 @@
   function suffixOf(n) { var m = String(n || '').match(SUFFIX); return m ? m[1] : ''; }
   function normKey(n) { return baseName(n).toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
+  /* NLS does not reliably advance matchPeriod when a game kicks off. On
+     11/08/2026 Hartlepool v Middlesbrough sat at "PreMatch" while the same
+     feed carried two goals, at 5' and 8', and three substitutions — so a band
+     trusting the field alone told fans a game they could watch had not
+     started. The clock is the better witness once kick-off has passed.
+
+     Bounded, because the same feed that never said "SecondHalf" cannot be
+     relied on to say "FullTime" either, and a band still flashing LIVE at
+     midnight is a worse lie than a quiet one. Past the window a match that
+     kicked off well over two hours ago has finished, whatever the feed says,
+     and calling it finished is both truer than "kick-off 15:00" and what
+     lets the band pack up on its own. */
+  var LIVE_WINDOW_MS = 140 * 60000;
+
+  function stateFor(period, ko, now) {
+    var s = periodState(period);
+    if (s !== 'pre') return s;              /* the feed knows something */
+    var since = (now || Date.now()) - ko.getTime();
+    if (since < 0) return 'pre';
+    return since < LIVE_WINDOW_MS ? 'live' : 'ft';
+  }
+
+  /* The band is a "watch this now" band. A tie that is over is not something
+     to watch, so once none of today's are still to come or under way there is
+     nothing left to say and the block goes back to taking up no room. */
+  function watchable(m) { return m.state === 'pre' || m.state === 'live'; }
+
   function periodState(p) {
     var s = String(p || '').toLowerCase();
     if (s === 'postponed') return 'postponed';
@@ -661,7 +697,7 @@
           ko: ko,
           home: (a.homeTeam && (a.homeTeam.name || a.homeTeam.shortName)) || '',
           away: (a.awayTeam && (a.awayTeam.name || a.awayTeam.shortName)) || '',
-          state: a.postponementReason ? 'postponed' : periodState(a.matchPeriod)
+          state: a.postponementReason ? 'postponed' : stateFor(a.matchPeriod, ko)
         };
       }).filter(function (m) {
         return m.ko && m.home && ukYmd(m.ko) === today;
@@ -784,7 +820,10 @@
   }
 
   function render(matches, links, fav) {
-    if (!matches.length) { root.hidden = true; return; }
+    /* Nothing today, or nothing left today — the same silence either way. A
+       front page does not want a row of full-time scores from three hours ago
+       sitting where its call to action was. */
+    if (!matches.length || !matches.some(watchable)) { root.hidden = true; return; }
 
     var mine = null;
     if (fav) {
