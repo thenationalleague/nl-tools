@@ -48,13 +48,17 @@ const SUFFIX_DECL = src.match(/var SUFFIX = \/.*?\/i;/);
 assert.ok(SUFFIX_DECL, 'SUFFIX regex is present in the bundle');
 const ARM_DECL = src.match(/var ARM_MS\s+= [^;]+;/);
 assert.ok(ARM_DECL, 'ARM_MS is present in the bundle');
+const WINDOW_DECL = src.match(/var LIVE_WINDOW_MS = [^;]+;/);
+assert.ok(WINDOW_DECL, 'LIVE_WINDOW_MS is present in the bundle');
 
 const W = new Function(
-  "var TZ = 'Europe/London'; var byKey = {};\n" + SUFFIX_DECL[0] + '\n' + ARM_DECL[0] + '\n' +
+  "var TZ = 'Europe/London'; var byKey = {};\n" + SUFFIX_DECL[0] + '\n' + ARM_DECL[0] + '\n' + WINDOW_DECL[0] + '\n' +
   ['baseName', 'suffixOf', 'normKey', 'periodState', 'parseKO', 'fmt', 'ukYmd', 'ukTime',
-   'isHex', 'lum', 'accentFor', 'indexClubs', 'clubFor', 'shortFor', 'linkable'].map(extract).join('\n') +
+   'isHex', 'lum', 'accentFor', 'indexClubs', 'clubFor', 'shortFor', 'linkable',
+   'stateFor', 'watchable'].map(extract).join('\n') +
   '\n return { baseName, suffixOf, normKey, periodState, parseKO, ukYmd, ukTime,' +
-  ' lum, accentFor, indexClubs, clubFor, shortFor, linkable, ARM_MS, byKey };'
+  ' lum, accentFor, indexClubs, clubFor, shortFor, linkable, stateFor, watchable, ARM_MS,' +
+  ' LIVE_WINDOW_MS, byKey };'
 )();
 
 W.indexClubs(clubsMeta, false);
@@ -181,6 +185,59 @@ test('every host in this season\'s cup has a slot in the link map', () => {
     const name = memberByCode[code].name;
     assert.ok(name in linksMeta.links, `${name} has a link slot`);
   }
+});
+
+/* ---------- live when the feed has not noticed ---------- */
+
+test('a tie whose kick-off has passed reads as live even if NLS says PreMatch', () => {
+  /* The real first tie of 2026-27: Hartlepool v Middlesbrough sat at
+     "PreMatch" while the same feed carried goals at 5' and 8'. */
+  const ko = W.parseKO('2026-08-11 14:00:00');
+  const at = mins => ko.getTime() + mins * 60000;
+
+  assert.equal(W.stateFor('PreMatch', ko, at(-5)), 'pre',  'five minutes out');
+  assert.equal(W.stateFor('PreMatch', ko, at(12)), 'live', 'twelve minutes in');
+  assert.equal(W.stateFor('PreMatch', ko, at(80)), 'live', 'second half');
+});
+
+test('the clock never overrides a feed that does know', () => {
+  const ko = W.parseKO('2026-08-11 14:00:00');
+  const at = mins => ko.getTime() + mins * 60000;
+  assert.equal(W.stateFor('FullTime', ko, at(100)), 'ft');
+  assert.equal(W.stateFor('Postponed', ko, at(100)), 'postponed');
+  assert.equal(W.stateFor('SecondHalf', ko, at(-200)), 'live');
+});
+
+test('an unreported tie stops claiming to be live, and counts as finished', () => {
+  /* A feed that never said SecondHalf cannot be trusted to say FullTime. Past
+     the window the match has finished whatever the feed thinks — and calling
+     it finished is what lets the band pack up instead of being held open all
+     night by one tie nobody ever closed. */
+  const ko = W.parseKO('2026-08-11 14:00:00');
+  assert.equal(W.LIVE_WINDOW_MS, 140 * 60000);
+  assert.equal(W.stateFor('PreMatch', ko, ko.getTime() + 139 * 60000), 'live');
+  assert.equal(W.stateFor('PreMatch', ko, ko.getTime() + 141 * 60000), 'ft');
+});
+
+/* ---------- when the band packs up ---------- */
+
+test('only a tie still to come or under way keeps the band open', () => {
+  assert.equal(W.watchable({ state: 'pre' }), true);
+  assert.equal(W.watchable({ state: 'live' }), true);
+  assert.equal(W.watchable({ state: 'ft' }), false);
+  assert.equal(W.watchable({ state: 'postponed' }), false);
+  assert.equal(W.watchable({ state: 'abandoned' }), false);
+});
+
+test('a finished card leaves nothing behind', () => {
+  /* 11/08/2026: one tie, Hartlepool 0-10 Middlesbrough, full time by 16:40.
+     A front page does not want that sitting where its CTA was. */
+  const day = [{ state: 'ft' }];
+  assert.equal(day.some(W.watchable), false, 'the whole card is done');
+
+  /* An evening round behind an afternoon kick-off keeps it open, though. */
+  const mixed = [{ state: 'ft' }, { state: 'postponed' }, { state: 'pre' }];
+  assert.equal(mixed.some(W.watchable), true, 'later ties still to come');
 });
 
 /* ---------- when a tile becomes a link ---------- */
