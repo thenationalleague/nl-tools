@@ -70,6 +70,16 @@
      display, so the tile agrees with the broadcast.
 
      Changelog:
+       11/08/2026  v1.4  The band no longer waits on the SSO cookie before
+                         its first paint when the visitor is plainly signed
+                         out, and a cookie that lands later pins the club on
+                         the next poll rather than the next visit.
+       11/08/2026  v1.3  Unarmed tiles say when their stream opens, and
+                         the kick-off time is labelled KO so the two clock
+                         times on a tile cannot be read as each other. The
+                         cap is typographic: the NL Cup lockup is a portrait
+                         card with a Premier League sponsor strip in it, and
+                         at rail height both were illegible.
        11/08/2026  v1.2  Links arm 15 minutes before kick-off and not
                          before, and the poll re-renders on a failed
                          fetch so they arm without a reload. Hartlepool's
@@ -85,14 +95,10 @@
 <div id="nlCupLive" hidden>
   <div class="nlcl__band">
     <div class="nlcl__cap">
-      <img class="nlcl__mark" width="34" height="47" alt="" decoding="async"
-           src="https://raw.githubusercontent.com/thenationalleague/tools/main/assets/divisions/NL%20Cup.png">
-      <span class="nlcl__capText">
-        <span class="nlcl__title">National League Cup</span>
-        <span class="nlcl__sub">
-          <span class="nlcl__badge"><i class="nlcl__dot" aria-hidden="true"></i>Live</span>
-          <span class="nlcl__date" id="nlcl-date"></span>
-        </span>
+      <span class="nlcl__title">National League Cup</span>
+      <span class="nlcl__sub">
+        <span class="nlcl__badge"><i class="nlcl__dot" aria-hidden="true"></i>Live</span>
+        <span class="nlcl__date" id="nlcl-date"></span>
       </span>
     </div>
 
@@ -148,21 +154,24 @@
 
   /* Cap — the "what this is" end of the CTA. Fixed width so the rail below
      starts on the same line whatever the round looks like. */
+  /* Typographic, not the badge. assets/divisions/NL Cup.png is a portrait
+     lockup carrying "NATIONAL LEAGUE CUP" and a "Supported by Premier League"
+     strip — at the ~47px a rail cap can spare, the wording is unreadable and
+     the sponsor credit is a smudge, which serves the sponsor worse than not
+     showing it. The name set in Carbona at 900 IS the lockup at this scale. */
   #nlCupLive .nlcl__cap {
-    flex:none; width:250px;
-    display:flex; align-items:center; gap:11px;
-    padding:14px 14px 14px 16px;
+    flex:none; width:230px;
+    display:flex; flex-direction:column; justify-content:center; gap:7px;
+    padding:14px 14px 14px 18px;
     border-right:2px solid var(--primary);
     color:var(--white);
   }
-  #nlCupLive .nlcl__mark { flex:none; height:47px; width:auto; display:block; }
-  #nlCupLive .nlcl__capText { min-width:0; }
   #nlCupLive .nlcl__title {
     display:block;
-    font-size:16px; line-height:1.12; letter-spacing:.01em;
+    font-size:19px; line-height:1.08; letter-spacing:.005em;
     font-weight:900; font-variation-settings:'wght' 900;
   }
-  #nlCupLive .nlcl__sub { display:flex; align-items:center; gap:8px; margin-top:6px; }
+  #nlCupLive .nlcl__sub { display:flex; align-items:center; gap:8px; min-width:0; }
   /* Red pill rather than a red dot: canon reserves --accent-live green for
      pulse dots BECAUSE red on navy is too low-contrast (nl-brand.css §live).
      Inverting it — white on brand red — keeps the signal red where the fan
@@ -314,6 +323,14 @@
     font-weight:800; font-variation-settings:'wght' 800;
     color:var(--primary);
   }
+  /* Deliberately not styled like the button it will become — this is an
+     answer to "when", not something to press. */
+  #nlCupLive .nlcl__soon {
+    font-size:11px; letter-spacing:.04em;
+    font-weight:700; font-variation-settings:'wght' 700;
+    color:var(--text-muted);
+  }
+  #nlCupLive .nlcl__status b { font-weight:inherit; opacity:.62; }
   #nlCupLive .nlcl__arrow { flex:none; width:11px; height:11px; transition:transform .16s ease; }
   #nlCupLive a.nlcl__tile:hover .nlcl__arrow,
   #nlCupLive a.nlcl__tile:focus-visible .nlcl__arrow { transform:translate(2px, -2px); }
@@ -325,6 +342,7 @@
   }
   #nlCupLive .nlcl__tile.is-mine .nlcl__status,
   #nlCupLive .nlcl__tile.is-mine .nlcl__watch,
+  #nlCupLive .nlcl__tile.is-mine .nlcl__soon,
   #nlCupLive .nlcl__tile.is-mine .nlcl__code { color:inherit; }
   #nlCupLive .nlcl__mine {
     flex:none;
@@ -353,6 +371,7 @@
   }
   #nlCupLive .nlcl__tile.is-solo .nlcl__meta { margin-left:auto; padding-top:0; gap:14px; }
   #nlCupLive .nlcl__tile.is-solo .nlcl__status { font-size:13px; color:inherit; }
+  #nlCupLive .nlcl__tile.is-solo .nlcl__soon { font-size:12px; color:inherit; opacity:.8; }
   #nlCupLive .nlcl__tile.is-solo .nlcl__watch {
     padding:8px 14px; border-radius:999px; font-size:12px;
     background:var(--club-ink); color:var(--club);
@@ -366,7 +385,6 @@
       width:auto; border-right:0; border-bottom:2px solid var(--primary);
       padding:11px 14px;
     }
-    #nlCupLive .nlcl__mark { height:38px; }
     #nlCupLive .nlcl__nav { display:none; }   /* thumbs, not arrows */
     #nlCupLive .nlcl__tile.is-solo { gap:12px; }
     #nlCupLive .nlcl__tile.is-solo .nlcl__name { font-size:17px; }
@@ -557,18 +575,29 @@
       return JSON.parse(decodeURIComponent(escape(atob(s))));
     } catch (e) { return null; }
   }
+  function favouriteTeamNow() {
+    var claims = decodeJwtPayload(readCookie('_gc_sa_sso_access'));
+    return (claims && claims.favourite_team) ? String(claims.favourite_team) : null;
+  }
   /* The SSO middleware writes the cookie asynchronously, so a synchronous read
-     at script load misses it on a cold visit. Capped short: pinning the fan's
-     club is a nicety and the rail must not wait on it. There is no sign-in
-     path from here — signed out simply means an unpinned rail. */
+     at script load misses it on a cold visit — but a signed-OUT visitor never
+     gets a cookie at all, and waiting the full grace period for them would
+     leave the band blank on a front page for no reason. So: take the answer
+     immediately if it is already there, and otherwise give it one short grace
+     period. A cookie that lands later still pins the club on the next poll.
+
+     There is no sign-in path from here — signed out simply means an
+     unpinned rail. */
   function favouriteTeam(ms) {
+    var now = favouriteTeamNow();
+    if (now) return Promise.resolve(now);
     return new Promise(function (resolve) {
-      var deadline = Date.now() + (ms || 1500);
+      var deadline = Date.now() + (ms || 600);
       (function tick() {
-        var claims = decodeJwtPayload(readCookie('_gc_sa_sso_access'));
-        if (claims && claims.favourite_team) return resolve(String(claims.favourite_team));
+        var found = favouriteTeamNow();
+        if (found) return resolve(found);
         if (Date.now() > deadline) return resolve(null);
-        setTimeout(tick, 200);
+        setTimeout(tick, 150);
       })();
     });
   }
@@ -627,9 +656,12 @@
     '<path d="M4.5 11.5 11.5 4.5M5.5 4.5h6v6" stroke="currentColor" stroke-width="2.2"' +
     ' stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
+  /* "KO" is doing real work, not decorating: an unarmed tile carries a second
+     clock time ("Watch from 18:45") and without the label a fan has two times
+     in front of them and no way to tell which one the game starts at. */
   function statusHTML(m) {
     var s = STATUS[m.state];
-    if (!s) return '<span class="nlcl__status">' + escHtml(ukTime(m.ko)) + '</span>';
+    if (!s) return '<span class="nlcl__status"><b>KO</b> ' + escHtml(ukTime(m.ko)) + '</span>';
     return '<span class="nlcl__status ' + s.cls + '">' +
       (s.dot ? '<i aria-hidden="true"></i>' : '') + escHtml(s.label) + '</span>';
   }
@@ -653,13 +685,25 @@
     return (now || Date.now()) >= m.ko.getTime() - ARM_MS;
   }
 
-  function open(m, links) {
-    var url = linkable(m) ? (links[normKey(m.home)] || '') : '';
+  /* Three states, not two. A tile with no URL on file shows nothing; a tile
+     whose stream has not opened yet says when it will, which is the question
+     the fan would otherwise have to work out from the kick-off time. */
+  function open(m, links, now) {
+    var known = links[normKey(m.home)] || '';
+    var live = known && linkable(m, now);
     return {
-      url: url,
-      tag: url ? 'a' : 'div',
-      attrs: url ? ' href="' + escHtml(url) + '" target="_blank" rel="noopener noreferrer"' : ''
+      url: live ? known : '',
+      from: (known && !live && m.state === 'pre') ? ukTime(new Date(m.ko.getTime() - ARM_MS)) : '',
+      tag: live ? 'a' : 'div',
+      attrs: live ? ' href="' + escHtml(known) + '" target="_blank" rel="noopener noreferrer"' : ''
     };
+  }
+
+  function ctaHTML(o) {
+    if (o.url) return '<span class="nlcl__meta"><span class="nlcl__watch">Watch' + ARROW + '</span></span>';
+    if (o.from) return '<span class="nlcl__meta"><span class="nlcl__soon">Watch from ' +
+      escHtml(o.from) + '</span></span>';
+    return '';
   }
 
   function label(m, mine) {
@@ -682,8 +726,7 @@
           '<span class="nlcl__name">' + escHtml(shortFor(m.home)) + '</span></span>' +
         '<span class="nlcl__side">' + crestHTML(m.away, CREST_SM) +
           '<span class="nlcl__name">' + escHtml(shortFor(m.away)) + '</span></span>' +
-        (o.url ? '<span class="nlcl__meta"><span class="nlcl__watch">Watch' + ARROW +
-          '</span></span>' : '') +
+        ctaHTML(o) +
       '</' + o.tag + '>' +
     '</li>';
   }
@@ -706,6 +749,7 @@
           '<span class="nlcl__name">' + escHtml(shortFor(m.away)) + '</span></span>' +
         '<span class="nlcl__meta">' + statusHTML(m) +
           (o.url ? '<span class="nlcl__watch">Watch' + ARROW + '</span>' : '') +
+          (o.from ? '<span class="nlcl__soon">Watch from ' + escHtml(o.from) + '</span>' : '') +
         '</span>' +
       '</' + o.tag + '>' +
     '</li>';
@@ -795,7 +839,7 @@
     getJson(META_URL),
     soft(getJson(GUESTS_URL), { clubs: [] }),
     soft(getJson(LINKS_URL), { links: {} }),
-    favouriteTeam(1500)
+    favouriteTeam(600)
   ]).then(function (res) {
     indexClubs(res[0], false);
     indexClubs(res[1], true);
@@ -808,6 +852,10 @@
     function cycle() {
       return fetchToday(season).then(function (matches) {
         last = matches;
+        /* Re-read rather than trust the boot-time answer: a fan who signs in
+           on another tab, or whose cookie landed after the grace period, gets
+           their club pinned on the next poll instead of on their next visit. */
+        fav = fav || favouriteTeamNow();
         render(matches, links, fav);
       });
     }
