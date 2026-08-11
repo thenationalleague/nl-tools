@@ -42,12 +42,17 @@ function extract(name) {
   throw new Error('unbalanced ' + name);
 }
 
+/* The suffix pattern comes out of the bundle too — it is the whole fix, and a
+   copy of it here would pass while the shipped one was broken. */
+const SUFFIX_DECL = src.match(/var SUFFIX = \/.*?\/i;/);
+assert.ok(SUFFIX_DECL, 'SUFFIX regex is present in the bundle');
+
 const W = new Function(
-  "var TZ = 'Europe/London'; var byKey = {};" +
-  ['baseName', 'normKey', 'periodState', 'parseKO', 'fmt', 'ukYmd', 'ukTime',
-   'isHex', 'lum', 'accentFor', 'indexClubs', 'clubFor'].map(extract).join('\n') +
-  '\n return { baseName, normKey, periodState, parseKO, ukYmd, ukTime,' +
-  ' accentFor, indexClubs, clubFor, byKey };'
+  "var TZ = 'Europe/London'; var byKey = {};\n" + SUFFIX_DECL[0] + '\n' +
+  ['baseName', 'suffixOf', 'normKey', 'periodState', 'parseKO', 'fmt', 'ukYmd', 'ukTime',
+   'isHex', 'lum', 'accentFor', 'indexClubs', 'clubFor', 'shortFor'].map(extract).join('\n') +
+  '\n return { baseName, suffixOf, normKey, periodState, parseKO, ukYmd, ukTime,' +
+  ' lum, accentFor, indexClubs, clubFor, shortFor, byKey };'
 )();
 
 W.indexClubs(clubsMeta, false);
@@ -69,6 +74,20 @@ test('the U21/PL2 disagreement between NLS and cup-clubs-meta collapses', () => 
   assert.equal(W.normKey('Ipswich Town U21'),    W.normKey('Ipswich Town PL2'));
   assert.equal(W.baseName('Wolverhampton Wanderers PL2'), 'Wolverhampton Wanderers');
   assert.equal(W.baseName('Everton U23'), 'Everton');
+});
+
+test('a tile calls a side what the broadcast calls them', () => {
+  /* The repo's short + the suffix NLS actually used, so the rail agrees with
+     the coverage rather than with the file it read the crest from. */
+  assert.equal(W.shortFor('Birmingham City U21'), 'Birmingham U21');
+  assert.equal(W.shortFor('Birmingham City PL2'), 'Birmingham PL2');
+  assert.equal(W.shortFor('Middlesbrough PL2'), 'Boro PL2');
+  assert.equal(W.shortFor('Wolverhampton Wanderers PL2'), 'Wolves PL2');
+  /* Member clubs carry no suffix and keep their own short. */
+  assert.equal(W.shortFor('FC Halifax Town'), 'Halifax');
+  assert.equal(W.shortFor('Hartlepool United'), 'Hartlepool');
+  /* A side nobody has heard of still gets a name, not an empty tile. */
+  assert.equal(W.shortFor('Some New Club U21'), 'Some New Club U21');
 });
 
 test('a member club name is never mistaken for a suffixed one', () => {
