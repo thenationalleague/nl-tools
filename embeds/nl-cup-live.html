@@ -1,0 +1,768 @@
+<!-- ============================================================
+     NATIONAL LEAGUE CUP — LIVE — embeddable widget for
+     thenationalleague.org.uk. Source of truth. Copy/paste into the
+     CMS custom HTML block, or use the hosted bundle
+     (embeds/nl-cup-live.js).
+
+     What it is
+     ----------
+     On a National League Cup matchday this paints a card for every tie
+     being played TODAY, each one linking to that host club's stream.
+     On every other day it paints nothing at all — the block collapses
+     to zero height and the page reads as if it were never there. That
+     silence is the point: this sits permanently in the CMS and speaks
+     only on the ~10 days a season it has something to say.
+
+     "Today" is the UK calendar day, 00:00–23:59 Europe/London, not the
+     UTC day. Under BST those differ by an hour and a 00:30 kick-off
+     would otherwise land on the wrong card, so the API window is
+     deliberately widened to ±1 day and then filtered on the UK date.
+
+     The link
+     --------
+     One URL per HOST club, from assets/data/nl-cup-links.json. Every
+     cup tie is played at a member club's ground and a club's stream
+     page does not move between rounds, so Hartlepool's link is
+     Hartlepool's link all season. A club with no URL yet still gets a
+     card — it just is not clickable, which is the honest state rather
+     than a dead link.
+
+     The supporter's club
+     --------------------
+     If the NL+ SSO cookie is readable and the fan's favourite_team is
+     playing, that tie is lifted out of the grid into a full-width hero
+     in the club's own colours. Everything else stays in kick-off
+     order behind it. No cookie, or no match, and the grid is simply
+     the whole widget — nothing is gated on being signed in.
+
+     Scale
+     -----
+     A cup matchday is 1 to 16 ties. One tie renders as a single wide
+     card rather than a lonely quarter of a row; 2–16 step 2/3/4
+     columns on CONTAINER width, because an embed does not own the
+     viewport and the same block sits full-bleed and in an article
+     column. Ties are grouped under their kick-off time, which is what
+     the fixture list actually looks like — a 16-tie round is three
+     buckets (18:00, 18:30, 18:45), not sixteen scattered times.
+
+     Data
+     ----
+     NLS competition 1275, season from clubs-meta seasons.current.
+     Crests and colours resolve through clubs-meta.json for member
+     clubs and cup-clubs-meta.json for the academy sides. Note the
+     academy sides arrive from NLS as "Birmingham City U21" where
+     cup-clubs-meta calls them "Birmingham City PL2" — the suffix is
+     stripped before matching, or three of the sixteen would show no
+     crest and no colour.
+
+     Changelog:
+       11/08/2026  v1.0  First build.
+     ============================================================ -->
+
+<div id="nlCupLive" hidden>
+  <div class="nlcl__head">
+    <img class="nlcl__mark" width="30" height="41" alt="National League Cup" decoding="async"
+         src="https://raw.githubusercontent.com/thenationalleague/tools/main/assets/divisions/NL%20Cup.png">
+    <span class="nlcl__title">National League Cup</span>
+    <span class="nlcl__badge"><i class="nlcl__dot" aria-hidden="true"></i>Live</span>
+    <span class="nlcl__date" id="nlcl-date"></span>
+  </div>
+  <div class="nlcl__hero" id="nlcl-hero" hidden></div>
+  <ul class="nlcl__grid" id="nlcl-grid"></ul>
+</div>
+
+<style>
+  /* Carbona Variable */
+  @font-face {
+    font-family: "carbona-variable";
+    src: url("https://use.typekit.net/af/184cf2/0000000000000000774c3175/31/l?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n4&v=3") format("woff2"),
+         url("https://use.typekit.net/af/184cf2/0000000000000000774c3175/31/d?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n4&v=3") format("woff");
+    font-display: swap; font-style: normal; font-weight: 200 900; font-stretch: normal;
+  }
+
+  #nlCupLive {
+    /* Values mirror the NL canon (system/nl-brand.css) — embeds can't load
+       the portal stylesheet, so the tokens are inlined verbatim. */
+    --primary:#9e0000; --primary-600:#7e0000; --primary-700:#600000;
+    --navy:#223b7c; --navy-600:#192e63; --navy-300:#9baac9;
+    --green:#1a7030; --amber:#c96f15;
+    --accent-live:#4ade80;
+    --white:#ffffff; --off-white:#f4f6f9;
+    --text:#1a2a44; --text-muted:#5a6a82;
+    --border:#dde3ed;
+    --radius:6px;
+
+    font-family:'carbona-variable','carbona',sans-serif;
+    font-size:15px; line-height:1.45;
+    font-variation-settings:'wght' 400;
+    color:var(--text); -webkit-font-smoothing:antialiased;
+    max-width:1180px; margin:24px auto; padding:0 12px;
+
+    /* Columns step on the width of THIS block, not the window. */
+    container-type:inline-size;
+  }
+  #nlCupLive[hidden] { display:none; }
+  #nlCupLive, #nlCupLive *, #nlCupLive *::before, #nlCupLive *::after { box-sizing:border-box; }
+
+  /* Header ----------------------------------------------------------- */
+  #nlCupLive .nlcl__head {
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    padding:12px 16px;
+    background:var(--navy);
+    border-bottom:2px solid var(--primary);
+    border-radius:var(--radius) var(--radius) 0 0;
+    color:var(--white);
+  }
+  #nlCupLive .nlcl__mark { flex:none; height:41px; width:auto; display:block; }
+  #nlCupLive .nlcl__title {
+    font-size:17px; letter-spacing:.02em;
+    font-weight:900; font-variation-settings:'wght' 900;
+  }
+  /* Red pill rather than a red dot: canon reserves --accent-live green for
+     pulse dots BECAUSE red on navy is too low-contrast (nl-brand.css §live).
+     Inverting it — white on brand red — keeps the signal red where the fan
+     reads it and keeps the contrast where canon wanted it. */
+  #nlCupLive .nlcl__badge {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:3px 9px 4px; border-radius:999px;
+    background:var(--primary); color:var(--white);
+    font-size:11px; letter-spacing:.09em; text-transform:uppercase;
+    font-weight:800; font-variation-settings:'wght' 800;
+  }
+  #nlCupLive .nlcl__dot {
+    width:7px; height:7px; border-radius:50%; background:var(--white);
+    animation:nlcl-pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes nlcl-pulse { 0%,100% { opacity:1; } 50% { opacity:.25; } }
+  #nlCupLive .nlcl__date {
+    margin-left:auto;
+    font-size:12px; letter-spacing:.05em; text-transform:uppercase;
+    font-weight:700; font-variation-settings:'wght' 700;
+    color:var(--navy-300);
+  }
+
+  /* Grid ------------------------------------------------------------- */
+  #nlCupLive .nlcl__grid {
+    list-style:none; margin:0; padding:14px;
+    background:var(--off-white);
+    border:1px solid var(--border); border-top:0;
+    border-radius:0 0 var(--radius) var(--radius);
+    display:grid; gap:12px;
+    grid-template-columns:repeat(2, minmax(0, 1fr));
+  }
+  /* display:grid above outbids the UA's [hidden] rule, so the one case where
+     the whole card IS the hero needs saying explicitly. */
+  #nlCupLive .nlcl__grid[hidden] { display:none; }
+  @container (min-width: 560px) {
+    #nlCupLive .nlcl__grid { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+  }
+  @container (min-width: 860px) {
+    #nlCupLive .nlcl__grid { gap:14px; grid-template-columns:repeat(4, minmax(0, 1fr)); }
+  }
+  /* One card left over — the fan's own tie is up in the hero and a single
+     other tie remains. Stretching it the full 1180px makes a letterbox with
+     two 30px crests adrift in it, so it keeps a card's width and sits left. */
+  #nlCupLive .nlcl__grid.is-one { grid-template-columns:minmax(0, 340px); }
+
+  /* Kick-off rail ---------------------------------------------------- */
+  #nlCupLive .nlcl__ko {
+    grid-column:1 / -1;
+    display:flex; align-items:center; gap:10px;
+    margin:2px 0 -2px;
+    font-size:12px; letter-spacing:.08em;
+    font-weight:800; font-variation-settings:'wght' 800;
+    color:var(--text-muted);
+  }
+  #nlCupLive .nlcl__ko::after {
+    content:""; flex:1; height:1px; background:var(--border);
+  }
+  #nlCupLive .nlcl__ko:first-child { margin-top:0; }
+
+  /* Card ------------------------------------------------------------- */
+  #nlCupLive .nlcl__card {
+    --club:var(--navy); --club-ink:var(--white);
+    display:flex; flex-direction:column; height:100%;
+    background:var(--white);
+    border:1px solid var(--border); border-top:3px solid var(--club);
+    border-radius:var(--radius);
+    text-decoration:none; color:inherit;
+    transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+  }
+  #nlCupLive a.nlcl__card:hover,
+  #nlCupLive a.nlcl__card:focus-visible {
+    transform:translateY(-3px);
+    box-shadow:0 8px 22px rgba(10,22,40,.14);
+  }
+  #nlCupLive a.nlcl__card:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
+  /* Played and postponed ties stay on the card so the round reads as a whole,
+     but they stop competing with the ties a fan can still watch. */
+  #nlCupLive .nlcl__card.is-done { opacity:.62; }
+
+  #nlCupLive .nlcl__teams { padding:12px 12px 4px; display:grid; gap:8px; }
+  #nlCupLive .nlcl__team { display:flex; align-items:center; gap:9px; min-width:0; }
+  #nlCupLive .nlcl__crest {
+    flex:none; width:30px; height:30px; min-height:0;
+    object-fit:contain; display:block;
+  }
+  #nlCupLive .nlcl__code {
+    flex:none; width:30px; text-align:center;
+    font-size:12px; letter-spacing:.02em;
+    font-weight:900; font-variation-settings:'wght' 900;
+    color:var(--club);
+  }
+  /* Two lines reserved and two the ceiling: "Wolverhampton Wanderers PL2" in
+     a quarter-width column needs both, and a third line would make one card
+     taller than the rest of its row. */
+  #nlCupLive .nlcl__name {
+    min-width:0; flex:1;
+    display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2;
+    overflow:hidden; overflow-wrap:break-word;
+    font-size:14px; line-height:1.2;
+    font-weight:800; font-variation-settings:'wght' 800;
+  }
+
+  #nlCupLive .nlcl__foot {
+    margin-top:auto;
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    padding:9px 12px 10px;
+    border-top:1px solid var(--border);
+  }
+  #nlCupLive .nlcl__status {
+    display:inline-flex; align-items:center; gap:6px;
+    font-size:12px; letter-spacing:.06em; text-transform:uppercase;
+    font-weight:800; font-variation-settings:'wght' 800;
+    color:var(--text-muted);
+  }
+  #nlCupLive .nlcl__status.is-live { color:var(--primary); }
+  #nlCupLive .nlcl__status.is-live i {
+    width:7px; height:7px; border-radius:50%; background:var(--primary);
+    animation:nlcl-pulse 1.8s ease-in-out infinite;
+  }
+  #nlCupLive .nlcl__status.is-ft { color:var(--green); }
+  #nlCupLive .nlcl__status.is-off { color:var(--amber); }
+  #nlCupLive .nlcl__watch {
+    margin-left:auto;   /* holds the right edge when the time is left off */
+    display:inline-flex; align-items:center; gap:5px;
+    font-size:12px; letter-spacing:.05em; text-transform:uppercase;
+    font-weight:800; font-variation-settings:'wght' 800;
+    color:var(--primary);
+  }
+  #nlCupLive .nlcl__arrow {
+    flex:none; width:13px; height:13px;
+    transition:transform .16s ease;
+  }
+  #nlCupLive a.nlcl__card:hover .nlcl__arrow,
+  #nlCupLive a.nlcl__card:focus-visible .nlcl__arrow { transform:translate(2px, -2px); }
+
+  /* Hero — the supporter's own club ---------------------------------- */
+  /* Full width above the grid, in the club's own colours. It breaks the
+     kick-off ordering on purpose: a fan who supports one of the sixteen is
+     here for one tie, and hunting for it in a 16-card grid is the thing
+     this is meant to remove. */
+  #nlCupLive .nlcl__hero { margin:0; }
+  #nlCupLive .nlcl__hero[hidden] { display:none; }
+  /* :not([hidden]) matters — an adjacent-sibling rule fires whether or not the
+     sibling is displayed, so without it the grid would carry a seam back to a
+     hero that isn't there. */
+  #nlCupLive .nlcl__hero:not([hidden]) + .nlcl__grid {
+    margin-top:12px; border-top:1px solid var(--border); border-radius:var(--radius);
+  }
+  #nlCupLive .nlcl__herocard {
+    --club:var(--navy); --club-ink:var(--white);
+    display:block; text-decoration:none;
+    background:var(--club); color:var(--club-ink);
+    border:1px solid var(--border); border-top:0;
+    padding:16px;
+    transition:filter .16s ease, box-shadow .16s ease;
+  }
+  #nlCupLive a.nlcl__herocard:hover,
+  #nlCupLive a.nlcl__herocard:focus-visible { filter:brightness(1.08); box-shadow:0 8px 22px rgba(10,22,40,.18); }
+  #nlCupLive a.nlcl__herocard:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
+  /* Your club is the only tie today — the hero closes the block. */
+  #nlCupLive .nlcl__hero.is-last .nlcl__herocard { border-radius:0 0 var(--radius) var(--radius); }
+  #nlCupLive .nlcl__herotag {
+    display:block; margin-bottom:10px;
+    font-size:11px; letter-spacing:.11em; text-transform:uppercase;
+    font-weight:800; font-variation-settings:'wght' 800;
+    opacity:.78;
+  }
+  #nlCupLive .nlcl__heroline {
+    display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+  }
+  #nlCupLive .nlcl__heroside { display:flex; align-items:center; gap:11px; min-width:0; }
+  #nlCupLive .nlcl__herocrest {
+    flex:none; width:52px; height:52px; object-fit:contain; display:block;
+  }
+  #nlCupLive .nlcl__heroname {
+    font-size:19px; line-height:1.15;
+    font-weight:900; font-variation-settings:'wght' 900;
+  }
+  #nlCupLive .nlcl__herov {
+    font-size:13px; letter-spacing:.1em; text-transform:uppercase;
+    font-weight:700; font-variation-settings:'wght' 700;
+    opacity:.7;
+  }
+  #nlCupLive .nlcl__herometa {
+    margin-left:auto; display:flex; align-items:center; gap:14px;
+    font-size:13px; letter-spacing:.06em; text-transform:uppercase;
+    font-weight:800; font-variation-settings:'wght' 800;
+  }
+  /* On a club-coloured wash the status tokens are unreadable — muted grey on
+     Hartlepool blue all but disappears, and brand red on a red club would too.
+     Everything in the hero takes the ink the wash was contrast-checked for. */
+  #nlCupLive .nlcl__herometa .nlcl__status,
+  #nlCupLive .nlcl__herometa .nlcl__status.is-live,
+  #nlCupLive .nlcl__herometa .nlcl__status.is-ft,
+  #nlCupLive .nlcl__herometa .nlcl__status.is-off { color:inherit; }
+  #nlCupLive .nlcl__herometa .nlcl__status.is-live i { background:currentColor; }
+  #nlCupLive .nlcl__herowatch {
+    display:inline-flex; align-items:center; gap:6px;
+    padding:8px 14px; border-radius:999px;
+    background:var(--club-ink); color:var(--club);
+  }
+
+  @container (max-width: 460px) {
+    #nlCupLive .nlcl__name { font-size:13px; }
+    #nlCupLive .nlcl__crest, #nlCupLive .nlcl__code { width:26px; }
+    #nlCupLive .nlcl__crest { height:26px; }
+    #nlCupLive .nlcl__heroname { font-size:16px; }
+    #nlCupLive .nlcl__herometa { margin-left:0; width:100%; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    #nlCupLive .nlcl__card,
+    #nlCupLive .nlcl__herocard,
+    #nlCupLive .nlcl__arrow { transition:none; }
+    #nlCupLive a.nlcl__card:hover,
+    #nlCupLive a.nlcl__card:focus-visible { transform:none; }
+    #nlCupLive a.nlcl__card:hover .nlcl__arrow,
+    #nlCupLive a.nlcl__card:focus-visible .nlcl__arrow { transform:none; }
+    #nlCupLive .nlcl__dot,
+    #nlCupLive .nlcl__status.is-live i { animation:none; }
+  }
+</style>
+
+<script>
+(function () {
+  'use strict';
+
+  var root = document.getElementById('nlCupLive');
+  if (!root) return;
+
+  var REPO       = 'https://raw.githubusercontent.com/thenationalleague/tools/main/';
+  var META_URL   = REPO + 'assets/data/clubs-meta.json';
+  var GUESTS_URL = REPO + 'assets/data/cup-clubs-meta.json';
+  var LINKS_URL  = REPO + 'assets/data/nl-cup-links.json';
+  var CREST_SM   = REPO + 'assets/crests/thumbs/';     /* 96px  — grid cards */
+  var CREST_MD   = REPO + 'assets/crests/medium/';     /* 256px — hero only  */
+
+  var API      = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2/matches/';
+  var COMP_CUP = 1275;                 /* firm NLS code — never a name match */
+  var TZ       = 'Europe/London';
+  var POLL_MS  = 60000;
+
+  var dateEl = document.getElementById('nlcl-date');
+  var heroEl = document.getElementById('nlcl-hero');
+  var grid   = document.getElementById('nlcl-grid');
+
+  /* ---------- helpers ---------- */
+
+  function escHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function isHex(h) { return /^#[0-9a-fA-F]{6}$/.test(String(h || '')); }
+
+  function lum(hex) {
+    var c = String(hex).replace('#', '');
+    var r = parseInt(c.slice(0, 2), 16),
+        g = parseInt(c.slice(2, 4), 16),
+        b = parseInt(c.slice(4, 6), 16);
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  }
+  function pickTextColor(hex) { return isHex(hex) && lum(hex) > 0.68 ? '#1a2a44' : '#ffffff'; }
+
+  /* First colour that isn't effectively white — white-on-white would erase
+     the rule and the hero wash, so Gateshead falls through to its second. */
+  function accentFor(colors) {
+    var order = [colors.primary, colors.secondary, colors.tertiary];
+    for (var i = 0; i < order.length; i++) {
+      if (isHex(order[i]) && lum(order[i]) <= 0.93) return order[i];
+    }
+    return '#223b7c';
+  }
+
+  /* NLS dates carry no T and no zone: "2026-08-18 18:00:00" is UTC. */
+  function parseKO(str) {
+    if (!str) return null;
+    var d = new Date(String(str).indexOf('T') > -1 ? str : String(str).replace(' ', 'T') + 'Z');
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  /* Everything the fan sees is UK wall-clock, and "today" is the UK calendar
+     day. Under BST that is an hour off UTC, which is exactly the gap a naive
+     toISOString() day window falls into. */
+  function fmt(date, opts) {
+    try {
+      return new Intl.DateTimeFormat(opts.loc || 'en-GB',
+        Object.assign({ timeZone: TZ }, opts.o)).format(date);
+    } catch (e) {
+      return new Intl.DateTimeFormat(opts.loc || 'en-GB', opts.o).format(date);
+    }
+  }
+  function ukYmd(d)  { return fmt(d, { loc: 'en-CA', o: { year: 'numeric', month: '2-digit', day: '2-digit' } }); }
+  function ukTime(d) { return fmt(d, { o: { hour: '2-digit', minute: '2-digit', hour12: false } }); }
+  function ukDate(d) { return fmt(d, { o: { weekday: 'long', day: 'numeric', month: 'long' } }); }
+  function utcYmd(d) { return new Date(d.getTime()).toISOString().slice(0, 10); }
+
+  /* NLS says "Birmingham City U21"; cup-clubs-meta says "Birmingham City PL2".
+     Three of the sixteen academy sides disagree, so both sides get flattened
+     to the parent club before any lookup. */
+  function baseName(n) {
+    return String(n || '').replace(/\s+(PL2|U2[13]|Under[ -]?2[13]|Academy|Development)$/i, '').trim();
+  }
+  function normKey(n) { return baseName(n).toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+  function periodState(p) {
+    var s = String(p || '').toLowerCase();
+    if (s === 'postponed') return 'postponed';
+    if (s === 'abandoned') return 'abandoned';
+    if (s === 'fulltime' || s === 'postmatch') return 'ft';
+    if (['firsthalf', 'secondhalf', 'halftime', 'extratime', 'penalties'].some(function (v) {
+      return s.indexOf(v) > -1;
+    })) return 'live';
+    return 'pre';
+  }
+
+  /* ---------- club lookup ---------- */
+
+  var byKey = {};   /* normalised name -> { crestName, colors } */
+
+  function indexClubs(meta, isGuest) {
+    (meta && meta.clubs || []).forEach(function (c) {
+      if (!c || !c.name) return;
+      var rec = { crestName: c.crestName || c.name, colors: c.colors || {} };
+      byKey[normKey(c.name)] = rec;
+      if (c.crestName) byKey[normKey(c.crestName)] = rec;
+      if (isGuest && c.short) byKey[normKey(c.short)] = rec;
+    });
+  }
+
+  function clubFor(name) {
+    return byKey[normKey(name)] || { crestName: baseName(name), colors: {} };
+  }
+
+  function crestUrl(base, crestName) { return base + encodeURIComponent(crestName) + '.png'; }
+
+  /* Three-letter fallback would need a code we may not have for a guest, so a
+     missing crest steps 96px -> 256px -> the club's initials. */
+  function initialsOf(name) {
+    return baseName(name).split(/\s+/).map(function (w) { return w.charAt(0); })
+      .join('').slice(0, 3).toUpperCase();
+  }
+
+  function wireCrests(scope) {
+    Array.prototype.forEach.call(scope.querySelectorAll('img[data-fallback]'), function (img) {
+      img.addEventListener('error', function () {
+        var next = img.getAttribute('data-fallback');
+        if (next && img.src !== next) { img.removeAttribute('data-fallback'); img.src = next; return; }
+        var span = document.createElement('span');
+        span.className = img.getAttribute('data-code-class') || 'nlcl__code';
+        span.textContent = img.getAttribute('data-code') || '';
+        if (img.parentNode) img.parentNode.replaceChild(span, img);
+      });
+    });
+  }
+
+  /* ---------- NL+ SSO (read-only, never blocking) ---------- */
+
+  function readCookie(name) {
+    var parts = (document.cookie || '').split('; ');
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i].indexOf(name + '=') === 0) return decodeURIComponent(parts[i].slice(name.length + 1));
+    }
+    return null;
+  }
+  function decodeJwtPayload(jwt) {
+    if (!jwt) return null;
+    var parts = String(jwt).split('.');
+    if (parts.length !== 3) return null;
+    try {
+      var s = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      while (s.length % 4) s += '=';
+      return JSON.parse(decodeURIComponent(escape(atob(s))));
+    } catch (e) { return null; }
+  }
+  /* The SSO middleware writes the cookie asynchronously, so a synchronous read
+     at script load misses it on a cold visit. Capped short: the hero is a nice
+     -to-have and the matchday card must not wait on it. */
+  function favouriteTeam(ms) {
+    return new Promise(function (resolve) {
+      var deadline = Date.now() + (ms || 1500);
+      (function tick() {
+        var claims = decodeJwtPayload(readCookie('_gc_sa_sso_access'));
+        if (claims && claims.favourite_team) return resolve(String(claims.favourite_team));
+        if (Date.now() > deadline) return resolve(null);
+        setTimeout(tick, 200);
+      })();
+    });
+  }
+
+  /* ---------- fetch ---------- */
+
+  function getJson(url, opts) {
+    return fetch(url, opts || { cache: 'no-cache' }).then(function (r) {
+      if (!r.ok) throw new Error(url + ' ' + r.status);
+      return r.json();
+    });
+  }
+
+  /* ±1 day around the UK date, then filtered on the UK date — the window is a
+     UTC one and the answer is a local one. */
+  function fetchToday(season) {
+    var now = new Date();
+    var from = utcYmd(new Date(now.getTime() - 864e5)) + ' 00:00:00Z';
+    var to   = utcYmd(new Date(now.getTime() + 864e5)) + ' 23:59:59Z';
+    var url = API + '?seasonID=' + encodeURIComponent(season) +
+      '&competitionID=' + COMP_CUP +
+      '&from=' + encodeURIComponent(from) +
+      '&to='   + encodeURIComponent(to) +
+      '&page.number=1&page.size=100';
+
+    var today = ukYmd(now);
+    return getJson(url, { cache: 'no-store' }).then(function (json) {
+      return (json && json.data || []).map(function (m) {
+        var a = m.attributes || {};
+        var ko = parseKO(a.kickOffDateUTC);
+        return {
+          id: m.id,
+          ko: ko,
+          home: (a.homeTeam && (a.homeTeam.name || a.homeTeam.shortName)) || '',
+          away: (a.awayTeam && (a.awayTeam.name || a.awayTeam.shortName)) || '',
+          state: a.postponementReason ? 'postponed' : periodState(a.matchPeriod)
+        };
+      }).filter(function (m) {
+        return m.ko && m.home && ukYmd(m.ko) === today;
+      }).sort(function (x, y) {
+        return (x.ko - y.ko) || x.home.localeCompare(y.home);
+      });
+    });
+  }
+
+  /* ---------- render ---------- */
+
+  var STATUS = {
+    live:      { cls: 'is-live', label: 'Live', dot: true },
+    ft:        { cls: 'is-ft',   label: 'Full time' },
+    postponed: { cls: 'is-off',  label: 'Postponed' },
+    abandoned: { cls: 'is-off',  label: 'Abandoned' }
+  };
+
+  var ARROW = '<svg class="nlcl__arrow" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
+    '<path d="M4.5 11.5 11.5 4.5M5.5 4.5h6v6" stroke="currentColor" stroke-width="2"' +
+    ' stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function statusHTML(m) {
+    var s = STATUS[m.state];
+    if (!s) return '<span class="nlcl__status">' + escHtml(ukTime(m.ko)) + '</span>';
+    return '<span class="nlcl__status ' + s.cls + '">' +
+      (s.dot ? '<i aria-hidden="true"></i>' : '') + escHtml(s.label) + '</span>';
+  }
+
+  function teamHTML(name) {
+    var club = clubFor(name);
+    return '<span class="nlcl__team">' +
+      '<img class="nlcl__crest" src="' + escHtml(crestUrl(CREST_SM, club.crestName)) + '"' +
+        ' data-fallback="' + escHtml(crestUrl(CREST_MD, club.crestName)) + '"' +
+        ' data-code="' + escHtml(initialsOf(name)) + '"' +
+        ' alt="" loading="lazy" decoding="async">' +
+      '<span class="nlcl__name">' + escHtml(name) + '</span>' +
+    '</span>';
+  }
+
+  /* A postponed tie keeps its card and loses its link — a stream page for a
+     game that is not being played is worse than no link at all. */
+  function linkable(m) { return m.state !== 'postponed' && m.state !== 'abandoned'; }
+
+  function cardHTML(m, links, showRails) {
+    var accent = accentFor(clubFor(m.home).colors || {});
+    var url = linkable(m) ? (links[normKey(m.home)] || '') : '';
+    var tag = url ? 'a' : 'div';
+    var attrs = url ? ' href="' + escHtml(url) + '" target="_blank" rel="noopener noreferrer"' : '';
+    var done = (m.state === 'ft' || m.state === 'postponed' || m.state === 'abandoned');
+    /* The rail directly above already gives the kick-off time, so printing it
+       again on every card under it is the same fact twice. It comes back when
+       there is no rail, and when there is no Watch link to fill the row. */
+    var quiet = showRails && m.state === 'pre' && url;
+
+    return '<li>' +
+      '<' + tag + ' class="nlcl__card' + (done ? ' is-done' : '') + '"' + attrs +
+        ' style="--club:' + accent + '"' +
+        ' aria-label="' + escHtml(m.home + ' versus ' + m.away + ', ' + ukTime(m.ko) +
+          (url ? ' — watch' : '')) + '">' +
+        '<span class="nlcl__teams">' + teamHTML(m.home) + teamHTML(m.away) + '</span>' +
+        '<span class="nlcl__foot">' +
+          (quiet ? '' : statusHTML(m)) +
+          (url ? '<span class="nlcl__watch"><span>Watch</span>' + ARROW + '</span>' : '') +
+        '</span>' +
+      '</' + tag + '>' +
+    '</li>';
+  }
+
+  function heroHTML(m, links) {
+    var club = clubFor(m.fav);
+    var accent = accentFor(club.colors || {});
+    var ink = pickTextColor(accent);
+    var url = linkable(m) ? (links[normKey(m.home)] || '') : '';
+    var tag = url ? 'a' : 'div';
+    var attrs = url ? ' href="' + escHtml(url) + '" target="_blank" rel="noopener noreferrer"' : '';
+
+    function side(name) {
+      var c = clubFor(name);
+      return '<span class="nlcl__heroside">' +
+        '<img class="nlcl__herocrest" src="' + escHtml(crestUrl(CREST_MD, c.crestName)) + '"' +
+          ' data-fallback="' + escHtml(crestUrl(CREST_SM, c.crestName)) + '"' +
+          ' data-code="' + escHtml(initialsOf(name)) + '" data-code-class="nlcl__heroname"' +
+          ' alt="" loading="eager" decoding="async">' +
+        '<span class="nlcl__heroname">' + escHtml(name) + '</span>' +
+      '</span>';
+    }
+
+    return '<' + tag + ' class="nlcl__herocard"' + attrs +
+      ' style="--club:' + accent + ';--club-ink:' + ink + '"' +
+      ' aria-label="' + escHtml('Your club: ' + m.home + ' versus ' + m.away + ', ' + ukTime(m.ko)) + '">' +
+      (m.solo ? '' : '<span class="nlcl__herotag">Your club today</span>') +
+      '<span class="nlcl__heroline">' +
+        side(m.home) +
+        '<span class="nlcl__herov">v</span>' +
+        side(m.away) +
+        '<span class="nlcl__herometa">' + statusHTML(m) +
+          (url ? '<span class="nlcl__herowatch">Watch' + ARROW + '</span>' : '') +
+        '</span>' +
+      '</span>' +
+    '</' + tag + '>';
+  }
+
+  function render(matches, links, fav) {
+    if (!matches.length) { root.hidden = true; return; }
+
+    var hero = null;
+    if (fav) {
+      var favKey = normKey(fav);
+      for (var i = 0; i < matches.length; i++) {
+        if (normKey(matches[i].home) === favKey || normKey(matches[i].away) === favKey) {
+          hero = matches[i];
+          hero.fav = normKey(matches[i].home) === favKey ? matches[i].home : matches[i].away;
+          break;
+        }
+      }
+    }
+
+    /* A one-tie night is the whole widget, so it gets the hero treatment
+       whoever the fan supports — as a grid card it would be two 30px crests
+       marooned in a 1180px letterbox. The "Your club today" tag stays off
+       unless the tie really is theirs; there is nothing to distinguish it
+       from when it is the only thing on screen. */
+    if (!hero && matches.length === 1) {
+      hero = matches[0];
+      hero.fav = matches[0].home;
+      hero.solo = true;
+    }
+
+    var rest = matches.filter(function (m) { return m !== hero; });
+
+    if (hero) {
+      heroEl.innerHTML = heroHTML(hero, links);
+      heroEl.hidden = false;
+      wireCrests(heroEl);
+    } else {
+      heroEl.innerHTML = '';
+      heroEl.hidden = true;
+    }
+
+    /* Kick-off rails only earn their place when there is more than one time to
+       tell apart — a single bucket would be a label for the whole card. */
+    var times = rest.map(function (m) { return ukTime(m.ko); });
+    var showRails = times.some(function (t) { return t !== times[0]; });
+
+    var html = '', lastKO = null;
+    rest.forEach(function (m) {
+      var t = ukTime(m.ko);
+      if (showRails && t !== lastKO) {
+        html += '<li class="nlcl__ko" role="presentation">' + escHtml(t) + '</li>';
+        lastKO = t;
+      }
+      html += cardHTML(m, links, showRails);
+    });
+
+    grid.innerHTML = html;
+    grid.classList.toggle('is-one', rest.length === 1);
+    grid.hidden = rest.length === 0;
+    heroEl.classList.toggle('is-last', rest.length === 0);
+    wireCrests(grid);
+
+    dateEl.textContent = ukDate(matches[0].ko);
+    root.hidden = false;
+  }
+
+  /* ---------- boot ---------- */
+
+  /* The widget stays hidden until it knows there is something to show. A
+     skeleton that resolves to nothing is not silence. */
+  var links = {};
+
+  function loadLinks(json) {
+    var out = {};
+    Object.keys((json && json.links) || {}).forEach(function (name) {
+      var url = String(json.links[name] || '').trim();
+      if (url) out[normKey(name)] = url;
+    });
+    return out;
+  }
+
+  function soft(p, fallback) {
+    return p.catch(function (e) {
+      if (window.console && console.warn) console.warn('[NL Cup Live]', e && e.message || e);
+      return fallback;
+    });
+  }
+
+  Promise.all([
+    getJson(META_URL),
+    soft(getJson(GUESTS_URL), { clubs: [] }),
+    soft(getJson(LINKS_URL), { links: {} }),
+    favouriteTeam(1500)
+  ]).then(function (res) {
+    indexClubs(res[0], false);
+    indexClubs(res[1], true);
+    links = loadLinks(res[2]);
+    var fav = res[3];
+    var season = (res[0].seasons && res[0].seasons.current) || '';
+    if (!season) throw new Error('no current season in clubs-meta');
+
+    function cycle() {
+      return fetchToday(season).then(function (matches) {
+        render(matches, links, fav);
+      });
+    }
+
+    return cycle().then(function () {
+      /* One request a minute, and only while the tab is being looked at — a
+         card that says LIVE has to be able to stop saying it, and a widget
+         left open overnight has to go quiet at midnight on its own. */
+      setInterval(function () {
+        if (document.hidden) return;
+        cycle().catch(function () { /* keep the last good card on screen */ });
+      }, POLL_MS);
+    });
+  }).catch(function (e) {
+    /* Failing silently is the correct failure here: on all but ~10 days a
+       season the right output IS nothing, so an error box would be wrong far
+       more often than it was right. */
+    root.hidden = true;
+    if (window.console && console.warn) console.warn('[NL Cup Live] not rendered.', e && e.message || e);
+  });
+})();
+</script>

@@ -95,6 +95,35 @@ An iframe is deliberately *not* used: the widget reads the SSO cookie via
 `nl.tools` cannot see `thenationalleague.org.uk` cookies, which would break
 club personalisation entirely.
 
+### NL Cup LIVE is the one that is usually invisible
+
+`embeds/nl-cup-live.html` cards up today's National League Cup ties (NLS
+competition `1275`), each linking to that host club's stream. It has no
+Firebase and no auth, and it reads the SSO cookie only to lift the fan's own
+club into a hero — nothing is gated on being signed in.
+
+Its governing behaviour is silence. The cup plays on roughly ten days a
+season and the block sits in the CMS permanently, so on every other day the
+root stays `hidden` and the page reads as if it were never pasted. That
+means no skeleton and no error box either: a spinner that resolves to
+nothing is not silence, and an error box would be wrong far more often than
+it was right. It reveals only once it knows it has ties to show.
+
+Three things in it are worth stealing:
+
+- **"Today" is the UK day, not the UTC day.** The `from`/`to` window is
+  widened a day either side and then filtered on `Europe/London`, because
+  under BST a 00:30 kick-off falls on the previous UTC day. Any embed doing
+  a "today" query against NLS has this bug waiting for it.
+- **NLS and the repo disagree about the academy sides.** The API says
+  `Birmingham City U21`; `cup-clubs-meta.json` says `Birmingham City PL2`.
+  Both sides are stripped to the parent club before any crest, colour or
+  link lookup — exact-name matching loses three of the sixteen.
+- **One link per HOST club**, from `assets/data/nl-cup-links.json`. Every
+  tie is played at a member ground and a club's stream page does not move
+  between rounds, so the map is sixteen rows for the whole season. A club
+  with no URL still gets a card; it just is not a link.
+
 ## 2. File structure (single file)
 
 ```
