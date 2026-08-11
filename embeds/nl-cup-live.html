@@ -70,6 +70,9 @@
      display, so the tile agrees with the broadcast.
 
      Changelog:
+       11/08/2026  v1.5  Full bleed by default — the band spans the window
+                         rather than the template's content column. Opt back
+                         in with <div data-nl-cup-live="contained">.
        11/08/2026  v1.4  The band no longer waits on the SSO cookie before
                          its first paint when the visitor is plainly signed
                          out, and a cookie that lands later pins the club on
@@ -136,10 +139,24 @@
     color:var(--text); -webkit-font-smoothing:antialiased;
     max-width:1180px; margin:20px auto; padding:0 12px;
 
-    /* The rail reshapes on the width of THIS block, not the window — a
-       homepage module never owns the viewport. */
+    /* The rail reshapes on the width of THIS block, not the window — the band
+       has to work full-bleed and inside a narrow column, and only the block
+       knows which it got. */
     container-type:inline-size;
   }
+
+  /* Full bleed. The CMS drops this into whatever column the page template
+     gives it, so escaping is a negative margin rather than a width — see the
+     script for why it is measured rather than 100vw. Edge to edge means the
+     corners and the drop shadow go: a band that spans the window and still
+     has rounded corners reads as a card that has been stretched. */
+  #nlCupLive.is-bleed { max-width:none; margin-block:0; padding:0; }
+  #nlCupLive.is-bleed .nlcl__band { border-radius:0; box-shadow:none; }
+  /* A flat gutter, not an attempt to line the cap up with the host page's
+     content column — that would mean hard-coding a guess at someone else's
+     grid, and getting it wrong looks arbitrary rather than aligned. */
+  #nlCupLive.is-bleed .nlcl__cap { padding-left:22px; }
+  #nlCupLive.is-bleed .nlcl__track { padding-right:16px; }
   #nlCupLive[hidden] { display:none; }
   #nlCupLive, #nlCupLive *, #nlCupLive *::before, #nlCupLive *::after { box-sizing:border-box; }
 
@@ -170,6 +187,10 @@
     display:block;
     font-size:19px; line-height:1.08; letter-spacing:.005em;
     font-weight:900; font-variation-settings:'wght' 900;
+    /* The cap is a fixed width so the rail starts on the same line every
+       night; the competition's name breaking across two of them inside it
+       is the one thing that would undo that. */
+    white-space:nowrap;
   }
   #nlCupLive .nlcl__sub { display:flex; align-items:center; gap:8px; min-width:0; }
   /* Red pill rather than a red dot: canon reserves --accent-live green for
@@ -423,6 +444,13 @@
      carries no button until then. A Watch button that lands on a page playing
      nothing is worse than no button — the fan has already spent the click. */
   var ARM_MS   = 15 * 60000;
+
+  /* Full bleed by default; the host page can keep it in its column with
+     <div data-nl-cup-live="contained">. */
+  var marker = root.parentNode && root.parentNode.closest
+    ? root.parentNode.closest('[data-nl-cup-live]') : null;
+  var contained = String((marker && marker.getAttribute('data-nl-cup-live')) ||
+    root.getAttribute('data-mode') || '').trim().toLowerCase() === 'contained';
 
   var dateEl  = document.getElementById('nlcl-date');
   var track   = document.getElementById('nlcl-track');
@@ -783,7 +811,26 @@
 
     dateEl.textContent = ukDate(matches[0].ko);
     root.hidden = false;
+    /* Both after the reveal: a hidden element has no box to measure. */
+    bleed();
     syncNav();
+  }
+
+  /* ---------- full bleed ---------- */
+
+  /* Measured, not 100vw. 100vw counts the scrollbar, so on any page tall
+     enough to scroll — i.e. a homepage — a 100vw band overhangs by the
+     scrollbar's width and puts a horizontal scrollbar on the whole site.
+     documentElement.clientWidth excludes it, and the element's own offset
+     tells us how far left it has to travel, whatever column it landed in. */
+  function bleed() {
+    if (contained) return;
+    root.style.marginLeft = '0';
+    root.style.width = 'auto';
+    var vw = document.documentElement.clientWidth;
+    var left = root.getBoundingClientRect().left;
+    root.style.marginLeft = (-left) + 'px';
+    root.style.width = vw + 'px';
   }
 
   /* ---------- rail mechanics ---------- */
@@ -808,6 +855,9 @@
        rather than the rail jumping to somewhere unrecognisable. */
     track.scrollBy({ left: dir * Math.max(160, track.clientWidth - 90), behavior: 'smooth' });
   }
+  if (!contained) root.classList.add('is-bleed');
+  window.addEventListener('resize', function () { bleed(); syncNav(); });
+
   navPrev.addEventListener('click', function () { nudge(-1); });
   navNext.addEventListener('click', function () { nudge(1); });
   track.addEventListener('scroll', syncNav, { passive: true });
