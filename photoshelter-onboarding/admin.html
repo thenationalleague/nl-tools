@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<!--
+  NL Tools — PhotoShelter Onboarding (admin)
+  Version: v0.1 (11/08/2026)
+  File: /photoshelter-onboarding/admin.html
+
+  Reads back what the open sign-up form at /photoshelter-onboarding/ collects,
+  so the four sessions can be balanced and joining links sent. The public page
+  can write but never read; this page is the only way in, and it is
+  admin/superadmin only because the data is names and email addresses for
+  people at 72 clubs.
+
+  Storage (RTDB):
+    app-data/ops-photoshelter-onboarding/bookings   read + delete (admin only)
+    tools/ops-photoshelter-onboarding               tool registration
+
+  Access (auth-guard registry — see system/auth-guard.js):
+    superadmin admin → admin · everyone else → off (invisible on the portal)
+
+  CHANGELOG
+  11/08/2026 v0.1 — Initial build. Per-session availability counts, table
+                    grouped by club, the clubs yet to register, lead-account
+                    flags (no lead / more than one lead), CSV export and
+                    per-row delete for junk.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PhotoShelter Onboarding — NL Tools</title>
+
+  <!-- Brand stylesheet (lint canonical: ?v=34) -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=34">
+
+  <!-- Firebase 10.12.0 SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- Firebase init -->
+  <script>
+    firebase.initializeApp({
+      apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+      authDomain:        "nl-tools.firebaseapp.com",
+      databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+      projectId:         "nl-tools",
+      storageBucket:     "nl-tools.firebasestorage.app",
+      messagingSenderId: "801354670005",
+      appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+    });
+    var db = firebase.database();
+  </script>
+
+  <!-- Tool identity + changelog. Keep window.NL_TOOL and var NL_TOOL_KEY
+       in sync — auth-guard reads NL_TOOL_KEY, nl-topbar reads window.NL_TOOL. -->
+  <script>
+    window.NL_TOOL = {
+      title: 'PhotoShelter Onboarding',
+      toolKey: 'ops-photoshelter-onboarding'
+    };
+    var NL_TOOL_KEY = 'ops-photoshelter-onboarding';
+
+    window.NL_CHANGELOG = [
+      {
+        date: '11/08/2026',
+        version: 'v0.1',
+        items: [
+          'Initial build — sign-ups for the four onboarding sessions.',
+          'Availability counts per session, grouped by club, with the clubs yet to register.',
+          'Flags clubs with no nominated lead account, and clubs where two people claim it.',
+          'CSV export and per-row delete.'
+        ]
+      }
+    ];
+
+    window.nlAuthReady = function (userData) {
+      window.NL = window.NL || {};
+      window.NL.session = userData;
+      if (window.TOOL && window.TOOL.boot) {
+        window.TOOL.boot(userData);
+      } else {
+        window._toolDeferredSession = userData;
+      }
+    };
+  </script>
+
+  <!-- NL system scripts (lint canonical: ?v=30 / ?v=8 / ?v=10) -->
+  <script src="/system/nl-utils.js?v=30"></script>
+  <script src="/system/nl-topbar.js?v=8"></script>
+  <script src="/system/auth-guard.js?v=10"></script>
+
+<style>
+  /* #pageWrap default hide is in nl-brand.css; auth-guard reveals with
+     style.display = 'block'. Don't clear with '' — would re-trigger the
+     brand rule and re-hide the page. */
+
+  /* Session counts sit above everything: the number that decides how the
+     four rooms get balanced. .stat is canon; only the availability bar is
+     local, because nothing else needed one. */
+  .ps-bar { height: 4px; border-radius: 2px; background: var(--navy-100);
+    margin-top: 10px; overflow: hidden; }
+  .ps-bar__fill { height: 100%; background: var(--primary); border-radius: 2px; }
+
+  .ps-club { font-variation-settings: 'wght' 700; color: var(--navy); }
+  .ps-crest { width: 22px; height: 22px; object-fit: contain; vertical-align: -6px;
+    margin-right: 7px; }
+
+  .ps-lead { display: inline-flex; align-items: center; gap: 5px; }
+
+  .ps-dates-cell { display: flex; flex-wrap: wrap; gap: 4px; }
+  .ps-daychip { font-size: var(--text-xs); padding: 2px 7px; border-radius: 999px;
+    background: var(--navy-50); color: var(--navy); font-variation-settings: 'wght' 700;
+    white-space: nowrap; }
+
+  .ps-notes { font-size: var(--text-xs); color: var(--text-muted); line-height: 1.5;
+    max-width: 320px; }
+
+  .ps-missing { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ps-missing span { font-size: var(--text-xs); padding: 4px 9px; border-radius: 999px;
+    background: var(--off-white); border: 1px solid var(--border); color: var(--text-muted); }
+
+  .ps-warn { margin-bottom: 22px; padding: 13px 16px; background: var(--amber-light);
+    border: 1px solid var(--amber); border-radius: var(--radius);
+    font-size: var(--text-sm); color: var(--navy); line-height: 1.55; }
+  .ps-warn ul { margin: 6px 0 0; padding-left: 18px; }
+
+  .ps-groupname { background: var(--off-white); font-variation-settings: 'wght' 800;
+    color: var(--navy); font-size: var(--text-xs); text-transform: uppercase;
+    letter-spacing: var(--tracking-wide); }
+</style>
+</head>
+<body>
+
+<!-- Topbar — auto-rendered by /system/nl-topbar.js from window.NL_TOOL -->
+<div id="nlTopbar"></div>
+
+<div id="pageWrap">
+  <div class="container">
+
+    <div class="section-head">
+      <h2>Session availability</h2>
+      <div class="page-header__actions">
+        <a class="btn btn--ghost btn--sm" href="/photoshelter-onboarding/" target="_blank"
+           rel="noopener">Open the sign-up form ↗</a>
+        <button class="btn btn--navy btn--sm" id="psCsv">Export CSV</button>
+      </div>
+    </div>
+
+    <div class="stats" id="psStats"></div>
+
+    <div id="psWarn"></div>
+
+    <div class="section-head" style="margin-top:8px;">
+      <h2>Registrations <span id="psCount" class="text-secondary"></span></h2>
+      <div class="toolbar__right">
+        <input type="search" id="psSearch" class="toolbar__search"
+               placeholder="Search name, club, email or role…">
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="table table--compact" id="psTable">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Role</th>
+            <th>Email</th>
+            <th>Can make</th>
+            <th>Lead account</th>
+            <th>Wants covered</th>
+            <th>Registered</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="psRows"></tbody>
+      </table>
+    </div>
+
+    <div class="section-head" style="margin-top:32px;">
+      <h2>Yet to register <span id="psMissingCount" class="text-secondary"></span></h2>
+    </div>
+    <div class="ps-missing" id="psMissing"></div>
+
+  </div>
+</div>
+
+<!-- Main app -->
+<script>
+(function () {
+  'use strict';
+
+  /* Kept in step with the public page. If a future round changes the dates
+     there, change them here too — this list is what the counts are built
+     from, and a booking for a date not in this list would go uncounted. */
+  var SESSIONS = [
+    { id: '2026-08-25', day: 'Tuesday 25 August',   short: 'Tue 25' },
+    { id: '2026-08-26', day: 'Wednesday 26 August', short: 'Wed 26' },
+    { id: '2026-08-27', day: 'Thursday 27 August',  short: 'Thu 27' },
+    { id: '2026-08-28', day: 'Friday 28 August',    short: 'Fri 28' }
+  ];
+  var RTDB_PATH = 'app-data/ops-photoshelter-onboarding/bookings';
+
+  var el   = function (id) { return document.getElementById(id); };
+  var ROWS = [];        /* [{ id, ...booking }] */
+  var CLUBS = [];       /* current-season club names */
+
+  var LEAD_LABEL = {
+    me:        'Yes, them',
+    other:     'Someone else',
+    undecided: 'Not decided'
+  };
+
+  /* ── Load ──────────────────────────────────────────────────────────────*/
+  function boot() {
+    NL.ensureAuth()
+      .then(function () {
+        return Promise.all([
+          db.ref(RTDB_PATH).once('value'),
+          NL.clubs.forSeason('current')
+        ]);
+      })
+      .then(function (res) {
+        var snap = res[0];
+        CLUBS = (res[1] || []).map(function (c) { return c.name; });
+
+        ROWS = [];
+        snap.forEach(function (child) {
+          var v = child.val() || {};
+          v.id = child.key;
+          ROWS.push(v);
+        });
+        ROWS.sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
+
+        render();
+        wire();
+      })
+      .catch(function (e) {
+        NL.toast('Could not load registrations: ' + e.message, 'error');
+      });
+  }
+
+  /* ── Derived numbers ───────────────────────────────────────────────────*/
+  function countFor(sessionId) {
+    return ROWS.filter(function (r) { return r.dates && r.dates[sessionId]; }).length;
+  }
+
+  function byClub() {
+    var map = {};
+    ROWS.forEach(function (r) {
+      var k = r.club || '(no club given)';
+      (map[k] = map[k] || []).push(r);
+    });
+    return map;
+  }
+
+  /* Two things worth chasing before the sessions run: a club that registered
+     but nominated nobody, and a club where two people both claim the single
+     lead account. */
+  function leadProblems() {
+    var map = byClub(), noLead = [], clash = [];
+    Object.keys(map).forEach(function (club) {
+      var leads = map[club].filter(function (r) { return r.lead === 'me'; });
+      if (!leads.length) noLead.push(club);
+      if (leads.length > 1) clash.push(club + ' (' + leads.length + ')');
+    });
+    return { noLead: noLead.sort(), clash: clash.sort() };
+  }
+
+  /* ── Render ────────────────────────────────────────────────────────────*/
+  function renderStats() {
+    var max = Math.max.apply(null, SESSIONS.map(function (s) { return countFor(s.id); }).concat([1]));
+    el('psStats').innerHTML = SESSIONS.map(function (s) {
+      var n = countFor(s.id);
+      return '<div class="stat">' +
+        '<div class="stat__num">' + n + '</div>' +
+        '<div class="stat__label">' + NL.escHtml(s.short) + ' available</div>' +
+        '<div class="ps-bar"><div class="ps-bar__fill" style="width:' +
+          Math.round((n / max) * 100) + '%"></div></div>' +
+      '</div>';
+    }).join('');
+  }
+
+  function renderWarnings() {
+    var p = leadProblems(), bits = [];
+    if (p.noLead.length) {
+      bits.push('<li><strong>No lead nominated</strong> at ' + p.noLead.length + ' club' +
+        (p.noLead.length === 1 ? '' : 's') + ': ' +
+        p.noLead.map(NL.escHtml).join(', ') + '</li>');
+    }
+    if (p.clash.length) {
+      bits.push('<li><strong>More than one person claiming the lead account</strong> at: ' +
+        p.clash.map(NL.escHtml).join(', ') + '</li>');
+    }
+    el('psWarn').innerHTML = bits.length
+      ? '<div class="ps-warn">Worth resolving before you set the accounts up:<ul>' +
+        bits.join('') + '</ul></div>'
+      : '';
+  }
+
+  function dateChips(r) {
+    var on = SESSIONS.filter(function (s) { return r.dates && r.dates[s.id]; });
+    if (!on.length) return '<span class="text-secondary">—</span>';
+    return '<div class="ps-dates-cell">' + on.map(function (s) {
+      return '<span class="ps-daychip">' + NL.escHtml(s.short) + '</span>';
+    }).join('') + '</div>';
+  }
+
+  function leadCell(r) {
+    if (r.lead === 'me') {
+      return '<span class="ps-lead"><span class="pill pill--approved">Lead</span></span>';
+    }
+    if (r.lead === 'other') {
+      var who = [r.leadName, r.leadEmail].filter(Boolean).map(NL.escHtml).join(' · ');
+      return '<span class="text-secondary">' + NL.escHtml(LEAD_LABEL.other) + '</span>' +
+             (who ? '<div class="ps-notes">' + who + '</div>' : '');
+    }
+    return '<span class="text-secondary">' +
+           NL.escHtml(LEAD_LABEL[r.lead] || '—') + '</span>';
+  }
+
+  function filtered() {
+    var q = (el('psSearch').value || '').trim().toLowerCase();
+    if (!q) return ROWS;
+    return ROWS.filter(function (r) {
+      return [r.name, r.club, r.email, r.role].join(' ').toLowerCase().indexOf(q) > -1;
+    });
+  }
+
+  function renderRows() {
+    var rows = filtered();
+    el('psCount').textContent = rows.length
+      ? '(' + rows.length + ' from ' + Object.keys(byClub()).length + ' clubs)'
+      : '';
+
+    if (!rows.length) {
+      el('psRows').innerHTML = '<tr><td colspan="8">' +
+        '<div class="empty-state"><div class="empty-state__icon">📭</div>' +
+        '<div class="empty-state__title">Nothing yet</div>' +
+        '<div class="empty-state__text">Registrations appear here as clubs submit the form.</div>' +
+        '</div></td></tr>';
+      return;
+    }
+
+    /* Grouped by club so the room list reads the way you would chase it. */
+    var groups = {};
+    rows.forEach(function (r) { (groups[r.club || '(no club given)'] = groups[r.club || '(no club given)'] || []).push(r); });
+
+    el('psRows').innerHTML = Object.keys(groups).sort().map(function (club) {
+      var head = '<tr class="ps-groupname"><td colspan="8">' +
+        '<img class="ps-crest" src="' + NL.escHtml(NL.clubs.crestUrl(club, 'thumb')) + '" alt="">' +
+        NL.escHtml(club) + ' · ' + groups[club].length + '</td></tr>';
+
+      return head + groups[club].map(function (r) {
+        return '<tr>' +
+          '<td class="ps-club">' + NL.escHtml(r.name || '') + '</td>' +
+          '<td>' + NL.escHtml(r.role || '') + '</td>' +
+          '<td><a href="mailto:' + NL.escHtml(r.email || '') + '">' +
+              NL.escHtml(r.email || '') + '</a></td>' +
+          '<td>' + dateChips(r) + '</td>' +
+          '<td>' + leadCell(r) + '</td>' +
+          '<td><div class="ps-notes">' + NL.escHtml(r.notes || '') + '</div></td>' +
+          '<td class="text-secondary">' + (r.ts ? NL.escHtml(NL.timeAgo(r.ts)) : '') + '</td>' +
+          '<td><button class="btn btn--ghost btn--sm" data-del="' + NL.escHtml(r.id) + '">Delete</button></td>' +
+        '</tr>';
+      }).join('');
+    }).join('');
+  }
+
+  function renderMissing() {
+    var have = byClub();
+    var missing = CLUBS.filter(function (c) { return !have[c]; }).sort();
+    el('psMissingCount').textContent = '(' + missing.length + ' of ' + CLUBS.length + ')';
+    el('psMissing').innerHTML = missing.length
+      ? missing.map(function (c) { return '<span>' + NL.escHtml(c) + '</span>'; }).join('')
+      : '<span>Every club has registered at least one person.</span>';
+  }
+
+  function render() {
+    renderStats();
+    renderWarnings();
+    renderRows();
+    renderMissing();
+  }
+
+  /* ── Actions ───────────────────────────────────────────────────────────*/
+  function wire() {
+    el('psSearch').addEventListener('input', renderRows);
+
+    el('psRows').addEventListener('click', function (ev) {
+      var btn = ev.target.closest('[data-del]');
+      if (!btn) return;
+      var id  = btn.getAttribute('data-del');
+      var row = ROWS.filter(function (r) { return r.id === id; })[0];
+      if (!row) return;
+
+      NL.confirm('Delete the registration for ' + (row.name || 'this person') +
+                 ' at ' + (row.club || 'their club') + '? This cannot be undone.',
+                 { variant: 'danger', confirmText: 'Delete' })
+        .then(function (ok) {
+          if (!ok) return;
+          return db.ref(RTDB_PATH + '/' + id).remove().then(function () {
+            ROWS = ROWS.filter(function (r) { return r.id !== id; });
+            render();
+            NL.toast('Registration deleted.', 'success');
+          });
+        })
+        .catch(function (e) { NL.toast(e.message, 'error'); });
+    });
+
+    el('psCsv').addEventListener('click', function () {
+      var head = ['Club', 'Name', 'Role', 'Email', 'Lead account', 'Lead name',
+                  'Lead email', 'Wants covered', 'Registered']
+                 .concat(SESSIONS.map(function (s) { return s.day; }));
+
+      var body = ROWS.slice().sort(function (a, b) {
+        return String(a.club || '').localeCompare(String(b.club || ''));
+      }).map(function (r) {
+        return [
+          r.club || '', r.name || '', r.role || '', r.email || '',
+          LEAD_LABEL[r.lead] || '', r.leadName || '', r.leadEmail || '',
+          r.notes || '', r.ts ? NL.formatDateTime(r.ts) : ''
+        ].concat(SESSIONS.map(function (s) {
+          return (r.dates && r.dates[s.id]) ? 'Yes' : '';
+        }));
+      });
+
+      /* bom:true so Excel reads club names with accents correctly. */
+      NL.download('photoshelter-onboarding.csv',
+                  NL.csv([head].concat(body), { bom: true }),
+                  'text/csv;charset=utf-8');
+    });
+  }
+
+  window.TOOL = { boot: boot };
+  if (window._toolDeferredSession) boot(window._toolDeferredSession);
+})();
+</script>
+
+</body>
+</html>

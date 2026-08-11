@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--
+  NL Tools — PhotoShelter Onboarding (club-facing)
+  Version: v0.1 (11/08/2026)
+  File: /photoshelter-onboarding/index.html
+
+  Club media staff pick which of the four identical PhotoShelter training
+  sessions they can make. The League then assigns each person to one session
+  and emails the joining link. One submission = one person, not one club.
+
+  NOT a gated tool (no auth-guard) — out of lint-tools scope by design.
+  The link is open: anyone who has it can register, because the people we
+  need in the room (club photographers, media officers) mostly do not have
+  portal logins. Abuse control is anonymous Firebase auth (so the write path
+  is not reachable by a bare curl against the REST endpoint), a honeypot
+  field, and create-only rules with per-field validation.
+
+  RTDB:
+    app-data/ops-photoshelter-onboarding/bookings/<pushId>   create-only
+
+  Reading the bookings back is admin/superadmin only and lives in
+  admin.html — this page can write but can never read, so an open URL never
+  exposes one club's people to another.
+
+  CONFIRMATION EMAIL (CFG.confirmEmail) — on by default.
+  After the booking is saved, the page fires ps_confirm at Apps Script and
+  ignores the result. Thanks for registering, we will be in touch in the
+  coming days about which slot you are on, email Richard to amend anything.
+  Because it is unawaited, the page behaves identically whether or not the
+  action exists in the live Apps Script project — the worst case is a
+  registration with no receipt, never a lost registration.
+
+  EMAIL VERIFICATION (CFG.verifyEmail) — off by default.
+  Flipping it to true moves the write server-side: the page asks Apps Script
+  for a 4-digit code, and submits the booking WITH that code, so Apps Script
+  verifies it and writes to RTDB itself using the database secret. Same shape
+  the Vacancies tool already uses in production. It does nothing until the
+  ps_requestCode / ps_submit actions in gas/PhotoShelterOnboarding.gs are
+  pasted into the live Apps Script project and the deployment is updated —
+  so leave it false until that is done, or nobody can register at all.
+
+  CHANGELOG
+  11/08/2026 v0.1 — Initial build. Four sessions, 25–28 August 2026, 10:00am,
+                    identical content. Sessions auto-expire once their date
+                    passes; when all four are gone the form is replaced by a
+                    closed panel. Availability is "tick everything you can
+                    make" — the League assigns the session, so no capacity is
+                    shown and nothing is read back to the page.
+-->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PhotoShelter onboarding — The National League</title>
+
+<link rel="stylesheet" href="/system/nl-brand.css?v=34">
+
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="/system/nl-utils.js?v=30"></script>
+<script>
+  firebase.initializeApp({
+    apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
+    authDomain:        "nl-tools.firebaseapp.com",
+    databaseURL:       "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId:         "nl-tools",
+    storageBucket:     "nl-tools.firebasestorage.app",
+    messagingSenderId: "801354670005",
+    appId:             "1:801354670005:web:05d8ebad3e7e63610d03fc"
+  });
+  var db = firebase.database();
+</script>
+
+<style>
+/* Chrome follows club-contacts and club-signoff — the other two pages clubs
+   are sent a link to. Gradient hero, one column, white cards. */
+.rw { max-width: 720px; margin: 0 auto; padding: 0 0 60px; }
+
+.ps-hero { background: linear-gradient(135deg, var(--navy) 0%, var(--navy-600) 60%,
+  var(--primary) 160%); color: var(--white); padding: 26px 22px;
+  display: flex; align-items: center; gap: 16px; }
+.ps-hero__rose { width: 52px; height: 52px; object-fit: contain; flex-shrink: 0; }
+.ps-hero__t { min-width: 0; }
+.ps-hero__t .kicker { font-size: var(--text-xs); text-transform: uppercase;
+  letter-spacing: var(--tracking-wider); color: var(--navy-100);
+  font-variation-settings: 'wght' 800; }
+.ps-hero__t h1 { margin: 3px 0 0; font-size: var(--text-xl); color: var(--white);
+  font-variation-settings: 'wght' 900; line-height: 1.1; }
+.ps-hero__t p { margin: 6px 0 0; font-size: var(--text-sm); color: var(--navy-100);
+  line-height: 1.45; }
+
+.ps-body { padding: 0 22px; }
+
+.ps-intro { background: var(--white); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px 20px;
+  margin: 22px 0; font-size: var(--text-sm); line-height: 1.6; color: var(--text); }
+.ps-intro p { margin: 0 0 10px; }
+.ps-intro p:last-child { margin-bottom: 0; }
+.ps-intro strong { font-variation-settings: 'wght' 700; color: var(--navy); }
+
+/* Session tick-list. Whole row is the label so the tap target is the card. */
+.ps-dates { display: grid; gap: 10px; }
+.ps-date { display: flex; align-items: center; gap: 12px; padding: 13px 15px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--white); cursor: pointer;
+  transition: border-color .15s, background .15s; }
+.ps-date:hover { border-color: var(--primary-300); background: var(--primary-50); }
+.ps-date input { margin: 0; }
+.ps-date__t { min-width: 0; }
+.ps-date__day { display: block; font-size: var(--text-sm);
+  font-variation-settings: 'wght' 700; color: var(--navy); }
+.ps-date__time { display: block; font-size: var(--text-xs); color: var(--text-muted);
+  margin-top: 1px; }
+.ps-date.is-on { border-color: var(--primary); background: var(--primary-50); }
+
+/* Lead nomination — same row treatment, radios rather than checkboxes. */
+.ps-radios { display: grid; gap: 8px; }
+.ps-radio { display: flex; align-items: flex-start; gap: 12px; padding: 12px 15px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--white); cursor: pointer;
+  transition: border-color .15s, background .15s; }
+.ps-radio:hover { border-color: var(--primary-300); background: var(--primary-50); }
+.ps-radio.is-on { border-color: var(--primary); background: var(--primary-50); }
+.ps-radio input { margin: 2px 0 0; width: 16px; height: 16px; accent-color: var(--primary);
+  flex-shrink: 0; }
+.ps-radio__t { min-width: 0; font-size: var(--text-sm);
+  font-variation-settings: 'wght' 600; color: var(--navy); }
+.ps-radio__sub { display: block; font-variation-settings: 'wght' 400;
+  font-size: var(--text-xs); color: var(--text-muted); margin-top: 2px; line-height: 1.4; }
+
+/* Conditional block for "someone else will be the lead". */
+.ps-leadwho { display: none; margin-top: 12px; padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius); background: var(--off-white); }
+.ps-leadwho.is-open { display: block; }
+
+/* The honeypot. Off-screen rather than display:none — some bots skip hidden
+   fields but happily fill positioned ones. Not focusable, not announced. */
+.ps-hp { position: absolute; left: -9999px; width: 1px; height: 1px;
+  overflow: hidden; }
+
+.ps-err { display: none; margin: 14px 0 0; padding: 12px 15px;
+  background: var(--red-light); border: 1px solid var(--red);
+  border-radius: var(--radius); color: var(--navy); font-size: var(--text-sm);
+  line-height: 1.5; }
+.ps-err.is-open { display: block; }
+.ps-err ul { margin: 6px 0 0; padding-left: 18px; }
+
+.ps-foot { margin-top: 18px; font-size: var(--text-xs); color: var(--text-muted);
+  line-height: 1.55; }
+
+/* Success + closed panels reuse the canon .success-screen. */
+.ps-panel { background: var(--white); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow); margin: 22px 0; }
+.ps-recap { display: inline-block; text-align: left; margin: 4px auto 0;
+  font-size: var(--text-sm); color: var(--text); line-height: 1.7; }
+.ps-recap dt { font-size: var(--text-xs); text-transform: uppercase;
+  letter-spacing: var(--tracking-wide); color: var(--text-muted);
+  font-variation-settings: 'wght' 800; margin-top: 10px; }
+.ps-recap dd { margin: 2px 0 0; font-variation-settings: 'wght' 600; color: var(--navy); }
+
+/* 4-digit code entry — only rendered when CFG.verifyEmail is on. */
+.ps-code { display: none; }
+.ps-code.is-open { display: block; }
+.ps-code__input { width: 140px !important; text-align: center; font-size: 22px !important;
+  letter-spacing: 0.35em; font-variation-settings: 'wght' 700; }
+.ps-code__status { font-size: var(--text-xs); margin-top: 6px; color: var(--text-muted); }
+.ps-code__status.ok { color: var(--green); font-variation-settings: 'wght' 700; }
+
+@media (max-width: 560px) {
+  .ps-hero { padding: 20px 16px; }
+  .ps-body { padding: 0 16px; }
+}
+</style>
+</head>
+<body>
+
+<div class="rw">
+
+  <div class="ps-hero">
+    <img class="ps-hero__rose" src="/assets/crests/National%20League%20rose%20white.png" alt="">
+    <div class="ps-hero__t">
+      <span class="kicker">The National League</span>
+      <h1>PhotoShelter onboarding</h1>
+      <p id="psHeroSub">Pick the training sessions you can make.</p>
+    </div>
+  </div>
+
+  <div class="ps-body">
+
+    <div class="ps-intro" id="psIntro">
+      <p>PhotoShelter is the platform the League is moving to for storing and
+         sharing club photography: a single place to upload match images, find
+         them again, and give the people who need them access without trading
+         files around by email or WeTransfer.</p>
+      <p>We are running <strong>four identical online sessions</strong>, each about
+         an hour, walking through how to use it. You only need to attend one.
+         Tick <strong>every</strong> date you could make below and we will confirm
+         which session you are on, with the joining link, by email.</p>
+    </div>
+
+    <!-- FORM -->
+    <form class="form-panel ps-panel" id="psForm" autocomplete="on" novalidate>
+      <div class="form-panel__head">Register for a session</div>
+      <div class="form-panel__body">
+
+        <div class="form-grid">
+          <div class="form-group span2">
+            <label for="psClubMount">Your club <span class="req">*</span></label>
+            <div id="psClubMount"></div>
+          </div>
+
+          <div class="form-group">
+            <label for="psName">Full name <span class="req">*</span></label>
+            <input type="text" id="psName" name="name" autocomplete="name" maxlength="80"
+                   placeholder="Jane Smith">
+          </div>
+
+          <div class="form-group">
+            <label for="psEmail">Email address <span class="req">*</span></label>
+            <input type="email" id="psEmail" name="email" autocomplete="email" maxlength="120"
+                   placeholder="you@yourclub.co.uk">
+          </div>
+
+          <div class="form-group span2">
+            <label for="psRole">Your role at the club <span class="req">*</span></label>
+            <input type="text" id="psRole" name="role" autocomplete="organization-title"
+                   maxlength="100" placeholder="Club photographer / Media Officer / …">
+          </div>
+        </div>
+
+        <!-- Email verification. Hidden unless CFG.verifyEmail. -->
+        <div class="ps-code" id="psCodeBlock">
+          <div class="section-head" style="margin-top:22px;"><h2>Verify your email</h2></div>
+          <p class="form-hint" style="margin-bottom:10px;">
+            We will send a 4-digit code to the address above so we know the joining
+            link will reach you.
+          </p>
+          <button type="button" class="btn btn--navy btn--sm" id="psSendCode">Send code</button>
+          <div class="form-group" id="psCodeEntry" style="display:none;margin-top:14px;">
+            <label for="psCode">4-digit code</label>
+            <input type="text" id="psCode" class="ps-code__input" maxlength="4"
+                   inputmode="numeric" placeholder="0000" autocomplete="one-time-code">
+            <div class="ps-code__status" id="psCodeStatus"></div>
+          </div>
+        </div>
+
+        <div class="section-head" style="margin-top:22px;"><h2>Which dates can you make?</h2></div>
+        <p class="form-hint" style="margin-bottom:10px;">
+          All four sessions are the same, at 10:00am. Tick every one you could
+          attend. The more you tick, the easier it is for us to place you.
+        </p>
+        <div class="ps-dates" id="psDates"></div>
+
+        <div class="section-head" style="margin-top:22px;"><h2>Lead account</h2></div>
+        <p class="form-hint" style="margin-bottom:10px;">
+          Each club gets one lead PhotoShelter account, which manages the club's
+          images and who else can reach them.
+        </p>
+        <div class="ps-radios" id="psLead">
+          <label class="ps-radio">
+            <input type="radio" name="lead" value="me">
+            <span class="ps-radio__t">Yes, that will be me
+              <span class="ps-radio__sub">You will hold your club's lead account.</span></span>
+          </label>
+          <label class="ps-radio">
+            <input type="radio" name="lead" value="other">
+            <span class="ps-radio__t">No, someone else at our club
+              <span class="ps-radio__sub">Tell us who, if you know.</span></span>
+          </label>
+          <label class="ps-radio">
+            <input type="radio" name="lead" value="undecided">
+            <span class="ps-radio__t">Not decided yet
+              <span class="ps-radio__sub">No problem. We will follow it up with the club.</span></span>
+          </label>
+        </div>
+
+        <div class="ps-leadwho" id="psLeadWho">
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="psLeadName">Their name</label>
+              <input type="text" id="psLeadName" maxlength="80" placeholder="Optional">
+            </div>
+            <div class="form-group">
+              <label for="psLeadEmail">Their email</label>
+              <input type="email" id="psLeadEmail" maxlength="120" placeholder="Optional">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-top:22px;">
+          <label for="psNotes">Anything you would like covered?</label>
+          <textarea id="psNotes" maxlength="1000"
+                    placeholder="Optional. What would make the session worth your hour?"></textarea>
+          <div class="form-hint">Optional. It genuinely shapes what we cover.</div>
+        </div>
+
+        <!-- Honeypot: a human never sees this, so anything in it is a bot. -->
+        <div class="ps-hp" aria-hidden="true">
+          <label for="psCompany">Company</label>
+          <input type="text" id="psCompany" name="company" tabindex="-1" autocomplete="off">
+        </div>
+
+        <div class="ps-err" id="psErr"></div>
+
+      </div>
+      <div class="form-panel__foot">
+        <button type="submit" class="btn btn--primary" id="psSubmit">Register</button>
+      </div>
+    </form>
+
+    <!-- SUCCESS -->
+    <div class="ps-panel" id="psDone" style="display:none;">
+      <div class="success-screen">
+        <div class="success-screen__icon">✅</div>
+        <h2>You are registered</h2>
+        <dl class="ps-recap" id="psRecap"></dl>
+        <p style="margin-top:18px;font-size:var(--text-sm);color:var(--text-muted);line-height:1.6;">
+          We will email you to confirm which session you are on, with the
+          joining link. Nothing else to do for now.
+        </p>
+        <p style="margin-top:10px;font-size:var(--text-xs);color:var(--text-muted);">
+          Something wrong, or need to change it?
+          <a href="mailto:richard@thenationalleague.org.uk">richard@thenationalleague.org.uk</a>
+        </p>
+        <button type="button" class="btn btn--ghost btn--sm" id="psAgain"
+                style="margin-top:18px;">Register someone else</button>
+      </div>
+    </div>
+
+    <!-- CLOSED (all four dates in the past) -->
+    <div class="ps-panel" id="psClosed" style="display:none;">
+      <div class="success-screen">
+        <div class="success-screen__icon">📅</div>
+        <h2>Sign-ups have closed</h2>
+        <p style="margin-top:8px;font-size:var(--text-sm);color:var(--text-muted);line-height:1.6;">
+          The PhotoShelter onboarding sessions have now taken place. If you
+          missed them and still need setting up, get in touch and we will sort
+          something out.
+        </p>
+        <p style="margin-top:14px;font-size:var(--text-sm);">
+          <a href="mailto:richard@thenationalleague.org.uk">richard@thenationalleague.org.uk</a>
+        </p>
+      </div>
+    </div>
+
+    <p class="ps-foot">
+      Your details are used to run these sessions and set up your PhotoShelter
+      access, and are visible only to National League staff. They are not shared
+      with other clubs.
+    </p>
+
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ── Configuration ─────────────────────────────────────────────────────
+     The four sessions, in order. A session disappears once its date has
+     passed; when the list empties the form is replaced by the closed panel.
+     A future round of onboarding is an edit to this array and nothing else. */
+  var SESSIONS = [
+    { id: '2026-08-25', day: 'Tuesday 25 August',   short: 'Tue 25 Aug' },
+    { id: '2026-08-26', day: 'Wednesday 26 August', short: 'Wed 26 Aug' },
+    { id: '2026-08-27', day: 'Thursday 27 August',  short: 'Thu 27 Aug' },
+    { id: '2026-08-28', day: 'Friday 28 August',    short: 'Fri 28 Aug' }
+  ];
+  var SESSION_TIME = '10:00am';
+  var CONTACT      = 'richard@thenationalleague.org.uk';
+  var RTDB_PATH    = 'app-data/ops-photoshelter-onboarding/bookings';
+  var DONE_KEY     = 'nl-ps-onboarding-registered';
+
+  var CFG = {
+    /* false → the page writes to RTDB itself behind anonymous auth.
+       true  → Apps Script verifies a 4-digit code and owns the write.
+       Do NOT flip this until ps_requestCode + ps_submit are live in the
+       Apps Script deployment, or registration stops working entirely. */
+    verifyEmail: false,
+
+    /* Short receipt to the person who registered. Fire-and-forget: it is sent
+       AFTER the booking is safely saved, and a failure is swallowed, so a
+       missing or broken Apps Script action can never cost someone their
+       place. Safe to leave true before ps_confirm is pasted in. */
+    confirmEmail: true
+  };
+
+  var el = function (id) { return document.getElementById(id); };
+  var clubPicker = null;
+  var live       = [];      /* sessions still in the future */
+  var codeSent   = false;
+
+  /* ── Which sessions are still open ─────────────────────────────────────
+     Compared as YYYY-MM-DD strings against the browser's local date, so a
+     session stays listed for the whole of its own day. */
+  function todayId() {
+    var d = new Date(), p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  function openSessions() {
+    var t = todayId();
+    return SESSIONS.filter(function (s) { return s.id >= t; });
+  }
+
+  /* ── Render ────────────────────────────────────────────────────────────*/
+  function renderDates() {
+    var wrap = el('psDates');
+    wrap.innerHTML = '';
+    live.forEach(function (s) {
+      var lab = document.createElement('label');
+      lab.className = 'ps-date';
+      lab.innerHTML =
+        '<input type="checkbox" value="' + NL.escHtml(s.id) + '">' +
+        '<span class="ps-date__t">' +
+          '<span class="ps-date__day">' + NL.escHtml(s.day) + '</span>' +
+          '<span class="ps-date__time">' + NL.escHtml(SESSION_TIME) + ' · online · about an hour</span>' +
+        '</span>';
+      var cb = lab.querySelector('input');
+      cb.addEventListener('change', function () {
+        lab.classList.toggle('is-on', cb.checked);
+      });
+      wrap.appendChild(lab);
+    });
+  }
+
+  function renderHeroSub() {
+    if (!live.length) { el('psHeroSub').textContent = 'Sign-ups have closed.'; return; }
+    var first = live[0].short, last = live[live.length - 1].short;
+    el('psHeroSub').textContent = live.length === 1
+      ? 'One session left: ' + first + ', ' + SESSION_TIME + '.'
+      : live.length + ' online sessions, ' + first + ' to ' + last + ', ' + SESSION_TIME + '.';
+  }
+
+  function showClosed() {
+    el('psForm').style.display   = 'none';
+    el('psIntro').style.display  = 'none';
+    el('psClosed').style.display = '';
+  }
+
+  /* ── Lead radios ───────────────────────────────────────────────────────*/
+  function wireLead() {
+    var radios = el('psLead').querySelectorAll('input[name="lead"]');
+    Array.prototype.forEach.call(radios, function (r) {
+      r.addEventListener('change', function () {
+        Array.prototype.forEach.call(radios, function (o) {
+          o.closest('.ps-radio').classList.toggle('is-on', o.checked);
+        });
+        el('psLeadWho').classList.toggle('is-open', r.value === 'other' && r.checked);
+      });
+    });
+  }
+
+  /* ── Validation ────────────────────────────────────────────────────────*/
+  function validEmail(v) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
+
+  function collect() {
+    var dates = {};
+    Array.prototype.forEach.call(
+      el('psDates').querySelectorAll('input:checked'),
+      function (cb) { dates[cb.value] = true; }
+    );
+    var leadEl = el('psLead').querySelector('input[name="lead"]:checked');
+    return {
+      club:      clubPicker ? (clubPicker.getValue() || '').trim() : '',
+      name:      el('psName').value.trim(),
+      email:     el('psEmail').value.trim(),
+      role:      el('psRole').value.trim(),
+      dates:     dates,
+      lead:      leadEl ? leadEl.value : '',
+      leadName:  el('psLeadName').value.trim(),
+      leadEmail: el('psLeadEmail').value.trim(),
+      notes:     el('psNotes').value.trim()
+    };
+  }
+
+  function problems(d) {
+    var p = [];
+    if (!d.club)                        p.push('Choose your club.');
+    if (d.name.length < 2)              p.push('Enter your full name.');
+    if (!validEmail(d.email))           p.push('Enter a valid email address.');
+    if (d.role.length < 2)              p.push('Enter your role at the club.');
+    if (!Object.keys(d.dates).length)   p.push('Tick at least one date you can make.');
+    if (!d.lead)                        p.push('Tell us about the lead account.');
+    if (d.leadEmail && !validEmail(d.leadEmail))
+      p.push('The lead account email does not look right.');
+    if (CFG.verifyEmail && el('psCode').value.trim().length !== 4)
+      p.push('Enter the 4-digit code we emailed you.');
+    return p;
+  }
+
+  function showErrors(list) {
+    var box = el('psErr');
+    if (!list.length) { box.classList.remove('is-open'); box.innerHTML = ''; return; }
+    box.innerHTML = '<strong>Not quite there:</strong><ul>' +
+      list.map(function (m) { return '<li>' + NL.escHtml(m) + '</li>'; }).join('') + '</ul>';
+    box.classList.add('is-open');
+    box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  /* ── Submit ────────────────────────────────────────────────────────────*/
+  function gasPost(payload) {
+    return fetch(NL.endpoints.gas + '?cb=' + Date.now(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify(payload)
+    }).then(function (r) { return r.json(); });
+  }
+
+  function submit(ev) {
+    ev.preventDefault();
+
+    /* Honeypot: a filled Company field is a bot. Show the success screen so
+       it has nothing to learn from, and write nothing. */
+    if (el('psCompany').value) { succeed(collect()); return; }
+
+    var d = collect();
+    var errs = problems(d);
+    if (errs.length) { showErrors(errs); return; }
+    showErrors([]);
+
+    var btn = el('psSubmit');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Registering…';
+
+    var record = {
+      club:      d.club,
+      name:      d.name,
+      email:     d.email,
+      role:      d.role,
+      dates:     d.dates,
+      lead:      d.lead,
+      leadName:  d.lead === 'other' ? d.leadName  : '',
+      leadEmail: d.lead === 'other' ? d.leadEmail : '',
+      notes:     d.notes,
+      ts:        firebase.database.ServerValue.TIMESTAMP
+    };
+
+    var write = CFG.verifyEmail
+      /* Apps Script verifies the code and writes it — the browser never
+         touches RTDB, so there is no open write path at all. */
+      ? gasPost({
+          action:  'ps_submit',
+          code:    el('psCode').value.trim(),
+          booking: (function () { var c = {}; for (var k in record) c[k] = record[k];
+                                  c.ts = Date.now(); return c; })()
+        }).then(function (r) {
+          if (!r || r.ok === false) throw new Error((r && r.error) || 'Could not register.');
+        })
+      /* Direct write, behind anonymous auth, create-only by rule. */
+      : firebase.auth().signInAnonymously().then(function () {
+          return db.ref(RTDB_PATH).push(record);
+        });
+
+    write.then(function () {
+      try { localStorage.setItem(DONE_KEY, '1'); } catch (e) {}
+      /* Receipt. Deliberately after the write and deliberately unawaited:
+         the booking is already safe, so a bounced or unconfigured mailer
+         must not turn a successful registration into an error on screen.
+         With verifyEmail on, Apps Script sends this itself at submit time. */
+      if (CFG.confirmEmail && !CFG.verifyEmail) {
+        var picked = live.filter(function (s) { return d.dates[s.id]; })
+                         .map(function (s) { return s.day + ', ' + SESSION_TIME; });
+        gasPost({
+          action: 'ps_confirm',
+          email:  d.email,
+          name:   d.name,
+          club:   d.club,
+          dates:  picked
+        }).catch(function () { /* silent by design */ });
+      }
+      succeed(d);
+    }).catch(function (e) {
+      btn.disabled  = false;
+      btn.innerHTML = 'Register';
+      showErrors([
+        'We could not save that. ' + (e && e.message ? e.message : 'Please try again') +
+        '. If it keeps happening, email ' + CONTACT + ' and we will register you by hand.'
+      ]);
+    });
+  }
+
+  function succeed(d) {
+    var picked = live.filter(function (s) { return d.dates && d.dates[s.id]; });
+    var recap = el('psRecap');
+    recap.innerHTML =
+      '<dt>Name</dt><dd>' + NL.escHtml(d.name) + '</dd>' +
+      '<dt>Club</dt><dd>' + NL.escHtml(d.club) + '</dd>' +
+      '<dt>' + (picked.length === 1 ? 'Date you can make' : 'Dates you can make') + '</dt><dd>' +
+        (picked.length
+          ? picked.map(function (s) { return NL.escHtml(s.day); }).join('<br>')
+          : '—') +
+      '</dd>';
+    el('psForm').style.display  = 'none';
+    el('psIntro').style.display = 'none';
+    el('psDone').style.display  = '';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  /* Registering a second person from the same machine is expected — clubs
+     share a media laptop. So this is a reset, not a block. */
+  function again() {
+    el('psForm').reset();
+    Array.prototype.forEach.call(
+      document.querySelectorAll('.ps-date.is-on, .ps-radio.is-on'),
+      function (n) { n.classList.remove('is-on'); }
+    );
+    el('psLeadWho').classList.remove('is-open');
+    if (clubPicker) clubPicker.clear();
+    if (CFG.verifyEmail) {
+      codeSent = false;
+      el('psCodeEntry').style.display = 'none';
+      el('psSendCode').textContent = 'Send code';
+      el('psSendCode').disabled = false;
+      el('psCodeStatus').textContent = '';
+      el('psCodeStatus').className = 'ps-code__status';
+    }
+    var btn = el('psSubmit');
+    btn.disabled = false; btn.innerHTML = 'Register';
+    el('psDone').style.display  = 'none';
+    el('psIntro').style.display = '';
+    el('psForm').style.display  = '';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  /* ── Email verification (only when CFG.verifyEmail) ─────────────────────*/
+  function wireCode() {
+    el('psCodeBlock').classList.add('is-open');
+    el('psSendCode').addEventListener('click', function () {
+      var email = el('psEmail').value.trim();
+      if (!validEmail(email)) { showErrors(['Enter a valid email address first.']); return; }
+      showErrors([]);
+      var b = el('psSendCode');
+      b.disabled = true; b.innerHTML = '<span class="spinner"></span>Sending…';
+      gasPost({ action: 'ps_requestCode', email: email }).then(function (r) {
+        if (!r || r.ok === false) throw new Error((r && r.error) || 'Could not send the code.');
+        codeSent = true;
+        el('psCodeEntry').style.display = '';
+        el('psCodeStatus').textContent = 'Code sent to ' + email + '. It expires in 10 minutes.';
+        b.textContent = 'Resend code'; b.disabled = false;
+      }).catch(function (e) {
+        b.textContent = 'Send code'; b.disabled = false;
+        showErrors([e.message]);
+      });
+    });
+    el('psCode').addEventListener('input', function () {
+      var v = this.value.replace(/\D/g, '').slice(0, 4);
+      this.value = v;
+      var st = el('psCodeStatus');
+      if (v.length === 4 && codeSent) {
+        st.className = 'ps-code__status ok';
+        st.textContent = '✓ Code entered. Register when you are ready.';
+      }
+    });
+  }
+
+  /* ── Boot ──────────────────────────────────────────────────────────────*/
+  function boot() {
+    live = openSessions();
+    renderHeroSub();
+
+    if (!live.length) { showClosed(); return; }
+
+    renderDates();
+    wireLead();
+    if (CFG.verifyEmail) wireCode();
+
+    clubPicker = NL.clubPicker('#psClubMount', {
+      mode:        'select',
+      season:      'current',
+      placeholder: 'Select your club',
+      onSelect:    function () { showErrors([]); }
+    });
+
+    el('psForm').addEventListener('submit', submit);
+    el('psAgain').addEventListener('click', again);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+})();
+</script>
+
+</body>
+</html>
