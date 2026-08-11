@@ -50,6 +50,14 @@
      tile — it just is not clickable, which is the honest state rather
      than a dead link.
 
+     A tile is only a link once the stream can actually be watched:
+     from 15 minutes before kick-off. Those pages sit there playing
+     nothing until then, and a button that spends a fan's click on an
+     empty page is worse than no button. The arming is a clock
+     decision rather than a data one, so the poll re-renders even when
+     the fetch failed — a tie must not be left buttonless because the
+     API blinked.
+
      Data
      ----
      NLS competition 1275, season from clubs-meta seasons.current.
@@ -62,6 +70,10 @@
      display, so the tile agrees with the broadcast.
 
      Changelog:
+       11/08/2026  v1.2  Links arm 15 minutes before kick-off and not
+                         before, and the poll re-renders on a failed
+                         fetch so they arm without a reload. Hartlepool's
+                         stream URL is the first one wired.
        11/08/2026  v1.1  Rebuilt as a front-page CTA rail. v1.0 was a
                          fixture grid: correct data, wrong furniture —
                          sixteen cards four-wide is a fixture page, and
@@ -389,6 +401,10 @@
   var COMP_CUP = 1275;                 /* firm NLS code — never a name match */
   var TZ       = 'Europe/London';
   var POLL_MS  = 60000;
+  /* The stream pages do not go live until shortly before kick-off, so a tile
+     carries no button until then. A Watch button that lands on a page playing
+     nothing is worse than no button — the fan has already spent the click. */
+  var ARM_MS   = 15 * 60000;
 
   var dateEl  = document.getElementById('nlcl-date');
   var track   = document.getElementById('nlcl-track');
@@ -626,9 +642,16 @@
       ' alt="" loading="lazy" decoding="async">';
   }
 
-  /* A postponed tie keeps its tile and loses its link — a stream page for a
-     game that is not being played is worse than no link at all. */
-  function linkable(m) { return m.state !== 'postponed' && m.state !== 'abandoned'; }
+  /* A tile is a link only once its stream can actually be watched: from 15
+     minutes before kick-off, and not if the tie is off. It stays a link after
+     full time, because the same page carries the replay.
+
+     `now` is a parameter so this is testable without moving the clock. */
+  function linkable(m, now) {
+    if (m.state === 'postponed' || m.state === 'abandoned') return false;
+    if (m.state === 'live' || m.state === 'ft') return true;
+    return (now || Date.now()) >= m.ko.getTime() - ARM_MS;
+  }
 
   function open(m, links) {
     var url = linkable(m) ? (links[normKey(m.home)] || '') : '';
@@ -781,18 +804,31 @@
     var season = (res[0].seasons && res[0].seasons.current) || '';
     if (!season) throw new Error('no current season in clubs-meta');
 
+    var last = null;
     function cycle() {
-      return fetchToday(season).then(function (matches) { render(matches, links, fav); });
+      return fetchToday(season).then(function (matches) {
+        last = matches;
+        render(matches, links, fav);
+      });
     }
 
     return cycle().then(function () {
       /* One request a minute, and only while the tab is being looked at — a
-         tile that says LIVE has to be able to stop saying it, and a page left
-         open overnight has to go quiet at midnight on its own. */
-      setInterval(function () {
+         tile that says LIVE has to be able to stop saying it, a link has to
+         arm at kick-off minus fifteen without anyone reloading, and a page
+         left open overnight has to go quiet at midnight on its own.
+
+         A failed poll still re-renders the last good band: arming is a clock
+         decision, not a data one, so an API blip must not be what leaves a
+         tie sitting there without its button. */
+      function tick() {
         if (document.hidden) return;
-        cycle().catch(function () { /* keep the last good band on screen */ });
-      }, POLL_MS);
+        cycle().catch(function () { if (last) render(last, links, fav); });
+      }
+      setInterval(tick, POLL_MS);
+      /* Coming back to a backgrounded tab is the one moment the band is most
+         likely to be stale by more than a minute. */
+      document.addEventListener('visibilitychange', tick);
     });
   }).catch(function (e) {
     /* Failing silently is the correct failure here: on all but ~10 days a
