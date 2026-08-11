@@ -186,6 +186,12 @@ function doPost(e) {
     if (action === 'vacancies_validateCode') return vacValidateCode(body);
     if (action === 'vacancies_submit')       return vacSubmit(body);
     if (action === 'vacancies_submitAuthed') return vacSubmitAuthed(body);
+    /* PhotoShelter onboarding — see PhotoShelterOnboarding.gs. ps_confirm is
+       the only one the live page calls today; the code pair is there for if
+       the sign-up is moved behind email verification. */
+    if (action === 'ps_confirm')     return respond(ps_confirm(body));
+    if (action === 'ps_requestCode') return respond(ps_requestCode(body));
+    if (action === 'ps_submit')      return respond(ps_submit(body));
     /* Chase HQ */
     if (action === 'chaseEmail')     return respond(generateChaseEmail(body));
     /* Claudio AI assistant */
