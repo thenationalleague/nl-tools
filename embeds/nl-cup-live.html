@@ -1,0 +1,889 @@
+<!-- ============================================================
+     NATIONAL LEAGUE CUP — LIVE — front-page rail for
+     thenationalleague.org.uk. Source of truth. Copy/paste into the
+     CMS custom HTML block, or use the hosted bundle
+     (embeds/nl-cup-live.js).
+
+     What it is
+     ----------
+     A call-to-action band for the front page: on a National League Cup
+     matchday it says the cup is on today and puts every tie one click
+     from its stream. Not a fixture list and not a results page — the
+     tile is a button, and the whole thing is sized to sit in a
+     homepage stack rather than to be read.
+
+     Nothing signs in. The NL+ cookie is read if it happens to be
+     there, purely to pull the fan's own club to the front of the
+     rail; there is no gate, no prompt and no account state.
+
+     On every other day it paints nothing at all — the block collapses
+     to zero height and the page reads as if it were never there. That
+     silence is the point: this sits permanently in the CMS and speaks
+     only on the ~10 days a season it has something to say. No
+     skeleton and no error box either, because a spinner that resolves
+     to nothing is not silence, and on 355 days a year an error box
+     would be reporting a failure that is really the right answer.
+
+     Why a rail and not a grid
+     -------------------------
+     A round is 1 to 16 ties, and 16 cards stacked four-wide is a
+     fixture page — it takes over a front page that has other jobs to
+     do. The rail holds one band's height whether there is one tie or
+     sixteen, and scrolls sideways. It is "smart" in that it changes
+     shape rather than length:
+
+       1 tie      → the band IS the tie. Full-width CTA, big crests.
+       2+ ties    → tiles, snap-scrolled, with arrows once they overflow.
+       fan's club → pinned to the front of the rail in its own colours.
+
+     "Today" is the UK calendar day, 00:00–23:59 Europe/London, not the
+     UTC day. Under BST those differ by an hour and a 00:30 kick-off
+     would otherwise land on the wrong day, so the API window is
+     deliberately widened to ±1 day and then filtered on the UK date.
+
+     The link
+     --------
+     One URL per HOST club, from assets/data/nl-cup-links.json. Every
+     cup tie is played at a member club's ground and a club's stream
+     page does not move between rounds, so Hartlepool's link is
+     Hartlepool's link all season. A club with no URL yet still gets a
+     tile — it just is not clickable, which is the honest state rather
+     than a dead link.
+
+     A tile is only a link once the stream can actually be watched:
+     from 15 minutes before kick-off. Those pages sit there playing
+     nothing until then, and a button that spends a fan's click on an
+     empty page is worse than no button. The arming is a clock
+     decision rather than a data one, so the poll re-renders even when
+     the fetch failed — a tie must not be left buttonless because the
+     API blinked.
+
+     Data
+     ----
+     NLS competition 1275, season from clubs-meta seasons.current.
+     Crests, colours and short names resolve through clubs-meta.json
+     for member clubs and cup-clubs-meta.json for the academy sides.
+     Note the academy sides arrive from NLS as "Birmingham City U21"
+     where cup-clubs-meta calls them "Birmingham City PL2" — the
+     suffix is stripped before matching (or three of the sixteen show
+     no crest and no colour) and then the NLS spelling is put back for
+     display, so the tile agrees with the broadcast.
+
+     Changelog:
+       11/08/2026  v1.4  The band no longer waits on the SSO cookie before
+                         its first paint when the visitor is plainly signed
+                         out, and a cookie that lands later pins the club on
+                         the next poll rather than the next visit.
+       11/08/2026  v1.3  Unarmed tiles say when their stream opens, and
+                         the kick-off time is labelled KO so the two clock
+                         times on a tile cannot be read as each other. The
+                         cap is typographic: the NL Cup lockup is a portrait
+                         card with a Premier League sponsor strip in it, and
+                         at rail height both were illegible.
+       11/08/2026  v1.2  Links arm 15 minutes before kick-off and not
+                         before, and the poll re-renders on a failed
+                         fetch so they arm without a reload. Hartlepool's
+                         stream URL is the first one wired.
+       11/08/2026  v1.1  Rebuilt as a front-page CTA rail. v1.0 was a
+                         fixture grid: correct data, wrong furniture —
+                         sixteen cards four-wide is a fixture page, and
+                         a front page cannot spare that much height for
+                         something that is silent most of the season.
+       11/08/2026  v1.0  First build.
+     ============================================================ -->
+
+<div id="nlCupLive" hidden>
+  <div class="nlcl__band">
+    <div class="nlcl__cap">
+      <span class="nlcl__title">National League Cup</span>
+      <span class="nlcl__sub">
+        <span class="nlcl__badge"><i class="nlcl__dot" aria-hidden="true"></i>Live</span>
+        <span class="nlcl__date" id="nlcl-date"></span>
+      </span>
+    </div>
+
+    <div class="nlcl__scroll">
+      <button class="nlcl__nav is-prev" type="button" aria-label="Previous ties" hidden></button>
+      <ul class="nlcl__track" id="nlcl-track"></ul>
+      <button class="nlcl__nav is-next" type="button" aria-label="More ties" hidden></button>
+    </div>
+  </div>
+</div>
+
+<style>
+  /* Carbona Variable */
+  @font-face {
+    font-family: "carbona-variable";
+    src: url("https://use.typekit.net/af/184cf2/0000000000000000774c3175/31/l?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n4&v=3") format("woff2"),
+         url("https://use.typekit.net/af/184cf2/0000000000000000774c3175/31/d?primer=7cdcb44be4a7db8877ffa5c0007b8dd865b3bbc383831fe2ea177f62257a9191&fvd=n4&v=3") format("woff");
+    font-display: swap; font-style: normal; font-weight: 200 900; font-stretch: normal;
+  }
+
+  #nlCupLive {
+    /* Values mirror the NL canon (system/nl-brand.css) — embeds can't load
+       the portal stylesheet, so the tokens are inlined verbatim. */
+    --primary:#9e0000; --primary-600:#7e0000; --primary-700:#600000;
+    --navy:#223b7c; --navy-600:#192e63; --navy-300:#9baac9;
+    --green:#1a7030; --amber:#c96f15;
+    --white:#ffffff; --off-white:#f4f6f9;
+    --text:#1a2a44; --text-muted:#5a6a82;
+    --border:#dde3ed;
+    --radius:6px;
+
+    font-family:'carbona-variable','carbona',sans-serif;
+    font-size:15px; line-height:1.4;
+    font-variation-settings:'wght' 400;
+    color:var(--text); -webkit-font-smoothing:antialiased;
+    max-width:1180px; margin:20px auto; padding:0 12px;
+
+    /* The rail reshapes on the width of THIS block, not the window — a
+       homepage module never owns the viewport. */
+    container-type:inline-size;
+  }
+  #nlCupLive[hidden] { display:none; }
+  #nlCupLive, #nlCupLive *, #nlCupLive *::before, #nlCupLive *::after { box-sizing:border-box; }
+
+  /* Band -------------------------------------------------------------- */
+  #nlCupLive .nlcl__band {
+    display:flex; align-items:stretch;
+    background:var(--navy);
+    border-radius:var(--radius);
+    box-shadow:0 2px 12px rgba(10,22,40,.10);
+    overflow:hidden;
+  }
+
+  /* Cap — the "what this is" end of the CTA. Fixed width so the rail below
+     starts on the same line whatever the round looks like. */
+  /* Typographic, not the badge. assets/divisions/NL Cup.png is a portrait
+     lockup carrying "NATIONAL LEAGUE CUP" and a "Supported by Premier League"
+     strip — at the ~47px a rail cap can spare, the wording is unreadable and
+     the sponsor credit is a smudge, which serves the sponsor worse than not
+     showing it. The name set in Carbona at 900 IS the lockup at this scale. */
+  #nlCupLive .nlcl__cap {
+    flex:none; width:230px;
+    display:flex; flex-direction:column; justify-content:center; gap:7px;
+    padding:14px 14px 14px 18px;
+    border-right:2px solid var(--primary);
+    color:var(--white);
+  }
+  #nlCupLive .nlcl__title {
+    display:block;
+    font-size:19px; line-height:1.08; letter-spacing:.005em;
+    font-weight:900; font-variation-settings:'wght' 900;
+  }
+  #nlCupLive .nlcl__sub { display:flex; align-items:center; gap:8px; min-width:0; }
+  /* Red pill rather than a red dot: canon reserves --accent-live green for
+     pulse dots BECAUSE red on navy is too low-contrast (nl-brand.css §live).
+     Inverting it — white on brand red — keeps the signal red where the fan
+     reads it and keeps the contrast where canon wanted it. */
+  #nlCupLive .nlcl__badge {
+    flex:none;
+    display:inline-flex; align-items:center; gap:5px;
+    padding:2px 8px 3px; border-radius:999px;
+    background:var(--primary); color:var(--white);
+    font-size:10px; letter-spacing:.1em; text-transform:uppercase;
+    font-weight:800; font-variation-settings:'wght' 800;
+  }
+  #nlCupLive .nlcl__dot {
+    width:6px; height:6px; border-radius:50%; background:var(--white);
+    animation:nlcl-pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes nlcl-pulse { 0%,100% { opacity:1; } 50% { opacity:.25; } }
+  #nlCupLive .nlcl__date {
+    min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    font-size:11px; letter-spacing:.05em; text-transform:uppercase;
+    font-weight:700; font-variation-settings:'wght' 700;
+    color:var(--navy-300);
+  }
+
+  /* Scroller ---------------------------------------------------------- */
+  #nlCupLive .nlcl__scroll { position:relative; flex:1; min-width:0; }
+  #nlCupLive .nlcl__track {
+    list-style:none; margin:0;
+    display:flex; gap:8px;
+    padding:10px 12px;
+    overflow-x:auto; overscroll-behavior-x:contain;
+    scroll-snap-type:x proximity;
+    /* Without this the snap point for the first tile aligns it with the raw
+       scrollport edge, which eats the 12px gutter and parks the rail at
+       scrollLeft:12 — so the gutter vanished AND "am I at the start?" was
+       never true, leaving a dead back arrow on screen. */
+    scroll-padding-inline:12px;
+    scrollbar-width:none; -ms-overflow-style:none;
+  }
+  #nlCupLive .nlcl__track::-webkit-scrollbar { display:none; }
+  #nlCupLive .nlcl__track > li { flex:none; scroll-snap-align:start; }
+
+  /* Arrows appear only once the rail actually overflows, and the fade under
+     each one is the honest signal that there is more — an arrow alone reads
+     as decoration. */
+  #nlCupLive .nlcl__nav {
+    position:absolute; top:50%; transform:translateY(-50%); z-index:2;
+    width:30px; height:30px; padding:0;
+    display:flex; align-items:center; justify-content:center;
+    border:0; border-radius:50%; cursor:pointer;
+    background:var(--white); color:var(--navy);
+    box-shadow:0 2px 8px rgba(10,22,40,.35);
+    font:inherit;
+  }
+  #nlCupLive .nlcl__nav[hidden] { display:none; }
+  #nlCupLive .nlcl__nav:disabled { opacity:0; pointer-events:none; }
+  #nlCupLive .nlcl__nav:focus-visible { outline:3px solid var(--white); outline-offset:2px; }
+  #nlCupLive .nlcl__nav.is-prev { left:6px; }
+  #nlCupLive .nlcl__nav.is-next { right:6px; }
+  #nlCupLive .nlcl__nav::before {
+    content:""; width:8px; height:8px;
+    border-right:2.5px solid currentColor; border-bottom:2.5px solid currentColor;
+  }
+  #nlCupLive .nlcl__nav.is-prev::before { transform:rotate(135deg); margin-left:3px; }
+  #nlCupLive .nlcl__nav.is-next::before { transform:rotate(-45deg); margin-right:3px; }
+
+  #nlCupLive .nlcl__scroll::before,
+  #nlCupLive .nlcl__scroll::after {
+    content:""; position:absolute; top:0; bottom:0; width:40px; z-index:1;
+    pointer-events:none; opacity:0; transition:opacity .18s ease;
+  }
+  #nlCupLive .nlcl__scroll::before {
+    left:0; background:linear-gradient(to right, var(--navy), rgba(34,59,124,0));
+  }
+  #nlCupLive .nlcl__scroll::after {
+    right:0; background:linear-gradient(to left, var(--navy), rgba(34,59,124,0));
+  }
+  #nlCupLive .nlcl__scroll.can-prev::before,
+  #nlCupLive .nlcl__scroll.can-next::after { opacity:1; }
+
+  /* Tile -------------------------------------------------------------- */
+  #nlCupLive .nlcl__tile {
+    --club:var(--navy); --club-ink:var(--white);
+    display:flex; flex-direction:column; gap:7px;
+    width:186px; height:100%;
+    padding:9px 10px 10px;
+    background:var(--white);
+    border-radius:5px;
+    border-left:3px solid var(--club);
+    text-decoration:none; color:var(--text);
+    transition:transform .16s ease, box-shadow .16s ease;
+  }
+  #nlCupLive a.nlcl__tile:hover,
+  #nlCupLive a.nlcl__tile:focus-visible {
+    transform:translateY(-2px); box-shadow:0 6px 16px rgba(0,0,0,.30);
+  }
+  #nlCupLive a.nlcl__tile:focus-visible { outline:3px solid var(--white); outline-offset:2px; }
+  /* Played and postponed ties step back without going translucent — opacity on
+     a white tile lets the navy band through and the tile turns muddy blue. A
+     flat off-white surface reads as "done" and stays a solid object. */
+  #nlCupLive .nlcl__tile.is-done { background:var(--off-white); }
+  #nlCupLive .nlcl__tile.is-done .nlcl__name { color:var(--text-muted); }
+  #nlCupLive .nlcl__tile.is-done .nlcl__crest { opacity:.72; }
+
+  #nlCupLive .nlcl__side { display:flex; align-items:center; gap:8px; min-width:0; }
+  #nlCupLive .nlcl__crest { flex:none; width:22px; height:22px; object-fit:contain; display:block; }
+  #nlCupLive .nlcl__code {
+    flex:none; width:22px; text-align:center;
+    font-size:10px; font-weight:900; font-variation-settings:'wght' 900;
+    color:var(--club);
+  }
+  /* Short names, one line, no clamp: a rail tile that grows a second line
+     grows every tile in the band. clubs-meta already publishes the short a
+     human would say out loud. */
+  #nlCupLive .nlcl__name {
+    min-width:0; flex:1;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    font-size:14px;
+    font-weight:800; font-variation-settings:'wght' 800;
+  }
+  /* Caption line, shared by every tile. The pinned tile's "Your club" flag
+     lives up here rather than on a line of its own — a flex row stretches, so
+     one extra line on one tile was quietly making the whole band taller and
+     leaving a gap inside the other fifteen. */
+  #nlCupLive .nlcl__top {
+    display:flex; align-items:baseline; justify-content:space-between; gap:6px;
+    min-width:0;
+  }
+  #nlCupLive .nlcl__meta {
+    display:flex; align-items:center; justify-content:flex-end;
+    margin-top:auto; padding-top:2px;
+  }
+  #nlCupLive .nlcl__status {
+    display:inline-flex; align-items:center; gap:5px;
+    font-size:11px; letter-spacing:.06em; text-transform:uppercase;
+    font-weight:800; font-variation-settings:'wght' 800;
+    color:var(--text-muted);
+  }
+  #nlCupLive .nlcl__status.is-live { color:var(--primary); }
+  #nlCupLive .nlcl__status.is-live i {
+    width:6px; height:6px; border-radius:50%; background:currentColor;
+    animation:nlcl-pulse 1.8s ease-in-out infinite;
+  }
+  #nlCupLive .nlcl__status.is-ft  { color:var(--green); }
+  #nlCupLive .nlcl__status.is-off { color:var(--amber); }
+  #nlCupLive .nlcl__watch {
+    display:inline-flex; align-items:center; gap:4px;
+    font-size:11px; letter-spacing:.05em; text-transform:uppercase;
+    font-weight:800; font-variation-settings:'wght' 800;
+    color:var(--primary);
+  }
+  /* Deliberately not styled like the button it will become — this is an
+     answer to "when", not something to press. */
+  #nlCupLive .nlcl__soon {
+    font-size:11px; letter-spacing:.04em;
+    font-weight:700; font-variation-settings:'wght' 700;
+    color:var(--text-muted);
+  }
+  #nlCupLive .nlcl__status b { font-weight:inherit; opacity:.62; }
+  #nlCupLive .nlcl__arrow { flex:none; width:11px; height:11px; transition:transform .16s ease; }
+  #nlCupLive a.nlcl__tile:hover .nlcl__arrow,
+  #nlCupLive a.nlcl__tile:focus-visible .nlcl__arrow { transform:translate(2px, -2px); }
+
+  /* The fan's own club, pinned to the front in its own colours. */
+  #nlCupLive .nlcl__tile.is-mine {
+    background:var(--club); color:var(--club-ink);
+    border-left-color:var(--club-ink);
+  }
+  #nlCupLive .nlcl__tile.is-mine .nlcl__status,
+  #nlCupLive .nlcl__tile.is-mine .nlcl__watch,
+  #nlCupLive .nlcl__tile.is-mine .nlcl__soon,
+  #nlCupLive .nlcl__tile.is-mine .nlcl__code { color:inherit; }
+  #nlCupLive .nlcl__mine {
+    flex:none;
+    font-size:9px; letter-spacing:.12em; text-transform:uppercase;
+    font-weight:800; font-variation-settings:'wght' 800;
+    opacity:.82;
+  }
+
+  /* Solo — one tie is the whole night, so the band becomes the tie ----- */
+  #nlCupLive .nlcl__track.is-solo { padding:0; }
+  #nlCupLive .nlcl__track.is-solo > li { flex:1; min-width:0; }
+  #nlCupLive .nlcl__tile.is-solo {
+    flex-direction:row; align-items:center; gap:16px; flex-wrap:wrap;
+    width:auto; padding:14px 18px;
+    border-left:0; border-radius:0;
+    background:var(--club); color:var(--club-ink);
+  }
+  #nlCupLive a.nlcl__tile.is-solo:hover,
+  #nlCupLive a.nlcl__tile.is-solo:focus-visible { transform:none; box-shadow:none; filter:brightness(1.08); }
+  #nlCupLive .nlcl__tile.is-solo .nlcl__crest { width:44px; height:44px; }
+  #nlCupLive .nlcl__tile.is-solo .nlcl__code { width:44px; font-size:16px; }
+  #nlCupLive .nlcl__tile.is-solo .nlcl__name { font-size:19px; flex:none; font-weight:900; font-variation-settings:'wght' 900; }
+  #nlCupLive .nlcl__tile.is-solo .nlcl__v {
+    font-size:12px; letter-spacing:.1em; text-transform:uppercase; opacity:.7;
+    font-weight:700; font-variation-settings:'wght' 700;
+  }
+  #nlCupLive .nlcl__tile.is-solo .nlcl__meta { margin-left:auto; padding-top:0; gap:14px; }
+  #nlCupLive .nlcl__tile.is-solo .nlcl__status { font-size:13px; color:inherit; }
+  #nlCupLive .nlcl__tile.is-solo .nlcl__soon { font-size:12px; color:inherit; opacity:.8; }
+  #nlCupLive .nlcl__tile.is-solo .nlcl__watch {
+    padding:8px 14px; border-radius:999px; font-size:12px;
+    background:var(--club-ink); color:var(--club);
+  }
+  #nlCupLive .nlcl__tile.is-solo .nlcl__mine { width:100%; order:-1; margin-bottom:-6px; }
+
+  /* Stacked cap — below this the cap and the rail cannot share a line. */
+  @container (max-width: 640px) {
+    #nlCupLive .nlcl__band { display:block; }
+    #nlCupLive .nlcl__cap {
+      width:auto; border-right:0; border-bottom:2px solid var(--primary);
+      padding:11px 14px;
+    }
+    #nlCupLive .nlcl__nav { display:none; }   /* thumbs, not arrows */
+    #nlCupLive .nlcl__tile.is-solo { gap:12px; }
+    #nlCupLive .nlcl__tile.is-solo .nlcl__name { font-size:17px; }
+    #nlCupLive .nlcl__tile.is-solo .nlcl__meta { margin-left:0; width:100%; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    #nlCupLive .nlcl__tile, #nlCupLive .nlcl__arrow,
+    #nlCupLive .nlcl__scroll::before, #nlCupLive .nlcl__scroll::after { transition:none; }
+    #nlCupLive a.nlcl__tile:hover, #nlCupLive a.nlcl__tile:focus-visible { transform:none; }
+    #nlCupLive a.nlcl__tile:hover .nlcl__arrow,
+    #nlCupLive a.nlcl__tile:focus-visible .nlcl__arrow { transform:none; }
+    #nlCupLive .nlcl__dot, #nlCupLive .nlcl__status.is-live i { animation:none; }
+  }
+</style>
+
+<script>
+(function () {
+  'use strict';
+
+  var root = document.getElementById('nlCupLive');
+  if (!root) return;
+
+  var REPO       = 'https://raw.githubusercontent.com/thenationalleague/tools/main/';
+  var META_URL   = REPO + 'assets/data/clubs-meta.json';
+  var GUESTS_URL = REPO + 'assets/data/cup-clubs-meta.json';
+  var LINKS_URL  = REPO + 'assets/data/nl-cup-links.json';
+  var CREST_SM   = REPO + 'assets/crests/thumbs/';     /* 96px  — rail tiles */
+  var CREST_MD   = REPO + 'assets/crests/medium/';     /* 256px — solo band  */
+
+  var API      = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2/matches/';
+  var COMP_CUP = 1275;                 /* firm NLS code — never a name match */
+  var TZ       = 'Europe/London';
+  var POLL_MS  = 60000;
+  /* The stream pages do not go live until shortly before kick-off, so a tile
+     carries no button until then. A Watch button that lands on a page playing
+     nothing is worse than no button — the fan has already spent the click. */
+  var ARM_MS   = 15 * 60000;
+
+  var dateEl  = document.getElementById('nlcl-date');
+  var track   = document.getElementById('nlcl-track');
+  var scroll  = root.querySelector('.nlcl__scroll');
+  var navPrev = root.querySelector('.nlcl__nav.is-prev');
+  var navNext = root.querySelector('.nlcl__nav.is-next');
+
+  /* ---------- helpers ---------- */
+
+  function escHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function isHex(h) { return /^#[0-9a-fA-F]{6}$/.test(String(h || '')); }
+
+  function lum(hex) {
+    var c = String(hex).replace('#', '');
+    var r = parseInt(c.slice(0, 2), 16),
+        g = parseInt(c.slice(2, 4), 16),
+        b = parseInt(c.slice(4, 6), 16);
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  }
+  function pickTextColor(hex) { return isHex(hex) && lum(hex) > 0.68 ? '#1a2a44' : '#ffffff'; }
+
+  /* First colour that isn't effectively white — white-on-white would erase
+     both the tile's rule and the solo wash, so Gateshead falls to its second. */
+  function accentFor(colors) {
+    var order = [colors.primary, colors.secondary, colors.tertiary];
+    for (var i = 0; i < order.length; i++) {
+      if (isHex(order[i]) && lum(order[i]) <= 0.93) return order[i];
+    }
+    return '#223b7c';
+  }
+
+  /* NLS dates carry no T and no zone: "2026-08-18 18:00:00" is UTC. */
+  function parseKO(str) {
+    if (!str) return null;
+    var d = new Date(String(str).indexOf('T') > -1 ? str : String(str).replace(' ', 'T') + 'Z');
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  /* Everything the fan sees is UK wall-clock, and "today" is the UK calendar
+     day. Under BST that is an hour off UTC, which is exactly the gap a naive
+     toISOString() day window falls into. */
+  function fmt(date, opts) {
+    try {
+      return new Intl.DateTimeFormat(opts.loc || 'en-GB',
+        Object.assign({ timeZone: TZ }, opts.o)).format(date);
+    } catch (e) {
+      return new Intl.DateTimeFormat(opts.loc || 'en-GB', opts.o).format(date);
+    }
+  }
+  function ukYmd(d)  { return fmt(d, { loc: 'en-CA', o: { year: 'numeric', month: '2-digit', day: '2-digit' } }); }
+  function ukTime(d) { return fmt(d, { o: { hour: '2-digit', minute: '2-digit', hour12: false } }); }
+  /* Abbreviated on purpose: the cap is a fixed 250px so the rail below it
+     starts on the same line every night, and "Tuesday 11 August" spends that
+     budget on letters rather than on the two facts in it. */
+  function ukDate(d) { return fmt(d, { o: { weekday: 'short', day: 'numeric', month: 'short' } }); }
+  function utcYmd(d) { return new Date(d.getTime()).toISOString().slice(0, 10); }
+
+  /* NLS says "Birmingham City U21"; cup-clubs-meta says "Birmingham City PL2".
+     Three of the sixteen academy sides disagree, so both sides get flattened
+     to the parent club before any lookup. */
+  var SUFFIX = /\s+(PL2|U2[13]|Under[ -]?2[13]|Academy|Development)$/i;
+  function baseName(n) { return String(n || '').replace(SUFFIX, '').trim(); }
+  function suffixOf(n) { var m = String(n || '').match(SUFFIX); return m ? m[1] : ''; }
+  function normKey(n) { return baseName(n).toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+  function periodState(p) {
+    var s = String(p || '').toLowerCase();
+    if (s === 'postponed') return 'postponed';
+    if (s === 'abandoned') return 'abandoned';
+    if (s === 'fulltime' || s === 'postmatch') return 'ft';
+    if (['firsthalf', 'secondhalf', 'halftime', 'extratime', 'penalties'].some(function (v) {
+      return s.indexOf(v) > -1;
+    })) return 'live';
+    return 'pre';
+  }
+
+  /* ---------- club lookup ---------- */
+
+  var byKey = {};   /* normalised name -> { crestName, short, colors } */
+
+  function indexClubs(meta, isGuest) {
+    (meta && meta.clubs || []).forEach(function (c) {
+      if (!c || !c.name) return;
+      var rec = {
+        crestName: c.crestName || c.name,
+        short: baseName(c.short || c.name),
+        colors: c.colors || {}
+      };
+      byKey[normKey(c.name)] = rec;
+      if (c.crestName) byKey[normKey(c.crestName)] = rec;
+      if (isGuest && c.short) byKey[normKey(c.short)] = rec;
+    });
+  }
+
+  function clubFor(name) {
+    return byKey[normKey(name)] || { crestName: baseName(name), short: baseName(name), colors: {} };
+  }
+
+  /* The repo's short and the NLS suffix, recombined: "Birmingham PL2" from
+     cup-clubs-meta + "U21" from the API = "Birmingham U21", so the tile agrees
+     with whatever the broadcast is calling them. */
+  function shortFor(name) {
+    var s = suffixOf(name);
+    return clubFor(name).short + (s ? ' ' + s : '');
+  }
+
+  function crestUrl(base, crestName) { return base + encodeURIComponent(crestName) + '.png'; }
+
+  /* A guest may have no code we can print, so a missing crest steps
+     96px -> 256px -> the club's initials. */
+  function initialsOf(name) {
+    return baseName(name).split(/\s+/).map(function (w) { return w.charAt(0); })
+      .join('').slice(0, 3).toUpperCase();
+  }
+
+  function wireCrests(scope) {
+    Array.prototype.forEach.call(scope.querySelectorAll('img[data-fallback]'), function (img) {
+      img.addEventListener('error', function () {
+        var next = img.getAttribute('data-fallback');
+        if (next && img.src !== next) { img.removeAttribute('data-fallback'); img.src = next; return; }
+        var span = document.createElement('span');
+        span.className = 'nlcl__code';
+        span.textContent = img.getAttribute('data-code') || '';
+        if (img.parentNode) img.parentNode.replaceChild(span, img);
+      });
+    });
+  }
+
+  /* ---------- NL+ SSO (read-only, never blocking, never prompting) ------- */
+
+  function readCookie(name) {
+    var parts = (document.cookie || '').split('; ');
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i].indexOf(name + '=') === 0) return decodeURIComponent(parts[i].slice(name.length + 1));
+    }
+    return null;
+  }
+  function decodeJwtPayload(jwt) {
+    if (!jwt) return null;
+    var parts = String(jwt).split('.');
+    if (parts.length !== 3) return null;
+    try {
+      var s = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      while (s.length % 4) s += '=';
+      return JSON.parse(decodeURIComponent(escape(atob(s))));
+    } catch (e) { return null; }
+  }
+  function favouriteTeamNow() {
+    var claims = decodeJwtPayload(readCookie('_gc_sa_sso_access'));
+    return (claims && claims.favourite_team) ? String(claims.favourite_team) : null;
+  }
+  /* The SSO middleware writes the cookie asynchronously, so a synchronous read
+     at script load misses it on a cold visit — but a signed-OUT visitor never
+     gets a cookie at all, and waiting the full grace period for them would
+     leave the band blank on a front page for no reason. So: take the answer
+     immediately if it is already there, and otherwise give it one short grace
+     period. A cookie that lands later still pins the club on the next poll.
+
+     There is no sign-in path from here — signed out simply means an
+     unpinned rail. */
+  function favouriteTeam(ms) {
+    var now = favouriteTeamNow();
+    if (now) return Promise.resolve(now);
+    return new Promise(function (resolve) {
+      var deadline = Date.now() + (ms || 600);
+      (function tick() {
+        var found = favouriteTeamNow();
+        if (found) return resolve(found);
+        if (Date.now() > deadline) return resolve(null);
+        setTimeout(tick, 150);
+      })();
+    });
+  }
+
+  /* ---------- fetch ---------- */
+
+  function getJson(url, opts) {
+    return fetch(url, opts || { cache: 'no-cache' }).then(function (r) {
+      if (!r.ok) throw new Error(url + ' ' + r.status);
+      return r.json();
+    });
+  }
+
+  /* ±1 day around the UK date, then filtered on the UK date — the window is a
+     UTC one and the answer is a local one. */
+  function fetchToday(season) {
+    var now = new Date();
+    var from = utcYmd(new Date(now.getTime() - 864e5)) + ' 00:00:00Z';
+    var to   = utcYmd(new Date(now.getTime() + 864e5)) + ' 23:59:59Z';
+    var url = API + '?seasonID=' + encodeURIComponent(season) +
+      '&competitionID=' + COMP_CUP +
+      '&from=' + encodeURIComponent(from) +
+      '&to='   + encodeURIComponent(to) +
+      '&page.number=1&page.size=100';
+
+    var today = ukYmd(now);
+    return getJson(url, { cache: 'no-store' }).then(function (json) {
+      return (json && json.data || []).map(function (m) {
+        var a = m.attributes || {};
+        var ko = parseKO(a.kickOffDateUTC);
+        return {
+          id: m.id,
+          ko: ko,
+          home: (a.homeTeam && (a.homeTeam.name || a.homeTeam.shortName)) || '',
+          away: (a.awayTeam && (a.awayTeam.name || a.awayTeam.shortName)) || '',
+          state: a.postponementReason ? 'postponed' : periodState(a.matchPeriod)
+        };
+      }).filter(function (m) {
+        return m.ko && m.home && ukYmd(m.ko) === today;
+      }).sort(function (x, y) {
+        return (x.ko - y.ko) || x.home.localeCompare(y.home);
+      });
+    });
+  }
+
+  /* ---------- render ---------- */
+
+  var STATUS = {
+    live:      { cls: 'is-live', label: 'Live', dot: true },
+    ft:        { cls: 'is-ft',   label: 'FT' },
+    postponed: { cls: 'is-off',  label: 'P–P' },
+    abandoned: { cls: 'is-off',  label: 'Abandoned' }
+  };
+
+  var ARROW = '<svg class="nlcl__arrow" viewBox="0 0 16 16" fill="none" aria-hidden="true">' +
+    '<path d="M4.5 11.5 11.5 4.5M5.5 4.5h6v6" stroke="currentColor" stroke-width="2.2"' +
+    ' stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  /* "KO" is doing real work, not decorating: an unarmed tile carries a second
+     clock time ("Watch from 18:45") and without the label a fan has two times
+     in front of them and no way to tell which one the game starts at. */
+  function statusHTML(m) {
+    var s = STATUS[m.state];
+    if (!s) return '<span class="nlcl__status"><b>KO</b> ' + escHtml(ukTime(m.ko)) + '</span>';
+    return '<span class="nlcl__status ' + s.cls + '">' +
+      (s.dot ? '<i aria-hidden="true"></i>' : '') + escHtml(s.label) + '</span>';
+  }
+
+  function crestHTML(name, tier) {
+    var club = clubFor(name);
+    return '<img class="nlcl__crest" src="' + escHtml(crestUrl(tier, club.crestName)) + '"' +
+      ' data-fallback="' + escHtml(crestUrl(tier === CREST_SM ? CREST_MD : CREST_SM, club.crestName)) + '"' +
+      ' data-code="' + escHtml(initialsOf(name)) + '"' +
+      ' alt="" loading="lazy" decoding="async">';
+  }
+
+  /* A tile is a link only once its stream can actually be watched: from 15
+     minutes before kick-off, and not if the tie is off. It stays a link after
+     full time, because the same page carries the replay.
+
+     `now` is a parameter so this is testable without moving the clock. */
+  function linkable(m, now) {
+    if (m.state === 'postponed' || m.state === 'abandoned') return false;
+    if (m.state === 'live' || m.state === 'ft') return true;
+    return (now || Date.now()) >= m.ko.getTime() - ARM_MS;
+  }
+
+  /* Three states, not two. A tile with no URL on file shows nothing; a tile
+     whose stream has not opened yet says when it will, which is the question
+     the fan would otherwise have to work out from the kick-off time. */
+  function open(m, links, now) {
+    var known = links[normKey(m.home)] || '';
+    var live = known && linkable(m, now);
+    return {
+      url: live ? known : '',
+      from: (known && !live && m.state === 'pre') ? ukTime(new Date(m.ko.getTime() - ARM_MS)) : '',
+      tag: live ? 'a' : 'div',
+      attrs: live ? ' href="' + escHtml(known) + '" target="_blank" rel="noopener noreferrer"' : ''
+    };
+  }
+
+  function ctaHTML(o) {
+    if (o.url) return '<span class="nlcl__meta"><span class="nlcl__watch">Watch' + ARROW + '</span></span>';
+    if (o.from) return '<span class="nlcl__meta"><span class="nlcl__soon">Watch from ' +
+      escHtml(o.from) + '</span></span>';
+    return '';
+  }
+
+  function label(m, mine) {
+    return (mine ? 'Your club: ' : '') + m.home + ' versus ' + m.away + ', ' + ukTime(m.ko);
+  }
+
+  function tileHTML(m, links, mine) {
+    var o = open(m, links);
+    var accent = accentFor(clubFor(mine ? m.mineName : m.home).colors || {});
+    var done = (m.state === 'ft' || m.state === 'postponed' || m.state === 'abandoned');
+
+    return '<li>' +
+      '<' + o.tag + ' class="nlcl__tile' + (mine ? ' is-mine' : '') + (done ? ' is-done' : '') + '"' +
+        o.attrs + ' style="--club:' + accent + ';--club-ink:' + pickTextColor(accent) + '"' +
+        ' aria-label="' + escHtml(label(m, mine) + (o.url ? ' — watch' : '')) + '">' +
+        '<span class="nlcl__top">' + statusHTML(m) +
+          (mine ? '<span class="nlcl__mine">Your club</span>' : '') +
+        '</span>' +
+        '<span class="nlcl__side">' + crestHTML(m.home, CREST_SM) +
+          '<span class="nlcl__name">' + escHtml(shortFor(m.home)) + '</span></span>' +
+        '<span class="nlcl__side">' + crestHTML(m.away, CREST_SM) +
+          '<span class="nlcl__name">' + escHtml(shortFor(m.away)) + '</span></span>' +
+        ctaHTML(o) +
+      '</' + o.tag + '>' +
+    '</li>';
+  }
+
+  /* One tie is the whole night, so the band becomes the tie rather than
+     parking a 186px tile in 900px of navy. */
+  function soloHTML(m, links, mine) {
+    var o = open(m, links);
+    var accent = accentFor(clubFor(mine ? m.mineName : m.home).colors || {});
+
+    return '<li>' +
+      '<' + o.tag + ' class="nlcl__tile is-solo"' + o.attrs +
+        ' style="--club:' + accent + ';--club-ink:' + pickTextColor(accent) + '"' +
+        ' aria-label="' + escHtml(label(m, mine) + (o.url ? ' — watch' : '')) + '">' +
+        (mine ? '<span class="nlcl__mine">Your club</span>' : '') +
+        '<span class="nlcl__side">' + crestHTML(m.home, CREST_MD) +
+          '<span class="nlcl__name">' + escHtml(shortFor(m.home)) + '</span></span>' +
+        '<span class="nlcl__v">v</span>' +
+        '<span class="nlcl__side">' + crestHTML(m.away, CREST_MD) +
+          '<span class="nlcl__name">' + escHtml(shortFor(m.away)) + '</span></span>' +
+        '<span class="nlcl__meta">' + statusHTML(m) +
+          (o.url ? '<span class="nlcl__watch">Watch' + ARROW + '</span>' : '') +
+          (o.from ? '<span class="nlcl__soon">Watch from ' + escHtml(o.from) + '</span>' : '') +
+        '</span>' +
+      '</' + o.tag + '>' +
+    '</li>';
+  }
+
+  function render(matches, links, fav) {
+    if (!matches.length) { root.hidden = true; return; }
+
+    var mine = null;
+    if (fav) {
+      var favKey = normKey(fav);
+      for (var i = 0; i < matches.length; i++) {
+        if (normKey(matches[i].home) === favKey || normKey(matches[i].away) === favKey) {
+          mine = matches[i];
+          mine.mineName = normKey(matches[i].home) === favKey ? matches[i].home : matches[i].away;
+          break;
+        }
+      }
+    }
+
+    /* Kick-off order, except the fan's own tie, which comes to the front. That
+       is the whole reason to know who they support. */
+    var ordered = mine ? [mine].concat(matches.filter(function (m) { return m !== mine; })) : matches;
+    var solo = ordered.length === 1;
+
+    track.innerHTML = ordered.map(function (m) {
+      return solo ? soloHTML(m, links, m === mine) : tileHTML(m, links, m === mine);
+    }).join('');
+    track.classList.toggle('is-solo', solo);
+    wireCrests(track);
+
+    dateEl.textContent = ukDate(matches[0].ko);
+    root.hidden = false;
+    syncNav();
+  }
+
+  /* ---------- rail mechanics ---------- */
+
+  /* Arrows and fades are driven by measurement, not by tie count: a six-tie
+     round fits on a desktop homepage and overflows in a sidebar, and the same
+     band has to be honest in both. */
+  function syncNav() {
+    var slack = track.scrollWidth - track.clientWidth;
+    var over = slack > 4 && !track.classList.contains('is-solo');
+    navPrev.hidden = navNext.hidden = !over;
+    if (!over) { scroll.classList.remove('can-prev', 'can-next'); return; }
+    var x = track.scrollLeft;
+    navPrev.disabled = x <= 2;
+    navNext.disabled = x >= slack - 2;
+    scroll.classList.toggle('can-prev', !navPrev.disabled);
+    scroll.classList.toggle('can-next', !navNext.disabled);
+  }
+
+  function nudge(dir) {
+    /* Just under a viewport, so a tile is always left on screen as an anchor
+       rather than the rail jumping to somewhere unrecognisable. */
+    track.scrollBy({ left: dir * Math.max(160, track.clientWidth - 90), behavior: 'smooth' });
+  }
+  navPrev.addEventListener('click', function () { nudge(-1); });
+  navNext.addEventListener('click', function () { nudge(1); });
+  track.addEventListener('scroll', syncNav, { passive: true });
+  if (window.ResizeObserver) new ResizeObserver(syncNav).observe(track);
+  else window.addEventListener('resize', syncNav);
+
+  /* ---------- boot ---------- */
+
+  /* The band stays hidden until it knows it has ties. A skeleton that resolves
+     to nothing is not silence. */
+
+  function loadLinks(json) {
+    var out = {};
+    Object.keys((json && json.links) || {}).forEach(function (name) {
+      var url = String(json.links[name] || '').trim();
+      if (url) out[normKey(name)] = url;
+    });
+    return out;
+  }
+
+  function soft(p, fallback) {
+    return p.catch(function (e) {
+      if (window.console && console.warn) console.warn('[NL Cup Live]', e && e.message || e);
+      return fallback;
+    });
+  }
+
+  Promise.all([
+    getJson(META_URL),
+    soft(getJson(GUESTS_URL), { clubs: [] }),
+    soft(getJson(LINKS_URL), { links: {} }),
+    favouriteTeam(600)
+  ]).then(function (res) {
+    indexClubs(res[0], false);
+    indexClubs(res[1], true);
+    var links = loadLinks(res[2]);
+    var fav = res[3];
+    var season = (res[0].seasons && res[0].seasons.current) || '';
+    if (!season) throw new Error('no current season in clubs-meta');
+
+    var last = null;
+    function cycle() {
+      return fetchToday(season).then(function (matches) {
+        last = matches;
+        /* Re-read rather than trust the boot-time answer: a fan who signs in
+           on another tab, or whose cookie landed after the grace period, gets
+           their club pinned on the next poll instead of on their next visit. */
+        fav = fav || favouriteTeamNow();
+        render(matches, links, fav);
+      });
+    }
+
+    return cycle().then(function () {
+      /* One request a minute, and only while the tab is being looked at — a
+         tile that says LIVE has to be able to stop saying it, a link has to
+         arm at kick-off minus fifteen without anyone reloading, and a page
+         left open overnight has to go quiet at midnight on its own.
+
+         A failed poll still re-renders the last good band: arming is a clock
+         decision, not a data one, so an API blip must not be what leaves a
+         tie sitting there without its button. */
+      function tick() {
+        if (document.hidden) return;
+        cycle().catch(function () { if (last) render(last, links, fav); });
+      }
+      setInterval(tick, POLL_MS);
+      /* Coming back to a backgrounded tab is the one moment the band is most
+         likely to be stale by more than a minute. */
+      document.addEventListener('visibilitychange', tick);
+    });
+  }).catch(function (e) {
+    /* Failing silently is the correct failure here: on all but ~10 days a
+       season the right output IS nothing, so an error box would be wrong far
+       more often than it was right. */
+    root.hidden = true;
+    if (window.console && console.warn) console.warn('[NL Cup Live] not rendered.', e && e.message || e);
+  });
+})();
+</script>

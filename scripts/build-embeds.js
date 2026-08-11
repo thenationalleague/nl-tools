@@ -51,6 +51,13 @@ const EMBEDS = [
     globalFlag: '__nlClubDirectoryMounted',
     name: 'Club Directory',
   },
+  {
+    src: 'embeds/nl-cup-live.html',
+    out: 'embeds/nl-cup-live.js',
+    mountAttr: 'data-nl-cup-live',
+    globalFlag: '__nlCupLiveMounted',
+    name: 'NL Cup Live',
+  },
 ];
 
 // Pull the three parts out of the embed. The embeds follow a fixed shape —
