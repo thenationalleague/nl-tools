@@ -224,8 +224,23 @@ test('every link points at www, never beta', () => {
   for (const [club, url] of Object.entries(linksMeta.links)) {
     if (!url) continue;
     assert.ok(!/\bbeta\./i.test(url), `${club} link is not on beta: ${url}`);
-    assert.ok(url.startsWith('https://www.thenationalleague.org.uk/'),
-      `${club} link is an nl.org.uk www URL: ${url}`);
+    /* Whole shape, not just the host: these arrive pasted, and a stream id
+       that lost its last few characters looks completely fine in the JSON and
+       404s the one time anybody follows it. */
+    assert.match(url,
+      /^https:\/\/www\.thenationalleague\.org\.uk\/live\/[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/,
+      `${club} link is a full www /live/<uuid> URL: ${url}`);
+  }
+});
+
+test('no two clubs share a stream page', () => {
+  /* Copying the row above and changing only the club name is the obvious way
+     to fill this file in, and it sends one club's fans to another's game. */
+  const seen = new Map();
+  for (const [club, url] of Object.entries(linksMeta.links)) {
+    if (!url) continue;
+    assert.ok(!seen.has(url), `${club} has its own stream, not ${seen.get(url)}'s`);
+    seen.set(url, club);
   }
 });
 
