@@ -27,7 +27,7 @@
   }
   window.__nlJudgementsMounted = true;
 
-  var VERSION = "v1.8";
+  var VERSION = "v1.9";
   var CSS = "\n#nlJudgements { max-width: 720px; margin: 0 auto; }\n#nlJudgements .nlj-table {\n  width: 100%;\n  border-collapse: collapse;\n  background: #ffffff;\n  border: 1px solid #dde3ed;\n  border-radius: 6px;\n  overflow: hidden;\n  font-size: 14px;\n  font-family: inherit;\n}\n#nlJudgements .nlj-table th {\n  background: #223b7c;\n  color: #ffffff;\n  font-weight: 800;\n  font-size: 10px;\n  text-transform: uppercase;\n  letter-spacing: 0.1em;\n  padding: 12px 14px;\n  text-align: left;\n  white-space: nowrap;\n}\n#nlJudgements .nlj-table td {\n  padding: 11px 14px;\n  border-bottom: 1px solid #dde3ed;\n  vertical-align: middle;\n}\n#nlJudgements .nlj-table tr:last-child td { border-bottom: none; }\n#nlJudgements .nlj-table tr:hover td { background: #f4f6f9; }\n#nlJudgements .nlj-club { font-weight: 700; }\n#nlJudgements .nlj-empty {\n  text-align: center;\n  padding: 40px 16px;\n  color: #5a6a82;\n  font-size: 13px;\n  font-weight: 600;\n}\n@media (max-width: 520px) {\n  #nlJudgements .nlj-table thead { display: none; }\n  #nlJudgements .nlj-table tr { display: block; border-bottom: 1px solid #dde3ed; padding: 12px 14px; }\n  #nlJudgements .nlj-table tr:last-child { border-bottom: none; }\n  #nlJudgements .nlj-table td { display: block; padding: 2px 0; border-bottom: none; white-space: normal !important; }\n  #nlJudgements .nlj-table td::before {\n    content: attr(data-label);\n    font-size: 10px;\n    font-weight: 800;\n    text-transform: uppercase;\n    letter-spacing: 0.08em;\n    color: #5a6a82;\n    display: block;\n    margin-bottom: 1px;\n  }\n}\n";
   var HTML = "<div id=\"nlJudgements\">\n  <table class=\"nlj-table\">\n    <thead>\n      <tr>\n        <th>Club</th>\n        <th>Rule breached</th>\n        <th>Start date</th>\n        <th>End date</th>\n      </tr>\n    </thead>\n    <tbody id=\"nlJudgementsBody\">\n      <tr><td colspan=\"4\" class=\"nlj-empty\">Loading…</td></tr>\n    </tbody>\n  </table>\n</div>";
 
@@ -116,14 +116,15 @@
         });
       }
 
-      /* Which batch a record belongs to. 0 = concluded (an end date that has
-         passed), 1 = ongoing (no end date, or one still to come). Matches the
-         Active/Resolved split the internal tool derives, so the two views
-         never disagree about a record. */
+      /* Which batch a record belongs to. 0 = served (the end date has arrived
+         or passed), 1 = ongoing (no end date, or one still to come).
+         An embargo ending TODAY is served, not ongoing — the club is out of it
+         the moment the date lands, so it belongs in the top batch on the day
+         itself rather than appearing to still be under it. */
       function batchOf(r, today) {
         if (!r.endDate) return 1;
         var end = parseDate(r.endDate);
-        return (end && end < today) ? 0 : 1;
+        return (end && end <= today) ? 0 : 1;
       }
 
       /* Concluded records first, then ongoing. Inside each batch the date that
