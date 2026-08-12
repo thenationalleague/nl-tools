@@ -52,6 +52,13 @@ const EMBEDS = [
     name: 'Club Directory',
   },
   {
+    src: 'embeds/judgements.html',
+    out: 'embeds/judgements.js',
+    mountAttr: 'data-nl-judgements',
+    globalFlag: '__nlJudgementsMounted',
+    name: 'Judgements & Decisions',
+  },
+  {
     src: 'embeds/nl-cup-live.html',
     out: 'embeds/nl-cup-live.js',
     mountAttr: 'data-nl-cup-live',
