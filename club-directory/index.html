@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Club Directory
-  Version: v1.1 (10/08/2026)
+  Version: v1.2 (10/08/2026)
   File: /club-directory/index.html
 
   The League's own view of the club directory, for anyone with a portal
@@ -62,14 +62,21 @@
   tagged "shared mailbox" and can be dropped like any other row. An inbox we
   cannot place simply is not offered.
 
-  NOT-FOR-PUBLICATION PEOPLE
-  --------------------------
-  hideContact means "do not publish", and it is absolute in the reader. It
-  does not mean "do not write to" — this page is behind auth-guard, the
+  NOT-FOR-PUBLICATION DETAILS
+  ---------------------------
+  "Do not publish" is decided per address and per number as of v1.2, so a
+  person can be publishing their club address while their mobile is held
+  back. Two things follow for the export.
+
+  It does not mean "do not write to". This page is behind auth-guard, the
   export is internal routing, and a secretary who asked not to be in the
-  public directory still expects League mail. So they are included, counted
-  on screen, and there is a switch to leave them out. The decision is stated
-  rather than buried.
+  public directory still expects League mail. So withheld details are
+  included, counted on screen, and there is a switch to leave them out.
+
+  When that switch is off it drops the withheld LINES, not the person —
+  dropping the person would lose the address they were happy to give us,
+  which is the opposite of what the switch is for. Somebody left with
+  nothing after that is dropped.
 
   Storage (RTDB):
     app-data/ops-club-directory/clubs        the directory (read)
@@ -88,7 +95,7 @@
   <title>Club Directory — NL Tools</title>
 
   <link rel="stylesheet" href="/system/nl-brand.css?v=35">
-  <link rel="stylesheet" href="/club-directory/_directory.css?v=27">
+  <link rel="stylesheet" href="/club-directory/_directory.css?v=28">
 
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -115,6 +122,14 @@
     var NL_TOOL_KEY = 'ops-club-directory';
 
     window.NL_CHANGELOG = [
+      {
+        date: '10 August 2026',
+        version: 'v1.2',
+        items: [
+          'Whether a detail is published is now decided per address and per phone number rather than per person, so somebody can publish their club address and keep their mobile out of the directory.',
+          'The mailing-list export follows: switching off "include details marked not-for-publication" now leaves out the withheld addresses rather than the whole person, because dropping the person would lose the address they were happy to give us.'
+        ]
+      },
       {
         date: '10 August 2026',
         version: 'v1.1',
@@ -148,8 +163,8 @@
   <script src="/system/nl-utils.js?v=30"></script>
   <script src="/system/nl-topbar.js?v=8"></script>
   <script src="/system/auth-guard.js?v=10"></script>
-  <script src="/club-directory/_directory.js?v=27"></script>
-  <script src="/club-directory/_tidy.js?v=27"></script>
+  <script src="/club-directory/_directory.js?v=28"></script>
+  <script src="/club-directory/_tidy.js?v=28"></script>
 
 <style>
   /* Staff see every club, including ones the admin team has not been through
@@ -355,7 +370,7 @@
         </label>
         <label class="lb-opt">
           <input type="checkbox" id="lbHeld" checked>
-          Include people marked not-for-publication <span id="lbHeldNote"></span>
+          Include details marked not-for-publication <span id="lbHeldNote"></span>
         </label>
       </div>
 
@@ -651,22 +666,30 @@ window.TOOL = (function () {
       var rec = ALL[club] || {};
       picked.forEach(function (key) {
         NLDirectory.listMembers(rec, key).forEach(function (p) {
-          if (!LB.held && p.hideContact) { return; }
+          /* Per address and per number, not per person. Somebody can publish
+             their club address and keep their mobile back, so "leave out what
+             is not for publication" has to drop the withheld LINES and keep
+             the person — dropping the person would lose the address they were
+             happy to give us. Somebody left with nothing is dropped. */
+          var c = NLDirectory.contactsOf(p, '');
+          var em = c.emails.filter(function (x) { return LB.held || !x.hide; });
+          var ph = c.phones.filter(function (x) { return LB.held || !x.hide; });
+          if (!LB.held && !em.length && !ph.length) { return; }
           var id = club + '::' + (p.id || NLDirectory.fullName(p));
           var row = index[id];
           if (!row) {
             row = index[id] = {
               key: id, club: club, kind: 'person',
               name: NLDirectory.fullName(p) || 'Name not given',
-              held: !!p.hideContact,
+              held: c.emails.concat(c.phones).some(function (x) { return x.hide; }),
               /* De-duplicated: a title entered twice is flagged on the
                  overview as something to fix, and repeating it here just
                  makes the export look wrong as well. */
               roles: NLDirectory.rolesOf(p).map(function (r) {
                 return (r.title || '').trim();
               }).filter(function (t, i, a) { return t && a.indexOf(t) === i; }),
-              emails: NLDirectory.emailsOf(p),
-              phones: NLDirectory.phonesOf(p).map(function (x) { return x.number; }),
+              emails: em.map(function (x) { return x.value; }),
+              phones: ph.map(function (x) { return x.value; }),
               lists: []
             };
             out.push(row);
@@ -805,7 +828,7 @@ window.TOOL = (function () {
 
     $('lbInboxNote').textContent = boxes ? '(' + boxes + ' matched)' : '';
     $('lbHeldNote').textContent = LB.held
-      ? (heldIn ? '(' + heldIn + ' included)' : '')
+      ? (heldIn ? '(' + heldIn + ' people affected)' : '')
       : '(excluded)';
 
     $('lbCount').textContent = reach.length;
@@ -840,7 +863,7 @@ window.TOOL = (function () {
           '<td>' + esc(r.lists.map(function (k) { return LIST_LABEL[k] || k; }).join(', ')) + '</td>' +
           '<td>' + esc(r.name) +
             (r.kind === 'inbox' ? ' <span class="pill pill--info">shared mailbox</span>' : '') +
-            (r.held ? ' <span class="pill pill--pending">not published</span>' : '') +
+            (r.held ? ' <span class="pill pill--pending">has withheld details</span>' : '') +
             (r.roles.length ? '<br><span class="cd-row__ext">' +
               esc(r.roles.join(' / ')) + '</span>' : '') + '</td>' +
           '<td><span class="lb-clubcell"><img data-crest="' + esc(r.club) + '" alt="">' +
@@ -920,7 +943,7 @@ window.TOOL = (function () {
           r.lists.map(function (k) { return LIST_LABEL[k] || k; }).join(' / '),
           r.roles.join(' / '), r.emails.join(' '), r.phones.join(' '),
           r.kind === 'inbox' ? 'Shared mailbox' : 'Person',
-          r.held ? 'Not published' : 'Published'];
+          r.held ? 'Some details withheld' : 'All published'];
       })), { bom: !!bom });
   }
 

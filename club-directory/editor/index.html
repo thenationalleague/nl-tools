@@ -7,6 +7,32 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.32 — (10/08/2026) Whether a detail is published is now decided per
+         ADDRESS and per NUMBER, not per person. The old flag was one tick
+         covering everything somebody had, so a club officer happy to publish
+         the club address but not their mobile could only say no to both —
+         and that is the ordinary case, not the exotic one.
+         Every email and every phone line in the person modal now carries its
+         own "Not published" tick. The person-level tick stays for the people
+         who want nothing out at all, and the 290 already carrying it keep
+         working with nothing re-entered.
+         Publishing is unchanged in kind: what is held back is REMOVED from
+         the published copy rather than hidden in it, so a reader cannot ask
+         for what it was not given. Where a channel is emptied entirely the
+         published record carries a marker so the reader can still say "Not
+         published" rather than the lie "None held".
+         The confirm now names what is about to become public, so opening one
+         address does not read like opening all of them. The change is logged
+         on the same field as the address itself, so the green marker, the
+         journal and the Undo button all work on it with nothing new taught.
+         Two latent faults fixed on the way, both of which needed an
+         object-shaped email to show themselves and now get one: the tidier's
+         case pass read every address as a plain string and would have thrown
+         on the first object, taking the bake with it; and the duplicate merge
+         compared addresses by reference, so the same address arriving twice
+         went in twice. Merging now keeps the withheld state where the two
+         copies disagree — combining records must not quietly publish
+         something.
   v1.31 — (07/08/2026) Publishing and versioning are one act, because they
          were always one fact: this is what the League is standing behind, as
          of now. Two buttons meant you could publish without a record of what
@@ -500,15 +526,15 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=35">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=27">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=28">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=30"></script>
-<script src="/club-directory/_tidy.js?v=27"></script>
-<script src="/club-directory/_gate.js?v=27"></script>
-<script src="/club-directory/_directory.js?v=27"></script>
+<script src="/club-directory/_tidy.js?v=28"></script>
+<script src="/club-directory/_gate.js?v=28"></script>
+<script src="/club-directory/_directory.js?v=28"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -792,6 +818,21 @@
     border-radius: var(--radius); background: var(--white); color: var(--text-muted);
   }
   .ed-crow .ed-del { flex: 0 0 auto; }
+  /* The publish tick sits on the line it governs, not in a legend somewhere
+     else — the question is "this address?", so it is asked next to it. */
+  .ed-chide {
+    display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto;
+    font-size: 12px; color: var(--text-muted); white-space: nowrap;
+    cursor: pointer;
+  }
+  .ed-chide__box { width: 14px; height: 14px; accent-color: var(--primary); }
+  .ed-chide:has(.ed-chide__box:checked) {
+    color: var(--primary); font-variation-settings: 'wght' 700;
+  }
+  @media (max-width: 620px) {
+    .ed-crow { flex-wrap: wrap; }
+    .ed-cval { flex: 1 1 100%; }
+  }
 
   /* The reason is the useful half of a red flag, and it sat behind a hover
      with nothing to say it was there. */
@@ -1882,10 +1923,29 @@
       if (p[k] !== undefined && p[k] !== null) { out[k] = clone(p[k]); }
     });
     /* The whole point. Not blanked, not flagged — not there. `added` goes too:
-       whether the League typed somebody in or the club did is our business. */
+       whether the League typed somebody in or the club did is our business.
+
+       Per entry as of v1.32, so a person can publish their club address and
+       keep their mobile back. Same guarantee either way: what is held back is
+       removed from the published copy, so no rule has to be clever and no
+       reader can ask for it. hideContact still means all of it. */
     if (!p.hideContact) {
-      out.emails = clone(NLDirectory.arr(p.emails)) || [];
-      out.phones = clone(NLDirectory.arr(p.phones)) || [];
+      var em = NLDirectory.arr(p.emails).filter(function (e) {
+        return NLDirectory.addrOf(e).trim();
+      });
+      var ph = NLDirectory.arr(p.phones).filter(function (x) {
+        return x && (x.number || '').trim();
+      });
+      var keepEm = em.filter(function (e) { return !NLDirectory.ownHide(e); });
+      var keepPh = ph.filter(function (x) { return !NLDirectory.ownHide(x); });
+      out.emails = clone(keepEm) || [];
+      out.phones = clone(keepPh) || [];
+      /* Only when a channel is emptied ENTIRELY. It is how the reader tells
+         "held back" from "we do not have one" — with one of three addresses
+         withheld there is nothing to say, because the reader is not owed a
+         count of what it is not getting. */
+      if (em.length && !keepEm.length) { out.hideEmail = true; }
+      if (ph.length && !keepPh.length) { out.hidePhone = true; }
     }
     return out;
   }
@@ -1900,20 +1960,65 @@
      us to hold back is held back whether their club has been checked or not,
      because that is their decision and not a state of our work. */
   function buildPublished() {
-    var clubs = {}, pending = [], people = 0, held = 0, unchecked = 0;
+    var clubs = {}, pending = [], leaks = [], people = 0, held = 0, unchecked = 0;
     Object.keys(ALL).sort().forEach(function (name) {
       var rec = ALL[name] || {};
       if (!signedOffBy(rec)) { unchecked++; }
       var list = NLDirectory.arr(rec.people);
-      list.forEach(function (p) { people++; if (p.hideContact) { held++; } });
-      clubs[name] = {
-        club: name,
-        info: clone(rec.info || {}),
-        people: list.map(publishablePerson)
-      };
+      /* People with ANYTHING kept back, not people with everything kept
+         back — the count is there to say how much of the directory is not
+         in the published copy, and a withheld mobile counts. */
+      list.forEach(function (p) {
+        people++;
+        var c = NLDirectory.contactsOf(p, '');
+        if (c.emails.concat(c.phones).some(function (x) { return x.hide; })) { held++; }
+      });
+      var out = list.map(publishablePerson);
+      clubs[name] = { club: name, info: clone(rec.info || {}), people: out };
+      leaks = leaks.concat(escaped(name, list, out));
     });
-    return { clubs: clubs, pending: pending, unchecked: unchecked,
+    return { clubs: clubs, pending: pending, unchecked: unchecked, leaks: leaks,
              count: Object.keys(clubs).length, people: people, held: held };
+  }
+
+  /* The one way a withheld detail can still go out, and it is not a fault in
+     the stripping — it is the duplicates. 57 people across 26 clubs were
+     entered twice, so marking a mobile not-for-publication on one record
+     leaves the other record publishing the same number, and the club's
+     request is defeated by a copy nobody remembered was there.
+
+     Nothing here guesses which record is right; that is the editor's call and
+     merging is a separate job. It just refuses to let it happen quietly. */
+  function escaped(club, before, after) {
+    var who = function (p) { return NLDirectory.fullName(p).trim().toLowerCase(); };
+    /* Keyed by name AND value, not by value alone. The first cut keyed on the
+       value and stopped a publish at Horsham because the club switchboard was
+       withheld against one person and published against three others — which
+       is not a leak, it is one public number that somebody did not want on
+       their own card. The case worth stopping is the SAME PERSON twice. */
+    var withheld = {};
+    before.forEach(function (p) {
+      var n = who(p);
+      if (!n) { return; }
+      var c = NLDirectory.contactsOf(p, '');
+      c.emails.concat(c.phones).forEach(function (x) {
+        if (x.hide) { withheld[n + '\u0000' + x.value.trim().toLowerCase()] = x.value; }
+      });
+    });
+    if (!Object.keys(withheld).length) { return []; }
+    var out = [];
+    after.forEach(function (p) {
+      var n = who(p);
+      if (!n) { return; }
+      NLDirectory.arr(p.emails).map(NLDirectory.addrOf)
+        .concat(NLDirectory.arr(p.phones).map(function (x) { return x && x.number; }))
+        .forEach(function (v) {
+          var k = n + '\u0000' + String(v || '').trim().toLowerCase();
+          if (!String(v || '').trim() || !withheld[k]) { return; }
+          out.push({ club: club, value: withheld[k], on: NLDirectory.fullName(p) });
+        });
+    });
+    return out;
   }
 
   /* Publishing and versioning are one act, because they were always one
@@ -1943,6 +2048,31 @@
         { title: 'Nothing to publish' });
       return;
     }
+    /* Asked, not silently allowed. Two genuinely different people of the same
+       name at one club sharing a number is possible, so this is not a wall —
+       but it defaults to not publishing, because the thing on the other side
+       of the button cannot be taken back. */
+    if (built.leaks.length) {
+      var lines = built.leaks.slice(0, 12).map(function (x) {
+        return '  \u2022 ' + x.value + ' \u2014 still published on the other ' +
+          x.on + ' record at ' + x.club;
+      }).join('\n');
+      NL.confirm(built.leaks.length + ' detail' + (built.leaks.length === 1 ? '' : 's') +
+        ' marked not-for-publication would still go out, because the same ' +
+        'person is in the directory twice and the second record still carries ' +
+        'it:\n\n' + lines +
+        (built.leaks.length > 12 ? '\n  \u2026and ' + (built.leaks.length - 12) + ' more' : '') +
+        '\n\nThe fix is a minute: open the other record and tick it there too, ' +
+        'or merge the duplicate. Publishing now sends it out anyway.',
+        { title: 'A withheld detail would still be published', variant: 'danger',
+          confirmText: 'Publish anyway', cancelText: 'Let me fix it' }
+      ).then(function (ok) { if (ok) { publishConfirmed(built); } });
+      return;
+    }
+    publishConfirmed(built);
+  }
+
+  function publishConfirmed(built) {
     var prev = PUBLISHED_AT;
     var when = NL.formatDate(Date.now());
     NL.prompt('This replaces what readers see with all ' + built.count +
@@ -2555,7 +2685,7 @@
      Typing into the row is gone with them. Two ways to change the same field
      is worse than one even when both work, and this is the one that can show
      a job title and the address that goes with it at the same time. */
-  function contactRow(kind, value, section, roles, ext) {
+  function contactRow(kind, value, section, roles, ext, hide) {
     var row = document.createElement('div');
     row.className = 'ed-crow';
     /* Every phone record carries an ext field. All 563 are empty today and
@@ -2585,6 +2715,23 @@
       });
     }
 
+    /* One tick per address and per number, because that is the grain the
+       decision is actually made at: a club officer will give you the club
+       address for the directory and keep their mobile out of it, and until
+       now saying so meant keeping BOTH out. Worded as the thing being
+       withheld rather than as "publish", so the tick and the consequence
+       point the same way — a ticked box means something is being kept back. */
+    var hideLab = document.createElement('label');
+    hideLab.className = 'ed-chide';
+    var hideBox = document.createElement('input');
+    hideBox.type = 'checkbox';
+    hideBox.className = 'ed-chide__box';
+    hideBox.checked = !!hide;
+    hideLab.appendChild(hideBox);
+    hideLab.appendChild(document.createTextNode(' Not published'));
+    hideLab.title = 'Keep this ' + (kind === 'email' ? 'address' : 'number') +
+      ' out of the published directory. Their other details are unaffected.';
+
     var del = document.createElement('button');
     del.className = 'btn btn--icon btn--ghost ed-del';
     del.type = 'button';
@@ -2595,6 +2742,7 @@
 
     row.appendChild(input);
     if (pick) { row.appendChild(pick); }
+    row.appendChild(hideLab);
     row.appendChild(del);
     return row;
   }
@@ -2662,7 +2810,10 @@
     pubWrap.appendChild(pubLab);
     var pubHint = document.createElement('p');
     pubHint.className = 'form-hint';
-    pubHint.textContent = 'We still hold them; the reader shows "Not published".' +
+    pubHint.textContent = 'Everything of theirs \u2014 every address and every ' +
+      'number. We still hold it; the reader shows "Not published". To keep just ' +
+      'one address or one number back, leave this clear and tick it on the line ' +
+      'itself below.' +
       (sections.length > 1 ? ' This covers every department they appear in.' : '');
     pubWrap.appendChild(pubHint);
     wrap.appendChild(pubWrap);
@@ -2677,7 +2828,8 @@
       var addr = NLDirectory.addrOf(e);
       if (!addr) { return; }
       emailBox.appendChild(contactRow('email', addr,
-        (typeof e === 'string') ? '' : (e.section || ''), sections));
+        (typeof e === 'string') ? '' : (e.section || ''), sections, '',
+        NLDirectory.ownHide(e)));
     });
     var addEmail = document.createElement('button');
     addEmail.className = 'btn btn--sm btn--ghost';
@@ -2694,7 +2846,8 @@
     wrap.appendChild(phoneBox);
     NLDirectory.arr(person.phones).forEach(function (x) {
       if (!x || !(x.number || '').trim()) { return; }
-      phoneBox.appendChild(contactRow('phone', x.number, x.section || '', sections, x.ext || ''));
+      phoneBox.appendChild(contactRow('phone', x.number, x.section || '', sections,
+        x.ext || '', NLDirectory.ownHide(x)));
     });
     var addPhone = document.createElement('button');
     addPhone.className = 'btn btn--sm btn--ghost';
@@ -2767,8 +2920,10 @@
     var read = function (box) {
       return [].slice.call(box.querySelectorAll('.ed-crow')).map(function (r) {
         var f = r.querySelector('.ed-cfor');
+        var h = r.querySelector('.ed-chide__box');
         return { value: r.querySelector('.ed-cval').value.trim(),
                  section: f ? f.value : '',
+                 hide: !!(h && h.checked),
                  ext: r.dataset.ext || '' };
       }).filter(function (x) { return x.value; });
     };
@@ -2811,18 +2966,36 @@
 
      This existed before the form absorbed the publish toggle and was lost in
      the process — a regression, not an oversight of the original design. */
-  function confirmPublish(person, hiding, sections) {
-    if (hiding) { return Promise.resolve(true); }
+  /* One line per address or number, with its publication state on it. This is
+     what the journal stores and what the diff compares, so the tick is a
+     tracked, reversible change like any other edit to the same field. */
+  function contactLine(list, valueOf) {
+    return NLDirectory.arr(list).map(function (x) {
+      var v = String(valueOf(x) || '').trim();
+      return v ? v + (NLDirectory.ownHide(x) ? ' (not published)' : '') : '';
+    }).filter(Boolean).join(', ');
+  }
+
+  /* Asked in one direction only. Holding something back is the club's own
+     request and needs no ceremony; putting something out that was held back
+     is the move that cannot be taken back, so it gets named and confirmed.
+     `opening` is the list of details about to become public \u2014 which with a
+     per-address tick can be one line rather than the whole person. */
+  function confirmPublish(person, opening, sections) {
+    if (!opening.length) { return Promise.resolve(true); }
     var name = NLDirectory.fullName(person) || 'this person';
     var where = sections.length > 1
       ? ' They appear under ' + sections.join(', ') + ', and this covers all of them.'
       : '';
+    var what = opening.length === 1
+      ? '\u201c' + opening[0] + '\u201d'
+      : opening.length + ' of their details:\n\n  ' + opening.join('\n  ');
     return NL.confirm(
-      'Publish ' + name + '\u2019s contact details in the directory?' + where +
-      '\n\nThe club asked for these to be kept off. Only do this if they have since ' +
-      'said otherwise — everyone holding the reader code will be able to see them, ' +
+      'Publish ' + what + ' for ' + name + ' in the directory?' + where +
+      '\n\nThe club asked for this to be kept off. Only do it if they have since ' +
+      'said otherwise \u2014 everyone holding the reader code will be able to see it, ' +
       'and it cannot be taken back once it is out.',
-      { title: 'Publish contact details', variant: 'danger', confirmText: 'Yes, publish them' }
+      { title: 'Publish contact details', variant: 'danger', confirmText: 'Yes, publish' }
     );
   }
 
@@ -2832,8 +3005,8 @@
     var was = {
       name: NLDirectory.fullName(person),
       hide: !!person.hideContact,
-      emails: NLDirectory.emailsOf(person).join(', '),
-      phones: NLDirectory.phonesOf(person).map(function (x) { return x.number; }).join(', ')
+      emails: contactLine(NLDirectory.arr(person.emails), NLDirectory.addrOf),
+      phones: contactLine(NLDirectory.arr(person.phones), function (x) { return x && x.number; })
     };
     var pid = 'people/' + (person.id || '');
 
@@ -2860,15 +3033,25 @@
       /* A plain string when it applies everywhere, an object only when it does
          not — so a record that gains nothing keeps the shape it had. */
       person.emails = next.emails.map(function (x) {
-        return x.section ? { address: x.value, section: x.section } : x.value;
+        if (!x.section && !x.hide) { return x.value; }
+        var out = { address: x.value };
+        if (x.section) { out.section = x.section; }
+        if (x.hide) { out.hide = true; }
+        return out;
       });
       person.phones = next.phones.map(function (x) {
         var out = { number: x.value, ext: x.ext || '' };
         if (x.section) { out.section = x.section; }
+        if (x.hide) { out.hide = true; }
         return out;
       });
-      var nowEm = NLDirectory.emailsOf(person).join(', ');
-      var nowPh = NLDirectory.phonesOf(person).map(function (x) { return x.number; }).join(', ');
+      /* The logged line carries the publication state, so "took Jane's mobile
+         out of the directory" is a change the journal can show and the Undo
+         button can reverse. Keeping it in the same entry rather than adding a
+         path of its own means the green-flag pairing and the per-person undo
+         both work on it with nothing new to teach them. */
+      var nowEm = contactLine(NLDirectory.arr(person.emails), NLDirectory.addrOf);
+      var nowPh = contactLine(NLDirectory.arr(person.phones), function (x) { return x && x.number; });
       if (nowEm !== was.emails) { logEdit(club, pid + '/emails', was.emails, nowEm); }
       if (nowPh !== was.phones) { logEdit(club, pid + '/phones', was.phones, nowPh); }
 
@@ -2888,11 +3071,27 @@
       renameThen();
     };
 
-    if (next.hide !== was.hide) {
+    /* Everything that was being kept back, by value, before anything is
+       written. Computed here rather than inside applyRest because applyRest
+       rebuilds person.emails from the form and the old state is gone. */
+    var wasHidden = {};
+    NLDirectory.arr(person.emails).forEach(function (e) {
+      var v = NLDirectory.addrOf(e).trim();
+      if (v && (was.hide || NLDirectory.ownHide(e))) { wasHidden[v] = true; }
+    });
+    NLDirectory.arr(person.phones).forEach(function (x) {
+      var v = ((x && x.number) || '').trim();
+      if (v && (was.hide || NLDirectory.ownHide(x))) { wasHidden[v] = true; }
+    });
+    var opening = next.hide ? [] : next.emails.concat(next.phones)
+      .filter(function (x) { return !x.hide && wasHidden[x.value]; })
+      .map(function (x) { return x.value; });
+
+    if (opening.length) {
       var sections = roles.map(function (r) { return r.section; })
         .filter(function (sec, i, a) { return a.indexOf(sec) === i; });
-      confirmPublish(person, next.hide, sections).then(function (ok) {
-        if (!ok) { next.hide = was.hide; return; }   /* stay open, nothing written */
+      confirmPublish(person, opening, sections).then(function (ok) {
+        if (!ok) { return; }                          /* stay open, nothing written */
         proceed();
       });
       return;
