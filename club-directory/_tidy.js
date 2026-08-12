@@ -1,7 +1,17 @@
 /* =========================================================================
    NL Tools — club directory tidier
    File: /club-directory/_tidy.js
-   Version: v1.3 (06/08/2026)
+   Version: v1.4 (10/08/2026)
+
+   v1.4 — An address can be an object now that publication is decided per
+     address, and two passes here had only ever been handed strings. The case
+     pass called em.toLowerCase() on it, which would have thrown and taken the
+     whole bake down; the duplicate merge compared addresses with indexOf,
+     which compares references, so the same address arriving as an object was
+     never seen as a duplicate. Both read the address out of either shape now,
+     and where two copies of one address disagree about publication the
+     withheld state wins — merging two records must not quietly publish
+     something.
 
    v1.3 — Mailbox domains. A "hotnail.com" had been sitting in the directory
      since the build: a perfectly well-formed address, no mismatch with the
@@ -443,13 +453,21 @@
           log(pathFor(p, pi, 'roles/' + ri + '/title'), t, out, 'case');
         }
       });
+      /* An address is a plain string OR {address, section, hide}. This read
+         it as a string only, so the first object-shaped address would have
+         thrown "em.toLowerCase is not a function" and taken the whole bake
+         down with it. Nothing stored was an object yet, which is the only
+         reason it had not. */
       p.emails = arr(p.emails).map(function (em, ei) {
-        if (em && /[A-Z]/.test(em)) {
-          n.emails++;
-          log(pathFor(p, pi, 'emails/' + ei), em, em.toLowerCase(), 'case');
-          return em.toLowerCase();
-        }
-        return em;
+        var a = (typeof em === 'string') ? em : ((em && em.address) || '');
+        if (!a || !/[A-Z]/.test(a)) { return em; }
+        n.emails++;
+        log(pathFor(p, pi, 'emails/' + ei), a, a.toLowerCase(), 'case');
+        if (typeof em === 'string') { return a.toLowerCase(); }
+        var out = {};
+        for (var k in em) { if (Object.prototype.hasOwnProperty.call(em, k)) { out[k] = em[k]; } }
+        out.address = a.toLowerCase();
+        return out;
       });
     });
     return n;
@@ -472,12 +490,37 @@
       var t = seen[k];
       var gained = arr(p.roles).map(function (r) { return r.section; });
       t.roles = arr(t.roles).concat(arr(p.roles));
+      /* By value, not by identity. An entry is a plain string OR an object
+         ({address, section, hide}), and indexOf on an object compares
+         references — so the same address arriving as an object was never
+         seen as a duplicate and went in twice. Where it IS a duplicate and
+         one copy is marked not-for-publication, the withheld state wins:
+         merging two records must not quietly publish something. */
+      var addr = function (e) {
+        return String((typeof e === 'string' ? e : (e && e.address)) || '')
+          .trim().toLowerCase();
+      };
       arr(p.emails).forEach(function (em) {
-        if (em && arr(t.emails).indexOf(em) < 0) { t.emails = arr(t.emails).concat(em); }
+        if (!addr(em)) { return; }
+        var at = -1;
+        arr(t.emails).forEach(function (x, i) { if (addr(x) === addr(em)) { at = i; } });
+        if (at < 0) { t.emails = arr(t.emails).concat(em); return; }
+        if (em && typeof em === 'object' && em.hide) {
+          var keep = arr(t.emails), cur = keep[at];
+          var next = { address: (typeof cur === 'string') ? cur : ((cur && cur.address) || ''),
+                       hide: true };
+          if (cur && typeof cur === 'object' && cur.section) { next.section = cur.section; }
+          keep[at] = next;
+          t.emails = keep;
+        }
       });
       arr(p.phones).forEach(function (ph) {
-        var have = arr(t.phones).some(function (x) { return x.number === ph.number; });
-        if (!have) { t.phones = arr(t.phones).concat(ph); }
+        var at = -1;
+        arr(t.phones).forEach(function (x, i) {
+          if (x && ph && String(x.number || '').trim() === String(ph.number || '').trim()) { at = i; }
+        });
+        if (at < 0) { t.phones = arr(t.phones).concat(ph); return; }
+        if (ph && ph.hide) { var kp = arr(t.phones); kp[at].hide = true; t.phones = kp; }
       });
       if (p.hideContact) { t.hideContact = true; }
       if (p.id) { t.mergedIds = arr(t.mergedIds).concat(p.id); }

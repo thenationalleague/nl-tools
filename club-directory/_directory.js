@@ -1,7 +1,13 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.3 (10/08/2026)
+   Version: v1.4 (10/08/2026)
+
+   v1.4 — publication is per address and per number. contactsOf() returns both
+   channels normalised with their own hide state, channel() decides what a
+   given view shows and whether anything is being kept back, and every
+   renderer goes through the pair. The person-level hideContact still means
+   all of it, so nothing already stored changes meaning.
 
    v1.3 — the mailing-list taxonomy (LIST_LABEL / LIST_ORDER / listMembers)
    moves here from the editor. Second use: the staff overview builds exports
@@ -123,6 +129,67 @@
      the whole tidier to read a field safely. */
   function rolesOf(p) { return arr(p && p.roles); }
   function reachable(p) { return emailsOf(p).length > 0 || phonesOf(p).length > 0; }
+
+  /* ------------------------------------------------ what gets published
+     Publication is decided per ADDRESS and per NUMBER, not per person. The
+     case that forced it is ordinary: a club officer happy for the club
+     address to be in the directory and not their mobile, or happy for the
+     mobile and not their personal email. One flag per person could not say
+     that, so it said no to all of it.
+
+     Two levels, and both are honoured:
+       p.hideContact        the person — nothing of theirs is published.
+                            The 290 people already carrying it keep working
+                            with nothing re-entered.
+       entry.hide           this address, or this number, on its own.
+
+     Reading is the only place the rule lives. The editor shows everything
+     and marks what is held back; the reader is handed a record the withheld
+     entries were physically removed from at publish. Both go through here,
+     because a second renderer deciding for itself who to show would be a
+     second chance to get it wrong. */
+  function entryHidden(entry, p) {
+    return !!(p && p.hideContact) ||
+           !!(entry && typeof entry === 'object' && entry.hide);
+  }
+  /* Entry-level only — used where the person-level flag is already its own
+     signal and folding it in would report the same fact twice. */
+  function ownHide(entry) {
+    return !!(entry && typeof entry === 'object' && entry.hide);
+  }
+
+  /* Both channels, normalised, carrying their own publication state. */
+  function contactsOf(p, section) {
+    return {
+      emails: arr(p && p.emails).filter(function (e) {
+        return addrOf(e).trim() && forHere(e, section);
+      }).map(function (e) {
+        return { value: addrOf(e).trim(), ext: '', hide: entryHidden(e, p) };
+      }),
+      phones: arr(p && p.phones).filter(function (x) {
+        return x && (x.number || '').trim() && forHere(x, section);
+      }).map(function (x) {
+        return { value: (x.number || '').trim(), ext: (x.ext || '').trim(),
+                 hide: entryHidden(x, p) };
+      })
+    };
+  }
+
+  /* What THIS view shows, and whether anything is being kept back.
+
+     `marker` is how a published record says "there was something here" after
+     the something was removed — publishablePerson sets hideEmail/hidePhone
+     only when a channel is emptied entirely, so the reader can tell "held
+     back" from "we do not have one" without being handed the thing itself.
+     p.hideContact is read too, because a copy published before this existed
+     says it that way and must keep reading correctly. */
+  function channel(p, entries, marker, showHidden) {
+    return {
+      show: showHidden ? entries : entries.filter(function (e) { return !e.hide; }),
+      withheld: !!(p && (p.hideContact || p[marker])) ||
+                entries.some(function (e) { return e.hide; })
+    };
+  }
   /* lastName where the club gave one, otherwise the last word of the name.
      A directory is looked up by surname and nothing else. */
   function surnameOf(p) {
@@ -216,27 +283,36 @@
        so an editor looked at an email address with no way of knowing it will
        never appear in the reader — across 290 of 1,070 people, in 65 of the
        72 clubs. The state is now stated wherever the details are shown. */
+    var showHidden = !!(opts && opts.showHidden);
     var unlisted = !!p.hideContact;
-    var hidden = unlisted && !(opts && opts.showHidden);
     var here = arr(p.roles).filter(function (r) { return r.section === section; });
     var titles = here.map(function (r) { return (r.title || '').trim(); }).filter(Boolean);
-    var mail = hidden ? '' : emailsOf(p, section).map(function (e) {
-      return '<a href="mailto:' + esc(e) + '">' + esc(e) + '</a>';
+    var all = contactsOf(p, section);
+    var em = channel(p, all.emails, 'hideEmail', showHidden);
+    var tl = channel(p, all.phones, 'hidePhone', showHidden);
+
+    var mail = em.show.map(function (e) {
+      return '<a href="mailto:' + esc(e.value) + '">' + esc(e.value) + '</a>' +
+        held(e, showHidden && !unlisted);
     }).join('<br>');
-    var ph = hidden ? '' : phonesOf(p, section).map(function (x) {
-      var n = (x.number || '').trim(), ext = (x.ext || '').trim();
-      return '<a href="tel:' + esc(tel(n)) + '">' + esc(n) + '</a>' +
-        (ext ? ' <span class="cd-row__ext">ext ' + esc(ext) + '</span>' : '');
+    var ph = tl.show.map(function (x) {
+      return '<a href="tel:' + esc(tel(x.value)) + '">' + esc(x.value) + '</a>' +
+        (x.ext ? ' <span class="cd-row__ext">ext ' + esc(x.ext) + '</span>' : '') +
+        held(x, showHidden && !unlisted);
     }).join('<br>');
 
-    var quiet = hidden ? 'Not published' : 'None held';
-    /* Shown only where the details themselves are shown. In the reader the
-       contact cell already says "Not published" instead of an address, so a
-       tag next to it would be saying the same thing twice. */
-    var tag = (unlisted && !hidden)
-      ? '<span class="cd-row__unlisted" title="The club asked us to keep these ' +
-        'details out of the published directory. The reader shows &quot;Not ' +
-        'published&quot; here.">Not published</span>'
+    /* Per channel now: an email cell can read "Not published" while the phone
+       beside it shows a number, which is the whole point of the change. */
+    var quietEm = em.withheld && !showHidden ? 'Not published' : 'None held';
+    var quietPh = tl.withheld && !showHidden ? 'Not published' : 'None held';
+    /* The person-level tag survives for the person-level decision only. When
+       it is set, everything is held back, and tagging each of six lines
+       individually says the same thing six times. Where the decision is
+       per address, the address itself carries the mark instead. */
+    var tag = (unlisted && showHidden)
+      ? '<span class="cd-row__unlisted" title="The club asked us to keep this ' +
+        'person’s details out of the published directory. The reader shows ' +
+        '&quot;Not published&quot; here.">Not published</span>'
       : '';
     /* The row says who it is. The editor used to work this out by counting —
        "the third row under Leadership is the third person in Leadership" —
@@ -264,9 +340,24 @@
         (titles.length ? titles.map(esc).join(' &middot; ')
           : (opts && opts.showGaps ? '<em>No job title</em>' : '')) +
       '</div>' +
-      '<div>' + tag + (mail || '<span class="cd-row__quiet">' + quiet + '</span>') + '</div>' +
-      '<div>' + (ph || (mail ? '' : '')) + '</div>' +
+      '<div>' + tag + (mail || '<span class="cd-row__quiet">' + quietEm + '</span>') + '</div>' +
+      /* The phone cell has always stayed blank when there is simply no
+         number — "None held" against 400 people is noise. It speaks up only
+         to say a number exists and is being kept back. */
+      '<div>' + (ph || (tl.withheld && !showHidden
+        ? '<span class="cd-row__quiet">Not published</span>' : '')) + '</div>' +
       '</li>';
+  }
+
+  /* The mark against a single address or number, for the views that show
+     what they are not publishing. Off in the reader, which is handed a
+     record these entries were removed from, and off when the whole person
+     is held back and the row already carries one tag for the lot. */
+  function held(entry, on) {
+    return (on && entry.hide)
+      ? ' <span class="cd-held" title="This one is kept out of the published ' +
+        'directory. Others on the same person may still be published.">not published</span>'
+      : '';
   }
 
   function facts(pairs) {
@@ -291,8 +382,8 @@
      second renderer deciding for itself who to show would be a second chance
      to get it wrong, and the reader is where getting it wrong is published. */
   function personCard(p, opts) {
+    var showHidden = !!(opts && opts.showHidden);
     var unlisted = !!p.hideContact;
-    var hidden = unlisted && !(opts && opts.showHidden);
     var roles = arr(p.roles);
 
     var jobs = roles.map(function (r) {
@@ -305,14 +396,19 @@
 
     /* Every address and every number, not a department's share of them. The
        card is the whole person. */
-    var lines = hidden ? '' : emailsOf(p, '').map(function (e) {
-      return '<a class="cd-pc__line" href="mailto:' + esc(e) + '">' +
-        '<span class="cd-pc__ic">' + glyph('email') + '</span>' + esc(e) + '</a>';
-    }).concat(phonesOf(p, '').map(function (x) {
-      var n = (x.number || '').trim(), ext = (x.ext || '').trim();
-      return '<a class="cd-pc__line" href="tel:' + esc(tel(n)) + '">' +
-        '<span class="cd-pc__ic">' + glyph('phone') + '</span>' + esc(n) +
-        (ext ? ' <span class="cd-row__ext">ext ' + esc(ext) + '</span>' : '') + '</a>';
+    var all = contactsOf(p, '');
+    var em = channel(p, all.emails, 'hideEmail', showHidden);
+    var tl = channel(p, all.phones, 'hidePhone', showHidden);
+    var mark = showHidden && !unlisted;
+    var lines = em.show.map(function (e) {
+      return '<a class="cd-pc__line" href="mailto:' + esc(e.value) + '">' +
+        '<span class="cd-pc__ic">' + glyph('email') + '</span>' + esc(e.value) +
+        held(e, mark) + '</a>';
+    }).concat(tl.show.map(function (x) {
+      return '<a class="cd-pc__line" href="tel:' + esc(tel(x.value)) + '">' +
+        '<span class="cd-pc__ic">' + glyph('phone') + '</span>' + esc(x.value) +
+        (x.ext ? ' <span class="cd-row__ext">ext ' + esc(x.ext) + '</span>' : '') +
+        held(x, mark) + '</a>';
     })).join('');
 
     return '<li class="cd-pc' + (unlisted ? ' cd-pc--unlisted' : '') + '"' +
@@ -322,7 +418,8 @@
       '</div></div>' +
       (jobs ? '<ul class="cd-pc__jobs">' + jobs + '</ul>' : '') +
       '<div class="cd-pc__lines">' + (lines ||
-        '<span class="cd-row__quiet">' + (hidden ? 'Not published' : 'None held') +
+        '<span class="cd-row__quiet">' +
+        ((em.withheld || tl.withheld) && !showHidden ? 'Not published' : 'None held') +
         '</span>') + '</div>' +
     '</li>';
   }
@@ -499,6 +596,9 @@
     reachable: reachable,
     emailsOf: emailsOf,
     phonesOf: phonesOf,
+    contactsOf: contactsOf,
+    entryHidden: entryHidden,
+    ownHide: ownHide,
     addrOf: addrOf,
     glyph: glyph,
     strokeGlyph: strokeGlyph,
