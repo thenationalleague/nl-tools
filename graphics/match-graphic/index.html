@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Match Graphic
-  Version: v1.2 (10/08/2026)
+  Version: v1.3 (13/08/2026)
   File: /graphics/match-graphic/index.html
 
   Builds a single match graphic for any two clubs, in the four delivery
@@ -22,6 +22,26 @@
   Graphics & Media sub-tools, so anyone who can reach /graphics/ gets this.
 
   CHANGELOG
+  v1.3 (13/08/2026) — FIX: exports came out with no crests
+    - v1.2 stopped the canvas being tainted by opting the crest request into
+      CORS. That fixed the dead button but swapped it for a quieter fault:
+      raw.githubusercontent.com does not Vary on Origin and sits behind a
+      5-minute CDN cache, so once a crest URL is cached from a plain <img>
+      (wireCrestImg's full-res fallback does exactly that) the CORS request
+      reuses the non-CORS entry and fails. Result: the PNG downloaded happily
+      with the badges missing — publishable, and wrong.
+    - Canvas crests now load same-origin from /assets/crests/. No CORS, no
+      taint, no cache-mode mismatch, no third-party dependency on the one
+      asset the artwork cannot do without. Matches fixtures-graphic.
+    - A missing crest or logo now shows a persistent "Do not publish this"
+      strip naming what is absent, not just a toast that scrolls away.
+    - toBlob is wrapped: an export that cannot be produced says so instead of
+      throwing out of the click handler and looking like a dead button.
+    - Boot fetches retry twice with backoff, and a boot that still fails shows
+      a persistent notice with a Reload button. Previously one dropped request
+      on a weak connection left the page looking ready with every control
+      inert — reproduced in a headless browser.
+
   v1.2 (10/08/2026) — FIX: downloads did nothing
     - Crests are fetched from raw.githubusercontent.com (NL.clubs.crestUrl),
       and drawing a cross-origin image into a canvas taints it, so every
@@ -90,6 +110,15 @@
     var NL_TOOL_KEY = 'staff-graphics';
 
     window.NL_CHANGELOG = [
+      {
+        date: '13/08/2026',
+        version: 'v1.3',
+        items: [
+          'Fixed: downloads came out with the crests missing. Badges now load from this site rather than a third-party domain.',
+          'A missing crest is now flagged as “do not publish” instead of quietly shipping an incomplete graphic.',
+          'The tool retries if the connection drops while loading, and tells you plainly if it still could not start.'
+        ]
+      },
       {
         date: '10/08/2026',
         version: 'v1.2',
@@ -378,6 +407,13 @@
 
   var el = function (id) { return document.getElementById(id); };
 
+  /* "a, b and c" — reads as a sentence in both the toast and the warning. */
+  function listOf(items) {
+    if (items.length < 2) return items[0] || '';
+    return items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1];
+  }
+  function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+
   /* The one competition non-member sides enter. Must match the `competition`
      string in competitions-meta.json. */
   var CUP = 'NL Cup';
@@ -388,6 +424,7 @@
   var unlocked = false;
   var images = {};              /* url -> Promise<Image|null> */
   var homePicker, awayPicker;
+  var missingAssets = [];       /* crest/logo names that failed this draw */
   var members = [];             /* NL roster for the current season */
   var guestList = [];           /* THIS season's cup guests, name-sorted */
   var guestByName = {};         /* name -> guest record, same set */
@@ -413,28 +450,43 @@
 
   /* ---------- assets ---------- */
 
-  /* crossOrigin MUST be set before src, and it is not optional here.
-     NL.clubs.crestUrl points at raw.githubusercontent.com, and drawing a
-     cross-origin image into a canvas TAINTS it — every later toBlob() then
-     throws SecurityError, which is thrown out of the download click handler,
-     so the button silently does nothing. The host sends
-     `access-control-allow-origin: *`, but a plain <img> does not use it; the
-     request has to opt in. With the opt-in the canvas stays clean and exports.
+  /* Crests for the CANVAS are loaded same-origin, and that is load-bearing.
 
-     If the header ever disappears the image fails to load instead, which
-     surfaces as the existing "A crest failed to load" toast — a visible
-     failure rather than a silent one. That trade is deliberate.
+     NL.clubs.crestUrl points at raw.githubusercontent.com. Drawing a
+     cross-origin image into a canvas taints it and toBlob() then throws, so
+     v1.2 opted the request into CORS with crossOrigin='anonymous'. That fixed
+     the dead button but traded it for a subtler failure: the host replies
+     `vary: Authorization,Accept-Encoding` — no `Origin` — behind a 5-minute
+     CDN cache. Once the browser has that URL cached from a PLAIN <img> (which
+     NL.clubs.wireCrestImg issues on its full-res fallback), the CORS request
+     can reuse the non-CORS cache entry and fail. The export then succeeds with
+     the crests missing, which is worse than failing outright because a graphic
+     with no badges can be published without anyone noticing.
 
-     (graphics/fixtures-graphic sidesteps the same problem by using a
-     same-origin /assets/crests/ path. Two tools now, two different
-     workarounds — a shared crest-image loader is a canon candidate.) */
+     Same-origin removes the whole class of problem: no CORS, no taint, no
+     cache-mode mismatch, no third-party dependency on the one asset the
+     artwork cannot do without — and on a slow connection it reuses the
+     connection the page already has. _headers caches /assets/crests/* for a
+     week. graphics/fixtures-graphic reached the same conclusion independently.
+
+     Deliberately NOT setting crossOrigin: on a same-origin request it does
+     nothing, and leaving it off means a future cross-origin URL trips the
+     loud guard in save() rather than silently tainting.
+
+     Third tool to meet this trap — a shared crest-image loader on NL.clubs is
+     a canon candidate, noted rather than done here. */
+  var CANVAS_CREST_BASE = '/assets/crests/';
+
+  function canvasCrestUrl(name) {
+    return name ? CANVAS_CREST_BASE + encodeURIComponent(name) + '.png' : '';
+  }
+
   function loadImage(src) {
     if (!images[src]) {
       images[src] = new Promise(function (res) {
         var i = new Image();
         i.onload = function () { res(i); };
         i.onerror = function () { res(null); };
-        i.crossOrigin = 'anonymous';
         i.src = src;
       });
     }
@@ -572,12 +624,17 @@
     var ctx = canvas.getContext('2d', { alpha: false });
 
     return Promise.all([
-      loadImage(NL.clubs.crestUrl(crestKeyFor(state.home))),
-      loadImage(NL.clubs.crestUrl(crestKeyFor(state.away))),
+      loadImage(canvasCrestUrl(crestKeyFor(state.home))),
+      loadImage(canvasCrestUrl(crestKeyFor(state.away))),
       loadImage(badges[state.comp])
     ]).then(function (a) {
-      if (!a[0] || !a[1]) NL.toast('A crest failed to load', 'error');
-      if (!a[2]) NL.toast('The competition logo failed to load', 'error');
+      /* A toast disappears. A graphic delivered with a missing badge does
+         not, so record the gap and say so permanently in the panel below. */
+      missingAssets = [];
+      if (!a[0]) missingAssets.push(state.home + '’s crest');
+      if (!a[1]) missingAssets.push(state.away + '’s crest');
+      if (!a[2]) missingAssets.push('the ' + state.comp + ' logo');
+      if (missingAssets.length) NL.toast(cap(listOf(missingAssets)) + ' failed to load', 'error');
 
       MG.render(ctx, { home: home, away: away, competition: state.comp },
                 { homeCrest: a[0], awayCrest: a[1], badge: a[2] },
@@ -599,8 +656,15 @@
       el('mgExplain').textContent = notes.length ? notes.join(' ')
         : 'Both clubs use their secondary colour for the code, which is the usual case.';
 
+      /* A missing asset outranks the similar-primaries note: one is a defect
+         in what you are about to publish, the other is a judgement call. */
       var warn = el('mgWarn');
-      if (MG.readsAsSameField(hc.panel, ac.panel)) {
+      if (missingAssets.length) {
+        warn.hidden = false;
+        warn.innerHTML = '<span><b>Do not publish this.</b> ' +
+          NL.escHtml(cap(listOf(missingAssets))) + ' did not load, so the graphic ' +
+          'below is incomplete. Check your connection and reload.</span>';
+      } else if (MG.readsAsSameField(hc.panel, ac.panel)) {
         warn.hidden = false;
         warn.innerHTML = '<span><b>Similar primaries.</b> These panels read as ' +
           'close to one flat field; the seam bands do the separating.</span>';
@@ -618,11 +682,20 @@
 
   /* ---------- export ---------- */
 
+  /* toBlob throws on a tainted canvas, and that throw used to escape the click
+     handler — the button appeared to do nothing at all, which cost a fortnight
+     of nobody realising exports were broken. Catch it and say so. */
   function save(fmt) {
     var name = filename(state.home, state.away, fmt);
-    el('mgCanvas').toBlob(function (blob) {
-      NL.download(name, blob, 'image/png');
-    }, 'image/png');
+    try {
+      el('mgCanvas').toBlob(function (blob) {
+        if (!blob) { NL.toast('The export produced no image — try reloading', 'error'); return; }
+        NL.download(name, blob, 'image/png');
+      }, 'image/png');
+    } catch (err) {
+      console.error('[match-graphic] export failed', err);
+      NL.toast('Could not export this graphic — reload the page and try again', 'error');
+    }
   }
 
   function downloadAll() {
@@ -708,6 +781,21 @@
     });
   }
 
+  /* One dropped request on a weak connection used to be terminal: every click
+     handler is attached inside the boot chain, so a single failed fetch left a
+     page that LOOKED ready with permanently dead buttons and one toast that
+     scrolled away. Two retries with backoff cover the usual wobble. */
+  function retry(fn, tries, wait) {
+    tries = tries == null ? 2 : tries;
+    wait = wait || 700;
+    return fn().catch(function (err) {
+      if (tries <= 0) throw err;
+      console.warn('[match-graphic] retrying after', err && err.message);
+      return new Promise(function (r) { setTimeout(r, wait); })
+        .then(function () { return retry(fn, tries - 1, wait * 2); });
+    });
+  }
+
   window.TOOL = window.TOOL || {};
   window.TOOL.boot = function () {
     if (!MG) {
@@ -726,10 +814,12 @@
       : Promise.resolve();
 
     Promise.all([
-      NL.clubs.forSeason('current'),
-      fetch('/assets/data/competitions-meta.json').then(function (r) {
-        if (!r.ok) throw new Error('competitions-meta ' + r.status);
-        return r.json();
+      retry(function () { return NL.clubs.forSeason('current'); }),
+      retry(function () {
+        return fetch('/assets/data/competitions-meta.json').then(function (r) {
+          if (!r.ok) throw new Error('competitions-meta ' + r.status);
+          return r.json();
+        });
       }),
       /* Guests are a bonus, not a dependency — a failure here must not cost
          the tool its 72 NL clubs, so it resolves to none rather than reject. */
@@ -809,7 +899,20 @@
       return syncGuests();
     }).catch(function (err) {
       console.error('[match-graphic]', err);
-      NL.toast('Could not load club data — try reloading', 'error');
+      NL.toast('Could not load club data', 'error');
+      /* The toast goes; this does not. Without it the page sits there looking
+         usable while every control is inert, which is indistinguishable from
+         the tool being broken. */
+      var warn = el('mgWarn');
+      if (warn) {
+        warn.hidden = false;
+        warn.innerHTML = '<span><b>The tool did not finish loading.</b> Club data ' +
+          'could not be fetched, so the controls below will not respond. This is ' +
+          'usually a dropped connection. <button type="button" class="btn btn--ghost btn--sm" ' +
+          'id="mgRetryBoot">Reload</button></span>';
+        var again = el('mgRetryBoot');
+        if (again) again.addEventListener('click', function () { location.reload(); });
+      }
     });
   };
 
