@@ -68,6 +68,15 @@
 
   window.NL_CHANGELOG = [
     {
+      date: '13/08/2026',
+      version: 'v2.2',
+      items: [
+        'Fixed: exported graphics could come out with crests missing — on a slow connection sometimes all but one. Badges now load from this site instead of a third-party domain.',
+        'Crests now use the 256px versions rather than the full-size originals — visually identical at the size they are drawn, but around 9x lighter to load.',
+        'If any crest still fails to load, the status line now says so and stays up, instead of reporting a clean download.'
+      ]
+    },
+    {
       date: '13 July 2026',
       version: 'v2.1',
       items: [
@@ -285,11 +294,24 @@
   const CANVAS_SIZE = 1347;
 
   /* ===== Asset URLs ===== */
-  const REPO_ASSETS = "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/";
+  /* Same-origin on purpose. These assets are drawn into the export canvas, and
+     fetching them from raw.githubusercontent.com made every graphic hostage to a
+     third party: that host does not Vary on Origin and sits behind a 5-minute
+     CDN cache, so a crossOrigin request could reuse a non-CORS cache entry and
+     fail. The image was then skipped and the export shipped without it. The
+     identical files are served from this domain (_headers caches them a week),
+     which removes CORS, tainting and the third-party dependency in one go. */
+  const REPO_ASSETS = "/assets/";
 
   const BG_URL = REPO_ASSETS + "backgrounds/fixtures-1x1.png";
 
-  const CREST_BASE_URL = "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/";
+  /* medium tier (256px), not the originals. These crests are drawn at
+     50px in the export, so 256px is still 5.1x oversampled — while the
+     full-res originals average 524KB each (largest 5.4MB). At 8 crests that
+     is ~4.2MB of needless transfer, which on a slow connection is exactly
+     how a crest ends up not arriving in time and being dropped from the
+     graphic. Medium averages 57KB: same output, ~9x less to fetch. */
+  const CREST_BASE_URL = "/assets/crests/medium/";
 
   function crestUrlForName(teamName){
     var t = (teamName || "").replace(/\s+/g," ").trim();
@@ -305,7 +327,10 @@
   const DIV_BADGE_POS = { x: 750, y: 1258, scale: 0.075 };
 
   /* ===== Clubs metadata (fetched) ===== */
-  var CLUBS_META_URL = "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json";
+  /* Same-origin: this is the last runtime dependency on a third party in
+     this tool, and if it fails the club list never populates. Served from
+     this domain it rides the connection the page already has. */
+  var CLUBS_META_URL = "/assets/data/clubs-meta.json";
   var TEAM_NAMES = [];
   var TEAM_NAME_SET = new Set();
 
@@ -385,9 +410,13 @@
 
   /* ================= HELPERS ================= */
 
-  function setStatus(msg){
+  /* sticky=true leaves the message up. Progress messages should clear; a
+     warning that the graphic you just downloaded is incomplete must not —
+     900ms is not long enough to read, let alone act on. */
+  function setStatus(msg, sticky){
     statusTextEl.textContent = msg;
     window.clearTimeout(setStatus._t);
+    if(sticky) return;
     setStatus._t = window.setTimeout(()=> statusTextEl.textContent = "Ready", 900);
   }
 
@@ -622,13 +651,26 @@
     divBadgeImg = await loadImage(divUrl);
   }
 
+  /* Count of crests that did NOT load on the last preload. A crest that fails
+     is skipped by the draw, so without this an incomplete graphic leaves
+     silently — the failure a colleague hit on a slow connection. */
+  var missingCrests = 0;
+
+  /* Appends the warning to the status line. Never blocks the download. */
+  function exportNote(base){
+    if(!missingCrests) return base;
+    return base + " — but " + missingCrests + " crest" + (missingCrests === 1 ? "" : "s") +
+           " didn't load. Check your connection and export again.";
+  }
+
   async function preloadRowCrests(){
     var urls = new Set();
     for(var i=0;i<ROWS_COUNT;i++){
       var t = rowsState[i].team;
       if(t && TEAM_NAME_SET.has(t)) urls.add(crestUrlForName(t));
     }
-    await Promise.all([...urls].map(function(u){ return loadImage(u).catch(function(){return null;}); }));
+    var results = await Promise.all([...urls].map(function(u){ return loadImage(u).catch(function(){return null;}); }));
+    missingCrests = results.filter(function(img){ return !img; }).length;
   }
 
   function drawDivisionBadge(c){
@@ -751,7 +793,7 @@
       if(!blob){ setStatus("Export failed"); return; }
       var fn = ("Top goalscorers - " + divisionSel.value + ".png").replace(/\s+/g," ").trim();
       NL.download(fn, blob, "image/png");
-      setStatus("Downloaded");
+      setStatus(exportNote("Downloaded"), missingCrests > 0);
       if (window.NL && NL.writeAudit) NL.writeAudit('top-scorers_download', fn);
     }catch(e){ console.error(e); setStatus("Export error"); }
   }
