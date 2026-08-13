@@ -1,7 +1,15 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.4 (10/08/2026)
+   Version: v1.5 (12/08/2026)
+
+   v1.5 — an address names WHICH of the person's jobs it is for, as a set
+   rather than one-or-all. Barrow's safeguarding champion is also a director
+   and the club is happy for his address against one post and not the other.
+   sectionsOf() reads the set (legacy single `section` = a set of one), a
+   department listing an address is not for says nothing rather than "None
+   held", and a card annotates it — a card is the whole person, so an address
+   for one of their jobs has to say which.
 
    v1.4 — publication is per address and per number. contactsOf() returns both
    channels normalised with their own hide state, channel() decides what a
@@ -110,9 +118,29 @@
      section means "wherever this person appears", which is exactly the
      current behaviour, so nothing already stored changes meaning. */
   function addrOf(e) { return (typeof e === 'string') ? e : ((e && e.address) || ''); }
+
+  /* WHICH of their jobs an address is for. Barrow asked for exactly this and
+     it is the ordinary case, not the exotic one: their safeguarding champion
+     is also a director, and the club is happy for his address to be listed
+     against the safeguarding post and not the board one.
+
+     v1.5 makes it a SET. The single `section` string could say "everywhere"
+     or "exactly one place" and nothing in between, which happened to fit
+     Barrow — one target role — and would not fit somebody wanted under Media
+     and Commercial but not Directors. 275 of 1,070 people hold more than one
+     post, so that was a matter of time.
+
+     Nothing stored says anything yet: an empty set means "wherever this
+     person appears", which is the behaviour of all 914 addresses today. The
+     legacy single `section` is read as a set of one, so no migration. */
+  function sectionsOf(e) {
+    if (!e || typeof e === 'string') { return []; }
+    if (e.sections) { return arr(e.sections).filter(Boolean); }
+    return e.section ? [e.section] : [];
+  }
   function forHere(e, section) {
-    var s = (typeof e === 'string') ? '' : ((e && e.section) || '');
-    return !s || !section || s === section;
+    var s = sectionsOf(e);
+    return !s.length || !section || s.indexOf(section) > -1;
   }
   function emailsOf(p, section) {
     return arr(p && p.emails).filter(function (e) {
@@ -164,13 +192,14 @@
       emails: arr(p && p.emails).filter(function (e) {
         return addrOf(e).trim() && forHere(e, section);
       }).map(function (e) {
-        return { value: addrOf(e).trim(), ext: '', hide: entryHidden(e, p) };
+        return { value: addrOf(e).trim(), ext: '', hide: entryHidden(e, p),
+                 sections: sectionsOf(e) };
       }),
       phones: arr(p && p.phones).filter(function (x) {
         return x && (x.number || '').trim() && forHere(x, section);
       }).map(function (x) {
         return { value: (x.number || '').trim(), ext: (x.ext || '').trim(),
-                 hide: entryHidden(x, p) };
+                 hide: entryHidden(x, p), sections: sectionsOf(x) };
       })
     };
   }
@@ -189,6 +218,18 @@
       withheld: !!(p && (p.hideContact || p[marker])) ||
                 entries.some(function (e) { return e.hide; })
     };
+  }
+
+  /* Do they hold one at all, anywhere? The difference between "we have no
+     email for this person" and "we have one, but it is for their other job".
+     A department listing that says "None held" against the second is a small
+     untruth, and the honest answer is to say nothing: naming it would only
+     tell a reader there is an address to go and ask for, which is the thing
+     the club asked us not to do. */
+  function holdsAny(p, key) {
+    return arr(p && p[key]).some(function (x) {
+      return (key === 'emails' ? addrOf(x) : (x && x.number) || '').trim();
+    });
   }
   /* lastName where the club gave one, otherwise the last word of the name.
      A directory is looked up by surname and nothing else. */
@@ -303,8 +344,8 @@
 
     /* Per channel now: an email cell can read "Not published" while the phone
        beside it shows a number, which is the whole point of the change. */
-    var quietEm = em.withheld && !showHidden ? 'Not published' : 'None held';
-    var quietPh = tl.withheld && !showHidden ? 'Not published' : 'None held';
+    var quietEm = em.withheld && !showHidden ? 'Not published'
+      : (holdsAny(p, 'emails') ? '' : 'None held');
     /* The person-level tag survives for the person-level decision only. When
        it is set, everything is held back, and tagging each of six lines
        individually says the same thing six times. Where the decision is
@@ -340,7 +381,8 @@
         (titles.length ? titles.map(esc).join(' &middot; ')
           : (opts && opts.showGaps ? '<em>No job title</em>' : '')) +
       '</div>' +
-      '<div>' + tag + (mail || '<span class="cd-row__quiet">' + quietEm + '</span>') + '</div>' +
+      '<div>' + tag + (mail || (quietEm
+        ? '<span class="cd-row__quiet">' + quietEm + '</span>' : '')) + '</div>' +
       /* The phone cell has always stayed blank when there is simply no
          number — "None held" against 400 people is noise. It speaks up only
          to say a number exists and is being kept back. */
@@ -353,6 +395,24 @@
      what they are not publishing. Off in the reader, which is handed a
      record these entries were removed from, and off when the whole person
      is held back and the row already carries one tag for the lot. */
+  /* On a CARD only. A card is the whole person with every job listed, so an
+     address that belongs to one of those jobs needs to say which — otherwise
+     Barrow's safeguarding address reads as their director's address too, and
+     the club agreed to one of those and not the other. In a department LIST
+     it is redundant: you are already inside the department.
+
+     Shown to readers as well as editors. "Listed for that purpose" is exactly
+     what the club agreed to, so saying which purpose is keeping the promise,
+     not leaking anything. */
+  function scopeNote(entry, p) {
+    var s = entry.sections || [];
+    if (!s.length) { return ''; }
+    var all = arr(p && p.roles).map(function (r) { return r && r.section; })
+      .filter(function (x, i, a) { return x && a.indexOf(x) === i; });
+    if (all.length < 2 || s.length >= all.length) { return ''; }
+    return ' <span class="cd-scope">' + esc(s.join(' \u00b7 ')) + ' only</span>';
+  }
+
   function held(entry, on) {
     return (on && entry.hide)
       ? ' <span class="cd-held" title="This one is kept out of the published ' +
@@ -403,12 +463,12 @@
     var lines = em.show.map(function (e) {
       return '<a class="cd-pc__line" href="mailto:' + esc(e.value) + '">' +
         '<span class="cd-pc__ic">' + glyph('email') + '</span>' + esc(e.value) +
-        held(e, mark) + '</a>';
+        scopeNote(e, p) + held(e, mark) + '</a>';
     }).concat(tl.show.map(function (x) {
       return '<a class="cd-pc__line" href="tel:' + esc(tel(x.value)) + '">' +
         '<span class="cd-pc__ic">' + glyph('phone') + '</span>' + esc(x.value) +
         (x.ext ? ' <span class="cd-row__ext">ext ' + esc(x.ext) + '</span>' : '') +
-        held(x, mark) + '</a>';
+        scopeNote(x, p) + held(x, mark) + '</a>';
     })).join('');
 
     return '<li class="cd-pc' + (unlisted ? ' cd-pc--unlisted' : '') + '"' +
@@ -597,6 +657,7 @@
     emailsOf: emailsOf,
     phonesOf: phonesOf,
     contactsOf: contactsOf,
+    sectionsOf: sectionsOf,
     entryHidden: entryHidden,
     ownHide: ownHide,
     addrOf: addrOf,

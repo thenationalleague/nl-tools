@@ -1,7 +1,12 @@
 /* =========================================================================
    NL Tools — club directory tidier
    File: /club-directory/_tidy.js
-   Version: v1.4 (10/08/2026)
+   Version: v1.5 (12/08/2026)
+
+   v1.5 — Merging two records for one person now unions the role scoping as
+     well as OR-ing the withheld state. It preserved neither before: the
+     rebuilt entry carried only the legacy single `section`, so combining
+     duplicates silently widened an address the club had narrowed.
 
    v1.4 — An address can be an object now that publication is decided per
      address, and two passes here had only ever been handed strings. The case
@@ -500,27 +505,53 @@
         return String((typeof e === 'string' ? e : (e && e.address)) || '')
           .trim().toLowerCase();
       };
+      /* Which of the person's jobs an entry is for. Mirrors NLDirectory
+         .sectionsOf, and is duplicated rather than imported because
+         club-signoff loads this file WITHOUT _directory.js. */
+      var secs = function (e) {
+        if (!e || typeof e === 'string') { return []; }
+        if (e.sections) { return arr(e.sections).filter(Boolean); }
+        return e.section ? [e.section] : [];
+      };
+      /* Two copies of one address, combined. Hidden wins over published —
+         merging records must not quietly publish something. Scope is the
+         UNION, and an empty scope means "wherever they appear", so an empty
+         one absorbs a narrow one rather than being narrowed by it. */
+      var fuse = function (cur, add, valueKey, value) {
+        var out = {};
+        out[valueKey] = value;
+        var a = secs(cur), b = secs(add);
+        if (a.length && b.length) {
+          out.sections = a.concat(b.filter(function (x) { return a.indexOf(x) < 0; }));
+        }
+        if ((cur && cur.hide) || (add && add.hide)) { out.hide = true; }
+        if (cur && cur.ext) { out.ext = cur.ext; }
+        else if (add && add.ext) { out.ext = add.ext; }
+        return out;
+      };
       arr(p.emails).forEach(function (em) {
         if (!addr(em)) { return; }
-        var at = -1;
-        arr(t.emails).forEach(function (x, i) { if (addr(x) === addr(em)) { at = i; } });
-        if (at < 0) { t.emails = arr(t.emails).concat(em); return; }
-        if (em && typeof em === 'object' && em.hide) {
-          var keep = arr(t.emails), cur = keep[at];
-          var next = { address: (typeof cur === 'string') ? cur : ((cur && cur.address) || ''),
-                       hide: true };
-          if (cur && typeof cur === 'object' && cur.section) { next.section = cur.section; }
-          keep[at] = next;
-          t.emails = keep;
-        }
+        var at = -1, keep = arr(t.emails);
+        keep.forEach(function (x, i) { if (addr(x) === addr(em)) { at = i; } });
+        if (at < 0) { t.emails = keep.concat(em); return; }
+        var cur = keep[at];
+        var value = (typeof cur === 'string') ? cur : ((cur && cur.address) || '');
+        var next = fuse(cur, em, 'address', value);
+        /* Back to a plain string if nothing needs saying — the shape 914
+           addresses are stored in, and worth not leaving behind. */
+        keep[at] = (!next.sections && !next.hide) ? value : next;
+        t.emails = keep;
       });
       arr(p.phones).forEach(function (ph) {
-        var at = -1;
-        arr(t.phones).forEach(function (x, i) {
-          if (x && ph && String(x.number || '').trim() === String(ph.number || '').trim()) { at = i; }
-        });
-        if (at < 0) { t.phones = arr(t.phones).concat(ph); return; }
-        if (ph && ph.hide) { var kp = arr(t.phones); kp[at].hide = true; t.phones = kp; }
+        var num = function (x) { return String((x && x.number) || '').trim(); };
+        if (!num(ph)) { return; }
+        var at = -1, keep = arr(t.phones);
+        keep.forEach(function (x, i) { if (num(x) === num(ph)) { at = i; } });
+        if (at < 0) { t.phones = keep.concat(ph); return; }
+        var merged = fuse(keep[at], ph, 'number', num(keep[at]));
+        if (merged.ext === undefined) { merged.ext = (keep[at] && keep[at].ext) || ''; }
+        keep[at] = merged;
+        t.phones = keep;
       });
       if (p.hideContact) { t.hideContact = true; }
       if (p.id) { t.mergedIds = arr(t.mergedIds).concat(p.id); }
