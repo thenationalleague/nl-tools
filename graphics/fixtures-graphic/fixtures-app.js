@@ -46,7 +46,12 @@
      dropped from the export rather than drawn. NL.clubs.crestUrl points at
      raw.githubusercontent.com, so it cannot be used on this path; the club
      lookup still comes from the canon, only the URL is local. */
-  var CREST_BASE = "/assets/crests/";
+  /* medium tier (256px). Row crests render small in a 1080-wide graphic, so
+     256px is comfortably oversampled, while the full-res originals average
+     524KB each (largest 5.4MB) — at 24 crests that is ~12.6MB of needless
+     transfer, and the slower the connection the more likely one of them fails
+     to arrive before export and is dropped. Medium averages 57KB. */
+  var CREST_BASE = "/assets/crests/medium/";
   function crestUrl(name) {
     return name ? CREST_BASE + encodeURIComponent(name) + ".png" : "";
   }

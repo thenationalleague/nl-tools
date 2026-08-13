@@ -297,6 +297,15 @@
     pasteEl.value = lines.join("\n");
   }
 
+  /* Crests come from the shared clubs-data mirror, which points at the
+     full-res originals (mean 524KB, largest 5.4MB). A 24-row table renders
+     them at row height in a 1080-wide graphic, so the medium tier (256px) is
+     comfortably oversampled and ~9x lighter — the difference between ~12.6MB
+     and ~1.4MB of crests, which is what decides whether they all arrive in
+     time on a slow connection. Overridden here rather than in the shared file
+     so nothing else changes behaviour. */
+  if (window.NL_CREST_BASE === "/assets/crests/") window.NL_CREST_BASE = "/assets/crests/medium/";
+
   /* ---------------- export ---------------- */
   function fileName() {
     var d = new Date();
@@ -317,6 +326,14 @@
     var restore = function () {};
     try {
       await (document.fonts && document.fonts.ready);
+      /* Wait for every crest to finish loading FIRST. inlineImages can only
+         convert an image the browser already holds — anything still in flight
+         was replaced with a blank, so on a cold cache or a slow connection the
+         export came out with all but one of the 24 crests missing, and said
+         "Downloaded" regardless. Same fix as fixtures-graphic. */
+      var pending = [].slice.call(gfx.querySelectorAll("img"));
+      var loaded = await Promise.all(pending.map(function (img) { return whenImageReady(img, 10000); }));
+      var late = loaded.filter(function (ok) { return !ok; }).length;
       restore = await inlineImages(gfx);   /* pre-inline crests so the canvas isn't cross-origin tainted */
       var blob = await window.htmlToImage.toBlob(gfx, {
         width: 1080, height: h, pixelRatio: 1, cacheBust: false,
@@ -327,7 +344,10 @@
       a.download = fileName();
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(a.href);
-      setStatus("Downloaded " + state.format);
+      /* never let a half-drawn graphic leave without saying so */
+      setStatus(late
+        ? "Downloaded — but " + late + " image" + (late === 1 ? "" : "s") + " didn't load. Check your connection and export again."
+        : "Downloaded " + state.format);
     } catch (err) {
       console.error(err);
       setStatus("Export blocked — use a screenshot. (" + (err && err.message) + ")");
@@ -336,6 +356,27 @@
       gfx.style.transform = prevT; gfxHost.style.width = prevW; gfxHost.style.height = prevH;
     }
   }
+  /* Resolve once an <img> has actually decoded, or once it's clear it won't.
+     Never rejects — the caller only needs to know whether it made it. */
+  function whenImageReady(img, ms) {
+    return new Promise(function (resolve) {
+      if (img.complete && img.naturalWidth) return resolve(true);
+      var settled = false;
+      function finish(ok) {
+        if (settled) return;
+        settled = true; clearTimeout(timer);
+        img.removeEventListener("load", onLoad);
+        img.removeEventListener("error", onError);
+        resolve(ok);
+      }
+      function onLoad() { finish(!!img.naturalWidth); }
+      function onError() { finish(false); }
+      var timer = setTimeout(function () { finish(false); }, ms || 10000);
+      img.addEventListener("load", onLoad);
+      img.addEventListener("error", onError);
+    });
+  }
+
   async function inlineImages(root) {
     var BLANK = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
     var imgs = [].slice.call(root.querySelectorAll("img"));

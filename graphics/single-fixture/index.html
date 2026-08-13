@@ -73,6 +73,15 @@
 
   window.NL_CHANGELOG = [
     {
+      date: '13/08/2026',
+      version: 'v2.2',
+      items: [
+        'Fixed: exported graphics could come out with crests missing — on a slow connection sometimes all but one. Badges now load from this site instead of a third-party domain.',
+        'Crests now use the 256px versions rather than the full-size originals — visually identical at the size they are drawn, but around 9x lighter to load.',
+        'If any crest still fails to load, the status line now says so and stays up, instead of reporting a clean download.'
+      ]
+    },
+    {
       date: '13 July 2026',
       version: 'v2.1',
       items: [
@@ -282,7 +291,10 @@
   const CANVAS_SIZE = 1347;
 
   /* ===== Asset URLs ===== */
-  const REPO_ASSETS = "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/";
+  /* Same-origin on purpose — see the note in league-tables. Fetching export
+     assets from a third party made the graphic hostage to that host's CORS and
+     cache behaviour, and a failed fetch was silently skipped from the export. */
+  const REPO_ASSETS = "/assets/";
 
   const BG_URL = REPO_ASSETS + "backgrounds/fixtures-1x1.png";
 
@@ -293,7 +305,7 @@
   };
   const DIV_BADGE_POS = { x: 750, y: 200, scale: 0.075 };
 
-  const CREST_BASE_URL = "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/";
+  const CREST_BASE_URL = "/assets/crests/";
   const CREST_HOME_POS = { x: 550, y: 600 };
   const CREST_AWAY_POS = { x: 950, y: 600 };
   const CREST_MAX_W = 300;
@@ -313,7 +325,10 @@
   };
 
   /* ===== Clubs metadata (fetched from clubs-meta.json) ===== */
-  var CLUBS_META_URL = "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json";
+  /* Same-origin: this is the last runtime dependency on a third party in
+     this tool, and if it fails the club list never populates. Served from
+     this domain it rides the connection the page already has. */
+  var CLUBS_META_URL = "/assets/data/clubs-meta.json";
   var TEAM_NAMES = [];
   var TEAM_NAME_SET = new Set();
   var NAME_TO_SHORT = new Map();
@@ -376,10 +391,22 @@
 
   /* ================= HELPERS ================= */
 
-  function setStatus(msg){
+  /* sticky=true leaves the message up — a warning that the graphic you just
+     downloaded is incomplete must not vanish after 900ms. */
+  function setStatus(msg, sticky){
     statusTextEl.textContent = msg;
     window.clearTimeout(setStatus._t);
+    if(sticky) return;
     setStatus._t = window.setTimeout(()=> statusTextEl.textContent = "Ready", 900);
+  }
+
+  /* Crests that failed to load on the last draw. A failed crest is skipped, so
+     without this an incomplete graphic leaves silently. */
+  var missingCrests = 0;
+  function exportNote(base){
+    if(!missingCrests) return base;
+    return base + " — but " + missingCrests + " crest" + (missingCrests === 1 ? "" : "s") +
+           " didn't load. Check your connection and export again.";
   }
 
   function loadImage(url){
@@ -531,6 +558,7 @@
   async function renderToContext(c){
     await ensureBaseImages();
     await preloadNeededCrests();
+    missingCrests = 0;   /* per-render, or it accumulates across draws */
 
     c.setTransform(1,0,0,1,0,0);
     c.clearRect(0,0,CANVAS_SIZE,CANVAS_SIZE);
@@ -555,10 +583,12 @@
 
     if(hUrl){
       const img = await loadImage(hUrl).catch(()=>null);
+      if(!img) missingCrests++;
       if(img) drawContainedImage(c, img, CREST_HOME_POS.x, CREST_HOME_POS.y, CREST_MAX_W, CREST_MAX_H);
     }
     if(aUrl){
       const img = await loadImage(aUrl).catch(()=>null);
+      if(!img) missingCrests++;
       if(img) drawContainedImage(c, img, CREST_AWAY_POS.x, CREST_AWAY_POS.y, CREST_MAX_W, CREST_MAX_H);
     }
 
@@ -630,7 +660,7 @@
       if(!blob){ setStatus("Export failed"); return; }
       const fn = buildFilename("1x1");
       NL.download(fn, blob, "image/png");
-      setStatus("Downloaded");
+      setStatus(exportNote("Downloaded"), missingCrests > 0);
       if (window.NL && NL.writeAudit) NL.writeAudit('single-fixture_download', fn);
     }catch(e){ console.error(e); setStatus("Export error"); }
   }
@@ -658,7 +688,7 @@
       if(!blob){ setStatus("Export failed"); return; }
       const fn = buildFilename("4x5");
       NL.download(fn, blob, "image/png");
-      setStatus("Downloaded");
+      setStatus(exportNote("Downloaded"), missingCrests > 0);
       if (window.NL && NL.writeAudit) NL.writeAudit('single-fixture_download', fn);
     }catch(e){ console.error(e); setStatus("Export error"); }
   }
