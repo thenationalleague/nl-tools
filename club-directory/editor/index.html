@@ -7,6 +7,29 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.34 — (13/08/2026) Shared mailboxes can be added and edited. They could
+         not be, and nobody noticed for a week, because the block rendered
+         only where there was already something to render: 38 clubs sent none,
+         and at those clubs there was no block, so no way in. A read-only
+         field with no empty state is a field that looks finished.
+         The block is drawn now whether or not the club sent any, says so when
+         they did not, and carries Add / Edit. The department is picked from
+         the League's own list rather than typed, because the staff overview
+         matches these onto mailing lists by their label and a free-typed
+         "Comms" matches nothing; anything genuinely outside the list goes
+         under Something else with a name of its own, which is what the clubs
+         did themselves (Careers, Retail, Club Office).
+         Keys are slugged — RTDB refuses . # $ / [ ] in a key and throws
+         synchronously, so "Media & marketing" has to become media-marketing
+         or the save takes the click handler down. An existing mailbox keeps
+         its key, so an edit stays an edit rather than becoming a delete and
+         an add.
+         Threaded through the snapshot, the diff, the undo patch and the
+         journal in the same pass, rather than discovered afterwards — which
+         is what happened with the mailing lists in v1.30, where a change left
+         no green marker and had no Undo behind it.
+         formField() comes out of the person modal and into the file: second
+         use, so it moves rather than being written twice.
   v1.33 — (12/08/2026) An address now names WHICH of the person's jobs it is
          for. Barrow asked for it and it is the ordinary case: their
          safeguarding champion is also a director twice over, and the club is
@@ -1474,18 +1497,35 @@
   var LIST_ORDER = NLDirectory.LIST_ORDER;
   var listMembers = NLDirectory.listMembers;
 
+  /* Rendered whether or not the club sent any. The first cut returned early
+     on an empty set, so at the 38 clubs that sent none the block did not
+     exist \u2014 and with no block there was no way in, which is how a whole
+     field ended up read-only by accident. An empty state that says so is
+     the only version of this that can be added to. */
   function showInboxes(club, rec) {
     var boxes = rec.inboxes || {};
     var keys = Object.keys(boxes).filter(function (k) {
       var b = boxes[k] || {};
       return (b.email || '').trim() || (b.phone || '').trim();
     });
-    if (!keys.length) { return; }
     var wrap = document.createElement('div');
     wrap.className = 'ed-block';
-    wrap.innerHTML = '<h2 class="ed-block__h">Shared mailboxes</h2>' +
-      '<p class="form-hint">Department addresses the club gave us, as opposed ' +
-      'to a person\u2019s own.</p>';
+    var head = document.createElement('div');
+    head.className = 'section-head';
+    head.innerHTML = '<h2 class="ed-block__h">Shared mailboxes</h2>';
+    wrap.appendChild(head);
+    var hint = document.createElement('p');
+    hint.className = 'form-hint';
+    hint.textContent = 'Department addresses the club gave us, as opposed to ' +
+      'a person\u2019s own.';
+    wrap.appendChild(hint);
+
+    if (!keys.length) {
+      var none = document.createElement('p');
+      none.className = 'cd-empty';
+      none.textContent = 'None held for ' + club + '.';
+      wrap.appendChild(none);
+    }
     var ul = document.createElement('ul');
     ul.className = 'cd-cards';
     keys.sort().forEach(function (k) {
@@ -1510,7 +1550,188 @@
       ul.appendChild(li);
     });
     wrap.appendChild(ul);
+    var marks = document.createElement('div');
+    marks.id = 'edBoxEdits';
+    wrap.appendChild(marks);
+    if (!signedOffBy(rec)) {
+      var btn = document.createElement('button');
+      btn.className = 'btn btn--sm btn--ghost';
+      btn.type = 'button';
+      btn.textContent = keys.length ? 'Edit shared mailboxes' : 'Add a shared mailbox';
+      btn.addEventListener('click', function () { editInboxes(club, rec); });
+      head.appendChild(btn);
+    }
     $('extra').appendChild(wrap);
+  }
+
+  /* A club's departmental addresses — commercial@, tickets@ — which are
+     frequently the address the club would rather you used. 34 of the 72 sent
+     them and nothing could touch them afterwards.
+
+     The department is picked from the League's own list rather than typed,
+     because these get matched onto mailing lists by their label on the staff
+     overview, and a free-typed "Comms" matches nothing. Anything genuinely
+     outside the list goes under Other with a name of its own — which is what
+     the clubs did themselves: Careers, Retail, Club Office. */
+  function editInboxes(club, rec) {
+    var boxes = rec.inboxes || {};
+    var rows = Object.keys(boxes).sort().map(function (k) {
+      var b = boxes[k] || {};
+      return { key: k, dept: b.dept || k, email: b.email || '',
+               phone: b.phone || '', ext: b.ext || '', gone: false };
+    });
+
+    var wrap = document.createElement('div');
+    var paint = function () {
+      wrap.innerHTML = '';
+      var live = rows.filter(function (r) { return !r.gone; });
+      if (!live.length) {
+        var p0 = document.createElement('p');
+        p0.className = 'form-hint';
+        p0.textContent = 'None yet. Add one below.';
+        wrap.appendChild(p0);
+      }
+      live.forEach(function (r) {
+        var card = document.createElement('div');
+        card.className = 'ed-role';
+        var grid = document.createElement('div');
+        grid.className = 'form-grid';
+
+        var dept = document.createElement('select');
+        dept.className = 'ed-dept';
+        dept.innerHTML = NLDirectory.ORDER.map(function (sec) {
+          return '<option value="' + esc(sec) + '"' +
+            (sec === r.dept ? ' selected' : '') + '>' + esc(sec) + '</option>';
+        }).join('') +
+          '<option value="__other"' +
+          (NLDirectory.ORDER.indexOf(r.dept) < 0 ? ' selected' : '') +
+          '>Something else…</option>';
+
+        var other = document.createElement('input');
+        other.className = 'ed-cval';
+        other.value = NLDirectory.ORDER.indexOf(r.dept) < 0 ? r.dept : '';
+        other.placeholder = 'e.g. Retail';
+        other.hidden = dept.value !== '__other';
+        dept.addEventListener('change', function () {
+          other.hidden = dept.value !== '__other';
+          r.dept = dept.value === '__other' ? other.value.trim() : dept.value;
+          if (dept.value === '__other') { other.focus(); }
+        });
+        other.addEventListener('input', function () { r.dept = other.value.trim(); });
+
+        var deptWrap = document.createElement('div');
+        deptWrap.appendChild(dept);
+        deptWrap.appendChild(other);
+
+        var em = document.createElement('input');
+        em.className = 'ed-cval'; em.type = 'email'; em.value = r.email;
+        em.placeholder = 'e.g. tickets@example.co.uk';
+        em.addEventListener('input', function () { r.email = em.value.trim(); });
+
+        var ph = document.createElement('input');
+        ph.className = 'ed-cval'; ph.value = r.phone;
+        ph.placeholder = 'e.g. 01234 567890';
+        ph.addEventListener('input', function () { r.phone = ph.value.trim(); });
+
+        var ex = document.createElement('input');
+        ex.className = 'ed-cval'; ex.value = r.ext;
+        ex.placeholder = 'e.g. 204';
+        ex.addEventListener('input', function () { r.ext = ex.value.trim(); });
+
+        grid.appendChild(formField('Department', deptWrap));
+        grid.appendChild(formField('Email', em));
+        grid.appendChild(formField('Phone', ph));
+        grid.appendChild(formField('Extension', ex));
+        card.appendChild(grid);
+
+        var drop = document.createElement('button');
+        drop.className = 'btn btn--sm btn--ghost ed-del';
+        drop.type = 'button';
+        drop.textContent = 'Remove this mailbox';
+        drop.addEventListener('click', function () { r.gone = true; paint(); });
+        card.appendChild(drop);
+        wrap.appendChild(card);
+      });
+
+      var add = document.createElement('button');
+      add.className = 'btn btn--sm btn--ghost';
+      add.type = 'button';
+      add.textContent = 'Add a shared mailbox';
+      add.addEventListener('click', function () {
+        rows.push({ key: '', dept: NLDirectory.ORDER[0], email: '', phone: '',
+                    ext: '', gone: false });
+        paint();
+      });
+      wrap.appendChild(add);
+    };
+    paint();
+
+    NL.modal({
+      title: club + ' — shared mailboxes',
+      width: 'wide',
+      body: wrap,
+      buttons: [
+        { label: 'Cancel', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Save mailboxes', className: 'btn--primary', onClick: function (c) {
+          var next = {}, used = {};
+          rows.filter(function (r) { return !r.gone; }).forEach(function (r) {
+            if (!r.dept || (!r.email && !r.phone)) { return; }
+            /* A key already in the record keeps it, so an edit stays an edit
+               rather than becoming a delete and an add. A new one is slugged
+               from the department, and RTDB refuses . # $ / [ ] in a key —
+               "Media & marketing" has to become media-marketing or the save
+               throws synchronously and nothing is written. */
+            var key = r.key || slugKey(r.dept, used);
+            used[key] = true;
+            next[key] = { dept: r.dept };
+            if (r.email) { next[key].email = r.email; }
+            if (r.phone) { next[key].phone = r.phone; }
+            if (r.ext) { next[key].ext = r.ext; }
+          });
+
+          var was = rec.inboxes || {};
+          var touched = [];
+          keysOf(was, next).forEach(function (k) {
+            if (JSON.stringify(was[k] || null) === JSON.stringify(next[k] || null)) { return; }
+            var label = function (b) {
+              if (!b) { return ''; }
+              return [b.email, b.phone].filter(Boolean).join(', ');
+            };
+            touched.push((next[k] || was[k] || {}).dept || k);
+            logEdit(club, 'inboxes/' + k, label(was[k]), label(next[k]));
+          });
+          if (!touched.length) { c.close(); return; }
+
+          (ALL[club] || rec).inboxes = next;
+          c.close();
+          saveStructure(club, 'Shared mailboxes updated (' + touched.join(', ') + ')');
+        } }
+      ]
+    });
+  }
+
+  /* RTDB refuses . # $ / [ ] in a key and throws synchronously when handed
+     one, so this is not cosmetic. `used` keeps two mailboxes named the same
+     thing from becoming one. */
+  /* One labelled form control. Was a closure inside the person modal until
+     the mailbox editor wanted the same thing — second use, so it moves out
+     rather than being written twice. */
+  function formField(label, node) {
+    var g = document.createElement('div');
+    g.className = 'form-group';
+    var l = document.createElement('label');
+    l.textContent = label;
+    g.appendChild(l); g.appendChild(node);
+    return g;
+  }
+
+  function slugKey(dept, used) {
+    var base = String(dept || 'other').toLowerCase()
+      .replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'other';
+    var key = base, n = 2;
+    while (used[key]) { key = base + '-' + (n++); }
+    return key;
   }
 
   function showLists(club, rec) {
@@ -2211,6 +2432,7 @@
       people:    clone(NLDirectory.arr(rec.people)) || [],
       info:      clone(rec.info || {}),
       leads:     clone(rec.leads || {}),
+      inboxes:   clone(rec.inboxes || {}),
       signedOff: rec.signedOff || null,
       edits:     clone(NLDirectory.arr(prov.edits)) || [],
       changes:   clone(NLDirectory.arr(prov.changes)) || []
@@ -2269,6 +2491,17 @@
     });
     if (keysOf(leads).length) { out.leads = leads; }
 
+    /* Shared mailboxes, on the same terms and for the same reason. Keyed by
+       mailbox because those keys are slugs — media-marketing, other-careers —
+       and safe as RTDB keys. */
+    var boxes = {};
+    keysOf(a.inboxes, b.inboxes).forEach(function (k) {
+      if (same((a.inboxes || {})[k], (b.inboxes || {})[k])) { return; }
+      boxes[k] = { before: clone((a.inboxes || {})[k]) || null,
+                   after:  clone((b.inboxes || {})[k]) || null };
+    });
+    if (keysOf(boxes).length) { out.inboxes = boxes; }
+
     if (!same(a.signedOff, b.signedOff)) {
       out.signedOff = { before: a.signedOff || null, after: b.signedOff || null };
     }
@@ -2324,6 +2557,13 @@
         if (v == null) { delete rec.leads[k]; } else { rec.leads[k] = clone(v); }
       });
     }
+    if (patch.inboxes) {
+      rec.inboxes = rec.inboxes || {};
+      Object.keys(patch.inboxes).forEach(function (k) {
+        var v = patch.inboxes[k].before;
+        if (v == null) { delete rec.inboxes[k]; } else { rec.inboxes[k] = clone(v); }
+      });
+    }
     if (patch.signedOff) { rec.signedOff = clone(patch.signedOff.before); }
 
     var prov = PROV[club] || (PROV[club] = {});
@@ -2345,6 +2585,11 @@
      spotting the one case undo cannot isolate: two acts on one person. */
   function touchedBy(club, patch) {
     var names = [];
+    Object.keys(patch.inboxes || {}).forEach(function (k) {
+      var b = (patch.inboxes[k] || {});
+      var d = (b.after && b.after.dept) || (b.before && b.before.dept) || k;
+      names.push('the ' + d + ' mailbox');
+    });
     Object.keys(patch.leads || {}).forEach(function (k) {
       names.push((LIST_LABEL[k] || k) + ' list');
     });
@@ -2852,14 +3097,7 @@
         wrap.appendChild(p2);
       }
     };
-    var field = function (label, node) {
-      var g = document.createElement('div');
-      g.className = 'form-group';
-      var l = document.createElement('label');
-      l.textContent = label;
-      g.appendChild(l); g.appendChild(node);
-      return g;
-    };
+    var field = formField;
     var textbox = function (value, placeholder) {
       var i = document.createElement('input');
       i.value = value || '';
@@ -3669,12 +3907,13 @@
   function markEdits(club) {
     var edits = editList(club);
     if (!edits.length) { return; }
-    var byPerson = {}, info = [], lists = [];
+    var byPerson = {}, info = [], lists = [], boxes = [];
     edits.forEach(function (e) {
       var m = /^people\/([^/]+)\/(.*)$/.exec(e.path || '');
       if (m) { (byPerson[m[1]] = byPerson[m[1]] || []).push({ tail: m[2], e: e }); }
       else if (/^info\//.test(e.path || '')) { info.push(e); }
       else if (/^leads\//.test(e.path || '')) { lists.push(e); }
+      else if (/^inboxes\//.test(e.path || '')) { boxes.push(e); }
     });
 
     $('out').querySelectorAll('.cd-row').forEach(function (row) {
@@ -3694,6 +3933,7 @@
 
     if (info.length) { markInfoEdits(club, info); }
     if (lists.length) { markListEdits(club, lists); }
+    if (boxes.length) { markBoxEdits(club, boxes); }
   }
 
   /* Green under the mailing lists, the same as a hand edit anywhere else.
@@ -3727,6 +3967,33 @@
     pill.title = (String(e.from || '').trim() ? 'Was "' + e.from + '". ' : 'Was blank. ') +
       'Changed by ' + (e.by || 'an editor') + ' on ' + NL.formatDate(e.at) + '.';
     pillsFor(row).appendChild(pill);
+  }
+
+  /* The same green marker the lists get. An address the League typed in has
+     to be as visible as one the club sent, or the next person to look cannot
+     tell which is which. */
+  function markBoxEdits(club, edits) {
+    var box = document.getElementById('edBoxEdits');
+    if (!box) { return; }
+    box.className = 'ed-infoedits';
+    box.innerHTML = '<b>' + edits.length +
+      (edits.length === 1 ? ' mailbox' : ' mailboxes') + ' changed by hand</b>';
+    var ul = document.createElement('ul');
+    var boxes = (ALL[club] || {}).inboxes || {};
+    edits.forEach(function (e) {
+      /* The department, not the storage key — "Media & marketing", not
+         media-marketing. A record that has since been removed has no
+         department left to name, so the key stands in. */
+      var key = e.path.replace(/^inboxes\//, '');
+      var li = document.createElement('li');
+      li.innerHTML = '<span class="ed-pill ed-pill--edit">' +
+        esc((boxes[key] || {}).dept || key) + '</span> ' +
+        (String(e.from || '').trim() ? 'was <b>' + esc(e.from) + '</b>'
+                                     : 'was <i>not held</i>') +
+        ' &mdash; ' + esc(e.by || 'an editor') + ', ' + esc(NL.formatDate(e.at));
+      ul.appendChild(li);
+    });
+    box.appendChild(ul);
   }
 
   function markInfoEdits(club, info) {
