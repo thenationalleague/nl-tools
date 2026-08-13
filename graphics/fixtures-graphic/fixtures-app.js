@@ -10,12 +10,16 @@
   var MAX_ROWS = 12;
 
   var DIVISION_LOGO = {
-    National: "/assets/divisions/National.png",
-    North:    "/assets/divisions/North.png",
-    South:    "/assets/divisions/South.png",
-    Cup:      "/assets/divisions/Cup.png"
+    National: "/assets/divisions/medium/National.png",
+    North:    "/assets/divisions/medium/North.png",
+    South:    "/assets/divisions/medium/South.png",
+    Cup:      "/assets/divisions/medium/NL%20Cup.png"
   };
-  var LOGO_FALLBACK = (window.__resources && window.__resources.logoFallback) || "/assets/divisions/The%20National%20League.png";
+  /* No LOGO_FALLBACK. A division badge that fails used to be replaced with the
+     generic National League logo, which published a graphic branded as the
+     wrong competition — worse than an obvious gap. Missing art now renders
+     blank (visibility:hidden keeps the header's spacing) and the export
+     warning names it. */
   var SPONSOR_URL = "/assets/partners/TIC%20Health.png";
   var ROSE_WHITE = (window.__resources && window.__resources.roseWhite) || "/assets/crests/National%20League%20rose%20white.png";
 
@@ -187,7 +191,7 @@
     head.className = "gfx-head";
     head.innerHTML =
       '<div class="logo-tile"><img class="div-logo" crossorigin="anonymous" src="' + DIVISION_LOGO[div] +
-        '" onerror="this.onerror=null;this.src=\'' + LOGO_FALLBACK + '\'"></div>' +
+        '" onerror="this.onerror=null;this.style.visibility=\'hidden\'"></div>' +
       '<div class="titles">' +
         '<span class="eyebrow">' + escapeHtml(state.sub || "2026-27") + '</span>' +
         '<h1 class="gfx-title">' + escapeHtml(matchdayTitle()) + '</h1>' +
