@@ -7,6 +7,29 @@
 <title>Club Directory Editor — The National League</title>
 <!--
   club-directory / editor / index.html
+  v1.33 — (12/08/2026) An address now names WHICH of the person's jobs it is
+         for. Barrow asked for it and it is the ordinary case: their
+         safeguarding champion is also a director twice over, and the club is
+         happy for his address against the safeguarding post and not the board
+         ones. 275 of the 1,070 hold more than one post.
+         The mechanism half-existed — an address could carry a section since
+         the per-role work — but it could say "everywhere" or "exactly one
+         place" and nothing in between, and the control was a dropdown whose
+         default option read "All roles". In 914 addresses it had never once
+         been used, which is what a control that looks like a label gets you.
+         It is a set now, and the control is laid out rather than furled: one
+         canon .filter-pill per role plus an All. Clicking a single role while
+         All is on means "just this one", so Barrow's case is one click.
+         Turning the last role off is refused rather than allowed — an address
+         that appears nowhere is what the Not published tick already says, and
+         two controls meaning one thing is how you get a record that disagrees
+         with itself.
+         A department an address is not for now says nothing rather than
+         "None held", which was a small untruth: we hold one, it is for their
+         other job. Naming it would only tell a reader there is an address to
+         go and ask for. Cards say which post an address is for, because a
+         card is the whole person and otherwise the safeguarding address reads
+         as the director's address too.
   v1.32 — (10/08/2026) Whether a detail is published is now decided per
          ADDRESS and per NUMBER, not per person. The old flag was one tick
          covering everything somebody had, so a club officer happy to publish
@@ -526,15 +549,15 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=35">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=28">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=29">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=30"></script>
-<script src="/club-directory/_tidy.js?v=28"></script>
-<script src="/club-directory/_gate.js?v=28"></script>
-<script src="/club-directory/_directory.js?v=28"></script>
+<script src="/club-directory/_tidy.js?v=29"></script>
+<script src="/club-directory/_gate.js?v=29"></script>
+<script src="/club-directory/_directory.js?v=29"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -802,7 +825,21 @@
   .ed-role.is-here { border-color: var(--navy-300); background: var(--navy-50); }
   .ed-roledel { margin-top: 10px; }
   .ed-clist { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
-  .ed-crow { display: flex; align-items: center; gap: 8px; }
+  .ed-crow { display: flex; flex-direction: column; gap: 6px; }
+  .ed-crow__top { display: flex; align-items: center; gap: 8px; }
+  /* Laid out, not furled behind a menu. The whole reason the old control was
+     never used once in 914 addresses is that it looked like a label. */
+  .ed-cscope { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; padding-left: 2px; }
+  .ed-cscope__l {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em;
+    font-variation-settings: 'wght' 800; color: var(--text-muted); margin-right: 3px;
+  }
+  .ed-cscope .filter-pill { font-size: 11px; padding: 3px 9px; }
+  /* On because "all" is on, rather than because it was picked. Reads as
+     active without claiming to be a choice somebody made. */
+  .ed-cscope .filter-pill.is-implied {
+    background: var(--navy-100); color: var(--navy-600); border-color: var(--navy-100);
+  }
   .ed-cval {
     flex: 1 1 auto; min-width: 0;
     font-family: var(--font); font-size: var(--text-sm);
@@ -810,13 +847,6 @@
     border-radius: var(--radius); background: var(--white); color: var(--text);
   }
   .ed-cval:focus { outline: none; box-shadow: var(--focus-ring); border-color: var(--primary); }
-  .ed-cfor {
-    flex: 0 1 190px; min-width: 0;
-    font-family: var(--font); font-size: var(--text-xs);
-    font-weight: 600; font-variation-settings: 'wght' 600;
-    padding: 8px 9px; border: 1px solid var(--border);
-    border-radius: var(--radius); background: var(--white); color: var(--text-muted);
-  }
   .ed-crow .ed-del { flex: 0 0 auto; }
   /* The publish tick sits on the line it governs, not in a legend somewhere
      else — the question is "this address?", so it is asked next to it. */
@@ -2685,7 +2715,7 @@
      Typing into the row is gone with them. Two ways to change the same field
      is worse than one even when both work, and this is the one that can show
      a job title and the address that goes with it at the same time. */
-  function contactRow(kind, value, section, roles, ext, hide) {
+  function contactRow(kind, value, sections, roles, ext, hide) {
     var row = document.createElement('div');
     row.className = 'ed-crow';
     /* Every phone record carries an ext field. All 563 are empty today and
@@ -2699,20 +2729,67 @@
     input.placeholder = kind === 'email' ? 'e.g. name@example.co.uk' : 'e.g. 01234 567890';
     if (kind === 'email') { input.type = 'email'; }
 
-    var pick = null;
-    /* Only worth asking when there is a choice to make. */
+    /* WHICH of their jobs this address is for. Only worth asking when there
+       is a choice to make — 795 of the 1,070 hold one post and see nothing.
+
+       Toggles, laid out, not a dropdown. The dropdown that used to be here
+       defaulted to a option reading "All roles", which is a sentence rather
+       than a state: nobody scrolling past it would know a choice was on
+       offer, and in the whole directory not one of the 914 addresses had ever
+       used it. These are the canon .filter-pill — nl-brand's own answer for
+       independent multi-select — so the state is on the face of it.
+
+       Clicking a single role while All is on means "just this one", which is
+       the gesture the request actually arrives as: Barrow wanted their man's
+       address under Safeguarding and not under his two board posts, and that
+       is one click. */
+    var scope = null, scopeState = (sections || []).slice();
     if (roles.length > 1) {
-      pick = document.createElement('select');
-      pick.className = 'ed-cfor';
-      var all = document.createElement('option');
-      all.value = ''; all.textContent = 'All roles';
-      pick.appendChild(all);
-      roles.forEach(function (sec) {
-        var o = document.createElement('option');
-        o.value = sec; o.textContent = sec;
-        if (sec === section) { o.selected = true; }
-        pick.appendChild(o);
-      });
+      scope = document.createElement('div');
+      scope.className = 'ed-cscope';
+      var lab = document.createElement('span');
+      lab.className = 'ed-cscope__l';
+      lab.textContent = 'Show under';
+      scope.appendChild(lab);
+
+      var pills = {};
+      var paint = function () {
+        var all = !scopeState.length;
+        pills.__all.classList.toggle('active', all);
+        roles.forEach(function (sec) {
+          pills[sec].classList.toggle('active', all || scopeState.indexOf(sec) > -1);
+          pills[sec].classList.toggle('is-implied', all);
+        });
+      };
+      var mk = function (key, text) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'filter-pill';
+        b.textContent = text;
+        b.addEventListener('click', function () {
+          if (key === '__all') { scopeState = []; }
+          else if (!scopeState.length) { scopeState = [key]; }   /* just this one */
+          else if (scopeState.indexOf(key) < 0) { scopeState.push(key); }
+          else if (scopeState.length > 1) {
+            scopeState = scopeState.filter(function (x) { return x !== key; });
+          } else {
+            /* Turning the last one off would mean the address appears
+               nowhere, which is what the Not published tick already says. Two
+               controls meaning the same thing is how you end up with a record
+               where one says yes and the other says no. */
+            NL.toast('An address has to show somewhere. To keep it out of the ' +
+              'directory entirely, use Not published.', 'info');
+            return;
+          }
+          paint();
+        });
+        scope.appendChild(b);
+        pills[key] = b;
+        return b;
+      };
+      mk('__all', 'All their roles');
+      roles.forEach(function (sec) { mk(sec, sec); });
+      paint();
     }
 
     /* One tick per address and per number, because that is the grain the
@@ -2740,10 +2817,14 @@
     del.appendChild(NL.icon('delete'));
     del.addEventListener('click', function () { row.remove(); });
 
-    row.appendChild(input);
-    if (pick) { row.appendChild(pick); }
-    row.appendChild(hideLab);
-    row.appendChild(del);
+    var top = document.createElement('div');
+    top.className = 'ed-crow__top';
+    top.appendChild(input);
+    top.appendChild(hideLab);
+    top.appendChild(del);
+    row.appendChild(top);
+    if (scope) { row.appendChild(scope); }
+    row.__scope = function () { return scopeState.slice(); };
     return row;
   }
 
@@ -2788,8 +2869,12 @@
     };
 
     /* ---- who they are ---- */
+    /* Escape each name, THEN join with the markup. Escaping the joined string
+       escapes the separator too, so the dialog read "Directors&lt;/b&gt;,
+       &lt;b&gt;Safeguarding & welfare" to everyone who opened somebody with
+       more than one post. Same trap the department list carries a note about. */
     group('Person', others.length
-      ? 'Also listed under <b>' + esc(others.join('</b>, <b>')) +
+      ? 'Also listed under <b>' + others.map(esc).join('</b>, <b>') +
         '</b>. The name and contact details below are shared with those entries.'
       : '');
     var grid1 = document.createElement('div');
@@ -2819,8 +2904,7 @@
     wrap.appendChild(pubWrap);
 
     /* ---- how to reach them ---- */
-    group('Email addresses', sections.length > 1
-      ? 'Leave "All roles" unless an address is only for one of their jobs.' : '');
+    group('Email addresses', '');
     var emailBox = document.createElement('div');
     emailBox.className = 'ed-clist';
     wrap.appendChild(emailBox);
@@ -2828,15 +2912,14 @@
       var addr = NLDirectory.addrOf(e);
       if (!addr) { return; }
       emailBox.appendChild(contactRow('email', addr,
-        (typeof e === 'string') ? '' : (e.section || ''), sections, '',
-        NLDirectory.ownHide(e)));
+        NLDirectory.sectionsOf(e), sections, '', NLDirectory.ownHide(e)));
     });
     var addEmail = document.createElement('button');
     addEmail.className = 'btn btn--sm btn--ghost';
     addEmail.type = 'button';
     addEmail.textContent = 'Add an email address';
     addEmail.addEventListener('click', function () {
-      emailBox.appendChild(contactRow('email', '', '', sections));
+      emailBox.appendChild(contactRow('email', '', [], sections));
     });
     wrap.appendChild(addEmail);
 
@@ -2846,15 +2929,15 @@
     wrap.appendChild(phoneBox);
     NLDirectory.arr(person.phones).forEach(function (x) {
       if (!x || !(x.number || '').trim()) { return; }
-      phoneBox.appendChild(contactRow('phone', x.number, x.section || '', sections,
-        x.ext || '', NLDirectory.ownHide(x)));
+      phoneBox.appendChild(contactRow('phone', x.number,
+        NLDirectory.sectionsOf(x), sections, x.ext || '', NLDirectory.ownHide(x)));
     });
     var addPhone = document.createElement('button');
     addPhone.className = 'btn btn--sm btn--ghost';
     addPhone.type = 'button';
     addPhone.textContent = 'Add a telephone number';
     addPhone.addEventListener('click', function () {
-      phoneBox.appendChild(contactRow('phone', '', '', sections));
+      phoneBox.appendChild(contactRow('phone', '', [], sections));
     });
     wrap.appendChild(addPhone);
 
@@ -2919,10 +3002,9 @@
 
     var read = function (box) {
       return [].slice.call(box.querySelectorAll('.ed-crow')).map(function (r) {
-        var f = r.querySelector('.ed-cfor');
         var h = r.querySelector('.ed-chide__box');
         return { value: r.querySelector('.ed-cval').value.trim(),
-                 section: f ? f.value : '',
+                 sections: r.__scope ? r.__scope() : [],
                  hide: !!(h && h.checked),
                  ext: r.dataset.ext || '' };
       }).filter(function (x) { return x.value; });
@@ -2972,7 +3054,10 @@
   function contactLine(list, valueOf) {
     return NLDirectory.arr(list).map(function (x) {
       var v = String(valueOf(x) || '').trim();
-      return v ? v + (NLDirectory.ownHide(x) ? ' (not published)' : '') : '';
+      if (!v) { return ''; }
+      var sec = NLDirectory.sectionsOf(x);
+      return v + (sec.length ? ' (' + sec.join(' + ') + ' only)' : '') +
+        (NLDirectory.ownHide(x) ? ' (not published)' : '');
     }).filter(Boolean).join(', ');
   }
 
@@ -3032,16 +3117,19 @@
       if (next.hide !== was.hide) { person.hideContact = next.hide; }
       /* A plain string when it applies everywhere, an object only when it does
          not — so a record that gains nothing keeps the shape it had. */
+      /* A plain string when it applies everywhere and is published, an
+         object only when it does not — so a record that gains nothing keeps
+         the shape it had, and 914 addresses are left exactly as they are. */
       person.emails = next.emails.map(function (x) {
-        if (!x.section && !x.hide) { return x.value; }
+        if (!x.sections.length && !x.hide) { return x.value; }
         var out = { address: x.value };
-        if (x.section) { out.section = x.section; }
+        if (x.sections.length) { out.sections = x.sections; }
         if (x.hide) { out.hide = true; }
         return out;
       });
       person.phones = next.phones.map(function (x) {
         var out = { number: x.value, ext: x.ext || '' };
-        if (x.section) { out.section = x.section; }
+        if (x.sections.length) { out.sections = x.sections; }
         if (x.hide) { out.hide = true; }
         return out;
       });
