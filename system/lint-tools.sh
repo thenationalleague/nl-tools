@@ -253,6 +253,43 @@ for index in "${CANDIDATES[@]}"; do
   fi
 done
 
+# ── Standalone pages ────────────────────────────────────────────────────────
+# Everything above walks pages that load auth-guard.js. That leaves the whole
+# standalone family unchecked — the passcode tools, the club capability pages,
+# the portal root — which is exactly the set an outside person sees. They carry
+# no auth-guard and no topbar by design, but they DO load nl-brand.css, and a
+# stale or missing ?v= there drifts as silently as it ever did in a tool. Found
+# on 04/08/2026: club-directory/meta-reference.html had been loading the brand
+# sheet with no ?v= at all, and nothing had ever said so.
+#
+# Embeds are deliberately out of scope. They are pasted into the Urban Zoo CMS
+# on thenationalleague.org.uk, where the page belongs to that site's design.
+standalone_warn=0
+standalone_clean=0
+standalone=()
+
+while IFS= read -r page; do
+  case "$page" in
+    ./node_modules/*|./system/_template/*|./embeds/*|./lab/*|./decks/*|\
+    ./system/brand-v3-mockups/*) continue ;;
+  esac
+  grep -q '<head' "$page" || continue
+  grep -q 'nl-topbar\.js' "$page" && continue      # a tool — already checked above
+  grep -q 'nl-brand\.css' "$page" || continue      # no brand sheet, nothing to version
+
+  short="${page#./}"
+  if grep -q "nl-brand\.css?v=$CANON_BRAND" "$page"; then
+    standalone_clean=$((standalone_clean + 1))
+  elif grep -qE 'nl-brand\.css\?v=[0-9]+' "$page"; then
+    got=$(grep -oE 'nl-brand\.css\?v=[0-9]+' "$page" | head -1 | sed 's/.*v=//')
+    standalone+=("  $short: nl-brand.css?v=$got — canonical is ?v=$CANON_BRAND")
+    standalone_warn=$((standalone_warn + 1))
+  else
+    standalone+=("  $short: loads nl-brand.css with no ?v= — add ?v=$CANON_BRAND")
+    standalone_warn=$((standalone_warn + 1))
+  fi
+done < <(find . -name '*.html' -not -path '*/node_modules/*' | sort)
+
 echo "=== Tool wiring lint ==="
 echo "Canonical: nl-brand.css?v=$CANON_BRAND  nl-utils.js?v=$CANON_UTILS  nl-topbar.js?v=$CANON_TOPBAR  auth-guard.js?v=$CANON_GUARD"
 echo
@@ -270,11 +307,20 @@ if [[ $waived_count -gt 0 ]]; then
   done
   echo
 fi
-echo "$clean_count tool$( [[ $clean_count -ne 1 ]] && echo s ) clean."
-
-if [[ $STRICT -eq 1 && $warn_count -gt 0 ]]; then
+if [[ $standalone_warn -gt 0 ]]; then
+  echo "Standalone pages out of sync ($standalone_warn):"
+  for w in "${standalone[@]}"; do
+    echo "$w"
+  done
   echo
-  echo "lint-tools: --strict, so failing on $warn_count drifted tool$( [[ $warn_count -ne 1 ]] && echo s )." >&2
+fi
+echo "$clean_count tool$( [[ $clean_count -ne 1 ]] && echo s ) clean, \
+$standalone_clean standalone page$( [[ $standalone_clean -ne 1 ]] && echo s ) clean."
+
+if [[ $STRICT -eq 1 && $((warn_count + standalone_warn)) -gt 0 ]]; then
+  echo
+  echo "lint-tools: --strict, so failing on $warn_count drifted tool$( [[ $warn_count -ne 1 ]] && echo s )" >&2
+  echo "            and $standalone_warn drifted standalone page$( [[ $standalone_warn -ne 1 ]] && echo s )." >&2
   exit 1
 fi
 exit 0
