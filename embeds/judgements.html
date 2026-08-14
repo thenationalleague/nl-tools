@@ -1,0 +1,251 @@
+<!-- ============================================================
+     JUDGEMENTS & DECISIONS — public-facing widget for
+     thenationalleague.org.uk. Source of truth.
+
+     - Reads RTDB app-data/ops-judgements/records anonymously (that node
+       is deliberately world-readable; see system/rtdb/README.md). No
+       auth, no writes — this widget only ever reads.
+     - Records are written by the internal tool at /judgements/.
+     - A record is hidden once it ended more than 30 days ago.
+
+     CHANGELOG
+       12/08/2026  v1.9  An embargo whose end date is TODAY now counts as
+                         served and batches with the concluded records.
+                         v1.8 used "ended before today", which left a club
+                         sitting among the ongoing rows for the whole of
+                         its last day with a past-looking date beside it.
+       12/08/2026  v1.8  Row order reworked. Concluded records now batch
+                         at the top, ongoing ones below. Within concluded,
+                         earliest end date first; within ongoing, earliest
+                         start date first; ties broken alphabetically by
+                         club. Was a single start-date ascending sort with
+                         the two mixed together.
+                         Also moved into this repo and registered with
+                         scripts/build-embeds.js, so the CMS can carry the
+                         hosted-bundle snippet instead of a pasted copy.
+       17/04/2026  v1.7  Updated RTDB path after root restructure:
+                         /judgements/ -> /app-data/ops-judgements/records/
+       17/04/2026  v1.6  max-width:720px to match host page container.
+       17/04/2026  v1.3  Loads Firebase SDK dynamically from the inline
+                         script to bypass the CMS stripping external
+                         script src tags. All CSS scoped under
+                         #nlJudgements to prevent bleed into the host page.
+       17/04/2026  v1.2  Iframe approach (CMS also blocked script src in
+                         an iframe embed).
+       17/04/2026  v1.1  Stripped CSS (lost styling).
+       17/04/2026  v1.0  Initial build (CSS bled into host page).
+     ============================================================ -->
+
+<div id="nlJudgements">
+  <table class="nlj-table">
+    <thead>
+      <tr>
+        <th>Club</th>
+        <th>Rule breached</th>
+        <th>Start date</th>
+        <th>End date</th>
+      </tr>
+    </thead>
+    <tbody id="nlJudgementsBody">
+      <tr><td colspan="4" class="nlj-empty">Loading…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<style>
+#nlJudgements { max-width: 720px; margin: 0 auto; }
+#nlJudgements .nlj-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #ffffff;
+  border: 1px solid #dde3ed;
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 14px;
+  font-family: inherit;
+}
+#nlJudgements .nlj-table th {
+  background: #223b7c;
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 12px 14px;
+  text-align: left;
+  white-space: nowrap;
+}
+#nlJudgements .nlj-table td {
+  padding: 11px 14px;
+  border-bottom: 1px solid #dde3ed;
+  vertical-align: middle;
+}
+#nlJudgements .nlj-table tr:last-child td { border-bottom: none; }
+#nlJudgements .nlj-table tr:hover td { background: #f4f6f9; }
+#nlJudgements .nlj-club { font-weight: 700; }
+#nlJudgements .nlj-empty {
+  text-align: center;
+  padding: 40px 16px;
+  color: #5a6a82;
+  font-size: 13px;
+  font-weight: 600;
+}
+@media (max-width: 520px) {
+  #nlJudgements .nlj-table thead { display: none; }
+  #nlJudgements .nlj-table tr { display: block; border-bottom: 1px solid #dde3ed; padding: 12px 14px; }
+  #nlJudgements .nlj-table tr:last-child { border-bottom: none; }
+  #nlJudgements .nlj-table td { display: block; padding: 2px 0; border-bottom: none; white-space: normal !important; }
+  #nlJudgements .nlj-table td::before {
+    content: attr(data-label);
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #5a6a82;
+    display: block;
+    margin-bottom: 1px;
+  }
+}
+</style>
+
+<script>
+(function() {
+  /* Dynamically load Firebase SDK to bypass CMS script-src stripping */
+  var scripts = [
+    'https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js',
+    'https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js'
+  ];
+  var loaded = 0;
+
+  function onAllLoaded() {
+    var app;
+    try {
+      app = firebase.app('nlj-widget');
+    } catch(e) {
+      app = firebase.initializeApp({
+        apiKey:            'AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU',
+        authDomain:        'nl-tools.firebaseapp.com',
+        databaseURL:       'https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app',
+        projectId:         'nl-tools',
+        storageBucket:     'nl-tools.firebasestorage.app',
+        messagingSenderId: '801354670005',
+        appId:             '1:801354670005:web:05d8ebad3e7e63610d03fc'
+      }, 'nlj-widget');
+    }
+
+    var db = firebase.database(app);
+    db.ref('app-data/ops-judgements/records').once('value').then(function(snap) {
+      var val = snap.val();
+      var records = [];
+      if (val && typeof val === 'object') {
+        Object.keys(val).forEach(function(key) {
+          var r = val[key];
+          r.id = key;
+          records.push(r);
+        });
+      }
+
+      var today = new Date();
+      today.setHours(0, 0, 0, 0);
+      var cutoff = new Date(today);
+      cutoff.setDate(cutoff.getDate() - 30);
+
+      var visible = records.filter(function(r) {
+        if (!r.endDate) return true;
+        var end = parseDate(r.endDate);
+        return end >= cutoff;
+      });
+
+      visible.sort(compareRecords(today));
+
+      render(visible);
+    }).catch(function(err) {
+      console.warn('Judgements widget error:', err);
+      document.getElementById('nlJudgementsBody').innerHTML =
+        '<tr><td colspan="4" class="nlj-empty">Unable to load data.</td></tr>';
+    });
+  }
+
+  /* Which batch a record belongs to. 0 = served (the end date has arrived
+     or passed), 1 = ongoing (no end date, or one still to come).
+     An embargo ending TODAY is served, not ongoing — the club is out of it
+     the moment the date lands, so it belongs in the top batch on the day
+     itself rather than appearing to still be under it. */
+  function batchOf(r, today) {
+    if (!r.endDate) return 1;
+    var end = parseDate(r.endDate);
+    return (end && end <= today) ? 0 : 1;
+  }
+
+  /* Concluded records first, then ongoing. Inside each batch the date that
+     matters leads: when it finished for concluded records, when it started
+     for ongoing ones — earliest first either way. Same date, alphabetical
+     by club. ISO yyyy-mm-dd strings sort chronologically as text, so the
+     dates are compared without parsing. */
+  function compareRecords(today) {
+    return function(a, b) {
+      var ba = batchOf(a, today);
+      var bb = batchOf(b, today);
+      if (ba !== bb) return ba - bb;
+
+      var ka = (ba === 0 ? a.endDate : a.startDate) || '';
+      var kb = (bb === 0 ? b.endDate : b.startDate) || '';
+      if (ka !== kb) return ka.localeCompare(kb);
+
+      return (a.club || '').localeCompare(b.club || '');
+    };
+  }
+
+  function loadNext() {
+    if (loaded >= scripts.length) { onAllLoaded(); return; }
+    var s = document.createElement('script');
+    s.src = scripts[loaded];
+    s.onload = function() { loaded++; loadNext(); };
+    s.onerror = function() {
+      console.warn('Failed to load: ' + scripts[loaded]);
+      document.getElementById('nlJudgementsBody').innerHTML =
+        '<tr><td colspan="4" class="nlj-empty">Unable to load data.</td></tr>';
+    };
+    document.head.appendChild(s);
+  }
+
+  loadNext();
+
+  function render(records) {
+    var tbody = document.getElementById('nlJudgementsBody');
+    if (!tbody) return;
+
+    if (records.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" class="nlj-empty">There are no current judgements or decisions to display.</td></tr>';
+      return;
+    }
+
+    var html = records.map(function(r) {
+      var endDisplay = r.endDate ? formatDate(r.endDate) : 'Ongoing';
+      return '<tr>'
+        + '<td data-label="Club" class="nlj-club">' + esc(r.club || '') + '</td>'
+        + '<td data-label="Rule breached">' + esc(r.rule || '') + '</td>'
+        + '<td data-label="Start date" style="white-space:nowrap;">' + formatDate(r.startDate) + '</td>'
+        + '<td data-label="End date" style="white-space:nowrap;">' + esc(endDisplay) + '</td>'
+        + '</tr>';
+    }).join('');
+
+    tbody.innerHTML = html;
+  }
+
+  function parseDate(str) {
+    var parts = String(str || '').split('-');
+    return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+  }
+
+  function formatDate(str) {
+    if (!str) return '';
+    var d = parseDate(str);
+    var day = d.getDate();
+    var months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    return day + ' ' + months[d.getMonth()] + ' ' + d.getFullYear();
+  }
+
+  function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+})();
+</script>

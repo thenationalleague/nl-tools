@@ -124,6 +124,42 @@ test('clubs.load + byOpta / byName resolve real records', async () => {
   assert.equal(NL.clubs.byName('AFC Fylde').optaID, 't3360', 'byName agrees');
 });
 
+test('clubs.guests loads the NL Cup guest sides, sorted and shaped', async () => {
+  const guests = await NL.clubs.guests();
+  assert.ok(Array.isArray(guests) && guests.length > 0, 'returns a non-empty array');
+
+  const names = guests.map((c) => c.name);
+  assert.deepEqual(names, [...names].sort((a, b) => a.localeCompare(b)), 'name-sorted');
+
+  for (const g of guests) {
+    assert.ok(g.name && g.code && g.colors, `${g.name}: has name, code and colours`);
+    assert.ok(g.colors.primary && g.colors.secondary && g.colors.tertiary,
+      `${g.name}: carries all three colours the match graphic needs`);
+  }
+
+  // Memoised: a second call must not re-fetch (the sandbox would still serve,
+  // so assert identity of the resolved value instead).
+  assert.equal(await NL.clubs.guests(), guests, 'promise-memoised');
+});
+
+test('guests stay OUT of the member roster', async () => {
+  await NL.clubs.load();
+  await NL.clubs.guests();
+
+  const fulham = NL.clubs.guestByName('Fulham PL2');
+  assert.ok(fulham, 'guestByName finds a guest');
+  assert.equal(fulham.crestName, 'Fulham', 'crestName points at the parent badge');
+
+  // The whole reason the two files are separate: a tool filtering clubs-meta
+  // on division must never see a side that was never an NL member.
+  assert.equal(NL.clubs.byName('Fulham PL2'), null, 'byName does not resolve a guest');
+  const all = await NL.clubs.all();
+  assert.equal(all.filter((c) => /\bPL2$/.test(c.name)).length, 0, 'clubs.all has no guests');
+
+  assert.equal(NL.clubs.guestByName('AFC Fylde'), null, 'guestByName does not resolve a member');
+  assert.equal(NL.clubs.guestByName(''), null, 'empty → null');
+});
+
 test('csv: RFC-4180 escaping, CRLF rows, optional BOM', () => {
   assert.equal(NL.csv([['a', 'b'], ['c', 'd']]), 'a,b\r\nc,d');
   // comma, quote and newline each force quoting; internal quotes doubled

@@ -58,7 +58,16 @@ const API_BASE = 'https://multi-club-matches.football.web.gc.nationalleagueservi
 const COMP_IDS = [89, 373, 372];        // National, North, South
 const MAX_PAGES = 10;
 const IN_PLAY_MIN = 105;                // past this from KO, an unmarked match has finished
-const FALLBACK_SEASON_ID = 2026;
+const CUTOFF_MIN = 60;                  // predictions lock this long before kick-off
+/* Season derived from the clock, not pinned to a year. The widgets already do
+   this (deriveSeasonId in motm.html and score-predictor.html): a National
+   League season is named for the calendar year it starts in, and it starts in
+   July. A hardcoded 2026 was correct the day it was written and silently wrong
+   from July 2027 — and wrong in the worst way, because the job still succeeds
+   and still writes a leaderboard, just for last season's fixtures. */
+function deriveSeasonId(d) {
+  return (d.getMonth() + 1) >= 7 ? d.getFullYear() : d.getFullYear() - 1;
+}
 
 /* Salt for the row hash. Public by necessity — the widget has to compute the
    same hash from its own jwtId to find its row, so it ships in the bundle.
@@ -93,8 +102,42 @@ function bstDateOf(d) {
   if (!d) return '';
   return d.toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
 }
-function matchdayKeyOf(m) { return bstDateOf(koOf(m)); }
+/* A match's matchday key never changes, but tallyFor asked for it once per
+   match, per fan, per scope. A full season is ~1,650 fixtures and the widget
+   offers ~96 scopes, so at fifty fans that was eight million calls to
+   toLocaleDateString — an Intl formatter costing tens of microseconds each.
+   The job took nine minutes to produce nine kilobytes of JSON, and crossed
+   the ten-minute timeout the week registrations reached sixty.
+
+   Derived per match, so cached per match. A WeakMap keyed on the match object
+   holds no reference of its own and keeps every signature intact. */
+const mdKeyCache = new WeakMap();
+function matchdayKeyOf(m) {
+  if (!m || typeof m !== 'object') return bstDateOf(koOf(m));
+  let k = mdKeyCache.get(m);
+  if (k === undefined) mdKeyCache.set(m, (k = bstDateOf(koOf(m))));
+  return k;
+}
 function monthOfMatchday(mdKey) { return String(mdKey || '').slice(0, 7); }
+
+/* Matches grouped by matchday, and by month, so a scope can be handed only
+   the fixtures it covers. tallyFor still filters defensively, so a pre-filtered
+   list produces exactly the same tally as the full one — it just stops every
+   fan's month scope walking past every fixture of every other month. */
+function matchIndex(matches) {
+  const day = new Map();
+  const month = new Map();
+  for (const m of matches) {
+    const md = matchdayKeyOf(m);
+    if (!md) continue;
+    if (!day.has(md)) day.set(md, []);
+    day.get(md).push(m);
+    const mo = monthOfMatchday(md);
+    if (!month.has(mo)) month.set(mo, []);
+    month.get(mo).push(m);
+  }
+  return { day, month };
+}
 
 /* Only 'post' counts towards a tally. An in-play period is not believed
    forever — a match abandoned mid-game, or a feed that simply stops updating,
@@ -129,6 +172,22 @@ function verdictOf(predH, predA, realH, realA) {
   return 'wrong';
 }
 
+/* The most recent thing a fan did: their latest prediction, or their
+   registration if they have not made one. Used to break a tie, so a table
+   where nobody has scored yet reads newest-first rather than alphabetically —
+   at the start of a season that is the only signal in it, and A-Z buries
+   whoever just signed up at the bottom. */
+function lastActivity(reg, predsByDay) {
+  let last = Number(reg && reg.registeredAt) || 0;
+  for (const day of Object.keys(predsByDay || {})) {
+    for (const mid of Object.keys(predsByDay[day] || {})) {
+      const at = Number(predsByDay[day][mid] && predsByDay[day][mid].submittedAt) || 0;
+      if (at > last) last = at;
+    }
+  }
+  return last;
+}
+
 function rowHash(jwtId) {
   return crypto.createHash('sha256').update(ROW_SALT + String(jwtId)).digest('hex').slice(0, HASH_LEN);
 }
@@ -140,13 +199,17 @@ function rowHash(jwtId) {
 /* One user's tally over a scope. `scope` is {kind:'season'} | {kind:'month',
    key:'YYYY-MM'} | {kind:'day', key:'YYYY-MM-DD'}. */
 function tallyFor(predsByDay, matches, scope, now) {
-  const t = { results: 0, exacts: 0, settled: 0 };
+  const t = { results: 0, exacts: 0, settled: 0, predicted: 0 };
   for (const m of matches) {
     const md = matchdayKeyOf(m);
     if (scope.kind === 'month' && monthOfMatchday(md) !== scope.key) continue;
     if (scope.kind === 'day' && md !== scope.key) continue;
     const p = predsByDay[md] && predsByDay[md][m.id];
     if (!p) continue;
+    /* Counted before the settled check: this is "did they take part", which
+       is true the moment they predict and does not wait for a result. Before
+       a ball is kicked every entrant has predictions and nothing settled. */
+    t.predicted += 1;
     if (!isSettled(m, now)) continue;
     const v = verdictOf(p.home, p.away, m.attributes.homeTeam.score, m.attributes.awayTeam.score);
     if (v == null) continue;
@@ -164,7 +227,7 @@ function tallyFor(predsByDay, matches, scope, now) {
 
    Field names are short because this is read by every client on every load:
    n name, c crest, t teamId, tn teamName, r results, e exacts, s settled,
-   h row hash. `t` is a club id, not a person — it is what lets the widget
+   h row hash, j last activity (epoch ms, tie-break only). `t` is a club id, not a person — it is what lets the widget
    filter to "fans of my club" without another read. */
 function buildRows(users, predictions, matches, scope, now) {
   const rows = [];
@@ -172,7 +235,25 @@ function buildRows(users, predictions, matches, scope, now) {
     const reg = users[jwtId];
     if (!reg || !reg.forename) continue;
     const t = tallyFor(predictions[jwtId] || {}, matches, scope, now);
-    if (!t.settled) continue;
+    /* The season table lists everyone who has PREDICTED, not everyone who has
+       registered.
+
+       It used to list every registration, so that someone who had just signed
+       up could find themselves. The cost of that only shows up across a season
+       boundary: users/ is keyed by jwtId with no season in it, so a fan who
+       registered last season and never came back sat on the new season's table
+       on nought in perpetuity — and the widget's "N fans playing this season",
+       which is the recruitment line on the signed-out page, counted them.
+
+       Predicted rather than settled, deliberately. Before the first result
+       every entrant has predictions and nothing settled; gating on settled
+       would empty the table for the whole of matchday one.
+
+       A narrower scope still needs something settled. A fan who joined in
+       November has not scored nothing in October; they were not there, and a
+       row of zeroes in a month they sat out reads as a failure rather than an
+       absence. */
+    if (scope.kind === 'season' ? !t.predicted : !t.settled) continue;
     rows.push({
       n: (reg.forename + ' ' + (reg.surnameInitial || '')).trim(),
       c: reg.crestUrl || '',
@@ -182,15 +263,15 @@ function buildRows(users, predictions, matches, scope, now) {
       e: t.exacts,
       s: t.settled,
       h: rowHash(jwtId),
-      _sort: reg.forename || '',
+      j: lastActivity(reg, predictions[jwtId]),
     });
   }
   rows.sort((a, b) => {
     if (b.r !== a.r) return b.r - a.r;
     if (b.e !== a.e) return b.e - a.e;
-    return a._sort.localeCompare(b._sort);
+    return b.j - a.j;          // most recent activity first
   });
-  return rows.map((r) => { delete r._sort; return r; });
+  return rows;
 }
 
 /* Every scope the widget can ask for: the whole season, each month that has a
@@ -215,6 +296,7 @@ function scopesFor(matches) {
 
 function buildPayload(users, predictions, matches, now) {
   const scopes = scopesFor(matches);
+  const index = matchIndex(matches);
   const out = {
     season: { rows: buildRows(users, predictions, matches, scopes.season[0], now) },
     month: {},
@@ -222,8 +304,88 @@ function buildPayload(users, predictions, matches, now) {
     updatedAt: now.getTime(),
     salt: ROW_SALT,   // so a widget built against an older salt can detect the mismatch
   };
-  for (const s of scopes.month) out.month[s.key] = { rows: buildRows(users, predictions, matches, s, now) };
-  for (const s of scopes.day) out.day[s.key] = { rows: buildRows(users, predictions, matches, s, now) };
+  for (const s of scopes.month) {
+    out.month[s.key] = { rows: buildRows(users, predictions, index.month.get(s.key) || [], s, now) };
+  }
+  for (const s of scopes.day) {
+    out.day[s.key] = { rows: buildRows(users, predictions, index.day.get(s.key) || [], s, now) };
+  }
+  return out;
+}
+
+/* The cutoff for every fixture, as epoch ms, for the security rules to compare
+   server time against.
+
+   The widget already refuses to submit after this moment, but that is a
+   courtesy: the rule was ".write": "auth != null", so anyone with devtools
+   could post a prediction once a match had kicked off — or once it had
+   finished. A cutoff the client owns is not a cutoff.
+
+   Written by this job because it already holds the fixture list and a
+   credential no browser has. A match with no entry here cannot be predicted at
+   all: the rule compares against a missing value and denies. That is the right
+   way round — a fixture added upstream in the last few minutes is briefly
+   unpredictable, rather than briefly unprotected. */
+/* The inverse of bstDateOf: a London wall-clock midnight as an instant.
+   Date.UTC gives the moment that wall time would be if London were UTC;
+   correcting by the offset London actually had lands on the real one. Twice,
+   because the first correction can itself land the other side of a DST
+   boundary. Mirrors londonMidnight() in embeds/motm.html — the two must agree
+   or the rule rejects a nomination the widget is still offering. */
+function londonOffsetMs(t) {
+  const f = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London', hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(t)).reduce((a, x) => (a[x.type] = x.value, a), {});
+  return Date.UTC(f.year, f.month - 1, f.day, f.hour % 24, f.minute, f.second) - t;
+}
+function londonMidnight(y, mo, d) {
+  const guess = Date.UTC(y, mo - 1, d);
+  return guess - londonOffsetMs(guess - londonOffsetMs(guess));
+}
+
+/* Team of the Week nominations close at 23:59:59.999 UK on the day after the
+   match's own matchday — the millisecond before midnight opening matchday+2. */
+function motmCloseAt(m) {
+  const md = matchdayKeyOf(m);
+  if (!md) return null;
+  const p = md.split('-');
+  return londonMidnight(Number(p[0]), Number(p[1]), Number(p[2]) + 2) - 1;
+}
+
+/* The Team of the Week window, server-side.
+
+   Existence encodes the OPEN end and the value encodes the CLOSE end: an
+   entry is only written once the match has actually finished, so a rule that
+   demands the entry exists has enforced "opens at full time" without needing
+   a second timestamp to compare against.
+
+   Until now that window was the browser's alone — the rule was ".write":
+   "auth != null", so anyone with devtools could nominate before kick-off or a
+   week later. Same reasoning, and the same shape, as locks/ for predictions.
+
+   Fails closed: a match with no entry cannot be nominated in at all. A game
+   that finished in the last few minutes is briefly shut rather than briefly
+   open, which is the right way round for a deadline. */
+function buildMotmWindows(matches, now) {
+  const out = {};
+  for (const m of matches) {
+    if (!m.id || !isSettled(m, now)) continue;
+    const close = motmCloseAt(m);
+    if (close != null) out[m.id] = close;
+  }
+  return out;
+}
+
+function buildLocks(matches) {
+  const out = {};
+  for (const m of matches) {
+    const ko = koOf(m);
+    const md = matchdayKeyOf(m);
+    if (!ko || !md || !m.id) continue;
+    (out[md] || (out[md] = {}))[m.id] = ko.getTime() - CUTOFF_MIN * 60000;
+  }
   return out;
 }
 
@@ -231,13 +393,16 @@ function buildPayload(users, predictions, matches, now) {
 // IO
 // ---------------------------------------------------------------------------
 
-function currentSeasonId() {
+function currentSeasonId(now) {
   try {
     const meta = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets/data/clubs-meta.json'), 'utf8'));
     const s = meta && meta.seasons && meta.seasons.current;
-    return s ? Number(s) : FALLBACK_SEASON_ID;
+    if (s) return Number(s);
+    console.warn('clubs-meta has no seasons.current — falling back to the clock');
+    return deriveSeasonId(now || new Date());
   } catch (e) {
-    return FALLBACK_SEASON_ID;
+    console.warn('clubs-meta unreadable (' + e.message + ') — falling back to the clock');
+    return deriveSeasonId(now || new Date());
   }
 }
 
@@ -298,7 +463,7 @@ async function dbPut(path, value, token) {
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
   const now = new Date();
-  const seasonId = currentSeasonId();
+  const seasonId = currentSeasonId(now);
 
   const matches = await fetchFixtures(seasonId);
   console.log('fixtures: ' + matches.length + ' (season ' + seasonId + ')');
@@ -328,17 +493,35 @@ async function main() {
 
   if (dryRun) {
     console.log(JSON.stringify(payload.season.rows.slice(0, 5), null, 2));
+    console.log('locks: ' + Object.keys(buildLocks(matches)).length + ' matchdays');
     console.log('dry run — nothing written');
     return;
   }
 
   await dbPut('leaderboard', payload, token);
   console.log('wrote leaderboard/ at ' + new Date(payload.updatedAt).toISOString());
+
+  /* Write the locks every run, not just when they change. A fixture that gets
+     rescheduled moves its cutoff with it, and the rule reads whatever is here
+     — so this table drifting stale is the one way the lock could quietly stop
+     matching the fixture list. */
+  const locks = buildLocks(matches);
+  await dbPut('locks', locks, token);
+  console.log('wrote locks/ for ' + Object.keys(locks).length + ' matchdays');
+
+  /* Same job, same fixture list, same credential — and it already runs every
+     quarter of an hour, which is the resolution a nomination deadline needs. */
+  const motm = buildMotmWindows(matches, now);
+  await dbPut('motm-windows', motm, token);
+  console.log('wrote motm-windows/ for ' + Object.keys(motm).length + ' finished matches');
 }
 
 module.exports = {
   outcome, verdictOf, isSettled, matchdayKeyOf, monthOfMatchday,
-  tallyFor, buildRows, scopesFor, buildPayload, rowHash, ROW_SALT,
+  tallyFor, buildRows, scopesFor, buildPayload, rowHash, ROW_SALT, lastActivity,
+  matchIndex,
+  buildLocks, CUTOFF_MIN, buildMotmWindows, motmCloseAt,
+  currentSeasonId, deriveSeasonId,
 };
 
 if (require.main === module) {

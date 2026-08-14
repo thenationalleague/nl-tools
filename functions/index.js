@@ -5,6 +5,9 @@
  *   consumeInvite / submitAccessRequest / withdrawAccessRequest
  *                     — account-lifecycle callables (server-minted roles).
  *                       See account.js and system/rtdb/SECURITY-role-self-grant.md.
+ *   fanWidgetsAuth    — issues a superadmin a staff token for the separate
+ *                       nl-widgets project, so the Fan Widgets tool can read
+ *                       fan data live without mirroring it. See fan-widgets.js.
  *   programmeEnter / programmeClaim
  *                     — Programme Packs passcode → scoped `pClub` claim, so
  *                       Storage/RTDB rules can enforce write-own for passcode
@@ -131,9 +134,29 @@ Object.assign(exports, require("./account"));
 // `firebase deploy --only functions` picks them up. See functions/programme.js.
 Object.assign(exports, require("./programme"));
 
+// Fan-widget staff access (fanWidgetsAuth) — RTDB-triggered for the same
+// org-policy reason as programme.js and club-directory.js: a NEW callable
+// cannot be granted a public invoker on this project. It is the only route by
+// which a browser can read the fan data live without that data being copied
+// anywhere. See functions/fan-widgets.js.
+Object.assign(exports, require("./fan-widgets"));
+
 // Club Directory passcode → scoped-claim trigger (clubDirectoryAuth). Same
 // shape and the same org-policy reason as programme.js above.
 Object.assign(exports, require("./club-directory"));
+
+// UW Promo Codes credential → scoped-claim trigger (uwPromoAuth, plus the
+// sandbox twin uwPromoAuthTest). Third instance of the same shape and the same
+// org-policy reason as programme.js. Note the extra per-club throttle it can
+// afford that the others cannot — see the header there.
+Object.assign(exports, require("./uw-promo"));
+
+// NLS → RTDB live ingester (nlsIngestTick / nlsIngestHourly). Scheduled rather
+// than triggered, and it writes to the nl-widgets database rather than this
+// project's — see functions/nls-ingester.js for both reasons. Exported here so
+// `firebase deploy --only functions` creates the two Cloud Scheduler jobs; no
+// terminal and no gcloud, which was the deciding constraint on its shape.
+Object.assign(exports, require("./nls-ingester"));
 
 exports.onFootageDeleted = onObjectDeleted(
   { bucket: BUCKET, memory: "256MiB" },

@@ -1,6 +1,6 @@
 /* ============================================================
    Fixtures & Results Graphic — app logic.
-   Shares clubs-data.js (crests, club lookup) with the table tool.
+   Club roster, crests and lookups come from the canon (NL.clubs).
    Paste = home, [middle nuked], away. Editor adds scores + KO.
    ============================================================ */
 (function () {
@@ -10,12 +10,16 @@
   var MAX_ROWS = 12;
 
   var DIVISION_LOGO = {
-    National: "/assets/divisions/National.png",
-    North:    "/assets/divisions/North.png",
-    South:    "/assets/divisions/South.png",
-    Cup:      "/assets/divisions/Cup.png"
+    National: "/assets/divisions/medium/National.png",
+    North:    "/assets/divisions/medium/North.png",
+    South:    "/assets/divisions/medium/South.png",
+    Cup:      "/assets/divisions/medium/NL%20Cup.png"
   };
-  var LOGO_FALLBACK = (window.__resources && window.__resources.logoFallback) || "/assets/divisions/The%20National%20League.png";
+  /* No LOGO_FALLBACK. A division badge that fails used to be replaced with the
+     generic National League logo, which published a graphic branded as the
+     wrong competition — worse than an obvious gap. Missing art now renders
+     blank (visibility:hidden keeps the header's spacing) and the export
+     warning names it. */
   var SPONSOR_URL = "/assets/partners/TIC%20Health.png";
   var ROSE_WHITE = (window.__resources && window.__resources.roseWhite) || "/assets/crests/National%20League%20rose%20white.png";
 
@@ -26,9 +30,44 @@
     Cup: "National League Cup"
   };
 
+  /* Names that always display shortened, in every fit mode. Keyed on the
+     canonical club name, lower-cased. */
   var SHORTEN = {
-    "hampton & richmond borough": "Hampton & Richmond"
+    "hampton & richmond borough": "Hampton & Richmond",
+    "hemel hempstead town": "Hemel Hempstead"
   };
+
+  /* Accepted spellings that aren't the club's canonical name. Resolving
+     through here means the crest and the club record are found whichever
+     way the name was pasted. */
+  var ALIAS = {
+    "hemel hempstead": "Hemel Hempstead Town",
+    "hampton & richmond": "Hampton & Richmond Borough"
+  };
+
+  /* Crests are served same-origin on purpose. The PNG export draws every image
+     into a canvas, and a cross-origin image taints it — the crest is then
+     dropped from the export rather than drawn. NL.clubs.crestUrl points at
+     raw.githubusercontent.com, so it cannot be used on this path; the club
+     lookup still comes from the canon, only the URL is local. */
+  /* medium tier (256px). Row crests render small in a 1080-wide graphic, so
+     256px is comfortably oversampled, while the full-res originals average
+     524KB each (largest 5.4MB) — at 24 crests that is ~12.6MB of needless
+     transfer, and the slower the connection the more likely one of them fails
+     to arrive before export and is dropped. Medium averages 57KB. */
+  var CREST_BASE = "/assets/crests/medium/";
+  function crestUrl(name) {
+    return name ? CREST_BASE + encodeURIComponent(name) + ".png" : "";
+  }
+
+  /* Any pasted spelling → the club's canonical name (used for crest lookup
+     and club record lookup). Unknown names pass through untouched. */
+  function canonicalName(name) {
+    var k = String(name || "").toLowerCase().trim();
+    if (!k) return String(name || "");
+    if (NL.clubs.byName(k)) return NL.clubs.byName(k).name;
+    return ALIAS[k] || String(name || "").trim();
+  }
 
   var SAMPLE = [
     "Brackley Town\tv\tSolihull Moors",
@@ -71,15 +110,16 @@
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
   function teamDisplay(name) {
+    var canon = canonicalName(name);
     /* short-name mode uses each club's short label from the DB */
     if (state.fit === "short") {
-      var club = window.clubByName(name);
+      var club = NL.clubs.byName(canon);
       if (club && club.short) return club.short.toUpperCase();
     }
-    /* Hampton & Richmond Borough always shortens on arrival, every mode */
-    var k = String(name || "").toLowerCase().trim();
+    /* a few names always shorten on arrival, every mode */
+    var k = canon.toLowerCase();
     if (SHORTEN[k]) return SHORTEN[k].toUpperCase();
-    return String(name || "").toUpperCase();
+    return canon.toUpperCase();
   }
   function save() { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {} }
   function load() {
@@ -151,7 +191,7 @@
     head.className = "gfx-head";
     head.innerHTML =
       '<div class="logo-tile"><img class="div-logo" crossorigin="anonymous" src="' + DIVISION_LOGO[div] +
-        '" onerror="this.onerror=null;this.src=\'' + LOGO_FALLBACK + '\'"></div>' +
+        '" onerror="this.onerror=null;this.style.visibility=\'hidden\'"></div>' +
       '<div class="titles">' +
         '<span class="eyebrow">' + escapeHtml(state.sub || "2026-27") + '</span>' +
         '<h1 class="gfx-title">' + escapeHtml(matchdayTitle()) + '</h1>' +
@@ -171,8 +211,9 @@
         body.appendChild(dv);
         return;
       }
-      var homeCrest = window.crestUrl(r.home);
-      var awayCrest = window.crestUrl(r.away);
+      var homeName = canonicalName(r.home), awayName = canonicalName(r.away);
+      var homeCrest = crestUrl(homeName);
+      var awayCrest = crestUrl(awayName);
       var hasScore = state.mode === "results" && r.hs !== "" && r.hs != null && r.as !== "" && r.as != null;
       var mid;
       if (hasScore) {
@@ -221,29 +262,85 @@
           tsize -= 1.5; titleEl.style.fontSize = tsize + "px"; tg++;
         }
       }
-      /* per-name fitting, then EQUALISE so every name is the same size */
-      var fit = state.fit;
-      var nms = [].slice.call(body.querySelectorAll(".fx .nm"));
-      var baseSize = 0, minSize = Infinity;
-      nms.forEach(function (nm) {
-        nm.style.fontSize = ""; nm.style.letterSpacing = "";
-        var base = parseFloat(getComputedStyle(nm).fontSize) || 20;
-        baseSize = base;
-        var g = 0, size = base;
-        var barH = nm.parentNode.clientHeight;
-        /* shrink if wrapped lines exceed the row height OR a single long word
-           (e.g. KIDDERMINSTER) overflows the bar width */
-        while ((nm.scrollHeight > barH + 1 || nm.scrollWidth > nm.clientWidth + 1)
-               && size > base * 0.5 && g < 90) {
-          size -= 0.5; nm.style.fontSize = size + "px"; g++;
-        }
-        if (size < minSize) minSize = size;
-      });
-      /* apply the single smallest size to every name for a uniform look */
-      if (minSize < Infinity) {
-        nms.forEach(function (nm) { nm.style.fontSize = minSize + "px"; });
-      }
+      fitNames(body);
       fitStage();
+    });
+  }
+
+  /* ---------------- name fitting ----------------
+     One line is the goal: a name only wraps when it genuinely cannot fit on
+     one at the smallest size we allow.
+
+     The old version measured each name against its own bar's height. That bar
+     is a grid item sized by its content, so its height already included the
+     wrap — a name that had wrapped was measured as "fitting" and never got
+     shrunk, and the leftover two-line box is what read as a name sitting high
+     in the pill with an empty second line under it. Nothing here reads a
+     height that its own font-size decides; the only measurement is the name's
+     one-line width against the bar's width, which the grid fixes independently
+     of the text. */
+
+  /* How far the whole set is willing to shrink to keep everything on one line.
+     A name that still won't fit at this size is a genuine two-liner
+     (SCARBOROUGH ATHLETIC), and it wraps rather than dragging every other name
+     down with it. */
+  var MIN_RATIO = 0.82;
+
+  function barAvailWidth(nm) {
+    var bar = nm.parentNode, cs = getComputedStyle(bar);
+    return bar.clientWidth - parseFloat(cs.paddingLeft || 0) - parseFloat(cs.paddingRight || 0);
+  }
+
+  /* Largest size at or below `base` at which the name fits on one line. */
+  function oneLineSize(nm, base, floor) {
+    var avail = barAvailWidth(nm);
+    nm.style.whiteSpace = "nowrap";
+    var size = base, g = 0;
+    nm.style.fontSize = size + "px";
+    while (nm.scrollWidth > avail + 1 && size > floor && g < 120) {
+      size -= 0.5; nm.style.fontSize = size + "px"; g++;
+    }
+    return { size: size, fits: nm.scrollWidth <= avail + 1 };
+  }
+
+  function fitNames(body) {
+    var nms = [].slice.call(body.querySelectorAll(".fx .nm"));
+    if (!nms.length) return;
+    var canWrap = state.fit === "wrap" || state.fit === "short";
+
+    /* base size comes from --rh via CSS, so read it with our overrides cleared */
+    nms.forEach(function (nm) { nm.style.fontSize = ""; nm.style.letterSpacing = ""; nm.style.whiteSpace = ""; });
+    var base = parseFloat(getComputedStyle(nms[0]).fontSize) || 20;
+    var floor = base * MIN_RATIO;
+
+    /* Smallest one-line size any name needs, ignoring names that can't manage
+       one line even at the floor — those wrap instead, so they don't get to
+       shrink everyone else. */
+    var minSize = base;
+    nms.forEach(function (nm) {
+      var r = oneLineSize(nm, base, floor);
+      if (r.fits && r.size < minSize) minSize = r.size;
+    });
+
+    /* Apply the shared size, then decide per name whether it stays on one
+       line. nowrap is set explicitly, so a name that fits can never end up in
+       a two-line box. */
+    nms.forEach(function (nm) {
+      nm.style.fontSize = minSize + "px";
+      nm.style.whiteSpace = "nowrap";
+      if (nm.scrollWidth <= barAvailWidth(nm) + 1) return;
+      if (!canWrap) return;               /* truncate/scale/kern handle it in CSS */
+
+      nm.style.whiteSpace = "normal";     /* genuinely too long — two lines it is */
+      /* keep the wrapped name inside the row. The row's height is fixed by
+         --rh, so unlike the old code this measures something the font-size
+         cannot move. */
+      var row = nm.parentNode.parentNode;
+      var rowH = row ? row.clientHeight : 0;
+      var size = minSize, g = 0;
+      while (rowH && nm.scrollHeight > rowH - 2 && size > base * 0.5 && g < 60) {
+        size -= 0.5; nm.style.fontSize = size + "px"; g++;
+      }
     });
   }
 
@@ -362,10 +459,15 @@
   }
 
   /* ---------------- team datalist ---------------- */
+  /* Roster comes from the canon (NL.clubs, one clubs-meta fetch per session),
+     not a local mirror — current season only, which is what a matchday
+     graphic is ever built from. */
   function buildTeamList() {
-    $("teamList").innerHTML = window.NL_CLUBS.map(function (c) {
-      return '<option value="' + escapeHtml(c.name) + '">';
-    }).join("");
+    NL.clubs.forSeason().then(function (clubs) {
+      $("teamList").innerHTML = clubs.map(function (c) {
+        return '<option value="' + escapeHtml(c.name) + '">';
+      }).join("");
+    }).catch(function () { /* datalist stays empty — names are free text anyway */ });
   }
 
   /* ---------------- export ---------------- */
@@ -386,7 +488,14 @@
     var restore = function () {};
     try {
       await (document.fonts && document.fonts.ready);
-      restore = await inlineImages(gfx);   /* pre-inline crests so the canvas isn't cross-origin tainted */
+      /* Wait for every crest and logo to finish loading FIRST. inlineImages can
+         only convert an image the browser already holds, so exporting before
+         they land silently drops them — which is what a colleague on a cold
+         cache or a slower connection was getting. */
+      var pending = [].slice.call(gfx.querySelectorAll("img"));
+      var loaded = await Promise.all(pending.map(function (img) { return whenImageReady(img, 10000); }));
+      var late = loaded.filter(function (ok) { return !ok; }).length;
+      restore = await inlineImages(gfx);   /* pre-inline so the canvas isn't cross-origin tainted */
       var blob = await window.htmlToImage.toBlob(gfx, {
         width: 1080, height: h, pixelRatio: 1, cacheBust: false,
         backgroundColor: getComputedStyle(gfx).backgroundColor
@@ -395,7 +504,10 @@
       a.href = URL.createObjectURL(blob); a.download = fileName();
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(a.href);
-      setStatus("Downloaded " + state.format);
+      /* never let a half-drawn graphic leave without saying so */
+      setStatus(late
+        ? "Downloaded — but " + late + " image" + (late === 1 ? "" : "s") + " didn't load. Check your connection and export again."
+        : "Downloaded " + state.format);
     } catch (err) {
       console.error(err);
       setStatus("Export blocked — use a screenshot.");
@@ -404,6 +516,27 @@
       gfx.style.transform = prevT; gfxHost.style.width = prevW; gfxHost.style.height = prevH;
     }
   }
+  /* Resolve once an <img> has actually decoded, or once it's clear it won't.
+     Never rejects — the caller only needs to know whether it made it. */
+  function whenImageReady(img, ms) {
+    return new Promise(function (resolve) {
+      if (img.complete && img.naturalWidth) return resolve(true);
+      var settled = false;
+      function finish(ok) {
+        if (settled) return;
+        settled = true; clearTimeout(timer);
+        img.removeEventListener("load", onLoad);
+        img.removeEventListener("error", onError);
+        resolve(ok);
+      }
+      function onLoad() { finish(!!img.naturalWidth); }
+      function onError() { finish(false); }
+      var timer = setTimeout(function () { finish(false); }, ms || 10000);
+      img.addEventListener("load", onLoad);
+      img.addEventListener("error", onError);
+    });
+  }
+
   /* Convert every <img> under root to a data URL via canvas so html-to-image
      never has to fetch cross-origin (which is blocked in the file:// download).
      Any image that can't be converted is blanked for the capture, so export
@@ -497,7 +630,9 @@
     });
 
     window.addEventListener("resize", fitStage);
-    window.addEventListener("nl-clubs-updated", function () { buildTeamList(); render(); });
+    /* re-render once clubs-meta lands: short names and canonical-name
+       resolution both read NL.clubs, which is empty until then */
+    NL.clubs.load().then(render).catch(function () {});
     render();
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(render);
     /* re-fit after layout settles (fixes tiny 9x16 on first paint / in an iframe) */

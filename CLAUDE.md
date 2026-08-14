@@ -103,8 +103,8 @@ Every gated tool's `index.html` has a near-identical `<head>`. The source of tru
 
 | File                 | Current `?v=` | Role                                                              |
 |----------------------|---------------|-------------------------------------------------------------------|
-| `nl-brand.css`       | `?v=26`       | Brand tokens, components, layout. Tools must use tokens not hex.  |
-| `nl-utils.js`        | `?v=27`       | `window.NL.*` helpers: `toast`, `ensureAuth`, `formatDate`/`formatDateShort`/`formatDateTime`/`timeAgo`, `parseDate` (string/Date/epoch), `escHtml`, `writeAudit`, `installAuditHook`, `icon`, `endpoints`, `clubs` (incl. `crestUrl(name[,'thumb'\|'medium'])`, `wireCrestImg`, `byOpta`), `clubPicker`, `roles` (incl. `norm`, `label`, `realm`), `isClubUser`, `canClubEdit`, plus identity-data exports `mapStyle.drive`, `positionBands`, `projColours` (canvas/data callers). |
+| `nl-brand.css`       | `?v=32`       | Brand tokens, components, layout. Tools must use tokens not hex.  |
+| `nl-utils.js`        | `?v=30`       | `window.NL.*` helpers: `toast`, `ensureAuth`, `formatDate`/`formatDateShort`/`formatDateTime`/`timeAgo`, `parseDate` (string/Date/epoch), `escHtml`, `writeAudit`, `installAuditHook`, `icon`, `endpoints`, `clubs` (incl. `crestUrl(name[,'thumb'\|'medium'])`, `wireCrestImg`, `byOpta`, `guests`/`guestByName` for non-member cup sides), `clubPicker` (incl. `extraClubs`/`setExtraClubs`, `crestName`), `roles` (incl. `norm`, `label`, `realm`), `isClubUser`, `canClubEdit`, plus identity-data exports `mapStyle.drive`, `positionBands`, `projColours` (canvas/data callers). |
 | `nl-topbar.js`       | `?v=8`        | Renders `#nlTopbar` from `window.NL_TOOL`. Also injects PWA/favicon tags. |
 | `auth-guard.js`      | `?v=10`       | Gates `#pageWrap`. Verifies live Firebase Auth, re-reads RTDB user + tool registry, then reveals page and fires `nlAuthReady(session)`. |
 
@@ -155,7 +155,7 @@ The new tool's `index.html` must keep the canonical `?v=N` values from the templ
 - **Gated staff/club tools** — dirs with `index.html` referencing `/system/auth-guard.js`, either top-level (`vacancies/`) or one level down (`graphics/totw/`). Behind Firebase Auth, use the shared canon. Listed by `lint-tools.sh`.
 - **Fan-facing embeds** — `embeds/*.html` (score-predictor, MOTM, vidiprinter, transfer-centre, live-blog, results-ticker, match-centre). Pasted into the Urban Zoo CMS. The CMS strips `<script src=...>` tags, so Firebase has to be loaded dynamically via `document.createElement('script')` with `.onload` chaining. Inline `<style>`, `<link>`, inline `<script>` survive. See `embeds/widget-handover.md` for the invariants — copy `score-predictor.html` as the starting point for any new embed. These do **not** use `auth-guard.js` and are out of scope for `lint-tools.sh`.
 
-`widgets/*.js` are a third bucket: standalone JS widgets (news ticker, club-news feed, transfers ticker, results ticker) embedded on the public site.
+`widgets/*.js` are a third bucket: standalone JS widgets (news ticker, transfers ticker, results ticker) embedded on the public site.
 
 ## Deployment — nothing needs a terminal
 
@@ -189,16 +189,23 @@ is pasted into the console by hand.
 ## Data pipelines (GitHub Actions)
 
 - `.github/workflows/rebuild-index.yml` — daily 03:00 UTC. Runs `fetch-ga-metrics.js` + `fetch-ga-hourly.js` + `rebuild-index.js`. Commits to `assets/data/articles-index.json`, `ga-metrics.json`, `ga-hourly.json`, `ga-hourly-archive.json`. Authenticates to GCP via Workload Identity Federation (no JSON key).
-- `.github/workflows/build-club-news.yml` — every :15 and :45 of the hour. Python script (`build-club-news.py`) scrapes club news; commits `assets/data/club-news.json` and `club-news-failures.json`. Concurrency-guarded with `cancel-in-progress`.
-- `.github/workflows/backfill-ga-archive.yml` — one-shot/manual backfill into `ga-hourly-archive.json`.
 
-Both index-rebuild and club-news jobs handle concurrent runs by `git fetch origin main` + rebase before retrying push (up to 3 attempts).
+The index-rebuild job handles concurrent runs by `git fetch origin main` + rebase before retrying push (up to 3 attempts).
+
+The club-news pipeline (`build-club-news.yml`, its debug twin, the two
+`widgets/club-news-*.js` consumers and `assets/data/club-news.json`) was
+removed on 05/08/2026. The workflow had been disabled since 20/04/2026, so the
+committed JSON — and therefore anything embedding those widgets — had been
+serving April's headlines ever since. Deleted rather than revived: nothing was
+asking for it back in three and a half months. Same date, `backfill-ga-archive.yml`
+and `scripts/backfill-ga-hourly-archive.js` went too, having run once in May
+2026 to seed the archive. Recover either from git history if a need reappears.
 
 ## Conventions worth knowing
 
 - **Brand tokens, not hex.** `var(--primary)` (`#9e0000`), `var(--navy)`, `var(--red)`/`--green`/`--amber`/`--blue`/`--purple`, `var(--text-muted)`. Solid shade ladders `--primary-50/100/.../900` and `--navy-50/.../900` for hover states, idle borders, and anywhere you would have reached for an rgba() overlay — **the brand intentionally has no rgba-overlay tokens**, use the ladder. (As of v2.21 the retired aliases `--info`, `--info-light`, `--primary-dim`, `--navy-mid`, `--navy-light` no longer resolve — use `--blue` / `--blue-light` / `--primary-600` / `--navy-600` / `--navy-300` directly.) Identity palettes that a second tool might plausibly want now live in canon too: `--proj-1…--proj-8` (project identity — 1–6 alias `--navy`/`--primary`/`--green`/`--amber`/`--purple`/`--blue` directly, 7–8 are distinct slate shades; mirrored as `NL.projColours`), `--cal-*` (calendar event types), `--road-sign-*` (UK road signs), `--pos-*` (NL competition position bands, mirrored as `NL.positionBands` for canvas exports). The Style Guide tool (`/style-guide/`, superadmin only) is the canonical visual reference — open it when wondering "is X already a token?". Genuine one-off identity palettes still stay tool-local (claudio personas, attendance comp tiers, meeting-notes scratchpad, GA channel palette, club crest LUT) — see the policy block at the top of `nl-brand.css`.
 - **Never repeat the tool title in the page.** `nl-topbar.js` already renders `window.NL_TOOL.title`, so a page-level `<h1>` of the tool's own name duplicates it — and a description paragraph under it describes something the user is already looking at. The template shipped both until 30/07/2026, which is why it spread to several tools; lint now fails any `<h1>` whose text equals the tool title. A heading above a group of controls belongs in `.section-head` as an `<h2>`.
-- **Scripts in `<head>`.** `auth-guard.js` must sit above `</head>`. Body-bottom placement breaks the gate timing and lint flags it.
+- **No waffle.** The default failure of generated copy is explaining rather than asking. A line of user-facing text earns its place only if it **changes what the user does**, **warns of a consequence**, or **answers a question they would otherwise have to ask**. Cut it if it: restates a label, placeholder, heading or control already on screen; explains the product before asking the question; justifies or sells the ask ("it genuinely shapes what we cover"); reassures about something nobody was worried about ("No problem", "Nothing else to do for now"); is defensive boilerplate nobody requested (unasked-for privacy and data notices); or is a second sentence doing the first one's job. Two instructions for one action read as two actions. When in doubt, delete it and see whether the page still works — it usually does. `/dewaffle <path>` audits a page against this and proposes the cuts.
 - **`#pageWrap` is hidden by default** (rule in `nl-brand.css`). Auth-guard sets `style.display = 'block'` to reveal — never clear with `''`, that re-triggers the brand rule.
 - **`window.NL_TOOL` and `var NL_TOOL_KEY` must stay in sync.** Topbar reads the former, auth-guard reads the latter.
 - **Each tool keeps its own `NL_CHANGELOG`** array near the top of `index.html`, plus a date-stamped block-comment changelog in the file header. Bump version + add entry when you edit a tool.

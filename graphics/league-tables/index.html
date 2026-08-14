@@ -64,7 +64,7 @@
   });
 </script>
 
-<link rel="stylesheet" href="/system/nl-brand.css?v=32">
+<link rel="stylesheet" href="/system/nl-brand.css?v=35">
 
 <script>
   window.NL_TOOL = {
@@ -74,6 +74,23 @@
   var NL_TOOL_KEY = 'staff-graphics';
 
   window.NL_CHANGELOG = [
+    {
+      date: '13/08/2026',
+      version: 'v3.3',
+      items: [
+        'Division badges now load a 256px version instead of the full-size artwork — the NL Cup badge alone drops from 264KB to about 20KB.',
+        'A missing division badge no longer falls back to the generic National League logo, and no longer silently substitutes the National badge. Missing artwork renders blank and the status line names what is absent.'
+      ]
+    },
+    {
+      date: '13/08/2026',
+      version: 'v3.2',
+      items: [
+        'Fixed: exported graphics could come out with crests missing — on a slow connection sometimes all but one. Badges now load from this site instead of a third-party domain.',
+        'Crests now use the 256px versions rather than the full-size originals — visually identical at the size they are drawn, but around 9x lighter to load.',
+        'If any crest still fails to load, the status line now says so and stays up, instead of reporting a clean download.'
+      ]
+    },
     {
       date: '13 July 2026',
       version: 'v3.1',
@@ -93,7 +110,7 @@
   ];
 </script>
 
-<script src="/system/nl-utils.js?v=29"></script>
+<script src="/system/nl-utils.js?v=30"></script>
 <script src="/system/nl-topbar.js?v=8"></script>
 <script src="/system/auth-guard.js?v=10"></script>
 
@@ -359,11 +376,22 @@
   const GLOBAL_DY = -10;
 
   /* ===== Asset URLs ===== */
-  const REPO_ASSETS = "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/";
+  /* Same-origin on purpose. These assets are drawn into the export canvas, and
+     fetching them from raw.githubusercontent.com made every graphic hostage to a
+     third party: that host does not Vary on Origin and sits behind a 5-minute
+     CDN cache, so a crossOrigin request could reuse a non-CORS cache entry and
+     fail. The image was then skipped and the export shipped without it. The
+     identical files are served from this domain (_headers caches them a week),
+     which removes CORS, tainting and the third-party dependency in one go. */
+  const REPO_ASSETS = "/assets/";
 
   const BG_URL = REPO_ASSETS + "backgrounds/league-table-bg.png";
 
-  const DIVISION_BASE_URL = REPO_ASSETS + "divisions/";
+  /* medium tier (256px). Badges draw ~180-192px wide, so 256 is ample, and
+     the NL Cup badge alone drops 264KB -> ~20KB. Sponsors deliberately stay
+     full-res: they are already ~65KB and draw at ~516px, so a 256px tier
+     would upscale and soften them. */
+  const DIVISION_BASE_URL = REPO_ASSETS + "divisions/medium/";
 
   function getDivisionBadgeUrl(div){
     const d = safeText(div);
@@ -375,10 +403,21 @@
   const TIC_SCALE = 0.30;
   const TIC_ROT_DEG = -90;
 
-  const BADGE_MID = { x:180, y:120, scale:0.08 };
+  const BADGE_MID = { x:180, y:120, scale:0.08 };   /* scale kept for reference; draw uses BADGE_W */
+  /* Target WIDTH in export pixels, not a multiple of the source's natural
+     size. Every division PNG is 2400px wide, so the old `iw * 0.08` silently
+     meant "192px wide" — which made the layout depend on the source
+     resolution. Swapping in the lighter 256px tier under that maths would
+     have drawn the badge at ~20px. Sizing to a target keeps the graphic
+     identical whatever tier the file comes from. */
+  const BADGE_W = 192;
+
 
   /* ===== Clubs metadata (fetched from clubs-meta.json) ===== */
-  var CLUBS_META_URL = "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json";
+  /* Same-origin: this is the last runtime dependency on a third party in
+     this tool, and if it fails the club list never populates. Served from
+     this domain it rides the connection the page already has. */
+  var CLUBS_META_URL = "/assets/data/clubs-meta.json";
   var TEAMS_DROPDOWN = []; // populated on load from clubs-meta.json
   var TEAM_SET = new Set();
 
@@ -386,7 +425,13 @@
   function toAllCaps(s){ return safeText(s).toUpperCase(); }
 
   /* ===== CRESTS ===== */
-  const CREST_BASE_URL = "https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/";
+  /* medium tier (256px), not the originals. These crests are drawn at
+     36px in the export, so 256px is still 7x oversampled — while the
+     full-res originals average 524KB each (largest 5.4MB). At 24 crests that
+     is ~12.6MB of needless transfer, which on a slow connection is exactly
+     how a crest ends up not arriving in time and being dropped from the
+     graphic. Medium averages 57KB: same output, ~9x less to fetch. */
+  const CREST_BASE_URL = "/assets/crests/medium/";
 
   function crestUrlForTeam(teamName){
     const t = safeText(teamName);
@@ -578,9 +623,13 @@
 
   /* ================= HELPERS ================= */
 
-  function setStatus(msg){
+  /* sticky=true leaves the message up. Progress messages should clear; a
+     warning that the graphic you just downloaded is incomplete must not —
+     900ms is not long enough to read, let alone act on. */
+  function setStatus(msg, sticky){
     statusEl.textContent = msg;
     window.clearTimeout(setStatus._t);
+    if(sticky) return;
     setStatus._t = window.setTimeout(()=> statusEl.textContent = "Ready", 900);
   }
 
@@ -713,6 +762,15 @@
     c.drawImage(img, cx - dw/2, cy - dh/2, dw, dh);
   }
 
+  /* Count of crests that did NOT load on the last preload. A crest that fails
+     is skipped by the row draw, so without this the export leaves silently
+     missing badges — the failure mode a colleague hit on a slow connection,
+     getting one crest out of 24. Read by the download handlers. */
+  let missingCrests = 0;
+  /* Named assets (badge, sponsor) that failed, alongside the crest count.
+     Reset per render by ensureBaseImages' caller. */
+  let missingAssets = [];
+
   async function preloadCrests(){
     const urls = new Set();
     for(const r of rows){
@@ -721,8 +779,21 @@
       const u = getCrestUrlForTeamExact(teamName);
       if(u) urls.add(u);
     }
-    await Promise.all([...urls].map(u => loadImage(u).catch(()=>null)));
+    const results = await Promise.all([...urls].map(u => loadImage(u).catch(()=>null)));
+    missingCrests = results.filter(img => !img).length;
   }
+
+  /* Append a warning to the status line when the graphic just exported is
+     incomplete. Never blocks the download — the user may still want it. */
+  function exportNote(base){
+    const bits = [];
+    if(missingCrests) bits.push(missingCrests + " crest" + (missingCrests === 1 ? "" : "s"));
+    missingAssets.forEach(a => bits.push(a));
+    if(!bits.length) return base;
+    const list = bits.length < 2 ? bits[0] : bits.slice(0,-1).join(", ") + " and " + bits[bits.length-1];
+    return base + " — but " + list + " didn't load. Check your connection and export again.";
+  }
+  function anyMissing(){ return missingCrests > 0 || missingAssets.length > 0; }
 
   /* ================= PARSING / SERIALISING ================= */
 
@@ -940,10 +1011,17 @@
   /* ================= RENDER ================= */
 
   async function ensureBaseImages(){
+    missingAssets = [];   /* per-render, or it accumulates across draws */
     if(!bgImg) bgImg = await loadImage(BG_URL);
-    const divUrl = getDivisionBadgeUrl(divisionSel.value) || getDivisionBadgeUrl("National");
-    badgeImg = await loadImage(divUrl);
-    if(!ticImg) ticImg = await loadImage(TIC_URL);
+    /* No silent substitute. Falling back to the National badge when the chosen
+       division has no artwork published a graphic branded as the wrong
+       competition — worse than an obvious gap. A badge that will not load is
+       left out and counted, so the status line says so. */
+    const divUrl = getDivisionBadgeUrl(divisionSel.value);
+    badgeImg = divUrl ? await loadImage(divUrl).catch(()=>null) : null;
+    if(!badgeImg) missingAssets.push("the " + (safeText(divisionSel.value) || "division") + " badge");
+    if(!ticImg) ticImg = await loadImage(TIC_URL).catch(()=>null);
+    if(!ticImg) missingAssets.push("the sponsor logo");
   }
 
   function drawTitleAndMatchday(c){
@@ -969,8 +1047,9 @@
     if(!badgeImg) return;
     const iw = badgeImg.naturalWidth || badgeImg.width;
     const ih = badgeImg.naturalHeight || badgeImg.height;
-    const dw = iw * BADGE_MID.scale;
-    const dh = ih * BADGE_MID.scale;
+    if(!iw || !ih) return;
+    const dw = BADGE_W;
+    const dh = ih * (BADGE_W / iw);
     c.drawImage(badgeImg, (BADGE_MID.x + GLOBAL_DX) - dw/2, (BADGE_MID.y + GLOBAL_DY) - dh/2, dw, dh);
   }
 
@@ -1120,7 +1199,7 @@
       if(!blob){ setStatus("EXPORT BLOCKED (CORS)"); return; }
       const fn = buildFilename("1x1");
       NL.download(fn, blob, "image/png");
-      setStatus("Downloaded 1x1");
+      setStatus(exportNote("Downloaded 1x1"), anyMissing());
       if (window.NL && NL.writeAudit) NL.writeAudit('league-tables_download', fn);
     }catch(e){ console.error(e); setStatus(String(e && e.message ? e.message : e)); }
   }
@@ -1143,7 +1222,7 @@
       if(!blob){ setStatus("EXPORT BLOCKED (CORS)"); return; }
       const fn = buildFilename("4x5");
       NL.download(fn, blob, "image/png");
-      setStatus("Downloaded 4x5");
+      setStatus(exportNote("Downloaded 4x5"), anyMissing());
       if (window.NL && NL.writeAudit) NL.writeAudit('league-tables_download', fn);
     }catch(e){ console.error(e); setStatus(String(e && e.message ? e.message : e)); }
   }

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Match Graphic
-  Version: v1.0 (30/07/2026)
+  Version: v1.3 (13/08/2026)
   File: /graphics/match-graphic/index.html
 
   Builds a single match graphic for any two clubs, in the four delivery
@@ -22,6 +22,46 @@
   Graphics & Media sub-tools, so anyone who can reach /graphics/ gets this.
 
   CHANGELOG
+  v1.3 (13/08/2026) — FIX: exports came out with no crests
+    - v1.2 stopped the canvas being tainted by opting the crest request into
+      CORS. That fixed the dead button but swapped it for a quieter fault:
+      raw.githubusercontent.com does not Vary on Origin and sits behind a
+      5-minute CDN cache, so once a crest URL is cached from a plain <img>
+      (wireCrestImg's full-res fallback does exactly that) the CORS request
+      reuses the non-CORS entry and fails. Result: the PNG downloaded happily
+      with the badges missing — publishable, and wrong.
+    - Canvas crests now load same-origin from /assets/crests/. No CORS, no
+      taint, no cache-mode mismatch, no third-party dependency on the one
+      asset the artwork cannot do without. Matches fixtures-graphic.
+    - A missing crest or logo now shows a persistent "Do not publish this"
+      strip naming what is absent, not just a toast that scrolls away.
+    - toBlob is wrapped: an export that cannot be produced says so instead of
+      throwing out of the click handler and looking like a dead button.
+    - Boot fetches retry twice with backoff, and a boot that still fails shows
+      a persistent notice with a Reload button. Previously one dropped request
+      on a weak connection left the page looking ready with every control
+      inert — reproduced in a headless browser.
+
+  v1.2 (10/08/2026) — FIX: downloads did nothing
+    - Crests are fetched from raw.githubusercontent.com (NL.clubs.crestUrl),
+      and drawing a cross-origin image into a canvas taints it, so every
+      toBlob() threw SecurityError out of the download click handler — no
+      file, no error, nothing. Broken for every club since 07/08/2026, when
+      the canon crest base moved off same-origin (5de3c8a); not related to
+      the NL Cup work in v1.1. Fixed by opting the image request into CORS
+      (crossOrigin before src); the host already sends the header.
+
+  v1.1 (10/08/2026) — NL Cup guest sides
+    - Selecting the NL Cup adds the 16 PL2 representative sides to both
+      pickers; every other competition shows the NL roster alone, so a PL2
+      side cannot be picked for a National League graphic by accident.
+    - Entrants are read per season from competitions-meta.json rather than
+      hardcoded, so next season's 16 need no code change. Colours and codes
+      come from cup-clubs-meta.json; crests resolve through `crestName` to
+      the parent club's badge, so nothing is duplicated.
+    - Leaving the NL Cup while a guest is selected falls back to the first
+      NL club rather than drawing a graphic for a side not in that comp.
+
   v1.0 (30/07/2026) — Initial build
     - Two NL.clubPicker selects (home/away) with a swap control between them
     - Competition select from competitions-meta.json
@@ -39,7 +79,7 @@
   <title>Match Graphic — NL Tools</title>
 
   <!-- Brand stylesheet -->
-  <link rel="stylesheet" href="/system/nl-brand.css?v=32">
+  <link rel="stylesheet" href="/system/nl-brand.css?v=35">
 
   <!-- Firebase 10.12.0 SDK (compat) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -71,6 +111,31 @@
 
     window.NL_CHANGELOG = [
       {
+        date: '13/08/2026',
+        version: 'v1.3',
+        items: [
+          'Fixed: downloads came out with the crests missing. Badges now load from this site rather than a third-party domain.',
+          'A missing crest is now flagged as “do not publish” instead of quietly shipping an incomplete graphic.',
+          'The tool retries if the connection drops while loading, and tells you plainly if it still could not start.'
+        ]
+      },
+      {
+        date: '10/08/2026',
+        version: 'v1.2',
+        items: [
+          'Fixed: the download buttons did nothing. Crests load from a different domain, which locked the canvas against export — broken for every club since 7 August, not just the new cup sides.'
+        ]
+      },
+      {
+        date: '10/08/2026',
+        version: 'v1.1',
+        items: [
+          'Pick the NL Cup and the 16 PL2 sides join both club pickers — crests, codes and colours included.',
+          'Entrants come from competitions-meta per season, so next season’s 16 need no code change.',
+          'Switching away from the NL Cup drops a selected PL2 side back to an NL club.'
+        ]
+      },
+      {
         date: '30/07/2026',
         version: 'v1.0',
         items: [
@@ -95,7 +160,7 @@
   </script>
 
   <!-- NL system scripts -->
-  <script src="/system/nl-utils.js?v=29"></script>
+  <script src="/system/nl-utils.js?v=30"></script>
   <script src="/system/nl-topbar.js?v=8"></script>
   <script src="/system/auth-guard.js?v=10"></script>
 
@@ -302,7 +367,8 @@
         <div class="mg-strip mg-strip--info" id="mgOvNote" hidden>
           <span><b>Not saved.</b> Overrides apply to this download only and are
           forgotten on reload. To change a club permanently, edit
-          <code>clubs-meta.json</code>.</span>
+          <code>clubs-meta.json</code> — or <code>cup-clubs-meta.json</code>
+          for a PL2 side.</span>
         </div>
         <div class="form-panel__foot">
           <button class="btn btn--ghost btn--sm" id="mgUnlock" type="button">Override colours</button>
@@ -341,14 +407,79 @@
 
   var el = function (id) { return document.getElementById(id); };
 
+  /* "a, b and c" — reads as a sentence in both the toast and the warning. */
+  function listOf(items) {
+    if (items.length < 2) return items[0] || '';
+    return items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1];
+  }
+  function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+
+  /* The one competition non-member sides enter. Must match the `competition`
+     string in competitions-meta.json. */
+  var CUP = 'NL Cup';
+
   var state = { home: null, away: null, comp: 'National', format: '16x9' };
   var badges = {};              /* competition -> logo path */
   var overrides = {};           /* club name -> partial colours (session only) */
   var unlocked = false;
   var images = {};              /* url -> Promise<Image|null> */
   var homePicker, awayPicker;
+  var missingAssets = [];       /* crest/logo names that failed this draw */
+  var members = [];             /* NL roster for the current season */
+  var guestList = [];           /* THIS season's cup guests, name-sorted */
+  var guestByName = {};         /* name -> guest record, same set */
+
+  /* ---------- club records: members + cup guests ----------
+     Guests are deliberately absent from NL.clubs.byName (they are not and
+     never were NL members — see the note on NL.clubs.guests). Everything
+     downstream of selection treats the two the same, so resolve in one
+     place rather than branching at each call site. */
+
+  function recordFor(name) {
+    return NL.clubs.byName(name) || guestByName[name] || null;
+  }
+
+  /* Guest records point at the parent club's badge ("Fulham PL2" ->
+     Fulham.png) so no crest is duplicated under a suffixed name. */
+  function crestKeyFor(name) {
+    var c = recordFor(name);
+    return (c && c.crestName) || name;
+  }
+
+  function isGuest(name) { return !!guestByName[name]; }
 
   /* ---------- assets ---------- */
+
+  /* Crests for the CANVAS are loaded same-origin, and that is load-bearing.
+
+     NL.clubs.crestUrl points at raw.githubusercontent.com. Drawing a
+     cross-origin image into a canvas taints it and toBlob() then throws, so
+     v1.2 opted the request into CORS with crossOrigin='anonymous'. That fixed
+     the dead button but traded it for a subtler failure: the host replies
+     `vary: Authorization,Accept-Encoding` — no `Origin` — behind a 5-minute
+     CDN cache. Once the browser has that URL cached from a PLAIN <img> (which
+     NL.clubs.wireCrestImg issues on its full-res fallback), the CORS request
+     can reuse the non-CORS cache entry and fail. The export then succeeds with
+     the crests missing, which is worse than failing outright because a graphic
+     with no badges can be published without anyone noticing.
+
+     Same-origin removes the whole class of problem: no CORS, no taint, no
+     cache-mode mismatch, no third-party dependency on the one asset the
+     artwork cannot do without — and on a slow connection it reuses the
+     connection the page already has. _headers caches /assets/crests/* for a
+     week. graphics/fixtures-graphic reached the same conclusion independently.
+
+     Deliberately NOT setting crossOrigin: on a same-origin request it does
+     nothing, and leaving it off means a future cross-origin URL trips the
+     loud guard in save() rather than silently tainting.
+
+     Third tool to meet this trap — a shared crest-image loader on NL.clubs is
+     a canon candidate, noted rather than done here. */
+  var CANVAS_CREST_BASE = '/assets/crests/';
+
+  function canvasCrestUrl(name) {
+    return name ? CANVAS_CREST_BASE + encodeURIComponent(name) + '.png' : '';
+  }
 
   function loadImage(src) {
     if (!images[src]) {
@@ -365,7 +496,7 @@
   /* ---------- colours ---------- */
 
   function colorsFor(name) {
-    var club = NL.clubs.byName(name);
+    var club = recordFor(name);
     var base = club && club.colors ? club.colors : {};
     var ov = overrides[name];
     if (!ov) return base;
@@ -377,7 +508,7 @@
   function isOverridden(name) {
     var ov = overrides[name];
     if (!ov) return false;
-    var club = NL.clubs.byName(name);
+    var club = recordFor(name);
     var base = (club && club.colors) || {};
     return KEYS.some(function (k) {
       return ov[k] && base[k] && ov[k].toLowerCase() !== base[k].toLowerCase();
@@ -417,7 +548,7 @@
     }).join('');
 
     mount.innerHTML =
-      '<h3><img src="' + NL.clubs.crestUrl(name, 'thumb') + '" alt="">' +
+      '<h3><img src="' + NL.clubs.crestUrl(crestKeyFor(name), 'thumb') + '" alt="">' +
         NL.escHtml(name) + ' <span>' + side + '</span></h3>' +
       rows +
       '<p class="mg-derived">Code <span class="mg-sw mg-sw--sm" style="background:' +
@@ -425,7 +556,7 @@
         '<span class="pill ' + pillClass(r.textBasis) + '">' + r.textBasis + '</span>' +
         '<b>' + ratio.toFixed(2) + ':1</b></p>';
 
-    NL.clubs.wireCrestImg(mount.querySelector('h3 img'), name);
+    NL.clubs.wireCrestImg(mount.querySelector('h3 img'), crestKeyFor(name));
     if (!unlocked) return;
 
     mount.querySelectorAll('input[type="color"]').forEach(function (inp) {
@@ -460,7 +591,7 @@
   /* ---------- naming: mirrors scripts/build-match-graphics.js ---------- */
 
   function filename(homeName, awayName, fmt) {
-    var h = NL.clubs.byName(homeName), a = NL.clubs.byName(awayName);
+    var h = recordFor(homeName), a = recordFor(awayName);
     return (h ? h.code : '???') + '-' + (a ? a.code : '???') + '-' + fmt + '.png';
   }
 
@@ -469,8 +600,9 @@
   function draw() {
     if (!state.home || !state.away) return Promise.resolve();
 
-    var homeClub = NL.clubs.byName(state.home);
-    var awayClub = NL.clubs.byName(state.away);
+    var homeClub = recordFor(state.home);
+    var awayClub = recordFor(state.away);
+    if (!homeClub || !awayClub) return Promise.resolve();
     var home = { name: state.home, code: homeClub.code, colors: colorsFor(state.home) };
     var away = { name: state.away, code: awayClub.code, colors: colorsFor(state.away) };
 
@@ -492,12 +624,17 @@
     var ctx = canvas.getContext('2d', { alpha: false });
 
     return Promise.all([
-      loadImage(NL.clubs.crestUrl(state.home)),
-      loadImage(NL.clubs.crestUrl(state.away)),
+      loadImage(canvasCrestUrl(crestKeyFor(state.home))),
+      loadImage(canvasCrestUrl(crestKeyFor(state.away))),
       loadImage(badges[state.comp])
     ]).then(function (a) {
-      if (!a[0] || !a[1]) NL.toast('A crest failed to load', 'error');
-      if (!a[2]) NL.toast('The competition logo failed to load', 'error');
+      /* A toast disappears. A graphic delivered with a missing badge does
+         not, so record the gap and say so permanently in the panel below. */
+      missingAssets = [];
+      if (!a[0]) missingAssets.push(state.home + '’s crest');
+      if (!a[1]) missingAssets.push(state.away + '’s crest');
+      if (!a[2]) missingAssets.push('the ' + state.comp + ' logo');
+      if (missingAssets.length) NL.toast(cap(listOf(missingAssets)) + ' failed to load', 'error');
 
       MG.render(ctx, { home: home, away: away, competition: state.comp },
                 { homeCrest: a[0], awayCrest: a[1], badge: a[2] },
@@ -519,8 +656,15 @@
       el('mgExplain').textContent = notes.length ? notes.join(' ')
         : 'Both clubs use their secondary colour for the code, which is the usual case.';
 
+      /* A missing asset outranks the similar-primaries note: one is a defect
+         in what you are about to publish, the other is a judgement call. */
       var warn = el('mgWarn');
-      if (MG.readsAsSameField(hc.panel, ac.panel)) {
+      if (missingAssets.length) {
+        warn.hidden = false;
+        warn.innerHTML = '<span><b>Do not publish this.</b> ' +
+          NL.escHtml(cap(listOf(missingAssets))) + ' did not load, so the graphic ' +
+          'below is incomplete. Check your connection and reload.</span>';
+      } else if (MG.readsAsSameField(hc.panel, ac.panel)) {
         warn.hidden = false;
         warn.innerHTML = '<span><b>Similar primaries.</b> These panels read as ' +
           'close to one flat field; the seam bands do the separating.</span>';
@@ -538,11 +682,20 @@
 
   /* ---------- export ---------- */
 
+  /* toBlob throws on a tainted canvas, and that throw used to escape the click
+     handler — the button appeared to do nothing at all, which cost a fortnight
+     of nobody realising exports were broken. Catch it and say so. */
   function save(fmt) {
     var name = filename(state.home, state.away, fmt);
-    el('mgCanvas').toBlob(function (blob) {
-      NL.download(name, blob, 'image/png');
-    }, 'image/png');
+    try {
+      el('mgCanvas').toBlob(function (blob) {
+        if (!blob) { NL.toast('The export produced no image — try reloading', 'error'); return; }
+        NL.download(name, blob, 'image/png');
+      }, 'image/png');
+    } catch (err) {
+      console.error('[match-graphic] export failed', err);
+      NL.toast('Could not export this graphic — reload the page and try again', 'error');
+    }
   }
 
   function downloadAll() {
@@ -564,6 +717,54 @@
     });
   }
 
+  /* ---------- cup guests ---------- */
+
+  /* WHICH guests entered is a property of the season, not of the club, so it
+     lives on the competition record. Reading it per season means next year's
+     16 arrive with a data edit and no code change. An unrecorded season
+     (null) yields none, which is the honest answer rather than last year's. */
+  function guestsForSeason(comps, all, seasonKey) {
+    var cup = (comps.competitions || []).filter(function (c) {
+      return c.competition === CUP;
+    })[0];
+    var entry = cup && cup.entrants && cup.entrants[seasonKey];
+    var codes = entry && entry.guests;
+    if (!codes || !codes.length) return [];
+    var want = {};
+    codes.forEach(function (c) { want[c] = true; });
+    return all.filter(function (g) { return want[g.code]; });
+  }
+
+  function firstMemberBut(avoid) {
+    for (var i = 0; i < members.length; i++) {
+      if (members[i].name !== avoid) return members[i].name;
+    }
+    return members.length ? members[0].name : null;
+  }
+
+  /* The guests belong to ONE competition, so they are only offered there —
+     otherwise nothing stops a PL2 side being drawn onto a National League
+     graphic. Leaving the cup with one selected falls back to an NL club
+     rather than silently rendering a side that isn't in the competition. */
+  function syncGuests() {
+    var on = state.comp === CUP && guestList.length > 0;
+    if (!on) {
+      if (isGuest(state.home)) {
+        state.home = firstMemberBut(state.away);
+        homePicker.setValue(state.home);
+      }
+      if (isGuest(state.away)) {
+        state.away = firstMemberBut(state.home);
+        awayPicker.setValue(state.away);
+      }
+    }
+    var list = on ? guestList : [];
+    return Promise.all([
+      homePicker.setExtraClubs(list),
+      awayPicker.setExtraClubs(list)
+    ]).then(draw);
+  }
+
   /* ---------- wiring ---------- */
 
   function buildFormatButtons() {
@@ -577,6 +778,21 @@
         '<em>' + FMT_META[f].note + '</em>';
       b.addEventListener('click', function () { state.format = f; draw(); });
       el('mgFormats').appendChild(b);
+    });
+  }
+
+  /* One dropped request on a weak connection used to be terminal: every click
+     handler is attached inside the boot chain, so a single failed fetch left a
+     page that LOOKED ready with permanently dead buttons and one toast that
+     scrolled away. Two retries with backoff cover the usual wobble. */
+  function retry(fn, tries, wait) {
+    tries = tries == null ? 2 : tries;
+    wait = wait || 700;
+    return fn().catch(function (err) {
+      if (tries <= 0) throw err;
+      console.warn('[match-graphic] retrying after', err && err.message);
+      return new Promise(function (r) { setTimeout(r, wait); })
+        .then(function () { return retry(fn, tries - 1, wait * 2); });
     });
   }
 
@@ -598,15 +814,31 @@
       : Promise.resolve();
 
     Promise.all([
-      NL.clubs.forSeason('current'),
-      fetch('/assets/data/competitions-meta.json').then(function (r) {
-        if (!r.ok) throw new Error('competitions-meta ' + r.status);
-        return r.json();
+      retry(function () { return NL.clubs.forSeason('current'); }),
+      retry(function () {
+        return fetch('/assets/data/competitions-meta.json').then(function (r) {
+          if (!r.ok) throw new Error('competitions-meta ' + r.status);
+          return r.json();
+        });
+      }),
+      /* Guests are a bonus, not a dependency — a failure here must not cost
+         the tool its 72 NL clubs, so it resolves to none rather than reject. */
+      NL.clubs.guests().catch(function (err) {
+        console.warn('[match-graphic] cup guests unavailable', err);
+        return [];
       }),
       fontReady
     ]).then(function (res) {
       var clubs = res[0].filter(function (c) { return c.code && c.colors; });
       if (!clubs.length) throw new Error('no clubs with a code and colours');
+      members = clubs;
+
+      var seasonKey = NL.season.current(NL.clubs.meta());
+      guestList = guestsForSeason(res[1], res[2], seasonKey).filter(function (g) {
+        return g.code && g.colors;
+      });
+      guestByName = {};
+      guestList.forEach(function (g) { guestByName[g.name] = g; });
 
       (res[1].competitions || []).forEach(function (c) {
         if (c.logo) badges[c.competition] = c.logo;
@@ -625,18 +857,25 @@
       state.home = clubs[0].name;
       state.away = clubs.length > 1 ? clubs[1].name : clubs[0].name;
 
+      /* A guest has no division, so the dropdown's secondary line would be
+         blank for the 16. Label them instead — it is also the plainest way
+         to show why they only appear under the cup. */
+      function sideLabel(c) { return c.division || 'PL2 · NL Cup'; }
+
       homePicker = NL.clubPicker('#mgHomePicker', {
         mode: 'select', season: 'current', value: state.home,
+        secondary: sideLabel,
         onSelect: function (sel) { state.home = sel.name; draw(); }
       });
       awayPicker = NL.clubPicker('#mgAwayPicker', {
         mode: 'select', season: 'current', value: state.away,
+        secondary: sideLabel,
         onSelect: function (sel) { state.away = sel.name; draw(); }
       });
 
       el('mgComp').addEventListener('change', function (e) {
         state.comp = e.target.value;
-        draw();
+        syncGuests();
       });
       el('mgSwap').addEventListener('click', function () {
         var h = state.home;
@@ -655,10 +894,25 @@
       el('mgDownload').addEventListener('click', function () { save(state.format); });
       el('mgDownloadAll').addEventListener('click', downloadAll);
 
-      return draw();
+      /* Not draw() — syncGuests settles the pickers' rosters for whatever
+         competition we opened on, then draws. */
+      return syncGuests();
     }).catch(function (err) {
       console.error('[match-graphic]', err);
-      NL.toast('Could not load club data — try reloading', 'error');
+      NL.toast('Could not load club data', 'error');
+      /* The toast goes; this does not. Without it the page sits there looking
+         usable while every control is inert, which is indistinguishable from
+         the tool being broken. */
+      var warn = el('mgWarn');
+      if (warn) {
+        warn.hidden = false;
+        warn.innerHTML = '<span><b>The tool did not finish loading.</b> Club data ' +
+          'could not be fetched, so the controls below will not respond. This is ' +
+          'usually a dropped connection. <button type="button" class="btn btn--ghost btn--sm" ' +
+          'id="mgRetryBoot">Reload</button></span>';
+        var again = el('mgRetryBoot');
+        if (again) again.addEventListener('click', function () { location.reload(); });
+      }
     });
   };
 

@@ -1,7 +1,36 @@
 /* =========================================================================
    NL Tools — club directory tidier
    File: /club-directory/_tidy.js
-   Version: v1.2 (05/08/2026)
+   Version: v1.5 (12/08/2026)
+
+   v1.5 — Merging two records for one person now unions the role scoping as
+     well as OR-ing the withheld state. It preserved neither before: the
+     rebuilt entry carried only the legacy single `section`, so combining
+     duplicates silently widened an address the club had narrowed.
+
+   v1.4 — An address can be an object now that publication is decided per
+     address, and two passes here had only ever been handed strings. The case
+     pass called em.toLowerCase() on it, which would have thrown and taken the
+     whole bake down; the duplicate merge compared addresses with indexOf,
+     which compares references, so the same address arriving as an object was
+     never seen as a duplicate. Both read the address out of either shape now,
+     and where two copies of one address disagree about publication the
+     withheld state wins — merging two records must not quietly publish
+     something.
+
+   v1.3 — Mailbox domains. A "hotnail.com" had been sitting in the directory
+     since the build: a perfectly well-formed address, no mismatch with the
+     name on the record, and mail to it goes nowhere. Nothing looked at the
+     half of an address after the @.
+     Flagged, never corrected. hotnail is almost certainly hotmail, but
+     "almost certainly" is not the standard for an address the League will
+     write to — the same reason thronhill is flagged rather than fixed.
+     The distance test alone would flag a club's own domain that happens to
+     sit near a provider's, so it is paired with a rule that costs nothing and
+     settles it: a domain more than one person at the club uses is that club's
+     domain, and a typo is typed once by one person. Endings that are never
+     right — .ocm, .con, .couk — need no corroboration.
+     Three across 870 addresses, and no false positives among them.
 
    v1.2 — The club's own block goes through the same mill as its people.
      Everything before this worked on names and job titles; the ground, the
@@ -429,13 +458,21 @@
           log(pathFor(p, pi, 'roles/' + ri + '/title'), t, out, 'case');
         }
       });
+      /* An address is a plain string OR {address, section, hide}. This read
+         it as a string only, so the first object-shaped address would have
+         thrown "em.toLowerCase is not a function" and taken the whole bake
+         down with it. Nothing stored was an object yet, which is the only
+         reason it had not. */
       p.emails = arr(p.emails).map(function (em, ei) {
-        if (em && /[A-Z]/.test(em)) {
-          n.emails++;
-          log(pathFor(p, pi, 'emails/' + ei), em, em.toLowerCase(), 'case');
-          return em.toLowerCase();
-        }
-        return em;
+        var a = (typeof em === 'string') ? em : ((em && em.address) || '');
+        if (!a || !/[A-Z]/.test(a)) { return em; }
+        n.emails++;
+        log(pathFor(p, pi, 'emails/' + ei), a, a.toLowerCase(), 'case');
+        if (typeof em === 'string') { return a.toLowerCase(); }
+        var out = {};
+        for (var k in em) { if (Object.prototype.hasOwnProperty.call(em, k)) { out[k] = em[k]; } }
+        out.address = a.toLowerCase();
+        return out;
       });
     });
     return n;
@@ -458,12 +495,63 @@
       var t = seen[k];
       var gained = arr(p.roles).map(function (r) { return r.section; });
       t.roles = arr(t.roles).concat(arr(p.roles));
+      /* By value, not by identity. An entry is a plain string OR an object
+         ({address, section, hide}), and indexOf on an object compares
+         references — so the same address arriving as an object was never
+         seen as a duplicate and went in twice. Where it IS a duplicate and
+         one copy is marked not-for-publication, the withheld state wins:
+         merging two records must not quietly publish something. */
+      var addr = function (e) {
+        return String((typeof e === 'string' ? e : (e && e.address)) || '')
+          .trim().toLowerCase();
+      };
+      /* Which of the person's jobs an entry is for. Mirrors NLDirectory
+         .sectionsOf, and is duplicated rather than imported because
+         club-signoff loads this file WITHOUT _directory.js. */
+      var secs = function (e) {
+        if (!e || typeof e === 'string') { return []; }
+        if (e.sections) { return arr(e.sections).filter(Boolean); }
+        return e.section ? [e.section] : [];
+      };
+      /* Two copies of one address, combined. Hidden wins over published —
+         merging records must not quietly publish something. Scope is the
+         UNION, and an empty scope means "wherever they appear", so an empty
+         one absorbs a narrow one rather than being narrowed by it. */
+      var fuse = function (cur, add, valueKey, value) {
+        var out = {};
+        out[valueKey] = value;
+        var a = secs(cur), b = secs(add);
+        if (a.length && b.length) {
+          out.sections = a.concat(b.filter(function (x) { return a.indexOf(x) < 0; }));
+        }
+        if ((cur && cur.hide) || (add && add.hide)) { out.hide = true; }
+        if (cur && cur.ext) { out.ext = cur.ext; }
+        else if (add && add.ext) { out.ext = add.ext; }
+        return out;
+      };
       arr(p.emails).forEach(function (em) {
-        if (em && arr(t.emails).indexOf(em) < 0) { t.emails = arr(t.emails).concat(em); }
+        if (!addr(em)) { return; }
+        var at = -1, keep = arr(t.emails);
+        keep.forEach(function (x, i) { if (addr(x) === addr(em)) { at = i; } });
+        if (at < 0) { t.emails = keep.concat(em); return; }
+        var cur = keep[at];
+        var value = (typeof cur === 'string') ? cur : ((cur && cur.address) || '');
+        var next = fuse(cur, em, 'address', value);
+        /* Back to a plain string if nothing needs saying — the shape 914
+           addresses are stored in, and worth not leaving behind. */
+        keep[at] = (!next.sections && !next.hide) ? value : next;
+        t.emails = keep;
       });
       arr(p.phones).forEach(function (ph) {
-        var have = arr(t.phones).some(function (x) { return x.number === ph.number; });
-        if (!have) { t.phones = arr(t.phones).concat(ph); }
+        var num = function (x) { return String((x && x.number) || '').trim(); };
+        if (!num(ph)) { return; }
+        var at = -1, keep = arr(t.phones);
+        keep.forEach(function (x, i) { if (num(x) === num(ph)) { at = i; } });
+        if (at < 0) { t.phones = keep.concat(ph); return; }
+        var merged = fuse(keep[at], ph, 'number', num(keep[at]));
+        if (merged.ext === undefined) { merged.ext = (keep[at] && keep[at].ext) || ''; }
+        keep[at] = merged;
+        t.phones = keep;
       });
       if (p.hideContact) { t.hideContact = true; }
       if (p.id) { t.mergedIds = arr(t.mergedIds).concat(p.id); }
@@ -752,11 +840,77 @@
     });
   }
 
+  /* The mailbox providers a person is likely to have, against which a domain
+     one or two characters out is a typo rather than a coincidence. hotnail
+     for hotmail is the one that prompted this: a perfectly well-formed
+     address, no mismatch with the name, and mail to it goes nowhere.
+
+     The distance test alone would flag a real club domain that happens to sit
+     near one of these — hive.co.uk against live.co.uk — so it is paired with
+     a second rule that costs nothing and settles it: a domain the club uses
+     more than once is that club's domain. A typo is typed by one person, one
+     time. */
+  var MAIL_HOSTS = [
+    'gmail.com', 'googlemail.com', 'hotmail.com', 'hotmail.co.uk',
+    'outlook.com', 'outlook.co.uk', 'yahoo.com', 'yahoo.co.uk', 'ymail.com',
+    'btinternet.com', 'icloud.com', 'me.com', 'mac.com', 'live.co.uk',
+    'live.com', 'sky.com', 'aol.com', 'msn.com', 'talktalk.net',
+    'virginmedia.com', 'ntlworld.com', 'blueyonder.co.uk', 'protonmail.com',
+    'tiscali.co.uk', 'rocketmail.com'
+  ];
+
+  /* Endings that are never right, whatever the domain. Unlike the provider
+     test these need no corroboration — nobody's address ends .con. */
+  var BAD_TLD = /\.(con|cmo|ocm|c0m|comm|co\.ukk|co\.uk\.|couk|co\.u|or\.uk|nte)$/i;
+
+  function domainOf(em) {
+    var at = String(em || '').lastIndexOf('@');
+    return at < 1 ? '' : em.slice(at + 1).toLowerCase().trim();
+  }
+
+  /* Every domain in the club, and how many people use it. */
+  function domainCounts(rec) {
+    var n = {};
+    arr(rec.people).forEach(function (p) {
+      arr(p.emails).forEach(function (em) {
+        var d = domainOf(typeof em === 'string' ? em : (em && em.address));
+        if (d) { n[d] = (n[d] || 0) + 1; }
+      });
+    });
+    return n;
+  }
+
+  function domainTypo(em, counts) {
+    var dom = domainOf(em);
+    if (!dom || dom.indexOf('.') < 0) { return ''; }
+    if (BAD_TLD.test(dom)) {
+      return 'reads "' + dom + '", and that ending is not a real one';
+    }
+    if (MAIL_HOSTS.indexOf(dom) > -1) { return ''; }
+    /* Used by more than one person, so it is the club's own domain. */
+    if ((counts[dom] || 0) > 1) { return ''; }
+    for (var i = 0; i < MAIL_HOSTS.length; i++) {
+      var k = MAIL_HOSTS[i];
+      var d = editDistance(dom, k);
+      if (d > 0 && d <= 2 && d / Math.max(dom.length, k.length) <= 0.2) {
+        return 'reads "' + dom + '", which is one or two letters from "' + k + '"';
+      }
+    }
+    return '';
+  }
+
   function flagAttention(rec) {
     var out = [];
     flagInfo(rec.info, out);
+    var counts = domainCounts(rec);
     arr(rec.people).forEach(function (p, pi) {
-      arr(p.emails).forEach(function (em, ei) {
+      arr(p.emails).forEach(function (em0, ei) {
+        var em = typeof em0 === 'string' ? em0 : ((em0 && em0.address) || '');
+        var bad = domainTypo(em, counts);
+        if (bad) {
+          out.push({ path: pathFor(p, pi, 'emails/' + ei), field: 'email',
+            label: 'Check the domain', why: bad });
+        }
         var near = emailMismatch(p, em);
         if (near) {
           out.push({ path: pathFor(p, pi, 'emails/' + ei), field: 'email',

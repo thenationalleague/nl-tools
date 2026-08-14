@@ -1,31 +1,82 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Club Directory
-  Version: v1.0 (05/08/2026)
+  Version: v1.2 (10/08/2026)
   File: /club-directory/index.html
 
   The League's own view of the club directory, for anyone with a portal
   account. Read-only: corrections are made by the admin team in
   /club-directory/editor/, which is where the audit trail lives.
 
-  WHAT HAPPENED TO THE OLD ONE
-  ----------------------------
-  This replaces a 6,264-line tool that predated most of the canon it should
-  have been using — 50 bare font-weights against a variable face, 11 rgba
-  overlays where the shade ladder belongs, 14 hard-coded px sizes against a
-  clamp scale, 5 native confirm/alert calls, and 1,425 lines of local CSS.
-  Rebuilding was cheaper than remediating.
+  v1.1 — THREE VIEWS INSTEAD OF ONE
+  ---------------------------------
+  v1.0 was a club browser and nothing else: pick a club, read it. That is the
+  right thing to have, but it answers only the question you already knew to
+  ask. The two questions actually being asked of this data every week were
+  "which clubs still need work" and "give me every media contact in the
+  National League so I can email them", and neither had an answer here.
 
-  It also carried an "Import handbook seed data" button that wrote the 2025
-  handbook parse into app-data/ops-club-directory/clubs — the same node the
-  2026 directory lives in. Someone pressed it, and for an evening the editor
-  showed 2025 people with no contact details while the bake silently refused
-  to run because the node was not empty. The button is gone with the rest.
+    OVERVIEW      one row per club, what is outstanding, sortable by any
+                  column. The point is to be able to say "these eleven clubs
+                  have nobody on the safety list" without opening eleven clubs.
+    MAILING LISTS the export. Pick lists, pick clubs, drop anyone you do not
+                  want, copy or download. Rebuilt from the List builder in the
+                  tool this replaced, which had the interaction model right.
+    DIRECTORY     v1.0, unchanged.
 
-  Kept from that tool as ideas rather than code: the People Model v2
-  assessment (a closed League-owned `function` key per role, held separately
-  from the club's free-text title, and vacant posts modelled properly) and
-  the required-list compliance scoring. Both belong in a later pass.
+  WHAT COUNTS AS AN ISSUE
+  -----------------------
+  Five things, and they are all things a human has to resolve — nothing here
+  is a style preference:
+
+    Flags        NLTidy.flagAttention — a domain one character from hotmail,
+                 an address whose spelling fights the name, a phone number
+                 that cannot be dialled, a job title entered twice. Derived
+                 live on every draw, so a flag added to the tidier shows up
+                 here without a rebake.
+    No details   the club card is empty. Nothing held at all.
+    No job title a person with roles but not one of them titled.
+    No route     a person with neither an email nor a phone. They are in the
+                 directory and cannot be contacted, which is the one failure
+                 a directory cannot survive.
+    Lists unset  a mailing list with nobody on it. Mail to it goes nowhere.
+
+  The total is a sum, used only for the default sort. It is not a score and
+  is deliberately not presented as one — a club with fourteen people will
+  out-flag a club with four whatever the state of either.
+
+  MAILING LISTS ARE NOT DEPARTMENTS
+  ---------------------------------
+  Eleven lists, a separate taxonomy from the fifteen departments, and the
+  clubs answered them separately. SLO, DLO and PLO exist here and nowhere
+  else. The taxonomy lives in _directory.js (v1.3) so the editor and this
+  page cannot drift apart.
+
+  SHARED MAILBOXES IN AN EXPORT
+  -----------------------------
+  34 clubs gave us departmental inboxes — commercial@, tickets@ — and those
+  are frequently the address the club would rather you used. They are keyed
+  by the club's own dept label, not by our list keys, so they are matched
+  onto a list by that label against a small synonym table (INBOX_MATCH).
+  A match is a guess and is labelled as one on screen: every inbox row is
+  tagged "shared mailbox" and can be dropped like any other row. An inbox we
+  cannot place simply is not offered.
+
+  NOT-FOR-PUBLICATION DETAILS
+  ---------------------------
+  "Do not publish" is decided per address and per number as of v1.2, so a
+  person can be publishing their club address while their mobile is held
+  back. Two things follow for the export.
+
+  It does not mean "do not write to". This page is behind auth-guard, the
+  export is internal routing, and a secretary who asked not to be in the
+  public directory still expects League mail. So withheld details are
+  included, counted on screen, and there is a switch to leave them out.
+
+  When that switch is off it drops the withheld LINES, not the person —
+  dropping the person would lose the address they were happy to give us,
+  which is the opposite of what the switch is for. Somebody left with
+  nothing after that is dropped.
 
   Storage (RTDB):
     app-data/ops-club-directory/clubs        the directory (read)
@@ -33,7 +84,9 @@
 
   Access (auth-guard registry):
     staff / admin / superadmin → access. Club users see their own club only,
-    enforced by rules on clubs/$clubName, not by this page.
+    enforced by rules on clubs/$clubName, not by this page — which means a
+    club user's export contains their own club and nothing else, correctly,
+    without this page having to know that.
 -->
 <html lang="en">
 <head>
@@ -41,8 +94,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Club Directory — NL Tools</title>
 
-  <link rel="stylesheet" href="/system/nl-brand.css?v=32">
-  <link rel="stylesheet" href="/club-directory/_directory.css?v=19">
+  <link rel="stylesheet" href="/system/nl-brand.css?v=35">
+  <link rel="stylesheet" href="/club-directory/_directory.css?v=29">
 
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -70,6 +123,25 @@
 
     window.NL_CHANGELOG = [
       {
+        date: '10 August 2026',
+        version: 'v1.2',
+        items: [
+          'Whether a detail is published is now decided per address and per phone number rather than per person, so somebody can publish their club address and keep their mobile out of the directory.',
+          'The mailing-list export follows: switching off "include details marked not-for-publication" now leaves out the withheld addresses rather than the whole person, because dropping the person would lose the address they were happy to give us.'
+        ]
+      },
+      {
+        date: '10 August 2026',
+        version: 'v1.1',
+        items: [
+          'Overview: one row per club showing what is still outstanding — flags to check, people with no job title, people with no contact route, mailing lists with nobody on them, and whether the club card is empty. Sort by any column, filter to the clubs that still need work, click through to the club.',
+          'Mailing lists: pick the lists you want, narrow to some clubs or leave it at all 72, drop anyone you do not want, then copy the recipients as named addresses or plain addresses, or take the whole thing as CSV.',
+          'Shared mailboxes (commercial@, tickets@) join a list as their own recipient where the club’s own label matches it. Every one is tagged on screen, because matching a club’s wording to our list is a guess and should look like one.',
+          'People marked not-for-publication are included in exports and counted on screen. Not-for-publication means not in the public directory, not "do not write to" — there is a switch if you need them out.',
+          'Coverage gaps: pick a list and it tells you which clubs have nobody on it, with crests, before you send anything.'
+        ]
+      },
+      {
         date: '5 August 2026',
         version: 'v1.0',
         items: [
@@ -88,10 +160,11 @@
     };
   </script>
 
-  <script src="/system/nl-utils.js?v=29"></script>
+  <script src="/system/nl-utils.js?v=30"></script>
   <script src="/system/nl-topbar.js?v=8"></script>
   <script src="/system/auth-guard.js?v=10"></script>
-  <script src="/club-directory/_directory.js?v=19"></script>
+  <script src="/club-directory/_directory.js?v=29"></script>
+  <script src="/club-directory/_tidy.js?v=29"></script>
 
 <style>
   /* Staff see every club, including ones the admin team has not been through
@@ -112,6 +185,127 @@
   /* The state chip is the canon .pill — .pill--approved and .pill--pending
      already are green-on-green-light and amber-on-amber-light, which is
      exactly what "checked" and "not yet checked" want to look like. */
+
+  .ov-pane[hidden] { display: none; }
+
+  /* ---------------------------------------------------------- overview */
+  .ov-filters {
+    display: flex; align-items: center; gap: 8px;
+    flex-wrap: wrap; margin: 0 0 14px;
+  }
+  .ov-tablewrap { overflow-x: auto; }
+  .ov-table { width: 100%; }
+  .ov-table th { white-space: nowrap; cursor: pointer; user-select: none; }
+  .ov-table th[data-sort]:hover { color: var(--primary); }
+  .ov-table th .ov-arrow { opacity: 0; margin-left: 4px; }
+  .ov-table th.is-sorted .ov-arrow { opacity: 1; }
+  .ov-table td { vertical-align: middle; }
+  .ov-club {
+    display: flex; align-items: center; gap: 9px;
+    font-variation-settings: 'wght' 700;
+  }
+  .ov-club img { width: 22px; height: 22px; object-fit: contain; flex: none; }
+  .ov-club button {
+    border: none; background: none; padding: 0; cursor: pointer;
+    font: inherit; color: var(--navy); text-align: left;
+    font-variation-settings: 'wght' 700;
+  }
+  .ov-club button:hover { color: var(--primary); text-decoration: underline; }
+  .ov-n { font-variant-numeric: tabular-nums; text-align: right; }
+  /* A zero is the good answer in every numeric column here, so it recedes
+     and a non-zero carries the weight. Colour is not the only cue — the
+     number itself already differs — so this stays decorative. */
+  .ov-n--zero { color: var(--navy-300); }
+  .ov-n--bad  { color: var(--red); font-variation-settings: 'wght' 800; }
+  .ov-n--warn { color: var(--amber); font-variation-settings: 'wght' 800; }
+
+  /* -------------------------------------------------------- list builder */
+  /* align-items: start, or the mailing-list panel stretches to the height of
+     the 72-club panel next to it and the page opens on half a screen of
+     nothing. */
+  .lb-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+    align-items: start; margin-bottom: 16px;
+  }
+  @media (max-width: 820px) { .lb-grid { grid-template-columns: 1fr; } }
+  .lb-panel {
+    background: var(--white); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 14px 16px 16px;
+  }
+  /* The heading is the canon .section-head — same type, same spacing, no
+     second copy of the scale. Only the count needs a rule of its own. */
+  .lb-panel .section-head { margin-bottom: 10px; }
+  .lb-panel .section-head h2 span {
+    font-size: 12px; color: var(--text-muted);
+    letter-spacing: 0.04em; font-variation-settings: 'wght' 600;
+  }
+  .lb-actions { display: flex; gap: 4px; }
+  .lb-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+  .lb-pills .filter-pill { font-size: 12px; padding: 5px 11px; }
+  .lb-pills .filter-pill em {
+    font-style: normal; opacity: 0.72; margin-left: 5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .lb-div { margin-top: 12px; }
+  .lb-div:first-child { margin-top: 0; }
+  .lb-div__h {
+    font-size: 11px; font-variation-settings: 'wght' 800;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-muted); margin-bottom: 6px;
+  }
+  .lb-opts {
+    display: flex; flex-wrap: wrap; gap: 18px;
+    margin: 0 0 16px; padding: 12px 14px;
+    background: var(--off-white); border-radius: var(--radius);
+  }
+  .lb-opt { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .lb-opt input { width: 15px; height: 15px; accent-color: var(--navy); }
+  .lb-opt span { color: var(--text-muted); }
+
+  .lb-warn {
+    border: 1px solid var(--amber); background: var(--amber-light);
+    border-radius: var(--radius); padding: 12px 14px; margin-bottom: 16px;
+  }
+  .lb-warn__h {
+    font-size: 12px; font-variation-settings: 'wght' 800;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--amber); margin-bottom: 8px;
+  }
+  .lb-warn__item { font-size: 13px; margin-top: 8px; }
+  .lb-warn__item:first-of-type { margin-top: 0; }
+  .lb-warn__crests {
+    display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 5px;
+  }
+  .lb-warn__crest {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 12px; color: var(--text);
+  }
+  .lb-warn__crest img { width: 16px; height: 16px; object-fit: contain; }
+
+  .lb-results__hd {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
+  }
+  .lb-count {
+    font-size: 30px; font-variation-settings: 'wght' 900; line-height: 1;
+    color: var(--navy); font-variant-numeric: tabular-nums;
+  }
+  .lb-count__sub { font-size: 13px; color: var(--text-muted); margin-left: 8px; }
+  .lb-copy { display: flex; gap: 8px; flex-wrap: wrap; }
+  .lb-table { width: 100%; }
+  .lb-table td { vertical-align: top; }
+  .lb-table tr.is-omitted td { opacity: 0.42; text-decoration: line-through; }
+  .lb-table tr.is-omitted td:first-child { text-decoration: none; }
+  .lb-omit {
+    width: 26px; height: 26px; line-height: 1; padding: 0;
+    border: 1px solid var(--border); background: var(--white);
+    border-radius: 5px; cursor: pointer; color: var(--text-muted);
+    font-family: var(--font); font-size: 15px;
+  }
+  .lb-omit:hover { border-color: var(--primary); color: var(--primary); }
+  .lb-clubcell { display: flex; align-items: center; gap: 7px; }
+  .lb-clubcell img { width: 18px; height: 18px; object-fit: contain; flex: none; }
+  .lb-none { color: var(--text-muted); font-style: italic; }
 </style>
 </head>
 <body>
@@ -120,18 +314,103 @@
 
 <div id="pageWrap">
   <div class="page">
-    <div class="cd-pickbar">
-      <select id="pick" aria-label="Choose a club"></select>
-      <span id="state"></span>
+
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-pane="overview">Overview</button>
+      <button class="tab" data-pane="lists">Mailing lists</button>
+      <button class="tab" data-pane="directory">Directory</button>
     </div>
-    <div class="cd-search"><div class="cd-search__box">
-      <svg class="cd-search__icon" width="17" height="17" viewBox="0 0 24 24" fill="none"
-        stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
-        <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
-      <input class="cd-search__in" id="q" placeholder="Search clubs, people and job titles"
-        aria-label="Search">
-    </div></div>
-    <div id="out"></div>
+
+    <!-- ============================================================ OVERVIEW -->
+    <div class="ov-pane" id="pane-overview">
+      <div class="stats" id="ovStats"></div>
+      <div class="ov-filters filter-pill-row">
+        <span class="filter-pill-row__label">Show</span>
+        <button class="filter-pill active" data-ovf="all">All clubs</button>
+        <button class="filter-pill" data-ovf="todo">Something outstanding</button>
+        <button class="filter-pill" data-ovf="unchecked">Not yet checked</button>
+      </div>
+      <div class="ov-tablewrap">
+        <table class="table table--compact ov-table" id="ovTable"></table>
+      </div>
+    </div>
+
+    <!-- ======================================================== MAILING LISTS -->
+    <div class="ov-pane" id="pane-lists" hidden>
+      <div class="lb-grid">
+        <section class="lb-panel">
+          <div class="section-head">
+            <h2>Mailing lists</h2>
+            <div class="lb-actions">
+              <button class="btn btn--link btn--sm" id="lbListsAll">all</button>
+              <button class="btn btn--link btn--sm" id="lbListsNone">none</button>
+            </div>
+          </div>
+          <div class="lb-pills" id="lbLists"></div>
+        </section>
+        <!-- Closed by default. Most sends go to every club, and 72 pills
+             open on load push the results a full screen down for a choice
+             nobody was making. -->
+        <section class="lb-panel">
+          <div class="section-head">
+            <h2>Clubs <span id="lbClubSum"></span></h2>
+            <div class="lb-actions">
+              <button class="btn btn--link btn--sm" id="lbClubsToggle">choose</button>
+              <button class="btn btn--link btn--sm" id="lbClubsNone">every club</button>
+            </div>
+          </div>
+          <div id="lbClubs" hidden></div>
+        </section>
+      </div>
+
+      <div class="lb-opts">
+        <label class="lb-opt">
+          <input type="checkbox" id="lbInboxes" checked>
+          Include shared mailboxes <span id="lbInboxNote"></span>
+        </label>
+        <label class="lb-opt">
+          <input type="checkbox" id="lbHeld" checked>
+          Include details marked not-for-publication <span id="lbHeldNote"></span>
+        </label>
+      </div>
+
+      <div id="lbWarnings"></div>
+
+      <section>
+        <div class="lb-results__hd">
+          <div>
+            <span class="lb-count" id="lbCount">0</span>
+            <span class="lb-count__sub" id="lbCountSub">recipients</span>
+          </div>
+          <div class="lb-copy">
+            <button class="btn btn--navy btn--sm" data-copy="named">Copy named</button>
+            <button class="btn btn--navy btn--sm" data-copy="plain">Copy addresses</button>
+            <button class="btn btn--ghost btn--sm" data-copy="csv">Copy as CSV</button>
+            <button class="btn btn--ghost btn--sm" id="lbDownload">Download CSV</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table table--compact lb-table" id="lbTable"></table>
+        </div>
+      </section>
+    </div>
+
+    <!-- =========================================================== DIRECTORY -->
+    <div class="ov-pane" id="pane-directory" hidden>
+      <div class="cd-pickbar">
+        <select id="pick" aria-label="Choose a club"></select>
+        <span id="state"></span>
+      </div>
+      <div class="cd-search"><div class="cd-search__box">
+        <svg class="cd-search__icon" width="17" height="17" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
+        <input class="cd-search__in" id="q" placeholder="Search clubs, people and job titles"
+          aria-label="Search">
+      </div></div>
+      <div id="out"></div>
+    </div>
+
   </div>
 </div>
 
@@ -140,12 +419,38 @@ window.TOOL = (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var esc = NL.escHtml;
-  var ALL = {}, names = [];
+  var arr = function (v) { return NLDirectory.arr(v); };
+  var ALL = {}, names = [], AUDIT = {};
 
-  function ready(n) {
-    var s = (ALL[n] || {}).signedOff;
-    return !!(s && s.at);
-  }
+  var LIST_ORDER = NLDirectory.LIST_ORDER;
+  var LIST_LABEL = NLDirectory.LIST_LABEL;
+
+  /* A club labels its own mailboxes in its own words — "Ticket office",
+     "Press office", "Accounts". Placing one on a League list is therefore a
+     text match, not a lookup, so it is kept small, explicit and visible:
+     every inbox recipient is tagged on screen and can be dropped. An inbox
+     whose label matches nothing is simply never offered, which is the right
+     failure — an unplaced mailbox in an export is worse than a missing one. */
+  var INBOX_MATCH = {
+    secretary:  ['secretar', 'admin'],
+    media:      ['media', 'press', 'communicat', 'marketing'],
+    programme:  ['programme', 'program'],
+    commercial: ['commercial', 'sponsor', 'partnership', 'hospitality'],
+    finance:    ['finance', 'account', 'invoice', 'payment'],
+    ticketing:  ['ticket', 'box office'],
+    medical:    ['medical', 'physio'],
+    safety:     ['safety', 'steward'],
+    slo:        ['supporter liaison', 'fan liaison', 'supporter service'],
+    dlo:        ['disability', 'disabled'],
+    plo:        ['police']
+  };
+  /* Deliberately not in the table: "General Enquiries", "Club Office",
+     "General Info". They are real addresses at real clubs and they belong to
+     no list in particular, so placing them on one would be inventing an
+     answer. Safeguarding is the same shape from the other end — the clubs
+     have a safeguarding inbox and the League has no safeguarding list, so it
+     stays unoffered rather than being folded into Safety officer, which is a
+     different job. */
 
   function boot() {
     Promise.all([
@@ -155,25 +460,532 @@ window.TOOL = (function () {
       ALL = res[1].val() || {};
       names = Object.keys(ALL).sort();
       if (!names.length) {
-        $('out').innerHTML = '<p class="cd-empty">The directory has not been built yet. ' +
-          'The admin team builds it from the club submissions in the editor.</p>';
+        $('pane-overview').innerHTML = '<p class="cd-empty">The directory has not been ' +
+          'built yet. The admin team builds it from the club submissions in the editor.</p>';
         return;
       }
-      $('pick').innerHTML = names.map(function (n) {
-        return '<option value="' + esc(n) + '">' + esc(n) +
-          (ready(n) ? '' : ' — not yet checked') + '</option>';
-      }).join('');
-      $('pick').addEventListener('change', function () { draw(this.value); });
-      $('q').addEventListener('input', onSearch);
-      var first = fromHash() || names[0];
-      $('pick').value = first;
-      draw(first);
-      window.addEventListener('hashchange', function () {
-        var n = fromHash();
-        if (n) { $('pick').value = n; draw(n); }
-      });
+      names.forEach(function (n) { AUDIT[n] = auditClub(n); });
+
+      /* Read the deep link BEFORE wiring the directory: drawing a club
+         replaceState's its name into the hash, so asking afterwards is
+         asking a question you have just answered yourself — which is how the
+         overview opened on the directory tab every single time. */
+      var deep = fromHash();
+
+      wireTabs();
+      drawOverview();
+      buildLists();
+      wireDirectory();
+
+      if (deep) { showPane('directory'); }
     }).catch(function (err) {
-      $('out').innerHTML = '<p class="cd-empty">' + esc((err && err.message) || String(err)) + '</p>';
+      $('pane-overview').innerHTML = '<p class="cd-empty">' +
+        esc((err && err.message) || String(err)) + '</p>';
+    });
+  }
+
+  /* --------------------------------------------------------------- panes */
+  function wireTabs() {
+    $('tabs').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-pane]');
+      if (b) { showPane(b.dataset.pane); }
+    });
+  }
+  function showPane(which) {
+    ['overview', 'lists', 'directory'].forEach(function (p) {
+      $('pane-' + p).hidden = p !== which;
+    });
+    $('tabs').querySelectorAll('.tab').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.pane === which);
+    });
+  }
+
+  /* ------------------------------------------------------------ the audit
+     Derived live, never stored. A flag added to the tidier appears here on
+     the next load with no rebake, which is the whole reason flagAttention is
+     re-run rather than read back out of provenance. */
+  function heldInfo(info) {
+    info = info || {};
+    return Object.keys(info).filter(function (k) {
+      return k !== 'noSponsor' && String(info[k] == null ? '' : info[k]).trim() !== '';
+    }).length;
+  }
+
+  function auditClub(name) {
+    var rec = ALL[name] || {};
+    var people = arr(rec.people);
+    var flags = window.NLTidy ? NLTidy.flagAttention(rec) : [];
+    var noTitle = people.filter(function (p) {
+      return !NLDirectory.rolesOf(p).some(function (r) { return (r.title || '').trim(); });
+    }).length;
+    var noRoute = people.filter(function (p) { return !NLDirectory.reachable(p); }).length;
+    var gaps = LIST_ORDER.filter(function (k) {
+      return !NLDirectory.listMembers(rec, k).length;
+    });
+    var details = heldInfo(rec.info);
+    var checked = !!((rec.signedOff || {}).at);
+    return {
+      club: name, people: people.length, flags: flags.length,
+      noTitle: noTitle, noRoute: noRoute, gaps: gaps.length, gapKeys: gaps,
+      details: details, checked: checked,
+      todo: flags.length + noTitle + noRoute + gaps.length + (details ? 0 : 1)
+    };
+  }
+
+  /* ----------------------------------------------------------- overview */
+  var OV = { sort: 'todo', dir: -1, filter: 'all' };
+
+  var OV_COLS = [
+    { key: 'club',    label: 'Club',          num: false },
+    { key: 'checked', label: 'Checked',       num: false },
+    { key: 'people',  label: 'People',        num: true },
+    { key: 'flags',   label: 'Flags',         num: true, tone: 'bad' },
+    { key: 'noTitle', label: 'No job title',  num: true, tone: 'warn' },
+    { key: 'noRoute', label: 'No route',      num: true, tone: 'bad' },
+    { key: 'gaps',    label: 'Lists unset',   num: true, tone: 'warn' },
+    { key: 'details', label: 'Club details',  num: true, tone: 'details' },
+    { key: 'todo',    label: 'To do',         num: true, tone: 'bad' }
+  ];
+
+  function drawOverview() {
+    var rows = names.map(function (n) { return AUDIT[n]; });
+    var totals = rows.reduce(function (a, r) {
+      a.people += r.people; a.todo += r.todo;
+      a.checked += r.checked ? 1 : 0;
+      a.clean += r.todo ? 0 : 1;
+      return a;
+    }, { people: 0, todo: 0, checked: 0, clean: 0 });
+
+    $('ovStats').innerHTML =
+      stat(rows.length, 'clubs') +
+      stat(totals.people, 'people') +
+      stat(totals.checked + ' / ' + rows.length, 'checked off') +
+      stat(totals.clean, 'with nothing outstanding') +
+      stat(totals.todo, 'things to resolve');
+
+    if (OV.filter === 'todo') { rows = rows.filter(function (r) { return r.todo > 0; }); }
+    if (OV.filter === 'unchecked') { rows = rows.filter(function (r) { return !r.checked; }); }
+
+    rows.sort(function (a, b) {
+      var k = OV.sort, d;
+      if (k === 'club') { d = a.club.localeCompare(b.club); }
+      else if (k === 'checked') { d = (a.checked ? 1 : 0) - (b.checked ? 1 : 0); }
+      else { d = a[k] - b[k]; }
+      return (d || a.club.localeCompare(b.club)) * (k === 'club' ? 1 : OV.dir);
+    });
+
+    var head = OV_COLS.map(function (c) {
+      return '<th data-sort="' + c.key + '"' +
+        (c.num ? ' class="ta-right' + (OV.sort === c.key ? ' is-sorted' : '') + '"'
+               : (OV.sort === c.key ? ' class="is-sorted"' : '')) + '>' +
+        esc(c.label) + '<span class="ov-arrow">' +
+        (OV.sort === c.key ? (OV.dir < 0 ? '▾' : '▴') : '') + '</span></th>';
+    }).join('');
+
+    var body = rows.length ? rows.map(function (r) {
+      return '<tr>' +
+        '<td><span class="ov-club"><img data-crest="' + esc(r.club) + '" alt="">' +
+          '<button type="button" data-goto="' + esc(r.club) + '">' + esc(r.club) +
+          '</button></span></td>' +
+        '<td><span class="pill pill--' + (r.checked ? 'approved' : 'pending') + '">' +
+          (r.checked ? 'Checked' : 'Not yet') + '</span></td>' +
+        num(r.people, null) +
+        num(r.flags, 'bad') +
+        num(r.noTitle, 'warn') +
+        num(r.noRoute, 'bad') +
+        gapCell(r) +
+        detailCell(r) +
+        num(r.todo, 'bad') +
+      '</tr>';
+    }).join('') : '<tr class="empty-row"><td colspan="' + OV_COLS.length +
+        '">Nothing matches that filter — which here is good news.</td></tr>';
+
+    $('ovTable').innerHTML = '<thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody>';
+    wireCrests($('ovTable'));
+  }
+
+  function stat(n, label) {
+    return '<div class="stat"><div class="stat__num">' + esc(String(n)) +
+      '</div><div class="stat__label">' + esc(label) + '</div></div>';
+  }
+  function num(v, tone) {
+    var cls = 'ov-n ' + (v ? (tone ? 'ov-n--' + tone : '') : 'ov-n--zero');
+    return '<td class="' + cls + '">' + v + '</td>';
+  }
+  function gapCell(r) {
+    var title = r.gaps ? ' title="' + esc(r.gapKeys.map(function (k) {
+      return LIST_LABEL[k] || k;
+    }).join(', ')) + '"' : '';
+    return '<td class="ov-n ' + (r.gaps ? 'ov-n--warn' : 'ov-n--zero') + '"' + title + '>' +
+      r.gaps + ' / ' + LIST_ORDER.length + '</td>';
+  }
+  function detailCell(r) {
+    return r.details
+      ? '<td class="ov-n ov-n--zero">' + r.details + ' held</td>'
+      : '<td class="ov-n ov-n--bad">none held</td>';
+  }
+
+  $('ovTable').addEventListener('click', function (e) {
+    var th = e.target.closest('th[data-sort]');
+    if (th) {
+      var k = th.dataset.sort;
+      if (OV.sort === k) { OV.dir = -OV.dir; } else { OV.sort = k; OV.dir = k === 'club' ? 1 : -1; }
+      drawOverview();
+      return;
+    }
+    var go = e.target.closest('[data-goto]');
+    if (go) { showPane('directory'); $('pick').value = go.dataset.goto; draw(go.dataset.goto); }
+  });
+
+  document.querySelector('.ov-filters').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-ovf]');
+    if (!b) { return; }
+    OV.filter = b.dataset.ovf;
+    document.querySelectorAll('[data-ovf]').forEach(function (x) {
+      x.classList.toggle('active', x === b);
+    });
+    drawOverview();
+  });
+
+  /* -------------------------------------------------------- list builder */
+  var LB = { lists: {}, clubs: {}, omit: {}, inboxes: true, held: true };
+
+  /* Every candidate recipient for the current selection, before omissions.
+     A person on two selected lists is ONE recipient carrying both list names
+     — the old tool shipped a version that emailed them twice and it was the
+     first thing anyone noticed. */
+  function recipients() {
+    var picked = LIST_ORDER.filter(function (k) { return LB.lists[k]; });
+    if (!picked.length) { return []; }
+    var clubs = names.filter(function (n) {
+      return anyClubPicked() ? LB.clubs[n] : true;
+    });
+    var out = [], index = {};
+
+    clubs.forEach(function (club) {
+      var rec = ALL[club] || {};
+      picked.forEach(function (key) {
+        NLDirectory.listMembers(rec, key).forEach(function (p) {
+          /* Per address and per number, not per person. Somebody can publish
+             their club address and keep their mobile back, so "leave out what
+             is not for publication" has to drop the withheld LINES and keep
+             the person — dropping the person would lose the address they were
+             happy to give us. Somebody left with nothing is dropped. */
+          var c = NLDirectory.contactsOf(p, '');
+          var em = c.emails.filter(function (x) { return LB.held || !x.hide; });
+          var ph = c.phones.filter(function (x) { return LB.held || !x.hide; });
+          if (!LB.held && !em.length && !ph.length) { return; }
+          var id = club + '::' + (p.id || NLDirectory.fullName(p));
+          var row = index[id];
+          if (!row) {
+            row = index[id] = {
+              key: id, club: club, kind: 'person',
+              name: NLDirectory.fullName(p) || 'Name not given',
+              held: c.emails.concat(c.phones).some(function (x) { return x.hide; }),
+              /* De-duplicated: a title entered twice is flagged on the
+                 overview as something to fix, and repeating it here just
+                 makes the export look wrong as well. */
+              roles: NLDirectory.rolesOf(p).map(function (r) {
+                return (r.title || '').trim();
+              }).filter(function (t, i, a) { return t && a.indexOf(t) === i; }),
+              emails: em.map(function (x) { return x.value; }),
+              phones: ph.map(function (x) { return x.value; }),
+              lists: []
+            };
+            out.push(row);
+          }
+          if (row.lists.indexOf(key) < 0) { row.lists.push(key); }
+        });
+        if (LB.inboxes) {
+          inboxesFor(rec, key).forEach(function (b) {
+            var id = club + '::box::' + b.label;
+            var row = index[id];
+            if (!row) {
+              row = index[id] = {
+                key: id, club: club, kind: 'inbox', name: b.label, held: false,
+                roles: [], emails: b.email ? [b.email] : [],
+                phones: b.phone ? [b.phone] : [], lists: []
+              };
+              out.push(row);
+            }
+            if (row.lists.indexOf(key) < 0) { row.lists.push(key); }
+          });
+        }
+      });
+    });
+
+    out.sort(function (a, b) {
+      return a.club.localeCompare(b.club) ||
+        (a.kind === b.kind ? 0 : a.kind === 'inbox' ? 1 : -1) ||
+        a.name.localeCompare(b.name);
+    });
+    return out;
+  }
+
+  function anyClubPicked() {
+    return Object.keys(LB.clubs).some(function (k) { return LB.clubs[k]; });
+  }
+
+  /* A club's shared mailboxes that belong on one League list, matched on the
+     club's own label. Deliberately loose on the label and strict on the
+     result: no email, no recipient. */
+  function inboxesFor(rec, key) {
+    var boxes = rec.inboxes || {};
+    var needles = INBOX_MATCH[key] || [];
+    return Object.keys(boxes).map(function (k) {
+      var b = boxes[k] || {};
+      var label = String(b.dept || k).trim();
+      var hay = (label + ' ' + k).toLowerCase();
+      if (!needles.some(function (n) { return hay.indexOf(n) > -1; })) { return null; }
+      var email = (b.email || '').trim();
+      if (!email) { return null; }
+      return { label: label || k, email: email, phone: (b.phone || '').trim() };
+    }).filter(Boolean);
+  }
+
+  function buildLists() {
+    $('lbLists').innerHTML = LIST_ORDER.map(function (k) {
+      var n = names.reduce(function (a, c) {
+        return a + NLDirectory.listMembers(ALL[c] || {}, k).length;
+      }, 0);
+      return '<button class="filter-pill" data-list="' + k + '">' +
+        esc(LIST_LABEL[k] || k) + '<em>' + n + '</em></button>';
+    }).join('');
+
+    var byDiv = { National: [], North: [], South: [], Other: [] };
+    names.forEach(function (n) {
+      var meta = NL.clubs.byName(n);
+      var d = (meta && meta.division) || 'Other';
+      (byDiv[d] || byDiv.Other).push(n);
+    });
+    $('lbClubs').innerHTML = ['National', 'North', 'South', 'Other'].map(function (d) {
+      if (!byDiv[d].length) { return ''; }
+      return '<div class="lb-div"><div class="lb-div__h">' + esc(d) +
+        ' (' + byDiv[d].length + ')</div><div class="lb-pills">' +
+        byDiv[d].map(function (n) {
+          return '<button class="filter-pill" data-club="' + esc(n) + '">' + esc(n) + '</button>';
+        }).join('') + '</div></div>';
+    }).join('');
+
+    var pane = $('pane-lists');
+    pane.addEventListener('click', function (e) {
+      var l = e.target.closest('[data-list]');
+      if (l) { toggle(LB.lists, l.dataset.list, l); return drawLists(); }
+      var c = e.target.closest('[data-club]');
+      if (c) { toggle(LB.clubs, c.dataset.club, c); return drawLists(); }
+      var cp = e.target.closest('[data-copy]');
+      if (cp) { return doCopy(cp.dataset.copy, cp); }
+      var om = e.target.closest('[data-omit]');
+      if (om) {
+        var k = om.dataset.omit;
+        if (LB.omit[k]) { delete LB.omit[k]; } else { LB.omit[k] = true; }
+        return drawLists();
+      }
+      if (e.target.id === 'lbListsAll') { return setAll(LB.lists, LIST_ORDER, true, '[data-list]'); }
+      if (e.target.id === 'lbListsNone') { return setAll(LB.lists, LIST_ORDER, false, '[data-list]'); }
+      if (e.target.id === 'lbClubsNone') { return setAll(LB.clubs, names, false, '[data-club]'); }
+      if (e.target.id === 'lbClubsToggle') {
+        var box = $('lbClubs');
+        box.hidden = !box.hidden;
+        e.target.textContent = box.hidden ? 'choose' : 'hide';
+        return;
+      }
+      if (e.target.id === 'lbDownload') { return download(); }
+    });
+    pane.addEventListener('change', function (e) {
+      if (e.target.id === 'lbInboxes') { LB.inboxes = e.target.checked; drawLists(); }
+      if (e.target.id === 'lbHeld') { LB.held = e.target.checked; drawLists(); }
+    });
+
+    drawLists();
+  }
+
+  function toggle(bag, key, btn) {
+    if (bag[key]) { delete bag[key]; } else { bag[key] = true; }
+    btn.classList.toggle('active', !!bag[key]);
+    LB.omit = {};
+  }
+  function setAll(bag, keys, on, sel) {
+    keys.forEach(function (k) { if (on) { bag[k] = true; } else { delete bag[k]; } });
+    document.querySelectorAll(sel).forEach(function (b) {
+      b.classList.toggle('active', on);
+    });
+    LB.omit = {};
+    drawLists();
+  }
+
+  function drawLists() {
+    var rows = recipients();
+    var kept = rows.filter(function (r) { return !LB.omit[r.key]; });
+    var reach = kept.filter(function (r) { return r.emails.length; });
+    var heldIn = rows.filter(function (r) { return r.held; }).length;
+    var boxes = rows.filter(function (r) { return r.kind === 'inbox'; }).length;
+
+    var picked = names.filter(function (n) { return LB.clubs[n]; });
+    $('lbClubSum').textContent = picked.length
+      ? picked.length + ' of ' + names.length + ' selected'
+      : 'all ' + names.length;
+
+    $('lbInboxNote').textContent = boxes ? '(' + boxes + ' matched)' : '';
+    $('lbHeldNote').textContent = LB.held
+      ? (heldIn ? '(' + heldIn + ' people affected)' : '')
+      : '(excluded)';
+
+    $('lbCount').textContent = reach.length;
+    var omitted = rows.length - kept.length;
+    $('lbCountSub').textContent = !rows.length
+      ? 'pick at least one mailing list'
+      : ((reach.length === 1 ? 'address' : 'addresses') +
+         ' · ' + (kept.length - reach.length) + ' with no email' +
+         (omitted ? ' · ' + omitted + ' dropped' : ''));
+
+    document.querySelectorAll('[data-copy], #lbDownload').forEach(function (b) {
+      b.disabled = !reach.length;
+    });
+
+    drawWarnings();
+
+    if (!rows.length) {
+      $('lbTable').innerHTML = '<tbody><tr class="empty-row"><td>' +
+        'Pick a mailing list above. Leave the clubs alone for all ' + names.length +
+        ' of them, or tick a few to narrow it.</td></tr></tbody>';
+      return;
+    }
+
+    $('lbTable').innerHTML = '<thead><tr><th></th><th>List</th><th>Name</th>' +
+      '<th>Club</th><th>Email</th><th>Phone</th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        var off = !!LB.omit[r.key];
+        return '<tr class="' + (off ? 'is-omitted' : '') + '">' +
+          '<td><button class="lb-omit" data-omit="' + esc(r.key) + '" title="' +
+            (off ? 'Put back' : 'Drop from this export') + '">' +
+            (off ? '+' : '×') + '</button></td>' +
+          '<td>' + esc(r.lists.map(function (k) { return LIST_LABEL[k] || k; }).join(', ')) + '</td>' +
+          '<td>' + esc(r.name) +
+            (r.kind === 'inbox' ? ' <span class="pill pill--info">shared mailbox</span>' : '') +
+            (r.held ? ' <span class="pill pill--pending">has withheld details</span>' : '') +
+            (r.roles.length ? '<br><span class="cd-row__ext">' +
+              esc(r.roles.join(' / ')) + '</span>' : '') + '</td>' +
+          '<td><span class="lb-clubcell"><img data-crest="' + esc(r.club) + '" alt="">' +
+            esc(r.club) + '</span></td>' +
+          '<td>' + (r.emails.length
+            ? r.emails.map(function (em) {
+                return '<a href="mailto:' + esc(em) + '">' + esc(em) + '</a>';
+              }).join('<br>')
+            : '<span class="lb-none">no email held</span>') + '</td>' +
+          '<td>' + (r.phones.length ? esc(r.phones.join(', ')) : '') + '</td>' +
+        '</tr>';
+      }).join('') + '</tbody>';
+    wireCrests($('lbTable'));
+  }
+
+  /* Which clubs have nobody on a list you have just picked. Said before the
+     copy button rather than after the email, which is the only useful time
+     to say it. */
+  function drawWarnings() {
+    var picked = LIST_ORDER.filter(function (k) { return LB.lists[k]; });
+    var pool = names.filter(function (n) { return anyClubPicked() ? LB.clubs[n] : true; });
+    var items = picked.map(function (k) {
+      var missing = pool.filter(function (n) {
+        return !NLDirectory.listMembers(ALL[n] || {}, k).length;
+      });
+      if (!missing.length) { return ''; }
+      return '<div class="lb-warn__item"><b>' + missing.length + ' club' +
+        (missing.length === 1 ? '' : 's') + '</b> with nobody on <b>' +
+        esc(LIST_LABEL[k] || k) + '</b><div class="lb-warn__crests">' +
+        missing.map(function (n) {
+          return '<span class="lb-warn__crest"><img data-crest="' + esc(n) +
+            '" alt="">' + esc(n) + '</span>';
+        }).join('') + '</div></div>';
+    }).filter(Boolean).join('');
+
+    $('lbWarnings').innerHTML = items
+      ? '<div class="lb-warn"><div class="lb-warn__h">Coverage gaps</div>' + items + '</div>'
+      : '';
+    if (items) { wireCrests($('lbWarnings')); }
+  }
+
+  /* --------------------------------------------------------------- export */
+  function exportRows() {
+    return recipients().filter(function (r) {
+      return !LB.omit[r.key] && r.emails.length;
+    });
+  }
+
+  /* bom is for the downloaded file only — Excel needs it to read an accented
+     name, and pasting one into the clipboard puts an invisible character at
+     the front of whatever you paste it into. */
+  function formatAs(fmt, bom) {
+    var rows = exportRows();
+    if (fmt === 'named') {
+      /* One address each — their first, which is the one the club gave first.
+         Quoted display name because Outlook will otherwise treat a comma in
+         a name as a recipient separator. */
+      return rows.map(function (r) {
+        return '"' + r.name.replace(/"/g, '') + '" <' + r.emails[0] + '>';
+      }).join('; ');
+    }
+    if (fmt === 'plain') {
+      var seen = {}, all = [];
+      rows.forEach(function (r) {
+        r.emails.forEach(function (em) {
+          var lc = em.toLowerCase();
+          if (!seen[lc]) { seen[lc] = 1; all.push(em); }
+        });
+      });
+      return all.join('; ');
+    }
+    return NL.csv([['Name', 'Club', 'Division', 'Mailing lists', 'Job titles',
+                    'Emails', 'Phones', 'Type', 'Published']].concat(
+      rows.map(function (r) {
+        var meta = NL.clubs.byName(r.club);
+        return [r.name, r.club, (meta && meta.division) || '',
+          r.lists.map(function (k) { return LIST_LABEL[k] || k; }).join(' / '),
+          r.roles.join(' / '), r.emails.join(' '), r.phones.join(' '),
+          r.kind === 'inbox' ? 'Shared mailbox' : 'Person',
+          r.held ? 'Some details withheld' : 'All published'];
+      })), { bom: !!bom });
+  }
+
+  function doCopy(fmt, btn) {
+    var text = formatAs(fmt);
+    if (!text) { return; }
+    var was = btn.textContent;
+    NL.copy(text, { silent: true }).then(function (ok) {
+      if (!ok) { NL.toast('Copy failed — try the CSV download instead', 'error'); return; }
+      btn.textContent = '✓ Copied';
+      setTimeout(function () { btn.textContent = was; }, 1600);
+    });
+  }
+
+  function download() {
+    var picked = LIST_ORDER.filter(function (k) { return LB.lists[k]; });
+    var stamp = new Date().toISOString().slice(0, 10);
+    NL.download('nl-mailing-list-' +
+      (picked.length === 1 ? picked[0] : picked.length + '-lists') + '-' + stamp + '.csv',
+      formatAs('csv', true), 'text/csv;charset=utf-8');
+    NL.toast(exportRows().length + ' recipients downloaded', 'success');
+  }
+
+  /* ------------------------------------------------------------ directory */
+  function ready(n) {
+    var s = (ALL[n] || {}).signedOff;
+    return !!(s && s.at);
+  }
+
+  function wireDirectory() {
+    $('pick').innerHTML = names.map(function (n) {
+      return '<option value="' + esc(n) + '">' + esc(n) +
+        (ready(n) ? '' : ' — not yet checked') + '</option>';
+    }).join('');
+    $('pick').addEventListener('change', function () { draw(this.value); });
+    $('q').addEventListener('input', onSearch);
+    var first = fromHash() || names[0];
+    $('pick').value = first;
+    draw(first);
+    window.addEventListener('hashchange', function () {
+      var n = fromHash();
+      if (n) { showPane('directory'); $('pick').value = n; draw(n); }
     });
   }
 
@@ -192,7 +1004,7 @@ window.TOOL = (function () {
     var done = ready(name);
     $('state').innerHTML = '<span class="pill pill--' + (done ? 'approved' : 'pending') + '">' +
       (done ? 'Checked' : 'Not yet checked') + '</span>';
-    $('out').innerHTML = NLDirectory.renderClub(rec, {});
+    $('out').innerHTML = NLDirectory.renderClub(rec, { showGaps: true });
     var crest = document.getElementById('cdCrest');
     if (crest) {
       crest.alt = name + ' crest';
@@ -215,6 +1027,18 @@ window.TOOL = (function () {
           return NLDirectory.personRow(p, (NLDirectory.rolesOf(p)[0] || {}).section, {});
         }).join('') + '</ul></div>';
     }).join('');
+  }
+
+  /* Crests are wired after the HTML lands rather than built into it:
+     wireCrestImg installs the fallback handler, and setting src first means a
+     404 fires before anything is listening. */
+  function wireCrests(root) {
+    root.querySelectorAll('img[data-crest]').forEach(function (img) {
+      var n = img.dataset.crest;
+      img.alt = n + ' crest';
+      NL.clubs.wireCrestImg(img, n, true);
+      img.src = NL.clubs.crestUrl(n, 'thumb');
+    });
   }
 
   return { boot: boot };

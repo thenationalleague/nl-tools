@@ -58,14 +58,18 @@ const sandbox = {
   location: { search: '', href: '', hash: '' },
   localStorage: memStore(),
   sessionStorage: memStore(),
-  /* Serve the real clubs-meta.json off disk so NL.clubs.load()/byName/byOpta
-     can be exercised; anything else is intentionally unstubbed. */
+  /* Serve the real clubs-meta.json and cup-clubs-meta.json off disk so
+     NL.clubs.load()/byName/byOpta and NL.clubs.guests()/guestByName can be
+     exercised; anything else is intentionally unstubbed.
+     Order matters: 'cup-clubs-meta.json' also ends with 'clubs-meta.json'. */
   fetch: (url) => {
     const u = String(url).split('?')[0];
-    if (u.endsWith('clubs-meta.json')) {
-      const body = readFileSync(join(REPO, 'assets/data/clubs-meta.json'), 'utf8');
+    const serve = (rel) => {
+      const body = readFileSync(join(REPO, rel), 'utf8');
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(JSON.parse(body)) });
-    }
+    };
+    if (u.endsWith('cup-clubs-meta.json')) return serve('assets/data/cup-clubs-meta.json');
+    if (u.endsWith('clubs-meta.json')) return serve('assets/data/clubs-meta.json');
     return Promise.reject(new Error('unstubbed fetch in test sandbox: ' + url));
   },
 };

@@ -1,0 +1,85 @@
+name: Build fixture feed cache
+
+# The League's own copy of its fixture data — step 1 of the RTDB cache model.
+# Writes feed/fixtures/<season> and feed/meta/<season>. Nothing reads it yet.
+#
+# Deliberately its own workflow rather than another step inside
+# build-leaderboard.yml. Two reasons, and both are in the brief:
+#
+#   - Cadence is not shared. Fixtures change rarely; the leaderboard has to
+#     keep up with results. Folding them together would tie one to the other's
+#     schedule, and the whole point of this node's design is that write cadence
+#     is not baked in anywhere.
+#   - Blast radius. build-leaderboard.yml writes locks/ and motm-windows/,
+#     which hold the prediction and nomination deadlines. A fixture-cache bug
+#     should not be able to stop those being written.
+#
+# Hourly, not quarter-hourly: this is scheduled data, and a fixture moving is
+# news that breaks hours ahead, not seconds. GitHub's scheduler drifts 5-15
+# minutes under load, which matters for live state and not at all for this.
+
+on:
+  schedule:
+    - cron: '17 * * * *'      # offset off the hour so it does not queue behind
+                              # every other repo's on-the-hour job
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Fetch and print without writing'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: build-feed-cache
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        continue-on-error: true
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/firebase.database,https://www.googleapis.com/auth/userinfo.email
+
+      - name: Build and write the fixture cache
+        env:
+          # Expires within the hour. Admin-level access, which bypasses the
+          # security rules — that is how it writes a node no client may write.
+          # Omitting this is what made every scheduled run since 09/08 fail:
+          # auth succeeded, the fetch succeeded, and the script then threw at
+          # the write because the token never reached the process.
+          GOOGLE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          if [ "${{ steps.auth.outcome }}" != "success" ]; then
+            # Skip rather than fail on the schedule: nothing reads this node
+            # yet, so a missing credential is not an incident, and going red
+            # every hour would train everyone to ignore this repo's red cross.
+            # A manual run still fails loudly, which is when someone is looking.
+            echo "::warning::No Google credential — skipping."
+            [ "${{ github.event_name }}" = "workflow_dispatch" ] && exit 1
+            exit 0
+          fi
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            node scripts/build-feed-cache.js --dry-run
+          else
+            node scripts/build-feed-cache.js
+          fi

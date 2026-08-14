@@ -1,7 +1,26 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.2 (04/08/2026)
+   Version: v1.5 (12/08/2026)
+
+   v1.5 — an address names WHICH of the person's jobs it is for, as a set
+   rather than one-or-all. Barrow's safeguarding champion is also a director
+   and the club is happy for his address against one post and not the other.
+   sectionsOf() reads the set (legacy single `section` = a set of one), a
+   department listing an address is not for says nothing rather than "None
+   held", and a card annotates it — a card is the whole person, so an address
+   for one of their jobs has to say which.
+
+   v1.4 — publication is per address and per number. contactsOf() returns both
+   channels normalised with their own hide state, channel() decides what a
+   given view shows and whether anything is being kept back, and every
+   renderer goes through the pair. The person-level hideContact still means
+   all of it, so nothing already stored changes meaning.
+
+   v1.3 — the mailing-list taxonomy (LIST_LABEL / LIST_ORDER / listMembers)
+   moves here from the editor. Second use: the staff overview builds exports
+   from the same eleven lists, and two copies of a taxonomy is one copy too
+   many the day a list is added.
 
    Renders one club. Shared by the staff directory, the editor and the reader,
    so the presentation is written once and the three doors differ only in what
@@ -85,21 +104,167 @@
   function fullName(p) {
     return (p && (p.name || [p.firstName, p.lastName].filter(Boolean).join(' ') || '')).trim();
   }
-  function emailsOf(p) {
-    return arr(p && p.emails).filter(function (e) { return e && e.trim(); });
+  /* Contact details belong to the person, not the role — but a handful of
+     people genuinely hold one address per job. Truro City's safeguarding lead
+     has cblack@, commercial@ AND safeguarding@, and holds exactly those two
+     roles; nine people across the 72 are in that position.
+
+     So an address may optionally name the role it is for. Nine cases do not
+     justify moving contact details onto the role and restructuring 1,070
+     records — and 130 people hold a functional address like media@ as their
+     ONLY one, where there is nothing to choose between anyway.
+
+     An entry is a plain string (everything today) or {address, section}. No
+     section means "wherever this person appears", which is exactly the
+     current behaviour, so nothing already stored changes meaning. */
+  function addrOf(e) { return (typeof e === 'string') ? e : ((e && e.address) || ''); }
+
+  /* WHICH of their jobs an address is for. Barrow asked for exactly this and
+     it is the ordinary case, not the exotic one: their safeguarding champion
+     is also a director, and the club is happy for his address to be listed
+     against the safeguarding post and not the board one.
+
+     v1.5 makes it a SET. The single `section` string could say "everywhere"
+     or "exactly one place" and nothing in between, which happened to fit
+     Barrow — one target role — and would not fit somebody wanted under Media
+     and Commercial but not Directors. 275 of 1,070 people hold more than one
+     post, so that was a matter of time.
+
+     Nothing stored says anything yet: an empty set means "wherever this
+     person appears", which is the behaviour of all 914 addresses today. The
+     legacy single `section` is read as a set of one, so no migration. */
+  function sectionsOf(e) {
+    if (!e || typeof e === 'string') { return []; }
+    if (e.sections) { return arr(e.sections).filter(Boolean); }
+    return e.section ? [e.section] : [];
   }
-  function phonesOf(p) {
-    return arr(p && p.phones).filter(function (x) { return x && (x.number || '').trim(); });
+  function forHere(e, section) {
+    var s = sectionsOf(e);
+    return !s.length || !section || s.indexOf(section) > -1;
+  }
+  function emailsOf(p, section) {
+    return arr(p && p.emails).filter(function (e) {
+      return addrOf(e).trim() && forHere(e, section);
+    }).map(addrOf);
+  }
+  function phonesOf(p, section) {
+    return arr(p && p.phones).filter(function (x) {
+      return x && (x.number || '').trim() && forHere(x, section);
+    });
   }
   /* A person's roles, always as an array. Exported because both pages need it
      and the reader does not load _tidy.js — a page should not have to pull in
      the whole tidier to read a field safely. */
   function rolesOf(p) { return arr(p && p.roles); }
   function reachable(p) { return emailsOf(p).length > 0 || phonesOf(p).length > 0; }
+
+  /* ------------------------------------------------ what gets published
+     Publication is decided per ADDRESS and per NUMBER, not per person. The
+     case that forced it is ordinary: a club officer happy for the club
+     address to be in the directory and not their mobile, or happy for the
+     mobile and not their personal email. One flag per person could not say
+     that, so it said no to all of it.
+
+     Two levels, and both are honoured:
+       p.hideContact        the person — nothing of theirs is published.
+                            The 290 people already carrying it keep working
+                            with nothing re-entered.
+       entry.hide           this address, or this number, on its own.
+
+     Reading is the only place the rule lives. The editor shows everything
+     and marks what is held back; the reader is handed a record the withheld
+     entries were physically removed from at publish. Both go through here,
+     because a second renderer deciding for itself who to show would be a
+     second chance to get it wrong. */
+  function entryHidden(entry, p) {
+    return !!(p && p.hideContact) ||
+           !!(entry && typeof entry === 'object' && entry.hide);
+  }
+  /* Entry-level only — used where the person-level flag is already its own
+     signal and folding it in would report the same fact twice. */
+  function ownHide(entry) {
+    return !!(entry && typeof entry === 'object' && entry.hide);
+  }
+
+  /* Both channels, normalised, carrying their own publication state. */
+  function contactsOf(p, section) {
+    return {
+      emails: arr(p && p.emails).filter(function (e) {
+        return addrOf(e).trim() && forHere(e, section);
+      }).map(function (e) {
+        return { value: addrOf(e).trim(), ext: '', hide: entryHidden(e, p),
+                 sections: sectionsOf(e) };
+      }),
+      phones: arr(p && p.phones).filter(function (x) {
+        return x && (x.number || '').trim() && forHere(x, section);
+      }).map(function (x) {
+        return { value: (x.number || '').trim(), ext: (x.ext || '').trim(),
+                 hide: entryHidden(x, p), sections: sectionsOf(x) };
+      })
+    };
+  }
+
+  /* What THIS view shows, and whether anything is being kept back.
+
+     `marker` is how a published record says "there was something here" after
+     the something was removed — publishablePerson sets hideEmail/hidePhone
+     only when a channel is emptied entirely, so the reader can tell "held
+     back" from "we do not have one" without being handed the thing itself.
+     p.hideContact is read too, because a copy published before this existed
+     says it that way and must keep reading correctly. */
+  function channel(p, entries, marker, showHidden) {
+    return {
+      show: showHidden ? entries : entries.filter(function (e) { return !e.hide; }),
+      withheld: !!(p && (p.hideContact || p[marker])) ||
+                entries.some(function (e) { return e.hide; })
+    };
+  }
+
+  /* Do they hold one at all, anywhere? The difference between "we have no
+     email for this person" and "we have one, but it is for their other job".
+     A department listing that says "None held" against the second is a small
+     untruth, and the honest answer is to say nothing: naming it would only
+     tell a reader there is an address to go and ask for, which is the thing
+     the club asked us not to do. */
+  function holdsAny(p, key) {
+    return arr(p && p[key]).some(function (x) {
+      return (key === 'emails' ? addrOf(x) : (x && x.number) || '').trim();
+    });
+  }
+  /* lastName where the club gave one, otherwise the last word of the name.
+     A directory is looked up by surname and nothing else. */
+  function surnameOf(p) {
+    var last = ((p && p.lastName) || '').trim();
+    if (last) { return last; }
+    var whole = fullName(p).trim();
+    var bits = whole.split(/\s+/);
+    return bits.length > 1 ? bits[bits.length - 1] : whole;
+  }
+
+  /* SMITH, not Smith. The handbook has always set surnames this way and the
+     reason survives the move to a screen: at a glance it tells you which word
+     the list is sorted on, which for a Welsh or Irish name — Owen Rhys Jones,
+     Sean Michael O'Brien — is otherwise a guess. */
+  function displayName(p, opts) {
+    var whole = fullName(p);
+    if (!(opts && opts.capsSurname) || !whole) { return esc(whole || 'Name not given'); }
+    var last = surnameOf(p);
+    var at = whole.toLowerCase().lastIndexOf(last.toLowerCase());
+    if (!last || at < 0) { return esc(whole); }
+    return esc(whole.slice(0, at)) +
+      '<span class="cd-sur">' + esc(whole.slice(at, at + last.length)) + '</span>' +
+      esc(whole.slice(at + last.length));
+  }
+
+  function bySurname(a, b) {
+    var d = surnameOf(a).toLowerCase().localeCompare(surnameOf(b).toLowerCase());
+    return d || fullName(a).toLowerCase().localeCompare(fullName(b).toLowerCase());
+  }
+
   function sectionPeople(rec, section) {
     return arr(rec.people).filter(function (p) {
       return arr(p.roles).some(function (r) { return r.section === section; });
-    });
+    }).sort(bySurname);
   }
   /* Banner colours: the club's primary as the background, their secondary as
      the type. That is the pairing the clubs use themselves, so Forest Green
@@ -159,39 +324,100 @@
        so an editor looked at an email address with no way of knowing it will
        never appear in the reader — across 290 of 1,070 people, in 65 of the
        72 clubs. The state is now stated wherever the details are shown. */
+    var showHidden = !!(opts && opts.showHidden);
     var unlisted = !!p.hideContact;
-    var hidden = unlisted && !(opts && opts.showHidden);
     var here = arr(p.roles).filter(function (r) { return r.section === section; });
     var titles = here.map(function (r) { return (r.title || '').trim(); }).filter(Boolean);
-    var mail = hidden ? '' : emailsOf(p).map(function (e) {
-      return '<a href="mailto:' + esc(e) + '">' + esc(e) + '</a>';
+    var all = contactsOf(p, section);
+    var em = channel(p, all.emails, 'hideEmail', showHidden);
+    var tl = channel(p, all.phones, 'hidePhone', showHidden);
+
+    var mail = em.show.map(function (e) {
+      return '<a href="mailto:' + esc(e.value) + '">' + esc(e.value) + '</a>' +
+        held(e, showHidden && !unlisted);
     }).join('<br>');
-    var ph = hidden ? '' : phonesOf(p).map(function (x) {
-      var n = (x.number || '').trim(), ext = (x.ext || '').trim();
-      return '<a href="tel:' + esc(tel(n)) + '">' + esc(n) + '</a>' +
-        (ext ? ' <span class="cd-row__ext">ext ' + esc(ext) + '</span>' : '');
+    var ph = tl.show.map(function (x) {
+      return '<a href="tel:' + esc(tel(x.value)) + '">' + esc(x.value) + '</a>' +
+        (x.ext ? ' <span class="cd-row__ext">ext ' + esc(x.ext) + '</span>' : '') +
+        held(x, showHidden && !unlisted);
     }).join('<br>');
 
-    var quiet = hidden ? 'Not published' : 'None held';
-    /* Shown only where the details themselves are shown. In the reader the
-       contact cell already says "Not published" instead of an address, so a
-       tag next to it would be saying the same thing twice. */
-    var tag = (unlisted && !hidden)
-      ? '<span class="cd-row__unlisted" title="The club asked us to keep these ' +
-        'details out of the published directory. The reader shows &quot;Not ' +
-        'published&quot; here.">Not published</span>'
+    /* Per channel now: an email cell can read "Not published" while the phone
+       beside it shows a number, which is the whole point of the change. */
+    var quietEm = em.withheld && !showHidden ? 'Not published'
+      : (holdsAny(p, 'emails') ? '' : 'None held');
+    /* The person-level tag survives for the person-level decision only. When
+       it is set, everything is held back, and tagging each of six lines
+       individually says the same thing six times. Where the decision is
+       per address, the address itself carries the mark instead. */
+    var tag = (unlisted && showHidden)
+      ? '<span class="cd-row__unlisted" title="The club asked us to keep this ' +
+        'person’s details out of the published directory. The reader shows ' +
+        '&quot;Not published&quot; here.">Not published</span>'
       : '';
-    return '<li class="cd-row' + (unlisted ? ' cd-row--unlisted' : '') + '">' +
-      '<div class="cd-row__name">' + esc(fullName(p) || 'Name not given') + '</div>' +
+    /* The row says who it is. The editor used to work this out by counting —
+       "the third row under Leadership is the third person in Leadership" —
+       which held only while the render order matched the array order. Adding
+       a surname sort to sectionPeople broke that silently, and every marker,
+       every pen and every flag landed on the wrong person. Carrying the id is
+       the fix and the whole class of fault goes with it. */
+    var ridx = arr(p.roles).map(function (r, i) {
+      return r.section === section ? i : -1;
+    }).filter(function (i) { return i > -1; })[0];
+    return '<li class="cd-row' + (unlisted ? ' cd-row--unlisted' : '') + '"' +
+      (p.id ? ' data-pid="' + esc(p.id) + '"' : '') +
+      (ridx != null ? ' data-ridx="' + ridx + '"' : '') + '>' +
+      '<div class="cd-row__name">' + displayName(p, opts) + '</div>' +
       '<div class="cd-row__role">' +
         /* Escape each title, then join with the entity. Escaping the joined
            string turns the separator's own ampersand into &amp;middot; and
            prints it as text. */
-        (titles.length ? titles.map(esc).join(' &middot; ') : '<em>No job title</em>') +
+        /* Silent where it is read, loud where it is worked on. To a club
+           looking themselves up, "No job title" is the League announcing a
+           gap in its own records against a named member of their staff — it
+           reads as a slight, and it is 21% of every role we hold. To an
+           editor it is the job. So the reader shows nothing and the editor
+           says it, on the same markup, decided by who is looking. */
+        (titles.length ? titles.map(esc).join(' &middot; ')
+          : (opts && opts.showGaps ? '<em>No job title</em>' : '')) +
       '</div>' +
-      '<div>' + tag + (mail || '<span class="cd-row__quiet">' + quiet + '</span>') + '</div>' +
-      '<div>' + (ph || (mail ? '' : '')) + '</div>' +
+      '<div>' + tag + (mail || (quietEm
+        ? '<span class="cd-row__quiet">' + quietEm + '</span>' : '')) + '</div>' +
+      /* The phone cell has always stayed blank when there is simply no
+         number — "None held" against 400 people is noise. It speaks up only
+         to say a number exists and is being kept back. */
+      '<div>' + (ph || (tl.withheld && !showHidden
+        ? '<span class="cd-row__quiet">Not published</span>' : '')) + '</div>' +
       '</li>';
+  }
+
+  /* The mark against a single address or number, for the views that show
+     what they are not publishing. Off in the reader, which is handed a
+     record these entries were removed from, and off when the whole person
+     is held back and the row already carries one tag for the lot. */
+  /* On a CARD only. A card is the whole person with every job listed, so an
+     address that belongs to one of those jobs needs to say which — otherwise
+     Barrow's safeguarding address reads as their director's address too, and
+     the club agreed to one of those and not the other. In a department LIST
+     it is redundant: you are already inside the department.
+
+     Shown to readers as well as editors. "Listed for that purpose" is exactly
+     what the club agreed to, so saying which purpose is keeping the promise,
+     not leaking anything. */
+  function scopeNote(entry, p) {
+    var s = entry.sections || [];
+    if (!s.length) { return ''; }
+    var all = arr(p && p.roles).map(function (r) { return r && r.section; })
+      .filter(function (x, i, a) { return x && a.indexOf(x) === i; });
+    if (all.length < 2 || s.length >= all.length) { return ''; }
+    return ' <span class="cd-scope">' + esc(s.join(' \u00b7 ')) + ' only</span>';
+  }
+
+  function held(entry, on) {
+    return (on && entry.hide)
+      ? ' <span class="cd-held" title="This one is kept out of the published ' +
+        'directory. Others on the same person may still be published.">not published</span>'
+      : '';
   }
 
   function facts(pairs) {
@@ -200,6 +426,71 @@
         '<div class="cd-f__k">' + esc(p[0]) + '</div>' +
         '<div class="cd-f__v">' + p[1] + '</div></div>';
     }).join('');
+  }
+
+  /* One person, one card — a business card, not a row in a different shape.
+     The list is organised by department, so somebody who does two jobs
+     appears in two places; that is right for a list, because you are reading
+     down a department. A card is the person, so they appear once and their
+     jobs are listed ON it. Spennymoor's four people are four cards.
+
+     Which means the card view is not grouped at all. There is no department
+     heading, because the unit is no longer the department.
+
+     Suppression is not re-decided: hidden is computed from the same flag
+     personRow uses, and the contact block is never built when it is set. A
+     second renderer deciding for itself who to show would be a second chance
+     to get it wrong, and the reader is where getting it wrong is published. */
+  function personCard(p, opts) {
+    var showHidden = !!(opts && opts.showHidden);
+    var unlisted = !!p.hideContact;
+    var roles = arr(p.roles);
+
+    var jobs = roles.map(function (r) {
+      var t = (r.title || '').trim();
+      return '<li class="cd-pc__job">' +
+        '<span class="cd-pc__title">' + (t ? esc(t)
+          : (opts && opts.showGaps ? '<em>No job title</em>' : '&mdash;')) + '</span>' +
+        '<span class="cd-pc__dept">' + esc(r.section || '') + '</span></li>';
+    }).join('');
+
+    /* Every address and every number, not a department's share of them. The
+       card is the whole person. */
+    var all = contactsOf(p, '');
+    var em = channel(p, all.emails, 'hideEmail', showHidden);
+    var tl = channel(p, all.phones, 'hidePhone', showHidden);
+    var mark = showHidden && !unlisted;
+    var lines = em.show.map(function (e) {
+      return '<a class="cd-pc__line" href="mailto:' + esc(e.value) + '">' +
+        '<span class="cd-pc__ic">' + glyph('email') + '</span>' + esc(e.value) +
+        scopeNote(e, p) + held(e, mark) + '</a>';
+    }).concat(tl.show.map(function (x) {
+      return '<a class="cd-pc__line" href="tel:' + esc(tel(x.value)) + '">' +
+        '<span class="cd-pc__ic">' + glyph('phone') + '</span>' + esc(x.value) +
+        (x.ext ? ' <span class="cd-row__ext">ext ' + esc(x.ext) + '</span>' : '') +
+        scopeNote(x, p) + held(x, mark) + '</a>';
+    })).join('');
+
+    return '<li class="cd-pc' + (unlisted ? ' cd-pc--unlisted' : '') + '"' +
+      (p.id ? ' data-pid="' + esc(p.id) + '"' : '') + '>' +
+      '<div class="cd-pc__top"><div class="cd-pc__id">' +
+        '<div class="cd-pc__name">' + displayName(p, opts) + '</div>' +
+      '</div></div>' +
+      (jobs ? '<ul class="cd-pc__jobs">' + jobs + '</ul>' : '') +
+      '<div class="cd-pc__lines">' + (lines ||
+        '<span class="cd-row__quiet">' +
+        ((em.withheld || tl.withheld) && !showHidden ? 'Not published' : 'None held') +
+        '</span>') + '</div>' +
+    '</li>';
+  }
+
+  /* Everyone at the club, once each, by surname. sectionPeople answers "who
+     is in this department"; this answers "who is here", which is the question
+     a card view is arranged around. */
+  function allPeople(rec) {
+    return arr(rec.people).filter(function (p) {
+      return arr(p.roles).length;
+    }).slice().sort(bySurname);
   }
 
   /* ---------------------------------------------------------------- render */
@@ -223,14 +514,20 @@
         '<span class="cd-social__url">' + esc(u.replace(/^https?:\/\//i, '')) + '</span></a>';
     }).filter(Boolean).join('');
 
-    var depts = ORDER.map(function (s) {
-      var who = sectionPeople(rec, s);
-      if (!who.length) { return ''; }
-      return '<div class="cd-dept"><h3 class="cd-dept__h">' + esc(s) + '</h3>' +
-        '<ul class="cd-rows">' +
-        who.map(function (p) { return personRow(p, s, opts); }).join('') +
-        '</ul></div>';
-    }).filter(Boolean).join('');
+    /* Cards are ungrouped by design — see personCard. One flat set of people,
+       by surname, each carrying their own departments. */
+    var depts = (opts && opts.cards)
+      ? '<ul class="cd-cards">' + allPeople(rec).map(function (p) {
+          return personCard(p, opts);
+        }).join('') + '</ul>'
+      : ORDER.map(function (s) {
+          var who = sectionPeople(rec, s);
+          if (!who.length) { return ''; }
+          return '<div class="cd-dept"><h3 class="cd-dept__h">' + esc(s) + '</h3>' +
+            '<ul class="cd-rows">' +
+            who.map(function (p) { return personRow(p, s, opts); }).join('') +
+            '</ul></div>';
+        }).filter(Boolean).join('');
 
     var pal = bannerColours(rec.club);
 
@@ -290,6 +587,39 @@
       '</section>';
   }
 
+  /* ------------------------------------------------------- mailing lists
+     The League's own eleven questions — who is your secretary, your media
+     contact, your safety officer — answered by all 72 clubs by naming actual
+     people. Stored per club as leads/<key> = [personId].
+
+     This is deliberately NOT the department taxonomy above. A club has one
+     Media & marketing department and several people in it; it has exactly one
+     answer to "who do we write to about media". SLO, DLO and PLO exist here
+     and nowhere else. Conflating the two would lose that.
+
+     Promoted here at the second use: the editor renders and edits these, and
+     the staff overview builds mailing-list exports from them. */
+  var LIST_LABEL = {
+    secretary: 'Club secretary', media: 'Media', programme: 'Programme',
+    commercial: 'Commercial', finance: 'Finance', ticketing: 'Ticketing',
+    medical: 'Medical', slo: 'Supporter liaison (SLO)', safety: 'Safety officer',
+    dlo: 'Disability liaison (DLO)', plo: 'Police liaison (PLO)'
+  };
+  var LIST_ORDER = ['secretary', 'media', 'programme', 'commercial', 'finance',
+                    'ticketing', 'medical', 'safety', 'slo', 'dlo', 'plo'];
+
+  /* Members of one club's list, resolved from ids to people. An id with no
+     person behind it is dropped rather than rendered as a blank row — that
+     happens when someone is deleted and the list still names them. */
+  function listMembers(rec, key) {
+    var ids = arr((rec && rec.leads || {})[key]);
+    var by = {};
+    arr(rec && rec.people).forEach(function (p) { if (p.id) { by[p.id] = p; } });
+    return ids.map(function (id) {
+      return typeof id === 'string' ? by[id] : (id && by[id.id]);
+    }).filter(Boolean);
+  }
+
   /* Search across every club and every person at once, because "who is the
      safety officer at Chester" and "which club is Jack Lappin at" are the same
      question asked from two ends. Matches club, person and job title. */
@@ -317,11 +647,25 @@
     rolesOf: rolesOf,
     renderClub: renderClub,
     personRow: personRow,
+    personCard: personCard,
+    allPeople: allPeople,
+    surnameOf: surnameOf,
+    bySurname: bySurname,
     search: search,
     fullName: fullName,
     reachable: reachable,
+    emailsOf: emailsOf,
+    phonesOf: phonesOf,
+    contactsOf: contactsOf,
+    sectionsOf: sectionsOf,
+    entryHidden: entryHidden,
+    ownHide: ownHide,
+    addrOf: addrOf,
     glyph: glyph,
     strokeGlyph: strokeGlyph,
+    listMembers: listMembers,
+    LIST_LABEL: LIST_LABEL,
+    LIST_ORDER: LIST_ORDER,
     ORDER: ORDER
   };
 }());
