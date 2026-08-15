@@ -13,7 +13,7 @@
  *
  * NL Cup Footage retired 15/08/2026. makeProxy (360p preview proxies on upload)
  * and onFootageDeleted (mirroring Storage deletes back to the catalogue) went
- * with it — see footage/CONCEPT.md, which keeps the decisions. Their code is in
+ * with it — see system/retired/nl-cup-footage.md, which keeps the decisions. Their code is in
  * git history if the tool ever returns.
  *
  * NOTE: files under footage/national-league-cup/ are still in the bucket and

@@ -19,6 +19,27 @@ permanently, including in git history after deletion.
 - If a tool needs a flat data file at runtime, generate it at deploy time from
   RTDB via an Action. Do not commit the generated output.
 
+## Derive from the canon, never from a sibling tool
+
+A new tool is built from `system/_template/` and the canon. It is **not** built
+by copying the tool next door, and its comments do not describe it as "the same
+pattern as /footage/club/" or "identical to X".
+
+This is not style. Three tools were retired on 15/08/2026 and each one left
+dangling references behind it in tools that survived — `programme/admin` and
+`uw-promo/README` both explained themselves by pointing at `/footage/club/`,
+which no longer exists. A tool defined by reference to another tool is only as
+durable as that other tool, and the thing being pointed at is usually one
+implementation of a canon idea rather than the idea itself.
+
+So: say what a thing does, or name the canon it uses (`NL.codeGate`,
+`.nl-idbar`, `auth-guard.js`). If two tools genuinely need the same behaviour,
+that is the signal to promote it to canon — see the promotion rule below —
+not to describe one in terms of the other.
+
+Pointing at another tool as a **worked example** is fine, and useful. Defining
+your tool as a copy of it is not.
+
 ## Reuse-first (read this before writing any code)
 
 Every tool in this repo is built on a **shared canon**: `window.NL.*` helpers in
@@ -121,6 +142,7 @@ which is why work gets re-planned from scratch. Check here first.
 | `system/roles-and-access-plan.md` | Role model. Nothing links to it. |
 | `system/brand-v3-scale-plan.md` | Parked type/scale pass. |
 | `system/rtdb/README.md` | The RTDB snapshot contract — which files are deployed vs reference. |
+| `system/retired/README.md` | **Tools that have been deleted, and why.** One file each, recording the concept and the settled decisions so a rebuild starts from the answered questions. Read before proposing to build something that already existed once. |
 
 ## Branching
 
@@ -191,7 +213,7 @@ The new tool's `index.html` must keep the canonical `?v=N` values from the templ
 ## Two families of frontend, do not confuse them
 
 - **Gated staff/club tools** — dirs with `index.html` referencing `/system/auth-guard.js`, either top-level (`vacancies/`) or one level down (`graphics/totw/`). Behind Firebase Auth, use the shared canon. Listed by `lint-tools.sh`.
-- **Fan-facing embeds** — `embeds/*.html` (score-predictor, MOTM, vidiprinter, results-ticker, match-centre; plus transfer-centre and live-blog, **parked** — front-ends kept, Google Sheet backends dropped, see `embeds/REBUILD.md`). Pasted into the Urban Zoo CMS. The CMS strips `<script src=...>` tags, so Firebase has to be loaded dynamically via `document.createElement('script')` with `.onload` chaining. Inline `<style>`, `<link>`, inline `<script>` survive. See `embeds/widget-handover.md` for the invariants — copy `score-predictor.html` as the starting point for any new embed. These do **not** use `auth-guard.js` and are out of scope for `lint-tools.sh`.
+- **Fan-facing embeds** — `embeds/*.html` (score-predictor, MOTM, vidiprinter, results-ticker, match-centre; plus transfer-centre and live-blog, **parked** — front-ends kept, Google Sheet backends dropped, see `system/retired/live-blog-and-transfer-centre.md`). Pasted into the Urban Zoo CMS. The CMS strips `<script src=...>` tags, so Firebase has to be loaded dynamically via `document.createElement('script')` with `.onload` chaining. Inline `<style>`, `<link>`, inline `<script>` survive. See `embeds/widget-handover.md` for the invariants — copy `score-predictor.html` as the starting point for any new embed. These do **not** use `auth-guard.js` and are out of scope for `lint-tools.sh`.
 
 `widgets/*.js` are a third bucket: standalone JS widgets (news ticker, transfers ticker, results ticker) embedded on the public site.
 

@@ -251,7 +251,7 @@ validator, a component ships with its acceptance checks.
   website-analysis was a v0.2 skeleton with the IA agreed and no business logic
   ever ported; website-insights was 89 days idle. Both were parked, so nobody
   could reach either. One app now — website-archive — with the merged plan in
-  website-archive/REBUILD.md. Two files cannot drift apart if there is one file.
+  system/retired/website-insights-and-analysis.md. Two files cannot drift apart if there is one file.
 - **Programme-packs listing departed clubs** — might be deliberate (their
   Drive folders may need to outlive relegation). Needs an owner decision, not
   a silent "fix".

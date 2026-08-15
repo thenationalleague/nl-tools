@@ -40,7 +40,7 @@ app is fully decommissioned; no browser ever calls GAS again.
 > apps — behind the live-blog and transfer-centre embeds — were never mirrored
 > at all; this doc was written as though there were one project. They are not
 > being migrated: both tools are parked for a rebuild on RTDB and their Sheet
-> backends dropped (`embeds/REBUILD.md`), which keeps the answer at one project
+> backends dropped (`system/retired/live-blog-and-transfer-centre.md`), which keeps the answer at one project
 > rather than three. The deployments still need archiving in the editor.
 
 Status of this doc: **plan**. The interim security patch (Phase 0) is landed
