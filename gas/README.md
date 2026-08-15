@@ -19,8 +19,10 @@ cost:
 - The live project had **15 files**; the repo mirrored **6**.
 - Nine files — **9,162 lines** — had no repo record at all, including
   `ClaudioChat` (3,275), `ClaudioStats` (3,169) and `ProgrammePacks` (1,964).
-- Three of the six mirrors had drifted from live: `Notifications` by 19 lines,
-  `Code` by 8, `FixtureSync` by 4.
+- Three of the six mirrors differed from live: `Notifications` by 19 lines,
+  `Code` by 8, `FixtureSync` by 4 — and they were **ahead** of live, not
+  behind. See "Pending edits" below; the difference was an unshipped change,
+  which is a worse failure than a stale copy, not a lesser one.
 
 The `.gs` copies were deleted the same day. Keeping a hand-maintained second
 copy of a file the sync already pulls is how the drift happened in the first
@@ -50,6 +52,44 @@ Seven pages still call this backend through `NL.endpoints.gas`, including the
 login page. It is a live backend, not a residue — see
 [`../system/gas-to-functions-migration.md`](../system/gas-to-functions-migration.md)
 for where it is going.
+
+## Pending edits the live project has NOT had
+
+Deleting the hand-pasted `.gs` copies (15/08/2026) turned up something the
+commit message got backwards, and it is recorded here rather than lost with
+the files. Three of those copies differed from live — but they were **ahead of
+live, not behind it**. Someone had done the `thenationalleague.github.io/tools`
+→ `nl.tools` migration in the repo copy and never pasted it into Apps Script.
+
+So the live backend is still carrying old-domain URLs:
+
+| Live file | Line | What it is |
+|---|---|---|
+| `Vacancies.js` | `vacNotify` | `https://thenationalleague.github.io/tools/vacancies/` — **hardcoded, no fallback.** Goes out in every vacancy-submission notification. |
+| `Notifications.js` | `notifyAdmin` | `…/tools/portal/` as the `portalUrl` fallback |
+| `Notifications.js` | `sendApproval` | `…/tools/` as the `config.continueUrl` fallback |
+| `Code.js` | header comment | old domain in the `FIREBASE_CONTINUE_URL` example |
+
+Only the first one actually fires. The login page sends `portalUrl` from
+`window.location.origin`, and `FIREBASE_CONTINUE_URL` must be set as a Script
+Property or `sendInvite` refuses outright — so both fallbacks are dead paths.
+The old URLs 301-redirect to `nl.tools` besides, so nothing is broken; the
+links are just a redirect away from correct, and the redirect is a dependency
+nobody chose.
+
+**To fix, in the Apps Script editor** (`Vacancies.gs`, function `vacNotify`):
+
+```javascript
+var portalUrl   = 'https://nl.tools/vacancies/';
+```
+
+then Deploy → Manage deployments → ✎ the existing Web App deployment → New
+version → Deploy. The next sync commits it and this section can go.
+
+**Do not fix it by editing `gas/Vacancies.js`.** That file is written by
+`clasp pull`; an edit there deploys nothing and is overwritten on the next run.
+Editing the mirror instead of the project is the exact habit that produced the
+drift above.
 
 ## Two other Apps Script backends, still unmirrored
 
