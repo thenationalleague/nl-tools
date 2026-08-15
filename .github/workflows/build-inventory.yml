@@ -27,6 +27,17 @@ permissions:
 # A second push landing mid-run would race this one to the same file. Queue
 # instead of cancelling: the later run must still produce a commit, or the
 # inventory silently stops tracking main.
+#
+# Queueing alone was not enough, and this is how it failed on 15/08/2026. The
+# job checks out the SHA THAT TRIGGERED IT, not the tip of main. Two PRs landed
+# minutes apart; the first run built an inventory from the first PR's tree,
+# rebased onto a main that already had the second, and pushed. No conflict — it
+# only touches one generated file — so a description of an older repo was
+# published over a newer one, and the estate page listed two tools that had been
+# deleted.
+#
+# The fix is below in two places: build from the tip of main rather than the
+# trigger SHA, and rebuild rather than just rebase when the push is beaten.
 concurrency:
   group: build-inventory
   cancel-in-progress: false
@@ -42,6 +53,17 @@ jobs:
           # The scanner reads git history for per-file commit counts, which a
           # shallow clone reports as 1 for everything.
           fetch-depth: 0
+          ref: main
+
+      # The checkout above pins whatever main was when this run was queued. If
+      # another merge landed while we waited our turn, that is already out of
+      # date — and the thing we publish describes the repo, so it must describe
+      # the repo as it is now, not as it was when we were triggered.
+      - name: Move to the current tip of main
+        run: |
+          git fetch origin main
+          git reset --hard origin/main
+          echo "Building from $(git log --oneline -1)"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -62,20 +84,26 @@ jobs:
           fi
           git commit -m "chore: rebuild estate inventory"
 
-          # Push with up to 3 retries, rebasing if main moved while we worked.
-          # Our commit only touches the one generated JSON, so a rebase conflict
-          # against ordinary tool changes is essentially impossible.
+          # Push with up to 3 retries. Losing the push means main moved, which
+          # means the JSON we just built describes a tree that is no longer the
+          # tip. The old version rebased and pushed anyway — cleanly, and
+          # wrongly, because a one-file generated commit never conflicts. So
+          # rebuild against the new tip instead of replaying the old result.
           for i in 1 2 3; do
             if git push; then
               echo "Push succeeded on attempt $i"
               exit 0
             fi
-            echo "Push attempt $i failed - fetching and rebasing"
+            echo "Push attempt $i failed - main moved, rebuilding against it"
             git fetch origin main
-            git rebase origin/main || {
-              echo "Rebase failed - bailing"
-              exit 1
-            }
+            git reset --hard origin/main
+            node scripts/build-inventory.js
+            git add assets/data/tools-inventory.json
+            if git diff --cached --quiet; then
+              echo "Inventory already current on the new tip - nothing to push"
+              exit 0
+            fi
+            git commit -m "chore: rebuild estate inventory"
           done
           echo "All 3 push attempts failed"
           exit 1
