@@ -237,6 +237,7 @@ which he can run from a browser:
 | **Static site** (HTML/CSS/JS) | none — GitHub Pages | merge to `main`. There is no build step. |
 | **Cloud Functions** | `deploy-functions.yml` | **automatic** on any push to `main` touching `functions/**`, or Run workflow |
 | **RTDB rules** | `deploy-rtdb-rules.yml` | **manual only.** Actions → Run workflow → type `publish` |
+| **Storage rules** | `deploy-storage-rules.yml` | **manual only.** Actions → Run workflow → type `publish` |
 | **Apps Script** (`gas/`) | `deploy-gas.yml` | **manual only.** Actions → Run workflow → type `publish` |
 
 Two things worth knowing, because both have already caught someone out:
