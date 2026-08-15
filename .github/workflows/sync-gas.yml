@@ -104,7 +104,41 @@ jobs:
         if: steps.gate.outputs.ready == 'true'
         env:
           CLASP_CREDENTIALS: ${{ secrets.CLASP_CREDENTIALS }}
-        run: printf '%s' "$CLASP_CREDENTIALS" > ~/.clasprc.json
+        run: |
+          printf '%s' "$CLASP_CREDENTIALS" > ~/.clasprc.json
+
+          # Validate before handing it to clasp. clasp's own failure for a
+          # malformed credential is "Expected ',' or '}' after property value
+          # in JSON at position 630" — which names neither the file nor the
+          # cause, and looks like a problem with the Apps Script project rather
+          # than with the secret.
+          #
+          # The usual cause is copying the token out of a terminal: long output
+          # wraps on screen, and a mouse-selection across a wrapped line puts a
+          # real newline INSIDE the refresh_token string, which is invalid JSON.
+          # Nothing below prints the credential itself.
+          if ! python3 -c "import json,sys; json.load(open(sys.argv[1]))" ~/.clasprc.json 2>/dev/null; then
+            echo "::error::CLASP_CREDENTIALS is not valid JSON."
+            echo "  length: $(wc -c < ~/.clasprc.json) bytes"
+            echo "  lines:  $(wc -l < ~/.clasprc.json)  (a clasp credential is normally 1)"
+            echo ""
+            echo "  Almost always a copy-paste artefact: the terminal wrapped the"
+            echo "  output and the selection picked up a newline inside a value."
+            echo "  Re-copy it from the Cloud Shell editor instead of the terminal:"
+            echo "      cloudshell edit ~/.clasprc.json"
+            echo "  then select all in the editor pane and update the secret."
+            exit 1
+          fi
+
+          # Shape check. A valid file has a refresh token somewhere in it; a
+          # file that parses but carries no token would otherwise fail later,
+          # inside clasp, with an equally unhelpful message.
+          if ! grep -q 'refresh_token' ~/.clasprc.json; then
+            echo "::error::CLASP_CREDENTIALS parses as JSON but contains no refresh_token."
+            echo "  This is usually the wrong file, or clasp login did not complete."
+            exit 1
+          fi
+          echo "Credential looks well-formed ($(wc -c < ~/.clasprc.json) bytes)." 
 
       - name: Pull the live project
         if: steps.gate.outputs.ready == 'true'
