@@ -380,6 +380,22 @@ function main() {
     Object.keys(rulesRoot['app-data'] || {}).filter((k) => !k.startsWith('.'))
   );
 
+  /* The SECOND database. Fan data — votes, predictions, registrations — lives
+     in the nl-widgets project, not nl-tools, and this scanner could not see it
+     at all: it only ever looked at app-data/*, so every fan path a page reads
+     was invisible and its rule coverage unchecked. Two databases, one estate.
+
+     Top-level nodes only, which is all the coverage check needs: the fan rules
+     deny the root by default, so a node absent from this set is genuinely
+     unreachable rather than merely undocumented. */
+  const WIDGETS_RULES = path.join(REPO, 'system/rtdb/nl-widgets.rules.snapshot.json');
+  const widgetsDoc = fs.existsSync(WIDGETS_RULES)
+    ? JSON.parse(fs.readFileSync(WIDGETS_RULES, 'utf8')) : {};
+  const widgetsRoot = widgetsDoc.rules || widgetsDoc;
+  const widgetsCover = new Set(
+    Object.keys(widgetsRoot).filter((k) => !k.startsWith('.'))
+  );
+
   const allFiles = walk(REPO);
   const htmlFiles = allFiles.filter((f) => f.endsWith('.html')).map(rel).sort();
 
@@ -411,6 +427,19 @@ function main() {
       (text.match(/app-data\/([a-z0-9-]+)/g) || []).map((s) => s.split('/')[1])
     )].sort();
 
+    /* Fan-database paths. A page reaches nl-widgets through a NAMED second app
+       — widgetsDb/widgetsDB in the tools, plain db in the embeds — so the ref
+       is what identifies it, not the path shape. Only pages that mention the
+       project are considered, so an embed's own ref() calls are not mistaken
+       for nl-tools paths. */
+    const touchesWidgets = /nl-widgets/.test(text);
+    const widgetsData = touchesWidgets ? [...new Set(
+      (text.match(/(?:widgetsDb|widgetsDB|db)\.ref\(\s*['"]([a-z0-9-]+)/gi) || [])
+        .map((m) => (m.match(/['"]([a-z0-9-]+)/) || [])[1])
+        .filter(Boolean)
+        .filter((k) => k !== 'app-data' && k !== 'admin' && k !== 'tools')
+    )].sort() : [];
+
     pages.push({
       path: f,
       url: urlFor(f),
@@ -431,6 +460,8 @@ function main() {
       violationsApply: familyOf(f, species) !== 'embed' && toolKey !== 'staff-style-guide',
       appData,
       appDataUncovered: appData.filter((k) => !rulesCover.has(k)),
+      widgetsData,
+      widgetsUncovered: widgetsData.filter((k) => !widgetsCover.has(k)),
       gated,
       toolKey,
       /* live   = has a tools/ record, shows on the portal
