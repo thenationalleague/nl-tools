@@ -30,9 +30,18 @@ name: Deploy Apps Script
 # project since the last sync, pushing would silently revert their work — the
 # same class of loss this workflow exists to prevent, pointed the other way.
 #
-# So it pulls first, into a scratch directory, and diffs. If live carries
-# anything the repo has not seen, it REFUSES and tells you to run Sync Apps
-# Script and merge that commit. It never guesses which side is right.
+# So it pulls live first and compares it against THE LAST STATE THE SYNC SAW —
+# the most recent commit made by sync-gas.yml — not against this branch.
+#
+# That distinction is the whole guard, and the first version got it wrong. It
+# compared live against the branch and refused on any difference, which meant it
+# refused precisely when there was something to deploy: the first real run was
+# blocked by the three files the PR had deliberately changed. A deploy that
+# cannot run when the repo has changes is not a deploy.
+#
+# Comparing against the last sync answers the question that actually matters —
+# "has anyone touched the live project since we last looked?" — and leaves the
+# repo free to be ahead, which is the normal and intended state.
 #
 # KEEPING THE /exec URL
 # ---------------------
@@ -85,6 +94,10 @@ jobs:
 
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          # Full history: the guard finds the last sync commit by message, and
+          # a shallow clone cannot see it.
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -113,28 +126,45 @@ jobs:
           fi
 
       # ── The guard ──────────────────────────────────────────────────────────
-      - name: Refuse if the live project has changes the repo has not seen
+      - name: Refuse if someone has edited the live project since the last sync
         run: |
-          mkdir -p /tmp/gas-live
+          BASE=$(git log --format=%H -1 \
+                   --grep='sync Apps Script from the live project' -- gas/ || true)
+          if [ -z "$BASE" ]; then
+            echo "::error::No sync commit found, so there is no baseline to compare against."
+            echo "  Run the 'Sync Apps Script' workflow once first. It records what the"
+            echo "  live project currently holds, which is what this check needs in order"
+            echo "  to tell your changes apart from someone else's."
+            exit 1
+          fi
+          echo "Baseline — the last state the sync saw live in: $(git log --format='%h %ad %s' --date=short -1 $BASE)"
+
+          mkdir -p /tmp/gas-live /tmp/gas-base
+          git archive "$BASE" gas/ | tar -x -C /tmp/gas-base --strip-components=1
+
           printf '{"scriptId":"%s","rootDir":"/tmp/gas-live"}\n' "$GAS_SCRIPT_ID" > .clasp.json
           clasp pull
           rm -f .clasp.json
 
-          # Compare only the files clasp manages. A file present in one and not
-          # the other counts as a difference: a live file missing from the repo
-          # would be DELETED by the push.
-          if diff -rq --exclude='README.md' --exclude='*.md' gas /tmp/gas-live; then
-            echo "Live project matches the repo. Nothing of anyone else's to lose."
+          # Only the files clasp manages. Docs are ours, and .gs are the
+          # hand-pasted mirrors deleted on 15/08/2026 — clasp never pulled
+          # either, so a baseline old enough to contain them would otherwise
+          # read as a difference and refuse. A .js present in one and not the
+          # other still counts: a live file missing from the repo would be
+          # DELETED by the push, and a repo file missing from live is new.
+          if diff -rq --exclude='*.md' --exclude='*.gs' /tmp/gas-base /tmp/gas-live; then
+            echo ""
+            echo "Live matches the last sync — nobody has edited the project directly."
+            echo "Whatever gas/ is ahead by on this branch is yours to push:"
+            diff -rq --exclude='*.md' --exclude='*.gs' /tmp/gas-base gas || true
           else
-            echo "::error::The live Apps Script project differs from gas/ in this branch."
+            echo "::error::The live Apps Script project has changed since the last sync."
             echo ""
-            echo "  Pushing now would overwrite whatever is different, including any"
-            echo "  edit made in the Apps Script editor since the last sync."
+            echo "  Someone edited it in the editor. Pushing now would overwrite that."
             echo ""
-            echo "  Run the 'Sync Apps Script' workflow, merge the commit it makes,"
-            echo "  rebase this branch on it, then run this again. If the difference"
-            echo "  IS your change and the sync has already run, the sync commit is"
-            echo "  what you need to merge — do not force past this."
+            echo "  Run the 'Sync Apps Script' workflow, merge the commit it makes, then"
+            echo "  run this again. Do not force past this — the sync commit IS the"
+            echo "  evidence of what would have been lost."
             exit 1
           fi
 
