@@ -56,13 +56,16 @@ files if a diff is ever needed.
 | `Drive.js` | 114 | Shared Drive file browser (`getTree`, `getDownloadUrl`, `getThumbnail`). |
 | `ClaudioChat.js` | 3,275 | Anthropic API proxy with tool-use, for Claudio. |
 | `ClaudioStats.js` | 3,169 | Historical NL statistics engine behind Claudio's tools. |
-| `MeetingNotes.js` | 121 | `generateMeetingMinutes` — Anthropic proxy for Meeting Notes. |
 | `Tests.js` | 46 | Manual test functions, run from the editor. Never web-facing. |
-| `ChaseHQ.js` | 91 | **Dead.** chase-hq was removed from the site at brand sweep v2.19; the router still dispatches `chaseEmail`. Retires in Phase 3 of the migration. |
+| `ChaseHQ.js` | 91 | **Dead.** chase-hq was removed at brand sweep v2.19. Its router line is commented out as of 15/08/2026; the file retires in Phase 3. |
 | `appsscript.json` | — | The manifest. A change to scopes or runtime is exactly the drift worth seeing. |
 
-Seven pages still call this backend through `NL.endpoints.gas`, including the
-login page. It is a live backend, not a residue — see
+Six pages still call this backend through `NL.endpoints.gas`, including the
+login page. Two dispatch lines are commented out rather than deleted —
+`chaseEmail` and `claudio` — because both forward to Anthropic with a key from
+Script Properties, from a web app that is public by construction. While the
+tools in front of them are off the portal they are cost-abuse surface and
+nothing else. It is a live backend, not a residue — see
 [`../system/gas-to-functions-migration.md`](../system/gas-to-functions-migration.md)
 for where it is going.
 

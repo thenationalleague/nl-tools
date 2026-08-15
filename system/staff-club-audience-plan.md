@@ -46,7 +46,7 @@ then reviewed — no guesswork.
 
 **`audience: "staff"` (staff-only — club-realm hard-denied):**
 `staff-chase-hq` (retired placeholder), `staff-claudio`, `staff-graphics`,
-`staff-holiday-lieu`, `staff-meeting-notes`, `staff-tasks` (retired 15/08/2026 —
+`staff-holiday-lieu`, `staff-tasks` (retired 15/08/2026 —
 tool, parked record and rules all removed; see PR retiring it),
 `staff-travel-planner`, `staff-website-analysis`,
 `staff-website-archive`, `staff-website-insights`.
@@ -167,7 +167,7 @@ Split into two, because the audience field isn't reachable from the rules for
 tightening live tools' reads carries regression risk:
 
 - **3a (done):** lock the 5 staff-audience tools that have `app-data`
-  (`staff-tasks` — since retired, `staff-holiday-lieu`, `staff-meeting-notes`,
+  (`staff-tasks` — since retired, `staff-holiday-lieu`,
   `staff-chase-hq`, `staff-claudio`) to LEAGUE roles — AND-in a league requirement on every
   `.read`/`.write` (monotonic; league users unchanged, club/external denied).
   Closes the "any signed-in user can read staff tasks/holidays/notes" leak. All

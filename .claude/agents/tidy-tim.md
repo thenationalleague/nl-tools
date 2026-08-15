@@ -109,7 +109,7 @@ Name the layer it belongs in:
 
 - Genuine one-off identity palettes that the policy block at the top of
   `nl-brand.css` explicitly blesses as tool-local: claudio personas,
-  attendance competition tiers, meeting-notes scratchpad, the GA channel
+  attendance competition tiers, the GA channel
   palette, the club crest LUT.
 - A hex inside a comment, a changelog block, or an SVG data URI.
 - Anything already recorded in `system/_template/.lint-waivers`.
