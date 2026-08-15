@@ -6,6 +6,26 @@
 <title>Clubs Meta — Reference</title>
 <!--
   club-directory / meta-reference.html
+  v2.0 — Brand pass. The page was already token-clean (no raw hex, no native
+         dialogs) but was rebuilding canon components under its own names, and
+         one of them collided: a local `.chip` overrode the canon `.chip` it
+         was already loading, at a different size and weight. Now uses the
+         canon throughout — .filter-bar/.filter-row/.filter-label,
+         .chip/.chip-group, .btn, .table-wrap, .empty-state, .page-header —
+         and keeps aria-pressed alongside .active so the toggles stay
+         announceable, which the canon class alone does not give.
+         Behaviour is unchanged: same columns, same filters, same CSV.
+         Also swapped the hand-rolled helpers for the canon ones:
+           esc()                → NL.escHtml
+           manual CSV quoting   → NL.csv
+           Blob + <a download>  → NL.download
+           clipboard + "Copied" → NL.copy (toasts via NL.toast)
+         And the data source moved from a raw.githubusercontent URL on main to
+         NL.clubs.load(). Same JSON with every raw field intact — so columns
+         still appear automatically — but same-origin, memoised and sharing one
+         cache-bust with every other tool, instead of a second direct fetch of
+         a file the canon already owns. It also means the page works locally
+         and does not depend on GitHub being reachable.
   v1.4 — Surfaces the new clubs-meta `fasID` (sister identifier to `optaID`)
          in the Identity column group, rendered mono alongside it.
   v1.3 — flatten() now skips null values, so a club with a null container
@@ -24,8 +44,9 @@
   v1.0 — Read-only reference viewer for assets/data/clubs-meta.json.
 
   Sits "before" the Club Directory: surfaces the canonical clubs-meta
-  (handbook) layer only — no contacts, no people, no editing. Live-fetches
-  the JSON from main so it always reflects the published source of truth.
+  (handbook) layer only — no contacts, no people, no editing. Reads the live
+  JSON through NL.clubs.load(), so it always reflects the published source of
+  truth without holding a copy of its own.
 
   Use it to scan stadium names / capacities / kits etc. en masse, sort and
   filter, and export the flattened data as CSV (the CSV doubles as the
@@ -46,149 +67,144 @@
      scenario it guarded against would break all 34 other tools at the same
      time, so it was buying nothing this page can spend. -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=36">
+<script src="/system/nl-utils.js?v=30"></script>
 <style>
-  body { font-family: var(--font); color: var(--text); background: var(--white); -webkit-font-smoothing: antialiased; }
-</style>
-<style>
-  body { margin: 0; }
+  /* Only what the canon does not already provide. Everything with a canon
+     equivalent — the filter bar, chips, buttons, table shell, empty state,
+     page header — now uses it. A local `.chip` used to live here and, because
+     this <style> loads after nl-brand.css, it silently overrode the canon chip
+     at a different size and weight on a page that was already loading it. */
+
+  body { margin: 0; background: var(--white); }
   a { color: var(--navy); text-decoration: none; }
   a:hover { text-decoration: underline; }
 
-  .wrap { padding: 18px clamp(12px, 3vw, 32px) 64px; }
+  /* Not the canon .page: this is a full-bleed data table that wants the whole
+     viewport width, where .page centres to a reading measure. */
+  .mr-wrap { padding: 18px clamp(12px, 3vw, 32px) 64px; }
 
-  .head {
-    display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap;
-    border-bottom: 2px solid var(--primary);
-    padding-bottom: 12px; margin-bottom: 16px;
+  /* The table scrolls in both axes inside a fixed viewport-height box, with a
+     sticky header row and a sticky club-name column. The canon .table-wrap
+     handles horizontal overflow only, so the vertical cap and both sticky
+     axes are set here on top of it. */
+  .mr-scroll {
+    max-height: calc(100vh - 240px);
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--white);
   }
-  .head h1 {
-    margin: 0; font-size: var(--text-lg, 22px);
-    text-transform: uppercase; letter-spacing: 0.02em;
-    color: var(--navy);
-  }
-  .head .meta { color: var(--text-muted); font-size: var(--text-sm); margin-left: auto; text-align: right; line-height: 1.5; }
-  .head .meta b { color: var(--text); font-variation-settings: 'wght' 700; }
-
-  .controls {
-    display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap;
-    margin-bottom: 14px;
-  }
-  .controls__search {
-    font-family: var(--font); font-size: var(--text-sm);
-    border: 1px solid var(--border); border-radius: 6px;
-    padding: 8px 12px; background: var(--white); color: var(--text);
-    min-width: 220px; flex: 1; max-width: 360px;
-  }
-  .controls__search:focus { outline: none; border-color: var(--navy); }
-
-  .group { display: flex; align-items: center; gap: 2px; background: var(--off-white); padding: 4px; border-radius: 8px; }
-  .group__label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; font-weight: 800; font-variation-settings: 'wght' 800; color: var(--text-muted); padding: 0 8px 0 6px; }
-
-  .chip {
-    background: none; border: 1px solid transparent; border-radius: 5px;
-    font-family: var(--font); font-size: var(--text-xs); font-weight: 600; font-variation-settings: 'wght' 600;
-    color: var(--text); padding: 5px 11px; cursor: pointer; transition: all 0.12s;
-    white-space: nowrap;
-  }
-  .chip:hover:not([aria-pressed="true"]) { background: var(--white); }
-  .chip[aria-pressed="true"] { background: var(--navy); color: var(--white); }
-
-  .spacer { flex: 1; }
-
-  .tbl-scroll {
-    border: 1px solid var(--border); border-radius: 8px; overflow: auto;
-    max-height: calc(100vh - 220px); background: var(--white);
-  }
-  table { border-collapse: collapse; width: 100%; font-size: 13px; }
-  thead th {
+  .mr-tbl { border-collapse: collapse; width: 100%; font-size: 13px; }
+  .mr-tbl thead th {
     position: sticky; top: 0; z-index: 2;
     background: var(--navy); color: var(--white);
     text-align: left; padding: 8px 10px; white-space: nowrap;
-    font-weight: 700; font-variation-settings: 'wght' 700;
+    font-variation-settings: 'wght' 700;
     cursor: pointer; user-select: none;
     border-right: 1px solid var(--navy-600);
   }
-  thead th:hover { background: var(--navy-600); }
-  thead th .arrow { opacity: 0.55; font-size: 10px; margin-left: 4px; }
-  /* first column (club name) sticks horizontally too */
-  thead th.col-name, tbody td.col-name {
+  .mr-tbl thead th:hover { background: var(--navy-600); }
+  .mr-tbl thead th .arrow { opacity: 0.55; font-size: 10px; margin-left: 4px; }
+  .mr-tbl thead th.col-name, .mr-tbl tbody td.col-name {
     position: sticky; left: 0; z-index: 1;
-    font-weight: 700; font-variation-settings: 'wght' 700;
+    font-variation-settings: 'wght' 700;
   }
-  thead th.col-name { z-index: 3; }
-  tbody td.col-name { background: var(--off-white); color: var(--navy); }
+  .mr-tbl thead th.col-name { z-index: 3; }
+  .mr-tbl tbody td.col-name { background: var(--off-white); color: var(--navy); }
+  .mr-tbl tbody td { padding: 6px 10px; border-top: 1px solid var(--border); white-space: nowrap; vertical-align: middle; }
+  .mr-tbl tbody tr:hover td { background: var(--primary-50); }
+  .mr-tbl tbody tr:hover td.col-name { background: var(--primary-100); }
+  .mr-tbl td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .mr-tbl td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .mr-tbl td.empty { color: var(--text-muted); }
 
-  tbody td { padding: 6px 10px; border-top: 1px solid var(--border); white-space: nowrap; vertical-align: middle; }
-  tbody tr:hover td { background: var(--primary-50); }
-  tbody tr:hover td.col-name { background: var(--primary-100); }
-  td.num { text-align: right; font-variant-numeric: tabular-nums; }
-  td.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; }
-  td.empty { color: var(--text-muted); }
+  /* A swatch filled with the club's own colour, text auto-flipped for contrast.
+     Genuinely local: the value being displayed IS the colour, so no token can
+     stand in for it. */
+  .mr-cpill {
+    display: inline-block; min-width: 66px; text-align: center;
+    padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+    font-variation-settings: 'wght' 700; letter-spacing: 0.02em;
+  }
 
-  .cpill { display: inline-block; min-width: 66px; text-align: center;
-           padding: 2px 9px; border-radius: 999px; border: 1px solid var(--border);
-           font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px;
-           font-weight: 700; letter-spacing: 0.02em; }
+  /* CANON CANDIDATE: division → colour. Three tools now map National/North/
+     South to navy/amber/green independently. It wants to be --div-* tokens in
+     nl-brand.css, but that is a lockstep ?v= bump across every head and so its
+     own change, not a rider on a brand pass. */
+  .mr-div { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-variation-settings: 'wght' 700; }
+  .mr-div--National { background: var(--navy);  color: var(--white); }
+  .mr-div--North    { background: var(--amber); color: var(--text); }
+  .mr-div--South    { background: var(--green); color: var(--white); }
 
-  .div-pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; font-variation-settings: 'wght' 700; }
-  .div-National { background: var(--navy); color: var(--white); }
-  .div-North { background: var(--amber); color: var(--text); }
-  .div-South { background: var(--green); color: var(--white); }
+  .mr-meta { color: var(--text-muted); font-size: var(--text-sm); text-align: right; line-height: 1.5; }
+  .mr-meta b { color: var(--text); font-variation-settings: 'wght' 700; }
 
-  .status { padding: 40px; text-align: center; color: var(--text-muted); }
-  .status.err { color: var(--red); }
+  .mr-note { margin-top: 14px; font-size: var(--text-xs); color: var(--text-muted); line-height: 1.6; max-width: 100ch; }
+  .mr-note code { background: var(--off-white); padding: 1px 5px; border-radius: 4px; font-size: 11px; }
 
-  .note { margin-top: 14px; font-size: var(--text-xs); color: var(--text-muted); line-height: 1.6; }
-  .note code { background: var(--off-white); padding: 1px 5px; border-radius: 4px; font-size: 11px; }
+  /* The search field. Second time this has been hand-rolled — /estate/ needed
+     the same thing — so a text input sized to sit inside .filter-row is a
+     canon candidate in its own right. */
+  .mr-search {
+    font-family: var(--font); font-size: var(--text-sm);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 8px 12px; background: var(--white); color: var(--text);
+    min-width: 220px; flex: 1; max-width: 360px;
+  }
+  .mr-search:focus { outline: none; border-color: var(--navy); }
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="mr-wrap">
 
-  <div class="head">
-    <h1>Clubs Meta — Reference</h1>
-    <div class="meta" id="metaInfo">loading…</div>
+  <div class="page-header">
+    <div class="page-header__titles">
+      <h1 class="page-header__title">Clubs Meta — Reference</h1>
+    </div>
+    <div class="mr-meta" id="metaInfo">loading…</div>
   </div>
 
-  <div class="controls">
-    <input type="search" class="controls__search" id="search" placeholder="Search any field…">
-
-    <div class="group" id="seasonGroup">
-      <span class="group__label">Season</span>
-      <!-- season chips injected here -->
+  <div class="filter-bar filter-bar--stacked">
+    <div class="filter-row">
+      <input type="search" class="mr-search" id="search" placeholder="Search any field…">
+      <button class="btn btn--ghost btn--sm" id="copyCsv">Copy CSV</button>
+      <button class="btn btn--ghost btn--sm" id="dlCsv">Download CSV</button>
+      <button class="btn btn--ghost btn--sm" id="reload">↻ Reload</button>
     </div>
 
-    <div class="group" id="divGroup">
-      <span class="group__label">Division</span>
-      <button class="chip" data-div="all" aria-pressed="true">All</button>
-      <button class="chip" data-div="National" aria-pressed="false">National</button>
-      <button class="chip" data-div="North" aria-pressed="false">North</button>
-      <button class="chip" data-div="South" aria-pressed="false">South</button>
+    <div class="filter-row" id="seasonRow">
+      <span class="filter-label">Season</span>
+      <div class="chip-group" id="seasonGroup"><!-- season chips injected here --></div>
     </div>
 
-    <div class="group" id="colGroup">
-      <span class="group__label">Columns</span>
-      <!-- group toggles injected here -->
+    <div class="filter-row">
+      <span class="filter-label">Division</span>
+      <div class="chip-group" id="divGroup">
+        <button class="chip active" data-div="all" aria-pressed="true">All</button>
+        <button class="chip" data-div="National" aria-pressed="false">National</button>
+        <button class="chip" data-div="North" aria-pressed="false">North</button>
+        <button class="chip" data-div="South" aria-pressed="false">South</button>
+      </div>
     </div>
 
-    <div class="spacer"></div>
-
-    <button class="chip" id="copyCsv" style="border-color:var(--border)">Copy CSV</button>
-    <button class="chip" id="dlCsv" style="border-color:var(--border)">Download CSV</button>
-    <button class="chip" id="reload" style="border-color:var(--border)">↻ Reload</button>
+    <div class="filter-row">
+      <span class="filter-label">Columns</span>
+      <div class="chip-group" id="colGroup"><!-- group toggles injected here --></div>
+    </div>
   </div>
 
-  <div class="tbl-scroll">
-    <div class="status" id="status">Loading clubs-meta.json…</div>
-    <table id="tbl" hidden>
+  <div class="mr-scroll">
+    <div class="empty-state" id="status">Loading clubs-meta…</div>
+    <table class="mr-tbl" id="tbl" hidden>
       <thead><tr id="thead"></tr></thead>
       <tbody id="tbody"></tbody>
     </table>
   </div>
 
-  <p class="note">
-    Read-only. Live from <code>assets/data/clubs-meta.json</code> on <code>main</code> —
-    the single source of truth fetched by the embeds, widgets, graphics tools and the rest.
+  <p class="mr-note">
+    Read-only, live from <code>assets/data/clubs-meta.json</code> — the single source of truth
+    the embeds, widgets and graphics tools all read.
     Columns are derived from the JSON, so new fields (e.g. <code>lat</code>/<code>lng</code>/<code>nickname</code>) appear automatically.
     The <b>Season</b> switcher filters to the clubs that played that season and shows each club's division for that season;
     all other fields are the <b>latest</b> value (sponsors, kit, capacity etc. aren't snapshotted per season).
@@ -199,7 +215,12 @@
 
 <script>
 (function(){
-  var SRC = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
+  /* Data comes from NL.clubs.load() — the canon loader, same-origin and
+     memoised, returning the raw parsed JSON with every field intact (which is
+     what lets columns appear automatically). It replaces a second direct fetch
+     of raw.githubusercontent on main: same file, but that one broke offline,
+     duplicated a fetch the canon already owns, and answered to GitHub rather
+     than to the deployed site. */
 
   // Preferred column order + grouping. Columns not listed here are appended
   // (in first-seen order) under "Other", so the table never silently drops data.
@@ -221,7 +242,18 @@
   GROUPS.forEach(function(g){ groupOn[g.key] = g.on; });
 
   var $ = function(id){ return document.getElementById(id); };
-  var esc = function(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); };
+  var esc = NL.escHtml;   /* canon escaper — same contract, one implementation */
+
+  /* sRGB relative luminance of a hex colour, 0 (black) to 1 (white). */
+  function lum(hex){
+    var h = String(hex).replace('#','');
+    if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+    if (h.length < 6) return 0;
+    var r = parseInt(h.substr(0,2),16), g = parseInt(h.substr(2,2),16), b = parseInt(h.substr(4,2),16);
+    return (0.2126*r + 0.7152*g + 0.0722*b) / 255;
+  }
+  /* Light enough that a same-colour border would disappear into the row. */
+  function isLight(hex){ return lum(hex) > 0.85; }
 
   // Pick black or white text for legibility on a given hex background (sRGB luminance).
   function textOn(hex){
@@ -319,10 +351,16 @@
     if (val == null || val === '') return '<td class="col-'+(col==='name'?'name':'')+' empty">—</td>';
     var cls = col === 'name' ? 'col-name' : '';
     if (NUMERIC[col]) return '<td class="num '+cls+'">'+esc(Number(val).toLocaleString())+'</td>';
-    if (col === 'division') return '<td class="'+cls+'"><span class="div-pill div-'+esc(val)+'">'+esc(val)+'</span></td>';
+    if (col === 'division') return '<td class="'+cls+'"><span class="mr-div mr-div--'+esc(val)+'">'+esc(val)+'</span></td>';
     if (/colors?\./.test(col) && HEX.test(String(val))){
       var hexv = String(val).charAt(0)==='#' ? val : '#'+val;
-      return '<td class="'+cls+'"><span class="cpill" style="background:'+esc(hexv)+';color:'+textOn(hexv)+';border-color:'+esc(hexv)+'">'+esc(hexv)+'</span></td>';
+      /* Border matches the swatch so the pill reads as one solid block — but
+         only when the colour is dark enough to show against the white row.
+         Set unconditionally, a white kit (#FFFFFF, and 30-odd clubs have one)
+         drew a white pill with a white border and vanished, on the one page
+         whose whole job is showing colours. */
+      var border = isLight(hexv) ? 'var(--border)' : esc(hexv);
+      return '<td class="'+cls+'"><span class="mr-cpill" style="background:'+esc(hexv)+';color:'+textOn(hexv)+';border-color:'+border+'">'+esc(hexv)+'</span></td>';
     }
     if (col === 'optaID' || col === 'fasID' || col === 'postcode' || col === 'code') return '<td class="mono '+cls+'">'+esc(val)+'</td>';
     return '<td class="'+cls+'">'+esc(val)+'</td>';
@@ -359,8 +397,8 @@
       if (g.key === 'identity') { /* identity always shown via individual cols; still allow toggle */ }
       var b = document.createElement('button');
       b.className = 'chip'; b.textContent = g.label;
-      b.setAttribute('aria-pressed', groupOn[g.key] ? 'true' : 'false');
-      b.onclick = function(){ groupOn[g.key] = !groupOn[g.key]; b.setAttribute('aria-pressed', groupOn[g.key]?'true':'false'); render(); };
+      setPressed(b, groupOn[g.key]);
+      b.onclick = function(){ groupOn[g.key] = !groupOn[g.key]; setPressed(b, groupOn[g.key]); render(); };
       $('colGroup').appendChild(b);
     });
   }
@@ -385,35 +423,37 @@
     var box = $('seasonGroup');
     box.querySelectorAll('.chip').forEach(function(n){ n.remove(); });
     var keys = Object.keys(state.seasons.list || {}).sort().reverse();
-    if (!keys.length) { box.hidden = true; return; }   // no season model — hide
-    box.hidden = false;
+    /* Hide the whole filter-row, not just the chip group — otherwise the
+       "Season" label sits there labelling nothing. */
+    if (!keys.length) { $('seasonRow').hidden = true; return; }
+    $('seasonRow').hidden = false;
     keys.forEach(function(k){
       var b = document.createElement('button');
       b.className = 'chip'; b.textContent = state.seasons.list[k].label || k;
-      b.setAttribute('aria-pressed', state.season === k ? 'true' : 'false');
+      setPressed(b, state.season === k);
       b.onclick = function(){
         state.season = k;
-        box.querySelectorAll('.chip').forEach(function(c){ c.setAttribute('aria-pressed', c===b?'true':'false'); });
+        box.querySelectorAll('.chip').forEach(function(c){ setPressed(c, c === b); });
         render();
       };
       box.appendChild(b);
     });
   }
 
+  /* Header row + every column in canonical order, current filter and sort.
+     Quoting/escaping is NL.csv's job — it takes rows as arrays of cells. */
   function toCSV(){
-    var cols = state.cols;              // ALL columns, canonical order
-    var rows = filteredSorted();        // current filter + sort
-    var q = function(v){ v = String(v==null?'':v); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; };
-    var lines = [cols.map(label).map(q).join(',')];
-    rows.forEach(function(r){ lines.push(cols.map(function(c){ return q(r[c]); }).join(',')); });
-    return lines.join('\r\n');
+    var cols = state.cols;
+    var rows = filteredSorted();
+    return NL.csv([cols.map(label)].concat(
+      rows.map(function(r){ return cols.map(function(c){ return r[c]; }); })
+    ));
   }
 
   function load(){
-    $('status').textContent = 'Loading clubs-meta.json…';
-    $('status').className = 'status'; $('tbl').hidden = true; $('status').hidden = false;
-    fetch(SRC + '?cb=' + Date.now(), { cache:'no-store' })
-      .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    $('status').textContent = 'Loading clubs-meta…';
+    $('status').style.color = ''; $('tbl').hidden = true; $('status').hidden = false;
+    NL.clubs.load()
       .then(function(data){
         state.version = data.version || '';
         var clubs = (data.clubs || data);
@@ -439,32 +479,40 @@
         render();
       })
       .catch(function(e){
-        $('status').className = 'status err';
-        $('status').textContent = 'Could not load clubs-meta.json — ' + e.message;
+        $('status').style.color = 'var(--red)';
+        $('status').textContent = 'Could not load clubs-meta — ' + e.message;
       });
   }
 
   // wire controls
   $('search').oninput = function(){ state.q = this.value; render(); };
+  /* Canon styles the selected chip off .active; aria-pressed is kept in step
+     so the control still announces its state to a screen reader, which the
+     class alone does not do. */
+  function setPressed(node, on){
+    node.classList.toggle('active', !!on);
+    node.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+
   $('divGroup').onclick = function(e){
     var b = e.target.closest('.chip'); if(!b) return;
     state.div = b.getAttribute('data-div');
-    $('divGroup').querySelectorAll('.chip').forEach(function(c){ c.setAttribute('aria-pressed', c===b?'true':'false'); });
+    $('divGroup').querySelectorAll('.chip').forEach(function(c){ setPressed(c, c === b); });
     render();
   };
-  $('reload').onclick = load;
+  /* NL.clubs.load() memoises for the life of the page, so calling it again
+     replays the first response — right for every other caller, useless for a
+     Reload button. A full page reload is the honest way to get a genuinely
+     fresh fetch without reaching into the canon's closure.
+     CANON CANDIDATE: NL.clubs.reload() (invalidate + refetch) would let this
+     be an in-place refresh; it needs a lockstep ?v= bump, so not here. */
+  $('reload').onclick = function(){ location.reload(); };
   $('dlCsv').onclick = function(){
-    var blob = new Blob([toCSV()], { type:'text/csv;charset=utf-8' });
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'clubs-meta' + (state.version?'-'+state.version:'') + '.csv';
-    a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+    NL.download('clubs-meta' + (state.version ? '-' + state.version : '') + '.csv',
+                toCSV(), 'text/csv;charset=utf-8');
   };
   $('copyCsv').onclick = function(){
-    var b = this;
-    navigator.clipboard.writeText(toCSV()).then(function(){
-      var t = b.textContent; b.textContent = 'Copied ✓'; setTimeout(function(){ b.textContent = t; }, 1400);
-    });
+    NL.copy(toCSV(), { ok: 'CSV copied' });
   };
 
   load();
