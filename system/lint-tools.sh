@@ -88,6 +88,17 @@ is_waived() {
   return 1
 }
 
+# loads_asset <file-regex> <page> → 0 if the page really LOADS the asset.
+#
+# Matches an href=/src= attribute, not a bare mention of the filename. Every
+# page in the repo carries a boilerplate comment reading "nl-topbar.js adds
+# these too, but a standalone page never loads it" — so a filename-only test
+# says yes on pages that demonstrably do not load the file. That is not
+# hypothetical: it is exactly what switched the standalone check off below.
+loads_asset() {
+  grep -qE "(href|src)=\"/system/$1" "$2"
+}
+
 # check_asset <file> <slug> <index> <canonical> → echoes drift line if any.
 # Distinguishes three cases:
 #   (a) not loaded at all          → drift: missing
@@ -274,19 +285,41 @@ while IFS= read -r page; do
     ./system/brand-v3-mockups/*) continue ;;
   esac
   grep -q '<head' "$page" || continue
-  grep -q 'nl-topbar\.js' "$page" && continue      # a tool — already checked above
-  grep -q 'nl-brand\.css' "$page" || continue      # no brand sheet, nothing to version
+  # A page that really loads auth-guard is a tool and was checked above. This
+  # used to test for the string "nl-topbar.js" anywhere in the file, which the
+  # boilerplate favicon comment puts on every standalone page — so all 17 of
+  # them skipped BOTH loops and were checked by nothing at all. The comment
+  # saying "a standalone page never loads it" was switching off the check for
+  # the page carrying it.
+  loads_asset 'auth-guard\.js' "$page" && continue
+  loads_asset 'nl-brand\.css' "$page" || continue   # no brand sheet, nothing to version
 
   short="${page#./}"
-  if grep -q "nl-brand\.css?v=$CANON_BRAND" "$page"; then
+  page_drift=()
+
+  # Check every canon file the page actually loads. Absence is fine and
+  # expected — a standalone page has no topbar and no guard by design — but a
+  # file that IS loaded has to carry the canonical ?v=. Only nl-brand.css was
+  # checked before, so a public page on a stale nl-utils.js went unreported.
+  for pair in "nl-brand.css:$CANON_BRAND" "nl-utils.js:$CANON_UTILS" \
+              "nl-topbar.js:$CANON_TOPBAR" "auth-guard.js:$CANON_GUARD"; do
+    f="${pair%%:*}"; canon="${pair##*:}"
+    loads_asset "${f/./\\.}" "$page" || continue
+    if grep -q "$f?v=$canon" "$page"; then
+      continue
+    elif grep -qE "$f\?v=[0-9]+" "$page"; then
+      got=$(grep -oE "$f\?v=[0-9]+" "$page" | head -1 | sed 's/.*v=//')
+      page_drift+=("  $short: $f?v=$got — canonical is ?v=$canon")
+    else
+      page_drift+=("  $short: loads $f with no ?v= — add ?v=$canon")
+    fi
+  done
+
+  if [[ ${#page_drift[@]} -eq 0 ]]; then
     standalone_clean=$((standalone_clean + 1))
-  elif grep -qE 'nl-brand\.css\?v=[0-9]+' "$page"; then
-    got=$(grep -oE 'nl-brand\.css\?v=[0-9]+' "$page" | head -1 | sed 's/.*v=//')
-    standalone+=("  $short: nl-brand.css?v=$got — canonical is ?v=$CANON_BRAND")
-    standalone_warn=$((standalone_warn + 1))
   else
-    standalone+=("  $short: loads nl-brand.css with no ?v= — add ?v=$CANON_BRAND")
     standalone_warn=$((standalone_warn + 1))
+    for d in "${page_drift[@]}"; do standalone+=("$d"); done
   fi
 done < <(find . -name '*.html' -not -path '*/node_modules/*' | sort)
 
