@@ -95,7 +95,7 @@
          console, for registering a preview domain that reCAPTCHA cannot verify. */
       var APPCHECK_SITE_KEY = '6LdxWHItAAAAAOT69qFXddxpmRelAC-XkDcb2VPk';
       // NL+ logo (red, lozenge) served from the tools repo via raw.githubusercontent.com
-      var NLPLUS_LOGO_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/logos/NL%2B%20red%20lozenge.png';
+      var NLPLUS_LOGO_URL = 'https://nl.tools/assets/logos/NL%2B%20red%20lozenge.png';
       // SA SSO tenant for thenationalleague — matches the tenant_id claim in JWTs
       var SSO_TENANT_ID = 'EBLzD6derkq3NH7m9Rp2mQ';
 
@@ -108,7 +108,7 @@
       var COMP_IDS = Object.keys(COMPS).map(Number); // [89, 373, 372]
       var DEFAULT_COMP_ID = 89; // National — fallback when team→comp lookup fails
       var SEASON_ID  = 2026; // fallback only — the live value is derived from clubs-meta.json
-      var CLUBS_META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json';
+      var CLUBS_META_URL = 'https://nl.tools/assets/data/clubs-meta.json';
       var API_BASE   = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
       var MAX_PAGES  = 10;
       var IN_PLAY_MIN = 105;
@@ -505,7 +505,7 @@
       }
       function compWideLogoUrl(compId) {
         var c = COMPS[compId] || COMPS[DEFAULT_COMP_ID];
-        return 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/divisions/' + c.shortName + '-wide.png';
+        return 'https://nl.tools/assets/divisions/' + c.shortName + '-wide.png';
       }
       function compName(compId) {
         var c = COMPS[compId] || COMPS[DEFAULT_COMP_ID];

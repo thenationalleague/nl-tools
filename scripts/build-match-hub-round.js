@@ -36,7 +36,7 @@ const os = require("os");
 const crypto = require("crypto");
 
 const API = "https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2";
-const META_URL = "https://raw.githubusercontent.com/thenationalleague/tools/main/assets/data/clubs-meta.json";
+const META_URL = "https://nl.tools/assets/data/clubs-meta.json";
 const ALLTIME_URL = "https://raw.githubusercontent.com/thenationalleague/site/main/results.json";
 const COMPS = { nl: { id: 89, name: "National League", div: "National" },
                 north: { id: 373, name: "National League North", div: "North" },

@@ -414,7 +414,7 @@ window.CBDash = (function () {
     function renderHeader() {
       var crest = $('crest');
       if (crest) {
-        crest.src = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/' + encodeURIComponent(OWN.club) + '.png';
+        crest.src = '/assets/crests/' + encodeURIComponent(OWN.club) + '.png';
         crest.alt = OWN.club;
       }
       setText('clubName', OWN.club);
@@ -895,7 +895,7 @@ window.CBDash = (function () {
     function rolling(k) { var v = ((OWN.chips || {})[k] || '').trim(); return v ? (v.toLowerCase() === 'yes' ? 'Rolling' : 'Fixed term') : '—'; }
 
     var crest = $('crest');
-    if (crest) { crest.src = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/' + encodeURIComponent(OWN.club) + '.png'; crest.alt = OWN.club; }
+    if (crest) { crest.src = '/assets/crests/' + encodeURIComponent(OWN.club) + '.png'; crest.alt = OWN.club; }
     if ($('clubName')) $('clubName').textContent = OWN.club;
     if ($('tbClub')) $('tbClub').textContent = OWN.club;
     var DIV_FULL = { National: 'National League', North: 'National League North', South: 'National League South' };
