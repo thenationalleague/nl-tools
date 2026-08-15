@@ -10,17 +10,15 @@ mail (the single "strictly necessary" bit of Apps Script). The public GAS web
 app is fully decommissioned; no browser ever calls GAS again.
 
 > **STATUS CHECK, 15/08/2026.** That is the *goal*, stated in the present tense,
-> and it reads as though it has happened. It has not. **Seven pages still call
+> and it reads as though it has happened. It has not. **Five pages still call
 > GAS** through `NL.endpoints.gas`:
 >
 > `index.html` (the login page) · `portal/` · `vacancies/` · `vacancies/submit/`
 > · `claudio/` (parked, and its dispatch line is now commented out)
 >
-> Five, not the seven this said in the morning: photoshelter-onboarding came off
-> GAS in #858 and Programme Packs was deleted outright on 15/08/2026.
->
-> (`photoshelter-onboarding/` was the eighth until v1.0 dropped its GAS call
-> entirely — the email-verification flow it used had been abandoned.)
+> Five, not the eight this said in the morning: photoshelter-onboarding dropped
+> its GAS call in #858, meeting-notes was retired, and Programme Packs was
+> deleted outright — all on 15/08/2026.
 >
 > Phase 0 landed in PR #468 and the migration has not moved since. GAS is not a
 > residual shim — it is a live backend serving the page people sign in on.
@@ -85,6 +83,15 @@ send mail natively, and the slimmest-stack goal rules out adding a third-party
 provider (Resend/SendGrid = another vendor + account + DNS). So:
 
 - A **single GAS function that only sends mail** survives — nothing else.
+- **The one dependency this rests on, written down because nothing else states
+  it:** `MailApp.sendEmail`'s `from:` only accepts an address the sending
+  account holds as a verified send-as alias. Every email in the project goes out
+  as `SENDER_ALIAS` (`media@thenationalleague.org.uk`), which works solely
+  because that is an alias on the Workspace account owning the script. Remove
+  it, or change the script's owner, and every invite, approval, access request
+  and vacancy email fails with `Invalid argument: from` — a message naming
+  neither the alias nor the account. `testSetup()` in `gas/Tests.js` now checks
+  this explicitly rather than only checking the property is set.
 - It is **never exposed to browsers.** Only Cloud Functions call it,
   server-to-server, with a **shared secret** in a header that GAS verifies. The
   public-URL problem this whole migration exists to kill simply doesn't apply —
@@ -95,19 +102,19 @@ provider (Resend/SendGrid = another vendor + account + DNS). So:
 zero GAS but more Google Cloud setup and a powerful delegation grant; not worth
 it when a private shim is this small and safe.)*
 
-### 2. Drive-backed files — **DECISION: gone, Programme Packs moves to Storage**
-Programme Packs is being reworked to use **Firebase Storage** instead of Google
-Drive as its own piece of work. That removes the Drive dependency entirely, so
-there is **no Drive-vs-Storage question** for this migration and no
-service-account-to-Drive bridge to build. The `pp_*` / `getTree` /
-`getDownloadUrl` / `getThumbnail` Drive actions retire with the rework.
+### 2. Drive-backed files — **DONE 15/08/2026**
+Programme Packs moved to **Firebase Storage** as `/programme/` on 03/08/2026,
+and `/programme-packs/` was deleted on 15/08/2026 with all 17 `pp_*` routes,
+`getTree` / `getDownloadUrl` / `getThumbnail`, `ProgrammePacks.js` and
+`Drive.js`. **No part of this project touches Google Drive.** The Drive test in
+`gas/Tests.js` went too — it asked a question whose answer no longer matters.
 
 ---
 
 ## What is actually left — measured 15/08/2026
 
-Six pages still call GAS, but the surface is far smaller than that count
-suggests, and two thirds of it needs no migration at all:
+Five pages still call GAS, and the surface is smaller still — two of those five
+need no migration at all:
 
 | Page | Actions | Verdict |
 |---|---|---|
