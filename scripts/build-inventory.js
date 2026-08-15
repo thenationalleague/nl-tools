@@ -336,10 +336,56 @@ function assertFullHistory() {
  * Date and commit count only — never author or subject. See the header note:
  * this JSON is world-readable and commit metadata carries names.
  */
+/**
+ * Does this commit change the file in any way that is not a canon cache-bust?
+ *
+ * THE PROBLEM THIS SOLVES. Bumping a shared file's ?v= rewrites the same line
+ * in all 64 pages at once, in one commit. After a bump every page in the repo
+ * carries today's date, and "last changed" — the field the retirement decision
+ * most wants to lean on — says nothing at all. On 15/08/2026 two bumps landed
+ * in a morning, and the whole estate read as freshly worked on.
+ *
+ * So: look at what a commit actually did to THIS file, and ignore it if every
+ * changed line is a ?v= on a /system/ asset. --unified=0 keeps the hunks to
+ * changed lines only, so unrelated context cannot make a bump look substantive.
+ */
+function isCanonBumpOnly(sha, relPath) {
+  const diff = git(['show', '--unified=0', '--format=', sha, '--', relPath], '');
+  const changed = diff.split('\n').filter(
+    (l) => /^[+-]/.test(l) && !/^(\+\+\+|---)/.test(l)
+  );
+  if (!changed.length) return false;
+  return changed.every((l) => /\/system\/[\w.-]+\?v=\d+/.test(l));
+}
+
+/**
+ * Date and commit count only — never author or subject. See the header note:
+ * this JSON is world-readable and commit metadata carries names.
+ *
+ * lastSubstantive is the one to trust. lastCommit is kept beside it because
+ * the gap between the two is itself informative: a page whose only recent
+ * commits are cache-busts is a page nobody has had a reason to open.
+ */
 function gitFacts(relPath) {
   const date = git(['log', '-1', '--format=%ad', '--date=short', '--', relPath], null);
   const count = git(['rev-list', '--count', 'HEAD', '--', relPath], '0');
-  return { lastCommit: date || null, commits: Number(count) || 0 };
+
+  /* Walk back until a commit did something real. Bounded: a file with a long
+     tail of bumps and nothing else is exactly the case worth catching, but it
+     is not worth 500 git invocations to date it precisely. */
+  let lastSubstantive = null;
+  const shas = git(['log', '-40', '--format=%H', '--', relPath], '').split('\n').filter(Boolean);
+  for (const sha of shas) {
+    if (isCanonBumpOnly(sha, relPath)) continue;
+    lastSubstantive = git(['log', '-1', '--format=%ad', '--date=short', sha], null);
+    break;
+  }
+
+  return {
+    lastCommit: date || null,
+    lastSubstantive: lastSubstantive || null,
+    commits: Number(count) || 0,
+  };
 }
 
 /* ── main ────────────────────────────────────────────────────────────────── */
