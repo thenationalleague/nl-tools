@@ -91,22 +91,60 @@ npm run rebuild-index       # node scripts/rebuild-index.js — builds assets/da
 npm run fetch-ga-metrics    # node scripts/fetch-ga-metrics.js — GA4 Data API, writes assets/data/ga-metrics.json
 ```
 
-No test framework. No lint config beyond `system/lint-tools.sh`. Verification of UI changes is manual (open the page in a browser).
+```bash
+npm test                    # node --test tests/*.test.mjs — 260 tests, gates every PR
+bash system/lint-tools.sh --strict   # what CI runs; exit 1 on drift
+```
+
+There **is** a test suite: 17 files under `tests/`, run by `canon-checks.yml` on
+every push and PR. (This section said "No test framework" until 15/08/2026,
+which is the kind of wrong that stops someone adding a test.) `tests/canon.test.mjs`
+covers the `NL.*` API thoroughly; `tests/brand-canon.test.mjs` covers the CSS
+canon with four tests about one button variant, so the design system is
+effectively untested — that gap is real and worth closing.
+
+Verification of UI changes is still manual (open the page in a browser). There
+is no page-render test, so a converted page that silently breaks will not be
+caught by CI.
+
+## Plans and decisions — read before proposing one
+
+These exist and are **not** linked from anywhere a session would find them,
+which is why work gets re-planned from scratch. Check here first.
+
+| Document | What it decides |
+|---|---|
+| `system/CONSOLIDATION.md` | The master plan. Every tool draws from one shared place. Seven workstreams, safety rails, order of attack. Drafted 12/07/2026 from a five-way audit + external review. |
+| `system/gas-to-functions-migration.md` | **Locked decision**: retire the public Apps Script web app entirely; Firebase for everything, one private GAS email shim. |
+| `system/tool-status-and-access.md` | Which tools are live vs parked, and the per-role access model for each. |
+| `system/staff-club-audience-plan.md` | The staff/club audience gate. |
+| `system/roles-and-access-plan.md` | Role model. Nothing links to it. |
+| `system/brand-v3-scale-plan.md` | Parked type/scale pass. |
+| `system/rtdb/README.md` | The RTDB snapshot contract — which files are deployed vs reference. |
 
 ## Branching
 
-Active dev branch for this session: `claude/audit-brand-compliance-dIbO1`. PRs land on `main`; pushing to `main` directly is not done.
+PRs land on `main`; pushing to `main` directly is not done. Each session works on
+its own `claude/*` branch — the branch name is given in the session prompt, not
+here. (A specific branch name lived in this section and was months stale.)
 
 ## The system/ canon and the wiring contract
 
 Every gated tool's `index.html` has a near-identical `<head>`. The source of truth for that head is `system/_template/index.html`. Four files in `system/` are shared by every tool and **cache-busted with `?v=N`**:
 
-| File                 | Current `?v=` | Role                                                              |
-|----------------------|---------------|-------------------------------------------------------------------|
-| `nl-brand.css`       | `?v=32`       | Brand tokens, components, layout. Tools must use tokens not hex.  |
-| `nl-utils.js`        | `?v=30`       | `window.NL.*` helpers: `toast`, `ensureAuth`, `formatDate`/`formatDateShort`/`formatDateTime`/`timeAgo`, `parseDate` (string/Date/epoch), `escHtml`, `writeAudit`, `installAuditHook`, `icon`, `endpoints`, `clubs` (incl. `crestUrl(name[,'thumb'\|'medium'])`, `wireCrestImg`, `byOpta`, `guests`/`guestByName` for non-member cup sides), `clubPicker` (incl. `extraClubs`/`setExtraClubs`, `crestName`), `roles` (incl. `norm`, `label`, `realm`), `isClubUser`, `canClubEdit`, plus identity-data exports `mapStyle.drive`, `positionBands`, `projColours` (canvas/data callers). |
-| `nl-topbar.js`       | `?v=8`        | Renders `#nlTopbar` from `window.NL_TOOL`. Also injects PWA/favicon tags. |
-| `auth-guard.js`      | `?v=10`       | Gates `#pageWrap`. Verifies live Firebase Auth, re-reads RTDB user + tool registry, then reveals page and fires `nlAuthReady(session)`. |
+**Do not write the current `?v=` numbers here.** They lived in this table until
+15/08/2026 and had already rotted — it said `nl-brand.css ?v=32` while the real
+canonical was `?v=36`, four versions behind, in the one file every session is
+guaranteed to read. The live numbers are in `system/_template/index.html`;
+`lint-tools.sh` reads them from there and prints them at the top of every run,
+which is also the top of every Claude session. Read them there, never from here.
+
+| File                 | Role                                                              |
+|----------------------|-------------------------------------------------------------------|
+| `nl-brand.css`       | Brand tokens, components, layout. Tools must use tokens not hex.  |
+| `nl-utils.js`        | `window.NL.*` helpers: `toast`, `ensureAuth`, `formatDate`/`formatDateShort`/`formatDateTime`/`timeAgo`, `parseDate` (string/Date/epoch), `escHtml`, `writeAudit`, `installAuditHook`, `icon`, `endpoints`, `clubs` (incl. `crestUrl(name[,'thumb'\|'medium'])`, `wireCrestImg`, `byOpta`, `guests`/`guestByName` for non-member cup sides), `clubPicker` (incl. `extraClubs`/`setExtraClubs`, `crestName`), `roles` (incl. `norm`, `label`, `realm`), `isClubUser`, `canClubEdit`, plus identity-data exports `mapStyle.drive`, `positionBands`, `projColours` (canvas/data callers). |
+| `nl-topbar.js`       | Renders `#nlTopbar` from `window.NL_TOOL`. Also injects PWA/favicon tags. |
+| `auth-guard.js`      | Gates `#pageWrap`. Verifies live Firebase Auth, re-reads RTDB user + tool registry, then reveals page and fires `nlAuthReady(session)`. |
 
 `_headers` (at repo root) sends `Cache-Control: no-cache, must-revalidate` for `/system/*` so a new deploy of these files takes effect immediately — but the `?v=N` query is the **belt-and-braces** mechanism. The canonical versions live in `system/_template/index.html`; `lint-tools.sh` reads them from there and reports any tool whose head drifts (stale `?v=`, missing script, script below `</head>`, missing `window.NL_TOOL`/`NL_TOOL_KEY`/`#pageWrap`/`nlAuthReady`, or missing Firebase compat SDK when `firebase.initializeApp` is called).
 

@@ -94,10 +94,34 @@ This is the most important part. Consolidation without enforcement rots.
 **1. The lint gate is the law.** `system/lint-tools.sh` already runs on every
 Claude session start and checks every tool's wiring. **Every consolidation
 above ships with a new lint rule** so drift is caught the moment it's typed:
-- hand-rolled crest URL in a tool → flagged
-- a pasted script.google.com URL → flagged
-- a Firebase config that doesn't match the template → flagged (new check)
-- a tool re-declaring `esc()` / `showToast()` etc. over canon → flagged
+- hand-rolled crest URL in a tool → flagged — **NOT BUILT (15/08/2026)**
+- a pasted script.google.com URL → flagged — built
+- a Firebase config that doesn't match the template → flagged (new check) — **NOT BUILT**
+- a tool re-declaring `esc()` / `showToast()` etc. over canon → flagged — **NOT BUILT**
+
+> **STATUS CHECK, 15/08/2026 — read this before trusting the section above.**
+>
+> Three of the five rules below were never built, and the section reads as
+> though they were. Anyone relying on it believes drift is being caught when it
+> is not. Measured on 15/08/2026, with none of these rules in place:
+>
+> * **46 pages** redefine a class that already exists in `nl-brand.css`
+>   — 156 separate overrides. That is the missing "re-declaring over canon"
+>   rule, and it is the single largest source of drift in the repo.
+> * **310 non-canon CSS classes** live in 8 stylesheets outside `system/`,
+>   against canon's 194. `graphics/_shared/brand-graphic.css` alone defines
+>   **99 custom properties and 5 @font-face** — more than canon's 87 and 2.
+>   A second, larger design-token system, used by two pages.
+> * Bare generic canon names (`.btn`, `.gate`, `.chip`, `.topbar`) are clashed
+>   with **4.5× more often per class** than `nl-`prefixed ones. Naming is the
+>   mechanism, not just the symptom.
+> * The same duplication exists server-side: **four** implementations of
+>   passcode → scoped claim in `functions/`, each documented in `index.js` as a
+>   copy of the previous one ("Third instance of the same shape").
+>
+> The plan was sound. The enforcement step is what did not happen, and without
+> it the consolidation above will rot at the same rate it is applied. Build the
+> lint rules **first**, not alongside.
 - nl-utils loaded without a `?v=` version → flagged
 
 **2. New tools are born compliant.** `/new-tool` scaffolds from
