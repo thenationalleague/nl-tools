@@ -113,7 +113,7 @@
   var SESSION_TTL  = 4 * 60 * 60 * 1000; /* 4 hours in ms */
   var PORTAL_URL   = '/portal/';
   var LOGIN_URL    = '/';
-  var ROSE_URL     = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose%20white.png';
+  var ROSE_URL     = '/assets/crests/National%20League%20rose%20white.png';
 
   /* ── Session helpers -- defined first so portal can always access them ─── */
   var nlSession = {
