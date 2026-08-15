@@ -264,7 +264,8 @@ leaves its audit entry.
 
 ## Access / auth model
 
-Identical to `/footage/club/`: a **named Firebase app** (`nlUwPromo`,
+Identical to the retired `/footage/club/` (see `footage/CONCEPT.md`): a
+**named Firebase app** (`nlUwPromo`,
 in `_shared.js`) signs in **anonymously** for reads/writes so it can't clobber
 a portal (superadmin) login open in another tab. Master/UW passcodes and
 tokens are generated with an unambiguous alphabet (no 0/O/1/I/L); club PINs

@@ -54,7 +54,7 @@ portal, not error), and a club user where the tool is club-facing
 representative account in the system — never test only as him.
 
 For **standalone capability pages** — `/programme`, `/uw-promo`,
-`/footage/club`, `commercial-benchmarking/link.html` — none of that exists.
+`commercial-benchmarking/link.html` — none of that exists.
 No auth-guard, no `toolKey`, no roles. They gate on a passcode or an
 unguessable token, often minting a custom Firebase token with a club claim.
 Their personas are the ones the gate actually creates: the club itself,

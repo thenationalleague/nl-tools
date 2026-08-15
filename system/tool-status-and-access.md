@@ -56,7 +56,7 @@ record back and re-paste `tools/`. No `app-data` is touched, so no data is lost.
 | **Attendance** | 🟢 Live | edit all clubs; adjust neutral venues; all-clubs dropdown | view all (no editing) | add **own** club's attendances *(locked after X days — already defined in code; verify the value)* | view own + anonymised others |
 | **Club Directory** | 🟢 Live | edit all club data | view all | edit **own** club's data | view all |
 | **Commercial Benchmarking** | 🟢 Live | edit data | view benchmarks (club dropdown) | view **output only** | view **output only** |
-| **Cup Footage** | 🟢 Live | see all games; manage/upload/re-tag teams | view + download/preview all (nothing else) | **own team's** footage only | own team only |
+| **Cup Footage** | ⚫ Retired 15/08/2026 | — | — | — | — |
 | **DAZN VIP** | 🟠 Live — **rework** | edit | view | edit = a **request** NL admin must sign off; sees pending "requested" status | view incl. "requested" status |
 | **Handbook** | 🟢 Live | edit content | view | view | view |
 | **Judgements & Decisions** | 🟢 Live | add / amend / remove all | view | view | view |
