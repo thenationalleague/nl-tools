@@ -65,22 +65,24 @@ login page. It is a live backend, not a residue — see
 [`../system/gas-to-functions-migration.md`](../system/gas-to-functions-migration.md)
 for where it is going.
 
-## Two other Apps Script backends, still unmirrored
+## Two other Apps Script backends — being retired, not synced
 
-The sync covers the **consolidated** project only — the one behind
-`NL.endpoints.gas`. The repo calls two further Apps Script web apps that nothing
-here mirrors and nothing here syncs:
+The sync covers the **consolidated** project only. The repo called two further
+Apps Script web apps, both fan-facing, both with no repo copy of their code:
 
-| Deployment ends | Called by | Serves |
+| Deployment ends | Was behind | Now |
 |---|---|---|
-| `…Eqlzcw/exec` | `embeds/live-blog-page.html`, `embeds/live-blog-ticker.html` | Live blog: reads posts **and accepts submissions** |
-| `…5YtHOFzK/exec` | `embeds/transfer-centre-page.html`, `embeds/transfer-centre-ticker.html` | Transfer centre feed |
+| `…Eqlzcw/exec` | the live blog (read posts **and accept public submissions**) | unplugged — see [`../embeds/REBUILD.md`](../embeds/REBUILD.md) |
+| `…5YtHOFzK/exec` | the transfer centre feed | unplugged — same |
 
-Both are fan-facing, on the public site, with no repo copy of their code. To
-bring them under the same sync, each needs its **script ID** (from the editor
-URL, not the `/exec` URL) added as a second and third entry in
-`sync-gas.yml`. Until then, "the Apps Script layer is mirrored" is true of one
-project out of three.
+Both sat in front of a **Google Sheet**. Rather than bring them under the sync,
+both tools are parked for a rebuild on RTDB; their front-ends are kept and their
+backends dropped. So this project stays one Apps Script project, not three.
+
+**Neither is switched off yet.** Removing the repo's calls does not unpublish an
+Apps Script deployment — until someone archives them in the editor they remain
+public endpoints, and the live-blog one still accepts submissions. `REBUILD.md`
+has the decommission order.
 
 ## Backend authz — `SECURITY-invite-authz.md`
 

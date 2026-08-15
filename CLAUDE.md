@@ -191,7 +191,7 @@ The new tool's `index.html` must keep the canonical `?v=N` values from the templ
 ## Two families of frontend, do not confuse them
 
 - **Gated staff/club tools** — dirs with `index.html` referencing `/system/auth-guard.js`, either top-level (`vacancies/`) or one level down (`graphics/totw/`). Behind Firebase Auth, use the shared canon. Listed by `lint-tools.sh`.
-- **Fan-facing embeds** — `embeds/*.html` (score-predictor, MOTM, vidiprinter, transfer-centre, live-blog, results-ticker, match-centre). Pasted into the Urban Zoo CMS. The CMS strips `<script src=...>` tags, so Firebase has to be loaded dynamically via `document.createElement('script')` with `.onload` chaining. Inline `<style>`, `<link>`, inline `<script>` survive. See `embeds/widget-handover.md` for the invariants — copy `score-predictor.html` as the starting point for any new embed. These do **not** use `auth-guard.js` and are out of scope for `lint-tools.sh`.
+- **Fan-facing embeds** — `embeds/*.html` (score-predictor, MOTM, vidiprinter, results-ticker, match-centre; plus transfer-centre and live-blog, **parked** — front-ends kept, Google Sheet backends dropped, see `embeds/REBUILD.md`). Pasted into the Urban Zoo CMS. The CMS strips `<script src=...>` tags, so Firebase has to be loaded dynamically via `document.createElement('script')` with `.onload` chaining. Inline `<style>`, `<link>`, inline `<script>` survive. See `embeds/widget-handover.md` for the invariants — copy `score-predictor.html` as the starting point for any new embed. These do **not** use `auth-guard.js` and are out of scope for `lint-tools.sh`.
 
 `widgets/*.js` are a third bucket: standalone JS widgets (news ticker, transfers ticker, results ticker) embedded on the public site.
 

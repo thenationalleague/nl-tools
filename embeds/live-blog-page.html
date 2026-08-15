@@ -1542,8 +1542,13 @@
     animationMs: 250,
     newCardMs: 90000,
     fetchTimeoutMs: 12000,
-    apiUrl: 'https://script.google.com/macros/s/AKfycbwD3Yf25tVVvd0S46eC6ldWDQWK043FdTzwW6VoCHHppGzzg1o1S5vNMFNSbNGGEqlzcw/exec',
-    submitUrl: 'https://script.google.com/macros/s/AKfycbwD3Yf25tVVvd0S46eC6ldWDQWK043FdTzwW6VoCHHppGzzg1o1S5vNMFNSbNGGEqlzcw/exec',
+    /* PARKED 15/08/2026. Both pointed at an Apps Script web app in front of a
+       Google Sheet — see REBUILD.md. null, not a dead URL: a page that fails
+       to reach a backend looks broken, and this one is not broken, it is
+       unplugged. Everything below the data layer is intact and is the point
+       of keeping the file. */
+    apiUrl: null,
+    submitUrl: null,
     clubsMetaUrl: 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/clubs-meta.json',
     iconBase: 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/icons/',
     neutralColors: { primary:'#223b7c', secondary:'#9e0000', tertiary:'#9e0000' },
@@ -1867,6 +1872,7 @@
     const fd=new URLSearchParams();
     fd.append('action','submitSupporterNote'); fd.append('name',payload.name||'');
     fd.append('note',payload.note||''); fd.append('website',payload.website||''); fd.append('source',payload.source||'');
+    if(!CONFIG.submitUrl) throw new Error('Supporter notes are closed while the live blog is rebuilt.');
     const res=await fetchWithTimeout(CONFIG.submitUrl,{method:'POST',body:fd},CONFIG.fetchTimeoutMs);
     const text=await res.text(); let data=null;
     try{ data=JSON.parse(text); }catch(e){ throw new Error('Submission failed.'); }
@@ -2254,7 +2260,11 @@
   function parseMatchTimeToOrder(v){ const r=String(v||'').trim().toUpperCase(); if(!r) return 0; if(r==='KO') return 1; if(r==='HT') return 45000; if(r==='FT') return 90000; if(r==='AET') return 120000; if(r==='PENS') return 130000; const m=r.match(/^(\d+)(?:\+(\d+))?'/); if(m) return (Number(m[1]||0)*1000)+Number(m[2]||0); return 0; }
   function deriveClockSort(item){ const ex=Number(pickField(item,['clockSort','clock sort'])); if(Number.isFinite(ex)&&ex>0) return ex; const ct=parseClockTimeToSort(pickField(item,['clockTimeRaw','clock time raw','clockTime'])); if(ct>0) return ct; return parseMatchTimeToOrder(pickField(item,['matchTime','match time'])); }
 
+  /* The whole data layer is this one function: return an array of raw items
+     and every card, sting and animation below works unchanged. A rebuild
+     replaces the body with an RTDB read — see REBUILD.md for the shape. */
   async function loadSheetItems(){
+    if(!CONFIG.apiUrl) return [];
     const bust=`cb=${Date.now()}`;
     const url=CONFIG.apiUrl+(CONFIG.apiUrl.includes('?')?'&':'?')+bust;
     const res=await fetchWithTimeout(url,{cache:'no-store'},CONFIG.fetchTimeoutMs);
