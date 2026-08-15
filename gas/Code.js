@@ -186,12 +186,24 @@ function doPost(e) {
     if (action === 'vacancies_validateCode') return vacValidateCode(body);
     if (action === 'vacancies_submit')       return vacSubmit(body);
     if (action === 'vacancies_submitAuthed') return vacSubmitAuthed(body);
-    /* Chase HQ */
-    if (action === 'chaseEmail')     return respond(generateChaseEmail(body));
-    /* Claudio AI assistant */
-    if (action === 'claudio')        return respond(claudioChat(body));
-    /* Meeting Notes AI minutes */
-    if (action === 'generateMeetingMinutes') return respond(generateMeetingMinutes(body));
+    /* AI proxies — DISABLED 15/08/2026.
+       Each of these forwards to Anthropic using a key held in Script
+       Properties, from a web app that is public by construction. While the
+       tools in front of them are off the portal, the endpoints are cost-abuse
+       surface and nothing else: anyone who knows the /exec URL can spend the
+       key. The kill switch was written into the migration plan for exactly
+       this situation (Phase 0, "if you want zero AI-proxy exposure").
+
+         chaseEmail             chase-hq was deleted at brand sweep v2.19.
+         claudio                parked. Returning in some form, so the
+                                handler stays; only the door is shut.
+         generateMeetingMinutes meeting-notes retired 15/08/2026, handler
+                                deleted with it.
+
+       Uncomment claudio when the tool comes back — ideally as a Cloud
+       Function with native auth, per Phase 3. */
+    // if (action === 'chaseEmail')     return respond(generateChaseEmail(body));
+    // if (action === 'claudio')        return respond(claudioChat(body));
     /* Programme Packs */
     if (action === 'pp_bootstrap')         return pp_bootstrap(body);
     if (action === 'pp_upload')            return pp_upload(body);

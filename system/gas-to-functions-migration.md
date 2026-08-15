@@ -14,7 +14,8 @@ app is fully decommissioned; no browser ever calls GAS again.
 > GAS** through `NL.endpoints.gas`:
 >
 > `index.html` (the login page) · `portal/` · `vacancies/` · `vacancies/submit/`
-> · `programme-packs/` · `meeting-notes/` · `claudio/`
+> · `programme-packs/` · `claudio/` (parked, and its dispatch line is now
+> commented out)
 >
 > (`photoshelter-onboarding/` was the eighth until v1.0 dropped its GAS call
 > entirely — the email-verification flow it used had been abandoned.)
@@ -148,10 +149,16 @@ Migrate to callables with native auth:
 > `vacancies_*` — they follow with the Phase 1 email shim.
 
 ### Phase 3 — AI proxies
-- `claudio` (Claudio) and `generateMeetingMinutes` (Meeting Notes) → callables,
-  keys from Secret Manager, gated by native auth. Kills the cost-abuse vector.
-- **Delete `chaseEmail` entirely** — chase-hq was removed from the site at brand
-  sweep v2.19; the router still dispatches it (`gas/Code.js`). Dead endpoint.
+> **Partly pre-empted, 15/08/2026.** All three dispatch lines are now commented
+> out in `gas/Code.js`, so the cost-abuse vector is shut today rather than at
+> the end of this phase. `generateMeetingMinutes` and its handler are gone with
+> the tool. `chaseEmail`'s handler survives only as history. `claudio`'s handler
+> stays because the tool is coming back — it needs uncommenting, or better,
+> porting.
+
+- `claudio` (Claudio) → callable, key from Secret Manager, gated by native auth.
+  Uncommenting the GAS line instead would restore the exposure.
+- **Delete `chaseEmail` entirely** — chase-hq was removed at brand sweep v2.19.
 
 ### Phase 4 — Programme Packs → Firebase Storage *(separate rework)*
 Handled by the **Programme Packs on-Storage rework**, not this migration — when
