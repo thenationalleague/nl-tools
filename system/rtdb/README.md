@@ -28,6 +28,12 @@ bandwidth cannot exhaust the tools' quota. Both now deploy from this directory.
    console paste, and the repo cannot drift from live because the repo *is*
    live.
 
+   Each project has its own config: `firebase.json` for nl-tools (it also
+   carries the functions block), `firebase.nl-widgets.json` for the fan
+   database. Both are committed, and both sit where `firebase-tools` expects —
+   it resolves the `rules` path **relative to the config file**, which is worth
+   knowing before anyone tries to generate one at run time.
+
    The nl-widgets deploy is checked before it runs: the root `.read` and
    `.write` must both be `false`. That file is one edit away from exposing
    every fan registration, so the default-deny is asserted rather than
