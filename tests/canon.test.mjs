@@ -91,9 +91,23 @@ test('timeAgo: ladder tiers then absolute fallback', () => {
 
 test('clubs.crestUrl encodes the name and falls back to the rose', () => {
   const url = NL.clubs.crestUrl('AFC Fylde');
-  assert.ok(url.startsWith('https://'), 'absolute URL');
+  assert.ok(url.startsWith('/assets/crests/'), 'root-relative, same-origin');
   assert.ok(url.endsWith('/AFC%20Fylde.png'), 'encoded name + .png');
   assert.match(NL.clubs.crestUrl(''), /National%20League%20rose\.png$/);
+});
+
+test('the canon serves no asset from a third party', () => {
+  /* Crests are drawn into export canvases. raw.githubusercontent does not Vary
+     on Origin and sits behind a 5-minute CDN cache, so a crossOrigin request
+     can be handed a cached non-CORS response, fail, and ship a graphic with the
+     crest silently missing. That was diagnosed and fixed inside the graphics
+     tools in August 2026; the canon kept the bug for another two weeks because
+     nothing checked. This is that check. */
+  for (const f of ['system/nl-utils.js', 'system/nl-topbar.js', 'system/auth-guard.js']) {
+    const src = readFileSync(join(REPO, f), 'utf8');
+    assert.ok(!src.includes('raw.githubusercontent.com'),
+      `${f} loads an asset from raw.githubusercontent — use a same-origin path`);
+  }
 });
 
 test('clubs.crestUrl tiers: thumb + medium folders; no-arg unchanged', () => {

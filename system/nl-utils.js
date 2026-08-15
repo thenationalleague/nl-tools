@@ -1390,8 +1390,7 @@
          claim:  'dir'
        }).then(function (session) { ... });
      =================================================================== */
-  var CODEGATE_ROSE = 'https://raw.githubusercontent.com/thenationalleague/tools/'
-    + 'refs/heads/main/assets/crests/National%20League%20rose.png';
+  var CODEGATE_ROSE = '/assets/crests/National%20League%20rose.png';
   /* Long enough to cover a cold start plus Eventarc delivery, short enough
      that a genuinely dead backend says so rather than spinning forever. */
   var CODEGATE_TIMEOUT_MS = 45000;
@@ -1649,7 +1648,14 @@
   var _guestsMeta    = null;
   var CLUBS_URL     = '/assets/data/clubs-meta.json';
   var GUESTS_URL    = '/assets/data/cup-clubs-meta.json';
-  var CREST_BASE    = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
+  /* Same-origin, and not a style point. raw.githubusercontent does not Vary
+     on Origin and sits behind a 5-minute CDN cache, so a crossOrigin request
+     for a crest can be served a cached non-CORS response and fail — the image
+     is then skipped and a canvas export ships without it. That was diagnosed
+     and fixed inside the graphics tools in August 2026 and never brought back
+     here, so every other caller kept the bug. Serving from this domain removes
+     CORS, canvas tainting and the third-party dependency together. */
+  var CREST_BASE    = '/assets/crests/';
   var THUMB_BASE    = CREST_BASE + 'thumbs/';
   var MEDIUM_BASE   = CREST_BASE + 'medium/';
   var CLUB_ROSE     = CREST_BASE + 'National%20League%20rose.png';

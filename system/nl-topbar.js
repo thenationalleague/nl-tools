@@ -104,7 +104,8 @@
   /* ── Namespace ───────────────────────────────────────────────────────── */
   window.NL = window.NL || {};
 
-  var CREST_BASE = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/';
+  /* Same-origin — see the note on CREST_BASE in nl-utils.js. */
+  var CREST_BASE = '/assets/crests/';
   var LOGO_URL = CREST_BASE + 'National%20League%20rose%20white.png';
   var LOGO_FALLBACK = CREST_BASE + 'National%20League%20rose.png';
 
