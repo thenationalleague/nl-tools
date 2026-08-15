@@ -14,8 +14,10 @@ app is fully decommissioned; no browser ever calls GAS again.
 > GAS** through `NL.endpoints.gas`:
 >
 > `index.html` (the login page) · `portal/` · `vacancies/` · `vacancies/submit/`
-> · `programme-packs/` · `claudio/` (parked, and its dispatch line is now
-> commented out)
+> · `claudio/` (parked, and its dispatch line is now commented out)
+>
+> Five, not the seven this said in the morning: photoshelter-onboarding came off
+> GAS in #858 and Programme Packs was deleted outright on 15/08/2026.
 >
 > (`photoshelter-onboarding/` was the eighth until v1.0 dropped its GAS call
 > entirely — the email-verification flow it used had been abandoned.)

@@ -45,23 +45,24 @@ files if a diff is ever needed.
 
 | File | Lines | What it does |
 |---|---:|---|
-| `Code.js` | 218 | The `doGet`/`doPost` **router**. Dispatches on `action`. |
+| `Code.js` | 190 | The `doGet`/`doPost` **router**. Dispatches on `action`. |
 | `Utils.js` | 104 | Shared RTDB REST + the token verifiers `verifyIdentity_` / `verifyCaller_`. |
 | `Invite.js` | 196 | `sendInvite`, `validateInvite`, `consumeInvite`. |
 | `Notifications.js` | 159 | Request-flow email: `notifyAdmin`, `confirmRequest`, `sendApproval`, `sendRejection`. |
 | `Emails.js` | 138 | HTML email templates used by the above. |
 | `Vacancies.js` | 244 | Vacancy submission verification + notification email. |
 | `FixtureSync.js` | 428 | Time-driven NLS → RTDB fixture sync (see below). |
-| `ProgrammePacks.js` | 1,964 | The `pp_*` Drive-backed handlers (see below). |
-| `Drive.js` | 114 | Shared Drive file browser (`getTree`, `getDownloadUrl`, `getThumbnail`). |
 | `ClaudioChat.js` | 3,275 | Anthropic API proxy with tool-use, for Claudio. |
 | `ClaudioStats.js` | 3,169 | Historical NL statistics engine behind Claudio's tools. |
 | `Tests.js` | 46 | Manual test functions, run from the editor. Never web-facing. |
 | `ChaseHQ.js` | 91 | **Dead.** chase-hq was removed at brand sweep v2.19. Its router line is commented out as of 15/08/2026; the file retires in Phase 3. |
 | `appsscript.json` | — | The manifest. A change to scopes or runtime is exactly the drift worth seeing. |
 
-Six pages still call this backend through `NL.endpoints.gas`, including the
-login page. Two dispatch lines are commented out rather than deleted —
+Five pages still call this backend through `NL.endpoints.gas`, including the
+login page. Programme Packs was the sixth until it was retired on 15/08/2026,
+superseded by `/programme/` on Firebase Storage — which took the 17 `pp_*`
+routes, the Drive browser and **the last Google Drive dependency in the
+project** with it. Two dispatch lines are commented out rather than deleted —
 `chaseEmail` and `claudio` — because both forward to Anthropic with a key from
 Script Properties, from a web app that is public by construction. While the
 tools in front of them are off the portal they are cost-abuse surface and
@@ -108,31 +109,6 @@ Secrets (`RTDB_URL`, `RTDB_SECRET`, `ATT_SEASON_ID`) live in Script Properties,
 not in the file. This node is the shared source both the **Attendance** tool and
 the **Cup Footage** fixture importer read from.
 
-## `ProgrammePacks.js` — the `pp_*` handlers
-
-Data lives under **`app-data/media-programme-packs`**. Three places must agree
-on that key, and once did not:
-
-| Where | What references it |
-|-------|--------------------|
-| `programme-packs/index.html` | `NL_TOOL.toolKey`, `NL_TOOL_KEY`, `TOOL_DATA_PATH` |
-| `system/rtdb/rules.snapshot.json` + `tools-registry.snapshot.json` | rules + portal card |
-| `gas/ProgrammePacks.js` | the `PP_DATA` constant (single source) |
-
-The tool was recategorised `ops → media`; everything moved **except** the GAS
-file, which stayed on `ops-programme-packs`. The server then read and wrote a
-different (empty) subtree than the page rendered, so files removed from Drive
-were never pruned ("ghost" files) and `pp_delete` / `pp_reconcile_folder` errored
-against the dead key. v0.9 repointed to `media-` via `PP_DATA`. To clear ghosts
-already recorded, an admin opens each affected folder and clicks **↻ Sync with
-Drive**.
-
-Required Script Properties: `RTDB_URL`, `RTDB_SECRET` (shared),
-`FIREBASE_API_KEY` (ID-token verification), `PROGRAMME_PACKS_DRIVE_ROOT_ID`.
-
-This whole file retires when Programme Packs moves to Firebase Storage — see
-[`../programme-packs/REBUILD.md`](../programme-packs/REBUILD.md).
-
 ## Changing the backend
 
 1. Edit the `.js` file here and open a PR. It reviews like any other diff.
@@ -153,7 +129,8 @@ deploy guard will stop you rather than pick a winner.
 Two things the workflow protects that are easy to get wrong by hand:
 
 - **The `/exec` URL.** Every tool page calls a fixed one (`NL.endpoints.gas`,
-  and `PP_GAS_URL` in `programme-packs/index.html`). Creating a *new* deployment
+  — `PP_GAS_URL` in the retired Programme Packs was the other). Creating a *new*
+  deployment
   in the editor mints a new URL, the pages keep hitting the old code, and the
   change appears to do nothing while reporting success. The workflow deploys to
   the ID read out of `NL.endpoints.gas`, so it can only target what the site

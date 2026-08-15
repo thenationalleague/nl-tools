@@ -25,7 +25,7 @@ Locked decisions:
   toggles deliberately NOT built (would re-introduce the level model on top of
   explicit roles — worst of both).
 - **Third-party can't be club-scoped**, so club-basis tools (attendance,
-  directory, programme-packs, dazn-vip) are blocked for them by nature.
+  directory, programme, dazn-vip) are blocked for them by nature.
 
 ## Club churn
 
@@ -58,7 +58,7 @@ so roster-gating is UI-level; rules stay club-name-scoped — not a hole.)
 Migrated **attendance** and **club-directory** to `NL.isClubUser` (scope) /
 `NL.canClubEdit` (edit). club-viewer: attendance sees its own club but can't
 submit; club-directory gets the own-club hero + completion dashboard but no
-Manage (new `club-viewer` persona). **programme-packs, dazn-vip, vacancies were
+Manage (new `club-viewer` persona). **programme, dazn-vip, vacancies were
 moved to Phase 3** — their edits write to RTDB and are rule-enforced, so the UI
 affordance-hiding ships beside the rule tightening rather than alone. **No
 `?v=` bump** — `nl-utils` (with the helpers) is already live under `_headers`

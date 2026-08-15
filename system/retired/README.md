@@ -44,3 +44,22 @@ Judged by what was actually useful when writing these three:
 5. **Why it went.** Briefly, and honestly.
 
 What none of them needs is the code. Git has that.
+
+## Superseded rather than retired
+
+One entry that is not a post-mortem, because the concept did not go anywhere —
+it moved.
+
+**Programme Packs (`/programme-packs/`)**, deleted 15/08/2026. Superseded by
+**`/programme/`**, which shipped on 03/08/2026 and said so in its own header:
+"Replaces /programme-packs/ (Google Drive via Apps Script), which is retired:
+the Drive proxy was the source of the ghost-file drift, the manual redeploy
+dance and the GAS quota ceilings. Bytes now live in Firebase Storage."
+
+The replacement ran for twelve days while the original stayed on the portal,
+kept its RTDB node, and kept seventeen `pp_*` routes plus a Drive browser live
+in Apps Script. There is no concept to preserve here: `/programme/` and
+`/programme/admin/` are the concept, working.
+
+`programme-packs/REBUILD.md` went with it — a v2 spec for a rebuild that had
+already happened somewhere else.

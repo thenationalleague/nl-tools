@@ -1,14 +1,24 @@
 /**
  * NL Tools — Consolidated GAS
- * Version: v2.4 (19/06/2026)
- * Date: 19/06/2026
+ * Version: v2.5 (15/08/2026)
  *
- * This is the shared Apps Script ROUTER for the whole NL Tools backend — the
- * doGet/doPost entry points that dispatch to the per-tool handler files
- * (ProgrammePacks.gs, vacancies.gs, ClaudioChat.gs, MeetingNotes.gs, …).
- * This file is the in-repo mirror of the `Code.gs` in the Apps Script project;
- * keep the two in lockstep. Handler bodies live in their own .gs files (only
- * ProgrammePacks.gs is mirrored in this repo so far, under programme-packs/gas/).
+ * The shared Apps Script ROUTER — the doGet/doPost entry points that dispatch
+ * to the per-tool handlers. gas/ is the source of truth and deploys from the
+ * repo (see gas/README.md); it is no longer a mirror to keep in lockstep.
+ *
+ * v2.5 (15/08/2026) — Programme Packs retired, superseded by /programme/ on
+ * Firebase Storage. Removed: all 17 pp_* routes, the Drive browser routes
+ * (getTree / getDownloadUrl / getThumbnail) and their handler files
+ * ProgrammePacks.js and Drive.js. doGet is now a stub — it existed only to
+ * serve the Drive browser. **This retires the last Google Drive dependency in
+ * the project.**
+ *
+ * WHAT IS LEFT after that and the AI kill switch: invites, access requests,
+ * approvals and vacancies. Seven actions, and every one of them is "touch RTDB,
+ * then send an email" — see system/gas-to-functions-migration.md.
+ *
+ * NOTE ON THE CHANGELOG BELOW: entries from v2.4 back describe pp_* and Drive
+ * routes at length. They are history, not live routes. Nothing dispatches them.
  *
  * CHANGELOG
  * v2.4 (19/06/2026)
@@ -149,14 +159,16 @@ function getConfig() {
   };
 }
 
-/* ---- Entry point: GET (Drive browser) ------------------------------------ */
+/* ---- Entry point: GET -----------------------------------------------------
+   doGet existed only to serve the Drive browser behind Programme Packs, which
+   was retired 15/08/2026. Nothing calls it now. It stays as a stub rather than
+   being deleted because an Apps Script Web App with no doGet returns a Google
+   error page to anyone who opens the /exec URL in a browser, which reads as a
+   broken deployment rather than a deliberate one. */
 function doGet(e) {
   var p      = (e && e.parameter) ? e.parameter : {};
-  var action = p.action || 'getTree';
+  var action = p.action || '';
   try {
-    if (action === 'getTree')        return respond(getTree());
-    if (action === 'getDownloadUrl') return respond(getDownloadUrl(p.fileId));
-    if (action === 'getThumbnail')   return respond(serveThumbnail(p.fileId));
     return respond({ ok: false, error: 'Unknown action: ' + action });
   } catch(err) {
     return respond({ ok: false, error: err.message });
@@ -178,9 +190,6 @@ function doPost(e) {
     if (action === 'confirmRequest') return respond(confirmRequest(body));
     if (action === 'sendApproval')   return respond(sendApproval(body));
     if (action === 'sendRejection')  return respond(sendRejection(body));
-    /* Drive (POST fallback) */
-    if (action === 'getTree')        return respond(getTree());
-    if (action === 'getDownloadUrl') return respond(getDownloadUrl(body.fileId));
     /* Vacancies */
     if (action === 'vacancies_requestCode')  return vacRequestCode(body);
     if (action === 'vacancies_validateCode') return vacValidateCode(body);
@@ -204,24 +213,6 @@ function doPost(e) {
        Function with native auth, per Phase 3. */
     // if (action === 'chaseEmail')     return respond(generateChaseEmail(body));
     // if (action === 'claudio')        return respond(claudioChat(body));
-    /* Programme Packs */
-    if (action === 'pp_bootstrap')         return pp_bootstrap(body);
-    if (action === 'pp_upload')            return pp_upload(body);
-    if (action === 'pp_upload_begin')      return pp_upload_begin(body);
-    if (action === 'pp_upload_chunk')      return pp_upload_chunk(body);
-    if (action === 'pp_download')          return pp_download(body);
-    if (action === 'pp_download_link')     return pp_download_link(body);
-    if (action === 'pp_preview')           return pp_preview(body);
-    if (action === 'pp_list_folder')       return pp_list_folder(body);
-    if (action === 'pp_thumbnail')         return pp_thumbnail(body);
-    if (action === 'pp_thumbnails')        return pp_thumbnails(body);
-    if (action === 'pp_zip')               return pp_zip(body);
-    if (action === 'pp_delete')            return pp_delete(body);
-    if (action === 'pp_purge_orphans')     return pp_purge_orphans(body);
-    if (action === 'pp_reconcile_folder')  return pp_reconcile_folder(body);
-    if (action === 'pp_nlf_create')        return pp_nlf_create(body);
-    if (action === 'pp_nlf_rename')        return pp_nlf_rename(body);
-    if (action === 'pp_nlf_delete')        return pp_nlf_delete(body);
 
     return respond({ ok: false, error: 'Unknown action: ' + action });
   } catch(err) {

@@ -50,7 +50,7 @@ directory stops chugging, phones stop burning data, and every visitor to the
 public site gets a faster page.
 
 **Impacts:** club-directory, portal, attendance, vacancies, travel-planner,
-dazn-vip, programme-packs, club-contacts, club-data, footage, the shared
+dazn-vip, programme, club-contacts, club-data, the shared
 picker itself, and (via one CMS attribute change) the public-site widgets.
 
 ### 3. One address book for backend URLs
