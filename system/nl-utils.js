@@ -1,9 +1,22 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.28 (10/08/2026)
+   Version: v1.29 (15/08/2026)
 
    Changelog
+   v1.29 (15/08/2026)
+     - NL.codeGate — the "type a code, get in" screen, which five pages had
+       each grown their own copy of (club directory ×2, uw-promo, programme,
+       footage/producer). Same markup, same keystroke handling; only the check
+       behind it differed, and that difference is the one that matters, so the
+       surface splits them. codeGate.open() renders and runs the caller's
+       verify(code) and makes NO security claim of its own; codeGate.viaFunction
+       (the RTDB-trigger handshake lifted from club-directory/_gate.js) is the
+       one that is a real boundary, and is kept separate and named for it so
+       nobody adopts the UI and assumes they inherited the boundary with it.
+       Pairs with .nl-idbar and the canon .gate card in nl-brand.css v2.37: the bar's colour
+       states how you got in.
+
    v1.28 (10/08/2026)
      - Guest clubs — the non-member sides that enter NL competitions (the
        PL2 representative teams in the NL Cup) become addressable from the
@@ -1345,6 +1358,239 @@
         })
         .sort(function(a, b) { return a.name.localeCompare(b.name); });
     }
+  };
+
+  /* ===================================================================
+     NL.codeGate — the code-entry screen for pages outside auth-guard
+
+     Five pages had grown their own version of "type a code, get in": the
+     club directory (twice), uw-promo, programme and footage/producer. The
+     markup and the keystroke handling were the same in all of them; only the
+     check behind it differed, and that difference is the important one, so
+     this splits them.
+
+     WHAT THIS DOES AND DOES NOT PROMISE. The gate renders the screen and
+     runs the caller's `verify`. It makes NO security claim of its own — a
+     verify that compares the code in the browser is a screen to get past, and
+     a verify that hands the code to a server is a boundary. Both look
+     identical to the person typing. `NL.codeGate.viaFunction` is the second
+     kind, and is the one to reach for; it is kept separate and named for what
+     it does so that nobody adopts the UI and assumes they inherited the
+     boundary with it.
+
+     It renders the canon .gate card (nl-brand.css, canon since v2.32 — two
+     tools were still overriding it with their own copy) and pairs with
+     .nl-idbar: white bar, red underline, the page knows you by code and by
+     nothing else.
+
+       NL.codeGate.ensure({
+         mount:  document.getElementById('gate'),
+         title:  'Club Directory',
+         verify: NL.codeGate.viaFunction('app-data/ops-club-directory'),
+         claim:  'dir'
+       }).then(function (session) { ... });
+     =================================================================== */
+  var CODEGATE_ROSE = 'https://raw.githubusercontent.com/thenationalleague/tools/'
+    + 'refs/heads/main/assets/crests/National%20League%20rose.png';
+  /* Long enough to cover a cold start plus Eventarc delivery, short enough
+     that a genuinely dead backend says so rather than spinning forever. */
+  var CODEGATE_TIMEOUT_MS = 45000;
+
+  function codeGateOpen(opts) {
+    opts = opts || {};
+    var mount = opts.mount || document.body;
+    var len = opts.length || 6;
+    var numeric = opts.numeric !== false;
+    var sub0 = opts.sub || ('Enter your ' + (numeric ? len + '-digit' : '') + ' code.').replace('  ', ' ');
+    var esc = window.NL.escHtml;
+    var verify = opts.verify;
+    if (typeof verify !== 'function') {
+      throw new Error('NL.codeGate: a verify(code) function is required.');
+    }
+
+    return new Promise(function (resolve) {
+      var logo = opts.lockup
+        ? '<img class="gate__lockup" src="' + esc(opts.lockup) + '" alt="' + esc(opts.lockupAlt || '') + '">'
+        : '<img class="gate__logo" src="' + esc(opts.logo || CODEGATE_ROSE) + '" alt="National League">';
+
+      var host = document.createElement('div');
+      host.innerHTML =
+        '<div class="gate"><div class="gate__card">' + logo +
+          '<div class="gate__title">' + esc(opts.title || 'Sign in') + '</div>' +
+          '<div class="gate__sub" data-sub>' + esc(sub0) + '</div>' +
+          '<input class="gate__input" data-in ' +
+            (numeric ? 'inputmode="numeric" autocomplete="one-time-code" ' : 'autocapitalize="characters" ') +
+            'maxlength="' + len + '" placeholder="' + new Array(len + 1).join('•') + '" ' +
+            'aria-label="' + esc(opts.inputLabel || (len + '-character code')) + '">' +
+          '<div class="gate__err" data-err role="alert"></div>' +
+        '</div></div>';
+      var card = host.firstElementChild;
+      mount.innerHTML = '';
+      mount.appendChild(card);
+
+      var input = card.querySelector('[data-in]');
+      var err = card.querySelector('[data-err]');
+      var sub = card.querySelector('[data-sub]');
+      var busy = false;
+
+      function clean(v) {
+        return numeric ? String(v || '').replace(/[^0-9]/g, '').slice(0, len)
+                       : String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, len);
+      }
+
+      function fail(msg) {
+        busy = false;
+        input.disabled = false;
+        sub.textContent = sub0;
+        err.textContent = msg;
+        input.value = '';
+        input.focus();
+      }
+
+      function submit() {
+        var code = clean(input.value);
+        if (busy || code.length !== len) return;
+        busy = true;
+        err.textContent = '';
+        input.disabled = true;
+        sub.textContent = 'Checking…';
+        Promise.resolve()
+          .then(function () { return verify(code); })
+          .then(function (session) {
+            if (session === false || session == null) {
+              fail(opts.rejectMessage || 'Code not recognised.');
+              return;
+            }
+            resolve(session);
+          })
+          .catch(function (e) { fail((e && e.message) || 'Something went wrong.'); });
+      }
+
+      /* The code is the whole credential, so submit on the last character
+         rather than asking for a keypress that adds nothing. */
+      input.addEventListener('input', function () {
+        var v = clean(input.value);
+        if (v !== input.value) input.value = v;
+        err.textContent = '';
+        if (v.length === len) submit();
+      });
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') submit();
+      });
+      setTimeout(function () { input.focus(); }, 30);
+    });
+  }
+
+  /* A custom-token session survives a reload — Firebase persists it and
+     refreshes the ID token itself — so asking for the code again on every
+     load is the page failing to look, not the session expiring.
+
+     Resolves with the session or null. An anonymous user left behind by an
+     abandoned attempt carries no claim and counts as nobody, which stops a
+     half-finished handshake looking like a valid sign-in. */
+  function codeGateResume(claim) {
+    if (!claim || typeof firebase === 'undefined') return Promise.resolve(null);
+    return new Promise(function (resolve) {
+      var off = firebase.auth().onAuthStateChanged(function (user) {
+        off();
+        if (!user || user.isAnonymous) { resolve(null); return; }
+        user.getIdTokenResult()
+          .then(function (t) {
+            var c = (t && t.claims) || {};
+            resolve(c[claim] ? { role: c[claim], name: c[claim + 'Name'] || '' } : null);
+          })
+          .catch(function () { resolve(null); });
+      });
+    });
+  }
+
+  /* Server-side verification, and the only kind that is a real boundary.
+     Returns a verify(code) for NL.codeGate, backed by the RTDB-trigger
+     handshake under <root>:
+
+       1. sign in anonymously. Identity Toolkit rather than Cloud Run, so an
+          org policy blocking public invokers on callables does not apply.
+       2. write { code, at } to authRequests/<uid>.
+       3. a trigger validates server-side, deletes the request so a code never
+          lingers in the database, and writes authGrants/<uid>.
+       4. read the grant, delete both nodes while this uid still owns them,
+          then sign in again with the custom token it carried.
+
+     The code is never checked in the browser and the config holding it is not
+     readable by any client. Eventarc delivery costs seconds; acceptable when
+     a person signs in once and a spinner covers it. */
+  function codeGateViaFunction(root, extra) {
+    return function (code) {
+      var payload = { code: code };
+      if (extra) Object.keys(extra).forEach(function (k) { payload[k] = extra[k]; });
+      return codeGateExchange(root, payload);
+    };
+  }
+
+  function codeGateExchange(root, payload) {
+    var auth = firebase.auth(), db = firebase.database();
+    return auth.signInAnonymously().then(function (cred) {
+      var uid = cred.user.uid;
+      var reqRef = db.ref(root + '/authRequests/' + uid);
+      var grantRef = db.ref(root + '/authGrants/' + uid);
+
+      return new Promise(function (resolve, reject) {
+        var done = false;
+        var timer = setTimeout(function () {
+          if (done) return;
+          done = true; grantRef.off();
+          reject(new Error('The sign-in service did not answer. Please try again.'));
+        }, CODEGATE_TIMEOUT_MS);
+
+        grantRef.on('value', function (snap) {
+          var g = snap.val();
+          if (!g || done) return;
+          done = true;
+          clearTimeout(timer);
+          grantRef.off();
+          /* Clear both nodes while this uid still owns them — after the
+             custom-token sign-in the uid changes and the rules stop allowing
+             it. */
+          Promise.all([grantRef.remove()['catch'](function () {}),
+                       reqRef.remove()['catch'](function () {})])
+            .then(function () {
+              if (!g.ok) { reject(new Error(g.error || 'Code not recognised.')); return; }
+              resolve(g);
+            });
+        }, function (e) {
+          if (done) return;
+          done = true; clearTimeout(timer); reject(e);
+        });
+
+        var body = { at: firebase.database.ServerValue.TIMESTAMP };
+        Object.keys(payload).forEach(function (k) { body[k] = payload[k]; });
+        reqRef.set(body)['catch'](function (e) {
+          if (done) return;
+          done = true; clearTimeout(timer); grantRef.off(); reject(e);
+        });
+      });
+    }).then(function (g) {
+      return firebase.auth().signInWithCustomToken(g.customToken).then(function () {
+        return { role: g.role, name: g.name };
+      });
+    });
+  }
+
+  window.NL.codeGate = {
+    open: codeGateOpen,
+    resume: codeGateResume,
+    /* Resume if we can, gate if we cannot — what every caller actually wants. */
+    ensure: function (opts) {
+      opts = opts || {};
+      return codeGateResume(opts.claim).then(function (s) {
+        return s || codeGateOpen(opts);
+      });
+    },
+    viaFunction: codeGateViaFunction,
+    /* The master-key route: uses the caller's existing auth-guard session
+       instead of a code, and the trigger checks the role server-side. */
+    openAsAdmin: function (root) { return codeGateExchange(root, { admin: true }); },
+    signOut: function () { return firebase.auth().signOut(); }
   };
 
   /* ===================================================================
