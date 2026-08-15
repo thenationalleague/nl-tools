@@ -20,7 +20,7 @@
  * previously had to allow a client to create its own users/<uid> record —
  * which meant a self-signer could claim role 'staff'. With these callables the
  * rules drop client self-creates entirely; the Admin SDK here bypasses rules.
- * History: system/rtdb/SECURITY-role-self-grant.md, ported from gas/Invite.gs
+ * History: system/rtdb/SECURITY-role-self-grant.md, ported from gas/Invite.js
  * v1.3 (the GAS consumeInvite was reverted because the Workspace blocks
  * anonymous Apps Script access — Functions have no such gate).
  *

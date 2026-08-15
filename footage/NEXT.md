@@ -81,7 +81,7 @@ changes (the current audience is all authenticated + known).
   in `data.js`. Fixtures/groups TBC — `games[]` empty until the draw.
 - ~~**Fixtures from the NLS feed:**~~ **Done (14/07).** The "NLS feed" is the
   attendance tool's RTDB node `app-data/ops-attendance/fixtures` (public-read),
-  populated by the **NLS fixture-sync GAS** (`gas/FixtureSync.gs`, now mirrored in
+  populated by the **NLS fixture-sync GAS** (`gas/FixtureSync.js`, now mirrored in
   repo): it pulls the NLS API for four comps incl. **NL Cup (competitionID 1275)**
   and writes each match with `competitionKey: 'nl-cup'`, teams by NAME
   (`homeTeamName`/`awayTeamName` from NLS `home.name`), date in `kickoffUTC`, keyed
