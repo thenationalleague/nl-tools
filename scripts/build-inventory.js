@@ -44,6 +44,14 @@ const REPO = path.resolve(__dirname, '..');
 const OUT = path.join(REPO, 'assets/data/tools-inventory.json');
 const REGISTRY = path.join(REPO, 'system/rtdb/tools-registry.snapshot.json');
 const PARKED = path.join(REPO, 'system/rtdb/tools-registry.parked.json');
+const RULES = path.join(REPO, 'system/rtdb/rules.snapshot.json');
+const TEMPLATE = path.join(REPO, 'system/_template/index.html');
+
+/* The four shared files every gated tool loads. lint-tools.sh checks all four
+   on gated pages but only nl-brand.css on standalone ones, so a public page
+   carrying a stale nl-utils.js has never been visible anywhere. Canonical
+   versions come from the template, same single source of truth the lint uses. */
+const CANON_FILES = ['nl-brand.css', 'nl-utils.js', 'nl-topbar.js', 'auth-guard.js'];
 
 /* Directories that are not pages-under-management. node_modules and .git are
    obvious; _template is the scaffold source, not a live page. */
@@ -153,6 +161,52 @@ function readHeader(text) {
   };
 }
 
+/**
+ * Which canon files a page loads, and whether each is at the canonical version.
+ *   current      loaded with the ?v= the template carries
+ *   stale        loaded with an older ?v=
+ *   unversioned  loaded with no ?v= at all — caches indefinitely on a deploy
+ *   absent       not loaded
+ * Anchored to the /system/ path so a version quoted in a changelog comment is
+ * not mistaken for a live script tag — the same trap lint-tools.sh guards.
+ */
+function readCanon(text, canonical) {
+  const out = {};
+  for (const file of CANON_FILES) {
+    const key = file.replace(/\.(css|js)$/, '');
+    if (!text.includes('/system/' + file)) {
+      out[key] = { state: 'absent', version: null };
+      continue;
+    }
+    const m = text.match(new RegExp('/system/' + file.replace('.', '\\.') + '\\?v=(\\d+)'));
+    if (!m) {
+      out[key] = { state: 'unversioned', version: null };
+      continue;
+    }
+    out[key] = {
+      state: m[1] === canonical[file] ? 'current' : 'stale',
+      version: Number(m[1])
+    };
+  }
+  return out;
+}
+
+/**
+ * Canon violations countable from the source alone — the cheap half of what
+ * tidy-tim checks. A count, not a verdict: it says where a brand pass would
+ * find work, and nothing about whether the page is otherwise sound.
+ */
+function readViolations(text) {
+  /* Hex outside comments. Strip HTML comments first, or every changelog
+     mentioning a colour inflates the count. */
+  const live = text.replace(/<!--[\s\S]*?-->/g, '');
+  const hex = (live.match(/#[0-9a-fA-F]{6}\b/g) || []).length;
+  /* Native dialogs, not NL.confirm/NL.alert/NL.prompt — the preceding
+     character must not be a dot or word character. */
+  const dialogs = (live.match(/(^|[^.\w])(confirm|alert|prompt)\s*\(/g) || []).length;
+  return { hex, nativeDialogs: dialogs };
+}
+
 /** Title, in preference order: NL_TOOL.title, then <title> minus the suffix. */
 function readTitle(text) {
   const nl = text.match(/window\.NL_TOOL\s*=\s*\{[\s\S]{0,300}?title:\s*['"]([^'"]+)['"]/);
@@ -191,6 +245,55 @@ function groupOf(relPath) {
  *              public face of a gated admin. Load-bearing despite being ungated.
  *   public     a standalone ungated page that is nobody's companion
  */
+/**
+ * Family — the top-level batching. Species answers "what kind of page is this";
+ * family answers "is this even a tool". They are not the same question, and
+ * collapsing them made embeds and asset stubs sit in the list as if they were
+ * peers of Vacancies. Only `tool` is estate you manage; the rest are batched
+ * away so they stop competing for attention.
+ */
+function familyOf(relPath, species) {
+  if (relPath.startsWith('embeds/')) return 'embed';
+  if (relPath.startsWith('assets/')) return 'asset';
+  if (species === 'sandbox') return 'sandbox';
+  if (relPath.startsWith('system/')) return 'system';
+  return 'tool';
+}
+
+/**
+ * Role within its tool. The repo has a semi-regular convention — a tool's admin
+ * panel lives at <tool>/admin/ or <tool>/admin.html and is a separate gated
+ * page that the portal does not list. Naming that relationship is the point:
+ * a public form and the console behind it are one tool in two files.
+ *
+ *   main      the tool's front door (group-root index.html)
+ *   admin     its admin panel
+ *   reader    its PUBLIC no-login view of the stamped/published version
+ *   sub       a nested tool page (graphics/totw/)
+ *   variant   another named view of the same thing (print, editor, link)
+ *   companion anything else in the group
+ *
+ * `admin` and `reader` are the two standing conventions. Reader is the public
+ * face of a tool that publishes stamped versions — the gated tool edits, the
+ * reader shows what has been published, with no login. Naming it here means a
+ * future <tool>/reader/ is recognised on the day it lands rather than sitting
+ * in the list as an unexplained loose page.
+ *
+ * Deliberately no one-off filenames in the variant list. An earlier version
+ * hardcoded matchday-map and meta-reference, which dressed up two specific
+ * files as if they were a pattern; they are not, and they now read as
+ * companions, which is what they are.
+ */
+function roleOf(relPath, group) {
+  if (/(^|\/)admin(\/index\.html|\.html)$/i.test(relPath)) return 'admin';
+  if (/(^|\/)reader(\/index\.html|\.html)$/i.test(relPath)) return 'reader';
+  if (relPath === group + '/index.html' || relPath === 'index.html') return 'main';
+  const base = path.posix.basename(relPath, '.html');
+  if (/^(print|editor|link)$/i.test(base)) return 'variant';
+  if (relPath.endsWith('/index.html')) return 'sub';
+  return 'companion';
+}
+
 function classify(relPath, text, gated, groupHasGated) {
   if (gated) return 'tool';
   if (relPath === 'index.html') return 'root';
@@ -239,6 +342,25 @@ function main() {
     : {};
   delete parked.__README__;   // documentation key, not a tool record
 
+  /* Canonical ?v= per canon file, read from the template — the same source of
+     truth lint-tools.sh uses, so the two can never disagree. */
+  const templateText = fs.existsSync(TEMPLATE) ? fs.readFileSync(TEMPLATE, 'utf8') : '';
+  const canonical = {};
+  for (const file of CANON_FILES) {
+    const m = templateText.match(new RegExp(file.replace('.', '\\.') + '\\?v=(\\d+)'));
+    canonical[file] = m ? m[1] : null;
+  }
+
+  /* app-data children that the deployed rules actually cover. rules.snapshot.json
+     IS the deployed document (see system/rtdb/README.md), so unlike the registry
+     snapshots this is authoritative rather than a possibly-stale mirror — a page
+     touching a path absent here is genuinely unprotected. */
+  const rulesDoc = fs.existsSync(RULES) ? JSON.parse(fs.readFileSync(RULES, 'utf8')) : {};
+  const rulesRoot = rulesDoc.rules || rulesDoc;
+  const rulesCover = new Set(
+    Object.keys(rulesRoot['app-data'] || {}).filter((k) => !k.startsWith('.'))
+  );
+
   const allFiles = walk(REPO);
   const htmlFiles = allFiles.filter((f) => f.endsWith('.html')).map(rel).sort();
 
@@ -261,6 +383,14 @@ function main() {
     const keyMatch = text.match(/NL_TOOL_KEY\s*=\s*['"]([^'"]+)['"]/);
     const toolKey = keyMatch ? keyMatch[1] : null;
     const header = readHeader(text);
+    const species = classify(f, text, gated, gatedGroups.has(group));
+
+    /* RTDB paths the page names. Regex rather than parse: these appear in
+       ref() calls, in header comments documenting the contract, and in
+       template strings — all of which are evidence the page owns the path. */
+    const appData = [...new Set(
+      (text.match(/app-data\/([a-z0-9-]+)/g) || []).map((s) => s.split('/')[1])
+    )].sort();
 
     pages.push({
       path: f,
@@ -268,7 +398,20 @@ function main() {
       dir: dir === '.' ? '' : dir,
       group,
       title: readTitle(text),
-      species: classify(f, text, gated, gatedGroups.has(group)),
+      species,
+      family: familyOf(f, species),
+      role: roleOf(f, group),
+      canon: readCanon(text, canonical),
+      violations: readViolations(text),
+      /* Whether the violation counts mean anything for THIS page. Embeds are
+         pasted into the Urban Zoo CMS, which strips <link> tags — inlining
+         colours is their delivery contract, not a lapse, and they otherwise
+         dominate any hex ranking (one carries 227). The Style Guide is a
+         colour specimen sheet, so its hex is the content. Counting either as
+         debt would make the metric permanently misleading. */
+      violationsApply: familyOf(f, species) !== 'embed' && toolKey !== 'staff-style-guide',
+      appData,
+      appDataUncovered: appData.filter((k) => !rulesCover.has(k)),
       gated,
       toolKey,
       /* live   = has a tools/ record, shows on the portal
@@ -315,6 +458,54 @@ function main() {
        exists to find. */
     .filter((f) => f !== outRel);
 
+  /**
+   * Relative forms of page P as they would be written inside file F.
+   *
+   * Absolute-path matching alone is not enough, and the gap is not academic:
+   * commercial-benchmarking/dashboard.js builds its club capability link as
+   * `new URL('link.html?t=' + tok, location.href)`. The string
+   * "/commercial-benchmarking/link.html" appears nowhere, so that page reported
+   * zero inbound links and read as an orphan — while being the live route
+   * clubs without an account use to see their benchmarks. A retire list built
+   * on the absolute form alone would have deleted it.
+   *
+   * Only sibling-ish forms are returned. A bare "index.html" is skipped: it
+   * appears in nearly every directory and would link everything to everything.
+   */
+  /* Directories holding pages but no index.html — see relativeForms(). */
+  const dirsWithIndex = new Set(
+    pages.filter((p) => p.path.endsWith('/index.html')).map((p) => path.posix.dirname(p.path))
+  );
+  const bareCollections = new Set(
+    pages.map((p) => path.posix.dirname(p.path)).filter((d) => d !== '.' && !dirsWithIndex.has(d))
+  );
+
+  function relativeForms(fromFile, page) {
+    const fromDir = path.posix.dirname(fromFile);
+    const forms = [];
+
+    const asFile = path.posix.relative(fromDir, page.path);
+    if (asFile && asFile !== 'index.html' && !asFile.startsWith('..')) forms.push(asFile);
+
+    if (page.path.endsWith('/index.html')) {
+      const asDir = path.posix.relative(fromDir, path.posix.dirname(page.path));
+      if (asDir && !asDir.startsWith('..')) forms.push(asDir + '/');
+    }
+
+    /* Directory-level credit, for collections referenced as a set rather than
+       file by file: system/brand-v3-scale-plan.md points at `./brand-v3-mockups/`
+       and never names the three pages inside it, so all three read as orphans
+       while being live reference material for an in-progress plan.
+       Restricted to directories with no index.html of their own — a bare
+       collection. Without that guard, any mention of "handbook/" would credit
+       every page under it, and the metric would stop meaning anything. */
+    if (!page.path.endsWith('/index.html') && bareCollections.has(path.posix.dirname(page.path))) {
+      const asDir = path.posix.relative(fromDir, path.posix.dirname(page.path));
+      if (asDir && !asDir.startsWith('..')) forms.push(asDir + '/');
+    }
+    return forms;
+  }
+
   for (const f of scannable) {
     let text;
     try {
@@ -325,7 +516,11 @@ function main() {
     for (const [url, page] of urlToPage) {
       if (url === '/') continue;          // matches nearly everything, tells you nothing
       if (f === page.path) continue;      // self-reference
-      if (text.includes(url)) page.inbound.push(f);
+
+      if (text.includes(url)) { page.inbound.push(f); continue; }
+
+      const forms = relativeForms(f, page);
+      if (forms.some((r) => text.includes(r))) page.inbound.push(f);
     }
   }
   for (const p of pages) p.inbound.sort();
