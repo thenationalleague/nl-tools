@@ -22,7 +22,14 @@ app is fully decommissioned; no browser ever calls GAS again.
 > Phase 0 landed in PR #468 and the migration has not moved since. GAS is not a
 > residual shim — it is a live backend serving the page people sign in on.
 >
-> Because it is still load-bearing and still hand-deployed, the mirror in `gas/`
+> It is also no longer hand-deployed. As of 15/08/2026 `gas/` is two-way:
+> `deploy-gas.yml` pushes the repo into the project and redeploys the existing
+> Web App from a reviewed diff. That does not change this plan's destination —
+> Functions still win on native auth, Secret Manager and no legacy RTDB secret —
+> but it does remove "no repo-based deploys" from the list of reasons, and it
+> means each phase can now be cut over and reverted from the Actions tab.
+>
+> Because it is still load-bearing, the mirror in `gas/`
 > now has a sync: `.github/workflows/sync-gas.yml` pulls the live project daily
 > and commits only on drift. Its first run found the mirror was six files out of
 > fifteen and three of the six had drifted; the hand-pasted `.gs` copies are

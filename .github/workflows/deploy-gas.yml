@@ -1,0 +1,189 @@
+name: Deploy Apps Script
+
+# Pushes gas/ INTO the live Apps Script project and redeploys the existing Web
+# App, so a backend change ships from a reviewed diff instead of a paste.
+#
+# WHY THIS EXISTS
+# ---------------
+# sync-gas.yml made the repo see the backend. It did not make the repo able to
+# change it, so editing still meant opening the Apps Script editor and pasting
+# — and that asymmetry immediately produced exactly the failure it was supposed
+# to end: the nl.tools domain migration was done in the repo copy in July and
+# never pasted, so the live backend went on sending emails with the old
+# github.io URLs for a month while the repo looked correct. A mirror you can
+# only read is a mirror that quietly disagrees.
+#
+# This closes the loop. gas/ becomes the source of truth for the consolidated
+# project, reviewed in a diff like every other file here.
+#
+# DELIBERATELY MANUAL
+# -------------------
+# workflow_dispatch only, never on push. This rewrites a running backend that
+# serves the login page, invites, access requests, attendance fixture sync and
+# the AI proxies. A bad merge must not be able to do that as a side effect of
+# landing something unrelated. Someone presses the button, having read the
+# diff. Same rule, and the same confirm box, as deploy-rtdb-rules.yml.
+#
+# THE GUARD THAT MAKES TWO-WAY SAFE
+# ---------------------------------
+# `clasp push` overwrites every file in the project. If someone edited the live
+# project since the last sync, pushing would silently revert their work — the
+# same class of loss this workflow exists to prevent, pointed the other way.
+#
+# So it pulls first, into a scratch directory, and diffs. If live carries
+# anything the repo has not seen, it REFUSES and tells you to run Sync Apps
+# Script and merge that commit. It never guesses which side is right.
+#
+# KEEPING THE /exec URL
+# ---------------------
+# Every tool page calls a fixed /exec URL. `clasp deploy` with no arguments
+# mints a NEW deployment and a new URL, the pages keep hitting the old code,
+# and the change appears to do nothing — the single most common way an Apps
+# Script deploy "fails" while reporting success.
+#
+# The deployment ID is the AKfycb… segment of that /exec URL, which is already
+# in the repo as NL.endpoints.gas. It is read from there rather than configured
+# separately, so the thing being deployed to is by construction the thing the
+# pages call. The run then checks that ID actually exists in `clasp deployments`
+# before deploying, and stops if it does not.
+
+env:
+  # NL Tools consolidated Apps Script project — same project as sync-gas.yml.
+  GAS_SCRIPT_ID: 1Uiyk661Fasxn4h1Bhtd6rgkmn3XhkzsZJuJ9eCrr4aio2i0f7f53RtEZ
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "publish" to confirm you have read the diff'
+        required: true
+        default: ''
+      description:
+        description: 'Optional deployment note (shown in Apps Script version history)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never let a push and a pull run at once — they write the same directory
+  # against the same project.
+  group: gas-sync
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Refuse unless confirmed
+        if: ${{ github.event.inputs.confirm != 'publish' }}
+        run: |
+          echo "::error::Type 'publish' in the confirm box to run this."
+          exit 1
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install clasp
+        # Pinned to match sync-gas.yml. The credential file format is clasp's
+        # own, so the version that WROTE ~/.clasprc.json and the versions that
+        # read it have to agree.
+        run: npm install -g @google/clasp@3.3.0
+
+      - name: Authenticate
+        env:
+          CLASP_CREDENTIALS: ${{ secrets.CLASP_CREDENTIALS }}
+        run: |
+          if [ -z "$CLASP_CREDENTIALS" ]; then
+            echo "::error::CLASP_CREDENTIALS is not set. See sync-gas.yml for the setup."
+            exit 1
+          fi
+          printf '%s' "$CLASP_CREDENTIALS" > ~/.clasprc.json
+          if ! python3 -c "import json,sys; json.load(open(sys.argv[1]))" ~/.clasprc.json 2>/dev/null; then
+            echo "::error::CLASP_CREDENTIALS is not valid JSON ($(wc -c < ~/.clasprc.json) bytes, $(wc -l < ~/.clasprc.json) lines)."
+            echo "  Usually a copy-paste artefact — see the setup notes in sync-gas.yml."
+            exit 1
+          fi
+
+      # ── The guard ──────────────────────────────────────────────────────────
+      - name: Refuse if the live project has changes the repo has not seen
+        run: |
+          mkdir -p /tmp/gas-live
+          printf '{"scriptId":"%s","rootDir":"/tmp/gas-live"}\n' "$GAS_SCRIPT_ID" > .clasp.json
+          clasp pull
+          rm -f .clasp.json
+
+          # Compare only the files clasp manages. A file present in one and not
+          # the other counts as a difference: a live file missing from the repo
+          # would be DELETED by the push.
+          if diff -rq --exclude='README.md' --exclude='*.md' gas /tmp/gas-live; then
+            echo "Live project matches the repo. Nothing of anyone else's to lose."
+          else
+            echo "::error::The live Apps Script project differs from gas/ in this branch."
+            echo ""
+            echo "  Pushing now would overwrite whatever is different, including any"
+            echo "  edit made in the Apps Script editor since the last sync."
+            echo ""
+            echo "  Run the 'Sync Apps Script' workflow, merge the commit it makes,"
+            echo "  rebase this branch on it, then run this again. If the difference"
+            echo "  IS your change and the sync has already run, the sync commit is"
+            echo "  what you need to merge — do not force past this."
+            exit 1
+          fi
+
+      - name: Push gas/ into the project
+        run: |
+          printf '{"scriptId":"%s","rootDir":"gas"}\n' "$GAS_SCRIPT_ID" > .clasp.json
+          clasp push --force
+          rm -f .clasp.json
+
+      # ── Redeploy the EXISTING web app, never a new one ─────────────────────
+      - name: Redeploy the existing Web App deployment
+        run: |
+          printf '{"scriptId":"%s","rootDir":"gas"}\n' "$GAS_SCRIPT_ID" > .clasp.json
+
+          # The deployment ID is the AKfycb… segment of the /exec URL the pages
+          # call. Read it from nl-utils.js so this can only ever deploy to the
+          # thing the site is actually pointed at.
+          DEPLOY_ID=$(grep -oE 'https://script\.google\.com/macros/s/[A-Za-z0-9_-]+/exec' system/nl-utils.js \
+                      | head -1 | sed -E 's#.*/macros/s/([A-Za-z0-9_-]+)/exec#\1#')
+          if [ -z "$DEPLOY_ID" ]; then
+            echo "::error::Could not read NL.endpoints.gas out of system/nl-utils.js."
+            exit 1
+          fi
+          echo "Target deployment (from NL.endpoints.gas): $DEPLOY_ID"
+
+          # Prove it exists before deploying. Without this, a typo or a rotated
+          # URL would make clasp mint a brand-new deployment with a brand-new
+          # /exec, which no page calls — a silent no-op that reports success.
+          clasp deployments > /tmp/deployments.txt || true
+          cat /tmp/deployments.txt
+          if ! grep -q "$DEPLOY_ID" /tmp/deployments.txt; then
+            echo "::error::$DEPLOY_ID is not among this project's deployments (listed above)."
+            echo "  The code HAS been pushed, but nothing has been redeployed, so the"
+            echo "  live /exec URL is still serving the previous version."
+            echo "  Reconcile NL.endpoints.gas with the real deployment, then re-run."
+            exit 1
+          fi
+
+          NOTE="${{ github.event.inputs.description }}"
+          [ -n "$NOTE" ] || NOTE="Deployed from ${GITHUB_REF_NAME} @ ${GITHUB_SHA:0:7}"
+          clasp deploy --deploymentId "$DEPLOY_ID" --description "$NOTE"
+          rm -f .clasp.json
+
+          echo "Deployed. The /exec URL is unchanged, so every page picks this up."
+
+      - name: What to check
+        run: |
+          echo "Push and redeploy completed."
+          echo ""
+          echo "The next scheduled 'Sync Apps Script' run should report NO drift."
+          echo "If it commits something, the push did not take and that commit"
+          echo "is the evidence of what the project actually holds."

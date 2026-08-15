@@ -207,6 +207,7 @@ which he can run from a browser:
 | **Static site** (HTML/CSS/JS) | none — GitHub Pages | merge to `main`. There is no build step. |
 | **Cloud Functions** | `deploy-functions.yml` | **automatic** on any push to `main` touching `functions/**`, or Run workflow |
 | **RTDB rules** | `deploy-rtdb-rules.yml` | **manual only.** Actions → Run workflow → type `publish` |
+| **Apps Script** (`gas/`) | `deploy-gas.yml` | **manual only.** Actions → Run workflow → type `publish` |
 
 Two things worth knowing, because both have already caught someone out:
 
@@ -220,6 +221,13 @@ Two things worth knowing, because both have already caught someone out:
 
 So: a PR that adds a function needs no follow-up, a PR that changes rules needs
 one button press, and neither needs a machine. Say which in the PR body.
+
+`gas/` became two-way on 15/08/2026. `sync-gas.yml` pulls the live Apps Script
+project daily and commits on drift; `deploy-gas.yml` pushes the repo back and
+redeploys the **existing** Web App, so the `/exec` URL every page calls does not
+change. Edit the `.js` files in `gas/`, not the Apps Script editor. The deploy
+refuses to run if live holds anything the repo has not seen, so it cannot
+overwrite someone's editor change — if it stops you, run the sync first.
 
 RTDB *data* (the `tools/` registry, seed records) still has no deploy path and
 is pasted into the console by hand.

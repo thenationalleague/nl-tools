@@ -1,13 +1,21 @@
 # gas/ — mirror of the live Apps Script project
 
-**Do not edit anything in this directory.** Every `.js` file here is written by
-`clasp pull` from the live Apps Script project, daily, by
-[`.github/workflows/sync-gas.yml`](../.github/workflows/sync-gas.yml). An edit
-made here is not deployed and is overwritten by the next sync.
+**This directory is the source of truth for the consolidated Apps Script
+project.** Edit the `.js` files here, open a PR, and ship them with the
+**Deploy Apps Script** workflow. Two workflows keep it honest:
 
-The live project is the source of truth. This directory exists so the repo can
-*see* it — so a change made in the Apps Script editor shows up as a commit, in
-review, instead of being invisible.
+| Workflow | Direction | Trigger |
+|---|---|---|
+| [`sync-gas.yml`](../.github/workflows/sync-gas.yml) | live → repo | daily 04:40, commits only on drift |
+| [`deploy-gas.yml`](../.github/workflows/deploy-gas.yml) | repo → live | **manual only** — Actions → Run workflow → type `publish` |
+
+Deploy refuses to run if the live project holds anything the repo has not seen,
+so it can never overwrite an editor change someone made directly. If it stops
+you, run Sync Apps Script, merge the commit it makes, and try again.
+
+It also redeploys the **existing** Web App rather than minting a new one, using
+the deployment ID read out of `NL.endpoints.gas` — so the `/exec` URL every page
+calls never changes.
 
 ## How this became a mirror (and what it was before)
 
@@ -19,12 +27,18 @@ cost:
 - The live project had **15 files**; the repo mirrored **6**.
 - Nine files — **9,162 lines** — had no repo record at all, including
   `ClaudioChat` (3,275), `ClaudioStats` (3,169) and `ProgrammePacks` (1,964).
-- Three of the six mirrors had drifted from live: `Notifications` by 19 lines,
-  `Code` by 8, `FixtureSync` by 4.
+- Three of the six mirrors differed from live: `Notifications` by 19 lines,
+  `Code` by 8, `FixtureSync` by 4 — and they were **ahead** of live, not behind.
+  Someone had done the `thenationalleague.github.io/tools` → `nl.tools`
+  migration in the repo copy in July and never pasted it into Apps Script, so
+  the live backend spent a month emailing old-domain links while the repo
+  looked correct.
 
-The `.gs` copies were deleted the same day. Keeping a hand-maintained second
-copy of a file the sync already pulls is how the drift happened in the first
-place. Git history has them if a diff is ever needed.
+The `.gs` copies were deleted the same day, and that last finding is why the
+deploy workflow exists. A mirror you can only read is a mirror that quietly
+disagrees: it makes the repo the place people edit and the editor the place
+things actually run, which is the drift, not the cure. Git history has the six
+files if a diff is ever needed.
 
 ## What is in the project
 
@@ -115,20 +129,28 @@ This whole file retires when Programme Packs moves to Firebase Storage — see
 
 ## Changing the backend
 
-Editing happens in the Apps Script editor, and deploying is a human action —
-`sync-gas.yml` deliberately pulls only. Making it two-way would mean a bad merge
-could rewrite a running backend, and nothing here could catch that.
-
-1. Add or change the handler in the Apps Script editor.
+1. Edit the `.js` file here and open a PR. It reviews like any other diff.
 2. For a new action, add one `if (action === '…') return …(body);` line to
    `doPost` (or `doGet`) in `Code.js`.
-3. **Deploy → Manage deployments → ✎ edit the EXISTING Web App deployment →
-   Version: _New version_ → Deploy.**
+3. Merge, then **Actions → Deploy Apps Script → Run workflow → type `publish`**.
 
-Step 3 matters. The tool pages call a **fixed `/exec` URL** (`NL.endpoints.gas`,
-`PP_GAS_URL` in `programme-packs/index.html`). Creating a *new* deployment mints
-a new `/exec` URL, the pages keep hitting the old code, and the change appears to
-do nothing.
+That is the whole loop, and none of it needs a terminal or the Apps Script
+editor. The run pushes every file in this directory and redeploys the existing
+Web App; the next scheduled sync should then report no drift, which is the
+confirmation that it took.
 
-The next sync run commits whatever you deployed, so the repo catches up on its
-own.
+**If you edit in the Apps Script editor instead** — which is still fine for
+something urgent — the daily sync commits it and the repo catches up on its own.
+What you must not do is edit in both places and expect them to reconcile. The
+deploy guard will stop you rather than pick a winner.
+
+Two things the workflow protects that are easy to get wrong by hand:
+
+- **The `/exec` URL.** Every tool page calls a fixed one (`NL.endpoints.gas`,
+  and `PP_GAS_URL` in `programme-packs/index.html`). Creating a *new* deployment
+  in the editor mints a new URL, the pages keep hitting the old code, and the
+  change appears to do nothing while reporting success. The workflow deploys to
+  the ID read out of `NL.endpoints.gas`, so it can only target what the site
+  actually calls, and it checks that ID exists before deploying.
+- **Someone else's editor change.** `clasp push` overwrites everything. The
+  workflow pulls and diffs first, and refuses rather than guessing.

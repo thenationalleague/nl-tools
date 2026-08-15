@@ -173,7 +173,7 @@ function vacWriteSubmission(body, email) {
 function vacNotify(sub) {
   var props       = PropertiesService.getScriptProperties().getProperties();
   var senderAlias = props['SENDER_ALIAS'] || '';
-  var portalUrl   = 'https://thenationalleague.github.io/tools/vacancies/';
+  var portalUrl   = 'https://nl.tools/vacancies/';
 
   var subject = 'New vacancy submission: ' + sub.jobTitle + ' — ' + sub.club;
 
