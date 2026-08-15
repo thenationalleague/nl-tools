@@ -315,6 +315,54 @@ function main() {
        exists to find. */
     .filter((f) => f !== outRel);
 
+  /**
+   * Relative forms of page P as they would be written inside file F.
+   *
+   * Absolute-path matching alone is not enough, and the gap is not academic:
+   * commercial-benchmarking/dashboard.js builds its club capability link as
+   * `new URL('link.html?t=' + tok, location.href)`. The string
+   * "/commercial-benchmarking/link.html" appears nowhere, so that page reported
+   * zero inbound links and read as an orphan — while being the live route
+   * clubs without an account use to see their benchmarks. A retire list built
+   * on the absolute form alone would have deleted it.
+   *
+   * Only sibling-ish forms are returned. A bare "index.html" is skipped: it
+   * appears in nearly every directory and would link everything to everything.
+   */
+  /* Directories holding pages but no index.html — see relativeForms(). */
+  const dirsWithIndex = new Set(
+    pages.filter((p) => p.path.endsWith('/index.html')).map((p) => path.posix.dirname(p.path))
+  );
+  const bareCollections = new Set(
+    pages.map((p) => path.posix.dirname(p.path)).filter((d) => d !== '.' && !dirsWithIndex.has(d))
+  );
+
+  function relativeForms(fromFile, page) {
+    const fromDir = path.posix.dirname(fromFile);
+    const forms = [];
+
+    const asFile = path.posix.relative(fromDir, page.path);
+    if (asFile && asFile !== 'index.html' && !asFile.startsWith('..')) forms.push(asFile);
+
+    if (page.path.endsWith('/index.html')) {
+      const asDir = path.posix.relative(fromDir, path.posix.dirname(page.path));
+      if (asDir && !asDir.startsWith('..')) forms.push(asDir + '/');
+    }
+
+    /* Directory-level credit, for collections referenced as a set rather than
+       file by file: system/brand-v3-scale-plan.md points at `./brand-v3-mockups/`
+       and never names the three pages inside it, so all three read as orphans
+       while being live reference material for an in-progress plan.
+       Restricted to directories with no index.html of their own — a bare
+       collection. Without that guard, any mention of "handbook/" would credit
+       every page under it, and the metric would stop meaning anything. */
+    if (!page.path.endsWith('/index.html') && bareCollections.has(path.posix.dirname(page.path))) {
+      const asDir = path.posix.relative(fromDir, path.posix.dirname(page.path));
+      if (asDir && !asDir.startsWith('..')) forms.push(asDir + '/');
+    }
+    return forms;
+  }
+
   for (const f of scannable) {
     let text;
     try {
@@ -325,7 +373,11 @@ function main() {
     for (const [url, page] of urlToPage) {
       if (url === '/') continue;          // matches nearly everything, tells you nothing
       if (f === page.path) continue;      // self-reference
-      if (text.includes(url)) page.inbound.push(f);
+
+      if (text.includes(url)) { page.inbound.push(f); continue; }
+
+      const forms = relativeForms(f, page);
+      if (forms.some((r) => text.includes(r))) page.inbound.push(f);
     }
   }
   for (const p of pages) p.inbound.sort();

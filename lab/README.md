@@ -13,11 +13,12 @@ This directory is intentionally **outside** the NL Tools portal contract.
 
 ## Current contents
 
-| Page | What it is |
-|---|---|
-| `nl-scorer-import-tool-v1.0.0.html` | One-off CSV → Firebase goal-data backfill. Uploads a completed scorer CSV, matches names to player IDs, writes to the **vidiprinter** RTDB (`nl-vidiprinter-default-rtdb`) — not the `nl-tools` project. |
-| `po-sf-planner/` | Play-off semi-final planner. Single-use one-shot, doesn't follow the tool template. |
-| `step2-final-trains/` | Standalone travel one-off. |
+Empty. The directory stays because the convention above is worth keeping — it is
+where a scratch page goes so it never has to be argued about later.
 
-Moved here from the repo root in the July 2026 hygiene pass to keep the portal
-tool surface clean. None of these were linked from the portal or any live tool.
+Cleared on 15/08/2026 after `/estate/` showed the four pages here had no inbound
+link from anywhere in the repo and had not been touched since they were written:
+`nl-scorer-import-tool-v1.0.0.html` (one-off CSV → vidiprinter RTDB backfill),
+`po-sf-planner/` and `step2-final-trains/` (single-use planners moved here in the
+July 2026 hygiene pass), and `club-picker.html` (a manual smoke page for
+`NL.clubPicker`, from PR #368). All four are in git history if one is wanted back.
