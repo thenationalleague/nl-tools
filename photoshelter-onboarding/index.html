@@ -3,7 +3,7 @@
 <head>
 <!--
   NL Tools — PhotoShelter Onboarding (club-facing)
-  Version: v0.9 (11/08/2026)
+  Version: v1.0 (15/08/2026)
   File: /photoshelter-onboarding/index.html
 
   Club media staff pick which of the four identical PhotoShelter training
@@ -24,24 +24,29 @@
   admin.html — this page can write but can never read, so an open URL never
   exposes one club's people to another.
 
-  CONFIRMATION EMAIL (CFG.confirmEmail) — on by default.
-  After the booking is saved, the page fires ps_confirm at Apps Script and
-  ignores the result. Thanks for registering, we will be in touch in the
-  coming days about which slot you are on, email Richard to amend anything.
-  Because it is unawaited, the page behaves identically whether or not the
-  action exists in the live Apps Script project — the worst case is a
-  registration with no receipt, never a lost registration.
+  NO APPS SCRIPT. This page talks to RTDB and nothing else.
 
-  EMAIL VERIFICATION (CFG.verifyEmail) — off by default.
-  Flipping it to true moves the write server-side: the page asks Apps Script
-  for a 4-digit code, and submits the booking WITH that code, so Apps Script
-  verifies it and writes to RTDB itself using the database secret. Same shape
-  the Vacancies tool already uses in production. It does nothing until the
-  ps_requestCode / ps_submit actions in gas/PhotoShelterOnboarding.gs are
-  pasted into the live Apps Script project and the deployment is updated —
-  so leave it false until that is done, or nobody can register at all.
+  It used to carry two GAS paths, both dead: a confirmation receipt
+  (ps_confirm) and an optional email-verification mode (ps_requestCode /
+  ps_submit) that moved the write server-side. Neither action was ever
+  deployed — the sync on 15/08/2026 showed the live Apps Script project has no
+  ps_ route at all, and gas/PhotoShelterOnboarding.gs existed only in this
+  repo. The receipt therefore never sent, silently and by design, and the
+  verification mode could never be switched on.
+
+  The receipt is abandoned rather than fixed (Richard, 15/08/2026), so all of
+  it is gone: no gasPost, no code-entry UI, no CFG flags. Registration is
+  unchanged — anonymous auth, create-only write, per-field validation in rules.
 
   CHANGELOG
+  15/08/2026 v1.0 — Apps Script removed entirely. The sync of the live project
+                    showed no ps_ route exists and never did, so the receipt
+                    had been failing silently since launch and the
+                    verification mode could never have been enabled. Receipt
+                    abandoned rather than fixed, so gasPost, the code-entry UI,
+                    both CFG flags and gas/PhotoShelterOnboarding.gs all go.
+                    Registration is untouched.
+
   11/08/2026 v0.9 — Heading is "Thanks for registering" rather than "You are
                     registered" — the second reads like a confirmed booking,
                     which is the exact misreading the note underneath exists
@@ -340,13 +345,6 @@
   font-variation-settings: 'wght' 800; margin-top: 10px; }
 .ps-recap dd { margin: 2px 0 0; font-variation-settings: 'wght' 600; color: var(--navy); }
 
-/* 4-digit code entry — only rendered when CFG.verifyEmail is on. */
-.ps-code { display: none; }
-.ps-code.is-open { display: block; }
-.ps-code__input { width: 140px !important; text-align: center; font-size: 22px !important;
-  letter-spacing: 0.35em; font-variation-settings: 'wght' 700; }
-.ps-code__status { font-size: var(--text-xs); margin-top: 6px; color: var(--text-muted); }
-.ps-code__status.ok { color: var(--green); font-variation-settings: 'wght' 700; }
 
 @media (max-width: 560px) {
   .ps-hero { padding: 20px 16px; }
@@ -398,21 +396,6 @@
           </div>
         </div>
 
-        <!-- Email verification. Hidden unless CFG.verifyEmail. -->
-        <div class="ps-code" id="psCodeBlock">
-          <div class="section-head" style="margin-top:22px;"><h2>Verify your email</h2></div>
-          <p class="form-hint" style="margin-bottom:10px;">
-            We will send a 4-digit code to the address above so we know the joining
-            link will reach you.
-          </p>
-          <button type="button" class="btn btn--navy btn--sm" id="psSendCode">Send code</button>
-          <div class="form-group" id="psCodeEntry" style="display:none;margin-top:14px;">
-            <label for="psCode">4-digit code</label>
-            <input type="text" id="psCode" class="ps-code__input" maxlength="4"
-                   inputmode="numeric" placeholder="0000" autocomplete="one-time-code">
-            <div class="ps-code__status" id="psCodeStatus"></div>
-          </div>
-        </div>
 
         <div class="section-head" style="margin-top:22px;">
           <h2>Which dates are you available?</h2>
@@ -552,24 +535,9 @@
   var RTDB_PATH    = 'app-data/ops-photoshelter-onboarding/bookings';
   var DONE_KEY     = 'nl-ps-onboarding-registered';
 
-  var CFG = {
-    /* false → the page writes to RTDB itself behind anonymous auth.
-       true  → Apps Script verifies a 4-digit code and owns the write.
-       Do NOT flip this until ps_requestCode + ps_submit are live in the
-       Apps Script deployment, or registration stops working entirely. */
-    verifyEmail: false,
-
-    /* Short receipt to the person who registered. Fire-and-forget: it is sent
-       AFTER the booking is safely saved, and a failure is swallowed, so a
-       missing or broken Apps Script action can never cost someone their
-       place. Safe to leave true before ps_confirm is pasted in. */
-    confirmEmail: true
-  };
-
   var el = function (id) { return document.getElementById(id); };
   var clubPicker = null;
   var live       = [];      /* sessions still in the future */
-  var codeSent   = false;
 
   /* ── Which sessions are still open ─────────────────────────────────────
      Compared as YYYY-MM-DD strings against the browser's local date, so a
@@ -666,8 +634,6 @@
     if (!d.lead)                        p.push('Tell us who holds your club\'s library seat.');
     if (d.leadEmail && !validEmail(d.leadEmail))
       p.push('The library seat email does not look right.');
-    if (CFG.verifyEmail && el('psCode').value.trim().length !== 4)
-      p.push('Enter the 4-digit code we emailed you.');
     return p;
   }
 
@@ -680,14 +646,8 @@
     box.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
+
   /* ── Submit ────────────────────────────────────────────────────────────*/
-  function gasPost(payload) {
-    return fetch(NL.endpoints.gas + '?cb=' + Date.now(), {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify(payload)
-    }).then(function (r) { return r.json(); });
-  }
 
   /* Was a confirm dialog between Register and the write. It said the right
      thing at the wrong moment: an extra press, and a wall of text arriving
@@ -766,39 +726,13 @@
       ts:        firebase.database.ServerValue.TIMESTAMP
     };
 
-    var write = CFG.verifyEmail
-      /* Apps Script verifies the code and writes it — the browser never
-         touches RTDB, so there is no open write path at all. */
-      ? gasPost({
-          action:  'ps_submit',
-          code:    el('psCode').value.trim(),
-          booking: (function () { var c = {}; for (var k in record) c[k] = record[k];
-                                  c.ts = Date.now(); return c; })()
-        }).then(function (r) {
-          if (!r || r.ok === false) throw new Error((r && r.error) || 'Could not register.');
-        })
-      /* Direct write, behind anonymous auth, create-only by rule. */
-      : firebase.auth().signInAnonymously().then(function () {
-          return db.ref(RTDB_PATH).push(record);
-        });
+    /* Direct write, behind anonymous auth, create-only by rule. */
+    var write = firebase.auth().signInAnonymously().then(function () {
+      return db.ref(RTDB_PATH).push(record);
+    });
 
     write.then(function () {
       try { localStorage.setItem(DONE_KEY, '1'); } catch (e) {}
-      /* Receipt. Deliberately after the write and deliberately unawaited:
-         the booking is already safe, so a bounced or unconfigured mailer
-         must not turn a successful registration into an error on screen.
-         With verifyEmail on, Apps Script sends this itself at submit time. */
-      if (CFG.confirmEmail && !CFG.verifyEmail) {
-        var picked = live.filter(function (s) { return d.dates[s.id]; })
-                         .map(function (s) { return fullDay(s) + ', ' + SESSION_TIME; });
-        gasPost({
-          action: 'ps_confirm',
-          email:  d.email,
-          name:   d.name,
-          club:   d.club,
-          dates:  picked
-        }).catch(function () { /* silent by design */ });
-      }
       succeed(d);
     }).catch(function (e) {
       btn.disabled  = false;
@@ -837,14 +771,6 @@
     el('psLeadWho').classList.remove('is-open');
     renderSummary();
     if (clubPicker) clubPicker.clear();
-    if (CFG.verifyEmail) {
-      codeSent = false;
-      el('psCodeEntry').style.display = 'none';
-      el('psSendCode').textContent = 'Send code';
-      el('psSendCode').disabled = false;
-      el('psCodeStatus').textContent = '';
-      el('psCodeStatus').className = 'ps-code__status';
-    }
     var btn = el('psSubmit');
     btn.disabled = false; btn.innerHTML = 'Register';
     el('psDone').style.display  = 'none';
@@ -852,36 +778,6 @@
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  /* ── Email verification (only when CFG.verifyEmail) ─────────────────────*/
-  function wireCode() {
-    el('psCodeBlock').classList.add('is-open');
-    el('psSendCode').addEventListener('click', function () {
-      var email = el('psEmail').value.trim();
-      if (!validEmail(email)) { showErrors(['Enter a valid email address first.']); return; }
-      showErrors([]);
-      var b = el('psSendCode');
-      b.disabled = true; b.innerHTML = '<span class="spinner"></span>Sending…';
-      gasPost({ action: 'ps_requestCode', email: email }).then(function (r) {
-        if (!r || r.ok === false) throw new Error((r && r.error) || 'Could not send the code.');
-        codeSent = true;
-        el('psCodeEntry').style.display = '';
-        el('psCodeStatus').textContent = 'Code sent to ' + email + '. It expires in 10 minutes.';
-        b.textContent = 'Resend code'; b.disabled = false;
-      }).catch(function (e) {
-        b.textContent = 'Send code'; b.disabled = false;
-        showErrors([e.message]);
-      });
-    });
-    el('psCode').addEventListener('input', function () {
-      var v = this.value.replace(/\D/g, '').slice(0, 4);
-      this.value = v;
-      var st = el('psCodeStatus');
-      if (v.length === 4 && codeSent) {
-        st.className = 'ps-code__status ok';
-        st.textContent = '✓ Code entered. Register when you are ready.';
-      }
-    });
-  }
 
   /* ── Boot ──────────────────────────────────────────────────────────────*/
   function boot() {
@@ -891,7 +787,6 @@
 
     renderDates();
     wireLead();
-    if (CFG.verifyEmail) wireCode();
 
     clubPicker = NL.clubPicker('#psClubMount', {
       mode:        'select',
