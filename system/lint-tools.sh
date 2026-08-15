@@ -350,6 +350,26 @@ fi
 echo "$clean_count tool$( [[ $clean_count -ne 1 ]] && echo s ) clean, \
 $standalone_clean standalone page$( [[ $standalone_clean -ne 1 ]] && echo s ) clean."
 
+# Canon class overrides — the rule CONSOLIDATION.md's "Future-proofing" section
+# listed in July and which was never built. Everything above checks WIRING (does
+# the page load canon, at the right version). This checks whether the page then
+# quietly overrides what it just loaded, which is the larger source of drift:
+# 153 instances across 42 pages when it was first run.
+# Runs as a separate script so the same check is callable from CI and tests.
+override_rc=0
+if [[ -f "$REPO_ROOT/scripts/check-canon-overrides.js" ]] && command -v node >/dev/null 2>&1; then
+  echo
+  if [[ $STRICT -eq 1 ]]; then
+    node "$REPO_ROOT/scripts/check-canon-overrides.js" --strict || override_rc=1
+  else
+    node "$REPO_ROOT/scripts/check-canon-overrides.js"
+  fi
+fi
+
+if [[ $STRICT -eq 1 && $override_rc -ne 0 ]]; then
+  exit 1
+fi
+
 if [[ $STRICT -eq 1 && $((warn_count + standalone_warn)) -gt 0 ]]; then
   echo
   echo "lint-tools: --strict, so failing on $warn_count drifted tool$( [[ $warn_count -ne 1 ]] && echo s )" >&2
