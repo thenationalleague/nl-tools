@@ -30,18 +30,45 @@ name: Deploy Apps Script
 # project since the last sync, pushing would silently revert their work — the
 # same class of loss this workflow exists to prevent, pointed the other way.
 #
-# So it pulls live first and compares it against THE LAST STATE THE SYNC SAW —
-# the most recent commit made by sync-gas.yml — not against this branch.
+# So it pulls live first and compares it against THE LAST STATE WE PUT THERE OR
+# LAST SAW THERE, recorded as a content fingerprint in `gas/.deployed`.
 #
-# That distinction is the whole guard, and the first version got it wrong. It
-# compared live against the branch and refused on any difference, which meant it
-# refused precisely when there was something to deploy: the first real run was
-# blocked by the three files the PR had deliberately changed. A deploy that
-# cannot run when the repo has changes is not a deploy.
+# This is the third shape of this guard. The first two were both wrong, and both
+# wrong in a way that only showed up in use:
 #
-# Comparing against the last sync answers the question that actually matters —
-# "has anyone touched the live project since we last looked?" — and leaves the
-# repo free to be ahead, which is the normal and intended state.
+#   1. Compared live against THE BRANCH, and refused on any difference. That
+#      refused precisely when there was something to deploy — the first real run
+#      was blocked by the three files the PR had deliberately changed. A deploy
+#      that cannot run when the repo has changes is not a deploy.
+#
+#   2. Compared live against the last commit made by sync-gas.yml. Better, but a
+#      successful deploy CHANGES LIVE and so invalidates the baseline it just
+#      checked against — and only the nightly sync ever wrote that baseline. So
+#      every deploy after the first failed until 04:40 the next morning,
+#      reporting an editor change that had never happened.
+#
+# gas/.deployed fixes both by being explicit rather than inferred: a sha256 over
+# the files clasp manages, as they were when we last put them there or last saw
+# them there. Both workflows write it — this one after a successful push,
+# sync-gas.yml after it commits drift — so it is always the answer to "what do
+# we believe is running?".
+#
+# A fingerprint rather than a commit SHA because a commit cannot contain its own
+# SHA, so the sync could never record itself.
+#
+# When live matches it, nobody has touched the editor and the repo is free to be
+# ahead, which is the normal and intended state. When live does NOT match it,
+# someone edited the project directly and pushing would overwrite them.
+#
+# THE BASELINE HAS TO BE UPDATED BY THIS WORKFLOW TOO. Second version of this
+# guard, and the second thing it got wrong: a successful deploy CHANGES LIVE, so
+# it invalidates the very baseline it just checked against. Only the nightly
+# sync wrote that baseline, which meant every deploy after the first one failed
+# until 04:40 the next morning — reporting an editor change that had never
+# happened.
+#
+# So on success this job records the new baseline itself. After a push, live and
+# the repo match by definition, and saying so is the honest thing to record.
 #
 # KEEPING THE /exec URL
 # ---------------------
@@ -73,7 +100,8 @@ on:
         default: ''
 
 permissions:
-  contents: read
+  # write, because a successful deploy records the new baseline (see above).
+  contents: write
 
 concurrency:
   # Never let a push and a pull run at once — they write the same directory
@@ -128,43 +156,51 @@ jobs:
       # ── The guard ──────────────────────────────────────────────────────────
       - name: Refuse if someone has edited the live project since the last sync
         run: |
-          BASE=$(git log --format=%H -1 \
-                   --grep='sync Apps Script from the live project' -- gas/ || true)
-          if [ -z "$BASE" ]; then
-            echo "::error::No sync commit found, so there is no baseline to compare against."
-            echo "  Run the 'Sync Apps Script' workflow once first. It records what the"
-            echo "  live project currently holds, which is what this check needs in order"
-            echo "  to tell your changes apart from someone else's."
+          # Fingerprint of the files clasp manages: content only, order
+          # independent, and computable from a working tree without needing a
+          # commit — which a SHA-based marker could not be, since a commit
+          # cannot contain its own SHA.
+          gas_fingerprint() {
+            ( cd "$1" 2>/dev/null || exit 0
+              find . -maxdepth 1 -type f \( -name '*.js' -o -name 'appsscript.json' \) \
+                | sed 's|^\./||' | LC_ALL=C sort \
+                | while read -r f; do printf '%s %s\n' "$f" "$(sha256sum "$f" | cut -d' ' -f1)"; done
+            ) | sha256sum | cut -d' ' -f1
+          }
+
+          EXPECTED=$(tr -d ' \n\r' < gas/.deployed 2>/dev/null || true)
+          if [ -z "$EXPECTED" ]; then
+            echo "::error::gas/.deployed is empty or missing."
+            echo "  It must hold the fingerprint of what is currently live."
+            echo "  Run 'Sync Apps Script' — it pulls live and writes this file."
             exit 1
           fi
-          echo "Baseline — the last state the sync saw live in: $(git log --format='%h %ad %s' --date=short -1 $BASE)"
 
-          mkdir -p /tmp/gas-live /tmp/gas-base
-          git archive "$BASE" gas/ | tar -x -C /tmp/gas-base --strip-components=1
-
+          mkdir -p /tmp/gas-live
           printf '{"scriptId":"%s","rootDir":"/tmp/gas-live"}\n' "$GAS_SCRIPT_ID" > .clasp.json
           clasp pull
           rm -f .clasp.json
 
-          # Only the files clasp manages. Docs are ours, and .gs are the
-          # hand-pasted mirrors deleted on 15/08/2026 — clasp never pulled
-          # either, so a baseline old enough to contain them would otherwise
-          # read as a difference and refuse. A .js present in one and not the
-          # other still counts: a live file missing from the repo would be
-          # DELETED by the push, and a repo file missing from live is new.
-          if diff -rq --exclude='*.md' --exclude='*.gs' /tmp/gas-base /tmp/gas-live; then
+          ACTUAL=$(gas_fingerprint /tmp/gas-live)
+          echo "believed live: $EXPECTED"
+          echo "actually live: $ACTUAL"
+
+          if [ "$EXPECTED" = "$ACTUAL" ]; then
             echo ""
-            echo "Live matches the last sync — nobody has edited the project directly."
-            echo "Whatever gas/ is ahead by on this branch is yours to push:"
-            diff -rq --exclude='*.md' --exclude='*.gs' /tmp/gas-base gas || true
+            echo "Live is what we last put there. Nobody has edited the project directly."
+            echo "This deploy will push:"
+            diff -rq --exclude='*.md' --exclude='.deployed' /tmp/gas-live gas || true
           else
-            echo "::error::The live Apps Script project has changed since the last sync."
+            echo "::error::The live Apps Script project is not what we last put there."
             echo ""
             echo "  Someone edited it in the editor. Pushing now would overwrite that."
             echo ""
-            echo "  Run the 'Sync Apps Script' workflow, merge the commit it makes, then"
-            echo "  run this again. Do not force past this — the sync commit IS the"
-            echo "  evidence of what would have been lost."
+            echo "  Run the 'Sync Apps Script' workflow, read the diff, merge the commit"
+            echo "  it makes, then run this again. Do not force past it — that commit IS"
+            echo "  the evidence of what would have been lost."
+            echo ""
+            echo "  Read the diff, though: the sync also RESTORES anything the repo has"
+            echo "  deliberately deleted that live still has."
             exit 1
           fi
 
@@ -209,6 +245,43 @@ jobs:
           rm -f .clasp.json
 
           echo "Deployed. The /exec URL is unchanged, so every page picks this up."
+
+      # Live now matches this commit, because we just made it so. Record that,
+      # or the next run checks against a baseline this deploy has superseded.
+      - name: Record what is now live
+        run: |
+          # Fingerprint of the files clasp manages: content only, order
+          # independent, and computable from a working tree without needing a
+          # commit — which a SHA-based marker could not be, since a commit
+          # cannot contain its own SHA.
+          gas_fingerprint() {
+            ( cd "$1" 2>/dev/null || exit 0
+              find . -maxdepth 1 -type f \( -name '*.js' -o -name 'appsscript.json' \) \
+                | sed 's|^\./||' | LC_ALL=C sort \
+                | while read -r f; do printf '%s %s\n' "$f" "$(sha256sum "$f" | cut -d' ' -f1)"; done
+            ) | sha256sum | cut -d' ' -f1
+          }
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          gas_fingerprint gas > gas/.deployed
+          git add gas/.deployed
+          if git diff --cached --quiet; then
+            echo "gas/.deployed already names this commit."
+            exit 0
+          fi
+          git commit -m "chore: record the pushed Apps Script state"
+          for i in 1 2 3; do
+            if git push origin HEAD:main; then
+              echo "Recorded."
+              exit 0
+            fi
+            git fetch origin main && git rebase origin/main || exit 1
+          done
+          echo "::error::Deploy SUCCEEDED but gas/.deployed could not be pushed."
+          echo "  Live IS updated. Run 'Sync Apps Script' before the next deploy, or"
+          echo "  the guard refuses against a fingerprint that is now wrong."
+          exit 1
 
       - name: What to check
         run: |

@@ -167,6 +167,21 @@ jobs:
           fi
           echo "DRIFT: the live Apps Script project differs from gas/."
           git diff --cached --stat
+
+          gas_fingerprint() {
+            ( cd "$1" 2>/dev/null || exit 0
+              find . -maxdepth 1 -type f \( -name '*.js' -o -name 'appsscript.json' \) \
+                | sed 's|^\./||' | LC_ALL=C sort \
+                | while read -r f; do printf '%s %s\n' "$f" "$(sha256sum "$f" | cut -d' ' -f1)"; done
+            ) | sha256sum | cut -d' ' -f1
+          }
+
+          # deploy-gas.yml reads this to answer "what do we believe is running?".
+          # A pull makes gas/ equal live, so record that here too — otherwise the
+          # next deploy checks against a state this sync has already replaced.
+          gas_fingerprint gas > gas/.deployed
+          git add gas/.deployed
+
           git commit -m "chore: sync Apps Script from the live project"
           for i in 1 2 3; do
             if git push; then exit 0; fi
