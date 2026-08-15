@@ -9,9 +9,10 @@ project.** Edit the `.js` files here, open a PR, and ship them with the
 | [`sync-gas.yml`](../.github/workflows/sync-gas.yml) | live → repo | daily 04:40, commits only on drift |
 | [`deploy-gas.yml`](../.github/workflows/deploy-gas.yml) | repo → live | **manual only** — Actions → Run workflow → type `publish` |
 
-Deploy refuses to run if the live project holds anything the repo has not seen,
-so it can never overwrite an editor change someone made directly. If it stops
-you, run Sync Apps Script, merge the commit it makes, and try again.
+Deploy refuses to run if **someone has edited the live project since the last
+sync** — it compares live against the last commit the sync made, not against
+your branch, so the repo being ahead is normal and expected. If it stops you,
+run Sync Apps Script, merge the commit it makes, and try again.
 
 It also redeploys the **existing** Web App rather than minting a new one, using
 the deployment ID read out of `NL.endpoints.gas` — so the `/exec` URL every page
