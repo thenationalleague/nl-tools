@@ -36,8 +36,11 @@ app is fully decommissioned; no browser ever calls GAS again.
 > gone and `gas/*.js` is now the only copy. See `gas/README.md`.
 >
 > The sync covers the **consolidated** project only. Two further Apps Script web
-> apps — behind the live-blog and transfer-centre embeds — are still unmirrored
-> and out of scope of this migration, which was written as though there were one.
+> apps — behind the live-blog and transfer-centre embeds — were never mirrored
+> at all; this doc was written as though there were one project. They are not
+> being migrated: both tools are parked for a rebuild on RTDB and their Sheet
+> backends dropped (`embeds/REBUILD.md`), which keeps the answer at one project
+> rather than three. The deployments still need archiving in the editor.
 
 Status of this doc: **plan**. The interim security patch (Phase 0) is landed
 in PR #468; everything below is the deliberate follow-on.
