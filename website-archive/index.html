@@ -3,10 +3,25 @@
 <head>
 <!--
   NL Tools — Website Archive
-  Version: 2.3
+  Version: 2.4
   Date: 15/08/2026
 
   CHANGELOG
+  v2.4 (15/08/2026)
+    - Images are back. Every one on this page was pointed at the S3 bucket
+      directly, and the bucket answers 403 to anonymous requests, so every one
+      failed — invisibly, because each carried an onerror that hides the
+      element. Card thumbnails collapsed to their placeholder and the article
+      hero removed itself entirely, which looks like a feature quietly
+      withdrawn rather than a broken one.
+    - They now go through the NLS image service, which answers. The path was
+      always there: article BODY images already used it whenever the CMS gave
+      an id rather than a location. Only the hero, the card grid and the list
+      rows were pointed at the bucket.
+    - Sized per context — 1440px hero, 640px card, 240px row. The bucket serves
+      full-resolution originals, so a grid of them on a phone was downloading
+      several megabytes to render at 240px.
+
   v2.3 (15/08/2026)
     - Removed the "Analyse first 72 hours" link from the article modal, and its
       CSS. It opened /website-insights/, retired the same day along with
@@ -1292,7 +1307,33 @@
 var INDEX_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/articles-index.json';
 var BYSLUG_URL = 'https://news.cms.web.gc.nationalleagueservices.co.uk/v1/byslug';
 var S3_IMAGE_BASE = 'https://s3.eu-west-1.amazonaws.com/gc-media-assets-v2.gc.nationalleagueservices.co.uk/';
-var NLS_IMAGE_BASE = 'https://images.gc.nationalleagueservices.co.uk/fit-in/1440x1440/';
+var NLS_IMAGE_BASE_SIZED = 'https://images.gc.nationalleagueservices.co.uk/fit-in/';
+var NLS_IMAGE_BASE = NLS_IMAGE_BASE_SIZED + '1440x1440/';
+
+/* Route any image through the NLS image service rather than at the S3 bucket
+   directly.
+
+   The bucket answers 403 to anonymous requests. Every image on this page was
+   built from articles-index.json's imageUrl, which is a raw S3 URL, so every
+   one of them failed — and because each carried an onerror that hides the
+   element, they failed INVISIBLY. Card thumbnails collapsed to their
+   placeholder and the article hero removed itself entirely, which is what it
+   looks like when a feature is quietly withdrawn rather than broken.
+
+   The image service in front of the same bucket does answer, and the article
+   BODY images already went through it whenever the CMS gave an id rather than
+   a location. So the path was always there; only the hero and the thumbnails
+   were pointed the wrong way.
+
+   Size is a real gain rather than tidiness: the raw objects are full-resolution
+   originals, and a grid of them on a phone was downloading several megabytes to
+   render at 240px. */
+function nlsImage(url, size) {
+  if (!url) return '';
+  var key = String(url).indexOf(S3_IMAGE_BASE) === 0 ? String(url).slice(S3_IMAGE_BASE.length) : null;
+  if (!key) return url;                 /* already a service URL, or something else */
+  return NLS_IMAGE_BASE_SIZED + (size || '1440x1440') + '/' + key;
+}
 
 /* Resolve an image URL from CMS imageData (or a bare object with location/key/id).
    Handles: imageData.location (absolute S3 URL), imageData.key (S3 filename),
@@ -1300,8 +1341,8 @@ var NLS_IMAGE_BASE = 'https://images.gc.nationalleagueservices.co.uk/fit-in/1440
 function resolveArticleImage(imgData) {
   if (!imgData) return '';
   if (typeof imgData === 'string') return imgData;
-  if (imgData.location) return imgData.location;
-  if (imgData.key) return S3_IMAGE_BASE + imgData.key;
+  if (imgData.location) return nlsImage(imgData.location);
+  if (imgData.key) return NLS_IMAGE_BASE + imgData.key;
   if (imgData.id) return NLS_IMAGE_BASE + imgData.id + '.jpg';
   if (imgData.url) return imgData.url;
   return '';
@@ -1698,7 +1739,7 @@ function renderResults() {
 }
 
 function cardHTML(a, i) {
-  var img = a.imageUrl || '';
+  var img = nlsImage(a.imageUrl, '640x640');
   var imgMarkup = img
     ? '<img class="card__img" src="' + esc(img) + '" alt="" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling&&(this.nextElementSibling.style.display=\'flex\')">'
     : '';
@@ -1757,7 +1798,7 @@ function cardHTML(a, i) {
 }
 
 function rowHTML(a, i) {
-  var img = a.imageUrl || '';
+  var img = nlsImage(a.imageUrl, '240x240');
   var imgMarkup = img
     ? '<img src="' + esc(img) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
     : '';
@@ -1915,7 +1956,8 @@ function renderModalBody(a, content) {
   html += buildModalMetricsPanel(a);
 
   if (a.imageUrl) {
-    html += '<div class="article-modal__hero"><img src="' + esc(a.imageUrl) + '" alt="" onerror="this.parentNode.style.display=\'none\'"></div>';
+    html += '<div class="article-modal__hero"><img src="' + esc(nlsImage(a.imageUrl, '1440x1440')) +
+      '" alt="" onerror="this.parentNode.style.display=\'none\'"></div>';
   }
   if (a.newsCategory) {
     html += '<div class="article-modal__category">' + esc(a.newsCategory) + '</div>';
