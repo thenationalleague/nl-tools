@@ -10,9 +10,16 @@ on:
         required: false
         default: 'false'
         type: boolean
+      allow_empty_archive:
+        description: 'Proceed even if the hourly archive is missing from Storage (first run only — otherwise it loses history GA4 will not serve again)'
+        required: false
+        default: false
+        type: boolean
 
+# Read-only on the repo. The four feeds this job produces go to Firebase
+# Storage, not to git — it has nothing to commit.
 permissions:
-  contents: write
+  contents: read
   id-token: write
 
 jobs:
@@ -38,6 +45,36 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
+      # Both later steps need what the last run produced: rebuild-index.js does
+      # an incremental build against the existing index, and fetch-ga-hourly.js
+      # merges today's rows into the archive rather than replacing it. A missing
+      # object is not an error — a full rebuild is slow, not wrong — but a
+      # missing ARCHIVE is, because GA4 will not serve those hours again once
+      # its retention window has passed. That one aborts the run.
+      - name: Pull the previous feeds out of Firebase Storage
+        env:
+          BUCKET: gs://nl-tools.firebasestorage.app/data
+          ALLOW_EMPTY_ARCHIVE: ${{ inputs.allow_empty_archive }}
+        run: |
+          set -euo pipefail
+          mkdir -p assets/data
+          # ga-metrics.json is deliberately not pulled: fetch-ga-metrics.js
+          # writes it fresh below and nothing reads it after this job ends.
+          for f in articles-index.json ga-hourly.json ga-hourly-archive.json; do
+            if gcloud storage cp "$BUCKET/$f" "assets/data/$f" 2>/dev/null; then
+              echo "pulled  $f  ($(du -h "assets/data/$f" | cut -f1))"
+            else
+              echo "absent  $f"
+              [ "$f" = "ga-hourly-archive.json" ] && MISSING_ARCHIVE=1 || true
+            fi
+          done
+          if [ "${MISSING_ARCHIVE:-0}" = "1" ] && [ "${ALLOW_EMPTY_ARCHIVE:-}" != "true" ]; then
+            echo "::error::ga-hourly-archive.json is not in the bucket. Continuing would"
+            echo "::error::overwrite the all-time archive with 90 days of data and lose the"
+            echo "::error::rest permanently. Re-run with allow_empty_archive if that is intended."
+            exit 1
+          fi
+
       - name: Fetch GA metrics (lifetime aggregates)
         env:
           GA_PROPERTY_ID: ${{ secrets.GA_PROPERTY_ID }}
@@ -55,35 +92,27 @@ jobs:
           FORCE_FULL_REBUILD: ${{ github.event.inputs.force_full_rebuild || 'false' }}
         run: node scripts/rebuild-index.js
 
-      - name: Commit changes if any
+      # articles-index.json is the only one a browser reads. Firebase's
+      # getDownloadURL() hands back a URL carrying the object's
+      # firebaseStorageDownloadTokens value, and objects written by gcloud have
+      # no such value unless it is set here — so the token is minted fresh on
+      # every upload. Fresh rather than fixed on purpose: yesterday's URL stops
+      # working, which is right for a file that is replaced daily.
+      #
+      # Uploads are the service account's, and a service account bypasses
+      # Storage rules — so `data/` stays read-only to every browser while this
+      # step still writes it.
+      - name: Publish the feeds to Firebase Storage
+        env:
+          BUCKET: gs://nl-tools.firebasestorage.app/data
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # ga-metrics.json is deliberately NOT staged: it is an input to
-          # rebuild-index.js in this same job, not an output anyone reads later.
-          # See .gitignore.
-          git add assets/data/articles-index.json assets/data/ga-hourly.json assets/data/ga-hourly-archive.json 2>/dev/null || true
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-            exit 0
-          fi
-          git commit -m "chore: update article index and hourly data"
-
-          # Push with up to 3 retries. If remote moved while we were working,
-          # rebase our single commit on top of the new remote HEAD and try again.
-          # Our commit only touches assets/data/*.json so rebase conflicts are
-          # essentially impossible against typical tool/code changes.
-          for i in 1 2 3; do
-            if git push; then
-              echo "Push succeeded on attempt $i"
-              exit 0
-            fi
-            echo "Push attempt $i failed - fetching and rebasing"
-            git fetch origin main
-            git rebase origin/main || {
-              echo "Rebase failed - bailing"
-              exit 1
-            }
+          set -euo pipefail
+          gcloud storage cp assets/data/articles-index.json "$BUCKET/articles-index.json" \
+            --custom-metadata="firebaseStorageDownloadTokens=$(uuidgen)" \
+            --content-type=application/json
+          for f in ga-hourly.json ga-hourly-archive.json; do
+            [ -f "assets/data/$f" ] || { echo "::warning::$f was not produced, leaving the bucket copy alone"; continue; }
+            gcloud storage cp "assets/data/$f" "$BUCKET/$f" --content-type=application/json
           done
-          echo "All 3 push attempts failed"
-          exit 1
+          echo
+          gcloud storage ls -l "$BUCKET/"

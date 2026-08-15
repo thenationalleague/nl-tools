@@ -1,0 +1,87 @@
+name: Seed the data bucket from git history
+
+# Puts the four nightly feeds into Firebase Storage using the last copy git
+# ever held. Run it ONCE, before the first nightly run after the feeds stopped
+# being committed — otherwise "Rebuild article index" finds an empty bucket and
+# refuses, which is what it is supposed to do.
+#
+# It stays afterwards as the recovery route: if an object is ever deleted from
+# the bucket, this restores it. That only works while the history still carries
+# the files, so a future history rewrite retires this workflow with it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "seed" to overwrite whatever is in the bucket now.'
+        required: true
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: data-bucket
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check the confirmation
+        run: |
+          if [ "${{ inputs.confirm }}" != "seed" ]; then
+            echo "::error::The confirm box has to say exactly: seed"
+            exit 1
+          fi
+
+      # Full history: the files are large and were deleted, so the copies being
+      # restored are only reachable through it.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Restore each feed and upload it
+        env:
+          BUCKET: gs://nl-tools.firebasestorage.app/data
+        run: |
+          set -euo pipefail
+          mkdir -p restore
+
+          # ga-metrics.json is not seeded: it is rebuilt from the GA API on
+          # every run and nothing reads it afterwards.
+          for f in articles-index.json ga-hourly.json ga-hourly-archive.json; do
+            path="assets/data/$f"
+            if git cat-file -e "HEAD:$path" 2>/dev/null; then
+              git show "HEAD:$path" > "restore/$f"          # still tracked
+            else
+              sha=$(git rev-list -n 1 HEAD -- "$path")      # the commit that deleted it
+              if [ -z "$sha" ]; then
+                echo "::error::$path is not in this repository's history at all"
+                exit 1
+              fi
+              git show "$sha^:$path" > "restore/$f"
+              echo "$f recovered from $(git log -1 --format='%h %ad' --date=short "$sha^")"
+            fi
+            # A truncated file uploaded over a good one is worse than no file.
+            node -e "JSON.parse(require('fs').readFileSync('restore/$f','utf8'))"
+            echo "ok  $f  ($(du -h "restore/$f" | cut -f1))"
+          done
+
+          gcloud storage cp restore/articles-index.json "$BUCKET/articles-index.json" \
+            --custom-metadata="firebaseStorageDownloadTokens=$(uuidgen)" \
+            --content-type=application/json
+          for f in ga-hourly.json ga-hourly-archive.json; do
+            gcloud storage cp "restore/$f" "$BUCKET/$f" --content-type=application/json
+          done
+
+          echo
+          gcloud storage ls -l "$BUCKET/"

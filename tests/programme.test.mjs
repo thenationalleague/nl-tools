@@ -409,7 +409,7 @@ test('the NL folder has its own defaults, led by Adverts', () => {
 });
 
 test('the client upload cap matches the Storage rules', () => {
-  const rules = readFileSync(join(REPO, 'system/rtdb/storage.rules.snapshot'), 'utf8');
+  const rules = readFileSync(join(REPO, 'system/storage/rules.snapshot.rules'), 'utf8');
   const block = rules.slice(rules.indexOf('match /programme/'));
   const m = block.match(/request\.resource\.size\s*<\s*(\d+)\s*\*\s*1024\s*\*\s*1024/);
   assert.ok(m, 'could not find the programme size limit in the Storage rules');

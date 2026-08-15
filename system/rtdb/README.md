@@ -10,12 +10,14 @@ predictions, registrations — reached by anonymous, public, unbounded traffic.
 Keeping them apart means a fan-side mistake cannot reach staff data and fan
 bandwidth cannot exhaust the tools' quota. Both now deploy from this directory.
 
+Firebase **Storage** rules and CORS used to live here too, which is how the
+project ended up with three files each headed "source of truth". They are in
+[`system/storage/`](../storage/) now — Storage is not a database.
+
 | File | Mirrors | Live home |
 |---|---|---|
 | `rules.snapshot.json` | The full **nl-tools** security rules. **Deployed from here** — see the contract below. | Firebase console → Realtime Database → Rules (read-only reference; edits made there are overwritten by the next deploy) |
 | `nl-widgets.rules.snapshot.json` | The full **nl-widgets** (fan data) security rules. **Deployed from here** too, as of 15/08/2026 — it previously sat in `embeds/` with no deploy path at all and was pasted into the console by hand, which is how a rules document governing every fan vote and registration came to have nothing checking it matched what was running. | Same, on the `nl-widgets` project |
-| `storage.rules.snapshot` | The full Storage security rules. Key idiom: `request.auth.token.email != null` distinguishes real portal accounts from the anonymous-auth capability pages (footage, uw-promo) — anonymous tokens carry no email claim. | Firebase console → Storage → Rules |
-| `storage.cors.json` | Bucket CORS. Needed **only** for bulk (zip) download, which reads file bytes into the page — a browser will not do that cross-origin unless the bucket allows the origin. Single-file downloads are unaffected: the browser saves those directly and the page never sees the bytes. | Not settable in any console UI — Cloud Shell: `gcloud storage buckets update gs://nl-tools.firebasestorage.app --cors-file=system/rtdb/storage.cors.json` |
 | `tools-registry.snapshot.json` | The `tools/` node (tool registry: labels, urls, role defaults) | RTDB `tools/` (drives the portal cards **and** auth-guard access defaults) |
 | `tools-registry.parked.json` | Holding pen for tools pulled off the portal (back in planning). **NOT deployed** — records live here instead of in `tools/`, so those tools are superadmin-only + invisible while their code stays in the repo. See `system/tool-status-and-access.md`. | — (never pasted) |
 
