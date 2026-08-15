@@ -65,7 +65,7 @@
       var root = document.getElementById('nlClubs');
       if (!root) return;
 
-      var REPO      = 'https://raw.githubusercontent.com/thenationalleague/tools/main/';
+      var REPO      = 'https://nl.tools/';
       var META_URL  = REPO + 'assets/data/clubs-meta.json';
       var CREST_URL = REPO + 'assets/crests/medium/';   // 256px tier — full-res is 10x the bytes
       var CREST_FULL = REPO + 'assets/crests/';

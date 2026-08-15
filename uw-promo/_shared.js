@@ -325,8 +325,8 @@
     });
   }
 
-  var ROSE = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png';
-  var UW_LOGO = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/partners/Utility%20Warehouse.png';
+  var ROSE = '/assets/crests/National%20League%20rose.png';
+  var UW_LOGO = '/assets/partners/Utility%20Warehouse.png';
 
   function crestImgHtml(name, px) {
     px = px || 22;

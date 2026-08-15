@@ -97,7 +97,7 @@
          Add ?appcheck=debug to the page URL to get a debug token printed to the
          console, for registering a preview domain that reCAPTCHA cannot verify. */
       var APPCHECK_SITE_KEY = '6LdxWHItAAAAAOT69qFXddxpmRelAC-XkDcb2VPk';
-      var NLPLUS_LOGO_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/logos/NL%2B%20red%20lozenge.png';
+      var NLPLUS_LOGO_URL = 'https://nl.tools/assets/logos/NL%2B%20red%20lozenge.png';
       var SSO_TENANT_ID = 'EBLzD6derkq3NH7m9Rp2mQ';
 
       var COMPS = {
@@ -108,7 +108,7 @@
       var COMP_IDS = Object.keys(COMPS).map(Number);
       var DEFAULT_COMP_ID = 89;
       var API_BASE   = 'https://multi-club-matches.football.web.gc.nationalleagueservices.co.uk/v2';
-      var CLUBS_META_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/data/clubs-meta.json';
+      var CLUBS_META_URL = 'https://nl.tools/assets/data/clubs-meta.json';
       var MAX_PAGES  = 10;
       var NOTE_MAX   = 280;
 
@@ -151,7 +151,7 @@
       var footerEl  = document.getElementById('nlsm-footer');
 
       // ---------- sponsor + footer ----------
-      var ENTERPRISE_LOGO_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/partners/Enterprise.png';
+      var ENTERPRISE_LOGO_URL = 'https://nl.tools/assets/partners/Enterprise.png';
       function renderSponsor() {
         var r = state.registration;
         var compId = userCompId() || DEFAULT_COMP_ID;
@@ -535,7 +535,7 @@
       }
       function compLogoUrl(compId) {
         var c = COMPS[compId] || COMPS[DEFAULT_COMP_ID];
-        return 'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/divisions/' + c.logoFile;
+        return 'https://nl.tools/assets/divisions/' + c.logoFile;
       }
       function compName(compId) {
         var c = COMPS[compId] || COMPS[DEFAULT_COMP_ID];

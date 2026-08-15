@@ -409,7 +409,7 @@
     return app.database().ref(ROOT + '/audit').push(entry);
   }
 
-  var ROSE = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png';
+  var ROSE = '/assets/crests/National%20League%20rose.png';
 
   function crestImgHtml(name, px) {
     px = px || 22;

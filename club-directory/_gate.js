@@ -36,7 +36,7 @@
   'use strict';
 
   var ROOT = 'app-data/ops-club-directory';
-  var ROSE = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png';
+  var ROSE = '/assets/crests/National%20League%20rose.png';
   /* Long enough to cover a cold start plus Eventarc, short enough that a
      genuinely dead function says so rather than spinning forever. */
   var TIMEOUT_MS = 45000;

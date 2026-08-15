@@ -10,7 +10,7 @@ function emailHeader() {
     '<body style="margin:0;padding:0;background:#f4f6f9;font-family:Arial,Helvetica,sans-serif;">' +
     '<table width="100%" cellpadding="0" cellspacing="0" style="background:#9e0000;border-bottom:5px solid #223b7c;">' +
     '<tr><td style="padding:24px 32px;">' +
-    '<img src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose%20white.png"' +
+    '<img src="https://nl.tools/assets/crests/National%20League%20rose%20white.png"' +
     ' alt="The National League" height="48" style="display:block;"></td></tr></table>' +
     '<table width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:32px 16px;">' +
     '<table width="600" cellpadding="0" cellspacing="0" align="center"' +

@@ -174,7 +174,7 @@ async function fetchTable(compId, seasonId, roundId) {
 }
 
 const CLUBS_META_URL =
-  'https://raw.githubusercontent.com/thenationalleague/tools/main/assets/data/clubs-meta.json';
+  'https://nl.tools/assets/data/clubs-meta.json';
 
 /* Season is derived, never hardcoded (spec §6). A literal year silently serves
    last season from August, which is the failure that looks like the feed

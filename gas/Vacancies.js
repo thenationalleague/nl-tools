@@ -60,7 +60,7 @@ function vacRequestCode(body) {
   try {
     var htmlBody =
       '<div style="font-family:Arial,sans-serif;line-height:1.6;color:#1a2a44;">' +
-      '<img src="https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/crests/National%20League%20rose.png" ' +
+      '<img src="https://nl.tools/assets/crests/National%20League%20rose.png" ' +
       'style="height:48px;margin-bottom:20px;display:block;" alt="National League">' +
       '<h2 style="margin:0 0 12px;font-size:20px;">Vacancy submission — verification code</h2>' +
       '<p>Your verification code is:</p>' +
