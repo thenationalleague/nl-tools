@@ -264,7 +264,7 @@ leaves its audit entry.
 
 ## Access / auth model
 
-Identical to the retired `/footage/club/` (see `footage/CONCEPT.md`): a
+Identical to the retired `/footage/club/` (see `system/retired/nl-cup-footage.md`): a
 **named Firebase app** (`nlUwPromo`,
 in `_shared.js`) signs in **anonymously** for reads/writes so it can't clobber
 a portal (superadmin) login open in another tab. Master/UW passcodes and

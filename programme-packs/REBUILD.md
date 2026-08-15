@@ -1,8 +1,11 @@
 # Programme Packs — v2 rebuild spec (retire Apps Script + Drive)
 
 > **Status: planned, not started.** The live tool (`index.html` + `gas/`) keeps
-> running until v2 is ready. Build sequencing: **after** the NL Cup Footage tool's
-> Stages C/D, which prove the exact Firebase Storage patterns this reuses.
+> running until v2 is ready. Build sequencing: this was queued **after** the NL Cup Footage tool, which was
+> retired on 15/08/2026 (`system/retired/nl-cup-footage.md`), so nothing is in
+> front of it now. That tool's stages C/D were meant to prove the Firebase
+> Storage patterns this reuses — they never shipped, so those patterns are
+> unproven rather than borrowed, and this build has to establish them itself.
 
 ## Why rebuild
 
@@ -19,7 +22,7 @@ It works, but it fights the platform. Owner decision: **replace it.**
 
 ## Decision
 
-Rebuild on the **same clean stack as the NL Cup Footage tool**: Firebase Storage
+Rebuild on the stack NL Cup Footage was going to use: Firebase Storage
 for the bytes, RTDB for metadata, Firebase Storage Security Rules for access.
 **Zero Apps Script.**
 

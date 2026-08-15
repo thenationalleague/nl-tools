@@ -76,7 +76,7 @@ Apps Script web apps, both fan-facing, both with no repo copy of their code:
 
 | Deployment ends | Was behind | Now |
 |---|---|---|
-| `…Eqlzcw/exec` | the live blog (read posts **and accept public submissions**) | unplugged — see [`../embeds/REBUILD.md`](../embeds/REBUILD.md) |
+| `…Eqlzcw/exec` | the live blog (read posts **and accept public submissions**) | unplugged — see [`../system/retired/live-blog-and-transfer-centre.md`](../system/retired/live-blog-and-transfer-centre.md) |
 | `…5YtHOFzK/exec` | the transfer centre feed | unplugged — same |
 
 Both sat in front of a **Google Sheet**. Rather than bring them under the sync,
@@ -85,7 +85,7 @@ backends dropped. So this project stays one Apps Script project, not three.
 
 **Neither is switched off yet.** Removing the repo's calls does not unpublish an
 Apps Script deployment — until someone archives them in the editor they remain
-public endpoints, and the live-blog one still accepts submissions. `REBUILD.md`
+public endpoints, and the live-blog one still accepts submissions. `system/retired/website-insights-and-analysis.md`
 has the decommission order.
 
 ## Backend authz — `SECURITY-invite-authz.md`
