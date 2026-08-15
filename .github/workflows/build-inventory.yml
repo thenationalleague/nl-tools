@@ -1,0 +1,81 @@
+name: Build estate inventory
+
+# Regenerates assets/data/tools-inventory.json — the data behind /estate/.
+#
+# On push to main rather than on a schedule: the inventory describes the repo
+# itself, so the only thing that can invalidate it is a commit. A nightly cron
+# would spend most of its runs rewriting an identical file, and would leave the
+# estate page stale for up to a day after someone adds or deletes a page.
+#
+# Paths are filtered to HTML and to the registry snapshot. Everything the
+# scanner reads is one of those two, so a commit that only touches (say)
+# functions/ or assets/data/ cannot change the output and does not need a run.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.html'
+      - 'system/rtdb/tools-registry.snapshot.json'
+      - 'scripts/build-inventory.js'
+      - '.github/workflows/build-inventory.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# A second push landing mid-run would race this one to the same file. Queue
+# instead of cancelling: the later run must still produce a commit, or the
+# inventory silently stops tracking main.
+concurrency:
+  group: build-inventory
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          # The scanner reads git history for per-file commit counts, which a
+          # shallow clone reports as 1 for everything.
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build inventory
+        run: node scripts/build-inventory.js
+
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/data/tools-inventory.json
+          if git diff --cached --quiet; then
+            echo "Inventory unchanged"
+            exit 0
+          fi
+          git commit -m "chore: rebuild estate inventory"
+
+          # Push with up to 3 retries, rebasing if main moved while we worked.
+          # Our commit only touches the one generated JSON, so a rebase conflict
+          # against ordinary tool changes is essentially impossible.
+          for i in 1 2 3; do
+            if git push; then
+              echo "Push succeeded on attempt $i"
+              exit 0
+            fi
+            echo "Push attempt $i failed - fetching and rebasing"
+            git fetch origin main
+            git rebase origin/main || {
+              echo "Rebase failed - bailing"
+              exit 1
+            }
+          done
+          echo "All 3 push attempts failed"
+          exit 1
