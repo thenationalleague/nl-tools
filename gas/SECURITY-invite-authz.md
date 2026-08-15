@@ -1,7 +1,7 @@
 # GAS authz — invite & approval actions (Phase 7)
 
 **Status:** client-side fix landed in this PR (`portal/index.html` v5.95 +
-`gas/Notifications.gs` mirror). **The GAS-side guards below must be pasted into
+`gas/Notifications.js` mirror). **The GAS-side guards below must be pasted into
 the Apps Script project and re-deployed (new version of the existing
 deployment) for the fix to take effect.** Until then the hole is open.
 
@@ -9,7 +9,7 @@ deployment) for the fix to take effect.** Until then the hole is open.
 
 The consolidated Apps Script web app is deployed **Execute as: Me / Who has
 access: Anyone**, and its `/exec` URL is public (it ships in `nl-utils.js` as
-`NL.endpoints.gas`). `doPost` (see `gas/Code.gs`) dispatches on `action` with
+`NL.endpoints.gas`). `doPost` (see `gas/Code.js`) dispatches on `action` with
 **no authentication** — every handler runs with the owner's identity and the
 `RTDB_SECRET`, which bypasses all Realtime Database security rules.
 
@@ -41,7 +41,7 @@ GAS and must be pasted + redeployed.
 ### 1. `Utils.gs` — one shared verifier (reuses the ProgrammePacks pattern)
 
 Add this function. It mirrors `pp_verifyToken_` in
-`programme-packs/gas/ProgrammePacks.gs` so there is **one** verifier across the
+`gas/ProgrammePacks.js` so there is **one** verifier across the
 backend (verify the Firebase ID token → resolve the caller's role from RTDB):
 
 ```javascript
@@ -116,7 +116,7 @@ Insert at the **very top** of **both** `sendApproval(body)` and
 
 Leave `notifyAdmin` and `confirmRequest` **unchanged** — they are the
 pre-registration request flow and have no signed-in caller. (Mirrored in
-`gas/Notifications.gs` in this repo, with the guards applied.)
+`gas/Notifications.js` in this repo, with the guards applied.)
 
 ### 3. Portal client — send the token (DONE in this PR)
 
@@ -131,7 +131,7 @@ request form are left as bare fetches (pre-auth by design).
 1. Paste `verifyCaller_` into **Utils.gs**.
 2. Add the guard to **`sendInvite`** (Invite.gs) and the tier check.
 3. Add the guard to **`sendApproval`** + **`sendRejection`** (Notifications.gs)
-   — or paste the mirrored `gas/Notifications.gs` from this repo.
+   — or paste the mirrored `gas/Notifications.js` from this repo.
 4. **Deploy → Manage deployments → ✎ existing Web App deployment → New
    version → Deploy** (keeps the `/exec` URL stable).
 5. Smoke test: signed-in admin can still invite/approve/reject; a raw

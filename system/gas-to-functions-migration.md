@@ -10,20 +10,27 @@ mail (the single "strictly necessary" bit of Apps Script). The public GAS web
 app is fully decommissioned; no browser ever calls GAS again.
 
 > **STATUS CHECK, 15/08/2026.** That is the *goal*, stated in the present tense,
-> and it reads as though it has happened. It has not. **Eight pages still call
+> and it reads as though it has happened. It has not. **Seven pages still call
 > GAS** through `NL.endpoints.gas`:
 >
 > `index.html` (the login page) · `portal/` · `vacancies/` · `vacancies/submit/`
-> · `programme-packs/` · `photoshelter-onboarding/` · `meeting-notes/` ·
-> `claudio/`
+> · `programme-packs/` · `meeting-notes/` · `claudio/`
+>
+> (`photoshelter-onboarding/` was the eighth until v1.0 dropped its GAS call
+> entirely — the email-verification flow it used had been abandoned.)
 >
 > Phase 0 landed in PR #468 and the migration has not moved since. GAS is not a
 > residual shim — it is a live backend serving the page people sign in on.
 >
 > Because it is still load-bearing and still hand-deployed, the mirror in `gas/`
 > now has a sync: `.github/workflows/sync-gas.yml` pulls the live project daily
-> and commits only on drift. Until that runs, "in-repo mirror" is an unverified
-> claim about the one layer nothing else checks.
+> and commits only on drift. Its first run found the mirror was six files out of
+> fifteen and three of the six had drifted; the hand-pasted `.gs` copies are
+> gone and `gas/*.js` is now the only copy. See `gas/README.md`.
+>
+> The sync covers the **consolidated** project only. Two further Apps Script web
+> apps — behind the live-blog and transfer-centre embeds — are still unmirrored
+> and out of scope of this migration, which was written as though there were one.
 
 Status of this doc: **plan**. The interim security patch (Phase 0) is landed
 in PR #468; everything below is the deliberate follow-on.
@@ -94,7 +101,7 @@ Auth guards on `sendInvite` / `sendApproval` / `sendRejection` on the existing
 GAS, + client sends `idToken`. Closes the takeover hole while the rest is
 planned. **Kill-switch option for cost-abuse:** if you want zero AI-proxy
 exposure before Phase 3, comment out the `chaseEmail` (dead) and optionally
-`claudio` / `generateMeetingMinutes` dispatch lines in `gas/Code.gs` and
+`claudio` / `generateMeetingMinutes` dispatch lines in `gas/Code.js` and
 redeploy.
 
 ### Phase 1 — scaffold Functions
@@ -134,7 +141,7 @@ Migrate to callables with native auth:
 - `claudio` (Claudio) and `generateMeetingMinutes` (Meeting Notes) → callables,
   keys from Secret Manager, gated by native auth. Kills the cost-abuse vector.
 - **Delete `chaseEmail` entirely** — chase-hq was removed from the site at brand
-  sweep v2.19; the router still dispatches it (`gas/Code.gs`). Dead endpoint.
+  sweep v2.19; the router still dispatches it (`gas/Code.js`). Dead endpoint.
 
 ### Phase 4 — Programme Packs → Firebase Storage *(separate rework)*
 Handled by the **Programme Packs on-Storage rework**, not this migration — when
@@ -143,7 +150,7 @@ that lands, the Drive-backed `pp_*` + `getTree` / `getDownloadUrl` /
 phase just tracks that the rework removes the last Drive dependency.
 
 ### Phase 5 — FixtureSync
-`gas/FixtureSync.gs` (time-driven NLS → RTDB) → **Cloud Scheduler + a Function**.
+`gas/FixtureSync.js` (time-driven NLS → RTDB) → **Cloud Scheduler + a Function**.
 Self-contained; can move any time after Phase 1.
 
 ### Phase 6 — decommission the public GAS web app
@@ -177,11 +184,16 @@ that one flow while it's fixed.
 
 ---
 
-## What I'd want before writing Phase 2 code
+## What I'd want before writing Phase 2 code — **resolved, 15/08/2026**
 
-To turn this plan into Functions I'd need the current handler bodies I haven't
-seen (`Utils.gs`, `Invite.gs`, `Vacancies.gs`, `ClaudioChat.gs`,
-`MeetingNotes.gs`) — not for the interim patch, but so the ported Functions
-match today's behaviour exactly. We gather those at the start of each phase, not
-all up front. (`Drive.gs` isn't needed — Programme Packs' Storage rework retires
-it.)
+This section said the handler bodies were unseen and would be gathered phase by
+phase. They are all in the repo now: `.github/workflows/sync-gas.yml` pulls the
+live project daily, and the first run brought back nine files — 9,162 lines —
+that had never been mirrored, including `ClaudioChat`, `ClaudioStats` and
+`ProgrammePacks`. It also showed three of the six hand-pasted mirrors had
+drifted from live, so those were deleted; `gas/*.js` is now the only copy.
+
+So there is no gathering step left before Phase 2. What each phase ports is
+readable in `gas/` today, and the size of the job is visible for the first time:
+Claudio alone is 6,444 lines of Apps Script, which is why the AI proxies are
+Phase 3 and not Phase 1.

@@ -316,6 +316,23 @@ function git(args, fallback = '') {
 }
 
 /**
+ * A shallow clone silently poisons every date and count in this file: git can
+ * only see the commits it was given, so "last changed" becomes the oldest
+ * commit in the graft and "commits" becomes 1 for everything. The output still
+ * looks plausible — which is the problem. Sessions run in shallow clones by
+ * default, so without this guard a local rebuild produces a diff that reads
+ * like real churn and gets committed. The workflow uses fetch-depth: 0.
+ */
+function assertFullHistory() {
+  if (git(['rev-parse', '--is-shallow-repository'], 'false') !== 'true') return;
+  console.error('Refusing to build: this is a shallow clone.');
+  console.error('Every lastCommit and commits value would be wrong but look fine.');
+  console.error('Deepen first:  git fetch --unshallow');
+  console.error('Or, to inspect the classification only:  --allow-shallow');
+  process.exit(1);
+}
+
+/**
  * Date and commit count only — never author or subject. See the header note:
  * this JSON is world-readable and commit metadata carries names.
  */
@@ -328,6 +345,8 @@ function gitFacts(relPath) {
 /* ── main ────────────────────────────────────────────────────────────────── */
 
 function main() {
+  if (!process.argv.includes('--allow-shallow')) assertFullHistory();
+
   const registry = fs.existsSync(REGISTRY)
     ? JSON.parse(fs.readFileSync(REGISTRY, 'utf8'))
     : {};

@@ -60,7 +60,7 @@ _Recommendation pending: how much is in the Drive root today?_
 
 ## What gets deleted at cutover
 
-- `programme-packs/gas/` (`ProgrammePacks.gs`, its README) and the shared Apps Script project's `pp_*` actions + `doPost` router entries.
+- `gas/ProgrammePacks.js` (and its section in `gas/README.md`) plus the shared Apps Script project's `pp_*` actions + `doPost` router entries.
 - Drive-specific UI/fields: the "⤴ Open in Drive" button, `driveId`, `PP_GAS_URL`, the sync/reconcile flow.
 
 ## Cost

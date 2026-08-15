@@ -109,7 +109,7 @@ signup-time endpoint.
 **Current state:** invite acceptance is back to the **client-side write** (works
 for everyone). The takeover vector stays closed by the interim `users/$uid`
 `.validate` rule (blocks self-granted admin/superadmin). The GAS `consumeInvite`
-code remains mirrored in `gas/Invite.gs` as the reference implementation but is
+code remains mirrored in `gas/Invite.js` as the reference implementation but is
 **not called**.
 
 **The real durable fix → a Firebase Cloud Function.** A callable/HTTPS Function
@@ -125,13 +125,13 @@ Phase 2 of `system/gas-to-functions-migration.md` and is now the path of record.
 Roles are now written by the **trusted backend**, never self-asserted by the
 client. Landed in code:
 
-- **`gas/Utils.gs`** — `verifyIdentity_(idToken) → {uid,email}` (verifies the
+- **`gas/Utils.js`** — `verifyIdentity_(idToken) → {uid,email}` (verifies the
   token without needing an RTDB profile — the profile is being created);
   `verifyCaller_` refactored to reuse it.
-- **`gas/Invite.gs`** — new **`consumeInvite(body)`**: verifies the ID token,
+- **`gas/Invite.js`** — new **`consumeInvite(body)`**: verifies the ID token,
   re-validates the invite (email match, unused, unexpired), writes
   `users/<uid>/{role,tools,…}` with the RTDB secret, marks the invite used, and
-  clears the pending record. `gas/Code.gs` routes `consumeInvite`.
+  clears the pending record. `gas/Code.js` routes `consumeInvite`.
 - **`index.html`** (login page, v4.6) — `doSetPassword()` pre-checks the invite,
   creates the account, then calls `consumeInvite` with a fresh ID token. It **no
   longer writes `users/<uid>/role` itself.**
