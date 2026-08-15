@@ -23,11 +23,21 @@ name: Sync Apps Script
 #
 # SETUP (one-off, all from a browser)
 #   ONE secret: CLASP_CREDENTIALS — the contents of ~/.clasprc.json produced by
-#   `clasp login`. No local CLI needed: Google Cloud Shell
-#   (shell.cloud.google.com) gives you a browser terminal that can run
-#   `npx @google/clasp login --no-localhost`. It is a refresh token, not a
-#   password, and it can be revoked at myaccount.google.com → Security →
-#   Third-party apps.
+#   `clasp login` (use @google/clasp@3.3.0, matching the pin below).
+#
+#   No local CLI needed, but the login is fiddlier than it looks. clasp always
+#   redirects OAuth to http://localhost:8888 — v3's --no-localhost flag is
+#   documented but does nothing, and v2's works only via the `oob` flow Google
+#   switched off in 2022. So in Google Cloud Shell (shell.cloud.google.com):
+#     1. tab 1: npx @google/clasp@3.3.0 login      → prints an auth URL
+#     2. open it in a browser, authorise as the project's OWNER account
+#     3. the browser lands on localhost:8888 and fails — copy that whole URL
+#     4. tab 2: curl "<that URL>"                  → hands the code to tab 1
+#     5. tab 1 completes and writes ~/.clasprc.json; cat it, paste into the
+#        secret. The token never leaves Cloud Shell.
+#
+#   It is a refresh token, not a password. Revoke at myaccount.google.com →
+#   Security → Third-party apps.
 #
 # The script ID is deliberately NOT a secret. It names the project but grants
 # nothing without authorisation — the same class of identifier as the Firebase
@@ -84,7 +94,11 @@ jobs:
 
       - name: Install clasp
         if: steps.gate.outputs.ready == 'true'
-        run: npm install -g @google/clasp
+        # Pinned. The credential file format is clasp's own, so the version that
+        # WROTE ~/.clasprc.json and the version that reads it here have to agree
+        # — an unpinned major upgrade would break the sync silently, at 04:40,
+        # on the one layer that exists to catch silent breakage.
+        run: npm install -g @google/clasp@3.3.0
 
       - name: Authenticate
         if: steps.gate.outputs.ready == 'true'
