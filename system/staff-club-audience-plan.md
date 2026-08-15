@@ -48,8 +48,7 @@ then reviewed — no guesswork.
 `staff-chase-hq` (retired placeholder), `staff-claudio`, `staff-graphics`,
 `staff-holiday-lieu`, `staff-tasks` (retired 15/08/2026 —
 tool, parked record and rules all removed; see PR retiring it),
-`staff-travel-planner`, `staff-website-analysis`,
-`staff-website-archive`, `staff-website-insights`.
+`staff-travel-planner`, `staff-website-archive`.
 
 **`audience: "club"` (club-accessible — club + staff):**
 `media-dazn-vip`, `media-footage`, `media-programme-packs`,

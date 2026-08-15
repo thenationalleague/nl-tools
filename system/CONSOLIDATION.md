@@ -246,8 +246,12 @@ validator, a component ships with its acceptance checks.
   UTC-keyed), not drift.
 - **Footage / club-contacts / club-data external pages** — standalone,
   token-gated, no canon scripts by design. Optional to migrate later.
-- **Website-archive ↔ website-analysis being 40% the same file** — real, but
-  it's fork-drift needing its own shared-module design; separate track.
+- **Website-archive ↔ website-analysis being 40% the same file** — real, and
+  RESOLVED 15/08/2026 by deletion rather than by a shared-module design.
+  website-analysis was a v0.2 skeleton with the IA agreed and no business logic
+  ever ported; website-insights was 89 days idle. Both were parked, so nobody
+  could reach either. One app now — website-archive — with the merged plan in
+  website-archive/REBUILD.md. Two files cannot drift apart if there is one file.
 - **Programme-packs listing departed clubs** — might be deliberate (their
   Drive folders may need to outlive relegation). Needs an owner decision, not
   a silent "fix".
