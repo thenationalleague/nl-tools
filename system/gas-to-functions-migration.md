@@ -9,6 +9,22 @@ Auth + RTDB, with **native authentication** and repo-based deploys.
 mail (the single "strictly necessary" bit of Apps Script). The public GAS web
 app is fully decommissioned; no browser ever calls GAS again.
 
+> **STATUS CHECK, 15/08/2026.** That is the *goal*, stated in the present tense,
+> and it reads as though it has happened. It has not. **Eight pages still call
+> GAS** through `NL.endpoints.gas`:
+>
+> `index.html` (the login page) · `portal/` · `vacancies/` · `vacancies/submit/`
+> · `programme-packs/` · `photoshelter-onboarding/` · `meeting-notes/` ·
+> `claudio/`
+>
+> Phase 0 landed in PR #468 and the migration has not moved since. GAS is not a
+> residual shim — it is a live backend serving the page people sign in on.
+>
+> Because it is still load-bearing and still hand-deployed, the mirror in `gas/`
+> now has a sync: `.github/workflows/sync-gas.yml` pulls the live project daily
+> and commits only on drift. Until that runs, "in-repo mirror" is an unverified
+> claim about the one layer nothing else checks.
+
 Status of this doc: **plan**. The interim security patch (Phase 0) is landed
 in PR #468; everything below is the deliberate follow-on.
 
