@@ -13,6 +13,8 @@ when someone asks for it, and when they do, this is where the thinking is.
 | [`website-insights-and-analysis.md`](website-insights-and-analysis.md) | 15/08/2026 | Two of three views over one read-only dataset. Merged into `website-archive`, which survives — the agreed IA is in here. |
 | [`nl-cup-footage.md`](nl-cup-footage.md) | 15/08/2026 | Match-footage delivery to 32 Cup clubs. Three pages, two Cloud Functions, a Storage tree. |
 | [`public-site-tickers.md`](public-site-tickers.md) | 15/08/2026 | Three Sheet-fed CMS ticker widgets. All silently dead since March — one missing brace, one identity theft, one squatter. |
+| [`dazn-vip.md`](dazn-vip.md) | 15/08/2026 | VIP request log for the DAZN feed. The proposes→approves→confirms shape and the Reconcile tab are the keepers. |
+| [`chase-hq.md`](chase-hq.md) | 15/08/2026 | Commercial-chasing CRM, parked since July. Backend deleted; the unanswered question was ownership, not code. |
 
 ## Why one place
 
@@ -64,3 +66,15 @@ in Apps Script. There is no concept to preserve here: `/programme/` and
 
 `programme-packs/REBUILD.md` went with it — a v2 spec for a rebuild that had
 already happened somewhere else.
+
+**club-data (`/club-data/`)**, deleted 15/08/2026. Superseded by
+**club-contacts**, whose v2.8 absorbed the club-information capture as a wizard
+step and whose header has said "THIS IS THE UNIFIED FORM — supersedes the old
+club-data tool" since June. The two ran side by side for two months. RTDB
+`app-data/ops-club-data` still holds the collected returns; the rules stay
+until the data goes.
+
+**graphics/fixtures-results**, deleted 15/08/2026. Superseded by
+graphics/fixtures-graphic, which said in its own header it was "intended to
+replace it in a later pass". Richard confirmed which was the keeper; the pass
+happened.

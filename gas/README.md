@@ -58,7 +58,6 @@ files if a diff is ever needed.
 | `ClaudioChat.js` | 3,275 | Anthropic API proxy with tool-use, for Claudio. |
 | `ClaudioStats.js` | 3,169 | Historical NL statistics engine behind Claudio's tools. |
 | `Tests.js` | 46 | Manual test functions, run from the editor. Never web-facing. |
-| `ChaseHQ.js` | 91 | **Dead.** chase-hq was removed at brand sweep v2.19. Its router line is commented out as of 15/08/2026; the file retires in Phase 3. |
 | `appsscript.json` | — | The manifest. A change to scopes or runtime is exactly the drift worth seeing. |
 
 Five pages still call this backend through `NL.endpoints.gas`, including the

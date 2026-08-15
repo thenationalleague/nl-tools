@@ -1,6 +1,11 @@
 <!DOCTYPE html>
 <!--
-  club-kits/admin.html  v1.0 (29/07/2026)
+  club-kits/admin.html  v1.1 (15/08/2026)
+
+  v1.1 (15/08/2026) — Re-open keeps the club's answers.
+    The button now sets `reopened: true` on the record instead of deleting it;
+    the public form pre-fills from the record and the club edits. Copy updated
+    to say so, and the confirm is no longer a danger action — nothing is lost.
   Superadmin console for the club KIT COLOUR collection.
   Sibling of club-contacts/admin.html — same job, different payload.
 
@@ -10,7 +15,7 @@
 
   EDIT vs RE-OPEN: edit corrects a record here and stamps editedAt/editedBy,
   so a League correction stays distinguishable from what the club actually
-  submitted; re-open deletes the record so the club fills the form in again.
+  submitted; re-open unlocks the record so the club edits their answers.
   The RTDB rule always allowed an admin to overwrite an existing submission —
   what was missing was a way to offer the same colour choices, which is why
   the taxonomy now lives in the shared kit-colours.js.
@@ -34,7 +39,7 @@
 
   RE-OPEN matters more than it used to: with no gate on the form, a club can
   be filled in by mistake or by the wrong person, and submissions are
-  write-once. Re-open deletes the record so the club can start again.
+  write-once. Re-open flags the record; the form pre-fills and the club edits.
 
   The form collects no submitter name or email, so the export carries no
   personal data. It still must not be committed: it is club-confidential and
@@ -73,10 +78,12 @@
   <script>
     window.NL_TOOL = { title: 'Club Kits Admin', toolKey: 'ops-club-kits' };
     var NL_TOOL_KEY = 'ops-club-kits';
-    window.NL_CHANGELOG = [{ date: '29 Jul 2026', version: 'v1.0', items: [
+    window.NL_CHANGELOG = [{ date: '15 Aug 2026', version: 'v1.1', items: [
+      'Re-open now keeps a club\u2019s answers: the form unlocks pre-filled for editing instead of being wiped.'
+    ] }, { date: '29 Jul 2026', version: 'v1.0', items: [
       'New console for the kit colour collection: tracks who has come back and who is outstanding, with a review modal per club.',
       'The form is one public link for every club, so there are no per-club links to mint — “Copy form link” and one shared email message replace that.',
-      'Re-open deletes a club’s submission so they can fill the form in again — the form has no login, so a wrong or mistaken entry is fixed from here.',
+      'Re-open unlocks a club’s submission for editing — their answers are kept and pre-filled. The form has no login, so this is how a club corrects a mistake.',
       'Review modal shows a club’s kits with colour swatches; the JSON export is keyed by club and field-whitelisted. No submitter name or email is collected, so the export holds no personal data.',
       'Two exports: CSV (one row per kit, colours split into their own columns plus a dominant-family column to pivot on, and every outstanding club listed so all 72 are accounted for) and JSON (full nested structure).',
       'The JSON export also carries a “legacy” free-text rendering of each kit (e.g. "Red/White Stripes") so it can be merged straight into clubs-meta.',
@@ -1083,13 +1090,19 @@
       if (re) {
         e.stopPropagation();
         var name = re.getAttribute('data-reopen');
-        NL.confirm('Delete ' + name + '\u2019s submission so they can fill the form in again? This cannot be undone.',
-          { title: 'Re-open ' + name + '?', confirmText: 'Re-open', variant: 'danger' }).then(function (yes) {
+        NL.confirm('Unlock ' + name + '\u2019s form so they can edit their submission? Their answers are kept and pre-filled \u2014 nothing is deleted.',
+          { title: 'Re-open ' + name + '?', confirmText: 'Re-open' }).then(function (yes) {
           if (!yes) return;
-          if (NL.writeAudit) NL.writeAudit('clubkits_reopen', 'Re-opened kit form for ' + name);
-          db.ref(BASE + '/submissions/' + name).remove().then(function () {
-            delete S.subs[name];
-            NL.toast(name + ' re-opened.', 'success'); render();
+          if (NL.writeAudit) NL.writeAudit('clubkits_reopen', 'Re-opened kit form for ' + name + ' (answers kept)');
+          /* Flag, not delete. The public form sees `reopened` and loads the
+             record back into the wizard; the rules accept the club's next
+             write only while the flag is set, and the resubmission (which
+             never carries the flag) locks it again. Deleting was the old
+             behaviour, and it made fixing one sock colour cost a club the
+             whole return. */
+          db.ref(BASE + '/submissions/' + name).update({ reopened: true, reopenedAt: Date.now() }).then(function () {
+            S.subs[name].reopened = true;
+            NL.toast(name + ' re-opened for editing.', 'success'); render();
           }).catch(function (err) { NL.toast('Could not re-open: ' + (err.message || err), 'error'); });
         });
         return;

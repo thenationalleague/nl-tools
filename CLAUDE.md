@@ -93,7 +93,7 @@ is deliberate promotion, not hoarding every snippet into the canon.
 
 ## What this repo is
 
-NL Tools — a static GitHub Pages site (`thenationalleague/tools`, served at the root of the custom domain `https://nl.tools/` — the `CNAME` file at repo root binds the domain, and the old `thenationalleague.github.io/tools/*` URLs 301-redirect there) that hosts the National League's internal staff/club portal plus a family of self-contained tools (vacancies, attendance, holiday-lieu, claudio, dazn-vip, style-guide, etc.) and a separate family of fan-facing embed widgets that get pasted into the Urban Zoo CMS on `thenationalleague.org.uk`. (chase-hq existed until v2.19 of the brand sweep and was removed pending a structural rewrite.)
+NL Tools — a static GitHub Pages site (`thenationalleague/tools`, served at the root of the custom domain `https://nl.tools/` — the `CNAME` file at repo root binds the domain, and the old `thenationalleague.github.io/tools/*` URLs 301-redirect there) that hosts the National League's internal staff/club portal plus a family of self-contained tools (vacancies, attendance, holiday-lieu, claudio, style-guide, etc.) and a separate family of fan-facing embed widgets that get pasted into the Urban Zoo CMS on `thenationalleague.org.uk`. (chase-hq existed until v2.19 of the brand sweep and was removed pending a structural rewrite.)
 
 There is **no build step** for the site. HTML/CSS/JS is served as-is from the repo. The only Node code is in `scripts/` and `.github/workflows/` (article-index and GA pipelines).
 
@@ -212,7 +212,7 @@ For async flows that need a live auth token mid-flight, use `NL.ensureAuth().the
 Use the `/new-tool <slug>` skill. It copies `system/_template/`, swaps the five placeholders, and runs the lint. The skill **does not** wire the tool into the system — two follow-ups remain, both RTDB config:
 
 1. **RTDB `tools/<toolKey>` record** (label, url, icon, department, `defaults` per role). One record = portal card + auth-guard access. Without it the page is superadmin-only and invisible on the portal. **Check `system/rtdb/tools-registry.snapshot.json` first — the record may already exist.** When adding one, update that snapshot in the same PR and tell the user to paste it into RTDB `tools/`.
-2. **RTDB rules** for `app-data/<toolKey>/...`. Edit the full document at `system/rtdb/rules.snapshot.json` in the PR. That file **is** the deployed rules — see Deployment below; it ships when someone runs the workflow, so say so in the PR body. Do not extend the historical partial file `dazn-vip/dazn-vip.rules.json`.
+2. **RTDB rules** for `app-data/<toolKey>/...`. Edit the full document at `system/rtdb/rules.snapshot.json` in the PR. That file **is** the deployed rules — see Deployment below; it ships when someone runs the workflow, so say so in the PR body. (The historical partial file `dazn-vip/dazn-vip.rules.json` went with the tool on 15/08/2026 — the full document is the only rules file.)
 
 **Never assert that live RTDB *data* or the tools registry is missing or wrong based only on repo code — sessions cannot read the live database. Check the `system/rtdb/` snapshots, and if the answer matters, ask the user to verify in the console.** Rules are the exception: `rules.snapshot.json` is deployed from this repo, so it is authoritative rather than a guess. (See `system/rtdb/README.md` for the contract.)
 
