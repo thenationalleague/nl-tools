@@ -221,14 +221,14 @@ The new tool's `index.html` must keep the canonical `?v=N` values from the templ
 ## Two families of frontend, do not confuse them
 
 - **Gated staff/club tools** — dirs with `index.html` referencing `/system/auth-guard.js`, either top-level (`vacancies/`) or one level down (`graphics/totw/`). Behind Firebase Auth, use the shared canon. Listed by `lint-tools.sh`.
-- **Fan-facing embeds** — `embeds/*.html` (score-predictor, MOTM, vidiprinter, results-ticker, match-centre; plus transfer-centre and live-blog, **parked** — front-ends kept, Google Sheet backends dropped, see `system/retired/live-blog-and-transfer-centre.md`). Pasted into the Urban Zoo CMS. The CMS strips `<script src=...>` tags, so Firebase has to be loaded dynamically via `document.createElement('script')` with `.onload` chaining. Inline `<style>`, `<link>`, inline `<script>` survive. See `embeds/widget-handover.md` for the invariants — copy `score-predictor.html` as the starting point for any new embed. These do **not** use `auth-guard.js` and are out of scope for `lint-tools.sh`.
+- **Fan-facing embeds** — `embeds/*.html` (score-predictor, MOTM, vidiprinter, match-centre; plus transfer-centre and live-blog, **parked** — front-ends kept, Google Sheet backends dropped, see `system/retired/live-blog-and-transfer-centre.md`). Pasted into the Urban Zoo CMS. The CMS strips `<script src=...>` tags, so Firebase has to be loaded dynamically via `document.createElement('script')` with `.onload` chaining. Inline `<style>`, `<link>`, inline `<script>` survive. See `embeds/widget-handover.md` for the invariants — copy `score-predictor.html` as the starting point for any new embed. These do **not** use `auth-guard.js` and are out of scope for `lint-tools.sh`.
 
-`widgets/*.js` are a third bucket: standalone JS widgets embedded on the public
-site. One survives — the results ticker. The news ticker (Sheet-fed headlines)
-was deleted 15/08/2026: a missing brace on 02/03/2026 meant it had rendered
-nothing for five and a half months and nobody asked after it, which is its own
-verdict. The transfers ticker's scratch copy (`test.js`) went the same day; its
-real front-end is parked in `embeds/` with the transfer centre.
+There is no third bucket any more. `widgets/` — three Sheet-fed ticker widgets
+for the public site — was deleted on 15/08/2026 after all three turned out to
+have been silently dead since March (a missing brace, an identity theft, and a
+squatter; see `system/retired/public-site-tickers.md`). Their CMS embed blocks
+outlive them and should be removed from the site on the next edit of those
+pages.
 
 ## Deployment — nothing needs a terminal
 

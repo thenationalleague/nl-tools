@@ -12,6 +12,7 @@ when someone asks for it, and when they do, this is where the thinking is.
 | [`live-blog-and-transfer-centre.md`](live-blog-and-transfer-centre.md) | 15/08/2026 | Two fan-facing embeds on a Google Sheet backend. Front-ends kept in `embeds/`, unplugged. |
 | [`website-insights-and-analysis.md`](website-insights-and-analysis.md) | 15/08/2026 | Two of three views over one read-only dataset. Merged into `website-archive`, which survives — the agreed IA is in here. |
 | [`nl-cup-footage.md`](nl-cup-footage.md) | 15/08/2026 | Match-footage delivery to 32 Cup clubs. Three pages, two Cloud Functions, a Storage tree. |
+| [`public-site-tickers.md`](public-site-tickers.md) | 15/08/2026 | Three Sheet-fed CMS ticker widgets. All silently dead since March — one missing brace, one identity theft, one squatter. |
 
 ## Why one place
 
