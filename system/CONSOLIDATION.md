@@ -298,4 +298,4 @@ in lockstep. Explicitly NOT a one-tool-at-a-time job (that would re-fork the
 scale this programme just unified).
 
 Full write-up, evidence, proposed token values, and 1920×1200 mockups (Travel
-Planner, Portal, Tasks): **`system/brand-v3-scale-plan.md`** + `system/brand-v3-mockups/`.
+Planner, Portal, Tasks): **`system/brand-v3-scale-plan.md`** + `brand-dev/`.

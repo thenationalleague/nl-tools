@@ -71,7 +71,7 @@ The change lands in `system/nl-brand.css` `:root` and the shared component sizin
 | `.btn`              | `13px` / `11px 20px` (~36px tall)       | `15–16px` / ~48–52px tall       |
 | card grid floors    | `minmax(~200–280px, 1fr)`               | raise floor (~300–340px)        |
 
-The mockups in `./brand-v3-mockups/` show the target on three different UI
+The mockups in [`/brand-dev/`](../brand-dev/) show the target on three different UI
 patterns, all at 1920×1200 @ 100% with the real Carbona brand font:
 
 - `travel-planner.png` — form + itinerary + map (wide split layout)

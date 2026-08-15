@@ -4,7 +4,10 @@ The signed-off source-of-truth for **which tools are live**, **who can access
 each**, and **how each behaves per role** — from the full audit with Richard.
 Feeds the staff/club audience gating (`system/staff-club-audience-plan.md`).
 
-- **21 tools** → **13 live**, **8 parked** (pulled off the portal, back to planning).
+- **21 tools** at the July audit → **13 live**, **8 parked**. The 15/08/2026
+  estate purge has since retired eight of the twenty-one outright (rows marked
+  ⚫ below, each with its record under `system/retired/`); the parked set is
+  down to Claudio, Holiday & Lieu and the Transfer Centre.
 - Audience: **11 staff-audience** (NL staff only, clubs never) · **10 club-audience**
   (NL staff + clubs). Parking doesn't change audience — it changes portal presence.
 
@@ -38,16 +41,16 @@ record back and re-paste `tools/`. No `app-data` is touched, so no data is lost.
 | Tool | Status | Access model |
 |------|--------|--------------|
 | **Graphics & Media** | 🟢 Live | Flat — all NL staff; nothing to administer |
-| **Team of the Week** | 🟢 Live | Flat. **Needs UI overhaul** |
+| **Team of the Week** | ⚫ Dashboard retired 15/08/2026 (could not read its own data); the Enterprise TOTW *graphic* lives on under Graphics & Media |
 | **Travel Planner** | 🟢 Live | Flat. **UI change soon** = the brand-v3 scale / Compact-dash direction (`system/brand-v3-scale-plan.md`) |
 | **Website Archive** | 🟢 Live | Flat — live & working |
-| **Chase HQ** | 🅿️ Park — early | Provisional relationship management (e.g. commercial partnership seeking). Flat (nothing to administer) |
+| **Chase HQ** | ⚫ Retired 15/08/2026 — see `system/retired/chase-hq.md` | — |
 | **Claudio** | 🅿️ Park — advanced | AI helper; serious work needed before it's genuinely useful |
 | **Holiday & Lieu** | 🅿️ Park — advanced | **Admin panel** manages relationships, bank holidays, quotas. Non-admins see their own leave **and can approve leave for their reports** — the **org chart / reporting lines live in the tool and function today** (not a missing data model) |
-| **Meeting Notes** | 🅿️ Park — early | Lots of work needed. Flat once live |
-| **Tasks** | 🅿️ Park — early | Flat — no specific admin capability |
-| **Website Analysis** | 🅿️ Park — early | Scope to be nailed down |
-| **Website Insights** | 🅿️ Park — early | Scope to be nailed down |
+| **Meeting Notes** | ⚫ Retired 15/08/2026 | — |
+| **Tasks** | ⚫ Retired 15/08/2026 (an Intake rebuild exists unmerged on `claude/staff-portal-tool-review-vrb6kq`) | — |
+| **Website Analysis** | ⚫ Retired 15/08/2026 — concept folded into Website Archive (`system/retired/website-insights-and-analysis.md`) |
+| **Website Insights** | ⚫ Retired 15/08/2026 — same |
 
 ## Club-audience — NL staff + clubs (10)
 
@@ -57,10 +60,10 @@ record back and re-paste `tools/`. No `app-data` is touched, so no data is lost.
 | **Club Directory** | 🟢 Live | edit all club data | view all | edit **own** club's data | view all |
 | **Commercial Benchmarking** | 🟢 Live | edit data | view benchmarks (club dropdown) | view **output only** | view **output only** |
 | **Cup Footage** | ⚫ Retired 15/08/2026 | — | — | — | — |
-| **DAZN VIP** | 🟠 Live — **rework** | edit | view | edit = a **request** NL admin must sign off; sees pending "requested" status | view incl. "requested" status |
+| **DAZN VIP** | ⚫ Retired 15/08/2026 — see `system/retired/dazn-vip.md`; data kept in RTDB | — | — | — | — |
 | **Handbook** | 🟢 Live | edit content | view | view | view |
 | **Judgements & Decisions** | 🟢 Live | add / amend / remove all | view | view | view |
-| **Programme Packs** | 🟠 Live — **WIP** (moving to the Cup-Footage CDN) | upload/edit/download/remove in all folders + create folders | access + download (incl. zipped/batched); no edit | manage **own** folder incl. make/remove subfolders | access + download; no edit |
+| **Programme Packs** | ⚫ Retired 15/08/2026 — superseded by `/programme/` on Firebase Storage (shipped 03/08) | — | — | — | — |
 | **Transfer Centre** | 🅿️ Park — rework | — | — | — | — (prototype functions but needs bringing on-brand) |
 | **Vacancies** | 🟢 Live | add / edit / remove / **approve** all | view all | add/edit **own** club's only (**still needs NL admin approval** for every submission & change) | view all |
 

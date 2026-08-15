@@ -61,7 +61,7 @@ const SKIP_DIRS = new Set(['.git', 'node_modules', '_template']);
    disposable — the point of flagging them is that nothing else says so.
    public/ is deliberately NOT here: it holds a real standalone edition of a
    tool, not an experiment, and prejudging it as scrap would be wrong. */
-const SANDBOX_PREFIXES = ['lab/', 'decks/', 'system/brand-v3-mockups/'];
+const SANDBOX_PREFIXES = ['decks/', 'brand-dev/'];
 
 /* ── file walking ────────────────────────────────────────────────────────── */
 
@@ -589,7 +589,7 @@ function main() {
     }
 
     /* Directory-level credit, for collections referenced as a set rather than
-       file by file: system/brand-v3-scale-plan.md points at `./brand-v3-mockups/`
+       file by file: system/brand-v3-scale-plan.md points at `/brand-dev/`
        and never names the three pages inside it, so all three read as orphans
        while being live reference material for an in-progress plan.
        Restricted to directories with no index.html of their own — a bare

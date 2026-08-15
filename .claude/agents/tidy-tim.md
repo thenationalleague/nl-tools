@@ -113,7 +113,7 @@ Name the layer it belongs in:
   palette, the club crest LUT.
 - A hex inside a comment, a changelog block, or an SVG data URI.
 - Anything already recorded in `system/_template/.lint-waivers`.
-- Colour values in `decks/`, `lab/` — prototypes and one-shot decks are not
+- Colour values in `decks/`, `brand-dev/` — prototypes and one-shot decks are not
   held to tool canon. Say so rather than filing 900 findings.
 
 ## Output

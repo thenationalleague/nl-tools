@@ -124,7 +124,7 @@
  *   RTDB_URL                       — Firebase RTDB URL e.g. https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app
  *   RTDB_SECRET                    — Firebase RTDB legacy secret
  *   DRIVE_ID                       — Shared Files root folder ID e.g. 185haCQLXK1jHDxahFquGMkwyzNIjrZd5
- *   ANTHROPIC_KEY                  — Anthropic API key for Chase HQ (chaseEmail.gs)
+ *   ANTHROPIC_KEY                  — Anthropic API key (Claudio; Chase HQ retired 15/08/2026)
  *   CLAUDIO_ANTHROPIC_KEY          — Anthropic API key for Claudio AI assistant (ClaudioChat.gs) — separate billing
  *   MEETING_NOTES_ANTHROPIC_KEY    — Anthropic API key for Meeting Notes minutes (MeetingNotes.gs) — separate billing
  *   PROGRAMME_PACKS_DRIVE_ROOT_ID  — Drive folder ID for Programme Packs tree root (ProgrammePacks.gs)
@@ -175,7 +175,7 @@ function doGet(e) {
   }
 }
 
-/* ---- Entry point: POST (invites + notifications + vacancies + chase + claudio + meeting notes + programme packs) ----- */
+/* ---- Entry point: POST (invites + notifications + vacancies + claudio (door shut)) ----- */
 function doPost(e) {
   var body = {};
   try { body = JSON.parse(e.postData.contents); } catch(err) { body = {}; }
@@ -203,15 +203,15 @@ function doPost(e) {
        key. The kill switch was written into the migration plan for exactly
        this situation (Phase 0, "if you want zero AI-proxy exposure").
 
-         chaseEmail             chase-hq was deleted at brand sweep v2.19.
          claudio                parked. Returning in some form, so the
                                 handler stays; only the door is shut.
+         chaseEmail             chase-hq fully retired 15/08/2026 — handler
+                                file deleted (system/retired/chase-hq.md).
          generateMeetingMinutes meeting-notes retired 15/08/2026, handler
                                 deleted with it.
 
        Uncomment claudio when the tool comes back — ideally as a Cloud
        Function with native auth, per Phase 3. */
-    // if (action === 'chaseEmail')     return respond(generateChaseEmail(body));
     // if (action === 'claudio')        return respond(claudioChat(body));
 
     return respond({ ok: false, error: 'Unknown action: ' + action });

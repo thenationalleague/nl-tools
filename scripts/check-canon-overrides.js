@@ -53,7 +53,7 @@ const BASELINE = path.join(REPO, 'system/_template/.canon-overrides');
    cannot load nl-brand.css at all, so every style they carry is inline by
    necessity and "overriding canon" is meaningless for them. The Style Guide is
    a specimen sheet — restyling a component is its job. */
-const EXEMPT = [/^embeds\//, /^style-guide\//, /^system\/brand-v3-mockups\//, /^lab\//];
+const EXEMPT = [/^embeds\//, /^style-guide\//, /^brand-dev\//];
 
 /** Top-level class selectors defined in a stylesheet or <style> block. */
 function classesIn(css) {
