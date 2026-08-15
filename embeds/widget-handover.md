@@ -674,7 +674,7 @@ No points, no multipliers, no prizes. Two cumulative tables, both driven by `tal
 
 ## 22. Asset paths
 
-All assets in this repo, served via `https://raw.githubusercontent.com/thenationalleague/tools/main/…`. URL-encode `+` and spaces (`%2B`, `%20`) when constructing URLs from filenames.
+All assets in this repo, served via `https://nl.tools/…` — our own domain, on the GitHub Pages CDN. (Until 15/08/2026 these went through `raw.githubusercontent.com`; that host is a third party, sends no CORS on cached responses, and dies if the repo ever goes private. Do not reintroduce it.) URL-encode `+` and spaces (`%2B`, `%20`) when constructing URLs from filenames.
 
 - **NL+ logos** — `assets/logos/NL+ red lozenge.png`, `NL+ red square.png`, `NL+ white lozenge.png`, `NL+ white square.png`
 - **Division wide lockups** (header) — `assets/divisions/National-wide.png`, `North-wide.png`, `South-wide.png` (sponsor is inside the lockup; the standalone `Enterprise.png` is no longer used)
