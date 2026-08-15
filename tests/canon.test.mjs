@@ -290,3 +290,41 @@ test('csvParse round-trips NL.csv output, including real club names', () => {
   assert.deepEqual(plain(NL.csvParse(NL.csv(rows))), rows);
   assert.deepEqual(plain(NL.csvParse(NL.csv(rows, { bom: true }))), rows, 'BOM variant round-trips too');
 });
+
+/* ── NL.codeGate ───────────────────────────────────────────────────────────
+   The gate renders a screen and runs the caller's verify. It makes no security
+   claim of its own, and the surface is shaped so nobody can mistake one for
+   the other: viaFunction is the boundary, and it is named and separate.
+
+   Rendering needs a DOM the sandbox does not have, so these cover the surface
+   and the contracts a caller depends on. The keystroke path is covered by the
+   smoke test on the PR that converts each page. */
+
+test('NL.codeGate exposes the whole surface', () => {
+  assert.equal(typeof NL.codeGate, 'object');
+  for (const fn of ['open', 'ensure', 'resume', 'viaFunction', 'openAsAdmin', 'signOut']) {
+    assert.equal(typeof NL.codeGate[fn], 'function', `NL.codeGate.${fn} is a function`);
+  }
+});
+
+/* A verify is the only thing that decides whether anyone gets in. Defaulting
+   it to anything — even a rejecting stub — would make a gate with no check
+   look like a working gate, so it throws at call time instead. */
+test('NL.codeGate.open refuses to render without a verify', () => {
+  assert.throws(() => NL.codeGate.open({ title: 'x' }), /verify/);
+  assert.throws(() => NL.codeGate.open({ title: 'x', verify: 'yes' }), /verify/);
+});
+
+test('NL.codeGate.viaFunction returns a verify, not a result', () => {
+  const verify = NL.codeGate.viaFunction('app-data/ops-club-directory');
+  assert.equal(typeof verify, 'function');
+  assert.equal(verify.length, 1, 'takes the code');
+});
+
+/* resume() answers "is someone already through?" — with no claim to look for
+   the honest answer is nobody, not a thrown error on a page that has not
+   loaded Firebase yet. */
+test('NL.codeGate.resume with no claim resolves to null', async () => {
+  assert.equal(await NL.codeGate.resume(), null);
+  assert.equal(await NL.codeGate.resume(''), null);
+});

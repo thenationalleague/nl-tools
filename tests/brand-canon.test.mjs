@@ -63,3 +63,62 @@ test('.btn--icon composes with the existing colour variants', () => {
   assert.doesNotMatch(body, /(^|[;{\s])(background|color)\s*:/,
     '.btn--icon must not restate colours — that is the variant\'s job');
 });
+
+/* ── Entry route: the bar's colour says how you got in (v2.37) ─────────────
+   These four tests are the whole rule. It is a promise made to a person who
+   works across several of these pages — that they can tell, before reading a
+   word, whether the page knows them by name, by code, or not at all. Nothing
+   in a browser complains when it is broken, and it broke once already:
+   vacancies/submit wore the signed-in staff bar on a public form.
+
+   Red is reserved. If .nl-idbar ever gains --primary as a ground, an ungated
+   page can look like an authenticated one, which is the failure this exists
+   to prevent. */
+
+test('.nl-idbar is white with a red underline — you typed a code', () => {
+  const body = ruleBody('.nl-idbar');
+  assert.match(body, /background:\s*var\(--white\)/);
+  assert.match(body, /border-bottom:\s*3px solid var\(--primary\)/);
+});
+
+test('.nl-idbar--open is navy — nobody was asked who you are', () => {
+  const body = ruleBody('.nl-idbar--open');
+  assert.match(body, /background:\s*var\(--navy\)/);
+});
+
+test('.nl-idbar never claims the red ground reserved for a signed-in session', () => {
+  for (const sel of ['.nl-idbar', '.nl-idbar--open']) {
+    assert.doesNotMatch(ruleBody(sel), /background:\s*var\(--primary\)/,
+      `${sel} must not use the authenticated bar's ground`);
+  }
+});
+
+test('.topbar keeps the authenticated signature it is the only holder of', () => {
+  const body = ruleBody('.topbar');
+  assert.match(body, /background:\s*var\(--primary\)/);
+  assert.match(body, /border-bottom:\s*7px solid var\(--navy\)/);
+});
+
+/* The gate card and the bar are two halves of one flow: type a code, then be
+   told who the page now thinks you are. A gate with no bar to follow it is a
+   page that forgets. */
+test('.gate ships with the card, input and error slots NL.codeGate renders', () => {
+  for (const sel of ['.gate', '.gate__card', '.gate__title', '.gate__sub',
+                     '.gate__input', '.gate__err', '.gate__logo', '.gate__lockup']) {
+    assert.ok(rules.includes('\n' + sel + ' {') || rules.includes('\n' + sel + ':'),
+      `${sel} is present — NL.codeGate renders it`);
+  }
+});
+
+/* Deliberately excluded from the phone 16px floor at the end of the file: it is
+   --text-xl already. If someone adds it there "for consistency" they shrink it. */
+test('.gate__input is not caught by the small-screen 16px floor', () => {
+  /* Anchor on the section header, not the first 700px query — there are three
+     in the file and the earliest is nowhere near this block. Then skip past
+     the section's own comment, which names the class precisely to explain why
+     it is not in the list below it. */
+  const head = rules.indexOf('Text-entry controls: 16px floor');
+  const floor = rules.slice(rules.indexOf('*/', head));
+  assert.ok(!floor.includes('.gate__input'),
+    '.gate__input is --text-xl and must stay out of the 16px floor block');
+});
