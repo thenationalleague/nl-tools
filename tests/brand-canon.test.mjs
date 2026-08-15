@@ -122,3 +122,21 @@ test('.gate__input is not caught by the small-screen 16px floor', () => {
   assert.ok(!floor.includes('.gate__input'),
     '.gate__input is --text-xl and must stay out of the 16px floor block');
 });
+
+/* The bar wraps rather than overflowing (v2.38). The club-directory editor
+   carries a club selector and five buttons; the .ed-top it replaced set
+   flex-wrap and canon did not, so converting it would have pushed the controls
+   off the side of a laptop. Nothing in a browser complains — the row just runs
+   past the edge, on the one page whose bar is busy enough to notice. */
+test('.nl-idbar wraps rather than overflowing when the row runs out', () => {
+  assert.match(ruleBody('.nl-idbar'), /flex-wrap:\s*wrap/);
+  assert.match(ruleBody('.nl-idbar__actions'), /flex-wrap:\s*wrap/);
+});
+
+/* Wrapping only works because one child absorbs the slack. If __id ever loses
+   flex: 1 the actions stop being pushed right and the bar wraps immediately. */
+test('.nl-idbar__id keeps the flex: 1 the layout depends on', () => {
+  const body = ruleBody('.nl-idbar__id');
+  assert.match(body, /flex:\s*1/);
+  assert.match(body, /min-width:\s*0/);
+});
