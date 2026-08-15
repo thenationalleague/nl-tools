@@ -102,6 +102,30 @@ service-account-to-Drive bridge to build. The `pp_*` / `getTree` /
 
 ---
 
+## What is actually left — measured 15/08/2026
+
+Six pages still call GAS, but the surface is far smaller than that count
+suggests, and two thirds of it needs no migration at all:
+
+| Page | Actions | Verdict |
+|---|---|---|
+| `index.html` | `notifyAdmin`, `confirmRequest` | **migrate** |
+| `portal/` | `sendInvite`, `sendApproval`, `sendRejection` | **migrate** |
+| `vacancies/`, `vacancies/submit/` | `vacancies_requestCode`, `vacancies_submit` | **migrate** |
+| `programme-packs/` | 11 × `pp_*` | **do not migrate.** Retires with the Storage rework — `programme-packs/REBUILD.md`. Porting Drive handlers to Functions would be work thrown away. |
+| `claudio/` | `claudio` | **do not migrate yet.** Tool is parked and its dispatch line is commented out. It returns as a Function when the tool returns. |
+
+So the real remaining job is **seven actions across four pages**, and every one
+of them is the same shape: touch RTDB, then send an email. `vacRequestCode` and
+`vacSubmit` end in `MailApp.sendEmail` exactly as the invite and approval
+handlers do.
+
+That collapses the migration to a single question — **where does mail come
+from?** — which Phase 1 already answered: one private GAS shim, called
+server-to-server, never by a browser. Build `sendMail`, port seven actions onto
+the RTDB-trigger pattern that already exists, and the public web app can be
+switched off.
+
 ## Phases
 
 Ordered by **security payoff first, difficulty last.** Each phase is
@@ -116,16 +140,40 @@ exposure before Phase 3, comment out the `chaseEmail` (dead) and optionally
 redeploy.
 
 ### Phase 1 — scaffold Functions
-- **Blaze: already active** (you have it for Storage) — prerequisite done.
-- `firebase init functions` (region **europe-west1**, to match RTDB).
-- Establish the **callable pattern** + a shared `requireRole(context, roles)`
-  middleware (the native replacement for `verifyCaller_`).
-- A client helper `nlCall(name, payload)` wrapping `httpsCallable` — the
-  successor to this PR's interim `nlGasFetch`.
-- Put Anthropic keys in **Secret Manager**.
+
+> **REWRITTEN 15/08/2026. The original Phase 1 cannot be done.** It said
+> "establish the **callable pattern**" and "a client helper `nlCall(name,
+> payload)` wrapping `httpsCallable`". Since this was written, the project
+> acquired an org policy blocking `allUsers` on new Cloud Run services — so a
+> **new callable cannot be given a public invoker**, and the people using these
+> tools have no Google account.
+>
+> This is not theory. It was hit three separate times and documented each
+> time: `functions/programme.js` (03/08/2026), `functions/club-directory.js`,
+> and `functions/fan-widgets.js` — "the existing callables still update fine
+> but a new one cannot be [created]". NL Cup Footage burned a working
+> `getFootageUrl` callable on the same wall before being retired.
+>
+> The six `onCall` functions in `functions/` are grandfathered. Twenty-one
+> RTDB triggers are not. **Building the plan as written would waste the work
+> and then fail at deploy.**
+
+- **Blaze: already active** — prerequisite done.
+- **The invocation pattern is settled and already in canon.** Client writes to
+  `authRequests/<uid>`, an RTDB trigger validates server-side and writes
+  `authGrants/<uid>`, client reads the grant and deletes both. Proven four times
+  (programme, club-directory, uw-promo, fan-widgets) and generalised into
+  `NL.codeGate.viaFunction(root)` in `nl-utils.js` v1.29. Nothing new to design.
+  - Known trade-off, from `programme.js`: a trigger sees no source IP, so it
+    cannot rate-limit by IP the way a callable could.
+  - Known cost: Eventarc delivery is seconds. Fine for sign-in, fatal for
+    anything a user waits on — see the footage post-mortem in
+    `system/retired/nl-cup-footage.md`, where it added 15–20s per preview.
+- `requireRole(...)` still wanted as the native replacement for `verifyCaller_`,
+  but as a helper inside the trigger, not middleware around a callable.
+- Put Anthropic keys in **Secret Manager** — deferred, see Phase 3 below.
 - Stand up the **private GAS email shim** + its shared secret, and a
-  `sendMail(...)` helper Function that calls it. All later phases send mail
-  through this one path.
+  `sendMail(...)` helper. All later phases send mail through this one path.
 
 ### Phase 2 — invites, notifications, vacancies *(highest payoff)*
 These are pure RTDB + email — exactly the actions with the security problem.
@@ -161,6 +209,12 @@ Migrate to callables with native auth:
 - **Delete `chaseEmail` entirely** — chase-hq was removed at brand sweep v2.19.
 
 ### Phase 4 — Programme Packs → Firebase Storage *(separate rework)*
+> **Confirmed 15/08/2026.** This is the whole reason the 11 `pp_*` actions are
+> not in the migration scope above. Also worth knowing: that rework was
+> sequenced behind NL Cup Footage's stages C/D, "which prove the exact Firebase
+> Storage patterns this reuses". Footage was retired before those stages
+> shipped, so the patterns are unproven rather than borrowed and this build has
+> to establish them itself.
 Handled by the **Programme Packs on-Storage rework**, not this migration — when
 that lands, the Drive-backed `pp_*` + `getTree` / `getDownloadUrl` /
 `getThumbnail` GAS actions retire with it. No Drive work happens here; this
@@ -171,6 +225,10 @@ phase just tracks that the rework removes the last Drive dependency.
 Self-contained; can move any time after Phase 1.
 
 ### Phase 6 — decommission the public GAS web app
+> Reachable sooner than this ordering implies. Once Phase 2's seven actions
+> move, the only browser-facing dispatch left is `claudio` (already commented
+> out) and the `pp_*` block (retires with Phase 4). Phases 3 and 5 do not block
+> the shutdown.
 - Remove `NL.endpoints.gas` from `nl-utils.js` (lockstep `?v=` bump).
 - Delete the `gas/` router + handler mirrors.
 - Retire the public Apps Script web-app deployment.
