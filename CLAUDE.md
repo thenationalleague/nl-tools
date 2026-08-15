@@ -150,6 +150,14 @@ PRs land on `main`; pushing to `main` directly is not done. Each session works o
 its own `claude/*` branch — the branch name is given in the session prompt, not
 here. (A specific branch name lived in this section and was months stale.)
 
+Branches are **squash-merged**, which means `git branch --merged` is worthless
+here: a squashed branch's commits never become ancestors of `main`, so it reports
+every one of 241 branches as unmerged. Use **Actions → Prune merged branches**
+instead — report mode first, then `delete` with `prune` typed in. It runs three
+tests and spares anything that fails all of them; the two lists beside it,
+`.github/branch-prune-allow.txt` and `.github/branch-prune-keep.txt`, record the
+hand-checked exceptions in each direction.
+
 ## The system/ canon and the wiring contract
 
 Every gated tool's `index.html` has a near-identical `<head>`. The source of truth for that head is `system/_template/index.html`. Four files in `system/` are shared by every tool and **cache-busted with `?v=N`**:

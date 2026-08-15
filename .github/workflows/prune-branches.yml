@@ -1,0 +1,158 @@
+name: Prune merged branches
+
+# Deletes branches whose work is already on main. Dry run by default: it prints
+# the verdict for every branch and deletes nothing until you ask it to.
+#
+# Squash-merging is why this needs a workflow at all. A squashed branch's
+# commits never become ancestors of main, so `git branch --merged` calls every
+# one of them unmerged and is useless here. Three tests are run instead, and a
+# branch has to pass one of them to be deleted.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'report = list only. delete = actually delete.'
+        required: true
+        default: report
+        type: choice
+        options: [report, delete]
+      confirm:
+        description: 'Type "prune" to allow delete mode. Ignored in report mode.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: prune-branches
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check the confirmation
+        if: inputs.mode == 'delete'
+        run: |
+          if [ "${{ inputs.confirm }}" != "prune" ]; then
+            echo "::error::Delete mode needs the confirm box to say exactly: prune"
+            exit 1
+          fi
+
+      - name: Fetch every branch
+        run: git fetch origin '+refs/heads/*:refs/remotes/origin/*' --quiet
+
+      - name: Classify and prune
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+
+          gh api --paginate "repos/$REPO/pulls?state=all&per_page=100" \
+            --jq '.[] | {n:.number, ref:.head.ref, sha:.head.sha, state:.state, merged:(.merged_at != null), at:.merged_at}' \
+            | jq -s '.' > prs.json
+          echo "pull requests read: $(jq 'length' prs.json)"
+
+          jq -r '.[] | select(.state=="open") | .ref'        prs.json | sort -u > open-refs.txt
+          jq -r '.[] | select(.merged) | "\(.ref)\t\(.sha)"' prs.json | sort -u > merged-heads.tsv
+
+          read_list() {
+            [ -f "$1" ] || return 0
+            sed 's/#.*//' "$1" | tr -d ' \t' | grep -v '^$' || true
+          }
+          read_list .github/branch-prune-allow.txt | sort -u > allow.txt
+          read_list .github/branch-prune-keep.txt  | sort -u > keep.txt
+          echo "hand-cleared for deletion: $(wc -l < allow.txt)   kept on purpose: $(wc -l < keep.txt)"
+
+          git ls-remote --heads origin | awk '{sub("refs/heads/","",$2); print $2"\t"$1}' | sort > tips.tsv
+          : > to-delete.txt
+          : > report.txt
+
+          while IFS="$(printf '\t')" read -r br tip; do
+            [ "$br" = "$DEFAULT_BRANCH" ] && continue
+
+            if grep -qxF "$br" keep.txt;      then echo "KEEP    $br  (listed in branch-prune-keep.txt)" >> report.txt; continue; fi
+            if grep -qxF "$br" open-refs.txt; then echo "KEEP    $br  (open pull request)"               >> report.txt; continue; fi
+
+            # 1. merge- or rebase-merged: the tip is already an ancestor of the default branch.
+            if git merge-base --is-ancestor "origin/$br" "origin/$DEFAULT_BRANCH"; then
+              echo "$br" >> to-delete.txt
+              echo "DELETE  $br  (tip is an ancestor of $DEFAULT_BRANCH)" >> report.txt; continue
+            fi
+
+            # 2. squash-merged and untouched since: the tip is a merged PR's head commit.
+            if grep -qxF "$(printf '%s\t%s' "$br" "$tip")" merged-heads.tsv; then
+              echo "$br" >> to-delete.txt
+              echo "DELETE  $br  (tip is the head of a merged pull request)" >> report.txt; continue
+            fi
+
+            # 3. squash-merged, with commits after it that were never merged anywhere.
+            last=$(jq -r --arg b "$br" '[.[] | select(.merged and .ref==$b)] | sort_by(.at) | last' prs.json)
+            if [ "$last" != "null" ]; then
+              n=$(echo "$last"  | jq -r .n)
+              at=$(echo "$last" | jq -r .at)
+              tipdate=$(git log -1 --format=%aI "origin/$br")
+              squash=$(git log "origin/$DEFAULT_BRANCH" --format=%h --fixed-strings --grep="(#$n)" | head -1)
+              if [ -n "$squash" ] && [ "$(date -u -d "$tipdate" +%s)" -le "$(date -u -d "$at" +%s)" ]; then
+                echo "$br" >> to-delete.txt
+                echo "DELETE  $br  (squashed as $squash for PR #$n, nothing pushed after)" >> report.txt; continue
+              fi
+              if grep -qxF "$br" allow.txt; then
+                echo "$br" >> to-delete.txt
+                echo "DELETE  $br  (PR #$n merged; later commits cleared by branch-prune-allow.txt)" >> report.txt; continue
+              fi
+              echo "KEEP    $br  (PR #$n merged, but commits were pushed after $at)" >> report.txt; continue
+            fi
+
+            if grep -qxF "$br" allow.txt; then
+              echo "$br" >> to-delete.txt
+              echo "DELETE  $br  (no merged pull request; cleared by branch-prune-allow.txt)" >> report.txt; continue
+            fi
+            echo "KEEP    $br  (no merged pull request)" >> report.txt
+          done < tips.tsv
+
+          sort -o report.txt report.txt
+          total=$(wc -l < tips.tsv); doomed=$(wc -l < to-delete.txt)
+
+          {
+            echo "## Prune report — \`$MODE\`"
+            echo
+            echo "$total branches, $doomed to delete, $((total - doomed - 1)) kept (plus \`$DEFAULT_BRANCH\`)."
+            echo
+            echo '```'
+            cat report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          cat report.txt
+
+          if [ "$MODE" != "delete" ]; then
+            echo
+            echo "Report only. Run again with mode=delete and confirm=prune to remove the $doomed above."
+            exit 0
+          fi
+
+          echo
+          fail=0
+          while read -r br; do
+            tip=$(awk -F"\t" -v b="$br" '$1==b{print $2}' tips.tsv)
+            if gh api -X DELETE "repos/$REPO/git/refs/heads/$br" >/dev/null 2>&1; then
+              echo "deleted  $br  ($tip)"
+            else
+              echo "FAILED   $br  ($tip)"; fail=1
+            fi
+          done < to-delete.txt
+          echo
+          echo "Every commit above is still reachable by its SHA, and any branch with a"
+          echo "pull request can be restored from that pull request's page."
+          exit $fail
