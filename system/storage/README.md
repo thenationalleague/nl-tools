@@ -1,13 +1,18 @@
 # Firebase Storage config
 
-Reference copies of the live configuration for `nl-tools.firebasestorage.app`.
-Neither is deployed by a workflow — both are applied by hand, and both are here
-so what is running is reviewable in a diff.
+The live configuration for `nl-tools.firebasestorage.app`. The rules file **is**
+what is deployed — same contract as `system/rtdb/rules.snapshot.json`, not a
+snapshot someone remembered to update.
 
 | File | What it is | How it gets live |
 |---|---|---|
-| `rules.snapshot.rules` | The full Storage security rules. Key idiom: `request.auth.token.email != null` separates real portal accounts from the anonymous capability sessions (programme, formerly footage), which carry no email claim. | Firebase console → Storage → Rules → paste the whole file |
-| `cors.json` | Bucket CORS. Needed whenever a page reads bytes into itself rather than handing the browser a link — the programme zip download, and the website-archive index fetch. A plain single-file download is unaffected. | Not settable in any console UI. Cloud Shell: `gcloud storage buckets update gs://nl-tools.firebasestorage.app --cors-file=system/storage/cors.json` |
+| `rules.snapshot.rules` | The full Storage security rules. Key idiom: `request.auth.token.email != null` separates real portal accounts from the anonymous capability sessions (programme, formerly footage), which carry no email claim. | Actions → **Deploy Storage rules** → type `publish` |
+| `cors.json` | Bucket CORS. Needed whenever a page reads bytes into itself rather than handing the browser a link — the programme zip download, and the website-archive index fetch. A plain single-file download is unaffected. | Not settable in any console UI, and not deployable through the Firebase CLI either. Cloud Shell: `gcloud storage buckets update gs://nl-tools.firebasestorage.app --cors-file=system/storage/cors.json` |
+
+The deploy checks what the rules *grant* before publishing, not just that they
+parse: an unconditional `if true`, or a catch-all that permits write, fails the
+run. A malformed file the API would reject anyway is the easy case; an open
+bucket deploys cleanly and looks fine.
 
 ## Why this directory exists
 
@@ -20,6 +25,11 @@ which.
 
 The live one is now the only one, and it is under `system/storage/` because
 Storage is not RTDB — `system/rtdb/` was simply where the first one landed.
+
+Three copies was a symptom, not the disease. The disease was that publishing
+meant pasting into a console, so the repo held snapshots rather than sources and
+nothing could tell you which snapshot was true. The deploy workflow is the fix;
+deleting the other two was tidying up after it.
 
 ## What is in the bucket
 

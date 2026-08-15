@@ -1,0 +1,95 @@
+name: Deploy Storage rules
+
+# Publishes system/storage/rules.snapshot.rules to nl-tools.firebasestorage.app.
+#
+# Separate from "Deploy RTDB rules" on purpose. They authenticate identically
+# and read almost identically, but they govern different products with
+# different blast radii — and this repository has already been bitten by one
+# name covering two things (deploy-footage-proxy.yml was deploying all four
+# Cloud Functions for months). A workflow called "Deploy RTDB rules" that also
+# published Storage rules would be the same mistake with a new coat of paint.
+#
+# Until this existed the Storage rules were pasted into the console by hand,
+# which is how the repository came to hold THREE rules files — /storage.rules,
+# system/storage/rules.snapshot.rules and system/rtdb/storage.rules.snapshot —
+# each headed "source of truth", each a month apart, and the oldest of them
+# denying every read in the bucket. Nobody could tell which was running. The
+# file in git IS the rules now.
+#
+# Deliberately manual, same reasoning as the RTDB one: these rules stand
+# between 72 clubs and their programme packs, and landing an unrelated PR must
+# not be able to publish them as a side effect.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "publish" to confirm you have read the diff'
+        required: true
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: storage-rules
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Refuse unless confirmed
+        if: ${{ inputs.confirm != 'publish' }}
+        run: |
+          echo "::error::Type 'publish' in the confirm box to run this."
+          exit 1
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # The failure mode for Storage rules is not a syntax error — the API
+      # catches those. It is publishing a bucket that anyone can read or write,
+      # which deploys perfectly and looks fine until it doesn't. So the checks
+      # here are about reach, not form.
+      - name: Check what the rules actually grant
+        run: |
+          set -euo pipefail
+          F=system/storage/rules.snapshot.rules
+
+          grep -q "rules_version = '2'" "$F" || { echo "::error::not a v2 rules file"; exit 1; }
+          grep -q 'match /b/{bucket}/o' "$F" || { echo "::error::no bucket match block"; exit 1; }
+
+          # `if true` is never right here. Every prefix in this bucket is either
+          # staff-only, club-scoped by a custom claim, or written by a service
+          # account that bypasses rules entirely.
+          if grep -nE 'allow[^:]*:\s*if\s+true' "$F"; then
+            echo "::error::a rule grants access unconditionally — refusing to publish"
+            exit 1
+          fi
+
+          # The catch-all is the last line of defence. If it ever grants write,
+          # every path not explicitly matched above becomes writable.
+          if awk '/match \/\{allPaths=\*\*\}/,0' "$F" | grep -qE 'allow write:\s*if\s+(true|request\.auth)'; then
+            echo "::error::the catch-all grants write — refusing to publish"
+            exit 1
+          fi
+
+          echo "Prefixes declared:"
+          grep -oE 'match /[a-z]+/' "$F" | grep -v '^match /b/$' | sort -u | sed 's/^/  /'
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      # firebase.json's storage block points at the snapshot, so this needs no
+      # config of its own — and `--only storage` means the database and
+      # functions blocks in the same file are not touched.
+      - name: Deploy
+        run: |
+          npx --yes firebase-tools@latest deploy --only storage \
+            --project nl-tools --non-interactive --force

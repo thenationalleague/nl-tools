@@ -112,6 +112,15 @@ test('website-archive reads the index from Storage, not from the public repo', (
   assert.match(page, /firebase\.storage\(\)\.ref\(INDEX_PATH\)\.getDownloadURL\(\)/);
 });
 
+test('the Storage rules deploy from the repo, not from someone\'s clipboard', () => {
+  const cfg = JSON.parse(read('firebase.json'));
+  assert.equal(cfg.storage?.rules, 'system/storage/rules.snapshot.rules');
+  // --only, so publishing rules cannot also redeploy functions or the database.
+  const wf = read('.github/workflows/deploy-storage-rules.yml');
+  assert.match(wf, /--only storage/);
+  assert.match(wf, /if true/, 'the unconditional-grant guard is gone');
+});
+
 test('the seed workflow exists, because the first run needs a non-empty bucket', () => {
   const wf = read('.github/workflows/seed-data-bucket.yml');
   assert.match(wf, /fetch-depth: 0/, 'it restores from history, so it needs all of it');
