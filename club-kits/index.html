@@ -1,6 +1,15 @@
 <!DOCTYPE html>
 <!--
-  club-kits/index.html  v1.0 (29/07/2026)
+  club-kits/index.html  v1.1 (15/08/2026)
+
+  v1.1 (15/08/2026) — Re-open edits instead of resetting.
+    An admin re-open used to DELETE the record, so a club fixing one sock
+    colour re-typed the whole return. Re-open now flags the record
+    (`reopened: true`); this form sees the flag, loads the answers back into
+    the wizard (recordToData — the inverse of the submit mapping), and the
+    resubmission drops the flag, which is what locks it again. Rules updated
+    in the same commit: a club write is accepted when the record is absent OR
+    flagged. Original submittedAt survives; resubmittedAt records the edit.
   Public club KIT COLOUR collection — guided wizard.
   ONE public URL, no login: the front page is a big club selector, and picking
   a club there is the only gate. Anyone can therefore submit as any club — the
@@ -36,7 +45,8 @@
     app-data/ops-club-kits/submissions/<club>   the record, WRITE-ONCE
   Keyed by club NAME — all 72 are unique and free of RTDB-illegal characters
   (. $ # [ ] /), so the console and every export stay readable. Write-once
-  means a mistaken or squatted entry needs an admin re-open (admin.html).
+  means a mistaken or squatted entry needs an admin re-open (admin.html),
+  which since v1.1 unlocks the record for editing rather than deleting it.
   Draft lives in localStorage until submit, keyed by club.
 
   NO nl-utils.js ON PURPOSE. This page is unauthenticated, and nl-utils
@@ -333,6 +343,39 @@ var db = firebase.database();
     };
   }
   var data = freshData();
+  var editingPrev = null;   /* the submitted record, when an admin re-opened it */
+
+  /* Inverse of the submit mapping: a stored record back into wizard state.
+     Stored garments carry only what cleanGarment kept, so blanks are
+     reconstituted from blankGarment and colour slots from the cleaned list.
+     Tolerant of short/missing arrays — a record can only have been written by
+     this form or the admin console, but belt and braces costs nothing. */
+  function recordToData(rec) {
+    var d = freshData();
+    d.manufacturer = String(rec.manufacturer || '');
+    ['outfield', 'gk'].forEach(function (set) {
+      var list = rec[set] || [];
+      d[set === 'outfield' ? 'nOutfield' : 'nGk'] =
+        Math.max(set === 'outfield' ? 2 : 1, Math.min(3, list.length || 0)) || (set === 'outfield' ? 2 : 1);
+      list.slice(0, 3).forEach(function (k, i) {
+        GARMENTS.forEach(function (g) {
+          var name = g[0], from = k[name] || {}, to = d[set][i][name];
+          to.colours = (from.colours || []).filter(Boolean).map(function (c) {
+            return { family: c.family || null, shade: c.shade || null, label: c.label || '', hex: c.hex || null, raw: !!c.raw };
+          });
+          if (!to.colours.length) to.colours = [null];
+          if (name === 'shirt') {
+            to.pattern = from.pattern || '';
+            to.patternOther = from.patternOther || '';
+          } else {
+            to.detail = from.detail || '';
+            to.detailOther = from.detailOther || '';
+          }
+        });
+      });
+    });
+    return d;
+  }
 
   var OUTFIELD_LABELS = ['Home', 'Away', 'Third'];
   var GK_LABELS = ['Goalkeeper — first', 'Goalkeeper — second', 'Goalkeeper — third'];
@@ -644,6 +687,13 @@ var db = firebase.database();
       manufacturer: String(data.manufacturer || '').trim(),
       outfield: [], gk: [], submittedAt: Date.now()
     };
+    /* Resubmission after an admin re-open: keep the original date, stamp the
+       edit. `reopened` is deliberately NOT carried over — its absence is what
+       locks the record again (see the rules). */
+    if (editingPrev) {
+      rec.submittedAt = editingPrev.submittedAt || rec.submittedAt;
+      rec.resubmittedAt = Date.now();
+    }
     activeKits().forEach(function (k) {
       rec[k.set].push({
         slot: k.set === 'gk' ? 'gk' + (k.idx + 1) : ['home','away','third'][k.idx],
@@ -660,6 +710,7 @@ var db = firebase.database();
       /* Keep the picker's snapshot current, so going back to it shows this
          club ticked rather than still looking outstanding. */
       submitted[clubName] = rec;
+      editingPrev = null;
       renderLocked(rec);
     }).catch(function (e) {
       btn.disabled = false; btn.textContent = 'Submit to the League';
@@ -739,7 +790,18 @@ var db = firebase.database();
       document.querySelector('.ks').style.display = '';
       document.querySelector('.kn').style.display = '';
       window.scrollTo(0, 0);
-      if (prev) { renderLocked(prev); return; }
+      editingPrev = (prev && prev.reopened) ? prev : null;
+      if (prev && !prev.reopened) { renderLocked(prev); return; }
+      if (prev && prev.reopened) {
+        /* An admin unlocked this club's record: load their answers back into
+           the wizard so they edit, rather than start again. The local draft is
+           ignored on purpose — the record is what the League has, and a stale
+           draft from before submission would silently shadow it. */
+        data = recordToData(prev);
+        cur = 0; render();
+        el('kStatus').textContent = 'Your form has been re-opened — your previous answers are loaded below. Step through, change what you need, and submit again.';
+        return;
+      }
       data = freshData();
       var draft = loadDraft();
       if (draft) {
