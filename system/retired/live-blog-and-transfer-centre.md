@@ -42,13 +42,14 @@ rebuilding the data layer is an afternoon.
 ## What was deleted
 
 - `live-blog-ticker.html`, `transfer-centre-ticker.html` — thin strip versions
-  of the two pages above. Nothing in them is not in the pages, and
-  `widgets/results-ticker-widget.js` is the modern reference for a ticker
-  (Shadow DOM, no external `<script src>`, CMS-safe).
-- `widgets/transfers-ticker-widget.js` — same, and also Sheet-backed via an
-  `opts.sheet` URL passed in from the embed.
+  of the two pages above. Nothing in them is not in the pages.
+- The whole `widgets/` family followed on 15/08/2026 — see
+  [`public-site-tickers.md`](public-site-tickers.md). The modern ticker
+  reference (Shadow DOM, no external `<script src>`, CMS-safe) is the
+  transfers-ticker code that spent five months squatting in
+  `widgets/results-ticker-widget.js` — git has it at `f938950e`.
 
-Git history has all three.
+Git history has all of them.
 
 ## How to plug either one back in
 

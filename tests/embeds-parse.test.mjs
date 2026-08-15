@@ -19,7 +19,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync, mkdtempSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -41,7 +41,11 @@ function moduleParses(source, label) {
   catch (e) { return `${label}: ${String(e.stderr).split('\n').slice(0, 3).join(' ')}`; }
 }
 
+/* widgets/ was deleted 15/08/2026 (system/retired/public-site-tickers.md) but
+   stays in the scan: if the directory ever comes back, its files are gated from
+   the first commit rather than after the next five-month silence. */
 for (const dir of ['widgets', 'embeds']) {
+  if (!existsSync(join(REPO, dir))) continue;
   for (const f of readdirSync(join(REPO, dir)).sort()) {
     if (f.endsWith('.js')) {
       test(`${dir}/${f} parses`, () => {
