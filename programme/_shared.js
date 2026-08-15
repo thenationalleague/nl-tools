@@ -52,7 +52,7 @@
 
   Data lives at RTDB app-data/media-programme/{config,folders,files,trash,audit}
   and Storage programme/<CODE>/… — shapes documented in /programme/README.md.
-  Rules: system/rtdb/rules.snapshot.json + system/rtdb/storage.rules.snapshot.
+  Rules: system/rtdb/rules.snapshot.json + system/storage/rules.snapshot.rules.
 */
 (function () {
   'use strict';
@@ -114,7 +114,7 @@
   /* programme/<CODE>/<folderId>/<fileId>-<name>
      <CODE> is the clubs-meta 3-letter code (or NL) and is the segment the
      Storage rules match on — never change its position in this path without
-     changing system/rtdb/storage.rules.snapshot. */
+     changing system/storage/rules.snapshot.rules. */
   function storagePath(club, folderId, fileId, name) {
     return STORAGE_ROOT + '/' + club + '/' + folderId + '/' + fileId + '-' + safeName(name);
   }

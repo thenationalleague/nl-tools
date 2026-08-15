@@ -264,9 +264,18 @@ is pasted into the console by hand.
 
 ## Data pipelines (GitHub Actions)
 
-- `.github/workflows/rebuild-index.yml` — daily 03:00 UTC. Runs `fetch-ga-metrics.js` + `fetch-ga-hourly.js` + `rebuild-index.js`. Commits to `assets/data/articles-index.json`, `ga-metrics.json`, `ga-hourly.json`, `ga-hourly-archive.json`. Authenticates to GCP via Workload Identity Federation (no JSON key).
+- `.github/workflows/rebuild-index.yml` — daily 03:00 UTC. Runs `fetch-ga-metrics.js` + `fetch-ga-hourly.js` + `rebuild-index.js`. Authenticates to GCP via Workload Identity Federation (no JSON key).
 
-The index-rebuild job handles concurrent runs by `git fetch origin main` + rebase before retrying push (up to 3 attempts).
+**The four feeds live in Firebase Storage under `data/`, not in git** (since
+15/08/2026). The job pulls them out of the bucket, rebuilds, and puts them back;
+it commits nothing and has `contents: read`. `.gitignore` covers all four, so a
+local run leaves untracked files rather than a 36MB staged diff. Between them
+they had been committed ~370 times at 9–36MB a go — the bulk of why a clone is
+489MB. Details and the recovery route: `system/storage/README.md`.
+
+`ga-hourly-archive.json` is the one that cannot be rebuilt — GA4 will not serve
+hours past its retention window — so the job **fails** rather than proceeding if
+the bucket copy is missing.
 
 The club-news pipeline (`build-club-news.yml`, its debug twin, the two
 `widgets/club-news-*.js` consumers and `assets/data/club-news.json`) was

@@ -22,7 +22,11 @@
    GA METRICS
      If assets/data/ga-metrics.json exists (produced by fetch-ga-metrics.js),
      this script reads it and merges per-article metrics into each record.
-     Missing GA data is non-fatal: articles simply get metrics:null.
+     If it is ABSENT, metrics are carried forward from the previous index
+     rather than nulled — fetch-ga-metrics.js runs with continue-on-error, and
+     one bad night at the GA API should not empty every view count in the
+     archive. ga-metrics.json is no longer committed (it is a build
+     intermediate), so that path is now reachable rather than theoretical.
      Metrics included: pageViews, users, avgEngagementTimeSecs, engagementRate,
      scrollRate (% of users who scrolled past 90%), sources (channel breakdown).
 
@@ -488,7 +492,36 @@ function aggregateMetrics(list) {
 
 function mergeGaMetrics(articles) {
   if (!fs.existsSync(GA_METRICS_PATH)) {
-    log('GA MERGE: ga-metrics.json not found - articles will have metrics:null');
+    /* Keep whatever the last good run worked out, rather than nulling it.
+       fetch-ga-metrics.js runs with continue-on-error, so one bad night at the
+       GA API used to mean every article in the index lost its view count — and
+       the index is what the archive renders from, so the counts would simply
+       vanish from the tool. Yesterday's numbers are wrong by a day. No numbers
+       at all look like the feature was removed.
+
+       This was latent rather than theoretical: it never fired only because
+       ga-metrics.json was committed, so a checkout always had yesterday's copy
+       on disk. It stopped being committed on 15/08/2026 (it is a build
+       intermediate — see .gitignore), which would have made a transient GA
+       failure destructive. */
+    const prev = readExistingIndex();
+    const byId = new Map();
+    if (prev) {
+      for (const a of prev.articles) {
+        if (a && a.postID && a.metrics) byId.set(String(a.postID), a.metrics);
+      }
+    }
+    if (byId.size) {
+      let kept = 0;
+      articles.forEach(a => {
+        const m = a && a.postID ? byId.get(String(a.postID)) : null;
+        a.metrics = m || null;
+        if (m) kept++;
+      });
+      log('GA MERGE: ga-metrics.json not found - carried ' + kept + ' article(s) forward from the previous index');
+      return { matched: kept, unmatched: articles.length - kept };
+    }
+    log('GA MERGE: ga-metrics.json not found and no previous metrics to carry - articles will have metrics:null');
     articles.forEach(a => { a.metrics = null; });
     return { matched: 0, unmatched: articles.length };
   }

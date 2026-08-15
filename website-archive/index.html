@@ -3,10 +3,19 @@
 <head>
 <!--
   NL Tools — Website Archive
-  Version: 2.4
+  Version: 2.5
   Date: 15/08/2026
 
   CHANGELOG
+  v2.5 (15/08/2026)
+    - The index now comes from Firebase Storage (data/articles-index.json)
+      rather than raw.githubusercontent.com. It is 29MB and was committed 123
+      times; the nightly Action writes it to the bucket instead, and git is out
+      of the loop. Needs firebase-storage-compat.js, added above.
+    - Reading it is authorised: getDownloadURL() is a rules-checked metadata
+      read, so an account without read on data/ never receives a URL. The old
+      raw.githubusercontent URL was world-readable by anyone who found it.
+
   v2.4 (15/08/2026)
     - Images are back. Every one on this page was pointed at the S3 bucket
       directly, and the bucket answers 403 to anonymous requests, so every one
@@ -197,6 +206,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-storage-compat.js"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -216,6 +226,13 @@
   var NL_TOOL_KEY = 'staff-website-archive';
 
   window.NL_CHANGELOG = [
+    {
+      date: '15 August 2026',
+      version: 'v2.5',
+      items: [
+        'The archive index is now served from Firebase Storage rather than from the public GitHub repository, so it is only readable by an account that can already open this tool.'
+      ]
+    },
     {
       date: '13 July 2026',
       version: 'v2.2',
@@ -1305,7 +1322,16 @@
    Entry point is window.nlAuthReady, called by auth-guard.js
    ================================================================ */
 
-var INDEX_URL = 'https://raw.githubusercontent.com/thenationalleague/tools/refs/heads/main/assets/data/articles-index.json';
+/* The index is a 29MB object in Firebase Storage, written nightly by the
+   Rebuild article index Action. It used to be fetched from raw.githubusercontent
+   because it was committed — 123 commits of it, which is most of the reason a
+   clone of this repository is half a gigabyte.
+
+   getDownloadURL() is a rules-checked metadata read, so an account that cannot
+   read data/ never gets a URL at all. The URL it returns carries a download
+   token that changes with every upload, so a copied link goes stale within a
+   day rather than lasting forever. */
+var INDEX_PATH = 'data/articles-index.json';
 var BYSLUG_URL = 'https://news.cms.web.gc.nationalleagueservices.co.uk/v1/byslug';
 var S3_IMAGE_BASE = 'https://s3.eu-west-1.amazonaws.com/gc-media-assets-v2.gc.nationalleagueservices.co.uk/';
 var NLS_IMAGE_BASE_SIZED = 'https://images.gc.nationalleagueservices.co.uk/fit-in/';
@@ -1590,7 +1616,9 @@ function wireControls() {
 
 /* ============ DATA LOAD ============ */
 function loadIndex() {
-  fetch(INDEX_URL, { cache: 'no-cache' })
+  NL.ensureAuth()
+    .then(function() { return firebase.storage().ref(INDEX_PATH).getDownloadURL(); })
+    .then(function(url) { return fetch(url, { cache: 'no-cache' }); })
     .then(function(r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
@@ -1610,7 +1638,7 @@ function loadIndex() {
     .catch(function(err) {
       showEmpty("Couldn't load archive",
         'The archive index could not be fetched. ' + (err && err.message ? err.message : '') +
-        '. Check that articles-index.json exists in the tools repo.');
+        '. It is written nightly to Firebase Storage by the Rebuild article index Action.');
     });
 }
 

@@ -109,7 +109,7 @@ everything under it; the club root offers the whole pack.
 > **Bulk download needs bucket CORS.** It reads file bytes into the tab, which
 > a browser will only do cross-origin if the bucket allows the origin —
 > confirmed live on 03/08/2026, where the first attempt failed exactly as the
-> UI predicted. The config is `system/rtdb/storage.cors.json`; there is no
+> UI predicted. The config is `system/storage/cors.json`; there is no
 > console UI for bucket CORS, so it is applied from Cloud Shell.
 > Single-file downloads never touch this: the browser saves those directly and
 > the page never sees the bytes. So "bulk fails, single works" has one cause,
@@ -217,14 +217,14 @@ folder otherwise costs one `getDownloadURL` round-trip per file, which is what
 makes a 60-file folder feel broken.
 
 Rules: `system/rtdb/rules.snapshot.json` (`app-data/media-programme`) and
-`system/rtdb/storage.rules.snapshot` (`match /programme/{club}/{allPaths=**}`).
+`system/storage/rules.snapshot.rules` (`match /programme/{club}/{allPaths=**}`).
 
 ## Deploying
 
 1. **Functions** — automatic. `.github/workflows/deploy-footage-proxy.yml` runs
    on any push to `main` touching `functions/**` and deploys the whole codebase,
    not just the footage proxy. Confirm the run is green.
-2. **Storage rules** — paste `system/rtdb/storage.rules.snapshot` into
+2. **Storage rules** — paste `system/storage/rules.snapshot.rules` into
    Firebase console → Storage → Rules
 3. **RTDB rules** — paste `system/rtdb/rules.snapshot.json` into
    Firebase console → Realtime Database → Rules
