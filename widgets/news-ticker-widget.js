@@ -1,4 +1,4 @@
-/* News Ticker Widget (v1.8.1) — Shadow DOM isolated embed
+/* News Ticker Widget (v1.8.3) — Shadow DOM isolated embed
    - Google Sheet CSV columns: Headline | Hyperlink
    - Infers club from hyperlink domain using assets/data/clubs-meta.json (match by domain)
    - Crests from assets/crests/(TEAMNAME).png where TEAMNAME = meta.name
@@ -10,7 +10,7 @@
 (function(){
   "use strict";
 
-  const VERSION = "v1.8.2";
+  const VERSION = "v1.8.3";
 
   const DEFAULTS = {
     csv: "https://docs.google.com/spreadsheets/d/e/2PACX-1vSuNN7o0PQ-YzDS7-oZe_D91PMpJmF9d6CYshqXcMOpJVq-WHceJN_qanp79QuwrqBMUX7KoGCMWXZm/pub?output=csv",
@@ -524,7 +524,8 @@
       el.appendChild(a);
 
       return el;
-       
+    }
+
     function buildSepEl(){
       const sep = document.createElement("span");
       sep.className = "sep";
