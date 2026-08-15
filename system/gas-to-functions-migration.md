@@ -114,7 +114,7 @@ suggests, and two thirds of it needs no migration at all:
 | `index.html` | `notifyAdmin`, `confirmRequest` | **migrate** |
 | `portal/` | `sendInvite`, `sendApproval`, `sendRejection` | **migrate** |
 | `vacancies/`, `vacancies/submit/` | `vacancies_requestCode`, `vacancies_submit` | **migrate** |
-| `programme-packs/` | 11 × `pp_*` | **do not migrate.** Retires with the Storage rework — `programme-packs/REBUILD.md`. Porting Drive handlers to Functions would be work thrown away. |
+| ~~`programme-packs/`~~ | ~~11 × `pp_*`~~ | **Gone, 15/08/2026** — superseded by `/programme/`, which had already shipped on Storage. Routes, both handler files and the last Drive dependency went with it. |
 | `claudio/` | `claudio` | **do not migrate yet.** Tool is parked and its dispatch line is commented out. It returns as a Function when the tool returns. |
 
 So the real remaining job is **seven actions across four pages**, and every one
@@ -210,17 +210,21 @@ Migrate to callables with native auth:
   Uncommenting the GAS line instead would restore the exposure.
 - **Delete `chaseEmail` entirely** — chase-hq was removed at brand sweep v2.19.
 
-### Phase 4 — Programme Packs → Firebase Storage *(separate rework)*
-> **Confirmed 15/08/2026.** This is the whole reason the 11 `pp_*` actions are
-> not in the migration scope above. Also worth knowing: that rework was
-> sequenced behind NL Cup Footage's stages C/D, "which prove the exact Firebase
-> Storage patterns this reuses". Footage was retired before those stages
-> shipped, so the patterns are unproven rather than borrowed and this build has
-> to establish them itself.
-Handled by the **Programme Packs on-Storage rework**, not this migration — when
-that lands, the Drive-backed `pp_*` + `getTree` / `getDownloadUrl` /
-`getThumbnail` GAS actions retire with it. No Drive work happens here; this
-phase just tracks that the rework removes the last Drive dependency.
+### Phase 4 — Programme Packs → Firebase Storage — **DONE 15/08/2026**
+
+> Complete, and not by this migration. `/programme/` shipped on Firebase Storage
+> on **03/08/2026** and said so in its own header; `/programme-packs/` was
+> deleted on **15/08/2026** along with all 17 `pp_*` routes, `getTree` /
+> `getDownloadUrl` / `getThumbnail`, `ProgrammePacks.js` and `Drive.js`.
+>
+> **No part of this project touches Google Drive any more**, which is what this
+> phase existed to track.
+>
+> Worth recording, because it caught the plan out twice in one day: the scoping
+> note above originally said these 11 actions should not be migrated "because
+> they retire with the Storage rework". The rework had already shipped. They
+> needed deleting, not planning around — the replacement had been live for
+> twelve days while the original kept its portal card and its routes.
 
 ### Phase 5 — FixtureSync
 `gas/FixtureSync.js` (time-driven NLS → RTDB) → **Cloud Scheduler + a Function**.
