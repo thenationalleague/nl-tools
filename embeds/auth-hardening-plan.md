@@ -369,7 +369,7 @@ behaves. It could be locked down first, independently, as a smaller proof.
 
 ## 4b. What each node's rule is doing, and why
 
-`embeds/nl-widgets.rules.json` carries no comments, and must not. The Firebase
+`system/rtdb/nl-widgets.rules.snapshot.json` carries no comments, and must not. The Firebase
 console parses the document as strict JSON: a `"//"` key is read as a database
 path whose value has to be an object, so a string there fails to publish with
 `Expected '{'`. The annotations therefore live here.

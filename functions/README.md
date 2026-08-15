@@ -125,7 +125,7 @@ in `nls/schedule.js` and are covered by `tests/nls-ingester.test.mjs`.
    never appears.
 2. **Cloud Scheduler API** must be enabled on `nl-tools` (console → *APIs &
    Services*). The deploy creates the two jobs; it cannot enable the API.
-3. **RTDB rules on nl-widgets.** `embeds/nl-widgets.rules.json` carries the
+3. **RTDB rules on nl-widgets.** `system/rtdb/nl-widgets.rules.snapshot.json` carries the
    `nls/` block. That project has **no rules deploy workflow** — the file is a
    snapshot and has to be pasted into the nl-widgets console by hand.
    Reads are granted per slice (`live/index/<comp>/<ymd>`, `live/matches/<id>`,

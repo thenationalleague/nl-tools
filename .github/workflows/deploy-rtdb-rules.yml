@@ -1,6 +1,23 @@
 name: Deploy RTDB rules
 
-# Publishes system/rtdb/rules.snapshot.json to the nl-tools Realtime Database.
+# Publishes the RTDB rules snapshots to their databases.
+#
+#   system/rtdb/rules.snapshot.json             → nl-tools    (staff + club tools)
+#   system/rtdb/nl-widgets.rules.snapshot.json  → nl-widgets  (fan data)
+#
+# TWO PROJECTS, ON PURPOSE
+# -----------------------
+# Fan traffic is anonymous, public-read and unbounded; staff data is users,
+# roles, club records and PII. Keeping them in separate databases means a
+# fan-side mistake cannot reach staff data and fan bandwidth cannot exhaust the
+# tools' quota. That split is deliberate and worth keeping.
+#
+# What was NOT deliberate is that only one half had a deploy path. The
+# nl-widgets rules — governing every fan vote, prediction and registration —
+# lived at embeds/nl-widgets.rules.json and were pasted into the console by
+# hand, with nothing checking the repo copy matched what was running. That is
+# the same drift found in the Apps Script mirror one project over, and it is
+# fixed the same way: the file in git IS the rules.
 #
 # Why this exists
 # ---------------
@@ -35,6 +52,15 @@ on:
         description: 'Type "publish" to confirm you have read the diff'
         required: true
         default: ''
+      target:
+        description: 'Which database'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - nl-tools
+          - nl-widgets
 
 permissions:
   contents: read
@@ -59,11 +85,18 @@ jobs:
       - name: Check the rules parse
         run: |
           python3 -c "
-          import json, sys
+          import json
           d = json.load(open('system/rtdb/rules.snapshot.json'))
-          assert 'rules' in d, 'no top-level rules key'
-          n = len(d['rules']['app-data'])
-          print('rules parse OK —', n, 'app-data nodes')
+          assert 'rules' in d, 'nl-tools: no top-level rules key'
+          print('nl-tools parse OK —', len(d['rules']['app-data']), 'app-data nodes')
+
+          w = json.load(open('system/rtdb/nl-widgets.rules.snapshot.json'))
+          assert 'rules' in w, 'nl-widgets: no top-level rules key'
+          # Fan data is public-facing. A default-open root there would expose
+          # every registration and vote, so it is asserted rather than trusted.
+          assert w['rules'].get('.read') is False, 'nl-widgets: root .read must be false'
+          assert w['rules'].get('.write') is False, 'nl-widgets: root .write must be false'
+          print('nl-widgets parse OK —', len(w['rules']) - 2, 'nodes, root denied by default')
           "
 
       - name: Authenticate to Google Cloud
@@ -72,5 +105,23 @@ jobs:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Deploy rules
-        run: npx --yes firebase-tools@latest deploy --only database --project nl-tools --non-interactive --force
+      # The committed firebase.json already points database.rules at the
+      # nl-tools snapshot, so this needs no config of its own.
+      - name: Deploy nl-tools rules
+        if: ${{ github.event.inputs.target == 'both' || github.event.inputs.target == 'nl-tools' }}
+        run: |
+          npx --yes firebase-tools@latest deploy --only database \
+            --project nl-tools --non-interactive --force
+
+      # A throwaway config passed with --config, NOT an overwrite of the
+      # committed firebase.json: that file also carries the functions block
+      # deploy-functions.yml depends on, and a workflow that quietly rewrites
+      # a committed file is how the next person ends up debugging a ghost.
+      - name: Deploy nl-widgets rules
+        if: ${{ github.event.inputs.target == 'both' || github.event.inputs.target == 'nl-widgets' }}
+        run: |
+          printf '{"database":{"rules":"system/rtdb/nl-widgets.rules.snapshot.json"}}\n' \
+            > /tmp/firebase-widgets.json
+          npx --yes firebase-tools@latest deploy --only database \
+            --config /tmp/firebase-widgets.json \
+            --project nl-widgets --non-interactive --force

@@ -1,13 +1,19 @@
 # RTDB config snapshots
 
-Reference copies of the **live Firebase RTDB configuration** for the
-`nl-tools` project. Claude Code (and humans) have no read access to the
-live database from a repo checkout — these files are the canonical
-in-repo answer to "what's deployed right now?".
+Reference copies of the **live Firebase RTDB configuration**. Claude Code (and
+humans) have no read access to the live databases from a repo checkout — these
+files are the canonical in-repo answer to "what's deployed right now?".
+
+**There are two databases, on purpose.** `nl-tools` holds staff and club data —
+users, roles, club records, PII. `nl-widgets` holds fan data — votes,
+predictions, registrations — reached by anonymous, public, unbounded traffic.
+Keeping them apart means a fan-side mistake cannot reach staff data and fan
+bandwidth cannot exhaust the tools' quota. Both now deploy from this directory.
 
 | File | Mirrors | Live home |
 |---|---|---|
-| `rules.snapshot.json` | The full database security rules. **Deployed from here** — see the contract below. | Firebase console → Realtime Database → Rules (read-only reference; edits made there are overwritten by the next deploy) |
+| `rules.snapshot.json` | The full **nl-tools** security rules. **Deployed from here** — see the contract below. | Firebase console → Realtime Database → Rules (read-only reference; edits made there are overwritten by the next deploy) |
+| `nl-widgets.rules.snapshot.json` | The full **nl-widgets** (fan data) security rules. **Deployed from here** too, as of 15/08/2026 — it previously sat in `embeds/` with no deploy path at all and was pasted into the console by hand, which is how a rules document governing every fan vote and registration came to have nothing checking it matched what was running. | Same, on the `nl-widgets` project |
 | `storage.rules.snapshot` | The full Storage security rules. Key idiom: `request.auth.token.email != null` distinguishes real portal accounts from the anonymous-auth capability pages (footage, uw-promo) — anonymous tokens carry no email claim. | Firebase console → Storage → Rules |
 | `storage.cors.json` | Bucket CORS. Needed **only** for bulk (zip) download, which reads file bytes into the page — a browser will not do that cross-origin unless the bucket allows the origin. Single-file downloads are unaffected: the browser saves those directly and the page never sees the bytes. | Not settable in any console UI — Cloud Shell: `gcloud storage buckets update gs://nl-tools.firebasestorage.app --cors-file=system/rtdb/storage.cors.json` |
 | `tools-registry.snapshot.json` | The `tools/` node (tool registry: labels, urls, role defaults) | RTDB `tools/` (drives the portal cards **and** auth-guard access defaults) |
@@ -15,11 +21,17 @@ in-repo answer to "what's deployed right now?".
 
 ## The contract
 
-1. **`rules.snapshot.json` is deployed from this repo. It is not a snapshot
-   any more — it is the rules.** `firebase.json` points at it and the
-   **Deploy RTDB rules** workflow publishes it (Actions tab → Run workflow →
-   type `publish`). No terminal, no console paste, and the repo cannot drift
-   from live because the repo *is* live.
+1. **Both rules files are deployed from this repo. They are not snapshots
+   any more — they are the rules.** The **Deploy RTDB rules** workflow
+   publishes them (Actions tab → Run workflow → type `publish`), with a
+   **target** box choosing `both`, `nl-tools` or `nl-widgets`. No terminal, no
+   console paste, and the repo cannot drift from live because the repo *is*
+   live.
+
+   The nl-widgets deploy is checked before it runs: the root `.read` and
+   `.write` must both be `false`. That file is one edit away from exposing
+   every fan registration, so the default-deny is asserted rather than
+   trusted.
 
    Deliberately manual, never on push: rules govern every tool in the project,
    and landing an unrelated PR should not be able to lock 72 clubs out of

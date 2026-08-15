@@ -79,7 +79,7 @@ Two hard rules, learned the expensive way in the MOTM rebuild:
 App Check is live in monitor mode on both fan widgets — keep the site key
 wired when you touch initialisation.
 
-RTDB rules for this family live in `embeds/nl-widgets.rules.json` and the
+RTDB rules for this family live in `system/rtdb/nl-widgets.rules.snapshot.json` and the
 full document in `system/rtdb/rules.snapshot.json`. A rules change edits the
 full snapshot and must be flagged in the PR body for pasting into the
 console — nothing applies it automatically.
