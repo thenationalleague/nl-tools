@@ -51,7 +51,7 @@ tool, parked record and rules all removed; see PR retiring it),
 `staff-travel-planner`, `staff-website-archive`.
 
 **`audience: "club"` (club-accessible — club + staff):**
-`media-dazn-vip`, `media-footage`, `media-programme-packs`,
+`media-dazn-vip`, `media-programme`,
 `media-transfer-centre`, `ops-attendance`, `ops-club-directory`,
 `ops-commercial-benchmarking`, `ops-handbook`, `ops-judgements`,
 `ops-vacancies`.
