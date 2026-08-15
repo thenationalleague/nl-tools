@@ -268,15 +268,28 @@ function familyOf(relPath, species) {
  *
  *   main      the tool's front door (group-root index.html)
  *   admin     its admin panel
+ *   reader    its PUBLIC no-login view of the stamped/published version
  *   sub       a nested tool page (graphics/totw/)
- *   variant   a named alternative view of the same thing (print, reader, poster)
+ *   variant   another named view of the same thing (print, editor, link)
  *   companion anything else in the group
+ *
+ * `admin` and `reader` are the two standing conventions. Reader is the public
+ * face of a tool that publishes stamped versions — the gated tool edits, the
+ * reader shows what has been published, with no login. Naming it here means a
+ * future <tool>/reader/ is recognised on the day it lands rather than sitting
+ * in the list as an unexplained loose page.
+ *
+ * Deliberately no one-off filenames in the variant list. An earlier version
+ * hardcoded matchday-map and meta-reference, which dressed up two specific
+ * files as if they were a pattern; they are not, and they now read as
+ * companions, which is what they are.
  */
 function roleOf(relPath, group) {
   if (/(^|\/)admin(\/index\.html|\.html)$/i.test(relPath)) return 'admin';
+  if (/(^|\/)reader(\/index\.html|\.html)$/i.test(relPath)) return 'reader';
   if (relPath === group + '/index.html' || relPath === 'index.html') return 'main';
   const base = path.posix.basename(relPath, '.html');
-  if (/^(print|reader|poster|editor|link|meta-reference|matchday-map)$/i.test(base)) return 'variant';
+  if (/^(print|editor|link)$/i.test(base)) return 'variant';
   if (relPath.endsWith('/index.html')) return 'sub';
   return 'companion';
 }
