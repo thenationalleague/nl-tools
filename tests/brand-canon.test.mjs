@@ -260,6 +260,21 @@ test('the --div-* parent hues still carry the values the pairing settled on', ()
   assert.match(rules, /--green:\s*#1a7030/);
 });
 
+/* ── Shared yellow (v2.43) ─────────────────────────────────────────────────
+   Promoted from identical locals in wellbeing (--wb-yellow) and
+   wellbeing-map (--wm-yellow). The value is load-bearing: #efb700 was
+   chosen for LUMINANCE (roughly double --amber) so a red > amber > yellow
+   severity ramp stays legible to a red-green colour-blind reader as
+   lightness, not just hue. A well-meant retune towards a deeper "brand"
+   yellow silently flattens that ramp. Literal hexes, matching the rest of
+   the status-hue family. */
+test('--yellow carries the settled luminance-chosen value with its -light companion', () => {
+  assert.match(rules, /--yellow:\s*#efb700/,
+    '--yellow is #efb700 — chosen for luminance, see the token comment before retuning');
+  assert.match(rules, /--yellow-light:\s*#fdf8e0/,
+    '--yellow-light exists — every status hue carries a -light companion');
+});
+
 test('.disclosure is tokened — navy summary, muted chevron and meta, no raw hex', () => {
   const summary = ruleBody('.disclosure > summary');
   assert.match(summary, /color:\s*var\(--navy\)/);

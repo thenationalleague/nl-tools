@@ -185,6 +185,28 @@ test('clubs.crestImgHtml escapes a hostile club name everywhere it appears', () 
   assert.equal((html.match(/<img /g) || []).length, 1, 'exactly one tag comes out');
 });
 
+test('sanitiseHtml href whitelist: tel: survives, javascript: still does not (v1.35)', () => {
+  /* sanitiseHtml itself walks real DOM nodes (innerHTML parsing), which this
+     sandbox deliberately does not stub — so test the gate itself: extract the
+     href whitelist regex from the source and run it. tel: joined http(s) and
+     mailto in v1.35; before that, build-wellbeing-map.js had to down-convert
+     every phone link to bold text so the first edit would not silently drop
+     it. The second half is the one that must never loosen: the whitelist is
+     the only thing between user-entered rich text and a javascript: href. */
+  const src = readFileSync(join(REPO, 'system/nl-utils.js'), 'utf8');
+  const m = src.match(/if \(\/(\^\([^/]+\))\/(\w*)\.test\(href\)\) clean\.setAttribute\('href', href\)/);
+  assert.ok(m, 'the href whitelist guard is present in sanitiseHtml');
+  const gate = new RegExp(m[1], m[2]);
+  for (const ok of ['https://nl.tools/x', 'http://example.com', 'mailto:media@thenationalleague.org.uk',
+                    'tel:08088020133', 'tel:999', 'TEL:116123']) {
+    assert.ok(gate.test(ok), `${ok} passes the whitelist`);
+  }
+  for (const bad of ['javascript:alert(1)', 'JaVaScRiPt:alert(1)', 'data:text/html,<script>',
+                     'vbscript:x', 'file:///etc/passwd', '//evil.example', '#crisis-tel:trick']) {
+    assert.ok(!gate.test(bad), `${bad} is refused an href`);
+  }
+});
+
 test('clubs.wireCrestImgs sweeps img[data-crest] under a root', () => {
   const mk = (name) => ({
     src: '', onerror: null, style: {},

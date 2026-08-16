@@ -91,6 +91,35 @@ promote it.** Surface the opportunity even if you don't act on it — a one-line
 Genuine one-offs stay local (see the policy block atop `nl-brand.css`); the goal
 is deliberate promotion, not hoarding every snippet into the canon.
 
+### Names — the canon's vocabulary (use these words, no synonyms)
+
+One concept, one word — in code, comments, PRs, and conversation alike:
+
+- **Token** — a named CSS value (`--navy`, `--amber-light`). **Primitive**
+  tokens name the value itself; **semantic** tokens name a *meaning* and alias
+  a primitive (`--div-north: var(--amber)`). Name semantics for the job, never
+  the appearance — `--div-north`, not `--div-amber`, because the colour can
+  change and the name must not become a lie. Families share a prefix
+  (`--div-*`, `--pos-*`, `--cal-*`, `--proj-*`) so a palette greps as a set,
+  and shade ladders number `-50…-900`.
+- **Component** — a reusable styled block in `nl-brand.css` (`.banner`,
+  `.disclosure`, `.club-picker`, `.nl-select`), demoed live in the Style
+  Guide. (Older header comments say "WIDGET" — same thing; prefer
+  "component", and retire "widget" as headers get touched.)
+- **Helper** — an `NL.*` function in `nl-utils.js` (`NL.formatTime`,
+  `NL.season.fromDate`). Helpers are an API contract, versioned like one.
+- **Schema** — a shared data shape (`clubs-meta.json`) with its validator.
+- **Canon candidate** — a pattern flagged as wanting promotion (the flag is a
+  dated comment at the site). **Promotion** — the act of moving it into canon
+  with the full ritual: test, Style Guide, lockstep `?v=`. **Drift** — the
+  same idea written twice that has started to disagree; the thing promotions
+  exist to kill.
+
+A flagged candidate is a promise with a shelf life: when a promotion lands,
+delete the flag comments it answers — this session found a tool still carrying
+a TODO asking for an extraction that had shipped long before, shadowing the
+canon version with a drifted private copy.
+
 ## What this repo is
 
 NL Tools — a static GitHub Pages site (`thenationalleague/tools`, served at the root of the custom domain `https://nl.tools/` — the `CNAME` file at repo root binds the domain, and the old `thenationalleague.github.io/tools/*` URLs 301-redirect there) that hosts the National League's internal staff/club portal plus a family of self-contained tools (vacancies, attendance, holiday-lieu, claudio, style-guide, etc.) and a separate family of fan-facing embed widgets that get pasted into the Urban Zoo CMS on `thenationalleague.org.uk`. (chase-hq existed until v2.19 of the brand sweep and was removed pending a structural rewrite.)
