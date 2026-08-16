@@ -1,9 +1,21 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.34 (16/08/2026)
+   Version: v1.35 (16/08/2026)
 
    Changelog
+   v1.35 (16/08/2026)
+     - NL.sanitiseHtml passes tel: hrefs alongside http(s) and mailto.
+       The whitelist was silently dropping them, which forced
+       scripts/build-wellbeing-map.js to down-convert every phone link to
+       bold text before the first edit could destroy it — and that
+       script's own comment flagged allowing tel: as a fair canon
+       candidate: any tool rendering contact copy wants a number that
+       stays dialable. The workaround is now gone and the wellbeing map
+       seeds carry real tel: links. Everything else the whitelist
+       refuses (javascript:, data:, …) it still refuses.
+       Cache-bust ?v=37 -> ?v=38 in lockstep.
+
    v1.34 (16/08/2026)
      - NL.formatDuration(x, opts) — opts.seconds:true keeps seconds in the
        output ('42s', '3m 42s', '90m 00s'), the convention website-archive
@@ -932,7 +944,7 @@
 
   /* ── Rich text ───────────────────────────────────────────────────────── */
   /* NL.sanitiseHtml(html) → clean HTML string. Whitelist: p, br, b, strong,
-     i, em, ul, li, a[href http(s)/mailto]. Unknown tags are unwrapped
+     i, em, ul, li, a[href http(s)/mailto/tel]. Unknown tags are unwrapped
      (children kept), all other attributes stripped, script/style dropped
      entirely, contenteditable <div> blocks become <p>. Use before writing
      any user-entered rich text to RTDB and again before rendering it. */
@@ -954,7 +966,7 @@
             var clean = document.createElement(ALLOWED[tag]);
             if (tag === 'A') {
               var href = node.getAttribute('href') || '';
-              if (/^(https?:|mailto:)/i.test(href)) clean.setAttribute('href', href);
+              if (/^(https?:|mailto:|tel:)/i.test(href)) clean.setAttribute('href', href);
             }
             to.appendChild(clean);
             walk(node, clean);

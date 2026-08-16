@@ -45,12 +45,12 @@
  *
  *   - Subheadings (<h2>/<h3>) become a bold paragraph. The editor has no
  *     heading button, by request, and bold reads the same way on the page.
- *   - tel: links become plain text. NL.sanitiseHtml only passes http(s) and
- *     mailto, so a tel: href would be silently dropped on the first edit;
- *     better that the number is visibly text than invisibly broken. The
- *     numbers still read correctly, and they are re-linked on the live page.
- *     (Allowing tel: in NL.sanitiseHtml is a fair canon candidate — any tool
- *     holding contact copy will hit this.)
+ *   - tel: links survive as links. NL.sanitiseHtml passes tel: alongside
+ *     http(s) and mailto since nl-utils v1.35 — the canon candidate this
+ *     comment used to flag, actioned — so a phone number stays dialable
+ *     through every edit instead of being down-converted to bold text to
+ *     survive one. The <span> inside a wb-call still becomes an em dash
+ *     clause so "999 Emergency services" does not run together.
  */
 
 'use strict';
@@ -199,13 +199,15 @@ function toEditorHtml(html) {
   // Card wrappers (wb-999, wb-svc) carry layout only — unwrap them.
   s = s.replace(/<\/?div[^>]*>/g, '');
 
-  // tel: links become their own text. <span> inside a wb-call becomes an
-  // em dash clause so "999 Emergency services" does not run together.
-  s = s.replace(/<a[^>]*href="tel:[^"]*"[^>]*>([\s\S]*?)<\/a>/g, (_, inner) => {
+  // tel: links stay links — NL.sanitiseHtml passes tel: since nl-utils
+  // v1.35, so they survive editing. The <span> inside a wb-call still
+  // becomes an em dash clause so "999 Emergency services" does not run
+  // together once the span's styling is gone.
+  s = s.replace(/<a[^>]*href="(tel:[^"]*)"[^>]*>([\s\S]*?)<\/a>/g, (_, href, inner) => {
     const parts = inner.split(/<span[^>]*>/);
     const num = textOf(parts[0]);
     const rest = parts[1] ? textOf(parts[1]) : '';
-    return rest ? `<strong>${num} — ${rest}</strong>` : `<strong>${num}</strong>`;
+    return `<a href="${href}">${rest ? `${num} — ${rest}` : num}</a>`;
   });
 
   // Keep href on real links, drop target/rel/class.
@@ -220,10 +222,11 @@ function toEditorHtml(html) {
   s = s.replace(/>\s+</g, '><').replace(/\s+/g, ' ').trim();
   s = s.replace(/<p><\/p>/g, '');
 
-  // A converted tel: link can be left as a bare <strong> between blocks.
-  // NL.sanitiseHtml would wrap it on load anyway; do it here so the committed
-  // seed reads properly in a diff too.
-  s = s.replace(/(^|<\/p>|<\/ul>)(<strong>[^<]*<\/strong>)(?=<p>|<ul>|$)/g, '$1<p>$2</p>');
+  // A tel: link can be left bare between blocks once its wrapper divs are
+  // unwrapped. NL.sanitiseHtml would wrap it on load anyway; do it here so
+  // the committed seed reads properly in a diff too. (<strong> kept in the
+  // alternation for safety, though nothing produces a bare one any more.)
+  s = s.replace(/(^|<\/p>|<\/ul>)(<a href="tel:[^"]*">[^<]*<\/a>|<strong>[^<]*<\/strong>)(?=<p>|<ul>|$)/g, '$1<p>$2</p>');
 
   return s;
 }
