@@ -1,7 +1,13 @@
 /*
  * auth-guard.js — NL Tools v2
  * File: /system/auth-guard.js
- * Version: v6.2 (14/07/2026)
+ * Version: v6.3 (16/08/2026)
+ *
+ * v6.3: The audience gate covers a third value, 'meta' — tools about the
+ *       estate (Estate, Style Guide). Access-wise identical to 'staff':
+ *       league roles only, structurally. Exists so the portal can shelve
+ *       these separately without a display-only flag beside the audience
+ *       field carrying almost the same meaning.
  *
  * v6.2: Audience gate — a tool whose registry record carries
  *        `audience: "staff"` is now reachable by LEAGUE roles only
@@ -277,7 +283,11 @@
        a stray grant can't leak a staff tool to a club. Fail-safe: allow-list
        league roles rather than deny-list club ones. A tool with no `audience`
        field (not yet classified / legacy) skips this and behaves as before. */
-    if (toolData && toolData.audience === 'staff') {
+    if (toolData && (toolData.audience === 'staff' || toolData.audience === 'meta')) {
+      /* 'meta' (v6.3): tools about the estate — Estate, Style Guide. For the
+         gate it is exactly 'staff': league roles only, structurally, so a
+         stray club grant can never open one. The portal shelves the two
+         audiences differently; this file does not care about shelves. */
       var LEAGUE = { superadmin: true, admin: true, staff: true };
       if (!LEAGUE[session.role]) {
         window.location.replace(PORTAL_URL);
