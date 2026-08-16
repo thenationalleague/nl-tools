@@ -3,9 +3,17 @@
 <head>
 <!--
   NL Tools — Vacancies
-  Version: 3.16
+  Version: 3.17
   Date: 16/08/2026
 
+  v3.17 (16/08/2026)
+    - Security: the authed submit path now sends a Firebase ID token, which
+      GAS verifies server-side (vacSubmitAuthed → verifyCaller_). Previously
+      it sent only submitterEmail, which the backend trusted — an
+      unauthenticated write behind a public URL. The recorded submitter email
+      is now the token's verified email, not a client string. Also: submit now
+      surfaces a server {success:false} as an error instead of falsely showing
+      "Submission Received".
   v3.16 (16/08/2026)
     - All five .btn--accent buttons converted to .btn--primary. The variant
       was a byte-identical alias of --primary since brand v2.15 and this
@@ -170,6 +178,13 @@
   /* Public-facing "What's new" — shown when users click the version badge.
      Keep entries user-friendly. Most recent first. */
   window.NL_CHANGELOG = [
+    {
+      date: '16 August 2026',
+      version: 'v3.17',
+      items: [
+        'Security hardening on vacancy submission. No change to how you submit.'
+      ]
+    },
     {
       date: '16 August 2026',
       version: 'v3.15',
@@ -1112,8 +1127,10 @@ function doSubmit(){
   var btn=document.getElementById('sfSubmitBtn');
   btn.disabled=true;btn.innerHTML='<span class="spinner"></span>Submitting…';
 
-  // For authed portal users we bypass GAS verification — write directly
-  // submitterRole uses jobTitle from session for portal users
+  // submitterRole uses jobTitle from session for portal users. For authed
+  // users the identity comes from a verified Firebase ID token GAS-side, not
+  // from these fields — submitterEmail here is display-only, the server
+  // records the token's verified email.
   var payload={
     'Club':club,'Job Title':title,
     'Location':document.getElementById('sfLocation').value.trim(),
@@ -1126,17 +1143,23 @@ function doSubmit(){
     submitterName:name, submitterEmail:email, submitterRole:role,
   };
 
+  var ready;
   if(STATE.submitIsAuthed){
     payload.action = 'vacancies_submitAuthed';
-    payload.uid    = STATE.session.uid;
+    // The ID token is the credential the server verifies. Bypassing this is
+    // what left the authed path unauthenticated — a fresh token per submit.
+    ready = NL.ensureAuth().then(function(){ return firebase.auth().currentUser.getIdToken(); })
+      .then(function(tok){ payload.idToken = tok; });
   } else {
     payload.action = 'vacancies_submit';
     payload.code   = document.getElementById('sfCode').value.trim();
+    ready = Promise.resolve();
   }
 
-  gasPost(payload)
+  ready.then(function(){ return gasPost(payload); })
     .then(function(r){
       if(r.error) throw new Error(r.error);
+      if(r.success===false) throw new Error(r.message||'Submission failed.');
       if(STATE.submitCountdownInt) clearInterval(STATE.submitCountdownInt);
       document.getElementById('submitModalBody').innerHTML=
         '<div class="success-screen">'

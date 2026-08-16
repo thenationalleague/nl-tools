@@ -117,16 +117,23 @@ function vacSubmit(body) {
   return vacWriteSubmission(body, email);
 }
 
-/* ── Submit authed (portal user — already authenticated, no code needed) ── */
+/* ── Submit authed (portal user — no code, but the Firebase ID token IS the
+      credential) ────────────────────────────────────────────────────────────
+   The name once implied "trust the caller"; it did not verify anything, so a
+   bare POST with any submitterEmail wrote a submission with the owner's RTDB
+   secret and fired staff mail — an unauthenticated write behind a public URL.
+   Now the token is verified server-side and the SUBMITTER EMAIL IS THE VERIFIED
+   ONE, never the client-supplied string. Any signed-in portal user may submit;
+   no role gate beyond "has a real account", which is the intent. */
 function vacSubmitAuthed(body) {
-  var email = String(body.submitterEmail || '').trim().toLowerCase();
+  var caller = verifyCaller_(body.idToken);
+  if (!caller.ok) return respond({ success: false, message: caller.error || 'Sign-in required.' });
 
-  if (!email)                    return respond({ success: false, message: 'Email is required.' });
   if (!body['Club'])             return respond({ success: false, message: 'Club is required.' });
   if (!body['Job Title'])        return respond({ success: false, message: 'Job title is required.' });
   if (!body['Live Listing URL']) return respond({ success: false, message: 'Live listing URL is required.' });
 
-  return vacWriteSubmission(body, email);
+  return vacWriteSubmission(body, caller.user.email);
 }
 
 /* ── Write submission to Firebase RTDB ─────────────────────────────────── */

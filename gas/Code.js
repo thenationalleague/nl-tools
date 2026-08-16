@@ -181,10 +181,10 @@ function doPost(e) {
   try { body = JSON.parse(e.postData.contents); } catch(err) { body = {}; }
   var action = body.action || '';
   try {
-    /* Invite flow */
+    /* Invite flow. validateInvite/consumeInvite removed 16/08/2026 — invite
+       acceptance is the Cloud Function consumeInvite (functions/account.js);
+       the GAS routes had no caller but stayed reachable on the public URL. */
     if (action === 'sendInvite')     return respond(sendInvite(body));
-    if (action === 'validateInvite') return respond(validateInvite(body));
-    if (action === 'consumeInvite')  return respond(consumeInvite(body));
     /* Notification flow */
     if (action === 'notifyAdmin')    return respond(notifyAdmin(body));
     if (action === 'confirmRequest') return respond(confirmRequest(body));
