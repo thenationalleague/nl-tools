@@ -76,6 +76,7 @@ Tightening them to `auth != null` would break a live feature. Leave them:
 | `ops-vacancies/listings` + `analytics` | Jobs-board widget embedded on thenationalleague.org.uk reads listings and writes click analytics anonymously. |
 | `ops-club-data/*/submissions/$token`, `ops-club-contacts/*/submissions/$token` | Invite-token submission flows — access is gated by *token existence*, not login. |
 | `ops-vacancies/analytics` | Public **write** for anonymous click tracking (by design). |
+| `ops-club-kits/submissions` | `club-kits/index.html` — one no-login public URL, no auth-guard. Read is public; **create is fully unauthenticated** (`!data.exists()`, no `auth != null` clause) so a club rep with the link can submit without an account. Accepted trade-off (like `uw-promo`): anyone can submit as any club, colours only, no personal data. Reopen/edit gated to admins. |
 
 Rule of thumb: a broad `".read": true` here is usually load-bearing for a
 capability page or a public widget — **confirm the consumer before locking**.
