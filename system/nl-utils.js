@@ -1,9 +1,22 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.33 (16/08/2026)
+   Version: v1.34 (16/08/2026)
 
    Changelog
+   v1.34 (16/08/2026)
+     - NL.formatDuration(x, opts) — opts.seconds:true keeps seconds in the
+       output ('42s', '3m 42s', '90m 00s'), the convention website-archive
+       uses for GA engagement times. v1.33 deliberately left that tool's
+       local formatDuration() alone to avoid losing precision; user ruling
+       reversed that — "we don't want two independent timekeeping systems" —
+       so the canon clock accounts for granularity as an option and
+       website-archive delegates. Default (no opts) output is unchanged,
+       byte-identical for existing callers. One divergence, deliberate:
+       exactly-zero now reads as absent ('—') like the rest of the family,
+       where website-archive's local copy printed '0s'.
+       Cache-bust ?v=36 -> ?v=37 in lockstep.
+
    v1.33 (16/08/2026)
      - NL.formatDuration(x) — seconds (number, or a '3600s'-style Routes API
        string) → compact human duration, joining the date family: '45s',
@@ -515,14 +528,22 @@
     return window.NL.formatDateTime(d);
   };
 
-  /* Elapsed duration → compact human string: 45 → '45s', 300 → '5 min',
-     3600 → '1h', 5400 → '1h 30min'. Accepts a number of seconds or a
-     '3600s'-style duration string (the Routes API shape). Minutes floor —
-     above the minute, leftover seconds are dropped, never rounded up.
-     Absent, zero, negative or unparseable → '—', the date family's
-     fallback; a caller whose sentence needs a word instead ('every unknown
-     interval') supplies that word itself. */
-  window.NL.formatDuration = function(x) {
+  /* Elapsed duration → compact human string. One clock — granularity is an
+     option, not a second helper (v1.33 left website-archive's precise local
+     copy tool-local; user ruling reversed that: "we don't want two
+     independent timekeeping systems").
+       (default)       45 → '45s', 300 → '5 min', 3600 → '1h',
+                       5400 → '1h 30min'. Minutes floor — above the minute,
+                       leftover seconds are dropped, never rounded up.
+       {seconds:true}  keeps seconds (GA engagement-time convention):
+                       42 → '42s', 222 → '3m 42s' (remainder zero-padded),
+                       5400 → '90m 00s' — minutes stay unbounded, no hours
+                       unit, matching website-archive's established output.
+     Accepts a number of seconds or a '3600s'-style duration string (the
+     Routes API shape). Absent, zero, negative or unparseable → '—', the
+     date family's fallback, in both modes; a caller whose sentence needs a
+     word instead ('every unknown interval') supplies that word itself. */
+  window.NL.formatDuration = function(x, opts) {
     var secs = x;
     if (typeof secs === 'string') {
       var m = secs.match(/^\s*(\d+(?:\.\d+)?)\s*s?\s*$/);
@@ -532,6 +553,11 @@
     secs = Math.round(secs);
     if (secs <= 0) return '—';
     if (secs < 60) return secs + 's';
+    if (opts && opts.seconds) {
+      var mm = Math.floor(secs / 60);
+      var ss = secs % 60;
+      return mm + 'm ' + (ss < 10 ? '0' : '') + ss + 's';
+    }
     var h = Math.floor(secs / 3600);
     var mins = Math.floor((secs % 3600) / 60);
     if (!h) return mins + ' min';
