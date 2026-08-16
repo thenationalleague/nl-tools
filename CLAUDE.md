@@ -122,7 +122,7 @@ canon version with a drifted private copy.
 
 ## What this repo is
 
-NL Tools — a static GitHub Pages site (`thenationalleague/tools`, served at the root of the custom domain `https://nl.tools/` — the `CNAME` file at repo root binds the domain, and the old `thenationalleague.github.io/tools/*` URLs 301-redirect there) that hosts the National League's internal staff/club portal plus a family of self-contained tools (vacancies, attendance, holiday-lieu, claudio, style-guide, etc.) and a separate family of fan-facing embed widgets that get pasted into the Urban Zoo CMS on `thenationalleague.org.uk`. (chase-hq existed until v2.19 of the brand sweep and was removed pending a structural rewrite.)
+NL Tools — a static GitHub Pages site (`thenationalleague/nl-tools`, owned by the `thenationalleague` **organisation** since 16/08/2026 — the repo was `tools` under the personal account of the same name until GitHub's namespace-retirement rule forced the rename during the org move; the old `thenationalleague.github.io/tools/*` URLs are dead, and `https://nl.tools/` — bound by the `CNAME` file at repo root — is the only stable address) that hosts the National League's internal staff/club portal plus a family of self-contained tools (vacancies, attendance, holiday-lieu, claudio, style-guide, etc.) and a separate family of fan-facing embed widgets that get pasted into the Urban Zoo CMS on `thenationalleague.org.uk`. (chase-hq existed until v2.19 of the brand sweep and was removed pending a structural rewrite.)
 
 There is **no build step** for the site. HTML/CSS/JS is served as-is from the repo. The only Node code is in `scripts/` and `.github/workflows/` (article-index and GA pipelines).
 

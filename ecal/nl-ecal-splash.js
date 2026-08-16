@@ -1,10 +1,13 @@
 /* ============================================================================
    NL ECAL Club-Aware Splash / Interstitial — external script (GTM-safe)
-   Version: v8.4
-   Date: 09/07/2026
+   Version: v8.5
+   Date: 16/08/2026
    Commit this to the repo as:  ecal/nl-ecal-splash.js
    Deploy via GTM Custom HTML tag (All Pages) with ONE line:
-     <script src="https://cdn.jsdelivr.net/gh/thenationalleague/tools@main/ecal/nl-ecal-splash.js"></script>
+     <script src="https://nl.tools/ecal/nl-ecal-splash.js"></script>
+   (v8.5: served from nl.tools, our own domain. The old jsdelivr URL died when
+   the repo moved to the org as nl-tools — and jsdelivr cannot serve a private
+   repo, which this one is about to become. The GTM tag must be repointed.)
    (No inline JS in the tag => GTM's HTML validator has nothing to flag.)
 
    Behaviour identical to the v7.1 inline build:
@@ -65,7 +68,7 @@
     JWT_WAIT_MS:   2500,
     COOKIE_NAME:   "_gc_sa_sso_access",
     CLAIM:         "favourite_team",
-    IMAGE_BASE:    "https://cdn.jsdelivr.net/gh/thenationalleague/tools@main/ecal/",
+    IMAGE_BASE:    "https://nl.tools/ecal/",
     IMAGE_SUFFIX:  " - 1x1.jpg",
     ECAL_APIKEY:   "sMJhxXuD7phKwU4rcepysZh2E4oJwM6ahS5hzho1YM62e82018",
     ECAL_SCRIPT:   "//sync.ecal.com/v2/ecal.widget.js",
