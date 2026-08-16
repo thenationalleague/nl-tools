@@ -77,6 +77,17 @@ test('formatDateTime: default, weekday, no-year, seconds', () => {
   assert.equal(NL.formatDateTime('rubbish'), '—');
 });
 
+test('formatTime: HH:MM 24-hour, pads, accepts Date/epoch/string like its siblings', () => {
+  const d = new Date(2026, 3, 17, 9, 5);              // Fri 17 Apr 2026 09:05
+  assert.equal(NL.formatTime(d), '09:05', 'pads single-digit hour and minute');
+  assert.equal(NL.formatTime(new Date(2026, 3, 17, 15, 30)), '15:30', '24-hour, no am/pm');
+  assert.equal(NL.formatTime(d.getTime()), '09:05', 'epoch-ms via parseDate');
+  assert.equal(NL.formatTime('2026-04-17T09:05'), '09:05', 'ISO string via parseDate');
+  assert.equal(NL.formatTime('17/04/2026 09:05'), '09:05', 'UK string via parseDate');
+  assert.equal(NL.formatTime('rubbish'), '—');
+  assert.equal(NL.formatTime(null), '—');
+});
+
 test('timeAgo: ladder tiers then absolute fallback', () => {
   const now = Date.now();
   assert.equal(NL.timeAgo(now - 10 * 1000), 'just now');
