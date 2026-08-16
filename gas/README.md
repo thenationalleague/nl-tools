@@ -79,17 +79,18 @@ Apps Script web apps, both fan-facing, both with no repo copy of their code:
 
 | Deployment ends | Was behind | Now |
 |---|---|---|
-| `…Eqlzcw/exec` | the live blog (read posts **and accept public submissions**) | unplugged — see [`../system/retired/live-blog-and-transfer-centre.md`](../system/retired/live-blog-and-transfer-centre.md) |
-| `…5YtHOFzK/exec` | the transfer centre feed | unplugged — same |
+| `…Eqlzcw/exec` | the live blog (read posts **and accept public submissions**) | archived 16/08/2026 — see [`../system/retired/live-blog-and-transfer-centre.md`](../system/retired/live-blog-and-transfer-centre.md) |
+| `…5YtHOFzK/exec` | the transfer centre feed | archived 16/08/2026 — same |
 
 Both sat in front of a **Google Sheet**. Rather than bring them under the sync,
 both tools are parked for a rebuild on RTDB; their front-ends are kept and their
 backends dropped. So this project stays one Apps Script project, not three.
 
-**Neither is switched off yet.** Removing the repo's calls does not unpublish an
-Apps Script deployment — until someone archives them in the editor they remain
-public endpoints, and the live-blog one still accepts submissions. `system/retired/website-insights-and-analysis.md`
-has the decommission order.
+**Both were archived on 16/08/2026** — the deployments are dead and the `/exec`
+URLs no longer serve. The Apps Script projects themselves are retained in the
+editor (archived, not deleted): they are the only copies of that code, and the
+rebuild may want to read them. The Sheets behind them are kept for the same
+reason — see `system/retired/live-blog-and-transfer-centre.md`.
 
 ## Backend authz — `SECURITY-invite-authz.md`
 

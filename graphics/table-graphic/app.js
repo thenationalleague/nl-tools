@@ -179,7 +179,11 @@
       else if (flag === "R") cls += " is-releg";
       rowEl.className = cls;
 
-      var crest = window.crestUrl(r.team);
+      /* medium tier on purpose: 24 crests render at row height in a
+         1080-wide canvas, so 256px is comfortably oversampled and ~9x lighter
+         than the full-res originals — the difference between ~12.6MB and
+         ~1.4MB, which decides whether they all arrive on a slow connection. */
+      var crest = r.team ? NL.clubs.crestUrl(r.team, 'medium') : null;
       var statCells = cols.map(function (c) {
         var cls = c[1] === "pts" ? "stat pts" : "stat";
         return '<div class="' + cls + '">' + escapeHtml(r[c[1]] || "") + '</div>';
@@ -301,15 +305,6 @@
     pasteEl.value = lines.join("\n");
   }
 
-  /* Crests come from the shared clubs-data mirror, which points at the
-     full-res originals (mean 524KB, largest 5.4MB). A 24-row table renders
-     them at row height in a 1080-wide graphic, so the medium tier (256px) is
-     comfortably oversampled and ~9x lighter — the difference between ~12.6MB
-     and ~1.4MB of crests, which is what decides whether they all arrive in
-     time on a slow connection. Overridden here rather than in the shared file
-     so nothing else changes behaviour. */
-  if (window.NL_CREST_BASE === "/assets/crests/") window.NL_CREST_BASE = "/assets/crests/medium/";
-
   /* ---------------- export ---------------- */
   function fileName() {
     var d = new Date();
@@ -429,11 +424,17 @@
   }
 
   /* ---------------- team datalist ---------------- */
+  /* Names from the canon, async: the datalist appearing a beat after boot is
+     invisible in practice, and the alternative was the clubs-data.js mirror —
+     the last copy of club data outside clubs-meta, 29 colours adrift by the
+     time it was retired (nothing here ever read the colours; the drift was
+     the warning, not the damage). */
   function buildTeamList() {
-    var dl = $("teamList");
-    dl.innerHTML = window.NL_CLUBS.map(function (c) {
-      return '<option value="' + escapeHtml(c.name) + '">';
-    }).join("");
+    NL.clubs.all().then(function (clubs) {
+      $("teamList").innerHTML = clubs.map(function (c) {
+        return '<option value="' + escapeHtml(c.name) + '">';
+      }).join("");
+    }).catch(function () { /* free-text entry still works without it */ });
   }
 
   /* ---------------- wire controls ---------------- */
@@ -492,7 +493,6 @@
     });
 
     window.addEventListener("resize", fitStage);
-    window.addEventListener("nl-clubs-updated", function () { buildTeamList(); render(); });
 
     render();
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(render);

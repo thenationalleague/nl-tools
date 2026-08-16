@@ -107,8 +107,10 @@ projects and their Sheets keep running until someone archives them.
 Three things, in this order:
 
 1. Remove the embed blocks from the CMS pages.
-2. Archive or unpublish the two Apps Script web apps (the deployments ending
-   `…Eqlzcw` and `…5YtHOFzK`). Until this is done they remain public endpoints,
-   and the live-blog one still accepts submissions.
+2. ~~Archive or unpublish the two Apps Script web apps (the deployments ending
+   `…Eqlzcw` and `…5YtHOFzK`).~~ **Done 16/08/2026** — both deployments
+   archived; the endpoints are dead and the live blog no longer accepts
+   submissions. The projects stay in the Apps Script editor as the only
+   copies of their code.
 3. The Sheets can then be archived — keep them until the rebuild, in case any
    historical content is worth importing.
