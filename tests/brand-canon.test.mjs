@@ -322,6 +322,32 @@ test('position bands live only as NL.positionBands — no --pos-* CSS twins', ()
   }
 });
 
+/* ── Responsive table container (v2.45) ────────────────────────────────────
+   .table-wrap existed as a bare overflow-x and the estate kept hand-rolling
+   what it lacked (holiday-lieu, club-directory, club-signoff, estate,
+   attendance) — found live when the Style Guide's own tables blew out the
+   viewport. The max-width/min-width pair is the invisible contract:
+   overflow-x alone never fires when the wrap sits in a flex/grid parent,
+   because the wrap itself grows to its content and props the page open
+   instead of scrolling. Nothing in a browser complains when either is
+   dropped — the page just gets wider on the one layout that notices. */
+
+test('.table-wrap scrolls instead of propping the page open', () => {
+  const body = ruleBody('.table-wrap');
+  assert.match(body, /overflow-x:\s*auto/);
+  assert.match(body, /-webkit-overflow-scrolling:\s*touch/, 'momentum scrolling on iOS');
+  assert.match(body, /max-width:\s*100%/, 'must not grow past its container');
+  assert.match(body, /min-width:\s*0/, 'must be shrinkable as a flex/grid child');
+});
+
+test('.table-wrap carries no chrome of its own — .table owns it', () => {
+  const body = ruleBody('.table-wrap');
+  assert.doesNotMatch(body, /(^|[;{\s])(border|box-shadow|background)\s*:/,
+    'border/shadow/background on the wrap would double-frame every .table inside one');
+  assert.match(body, /border-radius:\s*var\(--radius\)/,
+    'radius (not chrome) keeps the rounded silhouette during a mid-scroll clip');
+});
+
 test('.disclosure is tokened — navy summary, muted chevron and meta, no raw hex', () => {
   const summary = ruleBody('.disclosure > summary');
   assert.match(summary, /color:\s*var\(--navy\)/);
