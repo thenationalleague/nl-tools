@@ -130,6 +130,50 @@ test('clubs.crestUrl tiers: thumb + medium folders; no-arg unchanged', () => {
   assert.equal(NL.clubs.crestUrl('', 'medium'), NL.clubs.ROSE, 'empty name → rose (any size)');
 });
 
+test('clubs.crestImgHtml emits an escaped, data-crest-carrying <img> per tier', () => {
+  const html = NL.clubs.crestImgHtml('AFC Fylde', 'thumb');
+  assert.ok(html.startsWith('<img '), 'an <img> tag');
+  assert.ok(html.includes('data-crest="AFC Fylde"'), 'carries data-crest for the wiring sweep');
+  assert.ok(html.includes('src="/assets/crests/thumbs/AFC%20Fylde.png"'), 'thumb tier URL');
+  assert.ok(html.includes('alt=""'), 'decorative alt by default');
+  assert.ok(!html.includes('onerror'), 'no inline fallback — wiring stays a post-insertion pass');
+
+  assert.ok(NL.clubs.crestImgHtml('AFC Fylde', 'medium').includes('src="/assets/crests/medium/AFC%20Fylde.png"'), 'medium tier URL');
+  assert.ok(NL.clubs.crestImgHtml('AFC Fylde').includes('src="/assets/crests/AFC%20Fylde.png"'), 'no size arg → full-res');
+
+  const opts = NL.clubs.crestImgHtml('Barrow', 'thumb', { className: 'ps-crest', alt: 'Barrow crest' });
+  assert.ok(opts.includes('class="ps-crest"'), 'opts.className');
+  assert.ok(opts.includes('alt="Barrow crest"'), 'opts.alt override');
+  assert.ok(!NL.clubs.crestImgHtml('Barrow', 'thumb').includes('class='), 'no class attribute unless asked');
+});
+
+test('clubs.crestImgHtml escapes a hostile club name everywhere it appears', () => {
+  const html = NL.clubs.crestImgHtml('<img src=x onerror=alert(1)>"FC', 'thumb');
+  assert.ok(!html.includes('<img src=x'), 'name cannot open a tag');
+  assert.ok(html.includes('data-crest="&lt;img src=x onerror=alert(1)&gt;&quot;FC"'), 'escaped in data-crest');
+  assert.ok(html.includes('%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E%22FC.png'), 'URL-encoded in src');
+  assert.equal((html.match(/<img /g) || []).length, 1, 'exactly one tag comes out');
+});
+
+test('clubs.wireCrestImgs sweeps img[data-crest] under a root', () => {
+  const mk = (name) => ({
+    src: '', onerror: null, style: {},
+    getAttribute: (k) => (k === 'data-crest' ? name : null),
+  });
+  const a = mk('Barrow'), b = mk('AFC Fylde');
+  const root = { querySelectorAll: (sel) => (sel === 'img[data-crest]' ? [a, b] : []) };
+  NL.clubs.wireCrestImgs(root, true);
+  assert.equal(typeof a.onerror, 'function', 'first img wired');
+  assert.equal(typeof b.onerror, 'function', 'second img wired');
+  a.src = NL.clubs.crestUrl('Barrow', 'thumb');
+  a.onerror();                                     // thumb 404
+  assert.equal(a.src, NL.clubs.crestUrl('Barrow'), 'sweep read the name back from data-crest');
+  a.onerror();                                     // full 404
+  assert.equal(a.style.display, 'none', 'hideOnFail passed through');
+  NL.clubs.wireCrestImgs(null);                    // no root → no throw
+  NL.clubs.wireCrestImgs({});                      // no querySelectorAll → no throw
+});
+
 test('clubs.wireCrestImg degrades thumb → full → rose', () => {
   const img = { src: '', onerror: null, style: {} };
   NL.clubs.wireCrestImg(img, 'Barrow', false);

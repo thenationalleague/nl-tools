@@ -1,5 +1,11 @@
 /*
   UW Promo Codes — shared runtime for the three standalone pages
+  Version: v3.2 (16/08/2026) — till-card crest repointed to the canon string
+           helper NL.clubs.crestImgHtml, with a NL.clubs.wireCrestImgs sweep
+           in printCards replacing the inline onerror (same full-res → rose
+           degrade). The local crestImgHtml(name, px) stays for now — its px
+           sizing + self-contained inline fallback serve nine call sites that
+           never run a wiring pass — flagged for a follow-up convergence.
   Version: v3.1 (10/08/2026) — till cards move into the shared runtime
            (tillCardHtml/printCards, styles in _shared.css). Two pages print
            them now — the master console and a club printing its own from the
@@ -364,10 +370,14 @@
     var qr = qrcode(0, 'M');
     qr.addData(link);
     qr.make();
+    /* Crest via the canon string helper (nl-utils v1.32). The string carries
+       no fallback — printCards runs NL.clubs.wireCrestImgs on the print root
+       straight after insertion, so a missing crest still degrades to the rose
+       before the browser can fetch anything. A caller using UWP.tillCardHtml
+       directly must run its own wireCrestImgs pass. */
     return '<div class="print-card">' +
       '<div class="print-card__brands">' +
-        '<img src="' + esc(NL.clubs.crestUrl(club.name)) + '" alt="" ' +
-          'onerror="this.onerror=null;this.src=\'' + ROSE + '\';">' +
+        NL.clubs.crestImgHtml(club.name) +
         '<img src="' + UW_LOGO + '" alt="Utility Warehouse" ' +
           'onerror="this.onerror=null;this.style.display=\'none\';">' +
       '</div>' +
@@ -399,6 +409,7 @@
       document.body.appendChild(root);
     }
     root.innerHTML = clubs.map(tillCardHtml).join('');
+    NL.clubs.wireCrestImgs(root);   // full-res → rose fallback for the card crests
 
     /* The card stylesheet is shared by all three pages, so the "hide
        everything but the cards" rule is scoped to this class rather than to

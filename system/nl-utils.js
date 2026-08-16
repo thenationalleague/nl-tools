@@ -1,9 +1,23 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.31 (16/08/2026)
+   Version: v1.32 (16/08/2026)
 
    Changelog
+   v1.32 (16/08/2026)
+     - NL.clubs.crestImgHtml(name, size, opts) — crest <img> as an escaped
+       HTML string, for string-built markup where wireCrestImg has no
+       element yet. Eight call sites across six tools were hand-rolling the
+       same string (escaping, tier choice, and — inconsistently — fallback
+       handling); uw-promo and programme had each grown a whole local
+       crestImgHtml. Emits data-crest="<name>" so the established
+       post-insertion sweep keeps working; carries no inline onerror of its
+       own — fallback wiring stays a wiring pass, now also canon:
+     - NL.clubs.wireCrestImgs(root, hideOnFail) — wires every
+       img[data-crest] under root via wireCrestImg. The identical loop
+       existed verbatim in club-kits, club-contacts and club-directory.
+       Cache-bust ?v=34 -> ?v=35 in lockstep.
+
    v1.31 (16/08/2026)
      - NL.formatTime(x) — time only, 'HH:MM' 24-hour, local tz, joining the
        date family (same parseDate input handling: string / Date / epoch).
@@ -1734,6 +1748,37 @@
         if (hideOnFail) img.style.display = 'none'; else img.src = rose;
       };
       return img;
+    },
+    /* Crest <img> as an HTML STRING, for string-built markup (table rows,
+       modal bodies, print sheets) where wireCrestImg has no element yet.
+       Same size arg as crestUrl ('thumb' / 'medium' / omit for full-res).
+       Name and URL are escHtml-escaped; alt defaults to "" (decorative).
+         opts.className → class attribute
+         opts.alt       → alt text override
+       The string carries NO fallback of its own. It emits data-crest="<name>"
+       so the existing post-insertion sweep — NL.clubs.wireCrestImgs(container)
+       (or a per-element wireCrestImg call) — attaches the thumb → full → rose
+       onerror chain. Insert the markup and sweep in the same tick: image
+       fetches resolve asynchronously, so a 404 cannot beat a sweep that runs
+       before the current task yields. */
+    crestImgHtml: function(name, size, opts) {
+      opts = opts || {};
+      var esc = window.NL.escHtml;
+      return '<img data-crest="' + esc(name || '') + '"' +
+        (opts.className ? ' class="' + esc(opts.className) + '"' : '') +
+        ' src="' + esc(this.crestUrl(name, size)) + '"' +
+        ' alt="' + esc(opts.alt || '') + '">';
+    },
+    /* Wire every img[data-crest] under `root` (an element or document) via
+       wireCrestImg, reading the club name back from the data-crest attribute.
+       The companion sweep for crestImgHtml — the identical loop existed
+       hand-rolled in club-kits, club-contacts and club-directory. */
+    wireCrestImgs: function(root, hideOnFail) {
+      if (!root || !root.querySelectorAll) return;
+      var self = this;
+      Array.prototype.forEach.call(root.querySelectorAll('img[data-crest]'), function(img) {
+        self.wireCrestImg(img, img.getAttribute('data-crest'), hideOnFail);
+      });
     },
     /* Load + memoise clubs-meta. One network hit per session. */
     load: function() {
