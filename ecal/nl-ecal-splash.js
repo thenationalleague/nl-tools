@@ -1,6 +1,6 @@
 /* ============================================================================
    NL ECAL Club-Aware Splash / Interstitial — external script (GTM-safe)
-   Version: v8.6
+   Version: v8.7
    Date: 16/08/2026
    Commit this to the repo as:  ecal/nl-ecal-splash.js
    Deploy via GTM Custom HTML tag (All Pages) with ONE line:
@@ -28,6 +28,17 @@
    during testing) so the new version is served.
 
    CHANGELOG
+   v8.7 — CRITICAL FIX: the ad click opens ECAL again. v8.6 yielded on pointerdown
+          (capture) — it set the overlay pointer-events:none BEFORE the click's
+          hit-test, so the click never landed on the button and ECAL's own click
+          handler never fired: the dimmer faded and it "just closed" without ever
+          opening the calendar modal. Removed the pointerdown hook. yieldToEcal now
+          runs on CLICK only, after the browser has already delivered that same
+          click to ECAL — so ECAL opens and our overlay stops intercepting from
+          that point on. This is the v8.4 timing (let the click land, then get out
+          of the way) with v8.6's pointer-transparency instead of a fade+hide.
+   v8.6 — (regressed the click; see v8.7.) Intended: the ad click yields to ECAL's
+          modal robustly so our overlay can no longer intercept clicks inside it.
    v8.4 — Auto-close made reliable. Removed the hover/touch/keypress "engagement"
           cancels (a mobile scroll-swipe was landing as a touch on the modal and
           cancelling the timer, so it never closed). The 8s timer now always runs
@@ -286,17 +297,24 @@
       var t=e.target; if(t && t.getAttribute && t.getAttribute("data-close")) close(t.getAttribute("data-close"));
     });
     xBtn.addEventListener("click", function(e){ e.preventDefault(); e.stopPropagation(); close("x"); });
-    /* The ad button is ECAL's: ECAL binds its own handler and opens ITS OWN
-       modal. Our overlay sits at z-index 2147483000 (near max), so if it lingers
-       for even a moment it captures the clicks meant for ECAL's modal — the modal
-       shows through but its buttons are dead. v8.6 guarantees we get out of the
-       way, by every mechanism at once and before ECAL acts:
-         1. pointerdown, CAPTURE phase — fires before ECAL's click handling, and
-            does not depend on the click event reaching us (ECAL may stop it).
-         2. make the whole overlay pointer-transparent via inline style (beats
-            any class-timing race) AND fade our chrome out.
-         3. NEVER set root.hidden — leave the node inert-but-present, so if ECAL
-            anchors its modal to our button the anchor survives. */
+    /* The ad button is ECAL's: ECAL binds its own CLICK handler and opens ITS
+       OWN modal. Our overlay sits at z-index 2147483000 (near max), so once ECAL
+       opens we must stop capturing clicks or the modal shows through with dead
+       buttons. The trick is timing: we get out of the way AFTER the opening click
+       has been dispatched, never before it.
+         - yieldToEcal makes the whole overlay pointer-transparent (inline style,
+           beats any class-timing race) and fades our chrome, but NEVER sets
+           root.hidden — the node stays inert-but-present so an ECAL modal anchored
+           to our button keeps its anchor.
+         - It runs on CLICK, which fires after the browser has already delivered
+           the same click to ECAL's handler. Setting pointer-events:none inside a
+           click handler does not un-dispatch the in-flight event, so ECAL still
+           opens; our overlay just stops intercepting from that point on.
+       v8.6 also ran this on pointerdown (capture) — that set the overlay
+       pointer-transparent BEFORE the click hit-test, so the click never landed on
+       the button and ECAL's handler never fired: the overlay faded and it "just
+       closed" without opening. v8.7 removes the pointerdown hook; click alone is
+       both sufficient and correct. */
     function yieldToEcal(){
       root.style.pointerEvents = "none";
       root.classList.remove("nl-splash--in");
@@ -305,7 +323,6 @@
       isOpen = false;
       document.removeEventListener("keydown", onKey, true);
     }
-    btn.addEventListener("pointerdown", yieldToEcal, true);
     btn.addEventListener("click", function(){ track("synced"); yieldToEcal(); });
 
     setTimeout(start, CONFIG.SHOW_DELAY_MS);
