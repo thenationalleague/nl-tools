@@ -162,3 +162,45 @@ test('.nl-select sets no width of its own', () => {
   assert.doesNotMatch(ruleBody('.nl-select'), /(min-)?width\s*:/,
     '.nl-select must leave width to the tool');
 });
+
+/* ── Notice banner (v2.40) ─────────────────────────────────────────────────
+   Promoted from five hand-rolled copies (portal .banner, fan-widgets
+   .fw-warn, photoshelter-onboarding .ps-warn, club-contacts .ri-dupnote /
+   .ri-softnote). Two settled rulings live here: full border rather than a
+   left accent stripe (the side-accent-on-a-card pattern is design-lint
+   flagged — recorded on .fw-warn when it was written), and deep ink on the
+   light tint (--amber-deep / --red-deep) because the bare semantic hue does
+   not read accessibly on its own -light background. */
+
+test('.banner exists with all three variants', () => {
+  for (const sel of ['.banner', '.banner--amber', '.banner--error', '.banner--info']) {
+    ruleBody(sel); /* asserts presence */
+  }
+});
+
+test('.banner is tokened — radius, type scale, no raw hex', () => {
+  const body = ruleBody('.banner');
+  assert.match(body, /border-radius:\s*var\(--radius\)/);
+  assert.match(body, /font-size:\s*var\(--text-sm\)/);
+  assert.doesNotMatch(body, /#[0-9a-fA-F]{3,8}\b/, '.banner must use tokens, not hex');
+});
+
+test('.banner variants sit on their semantic tints with readable deep ink', () => {
+  const amber = ruleBody('.banner--amber');
+  assert.match(amber, /background:\s*var\(--amber-light\)/);
+  assert.match(amber, /color:\s*var\(--amber-deep\)/);
+  const error = ruleBody('.banner--error');
+  assert.match(error, /background:\s*var\(--red-light\)/);
+  assert.match(error, /color:\s*var\(--red-deep\)/);
+  const info = ruleBody('.banner--info');
+  assert.match(info, /background:\s*var\(--blue-light\)/);
+  assert.match(info, /color:\s*var\(--navy\)/);
+});
+
+test('.banner carries a full border, never a left accent stripe', () => {
+  assert.match(ruleBody('.banner'), /border:\s*1px solid/);
+  for (const sel of ['.banner', '.banner--amber', '.banner--error', '.banner--info']) {
+    assert.doesNotMatch(ruleBody(sel), /border-left/,
+      `${sel} must not reintroduce the side-accent stripe`);
+  }
+});
