@@ -1,11 +1,17 @@
 /*
   UW Promo Codes — shared runtime for the three standalone pages
+  Version: v3.3 (16/08/2026) — the follow-up convergence flagged in v3.2:
+           local crestImgHtml(name, px) deleted. Every crest string in the
+           family now comes from canon NL.clubs.crestImgHtml('thumb'), with a
+           NL.clubs.wireCrestImgs sweep in the same tick as each innerHTML
+           render (same thumb → full → rose degrade, no inline onerror). The
+           px sizing moved to CSS — .club-cell img (_shared.css) and
+           .byclub__item img (page styles). UWP.crestImgHtml and UWP.ROSE are
+           gone from the surface.
   Version: v3.2 (16/08/2026) — till-card crest repointed to the canon string
            helper NL.clubs.crestImgHtml, with a NL.clubs.wireCrestImgs sweep
            in printCards replacing the inline onerror (same full-res → rose
-           degrade). The local crestImgHtml(name, px) stays for now — its px
-           sizing + self-contained inline fallback serve nine call sites that
-           never run a wiring pass — flagged for a follow-up convergence.
+           degrade).
   Version: v3.1 (10/08/2026) — till cards move into the shared runtime
            (tillCardHtml/printCards, styles in _shared.css). Two pages print
            them now — the master console and a club printing its own from the
@@ -47,8 +53,10 @@
     UWP.audit(actor,label,action,fields)  append audit entry (server ts)
     UWP.STATUS / UWP.pillFor()  code status metadata → nl-brand .pill class
     UWP.fmt(ms) / UWP.ago(ms)   date-time / relative formatting (canon-backed)
-    UWP.crestImgHtml(name,px)   crest <img> string (thumb → full → rose)
     UWP.clubLink(token) / UWP.uwLink(token)  absolute direct-link URLs
+
+  Crest strings are canon: NL.clubs.crestImgHtml(name, 'thumb') + a
+  NL.clubs.wireCrestImgs sweep after each innerHTML render (no local helper).
 
   Data lives at RTDB app-data/uw-promo/{config,codes,audit} — shape documented
   in /uw-promo/README.md. Rules: system/rtdb/rules.snapshot.json.
@@ -331,20 +339,7 @@
     });
   }
 
-  var ROSE = '/assets/crests/National%20League%20rose.png';
   var UW_LOGO = '/assets/partners/Utility%20Warehouse.png';
-
-  function crestImgHtml(name, px) {
-    px = px || 22;
-    var esc = window.NL && NL.escHtml ? NL.escHtml : function (s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); };
-    // %27-encode apostrophes (encodeURIComponent leaves them alone) so club
-    // names like King's Lynn can't break the single-quoted onerror JS below.
-    function u(url) { return String(url).replace(/'/g, '%27'); }
-    var thumb = u(NL.clubs.crestUrl(name, 'thumb')), full = u(NL.clubs.crestUrl(name));
-    return '<img src="' + esc(thumb) + '" alt="" loading="lazy" ' +
-      'onerror="if(this.src!==\'' + esc(full) + '\'){this.src=\'' + esc(full) + '\';}else{this.onerror=null;this.src=\'' + ROSE + '\';}" ' +
-      'style="width:' + px + 'px;height:' + px + 'px;object-fit:contain;flex-shrink:0;">';
-  }
 
   function pageBase() {
     // .../uw-promo/(club|admin)/... → .../uw-promo/
@@ -480,10 +475,8 @@
     audit: audit,
     fmt: function (ms) { return ms ? NL.formatDateTime(ms) : '—'; },
     ago: function (ms) { return ms ? NL.timeAgo(ms) : '—'; },
-    crestImgHtml: crestImgHtml,
     tillCardHtml: tillCardHtml,
     printCards: printCards,
-    ROSE: ROSE,
     UW_LOGO: UW_LOGO,
     clubLink: clubLinkFor,
     uwLink: function (token) { return pageBase() + '?u=' + encodeURIComponent(token) + envTail(); }
