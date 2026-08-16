@@ -1,0 +1,64 @@
+---
+// News grid island: static skeleton cards, hydrated in the browser from the
+// NL CMS search API. Build-time fetch is not possible from the build
+// container (egress policy), and a live fetch keeps the demo current anyway.
+const { count = 8, withHero = false } = Astro.props;
+const skeletons = Array.from({ length: count });
+---
+<div class="news-grid" data-news-grid data-count={count} data-with-hero={withHero ? '1' : ''}>
+  {skeletons.map(() => (
+    <div class="news-card news-card--skeleton" aria-hidden="true">
+      <div class="news-card__img"></div>
+      <div class="news-card__body">
+        <div class="sk-line" style="width: 40%"></div>
+        <div class="sk-line" style="width: 90%"></div>
+        <div class="sk-line" style="width: 70%"></div>
+      </div>
+    </div>
+  ))}
+</div>
+
+<script>
+  import { fetchLatest, esc, fmtDate } from '../lib/cms.js';
+
+  const base = import.meta.env.BASE_URL.replace(/\/?$/, '/');
+
+  document.querySelectorAll('[data-news-grid]').forEach(async (grid) => {
+    const count = parseInt(grid.getAttribute('data-count') || '8', 10);
+    const withHero = grid.getAttribute('data-with-hero') === '1';
+    try {
+      const articles = await fetchLatest(withHero ? count + 1 : count);
+      const hero = withHero ? articles.shift() : null;
+
+      if (hero) {
+        const heroEl = document.querySelector('[data-hero]');
+        if (heroEl) {
+          const media = heroEl.querySelector('.hero__media');
+          if (media && hero.image) media.style.backgroundImage = `url("${hero.image}")`;
+          const kicker = heroEl.querySelector('[data-hero-kicker]');
+          if (kicker && hero.category) kicker.textContent = hero.category;
+          const title = heroEl.querySelector('[data-hero-title]');
+          if (title) title.textContent = hero.title;
+          const sub = heroEl.querySelector('[data-hero-sub]');
+          if (sub) sub.textContent = hero.description || fmtDate(hero.published);
+          const link = heroEl.querySelector('[data-hero-link]');
+          if (link) link.href = base + 'news/article/?slug=' + encodeURIComponent(hero.slug);
+        }
+      }
+
+      grid.innerHTML = articles.slice(0, count).map((a) => `
+        <a class="news-card" href="${base}news/article/?slug=${encodeURIComponent(a.slug)}">
+          ${a.image
+            ? `<img class="news-card__img" src="${esc(a.image)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'">`
+            : `<div class="news-card__img"></div>`}
+          <div class="news-card__body">
+            ${a.category ? `<span class="news-card__cat">${esc(a.category)}</span>` : ''}
+            <h3 class="news-card__title">${esc(a.title)}</h3>
+            <span class="news-card__date">${esc(fmtDate(a.published))}</span>
+          </div>
+        </a>`).join('');
+    } catch (err) {
+      grid.outerHTML = '<div class="news-fallback">Couldn’t reach the news service just now — refresh to try again.</div>';
+    }
+  });
+</script>
