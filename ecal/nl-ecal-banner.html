@@ -1,0 +1,264 @@
+<!--
+  NL ECAL Club-Aware Advert — Website Embed
+  Version: v5.1 (supersedes v5.0)
+  Date: 16/08/2026
+  File: embeddable HTML fragment (drop into a CMS HTML block)
+
+  CANONICAL SOURCE: this file, ecal/nl-ecal-banner.html, is the source of truth.
+  The live copy is a paste into an Urban Zoo CMS HTML block (the CMS strips
+  <script src>, so this must stay an inline block, not a hosted script). When
+  you edit here, re-paste the whole block into the CMS — a merge is not a release
+  for the banner the way it is for ecal/nl-ecal-splash.js.
+
+  WHAT CHANGED (the important bit)
+  Detection is now authoritative, not guesswork. The logged-in fan's club comes
+  from the NL+ / Sports Alliance SSO JWT in cookie '_gc_sa_sso_access' — the same
+  source the Man of the Match widget uses. We read the cookie, decode the JWT, and
+  take the 'favourite_team' claim. No localStorage scan (that caused the phantom
+  "Kidderminster"), no cross-origin API, no __NUXT__ dependency.
+
+  FLOW
+    read cookie _gc_sa_sso_access -> decode JWT -> claims.favourite_team
+      -> match to one of 72 clubs -> that club's PNG + ECAL widget id
+    no cookie / no claim / no match / signed out -> National League version.
+  If the cookie isn't present yet (just-logged-in redirect), we poll briefly
+  (JWT_WAIT_MS) before settling on NL, so a signed-in fan isn't shown NL by mistake.
+
+  NOTES
+  - favourite_team is matched case-insensitively (with an " FC" tolerance), exactly
+    as the MOTM widget matches it against the NL team list. Richard confirmed SSO
+    club names marry the PNG/list names (e.g. "Weston-super-Mare", "AFC Telford United").
+  - Must run in the top-level page (same origin, cookie readable). A cross-origin
+    CMS iframe can't see the cookie — if detection never fires for a signed-in user,
+    check the embed isn't sandboxed in a foreign iframe.
+  - Preview any club without SSO:  nlEcalSetTestClub('Torquay United')
+    Clear it:                       localStorage.removeItem('nlEcalTestClub')
+  - Debug:  add ?ecalDebug=1 to the URL -> console shows JWT presence, the
+    favourite_team claim, and the matched club.
+
+  CHANGELOG
+  v5.1 — Repointed the image host off the dead jsdelivr namespace
+         (cdn.jsdelivr.net/gh/thenationalleague/tools@main/ecal) to
+         https://nl.tools/ecal/. The old repo path was retired in the org move,
+         and jsdelivr also refuses the folder (>50MB package limit) — nl.tools is
+         the only viable host. Two references changed: the initial <img src> and
+         CONFIG.IMAGE_BASE. No behaviour change.
+  v5.0 — Replaced localStorage broad-scan detection with NL+ SSO JWT decode
+         (cookie _gc_sa_sso_access, claim favourite_team), reusing the MOTM
+         widget's readCookie/decodeJwtPayload. Removed STORAGE_KEY/SCAN_FALLBACK.
+         Added brief JWT wait for post-login redirect. Kept banner render, image
+         verify, data-ecal-no-styling image-as-button, NL fallback, preview + debug.
+  v3.0 — Added data-ecal-no-styling so the PNG is the button face (ECAL otherwise
+         replaces the element with its own button).
+  v2.0 — Initial build (banner + provisional localStorage detection).
+-->
+
+<div id="nl-ecal-advert">
+  <button type="button"
+          id="nl-ecal-btn"
+          class="ecal-sync-widget-button nl-ecal-reset"
+          data-ecal-widget-id="6a3c898fbbf8c400029e0a2c"
+          data-ecal-no-styling
+          aria-label="Sync National League fixtures to your calendar">
+    <img id="nl-ecal-img"
+         src="https://nl.tools/ecal/National%20League%20-%201000x100.png"
+         alt="Sync National League fixtures to your calendar">
+  </button>
+</div>
+
+<style>
+  #nl-ecal-advert{ max-width:1000px; width:100%; margin:0 auto; }
+  #nl-ecal-advert .nl-ecal-reset{
+    display:block; width:100%; padding:0; margin:0; border:0;
+    background:transparent; cursor:pointer; line-height:0;
+    -webkit-appearance:none; appearance:none;
+  }
+  #nl-ecal-advert #nl-ecal-img{ display:block; width:100%; height:auto; border-radius:4px; }
+</style>
+
+<script>
+(function(){
+  "use strict";
+
+  var CONFIG = {
+    COOKIE_NAME:  "_gc_sa_sso_access",   // NL+ / Sports Alliance SSO JWT cookie
+    CLAIM:        "favourite_team",      // JWT claim holding the supported club name
+    JWT_WAIT_MS:  2500,                  // poll window for a just-set cookie before settling on NL
+    IMAGE_BASE:   "https://nl.tools/ecal/",
+    ECAL_APIKEY:  "sMJhxXuD7phKwU4rcepysZh2E4oJwM6ahS5hzho1YM62e82018",
+    ECAL_SCRIPT:  "//sync.ecal.com/v2/ecal.widget.js",
+    NL_WIDGET_ID: "6a3c898fbbf8c400029e0a2c",
+    TEST_KEY:     "nlEcalTestClub",
+    DEBUG:        false                  // or add ?ecalDebug=1 to the URL
+  };
+
+  /* club name -> ECAL widget id (PNG = "<Club> - 1000x100.png") */
+  var CLUBS = {
+    "AFC Fylde":"6a4372f17a225e0002199e37","AFC Telford United":"6a44d20713ebdc00024668ab",
+    "AFC Totton":"6a475ef36e53950002294433","Aldershot Town":"6a4341131b9dd5000258084c",
+    "Altrincham":"6a43735d7a225e0002199e38","Barrow":"6a4375c03dfae400020e4ae1",
+    "Bedford Town":"6a44d25913ebdc00024668ac","Billericay Town":"6a4386e85d3afc0002a6d93f",
+    "Boreham Wood":"6a4376403dfae400020e4ae2","Boston United":"6a4376bd7a225e0002199e39",
+    "Brackley Town":"6a44d2e634fd6f0002d21c65","Braintree Town":"6a43b18b659f9800026569ea",
+    "Buxton":"6a44d372e7498000021cd400","Carlisle United":"6a43778d7a225e0002199e3a",
+    "Chelmsford City":"6a43b1e9659f9800026569eb","Chesham United":"6a43b247bd424800029ed1a5",
+    "Chester":"6a44d44b13ebdc00024668ad","Chorley":"6a44d49c34fd6f0002d21c66",
+    "Dagenham & Redbridge":"6a475fdc6e53950002294434","Darlington":"6a44d52013ebdc00024668ae",
+    "Dorking Wanderers":"6a43b36c963c460002b8feef","Dover Athletic":"6a47603f6e53950002294435",
+    "Eastleigh":"6a4377eb7a225e0002199e3b","Ebbsfleet United":"6a4760ab6e53950002294436",
+    "Farnborough":"6a47621249b9eb00025e01e6","Farnham Town":"6a43b524659f9800026569ee",
+    "FC Halifax Town":"6a4378657a225e0002199e3c","Folkestone Invicta":"6a43b56a659f9800026569ef",
+    "Forest Green Rovers":"6a4378a67a225e0002199e3d","Gateshead":"6a437a07e6f28d0002d89365",
+    "Hampton & Richmond Borough":"6a43b5c11091400002aae7de","Harborough Town":"6a44d658bc4ef000023f73ec",
+    "Harrogate Town":"6a437a89c8c7900002f2eab0","Hartlepool United":"6a437b646964d100029f348f",
+    "Hebburn Town":"6a44d6b8bc4ef000023f73ed","Hednesford Town":"6a44d71813ebdc00024668af",
+    "Hemel Hempstead Town":"6a43b60d963c460002b8fef0","Hereford":"6a44d764bc4ef000023f73ee",
+    "Hornchurch":"6a437eb45d3afc0002a6d93d","Horsham":"6a47626d6e53950002294437",
+    "Kidderminster Harriers":"6a437f3fc8c7900002f2eab1","King's Lynn Town":"6a44d7b8bc4ef000023f73ef",
+    "Macclesfield":"6a44d7fd5374cf0002ac300d","Maidenhead United":"6a4762db3093f90002337917",
+    "Maidstone United":"6a43b698963c460002b8fef1","Marine":"6a44d8445374cf0002ac300e",
+    "Merthyr Town":"6a44d88913ebdc00024668b0","Morecambe":"6a44d8d5bc4ef000023f73f0",
+    "Oxford City":"6a44d9215374cf0002ac3010","Radcliffe":"6a44d98113ebdc00024668b1",
+    "Salisbury":"6a43b6db1091400002aae7df","Scarborough Athletic":"6a44da0d13ebdc00024668b2",
+    "Scunthorpe United":"6a437facc8c7900002f2eab2","Slough Town":"6a43b7201091400002aae7e0",
+    "Solihull Moors":"6a438245c8c7900002f2eab3","South Shields":"6a44da521d87cb00020cbf74",
+    "Southend United":"6a4383565d3afc0002a6d93e","Southport":"6a44da991d87cb00020cbf75",
+    "Spalding United":"6a44dae01d87cb00020cbf76","Spennymoor Town":"6a44db3513ebdc00024668b3",
+    "Sutton United":"6a4383d7c8c7900002f2eab4","Tamworth":"6a4384390639f9000240f037",
+    "Tonbridge Angels":"6a43b88e659f9800026569f0","Torquay United":"6a43b8f7e2a5230002fc0b2c",
+    "Truro City":"6a4763346e53950002294438","Walton & Hersham":"6a43b97a137e2d0002023bbb",
+    "Wealdstone":"6a4384cf0639f9000240f038","Weston-super-Mare":"6a4763976e53950002294439",
+    "Woking":"6a438517b46e00000209d7f8","Worksop Town":"6a44db8cf37a1c0002216642",
+    "Worthing":"6a438586d11d2700026745a8","Yeovil Town":"6a4385d0c8c7900002f2eab5"
+  };
+
+  var DEBUG = CONFIG.DEBUG || /[?&]ecalDebug=1/.test(location.search);
+
+  /* ---- identity helpers (verbatim from the working MOTM widget) ---- */
+  function readCookie(name){
+    var p = (document.cookie || "").split("; ");
+    for (var i = 0; i < p.length; i++) if (p[i].indexOf(name + "=") === 0) return p[i].slice(name.length + 1);
+    return null;
+  }
+  function decodeJwtPayload(jwt){
+    if (!jwt) return null;
+    var parts = jwt.split("."); if (parts.length !== 3) return null;
+    try {
+      var s = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+      while (s.length % 4) s += "=";
+      return JSON.parse(decodeURIComponent(escape(atob(s))));
+    } catch (e) { return null; }
+  }
+
+  /* ---- club matching ---- */
+  function stripFC(s){ return String(s).replace(/\s+f\.?\s?c\.?$/i, "").trim(); }
+  function norm(s){ return String(s).toLowerCase().replace(/&/g,"and").replace(/[^a-z0-9]+/g,""); }
+  function slug(s){ return String(s).toLowerCase().replace(/&/g,"and").replace(/'/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,""); }
+
+  var CI = {}, LOOK = {};
+  Object.keys(CLUBS).forEach(function(name){
+    CI[name.toLowerCase()] = name;             // exact, case-insensitive (mirrors MOTM matching)
+    LOOK[norm(name)] = name;                    // punctuation/space-insensitive
+    LOOK[slug(name)] = name;
+  });
+
+  function matchClub(val){
+    if(val == null) return null;
+    var s = String(val).trim();
+    if(!s) return null;
+    if(CI[s.toLowerCase()]) return CI[s.toLowerCase()];
+    var f = stripFC(s);
+    if(CI[f.toLowerCase()]) return CI[f.toLowerCase()];
+    if(LOOK[norm(s)]) return LOOK[norm(s)];
+    if(LOOK[norm(f)]) return LOOK[norm(f)];
+    if(LOOK[slug(s)]) return LOOK[slug(s)];
+    return null;
+  }
+
+  /* ---- detection ---- */
+  function claims(){ return decodeJwtPayload(readCookie(CONFIG.COOKIE_NAME)); }
+  function clubFromClaims(c){
+    if(!c) return null;
+    var fav = c[CONFIG.CLAIM] || c.favourite_team || c.favouriteTeam || c.favorite_team;
+    return fav ? matchClub(fav) : null;
+  }
+
+  function debugDump(state){
+    try{
+      var c = claims();
+      console.group("%c[NL ECAL] SSO detection", "color:#9e0000;font-weight:bold");
+      console.log("Cookie present:", !!readCookie(CONFIG.COOKIE_NAME));
+      console.log("JWT decoded:", !!c);
+      console.log("favourite_team claim:", c ? (c[CONFIG.CLAIM] || "(none)") : "(no JWT)");
+      console.log("Matched club:", state.club || "(none -> NL fallback)");
+      console.log("Source:", state.via);
+      console.log("Preview: nlEcalSetTestClub('Torquay United')");
+      console.groupEnd();
+    }catch(e){ console.warn("[NL ECAL] debug failed", e); }
+  }
+
+  /* ---- render ---- */
+  var IMG = document.getElementById("nl-ecal-img");
+  var BTN = document.getElementById("nl-ecal-btn");
+  var booted = false;
+
+  function fileFor(display){ return CONFIG.IMAGE_BASE + encodeURIComponent(display + " - 1000x100.png"); }
+
+  function bootEcal(){
+    if(booted) return; booted = true;
+    var s = document.createElement("script");
+    s.src = CONFIG.ECAL_SCRIPT;
+    s.setAttribute("data-ecal-apikey", CONFIG.ECAL_APIKEY);
+    document.body.appendChild(s);
+  }
+
+  function apply(club){
+    var display  = club || "National League";
+    var widgetId = club ? CLUBS[club] : CONFIG.NL_WIDGET_ID;
+    BTN.setAttribute("data-ecal-widget-id", widgetId);
+    BTN.setAttribute("aria-label", "Sync " + display + " fixtures to your calendar");
+    IMG.alt = "Sync " + display + " fixtures to your calendar";
+    IMG.src = fileFor(display);
+    bootEcal();               // boot ECAL only after the right widget-id is set
+  }
+
+  function finish(club){
+    if(club){
+      var probe = new Image();
+      probe.onload  = function(){ apply(club); };
+      probe.onerror = function(){ console.warn("[NL ECAL] missing PNG for " + club + ", using NL fallback"); apply(null); };
+      probe.src = fileFor(club);
+    } else {
+      apply(null);
+    }
+  }
+
+  function run(){
+    // 1. Preview override
+    var t = null;
+    try{ t = localStorage.getItem(CONFIG.TEST_KEY); }catch(e){}
+    if(t){ var mt = matchClub(t); if(mt){ if(DEBUG) debugDump({club:mt, via:"test"}); finish(mt); return; } }
+
+    // 2. JWT already present (the normal signed-in case)
+    var c = claims();
+    if(c){ var club = clubFromClaims(c); if(DEBUG) debugDump({club:club, via:"jwt"}); finish(club); return; }
+
+    // 3. No cookie yet — could be signed out, or cookie not set post-login redirect.
+    //    Poll briefly; settle on NL if it never appears.
+    var start = Date.now();
+    var iv = setInterval(function(){
+      var cc = claims();
+      if(cc){ clearInterval(iv); var cl = clubFromClaims(cc); if(DEBUG) debugDump({club:cl, via:"jwt-late"}); finish(cl); }
+      else if(Date.now() - start >= CONFIG.JWT_WAIT_MS){ clearInterval(iv); if(DEBUG) debugDump({club:null, via:"signed-out"}); finish(null); }
+    }, 200);
+  }
+
+  window.nlEcalSetTestClub = function(name){
+    try{ localStorage.setItem(CONFIG.TEST_KEY, name); location.reload(); }
+    catch(e){ console.warn("[NL ECAL] could not set test club", e); }
+  };
+
+  if(document.readyState === "loading"){ document.addEventListener("DOMContentLoaded", run); }
+  else { run(); }
+})();
+</script>
