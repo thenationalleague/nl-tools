@@ -204,3 +204,42 @@ test('.banner carries a full border, never a left accent stripe', () => {
       `${sel} must not reintroduce the side-accent stripe`);
   }
 });
+
+/* ── Disclosure row (v2.41) ────────────────────────────────────────────────
+   Promoted from three hand-rolled <details>/<summary> skeletons
+   (club-contacts/admin .cra-all__club, fan-widgets .fw-fan, estate
+   .est-fam). The marker suppression is the invisible contract: drop any one
+   of the three declarations and one browser family quietly renders TWO
+   arrows — the canon ▸ next to the platform's own triangle — and nothing
+   complains. fixtures' mini-caps togglers stayed local by ruling. */
+
+test('.disclosure suppresses the native marker in every engine', () => {
+  const body = ruleBody('.disclosure > summary');
+  assert.match(body, /list-style:\s*none/, 'list-style: none for Firefox/modern engines');
+  const wk = rules.indexOf('.disclosure > summary::-webkit-details-marker');
+  assert.notEqual(wk, -1, 'the ::-webkit-details-marker rule is present for older WebKit');
+  assert.match(rules.slice(wk, rules.indexOf('}', wk)), /display:\s*none/);
+  assert.ok(rules.includes('.disclosure > summary::marker'),
+    'the ::marker rule is present so no engine draws its own arrow');
+});
+
+test('.disclosure draws its own chevron and swaps it under [open]', () => {
+  const closed = rules.indexOf('.disclosure > summary::before');
+  assert.notEqual(closed, -1, 'the closed-state chevron is drawn by ::before');
+  assert.match(rules.slice(closed, rules.indexOf('}', closed)), /content:/);
+  const open = rules.indexOf('.disclosure[open] > summary::before');
+  assert.notEqual(open, -1, 'an [open] state rule exists');
+  assert.match(rules.slice(open, rules.indexOf('}', open)), /content:/,
+    'the open state is a content swap — no transform, nothing for reduced-motion to catch');
+});
+
+test('.disclosure is tokened — navy summary, muted chevron and meta, no raw hex', () => {
+  const summary = ruleBody('.disclosure > summary');
+  assert.match(summary, /color:\s*var\(--navy\)/);
+  assert.match(summary, /'wght' 800/);
+  assert.doesNotMatch(summary, /#[0-9a-fA-F]{3,8}\b/, '.disclosure summary must use tokens, not hex');
+  const meta = ruleBody('.disclosure__meta');
+  assert.match(meta, /color:\s*var\(--text-muted\)/);
+  assert.match(meta, /font-size:\s*var\(--text-sm\)/);
+  assert.doesNotMatch(meta, /#[0-9a-fA-F]{3,8}\b/, '.disclosure__meta must use tokens, not hex');
+});
