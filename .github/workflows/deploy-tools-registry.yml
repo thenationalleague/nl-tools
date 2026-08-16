@@ -1,0 +1,161 @@
+name: Deploy tools registry
+
+# Publishes system/rtdb/tools-registry.snapshot.json to RTDB tools/ — the node
+# that drives BOTH the portal cards AND auth-guard's access defaults.
+#
+# The registry was the last thing still pasted into the console by hand, and
+# it failed the way hand-pasting always fails here: on 16/08/2026 the live
+# tools/ops-estate record turned out to contain an entire stale copy of the
+# registry, nested one level too deep, sitting there for weeks. Rules,
+# Storage rules and Apps Script all left the console this weekend for the
+# same reason. This closes the set.
+#
+# Report mode (default) deletes nothing and diffs live against the snapshot —
+# run it any time drift is suspected. Publish replaces the whole node with the
+# snapshot, which is the contract: the file in git IS the registry. A record
+# that exists only in live is therefore a DELETION on publish, so publish
+# refuses if any exist unless allow_deletions is ticked — the same
+# refuse-rather-than-pick-a-winner stance as the Apps Script deploy.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'report = diff only. publish = write the snapshot to RTDB.'
+        required: true
+        default: report
+        type: choice
+        options: [report, publish]
+      confirm:
+        description: 'Type "publish" to allow publish mode. Ignored for report.'
+        required: false
+        default: ''
+      allow_deletions:
+        description: 'Publish even if live holds records the snapshot does not (they will be DELETED).'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: tools-registry
+  cancel-in-progress: false
+
+jobs:
+  registry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check the confirmation
+        if: inputs.mode == 'publish'
+        run: |
+          if [ "${{ inputs.confirm }}" != "publish" ]; then
+            echo "::error::Publish mode needs the confirm box to say exactly: publish"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Fetch the live registry
+        run: |
+          set -euo pipefail
+          TOKEN=$(gcloud auth print-access-token)
+          code=$(curl -sS -o live.json -w '%{http_code}' \
+            -H "Authorization: Bearer $TOKEN" \
+            "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app/tools.json")
+          if [ "$code" != "200" ]; then
+            echo "::error::RTDB read failed with HTTP $code. If 401/403: the service"
+            echo "::error::account needs the 'Firebase Realtime Database Admin' role"
+            echo "::error::(IAM console → the GCP_SERVICE_ACCOUNT principal → add role)."
+            cat live.json; exit 1
+          fi
+          echo "live registry: $(wc -c < live.json) bytes"
+
+      - name: Diff live against the snapshot
+        id: diff
+        run: |
+          set -euo pipefail
+          node - <<'EOF'
+          const fs = require('fs');
+          const live = JSON.parse(fs.readFileSync('live.json', 'utf8')) || {};
+          const snap = JSON.parse(fs.readFileSync('system/rtdb/tools-registry.snapshot.json', 'utf8'));
+
+          const stable = (v) => JSON.stringify(v, Object.keys(flatten(v)).sort());
+          function flatten(v, p = '', out = {}) {
+            if (v && typeof v === 'object') { for (const k of Object.keys(v)) flatten(v[k], p + '/' + k, out); }
+            else out[p] = v;
+            return out;
+          }
+
+          const liveKeys = Object.keys(live).sort();
+          const snapKeys = Object.keys(snap).sort();
+          const onlyLive = liveKeys.filter(k => !(k in snap));
+          const onlySnap = snapKeys.filter(k => !(k in live));
+          const differ = [];
+          for (const k of snapKeys.filter(k => k in live)) {
+            const a = flatten(live[k]), b = flatten(snap[k]);
+            const fields = new Set([...Object.keys(a), ...Object.keys(b)]);
+            const changes = [...fields].filter(f => JSON.stringify(a[f]) !== JSON.stringify(b[f]))
+              .map(f => `${f}: ${JSON.stringify(a[f])} → ${JSON.stringify(b[f])}`);
+            if (changes.length) differ.push({ k, changes });
+          }
+
+          const lines = [];
+          lines.push(`live: ${liveKeys.length} records · snapshot: ${snapKeys.length} records`);
+          if (onlyLive.length) {
+            lines.push('', `ONLY IN LIVE — publish would DELETE these (${onlyLive.length}):`);
+            onlyLive.forEach(k => lines.push(`  - ${k}`));
+          }
+          if (onlySnap.length) {
+            lines.push('', `ONLY IN SNAPSHOT — publish would CREATE these (${onlySnap.length}):`);
+            onlySnap.forEach(k => lines.push(`  + ${k}`));
+          }
+          if (differ.length) {
+            lines.push('', `DIFFER — publish would UPDATE these (${differ.length}):`);
+            differ.forEach(d => { lines.push(`  ~ ${d.k}`); d.changes.forEach(c => lines.push(`      ${c}`)); });
+          }
+          if (!onlyLive.length && !onlySnap.length && !differ.length) {
+            lines.push('', 'No drift. Live matches the snapshot exactly.');
+          }
+          const report = lines.join('\n');
+          console.log(report);
+          fs.writeFileSync('diff-report.txt', report);
+          fs.writeFileSync('deletions.txt', String(onlyLive.length));
+          EOF
+          {
+            echo "## Tools registry — \`${{ inputs.mode }}\`"
+            echo
+            echo '```'
+            cat diff-report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish the snapshot
+        if: inputs.mode == 'publish'
+        run: |
+          set -euo pipefail
+          if [ "$(cat deletions.txt)" != "0" ] && [ "${{ inputs.allow_deletions }}" != "true" ]; then
+            echo "::error::Live holds records the snapshot does not (see the diff above)."
+            echo "::error::Publishing would delete them. Either add them to the snapshot"
+            echo "::error::via a PR, or re-run with allow_deletions ticked if they should go."
+            exit 1
+          fi
+          TOKEN=$(gcloud auth print-access-token)
+          code=$(curl -sS -o put-result.json -w '%{http_code}' -X PUT \
+            -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            --data @system/rtdb/tools-registry.snapshot.json \
+            "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app/tools.json")
+          if [ "$code" != "200" ]; then
+            echo "::error::RTDB write failed with HTTP $code"; cat put-result.json; exit 1
+          fi
+          echo "Published. tools/ now matches the snapshot exactly."
+          echo "The portal reflects it on next load — no cache in the way, auth-guard re-reads per page."
