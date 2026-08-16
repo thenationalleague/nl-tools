@@ -348,6 +348,44 @@ test('.table-wrap carries no chrome of its own — .table owns it', () => {
     'radius (not chrome) keeps the rounded silhouette during a mid-scroll clip');
 });
 
+/* ── Button + pill rationalisation (v2.47) ─────────────────────────────────
+   .btn--accent was a byte-identical alias of .btn--primary from v2.15 until
+   its deletion; two names for one recipe is drift waiting to happen. The
+   pill alias pairs survived as names (shared domain vocabulary) but became
+   grouped selectors, so each recipe is stated exactly once and a pair
+   cannot drift apart. Nothing in a browser complains if someone re-splits
+   a pair "to tweak just one of them" — which is precisely the failure. */
+
+test('.btn--accent stays deleted — .btn--primary is the one primary CTA', () => {
+  /* Selector positions only — the changelog prose in the widget-index
+     comment still names the variant historically, and prose is not a rule. */
+  assert.doesNotMatch(rules, /\n\.btn--accent\s*[,{:]/,
+    '.btn--accent must not return; it was an identical alias of .btn--primary');
+});
+
+test('the five button variants each still exist with their stated job', () => {
+  for (const sel of ['.btn--primary', '.btn--navy', '.btn--ghost', '.btn--danger', '.btn--restore']) {
+    assert.ok(rules.includes(sel), `${sel} exists`);
+  }
+});
+
+test('pill alias pairs share one grouped rule each, so they cannot drift', () => {
+  for (const [a, b] of [['live', 'approved'], ['soon', 'pending'], ['expired', 'rejected']]) {
+    const re = new RegExp(`\\.pill--${a},\\s*\\n\\.pill--${b}\\s*\\{`);
+    assert.match(rules, re,
+      `.pill--${a} and .pill--${b} must be one grouped selector — one recipe, two names`);
+    /* And neither may reappear as a standalone rule that could diverge. */
+    assert.ok(!rules.includes(`\n.pill--${a} {`) && !rules.includes(`\n.pill--${b} {`),
+      `.pill--${a}/.pill--${b} must not also exist as standalone rules`);
+  }
+});
+
+test('.pill--postponed keeps the purple that separates called-off from coming-up', () => {
+  const body = ruleBody('.pill--postponed');
+  assert.match(body, /background:\s*var\(--purple-light\)/);
+  assert.match(body, /color:\s*var\(--purple\)/);
+});
+
 test('.disclosure is tokened — navy summary, muted chevron and meta, no raw hex', () => {
   const summary = ruleBody('.disclosure > summary');
   assert.match(summary, /color:\s*var\(--navy\)/);
