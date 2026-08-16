@@ -140,3 +140,25 @@ test('.nl-idbar__id keeps the flex: 1 the layout depends on', () => {
   assert.match(body, /flex:\s*1/);
   assert.match(body, /min-width:\s*0/);
 });
+
+/* ── Standalone select (v2.39) ─────────────────────────────────────────────
+   Promoted from nls-monitor's matchday picker on second use (Fan Widgets).
+   The load-bearing part is the redrawn arrow: without appearance: none the
+   platform draws its own arrow at a different size and colour on every OS,
+   and the control reads as unstyled next to the brand buttons beside it. A
+   well-meant "simplify: drop the gradients, keep the native arrow" undoes
+   the whole reason the class exists, and no browser complains. */
+test('.nl-select exists and redraws the dropdown arrow itself', () => {
+  const body = ruleBody('.nl-select');
+  assert.match(body, /(^|[;{\s])appearance:\s*none/, 'native arrow must be removed');
+  assert.match(body, /-webkit-appearance:\s*none/);
+  assert.match(body, /background-image:\s*linear-gradient/, 'arrow must be redrawn');
+  assert.match(body, /var\(--text-muted\)/, 'redrawn arrow uses the brand muted ink');
+});
+
+/* Width is layout, not identity — nls-monitor's 15rem stayed tool-local and
+   canon must not grow one. A min-width here would reflow every consumer. */
+test('.nl-select sets no width of its own', () => {
+  assert.doesNotMatch(ruleBody('.nl-select'), /(min-)?width\s*:/,
+    '.nl-select must leave width to the tool');
+});
