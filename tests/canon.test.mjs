@@ -225,6 +225,18 @@ test('roles: norm / label / realm / isClubUser fold the legacy "club" key', () =
   assert.ok(!NL.isClubUser('staff') && !NL.isClubUser('third-party') && !NL.isClubUser(''));
 });
 
+test('season.fromDate flips on 1 July, not August', () => {
+  // The canonical boundary: a season is named for the calendar year it starts
+  // in, and NLS publishes the new season's fixtures in July. Claudio carried
+  // an August-flip copy of this ternary, so each July two parts of the same
+  // tool named different seasons — these four dates pin the rule.
+  assert.equal(NL.season.fromDate(new Date(2026, 5, 30)), 2025, '30 June → previous year');
+  assert.equal(NL.season.fromDate(new Date(2026, 6, 1)), 2026, '1 July → same year');
+  assert.equal(NL.season.fromDate(new Date(2026, 11, 25)), 2026, 'December → same year');
+  assert.equal(NL.season.fromDate(new Date(2027, 0, 15)), 2026, 'January → previous year');
+  assert.equal(typeof NL.season.fromDate(), 'number', 'no-arg derives from the clock');
+});
+
 test('season.current / keys / label read the registry', () => {
   assert.equal(NL.season.current(meta), '2026');
   assert.deepEqual(NL.season.keys(meta), ['2026', '2025']);

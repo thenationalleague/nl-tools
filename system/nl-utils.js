@@ -1,9 +1,20 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.29 (15/08/2026)
+   Version: v1.30 (16/08/2026)
 
    Changelog
+   v1.30 (16/08/2026)
+     - NL.season.fromDate(d) — derive the season start-year from a date,
+       flipping on 1 July. The same three-line ternary existed in four
+       places (motm widget, leaderboard + feed-cache jobs, claudio) and
+       claudio had a fifth copy that flipped on 1 August instead, so for
+       a month each July two parts of the same tool disagreed about what
+       season it was. The boundary is canon now; the embeds and Node jobs
+       cannot load NL.* so they keep hand-mirrored copies with a lockstep
+       comment pointing here.
+       Cache-bust ?v=32 -> ?v=33 in lockstep.
+
    v1.29 (15/08/2026)
      - NL.codeGate — the "type a code, get in" screen, which five pages had
        each grown their own copy of (club directory ×2, uw-promo, programme,
@@ -1316,14 +1327,25 @@
   };
 
   /* ── Season helper (clubs-meta v1.9+) ────────────────────────────────────
-     Stateless: every method takes the parsed clubs-meta object a tool has
-     already fetched. clubs-meta carries a top-level `seasons` registry
+     Stateless: every method except fromDate takes the parsed clubs-meta
+     object a tool has already fetched. clubs-meta carries a top-level `seasons` registry
      { current, list:{<key>:{label}} } and each club a `seasons` map
      { <key>: <division that season> }. The top-level club.division stays =
      the current season's division (null for clubs not in the current
      league), so legacy consumers are unaffected; season-aware tools use
      clubsFor() to get the right roster + per-season division. */
   window.NL.season = {
+    /* Season start-year for a date (defaults to now), e.g. 2026 for any
+       date from 01/07/2026 to 30/06/2027. The season flips on 1 JULY —
+       not August, even though league fixtures kick off in August —
+       because a season is named for the calendar year it starts in and
+       NLS publishes the new season's fixtures in July. Prefer clubs-meta
+       seasons.current (via .current()) when the file is already loaded;
+       this is the clock-derived answer for when it isn't. */
+    fromDate: function(d) {
+      d = d || new Date();
+      return (d.getMonth() + 1) >= 7 ? d.getFullYear() : d.getFullYear() - 1;
+    },
     /* Current season key, e.g. '2026'. */
     current: function(meta) {
       return (meta && meta.seasons && meta.seasons.current) || null;

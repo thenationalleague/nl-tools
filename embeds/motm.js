@@ -117,6 +117,8 @@
       // clubs-meta (seasons.current) rather than being hardcoded; deriving it
       // from the date is the fallback if that fetch fails, and ?season=2025
       // forces an older one for testing.
+      // Mirrors canon NL.season.fromDate (system/nl-utils.js) — embeds are
+      // CMS-pasted and load no NL.* scripts, so keep this copy in lockstep.
       function deriveSeasonId(d) {
         var y = d.getFullYear();
         return (d.getMonth() + 1) >= 7 ? y : y - 1;
