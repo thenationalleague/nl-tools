@@ -233,6 +233,33 @@ test('.disclosure draws its own chevron and swaps it under [open]', () => {
     'the open state is a content swap — no transform, nothing for reduced-motion to catch');
 });
 
+/* ── Division identity (v2.42) ─────────────────────────────────────────────
+   Promoted from club-directory/meta-reference's .mr-div--* pills, the only
+   mapper verified to carry the navy/amber/green pairing its CANON CANDIDATE
+   flag recorded. The tokens exist to settle that pairing: fixtures' pastel
+   row washes and vidiprinter's embed palette already tell three different
+   colour stories for the same three divisions, and a fourth invention is
+   the failure these prevent. Aliases, not hex — a brand hue change must
+   flow through, exactly as --proj-1…6 do. */
+
+test('--div-* tokens exist and alias the settled division pairing', () => {
+  assert.match(rules, /--div-national:\s*var\(--navy\)/,
+    'National is navy — an alias, so a brand navy change flows through');
+  assert.match(rules, /--div-north:\s*var\(--amber\)/,
+    'North is amber');
+  assert.match(rules, /--div-south:\s*var\(--green\)/,
+    'South is green');
+});
+
+test('the --div-* parent hues still carry the values the pairing settled on', () => {
+  /* The aliases only mean what the parents say. If a semantic hue is ever
+     retuned, this fails as a prompt to re-check the North dark-text ruling
+     (white on the amber does not read) rather than silently inheriting. */
+  assert.match(rules, /--navy:\s*#223b7c/);
+  assert.match(rules, /--amber:\s*#c96f15/);
+  assert.match(rules, /--green:\s*#1a7030/);
+});
+
 test('.disclosure is tokened — navy summary, muted chevron and meta, no raw hex', () => {
   const summary = ruleBody('.disclosure > summary');
   assert.match(summary, /color:\s*var\(--navy\)/);
