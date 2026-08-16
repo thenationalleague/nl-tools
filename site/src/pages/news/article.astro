@@ -1,0 +1,58 @@
+---
+import Base from '../../layouts/Base.astro';
+---
+<Base title="Article — The National League" active="news">
+  <article data-article>
+    <p class="kicker" data-article-cat>News</p>
+    <h1 class="page-title" data-article-title>Loading&hellip;</h1>
+    <p class="article-meta" data-article-meta></p>
+    <img class="article-hero" data-article-hero alt="" hidden />
+    <div class="article-body" data-article-body></div>
+  </article>
+</Base>
+
+<script>
+  import { fetchArticle, renderBody, articleHero, fmtDate, esc } from '../../lib/cms.js';
+
+  const params = new URLSearchParams(location.search);
+  const slug = params.get('slug') || '';
+  const titleEl = document.querySelector('[data-article-title]');
+  const bodyEl = document.querySelector('[data-article-body]');
+
+  (async () => {
+    if (!slug) {
+      titleEl.textContent = 'Article not found';
+      return;
+    }
+    try {
+      const body = await fetchArticle(slug);
+      if (!body) throw new Error('empty body');
+      const meta = body[0] || {};
+      const title = meta.postTitle || slug.split('/').pop().replace(/-\d+$/, '').replace(/-/g, ' ');
+      titleEl.textContent = title;
+      document.title = title + ' — The National League';
+
+      const catEl = document.querySelector('[data-article-cat]');
+      if (meta.newsCategory) catEl.textContent = meta.newsCategory;
+
+      const metaEl = document.querySelector('[data-article-meta]');
+      const bits = [];
+      if (meta.postAuthor) bits.push(esc(meta.postAuthor.trim()));
+      if (meta.publishedDateTime) bits.push(esc(fmtDate(meta.publishedDateTime)));
+      metaEl.innerHTML = bits.join(' &middot; ');
+
+      const heroUrl = articleHero(body);
+      if (heroUrl) {
+        const heroEl = document.querySelector('[data-article-hero]');
+        heroEl.src = heroUrl;
+        heroEl.hidden = false;
+        heroEl.onerror = () => { heroEl.hidden = true; };
+      }
+
+      bodyEl.innerHTML = renderBody(body);
+    } catch (err) {
+      titleEl.textContent = 'Couldn’t load this article';
+      bodyEl.innerHTML = '<p class="news-fallback">The news service didn’t respond — refresh to try again.</p>';
+    }
+  })();
+</script>
