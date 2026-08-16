@@ -1,7 +1,16 @@
 /*
  * auth-guard.js — NL Tools v2
  * File: /system/auth-guard.js
- * Version: v6.3 (16/08/2026)
+ * Version: v6.4 (16/08/2026)
+ *
+ * v6.4: Vocabulary reconciliation with the agreed access model. The audience
+ *       value 'staff' is renamed 'league' ('staff' collided with the role
+ *       key — one word, one meaning); the gate accepts both so a mid-rename
+ *       registry can't lock anyone out. The retired 'third-party' role and
+ *       renamed 'club-viewer' -> 'club-staff' are handled entirely in
+ *       NL.roles (this file gates by realm/allow-list, not by those keys);
+ *       stale comments naming them are corrected. Cache-bust ?v=12 -> ?v=13,
+ *       in lockstep with nl-utils ?v=39 -> ?v=40.
  *
  * v6.3: The audience gate covers a third value, 'meta' — tools about the
  *       estate (Estate, Style Guide). Access-wise identical to 'staff':
@@ -277,15 +286,18 @@
       return;
     }
 
-    /* Audience gate (v6.2): a staff-audience tool is reachable by LEAGUE roles
-       only. Club and external realms (and any unknown role) are hard-denied
-       regardless of a per-user entry or default — the structural boundary, so
-       a stray grant can't leak a staff tool to a club. Fail-safe: allow-list
-       league roles rather than deny-list club ones. A tool with no `audience`
-       field (not yet classified / legacy) skips this and behaves as before. */
-    if (toolData && (toolData.audience === 'staff' || toolData.audience === 'meta')) {
+    /* Audience gate (v6.4): a league-audience tool is reachable by LEAGUE roles
+       only. Club roles (and any unknown role) are hard-denied regardless of a
+       per-user entry or default — the structural boundary, so a stray grant
+       can't leak a league tool to a club. Fail-safe: allow-list league roles
+       rather than deny-list club ones. A tool with no `audience` field (not
+       yet classified / legacy) skips this and behaves as before.
+       The audience value 'staff' was renamed 'league' (one word, one meaning —
+       'staff' collided with the role key); both are accepted so a mid-rename
+       registry can't lock anyone out. */
+    if (toolData && (toolData.audience === 'league' || toolData.audience === 'staff' || toolData.audience === 'meta')) {
       /* 'meta' (v6.3): tools about the estate — Estate, Style Guide. For the
-         gate it is exactly 'staff': league roles only, structurally, so a
+         gate it is exactly 'league': league roles only, structurally, so a
          stray club grant can never open one. The portal shelves the two
          audiences differently; this file does not care about shelves. */
       var LEAGUE = { superadmin: true, admin: true, staff: true };
@@ -324,12 +336,15 @@
     if (!session.tools || !session.tools.hasOwnProperty(NL_TOOL_KEY)) {
       if (toolData && toolData.defaults) {
         /* Bare role key IS the defaults key, uniformly for every role
-           (superadmin/admin/staff/club[-admin]/club-viewer/third-party).
-           The legacy compound `<org>-<role>` lookup is gone with the
-           deprecated orgKey (org distinction removed; all staff equal).
-           A role with no defaults entry — e.g. third-party — resolves to
-           'off', which is exactly the intended zero-access default. */
-        level = toolData.defaults[session.role] || 'off';
+           (superadmin/admin/staff/club-admin/club-staff). Normalise first so a
+           legacy key resolves against the canon defaults key: 'club' →
+           club-admin, 'club-viewer' → club-staff (NL.roles.norm). Raw role is
+           kept as a fallback. A role with no defaults entry resolves to 'off',
+           the intended zero-access default. The legacy compound `<org>-<role>`
+           lookup is gone with the deprecated orgKey (all staff equal). */
+        var roleKey = (window.NL && NL.roles && NL.roles.norm)
+          ? NL.roles.norm(session.role) : session.role;
+        level = toolData.defaults[roleKey] || toolData.defaults[session.role] || 'off';
       }
     }
 

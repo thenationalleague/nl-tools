@@ -544,7 +544,7 @@ function main() {
           if (parked[toolKey]) return { kind: 'superadmin', label: 'Superadmin (parked)' };
           var d = rec.defaults || {};
           var anyStaff = (d.staff || 'off') !== 'off' || (d.admin || 'off') !== 'off';
-          var anyClub = (d['club-admin'] || 'off') !== 'off' || (d['club-viewer'] || 'off') !== 'off';
+          var anyClub = (d['club-admin'] || 'off') !== 'off' || (d['club-staff'] || 'off') !== 'off';
           if (!anyStaff && !anyClub) return { kind: 'superadmin', label: 'Superadmin only' };
           if (anyClub) return { kind: 'club', label: 'Staff + clubs' };
           return { kind: 'staff', label: 'NL staff' };

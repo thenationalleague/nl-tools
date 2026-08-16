@@ -1,5 +1,18 @@
 # Roles & access — plan of action
 
+> **Vocabulary reconciled — 16/08/2026.** The settled model has **two realms
+> that log in** and **five roles**: League (`superadmin`, `admin`, `staff`) and
+> Club (`club-admin`, `club-staff`). The old **external realm and its
+> `third-party` role are retired** — outsiders get passcode-gated **coded links**
+> per job, not a login (third-party had zero access on every tool anyway). The
+> club read-tier was renamed **`club-viewer` → `club-staff`** to mirror League
+> Staff; both legacy keys stay accepted in `NL.roles`. The audience value
+> **`staff` → `league`** (it collided with the role key). The per-tool level
+> words **access/admin → Use/Manage** land with the panel rebuild (step 3).
+> The tables below still describe the older 6-role/`external` framing and its
+> phased build — kept as the record of how we got here; the code (`NL.roles`,
+> `auth-guard`) and the 16/08 access-model artifact are the ground truth.
+
 Status: **Phase 1 in progress** (this PR). Phases 2–3 to follow.
 
 ## The model — 3 realms, 6 roles, 2 axes
@@ -14,13 +27,13 @@ override). Do **not** bake level into role names.
 | League | `admin` | League Admin | admin panel, notifications; tools default to `admin` |
 | League | `staff` | League Staff | tools default to `access`, upgradeable per tool |
 | Club | `club-admin` (was `club`) | Club Admin | club tools; **edits** own club's content |
-| Club | `club-viewer` *(new)* | Club Viewer | club tools; **view-only** |
+| Club | `club-staff` *(new)* | Club Staff | club tools; **view-only** |
 | External | `third-party` *(new)* | Third Party | **hidden everywhere by default**; granted tools per user; org-named; never club-scoped |
 
 Locked decisions:
 - **Keep `superadmin`/`admin`/`staff` keys**, relabel pills only (renaming them
   is ~180 cosmetic edits for no real gain; the labels carry clarity).
-- **Rename `club` → `club-admin`** (substantive — pairs with `club-viewer`).
+- **Rename `club` → `club-admin`** (substantive — pairs with `club-staff`).
 - **Club edit is global** (admin vs viewer), not per-tool. Per-tool club-edit
   toggles deliberately NOT built (would re-introduce the level model on top of
   explicit roles — worst of both).
@@ -43,7 +56,7 @@ so roster-gating is UI-level; rules stay club-name-scoped — not a hole.)
 
 ### Phase 1 — Foundation *(this PR; no behaviour change)*
 - `nl-utils`: `NL.roles` (realm/label) + `NL.isClubUser(role)` (scope: club-admin
-  OR club-viewer OR legacy club) + `NL.canClubEdit(role)` (edit: club-admin /
+  OR club-staff OR legacy club) + `NL.canClubEdit(role)` (edit: club-admin /
   legacy club only). Helpers accept both the legacy `club` key and `club-admin`.
 - `auth-guard`: defaults lookup simplified to `defaults[role]` for every role
   (a role with no entry → `hidden`, which is third-party's zero-access default);
@@ -56,9 +69,9 @@ so roster-gating is UI-level; rules stay club-name-scoped — not a hole.)
 
 ### Phase 2 — Club tool sweep, UI-gated tools — **DONE**
 Migrated **attendance** and **club-directory** to `NL.isClubUser` (scope) /
-`NL.canClubEdit` (edit). club-viewer: attendance sees its own club but can't
+`NL.canClubEdit` (edit). club-staff: attendance sees its own club but can't
 submit; club-directory gets the own-club hero + completion dashboard but no
-Manage (new `club-viewer` persona). **programme, dazn-vip, vacancies were
+Manage (new `club-staff` persona). **programme, dazn-vip, vacancies were
 moved to Phase 3** — their edits write to RTDB and are rule-enforced, so the UI
 affordance-hiding ships beside the rule tightening rather than alone. **No
 `?v=` bump** — `nl-utils` (with the helpers) is already live under `_headers`
@@ -69,7 +82,7 @@ no-cache, so the new calls resolve; a forced bump buys nothing.
   writes — attendance `submissions`, vacancies `submissions`, judgements
   `records` — to role-scoped; (b) **rename** `club` → `club-admin` in role
   comparisons; (c) leave `third-party` absent from every `defaults` (= hidden).
-- Registry (`tools-registry.snapshot.json`): `club-viewer: "access"` on club
+- Registry (`tools-registry.snapshot.json`): `club-staff: "access"` on club
   tools; `club` defaults key → `club-admin`.
 - Portal user-admin: 6-option role picker + pills; **org-name field** when
   role is `third-party`; **club picker → `NL.season.clubsFor`**; **off-roster
@@ -97,7 +110,7 @@ browser verification.
 
 ## The load-bearing security note
 Until the Phase-3 rule tightening lands, several writes are `auth != null` (any
-signed-in user) — so a club-viewer or third-party could write where their page
+signed-in user) — so a club-staff or third-party could write where their page
 is hidden (notably attendance submissions). "View-only"/"blocked" only fully
 hold once those are role-scoped. This is the real must-do that both new roles
 depend on.

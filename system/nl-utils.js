@@ -1,9 +1,20 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.36 (16/08/2026)
+   Version: v1.37 (16/08/2026)
 
    Changelog
+   v1.37 (16/08/2026)
+     - NL.roles reconciled to the agreed two-realm model. Retired the
+       external realm and its 'third-party' role (zero access on every
+       tool anyway; outsiders now get passcode-gated coded links, not a
+       login). Renamed the club read-tier club-viewer -> club-staff, so it
+       mirrors League Staff. Both legacy keys stay ACCEPTED: realm()/
+       isClubUser() still recognise 'club-viewer', norm() folds it to
+       'club-staff' (and legacy 'club' to 'club-admin'). No live user
+       carried either retired/renamed key. Cache-bust ?v=39 -> ?v=40 in
+       lockstep with auth-guard ?v=12 -> ?v=13.
+
    v1.36 (16/08/2026)
      - NL.positionBands is now the SINGLE SOURCE for the NL competition
        position-band palette. The CSS twins (--pos-*) were deleted in
@@ -1738,14 +1749,15 @@
   };
 
   /* ===================================================================
-     NL.roles — canonical role model (v1.10). Three realms:
-       league  : superadmin / admin / staff
-       club    : club-admin (edit own club) / club-viewer (view only)
-       external: third-party (org-named, tools granted individually,
-                 hidden everywhere by default, never club-scoped)
-     'club' is the LEGACY key for club-admin and stays accepted until the
-     Phase-3 rename. Tools branch on these helpers, NOT raw role strings,
-     so the rename touches one place. ============================== */
+     NL.roles — canonical role model (v1.11). Two realms that log in:
+       league : superadmin / admin / staff
+       club   : club-admin (edit own club) / club-staff (view own club)
+     Outsiders don't get a role — they get passcode-gated coded links per
+     job (no login/identity). The old external realm and its 'third-party'
+     role are retired (it had zero access on every tool anyway).
+     Legacy keys stay ACCEPTED so nothing strands: 'club' → club-admin,
+     'club-viewer' → club-staff. Tools branch on these helpers, NOT raw role
+     strings, so the rename touches one place. ===================== */
   window.NL.roles = {
     LABELS: {
       superadmin:    'Superadmin',
@@ -1753,28 +1765,32 @@
       staff:         'League Staff',
       'club-admin':  'Club Admin',
       club:          'Club Admin',      /* legacy alias */
-      'club-viewer': 'Club Viewer',
-      'third-party': 'Third Party'
+      'club-staff':  'Club Staff',
+      'club-viewer': 'Club Staff'       /* legacy alias for club-staff */
     },
     realm: function(role) {
       if (role === 'superadmin' || role === 'admin' || role === 'staff') return 'league';
-      if (role === 'club' || role === 'club-admin' || role === 'club-viewer') return 'club';
-      if (role === 'third-party') return 'external';
+      if (role === 'club' || role === 'club-admin' || role === 'club-staff' || role === 'club-viewer') return 'club';
       return null;
     },
     label: function(role) { return this.LABELS[role] || role || ''; },
-    /* Normalise a role for access lookups: legacy 'club' → 'club-admin',
-       empty → 'staff'. The one place the Phase-3 rename lands. */
-    norm: function(role) { return role === 'club' ? 'club-admin' : (role || 'staff'); }
+    /* Normalise a role for access lookups. Legacy keys fold to canon:
+       'club' → club-admin, 'club-viewer' → club-staff; empty → staff. */
+    norm: function(role) {
+      if (role === 'club') return 'club-admin';
+      if (role === 'club-viewer') return 'club-staff';
+      return role || 'staff';
+    }
   };
 
   /* A club user of either tier — scope tools to session.club for these. */
   window.NL.isClubUser = function(role) {
-    return role === 'club' || role === 'club-admin' || role === 'club-viewer';
+    return role === 'club' || role === 'club-admin' || role === 'club-staff' || role === 'club-viewer';
   };
   /* May this user edit their OWN club's content? club-admin (legacy
-     'club') yes; club-viewer no. League admin/superadmin editing of any
-     club stays in each tool's own admin check, not here. */
+     'club') yes; club-staff (legacy 'club-viewer') no. League admin/
+     superadmin editing of any club stays in each tool's own admin check,
+     not here. */
   window.NL.canClubEdit = function(role) {
     return role === 'club' || role === 'club-admin';
   };

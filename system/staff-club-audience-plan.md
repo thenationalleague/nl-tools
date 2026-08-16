@@ -33,7 +33,7 @@ security boundary:**
 The one thing that IS consistent today — and the reason this migration is
 low-risk — is that `defaults` already encode the audience mechanically:
 
-| Current prefix        | club-admin / club-viewer default | → audience        |
+| Current prefix        | club-admin / club-staff default | → audience        |
 |-----------------------|----------------------------------|-------------------|
 | `staff-*` (11 tools)  | `off` / `off`                    | **staff-only**    |
 | `ops-*` (6 tools)     | `access` / `access`              | **club-accessible** |
@@ -87,7 +87,7 @@ axes 2 and 3 already exist and are unchanged by this plan. Keeping them distinct
 is what makes each decision explainable.
 
 **The six roles, three realms:** league (`superadmin`, `admin`, `staff`) ·
-club (`club-admin`, `club-viewer`) · external (`third-party`).
+club (`club-admin`, `club-staff`) · external (`third-party`).
 
 **Axis 1 — can they open the tool at all?** (the new `audience` gate)
 
@@ -97,7 +97,7 @@ club (`club-admin`, `club-viewer`) · external (`third-party`).
 | `admin`       | ✅ | ✅ |
 | `staff`       | ✅ | ✅ |
 | `club-admin`  | ❌ never | ✅ |
-| `club-viewer` | ❌ never | ✅ |
+| `club-staff` | ❌ never | ✅ |
 | `third-party` | ❌ never | ✅ **individually granted, tool-by-tool** — not the whole club suite |
 
 **Axis 2 — what can they do inside?** (the existing `off`/`access`/`admin` level,
@@ -115,7 +115,7 @@ from the per-user entry or `defaults[role]`)
   inside each tool — not by this gate.
 
 **The key nuance:** a club user is **never a tool-wide admin**. `club-admin`'s
-"admin" means **edit their own club's data** (`NL.canClubEdit`); `club-viewer` is
+"admin" means **edit their own club's data** (`NL.canClubEdit`); `club-staff` is
 read-only on their own club. Global/tool admin is a league-role concept only.
 
 So this plan changes **axis 1 only** (adds the enforced `audience` gate). Axis 2
