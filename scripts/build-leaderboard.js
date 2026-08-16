@@ -64,7 +64,9 @@ const CUTOFF_MIN = 60;                  // predictions lock this long before kic
    League season is named for the calendar year it starts in, and it starts in
    July. A hardcoded 2026 was correct the day it was written and silently wrong
    from July 2027 — and wrong in the worst way, because the job still succeeds
-   and still writes a leaderboard, just for last season's fixtures. */
+   and still writes a leaderboard, just for last season's fixtures.
+   Mirrors canon NL.season.fromDate (system/nl-utils.js) — Node has no
+   window.NL, so keep this copy in lockstep. */
 function deriveSeasonId(d) {
   return (d.getMonth() + 1) >= 7 ? d.getFullYear() : d.getFullYear() - 1;
 }

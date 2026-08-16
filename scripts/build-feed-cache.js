@@ -82,7 +82,9 @@ const SOURCE = 'nls';                   // recorded on every write, so a later
 // ---------------------------------------------------------------------------
 
 /* Same July boundary as the widgets, the leaderboard job and
-   season-rollover.yml, which flips clubs-meta at 02:00 on 1 July. */
+   season-rollover.yml, which flips clubs-meta at 02:00 on 1 July.
+   Mirrors canon NL.season.fromDate (system/nl-utils.js) — Node has no
+   window.NL, so keep this copy in lockstep. */
 function deriveSeasonId(d) {
   return (d.getMonth() + 1) >= 7 ? d.getFullYear() : d.getFullYear() - 1;
 }
