@@ -532,6 +532,30 @@ function main() {
             };
           })(registry[toolKey] || parked[toolKey])
         : null,
+      /* Who can actually open this page, as one honest label. Derived, not
+         declared: registry defaults for gated pages, page mechanics for
+         ungated ones. This is the column that makes access auditable at a
+         glance — the estate map showed it was the question being asked of
+         every row. */
+      access: (function () {
+        var rec = toolKey && (registry[toolKey] || parked[toolKey]);
+        if (gated) {
+          if (!rec) return { kind: 'superadmin', label: 'Superadmin (no record)' };
+          if (parked[toolKey]) return { kind: 'superadmin', label: 'Superadmin (parked)' };
+          var d = rec.defaults || {};
+          var anyStaff = (d.staff || 'off') !== 'off' || (d.admin || 'off') !== 'off';
+          var anyClub = (d['club-admin'] || 'off') !== 'off' || (d['club-viewer'] || 'off') !== 'off';
+          if (!anyStaff && !anyClub) return { kind: 'superadmin', label: 'Superadmin only' };
+          if (anyClub) return { kind: 'club', label: 'Staff + clubs' };
+          return { kind: 'staff', label: 'NL staff' };
+        }
+        /* Ungated: does the page mount a code gate? NL.codeGate directly, or
+           via a sibling _gate.js / _shared.js (programme and uw-promo keep
+           their gate in the shared file). graphics/_shared is a CSS dir and
+           never reaches here — graphics pages are gated. */
+        if (/NL\.codeGate|_gate\.js|\/_shared\.js/.test(text)) return { kind: 'code', label: 'Code-entered' };
+        return { kind: 'open', label: 'Open URL' };
+      })(),
       version: header.version,
       versionDate: header.versionDate,
       summary: header.summary,
