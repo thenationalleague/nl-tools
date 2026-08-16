@@ -104,6 +104,20 @@ test('formatDuration: compound hours+minutes, accepts a "3600s" string, junk →
   assert.equal(NL.formatDuration(undefined), '—');
 });
 
+test('formatDuration {seconds:true}: website-archive GA convention, same fallback as base', () => {
+  assert.equal(NL.formatDuration(42, { seconds: true }), '42s', 'under a minute, bare seconds');
+  assert.equal(NL.formatDuration(222, { seconds: true }), '3m 42s', 'minutes + seconds');
+  assert.equal(NL.formatDuration(185, { seconds: true }), '3m 05s', 'remainder seconds zero-padded');
+  assert.equal(NL.formatDuration(180, { seconds: true }), '3m 00s', 'exact minutes keep the 00s tail');
+  assert.equal(NL.formatDuration(5400, { seconds: true }), '90m 00s', 'over an hour: minutes stay unbounded, no hours unit');
+  assert.equal(NL.formatDuration('222s', { seconds: true }), '3m 42s', 'Routes-style string accepted in seconds mode too');
+  assert.equal(NL.formatDuration(0, { seconds: true }), '—', 'zero reads as absent — same fallback as base, not "0s"');
+  assert.equal(NL.formatDuration(-5, { seconds: true }), '—');
+  assert.equal(NL.formatDuration('rubbish', { seconds: true }), '—');
+  assert.equal(NL.formatDuration(null, { seconds: true }), '—');
+  assert.equal(NL.formatDuration(5400), '1h 30min', 'default output unchanged by the opts arg');
+});
+
 test('timeAgo: ladder tiers then absolute fallback', () => {
   const now = Date.now();
   assert.equal(NL.timeAgo(now - 10 * 1000), 'just now');
