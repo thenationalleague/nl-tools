@@ -7,6 +7,10 @@ import { defineConfig } from 'astro/config';
 export default defineConfig({
   site: 'https://nl.tools',
   base: '/site-demo',
+  prefetch: {
+    prefetchAll: true,
+    defaultStrategy: 'hover'
+  },
   build: {
     format: 'directory'
   }
