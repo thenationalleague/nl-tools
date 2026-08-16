@@ -195,6 +195,18 @@ snapshot. One mechanism left standing: `audience`.
 migration, behind a compatibility window, one tool at a time. Hygiene only —
 sequence it last so the guarantee is already in force before any keys move.
 
+> **Parked as eventual hygiene (16/08/2026).** Reviewed and deliberately
+> deferred, not dropped. The toolKey is an opaque internal id — users never see
+> it, and `audience` (not the `staff-`/`ops-`/`media-` prefix) is already the
+> only boundary, so the prefix is inert noise that buys tidiness, not safety.
+> The blocker is cost/risk, concentrated in one place: renaming `app-data/<toolKey>`
+> means **moving live data nodes** (~10 tools with data) by hand in the console —
+> there is no deploy path for RTDB *data*, only rules — with real data-loss risk
+> and zero functional gain. The other four sites (registry, user grants, rules,
+> `NL_TOOL_KEY`) are cheap. Do it per-tool behind a compat window if ever, never
+> big-bang. Not blocking the access-model vocabulary + panel work, which delivers
+> all the clarity on its own.
+
 **Phase 7 — (separate audit) GAS endpoints.** See below.
 
 ---

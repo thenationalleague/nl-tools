@@ -1,11 +1,21 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.97 (16/08/2026)
+  Version: v5.98 (16/08/2026)
   Date: 09/04/2026
   File: /portal/index.html
 
   Changelog:
+  v5.98 (16/08/2026) — Retire the third-party role from the portal (access-model
+    reconciliation, step 1). Outsiders no longer get a login/identity — they get
+    passcode-gated coded links per job (see system/third-party-access-plan.md,
+    now superseded). Removed: the Third Party invite button, 'third-party' from
+    PORTAL_ROLE_KEYS, and the entire Organisation-name flow (invite field, inline
+    role-picker row, save/edit/send handlers, display branch) that existed only
+    for it. isRestrictedRole collapses to isClubRole. The canon removal from
+    NL.roles + auth-guard follows in the vocabulary-reconciliation pass. Historic
+    changelog entries that mention third-party are left as record.
+
   v5.97 (16/08/2026) — Local .banner family promoted to canon (nl-brand.css
     v2.40, ?v=40). The portal's implementation was the shape the canon
     absorbed, so the guard-banner markup (banner banner--amber / --error) is
@@ -545,6 +555,13 @@
 
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
+    {
+      date: '16/08/2026',
+      version: 'v5.98',
+      items: [
+        'Retired the "third-party" account type. Outside partners (broadcasters, photographers, print) no longer get a login — they get a passcode-gated link to the one page they need, which is how programme packs, footage and the benchmarking links already work.'
+      ]
+    },
     {
       date: '16/08/2026',
       version: 'v5.97',
@@ -1696,7 +1713,6 @@
 .role-club       { background: var(--amber-light); color: var(--amber); }
 .role-club-admin  { background: var(--amber-light); color: var(--amber); }
 .role-club-viewer { background: var(--off-white); color: var(--amber); border: 1px solid var(--amber-light); }
-.role-third-party { background: var(--off-white); color: var(--text-muted); border: 1px dashed var(--border); }
 .role-pending    { background: var(--off-white); color: var(--text-muted); border: 1px solid var(--border); }
 
 /* -- Four-position access slider ------------------------------------------ */
@@ -2321,15 +2337,8 @@
                 <button type="button" class="invite-role-btn active" data-role="staff">League Staff</button>
                 <button type="button" class="invite-role-btn" data-role="club-admin">Club Admin</button>
                 <button type="button" class="invite-role-btn" data-role="club-viewer">Club Viewer</button>
-                <button type="button" class="invite-role-btn" data-role="third-party">Third Party</button>
               </div>
               <input type="hidden" id="inviteRole" value="staff">
-            </div>
-
-            <!-- Organisation name (third-party only) -->
-            <div class="field" id="inviteOrgNameField" style="display:none">
-              <label>Organisation</label>
-              <input type="text" id="inviteOrgName" placeholder="e.g. Getty Images, BBC Sport">
             </div>
 
             <!-- Club picker (shown when Club org selected) -->
@@ -2447,7 +2456,7 @@ function sortDepts(depts) {
 /* ---- Version ------------------------------------------------------------- */
 /* Version is shown via the topbar's clickable version badge (window.NL_CHANGELOG),
    which nl-topbar gates to league roles. The kicker stays the plain 'Portal'
-   label so club/third-party users see no version detail. */
+   label so club users see no version detail. */
 
 var STATE = {
   uid:      null,
@@ -2495,7 +2504,7 @@ function getAccessLevel(uid, toolKey) {
 function getGroupKey(ud) {
   /* The defaults key IS the bare role key — matches auth-guard's
      defaults[role] lookup and the registry (superadmin/admin/staff/
-     club-admin/club-viewer/third-party). Legacy 'club' → 'club-admin'. */
+     club-admin/club-viewer). Legacy 'club' → 'club-admin'. */
   var role = (ud && ud.role) || '';
   if (role === 'club') return 'club-admin';
   return role;
@@ -2510,12 +2519,12 @@ function getDefaultLevel(toolKey, ud) {
 /* ── Six-role model (Phase 3b) ───────────────────────────────────────────
    Identity roles, in picker order. Labels come from NL.roles (nl-utils)
    with a local fallback so the portal still renders if utils is stale. */
-var PORTAL_ROLE_KEYS = ['superadmin', 'admin', 'staff', 'club-admin', 'club-viewer', 'third-party'];
+var PORTAL_ROLE_KEYS = ['superadmin', 'admin', 'staff', 'club-admin', 'club-viewer'];
 function roleLabel(r) {
   if (window.NL && NL.roles && NL.roles.LABELS && NL.roles.LABELS[r]) return NL.roles.LABELS[r];
   return ({ superadmin: 'Superadmin', admin: 'League Admin', staff: 'League Staff',
             'club-admin': 'Club Admin', 'club-viewer': 'Club Viewer',
-            'third-party': 'Third Party', club: 'Club Admin' })[r] || capitalise(r || '');
+            club: 'Club Admin' })[r] || capitalise(r || '');
 }
 function normRole(r) {
   if (window.NL && NL.roles && NL.roles.norm) return NL.roles.norm(r);
@@ -2525,10 +2534,10 @@ function isClubRole(r) {
   if (window.NL && NL.isClubUser) return NL.isClubUser(r);
   return r === 'club-admin' || r === 'club-viewer' || r === 'club';
 }
-/* "Restricted" roles — club roles + third-party. These can't be granted admin
-   on any tool, and are fully locked out of staff-department tools. They CAN be
-   toggled Off/Access per tool. (Edit-vs-view for club roles is separate, by role.) */
-function isRestrictedRole(r) { return isClubRole(r) || normRole(r) === 'third-party'; }
+/* "Restricted" roles — club roles. These can't be granted admin on any tool,
+   and are fully locked out of staff-audience tools. They CAN be toggled
+   Off/Access per tool. (Edit-vs-view for club roles is separate, by role.) */
+function isRestrictedRole(r) { return isClubRole(r); }
 /* Canonical staff/club split for a tool RECORD — the `audience` field is the
    source of truth. Falls back to the club-admin-default heuristic only for a
    record that somehow lacks the audience field (all live records have it). */
@@ -4394,9 +4403,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
     context.appendChild(clubText);
   } else if (!u.pending) {
     var orgText = document.createElement('span');
-    var orgLabel = isClubRole(u.role) ? (u.club || 'Club')
-                 : (normRole(u.role) === 'third-party') ? (u.org || 'Third party')
-                 : 'National League';
+    var orgLabel = isClubRole(u.role) ? (u.club || 'Club') : 'National League';
     orgText.textContent = orgLabel + (u.jobTitle ? '  ·  ' + u.jobTitle : '');
     context.appendChild(orgText);
   }
@@ -4504,7 +4511,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
   body.insertBefore(editBar, body.firstChild);
 
   /* Helper: get current role-aware constraints for this user (6-role model).
-     Restricted roles (club-admin/club-viewer/third-party) can't be granted
+     Restricted roles (club-admin/club-viewer) can't be granted
      admin (capAccess) and are fully locked out of staff-dept tools, but their
      non-staff tools stay toggleable Off/Access. League roles edit freely. */
   function getRoleConstraints(roleOverride) {
@@ -4649,11 +4656,10 @@ function buildAccordionItem(uid, u, depts, deptMap) {
     });
 
     var newClub     = isClubRole(role) ? (confirmedClub || '') : '';
-    var newOrgName  = (role === 'third-party') ? (orgNameInput ? orgNameInput.value.trim() : (storedUser.org || '')) : '';
+    var newOrgName  = isClubRole(role) ? '' : 'National League';
     var newJobTitle = jobTitleInput ? jobTitleInput.value.trim() : (storedUser.jobTitle || '');
 
     if (isClubRole(role) && !newClub) { showToast('Select a club for this user', 'error'); return; }
-    if (role === 'third-party' && !newOrgName) { showToast('Enter an organisation name', 'error'); return; }
 
     if (role        !== (storedUser.role     || '')) hasChanges = true;
     if (newClub     !== (storedUser.club     || '')) hasChanges = true;
@@ -4780,8 +4786,8 @@ function buildAccordionItem(uid, u, depts, deptMap) {
     var confirmedClub = u.club || '';
 
     /* ── Live preview: reflect the chosen role in the tool sliders ──────────
-       Superadmin: everything admin, fully locked. Restricted roles (club +
-       third-party): staff-dept tools fully locked off; non-staff tools show
+       Superadmin: everything admin, fully locked. Restricted (club) roles:
+       staff-audience tools fully locked off; non-staff tools show
        Off/Access editable with Admin padlocked. League roles: fully editable
        — on the original role keep stored overrides, else show role defaults. */
     function previewRoleSliders(newRole, forceDefaults) {
@@ -4906,21 +4912,6 @@ function buildAccordionItem(uid, u, depts, deptMap) {
     clubPickerRow.appendChild(crPicker);
     rolePicker.appendChild(clubPickerRow);
 
-    /* ── Organisation name (third-party only) ── */
-    var orgNameRow = document.createElement('div');
-    orgNameRow.className = 'inline-role-picker__section';
-    var orgNameLbl = document.createElement('div');
-    orgNameLbl.className = 'inline-role-picker__section-label';
-    orgNameLbl.textContent = 'Organisation';
-    var orgNameInput = document.createElement('input');
-    orgNameInput.type = 'text';
-    orgNameInput.value = (normRole(u.role) === 'third-party') ? (u.org || '') : '';
-    orgNameInput.placeholder = 'e.g. Getty Images, BBC Sport';
-    orgNameInput.style.cssText = 'flex:1;font-size:13px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius);font-family:var(--font);';
-    orgNameRow.appendChild(orgNameLbl);
-    orgNameRow.appendChild(orgNameInput);
-    rolePicker.appendChild(orgNameRow);
-
     /* ── Job title (all roles) ── */
     var jobTitleRow = document.createElement('div');
     jobTitleRow.className = 'inline-role-picker__section';
@@ -4941,7 +4932,6 @@ function buildAccordionItem(uid, u, depts, deptMap) {
     function syncRolePickerUI() {
       var clubRole = isClubRole(selectedRole);
       clubPickerRow.style.display = clubRole ? 'flex' : 'none';
-      orgNameRow.style.display    = (selectedRole === 'third-party') ? 'flex' : 'none';
       roleBtns.querySelectorAll('.invite-role-btn').forEach(function(b) {
         b.classList.toggle('active', b.dataset.role === selectedRole);
       });
@@ -5282,7 +5272,7 @@ function buildSetAllSlider(uid, u, dept, deptMap, deptWrap) {
   }
 
   var isClubUser  = isRestrictedRole(u.role);
-  /* Restricted roles (club + third-party) lock staff tools and the admin stop */
+  /* Restricted (club) roles lock staff tools and the admin stop */
   var isStaffLocked = dept === 'staff' && isClubUser;
 
   ACC_LEVELS.forEach(function(level, idx) {
@@ -5351,7 +5341,7 @@ function setAllInDept(uid, u, deptTools, level, bodyEl, deptLabel) {
   if (!deptTools || !deptTools.length) return;
   var updates = {};
   var isClubUser = isRestrictedRole(u.role);
-  /* Staff dept locked for restricted roles (club + third-party) */
+  /* Staff-audience tools locked for restricted (club) roles */
   var isStaffDept = deptTools[0] && toolAudience(deptTools[0]) === 'staff';
   if (isStaffDept && isClubUser) {
     showToast('Staff tools are locked for this user', 'error');
@@ -5427,8 +5417,6 @@ function initInviteForm() {
       document.getElementById('inviteRole').value = role;
       var clubRole = isClubRole(role);
       document.getElementById('inviteClubField').style.display = clubRole ? 'block' : 'none';
-      var onf = document.getElementById('inviteOrgNameField');
-      if (onf) onf.style.display = (role === 'third-party') ? 'block' : 'none';
       if (clubRole) loadInvClubs();
       renderInviteToolSliders();
     });
@@ -5441,15 +5429,12 @@ function initInviteForm() {
     var name     = document.getElementById('inviteName').value.trim();
     var role     = normRole(document.getElementById('inviteRole').value);
     var club     = (invClubPicker.getValue() || '').trim();
-    var orgNameEl = document.getElementById('inviteOrgName');
-    var orgName  = orgNameEl ? orgNameEl.value.trim() : '';
     var jobTitle = document.getElementById('inviteClubRole').value.trim();
-    /* League roles carry the National League org; third-party carries its own. */
-    var org      = isClubRole(role) ? '' : (role === 'third-party' ? orgName : 'National League');
+    /* Club roles carry no org; every league role carries the National League. */
+    var org      = isClubRole(role) ? '' : 'National League';
 
     if (!email || !name) { showMsg('inviteMsg', 'Email and name are required.', 'error'); return; }
     if (isClubRole(role) && !club) { showMsg('inviteMsg', 'Please select a club.', 'error'); return; }
-    if (role === 'third-party' && !orgName) { showMsg('inviteMsg', 'Enter an organisation name.', 'error'); return; }
 
     setBtnLoading('inviteBtn', true);
 
@@ -5531,7 +5516,7 @@ function renderInviteToolSliders() {
   if (!container) return;
   container.innerHTML = '';
   var role      = normRole(document.getElementById('inviteRole').value || 'staff');
-  var isClubOrg = isRestrictedRole(role);   /* club + third-party: padlock admin, skip staff dept */
+  var isClubOrg = isRestrictedRole(role);   /* club roles: padlock admin, skip staff-audience tools */
   var tools     = STATE.toolsList.filter(function(t) { return t._key !== 'welcome'; });
   var deptMap  = {};
   tools.forEach(function(t) {
