@@ -10,7 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { REPO } from './load-canon.mjs';
+import { NL, REPO } from './load-canon.mjs';
 
 const css = readFileSync(join(REPO, 'system/nl-brand.css'), 'utf8');
 
@@ -273,6 +273,53 @@ test('--yellow carries the settled luminance-chosen value with its -light compan
     '--yellow is #efb700 — chosen for luminance, see the token comment before retuning');
   assert.match(rules, /--yellow-light:\s*#fdf8e0/,
     '--yellow-light exists — every status hue carries a -light companion');
+});
+
+/* ── Palette discipline (v2.44) ────────────────────────────────────────────
+   The brand is exactly four colours; everything else is a functional
+   extension with one job, a derived neutral, or an externally anchored
+   reference palette. Three rulings from that pass are pinned here. */
+
+test('reference palettes stay anchored to their real-world facts', () => {
+  /* Road signs: Highway Code / DfT spec. Cards: the referee's colours,
+     matching the hardcoded fills in yellow-card.svg / red-card.svg, and the
+     documented colouring interface for icon-card. These are stored facts,
+     not design choices — a well-meant retune towards a "nicer" shade breaks
+     the anchor. Single-consumer is not disqualifying for anchored data. */
+  assert.match(rules, /--road-sign-m:\s*#2563ac/, 'motorway blue is the DfT value');
+  assert.match(rules, /--road-sign-a-bg:\s*#007a33/, 'A-road green ground is the DfT value');
+  assert.match(rules, /--road-sign-a-fg:\s*#ffd900/, 'A-road yellow numerals are the DfT value');
+  assert.match(rules, /--card-yellow:\s*#fed800/, 'booking yellow matches the sprite fill');
+  assert.match(rules, /--card-red:\s*#fe0000/, 'dismissal red matches the sprite fill');
+});
+
+test('tool-domain state colours stay out of canon — no --cal-* tokens', () => {
+  /* Demoted in v2.44: "worked" and "rejected" are holiday-lieu's domain
+     states, nonsense as canon names. The tool maps its states onto system
+     hues instead. If a calendar palette ever wants back in, it needs new
+     job-named tokens and a second consumer — not these. */
+  assert.doesNotMatch(rules, /--cal-/,
+    'no --cal-* tokens — holiday-lieu maps its states onto system hues');
+});
+
+test('position bands live only as NL.positionBands — no --pos-* CSS twins', () => {
+  /* v2.44: the CSS tokens had zero live consumers (canvas exporters read
+     the JS mirror; embeds cannot read nl-brand.css) and existed only to
+     drift. The mirror is the single source; these are the settled values. */
+  assert.doesNotMatch(rules, /--pos-(champ|sf|qf|releg|c-fg|po-sf-bg|po-fg|r-bg|r-fg):/,
+    'no --pos-* CSS tokens — NL.positionBands is the single source');
+  const settled = {
+    champ: '#7F99DC', sf: '#3760C8', qf: '#2D4FA4', releg: '#192C5C',
+    cFg: '#000000', poSfBg: '#9aa3ad', poFg: '#000000',
+    rBg: '#000000', rFg: '#ffffff',
+  };
+  /* Key-by-key rather than deepEqual: NL comes from a node:vm sandbox, so
+     its object literals carry the vm realm's prototype. */
+  assert.deepEqual(Object.keys(NL.positionBands).sort(), Object.keys(settled).sort(),
+    'NL.positionBands carries exactly the settled band keys');
+  for (const [k, v] of Object.entries(settled)) {
+    assert.equal(NL.positionBands[k], v, `NL.positionBands.${k} is the settled value`);
+  }
 });
 
 test('.disclosure is tokened — navy summary, muted chevron and meta, no raw hex', () => {

@@ -1,9 +1,18 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.35 (16/08/2026)
+   Version: v1.36 (16/08/2026)
 
    Changelog
+   v1.36 (16/08/2026)
+     - NL.positionBands is now the SINGLE SOURCE for the NL competition
+       position-band palette. The CSS twins (--pos-*) were deleted in
+       brand v2.44: every real consumer is a canvas/image exporter that
+       reads this mirror, and embeds cannot read nl-brand.css by CMS
+       contract, so the tokens had zero live consumers and existed only
+       to drift. Values unchanged. Comment-only change here; cache-bust
+       ?v=38 -> ?v=39 in lockstep (rides the brand ?v=43 -> ?v=44 sweep).
+
    v1.35 (16/08/2026)
      - NL.sanitiseHtml passes tel: hrefs alongside http(s) and mailto.
        The whitelist was silently dropping them, which forced
@@ -1374,12 +1383,12 @@
     return svg;
   };
 
-  /* ── Identity-data shared with brand CSS ────────────────────────────────
-     These mirror the matching --proj-*, --pos-*, --road-sign-* tokens in
-     nl-brand.css for JS callers that need literal hex strings (canvas
-     exports, Google Maps style arrays, etc.). When the brand tokens
-     change, change these too — see the commented hex next to each var
-     reference to confirm. Promoted in v1.5 from per-tool definitions. */
+  /* ── Identity-data for JS callers ───────────────────────────────────────
+     Literal hex for canvas exports, Google Maps style arrays, etc.
+     NL.projColours mirrors the --proj-* tokens in nl-brand.css — when
+     those change, change it too. NL.positionBands has no CSS twin (brand
+     v2.44): this object IS the palette. Promoted in v1.5 from per-tool
+     definitions. */
 
   /* Project identity wheel — mirrors --proj-1 … --proj-8 in brand.
      v1.6: 1-6 are aliases of the semantic palette; values must match
@@ -1396,18 +1405,21 @@
     '#374151'  /* --proj-8 cool slate    (no semantic equivalent) */
   ];
 
-  /* NL competition position-band palette — mirrors --pos-* in brand.
-     Used by canvas/image-generation in graphics tools. */
+  /* NL competition position-band palette — the SINGLE SOURCE since brand
+     v2.44 (the --pos-* CSS twins were deleted; they had no live consumer
+     and existed only to drift). Used by canvas/image-generation in
+     graphics tools; the Style Guide renders its reference swatches from
+     this object. */
   window.NL.positionBands = {
-    champ:   '#7F99DC', /* --pos-champ        */
-    sf:      '#3760C8', /* --pos-sf           */
-    qf:      '#2D4FA4', /* --pos-qf           */
-    releg:   '#192C5C', /* --pos-releg        */
-    cFg:     '#000000', /* --pos-c-fg         */
-    poSfBg:  '#9aa3ad', /* --pos-po-sf-bg     */
-    poFg:    '#000000', /* --pos-po-fg        */
-    rBg:     '#000000', /* --pos-r-bg         */
-    rFg:     '#ffffff'  /* --pos-r-fg         */
+    champ:   '#7F99DC', /* champion row background      */
+    sf:      '#3760C8', /* play-off semi-final row      */
+    qf:      '#2D4FA4', /* play-off quarter-final row   */
+    releg:   '#192C5C', /* relegation row               */
+    cFg:     '#000000', /* foreground on champ          */
+    poSfBg:  '#9aa3ad', /* light play-off semi shade    */
+    poFg:    '#000000', /* foreground on play-off rows  */
+    rBg:     '#000000', /* relegated solid bg           */
+    rFg:     '#ffffff'  /* foreground on rBg            */
   };
 
   /* Google Maps style arrays — pass directly to new google.maps.Map({...styles: NL.mapStyle.drive}).
