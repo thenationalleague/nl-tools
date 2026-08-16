@@ -1,11 +1,20 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.98 (16/08/2026)
+  Version: v5.99 (16/08/2026)
   Date: 09/04/2026
   File: /portal/index.html
 
   Changelog:
+  v5.99 (16/08/2026) — Access-model reconciliation, step 2 (vocabulary). The club
+    read-tier is renamed club-viewer -> club-staff (mirrors League Staff): the
+    invite button, PORTAL_ROLE_KEYS, the role-pill CSS class and the local label/
+    isClubRole fallbacks now mint and render 'club-staff'. Legacy 'club-viewer' is
+    still accepted (roleLabel + isClubRole) so nothing strands. Rides the canon
+    bump nl-utils ?v=40 / auth-guard ?v=13 (NL.roles two-realm model, audience
+    'staff' -> 'league'). No behaviour change beyond the name; Use/Manage level
+    words + the panel rebuild are step 3.
+
   v5.98 (16/08/2026) — Retire the third-party role from the portal (access-model
     reconciliation, step 1). Outsiders no longer get a login/identity — they get
     passcode-gated coded links per job (see system/third-party-access-plan.md,
@@ -557,6 +566,13 @@
   window.NL_CHANGELOG = [
     {
       date: '16/08/2026',
+      version: 'v5.99',
+      items: [
+        'Renamed the club "viewer" role to Club Staff, so it reads as the mirror of League Staff. No change to what it can do — read-only on its own club.'
+      ]
+    },
+    {
+      date: '16/08/2026',
       version: 'v5.98',
       items: [
         'Retired the "third-party" account type. Outside partners (broadcasters, photographers, print) no longer get a login — they get a passcode-gated link to the one page they need, which is how programme packs, footage and the benchmarking links already work.'
@@ -718,9 +734,9 @@
     });
   }
 </script>
-<script src="/system/nl-utils.js?v=39"></script>
+<script src="/system/nl-utils.js?v=40"></script>
 <script src="/system/nl-topbar.js?v=9"></script>
-<script src="/system/auth-guard.js?v=12"></script>
+<script src="/system/auth-guard.js?v=13"></script>
 
 <link rel="stylesheet" href="/system/nl-brand.css?v=45">
 
@@ -1712,7 +1728,7 @@
 .role-staff      { background: var(--green-light); color: var(--green); }
 .role-club       { background: var(--amber-light); color: var(--amber); }
 .role-club-admin  { background: var(--amber-light); color: var(--amber); }
-.role-club-viewer { background: var(--off-white); color: var(--amber); border: 1px solid var(--amber-light); }
+.role-club-staff { background: var(--off-white); color: var(--amber); border: 1px solid var(--amber-light); }
 .role-pending    { background: var(--off-white); color: var(--text-muted); border: 1px solid var(--border); }
 
 /* -- Four-position access slider ------------------------------------------ */
@@ -2336,7 +2352,7 @@
                 <button type="button" class="invite-role-btn" data-role="admin">League Admin</button>
                 <button type="button" class="invite-role-btn active" data-role="staff">League Staff</button>
                 <button type="button" class="invite-role-btn" data-role="club-admin">Club Admin</button>
-                <button type="button" class="invite-role-btn" data-role="club-viewer">Club Viewer</button>
+                <button type="button" class="invite-role-btn" data-role="club-staff">Club Staff</button>
               </div>
               <input type="hidden" id="inviteRole" value="staff">
             </div>
@@ -2504,7 +2520,7 @@ function getAccessLevel(uid, toolKey) {
 function getGroupKey(ud) {
   /* The defaults key IS the bare role key — matches auth-guard's
      defaults[role] lookup and the registry (superadmin/admin/staff/
-     club-admin/club-viewer). Legacy 'club' → 'club-admin'. */
+     club-admin/club-staff). Legacy 'club' → 'club-admin', 'club-viewer' → 'club-staff'. */
   var role = (ud && ud.role) || '';
   if (role === 'club') return 'club-admin';
   return role;
@@ -2519,12 +2535,12 @@ function getDefaultLevel(toolKey, ud) {
 /* ── Six-role model (Phase 3b) ───────────────────────────────────────────
    Identity roles, in picker order. Labels come from NL.roles (nl-utils)
    with a local fallback so the portal still renders if utils is stale. */
-var PORTAL_ROLE_KEYS = ['superadmin', 'admin', 'staff', 'club-admin', 'club-viewer'];
+var PORTAL_ROLE_KEYS = ['superadmin', 'admin', 'staff', 'club-admin', 'club-staff'];
 function roleLabel(r) {
   if (window.NL && NL.roles && NL.roles.LABELS && NL.roles.LABELS[r]) return NL.roles.LABELS[r];
   return ({ superadmin: 'Superadmin', admin: 'League Admin', staff: 'League Staff',
-            'club-admin': 'Club Admin', 'club-viewer': 'Club Viewer',
-            club: 'Club Admin' })[r] || capitalise(r || '');
+            'club-admin': 'Club Admin', 'club-staff': 'Club Staff',
+            'club-viewer': 'Club Staff', club: 'Club Admin' })[r] || capitalise(r || '');
 }
 function normRole(r) {
   if (window.NL && NL.roles && NL.roles.norm) return NL.roles.norm(r);
@@ -2532,7 +2548,7 @@ function normRole(r) {
 }
 function isClubRole(r) {
   if (window.NL && NL.isClubUser) return NL.isClubUser(r);
-  return r === 'club-admin' || r === 'club-viewer' || r === 'club';
+  return r === 'club-admin' || r === 'club-staff' || r === 'club-viewer' || r === 'club';
 }
 /* "Restricted" roles — club roles. These can't be granted admin on any tool,
    and are fully locked out of staff-audience tools. They CAN be toggled
@@ -4511,7 +4527,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
   body.insertBefore(editBar, body.firstChild);
 
   /* Helper: get current role-aware constraints for this user (6-role model).
-     Restricted roles (club-admin/club-viewer) can't be granted
+     Restricted roles (club-admin/club-staff) can't be granted
      admin (capAccess) and are fully locked out of staff-dept tools, but their
      non-staff tools stay toggleable Off/Access. League roles edit freely. */
   function getRoleConstraints(roleOverride) {

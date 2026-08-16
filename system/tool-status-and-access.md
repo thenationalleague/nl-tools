@@ -14,13 +14,13 @@ Feeds the staff/club audience gating (`system/staff-club-audience-plan.md`).
 ## The framework (every tool sits on these three axes)
 
 Six roles in three realms: league (`superadmin`/`admin`/`staff`) · club
-(`club-admin`/`club-viewer`) · external (`third-party`).
+(`club-admin`/`club-staff`) · external (`third-party`).
 
 1. **Open the tool?** — the `audience` gate (staff-audience = club/external denied).
 2. **Do what inside?** — `off`/`access`/`admin` level (`admin` = NL admin; `access`
    = NL staff / club). `superadmin` = admin everywhere. `third-party` never admin.
 3. **See what data?** — league roles see all clubs; club roles see **their own club
-   only** (edit-own for `club-admin` via `NL.canClubEdit`, view for `club-viewer`).
+   only** (edit-own for `club-admin` via `NL.canClubEdit`, view for `club-staff`).
 
 Recurring per-role shape across the club tools: **NL admin = edit all · NL staff =
 view all · club-admin = edit own · club-staff = view**. Tool-specific rules

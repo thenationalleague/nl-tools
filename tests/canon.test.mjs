@@ -306,29 +306,36 @@ test('modal / confirm / prompt / alert are exposed (behaviour covered by smoke t
   assert.ok(NL.alert('hi') instanceof Promise);
 });
 
-test('roles: norm / label / realm / isClubUser fold the legacy "club" key', () => {
-  // norm — legacy 'club' → 'club-admin', empty → 'staff', else identity
+test('roles: norm / label / realm / isClubUser fold legacy "club" + "club-viewer"', () => {
+  // norm — legacy folds to canon: 'club' → 'club-admin', 'club-viewer' →
+  // 'club-staff', empty → 'staff', else identity
   assert.equal(NL.roles.norm('club'), 'club-admin');
+  assert.equal(NL.roles.norm('club-viewer'), 'club-staff');
+  assert.equal(NL.roles.norm('club-staff'), 'club-staff');
   assert.equal(NL.roles.norm(''), 'staff');
   assert.equal(NL.roles.norm(undefined), 'staff');
-  assert.equal(NL.roles.norm('club-viewer'), 'club-viewer');
   assert.equal(NL.roles.norm('admin'), 'admin');
 
-  // label — legacy 'club' shares the club-admin label
+  // label — legacy 'club' shares the club-admin label; both club-staff keys
+  // share the Club Staff label
   assert.equal(NL.roles.label('club'), 'Club Admin');
   assert.equal(NL.roles.label('club-admin'), 'Club Admin');
+  assert.equal(NL.roles.label('club-staff'), 'Club Staff');
+  assert.equal(NL.roles.label('club-viewer'), 'Club Staff');
   assert.equal(NL.roles.label('superadmin'), 'Superadmin');
   assert.equal(NL.roles.label('unknown'), 'unknown');
 
-  // realm — legacy 'club' resolves to the club realm
+  // realm — league / club only; the external realm and third-party are retired
   assert.equal(NL.roles.realm('club'), 'club');
+  assert.equal(NL.roles.realm('club-staff'), 'club');
   assert.equal(NL.roles.realm('club-viewer'), 'club');
   assert.equal(NL.roles.realm('staff'), 'league');
-  assert.equal(NL.roles.realm('third-party'), 'external');
+  assert.equal(NL.roles.realm('third-party'), null);
   assert.equal(NL.roles.realm('nonsense'), null);
 
-  // isClubUser — every club tier incl. legacy 'club'; nothing else
-  assert.ok(NL.isClubUser('club') && NL.isClubUser('club-admin') && NL.isClubUser('club-viewer'));
+  // isClubUser — every club tier incl. legacy keys; nothing else
+  assert.ok(NL.isClubUser('club') && NL.isClubUser('club-admin')
+            && NL.isClubUser('club-staff') && NL.isClubUser('club-viewer'));
   assert.ok(!NL.isClubUser('staff') && !NL.isClubUser('third-party') && !NL.isClubUser(''));
 });
 
