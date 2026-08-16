@@ -1,9 +1,20 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.30 (16/08/2026)
+   Version: v1.31 (16/08/2026)
 
    Changelog
+   v1.31 (16/08/2026)
+     - NL.formatTime(x) — time only, 'HH:MM' 24-hour, local tz, joining the
+       date family (same parseDate input handling: string / Date / epoch).
+       PR #808 flagged nls-monitor's kickoffTime() as promotion-ready the
+       moment a second caller appeared; travel-planner's ft() and
+       newsletter's inline autosave stamp make three. Local time by design,
+       matching formatDateTime — the CMS embeds pin Europe/London via
+       toLocaleTimeString because they run on fan devices anywhere, and
+       cannot load NL.* regardless.
+       Cache-bust ?v=33 -> ?v=34 in lockstep.
+
    v1.30 (16/08/2026)
      - NL.season.fromDate(d) — derive the season start-year from a date,
        flipping on 1 July. The same three-line ternary existed in four
@@ -446,6 +457,18 @@
     out += ', ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
     if (opts.seconds) out += ':' + pad2(d.getSeconds());
     return out;
+  };
+
+  /* Time only, local tz, 24-hour: '09:30'. Accepts anything parseDate
+     accepts (string / Date / epoch number); unparseable → '—'. Same
+     convention as formatDateTime's time part — local time, because every
+     gated tool is staff-facing UK usage. The CMS embeds deliberately use
+     Europe/London-pinned toLocaleTimeString instead (they run on fan
+     devices anywhere) and cannot load NL.* anyway. */
+  window.NL.formatTime = function(x) {
+    var d = window.NL.parseDate(x);
+    if (!d) return '—';
+    return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
   };
 
   /* Relative past time: 'just now', '5m ago', '3h ago', '2d ago' (<7d),
