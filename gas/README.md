@@ -50,7 +50,7 @@ files if a diff is ever needed.
 |---|---:|---|
 | `Code.js` | 190 | The `doGet`/`doPost` **router**. Dispatches on `action`. |
 | `Utils.js` | 104 | Shared RTDB REST + the token verifiers `verifyIdentity_` / `verifyCaller_`. |
-| `Invite.js` | 196 | `sendInvite`, `validateInvite`, `consumeInvite`. |
+| `Invite.js` | 93 | `sendInvite` only. (validateInvite/consumeInvite removed 16/08/2026 — invite acceptance is the Cloud Function `consumeInvite` in `functions/account.js`.) |
 | `Notifications.js` | 159 | Request-flow email: `notifyAdmin`, `confirmRequest`, `sendApproval`, `sendRejection`. |
 | `Emails.js` | 138 | HTML email templates used by the above. |
 | `Vacancies.js` | 244 | Vacancy submission verification + notification email. |
