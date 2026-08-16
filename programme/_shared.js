@@ -1,5 +1,10 @@
 /*
   Programme Packs — shared runtime for the library + admin console
+  Version: v1.1 (16/08/2026) — local crestImgHtml(name, px) deleted; crest
+           strings come from canon NL.clubs.crestImgHtml('thumb') + a
+           NL.clubs.wireCrestImgs sweep at each render (px sizing was already
+           in CSS: .own__crest / .dir__crest / .pack__crest / .club-cell img).
+           PP.crestImgHtml is gone from the surface.
   Version: v1.0 (03/08/2026) — initial build.
   File: /programme/_shared.js
 
@@ -40,7 +45,9 @@
     PP.newPasscode()                  admin: mint a club passcode
     PP.clubLink(code)                 absolute per-club link (branding only)
     PP.fmt(ms) / PP.ago(ms)           date-time / relative (canon-backed)
-    PP.crestImgHtml(name, px)         crest <img> string (thumb → full → rose)
+
+  Crest strings are canon: NL.clubs.crestImgHtml(name, 'thumb') + a
+  NL.clubs.wireCrestImgs sweep after each innerHTML render (no local helper).
 
   Pure helpers (unit-tested in tests/programme.test.mjs — no Firebase needed):
     PP.normCode(s)                    passcode normalisation
@@ -411,21 +418,6 @@
 
   var ROSE = '/assets/crests/National%20League%20rose.png';
 
-  function crestImgHtml(name, px) {
-    px = px || 22;
-    var esc = window.NL && NL.escHtml ? NL.escHtml : function (s) {
-      return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    };
-    // %27-encode apostrophes (encodeURIComponent leaves them) so club names
-    // like King's Lynn can't break the single-quoted onerror JS below.
-    function u(url) { return String(url).replace(/'/g, '%27'); }
-    var thumb = u(NL.clubs.crestUrl(name, 'thumb')), full = u(NL.clubs.crestUrl(name));
-    return '<img src="' + esc(thumb) + '" alt="" loading="lazy" ' +
-      'onerror="if(this.src!==\'' + esc(full) + '\'){this.src=\'' + esc(full) + '\';}else{this.onerror=null;this.src=\'' + ROSE + '\';}" ' +
-      'style="width:' + px + 'px;height:' + px + 'px;object-fit:contain;flex-shrink:0;">';
-  }
-
   window.PP = {
     ROOT: ROOT,
     STORAGE_ROOT: STORAGE_ROOT,
@@ -493,7 +485,6 @@
     fmt: function (ms) { return ms ? NL.formatDateTime(ms) : '—'; },
     fmtDate: function (ms) { return ms ? NL.formatDateShort(ms) : '—'; },
     ago: function (ms) { return ms ? NL.timeAgo(ms) : '—'; },
-    crestImgHtml: crestImgHtml,
     ROSE: ROSE
   };
 })();

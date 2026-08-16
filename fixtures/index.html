@@ -1,10 +1,17 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Fixtures
-  Version: v0.17 (05/08/2026)
+  Version: v0.18 (16/08/2026)
   File: /fixtures/index.html
 
   CHANGELOG
+    v0.18 (16/08/2026) — crestImg delegates to canon NL.clubs.crestImgHtml
+      with wireCrestImgs sweeps at both insertion points. This also FIXES a
+      silent bug: the old version wired the rose fallback onto a detached
+      element and then serialised it with outerHTML, which drops
+      property-assigned handlers — so the fallback never fired. loading="lazy"
+      stays, injected into the string pre-parse (canon has no opt for it;
+      second caller promotes).
     v0.17 (05/08/2026) — The row action sits on canon .btn--icon rather
       than a private copy of the same shape. .fx-act keeps only the two
       things that are about this table and not a shared pattern: 22px,
@@ -162,6 +169,13 @@
     var NL_TOOL_KEY = 'ops-fixtures';
 
     window.NL_CHANGELOG = [
+      {
+        date: '16/08/2026',
+        version: 'v0.18',
+        items: [
+          'Club crests in the fixture and rearrangements tables now fall back to the League rose if a crest image is missing — the fallback had been silently broken since the tables were built.'
+        ]
+      },
       {
         date: '05/08/2026',
         version: 'v0.17',
@@ -973,12 +987,14 @@
   }
 
   /* ---- Render ---------------------------------------------------------- */
+  /* Canon crestImgHtml plus loading="lazy", which must be in the parsed HTML
+     (set after insertion the fetch has already started — same reason the old
+     detached-element version was broken: wireCrestImg's property-assigned
+     onerror never survived outerHTML serialisation, so the rose fallback was
+     silently inert). Fallback wiring is now the wireCrestImgs sweep at each
+     insertion point. */
   function crestImg(name) {
-    var img = document.createElement('img');
-    img.alt = ''; img.loading = 'lazy';
-    img.src = NL.clubs.crestUrl(name, 'thumb');
-    NL.clubs.wireCrestImg(img, name);
-    return img.outerHTML;
+    return NL.clubs.crestImgHtml(name, 'thumb').replace('<img ', '<img loading="lazy" ');
   }
 
   /* Kick-off before the game, score after it, P–P or A–A when it did not
@@ -1076,6 +1092,7 @@
         '<td class="fx-c-act ta-right">' + actBtn(f) + '</td>' +
         '</tr>';
     }).join('');
+    NL.clubs.wireCrestImgs($('fxRows'));
     $('fxEmpty').hidden = rows.length > 0;
     $('fxTally').textContent = rows.length === visible().length
       ? rows.length + ' fixtures'
@@ -1132,6 +1149,7 @@
     var waiting = moves.filter(function (f) { return f.status === 'postponed'; });
     var done = moves.filter(function (f) { return f.status === 'rearranged'; });
     pane.innerHTML = mvGroup('Awaiting a new date', waiting, true) + mvGroup('Rearranged', done, false);
+    NL.clubs.wireCrestImgs(pane);
   }
 
   /* The same table as the main list, not a card stack. It is the same data

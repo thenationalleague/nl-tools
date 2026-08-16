@@ -3,10 +3,18 @@
 <head>
 <!--
   NL Tools — Vacancies
-  Version: 3.14
-  Date: 12/07/2026
+  Version: 3.15
+  Date: 16/08/2026
 
   CHANGELOG
+  v3.15 (16/08/2026)
+    - Local crestImg() helper deleted: listing-table and locked club-user
+      crests come from canon NL.clubs.crestImgHtml(name,'thumb',{className})
+      with a NL.clubs.wireCrestImgs sweep after each render (same
+      thumb → full → rose degrade, no inline onerror). The locked-picker
+      crest drops its redundant inline 28px style — .club-picker__crest
+      already sizes it in nl-brand.css. Removed the local FALLBACK constant.
+
   v3.14 (12/07/2026)
     - Listing tables (vacancies, access, submissions) and the locked club-user
       crest now load ~15KB thumbnails via NL.clubs.crestUrl(name,'thumb') with an
@@ -156,6 +164,13 @@
   /* Public-facing "What's new" — shown when users click the version badge.
      Keep entries user-friendly. Most recent first. */
   window.NL_CHANGELOG = [
+    {
+      date: '16 August 2026',
+      version: 'v3.15',
+      items: [
+        'Club crests in the listing tables load through the shared crest component used across NL Tools.'
+      ]
+    },
     {
       date: '12 July 2026',
       version: 'v3.14',
@@ -450,20 +465,12 @@
 
 <script>
 var db           = firebase.database();
-var FALLBACK     = '/assets/crests/National%20League%20rose.png';
 var GAS_URL      = NL.endpoints.gas;
 
-/* Row/list crest <img> — loads the ~15KB thumbnail, degrading thumb → full → rose
-   on error. String-built table rows can't call NL.clubs.wireCrestImg on a live
-   element, so the thumb→full→rose chain is inlined via onerror. Pickers use the
-   shared NL.clubPicker (already thumbs); this is for the listing tables. */
-function crestImg(name, cls, extra){
-  var thumb = NL.clubs.crestUrl(name || '', 'thumb');
-  var full  = NL.clubs.crestUrl(name || '');
-  return '<img class="'+cls+'" src="'+esc(thumb)+'" alt=""'
-    +(extra?' '+extra:'')
-    +' onerror="this.onerror=function(){this.onerror=null;this.src=\''+FALLBACK+'\'};this.src=\''+esc(full)+'\'">';
-}
+/* Row/list crests are canon: NL.clubs.crestImgHtml(name,'thumb',{className})
+   emits the string, and each renderer runs NL.clubs.wireCrestImgs on its
+   container in the same tick, attaching the thumb → full → rose degrade.
+   Pickers use the shared NL.clubPicker (already thumbs). */
 
 /* Club pickers — shared NL.clubPicker controllers (created lazily, see nlAuthReady / renderSubmitStep1) */
 var fClubPicker = null, sClubPicker = null, sfClubPicker = null;
@@ -664,7 +671,7 @@ function renderVacTable() {
       :'<button class="btn btn--ghost btn--sm" onclick="openEditModal(\''+v.id+'\')">Edit</button> '
         +'<button class="btn btn--danger btn--sm" onclick="confirmDelete(\''+v.id+'\',\''+NL.escJ(v.jobTitle)+'\')">Delete</button>';
     return '<tr class="'+(v.deleted?'is-deleted':'')+'">'
-      +'<td>'+crestImg(v.club, 'job-crest')+'</td>'
+      +'<td>'+NL.clubs.crestImgHtml(v.club, 'thumb', {className:'job-crest'})+'</td>'
       +'<td><strong style="font-variation-settings:\'wght\' 700">'+esc(v.club)+'</strong></td>'
       +'<td>'+esc(v.jobTitle)+'</td>'
       +'<td>'+esc(v.vacancyType||'—')+'</td>'
@@ -674,6 +681,7 @@ function renderVacTable() {
       +'<td style="white-space:nowrap;">'+btns+'</td>'
       +'</tr>';
   }).join('');
+  NL.clubs.wireCrestImgs(tbody);   /* thumb → full → rose, same tick as insertion */
 }
 
 /* ── Access table (read only) ── */
@@ -691,7 +699,7 @@ function renderAccessTable() {
     if(d&&d<=soon) pillCls='soon'; else pillCls='live';
     var closing=d?fmtDT(d):'—';
     return '<tr>'
-      +'<td>'+crestImg(v.club, 'job-crest')+'</td>'
+      +'<td>'+NL.clubs.crestImgHtml(v.club, 'thumb', {className:'job-crest'})+'</td>'
       +'<td><strong style="font-variation-settings:\'wght\' 700">'+esc(v.club)+'</strong></td>'
       +'<td>'+esc(v.jobTitle)+'</td>'
       +'<td>'+esc(v.vacancyType||'—')+'</td>'
@@ -699,6 +707,7 @@ function renderAccessTable() {
       +'<td><span class="pill pill--'+pillCls+'">'+(pillCls==='soon'?'Closing Soon':'Live')+'</span></td>'
       +'</tr>';
   }).join('');
+  NL.clubs.wireCrestImgs(tbody);   /* thumb → full → rose, same tick as insertion */
 }
 
 /* ── Submissions table ── */
@@ -710,7 +719,7 @@ function renderSubsTable() {
     var pillCls=s.status==='Approved'?'approved':s.status==='Rejected'?'rejected':'pending';
     var approvedLabel=s.status==='Approved'&&s.approvedBy?'Approved: '+s.approvedBy:s.status;
     return '<tr>'
-      +'<td>'+crestImg(s.club, 'job-crest')+'</td>'
+      +'<td>'+NL.clubs.crestImgHtml(s.club, 'thumb', {className:'job-crest'})+'</td>'
       +'<td><strong style="font-variation-settings:\'wght\' 700">'+esc(s.club)+'</strong></td>'
       +'<td>'+esc(s.jobTitle)+'</td>'
       +'<td style="font-size:var(--text-xs);white-space:nowrap;">'+when+'</td>'
@@ -719,6 +728,7 @@ function renderSubsTable() {
       +'<td><button class="btn btn--ghost btn--sm" onclick="openSubModal(\''+s.id+'\')">Review</button></td>'
       +'</tr>';
   }).join('');
+  NL.clubs.wireCrestImgs(tbody);   /* thumb → full → rose, same tick as insertion */
 }
 
 /* ── Add/Edit ── */
@@ -951,7 +961,7 @@ function renderSubmitStep1(){
   var clubField = isClubUser
     ? '<div class="form-group span2"><label>Club</label>'
       +'<div class="club-picker__wrap" style="opacity:0.75;pointer-events:none;cursor:default;">'
-      +crestImg(clubVal, 'club-picker__crest', 'style="width:28px;height:28px;object-fit:contain;"')
+      +NL.clubs.crestImgHtml(clubVal, 'thumb', {className:'club-picker__crest'})
       +'<span style="font-size:var(--text-sm);font-weight:600;font-variation-settings:\'wght\' 600;padding:0;flex:1;">'+esc(clubVal)+'</span>'
       +'</div>'
       +'<input type="hidden" id="sfClub" value="'+esc(clubVal)+'">'
@@ -1010,6 +1020,7 @@ function renderSubmitStep1(){
     +'<button class="btn btn--ghost" onclick="closeModal(\'submitModal\')">Cancel</button>'
     +'<button class="btn btn--accent" id="sfSubmitBtn" onclick="doSubmit()"'+(STATE.submitIsAuthed?'':' disabled')+'>Submit Vacancy</button>'
     +'</div>';
+  NL.clubs.wireCrestImgs(body);   /* locked club-user crest: thumb → full → rose */
 
   // Club field: club users get a locked hidden #sfClub above; NL staff get the shared picker.
   sfClubPicker = isClubUser ? null : NL.clubPicker('#sfClubPicker', { season:'current', freetext:'commit', placeholder:'Search or type club name…' });
