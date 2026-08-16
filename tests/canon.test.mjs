@@ -88,6 +88,22 @@ test('formatTime: HH:MM 24-hour, pads, accepts Date/epoch/string like its siblin
   assert.equal(NL.formatTime(null), '—');
 });
 
+test('formatDuration: compound hours+minutes, accepts a "3600s" string, junk → —', () => {
+  assert.equal(NL.formatDuration(45), '45s');
+  assert.equal(NL.formatDuration(300), '5 min');
+  assert.equal(NL.formatDuration(3600), '1h');
+  assert.equal(NL.formatDuration(5400), '1h 30min', 'keeps the half nls-monitor used to round to "2 hr"');
+  assert.equal(NL.formatDuration('3600s'), '1h', 'Routes-API duration string accepted');
+  assert.equal(NL.formatDuration(90), '1 min', 'minutes floor, never round up');
+  assert.equal(NL.formatDuration(5459), '1h 30min', 'leftover seconds above the minute are dropped');
+  assert.equal(NL.formatDuration(7200), '2h', 'no "0min" tail on exact hours');
+  assert.equal(NL.formatDuration(0), '—', 'zero reads as absent, like both pre-canon copies');
+  assert.equal(NL.formatDuration(-5), '—');
+  assert.equal(NL.formatDuration('rubbish'), '—');
+  assert.equal(NL.formatDuration(null), '—');
+  assert.equal(NL.formatDuration(undefined), '—');
+});
+
 test('timeAgo: ladder tiers then absolute fallback', () => {
   const now = Date.now();
   assert.equal(NL.timeAgo(now - 10 * 1000), 'just now');

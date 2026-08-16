@@ -1,8 +1,17 @@
 <!DOCTYPE html>
 <!--
   NL Tools — NLServices API Monitor
-  Version: v0.8 (16/08/2026)
+  Version: v0.9 (16/08/2026)
 
+  v0.9 — Run intervals come from NL.formatDuration (nl-utils v1.33), which
+         this tool's humanInterval() was the flagged forerunner of (PR #808,
+         second caller: travel-planner). Small visible improvement: the
+         compound convention keeps the minutes its old rounding lost —
+         intervals here run 60–7200s from meta config, so a 90-minute
+         interval now reads "1h 30min" instead of "2 hr". A missing interval
+         reads "an unknown interval" in the Overdue sentence and drops the
+         "next in" clause entirely (canon's bare '—' fallback reads badly
+         mid-sentence).
   v0.8 — Kick-off times come from NL.formatTime (nl-utils v1.31), the canon
          time-only formatter this tool's kickoffTime() was the flagged
          forerunner of (PR #808); the local split-the-last-word helper is
@@ -185,6 +194,13 @@
         'Scorer coverage distinguishes “still backfilling” from “upstream has no scorer”.'
       ]
     });
+    window.NL_CHANGELOG.unshift({
+      date: '16/08/2026',
+      version: 'v0.9',
+      items: [
+        'Run intervals now use the shared duration formatter and keep their minutes — a 90-minute interval reads “1h 30min” instead of rounding to “2 hr”.'
+      ]
+    });
 
     /* auth-guard fires this once the session is verified + pageWrap is
        revealed. Boot the main app from here so RTDB reads happen with a
@@ -201,7 +217,7 @@
   </script>
 
   <!-- NL system scripts — canonical ?v= lives in system/_template/index.html -->
-  <script src="/system/nl-utils.js?v=35"></script>
+  <script src="/system/nl-utils.js?v=36"></script>
   <script src="/system/nl-topbar.js?v=9"></script>
   <script src="/system/auth-guard.js?v=12"></script>
 
@@ -691,11 +707,16 @@
       verdict('warn', 'Partial failure',
         (m.failedCompetitions || []).join(', ') + ' failed; the rest were written and the failed one keeps its last known value.');
     } else if (sinceRun > Math.max(2 * (m.intervalSec || 3600) * 1000, 5 * 60 * 1000)) {
+      /* Canon formatDuration answers '—' for a missing interval; this
+         sentence needs a word there ('every —' reads like a typo), so the
+         caller supplies it. */
       verdict('warn', 'Overdue',
-        'Last run ' + NL.timeAgo(m.lastRun) + ', but it asked to run every ' + humanInterval(m.intervalSec) + '.');
+        'Last run ' + NL.timeAgo(m.lastRun) + ', but it asked to run every ' +
+        (m.intervalSec ? NL.formatDuration(m.intervalSec) : 'an unknown interval') + '.');
     } else {
       verdict('ok', modeLabel(m.mode),
-        'Last run ' + NL.timeAgo(m.lastRun) + ' · next in ' + humanInterval(m.intervalSec) +
+        'Last run ' + NL.timeAgo(m.lastRun) +
+        (m.intervalSec ? ' · next in ' + NL.formatDuration(m.intervalSec) : '') +
         ' · season ' + esc(m.season) + ' · took ' + (m.durationMs || 0) + 'ms');
     }
 
@@ -720,13 +741,6 @@
     if (mode === 'prematch') return 'Pre-match — collecting team news';
     if (mode === 'cooldown') return 'Post-match — catching late entries';
     return 'Idle — nothing due';
-  }
-
-  function humanInterval(sec) {
-    if (!sec) return 'unknown';
-    if (sec < 60) return sec + 's';
-    if (sec < 3600) return Math.round(sec / 60) + ' min';
-    return Math.round(sec / 3600) + ' hr';
   }
 
   // -------------------------------------------------------------------------

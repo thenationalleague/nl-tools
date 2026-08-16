@@ -1,9 +1,22 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.32 (16/08/2026)
+   Version: v1.33 (16/08/2026)
 
    Changelog
+   v1.33 (16/08/2026)
+     - NL.formatDuration(x) — seconds (number, or a '3600s'-style Routes API
+       string) → compact human duration, joining the date family: '45s',
+       '5 min', '1h', '1h 30min'. PR #808 flagged nls-monitor's
+       humanInterval() as promotion-ready when a second caller appeared;
+       travel-planner's fmtDur() is that caller. The compound hours+minutes
+       convention is travel-planner's — strictly more accurate than
+       nls-monitor's rounding ('1h 30min', where 5400s used to round to
+       '2 hr'). Absent/zero/junk → '—' like the rest of the family; both
+       pre-canon copies treated zero as absent too, and a caller whose
+       sentence needs a word instead owns that word.
+       Cache-bust ?v=35 -> ?v=36 in lockstep.
+
    v1.32 (16/08/2026)
      - NL.clubs.crestImgHtml(name, size, opts) — crest <img> as an escaped
        HTML string, for string-built markup where wireCrestImg has no
@@ -500,6 +513,29 @@
     var days = Math.floor(hrs / 24);
     if (days < 7) return days + 'd ago';
     return window.NL.formatDateTime(d);
+  };
+
+  /* Elapsed duration → compact human string: 45 → '45s', 300 → '5 min',
+     3600 → '1h', 5400 → '1h 30min'. Accepts a number of seconds or a
+     '3600s'-style duration string (the Routes API shape). Minutes floor —
+     above the minute, leftover seconds are dropped, never rounded up.
+     Absent, zero, negative or unparseable → '—', the date family's
+     fallback; a caller whose sentence needs a word instead ('every unknown
+     interval') supplies that word itself. */
+  window.NL.formatDuration = function(x) {
+    var secs = x;
+    if (typeof secs === 'string') {
+      var m = secs.match(/^\s*(\d+(?:\.\d+)?)\s*s?\s*$/);
+      secs = m ? parseFloat(m[1]) : NaN;
+    }
+    if (typeof secs !== 'number' || !isFinite(secs)) return '—';
+    secs = Math.round(secs);
+    if (secs <= 0) return '—';
+    if (secs < 60) return secs + 's';
+    var h = Math.floor(secs / 3600);
+    var mins = Math.floor((secs % 3600) / 60);
+    if (!h) return mins + ' min';
+    return mins ? h + 'h ' + mins + 'min' : h + 'h';
   };
 
   /* ── HTML escape ─────────────────────────────────────────────────────── */
