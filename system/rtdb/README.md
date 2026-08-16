@@ -96,4 +96,10 @@ rules/registry (denied for everyone, PERMISSION_DENIED on a path the
 snapshot says is writable), trust the console over this folder, then
 re-sync the snapshot.
 
-Snapshots last verified against live: **14 Jul 2026** (tools registry + rules).
+Snapshots last verified against live: **16 Aug 2026** (tools registry — exported
+from the console and diffed field-by-field against
+`tools-registry.snapshot.json`: same 17 records, no live-only records, zero
+drift in label/icon/url/description/type/visibleToAll or any `defaults` level.
+The only differences were the intended renames — `audience: "staff"` →
+`"league"` on 6 records, and the `defaults` key `club-viewer` → `club-staff` on
+all 17). Rules: **14 Jul 2026**.
