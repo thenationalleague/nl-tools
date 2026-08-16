@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.95 (17/07/2026)
+  Version: v5.96 (16/08/2026)
   Date: 09/04/2026
   File: /portal/index.html
 
@@ -539,6 +539,13 @@
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
     {
+      date: '16/08/2026',
+      version: 'v5.96',
+      items: [
+        'A third section, Meta, for the tools about the estate rather than of it — currently Estate and the Style Guide. Backed by a third audience value: for access, meta behaves exactly as staff (auth-guard hard-gates it to league roles); the portal shelves it separately. Invisible to anyone who cannot see a card on it.'
+      ]
+    },
+    {
       date: '12 July 2026',
       version: 'v5.92',
       items: [
@@ -682,7 +689,7 @@
 </script>
 <script src="/system/nl-utils.js?v=32"></script>
 <script src="/system/nl-topbar.js?v=9"></script>
-<script src="/system/auth-guard.js?v=11"></script>
+<script src="/system/auth-guard.js?v=12"></script>
 
 <link rel="stylesheet" href="/system/nl-brand.css?v=38">
 
@@ -2213,6 +2220,17 @@
       <div class="tool-grid" id="clubToolGrid"><!-- Populated by JS --></div>
     </div>
 
+    <!-- Meta — tools ABOUT the estate rather than of it (estate map, style
+         guide). Third `audience` value: for access it behaves exactly as
+         'staff' (toolAudience maps it, auth-guard hard-gates it to league
+         roles), and only this shelf split reads the raw value. Renders only
+         when a visible tool carries it, so for everyone but superadmin it
+         simply never exists. -->
+    <div id="metaToolsSection" style="display:none;">
+      <div class="tools-section__head" style="margin-top:36px;">Meta</div>
+      <div class="tool-grid" id="metaToolGrid"><!-- Populated by JS --></div>
+    </div>
+
     <!-- Club users: single flat grid -->
     <div id="clubFlatSection" style="display:none;">
       <div class="tool-grid" id="clubFlatGrid"><!-- Populated by JS --></div>
@@ -2516,6 +2534,12 @@ function isRestrictedRole(r) { return isClubRole(r) || normRole(r) === 'third-pa
    record that somehow lacks the audience field (all live records have it). */
 function toolAudience(tool) {
   if (!tool) return 'club';
+  /* 'meta' is an audience for ACCESS purposes identical to 'staff' — league
+     roles only, never club, never on invite/request cards. Mapping it here
+     means every consumer of toolAudience inherits the staff protections
+     without knowing meta exists. Only the portal's shelf split reads the raw
+     value (see isMetaTool). */
+  if (tool.audience === 'meta') return 'staff';
   if (tool.audience === 'staff' || tool.audience === 'club') return tool.audience;
   return (((tool.defaults && tool.defaults['club-admin']) || 'off') !== 'off') ? 'club' : 'staff';
 }
@@ -2915,8 +2939,10 @@ function renderToolGrid() {
   /* Split by type: a "club tool" is one club roles can reach (club-admin
      default is not 'off'); everything else is a staff tool. */
   function isClubTool(t) { return toolAudience(t.tool) === 'club'; }
-  var staffTools = myTools.filter(function(t) { return !isClubTool(t); });
-  var clubTools  = myTools.filter(function(t) { return  isClubTool(t); });
+  function isMetaTool(t) { return t.tool.audience === 'meta'; }
+  var metaTools  = myTools.filter(isMetaTool);
+  var staffTools = myTools.filter(function(t) { return !isClubTool(t) && !isMetaTool(t); });
+  var clubTools  = myTools.filter(function(t) { return  isClubTool(t) && !isMetaTool(t); });
 
   function populateGrid(gridId, items) {
     var grid = document.getElementById(gridId);
@@ -2945,6 +2971,7 @@ function renderToolGrid() {
     /* Club users — flat list of club-facing tools only */
     document.getElementById('staffToolsSection').style.display = 'none';
     document.getElementById('clubToolsSection').style.display = 'none';
+    document.getElementById('metaToolsSection').style.display = 'none';
     document.getElementById('clubFlatSection').style.display = '';
     populateGrid('clubFlatGrid', clubTools);
   } else {
@@ -2952,8 +2979,11 @@ function renderToolGrid() {
     document.getElementById('clubFlatSection').style.display = 'none';
     document.getElementById('staffToolsSection').style.display = staffTools.length ? '' : 'none';
     document.getElementById('clubToolsSection').style.display = clubTools.length ? '' : 'none';
+    /* Meta shelf: hidden entirely unless this user can see something on it. */
+    document.getElementById('metaToolsSection').style.display = metaTools.length ? '' : 'none';
     populateGrid('staffToolGrid', staffTools);
     populateGrid('clubToolGrid', clubTools);
+    populateGrid('metaToolGrid', metaTools);
   }
 }
 
