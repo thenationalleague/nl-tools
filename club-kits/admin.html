@@ -1,7 +1,13 @@
 <!DOCTYPE html>
 <!--
-  club-kits/admin.html  v1.2 (16/08/2026)
+  club-kits/admin.html  v1.3 (17/08/2026)
 
+  v1.3 (17/08/2026) — Edit can now ADD and REMOVE whole kits, not just
+    recolour them: a missing third GK kit can be added, a kit submitted in
+    error deleted. Bounds are the form's own (outfield 2–3, GK 1–3). Slot
+    and label re-derive from position on every change, so removing the
+    second GK kit renumbers the third down to second — in the record and
+    every export. Nothing is written until Save changes.
   v1.2 (16/08/2026) — crest <img> strings and the [data-crest] wiring sweeps
     repointed to the canon helpers NL.clubs.crestImgHtml + wireCrestImgs
     (nl-utils v1.32). Same markup, same thumb→full→rose fallback, no
@@ -82,7 +88,10 @@
   <script>
     window.NL_TOOL = { title: 'Club Kits Admin', toolKey: 'ops-club-kits' };
     var NL_TOOL_KEY = 'ops-club-kits';
-    window.NL_CHANGELOG = [{ date: '16 Aug 2026', version: 'v1.2', items: [
+    window.NL_CHANGELOG = [{ date: '17 Aug 2026', version: 'v1.3', items: [
+      'Edit can now add a missing kit or remove one submitted in error, within the form’s own bounds (2–3 outfield, 1–3 goalkeeper).',
+      'Kits renumber on removal — delete the second GK kit and the third becomes the new second, in the record and every export.'
+    ] }, { date: '16 Aug 2026', version: 'v1.2', items: [
       'Club crests in the lists, review modal and kit sheets now come from the shared crest helper — same look, one less thing to drift.'
     ] }, { date: '15 Aug 2026', version: 'v1.1', items: [
       'Re-open now keeps a club\u2019s answers: the form unlocks pre-filled for editing instead of being wiped.'
@@ -165,6 +174,15 @@
   .ce-kit { border-top:1px solid var(--border); margin-top:14px; padding-top:12px; }
   .ce-kit__n { font-size:11px; text-transform:uppercase; letter-spacing:.06em;
                font-variation-settings:'wght' 800; color:var(--primary); margin-bottom:8px; }
+  .ce-set__h { display:flex; align-items:center; justify-content:space-between; gap:10px;
+               margin-top:20px; padding-top:14px; border-top:2px solid var(--navy-100); }
+  .ce-set__t { font-size:12px; text-transform:uppercase; letter-spacing:.07em;
+               font-variation-settings:'wght' 800; color:var(--navy); }
+  .ce-set__h + .ce-kit { border-top:0; margin-top:0; padding-top:2px; }
+  .ce-kit__hd { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+  .ce-rm { border:0; background:none; padding:2px 4px; cursor:pointer; font-family:var(--font);
+           font-size:12px; font-variation-settings:'wght' 700; color:var(--red); }
+  .ce-rm:hover { text-decoration:underline; }
   .ce-gars { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:14px; align-items:start; }
   @media (max-width:640px){ .ce-gars { grid-template-columns:1fr; } }
   .ce-g { min-width:0; }
@@ -667,7 +685,11 @@
      A save stamps editedAt/editedBy so a League correction stays
      distinguishable from what the club actually submitted — NL.writeAudit
      records the write, but the record itself would otherwise look like the
-     club's own answer. */
+     club's own answer.
+
+     Whole kits can be ADDED and REMOVED here too, within the form's own
+     bounds (outfield 2–3, GK 1–3) — for the club that submitted two GK kits
+     but owns three, or submitted one that does not exist. */
   function whoAmI() {
     var s = (window.NL && NL.session) || {};
     var u = (firebase.auth && firebase.auth().currentUser) || {};
@@ -755,8 +777,28 @@
   function editSub(club, rec) {
     /* Deep clone — nothing touches S.subs until the save succeeds. */
     var work = JSON.parse(JSON.stringify(rec));
-    var kits = (work.outfield || []).map(function (k) { return { set: 'outfield', k: k }; })
-      .concat((work.gk || []).map(function (k) { return { set: 'gk', k: k }; }));
+    work.outfield = work.outfield || [];
+    work.gk = work.gk || [];
+
+    /* Kits are POSITIONAL, exactly as the public form writes them: slot and
+       label derive from a kit's place in its set, and re-deriving them after
+       every change is what makes removal renumber — delete the second GK kit
+       and the third becomes the new second, in the record and every export. */
+    var SETS = [
+      { key: 'outfield', name: 'Outfield kits', min: 2, max: 3,
+        slots: ['home', 'away', 'third'],
+        labels: ['Home', 'Away', 'Third'], ord: ['home', 'away', 'third'] },
+      { key: 'gk', name: 'Goalkeeper kits', min: 1, max: 3,
+        slots: ['gk1', 'gk2', 'gk3'],
+        labels: ['Goalkeeper — first', 'Goalkeeper — second', 'Goalkeeper — third'],
+        ord: ['first', 'second', 'third'] }
+    ];
+    function relabel() {
+      SETS.forEach(function (s) {
+        work[s.key].forEach(function (k, i) { k.slot = s.slots[i]; k.label = s.labels[i]; });
+      });
+    }
+    function blankKit() { return { shirt: { colours: [] }, shorts: { colours: [] }, socks: { colours: [] } }; }
 
     var wrap = document.createElement('div');
     wrap.innerHTML =
@@ -764,11 +806,53 @@
       'so the record still shows it was changed after the club submitted it.</p>' +
       '<div><label class="ce-lbl">Kit manufacturer</label>' +
       '<input class="ce-in" id="ceMan" value="' + esc(work.manufacturer || '') + '"></div>' +
-      kits.map(function (x, i) {
-        return '<div class="ce-kit"><div class="ce-kit__n">' + esc(x.k.label || x.k.slot) + '</div>' +
-          '<div class="ce-gars" data-kit="' + i + '"></div></div>';
-      }).join('') +
+      '<div data-kits></div>' +
       '<p class="ce-err" id="ceErr"></p>';
+    var kitsHost = wrap.querySelector('[data-kits]');
+
+    function paintKits() {
+      relabel();
+      kitsHost.innerHTML = SETS.map(function (s) {
+        var list = work[s.key];
+        return '<div class="ce-set__h"><span class="ce-set__t">' + esc(s.name) + '</span>' +
+          (list.length < s.max
+            ? '<button type="button" class="btn btn--ghost btn--sm" data-add="' + s.key + '">+ Add ' +
+              esc(s.ord[list.length]) + (s.key === 'gk' ? ' GK' : '') + ' kit</button>' : '') +
+          '</div>' +
+          list.map(function (k, i) {
+            return '<div class="ce-kit"><div class="ce-kit__hd">' +
+              '<div class="ce-kit__n">' + esc(k.label) + '</div>' +
+              (list.length > s.min
+                ? '<button type="button" class="ce-rm" data-rm="' + s.key + ':' + i + '">Remove</button>' : '') +
+              '</div><div class="ce-gars" data-kit="' + s.key + ':' + i + '"></div></div>';
+          }).join('');
+      }).join('');
+
+      SETS.forEach(function (s) {
+        work[s.key].forEach(function (k, i) {
+          var host = kitsHost.querySelector('[data-kit="' + s.key + ':' + i + '"]');
+          GARMENTS.forEach(function (g) {
+            k[g[0]] = k[g[0]] || { colours: [] };
+            var cell = document.createElement('div');
+            cell.className = 'ce-g';
+            host.appendChild(cell);
+            garmentEditor(cell, k[g[0]], g[1], g[0] === 'shirt' ? 3 : 2, g[2]);
+          });
+        });
+      });
+    }
+
+    /* Delegated — paintKits rebuilds the innerHTML but the host node
+       survives. Add/remove only touch the working copy: Cancel still
+       discards everything, and nothing is written until Save changes. */
+    kitsHost.addEventListener('click', function (e) {
+      var add = e.target.closest('[data-add]'), rm = e.target.closest('[data-rm]');
+      if (add) { work[add.getAttribute('data-add')].push(blankKit()); paintKits(); }
+      else if (rm) {
+        var p = rm.getAttribute('data-rm').split(':');
+        work[p[0]].splice(+p[1], 1); paintKits();
+      }
+    });
 
     var ctrl = NL.modal({
       title: 'Edit ' + club, width: 'wide', body: wrap,
@@ -777,31 +861,24 @@
         { label: 'Save changes', className: 'btn--primary', onClick: function (c) { save(c); } }
       ]
     });
-
-    kits.forEach(function (x, i) {
-      var host = ctrl.body.querySelector('[data-kit="' + i + '"]');
-      GARMENTS.forEach(function (g) {
-        x.k[g[0]] = x.k[g[0]] || { colours: [] };
-        var cell = document.createElement('div');
-        cell.className = 'ce-g';
-        host.appendChild(cell);
-        garmentEditor(cell, x.k[g[0]], g[1], g[0] === 'shirt' ? 3 : 2, g[2]);
-      });
-    });
+    paintKits();
 
     function save(c) {
+      relabel();
       var problems = [];
-      kits.forEach(function (x) {
-        GARMENTS.forEach(function (g) {
-          var gar = x.k[g[0]], used = (gar.colours || []).filter(Boolean);
-          var label = (x.k.label || x.k.slot) + ' — ' + g[1].toLowerCase();
-          if (!used.length) { problems.push(label + ': needs at least one colour.'); return; }
-          if (used.length < gar.colours.length) problems.push(label + ': every colour box needs a value.');
-          if (used.length > 1) {
-            var key = g[2] ? gar.pattern : gar.detail;
-            if (!key) problems.push(label + ': choose how the colours are arranged.');
-          }
-          gar.colours = used;   /* drop the empties before saving */
+      SETS.forEach(function (s) {
+        work[s.key].forEach(function (k) {
+          GARMENTS.forEach(function (g) {
+            var gar = k[g[0]] || {}, used = (gar.colours || []).filter(Boolean);
+            var label = (k.label || k.slot) + ' — ' + g[1].toLowerCase();
+            if (!used.length) { problems.push(label + ': needs at least one colour.'); return; }
+            if (used.length < gar.colours.length) problems.push(label + ': every colour box needs a value.');
+            if (used.length > 1) {
+              var key = g[2] ? gar.pattern : gar.detail;
+              if (!key) problems.push(label + ': choose how the colours are arranged.');
+            }
+            gar.colours = used;   /* drop the empties before saving */
+          });
         });
       });
       if (problems.length) {
