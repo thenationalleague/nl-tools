@@ -273,6 +273,7 @@ which he can run from a browser:
 | **RTDB rules** | `deploy-rtdb-rules.yml` | **manual only.** Actions → Run workflow → type `publish` |
 | **Storage rules** | `deploy-storage-rules.yml` | **manual only.** Actions → Run workflow → type `publish` |
 | **Apps Script** (`gas/`) | `deploy-gas.yml` | **manual only.** Actions → Run workflow → type `publish` |
+| **`tools/` registry** | `deploy-tools-registry.yml` | **manual only.** `report` mode diffs live vs snapshot and writes nothing; `publish` + type `publish` replaces the node. Never paste this by hand. |
 
 Two things worth knowing, because both have already caught someone out:
 
@@ -294,8 +295,20 @@ change. Edit the `.js` files in `gas/`, not the Apps Script editor. The deploy
 refuses to run if live holds anything the repo has not seen, so it cannot
 overwrite someone's editor change — if it stops you, run the sync first.
 
-RTDB *data* (the `tools/` registry, seed records) still has no deploy path and
-is pasted into the console by hand.
+The **`tools/` registry deploys from the repo too** (`deploy-tools-registry.yml`,
+added 16/08/2026) — `system/rtdb/tools-registry.snapshot.json` **is** the
+registry, exactly as the rules files are the rules. Run it in **report** mode
+(the default) to diff live against the snapshot without writing anything; that
+is the right first move whenever drift is suspected, and it beats exporting the
+node and comparing by hand. **publish** replaces the whole node, so a record
+that exists only in live is a deletion — publish refuses unless
+`allow_deletions` is ticked. Do not tell anyone to paste this node into the
+console; that instruction is what let `tools/ops-estate` sit for weeks holding a
+whole stale copy of the registry nested a level too deep.
+
+Other RTDB *data* (seed records, `app-data/*`) has no deploy path and should not
+get one — it is live operational data written by the tools themselves, not
+config that belongs in git.
 
 ## Data pipelines (GitHub Actions)
 
