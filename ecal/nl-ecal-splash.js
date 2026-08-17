@@ -1,6 +1,6 @@
 /* ============================================================================
    NL ECAL Club-Aware Splash / Interstitial — external script (GTM-safe)
-   Version: v8.9
+   Version: v9.0
    Date: 17/08/2026
    Commit this to the repo as:  ecal/nl-ecal-splash.js
    Deploy via GTM Custom HTML tag (All Pages) with ONE line:
@@ -28,6 +28,18 @@
    during testing) so the new version is served.
 
    CHANGELOG
+   v9.0 — The ad is no longer shown until it works. v8.9 revealed it immediately
+          and re-scanned in the background, which left a few hundred ms where the
+          ad was visible and clickable but not yet bound by ECAL — click in that
+          window and it fell through to our own close handler, so the splash shut
+          with no modal. Caught live by clicking fast: the console showed the
+          click landing between "widgets loaded: 1" and the next re-scan.
+          New whenEcalReady() polls until ECAL's widget DATA has loaded (its
+          initButtons merely existing is not readiness — that was v8.8's error),
+          calls initButtons once, and only then reveals. Observed live: widgets
+          arrive ~400-800ms after the script is appended. Capped at ~3s so a slow
+          or failed ECAL delays the ad rather than suppressing it, with the
+          repeating re-scan kept as a safety net.
    v8.9 — v8.8 called initButtons() once, as soon as it existed — too early.
           EcalWidget.initButtons is defined the moment ECAL's script parses, but
           its widget data loads asynchronously afterwards (boot / continueBoot /
@@ -209,6 +221,28 @@
      Polled because ECAL may still be loading when we show — on a page without
      the banner we have only just appended the script ourselves. Give up quietly
      after ~6s rather than spin. */
+  /* ECAL is usable once its widget data has loaded — initButtons existing is not
+     enough (that is v8.8's mistake). Observed live: widgets arrive within about
+     400-800ms of the script being appended. Capped at ~3s so a slow or failed
+     ECAL delays the ad rather than suppressing it; cb(false) means show it
+     anyway and let the re-scan net catch up. */
+  function whenEcalReady(cb){
+    var tries = 0, MAX = 15;   /* ~3s */
+    (function poll(){
+      var E = window.EcalWidget;
+      var count = E && E.widgets ? (E.widgets.length || Object.keys(E.widgets).length || 0) : 0;
+      if (E && typeof E.initButtons === "function" && count > 0) {
+        if (DEBUG) console.log("[NL ECAL Splash] ECAL ready after " + (tries * 200) + "ms — widgets: " + count);
+        return cb(true);
+      }
+      if (++tries >= MAX) {
+        if (DEBUG) console.warn("[NL ECAL Splash] ECAL not ready after ~3s — showing anyway");
+        return cb(false);
+      }
+      setTimeout(poll, 200);
+    })();
+  }
+
   function bindEcalButton(){
     var tries = 0, MAX = 24;   /* ~10s */
     (function attempt(){
@@ -327,8 +361,21 @@
     curSignedIn = !!signedIn;
     if(DEBUG) debugDump(club, via);
     /* Order matters: applyClub sets the final widget id on the button, so the
-       button must be complete before ECAL is asked to bind it. */
-    applyClub(club); bootEcal(); open(); bindEcalButton();
+       button must be complete before ECAL is asked to bind it.
+
+       We then wait for ECAL to finish booting BEFORE revealing the ad. v8.9
+       showed the ad immediately and re-scanned in the background, which left a
+       few hundred ms where the ad was visible and clickable but not yet wired:
+       click in that window and it fell through to our own close handler, so the
+       splash shut with no modal. Showing a control before it works is the bug —
+       so the reveal now waits. Capped, because a fan seeing the ad late is far
+       better than never seeing it at all. */
+    applyClub(club); bootEcal();
+    whenEcalReady(function(ready){
+      if (ready) { try { window.EcalWidget.initButtons(); } catch(e){} }
+      open();
+      bindEcalButton();   /* safety net: keeps re-scanning while open */
+    });
   }
 
   function start(){
