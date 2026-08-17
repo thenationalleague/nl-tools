@@ -1,6 +1,6 @@
 /* ============================================================================
    NL ECAL Club-Aware Splash / Interstitial — external script (GTM-safe)
-   Version: v8.8
+   Version: v8.9
    Date: 17/08/2026
    Commit this to the repo as:  ecal/nl-ecal-splash.js
    Deploy via GTM Custom HTML tag (All Pages) with ONE line:
@@ -28,6 +28,17 @@
    during testing) so the new version is served.
 
    CHANGELOG
+   v8.9 — v8.8 called initButtons() once, as soon as it existed — too early.
+          EcalWidget.initButtons is defined the moment ECAL's script parses, but
+          its widget data loads asynchronously afterwards (boot / continueBoot /
+          loadButtons in their API), so that first call scanned with nothing
+          loaded and bound nothing. The console proved it: "initButtons() —
+          button bound" logged, and the click still only fired our own handler.
+          Running it by hand a minute later worked because ECAL had finished
+          booting by then. The call is idempotent, so it now REPEATS every 400ms
+          while the splash is open (~10s cap, stops on close) and catches
+          whichever tick ECAL finishes on. Debug logs the widget count per
+          attempt so the boot moment is visible.
    v8.8 — CRITICAL FIX: the ad now opens ECAL on pages that carry the banner.
           ECAL binds .ecal-sync-widget-button elements when its script scans the
           DOM and never re-scans. Our button is injected late (DOMContentLoaded
@@ -199,16 +210,24 @@
      the banner we have only just appended the script ourselves. Give up quietly
      after ~6s rather than spin. */
   function bindEcalButton(){
-    var tries = 0;
+    var tries = 0, MAX = 24;   /* ~10s */
     (function attempt(){
       var E = window.EcalWidget;
       if (E && typeof E.initButtons === "function") {
-        try { E.initButtons(); if(DEBUG) console.log("[NL ECAL Splash] initButtons() — button bound"); }
-        catch(e){ if(DEBUG) console.warn("[NL ECAL Splash] initButtons() threw", e); }
-        return;
+        try {
+          E.initButtons();
+          if (DEBUG) console.log("[NL ECAL Splash] initButtons() attempt " + (tries + 1) +
+            " — widgets loaded: " + ((E.widgets && E.widgets.length) || 0));
+        } catch(e){ if(DEBUG) console.warn("[NL ECAL Splash] initButtons() threw", e); }
       }
-      if (++tries < 40) setTimeout(attempt, 150);
-      else if (DEBUG) console.warn("[NL ECAL Splash] EcalWidget never appeared — button unbound");
+      /* Keep re-scanning while the splash is open. initButtons exists the moment
+         ECAL's script parses, but its widget data loads asynchronously after
+         that (see boot/continueBoot/loadButtons in their API), so calling it
+         once — the moment it appears — scans with nothing loaded and binds
+         nothing. That was v8.8: the log said the call succeeded while the
+         button stayed unbound. The call is idempotent, so simply repeating it
+         costs nothing and catches whichever tick ECAL finishes booting on. */
+      if (++tries < MAX && isOpen) setTimeout(attempt, 400);
     })();
   }
 
