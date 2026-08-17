@@ -1,6 +1,11 @@
 /*
-  club-kits/kit-colours.js  v1.1 (17/08/2026)
+  club-kits/kit-colours.js  v1.2 (17/08/2026)
 
+  v1.2 (17/08/2026) — Coral pink (pink family) and Dark blue (blue family)
+    added — both turned up as typed-in strings in the first 72-club collection.
+    Shorts and socks now allow THREE colours, same as shirts: the two-colour
+    cap made a club cram "X and Y" into one free-text box on every pair of
+    shorts it owns. Heads bump to ?v=3.
   v1.1 (17/08/2026) — Chocolate joins the brown family, the first shade added
     since launch. Records are self-describing (label + hex travel with each
     colour), so existing submissions are untouched; both heads bump the
@@ -58,7 +63,8 @@
     ['claret', 'Claret', [
       ['claret','Claret','#7A263A'], ['burgundy','Burgundy','#5C1A2B'], ['maroon','Maroon','#6B1F2E'] ]],
     ['pink',   'Pink', [
-      ['pink','Pink','#F49AC2'], ['hot-pink','Hot pink','#E6007E'], ['neon-pink','Neon pink','#FF2D95'] ]],
+      ['pink','Pink','#F49AC2'], ['coral','Coral pink','#F88379'],
+      ['hot-pink','Hot pink','#E6007E'], ['neon-pink','Neon pink','#FF2D95'] ]],
     ['orange', 'Orange', [
       ['orange','Orange','#F5821F'], ['burnt-orange','Burnt orange','#B8500F'], ['neon-orange','Neon orange','#FF6A00'] ]],
     ['amber',  'Amber / gold', [
@@ -74,7 +80,7 @@
       ['teal','Teal','#008080'], ['turquoise','Turquoise','#30D5C8'], ['aqua','Aqua','#5FE0D0'] ]],
     ['blue',   'Blue', [
       ['blue','Blue','#0057B8'], ['sky','Sky blue','#6CACE4'], ['light-blue','Light blue','#8FC7E8'],
-      ['royal','Royal blue','#0033A0'], ['electric','Electric blue','#0B7FFF'] ]],
+      ['royal','Royal blue','#0033A0'], ['dark-blue','Dark blue','#003070'], ['electric','Electric blue','#0B7FFF'] ]],
     ['navy',   'Navy', [
       ['navy','Navy','#12284C'], ['midnight','Midnight navy','#0B1A33'] ]],
     ['purple', 'Purple', [
@@ -106,7 +112,7 @@
      ambiguous between a trim and a hoop. */
   var DETAILS = [ ['trim','Trim'], ['stripe','Stripe / panel'], ['hoops','Hoops'], ['other','Other'] ];
 
-  var GARMENTS = [ ['shirt','Shirt',3], ['shorts','Shorts',2], ['socks','Socks',2] ];
+  var GARMENTS = [ ['shirt','Shirt',3], ['shorts','Shorts',3], ['socks','Socks',3] ];
 
   /* ── Colour combobox ───────────────────────────────────────────────────
      Type-ahead over OPTS, grouped by family, free text allowed. This is the
