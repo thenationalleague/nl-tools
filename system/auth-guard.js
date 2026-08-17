@@ -1,7 +1,12 @@
 /*
  * auth-guard.js — NL Tools v2
  * File: /system/auth-guard.js
- * Version: v6.5 (17/08/2026)
+ * Version: v6.6 (17/08/2026)
+ *
+ * v6.6: No behaviour change — cache-bust only, ?v=14 -> ?v=15, in lockstep
+ *       with nl-utils ?v=41 -> ?v=42 (NL.roles.grant). The two files are
+ *       bumped together by the canon rule so a page can never load a new
+ *       utils against an old guard.
  *
  * v6.5: The resolved level is handed to the tool as `session.toolLevel`.
  *       This file already worked out the true answer — per-user entry, else
