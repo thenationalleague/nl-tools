@@ -1,7 +1,26 @@
 /*
  * auth-guard.js — NL Tools v2
  * File: /system/auth-guard.js
- * Version: v6.4 (16/08/2026)
+ * Version: v6.5 (17/08/2026)
+ *
+ * v6.5: The resolved level is handed to the tool as `session.toolLevel`.
+ *       This file already worked out the true answer — per-user entry, else
+ *       the registry default for the role — and then threw it away, granting
+ *       or redirecting and telling the page nothing. So the three tools that
+ *       care about the level (Vacancies, Judgements, Website Archive) each
+ *       re-derived it from `session.tools[key]` alone, with no default
+ *       fallback. A League Admin with no explicit per-user entry therefore
+ *       got IN on the registry default of 'admin' and then landed view-only:
+ *       registry said Manage, the portal panel said Manage, the tool gave
+ *       Use. Three hand-rolled copies, three different bugs — Website
+ *       Archive read the object shape only (fixed v2.7), Judgements handles
+ *       both, Vacancies falls back to 'access'. One value, resolved once,
+ *       ends the class. Superadmin resolves to 'admin', as everywhere.
+ *       The resolution rules themselves move to NL.resolveToolLevel
+ *       (nl-utils v1.38) so the portal and the tools cannot answer the same
+ *       question differently, and so they can be tested — this file needs a
+ *       browser and Firebase, that helper needs neither.
+ *       Cache-bust ?v=13 -> ?v=14, in lockstep with nl-utils ?v=40 -> ?v=41.
  *
  * v6.4: Vocabulary reconciliation with the agreed access model. The audience
  *       value 'staff' is renamed 'league' ('staff' collided with the role
@@ -280,8 +299,9 @@
       return;
     }
 
-    /* Superadmin: always granted */
+    /* Superadmin: always granted, and always at the top level. */
     if (session.role === 'superadmin') {
+      session.toolLevel = 'admin';
       grantAccess(session);
       return;
     }
@@ -307,46 +327,27 @@
       }
     }
 
-    /* Resolve tool entry -- handles both string format ("admin","access","off")
-       and legacy boolean object format ({access:true, admin:true}). The old
-       "hidden" level was merged into "off" (v6.1): there is one no-access
-       state now, and it is always a silent redirect. */
-    var rawEntry = session.tools && session.tools[NL_TOOL_KEY];
-    var level;
-    if (!rawEntry && rawEntry !== 0) {
-      level = 'off';
-    } else if (typeof rawEntry === 'string') {
-      level = rawEntry;
-    } else if (typeof rawEntry === 'object') {
-      /* Legacy object format: {access: true/false, admin: true/false} */
-      if (rawEntry.admin)  level = 'admin';
-      else if (rawEntry.access) level = 'access';
-      else level = 'off';
-    } else if (rawEntry === true) {
-      level = 'access';
-    } else {
-      level = 'off';
-    }
+    /* Resolve the level: per-user entry (canonical string, legacy
+       {access,admin} object, or a bare true), else the registry default for
+       this role, else 'off'. The rules live in NL.resolveToolLevel — canon,
+       so the portal and every tool answer this question the same way, and
+       tested in tests/access-model.test.mjs. The retired 'hidden' value and
+       anything unrecognised read as 'off' (v6.1: one no-access state, always
+       a silent redirect).
+       nl-utils loads before this file in every head, so NL is present; the
+       inline fallback covers a head that has drifted rather than trusting it,
+       because failing open here would grant access. */
+    var rawEntry = session.tools ? session.tools[NL_TOOL_KEY] : undefined;
+    var level = (window.NL && NL.resolveToolLevel)
+      ? NL.resolveToolLevel(rawEntry, toolData, session.role)
+      : 'off';
 
-    /* Fallback to tool defaults if no explicit entry.
-       v5.0: prefer bare role key (`staff`, `admin`, `superadmin`, `club`)
-       to match the canonical tool-registry shape and the portal's v5.81
-       admin-UI lookup. Compound key (`nl-${role}`) accepted as fallback
-       for any older registry entries that haven't migrated. */
-    if (!session.tools || !session.tools.hasOwnProperty(NL_TOOL_KEY)) {
-      if (toolData && toolData.defaults) {
-        /* Bare role key IS the defaults key, uniformly for every role
-           (superadmin/admin/staff/club-admin/club-staff). Normalise first so a
-           legacy key resolves against the canon defaults key: 'club' →
-           club-admin, 'club-viewer' → club-staff (NL.roles.norm). Raw role is
-           kept as a fallback. A role with no defaults entry resolves to 'off',
-           the intended zero-access default. The legacy compound `<org>-<role>`
-           lookup is gone with the deprecated orgKey (all staff equal). */
-        var roleKey = (window.NL && NL.roles && NL.roles.norm)
-          ? NL.roles.norm(session.role) : session.role;
-        level = toolData.defaults[roleKey] || toolData.defaults[session.role] || 'off';
-      }
-    }
+    /* Hand the resolved level to the page (v6.5). This is the ONLY value a
+       tool should read to decide what the user may do: it already accounts
+       for the per-user entry, both legacy entry shapes, and the registry
+       default for the role. Reading session.tools[key] directly misses the
+       default and is how three tools disagreed with their own registry. */
+    session.toolLevel = level;
 
     if (level === 'access' || level === 'admin') {
       grantAccess(session);
