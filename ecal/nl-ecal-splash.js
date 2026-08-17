@@ -1,7 +1,7 @@
 /* ============================================================================
    NL ECAL Club-Aware Splash / Interstitial — external script (GTM-safe)
-   Version: v8.7
-   Date: 16/08/2026
+   Version: v8.8
+   Date: 17/08/2026
    Commit this to the repo as:  ecal/nl-ecal-splash.js
    Deploy via GTM Custom HTML tag (All Pages) with ONE line:
      <script src="https://nl.tools/ecal/nl-ecal-splash.js"></script>
@@ -28,6 +28,18 @@
    during testing) so the new version is served.
 
    CHANGELOG
+   v8.8 — CRITICAL FIX: the ad now opens ECAL on pages that carry the banner.
+          ECAL binds .ecal-sync-widget-button elements when its script scans the
+          DOM and never re-scans. Our button is injected late (DOMContentLoaded
+          + 650ms + up to 2.5s of JWT wait), so on any page where ECAL was
+          ALREADY loaded — every page with the banner advert, where bootEcal
+          returns early by design — the scan had long finished and our button
+          was never bound. Clicking it hit only our close handler: the splash
+          closed, no modal. That is the "it just closes" report, and it was
+          never a click-timing problem (v8.6/v8.7 chased that).
+          New bindEcalButton() calls EcalWidget.initButtons() after the button
+          is complete, polling ~6s because ECAL may still be loading. Verified
+          live: initButtons() by hand then clicking the ad opens the modal.
    v8.7 — CRITICAL FIX: the ad click opens ECAL again. v8.6 yielded on pointerdown
           (capture) — it set the overlay pointer-events:none BEFORE the click's
           hit-test, so the click never landed on the button and ECAL's own click
@@ -171,6 +183,35 @@
   function bootEcal(){ if(booted) return; booted=true;
     if(document.querySelector('script[src*="ecal.widget.js"]')) return;
     var s=document.createElement("script"); s.src=CONFIG.ECAL_SCRIPT; s.setAttribute("data-ecal-apikey",CONFIG.ECAL_APIKEY); document.body.appendChild(s); }
+
+  /* ECAL binds .ecal-sync-widget-button elements when its script scans the DOM,
+     and it does not watch for new ones. Our button is injected late — after
+     DOMContentLoaded, a 650ms delay and up to 2.5s of JWT wait — so on any page
+     that ALREADY has ECAL loaded (every page carrying the banner advert, where
+     bootEcal returns early by design) the scan happened long before our button
+     existed. It was therefore never bound: clicking it hit only our own close
+     handler, so the splash just closed and no calendar modal ever opened.
+
+     EcalWidget.initButtons() re-scans and picks it up. Confirmed live: running
+     it by hand and then clicking the ad opens the modal.
+
+     Polled because ECAL may still be loading when we show — on a page without
+     the banner we have only just appended the script ourselves. Give up quietly
+     after ~6s rather than spin. */
+  function bindEcalButton(){
+    var tries = 0;
+    (function attempt(){
+      var E = window.EcalWidget;
+      if (E && typeof E.initButtons === "function") {
+        try { E.initButtons(); if(DEBUG) console.log("[NL ECAL Splash] initButtons() — button bound"); }
+        catch(e){ if(DEBUG) console.warn("[NL ECAL Splash] initButtons() threw", e); }
+        return;
+      }
+      if (++tries < 40) setTimeout(attempt, 150);
+      else if (DEBUG) console.warn("[NL ECAL Splash] EcalWidget never appeared — button unbound");
+    })();
+  }
+
   function fileFor(d){ return CONFIG.IMAGE_BASE + encodeURIComponent(d + CONFIG.IMAGE_SUFFIX); }
 
   /* ---- inject styles ---- */
@@ -266,7 +307,9 @@
   function decideAndShow(club, via, signedIn){
     curSignedIn = !!signedIn;
     if(DEBUG) debugDump(club, via);
-    applyClub(club); bootEcal(); open();
+    /* Order matters: applyClub sets the final widget id on the button, so the
+       button must be complete before ECAL is asked to bind it. */
+    applyClub(club); bootEcal(); open(); bindEcalButton();
   }
 
   function start(){
