@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.106 (17/08/2026)
+  Version: v5.107 (17/08/2026)
   Date: 09/04/2026
   File: /portal/index.html
 
@@ -28,6 +28,26 @@
     well (no admin gating anywhere in it, superadmin-only by defaults).
     Thirteen of seventeen tools are now Off / Use; only Judgements, Vacancies and
     Website Archive still offer Manage.
+
+  v5.107 (17/08/2026) — The access editor leads with the role and shows only
+    the exceptions. It used to lay out all sixteen tools as editable controls
+    for every user, every time — so for a typical account all sixteen restated
+    the role, and the one row that genuinely deviated looked exactly like the
+    fifteen that did not. An exception is only visible if the rule is not
+    drawn beside it sixteen times. For club accounts it was worse: club access
+    follows the role with no per-tool exceptions, so every control was inert.
+    Now: one sentence naming what the role grants, then the deviating tools
+    under a red accent (labelled Exception on a league account, Stranded on a
+    club one — there it is leftover data to clear), then the rest folded into
+    a canon .disclosure that opens with edit mode.
+    The records did not change: saveAccess() has always written overrides
+    only, nulling any level equal to the role default. This brings the panel
+    into line with what it was already storing. Row markup is untouched, so
+    enterEditMode / saveAccess / cancelAccess find their rows as before.
+    Deleted buildSetAllSlider() and setAllInDept(): bulk-setting exceptions is
+    an anti-feature once role is the toolset, and that control shipped as two
+    duplicated DOM nodes (navy desktop copy, red mobile copy, swapped by media
+    query) styled with ~40 rgba() overlays the brand does not use.
 
   v5.106 (17/08/2026) — Access controls line up, and a dead rule stops drawing.
     Every .acc-slider is now one fixed width (--acc-slider-w, declared once on
@@ -1528,6 +1548,37 @@
    shared and this block rendered nothing... except the ::after, which had no
    counterpart to lose to and went on drawing a stray 1px rule across the navy
    bar. A dead rule with one live side effect is worse than either. */
+
+/* -- Access: role first, exceptions second ------------------------------- */
+/* The role decides the toolset, so the panel leads with the role and shows
+   only what departs from it. See buildAccordionItem. */
+
+.uacc-summary {
+  padding: 12px 14px 10px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.uacc-ex-head {
+  padding: 4px 14px 6px;
+  font-size: 9px;
+  font-weight: 800;
+  font-variation-settings: 'wght' 800;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--primary);
+}
+
+/* Exceptions carry a left accent so they read as departures from the rule,
+   not as more of the same list. */
+.uacc-dept-wrap--ex {
+  border-left: 3px solid var(--primary);
+  background: var(--primary-50);
+}
+
+.uacc-all { margin: 6px 14px 4px; }
+.uacc-all .uacc-dept-wrap { margin-top: 4px; }
+.uacc-all .uacc-tool-row { padding-left: 0; padding-right: 0; }
 
 .uacc-tool-row {
   display: flex;
@@ -4575,54 +4626,52 @@ function buildAccordionItem(uid, u, depts, deptMap) {
   var body = document.createElement('div');
   body.className = 'uacc-body';
 
-  /* Tool toggles grouped by dept */
+  /* Access is decided by ROLE (settled 17/08/2026 — see
+     system/roles-and-access-plan.md). So this shows the role's grant as one
+     sentence, then the EXCEPTIONS: tools where this account's stored entry
+     disagrees with what its role gives it. Everything else sits behind a
+     disclosure.
+
+     The old build laid out all sixteen tools as editable controls for every
+     user, every time. For a typical account all sixteen simply restated the
+     role, so the one row that genuinely deviated looked exactly like the
+     fifteen that did not — an exception is only visible if the rule is not
+     drawn beside it sixteen times. For a club account it was worse: club
+     access follows the role with no per-tool exceptions, so every one of
+     those controls was inert.
+
+     The data model already worked this way — saveAccess() has always written
+     overrides only, nulling any level equal to the role default. This brings
+     the panel into line with the records it writes.
+
+     Rows keep the .uacc-tool-row / .acc-slider markup exactly as before and
+     all still live inside `body`, so enterEditMode / saveAccess / cancelAccess
+     go on finding them with the same selectors — this changes where a row is
+     shown, not what it is. */
+
+  var roleNow      = normRole(u.role || 'staff');
+  var exceptions   = [];   /* rows whose stored entry differs from the role */
+  var conforming   = [];   /* rows that just restate the role */
+
   depts.forEach(function(dept) {
     var deptTools = deptMap[dept];
     if (!deptTools || !deptTools.length) return;
 
-    /* Staff dept always shown but locked to hidden for club-role users */
+    /* League-audience tools are structurally closed to club roles. */
     var staffLocked = dept === 'staff' && u.role !== 'superadmin' &&
                       isRestrictedRole(u.role);
 
-    /* deptWrap MUST be declared before buildSetAllSlider so the closure captures it */
-    var deptWrap = document.createElement('div');
-    deptWrap.className = 'uacc-dept-wrap';
-    deptWrap.dataset.dept = dept;
-
-    /* Navy header bar -- label + set-all inline (desktop) */
-    var deptHeader = document.createElement('div');
-    deptHeader.className = 'uacc-dept-header';
-    var deptLabel = document.createElement('div');
-    deptLabel.className = 'uacc-dept-label';
-    deptLabel.textContent = getDeptLabel(dept);
-    deptHeader.appendChild(deptLabel);
-
-    /* Red band -- mobile fallback only */
-    var deptBand = document.createElement('div');
-    deptBand.className = 'uacc-dept-band';
-    deptBand.dataset.dept = dept;
-
-    if (!isSuperUser) {
-      /* Add set-all to header (shown desktop) and band (shown mobile) */
-      deptHeader.appendChild(buildSetAllSlider(uid, u, dept, deptMap, deptWrap));
-      deptBand.appendChild(buildSetAllSlider(uid, u, dept, deptMap, deptWrap));
-    }
-
-    body.appendChild(deptHeader);
-    body.appendChild(deptBand);
-    body.appendChild(deptWrap);
-
     deptTools.forEach(function(t) {
-      var currentLevel  = getAccessLevel(uid, t._key);
-      var defaultLevel  = getDefaultLevel(t._key, u);
-      /* isSuperUser declared at item level above */
-      var isClubLocked  = isRestrictedRole(u.role); /* restricted roles can't have admin */
+      var currentLevel = getAccessLevel(uid, t._key);
+      var defaultLevel = getDefaultLevel(t._key, u);
+      var isClubLocked = isRestrictedRole(u.role); /* club roles can never Manage */
 
       /* If a restricted user is somehow set to admin, cap display at access */
       if (isClubLocked && currentLevel === 'admin') currentLevel = 'access';
 
       var row = document.createElement('div');
       row.className = 'uacc-tool-row';
+      row.dataset.dept = dept;
 
       var toolName = document.createElement('div');
       toolName.className = 'uacc-tool-name';
@@ -4632,42 +4681,85 @@ function buildAccordionItem(uid, u, depts, deptMap) {
       toolName.appendChild(iconSpan);
       toolName.appendChild(document.createTextNode(t.label || t._key));
 
-      /* For staff tools on non-NL users: force hidden and lock all options */
       var effectiveLevel = staffLocked ? 'off' : currentLevel;
-      /* All sliders start locked -- unlocked via Edit access button */
-      /* locked=false: edit-mode visual lock is handled by acc-slider--locked CSS
-         class on the wrapper, NOT by the locked param. The locked param is only
-         for permanent structural locks (superadmin, staff tools for non-nl).
-         staffLocked tools already have effectiveLevel='hidden' and isSuperUser
-         prevents interaction anyway. clubLocked pads admin stop for club users. */
-      /* Club access follows the ROLE — settled 17/08/2026, see
-         system/roles-and-access-plan.md. Club rows are read-only: a club person
-         gets exactly what Club Admin or Club Staff grants, with no per-tool
-         exceptions, because an override is a fact about access that lives in one
-         record and silently contradicts the role. It is also what keeps club
-         self-service explainable to 72 clubs. */
+
+      /* permanentLock = structurally off-limits, not merely "not editing":
+         a superadmin's own row, a league tool on a club account, or any club
+         row (club access follows the role, with no per-tool exceptions —
+         an override is a fact about access living in one record and silently
+         contradicting the role, and one sentence is what makes club
+         self-service explainable to 72 clubs). */
       var permanentLock = isSuperUser || staffLocked || isClubLocked;
-      var sliderEl = buildAccSlider(uid, t._key, effectiveLevel, defaultLevel, permanentLock, isClubLocked, dept, body);
-      /* Apply visual edit-mode lock via CSS class (not the locked param) */
+      var sliderEl = buildAccSlider(uid, t._key, effectiveLevel, defaultLevel,
+                                    permanentLock, isClubLocked, dept, body);
       if (!permanentLock) sliderEl.classList.add('acc-slider--locked');
 
       row.appendChild(toolName);
-      /* Surface a legacy override rather than hiding it. Club rows are no longer
-         editable, so an entry that differs from the role default is stranded
-         data — flag it so it can be cleared, instead of quietly disagreeing
-         with what the role says. */
-      if (isClubLocked && !staffLocked && effectiveLevel !== defaultLevel) {
-        var ovr = document.createElement('span');
-        ovr.className = 'uacc-override';
-        ovr.textContent = 'Override';
-        ovr.title = 'This account has a per-tool entry that differs from what its role grants ('
-                  + (ACC_LABELS[defaultLevel] || defaultLevel) + '). Club access now follows the role.';
-        toolName.appendChild(ovr);
+
+      /* Deviates from what the role grants. On a league account that is a
+         deliberate exception; on a club account it is stranded data from
+         before club rows became read-only, and wants clearing. */
+      var deviates = !staffLocked && effectiveLevel !== defaultLevel;
+      if (deviates) {
+        var note = document.createElement('span');
+        note.className = 'uacc-override';
+        note.textContent = isClubLocked ? 'Stranded' : 'Exception';
+        note.title = (isClubLocked
+          ? 'A per-tool entry left over from before club access followed the role. '
+          : 'A deliberate per-tool entry for this person. ')
+          + 'Their role grants ' + (ACC_LABELS[defaultLevel] || defaultLevel) + '.';
+        toolName.appendChild(note);
       }
+
       row.appendChild(sliderEl);
-      deptWrap.appendChild(row);
+      (deviates ? exceptions : conforming).push(row);
     });
   });
+
+  /* One sentence: what the role gives them. */
+  var summary = document.createElement('div');
+  summary.className = 'uacc-summary';
+  var summaryText = document.createElement('span');
+  if (isSuperUser) {
+    summaryText.textContent = 'Superadmin — every tool, always. Nothing here to set.';
+  } else {
+    summaryText.textContent = 'Access follows their role: ' + roleLabel(roleNow) + '.';
+  }
+  summary.appendChild(summaryText);
+  body.appendChild(summary);
+
+  /* The exceptions. Visible because they are rare. */
+  if (exceptions.length) {
+    var exHead = document.createElement('div');
+    exHead.className = 'uacc-ex-head';
+    exHead.textContent = exceptions.length === 1
+      ? '1 tool set apart from their role'
+      : exceptions.length + ' tools set apart from their role';
+    body.appendChild(exHead);
+
+    var exWrap = document.createElement('div');
+    exWrap.className = 'uacc-dept-wrap uacc-dept-wrap--ex';
+    exceptions.forEach(function(r) { exWrap.appendChild(r); });
+    body.appendChild(exWrap);
+  }
+
+  /* Everything else, folded away. Canon .disclosure (nl-brand v2.41) rather
+     than a hand-rolled toggle. */
+  if (conforming.length) {
+    var all = document.createElement('details');
+    all.className = 'disclosure uacc-all';
+    var allSummary = document.createElement('summary');
+    allSummary.textContent = exceptions.length
+      ? 'The other ' + conforming.length + ' tools'
+      : 'All ' + conforming.length + ' tools';
+    all.appendChild(allSummary);
+
+    var allWrap = document.createElement('div');
+    allWrap.className = 'uacc-dept-wrap';
+    conforming.forEach(function(r) { allWrap.appendChild(r); });
+    all.appendChild(allWrap);
+    body.appendChild(all);
+  }
 
   /* Edit access bar -- shown when in edit mode */
   var editBar = document.createElement('div');
@@ -4707,6 +4799,12 @@ function buildAccordionItem(uid, u, depts, deptMap) {
     /* Open role picker as part of edit mode */
     var picker = body.querySelector('.inline-role-picker');
     if (picker) picker.classList.add('open');
+    /* Adding an exception means reaching a tool that conforms today, so the
+       folded list opens with edit mode. It stays open until the item is
+       re-rendered — closing it under someone mid-edit would hide a control
+       they had just changed. */
+    var allFold = body.querySelector('.uacc-all');
+    if (allFold) allFold.open = true;
     editBar.classList.add('active');
     editAccessBtn.style.display = 'none';
     saveAccessBtn.style.display = '';
@@ -5463,129 +5561,14 @@ function resetSetAllSlider(bodyEl, dept) {
   }
 }
 
-function buildSetAllSlider(uid, u, dept, deptMap, deptWrap) {
-  var wrap = document.createElement('div');
-  wrap.className = 'uacc-set-all-slider';
-
-  var track = document.createElement('div');
-  track.className = 'uacc-set-all-slider__track';
-  var fill = document.createElement('div');
-  fill.className = 'uacc-set-all-slider__fill';
-  track.appendChild(fill);
-  wrap.appendChild(track);
-
-  function updateFill(idx) {
-    /* fill removed */ void idx <= 0 ? '0%' : (idx / (ACC_LEVELS.length - 1) * 100) + '%';
-  }
-
-  var isClubUser  = isRestrictedRole(u.role);
-  /* Restricted (club) roles lock staff tools and the admin stop */
-  var isStaffLocked = dept === 'staff' && isClubUser;
-
-  ACC_LEVELS.forEach(function(level, idx) {
-    var isPadlocked  = isStaffLocked || (isClubUser && level === 'admin');
-
-    var stop = document.createElement('div');
-    stop.className = 'uacc-set-all-slider__stop';
-
-    var node = document.createElement('div');
-    node.className = 'uacc-set-all-slider__node';
-    if (isPadlocked) {
-      node.textContent = '\uD83D\uDD12';
-      node.style.cssText = 'font-size:7px;display:flex;align-items:center;justify-content:center;border-color:rgba(255,255,255,0.2);';
-    }
-
-    var label = document.createElement('div');
-    label.className = 'uacc-set-all-slider__label';
-    label.textContent = ACC_LABELS[level];
-    if (isPadlocked) label.classList.add('uacc-set-all-slider__label--locked');
-
-    stop.appendChild(node);
-    stop.appendChild(label);
-
-    if (!isPadlocked) {
-      stop.addEventListener('click', function(e) {
-        e.stopPropagation();
-        /* Update mini slider UI */
-        wrap.querySelectorAll('.uacc-set-all-slider__stop').forEach(function(s, si) {
-          s.classList.remove('uacc-set-all-slider__stop--active', 'uacc-set-all-slider__stop--filled');
-          if (si === idx) s.classList.add('uacc-set-all-slider__stop--active');
-        });
-        updateFill(idx);
-        /* Apply to all tools in dept */
-        setAllInDept(uid, u, deptMap[dept], level, deptWrap, getDeptLabel(dept));
-      });
-    }
-    wrap.appendChild(stop);
-  });
-
-  /* Initialise set-all to reflect current dept state:
-     all tools same level → show that level; mixed → neutral */
-  var deptToolsList = deptMap[dept] || [];
-  var initialIdx = 0;
-  if (deptToolsList.length > 0 && !isStaffLocked) {
-    var currentLevels = deptToolsList.map(function(t) { return getAccessLevel(uid, t._key); });
-    var allSame = currentLevels.every(function(l) { return l === currentLevels[0]; });
-    if (allSame) {
-      var matchIdx = ACC_LEVELS.indexOf(currentLevels[0]);
-      if (matchIdx >= 0) {
-        initialIdx = matchIdx;
-        wrap.querySelectorAll('.uacc-set-all-slider__stop').forEach(function(s, si) {
-          if (si === initialIdx) s.classList.add('uacc-set-all-slider__stop--active');
-        });
-      }
-    }
-    /* Mixed state: no dot shown — user must pick explicitly */
-  }
-  updateFill(initialIdx);
-  /* Set-all starts locked -- unlocked when user enters edit mode */
-  wrap.style.pointerEvents = 'none';
-  wrap.style.opacity = '0.4';
-  return wrap;
-}
-
-function setAllInDept(uid, u, deptTools, level, bodyEl, deptLabel) {
-  if (!deptTools || !deptTools.length) return;
-  var updates = {};
-  var isClubUser = isRestrictedRole(u.role);
-  /* Staff-audience tools locked for restricted (club) roles */
-  var isStaffDept = deptTools[0] && toolAudience(deptTools[0]) === 'staff';
-  if (isStaffDept && isClubUser) {
-    showToast('Staff tools are locked for this user', 'error');
-    return;
-  }
-
-  /* Club users cannot be set to admin */
-  var safeLevel = (isClubUser && level === 'admin') ? 'access' : level;
-  deptTools.forEach(function(t) {
-    /* Never write staff tools for restricted users even if called directly */
-    if (toolAudience(t) === 'staff' && isClubUser) return;
-    /* Overrides-only: clear the entry when it matches the role default */
-    var def = roleDefaultLevel(t._key, u.role);
-    updates['users/' + uid + '/tools/' + t._key] = (safeLevel === def) ? null : safeLevel;
-  });
-  if (!Object.keys(updates).length) return; /* nothing to write */
-  /* Use safeLevel for DOM update too */
-  level = safeLevel;
-  var idx = ACC_LEVELS.indexOf(level);
-  var rows = bodyEl.querySelectorAll('.uacc-tool-row');
-  rows.forEach(function(row) {
-    var slider = row.querySelector('.acc-slider');
-    if (!slider) return;
-    slider.querySelectorAll('.acc-slider__stop').forEach(function(s, si) {
-      s.classList.remove('acc-slider__stop--active', 'acc-slider__stop--filled');
-      if (si < idx)  s.classList.add('acc-slider__stop--filled');
-      if (si === idx) s.classList.add('acc-slider__stop--active');
-    });
-    syncAccAria(slider);
-  });
-  var targetUser = STATE.allUsers[uid] || {};
-  writeAuditFor(uid, targetUser.name || '', targetUser.email || '',
-    'access_changed', 'Set all in ' + (deptLabel || '') + ' to ' + level);
-  db.ref().update(updates)
-    .then(function() { showToast('All set to ' + level, 'success'); })
-    .catch(function() { showToast('Failed to update', 'error'); });
-}
+/* buildSetAllSlider() and setAllInDept() lived here until v5.107.
+   A 'set every tool in this section to X' control only makes sense while the
+   panel treats per-tool levels as the thing you administer. Role is the
+   toolset, and per-tool entries are exceptions — bulk-setting exceptions is
+   an anti-feature, and this one shipped as two duplicated DOM nodes (a navy
+   desktop copy and a red mobile copy, swapped by media query) styled with
+   about forty rgba() overlays the brand does not use. Deleted with the grid
+   it belonged to. */
 
 /* ---- Invite club picker -------------------------------------------------- */
 var invClubPicker = null; /* NL.clubPicker controller (created in initInviteForm) */
