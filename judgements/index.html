@@ -3,17 +3,24 @@
 <head>
 <!--
   NL Tools — Judgements & Decisions
-  Version: 2.8
+  Version: 2.9
   Date: 17/08/2026
 
   CHANGELOG
+  v2.9 (17/08/2026)
+    - Manage rights read session.toolLevel (auth-guard v6.5) instead of
+      session.tools[key]. v2.8's claim that "the registry defaults give the
+      admin role 'admin' here, so League Admins keep manage by default" was
+      wrong: the per-user entry was the only thing this file looked at, so
+      the default never applied and a League Admin without an explicit entry
+      got in and then found the tool read-only. auth-guard resolves entry,
+      legacy shapes, default and superadmin in one place; this reads the
+      answer.
   v2.8 (17/08/2026)
     - The per-tool level now decides who can manage. Removed the
       `role === 'admin'` shortcut, which made the level unenforceable: a League
       Admin explicitly set to Use on this tool still got full admin rights.
-      Costs nobody access — the registry defaults give the admin role 'admin'
-      here, so League Admins keep manage by default; only a deliberate
-      demotion now actually bites. Superadmin remains always-granted.
+      Superadmin remains always-granted.
   v2.7 (16/08/2026)
     - "All records" header converted to the canon .section-head. The local
       .page-header rules were a drifted private copy shadowing the canon
@@ -110,6 +117,13 @@
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
     {
+      date: '17 August 2026',
+      version: 'v2.9',
+      items: [
+        'League Admins can add, amend and remove records without needing a per-tool grant, as the registry always intended.'
+      ]
+    },
+    {
       date: '12 July 2026',
       version: 'v2.5',
       items: [
@@ -135,9 +149,9 @@
   ];
 </script>
 
-<script src="/system/nl-utils.js?v=40"></script>
+<script src="/system/nl-utils.js?v=41"></script>
 <script src="/system/nl-topbar.js?v=9"></script>
-<script src="/system/auth-guard.js?v=13"></script>
+<script src="/system/auth-guard.js?v=14"></script>
 
 <style>
 /* ────────────────────────────────────────────────────────────────
@@ -322,22 +336,16 @@ var clubPicker = null;   /* NL.clubPicker controller (created in nlAuthReady) */
 window.nlAuthReady = function(session) {
   STATE.uid = session.uid;
 
-  // Determine admin status from session (already loaded by auth guard)
-  var role = session.role || '';
-  var toolEntry = session.tools && session.tools[NL_TOOL_KEY];
-  var toolAdmin = false;
-  if (toolEntry && typeof toolEntry === 'object') {
-    toolAdmin = !!toolEntry.admin;
-  } else if (typeof toolEntry === 'string') {
-    toolAdmin = (toolEntry === 'admin');
-  }
-  /* The per-tool level decides; superadmin is always granted, as everywhere.
-     There used to be a `role === 'admin'` shortcut here too, which made the
-     level unenforceable: a League Admin deliberately set to Use on this tool
-     still got full admin. It also cost nothing to remove — the registry gives
-     the admin role a default of 'admin' on this tool, so League Admins keep
-     manage rights by default and only an explicit demotion now bites. */
-  STATE.isAdmin = (role === 'superadmin' || toolAdmin);
+  /* The per-tool level decides. session.toolLevel is auth-guard's resolved
+     answer (auth-guard v6.5) — per-user entry if there is one, else the
+     registry default for this role, with both legacy entry shapes already
+     normalised, and 'admin' for superadmin.
+     Two bugs died here. A `role === 'admin'` shortcut used to make the level
+     unenforceable: a League Admin deliberately set to Use still got manage.
+     Removing it exposed the second — this block read session.tools[key] and
+     nothing else, so the registry default never applied and the comment left
+     behind claimed the opposite of what the code did. */
+  STATE.isAdmin = (session.toolLevel === 'admin');
 
   if (STATE.isAdmin) {
     document.getElementById('btnAdd').style.display = '';

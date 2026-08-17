@@ -1,9 +1,25 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.37 (16/08/2026)
+   Version: v1.38 (17/08/2026)
 
    Changelog
+   v1.38 (17/08/2026)
+     - NL.resolveToolLevel(entry, toolData, role) — the one answer to "what
+       may this person do on this tool", from the per-user entry if there is
+       one and the registry default for the role if there is not. auth-guard
+       had the only correct implementation and did not share it, so the three
+       tools that read the level hand-rolled their own and all three were
+       wrong: Website Archive read the legacy object shape only, Judgements
+       read both shapes but never the default, Vacancies fell back to
+       'access'. Each therefore disagreed with the registry record that had
+       just let the user in — a League Admin with no explicit grant landed
+       read-only on tools the registry gives them Manage on.
+       Fails closed: an unrecognised value, the retired 'hidden', a stored
+       false or 0 all read 'off', and only undefined/null counts as "no
+       entry" and falls through to the default. Cache-bust ?v=40 -> ?v=41 in
+       lockstep with auth-guard ?v=13 -> ?v=14.
+
    v1.37 (16/08/2026)
      - NL.roles reconciled to the agreed two-realm model. Retired the
        external realm and its 'third-party' role (zero access on every
@@ -1793,6 +1809,55 @@
      not here. */
   window.NL.canClubEdit = function(role) {
     return role === 'club' || role === 'club-admin';
+  };
+
+  /* NL.resolveToolLevel(entry, toolData, role) -> 'off' | 'access' | 'admin'
+     (v1.38)
+
+     The single answer to "what may this person do on this tool", from the two
+     places the answer can come from:
+
+       entry     users/<uid>/tools/<toolKey>  — the per-user grant, if any
+       toolData  tools/<toolKey>              — the registry record, for its
+                                                per-role `defaults`
+
+     A per-user entry always wins, including an explicit 'off'. With NO entry
+     at all the registry default for the role applies, and a role with no
+     default resolves to 'off' — zero access is the intended fallback.
+
+     Entry shapes accepted: the canonical string, the legacy
+     {access:bool, admin:bool} object, and a bare `true` from the oldest
+     records. The retired 'hidden' value reads as 'off' (auth-guard v6.1).
+     Superadmin is not special-cased here — auth-guard grants it before
+     asking, and a caller wanting the same must say so.
+
+     This exists because three tools each hand-rolled it and each got it
+     wrong differently: Website Archive read the object shape only, so a
+     string entry of "admin" evaluated undefined; Judgements read both shapes
+     but never the default; Vacancies fell back to 'access'. All three
+     therefore disagreed with the registry that granted the user entry in the
+     first place. One implementation, one test, no drift. */
+  window.NL.resolveToolLevel = function(entry, toolData, role) {
+    var level;
+
+    /* Absent means absent — undefined or null, nothing else. A stored `false`
+       or 0 is a RECORD, not a gap, and reads as 'off': falling through to the
+       default there would silently re-grant someone who had been denied. */
+    if (entry === undefined || entry === null) {
+      if (toolData && toolData.defaults) {
+        var key = window.NL.roles.norm(role);
+        level = toolData.defaults[key] || toolData.defaults[role] || 'off';
+      } else level = 'off';
+    }
+    else if (typeof entry === 'string') level = entry;
+    else if (entry === true)            level = 'access';
+    else if (typeof entry === 'object')
+      level = entry.admin ? 'admin' : (entry.access ? 'access' : 'off');
+    else level = 'off';
+
+    /* Anything unrecognised — the retired 'hidden', a typo, a number — is
+       no access. Fail closed. */
+    return (level === 'access' || level === 'admin') ? level : 'off';
   };
 
   /* ===================================================================

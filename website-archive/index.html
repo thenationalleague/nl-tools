@@ -3,16 +3,23 @@
 <head>
 <!--
   NL Tools — Website Archive
-  Version: 2.7
+  Version: 2.8
   Date: 17/08/2026
 
   CHANGELOG
+  v2.8 (17/08/2026)
+    - Manage rights read session.toolLevel (auth-guard v6.5) instead of
+      deriving them here. v2.7 fixed the entry SHAPE but kept the same blind
+      spot: only the per-user entry was consulted, so the registry default
+      never applied and a League Admin without an explicit entry landed
+      read-only on a tool the registry gives them Manage on. auth-guard
+      resolves entry, legacy shapes, default and superadmin once.
   v2.7 (17/08/2026)
     - FIX: granting "Manage" (level admin) on this tool did nothing. The admin
       read handled only the legacy {admin:true} object shape, but per-user tool
       entries are strings ("off"|"access"|"admin"), so it evaluated
       "admin".admin === undefined and only a superadmin ever got admin. Reads
-      both shapes now, matching how Judgements does it.
+      both shapes now.
   v2.6 (16/08/2026)
     - Local formatDuration() now delegates to NL.formatDuration(secs,
       {seconds:true}) (nl-utils v1.34) — the seconds-granularity convention
@@ -243,6 +250,13 @@
 
   window.NL_CHANGELOG = [
     {
+      date: '17 August 2026',
+      version: 'v2.8',
+      items: [
+        'League Admins get the admin controls without needing a per-tool grant, as the registry always intended.'
+      ]
+    },
+    {
       date: '16 August 2026',
       version: 'v2.6',
       items: [
@@ -335,9 +349,9 @@
     }
   ];
 </script>
-<script src="/system/nl-utils.js?v=40"></script>
+<script src="/system/nl-utils.js?v=41"></script>
 <script src="/system/nl-topbar.js?v=9"></script>
-<script src="/system/auth-guard.js?v=13"></script>
+<script src="/system/auth-guard.js?v=14"></script>
 
 <style>
 /* Tool-specific styles only — base reset, fonts, tokens, topbar, buttons
@@ -1545,15 +1559,13 @@ function readingTimeMins(article) {
 window.nlAuthReady = function(session) {
   // Topbar rendered automatically by nl-topbar.js from window.NL_TOOL
   // Determine admin status for export button visibility.
-  // The per-user entry is a STRING ("off" | "access" | "admin"); only very old
-  // records are the legacy {access:true, admin:true} object. This read handled
-  // the object only, so on a string entry it evaluated "admin".admin ===
-  // undefined and nobody but a superadmin ever got admin here. Both shapes now.
-  var toolEntry = (session && session.tools && session.tools[NL_TOOL_KEY]);
-  var toolAdmin = (typeof toolEntry === 'string')
-    ? (toolEntry === 'admin')
-    : !!(toolEntry && toolEntry.admin);
-  STATE.isAdmin = !!(toolAdmin || (session && session.role === 'superadmin'));
+  // session.toolLevel is auth-guard's resolved answer (auth-guard v6.5): the
+  // per-user entry if there is one, else the registry default for this role,
+  // both legacy entry shapes normalised, 'admin' for superadmin. Deriving it
+  // here was wrong twice — the object-only read of v2.6, then the missing
+  // default fallback that left a League Admin without an explicit entry
+  // read-only on a tool the registry gives them Manage on.
+  STATE.isAdmin = (session && session.toolLevel === 'admin');
   init();
 };
 
