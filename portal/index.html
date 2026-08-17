@@ -1,11 +1,24 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.104 (17/08/2026)
+  Version: v5.105 (17/08/2026)
   Date: 09/04/2026
   File: /portal/index.html
 
   Changelog:
+  v5.105 (17/08/2026) — Club access follows the ROLE; club rows are read-only.
+    Settled 17/08/2026 (see system/roles-and-access-plan.md): a club person gets
+    exactly what Club Admin or Club Staff grants, with no per-tool exceptions.
+    Club roles were already capped below admin in the builder, the preview and
+    the save path — this makes the whole row non-interactive rather than leaving
+    Off/Use editable. An override is a fact about access living in one record
+    that silently contradicts the role, and it is what would make club
+    self-service unexplainable to 72 clubs. Any legacy per-tool entry that
+    disagrees with the role default is now FLAGGED ("Override" chip, 6.07:1)
+    rather than hidden, so stranded data is visible by exception and can be
+    cleared. League side is unchanged and keeps the per-tool level on the three
+    tools that read it.
+
   v5.104 (17/08/2026) — The five role-driven tools declare two levels too
     (Attendance, Handbook, Commercial Benchmarking, Fixtures, Club Directory).
     They do have an admin tier, but their code decides it from the person's ROLE,
@@ -1525,6 +1538,23 @@
   font-variation-settings: 'wght' 600;
 }
 .uacc-tool-name__icon { margin-right: 6px; }
+/* Legacy per-tool entry on a club account that disagrees with its role. Club
+   access follows the role now, so this marks stranded data to be cleared —
+   visible by exception, which is the point. */
+.uacc-override {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--amber-deep);
+  background: var(--amber-light);
+  vertical-align: 1px;
+  cursor: help;
+}
 
 
 .uacc-toggle input:checked + .uacc-toggle__sw::after { left: 16px; }
@@ -4592,12 +4622,30 @@ function buildAccordionItem(uid, u, depts, deptMap) {
          for permanent structural locks (superadmin, staff tools for non-nl).
          staffLocked tools already have effectiveLevel='hidden' and isSuperUser
          prevents interaction anyway. clubLocked pads admin stop for club users. */
-      var permanentLock = isSuperUser || staffLocked;
+      /* Club access follows the ROLE — settled 17/08/2026, see
+         system/roles-and-access-plan.md. Club rows are read-only: a club person
+         gets exactly what Club Admin or Club Staff grants, with no per-tool
+         exceptions, because an override is a fact about access that lives in one
+         record and silently contradicts the role. It is also what keeps club
+         self-service explainable to 72 clubs. */
+      var permanentLock = isSuperUser || staffLocked || isClubLocked;
       var sliderEl = buildAccSlider(uid, t._key, effectiveLevel, defaultLevel, permanentLock, isClubLocked, dept, body);
       /* Apply visual edit-mode lock via CSS class (not the locked param) */
       if (!permanentLock) sliderEl.classList.add('acc-slider--locked');
 
       row.appendChild(toolName);
+      /* Surface a legacy override rather than hiding it. Club rows are no longer
+         editable, so an entry that differs from the role default is stranded
+         data — flag it so it can be cleared, instead of quietly disagreeing
+         with what the role says. */
+      if (isClubLocked && !staffLocked && effectiveLevel !== defaultLevel) {
+        var ovr = document.createElement('span');
+        ovr.className = 'uacc-override';
+        ovr.textContent = 'Override';
+        ovr.title = 'This account has a per-tool entry that differs from what its role grants ('
+                  + (ACC_LABELS[defaultLevel] || defaultLevel) + '). Club access now follows the role.';
+        toolName.appendChild(ovr);
+      }
       row.appendChild(sliderEl);
       deptWrap.appendChild(row);
     });

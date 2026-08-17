@@ -13,6 +13,61 @@
 > phased build — kept as the record of how we got here; the code (`NL.roles`,
 > `auth-guard`) and the 16/08 access-model artifact are the ground truth.
 
+## SETTLED — the launch model (17/08/2026)
+
+Decided with Richard after auditing what the per-tool level actually controls.
+**Simplify for launch; add complexity when real life justifies it.** Do not
+re-open these without a concrete case that the simple model failed.
+
+**1. Role is the toolset.** What a person can do is decided by their role.
+The five roles are the model — League (Superadmin / Admin / Staff) and Club
+(Club Admin / Club Staff). A club-side capability ladder is expressed by role:
+
+| Attendance, as an example | Role |
+|---|---|
+| see own club's detail | Club Staff |
+| + enter and submit own attendances | Club Admin |
+| see and interact with all clubs | League Staff |
+| + edit all data | League Admin |
+
+Four tiers, four roles. No per-tool level is involved, and none is needed.
+
+**2. The per-tool level says whether you get in, not what you can do.**
+`off` / `access` are load-bearing everywhere. `admin` is NOT: the audit found
+only **three of seventeen** tools read it — Vacancies, Judgements and Website
+Archive. Every other tool decides from role, or has nothing to administer.
+So tools declare their own ladder (`levels` in the registry) and the fourteen
+that have no admin tier no longer offer "Manage". Offering a control that sets
+a value nothing reads is worse than not offering it.
+
+**3. No per-user overrides on the club side. Two tiers, locked.**
+This was already true in code — club roles are capped below `admin` in the
+builder, the preview *and* the save path — and it stays true by decision.
+The rationale, in order of weight:
+
+- Club-side admin is one capability wearing different hats: *act for my club*.
+  A person trusted with the club's attendances is trusted with its directory
+  entry. The tool-by-tool exception is theoretical; the cost is concrete.
+- An override is invisible debt — a fact about access living in one person's
+  record and nowhere else, silently contradicting their role.
+- It re-creates the two-systems problem one level down: "what can they do?"
+  stops being "read their role" and becomes "read their role, then check
+  seventeen tools for exceptions."
+- **It is what makes club self-service possible.** Club Admins appointing
+  their own people only works if the model is one sentence. Add per-tool
+  exceptions and it becomes a support burden.
+
+If a club genuinely needs another person with admin powers, make them a
+Club Admin. There is no scarcity of seats.
+
+**4. The league side keeps the override, on the three tools that read it.**
+Not an inconsistency — the override survives only where it earns its place.
+"This staffer is the Vacancies approver but not a League Admin" is a real,
+named job. League roles are a handful of people managed directly; club roles
+are 72 clubs that cannot be.
+
+---
+
 Status: **Phase 1 in progress** (this PR). Phases 2–3 to follow.
 
 ## The model — 3 realms, 6 roles, 2 axes
