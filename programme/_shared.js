@@ -1,5 +1,8 @@
 /*
   Programme Packs — shared runtime for the library + admin console
+  Version: v1.4 (17/08/2026) — video and audio are kinds of their own
+           (🎬 / 🎵 tiles), so the library page can hand them to the
+           browser's native players instead of filing them under 📎.
   Version: v1.3 (17/08/2026) — PP.enterMaster: the library's third door. An
            NL admin arriving with ?master=1 gets the console's '*' session on
            the library page itself, so all 73 folders browse AND manage in
@@ -197,13 +200,15 @@
     var t = String(contentType || '').toLowerCase();
     var ext = String(name || '').toLowerCase().split('.').pop();
     if (t.indexOf('image/') === 0) return 'image';
+    if (t.indexOf('video/') === 0 || /^(mp4|mov|m4v|webm)$/.test(ext)) return 'video';
+    if (t.indexOf('audio/') === 0 || /^(mp3|wav|m4a|aac|ogg)$/.test(ext)) return 'audio';
     if (t === 'application/pdf' || ext === 'pdf') return 'pdf';
     if (t.indexOf('word') !== -1 || ext === 'doc' || ext === 'docx') return 'doc';
     if (t.indexOf('sheet') !== -1 || t.indexOf('excel') !== -1 || ext === 'xls' || ext === 'xlsx' || ext === 'csv') return 'sheet';
     return 'file';
   }
 
-  var KIND_ICON = { image: '🖼️', pdf: '📕', doc: '📄', sheet: '📊', file: '📎' };
+  var KIND_ICON = { image: '🖼️', video: '🎬', audio: '🎵', pdf: '📕', doc: '📄', sheet: '📊', file: '📎' };
 
   /* ── Previews — three sizes per image ─────────────────────────────────
      Same vocabulary as the canon crest tiers (NL.clubs.crestUrl):

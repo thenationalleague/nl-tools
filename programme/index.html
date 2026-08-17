@@ -3,6 +3,13 @@
 <head>
 <!--
   Programme Packs — club library (standalone, passcode; ?master=1 for admins)
+  Version: v1.19 (17/08/2026) — the eye reaches video, audio and Word.
+           Video/audio go to the browser's native players (streamed on play,
+           metadata only until then). Word documents render CLIENT-SIDE via
+           vendored docx-preview + JSZip (programme/_vendor/, lazy-loaded on
+           first use) — never an embedded Microsoft/Google viewer, which
+           would hand a club's file URL to a third party. .docx only; the
+           2003 binary .doc stays download-only.
   Version: v1.18 (17/08/2026) — the master door (?master=1, _shared.js v1.3):
            an NL admin gets the console's '*' session on this page, browsing
            and managing all 73 folders in one place — canWrite() and the
@@ -810,15 +817,49 @@
     wireClub(code, writable);
   }
 
-  /* What a browser can actually render on its own. Images and PDFs, and
-     nothing else — a .docx cannot be previewed without shipping the file to a
-     third-party viewer (Microsoft's or Google's), which would mean sending a
-     club's material to someone else to look at. Not worth it for a convenience;
-     those download instead. */
+  /* The eye reaches what can be shown without anyone else involved: images,
+     PDFs, video and audio are the browser's own abilities; Word is rendered
+     by vendored code below. Spreadsheets and the rest download instead. */
+  /* Word previews render CLIENT-SIDE (programme/_vendor/ — docx-preview +
+     its JSZip dependency), because the zero-effort routes are Microsoft's
+     and Google's embedded viewers, which work by handing the file's URL to a
+     third party to fetch — a club's material shipped to someone else for a
+     convenience. Rendering here, the bytes never leave Firebase. The two
+     scripts load lazily on the first Word preview, never on page load.
+     Only .docx: the 2003 binary .doc format needs Word itself. */
+  function isDocx(f) {
+    return String(f.contentType || '').toLowerCase() ===
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      /\.docx$/i.test(String(f.name || ''));
+  }
+
+  var docxVendor = null;
+  function loadDocxVendor() {
+    if (docxVendor) return docxVendor;
+    docxVendor = ['/programme/_vendor/jszip.min.js', '/programme/_vendor/docx-preview.min.js']
+      .reduce(function (chain, src) {
+        return chain.then(function () {
+          return new Promise(function (resolve, reject) {
+            var s = document.createElement('script');
+            s.src = src;
+            s.onload = resolve;
+            s.onerror = function () { reject(new Error('The document viewer did not load.')); };
+            document.head.appendChild(s);
+          });
+        });
+      }, Promise.resolve())
+      .catch(function (e) {
+        docxVendor = null;   // a network blip must not wedge every later preview
+        throw e;
+      });
+    return docxVendor;
+  }
+
   function canPreview(f) {
     var kind = PP.fileKind(f.contentType, f.name);
     if (!f.url) return false;
-    if (kind === 'pdf') return true;
+    if (kind === 'pdf' || kind === 'video' || kind === 'audio') return true;
+    if (kind === 'doc') return isDocx(f);
     /* An image needs a source the browser can actually show — a rendered
        medium, a renderable original, or a legacy record with no stored type
        (the old benefit of the doubt). A PSD's eye used to open a modal with
@@ -831,13 +872,29 @@
     var f = (FILES[code] || {})[fileId];
     if (!f || !canPreview(f)) return;
     var kind = PP.fileKind(f.contentType, f.name);
-    /* The medium tier (1600px long edge), not the original: a preview's job
-       is "is this the one?", which a 20MB file answers no better than a
-       400KB one. Download below is the untouched original. Files without a
-       medium (small enough not to need one, or uploaded before previews
-       existed) show the original, which is what this always did. */
-    var body = kind === 'image'
-      ? '<img src="' + esc(f.mediumUrl || f.url) + '" alt="' + esc(f.name) + '" class="prev__img">'
+
+    var body, surface = ' prev--doc';
+    if (kind === 'image') {
+      /* The medium tier (1600px long edge), not the original: a preview's job
+         is "is this the one?", which a 20MB file answers no better than a
+         400KB one. Download below is the untouched original. Files without a
+         medium (small enough not to need one, or uploaded before previews
+         existed) show the original, which is what this always did. */
+      body = '<img src="' + esc(f.mediumUrl || f.url) + '" alt="' + esc(f.name) + '" class="prev__img">';
+      surface = '';
+    } else if (kind === 'video') {
+      /* The browser's own player. preload="metadata" fetches the header and
+         a first frame, not the file — bytes stream only when someone presses
+         play. A codec the browser can't play shows its native failure state,
+         and Download is right below either way. */
+      body = '<video class="prev__video" controls preload="metadata" src="' + esc(f.url) + '"></video>';
+      surface = '';
+    } else if (kind === 'audio') {
+      body = '<audio class="prev__audio" controls preload="metadata" src="' + esc(f.url) + '"></audio>';
+    } else if (kind === 'doc') {
+      /* Rendered into this node after the modal opens — see below. */
+      body = '<div class="prev__docx" id="prevDocx">Preparing the document…</div>';
+    } else {
       /* An <iframe> hands the PDF to the browser's own viewer. Some mobile
          browsers have none and will offer a download instead — which is the
          same thing the Download button does, so the fallback is harmless.
@@ -851,13 +908,14 @@
          honour them, Firefox and Safari largely ignore them and show their own
          viewer, which is no worse than today. The download URL already carries
          a query string, so this has to be a fragment and not another param. */
-      : '<iframe src="' + esc(f.url) + '#toolbar=0&navpanes=0&scrollbar=0&view=FitH"' +
+      body = '<iframe src="' + esc(f.url) + '#toolbar=0&navpanes=0&scrollbar=0&view=FitH"' +
         ' class="prev__frame" title="' + esc(f.name) + '"></iframe>';
+    }
 
     NL.modal({
       title: f.name,
       width: 'wide',
-      body: '<div class="prev' + (kind === 'image' ? '' : ' prev--doc') + '">' + body + '</div>',
+      body: '<div class="prev' + surface + '">' + body + '</div>',
       buttons: [
         { label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } },
         { label: 'Download', className: 'btn--primary', autofocus: true, onClick: function () {
@@ -869,6 +927,31 @@
           } }
       ]
     });
+
+    if (kind === 'doc') {
+      /* Viewer scripts, then bytes, then render — all after the modal is up,
+         so the wait happens behind "Preparing" rather than a dead eye
+         button. Every failure lands in the same place: the modal stays
+         useful because Download is already there. */
+      loadDocxVendor()
+        .then(function () { return fetch(f.url); })
+        .then(function (r) {
+          if (!r.ok) throw new Error('fetch ' + r.status);
+          return r.blob();
+        })
+        .then(function (blob) {
+          var host = el('prevDocx');
+          if (!host || !document.body.contains(host)) return;   // modal already closed
+          host.textContent = '';
+          return window.docx.renderAsync(blob, host);
+        })
+        .catch(function () {
+          var host = el('prevDocx');
+          if (host && document.body.contains(host)) {
+            host.textContent = 'This document couldn’t be previewed here — Download opens it in Word.';
+          }
+        });
+    }
   }
 
   /* A picture library shown as pictures. Clicking a tile selects it — the file
