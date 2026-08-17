@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Programme Packs (admin)
+  Version: v1.4 (17/08/2026) — Generate previews: renders the thumb/medium
+           tiers (_shared.js v1.2) for images uploaded before previews
+           existed, in this browser under the '*' session — fetch the bytes
+           (bucket CORS already allows this origin for the zip feature),
+           resize on a canvas, store the variants in the club's own prefix,
+           stamp the record. Idempotent: previewsAt marks a file done.
+           Delete for good now removes a file's preview objects with it.
   Version: v1.3 (16/08/2026) — access-table crests come from canon
            NL.clubs.crestImgHtml('thumb') with a NL.clubs.wireCrestImgs sweep
            after the pane render (PP.crestImgHtml is gone — _shared.js v1.1).
@@ -81,6 +88,16 @@
     var NL_TOOL_KEY = 'media-programme';
 
     window.NL_CHANGELOG = [
+      {
+        date: '17/08/2026',
+        version: 'v1.4',
+        items: [
+          'Generate previews: images uploaded before previews existed get ' +
+            'their thumbnail and preview sizes rendered from here, so the ' +
+            'library stops downloading full-size photos to draw its grids.',
+          'Deleting a file for good also deletes its preview copies.'
+        ]
+      },
       {
         date: '16/08/2026',
         version: 'v1.3',
@@ -413,6 +430,115 @@
       }).join('') + '</div>';
   }
 
+  /* ── Previews backfill ────────────────────────────────────────────────
+     Images uploaded before v1.17 of the library have no thumb/medium tiers,
+     so every tile that shows them costs the full original — the exact thing
+     previews exist to stop. This renders the missing tiers HERE, in the
+     admin's browser: fetch the bytes (bucket CORS already admits this origin
+     for the zip feature), resize on a canvas, store the variants into the
+     club's own prefix under the '*' session, stamp the record. No function,
+     no deploy — the same decision as generation at upload, for the same
+     org-policy and latency reasons (_shared.js header).
+
+     Idempotent by record: previewsAt marks generation as having run, even
+     when an image was small enough to need no tiers, so re-pressing the
+     button only ever picks up what is still missing. Failures stay
+     unstamped and are retried next run. */
+  var BACKFILL = { running: false, done: 0, total: 0, failed: 0, current: '', cancel: false };
+  var BACKFILL_CONC = 3;
+
+  function backfillCandidates() {
+    var out = [];
+    Object.keys(FILES).forEach(function (code) {
+      Object.keys(FILES[code] || {}).forEach(function (id) {
+        var r = FILES[code][id] || {};
+        if (!r.url || r.previewsAt || r.thumbUrl) return;
+        if (!PP.previews.eligible(r.contentType)) return;
+        out.push({ code: code, id: id, rec: r });
+      });
+    });
+    return out;
+  }
+
+  function previewsCard() {
+    var waiting = backfillCandidates();
+    if (BACKFILL.running) {
+      return '<div class="tpl"><div class="tpl__head">Previews</div>' +
+        '<div class="up-row"><span class="up-row__name">' +
+          esc(BACKFILL.done + ' of ' + BACKFILL.total +
+            (BACKFILL.current ? ' · ' + BACKFILL.current : '')) + '</span>' +
+        '<span class="up-row__bar"><span class="up-row__fill" style="transform:scaleX(' +
+          (BACKFILL.total ? BACKFILL.done / BACKFILL.total : 0) + ')"></span></span>' +
+        '<button class="btn btn--ghost btn--sm" id="bfStop">Stop</button></div></div>';
+    }
+    if (!waiting.length) return '';   // nothing to do, nothing to say
+    var bytes = waiting.reduce(function (t, c) { return t + (Number(c.rec.size) || 0); }, 0);
+    return '<div class="tpl"><div class="tpl__head">Previews</div>' +
+      '<p class="form-hint" style="margin:0 0 10px">' +
+        esc(waiting.length + ' image' + (waiting.length === 1 ? '' : 's') + ' (' +
+          PP.humanSize(bytes) + ') still previewing at full size — each one is ' +
+          'downloaded in full every time its folder is opened.') + '</p>' +
+      '<button class="btn btn--primary btn--sm" id="bfRun">Generate previews</button>' +
+      (BACKFILL.failed ? ' <span class="form-hint">' +
+        esc(BACKFILL.failed + ' failed last run — kept for retry') + '</span>' : '') +
+      '</div>';
+  }
+
+  function backfillOne(item) {
+    return fetch(item.rec.url)
+      .then(function (r) {
+        if (!r.ok) throw new Error('fetch ' + r.status);
+        return r.blob();
+      })
+      .then(function (blob) { return PP.previews.make(blob, item.rec.contentType); })
+      .then(function (made) {
+        if (!made) throw new Error('undecodable');
+        return PP.previews.store(item.code, item.id, made);
+      })
+      .then(function (fields) {
+        return PP.ref('files/' + item.code + '/' + item.id).update(fields);
+      });
+  }
+
+  function runBackfill() {
+    var queue = backfillCandidates();
+    if (!queue.length || BACKFILL.running) return;
+    BACKFILL = { running: true, done: 0, total: queue.length, failed: 0, current: '', cancel: false };
+    render();
+
+    var next = 0;
+    function pump() {
+      if (BACKFILL.cancel || next >= queue.length) return Promise.resolve();
+      var item = queue[next++];
+      BACKFILL.current = item.rec.name || '';
+      return backfillOne(item)
+        .catch(function () { BACKFILL.failed++; })
+        .then(function () {
+          BACKFILL.done++;
+          /* The record update already re-renders via the files watcher; this
+             covers the failure path, where nothing else would repaint. */
+          if (tab === 'access') render();
+          return pump();
+        });
+    }
+
+    var lanes = [];
+    for (var i = 0; i < BACKFILL_CONC; i++) lanes.push(pump());
+    Promise.all(lanes).then(function () {
+      var ok = BACKFILL.done - BACKFILL.failed;
+      var stopped = BACKFILL.cancel;
+      BACKFILL.running = false;
+      BACKFILL.current = '';
+      PP.audit('previews-backfill', { count: ok,
+        detail: ok + ' generated' + (BACKFILL.failed ? ', ' + BACKFILL.failed + ' failed' : '') +
+          (stopped ? ', stopped early' : '') });
+      NL.toast(ok + ' preview' + (ok === 1 ? '' : 's') + ' generated' +
+        (BACKFILL.failed ? ' · ' + BACKFILL.failed + ' failed' : ''),
+        BACKFILL.failed ? 'info' : 'success');
+      render();
+    });
+  }
+
   function renderAccess() {
     var seeded = Object.keys(CONFIG.clubs || {}).length;
 
@@ -441,7 +567,7 @@
     var missing = ROSTER.filter(function (c) { return !CONFIG.clubs[c.code]; }).length;
 
     el('paneAccess').innerHTML =
-      storageHero() + storageRanks() +
+      storageHero() + storageRanks() + previewsCard() +
       '<div class="tpl">' +
         '<div class="tpl__head">Standard message</div>' +
         '<p class="form-hint" style="margin:0 0 8px">Placeholders: <code>{club}</code> <code>{link}</code> <code>{passcode}</code></p>' +
@@ -468,6 +594,11 @@
     el('btnSeedSync').onclick = seedRoster;
     el('btnExport').onclick = exportCsv;
     el('btnMerge').onclick = exportMergeCsv;
+
+    var bfRun = el('bfRun');
+    if (bfRun) bfRun.onclick = runBackfill;
+    var bfStop = el('bfStop');
+    if (bfStop) bfStop.onclick = function () { BACKFILL.cancel = true; };
 
     el('tplBody').value = TPL;
     el('tplSave').onclick = saveTpl;
@@ -797,11 +928,22 @@
         /* Delete the bytes first. If that fails we keep the trash record, so a
            failure leaves a recoverable file rather than an orphaned object
            nobody can see or reach. */
+        var gone = function (e) {
+          // Already gone in Storage is fine — carry on and clear the record.
+          if (e && e.code === 'storage/object-not-found') return;
+          throw e;
+        };
         return PP.storageRef(rec.storagePath).delete()
-          .catch(function (e) {
-            // Already gone in Storage is fine — carry on and clear the record.
-            if (e && e.code === 'storage/object-not-found') return;
-            throw e;
+          .catch(gone)
+          .then(function () {
+            /* Its preview tiers go with it — they are copies of the same
+               image, and the record about to be cleared is the only thing
+               that knows their paths. Best-effort: a stray preview object is
+               a few hundred KB, not a recoverable file. */
+            var tiers = [rec.thumbPath, rec.mediumPath].filter(Boolean);
+            return Promise.all(tiers.map(function (p) {
+              return PP.storageRef(p).delete().catch(function () {});
+            }));
           })
           .then(function () { return PP.ref('trash/' + code + '/' + id).remove(); })
           .then(function () {
@@ -945,6 +1087,7 @@
     'folder-rename': 'Renamed a folder',
     'folder-delete': 'Deleted a folder',
     'regen-access': 'Reissued access',
+    'previews-backfill': 'Generated previews',
     'seed': 'Seeded the roster',
     'email-template': 'Edited the standard message',
     'build-emails': 'Built club emails',

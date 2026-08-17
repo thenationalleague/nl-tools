@@ -416,3 +416,72 @@ test('the client upload cap matches the Storage rules', () => {
   assert.equal(PP.MAX_BYTES, Number(m[1]) * 1024 * 1024,
     'PP.MAX_BYTES and the Storage rule must agree, or uploads fail at the last byte');
 });
+
+/* ── Previews ─────────────────────────────────────────────────────────────
+   The pure half of PP.previews: tier names, geometry, type routing and the
+   variant path shape. make/store need a canvas and Firebase — the manual
+   smoke test in programme/README.md covers those. */
+
+test('preview tiers use the canon crest vocabulary, thumb inside medium', () => {
+  assert.deepEqual(Object.keys(PP.previews.TIERS).sort(), ['medium', 'thumb']);
+  assert.ok(PP.previews.TIERS.thumb < PP.previews.TIERS.medium,
+    'a thumb larger than a medium means the tiers are wired backwards');
+});
+
+test('fitWithin scales the long edge and keeps aspect, either orientation', () => {
+  assert.deepEqual({ ...PP.previews.fitWithin(4000, 3000, 360) }, { w: 360, h: 270 });
+  assert.deepEqual({ ...PP.previews.fitWithin(3000, 4000, 360) }, { w: 270, h: 360 });
+  assert.deepEqual({ ...PP.previews.fitWithin(5184, 3456, 1600) }, { w: 1600, h: 1067 });
+});
+
+test('fitWithin never upscales — a small image is its own preview', () => {
+  assert.deepEqual({ ...PP.previews.fitWithin(200, 100, 360) }, { w: 200, h: 100 });
+  assert.deepEqual({ ...PP.previews.fitWithin(360, 360, 360) }, { w: 360, h: 360 });
+});
+
+test('fitWithin survives junk dimensions without a zero-sized canvas', () => {
+  /* A 0×0 or NaN canvas throws on toBlob in some engines — the floor is 1px. */
+  assert.deepEqual({ ...PP.previews.fitWithin(0, 0, 360) }, { w: 1, h: 1 });
+  assert.deepEqual({ ...PP.previews.fitWithin(NaN, 500, 360) }, { w: 1, h: 360 });
+});
+
+test('eligibility is the decodable raster set — resize what a canvas can read', () => {
+  ['image/png', 'image/jpeg', 'image/webp'].forEach((t) =>
+    assert.ok(PP.previews.eligible(t), `${t} should be eligible`));
+  ['image/svg+xml', 'image/gif', 'image/tiff', 'image/vnd.adobe.photoshop',
+    'application/pdf', 'application/postscript', '', undefined].forEach((t) =>
+    assert.ok(!PP.previews.eligible(t), `${t} must not be eligible`));
+  assert.ok(PP.previews.eligible('IMAGE/JPEG'), 'case must not decide eligibility');
+});
+
+test('renderable is broader than eligible — an <img> shows more than a canvas resizes', () => {
+  /* GIF is the one to protect: a canvas keeps only the first frame, so a
+     resized tile would freeze an animation that plays today. */
+  ['image/svg+xml', 'image/avif', 'image/gif'].forEach((t) => {
+    assert.ok(PP.previews.renderable(t), `${t} renders in an <img>`);
+    assert.ok(!PP.previews.eligible(t), `${t} is still not resized`);
+  });
+  ['image/tiff', 'image/vnd.adobe.photoshop'].forEach((t) =>
+    assert.ok(!PP.previews.renderable(t),
+      `${t} does not render in a browser — the tile must show an icon, not a broken image`));
+});
+
+test('preview output keeps alpha formats PNG and flattens the rest to JPEG', () => {
+  assert.deepEqual({ ...PP.previews.output('image/png') }, { type: 'image/png', ext: 'png' });
+  assert.deepEqual({ ...PP.previews.output('image/gif') }, { type: 'image/png', ext: 'png' });
+  assert.deepEqual({ ...PP.previews.output('image/jpeg') }, { type: 'image/jpeg', ext: 'jpg' });
+  assert.deepEqual({ ...PP.previews.output('image/webp') }, { type: 'image/jpeg', ext: 'jpg' });
+});
+
+test('variant path sits inside the club prefix, keyed on fileId alone', () => {
+  const p = PP.previews.path('FYL', '-Nabc123', 'thumb', 'jpg');
+  assert.equal(p, 'programme/FYL/_previews/-Nabc123-thumb.jpg');
+  assert.equal(p.split('/')[1], 'FYL',
+    'club code stays in the segment the Storage rules match for write-own');
+  /* No folder segment: moving a file only rewrites folderId in RTDB, so a
+     folder-keyed variant path would go stale on the first move. And
+     '_previews' cannot collide with a real folderId — those are push keys
+     (always starting with "-") or the literal '_root'. */
+  assert.ok(p.indexOf('/_previews/') !== -1);
+  assert.notEqual('_previews', PP.ROOT_FOLDER);
+});
