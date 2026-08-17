@@ -3,10 +3,16 @@
 <head>
 <!--
   NL Tools — Website Archive
-  Version: 2.6
-  Date: 16/08/2026
+  Version: 2.7
+  Date: 17/08/2026
 
   CHANGELOG
+  v2.7 (17/08/2026)
+    - FIX: granting "Manage" (level admin) on this tool did nothing. The admin
+      read handled only the legacy {admin:true} object shape, but per-user tool
+      entries are strings ("off"|"access"|"admin"), so it evaluated
+      "admin".admin === undefined and only a superadmin ever got admin. Reads
+      both shapes now, matching how Judgements does it.
   v2.6 (16/08/2026)
     - Local formatDuration() now delegates to NL.formatDuration(secs,
       {seconds:true}) (nl-utils v1.34) — the seconds-granularity convention
@@ -1538,9 +1544,16 @@ function readingTimeMins(article) {
 /* ============ AUTH-GUARD ENTRY POINT ============ */
 window.nlAuthReady = function(session) {
   // Topbar rendered automatically by nl-topbar.js from window.NL_TOOL
-  // Determine admin status for export button visibility
-  var toolPerms = (session && session.tools && session.tools[NL_TOOL_KEY]) || {};
-  STATE.isAdmin = !!(toolPerms.admin || (session && session.role === 'superadmin'));
+  // Determine admin status for export button visibility.
+  // The per-user entry is a STRING ("off" | "access" | "admin"); only very old
+  // records are the legacy {access:true, admin:true} object. This read handled
+  // the object only, so on a string entry it evaluated "admin".admin ===
+  // undefined and nobody but a superadmin ever got admin here. Both shapes now.
+  var toolEntry = (session && session.tools && session.tools[NL_TOOL_KEY]);
+  var toolAdmin = (typeof toolEntry === 'string')
+    ? (toolEntry === 'admin')
+    : !!(toolEntry && toolEntry.admin);
+  STATE.isAdmin = !!(toolAdmin || (session && session.role === 'superadmin'));
   init();
 };
 
