@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.107 (17/08/2026)
+  Version: v5.108 (17/08/2026)
   Date: 09/04/2026
   File: /portal/index.html
 
@@ -28,6 +28,23 @@
     well (no admin gating anywhere in it, superadmin-only by defaults).
     Thirteen of seventeen tools are now Off / Use; only Judgements, Vacancies and
     Website Archive still offer Manage.
+
+  v5.108 (17/08/2026) — Two rows that drew as "you have nothing" when they did
+    not. A superadmin's own entry rendered sixteen tools of struck-through
+    Off / Use / Manage: every rung is structurally unavailable to them because
+    the role is granted before the level is ever asked, so permanentLock
+    padlocked the lot. They now get the summary line and no list at all.
+    Club rows had the same fault for the same reason — permanentLock included
+    every club row, so a club person's sixteen tools drew struck out while
+    they in fact hold Use on all of them. permanentLock is now reserved for
+    what it means: a league-audience tool on a club account. Club rows are
+    read-only, which is a different statement and already has a style
+    (.acc-slider--locked — value legible, affordance retreats); the Manage
+    rung stays struck via clubLocked, since a club role can never hold it.
+    enterEditMode gains an isClub guard, because the strike-through was
+    quietly doing that job.
+    Also: NL_CHANGELOG had not moved since v5.101, so the topbar badge still
+    read v5.101 while six versions of visible change shipped underneath it.
 
   v5.107 (17/08/2026) — The access editor leads with the role and shows only
     the exceptions. It used to lay out all sixteen tools as editable controls
@@ -670,6 +687,15 @@
 
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
+    {
+      date: '17/08/2026',
+      version: 'v5.108',
+      items: [
+        'Managing someone\u2019s access now starts from their role. You see one line saying what the role grants, then only the tools set apart from it \u2014 the rest fold away.',
+        'Tools with nothing to administer no longer offer "Manage", so the control only appears where it does something.',
+        'The access controls line up in a column, and read-only rows no longer look struck out.'
+      ]
+    },
     {
       date: '17/08/2026',
       version: 'v5.101',
@@ -4683,13 +4709,16 @@ function buildAccordionItem(uid, u, depts, deptMap) {
 
       var effectiveLevel = staffLocked ? 'off' : currentLevel;
 
-      /* permanentLock = structurally off-limits, not merely "not editing":
-         a superadmin's own row, a league tool on a club account, or any club
-         row (club access follows the role, with no per-tool exceptions —
-         an override is a fact about access living in one record and silently
-         contradicting the role, and one sentence is what makes club
-         self-service explainable to 72 clubs). */
-      var permanentLock = isSuperUser || staffLocked || isClubLocked;
+      /* permanentLock strikes through EVERY rung — reserve it for a tool that
+         is structurally unavailable, which is a league-audience tool on a club
+         account and nothing else. It used to include every club row, so a club
+         person's rows drew as sixteen struck-out controls saying "you have
+         nothing" when what they have is Use on all of them. Club access is
+         read-only, which is a different statement: the value stays legible and
+         only the affordance retreats (.acc-slider--locked). The Manage rung
+         stays struck via clubLocked, because a club role can never hold it.
+         (Superadmins never reach here — see below.) */
+      var permanentLock = staffLocked;
       var sliderEl = buildAccSlider(uid, t._key, effectiveLevel, defaultLevel,
                                     permanentLock, isClubLocked, dept, body);
       if (!permanentLock) sliderEl.classList.add('acc-slider--locked');
@@ -4728,8 +4757,14 @@ function buildAccordionItem(uid, u, depts, deptMap) {
   summary.appendChild(summaryText);
   body.appendChild(summary);
 
+  /* A superadmin gets the sentence and nothing else. Every rung of every tool
+     is structurally unavailable to them — the role is granted before the
+     level is ever asked — so the list rendered as sixteen rows of
+     struck-through Off / Use / Manage: unreadable, unusable, and saying
+     sixteen times what the line above says once. */
+
   /* The exceptions. Visible because they are rare. */
-  if (exceptions.length) {
+  if (!isSuperUser && exceptions.length) {
     var exHead = document.createElement('div');
     exHead.className = 'uacc-ex-head';
     exHead.textContent = exceptions.length === 1
@@ -4745,7 +4780,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
 
   /* Everything else, folded away. Canon .disclosure (nl-brand v2.41) rather
      than a hand-rolled toggle. */
-  if (conforming.length) {
+  if (!isSuperUser && conforming.length) {
     var all = document.createElement('details');
     all.className = 'disclosure uacc-all';
     var allSummary = document.createElement('summary');
@@ -4827,6 +4862,11 @@ function buildAccordionItem(uid, u, depts, deptMap) {
 
       if (isSuperUser) return;
       if (constraints.isStaffLocked(deptKey)) return; /* staff-dept tool for restricted role stays locked off */
+      /* Club access follows the role, with no per-tool exceptions (settled
+         17/08/2026). Club rows stay read-only in edit mode too — they are no
+         longer struck through, so this is the guard that keeps them
+         uneditable now that the strike-through is not doing it. */
+      if (constraints.isClub) return;
 
       /* Reset to stored RTDB value (or role default if no override) */
       var level = storedTools[toolKey] || getDefaultLevel(toolKey, currentU);
