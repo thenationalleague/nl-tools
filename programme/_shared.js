@@ -1,5 +1,14 @@
 /*
   Programme Packs — shared runtime for the library + admin console
+  Version: v1.3 (17/08/2026) — PP.enterMaster: the library's third door. An
+           NL admin arriving with ?master=1 gets the console's '*' session on
+           the library page itself, so all 73 folders browse AND manage in
+           one place. Requires a live portal sign-in on every boot (a
+           persisted '*' session is signed out, not adopted, when the portal
+           login has gone); with one present, a persisted '*' is adopted to
+           skip the Eventarc exchange. FB config hoisted to FB_CONFIG so
+           ensureDefaultApp() can initialise the default app when auth-guard
+           hasn't.
   Version: v1.2 (17/08/2026) — PP.previews: three sizes per image, the canon
            crest vocabulary (thumb / medium / full). Rendered in the BROWSER
            with a canvas, at upload time — not by a resize endpoint, because
@@ -46,6 +55,8 @@
     PP.ref(path)                      ref under app-data/media-programme
     PP.enter(code)                    → Promise<session>  (club/NL passcode)
     PP.enterAsAdmin()                 → Promise<session>  (portal admin → '*')
+    PP.enterMaster()                  → Promise<session>  (library ?master=1;
+                                        rejects pp/no-portal without a portal login)
     PP.resume()                       → Promise<session|null> (remembered device)
     PP.forget()                       clear the remembered passcode
     PP.session                        { code, name, division, isNL, isAdmin }
@@ -90,16 +101,22 @@
   var REMEMBER_KEY = 'nl-programme-access';
   var REMEMBER_DAYS = 30;
 
-  /* Named app — NOT the default app (see header). nl-utils' audit hook
-     self-skips when there's no default app; on the admin console the default
-     app DOES exist (auth-guard), so this family keeps its own audit trail
-     under app-data/media-programme/audit either way. */
-  var app = firebase.initializeApp({
+  /* One config, two apps. The named app is initialised here, always; the
+     DEFAULT app is initialised by auth-guard's page (the console) or by
+     ensureDefaultApp() when the library boots in master mode and needs to
+     see the portal session. */
+  var FB_CONFIG = {
     apiKey: "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU", authDomain: "nl-tools.firebaseapp.com",
     databaseURL: "https://nl-tools-default-rtdb.europe-west1.firebasedatabase.app", projectId: "nl-tools",
     storageBucket: "nl-tools.firebasestorage.app", messagingSenderId: "801354670005",
     appId: "1:801354670005:web:05d8ebad3e7e63610d03fc"
-  }, 'nlProgramme');
+  };
+
+  /* Named app — NOT the default app (see header). nl-utils' audit hook
+     self-skips when there's no default app; on the admin console the default
+     app DOES exist (auth-guard), so this family keeps its own audit trail
+     under app-data/media-programme/audit either way. */
+  var app = firebase.initializeApp(FB_CONFIG, 'nlProgramme');
 
   /* ── Pure helpers ──────────────────────────────────────────────────────
      No Firebase, no DOM — everything here is exercised directly by
@@ -556,6 +573,73 @@
     return enter(rec.code).catch(function () { forget(); return null; });
   }
 
+  /* ── Master entry (the library page, opened by an NL admin) ───────────
+     The library's third door, beside the passcode and the remembered device:
+     an admin arrives from the console (?master=1) and gets the same '*'
+     session the console holds, so every folder is browsable AND writable —
+     canWrite() and the rules both already understand '*'; only this entry
+     path was missing.
+
+     The portal sign-in is required on EVERY master boot. A '*' custom-token
+     session persists in this browser like any Firebase session, and adopting
+     it without looking would leave master powers behind on a machine whose
+     portal login has since been signed out — so no live portal session means
+     no master view, and any lingering '*' session is signed out rather than
+     left for the next person at the keyboard. With a live portal session the
+     persisted '*' is adopted as-is, which skips the ~15-20s Eventarc
+     exchange; the server-side role check re-runs whenever the exchange does
+     (first visit, new browser, cleared storage). */
+
+  function authReady(auth) {
+    return new Promise(function (resolve) {
+      var off = auth.onAuthStateChanged(function (u) { off(); resolve(u); });
+    });
+  }
+
+  function ensureDefaultApp() {
+    try { return firebase.app(); } catch (e) { return firebase.initializeApp(FB_CONFIG); }
+  }
+
+  function enterMaster() {
+    return authReady(ensureDefaultApp().auth()).then(function (portalUser) {
+      if (!portalUser) {
+        return authReady(app.auth()).then(function (u) {
+          if (u) app.auth().signOut();
+          var e = new Error('The master view needs a National League portal sign-in.');
+          e.code = 'pp/no-portal';
+          throw e;
+        });
+      }
+      return authReady(app.auth()).then(function (u) {
+        /* Adoption is bound to the person, not just the machine: the trigger
+           mints master sessions as uid pp-admin-<portal uid>, so a persisted
+           '*' is only reused by the portal user it was minted for. Anyone
+           else at this keyboard — admin or not — goes through the exchange,
+           which re-checks THEIR role server-side and mints under THEIR name,
+           so the audit can never carry the previous admin's identity. The
+           one thing adoption does not re-check is a demotion of that same
+           still-signed-in admin; that waits for the next fresh exchange,
+           and disabling the portal account closes it everywhere. */
+        if (!u || u.uid !== 'pp-admin-' + portalUser.uid) return enterAsAdmin();
+        /* The rejection handler covers getIdTokenResult ALONE — hung after
+           it, it would also catch a failed exchange and run a second
+           ~20s round-trip just to fail again. */
+        return u.getIdTokenResult().then(function (t) {
+          return (t && t.claims && t.claims.pClub === '*') || null;
+        }, function () { return null; }).then(function (isMaster) {
+          if (isMaster) {
+            session = { code: '*', name: 'National League', division: '', isNL: true, isAdmin: true };
+            PP.session = session;
+            return session;
+          }
+          /* A club's session was persisted here (an open-as visit, or a club
+             machine) — exchange properly rather than borrowing it. */
+          return enterAsAdmin();
+        });
+      });
+    });
+  }
+
   function requireSession() {
     if (!session) throw new Error('No Programme Packs session');
     return session;
@@ -608,6 +692,7 @@
     handOff: function (code) { remember(code); },
     enter: enter,
     enterAsAdmin: enterAsAdmin,
+    enterMaster: enterMaster,
     resume: resume,
     forget: forget,
     requireSession: requireSession,

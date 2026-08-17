@@ -2,7 +2,15 @@
 <html lang="en">
 <head>
 <!--
-  Programme Packs — club library (standalone, passcode)
+  Programme Packs — club library (standalone, passcode; ?master=1 for admins)
+  Version: v1.18 (17/08/2026) — the master door (?master=1, _shared.js v1.3):
+           an NL admin gets the console's '*' session on this page, browsing
+           and managing all 73 folders in one place — canWrite() and the
+           rules already understood '*', so this is an entry path, not a
+           permission change. Empty clubs open for a master session (an
+           admin fills them). ?embed=1 drops the idbar and replaces history
+           steps for the console's Library tab. "Not you?" reads Console on
+           a master session and goes there.
   Version: v1.17 (17/08/2026) — images carry three sizes (_shared.js v1.2):
            tiles draw a 360px thumb, the eye shows a 1600px medium, Download
            stays the untouched original. Both are rendered in the browser at
@@ -185,6 +193,10 @@
   function navigate(club, folderId) {
     var next = hashFor(club, folderId);
     if (location.hash === next) { applyHash(); return; }
+    /* Embedded, each step REPLACES: an iframe shares the parent's session
+       history, so stacking entries would turn the console's Back button into
+       an unwind of this folder walk. The breadcrumb is the way back here. */
+    if (EMBED) { location.replace(location.pathname + location.search + next); return; }
     location.hash = next;                 // hashchange applies it
   }
   function applyHash() {
@@ -213,6 +225,18 @@
   })();
   var linkClub = params.get('club') || '';
 
+  /* ?master=1 — the admin door. Asks _shared for the console's '*' session
+     instead of a passcode, so an NL admin browses and manages all 73 folders
+     right here. The flag itself grants nothing: PP.enterMaster needs a live
+     portal sign-in and the role check happens server-side, so a club (or
+     anyone) adding it to the URL just meets a sign-in message.
+     ?embed=1 — the page is inside the console's Library tab: the console
+     already says who you are, so the idbar comes off, and in-library
+     navigation replaces history entries rather than stacking them (browser
+     Back in the console should leave the console, not unwind a folder walk). */
+  var MASTER = params.get('master') === '1';
+  var EMBED = params.get('embed') === '1';
+
   /* Badge the gate with the club from the link, so Yeovil's people meet
      Yeovil's crest rather than a generic rose. clubs-meta is a public static
      file, so this needs no auth and no lookup against anything private —
@@ -237,11 +261,40 @@
 
   /* Try a remembered device first, so a weekly user isn't retyping a card
      every Tuesday. PP.resume() resolves null (never rejects) if nothing is
-     stored or the passcode has since been regenerated in the console. */
-  PP.resume().then(function (s) {
-    if (s) { enter(s); return; }
-    showGate();
-  }).catch(showGate);
+     stored or the passcode has since been regenerated in the console.
+     ?master=1 takes its own door instead — deliberately never falling back
+     to a remembered club passcode, so an admin is always who the audit says
+     they are. */
+  if (MASTER) {
+    el('gateSub').textContent = 'Confirming your National League access…';
+    /* First visit in a browser is a full Eventarc exchange — seconds, not
+       milliseconds. Same courtesy as the passcode path: say so before a
+       working gate starts reading as a hung one. */
+    var masterSlow = setTimeout(function () {
+      el('gateSub').textContent = 'Still confirming — this can take a few seconds.';
+    }, 4000);
+    PP.enterMaster().then(function (s) {
+      clearTimeout(masterSlow);
+      enter(s);
+    }).catch(function (e) {
+      clearTimeout(masterSlow);
+      if (e && e.code === 'pp/no-portal') {
+        el('gateSub').innerHTML =
+          'The master view needs a National League portal sign-in.<br>' +
+          '<a href="/programme/admin/">Open the admin console</a> · ' +
+          '<a href="' + esc(location.pathname) + '">enter a passcode instead</a>';
+        return;
+      }
+      /* The trigger's own message covers the refused-role case
+         ("administration is admin-only") and the timeout alike. */
+      el('gateSub').textContent = (e && e.message) || 'Something went wrong. Please try again.';
+    });
+  } else {
+    PP.resume().then(function (s) {
+      if (s) { enter(s); return; }
+      showGate();
+    }).catch(showGate);
+  }
 
   function showGate() {
     brandGate();
@@ -279,6 +332,10 @@
   }
 
   el('signout').addEventListener('click', function () {
+    /* A master session has no passcode to forget, and forgetting would only
+       bounce to a gate that signs straight back in — the useful exit is the
+       console. Clubs keep the original meaning. */
+    if ((PP.session || {}).isAdmin) { location.href = '/programme/admin/'; return; }
     PP.forget();
     location.href = location.pathname;
   });
@@ -300,6 +357,10 @@
     }
     el('idbarCrest').replaceChildren(crest);
     el('idbarClub').textContent = session.name;
+    if (session.isAdmin) el('signout').textContent = 'Console';
+    /* Inside the console's Library tab the page around this one already
+       carries the identity and the way out — a second bar is furniture. */
+    if (EMBED) document.querySelector('.nl-idbar').style.display = 'none';
 
     if (session.viaAdmin) {
       var b = el('asBanner');
@@ -560,11 +621,13 @@
     /* An empty club can't be opened — there is nothing behind it, and letting
        someone click into a blank folder is a worse answer than not letting them
        click at all. It stays listed and greyed, and says why on hover. Your own
-       club is always enterable: that is where you go to fix being empty. */
+       club is always enterable: that is where you go to fix being empty — and
+       a master session can enter anywhere for the same reason, because for an
+       admin every empty folder is one they might be about to fill. */
     html += '<div class="dir' + (entering ? ' nl-enter' : '') + '">' + ROSTER.map(function (c) {
       var n = fileCount(c.code), last = lastUpload(c.code);
       var mine = c.code === s.code;
-      var open = n > 0 || mine;
+      var open = n > 0 || mine || s.isAdmin;
       var state = n ? (n + ' file' + (n === 1 ? '' : 's') + ', last added ' + PP.ago(last))
                     : (mine ? 'your club — nothing uploaded yet' : 'nothing uploaded yet');
       return '<button class="dir__card' + (n ? '' : ' is-empty') + '"' +

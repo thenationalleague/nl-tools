@@ -8,7 +8,7 @@ retired — see [Cutover](#cutover).
 |---|---|---|---|
 | `/programme/` | **The 72 clubs** | their 6-character passcode | Browse and download **every** club's folder. Upload, organise into folders, and remove files **in their own folder only** |
 | `/programme/` | **NL commercial** | the 73rd (National League) passcode | Everything a club can do, in the **National League** folder |
-| `/programme/admin/` | **NL admin/superadmin** | **portal login** (auth-guard, `media-programme`) | Seed/sync the roster, see and regenerate every passcode, export the access CSV, restore or permanently delete removed files, generate previews for images uploaded before previews existed, read the audit trail |
+| `/programme/admin/` | **NL admin/superadmin** | **portal login** (auth-guard, `media-programme`) | Everything, everywhere: the **Library** tab is the club page in master mode — browse and manage all 73 folders. Plus: seed/sync the roster, see and regenerate every passcode, export the access CSV, restore or permanently delete removed files, generate previews for images uploaded before previews existed, read the audit trail |
 
 ## The model
 
@@ -175,6 +175,22 @@ footage measured ~15-20s and found it structural rather than cold-start. That
 killed it for video previews, which happen constantly. Here it runs on a gate a
 device hits once every 30 days, behind a spinner that says so after 3s. The
 client gives up at 60s.
+
+**The master view** (`/programme/?master=1`) is the library's third door,
+beside the passcode and the remembered device: an NL admin gets the console's
+`'*'` session on the club page itself, so all 73 folders browse **and**
+manage in one place — `canWrite()` and both rulesets already understood
+`'*'`; only the entry path was missing. The console's **Library** tab embeds
+exactly this (`&embed=1` drops the idbar and keeps folder navigation out of
+the console's history). The flag grants nothing: it needs a **live portal
+sign-in on every boot** — a persisted `'*'` session on a machine whose portal
+login has gone is signed out, not adopted — and the role check happens
+server-side in `programmeAuth`. With a live portal session, a persisted `'*'`
+is adopted to skip the ~15-20s Eventarc exchange, but only by the portal user
+it was minted for (`pp-admin-<uid>`): anyone else at that keyboard goes back
+through the exchange under their own name and their own role check, so the
+audit can never carry the previous admin's identity. Master actions audit as
+`master`, unlike **Open as**, which acts as the club (marked `viaAdmin`).
 
 This is the one deliberate difference from `/uw-promo/`, where passcodes are
 world-readable and compared client-side. With anonymous auth the token carries
