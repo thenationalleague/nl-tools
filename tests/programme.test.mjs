@@ -417,6 +417,22 @@ test('the client upload cap matches the Storage rules', () => {
     'PP.MAX_BYTES and the Storage rule must agree, or uploads fail at the last byte');
 });
 
+test('fileKind: video and audio are kinds of their own', () => {
+  /* Added 17/08/2026 so the eye can hand them to the native players. Both
+     match on content type first, extension as the fallback — same contract
+     as every other kind. */
+  assert.equal(PP.fileKind('video/mp4', 'clip.mp4'), 'video');
+  assert.equal(PP.fileKind('video/quicktime', 'ident.mov'), 'video');
+  assert.equal(PP.fileKind('', 'highlights.webm'), 'video');
+  assert.equal(PP.fileKind('audio/mpeg', 'jingle.mp3'), 'audio');
+  assert.equal(PP.fileKind('', 'stinger.wav'), 'audio');
+  assert.equal(PP.kindIcon('video'), '🎬');
+  assert.equal(PP.kindIcon('audio'), '🎵');
+  /* And nothing already classified moved. */
+  assert.equal(PP.fileKind('application/pdf', 'specs.pdf'), 'pdf');
+  assert.equal(PP.fileKind('', 'notes.docx'), 'doc');
+});
+
 /* ── Entry doors ──────────────────────────────────────────────────────────
    Three ways into the library — passcode, remembered device, master — plus
    the console's own exchange. Each is an entry path the README documents;
