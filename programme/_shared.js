@@ -1,5 +1,13 @@
 /*
   Programme Packs — shared runtime for the library + admin console
+  Version: v1.2 (17/08/2026) — PP.previews: three sizes per image, the canon
+           crest vocabulary (thumb / medium / full). Rendered in the BROWSER
+           with a canvas, at upload time — not by a resize endpoint, because
+           the org policy that blocks public invokers on new Cloud Run
+           services rules a proxy URL out, and the RTDB-trigger workaround's
+           Eventarc latency (~15-20s) is what killed footage previews.
+           Variants live at programme/<CODE>/_previews/<fileId>-<tier>.<ext>
+           and their URLs are stored on the file record, same reason url is.
   Version: v1.1 (16/08/2026) — local crestImgHtml(name, px) deleted; crest
            strings come from canon NL.clubs.crestImgHtml('thumb') + a
            NL.clubs.wireCrestImgs sweep at each render (px sizing was already
@@ -56,6 +64,8 @@
     PP.humanSize(bytes)
     PP.fileKind(contentType, name)    'image' | 'pdf' | 'doc' | 'sheet' | 'file'
     PP.uploadType(file)               canonical content type for an upload
+    PP.previews.*                     thumb/medium generation (pure bits tested;
+                                      make/store are browser+Firebase)
 
   Data lives at RTDB app-data/media-programme/{config,folders,files,trash,audit}
   and Storage programme/<CODE>/… — shapes documented in /programme/README.md.
@@ -177,6 +187,169 @@
   }
 
   var KIND_ICON = { image: '🖼️', pdf: '📕', doc: '📄', sheet: '📊', file: '📎' };
+
+  /* ── Previews — three sizes per image ─────────────────────────────────
+     Same vocabulary as the canon crest tiers (NL.clubs.crestUrl):
+
+       thumb   360px long edge  — the grid tile (128px box, retina-covered)
+       medium  1600px long edge — the eye/preview modal (70vh, wide)
+       full    the original     — download only
+
+     Rendered in the BROWSER at upload time with a canvas, and their URLs
+     stored on the file record next to `url`. NOT an on-demand resize
+     endpoint: the org policy blocking public invokers on new Cloud Run
+     services (see the header) makes such a URL unreachable, and the
+     RTDB-trigger workaround pays ~15-20s of Eventarc latency per request —
+     the exact combination that killed the retired footage tool's previews.
+     Pre-rendering at upload costs the uploader a second and nobody else
+     anything, which is the same trade the crest tiers made.
+
+     Variants live at programme/<CODE>/_previews/<fileId>-<tier>.<ext> —
+     inside the club's own prefix, so the existing Storage rules already
+     cover them (write-own, clubs cannot delete), and keyed on fileId alone,
+     so moving a file between folders (an RTDB-only change) never strands
+     them. '_previews' cannot collide with a real folder segment: folderIds
+     are push keys, which always start with '-' (or the literal '_root'). */
+  var PREVIEW_TIERS = { thumb: 360, medium: 1600 };
+  var PREVIEW_QUALITY = 0.82;
+
+  /* Raster types every engine can decode AND draw to a canvas. SVG is left
+     out (already small, scales by itself, and can taint a canvas); TIFF and
+     PSD because no browser decodes them at all; GIF because a canvas keeps
+     only the first frame, and a tile that used to animate would freeze. */
+  var DECODABLE = { 'image/png': 1, 'image/jpeg': 1, 'image/webp': 1 };
+
+  /* What an <img> can display at all — the no-variant fallback decision.
+     Broader than DECODABLE: SVG and AVIF render fine, we just don't resize
+     them. A type outside this set (TIFF, PSD, EPS) shows its kind icon
+     instead of a broken image. */
+  var PREVIEW_RENDERABLE = { 'image/png': 1, 'image/jpeg': 1, 'image/webp': 1,
+    'image/gif': 1, 'image/svg+xml': 1, 'image/avif': 1 };
+
+  function previewEligible(contentType) {
+    return DECODABLE[String(contentType || '').toLowerCase()] === 1;
+  }
+  function previewRenderable(contentType) {
+    return PREVIEW_RENDERABLE[String(contentType || '').toLowerCase()] === 1;
+  }
+
+  /* PNG sources keep alpha, so their variants stay PNG; everything else
+     flattens to JPEG (with a white underfill, for WebP alpha). GIF maps to
+     PNG for totality, though eligibility filters it out before this runs. */
+  function previewOutput(contentType) {
+    var t = String(contentType || '').toLowerCase();
+    return (t === 'image/png' || t === 'image/gif')
+      ? { type: 'image/png', ext: 'png' }
+      : { type: 'image/jpeg', ext: 'jpg' };
+  }
+
+  /* Long edge down to `max`, aspect kept, never upscaled, never below 1px. */
+  function fitWithin(w, h, max) {
+    w = Math.max(1, Math.round(Number(w) || 0));
+    h = Math.max(1, Math.round(Number(h) || 0));
+    var edge = Math.max(w, h);
+    if (edge <= max) return { w: w, h: h };
+    var scale = max / edge;
+    return { w: Math.max(1, Math.round(w * scale)), h: Math.max(1, Math.round(h * scale)) };
+  }
+
+  function previewPath(club, fileId, tier, ext) {
+    return STORAGE_ROOT + '/' + club + '/_previews/' + fileId + '-' + tier + '.' + ext;
+  }
+
+  /* Decode with EXIF orientation applied, so a portrait phone photo does not
+     thumb sideways. Engines that don't know the option throw — fall back to
+     a plain decode, then to an <img>, which modern engines orient anyway. */
+  function decodeImage(blob) {
+    if (typeof createImageBitmap === 'function') {
+      return createImageBitmap(blob, { imageOrientation: 'from-image' })
+        .catch(function () { return createImageBitmap(blob); })
+        .catch(function () { return decodeViaImg(blob); });
+    }
+    return decodeViaImg(blob);
+  }
+  function decodeViaImg(blob) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(blob);
+      var img = new Image();
+      img.onload = function () { URL.revokeObjectURL(url); resolve(img); };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('undecodable')); };
+      img.src = url;
+    });
+  }
+
+  function encodeTier(src, w, h, max, out) {
+    var dims = fitWithin(w, h, max);
+    var canvas = document.createElement('canvas');
+    canvas.width = dims.w;
+    canvas.height = dims.h;
+    var ctx = canvas.getContext('2d');
+    if (!ctx) return Promise.resolve(null);
+    if (out.type === 'image/jpeg') {   // WebP alpha would composite onto black
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, dims.w, dims.h);
+    }
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(src, 0, 0, dims.w, dims.h);
+    return new Promise(function (resolve) {
+      canvas.toBlob(function (b) { resolve(b || null); }, out.type, PREVIEW_QUALITY);
+    });
+  }
+
+  /* blob + canonical content type
+       → { thumb?: {blob, contentType, ext}, medium?: {…} }  tiers rendered
+       → {}    generation ran and the image is small enough to need none
+       → null  ineligible type, or the decode/encode failed (retryable later)
+     Resolves rather than rejects for everything expected — a missing preview
+     must never block or fail the upload it belongs to. A tier the source
+     already fits inside is skipped: a 1200px photo gets a thumb but no
+     medium, and the modal simply shows the original. Browser only. */
+  function makePreviews(blob, contentType) {
+    if (!previewEligible(contentType)) return Promise.resolve(null);
+    return decodeImage(blob).then(function (src) {
+      var w = src.naturalWidth || src.width, h = src.naturalHeight || src.height;
+      if (!w || !h) return null;
+      var out = previewOutput(contentType);
+      var tiers = Object.keys(PREVIEW_TIERS).filter(function (t) {
+        return Math.max(w, h) > PREVIEW_TIERS[t];
+      });
+      return tiers.reduce(function (chain, tier) {
+        return chain.then(function (acc) {
+          return encodeTier(src, w, h, PREVIEW_TIERS[tier], out).then(function (b) {
+            if (b) acc[tier] = { blob: b, contentType: out.type, ext: out.ext };
+            return acc;
+          });
+        });
+      }, Promise.resolve({})).then(function (acc) {
+        if (src.close) src.close();
+        return acc;
+      });
+    }).catch(function () { return null; });
+  }
+
+  /* Upload rendered tiers into the club's prefix and hand back the record
+     fields ({ previewsAt, thumbUrl?, thumbPath?, mediumUrl?, mediumPath? }).
+     previewsAt marks "generation ran" even when the image needed no tier, so
+     the admin backfill can tell done from never-tried. A tier whose upload
+     fails is dropped silently — its consumer falls back to the original. */
+  function storePreviews(club, fileId, made) {
+    var fields = { previewsAt: firebase.database.ServerValue.TIMESTAMP };
+    return Object.keys(made || {}).reduce(function (chain, tier) {
+      return chain.then(function () {
+        var v = made[tier];
+        var vPath = previewPath(club, fileId, tier, v.ext);
+        return app.storage().ref(vPath)
+          .put(v.blob, { contentType: v.contentType, cacheControl: 'public,max-age=3600' })
+          .then(function (snap) { return snap.ref.getDownloadURL(); })
+          .then(function (url) {
+            fields[tier + 'Url'] = url;
+            fields[tier + 'Path'] = vPath;
+          })
+          .catch(function () {});
+      });
+    }, Promise.resolve()).then(function () { return fields; });
+  }
 
   /* Unambiguous alphabet — no 0/O, 1/I/L — for anything a human retypes.
      Same alphabet as uw-promo, so a printed NL access card reads consistently
@@ -481,6 +654,17 @@
     fileKind: fileKind,
     uploadType: uploadType,
     kindIcon: function (kind) { return KIND_ICON[kind] || KIND_ICON.file; },
+
+    previews: {
+      TIERS: PREVIEW_TIERS,
+      eligible: previewEligible,
+      renderable: previewRenderable,
+      output: previewOutput,
+      fitWithin: fitWithin,
+      path: previewPath,
+      make: makePreviews,
+      store: storePreviews
+    },
 
     fmt: function (ms) { return ms ? NL.formatDateTime(ms) : '—'; },
     fmtDate: function (ms) { return ms ? NL.formatDateShort(ms) : '—'; },

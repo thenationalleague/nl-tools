@@ -8,7 +8,7 @@ retired — see [Cutover](#cutover).
 |---|---|---|---|
 | `/programme/` | **The 72 clubs** | their 6-character passcode | Browse and download **every** club's folder. Upload, organise into folders, and remove files **in their own folder only** |
 | `/programme/` | **NL commercial** | the 73rd (National League) passcode | Everything a club can do, in the **National League** folder |
-| `/programme/admin/` | **NL admin/superadmin** | **portal login** (auth-guard, `media-programme`) | Seed/sync the roster, see and regenerate every passcode, export the access CSV, restore or permanently delete removed files, read the audit trail |
+| `/programme/admin/` | **NL admin/superadmin** | **portal login** (auth-guard, `media-programme`) | Seed/sync the roster, see and regenerate every passcode, export the access CSV, restore or permanently delete removed files, generate previews for images uploaded before previews existed, read the audit trail |
 
 ## The model
 
@@ -99,6 +99,39 @@ last one.
 manual sort order is hidden state nobody maintains, and across 72 clubs it
 would mean 72 arrangements of the same three folders — the opposite of what
 someone hunting through another club's library needs.
+
+**Every image carries three sizes** — the canon crest vocabulary: a **thumb**
+(360px long edge) that the grid tiles draw, a **medium** (1600px long edge)
+that the eye/preview modal shows, and the **full** original, which only
+Download touches. Before this, a folder of twenty 20MB photos pulled 400MB
+just to draw its grid, for every visitor, every time.
+
+The two smaller sizes are **rendered in the browser at upload** (canvas) and
+their URLs stored on the file record beside `url` — *not* served by a resize
+endpoint. That is not a style choice: the org policy that blocks public
+invokers on new Cloud Run services (the same wall programmeEnter and
+getFootageUrl hit) makes an on-demand proxy URL unreachable from a browser,
+and the RTDB-trigger workaround pays ~15-20s of Eventarc latency per request,
+which is what killed the retired footage tool's previews. Pre-rendering at
+upload costs the uploader about a second and nobody else anything.
+
+Variants live at `programme/<CODE>/_previews/<fileId>-<tier>.<ext>` — inside
+the club's own prefix, so the existing Storage rules cover them unchanged
+(write-own, clubs cannot delete), and keyed on fileId alone, so moving a file
+between folders (an RTDB-only change) never strands them. PNG sources keep
+alpha and stay PNG; JPEG/WebP flatten to JPEG. A tier the source already fits
+inside is skipped. Types a canvas can't or shouldn't resize get no variants —
+SVG/TIFF/PSD/EPS/PDF because nothing decodes them there, GIF because a canvas
+keeps one frame and a tile that used to animate would freeze; tiles fall back
+to the original when an `<img>` can show it and to the type icon when it
+cannot — a PSD used to render as a broken image.
+
+**Images uploaded before previews existed get theirs from the console** —
+the *Generate previews* button on the Access pane fetches each original's
+bytes (same bucket CORS the zip feature needs), renders the tiers in the
+admin's browser under the `'*'` session, and stamps the record. `previewsAt`
+marks a file done — including "ran, image too small to need any" — so the
+button is idempotent and failures are retried on the next press.
 
 **Bulk download** is a stored (uncompressed) zip built in the browser —
 `programme/_zip.js`, no dependency and no build step. What goes in these packs
@@ -200,13 +233,19 @@ authRequests/<uid>         { code, admin?, at }   # own uid only; deleted by the
 authGrants/<uid>           { ok, customToken?, club?, error? }   # own uid only
 folders/<CODE>/<folderId>  { name, parentId?, createdAt }   parentId = subfolder
 files/<CODE>/<fileId>      { name, folderId, size, contentType, storagePath,
-                             url, uploadedAt }   folderId '_root' = top level
+                             url, uploadedAt,
+                             previewsAt?, thumbUrl?, thumbPath?,   # three-size
+                             mediumUrl?, mediumPath? }             # previews
+                           folderId '_root' = top level
 trash/<CODE>/<fileId>      { ...file, deletedAt }
 audit/<pushId>             { ts, actor, actorLabel, action, club?, detail? }
 rate/{uid/<uid>,global}    throttle counters (Admin SDK only)
 ```
 
-Bytes: Storage `programme/<CODE>/<folderId>/<fileId>-<name>`.
+Bytes: Storage `programme/<CODE>/<folderId>/<fileId>-<name>`, with preview
+tiers at `programme/<CODE>/_previews/<fileId>-<tier>.<ext>` (`_previews`
+cannot collide with a folderId — those are push keys, always `-`-led, or the
+literal `_root`).
 
 `<CODE>` is the **clubs-meta 3-letter code** (or `NL`) — deliberately the same
 key the portal uses. Getting this right on day one is free; getting it wrong

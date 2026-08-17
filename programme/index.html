@@ -3,6 +3,14 @@
 <head>
 <!--
   Programme Packs — club library (standalone, passcode)
+  Version: v1.17 (17/08/2026) — images carry three sizes (_shared.js v1.2):
+           tiles draw a 360px thumb, the eye shows a 1600px medium, Download
+           stays the untouched original. Both are rendered in the browser at
+           upload and their URLs stored on the record, so a folder of twenty
+           20MB photos no longer pulls 400MB to draw a grid. Files uploaded
+           before this get theirs from the console's Generate previews
+           button. A type no browser renders (PSD, TIFF) now shows its kind
+           icon instead of a broken image.
   Version: v1.16 (16/08/2026) — crest strings come from canon
            NL.clubs.crestImgHtml('thumb', {className}) with a
            NL.clubs.wireCrestImgs sweep after each render (PP.crestImgHtml is
@@ -746,15 +754,27 @@
      those download instead. */
   function canPreview(f) {
     var kind = PP.fileKind(f.contentType, f.name);
-    return !!f.url && (kind === 'image' || kind === 'pdf');
+    if (!f.url) return false;
+    if (kind === 'pdf') return true;
+    /* An image needs a source the browser can actually show — a rendered
+       medium, a renderable original, or a legacy record with no stored type
+       (the old benefit of the doubt). A PSD's eye used to open a modal with
+       a broken image in it; now it simply offers Download instead. */
+    return kind === 'image' &&
+      !!(f.mediumUrl || PP.previews.renderable(f.contentType) || !f.contentType);
   }
 
   function preview(code, fileId) {
     var f = (FILES[code] || {})[fileId];
     if (!f || !canPreview(f)) return;
     var kind = PP.fileKind(f.contentType, f.name);
+    /* The medium tier (1600px long edge), not the original: a preview's job
+       is "is this the one?", which a 20MB file answers no better than a
+       400KB one. Download below is the untouched original. Files without a
+       medium (small enough not to need one, or uploaded before previews
+       existed) show the original, which is what this always did. */
     var body = kind === 'image'
-      ? '<img src="' + esc(f.url) + '" alt="' + esc(f.name) + '" class="prev__img">'
+      ? '<img src="' + esc(f.mediumUrl || f.url) + '" alt="' + esc(f.name) + '" class="prev__img">'
       /* An <iframe> hands the PDF to the browser's own viewer. Some mobile
          browsers have none and will offer a download instead — which is the
          same thing the Download button does, so the fallback is harmless.
@@ -802,8 +822,18 @@
 
   function fileTile(f, code, writable, isNL) {
     var kind = PP.fileKind(f.contentType, f.name);
-    var art = (kind === 'image' && f.url)
-      ? '<img src="' + esc(f.url) + '" alt="" loading="lazy">'
+    /* Thumb first — a 170px tile must not cost a 20MB download. Without one
+       (uploaded before previews existed, or generation failed) fall back to
+       the original, but only when an <img> can actually show it: a PSD or
+       TIFF used to sit here as a broken image. A record with no stored type
+       predates canonicalisation — give it the old benefit of the doubt. */
+    var artSrc = null;
+    if (kind === 'image' && f.url) {
+      artSrc = f.thumbUrl ||
+        ((PP.previews.renderable(f.contentType) || !f.contentType) ? f.url : null);
+    }
+    var art = artSrc
+      ? '<img src="' + esc(artSrc) + '" alt="" loading="lazy">'
       : '<span class="tile__icon" aria-hidden="true">' + PP.kindIcon(kind) + '</span>';
     return '<div class="tile' + (sel[f.id] ? ' is-picked' : '') + '" tabindex="0" role="button"' +
       ' data-pick="' + esc(f.id) + '" aria-pressed="' + (sel[f.id] ? 'true' : 'false') + '"' +
@@ -1507,6 +1537,15 @@
       cacheControl: 'public,max-age=3600'
     });
 
+    /* Previews render while the original uploads, so the record lands already
+       carrying its thumb/medium URLs and a tile never has to pull the full
+       file. A hung decode must not hang the upload: 20s and it ships without
+       previews, which the console's Generate previews button can add later. */
+    var madePreviews = Promise.race([
+      PP.previews.make(file, type),
+      new Promise(function (r) { setTimeout(function () { r(null); }, 20000); })
+    ]).catch(function () { return null; });
+
     task.on('state_changed', function (snap) {
       var pct = snap.totalBytes ? snap.bytesTransferred / snap.totalBytes : 0;
       fill.style.transform = 'scaleX(' + pct + ')';
@@ -1522,17 +1561,23 @@
     }, function () {
       /* Store the download URL on the record at upload time. Rendering a
          folder otherwise means one getDownloadURL round-trip per file, which
-         is what makes a 60-file folder feel broken. */
-      task.snapshot.ref.getDownloadURL().then(function (url) {
-        return PP.ref('files/' + code + '/' + fileId).set({
+         is what makes a 60-file folder feel broken. Preview URLs are stored
+         alongside for the same reason. Their upload waits here so the record
+         is written once, complete — never a flash of 20MB tile art. */
+      var previewFields = madePreviews.then(function (made) {
+        if (!made) return {};
+        return PP.previews.store(code, fileId, made).catch(function () { return {}; });
+      });
+      Promise.all([task.snapshot.ref.getDownloadURL(), previewFields]).then(function (got) {
+        return PP.ref('files/' + code + '/' + fileId).set(Object.assign({
           name: file.name.slice(0, 160),
           folderId: folderId,
           size: file.size,
           contentType: type,
           storagePath: path,
-          url: url,
+          url: got[0],
           uploadedAt: PP.TS()
-        });
+        }, got[1]));
       }).then(function () {
         row.remove();
         PP.audit('upload', { club: code, detail: file.name });
