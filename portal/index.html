@@ -1,11 +1,24 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.101 (17/08/2026)
+  Version: v5.102 (17/08/2026)
   Date: 09/04/2026
   File: /portal/index.html
 
   Changelog:
+  v5.102 (17/08/2026) — Access levels become per-tool. New toolLevels(tool) reads
+    a `levels` array from the tool's registry record and the sliders render only
+    those rungs, so a tool with no admin tier stops offering "Manage" — a control
+    that, on most tools, sets a value nothing reads. Absent/malformed `levels`
+    falls back to the full three, so an unmigrated or badly-edited record behaves
+    exactly as before and can never silently remove an access state. Only a
+    PREFIX of off/access/admin is honoured (drop the top rung, never punch a hole).
+    Each stop now carries data-level and the readers use it instead of mapping
+    stop INDEX back to ACC_LEVELS, which only held while every slider had three
+    stops. setSliderLevel clamps to the highest rung a tool has, so a dept
+    "set all to Manage" no longer leaves two-level tools with nothing selected.
+    Inert until records declare `levels`.
+
   v5.101 (17/08/2026) — Access model step 3: the per-tool level control is
     rebuilt, and its words change. Levels are now Off / Use / Manage (stored
     values off/access/admin are untouched) so "admin" is left to mean the ROLE
@@ -4629,7 +4642,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
       if (idx === -1) idx = 0;
 
       slider.querySelectorAll('.acc-slider__stop').forEach(function(stop, si) {
-        var stopLevel = ACC_LEVELS[si];
+        var stopLevel = stop.dataset.level || ACC_LEVELS[si];
         stop.classList.remove('acc-slider__stop--active', 'acc-slider__stop--filled', 'acc-slider__stop--padlocked');
         var lbl  = stop.querySelector('.acc-slider__label');
         if (constraints.capAccess && stopLevel === 'admin') {
@@ -4699,7 +4712,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
       /* Read current visual level from slider */
       var level = 'off';
       slider.querySelectorAll('.acc-slider__stop').forEach(function(s, si) {
-        if (s.classList.contains('acc-slider__stop--active')) level = ACC_LEVELS[si];
+        if (s.classList.contains('acc-slider__stop--active')) level = s.dataset.level || ACC_LEVELS[si];
       });
 
       var def = roleDefaultLevel(toolKey, role);
@@ -4879,7 +4892,7 @@ function buildAccordionItem(uid, u, depts, deptMap) {
         slider.className = 'acc-slider' + (fullLock ? ' acc-slider--locked' : '');
 
         slider.querySelectorAll('.acc-slider__stop').forEach(function(stop, si) {
-          var stopLevel = ACC_LEVELS[si];
+          var stopLevel = stop.dataset.level || ACC_LEVELS[si];
           stop.classList.remove('acc-slider__stop--active', 'acc-slider__stop--filled', 'acc-slider__stop--padlocked');
           var lbl  = stop.querySelector('.acc-slider__label');
           var padlock = fullLock || (restricted && stopLevel === 'admin');
@@ -5147,6 +5160,21 @@ function buildAccordionItem(uid, u, depts, deptMap) {
 
 /* ---- Access slider ------------------------------------------------------- */
 var ACC_LEVELS = ['off', 'access', 'admin'];
+
+/* Which levels does THIS tool actually have? Most tools have no admin tier —
+   editing follows the person's role, or there is nothing to administer at all —
+   so offering "Manage" there is a control that does nothing. A tool declares
+   its ladder in the registry as `levels`; absent means the full three, so an
+   unmigrated record behaves exactly as before.
+   Only a PREFIX of ACC_LEVELS is meaningful: you can drop the top rung, never
+   punch a hole in the middle. Anything else is ignored in favour of the full
+   set — a malformed record must not silently remove access states. */
+function toolLevels(tool) {
+  var declared = tool && tool.levels;
+  if (!Array.isArray(declared) || !declared.length) return ACC_LEVELS;
+  var isPrefix = declared.every(function(l, i) { return l === ACC_LEVELS[i]; });
+  return isPrefix ? declared : ACC_LEVELS;
+}
 /* Stored values stay off/access/admin — only the words change. "Admin" meant
    three things at once (a league role, a per-tool power level, and "edits own
    club"), so the per-tool level gets its own plain vocabulary and "admin" is
@@ -5169,17 +5197,24 @@ function syncAccAria(slider) {
 /* Set an acc-slider to a given level, updating dot classes.
    Used by Restore defaults to reset all sliders at once. */
 function setSliderLevel(slider, level) {
-  var idx = ACC_LEVELS.indexOf(level);
-  if (idx === -1) idx = 0;
+  /* Match against the stops this slider actually has, not the global ladder.
+     A "set all" can ask for 'admin' on a tool that has no admin tier — clamp to
+     the highest rung that exists rather than leaving nothing selected. */
+  var stops = slider.querySelectorAll('.acc-slider__stop');
+  var levels = Array.prototype.map.call(stops, function(s, si) {
+    return s.dataset.level || ACC_LEVELS[si];
+  });
+  var idx = levels.indexOf(level);
+  if (idx === -1) idx = (ACC_LEVELS.indexOf(level) > 0) ? levels.length - 1 : 0;
+  var applied = levels[idx] || 'off';
 
-  slider.querySelectorAll('.acc-slider__stop').forEach(function(stop, si) {
+  stops.forEach(function(stop, si) {
     stop.classList.remove('acc-slider__stop--active', 'acc-slider__stop--filled', 'acc-slider__stop--padlocked');
-    var lbl  = stop.querySelector('.acc-slider__label');
     if (si === idx) stop.classList.add('acc-slider__stop--active');
   });
   syncAccAria(slider);
 
-  slider.dataset.previewLevel = level;
+  slider.dataset.previewLevel = applied;
 
   /* Reset the dept set-all slider */
   var dept = slider.dataset.dept;
@@ -5195,9 +5230,14 @@ function buildAccSlider(uid, toolKey, currentLevel, defaultLevel, locked, clubLo
   wrap.dataset.dept = dept;
   wrap.setAttribute('role', 'radiogroup');
   wrap.setAttribute('aria-label', 'Access level');
-  var currentIdx = ACC_LEVELS.indexOf(currentLevel);
-  if (currentIdx === -1) currentIdx = 0;
-  var defaultIdx = ACC_LEVELS.indexOf(defaultLevel);
+  /* Render only the levels this tool actually has (see toolLevels). If a stored
+     value sits above the tool's ladder — a legacy 'admin' on a tool that has no
+     admin tier — it is clamped to the top rung that exists, so the control can
+     never display a state it cannot represent. */
+  var LEVELS = toolLevels(STATE.tools && STATE.tools[toolKey]);
+  var currentIdx = LEVELS.indexOf(currentLevel);
+  if (currentIdx === -1) currentIdx = (ACC_LEVELS.indexOf(currentLevel) > 0) ? LEVELS.length - 1 : 0;
+  var defaultIdx = LEVELS.indexOf(defaultLevel);
 
   /* The old build appended an .acc-slider__track plus a __track-fill child, and
      called an updateFill() whose body computed a percentage then threw it away.
@@ -5214,7 +5254,7 @@ function buildAccSlider(uid, toolKey, currentLevel, defaultLevel, locked, clubLo
      or superadmin's own slider). In those cases stops get padlocks + no handler.
      For normal edit-mode locking, `locked` just adds the CSS class -- handlers
      are always wired and check `_editUid` before acting. */
-  ACC_LEVELS.forEach(function(level, idx) {
+  LEVELS.forEach(function(level, idx) {
     /* Permanent padlock: truly restricted stop (superadmin slider, or club admin cap) */
     /* Padlock: permanently restricted stops.
        locked=true means the whole slider is structurally off-limits (superadmin, staff-locked).
@@ -5234,6 +5274,10 @@ function buildAccSlider(uid, toolKey, currentLevel, defaultLevel, locked, clubLo
     label.className = 'acc-slider__label';
     label.textContent = ACC_LABELS[level];
     stop.appendChild(label);
+    /* Carry the level on the element. Several readers used to map stop INDEX
+       back to ACC_LEVELS, which only worked while every slider had all three
+       stops. */
+    stop.dataset.level = level;
 
     /* Semantics + keyboard. These were plain divs with a click handler, so the
        whole control was mouse-only and silent to a screen reader. */
@@ -5720,11 +5764,13 @@ function buildInviteSlider(toolKey, currentLevel, clubLocked, dept, container) {
   wrap.dataset.toolkey = toolKey;
   /* Cap club users at access */
   if (clubLocked && currentLevel === 'admin') currentLevel = 'access';
-  var currentIdx = ACC_LEVELS.indexOf(currentLevel);
-  if (currentIdx === -1) currentIdx = 0;
+  /* Only the levels this tool has — see toolLevels. */
+  var LEVELS = toolLevels(STATE.tools && STATE.tools[toolKey]);
+  var currentIdx = LEVELS.indexOf(currentLevel);
+  if (currentIdx === -1) currentIdx = (ACC_LEVELS.indexOf(currentLevel) > 0) ? LEVELS.length - 1 : 0;
   wrap.setAttribute('role', 'radiogroup');
   wrap.setAttribute('aria-label', 'Access level');
-  ACC_LEVELS.forEach(function(level, idx) {
+  LEVELS.forEach(function(level, idx) {
     var isPadlocked = clubLocked && level === 'admin';
     var stop = document.createElement('div');
     stop.className = 'acc-slider__stop';
@@ -5738,6 +5784,7 @@ function buildInviteSlider(toolKey, currentLevel, clubLocked, dept, container) {
     label.className = 'acc-slider__label';
     label.textContent = ACC_LABELS[level];
     stop.appendChild(label);
+    stop.dataset.level = level;
 
     stop.setAttribute('role', 'radio');
     stop.setAttribute('aria-checked', String(!isPadlocked && idx === currentIdx));
