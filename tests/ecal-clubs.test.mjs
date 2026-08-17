@@ -98,6 +98,34 @@ for (const [path, label] of BUILDS) {
   });
 }
 
+test('splash: the sync-link map matches clubs-meta exactly', () => {
+  const src = readFileSync(join(REPO, 'ecal/nl-ecal-splash.js'), 'utf8');
+  const body = src.slice(src.indexOf('var LINKS'), src.indexOf('};', src.indexOf('var LINKS')));
+  const built = new Map([...body.matchAll(/"([^"]+)"\s*:\s*"(https:\/\/[^"]+)"/g)].map(([, n, u]) => [n, u]));
+
+  assert.ok(built.size > 0, 'no LINKS map found in the splash — has the literal moved?');
+
+  const truthLinks = new Map();
+  for (const club of currentClubs) {
+    const url = club?.ecal?.link;
+    if (url) truthLinks.set(club.name, url);
+  }
+
+  const missing = [...truthLinks.keys()].filter((n) => !built.has(n));
+  const extra = [...built.keys()].filter((n) => !truthLinks.has(n));
+  assert.deepEqual(missing, [], `in clubs-meta but not in LINKS: ${missing.join(', ')}`);
+  assert.deepEqual(extra, [], `in LINKS but not in clubs-meta: ${extra.join(', ')}`);
+
+  const wrong = [...truthLinks].filter(([n, u]) => built.get(n) !== u)
+    .map(([n, u]) => `${n}: splash has ${built.get(n)}, clubs-meta has ${u}`);
+  assert.deepEqual(wrong, [], `sync-link drift:\n  ${wrong.join('\n  ')}`);
+});
+
+test('every current-season club has an eCal sync link', () => {
+  const without = currentClubs.filter((c) => !c?.ecal?.link).map((c) => c.name);
+  assert.deepEqual(without, [], `missing ecal.link: ${without.join(', ')}`);
+});
+
 test('the splash and the banner agree with each other', () => {
   const [a, b] = BUILDS.map(([p]) => mapFromSource(p));
   const disagree = [...a].filter(([n, id]) => b.get(n) !== id)

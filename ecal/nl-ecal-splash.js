@@ -1,6 +1,6 @@
 /* ============================================================================
    NL ECAL Club-Aware Splash / Interstitial — external script (GTM-safe)
-   Version: v9.1
+   Version: v9.2
    Date: 17/08/2026
    Commit this to the repo as:  ecal/nl-ecal-splash.js
    Deploy via GTM Custom HTML tag (All Pages) with ONE line:
@@ -8,26 +8,44 @@
    (v8.5: served from nl.tools, our own domain. The old jsdelivr URL died when
    the repo moved to the org as nl-tools — and jsdelivr cannot serve a private
    repo, which this one is about to become. The GTM tag must be repointed.)
-   (v8.6: the ad click yields to ECAL's modal robustly — our overlay can no
-   longer intercept the clicks inside ECAL's popup. See the wiring below.)
    (No inline JS in the tag => GTM's HTML validator has nothing to flag.)
 
    Behaviour identical to the v7.1 inline build:
    - Site-wide, fires on any first page of the day; once per DAY per device.
    - Skips ticketing/checkout + sign-in/account (CONFIG.EXCLUDE_PATHS).
    - Club from NL+ SSO JWT (cookie _gc_sa_sso_access, claim favourite_team).
-   - Square "<CLUB> - 1x1.png" centred as the ECAL sync button; dismiss via
-     X / backdrop / Esc; clicking the ad fires ECAL and drops the dimmer.
+   - Square "<CLUB> - 1x1.jpg" centred as the ad; dismiss via X / backdrop /
+     Esc; clicking the ad opens that club's ECAL calendar in a new tab.
    - GA4 dataLayer events: nl_splash_shown | _dismissed | _synced (club-tagged).
 
    Preview: nlEcalSetTestClub('Torquay United') then reload;
             ?ecalSplash=1 forces past the daily cap; ?ecalDebug=1 traces.
 
-   NOTE ON UPDATES: jsDelivr caches @main aggressively. After pushing a change,
-   purge it via https://www.jsdelivr.com/tools/purge (or append ?v=N to the src
-   during testing) so the new version is served.
+   NOTE ON UPDATES: GitHub Pages caches this file, so a push alone does not
+   reach fans. Bump the ?v= on the GTM tag's src to the version number in this
+   header (v9.2 => ?v=92) and publish the container; that query is what makes
+   the new build load. https://nl.tools/ecal/nl-ecal-splash.js?probe=1 shows
+   which version is actually being served.
 
    CHANGELOG
+   v9.2 — The ad is a LINK. ECAL's widget SDK is gone from this file entirely.
+          Six versions (v8.6-v9.1) tried to make their widget bind a button we
+          inject late. It cannot be relied on: v9.0's console showed ECAL ready,
+          initButtons() already called, and a fast click still opening nothing —
+          there is internal setup in their SDK we cannot see or wait on. Every
+          "fix" was a guess at someone else's timing.
+          ECAL issue a plain short link per calendar (clubs-meta ecal.link, all
+          72 clubs). Clicking the ad now opens that URL. No script to boot, no
+          DOM scan, no binding, no race: the click always does something.
+          Removed: bootEcal, whenEcalReady, bindEcalButton, awaitEcalModal, the
+          ecal-sync-widget-button class and every data-ecal attribute, plus the
+          now-dead ECAL_APIKEY / ECAL_SCRIPT / NL_WIDGET_ID config.
+          NL_LINK carries the league-wide calendar for signed-out fans, set by
+          hand because clubs-meta has no league-level entry. If it is ever
+          emptied the splash stays SILENT for those fans rather than showing an
+          advert that does nothing.
+          tests/ecal-clubs.test.mjs now guards the link map against clubs-meta
+          the same way it guards the ids.
    v9.1 — Stop depending on ECAL binding reliably; survive it not doing so.
           v9.0 proved readiness was NOT the problem: the console showed ECAL
           ready (widgets loaded), initButtons() already called BEFORE the reveal,
@@ -134,15 +152,23 @@
     CLAIM:         "favourite_team",
     IMAGE_BASE:    "https://nl.tools/ecal/",
     IMAGE_SUFFIX:  " - 1x1.jpg",
-    ECAL_APIKEY:   "sMJhxXuD7phKwU4rcepysZh2E4oJwM6ahS5hzho1YM62e82018",
-    ECAL_SCRIPT:   "//sync.ecal.com/v2/ecal.widget.js",
-    NL_WIDGET_ID:  "6a3c898fbbf8c400029e0a2c",
+    /* The league-wide sync link, used for signed-out fans and any club we
+       cannot match — which is most impressions. clubs-meta has a link for all
+       72 clubs but nothing league-wide, so this one is set by hand, from the
+       ECAL dashboard's share link for the National League calendar. If it is
+       ever emptied the splash stays silent for those fans rather than showing
+       a dead advert (see decideAndShow). */
+    NL_LINK:       "https://ql.e-c.al/4eIGd3o",
     TEST_KEY:      "nlEcalTestClub",
     SEEN_KEY:      "nlEcalSplashSeen",
     ANALYTICS:     true,
     DEBUG:         false
   };
 
+  /* Canonical club-name list. The widget ids are no longer used for anything —
+     the ad is a plain link now — but this stays as the name index that club
+     matching works from, and tests/ecal-clubs.test.mjs keeps it honest against
+     clubs-meta so a promoted or relegated club cannot silently drift. */
   var CLUBS = {
     "AFC Fylde":"6a4372f17a225e0002199e37","AFC Telford United":"6a44d20713ebdc00024668ab",
     "AFC Totton":"6a475ef36e53950002294433","Aldershot Town":"6a4341131b9dd5000258084c",
@@ -182,6 +208,49 @@
     "Worthing":"6a438586d11d2700026745a8","Yeovil Town":"6a4385d0c8c7900002f2eab5"
   };
 
+  /* Club -> ECAL's own short sync link, generated from clubs-meta.json (the
+     source of truth) for the current season's 72 clubs. These are issued by
+     ECAL and are plain URLs: no widget binding, no DOM scan, no SDK timing.
+     That is the entire point — see the v9.2 note above. */
+  var LINKS = {
+    "AFC Fylde":"https://ql.e-c.al/4feRrNF","AFC Telford United":"https://ql.e-c.al/4xXzJX9",
+    "AFC Totton":"https://ql.e-c.al/4p0PrNj","Aldershot Town":"https://ql.e-c.al/4vFK6O0",
+    "Altrincham":"https://ql.e-c.al/4vDRwBl","Barrow":"https://ql.e-c.al/4v72GgT",
+    "Bedford Town":"https://ql.e-c.al/4biXDme","Billericay Town":"https://ql.e-c.al/4v75Dht",
+    "Boreham Wood":"https://ql.e-c.al/4wbsZDs","Boston United":"https://ql.e-c.al/4vG8kHW",
+    "Brackley Town":"https://ql.e-c.al/4gPTXfq","Braintree Town":"https://ql.e-c.al/4fbAoNn",
+    "Buxton":"https://ql.e-c.al/4gbm9Jx","Carlisle United":"https://ql.e-c.al/4v2yYtq",
+    "Chelmsford City":"https://ql.e-c.al/4vF7080","Chesham United":"https://ql.e-c.al/4wmqsGQ",
+    "Chester":"https://ql.e-c.al/4gPPI3q","Chorley":"https://ql.e-c.al/4v6oWYc",
+    "Dagenham & Redbridge":"https://ql.e-c.al/4eVdGYq","Darlington":"https://ql.e-c.al/4gaDqCB",
+    "Dorking Wanderers":"https://ql.e-c.al/4wo6U4R","Dover Athletic":"https://ql.e-c.al/445LnSn",
+    "Eastleigh":"https://ql.e-c.al/4wh92uY","Ebbsfleet United":"https://ql.e-c.al/4vbnFz0",
+    "FC Halifax Town":"https://ql.e-c.al/3SPAK3x","Farnborough":"https://ql.e-c.al/4wrWlhe",
+    "Farnham Town":"https://ql.e-c.al/4pfDjbz","Folkestone Invicta":"https://ql.e-c.al/44C79NA",
+    "Forest Green Rovers":"https://ql.e-c.al/4bgYow6","Gateshead":"https://ql.e-c.al/4eAATR0",
+    "Hampton & Richmond Borough":"https://ql.e-c.al/4eSeo9a","Harborough Town":"https://ql.e-c.al/4eNY0WX",
+    "Harrogate Town":"https://ql.e-c.al/4v3iykk","Hartlepool United":"https://ql.e-c.al/3SEy3BQ",
+    "Hebburn Town":"https://ql.e-c.al/4ePWcNd","Hednesford Town":"https://ql.e-c.al/4wnQQA7",
+    "Hemel Hempstead Town":"https://ql.e-c.al/3R6IygV","Hereford":"https://ql.e-c.al/3Subwb0",
+    "Hornchurch":"https://ql.e-c.al/3QR7hpo","Horsham":"https://ql.e-c.al/3RkfX7T",
+    "Kidderminster Harriers":"https://ql.e-c.al/4g9B7zG","King's Lynn Town":"https://ql.e-c.al/4oUE9Ki",
+    "Macclesfield":"https://ql.e-c.al/4vEArHf","Maidenhead United":"https://ql.e-c.al/4gTSHrH",
+    "Maidstone United":"https://ql.e-c.al/4eDPif9","Marine":"https://ql.e-c.al/4faQyqi",
+    "Merthyr Town":"https://ql.e-c.al/4eFBr8h","Morecambe":"https://ql.e-c.al/4vHQxjJ",
+    "Oxford City":"https://ql.e-c.al/4b3fUnz","Radcliffe":"https://ql.e-c.al/4v4lEVa",
+    "Salisbury":"https://ql.e-c.al/4eSF0qz","Scarborough Athletic":"https://ql.e-c.al/4phjpNn",
+    "Scunthorpe United":"https://ql.e-c.al/4wabROy","Slough Town":"https://ql.e-c.al/4v2ERXq",
+    "Solihull Moors":"https://ql.e-c.al/4wiBcGa","South Shields":"https://ql.e-c.al/447b3xT",
+    "Southend United":"https://ql.e-c.al/4wm5lEw","Southport":"https://ql.e-c.al/4vb6Qo2",
+    "Spalding United":"https://ql.e-c.al/4gV7PVE","Spennymoor Town":"https://ql.e-c.al/44KrsbH",
+    "Sutton United":"https://ql.e-c.al/4wm5xne","Tamworth":"https://ql.e-c.al/4gTasr0",
+    "Tonbridge Angels":"https://ql.e-c.al/4vLu9WI","Torquay United":"https://ql.e-c.al/4gelerU",
+    "Truro City":"https://ql.e-c.al/3TeGGDk","Walton & Hersham":"https://ql.e-c.al/4av3nZV",
+    "Wealdstone":"https://ql.e-c.al/4voFf2V","Weston-super-Mare":"https://ql.e-c.al/44bsXzx",
+    "Woking":"https://ql.e-c.al/3RaOCF5","Worksop Town":"https://ql.e-c.al/3SCV8ox",
+    "Worthing":"https://ql.e-c.al/4v4l220","Yeovil Town":"https://ql.e-c.al/44Co0Qt"
+  };
+
   var qs = location.search,
       DEBUG = CONFIG.DEBUG || /[?&]ecalDebug=1/.test(qs),
       FORCE = /[?&]ecalSplash=1/.test(qs);
@@ -218,69 +287,14 @@
     }catch(e){} }
 
   /* ---- ECAL ---- */
-  var booted=false;
-  function bootEcal(){ if(booted) return; booted=true;
-    if(document.querySelector('script[src*="ecal.widget.js"]')) return;
-    var s=document.createElement("script"); s.src=CONFIG.ECAL_SCRIPT; s.setAttribute("data-ecal-apikey",CONFIG.ECAL_APIKEY); document.body.appendChild(s); }
-
-  /* ECAL binds .ecal-sync-widget-button elements when its script scans the DOM,
-     and it does not watch for new ones. Our button is injected late — after
-     DOMContentLoaded, a 650ms delay and up to 2.5s of JWT wait — so on any page
-     that ALREADY has ECAL loaded (every page carrying the banner advert, where
-     bootEcal returns early by design) the scan happened long before our button
-     existed. It was therefore never bound: clicking it hit only our own close
-     handler, so the splash just closed and no calendar modal ever opened.
-
-     EcalWidget.initButtons() re-scans and picks it up. Confirmed live: running
-     it by hand and then clicking the ad opens the modal.
-
-     Polled because ECAL may still be loading when we show — on a page without
-     the banner we have only just appended the script ourselves. Give up quietly
-     after ~6s rather than spin. */
-  /* ECAL is usable once its widget data has loaded — initButtons existing is not
-     enough (that is v8.8's mistake). Observed live: widgets arrive within about
-     400-800ms of the script being appended. Capped at ~3s so a slow or failed
-     ECAL delays the ad rather than suppressing it; cb(false) means show it
-     anyway and let the re-scan net catch up. */
-  function whenEcalReady(cb){
-    var tries = 0, MAX = 15;   /* ~3s */
-    (function poll(){
-      var E = window.EcalWidget;
-      var count = E && E.widgets ? (E.widgets.length || Object.keys(E.widgets).length || 0) : 0;
-      if (E && typeof E.initButtons === "function" && count > 0) {
-        if (DEBUG) console.log("[NL ECAL Splash] ECAL ready after " + (tries * 200) + "ms — widgets: " + count);
-        return cb(true);
-      }
-      if (++tries >= MAX) {
-        if (DEBUG) console.warn("[NL ECAL Splash] ECAL not ready after ~3s — showing anyway");
-        return cb(false);
-      }
-      setTimeout(poll, 200);
-    })();
+  /* No SDK any more. v8.6 to v9.1 all tried to make ECAL's widget bind a button
+     we inject late; the console eventually proved it could not be relied on even
+     when their own readiness signals said yes. ECAL issue a plain short link per
+     calendar, so the ad is now simply a link. Nothing to boot, scan, bind or
+     race — it either opens or the browser tells the fan why. */
+  function linkFor(display){
+    return (display && LINKS[display]) || CONFIG.NL_LINK || "";
   }
-
-  function bindEcalButton(){
-    var tries = 0, MAX = 24;   /* ~10s */
-    (function attempt(){
-      var E = window.EcalWidget;
-      if (E && typeof E.initButtons === "function") {
-        try {
-          E.initButtons();
-          if (DEBUG) console.log("[NL ECAL Splash] initButtons() attempt " + (tries + 1) +
-            " — widgets loaded: " + ((E.widgets && E.widgets.length) || 0));
-        } catch(e){ if(DEBUG) console.warn("[NL ECAL Splash] initButtons() threw", e); }
-      }
-      /* Keep re-scanning while the splash is open. initButtons exists the moment
-         ECAL's script parses, but its widget data loads asynchronously after
-         that (see boot/continueBoot/loadButtons in their API), so calling it
-         once — the moment it appears — scans with nothing loaded and binds
-         nothing. That was v8.8: the log said the call succeeded while the
-         button stayed unbound. The call is idempotent, so simply repeating it
-         costs nothing and catches whichever tick ECAL finishes booting on. */
-      if (++tries < MAX && isOpen) setTimeout(attempt, 400);
-    })();
-  }
-
   function fileFor(d){ return CONFIG.IMAGE_BASE + encodeURIComponent(d + CONFIG.IMAGE_SUFFIX); }
 
   /* ---- inject styles ---- */
@@ -311,8 +325,7 @@
         '<div class="nl-splash__backdrop" data-close="backdrop"></div>'+
         '<div class="nl-splash__modal" role="dialog" aria-modal="true" aria-label="National League offer">'+
           '<button type="button" class="nl-splash__x" id="nl-splash-x" aria-label="Close">&times;</button>'+
-          '<button type="button" id="nl-splash-btn" class="ecal-sync-widget-button nl-splash__adbtn" '+
-            'data-ecal-widget-id="'+CONFIG.NL_WIDGET_ID+'" data-ecal-no-styling '+
+          '<button type="button" id="nl-splash-btn" class="nl-splash__adbtn" '+
             'aria-label="Sync National League fixtures to your calendar">'+
             '<img id="nl-splash-img" class="nl-splash__img" '+
               'src="'+fileFor("National League")+'" '+
@@ -328,8 +341,6 @@
 
   function applyClub(club){
     curDisplay = club || "National League";
-    var widgetId = club ? CLUBS[club] : CONFIG.NL_WIDGET_ID;
-    btn.setAttribute("data-ecal-widget-id", widgetId);
     btn.setAttribute("aria-label","Sync "+curDisplay+" fixtures to your calendar");
     img.alt="Sync "+curDisplay+" fixtures to your calendar";
     img.src=fileFor(curDisplay);
@@ -376,22 +387,16 @@
   function decideAndShow(club, via, signedIn){
     curSignedIn = !!signedIn;
     if(DEBUG) debugDump(club, via);
-    /* Order matters: applyClub sets the final widget id on the button, so the
-       button must be complete before ECAL is asked to bind it.
-
-       We then wait for ECAL to finish booting BEFORE revealing the ad. v8.9
-       showed the ad immediately and re-scanned in the background, which left a
-       few hundred ms where the ad was visible and clickable but not yet wired:
-       click in that window and it fell through to our own close handler, so the
-       splash shut with no modal. Showing a control before it works is the bug —
-       so the reveal now waits. Capped, because a fan seeing the ad late is far
-       better than never seeing it at all. */
-    applyClub(club); bootEcal();
-    whenEcalReady(function(ready){
-      if (ready) { try { window.EcalWidget.initButtons(); } catch(e){} }
-      open();
-      bindEcalButton();   /* safety net: keeps re-scanning while open */
-    });
+    /* Never show an ad that cannot do anything. If we have no sync link for this
+       club (or no National League link configured for the signed-out case), stay
+       silent rather than present a dead advert. */
+    var display = club || "National League";
+    if(!linkFor(display)){
+      if(DEBUG) console.warn("[NL ECAL Splash] no sync link for " + display + " — not showing");
+      return;
+    }
+    applyClub(club);
+    open();
   }
 
   function start(){
@@ -440,67 +445,18 @@
        the button and ECAL's handler never fired: the overlay faded and it "just
        closed" without opening. v8.7 removes the pointerdown hook; click alone is
        both sufficient and correct. */
-    function yieldToEcal(){
-      /* Get out of ECAL's way WITHOUT vanishing. The old version also removed
-         .nl-splash--in, which faded the ad out on click — so when ECAL ignored
-         the click (see below) the fan watched the ad disappear and nothing
-         happen. Now the overlay simply stops intercepting: ECAL's modal, when
-         it arrives, sits on top and is fully usable, and if it never arrives
-         the ad is still there to click again. */
-      root.style.pointerEvents = "none";
-      lockScroll(false);
-      cancelAuto();
-      document.removeEventListener("keydown", onKey, true);
-    }
-
-    /* Has ECAL put its own modal on the page? Matched loosely because we do not
-       control their markup — any sizeable ecal-flavoured node that is NOT ours.
-       Our own nodes are excluded explicitly: they are called nl-ecal-* and carry
-       ecal-sync-widget-button, so a naive "contains ecal" test matches us. */
-    function ecalModalPresent(){
-      var nodes = document.querySelectorAll('iframe[src*="ecal"], [class*="ecal"], [id*="ecal"]');
-      for (var i = 0; i < nodes.length; i++) {
-        var n = nodes[i];
-        if (root.contains(n) || n === root) continue;
-        if (n.offsetWidth > 240 && n.offsetHeight > 240) return true;
-      }
-      return false;
-    }
-
-    /* ECAL sometimes ignores the first click: the button is bound and its
-       widgets are loaded (the console proved both), yet nothing opens — there is
-       further internal setup we cannot see or wait on. Rather than keep guessing
-       at their readiness, watch for the modal and give the click one more go.
-       Nothing here traps the page: it always ends by closing. */
-    function awaitEcalModal(){
-      var t0 = Date.now(), retried = false;
-      (function poll(){
-        if (ecalModalPresent()) {
-          if (DEBUG) console.log("[NL ECAL Splash] ECAL modal opened after " + (Date.now() - t0) + "ms");
-          close("synced");
-          return;
-        }
-        var lapsed = Date.now() - t0;
-        if (!retried && lapsed > 700) {
-          retried = true;
-          if (DEBUG) console.log("[NL ECAL Splash] no modal after 700ms — re-binding and clicking again");
-          try { if (window.EcalWidget && window.EcalWidget.initButtons) window.EcalWidget.initButtons(); } catch(e){}
-          try { btn.click(); } catch(e){}
-        }
-        if (lapsed < 6000) setTimeout(poll, 150);
-        else { if (DEBUG) console.warn("[NL ECAL Splash] ECAL never opened — closing"); close("synced"); }
-      })();
-    }
-
-    /* Guarded so the programmatic retry click above passes straight through to
-       ECAL instead of re-entering our own handler. */
-    var clickHandled = false;
-    btn.addEventListener("click", function(){
-      if (clickHandled) return;
-      clickHandled = true;
+    /* The ad is a link. Open ECAL's sync page for this club, then close.
+       No SDK, no binding, no waiting: the click always does something. */
+    btn.addEventListener("click", function(e){
+      e.preventDefault();
+      var url = linkFor(curDisplay);
       track("synced");
-      yieldToEcal();
-      awaitEcalModal();
+      if (url) {
+        if (DEBUG) console.log("[NL ECAL Splash] opening " + url);
+        try { window.open(url, "_blank", "noopener,noreferrer"); }
+        catch(err){ location.href = url; }   /* popup blocked: same-tab is better than nothing */
+      }
+      close("synced");
     });
 
     setTimeout(start, CONFIG.SHOW_DELAY_MS);
