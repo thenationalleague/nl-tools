@@ -18,6 +18,9 @@
  *   <div data-nl-cup-live-test="eve"></div>    tomorrow's round — the MD-1 preview
  *   <div data-nl-cup-live-test="none"></div>   an empty day — renders nothing
  *   <div data-nl-cup-live-test="done"></div>   a finished card — also nothing
+ *
+ * Add data-nl-cup-live="top" to any marker above to also exercise the
+ * re-parent-to-top mode — the widget reads that attribute in both builds.
  */
 (function () {
   var marker = document.querySelector('[data-nl-cup-live-test]');
