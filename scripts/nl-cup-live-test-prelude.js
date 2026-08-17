@@ -15,6 +15,7 @@
  * Scenario comes off the marker div:
  *   <div data-nl-cup-live-test></div>          16 ties, every state at once
  *   <div data-nl-cup-live-test="one"></div>    a single tie — the solo band
+ *   <div data-nl-cup-live-test="eve"></div>    tomorrow's round — the MD-1 preview
  *   <div data-nl-cup-live-test="none"></div>   an empty day — renders nothing
  *   <div data-nl-cup-live-test="done"></div>   a finished card — also nothing
  */
@@ -75,8 +76,31 @@
     tie('Gateshead', 'Nottingham Forest PL2', -180, 'Postponed')
   ];
 
+  /* Minutes from now to a given UK-evening hour TOMORROW, computed rather than
+     a flat +24h so the scenario still lands on tomorrow when loaded late at
+     night. Local clock arithmetic — this harness runs on staff machines in
+     the UK, which is the one place anyone looks at it. */
+  function minsTomorrow(h) {
+    var now = new Date();
+    var t = new Date(now);
+    t.setDate(t.getDate() + 1);
+    t.setHours(h, 45, 0, 0);
+    return Math.round((t - now) / 60000);
+  }
+
+  /* Tomorrow's round as the eve preview shows it: pre ties only, a flat
+     Tomorrow pill in the cap, KO times, and no Watch button or "Watch from"
+     line however close the clock gets. */
+  var EVE = [
+    tie('Sutton United', 'Leicester City PL2', minsTomorrow(18)),
+    tie('Truro City', 'Southampton PL2', minsTomorrow(18)),
+    tie('Braintree Town', 'Ipswich Town U21', minsTomorrow(19)),
+    tie('Hartlepool United', 'Middlesbrough PL2', minsTomorrow(19))
+  ];
+
   var MATCHES = scenario === 'none' ? []
     : scenario === 'done' ? DONE
+    : scenario === 'eve' ? EVE
     : scenario === 'one' ? [tie('Hartlepool United', 'Middlesbrough PL2', 6)]
     : FULL;
 
