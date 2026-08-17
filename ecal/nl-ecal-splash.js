@@ -1,6 +1,6 @@
 /* ============================================================================
    NL ECAL Club-Aware Splash / Interstitial — external script (GTM-safe)
-   Version: v9.0
+   Version: v9.1
    Date: 17/08/2026
    Commit this to the repo as:  ecal/nl-ecal-splash.js
    Deploy via GTM Custom HTML tag (All Pages) with ONE line:
@@ -28,6 +28,22 @@
    during testing) so the new version is served.
 
    CHANGELOG
+   v9.1 — Stop depending on ECAL binding reliably; survive it not doing so.
+          v9.0 proved readiness was NOT the problem: the console showed ECAL
+          ready (widgets loaded), initButtons() already called BEFORE the reveal,
+          and a fast click still opened nothing. There is further internal setup
+          in their SDK we cannot see or wait on, so no amount of pre-checking
+          fixes it — three versions tried.
+          What made it look catastrophic was our own doing: the click faded our
+          overlay out, so when ECAL ignored the click the fan watched the ad
+          vanish and nothing happen. Now the click only makes the overlay
+          pointer-transparent — the ad STAYS on screen. ECAL's modal, when it
+          arrives, sits on top and is fully usable; if it never arrives the ad is
+          still there to click again.
+          Added awaitEcalModal(): watches for ECAL's modal, and if none appears
+          within 700ms re-binds and clicks once more (guarded so the retry does
+          not re-enter our handler). Always ends by closing — after the modal
+          opens, or at 6s — so the page can never be trapped.
    v9.0 — The ad is no longer shown until it works. v8.9 revealed it immediately
           and re-scanned in the background, which left a few hundred ms where the
           ad was visible and clickable but not yet bound by ECAL — click in that
@@ -425,14 +441,67 @@
        closed" without opening. v8.7 removes the pointerdown hook; click alone is
        both sufficient and correct. */
     function yieldToEcal(){
+      /* Get out of ECAL's way WITHOUT vanishing. The old version also removed
+         .nl-splash--in, which faded the ad out on click — so when ECAL ignored
+         the click (see below) the fan watched the ad disappear and nothing
+         happen. Now the overlay simply stops intercepting: ECAL's modal, when
+         it arrives, sits on top and is fully usable, and if it never arrives
+         the ad is still there to click again. */
       root.style.pointerEvents = "none";
-      root.classList.remove("nl-splash--in");
       lockScroll(false);
       cancelAuto();
-      isOpen = false;
       document.removeEventListener("keydown", onKey, true);
     }
-    btn.addEventListener("click", function(){ track("synced"); yieldToEcal(); });
+
+    /* Has ECAL put its own modal on the page? Matched loosely because we do not
+       control their markup — any sizeable ecal-flavoured node that is NOT ours.
+       Our own nodes are excluded explicitly: they are called nl-ecal-* and carry
+       ecal-sync-widget-button, so a naive "contains ecal" test matches us. */
+    function ecalModalPresent(){
+      var nodes = document.querySelectorAll('iframe[src*="ecal"], [class*="ecal"], [id*="ecal"]');
+      for (var i = 0; i < nodes.length; i++) {
+        var n = nodes[i];
+        if (root.contains(n) || n === root) continue;
+        if (n.offsetWidth > 240 && n.offsetHeight > 240) return true;
+      }
+      return false;
+    }
+
+    /* ECAL sometimes ignores the first click: the button is bound and its
+       widgets are loaded (the console proved both), yet nothing opens — there is
+       further internal setup we cannot see or wait on. Rather than keep guessing
+       at their readiness, watch for the modal and give the click one more go.
+       Nothing here traps the page: it always ends by closing. */
+    function awaitEcalModal(){
+      var t0 = Date.now(), retried = false;
+      (function poll(){
+        if (ecalModalPresent()) {
+          if (DEBUG) console.log("[NL ECAL Splash] ECAL modal opened after " + (Date.now() - t0) + "ms");
+          close("synced");
+          return;
+        }
+        var lapsed = Date.now() - t0;
+        if (!retried && lapsed > 700) {
+          retried = true;
+          if (DEBUG) console.log("[NL ECAL Splash] no modal after 700ms — re-binding and clicking again");
+          try { if (window.EcalWidget && window.EcalWidget.initButtons) window.EcalWidget.initButtons(); } catch(e){}
+          try { btn.click(); } catch(e){}
+        }
+        if (lapsed < 6000) setTimeout(poll, 150);
+        else { if (DEBUG) console.warn("[NL ECAL Splash] ECAL never opened — closing"); close("synced"); }
+      })();
+    }
+
+    /* Guarded so the programmatic retry click above passes straight through to
+       ECAL instead of re-entering our own handler. */
+    var clickHandled = false;
+    btn.addEventListener("click", function(){
+      if (clickHandled) return;
+      clickHandled = true;
+      track("synced");
+      yieldToEcal();
+      awaitEcalModal();
+    });
 
     setTimeout(start, CONFIG.SHOW_DELAY_MS);
   }
