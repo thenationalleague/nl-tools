@@ -1,11 +1,30 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.100 (16/08/2026)
+  Version: v5.101 (17/08/2026)
   Date: 09/04/2026
   File: /portal/index.html
 
   Changelog:
+  v5.101 (17/08/2026) — Access model step 3: the per-tool level control is
+    rebuilt, and its words change. Levels are now Off / Use / Manage (stored
+    values off/access/admin are untouched) so "admin" is left to mean the ROLE
+    alone rather than a role, a power level and "edits own club" at once.
+    The control itself was a pseudo-slider: three dots on a track that was
+    never drawn — its updateFill() computed a percentage and discarded it, and
+    .acc-slider__track had no CSS at all — labelled in 8px uppercase 800 and
+    operable only by mouse. It is now a segmented control: the standard
+    affordance for one-of-three, 11.5px labels, brand tokens throughout.
+    Accessibility: role=radiogroup/radio with aria-checked, a roving tabstop,
+    Space/Enter activation and a visible focus ring, where before it was divs
+    with click handlers — unreachable by keyboard and silent to screen readers.
+    A shared syncAccAria() keeps state correct across the preview/restore paths.
+    Canon: removed rgba(0,0,0,.03) and rgba(158,0,0,.15) in favour of the shade
+    ladder, and deleted the inline style.cssText / label.style.color writes —
+    including one setting label text to var(--border), a border token used as a
+    text colour, which failed contrast outright. All states verified against
+    WCAG AA (5.08:1 idle, 8.56:1 selected, 4.53:1 padlocked-on-navy).
+
   v5.100 (16/08/2026) — toolAudience() learns the canonical 'league' audience
     value. It only knew 'staff'/'club'/'meta', so after the registry rename the
     six league tools fell through to the legacy club-admin heuristic — which
@@ -572,6 +591,14 @@
 
   /* Public-facing "What's new" — shown when users click the version badge. */
   window.NL_CHANGELOG = [
+    {
+      date: '17/08/2026',
+      version: 'v5.101',
+      items: [
+        'Tool access levels are now Off / Use / Manage. "Use" is what "Access" was, "Manage" is what "Admin" was — renamed so "admin" only ever means a person\u2019s role, never a tool setting.',
+        'The access control is easier to read and can now be operated by keyboard.'
+      ]
+    },
     {
       date: '16/08/2026',
       version: 'v5.99',
@@ -1739,83 +1766,93 @@
 .role-club-staff { background: var(--off-white); color: var(--amber); border: 1px solid var(--amber-light); }
 .role-pending    { background: var(--off-white); color: var(--text-muted); border: 1px solid var(--border); }
 
-/* -- Four-position access slider ------------------------------------------ */
+/* -- Per-tool access level ------------------------------------------------- */
+/* Access level — a segmented control (Off / Use / Manage).
+   Was a pseudo-slider: three dots on a "track" that was never drawn (its
+   updateFill() was dead code), labelled in 8px uppercase and reachable only
+   by mouse. A segmented control is the standard affordance for one-of-three,
+   so it needs no learning, reads at a glance, and takes keyboard focus. */
 .acc-slider {
   display: inline-flex;
-  align-items: flex-start;
+  align-items: stretch;
+  gap: 2px;
+  padding: 2px;
   position: relative;
   flex-shrink: 0;
+  background: var(--off-white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
 
-/* The connecting track -- sits behind the node row */
-/* Each stop */
 .acc-slider__stop {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 3px;
+  justify-content: center;
   position: relative;
   z-index: 1;
   cursor: pointer;
-  padding: 0 10px 0;
-  border-radius: 4px;
-  transition: background 0.1s;
-  min-width: 54px;
-  max-width: 54px;
-  width: 54px;
+  padding: 5px 11px;
+  min-width: 60px;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  transition: background 0.15s ease, color 0.15s ease;
 }
-.acc-slider__stop:hover:not(.acc-slider__stop--locked) { background: rgba(0,0,0,0.03); }
-
-.acc-slider__node {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 2px solid var(--border);
-  background: var(--white);
-  transition: all 0.15s;
-  position: relative;
-  flex-shrink: 0;
+/* Hover must exclude the selected segment. Without the :not() below, this
+   selector (0,3,0) out-specifies .acc-slider__stop--active (0,1,0), so
+   hovering the selected segment repainted it near-white while its label
+   stayed white — invisible, about 1.05:1. The selected segment gets its own
+   hover instead: a step down the primary ladder, white text intact. */
+.acc-slider__stop:hover:not(.acc-slider__stop--padlocked):not(.acc-slider__stop--active) {
+  background: var(--navy-50);
 }
-
-/* Active node */
-.acc-slider__stop--active .acc-slider__node {
-  background: var(--primary);
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(158,0,0,0.15);
+.acc-slider__stop--active:hover { background: var(--primary-600); }
+.acc-slider__stop:focus-visible {
+  outline: 2px solid var(--navy);
+  outline-offset: 1px;
 }
 
-/* Nodes to the left of active */
-.acc-slider__stop--filled .acc-slider__node {
-  background: var(--white);
-  border-color: var(--border);
-}
+/* The dot is gone — the segment itself carries the state now. */
+.acc-slider__node { display: none; }
 
 .acc-slider__label {
-  font-size: 8px;
-  font-weight: 800;
-  font-variation-settings: 'wght' 800;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variation-settings: 'wght' 600;
+  letter-spacing: 0.005em;
   color: var(--text-muted);
-  transition: color 0.15s;
+  transition: color 0.15s ease;
   white-space: nowrap;
-  line-height: 1;
+  line-height: 1.25;
 }
-.acc-slider__stop--active .acc-slider__label { color: var(--primary); }
-.acc-slider__stop--filled .acc-slider__label { color: var(--text-muted); }
 
-/* Default ring removed */
+/* Selected — the one state that carries brand colour. */
+.acc-slider__stop--active { background: var(--primary); }
+.acc-slider__stop--active .acc-slider__label {
+  color: var(--white);
+  font-weight: 700;
+  font-variation-settings: 'wght' 700;
+}
 
-/* Locked -- interaction disabled but value still visible */
+/* Read-only (not in edit mode): value stays legible, affordance retreats. */
 .acc-slider--locked .acc-slider__stop { cursor: default; pointer-events: none; }
-/* Dimmed track fill when locked */
-.acc-slider--locked /* Active/filled stops: show value but slightly muted */
-.acc-slider--locked .acc-slider__stop--active .acc-slider__node { opacity: 0.6; }
+.acc-slider--locked { background: transparent; }
+.acc-slider--locked .acc-slider__stop--active { background: var(--primary-100); }
+.acc-slider--locked .acc-slider__stop--active .acc-slider__label { color: var(--primary-900); }
 
-.acc-slider--locked .acc-slider__stop--active .acc-slider__label { opacity: 0.6; }
+/* Structurally unavailable (a club role can never Manage; a league-audience
+   tool is never open to club roles). Not "disabled for now" — never. */
+.acc-slider__stop--padlocked { cursor: not-allowed; }
+.acc-slider__stop--padlocked .acc-slider__label {
+  color: var(--text-muted);
+  opacity: 0.6;              /* still readable — the user needs to see what
+                                is ruled out, not just that something is */
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
 
-/* Truly padlocked stops (superadmin, staff-locked) */
-.acc-slider--locked .acc-slider__stop--padlocked .acc-slider__node { opacity: 0.35; }
+@media (prefers-reduced-motion: reduce) {
+  .acc-slider__stop, .acc-slider__label { transition: none; }
+}
 
 /* Dept header set-all buttons */
 .uacc-dept-header {
@@ -1936,6 +1973,13 @@
 }
 .uacc-set-all-slider__stop--active .uacc-set-all-slider__label { color: var(--white); }
 .uacc-set-all-slider__stop--filled .uacc-set-all-slider__label { color: rgba(255,255,255,0.8); }
+/* Padlocked set-all label. Was inline rgba(255,255,255,0.25) — near-invisible
+   on the navy band. The navy ladder gives a legible muted tone instead. */
+.uacc-set-all-slider__label--locked {
+  color: var(--navy-300);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
 
 /* Set-all slider on navy header -- white style */
 .uacc-dept-header .uacc-set-all-slider__track {
@@ -2148,23 +2192,10 @@
 .toast.error   { background: var(--primary); }
 .toast.info    { background: var(--navy); }
 
-/* -- Padlock stop (admin locked for club users) ---------------------------- */
-.acc-slider__stop--padlocked {
-  cursor: default;
-  pointer-events: none;
-}
-.acc-slider__stop--padlocked .acc-slider__node {
-  background: var(--off-white);
-  border-color: var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 8px;
-  line-height: 1;
-}
-.acc-slider__stop--padlocked .acc-slider__label {
-  color: var(--border);
-}
+/* Padlocked-stop styling lives with the rest of the segmented control above.
+   This block used to restate it and ended by setting the label to
+   var(--border) — a border token as text colour, which failed contrast
+   outright. Nothing to override here any more. */
 
 /* -- User header pill stack ------------------------------------------------ */
 .uacc-pill-stack {
@@ -4600,22 +4631,18 @@ function buildAccordionItem(uid, u, depts, deptMap) {
       slider.querySelectorAll('.acc-slider__stop').forEach(function(stop, si) {
         var stopLevel = ACC_LEVELS[si];
         stop.classList.remove('acc-slider__stop--active', 'acc-slider__stop--filled', 'acc-slider__stop--padlocked');
-        var node = stop.querySelector('.acc-slider__node');
         var lbl  = stop.querySelector('.acc-slider__label');
         if (constraints.capAccess && stopLevel === 'admin') {
           /* Restricted roles: admin padlocked, Off/Access still editable */
           stop.classList.add('acc-slider__stop--padlocked');
           stop.style.pointerEvents = 'none';
-          if (node) { node.textContent = String.fromCodePoint(0x1F512); node.style.cssText = 'font-size:8px;background:var(--off-white);border-color:var(--border);display:flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;border:2px solid;'; }
-          if (lbl) lbl.style.color = 'var(--border)';
         } else {
           stop.style.pointerEvents = '';
-          if (node) { node.textContent = ''; node.style.cssText = ''; }
-          if (lbl) lbl.style.color = '';
           if (si < idx)  stop.classList.add('acc-slider__stop--filled');
           if (si === idx) stop.classList.add('acc-slider__stop--active');
         }
       });
+      syncAccAria(slider);
       delete slider.dataset.previewLevel;
 
       /* Remove locked class -- CSS handles pointer-events, handlers already wired */
@@ -4737,14 +4764,12 @@ function buildAccordionItem(uid, u, depts, deptMap) {
       var idx     = ACC_LEVELS.indexOf(level);
       if (idx === -1) idx = 0;
 
-      var fill = slider.querySelector('.acc-slider__track-fill');
-      if (fill) /* fill removed */ void idx <= 0 ? '0%' : (idx / (ACC_LEVELS.length - 1) * 100) + '%';
-
       slider.querySelectorAll('.acc-slider__stop').forEach(function(stop, si) {
         stop.classList.remove('acc-slider__stop--active', 'acc-slider__stop--filled');
         if (si < idx)  stop.classList.add('acc-slider__stop--filled');
         if (si === idx) stop.classList.add('acc-slider__stop--active');
       });
+      syncAccAria(slider);
       delete slider.dataset.previewLevel;
     });
 
@@ -4856,26 +4881,19 @@ function buildAccordionItem(uid, u, depts, deptMap) {
         slider.querySelectorAll('.acc-slider__stop').forEach(function(stop, si) {
           var stopLevel = ACC_LEVELS[si];
           stop.classList.remove('acc-slider__stop--active', 'acc-slider__stop--filled', 'acc-slider__stop--padlocked');
-          var node = stop.querySelector('.acc-slider__node');
           var lbl  = stop.querySelector('.acc-slider__label');
           var padlock = fullLock || (restricted && stopLevel === 'admin');
           if (padlock) {
             stop.classList.add('acc-slider__stop--padlocked');
             stop.style.pointerEvents = 'none';
-            if (node) {
-              node.textContent = String.fromCodePoint(0x1F512);
-              node.style.cssText = 'font-size:8px;background:var(--off-white);border-color:var(--border);display:flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:50%;border:2px solid;';
-            }
-            if (lbl) lbl.style.color = 'var(--border)';
             if (si === useIdx && fullLock) stop.classList.add('acc-slider__stop--active');
           } else {
             stop.style.pointerEvents = '';
-            if (node) { node.textContent = ''; node.style.cssText = ''; }
-            if (lbl) lbl.style.color = '';
             if (si < useIdx)  stop.classList.add('acc-slider__stop--filled');
             if (si === useIdx) stop.classList.add('acc-slider__stop--active');
           }
         });
+        syncAccAria(slider);
 
         slider.dataset.previewLevel = useLevel;
       });
@@ -5129,7 +5147,24 @@ function buildAccordionItem(uid, u, depts, deptMap) {
 
 /* ---- Access slider ------------------------------------------------------- */
 var ACC_LEVELS = ['off', 'access', 'admin'];
-var ACC_LABELS = { off: 'Off', access: 'Access', admin: 'Admin' };
+/* Stored values stay off/access/admin — only the words change. "Admin" meant
+   three things at once (a league role, a per-tool power level, and "edits own
+   club"), so the per-tool level gets its own plain vocabulary and "admin" is
+   left to mean the role alone. */
+var ACC_LABELS = { off: 'Off', access: 'Use', admin: 'Manage' };
+
+/* Keep the segmented control's a11y state matching its classes. The preview
+   and restore paths repaint the --active class directly, so aria-checked and
+   the roving tabstop are re-derived from it here rather than in five places. */
+function syncAccAria(slider) {
+  if (!slider || !slider.querySelectorAll) return;
+  slider.querySelectorAll('.acc-slider__stop').forEach(function(s) {
+    if (s.getAttribute('aria-disabled') === 'true') return;
+    var on = s.classList.contains('acc-slider__stop--active');
+    s.setAttribute('aria-checked', String(on));
+    s.tabIndex = on ? 0 : -1;
+  });
+}
 
 /* Set an acc-slider to a given level, updating dot classes.
    Used by Restore defaults to reset all sliders at once. */
@@ -5139,12 +5174,10 @@ function setSliderLevel(slider, level) {
 
   slider.querySelectorAll('.acc-slider__stop').forEach(function(stop, si) {
     stop.classList.remove('acc-slider__stop--active', 'acc-slider__stop--filled', 'acc-slider__stop--padlocked');
-    var node = stop.querySelector('.acc-slider__node');
     var lbl  = stop.querySelector('.acc-slider__label');
-    if (node) { node.textContent = ''; node.style.cssText = ''; }
-    if (lbl)  { lbl.style.color = ''; }
     if (si === idx) stop.classList.add('acc-slider__stop--active');
   });
+  syncAccAria(slider);
 
   slider.dataset.previewLevel = level;
 
@@ -5160,22 +5193,16 @@ function buildAccSlider(uid, toolKey, currentLevel, defaultLevel, locked, clubLo
   wrap.dataset.toolkey = toolKey;
   wrap.dataset.currentLevel = currentLevel;
   wrap.dataset.dept = dept;
+  wrap.setAttribute('role', 'radiogroup');
+  wrap.setAttribute('aria-label', 'Access level');
   var currentIdx = ACC_LEVELS.indexOf(currentLevel);
   if (currentIdx === -1) currentIdx = 0;
   var defaultIdx = ACC_LEVELS.indexOf(defaultLevel);
 
-  var track = document.createElement('div');
-  track.className = 'acc-slider__track';
-  var fill = document.createElement('div');
-  fill.className = 'acc-slider__track-fill';
-  track.appendChild(fill);
-  wrap.appendChild(track);
-
-  function updateFill(idx) {
-    var pct = idx <= 0 ? 0 : (idx / (ACC_LEVELS.length - 1)) * 100;
-    /* fill removed */ void pct + '%';
-  }
-  updateFill(currentIdx);
+  /* The old build appended an .acc-slider__track plus a __track-fill child, and
+     called an updateFill() whose body computed a percentage then threw it away.
+     Two undrawn divs and a no-op on every render — the track had no CSS at all.
+     Gone; the segments carry the state themselves. */
 
   /* locked     = edit-mode lock only -- slider is read-only until Edit pressed.
                   Does NOT prevent click handlers from being attached.
@@ -5203,20 +5230,21 @@ function buildAccSlider(uid, toolKey, currentLevel, defaultLevel, locked, clubLo
       if (idx === currentIdx) stop.classList.add('acc-slider__stop--active');
     }
 
-    var node = document.createElement('div');
-    node.className = 'acc-slider__node';
-    if (isPadlocked) {
-      node.textContent = String.fromCodePoint(0x1F512);
-      node.style.cssText = 'font-size:8px;background:var(--off-white);border-color:var(--border);display:flex;align-items:center;justify-content:center;';
-    }
-
     var label = document.createElement('div');
     label.className = 'acc-slider__label';
     label.textContent = ACC_LABELS[level];
-    if (isPadlocked) label.style.color = 'var(--border)';
-
-    stop.appendChild(node);
     stop.appendChild(label);
+
+    /* Semantics + keyboard. These were plain divs with a click handler, so the
+       whole control was mouse-only and silent to a screen reader. */
+    stop.setAttribute('role', 'radio');
+    stop.setAttribute('aria-checked', String(!isPadlocked && idx === currentIdx));
+    if (isPadlocked) {
+      stop.setAttribute('aria-disabled', 'true');
+      stop.title = 'Not available for this role';
+    } else {
+      stop.tabIndex = (idx === currentIdx) ? 0 : -1;
+    }
 
     /* Attach click handler to all non-padlocked stops.
        Edit-only locked stops get handler too -- it checks _editUid before acting. */
@@ -5235,11 +5263,22 @@ function buildAccSlider(uid, toolKey, currentLevel, defaultLevel, locked, clubLo
           s.classList.remove('acc-slider__stop--active', 'acc-slider__stop--filled');
           if (si < idx)  s.classList.add('acc-slider__stop--filled');
           if (si === idx) s.classList.add('acc-slider__stop--active');
+          /* Keep the a11y state and the roving tabstop with the selection. */
+          if (s.getAttribute('aria-disabled') !== 'true') {
+            s.setAttribute('aria-checked', String(si === idx));
+            s.tabIndex = (si === idx) ? 0 : -1;
+          }
         });
-        updateFill(idx);
         /* Reset dept set-all slider to neutral */
         if (dept && bodyEl) resetSetAllSlider(bodyEl, dept);
         /* No RTDB write -- deferred to Save */
+      });
+      /* Space/Enter activate the focused segment, as a radio should. */
+      stop.addEventListener('keydown', function(e) {
+        if (e.key === ' ' || e.key === 'Enter' || e.key === 'Spacebar') {
+          e.preventDefault();
+          stop.click();
+        }
       });
     }
     wrap.appendChild(stop);
@@ -5320,7 +5359,7 @@ function buildSetAllSlider(uid, u, dept, deptMap, deptWrap) {
     var label = document.createElement('div');
     label.className = 'uacc-set-all-slider__label';
     label.textContent = ACC_LABELS[level];
-    if (isPadlocked) label.style.color = 'rgba(255,255,255,0.25)';
+    if (isPadlocked) label.classList.add('uacc-set-all-slider__label--locked');
 
     stop.appendChild(node);
     stop.appendChild(label);
@@ -5399,11 +5438,7 @@ function setAllInDept(uid, u, deptTools, level, bodyEl, deptLabel) {
       if (si < idx)  s.classList.add('acc-slider__stop--filled');
       if (si === idx) s.classList.add('acc-slider__stop--active');
     });
-    var trackFill = slider.querySelector('.acc-slider__track-fill');
-    if (trackFill) {
-      var pct = idx <= 0 ? 0 : (idx / (ACC_LEVELS.length - 1)) * 100;
-      trackFill.style.width = pct + '%';
-    }
+    syncAccAria(slider);
   });
   var targetUser = STATE.allUsers[uid] || {};
   writeAuditFor(uid, targetUser.name || '', targetUser.email || '',
@@ -5641,7 +5676,7 @@ function buildInviteSetAllSlider(dept, deptMap, container, isClubOrg) {
     var label = document.createElement('div');
     label.className = 'uacc-set-all-slider__label';
     label.textContent = ACC_LABELS[level];
-    if (isPadlocked) label.style.color = 'rgba(255,255,255,0.25)';
+    if (isPadlocked) label.classList.add('uacc-set-all-slider__label--locked');
     stop.appendChild(node);
     stop.appendChild(label);
 
@@ -5687,17 +5722,8 @@ function buildInviteSlider(toolKey, currentLevel, clubLocked, dept, container) {
   if (clubLocked && currentLevel === 'admin') currentLevel = 'access';
   var currentIdx = ACC_LEVELS.indexOf(currentLevel);
   if (currentIdx === -1) currentIdx = 0;
-  var track = document.createElement('div');
-  track.className = 'acc-slider__track';
-  var fill = document.createElement('div');
-  fill.className = 'acc-slider__track-fill';
-  track.appendChild(fill);
-  wrap.appendChild(track);
-  function updateFill(idx) {
-    var pct = idx <= 0 ? 0 : (idx / (ACC_LEVELS.length - 1)) * 100;
-    /* fill removed */ void pct + '%';
-  }
-  updateFill(currentIdx);
+  wrap.setAttribute('role', 'radiogroup');
+  wrap.setAttribute('aria-label', 'Access level');
   ACC_LEVELS.forEach(function(level, idx) {
     var isPadlocked = clubLocked && level === 'admin';
     var stop = document.createElement('div');
@@ -5708,30 +5734,43 @@ function buildInviteSlider(toolKey, currentLevel, clubLocked, dept, container) {
       if (idx < currentIdx)  stop.classList.add('acc-slider__stop--filled');
       if (idx === currentIdx) stop.classList.add('acc-slider__stop--active');
     }
-    var node = document.createElement('div');
-    node.className = 'acc-slider__node';
-    if (isPadlocked) {
-      node.textContent = '\uD83D\uDD12';
-      node.style.cssText = 'font-size:8px;background:var(--off-white);border-color:var(--border);display:flex;align-items:center;justify-content:center;';
-    }
     var label = document.createElement('div');
     label.className = 'acc-slider__label';
     label.textContent = ACC_LABELS[level];
-    if (isPadlocked) label.style.color = 'var(--border)';
-    stop.appendChild(node);
     stop.appendChild(label);
-    if (!isPadlocked) stop.addEventListener('click', function(e) {
-      e.stopPropagation();
-      currentIdx = idx;
-      wrap.querySelectorAll('.acc-slider__stop').forEach(function(s, si) {
-        s.classList.remove('acc-slider__stop--active', 'acc-slider__stop--filled');
-        if (si < idx)  s.classList.add('acc-slider__stop--filled');
-        if (si === idx) s.classList.add('acc-slider__stop--active');
+
+    stop.setAttribute('role', 'radio');
+    stop.setAttribute('aria-checked', String(!isPadlocked && idx === currentIdx));
+    if (isPadlocked) {
+      stop.setAttribute('aria-disabled', 'true');
+      stop.title = 'Not available for this role';
+    } else {
+      stop.tabIndex = (idx === currentIdx) ? 0 : -1;
+    }
+
+    if (!isPadlocked) {
+      stop.addEventListener('click', function(e) {
+        e.stopPropagation();
+        currentIdx = idx;
+        wrap.querySelectorAll('.acc-slider__stop').forEach(function(s, si) {
+          s.classList.remove('acc-slider__stop--active', 'acc-slider__stop--filled');
+          if (si < idx)  s.classList.add('acc-slider__stop--filled');
+          if (si === idx) s.classList.add('acc-slider__stop--active');
+          if (s.getAttribute('aria-disabled') !== 'true') {
+            s.setAttribute('aria-checked', String(si === idx));
+            s.tabIndex = (si === idx) ? 0 : -1;
+          }
+        });
+        /* Reset dept set-all slider to neutral when individual tool changed */
+        if (dept && container) resetInviteSetAll(dept, container);
       });
-      updateFill(idx);
-      /* Reset dept set-all slider to neutral when individual tool changed */
-      if (dept && container) resetInviteSetAll(dept, container);
-    });
+      stop.addEventListener('keydown', function(e) {
+        if (e.key === ' ' || e.key === 'Enter' || e.key === 'Spacebar') {
+          e.preventDefault();
+          stop.click();
+        }
+      });
+    }
     wrap.appendChild(stop);
   });
   return wrap;
