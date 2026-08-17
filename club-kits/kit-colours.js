@@ -1,5 +1,10 @@
 /*
-  club-kits/kit-colours.js  v1 (30/07/2026)
+  club-kits/kit-colours.js  v1.1 (17/08/2026)
+
+  v1.1 (17/08/2026) — Chocolate joins the brown family, the first shade added
+    since launch. Records are self-describing (label + hex travel with each
+    colour), so existing submissions are untouched; both heads bump the
+    cache-bust to kit-colours.js?v=2 in the same commit.
 
   The kit COLOUR TAXONOMY and the colour picker, shared by both pages of this
   tool: the public form (index.html) and the admin console (admin.html).
@@ -76,7 +81,8 @@
       ['purple','Purple','#6A2C91'], ['lilac','Lilac','#C8A2C8'], ['lavender','Lavender','#B57EDC'],
       ['violet','Violet','#7F00FF'], ['neon-purple','Neon purple','#B026FF'] ]],
     ['brown',  'Brown', [
-      ['brown','Brown','#6B4423'], ['tan','Tan','#B08D57'], ['stone','Stone','#D6CCC2'] ]]
+      ['brown','Brown','#6B4423'], ['chocolate','Chocolate','#47281A'],
+      ['tan','Tan','#B08D57'], ['stone','Stone','#D6CCC2'] ]]
   ];
 
   /* Flat option list, built once. */
