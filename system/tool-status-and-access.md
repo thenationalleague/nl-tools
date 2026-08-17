@@ -1,96 +1,163 @@
 # Tool status & access model
 
-The signed-off source-of-truth for **which tools are live**, **who can access
-each**, and **how each behaves per role** — from the full audit with Richard.
-Feeds the staff/club audience gating (`system/staff-club-audience-plan.md`).
+Which tools are live, who can open each, and what each role can do inside.
+Rewritten 17/08/2026 against `tools-registry.snapshot.json` — the previous
+version still described six roles, an external realm, and pasting the registry
+into the console by hand, all three of which are gone.
 
-- **21 tools** at the July audit → **13 live**, **8 parked**. The 15/08/2026
-  estate purge has since retired eight of the twenty-one outright (rows marked
-  ⚫ below, each with its record under `system/retired/`); the parked set is
-  down to Claudio, Holiday & Lieu and the Transfer Centre.
-- Audience: **11 staff-audience** (NL staff only, clubs never) · **10 club-audience**
-  (NL staff + clubs). Parking doesn't change audience — it changes portal presence.
+The model itself is settled in `system/roles-and-access-plan.md` (the SETTLED
+block, 17/08/2026). This file is the per-tool application of it. Where the two
+disagree, that one wins.
 
-## The framework (every tool sits on these three axes)
+## The framework — three axes
 
-Six roles in three realms: league (`superadmin`/`admin`/`staff`) · club
-(`club-admin`/`club-staff`) · external (`third-party`).
+**Five roles in two realms that log in:** League (`superadmin`, `admin`,
+`staff`) · Club (`club-admin`, `club-staff`). There is no external realm —
+outsiders get passcode-gated coded links per job, not a login.
 
-1. **Open the tool?** — the `audience` gate (staff-audience = club/external denied).
-2. **Do what inside?** — `off`/`access`/`admin` level (`admin` = NL admin; `access`
-   = NL staff / club). `superadmin` = admin everywhere. `third-party` never admin.
-3. **See what data?** — league roles see all clubs; club roles see **their own club
-   only** (edit-own for `club-admin` via `NL.canClubEdit`, view for `club-staff`).
+1. **Can you open it?** — the `audience` gate. `league` = clubs denied.
+   `club` = both realms. `meta` = tooling about the estate itself; superadmin
+   in practice.
+2. **Can you get in?** — the per-tool level: `off` / `access` / `admin`.
+   `superadmin` is always granted. With no per-user entry it falls back to
+   `tools/<toolKey>/defaults[<role>]`; a role absent from `defaults` is `off`.
+3. **What can you do, and to whose data?** — **role decides**, not level.
+   League roles see all clubs; club roles see their own club only.
 
-Recurring per-role shape across the club tools: **NL admin = edit all · NL staff =
-view all · club-admin = edit own · club-staff = view**. Tool-specific rules
-(approval queues, time-locks, subsets) layer on top, inside each tool.
+The recurring club-tool ladder is four tiers on four roles: **Club Staff view
+own · Club Admin edit own · League Staff view all · League Admin edit all.**
+
+### Why most tools declare `levels: ["off","access"]`
+
+`admin` as a *level* is only load-bearing where a tool actually reads it, and
+the 17/08 audit found **three of seventeen** do: Vacancies, Judgements and
+Website Archive. Everywhere else the ladder is role. Those fourteen tools
+therefore declare `levels: ["off","access"]` in their registry record and the
+portal's access panel does not offer "Manage" for them — offering a control
+that sets a value nothing reads is worse than not offering it.
+
+Panel wording: `off` = **Off**, `access` = **Use**, `admin` = **Manage**.
+
+### Club-side overrides do not exist
+
+Club roles are capped below `admin` in the panel builder, the preview and the
+save path, by decision. If a club needs another person with admin powers, make
+them a Club Admin. The league side keeps the per-user override, because it
+earns its place on the three tools that read it ("this staffer is the Vacancies
+approver but not a League Admin" is a real job).
+
+## Deployment — the registry ships from this repo
+
+`system/rtdb/tools-registry.snapshot.json` **is** the `tools/` node. Changing a
+record means editing that file in a PR, then running **Actions →
+Deploy tools registry**. Run it in `report` mode first — it diffs live against
+the snapshot and writes nothing. `publish` replaces the whole node, so a record
+that exists only in live is a deletion and publish refuses unless
+`allow_deletions` is ticked.
+
+Do not paste this node into the console. Hand-pasting is how `tools/ops-estate`
+ended up holding an entire stale copy of the registry, nested a level too deep,
+for weeks.
 
 ## Parking
 
-A tool with **no `tools/<toolKey>` record** is off the portal and superadmin-only
-(auth-guard), while its **code stays in the repo**. So the 8 parked tools are
-removed from `tools-registry.snapshot.json` and held in
-`tools-registry.parked.json` (full config retained). Bring one back = move its
-record back and re-paste `tools/`. No `app-data` is touched, so no data is lost.
+A tool with **no `tools/<toolKey>` record** is off the portal and
+superadmin-only, while its code stays in the repo. Parked records live in
+`tools-registry.parked.json` with their full config. No `app-data` is touched,
+so nothing is lost.
 
 ---
 
-## Staff-audience — NL staff only, clubs never (11)
+## Live — 17 records
 
-| Tool | Status | Access model |
-|------|--------|--------------|
-| **Graphics & Media** | 🟢 Live | Flat — all NL staff; nothing to administer |
-| **Team of the Week** | ⚫ Dashboard retired 15/08/2026 (could not read its own data); the Enterprise TOTW *graphic* lives on under Graphics & Media |
-| **Travel Planner** | 🟢 Live | Flat. **UI change soon** = the brand-v3 scale / Compact-dash direction (`system/brand-v3-scale-plan.md`) |
-| **Website Archive** | 🟢 Live | Flat — live & working |
-| **Chase HQ** | ⚫ Retired 15/08/2026 — see `system/retired/chase-hq.md` | — |
-| **Claudio** | 🅿️ Park — advanced | AI helper; serious work needed before it's genuinely useful |
-| **Holiday & Lieu** | 🅿️ Park — advanced | **Admin panel** manages relationships, bank holidays, quotas. Non-admins see their own leave **and can approve leave for their reports** — the **org chart / reporting lines live in the tool and function today** (not a missing data model) |
-| **Meeting Notes** | ⚫ Retired 15/08/2026 | — |
-| **Tasks** | ⚫ Retired 15/08/2026 (an Intake rebuild exists unmerged on `claude/staff-portal-tool-review-vrb6kq`) | — |
-| **Website Analysis** | ⚫ Retired 15/08/2026 — concept folded into Website Archive (`system/retired/website-insights-and-analysis.md`) |
-| **Website Insights** | ⚫ Retired 15/08/2026 — same |
+### League audience — NL staff only, clubs never (6)
 
-## Club-audience — NL staff + clubs (10)
+| Tool | Key | League Admin | League Staff | Notes |
+|---|---|---|---|---|
+| **Graphics & Media** | `staff-graphics` | Use | Use | Flat — nothing to administer |
+| **Newsletter** | `staff-newsletter` | Use | Use | Flat. Monthly staff newsletter builder |
+| **Travel Planner** | `staff-travel-planner` | Use | Use | Flat |
+| **Website Archive** | `staff-website-archive` | Manage | Use | **Reads the admin level.** Granting Manage was a no-op until v2.7 — it read `toolPerms.admin` on a string |
+| **Programme Packs (admin)** | `media-programme` | Manage | Off | Console for `/programme/`; the club-facing side is the Storage-backed page, not this |
+| **Fan Widgets** | `ops-fan-widgets` | Off | Off | Superadmin only today |
 
-| Tool | Status | NL admin | NL staff | Club admin | Club staff |
-|------|--------|----------|----------|------------|------------|
-| **Attendance** | 🟢 Live | edit all clubs; adjust neutral venues; all-clubs dropdown | view all (no editing) | add **own** club's attendances *(locked after X days — already defined in code; verify the value)* | view own + anonymised others |
-| **Club Directory** | 🟢 Live | edit all club data | view all | edit **own** club's data | view all |
-| **Commercial Benchmarking** | 🟢 Live | edit data | view benchmarks (club dropdown) | view **output only** | view **output only** |
-| **Cup Footage** | ⚫ Retired 15/08/2026 | — | — | — | — |
-| **DAZN VIP** | ⚫ Retired 15/08/2026 — see `system/retired/dazn-vip.md`; data kept in RTDB | — | — | — | — |
-| **Handbook** | 🟢 Live | edit content | view | view | view |
-| **Judgements & Decisions** | 🟢 Live | add / amend / remove all | view | view | view |
-| **Programme Packs** | ⚫ Retired 15/08/2026 — superseded by `/programme/` on Firebase Storage (shipped 03/08) | — | — | — | — |
-| **Transfer Centre** | 🅿️ Park — rework | — | — | — | — (prototype functions but needs bringing on-brand) |
-| **Vacancies** | 🟢 Live | add / edit / remove / **approve** all | view all | add/edit **own** club's only (**still needs NL admin approval** for every submission & change) | view all |
+### Club audience — NL staff + clubs (8)
 
-*Notes:* Cup Footage is needed by only **~16 clubs per season**. Commercial
-Benchmarking runs occasional **per-club data-collection** via a locked sub-page.
+| Tool | Key | League Admin | League Staff | Club Admin | Club Staff |
+|---|---|---|---|---|---|
+| **Attendance** | `ops-attendance` | edit all clubs; adjust neutral venues | view all | add own club's attendances (day-locked) | view own + anonymised others |
+| **Club Directory** | `ops-club-directory` | edit all club data | view all | edit own club's data | view all |
+| **Commercial Benchmarking** | `ops-commercial-benchmarking` | edit data | view benchmarks (club dropdown) | view output only | view output only |
+| **Fixtures** | `ops-fixtures` | all clubs | all clubs | own club | own club |
+| **Handbook 2026-27** | `ops-handbook` | edit content | view | view | view |
+| **Judgements & Decisions** | `ops-judgements` | **Manage** — add / amend / remove all | view | view | view |
+| **Vacancies** | `ops-vacancies` | **Manage** — full CRUD + approve/reject | view all | add/edit own club's; every submission needs NL approval | view all |
+| **Wellbeing** | `ops-wellbeing` | — | — | — | — |
+
+**One registry oddity, harmless but worth tidying:** `ops-fixtures` sets
+`defaults.staff = "admin"` where all sixteen other records use `"access"`.
+Fixtures does not read the level at all — it decides from role — and it
+declares `levels: ["off","access"]`, so the value is dead either way. Set it to
+`"access"` next time the file is opened.
+
+**Wellbeing is not actually gated.** `/wellbeing/index.html` carries no
+auth-guard, no topbar and no Firebase, by design — it is a public page on the
+club-contacts precedent, and nothing is recorded on it. Its registry record
+exists only to put a card on the portal. The `defaults` in that record are
+decorative; do not read them as a gate, and do not "fix" the page by adding
+auth-guard.
+
+### Meta audience — tooling about the estate (3)
+
+| Tool | Key | Who |
+|---|---|---|
+| **Estate** | `ops-estate` | Superadmin only |
+| **NLServices API** | `ops-nls-monitor` | Superadmin only |
+| **Style Guide** | `staff-style-guide` | Superadmin only |
+
+## Parked — 3
+
+| Tool | Key | Audience | What's needed |
+|---|---|---|---|
+| **Claudio** | `staff-claudio` | league | AI helper; serious work before it is genuinely useful |
+| **Holiday & Lieu** | `staff-holiday-lieu` | league | Admin panel manages relationships, bank holidays, quotas. Non-admins see their own leave and approve for their reports — the org chart lives in the tool and works today |
+| **Transfer Centre** | `media-transfer-centre` | club | Prototype functions; needs bringing on-brand. Sheet backend dropped — see `system/retired/live-blog-and-transfer-centre.md` |
+
+## Retired
+
+Gone in the 15/08/2026 purge: Team of the Week dashboard (the Enterprise TOTW
+*graphic* lives on under Graphics & Media), Chase HQ, Meeting Notes, Tasks,
+Website Analysis, Website Insights, Cup Footage, DAZN VIP, and the old
+Programme Packs (superseded by `/programme/` on Firebase Storage).
+
+`system/retired/` holds a record for Chase HQ, DAZN VIP, Cup Footage, and
+Website Insights + Analysis — the concept and the settled decisions, so a
+rebuild starts from the answered questions. **Read the record before proposing
+to rebuild.** Meeting Notes, Tasks and the TOTW dashboard have no record;
+recover those from git history if they are ever wanted back.
 
 ---
 
-## Canon candidates spotted (per the "grow the canon" rule)
+## Canon candidates spotted
 
 - **"Club proposes → NL approves"** — DAZN VIP's request-edit and Vacancies'
-  club-submit-needs-approval are the **same shape**. Candidate for one shared
-  submission/approval concept rather than two bespoke flows.
-- **"Public flipbook projection"** — Club Directory (future public flipbook) and
-  Handbook (external flipbook) both want a read-only public export from the same
-  source. Same pattern twice → candidate for a shared approach.
+  club-submit-needs-approval were the same shape. One shared submission /
+  approval concept rather than bespoke flows per tool.
+- **"Public flipbook projection"** — Club Directory (future public flipbook)
+  and Handbook (external flipbook) both want a read-only public export from the
+  same source.
 
-## Tool-internal rules (live inside each tool, NOT in the access gate)
+## Tool-internal rules — live inside each tool, not in the access gate
 
-Attendance day-lock · Commercial per-club data-collection sub-page · Footage
-16-club subset · Programme-Packs folder ownership · anonymised benchmarking
-output · the DAZN/Vacancies approval queues · Holiday & Lieu's org-chart
-approval routing.
+Attendance day-lock · Commercial per-club data-collection sub-page ·
+anonymised benchmarking output · the Vacancies approval queue · Holiday &
+Lieu's org-chart approval routing.
 
-## Bring-back checklist (for a parked tool)
+## Bring-back checklist for a parked tool
 
 1. Finish the build to "ready".
-2. Move its record from `tools-registry.parked.json` → `tools-registry.snapshot.json`
-   (it already carries its `audience` + `defaults`).
-3. Re-paste `tools/` to RTDB; the card reappears for the right roles.
+2. Move its record from `tools-registry.parked.json` →
+   `tools-registry.snapshot.json` (it already carries `audience` + `defaults`;
+   add `levels` unless the tool genuinely reads the admin level).
+3. Run **Actions → Deploy tools registry** in `report` mode, check the diff
+   shows only that record being created, then `publish`.
