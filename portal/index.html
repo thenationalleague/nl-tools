@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.109 (17/08/2026)
+  Version: v5.110 (17/08/2026)
   Date: 09/04/2026
   File: /portal/index.html
 
@@ -28,6 +28,18 @@
     well (no admin gating anywhere in it, superadmin-only by defaults).
     Thirteen of seventeen tools are now Off / Use; only Judgements, Vacancies and
     Website Archive still offer Manage.
+
+  v5.110 (17/08/2026) — Each role states what it grants, in both pickers. The
+    four buttons were bare names, so nothing on screen said which role can
+    submit a club's attendances — the answer lived only in
+    system/roles-and-access-plan.md, which nothing links to, and the person
+    choosing the role is exactly the person who needs it. The wording comes
+    from NL.roles.grant (nl-utils v1.39) rather than either picker, so the
+    invite form and the inline picker in each user row cannot drift apart, and
+    a future tool explaining access reads it from the same place as the label.
+    The invite form's buttons are static markup, so fillRoleGrants() fills them
+    from canon when the panel is revealed.
+    Lockstep: nl-utils ?v=41 -> ?v=42, auth-guard ?v=14 -> ?v=15.
 
   v5.109 (17/08/2026) — Nothing is struck through any more, because nothing
     unreachable is drawn. With thirteen of sixteen tools at two rungs, a club
@@ -708,11 +720,12 @@
   window.NL_CHANGELOG = [
     {
       date: '17/08/2026',
-      version: 'v5.109',
+      version: 'v5.110',
       items: [
         'Managing someone\u2019s access now starts from their role. You see one line saying what the role grants, then only the tools set apart from it \u2014 the rest fold away.',
         'Tools with nothing to administer no longer offer "Manage", so the control only appears where it does something.',
-        'Nothing is crossed out any more: a tool a club account cannot open, or a level its role cannot hold, is simply not shown.'
+        'Nothing is crossed out any more: a tool a club account cannot open, or a level its role cannot hold, is simply not shown.',
+        'Each role now says what it grants, so picking one no longer means knowing the model by heart.'
       ]
     },
     {
@@ -893,9 +906,9 @@
     });
   }
 </script>
-<script src="/system/nl-utils.js?v=41"></script>
+<script src="/system/nl-utils.js?v=42"></script>
 <script src="/system/nl-topbar.js?v=9"></script>
-<script src="/system/auth-guard.js?v=14"></script>
+<script src="/system/auth-guard.js?v=15"></script>
 
 <link rel="stylesheet" href="/system/nl-brand.css?v=45">
 
@@ -2230,6 +2243,38 @@
   color: var(--white);
 }
 
+/* Role buttons that carry their grant. The name keeps the uppercase chip
+   treatment; the grant sits under it in sentence case, because it is a
+   sentence. Wider and taller than the bare variant by necessity — the whole
+   point is that the answer is legible at the moment of choosing. */
+.invite-role-btn--described {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  text-align: left;
+  padding: 8px 12px;
+  flex: 1 1 190px;
+  max-width: 260px;
+}
+.invite-role-btn__name {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+.invite-role-btn__grant {
+  font-size: 11px;
+  font-weight: 500;
+  font-variation-settings: 'wght' 500;
+  text-transform: none;
+  letter-spacing: 0;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+.invite-role-btn--described:hover .invite-role-btn__grant { color: var(--navy); }
+/* Selected: the button goes navy, so the grant needs to come off muted grey
+   or it drops to about 2:1 on that ground. */
+.invite-role-btn--described.active .invite-role-btn__grant { color: var(--navy-100); }
+
 /* Invite tool slider rows */
 .invite-tool-row {
   display: flex;
@@ -2577,10 +2622,13 @@
             <div class="field">
               <label>Role</label>
               <div id="inviteRolePicker" style="display:flex;gap:6px;flex-wrap:wrap;">
-                <button type="button" class="invite-role-btn" data-role="admin">League Admin</button>
-                <button type="button" class="invite-role-btn active" data-role="staff">League Staff</button>
-                <button type="button" class="invite-role-btn" data-role="club-admin">Club Admin</button>
-                <button type="button" class="invite-role-btn" data-role="club-staff">Club Staff</button>
+                <!-- Name + grant. The grant text is filled from NL.roles.grant()
+                     on boot (see fillRoleGrants) so canon owns the wording and
+                     the two pickers cannot drift apart. -->
+                <button type="button" class="invite-role-btn invite-role-btn--described" data-role="admin"><span class="invite-role-btn__name">League Admin</span></button>
+                <button type="button" class="invite-role-btn invite-role-btn--described active" data-role="staff"><span class="invite-role-btn__name">League Staff</span></button>
+                <button type="button" class="invite-role-btn invite-role-btn--described" data-role="club-admin"><span class="invite-role-btn__name">Club Admin</span></button>
+                <button type="button" class="invite-role-btn invite-role-btn--described" data-role="club-staff"><span class="invite-role-btn__name">Club Staff</span></button>
               </div>
               <input type="hidden" id="inviteRole" value="staff">
             </div>
@@ -2752,6 +2800,22 @@ function getGroupKey(ud) {
   var role = (ud && ud.role) || '';
   if (role === 'club') return 'club-admin';
   return role;
+}
+
+/* Fill the invite form's static role buttons with their grant line from canon.
+   The buttons are markup (they exist before any user data loads) but the
+   wording is NL.roles.grant, so this picker and the inline one in each user
+   row say the same thing without either holding a copy of the text. */
+function fillRoleGrants() {
+  document.querySelectorAll('#inviteRolePicker .invite-role-btn').forEach(function(btn) {
+    if (btn.querySelector('.invite-role-btn__grant')) return;
+    var text = NL.roles.grant(btn.dataset.role);
+    if (!text) return;
+    var span = document.createElement('span');
+    span.className = 'invite-role-btn__grant';
+    span.textContent = text;
+    btn.appendChild(span);
+  });
 }
 
 function getDefaultLevel(toolKey, ud) {
@@ -2986,6 +3050,7 @@ function initPortal() {
 
   if (STATE.isAdmin) {
     document.getElementById('adminPanel').style.display = 'block';
+    fillRoleGrants();
     initAdminTabs();
     initAuditPane();
     loadRequests();
@@ -5270,8 +5335,22 @@ function buildAccordionItem(uid, u, depts, deptMap) {
       var rbtn = document.createElement('button');
       rbtn.type = 'button';
       rbtn.dataset.role = r;
-      rbtn.className = 'invite-role-btn' + (selectedRole === r ? ' active' : '');
-      rbtn.textContent = roleLabel(r);
+      rbtn.className = 'invite-role-btn invite-role-btn--described'
+                     + (selectedRole === r ? ' active' : '');
+      /* Name and grant together. Four bare names told nobody which one can
+         submit their club's attendances — the answer lived only in a plan
+         document, and the person picking is the one who needs it. */
+      var rname = document.createElement('span');
+      rname.className = 'invite-role-btn__name';
+      rname.textContent = roleLabel(r);
+      rbtn.appendChild(rname);
+      var rgrant = NL.roles.grant(r);
+      if (rgrant) {
+        var rdesc = document.createElement('span');
+        rdesc.className = 'invite-role-btn__grant';
+        rdesc.textContent = rgrant;
+        rbtn.appendChild(rdesc);
+      }
       rbtn.addEventListener('click', function() {
         selectedRole = r;
         if (!isClubRole(r)) confirmedClub = '';

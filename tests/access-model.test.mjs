@@ -112,3 +112,41 @@ test('the returned value is always one of the three levels', () => {
 test('the retired third-party role gets nothing from an ordinary record', () => {
   assert.equal(resolve(undefined, TOOL, 'third-party'), 'off');
 });
+
+/* NL.roles.grant — the one-line statement of what a role can do.
+
+   It lives in canon beside NL.roles.LABELS because it is the same vocabulary:
+   a role name nobody can act on is half the model. The portal shows it under
+   both role pickers, so the person choosing a role can see which one submits
+   their club's attendances — the question that sent Richard back to a plan
+   document nothing links to. */
+
+test('every role in the model has both a label and a grant', () => {
+  const roles = ['superadmin', 'admin', 'staff', 'club-admin', 'club-staff'];
+  for (const r of roles) {
+    assert.ok(NL.roles.label(r), `${r} has no label`);
+    assert.ok(NL.roles.grant(r), `${r} has no grant line — a picker would render a blank`);
+  }
+});
+
+test('legacy role keys carry a grant too', () => {
+  /* A record written before the 16/08 rename still renders in the picker. */
+  assert.equal(NL.roles.grant('club'), NL.roles.grant('club-admin'));
+  assert.equal(NL.roles.grant('club-viewer'), NL.roles.grant('club-staff'));
+});
+
+test('an unknown role gets an empty grant, not a placeholder', () => {
+  /* '' lets the caller render nothing. A fallback string would put invented
+     wording about someone's access on screen. */
+  assert.equal(NL.roles.grant('third-party'), '');
+  assert.equal(NL.roles.grant('nonsense'), '');
+  assert.equal(NL.roles.grant(''), '');
+  assert.equal(NL.roles.grant(undefined), '');
+});
+
+test('the two tiers in each realm do not describe themselves identically', () => {
+  /* The whole point is that the pair is distinguishable at a glance. */
+  assert.notEqual(NL.roles.grant('admin'), NL.roles.grant('staff'));
+  assert.notEqual(NL.roles.grant('club-admin'), NL.roles.grant('club-staff'));
+  assert.notEqual(NL.roles.grant('admin'), NL.roles.grant('club-admin'));
+});

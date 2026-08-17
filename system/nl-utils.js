@@ -1,9 +1,22 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.38 (17/08/2026)
+   Version: v1.39 (17/08/2026)
 
    Changelog
+   v1.39 (17/08/2026)
+     - NL.roles.GRANTS + NL.roles.grant(role) — one line on what each role can
+       actually do, beside LABELS because it is the same vocabulary. Four bare
+       names in the portal's role pickers told nobody which role submits a
+       club's attendances; the answer lived only in
+       system/roles-and-access-plan.md, which nothing links to, so the person
+       choosing a role could not see what they were choosing. Phrased on the
+       axis that separates the roles — whose data you see, and whether you can
+       change it. Legacy keys ('club', 'club-viewer') carry the same line as
+       their canon key; an unknown role returns '' so a caller renders nothing
+       rather than inventing wording about someone's access. Cache-bust
+       ?v=41 -> ?v=42 in lockstep with auth-guard ?v=14 -> ?v=15.
+
    v1.38 (17/08/2026)
      - NL.resolveToolLevel(entry, toolData, role) — the one answer to "what
        may this person do on this tool", from the per-user entry if there is
@@ -1789,7 +1802,27 @@
       if (role === 'club' || role === 'club-admin' || role === 'club-staff' || role === 'club-viewer') return 'club';
       return null;
     },
+    /* What each role actually grants, in one line, for a picker or an invite.
+       Lives beside LABELS because it is the same vocabulary: a name nobody can
+       act on is only half the model, and splitting the two across files is how
+       the label and its meaning drift apart.
+       Phrased on the axis that separates the roles — whose data you see, and
+       whether you can change it. That is the question anyone picking a role is
+       actually asking ("which one can submit our attendances?"), and it is
+       decided by role, not by any per-tool setting. */
+    GRANTS: {
+      superadmin:    'Everything, including this panel.',
+      admin:         'All clubs. Can edit their data.',
+      staff:         'All clubs. Can view their data.',
+      'club-admin':  'Their own club only. Can submit and edit for it.',
+      club:          'Their own club only. Can submit and edit for it.',
+      'club-staff':  'Their own club only. View, no changes.',
+      'club-viewer': 'Their own club only. View, no changes.'
+    },
     label: function(role) { return this.LABELS[role] || role || ''; },
+    /* One line on what this role can do. '' for an unknown role, so a caller
+       can render nothing rather than a placeholder. */
+    grant: function(role) { return this.GRANTS[role] || ''; },
     /* Normalise a role for access lookups. Legacy keys fold to canon:
        'club' → club-admin, 'club-viewer' → club-staff; empty → staff. */
     norm: function(role) {
