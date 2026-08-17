@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.111 (17/08/2026)
+  Version: v5.112 (17/08/2026)
   Date: 09/04/2026
   File: /portal/index.html
 
@@ -28,6 +28,26 @@
     well (no admin gating anywhere in it, superadmin-only by defaults).
     Thirteen of seventeen tools are now Off / Use; only Judgements, Vacancies and
     Website Archive still offer Manage.
+
+  v5.112 (17/08/2026) — FIX: a League Admin pressing Edit saw nothing selected
+    on all thirteen two-rung tools. Three repaint paths — enterEditMode,
+    cancelAccess and previewRoleSliders — did their own arithmetic against the
+    global off/access/admin list rather than the slider's own rungs, so a
+    stored or defaulted 'admin' resolved to index 2, no rung matched, and the
+    control came up blank. All three now call setSliderLevel, which has always
+    painted against the rungs that exist; so do both click handlers, so there
+    is one repaint in the file instead of five. The sign-up request card's
+    reader, the last one mapping index back to a level, reads dataset.level.
+    The rungs line up now, not just the boxes. The control is a fixed width and
+    the rungs used to divide it, so "Use" was half the box on a two-rung tool
+    and a third of it on a three-rung one — the words landed in a different
+    place on every row and the column read as ragged even though the boxes
+    matched. It is a three-column grid, and a rung the tool (or the role) does
+    not have is an empty cell: Off sits under Off, Use under Use, Manage under
+    Manage, all the way down. The cell is aria-hidden and carries no label,
+    role or handler.
+    Dropped .acc-slider__stop--filled — applied in two builders, styled
+    nowhere since the track was deleted.
 
   v5.111 (17/08/2026) — The invite form's tool preview gets the same shape as
     the user rows: the role's grant in one line, then a fold for the exception
@@ -741,12 +761,14 @@
   window.NL_CHANGELOG = [
     {
       date: '17/08/2026',
-      version: 'v5.110',
+      version: 'v5.112',
       items: [
         'Managing someone\u2019s access now starts from their role. You see one line saying what the role grants, then only the tools set apart from it \u2014 the rest fold away.',
         'Tools with nothing to administer no longer offer "Manage", so the control only appears where it does something.',
         'Nothing is crossed out any more: a tool a club account cannot open, or a level its role cannot hold, is simply not shown.',
-        'Each role now says what it grants, so picking one no longer means knowing the model by heart.'
+        'Each role now says what it grants, so picking one no longer means knowing the model by heart.',
+        'Fixed: tools without a "Manage" level showed no selection at all when editing someone\u2019s access.',
+        'The Off / Use / Manage buttons now line up in columns down the list.'
       ]
     },
     {
@@ -1991,7 +2013,8 @@
    column read as ragged. Now the box is a fixed width and the segments
    divide it, so all the controls line up and only the internal split moves. */
 .acc-slider {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);   /* one column per rung, always */
   align-items: stretch;
   gap: 2px;
   padding: 2px;
@@ -2002,6 +2025,9 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
+/* Holds a column open where this tool has no rung. Not a control: no label,
+   no handler, aria-hidden. Its only job is to keep Use above Use. */
+.acc-slider__gap { display: block; }
 
 .acc-slider__stop {
   display: flex;
@@ -2010,8 +2036,7 @@
   position: relative;
   z-index: 1;
   cursor: pointer;
-  flex: 1 1 0;
-  min-width: 0;          /* let the segments share the fixed width evenly */
+  min-width: 0;          /* the grid column sets the width */
   padding: 5px 4px;
   border-radius: calc(var(--radius) - 2px);
   background: transparent;
@@ -4070,11 +4095,13 @@ function approveRequest(r, btn, ss) {
     ss.querySelectorAll('.acc-slider').forEach(function(slider) {
       var key = slider.dataset.toolkey;
       if (!key) return;
-      var idx = 0;
-      slider.querySelectorAll('.acc-slider__stop').forEach(function(s, i) {
-        if (s.classList.contains('acc-slider__stop--active')) idx = i;
+      /* Read the level off the segment, not off its index — the last reader
+         still doing the latter. See the note in the invite send path. */
+      var level = 'off';
+      slider.querySelectorAll('.acc-slider__stop').forEach(function(s) {
+        if (s.classList.contains('acc-slider__stop--active')) level = s.dataset.level || level;
       });
-      toolAccess[key] = ACC_LEVELS[idx] || 'off';
+      toolAccess[key] = level;
     });
   }
 
@@ -4838,27 +4865,15 @@ function buildAccordionItem(uid, u, depts, deptMap) {
          uneditable now that the strike-through is not doing it. */
       if (constraints.isClub) return;
 
-      /* Reset to stored RTDB value (or role default if no override) */
+      /* Reset to stored RTDB value (or role default if no override).
+         setSliderLevel paints against the slider's OWN rungs. This block used
+         to do its own arithmetic against the global off/access/admin list, so
+         on a two-rung tool a stored 'admin' resolved to index 2, no rung
+         matched, and the control came up with NOTHING selected — the blank
+         rows a League Admin saw on all thirteen two-rung tools the moment they
+         pressed Edit. */
       var level = storedTools[toolKey] || getDefaultLevel(toolKey, currentU);
-      if (constraints.capAccess && level === 'admin') level = 'access';
-      var idx   = ACC_LEVELS.indexOf(level);
-      if (idx === -1) idx = 0;
-
-      slider.querySelectorAll('.acc-slider__stop').forEach(function(stop, si) {
-        var stopLevel = stop.dataset.level || ACC_LEVELS[si];
-        stop.classList.remove('acc-slider__stop--active', 'acc-slider__stop--filled', 'acc-slider__stop--padlocked');
-        var lbl  = stop.querySelector('.acc-slider__label');
-        if (constraints.capAccess && stopLevel === 'admin') {
-          /* Restricted roles: admin padlocked, Off/Access still editable */
-          stop.classList.add('acc-slider__stop--padlocked');
-          stop.style.pointerEvents = 'none';
-        } else {
-          stop.style.pointerEvents = '';
-          if (si < idx)  stop.classList.add('acc-slider__stop--filled');
-          if (si === idx) stop.classList.add('acc-slider__stop--active');
-        }
-      });
-      syncAccAria(slider);
+      setSliderLevel(slider, level);
       delete slider.dataset.previewLevel;
 
       /* Remove locked class -- CSS handles pointer-events, handlers already wired */
@@ -4964,16 +4979,9 @@ function buildAccordionItem(uid, u, depts, deptMap) {
       var slider = row.querySelector('.acc-slider');
       if (!slider || !slider.dataset.toolkey) return;
       var toolKey = slider.dataset.toolkey;
-      var level   = storedTools[toolKey] || getDefaultLevel(toolKey, u);
-      var idx     = ACC_LEVELS.indexOf(level);
-      if (idx === -1) idx = 0;
-
-      slider.querySelectorAll('.acc-slider__stop').forEach(function(stop, si) {
-        stop.classList.remove('acc-slider__stop--active', 'acc-slider__stop--filled');
-        if (si < idx)  stop.classList.add('acc-slider__stop--filled');
-        if (si === idx) stop.classList.add('acc-slider__stop--active');
-      });
-      syncAccAria(slider);
+      /* Same rule as enterEditMode: repaint against the slider's own rungs. */
+      var level = storedTools[toolKey] || getDefaultLevel(toolKey, u);
+      setSliderLevel(slider, level);
       delete slider.dataset.previewLevel;
     });
 
@@ -5077,25 +5085,23 @@ function buildAccordionItem(uid, u, depts, deptMap) {
         }
         if (restricted && useLevel === 'admin') useLevel = 'access';
 
-        var useIdx = ACC_LEVELS.indexOf(useLevel);
-        if (useIdx === -1) useIdx = 0;
-
         slider.className = 'acc-slider' + (fullLock ? ' acc-slider--locked' : '');
 
-        slider.querySelectorAll('.acc-slider__stop').forEach(function(stop, si) {
-          var stopLevel = stop.dataset.level || ACC_LEVELS[si];
-          stop.classList.remove('acc-slider__stop--active', 'acc-slider__stop--filled', 'acc-slider__stop--padlocked');
-          var lbl  = stop.querySelector('.acc-slider__label');
+        /* Paint against the slider's own rungs (setSliderLevel), not against
+           the global off/access/admin list — on a two-rung tool an 'admin'
+           value has no rung to land on and the control came up blank. */
+        setSliderLevel(slider, useLevel);
+
+        /* A rung the previewed role could never hold stays inert. Nothing is
+           struck through: the club filter in buildAccSlider means a club
+           preview has no Manage rung to disable in the first place, and this
+           only bites on a slider built for a league role and previewed as a
+           club one, before the row is rebuilt. */
+        slider.querySelectorAll('.acc-slider__stop').forEach(function(stop) {
+          var stopLevel = stop.dataset.level;
           var padlock = fullLock || (restricted && stopLevel === 'admin');
-          if (padlock) {
-            stop.classList.add('acc-slider__stop--padlocked');
-            stop.style.pointerEvents = 'none';
-            if (si === useIdx && fullLock) stop.classList.add('acc-slider__stop--active');
-          } else {
-            stop.style.pointerEvents = '';
-            if (si < useIdx)  stop.classList.add('acc-slider__stop--filled');
-            if (si === useIdx) stop.classList.add('acc-slider__stop--active');
-          }
+          stop.classList.toggle('acc-slider__stop--padlocked', !!padlock);
+          stop.style.pointerEvents = padlock ? 'none' : '';
         });
         syncAccAria(slider);
 
@@ -5453,11 +5459,26 @@ function buildAccSlider(uid, toolKey, currentLevel, defaultLevel, locked, clubLo
      or superadmin's own slider). In those cases stops get padlocks + no handler.
      For normal edit-mode locking, `locked` just adds the CSS class -- handlers
      are always wired and check `_editUid` before acting. */
-  LEVELS.forEach(function(level, idx) {
-    /* Permanent padlock: truly restricted stop (superadmin slider, or club admin cap) */
-    /* Padlock: permanently restricted stops.
-       locked=true means the whole slider is structurally off-limits (superadmin, staff-locked).
-       clubLocked=true means only the admin stop is padlocked for club users. */
+  /* Three columns, always — even when this tool has two rungs. The control is
+     a fixed width and the rungs used to divide it, so "Use" was half the box on
+     a two-rung tool and a third of it on a three-rung one: the words sat in a
+     different place on every row and the column read as ragged even though the
+     boxes were the same size. Aligning the box was not the job; aligning the
+     BUTTONS is. The missing rung is rendered as an empty cell so Off sits under
+     Off, Use under Use and Manage under Manage all the way down the list. */
+  ACC_LEVELS.forEach(function(level) {
+    var idx = LEVELS.indexOf(level);
+    if (idx === -1) {
+      /* A rung this tool (or this role) does not have. An empty cell holds the
+         column open; it is not a control, so it carries no role, no label and
+         no handler, and a screen reader passes straight over it. */
+      var gap = document.createElement('div');
+      gap.className = 'acc-slider__gap';
+      gap.setAttribute('aria-hidden', 'true');
+      wrap.appendChild(gap);
+      return;
+    }
+
     var isPadlocked = locked || (clubLocked && level === 'admin');
 
     var stop = document.createElement('div');
@@ -5465,7 +5486,10 @@ function buildAccSlider(uid, toolKey, currentLevel, defaultLevel, locked, clubLo
     if (isPadlocked) {
       stop.classList.add('acc-slider__stop--padlocked');
     } else {
-      if (idx < currentIdx)  stop.classList.add('acc-slider__stop--filled');
+      /* --filled (every rung below the selected one) was applied here and
+         styled nowhere — the segments carry the state on their own since the
+         track was deleted. Dropped rather than left as a class that looks
+         meaningful in the DOM inspector and is not. */
       if (idx === currentIdx) stop.classList.add('acc-slider__stop--active');
     }
 
@@ -5502,16 +5526,9 @@ function buildAccSlider(uid, toolKey, currentLevel, defaultLevel, locked, clubLo
         }
         currentLevel = level;
         currentIdx   = idx;
-        wrap.querySelectorAll('.acc-slider__stop').forEach(function(s, si) {
-          s.classList.remove('acc-slider__stop--active', 'acc-slider__stop--filled');
-          if (si < idx)  s.classList.add('acc-slider__stop--filled');
-          if (si === idx) s.classList.add('acc-slider__stop--active');
-          /* Keep the a11y state and the roving tabstop with the selection. */
-          if (s.getAttribute('aria-disabled') !== 'true') {
-            s.setAttribute('aria-checked', String(si === idx));
-            s.tabIndex = (si === idx) ? 0 : -1;
-          }
-        });
+        /* One repaint, shared with every other path (setSliderLevel), which
+           also keeps aria-checked and the roving tabstop with the selection. */
+        setSliderLevel(wrap, level);
         /* No RTDB write -- deferred to Save */
       });
       /* Space/Enter activate the focused segment, as a radio should. */
@@ -5757,14 +5774,27 @@ function buildInviteSlider(toolKey, currentLevel, clubLocked, dept, container) {
   if (currentIdx === -1) currentIdx = (ACC_LEVELS.indexOf(currentLevel) > 0) ? LEVELS.length - 1 : 0;
   wrap.setAttribute('role', 'radiogroup');
   wrap.setAttribute('aria-label', 'Access level');
-  LEVELS.forEach(function(level, idx) {
+  /* Three columns, always — same rule as the user rows: an absent rung is an
+     empty cell, so Off sits under Off and Use under Use down the whole list. */
+  ACC_LEVELS.forEach(function(level) {
+    var idx = LEVELS.indexOf(level);
+    if (idx === -1) {
+      var gap = document.createElement('div');
+      gap.className = 'acc-slider__gap';
+      gap.setAttribute('aria-hidden', 'true');
+      wrap.appendChild(gap);
+      return;
+    }
     var isPadlocked = clubLocked && level === 'admin';
     var stop = document.createElement('div');
     stop.className = 'acc-slider__stop';
     if (isPadlocked) {
       stop.classList.add('acc-slider__stop--padlocked');
     } else {
-      if (idx < currentIdx)  stop.classList.add('acc-slider__stop--filled');
+      /* --filled (every rung below the selected one) was applied here and
+         styled nowhere — the segments carry the state on their own since the
+         track was deleted. Dropped rather than left as a class that looks
+         meaningful in the DOM inspector and is not. */
       if (idx === currentIdx) stop.classList.add('acc-slider__stop--active');
     }
     var label = document.createElement('div');
@@ -5786,15 +5816,7 @@ function buildInviteSlider(toolKey, currentLevel, clubLocked, dept, container) {
       stop.addEventListener('click', function(e) {
         e.stopPropagation();
         currentIdx = idx;
-        wrap.querySelectorAll('.acc-slider__stop').forEach(function(s, si) {
-          s.classList.remove('acc-slider__stop--active', 'acc-slider__stop--filled');
-          if (si < idx)  s.classList.add('acc-slider__stop--filled');
-          if (si === idx) s.classList.add('acc-slider__stop--active');
-          if (s.getAttribute('aria-disabled') !== 'true') {
-            s.setAttribute('aria-checked', String(si === idx));
-            s.tabIndex = (si === idx) ? 0 : -1;
-          }
-        });
+        setSliderLevel(wrap, level);
       });
       stop.addEventListener('keydown', function(e) {
         if (e.key === ' ' || e.key === 'Enter' || e.key === 'Spacebar') {
