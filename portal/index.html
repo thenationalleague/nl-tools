@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.108 (17/08/2026)
+  Version: v5.109 (17/08/2026)
   Date: 09/04/2026
   File: /portal/index.html
 
@@ -28,6 +28,25 @@
     well (no admin gating anywhere in it, superadmin-only by defaults).
     Thirteen of seventeen tools are now Off / Use; only Judgements, Vacancies and
     Website Archive still offer Manage.
+
+  v5.109 (17/08/2026) — Nothing is struck through any more, because nothing
+    unreachable is drawn. With thirteen of sixteen tools at two rungs, a club
+    account's panel was mostly crossed-out text: eight league tools it can
+    never open, plus a Manage rung on every remaining row that a club role can
+    never hold. It read as broken rather than as informative, and a control
+    nobody can ever operate is not information anyone acts on.
+    League-audience tools are skipped for club accounts and counted once in
+    the summary line instead ("8 league tools are not open to club accounts").
+    The Manage rung is filtered out of the ladder for club rows in
+    buildAccSlider rather than rendered and defaced. What is left is a real
+    control, read-only until Edit access is pressed.
+    .acc-slider__stop--padlocked keeps its class as a fallback but loses the
+    line-through: muted and inert, not defaced.
+    Canon candidate: .acc-slider is a second implementation of a segmented
+    single-choice control, which nl-brand.css already has as .chip-group /
+    .chip. The portal's version adds states the canon one lacks (a read-only
+    value display, and a per-tool ladder). Worth converging — see the note in
+    the CSS above .acc-slider.
 
   v5.108 (17/08/2026) — Two rows that drew as "you have nothing" when they did
     not. A superadmin's own entry rendered sixteen tools of struck-through
@@ -689,11 +708,11 @@
   window.NL_CHANGELOG = [
     {
       date: '17/08/2026',
-      version: 'v5.108',
+      version: 'v5.109',
       items: [
         'Managing someone\u2019s access now starts from their role. You see one line saying what the role grants, then only the tools set apart from it \u2014 the rest fold away.',
         'Tools with nothing to administer no longer offer "Manage", so the control only appears where it does something.',
-        'The access controls line up in a column, and read-only rows no longer look struck out.'
+        'Nothing is crossed out any more: a tool a club account cannot open, or a level its role cannot hold, is simply not shown.'
       ]
     },
     {
@@ -1921,7 +1940,16 @@
    updateFill() was dead code), labelled in 8px uppercase and reachable only
    by mouse. A segmented control is the standard affordance for one-of-three,
    so it needs no learning, reads at a glance, and takes keyboard focus. */
-/* One fixed width for every control, whatever its rung count.
+/* CANON CANDIDATE (17/08/2026) — .acc-slider is a second implementation of a
+   segmented, mutually-exclusive choice control, and nl-brand.css already has
+   one: .chip-group / .chip. This version carries states the canon component
+   does not — a read-only value display (--locked) and a per-tool ladder whose
+   rung count varies — so converging means extending .chip-group rather than
+   swapping to it. Flagged, not done: there is one consumer today, and the
+   promotion rule is that the second use earns the move. If a tool needs a
+   two- or three-way choice, extend .chip-group and bring this with it.
+
+   One fixed width for every control, whatever its rung count.
    These sit in a column, one per tool, and used to be inline-flex with a
    60px min-width per segment — so a two-rung tool (Off / Use) drew ~128px
    and a three-rung tool (Off / Use / Manage) ~190px. Right-aligned in the
@@ -1997,15 +2025,18 @@
 .acc-slider--locked .acc-slider__stop--active { background: var(--primary-100); }
 .acc-slider--locked .acc-slider__stop--active .acc-slider__label { color: var(--primary-900); }
 
-/* Structurally unavailable (a club role can never Manage; a league-audience
-   tool is never open to club roles). Not "disabled for now" — never. */
-.acc-slider__stop--padlocked { cursor: not-allowed; }
+/* Structurally unavailable. This used to strike the label through, and with
+   thirteen of sixteen tools at two rungs it meant a club account's panel was
+   mostly crossed-out text — it read as broken rather than as informative, and
+   a rung nobody can ever select is not information anyone acts on.
+   The rows and rungs are now simply not drawn (see buildAccordionItem and
+   buildAccSlider), so this state is close to unreachable. It stays as a
+   fallback for any path that still passes it, muted and inert rather than
+   defaced. */
+.acc-slider__stop--padlocked { cursor: default; }
 .acc-slider__stop--padlocked .acc-slider__label {
   color: var(--text-muted);
-  opacity: 0.6;              /* still readable — the user needs to see what
-                                is ruled out, not just that something is */
-  text-decoration: line-through;
-  text-decoration-thickness: 1px;
+  opacity: 0.5;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4678,14 +4709,21 @@ function buildAccordionItem(uid, u, depts, deptMap) {
   var roleNow      = normRole(u.role || 'staff');
   var exceptions   = [];   /* rows whose stored entry differs from the role */
   var conforming   = [];   /* rows that just restate the role */
+  var closedCount  = 0;    /* tools this account's realm can never reach */
 
   depts.forEach(function(dept) {
     var deptTools = deptMap[dept];
     if (!deptTools || !deptTools.length) return;
 
-    /* League-audience tools are structurally closed to club roles. */
+    /* League-audience tools are structurally closed to club roles — the
+       audience gate denies them in auth-guard before any level is read. */
     var staffLocked = dept === 'staff' && u.role !== 'superadmin' &&
                       isRestrictedRole(u.role);
+
+    /* So they are not drawn. Eight rows of struck-out Off / Use, one per
+       league tool, on every club account, saying nothing that changes what
+       anyone does — the count in the summary says it once instead. */
+    if (staffLocked) { closedCount += deptTools.length; return; }
 
     deptTools.forEach(function(t) {
       var currentLevel = getAccessLevel(uid, t._key);
@@ -4707,28 +4745,23 @@ function buildAccordionItem(uid, u, depts, deptMap) {
       toolName.appendChild(iconSpan);
       toolName.appendChild(document.createTextNode(t.label || t._key));
 
-      var effectiveLevel = staffLocked ? 'off' : currentLevel;
-
-      /* permanentLock strikes through EVERY rung — reserve it for a tool that
-         is structurally unavailable, which is a league-audience tool on a club
-         account and nothing else. It used to include every club row, so a club
-         person's rows drew as sixteen struck-out controls saying "you have
-         nothing" when what they have is Use on all of them. Club access is
-         read-only, which is a different statement: the value stays legible and
-         only the affordance retreats (.acc-slider--locked). The Manage rung
-         stays struck via clubLocked, because a club role can never hold it.
-         (Superadmins never reach here — see below.) */
-      var permanentLock = staffLocked;
-      var sliderEl = buildAccSlider(uid, t._key, effectiveLevel, defaultLevel,
-                                    permanentLock, isClubLocked, dept, body);
-      if (!permanentLock) sliderEl.classList.add('acc-slider--locked');
+      /* Nothing here is struck out any more, because nothing unreachable is
+         drawn: a tool this account's realm cannot open is skipped above, and a
+         rung its role cannot hold is dropped from the ladder in
+         buildAccSlider. What remains is a real control, shown read-only until
+         Edit access is pressed — .acc-slider--locked, where the value stays
+         legible and only the affordance retreats. Superadmins never reach
+         here at all (see below). */
+      var sliderEl = buildAccSlider(uid, t._key, currentLevel, defaultLevel,
+                                    false, isClubLocked, dept, body);
+      sliderEl.classList.add('acc-slider--locked');
 
       row.appendChild(toolName);
 
       /* Deviates from what the role grants. On a league account that is a
          deliberate exception; on a club account it is stranded data from
          before club rows became read-only, and wants clearing. */
-      var deviates = !staffLocked && effectiveLevel !== defaultLevel;
+      var deviates = currentLevel !== defaultLevel;
       if (deviates) {
         var note = document.createElement('span');
         note.className = 'uacc-override';
@@ -4752,7 +4785,8 @@ function buildAccordionItem(uid, u, depts, deptMap) {
   if (isSuperUser) {
     summaryText.textContent = 'Superadmin — every tool, always. Nothing here to set.';
   } else {
-    summaryText.textContent = 'Access follows their role: ' + roleLabel(roleNow) + '.';
+    summaryText.textContent = 'Access follows their role: ' + roleLabel(roleNow) + '.'
+      + (closedCount ? ' ' + closedCount + ' league tools are not open to club accounts.' : '');
   }
   summary.appendChild(summaryText);
   body.appendChild(summary);
@@ -5468,6 +5502,11 @@ function buildAccSlider(uid, toolKey, currentLevel, defaultLevel, locked, clubLo
      admin tier — it is clamped to the top rung that exists, so the control can
      never display a state it cannot represent. */
   var LEVELS = toolLevels(STATE.tools && STATE.tools[toolKey]);
+  /* A club role can never hold Manage, so for a club account the rung is not
+     drawn at all. It used to be drawn and struck through, which is a control
+     saying "here is a thing you cannot have" — noise on every club row, on
+     every tool, forever. If it cannot be operated it is not a control. */
+  if (clubLocked) LEVELS = LEVELS.filter(function(l) { return l !== 'admin'; });
   var currentIdx = LEVELS.indexOf(currentLevel);
   if (currentIdx === -1) currentIdx = (ACC_LEVELS.indexOf(currentLevel) > 0) ? LEVELS.length - 1 : 0;
   var defaultIdx = LEVELS.indexOf(defaultLevel);
@@ -5884,6 +5923,9 @@ function buildInviteSlider(toolKey, currentLevel, clubLocked, dept, container) {
   if (clubLocked && currentLevel === 'admin') currentLevel = 'access';
   /* Only the levels this tool has — see toolLevels. */
   var LEVELS = toolLevels(STATE.tools && STATE.tools[toolKey]);
+  /* Same rule as the user rows: a rung a club role can never hold is not
+     drawn, rather than drawn and crossed out. */
+  if (clubLocked) LEVELS = LEVELS.filter(function(l) { return l !== 'admin'; });
   var currentIdx = LEVELS.indexOf(currentLevel);
   if (currentIdx === -1) currentIdx = (ACC_LEVELS.indexOf(currentLevel) > 0) ? LEVELS.length - 1 : 0;
   wrap.setAttribute('role', 'radiogroup');
