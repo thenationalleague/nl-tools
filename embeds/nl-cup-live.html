@@ -8,22 +8,25 @@
      ----------
      A call-to-action band for the front page: on a National League Cup
      matchday it says the cup is on today and puts every tie one click
-     from its stream. Not a fixture list and not a results page — the
-     tile is a button, and the whole thing is sized to sit in a
-     homepage stack rather than to be read.
+     from its stream, and from midnight the night before it previews
+     tomorrow's round — kick-off times under a flat Tomorrow pill, no
+     Live pulse and no stream times until the day itself. Not a fixture
+     list and not a results page — the tile is a button, and the whole
+     thing is sized to sit in a homepage stack rather than to be read.
 
      Nothing signs in. The NL+ cookie is read if it happens to be
      there, purely to pull the fan's own club to the front of the
      rail; there is no gate, no prompt and no account state.
 
-     On every other day — and after the last of today's ties has
-     finished — it paints nothing at all. The block collapses to zero
-     height and the page reads as if it were never there. That
+     On every other day — and once the last tie of a round's final
+     night has finished — it paints nothing at all. The block collapses
+     to zero height and the page reads as if it were never there. That
      silence is the point: this sits permanently in the CMS and speaks
-     only on the ~10 days a season it has something to say. No
-     skeleton and no error box either, because a spinner that resolves
-     to nothing is not silence, and on 355 days a year an error box
-     would be reporting a failure that is really the right answer.
+     only on the ~20 days a season (each round day and its eve) it has
+     something to say. No skeleton and no error box either, because a
+     spinner that resolves to nothing is not silence, and on the other
+     345 days a year an error box would be reporting a failure that is
+     really the right answer.
 
      Why a rail and not a grid
      -------------------------
@@ -40,7 +43,10 @@
      "Today" is the UK calendar day, 00:00–23:59 Europe/London, not the
      UTC day. Under BST those differ by an hour and a 00:30 kick-off
      would otherwise land on the wrong day, so the API window is
-     deliberately widened to ±1 day and then filtered on the UK date.
+     deliberately widened — a day back, two days forward — and then
+     filtered on the UK date. Two UK days are in view: today's card
+     wins while it still has a tie to come or in play, otherwise
+     tomorrow's round takes the band as the eve preview.
 
      The link
      --------
@@ -71,6 +77,13 @@
      display, so the tile agrees with the broadcast.
 
      Changelog:
+       17/08/2026  v1.8  The band wakes at midnight the day before a
+                         round and previews tomorrow's ties: kick-off
+                         times under a flat Tomorrow pill. The Live
+                         pulse, the Watch buttons and the "Watch from"
+                         stream times stay matchday-only, and today's
+                         card still wins while it has a tie left to
+                         watch.
        11/08/2026  v1.7  The band packs up once the last of today's ties is
                          over, rather than sitting on the front page showing
                          full-time scores nobody can go and watch.
@@ -109,7 +122,7 @@
     <div class="nlcl__cap">
       <span class="nlcl__title">National League Cup</span>
       <span class="nlcl__sub">
-        <span class="nlcl__badge"><i class="nlcl__dot" aria-hidden="true"></i>Live</span>
+        <span class="nlcl__badge" id="nlcl-badge"><i class="nlcl__dot" aria-hidden="true"></i>Live</span>
         <span class="nlcl__date" id="nlcl-date"></span>
       </span>
     </div>
@@ -462,6 +475,7 @@
     root.getAttribute('data-mode') || '').trim().toLowerCase() === 'contained';
 
   var dateEl  = document.getElementById('nlcl-date');
+  var badgeEl = document.getElementById('nlcl-badge');
   var track   = document.getElementById('nlcl-track');
   var scroll  = root.querySelector('.nlcl__scroll');
   var navPrev = root.querySelector('.nlcl__nav.is-prev');
@@ -522,6 +536,14 @@
   function ukDate(d) { return fmt(d, { o: { weekday: 'short', day: 'numeric', month: 'short' } }); }
   function utcYmd(d) { return new Date(d.getTime()).toISOString().slice(0, 10); }
 
+  /* The UK day after a UK day, by calendar arithmetic rather than +24 hours —
+     on the 25-hour night the clocks go back, midnight plus a day is still the
+     same UK date, and the eve preview would sit that Sunday out. */
+  function ukNextYmd(ymd) {
+    var p = String(ymd).split('-');
+    return new Date(Date.UTC(+p[0], p[1] - 1, +p[2] + 1)).toISOString().slice(0, 10);
+  }
+
   /* NLS says "Birmingham City U21"; cup-clubs-meta says "Birmingham City PL2".
      Three of the sixteen academy sides disagree, so both sides get flattened
      to the parent club before any lookup. */
@@ -553,8 +575,9 @@
   }
 
   /* The band is a "watch this now" band. A tie that is over is not something
-     to watch, so once none of today's are still to come or under way there is
-     nothing left to say and the block goes back to taking up no room. */
+     to watch, so once none of today's are still to come or under way the day
+     is done — the band hands over to tomorrow's round if there is one
+     (pickDay), and otherwise goes back to taking up no room. */
   function watchable(m) { return m.state === 'pre' || m.state === 'live'; }
 
   function periodState(p) {
@@ -675,21 +698,42 @@
     });
   }
 
-  /* ±1 day around the UK date, then filtered on the UK date — the window is a
-     UTC one and the answer is a local one. */
-  function fetchToday(season) {
+  /* One UTC window wide enough for both UK days in view — a day back for the
+     BST midnight stragglers, two forward so that tomorrow's evening kick-offs
+     (already tomorrow's UTC day, and reached from midnight tonight) are
+     inside it. Filtered on the UK date afterwards: the window is a UTC one
+     and the answer is a local one. */
+  function apiWindow(now) {
+    return {
+      from: utcYmd(new Date(now.getTime() - 864e5)) + ' 00:00:00Z',
+      to:   utcYmd(new Date(now.getTime() + 2 * 864e5)) + ' 23:59:59Z'
+    };
+  }
+
+  /* Two days are in view. Today's card wins while it still has a tie to come
+     or in play; otherwise tomorrow's round takes the band as the eve preview.
+     That is what puts Tuesday's cup night on the front page from Monday
+     morning — and, in a round split across two evenings, what hands the band
+     to the second night once the first is done. */
+  function pickDay(matches, today, tomorrow) {
+    var todays = matches.filter(function (m) { return ukYmd(m.ko) === today; });
+    if (todays.some(watchable)) return todays;
+    return matches.filter(function (m) { return ukYmd(m.ko) === tomorrow; });
+  }
+
+  function fetchTies(season) {
     var now = new Date();
-    var from = utcYmd(new Date(now.getTime() - 864e5)) + ' 00:00:00Z';
-    var to   = utcYmd(new Date(now.getTime() + 864e5)) + ' 23:59:59Z';
+    var win = apiWindow(now);
     var url = API + '?seasonID=' + encodeURIComponent(season) +
       '&competitionID=' + COMP_CUP +
-      '&from=' + encodeURIComponent(from) +
-      '&to='   + encodeURIComponent(to) +
+      '&from=' + encodeURIComponent(win.from) +
+      '&to='   + encodeURIComponent(win.to) +
       '&page.number=1&page.size=100';
 
     var today = ukYmd(now);
+    var tomorrow = ukNextYmd(today);
     return getJson(url, { cache: 'no-store' }).then(function (json) {
-      return (json && json.data || []).map(function (m) {
+      return pickDay((json && json.data || []).map(function (m) {
         var a = m.attributes || {};
         var ko = parseKO(a.kickOffDateUTC);
         return {
@@ -700,10 +744,12 @@
           state: a.postponementReason ? 'postponed' : stateFor(a.matchPeriod, ko)
         };
       }).filter(function (m) {
-        return m.ko && m.home && ukYmd(m.ko) === today;
+        if (!m.ko || !m.home) return false;
+        var day = ukYmd(m.ko);
+        return day === today || day === tomorrow;
       }).sort(function (x, y) {
         return (x.ko - y.ko) || x.home.localeCompare(y.home);
-      });
+      }), today, tomorrow);
     });
   }
 
@@ -755,9 +801,12 @@
   function open(m, links, now) {
     var known = links[normKey(m.home)] || '';
     var live = known && linkable(m, now);
+    /* "Watch from 18:45" is an answer about tonight. On the eve card the only
+       honest time is the kick-off, so the line waits for the day itself. */
+    var sameDay = ukYmd(m.ko) === ukYmd(new Date(now || Date.now()));
     return {
       url: live ? known : '',
-      from: (known && !live && m.state === 'pre') ? ukTime(new Date(m.ko.getTime() - ARM_MS)) : '',
+      from: (known && !live && m.state === 'pre' && sameDay) ? ukTime(new Date(m.ko.getTime() - ARM_MS)) : '',
       tag: live ? 'a' : 'div',
       attrs: live ? ' href="' + escHtml(known) + '" target="_blank" rel="noopener noreferrer"' : ''
     };
@@ -849,6 +898,12 @@
     wireCrests(track);
 
     dateEl.textContent = ukDate(matches[0].ko);
+    /* The pill may only say Live on the day itself — a pulsing LIVE thirty
+       hours before kick-off is exactly the kind of lie the band is built not
+       to tell. On the eve it says Tomorrow, flat. */
+    badgeEl.innerHTML = ukYmd(matches[0].ko) === ukYmd(new Date())
+      ? '<i class="nlcl__dot" aria-hidden="true"></i>Live'
+      : 'Tomorrow';
     root.hidden = false;
     /* Both after the reveal: a hidden element has no box to measure. */
     bleed();
@@ -939,7 +994,7 @@
 
     var last = null;
     function cycle() {
-      return fetchToday(season).then(function (matches) {
+      return fetchTies(season).then(function (matches) {
         last = matches;
         /* Re-read rather than trust the boot-time answer: a fan who signs in
            on another tab, or whose cookie landed after the grace period, gets
@@ -968,7 +1023,7 @@
       document.addEventListener('visibilitychange', tick);
     });
   }).catch(function (e) {
-    /* Failing silently is the correct failure here: on all but ~10 days a
+    /* Failing silently is the correct failure here: on all but ~20 days a
        season the right output IS nothing, so an error box would be wrong far
        more often than it was right. */
     root.hidden = true;

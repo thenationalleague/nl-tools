@@ -54,9 +54,11 @@ assert.ok(WINDOW_DECL, 'LIVE_WINDOW_MS is present in the bundle');
 const W = new Function(
   "var TZ = 'Europe/London'; var byKey = {};\n" + SUFFIX_DECL[0] + '\n' + ARM_DECL[0] + '\n' + WINDOW_DECL[0] + '\n' +
   ['baseName', 'suffixOf', 'normKey', 'periodState', 'parseKO', 'fmt', 'ukYmd', 'ukTime',
+   'utcYmd', 'ukNextYmd', 'apiWindow', 'pickDay', 'open',
    'isHex', 'lum', 'accentFor', 'indexClubs', 'clubFor', 'shortFor', 'linkable',
    'stateFor', 'watchable'].map(extract).join('\n') +
   '\n return { baseName, suffixOf, normKey, periodState, parseKO, ukYmd, ukTime,' +
+  ' ukNextYmd, apiWindow, pickDay, open,' +
   ' lum, accentFor, indexClubs, clubFor, shortFor, linkable, stateFor, watchable, ARM_MS,' +
   ' LIVE_WINDOW_MS, byKey };'
 )();
@@ -238,6 +240,56 @@ test('a finished card leaves nothing behind', () => {
   /* An evening round behind an afternoon kick-off keeps it open, though. */
   const mixed = [{ state: 'ft' }, { state: 'postponed' }, { state: 'pre' }];
   assert.equal(mixed.some(W.watchable), true, 'later ties still to come');
+});
+
+/* ---------- the eve preview (MD-1) ---------- */
+
+test('the UK day rolls over by calendar, not by adding 24 hours', () => {
+  assert.equal(W.ukNextYmd('2026-08-17'), '2026-08-18');
+  assert.equal(W.ukNextYmd('2026-08-31'), '2026-09-01');
+  assert.equal(W.ukNextYmd('2026-12-31'), '2027-01-01');
+  /* The 25-hour night the clocks go back: midnight plus 24 hours is still
+     Sunday, but the day after Sunday is Monday. */
+  assert.equal(W.ukNextYmd('2026-10-25'), '2026-10-26');
+});
+
+test("the API window reaches tomorrow evening from MD-1 midnight", () => {
+  /* Monday 00:30 BST is Sunday 23:30 UTC — a +1 day window ends on Monday's
+     UTC day and misses every Tuesday kick-off, which is the whole preview. */
+  const win = W.apiWindow(new Date('2026-08-16T23:30:00Z'));
+  assert.equal(win.from, '2026-08-15 00:00:00Z');
+  assert.equal(win.to,   '2026-08-18 23:59:59Z');
+});
+
+test("today's card holds the band; tomorrow's takes it only when today is done", () => {
+  const at = (ko, state) => ({ ko: W.parseKO(ko), state });
+  const mon = '2026-08-17', tue = '2026-08-18';
+  const tueTies = [at('2026-08-18 18:00:00', 'pre'), at('2026-08-18 18:45:00', 'pre')];
+
+  /* MD-1: nothing today, so tomorrow's round previews. */
+  assert.deepEqual(W.pickDay(tueTies, mon, tue), tueTies);
+  /* MD with a split round: today's ties only — tomorrow waits its turn. */
+  const monLive = [at('2026-08-17 18:00:00', 'live')];
+  assert.deepEqual(W.pickDay(monLive.concat(tueTies), mon, tue), monLive);
+  /* Today all finished: the band hands over to tomorrow's night. */
+  const monDone = [at('2026-08-17 14:00:00', 'ft')];
+  assert.deepEqual(W.pickDay(monDone.concat(tueTies), mon, tue), tueTies);
+  /* Nothing either day: nothing to pick, so the band stays away. */
+  assert.deepEqual(W.pickDay(monDone, mon, tue), []);
+});
+
+test('the "Watch from" stream time waits for the day itself', () => {
+  /* On the eve card "Watch from 18:45" would read as tonight. */
+  const ko = W.parseKO('2026-08-18 18:00:00');
+  const links = {};
+  links[W.normKey('Hartlepool United')] = 'https://www.thenationalleague.org.uk/live/x';
+  const tie = { ko, home: 'Hartlepool United', state: 'pre' };
+  const eve = ko.getTime() - 20 * 3600000;   /* Monday 23:00 UK */
+  const day = ko.getTime() - 5 * 3600000;    /* Tuesday 14:00 UK */
+
+  assert.equal(W.open(tie, links, eve).from, '', 'no stream time on the eve');
+  assert.equal(W.open(tie, links, eve).url, '', 'and no link either');
+  assert.equal(W.open(tie, links, day).from, '18:45', 'stream time on the day');
 });
 
 /* ---------- when a tile becomes a link ---------- */
