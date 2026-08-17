@@ -30,8 +30,8 @@ own · Club Admin edit own · League Staff view all · League Admin edit all.**
 ### Why most tools declare `levels: ["off","access"]`
 
 `admin` as a *level* is only load-bearing where a tool actually reads it, and
-the 17/08 audit found **three of seventeen** do: Vacancies, Judgements and
-Website Archive. Everywhere else the ladder is role. Those fourteen tools
+the 17/08 audit found **three of sixteen** do: Vacancies, Judgements and
+Website Archive. Everywhere else the ladder is role. The other thirteen
 therefore declare `levels: ["off","access"]` in their registry record and the
 portal's access panel does not offer "Manage" for them — offering a control
 that sets a value nothing reads is worse than not offering it.
@@ -68,7 +68,7 @@ so nothing is lost.
 
 ---
 
-## Live — 17 records
+## Live — 16 records
 
 ### League audience — NL staff only, clubs never (6)
 
@@ -81,7 +81,7 @@ so nothing is lost.
 | **Programme Packs (admin)** | `media-programme` | Manage | Off | Console for `/programme/`; the club-facing side is the Storage-backed page, not this |
 | **Fan Widgets** | `ops-fan-widgets` | Off | Off | Superadmin only today |
 
-### Club audience — NL staff + clubs (8)
+### Club audience — NL staff + clubs (7)
 
 | Tool | Key | League Admin | League Staff | Club Admin | Club Staff |
 |---|---|---|---|---|---|
@@ -92,20 +92,12 @@ so nothing is lost.
 | **Handbook 2026-27** | `ops-handbook` | edit content | view | view | view |
 | **Judgements & Decisions** | `ops-judgements` | **Manage** — add / amend / remove all | view | view | view |
 | **Vacancies** | `ops-vacancies` | **Manage** — full CRUD + approve/reject | view all | add/edit own club's; every submission needs NL approval | view all |
-| **Wellbeing** | `ops-wellbeing` | — | — | — | — |
 
 **One registry oddity, harmless but worth tidying:** `ops-fixtures` sets
-`defaults.staff = "admin"` where all sixteen other records use `"access"`.
+`defaults.staff = "admin"` where all fifteen other records use `"access"`.
 Fixtures does not read the level at all — it decides from role — and it
 declares `levels: ["off","access"]`, so the value is dead either way. Set it to
 `"access"` next time the file is opened.
-
-**Wellbeing is not actually gated.** `/wellbeing/index.html` carries no
-auth-guard, no topbar and no Firebase, by design — it is a public page on the
-club-contacts precedent, and nothing is recorded on it. Its registry record
-exists only to put a card on the portal. The `defaults` in that record are
-decorative; do not read them as a gate, and do not "fix" the page by adding
-auth-guard.
 
 ### Meta audience — tooling about the estate (3)
 
@@ -114,6 +106,18 @@ auth-guard.
 | **Estate** | `ops-estate` | Superadmin only |
 | **NLServices API** | `ops-nls-monitor` | Superadmin only |
 | **Style Guide** | `staff-style-guide` | Superadmin only |
+
+## Not a tool — Wellbeing
+
+`/wellbeing/` is a **public page**, not a portal tool. No auth-guard, no
+topbar, no Firebase, nothing recorded — a standalone section built for a
+specific purpose that needs to be publicly reachable, on the club-contacts
+precedent.
+
+It held an `ops-wellbeing` registry record until 17/08/2026, which put a card
+on the portal and carried per-role `defaults` that nothing enforced. The record
+is gone. Do not re-add one, and do not "fix" the page by adding auth-guard —
+being open is the point. It is reached by its URL.
 
 ## Parked — 3
 
