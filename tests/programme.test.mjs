@@ -417,6 +417,20 @@ test('the client upload cap matches the Storage rules', () => {
     'PP.MAX_BYTES and the Storage rule must agree, or uploads fail at the last byte');
 });
 
+/* ── Entry doors ──────────────────────────────────────────────────────────
+   Three ways into the library — passcode, remembered device, master — plus
+   the console's own exchange. Each is an entry path the README documents;
+   losing one from the surface is a break, and a new one should be a
+   decision, not drift. The doors themselves need live Firebase; this pins
+   the surface. */
+
+test('the shared surface carries all four entry paths', () => {
+  assert.equal(typeof PP.enter, 'function');
+  assert.equal(typeof PP.resume, 'function');
+  assert.equal(typeof PP.enterMaster, 'function');
+  assert.equal(typeof PP.enterAsAdmin, 'function');
+});
+
 /* ── Previews ─────────────────────────────────────────────────────────────
    The pure half of PP.previews: tier names, geometry, type routing and the
    variant path shape. make/store need a canvas and Firebase — the manual
