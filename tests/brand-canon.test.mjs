@@ -434,3 +434,50 @@ test('both elevations exist and share one ink', () => {
   assert.equal(ink(shadow[1]), ink(shadowLg[1]),
     'the two elevations must use the same ink');
 });
+
+/* The type floor holds.
+
+   v2.36 raised the --text-* floors because a phone was being served the
+   smallest type in the system. It fixed the tokens and converted nothing, so
+   19 of this file's 59 font-sizes sat below the floor the same file tells you
+   never to go under — .table th at 10px, every form label and .pill at 11px,
+   .topbar__dd-role at 8px. The rule existed and nothing obeyed it, and it took
+   a second phone report to notice. v2.49 converted them; this stops the next
+   hardcoded 11px landing unnoticed. */
+
+test('no component in canon sets a font-size below the 12px floor', () => {
+  /* The exceptions, named in the scale's comment: glyphs sized to their
+     shape, and the avatar fitting ladder (2/3/4 initials in a fixed circle —
+     a token would grow with the viewport and overflow it). Anything else
+     below 12px is the bug this test exists for. */
+  const ALLOWED = [
+    /\.topbar__avatar--staff-\d/,        // fitting ladder
+    /\.topbar__dd-item--active::after/,  // tick glyph
+    /\.nl-doc/, /\.nl-art/, /\.nl-clause/, /\.nl-tbl/, /\.nl-cover/, // document system
+  ];
+  const offenders = [];
+  let selector = '';
+  for (const line of rules.split('\n')) {
+    const sel = /^([.#a-zA-Z\[][^{}]*)\{/.exec(line);
+    if (sel) selector = sel[1].trim();
+    const m = /font-size:\s*(\d+(?:\.\d+)?)px/.exec(line);
+    if (!m) continue;
+    if (parseFloat(m[1]) >= 12) continue;
+    if (ALLOWED.some((re) => re.test(selector))) continue;
+    offenders.push(`${selector} — ${m[1]}px`);
+  }
+  assert.deepEqual(offenders, [],
+    `below the 12px floor, and not a documented exception:\n  ${offenders.join('\n  ')}`);
+});
+
+test('the type scale floors have not been lowered', () => {
+  /* "Do not lower a floor back below 12px to make something fit; the fix for
+     a cramped layout is the layout." — the file's own words. */
+  const floors = { '--text-xs': 12, '--text-sm': 14, '--text-base': 16, '--text-md': 18, '--text-lg': 22 };
+  for (const [tok, min] of Object.entries(floors)) {
+    const m = new RegExp(`${tok}:\\s*clamp\\(\\s*(\\d+)px`).exec(rules);
+    assert.ok(m, `${tok} is a clamp with a px floor`);
+    assert.ok(Number(m[1]) >= min,
+      `${tok} floor is ${m[1]}px, below the ${min}px agreed at v2.36`);
+  }
+});
