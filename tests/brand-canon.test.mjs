@@ -14,6 +14,20 @@ import { NL, REPO } from './load-canon.mjs';
 
 const css = readFileSync(join(REPO, 'system/nl-brand.css'), 'utf8');
 
+/* Canon is not only the stylesheet. nl-topbar.js injects its CSS as a
+   JavaScript STRING and auth-guard.js writes cssText directly, so both were
+   invisible to every sweep and to this file's own floor test — which read
+   nl-brand.css and nothing else. The topbar renders on every page in the
+   estate and its version badge sat at 10px throughout. A guard with the same
+   blind spot as the sweep it guards is not a guard. */
+const CANON_JS = ['system/nl-topbar.js', 'system/auth-guard.js'];
+/* Comments stripped before scanning. These files explain in prose what values
+   they replaced, and a guard that fires on its own changelog is a guard
+   somebody switches off. */
+const stripComments = (src) =>
+  src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+const canonJs = CANON_JS.map((f) => [f, stripComments(readFileSync(join(REPO, f), 'utf8'))]);
+
 /* Everything after the opening block comment — the changelog at the top of the
    file talks about fill and stroke at length, and prose is not a rule. */
 const rules = css.slice(css.indexOf('*/') + 2);
@@ -484,4 +498,34 @@ test('the type scale floors have not been lowered', () => {
     assert.ok(Number(m[1]) >= min,
       `${tok} floor is ${m[1]}px, below the ${min}px agreed at v2.36`);
   }
+});
+
+
+test('canon JavaScript sets no font-size below the 12px floor either', () => {
+  /* The px literals that remain are glyphs sized to their shape — a 26px
+     close X — and the meta theme-color, which cannot take a var(). Anything
+     that is text obeys the floor wherever it is written. */
+  const offenders = [];
+  for (const [file, src] of canonJs) {
+    for (const m of src.matchAll(/font-size: ?(?:var\([^,)]+, *)?(\d+(?:\.\d+)?)px/g)) {
+      if (parseFloat(m[1]) >= 12) continue;
+      offenders.push(`${file}: ${m[0]}`);
+    }
+  }
+  assert.deepEqual(offenders, [], `below the floor in canon JS:\n  ${offenders.join('\n  ')}`);
+});
+
+test('canon JavaScript hand-mixes no rgba()', () => {
+  /* The brand has no rgba-overlay tokens by decision — the shade ladder and
+     color-mix cover it. The two legitimate uses (--shadow, --scrim) are
+     tokens in nl-brand.css, so a literal rgba here means a hand-mixed colour
+     that will not follow the brand. */
+  const offenders = [];
+  for (const [file, src] of canonJs) {
+    for (const m of src.matchAll(/rgba\(\s*\d/g)) {
+      const line = src.slice(0, m.index).split('\n').length;
+      offenders.push(`${file}:${line}`);
+    }
+  }
+  assert.deepEqual(offenders, [], `hand-mixed rgba in canon JS: ${offenders.join(', ')}`);
 });

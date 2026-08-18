@@ -1,7 +1,19 @@
 /*
  * auth-guard.js — NL Tools v2
  * File: /system/auth-guard.js
- * Version: v6.6 (17/08/2026)
+ * Version: v6.7 (17/08/2026)
+ *
+ * v6.7: The loading overlay joins the brand. It is built with cssText, so it
+ *       was invisible to every stylesheet sweep: 13px and 11px text, four
+ *       hand-mixed rgba() washes and a raw #9e0000 ground. Now tokens — with
+ *       LITERAL FALLBACKS, var(--primary, #9e0000), because this overlay is
+ *       the first thing painted on a gated page and can beat the stylesheet;
+ *       a bare var() that fails to resolve would leave an invisible
+ *       full-screen loading screen.
+ *       The sub-text also failed contrast: rgba(255,255,255,0.55) measures
+ *       4.19:1 on the card, under AA at that size. 75% white is 6.68:1.
+ *       Cache-bust ?v=15 -> ?v=16, in lockstep with nl-topbar ?v=9 -> ?v=10
+ *       and nl-brand ?v=47 -> ?v=48.
  *
  * v6.6: No behaviour change — cache-bust only, ?v=14 -> ?v=15, in lockstep
  *       with nl-utils ?v=41 -> ?v=42 (NL.roles.grant). The two files are
@@ -211,7 +223,12 @@
   overlay.id  = 'nlAuthOverlay';
   overlay.style.cssText = [
     'position:fixed', 'inset:0', 'z-index:99999',
-    'background:#9e0000',
+    /* Tokens with literal fallbacks throughout this overlay. It is the first
+       thing painted on every gated page — earlier than the stylesheet is
+       guaranteed to have applied — and a bare var() that fails to resolve
+       leaves an invisible full-screen loading screen. The fallback is the
+       token's own value. */
+    'background:var(--primary, #9e0000)',
     'display:flex', 'align-items:center', 'justify-content:center',
     'font-family:carbona-variable,Arial,sans-serif',
     'flex-direction:column', 'gap:0'
@@ -220,7 +237,7 @@
   /* Card */
   var card = document.createElement('div');
   card.style.cssText = [
-    'background:rgba(0,0,0,0.15)',
+    'background:var(--primary-600, #7e0000)',
     'border-radius:12px',
     'padding:32px 40px',
     'display:flex', 'flex-direction:column', 'align-items:center', 'gap:20px',
@@ -237,8 +254,8 @@
   var spinner = document.createElement('div');
   spinner.style.cssText = [
     'width:28px', 'height:28px',
-    'border:2px solid rgba(255,255,255,0.3)',
-    'border-top-color:#fff',
+    'border:2px solid color-mix(in srgb, var(--white, #fff) 30%, var(--primary, #9e0000))',
+    'border-top-color:var(--white, #fff)',
     'border-radius:50%',
     'animation:nlSpin 0.8s linear infinite',
     'flex-shrink:0'
@@ -248,8 +265,8 @@
   /* Status text */
   var statusText = document.createElement('div');
   statusText.style.cssText = [
-    'font-size:13px', 'font-weight:600',
-    'color:rgba(255,255,255,0.9)',
+    'font-size:var(--text-sm, 14px)', 'font-weight:600',
+    'color:var(--white, #fff)',
     'letter-spacing:0.02em',
     'min-height:20px',
     'animation:nlFade 0.3s ease'
@@ -259,7 +276,9 @@
 
   /* Sub text */
   var subText = document.createElement('div');
-  subText.style.cssText = 'font-size:11px;color:rgba(255,255,255,0.55);margin-top:-12px;min-height:16px;';
+  /* Was rgba(255,255,255,0.55), which measures 4.19:1 on the card — under AA
+     for text this size. 75% white is 6.68:1 on the same ground. */
+  subText.style.cssText = 'font-size:var(--text-xs, 12px);color:color-mix(in srgb, var(--white, #fff) 75%, var(--primary-600, #7e0000));margin-top:-12px;min-height:16px;';
   card.appendChild(subText);
 
   overlay.appendChild(card);
