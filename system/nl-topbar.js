@@ -1,7 +1,20 @@
 /* =========================================================================
    NL Tools — Topbar renderer
    File: /system/nl-topbar.js
-   Version: v1.5 (25/04/2026)
+   Version: v1.6 (17/08/2026)
+
+   v1.6 — This file's CSS is injected as a JavaScript STRING, so every sweep
+          of the estate's stylesheets walked straight past it — including the
+          type-scale conversion at nl-brand v2.49. Eight hardcoded font-sizes
+          were still here, the version badge among them at 10px, on the one
+          component that renders on every page in the estate. All on the
+          --text-* scale now. Six hand-mixed rgba() overlays become color-mix
+          against the brand tokens (the topbar ground is --primary), the raw
+          #4ade80 "new" dot becomes --green, the changelog scrim becomes the
+          new --scrim token and its modal shadow --shadow-lg.
+          tests/brand-canon.test.mjs now reads this file and auth-guard.js as
+          well as nl-brand.css — the guard had the same blind spot as the
+          sweep, which is why this hid. Cache-bust ?v=9 -> ?v=10.
 
    Renders the standardised NL Tools topbar into #nlTopbar slot. Reads
    session from window.NL_SESSION (set by auth-guard) and tool catalogue
@@ -686,29 +699,29 @@
     cs.id = 'nl-changelog-styles';
     cs.textContent = [
       '.topbar__title-row{display:flex;align-items:center;gap:8px;}',
-      '.topbar__version{position:relative;background:rgba(255,255,255,0.15);color:rgba(255,255,255,0.9);border:1px solid rgba(255,255,255,0.2);padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;font-family:var(--font);cursor:pointer;transition:all 0.15s;white-space:nowrap;letter-spacing:0.04em;}',
-      '.topbar__version:hover{background:rgba(255,255,255,0.25);border-color:rgba(255,255,255,0.35);}',
+      '.topbar__version{position:relative;background:color-mix(in srgb, var(--white) 15%, var(--primary));color:var(--white);border:1px solid color-mix(in srgb, var(--white) 20%, var(--primary));padding:2px 8px;border-radius:10px;font-size:var(--text-xs);font-weight:700;font-family:var(--font);cursor:pointer;transition:all 0.15s;white-space:nowrap;letter-spacing:0.04em;}',
+      '.topbar__version:hover{background:color-mix(in srgb, var(--white) 25%, var(--primary));border-color:color-mix(in srgb, var(--white) 35%, var(--primary));}',
       '.topbar__logo-link{display:flex;align-items:center;flex-shrink:0;opacity:0.92;transition:opacity 0.15s;}',
       '.topbar__logo-link:hover{opacity:1;}',
-      '.topbar__version-dot{position:absolute;top:-3px;right:-3px;width:8px;height:8px;border-radius:50%;background:#4ade80;border:1.5px solid var(--primary);box-shadow:0 0 0 1px rgba(255,255,255,0.4);}',
-      '.nl-changelog-backdrop{position:fixed;inset:0;background:rgba(10,22,40,0.65);z-index:300;display:flex;align-items:flex-start;justify-content:center;padding:60px 16px;overflow-y:auto;animation:nlFade 0.15s ease-out;}',
-      '.nl-changelog-modal{background:var(--white);border-radius:10px;width:100%;max-width:560px;box-shadow:0 16px 60px rgba(0,0,0,0.3);overflow:hidden;margin:auto;animation:nlFade 0.2s ease-out;}',
+      '.topbar__version-dot{position:absolute;top:-3px;right:-3px;width:8px;height:8px;border-radius:50%;background:var(--green);border:1.5px solid var(--primary);box-shadow:0 0 0 1px color-mix(in srgb, var(--white) 40%, var(--primary));}',
+      '.nl-changelog-backdrop{position:fixed;inset:0;background:var(--scrim);z-index:300;display:flex;align-items:flex-start;justify-content:center;padding:60px 16px;overflow-y:auto;animation:nlFade 0.15s ease-out;}',
+      '.nl-changelog-modal{background:var(--white);border-radius:10px;width:100%;max-width:560px;box-shadow:var(--shadow-lg);overflow:hidden;margin:auto;animation:nlFade 0.2s ease-out;}',
       '.nl-changelog-modal__head{background:var(--primary);color:var(--white);padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:7px solid var(--navy);}',
-      '.nl-changelog-modal__head h3{color:var(--white);font-size:14px;font-weight:900;font-variation-settings:\'wght\' 900;text-transform:uppercase;letter-spacing:0.1em;margin:0;}',
-      '.nl-changelog-modal__close{background:none;border:none;color:rgba(255,255,255,0.6);font-size:26px;cursor:pointer;line-height:1;padding:2px 8px;font-family:var(--font);}',
+      '.nl-changelog-modal__head h3{color:var(--white);font-size:var(--text-sm);font-weight:900;font-variation-settings:\'wght\' 900;text-transform:uppercase;letter-spacing:0.1em;margin:0;}',
+      '.nl-changelog-modal__close{background:none;border:none;color:color-mix(in srgb, var(--white) 60%, var(--navy));font-size:26px;cursor:pointer;line-height:1;padding:2px 8px;font-family:var(--font);}',
       '.nl-changelog-modal__close:hover{color:var(--white);}',
       '.nl-changelog-modal__body{padding:24px;max-height:65vh;overflow-y:auto;}',
       '.nl-changelog-entry{padding:16px 0;border-bottom:1px solid var(--border);}',
       '.nl-changelog-entry:first-child{padding-top:0;}',
       '.nl-changelog-entry:last-child{border-bottom:none;padding-bottom:0;}',
       '.nl-changelog-entry__meta{display:flex;gap:8px;margin-bottom:10px;align-items:center;}',
-      '.nl-changelog-entry__date{font-size:12px;font-weight:900;font-variation-settings:\'wght\' 900;color:var(--navy);text-transform:uppercase;letter-spacing:0.08em;}',
-      '.nl-changelog-entry__sep{color:var(--text-muted);font-size:12px;}',
-      '.nl-changelog-entry__version{font-size:11px;color:var(--text-muted);font-weight:600;background:var(--off-white);border:1px solid var(--border);padding:1px 7px;border-radius:10px;}',
+      '.nl-changelog-entry__date{font-size:var(--text-xs);font-weight:900;font-variation-settings:\'wght\' 900;color:var(--navy);text-transform:uppercase;letter-spacing:0.08em;}',
+      '.nl-changelog-entry__sep{color:var(--text-muted);font-size:var(--text-xs);}',
+      '.nl-changelog-entry__version{font-size:var(--text-xs);color:var(--text-muted);font-weight:600;background:var(--off-white);border:1px solid var(--border);padding:1px 7px;border-radius:10px;}',
       '.nl-changelog-entry__list{margin:0;padding-left:20px;}',
-      '.nl-changelog-entry__list li{font-size:14px;line-height:1.6;color:var(--text);margin-bottom:6px;}',
+      '.nl-changelog-entry__list li{font-size:var(--text-sm);line-height:1.6;color:var(--text);margin-bottom:6px;}',
       '.nl-changelog-entry__list li:last-child{margin-bottom:0;}',
-      '.nl-changelog-entry__note{font-size:14px;line-height:1.6;color:var(--text);}'
+      '.nl-changelog-entry__note{font-size:var(--text-sm);line-height:1.6;color:var(--text);}'
     ].join('\n');
     document.head.appendChild(cs);
   }
