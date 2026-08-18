@@ -396,3 +396,41 @@ test('.disclosure is tokened — navy summary, muted chevron and meta, no raw he
   assert.match(meta, /font-size:\s*var\(--text-sm\)/);
   assert.doesNotMatch(meta, /#[0-9a-fA-F]{3,8}\b/, '.disclosure__meta must use tokens, not hex');
 });
+
+/* Role pills against the role model.
+
+   These two must move together and did not: the 16/08 rename split the club
+   realm into club-admin and club-staff, NL.roles was updated, and nl-brand.css
+   was not — so a Club Staff pill had no styling in canon at all. The portal had
+   its own copy of the block, which is exactly why nobody saw it. */
+
+test('every role in NL.roles has a pill class in canon', () => {
+  const missing = Object.keys(NL.roles.LABELS)
+    .filter((r) => !new RegExp(`\\.role-${r}\\b`).test(rules));
+  assert.deepEqual(missing, [],
+    `roles with no .role-* rule in nl-brand.css: ${missing.join(', ')}`);
+});
+
+test('canon has no pill class for a role the model does not have', () => {
+  const known = new Set(Object.keys(NL.roles.LABELS));
+  /* 'pending' is a state, not a role — it is the one legitimate extra. */
+  known.add('pending');
+  const extra = [...rules.matchAll(/^\.role-([a-z-]+)\s*\{/gm)]
+    .map((m) => m[1])
+    .filter((r) => !known.has(r));
+  assert.deepEqual(extra, [],
+    `.role-* rules for roles NL.roles does not know: ${extra.join(', ')}`);
+});
+
+test('both elevations exist and share one ink', () => {
+  /* Two greys that disagree make "raised" look like a different material
+     depending on which tool you are in — which is what the estate had. */
+  const root = rules.slice(rules.indexOf(':root'));
+  const shadow = /--shadow:\s*([^;]+);/.exec(root);
+  const shadowLg = /--shadow-lg:\s*([^;]+);/.exec(root);
+  assert.ok(shadow, '--shadow is defined');
+  assert.ok(shadowLg, '--shadow-lg is defined');
+  const ink = (v) => /rgba\(\s*([\d\s,]+?),\s*[\d.]+\s*\)/.exec(v)?.[1].replace(/\s/g, '');
+  assert.equal(ink(shadow[1]), ink(shadowLg[1]),
+    'the two elevations must use the same ink');
+});
