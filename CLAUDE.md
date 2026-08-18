@@ -168,7 +168,8 @@ which is why work gets re-planned from scratch. Check here first.
 | `system/gas-to-functions-migration.md` | **Locked decision**: retire the public Apps Script web app entirely; Firebase for everything, one private GAS email shim. |
 | `system/tool-status-and-access.md` | Which tools are live vs parked, and the per-role access model for each. |
 | `system/staff-club-audience-plan.md` | The staff/club audience gate. |
-| `system/roles-and-access-plan.md` | Role model. Nothing links to it. |
+| `system/roles-and-access-plan.md` | Role model. The SETTLED launch model is the block at the top. |
+| `system/guest-pass-plan.md` | **Scoping, not built.** A second door: a code that carries a tool list, for outsiders who should never have an account. Four open questions at the foot. Read before proposing anything about third-party or passcode access. |
 | `system/brand-v3-scale-plan.md` | Parked type/scale pass. |
 | `system/rtdb/README.md` | The RTDB snapshot contract — which files are deployed vs reference. |
 | `system/retired/README.md` | **Tools that have been deleted, and why.** One file each, recording the concept and the settled decisions so a rebuild starts from the answered questions. Read before proposing to build something that already existed once. |
