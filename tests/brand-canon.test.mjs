@@ -460,7 +460,11 @@ test('no component in canon sets a font-size below the 12px floor', () => {
   for (const line of rules.split('\n')) {
     const sel = /^([.#a-zA-Z\[][^{}]*)\{/.exec(line);
     if (sel) selector = sel[1].trim();
-    const m = /font-size:\s*(\d+(?:\.\d+)?)px/.exec(line);
+    /* Plain px AND the floor of a clamp(). The v2.49 sweep matched only plain
+       px, so every clamp-based size walked straight past it — including a
+       .tool-tile__desc at clamp(11px, ...), which was then reported from a
+       phone as unreadable. A floor is a floor however it is written. */
+    const m = /font-size:\s*(?:clamp\(\s*)?(\d+(?:\.\d+)?)px/.exec(line);
     if (!m) continue;
     if (parseFloat(m[1]) >= 12) continue;
     if (ALLOWED.some((re) => re.test(selector))) continue;
