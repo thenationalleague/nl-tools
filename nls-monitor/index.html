@@ -1,8 +1,17 @@
 <!DOCTYPE html>
 <!--
   NL Tools — NLServices API Monitor
-  Version: v0.10 (18/08/2026)
+  Version: v0.11 (18/08/2026)
 
+  v0.11 — Every timestamp is absolute and carries seconds — "18 Aug 2026,
+         09:04:12", not "3h ago". Canon already had it: formatDateTime's
+         {seconds:true}, so no canon change and no cache-bust. Relative time
+         answers "is this recent", which is not a question anyone brings to a
+         feed monitor; the questions here are "did this arrive before or after
+         that run" and "how far behind the upstream timestamp were we", and
+         both need the real clock. It was also destroying the precision the
+         comparison depends on — two events 40 seconds apart both read "3h
+         ago". The events column is monospaced so a run of them aligns.
   v0.10 — Substitutions name the player coming on. The feed sends the on-name
          as `playerName` (the key every event type uses for its subject) and
          the off-name as `playerOffName`; this page read a `playerOnName` that
@@ -213,6 +222,13 @@
       version: 'v0.10',
       items: [
         'Substitutions name the player coming on. The name was being read from a key the event record does not have, so every sub read “? on for …” while the data itself was arriving complete.'
+      ]
+    });
+    window.NL_CHANGELOG.unshift({
+      date: '18/08/2026',
+      version: 'v0.11',
+      items: [
+        'Timestamps are exact and include seconds — “18 Aug 2026, 09:04:12” rather than “3h ago”. Two events forty seconds apart no longer read the same.'
       ]
     });
 
@@ -716,7 +732,8 @@
       verdict('bad', 'Running, but nothing has succeeded', 'No successful ingest recorded.');
     } else if (active && (now - m.lastSuccess) > 5 * 60 * 1000) {
       verdict('bad', 'Stale during a live window',
-        'Last success ' + NL.timeAgo(m.lastSuccess) + '. Anything reading this is showing old data.');
+        'Last success ' + NL.formatDateTime(m.lastSuccess, { seconds: true }) +
+        '. Anything reading this is showing old data.');
     } else if (m.errorCount) {
       verdict('warn', 'Partial failure',
         (m.failedCompetitions || []).join(', ') + ' failed; the rest were written and the failed one keeps its last known value.');
@@ -725,11 +742,12 @@
          sentence needs a word there ('every —' reads like a typo), so the
          caller supplies it. */
       verdict('warn', 'Overdue',
-        'Last run ' + NL.timeAgo(m.lastRun) + ', but it asked to run every ' +
+        'Last run ' + NL.formatDateTime(m.lastRun, { seconds: true }) +
+        ', but it asked to run every ' +
         (m.intervalSec ? NL.formatDuration(m.intervalSec) : 'an unknown interval') + '.');
     } else {
       verdict('ok', modeLabel(m.mode),
-        'Last run ' + NL.timeAgo(m.lastRun) +
+        'Last run ' + NL.formatDateTime(m.lastRun, { seconds: true }) +
         (m.intervalSec ? ' · next in ' + NL.formatDuration(m.intervalSec) : '') +
         ' · season ' + esc(m.season) + ' · took ' + (m.durationMs || 0) + 'ms');
     }
@@ -915,7 +933,15 @@
         '<span class="ev__type">' + esc(e.type) + '</span>' +
         '<span class="ev__what">' + esc(what) + minute +
           (e.retracted ? ' <span class="muted">(retracted upstream)</span>' : '') + '</span>' +
-        '<span class="ev__when">' + esc(NL.timeAgo(e.detectedAt)) + '</span>' +
+        /* ABSOLUTE, TO THE SECOND — not '3h ago'. This column exists to be
+           compared: against the upstream eventTimestamp, against the ingest
+           run that should have caught it, against another event in the same
+           list. Relative time answers "is this recent", which is not a
+           question anyone brings to a feed monitor, and it silently loses the
+           precision the comparison needs — two events 40 seconds apart both
+           read '3h ago'. */
+        '<span class="ev__when mono">' +
+          esc(NL.formatDateTime(e.detectedAt, { seconds: true })) + '</span>' +
         '</div>';
     }).join('');
   }
