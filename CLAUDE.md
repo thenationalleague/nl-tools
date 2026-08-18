@@ -169,6 +169,7 @@ which is why work gets re-planned from scratch. Check here first.
 | `system/tool-status-and-access.md` | Which tools are live vs parked, and the per-role access model for each. |
 | `system/staff-club-audience-plan.md` | The staff/club audience gate. |
 | `system/roles-and-access-plan.md` | Role model. The SETTLED launch model is the block at the top. |
+| `system/vip-access-spec.md` | **Spec, not built.** VIP Access Manager handover brief. Corrects an earlier draft that pointed at the wrong references, and surfaces that this tool existed before — read `system/retired/dazn-vip.md` alongside it. Two blocking questions at the foot. |
 | `system/guest-pass-plan.md` | **Scoping, not built.** A second door: a code that carries a tool list, for outsiders who should never have an account. Four open questions at the foot. Read before proposing anything about third-party or passcode access. |
 | `system/brand-v3-scale-plan.md` | Parked type/scale pass. |
 | `system/rtdb/README.md` | The RTDB snapshot contract — which files are deployed vs reference. |
