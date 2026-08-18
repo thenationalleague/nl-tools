@@ -1,4 +1,4 @@
-# VIP Access Manager — build spec v2.0 (handover)
+# VIP Access Manager — build spec v2.2 (handover)
 
 **Status: spec, not a decision. Nothing is built.** Written 18/08/2026 to hand a
 fresh Claude Code session everything it needs, after v1.0 was drafted without
@@ -64,18 +64,44 @@ Richard's answer, and it lands between v1.0 and the old build:
 - **Richard marks it complete** when DAZN confirms. That is the old build's
   third state, without the middle one — there is no separate "sent", because he
   is the one sending and he knows.
-- **Under consideration, not settled:** after 24 hours, offer the *club* a
-  confirmation — *"has this person got access?"* — and let them close it out.
-
-That last idea is worth taking seriously and is listed as an open question in
-§6. It is better than asking DAZN, because the club is the party who finds out
-first: their person either gets in or does not. It also removes Richard from
-the closing loop, which is the direction of travel.
+- **After 24 hours, the club closes it out.** See §2.1a — this is in v1.
 
 **What NOT to build: a `sent` state.** The old build had `pending → sent →
 complete` and that middle state existed so an admin could record having emailed
 DAZN. Richard is the admin and the sender; a state that only tells him what he
 just did is friction, and friction is what made the old tool unpleasant.
+
+### 2.1a The 24-hour club close-out — SETTLED: in v1
+
+Richard, 18/08/2026: *"version one, at a twenty-four hour, allow people to mark
+themselves as having access... and have it so they can mark an issue, and that
+would generate an email to me so that I could triage it."*
+
+Once a request has sat for **24 hours**, the club's own view of that slot offers
+two actions and no others:
+
+| Action | What it means | What it does |
+|---|---|---|
+| **They're in** | the person can log in to DAZN | closes the slot to complete; the new name becomes the slot |
+| **There's a problem** | 24 hours on, still no access | keeps the slot in its requested state and **emails Richard** (§2.2a) |
+
+Design notes that matter:
+
+- **The club is the right party to ask.** They find out first — their person
+  either gets in or does not. Asking DAZN would be asking the party with the
+  least incentive to answer.
+- **Neither action is a nag.** The two controls appear on the slot after 24
+  hours. No reminder emails, no chasing. If the club never touches it, the slot
+  stays requested and Richard can still mark it complete himself — that path
+  does not go away.
+- **"There's a problem" is a signal, not a state machine.** It does not create a
+  fourth status. It flags the slot for Richard and sends him one email. He
+  triages; whatever he does next is an ordinary admin action.
+- Free text on the problem report is optional and should be short — one field,
+  no form. It goes in the email to Richard, not on the slot as a public note.
+- Both actions are available to **Club Admin only** — the role that could submit
+  the request in the first place (§4.3). Club Staff see the state, not the
+  buttons.
 
 ### 2.2 Reconcile — SETTLED: no formal tab
 
@@ -94,7 +120,14 @@ A person changing their surname is an edit, not a remove-plus-add.
 
 ### 2.2a Who generates email — SETTLED, and it is a rule
 
-**Only a club submission generates an email to DAZN. Admin edits are silent.**
+**Every email in this tool is triggered by a club. Admin actions are silent.**
+
+There are exactly **two** emails, with different recipients and different jobs:
+
+| Trigger | Goes to | Purpose |
+|---|---|---|
+| Club submits a swap or fills a slot | **DAZN** | the request itself |
+| Club reports a problem after 24 hours (§2.1a) | **Richard** | triage |
 
 Richard: *"me as the admin... not necessarily generating direct emails to DAZN.
 I think that's reserved just for the clubs — they use it as a change or update
@@ -107,9 +140,13 @@ This matters more than it looks. It means:
   is recording something that already happened, not asking DAZN for anything.
 - An admin edit therefore does **not** set `requestedOn`, and does not put the
   slot into a pending state.
+- **A problem report never reaches DAZN.** It is an internal escalation to
+  Richard, who decides whether it becomes a chase. Wiring it to the DAZN address
+  would send the third party a message about their own failure to act, from a
+  club, unmediated.
 
-Build it so an admin edit cannot accidentally fire an email. That is a
-correctness rule, not a preference.
+Build it so an admin action cannot fire either email, and so a problem report
+cannot fire the DAZN one. That is a correctness rule, not a preference.
 
 ### 2.3 The canon candidate
 
@@ -164,6 +201,39 @@ later "fix" by opening it up.
 Deleting live RTDB data is Richard's action in the console, not something a PR
 can do. The PR removes the rules; he clears the node. Say so in the PR body, and
 say which order.
+
+### 3.2 Who holds slots — SETTLED: orgs, most of which are clubs
+
+**There are VIP allocations that are not a club.** v1.0's assumption of "72
+clubs × 5 slots, flat" is a loss of function, not a simplification.
+
+So the data shape is **orgs-with-slots**, where the overwhelming majority of
+orgs happen to be clubs. Do not model clubs as the entity and bolt everything
+else on beside it; that is what produced the presentation Richard rejected.
+
+A club org is not free-text — it keys off the existing club record
+(`NL.clubs.*`, crest, key) so club scoping in §4.3 works without a second
+mapping. A non-club org is a record with a name and no club key.
+
+**Presentation — Richard, verbatim: *"One list with a filter is correct."***
+
+One list. Clubs and non-clubs in the same table, same columns, same actions,
+with a filter to narrow to one or the other. Not two tabs, not two sections
+stacked, not a "clubs" screen with an "other" screen behind it. The old build's
+clubs/non-clubs division read as two parallel worlds and that is the specific
+thing he named as wrong.
+
+Consequences to build for, not discover:
+
+- Club scoping (§4.3) is unchanged for club users — a Club Admin sees their own
+  club's row and nothing else, non-club orgs included in "nothing else".
+- Non-club orgs have **no club users**, so they have no self-service submission
+  path. Their slots are admin-maintained. The club flow and the admin flow
+  already differ (§2.2a); this is the same split, not a new one.
+- The 24-hour close-out (§2.1a) is therefore a club-org-only affordance. A
+  non-club org's slot has no one to ask.
+- Slot count is per-org, not a global constant of five. Clubs get five; assume
+  nothing about the rest until Richard says.
 
 ## 4. The build
 
@@ -282,47 +352,25 @@ needs one button press; one that only changes the page needs none.
 
 ## 6. Open questions
 
-Four of v1.0's questions were answered on 18/08/2026 and have moved into the
-sections above (§2.1 status model, §2.2 no Reconcile tab, §2.2a email rule,
-§3.1 fresh data path). What is left:
+Six of v1.0's questions were answered on 18/08/2026 and have moved into the
+sections above (§2.1 status model, §2.1a the 24-hour close-out, §2.2 no
+Reconcile tab, §2.2a the email rules, §3.1 fresh data path, §3.2 orgs not just
+clubs). What is left is two facts to supply, not two decisions to make:
 
-### 6.1 Non-club orgs — the question Richard's own answer raised
+### 6.1 Still to supply
 
-Richard named the clubs/non-clubs division as one of the things that was wrong
-with the old tool's presentation. But he said the *presentation* was wrong, not
-that the division should not exist — and the retired record confirms the old
-build had "non-club orgs" that an admin managed.
-
-v1.0 assumes **72 clubs × 5 slots, flat**. That is either a simplification or a
-loss of function, and nobody has said which.
-
-**So: are there VIP allocations that are not a club?** Broadcasters, sponsors,
-league staff, competition partners. If yes, the data shape is orgs-with-slots
-where most orgs happen to be clubs — not clubs-with-slots. That is a
-foundational decision and it is cheap now, expensive later.
-
-If yes, the presentation lesson is the useful part of his answer: whatever the
-old build did to separate them read badly. One list with a filter, or clubs
-front and centre with everything else behind a tab — but not two parallel
-worlds.
-
-### 6.2 The 24-hour club confirmation
-
-Richard floated it (§2.1): once a request has sat for 24 hours, offer the club a
-*"has this person got access?"* confirmation so they close it out rather than
-him.
-
-In or out for v1? It is the only mechanism in the design that would catch a
-request DAZN silently dropped, and it takes the closing action off Richard —
-but it adds a second club-side state to build and explain.
-
-### 6.3 Still to supply
-
-- The DAZN recipient address for the GAS trigger. **Give it to the GAS config
-  directly, not in a PR** — it is a third-party contact and this repo is public.
+- **The DAZN recipient address** for the GAS trigger. **Give it to the GAS
+  config directly, not in a PR** — it is a third-party contact and this repo is
+  public.
+- **Richard's triage address** for the problem-report email (§2.1a). Same rule:
+  GAS config, never a PR. If it is the same mailbox the portal already writes
+  to, reuse that key rather than adding a second.
 - Confirm `ops-vip-access` as the tool key. No clash in the current registry.
+- **The non-club org list** (§3.2) — who they are and how many slots each. Not a
+  blocker for the build; the shape is settled and the records can be entered
+  once the tool exists. Do not commit the list to this repo.
 
-### 6.4 Answered by the settled access model, not open
+### 6.2 Answered by the settled access model, not open
 
 v1.0 asked whether admin should be Richard-only or any staff-tools admin. **This
 is not a design question for this tool.** Role is the toolset: League Admin gets
@@ -342,9 +390,16 @@ A layperson should be able to run this in a browser:
 - Richard marks it complete; only then does the new name become the slot.
 - **Richard editing a slot directly sends no email at all** (§2.2a) and does not
   put the slot into a requested state.
-- A Club Staff user sees the same five slots and **cannot** submit anything.
-- A League Admin sees all 72 clubs, can mark a change actioned, and can edit a
-  slot directly.
+- A slot requested less than 24 hours ago shows **no** close-out controls. The
+  same slot, aged past 24 hours, offers the Club Admin *"they're in"* and
+  *"there's a problem"* (§2.1a).
+- *"They're in"* completes the slot with no email to anyone. *"There's a
+  problem"* emails **Richard** and leaves the slot requested — and **nothing in
+  that path reaches DAZN**.
+- A Club Staff user sees the same five slots, including their state, and
+  **cannot** submit or close out anything.
+- A League Admin sees every org — clubs and non-clubs in **one list with a
+  filter** (§3.2) — can mark a change actioned, and can edit a slot directly.
 - Signing in as a club and editing the URL to another club's data fails **at the
   rules level**, not just in the UI.
 - `bash system/lint-tools.sh --strict` is clean, `npm test` passes.
@@ -375,6 +430,7 @@ an approval flow. Read it as an example, never as the reference.
 
 | Version | Date | Changes |
 |---|---|---|
+| v2.2 | 18/08/2026 | The last two design questions answered and moved into the body. §2.1a: the 24-hour club close-out is **in v1**, and it is two-way — *"they're in"* completes the slot, *"there's a problem"* emails Richard for triage. §2.2a rewritten around **two** emails with different recipients — club→DAZN is the request, club→Richard is the escalation, and a problem report must never reach DAZN. §3.2: **there are non-club orgs**, so the shape is orgs-with-slots, presented as one list with a filter rather than two parallel worlds — which is the specific presentation failure Richard named. §6 reduced from open decisions to facts still to supply. |
 | v2.1 | 18/08/2026 | Four questions answered by Richard and moved into the body: status model (requested-on, admin marks complete, no `sent` state), no Reconcile tab but the admin edit path becomes primary, only club submissions generate email, and a totally fresh data node with the old one deleted. Reframed the retired record as evidence rather than scripture — Richard's verdict is that the concept was right and the execution clunky, so what carries over is correctness, not layout. Raised §6.1, non-club orgs, which his own answer surfaced and nobody had asked. |
 | v2.0 | 18/08/2026 | Rewritten for handover. Corrected v1.0's three wrong references; surfaced the retired tool and its settled three-state lifecycle, Reconcile tab and PII incident; flagged the live data at `media-dazn-vip` against v1.0's proposed new path; replaced the invented access model with the settled one; added deploy routes, acceptance criteria and a reading list. |
 | v1.0 | 18/08/2026 | Initial spec drafted from grill-me session, without repository context. |
