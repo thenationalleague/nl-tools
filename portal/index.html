@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
   NL Tools -- Portal Dashboard
-  Version: v5.120 (17/08/2026)
+  Version: v5.121 (17/08/2026)
   Date: 09/04/2026
   File: /portal/index.html
 
@@ -28,6 +28,27 @@
     well (no admin gating anywhere in it, superadmin-only by defaults).
     Thirteen of seventeen tools are now Off / Use; only Judgements, Vacancies and
     Website Archive still offer Manage.
+
+  v5.121 (17/08/2026) — One tab, one job; and one interaction for setting
+    access. Invites were SENT from the Users tab and TRACKED from Inbound, so
+    you created a thing in one place and watched it in another. Inbound also
+    held two opposite directions at once — requests coming in from clubs,
+    invites going out to people — under a single heading.
+    Four tabs now: Users (the list, full width), Invites (send + pending
+    together), Requests (sign-up requests, renamed from Inbound now it holds
+    one thing), Audit log. The two-column Users/Invite split and its sticky
+    right column go with it.
+    Fixed on the way: the tab handler refreshed pending invites on a pane named
+    'pending-invites', which never existed, so opening the tab showed whatever
+    was cached at page load. Notification emails already sent point at
+    ?tab=inbound; that now resolves to Requests, which is what they are about.
+    The invite's tool list is shown read-only with an Adjust button, the same
+    two-step the Users pane uses. It was a disclosure with live controls, so
+    one job had two different interactions depending which tab you were in, and
+    a stray click could move a control you had only opened to look at.
+    Copy cut to match: "Tool access — edit before sending" is "Tool access"
+    (the button says what to do), and "Select an org and role to see default
+    access levels" is "Pick a role."
 
   v5.120 (17/08/2026) — The invite summary goes entirely. v5.119 cut it down to
     a count, which was still waffle: "Opens 11 of 16 tools" counts the very
@@ -1499,39 +1520,23 @@
   color: var(--text-muted);
 }
 
-/* -- Users + Invite two-column split --------------------------------------- */
-.users-invite-split {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 28px;
-  align-items: start;
-}
-.users-invite-split__invite {
-  background: var(--off-white);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px;
-  position: sticky;
-  top: 80px;
-}
-.users-invite-split__invite-head {
+/* The two-column Users+Invite split was styled here until v5.121. The invite
+   form has its own tab now, so the grid, the sticky right column and their
+   860px breakdown all went with it. */
+
+/* Tool-access head in the invite form: label left, Adjust right. */
+.invite-tools-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
   font-size: var(--text-xs);
   font-weight: 800;
   font-variation-settings: 'wght' 800;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--navy);
-  margin-bottom: 16px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--border);
-}
-@media (max-width: 860px) {
-  .users-invite-split {
-    grid-template-columns: 1fr;
-  }
-  .users-invite-split__invite {
-    position: static;
-  }
+  color: var(--text-muted);
 }
 
 .admin-pane { display: none; }
@@ -2566,15 +2571,19 @@
     <div class="admin-panel" id="adminPanel" style="display:none">
       <div class="admin-panel__title">Admin Panel</div>
 
+      <!-- One tab, one job. Invites used to be sent from the Users tab and
+           tracked from Inbound, so you created a thing in one place and watched
+           it in another. Inbound also held two opposite directions at once:
+           requests coming in from clubs, invites going out to people. -->
       <div class="admin-tabs">
-        <button class="admin-tab active" data-pane="inbound">Inbound <span id="pendingInviteCount"></span></button>
-        <button class="admin-tab" data-pane="users">Users</button>
-        <button class="admin-tab" data-pane="audit">Audit Log</button>
+        <button class="admin-tab active" data-pane="users">Users</button>
+        <button class="admin-tab" data-pane="invites">Invites <span id="pendingInviteCount"></span></button>
+        <button class="admin-tab" data-pane="requests">Requests</button>
+        <button class="admin-tab" data-pane="audit">Audit log</button>
       </div>
 
-      <!-- Inbound pane: sign-up requests + pending invites -->
-      <div class="admin-pane active" id="pane-inbound">
-
+      <!-- Requests: sign-up requests from clubs. Inbound, hence its own tab. -->
+      <div class="admin-pane" id="pane-requests">
         <!-- Sign-up requests section -->
         <div class="inbound-section">
           <div class="inbound-section__head">
@@ -2589,44 +2598,14 @@
           </div>
         </div>
 
-        <!-- Pending invites section -->
-        <div class="inbound-section" style="margin-top:28px;">
-          <div class="inbound-section__head">
-            <span class="inbound-section__label">Pending invites</span>
-            <span class="inbound-section__hint">Sent but not yet accepted</span>
-          </div>
-          <div id="pendingInvitesList">
-            <div style="font-size:var(--text-sm);color:var(--text-muted);padding:8px 0;">Loading…</div>
-          </div>
-        </div>
-
       </div>
 
-      <!-- Users pane — includes user list (left) + invite form (right) -->
-      <div class="admin-pane" id="pane-users">
-        <div class="users-invite-split">
-
-          <!-- Left: user list -->
-          <div class="users-invite-split__users">
-            <div class="users-controls">
-              <input type="text" id="userSearch" placeholder="Search by name or email…">
-              <button class="btn btn--ghost btn--sm" id="reloadUsersBtn">Reload</button>
-            </div>
-            <div style="margin-bottom:10px;display:none;" id="clubFilterWrap">
-              <!-- Canon .nl-select. This carried twelve inline properties
-                   hand-rolling the component, so it missed the hover, the
-                   focus ring and the chevron canon draws, and would not have
-                   followed a change to any of them. -->
-              <select id="clubFilterSelect" class="nl-select" style="width:100%;max-width:320px;">
-                <option value="">All users</option>
-              </select>
-            </div>
-            <div class="users-accordion" id="usersAccordion"></div>
+      <!-- Invites: send one, and see the ones still outstanding. -->
+      <div class="admin-pane" id="pane-invites">
+        <div class="inbound-section">
+          <div class="inbound-section__head">
+            <span class="inbound-section__label">Invite a new user</span>
           </div>
-
-          <!-- Right: invite form -->
-          <div class="users-invite-split__invite">
-            <div class="users-invite-split__invite-head">Invite a new user</div>
             <div class="invite-form-wrap">
         <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap;">
 
@@ -2672,22 +2651,49 @@
 
           <!-- Right: tool access preview (seeded from defaults, editable) -->
           <div style="flex:1;min-width:300px;">
-            <div style="font-size:var(--text-xs);font-weight:800;font-variation-settings:'wght' 800;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-muted);margin-bottom:12px;">
-              Tool access — edit before sending
+            <div class="invite-tools-head">
+              <span>Tool access</span>
+              <button type="button" class="btn btn--ghost btn--sm" id="inviteAdjustBtn" style="display:none">Adjust</button>
             </div>
             <div id="inviteToolSliders">
               <div style="font-size:var(--text-sm);color:var(--text-muted);padding:16px 0;">
-                Select an org and role to see default access levels.
+                Pick a role.
               </div>
             </div>
           </div>
 
             </div>
           </div><!-- /invite-form-wrap -->
-          </div><!-- /invite -->
+        </div>
 
-        </div><!-- /users-invite-split -->
-      </div><!-- /pane-users -->
+        <!-- Pending invites section -->
+        <div class="inbound-section" style="margin-top:28px;">
+          <div class="inbound-section__head">
+            <span class="inbound-section__label">Pending invites</span>
+            <span class="inbound-section__hint">Sent but not yet accepted</span>
+          </div>
+          <div id="pendingInvitesList">
+            <div style="font-size:var(--text-sm);color:var(--text-muted);padding:8px 0;">Loading…</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Users pane — includes user list (left) + invite form (right) -->
+      <!-- Users: the list, full width. The invite form lived here in a
+           two-column split until v5.121; it is its own tab now. -->
+      <div class="admin-pane" id="pane-users">
+        <div class="users-controls">
+          <input type="text" id="userSearch" placeholder="Search by name or email…">
+          <button class="btn btn--ghost btn--sm" id="reloadUsersBtn">Reload</button>
+        </div>
+        <div style="margin-bottom:10px;display:none;" id="clubFilterWrap">
+          <select id="clubFilterSelect" class="nl-select" style="width:100%;max-width:320px;">
+            <option value="">All users</option>
+          </select>
+        </div>
+        <div class="users-accordion" id="usersAccordion"></div>
+      </div>
 
 
       <!-- Audit log pane -->
@@ -4020,14 +4026,20 @@ function initAdminTabs() {
         initAuditPane();
         loadAuditFeed(true);
       }
-      if (tab.dataset.pane === 'pending-invites') {
+      /* Was 'pending-invites', a pane name that never existed — so opening the
+         tab never refreshed the list and you saw whatever was cached from
+         page load. */
+      if (tab.dataset.pane === 'invites') {
         loadPendingInvites();
       }
     });
   });
 
-  /* Auto-open tab from ?tab= URL param (e.g. from admin notification email) */
+  /* Auto-open tab from ?tab= URL param (e.g. from admin notification email).
+     Emails already sent point at ?tab=inbound, which no longer exists — that
+     pane became Requests, which is what those notifications are about. */
   var tabParam = new URLSearchParams(window.location.search).get('tab');
+  if (tabParam === 'inbound') tabParam = 'requests';
   if (tabParam) {
     var target = document.querySelector('.admin-tab[data-pane="' + tabParam + '"]');
     if (target) {
@@ -5865,16 +5877,27 @@ function renderInviteToolSliders() {
 
   if (!rows.length) return;
 
-  var fold = document.createElement('details');
-  fold.className = 'disclosure uacc-all';
-  var foldSummary = document.createElement('summary');
-  foldSummary.textContent = 'Set a tool apart from the role (optional)';
-  fold.appendChild(foldSummary);
+  /* Shown, and read-only until Adjust is pressed — the same two-step the Users
+     pane uses. It was a disclosure with live controls, so the one job (set
+     someone's per-tool access) had two different interactions depending on
+     which tab you were in, and a stray click could move a control you had only
+     opened to look at. */
   var wrap = document.createElement('div');
   wrap.className = 'uacc-dept-wrap';
   rows.forEach(function(r) { wrap.appendChild(r); });
-  fold.appendChild(wrap);
-  container.appendChild(fold);
+  container.appendChild(wrap);
+
+  var adjust = document.getElementById('inviteAdjustBtn');
+  if (adjust) {
+    adjust.style.display = '';
+    adjust.textContent = 'Adjust';
+    adjust.onclick = function() {
+      container.querySelectorAll('.acc-slider').forEach(function(sl) {
+        sl.classList.remove('acc-slider--locked');
+      });
+      adjust.style.display = 'none';
+    };
+  }
 }
 
 /* resetInviteSetAll() and buildInviteSetAllSlider() lived here until v5.111,
@@ -5886,7 +5909,10 @@ function renderInviteToolSliders() {
 
 function buildInviteSlider(toolKey, currentLevel, clubLocked, dept, container) {
   var wrap = document.createElement('div');
-  wrap.className = 'acc-slider';
+  /* Starts locked. The Adjust button in the tool-access head unlocks the set,
+     matching how the Users pane works. --locked also turns off pointer events,
+     so nothing needs to guard the click handlers. */
+  wrap.className = 'acc-slider acc-slider--locked';
   wrap.dataset.toolkey = toolKey;
   /* Cap club users at access */
   if (clubLocked && currentLevel === 'admin') currentLevel = 'access';
