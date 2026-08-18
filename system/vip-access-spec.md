@@ -13,14 +13,24 @@ place.**
 
 ## 0. The single most important fact
 
-**This tool already existed. It was retired on 15/08/2026 and its data is still
-live in RTDB.**
+**This tool already existed. It was retired on 15/08/2026, and Richard's verdict
+is that it was not fit for purpose.**
 
-Read `system/retired/dazn-vip.md` before anything else. The repository rule is
-explicit: *read the retired record before proposing to build something that
-existed once, so the work starts from the answered questions.*
+Read `system/retired/dazn-vip.md` before anything else — but read it as
+**evidence, not scripture.** The repository rule is to read the retired record
+so the work starts from the answered questions; it is not a rule to repeat a
+build that did not work.
 
-What that record settles, and what v1.0 either missed or contradicts, is in §2.
+**Richard, 18/08/2026, on why it failed:** the presentation was off — in
+particular how it divided clubs from non-clubs — and the dialogue, the
+confirmation and the email generation all felt clunky. *"It needed more than
+just a brand pass."*
+
+Note what is NOT on that list: the concept, the data shape, or the idea of a
+mirror. **The ambition was right and the execution was poor.** So the parts of
+the old tool worth carrying are the ones about correctness (§2), and the parts
+to throw away are the ones about how it looked and felt — which is most of what
+a user touched.
 
 ---
 
@@ -46,49 +56,60 @@ and they apply as you build.
 From `system/retired/dazn-vip.md`. These were decided with Richard and are the
 expensive part; a rebuild that re-argues them wastes the work.
 
-### 2.1 The three-state lifecycle — and v1.0 contradicts it
+### 2.1 Status model — SETTLED 18/08/2026
 
-The old tool ran `pending` → `sent` → `complete`:
+Richard's answer, and it lands between v1.0 and the old build:
 
-- **pending** — club submitted
-- **sent** — NL emailed DAZN; **the mirror still shows the old state**
-- **complete** — DAZN confirmed; the mirror updates
+- The slot shows **"Requested on [date]"** after a club submits. v1.0 had this.
+- **Richard marks it complete** when DAZN confirms. That is the old build's
+  third state, without the middle one — there is no separate "sent", because he
+  is the one sending and he knows.
+- **Under consideration, not settled:** after 24 hours, offer the *club* a
+  confirmation — *"has this person got access?"* — and let them close it out.
 
-The record's words: *"That three-state honesty — the mirror never claims what
-DAZN has not confirmed — was the tool's whole point."*
+That last idea is worth taking seriously and is listed as an open question in
+§6. It is better than asking DAZN, because the club is the party who finds out
+first: their person either gets in or does not. It also removes Richard from
+the closing loop, which is the direction of travel.
 
-**v1.0 puts this out of scope** (§3: *"Status workflow beyond 'requested on
-[date]' vs actioned"*) and proposes a two-state model where the slot updates the
-moment the club confirms.
+**What NOT to build: a `sent` state.** The old build had `pending → sent →
+complete` and that middle state existed so an admin could record having emailed
+DAZN. Richard is the admin and the sender; a state that only tells him what he
+just did is friction, and friction is what made the old tool unpleasant.
 
-That is the one thing the previous build existed to prevent. If a club swaps a
-slot and the tool immediately shows the new person, the tool is asserting
-something DAZN has not done — and DAZN is the only real authority. A club then
-believes their new VIP has access when they do not.
+### 2.2 Reconcile — SETTLED: no formal tab
 
-**This is the first decision for Richard.** Either:
+The old build had a Reconcile tab: paste DAZN's list, diff by email, batch
+apply. Richard's answer: he will see DAZN's data periodically and update by
+hand, and *"ease of use of the tool"* is the point.
 
-- **(a) Keep two states** and accept the record is a request log, not a mirror —
-  in which case the UI must never present a slot as *granted*, only as
-  *requested*, and the wording matters more than the data shape; or
-- **(b) Restore three states**, which costs one extra field and one admin action
-  and is what the previous build concluded.
+So: **no paste-and-diff tab.** But the admin's direct-edit path stops being an
+escape hatch and becomes a primary flow — the thing he will actually use to keep
+the record true. It has to be fast: find a club, change a name, done. If editing
+a slot as admin takes more than a couple of clicks, this tool has the same
+problem the last one had.
 
-The v1.0 admin flow already has "mark a slot as actioned once DAZN confirms",
-which is the third state under a different name. The two designs are closer than
-they look; what is missing is what the club sees in between.
+The one thing worth keeping from the old Reconcile: **match on email, not name.**
+A person changing their surname is an edit, not a remove-plus-add.
 
-### 2.2 Reconcile — steal it
+### 2.2a Who generates email — SETTLED, and it is a rule
 
-The old tool's v1.6 Reconcile tab: paste DAZN's authoritative list, diff it
-against the mirror **matched by email** (so a name change renders as an edit,
-not remove-plus-add), type `OVERWRITE` to confirm, apply in one batched update,
-stamp `lastVerifiedAt` per org. Orgs missing from the paste are left untouched —
-honest about what was actually verified.
+**Only a club submission generates an email to DAZN. Admin edits are silent.**
 
-The record says: *"Any future tool mirroring an external authority should steal
-this wholesale."* Not in v1.0's scope. Worth adding, because without it the
-mirror drifts from DAZN and nothing ever catches it.
+Richard: *"me as the admin... not necessarily generating direct emails to DAZN.
+I think that's reserved just for the clubs — they use it as a change or update
+mechanism."*
+
+This matters more than it looks. It means:
+
+- The club-facing flow is the *request* channel, and its email is the product.
+- The admin view is a *record-keeping* surface. Richard editing a slot means he
+  is recording something that already happened, not asking DAZN for anything.
+- An admin edit therefore does **not** set `requestedOn`, and does not put the
+  slot into a pending state.
+
+Build it so an admin edit cannot accidentally fire an email. That is a
+correctness rule, not a preference.
 
 ### 2.3 The canon candidate
 
@@ -123,32 +144,26 @@ Hard rules, from `CLAUDE.md` and that incident:
    should live**. Being handed a file is not permission to commit it.
 4. Test fixtures use invented names.
 
-### 3.1 There is already data at a different path
+### 3.1 Data path — SETTLED: fresh, and the old node goes
 
-v1.0 §4 suggests `/app-data/ops-vip-access/{clubKey}/slots/{0-4}`.
+Richard: *"Totally fresh. The existing data is entirely out of date."*
 
-**But `app-data/media-dazn-vip/` still exists in RTDB, still has rules in
-`rules.snapshot.json`, and holds the real operational data** — orgs, VIP lists,
-the request queue and per-org audit. The retired record deliberately left both
-in place: *"deleting it is a separate decision for whoever owns the DAZN
-relationship."*
+So:
 
-So the second decision for Richard: **migrate, or start clean?**
+- **New: `app-data/ops-vip-access/`**, shape of the build's choosing.
+- **The old `app-data/media-dazn-vip/` node is deleted**, along with its rules
+  in `rules.snapshot.json`. It holds names and emails that are out of date and
+  that nobody is maintaining — an orphan full of stale personal data is worse
+  than no data.
 
-- **Reuse `media-dazn-vip`** — the data is there, the rules are there, and the
-  history is not lost. Costs: an old shape to work with, and a `media-` prefix
-  for something that is arguably ops.
-- **New `ops-vip-access`** — clean shape, matches v1.0. Costs: the old node
-  becomes an orphan holding personal data that nobody is maintaining, which is
-  its own problem and needs an explicit decision to delete.
+**Order of operations, from the retired record and non-negotiable: the rule and
+the data leave together, never the rule first.** Removing the rule while the
+data sits there leaves personal data behind a default-deny that somebody will
+later "fix" by opening it up.
 
-**Do not create the new path and leave the old one sitting there.** Whichever
-way it goes, the other node's fate is decided in the same PR.
-
-Note the order-of-operations rule from the record: when data does go, **the rule
-and the data leave together, never the rule first.**
-
----
+Deleting live RTDB data is Richard's action in the console, not something a PR
+can do. The PR removes the rules; he clears the node. Say so in the PR body, and
+say which order.
 
 ## 4. The build
 
@@ -267,23 +282,52 @@ needs one button press; one that only changes the page needs none.
 
 ## 6. Open questions
 
-**Decided by Richard before or during build. The first two are blocking.**
+Four of v1.0's questions were answered on 18/08/2026 and have moved into the
+sections above (§2.1 status model, §2.2 no Reconcile tab, §2.2a email rule,
+§3.1 fresh data path). What is left:
 
-1. **Two states or three?** (§2.1) — does the club see "requested" until DAZN
-   confirms, or does the slot change immediately? Blocking: it changes the data
-   shape and the whole UI.
-2. **Reuse `media-dazn-vip` or start `ops-vip-access`?** (§3.1) — and in the
-   same breath, what happens to the node that is not chosen. Blocking: it is the
-   data path.
-3. Is Reconcile (§2.2) in v1, or deferred? Without it nothing catches drift
-   between the mirror and DAZN.
-4. The DAZN recipient address for the GAS trigger. **Supply it directly to the
-   GAS config, not in a PR** — it is a third-party contact in a public repo.
-5. Tool key: `ops-vip-access` suggested. No clash in the current registry.
-6. Does this tool need an `admin` *level*, or does role cover it? (§4.3 — the
-   default answer is role.)
+### 6.1 Non-club orgs — the question Richard's own answer raised
 
----
+Richard named the clubs/non-clubs division as one of the things that was wrong
+with the old tool's presentation. But he said the *presentation* was wrong, not
+that the division should not exist — and the retired record confirms the old
+build had "non-club orgs" that an admin managed.
+
+v1.0 assumes **72 clubs × 5 slots, flat**. That is either a simplification or a
+loss of function, and nobody has said which.
+
+**So: are there VIP allocations that are not a club?** Broadcasters, sponsors,
+league staff, competition partners. If yes, the data shape is orgs-with-slots
+where most orgs happen to be clubs — not clubs-with-slots. That is a
+foundational decision and it is cheap now, expensive later.
+
+If yes, the presentation lesson is the useful part of his answer: whatever the
+old build did to separate them read badly. One list with a filter, or clubs
+front and centre with everything else behind a tab — but not two parallel
+worlds.
+
+### 6.2 The 24-hour club confirmation
+
+Richard floated it (§2.1): once a request has sat for 24 hours, offer the club a
+*"has this person got access?"* confirmation so they close it out rather than
+him.
+
+In or out for v1? It is the only mechanism in the design that would catch a
+request DAZN silently dropped, and it takes the closing action off Richard —
+but it adds a second club-side state to build and explain.
+
+### 6.3 Still to supply
+
+- The DAZN recipient address for the GAS trigger. **Give it to the GAS config
+  directly, not in a PR** — it is a third-party contact and this repo is public.
+- Confirm `ops-vip-access` as the tool key. No clash in the current registry.
+
+### 6.4 Answered by the settled access model, not open
+
+v1.0 asked whether admin should be Richard-only or any staff-tools admin. **This
+is not a design question for this tool.** Role is the toolset: League Admin gets
+the admin view. If one named person should have it and other League Admins
+should not, that is a per-user exception in the portal. See §4.3.
 
 ## 7. What "done" looks like
 
@@ -293,7 +337,11 @@ A layperson should be able to run this in a browser:
   no other club's.
 - Filling an empty slot shows a confirmation naming the person being added.
   Swapping shows both names — removing X, adding Y.
-- Confirming sends the email, and the slot reflects whatever §6.1 settles on.
+- Confirming sends the email and the slot reads "Requested on [date]" — the
+  previous occupant still shown, because DAZN has not acted yet.
+- Richard marks it complete; only then does the new name become the slot.
+- **Richard editing a slot directly sends no email at all** (§2.2a) and does not
+  put the slot into a requested state.
 - A Club Staff user sees the same five slots and **cannot** submit anything.
 - A League Admin sees all 72 clubs, can mark a change actioned, and can edit a
   slot directly.
@@ -327,5 +375,6 @@ an approval flow. Read it as an example, never as the reference.
 
 | Version | Date | Changes |
 |---|---|---|
+| v2.1 | 18/08/2026 | Four questions answered by Richard and moved into the body: status model (requested-on, admin marks complete, no `sent` state), no Reconcile tab but the admin edit path becomes primary, only club submissions generate email, and a totally fresh data node with the old one deleted. Reframed the retired record as evidence rather than scripture — Richard's verdict is that the concept was right and the execution clunky, so what carries over is correctness, not layout. Raised §6.1, non-club orgs, which his own answer surfaced and nobody had asked. |
 | v2.0 | 18/08/2026 | Rewritten for handover. Corrected v1.0's three wrong references; surfaced the retired tool and its settled three-state lifecycle, Reconcile tab and PII incident; flagged the live data at `media-dazn-vip` against v1.0's proposed new path; replaced the invented access model with the settled one; added deploy routes, acceptance criteria and a reading list. |
 | v1.0 | 18/08/2026 | Initial spec drafted from grill-me session, without repository context. |
