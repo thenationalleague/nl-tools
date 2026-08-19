@@ -52,6 +52,14 @@
  *   lives on the anchor record, so it survives any client reload by
  *   construction: consumers derive, they never count.
  *
+ * THE TRANSITION LEDGER
+ *   Kick-off is the only state change events can correct; the rest — HalfTime,
+ *   FullTime, Abandoned, ExtraTime, Penalties — are observations and nothing
+ *   more. Every witnessed list transition is appended to
+ *   anchors/{matchID}/transitions as { from, to, observedUTC }, so the full
+ *   state history of a match survives in one node beside its anchors, under
+ *   the same per-match read grant.
+ *
  * EDGE CASES, SETTLED
  *   Postponed never anchors — arrival is only FirstHalf or SecondHalf, and a
  *   postponed match reaches neither. A flip before the listed hour is
@@ -235,6 +243,33 @@ function applyMeasurement(record, impliedStartMs, nowMs) {
   return { record: withLag(next), changed: true };
 }
 
+/**
+ * The transition ledger — every observed LIST period change for a match,
+ * kept beside its anchors at anchors/{matchID}/transitions. HalfTime and
+ * FullTime have no event timestamp to correct against, so unlike kick-off
+ * they can never graduate beyond an observation: this list IS the record.
+ *
+ * The baseline for "did it change" is the ledger's own last entry (falling
+ * back to the caller's previous poll), so a restart that missed flips still
+ * appends the change it can see — with `from` reflecting what was actually
+ * last known rather than a guess. A first sighting at PreMatch records
+ * nothing: nothing has happened yet.
+ *
+ * Returns { transitions, changed }.
+ */
+function appendTransition(transitions, prevPeriod, period, nowMs) {
+  const list = Array.isArray(transitions) ? transitions.slice() : [];
+  const p = String(period || '').toLowerCase();
+  const last = list.length ? list[list.length - 1] : null;
+  const baseline = last
+    ? String(last.to || '').toLowerCase()
+    : (prevPeriod == null ? null : String(prevPeriod).toLowerCase());
+  if (baseline === p) return { transitions: list, changed: false };
+  if (baseline == null && p === 'prematch') return { transitions: list, changed: false };
+  list.push({ from: baseline, to: p, observedUTC: iso(nowMs) });
+  return { transitions: list, changed: true };
+}
+
 function fmtMinute(minute, capMin) {
   if (minute > capMin) return capMin + "'+" + (minute - capMin);
   return minute + "'";
@@ -274,5 +309,6 @@ module.exports = {
   arrivalSlotOf, slotOfEventPeriod,
   impliedStartOf, measureDetail,
   applyListArrival, applyMeasurement,
+  appendTransition,
   clockOf,
 };

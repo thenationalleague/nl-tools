@@ -1,8 +1,15 @@
 <!DOCTYPE html>
 <!--
   NL Tools — NLServices API Monitor
-  Version: v0.14 (19/08/2026)
+  Version: v0.15 (19/08/2026)
 
+  v0.15 — The whole state ledger in the Events feed, not just kick-offs.
+         Half time, full time and the oddities (abandoned, extra time, a
+         wobble back to pre-match) render from anchors/<id>/transitions —
+         each is an observation with no event timestamp to correct against,
+         so the observed time is the record and sits in the detected-at
+         column. Flips into a half are deliberately not repeated: the
+         kick-off line already carries them, corrected.
   v0.14 — Kick-offs appear in the Events feed. Synthetic and display-only:
          the RTDB stream stays append-only player events, because an anchor
          REVISES backwards and a feed entry must not silently change its
@@ -282,6 +289,13 @@
         'Kick-offs show in the Events feed — derived from the anchor records at render time, with source, confidence and the measured list-flip lag. Past days show theirs once the backfill has run.'
       ]
     });
+    window.NL_CHANGELOG.unshift({
+      date: '19/08/2026',
+      version: 'v0.15',
+      items: [
+        'Every match state change in the Events feed: half time, full time, abandonments and extra time from the new transition ledger, alongside the corrected kick-offs.'
+      ]
+    });
 
     /* auth-guard fires this once the session is verified + pageWrap is
        revealed. Boot the main app from here so RTDB reads happen with a
@@ -408,6 +422,8 @@
   .ev--lineup .ev__type       { color: var(--navy-600); }
   .ev--withdrawal .ev__type   { color: var(--red); }
   .ev--kick-off .ev__type     { color: var(--navy); }
+  .ev--half-time .ev__type    { color: var(--amber-deep); }
+  .ev--full-time .ev__type    { color: var(--navy-600); }
   .ev--retracted { opacity: .55; }
   .ev--retracted .ev__what { text-decoration: line-through; }
   .ev__when { color: var(--text-muted); font-size: var(--text-sm); white-space: nowrap; }
@@ -753,6 +769,21 @@
           ingestLagMs: rec.ingestLagMs,
           fixture: names[id] || id,
           detectedAt: Date.parse(rec.listFlipUTC || rec.anchorUTC)
+        });
+      });
+      /* The rest of the ledger. Flips INTO a half are skipped here — the
+         kick-off line above already carries them, corrected — so what's left
+         is half time, full time, and the oddities (abandoned, extra time, a
+         wobble back to pre-match), each an observation and shown as one. */
+      (Array.isArray(a.transitions) ? a.transitions : []).forEach(function (t) {
+        if (!t || !t.to || t.to === 'firsthalf' || t.to === 'secondhalf') return;
+        out.push({
+          type: t.to === 'halftime' ? 'half-time'
+            : t.to === 'fulltime' ? 'full-time'
+              : t.to === 'postmatch' ? 'post-match' : t.to,
+          fixture: names[id] || id,
+          from: t.from || null,
+          detectedAt: Date.parse(t.observedUTC)
         });
       });
     });
@@ -1117,6 +1148,11 @@
           (e.ingestLagMs > 0
             ? ' · list flip lagged by ' + NL.formatDuration(Math.round(e.ingestLagMs / 1000))
             : '');
+      } else if (e.fixture) {
+        /* A ledger transition — half time, full time, or an oddity. The
+           observation time is the whole record, and it sits in the
+           detected-at column where it belongs. */
+        what = e.fixture + (e.from ? ' (from ' + e.from + ')' : '');
       }
       var minute = e.formattedMinute ? ' <span class="muted mono">' + esc(e.formattedMinute) + '</span>' : '';
       return '<div class="ev ev--' + esc(e.type) + (e.retracted ? ' ev--retracted' : '') + '">' +

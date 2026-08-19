@@ -226,6 +226,49 @@ test('a record read back from RTDB has no revisions field — RTDB drops empty a
 });
 
 // ---------------------------------------------------------------------------
+// The transition ledger — every state change, observed once
+// ---------------------------------------------------------------------------
+
+test('a witnessed change appends; sitting still appends nothing', () => {
+  const first = A.appendTransition(undefined, 'prematch', 'firsthalf', FLIP);
+  assert.equal(first.changed, true);
+  assert.deepEqual(first.transitions, [
+    { from: 'prematch', to: 'firsthalf', observedUTC: '2026-08-08T15:04:30.000Z' },
+  ]);
+  const still = A.appendTransition(first.transitions, 'firsthalf', 'firsthalf', FLIP + MIN);
+  assert.equal(still.changed, false);
+});
+
+test('the ledger chains through a whole match, HalfTime and FullTime included', () => {
+  let list;
+  [['prematch', 'firsthalf'], ['firsthalf', 'halftime'],
+   ['halftime', 'secondhalf'], ['secondhalf', 'fulltime']].forEach(([from, to], i) => {
+    list = A.appendTransition(list, from, to, FLIP + i * 45 * MIN).transitions;
+  });
+  assert.deepEqual(list.map((t) => t.to), ['firsthalf', 'halftime', 'secondhalf', 'fulltime']);
+  assert.equal(list[3].from, 'secondhalf');
+});
+
+test('the ledger\'s own last entry is the baseline, so a restart cannot double-log', () => {
+  const one = A.appendTransition(undefined, 'prematch', 'firsthalf', FLIP).transitions;
+  // Cold start: prevPeriod unknown, period unchanged — the ledger remembers.
+  const again = A.appendTransition(one, null, 'firsthalf', FLIP + 5 * MIN);
+  assert.equal(again.changed, false);
+  // Cold start across a missed flip: the change is real and from is honest.
+  const late = A.appendTransition(one, null, 'halftime', FLIP + 50 * MIN);
+  assert.equal(late.changed, true);
+  assert.equal(late.transitions[1].from, 'firsthalf');
+});
+
+test('a first sighting at PreMatch records nothing — nothing has happened', () => {
+  assert.equal(A.appendTransition(undefined, null, 'prematch', FLIP).changed, false);
+  // But joining late IS an observation worth keeping, with an honest null from.
+  const late = A.appendTransition(undefined, null, 'secondhalf', FLIP);
+  assert.equal(late.changed, true);
+  assert.equal(late.transitions[0].from, null);
+});
+
+// ---------------------------------------------------------------------------
 // The derived clock — floors to minutes, capped, frozen at the whistle
 // ---------------------------------------------------------------------------
 

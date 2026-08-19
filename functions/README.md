@@ -130,6 +130,11 @@ the detail response but a poll observation cannot be recovered after the fact.
 A backfilled day therefore has kick-off times but no `ingestLagMs`: the lag
 exhibit only ever comes from a witnessed flip.
 
+Every other state change — HalfTime, FullTime, Abandoned, ExtraTime — has no
+event timestamp to correct against, so each witnessed list transition is
+appended to `anchors/<matchID>/transitions` as `{ from, to, observedUTC }`:
+the full state history of a match, in one node, under the same read grant.
+
 ### One-time setup, in addition to the list above
 
 1. **Cross-project database access.** These are the only functions here that

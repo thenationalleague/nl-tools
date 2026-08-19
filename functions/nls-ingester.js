@@ -49,6 +49,12 @@
  * This file orchestrates them and owns every RTDB write.
  *
  * CHANGELOG
+ *   19/08/2026  v0.3.0  The transition ledger: every witnessed list period
+ *                       change — HalfTime, FullTime, Abandoned, the lot — is
+ *                       appended to anchors/<matchID>/transitions as
+ *                       { from, to, observedUTC }. Kick-off stays the only
+ *                       transition events can correct; the rest are
+ *                       observations and this ledger is their record.
  *   19/08/2026  v0.2.1  Anchor backfill: past matchdays get their event-derived
  *                       KICK_OFF records on the hourly run, bounded and
  *                       resumable like the scorer backfill. Event-derived only
@@ -81,7 +87,7 @@ const E = require('./nls/events');
 const A = require('./nls/anchors');
 const D = require('./nls/derive');
 
-const VERSION = '0.2.1';
+const VERSION = '0.3.0';
 
 /* nls/ lives in nl-widgets, alongside the feed/ fixture cache and the fan
    widgets that will read it in step 2. Writing it into nl-tools would put the
@@ -295,34 +301,53 @@ async function ingestDetail(row, now, serverNow) {
 // ---------------------------------------------------------------------------
 
 /**
- * Stage 1's contribution: the LIST arriving at FirstHalf/SecondHalf writes the
- * low-confidence anchor. Only rows whose period moved since the previous run
- * reach RTDB here — a match sitting in its half costs nothing per poll. The
- * record itself survives restarts, so a cold start mid-half reads the anchor
- * it wrote earlier and leaves it alone.
+ * Stage 1's contribution, two records from one observation:
  *
- * An anchor failure is contained: it must never cost the run its index write
+ *   - arrival at FirstHalf/SecondHalf writes the low-confidence kick-off
+ *     anchor (anchors/<id>/<1H|2H>), later corrected by events;
+ *   - EVERY witnessed period change appends to the transition ledger
+ *     (anchors/<id>/transitions) — HalfTime, FullTime, Abandoned and the
+ *     rest have no event timestamp to correct against, so the observation
+ *     is the whole record.
+ *
+ * Only rows whose period moved since the previous run reach RTDB here — a
+ * match sitting in its half costs nothing per poll, and both records ride
+ * one read of the match's anchors node. The records survive restarts, so a
+ * cold start mid-half leaves the earlier anchor alone and the ledger's own
+ * last entry keeps the dedup honest.
+ *
+ * A failure here is contained: it must never cost the run its index write
  * or its event stream.
  */
-async function applyAnchorArrivals(rows, now) {
+async function applyListObservations(rows, now) {
   let touched = 0;
   await Promise.all(rows.map(async (row) => {
     const slot = A.arrivalSlotOf(row.period, row.prevPeriod);
-    if (!slot) return;
+    const moved = row.prevPeriod !== row.period &&
+      !(row.prevPeriod == null && row.period === 'prematch');
+    if (!slot && !moved) return;
     try {
-      const path = 'anchors/' + row.id + '/' + slot;
-      const existing = await read(path);
-      /* Witnessed = the previous poll's period was known and different, i.e.
-         this poll saw the flip itself rather than finding the match already
-         in play — only those observations feed the lag exhibit. */
-      const r = A.applyListArrival(existing, now, row.prevPeriod != null);
-      if (r.changed) {
-        await db().ref(ROOT + '/' + path).set(r.record);
+      const node = (await read('anchors/' + row.id)) || {};
+      const updates = {};
+
+      const t = A.appendTransition(node.transitions, row.prevPeriod, row.period, now);
+      if (t.changed) updates.transitions = t.transitions;
+
+      if (slot) {
+        /* Witnessed = the previous poll's period was known and different,
+           i.e. this poll saw the flip itself rather than finding the match
+           already in play — only those observations feed the lag exhibit. */
+        const r = A.applyListArrival(node[slot], now, row.prevPeriod != null);
+        if (r.changed) updates[slot] = r.record;
+      }
+
+      if (Object.keys(updates).length) {
+        await db().ref(ROOT + '/anchors/' + row.id).update(updates);
         touched += 1;
       }
     } catch (err) {
       const why = (err && err.message) || String(err);
-      logger.error('anchor arrival failed (' + row.id + '): ' + why,
+      logger.error('anchor observation failed (' + row.id + '): ' + why,
         { matchID: row.id, reason: why });
     }
   }));
@@ -797,12 +822,13 @@ async function runIngest(now, opts) {
     });
   });
 
-  /* Kick-off anchors from the list, BEFORE detail runs — so when the flip and
-     the first timed events land on the same poll, the event correction in
-     ingestDetail revises the anchor this run just created rather than racing
-     it. Detail `period` never participates: it sits on PreMatch for the whole
-     match, so the list is the only period source read here. */
-  const anchorArrivals = await applyAnchorArrivals(rows, now);
+  /* Kick-off anchors and the transition ledger, from the list, BEFORE detail
+     runs — so when the flip and the first timed events land on the same poll,
+     the event correction in ingestDetail revises the anchor this run just
+     created rather than racing it. Detail `period` never participates: it
+     sits on PreMatch for the whole match, so the list is the only period
+     source read here. */
+  const anchorArrivals = await applyListObservations(rows, now);
 
   const plan = S.derivePlan(rows, now);
   const byId = new Map(rows.map((r) => [r.id, r]));
