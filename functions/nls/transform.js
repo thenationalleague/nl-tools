@@ -259,6 +259,17 @@ function detailSide(team, matchTeam) {
   };
 }
 
+/* eventTimestamp is the entry's wall-clock time — "2026-03-24 19:48:36.000000"
+   — and the only field on an event that names a real instant rather than a
+   match minute. It is what makes an event usable as a kick-off measurement
+   (nls/anchors.js), so it is carried on every timed event as tsUTC.
+   Normalised through the same door as every other date, then re-serialised so
+   the published value is clean ISO rather than upstream's six-digit fraction. */
+function eventTsOf(e) {
+  const d = normaliseUtc(e && e.eventTimestamp);
+  return d ? d.toISOString() : null;
+}
+
 /* Event array index is the canonical identity within a match — stable for a
    given team, numeric, and free of the characters Firebase rejects. Carried
    across from the vidiprinter unchanged (spec §5.1) because it is the piece
@@ -274,7 +285,8 @@ function shapeGoals(events, teamID) {
       playerName: playerNameOf(g.player),
       minute: num(e.eventMinute != null ? e.eventMinute : e.eventTime),
       formattedMinute: e.formattedEventTime ? String(e.formattedEventTime) : null,
-      period: e.eventPeriod ? String(e.eventPeriod) : null,
+      period: e.eventPeriod != null ? String(e.eventPeriod) : null,
+      tsUTC: eventTsOf(e),
       isOwnGoal: type.includes('own'),
       isPenalty: type.includes('pen'),
     };
@@ -291,6 +303,8 @@ function shapeBookings(events, teamID) {
       playerName: playerNameOf(b.player),
       minute: num(e.eventMinute != null ? e.eventMinute : e.eventTime),
       formattedMinute: e.formattedEventTime ? String(e.formattedEventTime) : null,
+      period: e.eventPeriod != null ? String(e.eventPeriod) : null,
+      tsUTC: eventTsOf(e),
       card: b.card ? String(b.card) : null,
       cardType: b.cardType ? String(b.cardType) : null,
       reason: b.reason ? String(b.reason) : null,
@@ -310,6 +324,8 @@ function shapeSubs(events, teamID) {
       playerOffName: playerNameOf(s.subOffPlayer),
       minute: num(e.eventMinute != null ? e.eventMinute : e.eventTime),
       formattedMinute: e.formattedEventTime ? String(e.formattedEventTime) : null,
+      period: e.eventPeriod != null ? String(e.eventPeriod) : null,
+      tsUTC: eventTsOf(e),
       reason: s.reason ? String(s.reason) : null,
     };
   });
