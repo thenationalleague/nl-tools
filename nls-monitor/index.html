@@ -1,8 +1,22 @@
 <!DOCTYPE html>
 <!--
   NL Tools — NLServices API Monitor
-  Version: v0.11 (18/08/2026)
+  Version: v0.12 (19/08/2026)
 
+  v0.12 — Live minutes come from the ingester's kick-off anchors, not from
+         upstream's matchMinutes. NLS never emits kick-off, so the ingester
+         synthesises it (anchors/<matchID>/<1H|2H> — list flip at low
+         confidence, corrected backwards by event timestamps; method note
+         v18.0). The pill shows the derived clock — elapsed since the anchor,
+         floored, capped at 45'+n / 90'+n, frozen at the cap through half
+         time — and its tooltip names the anchor's source and confidence,
+         upstream's own minute for comparison, and the measured kick-off
+         ingest lag where one exists. Falls back to upstream's minute
+         wherever the model makes no claim (no anchor yet, extra time,
+         penalties). The clock re-derives on the 15-second health tick —
+         derived, never counted, so a reload loses nothing. Event rows
+         gained the upstream entry time (tsUTC) as a tooltip on the
+         detected-at column: the pair is the per-event ingest lag.
   v0.11 — Every timestamp is absolute and carries seconds — "18 Aug 2026,
          09:04:12", not "3h ago". Canon already had it: formatDateTime's
          {seconds:true}, so no canon change and no cache-bust. Relative time
@@ -86,6 +100,7 @@
                  nls/live/index/<comp>/<ymd>  the ingester's last-run day
                  nls/fixtures/<comp>/<ymd>    any other day, from the hourly run
                  nls/events/<ymd>             the event stream
+                 nls/anchors/<matchID>        synthetic kick-off records (1H/2H)
                  nls/derived/tables|scorers|coverage/<comp>
                  (nls/seen is never read — internal dedup guard)
 
@@ -229,6 +244,14 @@
       version: 'v0.11',
       items: [
         'Timestamps are exact and include seconds — “18 Aug 2026, 09:04:12” rather than “3h ago”. Two events forty seconds apart no longer read the same.'
+      ]
+    });
+    window.NL_CHANGELOG.unshift({
+      date: '19/08/2026',
+      version: 'v0.12',
+      items: [
+        'Live minutes are the ingester’s own clock, derived from its synthetic kick-off anchors, with upstream’s minute alongside in the tooltip — plus the anchor’s source, confidence and the measured kick-off ingest lag.',
+        'Event rows carry the upstream entry time on the detected-at column, so the per-event ingest lag can be read off one row.'
       ]
     });
 
@@ -443,10 +466,12 @@
     index: {},             // today's live rows (only ever written for today)
     fixtures: {},          // the chosen day's rows, from fixtures/<comp>/<ymd>
     events: {},
+    anchors: {},           // matchID -> { '1H': record, '2H': record }
     ymd: todayYmd(),
     dayPinned: false   // true once a day is chosen, so the calendar stops moving it
   };
   var dayRefs = [];        // live refs for the chosen day, detached on change
+  var anchorRefs = {};     // matchID -> ref; grows as rows go live, cleared with the day
   var tab = 'today';
 
   var els = {
@@ -568,8 +593,13 @@
     /* Re-check the verdict on a timer as well as on data: "no successful run
        for six minutes" is a state that arrives through the passage of time,
        not through a write, so a purely event-driven page would sit there
-       looking green while the ingester was dead. */
-    setInterval(renderHealth, 15000);
+       looking green while the ingester was dead. The derived clock rides the
+       same tick — it too is a function of the wall clock, not of a write,
+       and 15s keeps a floor-to-the-minute display at worst 15s late. */
+    setInterval(function () {
+      renderHealth();
+      if (tab === 'today' && anyLive()) renderToday();
+    }, 15000);
   }
 
   /* Subscribing to a day means detaching the last one. Without this, moving
@@ -578,6 +608,8 @@
   function detachDay() {
     dayRefs.forEach(function (r) { r.off(); });
     dayRefs = [];
+    Object.keys(anchorRefs).forEach(function (id) { anchorRefs[id].off(); });
+    anchorRefs = {};
   }
 
   function selectDay(ymd) {
@@ -586,6 +618,7 @@
     state.index = {};
     state.fixtures = {};
     state.events = {};
+    state.anchors = {};
 
     COMPS.forEach(function (c) {
       /* Exactly the granted slices — <comp>/<ymd>, never the parent. That
@@ -599,6 +632,7 @@
       var idx = wdb.ref(ROOT + '/live/index/' + c.key + '/' + ymd);
       idx.on('value', function (s) {
         state.index[c.key] = s.val() || {};
+        syncAnchorSubs();
         if (tab === 'today') renderToday();
       }, onErr);
       dayRefs.push(idx);
@@ -606,6 +640,7 @@
       var fx = wdb.ref(ROOT + '/fixtures/' + c.key + '/' + ymd);
       fx.on('value', function (s) {
         state.fixtures[c.key] = s.val() || {};
+        syncAnchorSubs();
         if (tab === 'today') renderToday();
       }, onErr);
       dayRefs.push(fx);
@@ -622,6 +657,40 @@
     renderDaybar();
     renderToday();
     if (tab === 'events') renderEvents();
+  }
+
+  /* One merged view of the chosen day — fixtures/ as the base, live rows on
+     top — shared by the table renderer, the anchor subscriber and the tick. */
+  function dayRows(compKey) {
+    return Object.assign({}, state.fixtures[compKey] || {}, state.index[compKey] || {});
+  }
+
+  /* Anchor subscriptions follow the day's live matches: attached the first
+     time a row reads as live, detached with everything else on a day change.
+     anchors/ is granted per match — like every nls/ read, you name what you
+     want — and the node is a few hundred bytes, so a full card costs little.
+     A read failure here means the anchors rules block has not been pasted
+     yet; the pill just falls back to upstream's minute, so it is not fatal. */
+  function syncAnchorSubs() {
+    COMPS.forEach(function (c) {
+      var rows = dayRows(c.key);
+      Object.keys(rows).forEach(function (id) {
+        if (!rows[id].live || anchorRefs[id]) return;
+        var ref = wdb.ref(ROOT + '/anchors/' + id);
+        anchorRefs[id] = ref;
+        ref.on('value', function (s) {
+          state.anchors[id] = s.val();
+          if (tab === 'today') renderToday();
+        }, function () { /* no grant yet — upstream minute stands in */ });
+      });
+    });
+  }
+
+  function anyLive() {
+    return COMPS.some(function (c) {
+      var rows = dayRows(c.key);
+      return Object.keys(rows).some(function (id) { return rows[id].live; });
+    });
   }
 
   /* Every date that has fixtures in any competition, ascending. */
@@ -792,8 +861,7 @@
          other than the ingester's last run has; live/index carries the live
          minute and only ever exists for that run's day. Live wins on the
          matches it has, so a past day still renders and today still ticks. */
-      var merged = Object.assign({}, state.fixtures[c.key] || {}, state.index[c.key] || {});
-      var rows = Object.values(merged);
+      var rows = Object.values(dayRows(c.key));
       if (!rows.length) return;
       rows.sort(function (a, b) { return String(a.ko).localeCompare(String(b.ko)); });
       blocks.push({ comp: c, rows: rows });
@@ -870,8 +938,49 @@
     return s;
   }
 
+  /* THE CLOCK IS DERIVED, NEVER COUNTED. elapsed = now \u2212 anchorUTC, +45:00 in
+     the second half; floored to minutes; capped at 45'+n / 90'+n and frozen
+     at the cap through half time. Clock state lives on the anchor record
+     (functions/nls/anchors.js holds the method and its tests), so a reload
+     of this page loses nothing. Null wherever the model makes no claim \u2014
+     no anchor yet, extra time, penalties \u2014 and the caller falls back to
+     upstream's minute. */
+  function anchorClock(anchors, period) {
+    if (!anchors) return null;
+    var a1 = anchors['1H'] && Date.parse(anchors['1H'].anchorUTC);
+    var a2 = anchors['2H'] && Date.parse(anchors['2H'].anchorUTC);
+    var m;
+    if (period === 'firsthalf' && a1) {
+      m = Math.max(0, Math.floor((Date.now() - a1) / 60000));
+      return { text: m > 45 ? "45'+" + (m - 45) : m + "'", rec: anchors['1H'] };
+    }
+    if (period === 'halftime' && a1) {
+      return { text: "45'", rec: anchors['1H'] };
+    }
+    if (period === 'secondhalf' && a2) {
+      m = 45 + Math.max(0, Math.floor((Date.now() - a2) / 60000));
+      return { text: m > 90 ? "90'+" + (m - 90) : m + "'", rec: anchors['2H'] };
+    }
+    return null;
+  }
+
   function periodPill(r) {
     if (r.live) {
+      var clock = anchorClock(state.anchors[r.id], r.period);
+      if (clock) {
+        /* The tooltip is the inspection surface: which anchor the minute
+           hangs off, what upstream claims alongside, and \u2014 where an event
+           has corrected a list flip \u2014 the measured kick-off ingest lag. */
+        var tip = 'Clock from the ' + (clock.rec.source || '?') + ' anchor (' +
+          (clock.rec.confidence || '?') + ' confidence) \u00b7 upstream says ' +
+          (r.formattedMinute || (r.minute != null ? r.minute + "'" : '\u2014'));
+        if (clock.rec.ingestLagMs > 0) {
+          tip += ' \u00b7 list flip trailed kick-off by ' +
+            NL.formatDuration(Math.round(clock.rec.ingestLagMs / 1000));
+        }
+        return '<span class="pill nm-pill pill--live" title="' + esc(tip) + '">' +
+          esc(clock.text) + '</span>';
+      }
       return '<span class="pill nm-pill pill--live">' + esc(r.formattedMinute || r.minute + "'") + '</span>';
     }
     if (r.postponed) return '<span class="pill nm-pill pill--postponed" title="Postponed">P\u2013P</span>';
@@ -939,8 +1048,12 @@
            list. Relative time answers "is this recent", which is not a
            question anyone brings to a feed monitor, and it silently loses the
            precision the comparison needs — two events 40 seconds apart both
-           read '3h ago'. */
-        '<span class="ev__when mono">' +
+           read '3h ago'. Where the record carries the upstream entry time
+           (tsUTC), it rides the tooltip: this time against that one IS the
+           per-event ingest lag. */
+        '<span class="ev__when mono"' +
+          (e.tsUTC ? ' title="' + esc('Entered upstream ' +
+            NL.formatDateTime(e.tsUTC, { seconds: true })) + '"' : '') + '>' +
           esc(NL.formatDateTime(e.detectedAt, { seconds: true })) + '</span>' +
         '</div>';
     }).join('');

@@ -65,6 +65,10 @@ function goalEvents(detail, ctx) {
     playerName: g.playerName,
     minute: g.minute,
     formattedMinute: g.formattedMinute,
+    /* The upstream entry's own wall-clock time. detectedAt says when WE first
+       saw it; tsUTC says when THEY recorded it — the pair is the per-event
+       ingest-lag measurement, so both ride along. */
+    tsUTC: g.tsUTC || null,
     isOwnGoal: !!g.isOwnGoal,
     isPenalty: !!g.isPenalty,
   }));
@@ -79,6 +83,7 @@ function bookingEvents(detail, ctx) {
     playerName: b.playerName,
     minute: b.minute,
     formattedMinute: b.formattedMinute,
+    tsUTC: b.tsUTC || null,
     cardType: b.cardType || b.card || null,
   }));
 }
@@ -95,6 +100,7 @@ function subEvents(detail, ctx) {
     playerOffName: s.playerOffName,
     minute: s.minute,
     formattedMinute: s.formattedMinute,
+    tsUTC: s.tsUTC || null,
   }));
 }
 

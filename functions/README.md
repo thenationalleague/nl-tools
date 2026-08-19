@@ -114,6 +114,16 @@ arriving, 5 minutes once a lineup is complete, hourly otherwise, plus a 20-minut
 tail after the last whistle because officials keep entering cards. The rules are
 in `nls/schedule.js` and are covered by `tests/nls-ingester.test.mjs`.
 
+**Kick-off is synthesised, because NLS never emits it.** `anchors/<matchID>/<1H|2H>`
+holds one KICK_OFF record per period: written at low confidence when the list
+flips to FirstHalf (or arrives at SecondHalf — matches can skip HalfTime), then
+corrected backwards by the wall-clock timestamps on goals, bookings and subs.
+The gap between the two values is kept on the record as `ingestLagMs` — the
+feed's kick-off ingest lag, measured per match. The derived clock hangs off the
+anchor (`now − anchorUTC`, +45:00 in the second half, capped at 45'+n / 90'+n),
+so it survives any client reload by construction. Method and edge cases are in
+`nls/anchors.js`, covered by `tests/nls-anchors.test.mjs`.
+
 ### One-time setup, in addition to the list above
 
 1. **Cross-project database access.** These are the only functions here that
@@ -129,8 +139,8 @@ in `nls/schedule.js` and are covered by `tests/nls-ingester.test.mjs`.
    `nls/` block. That project has **no rules deploy workflow** — the file is a
    snapshot and has to be pasted into the nl-widgets console by hand.
    Reads are granted per slice (`live/index/<comp>/<ymd>`, `live/matches/<id>`,
-   `events/<ymd>`, …) and never at `nls/` itself, so a consumer has to subscribe
-   to a scoped path rather than the namespace. That is the bandwidth design and
+   `events/<ymd>`, `anchors/<matchID>`, …) and never at `nls/` itself, so a
+   consumer has to subscribe to a scoped path rather than the namespace. That is the bandwidth design and
    the licensing posture in the same rule. `seen/` is granted to nobody — it is
    an internal dedup guard. Public read is a later decision and is deliberately
    not made here.

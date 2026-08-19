@@ -44,10 +44,19 @@
  *   nls/transform.js  upstream-shaped in, consumer-shaped out
  *   nls/schedule.js   the cadence state machine (pure)
  *   nls/events.js     state → events, the thing that cannot be backfilled
+ *   nls/anchors.js    synthetic kick-off records, corrected by events (pure)
  *   nls/derive.js     tables and scorers
  * This file orchestrates them and owns every RTDB write.
  *
  * CHANGELOG
+ *   19/08/2026  v0.2.0  Kick-off anchors (method note v18.0, 19/08/2026). NLS
+ *                       never emits kick-off, so the flip to FirstHalf /
+ *                       arrival at SecondHalf on the LIST writes
+ *                       anchors/<matchID>/<1H|2H>, and every timed detail
+ *                       event then corrects it backwards. The gap between the
+ *                       two is kept per match as the feed's kick-off ingest
+ *                       lag. Timed events now carry tsUTC (upstream
+ *                       eventTimestamp) for the same reason.
  *   09/08/2026  v0.1.0  Initial build against spec v1.2. Two-stage polling,
  *                       pre-match unconditional window, event stream with
  *                       dedup guard and retraction, official-table base with
@@ -64,9 +73,10 @@ const F = require('./nls/fetch');
 const T = require('./nls/transform');
 const S = require('./nls/schedule');
 const E = require('./nls/events');
+const A = require('./nls/anchors');
 const D = require('./nls/derive');
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 
 /* nls/ lives in nl-widgets, alongside the feed/ fixture cache and the fan
    widgets that will read it in step 2. Writing it into nl-tools would put the
@@ -231,6 +241,12 @@ async function ingestDetail(row, now, serverNow) {
     });
   }
 
+  /* Kick-off measurement first: goal/booking/sub timestamps imply when the
+     half actually started, and the anchor should tighten on the same poll
+     that delivered the evidence. Detail `period` is deliberately not read
+     for this — it sits on PreMatch all match; each event names its own. */
+  const anchorsTouched = await applyAnchorMeasurements(curr, now);
+
   const seenKeys = await readSeenFor(curr);
   const { created, retracted } = E.diffDetail(prev, curr, seenKeys);
 
@@ -264,7 +280,75 @@ async function ingestDetail(row, now, serverNow) {
     created, retractedCount: retracted.length,
     lineupComplete: curr.lineupComplete,
     detailFetchedAt: now,
+    anchorsTouched,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Kick-off anchors — the synthetic event NLS never emits
+// (nls/anchors.js carries the method; this owns the reads and writes)
+// ---------------------------------------------------------------------------
+
+/**
+ * Stage 1's contribution: the LIST arriving at FirstHalf/SecondHalf writes the
+ * low-confidence anchor. Only rows whose period moved since the previous run
+ * reach RTDB here — a match sitting in its half costs nothing per poll. The
+ * record itself survives restarts, so a cold start mid-half reads the anchor
+ * it wrote earlier and leaves it alone.
+ *
+ * An anchor failure is contained: it must never cost the run its index write
+ * or its event stream.
+ */
+async function applyAnchorArrivals(rows, now) {
+  let touched = 0;
+  await Promise.all(rows.map(async (row) => {
+    const slot = A.arrivalSlotOf(row.period, row.prevPeriod);
+    if (!slot) return;
+    try {
+      const path = 'anchors/' + row.id + '/' + slot;
+      const existing = await read(path);
+      /* Witnessed = the previous poll's period was known and different, i.e.
+         this poll saw the flip itself rather than finding the match already
+         in play — only those observations feed the lag exhibit. */
+      const r = A.applyListArrival(existing, now, row.prevPeriod != null);
+      if (r.changed) {
+        await db().ref(ROOT + '/' + path).set(r.record);
+        touched += 1;
+      }
+    } catch (err) {
+      const why = (err && err.message) || String(err);
+      logger.error('anchor arrival failed (' + row.id + '): ' + why,
+        { matchID: row.id, reason: why });
+    }
+  }));
+  return touched;
+}
+
+/**
+ * Stage 2's contribution: every timed event on a fetched detail is a kick-off
+ * measurement, and the best one per period corrects the anchor backwards —
+ * or creates it, when a poller gap meant the flip was never observed.
+ */
+async function applyAnchorMeasurements(detail, now) {
+  const measured = A.measureDetail(detail);
+  let touched = 0;
+  for (const slot of ['1H', '2H']) {
+    if (measured[slot] == null) continue;
+    try {
+      const path = 'anchors/' + detail.id + '/' + slot;
+      const existing = await read(path);
+      const r = A.applyMeasurement(existing, measured[slot], now);
+      if (r.changed) {
+        await db().ref(ROOT + '/' + path).set(r.record);
+        touched += 1;
+      }
+    } catch (err) {
+      const why = (err && err.message) || String(err);
+      logger.error('anchor measurement failed (' + detail.id + '): ' + why,
+        { matchID: detail.id, reason: why });
+    }
+  }
+  return touched;
 }
 
 /* The dedup guard, checked rather than inferred from the previous node —
@@ -626,6 +710,10 @@ async function runIngest(now, opts) {
       row.lineupComplete = Boolean(prevRow.lineupComplete);
       row.detailFetchedAt = prevRow.detailFetchedAt || 0;
       row.prevSignature = T.signatureOf(prevRow);
+      /* What the LIST said last run — the anchor arrival detector compares
+         against it. Null on the first sighting of the day or a cold start,
+         which anchors at low confidence but never claims a witnessed flip. */
+      row.prevPeriod = prevRow.period || null;
       /* Stamped on the first run that observes full time, and carried
          thereafter. This is what the 20-minute cooldown is measured from —
          see the finished branch of schedule.matchPlan for why an assumed
@@ -634,6 +722,13 @@ async function runIngest(now, opts) {
       rows.push(row);
     });
   });
+
+  /* Kick-off anchors from the list, BEFORE detail runs — so when the flip and
+     the first timed events land on the same poll, the event correction in
+     ingestDetail revises the anchor this run just created rather than racing
+     it. Detail `period` never participates: it sits on PreMatch for the whole
+     match, so the list is the only period source read here. */
+  const anchorArrivals = await applyAnchorArrivals(rows, now);
 
   const plan = S.derivePlan(rows, now);
   const byId = new Map(rows.map((r) => [r.id, r]));
@@ -663,8 +758,10 @@ async function runIngest(now, opts) {
   /* Fold detail outcomes back into the index rows before writing them, so the
      next run's cadence decision reads a current lineupComplete. */
   const createdByComp = {};
+  let anchorCorrections = 0;
   detailResults.forEach((r) => {
     if (!r || !r.ok) return;
+    anchorCorrections += r.anchorsTouched || 0;
     const row = byId.get(r.id);
     if (row) {
       row.lineupComplete = r.lineupComplete;
@@ -684,6 +781,7 @@ async function runIngest(now, opts) {
     res.rows.forEach((row) => {
       const clean = Object.assign({}, row);
       delete clean.prevSignature;
+      delete clean.prevPeriod;
       node[row.id] = clean;
     });
     const r = await writeIfChanged('live/index/' + res.key + '/' + todayYmd, node,
@@ -728,6 +826,7 @@ async function runIngest(now, opts) {
     matchesToday: rows.length,
     detailFetched: due.length,
     eventsCreated: createdCount,
+    anchorWrites: anchorArrivals + anchorCorrections,
     indexWrites: indexWrites,
     tablesWritten: tableWrites,
     scorersTouched: scorerTouches,
@@ -744,7 +843,8 @@ async function runIngest(now, opts) {
 
   logger.info('nls ingest', {
     mode: plan.mode, live: plan.liveCount, matches: rows.length,
-    detail: due.length, events: createdCount, failed: failed,
+    detail: due.length, events: createdCount,
+    anchors: meta.anchorWrites, failed: failed,
     ms: meta.durationMs,
   });
 
