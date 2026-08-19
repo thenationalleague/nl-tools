@@ -124,6 +124,12 @@ anchor (`now − anchorUTC`, +45:00 in the second half, capped at 45'+n / 90'+n)
 so it survives any client reload by construction. Method and edge cases are in
 `nls/anchors.js`, covered by `tests/nls-anchors.test.mjs`.
 
+Past matchdays are backfilled on the hourly run (bounded, resumable, ledger at
+`meta/anchor-backfill/*`) — event-derived only, since the timestamps persist on
+the detail response but a poll observation cannot be recovered after the fact.
+A backfilled day therefore has kick-off times but no `ingestLagMs`: the lag
+exhibit only ever comes from a witnessed flip.
+
 ### One-time setup, in addition to the list above
 
 1. **Cross-project database access.** These are the only functions here that
