@@ -1,8 +1,16 @@
 <!DOCTYPE html>
 <!--
   NL Tools — NLServices API Monitor
-  Version: v0.13 (19/08/2026)
+  Version: v0.14 (19/08/2026)
 
+  v0.14 — Kick-offs appear in the Events feed. Synthetic and display-only:
+         the RTDB stream stays append-only player events, because an anchor
+         REVISES backwards and a feed entry must not silently change its
+         headline time — so the lines are derived from anchors/ at render
+         time and always show the current best kick-off, its source and
+         confidence, and the measured list-flip lag. Anchor subscriptions
+         now cover every match on the selected day rather than only live
+         ones, so backfilled past days show their kick-offs too.
   v0.13 — The PERMISSION_DENIED guidance names the fix that exists: Actions →
          Deploy RTDB rules, target nl-widgets. It said "paste the block into
          the console by hand" — true when written, false since the rules
@@ -267,6 +275,13 @@
         'The permission-denied message points at the Deploy RTDB rules workflow instead of a console paste that stopped being how rules ship.'
       ]
     });
+    window.NL_CHANGELOG.unshift({
+      date: '19/08/2026',
+      version: 'v0.14',
+      items: [
+        'Kick-offs show in the Events feed — derived from the anchor records at render time, with source, confidence and the measured list-flip lag. Past days show theirs once the backfill has run.'
+      ]
+    });
 
     /* auth-guard fires this once the session is verified + pageWrap is
        revealed. Boot the main app from here so RTDB reads happen with a
@@ -392,6 +407,7 @@
   .ev--substitution .ev__type { color: var(--blue); }
   .ev--lineup .ev__type       { color: var(--navy-600); }
   .ev--withdrawal .ev__type   { color: var(--red); }
+  .ev--kick-off .ev__type     { color: var(--navy); }
   .ev--retracted { opacity: .55; }
   .ev--retracted .ev__what { text-decoration: line-through; }
   .ev__when { color: var(--text-muted); font-size: var(--text-sm); white-space: nowrap; }
@@ -682,26 +698,65 @@
     return Object.assign({}, state.fixtures[compKey] || {}, state.index[compKey] || {});
   }
 
-  /* Anchor subscriptions follow the day's live matches: attached the first
-     time a row reads as live, detached with everything else on a day change.
-     anchors/ is granted per match — like every nls/ read, you name what you
-     want — and the node is a few hundred bytes, so a full card costs little.
-     A read failure here means the anchors grant has not been published yet
-     (Actions → Deploy RTDB rules); the pill just falls back to upstream's
-     minute, so it is not fatal. */
+  /* Anchor subscriptions cover EVERY match on the selected day, not just the
+     live ones — the backfill gives past matchdays their derived kick-offs,
+     and the Events tab renders kick-off lines from these records whatever
+     state the match is in now. anchors/ is granted per match — like every
+     nls/ read, you name what you want — and the node is a few hundred bytes,
+     so a full card costs little. A read failure here means the anchors grant
+     has not been published yet (Actions → Deploy RTDB rules); the page just
+     shows upstream's minute and no kick-off lines, so it is not fatal. */
   function syncAnchorSubs() {
     COMPS.forEach(function (c) {
       var rows = dayRows(c.key);
       Object.keys(rows).forEach(function (id) {
-        if (!rows[id].live || anchorRefs[id]) return;
+        if (anchorRefs[id]) return;
         var ref = wdb.ref(ROOT + '/anchors/' + id);
         anchorRefs[id] = ref;
         ref.on('value', function (s) {
           state.anchors[id] = s.val();
           if (tab === 'today') renderToday();
+          if (tab === 'events') renderEvents();
         }, function () { /* no grant yet — upstream minute stands in */ });
       });
     });
+  }
+
+  /* The anchor records rendered as feed lines. Synthetic and display-only:
+     the RTDB event stream stays append-only player events, while an anchor
+     REVISES backwards — so kick-off lines are derived at render time and
+     always show the current best time rather than a superseded one. Slotted
+     into the feed by when the anchor was first observed (the flip), which is
+     the same "when we knew" semantic detectedAt carries. */
+  function anchorEventRows() {
+    var names = {};
+    COMPS.forEach(function (c) {
+      var rows = dayRows(c.key);
+      Object.keys(rows).forEach(function (id) {
+        var r = rows[id];
+        names[id] = ((r.home && r.home.name) || '?') + ' v ' + ((r.away && r.away.name) || '?');
+      });
+    });
+    var out = [];
+    Object.keys(state.anchors || {}).forEach(function (id) {
+      var a = state.anchors[id];
+      if (!a) return;
+      ['1H', '2H'].forEach(function (slot) {
+        var rec = a[slot];
+        if (!rec || !rec.anchorUTC) return;
+        out.push({
+          type: 'kick-off',
+          slot: slot,
+          anchorUTC: rec.anchorUTC,
+          source: rec.source,
+          confidence: rec.confidence,
+          ingestLagMs: rec.ingestLagMs,
+          fixture: names[id] || id,
+          detectedAt: Date.parse(rec.listFlipUTC || rec.anchorUTC)
+        });
+      });
+    });
+    return out;
   }
 
   function anyLive() {
@@ -1011,7 +1066,7 @@
   // -------------------------------------------------------------------------
 
   function renderEvents() {
-    var list = Object.values(state.events || {});
+    var list = Object.values(state.events || {}).concat(anchorEventRows());
     if (!list.length) {
       /* Empty here is usually correct rather than broken, and saying which is
          the difference between a tool and a shrug. Events exist only for days
@@ -1054,6 +1109,14 @@
         what = (e.teamName || '') + ' team news' + (e.formation ? ' — ' + e.formation : '');
       } else if (e.type === 'withdrawal') {
         what = who + ' withdrawn from the XI';
+      } else if (e.type === 'kick-off') {
+        /* Synthetic, from the anchor record — see anchorEventRows. */
+        what = (e.slot === '2H' ? 'Second half under way' : 'Kick-off') + ' — ' +
+          e.fixture + ' · derived ' + NL.formatDateTime(e.anchorUTC, { seconds: true }) +
+          ' (' + (e.source || '?') + ', ' + (e.confidence || '?') + ')' +
+          (e.ingestLagMs > 0
+            ? ' · list flip lagged by ' + NL.formatDuration(Math.round(e.ingestLagMs / 1000))
+            : '');
       }
       var minute = e.formattedMinute ? ' <span class="muted mono">' + esc(e.formattedMinute) + '</span>' : '';
       return '<div class="ev ev--' + esc(e.type) + (e.retracted ? ' ev--retracted' : '') + '">' +
