@@ -272,7 +272,7 @@ which he can run from a browser:
 |---|---|---|
 | **Static site** (HTML/CSS/JS) | none — GitHub Pages | merge to `main`. There is no build step. |
 | **Cloud Functions** | `deploy-functions.yml` | **automatic** on any push to `main` touching `functions/**`, or Run workflow |
-| **RTDB rules** | `deploy-rtdb-rules.yml` | **manual only.** Actions → Run workflow → type `publish` |
+| **RTDB rules** — BOTH databases, nl-tools and nl-widgets | `deploy-rtdb-rules.yml` | **manual only.** Actions → Run workflow → choose target → type `publish`. Nothing is ever pasted into a Firebase console — `functions/README.md` said otherwise for nl-widgets until 19/08/2026 and misdirected a session. |
 | **Storage rules** | `deploy-storage-rules.yml` | **manual only.** Actions → Run workflow → type `publish` |
 | **Apps Script** (`gas/`) | `deploy-gas.yml` | **manual only.** Actions → Run workflow → type `publish` |
 | **`tools/` registry** | `deploy-tools-registry.yml` | **manual only.** `report` mode diffs live vs snapshot and writes nothing; `publish` + type `publish` replaces the node. Never paste this by hand. |
