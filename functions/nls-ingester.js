@@ -49,6 +49,11 @@
  * This file orchestrates them and owns every RTDB write.
  *
  * CHANGELOG
+ *   19/08/2026  v0.2.1  Anchor backfill: past matchdays get their event-derived
+ *                       KICK_OFF records on the hourly run, bounded and
+ *                       resumable like the scorer backfill. Event-derived only
+ *                       — no listFlipUTC, no ingestLagMs — because a poll
+ *                       observation cannot be recovered after the fact.
  *   19/08/2026  v0.2.0  Kick-off anchors (method note v18.0, 19/08/2026). NLS
  *                       never emits kick-off, so the flip to FirstHalf /
  *                       arrival at SecondHalf on the LIST writes
@@ -76,7 +81,7 @@ const E = require('./nls/events');
 const A = require('./nls/anchors');
 const D = require('./nls/derive');
 
-const VERSION = '0.2.0';
+const VERSION = '0.2.1';
 
 /* nls/ lives in nl-widgets, alongside the feed/ fixture cache and the fan
    widgets that will read it in step 2. Writing it into nl-tools would put the
@@ -633,6 +638,75 @@ async function backfillScorers(seasonID, now, todayYmd) {
   return summary;
 }
 
+/**
+ * Anchor backfill for matchdays the ingester was not running for.
+ *
+ * The event-derived half of a kick-off is DERIVABLE FROM STATE: the
+ * eventTimestamp, eventMinute and eventPeriod the formula needs all persist
+ * on the detail response indefinitely, so fetching a past day's details and
+ * running the same measurement produces exactly what the live path would
+ * have converged on. Same doctrine as the scorer backfill above — a derived
+ * value is recoverable from state; a sequence of observations is not.
+ *
+ * Which is also the honest limit: the LIST-FLIP half cannot be recovered,
+ * because nothing stores past poll observations. Backfilled anchors are
+ * event-derived/high only, carry no listFlipUTC and no ingestLagMs — the
+ * kick-off ingest-lag exhibit only ever comes from a witnessed flip.
+ * Matches with no timed events stay unanchored rather than guessed at.
+ *
+ * A separate done-ledger from the scorer backfill (meta/anchor-backfill/*),
+ * because the scorer ledger marked its days done before anchors existed —
+ * sharing it would either re-run scorers or never run anchors.
+ */
+async function backfillAnchors(seasonID, now, todayYmd) {
+  const summary = [];
+  for (const compId of T.COMP_IDS) {
+    const key = T.compKeyOf(compId);
+    try {
+      const cal = await read('meta/calendar/' + key);
+      if (!cal || !cal.days) continue;
+      const done = (await read('meta/anchor-backfill/' + key)) || {};
+      const doneDays = done.days || {};
+
+      /* Past days only — today belongs to the live path. */
+      const pending = Object.keys(cal.days).sort()
+        .filter((d) => d < todayYmd && !doneDays[d]);
+      if (!pending.length) continue;
+
+      for (const ymd of pending.slice(0, BACKFILL_DAYS_PER_RUN)) {
+        const listed = await F.fetchDayList(compId, seasonID, ymd);
+        const rows = listed.rows.map((m) => T.shapeIndexRow(m, now)).filter(Boolean);
+        /* Finished matches, plus abandoned ones — an abandoned match still
+           kicked off, and its first-half events are legitimate measurements.
+           Postponed never anchors: it never reaches this filter. */
+        const played = rows.filter((r) => r.finished || r.period === 'abandoned');
+
+        let written = 0;
+        await mapPool(played, 4, async (r) => {
+          try {
+            const d = T.shapeDetail(await F.fetchDetail(r.id, r.comp), now);
+            if (!d) return;
+            /* Two statements on purpose: `written += await x` reads `written`
+               BEFORE the await suspends, so concurrent workers lose counts. */
+            const n = await applyAnchorMeasurements(d, now);
+            written += n;
+          } catch (err) { /* one match's detail failing must not stall the day */ }
+        });
+
+        await db().ref(ROOT + '/meta/anchor-backfill/' + key + '/days/' + ymd).set(true);
+        summary.push(key + '/' + ymd + ':' + written);
+      }
+
+      const left = pending.length - Math.min(pending.length, BACKFILL_DAYS_PER_RUN);
+      await db().ref(ROOT + '/meta/anchor-backfill/' + key + '/pending').set(left);
+    } catch (err) {
+      const why = (err && err.message) || String(err);
+      logger.error('anchor backfill failed (' + key + '): ' + why, { compKey: key, reason: why });
+    }
+  }
+  return summary;
+}
+
 // ---------------------------------------------------------------------------
 // The run
 // ---------------------------------------------------------------------------
@@ -808,6 +882,7 @@ async function runIngest(now, opts) {
     /* Backfill BEFORE coverage, so the gap the coverage flag reports is the
        real one rather than the catch-up still in progress. */
     await backfillScorers(seasonID, now, todayYmd);
+    await backfillAnchors(seasonID, now, todayYmd);
     await writeCoverage(seasonID, now);
   }
 
