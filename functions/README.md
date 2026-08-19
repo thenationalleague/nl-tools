@@ -136,8 +136,13 @@ so it survives any client reload by construction. Method and edge cases are in
 2. **Cloud Scheduler API** must be enabled on `nl-tools` (console → *APIs &
    Services*). The deploy creates the two jobs; it cannot enable the API.
 3. **RTDB rules on nl-widgets.** `system/rtdb/nl-widgets.rules.snapshot.json` carries the
-   `nls/` block. That project has **no rules deploy workflow** — the file is a
-   snapshot and has to be pasted into the nl-widgets console by hand.
+   `nls/` block and ships through **Actions → Deploy RTDB rules** (choose
+   target `nl-widgets` or `both`, type `publish`) — the file in git IS the
+   rules, exactly as on nl-tools. (This item said "no rules deploy workflow —
+   paste into the console by hand" until 19/08/2026, long after the workflow
+   gained its nl-widgets target, and the stale line duly sent a session back
+   to the console. The workflow's own header is the authority on how rules
+   ship; this note is just the pointer.)
    Reads are granted per slice (`live/index/<comp>/<ymd>`, `live/matches/<id>`,
    `events/<ymd>`, `anchors/<matchID>`, …) and never at `nls/` itself, so a
    consumer has to subscribe to a scoped path rather than the namespace. That is the bandwidth design and

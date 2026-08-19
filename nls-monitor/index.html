@@ -1,8 +1,14 @@
 <!DOCTYPE html>
 <!--
   NL Tools — NLServices API Monitor
-  Version: v0.12 (19/08/2026)
+  Version: v0.13 (19/08/2026)
 
+  v0.13 — The PERMISSION_DENIED guidance names the fix that exists: Actions →
+         Deploy RTDB rules, target nl-widgets. It said "paste the block into
+         the console by hand" — true when written, false since the rules
+         workflow gained its nl-widgets target, and stale guidance in an
+         error message is worse than none because it is read at exactly the
+         moment someone will act on it.
   v0.12 — Live minutes come from the ingester's kick-off anchors, not from
          upstream's matchMinutes. NLS never emits kick-off, so the ingester
          synthesises it (anchors/<matchID>/<1H|2H> — list flip at low
@@ -252,6 +258,13 @@
       items: [
         'Live minutes are the ingester’s own clock, derived from its synthetic kick-off anchors, with upstream’s minute alongside in the tooltip — plus the anchor’s source, confidence and the measured kick-off ingest lag.',
         'Event rows carry the upstream entry time on the detected-at column, so the per-event ingest lag can be read off one row.'
+      ]
+    });
+    window.NL_CHANGELOG.unshift({
+      date: '19/08/2026',
+      version: 'v0.13',
+      items: [
+        'The permission-denied message points at the Deploy RTDB rules workflow instead of a console paste that stopped being how rules ship.'
       ]
     });
 
@@ -512,12 +525,16 @@
     }).catch(function (err) {
       var msg = (err && err.message) ? err.message : String(err);
       verdict('bad', 'Could not read nl-widgets', msg);
-      /* PERMISSION_DENIED here is almost always the rules, not the token —
-         the nls/ block has to be pasted into the nl-widgets console by hand,
-         because that project has no rules deploy workflow. */
+      /* PERMISSION_DENIED here is almost always the rules, not the token.
+         nl-widgets rules ship from the repo like everything else — Actions →
+         Deploy RTDB rules, target nl-widgets — so a denied read means that
+         has not been run since the nls/ block last changed. This comment and
+         the message below said "paste into the console by hand" until
+         19/08/2026, months after the workflow gained its nl-widgets target,
+         and the stale advice duly misdirected a session. */
       if (/permission_denied/i.test(msg)) {
         verdict('bad', 'Permission denied on nls/',
-          'The nls/ rules block has probably not been pasted into the nl-widgets console yet — see functions/README.md.');
+          'The nls/ rules have not been published since they last changed — Actions → “Deploy RTDB rules”, target nl-widgets, type publish.');
       }
     });
   };
@@ -669,8 +686,9 @@
      time a row reads as live, detached with everything else on a day change.
      anchors/ is granted per match — like every nls/ read, you name what you
      want — and the node is a few hundred bytes, so a full card costs little.
-     A read failure here means the anchors rules block has not been pasted
-     yet; the pill just falls back to upstream's minute, so it is not fatal. */
+     A read failure here means the anchors grant has not been published yet
+     (Actions → Deploy RTDB rules); the pill just falls back to upstream's
+     minute, so it is not fatal. */
   function syncAnchorSubs() {
     COMPS.forEach(function (c) {
       var rows = dayRows(c.key);
