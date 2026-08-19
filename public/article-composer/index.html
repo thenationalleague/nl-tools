@@ -1,180 +1,355 @@
 <!DOCTYPE html>
 <!--
-  Article Composer — public standalone edition
-  Version: 2.3
-  Date: 17/08/2026
+  Article Composer — public edition
+  Version: 5.0
+  Date: 18/08/2026
   File: /public/article-composer/index.html
 
   This ungated edition is deliberate — it exists for use without a portal
   login, alongside the gated tool at /graphics/article-composer/. It is not
-  a duplicate; do not retire it as one without Richard's say-so.
+  a duplicate; do not retire it as one without Richard's say-so. (PR #849
+  retired it once on exactly that reasoning.)
 
-  v2.3 (17/08/2026) — Restored after PR #849 retired it as a second copy.
-          nl-brand.css bumped ?v=36 -> ?v=45. No other changes.
-  v2.2 (13/07/2026) — Recovered from repository history as a public, login-free tool.
-          Saved article content removed so new users begin with a blank editor.
+  THE TWO ARE THE SAME TOOL. Everything below the identity bar is byte-for-
+  byte the gated file: same toolbar, same button order and classes, same
+  engine, same confirm dialog, same clipboard helpers. If you change one,
+  change both — a difference here is a bug, not a variant. The ONLY
+  differences are the ones auth forces:
+
+    - no Firebase SDKs, no auth-guard.js, no nl-topbar.js
+    - no #pageWrap (that hidden-until-revealed wrapper is auth-guard's)
+    - .nl-idbar instead of .topbar — see the identity-bar note in the body
+    - no data-audit attributes: the audit hook needs a signed-in user, and
+      an attribute naming an action nothing records is worse than none
+
+  nl-utils.js loads and every NL.* helper this page uses works without
+  Firebase — checked, not assumed: nothing in that file touches firebase at
+  the top level, so NL.copy and NL.toast behave identically here.
+
+  CHANGELOG
+  v5.0 (18/08/2026) — Rebuilt from the gated tool so the two match exactly.
+    Was v2.3, a recovered v2.x lineage that had missed everything v4.0 and
+    v4.1 decided: no confirm on Restart (on the UNGATED copy, where a
+    stranger is likeliest to hit it), no brand button classes, no canon
+    clipboard helper, and it still carried the Convert button and the
+    "Allow rich paste (unsafe)" toggle that the gated tool removed as a
+    dead control and a foot-gun. Identity bar is the white .nl-idbar.
+
+  Inherited from the gated tool:
+
+  v4.1 (13/07/2026) — Clipboard canon migration
+    Engine:
+      - copy() plain-text helper migrated to NL.copy(text,{silent:true}),
+        preserving its showStatus('Copied'/'Clipboard blocked…') UI.
+      - "Copy text" button left on execCommand path (copies rich/formatted
+        editor content that plain-text NL.copy cannot reproduce).
+
+  v4.0 (26/04/2026) — Brand consistency pass + functional fixes
+    CSS:
+      - Stripped all inline CSS that duplicates nl-brand.css widgets
+      - Confirm dialog replaced with brand .modal-backdrop/.modal
+      - Panel headings use .text-label utility class
+      - Status footer uses .text-label utility class
+      - .page container override removed (brand provides fluid padding)
+      - Formatting toolbar renamed .fmt-toolbar (avoids collision with
+        brand .toolbar widget)
+      - Copy text button changed to btn--ghost (one primary CTA per section)
+      - Removed hardcoded toast div (NL.toast creates its own)
+      - Removed empty media query block
+    Functional:
+      - Clear formatting now resets headings to paragraph (was inline-only)
+      - Style dropdown options styled to preview their heading level
+      - Removed Convert button (did nothing visible to user)
+      - Removed "Allow rich paste" checkbox (foot-gun, plain paste handles
+        95% of cases via auto-detection of markdown/lists)
+    Engine:
+      - All editor logic preserved from v3.0
+
+  v3.0 (17/04/2026) — Portal integration rebuild
+    - See previous changelog for full v3.0 details
 -->
-<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-  
-<title>Article Composer v2.3</title>
-<link rel="stylesheet" href="https://use.typekit.net/gff4ipy.css">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex,nofollow">
-<link rel="stylesheet" href="/system/nl-brand.css?v=48">
-<style>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Article Composer — The National League</title>
+  <meta name="robots" content="noindex,nofollow">
 
-    /* The local names stay — they are used throughout this file — but they now
-       point at brand tokens instead of carrying their own hex. The palette
-       here was GitHub's, which is a reasonable thing to reach for and the
-       wrong thing to ship on an NL page.
+  <!-- Favicons. Static, not injected: nl-topbar.js adds these on gated pages
+       and this page never loads it, so an icon that arrives with the JS would
+       never arrive at all. /favicon.ico is the backstop browsers ask for
+       without being told. -->
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icons/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/icons/favicon-16x16.png">
+  <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 
-       --border is deliberately NOT redefined: it is a canon token name, and a
-       local copy would have quietly overridden it for every shared component
-       on the page too. */
-    :root { --bg: var(--off-white); --fg: var(--text); --accent: var(--navy);
-            --ok: var(--green); --warn: var(--amber);
-            --toast: var(--navy-800); --toastfg: var(--white); }
-    * { box-sizing: border-box; }
-body {
-  margin: 0;
-  padding: 24px 26px 28px;
-  font-family: "carbona-variable", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 1.5;
-  color: var(--fg);
-}
-.app-header { display:flex; align-items:center; gap:12px; margin: 0 0 16px; }
-.app-header img {
-  height:44px;
-  width:auto;
-  border:none;
-  border-radius:0;
-  object-fit:contain;
-}
-.app-header h1 {
-  font-size: 22px;
-  font-weight: 800;
-  margin: 0;
-}
-    .toolbar { display:flex; flex-wrap:wrap; gap:8px; margin: 0 0 10px; align-items: center; }
-    .toolbar button, .toolbar label, .toolbar select { padding:8px 10px; border:1px solid var(--border); background:var(--white); border-radius:10px; cursor:pointer; }
-    .toolbar select { padding:8px; }
-    .toolbar .sep { width: 1px; height: 28px; background: var(--border); margin: 0 4px; }
-    .wrap { display:grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
-    @media (max-width: 800px) { .wrap { grid-template-columns: 1fr; } }
-    .panel { display:flex; flex-direction: column; gap:8px; }
-    .panel h2 { margin: 0; font-size: 14px; color:var(--text-muted); font-weight: 600; }
-    .editor, pre { width:100%; height: 54vh; border:1px solid var(--border); border-radius:12px; background:var(--white); }
-    .editor { padding: 12px; overflow:auto; }
-  /* ===== EDITOR TYPOGRAPHY SCALE ===== */
+  <!-- No Firebase, no auth-guard, no nl-topbar: this page is open. nl-utils
+       is loaded on its own because every NL.* helper the engine below calls
+       (NL.copy, NL.toast) works without a Firebase app on the page — nothing
+       in that file touches firebase at the top level. -->
+  <link rel="stylesheet" href="/system/nl-brand.css?v=48">
 
-.editor h1 { font-size: 32px; font-weight: 800; margin: 0 0 8px; }
-.editor h2 { font-size: 26px; font-weight: 800; margin: 0 0 8px; }
-.editor h3 { font-size: 22px; font-weight: 700; margin: 0 0 8px; }
-.editor h4 { font-size: 18px; font-weight: 700; margin: 0 0 6px; }
-.editor h5 { font-size: 16px; font-weight: 600; margin: 0 0 6px; }
-.editor h6 { font-size: 14px; font-weight: 600; margin: 0 0 6px; }
+  <script>
+    window.NL_CHANGELOG = [
+      {
+        date: '18 August 2026',
+        version: 'v5.0',
+        items: [
+          'Rebuilt from the portal edition so the two are the same tool — same toolbar, same buttons, same behaviour.',
+          'Restart now asks before it clears the editor.',
+          'Removed the Convert button and the rich-paste toggle; pasting handles both on its own.'
+        ]
+      },
+      {
+        date: '13 July 2026',
+        version: 'v2.1',
+        items: [
+          'Copy buttons now use the shared clipboard helper for consistent behaviour.'
+        ]
+      },
+      {
+        date: '26 April 2026',
+        version: 'v2.0',
+        items: [
+          'Design refresh — fully aligned with NL Tools brand system.',
+          'Clear formatting now resets headings back to paragraph.',
+          'Style dropdown previews each heading size.',
+          'Removed rich paste toggle and manual convert button — cleaner workflow.'
+        ]
+      },
+      {
+        date: '21 April 2026',
+        version: 'v1.2',
+        items: [
+          'Refreshed design — standardised topbar with profile dropdown.',
+          'Layout now fills wide screens.'
+        ]
+      }
+    ];
+  </script>
 
-.editor p { margin: 0 0 10px; }
+  <script src="/system/nl-utils.js?v=42"></script>
 
-    .editor:focus { outline: 2px solid rgba(9,105,218,0.15); }
-    .editor:empty::before { content: attr(data-placeholder); color:var(--text-muted); }
-    pre { margin:0; padding: 12px; background: var(--bg); overflow:auto; white-space: pre-wrap; word-break: break-word; }
-    .below { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-    .below button { padding:8px 10px; border:1px solid var(--border); background:var(--white); border-radius:10px; cursor:pointer; }
-    footer { margin-top: 10px; color:var(--text-muted); font-size: 12px; display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
-    .status { font-size:12px; color:var(--text-muted); }
-    .status.ok { color: var(--ok); }
-    .status.warn { color: var(--warn); }
-    code { background: var(--bg); padding: 2px 6px; border-radius: 6px; }
-    .toast { position: fixed; left: 50%; bottom: 32px; transform: translateX(-50%); background: var(--toast); color: var(--toastfg);
-             padding: 10px 14px; border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.18); opacity: 0; pointer-events:none;
-             transition: opacity .18s ease, transform .18s ease; }
-    .toast.show { opacity: 1; transform: translateX(-50%) translateY(-6px); }
-    .opt { display:none; align-items:center; gap:6px; font-size:12px; color:var(--text-muted); }
-    .opt input { transform: translateY(1px); }
-    .icon { display:inline-flex; align-items:center; justify-content:center; gap:6px; }
-    .icon svg { width:16px; height:16px; }
-    .mobile-only { display:none; }
-    @media (max-width:800px){ .mobile-only { display:inline-flex; } .opt { display:none; } }
+  <style>
+    /* .fmt-toolbar lives in nl-brand.css (promoted v2.19). Style dropdown
+       sizing below is the only article-composer-specific override. */
+
+    /* ── Style dropdown — preview heading sizes ── */
+    #styleSelect { min-width: 140px; }
+    #styleSelect option[value="h1"] { font-size: 18px; font-weight: 900; }
+    #styleSelect option[value="h2"] { font-size: 16px; font-weight: 900; }
+    #styleSelect option[value="h3"] { font-size: 15px; font-weight: 700; }
+    #styleSelect option[value="h4"] { font-size: 14px; font-weight: 700; }
+    #styleSelect option[value="h5"] { font-size: 13px; font-weight: 700; }
+    #styleSelect option[value="h6"] { font-size: 12px; font-weight: 700; text-transform: uppercase; }
+
+    /* ── Dual panel layout ── */
+    .wrap {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      align-items: start;
+    }
+    @media (max-width: 900px) { .wrap { grid-template-columns: 1fr; } }
+
+    .panel { display: flex; flex-direction: column; gap: 8px; }
+
+    .editor, .htmlout {
+      width: 100%;
+      height: 58vh;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--white);
+      box-shadow: var(--shadow);
+    }
+    .editor {
+      padding: 18px;
+      overflow: auto;
+      font-size: var(--text-base);
+      line-height: 1.55;
+    }
+    .editor:focus {
+      outline: 2px solid color-mix(in srgb, var(--navy) 15%, transparent);
+      border-color: var(--navy);
+    }
+    .editor:empty::before {
+      content: attr(data-placeholder);
+      color: var(--text-muted);
+    }
+
+    /* Editor typography scale — justified: editorial heading hierarchy
+       inside the contentEditable area, distinct from UI typography */
+    .editor h1 { font-size: var(--text-xl); font-weight: 800; font-variation-settings: 'wght' 800; margin: 0 0 10px; line-height: 1.2; }
+    .editor h2 { font-size: var(--text-lg); font-weight: 800; font-variation-settings: 'wght' 800; margin: 0 0 10px; line-height: 1.25; }
+    .editor h3 { font-size: var(--text-md); font-weight: 700; font-variation-settings: 'wght' 700; margin: 0 0 8px; line-height: 1.3; }
+    .editor h4 { font-size: var(--text-md); font-weight: 700; font-variation-settings: 'wght' 700; margin: 0 0 6px; }
+    .editor h5 { font-size: var(--text-base); font-weight: 700; font-variation-settings: 'wght' 700; margin: 0 0 6px; }
+    .editor h6 { font-size: var(--text-sm); font-weight: 700; font-variation-settings: 'wght' 700; margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.06em; }
+    .editor p { margin: 0 0 12px; }
+    .editor ul, .editor ol { margin: 0 0 12px 22px; }
+    .editor li { margin: 0 0 4px; }
+    .editor strong, .editor b { font-weight: 800; font-variation-settings: 'wght' 800; }
+
+    .htmlout {
+      padding: 16px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: monospace;
+      font-size: var(--text-sm);
+      line-height: 1.55;
+      color: var(--text);
+      background: var(--off-white);
+    }
+
+    /* ── Panel actions row ── */
+    .below { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+    /* ── Status footer ── */
+    footer {
+      margin-top: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .status.ok   { color: var(--green); }
+    .status.warn { color: var(--amber); }
+
+    /* ── Inline code in editor ── */
+    code { background: var(--off-white); padding: 2px 6px; border-radius: var(--radius); font-size: 0.92em; }
   </style>
 </head>
 <body>
+  <div>
 
-<header class="app-header">
-  <img id="nlLogo" class="logo" src="https://rckd-nl.github.io/nl-tools/assets/divisions/The%20National%20League.png" alt="National League logo">
-  <h1>Article Composer <small style="font-size:12px;font-weight:700;color:var(--text-muted);">v2.2</small></h1>
-</header>
+    <!-- IDENTITY BAR. The canon rule (nl-brand.css v2.37) is that the bar's
+         colour states HOW YOU GOT IN, and a page must never look more trusted
+         than the route that opened it. The red .topbar is auth-guard's alone
+         and cannot be reproduced by hand, which is why this page does not
+         wear one. .nl-idbar is the white bar: no NL account behind it.
 
-<div class="toolbar"
- aria-label="Formatting toolbar">
-    <select id="styleSelect" title="Apply style (Paragraph, H1–H6)">
-      <option value="p">Paragraph</option>
-      <option value="h1">Heading 1</option>
-      <option value="h2">Heading 2</option>
-      <option value="h3">Heading 3</option>
-      <option value="h4">Heading 4</option>
-      <option value="h5">Heading 5</option>
-      <option value="h6">Heading 6</option>
-    </select>
-    <span class="sep"></span>
-    <button type="button" data-cmd="bold" class="icon" title="Bold (Ctrl/Cmd+B)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 5h6a4 4 0 010 8H7z"></path><path d="M13 13h1a4 4 0 010 8H7v-8"></path></svg> B
-    </button>
-    <button type="button" data-cmd="italic" class="icon" title="Italic (Ctrl/Cmd+I)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 4h9"></path><path d="M5 20h9"></path><path d="M14 4l-5 16"></path></svg> I
-    </button>
-    <button type="button" data-cmd="underline" class="icon" title="Underline (Ctrl/Cmd+U)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4v6a6 6 0 0012 0V4"></path><path d="M4 20h16"></path></svg> U
-    </button>
-    <span class="sep"></span>
-    <button type="button" data-cmd="insertUnorderedList" class="icon" title="Bulleted list">
-      <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="6" r="2"></circle><circle cx="5" cy="12" r="2"></circle><circle cx="5" cy="18" r="2"></circle></svg>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 6h10M10 12h10M10 18h10"></path></svg>
-    </button>
-    <button type="button" data-cmd="insertOrderedList" class="icon" title="Numbered list">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h12M8 12h12M8 18h12"></path></svg>
-      <svg viewBox="0 0 24 24" fill="currentColor">
-        <text x="3" y="8" font-size="8" font-family="system-ui, Arial">1</text>
-        <text x="3" y="14" font-size="8" font-family="system-ui, Arial">2</text>
-        <text x="3" y="20" font-size="8" font-family="system-ui, Arial">3</text>
-      </svg>
-    </button>
-    <span class="sep"></span>
-    <button type="button" id="undoBtn" class="icon" title="Undo (Ctrl/Cmd+Z)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 14l-4-4 4-4"></path><path d="M20 20a9 9 0 00-9-9H5"></path></svg> Undo
-    </button>
-    <button type="button" id="redoBtn" class="icon" title="Redo (Ctrl+Y / Shift+Cmd+Z)">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 6l4 4-4 4"></path><path d="M4 20a9 9 0 019-9h6"></path></svg> Redo
-    </button>
-    <span class="sep"></span>
-    <button type="button" id="clearFmt" title="Clear inline formatting">Clear formatting</button>
-    <button type="button" id="restart" title="Clear everything (undoable)">Restart</button>
-    <button type="button" id="convertMobile" class="mobile-only" title="Manually convert / refresh HTML (mobile)">Convert</button>
-    <span class="opt" id="richPasteWrap">
-      <label><input type="checkbox" id="richPaste"> Allow rich paste (unsafe)</label>
-    </span>
+         Ruling 18/08/2026: a public NL product wears the white bar whether or
+         not it has a passcode. Visual identity follows the product, and the
+         distinction that matters to a reader is NL account vs not — not
+         code-entered vs open. -->
+    <div class="nl-idbar">
+      <img class="nl-idbar__crest" src="/assets/crests/National%20League%20rose.png"
+           alt="" width="42" height="42">
+      <div class="nl-idbar__id">
+        <div class="nl-idbar__title">Article Composer</div>
+        <div class="nl-idbar__sub">The National League</div>
+      </div>
+    </div>
+
+    <div class="page">
+
+      <!-- Formatting toolbar -->
+      <div class="fmt-toolbar" aria-label="Formatting toolbar">
+        <select id="styleSelect" title="Apply style (Paragraph, H1–H6)">
+          <option value="p">Paragraph</option>
+          <option value="h1">Heading 1</option>
+          <option value="h2">Heading 2</option>
+          <option value="h3">Heading 3</option>
+          <option value="h4">Heading 4</option>
+          <option value="h5">Heading 5</option>
+          <option value="h6">Heading 6</option>
+        </select>
+        <span class="sep"></span>
+        <button type="button" data-cmd="bold" class="fmt-icon" title="Bold (Ctrl/Cmd+B)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M7 5h6a4 4 0 010 8H7z"></path><path d="M13 13h1a4 4 0 010 8H7v-8"></path></svg>
+          B
+        </button>
+        <button type="button" data-cmd="italic" class="fmt-icon" title="Italic (Ctrl/Cmd+I)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M10 4h9"></path><path d="M5 20h9"></path><path d="M14 4l-5 16"></path></svg>
+          I
+        </button>
+        <button type="button" data-cmd="underline" class="fmt-icon" title="Underline (Ctrl/Cmd+U)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 4v6a6 6 0 0012 0V4"></path><path d="M4 20h16"></path></svg>
+          U
+        </button>
+        <span class="sep"></span>
+        <button type="button" data-cmd="insertUnorderedList" class="fmt-icon" title="Bulleted list">
+          <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="6" r="1.6"></circle><circle cx="5" cy="12" r="1.6"></circle><circle cx="5" cy="18" r="1.6"></circle></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M10 6h10M10 12h10M10 18h10"></path></svg>
+        </button>
+        <button type="button" data-cmd="insertOrderedList" class="fmt-icon" title="Numbered list">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M8 6h12M8 12h12M8 18h12"></path></svg>
+        </button>
+        <span class="sep"></span>
+        <button type="button" id="undoBtn" class="fmt-icon" title="Undo (Ctrl/Cmd+Z)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="width:16px;height:16px"><path d="M3 10h13a4 4 0 010 8H9"/><polyline points="7 6 3 10 7 14"/></svg>
+          Undo
+        </button>
+        <button type="button" id="redoBtn" class="fmt-icon" title="Redo (Ctrl+Y / Shift+Cmd+Z)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="width:16px;height:16px"><path d="M21 10H8a4 4 0 000 8h7"/><polyline points="17 6 21 10 17 14"/></svg>
+          Redo
+        </button>
+        <span class="sep"></span>
+        <button type="button" id="clearFmt" title="Clear all formatting">Clear formatting</button>
+        <button type="button" id="restart" class="danger" title="Clear everything">Restart</button>
+      </div>
+
+      <!-- Dual panels -->
+      <div class="wrap">
+        <div class="panel">
+          <h2 class="text-label">Editor</h2>
+          <div id="editor"
+               class="editor"
+               contenteditable="true"
+               role="textbox"
+               aria-multiline="true"
+               spellcheck="true"
+               data-placeholder="Start typing or paste (Enter = new paragraph)"></div>
+          <div class="below">
+            <button type="button" id="copyText" class="btn btn--ghost">Copy text</button>
+          </div>
+        </div>
+        <div class="panel">
+          <h2 class="text-label">HTML (cleaned)</h2>
+          <pre id="out" class="htmlout" aria-label="HTML preview"></pre>
+          <div class="below">
+            <button type="button" id="copyHtml" class="btn btn--primary">Copy HTML</button>
+          </div>
+        </div>
+      </div>
+
+      <footer>
+        <span class="text-label status" id="status">Autosave: idle</span>
+        <span class="text-label">Drafts saved in this browser only</span>
+      </footer>
+
+    </div>
+
+    <!-- Confirm dialog — uses brand modal widget from nl-brand.css -->
+    <div class="modal-backdrop" id="confirmBackdrop">
+      <div class="modal" style="max-width:420px;">
+        <div class="modal__head">
+          <h3 id="confirmTitle">Clear everything?</h3>
+          <button class="modal__close" id="confirmClose" type="button" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal__body">
+          <p class="confirm-text" id="confirmBody">This will remove all content from the editor. This can't be undone.</p>
+        </div>
+        <div class="modal__footer">
+          <button class="btn btn--ghost" id="confirmCancel">Cancel</button>
+          <button class="btn btn--danger" id="confirmOk">Clear</button>
+        </div>
+      </div>
+    </div>
+
   </div>
 
-  <div class="wrap">
-    <div class="panel">
-      <h2>Editor</h2>
-      <div id="editor" class="editor" contenteditable="true" role="textbox" aria-multiline="true" spellcheck="true" data-placeholder="Start typing or paste (Enter = new paragraph)"></div>
-      <div class="below"><button type="button" id="copyText">Copy Text</button></div>
-    </div>
-    <div class="panel">
-      <h2>HTML (cleaned)</h2>
-      <pre id="out" aria-label="HTML preview"></pre>
-      <div class="below"><button type="button" id="copyHtml">Copy HTML</button></div>
-    </div>
-  </div>
-
-  <footer>
-    <span class="status" id="status">Autosave: idle</span>
-  </footer>
-
-  <div id="toast" class="toast" role="status" aria-live="polite">Copied to clipboard</div>
-
+  <!-- ─────────────────────────────────────────────────────────────────────
+       ARTICLE COMPOSER ENGINE
+       Based on v3.0. Changes in v4.0:
+       - Clear formatting now resets block format to <p>
+       - Rich paste checkbox removed (always plain paste)
+       - Convert button removed
+       - Confirm dialog uses brand modal classes
+       ───────────────────────────────────────────────────────────────────── -->
   <script>
   (function(){
     if (document.readyState === 'loading') {
@@ -184,41 +359,44 @@ body {
     }
 
     function init(){
-      try { document.execCommand && document.execCommand('defaultParagraphSeparator', false, 'p'); } catch {}
-      const ed = document.getElementById('editor');
-      const out = document.getElementById('out');
-      const btns = document.querySelectorAll('[data-cmd]');
-      const copyHtmlBtn = document.getElementById('copyHtml');
-      const copyTextBtn = document.getElementById('copyText');
-      const clearFmtBtn = document.getElementById('clearFmt');
-      const restartBtn = document.getElementById('restart');
-      const undoBtn = document.getElementById('undoBtn');
-      const redoBtn = document.getElementById('redoBtn');
-      const statusEl = document.getElementById('status');
-      const toast = document.getElementById('toast');
-      const styleSelect = document.getElementById('styleSelect');
-      const convertMobileBtn = document.getElementById('convertMobile');
-      const richPaste = document.getElementById('richPaste');
+      try { document.execCommand && document.execCommand('defaultParagraphSeparator', false, 'p'); } catch(e) {}
+      var ed = document.getElementById('editor');
+      var out = document.getElementById('out');
+      var btns = document.querySelectorAll('[data-cmd]');
+      var copyHtmlBtn = document.getElementById('copyHtml');
+      var copyTextBtn = document.getElementById('copyText');
+      var clearFmtBtn = document.getElementById('clearFmt');
+      var restartBtn = document.getElementById('restart');
+      var undoBtn = document.getElementById('undoBtn');
+      var redoBtn = document.getElementById('redoBtn');
+      var statusEl = document.getElementById('status');
+      var styleSelect = document.getElementById('styleSelect');
 
-      const STORAGE_KEY = 'article-composer-v2.2';
-      let saveTimer = null;
-      let toastTimer = null;
-      let lastSnapshot = '';
+      // Confirm dialog refs
+      var confirmBackdrop = document.getElementById('confirmBackdrop');
+      var confirmOk = document.getElementById('confirmOk');
+      var confirmCancel = document.getElementById('confirmCancel');
+      var confirmClose = document.getElementById('confirmClose');
+
+      // KEEP original storage key so existing drafts survive
+      var STORAGE_KEY = 'article-composer-v2.1';
+      var saveTimer = null;
+      var lastSnapshot = '';
 
       function scheduleRender() {
         if (scheduleRender._raf) cancelAnimationFrame(scheduleRender._raf);
         if (scheduleRender._t) clearTimeout(scheduleRender._t);
-        scheduleRender._raf = requestAnimationFrame(() => {
+        scheduleRender._raf = requestAnimationFrame(function() {
           scheduleRender._raf = null;
-          const now = ed.innerHTML;
+          var now = ed.innerHTML;
           if (now !== lastSnapshot) {
             lastSnapshot = now;
             renderOut();
             scheduleSave();
           }
         });
-        scheduleRender._t = setTimeout(() => {
-          const now = ed.innerHTML;
+        scheduleRender._t = setTimeout(function() {
+          var now = ed.innerHTML;
           if (now !== lastSnapshot) {
             lastSnapshot = now;
             renderOut();
@@ -227,33 +405,13 @@ body {
         }, 120);
       }
 
-      function showToast(text='Copied to clipboard'){
-        toast.textContent = text;
-        toast.classList.add('show');
-        if (toastTimer) clearTimeout(toastTimer);
-        toastTimer = setTimeout(()=>toast.classList.remove('show'), 1100);
+      function showToast(text) {
+        if (window.NL && window.NL.toast) { NL.toast(text, 'success'); return; }
       }
 
-      // Load saved
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const data = JSON.parse(raw);
-          if (data && typeof data.html === 'string') ed.innerHTML = data.html;
-        }
-      } catch {}
-
-      // Style select
-      styleSelect.addEventListener('change', () => {
-        const val = styleSelect.value;
-        const tag = val === 'p' ? 'P' : val.toUpperCase();
-        document.execCommand && document.execCommand('formatBlock', false, tag);
-        ed.focus(); scheduleRender();
-      });
-
       // Undo/Redo keyboard
-      ed.addEventListener('keydown', (e) => {
-        const mod = e.ctrlKey || e.metaKey;
+      ed.addEventListener('keydown', function(e) {
+        var mod = e.ctrlKey || e.metaKey;
         if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey) {
           e.preventDefault(); document.execCommand && document.execCommand('undo'); scheduleRender();
         } else if (mod && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
@@ -261,134 +419,240 @@ body {
         }
       });
 
-      // Primary update signal
-      ed.addEventListener('input', scheduleRender);
-      // Secondary signals
-      ['beforeinput','compositionend','keyup','mouseup','blur','touchend','click'].forEach(evn => ed.addEventListener(evn, scheduleRender));
+      // Undo/Redo buttons
+      undoBtn.addEventListener('click', function() {
+        ed.focus(); document.execCommand && document.execCommand('undo'); scheduleRender();
+      });
+      redoBtn.addEventListener('click', function() {
+        ed.focus(); document.execCommand && document.execCommand('redo'); scheduleRender();
+      });
 
-      // MutationObserver as safety net
-      const mo = new MutationObserver(scheduleRender);
+      // Load saved
+      try {
+        var raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          var data = JSON.parse(raw);
+          if (data && typeof data.html === 'string') ed.innerHTML = data.html;
+        }
+      } catch(e) {}
+
+      // Style select — formatBlock with fallback for heading→paragraph
+      styleSelect.addEventListener('change', function() {
+        ed.focus();
+        var val = styleSelect.value;
+
+        if (val === 'p') {
+          // formatBlock('P') is unreliable for heading→paragraph in some browsers.
+          // Try execCommand first, then fall back to manual DOM replacement.
+          var sel = window.getSelection();
+          var node = sel && sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
+          if (node && node.nodeType === 3) node = node.parentNode;
+          // Walk up to find the block element
+          while (node && node !== ed && !/^(H[1-6]|P|DIV|LI)$/.test(node.nodeName)) {
+            node = node.parentNode;
+          }
+          if (node && /^H[1-6]$/.test(node.nodeName)) {
+            // Manual replacement — more reliable than formatBlock
+            var p = document.createElement('p');
+            while (node.firstChild) p.appendChild(node.firstChild);
+            node.parentNode.replaceChild(p, node);
+            // Place cursor inside the new <p>
+            var r = document.createRange();
+            r.selectNodeContents(p);
+            r.collapse(false);
+            sel.removeAllRanges();
+            sel.addRange(r);
+          } else {
+            document.execCommand && document.execCommand('formatBlock', false, 'P');
+          }
+        } else {
+          var tag = val.toUpperCase();
+          document.execCommand && document.execCommand('formatBlock', false, tag);
+        }
+        scheduleRender();
+      });
+
+      // Primary render triggers
+      ed.addEventListener('input', scheduleRender);
+      ['beforeinput','compositionend','keyup','mouseup','blur','touchend','click'].forEach(function(evn){
+        ed.addEventListener(evn, scheduleRender);
+      });
+      var mo = new MutationObserver(scheduleRender);
       mo.observe(ed, { childList: true, subtree: true, characterData: true });
 
-      // PASTE — Always treat as plain text (unless explicitly enabled)
-      ed.addEventListener('paste', (e) => {
-        const cd = e.clipboardData || window.clipboardData;
+      // PASTE — always plain text, auto-detects markdown headings and lists
+      ed.addEventListener('paste', function(e) {
+        var cd = e.clipboardData || window.clipboardData;
         if (!cd) return;
         e.preventDefault();
-        let html = '';
-        const textPayload = cd.getData('text/plain') || '';
-        if (richPaste && richPaste.checked) {
-          // optional unsafe mode: try HTML, then fallback to text
-          const htmlPayload = cd.getData('text/html');
-          if (htmlPayload) html = safeHtmlFromClipboard(htmlPayload);
-        }
-        if (!html) html = textToHtmlWithListsAndHeadings(textPayload);
+        var textPayload = cd.getData('text/plain') || '';
+        var html = textToHtmlWithListsAndHeadings(textPayload);
         insertOrReplace(html, true);
         scheduleRender();
       });
 
       // Toolbar commands
-      btns.forEach(b => {
-        b.addEventListener('click', () => {
-          const cmd = b.dataset.cmd;
+      btns.forEach(function(b) {
+        b.addEventListener('click', function() {
+          var cmd = b.dataset.cmd;
           document.execCommand && document.execCommand(cmd, false, null);
           ed.focus(); scheduleRender();
         });
       });
 
-      // Clear formatting (inline only)
-      clearFmtBtn.addEventListener('click', () => {
+      // Clear formatting — strips inline AND resets block format to <p>
+      clearFmtBtn.addEventListener('click', function() {
         ed.focus();
-        const sel = window.getSelection();
+        var sel = window.getSelection();
         if (sel && sel.rangeCount && !sel.getRangeAt(0).collapsed) {
+          // Selection exists — remove inline formatting
           document.execCommand && document.execCommand('removeFormat', false, null);
+          // Reset any heading to paragraph
+          document.execCommand && document.execCommand('formatBlock', false, 'P');
         } else {
+          // No selection — strip all inline formatting from entire editor
           stripInlineFormatting(ed);
+          // Reset all headings to paragraphs
+          ed.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(function(h) {
+            var p = document.createElement('p');
+            while (h.firstChild) p.appendChild(h.firstChild);
+            h.parentNode.replaceChild(p, h);
+          });
         }
+        // Reset dropdown to Paragraph
+        styleSelect.value = 'p';
         scheduleRender();
       });
 
-      // RESTART — remove everything; undoable
-      restartBtn.addEventListener('click', () => {
+      // Restart — routed through brand modal confirm dialog
+      restartBtn.addEventListener('click', function() {
+        confirmBackdrop.classList.add('open');
+      });
+      function closeConfirm() {
+        confirmBackdrop.classList.remove('open');
+      }
+      confirmCancel.addEventListener('click', closeConfirm);
+      confirmClose.addEventListener('click', closeConfirm);
+      confirmBackdrop.addEventListener('click', function(e) {
+        if (e.target === confirmBackdrop) closeConfirm();
+      });
+      // Esc to close confirm
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && confirmBackdrop.classList.contains('open')) closeConfirm();
+      });
+      confirmOk.addEventListener('click', function() {
+        ed.focus();
         selectAll(ed);
         document.execCommand && document.execCommand('delete', false, null);
         if (ed.innerHTML.trim() !== '') {
-          document.execCommand && document.execCommand('insertHTML', false, '');
           ed.innerHTML = '';
         }
         scheduleRender();
         placeCaretAtEnd(ed);
+        closeConfirm();
+        showToast('Cleared');
       });
 
       // Copy HTML
-      copyHtmlBtn.addEventListener('click', async () => { renderOut(); await copy(out.textContent, out); showToast('Copied to clipboard'); });
+      copyHtmlBtn.addEventListener('click', function() {
+        renderOut();
+        copy(out.textContent, out).then(function(){ showToast('HTML copied'); });
+      });
 
-      // Copy Text
-      copyTextBtn.addEventListener('click', async () => {
+      // Copy text
+      copyTextBtn.addEventListener('click', function() {
         try {
-          const sel = window.getSelection();
-          const ranges = [];
-          for (let i = 0; i < sel.rangeCount; i++) ranges.push(sel.getRangeAt(i).cloneRange());
-          const r = document.createRange();
+          var sel = window.getSelection();
+          var ranges = [];
+          for (var i = 0; i < sel.rangeCount; i++) ranges.push(sel.getRangeAt(i).cloneRange());
+          var r = document.createRange();
           r.selectNodeContents(ed);
           sel.removeAllRanges();
           sel.addRange(r);
-          let ok = false;
-          try { ok = document.execCommand && document.execCommand('copy'); } catch {}
+          var ok = false;
+          try { ok = document.execCommand && document.execCommand('copy'); } catch(e) {}
           sel.removeAllRanges();
-          ranges.forEach(rr => sel.addRange(rr));
+          ranges.forEach(function(rr){ sel.addRange(rr); });
           if (!ok && navigator.clipboard) {
-            await navigator.clipboard.writeText(ed.innerText);
+            navigator.clipboard.writeText(ed.innerText);
           }
-          showToast('Copied to clipboard');
-        } catch {
-          const r = document.createRange();
-          r.selectNodeContents(ed);
-          const sel = window.getSelection();
-          sel.removeAllRanges(); sel.addRange(r);
-          showStatus('Clipboard blocked — press Ctrl/Cmd+C','warn',1400);
+          showToast('Text copied');
+        } catch(e) {
+          var r2 = document.createRange();
+          r2.selectNodeContents(ed);
+          var sel2 = window.getSelection();
+          sel2.removeAllRanges(); sel2.addRange(r2);
+          showStatus('Clipboard blocked — press Ctrl/Cmd+C', 'warn', 1400);
         }
       });
 
-      // Convert button (mobile)
-      convertMobileBtn.addEventListener('click', () => {
-        renderOut();
-        scheduleSave();
-        showToast('Converted');
-      });
-
-      // Initial
+      // Initial render
       renderOut();
       lastSnapshot = ed.innerHTML;
 
-      // Helpers
-      function selectAll(root){ const r=document.createRange(), s=window.getSelection(); r.selectNodeContents(root); s.removeAllRanges(); s.addRange(r); }
-      function insertOrReplace(html, viaUndo){ if (isEditorEffectivelyEmpty()) { selectAll(ed); if (viaUndo && document.execCommand){document.execCommand('insertHTML', false, html);} else {ed.innerHTML=html;} placeCaretAtEnd(ed);} else { if (viaUndo && document.execCommand){document.execCommand('insertHTML', false, html);} else {insertHtmlAtCaret(html);} } }
-      function isEditorEffectivelyEmpty(){ const t=ed.textContent.replace(/\u200B/g,'').trim(); return !t && ed.children.length===0; }
-      function placeCaretAtEnd(el){ el.focus(); const r=document.createRange(), s=window.getSelection(); r.selectNodeContents(el); r.collapse(false); s.removeAllRanges(); s.addRange(r); }
+      // ── Helpers ─────────────────────────────────────────────────────
+
+      function selectAll(root){
+        var r = document.createRange(), s = window.getSelection();
+        r.selectNodeContents(root);
+        s.removeAllRanges(); s.addRange(r);
+      }
+
+      function insertOrReplace(html, viaUndo){
+        if (isEditorEffectivelyEmpty()) {
+          selectAll(ed);
+          if (viaUndo && document.execCommand){
+            document.execCommand('insertHTML', false, html);
+          } else {
+            ed.innerHTML = html;
+          }
+          placeCaretAtEnd(ed);
+        } else {
+          if (viaUndo && document.execCommand){
+            document.execCommand('insertHTML', false, html);
+          } else {
+            insertHtmlAtCaret(html);
+          }
+        }
+      }
+
+      function isEditorEffectivelyEmpty(){
+        var t = ed.textContent.replace(/\u200B/g,'').trim();
+        return !t && ed.children.length === 0;
+      }
+
+      function placeCaretAtEnd(el){
+        el.focus();
+        var r = document.createRange(), s = window.getSelection();
+        r.selectNodeContents(el);
+        r.collapse(false);
+        s.removeAllRanges(); s.addRange(r);
+      }
 
       function stripInlineFormatting(root){
-        root.querySelectorAll('b,strong,i,em,u,span').forEach(el => {
-          const parent = el.parentNode;
+        root.querySelectorAll('b,strong,i,em,u,span').forEach(function(el){
+          var parent = el.parentNode;
           while (el.firstChild) parent.insertBefore(el.firstChild, el);
           el.remove();
         });
-        root.querySelectorAll('*').forEach(el => { el.removeAttribute('style'); el.removeAttribute('class'); });
+        root.querySelectorAll('*').forEach(function(el){
+          el.removeAttribute('style'); el.removeAttribute('class');
+        });
       }
 
       function insertHtmlAtCaret(html){
-        const sel = window.getSelection();
+        var sel = window.getSelection();
         if (!sel || sel.rangeCount === 0) { ed.insertAdjacentHTML('beforeend', html); return; }
-        const range = sel.getRangeAt(0);
+        var range = sel.getRangeAt(0);
         range.deleteContents();
-        const temp = document.createElement('div');
+        var temp = document.createElement('div');
         temp.innerHTML = html;
-        const frag = document.createDocumentFragment();
-        let node, lastNode;
-        while((node = temp.firstChild)) { lastNode = frag.appendChild(node); }
+        var frag = document.createDocumentFragment();
+        var node, lastNode;
+        while ((node = temp.firstChild)) { lastNode = frag.appendChild(node); }
         range.insertNode(frag);
         if (lastNode) {
-          const newRange = document.createRange();
+          var newRange = document.createRange();
           newRange.setStartAfter(lastNode);
           newRange.collapse(true);
           sel.removeAllRanges();
@@ -396,157 +660,169 @@ body {
         }
       }
 
-      // SAFE from clipboard (only used in optional rich paste)
-      function safeHtmlFromClipboard(htmlRaw){
-        const container = document.createElement('div');
-        container.innerHTML = htmlRaw;
-        const body = container.querySelector('body');
-        const root = document.createElement('div');
-        root.innerHTML = body ? body.innerHTML : container.innerHTML;
-        // strip attributes + unknown tags
-        const ALLOWED = new Set(['H1','H2','H3','H4','H5','H6','P','BR','STRONG','EM','U','UL','OL','LI','B','I']);
-        const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, null);
-        const toRemove = [];
-        while (walker.nextNode()) {
-          const el = walker.currentNode;
-          if (!ALLOWED.has(el.tagName)) {
-            if (el.tagName === 'DIV') {
-              const p = document.createElement('p');
-              while (el.firstChild) p.appendChild(el.firstChild);
-              el.replaceWith(p);
-            } else {
-              const parent = el.parentNode;
-              while (el.firstChild) parent.insertBefore(el.firstChild, el);
-              toRemove.push(el);
-            }
-          }
-          if (el.removeAttribute) { el.removeAttribute('style'); el.removeAttribute('class'); el.removeAttribute('id'); }
-        }
-        toRemove.forEach(n => n.remove());
-        return root.innerHTML.trim();
-      }
-
-      // Text → HTML (fallback & default) with lists/headings
       function textToHtmlWithListsAndHeadings(text){
-        const norm = text.replace(/\r\n?/g,'\n').replace(/[ \t]+$/gm,'');
-        const lines = norm.split('\n');
+        var norm = text.replace(/\r\n?/g,'\n').replace(/[ \t]+$/gm,'');
+        var lines = norm.split('\n');
         while (lines.length && lines[0].trim() === '') lines.shift();
         while (lines.length && lines[lines.length-1].trim() === '') lines.pop();
-        const htmlParts = [];
-        let i = 0;
-        const bulletChars = '\\-\\*•·▪‣◦●';
-        const bulletRe = new RegExp('^\\s*(['+bulletChars+'])\\s+(.*\\S)\\s*$');
-        const mOLTop = /^(\d+)(?:[.)])\s+(.*\S)\s*$/;
-        const mATX = /^(#{1,6})\s+(.+)$/;
+        var htmlParts = [];
+        var i = 0;
+        var bulletChars = '\\-\\*\u2022\u00b7\u25aa\u2023\u25e6\u25cf';
+        var bulletRe = new RegExp('^\\s*([' + bulletChars + '])\\s+(.*\\S)\\s*$');
+        var mOLTop = /^(\d+)(?:[.)])\s+(.*\S)\s*$/;
+        var mATX = /^(#{1,6})\s+(.+)$/;
         while (i < lines.length) {
           while (i < lines.length && lines[i].trim() === '') i++;
           if (i >= lines.length) break;
-          const line = lines[i].trim();
-          const mH = line.match(mATX);
-          if (mH) { const level = mH[1].length; htmlParts.push('<h'+level+'>'+escapeToHtml(mH[2])+'</h'+level+'>'); i++; continue; }
+          var line = lines[i].trim();
+          var mH = line.match(mATX);
+          if (mH) { var level = mH[1].length; htmlParts.push('<h' + level + '>' + escapeToHtml(mH[2]) + '</h' + level + '>'); i++; continue; }
           if (bulletRe.test(line)) {
             htmlParts.push('<ul>');
             while (i < lines.length && bulletRe.test(lines[i].trim())) {
-              const mm = lines[i].trim().match(bulletRe);
-              htmlParts.push('<li>'+escapeToHtml(mm[2])+'</li>');
+              var mm = lines[i].trim().match(bulletRe);
+              htmlParts.push('<li>' + escapeToHtml(mm[2]) + '</li>');
               i++;
             }
             htmlParts.push('</ul>');
             continue;
           }
-          const mOL = line.match(mOLTop);
+          var mOL = line.match(mOLTop);
           if (mOL) {
-            const start = mOL[1];
-            htmlParts.push(start !== '1' ? '<ol start="'+start+'">' : '<ol>');
+            var start = mOL[1];
+            htmlParts.push(start !== '1' ? '<ol start="' + start + '">' : '<ol>');
             while (i < lines.length) {
-              const l = lines[i].trim();
-              const m2 = l.match(mOLTop);
+              var l = lines[i].trim();
+              var m2 = l.match(mOLTop);
               if (!m2) break;
-              htmlParts.push('<li>'+escapeToHtml(m2[2])+'</li>');
+              htmlParts.push('<li>' + escapeToHtml(m2[2]) + '</li>');
               i++;
             }
             htmlParts.push('</ol>');
             continue;
           }
-          htmlParts.push('<p>'+escapeToHtml(line)+'</p>');
+          htmlParts.push('<p>' + escapeToHtml(line) + '</p>');
           i++;
         }
         return htmlParts.join('');
       }
 
-      function escapeToHtml(s){ return s.replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+      function escapeToHtml(s){
+        return s.replace(/[&<>]/g, function(c){
+          return ({'&':'&amp;','<':'&lt;','>':'&gt;'})[c];
+        });
+      }
 
-      // Wrap top-level inline/text into paragraphs for PREVIEW only
       function wrapInlineAtRoot(container){
-        const isInline = (el) => el.nodeType === 3 || (el.nodeType === 1 && /^(B|I|EM|STRONG|U|SPAN|A|CODE|SMALL|SUB|SUP|S|DEL|MARK)$/.test(el.tagName));
-        const blocks = [];
-        let buf = [];
-        const flush = () => { if (!buf.length) return; const p = document.createElement('p'); buf.forEach(n => p.appendChild(n)); blocks.push(p); buf = []; };
-        Array.from(container.childNodes).forEach(n => {
+        var isInline = function(el) {
+          return el.nodeType === 3 || (el.nodeType === 1 && /^(B|I|EM|STRONG|U|SPAN|A|CODE|SMALL|SUB|SUP|S|DEL|MARK)$/.test(el.tagName));
+        };
+        var blocks = [];
+        var buf = [];
+        var flush = function() {
+          if (!buf.length) return;
+          var p = document.createElement('p');
+          buf.forEach(function(n){ p.appendChild(n); });
+          blocks.push(p);
+          buf = [];
+        };
+        Array.from(container.childNodes).forEach(function(n) {
           if (isInline(n)) { buf.push(n); }
           else if (n.nodeType === 1) { flush(); blocks.push(n); }
         });
         flush();
-        container.replaceChildren(...blocks);
+        container.replaceChildren.apply(container, blocks);
       }
 
-      // Build clean HTML for preview ONLY (non-destructive to editor)
       function getPrettyCleanHtml(){
-        const container = document.createElement('div');
+        var container = document.createElement('div');
         container.innerHTML = ed.innerHTML;
         wrapInlineAtRoot(container);
 
-        const allowed = new Set(['H1','H2','H3','H4','H5','H6','P','BR','STRONG','EM','U','UL','OL','LI','B','I']);
-        const walker = document.createTreeWalker(container, NodeFilter.SHOW_ELEMENT, null);
-        const toRemove = [];
+        var allowed = new Set(['H1','H2','H3','H4','H5','H6','P','BR','STRONG','EM','U','UL','OL','LI','B','I']);
+        var walker = document.createTreeWalker(container, NodeFilter.SHOW_ELEMENT, null);
+        var toRemove = [];
         while (walker.nextNode()) {
-          const el = walker.currentNode;
+          var el = walker.currentNode;
           if (!allowed.has(el.tagName)) {
-            const parent = el.parentNode;
+            var parent = el.parentNode;
             while (el.firstChild) parent.insertBefore(el.firstChild, el);
             toRemove.push(el);
           } else {
             el.removeAttribute('style'); el.removeAttribute('class');
           }
         }
-        toRemove.forEach(el => el.remove());
+        toRemove.forEach(function(el){ el.remove(); });
 
-        container.querySelectorAll('div').forEach(d => {
-          const p = document.createElement('p');
+        container.querySelectorAll('div').forEach(function(d) {
+          var p = document.createElement('p');
           while (d.firstChild) p.appendChild(d.firstChild);
           d.replaceWith(p);
         });
 
-        container.querySelectorAll('p').forEach(p => {
+        container.querySelectorAll('p').forEach(function(p) {
           if (p.innerHTML.replace(/<br\s*\/?>/i,'').trim() === '') p.remove();
         });
 
-        const lines = [];
-        Array.from(container.childNodes).forEach(node => {
+        var lines = [];
+        Array.from(container.childNodes).forEach(function(node) {
           if (node.nodeType !== 1) return;
-          const tag = node.tagName.toLowerCase();
+          var tag = node.tagName.toLowerCase();
           if (tag === 'p') { lines.push('<p>' + node.innerHTML + '</p>'); lines.push(''); }
           else if (tag === 'ul' || tag === 'ol') {
             lines.push('<' + tag + '>');
-            node.querySelectorAll(':scope > li').forEach(li => lines.push('  <li>' + li.innerHTML + '</li>'));
+            node.querySelectorAll(':scope > li').forEach(function(li){
+              lines.push('  <li>' + li.innerHTML + '</li>');
+            });
             lines.push('</' + tag + '>');
             lines.push('');
           } else if (tag === 'br') { lines.push('<br>'); }
-          else if (/^h[1-6]$/.test(tag)) { lines.push('<'+tag+'>' + node.innerHTML + '</'+tag+'>'); lines.push(''); }
+          else if (/^h[1-6]$/.test(tag)) { lines.push('<' + tag + '>' + node.innerHTML + '</' + tag + '>'); lines.push(''); }
           else { lines.push(node.outerHTML); }
         });
         return lines.join('\n');
       }
 
-      function renderOut(){ out.textContent=getPrettyCleanHtml(); }
-      function collectState(){ return { version:'v2.2', html: ed.innerHTML, ts: Date.now() }; }
-      function scheduleSave(){ try { if (saveTimer) clearTimeout(saveTimer); saveTimer=setTimeout(saveState, 500); } catch {} }
-      function saveState(){ try { localStorage.setItem(STORAGE_KEY, JSON.stringify(collectState())); showStatus('Saved','ok',600); } catch (e) {} }
-      async function copy(text, fallbackNode){ try { await navigator.clipboard.writeText(text); showStatus('Copied','ok',600); } catch { const r=document.createRange(); r.selectNodeContents(fallbackNode||out); const sel=getSelection(); sel.removeAllRanges(); sel.addRange(r); showStatus('Clipboard blocked — press Ctrl/Cmd+C','warn',1200); } }
-      function showStatus(msg, cls='ok', ms=700){ statusEl.textContent='Autosave: '+msg; statusEl.classList.remove('ok','warn'); if(cls) statusEl.classList.add(cls); setTimeout(()=>{ statusEl.textContent='Autosave: idle'; statusEl.classList.remove('ok','warn'); }, ms); }
+      function renderOut(){ out.textContent = getPrettyCleanHtml(); }
+      function collectState(){ return { version: 'v4.0', html: ed.innerHTML, ts: Date.now() }; }
+      function scheduleSave(){
+        try {
+          if (saveTimer) clearTimeout(saveTimer);
+          saveTimer = setTimeout(saveState, 500);
+        } catch(e) {}
+      }
+      function saveState(){
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(collectState()));
+          showStatus('Saved', 'ok', 600);
+        } catch(e) {}
+      }
+      function copy(text, fallbackNode){
+        return NL.copy(text, { silent: true }).then(function(ok) {
+          if (ok) {
+            showStatus('Copied', 'ok', 600);
+          } else {
+            var r = document.createRange();
+            r.selectNodeContents(fallbackNode || out);
+            var sel = getSelection();
+            sel.removeAllRanges(); sel.addRange(r);
+            showStatus('Clipboard blocked — press Ctrl/Cmd+C', 'warn', 1200);
+          }
+        });
+      }
+      function showStatus(msg, cls, ms){
+        cls = cls || 'ok'; ms = ms || 700;
+        statusEl.textContent = 'Autosave: ' + msg;
+        statusEl.classList.remove('ok','warn');
+        if (cls) statusEl.classList.add(cls);
+        setTimeout(function() {
+          statusEl.textContent = 'Autosave: idle';
+          statusEl.classList.remove('ok','warn');
+        }, ms);
+      }
     }
   })();
   </script>
 
-
-</body></html>
+</body>
+</html>
