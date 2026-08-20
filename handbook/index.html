@@ -1474,27 +1474,41 @@
   }
 
   function publish() {
-    // The season is locked to SEASON and cannot be typed over. Public
-    // surfaces read the season off the FRONT of the label (see
-    // seasonFromLabel in reader.html), so a free-text label like "v2"
-    // replaced the season on the cover. A revision note is still allowed
-    // and lands after it — "2026-27 v2" — which the reader parses correctly.
-    NL.prompt('Publishing as “' + SEASON + '”. Add a revision note (optional):',
-      { title: 'Publish edition', default: '' })
-      .then(function (note) {
-        if (note === null) return;
-        var lbl = (SEASON + ' ' + String(note || '').trim()).trim();
-        // Type-to-confirm: publishing freezes the WHOLE handbook and changes what the public sees.
-        return NL.prompt(
-          'Publishing freezes the whole handbook draft — all five areas — as edition “' + lbl + '” and updates what public surfaces show. This cannot be edited afterwards; you publish a new edition instead.\n\nType PUBLISH to confirm.',
-          { title: 'Confirm publish', confirmText: 'Publish edition' }
-        ).then(function (word) {
+    /* NO VERSION NUMBER. The label is the season and nothing else; the DATE is
+       the version, and it is already recorded as publishedAt on every edition.
+
+       Ruling 19/08/2026. A hand-typed revision note used to land after the
+       season — "2026-27 v2" — and it earned its retirement twice over. It was
+       free text before the season was locked, which is how an edition came to
+       be named "v2" and put that on the cover where the season belongs. And
+       even done right it was a second, weaker answer to a question publishedAt
+       already answers exactly: v3 tells a club nothing, "Last updated 19 August
+       2026" tells them whether to re-read it.
+
+       Publishing twice in one day therefore produces two editions with the same
+       label, which is correct — they are the same handbook, and the timestamp
+       separates them. Nothing overwrites: every publish push()es a new edition
+       and only moves the publishedEditionId pointer. */
+    var lbl = SEASON;
+    // Type-to-confirm: publishing freezes the WHOLE handbook and changes what the public sees.
+    NL.prompt(
+      'Publishing freezes the whole handbook draft — all five areas — as “' + lbl + '”, stamped with today’s date, and updates what public surfaces show. This cannot be edited afterwards; you publish again instead.\n\nType PUBLISH to confirm.',
+      { title: 'Confirm publish', confirmText: 'Publish edition' }
+    ).then(function (word) {
           if ((word || '').trim().toUpperCase() !== 'PUBLISH') { NL.toast && NL.toast('Publish cancelled', 'info'); return; }
           NL.ensureAuth().then(function () {
             return db.ref(BASE + '/draft/docs').once('value');   // snapshot every area, not just the open one
           }).then(function (snap) {
             var all = snap.val() || {};
             var edition = {
+              /* SEASON AS A FIELD, not a substring of a display label. The
+                 editor's cover reads the SEASON constant and the reader used to
+                 parse it out of the front of `label`, which is two sources for
+                 one fact — so the two pages disagreed the moment a label did not
+                 start with a season, and one showed 2026-27 while the other
+                 showed nothing. One source now: this. `label` stays, equal to
+                 the season, for older readers and the PDF filename. */
+              season: SEASON,
               label: lbl, status: 'published',
               publishedAt: Date.now(), publishedBy: (S.session && (S.session.name || S.session.email)) || null,
               docs: {}
@@ -1524,12 +1538,11 @@
             return ref.set(edition)
               .then(function () { return db.ref(BASE + '/publishedEditionId').set(ref.key); })
               .then(function () {
-                NL.writeAudit && NL.writeAudit('publish', 'Published edition "' + lbl + '" (' + count + ' areas)');
-                NL.toast && NL.toast('Published edition “' + lbl + '” — ' + count + ' area' + (count === 1 ? '' : 's'), 'success');
+                NL.writeAudit && NL.writeAudit('publish', 'Published "' + lbl + '" (' + count + ' areas)');
+                NL.toast && NL.toast('Published “' + lbl + '” — ' + count + ' area' + (count === 1 ? '' : 's'), 'success');
               });
           }).catch(function (e) { NL.toast && NL.toast('Publish failed: ' + (e && e.message || e), 'error'); });
-        });
-      });
+    });
   }
   /* ================= Events ================= */
   function closeDrawer() {
