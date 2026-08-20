@@ -61,7 +61,7 @@ const { onValueWritten } = require("firebase-functions/v2/database");
 const logger = require("firebase-functions/logger");
 const admin = require("firebase-admin");
 
-const ROOT = "app-data/club-access";
+const ROOT = "app-data/club-codes";
 
 const TRIGGER_OPTS = {
   ref: "/" + ROOT + "/authRequests/{uid}",
