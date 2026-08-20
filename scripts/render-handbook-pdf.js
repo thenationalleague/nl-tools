@@ -230,7 +230,61 @@ function instanceBold(ttfBytes) {
   }
 }
 
+/* ---- Credentials -----------------------------------------------------------
+   This job used to hold none at all. It worked because the handbook's edition
+   nodes were world-readable, which stopped being a safe assumption the moment
+   the reader grew a club-code gate: gating the rules with the renderer still
+   anonymous would fail this job silently, freeze pdf-meta.json, and deny the
+   print view the reader falls back TO. See system/club-code-plan.md §1.0a.
+
+   Two consumers need covering and they authenticate differently:
+
+     · the REST reads below — an admin access token, which bypasses rules.
+     · the PAGE, driven headless — a custom token it signs in with, because a
+       browser gets its answer through the rules like anyone else.
+
+   Both come from one service account via Workload Identity Federation, the
+   pattern rebuild-index.yml already uses. The pipeline holds a credential of
+   its own rather than borrowing a club's: a club code in CI would break this
+   job the first time somebody rotated it, and would put a live club
+   credential in a secret store for no benefit.
+
+   DEGRADES RATHER THAN BREAKS. If admin will not initialise — no ADC, a
+   missing role, running locally — this logs and carries on unauthenticated,
+   which is exactly what it did before. That keeps the currently-green hourly
+   render green while the rules are still open, so this change cannot be the
+   thing that breaks it. Once a run is seen green WITH a token, the rules can
+   move. */
+let adminApp = null;
+let renderToken = null;
+
+async function initCredentials() {
+  try {
+    const admin = require('firebase-admin');
+    adminApp = admin.apps.length ? admin.app()
+      : admin.initializeApp({ databaseURL: RTDB });
+    renderToken = await admin.auth()
+      .createCustomToken('handbook-renderer', { club: '*' });
+    console.log('Credentials: service account, club:"*" claim minted');
+  } catch (e) {
+    /* Never log the token or the credential — just why we have neither. */
+    console.log('Credentials: none (' + (e && e.message ? e.message.slice(0, 120) : 'unknown') +
+      ') — continuing unauthenticated, which only works while the rules are open');
+    adminApp = null;
+    renderToken = null;
+  }
+}
+
 async function rtdb(p) {
+  /* Admin reads bypass rules entirely, so this keeps working after the flip.
+     The unauthenticated fetch stays as the fallback described above. */
+  if (adminApp) {
+    const ref = adminApp.database().ref(p.replace(/^\//, '').replace(/\.json.*$/, ''));
+    /* One caller passes ?shallow=true. The admin read fetches the whole node
+       instead — a few KB more over the wire for a keys-only use, and not worth
+       a second code path to avoid. */
+    return (await ref.once('value')).val();
+  }
   const res = await fetch(RTDB + p);
   if (!res.ok) throw new Error('RTDB ' + p + ' -> HTTP ' + res.status);
   return res.json();
@@ -243,6 +297,8 @@ async function settle(page) {
 
 async function main() {
   const puppeteer = require('puppeteer-core');
+
+  await initCredentials();
 
   const editionId = await rtdb('/app-data/ops-handbook/publishedEditionId.json');
   if (!editionId) { console.log('No published edition — nothing to render.'); return; }
@@ -290,6 +346,15 @@ async function main() {
   try {
     const page = await browser.newPage();
     page.on('pageerror', e => console.error('pageerror:', e.message));
+
+    /* Hand the page its credential BEFORE any of its own script runs, and as a
+       variable rather than a query parameter: a URL ends up in the Actions log,
+       in any server log in front of it, and in the history of anyone handed the
+       link. evaluateOnNewDocument survives every goto below, so this is set
+       once rather than per navigation. */
+    if (renderToken) {
+      await page.evaluateOnNewDocument((t) => { window.__NL_RENDER_TOKEN = t; }, renderToken);
+    }
 
     // Pass 1 — each area as its own part.
     const { PDFDocument } = require('pdf-lib');

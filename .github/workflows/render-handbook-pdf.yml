@@ -18,6 +18,10 @@ on:
 
 permissions:
   contents: write
+  # Workload Identity Federation, same pattern as rebuild-index.yml. The job
+  # needs a credential of its own now that the handbook is heading behind the
+  # club-code gate — see system/club-code-plan.md §1.0a.
+  id-token: write
 
 concurrency:
   group: render-handbook-pdf
@@ -36,8 +40,20 @@ jobs:
         id: chrome
         uses: browser-actions/setup-chrome@v1
 
-      - name: Install puppeteer-core + pdf-lib + fontkit + wawoff2
-        run: npm install --no-save puppeteer-core pdf-lib @pdf-lib/fontkit wawoff2
+      - name: Install puppeteer-core + pdf-lib + fontkit + wawoff2 + firebase-admin
+        run: npm install --no-save puppeteer-core pdf-lib @pdf-lib/fontkit wawoff2 firebase-admin
+
+      # The renderer reads the edition (admin, bypassing rules) and hands the
+      # headless page a custom token to sign in with (rules apply to it, as they
+      # do to a club). Both come from this one service account. If this step is
+      # skipped or the role is missing the script logs it and carries on
+      # unauthenticated, which is what it did before — so this cannot be the
+      # thing that breaks a currently-green render.
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
       - name: Install fonttools (variable-font instancing for the band weight)
         run: python3 -m pip install --quiet fonttools
