@@ -137,8 +137,11 @@ async function assemble(frontBuf, areaParts, deco) {
     for (let k = 1; k < part.pages; k++) bandFor[starts[part.id] - 1 + k] = part.id;
   });
 
-  const footText = 'The National League Handbook · Edition ' + (deco.label || '') +
-    (deco.pubDate ? ' · Published ' + deco.pubDate : '');
+  /* The DATE is the version (ruling 19/08/2026) — no edition number. The
+     season identifies WHICH handbook, the date identifies HOW CURRENT, and
+     between them there is nothing left for a v-number to say. */
+  const footText = 'The National League Handbook' + (deco.season ? ' ' + deco.season : '') +
+    (deco.pubDate ? ' · Last updated ' + deco.pubDate : '');
 
   out.getPages().forEach((p, i) => {
     const W = p.getWidth(), H = p.getHeight();
@@ -252,6 +255,11 @@ async function main() {
   }
 
   const label = await rtdb('/app-data/ops-handbook/editions/' + editionId + '/label.json');
+  /* Season as a field, with the label parse only for editions published before
+     that field existed. Same resolution as reader.html and print.html. */
+  const seasonField = await rtdb('/app-data/ops-handbook/editions/' + editionId + '/season.json');
+  const labelSeason = (String(label || '').match(/^\s*(\d{4}\s*[-\/]\s*\d{2,4})/) || [])[1] || '';
+  const season = seasonField ? String(seasonField) : labelSeason;
   const publishedAt = await rtdb('/app-data/ops-handbook/editions/' + editionId + '/publishedAt.json');
   const docKeys = Object.keys(await rtdb('/app-data/ops-handbook/editions/' + editionId + '/docs.json?shallow=true') || {});
   const present = ORDER.filter(id => docKeys.includes(id));
@@ -307,10 +315,10 @@ async function main() {
     await settle(page);
     const frontBuf = await page.pdf(pdfOpts());
 
-    const { bytes, starts, total } = await assemble(frontBuf, areaParts, { label: label || '', pubDate, fontBytes, boldBytes, slantedBytes, titles });
+    const { bytes, starts, total } = await assemble(frontBuf, areaParts, { label: label || '', season, pubDate, fontBytes, boldBytes, slantedBytes, titles });
     fs.writeFileSync(OUT_PDF, bytes);
     fs.writeFileSync(OUT_META, JSON.stringify({
-      editionId, label: label || '', publishedAt: publishedAt || null,
+      editionId, label: label || '', season: season || '', publishedAt: publishedAt || null,
       renderedAt: new Date().toISOString(), pages: total, sections: starts
     }, null, 2) + '\n');
     console.log('Wrote', OUT_PDF, '(' + bytes.length + ' bytes,', total, 'pages) + pdf-meta.json');
