@@ -61,6 +61,14 @@ Object.assign(exports, require("./club-directory"));
 // afford that the others cannot — see the header there.
 Object.assign(exports, require("./uw-promo"));
 
+// One club code → a `club` claim (clubCodeAuth). Fourth instance of the same
+// shape, and the one meant to absorb the others: a single credential per club
+// covering every club-facing gated tool, with entitlement decided per tool in
+// the RTDB rules rather than by which code you hold. Handbook first, Directory
+// second, Programme Packs migrated last. See functions/club-code.js and
+// system/club-code-plan.md.
+Object.assign(exports, require("./club-code"));
+
 // NLS → RTDB live ingester (nlsIngestTick / nlsIngestHourly). Scheduled rather
 // than triggered, and it writes to the nl-widgets database rather than this
 // project's — see functions/nls-ingester.js for both reasons. Exported here so
