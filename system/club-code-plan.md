@@ -75,9 +75,28 @@ and that claim has to be true before 72 clubs are told it. Three honest routes:
 3. **Split the difference.** Gate RTDB and move the PDF; leave the seeds, since
    they are a one-time import artefact rather than the live document.
 
-**Recommendation: 2, minus the impossible part.** Do the rules and the PDF, and
-delete the seeds from the working tree with a note saying history keeps them.
-That gets the claim honest without pretending git can be un-rung.
+**Recommendation was 2, minus the impossible part.**
+
+### 1.0 SETTLED 19/08/2026 — route 3
+
+Richard: *"yes to firebase if it is an easy job"*, then *"keep seeds for now"*.
+
+So: **rules gated, PDF moved to Storage, seed JSON stays in the repo.** That is
+route 3, and the consequence is worth stating rather than leaving to be
+discovered:
+
+> The handbook TEXT remains publicly downloadable from this repository, as
+> ~600KB of structured JSON, whether or not the reader asks for a code.
+
+The gate is therefore real for the reader and the PDF, and **not** a boundary
+around the content itself. Say "sign in with your club code" to clubs — never
+"this is confidential", because it is not, and one search of a public GitHub
+repo proves it.
+
+The seeds are a one-time import artefact rather than the live document, so
+this is a defensible place to stop. It stops being defensible the moment the
+same architecture carries the Directory, where the equivalent file would be
+personal data. **The Directory ships nothing comparable to the repo. Ever.**
 
 ### 1.1 Also true, and worth deciding once
 
