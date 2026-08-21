@@ -525,6 +525,51 @@ test('the clause markup carries the numbering style the hanging rule reads', () 
     'renderNode must emit data-num on every clause');
 });
 
+test('an article and its clauses share one left edge', () => {
+  /* Richard, reading League Rules: "clause six will say Registration of
+     Players, and it's aligned in a certain area. But six point one, the
+     content of six point one, is not aligned in the same place."
+
+     He was right, and it was arithmetic: the article gutter was 30px and the
+     clause gutter 46px, so a section title started 16px left of the text of
+     its own first sub-clause. Two edges, both looking deliberate, neither
+     agreeing with the other.
+
+     Pinned as ONE number rather than two rules, because the failure mode is
+     someone changing one gutter for a good reason and not the other. */
+  const artNum = /\.nl-art__num\s*\{([^}]*)\}/.exec(css);
+  const clNum = /\.nl-clause__num\s*\{([^}]*)\}/.exec(css);
+  assert.ok(artNum && clNum, 'both number gutters still exist');
+  const width = (m) => Number(/min-width:\s*(\d+)px/.exec(m[1])[1]);
+  assert.equal(width(artNum), width(clNum),
+    'the article number gutter and the clause number gutter must be the same ' +
+    'width, or a section title and its own sub-clauses sit on different ' +
+    'left edges');
+
+  /* And the third edge: prose written straight into an article is emitted as
+     a direct child of <section class="nl-art">, so it has no gutter at all
+     and began at the very left of the sheet. 48 of 107 articles carry it. */
+  assert.match(css,
+    /\.nl-art:not\(\.nl-art--nonum\)\s*>\s*\.nl-clause__text[^{]*\{[^}]*margin-left:\s*58px/,
+    'article-level prose must be pushed into the same 58px column');
+  assert.match(css,
+    /\.nl-art:not\(\.nl-art--nonum\)\s*>\s*\.nl-clause--nonum[^{]*\{[^}]*margin-left:\s*58px/,
+    'an unnumbered depth-1 clause must be too — collapsing its gutter puts it ' +
+    'flush with the PARENT text, which at depth 1 is the sheet edge');
+});
+
+test('the PDF keeps that column, in its own units', () => {
+  /* print.html sets a 12mm clause gutter, so the 58px canon figure is the
+     wrong length on paper. Both halves have to be restated together or the
+     PDF drifts back to two edges while the screen looks right. */
+  const print = readFileSync(join(REPO, 'handbook/print.html'), 'utf8');
+  assert.match(print, /\.flow \.nl-art__num\s*\{[^}]*min-width:\s*12mm/,
+    'the print article gutter must match the print clause gutter');
+  assert.match(print,
+    /\.flow \.nl-art:not\(\.nl-art--nonum\)[\s\S]{0,120}margin-left:\s*calc\(12mm \+ 12px\)/,
+    'article-level prose must sit in the print column too');
+});
+
 test('nothing in the document system is pulled outside the text column', () => {
   /* A negative margin on document content escapes the page padding and puts
      the content against the edge of the sheet. That is what happened when a
