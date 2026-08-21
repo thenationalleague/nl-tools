@@ -298,7 +298,19 @@ async function initCredentials() {
    "in progress" at eleven minutes with nothing left to do. The old fetch()
    path left no handle behind, which is why this never came up before.
 
-   Called from main's finally, so a failed render cleans up too. */
+   Called from the CALL SITE's finally, not from main's, so that it runs on
+   every exit path rather than only the ones that reach the render.
+
+   That distinction is not hypothetical — it is this same bug, found a second
+   time. main() returns early three ways before the try/finally that closes
+   the browser: no published edition, no areas in the edition, and — the one
+   that actually bit — "PDF already current, skipping". Every scheduled run
+   from 05:16 on 21/08/2026 did its whole job in ONE SECOND, logged the skip,
+   and then sat there for an hour until the next hour's run cancelled it. The
+   only green run in that window was a forced dispatch, which renders, and so
+   reached the finally.
+
+   Whatever the exit path, the socket closes. */
 async function closeCredentials() {
   if (!adminApp) return;
   try {
@@ -445,4 +457,12 @@ async function main() {
 }
 
 module.exports = { ORDER, SHORT, TOC, MM, pdfOpts, assemble, fetchBrandFont };
-if (require.main === module) main().catch(e => { console.error(e); process.exit(1); });
+if (require.main === module) {
+  /* finally, not the success path and not main's own — see closeCredentials.
+     process.exitCode rather than process.exit(), because exit() would kill the
+     process before the close has a chance to run and put us back where we
+     started, just faster. */
+  main()
+    .catch((e) => { console.error(e); process.exitCode = 1; })
+    .finally(closeCredentials);
+}

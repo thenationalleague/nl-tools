@@ -120,9 +120,31 @@ test('the admin app is closed, or the job never exits', () => {
      after an error is worse than the error. */
   assert.match(CODE, /deleteApp\s*\(/,
     'close the admin app or the process cannot exit');
-  const finallyBlock = CODE.slice(CODE.lastIndexOf('} finally {'));
-  assert.match(finallyBlock, /closeCredentials\s*\(\s*\)/,
-    'the close must run in the finally, not only on the success path');
+});
+
+test('the close runs on EVERY exit path, not just the rendering one', () => {
+  /* Same bug, found twice. The first fix put closeCredentials() in main's
+     finally, which covers a render that succeeds and a render that throws —
+     and misses the three ways main returns BEFORE that try block: no
+     published edition, no areas, and "PDF already current, skipping".
+
+     That last one is the normal case. Every scheduled run from 05:16 on
+     21/08/2026 did its whole job in one second, logged the skip, and then sat
+     on an open websocket for an hour until the next hour's run cancelled it.
+     The only green run in that window was a forced dispatch, which renders,
+     and so reached the finally. A job that hangs when there is NOTHING TO DO
+     is the one shape a smoke test never catches.
+
+     So the close belongs at the call site, where no early return can dodge
+     it — and attached with .finally rather than after .catch, so a thrown
+     render cleans up too. process.exit() must not be used: it tears the
+     process down before the close can run, which is the original bug with
+     extra steps. */
+  const tail = CODE.slice(CODE.indexOf('require.main === module'));
+  assert.match(tail, /\.finally\(\s*closeCredentials\s*\)?/,
+    'closeCredentials must be attached to main() with .finally at the call site');
+  assert.ok(!/process\.exit\s*\(/.test(tail),
+    'use process.exitCode — process.exit() kills the process before the close runs');
 });
 
 test('firebase-admin is pinned to a major version in the workflow', () => {
