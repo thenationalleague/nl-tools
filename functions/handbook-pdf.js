@@ -75,6 +75,12 @@ const TRIGGER_OPTS = {
      racing to commit the same file; the workflow's own concurrency group would
      cancel one, but not starting it is cheaper and clearer. */
   maxInstances: 1,
+  /* The same account the other four triggers name. This one does not need it
+     for RTDB reasons — it only reads the event payload — but naming it keeps
+     the Secret Manager grant to ONE identity across the project, rather than
+     this function alone running as the gen-2 default compute account and
+     needing its own binding that nobody would remember existed. */
+  serviceAccount: "firebase-adminsdk-fbsvc@nl-tools.iam.gserviceaccount.com",
   secrets: [GITHUB_DISPATCH_TOKEN],
 };
 
