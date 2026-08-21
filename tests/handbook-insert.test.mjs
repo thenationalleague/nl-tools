@@ -145,6 +145,34 @@ test('a bullet keeps its own kind rather than becoming a numbered clause', () =>
   assert.equal(hb.previewNumber('b1', 'after'), '•');
 });
 
+test('the GAP moves to the canonical boundary, not just the target', () => {
+  /* The half of the fix that was missing, and the reason Richard reported the
+     same bug twice.
+
+     v0.42 canonicalised where a new clause would LAND. Both hovers on a
+     boundary between siblings already produced one identical insertion — the
+     tests above prove it. But showInsertFor still opened the gap on whatever
+     was under the pointer, so hovering the bottom of 2 drew a strip under 2
+     and hovering the top of 3 drew a different strip above 3, thirty pixels
+     apart. Same outcome, two visibly separate offers. The user cannot see
+     `where` — they can only see where the line is drawn.
+
+     A unit test cannot hover, so this pins the mechanism: the redirect has to
+     happen against the ELEMENT, before the gap class is applied. */
+  const show = lift('showInsertFor');
+  const gapAt = show.indexOf('classList.add(');
+  const canonAt = show.indexOf('canonicalBoundary(');
+  assert.ok(canonAt >= 0, 'showInsertFor must canonicalise at all');
+  assert.ok(canonAt < gapAt,
+    'the boundary must be canonicalised BEFORE the gap class is applied, or ' +
+    'the gap opens in the place the pointer happened to be');
+  assert.match(show, /clauseEl = alt;\s*where = canon\.where;/,
+    'a hover that resolves elsewhere must redraw on THAT element');
+  assert.match(show, /INS\.refId = clauseEl\.dataset\.id/,
+    'once redirected, the element and the target are the same thing — two ' +
+    'sources for one boundary is how they came apart in the first place');
+});
+
 test('the preview and the insert build the same clause', () => {
   /* newSpecAt is shared by both on purpose. If insertRelative ever stops using
      it, the number offered and the number given can part company silently. */
