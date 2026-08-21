@@ -1,6 +1,37 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
+  Version: v0.42 (21/08/2026) — you can see where a clause will land, and
+    take it back.
+
+    Richard: "it's almost impossible to know where I'm placing a new item…
+    there's also not really an undo function… feels like you could quite
+    easily make some serious issues and not know how to fix them."
+
+    UNDO. Every change goes through commit() — structural ops and typing
+    alike — so one stack on that single write path covers everything, and
+    nothing added later can quietly escape it. Ctrl+Z / Ctrl+Shift+Z, and
+    buttons in the TOP bar rather than the action bar, because the action bar
+    only appears once a clause is selected and the moment undo is wanted most
+    is right after something went wrong. Snapshots rather than inverse diffs:
+    a diff has to be RIGHT about what it reverses, a snapshot only has to be a
+    copy, and commit() already diffs to work out its writes. Capped at 20 and
+    cleared when the area changes, since the ids would not resolve.
+    Ctrl+Z is intercepted inside contenteditable too — the browser's own undo
+    buffer knows nothing about the clause tree and would leave the two
+    disagreeing.
+
+    WHERE IT LANDS. Hovering the document draws a line at the boundary a new
+    clause would take, at the depth it would take, with a + to accept it. The
+    line IS the answer: it sits between the two clauses it would sit between.
+    One element moved under the pointer — a drop zone rendered between every
+    pair would be 1,203 of them, which is the per-clause toolbar mistake
+    again. Only near an edge, because a line through the middle of a
+    paragraph someone is reading is noise.
+
+    DELETING. The confirmation names the clause and quotes its opening words.
+    The action bar is no longer beside what it acts on, so "this clause" was a
+    question rather than a statement.
   Version: v0.41 (21/08/2026) — the action bar is #ceActs, not #ceBar.
     v0.40 gave it an id the TOP toolbar already held, so $('ceBar') returned
     the toolbar and syncActionBar's "hide when nothing is selected" hid the
@@ -102,6 +133,17 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '21/08/2026',
+        version: 'v0.42',
+        items: [
+          'Undo and Redo, top left — or Ctrl+Z and Ctrl+Shift+Z. Covers ' +
+            'adding, deleting, moving and typing.',
+          'Hovering between two clauses shows a line and a + where a new ' +
+            'clause would go, so you can see where it lands before you add it.',
+          'Deleting names the clause and shows its opening words first.'
+        ]
+      },
       {
         date: '21/08/2026',
         version: 'v0.41',
@@ -570,6 +612,36 @@
   @media (max-width: 860px) { .ce-fmt { padding: 6px 14px; } }
   /* No in-document selection marker — the breadcrumb + contents highlight say where you are. */
 
+  .ce-undo {
+    font-family: var(--font); font-size: var(--text-xs);
+    font-weight: 600; font-variation-settings: 'wght' 600;
+    padding: 5px 9px; cursor: pointer; flex: none;
+    background: var(--white); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+  }
+  .ce-undo:hover:not(:disabled) { border-color: var(--navy); background: var(--navy-50); }
+  .ce-undo:disabled { opacity: .4; cursor: default; }
+
+  /* The insert line: where a new clause will land, shown before you commit to
+     it. The line itself takes no pointer events — it follows the mouse, so
+     catching them would make it chase itself — only the + is clickable. */
+  .hb-ins {
+    position: fixed; z-index: 40; pointer-events: none;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .hb-ins__line {
+    flex: 1 1 auto; height: 2px; background: var(--primary); border-radius: 2px;
+  }
+  .hb-ins__go {
+    pointer-events: auto; flex: none; cursor: pointer;
+    width: 22px; height: 22px; line-height: 1; padding: 0;
+    font-family: var(--font); font-size: var(--text-sm); font-weight: 700;
+    color: var(--white); background: var(--primary);
+    border: 0; border-radius: 50%;
+  }
+  .hb-ins__go:hover { background: var(--primary-700); }
+  .hb-ins__go:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
+
   /* The action bar. One of these, at the foot of the editing pane.
      It replaced a per-clause toolbar: eleven controls on each of 1,203 nodes,
      which drew 6,160 buttons in League Rules alone and left two of every three
@@ -648,6 +720,11 @@
           <button data-mode="read" class="is-on">Read</button>
           <button data-mode="edit" id="ceEditBtn" hidden>Edit</button>
         </div>
+        <!-- Undo lives up here, not on the action bar: the action bar only
+             appears once a clause is selected, and the moment you most need
+             undo is right after something went wrong. -->
+        <button class="ce-undo" id="ceUndo" type="button" hidden>&#8630; Undo</button>
+        <button class="ce-undo" id="ceRedo" type="button" hidden>&#8631; Redo</button>
         <span class="ce-mode-note" id="ceModeNote"></span>
         <div class="ce-bar__spacer"></div>
         <button class="btn btn--ghost" id="ceImportDoc" type="button" hidden>Import documents…</button>
@@ -699,6 +776,15 @@
         </div>
       </div>
     </main>
+    <!-- The insert line. ONE element, positioned under the pointer, rather
+         than a drop zone rendered between every pair of clauses — 1,203 of
+         those is the per-clause toolbar mistake again. Fixed positioning off
+         getBoundingClientRect, so there is no offset-parent maths and no
+         dependence on anything render() rebuilds. -->
+    <div class="hb-ins" id="ceIns" hidden>
+      <button class="hb-ins__go" type="button" id="ceInsGo" title="Add a clause here">+</button>
+      <span class="hb-ins__line"></span>
+    </div>
     <div class="ce-scrim" id="ceScrim"></div>
   </div>
 </div>
@@ -735,6 +821,14 @@
     /* The in-flight save from the last blur, so the action bar can wait for it
        rather than committing a clone that has not seen the last thing typed. */
     pendingSave: null,
+    /* Undo. Every structural change and every text save goes through commit(),
+       which is the only write path — so one stack there covers the lot.
+       Snapshots of the whole area rather than inverse diffs: a diff has to be
+       right about what it undoes, a snapshot only has to be a copy, and
+       commit() already diffs a clone against S.nodes to work out the writes.
+       Capped, because a snapshot of League Rules is 560 nodes. Per-area:
+       cleared when the area changes, since the ids would not resolve. */
+    undo: [], redo: [], timeTravel: false,
     /* Transient, never persisted: "draw an empty heading field on this clause
        because the user just asked for one". Cleared when the selection moves,
        so an abandoned empty heading does not follow you down the document. */
@@ -1218,6 +1312,7 @@
 
   function syncBar() {
     $('ceEditBtn').hidden = !canEdit() || !S.docId;
+    syncUndoBtns();
     $('cePublish').hidden = !canEdit() || !S.docId || !Object.keys(S.nodes).length;
     /* IMPORT IS RETIRED FROM THE EVERYDAY BAR (19/08/2026). Seeding was a
        one-time job and it is done; what is left is two buttons that overwrite
@@ -1253,6 +1348,9 @@
     if (id === '__cover') { if (S.docId !== null) showCover(); return; }
     if (id === S.docId) return;
     S.docId = id; S.selectedId = null; S.mode = 'read';
+    /* The stacks hold node ids from the area being left. Carrying them across
+       would offer an undo that restores another area's clauses into this one. */
+    S.undo.length = 0; S.redo.length = 0; S.showTitleFor = null;
     if ($('ceSearch')) $('ceSearch').value = '';   // manual switch shows that area's outline
     closeDrawer();
     load();
@@ -1383,7 +1481,51 @@
   function global_HB_ready() { return !!(window.HB_DOCX && window.HB_DOCX.parse); }
 
   // Persist a clone as the new draft: diff against S.nodes, write changed + null-out removed.
+  var UNDO_MAX = 20;
+
+  /* Remember where we were, so it can be got back to. Called by commit() for
+     every change, which is the point: one stack on the single write path
+     covers structural ops and typing alike, and nothing can be added later
+     that quietly escapes it.
+
+     An undo is itself a commit, so it must not push its own before-state onto
+     the stack — S.timeTravel says "this commit IS the time travel". */
+  function pushUndo(label) {
+    if (S.timeTravel) return;
+    S.undo.push({ nodes: JSON.parse(JSON.stringify(S.nodes)), label: label || 'change' });
+    if (S.undo.length > UNDO_MAX) S.undo.shift();
+    /* A new change after undoing abandons the redo branch, as everywhere. */
+    S.redo.length = 0;
+  }
+
+  function timeTravel(from, to, verb) {
+    var step = from.pop();
+    if (!step) { NL.toast && NL.toast('Nothing to ' + verb, 'info'); return; }
+    to.push({ nodes: JSON.parse(JSON.stringify(S.nodes)), label: step.label });
+    S.timeTravel = true;
+    /* commit(), not previewThenCommit(): this is a restore, and a renumber
+       preview asking whether you meant to undo is the opposite of an undo. */
+    var done = commit(step.nodes, verb + ': ' + step.label);
+    Promise.resolve(done).then(function () {
+      S.timeTravel = false;
+      /* The selected clause may have been what was undone. */
+      if (S.selectedId && !S.nodes[S.selectedId]) S.selectedId = null;
+      syncUndoBtns(); syncActionBar();
+      NL.toast && NL.toast(verb === 'Undo' ? 'Undone: ' + step.label : 'Redone: ' + step.label, 'success');
+    });
+  }
+  function doUndo() { timeTravel(S.undo, S.redo, 'Undo'); }
+  function doRedo() { timeTravel(S.redo, S.undo, 'Redo'); }
+
+  function syncUndoBtns() {
+    var u = $('ceUndo'), r = $('ceRedo');
+    var on = (S.mode === 'edit' && canEdit() && !!S.docId);
+    if (u) { u.hidden = !on; u.disabled = !S.undo.length; u.title = S.undo.length ? 'Undo ' + S.undo[S.undo.length - 1].label + ' (Ctrl+Z)' : 'Nothing to undo'; }
+    if (r) { r.hidden = !on; r.disabled = !S.redo.length; r.title = S.redo.length ? 'Redo ' + S.redo[S.redo.length - 1].label + ' (Ctrl+Shift+Z)' : 'Nothing to redo'; }
+  }
+
   function commit(clone, label) {
+    pushUndo(label);
     var updates = {}, now = Date.now();
     var who = (S.session && (S.session.name || S.session.email)) || null;
     Object.keys(clone).forEach(function (id) {
@@ -1399,6 +1541,7 @@
       S.index = null; // search index is now stale
       NL.writeAudit && NL.writeAudit('edit', label);
       render();
+      syncUndoBtns();
       if (S.focusNew) { focusNode(S.focusNew); S.focusNew = null; }  // drop the cursor into a just-added clause
     }).catch(function (e) {
       NL.toast && NL.toast('Save failed: ' + (e && e.message || e), 'error');
@@ -1473,6 +1616,44 @@
     } catch (e) {}
   }
 
+  /* ================= Where a new clause will land =================
+     Richard: "it's almost impossible to know where I'm placing a new item."
+     He was right — "+ clause" adds after whatever happens to be selected, and
+     nothing on screen said which that was or where the result would appear.
+
+     So: hovering the document draws a line at the boundary a new clause would
+     land on, at the depth it would land at. The line IS the answer — it sits
+     between the two clauses it would sit between. Click the + to take it.
+
+     One element, moved. A drop zone rendered between every pair of clauses
+     would be 1,203 of them, which is the per-clause toolbar mistake again. */
+  var INS = { refId: null, where: null };
+
+  function hideInsert() {
+    INS.refId = null;
+    var el = $('ceIns'); if (el) el.hidden = true;
+  }
+
+  function showInsertFor(clauseEl, clientY) {
+    var el = $('ceIns'); if (!el) return;
+    var r = clauseEl.getBoundingClientRect();
+    /* Only near an edge. In the middle of a clause the pointer is over text
+       someone is reading, and a line through it is noise — the gap is the
+       gesture, so it has to be the gap that offers it. */
+    var edge = Math.min(14, r.height / 3);
+    var where = null;
+    if (clientY <= r.top + edge) where = 'before';
+    else if (clientY >= r.bottom - edge) where = 'after';
+    if (!where) { hideInsert(); return; }
+
+    INS.refId = clauseEl.dataset.id;
+    INS.where = where;
+    el.hidden = false;
+    el.style.left = r.left + 'px';
+    el.style.width = r.width + 'px';
+    el.style.top = ((where === 'before' ? r.top : r.bottom) - 1) + 'px';
+  }
+
   /* ================= Structural operations ================= */
   function newNode(parentId, numStyle, kind) {
     return { id: uid(), parentId: parentId, order: 0, kind: kind || 'clause', numStyle: numStyle || 'decimal', numberOverride: null, title: null, body: '' };
@@ -1488,6 +1669,11 @@
       S.selectedId = n.id; S.focusNew = n.id;
       previewThenCommit(c, 'Add clause after ' + id);
     },
+    /* Insert at a boundary the user pointed at, at that clause's own depth —
+       so the line they saw is where it goes. addAfter is the same thing with
+       the reference chosen for you. */
+    insertBefore: function (id) { insertRelative(id, 'before'); },
+    insertAfter: function (id) { insertRelative(id, 'after'); },
     addTable: function (id) {
       var c = clone(), t = c[id];
       var n = {
@@ -1547,7 +1733,19 @@
     delete: function (id) {
       var n = S.nodes[id];
       var kids = childrenOf(S.nodes, id).length;
-      NL.confirm('Delete this clause' + (kids ? ' and its ' + kids + ' sub-clause' + (kids === 1 ? '' : 's') : '') + '? This cannot be undone.', { confirmText: 'Delete', variant: 'danger' })
+      /* Say WHICH clause, and show its opening words. The action bar is no
+         longer beside what it acts on, so "this clause" is a question rather
+         than a statement — and on a 560-clause document, deleting the wrong
+         one is easy and quiet. */
+      var num = (S.numMap && S.numMap[id]) || '';
+      var gist = (n.title || String(n.body || '').replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+      if (gist.length > 90) gist = gist.slice(0, 89) + '\u2026';
+      NL.confirm(
+        'Delete <strong>' + esc(num || 'this clause') + '</strong>' +
+        (kids ? ' and its ' + kids + ' sub-clause' + (kids === 1 ? '' : 's') : '') + '?' +
+        (gist ? '<blockquote style="margin:10px 0;padding-left:10px;border-left:3px solid var(--border);color:var(--text-muted)">' + esc(gist) + '</blockquote>' : '') +
+        '<p style="margin:0">Undo will bring it back.</p>',
+        { confirmText: 'Delete', variant: 'danger', html: true })
         .then(function (ok) {
           if (!ok) return;
           var c = clone();
@@ -1558,6 +1756,19 @@
         });
     }
   };
+  function insertRelative(refId, where) {
+    var c = clone(), t = c[refId];
+    if (!t) return;
+    var n = newNode(t.parentId,
+      t.kind === 'bullet' ? 'bullet' : (t.numStyle || 'decimal'),
+      t.kind === 'bullet' ? 'bullet' : 'clause');
+    n.order = (t.order || 0) + (where === 'before' ? -0.5 : 0.5);
+    c[n.id] = n;
+    reindex(c, t.parentId);
+    S.selectedId = n.id; S.focusNew = n.id;
+    previewThenCommit(c, 'Add clause ' + where + ' ' + refId);
+  }
+
   function move(id, dir) {
     var c = clone(), t = c[id];
     var sibs = childrenOf(c, t.parentId);
@@ -1887,6 +2098,43 @@
       var id = S.selectedId, val = sel && sel.value;
       if (!sel || !id) return;
       afterPendingSave(function () { if (S.nodes[id]) OPS.style(id, val); });
+    });
+
+    /* The insert line follows the pointer down the document. */
+    doc.addEventListener('mousemove', function (e) {
+      if (S.mode !== 'edit' || !canEdit()) { hideInsert(); return; }
+      var cl = e.target.closest('.nl-clause, .nl-art');
+      if (!cl || !cl.dataset.id) { hideInsert(); return; }
+      showInsertFor(cl, e.clientY);
+    });
+    doc.addEventListener('mouseleave', hideInsert);
+    /* Scrolling moves the document under a line pinned to the viewport. */
+    doc.addEventListener('scroll', hideInsert);
+    $('ceInsGo').addEventListener('click', function () {
+      var ref = INS.refId, where = INS.where;
+      if (!ref) return;
+      hideInsert();
+      afterPendingSave(function () {
+        if (S.nodes[ref]) OPS[where === 'before' ? 'insertBefore' : 'insertAfter'](ref);
+      });
+    });
+
+    $('ceUndo').addEventListener('click', function () { afterPendingSave(doUndo); });
+    $('ceRedo').addEventListener('click', function () { afterPendingSave(doRedo); });
+
+    /* Undo has to reach the whole page, not only the document: the moment it
+       is wanted most is right after a structural change, when focus may be
+       anywhere or nowhere. */
+    document.addEventListener('keydown', function (e) {
+      if (S.mode !== 'edit' || !canEdit()) return;
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      var k = (e.key || '').toLowerCase();
+      if (k !== 'z' && k !== 'y') return;
+      e.preventDefault();
+      /* Ctrl+Z inside a contenteditable would otherwise undo a keystroke in
+         the browser's own buffer, which knows nothing about the clause tree
+         and would leave the two disagreeing. One undo, one meaning. */
+      afterPendingSave(k === 'y' || e.shiftKey ? doRedo : doUndo);
     });
 
     /* Keyboard for the four arrows. These are the bindings every outliner
