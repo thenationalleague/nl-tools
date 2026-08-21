@@ -287,13 +287,30 @@
     verify: NL.codeGate.viaFunction('app-data/club-codes'),
     claim: 'club'
   }).then(function (session) {
-    /* The bar states who the page thinks you are — the whole point of the
-       white .nl-idbar. Until this resolves it says nothing at all rather than
-       guessing. */
-    var sub = document.querySelector('.nl-idbar__sub');
-    if (sub) sub.textContent = clubLabel(session) || 'The National League';
+    /* HIDE THE GATE FIRST, and before anything that could throw.
+
+       NL.codeGate resolves its promise and leaves its own card on screen —
+       tearing it down is the caller's job, which every other consumer does
+       (uw-promo sets display none, club-directory sets hidden) and this page
+       did not. The effect was the worst kind of bug: a correct code worked,
+       the handbook rendered underneath, and the card stayed on top still
+       reading "Checking…" — so the thing that had succeeded looked like the
+       thing that had hung, and three separate innocent parties got blamed
+       for it, IAM twice.
+
+       Order matters. The shell is revealed and the gate removed before
+       clubLabel runs, because clubLabel reads clubs-meta and a throw there
+       must not be able to leave a working page invisible behind a spinner
+       again. */
+    var gate = document.getElementById('rdGate');
+    if (gate) gate.hidden = true;
     document.getElementById('rdShell').hidden = false;
     load();
+
+    try {
+      var sub = document.querySelector('.nl-idbar__sub');
+      if (sub) sub.textContent = clubLabel(session) || 'The National League';
+    } catch (_) { /* the bar keeps its default; the handbook still opens */ }
   });
 
   /* ---------- load ---------- */
