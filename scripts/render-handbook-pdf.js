@@ -261,8 +261,14 @@ let renderToken = null;
 async function initCredentials() {
   try {
     const admin = require('firebase-admin');
-    adminApp = admin.apps.length ? admin.app()
-      : admin.initializeApp({ databaseURL: RTDB });
+    /* admin.app() THROWS when no default app exists; that is the documented
+       way to ask. The obvious `admin.apps.length` is a v9 compat property that
+       firebase-admin v13 removed, so it reads undefined and throws
+       "Cannot read properties of undefined" — which the catch below then
+       reported as a credentials failure, on a runner whose credentials were
+       fine. Checked against the shipped SDK now rather than remembered. */
+    try { adminApp = admin.app(); }
+    catch (_) { adminApp = admin.initializeApp({ databaseURL: RTDB }); }
     renderToken = await admin.auth()
       .createCustomToken('handbook-renderer', { club: '*' });
     console.log('Credentials: service account, club:"*" claim minted');
