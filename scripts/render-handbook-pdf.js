@@ -260,16 +260,28 @@ let renderToken = null;
 
 async function initCredentials() {
   try {
-    const admin = require('firebase-admin');
-    /* admin.app() THROWS when no default app exists; that is the documented
-       way to ask. The obvious `admin.apps.length` is a v9 compat property that
-       firebase-admin v13 removed, so it reads undefined and throws
-       "Cannot read properties of undefined" — which the catch below then
-       reported as a credentials failure, on a runner whose credentials were
-       fine. Checked against the shipped SDK now rather than remembered. */
-    try { adminApp = admin.app(); }
-    catch (_) { adminApp = admin.initializeApp({ databaseURL: RTDB }); }
-    renderToken = await admin.auth()
+    /* SUBPATH IMPORTS, NOT THE ROOT NAMESPACE. firebase-admin is modular-only
+       from v13 on. Its root export is exactly this and nothing else:
+
+         applicationDefault, cert, deleteApp, getApp, getApps, initializeApp,
+         refreshToken   (+ the error classes and SDK_VERSION)
+
+       No `auth`, no `database`, no `app`, no `apps`. Two runs were burned
+       finding that out one property at a time — `admin.apps.length` first,
+       then `admin.auth is not a function` — because each fix was written from
+       memory of the v9 namespace API and shipped without checking. The list
+       above was read off the installed package, and tests/render-credentials
+       .test.mjs now fails the build if this file reaches for the old shape
+       again. */
+    const { initializeApp, getApps, getApp, applicationDefault } =
+      require('firebase-admin/app');
+    const { getAuth } = require('firebase-admin/auth');
+
+    adminApp = getApps().length ? getApp() : initializeApp({
+      credential: applicationDefault(),   // the ADC file the auth step exported
+      databaseURL: RTDB
+    });
+    renderToken = await getAuth(adminApp)
       .createCustomToken('handbook-renderer', { club: '*' });
     console.log('Credentials: service account, club:"*" claim minted');
   } catch (e) {
@@ -285,7 +297,8 @@ async function rtdb(p) {
   /* Admin reads bypass rules entirely, so this keeps working after the flip.
      The unauthenticated fetch stays as the fallback described above. */
   if (adminApp) {
-    const ref = adminApp.database().ref(p.replace(/^\//, '').replace(/\.json.*$/, ''));
+    const { getDatabase } = require('firebase-admin/database');
+    const ref = getDatabase(adminApp).ref(p.replace(/^\//, '').replace(/\.json.*$/, ''));
     /* One caller passes ?shallow=true. The admin read fetches the whole node
        instead — a few KB more over the wire for a keys-only use, and not worth
        a second code path to avoid. */
