@@ -15,6 +15,18 @@
   <link rel="apple-touch-icon" href="/assets/icons/apple-touch-icon.png">
 <!--
   club-directory / reader / index.html
+  v1.6 — (21/08/2026) The bar names your club, and "Not published" / "None
+         held" are yours alone. The bar said "Signed in by code" to someone
+         who had just signed in by code — it stated the one thing they already
+         knew and withheld the one thing they did not. It now names the club
+         whose code opened the page, resolved through the roster so a resumed
+         session (which carries the club KEY, not its name) says it too.
+         And the withheld markers are loud only on your own entry
+         (_directory.js v1.6, opts.showQuiet). On your own club they are a
+         to-do list — what the League is holding back, what it was never
+         given. On the other 71 they are a column of noise about a gap that is
+         none of your business. Same markup, decided by who is looking; the
+         editor is unchanged.
   v1.5 — (21/08/2026) It opens on YOUR club, and there is an index of all of
          them. The club code carries the club's key, so the page knows who is
          reading and can open on their entry — it used to open on Aldershot,
@@ -94,14 +106,14 @@
   Not lint-covered: no auth-guard, by design.
 -->
 <link rel="stylesheet" href="/system/nl-brand.css?v=48">
-<link rel="stylesheet" href="/club-directory/_directory.css?v=29">
+<link rel="stylesheet" href="/club-directory/_directory.css?v=30">
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="/system/nl-utils.js?v=43"></script>
-<script src="/club-directory/_gate.js?v=29"></script>
-<script src="/club-directory/_directory.js?v=29"></script>
+<script src="/club-directory/_gate.js?v=30"></script>
+<script src="/club-directory/_directory.js?v=30"></script>
 <script>
   firebase.initializeApp({
     apiKey:            "AIzaSyC3az3OMnU7TdqlaWp8yrO_EjgZ36l-mXU",
@@ -251,11 +263,22 @@
     paint();
   }
 
+  /* `club` is the club being RENDERED, not the club reading. showQuiet is
+     loud only where those are the same: "Not published" and "None held" are a
+     to-do list on your own entry and a column of noise on the other 71. */
   function viewOpts(extra) {
     var o = { cards: VIEW === 'cards', capsSurname: true };
     for (var k in (extra || {})) { o[k] = extra[k]; }
+    if (o.club != null) { o.showQuiet = isOwn(o.club); delete o.club; }
+    else { o.showQuiet = false; }
     return o;
   }
+
+  /* Resolved once ROSTER and the directory are both in, so it is a name
+     comparison rather than a guess. Empty for a Directory reader code, which
+     carries no club — so nobody who is not a club sees any of it. */
+  var OWN = '';
+  function isOwn(name) { return !!OWN && name === OWN; }
 
   /* Two doors, one card. A club types the SAME six characters that open the
      Handbook and Programme Packs; anyone else the League has given a
@@ -286,10 +309,6 @@
     /* codeGate does not take its own card down — the caller owns the mount and
        knows what replaces it. */
     $('gateWrap').hidden = true;
-    if (session && session.name) {
-      var sub = document.querySelector('.nl-idbar__sub');
-      if (sub) sub.textContent = session.name;
-    }
     $('signOut').addEventListener('click', function () {
       NL.codeGate.signOut().then(function () { location.reload(); });
     });
@@ -311,6 +330,14 @@
     PENDING = pub.pending || [];
     PUBLISHED_AT = pub.at || 0;
     names = Object.keys(ALL).sort();
+    /* Both of these need the roster AND the directory, so they happen here
+       rather than at the gate: the bar was saying "Signed in by code" to
+       someone who had just signed in by code, and a resumed session carries
+       no name at all — the claim is the club KEY, and the name comes back
+       through the roster. */
+    OWN = ownClub();
+    var sub = document.querySelector('.nl-idbar__sub');
+    if (sub) sub.textContent = OWN || (SESSION && SESSION.name) || 'The National League';
     if (!names.length) {
       $('out').innerHTML = '<p class="cd-empty">The directory has not been published ' +
         'yet. The National League goes through each club\u2019s details before they ' +
@@ -347,7 +374,7 @@
         'They appear here once the National League has been through them.</p>';
       return;
     }
-    var first = fromHash() || ownClub() || INDEX;
+    var first = fromHash() || OWN || INDEX;
     $('pick').value = first;
     draw(first);
     window.addEventListener('hashchange', function () {
@@ -465,7 +492,7 @@
       return;
     }
     rec.club = rec.club || name;
-    $('out').innerHTML = NLDirectory.renderClub(rec, viewOpts());
+    $('out').innerHTML = NLDirectory.renderClub(rec, viewOpts({ club: name }));
     var crest = document.getElementById('cdCrest');
     if (crest) {
       crest.alt = name + ' crest';
@@ -495,9 +522,9 @@
       return '<div class="cd-dept"><h3 class="cd-dept__h">' + esc(c) + '</h3>' +
         '<ul class="' + (cards ? 'cd-cards' : 'cd-rows') + '">' +
         byClub[c].sort(NLDirectory.bySurname).map(function (p) {
-          return cards ? NLDirectory.personCard(p, viewOpts())
+          return cards ? NLDirectory.personCard(p, viewOpts({ club: c }))
                        : NLDirectory.personRow(p, (NLDirectory.rolesOf(p)[0] || {}).section,
-                           viewOpts());
+                           viewOpts({ club: c }));
         }).join('') + '</ul></div>';
     }).join('') + '</div>';
   }

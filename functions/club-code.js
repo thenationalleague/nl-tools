@@ -24,21 +24,29 @@
  * withheld-contact markers and nobody else's. A club-shaped claim is not
  * tidiness; it is the mechanism that feature needs.
  *
- * FRESH CODES, NOT THE PROGRAMME ONES
- * -----------------------------------
- * Recycling the mechanism, not the codes. A code someone was handed for
- * matchday artwork must not silently become a key to a staff directory —
- * that is an access widening nobody decided, club by club. `config` here is a
- * new node and starts empty.
+ * THE PROGRAMME CODES, RELOCATED  (decided 21/08/2026)
+ * ----------------------------------------------------
+ * This file first said "fresh codes, not the Programme ones", on the grounds
+ * that a code handed out for matchday artwork should not silently become a key
+ * to a staff directory. That was overruled deliberately, and the reason is
+ * worth keeping: the Programme codes are IN THE WILD across 72 clubs, and
+ * reissuing them to gain a cleaner history would have meant 72 conversations
+ * and a long tail of people holding a code that no longer works. One
+ * credential, moved rather than replaced. The widening is the decision, taken
+ * once, rather than an accident.
  *
- * Migration is additive: `pClub` keeps working untouched while these are
- * issued. Programme Packs moves onto this claim last, once the 72 hold the new
- * code.
+ * Both claims are minted from both doors, so a club that signs in at either
+ * tool stays signed in at the other — signInWithCustomToken replaces the
+ * session, so minting one would make the two gates fight.
  *
- * THE SHAPE OF config  (never client-readable — rules deny outright)
- * -----------------------------------------------------------------
- *   config/clubs/<clubKey> = { name, code, revoked?, rotatedAt? }
- *   config/nl              = { name, code }        → claim 'club: "*"'
+ * THE SHAPE OF THE RECORDS  (never client-readable except by an admin)
+ * -------------------------------------------------------------------
+ *   clubs/<clubKey> = { name, passcode | code, revoked?, rotatedAt? }
+ *   nl              = { name, passcode | code }    → claim 'club: "*"'
+ *
+ * `passcode` is what the Programme console has always written and `code` is
+ * the club-codes vocabulary; both are read. See readCodes() for where they
+ * live and storedCode() for the field names.
  *
  * `revoked: true` is preferred over deleting a record, so an audit line still
  * resolves a departed club's uid to a name rather than showing a bare key.
@@ -319,8 +327,20 @@ exports.clubCodeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
        here must keep Programme Packs working, because the two gates otherwise
        fight: signInWithCustomToken replaces the session, so whichever was
        opened last would be the only one that worked. */
+    /* The NAME rides in the claims too, as `<claim>Name` — the shape
+       NL.codeGate.resume reads (`c[claim + 'Name']`). The grant payload
+       carries it as well, but a grant is answered once and a claim survives
+       every reload, so without this a returning club got an identity bar that
+       had forgotten which club it was and fell back to "The National League".
+       The page can resolve the key through the roster, and does; this means
+       it does not have to. */
+    const clubName = hit.rec.name ||
+      (hit.key === "NL" ? "National League" : hit.key);
     const customToken = await admin.auth()
-      .createCustomToken("cc-" + hit.key, { club: hit.key, pClub: hit.key });
+      .createCustomToken("cc-" + hit.key, {
+        club: hit.key, pClub: hit.key,
+        clubName: clubName, pClubName: clubName,
+      });
 
     logger.info("clubCodeAuth: club granted", { club: hit.key });
     /* `role` and `name` at the TOP LEVEL, because that is the shape
@@ -329,8 +349,6 @@ exports.clubCodeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
        nested `club` object, so the reader's identity bar had nothing to read
        and fell back to "The National League" on a club's own sign-in. The
        nested object stays for callers that want the pair together. */
-    const clubName = hit.rec.name ||
-      (hit.key === "NL" ? "National League" : hit.key);
     return grant({
       ok: true,
       customToken,
