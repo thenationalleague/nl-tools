@@ -114,11 +114,33 @@ function safeEqual(a, b) {
  * refuses to mint a passcode another club already holds. A `token` field may
  * still sit on old config records; nothing reads it.
  */
+/* The stored field is `passcode` on records this console has minted, and `code`
+   on anything written in the club-codes vocabulary. Both are read, because the
+   two doors now share one config and MUST agree on where a code lives: a record
+   readable by one function and not the other means a club is told their code is
+   wrong by one tool and let in by the other, which is the most confusing
+   possible way for this to fail. club-code.js has read both since the
+   relocation; this side did not, which is that exact failure waiting to happen
+   — and did happen, 21/08/2026. Identical to club-code.js's storedCode. */
+function storedCode(rec) {
+  return normCode((rec && (rec.passcode || rec.code)) || "");
+}
+
 function pickClub(cfg, code) {
   const clubs = (cfg && cfg.clubs) || {};
   const all = Object.keys(clubs).map((k) => ({ key: k, rec: clubs[k] }));
   if (cfg && cfg.nl) all.push({ key: "NL", rec: cfg.nl });
-  return all.find((c) => c.rec && safeEqual(normCode(c.rec.passcode), code)) || null;
+  /* An empty typed code matches nothing, and an empty STORED code is matched by
+     nothing. safeEqual('','') is true, so a half-finished record — a club added
+     before its code was minted — would otherwise open for anyone submitting a
+     blank. The caller's four-character floor covers it today, but that is one
+     guard in one caller; the door refuses on its own account. Same shape as
+     club-code.js, which got this line first. */
+  if (!code) return null;
+  return all.find((c) =>
+    c.rec && !c.rec.revoked &&
+    storedCode(c.rec) !== "" &&
+    safeEqual(storedCode(c.rec), code)) || null;
 }
 
 /* ---- Throttle ------------------------------------------------------------
