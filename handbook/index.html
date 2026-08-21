@@ -2,7 +2,14 @@
 <!--
   NL Tools — Handbook 2026-27
   Version: v0.62 (21/08/2026) — the editor gets a tree, and the reader keeps
-    its column. Four changes, all of them orientation rather than capability:
+    its column. Also bounds the restore-point offer, which had none: one
+    discard pinned an amber bar to the top of the review screen for the life
+    of the tool. Richard: "I am getting restore option on loop. Don't know
+    what it is supposed to do and can't see why I'd be repeatedly offered
+    it." A restore point is an undo, not an archive — it is offered for 24
+    hours, until the next publish settles the question, or until dismissed,
+    and the offer now says that putting the changes back replaces the whole
+    draft rather than just saying "restore". Four changes, all of them orientation rather than capability:
     the verbs for restructuring were all here, and almost nothing told you
     what you were restructuring.
 
@@ -487,7 +494,10 @@
           'The breadcrumb now follows the clause you have selected, and each ' +
             'part of it takes you there.',
           'The toolbar says which level you are on, and the indent and move ' +
-            'arrows grey out when they cannot be used.'
+            'arrows grey out when they cannot be used.',
+          'Fixed: the offer to put discarded changes back kept appearing ' +
+            'every time you opened the review. It now appears for a day ' +
+            'after a discard, says what it would do, and can be dismissed.'
         ]
       },
       {
@@ -1153,6 +1163,13 @@
     font-size: var(--text-xs);
   }
   .hb-rev__restore span { flex: 1 1 220px; min-width: 0; }
+  .hb-rev__dismiss {
+    flex: none; border: 0; background: none; cursor: pointer;
+    color: var(--text-muted); font-size: 18px; line-height: 1;
+    padding: 2px 6px; border-radius: var(--radius-sm);
+  }
+  .hb-rev__dismiss:hover { color: var(--text); background: var(--amber-light); }
+  .hb-rev__dismiss:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
   .hb-rev__discard {
     margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border);
     display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
@@ -3603,10 +3620,14 @@
        discard was pressed. */
     if (snap && snap.at) {
       out.push('<div class="hb-rev__restore"><span>' +
-        (snap.count ? esc(String(snap.count)) + (snap.count === 1 ? ' change was' : ' changes were') : 'Changes were') +
-        ' discarded on ' + esc(NL.formatDateTime(snap.at) || '') +
-        (snap.by ? ' by ' + esc(snap.by) : '') + '.</span>' +
-        '<button class="btn btn--sm btn--ghost" type="button" id="hbRestore" data-snap="' + esc(snap.id) + '">Restore them</button>' +
+        '<b>' + (snap.count ? esc(String(snap.count)) + (snap.count === 1 ? ' change was' : ' changes were') : 'Changes were') +
+        ' discarded</b> ' + esc(NL.timeAgo(snap.at) || '') +
+        (snap.by ? ' by ' + esc(snap.by) : '') +
+        '. Putting them back replaces the whole draft with how it stood before ' +
+        'that, in every area — anything edited since would go.</span>' +
+        '<button class="btn btn--sm btn--ghost" type="button" id="hbRestore" data-snap="' + esc(snap.id) + '">Put them back</button>' +
+        '<button class="hb-rev__dismiss" type="button" id="hbSnapNo" data-snap="' + esc(snap.id) + '"' +
+        ' aria-label="Stop offering this">&times;</button>' +
       '</div>');
     }
 
@@ -3717,11 +3738,48 @@
     });
   }
 
+  /* A RESTORE POINT IS AN UNDO, NOT AN ARCHIVE, and the first cut did not
+     know the difference: it offered the most recent one whenever the review
+     was opened, with no expiry, no dismissal and no test of whether it still
+     meant anything. One discard therefore pinned an amber bar to the top of
+     that screen for the life of the tool. Richard: "I am getting restore
+     option on loop. Don't know what it is supposed to do and can't see why
+     I'd be repeatedly offered it."
+
+     Three tests, and a restore point has to pass all of them to be offered:
+
+       FRESH     — regret about a discard arrives in minutes or hours, not
+                   days. After that it is not an undo any more.
+       UNSETTLED — a publish settles the question. The discarded changes are
+                   definitively not in the handbook, and putting them back
+                   into a draft that has since gone out is a new decision
+                   rather than a correction.
+       UNSEEN    — dismissed once is dismissed. Per snapshot, so the next
+                   discard offers itself normally.
+
+     The points themselves are still kept and still restorable; what is
+     bounded is how long one nags. */
+  var SNAP_OFFER_MS = 24 * 60 * 60 * 1000;
+  var SNAP_SEEN_KEY = 'nl_hb_snapshot_dismissed';
+
+  function snapDismissed(id) {
+    try { return localStorage.getItem(SNAP_SEEN_KEY) === id; } catch (e) { return false; }
+  }
+  function dismissSnap(id) {
+    try { localStorage.setItem(SNAP_SEEN_KEY, id); } catch (e) { /* private window */ }
+  }
+
   function latestSnapshot() {
     return db.ref(BASE + '/draft/snapshotIndex').once('value').then(function (snap) {
       var idx = snap.val() || {};
       var ids = Object.keys(idx).sort(function (a, b) { return (idx[b].at || 0) - (idx[a].at || 0); });
-      return ids.length ? Object.assign({ id: ids[0] }, idx[ids[0]]) : null;
+      if (!ids.length) return null;
+      var top = Object.assign({ id: ids[0] }, idx[ids[0]]);
+      if (!top.at) return null;
+      if (Date.now() - top.at > SNAP_OFFER_MS) return null;          // stale
+      if (PUB.publishedAt && PUB.publishedAt > top.at) return null;  // settled
+      if (snapDismissed(top.id)) return null;                        // seen
+      return top;
     })['catch'](function () { return null; });
   }
 
@@ -3916,6 +3974,12 @@
       if (back) back.addEventListener('click', function () {
         ctrl.close();
         restoreSnapshot(back.getAttribute('data-snap'));
+      });
+      var no = body.querySelector('#hbSnapNo');
+      if (no) no.addEventListener('click', function () {
+        dismissSnap(no.getAttribute('data-snap'));
+        var box = no.closest('.hb-rev__restore');
+        if (box) box.remove();
       });
       /* One row at a time. The modal stays open — reverting three clauses
          should not be three trips through the same screen — and each row

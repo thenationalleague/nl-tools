@@ -181,3 +181,54 @@ test('the gutters shrink on a phone', () => {
   assert.match(mob, /\.nl-art__num, \.nl-clause__num \{ min-width: 30px; \}/);
   assert.match(mob, /margin-left: -38px/, 'the hanging offset follows the gutter');
 });
+
+/* ------------------------------------------------- the restore point offer
+
+   Reported: "I am getting restore option on loop. Don't know what it is
+   supposed to do and can't see why I'd be repeatedly offered it."
+
+   Both halves were true. The first cut offered the most recent restore point
+   whenever the review was opened — no expiry, no dismissal, no test of
+   whether it still meant anything — so one discard pinned an amber bar to
+   the top of that screen for the life of the tool. And the button said
+   "Restore them" without saying that restoring replaces the whole draft, in
+   every area, with how it stood before the discard.
+
+   A restore point is an UNDO, not an archive. The points are still kept and
+   still restorable; what is bounded is how long one nags. */
+
+test('a restore point stops being offered once it is stale', () => {
+  /* Regret about a discard arrives in minutes or hours. After that it is not
+     an undo any more. */
+  assert.match(CODE, /SNAP_OFFER_MS = 24 \* 60 \* 60 \* 1000/);
+  assert.match(CODE, /Date\.now\(\) - top\.at > SNAP_OFFER_MS\) return null/);
+});
+
+test('publishing settles it', () => {
+  /* The discarded changes are then definitively not in the handbook, and
+     putting them back into a draft that has since gone out is a new decision
+     rather than a correction. */
+  assert.match(CODE, /PUB\.publishedAt && PUB\.publishedAt > top\.at\) return null/);
+});
+
+test('dismissed once is dismissed, per restore point', () => {
+  assert.match(CODE, /function snapDismissed/);
+  assert.match(CODE, /snapDismissed\(top\.id\)\) return null/);
+  assert.match(CODE, /localStorage\.setItem\(SNAP_SEEN_KEY, id\)/);
+  /* Per snapshot id, so the NEXT discard offers itself normally. */
+  assert.match(CODE, /localStorage\.getItem\(SNAP_SEEN_KEY\) === id/);
+});
+
+test('localStorage being unavailable does not take the review down', () => {
+  /* A private window throws on access, and this runs while rendering the
+     screen somebody opened to decide whether to publish. */
+  const fn = CODE.slice(CODE.indexOf('function snapDismissed('));
+  assert.match(fn.slice(0, 400), /catch \(e\) \{ return false; \}/);
+});
+
+test('the offer says what putting them back would do', () => {
+  /* "Restore them" is two words for replacing every clause in five areas. */
+  assert.match(CODE, /replaces the whole draft/);
+  assert.match(CODE, /anything edited since would go/);
+  assert.match(CODE, /hb-rev__dismiss/, 'and it can be sent away');
+});
