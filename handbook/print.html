@@ -231,65 +231,59 @@
     return Promise.all(waits);
   }
 
-  /* ---------- who is allowed to read this ----------
-     This page has TWO callers and they arrive completely differently, which is
-     the whole reason this block exists:
+  /* ---------- where the edition comes from ----------
+     Two callers, arriving completely differently, and the difference is the
+     whole reason this block exists:
 
        1. A CLUB, who opened reader.html, typed their code, and clicked
-          Download PDF. That opens this page in a new tab — a separate
-          document, but the same origin, so the Firebase session persists and
-          the club claim is simply already there. Nothing to type twice.
+          Download PDF. New tab, same origin, so the Firebase session persists
+          and the club claim is already there. They read RTDB like anyone else
+          and the rules decide. Nothing to type twice.
 
-       2. THE RENDERER, scripts/render-handbook-pdf.js, driving this page
-          through headless Chrome in an Action. It has no keyboard and no
-          session, so it injects a custom token before the page runs and we
-          sign in with that.
+       2. THE RENDERER, driving this page through headless Chrome in an
+          Action. It has no keyboard and no session — so it does not read RTDB
+          from here at all. It has ALREADY read the edition with admin access
+          on the Node side, and hands it over as window.__NL_EDITION.
 
-     Case 2 is why the handbook rules could not be gated when the reader's gate
-     shipped: the renderer had no credential of any kind and worked purely
-     because the nodes were world-readable. Gating them would have failed the
-     hourly render silently, frozen pdf-meta.json, and denied the print view
-     the reader falls back TO — unreachable by both routes, looking like a
-     caching problem. See system/club-code-plan.md §1.0a.
+     Case 2 used to sign in with an injected custom token, which meant minting
+     one, which meant iam.serviceAccounts.signBlob, which was denied on a
+     service account that already held Service Account Token Creator. Four
+     rounds of console-fiddling on a phone for a permission that turned out
+     not to be the problem.
 
-     The token is injected as a variable, never a query parameter: a URL ends
-     up in server logs, in the Actions log, and in the browser history of
-     anyone who is handed the link. */
-  function authed() {
-    var injected = window.__NL_RENDER_TOKEN;
-    return new Promise(function (resolve, reject) {
-      var off = firebase.auth().onAuthStateChanged(function (user) {
-        off();
-        /* An anonymous user is somebody's abandoned half-finished handshake,
-           not a session — it carries no claim and counts as nobody. */
-        if (user && !user.isAnonymous) return resolve(user);
-        if (!injected) {
-          return reject(new Error('NO_SESSION'));
-        }
-        firebase.auth().signInWithCustomToken(injected).then(resolve, reject);
-      });
+     So the token is gone. Handing over data the Node side has already
+     fetched is fewer moving parts than authenticating a second time to fetch
+     it again — and it cannot be broken later by an IAM policy nobody in this
+     organisation edits from one year to the next. See club-code-plan.md
+     §1.0a.
+
+     The club path is untouched: real users still go through the rules. */
+  function edition() {
+    if (window.__NL_EDITION) return Promise.resolve(window.__NL_EDITION);
+    return db.ref(BASE + '/publishedEditionId').once('value').then(function (s) {
+      var id = s.val();
+      if (!id) return null;
+      return db.ref(BASE + '/editions/' + id).once('value').then(function (s2) { return s2.val(); });
     });
   }
 
-  authed().then(function () {
-  return db.ref(BASE + '/publishedEditionId').once('value').then(function (s) {
-    var id = s.val();
-    if (!id) { document.getElementById('prDoc').innerHTML = '<p class="pr-state">The handbook has not been published yet.</p>'; return null; }
-    return db.ref(BASE + '/editions/' + id).once('value').then(function (s2) { return s2.val(); });
-  }).then(function (ed) {
-    if (!ed) return;
+  edition().then(function (ed) {
+    if (!ed) {
+      document.getElementById('prDoc').innerHTML =
+        '<p class="pr-state">The handbook has not been published yet.</p>';
+      return;
+    }
     render(ed);
     return ready().then(function () {
       if (/[?&]print=1/.test(location.search)) setTimeout(function () { window.print(); }, 150);
     });
-  });
   }).catch(function (e) {
-    /* Name the actual problem. "Could not be loaded" on a page reached by
-       clicking Download, when the real answer is "you are not signed in",
-       sends someone hunting a fault that is not there. */
+    /* Name the actual problem. A club arriving here without a session gets
+       PERMISSION_DENIED from the rules, and "could not be loaded" on a page
+       reached by clicking Download sends them hunting a fault that is not
+       there. The renderer never lands here — it is handed the edition. */
     var msg = String((e && e.message) || '');
-    var noSession = msg === 'NO_SESSION' || /permission[_ ]denied/i.test(msg);
-    document.getElementById('prDoc').innerHTML = noSession
+    document.getElementById('prDoc').innerHTML = /permission[_ ]denied/i.test(msg)
       ? '<p class="pr-state">Open the handbook and enter your club code first, then use Download PDF.</p>'
       : '<p class="pr-state">Sorry — the handbook could not be loaded. ' + esc(msg) + '</p>';
   });
