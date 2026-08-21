@@ -1,6 +1,29 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
+  Version: v0.61 (21/08/2026) — URGENT FIX. Reported from the live site:
+    every article in the Memorandum numbered "7", every article in the
+    Articles numbered "31", and every sub-clause gone. Seven and thirty-one
+    are the numbers of root articles in those two areas.
+
+    computeNumbers writes map[k.id] and renderNode reads numMap[node.id] —
+    the PROPERTY, not the key. A stored clause with no id property therefore
+    collapses a whole area onto map[undefined]: every clause renders whatever
+    the last one computed, and no child renders at all, because walk()
+    recurses on childrenOf(nodes, undefined).
+
+    "Discard all changes" (v0.59) wrote its clauses through strip(), which
+    does not include the id, and did it to all five areas at once. Every
+    writer before it passed whole node objects through, so nothing had ever
+    exercised the gap.
+
+    NOTHING WAS LOST. The keys, the text, the parents, the order and the
+    styles were all intact — only the redundant copy of the key inside the
+    value. normNode now stamps the id from the key on the way in, so the
+    draft repairs itself on the next load with no database write and no
+    migration, and the two writers that store a stripped clause put the id
+    back as well.
+
   Version: v0.60 (21/08/2026) — the missing middle. Undo was twenty deep,
     per-area and gone on reload; the only other restore points were
     publishes. So a bad edit made three weeks ago had exactly one remedy —
@@ -423,6 +446,15 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '21/08/2026',
+        version: 'v0.61',
+        items: [
+          'Fixed: after discarding changes, every article in an area showed ' +
+            'the same number and its sub-clauses did not appear. No text was ' +
+            'lost — reloading the page is enough.'
+        ]
+      },
       {
         date: '21/08/2026',
         version: 'v0.60',
@@ -1954,7 +1986,7 @@
       DOCS.forEach(function (d) {
         var doc = all[d.id]; if (!doc || !doc.nodes) return;
         var nodes = doc.nodes;
-        Object.keys(nodes).forEach(function (id) { normNode(nodes[id]); });
+        Object.keys(nodes).forEach(function (id) { normNode(nodes[id], id); });
         idx[d.id] = { title: (doc.meta && doc.meta.title) || docTitle(d.id), nodes: nodes, numMap: computeNumbers(nodes) };
       });
       S.index = idx;
@@ -2375,7 +2407,7 @@
       var meta = res[0].val(), nodes = res[1].val() || {};
       if (meta) S.doc = Object.assign(S.doc, meta);
       // Restore fields Firebase drops/coerces (null parentId, sparse table arrays).
-      Object.keys(nodes).forEach(function (id) { normNode(nodes[id]); });
+      Object.keys(nodes).forEach(function (id) { normNode(nodes[id], id); });
       S.nodes = nodes;
       render();
     }).catch(function (e) {
@@ -2576,8 +2608,25 @@
     });
   }
   function strip(n) { return { parentId: n.parentId, order: n.order, kind: n.kind, numStyle: n.numStyle, numberOverride: n.numberOverride, title: n.title, body: n.body, table: n.table || null }; }
-  // Firebase returns arrays as objects when sparse — coerce a node's table back to arrays.
-  function normNode(n) {
+  /* Firebase returns arrays as objects when sparse — coerce a node's table back
+     to arrays. Also stamps the id.
+
+     THE ID IS THE KEY, and storing a second copy of it inside the value was
+     always the fragile half of that. computeNumbers writes map[k.id] and
+     renderNode reads numMap[node.id]: both use the PROPERTY, so a node whose
+     stored value happens not to carry one collapses the whole area onto
+     map[undefined] — every clause shows the same number and no child renders
+     at all, because walk() recurses on childrenOf(nodes, undefined).
+
+     That is not hypothetical. "Discard all changes" (v0.59) wrote its clauses
+     through strip(), which does not include the id, and did it to all five
+     areas at once. Every writer before it had passed whole node objects
+     through, so nothing had ever exercised the gap.
+
+     Stamping here fixes the draft on the next load with no database write and
+     no migration: the keys were never damaged, only the copy. */
+  function normNode(n, id) {
+    if (id !== undefined) n.id = id;
     if (n.parentId === undefined) n.parentId = null;
     if (n.order === undefined) n.order = 0;
     if (n.table) {
@@ -3183,7 +3232,7 @@
         var drfNodes = (draft[d.id] && draft[d.id].nodes) || {};
         var drf = {}, pub = {}, pubNum = {};
         Object.keys(drfNodes).forEach(function (id) {
-          drf[id] = normNode(Object.assign({}, drfNodes[id]));
+          drf[id] = normNode(Object.assign({}, drfNodes[id]), id);
         });
         var snap = r[i + 1] && r[i + 1].val();
         /* An edition stores its clauses as an array; Firebase hands a sparse
@@ -3191,7 +3240,7 @@
         (snap ? (Array.isArray(snap) ? snap : Object.keys(snap).map(function (k) { return snap[k]; })) : [])
           .forEach(function (nd) {
             if (!nd || !nd.id) return;
-            pub[nd.id] = normNode(Object.assign({}, nd));
+            pub[nd.id] = normNode(Object.assign({}, nd), nd.id);
             pubNum[nd.id] = nd.number || '';
           });
         /* Kept so a single clause can be put back without reading the
@@ -3246,7 +3295,8 @@
       if (wasParent !== null && !area.drf[wasParent]) {
         return Promise.reject(new Error('the clause this sat under is no longer in the draft — put that back first'));
       }
-      var v = strip(normNode(Object.assign({}, was)));
+      var v = strip(normNode(Object.assign({}, was), id));
+      v.id = id;   // see discardAll — strip() does not carry it
       Object.keys(v).forEach(function (k) { if (v[k] == null) delete v[k]; });
       updates[id] = v;
     }
@@ -3584,7 +3634,11 @@
                edition carries none, and stamping every clause as edited
                today by whoever pressed the button would be a lie told 560
                times. */
-            var v = strip(normNode(Object.assign({}, nd)));
+            var v = strip(normNode(Object.assign({}, nd), nd.id));
+            /* strip() drops the id, and this is the one writer that does not
+               pass a whole node through. Put it back: a stored clause with no
+               id property is what collapsed every area onto one number. */
+            v.id = nd.id;
             Object.keys(v).forEach(function (k) { if (v[k] == null) delete v[k]; });
             updates[nd.id] = v;
           });
@@ -3736,7 +3790,7 @@
             DOCS.forEach(function (d) {
               var doc = all[d.id]; if (!doc || !doc.nodes) return;
               var nodes = doc.nodes;
-              Object.keys(nodes).forEach(function (id) { normNode(nodes[id]); });
+              Object.keys(nodes).forEach(function (id) { normNode(nodes[id], id); });
               var numMap = computeNumbers(nodes);
               var meta = doc.meta || { title: docTitle(d.id) };
               var snapshot = Object.keys(nodes).map(function (id) {

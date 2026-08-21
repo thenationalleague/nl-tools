@@ -638,3 +638,52 @@ test('a revert keeps the cached draft honest for the next one', () => {
   const fn = CODE.slice(CODE.indexOf('function revertOne('));
   assert.match(fn.slice(0, 3000), /delete area\.drf\[id\]/);
 });
+
+/* ------------------------------------------------------ the id is the key
+
+   Reported from the live site: every article in the Memorandum numbered "7",
+   every article in the Articles numbered "31", and every sub-clause missing.
+   Seven and thirty-one are the number of root articles in those two areas.
+
+   computeNumbers writes map[k.id] and renderNode reads numMap[node.id] — the
+   PROPERTY, not the key. A stored clause with no id property therefore
+   collapses the whole area onto map[undefined]: every clause renders whatever
+   the last one computed, and no child renders at all, because walk() recurses
+   on childrenOf(nodes, undefined).
+
+   "Discard all changes" wrote its clauses through strip(), which does not
+   include the id, and did it to all five areas at once. Every writer before it
+   passed whole node objects through, so nothing had ever exercised the gap.
+
+   Nothing was lost — the keys, the text, the parents and the order were all
+   intact, only the redundant copy of the key inside the value. */
+
+test('nodes are stamped with their key on the way in', () => {
+  /* The fix that matters: it repairs a damaged draft on the next page load,
+     with no database write and no migration. */
+  assert.match(CODE, /function normNode\(n, id\)/);
+  assert.match(CODE, /if \(id !== undefined\) n\.id = id;/);
+  assert.match(CODE, /normNode\(nodes\[id\], id\)/,
+    'load() has the key in hand and must pass it');
+});
+
+test('every writer that strips a node puts the id back', () => {
+  /* strip() is the stored shape and deliberately has no id. The two callers
+     that write a stripped node rather than a whole one have to restore it. */
+  const stripDef = /function strip\(n\) \{ return \{([^}]*)\}/.exec(CODE);
+  assert.ok(stripDef, 'strip() still exists');
+  assert.ok(!/\bid\b/.test(stripDef[1]), 'strip() does not carry the id — that is the trap');
+
+  for (const fn of ['discardAll', 'revertOne']) {
+    const body = CODE.slice(CODE.indexOf('function ' + fn + '('));
+    assert.match(body.slice(0, 4000), /v\.id = /,
+      `${fn} writes stripped clauses and must restore the id`);
+  }
+});
+
+test('the diff reads nodes with their keys too', () => {
+  /* loadForReview computes numbers over the draft, so it had the same defect
+     and would have shown a review full of identical clause numbers. */
+  assert.match(CODE, /drf\[id\] = normNode\(Object\.assign\(\{\}, drfNodes\[id\]\), id\)/);
+  assert.match(CODE, /pub\[nd\.id\] = normNode\(Object\.assign\(\{\}, nd\), nd\.id\)/);
+});
