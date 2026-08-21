@@ -1,6 +1,19 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
+  Version: v0.59 (21/08/2026) — a way back. "Discard all changes" sits at the
+    foot of the review and puts the whole draft — all five areas — back to
+    the published edition, exactly as it stands: typed to confirm, refused
+    while another admin has an area open, and byte-identical afterwards, so
+    the next review reports nothing to publish rather than nearly nothing.
+
+    And undo now steps BACK rather than forward. It went through commit(),
+    which stamps every changed clause with the time and the person — so
+    undoing an accidental edit put the old words back and recorded the
+    clause as changed a moment ago, by you. A restore now carries the
+    original stamps, and the clause ends up as it was rather than as a new
+    thing that resembles it.
+
   Version: v0.58 (21/08/2026) — a denied read is no longer reported as an
     empty one. Before the RTDB rules widened, checkPublished could not read
     publishedEditionId, so the review announced "nothing has been published
@@ -391,6 +404,16 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '21/08/2026',
+        version: 'v0.59',
+        items: [
+          'Discard all changes — at the foot of the review, puts the whole ' +
+            'draft back to the published edition.',
+          'Undo puts a clause back as it was, rather than re-saving the old ' +
+            'wording as a fresh change by you.'
+        ]
+      },
       {
         date: '21/08/2026',
         version: 'v0.58',
@@ -1005,6 +1028,14 @@
   .hb-rev__num { font-variation-settings: 'wght' 800; color: var(--navy); }
   .hb-rev__lbl { color: var(--text); min-width: 0; overflow-wrap: anywhere; }
   .hb-rev__diff, .hb-rev__note { margin: 0; }
+  .hb-rev__discard {
+    margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border);
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  .hb-rev__discard p {
+    flex: 1 1 220px; min-width: 0; margin: 0;
+    font-size: var(--text-xs); color: var(--text-muted);
+  }
   .hb-rev__note { color: var(--text-muted); font-size: var(--text-xs); }
   .hb-rev ins, .hb-rev del { text-decoration: none; border-radius: 3px; padding: 0 2px; }
   .hb-rev ins { background: var(--green-light); color: var(--green); }
@@ -2405,7 +2436,11 @@
     S.timeTravel = true;
     /* commit(), not previewThenCommit(): this is a restore, and a renumber
        preview asking whether you meant to undo is the opposite of an undo. */
-    var done = commit(step.nodes, verb + ': ' + step.label);
+    /* keepStamps: this is a restoration, not an edit. The clause goes back to
+       exactly what it was — including who last changed it and when — so
+       undoing an accidental edit leaves no trace of the edit OR of the undo
+       on the clause itself. */
+    var done = commit(step.nodes, verb + ': ' + step.label, { keepStamps: true });
     Promise.resolve(done).then(function () {
       S.timeTravel = false;
       /* The selected clause may have been what was undone. */
@@ -2424,14 +2459,22 @@
     if (r) { r.hidden = !on; r.disabled = !S.redo.length; r.title = S.redo.length ? 'Redo ' + S.redo[S.redo.length - 1].label + ' (Ctrl+Shift+Z)' : 'Nothing to redo'; }
   }
 
-  function commit(clone, label) {
+  /* opts.keepStamps — a RESTORE puts back what was there, stamps included.
+     Without it, undo wrote the old text back and stamped it as edited just
+     now, by you: the clause read "changed a moment ago" when what actually
+     happened was that a change was taken away. An undo that leaves its own
+     fingerprints has not stepped back, it has stepped forward into a state
+     that looks like the old one. */
+  function commit(clone, label, opts) {
+    opts = opts || {};
     pushUndo(label);
     var updates = {}, now = Date.now();
     var who = (S.session && (S.session.name || S.session.email)) || null;
     Object.keys(clone).forEach(function (id) {
       var a = clone[id], b = S.nodes[id];
       if (!b || JSON.stringify(strip(a)) !== JSON.stringify(strip(b))) {
-        a.updatedAt = now; a.updatedBy = who; updates[id] = a;
+        if (!opts.keepStamps) { a.updatedAt = now; a.updatedBy = who; }
+        updates[id] = a;
       }
     });
     Object.keys(S.nodes).forEach(function (id) { if (!clone[id]) updates[id] = null; });
@@ -3181,7 +3224,135 @@
           REV_MAX + '.</p>' : '') +
       '</section>');
     });
+
+    /* The way out, at the bottom of the list rather than in the footer beside
+       Publish. Same reasoning as the glyph buttons one tool over: two
+       consequential actions sitting next to each other are two actions you
+       can confuse. You read what changed, and then at the foot of it there
+       is the other answer. */
+    if (n) {
+      out.push('<div class="hb-rev__discard">' +
+        '<p>Not right? Put the draft back to the published edition' +
+          (when ? ' of ' + esc(when) : '') + '. All ' + n +
+          (n === 1 ? ' change goes' : ' changes go') + ', in every area, and undo will not bring them back.</p>' +
+        '<button class="btn btn--sm btn--danger" type="button" id="hbDiscard">Discard all changes</button>' +
+      '</div>');
+    }
     return out.join('');
+  }
+
+  /* ---- Discard: put the draft back to the published edition ----------
+     The counterpart to Publish, and the reason it lives inside the review
+     rather than on the bar: the button that throws the changes away belongs
+     beside the list of what they are, not two along from the one that sends
+     them to 72 clubs.
+
+     It restores, it does not "undo". The undo stack is 20 deep and per-area;
+     this is every area, however long ago, and it is exact — the draft comes
+     back byte-identical to the edition, so the review afterwards reports
+     nothing to publish rather than "nearly nothing". */
+  function discardAll() {
+    if (!PUB.id) return Promise.resolve();
+    /* SOMEONE ELSE MAY BE IN THERE. This rewrites all five areas, so an
+       area another admin has open is their work being deleted from under
+       them — the one case the edit lock exists for, and the one place that
+       had no check because nothing before this wrote outside the open
+       area. */
+    return NL.ensureAuth()
+      .then(function () { return db.ref(BASE + '/draft/locks').once('value'); })
+      .then(function (snap) {
+        var locks = snap.val() || {};
+        var held = Object.keys(locks).filter(function (k) {
+          return !lockIsMine(locks[k]) && !lockIsStale(locks[k]);
+        });
+        if (held.length) {
+          var who = held.map(function (k) { return (locks[k].name || 'Someone') + ' (' + docTitle(k) + ')'; });
+          NL.alert && NL.alert(who.join(', ') + ' is editing right now. Discarding would delete their work as well as yours.',
+            { title: 'Someone else is in the handbook' });
+          return null;
+        }
+        return NL.prompt(
+          'This puts the whole handbook draft — all five areas — back to the published edition, exactly as it stands. ' +
+          'Every change made since is gone, and undo will not bring it back.\n\nType DISCARD to confirm.',
+          { title: 'Discard all unpublished changes', confirmText: 'Discard changes' }
+        );
+      })
+      .then(function (word) {
+        if (word === null || word === undefined) return null;
+        if ((word || '').trim().toUpperCase() !== 'DISCARD') {
+          NL.toast && NL.toast('Nothing discarded', 'info');
+          return null;
+        }
+        var reads = [];
+        DOCS.forEach(function (d) {
+          var base = BASE + '/editions/' + PUB.id + '/docs/' + d.id;
+          reads.push(Promise.all([
+            db.ref(base + '/nodes').once('value'),
+            db.ref(base + '/title').once('value'),
+            db.ref(base + '/subtitle').once('value'),
+            db.ref(base + '/season').once('value')
+          ]));
+        });
+        return Promise.all(reads);
+      })
+      .then(function (all) {
+        if (!all) return null;
+        var writes = [];
+        DOCS.forEach(function (d, i) {
+          var snap = all[i][0].val();
+          var list = snap ? (Array.isArray(snap) ? snap : Object.keys(snap).map(function (k) { return snap[k]; })) : [];
+          /* An area with no clauses in the edition is left ALONE rather than
+             emptied. The publish loop skips an area with no nodes, so an
+             empty snapshot means "this was never published", not "this was
+             published empty" — and wiping a draft on that reading would
+             delete an area nobody had got round to publishing yet. */
+          if (!list.length) return;
+          var updates = {}, keep = {};
+          list.forEach(function (nd) {
+            if (!nd || !nd.id) return;
+            keep[nd.id] = true;
+            /* strip() is what the edition was built with, so this puts back
+               exactly the stored fields and no others. No updatedAt: the
+               edition carries none, and stamping every clause as edited
+               today by whoever pressed the button would be a lie told 560
+               times. */
+            var v = strip(normNode(Object.assign({}, nd)));
+            Object.keys(v).forEach(function (k) { if (v[k] == null) delete v[k]; });
+            updates[nd.id] = v;
+          });
+          writes.push(
+            db.ref(BASE + '/draft/docs/' + d.id + '/nodes').once('value').then(function (cur) {
+              Object.keys(cur.val() || {}).forEach(function (id) { if (!keep[id]) updates[id] = null; });
+              return db.ref(BASE + '/draft/docs/' + d.id + '/nodes').update(updates);
+            }).then(function () {
+              return db.ref(BASE + '/draft/docs/' + d.id + '/meta').update({
+                title: all[i][1].val() || docTitle(d.id),
+                subtitle: all[i][2].val() || '',
+                season: all[i][3].val() || ''
+              });
+            })
+          );
+        });
+        return Promise.all(writes).then(function () { return true; });
+      })
+      .then(function (ok) {
+        if (!ok) return;
+        /* The stack refers to states that no longer exist anywhere. Keeping
+           it would offer to "undo" the discard and silently reinstate half
+           of one area. */
+        S.undo.length = 0; S.redo.length = 0;
+        S.index = null;
+        touchDraft();
+        NL.writeAudit && NL.writeAudit('discard', 'Discarded all unpublished changes');
+        return load().then(function () {
+          return checkPublished();
+        }).then(function () {
+          PUB.count = 0; syncChanges(); syncUndoBtns();
+          NL.toast && NL.toast('The draft is back to the published edition', 'success');
+        });
+      })['catch'](function (e) {
+        NL.toast && NL.toast('Could not discard: ' + ((e && e.message) || e), 'error');
+      });
   }
 
   function reviewChanges() {
@@ -3205,6 +3376,14 @@
       PUB.count = HB_DIFF.total(areas);
       syncChanges();
       body.innerHTML = reviewHtml(areas);
+      var kill = body.querySelector('#hbDiscard');
+      if (kill) kill.addEventListener('click', function () {
+        /* Close first. The discard reloads the area underneath and its own
+           confirmation is the guard — leaving a list of changes on screen
+           that no longer exist is the worse end state. */
+        ctrl.close();
+        discardAll();
+      });
     })['catch'](function (e) {
       body.innerHTML = '<p class="hb-rev__sum">Could not read the published edition: ' +
         esc((e && e.message) || e) + '</p>';

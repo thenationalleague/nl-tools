@@ -452,3 +452,77 @@ test('opening the review re-checks rather than trusting page load', () => {
     'the rules may have been deployed, or a colleague may have published, ' +
     'since this page loaded');
 });
+
+/* ----------------------------------------------- stepping back, not forward
+
+   Two requests, one idea: taking a change away should leave the document as
+   though the change never happened — not as though a second change had been
+   made on top of it. */
+
+test('an undo restores the stamps, so the clause is what it was', () => {
+  /* commit() writes updatedAt/updatedBy on every changed clause. Undo goes
+     through commit(), so undoing an accidental edit used to put the old text
+     back and stamp it "changed a moment ago, by you". The wording stepped
+     back and the record stepped forward. */
+  assert.match(CODE, /function commit\(clone, label, opts\)/);
+  assert.match(CODE, /if \(!opts\.keepStamps\) \{ a\.updatedAt = now; a\.updatedBy = who; \}/);
+  assert.match(CODE, /commit\(step\.nodes, verb \+ ': ' \+ step\.label, \{ keepStamps: true \}\)/,
+    'time travel is a restoration, not an edit');
+});
+
+test('discard puts back the edition exactly, stamps and all', () => {
+  /* Editions are built with strip(), which carries no updatedAt — so a
+     discarded draft has none either, and is byte-identical to what was
+     published. Stamping 560 clauses as edited today by whoever pressed the
+     button would be a lie told 560 times, and it would make the very next
+     review report a document that matches the edition as "changed". */
+  const fn = CODE.slice(CODE.indexOf('function discardAll('));
+  const body = fn.slice(0, fn.indexOf('\n  function '));
+  assert.match(body, /strip\(normNode\(/);
+  assert.ok(!/updatedAt = /.test(body), 'no fresh stamps on a restore');
+});
+
+test('discard removes draft clauses the edition does not have', () => {
+  /* An update() of the published clauses alone leaves anything ADDED since
+     sitting in the draft — a discard that discards most of it. */
+  const fn = CODE.slice(CODE.indexOf('function discardAll('));
+  assert.match(fn.slice(0, 4000), /if \(!keep\[id\]\) updates\[id\] = null;/);
+});
+
+test('discard leaves an area the edition never carried alone', () => {
+  /* publish() skips an area with no nodes, so an empty snapshot means "never
+     published", not "published empty". Treating those the same would delete
+     an area nobody had got round to publishing. */
+  const fn = CODE.slice(CODE.indexOf('function discardAll('));
+  assert.match(fn.slice(0, 4000), /if \(!list\.length\) return;/);
+});
+
+test('discard refuses while someone else is editing', () => {
+  /* It rewrites all five areas, so an area another admin has open is their
+     work being deleted from under them. Everything before this only ever
+     wrote inside the open area, which is why the lock had never needed
+     checking here. */
+  const fn = CODE.slice(CODE.indexOf('function discardAll('));
+  const body = fn.slice(0, 4000);
+  assert.match(body, /draft\/locks/);
+  assert.match(body, /!lockIsMine\(locks\[k\]\) && !lockIsStale\(locks\[k\]\)/,
+    'someone else, and still live — my own lock and a dead one are both fine');
+  assert.match(body, /is editing right now/);
+});
+
+test('discard is typed to confirm and clears the undo stack', () => {
+  const fn = CODE.slice(CODE.indexOf('function discardAll('));
+  const body = fn.slice(0, 5000);
+  assert.match(body, /!== 'DISCARD'/);
+  assert.match(body, /S\.undo\.length = 0; S\.redo\.length = 0;/,
+    'the stack points at states that no longer exist — offering to undo the ' +
+    'discard would reinstate half of one area');
+});
+
+test('discard sits in the review, not beside Publish', () => {
+  assert.match(CODE, /id="hbDiscard"/);
+  const body = CODE.slice(CODE.indexOf('function reviewHtml('), CODE.indexOf('function discardAll('));
+  assert.match(body, /hb-rev__discard/);
+  /* And only when there is something to discard. */
+  assert.match(body, /if \(n\) \{[\s\S]{0,200}hb-rev__discard/);
+});
