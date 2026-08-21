@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
+  Version: v0.58 (21/08/2026) — a denied read is no longer reported as an
+    empty one. Before the RTDB rules widened, checkPublished could not read
+    publishedEditionId, so the review announced "nothing has been published
+    yet" over a handbook with previous editions behind it. Not knowing and
+    knowing there is nothing are different answers; the first now names its
+    own cause. Opening the review also re-checks rather than trusting what
+    the page found on load.
+
   Version: v0.57 (21/08/2026) — you can see what you have not published yet.
     The bar carries an amber "Not published" pill the moment the draft is
     newer than the live edition, and pressing it opens a review: what was
@@ -352,7 +360,7 @@
   <title>Handbook 2026-27 — NL Tools</title>
 
   <!-- Brand stylesheet (lint canonical: ?v=45) -->
-  <link rel="stylesheet" href="/system/nl-brand.css?v=56">
+  <link rel="stylesheet" href="/system/nl-brand.css?v=57">
 
   <!-- Firebase 10.12.0 SDK (compat) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -383,6 +391,14 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '21/08/2026',
+        version: 'v0.58',
+        items: [
+          'Fixed: the review said nothing had ever been published when it ' +
+            'simply could not read the published edition.'
+        ]
+      },
       {
         date: '21/08/2026',
         version: 'v0.57',
@@ -2978,6 +2994,9 @@
      documents. */
   function checkPublished() {
     if (!canEdit()) return Promise.resolve();
+    /* Cleared on every run, or a denial before the rules landed sticks for
+       the life of the page and keeps reporting itself after it is fixed. */
+    PUB.error = false;
     return NL.ensureAuth().then(function () {
       return Promise.all([
         db.ref(BASE + '/publishedEditionId').once('value'),
@@ -3105,7 +3124,15 @@
     var out = [];
 
     out.push('<p class="hb-rev__sum">' + (
-      !PUB.id
+      /* A DENIED READ IS NOT AN EMPTY ONE, and this told the wrong story
+         once already: before the rules widened, checkPublished could not
+         read publishedEditionId, PUB.id stayed null, and the review
+         announced "nothing has been published yet" over a handbook with
+         previous editions behind it. Not knowing and knowing there is
+         nothing are different answers. */
+      PUB.error
+        ? 'Could not read the published edition, so there is nothing to compare the draft against. This is usually the RTDB rules — ask for the “Deploy RTDB rules” workflow to be run for nl-tools.'
+        : !PUB.id
         ? 'Nothing has been published yet. Publishing now creates the first edition, containing everything in the draft.'
         : (n === 0
             ? 'The draft matches the published edition' + (when ? ' of ' + esc(when) : '') + '. There is nothing to publish.'
@@ -3118,7 +3145,7 @@
         (renum === 1 ? ' clause was renumbered' : ' clauses were renumbered') +
         ' as a result. Their wording has not changed, so they are not listed.</p>');
     }
-    if (!PUB.id) return out.join('');
+    if (PUB.error || !PUB.id) return out.join('');
 
     var shown = 0;
     DOCS.forEach(function (d) {
@@ -3171,7 +3198,10 @@
           onClick: function (c) { c.close(); publish(); } }
       ]
     });
-    loadForReview().then(function (areas) {
+    /* Re-check first. The boot check may have run before the rules were
+       deployed, or before a colleague published; a review that reports the
+       state of the page load rather than of now is worth nothing. */
+    Promise.resolve(checkPublished()).then(loadForReview).then(function (areas) {
       PUB.count = HB_DIFF.total(areas);
       syncChanges();
       body.innerHTML = reviewHtml(areas);
