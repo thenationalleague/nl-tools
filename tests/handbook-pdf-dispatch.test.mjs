@@ -62,16 +62,20 @@ test('the branch it dispatches against is the one the workflow lives on', () => 
     'PRs land on main; dispatching a branch that does not exist is a 422');
 });
 
-test('owner and repo match where this repository actually is', () => {
+test('it dispatches the repository this actually is', () => {
   /* Renamed once already — thenationalleague/tools became nl-tools on
-     16/08/2026 when the repo moved to the organisation. A stale name here
-     would 404 in the same unreadable way. */
-  const cfg = readFileSync(join(REPO, '.git/config'), 'utf8');
-  const url = /url = (.+)/.exec(cfg);
-  assert.ok(url, 'no git remote to check against');
-  const slug = constant('OWNER') + '/' + constant('REPO');
-  assert.ok(url[1].includes(slug),
-    `dispatches ${slug} but the remote is ${url[1].trim()}`);
+     16/08/2026 when the repo moved to the organisation — and a stale name
+     here 404s in the same unreadable way as a typo.
+
+     Pinned as a LITERAL, not compared against the local git remote. The
+     first version of this test did that and failed a correct function: a
+     clone can still carry the pre-rename URL, because GitHub redirects it
+     and git never has to notice. An oracle that is itself allowed to be
+     stale is not an oracle. */
+  assert.equal(constant('OWNER'), 'thenationalleague');
+  assert.equal(constant('REPO'), 'nl-tools',
+    'the repository is nl-tools; `tools` is the pre-rename name and only ' +
+    'works for git, via a redirect the REST API does not follow');
 });
 
 test('a refused dispatch is logged, never thrown', () => {

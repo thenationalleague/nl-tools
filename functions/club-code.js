@@ -197,6 +197,63 @@ async function readCodes(db, who) {
   return {};
 }
 
+/* ---- Usage log -----------------------------------------------------------
+
+   WHO USED A CODE, WHEN, AND WHICH TOOL THEY OPENED WITH IT.
+
+   Until now: nothing. Both doors minted a token and returned. The comments in
+   this file talk about the audit trail naming a person — and the trail was
+   never written, so every club-code sign-in since launch is unrecorded and
+   cannot be recovered. This starts the record; it does not backdate it.
+
+   WHAT IS STORED, AND WHAT IS NOT. The userId, never the person's name. The
+   name already lives one node away in the code record, so writing it here
+   would be a second copy that goes stale the moment someone is renamed — the
+   admin page resolves it at display time instead. The CODE is never written,
+   here or anywhere: a log holding the credential it logs the use of is a
+   second place to steal it from.
+
+   FLAT, not nested under the club. "The last 200 sign-ins across the estate"
+   is the question this gets asked, and under usage/<club>/<push> that means
+   reading every entry ever written and sorting in the browser —
+   limitToLast on the parent returns the last CLUBS, not the last uses. Flat
+   with the club as a field, indexed on `at`, makes it one bounded query.
+
+   ONE ENTRY PER SUCCESSFUL SIGN-IN. A failed
+   attempt is not a use and stays out of it — the throttle already counts
+   those, and mixing "someone got in" with "someone tried" makes the useful
+   list unreadable.
+
+   It grows without a ceiling. At the estate's rate that is a few thousand rows
+   a year, which RTDB does not notice, and trimming on write would cost a read
+   on every sign-in to save nothing anyone is short of. Worth a cap the day
+   someone wants a year-on-year view rather than a recent one. */
+function noteUse(db, key, detail) {
+  if (!key) return Promise.resolve();
+  const entry = {
+    club: key,
+    at: admin.database.ServerValue.TIMESTAMP,
+    tool: cleanTool(detail && detail.tool),
+    userId: (detail && detail.userId) || "",
+  };
+  /* Fire and forget. A club that has typed the right code is signing in
+     whatever the log does — failing the grant because an audit write failed
+     would turn a record-keeping problem into a lockout. */
+  return db.ref(ROOT + "/usage").push(entry).catch((err) => {
+    logger.warn("clubCodeAuth: usage not recorded", {
+      club: key, message: err && err.message,
+    });
+  });
+}
+
+/* The tool name comes off the client, so it is untrusted text on its way to a
+   node an admin reads. Lowercase letters and dashes, short, or nothing —
+   an unknown tool is better recorded as blank than as whatever was sent. */
+function cleanTool(t) {
+  const s = String(t == null ? "" : t).toLowerCase().replace(/[^a-z-]/g, "");
+  return s.slice(0, 24);
+}
+
 /* ---- Throttle ------------------------------------------------------------
    A trigger sees no source IP, so this cannot rate limit per caller, and an
    attacker can mint anonymous uids freely — which makes a per-uid counter weak
@@ -373,6 +430,7 @@ exports.clubCodeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
     /* The person's NAME is not logged — it is theirs, and a club key plus a
        timestamp already answers every question this log is asked. */
     logger.info("clubCodeAuth: club granted", { club: hit.key, named: !!hit.userId });
+    await noteUse(db, hit.key, { tool: req.tool, userId: hit.userId });
     /* `role` and `name` at the TOP LEVEL, because that is the shape
        NL.codeGate resolves with — codeGateExchange returns { role: g.role,
        name: g.name } and nothing else. The first version returned only the

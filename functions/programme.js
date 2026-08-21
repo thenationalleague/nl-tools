@@ -73,6 +73,27 @@ const ROOT = "app-data/media-programme";
    through both and fails if they ever disagree. */
 const CODES_ROOT = "app-data/club-codes";
 
+/* One entry per successful sign-in, beside the codes rather than beside this
+   tool's data — the record is about the CREDENTIAL, and it is read by the Club
+   Codes page. The userId, never the person's name (that lives one node away in
+   the code record and would go stale here on a rename) and never the code.
+   Fire and forget: a club with the right code is signing in whatever the log
+   does, and failing the grant over a record-keeping write would turn an audit
+   problem into a lockout. Mirrors noteUse in club-code.js. */
+function noteUse(db, key, tool, userId) {
+  if (!key) return Promise.resolve();
+  return db.ref(CODES_ROOT + "/usage").push({
+    club: key,
+    at: admin.database.ServerValue.TIMESTAMP,
+    tool: tool,
+    userId: userId || "",
+  }).catch((err) => {
+    logger.warn("programmeAuth: usage not recorded", {
+      club: key, message: err && err.message,
+    });
+  });
+}
+
 const TRIGGER_OPTS = {
   ref: "/" + ROOT + "/authRequests/{uid}",
   instance: "nl-tools-default-rtdb",
@@ -338,6 +359,12 @@ exports.programmeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
     /* The person's name is not logged — the club key and a timestamp answer
        everything this log is asked. */
     logger.info("programmeAuth: club granted", { club: hit.key, named: !!hit.userId });
+    /* The other door onto the same codes, so the same log. It writes under
+       CODES_ROOT rather than this tool's own ROOT because the record is about
+       the CREDENTIAL, not about Programme Packs — one code, one usage trail,
+       whichever tool it opened. The tool is hard-coded here: this function
+       serves exactly one, so there is nothing for a client to tell it. */
+    await noteUse(db, hit.key, "programme", hit.userId);
     return grant({
       ok: true,
       customToken,
