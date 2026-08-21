@@ -203,6 +203,33 @@ club's rows only**:
 not a redaction of a payload that is present-but-hidden. That distinction is the
 whole design and it must survive whatever is built on top.
 
+### 4.2a CORRECTION 21/08/2026 — the Directory reader is not the hard half
+
+This plan said the Directory was the difficult one and implied roles were why.
+Richard's question — *"the passcode-gated version we are building has no
+editing function, so where is the role dependency?"* — is right, and the
+answer is that there isn't one.
+
+The Directory has **two halves and this project touches one of them**:
+
+| `club-directory/editor/` | roles live here: `dir: 'editor' \| 'admin'`. **Untouched.** Keeps its own codes. |
+| `club-directory/reader/` | read-only. Same shape as the Handbook: club code in, document out. No roles anywhere. |
+
+So the reader is one rules line with the same accept-either-claim trick, not a
+restructure. And the own-club marker — the feature this was all for — is a
+**filter, not a rebuild**: the published payload already carries a `withheld`
+flag per row, so the reader compares the row's club against the session's club
+and shows the marker on a match. The club claim built on 20/08 is exactly the
+missing piece.
+
+**What actually makes the Directory second is not technical.** It is names,
+phone numbers and email addresses behind a code that a club will pass around
+internally. That is a governance decision about who holds it, and it deserves
+its own conversation rather than being smuggled in behind an afternoon's work.
+
+Recorded because the overstatement was mine and a later session reading §4
+would otherwise plan around a difficulty that is not there.
+
 ### 4.3 What must not happen
 
 Do not "improve" this by publishing the withheld values and hiding them in the
