@@ -9,6 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { NL, REPO } from './load-canon.mjs';
 
@@ -766,4 +767,51 @@ test('canon JavaScript hand-mixes no rgba()', () => {
     }
   }
   assert.deepEqual(offenders, [], `hand-mixed rgba in canon JS: ${offenders.join(', ')}`);
+});
+
+/* ── --font-mono (v2.61) ───────────────────────────────────────────────────
+   Promoted on the twentieth hand-rolling. The same stack was written out in
+   five spellings across sixteen files, and graphics/ had gone as far as
+   defining its own --font-mono privately — which is the tell: the same idea
+   named the same way in a second place is a token that has not been promoted
+   yet. */
+test('--font-mono is a token, not twenty copies of a stack', () => {
+  assert.match(rules, /--font-mono:\s*ui-monospace/,
+    'the brand has no monospace face and needs one — codes, ids and slugs ' +
+    'are read a character at a time');
+});
+
+test('no gated page hand-rolls the stack any more', () => {
+  /* Embeds are excluded on purpose and tested for separately below. */
+  const files = execSync(
+    "grep -rln 'ui-monospace' --include=*.html --include=*.css . " +
+    "| grep -v node_modules | grep -v '^./.claude' | grep -v '^./embeds/' || true",
+    { cwd: REPO, encoding: 'utf8' }).trim();
+  const offenders = files ? files.split('\n').filter((f) => f !== './system/nl-brand.css') : [];
+  assert.deepEqual(offenders, [],
+    'these still spell the stack out instead of using var(--font-mono): ' +
+    offenders.join(', '));
+});
+
+test('the embeds keep their own copy, and that is correct', () => {
+  /* They are pasted into the Urban Zoo CMS and cannot load nl-brand.css at
+     all, so every value they use is mirrored verbatim. A test that "fixed"
+     them would break them, so this pins the exception rather than leaving
+     the next sweep to rediscover it. */
+  const motm = readFileSync(join(REPO, 'embeds/score-predictor.html'), 'utf8');
+  assert.match(motm, /ui-monospace/,
+    'the embed still carries its own stack — it cannot reach the token');
+});
+
+test('graphics no longer shadows the token with a private copy', () => {
+  const g = readFileSync(join(REPO, 'graphics/_shared/brand-graphic.css'), 'utf8');
+  assert.ok(!/--font-mono:\s*ui-monospace/.test(g),
+    'a token defined in two places is a token that can disagree in two places');
+  assert.match(g, /var\(--font-mono\)/, 'it still USES the canon one');
+});
+
+test('the Style Guide shows it, or it is not a living reference', () => {
+  const sg = readFileSync(join(REPO, 'style-guide/index.html'), 'utf8');
+  assert.match(sg, /var\(--font-mono\)<\/code>/,
+    'the token is named in the Typography section');
 });

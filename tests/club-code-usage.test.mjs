@@ -179,3 +179,28 @@ test('the page reads a bounded slice, and survives the rule not being live', () 
   assert.match(block.slice(0, 1400), /Could not read recent/,
     'a failed usage read reports itself and leaves the rest of the page up');
 });
+
+test('the page says when a code was last changed', () => {
+  /* rotatedAt has been written on every reset since launch and displayed
+     nowhere, so "when did we last change this?" — the question asked
+     immediately before every reset — was unanswerable from the page that
+     does the resetting. */
+  assert.match(PAGE, /function rotatedLine/);
+  assert.match(PAGE, /Code last changed/);
+  assert.match(PAGE, /target\.rotatedAt/);
+});
+
+test('a code that has never been reset says nothing rather than guessing', () => {
+  /* Absent rotatedAt means never reset, which is a different thing from
+     never used — and "changed 56 years ago" is what a missing timestamp
+     renders as if it is passed through anyway. */
+  const fn = PAGE.slice(PAGE.indexOf('function rotatedLine'));
+  assert.match(fn.slice(0, 600), /if \(!target \|\| !target\.rotatedAt\) return '';/);
+});
+
+test('the reset writes the timestamp it now displays', () => {
+  /* Both resets — a whole club, and one person. A display with only one
+     writer behind it is a field that looks broken for half the rows. */
+  const writes = PAGE.match(/patch\.rotatedAt = firebase\.database\.ServerValue\.TIMESTAMP/g) || [];
+  assert.equal(writes.length, 2, 'the club reset and the person reset both stamp it');
+});
