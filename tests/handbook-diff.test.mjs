@@ -327,6 +327,8 @@ test('the longest increasing subsequence is the one the reorder rests on', () =>
 const PAGE = readFileSync(join(REPO, 'handbook/index.html'), 'utf8');
 const RULES = JSON.parse(readFileSync(join(REPO, 'system/rtdb/rules.snapshot.json'), 'utf8'));
 const CODE = PAGE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/<!--[\s\S]*?-->/g, '');
+const SRC_COMMENTS = PAGE;
+const SPRITE_SRC = readFileSync(join(REPO, 'assets/icons/sprites.svg'), 'utf8');
 
 test('an admin is allowed to read the edition they are diffing against', () => {
   /* THE ONE THAT BITES. editions/ was readable only by a club token — the
@@ -448,7 +450,191 @@ test('the error state is cleared on each check, not sticky', () => {
 });
 
 test('opening the review re-checks rather than trusting page load', () => {
-  assert.match(CODE, /checkPublished\(\)\)\.then\(loadForReview\)/,
+  const open = CODE.slice(CODE.indexOf('function reviewChanges('));
+  assert.match(open.slice(0, 900), /Promise\.resolve\(checkPublished\(\)\)[\s\S]{0,200}loadForReview\(\)/,
     'the rules may have been deployed, or a colleague may have published, ' +
     'since this page loaded');
+});
+
+/* ----------------------------------------------- stepping back, not forward
+
+   Two requests, one idea: taking a change away should leave the document as
+   though the change never happened — not as though a second change had been
+   made on top of it. */
+
+test('an undo restores the stamps, so the clause is what it was', () => {
+  /* commit() writes updatedAt/updatedBy on every changed clause. Undo goes
+     through commit(), so undoing an accidental edit used to put the old text
+     back and stamp it "changed a moment ago, by you". The wording stepped
+     back and the record stepped forward. */
+  assert.match(CODE, /function commit\(clone, label, opts\)/);
+  assert.match(CODE, /if \(!opts\.keepStamps\) \{ a\.updatedAt = now; a\.updatedBy = who; \}/);
+  assert.match(CODE, /commit\(step\.nodes, verb \+ ': ' \+ step\.label, \{ keepStamps: true \}\)/,
+    'time travel is a restoration, not an edit');
+});
+
+test('discard puts back the edition exactly, stamps and all', () => {
+  /* Editions are built with strip(), which carries no updatedAt — so a
+     discarded draft has none either, and is byte-identical to what was
+     published. Stamping 560 clauses as edited today by whoever pressed the
+     button would be a lie told 560 times, and it would make the very next
+     review report a document that matches the edition as "changed". */
+  const fn = CODE.slice(CODE.indexOf('function discardAll('));
+  const body = fn.slice(0, fn.indexOf('\n  function '));
+  assert.match(body, /strip\(normNode\(/);
+  assert.ok(!/updatedAt = /.test(body), 'no fresh stamps on a restore');
+});
+
+test('discard removes draft clauses the edition does not have', () => {
+  /* An update() of the published clauses alone leaves anything ADDED since
+     sitting in the draft — a discard that discards most of it. */
+  const fn = CODE.slice(CODE.indexOf('function discardAll('));
+  assert.match(fn.slice(0, 4000), /if \(!keep\[id\]\) updates\[id\] = null;/);
+});
+
+test('discard leaves an area the edition never carried alone', () => {
+  /* publish() skips an area with no nodes, so an empty snapshot means "never
+     published", not "published empty". Treating those the same would delete
+     an area nobody had got round to publishing. */
+  const fn = CODE.slice(CODE.indexOf('function discardAll('));
+  assert.match(fn.slice(0, 4000), /if \(!list\.length\) return;/);
+});
+
+test('discard refuses while someone else is editing', () => {
+  /* It rewrites all five areas, so an area another admin has open is their
+     work being deleted from under them. Everything before this only ever
+     wrote inside the open area, which is why the lock had never needed
+     checking here. */
+  const fn = CODE.slice(CODE.indexOf('function discardAll('));
+  const body = fn.slice(0, 4000);
+  assert.match(body, /draft\/locks/);
+  assert.match(body, /!lockIsMine\(locks\[k\]\) && !lockIsStale\(locks\[k\]\)/,
+    'someone else, and still live — my own lock and a dead one are both fine');
+  assert.match(body, /is editing right now/);
+});
+
+test('discard is typed to confirm and clears the undo stack', () => {
+  const fn = CODE.slice(CODE.indexOf('function discardAll('));
+  const body = fn.slice(0, 5000);
+  assert.match(body, /!== 'DISCARD'/);
+  assert.match(body, /S\.undo\.length = 0; S\.redo\.length = 0;/,
+    'the stack points at states that no longer exist — offering to undo the ' +
+    'discard would reinstate half of one area');
+});
+
+test('discard sits in the review, not beside Publish', () => {
+  assert.match(CODE, /id="hbDiscard"/);
+  const body = CODE.slice(CODE.indexOf('function reviewHtml('), CODE.indexOf('function discardAll('));
+  assert.match(body, /hb-rev__discard/);
+  /* And only when there is something to discard. */
+  assert.match(body, /if \(n\) \{[\s\S]{0,200}hb-rev__discard/);
+});
+
+/* ------------------------------------------------------- the missing middle
+
+   Undo is twenty deep, per-area and gone on reload; the only other restore
+   points were publishes. So a bad edit made three weeks ago had one remedy —
+   throw away everything since — and that discard was itself the one
+   irreversible act in the tool. These two close both ends. */
+
+test('a snapshot is taken BEFORE the discard writes anything', () => {
+  /* A discard that fails halfway leaves a snapshot that is merely
+     redundant. A discard that succeeds without one is unrecoverable. */
+  const fn = CODE.slice(CODE.indexOf('function discardAll('));
+  const body = fn.slice(0, 6000);
+  const snapAt = body.indexOf('takeSnapshot(');
+  const writeAt = body.indexOf("'/draft/docs/'");
+  assert.ok(snapAt > -1, 'discard takes a snapshot');
+  assert.ok(writeAt > -1 && snapAt < writeAt,
+    'and takes it before it starts overwriting the draft');
+});
+
+test('the snapshot and its index are separate nodes', () => {
+  /* A snapshot is the whole handbook; the index beside it is three fields.
+     Listing what restore points exist has to read the index, or opening the
+     review downloads every snapshot ever taken to show three dates. */
+  assert.match(CODE, /draft\/snapshots/);
+  assert.match(CODE, /draft\/snapshotIndex/);
+  const latest = CODE.slice(CODE.indexOf('function latestSnapshot('));
+  assert.match(latest.slice(0, 500), /snapshotIndex/);
+  assert.ok(!/snapshots'\)\.once/.test(latest.slice(0, 500)),
+    'the picker reads the index, never the snapshots themselves');
+});
+
+test('restore points live under draft/, so no rules change ships with them', () => {
+  /* draft is already "signed in can read, admin can write", which is exactly
+     what a snapshot of the draft wants — and nothing reads draft wholesale,
+     so the weight sits out of the way. A node of its own would need the
+     manual rules workflow run before the feature worked at all. */
+  const hb = RULES.rules['app-data']['ops-handbook'];
+  assert.ok(!hb.snapshots, 'no separate snapshots node to have to deploy');
+  assert.match(hb.draft['.write'], /'admin'/);
+  assert.match(CODE, /BASE \+ '\/draft\/snapshots'/);
+});
+
+test('old restore points are pruned, and a failed prune is not a failed discard', () => {
+  const fn = CODE.slice(CODE.indexOf('function pruneSnapshots('));
+  const body = fn.slice(0, 900);
+  assert.match(CODE, /SNAP_KEEP = \d+/);
+  assert.match(body, /slice\(SNAP_KEEP\)/);
+  assert.match(body, /catch/, 'clutter is not a failure');
+});
+
+test('restoring replaces the draft rather than merging into it', () => {
+  /* The snapshot IS the draft as it was, so anything added since has to go
+     rather than survive alongside. update() would leave it. */
+  const fn = CODE.slice(CODE.indexOf('function restoreSnapshot('));
+  const body = fn.slice(0, 2000);
+  assert.match(body, /'\/draft\/docs'\)\.set\(docs\)/);
+  assert.match(body, /!== 'RESTORE'/, 'typed to confirm — it discards in the other direction');
+  assert.match(body, /S\.undo\.length = 0/);
+});
+
+test('every changed clause offers to go back on its own', () => {
+  /* Without this the only remedy for one bad edit among forty good ones is
+     Discard all changes. */
+  assert.match(CODE, /function revertOne\(docId, kind, entry\)/);
+  assert.match(CODE, /class="btn btn--icon btn--ghost hb-rev__back"/);
+  assert.match(CODE, /aria-label="Put this clause back to the published version"/);
+  assert.match(CODE, /sprites\.svg#icon-refresh/,
+    'a circular arrow — a back chevron on the right of a row reads as ' +
+    '"previous" or "collapse"');
+  assert.match(SPRITE_SRC, /id="icon-refresh"/);
+  assert.match(PAGE, /@media \(hover: none\) \{ \.hb-rev__back \{ opacity: 1; \} \}/,
+    'a hover-only affordance is permanently dim on a phone, which reads as ' +
+    'disabled');
+});
+
+test('reverting an added clause that has children is refused, not orphaning', () => {
+  /* Deleting it alone leaves its children with a parentId pointing at
+     nothing: they vanish from the tree without being deleted. */
+  const fn = CODE.slice(CODE.indexOf('function revertOne('));
+  const body = fn.slice(0, 3000);
+  assert.match(body, /kids\.length/);
+  assert.match(body, /put those back first/);
+});
+
+test('reverting a removed clause whose parent is gone is refused', () => {
+  const fn = CODE.slice(CODE.indexOf('function revertOne('));
+  const body = fn.slice(0, 3000);
+  assert.match(body, /!area\.drf\[wasParent\]/);
+  assert.match(body, /no longer in the draft/);
+});
+
+test('a revert does not join the per-area undo stack, and says why', () => {
+  /* The stack holds snapshots of the OPEN area; the review is cross-area.
+     Working for some rows and quietly corrupting others is worse than
+     working the same everywhere. */
+  const fn = CODE.slice(CODE.indexOf('function revertOne('));
+  const body = fn.slice(0, 3000);
+  assert.match(body, /if \(docId === S\.docId\) \{[\s\S]{0,120}S\.undo\.length = 0/,
+    'touching the open area clears its stack rather than leaving it stale');
+  assert.match(SRC_COMMENTS, /IT DOES NOT JOIN THE UNDO STACK, deliberately/);
+});
+
+test('a revert keeps the cached draft honest for the next one', () => {
+  /* Two reverts in one sitting: the second must reason about a document
+     that has already moved. */
+  const fn = CODE.slice(CODE.indexOf('function revertOne('));
+  assert.match(fn.slice(0, 3000), /delete area\.drf\[id\]/);
 });
