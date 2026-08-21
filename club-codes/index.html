@@ -1,6 +1,12 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Club Codes
+  Version: v0.4 (21/08/2026) — Activity per club and per person. The global
+  Recent activity list answers "has anyone been in"; a row's own Activity
+  toggle answers "has THIS club been in", which is the question actually
+  asked about a code somebody is about to reset. Loaded on demand and cached
+  per club, so 72 clubs cost nothing until one is opened and a person's
+  history is filtered out of their club's rather than fetched again.
   Version: v0.3 (21/08/2026) — a LIST, not 72 cards. Each club was a bordered
   card holding a wrapped flex row with no layout of its own below the width
   that row needs, so on a phone all four children became their own band: one
@@ -54,7 +60,9 @@
     app-data/club-codes/nl                   the shared National League code
     app-data/club-codes/usage/<pushId>       { club, at, tool, userId }
                                              one row per successful sign-in,
-                                             written ONLY by the two functions
+                                             written ONLY by the two functions.
+                                             Indexed on `at` (the global list)
+                                             and `club` (one club's history)
     tools/ops-club-codes                     tool registration
 
   The codes are shared property, not this tool's data, which is why they do
@@ -113,6 +121,14 @@
     var NL_TOOL_KEY = 'ops-club-codes';
 
     window.NL_CHANGELOG = [
+      {
+        date: '21/08/2026',
+        version: 'v0.4',
+        items: [
+          'Every club and every named person now has an Activity toggle: ' +
+            'when their code was used and which tool it opened.'
+        ]
+      },
       {
         date: '21/08/2026',
         version: 'v0.3',
@@ -325,6 +341,58 @@
   /* Named people sit UNDER their club, indented to the club's name column so
      the shape of the page says what the model is: one club, one shared code,
      and the people who have their own. */
+  /* The toggle rides in the name cell rather than taking a column of its
+     own: the two action columns are full, and a fifth control on every row
+     would put three buttons beside a club that mostly needs none of them. */
+  .cc-more {
+    font-family: var(--font); font-size: var(--text-xs);
+    font-weight: 600; font-variation-settings: 'wght' 600;
+    background: none; border: 0; padding: 2px 4px; margin-left: 8px;
+    color: var(--text-muted); cursor: pointer; border-radius: var(--radius-sm);
+  }
+  .cc-more:hover { color: var(--primary); }
+  .cc-more:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+  .cc-more[aria-expanded="true"] { color: var(--primary); }
+
+  /* Loaded on demand, so 72 clubs cost nothing until one is opened.
+
+     TINTED, because untinted it was a set of plain rows sitting directly
+     above the club's PEOPLE — same indent, same type, same names — and there
+     was no telling where the log ended and the list of people began. A panel
+     that opens has to look like a panel. */
+  .cc-log {
+    margin: 2px 0 10px 44px; padding: 8px 12px;
+    /* WHITE, not the navy tint — that is the row hover colour, so a tinted
+       panel reads as a hovered row. White against the page's own ground, with
+       a hairline, says "this opened" without borrowing another state. */
+    background: var(--white); border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+  .cc-log__cap {
+    font-size: var(--text-xs); text-transform: uppercase;
+    letter-spacing: var(--tracking-wide); font-weight: 700;
+    font-variation-settings: 'wght' 700;
+    color: var(--text-muted); margin: 0 0 4px;
+  }
+  .cc-log__row {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 6px 14px; padding: 4px 6px; align-items: baseline;
+    font-size: var(--text-sm);
+  }
+  .cc-log__who { min-width: 0; overflow-wrap: anywhere; }
+  .cc-log__who--master { color: var(--text-muted); font-style: italic; }
+  .cc-log__tool {
+    font-size: var(--text-xs); text-transform: uppercase;
+    letter-spacing: var(--tracking-wide); color: var(--text-muted);
+  }
+  .cc-log__when { color: var(--text-muted); font-size: var(--text-xs); white-space: nowrap; }
+  .cc-log__none { font-size: var(--text-sm); color: var(--text-muted); font-style: italic; padding: 4px 6px; }
+  @media (max-width: 640px) {
+    .cc-log { margin-left: 12px; }
+    .cc-log__row { grid-template-columns: minmax(0, 1fr) auto; }
+    .cc-log__tool { grid-row: 2; }
+  }
+
   .cc-users { list-style: none; margin: 0; padding: 2px 0 10px; }
   .cc-user { grid-template-areas: ". name code act1 act2"; padding: 5px 6px; }
   .cc-user__name {
@@ -415,6 +483,10 @@
   /* Enough to answer "has anyone been in today" and "who was that", not a
      year's history. The whole log is kept; this is only what is drawn. */
   var USE_LIMIT = 200;
+  /* Per-club history, fetched the first time a row is opened and kept for the
+     session. OPEN survives render() because render() rebuilds the markup and
+     would otherwise close every panel on any change anywhere on the page. */
+  var ACT = {}, OPEN = {}, ACT_LIMIT = 25;
   var FIND = '';
 
   /* The stored field is `passcode` on everything the Programme console has
@@ -599,13 +671,83 @@
 
   function userRow(clubKey, id, u) {
     return '<li class="cc-user">' +
-      '<span class="cc-user__name">' + esc(u.name || 'Unnamed') + '</span>' +
+      '<span class="cc-user__name">' + esc(u.name || 'Unnamed') +
+        actToggle('user', clubKey, id) + '</span>' +
       '<span class="cc-user__code">' + codeCell(codeOf(u), u.name || 'this code') + '</span>' +
       /* Remove first, Reset second — so Reset is in the same column as the
          club's Reset directly above it. */
       '<span class="cc-user__act1"><button class="btn btn--sm btn--danger" type="button" data-drop-user="' + esc(clubKey) + '" data-id="' + esc(id) + '">Remove</button></span>' +
       '<span class="cc-user__act2"><button class="btn btn--sm btn--ghost" type="button" data-reset-user="' + esc(clubKey) + '" data-id="' + esc(id) + '">Reset</button></span>' +
-    '</li>';
+    '</li>' + logPanel('user', clubKey, id);
+  }
+
+  /* ── Activity, per club and per person ───────────────────────────────
+     The global Recent activity list answers "has anyone been in". This
+     answers "has THIS club been in", which is the question that gets asked
+     about a code someone is about to reset.
+
+     ON DEMAND, and cached for the session. A per-row query for 72 clubs on
+     load would be 72 queries to show nothing anybody asked for; opening one
+     row is one indexed query. A person's history is filtered out of their
+     club's, so expanding three people at one club is still one read. */
+  function actKey(kind, club, id) { return kind + ':' + club + (id ? ':' + id : ''); }
+
+  function actToggle(kind, club, id) {
+    var open = !!OPEN[actKey(kind, club, id)];
+    return '<button class="cc-more" type="button" aria-expanded="' + (open ? 'true' : 'false') +
+      '" data-act-kind="' + kind + '" data-act-club="' + esc(club) + '"' +
+      (id ? ' data-act-id="' + esc(id) + '"' : '') + '>Activity</button>';
+  }
+
+  function logPanel(kind, club, id) {
+    var k = actKey(kind, club, id);
+    if (!OPEN[k]) return '';
+    var all = ACT[club];
+    var cap = '<p class="cc-log__cap">' +
+      (kind === 'user' ? 'Their sign-ins' : 'Sign-ins with this club\u2019s codes') + '</p>';
+    if (!all) return '<div class="cc-log">' + cap + '<p class="cc-log__none">Loading\u2026</p></div>';
+    var list = (kind === 'user') ? all.filter(function (u) { return u.userId === id; }) : all;
+    if (!list.length) {
+      return '<div class="cc-log">' + cap + '<p class="cc-log__none">' +
+        (kind === 'user' ? 'This person has not signed in yet.'
+                         : 'This code has not been used yet.') +
+        ' The record starts from when it was switched on.</p></div>';
+    }
+    return '<div class="cc-log">' + cap + list.map(function (u) {
+      var who = whoOf(u);
+      return '<div class="cc-log__row">' +
+        (kind === 'user' ? '' :
+          '<span class="cc-log__who' + (who.master ? ' cc-log__who--master' : '') + '">' +
+            esc(who.text) + '</span>') +
+        (kind === 'user' ? '<span class="cc-log__who">' + esc(who.text) + '</span>' : '') +
+        '<span class="cc-log__tool">' + esc(TOOL_LABEL[u.tool] || u.tool || '\u2014') + '</span>' +
+        '<span class="cc-log__when" title="' + esc(NL.formatDateTime(u.at) || '') + '">' +
+          esc(NL.timeAgo(u.at) || '') + '</span>' +
+      '</div>';
+    }).join('') + '</div>';
+  }
+
+  function toggleAct(kind, club, id) {
+    var k = actKey(kind, club, id);
+    if (OPEN[k]) { delete OPEN[k]; render(); return; }
+    OPEN[k] = true;
+    render();
+    if (ACT[club]) return;
+    /* Indexed on `club`, so this is a bounded read however long the log
+       grows. Newest first, same order as the list above. */
+    ref('usage').orderByChild('club').equalTo(club).limitToLast(ACT_LIMIT)
+      .once('value').then(function (snap) {
+        var v = snap.val() || {};
+        ACT[club] = Object.keys(v).map(function (x) { return v[x]; })
+          .filter(Boolean)
+          .sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
+        render();
+      })['catch'](function (err) {
+        console.error('[club-codes] reading activity for ' + club, err);
+        ACT[club] = [];
+        render();
+        NL.toast && NL.toast('Could not read the activity for this club', 'error');
+      });
   }
 
   /* ONE ROW, not a card. The division is the group heading now, so it stops
@@ -625,13 +767,15 @@
 
     return '<div class="cc-row' + (rec ? '' : ' is-missing') + '">' +
         crest +
-        '<div class="cc-row__name">' + esc(row.name) + '</div>' +
+        '<div class="cc-row__name">' + esc(row.name) +
+          (rec ? actToggle('club', row.key, '') : '') + '</div>' +
         '<div class="cc-row__code">' + codeCell(code, row.name + '\u2019s club code') + '</div>' +
         (rec
           ? '<div class="cc-row__act1"><button class="btn btn--sm btn--ghost" type="button" data-add="' + esc(row.key) + '">Add a person</button></div>' +
             '<div class="cc-row__act2"><button class="btn btn--sm btn--ghost" type="button" data-reset="' + esc(row.key) + '">Reset</button></div>'
           : '<div class="cc-row__issue"><button class="btn btn--sm btn--navy" type="button" data-issue="' + esc(row.key) + '">Issue a code</button></div>') +
       '</div>' +
+      logPanel('club', row.key, '') +
       (ids.length
         ? '<ul class="cc-users">' + ids.map(function (id) {
             return userRow(row.key, id, users[id] || {});
@@ -788,6 +932,12 @@
 
   function wireRows() {
     var root = $('out');
+    root.querySelectorAll('[data-act-kind]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        toggleAct(b.getAttribute('data-act-kind'), b.getAttribute('data-act-club'),
+                  b.getAttribute('data-act-id') || '');
+      });
+    });
     root.querySelectorAll('[data-copy]').forEach(function (b) {
       b.addEventListener('click', function () { NL.copy(b.getAttribute('data-copy')); });
     });
