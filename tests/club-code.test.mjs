@@ -55,7 +55,7 @@ function liftFns(relPath, names) {
     '\nreturn {' + names.join(',') + '};})()');
 }
 
-const cc = liftFns('functions/club-code.js', ['normCode', 'safeEqual', 'pickClub']);
+const cc = liftFns('functions/club-code.js', ['normCode', 'safeEqual', 'storedCode', 'pickClub']);
 const pp = liftFns('functions/programme.js', ['normCode']);
 
 // --- normCode ---------------------------------------------------------------
@@ -154,13 +154,50 @@ test('pickClub survives an absent or empty config rather than throwing', () => {
 
 // --- the claim vocabulary ---------------------------------------------------
 
-test('the club claim uses the same wildcard as pClub, so rules need one branch', () => {
-  /* Rules written as `auth.token.club === $club || auth.token.club === '*'`
-     mirror the pClub ones exactly. If this ever became 'ALL' or true, every
-     rule in the snapshot would need a second shape. */
+test('both claims are minted, from either door', () => {
+  /* The codes are ONE credential now, shared with Programme Packs, so each
+     gate must mint `club` AND `pClub`. Minting one would make the two gates
+     fight: signInWithCustomToken replaces the session, so whichever tool was
+     opened last would be the only one that worked — a club would bounce
+     between the Handbook and Programme Packs re-entering the same code. */
   const src = readFileSync(join(ROOT, 'functions/club-code.js'), 'utf8');
-  assert.match(src, /\{ club: "\*" \}/, 'the staff path must mint club: "*"');
-  assert.match(src, /\{ club: hit\.key \}/, 'the club path must mint the club key');
+  assert.match(src, /\{ club: hit\.key, pClub: hit\.key \}/);
+  assert.match(src, /\{ club: "\*", pClub: "\*" \}/);
+
+  const pp = readFileSync(join(ROOT, 'functions/programme.js'), 'utf8');
+  assert.match(pp, /pClub: hit\.key, club: hit\.key/);
+  assert.match(pp, /pClub: "\*", club: "\*"/);
+});
+
+test('a relocated Programme record opens under its historical field name', () => {
+  /* The 72 live records store the credential as `passcode`. They are being
+     MOVED, not rewritten — renaming 72 secrets in flight is a second thing to
+     go wrong — so both names must open the door. A record that works under one
+     and not the other is the worst outcome of tidying. */
+  const relocated = { clubs: { FYL: { name: 'AFC Fylde', passcode: 'AB12CD' } } };
+  assert.equal(cc.pickClub(relocated, 'AB12CD').key, 'FYL');
+  assert.equal(cc.storedCode({ passcode: 'ab-12cd' }), 'AB12CD');
+  assert.equal(cc.storedCode({ code: 'ab-12cd' }), 'AB12CD');
+  assert.equal(cc.storedCode({}), '');
+});
+
+test('both functions read the relocated node, with a fallback while it moves', () => {
+  /* No flag day: this ships BEFORE the data moves, works while it moves, and
+     works after. The fallback comes out once the old node is gone.
+
+     The two files express the same pair of paths differently — each builds one
+     of them from its own ROOT — so matching path literals across both is what
+     the first version of this test tried and got wrong. The shared, unambiguous
+     marker is the log line the fallback emits, which is also the thing that
+     tells you, in production, that the move has not finished. */
+  for (const f of ['functions/club-code.js', 'functions/programme.js']) {
+    const src = readFileSync(join(ROOT, f), 'utf8');
+    assert.match(src, /codes read from the OLD location/,
+      f + ' must keep the fallback, and say so in the log, until the move is done');
+  }
+  assert.match(readFileSync(join(ROOT, 'functions/programme.js'), 'utf8'),
+    /const CODES = "app-data\/club-codes\/config"/,
+    'programme.js must read the relocated node first');
 });
 
 test('the code is never written to a log line', () => {

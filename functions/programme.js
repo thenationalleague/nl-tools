@@ -54,6 +54,20 @@ const admin = require("firebase-admin");
 
 const ROOT = "app-data/media-programme";
 
+/* WHERE THE PASSCODES LIVE — being relocated, 21/08/2026.
+   They are moving to app-data/club-codes/config, because they stopped being
+   Programme's passcodes the moment they became the estate's one club
+   credential (system/club-code-plan.md). The node's name should say what it
+   holds.
+
+   Reads prefer the NEW location and fall back to the old one, so there is no
+   flag day: this ships before the data moves, keeps working while it moves,
+   and keeps working after. The fallback comes out once the old node is gone.
+
+   Programme's own DATA (folders, files, trash, audit) stays under ROOT. Only
+   the credential moves. */
+const CODES = "app-data/club-codes/config";
+
 const TRIGGER_OPTS = {
   ref: "/" + ROOT + "/authRequests/{uid}",
   instance: "nl-tools-default-rtdb",
@@ -187,7 +201,8 @@ exports.programmeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
       }
       /* Distinct uid per admin so the audit trail names the individual, unlike
          the shared club uids below. */
-      const customToken = await admin.auth().createCustomToken("pp-admin-" + uid, { pClub: "*" });
+      const customToken = await admin.auth()
+        .createCustomToken("pp-admin-" + uid, { pClub: "*", club: "*" });
       logger.info("programmeAuth: admin granted", { uid, role });
       return grant({
         ok: true, customToken, isNL: true,
@@ -206,7 +221,11 @@ exports.programmeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
     const code = normCode(req.code);
     if (code.length < 4) return grant({ ok: false, error: "Enter your passcode." });
 
-    const cfg = (await db.ref(ROOT + "/config").once("value")).val() || {};
+    let cfg = (await db.ref(CODES).once("value")).val();
+    if (!cfg || !cfg.clubs) {
+      cfg = (await db.ref(ROOT + "/config").once("value")).val() || {};
+      if (cfg.clubs) logger.info("programmeAuth: codes read from the OLD location");
+    }
     const hit = pickClub(cfg, code);
 
     if (!hit) {
@@ -222,7 +241,13 @@ exports.programmeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
        support — and it keeps the Auth user list at 73 rows, not one per
        device. */
     const customToken = await admin.auth()
-      .createCustomToken("pp-" + hit.key, { pClub: hit.key });
+      /* BOTH CLAIMS, from either door. The codes are one credential now, so a
+         club that signs in here must not lose access to the Handbook, and a
+         club that signs in there must not lose access to this. Minting only
+         one would make the two gates fight: signInWithCustomToken REPLACES the
+         session, so whichever tool you opened last would be the only one that
+         worked. Additive — nothing reads `club` here yet. */
+      .createCustomToken("pp-" + hit.key, { pClub: hit.key, club: hit.key });
 
     logger.info("programmeAuth: club granted", { club: hit.key });
     return grant({
