@@ -1,6 +1,16 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Programme Packs (admin)
+  Version: v1.6 (21/08/2026) — the passcodes moved out from under this tool.
+           They are one credential now (app-data/club-codes/config): the same
+           six characters open Programme Packs and the Handbook. Only config
+           moved — folders, files, trash and audit stay put — so only the
+           config reads and writes here changed, via PP.codesRef.
+           Also: the console will no longer offer to seed a roster it has not
+           managed to read. "Not switched on yet" and "haven't heard back"
+           rendered the same screen, with a Seed roster button under it, and
+           seeding on the second one issues 72 replacement passcodes over
+           working ones. Nearly pressed on 21/08/2026 for exactly that reason.
   Version: v1.5 (17/08/2026) — Library tab: the club page in master mode
            (?master=1&embed=1) in a frame, so browsing and managing all 73
            folders happens inside the console with the '*' session it
@@ -48,7 +58,11 @@
   session is never modified and no custom claims are written to real accounts.
 
   Storage (RTDB):
-    app-data/media-programme/config   club passcodes (pClub '*' only)
+    app-data/club-codes/config        club codes — SHARED, not this tool's.
+                                      Read/written here via PP.codesRef.
+                                      Readable by a portal admin/superadmin or
+                                      a pClub '*' session; closed to everyone
+                                      else, including club sessions.
     app-data/media-programme/{folders,files,trash,audit}
     tools/media-programme             tool registration (label, defaults)
 
@@ -94,6 +108,18 @@
     var NL_TOOL_KEY = 'media-programme';
 
     window.NL_CHANGELOG = [
+      {
+        date: '21/08/2026',
+        version: 'v1.6',
+        items: [
+          'Passcodes are one credential now — the same code opens Programme ' +
+            'Packs and the Handbook. This console still issues and regenerates ' +
+            'them; they are just stored somewhere both tools can reach.',
+          'Seed roster is refused while club access is still loading, so a ' +
+            'slow read can no longer be mistaken for an empty one and answered ' +
+            'with 72 new passcodes.'
+        ]
+      },
       {
         date: '17/08/2026',
         version: 'v1.5',
@@ -280,6 +306,14 @@
   window.TOOL = window.TOOL || {};
 
   var CONFIG = { clubs: {}, nl: null };
+  /* False until the config listener has actually delivered a value. An empty
+     CONFIG has two very different causes — nothing seeded yet, or we have not
+     heard back — and they were rendering the same screen: "Not switched on
+     yet", with a Seed roster button under it. Pressed on the second cause,
+     that mints 72 replacement passcodes for clubs already holding working
+     ones. Nearly happened on 21/08/2026, when the codes moved out from under
+     this tool and the console was still reading the emptied node. */
+  var configSeen = false;
   var FILES = {}, TRASH = {}, AUDIT = {}, ROSTER = [], BY_CODE = {};
   var ready = false;
   var tab = 'access';
@@ -333,7 +367,13 @@
         }, function (err) { fail('reading ' + path, err, PANE[tabs[tabs.length - 1]]); });
       }
 
+      /* config alone lives outside this tool now — app-data/club-codes, the
+         one credential the Handbook and Programme Packs both open on. The
+         explicit ref is why: PP.ref('config') would read the emptied node
+         under this tool and report 72 clubs with no access, one button press
+         away from minting 72 replacement passcodes nobody holds. */
       watch('config', function (v) {
+        configSeen = true;
         CONFIG = { clubs: v.clubs || {}, nl: v.nl || null };
         /* Keep an edit in progress — only adopt the stored template when the
            box hasn't been touched, or a save from another tab would wipe what
@@ -589,6 +629,13 @@
   function renderAccess() {
     var seeded = Object.keys(CONFIG.clubs || {}).length;
 
+    if (!seeded && !CONFIG.nl && !configSeen) {
+      status('Reading club access…',
+        'If this does not clear, the codes are not readable from here — say so ' +
+        'rather than seeding, which would issue new passcodes over the top.');
+      return;
+    }
+
     if (!seeded && !CONFIG.nl) {
       el('paneAccess').innerHTML =
         '<div class="empty-state">' +
@@ -723,6 +770,14 @@
      don't have one. Re-running after promotion/relegation picks up the new
      clubs without touching any existing passcode. */
   function seedRoster() {
+    /* Belt to the render guard's braces. Seeding is additive against what we
+       have READ, so seeding against a config we never read writes a fresh
+       passcode over every club — the one destructive thing this console can
+       do, and the only one with no undo. */
+    if (!configSeen) {
+      NL.toast('Club access has not loaded — nothing seeded', 'error');
+      return;
+    }
     var updates = {}, added = 0, taken = takenCodes();
     ROSTER.forEach(function (c) {
       if (CONFIG.clubs[c.code]) return;
@@ -741,7 +796,7 @@
     }
     if (!added) { NL.toast('Every club already has access', 'info'); return; }
 
-    PP.ref('config').update(updates).then(function () {
+    PP.codesRef('config').update(updates).then(function () {
       PP.audit('seed', { count: added, detail: 'Seeded from clubs-meta roster' });
       NL.toast(added + ' added', 'success');
     }).catch(function (e) { NL.toast('Seed failed: ' + e.message, 'error'); });
@@ -758,7 +813,7 @@
       .then(function (ok) {
         if (!ok) return;
         var path = isNL ? 'config/nl' : 'config/clubs/' + code;
-        return PP.ref(path).update({ passcode: freshPasscode(takenCodes()) })
+        return PP.codesRef(path).update({ passcode: freshPasscode(takenCodes()) })
           .then(function () {
             PP.audit('regen-access', { club: code, clubName: rec.name });
             NL.toast('New passcode issued', 'success');
@@ -832,7 +887,7 @@
 
   function saveTpl() {
     TPL = el('tplBody').value;
-    PP.ref('config/emailTemplate').set({ body: TPL, updatedAt: PP.TS() }).then(function () {
+    PP.codesRef('config/emailTemplate').set({ body: TPL, updatedAt: PP.TS() }).then(function () {
       el('tplStatus').textContent = 'Saved ✓';
       setTimeout(function () { el('tplStatus').textContent = ''; }, 2000);
       PP.audit('email-template', { detail: 'Updated the standard message' });

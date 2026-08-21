@@ -200,8 +200,10 @@ exports.clubCodeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
   try {
     /* ---- NL path: caller is already signed in on the portal -------------
        Staff open these tools from the portal and should not be typing a club
-       code to do it. `club: "*"` is the same wildcard pClub uses, so rules
-       written for one read the other without a second branch. */
+       code to do it. `club: "*"` is the same SHAPE of wildcard pClub uses, so
+       a rule written for one reads the other without a second branch — but
+       they are not the same grant, and which claims get minted depends on the
+       role. See below. */
     if (req.staff === true) {
       const role = String(
         (await db.ref("users/" + uid + "/role").once("value")).val() || ""
@@ -211,10 +213,29 @@ exports.clubCodeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
         logger.warn("clubCodeAuth: staff claim refused", { uid, role });
         return grant({ ok: false, error: "This needs a National League account." });
       }
-      /* Distinct uid per person here, unlike the shared club uids below: a
-         named account is signing in, so the audit trail can name them. */
+      /* `pClub: "*"` is NOT the same grant as `club: "*"`, and this door must
+         not hand out both to everyone who reaches it.
+
+         `club` is the club-facing wildcard: see every club, edit nothing,
+         which is what an NL staff account already means everywhere else.
+         `pClub` is Programme Packs ADMINISTRATION — write into all 73
+         folders, and read the config holding every club's passcode. The
+         programmeAuth door has always held that to admin/superadmin ("Programme
+         Packs administration is admin-only"), and minting both here would have
+         quietly handed a staff account the thing that door refuses them,
+         through a different tool's sign-in.
+
+         So: staff get the club wildcard, admins get both. Nothing calls the
+         staff path yet — codeGate.openAsAdmin sends `admin`, not `staff` — so
+         this is closing the hole before anything falls in it.
+
+         Distinct uid per person, unlike the shared club uids below: a named
+         account is signing in, so the audit trail can name them. */
+      const claims = (role === "admin" || role === "superadmin")
+        ? { club: "*", pClub: "*" }
+        : { club: "*" };
       const customToken = await admin.auth()
-        .createCustomToken("cc-staff-" + uid, { club: "*", pClub: "*" });
+        .createCustomToken("cc-staff-" + uid, claims);
       logger.info("clubCodeAuth: staff granted", { uid, role });
       return grant({
         ok: true, customToken, isNL: true,

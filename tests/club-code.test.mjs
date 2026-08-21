@@ -200,6 +200,27 @@ test('both functions read the relocated node, with a fallback while it moves', (
     'programme.js must read the relocated node first');
 });
 
+test('the NL door hands staff the club wildcard, and admins the Programme one too', () => {
+  /* `club: "*"` and `pClub: "*"` are the same SHAPE and very different grants.
+     `club` is what an NL staff account already means everywhere else: see
+     every club, edit nothing. `pClub` is Programme Packs ADMINISTRATION —
+     write into all 73 folders, and read the config holding every club's code.
+     programmeAuth has always held that to admin/superadmin; minting both here
+     for anyone who passed the staff check would have handed a staff account,
+     through a different tool's sign-in, the exact thing the other door
+     refuses them. Nothing calls this path yet, which is the only reason this
+     is a guard rather than an incident. */
+  const src = readFileSync(join(ROOT, 'functions/club-code.js'), 'utf8');
+  const staffDoor = src.slice(src.indexOf('req.staff === true'),
+                              src.indexOf('Club path'));
+  assert.match(staffDoor, /role === "admin" \|\| role === "superadmin"/,
+    'the claim set must depend on the role, not just on passing the door');
+  assert.match(staffDoor, /\{ club: "\*" \}/,
+    'staff get the club wildcard on its own');
+  assert.ok(!/createCustomToken\([^)]*\{ club: "\*", pClub: "\*" \}\s*\)/.test(staffDoor),
+    'pClub must not be minted unconditionally on the staff path');
+});
+
 test('the code is never written to a log line', () => {
   /* A near-miss in a log is a near-miss written down, and Cloud Logging is
      readable by anyone with project access. */
