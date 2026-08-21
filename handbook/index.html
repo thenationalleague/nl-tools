@@ -1,6 +1,23 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
+  Version: v0.55 (21/08/2026) — carriage returns are kept. Reported from the
+    referee fee tariff: "any time I go out of edit it takes the carriage
+    returns away." Two causes, two paths, both silent.
+
+    TABLE CELLS were read back with cell.textContent, which drops a <br>
+    without leaving so much as a space — so the lines typed into a tariff were
+    welded into one on save. Cells stay PLAIN TEXT (they have never had a
+    sanitiser, and esc() means stored markup would be shown to a club as
+    literal angle brackets) but now carry newlines, drawn as breaks.
+
+    CLAUSE BODIES: sanitize()'s allow-list has no `div`, and Chrome wraps each
+    new line in one when Enter is pressed in a contenteditable holding bare
+    text — so clean() unwrapped them and merged the lines. There WAS a
+    <div> -> <p> replacement for this, at the end, on the serialised string,
+    by which point every div had already been removed. Dead code sitting on
+    top of the bug it was written to prevent. Converted inside clean() now.
+
   Version: v0.54 (21/08/2026) — the selection marker no longer paints a solid
     column down the gutter of every sub-clause (nl-brand v2.57). The number is
     a flex item, so its tint stretched to the height of the row — and a row
@@ -339,6 +356,17 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '21/08/2026',
+        version: 'v0.55',
+        items: [
+          'Line breaks typed into a table cell are now kept — the fee ' +
+            'tariffs can have one line per entry. They were being stripped ' +
+            'every time you left edit mode.',
+          'Line breaks typed into a clause with no existing paragraphs are ' +
+            'kept too. Same symptom, different cause.'
+        ]
+      },
       {
         date: '21/08/2026',
         version: 'v0.54',
@@ -1317,6 +1345,24 @@
       [].slice.call(node.childNodes).forEach(function (c) {
         if (c.nodeType === 1) {
           var tag = c.tagName.toLowerCase();
+          /* A DIV IS A LINE BREAK, NOT RUBBISH. Chrome wraps each new line in
+             a <div> when Enter is pressed in a contenteditable that holds bare
+             text. div is not an allowed tag, so this used to UNWRAP it — and
+             the two lines silently became one.
+
+             The old code did have a <div> -> <p> replacement, at the end, on
+             the serialised string. It could never fire: by then clean() had
+             already removed every div. Dead code sitting on top of the bug it
+             was written to prevent, which is why it survived so long.
+
+             Converted here instead, before anything can throw it away. */
+          if (tag === 'div') {
+            var p = document.createElement('p');
+            while (c.firstChild) p.appendChild(c.firstChild);
+            node.replaceChild(p, c);
+            clean(p);
+            return;
+          }
           if (OK_TAGS.indexOf(tag) === -1) {
             while (c.firstChild) node.insertBefore(c.firstChild, c);
             node.removeChild(c);
@@ -1330,7 +1376,10 @@
         } else if (c.nodeType === 8) { node.removeChild(c); }
       });
     })(d);
-    return d.innerHTML.replace(/<div>/gi, '<p>').replace(/<\/div>/gi, '</p>');
+    /* The string replace that used to live here is gone: divs are converted in
+       clean() now, so by this point there are none left — which was true
+       before too, and is exactly why it never did anything. */
+    return d.innerHTML;
   }
 
   /* ================= Render ================= */
@@ -1463,6 +1512,38 @@
     return out + '</div></div>';
   }
 
+  /* A cell is PLAIN TEXT that may contain newlines, and a newline is drawn as
+     a line break. Cells are stored as strings, not markup — allowing HTML in
+     them would need a sanitiser they have never had, and esc() below means
+     anything stored would be shown to a club as literal angle brackets. Text
+     with newlines gives the fee tariffs the lines they need and nothing else. */
+  function cellHtml(c) {
+    return esc(String(c == null ? '' : c)).replace(/\n/g, '<br>');
+  }
+
+  /* The inverse, read off the live cell. textContent — which this used —
+     drops a <br> entirely, not even leaving a space, so every line the editor
+     typed was concatenated into one on save and the breaks appeared to be
+     "taken away" on leaving edit mode. */
+  function cellText(el) {
+    var out = '';
+    (function walk(n) {
+      for (var c = n.firstChild; c; c = c.nextSibling) {
+        if (c.nodeType === 3) { out += c.nodeValue; continue; }
+        if (c.nodeType !== 1) continue;
+        var tag = c.tagName.toLowerCase();
+        if (tag === 'br') { out += '\n'; continue; }
+        /* Chrome wraps each new line in a div; Firefox splits paragraphs. */
+        var block = (tag === 'div' || tag === 'p' || tag === 'li');
+        if (block && out && out.slice(-1) !== '\n') out += '\n';
+        walk(c);
+      }
+    })(el);
+    /* contenteditable litters non-breaking spaces; they look identical to a
+       normal space and wrap, search and sort differently. */
+    return out.replace(/\u00a0/g, ' ').replace(/\n+$/, '');
+  }
+
   function renderTable(node, editing) {
     var t = node.table || { header: [], rows: [] };
     var head = Array.isArray(t.header) ? t.header : [];
@@ -1470,13 +1551,13 @@
     var h = '<div class="nl-tbl-wrap"><table class="nl-tbl">';
     if (head.length) {
       h += '<thead><tr>' + head.map(function (c, ci) {
-        return '<th' + (editing ? ' contenteditable="true" data-th="' + ci + '"' : '') + '>' + esc(c || '') + '</th>';
+        return '<th' + (editing ? ' contenteditable="true" data-th="' + ci + '"' : '') + '>' + cellHtml(c) + '</th>';
       }).join('') + '</tr></thead>';
     }
     h += '<tbody>' + rows.map(function (row, ri) {
       row = Array.isArray(row) ? row : [];
       return '<tr>' + row.map(function (c, ci) {
-        return '<td' + (editing ? ' contenteditable="true" data-tr="' + ri + '" data-tc="' + ci + '"' : '') + '>' + esc(c || '') + '</td>';
+        return '<td' + (editing ? ' contenteditable="true" data-tr="' + ri + '" data-tc="' + ci + '"' : '') + '>' + cellHtml(c) + '</td>';
       }).join('') + '</tr>';
     }).join('') + '</tbody></table></div>';
     if (editing) {
@@ -2684,7 +2765,10 @@
   function saveTableCell(cell) {
     var host = cell.closest('[data-id]'); if (!host) return;
     var id = host.dataset.id, node = S.nodes[id]; if (!node || !node.table) return;
-    var val = cell.textContent;
+    /* NOT textContent. It drops a <br> without leaving so much as a space, so
+       every line typed into a fee tariff was concatenated back into one the
+       moment the cell was left. See cellText. */
+    var val = cellText(cell);
     if (cell.hasAttribute('data-th')) {
       var ci = +cell.getAttribute('data-th');
       if ((node.table.header[ci] || '') === val) return;
@@ -2716,7 +2800,9 @@
     if (!n.table) return '';
     var s = (n.table.header || []).join(' ');
     (n.table.rows || []).forEach(function (r) { s += ' ' + (r || []).join(' '); });
-    return s;
+    /* Cells hold newlines now, and a search phrase that runs across a line
+       break inside one cell should still find it. */
+    return s.replace(/\s+/g, ' ');
   }
 
   /* ================= Publish + export ================= */
