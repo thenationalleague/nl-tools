@@ -56,7 +56,7 @@ function liftFns(relPath, names) {
 }
 
 const cc = liftFns('functions/club-code.js', ['normCode', 'safeEqual', 'storedCode', 'pickClub']);
-const pp = liftFns('functions/programme.js', ['normCode']);
+const pp = liftFns('functions/programme.js', ['normCode', 'safeEqual', 'storedCode', 'pickClub']);
 
 // --- normCode ---------------------------------------------------------------
 
@@ -219,6 +219,36 @@ test('the NL door hands staff the club wildcard, and admins the Programme one to
     'staff get the club wildcard on its own');
   assert.ok(!/createCustomToken\([^)]*\{ club: "\*", pClub: "\*" \}\s*\)/.test(staffDoor),
     'pClub must not be minted unconditionally on the staff path');
+});
+
+test('both doors open the same record — one config cannot mean two things', () => {
+  /* The two functions read ONE config now. Every record must therefore give
+     both of them the same answer. It did not on 21/08/2026: club-code.js read
+     `passcode` OR `code`, programme.js read `passcode` alone, so a record
+     written in the club-codes vocabulary let a club into the Handbook and told
+     the same club, holding the same six characters, that Programme Packs did
+     not recognise them.
+
+     Asserted against BOTH implementations rather than against one and a
+     comment, because the failure is silent on the side that still works. */
+  const cases = [
+    { clubs: { SUT: { name: 'Sutton United', code: 'AB12CD' } } },
+    { clubs: { SUT: { name: 'Sutton United', passcode: 'AB12CD' } } },
+    { clubs: { SUT: { name: 'Sutton United', passcode: 'ab-12 cd' } } },
+    { clubs: { OLD: { name: 'Gone', code: 'AB12CD', revoked: true } } },
+    { clubs: { NEW: { name: 'Half Built', code: '' } } },
+    { nl: { name: 'National League', code: 'AB12CD' } },
+  ];
+  for (const cfg of cases) {
+    for (const typed of ['AB12CD', 'ab12cd', '', 'ZZ0000']) {
+      const a = cc.pickClub(cfg, typed), b = pp.pickClub(cfg, typed);
+      assert.equal(a ? a.key : null, b ? b.key : null,
+        'disagreement on ' + JSON.stringify(cfg) + ' for ' + JSON.stringify(typed));
+    }
+  }
+  assert.equal(cc.storedCode({ passcode: 'ab-12cd' }), pp.storedCode({ passcode: 'ab-12cd' }));
+  assert.equal(cc.storedCode({ code: 'ab-12cd' }), pp.storedCode({ code: 'ab-12cd' }));
+  assert.equal(cc.storedCode({}), pp.storedCode({}));
 });
 
 test('the code is never written to a log line', () => {

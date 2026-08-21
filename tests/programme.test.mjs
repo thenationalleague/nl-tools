@@ -100,7 +100,7 @@ test('normCode matches the server implementation in functions/programme.js', () 
    implementation is under test, not a copy. */
 function serverPickClub() {
   const src = readFileSync(join(REPO, 'functions/programme.js'), 'utf8');
-  const parts = ['normCode', 'safeEqual', 'pickClub'].map((name) => {
+  const parts = ['normCode', 'safeEqual', 'storedCode', 'pickClub'].map((name) => {
     const m = src.match(new RegExp(`function ${name}\\([\\s\\S]*?\\n\\}`));
     assert.ok(m, `could not find ${name} in functions/programme.js`);
     return m[0];
@@ -140,6 +140,37 @@ test('pickClub: survives an empty or half-built config', () => {
   assert.equal(pick({}, '4K2M9P'), null);
   assert.equal(pick({ clubs: { SUT: null } }, '4K2M9P'), null);
   assert.equal(pick({ nl: CFG.nl }, 'X9WT4B')?.key, 'NL');
+});
+
+test('pickClub reads a record stored under either field name', () => {
+  /* One config, two doors. club-code.js has read `passcode` OR `code` since the
+     relocation; this side read `passcode` alone, so a record written in the
+     club-codes vocabulary opened the Handbook and was "not recognised" by
+     Programme Packs — the same club, the same six characters, two different
+     answers. That is the most confusing way this can fail, because the person
+     holding the code has every reason to believe they typed it right.
+     Happened 21/08/2026. */
+  const pick = serverPickClub();
+  assert.equal(pick({ clubs: { SUT: { name: 'Sutton United', code: '4K2M9P' } } }, '4K2M9P')?.key, 'SUT');
+  assert.equal(pick({ clubs: { SUT: { name: 'Sutton United', passcode: '4K2M9P' } } }, '4K2M9P')?.key, 'SUT');
+  assert.equal(pick({ nl: { name: 'National League', code: 'X9WT4B' } }, 'X9WT4B')?.key, 'NL');
+});
+
+test('pickClub fails closed on a blank code and a blank stored code', () => {
+  /* safeEqual('','') is true, so a record whose code field is missing would be
+     a skeleton key for anyone submitting nothing. The caller's four-character
+     floor covers it today; the door must refuse on its own account. */
+  const pick = serverPickClub();
+  assert.equal(pick(CFG, ''), null);
+  assert.equal(pick({ clubs: { NEW: { name: 'Half Built' } } }, ''), null);
+  assert.equal(pick({ clubs: { NEW: { name: 'Half Built', passcode: '' } } }, ''), null);
+});
+
+test('pickClub refuses a revoked record', () => {
+  /* Revoked rather than deleted, so an audit line still resolves the key to a
+     name. Same vocabulary as club-code.js, so one config means one meaning. */
+  const pick = serverPickClub();
+  assert.equal(pick({ clubs: { OLD: { name: 'Gone', code: '4K2M9P', revoked: true } } }, '4K2M9P'), null);
 });
 
 /* ── safeName ─────────────────────────────────────────────────────────── */
