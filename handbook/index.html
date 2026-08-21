@@ -1,6 +1,26 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
+  Version: v0.47 (21/08/2026) — adding a clause stops asking twice.
+
+    Richard: "it says add three here. I press it, and it just opens where
+    three already exists."
+
+    The insert itself is correct — simulated against the shipped functions:
+    the new clause takes 1.3 and the old 1.3 becomes 1.4, exactly as the strip
+    promised. What sat on top of it was previewThenCommit, which opens a
+    "confirm renumber" dialog whenever numbers move. An insert in the middle
+    of a list ALWAYS moves numbers, so it fired every single time — and until
+    Apply was pressed nothing happened and 1.3 was still where 1.3 was.
+
+    A renumber preview earns a dialog when the renumber is a SURPRISE:
+    indenting, moving, changing a numbering style. It does not earn one when
+    the user has just been told the number and pressed a button that said it.
+
+    Adds commit straight through now, and so do deletes, which already have
+    their own confirmation naming the clause. A new clause flashes briefly and
+    a toast names it — "Added 1.3" — because an empty clause arriving in a
+    wall of text is otherwise easy to miss.
   Version: v0.46 (21/08/2026) — one editing bar, not two at opposite ends.
 
     Richard: "why two diff editing areas here?" Because they were built at
@@ -230,6 +250,17 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '21/08/2026',
+        version: 'v0.47',
+        items: [
+          'Adding a clause no longer asks you to confirm a renumber you just ' +
+            'chose. It adds, says “Added 1.3”, and briefly highlights the new ' +
+            'clause.',
+          'Deleting no longer asks twice either — the confirmation already ' +
+            'names the clause.'
+        ]
+      },
       {
         date: '21/08/2026',
         version: 'v0.46',
@@ -769,6 +800,15 @@
      qualifies it is a page that will disagree with the canon later. The
      selector reads better for losing it, and the class is only ever put on a
      clause or an article by the code below. */
+  /* A clause that has just arrived. Fades on its own — a marker needing
+     dismissal would be a second thing to do after adding a clause. */
+  .hb-new { animation: hb-new-flash 1.4s ease-out; }
+  @keyframes hb-new-flash {
+    0%   { background: var(--amber-light); }
+    100% { background: transparent; }
+  }
+  @media (prefers-reduced-motion: reduce) { .hb-new { animation: none; } }
+
   .hb-gap-before { padding-top: 30px; }
   .hb-gap-after  { padding-bottom: 30px; }
 
@@ -1887,7 +1927,18 @@
       NL.writeAudit && NL.writeAudit('edit', label);
       render();
       syncUndoBtns();
-      if (S.focusNew) { focusNode(S.focusNew); S.focusNew = null; }  // drop the cursor into a just-added clause
+      if (S.focusNew) {
+        focusNode(S.focusNew);
+        /* A new clause is empty, so the only marks of its arrival are a number
+           and a grey placeholder in a wall of text. Flash it, briefly, so "did
+           that do anything" is not a question anyone has to ask. */
+        var fresh = $('c-' + S.focusNew);
+        if (fresh) {
+          fresh.classList.add('hb-new');
+          setTimeout(function () { fresh.classList.remove('hb-new'); }, 1400);
+        }
+        S.focusNew = null;
+      }
     }).catch(function (e) {
       NL.toast && NL.toast('Save failed: ' + (e && e.message || e), 'error');
       load();
@@ -1909,6 +1960,23 @@
   function clone() { return JSON.parse(JSON.stringify(S.nodes)); }
   function uid() { return 'n' + Date.now().toString(36) + Math.floor(Math.random() * 1e4).toString(36); }
   function reindex(nodes, pid) { childrenOf(nodes, pid).forEach(function (n, i) { n.order = i; }); }
+
+  /* A renumber preview is worth a dialog when the renumber is a SURPRISE —
+     indenting, moving, changing a numbering style. It is not worth one when
+     the user has just been told the number and pressed a button that said it:
+     "Add 1.3 here" followed by "this will renumber 1.3 to 1.4, apply?" asks
+     someone to confirm the thing they just chose, and a second dialog on a
+     correct action is how a correct action comes to feel broken.
+
+     So adds and deletes commit straight through — the insert strip announced
+     the number, and delete has its own confirmation naming the clause. Only
+     the surprising renumbers keep the preview. */
+  function commitAdd(c, label, newId) {
+    var done = commit(c, label);
+    var num = newId ? computeNumbers(c)[newId] : '';
+    NL.toast && NL.toast(num ? 'Added ' + num : 'Added', 'success');
+    return done;
+  }
 
   // Show a renumber preview when a structural change moves numbers, then commit.
   function previewThenCommit(c, label) {
@@ -2122,7 +2190,7 @@
       n.order = (t.order || 0) + 0.5; c[n.id] = n;
       reindex(c, t.parentId);
       S.selectedId = n.id; S.focusNew = n.id;
-      previewThenCommit(c, 'Add clause after ' + id);
+      commitAdd(c, 'Add clause after ' + id, n.id);
     },
     /* Insert at a boundary the user pointed at, at that clause's own depth —
        so the line they saw is where it goes. addAfter is the same thing with
@@ -2138,7 +2206,7 @@
       };
       c[n.id] = n; reindex(c, t.parentId);
       S.selectedId = n.id;
-      previewThenCommit(c, 'Add table after ' + id);
+      commitAdd(c, 'Add table after ' + id, n.id);
     },
     addSub: function (id) {
       var c = clone(), t = c[id];
@@ -2149,7 +2217,7 @@
       n.order = 1e6; c[n.id] = n;
       reindex(c, id);
       S.selectedId = n.id; S.focusNew = n.id;
-      previewThenCommit(c, 'Add sub-clause under ' + id);
+      commitAdd(c, 'Add sub-clause under ' + id, n.id);
     },
     indent: function (id) {
       var c = clone(), t = c[id];
@@ -2207,7 +2275,7 @@
           (function rm(x) { childrenOf(c, x).forEach(function (k) { rm(k.id); }); delete c[x]; })(id);
           reindex(c, n.parentId);
           if (S.selectedId === id) S.selectedId = null;
-          previewThenCommit(c, 'Delete ' + id);
+          commit(c, 'Delete ' + id);
         });
     }
   };
@@ -2221,7 +2289,7 @@
     c[n.id] = n;
     reindex(c, t.parentId);
     S.selectedId = n.id; S.focusNew = n.id;
-    previewThenCommit(c, 'Add clause ' + where + ' ' + refId);
+    commitAdd(c, 'Add clause ' + where + ' ' + refId, n.id);
   }
 
   function move(id, dir) {
