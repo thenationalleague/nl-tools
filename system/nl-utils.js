@@ -1,9 +1,18 @@
 /* =========================================================================
    NL Tools — Shared utilities
    File: /system/nl-utils.js
-   Version: v1.40 (21/08/2026)
+   Version: v1.41 (21/08/2026)
 
    Changelog
+   v1.41 (21/08/2026)
+     - NL.clubs.crestImgHtml emits loading="lazy" decoding="async". The helper
+       exists for LISTS of clubs, and a list of clubs is 72 of them: the club
+       directory index requested 72 crests and decoded 72 PNGs on first paint
+       for the dozen on screen. The estate hand-rolls loading="lazy" in 140
+       places and the one helper that emits crest images had none. Pass
+       {eager:true} for a crest that is the subject of the page rather than an
+       item in a list. Cache-bust ?v=43 -> ?v=44.
+
    v1.40 (21/08/2026)
      - NL.codeGate says when a slow check is still a working one. The
        viaFunction handshake is an RTDB round-trip to a trigger and Eventarc
@@ -1988,9 +1997,17 @@
     crestImgHtml: function(name, size, opts) {
       opts = opts || {};
       var esc = window.NL.escHtml;
+      /* LAZY BY DEFAULT. This helper's whole reason to exist is lists of
+         clubs, and a list of clubs is 72 of them: the directory index fired
+         72 eager requests and decoded 72 PNGs on first paint for the dozen
+         actually on screen. The estate already uses loading="lazy" in 140
+         places by hand; the one helper that emits crest images did not.
+         opts.eager for a crest that IS the thing being looked at — a hero or
+         a banner — where deferring it is the wrong way round. */
       return '<img data-crest="' + esc(name || '') + '"' +
         (opts.className ? ' class="' + esc(opts.className) + '"' : '') +
         ' src="' + esc(this.crestUrl(name, size)) + '"' +
+        (opts.eager ? '' : ' loading="lazy"') + ' decoding="async"' +
         ' alt="' + esc(opts.alt || '') + '">';
     },
     /* Wire every img[data-crest] under `root` (an element or document) via

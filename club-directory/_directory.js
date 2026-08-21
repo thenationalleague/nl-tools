@@ -1,7 +1,10 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.6 (21/08/2026)
+   Version: v1.7 (21/08/2026)
+
+   v1.7 — the banner crest carries canon .nl-crest, so it is drawn in a square
+   box rather than sized by the shape of the badge. decoding="async" with it.
 
    v1.6 — opts.showQuiet. "Not published" and "None held" are loud for the
    club whose entry it is and silent for everyone else. Same reasoning as
@@ -558,7 +561,8 @@
     return '' +
       '<div class="cd-banner"' + (pal ? ' style="--cd-bg:' + esc(pal.bg) +
         ';--cd-fg:' + esc(pal.fg) + '"' : '') + '>' +
-        '<img class="cd-banner__crest" id="cdCrest" alt="" hidden>' +
+        '<img class="nl-crest cd-banner__crest" id="cdCrest" alt="" hidden ' +
+          'decoding="async">' +
         '<h1 class="cd-banner__name">' + esc(rec.club || '') + '</h1>' +
       '</div>' +
 

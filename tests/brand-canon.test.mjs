@@ -552,6 +552,27 @@ test('the clause markup carries the numbering style the hanging rule reads', () 
     'renderNode must emit data-num on every clause');
 });
 
+test('.nl-crest is square, and stays square', () => {
+  /* Crest files are NOT square. The generated tiers fit the longest side to
+     96px or 256px, so they come out 73x96, 96x86, 64x96 — whatever shape the
+     badge is. That makes `width: X; height: auto` a trap, and the club
+     directory banner fell into it: a tall narrow crest drew 68x102 while a
+     wide one drew 68x61, so the banner's height moved with the club.
+
+     The box is the constant. If height ever stops matching width here, every
+     caller silently goes back to being sized by the artwork. */
+  const rule = /\.nl-crest\s*\{([^}]*)\}/.exec(css);
+  assert.ok(rule, '.nl-crest still exists');
+  const w = /width:\s*var\(--crest-size,\s*(\d+)px\)/.exec(rule[1]);
+  const h = /height:\s*var\(--crest-size,\s*(\d+)px\)/.exec(rule[1]);
+  assert.ok(w && h, 'both dimensions come from --crest-size');
+  assert.equal(w[1], h[1], 'the fallback must be square too');
+  assert.match(rule[1], /object-fit:\s*contain/,
+    'contain, so the badge fits the box rather than filling or cropping it');
+  assert.ok(!/height:\s*auto/.test(rule[1]),
+    'height:auto is the exact bug this component was promoted to end');
+});
+
 test('.is-sel is actually drawn', () => {
   /* The bug this was written for is the quietest kind. handbook/index.html
      and handbook/reader.html both add and remove .is-sel faithfully — on the
