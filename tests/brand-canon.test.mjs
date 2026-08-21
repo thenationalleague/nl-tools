@@ -525,6 +525,49 @@ test('the clause markup carries the numbering style the hanging rule reads', () 
     'renderNode must emit data-num on every clause');
 });
 
+test('.is-sel is actually drawn', () => {
+  /* The bug this was written for is the quietest kind. handbook/index.html
+     and handbook/reader.html both add and remove .is-sel faithfully — on the
+     selected clause and on a deep-link target — and until v2.56 no stylesheet
+     anywhere defined it. Every line of that bookkeeping ran correctly and
+     painted nothing, in both pages, for months.
+
+     So the guard is "does a rule exist", not "is it the right red". A class
+     two pages depend on should not be able to go back to meaning nothing. */
+  assert.match(css, /\.nl-clause\.is-sel[\s\S]{0,400}background:\s*var\(--primary\)/,
+    '.is-sel must draw a visible marker');
+  assert.match(css, /\.nl-clause\.is-sel,\s*\.nl-art\.is-sel\s*\{[^}]*position:\s*relative/,
+    'the margin rule is absolutely positioned, so the clause must be its ' +
+    'containing block or the rule lands somewhere else entirely');
+
+  /* Not a shadow, deliberately: an empty clause has nothing to cast one
+     around, and the empty clause is the case that most needs the marker. */
+  const block = css.slice(css.indexOf('.nl-clause.is-sel'), css.indexOf('.nl-art__head > .nl-clause__text'));
+  assert.ok(!/box-shadow/.test(block),
+    '.is-sel must not rely on a shadow — it has to hold its shape at zero height');
+
+  for (const page of ['handbook/index.html', 'handbook/reader.html']) {
+    assert.match(readFileSync(join(REPO, page), 'utf8'), /is-sel/,
+      page + ' sets .is-sel, which is why it is worth pinning here');
+  }
+});
+
+test('an untitled article runs its prose beside the number', () => {
+  /* 23 of 107 articles carry a number and no title — the whole of Board
+     Directives. Both the editor and the reader emit the body INSIDE
+     .nl-art__head for those, so it lands in the same gutter the number uses
+     instead of below an empty title row. Without the flex sizing the body
+     will not wrap and the directive runs off the page. */
+  assert.match(css, /\.nl-art__head\s*>\s*\.nl-clause__text\s*\{[^}]*flex:\s*1 1 auto/);
+  assert.match(css, /\.nl-art__head\s*>\s*\.nl-clause__text\s*\{[^}]*min-width:\s*0/,
+    'without min-width:0 a long unbroken line refuses to wrap in a flex row');
+
+  const hb = readFileSync(join(REPO, 'handbook/index.html'), 'utf8');
+  assert.match(hb, /!showTitle && wantBody \? artBody\(true\)/,
+    'renderNode must put the body inside the head when there is no title, ' +
+    'or the canon rule above matches nothing');
+});
+
 test('an article and its clauses share one left edge', () => {
   /* Richard, reading League Rules: "clause six will say Registration of
      Players, and it's aligned in a certain area. But six point one, the

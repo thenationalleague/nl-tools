@@ -1,6 +1,34 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
+  Version: v0.52 (21/08/2026) — five things Richard found by using it.
+
+    EMPTY CLAUSES are swept when you leave edit mode. Narrowly: no text, no
+    heading, no table, no sub-clauses, and never an article. Through commit(),
+    so it is undoable, and it says how many it took.
+
+    THE SELECTED CLAUSE IS DRAWN. .is-sel was applied and removed faithfully
+    by this page and by the reader, and styled by nothing, anywhere — see
+    nl-brand v2.56. Plus a 1.4s flash on jumping to a clause, which is the
+    transient half of the same question.
+
+    THE ACTION BAR MOVED TO THE TOP, under the Read/Edit bar. It began at the
+    foot for thumb reach, which is right on a phone and wrong on a desktop,
+    where it sat most of a screen from the caret. Below 700px it still goes to
+    the bottom.
+
+    AN ARTICLE WITH NO TITLE no longer draws an empty title row; its prose
+    runs beside the number. 23 of 107 articles — all of Board Directives.
+    This one is a markup change, so it needs a republish to reach the reader
+    and the PDF.
+
+    PLACEHOLDERS stopped inheriting the slot's type. "Section title" at 18px
+    weight 800 in grey read as a real heading; it is small and light now, and
+    only appears on a clause you have selected.
+
+  Version: v0.51 (21/08/2026) — one text column: an article's title, its own
+    prose and its clauses all start at the same left edge (nl-brand v2.55).
+    Three edges before, at 42px, 0px and 58px, all looking deliberate.
   Version: v0.50 (21/08/2026) — the table breakout is withdrawn
     (nl-brand v2.54). Its offsets were measured against the layout BEFORE
     hanging sub-clauses, so at depth 3 it pulled a table 58px outside the text
@@ -259,7 +287,7 @@
   <title>Handbook 2026-27 — NL Tools</title>
 
   <!-- Brand stylesheet (lint canonical: ?v=45) -->
-  <link rel="stylesheet" href="/system/nl-brand.css?v=52">
+  <link rel="stylesheet" href="/system/nl-brand.css?v=53">
 
   <!-- Firebase 10.12.0 SDK (compat) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -290,6 +318,34 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '21/08/2026',
+        version: 'v0.52',
+        items: [
+          'Clauses left completely empty are removed when you leave edit ' +
+            'mode — no text, no heading, no table, no sub-clauses. It says ' +
+            'how many, and undo puts them back.',
+          'The clause you have selected is now marked: a red rule down the ' +
+            'margin and a faint tint, which works even when the clause is ' +
+            'empty. Jumping to a clause flashes it briefly.',
+          'The editing bar moved to the top, under Read/Edit, instead of the ' +
+            'foot of the screen. On a phone it stays at the bottom.',
+          'A numbered section with no title no longer leaves a blank line ' +
+            'where a title would go — the text starts beside the number. ' +
+            'Takes effect in the reader and the PDF at the next publish.',
+          'Placeholder text is small and grey instead of looking like a real ' +
+            'heading, and only shows on the clause you have selected.'
+        ]
+      },
+      {
+        date: '21/08/2026',
+        version: 'v0.51',
+        items: [
+          'A section title, prose written directly into that section, and ' +
+            'the text of its sub-clauses now all start at the same left ' +
+            'edge. There were three different edges before.'
+        ]
+      },
       {
         date: '21/08/2026',
         version: 'v0.50',
@@ -823,9 +879,17 @@
   .nl-doc.is-editing [contenteditable]:hover { box-shadow: 0 0 0 1px var(--border); }
   .nl-doc.is-editing [contenteditable]:focus { box-shadow: var(--focus-ring); outline: none; background: var(--white); }
   .nl-doc.is-editing [contenteditable] { padding: 2px 4px; min-height: 1.2em; }
-  /* Placeholder shown in an empty editable slot so it's clear where to type. */
+  /* Placeholder shown in an empty editable slot so it's clear where to type.
+
+     It must not inherit the SLOT's type. A section title is 18px at weight
+     800, so recolouring alone gave a big bold grey line that read as an
+     actual heading — Richard: "it's not clear enough to the naked eye that
+     that isn't the actual title." The placeholder is now small, light and
+     italic whatever it sits in, which is the whole job of a placeholder. */
   .nl-doc.is-editing [contenteditable][data-ph]:empty::before {
     content: attr(data-ph); color: var(--text-muted); font-style: italic; pointer-events: none;
+    font-size: var(--text-sm); font-variation-settings: 'wght' 400;
+    letter-spacing: normal; text-transform: none;
   }
 
   /* ---- Formatting toolbar (edit mode) ---- */
@@ -868,14 +932,17 @@
      qualifies it is a page that will disagree with the canon later. The
      selector reads better for losing it, and the class is only ever put on a
      clause or an article by the code below. */
-  /* A clause that has just arrived. Fades on its own — a marker needing
-     dismissal would be a second thing to do after adding a clause. */
-  .hb-new { animation: hb-new-flash 1.4s ease-out; }
-  @keyframes hb-new-flash {
+  /* A clause that has just arrived, or one just jumped to. Fades on its own —
+     a marker needing dismissal would be a second thing to do afterwards.
+
+     Distinct from .is-sel (nl-brand.css), which is the standing "this is the
+     clause the bar acts on". This is the transient "it is over here". */
+  .hb-flash { animation: hb-flash-fade 1.4s ease-out; }
+  @keyframes hb-flash-fade {
     0%   { background: var(--amber-light); }
     100% { background: transparent; }
   }
-  @media (prefers-reduced-motion: reduce) { .hb-new { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .hb-flash { animation: none; } }
 
   .hb-gap-before { padding-top: 30px; }
   .hb-gap-after  { padding-bottom: 30px; }
@@ -916,9 +983,11 @@
      It replaced a per-clause toolbar: eleven controls on each of 1,203 nodes,
      which drew 6,160 buttons in League Rules alone and left two of every three
      rows on screen as furniture. See system/handbook-editor-plan.md. */
+  /* Second in a stack of two bars: the document bar above acts on the whole
+     area, this one on the selected clause. */
   .hb-bar {
     flex: none; display: flex; align-items: center; gap: 10px;
-    padding: 8px 12px; border-top: 2px solid var(--primary);
+    padding: 8px 12px; border-bottom: 2px solid var(--primary);
     background: var(--white); flex-wrap: wrap;
   }
   .hb-bar__where { display: flex; align-items: baseline; gap: 6px; flex: none; }
@@ -955,6 +1024,12 @@
   @media (max-width: 560px) {
     .hb-bar { gap: 6px; padding: 6px 8px; }
     .hb-bar__lbl { display: none; }
+  }
+  /* On a phone the bar belongs at the foot, where the thumb is — the one
+     place the original position was right. .ce-main is a flex column, so
+     order alone moves it; the DOM stays as written. */
+  @media (max-width: 700px) {
+    .hb-bar { order: 9; border-bottom: 0; border-top: 2px solid var(--primary); }
   }
 
 
@@ -1007,24 +1082,27 @@
         <button class="btn btn--ghost" id="ceReimport" type="button" hidden>Re-import</button>
         <button class="btn btn--primary" id="cePublish" type="button" hidden>Publish edition</button>
       </div>
-      <div class="nl-crumb" id="ceCrumb" title="Where you are"></div>
-      <div id="ceDoc"></div>
-
       <!-- ONE action bar, not one per clause.
            It lives OUTSIDE #ceDoc deliberately: render() rebuilds #ceDoc with
            innerHTML, and the document is contenteditable, so anything inside
            it is destroyed — and the caret with it — on every structural
            change. Out here it survives, which is what lets the toolbar follow
            the selection without a re-render.
-           A fixed strip at the foot rather than a popover pinned to the
-           clause: no scroll maths, nothing overlapping the text being read,
-           and it works on a phone, which is where this gets reviewed. -->
+           A strip in the layout rather than a popover pinned to the clause:
+           no scroll maths and nothing overlapping the text being read.
+           It sits directly under the Read/Edit bar, second in a stack of two:
+           the top bar acts on the DOCUMENT, this one on the CLAUSE. It began
+           at the foot for thumb reach, which is right on a phone and wrong on
+           a desktop, where it put the controls — and the label naming the
+           clause they act on — most of a screen away from the caret. Richard:
+           "it's a very unnatural place." Below 700px it goes back to the
+           bottom; see the .hb-bar order rule. -->
       <div class="hb-bar" id="ceActs" hidden>
         <div class="hb-bar__where">
           <span class="hb-bar__lbl">Editing</span>
-          <!-- The bar is pinned to the foot, so the clause it names can be
-               scrolled well off screen — which reads as the tool having lost
-               track of itself. Press the name to go back to it. -->
+          <!-- The clause the bar names can be scrolled off screen — which
+               reads as the tool having lost track of itself. Press the name
+               to go back to it. -->
           <button class="hb-bar__num" id="ceActsWhere" type="button"
                   title="Scroll back to this clause"></button>
         </div>
@@ -1058,6 +1136,8 @@
           <button type="button" data-op="delete" class="is-bad" title="Delete this clause and its sub-clauses">Delete</button>
         </div>
       </div>
+      <div class="nl-crumb" id="ceCrumb" title="Where you are"></div>
+      <div id="ceDoc"></div>
     </main>
     <!-- The insert line. ONE element, positioned under the pointer, rather
          than a drop zone rendered between every pair of clauses — 1,203 of
@@ -1281,13 +1361,31 @@
     var num = numMap[node.id] || '';
     if (node.parentId == null) {
       // Article (top level)
+      /* A title row ONLY where there is a title — or where one has just been
+         asked for, exactly as clause headings work. 23 of 107 articles carry
+         a number and no title (all of Board Directives), and drawing the row
+         anyway left a blank line where a heading would go and pushed the
+         directive's first line underneath it. */
+      var hasTitle = !!(node.title || '').trim();
+      var showTitle = hasTitle || (editing && S.showTitleFor === node.id);
+      var wantBody = !!node.body || editing;
+      function artBody(inHead) {
+        return '<div class="nl-clause__text" data-ph="Write the text…"' +
+          (inHead ? '' : ' style="margin-top:6px"') + editable('body') + '>' +
+          (node.body || '') + '</div>';
+      }
       var h = '<section class="nl-art' + (num ? '' : ' nl-art--nonum') + sel + '" id="c-' + node.id + '" data-id="' + node.id + '">' +
         '<div class="nl-art__head">' +
         '<span class="nl-art__num">' + esc(num) + '</span>' +
-        '<span class="nl-art__title" data-ph="Section title"' + editable('title') + '>' + esc(node.title || '') + '</span>' +
+        (showTitle
+          ? '<span class="nl-art__title" data-ph="Section title — optional"' + editable('title') + '>' + esc(node.title || '') + '</span>'
+          : '') +
+        /* No title: the body goes INSIDE the head, so the gutter the head
+           already has puts the prose beside the number rather than below a
+           blank row. See .nl-art__head > .nl-clause__text in nl-brand.css. */
+        (!showTitle && wantBody ? artBody(true) : '') +
         '</div>';
-      if (node.body) h += '<div class="nl-clause__text" data-ph="Write the text…" style="margin-top:6px"' + editable('body') + '>' + node.body + '</div>';
-      else if (editing) h += '<div class="nl-clause__text" data-ph="Write the text…" style="margin-top:6px"' + editable('body') + '></div>';
+      if (showTitle && wantBody) h += artBody(false);
       kids.forEach(function (c) { h += renderNode(c, numMap); });
       return h + '</section>';
     }
@@ -1558,8 +1656,21 @@
       (out.join('') || '<div class="ce-toc__result">No matches</div>');
   }
 
+  /* Briefly mark a clause. Used for one that has just arrived — a new clause
+     is empty, so its only marks are a number and a grey placeholder in a wall
+     of text — and for one just scrolled to, where the question is the same
+     one: which of these did I land on. */
+  function flash(id) {
+    var el = $('c-' + id); if (!el) return;
+    el.classList.remove('hb-flash');
+    void el.offsetWidth;              // restart the animation on a repeat jump
+    el.classList.add('hb-flash');
+    setTimeout(function () { el.classList.remove('hb-flash'); }, 1400);
+  }
+
   function scrollToNode(id) {
     var el = $('c-' + id); if (!el) return;
+    flash(id);
     // Lock the scroll-spy on the tapped section while the smooth scroll is in
     // flight — otherwise the nav highlight snaps back to the current section and
     // rattles through every one in between until the scroll arrives.
@@ -1689,11 +1800,60 @@
     });
   }
 
+  /* A clause with nothing in it. Richard: "what happens to clauses left
+     empty? In my mind they're simply erased on exit if empty."
+
+     Deliberately narrow. It must never take anything a person could have
+     meant to keep, so a clause survives if it has ANY of: text, a heading,
+     a table, or sub-clauses — a parent whose own line is blank is a real
+     shape in a legal document and its children are the content. Articles are
+     out entirely: an empty section is a section someone made on purpose and
+     is about to fill, and losing it would take its place in the numbering
+     with it. */
+  function isEmptyClause(n, hasKids) {
+    if (!n || n.parentId == null) return false;          // never an article
+    if (hasKids) return false;
+    if (n.kind === 'table' || n.table) return false;
+    if ((n.title || '').trim()) return false;
+    return !(n.body || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  /* Sweep them on the way out of edit mode — NOT on blur. Blur fires when you
+     click a button, so a blur-time sweep would delete the clause you had just
+     added on your way to typing in it. */
+  function pruneEmptyClauses() {
+    var kids = {};
+    Object.keys(S.nodes).forEach(function (id) {
+      var p = S.nodes[id].parentId; if (p != null) kids[p] = true;
+    });
+    var gone = Object.keys(S.nodes).filter(function (id) {
+      return isEmptyClause(S.nodes[id], kids[id]);
+    });
+    if (!gone.length) return Promise.resolve();
+    var c = JSON.parse(JSON.stringify(S.nodes));
+    gone.forEach(function (id) { delete c[id]; });
+    if (S.selectedId && !c[S.selectedId]) S.selectedId = null;
+    /* Say so, and only once it has actually happened. Silent deletion in a
+       legal document is worse than the clutter, and undo is the way back —
+       which is why this goes through commit() rather than writing direct. */
+    var what = gone.length + ' empty clause' + (gone.length === 1 ? '' : 's');
+    return Promise.resolve(commit(c, 'Removed ' + what)).then(function () {
+      NL.toast && NL.toast('Removed ' + what + ' — undo if that was wrong', 'info');
+    });
+  }
+
   function leaveEdit() {
     var was = S.mode;
-    S.mode = 'read';
-    render();
-    if (was === 'edit') releaseLock();
+    if (was !== 'edit') { S.mode = 'read'; render(); return; }
+    /* Wait for the save the outgoing blur just started, or the sweep clones a
+       stale S.nodes and erases what was typed into the clause being left. */
+    afterPendingSave(function () {
+      pruneEmptyClauses().then(function () {
+        S.mode = 'read';
+        render();
+        releaseLock();
+      });
+    });
   }
 
   /* ================= The edit lock =================
@@ -2005,11 +2165,7 @@
         /* A new clause is empty, so the only marks of its arrival are a number
            and a grey placeholder in a wall of text. Flash it, briefly, so "did
            that do anything" is not a question anyone has to ask. */
-        var fresh = $('c-' + S.focusNew);
-        if (fresh) {
-          fresh.classList.add('hb-new');
-          setTimeout(function () { fresh.classList.remove('hb-new'); }, 1400);
-        }
+        flash(S.focusNew);
         S.focusNew = null;
       }
     }).catch(function (e) {
@@ -2091,9 +2247,13 @@
     el.scrollIntoView({ block: 'center' });
   }
 
-  // Drop the caret into a clause's heading (used after "+ heading").
+  /* Drop the caret into a clause's heading (used after "+ heading"). An
+     ARTICLE's heading is .nl-art__title, not .nl-clause__title — and since
+     articles stopped drawing an empty title row, "+ heading" is the only way
+     to give one a title, so missing it here would leave the caret nowhere. */
   function focusTitle(id) {
-    var el = document.querySelector('#c-' + id + ' .nl-clause__title[contenteditable]');
+    var el = document.querySelector('#c-' + id + ' .nl-clause__title[contenteditable]') ||
+             document.querySelector('#c-' + id + ' .nl-art__title[contenteditable]');
     if (!el) return;
     el.focus();
     try {
