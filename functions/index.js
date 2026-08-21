@@ -76,3 +76,13 @@ Object.assign(exports, require("./club-code"));
 // terminal and no gcloud, which was the deciding constraint on its shape.
 Object.assign(exports, require("./nls-ingester"));
 
+
+// Publish the handbook, get the PDF (handbookPdfOnPublish). Watches
+// publishedEditionId and asks GitHub Actions to run render-handbook-pdf.yml,
+// so the Download PDF file catches up in a minute rather than by the next
+// hourly cron. A trigger and not a button on purpose: whoever is publishing
+// already pressed the only button they should need, and "rebuild the PDF" is
+// an implementation detail to them. The cron stays underneath as the thing
+// that still works when this does not. First function here to use a Secret
+// Manager secret — see functions/handbook-pdf.js.
+Object.assign(exports, require("./handbook-pdf"));
