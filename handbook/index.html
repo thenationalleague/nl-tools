@@ -1,6 +1,44 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
+  Version: v0.55 (21/08/2026) — carriage returns are kept. Reported from the
+    referee fee tariff: "any time I go out of edit it takes the carriage
+    returns away." Two causes, two paths, both silent.
+
+    TABLE CELLS were read back with cell.textContent, which drops a <br>
+    without leaving so much as a space — so the lines typed into a tariff were
+    welded into one on save. Cells stay PLAIN TEXT (they have never had a
+    sanitiser, and esc() means stored markup would be shown to a club as
+    literal angle brackets) but now carry newlines, drawn as breaks.
+
+    CLAUSE BODIES: sanitize()'s allow-list has no `div`, and Chrome wraps each
+    new line in one when Enter is pressed in a contenteditable holding bare
+    text — so clean() unwrapped them and merged the lines. There WAS a
+    <div> -> <p> replacement for this, at the end, on the serialised string,
+    by which point every div had already been removed. Dead code sitting on
+    top of the bug it was written to prevent. Converted inside clean() now.
+
+  Version: v0.54 (21/08/2026) — the selection marker no longer paints a solid
+    column down the gutter of every sub-clause (nl-brand v2.57). The number is
+    a flex item, so its tint stretched to the height of the row — and a row
+    contains its whole subtree.
+  Version: v0.53 (21/08/2026) — the double insert offer, properly this time,
+    and a new clause you never typed in.
+
+    ONE GAP. v0.42 canonicalised where a new clause would LAND, which made
+    both hovers on a boundary produce one identical insertion — and left the
+    GAP where the pointer happened to be. So the bottom of 2 opened a strip
+    under 2, the top of 3 opened another above 3, thirty pixels apart, same
+    outcome. The user cannot see `where`; they can only see the line. The
+    element is now redirected too. It settles after one redirect: opening 2's
+    gap pushes 3 down by exactly the gap, so the pointer lands inside 2.
+
+    A CLAUSE ADDED AND NEVER TYPED IN goes the moment focus leaves it.
+    Narrower than the sweep on exit and deliberately so — it can only reach
+    something created seconds ago in this session with nothing in it. Cleared
+    by the first keystroke rather than by the save, because text is written on
+    blur and a check against the saved state would delete what was just typed.
+
   Version: v0.52 (21/08/2026) — five things Richard found by using it.
 
     EMPTY CLAUSES are swept when you leave edit mode. Narrowly: no text, no
@@ -287,7 +325,7 @@
   <title>Handbook 2026-27 — NL Tools</title>
 
   <!-- Brand stylesheet (lint canonical: ?v=45) -->
-  <link rel="stylesheet" href="/system/nl-brand.css?v=53">
+  <link rel="stylesheet" href="/system/nl-brand.css?v=54">
 
   <!-- Firebase 10.12.0 SDK (compat) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -318,6 +356,37 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '21/08/2026',
+        version: 'v0.55',
+        items: [
+          'Line breaks typed into a table cell are now kept — the fee ' +
+            'tariffs can have one line per entry. They were being stripped ' +
+            'every time you left edit mode.',
+          'Line breaks typed into a clause with no existing paragraphs are ' +
+            'kept too. Same symptom, different cause.'
+        ]
+      },
+      {
+        date: '21/08/2026',
+        version: 'v0.54',
+        items: [
+          'Fixed: selecting a clause with sub-clauses under it filled the ' +
+            'whole number column with colour, all the way down past the last ' +
+            'sub-clause. Only the selected clause is marked now.'
+        ]
+      },
+      {
+        date: '21/08/2026',
+        version: 'v0.53',
+        items: [
+          'Between two clauses at the same level you are now offered ONE ' +
+            'place to insert, not two. The earlier fix made both offers do ' +
+            'the same thing but left them drawn in two separate places.',
+          'A clause you add and then click away from without typing anything ' +
+            'is removed straight away, as though you had never added it.'
+        ]
+      },
       {
         date: '21/08/2026',
         version: 'v0.52',
@@ -1202,6 +1271,12 @@
        so an abandoned empty heading does not follow you down the document. */
     showTitleFor: null,
     focusNew: null,      // node id to focus after the next commit (just-added clause)
+    /* The clause added a moment ago that has not been typed in. It goes the
+       instant focus leaves it — see sweepVirgin. Cleared by the first
+       keystroke, NOT by the save: text is written on blur, so at the moment
+       focus leaves, S.nodes still holds the empty body and a check against it
+       would delete what had just been written. */
+    virgin: null,
     index: null,         // cross-area search cache: { docId: {title,nodes,numMap} }
     editConfirmed: false // acknowledged the "you are editing the live draft" warning this session
   };
@@ -1270,6 +1345,24 @@
       [].slice.call(node.childNodes).forEach(function (c) {
         if (c.nodeType === 1) {
           var tag = c.tagName.toLowerCase();
+          /* A DIV IS A LINE BREAK, NOT RUBBISH. Chrome wraps each new line in
+             a <div> when Enter is pressed in a contenteditable that holds bare
+             text. div is not an allowed tag, so this used to UNWRAP it — and
+             the two lines silently became one.
+
+             The old code did have a <div> -> <p> replacement, at the end, on
+             the serialised string. It could never fire: by then clean() had
+             already removed every div. Dead code sitting on top of the bug it
+             was written to prevent, which is why it survived so long.
+
+             Converted here instead, before anything can throw it away. */
+          if (tag === 'div') {
+            var p = document.createElement('p');
+            while (c.firstChild) p.appendChild(c.firstChild);
+            node.replaceChild(p, c);
+            clean(p);
+            return;
+          }
           if (OK_TAGS.indexOf(tag) === -1) {
             while (c.firstChild) node.insertBefore(c.firstChild, c);
             node.removeChild(c);
@@ -1283,7 +1376,10 @@
         } else if (c.nodeType === 8) { node.removeChild(c); }
       });
     })(d);
-    return d.innerHTML.replace(/<div>/gi, '<p>').replace(/<\/div>/gi, '</p>');
+    /* The string replace that used to live here is gone: divs are converted in
+       clean() now, so by this point there are none left — which was true
+       before too, and is exactly why it never did anything. */
+    return d.innerHTML;
   }
 
   /* ================= Render ================= */
@@ -1416,6 +1512,38 @@
     return out + '</div></div>';
   }
 
+  /* A cell is PLAIN TEXT that may contain newlines, and a newline is drawn as
+     a line break. Cells are stored as strings, not markup — allowing HTML in
+     them would need a sanitiser they have never had, and esc() below means
+     anything stored would be shown to a club as literal angle brackets. Text
+     with newlines gives the fee tariffs the lines they need and nothing else. */
+  function cellHtml(c) {
+    return esc(String(c == null ? '' : c)).replace(/\n/g, '<br>');
+  }
+
+  /* The inverse, read off the live cell. textContent — which this used —
+     drops a <br> entirely, not even leaving a space, so every line the editor
+     typed was concatenated into one on save and the breaks appeared to be
+     "taken away" on leaving edit mode. */
+  function cellText(el) {
+    var out = '';
+    (function walk(n) {
+      for (var c = n.firstChild; c; c = c.nextSibling) {
+        if (c.nodeType === 3) { out += c.nodeValue; continue; }
+        if (c.nodeType !== 1) continue;
+        var tag = c.tagName.toLowerCase();
+        if (tag === 'br') { out += '\n'; continue; }
+        /* Chrome wraps each new line in a div; Firefox splits paragraphs. */
+        var block = (tag === 'div' || tag === 'p' || tag === 'li');
+        if (block && out && out.slice(-1) !== '\n') out += '\n';
+        walk(c);
+      }
+    })(el);
+    /* contenteditable litters non-breaking spaces; they look identical to a
+       normal space and wrap, search and sort differently. */
+    return out.replace(/\u00a0/g, ' ').replace(/\n+$/, '');
+  }
+
   function renderTable(node, editing) {
     var t = node.table || { header: [], rows: [] };
     var head = Array.isArray(t.header) ? t.header : [];
@@ -1423,13 +1551,13 @@
     var h = '<div class="nl-tbl-wrap"><table class="nl-tbl">';
     if (head.length) {
       h += '<thead><tr>' + head.map(function (c, ci) {
-        return '<th' + (editing ? ' contenteditable="true" data-th="' + ci + '"' : '') + '>' + esc(c || '') + '</th>';
+        return '<th' + (editing ? ' contenteditable="true" data-th="' + ci + '"' : '') + '>' + cellHtml(c) + '</th>';
       }).join('') + '</tr></thead>';
     }
     h += '<tbody>' + rows.map(function (row, ri) {
       row = Array.isArray(row) ? row : [];
       return '<tr>' + row.map(function (c, ci) {
-        return '<td' + (editing ? ' contenteditable="true" data-tr="' + ri + '" data-tc="' + ci + '"' : '') + '>' + esc(c || '') + '</td>';
+        return '<td' + (editing ? ' contenteditable="true" data-tr="' + ri + '" data-tc="' + ci + '"' : '') + '>' + cellHtml(c) + '</td>';
       }).join('') + '</tr>';
     }).join('') + '</tbody></table></div>';
     if (editing) {
@@ -1842,6 +1970,47 @@
     });
   }
 
+  /* A clause added and never typed in, dropped the moment focus leaves it.
+
+     Richard: "if I added a clause and then didn't type anything and I click
+     away, I want it simply to be removed, as though I never clicked. Otherwise
+     I'm accidentally setting up loads of blank clauses and I've completely
+     destroyed the document with loads of gaps."
+
+     This is a strictly narrower thing than the sweep on leaving edit mode, and
+     narrower on purpose: it only ever touches a clause created seconds ago in
+     this session that has had nothing typed into it. It cannot reach existing
+     content, whatever state that content is in.
+
+     Two exemptions, both for focus that is not "clicking away":
+       · the action bar — a bar press blurs the clause it is about to act on,
+         so sweeping here would delete the clause on the way to indenting it.
+       · anywhere still inside the same clause: a heading field and a body
+         field are two focus stops in one clause. */
+  function sweepVirgin(id, now) {
+    /* The id is passed in, not read off S.virgin — by the time this runs a
+       tick later, pressing the insert strip may already have added ANOTHER
+       clause and moved the flag onto it, and this would sweep the new one. */
+    if (!id || S.mode !== 'edit') return;
+    var inside = now && now.closest;
+    if (inside && (now.closest('#ceActs') || now.closest('#c-' + id))) return;
+    var n = S.nodes[id];
+    if (S.virgin === id) S.virgin = null;
+    if (!n || !isEmptyClause(n, childrenOf(S.nodes, id).length > 0)) return;
+
+    /* Where the caret was heading. commit() re-renders, which would otherwise
+       drop it — you would click into clause 9 and land nowhere. */
+    var landing = inside && now.closest('[data-id]');
+    var landingId = landing ? landing.dataset.id : null;
+
+    var c = JSON.parse(JSON.stringify(S.nodes));
+    delete c[id];
+    if (S.selectedId === id) S.selectedId = landingId || null;
+    Promise.resolve(commit(c, 'Removed an untouched new clause')).then(function () {
+      if (landingId && S.nodes[landingId]) focusNode(landingId);
+    });
+  }
+
   function leaveEdit() {
     var was = S.mode;
     if (was !== 'edit') { S.mode = 'read'; render(); return; }
@@ -2201,6 +2370,9 @@
      the number, and delete has its own confirmation naming the clause. Only
      the surprising renumbers keep the preview. */
   function commitAdd(c, label, newId) {
+    /* Every add comes through here, which is why the flag is set here and not
+       at the three call sites — the fourth one added later would not have it. */
+    S.virgin = newId || null;
     var done = commit(c, label);
     var num = newId ? computeNumbers(c)[newId] : '';
     NL.toast && NL.toast(num ? 'Added ' + num : 'Added', 'success');
@@ -2332,18 +2504,37 @@
     else if (clientY >= bottom - reach) where = 'after';
     if (!where) { hideInsert(); return; }
 
+    /* CANONICALISE THE GESTURE, NOT ONLY THE TARGET.
+
+       v0.42 canonicalised where the clause would LAND, so both hovers on one
+       boundary already produced the same insertion. What it did not do was
+       move the gap: hovering the bottom of 2 opened a gap under 2, hovering
+       the top of 3 opened a different gap above 3, and the two sat 30px apart
+       on screen. Identical outcome, two visibly separate offers — which is
+       the thing that was complained about, and it survived the fix aimed at
+       it. Richard, again: "I'm being offered that in two different areas."
+
+       So redirect the gap as well. A hover that resolves to somebody else's
+       boundary opens THAT clause's gap instead of its own.
+
+       This settles rather than oscillates: opening 2's gap pushes 3 down by
+       exactly the gap height, so the pointer — which has not moved — is now
+       inside 2's padding, where the next mousemove finds 2 directly and
+       canonicalises to itself. One redirect, then stable. */
+    var canon = canonicalBoundary(clauseEl.dataset.id, where);
+    if (canon.refId !== clauseEl.dataset.id || canon.where !== where) {
+      var alt = $('c-' + canon.refId);
+      if (alt) { clauseEl = alt; where = canon.where; }
+    }
+
     if (INS.el !== clauseEl || INS.side !== where) {
       if (INS.el) INS.el.classList.remove('hb-gap-before', 'hb-gap-after');
       clauseEl.classList.add(where === 'before' ? 'hb-gap-before' : 'hb-gap-after');
       INS.el = clauseEl;
       INS.side = where;
 
-      /* The gap opens on the element under the pointer — that is what keeps
-         the pointer inside it. The TARGET is canonicalised separately, so two
-         hovers on one boundary resolve to one insertion. */
-      var t = canonicalBoundary(clauseEl.dataset.id, where);
-      INS.refId = t.refId;
-      INS.where = t.where;
+      INS.refId = clauseEl.dataset.id;
+      INS.where = where;
 
       var num = previewNumber(INS.refId, INS.where);
       var hint = el.querySelector('.hb-ins__hint');
@@ -2574,7 +2765,10 @@
   function saveTableCell(cell) {
     var host = cell.closest('[data-id]'); if (!host) return;
     var id = host.dataset.id, node = S.nodes[id]; if (!node || !node.table) return;
-    var val = cell.textContent;
+    /* NOT textContent. It drops a <br> without leaving so much as a space, so
+       every line typed into a fee tariff was concatenated back into one the
+       moment the cell was left. See cellText. */
+    var val = cellText(cell);
     if (cell.hasAttribute('data-th')) {
       var ci = +cell.getAttribute('data-th');
       if ((node.table.header[ci] || '') === val) return;
@@ -2606,7 +2800,9 @@
     if (!n.table) return '';
     var s = (n.table.header || []).join(' ');
     (n.table.rows || []).forEach(function (r) { s += ' ' + (r || []).join(' '); });
-    return s;
+    /* Cells hold newlines now, and a search phrase that runs across a line
+       break inside one cell should still find it. */
+    return s.replace(/\s+/g, ' ');
   }
 
   /* ================= Publish + export ================= */
@@ -2974,6 +3170,23 @@
          and would otherwise race the save it just caused. */
       S.pendingSave = commit(c, 'Edit ' + field + ' of ' + id);
     }, true);
+    /* A keystroke is what makes a new clause real. Deliberately `input` and
+       not the save: text is written on blur, so at the moment focus leaves,
+       S.nodes still holds the empty body — sweeping against that would delete
+       exactly what had just been typed. */
+    doc.addEventListener('input', function (e) {
+      if (!S.virgin) return;
+      var host = e.target.closest && e.target.closest('[data-id]');
+      if (host && host.dataset.id === S.virgin) S.virgin = null;
+    });
+    /* Deferred a tick so document.activeElement is the element that TOOK
+       focus rather than the one losing it — relatedTarget is null for a click
+       on anything unfocusable, which is most of the page. */
+    doc.addEventListener('focusout', function () {
+      var id = S.virgin;
+      if (!id) return;
+      setTimeout(function () { sweepVirgin(id, document.activeElement); }, 0);
+    });
     // select clause on focus
     doc.addEventListener('focusin', function (e) {
       var host = e.target.closest('[data-id]'); if (host) selectNode(host.dataset.id);

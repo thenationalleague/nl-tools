@@ -84,6 +84,45 @@ test('a missing node is not empty', () => {
   assert.equal(isEmptyClause(undefined, false), false);
 });
 
+test('a clause added and never typed in goes as soon as focus leaves it', () => {
+  /* Richard: "if I added a clause and then didn't type anything and I click
+     away, I want it simply removed, as though I never clicked. Otherwise I'm
+     accidentally setting up loads of blank clauses."
+
+     Four things hold this together and each one is a silent failure:
+
+       · the flag is cleared by `input`, NOT by the save. Text is written on
+         BLUR, so at the moment focus leaves, S.nodes still holds the empty
+         body — checking against it would delete what had just been typed.
+       · the id is captured at focusout and passed in. A tick later the insert
+         strip may have added another clause and moved the flag onto it, and
+         the sweep would take the new one instead.
+       · focus landing on the action bar is not clicking away. A bar press
+         blurs the clause it is about to act on.
+       · the flag is set in commitAdd, the one place every add goes through. */
+  const wire = SRC.slice(SRC.indexOf('function wire()'));
+
+  assert.match(lift('commitAdd'), /S\.virgin = newId \|\| null/,
+    'set at the single choke point, or the next add to be written skips it');
+
+  assert.match(wire, /addEventListener\('input'[\s\S]{0,300}S\.virgin = null/,
+    'a keystroke must clear the flag — the save is too late');
+
+  assert.match(wire, /addEventListener\('focusout'[\s\S]{0,240}sweepVirgin\(id,/,
+    'the id must be captured at focusout, not read off S.virgin a tick later');
+
+  const sweep = lift('sweepVirgin');
+  assert.match(sweep, /function sweepVirgin\(id, now\)/,
+    'sweepVirgin takes the id it was asked about');
+  assert.match(sweep, /closest\('#ceActs'\)/,
+    'focus moving to the action bar is not clicking away');
+  assert.match(sweep, /isEmptyClause\(/,
+    'it must use the same definition of empty as the sweep on exit, not a ' +
+    'second, looser one');
+  assert.match(sweep, /commit\(c, /,
+    'through commit(), so it is undoable like everything else');
+});
+
 test('the sweep runs on leaving edit mode, behind the pending save', () => {
   /* Two things that are invisible until they go wrong.
 

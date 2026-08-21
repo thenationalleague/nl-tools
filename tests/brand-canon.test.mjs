@@ -540,6 +540,14 @@ test('.is-sel is actually drawn', () => {
     'the margin rule is absolutely positioned, so the clause must be its ' +
     'containing block or the rule lands somewhere else entirely');
 
+  /* The number is a flex ITEM in the clause row, and sub-clauses live inside
+     their parent's body — so the row is as tall as the whole subtree and an
+     un-pinned gutter tint paints a solid column past every descendant.
+     Selecting 1.1 filled the gutter down to the foot of 1.1.3. */
+  assert.match(css, /\.nl-clause\.is-sel\s*>\s*\.nl-clause__num\s*\{[^}]*align-self:\s*flex-start/,
+    'the selected number must not stretch — its tint would run the height ' +
+    'of every clause nested underneath it');
+
   /* Not a shadow, deliberately: an empty clause has nothing to cast one
      around, and the empty clause is the case that most needs the marker. */
   const block = css.slice(css.indexOf('.nl-clause.is-sel'), css.indexOf('.nl-art__head > .nl-clause__text'));
