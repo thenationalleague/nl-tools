@@ -109,6 +109,22 @@ test('print.html reads the injected edition and falls back to RTDB', () => {
   assert.match(PRINT, /publishedEditionId/);
 });
 
+test('the admin app is closed, or the job never exits', () => {
+  /* getDatabase() opens a persistent websocket. Node exits when the event
+     loop drains, so that single handle hangs the step forever: the render
+     finishes, the PDF is written, the log says so, and the runner sits there
+     until the job timeout. Cost eleven minutes and a cancelled run to find,
+     on a job every previous instance of which took 60-90 seconds.
+
+     Must be in main's FINALLY, so a failed render cleans up too — a hang
+     after an error is worse than the error. */
+  assert.match(CODE, /deleteApp\s*\(/,
+    'close the admin app or the process cannot exit');
+  const finallyBlock = CODE.slice(CODE.lastIndexOf('} finally {'));
+  assert.match(finallyBlock, /closeCredentials\s*\(\s*\)/,
+    'the close must run in the finally, not only on the success path');
+});
+
 test('firebase-admin is pinned to a major version in the workflow', () => {
   /* Unpinned, `npm install firebase-admin` takes whatever is newest. v13
      removed the namespace API without this repo noticing; the next major can

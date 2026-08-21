@@ -286,6 +286,31 @@ async function initCredentials() {
   }
 }
 
+/* CLOSE THE ADMIN APP OR THE JOB NEVER ENDS.
+
+   getDatabase() opens a persistent websocket and keeps it open. Node exits
+   when the event loop drains, so that one handle is enough to hang the step
+   forever — the render completes, the PDF is written, the log says so, and
+   the runner then sits there until the job timeout.
+
+   That is exactly what happened on the first run after the admin SDK went in:
+   every render before it finished in 60-90 seconds, and this one was still
+   "in progress" at eleven minutes with nothing left to do. The old fetch()
+   path left no handle behind, which is why this never came up before.
+
+   Called from main's finally, so a failed render cleans up too. */
+async function closeCredentials() {
+  if (!adminApp) return;
+  try {
+    const { deleteApp } = require('firebase-admin/app');
+    await deleteApp(adminApp);
+  } catch (e) {
+    console.log('Admin app close failed (' + (e && e.message) + ')');
+  } finally {
+    adminApp = null;
+  }
+}
+
 async function rtdb(p) {
   /* Admin reads bypass rules entirely, so this keeps working after the flip.
      The unauthenticated fetch stays as the fallback described above. */
@@ -415,6 +440,7 @@ async function main() {
     console.log('Wrote', OUT_PDF, '(' + bytes.length + ' bytes,', total, 'pages) + pdf-meta.json');
   } finally {
     await browser.close();
+    await closeCredentials();
   }
 }
 
