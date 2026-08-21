@@ -1,6 +1,25 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
+  Version: v0.57 (21/08/2026) — you can see what you have not published yet.
+    The bar carries an amber "Not published" pill the moment the draft is
+    newer than the live edition, and pressing it opens a review: what was
+    added, removed, edited or moved since the edition went out, area by
+    area, with the wording changes marked word by word in green and red.
+    Publish sits at the foot of that review, so the sequence is see it,
+    then do it — rather than a type-PUBLISH box as the first and only
+    account of what is about to change for 72 clubs.
+
+    THE HARD PART IS RENUMBERING, and it is why handbook/hb-diff.js exists
+    as its own tested module. Numbers here are computed from the tree, never
+    stored, so deleting clause 6.2 renumbers everything below it. A diff
+    that compares by number calls that forty changes; this one is keyed on
+    clause identity, counts it as one deletion, and says "8 clauses were
+    renumbered as a result" in a line of its own.
+
+    Two costs, two answers: the bar reads two timestamps on every load, and
+    the documents are only read when somebody asks to see the review.
+
   Version: v0.56 (21/08/2026) — sub-clause numbers were printing OUTSIDE the
     page (nl-brand v2.58). Hanging was keyed on depth, which assumed every
     parent has a 58px number gutter to give back; an unnumbered parent has
@@ -364,6 +383,18 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '21/08/2026',
+        version: 'v0.57',
+        items: [
+          'The bar now says when the draft has changes that are not live ' +
+            'yet, and “Review changes” shows exactly what they are before ' +
+            'you publish — added, removed, edited or moved, with wording ' +
+            'changes marked in green and red.',
+          'Clauses that only changed number because something above them ' +
+            'was deleted are counted in one line rather than listed.'
+        ]
+      },
       {
         date: '21/08/2026',
         version: 'v0.56',
@@ -842,6 +873,10 @@
 
   <!-- NL system scripts (lint canonical: ?v=38 / ?v=9 / ?v=12) -->
   <script src="docx-import.js?v=1"></script>
+  <!-- Draft vs published edition. Its own file because it is an algorithm
+       with a right answer — renumbering, reordering, word-level text — and
+       it is unit-tested in tests/handbook-diff.test.mjs. -->
+  <script src="hb-diff.js?v=1"></script>
   <script src="/system/nl-utils.js?v=44"></script>
   <script src="/system/nl-topbar.js?v=10"></script>
   <script src="/system/auth-guard.js?v=16"></script>
@@ -922,6 +957,42 @@
   }
   .ce-seg button.is-on { background: var(--navy); color: var(--white); }
   .ce-mode-note { font-size: var(--text-xs); color: var(--text-muted); }
+  /* ---- The publish review ----
+     Green and red mean the same here as anywhere: struck red is what the
+     published edition says, green is what the draft says instead. Both from
+     brand tokens — the -light grounds are the same pairing .pill uses. */
+  .hb-rev { font-size: var(--text-sm); line-height: 1.6; }
+  .hb-rev__sum { margin: 0 0 10px; color: var(--text); }
+  .hb-rev__renum {
+    margin: 0 0 16px; padding: 8px 12px; border-radius: var(--radius-sm);
+    background: var(--off-white); color: var(--text-muted); font-size: var(--text-xs);
+  }
+  .hb-rev__area { margin: 0 0 20px; }
+  .hb-rev__h {
+    display: flex; align-items: center; gap: 8px; margin: 0 0 8px;
+    font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-wide);
+    color: var(--navy); font-variation-settings: 'wght' 800;
+  }
+  .hb-rev__item {
+    padding: 8px 0 8px 12px; border-left: 3px solid var(--border);
+    margin-bottom: 8px;
+  }
+  .hb-rev__item--added   { border-left-color: var(--green); }
+  .hb-rev__item--removed { border-left-color: var(--red); }
+  .hb-rev__item--edited  { border-left-color: var(--amber); }
+  .hb-rev__item--moved   { border-left-color: var(--blue); }
+  .hb-rev__head { margin: 0 0 4px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .hb-rev__what {
+    font-size: var(--text-xs); text-transform: uppercase; letter-spacing: var(--tracking-wide);
+    font-variation-settings: 'wght' 800; color: var(--text-muted);
+  }
+  .hb-rev__num { font-variation-settings: 'wght' 800; color: var(--navy); }
+  .hb-rev__lbl { color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+  .hb-rev__diff, .hb-rev__note { margin: 0; }
+  .hb-rev__note { color: var(--text-muted); font-size: var(--text-xs); }
+  .hb-rev ins, .hb-rev del { text-decoration: none; border-radius: 3px; padding: 0 2px; }
+  .hb-rev ins { background: var(--green-light); color: var(--green); }
+  .hb-rev del { background: var(--red-light); color: var(--red); text-decoration: line-through; }
 
   /* ---- Mobile: side rail becomes a slide-in drawer; document goes full width ---- */
   @media (max-width: 860px) {
@@ -1165,6 +1236,15 @@
         <button class="btn btn--ghost" id="ceImportDoc" type="button" hidden>Import documents…</button>
         <input type="file" id="ceDocFile" accept=".docx,.doc" multiple hidden>
         <button class="btn btn--ghost" id="ceReimport" type="button" hidden>Re-import</button>
+        <!-- "You have edited, and none of it is live yet." Sits BEFORE
+             Publish because it is the thing to read first: the sequence is
+             see what changed, then publish.
+             A canon .pill inside a canon .btn — the pill is the state, the
+             button is the action. Neither needed inventing. -->
+        <button class="btn btn--sm btn--ghost" id="ceChanges" type="button" hidden>
+          <span class="pill pill--pending" id="ceChangesPill" hidden></span>
+          <span id="ceChangesLbl">Review changes</span>
+        </button>
         <button class="btn btn--primary" id="cePublish" type="button" hidden>Publish edition</button>
       </div>
       <!-- ONE action bar, not one per clause.
@@ -1869,6 +1949,7 @@
     $('ceEditBtn').hidden = !canEdit() || !S.docId;
     syncUndoBtns();
     $('cePublish').hidden = !canEdit() || !S.docId || !Object.keys(S.nodes).length;
+    syncChanges();
     /* IMPORT IS RETIRED FROM THE EVERYDAY BAR (19/08/2026). Seeding was a
        one-time job and it is done; what is left is two buttons that overwrite
        committed text, sitting two along from Publish. Re-import in particular
@@ -2342,7 +2423,11 @@
     return NL.ensureAuth().then(function () { return nodesRef().update(updates); }).then(function () {
       S.nodes = clone;
       S.index = null; // search index is now stale
+      /* After writeAudit, not before: writeAudit suppresses the automatic
+         audit hook for 500ms, and inside that window this timestamp does not
+         earn an audit line of its own on every keystroke-save. */
       NL.writeAudit && NL.writeAudit('edit', label);
+      touchDraft();
       render();
       syncUndoBtns();
       if (S.focusNew) {
@@ -2860,6 +2945,243 @@
     });
   }
 
+  /* ================= Unpublished changes =================
+     Richard: "you edit… because eventually you want to publish a new
+     document… it needs to be clear that you have done it, but you haven't
+     published the changes yet… very similar to having a diff where we can
+     see what changes have been made, but which aren't yet live prior to
+     pressing publish edition. The plus minus green and red, same as a git
+     diff — less for coders, and more for people like our admin team."
+
+     TWO COSTS, TWO ANSWERS. Knowing WHETHER anything is unpublished has to
+     be cheap: it is on every page load, for every admin. Knowing WHAT
+     changed can be expensive, because it happens when somebody asks.
+
+     So the bar reads one timestamp, and the review reads the documents. */
+
+  var PUB = { checked: false, id: null, publishedAt: 0, label: '', draftAt: 0, count: null };
+
+  /* Written by commit() — the single write path — so nothing can change the
+     draft without moving it. The alternative is reading every clause in all
+     five areas on every load to answer a yes/no question. */
+  function touchDraft() {
+    PUB.draftAt = Date.now();
+    /* A count from before this edit is now a lie, and a stale number on the
+       bar is worse than no number: it is the one thing somebody would trust
+       without opening the review. */
+    PUB.count = null;
+    syncChanges();
+    db.ref(BASE + '/draft/lastEditedAt').set(PUB.draftAt)['catch'](function () {});
+  }
+
+  /* Two small reads: the pointer's edition stamp, and the draft's. Never the
+     documents. */
+  function checkPublished() {
+    if (!canEdit()) return Promise.resolve();
+    return NL.ensureAuth().then(function () {
+      return Promise.all([
+        db.ref(BASE + '/publishedEditionId').once('value'),
+        db.ref(BASE + '/draft/lastEditedAt').once('value')
+      ]);
+    }).then(function (r) {
+      PUB.id = r[0].val() || null;
+      PUB.draftAt = r[1].val() || 0;
+      if (!PUB.id) { PUB.checked = true; syncChanges(); return; }
+      return db.ref(BASE + '/editions/' + PUB.id + '/publishedAt').once('value')
+        .then(function (s) {
+          PUB.publishedAt = s.val() || 0;
+          PUB.checked = true;
+          syncChanges();
+        });
+    })['catch'](function (e) {
+      /* The rule on editions/ wants either a club token or an admin — see
+         the note in the PR. A denial here must not take the editor down
+         with it; the bar simply cannot promise a state it could not read. */
+      console.warn('[handbook] could not check the published edition', e);
+      PUB.checked = true; PUB.error = true; syncChanges();
+    });
+  }
+
+  function syncChanges() {
+    var btn = $('ceChanges'), pill = $('ceChangesPill'), lbl = $('ceChangesLbl');
+    if (!btn) return;
+    if (!canEdit() || !PUB.checked) { btn.hidden = true; return; }
+    btn.hidden = false;
+    var state;
+    if (PUB.error) state = { pill: '', lbl: 'Review changes' };
+    else if (!PUB.id) state = { pill: 'Never published', lbl: 'Review the first edition' };
+    else if (PUB.count != null) state = PUB.count
+      ? { pill: String(PUB.count), lbl: PUB.count === 1 ? 'change to publish' : 'changes to publish' }
+      : { pill: '', lbl: 'No changes since the last edition' };
+    /* No timestamp on the draft means nobody has saved since this was added,
+       NOT that nothing has changed — those are different answers and only
+       one of them is safe to assert. */
+    else if (!PUB.draftAt) state = { pill: '', lbl: 'Review changes' };
+    else if (PUB.draftAt > PUB.publishedAt) state = { pill: 'Not published', lbl: 'Review changes' };
+    else state = { pill: '', lbl: 'No changes since the last edition' };
+
+    pill.hidden = !state.pill;
+    pill.textContent = state.pill;
+    lbl.textContent = state.lbl;
+  }
+
+  /* The documents, both sides. Five areas of draft in one read (the same one
+     publish() makes), and the edition's clause snapshots WITHOUT its baked
+     html — that html is the bulk of an edition and the diff never looks at
+     it. */
+  function loadForReview() {
+    return NL.ensureAuth().then(function () {
+      var reads = [db.ref(BASE + '/draft/docs').once('value')];
+      DOCS.forEach(function (d) {
+        reads.push(PUB.id
+          ? db.ref(BASE + '/editions/' + PUB.id + '/docs/' + d.id + '/nodes').once('value')
+          : Promise.resolve(null));
+      });
+      return Promise.all(reads);
+    }).then(function (r) {
+      var draft = r[0].val() || {};
+      var areas = {};
+      DOCS.forEach(function (d, i) {
+        var drfNodes = (draft[d.id] && draft[d.id].nodes) || {};
+        var drf = {}, pub = {}, pubNum = {};
+        Object.keys(drfNodes).forEach(function (id) {
+          drf[id] = normNode(Object.assign({}, drfNodes[id]));
+        });
+        var snap = r[i + 1] && r[i + 1].val();
+        /* An edition stores its clauses as an array; Firebase hands a sparse
+           one back as an object. Both shapes, one loop. */
+        (snap ? (Array.isArray(snap) ? snap : Object.keys(snap).map(function (k) { return snap[k]; })) : [])
+          .forEach(function (nd) {
+            if (!nd || !nd.id) return;
+            pub[nd.id] = normNode(Object.assign({}, nd));
+            pubNum[nd.id] = nd.number || '';
+          });
+        areas[d.id] = HB_DIFF.diffArea(pub, pubNum, drf, computeNumbers(drf));
+      });
+      return areas;
+    });
+  }
+
+  /* ---- rendering the review ---------------------------------------- */
+
+  function diffHtml(before, after) {
+    var ops = HB_DIFF.diffWords(HB_DIFF.htmlToText(before), HB_DIFF.htmlToText(after));
+    if (!ops.length) return '';
+    return ops.map(function (o) {
+      var t = esc(o.s).replace(/\n/g, '<br>');
+      if (o.t === '-') return '<del>' + t + '</del>';
+      if (o.t === '+') return '<ins>' + t + '</ins>';
+      return '<span>' + t + '</span>';
+    }).join(' ');
+  }
+
+  function whole(node, cls) {
+    var t = HB_DIFF.htmlToText(node.title);
+    var b = HB_DIFF.htmlToText(node.body);
+    var s = (t ? t + (b ? '\n' : '') : '') + b;
+    if (!s && node.table) s = 'Table';
+    if (!s) return '';
+    if (s.length > 600) s = s.slice(0, 599) + '…';
+    return '<' + cls + '>' + esc(s).replace(/\n/g, '<br>') + '</' + cls + '>';
+  }
+
+  function item(kind, what, entry, bodyHtml) {
+    return '<div class="hb-rev__item hb-rev__item--' + kind + '">' +
+      '<p class="hb-rev__head">' +
+        '<span class="hb-rev__what">' + esc(what) + '</span>' +
+        (entry.number ? '<span class="hb-rev__num">' + esc(entry.number) + '</span>' : '') +
+        '<span class="hb-rev__lbl">' + esc(entry.label) + '</span>' +
+      '</p>' + (bodyHtml || '') + '</div>';
+  }
+
+  /* A cap, said out loud. A silent top-N reads as "that is everything",
+     which on a publish review is the one thing it must never do. */
+  var REV_MAX = 300;
+
+  function reviewHtml(areas) {
+    var n = HB_DIFF.total(areas);
+    var renum = DOCS.reduce(function (a, d) { return a + areas[d.id].renumbered; }, 0);
+    var when = PUB.publishedAt ? NL.formatDate(PUB.publishedAt) : '';
+    var out = [];
+
+    out.push('<p class="hb-rev__sum">' + (
+      !PUB.id
+        ? 'Nothing has been published yet. Publishing now creates the first edition, containing everything in the draft.'
+        : (n === 0
+            ? 'The draft matches the published edition' + (when ? ' of ' + esc(when) : '') + '. There is nothing to publish.'
+            : '<strong>' + n + (n === 1 ? ' change' : ' changes') + '</strong> to the draft since the edition published' +
+              (when ? ' on ' + esc(when) : '') + '.')
+    ) + '</p>');
+
+    if (renum) {
+      out.push('<p class="hb-rev__renum">' + renum +
+        (renum === 1 ? ' clause was renumbered' : ' clauses were renumbered') +
+        ' as a result. Their wording has not changed, so they are not listed.</p>');
+    }
+    if (!PUB.id) return out.join('');
+
+    var shown = 0;
+    DOCS.forEach(function (d) {
+      var a = areas[d.id], count = HB_DIFF.areaTotal(a);
+      if (!count) return;
+      var rows = [];
+      a.removed.forEach(function (e) { rows.push(item('removed', 'Removed', e, whole(e.before, 'del'))); });
+      a.added.forEach(function (e) { rows.push(item('added', 'New', e, whole(e.after, 'ins'))); });
+      a.edited.forEach(function (e) {
+        var body;
+        if (e.styleOnly) body = '<p class="hb-rev__note">Formatting or numbering style only — the wording is unchanged.</p>';
+        else if (e.tableChanged && !e.textChanged) body = '<p class="hb-rev__note">The table in this clause changed.</p>';
+        else body = '<p class="hb-rev__diff">' + diffHtml(
+          (e.before.title ? e.before.title + ' ' : '') + (e.before.body || ''),
+          (e.after.title ? e.after.title + ' ' : '') + (e.after.body || '')) + '</p>';
+        if (e.alsoMoved) body += '<p class="hb-rev__note">Also moved' +
+          (e.wasNumber && e.wasNumber !== e.number ? ' — was ' + esc(e.wasNumber) : '') + '.</p>';
+        rows.push(item('edited', 'Edited', e, body));
+      });
+      a.moved.forEach(function (e) {
+        rows.push(item('moved', 'Moved', e, '<p class="hb-rev__note">' +
+          (e.toParent ? 'Moved to a different article' : 'Moved among its neighbours') +
+          (e.wasNumber && e.wasNumber !== e.number ? ' — was ' + esc(e.wasNumber) : '') +
+          '. The wording is unchanged.</p>'));
+      });
+      var room = Math.max(0, REV_MAX - shown);
+      var cut = rows.length - room;
+      shown += Math.min(rows.length, room);
+      out.push('<section class="hb-rev__area">' +
+        '<h4 class="hb-rev__h">' + esc(d.title) + '<span class="pill pill--info">' + count + '</span></h4>' +
+        rows.slice(0, room).join('') +
+        (cut > 0 ? '<p class="hb-rev__note">' + cut + ' more in this area are not shown — the review lists the first ' +
+          REV_MAX + '.</p>' : '') +
+      '</section>');
+    });
+    return out.join('');
+  }
+
+  function reviewChanges() {
+    var body = document.createElement('div');
+    body.className = 'hb-rev';
+    body.innerHTML = '<p class="hb-rev__sum">Reading the draft and the published edition…</p>';
+    var ctrl = NL.modal({
+      title: 'Changes not yet published',
+      width: 'wide',
+      body: body,
+      buttons: [
+        { label: 'Close', className: 'btn--ghost', onClick: function (c) { c.close(); } },
+        { label: 'Publish edition', className: 'btn--primary',
+          onClick: function (c) { c.close(); publish(); } }
+      ]
+    });
+    loadForReview().then(function (areas) {
+      PUB.count = HB_DIFF.total(areas);
+      syncChanges();
+      body.innerHTML = reviewHtml(areas);
+    })['catch'](function (e) {
+      body.innerHTML = '<p class="hb-rev__sum">Could not read the published edition: ' +
+        esc((e && e.message) || e) + '</p>';
+    });
+    return ctrl;
+  }
+
   function publish() {
     /* NO VERSION NUMBER. The label is the season and nothing else; the DATE is
        the version, and it is already recorded as publishedAt on every edition.
@@ -2937,6 +3259,11 @@
                    catching before a link goes to 72 clubs, and worth naming
                    WHICH, since "4 of 5" leaves you hunting. */
                 var missing = DOCS.filter(function (d) { return !edition.docs[d.id]; });
+                /* The draft and the edition now agree, and the bar has to
+                   say so — a badge still reading "not published" after a
+                   successful publish is how somebody publishes twice. */
+                PUB.id = ref.key; PUB.publishedAt = edition.publishedAt;
+                PUB.count = 0; syncChanges();
                 NL.writeAudit && NL.writeAudit('publish', 'Published "' + lbl + '" (' + count + ' of ' + DOCS.length + ' areas)');
                 if (missing.length) {
                   NL.toast && NL.toast('Published the handbook — but ' +
@@ -3005,6 +3332,7 @@
       importUpload(list);
     });
     $('cePublish').addEventListener('click', publish);
+    $('ceChanges').addEventListener('click', reviewChanges);
     $('ceDocNav').addEventListener('click', function (e) {
       var b = e.target.closest('[data-doc]'); if (b) switchDoc(b.dataset.doc);
     });
@@ -3226,6 +3554,10 @@
     renderDocNav();
     wire();
     syncBar();
+    /* Two small reads, not the documents — see checkPublished. Deliberately
+       not awaited: the bar fills in a moment later and nothing else waits
+       on it. */
+    checkPublished();
     // Deep link in the URL? Open there; otherwise land on the title page.
     var t = parseHash();
     if (t) { S.docId = t.docId; S.selectedId = t.nodeId; load().then(function () { scrollToNode(t.nodeId); refreshToc(); }); }
