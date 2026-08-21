@@ -815,3 +815,66 @@ test('the Style Guide shows it, or it is not a living reference', () => {
   assert.match(sg, /var\(--font-mono\)<\/code>/,
     'the token is named in the Typography section');
 });
+
+/* ── icon-indent / icon-outdent (21/08/2026) ──────────────────────────────
+   Added for the handbook's clause toolbar, which drew these with the &larr;
+   and &rarr; HTML entities: a glyph pretending to be an icon, taking its size
+   and weight from whatever font is loaded and sitting on a text baseline
+   rather than centred. */
+test('the sprite carries indent and outdent, and they are not the chevrons', () => {
+  const sprite = readFileSync(join(REPO, 'assets/icons/sprites.svg'), 'utf8');
+  for (const n of ['indent', 'outdent']) {
+    assert.ok(sprite.includes(`id="icon-${n}"`), `#icon-${n} is in the sprite`);
+  }
+  const grab = (n) => new RegExp(`<symbol id="icon-${n}"[\\s\\S]*?</symbol>`).exec(sprite)[0];
+  const back = grab('back'), indent = grab('indent'), outdent = grab('outdent');
+  /* A chevron beside a clause reads as "previous" and "next", which is a
+     different promise from "make this a sub-clause of the one above". The
+     lines are what say the operation is structural. */
+  assert.ok(indent.includes('<line'), 'indent shows lines of text, not just a chevron');
+  assert.ok(outdent.includes('<line'));
+  assert.notEqual(indent.replace(/indent/g, ''), back.replace(/back/g, ''));
+
+  /* One control, two directions: same lines, mirrored chevron. */
+  const lines = (s) => (s.match(/<line[^>]*>/g) || []).join('');
+  assert.equal(lines(indent), lines(outdent), 'the pair shares its lines');
+  assert.notEqual(
+    /<polyline[^>]*>/.exec(indent)[0], /<polyline[^>]*>/.exec(outdent)[0],
+    'and differs only in which way the chevron points');
+});
+
+test('the handbook toolbar uses them rather than HTML entities', () => {
+  const hb = readFileSync(join(REPO, 'handbook/index.html'), 'utf8');
+  /* HTML comments stripped first. The markup carries a comment naming the
+     four entities to explain why they are gone, and a guard that fires on
+     its own rationale is a guard somebody switches off — the same lesson
+     stripComments above was written for. */
+  const bar = hb.slice(hb.indexOf('id="ceActs"'), hb.indexOf('id="ceCrumb"'))
+    .replace(/<!--[\s\S]*?-->/g, '');
+  for (const e of ['&larr;', '&rarr;', '&uarr;', '&darr;']) {
+    assert.ok(!bar.includes(e), `${e} is a text arrow pretending to be an icon`);
+  }
+  for (const n of ['indent', 'outdent', 'up', 'down']) {
+    assert.ok(bar.includes('#icon-' + n), `the ${n} button draws #icon-${n}`);
+  }
+  /* No text node in the button, so the label has to come from somewhere. */
+  assert.match(bar, /data-op="indent" aria-label=/);
+});
+
+test('the icon buttons set neither fill nor stroke', () => {
+  /* The sprite declares both per symbol — stroked UI icons, filled match
+     icons — and a wrapper that states either one flattens the other kind. */
+  const hb = readFileSync(join(REPO, 'handbook/index.html'), 'utf8');
+  const rule = /\.hb-bar button\.hb-op \{([^}]*)\}/.exec(hb);
+  assert.ok(rule, '.hb-op is styled');
+  assert.doesNotMatch(rule[1], /(^|[;{\s])fill\s*:/);
+  assert.doesNotMatch(rule[1], /(^|[;{\s])stroke\s*:/);
+  assert.match(rule[1], /width:\s*28px/, 'square, so the glyph is centred rather than on a baseline');
+});
+
+test('the Style Guide shows the new pair', () => {
+  const sg = readFileSync(join(REPO, 'style-guide/index.html'), 'utf8');
+  assert.match(sg, /<code>icon-indent<\/code>/);
+  assert.match(sg, /<code>icon-outdent<\/code>/);
+  assert.match(sg, /id="sg-indent"/, 'with its own local copy of the symbol, as the others have');
+});
