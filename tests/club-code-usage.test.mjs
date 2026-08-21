@@ -64,12 +64,33 @@ test('only an admin can read it', () => {
     'sign-in');
 });
 
-test('it is indexed on `at`, or the query is a full read', () => {
-  /* The page asks orderByChild('at').limitToLast(200). Without the index
-     RTDB still answers — by downloading the entire node and sorting on the
-     client, warning in a console nobody has open. It gets slower every week
-     and never breaks, which is the worst shape of performance bug. */
-  assert.deepEqual(usageRules['.indexOn'], ['at']);
+test('both queries the page makes are indexed', () => {
+  /* Two reads, two indexes:
+       at   — the global "last 200 sign-ins" list
+       club — one club's own history, opened from its row
+
+     Without an index RTDB still ANSWERS: it downloads the entire node and
+     sorts on the client, warning into a console nobody has open. It gets
+     slower every week and never breaks, which is the worst shape of
+     performance bug — and the `club` one is the worse of the two, because
+     it fires on a click rather than once on load. */
+  assert.deepEqual(usageRules['.indexOn'], ['at', 'club']);
+
+  assert.match(PAGE, /orderByChild\('at'\)\.limitToLast\(USE_LIMIT\)/);
+  assert.match(PAGE, /orderByChild\('club'\)\.equalTo\(club\)\.limitToLast\(ACT_LIMIT\)/);
+});
+
+test('a club\'s history is read once and a person is filtered out of it', () => {
+  /* Expanding three people at one club must not be three reads, and 72
+     clubs on load must not be 72. The cache is what makes the per-row
+     control affordable at all. */
+  assert.match(PAGE, /if \(ACT\[club\]\) return;/,
+    'a club already loaded is not fetched again');
+  assert.match(PAGE, /kind === 'user'\) \? all\.filter/,
+    "a person's history comes out of their club's, not its own query");
+  assert.match(PAGE, /OPEN\[k\]/,
+    'which rows are open is page state, or render() closes them all on any ' +
+    'change anywhere');
 });
 
 for (const [name, src, root] of [
@@ -133,6 +154,20 @@ test('the page resolves the name rather than trusting a stored one', () => {
     'the name is looked up from the live code record at display time');
   assert.match(PAGE, /Removed person/,
     'a userId nobody recognises any more must say so, not show a bare id');
+});
+
+test('the panel does not borrow the row hover colour', () => {
+  /* .cc-row:hover is --navy-50. An expanded panel tinted the same reads as a
+     hovered row rather than as something that opened — and the first version
+     of it, untinted, was indistinguishable from the club's list of PEOPLE
+     directly below: same indent, same type, same names. */
+  const rule = /\.cc-log \{([^}]*)\}/.exec(PAGE);
+  assert.ok(rule, '.cc-log still exists');
+  assert.match(rule[1], /background:\s*var\(--white\)/);
+  assert.ok(!/var\(--navy-50\)/.test(rule[1]),
+    'that is the row hover colour');
+  assert.match(PAGE, /cc-log__cap/,
+    'the panel says what it is listing — the rows alone read as more people');
 });
 
 test('the page reads a bounded slice, and survives the rule not being live', () => {
