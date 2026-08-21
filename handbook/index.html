@@ -1,6 +1,38 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Handbook 2026-27
+  Version: v0.43 (21/08/2026) — one editor per area at a time.
+
+    Two people in the same area is the one situation this tool handled badly
+    and could not detect: the last save wins, silently, and undo makes it
+    worse — one person's undo restores a snapshot that predates the other's
+    change and quietly reverses it.
+
+    Pressing Edit now claims draft/locks/<areaId>. Anyone else sees "· in use"
+    on the Edit button and who has it, BEFORE they press — a button that looks
+    available and then refuses is worse than one that explains.
+
+    A SOFT lock, deliberately, and it can always be taken over. A hard lock on
+    a shared legal document is one closed laptop away from nobody being able
+    to edit the handbook, and the person who could fix that has gone home.
+    Taking over is a confirmation that names the holder, and is audited.
+
+    onDisconnect().remove() is what makes soft enough: Firebase drops the lock
+    server-side when the tab closes, the network goes or the laptop sleeps, so
+    in the ordinary case there is no timeout to wait out. The three-minute
+    staleness window only covers what onDisconnect cannot — a wedged socket
+    the server still believes in. A 45-second heartbeat keeps a live editor
+    from ever going stale.
+
+    Claimed with a transaction, not a read-then-write: two people pressing
+    Edit at the same moment is exactly the case this exists for, and
+    read-then-write would hand it to both. Released on Read, on leaving the
+    area, and on returning to the cover. Someone whose lock is taken is told
+    and dropped to Read rather than left typing into a document two people are
+    saving over.
+
+    No rules change: draft/locks sits under draft/, which is already
+    admin-and-superadmin-write.
   Version: v0.42 (21/08/2026) — you can see where a clause will land, and
     take it back.
 
@@ -133,6 +165,14 @@
     var NL_TOOL_KEY = 'ops-handbook';
 
     window.NL_CHANGELOG = [
+      {
+        date: '21/08/2026',
+        version: 'v0.43',
+        items: [
+          'One person edits an area at a time. The Edit button says who is in ' +
+            'there before you press it, and you can take over if you need to.'
+        ]
+      },
       {
         date: '21/08/2026',
         version: 'v0.42',
@@ -612,6 +652,15 @@
   @media (max-width: 860px) { .ce-fmt { padding: 6px 14px; } }
   /* No in-document selection marker — the breadcrumb + contents highlight say where you are. */
 
+  /* The Edit button when someone else is in there. Not disabled — taking over
+     is allowed and sometimes necessary — but it should not look like an
+     ordinary press. */
+  #ceEditBtn.is-held::after {
+    content: ' \00B7 in use';
+    font-weight: 500; font-variation-settings: 'wght' 500;
+    opacity: .75;
+  }
+
   .ce-undo {
     font-family: var(--font); font-size: var(--text-xs);
     font-weight: 600; font-variation-settings: 'wght' 600;
@@ -829,6 +878,9 @@
        Capped, because a snapshot of League Rules is 560 nodes. Per-area:
        cleared when the area changes, since the ids would not resolve. */
     undo: [], redo: [], timeTravel: false,
+    /* Who holds this area's edit lock, or null. Watched live, so the Edit
+       button can name them before it is pressed. */
+    lock: null,
     /* Transient, never persisted: "draw an empty heading field on this clause
        because the user just asked for one". Cleared when the selection moves,
        so an abandoned empty heading does not follow you down the document. */
@@ -1144,7 +1196,11 @@
       '</div>';
   }
   function showCover() {
-    S.docId = null; S.selectedId = null; S.mode = 'read';
+    /* Going back to the cover leaves the area too — hand the lock back. */
+    if (S.mode === 'edit' && S.docId) releaseLock(S.docId);
+    if (lockOff) { lockOff(); lockOff = null; }
+    stopLockBeat();
+    S.docId = null; S.selectedId = null; S.mode = 'read'; S.lock = null;
     S.doc = { id: null, title: 'Handbook', subtitle: '', season: '' };
     S.nodes = {};
     if ($('ceSearch')) $('ceSearch').value = '';
@@ -1331,8 +1387,19 @@
     $('ceImportDoc').hidden = !(IMPORT_ON && S.docId && canSeed());
     $('ceFmt').hidden = !(S.mode === 'edit' && canEdit());
     var note = $('ceModeNote');
+    /* Say who is in there BEFORE Edit is pressed, not after. A button that
+       looks available and then refuses is worse than one that explains. */
+    var heldByOther = S.lock && !lockIsMine(S.lock) && !lockIsStale(S.lock);
+    var eb = $('ceEditBtn');
+    if (eb && !eb.hidden) {
+      eb.classList.toggle('is-held', !!heldByOther);
+      eb.title = heldByOther
+        ? (S.lock.name || 'Someone else') + ' is editing this area — you can take over'
+        : 'Edit this area';
+    }
     if (!canEdit()) note.textContent = 'Read-only access';
     else if (S.mode === 'edit') note.textContent = 'Editing the draft · numbers recalculate live';
+    else if (heldByOther) note.textContent = (S.lock.name || 'Someone else') + ' is editing this area';
     else note.textContent = '';
     [].forEach.call(document.querySelectorAll('#ceMode button'), function (b) {
       b.classList.toggle('is-on', b.dataset.mode === S.mode);
@@ -1344,10 +1411,155 @@
   function nodesRef() { return db.ref(BASE + '/draft/docs/' + S.docId + '/nodes'); }
   function metaRef()  { return db.ref(BASE + '/draft/docs/' + S.docId + '/meta'); }
 
+  /* Entering edit is a claim on the area, not just a mode change. */
+  function enterEdit() {
+    claimLock(false).then(function (r) {
+      if (r.ok) {
+        if (r.degraded) {
+          NL.toast && NL.toast('Could not check the edit lock — carry on, but ' +
+            'check nobody else is in this area.', 'info');
+        }
+        S.mode = 'edit'; render();
+        return;
+      }
+      var who = (r.held && r.held.name) || 'Someone else';
+      var mins = Math.max(1, Math.round((Date.now() - ((r.held && r.held.at) || Date.now())) / 60000));
+      NL.confirm(
+        '<strong>' + esc(who) + '</strong> is editing this area — they started ' +
+        mins + ' minute' + (mins === 1 ? '' : 's') + ' ago.' +
+        '<p>Two people editing one area is the one thing this tool handles badly: ' +
+        'the last save wins, silently, and an undo can reverse the other person\u2019s ' +
+        'work without either of you seeing it.</p>' +
+        '<p style="margin:0">Taking over puts them back into Read. Anything they have ' +
+        'already typed is saved.</p>',
+        { title: 'Already being edited', html: true,
+          confirmText: 'Take over', cancelText: 'Stay in Read', variant: 'danger' }
+      ).then(function (ok) {
+        if (!ok) return;
+        claimLock(true).then(function (r2) {
+          if (!r2.ok) { NL.toast && NL.toast('Could not take over — try again', 'error'); return; }
+          NL.writeAudit && NL.writeAudit('edit-lock-takeover',
+            'Took over editing ' + S.docId + ' from ' + who);
+          S.mode = 'edit'; render();
+        });
+      });
+    });
+  }
+
+  function leaveEdit() {
+    var was = S.mode;
+    S.mode = 'read';
+    render();
+    if (was === 'edit') releaseLock();
+  }
+
+  /* ================= The edit lock =================
+     One editor per area at a time. Two people in the same area is the one
+     situation this tool handles badly and cannot detect: the last save wins,
+     silently, and undo makes it worse — one person's undo restores a snapshot
+     that predates the other's change and quietly reverses it.
+
+     A SOFT lock, deliberately. It is enforced here, not in the rules, and it
+     can always be taken over. A hard lock on a shared legal document is one
+     closed laptop away from nobody being able to edit the handbook, and the
+     person who could fix that is the person who has gone home.
+
+     onDisconnect().remove() is why this can be soft and still work: Firebase
+     drops the lock server-side when the tab closes, the network goes, or the
+     laptop sleeps — no timeout to wait out in the ordinary case. The staleness
+     window below is only for the case onDisconnect cannot cover (a wedged
+     socket that the server still believes in). It lives under draft/, so the
+     existing admin-only write rule already covers it. */
+  var LOCK_STALE_MS = 3 * 60 * 1000;
+  var LOCK_BEAT_MS = 45 * 1000;
+
+  function lockRef(id) { return db.ref(BASE + '/draft/locks/' + (id || S.docId)); }
+  function myUid() { return (firebase.auth().currentUser || {}).uid || ''; }
+  function myName() {
+    return (S.session && (S.session.name || S.session.email)) || 'Someone';
+  }
+  function lockIsMine(v) { return !!v && v.uid === myUid(); }
+  function lockIsStale(v) { return !v || (Date.now() - (v.at || 0)) > LOCK_STALE_MS; }
+
+  /* Claim it, or report who has it. A transaction rather than a read-then-write
+     because two people pressing Edit at the same moment is precisely the case
+     this exists for, and a read-then-write would hand it to both. */
+  function claimLock(force) {
+    var id = S.docId, uid = myUid();
+    if (!id || !uid) return Promise.resolve({ ok: false });
+    return lockRef(id).transaction(function (cur) {
+      if (cur && !lockIsMine(cur) && !lockIsStale(cur) && !force) return;  // abort
+      return { uid: uid, name: myName(), at: firebase.database.ServerValue.TIMESTAMP };
+    }).then(function (res) {
+      if (!res.committed) return { ok: false, held: res.snapshot.val() };
+      /* Let it go by itself when the tab does. */
+      lockRef(id).onDisconnect().remove();
+      startLockBeat();
+      return { ok: true };
+    }).catch(function () {
+      /* A lock we cannot write must not stop the work — that would be a hard
+         lock arrived at by accident, which is the thing being avoided. */
+      return { ok: true, degraded: true };
+    });
+  }
+
+  function releaseLock(id) {
+    stopLockBeat();
+    var ref = lockRef(id || S.docId);
+    ref.onDisconnect().cancel();
+    return ref.transaction(function (cur) {
+      /* Never remove someone else's — a take-over means the lock is theirs. */
+      return (cur && cur.uid !== myUid()) ? undefined : null;
+    }).catch(function () {});
+  }
+
+  /* Keep it warm so the staleness window never opens under a live editor. */
+  var lockBeat = null;
+  function startLockBeat() {
+    stopLockBeat();
+    lockBeat = setInterval(function () {
+      if (S.mode !== 'edit' || !S.docId) return;
+      lockRef().transaction(function (cur) {
+        if (cur && !lockIsMine(cur)) return;   // taken over: stop touching it
+        return { uid: myUid(), name: myName(), at: firebase.database.ServerValue.TIMESTAMP };
+      }).catch(function () {});
+    }, LOCK_BEAT_MS);
+  }
+  function stopLockBeat() { if (lockBeat) { clearInterval(lockBeat); lockBeat = null; } }
+
+  /* Watch the area's lock so the Edit button can say who has it, and so an
+     editor whose lock is taken from them finds out rather than typing into a
+     document somebody else is also typing into. */
+  var lockOff = null;
+  function watchLock() {
+    if (lockOff) { lockOff(); lockOff = null; }
+    if (!S.docId) return;
+    var ref = lockRef(), id = S.docId;
+    var cb = ref.on('value', function (snap) {
+      S.lock = snap.val();
+      if (S.mode === 'edit' && S.lock && !lockIsMine(S.lock)) {
+        /* Someone took it. Drop to Read rather than let two people save over
+           each other — the alternative is losing work quietly. */
+        S.mode = 'read';
+        stopLockBeat();
+        NL.alert && NL.alert(esc(S.lock.name || 'Someone else') +
+          ' has taken over editing this area. Your changes so far are saved; ' +
+          'you are back in Read.', { title: 'Editing taken over' });
+        render();
+        return;
+      }
+      syncBar();
+    });
+    lockOff = function () { ref.off('value', cb); };
+  }
+
   function switchDoc(id) {
     if (id === '__cover') { if (S.docId !== null) showCover(); return; }
     if (id === S.docId) return;
-    S.docId = id; S.selectedId = null; S.mode = 'read';
+    /* Leaving an area gives its lock straight back — a lock held by someone
+       who has wandered off to another section is a lock nobody meant to take. */
+    if (S.mode === 'edit' && S.docId && S.docId !== id) releaseLock(S.docId);
+    S.docId = id; S.selectedId = null; S.mode = 'read'; S.lock = null;
     /* The stacks hold node ids from the area being left. Carrying them across
        would offer an undo that restores another area's clauses into this one. */
     S.undo.length = 0; S.redo.length = 0; S.showTitleFor = null;
@@ -1365,6 +1577,9 @@
     S.nodes = {};
     render(); // show the area heading / empty state immediately while data loads
     return NL.ensureAuth().then(function () {
+      /* Start watching this area's lock as soon as we are authenticated, so
+         the Edit button already knows whether anyone is in there. */
+      if (canEdit()) watchLock();
       return Promise.all([metaRef().once('value'), nodesRef().once('value')]);
     }).then(function (res) {
       if (reqDoc !== S.docId) return; // user switched area before this resolved
@@ -2004,8 +2219,10 @@
       if (b.dataset.mode === 'edit') {
         if (!canEdit()) return;
         if (!S.editConfirmed) { confirmEditEntry(); return; }  // gate the first edit of the session
+        enterEdit();
+        return;
       }
-      S.mode = b.dataset.mode; render();
+      leaveEdit();
     });
     $('ceReimport').addEventListener('click', importSeed);
     $('ceImportDoc').addEventListener('click', function () { $('ceDocFile').click(); });

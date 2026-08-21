@@ -162,6 +162,34 @@ exactly the content most likely to need reordering.
 
 §3.5 (per-level numbering) remains parked and remains the right diagnosis.
 
+## 4b. Beyond the plan: undo, insertion, and the edit lock (v0.42–v0.43)
+
+Richard, after the toolbar pass: *"it's almost impossible to know where I'm
+placing a new item… deleting an item is quite challenging… there's also not
+really an undo function… feels like you could quite easily make some serious
+issues and not know how to fix them."* Then: *"is there a way to lock out
+other people if I am editing."*
+
+- **Undo/redo** on `commit()`, the single write path, so structural ops and
+  typing are both covered and nothing added later escapes it. Snapshots, not
+  inverse diffs — a diff has to be right about what it reverses, a snapshot
+  only has to be a copy.
+- **An insert line** that follows the pointer and shows the boundary and depth
+  a new clause would take, with a `+` to accept it.
+- **Delete names the clause** and quotes its opening words.
+- **An edit lock**, one editor per area, claimed by transaction and released
+  by `onDisconnect`. Soft and always over-ridable: a hard lock on a shared
+  legal document is one closed laptop away from nobody being able to edit the
+  handbook.
+
+The lock closes the limitation undo introduced. Undo restores a snapshot of
+the whole area, so with two editors one person's undo silently reverses the
+other's work — the lock removes the situation rather than trying to detect it.
+
+Still open, and worth stating: undo is **per-session and per-area**. Reload or
+switch area and the history is gone. The content is safe (it is in RTDB); the
+ability to step back is not.
+
 ## 5. The order this was planned in (kept for the record)
 
 1. **3.2** — an hour, halves the noise, zero risk.
