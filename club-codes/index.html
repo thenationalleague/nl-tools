@@ -1,6 +1,10 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Club Codes
+  Version: v0.2 (21/08/2026) — Recent activity. Nothing recorded a club code
+  being used until now: both doors minted a token and returned, so every
+  sign-in since launch is unrecorded and cannot be recovered. This starts the
+  record and does not backdate it.
   Version: v0.1 (21/08/2026)
   File: /club-codes/index.html
 
@@ -40,6 +44,9 @@
     app-data/club-codes/clubs/<KEY>          { name, passcode|code, users? }
     app-data/club-codes/clubs/<KEY>/users/*  { name, code, addedAt }
     app-data/club-codes/nl                   the shared National League code
+    app-data/club-codes/usage/<pushId>       { club, at, tool, userId }
+                                             one row per successful sign-in,
+                                             written ONLY by the two functions
     tools/ops-club-codes                     tool registration
 
   The codes are shared property, not this tool's data, which is why they do
@@ -100,6 +107,15 @@
     window.NL_CHANGELOG = [
       {
         date: '21/08/2026',
+        version: 'v0.2',
+        items: [
+          'Recent activity: who signed in with a club code, when, and which ' +
+            'tool they opened. Nothing was recorded before now, so the list ' +
+            'starts from today rather than going back.'
+        ]
+      },
+      {
+        date: '21/08/2026',
         version: 'v0.1',
         items: [
           'Initial build.'
@@ -144,6 +160,25 @@
   .cc-find:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
 
   .cc-note { color: var(--text-muted); font-size: var(--text-sm); }
+  .cc-use { margin-top: 4px; }
+  .cc-use__row {
+    display: grid; grid-template-columns: 30px minmax(0,1.4fr) minmax(0,1fr) auto auto;
+    gap: 12px; align-items: center;
+    padding: 8px 0; border-bottom: 1px solid var(--border);
+    font-size: var(--text-sm);
+  }
+  .cc-use__club { color: var(--navy); font-variation-settings: 'wght' 700; }
+  .cc-use__who { color: var(--text); min-width: 0; }
+  .cc-use__who--master { color: var(--text-muted); font-style: italic; }
+  .cc-use__tool {
+    font-size: var(--text-xs); text-transform: uppercase;
+    letter-spacing: var(--tracking-wide); color: var(--text-muted);
+  }
+  .cc-use__when { color: var(--text-muted); font-size: var(--text-xs); white-space: nowrap; }
+  @media (max-width: 640px) {
+    .cc-use__row { grid-template-columns: 24px 1fr auto; }
+    .cc-use__tool { display: none; }
+  }
   .cc-note--bad { color: var(--red); }
 
   .cc-club {
@@ -236,6 +271,13 @@
 
     <div id="out" class="cc-out"><p class="cc-note">Reading club codes…</p></div>
 
+    <div class="section-head">
+      <h2>Recent activity</h2>
+    </div>
+    <!-- Sign-ins, not attempts. A failed code is not a use, and mixing the two
+         makes the list unreadable at exactly the moment it matters. -->
+    <div id="use" class="cc-use"><p class="cc-note">Reading recent sign-ins…</p></div>
+
   </div>
 </div>
 
@@ -259,6 +301,10 @@
   var LEN = 6;
 
   var CLUBS = {}, NLREC = null, ROSTER = [], seen = { clubs: false, nl: false };
+  var USES = [];
+  /* Enough to answer "has anyone been in today" and "who was that", not a
+     year's history. The whole log is kept; this is only what is drawn. */
+  var USE_LIMIT = 200;
   var FIND = '';
 
   /* The stored field is `passcode` on everything the Programme console has
@@ -326,6 +372,73 @@
       seen.nl = true;
       render();
     }, function (err) { fail('reading the National League code', err); });
+
+    /* Sign-ins, newest last out of RTDB. Bounded by the query rather than by
+       the browser: the log is flat and indexed on `at` precisely so this stays
+       one small read however many years accumulate under it. */
+    ref('usage').orderByChild('at').limitToLast(USE_LIMIT).on('value', function (snap) {
+      var v = snap.val() || {};
+      USES = Object.keys(v).map(function (k) { return v[k]; })
+        .filter(Boolean)
+        .sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
+      renderUses();
+    }, function (err) {
+      /* Its own failure, not the page's. The codes are the job here; a
+         missing usage rule must not black out the tool that manages them. */
+      console.error('[club-codes] reading recent sign-ins', err);
+      $('use').innerHTML = '<p class="cc-note cc-note--bad">Could not read recent ' +
+        'sign-ins. The rules for app-data/club-codes/usage may not be deployed yet.</p>';
+    });
+  }
+
+  /* The name is resolved HERE, not stored in the log. The log holds a userId,
+     so a person renamed in the code list is renamed everywhere they appear —
+     a copy written at sign-in time would be a second version going stale from
+     the moment it landed. A userId nobody recognises any more (the person was
+     removed) says so rather than showing a bare id. */
+  function whoOf(u) {
+    if (!u.userId) return { text: 'Master code', master: true };
+    var rec = u.club === 'NL' ? NLREC : CLUBS[u.club];
+    var person = rec && rec.users && rec.users[u.userId];
+    if (person && person.name) return { text: person.name, master: false };
+    return { text: 'Removed person', master: true };
+  }
+
+  function clubNameOf(key) {
+    if (key === 'NL') return (NLREC && NLREC.name) || 'National League';
+    var rec = CLUBS[key];
+    return (rec && rec.name) || key;
+  }
+
+  var TOOL_LABEL = {
+    handbook: 'Handbook',
+    directory: 'Directory',
+    programme: 'Programme',
+  };
+
+  function renderUses() {
+    if (!seen.clubs || !seen.nl) return;
+    if (!USES.length) {
+      $('use').innerHTML = '<p class="cc-note">No sign-ins recorded yet. ' +
+        'The log starts from when this was switched on — it does not go back.</p>';
+      return;
+    }
+    $('use').innerHTML = USES.map(function (u) {
+      var name = clubNameOf(u.club);
+      var who = whoOf(u);
+      return '<div class="cc-use__row">' +
+        NL.clubs.crestImgHtml(name === 'National League' ? '' : name, 'thumb',
+          { className: 'nl-crest', alt: '' }) +
+        '<span class="cc-use__club">' + esc(name) + '</span>' +
+        '<span class="cc-use__who' + (who.master ? ' cc-use__who--master' : '') + '">' +
+          esc(who.text) + '</span>' +
+        '<span class="cc-use__tool">' +
+          esc(TOOL_LABEL[u.tool] || u.tool || '—') + '</span>' +
+        '<span class="cc-use__when" title="' + esc(NL.formatDateTime(u.at) || '') + '">' +
+          esc(NL.timeAgo(u.at) || '') + '</span>' +
+      '</div>';
+    }).join('');
+    NL.clubs.wireCrestImgs($('use'));
   }
 
   function fail(what, err) {
@@ -432,6 +545,9 @@
     $('out').innerHTML = list.map(clubCard).join('');
     NL.clubs.wireCrestImgs($('out'));
     wireRows();
+    /* The activity list resolves names out of CLUBS, so it can arrive before
+       it can be read. Redraw it once the codes are in. */
+    renderUses();
   }
 
   /* ── Writing ─────────────────────────────────────────────────────────── */
