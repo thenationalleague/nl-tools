@@ -468,3 +468,21 @@ test('NL.codeGate.resume with no claim resolves to null', async () => {
   assert.equal(await NL.codeGate.resume(), null);
   assert.equal(await NL.codeGate.resume(''), null);
 });
+
+/* The slow notice, guarded at the source because it needs a DOM and a clock.
+   What is worth pinning is not that the message exists but that its timer is
+   cancelled on BOTH exits: a leaked timer fires after the caller has taken the
+   card down, or overwrites the error line with "still checking" on a code that
+   has already come back wrong — telling someone to keep waiting for an answer
+   they have had. */
+test('NL.codeGate cancels the slow notice on success and on failure alike', () => {
+  const src = readFileSync(join(REPO, 'system/nl-utils.js'), 'utf8');
+  const gate = src.slice(src.indexOf('function codeGateOpen('),
+                         src.indexOf('function codeGateResume('));
+  assert.match(gate, /slow = setTimeout\(/, 'the notice is scheduled');
+  assert.match(gate, /function clearSlow\(\)/);
+  const fail = gate.slice(gate.indexOf('function fail('), gate.indexOf('function submit('));
+  assert.match(fail, /clearSlow\(\)/, 'a refused code must not still say "still checking"');
+  assert.match(gate, /clearSlow\(\);\s*\n\s*resolve\(session\)/,
+    'a resolved gate must not leave a timer writing to a card the caller has hidden');
+});

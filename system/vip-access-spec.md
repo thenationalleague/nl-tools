@@ -244,13 +244,14 @@ placeholder swaps. Do not hand-build the `<head>`.
 
 ### 4.2 Wiring contract — current canonical values
 
-These are correct as of 18/08/2026. **Do not copy them from another tool; read
-them from `system/_template/index.html`,** which is the source of truth, and
-which `lint-tools.sh` prints at the top of every run.
+**Read them from `system/_template/index.html`**, which is the source of truth,
+and which `lint-tools.sh` prints at the top of every run — so does every Claude
+session, at the top of its first message. Do not copy them from another tool.
 
-```
-nl-brand.css ?v=48   nl-utils.js ?v=42   nl-topbar.js ?v=10   auth-guard.js ?v=16
-```
+This section used to name the four numbers. They were four days old and one of
+them was already wrong, which is the whole reason CLAUDE.md stopped naming them
+too — a version written down in prose is a version that has stopped being
+checked.
 
 Every gated page declares, before `auth-guard.js`:
 
