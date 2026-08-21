@@ -177,6 +177,25 @@ test('clubs.crestImgHtml emits an escaped, data-crest-carrying <img> per tier', 
   assert.ok(!NL.clubs.crestImgHtml('Barrow', 'thumb').includes('class='), 'no class attribute unless asked');
 });
 
+test('clubs.crestImgHtml defers the image unless told not to', () => {
+  /* This helper exists for LISTS of clubs, and a list of clubs is 72 of them.
+     The club directory index requested 72 crests and decoded 72 PNGs on first
+     paint for the dozen actually on screen — while the estate hand-rolled
+     loading="lazy" in 140 other places and the one helper that emits crest
+     images had none of it. Lazy is therefore the DEFAULT here, not an option
+     each caller has to remember. */
+  const html = NL.clubs.crestImgHtml('AFC Fylde', 'thumb');
+  assert.ok(html.includes('loading="lazy"'), 'a crest in a list waits its turn');
+  assert.ok(html.includes('decoding="async"'), 'and never decodes on the main thread');
+
+  /* The exception, and it has to be an opt-OUT: a crest that is the subject
+     of the page — a banner, a hero — is the thing being looked at, and
+     deferring it is the wrong way round. */
+  const hero = NL.clubs.crestImgHtml('AFC Fylde', 'medium', { eager: true });
+  assert.ok(!hero.includes('loading="lazy"'), 'opts.eager opts out');
+  assert.ok(hero.includes('decoding="async"'), 'async decode still applies');
+});
+
 test('clubs.crestImgHtml escapes a hostile club name everywhere it appears', () => {
   const html = NL.clubs.crestImgHtml('<img src=x onerror=alert(1)>"FC', 'thumb');
   assert.ok(!html.includes('<img src=x'), 'name cannot open a tag');
