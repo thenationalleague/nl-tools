@@ -525,6 +525,28 @@ test('the clause markup carries the numbering style the hanging rule reads', () 
     'renderNode must emit data-num on every clause');
 });
 
+test('nothing in the document system is pulled outside the text column', () => {
+  /* A negative margin on document content escapes the page padding and puts
+     the content against the edge of the sheet. That is what happened when a
+     table breakout was written with offsets measured against the layout
+     BEFORE hanging sub-clauses: at depth 3 it pulled the table 58px past the
+     margin. Hanging itself is the ONE deliberate negative margin here — it
+     moves a clause left by exactly its parent's gutter, which lands it inside
+     the column, not outside it. Everything else stays put. */
+  const doc = css.slice(css.indexOf('/* Article (top-level node) */'),
+                        css.indexOf('/* ---- .nl-cover'));
+  const offenders = [];
+  for (const m of doc.matchAll(/([^{}]+)\{([^}]*margin[^}]*)\}/g)) {
+    const selector = m[1].trim().split('\n').pop().trim();
+    if (!/margin(-left|-right|-inline)?:\s*-/.test(m[2])) continue;
+    if (/data-num="decimal"/.test(m[0])) continue;   // the hanging rule, deliberate
+    offenders.push(selector + ' { ' + m[2].trim() + ' }');
+  }
+  assert.deepEqual(offenders, [],
+    'A negative margin on document content pushes it through the page padding ' +
+    'and up against the edge of the sheet:\n  ' + offenders.join('\n  '));
+});
+
 test('the PDF renderer turns the sheet off', () => {
   /* A PDF page is already paper. Left on, the sheet draws a bordered box
      around all 152 pages — and nothing in CI renders a PDF to notice. */
