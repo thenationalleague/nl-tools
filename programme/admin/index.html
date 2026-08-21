@@ -1,11 +1,17 @@
 <!DOCTYPE html>
 <!--
   NL Tools — Programme Packs (admin)
+  Version: v1.7 (21/08/2026) — the codes are at app-data/club-codes/{clubs,nl},
+           read and written per key. The `config` wrapper this shipped against
+           six hours earlier does not exist: the 73 live records landed at the
+           shorter path, both functions looked in the wrapper, and every club
+           in the estate was refused. Accepting where the data is beats moving
+           73 live secrets by hand to suit a level of nesting.
   Version: v1.6 (21/08/2026) — the passcodes moved out from under this tool.
-           They are one credential now (app-data/club-codes/config): the same
-           six characters open Programme Packs and the Handbook. Only config
-           moved — folders, files, trash and audit stay put — so only the
-           config reads and writes here changed, via PP.codesRef.
+           They are one credential now: the same six characters open Programme
+           Packs and the Handbook. Only the codes moved — folders, files, trash
+           and audit stay put — so only those reads and writes changed here,
+           via PP.codesRef.
            Also: the console will no longer offer to seed a roster it has not
            managed to read. "Not switched on yet" and "haven't heard back"
            rendered the same screen, with a Seed roster button under it, and
@@ -58,11 +64,14 @@
   session is never modified and no custom claims are written to real accounts.
 
   Storage (RTDB):
-    app-data/club-codes/config        club codes — SHARED, not this tool's.
-                                      Read/written here via PP.codesRef.
-                                      Readable by a portal admin/superadmin or
-                                      a pClub '*' session; closed to everyone
-                                      else, including club sessions.
+    app-data/club-codes/clubs/<KEY>   club codes — SHARED, not this tool's.
+    app-data/club-codes/nl            Read/written here via PP.codesRef, per
+                                      key rather than on the parent (which also
+                                      holds authRequests/authGrants). Readable
+                                      by a portal admin/superadmin or a pClub
+                                      '*' session; closed to everyone else,
+                                      including club sessions.
+    app-data/club-codes/config/       emailTemplate only — not a credential.
     app-data/media-programme/{folders,files,trash,audit}
     tools/media-programme             tool registration (label, defaults)
 
@@ -108,6 +117,15 @@
     var NL_TOOL_KEY = 'media-programme';
 
     window.NL_CHANGELOG = [
+      {
+        date: '21/08/2026',
+        version: 'v1.7',
+        items: [
+          'Fixed: the console was looking for the club codes one level deeper ' +
+            'than they are stored, so the Access tab was empty and no club ' +
+            'code opened Programme Packs.'
+        ]
+      },
       {
         date: '21/08/2026',
         version: 'v1.6',
@@ -367,22 +385,33 @@
         }, function (err) { fail('reading ' + path, err, PANE[tabs[tabs.length - 1]]); });
       }
 
-      /* config alone lives outside this tool now — app-data/club-codes, the
-         one credential the Handbook and Programme Packs both open on. The
-         explicit ref is why: PP.ref('config') would read the emptied node
+      /* The codes live outside this tool now — app-data/club-codes/{clubs,nl},
+         the one credential the Handbook and Programme Packs both open on. The
+         explicit refs are why: PP.ref('config') would read the emptied node
          under this tool and report 72 clubs with no access, one button press
-         away from minting 72 replacement passcodes nobody holds. */
-      watch('config', function (v) {
+         away from minting 72 replacement passcodes nobody holds.
+
+         Two watchers rather than one on the parent, because that parent also
+         holds authRequests/authGrants, which clients write and nobody should
+         be able to read across. Reading each key by name keeps the rule on
+         each key. */
+      watch('clubs', function (v) {
         configSeen = true;
-        CONFIG = { clubs: v.clubs || {}, nl: v.nl || null };
-        /* Keep an edit in progress — only adopt the stored template when the
-           box hasn't been touched, or a save from another tab would wipe what
-           you are typing. */
-        if (v.emailTemplate && v.emailTemplate.body) {
+        CONFIG.clubs = v || {};
+      }, ['access'], PP.codesRef('clubs'));
+      watch('nl', function (v) {
+        CONFIG.nl = (v && Object.keys(v).length) ? v : null;
+      }, ['access'], PP.codesRef('nl'));
+      /* The standard message is not a credential and stays in the wrapper.
+         Keep an edit in progress — only adopt the stored template when the box
+         hasn't been touched, or a save from another tab would wipe what you
+         are typing. */
+      watch('emailTemplate', function (v) {
+        if (v && v.body) {
           var box = el('tplBody');
-          if (!box || box.value === TPL || !box.value) TPL = v.emailTemplate.body;
+          if (!box || box.value === TPL || !box.value) TPL = v.body;
         }
-      }, ['access']);
+      }, ['access'], PP.codesRef('config/emailTemplate'));
       watch('files', function (v) { FILES = v; }, ['access']);
       watch('trash', function (v) { TRASH = v; }, ['access', 'trash']);
       subscribeAudit();
@@ -778,17 +807,17 @@
       NL.toast('Club access has not loaded — nothing seeded', 'error');
       return;
     }
-    var updates = {}, added = 0, taken = takenCodes();
+    var clubUpdates = {}, nlRec = null, added = 0, taken = takenCodes();
     ROSTER.forEach(function (c) {
       if (CONFIG.clubs[c.code]) return;
-      updates['clubs/' + c.code] = {
+      clubUpdates[c.code] = {
         name: c.name, division: c.division || '',
         passcode: freshPasscode(taken), addedAt: PP.TS()
       };
       added++;
     });
     if (!CONFIG.nl) {
-      updates.nl = {
+      nlRec = {
         name: 'National League', division: '',
         passcode: freshPasscode(taken), addedAt: PP.TS()
       };
@@ -796,7 +825,12 @@
     }
     if (!added) { NL.toast('Every club already has access', 'info'); return; }
 
-    PP.codesRef('config').update(updates).then(function () {
+    /* Written per key, not as one update on the parent: the parent also holds
+       authRequests/authGrants, and the rules are on each key by name. */
+    var writes = [];
+    if (Object.keys(clubUpdates).length) writes.push(PP.codesRef('clubs').update(clubUpdates));
+    if (nlRec) writes.push(PP.codesRef('nl').set(nlRec));
+    Promise.all(writes).then(function () {
       PP.audit('seed', { count: added, detail: 'Seeded from clubs-meta roster' });
       NL.toast(added + ' added', 'success');
     }).catch(function (e) { NL.toast('Seed failed: ' + e.message, 'error'); });
@@ -812,7 +846,7 @@
       { title: 'Regenerate access', html: true, confirmText: 'Regenerate', variant: 'danger' })
       .then(function (ok) {
         if (!ok) return;
-        var path = isNL ? 'config/nl' : 'config/clubs/' + code;
+        var path = isNL ? 'nl' : 'clubs/' + code;
         return PP.codesRef(path).update({ passcode: freshPasscode(takenCodes()) })
           .then(function () {
             PP.audit('regen-access', { club: code, clubName: rec.name });

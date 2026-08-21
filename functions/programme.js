@@ -54,19 +54,24 @@ const admin = require("firebase-admin");
 
 const ROOT = "app-data/media-programme";
 
-/* WHERE THE PASSCODES LIVE — being relocated, 21/08/2026.
-   They are moving to app-data/club-codes/config, because they stopped being
-   Programme's passcodes the moment they became the estate's one club
-   credential (system/club-code-plan.md). The node's name should say what it
-   holds.
+/* WHERE THE PASSCODES LIVE — relocated 21/08/2026.
+   CANONICAL: app-data/club-codes/clubs/<KEY> and app-data/club-codes/nl.
 
-   Reads prefer the NEW location and fall back to the old one, so there is no
-   flag day: this ships before the data moves, keeps working while it moves,
-   and keeps working after. The fallback comes out once the old node is gone.
+   They stopped being Programme's passcodes the moment they became the estate's
+   one club credential (system/club-code-plan.md), so they live under a node
+   named for what they are rather than for the first tool that used them.
+
+   No `config` level under it: the node is already called club-codes, and that
+   wrapper is what broke this. Both functions read config/clubs, the 73 live
+   records had landed at the shorter path, and every club in the estate was
+   refused until someone opened the console and looked. Accepting where the
+   data is beats moving 73 live secrets by hand to suit a level of nesting.
 
    Programme's own DATA (folders, files, trash, audit) stays under ROOT. Only
-   the credential moves. */
-const CODES = "app-data/club-codes/config";
+   the credential moved. Identical resolution to club-code.js — one credential,
+   one home, two doors, and tests/club-code.test.mjs runs the same fixtures
+   through both and fails if they ever disagree. */
+const CODES_ROOT = "app-data/club-codes";
 
 const TRIGGER_OPTS = {
   ref: "/" + ROOT + "/authRequests/{uid}",
@@ -141,6 +146,37 @@ function pickClub(cfg, code) {
     c.rec && !c.rec.revoked &&
     storedCode(c.rec) !== "" &&
     safeEqual(storedCode(c.rec), code)) || null;
+}
+
+/* Resolve the codes. Character-for-character the same as club-code.js's copy,
+   deliberately: two doors onto one credential must never disagree about where
+   it lives, and the shared test asserts they do not. Two fallbacks, both on
+   their way out, both logged so production says which one answered — the
+   `config` wrapper, and the per-tool node these came from.
+
+   Returns {} rather than throwing when nothing is found: an unreadable config
+   must refuse everyone, not 500 on every attempt. */
+async function readCodes(db, who) {
+  const [clubs, nl] = await Promise.all([
+    db.ref(CODES_ROOT + "/clubs").once("value"),
+    db.ref(CODES_ROOT + "/nl").once("value"),
+  ]);
+  if (clubs.exists() || nl.exists()) {
+    return { clubs: clubs.val() || {}, nl: nl.val() || null };
+  }
+
+  const wrapped = (await db.ref(CODES_ROOT + "/config").once("value")).val();
+  if (wrapped && (wrapped.clubs || wrapped.nl)) {
+    logger.info(who + ": codes read from the wrapped config node");
+    return wrapped;
+  }
+
+  const legacy = (await db.ref(ROOT + "/config").once("value")).val();
+  if (legacy && legacy.clubs) {
+    logger.info(who + ": codes read from the OLD location");
+    return legacy;
+  }
+  return {};
 }
 
 /* ---- Throttle ------------------------------------------------------------
@@ -243,11 +279,7 @@ exports.programmeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
     const code = normCode(req.code);
     if (code.length < 4) return grant({ ok: false, error: "Enter your passcode." });
 
-    let cfg = (await db.ref(CODES).once("value")).val();
-    if (!cfg || !cfg.clubs) {
-      cfg = (await db.ref(ROOT + "/config").once("value")).val() || {};
-      if (cfg.clubs) logger.info("programmeAuth: codes read from the OLD location");
-    }
+    const cfg = await readCodes(db, "programmeAuth");
     const hit = pickClub(cfg, code);
 
     if (!hit) {

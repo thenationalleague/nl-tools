@@ -1,7 +1,7 @@
 /*
   Programme Packs — shared runtime for the library + admin console
   Version: v1.5 (21/08/2026) — PP.codesRef / PP.CODES_ROOT. The club codes
-           moved out from under this tool to app-data/club-codes/config: they
+           moved out from under this tool to app-data/club-codes: they
            are one credential now, opening Programme Packs and the Handbook
            on the same six characters. Only config moved — folders, files,
            trash, audit and this tool's own authRequests/authGrants all stay
@@ -57,7 +57,7 @@
 
   This is the one deliberate difference from /uw-promo/, where passcodes are
   world-readable and compared client-side. Here no client ever reads a passcode:
-  app-data/club-codes/config is closed to everything except a portal
+  app-data/club-codes/{clubs,nl} is closed to everything except a portal
   admin/superadmin or a pClub '*' session. Write-own is enforced by the rules,
   not by this file.
 
@@ -92,7 +92,7 @@
                                       make/store are browser+Firebase)
 
   Data lives at RTDB app-data/media-programme/{folders,files,trash,audit}, the
-  codes at app-data/club-codes/config (shared with the Handbook),
+  codes at app-data/club-codes/{clubs,nl} (shared with the Handbook),
   and Storage programme/<CODE>/… — shapes documented in /programme/README.md.
   Rules: system/rtdb/rules.snapshot.json + system/storage/rules.snapshot.rules.
 */
@@ -702,7 +702,9 @@
     /* The codes moved out from under this tool on 21/08/2026. They are one
        credential now — the same six characters open Programme Packs and the
        Handbook, and will open the Club Directory — so they live at
-       app-data/club-codes/config rather than inside any one tool's data.
+       app-data/club-codes/{clubs,nl} rather than inside any one tool's data.
+       Per key, not on the parent: that parent also holds authRequests and
+       authGrants, which clients write, and the rules are on each key by name.
 
        Everything ELSE Programme Packs owns (folders, files, trash, audit, and
        its own authRequests/authGrants) stays under ROOT. Only the config

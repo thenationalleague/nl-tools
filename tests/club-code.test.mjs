@@ -181,23 +181,41 @@ test('a relocated Programme record opens under its historical field name', () =>
   assert.equal(cc.storedCode({}), '');
 });
 
-test('both functions read the relocated node, with a fallback while it moves', () => {
-  /* No flag day: this ships BEFORE the data moves, works while it moves, and
-     works after. The fallback comes out once the old node is gone.
+test('both functions look for the codes in the same places, in the same order', () => {
+  /* The canonical home is app-data/club-codes/{clubs,nl}. A `config` wrapper
+     under it is read second, and the per-tool node these came from third; both
+     are on their way out, and both log which one answered so production says
+     when the tidying is finished.
 
-     The two files express the same pair of paths differently — each builds one
-     of them from its own ROOT — so matching path literals across both is what
-     the first version of this test tried and got wrong. The shared, unambiguous
-     marker is the log line the fallback emits, which is also the thing that
-     tells you, in production, that the move has not finished. */
+     The order is the point, and so is the agreement. On 21/08/2026 both
+     functions read ONLY the wrapper, the 73 live records were at the shorter
+     path, and every club in the estate was refused — a total outage caused by
+     one level of nesting that no test could see, because each file was only
+     ever checked against itself.
+
+     Matching path literals across both files is what an earlier version of
+     this test tried and got wrong: each builds its paths from its own root
+     constant, so the literal never appears. Read the resolver instead. */
   for (const f of ['functions/club-code.js', 'functions/programme.js']) {
     const src = readFileSync(join(ROOT, f), 'utf8');
-    assert.match(src, /codes read from the OLD location/,
-      f + ' must keep the fallback, and say so in the log, until the move is done');
+    const fn = src.slice(src.indexOf('async function readCodes('));
+    const body = fn.slice(0, fn.indexOf('\n}'));
+
+    assert.match(body, /\/clubs"/, f + ' must read the canonical clubs node');
+    assert.match(body, /\/nl"/, f + ' must read the canonical nl node');
+    assert.match(body, /codes read from the wrapped config node/,
+      f + ' must fall back to the config wrapper, and say so');
+    assert.match(body, /codes read from the OLD location/,
+      f + ' must keep the per-tool fallback, and say so, until that node is gone');
+
+    /* Canonical first. A fallback that wins is not a fallback. */
+    assert.ok(body.indexOf('/clubs"') < body.indexOf('wrapped config node'),
+      f + ' must try the canonical path before either fallback');
+    assert.ok(body.indexOf('wrapped config node') < body.indexOf('OLD location'),
+      f + ' must try the wrapper before the per-tool node');
+    assert.match(body, /return \{\};/,
+      f + ' must refuse everyone when nothing is found, not throw');
   }
-  assert.match(readFileSync(join(ROOT, 'functions/programme.js'), 'utf8'),
-    /const CODES = "app-data\/club-codes\/config"/,
-    'programme.js must read the relocated node first');
 });
 
 test('the NL door hands staff the club wildcard, and admins the Programme one too', () => {

@@ -131,6 +131,47 @@ function pickClub(cfg, code) {
     safeEqual(storedCode(c.rec), code)) || null;
 }
 
+/* ---- Where the codes live ------------------------------------------------
+   CANONICAL: app-data/club-codes/clubs/<KEY> and app-data/club-codes/nl.
+
+   The node is already called club-codes, so wrapping the records in a further
+   `config` level named nothing the path did not already say — and when the 73
+   live records were moved in they landed at the shorter path, which is the
+   shape that has to be right rather than the one that reads best in a plan.
+   Both functions looked only in the wrapper, found nothing, and refused every
+   club in the estate (21/08/2026). Accepting where the data is beats moving
+   73 live secrets by hand to suit a level of nesting.
+
+   Two fallbacks, both on their way out, both logged so production says which
+   one answered:
+     · config/          — the wrapper, for anything written under it
+     · media-programme/ — the per-tool node the Programme codes came from
+
+   Returns {} rather than throwing when nothing is found: an unreadable config
+   must refuse everyone, not 500 on every attempt. */
+async function readCodes(db, who) {
+  const [clubs, nl] = await Promise.all([
+    db.ref(ROOT + "/clubs").once("value"),
+    db.ref(ROOT + "/nl").once("value"),
+  ]);
+  if (clubs.exists() || nl.exists()) {
+    return { clubs: clubs.val() || {}, nl: nl.val() || null };
+  }
+
+  const wrapped = (await db.ref(ROOT + "/config").once("value")).val();
+  if (wrapped && (wrapped.clubs || wrapped.nl)) {
+    logger.info(who + ": codes read from the wrapped config node");
+    return wrapped;
+  }
+
+  const legacy = (await db.ref("app-data/media-programme/config").once("value")).val();
+  if (legacy && legacy.clubs) {
+    logger.info(who + ": codes read from the OLD location");
+    return legacy;
+  }
+  return {};
+}
+
 /* ---- Throttle ------------------------------------------------------------
    A trigger sees no source IP, so this cannot rate limit per caller, and an
    attacker can mint anonymous uids freely — which makes a per-uid counter weak
@@ -255,14 +296,8 @@ exports.clubCodeAuth = onValueWritten(TRIGGER_OPTS, async (event) => {
     const code = normCode(req.code);
     if (code.length < 4) return grant({ ok: false, error: "Enter your club code." });
 
-    /* Same node Programme reads, with the same fallback while the relocation
-       is in flight — see the CODES note in functions/programme.js. One
-       credential, one home, two doors onto it. */
-    let cfg = (await db.ref(ROOT + "/config").once("value")).val();
-    if (!cfg || !cfg.clubs) {
-      cfg = (await db.ref("app-data/media-programme/config").once("value")).val() || {};
-      if (cfg.clubs) logger.info("clubCodeAuth: codes read from the OLD location");
-    }
+    /* Same records Programme reads — one credential, one home, two doors. */
+    const cfg = await readCodes(db, "clubCodeAuth");
     const hit = pickClub(cfg, code);
 
     if (!hit) {
