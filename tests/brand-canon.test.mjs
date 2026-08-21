@@ -502,6 +502,29 @@ test('.nl-doc is a sheet, and its shadow comes off the ladder', () => {
   assert.ok(!/box-shadow:[^;]*rgba\(/.test(rule), 'no hand-mixed rgba in the sheet shadow');
 });
 
+test('only self-describing numbers hang; letters and romans keep their indent', () => {
+  /* The distinction is the whole idea. "6.4.7" states its ancestry, so the
+     indent repeats it and can go. "(a)" restarts under every parent and means
+     nothing without position, so its indent is load-bearing. A rule that
+     hung everything would flatten the document into ambiguity. */
+  const hang = css.slice(css.indexOf('.nl-clause[data-depth="2"][data-num="decimal"]'));
+  const block = hang.slice(0, hang.indexOf('}') + 1);
+  assert.match(block, /data-num="decimal"/);
+  assert.ok(!/data-num="lower-alpha"|data-num="lower-roman"|data-num="bullet"/.test(block),
+    'letters, romans and bullets must NOT hang — their indent carries meaning');
+  assert.match(block, /margin-left:\s*-58px/,
+    'exactly one gutter: 46px min-width + the 12px flex gap');
+});
+
+test('the clause markup carries the numbering style the hanging rule reads', () => {
+  /* The stylesheet cannot tell a decimal from an (a) without being told. If
+     renderNode stops emitting data-num, the rule silently matches nothing and
+     the indent quietly comes back. */
+  const hb = readFileSync(join(REPO, 'handbook/index.html'), 'utf8');
+  assert.match(hb, /data-num="' \+ esc\(node\.numStyle \|\| 'decimal'\)/,
+    'renderNode must emit data-num on every clause');
+});
+
 test('the PDF renderer turns the sheet off', () => {
   /* A PDF page is already paper. Left on, the sheet draws a bordered box
      around all 152 pages — and nothing in CI renders a PDF to notice. */
