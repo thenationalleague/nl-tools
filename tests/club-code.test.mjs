@@ -161,8 +161,14 @@ test('both claims are minted, from either door', () => {
      opened last would be the only one that worked — a club would bounce
      between the Handbook and Programme Packs re-entering the same code. */
   const src = readFileSync(join(ROOT, 'functions/club-code.js'), 'utf8');
-  assert.match(src, /\{ club: hit\.key, pClub: hit\.key \}/);
+  assert.match(src, /club: hit\.key, pClub: hit\.key/);
   assert.match(src, /\{ club: "\*", pClub: "\*" \}/);
+
+  /* And the club's NAME rides along as `<claim>Name`, which is the shape
+     NL.codeGate.resume reads back. The grant payload carries it too, but a
+     grant is answered once and a claim survives every reload — without this a
+     returning club met an identity bar that had forgotten which club it was. */
+  assert.match(src, /clubName: clubName, pClubName: clubName/);
 
   const pp = readFileSync(join(ROOT, 'functions/programme.js'), 'utf8');
   assert.match(pp, /pClub: hit\.key, club: hit\.key/);

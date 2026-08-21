@@ -1,7 +1,17 @@
 /* =========================================================================
    NL Tools — Club Directory presentation
    File: /club-directory/_directory.js
-   Version: v1.5 (12/08/2026)
+   Version: v1.6 (21/08/2026)
+
+   v1.6 — opts.showQuiet. "Not published" and "None held" are loud for the
+   club whose entry it is and silent for everyone else. Same reasoning as
+   showGaps: to a club reading its OWN record those lines are a to-do list —
+   what the League is holding back, what it has never been given — and worth
+   acting on. To a club reading another club's record they are a column of
+   noise about a gap that is none of their business. Default is loud, so the
+   editor and every other caller are unchanged; the reader opts out for the
+   71 clubs that are not yours, which it can only do now that the club code
+   tells it which one is.
 
    v1.5 — an address names WHICH of the person's jobs it is for, as a set
    rather than one-or-all. Barrow's safeguarding champion is also a director
@@ -325,6 +335,7 @@
        never appear in the reader — across 290 of 1,070 people, in 65 of the
        72 clubs. The state is now stated wherever the details are shown. */
     var showHidden = !!(opts && opts.showHidden);
+    var loud = !opts || opts.showQuiet !== false;
     var unlisted = !!p.hideContact;
     var here = arr(p.roles).filter(function (r) { return r.section === section; });
     var titles = here.map(function (r) { return (r.title || '').trim(); }).filter(Boolean);
@@ -344,8 +355,20 @@
 
     /* Per channel now: an email cell can read "Not published" while the phone
        beside it shows a number, which is the whole point of the change. */
-    var quietEm = em.withheld && !showHidden ? 'Not published'
-      : (holdsAny(p, 'emails') ? '' : 'None held');
+    /* Loud for the club it belongs to, silent for everyone else.
+
+       Same reasoning as showGaps below. To a club reading its OWN entry,
+       "Not published" and "None held" are a to-do list: they say what the
+       League is holding back or has never been given, and invite the club to
+       fix it. To a club reading someone else's entry they are a column of
+       noise about a gap that is none of their business and that they could
+       not act on if it were. Same markup, decided by who is looking.
+
+       Default is loud, so the editor and every other caller are unchanged;
+       the reader opts out for the 71 clubs that are not yours. */
+    var quietEm = !loud ? ''
+      : (em.withheld && !showHidden ? 'Not published'
+      : (holdsAny(p, 'emails') ? '' : 'None held'));
     /* The person-level tag survives for the person-level decision only. When
        it is set, everything is held back, and tagging each of six lines
        individually says the same thing six times. Where the decision is
@@ -386,7 +409,7 @@
       /* The phone cell has always stayed blank when there is simply no
          number — "None held" against 400 people is noise. It speaks up only
          to say a number exists and is being kept back. */
-      '<div>' + (ph || (tl.withheld && !showHidden
+      '<div>' + (ph || (loud && tl.withheld && !showHidden
         ? '<span class="cd-row__quiet">Not published</span>' : '')) + '</div>' +
       '</li>';
   }
@@ -443,6 +466,7 @@
      to get it wrong, and the reader is where getting it wrong is published. */
   function personCard(p, opts) {
     var showHidden = !!(opts && opts.showHidden);
+    var loud = !opts || opts.showQuiet !== false;
     var unlisted = !!p.hideContact;
     var roles = arr(p.roles);
 
@@ -477,10 +501,10 @@
         '<div class="cd-pc__name">' + displayName(p, opts) + '</div>' +
       '</div></div>' +
       (jobs ? '<ul class="cd-pc__jobs">' + jobs + '</ul>' : '') +
-      '<div class="cd-pc__lines">' + (lines ||
+      '<div class="cd-pc__lines">' + (lines || (!loud ? '' :
         '<span class="cd-row__quiet">' +
         ((em.withheld || tl.withheld) && !showHidden ? 'Not published' : 'None held') +
-        '</span>') + '</div>' +
+        '</span>')) + '</div>' +
     '</li>';
   }
 
